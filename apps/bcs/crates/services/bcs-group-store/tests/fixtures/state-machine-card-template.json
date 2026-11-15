@@ -1,6 +1,6 @@
 {
   "name": "数据库诊断与复核",
-  "description": "State Machine 群：数据库诊断与复核",
+  "description": "按流程诊断数据库问题并复核修复结果",
   "supportedInterfaces": [
     {
       "url": "local://groups/group-sm-001",
@@ -30,7 +30,7 @@
     {
       "id": "group.execute",
       "name": "数据库诊断与复核",
-      "description": "State Machine 群：数据库诊断与复核",
+      "description": "按流程诊断数据库问题并复核修复结果",
       "tags": [
         "state_machine"
       ]

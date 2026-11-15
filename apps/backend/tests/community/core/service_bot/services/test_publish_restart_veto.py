@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from agentclaw.community.core.bot_management.engines.aicoding.restart_backup import _operation_id
+from agentclaw.community.core.bot_management.engines.aicoding.restart_backup import _operation_id, command
 from agentclaw.community.core.service_bot.repository.models import PublishOperationState
 from agentclaw.community.core.service_bot.services.publish_flow.tasks import PublishRestartHandler
 from agentclaw.community.core.service_bot.types import OnlineDeployDecision
@@ -137,7 +137,7 @@ async def test_published_partial_backup_passes_enabled_guard_without_failure_fie
         'success': True, 'publish_id': baas.issue('BOT-live', 'UPDATE'),
     })
     operation = _operation_id(None, 'restart:1:online')
-    execute = executor([partial_response(operation_id=operation)] * 3)
+    execute = executor([partial_response(operation_id=operation)])
     baas.post_bots_api = Mock(side_effect=lambda **kw: execute(kw['payload']['cmd']))
     result = await svc.execute_restart(1, 'online', 'operator')
     assert result['success'] is True
@@ -145,9 +145,11 @@ async def test_published_partial_backup_passes_enabled_guard_without_failure_fie
     assert ledger.get_latest_by_kind(1, 'restart', 'online').state == PublishOperationState.COMPLETED.value
     assert record.status == PublishStatus.SUCCESS.value
     assert not record.ext.get('error_message')
-    assert 'phase=verify status=partial_success' in caplog.text
+    assert 'phase=prepared status=partial_success' in caplog.text
+    assert 'phase=verify status=' not in caplog.text
     assert 'AICODING_RESTART_FAILED' not in caplog.text
-    assert execute.call_count == 3  # Detect, start, then verify the partial receipt.
+    assert execute.call_count == 2  # Detect, then start; no completed-receipt recheck.
+    execute.assert_called_with(command('start', operation))
 
 
 @pytest.mark.asyncio

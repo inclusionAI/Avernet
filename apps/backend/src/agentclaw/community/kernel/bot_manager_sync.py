@@ -145,12 +145,22 @@ class DeliveryFailure(StrEnum):
     UNKNOWN = "unknown"
 
 
+#: The stable reason both sync readers raise (via ``SnapshotUnavailable``)
+#: when the Bot named by a ``SyncKey`` is absent, deleted or out of scope.
+#: Declared here — not inline in an implementation — because consumers
+#: compare against it to keep the not-found meaning across layers, and a
+#: finite vocabulary must not be re-spelled by each reader.
+BOT_NOT_FOUND_CODE = "bot_not_found"
+
+
 class SnapshotUnavailable(Exception):
     """The facts behind a snapshot cannot be read.
 
     ``code`` is a stable machine reason — not found, ownership
     mismatch, missing stable identity, read error. It is read-only like
-    every member here; nothing depends on HTTP or Redis.
+    every member here; nothing depends on HTTP or Redis. The codes the
+    sync readers raise are this module's vocabulary too — see
+    ``BOT_NOT_FOUND_CODE``.
     """
 
     def __init__(self, code: str) -> None:

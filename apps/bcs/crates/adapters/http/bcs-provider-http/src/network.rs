@@ -1,4 +1,19 @@
+use bcs_network_tracing::ClientExt;
 use super::*;
+
+/// Common HTTP tracking headers for ordinary and protected downlinks. Keep
+/// this independent of body handling/logging so Caller material stays private.
+/// `message_id` is a fresh UUID per HTTP attempt, not the business frame ID.
+pub(super) fn with_bcn_headers(
+    request: reqwest::RequestBuilder,
+    protocol_version: &str,
+    message_id: &str,
+) -> reqwest::RequestBuilder {
+    request
+        .header(BCN_PROTOCOL_VERSION_HEADER, protocol_version)
+        .header(BCN_MESSAGE_ID_HEADER, message_id)
+        .header(BCN_TIMESTAMP_HEADER, bcs_protocol::now_ms().to_string())
+}
 
 pub(super) async fn post_provider<T: DeserializeOwned>(
     client: &reqwest::Client,
@@ -56,6 +71,7 @@ pub(super) async fn send_provider_request(
         provider_bypass_headers,
         ProviderClientPolicy::for_request(accept_sse),
         ProviderStatusPolicy::RequireSuccess,
+        false,
     )
     .await
 }
@@ -67,6 +83,7 @@ pub(super) async fn send_provider_delivery_request(
     body: &ProviderWebhookRequest,
     accept_sse: bool,
     provider_bypass_headers: &[(String, String)],
+    preproduction_caller_token_diagnostics: bool,
 ) -> ServiceResult<reqwest::Response> {
     send_provider_request_with_policy(
         client,
@@ -77,6 +94,7 @@ pub(super) async fn send_provider_delivery_request(
         provider_bypass_headers,
         ProviderClientPolicy::for_request(accept_sse),
         ProviderStatusPolicy::ReturnExplicitRejection,
+        preproduction_caller_token_diagnostics,
     )
     .await
 }
@@ -110,8 +128,9 @@ pub(super) async fn send_provider_request_with_policy(
     provider_bypass_headers: &[(String, String)],
     client_policy: ProviderClientPolicy,
     status_policy: ProviderStatusPolicy,
+    preproduction_caller_token_diagnostics: bool,
 ) -> ServiceResult<reqwest::Response> {
-    bcs_observability::observe_result("provider.send_provider_request_with_policy", async {
+    bcs_observability::observe_key_result("provider.send_provider_request_with_policy", async {
     let BotDeliveryTarget::HttpProvider {
         webhook_url,
         bcs_to_provider_token,
@@ -189,14 +208,12 @@ pub(super) async fn send_provider_request_with_policy(
         request_started_ms,
         "provider downlink: posting webhook"
     );
-    let mut request = request_client
+    let request = request_client
         .post(guarded_url.as_str())
         .bearer_auth(bcs_to_provider_token.expose_secret())
         .header("Accept", accept)
-        .header("Content-Type", "application/json; charset=utf-8")
-        .header(BCN_PROTOCOL_VERSION_HEADER, protocol_version)
-        .header(BCN_MESSAGE_ID_HEADER, &message_id)
-        .header(BCN_TIMESTAMP_HEADER, bcs_protocol::now_ms().to_string());
+        .header("Content-Type", "application/json; charset=utf-8");
+    let mut request = with_bcn_headers(request, protocol_version, &message_id);
     for (name, value) in provider_bypass_headers {
         if is_safe_provider_bypass_header(name) {
             request = request.header(name.as_str(), value.as_str());
@@ -216,7 +233,10 @@ pub(super) async fn send_provider_request_with_policy(
     let request = request.json(body).build().map_err(|_| ServiceError::DeliveryNotSent {
         code: "provider_request_build_failed", retryable: false,
     })?;
-    let send = request_client.execute(request);
+    if preproduction_caller_token_diagnostics {
+        caller_token_diagnostics::log_caller_token(body, &message_id);
+    }
+    let send = request_client.execute_traced(request);
     let response_result =
         if let Some(response_header_timeout) = client_policy.response_header_timeout {
             match tokio::time::timeout(response_header_timeout, send).await {

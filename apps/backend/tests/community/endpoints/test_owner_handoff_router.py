@@ -18,6 +18,9 @@ from agentclaw.community.core.bot_management.owner_handoff.contracts import (
 from agentclaw.community.core.bot_management.owner_handoff.service import (
     OwnerHandoffService,
 )
+from agentclaw.community.core.bot_management.owner_handoff.preflight import OwnerHandoffPreflight
+from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
+from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
 from agentclaw.community.core.repository.implementations.bot.owner_handoff import (
     OwnerHandoffRepository,
 )
@@ -31,6 +34,7 @@ from tests.community.core.bot_management.test_owner_handoff import (
 )
 from tests.community.factories.access import make_staff_user
 from tests.community.factories.bot_collaborator import make_bot
+from tests.community.factories.devices import make_active_local_device
 from tests.community.framework import (
     CaseInput,
     ExpectError,
@@ -54,10 +58,14 @@ def _register_command(method, suffix, *, forbidden):
     def seed(world):
         for user in ["A", "B", "C"]:
             make_staff_user(world, user_id=user)
-        bot = make_bot(world, bot_id="service", owner_id="A")
+        bot = make_bot(
+            world, bot_id="service", owner_id="A",
+            binding_id=make_active_local_device(world, owner_id="A"),
+        )
+        passport = Passport()
         service = OwnerHandoffService(
             OwnerHandoffRepository(world.get(DatabasePlugin)),
-            Passport(),
+            passport,
             Runtime(),
             Staff(),
             world.get(BotRepository),
@@ -67,6 +75,10 @@ def _register_command(method, suffix, *, forbidden):
             world.get(SpaceServiceProtocol),
             world.get(SpaceAccessServiceProtocol),
             ownership_sync=DisabledBotOwnershipSync(),
+            preflight=OwnerHandoffPreflight(
+                passport, world.get(DeviceBindingRepository),
+                world.get(BotPublishRepositoryProtocol),
+            ),
         )
         world.injector.binder.bind(OwnerHandoffServiceProtocol, to=service, scope=None)
         if not suffix:

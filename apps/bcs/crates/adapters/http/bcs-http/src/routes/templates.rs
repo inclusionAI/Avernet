@@ -179,3 +179,7 @@ impl IntoResponse for TemplateRouteError {
             .into_response()
     }
 }
+
+#[cfg(test)]
+#[path = "templates_tests.rs"]
+mod tests;

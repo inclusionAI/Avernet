@@ -8,9 +8,13 @@
 -- utf8mb4_bin so distinct principals stay distinct (spec §3.2.6).
 -- Existing-table actor columns keep their collation; the authority
 -- reads compare byte-exactly in SQL (CAST ... AS BINARY), matching
--- the friend-list reader precedent. MySQL-only statements here are
--- CI-verified (feasibility record §5.4 U7: index length, generated
--- column collation behavior).
+-- the friend-list reader precedent. The MySQL-compatible DDL is
+-- shared with OceanBase; CI verifies MySQL execution (feasibility
+-- record §5.4 U7: index length, generated-column collation behavior).
+-- Generated expressions return source IDs directly: character set
+-- and collation belong on the column, not inside the expression,
+-- to avoid OceanBase schema errors. See the scoped correction and
+-- retained-history guidance in reconciliation/bot-authority-generated-columns.md.
 
 -- === bcs_bots.ownership_version ==========================================
 -- 0 = uninitialized (denies Human management); 1 after first
@@ -47,13 +51,14 @@ ALTER TABLE edge_grants
 -- === single approved owner per (env, to_id) ==============================
 -- Nullable generated-column unique index (spec §4.1): non-NULL only
 -- for approved owner edges, so every other row stays NULL and free.
--- The generated value is forced to the binary collation so owner
--- bot ids never case-fold together.
+-- Declare utf8mb4/utf8mb4_bin on the generated column so owner bot
+-- ids never case-fold together. Keep the CASE expression free of
+-- CONVERT/COLLATE for OceanBase compatibility; other rows yield NULL.
 ALTER TABLE edge_grants
-    ADD COLUMN authority_owner_log VARCHAR(256) COLLATE utf8mb4_bin
+    ADD COLUMN authority_owner_log VARCHAR(256) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin
         GENERATED ALWAYS AS
             (CASE WHEN grant_kind = 'owner' AND status = 'approved'
-                  THEN CONVERT(to_id USING utf8mb4) COLLATE utf8mb4_bin END) VIRTUAL,
+                  THEN to_id ELSE NULL END) VIRTUAL COMMENT 'authority 唯一约束的生成列',
     ADD UNIQUE KEY uk_edge_approved_owner (env, authority_owner_log);
 
 -- Authority read indexes (role/roles_for/managers bounded reads;
@@ -82,10 +87,10 @@ CREATE TABLE bot_ownership_transfers (
   `reason`                    TEXT         NULL DEFAULT NULL COMMENT '决议理由',
   `result_ownership_version`  BIGINT       NULL DEFAULT NULL COMMENT 'accepted 后的版本；其他状态为 NULL',
   `bot_name_snapshot`         VARCHAR(1024) NULL DEFAULT NULL COMMENT '最小收件箱展示用 Bot 名快照（与 bcs_bots.name 同宽，写入路径原样复制不截断）',
-  `pending_log`               VARCHAR(256) COLLATE utf8mb4_bin
+  `pending_log`               VARCHAR(256) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin
         GENERATED ALWAYS AS
             (CASE WHEN status = 'pending'
-                  THEN CONVERT(bot_id USING utf8mb4) COLLATE utf8mb4_bin END) VIRTUAL COMMENT 'pending 唯一约束的生成列',
+                  THEN bot_id ELSE NULL END) VIRTUAL COMMENT 'pending 唯一约束的生成列',
   `gmt_create`                timestamp    NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `gmt_modified`              timestamp    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`id`),

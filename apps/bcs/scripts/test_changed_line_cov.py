@@ -190,6 +190,7 @@ class MeasureTest(unittest.TestCase):
         # authority entries instead of a fragile raw count.
         for expected in ("bcs-bot-store/src/memory.rs",
                          "bcs-bot-store/src/memory_authority.rs",
+                         "bcs-bot-store/src/memory_ownerships_batch.rs",
                          "bcs-bot-store/src/memory_ownership_sync.rs"):
             self.assertIn(expected, listed)
         services = SCRIPTS.parent / "crates" / "services"

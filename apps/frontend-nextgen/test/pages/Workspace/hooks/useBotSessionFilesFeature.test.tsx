@@ -9,6 +9,9 @@ import { beforeEach, expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom';
 import { fireEvent, render, renderHook, screen } from '@testing-library/react';
 
+// 资源面板跳转入口引入 history：jsdom 下真实 @umijs/max 会拉起 esbuild 触发
+// Buffer invariant 失败，按项目既有惯例用轻量桩替换（见 appRuntime.test.ts 等）。
+jest.mock('@umijs/max', () => ({ history: { push: () => undefined, replace: () => undefined } }));
 jest.mock('@/pages/Workspace/hooks/useBotSessionFiles');
 jest.mock('@/pages/Workspace/hooks/useBotSessionFileUpload');
 jest.mock('@/pages/Workspace/hooks/useBotSkills');
@@ -50,6 +53,7 @@ beforeEach(() => {
     isUploading: false,
     submit: jest.fn(),
     removeTask: jest.fn(),
+    cancelAll: jest.fn(),
   });
   mockedUseBotSkills.mockReturnValue({ skills: [], isLoading: false, loadSkills: jest.fn() });
 });
@@ -151,4 +155,16 @@ it('团队服务 Bot 资源面板将 online 阶段传递给预览 Hook', () => {
   render(<Fixture />);
   fireEvent.click(screen.getByText('Open files'));
   expect(useBotSessionFilePreview).toHaveBeenLastCalledWith(null, expect.objectContaining({ stage: 'online' }));
+});
+
+it.each(['draft', 'verify', 'online'] as const)('debug stage override %s applies to file list, uploads and preview', (stage) => {
+  function Fixture() {
+    const files = useBotSessionFilesFeature({ ...bot, botType: 'service', runtimeStage: stage }, session, 'viewer', jest.fn(), stage);
+    return <><button type="button" onClick={files.openFileDrawer}>Open debug files</button>{files.featureNode}</>;
+  }
+  render(<Fixture />);
+  fireEvent.click(screen.getByText('Open debug files'));
+  expect(mockedUseBotSessionFiles).toHaveBeenLastCalledWith('bot', 'session-1', 'viewer', '2088', undefined, stage);
+  expect(mockedUseBotSessionFileUpload).toHaveBeenLastCalledWith('bot', 'session-1', 'viewer', '2088', stage);
+  expect(useBotSessionFilePreview).toHaveBeenLastCalledWith(null, expect.objectContaining({ stage }));
 });

@@ -101,8 +101,7 @@ GET /api/runs/:flowId/nodes/:nodeId/subworkflows?groupExecutionId=:id&limit=30&c
 
 `groupExecutionId` is required and must match exactly. `limit` is an integer
 from 1 through 100 (default 30); query parameters must be scalar. A read loads
-one persisted parent row and parses `state_json.subworkflowFanouts[nodeId]`
-once. It does not use event reconstruction, live engine polling, node output,
+one persisted parent row and reads `state_json.subworkflowFanouts[nodeId]`. It does not use event reconstruction, live engine polling, node output,
 or the result projection as a fallback. Parent/group/child execution identity
 mismatches are errors, not empty groups. No query starts, rejoins, resumes,
 retries, cancels, seals, or writes a runtime state.
@@ -232,3 +231,68 @@ The read repository supports old schemas without the optional
 SQLite/MySQL missing-column error for that column, omitting that column on the
 retry. Missing required columns, connection errors and fallback failures still
 propagate; they never become empty successful reads.
+
+### ClawMind ordinary child correlation
+
+For a flat fanout item, the reader may correlate the parent's known
+`nativeFlowId` with a row whose `state_json.fanoutOrigin` matches the parent
+flow, node, execution, item ID and index, attempt, logical `childFlowId`, and
+child workflow ID exactly. The row's actual flow ID and workflow ID must also
+match. `fanoutOrigin.requestDigest` must be a nonblank string; if the parent
+item carries `requestDigest`, it must also match exactly. A parent `inputDigest`
+is a different field and is not used as a substitute. Missing, malformed, or
+mismatched metadata, missing native IDs or rows, and unauthorized child runs
+are hidden. The existing attempts-format path is unchanged. Child and parent
+are independently subject to the existing workflow and full owner-qualified run
+read permissions. A parent grant never grants access to a child. For a run with
+`fanoutOrigin`, run detail projects `state_json` onto validated workflow ID and
+version, business status, current phase, execution mode, active node IDs and
+node execution metadata (status, phase, executor, retry counts and timestamps).
+From this state projection, opaque workflow data, node results/errors, credentials,
+sessions, params, snapshots and fanout metadata are omitted. The child run
+row also redacts `params_json`, `input_json`, `result_json` and session fields.
+For child detail and both node-list modes, node execution records are reduced
+to execution metadata; child events are omitted and other raw child reads such
+as replay and steps are forbidden. Access remains subject to the child's own
+owner-qualified run permission. String labels are bounded and
+restricted to identifier-like characters; invalid fields are omitted. These
+labels are still engine/workflow-supplied and must not be populated with
+secrets. A child that itself owns a fanout remains subject to the existing
+managed-parent redaction instead.
+
+The child intervention read response returns only a `sessionConfigured`
+boolean for session presence, with `interventionReadOnly: true`,
+`interventionReady: false`, no actions, and no session values. The frontend
+shows an explicitly read-only state and does not offer session settings or
+chat/intervention actions; it also fails closed if the intervention read
+fails. This UI restriction is not write authorization: the existing public
+mutation endpoints have no independently verified production principal and
+must not be considered safe to expose or enable for child interventions. This
+change does not modify or authorize those mutation endpoints. Ordinary runs
+retain their existing behavior.
+
+This is a **best-effort correlation of metadata written by a trusted engine**,
+not an authenticated provenance, integrity, or incarnation proof. It assumes
+trusted engine writers and a secured engine transport; it does not resist a
+trusted writer forging metadata or deleting and recreating runs. The existing
+public bootstrap first applies its global admin-role middleware, which sets role
+flags but does not reject the request, then mounts ordinary
+`POST /api/internal/runs` under `engineAuth`; the legacy route itself has no
+additional per-run authorization. With a valid
+configured public key, unsigned writes are rejected. In `dev`, however, an
+empty key explicitly permits unsigned socket-loopback clients; `pre` and `prod`
+with no key reject requests. A configured shared engine signature identifies a
+trusted signer, not a particular run owner; it covers timestamp and body but
+not method or path and has no nonce/replay protection. It therefore requires a
+trusted transport and must not be treated as proof against forgery or replay.
+Deployments without an adequate trusted-writer and transport boundary must not rely on this correlation for security. Ordinary
+request association records and legacy managed checkpoint fields alone do not
+establish this correlation. The endpoint never returns the raw origin state,
+digest, or credentials.
+
+The bootstrap authentication integration test is
+`server/services/__tests__/run-subworkflows-engine-auth.test.ts`. Because it
+loads the actual public host through its package exports, build the shared,
+Clawevolve, ClawInsight, workflow and ClawWeb packages before running the test
+in a clean checkout; the test uses migrated in-memory SQLite and a synthetic
+Ed25519 key, not a production credential.

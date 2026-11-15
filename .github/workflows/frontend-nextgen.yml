@@ -49,8 +49,22 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-          cache-dependency-path: apps/frontend-nextgen/package-lock.json
+          cache-dependency-path: |
+            apps/frontend-nextgen/package-lock.json
+            apps/frontend-nextgen/assets/task-panel/package-lock.json
           registry-url: https://registry.npmjs.org
+
+      - name: Install shared task asset dependencies
+        working-directory: apps/frontend-nextgen/assets/task-panel
+        run: npm ci
+
+      - name: Verify shared task asset and standalone UI tests
+        working-directory: apps/frontend-nextgen/assets/task-panel
+        run: npm run verify
+
+      - name: Verify task asset in an isolated package checkout
+        working-directory: apps/frontend-nextgen/assets/task-panel
+        run: node scripts/verify-independent.mjs
 
       - name: Install locked public dependencies
         run: npm ci

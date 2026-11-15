@@ -1,6 +1,6 @@
 import pytest
 
-from src.interfaces.api.schemas.fusion_schemas import FusionRequest
+from app.adapters.http.schemas.fusion_schemas import FusionRequest
 
 
 def test_accepts_session_id() -> None:

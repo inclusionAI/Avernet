@@ -128,6 +128,7 @@ class TestCreateBotBcnRegister:
             owner_workno="u1",
             name="cc-bot",
             summary="",
+            avatar_url="",
         )
 
     def test_claude_code_normalcc_service_triggers_bcn_register(self):
@@ -157,6 +158,7 @@ class TestCreateBotBcnRegister:
             owner_workno="u1",
             name="cc-svc-bot",
             summary="service desc",
+            avatar_url="",
         )
 
     def test_service_bot_create_uses_default_image_and_persists_marker(self):
@@ -272,6 +274,7 @@ class TestCreateBotBcnRegister:
             owner_workno="u1",
             name="cc-personal-coding-bot",
             summary="",
+            avatar_url="",
         )
 
     def test_aicoding_personal_coding_triggers_bcn_register(self):
@@ -299,6 +302,7 @@ class TestCreateBotBcnRegister:
             owner_workno="u1",
             name="aicoding-personal-coding-bot",
             summary="",
+            avatar_url="",
         )
 
     @pytest.mark.parametrize(
@@ -337,6 +341,7 @@ class TestCreateBotBcnRegister:
             owner_workno="u1",
             name="cc-no-template",
             summary="",
+            avatar_url="",
         )
         assert "register bot to BCN as provider" in caplog.text
 
@@ -364,6 +369,7 @@ class TestCreateBotBcnRegister:
             owner_workno="u1",
             name="tc-bot",
             summary="",
+            avatar_url="",
         )
 
     def test_openclaw_service_triggers_bcn_register(self):
@@ -392,6 +398,7 @@ class TestCreateBotBcnRegister:
             owner_workno="u1",
             name="oc-svc-bot",
             summary="oc svc desc",
+            avatar_url="",
         )
 
     def test_openclaw_personal_registers_plugin_before_device_allocation(self):
@@ -499,7 +506,13 @@ def test_deferred_create_registers_all_engine_types_once(engine, bot_type):
             bot_id="all-1", engine_type=engine, bot_type=bot_type, provision=False,
         )
     assert record["bot_id"] == "all-1"
-    expected = dict(teamclaw_bot_uuid="all-1", owner_workno="u1", name="all-bots", summary="description")
+    expected = dict(
+        teamclaw_bot_uuid="all-1",
+        owner_workno="u1",
+        name="all-bots",
+        summary="description",
+        avatar_url="",
+    )
     if bot_type == "service":
         expected["provider_bot_ref"] = "all-1:staff_u1"
     if engine == "openclaw" and bot_type in ("personal", "desktop"):

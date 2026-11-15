@@ -32,7 +32,8 @@ from agentclaw.community.core.agentswarm.domain import models as dm
 from agentclaw.community.core.agentswarm.service.protocols import (
     AgentSwarmConfigError, AgentDetailItem, AgentEvent, AgentMessageDetail,
     AgentAttemptDetail, AgentResultDetail, GlobalRunLimitExceeded,
-    GuardEventDetailItem, GuardEventSummary, QueueDepthExceeded, RoundDetailItem,
+    GuardEventDetailItem, GuardEventSummary, IdentitySourceInvalid,
+    IdentitySourceRequired, QueueDepthExceeded, RoundDetailItem,
     RoundEvent, RunDetail, RunEvents, SubmitRunRequest, TenantRunLimitExceeded,
 )
 from agentclaw.community.api.agentswarm_service import (
@@ -42,6 +43,13 @@ from agentclaw.community.api.agentswarm_service import (
 
 TENANT = "tenant-a"
 STAFF_ID = "staff-1"
+
+
+def _with_owner(run: dm.Run, owner_id: str) -> dm.Run:
+    """The same run, attributed to another account."""
+    import dataclasses
+
+    return dataclasses.replace(run, owner_id=owner_id)
 
 
 def _mk_run(status: dm.RunStatus = dm.RunStatus.COMPLETED) -> dm.Run:
@@ -112,9 +120,11 @@ class StubAgentSwarmService:
         return self.run
 
     def list_runs(self, tenant: str, status: dm.RunStatus | None = None,
-                  *, page: int = 1, page_size: int = 20) -> dm.RunPage:
+                  *, page: int = 1, page_size: int = 20,
+                  owner_id: str | None = None) -> dm.RunPage:
         self.list_calls.append(
-            {"tenant": tenant, "status": status, "page": page, "page_size": page_size}
+            {"tenant": tenant, "status": status, "page": page,
+             "page_size": page_size, "owner_id": owner_id}
         )
         return dm.RunPage(items=(self.run,), total=1, page=page, page_size=page_size)
 
@@ -345,6 +355,42 @@ class TestCrossTenantIsolation:
         assert stub.submitted[-1].tenant == "tenant-b"
 
 
+class TestOwnershipIsolation:
+    """A tenant is a group, so runs must be scoped to their owner as well."""
+
+    def test_the_list_passes_the_caller_as_owner(self, client, stub):
+        client.get("/openapi/v1/agentswarm/runs", params={"tenant": TENANT})
+        assert stub.list_calls[-1]["owner_id"] == "staff-1", (
+            "a tenant-wide list would show one member another member's prompts"
+        )
+
+    def test_a_run_owned_by_someone_else_reads_as_missing(self, client, stub):
+        stub.run = _with_owner(stub.run, "someone-else")
+        assert client.get(
+            "/openapi/v1/agentswarm/runs/run-1", params={"tenant": TENANT}
+        ).status_code == 404
+
+    def test_a_run_owned_by_someone_else_cannot_be_cancelled(self, client, stub):
+        stub.run = _with_owner(stub.run, "someone-else")
+        assert client.post(
+            "/openapi/v1/agentswarm/runs/run-1/cancel", params={"tenant": TENANT}
+        ).status_code == 404
+        # The mutation is never attempted.
+        assert stub.cancelled == []
+
+    def test_the_callers_own_run_is_served(self, client, stub):
+        stub.run = _with_owner(stub.run, "staff-1")
+        assert client.get(
+            "/openapi/v1/agentswarm/runs/run-1", params={"tenant": TENANT}
+        ).status_code == 200
+
+    def test_a_run_predating_the_owner_column_stays_readable(self, client, stub):
+        stub.run = _with_owner(stub.run, "")
+        assert client.get(
+            "/openapi/v1/agentswarm/runs/run-1", params={"tenant": TENANT}
+        ).status_code == 200
+
+
 class TestSyncRunRoundTrip:
 
     def test_submit_sync_converts_dto_to_typed_request(self, client, stub):
@@ -401,6 +447,8 @@ class TestListRuns:
             "status": dm.RunStatus.COMPLETED,
             "page": 2,
             "page_size": 50,
+            # The caller, not the tenant, decides what the list contains.
+            "owner_id": "staff-1",
         }
         body = resp.json()
         assert body["total"] == 1
@@ -448,7 +496,9 @@ class TestCancel:
             "/openapi/v1/agentswarm/runs/run-1/cancel", params={"tenant": "tenant-b"}
         )
         assert resp.status_code == 404
-        assert stub.cancelled == [("run-1", "tenant-b")]
+        # Ownership is checked before the mutation is attempted, so a run the
+        # caller cannot see is never handed to the service at all.
+        assert stub.cancelled == []
 
 
 class TestSmokeRoutes:
@@ -608,6 +658,27 @@ class TestErrorMapping:
         resp = client.post("/openapi/v1/agentswarm/runs", json=_spec_body())
         assert resp.status_code == 400
         assert "llm config missing" in resp.json()["error"]
+
+    def test_a_missing_identity_source_maps_to_400(self, client, stub):
+        """Absent is a caller error, not a transient condition: 400, and the
+        body names the field the caller must supply."""
+        stub.submit_error = IdentitySourceRequired()
+        resp = client.post("/openapi/v1/agentswarm/runs", json=_spec_body())
+
+        assert resp.status_code == 400
+        assert "identity_bot_id" in resp.json()["error"]
+
+    def test_an_invalid_identity_source_maps_to_422(self, client, stub):
+        """Well-formed request naming a source it may not use: 422, matching
+        what create-with-manifest answers for the same condition."""
+        stub.submit_error = IdentitySourceInvalid(
+            "20261110_source",
+            "is not a Bot owned by the caller holding an issued passport",
+        )
+        resp = client.post("/openapi/v1/agentswarm/runs", json=_spec_body())
+
+        assert resp.status_code == 422
+        assert "20261110_source" in resp.json()["error"]
 
 
 class TestAuthWiring:

@@ -1,4 +1,4 @@
-import { Fragment, type ReactNode } from 'react';
+import { Fragment, type ReactNode, useEffect, useRef } from 'react';
 import { DataTableEmpty } from './DataTableEmpty';
 import { DataTableHeader } from './DataTableHeader';
 import { DataTableRow } from './DataTableRow';
@@ -15,6 +15,12 @@ export interface DataTableColumn<Row> {
   className?: string;
   /** 仅作用于表头单元格（如 sticky 列需与表头底色对齐）。 */
   headerClassName?: string;
+  /**
+   * 固定列（横向滚动时吸附容器边缘）。定位、不透明垫底、hover 高亮层
+   * 与滚动遮挡阴影由通用层注入；勿在 className/headerClassName 手写
+   * sticky 背景类——半透明底会透出被遮列文字（hover 内容重叠缺陷，2026-11 修复）。
+   */
+  sticky?: 'left' | 'right';
 }
 
 export interface DataTableProps<Row> {
@@ -43,9 +49,33 @@ export function DataTable<Row>({
   rowHeight = 'h-16',
   minWidth,
 }: DataTableProps<Row>) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  // 宽表横向滚动感知：容器写入 --sticky-{left,right}-shadow(1/0)，
+  // 供固定列边缘阴影层表达「边缘之外仍有被遮内容」，滚到尽头即消失。
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const update = () => {
+      const hasLeft = el.scrollLeft > 0;
+      const hasRight = el.scrollWidth - el.clientWidth - el.scrollLeft > 1;
+      el.style.setProperty('--sticky-left-shadow', hasLeft ? '1' : '0');
+      el.style.setProperty('--sticky-right-shadow', hasRight ? '1' : '0');
+    };
+    update();
+    el.addEventListener('scroll', update, { passive: true });
+    // jsdom 等无 ResizeObserver 的环境跳过尺寸监听（scroll 监听与初始写入不受影响）。
+    const resizeObserver = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(update);
+    resizeObserver?.observe(el);
+    return () => {
+      el.removeEventListener('scroll', update);
+      resizeObserver?.disconnect();
+    };
+  });
+
   if (rows.length === 0 && empty !== undefined) {
     return (
-      <div className="w-full overflow-x-auto">
+      <div ref={scrollRef} className="w-full overflow-x-auto">
         <table aria-label={ariaLabel} className={`w-full table-fixed border-collapse text-sm ${minWidth ?? ''}`}>
           <DataTableHeader columns={columns} />
           <tbody>
@@ -57,7 +87,7 @@ export function DataTable<Row>({
   }
 
   return (
-    <div className="w-full overflow-x-auto">
+    <div ref={scrollRef} className="w-full overflow-x-auto">
       <table aria-label={ariaLabel} className={`w-full table-fixed border-collapse text-sm ${minWidth ?? ''}`}>
         <DataTableHeader columns={columns} />
         <tbody>

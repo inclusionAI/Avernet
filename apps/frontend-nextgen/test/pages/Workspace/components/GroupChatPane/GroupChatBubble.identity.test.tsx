@@ -39,6 +39,21 @@ it.each([
 });
 
 it.each([
+  ['历史消息只带 botName', 'history', { botUuid: 'b1', botName: '旧名' }, '旧名'],
+  ['实时消息只带 senderName', 'streaming', { senderId: 'b1', senderName: '新名' }, '新名'],
+] as const)('%s 时头像仍按 Bot ID 取 Session 摘要', (_label, status, extra, expectedName) => {
+  render(<GroupChatBubble
+    message={{ id: 'avatar', role: 'assistant', content: '你好', status, extra }}
+    group={group} participants={[]}
+    displayParticipants={[{ actorId: 'b1', kind: 'bot', name: 'Bot 一', avatarUrl: '/b1.png' }]}
+    isLastMessage={false} isRequesting={false}
+  />);
+  const img = screen.getByAltText(expectedName);
+  expect(img).toBeInTheDocument();
+  expect(img.getAttribute('src')).toBe('/b1.png');
+});
+
+it.each([
   ['user', '456', '测试用户乙', '用户'],
   ['assistant', 'bot-a', '协作助手', 'Bot'],
 ] as const)('%s 名称后显示与会话管理一致的类型标签，时间在标签之后', (role, senderId, senderName, label) => {

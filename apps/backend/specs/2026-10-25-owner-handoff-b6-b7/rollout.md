@@ -178,3 +178,16 @@ This exception is opt-in on these two routes only, not a global collaborator
 permission. Missing/empty admin configuration grants nothing. Other explicit
 admin `*-for-others` routes retain their existing whitelist checks. Frontend
 payloads, schema and personal/default deletion policies are unchanged.
+
+### Expired historical certificate rollout
+
+Deploy additive tcauthmng `queryOwnerHandoffPassport` and
+`expired_passport_handoff: 1` capability before updating the Backend/corp adapter.
+Ordinary passport queries and independent execution-identity reissue remain
+valid-certificate-only. Correlated Owner handoff may inherit the latest
+non-deleted expired passport only when no valid passport exists, retaining the
+expected credential ID fence and existing resource scope. No DDL, frontend or
+SecBaaS changes are needed. Existing QUEUED/CURRENT_PASSPORT_REQUIRED operations
+resume through recovery after deployment; no direct database update is required.
+Verify valid and expired handoffs, missing history, changed generation, pending
+AAC, runtime acknowledgement and old-cache cleanup before production rollout.

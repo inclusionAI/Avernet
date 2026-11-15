@@ -546,6 +546,7 @@ def test_search_bot_metadata_returns_only_display_fields(client, svc):
             {
                 "bot_id": "b1",
                 "owner_id": "u1",
+                "owner_name": None,
                 "bcn_bot_id": "b1:u1",
                 "bot_name": "N",
                 "bot_desc": "D",

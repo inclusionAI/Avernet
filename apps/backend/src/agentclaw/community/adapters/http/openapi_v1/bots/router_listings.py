@@ -76,6 +76,15 @@ from .schemas import (
 )
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 
+from agentclaw.community.core.bot_copy.status_derive import build_copy_state_summary
+from agentclaw.community.core.bot_copy.repository.protocol import (
+    BotCopyRepositoryProtocol,
+)
+from agentclaw.community.core.repository.protocols.bot.config_manifest_apply import (
+    BotConfigManifestApplyRepositoryProtocol,
+)
+from agentclaw.community.utils.env_utils import get_current_env
+
 from .converter_bot import _to_bot, _resolve_row_spaces, _to_bot_metadata
 
 logger = get_logger()
@@ -367,6 +376,10 @@ async def list_inventory(
     space_context: BusinessSpaceContextProtocol = Injected(
         BusinessSpaceContextProtocol
     ),
+    bot_copy_repo: BotCopyRepositoryProtocol = Injected(BotCopyRepositoryProtocol),
+    apply_repo: BotConfigManifestApplyRepositoryProtocol = Injected(
+        BotConfigManifestApplyRepositoryProtocol
+    ),
 ) -> Envelope[Page[BotInventoryItem]]:
     """List personal cloud, service, and local Bots in the current space."""
     granted = caller.granted_bot_ids(owned_by_delegator=True)
@@ -387,4 +400,20 @@ async def list_inventory(
         page=page_params.page,
         page_size=page_params.page_size,
     )
-    return page(total, [_to_inventory_item(item) for item in items], request)
+    # Derive-on-read copy_state per inventory card (same source as GET /bots/{id}):
+    # legacy bots (no ac_bot_copy row) → null, additive field. Mirrors the detail
+    # handler's attach so inventory cards render the copy-progress badge + retry
+    # action without a second round-trip.
+    inventory_items = []
+    for item in items:
+        inventory_item = _to_inventory_item(item)
+        inventory_item.copy_state = build_copy_state_summary(
+            bot_copy_repo=bot_copy_repo,
+            apply_repo=apply_repo,
+            env=get_current_env(),
+            entity_id=item.owner_entity_id or owner_id,
+            bot_id=item.bot_id,
+            bot_status=item.status,
+        )
+        inventory_items.append(inventory_item)
+    return page(total, inventory_items, request)

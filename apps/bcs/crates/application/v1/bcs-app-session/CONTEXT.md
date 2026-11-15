@@ -35,8 +35,9 @@
   file commands, and orchestrates best-effort completion notifications.
 - `GroupContextAddAccessGuard`, which resolves the Group/Session boundary,
   verifies current-Session membership for session/round writes and Group membership for group writes, validates the
-  `{sessionId}:{round}` format, and delegates all Group Context operations to
-  the underlying application service.
+  `{sessionId}:{round}` format, resolves preset management against an existing
+  Group, and authorizes writes against the Group driver Bot.
+  The underlying Group Context service owns preset and entry policies.
 
 ## Consumes
 
@@ -80,8 +81,8 @@
 
 ## Runtime ownership
 
-This crate owns V1 Session, Session File, and the public Group Context add
-resource-membership gate. The Group Context gate reads the persisted Session
+This crate owns V1 Session, Session File, and the public Group Context
+resource-membership gate for adds. The Group Context gate reads the persisted Session
 at request time so dynamically invited Session participants remain allowed;
 Group Context storage and field-policy semantics stay in the Group Context
 application service. For files, it enforces membership and the

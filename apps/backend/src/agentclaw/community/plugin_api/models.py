@@ -100,6 +100,9 @@ class BotModel(Base):
     # to_dict() so no current API response body changes.
     avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
 
+    # The Bot whose AgentPass identity this one inherits; NULL = holds its own.
+    identity_bot_id = Column(String(64), nullable=True)
+
     # The ``create_all`` mirror of prod's UNIQUE uk_bot_id_entity_id_env
     # (bot_id, entity_id, env), which the out-of-band prod DDL carries and this
     # model previously did not — so local and singlebox, which build their
@@ -177,6 +180,10 @@ class BotModel(Base):
             "env": self.env,
             "bot_type": self.bot_type,
             "space_id": self.space_id,
+            # Internal read path, not just the API projection: consumers build a
+            # Bot dict from to_dict() and must see the identity source, or an
+            # inheriting Bot silently resolves an agent code from its own id.
+            "identity_bot_id": self.identity_bot_id,
             "template_type": self.template_type,
             "call_type": self.call_type,
             "caller_config_revision": self.caller_config_revision,

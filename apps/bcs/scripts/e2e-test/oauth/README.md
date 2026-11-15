@@ -48,6 +48,20 @@ codes live only in a temporary directory/in memory and are not artifacts.
   refresh/revoke behavior over both SQLite and memory.
 - Rollback: removing `[api.auth]` restores the compatibility OAuth facade;
   explicit gateway-only closes V1 only; disabling legacy OAuth too closes both.
+- Friend-connect surface (memory only, `friend_surface.py`): the memory-mode
+  companion is the only e2e runtime wiring the edge-permission in-memory
+  stores behind the real `DbConnectService`. The scenario registers fresh
+  bots via real human logins and drives the new friend framework full link
+  with assertions: legacy `/friends/*` create -> duplicate-pending echo ->
+  pending inbox -> receiver-only accept/reject (wrong caller 403) -> edges on
+  `/collaboration/friend-connections` and legacy friend list -> accepted/
+  rejected projections -> already-friends idempotency -> unknown target 404,
+  plus the v1 openapi friendship surface (owner-scoped create/list, non-owner
+  403, owner accept/reject read back from the decided store row with DB-managed
+  timestamps, and the connect-backed friendship delete). This keeps the
+  in-memory store implementations, the `EdgeConnectFriendService` facade and
+  the v1 friendship application/adapter layer covered end to end; run it
+  standalone with `python3 friend_surface.py --binary <bcs-oauth-e2e path>`.
   Disabled-provider refresh is rejected without a new cookie, while legacy
   refresh and logout remain governed by their independent contracts.
 - Pending-state capacity: fill the public URL endpoint to its documented limit,
@@ -55,6 +69,16 @@ codes live only in a temporary directory/in memory and are not artifacts.
   login to prove saturation neither evicts live batches nor prevents recovery.
 - Concurrent V1/legacy refresh: exactly one HTTP request wins the CAS; stale
   logout still revokes its rotated descendant.
+- BCS-only candidate discovery: two actual OAuth browser sessions register Bots,
+  search as Human/managed Bot, enforce cross-viewer visibility and reject foreign
+  perspectives. Pending requests become approved Connect edges only after the
+  target manager accepts them. Lists and semantic search agree on `is_friend`,
+  including a friend subsequently made private. A loopback BCSFuse stub checks
+  real outbound recall scopes and supplies deterministic ordering, empty recalls
+  and HTTP failures; a separate provider-disabled process verifies name fallback.
+  Registration and relationship state are created through HTTP, never direct SQL
+  or Core calls. These processes use the existing OAuth runtime profile pool and
+  fail the companion on assertion errors, without changing coverage thresholds.
 - Operator startup: malformed source tables/values, unknown/duplicate sources,
   missing fields, invalid URLs/origins/redirects, secret lookup/key failures,
   and JSON/TOML native-value guards must fail before any server is published.

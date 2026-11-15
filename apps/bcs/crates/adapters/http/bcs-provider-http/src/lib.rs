@@ -83,7 +83,7 @@ async fn read_provider_ack_body(
     response: reqwest::Response,
     timeout: Duration,
 ) -> Result<ProviderAckResponse, ProviderAckBodyError> {
-    bcs_observability::observe_result("provider.read_provider_ack_body", async {
+    bcs_observability::observe_key_result("provider.read_provider_ack_body", async {
     match tokio::time::timeout(timeout, response.json::<ProviderAckResponse>()).await {
         Ok(Ok(ack)) => Ok(ack),
         Ok(Err(error)) => Err(ProviderAckBodyError::Decode(error)),
@@ -136,6 +136,7 @@ impl ProviderClientPolicy {
 #[derive(Default)]
 struct LagTracker {
     alerting: bool,
+    correlated_pair_completed: bool,
     peak_lag_ms: u64,
 }
 
@@ -154,6 +155,7 @@ pub struct HttpProviderTransport {
     sse_client: reqwest::Client,
     url_guard: OutboundUrlGuard,
     chat_run_timeout_ms: u64,
+    preproduction_caller_token_diagnostics: bool,
     event_ingest: std::sync::RwLock<Option<Arc<dyn ProviderEventIngestService>>>,
     bot_run_context: std::sync::RwLock<Option<Arc<dyn BotRunContextPort>>>,
     interactions: std::sync::RwLock<Option<std::sync::Weak<dyn InteractionService>>>,
@@ -163,6 +165,7 @@ mod transport;
 mod multiplex;
 mod wire;
 mod network;
+mod caller_token_diagnostics;
 mod stream;
 use wire::*;
 use network::*;

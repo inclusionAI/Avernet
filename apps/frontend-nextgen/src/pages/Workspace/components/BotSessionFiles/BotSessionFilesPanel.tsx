@@ -4,7 +4,7 @@ import { TooltipProvider } from '@/components/ui/Tooltip';
 import { useBotSessionFilePreview } from '@/pages/Workspace/hooks/useBotSessionFilePreview';
 import type { BotSessionFileView } from '@/services/workspace/botSessionFileService';
 import { cn } from '@/utils/cn';
-import { FileText, Upload, X } from 'lucide-react';
+import { FileText, FolderOpen, Upload, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { PreviewPane } from '../GroupChatPane/SessionFilesPreviewPane';
 import { BotSessionFilesRow } from './BotSessionFilesRow';
@@ -28,6 +28,16 @@ export interface BotSessionFilesPanelProps {
   onDelete: (file: BotSessionFileView) => void;
   onDownload: (file: BotSessionFileView) => void;
   onReference: (file: BotSessionFileView) => void;
+  /** 跳转 Bot 完整资源目录入口；不传则不渲染（好友 Bot 等场景）。 */
+  resourceJump?: BotResourceJump;
+}
+
+/** 资源面板 → Bot 完整资源目录的跳转入口状态：露出、置灰原因与执行均由上层 Hook 决定。 */
+export interface BotResourceJump {
+  available: boolean;
+  /** 不可用时的原因提示，同时作为无障碍名称与悬停提示。 */
+  disabledReason?: string;
+  onJump: () => void;
 }
 
 /**
@@ -53,6 +63,7 @@ export function BotSessionFilesPanel({
   onDelete,
   onDownload,
   onReference,
+  resourceJump,
 }: BotSessionFilesPanelProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [category, setCategory] = useState<SessionFileCategory | 'all'>('all');
@@ -108,8 +119,29 @@ export function BotSessionFilesPanel({
   return (
     <aside className="flex h-full flex-col bg-background">
       {/* 标题行（设计稿：48px，标题 14px 左起 20px，16px 关闭 X 右起 20px）。 */}
-      <div className="flex h-12 shrink-0 items-center justify-between pl-5 pr-5">
-        <h3 className="m-0 text-sm font-normal leading-5 tracking-[-0.15px] text-foreground">资源管理</h3>
+      <div className="flex h-12 shrink-0 items-center justify-between gap-3 pl-5 pr-5">
+        <div className="flex min-w-0 items-center gap-1">
+          <h3 className="m-0 text-sm font-normal leading-5 tracking-[-0.15px] text-foreground">资源管理</h3>
+          {/* 跳转 Bot 完整资源目录：面板内只看得到当前会话文件，完整目录在 Bot 详情「资源」tab。
+              入口紧贴标题、远离关闭按钮——图标与上传同属「方框/箭头」形态，原先靠近关闭易误触。
+              置灰原因（无空间归属）由上层 Hook 给出，此处只负责呈现与触发。 */}
+          {resourceJump ? (
+            <IconButton
+              label={resourceJump.available ? '查看该 Bot 全部资源' : resourceJump.disabledReason ?? '查看该 Bot 全部资源'}
+              icon={<FolderOpen className="h-4 w-4" aria-hidden />}
+              size="sm"
+              variant="ghost"
+              // 置灰用 aria-disabled 而非原生 disabled：原生 disabled 不派发 pointer 事件，
+              // Tooltip 失效会让用户看不到「为什么不能点」（同 GroupSidebar 无权限菜单项约定）。
+              aria-disabled={resourceJump.available ? undefined : true}
+              onClick={resourceJump.available ? resourceJump.onJump : undefined}
+              className={cn(
+                'h-6 w-6 text-zinc-400 hover:bg-muted hover:text-foreground',
+                !resourceJump.available && 'cursor-not-allowed opacity-40',
+              )}
+            />
+          ) : null}
+        </div>
         <IconButton
           label="关闭资源管理面板"
           icon={<X className="h-4 w-4" aria-hidden />}
@@ -171,14 +203,13 @@ export function BotSessionFilesPanel({
             ) : (
               <span />
             )}
-            <Button
+            <IconButton
+              label="上传文件"
+              icon={<Upload className="h-3.5 w-3.5" aria-hidden />}
               variant="outline"
-              aria-label="上传文件"
               onClick={onUploadClick}
               className="h-6 w-6 shrink-0 rounded-lg border-zinc-200 bg-background p-0 text-muted-foreground hover:bg-background hover:text-foreground"
-            >
-              <Upload className="h-3.5 w-3.5" aria-hidden />
-            </Button>
+            />
           </div>
 
           <div className="app-scrollbar flex min-h-0 flex-1 flex-col overflow-y-auto">

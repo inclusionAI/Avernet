@@ -1,5 +1,5 @@
 import { defaultCapabilities, extendCapabilities } from '@/capabilities';
-import { createBot, getBot, listBotInventory, pollBotAuthStatus } from '@/services/backendApi/bots/botController';
+import { createBot, getBot, listBotInventory, pollBotAuthStatus, restartBot } from '@/services/backendApi/bots/botController';
 import { BackendRequestError } from '@/services/backendApi/httpClient';
 import { botAvatarService } from '@/services/botWorkshop/botAvatarService';
 import { botEditorService } from '@/services/botWorkshop/botEditorService';
@@ -12,6 +12,7 @@ jest.mock('@/services/backendApi/bots/botController', () => ({
   getBot: jest.fn(),
   listBotInventory: jest.fn(),
   pollBotAuthStatus: jest.fn(),
+  restartBot: jest.fn(),
 }));
 jest.mock('@/services/botWorkshop/botEditorService', () => ({
   botEditorService: { restartLifecycle: jest.fn() },
@@ -24,6 +25,7 @@ const mockedCreateBot = createBot as jest.MockedFunction<typeof createBot>;
 const mockedGetBot = getBot as jest.MockedFunction<typeof getBot>;
 const mockedListBotInventory = listBotInventory as jest.MockedFunction<typeof listBotInventory>;
 const mockedPollBotAuthStatus = pollBotAuthStatus as jest.MockedFunction<typeof pollBotAuthStatus>;
+const mockedRestartBot = restartBot as jest.MockedFunction<typeof restartBot>;
 const mockedRestartLifecycle = botEditorService.restartLifecycle as jest.MockedFunction<
   typeof botEditorService.restartLifecycle
 >;
@@ -519,6 +521,62 @@ describe('botWorkshopService', () => {
         initialize: false,
       }),
     ).toThrow('Hermes 暂不支持服务化');
+  });
+});
+
+describe('botWorkshopService.restart', () => {
+  test('AgentCoding 重启携带确认模板更新的固定扩展参数', async () => {
+    const { item } = mapBotDto({
+      bot_id: 'agent-coding-bot',
+      bot_name: 'Agent Coding Bot',
+      owner_entity_id: 'owner-1',
+      active_engine: 'claude_code',
+      template_type: 'generalCC',
+      bot_type: 'personal',
+      status: 'ACTIVE',
+      actions: ['view', 'restart'],
+    });
+    mockedRestartBot.mockResolvedValue({
+      code: 200000,
+      message: 'OK',
+      data: {
+        status: 'ACTIVE',
+        ext: {
+          aicoding: {
+            restart: { operation_id: 'op-1', status: 'RUNNING', phase: 'QUEUED', message: null },
+          },
+        },
+      },
+      request_id: 'req-1',
+    } as never);
+
+    const response = await botWorkshopService.restart(item, 'caller-1');
+
+    expect(mockedRestartBot).toHaveBeenCalledWith('agent-coding-bot', {
+      userId: 'caller-1',
+      ownerId: 'owner-1',
+      extraConfigs: { confirmed_template_update: 'true' },
+    });
+    expect(response).toMatchObject({
+      ext: { aicoding: { restart: { operation_id: 'op-1' } } },
+    });
+  });
+
+  test('普通 Bot 重启保持无请求体目标，不受 Coding 确认参数影响', async () => {
+    const { item } = mapBotDto({
+      bot_id: 'openclaw-bot',
+      bot_name: 'OpenClaw Bot',
+      owner_entity_id: 'owner-1',
+      engine: 'openclaw',
+      bot_type: 'personal',
+      status: 'ACTIVE',
+      actions: ['view', 'restart'],
+    });
+    mockedRestartBot.mockResolvedValue({ code: 200000, data: { status: 'PENDING' } } as never);
+
+    await botWorkshopService.restart(item, 'caller-1');
+
+    expect(mockedRestartBot).toHaveBeenCalledWith('openclaw-bot', undefined);
   });
 });
 

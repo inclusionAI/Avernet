@@ -13,9 +13,11 @@ import {
   restartBot,
   restartBotEngine,
   restartLocalBot,
+  retryCopyBot as retryCopyBotApi,
   updateBot,
   upgradeBotToService,
 } from '@/services/backendApi/bots/botController';
+import type { BotCopyRetryResult } from '@/services/backendApi/bots/botController';
 import { BackendRequestError } from '@/services/backendApi/httpClient';
 import type { BackendUnknownRecord } from '@/services/backendApi/types';
 import { isSameHumanIdentity } from '@/domain/userIdentity';
@@ -25,6 +27,7 @@ import { botAvatarService } from './botAvatarService';
 import { personalCreateSpace, toBotCreateRequest, validateBotCreate } from './botCreatePolicy';
 import { botEditorService } from './botEditorService';
 import { mapBotDto, mapBotList } from './botMapper';
+import type { BotRestartResponse } from './botRestartTracking';
 import { localBotService } from './localBotService';
 import type {
   AvernetBotCreateRequest,
@@ -263,8 +266,14 @@ export const botWorkshopService = {
   },
   /**
    * 复制 Bot:名称/描述由用户编辑,其余字段(引擎/空间/服务模式/头像)从源 Bot 只读透传;
-   * 复制结果与创建同构 —— 需 AgentPass 授权时返回 `authorization_required`,由列表 Hook 复用
-   * `useBotCreateAuthorization` 轮询。源 Bot 的协作者/外部渠道/工具授权/密钥不继承。
+   * 后端 `BotCopyResponse` 按 `type` 判别:
+   * - `success` —— 复制已提交,dst bot 由 create_job 异步创建;响应只回 bot_id,FE 刷
+   *   列表即可见并跟随 copy_state。avatar 在此刻 best-effort 持久化(以 bot_id 为键,
+   *   与 create 同款 botAvatarService.save),失败降级为默认头像,不阻断复制。
+   * - `auth_required` —— 内网 AgentPass 授权闸 pending,回 iframe/redirect。**与创建
+   *   同款处理**:携带 `request` 交由 `useBotCreateAuthorization` 轮询 dst bot 的
+   *   auth-status,ISSUED 后收敛(dst bot 已注册,auth-status 端点对 copy dst 同样适用)。
+   * 源 Bot 的协作者/外部渠道/工具授权/密钥不继承。
    */
   async copyBot(input: BotCopyInput): Promise<BotCopyResult> {
     const name = input.name.trim();
@@ -272,23 +281,27 @@ export const botWorkshopService = {
     if (name.includes('@')) throw new Error('Bot 名称不能包含 @');
     if (name.length > 40) throw new Error('Bot 名称不能超过 40 个字符');
     const description = input.description.trim();
+    // 后端 extra="forbid":excludes 必须进 request_detail,avatar_url 不进 body。
+    const request_detail = input.excludes.length ? { excludes: input.excludes } : undefined;
     const response = await copyBot({
       source_bot_id: input.sourceBotId,
       bot_name: name,
       bot_desc: description,
-      excludes: input.excludes,
-      ...(input.avatarUrl ? { avatar_url: input.avatarUrl } : {}),
+      ...(request_detail ? { request_detail } : {}),
     });
     const dto = response.data;
-    if (!dto) throw new Error('复制接口未返回 Bot 数据');
-    if ('iframe_url' in dto || 'redirect_url' in dto) {
-      const botId = typeof dto.bot_id === 'string' ? dto.bot_id : '';
-      const iframeUrl = typeof dto.iframe_url === 'string' ? dto.iframe_url : '';
-      const redirectUrl = typeof dto.redirect_url === 'string' ? dto.redirect_url : '';
-      if (!botId || (!iframeUrl && !redirectUrl)) throw new Error('授权信息不完整,请稍后重试复制');
+    if (!dto || !dto.type || !dto.bot_id || !dto.operation_id) {
+      throw new Error('复制接口返回结构异常');
+    }
+    if (dto.type === 'auth_required') {
+      const iframeUrl = dto.iframe_url ?? '';
+      const redirectUrl = dto.redirect_url ?? '';
+      if (!iframeUrl && !redirectUrl) throw new Error('授权信息不完整,请稍后重试复制');
+      // request 用于复用 useBotCreateAuthorization 轮询 auth-status —— 与创建 iframe
+      // url 的处理完全一致;不携带 agentCoding(复制不继承源 Bot 的工具/模板配置)。
       return {
         type: 'authorization_required',
-        botId,
+        botId: dto.bot_id,
         iframeUrl,
         redirectUrl,
         request: {
@@ -301,12 +314,21 @@ export const botWorkshopService = {
         ...(input.avatarUrl ? { avatarUrl: input.avatarUrl } : {}),
       };
     }
-    const bot = mapBotDto(dto).item;
-    const avatar = await persistCreatedAvatar(bot, input.avatarUrl);
-    if (avatar.failure) {
-      return { type: 'created_with_pending_after_create', bot: avatar.bot, afterCreateFailures: [avatar.failure] };
+    // The destination is created asynchronously; the caller saves its avatar
+    // after the destination becomes readable.
+    return { type: 'issued', botId: dto.bot_id, operationId: dto.operation_id };
+  },
+  /**
+   * 重试复制(dst bot_id):后端 cas_retry 60s 节流,CONVERGED 直接返回 terminal 拒绝。
+   * 调方按 result 决定 toast 文案;re_enqueued 后通常触发列表刷新跟随 copy_state。
+   */
+  async retryCopyBot(botId: string): Promise<{ operationId: string; result: BotCopyRetryResult }> {
+    const response = await retryCopyBotApi(botId);
+    const dto = response.data;
+    if (!dto || !dto.operation_id || !dto.result) {
+      throw new Error('重试接口返回结构异常');
     }
-    return { type: 'created', bot: avatar.bot };
+    return { operationId: dto.operation_id, result: dto.result };
   },
   async update(id: string, values: { name?: string; description?: string }) {
     const response = await updateBot(id, { bot_name: values.name, bot_desc: values.description });
@@ -318,9 +340,24 @@ export const botWorkshopService = {
     else if (bot.serviceMode === 'service') await deleteServiceDraft(bot.id);
     else await deleteBot(bot.id);
   },
-  async restart(bot: BotDomain) {
-    if (bot.deployment === 'local') await restartLocalBot(bot.id);
-    else await restartBot(bot.id);
+  async restart(bot: BotDomain, userId?: string): Promise<BotRestartResponse | undefined> {
+    if (bot.deployment === 'local') {
+      await restartLocalBot(bot.id);
+      return undefined;
+    }
+    // AgentCoding 的 Bot 管理页重启等价于用户确认后执行模板重载。沿用 open-claw
+    // 的既有 wire 契约传字符串 'true'；其他引擎保持无 body 重启，不受影响。
+    const target = bot.runtime.isAgentCodingBot
+      ? {
+          userId: userId ?? '',
+          ownerId: bot.ownerId,
+          extraConfigs: { confirmed_template_update: 'true' },
+        }
+      : undefined;
+    const response = await restartBot(bot.id, target);
+    // restart 接口返回已落库的 Bot 记录：同步引擎（openclaw）此时已是 PENDING，
+    // coding 引擎携带 ext.aicoding.restart journal，由前端据此启动重启追踪。
+    return (response.data ?? undefined) as unknown as BotRestartResponse | undefined;
   },
   async restartEngine(id: string) {
     await restartBotEngine(id);

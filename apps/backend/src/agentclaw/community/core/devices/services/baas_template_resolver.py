@@ -49,8 +49,9 @@ class BaasTemplateResolverProtocol(Protocol):
         env: str,
         user_id: str | None,
         bot_type: str,
+        engine_bucket: str,
     ) -> str | None:
-        """命中现有工号映射时返回覆盖的 template_uuid。"""
+        """Return the override for this owner and resolved engine bucket, if any."""
 
     def resolve_template_uid(
         self,
@@ -237,20 +238,25 @@ class SystemConfigBaasTemplateResolver:
         template_config: dict | None,
     ) -> BaasTemplateResolution:
         """解析当前业务上下文最终使用的 BaaS template。"""
+        engine_bucket = self.normalize_engine_for_template(
+            engine_type=engine_type, template_type=template_type, template_config=template_config
+        )
         override_uuid = self.resolve_template_override(
             env=env,
             user_id=user_id,
             bot_type=bot_type,
+            engine_bucket=engine_bucket,
         )
         if override_uuid is not None:
             logger.info(
                 "[template.whitelist] whitelist override hit: "
-                "env=%s config_key=%s user_id=%s template_uuid=%s bot_id=%s",
+                "env=%s config_key=%s user_id=%s template_uuid=%s bot_id=%s engine=%s",
                 env,
                 PERSONAL_BOT_TEST_TEMPLATE_WHITELIST_CONFIG_KEY,
                 user_id,
                 override_uuid,
                 bot_id,
+                engine_bucket,
             )
             return BaasTemplateResolution(
                 template_uid="__whitelist_override__",
@@ -285,6 +291,7 @@ class SystemConfigBaasTemplateResolver:
         env: str,
         user_id: str | None,
         bot_type: str,
+        engine_bucket: str,
     ) -> str | None:
         """从现有数据库配置解析个人或服务 Bot 的模板覆盖。
 
@@ -294,7 +301,7 @@ class SystemConfigBaasTemplateResolver:
         normalized_bot_type = (bot_type or "").strip().lower()
         if normalized_bot_type not in {"personal", "service"}:
             return None
-        return self._resolve_whitelist_override(env=env, user_id=user_id)
+        return self._resolve_whitelist_override(env=env, user_id=user_id, engine_bucket=engine_bucket)
 
     def select_template_uid(
         self,
@@ -476,6 +483,7 @@ class SystemConfigBaasTemplateResolver:
         *,
         env: str,
         user_id: str | None,
+        engine_bucket: str,
     ) -> str | None:
         """如果 user_id 命中白名单，返回覆盖的 template_uuid。
 
@@ -524,6 +532,11 @@ class SystemConfigBaasTemplateResolver:
         normalized_user_id = str(user_id)
         for mapping in mappings:
             if not isinstance(mapping, dict):
+                continue
+
+            # Legacy staff mappings were meant for OpenClaw, not a wildcard.
+            engine = mapping.get("engine", "openclaw")
+            if not isinstance(engine, str) or not engine.strip() or engine.strip().lower() != engine_bucket:
                 continue
 
             staff_ids = mapping.get("staff_ids")

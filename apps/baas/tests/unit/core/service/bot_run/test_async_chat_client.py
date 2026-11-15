@@ -270,10 +270,44 @@ class TestSendMessage:
         client = AsyncChatClient(uri="ws://host/ws")
         await client.connect()
 
-        content, agent_payloads = await client.send_message("Hi", wait_result=False)
+        content, agent_payloads = await client.send_message(
+            "Hi", wait_result=False, timeout=5
+        )
         assert content == ""
         assert agent_payloads == []
         mock_bot_ws_instance.chat_send.assert_called_once()
+        # fire-and-forget：不把调用方等待超时下发给引擎当 run 超时
+        call_kwargs = mock_bot_ws_instance.chat_send.call_args[1]
+        assert call_kwargs["timeout_ms"] is None
+
+    @pytest.mark.asyncio
+    async def test_send_message_wait_result_true_passes_engine_timeout(
+        self, mock_bot_ws, mock_bot_ws_instance
+    ):
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            AsyncChatClient,
+        )
+
+        mock_bot_ws_instance.connect.return_value = {
+            "server": {"host": "srv"},
+            "features": {},
+        }
+
+        client = AsyncChatClient(uri="ws://host/ws")
+        await client.connect()
+
+        async def fire_chat_complete(*args, **kwargs):
+            sk = kwargs["session_key"]
+            state = client._sessions.get(sk)
+            if state:
+                state.chat_complete.set()
+            return {"ok": True}
+
+        mock_bot_ws_instance.chat_send.side_effect = fire_chat_complete
+
+        await client.send_message("Hi", timeout=5)
+        call_kwargs = mock_bot_ws_instance.chat_send.call_args[1]
+        assert call_kwargs["timeout_ms"] == 5000
 
     @pytest.mark.asyncio
     async def test_send_message_with_auth_token(

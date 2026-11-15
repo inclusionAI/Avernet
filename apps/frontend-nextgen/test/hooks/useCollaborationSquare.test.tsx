@@ -1,8 +1,12 @@
 /** @jest-environment jsdom */
 import { notifyError, notifySuccess } from '@/components/ui/notify';
-import type { PublicBot, PublicBotSearchQuery, PublicGroup, PublicTask } from '@/domain/collaborationSquare/types';
+import type { BotCandidatePage, PublicBot, PublicBotSearchQuery, PublicGroup, PublicTask } from '@/domain/collaborationSquare/types';
+import { resolvePublicBotPrimaryAction } from '@/domain/collaborationSquare/types';
 import { useCollaborationSquare } from '@/hooks/useCollaborationSquare';
 import { useHumanIdentity } from '@/hooks/useHumanIdentity';
+import * as friendConnectionController from '@/services/backendApi/collaboration/collaborationFriendConnectionController';
+import { BackendRequestError } from '@/services/backendApi/httpClient';
+import * as privateBotSessionController from '@/services/backendApi/bots/privateBotSessionController';
 import {
   CollaborationSquareError,
   collaborationSquareBotService,
@@ -20,6 +24,17 @@ import { history } from '@umijs/max';
 jest.mock('@umijs/max', () => ({ history: { push: jest.fn() } }));
 jest.mock('@/hooks/useHumanIdentity', () => ({ useHumanIdentity: jest.fn() }));
 jest.mock('@/components/ui/notify', () => ({ notifyError: jest.fn(), notifySuccess: jest.fn() }));
+// Task 4：撤销/删除好友连接与 Backend 私聊建会话保持真实模块（requireActual），
+// 仅替换被断言“不得被调用”的出口，验证过期响应不做补偿性撤销、BCS-only 不建 Backend 私聊。
+jest.mock('@/services/backendApi/collaboration/collaborationFriendConnectionController', () => ({
+  ...jest.requireActual('@/services/backendApi/collaboration/collaborationFriendConnectionController'),
+  cancelFriendConnectionRequest: jest.fn(),
+  deleteFriendConnection: jest.fn(),
+}));
+jest.mock('@/services/backendApi/bots/privateBotSessionController', () => ({
+  ...jest.requireActual('@/services/backendApi/bots/privateBotSessionController'),
+  createBotSession: jest.fn(),
+}));
 
 const mockedUseHumanIdentity = useHumanIdentity as jest.MockedFunction<typeof useHumanIdentity>;
 const mockedNotifyError = notifyError as jest.MockedFunction<typeof notifyError>;
@@ -31,7 +46,7 @@ interface PendingRequest {
   query: PublicBotSearchQuery | undefined;
   context: typeof humanContext | undefined;
   signal: AbortSignal | undefined;
-  resolve: (page: { items: PublicBot[]; total: number }) => void;
+  resolve: (page: { items: PublicBot[]; nextOffset: number; hasMore: boolean }) => void;
 }
 
 const resultBot = (id: string): PublicBot => ({
@@ -43,7 +58,12 @@ const resultBot = (id: string): PublicBot => ({
   relationshipStatus: 'none',
 });
 
-const botPage = (items: PublicBot[], total = items.length) => ({ items, total });
+/** BCS 原始游标页 fixture：nextOffset/hasMore 显式给定（不再依赖 total）。 */
+const botPage = (items: PublicBot[], extra: { nextOffset?: number; hasMore?: boolean } = {}) => ({
+  items,
+  nextOffset: extra.nextOffset ?? items.length,
+  hasMore: extra.hasMore ?? false,
+});
 
 const resultGroup = (id: string): PublicGroup => ({
   id,
@@ -98,7 +118,7 @@ describe('useCollaborationSquare Bot Search', () => {
     const pending: PendingRequest[] = [];
     jest.spyOn(collaborationSquareBotService, 'listBotPage').mockImplementation(
       (query, context, signal) =>
-        new Promise<{ items: PublicBot[]; total: number }>((resolve) => {
+        new Promise<BotCandidatePage>((resolve) => {
           pending.push({ query, context, signal, resolve });
         }),
     );
@@ -108,7 +128,7 @@ describe('useCollaborationSquare Bot Search', () => {
       jest.advanceTimersByTime(0);
     });
     expect(pending).toHaveLength(1);
-    expect(pending[0].query).toEqual({ page: 1, pageSize: 24, ...viewerFields });
+    expect(pending[0].query).toEqual({ offset: 0, pageSize: 24, ...viewerFields });
     expect(pending[0].context).toEqual(humanContext);
 
     act(() => {
@@ -123,7 +143,7 @@ describe('useCollaborationSquare Bot Search', () => {
       jest.advanceTimersByTime(1);
     });
     expect(pending).toHaveLength(2);
-    expect(pending[1].query).toEqual({ search: 'workflow', page: 1, pageSize: 24, ...viewerFields });
+    expect(pending[1].query).toEqual({ search: 'workflow', offset: 0, pageSize: 24, ...viewerFields });
 
     await act(async () => {
       pending[1].resolve(botPage([resultBot('new')]));
@@ -212,7 +232,7 @@ describe('useCollaborationSquare Bot Search', () => {
     const listPending: PendingRequest[] = [];
     jest.spyOn(collaborationSquareBotService, 'listBotPage').mockImplementation(
       (query, context, signal) =>
-        new Promise<{ items: PublicBot[]; total: number }>((resolve) => {
+        new Promise<BotCandidatePage>((resolve) => {
           listPending.push({ query, context, signal, resolve });
         }),
     );
@@ -244,7 +264,7 @@ describe('useCollaborationSquare Bot Search', () => {
       await Promise.resolve();
     });
     expect(listPending).toHaveLength(2);
-    expect(listPending[1].query).toEqual({ search: '项目助手', page: 1, pageSize: 24, ...viewerFields });
+    expect(listPending[1].query).toEqual({ search: '项目助手', offset: 0, pageSize: 24, ...viewerFields });
     expect(listPending[1].context).toEqual(humanContext);
 
     // 名称搜索结果加载完成 → 列表内按 ID 定位目标卡片并高亮，不再打开画像
@@ -294,7 +314,7 @@ describe('useCollaborationSquare Bot Search', () => {
     const listPending: (PendingRequest & { reject: (reason?: unknown) => void })[] = [];
     jest.spyOn(collaborationSquareBotService, 'listBotPage').mockImplementation(
       (query, context, signal) =>
-        new Promise<{ items: PublicBot[]; total: number }>((resolve, reject) => {
+        new Promise<BotCandidatePage>((resolve, reject) => {
           listPending.push({ query, context, signal, resolve, reject });
         }),
     );
@@ -353,7 +373,7 @@ describe('useCollaborationSquare Bot Search', () => {
     const listPending: PendingRequest[] = [];
     jest.spyOn(collaborationSquareBotService, 'listBotPage').mockImplementation(
       (query, context, signal) =>
-        new Promise<{ items: PublicBot[]; total: number }>((resolve) => {
+        new Promise<BotCandidatePage>((resolve) => {
           listPending.push({ query, context, signal, resolve });
         }),
     );
@@ -397,7 +417,7 @@ describe('useCollaborationSquare Bot Search', () => {
     const listPending: PendingRequest[] = [];
     jest.spyOn(collaborationSquareBotService, 'listBotPage').mockImplementation(
       (query, context, signal) =>
-        new Promise<{ items: PublicBot[]; total: number }>((resolve) => {
+        new Promise<BotCandidatePage>((resolve) => {
           listPending.push({ query, context, signal, resolve });
         }),
     );
@@ -422,19 +442,19 @@ describe('useCollaborationSquare Bot Search', () => {
       await Promise.resolve();
     });
     expect(listPending).toHaveLength(2);
-    expect(listPending[1].query).toEqual({ search: '项目助手', page: 1, pageSize: 24, ...viewerFields });
-    // 名称搜索第一页 24 条重名结果、不含目标 → 深链自动请求第二页
+    expect(listPending[1].query).toEqual({ search: '项目助手', offset: 0, pageSize: 24, ...viewerFields });
+    // 名称搜索第一页 24 条重名结果、不含目标（BCS 游标 hasMore=true）→ 深链自动请求下一页
     await act(async () => {
-      listPending[1].resolve(botPage(firstPageOthers, 25));
+      listPending[1].resolve(botPage(firstPageOthers, { nextOffset: 24, hasMore: true }));
       await Promise.resolve();
       jest.advanceTimersByTime(0);
       await Promise.resolve();
     });
     await waitFor(() => expect(listPending).toHaveLength(3));
-    expect(listPending[2].query).toEqual({ search: '项目助手', page: 2, pageSize: 24, ...viewerFields });
+    expect(listPending[2].query).toEqual({ search: '项目助手', offset: 24, pageSize: 24, ...viewerFields });
     // 第二页加载完成并含目标 → 列表内定位高亮，不清深链参数
     await act(async () => {
-      listPending[2].resolve(botPage([target], 25));
+      listPending[2].resolve(botPage([target]));
       await Promise.resolve();
       jest.advanceTimersByTime(0);
       await Promise.resolve();
@@ -451,7 +471,7 @@ describe('useCollaborationSquare Bot Search', () => {
     const listPending: PendingRequest[] = [];
     jest.spyOn(collaborationSquareBotService, 'listBotPage').mockImplementation(
       (query, context, signal) =>
-        new Promise<{ items: PublicBot[]; total: number }>((resolve) => {
+        new Promise<BotCandidatePage>((resolve) => {
           listPending.push({ query, context, signal, resolve });
         }),
     );
@@ -476,16 +496,16 @@ describe('useCollaborationSquare Bot Search', () => {
     });
     // 第一页 24 条不含目标但分页未耗尽：不按目标失效，继续加载第二页
     await act(async () => {
-      listPending[1].resolve(botPage(others.slice(0, 24), 25));
+      listPending[1].resolve(botPage(others.slice(0, 24), { nextOffset: 24, hasMore: true }));
       await Promise.resolve();
       jest.advanceTimersByTime(0);
       await Promise.resolve();
     });
     expect(mockedNotifyError).not.toHaveBeenCalled();
     await waitFor(() => expect(listPending).toHaveLength(3));
-    // 第二页为最后一页：加载耗尽后仍未命中才按目标失效
+    // 第二页为最后一页（hasMore=false）：加载耗尽后仍未命中才按目标失效
     await act(async () => {
-      listPending[2].resolve(botPage(others.slice(24), 25));
+      listPending[2].resolve(botPage(others.slice(24)));
       await Promise.resolve();
       jest.advanceTimersByTime(0);
       await Promise.resolve();
@@ -502,7 +522,7 @@ describe('useCollaborationSquare Bot Search', () => {
     const listPending: PendingRequest[] = [];
     jest.spyOn(collaborationSquareBotService, 'listBotPage').mockImplementation(
       (query, context, signal) =>
-        new Promise<{ items: PublicBot[]; total: number }>((resolve) => {
+        new Promise<BotCandidatePage>((resolve) => {
           listPending.push({ query, context, signal, resolve });
         }),
     );
@@ -575,7 +595,7 @@ describe('useCollaborationSquare Bot Search', () => {
     const listPending: PendingRequest[] = [];
     jest.spyOn(collaborationSquareBotService, 'listBotPage').mockImplementation(
       (query, context, signal) =>
-        new Promise<{ items: PublicBot[]; total: number }>((resolve) => {
+        new Promise<BotCandidatePage>((resolve) => {
           listPending.push({ query, context, signal, resolve });
         }),
     );
@@ -655,7 +675,7 @@ describe('useCollaborationSquare Bot Search', () => {
     const listPending: PendingRequest[] = [];
     jest.spyOn(collaborationSquareBotService, 'listBotPage').mockImplementation(
       (query, context, signal) =>
-        new Promise<{ items: PublicBot[]; total: number }>((resolve) => {
+        new Promise<BotCandidatePage>((resolve) => {
           listPending.push({ query, context, signal, resolve });
         }),
     );
@@ -729,7 +749,7 @@ describe('useCollaborationSquare Bot Search', () => {
     const listPending: PendingRequest[] = [];
     jest.spyOn(collaborationSquareBotService, 'listBotPage').mockImplementation(
       (query, context, signal) =>
-        new Promise<{ items: PublicBot[]; total: number }>((resolve) => {
+        new Promise<BotCandidatePage>((resolve) => {
           listPending.push({ query, context, signal, resolve });
         }),
     );
@@ -787,7 +807,7 @@ describe('useCollaborationSquare Bot Search', () => {
     const listPending: PendingRequest[] = [];
     jest.spyOn(collaborationSquareBotService, 'listBotPage').mockImplementation(
       (query, context, signal) =>
-        new Promise<{ items: PublicBot[]; total: number }>((resolve) => {
+        new Promise<BotCandidatePage>((resolve) => {
           listPending.push({ query, context, signal, resolve });
         }),
     );
@@ -824,7 +844,7 @@ describe('useCollaborationSquare Bot Search', () => {
     const listPending: PendingRequest[] = [];
     jest.spyOn(collaborationSquareBotService, 'listBotPage').mockImplementation(
       (query, context, signal) =>
-        new Promise<{ items: PublicBot[]; total: number }>((resolve) => {
+        new Promise<BotCandidatePage>((resolve) => {
           listPending.push({ query, context, signal, resolve });
         }),
     );
@@ -860,14 +880,14 @@ describe('useCollaborationSquare Bot Search', () => {
     unmount();
   });
 
-  test('首屏使用 24 条并在加载更多时请求下一页且去重合并', async () => {
+  test('首屏使用 24 条并在加载更多时按 BCS nextOffset 续读且去重合并', async () => {
     const listBots = jest.spyOn(collaborationSquareBotService, 'listBotPage').mockImplementation(async (query) => {
-      if (query?.page === 1)
+      if ((query?.offset ?? 0) === 0)
         return botPage(
           Array.from({ length: 24 }, (_, index) => resultBot(`page-1-${index}`)),
-          26,
+          { nextOffset: 24, hasMore: true },
         );
-      return botPage([resultBot('page-2-0'), resultBot('page-1-0')], 26);
+      return botPage([resultBot('page-2-0'), resultBot('page-1-0')]);
     });
     const { result, unmount } = renderHook(() => useCollaborationSquare('bot'));
 
@@ -876,7 +896,7 @@ describe('useCollaborationSquare Bot Search', () => {
       await Promise.resolve();
     });
     expect(listBots).toHaveBeenLastCalledWith(
-      { page: 1, pageSize: 24, ...viewerFields },
+      { offset: 0, pageSize: 24, ...viewerFields },
       humanContext,
       expect.any(AbortSignal),
     );
@@ -886,8 +906,9 @@ describe('useCollaborationSquare Bot Search', () => {
       await result.current.loadMore();
     });
 
+    // 续读 offset 来自上一页返回的 BCS 原始 nextOffset（24）。
     expect(listBots).toHaveBeenLastCalledWith(
-      { page: 2, pageSize: 24, ...viewerFields },
+      { offset: 24, pageSize: 24, ...viewerFields },
       humanContext,
       expect.any(AbortSignal),
     );
@@ -900,7 +921,9 @@ describe('useCollaborationSquare Bot Search', () => {
 
   test('名称搜索与智能搜索互相切换时清空已有输入', async () => {
     jest.spyOn(collaborationSquareBotService, 'listBotPage').mockResolvedValue(botPage([]));
-    jest.spyOn(collaborationSquareBotService, 'discoverBots').mockResolvedValue([]);
+    jest
+      .spyOn(collaborationSquareBotService, 'discoverBots')
+      .mockResolvedValue({ items: [], searchMode: 'empty_query' });
     const { result, unmount } = renderHook(() => useCollaborationSquare('bot'));
 
     await act(async () => {
@@ -936,16 +959,19 @@ describe('useCollaborationSquare Bot Search', () => {
       .mockResolvedValue(botPage([resultBot('default')]));
     const discoverBots = jest
       .spyOn(collaborationSquareBotService, 'discoverBots')
-      .mockResolvedValue([
-        { ...resultBot('code'), name: '研发助手', description: '代码审查与质量改进', capabilities: ['代码审查'] },
-      ]);
+      .mockResolvedValue({
+        items: [
+          { ...resultBot('code'), name: '研发助手', description: '代码审查与质量改进', capabilities: ['代码审查'] },
+        ],
+        searchMode: 'semantic',
+      });
     const { result, unmount } = renderHook(() => useCollaborationSquare('bot'));
 
     await act(async () => {
       jest.advanceTimersByTime(0);
     });
     expect(listBots).toHaveBeenLastCalledWith(
-      { page: 1, pageSize: 24, ...viewerFields },
+      { offset: 0, pageSize: 24, ...viewerFields },
       humanContext,
       expect.any(AbortSignal),
     );
@@ -974,11 +1000,13 @@ describe('useCollaborationSquare Bot Search', () => {
     });
 
     expect(discoverBots).toHaveBeenLastCalledWith(
-      { keyword: '代码', topK: 20, minScore: 0.01, runtimeState: 'online', ...viewerFields },
+      { keyword: '代码', ...viewerFields },
       humanContext,
       expect.any(AbortSignal),
     );
     expect(result.current.visibleBots.map((bot) => bot.id)).toEqual(['code']);
+    // 智能语义模式独立保留，供面板/搜索栏展示语义命中。
+    expect(result.current.searchResultMode).toBe('semantic');
 
     act(() => {
       result.current.setQuery('bot', '');
@@ -1252,9 +1280,10 @@ describe('useCollaborationSquare Bot Search', () => {
     unmount();
   });
 
-  test('画像详情拉取失败不判定目标失效：卡片保留、画像置空、不弹失效提示', async () => {
+  test('画像详情拉取失败不判定目标失效：卡片保留、画像置空、改弹窗内提示', async () => {
     // 画像走 bot-catalog profile 真实端点；目录外的 bot_uuid 会 404 → target_invalid。
-    // 申请弹窗必须保持打开（无已公开能力版式），不能删卡片。
+    // 申请弹窗必须保持打开（无已公开能力版式），不能删卡片；失败原因进入 botProfileError
+    // 由弹窗内展示（不弹 sonner toast，mapProfileError 已 cancel httpClient 默认投递）。
     const bot = resultBot('20260413_uhup5rb8:246864');
     jest.spyOn(collaborationSquareBotService, 'listBotPage').mockResolvedValue(botPage([bot]));
     jest
@@ -1273,6 +1302,7 @@ describe('useCollaborationSquare Bot Search', () => {
 
     expect(useCollaborationSquareStore.getState().bots).toEqual([bot]);
     expect(useCollaborationSquareStore.getState().botProfile).toBeNull();
+    expect(useCollaborationSquareStore.getState().botProfileError).toBe('内容已取消公开或不可访问');
     expect(useCollaborationSquareStore.getState().detailLoading).toBe(false);
     // 选中位保留（申请弹窗据此归口画像数据）；关闭路径由面板 closeProfile 收口。
     expect(useCollaborationSquareStore.getState().selectedBotId).toBe(bot.id);
@@ -1291,6 +1321,7 @@ describe('useCollaborationSquare Bot Search', () => {
         ownerName: bot.ownerName,
         description: bot.description,
         capabilities: [],
+        skills: [],
       });
     const legacyProfile = jest.spyOn(collaborationSquareService, 'getBotProfile');
     const realFriendship = jest
@@ -1310,7 +1341,7 @@ describe('useCollaborationSquare Bot Search', () => {
       await Promise.resolve();
     });
 
-    expect(realProfile).toHaveBeenCalledWith(bot.id);
+    expect(realProfile).toHaveBeenCalledWith(bot);
     expect(legacyProfile).not.toHaveBeenCalled();
     expect(realFriendship).toHaveBeenCalledWith(bot.id, humanContext, undefined, { type: 'human', id: '900003' });
     expect(legacyFriendship).not.toHaveBeenCalled();
@@ -1451,6 +1482,35 @@ describe('useCollaborationSquare Bot Search', () => {
     });
 
     expect(useCollaborationSquareStore.getState().bots.map((item) => item.id)).toEqual([bot.id]);
+    expect(useCollaborationSquareStore.getState().busyKeys).toEqual([]);
+
+    unmount();
+  });
+
+  test('好友申请失败已由协议层提示时不再重复 toast', async () => {
+    const bot = resultBot('bot-already-handled');
+    jest.spyOn(collaborationSquareBotService, 'listBotPage').mockResolvedValue(botPage([bot]));
+    jest.spyOn(collaborationSquareBotService, 'requestBotFriendship').mockRejectedValue(
+      new BackendRequestError('网络异常', {
+        status: 500,
+        apiPath: '/openapi/v1/collaboration/friend-connections/requests',
+        toastKey: 'notify:friend-request-500',
+        alreadyHandled: true,
+      }),
+    );
+    const { result, unmount } = renderHook(() => useCollaborationSquare('bot'));
+
+    await act(async () => {
+      jest.advanceTimersByTime(0);
+    });
+    await act(async () => {
+      result.current.primaryBotAction(bot);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mockedNotifyError).not.toHaveBeenCalled();
+    expect(mockedNotifySuccess).not.toHaveBeenCalled();
     expect(useCollaborationSquareStore.getState().busyKeys).toEqual([]);
 
     unmount();
@@ -1748,5 +1808,436 @@ describe('useCollaborationSquare Task Plaza', () => {
     expect(listTasks).toHaveBeenCalledTimes(2);
 
     unmount();
+  });
+});
+
+describe('useCollaborationSquare 好友申请代次与 Human 建聊开关（Task 4）', () => {
+  const mockedCancelFriendConnectionRequest = friendConnectionController.cancelFriendConnectionRequest as jest.Mock;
+  const mockedDeleteFriendConnection = friendConnectionController.deleteFriendConnection as jest.Mock;
+  const mockedCreateBotSession = privateBotSessionController.createBotSession as jest.Mock;
+  const friendBotId = 'bot-1:2088';
+  const friendActorB = { id: 'bot_910001', kind: 'bot' as const, displayName: '当前 Bot', online: true };
+
+  const setRuntimeBackendEnabled = (value: boolean) => {
+    Object.defineProperty(window, 'AVERNET_RUNTIME_CONFIG', {
+      value: { PUBLIC_BOT_BACKEND_ENABLED: value },
+      configurable: true,
+    });
+  };
+
+  interface Deferred<T> {
+    resolve: (value: T) => void;
+    reject: (reason?: unknown) => void;
+  }
+
+  function createDeferred<T>(): { promise: Promise<T>; deferred: Deferred<T> } {
+    const deferred = {} as Deferred<T>;
+    const promise = new Promise<T>((resolve, reject) => {
+      deferred.resolve = resolve;
+      deferred.reject = reject;
+    });
+    return { promise, deferred };
+  }
+
+  async function flush(times = 6) {
+    for (let i = 0; i < times; i += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      await act(async () => {
+        jest.advanceTimersByTime(0);
+        await Promise.resolve();
+      });
+    }
+  }
+
+  function renderSquare() {
+    return renderHook(() => useCollaborationSquare('bot'));
+  }
+
+  beforeEach(() => {
+    jest.useFakeTimers();
+    (history.push as jest.Mock).mockClear();
+    useCollaborationSquareStore.getState().reset();
+    useSquareHighlightStore.setState({ highlightBotId: null });
+    useSquareIdentityStore.getState().reset();
+    useWorkspaceStore.getState().reset();
+    useWorkspaceStore.getState().setIdentities(
+      [
+        { id: 'human_900003', kind: 'user', displayName: '当前用户', online: true },
+        friendActorB,
+      ],
+      'human_900003',
+    );
+    mockedUseHumanIdentity.mockReturnValue({
+      identity: { userId: '900003', displayName: '当前用户', online: true },
+      status: 'ready',
+    });
+    mockedNotifyError.mockClear();
+    mockedNotifySuccess.mockClear();
+    mockedCancelFriendConnectionRequest.mockClear();
+    mockedDeleteFriendConnection.mockClear();
+    mockedCreateBotSession.mockClear();
+    window.history.replaceState({}, '', '/collaboration-square/bots');
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+    jest.useRealTimers();
+    Reflect.deleteProperty(window, 'AVERNET_RUNTIME_CONFIG');
+  });
+
+  test('resolvePublicBotPrimaryAction：Backend 关闭时 open_human_bot_conversation 转为已是好友，不再提供私聊入口', () => {
+    const friendBot = { ...resultBot(friendBotId), relationshipStatus: 'friend' as const };
+    const ownedBot = { ...resultBot(friendBotId), isOwnedByLoggedInUser: true };
+
+    expect(
+      resolvePublicBotPrimaryAction({
+        activeActor: { type: 'human', id: '900003' },
+        targetActorId: friendBotId,
+        relationshipStatus: 'friend',
+        backendChatEnabled: false,
+      }),
+    ).toBe('friendship_established');
+    expect(
+      resolvePublicBotPrimaryAction({
+        activeActor: { type: 'human', id: '900003' },
+        targetActorId: friendBotId,
+        relationshipStatus: 'none',
+        isOwnedByLoggedInUser: true,
+        backendChatEnabled: false,
+      }),
+    ).toBe('friendship_established');
+    // 全栈（Backend 开启）保留原行为
+    expect(
+      resolvePublicBotPrimaryAction({
+        activeActor: { type: 'human', id: '900003' },
+        targetActorId: (friendBot as PublicBot).id,
+        relationshipStatus: 'friend',
+        backendChatEnabled: true,
+      }),
+    ).toBe('open_human_bot_conversation');
+    expect(
+      resolvePublicBotPrimaryAction({
+        activeActor: { type: 'human', id: '900003' },
+        targetActorId: (ownedBot as PublicBot).id,
+        relationshipStatus: 'none',
+        isOwnedByLoggedInUser: true,
+        backendChatEnabled: true,
+      }),
+    ).toBe('open_human_bot_conversation');
+  });
+
+  test('Backend 关闭时已有好友点击不触发建聊或申请，busy 不滞留', async () => {
+    setRuntimeBackendEnabled(false);
+    const bot = { ...resultBot(friendBotId), relationshipStatus: 'friend' as const };
+    jest.spyOn(collaborationSquareBotService, 'listBotPage').mockResolvedValue(botPage([bot]));
+    const openConversation = jest.spyOn(collaborationSquareBotService, 'openBotConversation');
+    const requestFriendship = jest.spyOn(collaborationSquareBotService, 'requestBotFriendship');
+    const { result, unmount } = renderSquare();
+    await flush();
+
+    act(() => {
+      result.current.primaryBotAction(bot);
+    });
+
+    expect(requestFriendship).not.toHaveBeenCalled();
+    expect(openConversation).not.toHaveBeenCalled();
+    expect(mockedCreateBotSession).not.toHaveBeenCalled();
+    expect((history.push as jest.Mock)).not.toHaveBeenCalled();
+    expect(useCollaborationSquareStore.getState().busyKeys).toEqual([]);
+    unmount();
+  });
+
+  test('Backend 关闭时 Human 申请自动批准后建立好友关系、卡片展示好友，但不创建 Backend 私聊', async () => {
+    setRuntimeBackendEnabled(false);
+    const bot = resultBot('bot-approval');
+    jest.spyOn(collaborationSquareBotService, 'listBotPage').mockResolvedValue(botPage([bot]));
+    const openConversation = jest.spyOn(collaborationSquareBotService, 'openBotConversation').mockResolvedValue({ sessionId: 'session-1' });
+    jest.spyOn(collaborationSquareBotService, 'requestBotFriendship').mockResolvedValue({ status: 'friend' });
+    const { result, unmount } = renderSquare();
+    await flush();
+
+    act(() => {
+      result.current.primaryBotAction(bot);
+    });
+    await flush();
+
+    expect(useCollaborationSquareStore.getState().bots[0].relationshipStatus).toBe('friend');
+    expect(mockedNotifySuccess).toHaveBeenCalledWith('好友关系已建立');
+    expect(openConversation).not.toHaveBeenCalled();
+    expect(mockedCreateBotSession).not.toHaveBeenCalled();
+    expect((history.push as jest.Mock)).not.toHaveBeenCalled();
+    expect(useCollaborationSquareStore.getState().busyKeys).toEqual([]);
+    unmount();
+  });
+
+  test('Backend 开启时好友已批准但建聊失败：保留好友成功态并提示「已成为好友，但暂未进入对话」', async () => {
+    const bot = resultBot('bot-chat-fail');
+    jest.spyOn(collaborationSquareBotService, 'listBotPage').mockResolvedValue(botPage([bot]));
+    jest.spyOn(collaborationSquareBotService, 'requestBotFriendship').mockResolvedValue({ status: 'friend' });
+    jest.spyOn(collaborationSquareBotService, 'openBotConversation').mockRejectedValue(new Error('Backend 不可用'));
+    const { result, unmount } = renderSquare();
+    await flush();
+
+    act(() => {
+      result.current.primaryBotAction(bot);
+    });
+    await flush();
+
+    // 已批准好友不做回滚，也不把建聊失败当成申请失败
+    expect(useCollaborationSquareStore.getState().bots[0].relationshipStatus).toBe('friend');
+    expect(mockedNotifySuccess).toHaveBeenCalledWith('好友关系已建立');
+    expect(mockedNotifyError).toHaveBeenCalledWith('已成为好友，但暂未进入对话');
+    expect((history.push as jest.Mock)).not.toHaveBeenCalled();
+    expect(useCollaborationSquareStore.getState().busyKeys).toEqual([]);
+    unmount();
+  });
+
+  test('建聊前切换角色：旧申请的迟到成功不建聊、不提示、不导航', async () => {
+    const bot = resultBot('bot-late-approve');
+    jest.spyOn(collaborationSquareBotService, 'listBotPage').mockResolvedValue(botPage([bot]));
+    const openConversation = jest.spyOn(collaborationSquareBotService, 'openBotConversation');
+    const { promise, deferred } = createDeferred<{ status: 'friend' }>();
+    jest.spyOn(collaborationSquareBotService, 'requestBotFriendship').mockReturnValue(promise);
+    const { result, unmount } = renderSquare();
+    await flush();
+
+    // 角色发 A（人类）发好友申请后立即切换到 Bot 角色发 B
+    act(() => {
+      result.current.primaryBotAction(bot);
+    });
+    act(() => {
+      useSquareIdentityStore.getState().selectIdentity(friendActorB.id);
+    });
+
+    // A 的申请迟到返回 friend（传输未取消、故意仍 resolve）：不得建聊/提示/导航
+    await act(async () => {
+      deferred.resolve({ status: 'friend' });
+      await Promise.resolve();
+    });
+    await flush();
+
+    expect(openConversation).not.toHaveBeenCalled();
+    expect(mockedNotifySuccess).not.toHaveBeenCalledWith('好友关系已建立');
+    expect((history.push as jest.Mock)).not.toHaveBeenCalled();
+    expect(mockedCreateBotSession).not.toHaveBeenCalled();
+    unmount();
+  });
+
+  test('建聊已发出后切换角色：允许服务端完成会话创建但不导航', async () => {
+    const bot = resultBot('bot-chat-inflight');
+    jest.spyOn(collaborationSquareBotService, 'listBotPage').mockResolvedValue(botPage([bot]));
+    jest.spyOn(collaborationSquareBotService, 'requestBotFriendship').mockResolvedValue({ status: 'friend' });
+    const conversationDeferred = createDeferred<{ sessionId: string }>();
+    jest.spyOn(collaborationSquareBotService, 'openBotConversation').mockReturnValue(conversationDeferred.promise);
+    const { result, unmount } = renderSquare();
+    await flush();
+
+    act(() => {
+      result.current.primaryBotAction(bot);
+    });
+    await flush();
+    expect(collaborationSquareBotService.openBotConversation).toHaveBeenCalledWith('bot-chat-inflight', humanContext);
+
+    // 建聊请求已发出后切换到 Bot 角色发 B
+    act(() => {
+      useSquareIdentityStore.getState().selectIdentity(friendActorB.id);
+    });
+
+    // 允许服务端完成（响应仍到达），但旧角色的过期成功不得触发导航
+    await act(async () => {
+      conversationDeferred.deferred.resolve({ sessionId: 'session-stale' });
+      await Promise.resolve();
+    });
+    await flush();
+
+    expect((history.push as jest.Mock)).not.toHaveBeenCalledWith(
+      '/workspace/chat?bot=bot-chat-inflight&session=session-stale',
+    );
+    expect((history.push as jest.Mock)).not.toHaveBeenCalled();
+    unmount();
+  });
+
+  test('已有好友直接打开私聊：建聊完成于切换角色后不得导航', async () => {
+    const bot = { ...resultBot(friendBotId), relationshipStatus: 'friend' as const };
+    jest.spyOn(collaborationSquareBotService, 'listBotPage').mockResolvedValue(botPage([bot]));
+    const conversationDeferred = createDeferred<{ sessionId: string }>();
+    const openConversation = jest
+      .spyOn(collaborationSquareBotService, 'openBotConversation')
+      .mockReturnValue(conversationDeferred.promise);
+    const { result, unmount } = renderSquare();
+    await flush();
+
+    act(() => {
+      result.current.primaryBotAction(bot);
+    });
+    expect(openConversation).toHaveBeenCalledWith(bot.id, humanContext, { isOwnedByLoggedInUser: false });
+
+    act(() => {
+      useSquareIdentityStore.getState().selectIdentity(friendActorB.id);
+    });
+    await act(async () => {
+      conversationDeferred.deferred.resolve({ sessionId: 'session-direct-stale' });
+      await Promise.resolve();
+    });
+    await flush();
+
+    expect((history.push as jest.Mock)).not.toHaveBeenCalled();
+    unmount();
+  });
+
+  test('A→B→A：旧申请迟到成功不复活、旧 finally 不清新操作的 busy，切回后以新读取为准且不发补偿性撤销', async () => {
+    const bot = resultBot('bot-aba');
+    jest
+      .spyOn(collaborationSquareBotService, 'listBotPage')
+      .mockImplementation(async () => botPage([{ ...bot, relationshipStatus: 'applying' }]));
+    const first = createDeferred<{ status: 'friend' }>();
+    const second = createDeferred<{ status: 'applying' }>();
+    jest
+      .spyOn(collaborationSquareBotService, 'requestBotFriendship')
+      .mockImplementationOnce(() => first.promise)
+      .mockImplementationOnce(() => second.promise);
+    const { result, unmount } = renderSquare();
+    await flush();
+
+    const busyKey = 'bot:human:900003:bot-aba';
+    // A（人类）发起第一次申请
+    act(() => {
+      result.current.primaryBotAction(bot);
+    });
+    expect(useCollaborationSquareStore.getState().busyKeys).toEqual([busyKey]);
+
+    // A→B→A 两段切换
+    act(() => {
+      useSquareIdentityStore.getState().selectIdentity(friendActorB.id);
+    });
+    expect(useCollaborationSquareStore.getState().busyKeys).toEqual([]);
+    act(() => {
+      useSquareIdentityStore.getState().selectIdentity(null);
+    });
+    await flush();
+
+    // 回到 A 后新读取显示已提交的关系（服务端真实状态），不发补偿性撤销
+    expect(mockedCancelFriendConnectionRequest).not.toHaveBeenCalled();
+    expect(mockedDeleteFriendConnection).not.toHaveBeenCalled();
+    expect(useCollaborationSquareStore.getState().bots[0].relationshipStatus).toBe('applying');
+
+    // A 的新代次对同一目标再次发起操作 → busy 重新归属新代次
+    act(() => {
+      result.current.primaryBotAction({ ...bot, relationshipStatus: 'none' });
+    });
+    expect(useCollaborationSquareStore.getState().busyKeys).toEqual([busyKey]);
+
+    // 第一次申请的迟到成功（旧代次）不得复活：不提示、不更新卡片，也不清新操作的 busy
+    await act(async () => {
+      first.deferred.resolve({ status: 'friend' });
+      await Promise.resolve();
+    });
+    expect(mockedNotifySuccess).not.toHaveBeenCalledWith('好友关系已建立');
+    expect(useCollaborationSquareStore.getState().bots[0].relationshipStatus).toBe('applying');
+    expect(useCollaborationSquareStore.getState().busyKeys).toEqual([busyKey]);
+
+    // 新操作的完成才清理自己的 busy
+    await act(async () => {
+      second.deferred.resolve({ status: 'applying' });
+      await Promise.resolve();
+    });
+    await flush();
+    expect(mockedNotifySuccess).toHaveBeenCalledWith('好友申请已提交');
+    expect(useCollaborationSquareStore.getState().busyKeys).toEqual([]);
+    unmount();
+  });
+
+  test('A→B→A 切回后重复提交命中去重时提示仍在处理中，不当作真实失败', async () => {
+    const bot = resultBot('bot-duplicate-action');
+    jest.spyOn(collaborationSquareBotService, 'listBotPage').mockResolvedValue(botPage([bot]));
+    jest
+      .spyOn(collaborationSquareBotService, 'requestBotFriendship')
+      .mockRejectedValue(new CollaborationSquareError('duplicate_action', '该操作正在提交，请勿重复操作'));
+    const { result, unmount } = renderSquare();
+    await flush();
+
+    act(() => {
+      result.current.primaryBotAction(bot);
+    });
+    await flush();
+
+    expect(mockedNotifyError).toHaveBeenCalledWith('上一次提交仍在处理中，请稍候');
+    expect(mockedNotifySuccess).not.toHaveBeenCalledWith('好友申请已提交');
+    expect(useCollaborationSquareStore.getState().busyKeys).toEqual([]);
+    unmount();
+  });
+
+  test('角色切换后旧写入的迟到失败不弹过期错误', async () => {
+    const bot = resultBot('bot-late-fail');
+    jest.spyOn(collaborationSquareBotService, 'listBotPage').mockResolvedValue(botPage([bot]));
+    const { promise, deferred } = createDeferred<{ status: 'applying' }>();
+    jest.spyOn(collaborationSquareBotService, 'requestBotFriendship').mockReturnValue(promise);
+    const { result, unmount } = renderSquare();
+    await flush();
+
+    act(() => {
+      result.current.primaryBotAction(bot);
+    });
+    act(() => {
+      useSquareIdentityStore.getState().selectIdentity(friendActorB.id);
+    });
+
+    await act(async () => {
+      deferred.reject(new CollaborationSquareError('network', '过期失败'));
+      await Promise.resolve();
+    });
+    await flush();
+
+    expect(mockedNotifyError).not.toHaveBeenCalled();
+    // 旧 finally 不清理新角色状态：busy 未被遗留；新角色的列表已重新加载（以新读回为准）
+    expect(useCollaborationSquareStore.getState().busyKeys).toEqual([]);
+    unmount();
+  });
+
+  test('卸载／重新挂载：旧 finally 不清新操作的 busy，同一目标不被遗留 busy 永久禁用', async () => {
+    const bot = resultBot('bot-remount');
+    jest.spyOn(collaborationSquareBotService, 'listBotPage').mockResolvedValue(botPage([bot]));
+    const first = createDeferred<{ status: 'applying' }>();
+    const second = createDeferred<{ status: 'applying' }>();
+    jest
+      .spyOn(collaborationSquareBotService, 'requestBotFriendship')
+      .mockImplementationOnce(() => first.promise)
+      .mockImplementationOnce(() => second.promise);
+
+    const firstRender = renderSquare();
+    await flush();
+    act(() => {
+      firstRender.result.current.primaryBotAction(bot);
+    });
+    act(() => {
+      firstRender.unmount();
+    });
+
+    // 卸载后重新挂载：列表重新加载，同一目标可再次发起申请（busy 未被上一代次遗留禁用）
+    const secondRender = renderSquare();
+    await flush();
+    act(() => {
+      secondRender.result.current.primaryBotAction(bot);
+    });
+    const busyKey = 'bot:human:900003:bot-remount';
+    expect(useCollaborationSquareStore.getState().busyKeys).toEqual([busyKey]);
+
+    // 上一代次的旧申请迟到完成：不得提示，也不得清除新一代次刚占用的 busy（旧 finally 守卫代次）
+    await act(async () => {
+      first.deferred.resolve({ status: 'applying' });
+      await Promise.resolve();
+    });
+    expect(mockedNotifySuccess).not.toHaveBeenCalledWith('好友申请已提交');
+    expect(useCollaborationSquareStore.getState().busyKeys).toEqual([busyKey]);
+
+    // 新操作的完成正常清理
+    await act(async () => {
+      second.deferred.resolve({ status: 'applying' });
+      await Promise.resolve();
+    });
+    await flush();
+    expect(mockedNotifySuccess).toHaveBeenCalledWith('好友申请已提交');
+    expect(useCollaborationSquareStore.getState().busyKeys).toEqual([]);
+    secondRender.unmount();
   });
 });

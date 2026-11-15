@@ -208,6 +208,7 @@ fn policy_shape_is_json_object_with_user_ids() {
 #[test]
 fn commands_cover_all_groupcontext_endpoints_without_body_actor_for_systemset() {
     let add = AddGroupContext {
+        preset: false,
         actor_id: "judge_bot".into(),
         request_context: request_context(),
         name: "player_state".into(),
@@ -253,6 +254,7 @@ fn entry_active_state_uses_superseded_marker_not_business_valid_to() {
     let now = time("2026-10-12T08:16:08Z");
     let past = time("2023-11-14T22:13:20Z");
     let mut entry = GroupContextEntry {
+        created_from_preset: false,
         id: 42,
         context_id: "ctx_42".into(),
         name: "player_state".into(),
@@ -341,6 +343,7 @@ fn get_item_serializes_content_and_business_validity() {
 #[test]
 fn add_collect_from_is_optional_and_null_decodes_to_none() {
     let mut add = AddGroupContext {
+        preset: false,
         actor_id: "judge_bot".into(),
         request_context: request_context(),
         name: "player_state".into(),
@@ -369,6 +372,7 @@ fn add_collect_from_is_optional_and_null_decodes_to_none() {
         "valid_to": null
     });
     let decoded: AddGroupContext = serde_json::from_value(json).expect("null policy deserializes");
+    assert!(!decoded.preset);
     assert_eq!(decoded.collect_from, None);
 
     add.collect_from = Some(GroupContextPolicy::users(["other_bot"]));
@@ -388,6 +392,7 @@ fn add_collect_from_is_optional_and_null_decodes_to_none() {
 fn commands_serialize_optional_business_validity_fields() {
     let valid_from = time("2026-10-12T08:16:08Z");
     let add = AddGroupContext {
+        preset: false,
         actor_id: "judge_bot".into(),
         request_context: request_context(),
         name: "player_state".into(),
@@ -487,4 +492,27 @@ fn get_item_management_fields_are_owner_only_and_omitted_when_missing() {
         owner_json["owners"],
         json!({ "userIds": ["judge_bot"] })
     );
+}
+
+#[tokio::test]
+async fn service_without_preset_support_rejects_preset_operations() {
+    use bcs_service_api::application::v1::AuthenticatedCaller;
+
+    let service = NoopGroupContextService;
+    let caller = AuthenticatedCaller {
+        tenant: None,
+        user: None,
+        bot: None,
+        app: None,
+        access_key: None,
+    };
+    let errors = [
+        service.list_presets("group", &caller, None).await.unwrap_err(),
+        service.add_preset("group", "actor", "timeline".into(), String::new()).await.unwrap_err(),
+        service.update_preset("group", "actor", "timeline".into(), None, Some("events".into())).await.unwrap_err(),
+        service.delete_preset("group", "actor", "timeline".into()).await.unwrap_err(),
+    ];
+    for error in errors {
+        assert!(matches!(error, ApplicationError::Internal(message) if message == "presets unavailable"));
+    }
 }

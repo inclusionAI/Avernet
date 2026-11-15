@@ -237,6 +237,9 @@
               "id": {
                 "type": "integer"
               },
+              "identity_bot_id": {
+                "type": "null"
+              },
               "is_delete": {
                 "type": "integer"
               },
@@ -301,6 +304,7 @@
               "gmt_create",
               "gmt_modified",
               "id",
+              "identity_bot_id",
               "is_delete",
               "modifier_id",
               "owner_id",

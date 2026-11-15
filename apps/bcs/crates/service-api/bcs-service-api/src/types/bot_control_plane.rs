@@ -55,6 +55,9 @@ pub struct BotCandidateReadQuery {
     pub acting_bot_id: String,
     pub env: String,
     pub visibility: BotCandidateVisibility,
+    /// Viewer perspective used to pick the visibility dimension: a Human
+    /// viewer filters on `user_visibility`, a Bot viewer on `visibility`.
+    pub viewer_kind: ActorKind,
     pub friend_ids: HashSet<String>,
     pub name: Option<String>,
     pub offset: u64,
@@ -66,6 +69,9 @@ pub struct BotSearchCandidateQuery {
     pub acting_bot_id: String,
     pub env: String,
     pub visibility: BotCandidateVisibility,
+    /// Viewer perspective for the purpose-based visibility branch. `None`
+    /// keeps the legacy Bot-oriented control-plane filter.
+    pub viewer_kind: Option<ActorKind>,
     pub friend_ids: HashSet<String>,
     pub bot_uuids: Option<Vec<String>>,
     pub name: Option<String>,
@@ -75,6 +81,10 @@ pub struct BotSearchCandidateQuery {
     pub status: Option<ActorStatus>,
     pub friendship: Option<BotSearchFriendshipFilter>,
     pub tc_bot: Option<bool>,
+    /// When true, free-text matching covers only the Bot display name, as the
+    /// V1 name fallback requires; the legacy control plane keeps matching
+    /// summaries and Bot IDs.
+    pub name_only: bool,
     pub offset: u64,
     pub limit: u64,
 }
@@ -134,6 +144,10 @@ pub struct ControlledBotCandidate {
     pub kind: ActorKind,
     pub status: ActorStatus,
     pub access_relation: BotAccessRelation,
+    /// The source row's persisted creation time in
+    /// epoch milliseconds (`gmt_create`): the mine
+    /// page's `created_at`-descending order key.
+    pub created_at: u64,
 }
 
 /// How to combine `task_claim_mode` / `task_dream_mode` filters in a task-mode roster query.

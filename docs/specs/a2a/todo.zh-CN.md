@@ -11,7 +11,7 @@
 | A2A-001 | BCN 下行 A2A Client 支持 JSON-RPC 绑定 | 已实现，通过本地合同验证 |
 | A2A-002 | AgentCard 支持 Data-only Extension 的规范化接入与使用 | 已实现原始数据保留及来源扩展消费，通过本地验证 |
 | A2A-003 | 基于请求 metadata 传递 userId 等调用上下文 | 待定义字段与信任规则、待实施 |
-| A2A-004 | A2A 管理接口按 agent_name 选择对象，返回 bot_id | 已实现，通过本地合同验证 |
+| A2A-004 | A2A 管理接口按路径 bot_id 选择对象，支持 source_agent_id 找回身份 | 已实现，通过本地合同验证 |
 | A2A-005 | 解除固定下行 token 依赖，本期支持无应用层凭据调用 | 已实现新入口匿名准入，兼容入口保留 Bearer；本地验证通过 |
 | A2A-006 | Card 更新不再要求 expected_revision | 已实现，通过本地合同验证 |
 | A2A-007 | 非流式 Agent 接入：文本问答、长任务查询和取消 | 已实现，通过本地合同验证 |
@@ -141,7 +141,7 @@ Provider 使用稳定的英文接入标识，Bot 名称统一来自 AgentCard.na
 - provider_name 使用小写 ASCII 字母、数字、连字符或下划线，以字母开头，长度 1～64，校验规则为 `^[a-z][a-z0-9_-]{0,63}$`。在部署环境内唯一，注册后保持稳定；不满足规则的输入明确拒绝，不静默转换。
 - agent_name 直接取 AgentCard.name，支持中文，在同一 Provider 内唯一。注册请求不再单独填写 agent_name，也不新增并列展示名字段。明确 Unicode、大小写、空白和长度校验，并与数据库唯一索引保持一致；不静默改写原始 Card.name，接受后保证存储及响应中的 Bot 名称与它一致。
 - 显式更新、手动刷新和周期刷新均将 Bot 名称与 Card.name 同步，名称、Card 及来源原子写入。新名称与其他 Bot 冲突时，拒绝整个更新并保留旧配置；自动刷新记录明确失败原因。
-- 更新请求中的 agent_name 选择当前 Bot，新 Card.name 决定更新后的名称。成功改名后调用方使用新名称；旧名不作为别名继续解析。改名和软删除后名称立即释放，允许其他 Bot 使用；已有运行仍关联稳定内部 ID。唯一性覆盖同一环境、同一 Provider 下所有有效 Bot，包括非 A2A Bot，不建立历史名称保留表。
+- 更新路径中的 bot_id 选择当前 Bot，新 Card.name 决定展示名称。成功改名后调用方继续使用原 bot_id；名称不作为管理定位依据。改名和软删除后名称立即释放，允许其他 Bot 使用；已有运行仍关联稳定内部 ID。唯一性覆盖同一环境、同一 Provider 下所有有效 Bot，包括非 A2A Bot，不建立历史名称保留表。
 - A2A 接入方无需提供或记录 provider_id、bot_uuid、provider_bot_ref。服务端将名称映射到内部身份；Provider/ref 的生成或映射不得破坏 AgentPass 等既有身份规则。
 
 对客指南采用独立名称入口，避免将现有 ID 路由静默改为双重含义：
@@ -149,9 +149,9 @@ Provider 使用稳定的英文接入标识，Bot 名称统一来自 AgentCard.na
 | 操作 | 对外名称接口 |
 | --- | --- |
 | 注册 Agent | POST /a2a/agents；body 提交 Card URL 或完整 Card、owners 等注册字段，不传 provider_name 或 agent_name |
-| 查询登记 Card | GET /a2a/agent-card；query 必填 agent_name；Provider 从管理 token 获取 |
-| 更新登记 Card | PUT /a2a/agent-card；JSON body 必填当前 agent_name，以及 agent_card_url 或 agent_card |
-| 刷新登记 Card | POST /a2a/agent-card/refresh；JSON body 必填 agent_name；Provider 从管理 token 获取 |
+| 查询登记 Card | GET /a2a/agents/{bot_id}/agent-card；ID 在路径中；Provider 从管理 token 获取 |
+| 更新登记 Card | PUT /a2a/agents/{bot_id}/agent-card；JSON body 提交完整 agent_card_url 或 agent_card，或仅 visibility |
+| 刷新登记 Card | POST /a2a/agents/{bot_id}/agent-card:refresh；空 body 或 {}；Provider 从管理 token 获取 |
 | 发起 BCN 异步调用 | POST /a2a/providers/{provider_name}/bots/{bot_name}/chat-async |
 | 查询 BCN 运行 | GET /a2a/chat/runs/{run_id} |
 | 取消 BCN 运行 | POST /a2a/chat/runs/{run_id}/cancel |
@@ -161,9 +161,9 @@ Provider 使用稳定的英文接入标识，Bot 名称统一来自 AgentCard.na
 ### 实施范围与验收标准
 
 1. 定义名称解析与唯一性约束，校验 Provider 英文标识；处理历史非法 Provider 名称、Bot 重名及 Bot/Card 名称不一致，给出迁移方案，不能任意选取第一条或静默重命名。
-2. **token 确定管理范围**：注册和 Card 管理先验证 Provider 管理 token，解析唯一有效 Provider，再在其范围内按 agent_name 选择对象，复用已有用例。缺失、失效、禁用或无法确定唯一 Provider 的凭据明确拒绝；不得根据请求参数猜测或切换归属。新管理接口不接受 provider_name 作为范围覆盖字段，意外传入时明确拒绝。业务调用凭据与管理凭据仍分离，跨 Provider 同名 Bot 不能串用权限。
+2. **token 确定管理范围**：注册和 Card 管理先验证 Provider 管理 token，解析唯一有效 Provider，再在其范围内按 bot_id 选择对象，复用已有用例。缺失、失效、禁用或无法确定唯一 Provider 的凭据明确拒绝；不得根据请求参数猜测或切换归属。新管理接口不接受 provider_name 作为范围覆盖字段，意外传入时明确拒绝。业务调用凭据与管理凭据仍分离，跨 Provider 同名 Bot 不能串用权限。
 3. 注册从 URL 拉取的 Card 或内联 Card 中获取名称；缺失、非法、同 Provider 重名均拒绝。禁止通过另一个管理入口单独改名而破坏 Bot 名称与 Card.name 的一致性。
-4. 对外注册、Card 管理和调用响应使用 provider_name、agent_name；更新及刷新成功返回最新名称。检查错误信息、分页、发现及运行状态 DTO，避免暴露 provider_id、bot_uuid 或 provider_bot_ref；审计和内部日志可保留内部 ID。
+4. 对外注册和 Card 管理响应暴露 bot_id，保留 provider_name、agent_name 用于展示；更新及刷新成功返回最新名称。检查错误信息、分页、发现及运行状态 DTO，避免暴露 provider_id、bot_uuid 或 provider_bot_ref；审计和内部日志可保留内部 ID。
 5. 发起调用后，查询和取消仍使用 run_id，运行归属依据内部 ID。旧 ID 接口保持兼容；涉及 A2A Bot 的名称写入必须维护相同一致性约束。
 6. 验证中文 Card.name 的注册、查询、展示和调用全链路，以及显式更新、手动刷新、周期刷新触发改名；重名冲突无部分写入，旧名称不误路由，已有任务关联不变。并发注册/改名、慢刷新与显式更新竞争需有合同测试。
 7. **发现、搜索与列表一致性**：注册、显式更新、手动刷新和周期刷新成功后，Bot 发现结果、搜索结果、列表及详情展示的名称均与已保存的 AgentCard.name 一致，不再从另一份独立展示名取值。按 Bot 名称搜索时使用同步后的名称；改名后新名称可命中，旧名称不再作为该 Bot 的当前名称命中（其他描述字段中包含旧名称的全文搜索结果不受此约束）。如存在缓存或独立搜索索引，需定义并验证更新、失效与可见时限，避免长期保留旧名；权限过滤保持不变。
@@ -341,7 +341,7 @@ Provider 管理 token 继续用于注册和管理 Bot，BCN 调用方的运行�
 
 ## A2A-009：Provider 管理接口 v0.1 合同
 
-注册路径统一为 POST /a2a/agents，对外使用 Agent 资源名称；内部仍映射为 BCN Bot。对外 Agent 管理接口统一使用 agent_name：GET 查询参数、PUT/刷新请求体、成功响应、Location 查询参数及错误 details.field 均同步；其值等于 AgentCard.name，注册时从 Card 获取，不重复填写。内部 Bot 模型及旧 Bot API 的 bot_name 保持不变，BOT_* 错误码本次不改。新管理入口不接受 bot_name 别名，避免双字段冲突。
+注册路径统一为 POST /a2a/agents，对外使用 Agent 资源名称；内部仍映射为 BCN Bot。对外 Agent 管理接口统一使用路径 bot_id：GET/PUT `/a2a/agents/{bot_id}/agent-card`，POST `.../agent-card:refresh`，Location 采用 ID 查询资源地址；响应中的 agent_name 仍等于 Card.name。GET `/a2a/agents?source_agent_id=...` 在当前 Provider 下精确找回 ID，返回 items（0 或 1 项）。内部 Bot 模型及旧 Bot API 的 bot_name 保持不变，BOT_* 错误码本次不改。新管理入口不接受 bot_name 别名，避免双字段冲突。
 
 独立合同见 [Provider AgentCard 管理接口 v0.1](../../bcn-provider-agent-card-api-v0.1.zh-CN.md)。这是目标合同，不代表现有部署已符合。
 
@@ -349,7 +349,7 @@ Provider 管理 token 继续用于注册和管理 Bot，BCN 调用方的运行�
 - 文档版本与 A2A 协议版本独立；旧 ID API 保持兼容，不静默改变旧调用方语义。
 - 实现合同中所有者/摘要限制、URL 获取规则、响应不签发运行 token、当前有效名称唯一及数据一致性；不能仅改文档宣称通过。
 - 补充 HTTP 合同测试，覆盖认证、重复注册、URL/内联切换、改名、刷新竞争、错误及失败不部分写入。
-- 验证 Agent 管理接口只使用 agent_name，响应及 Location 不再输出 bot_name，旧字段请求明确报 INVALID_REQUEST；Provider 隔离、Card 改名同步和旧 Bot API 兼容行为不变。
+- 验证 Agent 管理接口仅按路径 bot_id 定位，旧 name 请求拒绝、旧管理路由不保留别名；Provider 隔离、Card 改名同步和旧 Bot API 兼容行为不变。
 - 验证非流式及 JSON-RPC 等依赖能力；上线前提供联调验收记录。来源 ID 扩展在正式 URI 发布前不作为基础接口必需字段。
 
 - 注册推荐直接提交完整 agent_card；按独立合同 2.2 的逐字段要求实现校验和保留行为，并覆盖技能 ID 唯一性、可选能力不启用、技能鉴权限制及签名不等于验真的测试。未知可选 Card 数据不能因管理请求严格校验而丢失。

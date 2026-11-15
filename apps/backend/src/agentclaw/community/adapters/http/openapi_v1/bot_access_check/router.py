@@ -18,7 +18,11 @@ refusal is the same whichever Bot or user is asked about.
 disagree: ownership, explicit editor rows, the Space-member grant and the
 COSEC revocation all apply. Access is per Bot, so there is no stage input.
 
-**Failure direction.** No Bot at ``(bot_id, entity_id)`` is a real answer —
+**Addressing.** ``entity_id`` is optional. Without it the Bot is found by
+``bot_id`` alone, which only succeeds when exactly one live Bot carries that id;
+an id shared by several Bots is a 409 asking for ``entity_id``, never a guess.
+
+**Failure direction.** No Bot at the address is a real answer —
 ``has_access=false``. A failed collaborator lookup is not: it propagates to
 the app's 500 handler instead of being reported as a ``false`` that never ran.
 """
@@ -83,8 +87,8 @@ async def get_bot_access(
     request: Request,
     bot_id: BotIdPath,
     principal: PrincipalDep,
-    entity_id: Annotated[str, Query(min_length=1, max_length=1024)],
     user_id: Annotated[str, Query(min_length=1, max_length=256)],
+    entity_id: Annotated[str | None, Query(min_length=1, max_length=1024)] = None,
     required_level: RequiredLevel = RequiredLevel.MEMBER,
     config: OpenApiBotAccessCheckConfig = Injected(OpenApiBotAccessCheckConfig),
     bots: BotRepository = Injected(BotRepository),
@@ -115,14 +119,17 @@ def _level(
     collaborators: CollaboratorServiceProtocol,
     *,
     bot_id: str,
-    entity_id: str,
+    entity_id: str | None,
     user_id: str,
 ) -> PermissionLevel:
     """The user's operable level, ``NONE`` only when no Bot is at the address."""
     try:
-        context = BotAddressResolver(bots).resolve(bot_id=bot_id, entity_id=entity_id)
+        context = BotAddressResolver(bots).resolve(
+            bot_id=bot_id, entity_id=entity_id, allow_unique_bot_id=True
+        )
     except BotAddressNotFoundError:
         return PermissionLevel.NONE
+    # BotLookupAmbiguousError (bot_id shared, no entity_id) propagates → 409.
     # Exceptions from the collaborator lookup propagate (→ 500) by design.
     return resolve_operable_permission_level(
         collaborators,

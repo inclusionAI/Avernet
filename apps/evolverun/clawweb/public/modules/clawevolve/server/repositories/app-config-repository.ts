@@ -95,8 +95,7 @@ export class AppConfigRepository {
     if (sets.length === 0) return existing;
 
     // Revision counter; application-layer gmt_modified (no trigger).
-    sets.push("version = ?");
-    values.push(existing.version + 1);
+    sets.push("version = version + 1");
     sets.push("gmt_modified = ?");
     values.push(now);
     values.push(configKey);

@@ -16,6 +16,7 @@ export default function SubworkflowPanel({ flowId, nodeId, groupExecutionId }: {
     {error && <div role="alert" className="text-destructive">{error}
       <button type="button" className="ml-2 text-primary" onClick={retry}>重试</button></div>}
     {data && <>
+      <p className="text-xs text-muted-foreground">以下状态和统计来自组快照；父流程停止后，子运行可能继续执行。打开子运行可查看当前状态。</p>
       <div className="flex flex-wrap gap-x-4 gap-y-1">
         <span>状态 <strong data-testid="fanout-status">{data.status}</strong></span><span>{data.successPolicy}</span>
         <span>并发 {data.activeCount} / {data.concurrency}</span><span>revision {data.revision}</span>

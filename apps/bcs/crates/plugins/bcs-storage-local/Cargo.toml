@@ -11,7 +11,6 @@ workspace = true
 
 [dependencies]
 async-trait    = { workspace = true }
-anyhow         = { workspace = true }
 bcs-storage-api = { workspace = true }
 bytes          = { workspace = true }
 fastrand       = { workspace = true }

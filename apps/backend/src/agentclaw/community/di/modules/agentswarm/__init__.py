@@ -144,9 +144,13 @@ class AgentSwarmModule(Module):
             from agentclaw.community.plugins.community.agentswarm.bot_authorization import (
                 ManifestBotAuthorizationSource,
             )
+            from agentclaw.community.core.repository.protocols.bot import (
+                BotRepository,
+            )
             return ManifestBotAuthorizationSource(
                 manifest_seam=injector.get(ManifestCreationSeam),
                 passport_plugin=injector.get(PassportPlugin),
+                bot_repo=injector.get(BotRepository),
             )
         except Exception:
             logger.warning(

@@ -1,3 +1,4 @@
+import { TaskPanelAdapter } from '@/components/Workspace/TaskPanelAdapter';
 // @sdd: 方式② CDN UMD 副屏加载器（迁移自 ocb UmdPanel，适配新 `@tc-chat/ui` SDK）。
 //
 // 背景：新引擎 `@tc-chat/ui` 的 `resolveBusinessEntry` 在「全局 CDN map 命中」分支把
@@ -15,9 +16,10 @@
 // 顶层 props（剔除保留键），并透传 tab/params/payload/onAction/onInteraction/eventEmitter。
 import { Skeleton } from '@/components/ui';
 import { ensureReactGlobal } from '@/services/workspace/ensureReactGlobal';
+import { useCollaborationGroupLaunchStore } from '@/stores/collaborationGroupLaunchStore';
 import { registerPanelContent } from '@tc-chat/ui/es/SidePanelContent';
 import type { PanelContentProps } from '@tc-chat/ui/es/SidePanelContent/registry';
-import { Component, type ComponentType, useEffect, useState } from 'react';
+import { Component, type ComponentType, useCallback, useEffect, useId, useState } from 'react';
 import { resolveBcsStateMachineApiBaseUrl } from './bcsPanelBaseUrl';
 import { RESERVED_DATA_KEYS, resolveExportName } from './resolveUmdExport';
 import { resolveUmdComponent } from './resolveUmdModule';
@@ -71,13 +73,19 @@ interface UmdState {
  * 其中 `params`（= resolveBusinessEntry 的 finalPayload）含 `cdn`/`entry`/`_componentKey`/`_libraryName`/`data`。
  * 加载完成后把 `data` 业务字段平铺给远程 UMD 组件（与引擎 CDNMount 行为一致）。
  */
-export function UmdPanel(props: PanelContentProps): React.ReactElement {
+function GenericUmdPanel(props: PanelContentProps): React.ReactElement {
   const { tab, onAction, onInteraction, eventEmitter } = props;
   const tabData = (tab?.params ?? tab?.payload ?? {}) as Record<string, unknown>;
 
   const cdn = tabData.cdn as string | undefined;
   const exportName = resolveExportName(tabData);
   const data = (tabData.data as Record<string, unknown> | undefined) ?? {};
+  const instanceId = useId();
+  const source = `${instanceId}:${tab?.id ?? ''}:${cdn}:${exportName}`;
+  const onOpenCreateGroup = useCallback((options?: unknown) => {
+    useCollaborationGroupLaunchStore.getState().open(source, options);
+  }, [source]);
+  useEffect(() => () => useCollaborationGroupLaunchStore.getState().close(source), [source]);
 
   const [state, setState] = useState<UmdState>({ Component: null, error: null });
 
@@ -155,9 +163,21 @@ export function UmdPanel(props: PanelContentProps): React.ReactElement {
         onInteraction={onInteraction}
         eventEmitter={eventEmitter}
         {...flattened}
+        onOpenCreateGroup={onOpenCreateGroup}
       />
     </PanelRenderErrorBoundary>
   );
+}
+
+export function UmdPanel(props: PanelContentProps): React.ReactElement {
+  const payload = (props.tab?.params ?? props.tab?.payload ?? {}) as Record<string, unknown>;
+  const key = payload._componentKey ?? payload.entry;
+  if (key === 'taskPanel.TaskLoopView' || key === 'task-loop' ||
+    (payload._libraryName === 'taskPanel' && key === 'TaskLoopView')) {
+    const data = (payload.data ?? payload) as Record<string, unknown>;
+    return <TaskPanelAdapter {...props} params={data} />;
+  }
+  return <GenericUmdPanel {...props} />;
 }
 
 let registered = false;

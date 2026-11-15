@@ -12,14 +12,22 @@ import { createInternalBotWorkflowPermissionsRouter } from "@avernet/workflow/se
 import { createInternalApprovalCardsRouter } from "@avernet/workflow/server/routes/internal/approval-cards";
 import { ApprovalCardRepository } from "@avernet/workflow/server/repositories/approval-card-repository";
 import {
-  createAutoHealRouter,
   createRunsRouter,
   createWorkflowsRouter,
 } from "@avernet/workflow/server";
+import { createAutoHealRouter } from "@avernet/workflow/server/routes/auto-heal";
 import { createSubworkflowObservabilityRouter } from "@avernet/workflow/server/routes/subworkflow-observability";
 import { createSubworkflowAuthorizer } from "@avernet/workflow/server/routes/subworkflow-authorization";
 import { createPackVersionRouter } from "@avernet/workflow/server/routes/pack-version";
-import { readPackOperationFromRemote, reconcilePackOperationFromRemote } from "@avernet/workflow/server/services/pack-version-remote";
+import { createWorkflowUnifiedSaveRouter, unifiedSaveHostGuard } from "@avernet/workflow/server/routes/workflow-unified-save";
+import { createWorkflowCloneRouter } from "@avernet/workflow/server/routes/workflow-clone";
+import { WorkflowCloneService } from "@avernet/workflow/server/services/workflow-clone-service";
+import { WorkflowUnifiedSaveService, type WorkflowPackWriteAuthorization } from "@avernet/workflow/server/services/workflow-unified-save-service";
+import type { AuthorizeSnapshotDeploy } from "@avernet/workflow/server/services/auto-heal-deploy-service";
+import type { ClawFlowsGitConfig } from "@avernet/workflow/server/services/clawflows-git-client";
+import { createEditorDraftCasRouter } from "@avernet/workflow/server/routes/editor-draft-cas";
+import { EditorDraftCasService } from "@avernet/workflow/server/services/editor-draft-cas-service";
+import { readActivePackVersionFromRemote, readPackOperationFromRemote, reconcilePackOperationFromRemote } from "@avernet/workflow/server/services/pack-version-remote";
 import { createPackScriptsRouter } from "@avernet/workflow/server/routes/pack-scripts";
 import { readPackScriptsFromRemote } from "@avernet/workflow/server/services/pack-script-read-service";
 import { createWorkflowNodeStatsRouter } from "@avernet/workflow/server/routes/workflow-node-stats";
@@ -59,6 +67,8 @@ import { createAuthMeHandler, resolveAuthMeIdentity } from "./auth-me.js";
 import { createWorkflowRepairRuntime } from "./repair-workbench-runtime.js";
 import { AistudioService, resolveAistudioConfig } from "@avernet/clawinsight/server/services/aistudio-service";
 import { createRepairAisExecution, resolveRepairAisConfiguration } from "./repair-ais-execution.js";
+import { createWorkflowAiDraftRuntime } from "./workflow-ai-draft-runtime.js";
+import { createWorkflowAiDraftBaasExecution } from "./workflow-ai-draft-baas-execution.js";
 import { createInternalEngineAuth } from "./internal-engine-auth.js";
 import { createAutoHealTriggerRun } from "./auto-heal-trigger-run.js";
 
@@ -78,13 +88,32 @@ const packWriteGuard: RequestHandler = (req, res, next) => {
   next();
 };
 
-export function createClawWebBootstrap(options: { sessionRecovery?: SessionRecoveryRuntime } = {}): ClawWebBootstrap {
+/** Explicitly trusted server composition. Do not derive identity, Git config or
+ * Pack authorization from unverified headers/cookies or request body. The host
+ * must coordinate every other writer and protect all shared/unlisted Pack paths.
+ * Candidate bundles contain complete Git history and must never leave the host.
+ * The host/ingress must enforce per-principal rate limits and bounded in-flight
+ * authentication and saves, retaining slots until background work actually ends.
+ */
+export type UnifiedSaveHost = Readonly<{
+  resolveVerifiedPrincipal(request: express.Request): Promise<{ actorId: string } | null>;
+  resolveRepository(workflowId: string, actorId: string): Promise<{
+    repositoryId: string; config: ClawFlowsGitConfig;
+  } | null>;
+  /** Optional additional restriction; workflow edit and DB-bound Pack checks always apply. */
+  canWriteExactCandidate?(candidate: WorkflowPackWriteAuthorization): Promise<boolean>;
+}>;
+
+/** Server-only ACL for complete Editor deployment candidates; omission denies
+ * Editor deployment. It never supplies identity or grants Pack file writes. */
+export function createClawWebBootstrap(options: { sessionRecovery?: SessionRecoveryRuntime; unifiedSave?: UnifiedSaveHost; authorizeSnapshotDeploy?: AuthorizeSnapshotDeploy } = {}): ClawWebBootstrap {
   return {
     async start(context) {
       const port = Number.parseInt(process.env.PORT ?? "3001", 10);
       const aisConfig = resolveAistudioConfig();
       const repairConfig = await resolveRepairAisConfiguration(aisConfig.token,
         process.env.CLAWWEB_REPAIR_AIS_SNAPSHOT_ID, process.env.CLAWWEB_REPAIR_CLAWFLOWS_GIT_DIR);
+      const aiDraftExecution = createWorkflowAiDraftBaasExecution();
       const { db } = await initDatabase();
       if (db.dbType === "noop") throw new Error("Public ClawWeb requires an available database");
       const insight = createInsightRuntime(db);
@@ -105,6 +134,34 @@ export function createClawWebBootstrap(options: { sessionRecovery?: SessionRecov
       }
       const app = express();
       app.use(compression());
+      // This adapter consumes the raw body itself. Mount before *any* body parser;
+      // parsing here first would defeat its duplicate-key and bounded-body checks.
+      const configuredHost = options.unifiedSave;
+      const candidatePolicy = configuredHost?.canWriteExactCandidate;
+      const unifiedSaveHost = configuredHost
+        && typeof configuredHost.resolveVerifiedPrincipal === 'function'
+        && typeof configuredHost.resolveRepository === 'function'
+        && (!('canWriteExactCandidate' in configuredHost) || typeof candidatePolicy === 'function')
+        ? configuredHost : undefined;
+      const unifiedPermissions = new BotWorkflowPermissionRepository(db);
+      const unifiedDraft = new EditorDraftCasService(db, unifiedPermissions);
+      app.use(/^\/api\/workflows\/[^/]+\/unified-save\/?$/i, unifiedSaveHostGuard(), packWriteGuard);
+      app.use("/api/workflows", createWorkflowUnifiedSaveRouter({
+        // Disabled means no external identity/ACL or repository lookup at all.
+        resolvePrincipal: request => unifiedSaveHost ? unifiedSaveHost.resolveVerifiedPrincipal(request) : Promise.resolve(null),
+        resolveAuthorizedService: async (workflowId, principal) => {
+          if (!unifiedSaveHost) return null;
+          const canEdit = (id: string, actor: string) => unifiedPermissions.hasEditPermission(id, actor);
+          if (!await canEdit(workflowId, principal.actorId)) return null;
+          const draft = await unifiedDraft.read(workflowId, principal.actorId);
+          const repository = await unifiedSaveHost.resolveRepository(workflowId, principal.actorId);
+          if (!repository) return null;
+          const service = new WorkflowUnifiedSaveService({ draft: unifiedDraft, canEdit,
+            ...(candidatePolicy ? { canWritePack: (candidate: WorkflowPackWriteAuthorization) => candidatePolicy.call(unifiedSaveHost, candidate) } : {}),
+            repositoryId: repository.repositoryId, config: { ...repository.config } });
+          return { packId: draft.packId ?? workflowId, repositoryId: repository.repositoryId, service };
+        },
+      }));
       app.use(express.json({ limit: "10mb" }));
       app.use(cookieParser());
       app.use(adminAuthMiddleware({ config: fallbackAdminConfig, repository: adminUserRepo }));
@@ -171,6 +228,25 @@ export function createClawWebBootstrap(options: { sessionRecovery?: SessionRecov
         },
       });
       app.use("/api/workflow-repairs", repairRuntime.router);
+      const aiDraftRuntime = createWorkflowAiDraftRuntime(db, {
+        ...(publicBaseUrl ? { publicOrigin: publicBaseUrl } : {}),
+        canEdit: (workflowId, actorId) => actorId === "dev_local" && context.environment === "dev"
+          ? Promise.resolve(true) : botPermRepo.hasEditPermission(workflowId, actorId),
+        principal: async request => {
+          const identity = resolveAuthMeIdentity(request, { environment: context.environment });
+          return identity?.userId === "dev_local" ? { actorId: "dev_local" } : null;
+        },
+        ...(aiDraftExecution ? { execution: aiDraftExecution } : { unavailableReason: "AUTO_HEAL_BAAS_NOT_CONFIGURED" }),
+      });
+      app.use("/api/workflows", aiDraftRuntime.router);
+      let aiDraftPollPending: Promise<void> | null = null;
+      const aiDraftPoll = aiDraftExecution ? setInterval(() => {
+        if (aiDraftPollPending) return;
+        aiDraftPollPending = aiDraftRuntime.monitor.reconcile().then(() => undefined).catch(() => {
+          console.warn('[clawweb] AI draft reconciliation failed; will retry');
+        }).finally(() => { aiDraftPollPending = null; });
+      }, 15_000) : undefined;
+      aiDraftPoll?.unref();
       let repairPollBusy = false;
       const repairPoll = setInterval(() => {
         if (repairPollBusy) return;
@@ -246,16 +322,30 @@ export function createClawWebBootstrap(options: { sessionRecovery?: SessionRecov
       const packContext = { db, gitConfig: autoHealGitConfig, gitAuthor: autoHealAuthor };
       // Snapshot reads require the same verified local principal and edit ACL as
       // journal recovery. File writes remain unavailable on the public host.
-      app.use(/^\/api\/workflows\/[^/]+\/(?:pack-version|pack-operations\/[^/]+(?:\/reconcile)?)\/?$/i, packWriteGuard);
+      app.use(/^\/api\/workflows\/[^/]+\/(?:editor-draft|pack-version|pack-operations\/[^/]+(?:\/reconcile)?)\/?$/i, packWriteGuard);
+      const editorDraftCas = new EditorDraftCasService(db, botPermRepo);
+      app.use("/api/workflows", createEditorDraftCasRouter({
+        resolvePrincipal: resolvePackPrincipal,
+        read: (workflowId, actorId) => editorDraftCas.read(workflowId, actorId),
+        save: input => editorDraftCas.save(input),
+      }));
       app.use("/api/workflows", createPackVersionRouter({
         resolvePrincipal: resolvePackPrincipal,
         botPermRepo, workflowSpecRepo,
+        readActiveSnapshot: (workflowId, version) => readActivePackVersionFromRemote({ ...packContext, workflowId, version }),
         readSnapshot: (workflowId, packId, version) => readPackScriptsFromRemote({
           ...packContext, workflowId, packId, version, includeVersionFiles: true,
         }),
         readOperation: (requestId, workflowId, actorId) => readPackOperationFromRemote({ ...packContext, requestId, workflowId, actorId }),
         reconcileOperation: (requestId, workflowId, actorId) => reconcilePackOperationFromRemote({ ...packContext, requestId, workflowId, actorId }),
       }));
+      app.use("/api/workflows", createWorkflowCloneRouter(new WorkflowCloneService({
+        db,
+        workflowSpecRepo,
+        facadeRepo,
+        gitConfig: autoHealGitConfig,
+        gitAuthor: autoHealAuthor,
+      })));
       app.use("/api/workflows", createWorkflowsRouter(
         workflowSpecRepo,
         null,
@@ -290,9 +380,10 @@ export function createClawWebBootstrap(options: { sessionRecovery?: SessionRecov
         facadeRepo,
         new RunSubworkflowsService(new RunSubworkflowsRepository(db), botPermRepo),
       ));
-      app.use(["/api/auto-heal/save", "/api/auto-heal/deploy"], packWriteGuard);
+      app.use(["/api/auto-heal/save", "/api/auto-heal/unified-save", "/api/auto-heal/editor-save-first-draft", "/api/auto-heal/deploy", "/api/auto-heal/editor-deploy"], packWriteGuard);
       app.use("/api/auto-heal", createAutoHealRouter({
         resolvePrincipal: resolvePackPrincipal,
+        authorizeSnapshotDeploy: options.authorizeSnapshotDeploy,
         db,
         flowRunRepo,
         workflowSpecRepo,
@@ -312,7 +403,9 @@ export function createClawWebBootstrap(options: { sessionRecovery?: SessionRecov
       return {
         stop: async () => {
           if (repairPoll) clearInterval(repairPoll);
+          if (aiDraftPoll) clearInterval(aiDraftPoll);
           await closeHttpServer(server);
+          await aiDraftPollPending;
           await clawevolve.stop();
           await closeDatabase();
         },

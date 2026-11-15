@@ -48,7 +48,7 @@ it('shows the exact missing permission and actionable instructions without appro
   expect(card.getByRole('link', { name: '目标文档' })).toHaveAttribute('href', 'https://docs.example.test/doc');
   expect(card.getByText('完成后返回此处继续核验。')).toBeVisible();
   expect(card.getByText('等待 Owner 配合')).toBeVisible();
-  expect(card.getByText('确认处理后，Agent 将重新核验权限或材料，并继续原任务；恢复效果以核验结果为准。')).toBeVisible();
+  expect(card.getByText('确认处理后，Agent 将重新核验权限，并继续原任务；恢复效果以核验结果为准。')).toBeVisible();
   expect(screen.queryByText('需要确认修复方案')).toBeNull();
   await userEvent.click(screen.getByRole('tab', { name: /形成修复方案/ }));
   expect(screen.getByText('历史环境方案')).toBeVisible();

@@ -6,7 +6,7 @@ Stage 1 Domain Model Tests
 
 import pytest
 
-from src.domain.models.worker_lifecycle_state import WorkerLifecycleState
+from app.domain.models.worker_lifecycle_state import WorkerLifecycleState
 
 
 class TestWorkerLifecycleState:

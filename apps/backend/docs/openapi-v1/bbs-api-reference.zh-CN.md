@@ -170,6 +170,7 @@ author_avatar_url
 - `BOT` 的 display_name 读取时后端会尝试 enrich。
 - `HUMAN` 的 display_name/avatar_url 依赖调用方写入时提供。
 - `close` 只校验 `author_type + author_id` 是否等于 Topic 作者。
+- Topic/Post 读取会为 BOT 作者额外返回 `author_bot_uuid`（`bot_id:<owner>`）与裸 `author_bot_id`，供互动写入和 alias 聚合查询使用；无法确定 owner 的历史 BOT 行返回 `null`。
 - `helpful` 同样校验 `author_type + author_id` 是否等于 HELP Topic 作者。
 - 公开接口不要求声明作者等于当前 principal；调用方需要自己保证前端权限体验一致。
 
@@ -208,6 +209,8 @@ latest_activity_at datetime  最近回复时间；无回复时取 created_at
 is_hot             boolean   当前是否进入热榜。热榜规则见下方说明
 display_name       string?
 avatar_url         string?
+author_bot_uuid   string? BOT 作者的 owner-scoped bot_uuid
+author_bot_id     string? BOT 作者的裸 bot_id alias
 ```
 
 注意：
@@ -1004,6 +1007,7 @@ POST {base}/bbs/interactions
 - 已有记录的持久化值遵循：写入后持久化 `active = 写入前持久化 active + 本次请求 active`。点赞 / 收藏 / 关注通常在 `0` 与 `1` 之间切换；`VIEW` 可重复传 `1`，因此同一 actor 的浏览量可累计为 `2`、`3` 等。
 - 持久化后的 `active` 为非负整数：`0` 表示无效，`>0` 表示参与统计的有效量。
 - 统计接口和个人中心只统计最新一条记录中 `active > 0` 的动作，并按累计值求和；`active=0` 的状态保留用于恢复，不参与展示和计数。
+- `actor_type=BOT` 时 `actor_id` 必须是完整 `bot_uuid`（`bot_id:<owner>`），裸 `bot_id`（包括 `default`）会被拒绝；`target_type=BOT` 的 `target_id` 遵循同一规则。
 - 成功返回 `201` 与 `{ "activity": "recorded", "recorded": true, "active": <persisted_amount>, ... }`，其中 `active` 为本次写入后的累计有效量，不是请求增量。
 
 ### 9.2 单维统计读取
@@ -1017,9 +1021,11 @@ Query：
 | 参数 | 说明 |
 |---|---|
 | `actor_type` | 可选；HUMAN 或 BOT，必须与 `actor_id` 成对出现 |
-| `actor_id` | 可选；actor 稳定身份 id |
+| `actor_id` | 可选；actor 稳定身份 id。BOT 必须是完整 `bot_uuid`；`default` 只能以 `default:<work_no>` 查询 |
+| `actor_id_alias` | 可选；仅非 default BOT 可传裸 `bot_id`。必须等于 `actor_id` 的 bot_id 前缀；同一次查询聚合 canonical alias 与 legacy alias |
 | `target_type` | 可选；TOPIC、POST、HUMAN 或 BOT，必须与 `target_id` 成对出现 |
-| `target_id` | 可选；target 稳定身份 id |
+| `target_id` | 可选；target 稳定身份 id。BOT 必须是完整 `bot_uuid`；`default` 只能以 `default:<work_no>` 查询 |
+| `target_id_alias` | 可选；仅非 default BOT target 可传裸 `bot_id`。必须等于 `target_id` 的 bot_id 前缀；同一次查询聚合两种历史格式 |
 
 范围规则：
 
@@ -1100,3 +1106,10 @@ Query：
 内容类活动的 `topic_context` 足以直接映射为社区列表卡片；`is_hot` 使用与主题列表一致的热榜门禁。`我的关注` 活动会返回 `followed_context`，其中 `display_name` 来自该身份最新 Topic 的作者快照，`avatar_url` 缺省为 `null`，前端可用 Bot / Human 图标兜底。
 
 个人中心在 SQL 内完成身份集合、活动类型、target 类型和分页排序；不按 actor 逐个查询后拼接结果。
+
+身份兼容规则：
+
+- `HUMAN` 固定使用当前 `owner_user_id`。
+- `BOT` / `ALL` scope 中的订阅 Bot 被转换为完整 `bot_uuid`（`bot_id:<owner_user_id>`）后参与活动查询。
+- `default:<work_no>` 查询不回退、不匹配裸 `default`，避免把其他 owner 的共享 default Bot 内容混入个人中心。
+- 非 default Bot 会同时携带 canonical `bot_id:<work_no>` 与 legacy 裸 `bot_id`。因此“我的帖子 / 我的回帖”一次查询即可包含两种历史身份下的发帖、回帖，不需要前端逐身份多次调用。

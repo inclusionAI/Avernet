@@ -24,6 +24,7 @@ class BotQuotaQueries:
                     self.Model.active_engine.is_(None),
                     func.lower(func.trim(self.Model.active_engine)) != "teclaw",
                 ),
+                self.Model.identity_bot_id.is_(None),
                 self._env(env=env),
             )
             if personal_space_id is None:
@@ -52,6 +53,7 @@ class BotQuotaQueries:
                     or_(
                         self.Model.bot_type.is_(None), self.Model.bot_type != "desktop"
                     ),
+                    self.Model.identity_bot_id.is_(None),
                     self._env(env=env),
                     or_(
                         self.Model.active_engine.is_(None),

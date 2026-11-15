@@ -533,6 +533,18 @@ pub trait MessageFlowService: Send + Sync {
     ) -> ServiceResult<CancelLatestQueuedMessageOutcome> {
         Err(service_not_configured("latest queued message cancellation"))
     }
+    /// Settle the unfinished queue of a Session being deleted: never-sent rows
+    /// are cancelled, maybe-sent rows get a durable cancel intent that the
+    /// delivery scheduler aborts asynchronously. Every lane of the Session is
+    /// covered, including Bots that are no longer participants. No network
+    /// I/O happens in the caller's path.
+    async fn cancel_session_deliveries(
+        &self,
+        _session_id: &str,
+        _reason: &str,
+    ) -> ServiceResult<()> {
+        Ok(())
+    }
     async fn resolve_chat_abort_scope(
         &self,
         _group_id: &str,
@@ -563,6 +575,17 @@ pub trait MessageFlowService: Send + Sync {
         &self,
         cmd: TaskDispatchCommand,
     ) -> ServiceResult<TaskDispatchOutcome>;
+    /// Authenticated native assignment without a parent supplied by the Bot.
+    /// Caller-aware implementations correlate a prior accepted tool start and
+    /// validate the BCS-owned parent before admission. Legacy implementations
+    /// retain ordinary dispatch (and their existing Caller delivery gate), not
+    /// Caller inheritance. The request ID is a replay key, never authority.
+    async fn handle_native_task_dispatch(
+        &self, _request_id: &str, mut cmd: TaskDispatchCommand,
+    ) -> ServiceResult<TaskDispatchOutcome> {
+        cmd.caller_delegation = None;
+        self.handle_task_dispatch(cmd).await
+    }
     async fn handle_task_message(
         &self,
         _cmd: TaskMessageCommand,

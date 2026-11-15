@@ -13,6 +13,7 @@ pub async fn register_provider(
         .services
         .provider_management
         .register_provider(RegisterProviderCommand {
+            a2a: req.a2a,
             collaboration_scope: parse_collaboration_scope(req.collaboration_scope.as_deref())?,
             name: req.name,
             slug: req.slug,
@@ -199,6 +200,7 @@ pub async fn patch_provider(
         .services
         .provider_management
         .update_provider(UpdateProviderCommand {
+            a2a: req.a2a,
             collaboration_scope: parse_collaboration_scope(req.collaboration_scope.as_deref())?,
             provider_id,
             provider_admin_token,

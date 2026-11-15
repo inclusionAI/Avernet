@@ -4,13 +4,38 @@
 import { ChatLayoutPanelSlot } from '@/components/Workspace/ChatLayoutPanelSlot';
 import { PersistentChatLayoutPanelProvider } from '@/components/Workspace/PersistentChatLayoutPanelHost';
 import { PersistentChatLayoutPanelViewport } from '@/components/Workspace/PersistentChatLayoutPanelViewport';
+import { useSessionTaskPanelBootstrap } from '@/hooks/useSessionTaskPanelBootstrap';
+import { useGroupChatPanelCleanup } from '@/pages/Workspace/hooks/useGroupChatPanelCleanup';
 import { PANEL_WIDTH_STORAGE_KEY } from '@/services/workspace/panelWidthMemory';
 import { useTaskConversationNavigationStore } from '@/stores/taskConversationNavigationStore';
+import { useTaskSessionAssociationStore } from '@/stores/taskSessionAssociationStore';
 import { useTaskSidePanelStore } from '@/stores/taskSidePanelStore';
+import type { PanelHandle } from '@tc-chat/core';
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom/jest-globals';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import React from 'react';
+
+const mockGetTaskBySession = jest.fn();
+jest.mock('@/services/myTask', () => ({
+  getTaskBySession: (...args: unknown[]) => mockGetTaskBySession(...args),
+  listMyTasks: async () => ({ code: 0, data: [] }),
+  isEnvelopeFailure: (result: { code: number }) => result.code !== 0,
+}));
+
+jest.mock('@/services/tasks/panel/taskPanelRuntime', () => {
+  const { createTestTaskPanelRuntime } = require('../../helpers/taskPanelRuntime');
+  return createTestTaskPanelRuntime({ bySession: (...args: any[]) => mockGetTaskBySession(...args), list: async () => ({ data: [] }) });
+});
+const mockHistory = { readPage: async () => ({ messages: [], nextCursor: null }) };
+
+/** 与 GroupWorkspaceArea 一致：先注册会话清理，再恢复任务，ref 由真实插槽负责。 */
+function GroupSessionPanelHarness({ sessionId }: { sessionId: string | null }): JSX.Element {
+  const panelRef = React.useRef<PanelHandle | null>(null);
+  useGroupChatPanelCleanup(sessionId, panelRef);
+  useSessionTaskPanelBootstrap({ sessionId, userId: 'u1', panelRef, history: mockHistory });
+  return <ChatLayoutPanelSlot ref={panelRef} dismissOnOutside={false} />;
+}
 
 // 捕获 <ChatLayoutPanelSlot> 内部渲染 <ChatLayout.Panel> 收到的 props（push-stack 防类型收窄）。
 // 真实运行时 ChatLayoutRoot 会 cloneElement 注入 onIsOpenChange（Root 的 ResizeHandle
@@ -94,7 +119,41 @@ describe('ChatLayoutPanelSlot', () => {
     localStorage.clear();
     useTaskConversationNavigationStore.getState().resetAll();
     useTaskSidePanelStore.getState().resetAll();
+    useTaskSessionAssociationStore.getState().reset();
+    mockGetTaskBySession.mockResolvedValue({ ok: true, data: [] });
     window.history.pushState({}, '', '/workspace/chat?bot=b1&session=s1');
+  });
+
+  it('手动进入缓存群会话经过列表重拉空窗后仍恢复 TaskPanel，切换到其他会话不会残留旧任务', async () => {
+    mockGetTaskBySession.mockImplementation(async (sessionId: string) => ({
+      ok: true,
+      data: sessionId === 'empty' ? [] : [{ task_id: `task-${sessionId}` }],
+    }));
+    const tree = (sessionId: string | null) => (
+      <PersistentPanelHarness>
+        <GroupSessionPanelHarness sessionId={sessionId} />
+      </PersistentPanelHarness>
+    );
+    const { rerender } = render(tree('s1'));
+    await waitFor(() => expect(mockRawHandle.openTab).toHaveBeenCalledTimes(1));
+    expect(useTaskSidePanelStore.getState().activeTaskId).toBe('task-s1');
+
+    // useSessionMap 重拉选中群会清缓存，selectedSession 经历 s1 → null → s1。
+    rerender(tree(null));
+    rerender(tree('s1'));
+    await waitFor(() => expect(mockRawHandle.openTab).toHaveBeenCalledTimes(2));
+    expect(mockRawHandle.openTab).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'task-task-s1' }));
+
+    rerender(tree('s2'));
+    await waitFor(() => expect(mockRawHandle.openTab).toHaveBeenCalledTimes(3));
+    expect(mockRawHandle.openTab).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'task-task-s2' }));
+    expect(useTaskSidePanelStore.getState().activeTaskId).toBe('task-s2');
+
+    rerender(tree('empty'));
+    await act(async () => Promise.resolve());
+    expect(mockRawHandle.openTab).toHaveBeenCalledTimes(3);
+    expect(useTaskSidePanelStore.getState().activeTaskId).toBeNull();
+    expect(useTaskSessionAssociationStore.getState().activeSessionTaskIds).toEqual([]);
   });
 
   it('displayName 为 "ChatLayout.Panel"，使 ChatLayoutRoot 识别插槽并 cloneElement 注入真实开合态', () => {
@@ -206,7 +265,7 @@ describe('ChatLayoutPanelSlot', () => {
       navigationId = store.beginNavigation('t-selected', '/workspace/chat', 's1');
       store.markRouteCommitted(navigationId);
       store.markRouteHydrated(navigationId);
-      useTaskSidePanelStore.getState().setActiveTask('t-selected');
+      useTaskSidePanelStore.setState({ activeTaskId: 't-selected' });
     });
 
     // 根会话 hydration 可能重新发出历史任务面板消息，例如最新任务 t-latest。
@@ -225,10 +284,10 @@ describe('ChatLayoutPanelSlot', () => {
     act(() => ref.current?.openTab(selectedTaskTab));
     expect(mockRawHandle.openTab).not.toHaveBeenCalled();
 
-    // 用户通过下拉框显式切换任务时先更新 activeTaskId。此时该任务的 openTab 必须放行。
+    // 用户通过下拉框显式切换任务时登记 open intent（active fixture 仅模拟共享投影）。此时该任务的 openTab 必须放行。
     act(() => {
       const taskStore = useTaskSidePanelStore.getState();
-      taskStore.setActiveTask('t-user-picked');
+      useTaskSidePanelStore.setState({ activeTaskId: 't-user-picked' });
       taskStore.markTaskPanelOpenIntent('t-user-picked');
       ref.current?.openTab({
         id: 'task-t-user-picked',
@@ -257,7 +316,7 @@ describe('ChatLayoutPanelSlot', () => {
     const store = useTaskConversationNavigationStore.getState();
     const navigationId = store.beginNavigation('t1', '/workspace/collaboration', 's2');
     act(() => store.markRouteCommitted(navigationId));
-    act(() => useTaskSidePanelStore.getState().setActiveTask('t1'));
+    act(() => useTaskSidePanelStore.setState({ activeTaskId: 't1' }));
     // 模拟用户退出会话页：原插槽卸载，但导航 lease 尚未释放，持久宿主仍持有旧 Panel。
     rerender(<PersistentPanelHarness />);
     expect(screen.getByTestId('mock-persistent-panel-state')).toBeTruthy();
@@ -269,6 +328,7 @@ describe('ChatLayoutPanelSlot', () => {
     expect(useTaskConversationNavigationStore.getState().navigation).toBeNull();
     expect(useTaskConversationNavigationStore.getState().originsByTask).toEqual({});
     expect(useTaskSidePanelStore.getState().activeTaskId).toBeNull();
+    expect(useTaskSidePanelStore.getState().taskPanelOpenIntentTaskId).toBeNull();
   });
 
   it('目标会话迟到的 closePanelForce 仍被持续抑制，TaskPanel 不会一闪而逝', () => {
@@ -322,7 +382,7 @@ describe('ChatLayoutPanelSlot', () => {
     expect(useTaskConversationNavigationStore.getState().navigation).toBeNull();
   });
 
-  it('普通会话切换仍将 closePanelForce 透传给 SDK Panel，并清理旧任务宿主', () => {
+  it('普通会话切换仍将 closePanelForce 透传给 SDK Panel，并清理旧任务焦点状态', () => {
     const ref = React.createRef<import('@tc-chat/core').PanelHandle>();
     const store = useTaskConversationNavigationStore.getState();
     store.rememberOrigin('t1', {
@@ -340,6 +400,11 @@ describe('ChatLayoutPanelSlot', () => {
     const navigationId = store.beginNavigation('t1', '/workspace/chat', 's1');
     store.markRouteCommitted(navigationId);
     store.markRouteHydrated(navigationId);
+    act(() => {
+      const taskStore = useTaskSidePanelStore.getState();
+      useTaskSidePanelStore.setState({ activeTaskId: 't1' });
+      taskStore.markTaskPanelOpenIntent('explicit-task');
+    });
     render(<ChatLayoutPanelSlot ref={ref} {...asRootInjected({ bridge: 'bridge' })} />);
     window.history.pushState({}, '', '/workspace/chat?bot=b2&session=s2');
 
@@ -347,6 +412,8 @@ describe('ChatLayoutPanelSlot', () => {
 
     expect(mockRawHandle.closePanelForce).toHaveBeenCalledTimes(1);
     expect(useTaskConversationNavigationStore.getState().originsByTask).toEqual({});
+    expect(useTaskSidePanelStore.getState().activeTaskId).toBeNull();
+    expect(useTaskSidePanelStore.getState().taskPanelOpenIntentTaskId).toBe('explicit-task');
   });
 
   it('任务节点跨 Bot/群会话路由时复用同一个 Panel/TaskPanel 实例，不重新挂载或恢复快照', () => {
@@ -563,4 +630,23 @@ describe('ChatLayoutPanelSlot', () => {
     );
     expect(localStorage.getItem(PANEL_WIDTH_STORAGE_KEY)).toBe('560');
   });
+});
+
+it.each([false, true])('SDK internal tab-X acknowledges the controller (persistent=%s)', async persistent => {
+  const { getTaskPanelController } = require('@/services/tasks/panel/taskPanelRuntime');
+  const controller = await getTaskPanelController();
+  const tab = { id: 'custom-sdk-task-tab', type: 'taskPanel.TaskLoopView', title: 'T', closable: true, params: { taskId: 'sdk-task' } };
+  controller.adoptPresentedTask(tab);
+  useTaskConversationNavigationStore.getState().rememberTaskTab('sdk-task', tab);
+  const close = jest.spyOn(controller, 'closeTask');
+  const onTabClose = jest.fn();
+  const slot = <ChatLayoutPanelSlot onTabClose={onTabClose} />;
+  const mounted = render(persistent ? <PersistentPanelHarness>{slot}</PersistentPanelHarness> : slot);
+  try {
+    const callback = mockPanelRenders.at(-1)?.onTabClose as (id: string) => void;
+    act(() => { callback('custom-sdk-task-tab'); });
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(controller.getSnapshot().activeTaskId).toBeNull();
+    expect(onTabClose).toHaveBeenCalledWith('custom-sdk-task-tab');
+  } finally { mounted.unmount(); close.mockRestore(); }
 });

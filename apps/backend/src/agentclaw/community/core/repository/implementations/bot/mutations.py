@@ -175,6 +175,11 @@ class BotMutationRepositoryMixin:
                 .update(
                     {
                         self.Model.is_delete: 1,
+                        # A soft-deleted Bot is no longer running: leaving it
+                        # spelled ACTIVE makes every is_delete-blind read —
+                        # a raw query, an ops console, a support transcript —
+                        # claim a released Bot is up.
+                        self.Model.status: "RELEASED",
                         self.Model.gmt_modified: func.now(),
                     },
                     synchronize_session=False,

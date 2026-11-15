@@ -41,7 +41,7 @@ pub(super) fn run_values(record: &A2aRunRecord, env: &str, scope_key: String) ->
     let mut values=vec![env.into(),record.run_id.clone().into(),DbValue::Null,scope_key.into()];
     values.extend(scope_values(&record.scope));
     values.extend(vec![record.group_id.clone().into(),record.interface.protocol_version.clone().into(),
-        match record.interface.binding {A2aBinding::HttpJson=>"http_json",A2aBinding::JsonRpc=>"json_rpc",A2aBinding::Grpc=>"grpc"}.into(),
+        match record.interface.binding {A2aBinding::HttpJson=>"http_json",A2aBinding::JsonRpc=>"json_rpc",A2aBinding::Grpc=>"grpc",A2aBinding::Custom=>"custom"}.into(),
         match record.interface.update_mode {A2aUpdateMode::Stream=>"stream",A2aUpdateMode::Poll=>"poll"}.into(),record.credential_kind.clone().into(),serde_json::to_string(&record.extensions).map_err(error)?.into(),
         record.message_id.clone().into(),record.request_digest.clone().into(),opt(&record.context_id),state(record.state).into(),
         num(record.version)?,num(record.deadline_ms)?,num(record.updated_at_ms)?]);
@@ -49,7 +49,7 @@ pub(super) fn run_values(record: &A2aRunRecord, env: &str, scope_key: String) ->
 }
 pub(super) fn decode(row: &DbRow) -> ServiceResult<A2aRunRecord> {
     let scope=scope(row)?;
-    let binding=match text(row,"binding")?.as_str() {"http_json"=>A2aBinding::HttpJson,"json_rpc"=>A2aBinding::JsonRpc,"grpc"=>A2aBinding::Grpc,_=>return Err(error("unknown binding"))};
+    let binding=match text(row,"binding")?.as_str() {"http_json"=>A2aBinding::HttpJson,"json_rpc"=>A2aBinding::JsonRpc,"grpc"=>A2aBinding::Grpc,"custom"=>A2aBinding::Custom,_=>return Err(error("unknown binding"))};
     let update_mode=match text(row,"update_mode")?.as_str() {"stream"=>A2aUpdateMode::Stream,"poll"=>A2aUpdateMode::Poll,_=>return Err(error("unknown update mode"))};
     let budget=if row.get_i64("budget_remaining_ms").map_err(error)?.is_none() {None} else {
         let phase=match text(row,"budget_phase")?.as_str() {

@@ -1252,6 +1252,18 @@ story_provider_callback_survives_slow_judge() {
     fi
     TESTS_TOTAL=$((TESTS_TOTAL + 1))
     [[ "$HTTP_STATUS" == "200" || "$HTTP_STATUS" == "201" ]] || return
+    # Friend requests are pending-by-default (edge-permission connect
+    # convergence, dima 2026110600120400669): the Provider bot decides its own
+    # inbound request with its runtime credential before the driver's trust
+    # list can contain it. A replayed "Already friends" response carries no
+    # request id, so nothing needs accepting on rerun.
+    local friend_request_id
+    friend_request_id=$(json_path "$RESPONSE" "data.id")
+    if [[ -n "$friend_request_id" ]]; then
+        api_request_headers POST "/friends/requests/${friend_request_id}/accept" \
+            '{}' "X-BCS-Bot-Token: ${runtime_token}"
+        assert_eq "slow-Judge Provider bot accepts the friend request" "$HTTP_STATUS" "200"
+    fi
     api_get "/bots/${BOT_CEO_UUID}/friends"
     require_status "driver reads friends after Provider trust setup" "200" || return
     assert_contains "driver trust list contains the slow-Judge Provider bot" \

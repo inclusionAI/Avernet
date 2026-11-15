@@ -577,7 +577,7 @@ it('URL selections and readonly session selections expand only their target Bot'
   expect(useConversationStore.getState().expandedBotIds).toEqual({ [managedBot.botId]: true });
 });
 
-describe('团队 Bot 路由和只读选择', () => {
+describe('我协作的 Bot 路由和只读选择', () => {
   const teamView: ConversationBotView = { bot: managedBot, section: 'team' };
   it('无 section 深链解析 team，保留 session；只读选中与 URL 不降级 managed', () => {
     const { result } = renderHook(() =>

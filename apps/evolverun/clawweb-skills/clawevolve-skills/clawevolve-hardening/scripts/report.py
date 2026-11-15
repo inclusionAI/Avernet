@@ -6,9 +6,13 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import urllib.error
-import urllib.request
+import sys
+from pathlib import Path
 from typing import Any
+
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "platform"))
+from clawevolve_runtime import runtime
 
 
 SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
@@ -68,22 +72,12 @@ def post_report(
         payload["output"] = output
     else:
         payload["error"] = {"code": error_code, "message": summary, "retryable": retryable}
-    base = clawweb_url.rstrip("/")
-    url = f"{base}/api/evolve/internal/tasks/{task_id}/steps/{step_id}/report"
-    request = urllib.request.Request(
-        url,
-        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-        method="POST",
+    return runtime._report(
+        argparse.Namespace(task_id=task_id, step_id=step_id, clawweb_url=clawweb_url),
+        status, summary,
+        output=payload.get("output"), error=payload.get("error"),
     )
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-    try:
-        with opener.open(request, timeout=60) as response:
-            result = json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as error:
-        detail = error.read().decode("utf-8", errors="replace")
-        raise SystemExit(f"ClawWeb 上报失败: HTTP {error.code}: {detail}") from error
-    return result
+
 
 
 if __name__ == "__main__":

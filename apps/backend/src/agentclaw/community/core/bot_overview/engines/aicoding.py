@@ -6,9 +6,9 @@ reads it (see ``member_management_capability``): the Bot record's top level
 first, then ``bot.ext.template_config``, then the snapshot row in the
 template repository (``ac_templates.ext``). A lookup that fails degrades to
 "no template reported" — the overview is an unauthenticated read surface and
-must answer, not error. The engine-neutral fields (``default_model``,
-``skills``, ``mcps``, ``sessions``) stay at their "nothing reported" defaults
-until the engine grows data sources for them.
+must answer, not error. It also fills the neutral ``default_model``; skills,
+MCP servers and session activity are platform-owned and filled by
+``BotOverviewService``.
 """
 
 from __future__ import annotations
@@ -158,8 +158,6 @@ class AICodingBotOverviewProvider:
             bot_id=query.bot_id, bot=bot, template_repo=self._template_repo
         )
         config = template_config or {}
-        # TODO(aicoding engine owner): report skills, mcps and
-        # sessions.last_session_at from the engine.
         return EngineBotOverview(
             default_model=_text(config.get("model")),
             payload=AICodingEnginePayload(

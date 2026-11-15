@@ -171,3 +171,59 @@ describe("session analysis Router", () => {
     }));
   });
 });
+
+describe("session preview availability", () => {
+  it.each([
+    { name: "small raw without Agent analysis", uploaded: { raw: { size: 10 } }, expected: null },
+    { name: "exact size limit", uploaded: { raw: { size: 2097152 } }, expected: null },
+    { name: "large raw", uploaded: { raw: { size: 2097153 } }, expected: "2 MiB" },
+    { name: "unknown size", uploaded: { raw: {} }, expected: "大小信息不可用" },
+    { name: "trajectory only", uploaded: { trajectory: { size: 10 } }, expected: "仅提供运行轨迹" },
+    { name: "no evidence", uploaded: {}, expected: "未提供原始 Session" },
+    { name: "upload disabled", uploaded: { raw: { size: 10 } }, uploadMode: "none", expected: "未启用会话文件上传" },
+    { name: "unsupported format", uploaded: { raw: { size: 10 } }, key: "raw.zip", expected: "格式不支持" },
+  ])("$name", async ({ uploaded, expected, uploadMode, key }) => {
+    const task = {
+      task_id: "SA-preview", task_type: "session_analysis", user_id: "160855",
+      created_by: "160855", status: "completed",
+      config_json: JSON.stringify({
+        mode: "ANALYZE_SINGLE", llmAnalysis: false, artifactUploadMode: uploadMode ?? "broker",
+        aisBase: { snapshotId: 17, packageId: "diagnose", deadlineAt: 100 },
+        artifacts: { raw: { objectKey: key ?? "raw.jsonl" }, report: { objectKey: "report.md" } },
+      }),
+    } as EvolveTaskRow;
+    const repo = {
+      findTask: vi.fn().mockResolvedValue(task),
+      listSteps: vi.fn().mockResolvedValue([{ output_json: JSON.stringify({ artifacts: { ...uploaded, report: {} } }) }]),
+      listEvolveBots: vi.fn().mockResolvedValue([]),
+    } as unknown as EvolveRepository;
+    const getObject = vi.fn(async (objectKey: string) => ({
+      content: Buffer.from(objectKey === "report.md" ? "# Report" : '{"type":"message"}\n'),
+    }));
+    const app = express();
+    app.use(createSessionAnalysisRouter({
+      repo, uploadStore: { getObject } as unknown as ObjectStore,
+      ais: {} as AisExecutor,
+      aisOptions: { legacySnapshotId: 1, deadlineSeconds: 7200 },
+      publicBaseUrl: "http://localhost:3001", artifactUploadMode: "broker",
+    }));
+    const server = app.listen(0);
+    servers.push(server);
+    await new Promise<void>(resolve => server.once("listening", resolve));
+    const response = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/SA-preview`, {
+      headers: { "X-Staff-Id": "160855" },
+    });
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.llmAnalysis).toBe(false);
+    expect(body.reportMarkdown).toBe(uploadMode === "none" ? null : "# Report");
+    if (expected) {
+      expect(body.sessionPreview).toBeNull();
+      expect(body.sessionPreviewUnavailableReason).toContain(expected);
+      expect(getObject.mock.calls.every(([key]) => key === "report.md")).toBe(true);
+    } else {
+      expect(body.sessionPreview.eventCount).toBe(1);
+      expect(body.sessionPreviewUnavailableReason).toBeNull();
+    }
+  });
+});

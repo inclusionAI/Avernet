@@ -41,8 +41,7 @@ export function useGroupWorkspace(pinnedGroup?: GroupView): UseGroupWorkspaceRes
   const rawSetMembership = useWorkspaceStore((s) => s.setMembership);
   const toggleGroupExpanded = useWorkspaceStore((s) => s.toggleGroupExpanded);
 
-  // 用户手动切换角色筛选时先清空当前选中群/会话，避免 useSelectedGroupDetail
-  // 的自动纠正 effect 把 membership 强制改回与旧选中群匹配的值。
+  // 用户手动切换参与方式时清空当前选中群/会话；深链解析不自动改动筛选。
   const setMembership = useCallback(
     (m: 'direct' | 'session_only') => {
       const store = useWorkspaceStore.getState();
@@ -53,14 +52,19 @@ export function useGroupWorkspace(pinnedGroup?: GroupView): UseGroupWorkspaceRes
   );
 
   const [sessionGroups, setSessionGroups] = useState<GroupView[]>(pinnedGroup ? [pinnedGroup] : []);
-  // 记录 sessionGroups 是为哪个身份加载完成的(loadGroups 成功回填时写入):
-  // 供 useSelectedGroupDetail 判定“当前可见列表是否属于当前身份且已加载完成”,
-  // 堵住新开页全新挂载时按初始空列表/上一身份陈旧列表误切 membership 的竞态。
+  // 标记列表所属身份，避免选中详情兜底消费上一身份的陈旧列表。
   const [loadedListIdentity, setLoadedListIdentity] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSearchRef = useRef('');
-  // 成员补拉缓存 / 选中群详情重载 / 解散群：下沉至 useGroupWorkspaceMutations（控本体体积）。
-  const { seedFromCache, enrichParticipants, reloadSelectedGroup, dissolveGroup } = useGroupWorkspaceMutations({
+  // 成员补拉（含请求代次）/ 选中群详情重载 / 解散群：下沉至 useGroupWorkspaceMutations（控本体体积）。
+  const {
+    beginListLoad,
+    isCurrentRequest,
+    seedFromCache,
+    enrichParticipants,
+    reloadSelectedGroup,
+    dissolveGroup,
+  } = useGroupWorkspaceMutations({
     sessionGroups,
     setSessionGroups,
     activeIdentityId,
@@ -82,9 +86,8 @@ export function useGroupWorkspace(pinnedGroup?: GroupView): UseGroupWorkspaceRes
     [identities],
   );
 
-  // 群行头像堆成员补拉（fire-and-forget）：对列表未回传 participants 的群按详情逐个拉取，
-  // 逐群合并进 sessionGroups（不整替整行，避免覆盖列表的 membership 等视图字段）。
-  // 失败也写入缓存占位（空名单），防止逐字防抖搜索对同一失败群反复请求；页面重挂载即重置。
+  // 群列表加载：新响应自带摘要时直接展示（头像零补拉）；旧响应缺摘要字段才按群详情补拉。
+  // 请求代次在首个 await 前生成，身份/搜索/成员视角或新列次都会让旧请求结果失效。
   const loadGroups = useCallback(
     async (identityId: string | null, q?: string, requestedMembership = membership) => {
       const identity = resolveIdentity(identityId);
@@ -92,12 +95,13 @@ export function useGroupWorkspace(pinnedGroup?: GroupView): UseGroupWorkspaceRes
         setGroupsError(null);
         return;
       }
+      const request = beginListLoad(identityId);
       useWorkspaceStore.getState().setIsGroupsLoading(true);
       setGroupsError(null);
       const isCurrentList = () => {
         const current = useWorkspaceStore.getState();
-        return current.activeIdentityId === identityId && current.membership === requestedMembership
-          && lastSearchRef.current === (q || '');
+        return isCurrentRequest(request) && current.activeIdentityId === identityId
+          && current.membership === requestedMembership && lastSearchRef.current === (q || '');
       };
       try {
         const detail = pinnedGroup ? await loadScopedGroup(pinnedGroup.groupId, identity.id) : null;
@@ -108,16 +112,15 @@ export function useGroupWorkspace(pinnedGroup?: GroupView): UseGroupWorkspaceRes
           : await groupService.loadGroups(identity, { q, membership: requestedMembership });
         if (!isCurrentList()) return;
         if (res.ok) {
-          // 先用缓存过的成员名单给新列表播种（列表接口不回传 participants），再对仍未有
-          // 成员的群异步补拉详情——防抖搜索/身份切换的列次同一群不再重复请求。
-          const seeded = seedFromCache(res.data);
+          // 旧响应才用同身份缓存播种并按群补拉详情；新响应带摘要（含显式空摘要）时不触碰缓存。
+          const seeded = seedFromCache(res.data, request);
           setSessionGroups(seeded);
           // 仅当这次列表仍属于当前活动身份时才记成“已为该身份加载完成”,
           // 避免身份切换后旧身份的残留响应把 loadedListIdentity 写成旧值。
           if (useWorkspaceStore.getState().activeIdentityId === identityId) {
             setLoadedListIdentity(identityId);
           }
-          void enrichParticipants(seeded, identity.kind === 'bot' ? identity.id : undefined);
+          void enrichParticipants(seeded, request, identity.kind === 'bot' ? identity.id : undefined);
         } else {
           if (pinnedGroup) setSessionGroups([]);
           setGroupsError(res.error.friendlyMessage);
@@ -129,7 +132,7 @@ export function useGroupWorkspace(pinnedGroup?: GroupView): UseGroupWorkspaceRes
         if (isCurrentList()) useWorkspaceStore.getState().setIsGroupsLoading(false);
       }
     },
-    [resolveIdentity, membership, pinnedGroup, seedFromCache, enrichParticipants],
+    [resolveIdentity, membership, pinnedGroup, beginListLoad, isCurrentRequest, seedFromCache, enrichParticipants],
   );
 
   // 身份变化或成员视角切换 → 重载列表并清空上轮搜索基线，避免防抖 effect 误判为新搜索。
@@ -159,19 +162,21 @@ export function useGroupWorkspace(pinnedGroup?: GroupView): UseGroupWorkspaceRes
     [sessionGroups, kindFilter, sortMode, pinnedGroup],
   );
 
-  const selectedGroup = useMemo(
+  const listedSelectedGroup = useMemo(
     () => sessionGroups.find((g) => g.groupId === selectedGroupId) ?? null,
     [selectedGroupId, sessionGroups],
   );
 
   const listReadyForCurrentIdentity = activeIdentityId !== null && loadedListIdentity === activeIdentityId;
-  // 深链选中群的成员视角兜底已拆到 useSelectedGroupDetail(控 Hook 体积)。
-  useSelectedGroupDetail(
+  // 深链目标不依赖侧栏当前页：列表缺失时按 group id 独立加载详情。
+  const selectedGroupFallback = useSelectedGroupDetail(
     pinnedGroup ? null : selectedGroupId,
     sessionGroups,
     isGroupsLoading,
-    listReadyForCurrentIdentity,
+    listReadyForCurrentIdentity || Boolean(groupsError),
   );
+  const selectedGroup = (listReadyForCurrentIdentity || pinnedGroup ? listedSelectedGroup : null)
+    ?? selectedGroupFallback.group;
 
   const canManageGroup = useMemo<PolicyResult>(
     () => groupService.canManageGroup(selectedGroup, activeIdentityId),
@@ -182,9 +187,7 @@ export function useGroupWorkspace(pinnedGroup?: GroupView): UseGroupWorkspaceRes
     [selectedGroup, activeIdentityId],
   );
 
-  // 选中群：仅写入选中态，不拉群详情。会话列表由 useSessionMap 调 /groups/{id}/sessions 单独拉取；
-  // 群详情（participants/owner/driver）仅在打开管理面板（查看/编辑）时由 handleManageGroup →
-  // reloadSelectedGroup 按需拉取，避免每次选中群都触发 GET /groups/{id} 详情请求。
+  // 选中群：写入选中态；列表已包含目标时不额外拉详情，缺失时由上面的 Hook 兜底。
   const onSelectGroup = useCallback(
     (groupId: string) => {
       if (!pinnedGroup || groupId === pinnedGroup.groupId) useWorkspaceStore.getState().selectGroup(groupId);
@@ -213,6 +216,9 @@ export function useGroupWorkspace(pinnedGroup?: GroupView): UseGroupWorkspaceRes
     groupsError,
     selectedGroupId,
     selectedGroup,
+    isLoadingSelectedGroup: selectedGroupFallback.loading,
+    selectedGroupError: selectedGroupFallback.error,
+    retrySelectedGroup: selectedGroupFallback.retry,
     groupSearchText,
     setGroupSearchText,
     kindFilter,

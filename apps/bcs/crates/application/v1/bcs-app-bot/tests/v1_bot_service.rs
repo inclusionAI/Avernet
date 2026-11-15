@@ -3,14 +3,17 @@
     reason = "test assertions intentionally fail fast"
 )]
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use bcs_app_bot::{BotServiceConfig, BotServiceImpl};
-use bcs_bot::{BotControlPlaneCore, BotCore};
+use bcs_bot::{BotCandidateSearchCore, BotControlPlaneCore, BotCore, EmptyWorkerProfileCoreService};
 use bcs_bot_store::{MemoryBotRepo, MemoryProviderStore};
 use bcs_friend::FriendCore;
+use bcs_service_api::application::connect::{
+    FriendEntriesPage, FriendListQuery,
+};
 use bcs_service_api::application::{ConnectService, RequestDirection, RequestsPage};
 use bcs_service_api::application::v1::{
     ApplicationError, Bot, BotCandidatePurpose, BotCandidateSearchMode, BotDescriptorPatch,
@@ -19,9 +22,10 @@ use bcs_service_api::application::v1::{
     SearchBotCandidates, UpdateBot, UserVisibility,
 };
 use bcs_service_api::{
-    ActorKind, ActorStatus, BotCandidateSearchCoreResult, BotCandidateSearchCoreService,
-    BotCandidateSearchHit, BotCandidateSearchMode as CoreCandidateSearchMode,
-    BotCandidateSearchQuery, BotCapabilities, BotControlPlaneCoreService,
+    ActorKind, ActorStatus, AuthorizedCandidateSearchQuery, BotCandidateSearchCoreResult,
+    BotCandidateSearchCoreService, BotCandidateSearchHit,
+    BotCandidateSearchMode as CoreCandidateSearchMode, BotCandidateSearchQuery,
+    BotCandidateVisibility, BotCapabilities, BotControlPlaneCoreService,
     BotControlPlaneDescriptor, BotControlPlaneRecord, BotControlPlaneView, BotRegistryCoreService,
     BotRepoPort, FriendCoreService, LegacyBotCandidateSearchCoreResult, ProviderBotBinding,
     ProviderBotBindingRepoPort, ProviderRecord, ProviderRepoPort, RegisteredBot, ServiceError,
@@ -34,6 +38,7 @@ struct Fixture {
     service: BotServiceImpl,
     repo: Arc<MemoryBotRepo>,
     friends: Arc<FriendCore>,
+    connect: Arc<RecordingConnectService>,
     providers: Arc<MemoryProviderStore>,
     _temp: tempfile::TempDir,
 }
@@ -44,6 +49,7 @@ impl Fixture {
         let repo = Arc::new(MemoryBotRepo::with_base_dir(temp.path().to_path_buf()));
         let registry: Arc<dyn BotRegistryCoreService> = Arc::new(BotCore::with_repo(repo.clone()));
         let friends = Arc::new(FriendCore::memory());
+        let connect = Arc::new(RecordingConnectService::default());
         let providers = Arc::new(MemoryProviderStore::new());
         let control_plane: Arc<dyn BotControlPlaneCoreService> = Arc::new(
             BotControlPlaneCore::new(repo.clone(), providers.clone(), providers.clone()),
@@ -53,7 +59,7 @@ impl Fixture {
             control_plane,
             registry,
             friends.clone(),
-            Arc::new(NoopConnectService),
+            connect.clone(),
             Arc::new(RecordingCandidateSearch::empty()),
             BotServiceConfig { env: env.clone() },
         )
@@ -62,6 +68,7 @@ impl Fixture {
             service,
             repo,
             friends,
+            connect,
             providers,
             _temp: temp,
         }
@@ -130,19 +137,67 @@ impl Fixture {
 }
 
 struct RecordingCandidateSearch {
-    queries: Mutex<Vec<BotCandidateSearchQuery>>,
+    queries: Mutex<Vec<AuthorizedCandidateSearchQuery>>,
     result: BotCandidateSearchCoreResult,
+    derive_friend_markers: bool,
 }
 
+#[derive(Default)]
 struct RecordingConnectService {
-    friends: Mutex<Vec<FriendListEntry>>,
+    /// Friends served to any actor without an actor-specific set.
+    default_friends: Mutex<Vec<FriendListEntry>>,
+    /// Actor-scoped edge sets: the perspective whose approved edges are read.
+    actor_friends: Mutex<HashMap<String, Vec<FriendListEntry>>>,
+    queries: Mutex<Vec<(String, FriendListQuery)>>,
 }
 
 impl RecordingConnectService {
     fn new(friends: Vec<FriendListEntry>) -> Self {
         Self {
-            friends: Mutex::new(friends),
+            default_friends: Mutex::new(friends),
+            ..Self::default()
         }
+    }
+
+    fn add_friend(&self, actor_id: &str, kind: ActorKind) {
+        self.default_friends
+            .lock()
+            .expect("friends lock")
+            .push(friend_entry(actor_id, kind));
+    }
+
+    /// Approved edges served only when `owner` is the actor whose friend set
+    /// is read, so a test can pin that each perspective reads its own actor.
+    fn add_friend_for(&self, owner: &str, actor_id: &str, kind: ActorKind) {
+        self.actor_friends
+            .lock()
+            .expect("actor friends lock")
+            .entry(owner.to_string())
+            .or_default()
+            .push(friend_entry(actor_id, kind));
+    }
+
+    fn queries(&self) -> Vec<FriendListQuery> {
+        self.queries
+            .lock()
+            .expect("friend queries lock")
+            .iter()
+            .map(|(_, query)| query.clone())
+            .collect()
+    }
+
+    fn actor_queries(&self) -> Vec<(String, FriendListQuery)> {
+        self.queries.lock().expect("friend queries lock").clone()
+    }
+}
+
+fn friend_entry(actor_id: &str, kind: ActorKind) -> FriendListEntry {
+    FriendListEntry {
+        actor_id: actor_id.to_string(),
+        name: Some(actor_id.to_string()),
+        summary: None,
+        is_online: false,
+        kind,
     }
 }
 
@@ -198,17 +253,45 @@ impl ConnectService for RecordingConnectService {
 
     async fn list_friends_paginated(
         &self,
-        _: &str,
-        _: bcs_service_api::application::connect::FriendListQuery,
-    ) -> ServiceResult<bcs_service_api::application::connect::FriendEntriesPage> {
-        unreachable!("legacy caller must retain the unpaginated query")
+        actor_id: &str,
+        query: FriendListQuery,
+    ) -> ServiceResult<FriendEntriesPage> {
+        self.queries
+            .lock()
+            .expect("friend queries lock")
+            .push((actor_id.to_string(), query.clone()));
+        let actor_friends = self.actor_friends.lock().expect("actor friends lock");
+        let entries = match actor_friends.get(actor_id) {
+            Some(entries) => entries.clone(),
+            None => self
+                .default_friends
+                .lock()
+                .expect("friends lock")
+                .clone(),
+        };
+        let filtered = entries
+            .iter()
+            .filter(|entry| {
+                query
+                    .target_type
+                    .is_none_or(|target_type| entry.kind == target_type)
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        let total = filtered.len() as u64;
+        let items = filtered
+            .into_iter()
+            .skip(query.offset as usize)
+            .take(query.limit as usize)
+            .collect();
+        Ok(FriendEntriesPage { items, total })
     }
 
     async fn list_friends(
         &self,
         _: &str,
     ) -> ServiceResult<Vec<FriendListEntry>> {
-        Ok(self.friends.lock().expect("friends lock").clone())
+        panic!("v1 candidates must read approved edges, not the legacy list_friends");
     }
 
     async fn list_requests(
@@ -293,7 +376,15 @@ impl RecordingCandidateSearch {
         Self {
             queries: Mutex::new(Vec::new()),
             result,
+            derive_friend_markers: false,
         }
+    }
+
+    /// Mirror the production Core's friend marker derivation so a test can
+    /// compare the list and search views of the same approved edge set.
+    fn deriving_friend_markers(mut self) -> Self {
+        self.derive_friend_markers = true;
+        self
     }
 
     fn empty() -> Self {
@@ -308,13 +399,9 @@ impl RecordingCandidateSearch {
 impl BotCandidateSearchCoreService for RecordingCandidateSearch {
     async fn search_candidates(
         &self,
-        query: BotCandidateSearchQuery,
+        _query: BotCandidateSearchQuery,
     ) -> BotCandidateSearchCoreResult {
-        self.queries
-            .lock()
-            .expect("candidate search queries lock")
-            .push(query);
-        self.result.clone()
+        panic!("OpenAPI V1 must use the authorized candidate-search entry point")
     }
 
     async fn search_candidates_for_legacy(
@@ -322,6 +409,23 @@ impl BotCandidateSearchCoreService for RecordingCandidateSearch {
         _query: BotCandidateSearchQuery,
     ) -> LegacyBotCandidateSearchCoreResult {
         panic!("OpenAPI V1 must not call the legacy candidate-search entry point")
+    }
+
+    async fn search_authorized_candidates(
+        &self,
+        query: AuthorizedCandidateSearchQuery,
+    ) -> ServiceResult<BotCandidateSearchCoreResult> {
+        let mut result = self.result.clone();
+        if self.derive_friend_markers {
+            for hit in result.hits.iter_mut() {
+                hit.is_friend = query.friend_ids.contains(&hit.bot.bot_uuid);
+            }
+        }
+        self.queries
+            .lock()
+            .expect("candidate search queries lock")
+            .push(query);
+        Ok(result)
     }
 }
 

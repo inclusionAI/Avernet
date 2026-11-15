@@ -705,6 +705,18 @@ impl Fixture {
             .expect("connect fixture bot");
     }
 
+    /// Deterministic `created_at` for ordering-sensitive
+    /// listings: overwrites the control-plane audit entry
+    /// registration stamped (via the store's own fixture
+    /// surface, same role as `authority_state`).
+    async fn set_created_at(&self, bot_id: &str, created_at_ms: u64) {
+        let mut audit = self.repo.control_plane_audit_state().write().await;
+        let Some(entry) = audit.get_mut(bot_id) else {
+            panic!("fixture bot {bot_id} has no control-plane audit row");
+        };
+        entry.0 = created_at_ms;
+    }
+
     /// Seed an HTTP-Provider-routable bot: enabled
     /// provider downlink + enabled downlink credential +
     /// binding with a delivery endpoint (exactly the

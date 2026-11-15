@@ -558,6 +558,19 @@ class BotInventoryService(BotInventoryServiceProtocol):
                     action is BotAction.UPGRADE and level < PermissionLevel.ADMIN
                 )
             )
+            # VIEW is the inventory/basic-information face shared with ordinary
+            # Space members.  VIEW_CONFIG is deliberately narrower: it tells
+            # clients that this caller has an explicit collaborator row and may
+            # open the Bot configuration surface in read-only mode.  Keep it
+            # independent from EDIT because an online service publication has
+            # no lifecycle edit action, while its explicit collaborators still
+            # retain MEMBER-level reads on the underlying Bot configuration.
+            if (
+                explicit
+                and level < PermissionLevel.OWNER
+                and BotAction.VIEW_CONFIG not in allowed
+            ):
+                allowed = (*allowed, BotAction.VIEW_CONFIG)
             if BotAction.DELETE in actions:
                 disabled.setdefault(
                     BotAction.DELETE.value, "Bot Owner permission required"

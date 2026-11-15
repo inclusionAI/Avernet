@@ -63,6 +63,8 @@ describe('PermissionCard', () => {
     expect(screen.getByText('对用户可见性')).toHaveClass('text-sm', 'text-foreground');
     expect(screen.getByRole('heading', { level: 4, name: 'Bot 好友审批' })).toBeInTheDocument();
     expect(screen.getByText('好友审批策略')).toHaveClass('text-sm', 'text-foreground');
+    // 独立协作权限页不出现修复入口（AC-23）。
+    expect(screen.queryByRole('button', { name: '修复信息' })).not.toBeInTheDocument();
   });
 
   it('only shows verified Bot identity fields in the card header', () => {

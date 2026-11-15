@@ -131,6 +131,9 @@ class AvernetSubagent:
                         identity_file=self._spec.identity_file,
                         metadata=dict(self._spec.metadata),
                         config_manifest=self._spec.config_manifest,
+                        # Carried from the run's source so the created Bot
+                        # inherits that passport and skips human approval.
+                        identity_bot_id=self._spec.identity_bot_id or None,
                     ),
                     # Platform identity follows the spawn's durable identity and
                     # the attempt: agent_id is stable across D16 respawns (rebind

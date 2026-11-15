@@ -27,7 +27,7 @@ from agentclaw.community.di.modules.ecb_config import resource_ready_settings
 from agentclaw.community.kernel.deploy_runtime import DeployRuntime
 from agentclaw.community.plugin_api.http_client import (
     QUALIFIER_BAAS,
-    QUALIFIER_BCN,
+    QUALIFIER_BCN, QUALIFIER_CLAWWEB,
     QUALIFIER_GENERAL,
     QUALIFIER_MASA_AGENT_EVAL,
 )
@@ -81,7 +81,7 @@ def _app_name() -> str | None:
 # from the qualifier constants themselves so the config surface cannot drift
 # from the injector keys.
 _HTTP_CLIENT_QUALIFIERS = frozenset(
-    {QUALIFIER_BAAS, QUALIFIER_BCN, QUALIFIER_GENERAL, QUALIFIER_MASA_AGENT_EVAL}
+    {QUALIFIER_BAAS, QUALIFIER_BCN, QUALIFIER_CLAWWEB, QUALIFIER_GENERAL, QUALIFIER_MASA_AGENT_EVAL}
 )
 # The policy fields an ``http_client`` block (or an override body) may name,
 # derived from the dataclass so the accepted config surface cannot drift from

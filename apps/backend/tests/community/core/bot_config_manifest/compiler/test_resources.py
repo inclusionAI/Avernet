@@ -87,3 +87,25 @@ async def test_grammar_rules_are_re_asked_and_reported_per_entry() -> None:
     # The oss directory without 'unpack' is refused before any fetch.
     assert "unpack" in reasons["data/tree/"]
     assert [e.path for e in declared.entries] == ["data/dup.txt"]
+
+
+@pytest.mark.asyncio
+async def test_a_bot_source_entry_is_skipped_by_the_resources_compiler() -> None:
+    """A ``protocol: bot`` resources entry reclassifies to BOT_FILE_SYNC; the
+    resources compiler skips it whole so the RESOURCES declaration holds only
+    stored-content entries. A mixed list is the case that proves the skip is in
+    the right place — one inline file through, the bot entry invisible."""
+    session, content, resolver = rig(
+        sources={"from_bot": {"protocol": "bot", "bot_id": "src_1", "owner_id": "u1"}}
+    )
+    declared = await compile_resources(
+        session,
+        [
+            {"path": "data/readme.md", "content": "hi\n"},
+            {"path": "workspace/", "from": "from_bot"},
+        ],
+        resolver=resolver,
+        content=content,
+    )
+    assert declared.failures == ()
+    assert [e.path for e in declared.entries] == ["data/readme.md"]

@@ -37,8 +37,8 @@ impl A2aProviderRegistrationCoreService for A2aProviderRegistrationCore {
         if !downlink.enabled {return Err(invalid("A2A requires enabled Provider downlink"));}
         self.providers.a2a_authentication(provider_id,&card.agent_card).await?;
         if params.bot_name!=bcs_service_api::types::a2a_names::card_bot_name(&card.agent_card).map_err(invalid)? {return Err(invalid("Bot name must match AgentCard.name"));}
+        let (owner, initial_managers) = bcs_service_api::types::bot_authority::normalize_provider_owners(&params.owners)?;
         if params.connection_mode != ProviderBotConnectionMode::Gateway || params.webhook_url.is_some()
-            || params.owners.len() != 1 || params.owners[0].trim().is_empty()
             || !(2..=64).contains(&params.bot_name.chars().count()) || params.bot_name != params.bot_name.trim()
             || card.interface.protocol_version != "1.0" || !card.agent_card.is_object()
             || card.registered_at_ms < 0 {
@@ -57,15 +57,16 @@ impl A2aProviderRegistrationCoreService for A2aProviderRegistrationCore {
         let bot_uuid = if downlink.auth_mode == bcs_service_api::ProviderAuthMode::AgentPassSubbots {
             new_bot_uuid()
         } else { params.bot_uuid.unwrap_or_else(new_bot_uuid) };
-        let owner = params.owners[0].trim();
+        let owner = owner.as_str();
         let capabilities = BotCapabilities { name: Some(params.bot_name), summary: params.summary,
             domains: params.domains, skills: params.skills, scopes: params.scopes,
-            visibility: "protected".into(), agent_code: identity.agent_code.clone(), ..Default::default() };
+            visibility: card.visibility.as_str().into(), agent_code: identity.agent_code.clone(), ..Default::default() };
         let bot = BotProviderRecord { bot_uuid: bot_uuid.clone(), provider_id: provider_id.into(),
             provider_bot_ref: reference.clone(), connection_mode: ProviderBotConnectionMode::Gateway,
             webhook_url: None, is_deleted: false };
         let token = new_session_token();
-        let initialization = OwnershipInitialization { owner_user_id: owner.into(), mutation: AuthorityMutation {
+        let initialization = OwnershipInitialization { initial_manager_user_ids: initial_managers,
+                owner_user_id: owner.into(), mutation: AuthorityMutation {
             mutation_id: uuid::Uuid::new_v4().to_string(), actor: AuthorityActor::Provider {provider_id:provider_id.into()},
         }};
         let snapshot = A2aBotRecord { bot_uuid: bot_uuid.clone(), provider_id: provider_id.into(),

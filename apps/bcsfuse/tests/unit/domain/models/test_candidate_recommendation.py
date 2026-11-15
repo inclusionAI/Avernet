@@ -8,12 +8,12 @@ from __future__ import annotations
 
 import pytest
 
-from src.domain.models.candidate_recommendation import (
+from app.domain.models.candidate_recommendation import (
     CandidateRecommendation,
     CandidateRecommendationResponse,
 )
-from src.domain.models.domain_coverage import DomainCoverage
-from src.domain.models.retrieval_mode import RetrievalMode
+from app.domain.models.domain_coverage import DomainCoverage
+from app.domain.models.retrieval_mode import RetrievalMode
 
 
 class TestCandidateRecommendationModel:
@@ -154,19 +154,21 @@ class TestCandidateRecommendationModel:
         )
         assert max_score.score == 1.0
 
-        # 超出边界应失败
+        # Model scores are not probabilities; reject only non-finite values.
+        for score in (-2.5, 2.5):
+            assert CandidateRecommendation(profile_key="worker:default", worker_id="worker", score=score).score == score
         with pytest.raises(Exception):
             CandidateRecommendation(
                 profile_key="staff_003:default",
                 worker_id="staff_003",
-                score=-0.1,
+                score=float("nan"),
             )
 
         with pytest.raises(Exception):
             CandidateRecommendation(
                 profile_key="staff_004:default",
                 worker_id="staff_004",
-                score=1.1,
+                score=float("inf"),
             )
 
 

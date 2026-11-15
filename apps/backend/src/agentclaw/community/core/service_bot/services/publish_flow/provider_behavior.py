@@ -119,9 +119,13 @@ class ProviderBehavior(ABC):
         """Whether an upgrade can revive a candidate BaaS bot that is no longer
         live (``FAILED`` / ``STOPPED``). ``True`` when the provider's UPDATE
         destroys and recreates the device in place; ``False`` when it cannot
-        rebuild a gone container, so the online deploy must retire the candidate
-        and release a fresh one instead."""
+        rebuild a gone container. The status-aware recovery method preserves
+        this capability by default and allows provider-specific retry policy."""
         ...
+
+    def should_upgrade_not_live_bot(self, status: str) -> bool:
+        """Preserve the provider's recovery capability unless it specializes a status."""
+        return self.upgrade_recovers_not_live_bot
 
     @property
     @abstractmethod
@@ -206,8 +210,8 @@ class TeclawProviderBehavior(ProviderBehavior):
     of them), so a build snapshots ``/workspace`` + identity files into OSS and
     embeds the refs;
     a teclaw upgrade has no startup callback, so the MCP outbound rule is refreshed
-    explicitly; its UPDATE cannot rebuild a gone container, so a not-live bot is
-    retired rather than upgraded; teclaw service bots do not support scale; and the
+    explicitly; its UPDATE cannot rebuild a stopped container, so STOPPED bots
+    are retired while FAILED retries reuse UPDATE; teclaw does not support scale; and the
     verify bot is kept (not destroyed) when online succeeds.
     """
 
@@ -322,10 +326,14 @@ class TeclawProviderBehavior(ProviderBehavior):
 
     @property
     def upgrade_recovers_not_live_bot(self) -> bool:
-        # A teclaw UPDATE cannot rebuild a gone container — it would just fail the
-        # publish and strand the record, so a not-live candidate is retired and
-        # replaced by a fresh first release.
+        # A teclaw UPDATE cannot rebuild a stopped container. This capability
+        # controls STOPPED recovery; FAILED retries still reuse UPDATE.
         return False
+
+    def should_upgrade_not_live_bot(self, status: str) -> bool:
+        # A failed operation does not prove this Teclaw instance is gone.
+        # STOPPED still follows the non-recovering capability above.
+        return status == "FAILED" or super().should_upgrade_not_live_bot(status)
 
     @property
     def destroys_verify_bot_on_online(self) -> bool:

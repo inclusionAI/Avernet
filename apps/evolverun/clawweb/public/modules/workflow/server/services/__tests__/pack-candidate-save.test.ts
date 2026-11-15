@@ -5,9 +5,10 @@ import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { createLocalRemote, runGit } from './clawflows-git-client-fixture.js';
-import { PackCandidateConflictError, PackCandidateOutcomeUnknownError, savePackCandidate, withPreparedPackCandidate, type SavePackCandidateInput } from '../pack-candidate-save.js';
+import { PackCandidateConflictError, PackCandidateOutcomeUnknownError, savePackCandidate, withPreparedPackCandidate, pushPreparedPackCandidate, resumePreparedPackCandidate, type SavePackCandidateInput } from '../pack-candidate-save.js';
 import { cloneClawflows, createTempRepo, removeTempRepo } from '../clawflows-git-client.js';
 import { readPackScriptSnapshot } from '../pack-script-snapshot.js';
+import { restorePreparedGitBundle } from '../pack-git-prepared.js';
 const injection = vi.hoisted(() => ({ push: undefined as undefined | ((args: string[], run: () => Promise<Buffer>) => Promise<Buffer>), afterPush: false, readsAfterPush: 0, failReads: false }));
 vi.mock('@avernet/clawweb-shared/server/services/git-execution', async importOriginal => {
   const actual = await importOriginal<typeof import('@avernet/clawweb-shared/server/services/git-execution')>();
@@ -45,11 +46,12 @@ function publish(): string {
   return commit;
 }
 function input(extra: Partial<SavePackCandidateInput> = {}): SavePackCandidateInput {
-  return { workflowId: 'flow', sourceVersion: 'current', sourceCommit: current, expectedSavedHead: null,
+  return { workflowId: 'flow', sourceVersion: 'current', sourceCommit: current, expectedSavedHead: current,
     config: { remoteUrl: bare, username: 'test', email: 'test@example.invalid' }, changes: [], ...extra };
 }
 function show(commit: string, file: string): string { return runGit(root, ['--git-dir', bare, 'show', `${commit}:${file}`]); }
-function head(): string { return runGit(root, ['--git-dir', bare, 'rev-parse', 'refs/heads/saved/flow']); }
+// The mutable saved snapshot now lives on wf; legacy saved assertions below stay explicit.
+function head(): string { return runGit(root, ['--git-dir', bare, 'rev-parse', 'refs/heads/wf/flow']); }
 beforeEach(() => { root = mkdtempSync(path.join(tmpdir(), 'candidate-test-')); bare = createLocalRemote(root); seed = path.join(root, 'seed'); });
 afterEach(() => { injection.push = undefined; injection.afterPush = false; injection.readsAfterPush = 0; injection.failReads = false; rmSync(root, { recursive: true, force: true }); });
 describe('savePackCandidate', () => {
@@ -60,14 +62,14 @@ describe('savePackCandidate', () => {
       { path: 'asset.bin', operation: 'create', contentBase64: Buffer.from([0, 255, 1]).toString('base64'), mode: '100644' },
       { path: 'workflow.pack.yaml', operation: 'replace', contentBase64: b64('id: pack\nversion: 2\nworkflows: [flow]\n'), mode: '100644' },
     ] }));
-    expect(result.branch).toBe('saved/flow'); expect(head()).toBe(result.commit);
+    expect(result.branch).toBe('wf/flow'); expect(head()).toBe(result.commit);
     const base = prefix ? `${prefix}/` : '';
     expect(show(result.commit, `${base}scripts/shared.txt`)).toBe('changed shared');
     expect(show(result.commit, 'outside.txt')).toBe('outside');
     expect(show(result.commit, `${base}workflows/flow.yaml`)).toBe('id: flow');
     expect(execFileSync('git', ['--git-dir', bare, 'show', `${result.commit}:${base}asset.bin`])).toEqual(Buffer.from([0, 255, 1]));
     expect(runGit(root, ['--git-dir', bare, 'ls-tree', result.commit, `${base}scripts/shared.txt`])).toMatch(/^100755 blob/);
-    expect(runGit(root, ['--git-dir', bare, 'rev-parse', 'refs/heads/wf/flow'])).toBe(current);
+    expect(runGit(root, ['ls-remote', bare, 'refs/heads/saved/flow'])).toBe('');
   });
   it('edits draft and deletes a file without affecting other files', async () => {
     current = seedPack('packs/pack');
@@ -78,20 +80,73 @@ describe('savePackCandidate', () => {
     expect(show(second.commit, 'outside.txt')).toBe('outside');
     expect(runGit(root, ['--git-dir', bare, 'ls-tree', '-r', '--name-only', second.commit])).not.toContain('scripts/shared.txt');
   });
-  it('permits replacing a different observed saved head from current, but rejects stale leases', async () => {
+  it('rejects current over a different saved commit even with its exact expected head', async () => {
     current = seedPack();
     const draft = await savePackCandidate(input({ changes: [
       { path: 'draft.txt', operation: 'create', contentBase64: b64('draft work'), mode: '100644' },
     ] }));
     await expect(savePackCandidate(input())).rejects.toBeInstanceOf(PackCandidateConflictError);
     expect(head()).toBe(draft.commit);
-    const replaced = await savePackCandidate(input({ expectedSavedHead: draft.commit, changes: [
-      { path: 'current-edit.txt', operation: 'create', contentBase64: b64('confirmed replacement'), mode: '100644' },
+    const attempted = input({ expectedSavedHead: draft.commit, changes: [
+      { path: 'current-edit.txt', operation: 'create', contentBase64: b64('current work'), mode: '100644' },
+    ] });
+    await expect(savePackCandidate(attempted)).rejects.toBeInstanceOf(PackCandidateConflictError);
+    await expect(withPreparedPackCandidate(attempted, async (_prepared, push) => push()))
+      .rejects.toThrow(/saved/i);
+    expect(head()).toBe(draft.commit);
+    expect(show(head(), 'draft.txt')).toBe('draft work');
+    expect(runGit(root, ['--git-dir', bare, 'ls-tree', '--name-only', head()])).not.toContain('current-edit.txt');
+  });
+  it('ignores a distinct saved ref, even when it has the same tree as wf', async () => {
+    current = seedPack();
+    const tree = runGit(seed, ['rev-parse', `${current}^{tree}`]);
+    const saved = runGit(seed, ['commit-tree', tree, '-p', current, '-m', 'distinct saved']);
+    runGit(seed, ['push', bare, `${saved}:refs/heads/saved/flow`]);
+    const result = await savePackCandidate(input({ expectedSavedHead: current }));
+    expect(head()).toBe(result.commit);
+    expect(runGit(root, ['--git-dir', bare, 'rev-parse', 'refs/heads/saved/flow'])).toBe(saved);
+    expect(show(saved, 'scripts/shared.txt')).toBe('shared legacy');
+  });
+  it.each(['push', 'resume'])('rejects a legacy current candidate through %s without replacing saved', async entry => {
+    current = seedPack();
+    const prepared = await withPreparedPackCandidate(input({ changes: [
+      { path: 'current-edit.txt', operation: 'create', contentBase64: b64('current work'), mode: '100644' },
+    ] }), async candidate => candidate);
+    const draft = await savePackCandidate(input({ changes: [
+      { path: 'draft.txt', operation: 'create', contentBase64: b64('draft work'), mode: '100644' },
     ] }));
-    expect(head()).toBe(replaced.commit);
-    expect(show(replaced.commit, 'current-edit.txt')).toBe('confirmed replacement');
-    expect(runGit(root, ['--git-dir', bare, 'ls-tree', '--name-only', replaced.commit])).not.toContain('draft.txt');
-    await expect(savePackCandidate(input({ expectedSavedHead: draft.commit }))).rejects.toBeInstanceOf(PackCandidateConflictError);
+    // Simulate an older, valid journal that explicitly confirmed the saved head.
+    const legacy = { ...prepared, expectedSavedHead: draft.commit };
+    if (entry === 'resume') {
+      await expect(resumePreparedPackCandidate(legacy, input().config)).rejects.toBeInstanceOf(PackCandidateConflictError);
+    } else {
+      const dir = await createTempRepo();
+      try {
+        await cloneClawflows(dir, input().config);
+        await restorePreparedGitBundle(dir, legacy.bundleBase64);
+        await expect(pushPreparedPackCandidate(dir, legacy)).rejects.toBeInstanceOf(PackCandidateConflictError);
+      } finally { await removeTempRepo(dir); }
+    }
+    expect(head()).toBe(draft.commit);
+    expect(show(head(), 'draft.txt')).toBe('draft work');
+    expect(runGit(root, ['--git-dir', bare, 'ls-tree', '--name-only', head()])).not.toContain('current-edit.txt');
+  });
+  it('refuses to replay a retired saved journal, leaving both refs intact', async () => {
+    current = seedPack();
+    const prepared = await withPreparedPackCandidate(input(), async candidate => candidate);
+    const draft = await savePackCandidate(input({ changes: [
+      { path: 'draft.txt', operation: 'create', contentBase64: b64('draft work'), mode: '100644' },
+    ] }));
+    const legacy = { ...prepared, branch: 'saved/flow', expectedSavedHead: draft.commit };
+    const dir = await createTempRepo();
+    try {
+      await cloneClawflows(dir, input().config);
+      await restorePreparedGitBundle(dir, legacy.bundleBase64);
+      runGit(dir, ['push', '--force', 'origin', `${legacy.commit}:refs/heads/saved/flow`]);
+    } finally { await removeTempRepo(dir); }
+    await expect(resumePreparedPackCandidate(legacy, input().config)).rejects.toThrow(/Invalid prepared candidate/);
+    expect(head()).toBe(draft.commit);
+    expect(runGit(root, ['--git-dir', bare, 'rev-parse', 'refs/heads/saved/flow'])).toBe(legacy.commit);
   });
   it('allows current save when saved exactly equals the source commit', async () => {
     current = seedPack();
@@ -151,7 +206,7 @@ describe('savePackCandidate', () => {
     expect(arrived).toBe(2);
     expect(rejected && rejected.status === 'rejected' && rejected.reason).toBeInstanceOf(PackCandidateOutcomeUnknownError);
     if (rejected?.status === 'rejected' && rejected.reason instanceof PackCandidateOutcomeUnknownError) {
-      expect(rejected.reason.branch).toBe('saved/flow');
+      expect(rejected.reason.branch).toBe('wf/flow');
       expect(rejected.reason.commit).not.toBe(head());
     }
     expect(['one', 'two']).toContain(show(head(), 'new.txt'));
@@ -166,7 +221,7 @@ describe('savePackCandidate', () => {
         if (scenario !== 'authentication or rejection') {
           await run();
           if (scenario === 'moved after success') {
-            runGit(root, ['--git-dir', bare, 'update-ref', 'refs/heads/saved/flow', current]);
+            runGit(root, ['--git-dir', bare, 'update-ref', 'refs/heads/wf/flow', current]);
           }
         }
         injection.afterPush = true;
@@ -178,7 +233,7 @@ describe('savePackCandidate', () => {
       catch (e) { error = e; }
       expect(error).toBeInstanceOf(PackCandidateOutcomeUnknownError);
       const unknown = error as PackCandidateOutcomeUnknownError;
-      expect(unknown.branch).toBe('saved/flow'); expect(unknown.commit).toMatch(/^[a-f0-9]{40,64}$/);
+      expect(unknown.branch).toBe('wf/flow'); expect(unknown.commit).toMatch(/^[a-f0-9]{40,64}$/);
       expect(unknown.message).not.toContain('secret');
       expect(calls).toBe(1); expect(injection.readsAfterPush).toBe(0);
       if (scenario === 'moved after success') { expect(head()).toBe(current); expect(show(unknown.commit, 'new.txt')).toBe('candidate'); }
@@ -193,7 +248,7 @@ describe('savePackCandidate', () => {
     try { await savePackCandidate(input()); } catch (e) { error = e; }
     expect(error).toBeInstanceOf(PackCandidateOutcomeUnknownError);
     const unknown = error as PackCandidateOutcomeUnknownError;
-    expect(unknown.branch).toBe('saved/flow'); expect(unknown.commit).toMatch(/^[a-f0-9]{40,64}$/);
+    expect(unknown.branch).toBe('wf/flow'); expect(unknown.commit).toMatch(/^[a-f0-9]{40,64}$/);
     expect(unknown.message).not.toContain('secret');
     expect(runGit(root, ['ls-remote', bare, 'refs/heads/saved/flow'])).toBe('');
   });
@@ -206,7 +261,7 @@ describe('savePackCandidate', () => {
     await expect(savePackCandidate(input())).rejects.toThrow('Unsafe Pack entry');
   });
 
-  it('checks current before pushing, but saved CAS cannot atomically guard a later current advance', async () => {
+  it('wf CAS rejects even a server-side advance after the client preflight', async () => {
     current = seedPack();
     writeFileSync(path.join(seed, 'new-current.txt'), 'new current');
     runGit(seed, ['add', '.']);
@@ -215,12 +270,12 @@ describe('savePackCandidate', () => {
     runGit(seed, ['push', bare, `${next}:refs/heads/next`]);
     const hook = path.join(bare, 'hooks', 'pre-receive');
     writeFileSync(hook, `#!/bin/sh\nunset GIT_QUARANTINE_PATH GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES\ngit update-ref refs/heads/wf/flow ${next}\n`, { mode: 0o755 });
-    const result = await savePackCandidate(input({ changes: [
+    await expect(savePackCandidate(input({ changes: [
       { path: 'saved.txt', operation: 'create', contentBase64: b64('candidate'), mode: '100644' },
-    ] }));
+    ] }))).rejects.toBeInstanceOf(PackCandidateOutcomeUnknownError);
     expect(runGit(root, ['--git-dir', bare, 'rev-parse', 'refs/heads/wf/flow'])).toBe(next);
-    expect(head()).toBe(result.commit);
-    expect(runGit(root, ['--git-dir', bare, 'rev-parse', `${result.commit}^`])).toBe(current);
+    expect(head()).toBe(next);
+    expect(runGit(root, ['ls-remote', bare, 'refs/heads/saved/flow'])).toBe('');
   });
 
   it.each([
@@ -257,7 +312,7 @@ describe('savePackCandidate', () => {
     expect(head()).toBe(result.commit);
   });
 
-  it('rejects mixed root and nested Pack layouts regardless of which workflow is selected', async () => {
+  it('allows editing ordinary packs/ resources for the selected root workflow', async () => {
     seedPack();
     const other = path.join(seed, 'packs/other');
     mkdirSync(path.join(other, 'workflows'), { recursive: true });
@@ -265,10 +320,12 @@ describe('savePackCandidate', () => {
     writeFileSync(path.join(other, 'workflows/other.yaml'), 'id: other\n');
     current = publish();
     runGit(seed, ['push', bare, `${current}:refs/heads/wf/other`]);
-    await expect(savePackCandidate(input({ changes: [{ path: 'packs/other/workflows/other.yaml', operation: 'replace',
-      contentBase64: b64('id: other\nmodified: true\n'), mode: '100644' }] }))).rejects.toThrow('Mixed root and nested Pack layout');
+    const result = await savePackCandidate(input({ changes: [{ path: 'packs/other/workflows/other.yaml', operation: 'replace',
+      contentBase64: b64('id: other\nmodified: true\n'), mode: '100644' }] }));
+    expect(show(result.commit, 'packs/other/workflows/other.yaml')).toBe('id: other\nmodified: true');
+    expect(show(result.commit, 'workflow.pack.yaml').trimEnd()).toBe('id: pack\nversion: 1\nworkflows:\n  - id: flow\n    file: workflows/flow.yaml');
     await expect(savePackCandidate(input({ workflowId: 'other' }))).rejects.toThrow('Mixed root and nested Pack layout');
-    expect(runGit(root, ['ls-remote', bare, 'refs/heads/saved/*'])).toBe('');
+    expect(runGit(bare, ['ls-tree', '-r', '--name-only', result.commit])).toContain('packs/other/workflow.pack.yaml');
   });
   it('rejects introducing a nested manifest into a root Pack', async () => {
     current = seedPack();
@@ -395,7 +452,7 @@ describe('savePackCandidate', () => {
     expect(execFileSync('git', ['--git-dir', bare, 'show', `${saved.commit}:${destination}asset.bin`])).toEqual(Buffer.from([0, 255, 128, 1]));
     if (base) expect(runGit(root, ['--git-dir', bare, 'ls-tree', '-r', '--name-only', saved.commit, base])).toBe('');
     expect(show(saved.commit, 'outside.txt')).toBe('outside');
-    expect(runGit(root, ['--git-dir', bare, 'rev-parse', 'refs/heads/wf/flow'])).toBe(current);
+    expect(runGit(root, ['ls-remote', bare, 'refs/heads/saved/flow'])).toBe('');
     expect(runGit(root, ['--git-dir', bare, 'tag', '-l'])).toBe('');
   });
 

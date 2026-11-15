@@ -6,8 +6,8 @@ Stage 1 Adapter Tests
 
 import pytest
 
-from src.infra.adapters.in_memory_worker_registry_store import InMemoryWorkerRegistryStore
-from src.domain.models.worker import (
+from app.infra.adapters.in_memory_worker_registry_store import InMemoryWorkerRegistryStore
+from app.domain.models.worker import (
     Worker,
     WorkerType,
     WorkerIdentity,
@@ -17,9 +17,9 @@ from src.domain.models.worker import (
     Capability,
     CapabilityLevel,
 )
-from src.domain.models.worker_lifecycle_state import WorkerLifecycleState
-from src.domain.models.worker_source_info import WorkerSourceType
-from src.domain.exceptions import DuplicateWorkerException, WorkerNotFoundException
+from app.domain.models.worker_lifecycle_state import WorkerLifecycleState
+from app.domain.models.worker_source_info import WorkerSourceType
+from app.domain.exceptions import DuplicateWorkerException, WorkerNotFoundException
 
 
 class TestInMemoryWorkerRegistryStore:

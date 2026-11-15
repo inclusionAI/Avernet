@@ -9,7 +9,7 @@ import { useEffect, useState } from 'react';
  * 改为「确认后渲染」，历史装载与渲染之间的任何缝隙（setMessages 生效、占位过滤、WS 补齐、
  * BubbleList 挂载等）都被骨架屏吸收，物理上不再暴露「发送一条消息开始」中间态。
  *
- * 与就绪判定解耦：只看「可见消息空不空」与「在不在线」，不依赖状态机的任何中间路径。
+ * 单聊可通过 historyReady 提前结束骨架屏；其他场景仍按原连接/空态确认规则处理。
  */
 export const EMPTY_CONFIRM_MS = 1000;
 
@@ -18,6 +18,7 @@ export function useMessageAreaSkeleton({
   status,
   confirmMs = EMPTY_CONFIRM_MS,
   historyOnlyReady = false,
+  historyReady,
 }: {
   /** 渲染口径的可见消息（调用方须与消息区渲染层共用同一过滤）。 */
   messages: ChatMessage[];
@@ -27,6 +28,8 @@ export function useMessageAreaSkeleton({
   confirmMs?: number;
   /** 只读会话由 HTTP 完成信号确认历史，不等待不存在的 WS。 */
   historyOnlyReady?: boolean;
+  /** 单聊 HTTP 历史已完成：阅读历史（含空态）不等待连接、IAM 和握手。 */
+  historyReady?: boolean;
 }): boolean {
   const isEmpty = messages.length === 0;
   const [emptyConfirmed, setEmptyConfirmed] = useState(false);
@@ -46,5 +49,6 @@ export function useMessageAreaSkeleton({
   // 内容显示的充分条件 = 可见消息非空 且 顶栏已连接（预览反馈第六轮：单聊历史经 HTTP 先到、
   // WS 连接后到时，骨架屏撑到连接完成——顶栏变绿与历史出现严格同帧，两链路视觉一致）。
   const contentReady = !isEmpty && status === 'connected';
+  if (historyReady !== undefined) return !historyReady;
   return !historyOnlyReady && !contentReady && !emptyConfirmed;
 }

@@ -22,6 +22,7 @@ from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.http_client import (
     QUALIFIER_BAAS,
     QUALIFIER_BCN,
+    QUALIFIER_CLAWWEB,
     QUALIFIER_GENERAL,
     QUALIFIER_MASA_AGENT_EVAL,
     HttpClient,
@@ -123,4 +124,19 @@ class HttpClientModule(Module):
         base_url = config.base_url
         policy = pool.for_qualifier(QUALIFIER_MASA_AGENT_EVAL)
         _log_binding(QUALIFIER_MASA_AGENT_EVAL, base_url, policy)
+        return _client(base_url, policy)
+
+    @singleton
+    @provider
+    @inject
+    def clawweb_http_client(
+        self, clawweb: cfg.ClawwebConfig, pool: cfg.HttpClientPoolConfig
+    ) -> Annotated[HttpClient, QUALIFIER_CLAWWEB]:
+        """Clawweb client — the ``task_nav`` clone target. Host (prod / pre /
+        the simulator's clawweb service) is one canonical value per deployment,
+        selected by the overlay the same way every other binding's is; the
+        ``task_nav`` clone Port POSTs the relative clone path against it."""
+        base_url = clawweb.base_url
+        policy = pool.for_qualifier(QUALIFIER_CLAWWEB)
+        _log_binding(QUALIFIER_CLAWWEB, base_url, policy)
         return _client(base_url, policy)

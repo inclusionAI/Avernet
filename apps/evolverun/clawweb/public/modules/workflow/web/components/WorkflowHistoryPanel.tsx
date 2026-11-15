@@ -1,10 +1,10 @@
 import { useState, useEffect, useCallback } from 'react'
-import { stringify as stringifyYaml } from 'yaml'
 import { api } from '@avernet/clawweb-shared/web/api/client'
 import type { DeployHistoryItem, VersionSnapshot } from '@avernet/clawweb-shared/web/types'
 import { workflowVersionSourceLabel } from '../utils/workflow-version-source'
 import { useWorkflowAccess } from '../api/hooks'
 import WorkflowVersionDiff from './WorkflowVersionDiff'
+import YamlCodeViewer from './YamlCodeViewer'
 
 interface WorkflowHistoryPanelProps {
   workflowId: string
@@ -29,18 +29,6 @@ function formatTime(epochSec: number): string {
   return new Date(epochSec * 1000).toLocaleString()
 }
 
-/** Best-effort: render spec_json as text. Handles the {"content":"yaml"} wrapper. */
-function specJsonToText(specJson: string): string {
-  try {
-    const parsed = JSON.parse(specJson)
-    if (parsed && typeof parsed === 'object' && typeof parsed.content === 'string' && !Array.isArray(parsed.nodes)) {
-      return parsed.content
-    }
-    return stringifyYaml(parsed, { lineWidth: 0 })
-  } catch {
-    return specJson
-  }
-}
 
 export default function WorkflowHistoryPanel({ workflowId, onActiveVersionChange, onClose }: WorkflowHistoryPanelProps) {
   const [history, setHistory] = useState<(DeployHistoryItem & { source?: import('../../server/contracts/workflow-version-source').WorkflowVersionSource | null })[]>([])
@@ -238,9 +226,7 @@ export default function WorkflowHistoryPanel({ workflowId, onActiveVersionChange
                 {snapshotLoading ? (
                   <div className="p-4 text-sm text-gray-500">加载中…</div>
                 ) : snapshot ? (
-                  <pre className="flex-1 overflow-auto bg-slate-950 p-5 font-mono text-xs leading-relaxed text-slate-200">
-                    {specJsonToText(snapshot.specJson)}
-                  </pre>
+                  <YamlCodeViewer value={snapshot.specJson} />
                 ) : (
                   <div className="p-4 text-sm text-gray-400">无内容</div>
                 )}

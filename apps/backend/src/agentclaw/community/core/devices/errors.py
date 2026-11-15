@@ -64,3 +64,7 @@ class DeviceAlreadyExistsError(DeviceDomainError):
 class DeviceLimitExceededError(DeviceDomainError):
     """超过设备数量上限"""
     pass
+
+
+class DeviceFileSystemReadOnlyError(Exception):
+    """The target device explicitly reported a read-only filesystem."""

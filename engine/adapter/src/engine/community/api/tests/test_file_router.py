@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import io
 import asyncio
+import errno
 import sys
 from unittest.mock import AsyncMock, MagicMock
 
@@ -187,6 +188,39 @@ class TestCount:
 
 
 class TestUpload:
+    def test_plugin_http_exception_keeps_original_mapping(self, rich_manager, client):
+        from fastapi import HTTPException
+
+        plugin = MagicMock()
+        plugin.upload = AsyncMock(side_effect=HTTPException(status_code=403, detail="other"))
+        rich_manager._active_engine._file = plugin
+        resp = client.post("/api/file/upload", data={"target_path": "/x/y"},
+                           files={"file": ("x", b"data")})
+        assert resp.status_code == 500
+
+    def test_request_body_read_error_is_not_device_read_only(self, rich_manager, client, monkeypatch):
+        from starlette.datastructures import UploadFile
+
+        monkeypatch.setattr(UploadFile, "read", AsyncMock(side_effect=OSError(errno.EROFS, "temporary storage")))
+        resp = client.post("/api/file/upload", data={"target_path": "/x/y"},
+                           files={"file": ("x", b"data")})
+        assert resp.status_code == 500
+
+    @pytest.mark.parametrize(("error", "status"), [
+        (OSError(errno.EROFS, "read-only", "/private/path"), 403),
+        (OSError(errno.EIO, "I/O failure"), 500),
+        (PermissionError(errno.EACCES, "permission"), 403),
+    ])
+    def test_read_only_is_distinct_from_other_failures(self, rich_manager, client, error, status):
+        plugin = MagicMock()
+        plugin.upload = AsyncMock(side_effect=error)
+        rich_manager._active_engine._file = plugin
+        resp = client.post("/api/file/upload", data={"target_path": "/x/y"},
+                           files={"file": ("x", b"")})
+        assert resp.status_code == status
+        if error.errno == errno.EROFS:
+            assert resp.json() == {"detail": {"code": "filesystem_read_only"}}
+
     def test_dispatches(self, rich_manager, client):
         plugin = MagicMock()
         plugin.upload = AsyncMock(

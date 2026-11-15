@@ -9,6 +9,8 @@ export type {
   BotCopyAuthorization,
   BotCopyInput,
   BotCopyResult,
+  BotCopyStateSummary,
+  BotCopyStatus,
   BotCreateAuthorization,
   BotCreateAuthorizationPollResult,
   BotCreateInput,

@@ -22,7 +22,7 @@ describe("ClawMind workflow version wire contract", () => {
   let server: Server;
   let baseUrl: string;
   beforeAll(async () => {
-    raw.exec(`CREATE TABLE workflow_repair_release_records (record_id TEXT, record_kind TEXT, body_json TEXT); CREATE TABLE flow_runs (
+    raw.exec(`CREATE TABLE workflow_repair_release_records (record_id TEXT, record_kind TEXT, body_json TEXT); CREATE TABLE flow_runs (env VARCHAR(32) DEFAULT 'prod', tag VARCHAR(255) DEFAULT '',
       id INTEGER PRIMARY KEY, flow_id TEXT UNIQUE, workflow_id TEXT, workflow_title TEXT, status TEXT,
       params_json TEXT, input_json TEXT, result_json TEXT, node_count INTEGER, succeeded_count INTEGER,
       failed_count INTEGER, total_duration_ms INTEGER, total_token_usage INTEGER, triggered_by TEXT,
@@ -61,6 +61,35 @@ describe("ClawMind workflow version wire contract", () => {
     const response = await fetch(`${baseUrl}/runs`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ flow_id: "state-run", workflow_id: "demo", status: "running", state_json: stateJson }) });
     expect(response.status).toBe(201);
     expect(raw.prepare("SELECT state_json FROM flow_runs WHERE flow_id = 'state-run'").get()).toEqual({ state_json: stateJson });
+  });
+
+  it("rejects child dispatch claim fields on legacy and trial-shaped run creates without inserting", async () => {
+    const post = (body: unknown) => fetch(`${baseUrl}/runs`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    for (const value of ["secret-claim", "", null, false, 0, {}, []]) {
+      const state_json = JSON.stringify({ subworkflowFanouts: { a: { children: [{}, { dispatchClaimToken: value }] } } });
+      for (const fields of [{}, { run_request_id: "trial" }]) {
+        const response = await post({ flow_id: "blocked-run", workflow_id: "demo", status: "running", state_json, ...fields });
+        expect(response.status).toBe(400);
+        expect(await response.text()).not.toContain("secret-claim");
+      }
+    }
+    expect(raw.prepare("SELECT flow_id FROM flow_runs WHERE flow_id = 'blocked-run'").get()).toBeUndefined();
+  });
+
+  it("retains unrelated token-named business data and token-free fanout groups", async () => {
+    const state_json = JSON.stringify({ dispatchClaimToken: "user", workflowData: { dispatchClaimToken: "user" },
+      subworkflowFanouts: { node: { dispatchClaimToken: "user", children: [{ item: { dispatchClaimToken: "user" }, params: { dispatchClaimToken: "user" } }] } } });
+    const response = await fetch(`${baseUrl}/runs`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ flow_id: "business-token", workflow_id: "demo", status: "running", state_json, input_json: JSON.stringify({ dispatchClaimToken: "user" }), run: { state_json: JSON.stringify({ subworkflowFanouts: { node: { children: [{ dispatchClaimToken: "ignored" }] } } }) } }) });
+    expect(response.status).toBe(201);
+    expect(raw.prepare("SELECT state_json FROM flow_runs WHERE flow_id = 'business-token'").get()).toEqual({ state_json });
+  });
+
+  it("keeps existing runs with stored claims readable", async () => {
+    const state_json = JSON.stringify({ subworkflowFanouts: { node: { children: [{ dispatchClaimToken: "old-claim" }] } } });
+    raw.prepare("INSERT INTO flow_runs (flow_id, workflow_id, status, state_json) VALUES (?, ?, ?, ?)").run("old-claim-run", "demo", "running", state_json);
+    const response = await fetch(`${baseUrl}/runs/old-claim-run/state`);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ success: true, data: { state_json } });
   });
 
   it("rejects a double-encoded initial state", async () => {

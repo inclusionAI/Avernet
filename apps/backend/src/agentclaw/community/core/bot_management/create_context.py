@@ -102,3 +102,5 @@ class BotCreateSpec:
     # callers and is mutually exclusive with this bag.
     engine_properties: dict[str, Any] = field(default_factory=dict)
     expert_origin: ExpertOrigin | None = None
+    #: The Bot whose passport identity this one inherits; ``None`` = holds its own.
+    identity_bot_id: str | None = None

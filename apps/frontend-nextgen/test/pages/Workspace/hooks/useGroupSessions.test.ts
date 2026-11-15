@@ -437,15 +437,16 @@ it('身份切换后过期的兜底反查响应不得回填新身份列表', asyn
   const { result } = renderHook(() => useGroupSessions('g1'));
   await waitFor(() => expect(ss.getSessionDetail).toHaveBeenCalledWith('gone'));
 
+  // 身份切换前的在途响应才算旧身份响应；切换后 memberSync 会按新身份重新发起详情请求，
+  // 那些请求不属于本用例的「过期响应」，保持 pending。
+  const staleResolvers = detailResolvers.splice(0);
   // 反查在途时切换身份：useSessionMap 同步清缓存并递增 epoch。
   act(() => {
     useWorkspaceStore.setState({ activeIdentityId: 'other' });
   });
   await act(async () => {
-    // 排空所有在途 detail 请求（memberSync 的成功回调因 participants 为空是 no-op）。
-    detailResolvers
-      .splice(0)
-      .forEach((resolve) => resolve({ ok: true, data: session('gone', 'g1', '旧身份深处会话') }));
+    // 排空切换前的旧身份 detail 请求：two hooks 的响应都不得回填新身份缓存。
+    staleResolvers.forEach((resolve) => resolve({ ok: true, data: session('gone', 'g1', '旧身份深处会话') }));
     await Promise.resolve();
     await Promise.resolve();
   });

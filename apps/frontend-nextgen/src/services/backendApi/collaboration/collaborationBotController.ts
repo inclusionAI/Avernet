@@ -15,7 +15,7 @@ export interface CollaborationBotDto {
 
   bot_id: string;
   name?: string;
-  avatar_url?: string;
+  avatar_url?: string | null;
   status?: 'online' | 'hidden' | 'offline';
   reachability?: 'reachable' | 'unreachable';
   visibility?: 'public' | 'protected' | 'private';

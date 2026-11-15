@@ -1,3 +1,4 @@
+import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Spin } from '@/components/ui/Spin';
@@ -5,10 +6,11 @@ import type { Template } from '@/domain/evolution/types';
 import { history, useParams } from '@umijs/max';
 import { ArrowLeft, Pencil } from 'lucide-react';
 import { useCallback, useState } from 'react';
+import { DomainDetailTabs } from './DomainDetailTabs';
 import { DomainEditors } from './DomainEditors';
 import { DomainRuns } from './DomainRuns';
 import { DomainTemplates } from './DomainTemplates';
-import { ErrorBox, EvolutionHeader, JsonView, Section, useResource } from './shared';
+import { ErrorBox, Hint, JsonView, Section, useResource } from './shared';
 import { useEvolutionContext } from './useEvolutionContext';
 
 function DomainDetailContent() {
@@ -100,34 +102,37 @@ function DomainDetailContent() {
     }
   };
   return (
-    <main className="h-full overflow-y-auto bg-background p-4 sm:p-6 lg:px-10">
+    <main className="h-full overflow-y-auto bg-background p-5">
       <div className="w-full min-w-0 space-y-5">
-        <EvolutionHeader tab="templates" showTabs={false} />
-        <header className="flex flex-wrap items-center gap-3">
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label="返回评测模板"
-            onClick={() => history.push('/evolution-factory?tab=templates')}
-          >
-            <ArrowLeft size={18} />
-          </Button>
-          <h2 className="min-w-0 break-words text-xl font-semibold">{domain.data?.name ?? domainId}</h2>
-          {writable && domain.data && (
+        <header className="flex min-w-0 flex-wrap items-center gap-3">
+          <div className="flex min-w-0 flex-1 items-center gap-3">
             <Button
               variant="ghost"
               size="icon"
-              aria-label="编辑 Domain"
-              onClick={() => {
-                setDomainName(domain.data!.name);
-                setDescription(domain.data!.description || '');
-                setEditDomain(true);
-              }}
+              aria-label="返回评测模板"
+              onClick={() => history.push('/evolution-factory?tab=templates')}
             >
-              <Pencil size={14} />
+              <ArrowLeft size={18} />
             </Button>
-          )}
-          <div className="ml-auto flex flex-wrap gap-2">
+            <Hint content={domain.data?.name ?? domainId}>
+              <h1 className="min-w-0 truncate text-2xl font-medium leading-[34px]">{domain.data?.name ?? domainId}</h1>
+            </Hint>
+            {writable && domain.data && (
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="编辑 Domain"
+                onClick={() => {
+                  setDomainName(domain.data!.name);
+                  setDescription(domain.data!.description || '');
+                  setEditDomain(true);
+                }}
+              >
+                <Pencil size={14} />
+              </Button>
+            )}
+          </div>
+          <div className="ml-auto flex shrink-0 flex-wrap gap-2">
             <Button
               variant="outline"
               size="sm"
@@ -185,36 +190,32 @@ function DomainDetailContent() {
         <ErrorBox message={error} />
         {domain.loading && <Spin tip="加载 Domain…" />}
         {domain.data && (
-          <div className="-mt-3 space-y-1 pl-12 text-xs text-muted-foreground">
-            <p className="break-words">
-              {ownerUserId}/{domainId} · {domain.data.description || '暂无描述'}
-            </p>
-            <p>{domain.data.templateCount} 个模板</p>
+          <div
+            className="min-w-0 space-y-2 rounded-lg bg-muted/30 px-4 py-3 text-xs text-muted-foreground"
+            aria-label="Domain 信息"
+          >
+            <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2">
+              <span className="shrink-0">Owner：{ownerUserId}</span>
+              <Hint content={domainId}>
+                <span className="min-w-0 flex-1 truncate font-mono">Domain ID：{domainId}</span>
+              </Hint>
+              <Badge tone="neutral" className="shrink-0 whitespace-nowrap">
+                {domain.data.templateCount ?? templates.data?.length ?? '—'} 个模板
+              </Badge>
+            </div>
+            <Hint content={domain.data.description || undefined}>
+              <p className="truncate leading-5">{domain.data.description || '暂无描述'}</p>
+            </Hint>
           </div>
         )}
-        <div role="tablist" aria-label="评测详情" className="flex gap-6 border-b border-divider">
-          {(
-            [
-              ['detail', '目标详情'],
-              ['tasks', '关联任务'],
-            ] as const
-          ).map(([value, label]) => (
-            <Button
-              variant="ghost"
-              style={{ height: 'auto', whiteSpace: 'normal' }}
-              type="button"
-              role="tab"
-              key={value}
-              aria-selected={tab === value}
-              className={`border-b-2 px-3 pb-3 text-sm ${
-                tab === value ? 'border-primary text-primary' : 'border-transparent text-muted-foreground'
-              }`}
-              onClick={() => setTab(value)}
-            >
-              {label}
-            </Button>
-          ))}
-        </div>
+        <DomainDetailTabs
+          tab={tab}
+          onChange={setTab}
+          writable={writable}
+          busy={busy}
+          selectedCount={selected.length}
+          onPublish={batchPublish}
+        />
         {tab === 'detail' && (
           <DomainTemplates
             templates={templates}
@@ -222,7 +223,6 @@ function DomainDetailContent() {
             selected={selected}
             setSelected={setSelected}
             busy={busy}
-            batchPublish={batchPublish}
             startTemplate={startTemplate}
             archiveTemplate={(name) => mutation(() => evolutionApi.archiveTemplate(ownerUserId, domainId, name))}
           />

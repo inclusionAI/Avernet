@@ -52,7 +52,7 @@ describe("POST /:flowId/rerun — lifecycle_stage propagation", () => {
       identity_key TEXT, current_phase TEXT, started_at INTEGER, completed_at INTEGER, credentials_json TEXT,
       origin_session_key TEXT, origin_session_id TEXT, origin_bot_id TEXT, user_id TEXT, plugin_version TEXT,
       engine TEXT, state_json TEXT, workflow_version INTEGER, workflow_deploy_number INTEGER,
-      gmt_create INTEGER, gmt_modified INTEGER, evolution_analysis_status TEXT
+      gmt_create INTEGER, gmt_modified INTEGER, evolution_analysis_status TEXT, env TEXT, tag TEXT
     ); CREATE TABLE flow_events (
       id INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT, flow_id TEXT, workflow_id TEXT,
       node_id TEXT, event_type TEXT, attempt INTEGER, time INTEGER, data_json TEXT,
@@ -118,6 +118,21 @@ describe("POST /:flowId/rerun — lifecycle_stage propagation", () => {
         Math.floor(Date.now() / 1000),
       );
   }
+
+  it("inherits run markers independently of Bot lifecycle stage", async () => {
+    insertRun("flow-markers", {
+      credentialsJson: JSON.stringify({ STAGE: "draft" }),
+      inputJson: JSON.stringify({ command: '/workflow run test-workflow --tag release-2 --run-env prod --run-tag old' }),
+    });
+    raw.prepare("UPDATE flow_runs SET env = ?, tag = ? WHERE flow_id = ?").run("test", 'regression "A"', "flow-markers");
+    const res = await fetch(`${baseUrl}/runs/flow-markers/rerun`, { method: "POST" });
+    expect(res.status).toBe(200);
+    expect(sendInterventionMock).toHaveBeenCalledOnce();
+    const call = sendInterventionMock.mock.calls[0][0];
+    expect(call.lifecycleStage).toBe("draft");
+    expect(call.message).toContain('--tag release-2 --run-env="test" --run-tag="regression \\"A\\""');
+    expect(call.message).not.toContain("--run-tag old");
+  });
 
   it("passes lifecycleStage=draft when credentials_json has STAGE=draft", async () => {
     insertRun("flow-draft", {
@@ -278,7 +293,7 @@ describe("POST /:flowId/rerun — command resolution", () => {
       identity_key TEXT, current_phase TEXT, started_at INTEGER, completed_at INTEGER, credentials_json TEXT,
       origin_session_key TEXT, origin_session_id TEXT, origin_bot_id TEXT, user_id TEXT, plugin_version TEXT,
       engine TEXT, state_json TEXT, workflow_version INTEGER, workflow_deploy_number INTEGER,
-      gmt_create INTEGER, gmt_modified INTEGER, evolution_analysis_status TEXT
+      gmt_create INTEGER, gmt_modified INTEGER, evolution_analysis_status TEXT, env TEXT, tag TEXT
     ); CREATE TABLE flow_events (
       id INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT, flow_id TEXT, workflow_id TEXT,
       node_id TEXT, event_type TEXT, attempt INTEGER, time INTEGER, data_json TEXT,

@@ -90,7 +90,6 @@
       "base_url": "${BCS_FUSE_URL:-}"
     },
     "bot_config_manifest": {
-      "content_store_dir": "./data/manifest_content",
       "fetch_transport_allowlist": [],
       "teclaw_platform_managed": false
     },
@@ -104,6 +103,9 @@
     },
     "cache": {
       "redis_url": "${REDIS_URL:-}"
+    },
+    "clawweb": {
+      "base_url": "${CLAWWEB_URL:-}"
     },
     "community_identity": {
       "passport_mode": "self_issued"

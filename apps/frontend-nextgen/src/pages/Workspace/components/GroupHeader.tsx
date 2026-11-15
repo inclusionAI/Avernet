@@ -2,6 +2,8 @@ import { IconButton } from '@/components/ui';
 import { ChatConnectionStatus } from '@/components/Workspace/ChatConnectionStatus';
 import { PrimaryNavToggle } from '@/components/Workspace/PrimaryNav';
 import type { GroupView, SessionView } from '@/domain/collaboration';
+import { getDisplayParticipants, getParticipantDisplayCount } from '@/domain/collaboration/participantPresentation';
+import { HISTORY_SEARCH_ENABLED } from '@/domain/conversation/featureFlags';
 import type { GroupChatFavoritesModel } from '@/pages/Workspace/hooks/useGroupChatHeaderPanels';
 import type { DomainResult } from '@/services/workspace/identityService';
 import { cn } from '@/utils/cn';
@@ -124,11 +126,11 @@ export function GroupHeader({
   const [shareTarget, setShareTarget] = useState<'session' | 'group'>('session');
   const shareAnchorRef = useRef<HTMLSpanElement | null>(null);
 
-  const participants = selectedGroup?.participants ?? [];
+  // 展示口径：优先列表成员摘要（缺省回退完整明细），人数用接口权威计数并保留显式 0。
+  const participants = selectedGroup ? getDisplayParticipants(selectedGroup) : [];
   const humans = participants.filter((participant) => participant.kind === 'human').length;
   const bots = participants.filter((participant) => participant.kind === 'bot').length;
-  // 计数兜底：participants 未回填时退回列表接口的 participantCount 单计数。
-  const totalCount = selectedGroup?.participantCount || participants.length;
+  const totalCount = getParticipantDisplayCount(selectedGroup?.participantCount, participants);
 
   const handleShareSession = () => {
     setShareTarget('session');
@@ -256,7 +258,7 @@ export function GroupHeader({
                 onClick={() => onTogglePanel(activePanel === 'manage' ? 'none' : 'manage')}
               />
             ) : null}
-            {selectedSession ? (
+            {selectedSession && HISTORY_SEARCH_ENABLED ? (
               <HeaderIcon
                 label={activePanel === 'history' ? '关闭历史消息' : '历史消息'}
                 icon={<History className="size-4" aria-hidden />}

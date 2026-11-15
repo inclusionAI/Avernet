@@ -91,12 +91,13 @@ export function useConversationFavorites(options: {
           : null;
 
         if (view.bot.isAgentCodingBot && codingHost?.runSessionAction) {
+          conversationFavoriteService.invalidate(view.bot, userId);
           const result = await codingHost.runSessionAction({
             botId: view.bot.realBotId,
             userId,
             ownerId: view.bot.ownerId,
             action: { type: 'favorite', sessionId, favorite: favoriteState },
-          });
+          }).finally(() => conversationFavoriteService.invalidate(view.bot, userId));
           if (!isCurrent()) return false;
           if (!result.ok) {
             toast.error(result.message);

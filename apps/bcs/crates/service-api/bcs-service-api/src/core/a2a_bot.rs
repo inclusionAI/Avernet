@@ -29,8 +29,14 @@ pub trait A2aBotCoreService: Send + Sync {
     async fn provider_binding(&self, provider_id: &str, bot_uuid: &str) -> ServiceResult<BotProviderRecord>;
     async fn get_card(&self, bot_uuid: &str) -> ServiceResult<Option<A2aBotRecord>>;
     async fn get_by_name(&self, provider_id:&str, name:&str)->ServiceResult<Option<A2aBotRecord>>;
+    /// Exact, case-sensitive source extension agentId in one Provider; never a global lookup.
+    async fn get_by_provider_ref(&self, provider_id:&str, provider_bot_ref:&str)->ServiceResult<Option<A2aBotRecord>>;
     async fn refreshable_cards(&self, after_bot_uuid: Option<&str>, limit:u32) -> ServiceResult<Vec<A2aBotRecord>>;
     async fn replace_card(&self, record: A2aBotRecord) -> ServiceResult<A2aBotRecord>;
     /// Validates immutable affiliation and commits a complete validated Card.
+    async fn commit_card_with_visibility(&self,record:A2aBotRecord,expected:u64,visibility:Option<crate::types::a2a_bot::A2aRegistrationVisibility>)->ServiceResult<A2aBotRecord> {
+        if visibility.is_some() { return Err(crate::ServiceError::InternalError("visibility update unavailable".into())); }
+        self.commit_card(record,expected).await
+    }
     async fn commit_card(&self, record: A2aBotRecord, expected_revision: u64) -> ServiceResult<A2aBotRecord>;
 }

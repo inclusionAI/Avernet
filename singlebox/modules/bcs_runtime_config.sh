@@ -338,6 +338,22 @@ prepare_bcs_runtime_config() {
                 --state "$SINGLEBOX_QWENWORK_PROVIDER_STATE" --config "$config_file" || return 1
         done
     fi
+    if [ -n "${SINGLEBOX_ACCEPTANCE_REPAIR_PROVIDER_FILE:-}" ]; then
+        if [ "${SINGLEBOX_COVERAGE:-}" != "1" ]; then
+            log_error "Collaboration repair Provider fixtures require coverage mode"
+            return 1
+        fi
+        # The initial start precedes provisioning. On the BCS-only restart,
+        # authorize the newly registered Provider in generated copies only.
+        if [ -f "$SINGLEBOX_ACCEPTANCE_REPAIR_PROVIDER_FILE" ]; then
+            local fixture_python="${PROJECT_ROOT}/apps/backend/.venv/bin/python"
+            for config_file in "$base_config" "$local_config"; do
+                "$fixture_python" "${PROJECT_ROOT}/singlebox/ci/collaboration_repair_provider.py" authorize \
+                    --fixture "$SINGLEBOX_ACCEPTANCE_REPAIR_PROVIDER_FILE" \
+                    --config "$config_file" || return 1
+            done
+        fi
+    fi
     prepare_bcs_runtime_config_resources "$config_dir" || return 1
 
     BCS_CONFIG_DIR="$config_dir"

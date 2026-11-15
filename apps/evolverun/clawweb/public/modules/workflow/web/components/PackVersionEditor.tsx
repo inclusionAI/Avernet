@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import PackFileCodeEditor from './PackFileCodeEditor'
 
 /** The parent owns the complete candidate; this component neither loads nor persists it. */
 export type PackVersionFile = { path: string; contentBase64: string; mode: '100644' | '100755' }
@@ -290,12 +291,12 @@ export default function PackVersionEditor({ files, onChange, onUploadStateChange
               <button type="button" disabled={uploading} className="flex min-h-[31px] items-center rounded-[7px] border border-input bg-background px-2.5 text-[11px] font-semibold text-destructive hover:bg-destructive/5 disabled:opacity-40" onClick={() => { change(files.filter(file => file !== selected)); setSelectedPath(null) }}>删除所选文件</button>
             </div>
           </header>
-          <div className="min-h-[430px] flex-1 bg-[#fcfdff]">
+          <div className="flex min-h-[430px] flex-1 flex-col bg-background">
             {text === null
               ? <div className="p-4">
                 <p className="text-[11px] leading-[1.8] text-muted-foreground">此文件不是可安全编辑的 UTF-8 文本，或超过编辑大小限制；原内容保持不变，可上传文件替换。</p>
               </div>
-              : <textarea aria-label="文件内容" className="block h-full min-h-[430px] w-full flex-1 resize-none border-0 bg-[#fcfdff] px-4 py-4 font-mono text-[12px] leading-[1.8] text-foreground outline-none disabled:bg-muted/40" value={text} disabled={uploading} onChange={event => editText(event.target.value)} />}
+              : <PackFileCodeEditor path={selected.path} value={text} disabled={uploading} onChange={editText} />}
           </div>
           <footer className="flex items-center justify-between border-t border-border px-4 py-1.5">
             <span className="font-mono text-[10px] text-muted-foreground">{selectedBytes === null ? '—' : `${selectedBytes} B`} · UTF-8</span>
@@ -318,7 +319,7 @@ export default function PackVersionEditor({ files, onChange, onUploadStateChange
         <div className="border-b border-border/70 py-3">
           <p className="mb-2 text-[10px] font-bold text-muted-foreground">版本来源</p>
           <dl className="grid gap-1">
-            <div className="flex items-center justify-between gap-2"><dt className="text-[10px] text-muted-foreground">版本</dt><dd className="max-w-[65%] overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[10px] font-semibold text-foreground">{versionSource.version === 'current' ? '当前版（wf）' : '草稿版（saved）'}</dd></div>
+            <div className="flex items-center justify-between gap-2"><dt className="text-[10px] text-muted-foreground">版本</dt><dd className="max-w-[65%] overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[10px] font-semibold text-foreground">{versionSource.version === 'current' ? '当前版（生效 tag）' : '草稿版（wf）'}</dd></div>
             <div className="flex items-center justify-between gap-2"><dt className="text-[10px] text-muted-foreground">Pack</dt><dd className="max-w-[65%] overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[10px] font-semibold text-foreground">{versionSource.packId}</dd></div>
             <div className="flex items-center justify-between gap-2"><dt className="text-[10px] text-muted-foreground">分支 / Tag</dt><dd className="max-w-[65%] overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[10px] font-semibold text-foreground">{versionSource.baseRef}</dd></div>
             <div className="flex items-center justify-between gap-2"><dt className="text-[10px] text-muted-foreground">Commit</dt><dd className="max-w-[65%] overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[10px] font-semibold text-foreground">{versionSource.baseCommit}</dd></div>

@@ -50,11 +50,12 @@ export function computeAvailableInterventions(run: {
 }
 
 /**
- * Strip credentials_json from a flow run row for safe API responses.
+ * Strip credentials and internal association markers from API responses.
  * Adds derived safe fields instead of exposing raw credentials.
  */
 export function toSafeRunFields(run: Record<string, unknown>): Record<string, unknown> {
-  const { credentials_json, ...safe } = run;
+  const { credentials_json, ordinary_run_marker: _ordinaryMarker, parent_run_marker: _parentMarker,
+    child_run_marker: _childMarker, ...safe } = run;
   return {
     ...safe,
     ...("credentials_json" in run ? { hasCredentials: credentials_json != null && credentials_json !== "" } : {}),

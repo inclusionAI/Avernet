@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -249,6 +249,15 @@ class SessionFile(BaseModel):
     resource_id: str = Field(description="Opaque file resource identifier.")
     display_name: str = Field(description="Original display name.")
     status: str = Field(description="Upload or materialization state.")
+    creator_type: Literal["bot", "user"] | None = Field(
+        default=None, description="Resource origin: bot-generated or user-uploaded; null when unknown.",
+    )
+    creator_name: str | None = Field(
+        default=None, description="Creator display name captured on first creation; null when unknown.",
+    )
+    created_at: str | None = Field(
+        default=None, description="First session resource creation time in UTC ISO 8601; preserved across edits.",
+    )
     size_bytes: int | None = Field(
         default=None,
         description="Recorded byte size when available.",

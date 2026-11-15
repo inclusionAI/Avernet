@@ -80,7 +80,10 @@ export class AgentToolCallRepository {
         );
         // Stable retries remain readable even after the workload has advanced.
         if (existing) return this.resolveCreateRetry(existing, normalized);
-        if (!task || task.task_type !== this.taskType || !["pending", "running"].includes(task.status)) {
+        const config = task ? JSON.parse(task.config_json) : null;
+        const readOnlyRecheck = this.taskType === "session_recovery" && !normalized.isWrite
+          && config?.execution?.effectRecheck && ["waiting_effect", "completed", "failed", "canceled"].includes(task?.status ?? "");
+        if (!task || task.task_type !== this.taskType || (!["pending", "running"].includes(task.status) && !readOnlyRecheck)) {
           throw new AgentToolCallWorkloadConflictError(normalized.taskId, "task_state");
         }
         const workload = workloadIdentity(task.config_json);
@@ -94,10 +97,11 @@ export class AgentToolCallRepository {
           throw new AgentToolCallWorkloadConflictError(normalized.taskId, "authorization_scope");
         }
         if (input.toolCallLedgerGuard != null) {
-          input.toolCallLedgerGuard(
+          const prior = input.toolCallLedgerGuard(
             await this.toolCallLedger(tx, normalized.taskId, normalized.stepId),
-            { runtimeTargetVersion: workload.runtimeTargetVersion, taskConfig: JSON.parse(task.config_json), taskStatus: task.status },
+            { runtimeTargetVersion: workload.runtimeTargetVersion, taskConfig: config, taskStatus: task.status },
           );
+          if (prior) return { call: prior, created: false };
         }
         if (normalized.isWrite) {
           const active = (await tx.query<{ call_id: string }>(

@@ -105,7 +105,11 @@ async fn sqlite_cancellation_history_is_one_indexed_query_and_storage_failures_p
     assert_eq!(queries.len(), 1, "no per-message DB lookups");
     let plan = db.query(DbStatement::with_params(format!("EXPLAIN QUERY PLAN {}", queries[0].sql()), queries[0].params().to_vec())).await.unwrap();
     let detail = plan.iter().map(|row| bcs_db_api::db_get_column::<String>(row, "detail").unwrap()).collect::<Vec<_>>().join("; ");
-    assert_eq!(detail.matches("idx_delivery_source").count(), 1, "the per-message delivery aggregate must be indexed: {detail}");
+    // Either per-message index serves the aggregate; the Session-scoped one
+    // (043) matches all three equality columns of the correlated subquery.
+    assert_eq!(detail.matches("idx_delivery_source").count() + detail.matches("idx_delivery_session_message").count(), 1,
+        "the per-message delivery aggregate must be indexed: {detail}");
+    assert!(!detail.contains("SCAN history_delivery"), "{detail}");
     db.execute(DbStatement::new("DROP TABLE bcs_message_deliveries")).await.unwrap();
     assert!(reader.list_session_history("contract-group:abcd1234", MessageOwnerFilter::Any, None, None, None, 100).await.is_err());
 }

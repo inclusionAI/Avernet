@@ -26,7 +26,7 @@ use bcs_service_api::{GroupMetricCount, GroupMetricsSnapshotPort};
 #[derive(Debug, Default)]
 pub struct MemoryGroupRepo {
     groups: RwLock<HashMap<String, DomainGroup>>,
-    // Lock order: groups, then templates; no standalone Card read API.
+    // Writes and snapshot reads both lock groups before templates.
     card_templates: RwLock<HashMap<String, serde_json::Value>>,
     message_counts: RwLock<HashMap<String, usize>>,
     event_store: Option<Arc<MemoryEventStore>>,
@@ -88,6 +88,20 @@ impl GroupMetricsSnapshotPort for MemoryGroupRepo {
 
 #[async_trait]
 impl GroupRepoPort for MemoryGroupRepo {
+    async fn read_card_snapshot(&self, id: &str) -> ServiceResult<Option<bcs_service_api::types::GroupCardSnapshot>> {
+        let groups = self.groups.read().await;
+        let Some(group) = groups.get(id) else { return Ok(None); };
+        let cards = self.card_templates.read().await;
+        let card_template = cards.get(id).cloned().map(|card|
+            super::card_template::project_stored_template(card, id, group.label.as_deref(), group.context.as_deref())
+        ).transpose()?;
+        Ok(Some(bcs_service_api::types::GroupCardSnapshot {
+            group_id: group.id.clone(), group_kind: group.group_kind,
+            group_strategy: group.group_strategy, visibility: group.visibility.clone(),
+            record_status: group.record_status.clone(), card_template,
+        }))
+    }
+
     async fn has_public_group_with_members(&self, actor_ids: &[String]) -> ServiceResult<bool> {
         let ids = actor_ids.iter().collect::<std::collections::HashSet<_>>();
         Ok(self.groups.read().await.values().any(|g| g.visibility == "public" && g.record_status != "deleted"
@@ -210,7 +224,7 @@ impl GroupRepoPort for MemoryGroupRepo {
         }
         if deleting {
             cards.remove(&command.group_id);
-        } else if matches!(&command.mutation, GroupEventfulMutation::PatchMutableFields(patch) if patch.label.is_some()) {
+        } else if matches!(&command.mutation, GroupEventfulMutation::PatchMutableFields(patch) if patch.label.is_some() || patch.context.is_some()) {
             super::card_template::update_memory_template(&mut cards, &candidate);
         }
         Ok(candidate)
@@ -235,12 +249,15 @@ impl GroupRepoPort for MemoryGroupRepo {
             .get_mut(id)
             .ok_or_else(|| ServiceError::GroupNotFound(id.to_string()))?;
         let mut cards = self.card_templates.write().await;
+        let updates_card = patch.label.is_some() || patch.context.is_some();
         if let Some(label) = patch.label {
             group.label = Some(label);
-            super::card_template::update_memory_template(&mut cards, group);
         }
         if let Some(context) = patch.context {
             group.context = Some(context);
+        }
+        if updates_card {
+            super::card_template::update_memory_template(&mut cards, group);
         }
         if let Some(opening_message) = patch.opening_message {
             group.opening_message = opening_message;

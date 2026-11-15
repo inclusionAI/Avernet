@@ -19,7 +19,7 @@ class IntakeTargetDTO(BaseModel):
 
 
 class TaskIntakeCommandDTO(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     action: TaskIntakeAction
     message: str | None = None
@@ -56,7 +56,7 @@ class TaskIntakeResultDTO(BaseModel):
 
 
 class StartIntakeRequestDTO(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     session_id: str = Field(min_length=1)
 

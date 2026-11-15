@@ -60,6 +60,17 @@ class TaskInfoRecord:
 
 
 @dataclass(frozen=True)
+class TaskNodeSessionRef:
+    """Read-side reference from a chat session to one visible task node."""
+
+    task_id: str
+    node_id: str
+    owner_user_id: str
+    # Legacy rows created before timestamps were projected may not carry this.
+    updated_at: datetime | None = None
+
+
+@dataclass(frozen=True)
 class TaskNodeRecord:
     id: int
     task_id: str

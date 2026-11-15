@@ -9,9 +9,10 @@ use std::sync::Arc;
 use bcs_bot::BotControlPlaneCore;
 use bcs_bot_store::{MemoryBotRepo, MemoryProviderStore};
 use bcs_service_api::{
-    BotCandidateReadQuery, BotCandidateVisibility, BotCapabilities, BotControlPlaneCoreService,
-    BotControlPlaneOwnedQuery, BotControlPlanePatch, BotRepoPort, ProviderBotBinding,
-    ProviderBotBindingRepoPort, ProviderRecord, ProviderRepoPort,
+    ActorKind, BotCandidateReadQuery, BotCandidateVisibility,
+    BotCapabilities, BotControlPlaneCoreService, BotControlPlaneOwnedQuery, BotControlPlanePatch,
+    BotRepoPort, BotSearchCandidateQuery, ProviderBotBinding,
+    ProviderBotBindingRepoPort, ProviderRecord, ProviderRepoPort, ServiceError, ServiceResult,
 };
 
 struct Fixture {
@@ -84,6 +85,99 @@ impl Fixture {
     }
 }
 
+
+struct RejectProviderMetadata;
+
+#[async_trait::async_trait]
+impl bcs_service_api::port::repo::bot_provider::BotProviderRepoPort for RejectProviderMetadata {
+    async fn validate_provider_bot_name(&self, _: &str, _: &str, _: Option<&str>) -> ServiceResult<()> {
+        Err(ServiceError::InternalError("provider metadata must not be read".into()))
+    }
+
+    async fn get_provider_bot(&self, _: &str) -> ServiceResult<Option<bcs_service_api::bot_provider::BotProviderRecord>> {
+        Err(ServiceError::InternalError("provider metadata must not be read".into()))
+    }
+
+    async fn get_provider_bot_by_ref(&self, _: &str, _: &str) -> ServiceResult<Option<bcs_service_api::bot_provider::BotProviderRecord>> {
+        Err(ServiceError::InternalError("provider metadata must not be read".into()))
+    }
+
+    async fn list_provider_bot_metadata(&self, _: Option<&str>) -> ServiceResult<Vec<bcs_service_api::bot_provider::BotProviderRecord>> {
+        Err(ServiceError::InternalError("provider metadata must not be read".into()))
+    }
+
+    async fn get_connection_mode(&self, _: &str) -> ServiceResult<Option<bcs_service_api::bot_provider::BotConnectionMode>> {
+        Err(ServiceError::InternalError("provider metadata must not be read".into()))
+    }
+
+    async fn attach_provider_bot(&self, _: bcs_service_api::bot_provider::BotProviderRecord) -> ServiceResult<()> {
+        Err(ServiceError::InternalError("not configured".into()))
+    }
+
+    async fn create_provider_bot(
+        &self,
+        _: bcs_service_api::bot_provider::BotProviderRecord,
+        _: BotCapabilities,
+        _: &str,
+        _: &str,
+    ) -> ServiceResult<()> {
+        Err(ServiceError::InternalError("not configured".into()))
+    }
+
+    async fn update_provider_webhook(
+        &self,
+        _: &str,
+        _: &str,
+        _: Option<String>,
+        _: u64,
+    ) -> ServiceResult<bcs_service_api::bot_provider::BotProviderRecord> {
+        Err(ServiceError::InternalError("not configured".into()))
+    }
+
+    async fn delete_provider_bot(&self, _: &str, _: &str, _: u64) -> ServiceResult<bool> {
+        Err(ServiceError::InternalError("not configured".into()))
+    }
+}
+
+#[tokio::test]
+async fn raw_candidate_search_does_not_hydrate_provider_metadata() {
+    let fixture = Fixture::new();
+    fixture.add_bot("acting", "staff-1", "private").await;
+    fixture.add_bot("candidate", "staff-2", "public").await;
+    let core = BotControlPlaneCore::new(
+        fixture.repo.clone(),
+        fixture.providers.clone(),
+        fixture.providers.clone(),
+    )
+    .with_bot_provider_repo(Arc::new(RejectProviderMetadata));
+
+    let (records, total) = core
+        .search_candidate_records(BotSearchCandidateQuery {
+            acting_bot_id: "acting".to_string(),
+            env: fixture.env.clone(),
+            visibility: BotCandidateVisibility::Discovery,
+            viewer_kind: Some(ActorKind::Bot),
+            friend_ids: HashSet::new(),
+            bot_uuids: None,
+            name: Some("candidate".to_string()),
+            q: None,
+            visibility_filter: None,
+            user_visibility: None,
+            status: None,
+            friendship: None,
+            tc_bot: None,
+            name_only: true,
+            offset: 0,
+            limit: 20,
+        })
+        .await
+        .expect("raw candidate search");
+
+    assert_eq!(total, 1);
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].bot.bot_id, "candidate");
+}
+
 #[tokio::test]
 async fn batch_views_preserve_request_order_and_hydrate_physical_provider() {
     let fixture = Fixture::new();
@@ -153,6 +247,7 @@ async fn candidate_views_preserve_repo_total_and_friend_flag() {
             acting_bot_id: "acting".to_string(),
             env: fixture.env.clone(),
             visibility: BotCandidateVisibility::Collaboration,
+            viewer_kind: ActorKind::Bot,
             friend_ids: HashSet::from(["private-friend".to_string()]),
             name: None,
             offset: 0,

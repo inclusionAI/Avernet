@@ -92,7 +92,7 @@ class _Node:
 
 
 class TestTaskRuntimeLivenessProbe(unittest.IsolatedAsyncioTestCase):
-    async def test_single_bot_active_progress_uses_message_cursor(self):
+    async def test_single_bot_active_progress_uses_semantic_message_cursor(self):
         bot = _FakeBot()
         probe = TaskRuntimeLivenessProbe(bot=bot)
         node = _Node(run_id="r1", session_id="s1")
@@ -101,14 +101,24 @@ class TestTaskRuntimeLivenessProbe(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(first.state, "active")
         self.assertFalse(first.progressed)
 
-        bot.messages = [{"id": "m1"}]
+        bot.messages = [{"id": "m1", "role": "assistant", "content": ""}]
         second = await probe.probe(node, previous_cursor=first.heartbeat_cursor)
         self.assertEqual(second.state, "active")
-        self.assertTrue(second.progressed)
+        self.assertFalse(second.progressed)
 
+        bot.messages = [
+            {"id": "m2", "content": "continue task-loop", "updated_at": "2026-11-11T01:00:00Z"}
+        ]
         third = await probe.probe(node, previous_cursor=second.heartbeat_cursor)
         self.assertEqual(third.state, "active")
-        self.assertFalse(third.progressed)
+        self.assertTrue(third.progressed)
+
+        bot.messages = [
+            {"id": "m2", "content": "continue task-loop", "updated_at": "2026-11-11T02:00:00Z"}
+        ]
+        fourth = await probe.probe(node, previous_cursor=third.heartbeat_cursor)
+        self.assertEqual(fourth.state, "active")
+        self.assertFalse(fourth.progressed)
 
     async def test_single_bot_terminal_failure_is_reported(self):
         bot = _FakeBot()
@@ -297,6 +307,20 @@ class TestTaskRuntimeLivenessProbe(unittest.IsolatedAsyncioTestCase):
             (await probe.probe(_Node(run_id="r1"),)).state, "unknown"
         )
 
+
+    async def test_session_only_empty_message_is_not_progress(self):
+        bot = _FakeBot()
+        bot.messages = [{"id": "m1", "role": "assistant", "content": ""}]
+        probe = TaskRuntimeLivenessProbe(bot=bot)
+        node = _Node(session_id="s1")
+
+        first = await probe.probe(node)
+        self.assertFalse(first.progressed)
+        bot.messages.append(
+            {"id": "m2", "role": "assistant", "content": "", "updated_at": "2026-11-11T01:00:00Z"}
+        )
+        second = await probe.probe(node, previous_cursor=first.heartbeat_cursor)
+        self.assertFalse(second.progressed)
 
 if __name__ == "__main__":
     unittest.main()

@@ -63,10 +63,10 @@ class TestFileWorkerProfileSource:
 
     def test_scan_returns_all_profiles(self, sample_data):
         """测试 scan 返回所有 profiles"""
-        from src.infra.worker_profiles.sources.file_worker_profile_source import (
+        from app.infra.worker_profiles.sources.file_worker_profile_source import (
             FileWorkerProfileSource,
         )
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
 
@@ -85,10 +85,10 @@ class TestFileWorkerProfileSource:
 
     def test_get_profile_found(self, sample_data):
         """测试 get_profile 找到 profile"""
-        from src.infra.worker_profiles.sources.file_worker_profile_source import (
+        from app.infra.worker_profiles.sources.file_worker_profile_source import (
             FileWorkerProfileSource,
         )
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
 
@@ -104,10 +104,10 @@ class TestFileWorkerProfileSource:
 
     def test_get_profile_not_found(self, sample_data):
         """测试 get_profile 找不到 profile"""
-        from src.infra.worker_profiles.sources.file_worker_profile_source import (
+        from app.infra.worker_profiles.sources.file_worker_profile_source import (
             FileWorkerProfileSource,
         )
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
 
@@ -120,10 +120,10 @@ class TestFileWorkerProfileSource:
 
     def test_get_profiles_by_staff(self, sample_data):
         """测试 get_profiles_by_staff 返回员工所有 profiles"""
-        from src.infra.worker_profiles.sources.file_worker_profile_source import (
+        from app.infra.worker_profiles.sources.file_worker_profile_source import (
             FileWorkerProfileSource,
         )
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
 
@@ -144,13 +144,13 @@ class TestFileWorkerProfileSource:
 
     def test_profile_has_context_fragments(self, sample_data):
         """测试 profile 包含上下文片段"""
-        from src.infra.worker_profiles.sources.file_worker_profile_source import (
+        from app.infra.worker_profiles.sources.file_worker_profile_source import (
             FileWorkerProfileSource,
         )
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
-        from src.domain.models.context_fragment import ContextKind
+        from app.domain.models.context_fragment import ContextKind
 
         settings = WorkerProfileSettings(roots=[sample_data])
         source = FileWorkerProfileSource(settings)
@@ -170,10 +170,10 @@ class TestFileWorkerProfileSource:
 
     def test_profile_has_active_skills(self, sample_data):
         """测试 profile 包含激活技能"""
-        from src.infra.worker_profiles.sources.file_worker_profile_source import (
+        from app.infra.worker_profiles.sources.file_worker_profile_source import (
             FileWorkerProfileSource,
         )
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
 
@@ -192,10 +192,10 @@ class TestFileWorkerProfileSource:
 
     def test_profile_has_searchable_text(self, sample_data):
         """测试 profile 包含可检索文本"""
-        from src.infra.worker_profiles.sources.file_worker_profile_source import (
+        from app.infra.worker_profiles.sources.file_worker_profile_source import (
             FileWorkerProfileSource,
         )
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
 
@@ -217,10 +217,10 @@ class TestFileWorkerProfileSourceEdgeCases:
 
     def test_scan_empty_root(self):
         """测试扫描空根目录"""
-        from src.infra.worker_profiles.sources.file_worker_profile_source import (
+        from app.infra.worker_profiles.sources.file_worker_profile_source import (
             FileWorkerProfileSource,
         )
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
 
@@ -233,10 +233,10 @@ class TestFileWorkerProfileSourceEdgeCases:
 
     def test_scan_missing_openclaw(self):
         """测试缺少 openclaw 目录"""
-        from src.infra.worker_profiles.sources.file_worker_profile_source import (
+        from app.infra.worker_profiles.sources.file_worker_profile_source import (
             FileWorkerProfileSource,
         )
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
 
@@ -256,10 +256,10 @@ class TestFileWorkerProfileSourceEdgeCases:
 
     def test_scan_missing_skill_sets(self):
         """测试缺少 skill_sets.json"""
-        from src.infra.worker_profiles.sources.file_worker_profile_source import (
+        from app.infra.worker_profiles.sources.file_worker_profile_source import (
             FileWorkerProfileSource,
         )
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
 
@@ -291,8 +291,8 @@ class TestFileWorkerProfileSourceProtocol:
 
     def test_implements_protocol(self):
         """测试实现 WorkerProfileSource 协议"""
-        from src.domain.services.worker_profile_source import WorkerProfileSource
-        from src.infra.worker_profiles.sources.file_worker_profile_source import (
+        from app.domain.services.worker_profile_source import WorkerProfileSource
+        from app.infra.worker_profiles.sources.file_worker_profile_source import (
             FileWorkerProfileSource,
         )
 
@@ -302,7 +302,7 @@ class TestFileWorkerProfileSourceProtocol:
 
     def test_protocol_methods_exist(self):
         """测试协议方法存在"""
-        from src.infra.worker_profiles.sources.file_worker_profile_source import (
+        from app.infra.worker_profiles.sources.file_worker_profile_source import (
             FileWorkerProfileSource,
         )
 

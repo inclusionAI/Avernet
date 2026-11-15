@@ -23,7 +23,7 @@ class TestWorkerProfileSettings:
 
     def test_create_settings_with_defaults(self):
         """测试使用默认值创建配置"""
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
 
@@ -40,7 +40,7 @@ class TestWorkerProfileSettings:
 
     def test_create_settings_with_single_root(self):
         """测试单路径配置"""
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
 
@@ -51,7 +51,7 @@ class TestWorkerProfileSettings:
 
     def test_create_settings_with_multiple_roots(self):
         """测试多路径配置"""
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
 
@@ -69,7 +69,7 @@ class TestWorkerProfileSettings:
 
     def test_create_settings_with_all_options(self):
         """测试所有配置选项"""
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
 
@@ -88,10 +88,10 @@ class TestWorkerProfileSettings:
 
     def test_default_context_file_mapping(self):
         """测试默认的上下文文件映射"""
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
-        from src.domain.models.context_fragment import ContextKind
+        from app.domain.models.context_fragment import ContextKind
 
         settings = WorkerProfileSettings()
 
@@ -109,10 +109,10 @@ class TestWorkerProfileSettings:
 
     def test_custom_context_file_mapping(self):
         """测试自定义上下文文件映射"""
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
-        from src.domain.models.context_fragment import ContextKind
+        from app.domain.models.context_fragment import ContextKind
 
         custom_mapping = {
             "AGENTS.md": ContextKind.AGENT,
@@ -126,7 +126,7 @@ class TestWorkerProfileSettings:
 
     def test_extra_fields_forbidden(self):
         """测试额外字段被禁止"""
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
 
@@ -142,7 +142,7 @@ class TestWorkerProfileSettingsEnvLoading:
 
     def test_load_single_root_from_env(self, monkeypatch):
         """测试从环境变量加载单路径"""
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
 
@@ -156,7 +156,7 @@ class TestWorkerProfileSettingsEnvLoading:
 
     def test_load_multiple_roots_from_env(self, monkeypatch):
         """测试从环境变量加载多路径（逗号分隔）"""
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
 
@@ -175,7 +175,7 @@ class TestWorkerProfileSettingsEnvLoading:
 
     def test_load_roots_with_spaces_from_env(self, monkeypatch):
         """测试从环境变量加载带空格的路径"""
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
 
@@ -192,7 +192,7 @@ class TestWorkerProfileSettingsEnvLoading:
 
     def test_load_boolean_options_from_env(self, monkeypatch):
         """测试从环境变量加载布尔选项"""
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
 
@@ -210,7 +210,7 @@ class TestWorkerProfileSettingsEnvLoading:
 
     def test_load_boolean_options_case_insensitive(self, monkeypatch):
         """测试布尔选项大小写不敏感"""
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
 
@@ -224,7 +224,7 @@ class TestWorkerProfileSettingsEnvLoading:
 
     def test_explicit_values_override_env(self, monkeypatch):
         """测试显式值覆盖环境变量"""
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
 
@@ -237,7 +237,7 @@ class TestWorkerProfileSettingsEnvLoading:
 
     def test_empty_env_uses_default(self, monkeypatch):
         """测试空环境变量使用默认值"""
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
 
@@ -254,7 +254,7 @@ class TestWorkerProfileSettingsValidation:
 
     def test_empty_roots_uses_default(self):
         """测试空 roots 使用默认值"""
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
 
@@ -264,7 +264,7 @@ class TestWorkerProfileSettingsValidation:
 
     def test_empty_root_string_ignored(self):
         """测试空字符串路径被忽略"""
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
 
@@ -281,7 +281,7 @@ class TestWorkerProfileSettingsBotPattern:
 
     def test_default_bot_pattern(self):
         """测试默认的 bot 目录模式"""
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
 
@@ -302,7 +302,7 @@ class TestWorkerProfileSettingsBotPattern:
 
     def test_custom_bot_pattern(self):
         """测试自定义 bot 目录模式"""
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
 
@@ -320,7 +320,7 @@ class TestWorkerProfileSettingsBackupPattern:
 
     def test_default_backup_directories(self):
         """测试默认的备份目录列表"""
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
 
@@ -333,7 +333,7 @@ class TestWorkerProfileSettingsBackupPattern:
 
     def test_custom_backup_directories(self):
         """测试自定义备份目录"""
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
 
@@ -346,7 +346,7 @@ class TestWorkerProfileSettingsBackupPattern:
 
     def test_is_backup_directory(self):
         """测试判断是否为备份目录"""
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
 

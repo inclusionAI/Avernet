@@ -31,12 +31,12 @@ export function useBotEditor(
 ) {
   const copyResourcePath = useResourcePathClipboard();
   const [skills, setSkills] = useState<BotEditorSkill[]>([]);
-  const uploadSkillFolder = useBotLocalSkillUpload(botId, setSkills);
+  const uploadSkillFolder = useBotLocalSkillUpload(botId, setSkills, ownerId);
   const [skillSets, setSkillSets] = useState<BotCapabilitySet[]>([]);
-  const skillSetActivation = useSkillSetActivation(botId, setSkillSets);
+  const skillSetActivation = useSkillSetActivation(botId, setSkillSets, ownerId);
   const [mcps, setMcps] = useState<BotEditorMcp[]>([]);
   const [capabilityLoadError, setCapabilityLoadError] = useState<string>();
-  const candidates = useBotEditorCandidates(botId, spaceId);
+  const candidates = useBotEditorCandidates(botId, spaceId, ownerId);
   const [resources, setResources] = useState<BotEditorResource[]>([]);
   const [resourceLoadingPaths, setResourceLoadingPaths] = useState<string[]>([]);
   const [screens, setScreens] = useState<BotRenderScreen[]>([]);
@@ -111,20 +111,24 @@ export function useBotEditor(
     loading,
     reload: load,
     toggleSkill: (skill: BotEditorSkill) =>
-      act(() => botEditorService.toggleSkill(botId!, skill), skill.active ? 'Skill 已停用' : 'Skill 已启用'),
+      act(() => botEditorService.toggleSkill(botId!, skill, ownerId), skill.active ? 'Skill 已停用' : 'Skill 已启用'),
     deleteSkill: (id: string) =>
       act(
         async () => {
-          await botEditorService.deleteSkill(botId!, id);
+          await botEditorService.deleteSkill(botId!, id, ownerId);
           // 乐观移除卡片，避免静默全量重载期间卡片滞留(~1s)
           setSkills((current) => current.filter((skill) => skill.id !== id));
         },
         'Skill 已删除',
         { silent: true },
       ),
-    uploadSkill: (file: File) => act(() => botEditorService.uploadSkill(botId!, file), 'Skill 已上传'),
+    uploadSkill: async (file: File) => {
+      await botEditorService.uploadSkill(botId!, file, ownerId);
+      toast.success('Skill 已上传');
+      await load();
+    },
     setMcpActive: (mcp: BotEditorMcp, active: boolean) =>
-      act(() => botEditorService.setMcpActive(botId!, mcp, active), active ? 'MCP 已添加' : 'MCP 已移除'),
+      act(() => botEditorService.setMcpActive(botId!, mcp, active, ownerId), active ? 'MCP 已添加' : 'MCP 已移除'),
     createDirectory: (path: string) => act(() => botEditorService.createDirectory(botId!, path, ownerId), '目录已创建'),
     browseResources: async (directory = '') => {
       try {
@@ -163,22 +167,22 @@ export function useBotEditor(
             : botEditorService.createScreen(botId!, input, ownerId),
         id ? '副屏配置已更新' : '副屏配置已创建',
       ),
-    createSkillSet: (name: string) => act(() => botEditorService.createSkillSet(botId!, name), '能力集已创建'),
+    createSkillSet: (name: string) => act(() => botEditorService.createSkillSet(botId!, name, ownerId), '能力集已创建'),
     updateSkillSet: (id: string, name: string) =>
-      act(() => botEditorService.updateSkillSet(botId!, id, name), '能力集已更新'),
-    deleteSkillSet: (id: string) => act(() => botEditorService.deleteSkillSet(botId!, id), '能力集已删除'),
+      act(() => botEditorService.updateSkillSet(botId!, id, name, ownerId), '能力集已更新'),
+    deleteSkillSet: (id: string) => act(() => botEditorService.deleteSkillSet(botId!, id, ownerId), '能力集已删除'),
     setSkillSetActive: skillSetActivation.setSkillSetActive,
     setSkillSetSkill: (setId: string, skillId: string, active: boolean) =>
       act(
-        () => botEditorService.setSkillSetSkill(botId!, setId, skillId, active),
+        () => botEditorService.setSkillSetSkill(botId!, setId, skillId, active, ownerId),
         active ? 'Skill 已加入能力集' : 'Skill 已移出能力集',
       ),
     addSkillCenterReferences: (setId: string, skillCodes: string[]) =>
-      act(() => botEditorService.addSkillCenterReferences(botId!, setId, skillCodes), 'SkillCenter Skill 已加入能力集'),
+      act(() => botEditorService.addSkillCenterReferences(botId!, setId, skillCodes, ownerId), 'SkillCenter Skill 已加入能力集'),
     uploadSkillFolder,
     setSkillSetMcp: (setId: string, serverCode: string, active: boolean) =>
       act(
-        () => botEditorService.setSkillSetMcp(botId!, setId, serverCode, active),
+        () => botEditorService.setSkillSetMcp(botId!, setId, serverCode, active, ownerId),
         active ? 'MCP 已加入能力集' : 'MCP 已移出能力集',
       ),
     mcpCallTypes,

@@ -1,6 +1,7 @@
 import { recoveryTargetSnapshot } from "../agent-service.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SessionRecoveryError } from "../errors.js";
+import { DingTalkCardNotDispatchedError } from "../../../notifications/dingtalk-sender.js";
 import type { RecoveryStoredTask, RecoveryTaskStore } from "../task-contracts.js";
 import { SessionRecoveryTaskService } from "../task-service.js";
 import { parseRequest } from "../validation.js";
@@ -41,6 +42,77 @@ function setup(callbackFails = false, now = () => 100) {
 }
 
 describe("self-healing task orchestration", () => {
+  it("dispatches TE assessment after persisting the diagnostic trace ID", async () => {
+    const { service, records, agent, deps } = setup();
+    deps.resolveTarget = async () => recoveryTargetSnapshot({
+      environment: "prod", ownerId: "owner", botId: "default", provider: "baas",
+      bindingId: "binding", deviceId: "device", activeEngine: "teclaw",
+    });
+    const { task_id } = await service.create({ ...request, trace_id: "fault-trace",
+      target: { ...request.target, engine: "TE" } }, actor);
+    await flush();
+    expect(records.get(task_id)?.request.trace_id).toBe("fault-trace");
+    expect(agent.start).toHaveBeenCalledOnce();
+  });
+
+  it("accepts a replay of a task saved before diagnostic evidence hints were persisted", async () => {
+    const { service, agent } = setup();
+    const created = await service.create(request, actor);
+    expect(await service.create({ ...request, trace_id: "fault-trace", fault_at_ms: 1792107675000 }, actor)).toEqual(created);
+    await flush();
+    expect(agent.start).toHaveBeenCalledOnce();
+  });
+
+  it.each(["none", "unknown", "performed", "accepted", "unknown_delivery", "missing_read"] as const)(
+    "closes an assessment as unnecessary only with verified evidence and no possible intervention (%s)", async scenario => {
+      const { service, records, agent } = setup();
+      const { task_id } = await service.create(request, actor);
+      const task = records.get(task_id)!;
+      task.interventionStatus = scenario === "unknown" || scenario === "performed" ? scenario : "none";
+      if (scenario === "accepted" || scenario === "unknown_delivery") {
+        task.delivery = { delivery: { status: scenario === "accepted" ? "accepted" : "unknown" } } as NonNullable<RecoveryStoredTask["delivery"]>;
+      }
+      task.evidence.push({ evidence_id: "read", tool_call_id: "read-call", source: "session_read",
+        location: "original session", excerpt: "等待审批人确认" });
+      if (scenario !== "missing_read") {
+        task.timeline.push({ event_id: "read-call", at_ms: 10, kind: "operation", actor: "agent",
+          summary: "检查原会话", payload: { raw_tool_call_id: "read-call", status: "succeeded" } });
+      }
+      const assessed = service.assess(task_id, task.version, { decision: "no_recovery_needed",
+        summary: "原会话按业务规则等待审批人确认", evidence_ids: ["read"] });
+
+      if (scenario !== "none") {
+        await expect(assessed).rejects.toMatchObject({ status: 422 });
+        expect(records.get(task_id)).toMatchObject({ status: "running", phase: "assess", pending_results: [] });
+        expect(agent.release).not.toHaveBeenCalled();
+        return;
+      }
+      await assessed;
+      expect(records.get(task_id)).toMatchObject({
+        status: "completed", phase: "assess", completionReason: "no_recovery_needed",
+        judgment: { effect: "unknown", evidence_ids: ["read"] },
+        pending_results: [{ status: "completed", completion_reason: "no_recovery_needed", intervention_status: "none", effect: "unknown" }],
+      });
+      expect(agent.release).toHaveBeenCalledOnce();
+    });
+  it("retries card creation if the first request never left the notifier", async () => {
+    let now = 40000;
+    const { service, records, deps } = setup(false, () => now);
+    const { task_id } = await service.create(request, actor); await flush();
+    const task = records.get(task_id)!;
+    task.status = "waiting_owner";
+    task.ownerRequest = { requestId: "r1", revision: 1, status: "pending", reason: "permission", summary: "权限", instructions: "申请权限", evidence_ids: [], resumePhase: "assess", createdAtMs: 1 };
+    const notify = vi.fn().mockRejectedValueOnce(new DingTalkCardNotDispatchedError(new Error("token unavailable"))).mockResolvedValueOnce(true);
+    deps.notifier.notifyOwnerRequest = notify;
+    await service.maintenance(); await flush();
+    expect(records.get(task_id)?.timeline.at(-1)?.payload).toMatchObject({ operation: "create", dispatched: false });
+
+    now += 61000;
+    await service.maintenance(); await flush();
+    expect(notify.mock.calls.map(([input]) => input.updateOnly)).toEqual([false, false]);
+    expect(records.get(task_id)?.timeline.at(-1)?.payload).toMatchObject({ operation: "create", state: "sent" });
+  });
+
   it("reconciles a crashed card send with bounded updates of the same instance, retaining unknown delivery", async () => {
     let now = 40000;
     const { service, records, deps } = setup(false, () => now);
@@ -62,16 +134,16 @@ describe("self-healing task orchestration", () => {
     const { service, records, deps } = setup();
     const { task_id } = await service.create(request, actor); await flush();
     const task = records.get(task_id)!; task.status = "waiting_owner";
-    task.ownerRequest = { requestId: "r1", revision: 1, status: "pending", reason: "materials", summary: "补料", instructions: "补规则和图1", evidence_ids: [], resumePhase: "assess", createdAtMs: 1 };
+    task.ownerRequest = { requestId: "r1", revision: 1, status: "pending", reason: "permission", summary: "文档权限不足", instructions: "请申请原文档权限", evidence_ids: [], resumePhase: "assess", createdAtMs: 1 };
     let finishOld!: (value: boolean) => void;
     const notify = vi.fn().mockImplementationOnce(() => new Promise<boolean>(resolve => { finishOld = resolve; })).mockResolvedValue(true);
     deps.notifier.notifyOwnerRequest = notify;
     await service.maintenance(); await flush();
-    records.get(task_id)!.ownerRequest = { ...task.ownerRequest, requestId: "r2", revision: 2, instructions: "只剩图1" };
+    records.get(task_id)!.ownerRequest = { ...task.ownerRequest, requestId: "r2", revision: 2, instructions: "仍缺写权限" };
     await service.maintenance(); await flush();
     finishOld(true); await flush();
     expect(notify).toHaveBeenCalledTimes(3);
-    expect(notify.mock.calls[2][0]).toMatchObject({ updateOnly: true, task: { ownerRequest: { requestId: "r2", instructions: "只剩图1" } } });
+    expect(notify.mock.calls[2][0]).toMatchObject({ updateOnly: true, task: { ownerRequest: { requestId: "r2", instructions: "仍缺写权限" } } });
   });
   it("saves Owner feedback before asynchronously waking the same task, with Owner and control-plane checks", async () => {
     const { service, records, agent, deps } = setup();
@@ -79,8 +151,8 @@ describe("self-healing task orchestration", () => {
     const task = records.get(task_id)!;
     task.execution = { executionId: "exec", stepId: "step", ticketDigest: "digest", jobId: "job", ccSessionId: null,
       state: "running", leaseExpiresAt: 1000, decisionDeadlineAt: null, lastHeartbeatAt: 1, invalidatedAt: null };
-    task.evidence = [{ evidence_id: "read", tool_call_id: "call", source: "session_read", location: "original", excerpt: "缺图1" }];
-    await service.requestOwner(task_id, task.version, { reason: "materials", summary: "缺图1", instructions: "在原会话补图1", evidence_ids: ["read"], executionId: "exec" });
+    task.evidence = [{ evidence_id: "read", tool_call_id: "call", source: "session_read", location: "original", excerpt: "缺文档权限" }];
+    await service.requestOwner(task_id, task.version, { reason: "permission", summary: "缺文档权限", instructions: "申请原文档读取权限", evidence_ids: ["read"], executionId: "exec" });
     const pending = records.get(task_id)!;
     expect(pending).toMatchObject({ status: "waiting_owner", plan: null, pending_results: [] });
     const id = pending.ownerRequest!.requestId;
@@ -138,17 +210,15 @@ describe("self-healing task orchestration", () => {
     await expect(service.finishForOwnerHandoff(task_id, task.version, { summary: "Owner说好了，已恢复仅剩建议", evidence_ids: ["old"], executionId: "exec", effect: "recovered" })).rejects.toMatchObject({ status: 409 });
     expect(records.get(task_id)?.status).toBe("running");
   });
-  it("passes the frozen Bot and target environment to Owner notification policy without recording a disabled send", async () => {
+  it("waits for Owner approval without sending a one-way plan DM", async () => {
     const { service, records, notifier } = setup();
-    notifier.notify.mockResolvedValue(false);
     const ack = await service.create(request, actor); await flush();
     const task = records.get(ack.task_id)!;
     task.phase = "plan";
     task.level = "approval";
     await service.plan(task.taskId, task.version, { summary: "需要 Owner 开通权限", basis: "已核实权限受限", scope: "目标服务权限",
       verification: "权限恢复后核查原任务", actions: [], owner_cooperation: [{ request: "申请服务权限", basis: "服务明确拒绝访问" }] });
-    expect(notifier.notify).toHaveBeenCalledExactlyOnceWith({ ownerId: "owner", botId: "default", targetEnvironment: "prod",
-      taskId: task.taskId, kind: "plan", summary: "需要 Owner 开通权限" });
+    expect(notifier.notify).not.toHaveBeenCalled();
     const saved = records.get(task.taskId)!;
     expect(saved.status).toBe("waiting_owner");
     expect(saved.timeline.some(event => event.kind === "notification")).toBe(false);
@@ -315,6 +385,22 @@ describe("self-healing task orchestration", () => {
     const { service } = setup(); const ack = await service.create(request, actor);
     await expect(service.detail(ack.task_id, { userId: "stranger", isAdmin: false })).rejects.toMatchObject({ status: 403 });
   });
+  it("lets a current Bot collaborator read a private task without granting operations or public sharing", async () => {
+    const { service, deps, records } = setup();
+    const { task_id } = await service.create(request, actor); await flush();
+    const canReadAsBotCollaborator = vi.fn().mockResolvedValue(true);
+    const reader = new SessionRecoveryTaskService({ ...deps, canReadAsBotCollaborator });
+    const collaborator = { userId: "member", isAdmin: false };
+    expect(await reader.detail(task_id, collaborator)).toMatchObject({
+      shared: false, canOperate: false, canManageShare: false,
+    });
+    expect(canReadAsBotCollaborator).toHaveBeenCalledExactlyOnceWith("member", request.target);
+    await expect(reader.setTaskShared(task_id, true, collaborator)).rejects.toMatchObject({ status: 403 });
+    await expect(reader.terminate(task_id, collaborator)).rejects.toMatchObject({ status: 403 });
+    expect(records.get(task_id)?.shared).toBe(false);
+    canReadAsBotCollaborator.mockResolvedValue(false);
+    await expect(reader.detail(task_id, collaborator)).rejects.toMatchObject({ status: 403 });
+  });
   it("lists private linked tasks for administrators without exposing them to other users", async () => {
     const { service } = setup(); const { task_id } = await service.create(request, actor);
     expect(await service.list(request.event_id, { userId: "admin", isAdmin: true })).toMatchObject([{ task_id }]);
@@ -476,4 +562,38 @@ it("clears a paused summary when the same task resumes observation", async () =>
   await service.resume(task_id);
   expect(records.get(task_id)!).toMatchObject({ status: "running", requiresFreshObservation: true });
   expect(records.get(task_id)!.final_summary).toBeUndefined();
+});
+
+
+it.each(["observe", "verify"] as const)("preserves recovery at maintenance expiry after waiting for delivery in %s", async phase => {
+  let now = 100;
+  const { service, records, agent } = setup(false, () => now);
+  const { task_id } = await service.create(request, actor); await flush();
+  await service.recordDelivery(task_id, { event_id: "evt", delivery: { delivery_key: "send1", status: "accepted",
+    result_text: "accepted", started_at_ms: 1, finished_at_ms: 2, error: null } });
+  const task = records.get(task_id)!; task.phase = phase;
+  task.evidence = [{ evidence_id: "proof", tool_call_id: "read", source: "runtime_inspect", location: "files", excerpt: "原失败步骤已成功" }];
+  const deadline = task.observationDeadlineAt!;
+  await service.observe(task_id, task.version, { delivery: "unconfirmed", response: "unknown", effect: "recovered",
+    summary: "原任务已恢复，等待触达证据", evidence_ids: ["proof"] }, [], "不应提前保存的最终总结");
+  expect(records.get(task_id)).toMatchObject({ status: "running", phase, pending_results: [], observationDeadlineAt: deadline, judgment: { effect: "recovered" } });
+  expect(records.get(task_id)?.final_summary).toBeUndefined();
+  expect(agent.release).not.toHaveBeenCalled();
+  now = deadline;
+  await service.maintenance();
+  expect(records.get(task_id)).toMatchObject({ status: "completed", phase, observationDeadlineAt: deadline,
+    judgment: { effect: "recovered", delivery: "unconfirmed", evidence_ids: ["proof"] },
+    pending_results: [expect.objectContaining({ effect: "recovered", intervention_status: "unknown" })] });
+  expect(agent.release).toHaveBeenCalledOnce();
+});
+
+
+it("retains confirmed business recovery when an execution ends before delivery is confirmed", async () => {
+  const { service, records } = setup();
+  const { task_id } = await service.create(request, actor); await flush();
+  const task = records.get(task_id)!; task.phase = "observe";
+  task.judgment = { delivery: "unconfirmed", response: "unknown", effect: "recovered", summary: "业务产物已恢复，等待触达证据", evidence_ids: [] };
+  await service.executionFailure(task_id, "AIS execution timed out");
+  expect(records.get(task_id)).toMatchObject({ status: "failed", judgment: { effect: "recovered", delivery: "unconfirmed" },
+    pending_results: [expect.objectContaining({ status: "failed", effect: "recovered", intervention_status: "unknown" })] });
 });

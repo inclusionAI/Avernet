@@ -71,6 +71,7 @@ _SENSITIVE_NAME_PARTS: tuple[str, ...] = (
     "signature",
     "cookie",
     "session",
+    "avatar_url",
 )
 
 # Budgets. A log line is a diagnosis, not a payload dump: a request body with a

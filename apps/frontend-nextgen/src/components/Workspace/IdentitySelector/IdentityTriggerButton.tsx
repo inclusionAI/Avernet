@@ -52,11 +52,7 @@ export const IdentityTriggerButton = forwardRef<HTMLButtonElement, IdentityTrigg
         )}
       >
         {collapsedLayout ? (
-          identity.kind === 'user' ? (
-            <IdentityAvatar identity={identity} size="xs" userAvatarUrl={userAvatarUrl} />
-          ) : (
-            <span aria-hidden>{Array.from(identity.name.trim())[0] ?? '?'}</span>
-          )
+          <IdentityAvatar identity={identity} size="xs" userAvatarUrl={userAvatarUrl} />
         ) : sidebarChipLayout ? (
           /* v2 设计稿(dmore artboard-010 Frame 1912056221)协作侧栏身份行：16px 头像 +
              名称 + (短 ID) + 用户|Bot 身份分段指示 + 右端设置入口；整行触发身份切换 Popover。 */

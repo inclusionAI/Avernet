@@ -1,6 +1,6 @@
 {
   "name": "数据库诊断协作群",
-  "description": "Manager–Worker 群：数据库诊断协作群",
+  "description": "定位数据库慢查询并提出优化方案",
   "supportedInterfaces": [
     {
       "url": "local://groups/group-mw-001",
@@ -30,7 +30,7 @@
     {
       "id": "group.execute",
       "name": "数据库诊断协作群",
-      "description": "Manager–Worker 群：数据库诊断协作群",
+      "description": "定位数据库慢查询并提出优化方案",
       "tags": [
         "manager_worker"
       ]

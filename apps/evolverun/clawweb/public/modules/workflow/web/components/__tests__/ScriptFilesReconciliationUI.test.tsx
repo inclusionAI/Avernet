@@ -15,9 +15,9 @@ function frozenSession() {
   const session = sessionFor(workflowId)
   const original = { path: 'scripts/start.sh', contentBase64: 'b2xk', mode: '100755' as const }
   const candidate = { ...original, contentBase64: 'ZnJvemVu' }
-  const snapshot: Snapshot = { workflowId, packId: 'pack', canWrite: true, baseRef: `origin/wf/${workflowId}`, baseCommit: SOURCE, draftHead: null, versionFiles: [original] }
+  const snapshot: Snapshot = { workflowId, packId: 'pack', canWrite: true, baseRef: `refs/tags/deploy/${workflowId}/#1`, baseCommit: SOURCE, draftHead: null, versionFiles: [original] }
   updateVersion(session, 'current', { snapshot, files: [candidate], error: SAVE_ERROR, blocked: true, notice: '本地候选已保留。' })
-  publish(session, { ...session.state, reconciliation: {
+  publish(session, { ...session.state, version: 'current', reconciliation: {
     attempt: { requestId: REQUEST_ID, expectedPackId: 'pack', snapshot, files: [candidate], input: { requestId: REQUEST_ID, sourceVersion: 'current', sourceCommit: SOURCE, expectedSavedHead: null, changes: [{ ...candidate, operation: 'replace' }] } },
     token: {}, version: 'current', reason: 'no-response', identity: null,
     attemptedFiles: [candidate], sourceCommit: SOURCE, expectedSavedHead: null,
@@ -81,7 +81,7 @@ describe('Pack reconciliation presentation', () => {
     expect(exportButton).toBeEnabled()
     expect(fetchJson).toHaveBeenCalledTimes(1)
     expect(fetchJson).toHaveBeenCalledWith(`/api/workflows/${workflowId}/pack-version?version=draft`, { signal: expect.any(AbortSignal) })
-    await act(async () => resolveHead({ ...snapshot, baseRef: `origin/saved/${workflowId}`, baseCommit: REMOTE, draftHead: REMOTE }))
+    await act(async () => resolveHead({ ...snapshot, baseRef: `origin/wf/${workflowId}`, baseCommit: REMOTE, draftHead: REMOTE }))
     expect(screen.getByRole('region', { name: '保存结果对账' })).toHaveTextContent(`读取时的远端草稿 HEAD：${REMOTE}`)
     expect(headButton).toBeEnabled()
     expect(screen.getByRole('textbox')).toHaveAttribute('readonly')

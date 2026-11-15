@@ -240,7 +240,7 @@ impl MySqlGroupStore {
             }
         };
 
-        let updates_label = patch.label.is_some();
+        let updates_card = patch.label.is_some() || patch.context.is_some();
         let mut assignments = Vec::new();
         let mut params = Vec::new();
         if let Some(label) = patch.label {
@@ -302,7 +302,7 @@ impl MySqlGroupStore {
                 .and_then(|(_, stored_json)| stored_json.as_deref());
             params.push(Value::from(stored_json));
         }
-        let affected_rows = if updates_label {
+        let affected_rows = if updates_card {
             let statement = DbStatement::with_params(&sql, params);
             let write = if guard_routing_policy {
                 DbTransactionStep::ExecuteChecked { statement, expected_affected_rows: 1 }

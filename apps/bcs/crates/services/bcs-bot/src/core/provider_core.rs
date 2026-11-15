@@ -20,7 +20,7 @@ use bcs_service_api::core::RetireProviderBotParams;
 use super::ids::{new_bot_uuid, new_provider_id, new_session_token};
 use bcs_service_api::bot_provider::{BotConnectionMode, BotProviderRecord};
 use bcs_service_api::port::repo::bot_provider::BotProviderRepoPort;
-use bcs_service_api::port::repo::BotControlPlaneRepoPort;
+use bcs_service_api::port::repo::{BotControlPlaneRepoPort, OrganizationRepoPort};
 
 #[derive(Clone)]
 pub struct ProviderCore {
@@ -30,6 +30,9 @@ pub struct ProviderCore {
     registry: Arc<dyn BotRegistryCoreService>,
     webhook_url_guard: OutboundUrlGuard,
     bot_providers: Option<Arc<dyn BotProviderRepoPort>>,
+    /// Organization membership is checked before Provider retirement.
+    /// Optional for legacy/test compositions that do not wire organizations.
+    organizations: Option<Arc<dyn OrganizationRepoPort>>,
     /// P1.3: caller-config CAS channel for the registration's initial
     /// snapshot. `None` (memory composition) means registration cannot
     /// carry `initial_caller` — such requests fail closed with
@@ -70,6 +73,7 @@ impl ProviderCore {
             registry,
             webhook_url_guard,
             bot_providers: None,
+            organizations: None,
             caller_config: None,
         }
     }
@@ -84,6 +88,11 @@ impl ProviderCore {
 
     pub fn with_bot_provider_repo(mut self, repo: Arc<dyn BotProviderRepoPort>) -> Self {
         self.bot_providers = Some(repo);
+        self
+    }
+
+    pub fn with_organization_repo(mut self, repo: Arc<dyn OrganizationRepoPort>) -> Self {
+        self.organizations = Some(repo);
         self
     }
 
@@ -153,6 +162,7 @@ impl ProviderCore {
         provider_id: &str,
         provider_admin_token: &str,
         params: RegisterProviderBotParams,
+        initial_managers: Vec<String>,
     ) -> ServiceResult<(ProviderBotBinding, Option<String>)> {
         let RegisterProviderBotParams {
             webhook_url,
@@ -175,12 +185,27 @@ impl ProviderCore {
         let identity = bcs_service_api::types::provider_identity::normalize(downlink.auth_mode, &provider_bot_ref).map_err(|message| ServiceError::InvalidOperation { message: message.into(), request_id: None })?;
         let provider_bot_ref = identity.provider_bot_ref;
         let bot_uuid = if downlink.auth_mode == ProviderAuthMode::AgentPassSubbots { None } else { bot_uuid };
-        let owner = owners.first().map(|owner| owner.trim()).unwrap_or_default();
-        if owners.len() != 1 || owner.is_empty() {
+        // This Core creates identity/delivery metadata, not authority. The
+        // application must split its owner/manager snapshot before calling it.
+        if owners.len() != 1 {
             return Err(ServiceError::InvalidOperation {
-                message: "owners must contain exactly one non-empty staff_no".to_string(),
+                message: "identity registration requires exactly one owner; use ProviderManagement for initial managers".into(),
                 request_id: None,
             });
+        }
+        let (owner, _) = bcs_service_api::types::bot_authority::normalize_provider_owners(&owners)?;
+        let owner = owner.as_str();
+        let initialization = bcs_service_api::types::bot_authority::OwnershipInitialization {
+            owner_user_id: owner.into(), initial_manager_user_ids: initial_managers,
+            mutation: bcs_service_api::types::bot_authority::AuthorityMutation {
+                mutation_id: uuid::Uuid::new_v4().to_string(),
+                actor: bcs_service_api::types::bot_authority::AuthorityActor::Provider { provider_id: provider.provider_id.clone() },
+            },
+        };
+        bcs_service_api::types::bot_authority::validate_initial_managers(&initialization)?;
+        let atomic_authority = !initialization.initial_manager_user_ids.is_empty();
+        if atomic_authority && initial_caller.is_some() {
+            return Err(ServiceError::InvalidOperation { message: "initial caller configuration requires a separate configuration write".into(), request_id: None });
         }
         if let Some(url) = webhook_url.as_deref() {
             if matches!(connection_mode, ProviderBotConnectionMode::Plugin) {
@@ -191,14 +216,24 @@ impl ProviderCore {
             }
             validate_outbound_url(&self.webhook_url_guard, "webhook_url", url)?;
         }
-        // Gateway mode short-circuits on an existing binding (idempotent replay).
-        // Plugin mode never writes a binding, so this short-circuit never applies.
-        if !matches!(connection_mode, ProviderBotConnectionMode::Plugin) {
-            if let Some(existing_binding) = self
-                .bindings
-                .get_binding_by_provider_ref(&provider.provider_id, &provider_bot_ref)
-                .await?
-            {
+        // Resolve the durable Provider identity before the legacy binding replay:
+        // a tombstoned Gateway Bot deliberately retains a disabled binding.
+        let existing_provider_bot = match &self.bot_providers {
+            Some(metadata) => metadata.get_provider_bot_by_ref(provider_id, &provider_bot_ref).await?,
+            None => None,
+        };
+        let existing_binding = self
+            .bindings
+            .get_binding_by_provider_ref(&provider.provider_id, &provider_bot_ref)
+            .await?;
+        // Older single-owner registrations may only have a binding tombstone;
+        // newer atomic registrations also retain Provider metadata.
+        let reactivating = existing_provider_bot.as_ref().is_some_and(|record| record.is_deleted)
+            || existing_binding.as_ref().is_some_and(|binding| binding.disabled);
+        // Gateway mode short-circuits on an existing ACTIVE binding (idempotent replay).
+        // A disabled binding belonging to a tombstone enters reactivation instead.
+        if !reactivating && !matches!(connection_mode, ProviderBotConnectionMode::Plugin) {
+            if let Some(existing_binding) = existing_binding.clone() {
                 if downlink.auth_mode == ProviderAuthMode::AgentPassSubbots {
                     return Err(ServiceError::Conflict("Provider/ref is already registered".into()));
                 }
@@ -207,6 +242,7 @@ impl ProviderCore {
                         "webhook_url differs from the registered Bot; use PATCH to update it".to_string(),
                     ));
                 }
+                if atomic_authority { self.require_initialized_snapshot_replay(&existing_binding.bot_uuid).await?; }
                 info!(
                     provider_id = %provider.provider_id,
                     bot_uuid = %existing_binding.bot_uuid,
@@ -217,17 +253,19 @@ impl ProviderCore {
             }
         }
 
-        if let Some(metadata) = &self.bot_providers {
-            if let Some(existing) = metadata.get_provider_bot_by_ref(provider_id, &provider_bot_ref).await? {
-                if existing.is_deleted || bot_uuid.as_deref() != Some(existing.bot_uuid.as_str())
+        if let Some(existing) = &existing_provider_bot {
+            if !existing.is_deleted && (bot_uuid.as_deref() != Some(existing.bot_uuid.as_str())
                     || existing.connection_mode != BotConnectionMode::Plugin
-                    || connection_mode != ProviderBotConnectionMode::Plugin
+                    || connection_mode != ProviderBotConnectionMode::Plugin)
                 { return Err(ServiceError::Conflict("Provider/ref is already registered".into())); }
-            }
+        }
+        if !reactivating {
             if let Some(bot_id) = &bot_uuid {
-                if let Some(existing) = metadata.get_provider_bot(bot_id).await? {
-                    if existing.is_deleted || existing.provider_id != provider_id || existing.provider_bot_ref != provider_bot_ref {
-                        return Err(ServiceError::Conflict("Bot Provider membership cannot be replaced".into()));
+                if let Some(metadata) = &self.bot_providers {
+                    if let Some(existing) = metadata.get_provider_bot(bot_id).await? {
+                        if existing.is_deleted || existing.provider_id != provider_id || existing.provider_bot_ref != provider_bot_ref {
+                            return Err(ServiceError::Conflict("Bot Provider membership cannot be replaced".into()));
+                        }
                     }
                 }
                 if let Some(existing) = self.registry.try_get(bot_id).await? {
@@ -259,13 +297,41 @@ impl ProviderCore {
             agent_token: None,
             ..BotCapabilities::default()
         };
-        let bot_uuid = match bot_uuid {
-            Some(bot_uuid) => {
-                validate_external_id("bot_uuid", &bot_uuid)?;
-                bot_uuid
+        let bot_uuid = if reactivating {
+            // Provider/ref owns the durable identity. A caller-supplied UUID is
+            // deliberately ignored when reactivating its tombstone.
+            existing_provider_bot.as_ref().map(|record| record.bot_uuid.clone())
+                .or_else(|| existing_binding.as_ref().map(|binding| binding.bot_uuid.clone()))
+                .expect("checked tombstone")
+        } else {
+            match bot_uuid {
+                Some(bot_uuid) => {
+                    validate_external_id("bot_uuid", &bot_uuid)?;
+                    bot_uuid
+                }
+                None => new_bot_uuid(),
             }
-            None => new_bot_uuid(),
         };
+
+        if reactivating {
+            if initial_caller.is_some() {
+                return Err(ServiceError::InvalidOperation { message: "initial caller configuration requires a separate configuration write".into(), request_id: None });
+            }
+            return self.restore_with_initial_authority(BotProviderRecord {
+                bot_uuid, provider_id: provider.provider_id, provider_bot_ref,
+                connection_mode, webhook_url, is_deleted: false,
+            }, capabilities, provider_auth_mode, initialization).await;
+        }
+
+        if atomic_authority {
+            if self.registry.try_get(&bot_uuid).await?.is_none() {
+                return self.create_with_initial_authority(BotProviderRecord {
+                    bot_uuid, provider_id: provider.provider_id, provider_bot_ref,
+                    connection_mode, webhook_url, is_deleted: false,
+                }, capabilities, provider_auth_mode, initialization).await;
+            }
+            self.require_initialized_snapshot_replay(&bot_uuid).await?;
+        }
 
         if provider_auth_mode == ProviderAuthMode::AgentPassSubbots {
             let metadata = self.bot_providers.as_ref().ok_or_else(|| ServiceError::InternalError("atomic Provider Bot registration is not configured".into()))?;
@@ -822,3 +888,6 @@ fn ensure_provider_owner(provider: &ProviderRecord, staff_no: &str) -> ServiceRe
 
 mod management;
 mod bots;
+
+#[path = "provider_core/initial_authority.rs"]
+mod initial_authority;

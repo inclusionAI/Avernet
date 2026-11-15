@@ -154,4 +154,5 @@ def build_test_materialisers(**kwargs):
 def materialiser_ports(**kwargs):
     from agentclaw.community.core.apply_engine.delivery import MaterialiserPorts
 
+    kwargs.setdefault("file_sync", None)
     return MaterialiserPorts(**port_kwargs(**kwargs))

@@ -238,14 +238,14 @@ async fn named_target_pins_provider_only_after_card_and_binding_are_valid() {
     f.providers.update_provider_metadata(&f.command.provider_id,None,None,Some("test-provider"),1000).await.unwrap();
     let provider=f.providers.get_provider(&f.command.provider_id).await.unwrap().unwrap();
     let slug=provider.slug.as_deref().unwrap();
-    assert!(matches!(f.service.resolve_named_target(slug,"missing").await,Err(ServiceError::BotNotFound(_))));
+    assert!(matches!(f.service.resolve_provider_ref_target(slug,"missing").await,Err(ServiceError::BotNotFound(_))));
     assert_eq!(f.providers.get_provider(&provider.provider_id).await.unwrap().unwrap().config,provider.config);
     f.service.configure(f.command.clone()).await.unwrap();
     f.db.execute(DbStatement::new("UPDATE bcs_bots SET connection_mode='plugin' WHERE bot_uuid='bot'")).await.unwrap();
-    assert!(matches!(f.service.resolve_named_target(slug,"Card Agent").await,Err(ServiceError::Forbidden(_))));
+    assert!(matches!(f.service.resolve_provider_ref_target(slug,"remote").await,Err(ServiceError::BotNotFound(_))));
     assert_eq!(f.providers.get_provider(&provider.provider_id).await.unwrap().unwrap().config,provider.config);
     f.db.execute(DbStatement::new("UPDATE bcs_bots SET connection_mode='gateway' WHERE bot_uuid='bot'")).await.unwrap();
-    assert_eq!(f.service.resolve_named_target(slug,"Card Agent").await.unwrap(),"bot");
+    assert_eq!(f.service.resolve_provider_ref_target(slug,"remote").await.unwrap(),"bot");
     let config=f.providers.get_provider(&provider.provider_id).await.unwrap().unwrap().config;
     assert_eq!(serde_json::from_str::<serde_json::Value>(&config).unwrap()["a2a_name_pinned"],true);
 }

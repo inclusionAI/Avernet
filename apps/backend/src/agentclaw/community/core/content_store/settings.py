@@ -1,6 +1,6 @@
 """Config seam for the content store (W11, #1510).
 
-The store's root directory is an ``application.yaml`` decision, kept
+The local blob store's root directory is an ``application.yaml`` decision, kept
 config-borne per the review ruling on the transport allowlist (the same
 reasoning, one wave later): an env var is image-involving and implicit, and
 raw environment access belongs to config loading and composition roots
@@ -16,8 +16,8 @@ from typing import Any, Mapping
 
 #: The blob root's neutral default, relative to the process working
 #: directory — the same shape as ``user_config.skill_scan.storage_dir``.
-#: A deployment that wants a shared volume points the key at an absolute
-#: NAS path in its own env overlay; the neutral base ships bare.
+#: Read only by the local blob store the test and singlebox profiles wire;
+#: a deployment keeps its bytes in object storage and has no use for it.
 DEFAULT_CONTENT_STORE_DIR = "./data/manifest_content"
 
 #: Where the key lives in the YAML tree, as one constant: the block name

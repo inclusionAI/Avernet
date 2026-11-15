@@ -23,10 +23,10 @@ class TestFileSkillLoader:
 
     def test_load_skills_success(self):
         """测试成功加载技能"""
-        from src.infra.worker_profiles.loaders.file_skill_loader import (
+        from app.infra.worker_profiles.loaders.file_skill_loader import (
             FileSkillLoader,
         )
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
 
@@ -90,10 +90,10 @@ class TestFileSkillLoader:
 
     def test_load_skills_no_file(self):
         """测试文件不存在"""
-        from src.infra.worker_profiles.loaders.file_skill_loader import (
+        from app.infra.worker_profiles.loaders.file_skill_loader import (
             FileSkillLoader,
         )
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
 
@@ -108,10 +108,10 @@ class TestFileSkillLoader:
 
     def test_load_skills_invalid_json(self):
         """测试无效 JSON 文件"""
-        from src.infra.worker_profiles.loaders.file_skill_loader import (
+        from app.infra.worker_profiles.loaders.file_skill_loader import (
             FileSkillLoader,
         )
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
 
@@ -133,10 +133,10 @@ class TestFileSkillLoader:
 
     def test_load_skills_no_active_set(self):
         """测试没有激活的技能组"""
-        from src.infra.worker_profiles.loaders.file_skill_loader import (
+        from app.infra.worker_profiles.loaders.file_skill_loader import (
             FileSkillLoader,
         )
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
 
@@ -168,10 +168,10 @@ class TestFileSkillLoader:
 
     def test_load_skills_multiple_active_sets(self):
         """测试多个激活的技能组"""
-        from src.infra.worker_profiles.loaders.file_skill_loader import (
+        from app.infra.worker_profiles.loaders.file_skill_loader import (
             FileSkillLoader,
         )
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
 
@@ -212,10 +212,10 @@ class TestFileSkillLoader:
 
     def test_load_skills_empty_skill_set(self):
         """测试空的技能组"""
-        from src.infra.worker_profiles.loaders.file_skill_loader import (
+        from app.infra.worker_profiles.loaders.file_skill_loader import (
             FileSkillLoader,
         )
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
 
@@ -249,10 +249,10 @@ class TestFileSkillLoader:
 
     def test_load_skills_preserves_skill_set_name(self):
         """测试保留技能组名称"""
-        from src.infra.worker_profiles.loaders.file_skill_loader import (
+        from app.infra.worker_profiles.loaders.file_skill_loader import (
             FileSkillLoader,
         )
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
 
@@ -288,10 +288,10 @@ class TestFileSkillLoader:
 
     def test_load_skills_optional_fields(self):
         """测试可选字段处理"""
-        from src.infra.worker_profiles.loaders.file_skill_loader import (
+        from app.infra.worker_profiles.loaders.file_skill_loader import (
             FileSkillLoader,
         )
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
 
@@ -335,10 +335,10 @@ class TestFileSkillLoaderAllowNoActive:
 
     def test_allow_no_active_skillset_true(self):
         """测试允许没有激活技能组"""
-        from src.infra.worker_profiles.loaders.file_skill_loader import (
+        from app.infra.worker_profiles.loaders.file_skill_loader import (
             FileSkillLoader,
         )
-        from src.infra.worker_profiles.config.worker_profile_settings import (
+        from app.infra.worker_profiles.config.worker_profile_settings import (
             WorkerProfileSettings,
         )
 

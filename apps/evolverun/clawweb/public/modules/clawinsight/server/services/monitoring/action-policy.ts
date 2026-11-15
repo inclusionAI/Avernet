@@ -2,22 +2,21 @@
 import { DIAGNOSIS_V4_VERSION, type DiagnosisEvent, type Decision } from "./contracts.js";
 import { TC_CODES } from "./tc-catalog.js";
 export const ACTION_POLICY_VERSION = "diagnosis-actions/v1";
+export const RECOVERY_POLICY_VERSION = "recovery-eligibility/v3";
 export type Tags = { completed: boolean; correction: boolean; code: string | null };
 export function deriveAlert(tags: Tags | null): Decision {
   return tags === null ? "UNRESOLVED" : !tags.completed && tags.code !== null ? "ALERT" : "PASS";
 }
 export function eligibleForRecovery(tags: Tags | null): boolean {
-  return tags !== null && !tags.completed && !tags.correction && tags.code !== null;
+  return tags !== null && (!tags.completed || tags.code !== null);
 }
 /** Independent of allowlist/runtime readiness; caller has already validated the wire. */
 export function recoverySkipReason(event: DiagnosisEvent): string | null {
   if (event.schemaVersion !== DIAGNOSIS_V4_VERSION) return "legacy_policy";
   if (event.decision === "UNRESOLVED") return "diagnosis_unresolved";
-  if (event.handlerName === "COMPLETED") return "task_completed";
-  if (!event.tcFaultLabel || !TC_CODES.has(event.tcFaultLabel)) return "no_tc_code";
-  if (event.humanIntervention) return "human_correction";
-  if (event.handlerName !== "NOT_COMPLETED" || event.decision !== "ALERT") return "invalid_tags";
-  return null;
+  if (!validActionEvent(event)) return "invalid_tags";
+  return eligibleForRecovery({ completed: event.handlerName === "COMPLETED",
+    correction: event.humanIntervention, code: event.tcFaultLabel }) ? null : "task_completed";
 }
 /** Fail closed on invalid v4 tags; legacy parsing stays in its original branch. */
 export function validActionEvent(event: DiagnosisEvent): boolean {

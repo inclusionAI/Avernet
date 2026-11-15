@@ -61,6 +61,12 @@ impl CliSession {
         // A bridge may run legacy and subbot identities together. Inherited
         // selectors must not turn a legacy Bot into whichever Actor launched us.
         cmd.env_remove("BCN_AUTH_MODE").env_remove("BCN_ACTOR_BOT_ID");
+        // Only clear inherited endpoint selectors when this bridge resolved a
+        // CLI endpoint. With no bridge override, preserve the caller's
+        // environment for backwards compatibility.
+        if env.iter().any(|(key, _)| key == "BCS_API_BASE_URL") {
+            cmd.env_remove("BCS_API_BASE_URL").env_remove("MOLTIS_BCS_URL");
+        }
         for (k, v) in env {
             cmd.env(k, v);
         }

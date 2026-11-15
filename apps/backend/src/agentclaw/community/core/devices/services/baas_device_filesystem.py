@@ -17,6 +17,7 @@ from typing import Any, Callable
 import httpx
 
 from agentclaw.community.log import get_logger
+from agentclaw.community.core.devices.errors import DeviceFileSystemReadOnlyError
 from agentclaw.community.core.devices.services.device_filesystem import DeviceFileSystem
 from agentclaw.community.core.devices.services.baas_invoke_transport import (
     BaasTransport,
@@ -162,6 +163,13 @@ class BaasDeviceFileSystem(DeviceFileSystem):
             )
             resp.raise_for_status()
         except httpx.HTTPStatusError as e:
+            if e.response.status_code == 403 and len(e.response.content) <= 4096:
+                try:
+                    body = e.response.json()
+                except ValueError:
+                    body = None
+                if isinstance(body, dict) and body.get("detail") == {"code": "filesystem_read_only"}:
+                    raise DeviceFileSystemReadOnlyError("Target filesystem is read-only") from e
             logger.error(
                 "[%s.write_file] HTTP %d for %s: %s",
                 type(self).__name__, e.response.status_code, file_path, e,

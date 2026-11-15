@@ -1,17 +1,21 @@
 import type { BotManagementVerb } from '@/domain/botWorkshop';
 import { botWorkshopService } from './botWorkshopService';
+import type { BotRestartResponse } from './botRestartTracking';
 import { localBotService } from './localBotService';
 import type { BotDomain } from './types';
 import { botDormantService } from './botDormantService';
 import type { BotActivationResult } from '@/services/backendApi/bots/botDormantController';
 
-const runners: Record<BotManagementVerb, (bot: BotDomain, userId?: string) => Promise<void | BotActivationResult>> = {
+const runners: Record<
+  BotManagementVerb,
+  (bot: BotDomain, userId?: string) => Promise<void | BotActivationResult | BotRestartResponse>
+> = {
   activate: (bot, userId) => botDormantService.activate(bot, userId ?? ''),
   open_folder: async (bot) => {
     await localBotService.openFolder(bot.id);
   },
   delete: (bot) => botWorkshopService.remove(bot),
-  restart: (bot) => botWorkshopService.restart(bot),
+  restart: (bot, userId) => botWorkshopService.restart(bot, userId),
   // Coding Bot暂时以 engine_restart 作为入口，但实际预设转发 Relay refetch 语义。
   engine_restart: (bot) =>
     bot.runtime.isAgentCodingBot

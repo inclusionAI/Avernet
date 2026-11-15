@@ -31,3 +31,23 @@ class ServiceContainerConflictError(ServicePublicationError):
 
 class ServiceContainerUpstreamError(ServicePublicationError):
     """The runtime provider failed while serving a container operation."""
+
+
+class ServicePublicationGateBlockedError(ServicePublicationError):
+    """The release is blocked by the unified service-Bot evaluation gate."""
+
+    def __init__(self, gate_result: dict[str, object]):
+        self.gate_result = dict(gate_result)
+        super().__init__(
+            str(self.gate_result.get("display_message") or "评测未通过，无法推进发布")
+        )
+
+
+class ServicePublicationGatePendingError(ServicePublicationError):
+    """The unified evaluation gate has a decision still in progress."""
+
+    def __init__(self, gate_result: dict[str, object]):
+        self.gate_result = dict(gate_result)
+        super().__init__(
+            str(self.gate_result.get("display_message") or "评测认证处理中，请稍后再试")
+        )

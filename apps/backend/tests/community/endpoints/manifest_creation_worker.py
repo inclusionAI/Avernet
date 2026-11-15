@@ -1,5 +1,7 @@
 """Drive the real Manifest creation/apply task handlers and persist task outcomes."""
 
+from collections.abc import Callable
+
 from agentclaw.community.api.apply_run_service import ApplyRunServiceProtocol
 from agentclaw.community.core.apply_engine.apply_task import APPLY_TASK_TYPE
 from agentclaw.community.core.bot_config_manifest.create_job import (
@@ -63,7 +65,12 @@ class _Worker:
         else:
             self._repo.complete(task_id=task.id, worker_id=self._WORKER)
 
-    def turn(self) -> list:
+    def turn(
+        self,
+        *,
+        after_settle: Callable[[], None] | None = None,
+        first_task_type: str | None = None,
+    ) -> list:
         claimed = self._repo.claim_batch(
             worker_id=self._WORKER,
             env=get_current_env(),
@@ -71,10 +78,14 @@ class _Worker:
             limit=10,
             lease_seconds=300,
         )
+        if first_task_type is not None:
+            claimed.sort(key=lambda task: task.task_type != first_task_type)
         settled = []
         for task in claimed:
             outcome = self._dispatch(task)
             self._settle(task, outcome)
+            if after_settle is not None:
+                after_settle()
             if task.task_type == CREATE_JOB_TASK_TYPE:
                 settled.append(outcome)
         return settled

@@ -553,17 +553,68 @@ story_cli_operator_validates_channel_management() {
     require_status "CLI channel lookup group is cleaned up" "200" || return
 }
 
-# User story: An operator writes and reads Group Context through bcs-cli.
-#
-# Flow:
-#   Create a CLI-managed group -> add a group-scoped context entry -> read it
-#   directly -> update the active value -> list group-level entries -> clean up.
-#
-# Critical assertions:
-#   - The four public group-context CLI leaves are exercised against BCS HTTP
-#     routes, keeping CLI and adapter endpoint coverage complete.
-#   - Add/update return the stable ok status.
-#   - Get/list expose the active entry after mutation.
+_cli_story_exercise_context_presets() {
+    local group_id="$1" session_id="$2"
+    local query="groupId=$(urlencode "$group_id")"
+    local session_query="$query&sessionId=$(urlencode "$session_id")"
+
+    bot_post "/groupcontext/add-preset?$query" PM '{"name":"Timeline"}'
+    require_status "Bot credentials cannot manage preset definitions" "403" || return
+    api_post "/groupcontext/add-preset?$query" '{"name":"Timeline","description":"Incident timeline"}'
+    require_status "driver Bot owner defines a context preset" "200" || return
+    api_post "/groupcontext/add-preset?$query" '{"name":"Timeline"}'
+    require_status "duplicate preset name is rejected" "409" || return
+
+    _cli_story_run "group member discovers the preset through CLI" PM group-context list-preset \
+        --group-id "$group_id" || return
+    assert_eq "preset discovery includes its description" \
+        "$(_cli_json_array_has_object "$BCS_CLI_STDOUT" presets name Timeline description "Incident timeline")" "1"
+
+    bot_post "/groupcontext/list-preset?$query" CEO '{}'
+    require_status "Bot outside the group cannot discover its presets" "403" || return
+    assert_contains "discovery denial prompts for a Session ID" "$RESPONSE" "--session-id"
+    bot_post "/groupcontext/list-preset?$session_query" CEO '{}'
+    require_status "Session ID alone does not authorize a nonmember" "403" || return
+
+    _cli_story_run "driver adds the guest only to the Session" PM session add-member "$session_id" \
+        --bot-uuid "$BOT_CEO_UUID" --role consultant || return
+    _cli_story_run "Session-only guest discovers presets using its Session ID" CEO group-context list-preset \
+        --group-id "$group_id" --session-id "$session_id" || return
+    assert_eq "Session guest discovers the same preset" \
+        "$(_cli_json_array_has_object "$BCS_CLI_STDOUT" presets name Timeline)" "1"
+
+    bot_post "/groupcontext/add?$session_query" PM \
+        '{"name":"timeline","scope_level":"session","content":"Wrong spelling","visible_to":{"userIds":[]},"preset":true}'
+    require_status "preset selection is case-sensitive" "400" || return
+    bot_post "/groupcontext/add?$session_query" PM \
+        '{"name":"Timeline","scope_level":"session","content":"Missing preset flag","visible_to":{"userIds":[]}}'
+    require_status "reserved preset name requires explicit selection" "400" || return
+
+    _cli_story_run "Session guest adds context using the preset" CEO group-context add \
+        --group-id "$group_id" --session-id "$session_id" --scope-level session \
+        --name Timeline --content "Incident began at 09:00" --preset || return
+    assert_json_eq "preset context add succeeds" "$BCS_CLI_STDOUT" "status" "ok"
+
+    api_post "/groupcontext/update-preset?$query" '{"name":"Timeline","new_name":"IncidentTimeline","description":"Updated timeline"}'
+    require_status "driver Bot owner renames the preset" "200" || return
+    _cli_story_run "group member discovers the renamed preset" PM group-context list-preset \
+        --group-id "$group_id" || return
+    assert_eq "discovery returns the updated preset name and description" \
+        "$(_cli_json_array_has_object "$BCS_CLI_STDOUT" presets name IncidentTimeline description "Updated timeline")" "1"
+
+    api_post "/groupcontext/delete-preset?$query" '{"name":"IncidentTimeline"}'
+    require_status "driver Bot owner deletes the preset definition" "200" || return
+    api_post "/groupcontext/delete-preset?$query" '{"name":"IncidentTimeline"}'
+    require_status "deleting an unknown preset reports not found" "404" || return
+    _cli_story_run "Session guest reads the existing context after preset deletion" CEO group-context get \
+        --session-id "$session_id" --scope-level session --name Timeline || return
+    assert_eq "deleting a preset preserves context content and original name" \
+        "$(_cli_json_array_has_object "$BCS_CLI_STDOUT" items name Timeline content "Incident began at 09:00")" "1"
+}
+
+# User story: The driver Bot owner manages Preset definitions, and Bots
+# discover and use them from Group and Session membership.
+# The same workspace exercises ordinary Group Context at each scope.
 story_cli_operator_manages_group_context() {
     info "Story: an operator manages Group Context through bcs-cli"
     local group_id session_id round_id ctx_name content updated session_content round_content list_has_item get_has_content get_has_updated
@@ -665,6 +716,11 @@ story_cli_operator_manages_group_context() {
     }
     get_has_updated=$(_cli_json_array_has_object "$BCS_CLI_STDOUT" "items" "name" "$ctx_name" "content" "$updated")
     assert_eq "CLI group-context get returns the updated content" "$get_has_updated" "1"
+
+    _cli_story_exercise_context_presets "$group_id" "$session_id" || {
+        api_delete "/groups/${group_id}?bot_id=${BOT_PM_UUID}"
+        return
+    }
 
     api_delete "/groups/${group_id}?bot_id=${BOT_PM_UUID}"
     require_status "CLI group-context group is cleaned up" "200" || return

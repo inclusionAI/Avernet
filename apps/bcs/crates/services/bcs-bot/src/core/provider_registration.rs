@@ -31,6 +31,7 @@ pub struct ProviderRegistrationCore {
     self_service_providers: Vec<String>,
     url_guard: OutboundUrlGuard,
     a2a_allow_anonymous:bool,
+    catalog_changes: Option<Arc<dyn bcs_service_api::port::CatalogChangePort>>,
 }
 
 impl ProviderRegistrationCore {
@@ -57,10 +58,16 @@ impl ProviderRegistrationCore {
             self_service_providers,
             url_guard,
             a2a_allow_anonymous:false,
+            catalog_changes: None,
         }
     }
 
     pub fn with_a2a_anonymous(mut self,allow:bool)->Self {self.a2a_allow_anonymous=allow;self}
+
+    pub fn with_catalog_changes(mut self, port: Option<Arc<dyn bcs_service_api::port::CatalogChangePort>>) -> Self {
+        self.catalog_changes = port;
+        self
+    }
 
     async fn authorized_provider(
         &self,
@@ -162,6 +169,7 @@ impl ProviderRegistrationCoreService for ProviderRegistrationCore {
         self.register_with_ownership(
             command,
             bcs_service_api::types::bot_authority::OwnershipInitialization {
+                initial_manager_user_ids: Vec::new(),
                 // The Provider token's verified Human IS the
                 // initiator of the legacy surface too.
                 owner_user_id: owner.clone(),
@@ -285,6 +293,7 @@ impl ProviderRegistrationCore {
             self.registrations.create_provider_bot_with_ownership(provider_bot, capabilities,
                 &record.owner, &record.bot_token, initialization).await?;
         }
+        if let Some(port) = &self.catalog_changes { port.agent_changed(&record.bot_uuid); }
         Ok(ProviderRegistrationResult {
             record,
             effective_webhook_url,

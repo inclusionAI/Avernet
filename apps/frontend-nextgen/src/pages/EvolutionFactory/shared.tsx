@@ -1,20 +1,17 @@
 import { Button } from '@/components/ui/Button';
-import { Card } from '@/components/ui/Card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select';
 import { cn } from '@/utils/cn';
 import { history } from '@umijs/max';
+import { Info } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { useCallback, useEffect, useState } from 'react';
+import { Hint } from './sharedPrimitives';
 
 // 展示类 primitives（面板 / 骨架 / 徽标 / Tooltip）拆至本目录同名文件；此处聚合再导出，
 // 列表页既有 `from './shared'` 调用点保持零改动。
 export * from './sharedPrimitives';
 
-/**
- * 「智能进化」首页顶部的胶囊 Tabs —— 与 Bot 管理页（dmore 10/19 稿）同一规范：
- * 激活态 primary 12% 蓝底 + 蓝字 13px/500，未激活灰字，hover 走 muted。
- * 列表页（TaskDetail / DomainDetail 等二级页）继续用 EvolutionHeader 的下划线 tab 表达层级差异。
- */
+/** Shared navigation: blue text on a light blue pill, with no underline or border. */
 export type EvolutionTab = 'tasks' | 'templates' | 'versions';
 const EVOLUTION_TABS: ReadonlyArray<readonly [EvolutionTab, string]> = [
   ['tasks', '进化任务'],
@@ -23,7 +20,7 @@ const EVOLUTION_TABS: ReadonlyArray<readonly [EvolutionTab, string]> = [
 ];
 export function EvolutionTabs({ tab, className }: { tab: EvolutionTab; className?: string }) {
   return (
-    <div className={cn('flex items-center gap-1', className)} role="tablist" aria-label="智能进化">
+    <div className={cn('flex items-center gap-2', className)} role="tablist" aria-label="智能进化">
       {EVOLUTION_TABS.map(([value, label]) => (
         <Button
           key={value}
@@ -32,10 +29,10 @@ export function EvolutionTabs({ tab, className }: { tab: EvolutionTab; className
           type="button"
           aria-selected={tab === value}
           className={cn(
-            'inline-flex h-8 items-center rounded-md px-3 text-[13px] transition-colors cursor-pointer',
+            'inline-flex h-8 items-center rounded-md border-0 px-3 text-[13px] transition-colors cursor-pointer',
             tab === value
-              ? 'bg-primary/10 font-medium text-primary'
-              : 'font-normal text-muted-foreground hover:bg-muted hover:text-foreground',
+              ? 'bg-primary/10 font-medium text-primary hover:bg-primary/10 hover:text-primary'
+              : 'bg-transparent font-normal text-muted-foreground hover:bg-muted hover:text-foreground',
           )}
           onClick={() => history.push(`/evolution-factory${value === 'tasks' ? '' : `?tab=${value}`}`)}
         >
@@ -56,7 +53,7 @@ export function FilterSelect({
   value,
   onChange,
   options,
-  triggerClassName = 'w-full sm:w-[132px]',
+  triggerClassName = 'h-8 w-full sm:w-[132px]',
   disabled,
 }: {
   label: string;
@@ -68,8 +65,8 @@ export function FilterSelect({
 }) {
   return (
     <div className="flex w-full min-w-0 items-center gap-2 sm:w-auto">
-      <span className="shrink-0 text-xs font-medium text-muted-foreground">{label}</span>
-      <Select value={value || undefined} onValueChange={onChange} disabled={disabled}>
+      <span className="shrink-0 text-[13px] font-normal text-foreground">{label}</span>
+      <Select value={value} onValueChange={onChange} disabled={disabled}>
         <SelectTrigger aria-label={label} className={triggerClassName}>
           <SelectValue />
         </SelectTrigger>
@@ -95,38 +92,14 @@ export function EvolutionHeader({
   tab: 'tasks' | 'templates' | 'versions';
   actions?: ReactNode;
   showTabs?: boolean;
-}) {  return (
+}) {
+  return (
     <div className="space-y-5">
       <header className="flex items-center justify-between gap-3">
         <h1 className="text-2xl font-semibold">智能进化</h1>
         {actions}
       </header>
-      {showTabs && (
-        <div role="tablist" aria-label="智能进化" className="flex gap-6 border-b border-divider">
-          {(
-            [
-              ['tasks', '进化任务'],
-              ['templates', '评测模板'],
-              ['versions', '进化版本'],
-            ] as const
-          ).map(([value, label]) => (
-            <Button
-              variant="ghost"
-              style={{ height: 'auto', whiteSpace: 'normal' }}
-              key={value}
-              type="button"
-              role="tab"
-              aria-selected={tab === value}
-              className={`border-b-2 px-3 pb-3 text-sm ${
-                tab === value ? 'border-primary font-medium text-primary' : 'border-transparent text-muted-foreground'
-              }`}
-              onClick={() => history.push(`/evolution-factory${value === 'tasks' ? '' : `?tab=${value}`}`)}
-            >
-              {label}
-            </Button>
-          ))}
-        </div>
-      )}
+      {showTabs && <EvolutionTabs tab={tab} />}
     </div>
   );
 }
@@ -162,25 +135,49 @@ export function useResource<T>(load: () => Promise<T>, enabled = true) {
   }, [load, enabled, revision]);
   return { data, error, loading, reload };
 }
-export function Section({ title, children, index }: { title: string; children: ReactNode; index?: number }) {
+export function Section({ title, children }: { title: string; children: ReactNode; index?: number }) {
   return (
-    <Card className="p-5 sm:p-6">
-      <h2 className="mb-4 flex items-center gap-2 text-[15px] font-semibold">
-        {index !== undefined && (
-          <span className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full bg-primary text-xs text-primary-foreground">
-            {index}
-          </span>
-        )}
+    <section className="min-w-0">
+      <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold text-foreground">
+        <span aria-hidden className="h-3.5 w-0.5 shrink-0 bg-primary" />
         {title}
       </h2>
       {children}
-    </Card>
+    </section>
   );
 }
-export function Field({ label, help, children }: { label: string; help?: string; children: ReactNode }) {
+export function Field({
+  label,
+  help,
+  labelHint,
+  children,
+}: {
+  label: string;
+  help?: string;
+  labelHint?: string;
+  children: ReactNode;
+}) {
   return (
     <label className="flex min-w-0 flex-col gap-2 text-sm">
-      <span className="font-medium">{label}</span>
+      <span className="text-[13px] font-normal text-foreground">
+        {label.endsWith(' *') ? (
+          <>
+            <span aria-hidden="true" className="mr-1 text-destructive">
+              *
+            </span>
+            {label.slice(0, -2)}
+          </>
+        ) : (
+          label
+        )}
+        {labelHint && (
+          <Hint content={labelHint}>
+            <span aria-label="填写说明" className="ml-2 inline-flex align-middle text-muted-foreground">
+              <Info aria-hidden className="size-3.5" />
+            </span>
+          </Hint>
+        )}
+      </span>
       {children}
       {help && <span className="text-xs text-muted-foreground">{help}</span>}
     </label>
@@ -200,8 +197,8 @@ export function Choice({
   disabled?: boolean;
 }) {
   return (
-    <Select value={value || undefined} onValueChange={onChange} disabled={disabled}>
-      <SelectTrigger aria-label={label}>
+    <Select value={value} onValueChange={onChange} disabled={disabled}>
+      <SelectTrigger aria-label={label} className="h-8">
         <SelectValue placeholder="请选择" />
       </SelectTrigger>
       <SelectContent>

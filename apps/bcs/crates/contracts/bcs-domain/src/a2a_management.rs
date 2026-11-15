@@ -6,7 +6,7 @@ use serde_json::Value;
 use std::collections::HashSet;
 
 pub const SOURCE_AGENT_EXTENSION: &str =
-    "https://github.com/inclusionAI/Avernet/blob/dev/docs/specs/a2a/extensions/source-agent/v1.md";
+    "https://github.com/inclusionAI/Avernet/blob/dev/docs/specs/a2a/extensions/source-agent/v2.md";
 pub const MAX_CARD_BYTES: usize = 1_048_576;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -18,6 +18,7 @@ pub enum ManagementCode {
     BotNotFound,
     MethodNotAllowed,
     NotAcceptable,
+    ProviderBotRefConflict,
     BotNameConflict,
     SourceAgentConflict,
     SourceAgentChangeNotAllowed,
@@ -131,7 +132,11 @@ pub fn validate_management_card(card: &Value) -> Result<()> {
         .ok_or_else(|| invalid("agent_card.supportedInterfaces", "NONEMPTY_ARRAY_REQUIRED"))?;
     for (index, interface) in interfaces.iter().enumerate() {
         let prefix = format!("agent_card.supportedInterfaces[{index}]");
-        absolute_url(&interface["url"], &format!("{prefix}.url"), false)?;
+        // Standard bindings require URLs. Deployment-defined bindings validate
+        // their address fields at the outbound admission boundary.
+        if matches!(interface["protocolBinding"].as_str(), Some("HTTP+JSON" | "JSONRPC" | "GRPC")) {
+            absolute_url(&interface["url"], &format!("{prefix}.url"), false)?;
+        }
         text(
             &interface["protocolBinding"],
             &format!("{prefix}.protocolBinding"),
@@ -288,7 +293,6 @@ fn validate_anonymous_security(
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SourceAgent<'a> {
-    pub agent_id: &'a str,
     pub party: Option<&'a str>,
 }
 
@@ -299,6 +303,9 @@ pub fn source_agent(card: &Value) -> Result<Option<SourceAgent<'_>>> {
     else {
         return Ok(None);
     };
+    if extensions.iter().any(|v| v.get("uri").and_then(Value::as_str) == Some("https://github.com/inclusionAI/Avernet/blob/dev/docs/specs/a2a/extensions/source-agent/v1.md")) {
+        return Err(invalid("agent_card.capabilities.extensions", "SOURCE_EXTENSION_V1_RETIRED"));
+    }
     let mut found = None;
     for extension in extensions
         .iter()
@@ -315,9 +322,8 @@ pub fn source_agent(card: &Value) -> Result<Option<SourceAgent<'_>>> {
             .get("params")
             .filter(|v| v.is_object())
             .ok_or_else(|| invalid(field, "OBJECT_REQUIRED"))?;
-        let id = text(&params["agentId"], field)?;
-        if id != id.trim() || id.chars().count() > 256 || id.chars().any(char::is_control) {
-            return Err(invalid(field, "INVALID_SOURCE_AGENT_ID"));
+        if params.get("agentId").is_some() {
+            return Err(invalid(field, "USE_PROVIDER_BOT_REF"));
         }
         let party = match params.get("party") {
             None => None,
@@ -329,22 +335,22 @@ pub fn source_agent(card: &Value) -> Result<Option<SourceAgent<'_>>> {
             ),
         };
         found = Some(SourceAgent {
-            agent_id: id,
             party,
         });
     }
     Ok(found)
 }
 
-pub fn validate_source_transition(previous: &Value, next: &Value) -> Result<()> {
-    let old = source_agent(previous)?;
-    let new = source_agent(next)?;
-    if old.is_some_and(|old| new.as_ref().is_none_or(|new| old.agent_id != new.agent_id)) {
-        return Err(ManagementError::new(
-            ManagementCode::SourceAgentChangeNotAllowed,
-            "agent_card.capabilities.extensions",
-            "SOURCE_AGENT_IMMUTABLE",
-        ));
+/// Classification can be added, changed or removed; identity lives outside the Card.
+pub fn validate_source_transition(_previous: &Value, next: &Value) -> Result<()> {
+    source_agent(next)?;
+    Ok(())
+}
+
+pub fn validate_provider_bot_ref(reference: &str) -> Result<()> {
+    if reference.is_empty() || reference.len()>128 || !reference.bytes().all(|c|
+        c.is_ascii_alphanumeric() || matches!(c,b'_'|b'-'|b'.'|b':')) {
+        return Err(ManagementError::new(ManagementCode::InvalidRequest,"provider_bot_ref","INVALID_PROVIDER_BOT_REF"));
     }
     Ok(())
 }

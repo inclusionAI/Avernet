@@ -26,7 +26,7 @@ export interface WorkOrderState {
 // workOrder Store 只保存同步页面状态，不直接发请求；编排由 useWorkOrders 负责。
 export const useWorkOrderStore = create<WorkOrderState>((set) => ({
   view: 'pending_mine',
-  category: 'ALL',
+  category: 'APPROVAL',
   pageNo: 1,
   pageSize: 10,
   items: [],
@@ -52,7 +52,7 @@ export const useWorkOrderStore = create<WorkOrderState>((set) => ({
   reset: () =>
     set({
       view: 'pending_mine',
-      category: 'ALL',
+      category: 'APPROVAL',
       pageNo: 1,
       pageSize: 10,
       items: [],

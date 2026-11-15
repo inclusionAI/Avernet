@@ -74,6 +74,17 @@ impl ProviderCoreService for ProviderCore {
         admin_callback_url: Option<String>, scope: Option<ProviderCollaborationScope>,
         caller_capabilities: Option<bcs_service_api::ProviderCallerCapabilities>,
     ) -> ServiceResult<RegisteredProvider> {
+        self.register_provider_with_a2a(name, webhook_url, auth_mode, created_by, protocol_version, coordination, slug, admin_callback_url, scope, caller_capabilities, None).await
+    }
+
+    async fn register_provider_with_a2a(
+        &self, name: String, webhook_url: Option<String>, auth_mode: ProviderAuthMode,
+        created_by: String, protocol_version: Option<String>,
+        coordination: Option<ProviderCoordinationConfig>, slug: Option<String>,
+        admin_callback_url: Option<String>, scope: Option<ProviderCollaborationScope>,
+        caller_capabilities: Option<bcs_service_api::ProviderCallerCapabilities>,
+        a2a: Option<bcs_service_api::ProviderA2aPatch>,
+    ) -> ServiceResult<RegisteredProvider> {
         if let Some(slug) = slug.as_deref() { validate_provider_slug(slug)?; }
         let provider_id = new_provider_id();
         validate_external_id("provider_id", &provider_id)?;
@@ -115,6 +126,9 @@ if let Some(scope) = scope {
         }
         if let Some(caller_capabilities) = caller_capabilities.as_ref() {
             config = replace_caller_capabilities(&config, caller_capabilities)?;
+        }
+        if let Some(a2a) = a2a {
+            config = a2a.apply(&config).map_err(|message| ServiceError::InvalidOperation {message,request_id:None})?;
         }
         let provider = ProviderRecord {
             provider_id: provider_id.clone(),
@@ -275,6 +289,18 @@ if let Some(scope) = scope {
         admin_callback_url: Option<String>, scope: Option<ProviderCollaborationScope>,
         caller_capabilities: Option<bcs_service_api::ProviderCallerCapabilities>,
     ) -> ServiceResult<ProviderRecord> {
+        self.update_provider_with_a2a(provider_id, provider_admin_token, authenticated_staff_id, name, webhook_url, protocol_version, coordination, organization_management, slug, admin_callback_url, scope, caller_capabilities, None).await
+    }
+
+    async fn update_provider_with_a2a(
+        &self, provider_id: &str, provider_admin_token: &str, authenticated_staff_id: &str,
+        name: Option<String>, webhook_url: Option<String>, protocol_version: Option<String>,
+        coordination: Option<ProviderCoordinationConfig>,
+        organization_management: Option<ProviderOrganizationManagementConfig>, slug: Option<String>,
+        admin_callback_url: Option<String>, scope: Option<ProviderCollaborationScope>,
+        caller_capabilities: Option<bcs_service_api::ProviderCallerCapabilities>,
+        a2a: Option<bcs_service_api::ProviderA2aPatch>,
+    ) -> ServiceResult<ProviderRecord> {
         let current = self
             .provider_admin_for_path(provider_id, provider_admin_token)
             .await?;
@@ -349,6 +375,10 @@ if let Some(scope) = scope {
         if let Some(caller_capabilities) = caller_capabilities.as_ref() {
             let source = config.as_deref().unwrap_or(&current.config);
             config = Some(replace_caller_capabilities(source, caller_capabilities)?);
+        }
+        if let Some(a2a) = a2a.filter(|patch| patch.default_owner.is_some()) {
+            config = Some(a2a.apply(config.as_deref().unwrap_or(&current.config))
+                .map_err(|message| ServiceError::InvalidOperation {message,request_id:None})?);
         }
         self.providers
             .update_provider_metadata(provider_id, name.as_deref(), config.as_deref(), slug.as_deref(), now_ms())

@@ -41,6 +41,39 @@ async fn poll(cli: &Cli, result: ResponseTemplate) {
         .respond_with(result).expect(1).mount(&cli.server).await;
 }
 
+#[tokio::test]
+async fn chat_encodes_composite_bot_uuid_as_a_path_segment() {
+    let cli = Cli::new().await;
+    Mock::given(method("POST"))
+        .and(path("/bots/default%3A197262/chat-async"))
+        .and(header("authorization", "Bearer test-command-token"))
+        .and(header("X-BCS-CHAT-VERSION", "3"))
+        .and(header("X-BCS-Client-Detach", "true"))
+        .and(header("X-BCS-Client-Wait-Timeout-Ms", "60000"))
+        .and(body_json(default_body()))
+        .respond_with(ResponseTemplate::new(202).set_body_json(submit("pending")))
+        .expect(1)
+        .mount(&cli.server)
+        .await;
+
+    let output = cli.ok(
+        &["--json"],
+        &[
+            "chat",
+            "--bot-uuid",
+            "default:197262",
+            "--message",
+            "Hello",
+            "--detach",
+        ],
+    );
+
+    let value: Value = serde_json::from_str(&stdout(&output)).unwrap();
+    assert_eq!(value["submitted"], true);
+    assert_eq!(value["run_id"], "run-1");
+    cli.server.verify().await;
+}
+
 fn assert_ack(output: &std::process::Output, json_mode: bool) {
     let ack = "[chat] submitted run_id=run-1 session_id=session-1";
     if json_mode {

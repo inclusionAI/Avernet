@@ -26,6 +26,9 @@ from typing import Callable, Mapping
 from injector import Injector, Module, inject, multiprovider, provider, singleton
 
 from agentclaw.community.core.apply_engine.compiler import StateCompilers
+from agentclaw.community.core.bot_config_manifest.inline_backfill_protocol import (
+    ManifestInlineBackfillProtocol,
+)
 from agentclaw.community.core.bot_config_manifest.bot_config_manifest_service_protocol import MANIFEST_STATE
 from agentclaw.community.core.bot_config_manifest.compiler import ManifestCompiler
 from agentclaw.community.core.repository.protocols.bot.config_manifest_apply import (
@@ -403,6 +406,19 @@ class ManifestFetchModule(Module):
         )
 
         return lambda: SkillPackageValidator(SkillParser())
+
+    @singleton
+    @provider
+    @inject
+    def manifest_inline_backfill(
+        self, manifests: BotConfigManifestServiceProtocol, content: ContentStoreProtocol
+    ) -> ManifestInlineBackfillProtocol:
+        """Transitional: stores a stored Manifest's inline bodies for rows filed before the bytes moved."""
+        from agentclaw.community.core.bot_config_manifest.services.inline_backfill import (
+            ManifestInlineBackfillService,
+        )
+
+        return ManifestInlineBackfillService(manifests, content)
 
     @singleton
     @provider

@@ -240,11 +240,22 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
     }
   }
 
-private fetchIamToken(): Promise<string> {
+  private fetchIamToken(): Promise<string> {
     const params = withFriendBotRequestParams(this.options.bot, this.options.userId, {
       user_id: resolveUserId(this.options.userId),
     });
-    return this.getIamTokenFn(this.options.bot.realBotId, params.user_id, this.options.bot.ownerId, params.stage);
+    return this.getIamTokenFn(
+      this.options.bot.realBotId,
+      params.user_id,
+      this.options.bot.ownerId,
+      params.stage,
+      {
+        sessionKey: this.options.sessionId,
+        ...(this.options.bot.isFriendBot
+          ? { friendUserId: params.user_id, ownerId: this.options.bot.ownerId }
+          : {}),
+      },
+    );
   }
 
   private async getChatUrl(): Promise<{

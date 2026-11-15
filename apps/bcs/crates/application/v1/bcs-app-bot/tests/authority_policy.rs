@@ -259,6 +259,13 @@ impl BotAuthorityCoreService for RecordingCore {
         })
     }
 
+    async fn ownerships_for(
+        &self,
+        bot_ids: &[String],
+    ) -> bcs_service_api::ServiceResult<Vec<Option<BotOwnershipView>>> {
+        Ok(bot_ids.iter().map(|_| None).collect())
+    }
+
     async fn managers(
         &self,
         _query: ManagerListQuery,
@@ -401,6 +408,13 @@ impl BotAuthorityPort for NoopHook {
 
     async fn require_manage(&self, _: &str, _: &str) -> bcs_service_api::ServiceResult<()> {
         Ok(())
+    }
+
+    async fn ownerships_for(
+        &self,
+        bot_ids: &[String],
+    ) -> bcs_service_api::ServiceResult<Vec<Option<BotOwnershipView>>> {
+        Ok(bot_ids.iter().map(|_| None).collect())
     }
 }
 

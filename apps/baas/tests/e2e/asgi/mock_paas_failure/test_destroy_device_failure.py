@@ -24,8 +24,17 @@ def _set_mock(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 class TestDestroyDeviceFailure:
+    """DESTROY completes even when the sandbox cannot be torn down.
+
+    ``allow_residue_success`` is set for DESTROY/STOP, so an unreachable or
+    already-gone sandbox counts as a completed teardown: the bot is being
+    destroyed, so there is no surviving workload whose state could be
+    misreported. SCALE_DOWN deliberately does not take this path - see
+    ``TestScaleDownDestroyFailure``.
+    """
+
     @pytest.mark.asyncio
-    async def test_destroy_device_fails(
+    async def test_destroy_device_succeeds_when_teardown_fails(
         self, api: APITestHelper, monkeypatch: pytest.MonkeyPatch, unique_id: str
     ) -> None:
         _set_mock(monkeypatch)
@@ -45,11 +54,8 @@ class TestDestroyDeviceFailure:
         status = await wait_for_publish_status(
             api, publish_id, {"SUCCESS", "FAILED"}, timeout_seconds=ASYNC_POLL_TIMEOUT
         )
-        assert status == "FAILED", f"Expected FAILED, got {status}"
-        devices = await get_devices_from_progress(api, publish_id)
-        assert len(devices) >= 1
-        for d in devices:
-            assert d.get("result_status") == "FAILED"
+        assert status == "SUCCESS", f"Expected SUCCESS, got {status}"
+        # The device record is released regardless of the provider outcome.
         resp = await api.client.get(api.bot_url(bot["bot_uuid"]), params=api.params())
         assert resp.status_code == 404
         device_resp = await api.client.get(
@@ -61,7 +67,7 @@ class TestDestroyDeviceFailure:
                 assert d.get("status") == "RELEASED"
 
     @pytest.mark.asyncio
-    async def test_destroy_device_fails_multi_device(
+    async def test_destroy_device_succeeds_multi_device(
         self, api: APITestHelper, monkeypatch: pytest.MonkeyPatch, unique_id: str
     ) -> None:
         _set_mock(monkeypatch)
@@ -83,7 +89,7 @@ class TestDestroyDeviceFailure:
         status = await wait_for_publish_status(
             api, publish_id, {"SUCCESS", "FAILED"}, timeout_seconds=ASYNC_POLL_TIMEOUT
         )
-        assert status == "FAILED", f"Expected FAILED, got {status}"
+        assert status == "SUCCESS", f"Expected SUCCESS, got {status}"
 
 
 class TestScaleDownDestroyFailure:

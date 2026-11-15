@@ -38,7 +38,10 @@ class AvatarWrite(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
     avatar_url: str = Field(
-        description="Avatar URL supplied by the existing upload or generation channel."
+        description=(
+            "Avatar URL supplied by the existing upload or generation channel. "
+            "At most 24 KiB in UTF-8; the merged Bot metadata must also fit its storage limit."
+        )
     )
 
 

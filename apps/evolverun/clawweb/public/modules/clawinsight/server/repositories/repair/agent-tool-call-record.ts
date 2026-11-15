@@ -64,6 +64,7 @@ export type AgentToolCall = {
 
 /**
  * A synchronous invariant checked while the owning Repair Task row is locked.
+ * It may select a prior semantic receipt instead of inserting a call.
  * It must not perform I/O: throwing aborts the surrounding repository transaction.
  */
 export type AgentToolCallLedgerContext = Readonly<{
@@ -76,7 +77,7 @@ export type AgentToolCallLedgerContext = Readonly<{
 export type AgentToolCallLedgerGuard = (
   calls: readonly AgentToolCall[],
   context: AgentToolCallLedgerContext,
-) => void;
+) => AgentToolCall | void;
 
 export type CreateAgentToolCallInput = {
   callId: string;

@@ -200,9 +200,8 @@ if matches_any '^apps/frontend/'; then
   run_heavy "$repo_root/apps/frontend/scripts/ci_test.sh" --base "$base" --head "$head"
 fi
 
-if matches_any '^(singlebox/singlebox\.sh|singlebox/modules/|singlebox/ci/singlebox_coverage(_report|_manifest_check)?\.(sh|py)|singlebox/ci/singlebox_coverage_modules\.yaml|singlebox/ci/verify_singlebox_coverage_artifacts\.py|apps/backend/tests/community/acceptance/|apps/baas/tests/e2e/)'; then
-  # singlebox 自身脚本或 live E2E 用例变更时,即便没有 Backend/BaaS 源码变更,
-  # 也要触发 singlebox coverage gate。
+if matches_any '^(apps/bcsfuse/|singlebox/singlebox\.sh|singlebox/modules/|singlebox/ci/singlebox_coverage(_report|_manifest_check)?\.(sh|py)|singlebox/ci/singlebox_coverage_modules\.yaml|singlebox/ci/verify_singlebox_coverage_artifacts\.py|apps/backend/tests/community/acceptance/|apps/baas/tests/e2e/)'; then
+  # BCSFuse、Singlebox 自身脚本或 live E2E 用例变更也触发 Singlebox coverage gate。
   run_singlebox_coverage_once
 fi
 

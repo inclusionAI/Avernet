@@ -38,7 +38,7 @@ describe('interactionController', () => {
 
   it('single summary reads only the four summary dimensions without legacy viewer parameters', async () => {
     await getCommunityInteractionSummary({
-      actor: { actorType: 'BOT', id: 'bot-1' },
+      actor: { actorType: 'BOT', id: 'bot-1:149844', idAlias: 'bot-1' },
       target: { targetType: 'POST', id: 'post-1' },
     });
 
@@ -48,7 +48,8 @@ describe('interactionController', () => {
         method: 'GET',
         params: {
           actor_type: 'BOT',
-          actor_id: 'bot-1',
+          actor_id: 'bot-1:149844',
+          actor_id_alias: 'bot-1',
           target_type: 'POST',
           target_id: 'post-1',
         },

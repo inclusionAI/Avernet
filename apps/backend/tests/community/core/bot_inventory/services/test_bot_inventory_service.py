@@ -603,6 +603,7 @@ def test_team_space_lists_all_owners_and_scopes_actions_by_bot_permission() -> N
     assert by_id["service-editor"].actions == (
         BotAction.VIEW,
         BotAction.EDIT,
+        BotAction.VIEW_CONFIG,
     )
     assert by_id["service-editor"].disabled_actions == {
         "delete": "Bot Owner permission required"
@@ -817,7 +818,7 @@ def test_service_upgrade_action_requires_admin() -> None:
         level=PermissionLevel.MEMBER,
         explicit=True,
     )
-    assert member_actions == (BotAction.VIEW,)
+    assert member_actions == (BotAction.VIEW, BotAction.VIEW_CONFIG)
     assert member_disabled == {
         "delete": "Bot Owner permission required",
         "upgrade": "Bot Admin permission required",
@@ -830,8 +831,41 @@ def test_service_upgrade_action_requires_admin() -> None:
         level=PermissionLevel.ADMIN,
         explicit=True,
     )
-    assert admin_actions == (BotAction.VIEW, BotAction.UPGRADE)
+    assert admin_actions == (
+        BotAction.VIEW,
+        BotAction.UPGRADE,
+        BotAction.VIEW_CONFIG,
+    )
     assert admin_disabled == {"delete": "Bot Owner permission required"}
+
+
+def test_online_service_explicit_member_gets_read_only_config_action() -> None:
+    """Online lifecycle actions need not expose EDIT for a collaborator to read config."""
+    online_actions = (
+        BotAction.VIEW,
+        BotAction.CHAT,
+        BotAction.RESTART_PUBLISH,
+        BotAction.OFFLINE,
+    )
+
+    explicit_actions, _ = BotInventoryService._actions_for_level(
+        kind=BotInventoryKind.SERVICE,
+        actions=online_actions,
+        disabled={},
+        level=PermissionLevel.MEMBER,
+        explicit=True,
+    )
+    space_actions, _ = BotInventoryService._actions_for_level(
+        kind=BotInventoryKind.SERVICE,
+        actions=online_actions,
+        disabled={},
+        level=PermissionLevel.MEMBER,
+        explicit=False,
+    )
+
+    assert BotAction.VIEW_CONFIG in explicit_actions
+    assert BotAction.EDIT not in explicit_actions
+    assert BotAction.VIEW_CONFIG not in space_actions
 
 
 def _inventory_with(bot_rows: list[dict], stub: _StubTemplatePort) -> BotInventoryService:

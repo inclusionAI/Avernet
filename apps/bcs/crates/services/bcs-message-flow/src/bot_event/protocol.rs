@@ -1,5 +1,9 @@
 use super::*;
 
+#[cfg(test)]
+#[path = "../message_log_tests/bot_event_tests.rs"]
+mod key_log_tests;
+
 pub(super) fn build_default_policy_decision(
     group: &Group,
     sender_bot_id: &str,
@@ -416,6 +420,7 @@ pub(super) fn log_route_digest(
 
     info!(
         target: MSG_LOG_TARGET,
+        log_class = "business_key",
         schema_version = MESSAGE_LOG_SCHEMA_VERSION,
         event_type = MessageLogEventType::RouteDecided.as_str(),
         status = MessageLogStatus::Routed.as_str(),
@@ -508,6 +513,7 @@ pub(super) fn log_incoming_bot_event(cmd: &BotEventCommand, task_id: Option<&str
     let status = message_log_status_for_bot_event(&cmd.state);
     info!(
         target: MSG_LOG_TARGET,
+        log_class = matches!(cmd.state, ChatEventState::Final | ChatEventState::Error | ChatEventState::Aborted).then_some("business_key"),
         schema_version = MESSAGE_LOG_SCHEMA_VERSION,
         event_type = MessageLogEventType::BotEvent.as_str(),
         status = status.as_str(),
@@ -547,6 +553,7 @@ pub(super) fn log_relay_deliver_result(
     if delivered {
         info!(
             target: MSG_LOG_TARGET,
+            log_class = "business_key",
             schema_version = MESSAGE_LOG_SCHEMA_VERSION,
             event_type = MessageLogEventType::BotDeliverResult.as_str(),
             status = status.as_str(),
@@ -568,6 +575,7 @@ pub(super) fn log_relay_deliver_result(
     } else {
         warn!(
             target: MSG_LOG_TARGET,
+            log_class = "business_key",
             schema_version = MESSAGE_LOG_SCHEMA_VERSION,
             event_type = MessageLogEventType::BotDeliverResult.as_str(),
             status = status.as_str(),

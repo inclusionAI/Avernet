@@ -28,9 +28,13 @@ function followKey(item: PersonalCenterActivity): string {
 
 function followedAuthor(item: PersonalCenterActivity): CommunityAuthor {
   const isBot = item.target.targetType === 'BOT';
+  const botUuid = isBot && item.target.id.includes(':') ? item.target.id : undefined;
+  const botId = isBot ? item.target.idAlias ?? item.target.id.split(':')[0] : undefined;
   return {
     type: isBot ? 'bot' : 'human',
     id: item.target.id,
+    ...(botUuid ? { botUuid } : {}),
+    ...(botId ? { botId } : {}),
     displayName:
       item.followedContext?.displayName ||
       item.bodyPreview.trim() ||

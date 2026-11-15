@@ -7,7 +7,7 @@ Contract Tests for WorkerProfileBindingStoreAdapter
 import pytest
 
 from tests.contract.adapters.helpers import WorkerProfileBindingStoreContractTests
-from src.infra.adapters.in_memory_worker_profile_binding_store import InMemoryWorkerProfileBindingStore
+from app.infra.adapters.in_memory_worker_profile_binding_store import InMemoryWorkerProfileBindingStore
 
 
 # ============================================================================
@@ -59,7 +59,7 @@ class TestInMemoryWorkerProfileBindingStore:
 @pytest.fixture
 def sqlite_profile_binding_store():
     """创建 SQLite WorkerProfileBindingStore 实例"""
-    from src.infra.adapters.sqlite_worker_profile_binding_store import SQLiteWorkerProfileBindingStore
+    from app.infra.adapters.sqlite_worker_profile_binding_store import SQLiteWorkerProfileBindingStore
     return SQLiteWorkerProfileBindingStore(":memory:")
 
 

@@ -1,5 +1,9 @@
 import type { BotDomain } from '@/domain/botWorkshop';
 import { botEditLockService } from '@/services/botWorkshop/botEditLockService';
+import {
+  buildDraftOrPrestableServiceCodingBotChatHref,
+  isDraftOrPrestableServiceCodingBot,
+} from '@/services/botWorkshop/botPolicy';
 import { resolveBotRuntimeStage } from '@/services/botWorkshop/botRuntimeStage';
 import { history } from '@umijs/max';
 import { useCallback } from 'react';
@@ -16,6 +20,11 @@ export function useBotWorkshopLocks(load: (options?: { silent?: boolean }) => Pr
         await load({ silent: true });
         // Published runtimes keep their own entry/readonly policy; a lock is not an edit grant.
         if (!enterEditor) return;
+        // Draft service Coding Bots have no generic Bot editor route; AIXCoding owns the usable runtime.
+        if (isDraftOrPrestableServiceCodingBot(bot)) {
+          history.push(buildDraftOrPrestableServiceCodingBotChatHref(bot));
+          return;
+        }
         const params = new URLSearchParams({
           type: 'edit',
           id: bot.id,

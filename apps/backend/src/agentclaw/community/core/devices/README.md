@@ -9,6 +9,22 @@ with no linked Bot retain their standalone entity-owner rule. Lookup failures
 deny access; the retained entity never grants former-Owner access to a linked
 private Bot. Public visibility and existing collaborator checks remain in place.
 
+For BaaS file writes, the device filesystem exposes `DeviceFileSystemReadOnlyError`
+only when the Engine upload response contains its explicit read-only marker. Other
+403 responses, older Engine 500 responses, and transport failures remain errors
+without being classified as read-only. This does not promise atomic writes or
+change the permissions of the underlying filesystem.
+
+## Staff template overrides
+
+Staff template overrides (`system/personal_bot_test_template_whitelist`) match
+both the owner and the resolved BaaS engine bucket. A mapping contains
+`engine`, `staff_ids` and `template_uuid`; omitting `engine` means **OpenClaw
+only**, for both legacy single records and entries in `mappings`. Unmatched
+engines retain normal template selection, including explicit template UIDs.
+Different UUIDs for the same owner and bucket are ambiguous and fall back.
+This lookup does not broaden eligibility for ARCA-to-BaaS restart migration.
+
 ## Context Boundary
 
 ```yaml

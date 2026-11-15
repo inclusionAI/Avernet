@@ -2,8 +2,8 @@
 // 富文本 HTML 来自受信内部运营平台（雨燕配置）。先经 DOMPurify 白名单净化，再由受约束的
 // React 元素树渲染，不将原始 HTML 字符串直接写入 DOM。数据由 useReleaseNotes 提供（Open Core
 // capability=null → 此 Modal 不被渲染）。禁 antd/裸 button，用项目 <Modal>/<Button>。≤150 行。
-import { SafeHtml } from '@/assets/TaskPanel/SafeHtml';
-import { sanitizeRichHtml } from '@/assets/TaskPanel/sanitizeHtml';
+import { SafeHtml } from '@/components/Common/RichContent';
+import { sanitizeRichHtml } from '@/components/Common/RichContent';
 import type { ReleaseNotesData } from '@/capabilities';
 import { Button, Modal, ModalContent } from '@/components/ui';
 import { X } from 'lucide-react';

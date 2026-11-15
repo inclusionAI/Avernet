@@ -327,3 +327,68 @@ class TestConfigManifest:
             agents=[_agent(config_manifest=document)],
         ))
         assert req.agents[0].config_manifest == document
+
+
+class TestIdentityBotId:
+    """A run may name the Bot whose AgentPass identity its agents inherit."""
+
+    def test_omitted_means_the_ordinary_approval_flow(self):
+        dto = SubmitRunDTO(**_body())
+        assert dto.identity_bot_id is None
+
+    def test_the_source_is_carried_verbatim(self):
+        dto = SubmitRunDTO(**_body(identity_bot_id="20261110_abc"))
+        assert dto.identity_bot_id == "20261110_abc"
+
+    def test_over_length_source_rejected(self):
+        # The column is String(64); a longer id could never match a Bot.
+        with pytest.raises(ValidationError) as exc:
+            SubmitRunDTO(**_body(identity_bot_id="x" * 65))
+        assert "string_too_long" in _error_types(exc)
+
+    def test_extra_forbid_still_applies_alongside_the_new_field(self):
+        body = _body(identity_bot_id="b1")
+        body["identity_bot_idd"] = "typo"
+        with pytest.raises(ValidationError) as exc:
+            SubmitRunDTO(**body)
+        assert "extra_forbidden" in _error_types(exc)
+
+    def test_the_source_flows_into_the_run_request(self):
+        # DTO -> domain: the value the host adapter later reads.
+        from agentclaw.community.adapters.http.agentswarm.router import (
+            _to_domain,
+        )
+        req = _to_domain(SubmitRunDTO(
+            tenant="t",
+            goal="triage the queue",
+            agents=[_agent()],
+            identity_bot_id="20261110_abc",
+        ))
+        assert req.identity_bot_id == "20261110_abc"
+
+    def test_an_ordinary_submit_leaves_the_request_value_none(self):
+        from agentclaw.community.adapters.http.agentswarm.router import (
+            _to_domain,
+        )
+        req = _to_domain(SubmitRunDTO(
+            tenant="t", goal="triage the queue", agents=[_agent()],
+        ))
+        assert req.identity_bot_id is None
+
+    def test_only_bot_kind_agents_carry_the_source(self):
+        # An llm-kind agent provisions no Bot and holds no passport, so it
+        # must not look as though it inherits one.
+        from agentclaw.community.adapters.http.agentswarm.router import (
+            _to_domain,
+        )
+        req = _to_domain(SubmitRunDTO(
+            tenant="t",
+            goal="triage the queue",
+            agents=[
+                _agent(name="llm-one"),
+                _agent(name="bot-one", kind="bot"),
+            ],
+            identity_bot_id="20261110_abc",
+        ))
+        assert req.agents[0].identity_bot_id == ""
+        assert req.agents[1].identity_bot_id == "20261110_abc"

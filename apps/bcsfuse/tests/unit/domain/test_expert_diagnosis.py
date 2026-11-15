@@ -11,7 +11,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from src.domain.models.expert_diagnosis import (
+from app.domain.models.expert_diagnosis import (
     Priority,
     CriticalIssue,
     ExpertRecommendation,
@@ -89,7 +89,7 @@ class TestCriticalIssue:
 
     def test_critical_issue_severity_enum(self):
         """测试 severity 使用 RiskLevel 枚举值"""
-        from src.domain.models.expert_risk_assessment import RiskLevel
+        from app.domain.models.expert_risk_assessment import RiskLevel
 
         issue = CriticalIssue(
             issue="test",
@@ -254,7 +254,7 @@ class TestExpertDiagnosisIntegration:
 
     def test_complete_diagnosis_structure(self):
         """测试完整诊断结构"""
-        from src.domain.models.expert_risk_assessment import RiskLevel, RiskAssessment
+        from app.domain.models.expert_risk_assessment import RiskLevel, RiskAssessment
 
         # 风险评估
         risk_assessment = RiskAssessment(

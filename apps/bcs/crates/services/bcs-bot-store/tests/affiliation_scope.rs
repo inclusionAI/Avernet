@@ -289,9 +289,7 @@ async fn memory_attachment_uses_the_same_group_gate_and_current_membership() {
     );
 }
 
-#[path = "../../../bootstrap/bcs/src/migrations.rs"]
-#[allow(dead_code)]
-mod bootstrap_migrations;
+use bcs_db_migrations as bootstrap_migrations;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn independent_sqlite_connections_cannot_commit_public_group_and_restricted_affiliation() {

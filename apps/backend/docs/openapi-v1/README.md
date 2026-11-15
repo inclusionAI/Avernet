@@ -1828,10 +1828,20 @@ a verified principal, is owner/Bot scoped, and uses the standard `Envelope` /
 | DELETE | `/openapi/v1/bots/{bot_id}/skills/{skill_id}` | Recoverably delete one Inactive Local Skill | `Envelope[Deleted]` |
 | GET | `/openapi/v1/bots/skills/{skill_id}/readme` | Read visible shared or Local documentation without selecting a Bot | `Envelope[SkillContent]` |
 
-`413101` is documented only on raw ZIP upload. The stable Local Skill business
+`413101` applies to both raw ZIP and directory upload. The stable Local Skill business
 subcodes are `400101`, `404000`, `409101`–`409104`, `413101`, `502101`, and
 `502102`; existing public categories retain their `xxx000` codes. Generated
-OpenAPI remains derived from the Backend Router and DTOs.
+OpenAPI remains derived from the Backend Router and DTOs. Local package errors
+may carry a stable `data.reason`; clients must tolerate absent or unknown reasons
+and must not parse `message`. Package reasons are `invalid_package`, `invalid_zip`,
+`unreadable_archive`, `unsafe_file_path`, `duplicate_file_path`, `missing_skill_file`,
+`multiple_skill_files`, `invalid_wrapper`, `wrapper_name_mismatch`, `invalid_encoding`,
+and `invalid_metadata`. Manifest reasons are `MISSING_FRONTMATTER`, `INVALID_FRONTMATTER`,
+`INVALID_ENCODING`, `MISSING_NAME`, `MISSING_DESCRIPTION`, `INVALID_NAME_TYPE`,
+`INVALID_DESCRIPTION_TYPE`, `EMPTY_NAME`, `EMPTY_DESCRIPTION`, `NAME_TOO_LONG`,
+`DESCRIPTION_TOO_LONG`, `INVALID_NAME`, and `RESERVED_NAME`. Limit reasons are
+`too_large`, `file_too_large`, `too_many_files`, `expanded_too_large`, and
+`compressed_too_large`. Raw file content and parser exceptions are not returned.
 
 **Release gate — do not mark Track B complete yet.** The cleanup-work table DDL
 from #725 must be applied and verified before application rollout, and the real
@@ -1842,13 +1852,15 @@ and Bot containers. See the [English runbook and rollback procedure](skills-trac
 Scheduled/triggered agent tasks (the former "cron"); trigger is a nested object.
 | Method | Path | Purpose | Success |
 |---|---|---|---|
-| GET | `/openapi/v1/bots/{bot_id}/routines` | List (`bot_id`, `status`, paged) | `Envelope[Page[Routine]]` |
+| GET | `/openapi/v1/bots/{bot_id}/routines` | List (`bot_id`, `status`, paged) | `Envelope[RoutinePage]` |
 | POST | `/openapi/v1/bots/{bot_id}/routines` | Create | `201 Envelope[Routine]` |
 | GET | `/openapi/v1/bots/{bot_id}/routines/{routine_id}` | Get | `Envelope[Routine]` |
-| PATCH | `/openapi/v1/bots/{bot_id}/routines/{routine_id}` | Update (partial) | `Envelope[Routine]` |
+| PATCH | `/openapi/v1/bots/{bot_id}/routines/{routine_id}` | Update (partial) | `Envelope[Routine or RoutineOperationBatch]` |
 | DELETE | `/openapi/v1/bots/{bot_id}/routines/{routine_id}` | Delete | `Envelope[Deleted]` |
-| POST | `/openapi/v1/bots/{bot_id}/routines/{routine_id}/run` | Run now | `Envelope[RoutineRun]` |
-| GET | `/openapi/v1/bots/{bot_id}/routines/{routine_id}/runs` | Execution history (paged) | `Envelope[Page[RoutineRun]]` |
+| POST | `/openapi/v1/bots/{bot_id}/routines/{routine_id}/run` | Run now | `Envelope[RoutineRun or RoutineOperationBatch]` |
+| GET | `/openapi/v1/bots/{bot_id}/routines/{routine_id}/runs` | Execution history (paged) | `Envelope[RoutineRunPage]` |
+
+Runtime targets: see [the routines target contract](engine-surface.md#routines-runtime-targets) for body/query placement, stage defaults, Caller authorization, per-instance identity and partial failures.
 
 ### 🟩 lucas-xzp · P2 — identity (3 endpoints) · `openapi_v1/identity/router.py`
 Read/write a bot's identity markdown files (RULES, SOUL, …), `file_type` is an

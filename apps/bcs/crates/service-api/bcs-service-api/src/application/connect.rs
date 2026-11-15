@@ -3,7 +3,7 @@
 //! Route-facing; called by `routes/friends.rs`. Orchestrates `PermissionRequestRepo`,
 //! `EdgeGrantRepo`, `PermissionProfileRepo` (wired in a later installment).
 use async_trait::async_trait;
-use bcs_domain::edge_permission::{FriendListEntry, PermissionRequest, RequestStatus};
+use bcs_domain::edge_permission::{FriendListEntry, PermissionRequest, RequestKind, RequestStatus};
 
 use crate::core::error::ServiceResult;
 use crate::principal::RequestAuthHeaders;
@@ -123,4 +123,34 @@ pub trait ConnectService: Send + Sync {
         page_size: u32,
     ) -> ServiceResult<RequestsPage>;
 
+    /// The caller's own pending Connect request toward `to`, if one exists —
+    /// the legacy duplicate-pending (409) guard read.
+    ///
+    /// The default scans ONE bounded page so compatibility fakes keep
+    /// compiling; production implementations MUST override with a bounded
+    /// existence query (`LIMIT 1` at the store) instead of materializing
+    /// the caller's whole request history.
+    async fn find_pending_self_connect(
+        &self,
+        caller: &str,
+        to: &str,
+    ) -> ServiceResult<Option<PermissionRequest>> {
+        let page = self
+            .list_requests(
+                caller,
+                RequestDirection::Sent,
+                Some(RequestStatus::Pending),
+                1,
+                100,
+            )
+            .await?;
+        Ok(page
+            .items
+            .into_iter()
+            .find(|request| {
+                request.request_kind == RequestKind::Connect
+                    && request.to_id == to
+                    && request.created_by == caller
+            }))
+    }
 }

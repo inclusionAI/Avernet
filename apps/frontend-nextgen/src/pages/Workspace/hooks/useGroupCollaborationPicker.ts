@@ -35,7 +35,6 @@ export function useGroupCollaborationPicker(
     filterMode,
     search,
     candidatesRef: lists.candidatesRef,
-    applyCandidatesSnapshot: lists.applyCandidatesSnapshot,
     setTab,
     setFilterMode,
     setSearch,

@@ -68,52 +68,27 @@ pub(super) fn db_provider_repos(
 }
 
 #[cfg(any(test, feature = "test-utils"))]
-pub(super) fn memory_organization_services(
-    provider_repos: &ProviderRepoBundle,
-    provider_core: Arc<dyn ProviderCoreService>,
-    bot_registry: Arc<dyn BotRegistryCoreService>,
-) -> (
-    Arc<dyn OrganizationCoreService>,
-    Arc<dyn OrganizationManagementService>,
-) {
-    let organization_repo: Arc<dyn OrganizationRepoPort> = Arc::new(MemoryOrganizationRepo::new());
-    build_organization_services(
-        organization_repo,
-        provider_repos,
-        provider_core,
-        bot_registry,
-    )
+pub(super) fn memory_organization_repo() -> Arc<dyn OrganizationRepoPort> {
+    Arc::new(MemoryOrganizationRepo::new())
 }
 
-pub(super) fn db_organization_services(
+pub(super) fn db_organization_repo(
     db_plugin: Arc<dyn bcs_db_api::DbPlugin>,
     db_kind: &DbPluginKind,
-    provider_repos: &ProviderRepoBundle,
-    provider_core: Arc<dyn ProviderCoreService>,
-    bot_registry: Arc<dyn BotRegistryCoreService>,
-) -> (
-    Arc<dyn OrganizationCoreService>,
-    Arc<dyn OrganizationManagementService>,
-) {
-    let organization_repo: Arc<dyn OrganizationRepoPort> = match db_kind {
-        DbPluginKind::LocalSqlite => Arc::new(DbOrganizationStore::sqlite(db_plugin.clone())),
-        DbPluginKind::Mysql => Arc::new(DbOrganizationStore::mysql(db_plugin.clone())),
+) -> Arc<dyn OrganizationRepoPort> {
+    match db_kind {
+        DbPluginKind::LocalSqlite => Arc::new(DbOrganizationStore::sqlite(db_plugin)),
+        DbPluginKind::Mysql => Arc::new(DbOrganizationStore::mysql(db_plugin)),
         DbPluginKind::External(provider) => {
             panic!(
                 "external database plugin '{}' has no organization store wiring",
                 provider
             )
         }
-    };
-    build_organization_services(
-        organization_repo,
-        provider_repos,
-        provider_core,
-        bot_registry,
-    )
+    }
 }
 
-fn build_organization_services(
+pub(super) fn build_organization_services(
     organization_repo: Arc<dyn OrganizationRepoPort>,
     provider_repos: &ProviderRepoBundle,
     provider_core: Arc<dyn ProviderCoreService>,
@@ -136,7 +111,7 @@ fn build_organization_services(
     (organization_core, organization_management)
 }
 
-pub(super) fn build_provider_services_with_webhook_url_guard(
+pub(super) fn build_provider_services_with_webhook_url_guard_and_organization(
     a2a_allow_anonymous:bool,
     repos: &ProviderRepoBundle,
     registry: Arc<dyn BotRegistryCoreService>,
@@ -146,18 +121,24 @@ pub(super) fn build_provider_services_with_webhook_url_guard(
     control_plane: Arc<dyn BotControlPlaneCoreService>,
     channel_binding_cleanup: Arc<dyn ChannelBindingCleanupPort>,
     bot_catalog_cleanup: Arc<dyn BotCatalogCleanupPort>,
+    organization_repo: Option<Arc<dyn OrganizationRepoPort>>,
 ) -> (
     Arc<dyn ProviderCoreService>,
     Arc<dyn ProviderBotCoreService>,
     Arc<dyn ProviderManagementService>,
 ) {
-    let provider_core_impl = Arc::new(ProviderCore::new_with_webhook_url_guard(
+    let provider_core_impl = ProviderCore::new_with_webhook_url_guard(
         repos.provider_repo.clone(),
         repos.provider_credentials.clone(),
         repos.provider_bindings.clone(),
         registry.clone(),
         webhook_url_guard,
-    ).with_bot_provider_repo(repos.bot_providers.clone()).with_a2a_anonymous(a2a_allow_anonymous));
+    ).with_bot_provider_repo(repos.bot_providers.clone()).with_a2a_anonymous(a2a_allow_anonymous);
+    let provider_core_impl = match organization_repo {
+        Some(repo) => provider_core_impl.with_organization_repo(repo),
+        None => provider_core_impl,
+    };
+    let provider_core_impl = Arc::new(provider_core_impl);
     let provider_core: Arc<dyn ProviderCoreService> = provider_core_impl.clone();
     let provider_bot_core: Arc<dyn ProviderBotCoreService> = provider_core_impl;
     let mut provider_management = ProviderManagement::new(
@@ -452,18 +433,24 @@ pub(super) fn build_candidate_search_bindings(
     registry: Arc<dyn BotRegistryCoreService>,
     friends: Arc<dyn FriendCoreService>,
     fuse_client: Option<Arc<FuseClient>>,
+    control_plane: Option<Arc<dyn BotControlPlaneCoreService>>,
 ) -> CandidateSearchBindings {
     let worker_profiles: Arc<dyn WorkerProfileCoreService> = match fuse_client {
+        Some(client) if config.bcsfuse.api_version == bcs_fuse_client::BcsFuseApiVersion::V2 =>
+            Arc::new(bcs_fusion::FuseCardWorkerProfileService::new(client, config.bcsfuse.profile_id.clone())),
         Some(client) => Arc::new(FuseWorkerProfileService::new(client)),
         None => Arc::new(EmptyWorkerProfileCoreService),
     };
-    let candidate_search: Arc<dyn BotCandidateSearchCoreService> =
-        Arc::new(BotCandidateSearchCore::new(
-            registry,
-            friends,
-            worker_profiles.clone(),
-            config.bcsfuse.recommend_min_score,
-        ));
+    let mut candidate_search = BotCandidateSearchCore::new(
+        registry,
+        friends,
+        worker_profiles.clone(),
+        config.bcsfuse.recommend_min_score,
+    );
+    if let Some(control_plane) = control_plane {
+        candidate_search = candidate_search.with_control_plane(control_plane);
+    }
+    let candidate_search: Arc<dyn BotCandidateSearchCoreService> = Arc::new(candidate_search);
 
     CandidateSearchBindings {
         worker_profiles,
@@ -475,6 +462,7 @@ pub(super) fn build_candidate_search_bindings(
 #[allow(clippy::too_many_arguments)]
 pub(super) fn build_openapi_v1_state(
     config: &BcsConfig,
+    card_changes: Option<Arc<bcs_fusion::CardChangeQueue>>,
     invite_token_secret: Vec<u8>,
     control_plane_repo: Arc<dyn BotControlPlaneRepoPort>,
     provider_repos: &ProviderRepoBundle,
@@ -482,7 +470,7 @@ pub(super) fn build_openapi_v1_state(
     groups: Arc<dyn GroupCoreService>,
     friends: Arc<dyn FriendCoreService>,
     candidate_search: Arc<dyn BotCandidateSearchCoreService>,
-    friend_requests: Arc<dyn FriendRequestCoreService>,
+    legacy_friend: Arc<dyn FriendService>,
     relation: Arc<dyn RelationCoreService>,
     sessions: Arc<dyn SessionManagementService>,
     session_launch: Arc<dyn bcs_service_api::SessionLaunchService>,
@@ -540,12 +528,13 @@ pub(super) fn build_openapi_v1_state(
         registry.clone(), relation.clone(), relation_env.clone(),
         config.openapi_v1.registration_self_service_provider_ids.clone(),
         outbound_url_guard_from_config(config),
-    ).with_a2a_anonymous(config.a2a_allow_anonymous));
+    ).with_a2a_anonymous(config.a2a_allow_anonymous)
+        .with_catalog_changes(card_changes.clone().map(|queue| queue as Arc<dyn bcs_service_api::port::CatalogChangePort>)));
     let control_plane = Arc::new(BotControlPlaneCore::new(
         control_plane_repo,
         provider_repos.provider_repo.clone(),
         provider_repos.provider_bindings.clone(),
-    ).with_bot_provider_repo(provider_repos.bot_providers.clone()));
+    ).with_bot_provider_repo(provider_repos.bot_providers.clone()).with_catalog_changes(card_changes.clone().map(|queue| queue as Arc<dyn bcs_service_api::port::CatalogChangePort>)));
     let bot_service = Arc::new(
         BotServiceImpl::new(
             control_plane.clone(),
@@ -645,7 +634,7 @@ pub(super) fn build_openapi_v1_state(
     let invitation_service = Arc::new(
         InvitationFriendshipServiceImpl::new(
             friends,
-            friend_requests,
+            legacy_friend,
             invitation_groups,
             invitation_sessions,
             registry.clone(),
@@ -727,22 +716,8 @@ pub(crate) fn gateway_principal_verifier_for_tests() -> Arc<dyn PrincipalVerifie
 mod gateway_principal_tests;
 
 #[cfg(test)]
-mod candidate_search_wiring_tests {
-    use super::*;
-    use bcs_test_support::{NoopBotRegistryCoreService, NoopFriendCoreService};
-
-    #[test]
-    fn bindings_share_one_core_between_legacy_and_v1() {
-        let bindings = build_candidate_search_bindings(
-            &BcsConfig::default(),
-            Arc::new(NoopBotRegistryCoreService),
-            Arc::new(NoopFriendCoreService),
-            None,
-        );
-
-        assert!(Arc::ptr_eq(&bindings.legacy, &bindings.openapi_v1));
-    }
-}
+#[path = "candidate_search_wiring_tests.rs"]
+mod candidate_search_wiring_tests;
 
 pub async fn resolve_config_secrets(config: &mut BcsConfig, access: &dyn SecretAccessPort) -> crate::Result<()> {
     if let Some(value) = resolve_secret_value(config.auth_sdk.secret_key_secret.as_deref(), access, "auth_sdk.secret_key_secret").await? {

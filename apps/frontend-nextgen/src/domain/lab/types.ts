@@ -6,7 +6,7 @@
  *   （按 owner 列其已开启周期逛的 Bot；OPEN/NoCheck，不校验登录人，供前端渲染「每个 Bot 开关态矩阵」）。
  * - POST /openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-subscription → owner_user_id(query, 必填, 声明订阅 owner) + body 只 {note}；
  *   B 方案后端恒定 openclaw cron，前端不发 mode。
- * - DELETE /openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-subscription → {deleted}，无 owner query；后端卸下定时触发；幂等。
+ * - DELETE /openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-subscription?owner_user_id= → {deleted}；共享 Bot 按 owner 分别取消，后端卸下对应定时触发；幂等。
  *
  * enabled 不进领域类型，由调用方按「订阅是否存在」推导（订阅项出现即视作已开启）。
  * 新订阅 POST 返回 202 后可先做本地乐观展示；后台装配失败时不落库，刷新列表后回到关闭状态。

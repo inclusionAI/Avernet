@@ -40,6 +40,7 @@ test('能力集以统一成员样式展示聚合接口返回的 CLI', () => {
   );
 
   expect(screen.getByText('0 Skill · 0 MCP · 1 CLI')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: /默认能力集/ }));
   expect(screen.getByText('CLIs')).toBeInTheDocument();
   expect(screen.getByText('Claude CLI')).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: '移除Claude CLI' })).not.toBeInTheDocument();
@@ -76,6 +77,7 @@ test('系统默认能力集隐藏 Skill、MCP 和 CLI 的添加入口', () => {
     />,
   );
 
+  fireEvent.click(screen.getByRole('button', { name: /默认能力集/ }));
   expect(screen.getByText('内置 Skill')).toBeInTheDocument();
   expect(screen.getByText('内置 MCP')).toBeInTheDocument();
   expect(screen.getByText('Claude CLI')).toBeInTheDocument();
@@ -221,8 +223,31 @@ test('成员卡片按设计稿展示来源标签与通栏单列样式', () => {
     />,
   );
 
+  fireEvent.click(screen.getByRole('button', { name: /默认能力集/ }));
   expect(screen.getByText('市场')).toBeInTheDocument();
   expect(screen.getByText('空间')).toBeInTheDocument();
   expect(screen.getByText('V1.0')).toBeInTheDocument();
   expect(screen.getByText('市场 Skill').parentElement).toHaveClass('h-10');
+});
+
+
+test('默认能力集初始收起，刷新数据及重新进入保持用户选择', () => {
+  const set = { id: 'default', name: '默认能力集', isDefault: true, active: true,
+    skills: [], mcps: [], clis: [{ code: 'test', name: '内置 CLI' }] };
+  localStorage.clear();
+  const props = { botId: 'bot-1', authenticatedUserId: 'user-1', sets: [set], mySkills: [], marketSkills: [], skillCenterSkills: [], workshopSkills: [], marketMcps: [], editable: true,
+    onCreate: jest.fn(), onDelete: jest.fn(), onActive: jest.fn(), onSkill: jest.fn(), onSkillCenterReferences: jest.fn(), onMcp: jest.fn(), onUploadSkillFolder: jest.fn(), onLoadCandidates: jest.fn() };
+  const view = render(<CapabilitySetManager {...props} sets={[]} />);
+  view.rerender(<CapabilitySetManager {...props} />);
+  expect(screen.queryByText('内置 CLI')).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: /默认能力集/ }));
+  view.rerender(<CapabilitySetManager {...props} sets={[{ ...set }]} />);
+  expect(screen.getByText('内置 CLI')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: /默认能力集/ }));
+  view.rerender(<CapabilitySetManager {...props} sets={[{ ...set }]} />);
+  expect(screen.queryByText('内置 CLI')).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: /默认能力集/ }));
+  view.unmount();
+  render(<CapabilitySetManager {...props} />);
+  expect(screen.getByText('内置 CLI')).toBeInTheDocument();
 });

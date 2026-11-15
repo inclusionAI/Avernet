@@ -5,6 +5,8 @@ use std::sync::Arc;
 
 #[path = "bot_provider_storage.rs"]
 mod bot_storage;
+#[path = "bot_provider_reactivation.rs"]
+mod bot_reactivation;
 #[path = "collaboration_actor_storage.rs"]
 mod collaboration_actor_storage;
 #[path = "affiliation_scope.rs"]

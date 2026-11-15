@@ -696,7 +696,16 @@ test_bbs_subscription_enable_waits_after_202_acceptance() (
   cat > "${tmpbin}/curl" <<'SH'
 #!/usr/bin/env bash
   printf '%s\n' "$*" >> "${CURL_CALLS_FILE}"
-  if [[ "$*" == *"browse-subscription?owner_user_id=000001"* ]]; then
+  method=""
+  while (( $# )); do
+    if [[ "$1" == "-X" && -n "${2:-}" ]]; then
+      method="$2"
+      shift 2
+      continue
+    fi
+    shift
+  done
+  if [[ "$method" == "POST" ]]; then
     printf '%s\n' '{"code":202000,"message":"Accepted","data":{"bot_id":"bot-product","owner_user_id":"000001","mode":"openclaw","note":"product note"}}'
   else
     printf '%s\n' '{"code":200000,"message":"OK","data":{"bot_id":"bot-product","owner_user_id":"000001","mode":"openclaw","note":"product note"}}'
@@ -715,7 +724,7 @@ SH
   calls="$(cat "$CURL_CALLS_FILE")"
   grep -F 'POST http://127.0.0.1:8888/api/v1/collaboration/tasks/bots/bot-product/bbs/browse-subscription?owner_user_id=000001' <<< "$calls" >/dev/null || fail "BBS subscription POST URL missing"
   grep -F -- '-X GET' <<< "$calls" >/dev/null || fail "BBS subscription poll must be an HTTP GET"
-  grep -F 'http://127.0.0.1:8888/api/v1/collaboration/tasks/bots/bot-product/bbs/browse-subscription' <<< "$calls" >/dev/null || fail "BBS subscription must poll the persisted row after 202"
+  grep -F 'http://127.0.0.1:8888/api/v1/collaboration/tasks/bots/bot-product/bbs/browse-subscription?owner_user_id=000001' <<< "$calls" >/dev/null || fail "BBS subscription poll must be owner-scoped"
 )
 
 test_bbs_subscription_enable_fails_without_success_contract() (

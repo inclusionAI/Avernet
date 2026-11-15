@@ -13,6 +13,11 @@ import {
   getInventoryActionAvailability,
 } from '@/services/botWorkshop';
 import { botManagementService } from '@/services/botWorkshop/botManagementService';
+import {
+  needsFastInventorySync,
+  reconcileRestartPins,
+  resolveExpiredRestartPin,
+} from '@/services/botWorkshop/botRestartTracking';
 import { canOpenDraftOrPrestableServiceCodingBot } from '@/services/botWorkshop/botPolicy';
 import { useBotWorkshopStore } from '@/stores/botWorkshopStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
@@ -26,6 +31,7 @@ import { useBotWorkshopCopyHost } from './useBotWorkshopCopyHost';
 import { useBotWorkshopCreateFlow } from './useBotWorkshopCreateFlow';
 import { useBotWorkshopHealthCheck } from './useBotWorkshopHealthCheck';
 import { useBotWorkshopLocks } from './useBotWorkshopLocks';
+
 export function useBotWorkshop() {
   const state = useBotWorkshopStore();
   const requestIdentity = useBotWorkshopRequestIdentity();
@@ -37,6 +43,7 @@ export function useBotWorkshop() {
   const spaceError = useSpaceContext((space) => space.error);
   const spaceId = currentSpaceId === undefined ? '' : String(currentSpaceId);
   const loadSequence = useRef(0);
+  const resolvedPins = useRef(new Set<string>());
   const { keyword, engine, deployment, serviceMode, page, pageSize } = state;
   const navigation = useBotWorkshopNavigation();
   const currentUser = getCapabilities().getCurrentOpenApiUserId({ activeIdentityId });
@@ -71,6 +78,8 @@ export function useBotWorkshop() {
         });
         result.items = await botManagementService.fillOwnerNames(result.items, currentOpenApiUserId);
         if (sequence !== loadSequence.current) return;
+        // 重启 pin 在每次库存同步时合并：滞后 ACTIVE 不打断「重启中」，过渡态后跟随服务端。
+        result.items = reconcileRestartPins(useBotWorkshopStore.getState().items, result.items);
         state.setResult({
           items: result.items,
           total: result.total,
@@ -106,9 +115,33 @@ export function useBotWorkshop() {
   const refreshVisibleList = useCallback(() => void load({ silent: true }), [load]);
   useVisibleInterval(
     refreshVisibleList,
-    state.items.some((bot) => bot.rawStatus?.toUpperCase() === 'REACTIVATING') ? 5_000 : 30_000,
+    state.items.some((bot) => needsFastInventorySync(bot)) ? 5_000 : 30_000,
     requestIdentity.ready && spaceInitialized && Boolean(spaceId) && !createFlow.creating && !createFlow.authorization,
   );
+  // Pin 超时后的详情接口兜底：按重启响应记录的 operation_id 判定终态，避免本地卡死。
+  useEffect(() => {
+    const expired = state.items.filter((bot) => bot.pendingRestart && Date.now() > bot.pendingRestart.deadlineAt);
+    if (!expired.length) return;
+    void (async () => {
+      for (const bot of expired) {
+        const pin = bot.pendingRestart;
+        if (!pin) continue;
+        const key = `${bot.ownerId}:${bot.id}:${pin.operationId}:${pin.extensions ?? 0}`;
+        if (resolvedPins.current.has(key)) continue;
+        resolvedPins.current.add(key);
+        const resolution = await resolveExpiredRestartPin(bot);
+        if (resolution.status === 'SUCCEEDED') {
+          toast.success('Bot 重启完成');
+        } else if (resolution.status === 'FAILED') {
+          toast.error(resolution.message || '本次重启失败，请查看 Bot 日志');
+        } else if (resolution.status === 'RUNNING' && !resolution.extended) {
+          toast.info('重启仍在后台执行，状态可能暂时滞后');
+        }
+        if (resolution.status !== 'RUNNING' || !resolution.extended) void load({ silent: true });
+      }
+    })();
+  }, [state.items, load]);
+
   const accessControl = useBotWorkshopAccess(currentOpenApiUserId, load);
   const openHealthCheck = useBotWorkshopHealthCheck(currentOpenApiUserId);
   const runAction = useBotWorkshopActions(load, currentOpenApiUserId);
@@ -120,6 +153,7 @@ export function useBotWorkshop() {
   return {
     ...state,
     spaceId,
+    currentUserId: currentOpenApiUserId,
     currentSpaceKind: currentSpace?.spaceType === 'TEAM' ? 'team' : 'personal',
     canOpenConversation: (bot: BotDomain) =>
       canOpenDraftOrPrestableServiceCodingBot(bot, currentOpenApiUserId) ||
@@ -139,12 +173,12 @@ export function useBotWorkshop() {
     },
     openTaskInstances: (bot: BotDomain) => {
       const params = new URLSearchParams({ bot_id: bot.id, bot_name: bot.name });
-      history.push(`/bot-workshop/task-instances?${params.toString()}`);
+      if (bot.ownerId) params.set('owner_id', bot.ownerId);
+      history.push(`/bot-workshop/scheduled-tasks?${params.toString()}`);
     },
-    // inventory 仅在 Owner 或显式协作者时暴露 edit；空间普通成员只有 view/chat，
-    // 不应显示受协作者权限保护的任务实例入口。
+    // 可见用户可进入；管理操作另行校验 ADMIN/OWNER 与编辑锁。
     canOpenTaskInstances: (bot: BotDomain) =>
-      Boolean(currentOpenApiUserId && (bot.ownerId === currentOpenApiUserId || bot.actions.includes('edit'))),
+      Boolean(currentOpenApiUserId && (bot.actions.includes('view') || bot.ownerId === currentOpenApiUserId || bot.actions.includes('edit'))),
     containerUserId: requestIdentity.userId,
     canViewContainers: (bot: BotDomain) => Boolean(bot.runtime.engine !== 'teclaw' && currentOpenApiUserId && (bot.ownerId === currentOpenApiUserId || bot.actions.includes('edit'))),
     canRestartContainer: (bot: BotDomain) => Boolean(bot.runtime.engine !== 'teclaw' && currentOpenApiUserId && bot.ownerId === currentOpenApiUserId),

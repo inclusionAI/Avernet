@@ -647,11 +647,11 @@ async fn agentpass_provider_bot_registration_omits_runtime_token() {
 }
 
 #[tokio::test]
-async fn provider_bot_registration_requires_exactly_one_owner() {
+async fn provider_bot_registration_requires_valid_owner_and_manager_ids() {
     let ctx = test_context();
     let provider = register_provider(&ctx, ProviderAuthMode::StaticBearer).await;
 
-    for owners in [vec![], vec!["11111111".to_string(), "12345678".to_string()]] {
+    for owners in [vec![], vec!["11111111".to_string(), " ".to_string()]] {
         let err = ctx
             .core
             .register_provider_bot_with_bot_uuid(
@@ -750,3 +750,16 @@ async fn provider_bot_registration_is_idempotent_for_duplicate_provider_ref_with
 
 #[path = "provider_core_parts/delivery_and_auth.rs"]
 mod delivery_and_auth;
+
+
+#[tokio::test]
+async fn provider_core_rejects_manager_snapshots_instead_of_silently_discarding_them() {
+    let ctx = test_context();
+    let provider = register_provider(&ctx, ProviderAuthMode::StaticBearer).await;
+    let result = ctx.core.register_provider_bot_with_bot_uuid(&provider.provider_id, &provider.admin_token,
+        RegisterProviderBotParams { bot_name: "Core Scope".into(), provider_bot_ref: "core-scope".into(),
+            bot_uuid: Some("core-scope-bot".into()), owners: vec!["alice".into(), "bob".into()],
+            ..Default::default() }).await;
+    assert!(matches!(result, Err(ServiceError::InvalidOperation { .. })), "manager snapshots belong to application initialization, got {result:?}");
+    assert!(ctx.registry.get("core-scope-bot").await.is_none());
+}

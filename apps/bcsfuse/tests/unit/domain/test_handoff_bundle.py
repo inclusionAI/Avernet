@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.domain.models.handoff_bundle import (
+from app.domain.models.handoff_bundle import (
     HandoffBundle,
     HandoffFile,
     Manifest,

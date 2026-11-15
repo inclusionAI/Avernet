@@ -312,7 +312,7 @@ pub async fn handle_bot_event(
     // Persist tool call events (identified by payload.stream == "tool", distinguished by payload.data.phase)
     if let Some((data, phase)) = tool_event_phase(&cmd.event_payload) {
         match phase {
-            "start" => cache_tool_start(flow, &cmd, data).await,
+            "start" => cache_tool_start(flow, &cmd, data, managed.is_some()).await,
             "result" => {
                 // Authorize with the cached start's name. Result events may
                 // omit or report a different name; identity is bound by the

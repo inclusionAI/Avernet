@@ -79,7 +79,7 @@ def _principal_headers() -> dict[str, str]:
 
 
 def _seed_submitted_runner(world) -> None:
-    async def trigger_install_bbs_skills(self, *, bot_id: str):
+    async def trigger_install_bbs_skills(self, *, bot_id: str, owner_user_id: str):
         assert bot_id == "bot-a"
         return dict(_SUCCESS_RESULT)
 
@@ -104,7 +104,7 @@ def _seed_missing_subscription(world) -> None:
     method="POST",
     path=_INTERNAL_PATH,
     scenario="submitted",
-    input=CaseInput(path_params={"bot_id": "bot-a"}),
+    input=CaseInput(path_params={"bot_id": "bot-a"}, query_params={"owner_user_id": "111111"}),
     seed=_seed_submitted_runner,
     expect=ExpectSuccess(
         status=200, json_contains={"code": 200000, "data": _SUCCESS_RESULT}
@@ -118,7 +118,7 @@ def internal_skill_install_submitted():
     method="POST",
     path=_INTERNAL_PATH,
     scenario="subscription_not_found",
-    input=CaseInput(path_params={"bot_id": "bot-a"}),
+    input=CaseInput(path_params={"bot_id": "bot-a"}, query_params={"owner_user_id": "111111"}),
     seed=_seed_missing_subscription,
     expect=ExpectError(status=404, json_contains={"detail": "subscription not found"}),
 )
@@ -130,7 +130,7 @@ def internal_skill_install_subscription_not_found():
     method="POST",
     path=_OPENAPI_PATH,
     scenario="authenticated_submitted",
-    input=CaseInput(path_params={"bot_id": "bot-a"}, headers=_principal_headers()),
+    input=CaseInput(path_params={"bot_id": "bot-a"}, query_params={"owner_user_id": "111111"}, headers=_principal_headers()),
     seed=lambda world: (
         _boot_principal_verifier(world),
         _seed_submitted_runner(world),
@@ -147,7 +147,7 @@ def openapi_skill_install_submitted():
     method="POST",
     path=_OPENAPI_PATH,
     scenario="authenticated_subscription_not_found",
-    input=CaseInput(path_params={"bot_id": "bot-a"}, headers=_principal_headers()),
+    input=CaseInput(path_params={"bot_id": "bot-a"}, query_params={"owner_user_id": "111111"}, headers=_principal_headers()),
     seed=lambda world: (
         _boot_principal_verifier(world),
         _seed_missing_subscription(world),

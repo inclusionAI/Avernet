@@ -131,8 +131,19 @@ def _issues(summary: dict[str, Any], cases: list[dict[str, Any]]) -> list[dict[s
     return issues
 
 
+def _source_fields(case: dict[str, Any]) -> dict[str, str]:
+    context = case.get("context") if isinstance(case.get("context"), dict) else {}
+    fields = {}
+    for public, raw in (("sourceSessionId", "session_id"), ("sourceSessionKey", "session_key")):
+        value = case.get(public) or case.get(raw) or context.get("source_" + raw)
+        if isinstance(value, str) and value.strip():
+            fields[public] = value.strip()
+    return fields
+
+
 def _case_item(case: dict[str, Any]) -> dict[str, Any]:
     return {
+        **_source_fields(case),
         "caseId": str(case.get("case_id") or case.get("caseId") or case.get("session_id") or ""),
         "type": _case_type(case),
         "summary": _case_summary(case),
@@ -217,7 +228,8 @@ def _top_issue(summary: dict[str, Any], cases: list[dict[str, Any]]) -> dict[str
 def _strict_clawweb_diagnose_output(output: dict[str, Any]) -> dict[str, Any]:
     """Return exactly the ClawWeb diagnose output schema requested by product.
 
-    Allowed structure only:
+    Case items additionally allow optional sourceSessionId/sourceSessionKey.
+    Allowed structure:
     {
       "diagnosis": {"summary": str, "issues": [{"code", "title", "severity", "caseCount", "suggestion"}]},
       "cases": {"total": int, "goodCount": int, "badCount": int, "items": [{"caseId", "type", "summary"}]}
@@ -248,6 +260,7 @@ def _strict_clawweb_diagnose_output(output: dict[str, Any]) -> dict[str, Any]:
                 "caseId": str(item.get("caseId") or ""),
                 "type": "good" if str(item.get("type") or "").lower() == "good" else "bad",
                 "summary": str(item.get("summary") or ""),
+                **_source_fields(item),
             }
         )
     return {

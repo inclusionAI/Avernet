@@ -158,6 +158,7 @@ fn friendship_commands_carry_caller_and_no_raw_credentials() {
         caller: caller.clone(),
         bot_uuid: "bot-1".into(),
         to_bot_uuid: "bot-2".into(),
+        request_auth: None,
     };
     let list_reqs = ListBotFriendRequests {
         caller: caller.clone(),
@@ -170,10 +171,12 @@ fn friendship_commands_carry_caller_and_no_raw_credentials() {
     let accept_req = AcceptFriendRequest {
         caller: caller.clone(),
         request_id: "req-1".into(),
+        request_auth: None,
     };
     let reject_req = RejectFriendRequest {
         caller,
         request_id: "req-1".into(),
+        request_auth: None,
     };
     for cmd in [
         &list_bot_friendships.caller,

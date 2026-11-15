@@ -328,7 +328,15 @@ BotCandidate:
       $ref: "#/PhysicalBot"
     is_friend:
       type: boolean
-      description: Whether the acting physical Bot has an accepted Friendship.
+      description: Whether the acting Actor has an accepted Friendship with this Bot.
+    owner_user_id:
+      type: string
+      minLength: 1
+      description: >-
+        Owner user id read from the Bot's approved owner authority edge
+        on the same page. Present as display metadata only, never an
+        authorization result; omitted when the candidate row cannot
+        project an owner (e.g. an uninitialized legacy Bot).
 
 BotCandidateSearchItem:
   type: object

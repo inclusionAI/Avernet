@@ -1,9 +1,8 @@
-//! Add-only access guard for the public Group Context application service.
+//! Group and Session resource checks for public Group Context operations.
 //!
-//! The guard resolves the resource identity from the current Group/Session and
-//! returns before the Group Context service can create a write. All other
-//! operations are plain delegation; this is deliberately not a global
-//! interceptor or generic authorization framework.
+//! The guard resolves the canonical Group for adds and preset definitions, and
+//! checks Session membership when a Bot lists presets with a Session ID.
+//! Entry-level permissions remain in the Group Context application service.
 
 use std::sync::Arc;
 
@@ -14,13 +13,14 @@ use bcs_service_api::application::v1::{
     GroupContextApplicationService, GroupContextGetResponse, GroupContextListResponse,
     GroupContextRequestContext, ListGroupContexts, SystemSetGroupContext, UpdateGroupContext,
 };
-use bcs_service_api::port::repo::SessionRepoPort;
+use bcs_service_api::port::{BotAuthorityPort, repo::SessionRepoPort};
 use bcs_service_api::{Group, GroupCoreService, Participant, Session};
 
 pub struct GroupContextAddAccessGuard {
     inner: Arc<dyn GroupContextApplicationService>,
     groups: Arc<dyn GroupCoreService>,
     sessions: Arc<dyn SessionRepoPort>,
+    bot_authority: Arc<dyn BotAuthorityPort>,
 }
 
 impl GroupContextAddAccessGuard {
@@ -28,11 +28,13 @@ impl GroupContextAddAccessGuard {
         inner: Arc<dyn GroupContextApplicationService>,
         groups: Arc<dyn GroupCoreService>,
         sessions: Arc<dyn SessionRepoPort>,
+        bot_authority: Arc<dyn BotAuthorityPort>,
     ) -> Self {
         Self {
             inner,
             groups,
             sessions,
+            bot_authority,
         }
     }
 
@@ -148,11 +150,63 @@ suffix when scope_level=round",
     }
 }
 
+impl GroupContextAddAccessGuard {
+    async fn authorize_preset_write(&self, group_id: &str, actor: &str) -> Result<Group, ApplicationError> {
+        let group = self.load_group(group_id).await?;
+        let user_id = actor.strip_prefix("human_").filter(|id| !id.is_empty())
+            .ok_or_else(|| ApplicationError::forbidden_code("permission_denied", "preset management requires a Human caller"))?;
+        let authorized = self.bot_authority.can_manage(user_id, &group.driver_bot).await
+            .map_err(|error| ApplicationError::internal(format!("Bot authority lookup failed: {error}")))?;
+        if !authorized {
+            return Err(ApplicationError::forbidden_code(
+                "permission_denied",
+                "preset management requires owner or admin authority on the Group driver Bot",
+            ));
+        }
+        Ok(group)
+    }
+}
+
 #[async_trait]
 impl GroupContextApplicationService for GroupContextAddAccessGuard {
     async fn add(&self, mut command: AddGroupContext) -> Result<GroupContextAck, ApplicationError> {
         self.authorize_add(&mut command).await?;
         self.inner.add(command).await
+    }
+
+    async fn list_presets(&self, group_id: &str, caller: &bcs_service_api::application::v1::AuthenticatedCaller, session_id: Option<&str>) -> Result<Vec<bcs_service_api::application::v1::GroupContextItemPreset>, ApplicationError> {
+        let group = self.load_group(group_id).await?;
+        if let Some(bot) = &caller.bot
+            && !group.participants.iter().any(|member| member.bot_uuid == bot.bot_uuid)
+        {
+            let session_id = session_id.filter(|id| !id.trim().is_empty()).ok_or_else(|| {
+                ApplicationError::forbidden_code(
+                    "permission_denied",
+                    "This Bot is not a Group member. If it participates in a Session in this Group, pass sessionId (CLI: --session-id) to verify Session membership.",
+                )
+            })?;
+            let session = self.load_session(session_id).await?;
+            if session.group_id != group.id {
+                return Err(invalid_param("sessionId must identify a Session in the requested Group"));
+            }
+            ensure_participant(&session.participants, &bot.bot_uuid, "the specified Session")?;
+        }
+        self.inner.list_presets(&group.id, caller, session_id).await
+    }
+
+    async fn add_preset(&self, group_id: &str, actor: &str, name: String, description: String) -> Result<(), ApplicationError> {
+        let group = self.authorize_preset_write(group_id, actor).await?;
+        self.inner.add_preset(&group.id, actor, name, description).await
+    }
+
+    async fn update_preset(&self, group_id: &str, actor: &str, name: String, new_name: Option<String>, description: Option<String>) -> Result<(), ApplicationError> {
+        let group = self.authorize_preset_write(group_id, actor).await?;
+        self.inner.update_preset(&group.id, actor, name, new_name, description).await
+    }
+
+    async fn delete_preset(&self, group_id: &str, actor: &str, name: String) -> Result<(), ApplicationError> {
+        let group = self.authorize_preset_write(group_id, actor).await?;
+        self.inner.delete_preset(&group.id, actor, name).await
     }
 
     async fn update(

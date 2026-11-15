@@ -24,12 +24,11 @@ import urllib.request
 import uuid
 
 
-def assert_card(card: dict, group_id: str, name: str, strategy: str) -> None:
-    prefix = {"manager_worker": "Manager–Worker 群：", "state_machine": "State Machine 群："}[strategy]
+def assert_card(card: dict, group_id: str, name: str, strategy: str, context: str) -> None:
     assert card["name"] == name, "Card name differs from the Group label"
-    assert card["description"] == prefix + name, "Card description is stale"
+    assert card["description"] == context, "Card description differs from the Group context"
     assert card["skills"] == [{"id": "group.execute", "name": name,
-                               "description": prefix + name, "tags": [strategy]}]
+                               "description": context, "tags": [strategy]}]
     assert card["supportedInterfaces"] == [{"url": f"local://groups/{group_id}",
                                             "protocolBinding": "LOCAL", "protocolVersion": "1.0"}]
     extension = card["capabilities"]["extensions"][0]
@@ -84,7 +83,7 @@ class Story:
         cards = self.rows("bcs_group_agent_cards", group_id)
         assert len(cards) == 1, "Expected exactly one persisted Group Card"
         card = json.loads(cards[0]["card_template"])
-        assert_card(card, group_id, name, strategy)
+        assert_card(card, group_id, name, strategy, groups[0]["context"] or "")
         return card
 
     def run(self) -> None:
@@ -97,7 +96,7 @@ class Story:
         self.request("PUT", f"/bots/{self.bot}/visibility", {"visibility": "public"})
         for strategy, visibility in (("manager_worker", "private"), ("state_machine", "public"), ("chat", "private")):
             body = {"driver_bot": self.bot, "participants": [{"bot_uuid": self.bot}],
-                    "group_strategy": strategy, "visibility": visibility, "label": "初始群"}
+                    "group_strategy": strategy, "visibility": visibility, "label": "初始群", "context": "初始目标与背景"}
             if strategy == "manager_worker":
                 body["participants"][0]["role"] = "manager"
             if strategy == "state_machine":
@@ -141,9 +140,10 @@ runtime:
                     self.request("PUT", f"/groups/{group_id}/label", {"label": label})
                     self.card(group_id, label or group_id, strategy)
                 self.request("PATCH", f"/groups/{group_id}", {"name": "PATCH 名称"})
-                snapshot = self.card(group_id, "PATCH 名称", strategy)
-                self.request("PATCH", f"/groups/{group_id}", {"context": "Only dynamic context changed"})
-                assert self.card(group_id, "PATCH 名称", strategy) == snapshot
+                self.card(group_id, "PATCH 名称", strategy)
+                for context in ("Updated collaboration goal", ""):
+                    self.request("PATCH", f"/groups/{group_id}", {"context": context})
+                    assert self.card(group_id, "PATCH 名称", strategy)["description"] == context
             self.request("DELETE", f"/groups/{group_id}?bot_id={self.bot}")
             assert not self.rows("bcs_groups", group_id), "Group deletion was not persisted"
             assert not self.rows("bcs_group_agent_cards", group_id), "Orphaned Group Card after deletion"

@@ -25,9 +25,7 @@ use bcs_group_store::{GroupBuilder, MemoryGroupRepo, MySqlGroupStore};
 use bcs_service_api::port::repo::GroupRepoPort;
 use bcs_service_api::types::authorization_snapshot::GroupAuthorizationSnapshot;
 
-#[path = "../../../bootstrap/bcs/src/migrations.rs"]
-#[allow(dead_code)]
-mod bootstrap_migrations;
+use bcs_db_migrations as bootstrap_migrations;
 
 #[path = "common/authorization_scenarios.rs"]
 mod scenarios;

@@ -68,6 +68,7 @@ pub(super) fn group_context_service(
     db_kind: DbPluginKind, db_plugin: Arc<dyn bcs_db_api::DbPlugin>,
     sessions: Arc<dyn bcs_service_api::GroupCoreService>,
     session_repo: Arc<dyn bcs_service_api::SessionRepoPort>,
+    bot_authority: Arc<dyn bcs_service_api::port::BotAuthorityPort>,
 ) -> Arc<dyn bcs_service_api::GroupContextApplicationService> {
         let group_context_repo: Arc<dyn bcs_group_context_store::GroupContextRepo> = match db_kind {
             DbPluginKind::LocalSqlite => {
@@ -89,6 +90,7 @@ pub(super) fn group_context_service(
                 )),
                 sessions.clone(),
                 session_repo.clone(),
+                bot_authority,
             ));
     group_context_service
 }

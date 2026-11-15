@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.infra.config.feature_flags import FeatureFlags
+from app.infra.config.feature_flags import FeatureFlags
 
 
 class TestCapabilityVerifyFeatureFlag:

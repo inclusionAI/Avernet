@@ -148,21 +148,21 @@ async def test_coding_policy_still_adopts_after_post_submit_persistence_crash(en
 @pytest.mark.asyncio
 @pytest.mark.parametrize('engine', ['aicoding', 'claude_code'])
 @pytest.mark.parametrize('detector_fails', [False, True])
-async def test_nonfastdisk_or_unknown_detection_backup_failure_still_restarts(engine, detector_fails):
-    from agentclaw.community.core.bot_management.engines.aicoding.restart_backup import _operation_id
-    from tests.community.core.bot_management.aicoding.test_restart_backup import response
+async def test_nonfastdisk_or_unknown_detection_skips_backup_and_still_restarts(engine, detector_fails, caplog):
+    from agentclaw.community.core.bot_management.engines.aicoding.restart_backup import detection_command
     from tests.community.core.bot_management.aicoding.test_restart_fastdisk import detection, executor
 
     svc, _, baas, build, record = _setup(engine)
     baas.list_devices_by_bot_uuid.side_effect = None
     baas.list_devices_by_bot_uuid.return_value = [{'provider_device_id': 'physical', 'status': 'ACTIVE'}]
     detected = RuntimeError('detector unavailable') if detector_fails else detection('skip_no_fastdisk')
-    execute = executor([response('failed', operation_id=_operation_id(None, 'restart:1:online'))],
-                       detected=detected)
+    execute = executor([], detected=detected)
     baas.post_bots_api.side_effect = lambda **kw: execute(kw['payload']['cmd'])
     assert (await svc.execute_restart(1, 'online', 'operator'))['success']
     build.upgrade_async.assert_awaited_once()
-    assert execute.call_count == 2
+    execute.assert_called_once_with(detection_command())
+    assert 'event=aicoding_restart_backup' not in caplog.text
+    assert 'AICODING_RESTART_FAILED' not in caplog.text
     assert record.status == PublishStatus.SUCCESS.value
     assert 'error_message' not in record.ext
     assert 'precondition_error' not in record.ext['restart']

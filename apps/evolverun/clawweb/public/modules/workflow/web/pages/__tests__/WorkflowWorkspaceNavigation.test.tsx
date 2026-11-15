@@ -9,6 +9,7 @@ const queryHooks = vi.hoisted(() => ({
 }))
 
 vi.mock('../../api/hooks', () => ({
+  useCloneWorkflow: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useWorkflowTypes: () => ({
     data: [
       { workflow_id: 'wf-1', workflow_title: '示例工作流', run_count: 4, last_status: 'succeeded', last_run_at: 1, updated_at: 1 },
@@ -20,11 +21,20 @@ vi.mock('../../api/hooks', () => ({
     refetch: vi.fn(),
   }),
   useCreateWorkflow: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useCloneWorkflow: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useEvolveDiagnoses: queryHooks.diagnoses,
   useEvolveSuggestions: () => ({ data: { suggestions: [] } }),
   useEvolveLessons: queryHooks.lessons,
 }))
-vi.mock('@avernet/clawweb-shared/web/api/client', () => ({ api: { workflows: { get: async (id: string) => ({ id, title: id, version: '1', nodes: [] }) } }, fetchJson: vi.fn() }))
+vi.mock('@avernet/clawweb-shared/web/api/client', () => ({
+  api: { workflows: { get: async (id: string) => ({ id, title: id, version: '1', nodes: [] }) } },
+  fetchJson: async (url: string, init?: RequestInit) => {
+    const match = /^\/api\/workflows\/([^/]+)\/editor-draft$/.exec(url)
+    if (!match || init?.method !== 'GET') throw new Error(`Unexpected request: ${url}`)
+    const id = decodeURIComponent(match[1])
+    return { workflowId: id, packId: null, specJson: JSON.stringify({ id, title: id, version: '1', nodes: [] }), draftToken: 'a'.repeat(64) }
+  },
+}))
 vi.mock('@avernet/clawweb-shared/web/hooks/useClientUser', () => ({ getClientUser: () => ({ userId: 'admin-1', isAdmin: true }) }))
 vi.mock('../../components/workflow-workspace/OverviewTab', () => ({ default: () => <div>运行概览内容</div> }))
 vi.mock('../../components/workflow-workspace/EditorTab', () => ({ default: () => <div>编辑器内容</div> }))
@@ -108,7 +118,7 @@ describe('unified task escort navigation', () => {
 
     await userEvent.click(screen.getByRole('button', { name: '数据大盘' }))
 
-    expect(screen.getByLabelText('workspace-location')).toHaveTextContent('tab=dashboard')
+    await waitFor(() => expect(screen.getByLabelText('workspace-location')).toHaveTextContent('tab=dashboard'))
     expect(screen.getByText('管理员大盘内容')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '数据大盘' })).toHaveAttribute('aria-current', 'page')
   })

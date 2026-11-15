@@ -36,6 +36,11 @@ test('Coding Bot 的引擎重启预设为 refetch 引擎接口', async () => {
   expect(botWorkshopService.restartEngine).not.toHaveBeenCalled();
 });
 
+test('Bot 重启透传当前操作人，供 AgentCoding 确认参数生成请求体', async () => {
+  await botManagementActionService.run('restart', codingBot, 'caller-1');
+
+  expect(botWorkshopService.restart).toHaveBeenCalledWith(codingBot, 'caller-1');
+});
 test('普通云 Bot 继续使用 engine restart 接口', async () => {
   await botManagementActionService.run('engine_restart', openClawBot);
 

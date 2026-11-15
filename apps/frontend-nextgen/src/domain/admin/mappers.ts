@@ -124,8 +124,8 @@ export function mapSpaceDto(dto: BackendUnknownRecord): { item: Space; warnings:
     creatorUserName: asString(dto.creator_user_name),
     joinStatus: joinStatusFrom(dto),
     memberCount: asNumber(dto.member_count) ?? 0,
-    ownerCount: asNumber(dto.owner_count) ?? 0,
-    botCount: asNumber(dto.bot_count) ?? 0,
+    ownerCount: asNumber(dto.owner_count),
+    botCount: asNumber(dto.bot_count),
     gmtCreate: asString(dto.gmt_create),
     gmtModified: asString(dto.gmt_modified) ?? '',
   };
@@ -141,7 +141,7 @@ export function mapSpaceMemberDto(dto: BackendUnknownRecord): { item: SpaceMembe
     userName: asString(dto.user_name) ?? asString(dto.user_id) ?? '',
     displayName: asString(dto.display_name),
     role,
-    botPermissionCount: asNumber(dto.bot_permission_count) ?? 0,
+    botPermissionCount: asNumber(dto.bot_permission_count),
     isCreator: asBool(dto.is_creator) ?? false,
     gmtModified: asString(dto.gmt_modified) ?? '',
   };

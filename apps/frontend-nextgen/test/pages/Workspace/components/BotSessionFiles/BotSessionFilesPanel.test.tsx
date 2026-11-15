@@ -17,6 +17,9 @@ const readyFiles: BotSessionFileView[] = [
     sizeBytes: 2048,
     status: 'ready',
     errorCode: null,
+    creatorType: null,
+    creatorName: null,
+    createdAt: null,
   },
 ];
 
@@ -88,8 +91,26 @@ describe('BotSessionFilesPanel（单聊「资源管理」右侧副屏）', () =>
 
   it('不可预览类型：预览按钮禁用并提示原因，点击不下钻', () => {
     const files: BotSessionFileView[] = [
-      { resourceId: 'r1', displayName: '手法还原结果.json', sizeBytes: 2048, status: 'ready', errorCode: null },
-      { resourceId: 'r2', displayName: '打包资料.zip', sizeBytes: 4096, status: 'ready', errorCode: null },
+      {
+        resourceId: 'r1',
+        displayName: '手法还原结果.json',
+        sizeBytes: 2048,
+        status: 'ready',
+        errorCode: null,
+        creatorType: null,
+        creatorName: null,
+        createdAt: null,
+      },
+      {
+        resourceId: 'r2',
+        displayName: '打包资料.zip',
+        sizeBytes: 4096,
+        status: 'ready',
+        errorCode: null,
+        creatorType: null,
+        creatorName: null,
+        createdAt: null,
+      },
     ];
     render(<BotSessionFilesPanel {...baseProps} readyFiles={files} />);
 
@@ -110,7 +131,16 @@ describe('BotSessionFilesPanel（单聊「资源管理」右侧副屏）', () =>
 
   it('不可预览类型：行本体也保持纯展示，点击文件名不下钻', () => {
     const files: BotSessionFileView[] = [
-      { resourceId: 'r2', displayName: '打包资料.zip', sizeBytes: 4096, status: 'ready', errorCode: null },
+      {
+        resourceId: 'r2',
+        displayName: '打包资料.zip',
+        sizeBytes: 4096,
+        status: 'ready',
+        errorCode: null,
+        creatorType: null,
+        creatorName: null,
+        createdAt: null,
+      },
     ];
     render(<BotSessionFilesPanel {...baseProps} readyFiles={files} />);
 
@@ -121,9 +151,36 @@ describe('BotSessionFilesPanel（单聊「资源管理」右侧副屏）', () =>
 
   it('类型筛选 Tab：设计稿形态（无计数），按大类动态生成，点击后仅展示该类文件', () => {
     const files: BotSessionFileView[] = [
-      { resourceId: 'r1', displayName: '手法还原结果.json', sizeBytes: 2048, status: 'ready', errorCode: null },
-      { resourceId: 'r2', displayName: '说明文档.md', sizeBytes: 1024, status: 'ready', errorCode: null },
-      { resourceId: 'r3', displayName: '打包资料.zip', sizeBytes: 4096, status: 'ready', errorCode: null },
+      {
+        resourceId: 'r1',
+        displayName: '手法还原结果.json',
+        sizeBytes: 2048,
+        status: 'ready',
+        errorCode: null,
+        creatorType: null,
+        creatorName: null,
+        createdAt: null,
+      },
+      {
+        resourceId: 'r2',
+        displayName: '说明文档.md',
+        sizeBytes: 1024,
+        status: 'ready',
+        errorCode: null,
+        creatorType: null,
+        creatorName: null,
+        createdAt: null,
+      },
+      {
+        resourceId: 'r3',
+        displayName: '打包资料.zip',
+        sizeBytes: 4096,
+        status: 'ready',
+        errorCode: null,
+        creatorType: null,
+        creatorName: null,
+        createdAt: null,
+      },
     ];
     render(<BotSessionFilesPanel {...baseProps} readyFiles={files} />);
 
@@ -173,7 +230,16 @@ describe('BotSessionFilesPanel（单聊「资源管理」右侧副屏）', () =>
         {...baseProps}
         sessionId="s2"
         readyFiles={[
-          { resourceId: 'r9', displayName: '新会话文件.json', sizeBytes: 512, status: 'ready', errorCode: null },
+          {
+            resourceId: 'r9',
+            displayName: '新会话文件.json',
+            sizeBytes: 512,
+            status: 'ready',
+            errorCode: null,
+            creatorType: null,
+            creatorName: null,
+            createdAt: null,
+          },
         ]}
         onOpen={onOpen}
       />,

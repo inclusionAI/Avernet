@@ -162,6 +162,12 @@ user_config:
   gateway:
     base_url: "${GATEWAY_URL:-}"
 
+  # Clawweb host — the task_nav bot_config kind's workflow-permission clone
+  # target. Empty default; corp env overlays set the prod/pre/simulator host.
+  # (empty = fire-and-log POST failure, no apply abort — see task_nav handler.)
+  clawweb:
+    base_url: "${CLAWWEB_URL:-}"
+
   # Dormant-bot recycle: dry-run by default (never mutates without opt-in).
   dormant:
     dry_run: true

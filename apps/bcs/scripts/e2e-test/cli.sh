@@ -287,7 +287,7 @@ test_cli_friend() {
         fail "bcs-cli friend list exited $BCS_CLI_EXIT"
         TESTS_FAILED=$((TESTS_FAILED+1)); TESTS_TOTAL=$((TESTS_TOTAL+1)); return
     fi
-    # Assert that 研发的 UUID appears in the list (friends.sh auto-accept test pairs them).
+    # Assert that 研发的 UUID appears in the list (friends.sh request+accept test pairs them).
     if _cli_contains "$BCS_CLI_STDOUT" "$BOT_ENG_UUID"; then
         pass "bcs-cli friend list contains 研发"
         TESTS_PASSED=$((TESTS_PASSED+1))

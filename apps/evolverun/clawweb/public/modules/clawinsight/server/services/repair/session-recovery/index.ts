@@ -25,6 +25,7 @@ export function createSessionRecoveryRuntime(options: {
   notificationSender?: RecoveryNotificationSender | null; logs?: AgentLogTool; runtimeTool?: AgentRuntimeTool;
   trajectory?: BotSessionTrajectoryReader; nasRoots: string[];
   observationMs?: number; leaseSeconds?: number; launchGraceSeconds?: number;
+  canReadAsBotCollaborator?: ConstructorParameters<typeof SessionRecoveryTaskService>[0]["canReadAsBotCollaborator"];
 }): SessionRecoveryRuntime | undefined {
   if (options.db.dbType === "noop") {
     logRepairEvent("session-recovery", "session_recovery_runtime", "unavailable", { reason: "task database is not configured" });
@@ -50,7 +51,7 @@ export function createSessionRecoveryRuntime(options: {
     snapshotId: options.snapshotId, nasRoots: options.nasRoots, leaseSeconds: options.leaseSeconds ?? 120,
     launchGraceSeconds: options.launchGraceSeconds ?? 1800, observationMs, actionNotifier });
   tasks = new SessionRecoveryTaskService({ controlPlaneEnvironment, tasks: store, agent, notifier, reporter, observationMs, actionNotifier,
-    handbookConfig: notificationConfig,
+    handbookConfig: notificationConfig, canReadAsBotCollaborator: options.canReadAsBotCollaborator,
     resolveTarget: async request => {
       const expected = { OC: "openclaw", CC: "claude_code", TE: "teclaw" }[request.target.engine];
       const target = await options.targets.resolve({ environment: request.target.env, ownerId: request.target.entity_id, botId: request.target.bot_id, ...(request.target.runtime_identity ? { runtimeIdentity: request.target.runtime_identity } : {}) });

@@ -803,6 +803,7 @@ class TestRestartGuardOrchestration:
             env="dev",
             user_id="user001",
             bot_type=bot_type,
+            engine_bucket=active_engine,
         )
 
     @pytest.mark.parametrize(
@@ -1284,6 +1285,7 @@ class TestRestartGuardOrchestration:
             owner_workno="user001",
             name="TestBot",
             summary="",
+            avatar_url="",
         )
         baas.upgrade_bot.assert_called_once()
         assert call_order == ["bcn", "upgrade"]

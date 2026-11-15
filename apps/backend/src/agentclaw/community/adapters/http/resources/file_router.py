@@ -43,6 +43,7 @@ from agentclaw.community.core.bot_management.errors import (
 from agentclaw.community.core.bot_management.services.engine_resolver import (
     resolve_runtime_engine_for_bot,
 )
+from agentclaw.community.core.devices.errors import DeviceFileSystemReadOnlyError
 from agentclaw.community.core.devices.services.device_filesystem import (
     FileTooLargeError,
 )
@@ -445,6 +446,8 @@ async def create_directory(
     eid, ebid, eeng = _resolve_params(ctx, bot_id, engine_type, owner_id, bot_repo=bot_repo)
     try:
         await file_svc.create_directory(entity_id=eid, bot_id=ebid, engine_type=eeng, path=path)
+    except DeviceFileSystemReadOnlyError:
+        raise HTTPException(status_code=403, detail={"code": "filesystem_read_only"})
     except Exception as e:
         logger.error(f"[create_directory] Failed: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to create directory: {str(e)}")

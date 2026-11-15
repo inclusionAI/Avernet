@@ -128,6 +128,8 @@ pub struct GroupContextEntryMeta {
 /// across versions in the same supersede chain.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GroupContextEntry {
+    #[serde(default)]
+    pub created_from_preset: bool,
     pub id: i64,
     pub context_id: String,
     pub name: String,
@@ -165,4 +167,23 @@ impl GroupContextEntry {
     pub fn is_active(&self) -> bool {
         !self.is_superseded
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GroupContextItemPreset {
+    pub name: String,
+    pub description: String,
+    pub creator: String,
+    pub modifier: String,
+    #[serde(rename = "gmtCreate")]
+    pub gmt_create: GroupContextTime,
+    #[serde(rename = "gmtModified")]
+    pub gmt_modified: GroupContextTime,
+}
+
+#[derive(Debug, Clone)]
+pub enum GroupContextItemPresetChange {
+    Add { name: String, description: String },
+    Edit { name: String, new_name: Option<String>, description: Option<String> },
+    Delete { name: String },
 }

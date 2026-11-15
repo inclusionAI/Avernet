@@ -6,9 +6,10 @@ conversation content, no credentials. Session information is deliberately
 reduced to the time of the last session so a client can apply its own policy (for example "was there any
 conversation in the last two weeks") without the API hard-coding one.
 
-Collections default to empty: an engine without an overview provider, or one
-whose provider does not fill a field yet, reports no skills or MCP servers
-and no last session.
+Skills, MCP servers and session activity are platform-owned: the service fills
+them from the Skill Center and the engine-neutral session route for every
+engine. Only ``default_model`` and the engine payload come from per-engine
+providers.
 """
 
 from __future__ import annotations
@@ -74,23 +75,22 @@ class SessionActivity(BaseModel):
     last_session_at: datetime | None = Field(
         default=None,
         description="UTC time of the Bot's most recent session activity; null "
-        "when the Bot has had no session.",
+        "when none is known: the Bot has had no session, or its runtime could "
+        "not be reached.",
     )
 
 
 class EngineBotOverview(BaseModel):
     """What an engine provider contributes to a Bot overview.
 
-    Every field defaults to "nothing reported", so a provider fills only what
-    its engine can answer.
+    Skills, MCP servers and session activity are platform-owned and filled by
+    ``BotOverviewService`` for every engine, so a provider cannot report them.
+    Every field defaults to "nothing reported".
     """
 
     model_config = ConfigDict(extra="forbid")
 
     default_model: str | None = None
-    skills: list[SkillSummary] = Field(default_factory=list)
-    mcps: list[McpServerSummary] = Field(default_factory=list)
-    sessions: SessionActivity = Field(default_factory=SessionActivity)
     payload: EngineSpecificPayload | None = None
 
 

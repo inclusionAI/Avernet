@@ -7,7 +7,7 @@ FusionRecommendation 领域模型测试
 import pytest
 from pydantic import ValidationError
 
-from src.domain.models.fusion_recommendation import (
+from app.domain.models.fusion_recommendation import (
     FusionRecommendation,
     Decision,
 )

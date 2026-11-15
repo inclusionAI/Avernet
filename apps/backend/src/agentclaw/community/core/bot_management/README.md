@@ -12,6 +12,12 @@ metadata lookup, without changing their source PK or published stage bindings.
 
 Bot lifecycle, creation policy, repository, engine resolution, render-screen models, and skill-set switching.
 
+Bot avatar writes accept a URL or data URL of at most 24 KiB in UTF-8. The
+merged `ext` must also fit the 65,535-byte portable TEXT limit after the Bot
+repository's JSON serialization. Oversized avatar writes fail before mutation;
+existing values remain readable. These limits avoid sending a value that the
+Bot or collaboration profile stores cannot persist.
+
 ## Context Boundary
 
 ```yaml
@@ -19,6 +25,8 @@ purpose: "Bot lifecycle, creation policy, repository, engine resolution, render-
 provides:
   - BotOwnershipSyncService
   - OwnershipSyncRepairService
+  - CollaborationRepairServiceProtocol
+  - CollaborationRepairService
   - notify_bot_ownership_sync
   - bcn_bot_reference
   - provider_address_kwargs
@@ -45,6 +53,10 @@ consumes:
   - BotOwnershipSyncProtocol
   - OwnershipSyncReadRepository
   - BcsOwnershipPlugin
+  - "CollaborationRepairReadRepository"
+  - "ManagerSyncReadRepository"
+  - "BcsCollaborationMetadataPlugin"
+  - "BcsManagersPlugin"
   - "DeviceAccessor"
   - "PassportPlugin"
   - "CallerIdentityRepositoryProtocol"
@@ -66,9 +78,12 @@ consumes:
   - "CapabilityDesiredStateRepositoryProtocol"
   - "BotManagerSyncProtocol (api) — best-effort manager-set refresh after an owner handoff commits or a Bot's Space assignment changes"
 internal_dependencies:
+  - agentclaw.community.core.caller_identity.scheduled_refresh
   - agentclaw.community.api.bot_ownership_sync
   - agentclaw.community.kernel.bot_ownership_sync
   - agentclaw.community.plugin_api.bcs_ownership
+  - agentclaw.community.plugin_api.bcs_managers    # managers full-replace delivery port of the one-shot repair
+  - agentclaw.community.plugin_api.bcs_collaboration_metadata    # profile/caller/exists delivery port of the one-shot repair
   - agentclaw.community.api.bot_manager_sync
   - agentclaw.community.core.execution_identity.protocols
   - agentclaw.community.plugin_api.staff_dept
@@ -113,6 +128,7 @@ internal_dependencies:
   - agentclaw.community.kernel.lifecycle
   - agentclaw.community.kernel.device_dto    # CommandResult contract for coding-owned Arca backup execution
   - agentclaw.community.kernel.bot_manager_sync    # SyncReason for the manager-set side-channel submits
+  - agentclaw.community.kernel.collaboration_repair    # repair command/report DTOs and error vocabulary for the collaboration repair contracts
   - agentclaw.community.log
   - agentclaw.community.plugin_api.devices
   - agentclaw.community.plugin_api.drm
@@ -151,6 +167,14 @@ passes the existing runtime unchanged; only the coding strategy adapts it into
 this envelope. Other engines do not construct backup dependencies.
 
 ## Stable Bot addressing
+
+Display metadata queries use `bcn_metadata.resolve_metadata_pairs` and the
+repository's [bounded locator candidates](../repository/README.md#metadata-locator-batching).
+They retain exact Owner/entity precedence, ambiguity rejection and stored BCN
+reference validation after handoff; `default` never uses bare-ID fallback.
+The HTTP schema, pagination, avatar and publication projections are unchanged.
+The real-repository compatibility and SQL-count tests live in
+`tests/community/repository/bot/test_metadata_locators.py`.
 
 `addressing.py` owns the Backend-internal compatibility boundary. A request may
 still supply the historical field named `owner_id`; repository lookup matches it

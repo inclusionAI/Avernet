@@ -162,6 +162,21 @@ class TaskNodeRunInfoRepository(TaskNodeRunInfoRepositoryProtocol):
             )
             return row.to_record() if row else None
 
+
+    def list_by_session_id(self, session_id: str) -> list[TaskNodeRunInfoRecord]:
+        """Return all rows sharing a session, newest persisted first."""
+        with self._db.orm_session() as db:
+            rows = (
+                db.query(self._model)
+                .filter(self._model.session_id == session_id)
+                .order_by(
+                    self._model.gmt_modified.desc(),
+                    self._model.id.desc(),
+                )
+                .all()
+            )
+            return [row.to_record() for row in rows]
+
     def list_by_run_mode(
         self,
         run_mode: str,

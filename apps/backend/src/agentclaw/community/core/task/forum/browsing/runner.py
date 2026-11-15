@@ -59,6 +59,7 @@ class BbsBrowseLoopRunner:
         self,
         *,
         bot_id: str,
+        owner_user_id: str,
         expected_mode: str,
     ) -> dict[str, Any]:
         """Fire-and-forget: send one "run the browse skill now" message to ``bot_id``.
@@ -71,7 +72,7 @@ class BbsBrowseLoopRunner:
         complete asynchronously. Results are observable downstream (BBS
         topic/post listings), not synchronously here.
         """
-        subscription = self._lookup(bot_id)
+        subscription = self._lookup(bot_id, owner_user_id)
         if subscription.mode != expected_mode:
             raise ValidationError(
                 f"trigger mode mismatch: subscription.mode={subscription.mode} "
@@ -99,10 +100,11 @@ class BbsBrowseLoopRunner:
         self,
         *,
         bot_id: str,
+        owner_user_id: str,
         action: Literal["register", "remove"],
     ) -> dict[str, Any]:
         """Fire-and-forget: tell an openclaw-mode Bot to add/remove its local cron job."""
-        subscription = self._lookup(bot_id)
+        subscription = self._lookup(bot_id, owner_user_id)
         if subscription.mode != BROWSE_MODE_OPENCLAW:
             raise ValidationError(
                 "cron event applies only to openclaw-mode subscriptions"
@@ -121,7 +123,9 @@ class BbsBrowseLoopRunner:
             action=action,
         )
 
-    async def trigger_install_bbs_skills(self, *, bot_id: str) -> dict[str, Any]:
+    async def trigger_install_bbs_skills(
+        self, *, bot_id: str, owner_user_id: str
+    ) -> dict[str, Any]:
         """Manually send the BBS skill-install prompt for an existing Bot.
 
         Unlike the provisioning path, this is an explicit operation: transport
@@ -129,14 +133,14 @@ class BbsBrowseLoopRunner:
         swallowed. The owner segment is read from the persisted subscription so
         callers address a Bot without constructing BaaS identity themselves.
         """
-        subscription = self._lookup(bot_id)
+        subscription = self._lookup(bot_id, owner_user_id)
         if subscription.mode != BROWSE_MODE_OPENCLAW:
             raise ValidationError(
                 "skill install applies only to openclaw-mode subscriptions"
             )
         return await self.send_install_bbs_skills(
             bot_id=bot_id,
-            owner_user_id=subscription.owner_user_id,
+            owner_user_id=owner_user_id,
         )
 
     async def send_install_bbs_skills(
@@ -225,8 +229,11 @@ class BbsBrowseLoopRunner:
             out["action"] = action
         return out
 
-    def _lookup(self, bot_id: str) -> BrowseSubscriptionRecord:
-        sub = self._service.get_subscription(bot_id=bot_id)
+    def _lookup(self, bot_id: str, owner_user_id: str) -> BrowseSubscriptionRecord:
+        sub = self._service.get_subscription(
+            bot_id=bot_id,
+            owner_user_id=owner_user_id,
+        )
         if sub is None:
             raise NotFound("subscription not found")
         return sub

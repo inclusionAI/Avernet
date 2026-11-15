@@ -20,6 +20,8 @@ interface BotManagementMenuProps {
   lockedByOther: boolean;
   onAction: (action: BotCardManagementAction, bot: BotDomain) => Promise<void>;
   onManagePublication?: (bot: BotDomain) => void;
+  onOpenEvaluation?: (bot: BotDomain) => void;
+  onOpenEvalHistory?: (bot: BotDomain) => void;
   /** 以下两项与任务实例原为行内图标按钮，按 dmore 稿 087 收口进「三个点」气泡。 */
   onHealthCheck?: (bot: BotDomain) => void;
   healthCheckAvailability?: BotActionAvailability;
@@ -46,6 +48,8 @@ export function BotManagementMenu(props: BotManagementMenuProps) {
     lockedByOther,
     onAction,
     onManagePublication,
+    onOpenEvaluation,
+    onOpenEvalHistory,
     onHealthCheck,
     healthCheckAvailability,
     onOpenTaskInstances,
@@ -65,6 +69,23 @@ export function BotManagementMenu(props: BotManagementMenuProps) {
   const [confirmAction, setConfirmAction] = useState<BotCardManagementAction>();
   const isAgentCodingBot = bot.runtime.isAgentCodingBot;
   const dormant = isDormantPersonalBot(bot);
+  const scheduledTasksEntry =
+    onOpenTaskInstances && (isAgentCodingBot || canOpenTaskInstances) ? (
+      <Button
+        variant="ghost"
+        size="sm"
+        className="w-full justify-start"
+        leftIcon={<ClipboardList className="size-4" />}
+        aria-label={`查看 ${bot.name} 定时任务`}
+        onClick={() => {
+          Tracert.click(Points.botWorkshop.viewTaskInstance, { bot_id: bot.id });
+          setOpen(false);
+          onOpenTaskInstances(bot);
+        }}
+      >
+        定时任务
+      </Button>
+    ) : null;
   if (bot.lifecycle === 'deploying') return null;
   return (
     <>
@@ -117,9 +138,9 @@ export function BotManagementMenu(props: BotManagementMenuProps) {
                     }}
                   >
                     {canGeneralConfig ? (
-                      '通用配置'
+                      '公开设置'
                     ) : (
-                      <ActionHelp description={generalConfigDisabledReason ?? '当前不可用'}>通用配置</ActionHelp>
+                      <ActionHelp description={generalConfigDisabledReason ?? '当前不可用'}>公开设置</ActionHelp>
                     )}
                   </Button>
                 ) : null}
@@ -168,22 +189,7 @@ export function BotManagementMenu(props: BotManagementMenuProps) {
                     {collaborationMode === 'authorize' ? '授权' : '申请操作权限'}
                   </Button>
                 ) : null}
-                {onOpenTaskInstances && (isAgentCodingBot || canOpenTaskInstances) ? (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="w-full justify-start"
-                    leftIcon={<ClipboardList className="size-4" />}
-                    aria-label={`查看 ${bot.name} 任务实例`}
-                    onClick={() => {
-                      Tracert.click(Points.botWorkshop.viewTaskInstance, { bot_id: bot.id });
-                      setOpen(false);
-                      onOpenTaskInstances(bot);
-                    }}
-                  >
-                    任务实例
-                  </Button>
-                ) : null}
+                {scheduledTasksEntry}
                 {healthCheckAvailability?.visible && onHealthCheck ? (
                   <Button
                     variant="ghost"
@@ -247,12 +253,15 @@ export function BotManagementMenu(props: BotManagementMenuProps) {
               {/* 发布与运行态操作：按相同的权限和实例规则集中处理。 */}
             </>
           ) : null}
+          {dormant && scheduledTasksEntry ? <MenuSection>{scheduledTasksEntry}</MenuSection> : null}
           <BotManagementRuntimeItems
             bot={bot}
             lockedByOther={lockedByOther}
             onClose={() => setOpen(false)}
             onConfirm={setConfirmAction}
             onManagePublication={onManagePublication}
+            onOpenEvaluation={onOpenEvaluation}
+            onOpenEvalHistory={onOpenEvalHistory}
           />
         </PopoverContent>
       </Popover>

@@ -33,7 +33,7 @@ from agentclaw.community.core.task.task_context.task_artifact.report_item import
 
 
 class ExecutionEventDTO(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     task_id: str | None = None
     node_id: str | None = None
@@ -53,7 +53,7 @@ class ArtifactReportItemDTO(BaseModel):
     交叉校验和上限仍在核心 ``parse_artifact_report_item`` 收口。
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     artifact_name: str = Field(min_length=1, max_length=255, description="业务语义名")
     artifact_kind: str
@@ -68,7 +68,7 @@ class ArtifactReportItemDTO(BaseModel):
 
 
 class PlannedNodeRunInfoDTO(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     run_mode: str
     assignee: str | None = None
@@ -77,7 +77,7 @@ class PlannedNodeRunInfoDTO(BaseModel):
 
 
 class PlannedNodeDTO(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     task_id: str | None = None
     node_id: None = None
@@ -101,7 +101,7 @@ class TaskReportTraceStepDTO(BaseModel):
     只能作为 JSON 内的 ``status`` 字段。``boost_reason`` 是执行过程证据：为什么推进、为什么选择等等维度信息;``error_msg`` 是失败原因;``status_from/status_to`` 是节点状态。
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     action_type: str = Field(min_length=1)
     action_input: str | None
@@ -151,7 +151,7 @@ class TaskReportTraceStepDTO(BaseModel):
 
 
 class TaskReportTraceDTO(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     steps: list[TaskReportTraceStepDTO]
 
@@ -199,7 +199,7 @@ class TaskReportCommandDTO(BaseModel):
     report event type.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     task_id: str = Field(min_length=1)
     node_id: str = Field(min_length=1)

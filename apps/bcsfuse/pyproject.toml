@@ -23,6 +23,7 @@ classifiers = [
 ]
 
 dependencies = [
+    "search-core[models,qdrant]==0.1.0",
     # Core Web Framework
     "fastapi>=0.100.0",
     "uvicorn[standard]>=0.23.0",
@@ -32,11 +33,9 @@ dependencies = [
     "httpx>=0.24.0",
     "httpx-sse>=0.4.0",
     "requests",
-    # Vector Store (numpy must be installed before faiss-cpu)
+    # Vector store
     "numpy==1.26.4",
-    "faiss-cpu==1.8.0",
-    "packaging>=21.0",  # faiss loader requires packaging.version
-    "qdrant-client>=1.12.0",
+    "qdrant-client>=1.20.0,<1.21",
     # Database
     "mysql-connector-python>=8.0.0",
     # Background task scheduling
@@ -57,8 +56,14 @@ dev = [
 ]
 
 [tool.setuptools.packages.find]
-where = ["."]
-include = ["src*", "tests.smoke*"]
+where = ["src"]
+include = ["app*"]
 
 [tool.setuptools.package-data]
 "*" = ["*.yaml", "*.json", "*.md"]
+
+[tool.uv.sources]
+search-core = { path = "packages/search-core", editable = true }
+
+[tool.pytest.ini_options]
+pythonpath = ["src", "packages/search-core/src"]

@@ -5,11 +5,15 @@ import {
   Input,
   Modal,
   ModalContent,
-  ModalDescription,
   ModalFooter,
   ModalHeader,
   ModalTitle,
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
 } from '@/components/ui';
+import { CircleHelp } from 'lucide-react';
 import { useState } from 'react';
 
 export interface SpaceCreateFormProps {
@@ -24,41 +28,57 @@ export function SpaceCreateForm({ open, onOpenChange, onSubmit }: SpaceCreateFor
 
   const submit = async () => {
     const trimmed = name.trim();
-    if (!trimmed) return;
+    if (!trimmed || submitting) return;
     setSubmitting(true);
-    const ok = await onSubmit(trimmed);
-    setSubmitting(false);
-    if (ok) {
-      setName('');
-      onOpenChange(false);
+    try {
+      if (await onSubmit(trimmed)) {
+        setName('');
+        onOpenChange(false);
+      }
+    } finally {
+      setSubmitting(false);
     }
   };
 
+  const changeOpen = (next: boolean) => {
+    if (submitting) return;
+    if (!next) setName('');
+    onOpenChange(next);
+  };
+
   return (
-    <Modal open={open} onOpenChange={onOpenChange}>
-      {/* 底部已有取消按钮，关闭入口不重复，隐藏右上角叉叉 */}
-      <ModalContent size="sm" className="max-w-[420px]" showClose={false}>
-        {/* 标题与说明间距覆盖为 4px（ModalHeader 基座 6px 非 4px 倍数） */}
-        <ModalHeader className="space-y-1">
-          <ModalTitle className="text-[14px] font-semibold leading-5">创建团队空间</ModalTitle>
-          <ModalDescription className="text-[12px] leading-4">
-            创建一个独立的团队工作空间,用于多人协作。
-          </ModalDescription>
+    <Modal open={open} onOpenChange={changeOpen}>
+      <ModalContent size="md" className="max-w-[480px] gap-0 p-0" aria-describedby={undefined}>
+        <ModalHeader className="h-[57px] justify-center border-b border-border px-5">
+          <div className="flex items-center gap-1">
+            <ModalTitle className="text-base font-medium leading-6">创建新团队空间</ModalTitle>
+            <TooltipProvider delayDuration={200}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="ghost" size="icon" className="size-4 rounded-full p-0" aria-label="创建团队空间说明">
+                    <CircleHelp size={16} aria-hidden />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" className="whitespace-pre-line text-[13px] leading-5">
+                  {'个人空间为系统自动分配，无需创建。\n此处仅可创造团队空间。'}
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </div>
         </ModalHeader>
-        {/* 字段块结构与 SpaceJoinForm 对齐:外层 space-y-4 留多字段间距,内层 space-y-2 让 label 贴近输入框 */}
-        <div className="space-y-4 py-2">
+        <div className="px-5 py-5">
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              {/* label 14px + 正文字色为受控偏离（标准 12px + muted），经用户确认，见 docs/design-migration/admin-space-management-migration.md */}
               <CaptionText as="label" htmlFor="space-create-name" className="text-[14px] text-foreground">
-                空间名称（必填）
+                <span className="mr-1 text-destructive">*</span>空间名称
               </CaptionText>
             </div>
             <Input
               id="space-create-name"
-              className="text-[12px]"
+              className="h-8 text-[13px]"
               placeholder="请输入空间名称"
               value={name}
+              disabled={submitting}
               onChange={(e) => setName(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') void submit();
@@ -67,14 +87,12 @@ export function SpaceCreateForm({ open, onOpenChange, onSubmit }: SpaceCreateFor
             />
           </div>
         </div>
-        <ModalFooter>
-          {/* 按钮水平内边距 18px = sm 基座 12px 的 1.5 倍，用户指定（非 4px 倍数，受控偏离） */}
-          {/* 取消按钮样式对齐空间卡片「申请加入」按钮：secondary 线框 + 12px semibold */}
+        <ModalFooter className="flex-row justify-end border-t border-border px-5 py-4">
           <Button
             variant="secondary"
             size="sm"
-            className="px-[18px] text-[12px] font-semibold"
-            onClick={() => onOpenChange(false)}
+            className="h-8 px-4 text-[13px]"
+            onClick={() => changeOpen(false)}
             disabled={submitting}
           >
             取消
@@ -82,11 +100,11 @@ export function SpaceCreateForm({ open, onOpenChange, onSubmit }: SpaceCreateFor
           <Button
             variant="primary"
             size="sm"
-            className="px-[18px] text-[12px]"
+            className="h-8 px-4 text-[13px]"
             onClick={() => void submit()}
             disabled={submitting || !name.trim()}
           >
-            {submitting ? '创建中…' : '创建'}
+            {submitting ? '创建中…' : '确定'}
           </Button>
         </ModalFooter>
       </ModalContent>

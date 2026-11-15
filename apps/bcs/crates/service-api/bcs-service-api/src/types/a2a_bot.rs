@@ -31,9 +31,25 @@ pub struct A2aBotRecord {
     pub agent_card:Value,
     pub revision:u64,
 }
+/// BCN visibility chosen at admission; independent of the remote AgentCard.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum A2aRegistrationVisibility {
+    #[default]
+    Protected,
+    Public,
+    Private,
+}
+impl A2aRegistrationVisibility {
+    pub fn as_str(self) -> &'static str {
+        match self { Self::Protected => "protected", Self::Public => "public", Self::Private => "private" }
+    }
+}
+
 /// Validated declaration passed to atomic Bot creation, not a persistence format.
 #[derive(Clone, Debug, PartialEq)]
 pub struct A2aRegistrationCard {
+    pub visibility: A2aRegistrationVisibility,
     pub agent_card_url:Option<String>,
     pub agent_card:Value,
     pub interface:A2aInterface,

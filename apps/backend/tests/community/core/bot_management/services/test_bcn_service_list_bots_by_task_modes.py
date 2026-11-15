@@ -2,7 +2,9 @@
 
 BBS 任务模式候选 roster 查询测试。
 对应实现:
-``agentclaw.community.core.bot_management.services.bcn_service.list_bots_by_task_modes``。
+``agentclaw.community.core.bot_management.services.bcn_service.list_bots_by_task_modes``
+(2026-11-03 机械拆分: 方法原文移至 ``bcn_roster.BcnRosterMixin``,由 facade 组合,
+``get_current_env`` 的 patch 目标随之移到 ``bcn_roster``)。
 
 与 ``switch_bot`` / ``register_provider_bot`` / ``get_attributes`` 同套**统一 provider 身份**
 (``BcnConfig`` prod/pre、``Authorization: Bearer {provider_admin_token}``、``provider_id`` 在 path),
@@ -67,7 +69,7 @@ class TestListBotsByTaskModesEnvSelection:
     """复用统一 provider 身份: prod→prod 凭据, pre→pre 凭据。"""
 
     @patch(
-        "agentclaw.community.core.bot_management.services.bcn_service.get_current_env",
+        "agentclaw.community.core.bot_management.services.bcn_roster.get_current_env",
         return_value="prod",
     )
     def test_prod_env_uses_the_configured_provider_credentials(self, _mock_env, service, http):
@@ -94,7 +96,7 @@ class TestListBotsByTaskModesEnvSelection:
         }
 
     @patch(
-        "agentclaw.community.core.bot_management.services.bcn_service.get_current_env",
+        "agentclaw.community.core.bot_management.services.bcn_roster.get_current_env",
         return_value="pre",
     )
     def test_pre_env_uses_the_configured_provider_credentials(self, _mock_env, service, http):
@@ -113,7 +115,7 @@ class TestListBotsByTaskModesRequestParams:
     """``claim`` / ``dream`` 为 ``None`` 时不下发对应 query; ``match`` 始终下发。"""
 
     @patch(
-        "agentclaw.community.core.bot_management.services.bcn_service.get_current_env",
+        "agentclaw.community.core.bot_management.services.bcn_roster.get_current_env",
         return_value="prod",
     )
     def test_none_filters_omit_query_params(self, _mock_env, service, http):
@@ -125,7 +127,7 @@ class TestListBotsByTaskModesRequestParams:
         assert call.kwargs["params"] == {"match": "any"}
 
     @patch(
-        "agentclaw.community.core.bot_management.services.bcn_service.get_current_env",
+        "agentclaw.community.core.bot_management.services.bcn_roster.get_current_env",
         return_value="prod",
     )
     def test_false_filters_serialize_to_string_false(self, _mock_env, service, http):
@@ -143,7 +145,7 @@ class TestListBotsByTaskModesRequestParams:
 
 
     @patch(
-        "agentclaw.community.core.bot_management.services.bcn_service.get_current_env",
+        "agentclaw.community.core.bot_management.services.bcn_roster.get_current_env",
         return_value="pre",
     )
     def test_metadata_filters_are_forwarded_as_combined_query(self, _mock_env, service, http):
@@ -173,7 +175,7 @@ class TestListBotsByTaskModesResponseParsing:
     """解析 BCN 响应 ``items`` 列表,容错空 / 缺失 / 非列表。"""
 
     @patch(
-        "agentclaw.community.core.bot_management.services.bcn_service.get_current_env",
+        "agentclaw.community.core.bot_management.services.bcn_roster.get_current_env",
         return_value="prod",
     )
     def test_returns_items_list_verbatim(self, _mock_env, service, http):
@@ -183,7 +185,7 @@ class TestListBotsByTaskModesResponseParsing:
         assert service.list_bots_by_task_modes() == items
 
     @patch(
-        "agentclaw.community.core.bot_management.services.bcn_service.get_current_env",
+        "agentclaw.community.core.bot_management.services.bcn_roster.get_current_env",
         return_value="prod",
     )
     def test_items_empty_returns_empty_list(self, _mock_env, service, http):
@@ -192,7 +194,7 @@ class TestListBotsByTaskModesResponseParsing:
         assert service.list_bots_by_task_modes() == []
 
     @patch(
-        "agentclaw.community.core.bot_management.services.bcn_service.get_current_env",
+        "agentclaw.community.core.bot_management.services.bcn_roster.get_current_env",
         return_value="prod",
     )
     def test_missing_items_key_returns_empty_list(self, _mock_env, service, http):
@@ -201,7 +203,7 @@ class TestListBotsByTaskModesResponseParsing:
         assert service.list_bots_by_task_modes() == []
 
     @patch(
-        "agentclaw.community.core.bot_management.services.bcn_service.get_current_env",
+        "agentclaw.community.core.bot_management.services.bcn_roster.get_current_env",
         return_value="prod",
     )
     def test_items_not_a_list_returns_empty_list(self, _mock_env, service, http):
@@ -214,7 +216,7 @@ class TestListBotsByTaskModesErrorHandling:
     """未配置环境 / HTTP 错误 / 超时 / 意外异常 → ``BcnServiceError``。"""
 
     @patch(
-        "agentclaw.community.core.bot_management.services.bcn_service.get_current_env",
+        "agentclaw.community.core.bot_management.services.bcn_roster.get_current_env",
         return_value="dev",
     )
     def test_dev_env_not_configured_raises_and_skips_http(self, _mock_env, service, http):
@@ -225,7 +227,7 @@ class TestListBotsByTaskModesErrorHandling:
         assert http.calls_to("get") == []
 
     @patch(
-        "agentclaw.community.core.bot_management.services.bcn_service.get_current_env",
+        "agentclaw.community.core.bot_management.services.bcn_roster.get_current_env",
         return_value="pre",
     )
     def test_4xx_raises_bcn_service_error(self, _mock_env, service, http):
@@ -235,7 +237,7 @@ class TestListBotsByTaskModesErrorHandling:
             service.list_bots_by_task_modes()
 
     @patch(
-        "agentclaw.community.core.bot_management.services.bcn_service.get_current_env",
+        "agentclaw.community.core.bot_management.services.bcn_roster.get_current_env",
         return_value="pre",
     )
     def test_5xx_raises_bcn_service_error(self, _mock_env, service, http):
@@ -245,7 +247,7 @@ class TestListBotsByTaskModesErrorHandling:
             service.list_bots_by_task_modes()
 
     @patch(
-        "agentclaw.community.core.bot_management.services.bcn_service.get_current_env",
+        "agentclaw.community.core.bot_management.services.bcn_roster.get_current_env",
         return_value="pre",
     )
     def test_timeout_raises_bcn_service_error(self, _mock_env, service, http):
@@ -255,7 +257,7 @@ class TestListBotsByTaskModesErrorHandling:
             service.list_bots_by_task_modes()
 
     @patch(
-        "agentclaw.community.core.bot_management.services.bcn_service.get_current_env",
+        "agentclaw.community.core.bot_management.services.bcn_roster.get_current_env",
         return_value="pre",
     )
     def test_unexpected_exception_wraps_bcn_service_error(self, _mock_env, service, http):

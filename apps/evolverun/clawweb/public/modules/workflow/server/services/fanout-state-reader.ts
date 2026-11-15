@@ -1,7 +1,7 @@
 import { FanoutReadError, type FanoutErrorSummary, type StoredRunSnapshot } from '../contracts/run-subworkflows.js';
 
 type RecordValue = Record<string, unknown>;
-export type FanoutAttempt = { attemptNumber: number; childFlowId: string; status: string; error: FanoutErrorSummary | null };
+export type FanoutAttempt = { attemptNumber: number; nativeFlowId: string | null; associationKey: string | null; status: string; error: FanoutErrorSummary | null };
 export type FanoutItem = { itemIndex: number; itemId: string; activeAttemptNumber: number; attempts: FanoutAttempt[] };
 export type FanoutStateView = {
   parentFlowId: string; groupNodeId: string; groupExecutionId: string; revision: number;
@@ -52,6 +52,7 @@ export function readFanoutState(value: unknown, parentFlowId: string, nodeId: st
   if (!groupStatuses.has(text(row.status)) || config.successPolicy !== 'all_done'
     || config.finishMode !== 'wait_all' || config.resultPolicy !== 'collect_all' || !Array.isArray(row.children)) return invalid();
   const items = new Set<string>(); const indices = new Set<number>(); const flowIds = new Set<string>();
+  const nativeIds = new Set<string>();
   const children = row.children.map(value => {
     const item = object(value); const itemId = text(item.itemId); const itemIndex = integer(item.itemIndex);
     if (current && (item.parentFlowId !== parentFlowId || item.parentNodeId !== nodeId || item.groupExecutionId !== row.groupExecutionId)) {
@@ -66,7 +67,18 @@ export function readFanoutState(value: unknown, parentFlowId: string, nodeId: st
       const childFlowId = text(attempt.childFlowId); const status = text(attempt.status);
       if (attemptsSeen.has(attemptNumber) || flowIds.has(childFlowId) || childFlowId === parentFlowId || !childStatuses.has(status)) return invalid();
       attemptsSeen.add(attemptNumber); flowIds.add(childFlowId);
-      return { attemptNumber, childFlowId, status, error: errorSummary(attempt.error) };
+      // Only the approved attempts layout is legacy. Flat snapshots require
+      // a host-created ordinary association; a missing native ID stays unbound.
+      const parsedNative = !current ? childFlowId : attempt.nativeFlowId === undefined || attempt.nativeFlowId === null
+        ? null : text(attempt.nativeFlowId);
+      // The writer may currently admit native=parent. Hide rather than turning
+      // that persisted group into a permanent invalid-state response.
+      const nativeFlowId = parsedNative === parentFlowId && current ? null : parsedNative;
+      if (nativeFlowId !== null) {
+        if (nativeFlowId === parentFlowId || nativeIds.has(nativeFlowId)) return invalid();
+        nativeIds.add(nativeFlowId);
+      }
+      return { attemptNumber, nativeFlowId, associationKey: current ? childFlowId : null, status, error: errorSummary(attempt.error) };
     });
     const activeAttemptNumber = integer(current ? item.attemptNumber : item.activeAttemptNumber, 1);
     if (!attemptsSeen.has(activeAttemptNumber)) return invalid();

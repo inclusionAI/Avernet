@@ -2,6 +2,7 @@ import { BotRuntimeError } from "@avernet/clawweb-shared/server/services/bot-run
 import type { BotRuntime, ResolvedBotTarget } from "@avernet/clawweb-shared/server/services/bot-runtime";
 import { redactEvidenceValue } from "@avernet/clawweb-shared/server/services/redaction";
 import { SessionRecoveryError } from "./errors.js";
+import { redactSessionReadEvidence } from "./session-argument-evidence.js";
 import { gzipSync } from "node:zlib";
 import { cronRunSessionId, cronConversationKey } from "./session-identity.js";
 
@@ -128,7 +129,7 @@ export class RecoverySessionReader {
       .catch((error: unknown) => { if (error instanceof BotRuntimeError && error.code === "target_unavailable") throw new SessionRecoveryError(410, error.code, "目标运行环境已不可用");
         const cause = error as { stderr?: string; code?: string }; throw unavailable(cause?.stderr || cause?.code || "受控 Shell 请求失败"); });
     if (result.status !== "success" || result.exitCode !== 0) throw unavailable(result.stderr || `Shell exit=${result.exitCode}, status=${result.status}`);
-    try { return redactEvidenceValue(JSON.parse(result.stdout)) as Record<string, unknown>; }
+    try { return redactSessionReadEvidence(JSON.parse(result.stdout), input.target.activeEngine === "claude_code"); }
     catch { throw new SessionRecoveryError(503, "original_session_unavailable", "原会话记录格式无效"); }
   }
 }

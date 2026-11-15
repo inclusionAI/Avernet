@@ -221,6 +221,58 @@ impl DeliveryRuntime {
                     crate::storage_retry::managed_storage, || $work).await?
             };
         }
+        // Row-scoped operations: bounded retries, then the row is isolated
+        // and the loop moves on (`row_isolation`). Never `?` out of `run()`.
+        let mut isolation = row_isolation::RowIsolation::default();
+        macro_rules! row_transition {
+            ($command:expr) => {{
+                let command = $command;
+                let delivery_id = command.delivery_id.clone();
+                match self.row_op(&delivery_id, &mut isolation, || self.transition(command.clone())).await {
+                    Some(value) => value,
+                    None => continue,
+                }
+            }};
+        }
+        macro_rules! row_get {
+            ($id:expr) => {{
+                let delivery_id: String = ($id).to_string();
+                match self.row_op(&delivery_id, &mut isolation, || self.get(&delivery_id)).await {
+                    Some(value) => value,
+                    None => continue,
+                }
+            }};
+        }
+        // Transport completions (send outcome, abort outcome, pre-I/O
+        // registration failure) are one-shot evidence: an outage keeps them
+        // retrying exactly like `storage!` instead of dropping them, and only
+        // a deterministic fault falls through to row isolation.
+        macro_rules! evidence {
+            ($id:expr, $work:expr) => {{
+                let delivery_id: String = ($id).to_string();
+                match crate::storage_retry::retry(Some(shutdown.clone()), "scheduler_evidence",
+                    crate::storage_retry::managed_storage, || $work).await {
+                    Ok(value) => value,
+                    Err(error) if crate::storage_retry::managed_storage(&error) => return Err(error),
+                    Err(_) => match self.row_op(&delivery_id, &mut isolation, || $work).await {
+                        Some(value) => value,
+                        None => continue,
+                    },
+                }
+            }};
+        }
+        macro_rules! evidence_transition {
+            ($command:expr) => {{
+                let command = $command;
+                evidence!(command.delivery_id.clone(), self.transition(command.clone()))
+            }};
+        }
+        macro_rules! evidence_get {
+            ($id:expr) => {{
+                let id: String = ($id).to_string();
+                evidence!(id.clone(), self.get(&id))
+            }};
+        }
         storage!(self.service.recover(now_ms()));
         let epoch = Instant::now();
         // Never store old-policy future deadlines: new intervals apply to the
@@ -251,8 +303,9 @@ impl DeliveryRuntime {
             tokio::select! {
                 _ = shutdown.changed() => { break; }
                 _ = expiry_ticker.tick() => {
-                    let expired = storage!(self.service.work_batch(DeliveryWorkBatch::Expired, now_ms(), "", 100));
+                    let expired = { let excluded = isolation.excluded(); storage!(self.service.work_batch_excluding(DeliveryWorkBatch::Expired, now_ms(), "", 100, &excluded)) };
                     for row in expired {
+                        if isolation.blocked(&row.delivery_id) { continue; }
                         // A maybe-sent caller row never expires into a
                         // "stopped" lane release: TTL lapse converts to a
                         // cancel intent; only stop/terminal evidence settles
@@ -262,16 +315,17 @@ impl DeliveryRuntime {
                         {
                             let mut command = event(&row, Event::CancelRequested);
                             command.deadline_at_ms = Some(now_ms().saturating_add(self.config.cancel_timeout.as_millis() as i64));
-                            storage!(self.transition(command.clone()));
+                            row_transition!(command.clone());
                         } else {
-                            storage!(self.transition(event(&row, Event::QueueExpired)));
+                            row_transition!(event(&row, Event::QueueExpired));
                         }
                     }
                 }
                 _ = ticker.tick() => {
                     let tick_started = Instant::now();
-                    let rows = storage!(self.service.work_batch(DeliveryWorkBatch::Control, now_ms(), "", 32));
+                    let rows = { let excluded = isolation.excluded(); storage!(self.service.work_batch_excluding(DeliveryWorkBatch::Control, now_ms(), "", 32, &excluded)) };
                     for row in &rows {
+                        if isolation.blocked(&row.delivery_id) { continue; }
                         if row.state.status == Status::Cancelling
                             || (matches!(row.state.status, Status::Dispatching | Status::Running)
                                 && row.run_deadline_at_ms.is_some_and(|t| t <= now_ms())) {
@@ -280,7 +334,7 @@ impl DeliveryRuntime {
                             }
                         }
                         if row.state.status == Status::PendingContext && row.expire_at_ms.is_some_and(|t| t <= now_ms()) {
-                            storage!(self.transition(event(row, Event::QueueExpired)));
+                            row_transition!(event(row, Event::QueueExpired));
                         } else if matches!(row.state.status, Status::Dispatching | Status::Running)
                             && row.run_deadline_at_ms.is_some_and(|t| t <= now_ms()) {
                             let mut command = event(row, Event::CancelRequested);
@@ -292,7 +346,7 @@ impl DeliveryRuntime {
                                     "task_timeout": true,
                                 }));
                             }
-                            storage!(self.transition(command.clone()));
+                            row_transition!(command.clone());
                         } else if row.state.status == Status::Unknown
                             && row.run_deadline_at_ms.is_some_and(|t| t <= now_ms())
                             && row.semantic_projection_json.get("caller_required").is_some()
@@ -313,26 +367,30 @@ impl DeliveryRuntime {
                                 run_deadline_at_ms = ?row.run_deadline_at_ms,
                                 "uncertain caller delivery passed its run deadline; converting to a cancel intent"
                             );
-                            storage!(self.transition(command.clone()));
+                            row_transition!(command.clone());
                         } else if row.state.status == Status::Cancelling && !aborting.contains(&row.delivery_id) {
                             if row.cancel_deadline_at_ms.is_some_and(|t| t <= now_ms()) {
-                                storage!(self.transition(event(row, Event::AbortUnconfirmed)));
+                                row_transition!(event(row, Event::AbortUnconfirmed));
                             } else if row.abort_request_id.is_none() && abort_work.len() < self.config.max_abort_tasks {
                                 let mut cmd = match tokio::time::timeout(self.config.io_timeout, self.preparation.prepare_abort(row)).await {
                                     Ok(Ok(cmd)) => cmd,
                                     Ok(Err(error)) => {
                                         tracing::warn!(delivery_id=%row.delivery_id, error_kind=error.as_ref(), reason=abort_reason(&error), "delivery abort preparation failed");
-                                        storage!(self.transition(event(row, Event::AbortUnconfirmed))); continue;
+                                        row_transition!(event(row, Event::AbortUnconfirmed)); continue;
                                     }
                                     Err(_) => {
                                         tracing::warn!(delivery_id=%row.delivery_id, "delivery abort preparation timed out");
-                                        storage!(self.transition(event(row, Event::AbortUnconfirmed))); continue;
+                                        row_transition!(event(row, Event::AbortUnconfirmed)); continue;
                                     }
                                 };
                                 let mut start = event(row, Event::StartAbort);
                                 start.deadline_at_ms = Some(now_ms().saturating_add(self.config.cancel_timeout.as_millis() as i64));
-                                let Some(started) = storage!(self.transition(start.clone())) else { continue; };
-                                cmd.command_id = started.abort_request_id.clone().ok_or(ManagedDeliveryError::Conflict)?;
+                                let Some(started) = row_transition!(start.clone()) else { continue; };
+                                let Some(abort_request_id) = started.abort_request_id.clone() else {
+                                    tracing::error!(delivery_id = %started.delivery_id, "abort start committed without an abort request id");
+                                    continue;
+                                };
+                                cmd.command_id = abort_request_id;
                                 aborting.insert(row.delivery_id.clone());
                                 let io = self.transport.clone();
                                 let timeout = self.config.cancel_timeout;
@@ -346,12 +404,13 @@ impl DeliveryRuntime {
                                     .and_then(|value| value.as_str()).map(str::to_owned))
                                     .or_else(|| started.run_id.clone());
                                 abort_work.spawn(async move {
-                                    let result = tokio::time::timeout(timeout, async {
+                                    // A panic counts as an unconfirmed abort (None).
+                                    let result = futures::FutureExt::catch_unwind(std::panic::AssertUnwindSafe(tokio::time::timeout(timeout, async {
                                         match connection_id {
                                             Some(id) => io.abort_on_connection(cmd, &id).await,
                                             None => io.abort(cmd).await,
                                         }
-                                    }).await.ok();
+                                    }))).await.ok().and_then(Result::ok);
                                     (started.delivery_id, abort_request_id, downstream_run_id, result)
                                 });
                             }
@@ -398,6 +457,9 @@ impl DeliveryRuntime {
                         let mut entries = storage!(self.service.queued_heads(&bot, after, 8));
                         if entries.is_empty() && !after.is_empty() { entries = storage!(self.service.queued_heads(&bot, "", 8)); }
                         if let Some(last) = entries.last() { cursors.insert(bot.clone(), last.session_id.clone()); }
+                        // An isolated head must not keep winning selection
+                        // (e.g. as an Expire action) over healthy sessions.
+                        entries.retain(|entry| !isolation.blocked(&entry.delivery_id));
                         if entries.is_empty() { continue; }
                         let rate_ready = epoch.elapsed().as_millis() as u64 >= last_send.get(&bot).copied().unwrap_or(0).saturating_add(policy.min_send_interval_ms);
                         let transport_ready = !paused && active < policy.max_running && rate_ready;
@@ -437,24 +499,25 @@ impl DeliveryRuntime {
                                 .collect();
                             storage!(self.service.update_wait_reasons(waiting.clone(), now_ms()));
                             for delivery_id in offline_ids {
-                                let Some(row) = storage!(self.get(&delivery_id)) else { continue; };
+                                let Some(row) = row_get!(&delivery_id) else { continue; };
                                 tracing::warn!(
                                     delivery_id = %row.delivery_id,
                                     bot_id = %row.target_bot_id,
                                     startup_recovery_grace_ms = self.config.startup_recovery_grace.as_millis() as u64,
                                     "delivery target remained offline after startup recovery grace; marking failed"
                                 );
-                                storage!(self.transition(event(&row, Event::PreparationFailed)));
+                                row_transition!(event(&row, Event::PreparationFailed));
                             }
                             continue;
                         }
                         storage!(self.service.update_wait_reasons(selected.waiting.clone(), now_ms()));
                         match selected.action {
                             Some(DeliveryScheduleAction::Expire { delivery_id, .. }) => {
-                                if let Some(row) = storage!(self.get(&delivery_id)) { storage!(self.transition(event(&row, Event::QueueExpired))); }
+                                if let Some(row) = row_get!(&delivery_id) { row_transition!(event(&row, Event::QueueExpired)); }
                             }
                             Some(DeliveryScheduleAction::Prepare { delivery_id, .. }) => {
-                                let row = storage!(self.get(&delivery_id)).ok_or(ManagedDeliveryError::NotFound)?;
+                                if isolation.blocked(&delivery_id) { continue; }
+                                let Some(row) = row_get!(&delivery_id) else { continue; };
                                 // Caller anti-downgrade guard (spec §7.5.1): the
                                 // key's presence alone decides for the ordinary
                                 // path — anomalous false/null reject too. With
@@ -509,10 +572,12 @@ impl DeliveryRuntime {
                                         // whole task stays with the cancel handle
                                         // (run-deadline arbiter / AbortUnconfirmed),
                                         // the same model the ordinary path uses.
-                                        let _result = futures::future::Abortable::new(
-                                            runtime.attempt_caller_protected_dispatch(&row),
-                                            registration,
-                                        ).await;
+                                        let _result = futures::FutureExt::catch_unwind(std::panic::AssertUnwindSafe(
+                                            futures::future::Abortable::new(
+                                                runtime.attempt_caller_protected_dispatch(&row),
+                                                registration,
+                                            ),
+                                        )).await;
                                         WorkResult::CallerFinished(delivery_id)
                                     });
                                     continue;
@@ -521,8 +586,12 @@ impl DeliveryRuntime {
                                 let preparation = self.preparation.clone();
                                 let timeout = self.config.io_timeout;
                                 work.spawn(async move {
-                                    let result = tokio::time::timeout(timeout, preparation.prepare(&row)).await
-                                        .unwrap_or_else(|_| Err(bcs_service_api::ServiceError::InternalError("delivery preparation timed out".into())));
+                                    let result = match futures::FutureExt::catch_unwind(std::panic::AssertUnwindSafe(
+                                        tokio::time::timeout(timeout, preparation.prepare(&row)))).await {
+                                        Ok(Ok(result)) => result,
+                                        Ok(Err(_)) => Err(bcs_service_api::ServiceError::InternalError("delivery preparation timed out".into())),
+                                        Err(_) => Err(bcs_service_api::ServiceError::InternalError("delivery preparation panicked".into())),
+                                    };
                                     WorkResult::Prepared(row, result)
                                 });
                             }
@@ -532,7 +601,9 @@ impl DeliveryRuntime {
                     self.service.observe_operation("tick", tick_started.elapsed().as_secs_f64(), work.len(), true);
                 }
                 Some(result) = work.join_next(), if !work.is_empty() => {
-                    let result = result.map_err(|_| ManagedDeliveryError::Conflict)?;
+                    // Tasks catch their own panics; a join error is only a
+                    // cancellation and carries nothing to settle.
+                    let Ok(result) = result else { continue; };
                     match result {
                         WorkResult::CallerFinished(id) => {
                             preparing.remove(&id);
@@ -540,12 +611,12 @@ impl DeliveryRuntime {
                         }
                         WorkResult::Prepared(prepared_row, result) => {
                             preparing.remove(&prepared_row.delivery_id);
-                            let Some(current) = storage!(self.get(&prepared_row.delivery_id)) else { continue; };
+                            let Some(current) = row_get!(&prepared_row.delivery_id) else { continue; };
                             let row = &current;
                             if row.state.state_version != prepared_row.state.state_version || row.state.status != Status::Queued { continue; }
                             let mut prepared = match result {
                                 Ok(prepared) => prepared,
-                                Err(_) => { storage!(self.transition(event(row, Event::PreparationFailed))); continue; }
+                                Err(_) => { row_transition!(event(row, Event::PreparationFailed)); continue; }
                             };
                             let bot = &row.target_bot_id;
                             let (policies, paused, retries, policy_version) = self.policies(&[bot.clone()]).await;
@@ -572,7 +643,7 @@ impl DeliveryRuntime {
                                 }
                             };
                             if matches!(selected.action, Some(DeliveryScheduleAction::Expire { .. })) {
-                                storage!(self.transition(event(row, Event::QueueExpired)));
+                                row_transition!(event(row, Event::QueueExpired));
                                 continue;
                             }
                             if selected.action.is_none()
@@ -586,21 +657,32 @@ impl DeliveryRuntime {
                                     startup_recovery_grace_ms = self.config.startup_recovery_grace.as_millis() as u64,
                                     "prepared delivery target disconnected after startup recovery grace; marking failed"
                                 );
-                                storage!(self.transition(event(row, Event::PreparationFailed)));
+                                row_transition!(event(row, Event::PreparationFailed));
                                 continue;
                             }
                             if !matches!(selected.action, Some(DeliveryScheduleAction::Prepare { ref delivery_id, .. }) if delivery_id == &row.delivery_id) { continue; }
                             if !tokio::time::timeout(self.config.io_timeout, self.preparation.still_valid(&prepared)).await.unwrap_or(false) { continue; }
                             if prepared.command.target_bot_id() != bot || prepared.command.run_id.as_str() != row.run_id.as_deref().unwrap_or("")
                                 || prepared.transport_context_json.get("provider_route_headers").cloned().unwrap_or_else(|| serde_json::json!([]))
-                                    != serde_json::json!(prepared.command.provider_bypass_headers) { return Err(ManagedDeliveryError::Conflict); }
+                                    != serde_json::json!(prepared.command.provider_bypass_headers) {
+                                tracing::error!(delivery_id = %row.delivery_id, "prepared delivery does not match its row; isolating");
+                                isolation.isolate(&row.delivery_id);
+                                continue;
+                            }
                             let mut command = event(row, Event::StartSend);
                             if let Some(version) = policy_version { prepared.transport_context_json["policy_version"] = serde_json::json!(version); }
                             command.transport_context_json = Some(prepared.transport_context_json);
                             command.deadline_at_ms = Some(if row.flow_kind == bcs_domain::message_delivery::DeliveryFlowKind::DirectA2a {
-                                row.semantic_projection_json.get("expires_at_ms").and_then(|v| v.as_i64()).ok_or(ManagedDeliveryError::Conflict)?
+                                match row.semantic_projection_json.get("expires_at_ms").and_then(|v| v.as_i64()) {
+                                    Some(expires_at_ms) => expires_at_ms,
+                                    None => {
+                                        tracing::error!(delivery_id = %row.delivery_id, "direct A2A row has no expiry; isolating");
+                                        isolation.isolate(&row.delivery_id);
+                                        continue;
+                                    }
+                                }
                             } else { command.now_ms.saturating_add(run_timeout_for(row, self.config.run_timeout).as_millis() as i64) });
-                            let Some(started) = storage!(self.transition(command.clone())) else { continue; };
+                            let Some(started) = row_transition!(command.clone()) else { continue; };
                             // §7.2.1 delegation-only lineage (review batch-3
                             // §3.1): an ORDINARY Started row carrying the
                             // trusted `caller_lineage` marker is an Owner
@@ -626,21 +708,29 @@ impl DeliveryRuntime {
                                     }
                                 }
                             }
-                            let request_id = started.request_id.clone().ok_or(ManagedDeliveryError::Conflict)?;
+                            // Nothing was sent yet; the run deadline settles the
+                            // started row if its shape is unusable.
+                            let Some(request_id) = started.request_id.clone() else {
+                                tracing::error!(delivery_id = %started.delivery_id, "started delivery has no request id");
+                                continue;
+                            };
                             match &mut prepared.command.frame {
                                 BcsFrame::Request(frame) if frame.method == "chat.send" => frame.id = request_id.clone(),
-                                _ => return Err(ManagedDeliveryError::Conflict),
+                                _ => {
+                                    tracing::error!(delivery_id = %started.delivery_id, "prepared delivery is not a chat.send request");
+                                    continue;
+                                }
                             }
                             last_send.insert(bot.clone(), epoch.elapsed().as_millis() as u64);
                             cursors.insert(bot.clone(), row.session_id.clone());
                             // All subsequent failures are conservative possible sends.
                             // Registration failure is provably before transport I/O.
                             if !matches!(tokio::time::timeout(self.config.io_timeout, self.preparation.before_send(&started, &prepared.command)).await, Ok(Ok(()))) {
-                                let Some(current) = storage!(self.get(&started.delivery_id)) else { continue; };
+                                let Some(current) = evidence_get!(&started.delivery_id) else { continue; };
                                 let retry = current.attempt_no <= retries;
                                 let mut failed = event(&current, Event::DefinitelyNotSent { retry });
                                 failed.request_id = Some(request_id);
-                                storage!(self.transition(failed.clone()));
+                                evidence_transition!(failed.clone());
                                 continue;
                             }
                             let io = self.transport.clone();
@@ -648,17 +738,18 @@ impl DeliveryRuntime {
                             let connection_id = started.transport_context_json.as_ref()
                                 .and_then(|v| v.get("connection_id")).and_then(|v| v.as_str()).map(str::to_owned);
                             work.spawn(async move {
-                                let result = tokio::time::timeout(timeout, async {
+                                // A panic is an unknown outcome (None): never resent.
+                                let result = futures::FutureExt::catch_unwind(std::panic::AssertUnwindSafe(tokio::time::timeout(timeout, async {
                                     match connection_id {
                                         Some(id) => io.deliver_on_connection(prepared.command, &id).await,
                                         None => io.deliver(prepared.command).await,
                                     }
-                                }).await.ok();
+                                }))).await.ok().and_then(Result::ok);
                                 WorkResult::Sent(started.delivery_id, request_id, result)
                             });
                         }
                         WorkResult::Sent(id, request_id, result) => {
-                            if let Some(row) = storage!(self.get(&id)) {
+                            if let Some(row) = evidence_get!(&id) {
                                 // Submission is not ACK. A delivered=true result keeps
                                 // dispatching until a trusted Bot event proves receipt.
                                 {
@@ -690,19 +781,19 @@ impl DeliveryRuntime {
                                     };
                                     let mut command = event(&row, next);
                                     command.request_id = Some(request_id);
-                                    storage!(self.transition(command.clone()));
+                                    evidence_transition!(command.clone());
                                 }
                             }
                         }
                     }
                 }
                 Some(result) = abort_work.join_next(), if !abort_work.is_empty() => {
-                    let (id, abort_request_id, downstream_run_id, result) = result.map_err(|_| ManagedDeliveryError::Conflict)?;
+                    let Ok((id, abort_request_id, downstream_run_id, result)) = result else { continue; };
                     aborting.remove(&id);
                     if let Some(Err(error)) = &result {
                         tracing::warn!(delivery_id=%id, error_kind=error.as_ref(), reason=abort_reason(error), "delivery abort transport failed");
                     }
-                    if let Some(row) = storage!(self.get(&id)) {
+                    if let Some(row) = evidence_get!(&id) {
                         if row.abort_request_id.as_ref() != Some(&abort_request_id) { continue; }
                         let acknowledged = matches!(result, Some(Ok(ref r)) if r.target_bot_id == row.target_bot_id
                             && downstream_run_id.as_ref().is_some_and(|id| r.aborted_run_ids.len() == 1 && r.aborted_run_ids.contains(id)));
@@ -710,7 +801,7 @@ impl DeliveryRuntime {
                         if matches!(result, Some(Err(bcs_service_api::ServiceError::BotMethodUnsupported { .. } | bcs_service_api::ServiceError::InvalidOperation { .. }))) {
                             command.transport_context_json = Some(serde_json::json!({"task_cancel_rejected":true}));
                         }
-                        storage!(self.transition(command.clone()));
+                        evidence_transition!(command.clone());
                     }
                 }
             }
@@ -727,6 +818,8 @@ impl DeliveryRuntime {
 }
 
 mod caller_delegate;
+
+mod row_isolation;
 
 mod caller_dispatch;
 

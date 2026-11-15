@@ -7,10 +7,10 @@ FakeLLMProvider 测试
 import pytest
 import time
 
-from src.infra.llm.providers.fake_provider import FakeLLMProvider
-from src.domain.models.llm_request import LLMRequest
-from src.domain.models.llm_response import LLMResponse, FinishReason
-from src.domain.models.llm_task_spec import LLMTaskSpec, TaskType
+from app.infra.llm.providers.fake_provider import FakeLLMProvider
+from app.domain.models.llm_request import LLMRequest
+from app.domain.models.llm_response import LLMResponse, FinishReason
+from app.domain.models.llm_task_spec import LLMTaskSpec, TaskType
 
 
 class TestFakeLLMProvider:

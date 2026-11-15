@@ -6,12 +6,12 @@ from unittest.mock import AsyncMock, MagicMock, call
 
 import pytest
 
-from src.application.services.peer_review_service import PeerReviewService
-from src.domain.models.candidate_recommendation import (
+from app.application.services.peer_review_service import PeerReviewService
+from app.domain.models.candidate_recommendation import (
     CandidateRecommendation,
     CandidateRecommendationResponse,
 )
-from src.domain.models.verify_dto import (
+from app.domain.models.verify_dto import (
     CapabilityProbes,
     DimensionJudgment,
     DimensionProbe,
@@ -21,7 +21,7 @@ from src.domain.models.verify_dto import (
     PeerReviewer,
     VerifyData,
 )
-from src.domain.models.worker import (
+from app.domain.models.worker import (
     Availability,
     Capability,
     CapabilityLevel,
@@ -37,7 +37,7 @@ from src.domain.models.worker import (
 @pytest.fixture(autouse=True)
 def isolate_verify_debug_output(monkeypatch, tmp_path):
     monkeypatch.setattr(
-        "src.application.services.capability_verify_service._DEFAULT_DEBUG_OUTPUT_DIR",
+        "app.application.services.capability_verify_service._DEFAULT_DEBUG_OUTPUT_DIR",
         str(tmp_path),
     )
 
@@ -539,7 +539,7 @@ class TestCapabilityVerifyServiceWithPeerReview:
     @pytest.mark.asyncio
     async def test_peer_review_integrated_in_verify(self) -> None:
         """当 peer review service 存在时，_verify 应先尝试 peer review。"""
-        from src.application.services.capability_verify_service import CapabilityVerifyService
+        from app.application.services.capability_verify_service import CapabilityVerifyService
 
         mock_prompt_composer = AsyncMock()
         mock_prompt_composer.compose.return_value = [
@@ -605,7 +605,7 @@ class TestCapabilityVerifyServiceWithPeerReview:
             peer_review_service=mock_peer_service,
         )
 
-        from src.domain.events.worker_profile_created_event import WorkerProfileCreatedEvent
+        from app.domain.events.worker_profile_created_event import WorkerProfileCreatedEvent
         event = WorkerProfileCreatedEvent(worker_id="wrk_test")
         await service._verify(event)
 
@@ -619,7 +619,7 @@ class TestCapabilityVerifyServiceWithPeerReview:
     @pytest.mark.asyncio
     async def test_fallback_when_no_peer_reviewers(self) -> None:
         """当没有 peer reviewer 时，应回退到现有 LLM judge 流程。"""
-        from src.application.services.capability_verify_service import CapabilityVerifyService
+        from app.application.services.capability_verify_service import CapabilityVerifyService
 
         mock_prompt_composer = AsyncMock()
         mock_prompt_composer.compose.return_value = [
@@ -668,7 +668,7 @@ class TestCapabilityVerifyServiceWithPeerReview:
             peer_review_service=mock_peer_service,
         )
 
-        from src.domain.events.worker_profile_created_event import WorkerProfileCreatedEvent
+        from app.domain.events.worker_profile_created_event import WorkerProfileCreatedEvent
         event = WorkerProfileCreatedEvent(worker_id="wrk_test")
         await service._verify(event)
 

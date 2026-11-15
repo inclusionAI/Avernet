@@ -1,0 +1,85 @@
+# Minimal controlled-rollout contract for cct-drill-evaluation.
+# This file is a migration fixture: publish it through ClawWeb after wiring
+# the real pack scripts and replacing the node ids with the deployed parent spec.
+
+childWorkflow:
+  id: cct-emulation-item
+  title: CCT single-item emulation
+  version: 1
+  nodes:
+    - id: prepare
+      title: Prepare CCT item
+      phase: P1
+      dependsOn: []
+      executor:
+        type: cli-script
+        command: python3 prepare_emulation.py
+        workdir: scripts
+        outputMode: json
+        timeoutSeconds: 180
+        args:
+          scene-code: "{{input.params.scene_code}}"
+          partition: "{{input.params.partition}}"
+          count: "{{input.params.count}}"
+          qps: "{{input.params.qps}}"
+    - id: run-emulation
+      title: Run CCT emulation
+      phase: P2
+      dependsOn: [prepare]
+      executor:
+        type: cli-script
+        command: python3 run_emulation_node.py
+        workdir: scripts
+        outputMode: json
+        timeoutSeconds: 4000
+        args:
+          state-dir: "{{nodeOutput.prepare.stateDir}}"
+          scene-code: "{{nodeOutput.prepare.sceneCode}}"
+          scenes-file: "{{nodeOutput.prepare.scenesFile}}"
+          trace-run-id: "{{input.params.trace_run_id}}"
+    - id: summarize
+      title: Summarize CCT emulation
+      phase: P3
+      dependsOn: [run-emulation]
+      executor:
+        type: cli-script
+        command: python3 summarize_emulation.py
+        workdir: scripts
+        outputMode: json
+        timeoutSeconds: 60
+        args:
+          scene-code: "{{input.params.scene_code}}"
+          summary-file: "{{nodeOutput.run-emulation.summaryFile}}"
+          trace-run-id: "{{input.params.trace_run_id}}"
+  outputs:
+    result:
+      from: "{{nodeOutput.summarize}}"
+      public: true
+
+parentNode:
+  id: run-experiments
+  executor:
+    type: subworkflow
+    workflowId: cct-emulation-item
+    params:
+      scene_code: "{{item.scene_code}}"
+      partition: "{{item.partition}}"
+      count: "{{item.count}}"
+      qps: "{{item.qps}}"
+      trace_run_id: "{{params.trace_run_id}}"
+    fanout:
+      schemaVersion: fanout.v1
+      items: "{{nodeOutput.build-experiment-partitions.experimentPlan}}"
+      itemIdFrom: [scene_code, partition]
+      concurrency: 1
+      successPolicy: all_done
+      finishMode: wait_all
+      resultPolicy: collect_all
+      groupTimeoutSeconds: 7200
+
+parentSummaryContract:
+  source: "nodeOutput.run-experiments"
+  outcomes: [all_success, partial_failure, all_failed, incomplete]
+  notificationOwner: parent
+  childNotification: disabled
+  itemRetry: disabled

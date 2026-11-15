@@ -75,6 +75,7 @@ async fn persistent_control_plane_search_covers_search_text_friendship_and_tc_fi
             acting_bot_id: "acting-persistent-search".to_string(),
             env: "dev".to_string(),
             visibility: BotCandidateVisibility::Discovery,
+            viewer_kind: Some(ActorKind::Bot),
             friend_ids: HashSet::from(["friend-persistent".to_string()]),
             bot_uuids: None,
             name: Some(" needle ".to_string()),
@@ -84,6 +85,7 @@ async fn persistent_control_plane_search_covers_search_text_friendship_and_tc_fi
             status: None,
             friendship: Some(BotSearchFriendshipFilter::All),
             tc_bot: None,
+            name_only: false,
             offset: 0,
             limit: 20,
         })
@@ -97,6 +99,7 @@ async fn persistent_control_plane_search_covers_search_text_friendship_and_tc_fi
             acting_bot_id: "acting-persistent-search".to_string(),
             env: "dev".to_string(),
             visibility: BotCandidateVisibility::Discovery,
+            viewer_kind: Some(ActorKind::Bot),
             friend_ids: HashSet::new(),
             bot_uuids: Some(vec![
                 "search-match-persistent".to_string(),
@@ -109,6 +112,7 @@ async fn persistent_control_plane_search_covers_search_text_friendship_and_tc_fi
             status: None,
             friendship: None,
             tc_bot: None,
+            name_only: false,
             offset: 0,
             limit: 20,
         })
@@ -122,6 +126,7 @@ async fn persistent_control_plane_search_covers_search_text_friendship_and_tc_fi
             acting_bot_id: "acting-persistent-search".to_string(),
             env: "dev".to_string(),
             visibility: BotCandidateVisibility::Discovery,
+            viewer_kind: Some(ActorKind::Bot),
             friend_ids: HashSet::new(),
             bot_uuids: None,
             name: None,
@@ -131,6 +136,7 @@ async fn persistent_control_plane_search_covers_search_text_friendship_and_tc_fi
             status: None,
             friendship: None,
             tc_bot: None,
+            name_only: false,
             offset: 0,
             limit: 20,
         })
@@ -144,6 +150,7 @@ async fn persistent_control_plane_search_covers_search_text_friendship_and_tc_fi
             acting_bot_id: "acting-persistent-search".to_string(),
             env: "dev".to_string(),
             visibility: BotCandidateVisibility::Discovery,
+            viewer_kind: Some(ActorKind::Bot),
             friend_ids: HashSet::new(),
             bot_uuids: None,
             name: None,
@@ -153,6 +160,7 @@ async fn persistent_control_plane_search_covers_search_text_friendship_and_tc_fi
             status: None,
             friendship: None,
             tc_bot: None,
+            name_only: false,
             offset: 0,
             limit: 20,
         })
@@ -166,6 +174,7 @@ async fn persistent_control_plane_search_covers_search_text_friendship_and_tc_fi
             acting_bot_id: "acting-persistent-search".to_string(),
             env: "dev".to_string(),
             visibility: BotCandidateVisibility::Discovery,
+            viewer_kind: Some(ActorKind::Bot),
             friend_ids: HashSet::new(),
             bot_uuids: None,
             name: None,
@@ -175,6 +184,7 @@ async fn persistent_control_plane_search_covers_search_text_friendship_and_tc_fi
             status: None,
             friendship: Some(BotSearchFriendshipFilter::Friends),
             tc_bot: None,
+            name_only: false,
             offset: 0,
             limit: 20,
         })
@@ -188,6 +198,7 @@ async fn persistent_control_plane_search_covers_search_text_friendship_and_tc_fi
             acting_bot_id: "acting-persistent-search".to_string(),
             env: "dev".to_string(),
             visibility: BotCandidateVisibility::Discovery,
+            viewer_kind: Some(ActorKind::Bot),
             friend_ids: HashSet::from(["friend-persistent".to_string()]),
             bot_uuids: None,
             name: None,
@@ -197,6 +208,7 @@ async fn persistent_control_plane_search_covers_search_text_friendship_and_tc_fi
             status: None,
             friendship: Some(BotSearchFriendshipFilter::Friends),
             tc_bot: None,
+            name_only: false,
             offset: 0,
             limit: 20,
         })
@@ -211,6 +223,7 @@ async fn persistent_control_plane_search_covers_search_text_friendship_and_tc_fi
             acting_bot_id: "acting-persistent-search".to_string(),
             env: "dev".to_string(),
             visibility: BotCandidateVisibility::Discovery,
+            viewer_kind: Some(ActorKind::Bot),
             friend_ids: HashSet::from(["friend-persistent".to_string()]),
             bot_uuids: None,
             name: None,
@@ -220,6 +233,7 @@ async fn persistent_control_plane_search_covers_search_text_friendship_and_tc_fi
             status: None,
             friendship: Some(BotSearchFriendshipFilter::NonFriends),
             tc_bot: None,
+            name_only: false,
             offset: 0,
             limit: 20,
         })
@@ -233,6 +247,7 @@ async fn persistent_control_plane_search_covers_search_text_friendship_and_tc_fi
             acting_bot_id: "acting-persistent-search".to_string(),
             env: "dev".to_string(),
             visibility: BotCandidateVisibility::Discovery,
+            viewer_kind: Some(ActorKind::Bot),
             friend_ids: HashSet::new(),
             bot_uuids: None,
             name: None,
@@ -242,6 +257,7 @@ async fn persistent_control_plane_search_covers_search_text_friendship_and_tc_fi
             status: None,
             friendship: None,
             tc_bot: Some(true),
+            name_only: false,
             offset: 0,
             limit: 20,
         })
@@ -255,6 +271,7 @@ async fn persistent_control_plane_search_covers_search_text_friendship_and_tc_fi
             acting_bot_id: "acting-persistent-search".to_string(),
             env: "dev".to_string(),
             visibility: BotCandidateVisibility::Discovery,
+            viewer_kind: Some(ActorKind::Bot),
             friend_ids: HashSet::new(),
             bot_uuids: None,
             name: None,
@@ -264,6 +281,7 @@ async fn persistent_control_plane_search_covers_search_text_friendship_and_tc_fi
             status: None,
             friendship: None,
             tc_bot: Some(false),
+            name_only: false,
             offset: 0,
             limit: 20,
         })

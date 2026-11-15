@@ -20,6 +20,8 @@ export interface ChatPanelProps {
   messages: ChatMessage[];
   isRequesting: boolean;
   isLoadingMessages: boolean;
+  /** HTTP 历史独立完成，不用聊天连接状态阻塞阅读。 */
+  historyReady?: boolean;
   connectionStatus: ProviderConnectionStatus;
   retryCount: number;
   supportState: SupportChatState;

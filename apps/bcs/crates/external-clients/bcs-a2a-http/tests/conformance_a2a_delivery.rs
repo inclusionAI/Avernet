@@ -504,3 +504,6 @@ async fn empty_successful_subscriptions_do_not_reset_consecutive_failure_budget(
     assert_eq!(f.runs.get("empty-recoveries").await.unwrap().unwrap().state,A2aRunState::Canceled);
     assert_eq!(f.ingest.events.lock().unwrap().iter().filter(|e|e.state==ChatEventState::Error).count(),1);
 }
+
+#[path="support/custom_binding.rs"]
+mod custom_binding;

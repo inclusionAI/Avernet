@@ -1,7 +1,7 @@
 from unittest.mock import MagicMock
 
-from src.domain.services.profile_embedding_indexer import ProfileEmbeddingIndexer
-from src.infra.config.feature_flags import FeatureFlags
+from app.domain.services.profile_embedding_indexer import ProfileEmbeddingIndexer
+from app.infra.config.feature_flags import FeatureFlags
 
 
 def test_delete_by_profile_uses_profile_store_delete_contract():

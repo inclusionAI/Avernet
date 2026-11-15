@@ -345,7 +345,15 @@ class RemoteKnowledgeCatalog:
         return tuple(ids)
 
     def set_grant(
-        self, *, kb_id, actor_id, bot_id, owner_id, granted, expected_revision
+        self,
+        *,
+        kb_id,
+        actor_id,
+        bot_id,
+        owner_id,
+        granted,
+        expected_revision,
+        bot_name="",
     ):
         return self.remote.call(
             "PUT",
@@ -353,6 +361,7 @@ class RemoteKnowledgeCatalog:
             body={
                 "actor_staff_no": self.identities.staff_no(actor_id),
                 "user_id": self.identities.staff_no(owner_id),
+                "bot_name": bot_name,
                 "granted": granted,
                 "expected_revision": expected_revision,
             },

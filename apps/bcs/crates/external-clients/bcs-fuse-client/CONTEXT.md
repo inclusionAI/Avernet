@@ -2,9 +2,16 @@
 
 ## Provides
 
+- Transport-only Fuse v2 Card PUT/DELETE and search contracts.
+
 - Pure HTTP wrapper for the remote BCSFuse service.
 - Request/response DTOs for worker sync, worker recommendation, batch lookup, and fusion APIs.
 - `FuseClientError` for transport and response parsing failures.
+- Typed `RecommendWorkerFilters` on `RecommendWorkersRequest`. The only
+  expressible recall filter is the controlled `availability` string list; raw
+  provider JSON never enters the client contract. `filters: None` omits the
+  field entirely so legacy request bodies stay byte-compatible, while an
+  authorized recall sends `availability: [public, protected, private]`.
 
 ## Consumes
 

@@ -25,6 +25,7 @@ const pendingRequests = new Map<
     resolve: (value: any) => void;
     reject: (reason: any) => void;
     timer: ReturnType<typeof setTimeout>;
+    config: any;
   }
 >();
 
@@ -51,13 +52,41 @@ function ensureListener(): void {
 
       if (type === 'api-response') {
         const { status, statusText, data, headers } = msg;
-        pending.resolve({
+        const response = {
           data,
           status,
           statusText: statusText || '',
           headers: headers || {},
           config: {},
-        });
+        };
+        const validateStatus =
+          pending.config.validateStatus === undefined
+            ? (value: number) => value >= 200 && value < 300
+            : pending.config.validateStatus;
+        const path = String(pending.config.url || '').split('?')[0];
+        const isMkdir = path.endsWith('/api/resources/files/mkdir');
+        const isLogin =
+          data?.buserviceErrorCode === 'USER_NOT_LOGIN' ||
+          data?.actionType === 'LOGIN';
+        // Other endpoints and login responses keep their existing interceptor path.
+        if (
+          !isMkdir ||
+          isLogin ||
+          (status && (!validateStatus || validateStatus(status)))
+        ) {
+          pending.resolve(response);
+        } else {
+          pending.reject(
+            Object.assign(
+              new Error(`Request failed with status code ${status}`),
+              {
+                config: pending.config,
+                response: { ...response, config: pending.config },
+                isAxiosError: true,
+              },
+            ),
+          );
+        }
       } else {
         pending.reject(new Error(msg.message || '请求失败'));
       }
@@ -81,7 +110,7 @@ export function vscodeRequestAdapter(config: any): Promise<any> {
       reject(new Error(`[VSCode] 请求超时: ${config.url}`));
     }, REQUEST_TIMEOUT);
 
-    pendingRequests.set(requestId, { resolve, reject, timer });
+    pendingRequests.set(requestId, { resolve, reject, timer, config });
 
     postMessageToVSCode({
       source: 'web',

@@ -651,121 +651,80 @@ max_keep_days = 7
 当前文件为 message-delivery.log，每日通过既有日志轮转机制改名
 message-delivery.log.YYYY-MM-DD；同名已存在时追加唯一后缀避免覆盖。
 保留清理复用现有每小时 cleanup，max_keep_days=0 不清理。不要给其他 output 配置同一文件名。
-后台立即采一次，此后每 10 秒 SQL 聚合，超时 5 秒。采集失败仍输出最后成功快照，
-第 14 列为 0、第 15 列不推进；首次失败第 15 列为 0，零数值不能解读为已确认空队列。
-成功空结果明确归零（含此前存在的深度分组）；失败时最老等待时长也是旧采样值，不继续外推。
-没有消息/Bot/session ID、正文、URL、token、Provider binding key 或 header。
-每个文件属于该进程配置的环境，监控采集端必须附加部署环境和实例标签，不能将不同环境文件混算。
+后台立即采一次，此后每 10 秒执行一次现有 SQL 聚合，超时 5 秒。
+每次采样只写一行 CSV，包含所有指标，空闲时也输出。没有消息/Bot/session ID、正文、
+URL、token、Provider key 或 header。采集端附加部署环境和实例标签，不同环境不得混算。
 
-### 固定 15 列协议 v1
+### 固定列汇总协议 v2
 
-英文逗号分隔，每行一条记录，无表头、字段名、空格前缀或 tracing 时间/level/target。
-同一次采集输出多条记录，全部 15 列；第 4～9 列共同确定序列身份。编码 0 表示不适用/
-未知（不得推断为某个已知类型）；新增编码或列需要同步更新采集配置，改变列含义必须升级版本。
+旧 v1 尚未接入监控，直接替换为 v2，不再输出按 type/code 区分的多行记录。
+英文逗号分隔，无表头、字段名前缀、空格或 tracing 时间/level/target。
+每个指标永久对应一列；第 23 列版本为 2，未来调整已有列含义时必须升级版本。
+原有 flow/status/wait_reason 分组、操作耗时、Provider cache 和 Inject 历史选择累计记录
+不再写入本文件；本文件聚焦队列流量、积压和采样健康。业务查询及普通诊断日志不变。
 
-| 列（从 1 起） | 含义 | 类型/单位 |
-| --- | --- | --- |
-| 1 | 格式版本，当前 1 | 整数 |
-| 2 | 本轮采集结束时间 | Unix 毫秒 |
-| 3 | 本次监控生命周期 boot ID，重启更换 | 32 位十六进制字符串 |
-| 4 | 记录类型 | 整数，见下 |
-| 5 | flow 编码 | 整数 |
-| 6 | kind 编码 | 1 Send，2 Inject，0 不适用 |
-| 7 | status 编码 | 整数；操作记录单独使用成功/失败编码 |
-| 8 | wait_reason 编码 | 整数 |
-| 9 | 指标/事件/操作编码 | 整数，随记录类型解释 |
-| 10 | value | gauge 或累计数量，见下 |
-| 11 | count | 累计时长样本数 |
-| 12 | sum | 累计时长总秒数 |
-| 13 | max | 本进程历史最大时长，秒 |
-| 14 | 本次 SQL 快照成功 | 0/1 |
-| 15 | 最后成功 SQL 快照时间 | Unix 毫秒；0 表示尚无成功样本 |
+| 列（从 1 起） | 字段 | 含义 | 分钟聚合 |
+| --- | --- | --- | --- |
+| 1 | timestamp_ms | 输出时间，Unix 毫秒 | 时间列 |
+| 2 | interval_ms | 本次事件计数区间长度，单调时钟毫秒 | 辅助诊断 |
+| 3 | admitted | 成功准入的 Send 投递数 | SUM |
+| 4 | started | Send 发送启动数，包含重试 | SUM |
+| 5 | completed | Send 成功完成数，成功消费量 | SUM |
+| 6 | failed | Send 失败数 | SUM |
+| 7 | cancelled | Send 取消数 | SUM |
+| 8 | expired | Send 过期数 | SUM |
+| 9 | rejected_capacity | 准入时容量拒绝的 Send 数 | SUM |
+| 10 | retried | 重试启动数，是 started 子集 | SUM |
+| 11 | queued | 当前排队的 Send 数，积压量 | MAX（分钟峰值） |
+| 12 | active | 当前活跃 Send 数 | MAX |
+| 13 | pending_context | 当前待绑定 Inject 数 | MAX |
+| 14 | bound_context | 当前已绑定 Inject 数 | MAX |
+| 15 | uncertain | 当前 unknown/cancel_unknown Send 数，active 子集 | MAX |
+| 16 | oldest_wait_seconds | 最老 queued Send 的等待秒数 | MAX |
+| 17 | scheduler_available | 调度器可用 1，不可用 0 | MIN |
+| 18 | paused | 暂停发送 1，未暂停 0 | MAX |
+| 19 | snapshot_ok | 本轮 SQL 快照成功 1，失败 0 | MIN |
+| 20 | snapshot_age_ms | 距最近成功快照毫秒数；从未成功为 -1 | MAX |
+| 21 | writer_dropped_total | 进程累计日志缓冲丢弃次数 | 增长告警 |
+| 22 | writer_errors_total | 进程累计文件写入/轮转/清理/flush 错误次数 | 增长告警 |
+| 23 | schema_version | 固定 2 | 可选版本过滤 |
 
-类型与 value 口径：
-
-- **type=0 总览**：第 5～8 列为 0；code=1 queued Send、2 active Send、
-  3 pending_context Inject、4 bound Inject、5 uncertain Send、6 最老 queued 秒数、
-  7 不确定阻塞 lane 数、8 scheduler available（0/1）、9 paused（0/1）、
-  10 policy version、11 writer 丢弃快照累计次数、12 文件写入/轮转/清理/flush 错误累计次数。
-  1～10 为 gauge，11～12 为进程 counter；第 11～13 列为 0。
-  active 包括 dispatching/running/unknown/cancelling/cancel_unknown，不等于模型正在计算。
-  单 lane 一个 active 不变量下 code=7 等于 code=5。
-- **type=1 深度分组**：code=0；value 为相应 flow/kind/status/wait_reason 当前条数；
-  第 11～13 列为 0。wait_reason 为最近一次候选检查结果，不保证批外消息实时更新。
-- **type=2 事件**：code=1 admitted、2 started、3 terminal；value 为提交成功后的事件累计数，
-  通过 flow/kind/status 区分准入成功/拒绝及终态。admitted + rejected_capacity 是拒绝，
-  不是成功接收；started 每次 send-start 都计数，包含安全重试。
-  started 的 count/sum/max 描述创建到本次发送的排队秒数；terminal 描述最近 send-start
-  到 terminal 的运行秒数；无起止时间的事件仍计入 value，但不计入时长 count。
-  admitted 没有时长样本。Inject 绑定/consumed 不属于该 hook 的 terminal 事件；
-  Inject 深度由 type=1 观察。重启恢复不会回放历史事件。
-- **type=3 操作**：flow/kind/wait_reason 为 0，第 7 列独立定义 1 成功、2 失败。
-  value 为累计返回行数/观察量，count 为调用次数，sum/max 为耗时秒数。
-  code 顺序：1 lane_blocked、2 lookup、3 queued_bots、4 active_count、5 queued_heads、
-  6 expiry_batch、7 control_batch、8 recovery_batch、9 queue_statistics、
-  10 budget_exhausted、11 tick、12 bounded_contexts。
-  active_count/lane_blocked 的 rows 为成功读取记 1，不是占用条数；tick/budget_exhausted
-  的 rows 为该次 worker 工作集合大小。budget_exhausted 的 count 表示软预算/任务槽耗尽次数。
-  queue_statistics 超时被取消时可能没有产生完成 hook，须结合第 14 列和错误日志判断。
-- **type=4 Provider cache**：第 5～8 列为 0；code=1 hit、2 negative_hit、3 miss、
-  4 error、5 invalidation、6 load；value 为进程累计次数，其余统计列为 0。
-  negative_hit 是 hit 子集，不能重复加到命中率分母。缓存累计从进程启动开始。
-- **type=5 Inject 历史选择**：第 5 列 flow，第 6 列 1 Send，第 7～8 列 0；
-  code=1 选中历史累计条数、2 拼装历史累计 UTF-8 bytes、3 舍弃历史累计条数、
-  4 发生整条省略或单条截尾的 Send 累计次数。第 11～13 列为 0。
-  仅首次 send-start 提交（attempt_no=1）计数，安全重试不重复计数；这些是发送选择量，
-  不是模型实际使用量或已完成消费量。进程重启不回放历史；准备失败/取消前未 send-start 不计。
-
-通用 flow 编码：1 group、2 direct_a2a、3 task、4 system、5 state_machine。
-通用 status 编码：1 queued、2 dispatching、3 running、4 unknown、5 cancelling、
-6 cancel_unknown、7 completed、8 failed、9 cancelled、10 expired、11 rejected_capacity、
-12 pending_context、13 bound、14 consumed、15 discarded_context。
-wait_reason 编码：0 无/未知、1 prior_message_running、2 bot_capacity、3 rate_limited、
-4 bot_offline、5 retry_backoff、6 paused。
-
-例子（实际日志只包含下面的数据行，不包含解释）：
+示例（实际日志只有这一行）：
 
 ```text
-1,1788912000000,0123456789abcdef0123456789abcdef,0,0,0,0,0,1,3,0,0,0,1,1788912000000
-1,1788912000000,0123456789abcdef0123456789abcdef,1,1,1,1,6,0,3,0,0,0,1,1788912000000
+1794261600000,10000,20,18,16,1,0,0,2,1,3,2,0,1,0,12.5,1,0,1,0,0,0,2
 ```
 
-第一行表示 queued Send 总量为 3；第二行表示 group/Send/queued/paused 分组为 3。
+表示过去约 10 秒成功准入 20 次、发送启动 18 次（其中重试 1 次）、成功完成 16 次、
+失败 1 次、容量拒绝 2 次；当前排队 3 条、活跃 2 条，最老等待 12.5 秒。
 
-### 采集与调参
+### 计数口径与采集
 
-同一 boot ID、同一序列的累计 value 差值 / 采样时间差可算发送/完成/拒绝/过期速率；
-时长平均值为 sum 差值 / count 差值（分母 0 时无样本）。
-这些是累计 sum/count/max，**不是直方图，不能计算 P95/P99**；max 是启动以来峰值，
-不能用相邻 max 差值当区间最大值。新 boot ID 重置 counter，第一条只建立基线。
-boot ID 与进程内累计计数对象共同初始化；同一进程退为 follower 后重新成为 master，
-采样器复用原 boot ID 和计数，不把一次主从切换误报为计数重置。
-type=2/3 某个组合第一次事件前不输出，首次出现的累计值从本 boot 的 0 起算。
-第 14～15 列只描述 SQL 快照；策略/worker/cache 数据仍为本轮读取的数据。
+第 3～10 列是自上次输出以来、事务提交成功后的事件增量。每轮取出后归零，空闲为 0。
+监控平台直接按分钟 SUM，不对其再次求差，也不除以采样次数。
+消费分为发送启动（第 4 列）和成功完成（第 5 列），不能将失败/取消/过期当成成功。
+计数单位是对一个目标的 delivery，多目标投递计多次，不是去重后的原始消息数。
+Send 流量不含 Inject；Inject 仅观察第 13～14 列深度。容量拒绝只在准入 hook 计一次。
+重启恢复不会回放历史事件。区间计数与进程 instrumentation 共享生命周期，重新成为
+master 不重放已输出事件；停采期间未输出的事件会合入恢复后的第一条。
+interval_ms 包含该停采时间，可区分正常 10 秒样本与较长区间。
+分钟归属采用输出时间，正常情况下约有一个采样周期的分钟边界误差。
 
-writer 复用现有 tracing_appender 非阻塞输出，缓冲上限 4096、lossy=true。每轮快照作为
-一个多行日志事件提交，满载丢弃并累计计数，不阻塞调度或事务；文件 IO 错误通过日志系统
-标准错误输出报告（避免在 writer 中递归打日志），后续成功记录可观察错误累计。
-监控需同时告警文件停更、快照采集失败及陈旧、writer dropped/errors 增长。
-普通关闭先停止调度并等待 sampler 退出；服务生命周期结束时现有 LoggingGuard 统一
-flush 所有日志 worker。进程被强杀可能丢失尚未落盘的监控，
-不会改变消息事务结果。该日志不是审计账本，不保证 exactly-once。
+第 11～16 列为 SQL 快照 gauge，配置其聚合时要求 snapshot_ok=1。
+失败时保留上次成功值，但 snapshot_ok=0；从未成功时为零占位且 snapshot_age_ms=-1，
+这些值均不能解释成已确认的空队列。成功空结果归零；失败时等待秒数也不继续外推。
+SQL 快照失败不影响事件增量、调度器状态和 writer 健康。active 包括
+dispatching/running/unknown/cancelling/cancel_unknown，不等于模型正在计算。
 
-调参前先检查 paused、offline、uncertain，再看排队年龄、发送/完成速率与运行耗时。
-active 接近 max_running 且运行慢，不应仅增加 worker 批次；主要等待 rate_limited 时检查发送间隔。
-持续 budget_exhausted 才结合仓储操作耗时和 SQL 执行计划评估批次；不自动改变任何生产策略。
-逐 Bot 排障继续关联常规结构化日志及已有 delivery 查询。
+writer 继续复用 tracing_appender 的非阻塞输出、4096 缓冲和 lossy=true。
+日志丢弃、进程被强杀可能丢失增量，不能作为审计账本或 exactly-once 计数。
+第 21～22 列是进程累计 counter，重启可能归零，不可按分钟 SUM 当作新增错误数。
+必须同时告警文件停更、snapshot_ok=0、快照陈旧和 writer dropped/errors 增长。
+正常关闭先停止调度、等待 sampler，再由现有 LoggingGuard flush。
 
-### 本次验证范围
-
-2026-09-09：logging 相关 9 个测试、delivery 相关 10 个测试、bcs-config-api 的 48 个测试
-全部通过；默认 feature all-targets check、生产 lib no-default-features check 和 diff 检查通过。
-
-验证包括固定 15 列、无字段名前缀、快照失败保留/空结果归零、事件时长口径，以及通过
-现有 raw layer / async writer / worker guard 真实写入临时日志目录、与普通文件/console
-隔离、共享轮转清理、默认及显式 logging.outputs 兼容。编译覆盖默认 feature 和生产 lib
-no-default-features；测试自 dev-dependency 会合并默认 feature，无 Prometheus 以生产
-lib check 为证据。未重启运行 BCS，未验证生产采集器、磁盘故障压测或真实 MySQL/OceanBase。
+没有增加 SQL 查询或扫描：每轮仍只有一次现有 GROUP BY 聚合，事件热路径只更新固定
+八项内存计数。调参先检查暂停、离线/不确定阻塞和排队年龄，再对比启动/完成吞吐。
+逐 Bot 排障继续关联常规结构化日志和已有 delivery 查询。
 
 
 ## Direct A2A（chat v3）

@@ -25,6 +25,8 @@ import type {
 export interface CommunityAuthorDto {
   actor_type?: string;
   actor_id?: string;
+  author_bot_uuid?: string | null;
+  author_bot_id?: string | null;
   display_name?: string;
   avatar_url?: string | null;
 }
@@ -111,6 +113,8 @@ function asAuthorDto(dto: {
   return {
     actor_type: dto.author_type,
     actor_id: dto.author_id,
+    author_bot_uuid: (dto as { author_bot_uuid?: string | null }).author_bot_uuid,
+    author_bot_id: (dto as { author_bot_id?: string | null }).author_bot_id,
     display_name: dto.display_name,
     avatar_url: dto.avatar_url,
   };
@@ -247,9 +251,18 @@ function mapAuthor(author: CommunityAuthorDto | undefined): CommunityAuthor {
   const trimmedId = author?.actor_id?.trim() || '';
   const trimmedName = author?.display_name?.trim();
   const displayName = trimmedName || trimmedId || '匿名';
+  const isBot = author?.actor_type?.toUpperCase() === 'BOT';
+  const botUuid = author?.author_bot_uuid?.trim() || (
+    isBot && trimmedId.includes(':') ? trimmedId : undefined
+  );
+  const botId = author?.author_bot_id?.trim() || (
+    isBot && trimmedId ? trimmedId.split(':')[0] : undefined
+  );
   return {
-    type: author?.actor_type?.toUpperCase() === 'BOT' ? 'bot' : 'human',
+    type: isBot ? 'bot' : 'human',
     id: trimmedId || 'unknown',
+    ...(isBot && botUuid ? { botUuid } : {}),
+    ...(isBot && botId ? { botId } : {}),
     displayName,
     avatarUrl: author?.avatar_url?.trim() || undefined,
   };
@@ -319,8 +332,10 @@ export interface InteractionStatsDto {
 export interface InteractionSummaryQueryDto {
   actor_type?: string;
   actor_id?: string;
+  actor_id_alias?: string;
   target_type?: string;
   target_id?: string;
+  target_id_alias?: string;
   [key: string]: unknown;
 }
 
@@ -440,16 +455,23 @@ export function mapInteractionStatsDto(dto: InteractionStatsDto): InteractionSta
 }
 
 export function mapInteractionSummaryQuery(query: InteractionSummaryQuery): InteractionSummaryQueryDto {
-  if (query.actor && query.target) {
-    return {
-      actor_type: query.actor.actorType,
-      actor_id: query.actor.id,
-      target_type: query.target.targetType,
-      target_id: query.target.id,
-    };
-  }
-  if (query.actor) return { actor_type: query.actor.actorType, actor_id: query.actor.id };
-  if (query.target) return { target_type: query.target.targetType, target_id: query.target.id };
+  const actor = query.actor
+    ? {
+        actor_type: query.actor.actorType,
+        actor_id: query.actor.id,
+        ...(query.actor.idAlias ? { actor_id_alias: query.actor.idAlias } : {}),
+      }
+    : undefined;
+  const target = query.target
+    ? {
+        target_type: query.target.targetType,
+        target_id: query.target.id,
+        ...(query.target.idAlias ? { target_id_alias: query.target.idAlias } : {}),
+      }
+    : undefined;
+  if (actor && target) return { ...actor, ...target };
+  if (actor) return actor;
+  if (target) return target;
   return {};
 }
 
@@ -537,13 +559,18 @@ export function mapPersonalCenterActivityDto(
   if (!dto.topic_id && !(activityType === 'FOLLOWED' && (targetType === 'HUMAN' || targetType === 'BOT'))) {
     return null;
   }
+  const target: ForumTargetRef = {
+    targetType,
+    id: targetId,
+  };
+  if (targetType === 'BOT' && targetId.includes(':')) {
+    const botId = targetId.split(':')[0];
+    if (botId && botId !== 'default') target.idAlias = botId;
+  }
   return {
     activityType,
     actor: { actorType: interactionActorType(actorType), id: actorId },
-    target: {
-      targetType,
-      id: targetId,
-    },
+    target,
     topicId: dto.topic_id?.trim() || undefined,
     postId: dto.post_id?.trim() || undefined,
     happenedAt: dto.happened_at ?? '',

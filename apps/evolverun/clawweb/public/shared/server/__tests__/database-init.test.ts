@@ -25,6 +25,7 @@ vi.mock("../schema.js", () => ({
   sqliteTriggers: [],
 }));
 vi.mock("../schema-workflow-snapshot.js", () => ({ workflowSnapshotMigrations: [] }));
+vi.mock("../schema-ordinary-run-request.js", () => ({ ordinaryRunRequestMigrations: [] }));
 
 import { closeDatabase, initDatabase } from "../db.js";
 const ledgerInsert = "INSERT INTO schema_version (version, description) VALUES (?, ?)";

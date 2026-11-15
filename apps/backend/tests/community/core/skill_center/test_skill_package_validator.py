@@ -251,13 +251,6 @@ def test_multiline_description_preserves_yaml_semantics(
         ([], "missing_skill_file"),
         (
             [
-                ("SKILL.md", b"name: one\ndescription: one\n"),
-                ("a/SKILL.md", b"name: one\ndescription: two\n"),
-            ],
-            "multiple_skill_files",
-        ),
-        (
-            [
                 ("weather/SKILL.md", _skill_md()),
                 ("outside.txt", b"outside"),
             ],
@@ -468,3 +461,144 @@ def test_directory_rejects_traversal_before_canonical_zip_is_created() -> None:
         )
 
     assert error.value.reason == "unsafe_file_path"
+
+
+@pytest.mark.parametrize("wrapper", ["", "weather/"])
+@pytest.mark.parametrize("manifest_name", ["SKILL.md", "skill.MD"])
+def test_local_package_preserves_nested_capability_documents(
+    wrapper: str, manifest_name: str
+) -> None:
+    validator = SkillPackageValidator(SkillParser())
+    manifest = _skill_md() + b"[Review](capability/review/SKILL.md)\n"
+    nested = [
+        ("capability/review/SKILL.md", b"# Review\nSee scripts/main.py\n"),
+        (
+            "capability/review/scripts/main.py",
+            b"raise RuntimeError('not executed')",
+        ),
+        ("capability/query/SKILL.md", _skill_md(name="query")),
+    ]
+    payload = _zip(
+        [(wrapper + manifest_name, manifest)]
+        + [(wrapper + path, data) for path, data in nested]
+    )
+
+    package = validator.validate_legacy_local_zip(payload)
+
+    assert package.name == "weather"
+    assert dict(package.files) == {"SKILL.md": manifest, **dict(nested)}
+    assert _canonical_entries(package) == list(package.files)
+    assert validator.validate_legacy_local_zip(package.canonical_zip) == package
+    for validate in (validator.validate_zip, validator.validate_skill_center_exact_zip):
+        assert validate(package.canonical_zip).files == package.files
+
+
+@pytest.mark.parametrize("wrapper", ["", "opaque/"])
+def test_exact_center_preserves_nested_manifests(wrapper: str) -> None:
+    validator = SkillPackageValidator(SkillParser())
+    files = [("SKILL.md", _skill_md()), ("child/SKILL.md", b"reference")]
+    package = validator.validate_skill_center_exact_zip(
+        _zip([(wrapper + path, content) for path, content in files])
+    )
+    assert dict(package.files) == dict(files)
+    assert validator.revalidate(package) == package
+
+
+@pytest.mark.parametrize(
+    "paths",
+    [
+        ("a/SKILL.md", "b/SKILL.md"),
+        ("wrapper/child/SKILL.md",),
+        ("SKILL.md", "SKILL.MD"),
+        ("wrapper/SKILL.md", "wrapper/skill.md"),
+    ],
+)
+def test_center_rejects_ambiguous_or_missing_root(paths: tuple[str, ...]) -> None:
+    with pytest.raises(SkillPackageInvalidError):
+        SkillPackageValidator(SkillParser()).validate_skill_center_exact_zip(
+            _zip([(path, _skill_md()) for path in paths])
+        )
+
+
+@pytest.mark.parametrize(
+    ("paths",),
+    [
+        (
+            (
+                ("a/SKILL.md", _skill_md()),
+                ("b/SKILL.md", _skill_md()),
+            ),
+        ),
+        (
+            (
+                ("weather/capability/a/SKILL.md", _skill_md()),
+                ("weather/capability/b/SKILL.md", _skill_md()),
+            ),
+        ),
+        (
+            (
+                ("SKILL.md", _skill_md()),
+                ("SKILL.MD", _skill_md()),
+                ("capability/query/SKILL.md", _skill_md()),
+            ),
+        ),
+        (
+            (
+                ("weather/SKILL.md", _skill_md()),
+                ("weather/SKILL.MD", _skill_md()),
+                ("weather/capability/query/SKILL.md", _skill_md()),
+            ),
+        ),
+        (
+            (
+                ("weather/SKILL.md", _skill_md()),
+                ("weather/capability/query/SKILL.md", _skill_md()),
+                ("outside.txt", b"outside"),
+            ),
+        ),
+    ],
+)
+def test_local_nested_documents_require_one_unambiguous_package_root(
+    paths: tuple[tuple[str, bytes], ...],
+) -> None:
+    with pytest.raises(SkillPackageInvalidError) as error:
+        SkillPackageValidator(SkillParser()).validate_legacy_local_zip(
+            _zip(list(paths))
+        )
+
+    assert error.value.reason == "multiple_skill_files"
+
+
+@pytest.mark.parametrize(
+    ("manifest", "detail"),
+    [
+        (b"---\nname: good\n---\n", "MISSING_DESCRIPTION"),
+        (b"---\nname: bad_name\ndescription: okay\n---\n", "INVALID_NAME"),
+        (b"---\nname: skills-local\ndescription: okay\n---\n", "RESERVED_NAME"),
+    ],
+)
+def test_local_manifest_failure_keeps_actionable_detail(
+    manifest: bytes, detail: str
+) -> None:
+    with pytest.raises(SkillPackageInvalidError) as caught:
+        SkillPackageValidator(SkillParser()).validate_legacy_local_zip(
+            _zip([("SKILL.md", manifest)])
+        )
+    assert caught.value.reason == "invalid_metadata"
+    assert caught.value.detail == detail
+
+
+@pytest.mark.parametrize(
+    ("limit", "value", "files", "reason"),
+    [
+        ("MAX_FILE_BYTES", 2, [("file", b"abc")], "file_too_large"),
+        ("MAX_FILES", 1, [("one", b"a"), ("two", b"b")], "too_many_files"),
+        ("MAX_EXPANDED_BYTES", 3, [("one", b"aa"), ("two", b"bb")], "expanded_too_large"),
+        ("MAX_COMPRESSED_BYTES", 1, [("file", b"abc")], "compressed_too_large"),
+    ],
+)
+def test_directory_packing_reports_the_specific_limit(monkeypatch, limit, value, files, reason):
+    monkeypatch.setattr(package_module, limit, value)
+    with pytest.raises(SkillPackageTooLargeError) as error:
+        SkillPackageValidator(SkillParser()).pack_directory(files)
+    assert error.value.reason == reason

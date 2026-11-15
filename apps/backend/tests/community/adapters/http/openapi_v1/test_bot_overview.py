@@ -11,7 +11,7 @@ fake overview service, so each case pins one rule:
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import Depends, FastAPI
@@ -57,7 +57,7 @@ def _overview(engine: str = "claude_code") -> BotOverview:
 @pytest.fixture
 def overview_client():
     service = MagicMock()
-    service.get_overview.return_value = _overview()
+    service.get_overview = AsyncMock(return_value=_overview())
     app = mount_public_error_handlers(FastAPI())
     app.include_router(router, dependencies=[Depends(require_principal)])
     injector = Injector()

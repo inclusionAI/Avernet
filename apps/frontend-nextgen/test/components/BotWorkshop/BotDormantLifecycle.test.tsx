@@ -91,6 +91,69 @@ test('fresh list results win over the activation acceptance, including rollback 
   expect(useBotWorkshopStore.getState().items[0]).toEqual(bot);
 });
 
+test('a coding restart pins the card as restarting before the inventory catches up', async () => {
+  const runningBot = mapBotDto({
+    bot_id: 'restart-b1',
+    owner_entity_id: '149608',
+    bot_name: 'Coding Bot',
+    active_engine: 'aicoding',
+    bot_type: 'personal',
+    status: 'ACTIVE',
+    display_state: 'running',
+    actions: ['view', 'chat', 'edit', 'restart'],
+  }).item;
+  useBotWorkshopStore.setState({ items: [runningBot] });
+  jest.spyOn(botManagementActionService, 'run').mockResolvedValue({
+    status: 'ACTIVE',
+    ext: {
+      aicoding: {
+        restart: { operation_id: 'op-restart-1', status: 'RUNNING', phase: 'QUEUED', message: null },
+      },
+    },
+  } as never);
+  const load = jest.fn(async () => {});
+  const { result } = renderHook(() => useBotWorkshopActions(load, '149608'));
+  await act(async () => {
+    await result.current('restart', runningBot);
+  });
+
+  expect(load).toHaveBeenCalledTimes(1);
+  expect(useBotWorkshopStore.getState().items[0]).toMatchObject({
+    lifecycle: 'deploying',
+    rawStatus: 'PENDING',
+  });
+  expect(useBotWorkshopStore.getState().items[0].pendingRestart).toMatchObject({
+    operationId: 'op-restart-1',
+  });
+});
+
+test('a synchronous restart adopts the status returned by the mutation response', async () => {
+  const runningBot = mapBotDto({
+    bot_id: 'restart-b2',
+    owner_entity_id: '149608',
+    bot_name: 'OpenClaw Bot',
+    active_engine: 'openclaw',
+    bot_type: 'personal',
+    status: 'ACTIVE',
+    display_state: 'running',
+    actions: ['view', 'chat', 'edit', 'restart'],
+  }).item;
+  useBotWorkshopStore.setState({ items: [runningBot] });
+  jest.spyOn(botManagementActionService, 'run').mockResolvedValue({ status: 'PENDING' } as never);
+  const load = jest.fn(async () => {});
+  const { result } = renderHook(() => useBotWorkshopActions(load, '149608'));
+  await act(async () => {
+    await result.current('restart', runningBot);
+  });
+
+  expect(load).toHaveBeenCalledTimes(1);
+  expect(useBotWorkshopStore.getState().items[0]).toMatchObject({
+    lifecycle: 'deploying',
+    rawStatus: 'PENDING',
+  });
+  expect(useBotWorkshopStore.getState().items[0].pendingRestart).toBeUndefined();
+});
+
 test('accepted activation updates status immediately, suppresses duplicates and refreshes the list', async () => {
   useBotWorkshopStore.setState({ items: [bot] });
   let resolveActivation!: (value: { bot_id: string; status: string }) => void;

@@ -87,3 +87,5 @@ the formatter-only diff before continuing.
 - A current-schema snapshot for fresh installations must be a separate
   artifact with an explicit covered migration version. Do not replay the
   migrations already represented by that snapshot.
+
+For knowledge or architecture changes, read the [app knowledge standard](docs/agents/knowledge-standard.md), [architecture index](docs/arch/README.md), and [decision index](docs/adr/README.md).

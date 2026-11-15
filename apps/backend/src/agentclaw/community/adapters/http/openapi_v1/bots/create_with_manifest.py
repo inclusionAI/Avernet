@@ -233,6 +233,9 @@ def prepare_manifest_creation(
             space_id=current_space.numeric_id,
             template_validation_mode=BotCreateTemplateValidationMode.PUBLIC,
             engine_properties=_engine_properties_from_body(body),
+            # Bare ``BotCreate`` (the ordinary route) has no such field, so the
+            # shared helper reads it by name instead of narrowing its signature.
+            identity_bot_id=getattr(body, "identity_bot_id", None),
         ),
         BotCreateContext(
             deployment_mode=BotCreateDeploymentMode.CLOUD,
@@ -433,6 +436,11 @@ def _creation_state(
         if record is None:
             return None
         if record.status not in TERMINAL_STATUSES:
+            # A creation that applied for no passport (an identity-inheriting
+            # Bot) has nothing to authorize: it is still creating, not waiting
+            # for a human.
+            if record.payload.get("spec", {}).get("identity_bot_id"):
+                return (CreationState.CREATING, record)
             return (CreationState.AWAITING_AUTHORIZATION, record)
         return (_bot_less_terminal(record), record)
 

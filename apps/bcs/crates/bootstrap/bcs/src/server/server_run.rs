@@ -270,11 +270,16 @@ impl BcsServer {
                     .map(|entries| entries.v1_public_base_url.clone()),
             )
         };
-        let mut openapi_v1 = self.state.openapi_v1.clone()
-            .with_bot_self_service(Arc::new(bcs_app_bot::BotSelfServiceImpl::new(
-                crate::agent_identity::build_agent_identity_port()?,
-                self.state.services.registry.clone(),
+        let bot_self = Arc::new(bcs_app_bot::BotSelfServiceImpl::new(
+            crate::agent_identity::build_agent_identity_port()?,
+            self.state.services.registry.clone(),
+        ));
+        let mut openapi_v1 = self.state.openapi_v1.clone().with_bot_self_service(bot_self);
+        if let Some(management) = self.state.services.a2a_bot_management.clone() {
+            openapi_v1 = openapi_v1.with_a2a_service(Arc::new(bcs_app_a2a_bot::v1::A2aApiService::new(
+                management,
             )));
+        }
         openapi_v1.collaboration_drafts = self.state.services.collaboration_drafts.clone();
         openapi_v1.worker_task_service = Some(Arc::new(
             bcs_message_flow::TaskHandleApplicationService::new(self.state.services.message_flow.clone()),
@@ -339,6 +344,24 @@ impl BcsServer {
                 .collect::<std::collections::HashSet<_>>(),
         );
 
+        let mut untraced_routes = vec![
+            "/health".to_string(),
+            "/me/repair-info".to_string(),
+            "/admin/secret/{name}".to_string(),
+            "/groups/{id}/settings".to_string(),
+            "/manifest".to_string(),
+            "/assets/{bundle_name}/{file_name}".to_string(),
+            "/api/v1/collaboration/manifest".to_string(),
+            "/api/v1/collaboration/assets/{bundle_name}/{file_name}".to_string(),
+            bcs_ws::web::FRONTEND_WS_ENDPOINT.to_string(),
+            bcs_ws::bot::BOT_WS_ENDPOINT.to_string(),
+            bcs_ws::web::GROUP_SESSION_WS_ENDPOINT.to_string(),
+        ];
+        if let Some(metrics) = &self.state.metrics {
+            untraced_routes.push(metrics.endpoint_path.clone());
+        }
+        let trace_filter = bcs_network_tracing::HttpServerFilter::new(untraced_routes);
+
         Ok(router
             .layer(middleware::from_fn(debug_middleware))
             .layer(CatchPanicLayer::custom(
@@ -376,7 +399,8 @@ impl BcsServer {
                     .allow_methods(AllowMethods::mirror_request())
                     .allow_headers(AllowHeaders::mirror_request())
                     .allow_credentials(true),
-            ))
+            )
+            .layer(middleware::from_fn_with_state(trace_filter, bcs_network_tracing::http_server)))
     }
 
     async fn initialize_lifecycle(&self) -> Result<()> {
@@ -630,3 +654,7 @@ impl BcsServer {
         Ok((addr, handle, state))
     }
 }
+
+#[cfg(test)]
+#[path = "network_tracing_tests.rs"]
+mod network_tracing_tests;

@@ -51,7 +51,7 @@ class TaskArtifactAddRequestDTO(BaseModel):
         None, description="code 分支内容对象:code_base_name/code_base_address/pr_link/pr_desc"
     )
 
-    model_config = {"extra": "forbid"}
+    model_config = {"extra": "ignore"}
 
 
 class TaskArtifactDescriptorDTO(BaseModel):

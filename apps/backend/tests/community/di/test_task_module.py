@@ -38,7 +38,7 @@ from agentclaw.community.core.task.task_runner.callback_correlation import (
     CallbackCorrelationRegistry,
     InMemoryCallbackCorrelationRegistry,
 )
-from agentclaw.community.core.task.task_dispatch.claim_join_gate import (
+from agentclaw.community.core.task.task_dispatch.task_settings import (
     TaskSettingsServiceProtocol,
 )
 from agentclaw.community.core.task.task_discovery.frontend_url import (
@@ -48,9 +48,6 @@ from agentclaw.community.core.task.task_runner.client.ports import OpenApiBotPor
 from agentclaw.community.di.modules.task_module import TaskModule
 
 from agentclaw.community.di.modules.task_module import _resolve_harness_enabled
-from agentclaw.community.core.task.task_runner.client.catalog_keyword_discover import (
-    CatalogKeywordBotDiscover,
-)
 from agentclaw.community.core.task.task_runner.client.semantic_keyword_bot_discover import (
     SemanticKeywordBotDiscover,
 )
@@ -190,7 +187,7 @@ def test_task_module_binds_callback_singletons():
     assert inj.get(CallbackAuthenticator) is inj.get(CallbackAuthenticator)
 
 
-def test_task_module_uses_keyword_discovery_when_semantic_port_is_absent(monkeypatch):
+def test_task_module_keeps_semantic_only_when_semantic_port_is_absent(monkeypatch):
     class _BotPublic:
         def search_catalog_public_bots_by_keyword(self, **_kwargs):
             return {"total": 0, "items": []}
@@ -198,7 +195,7 @@ def test_task_module_uses_keyword_discovery_when_semantic_port_is_absent(monkeyp
     for profile in ("singlebox", "corp", "community"):
         monkeypatch.setenv("DEPLOY_PROFILE", profile)
         discover = TaskModule._resolve_discover(bot_public=_BotPublic())
-        assert isinstance(discover, CatalogKeywordBotDiscover)
+        assert isinstance(discover, SemanticKeywordBotDiscover)
 
 
 def test_task_module_uses_semantic_hybrid_when_semantic_port_is_available():

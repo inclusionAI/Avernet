@@ -139,12 +139,32 @@ describe('botController OpenAPI contracts', () => {
     expect(spy).toHaveBeenNthCalledWith(
       1,
       '/openapi/v1/bots/bot-1/restart?user_id=caller&entity_id=owner',
-      expect.objectContaining({ method: 'POST', signal: controller.signal }),
+      expect.objectContaining({ method: 'POST', body: undefined, signal: controller.signal }),
     );
     expect(spy).toHaveBeenNthCalledWith(
       2,
       '/openapi/v1/bots/bot-1/status?user_id=caller&entity_id=owner',
       expect.objectContaining({ method: 'GET', signal: controller.signal }),
+    );
+  });
+
+  test('Bot restart serializes AgentCoding template confirmation in the request body', async () => {
+    const spy = jest.spyOn(globalThis, 'fetch').mockImplementation(() => response({ status: 'PENDING' }));
+    await restartBot('bot-1', {
+      userId: 'caller',
+      ownerId: 'owner',
+      extraConfigs: { confirmed_template_update: 'true' },
+    });
+
+    expect(spy).toHaveBeenCalledWith(
+      '/openapi/v1/bots/bot-1/restart?user_id=caller&entity_id=owner',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          user_id: 'caller',
+          extra_configs: { confirmed_template_update: 'true' },
+        }),
+      }),
     );
   });
 

@@ -1,6 +1,6 @@
 """Authentication provider contract consumed by protected routes."""
 
-from src.application.ports import AuthProvider
+from app.application.ports import AuthProvider
 
 
 def test_auth_provider_contract_includes_route_validation() -> None:

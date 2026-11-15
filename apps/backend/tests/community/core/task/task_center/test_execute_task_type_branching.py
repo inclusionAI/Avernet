@@ -352,3 +352,43 @@ def test_execute_yaml_with_yaml_ignores_group_kind_chat():
     asyncio.new_event_loop().run_until_complete(
         svc.execute(_request(TaskType.YAML, yaml="def: x", group_kind="chat")))
     assert ("yaml", "state_machine", "def: x") in eng.calls
+
+
+
+def test_normalize_owner_bot_id_uses_initiator_for_legacy_bare_bot():
+    """历史裸 Bot id：统一按发起人 owner_user_id 处理，不再反查 BotService。"""
+    req = _request(
+        TaskType.YAML,
+        owner_bot_id="20261103_hadsuotr",
+        owner_user_id="146836",
+        yaml="kind: collab",
+    )
+    norm = normalize_owner_bot_id(req)
+    assert norm.owner_bot_id == "20261103_hadsuotr:146836"
+    assert norm.owner_user_id == "146836"
+
+
+def test_normalize_owner_bot_id_keeps_composite_owner_and_initiator():
+    """新协议：owner_bot_id=bot_id:bot_owner_id，owner_user_id 保持任务发起人。"""
+    req = _request(
+        TaskType.YAML,
+        owner_bot_id="20261103_hadsuotr:35983",
+        owner_user_id="146836",
+        yaml="kind: collab",
+    )
+    norm = normalize_owner_bot_id(req)
+    assert norm.owner_bot_id == "20261103_hadsuotr:35983"
+    assert norm.owner_user_id == "146836"
+
+
+def test_normalize_owner_bot_id_makes_default_owner_explicit():
+    """历史 default 是按发起人相对寻址的共享 Bot，规范化为 default:发起人。"""
+    req = _request(
+        TaskType.YAML,
+        owner_bot_id="default",
+        owner_user_id="146836",
+        yaml="kind: collab",
+    )
+    norm = normalize_owner_bot_id(req)
+    assert norm.owner_bot_id == "default:146836"
+    assert norm.owner_user_id == "146836"

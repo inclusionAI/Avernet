@@ -11,12 +11,12 @@ from __future__ import annotations
 import pytest
 from unittest.mock import patch, MagicMock
 
-from src.domain.models.fusion_result import Perspective
-from src.domain.models.stance_signal import StanceSignal
-from src.application.services.conflict_alignment_service import ConflictAlignmentService
-from src.application.services.structured_signal_extractor import StructuredSignalExtractor
-from src.domain.services.conflict_dimension_analyzer import ConflictDimensionAnalyzer
-from src.domain.taxonomy.registry import TaxonomyRegistry
+from app.domain.models.fusion_result import Perspective
+from app.domain.models.stance_signal import StanceSignal
+from app.application.services.conflict_alignment_service import ConflictAlignmentService
+from app.application.services.structured_signal_extractor import StructuredSignalExtractor
+from app.domain.services.conflict_dimension_analyzer import ConflictDimensionAnalyzer
+from app.domain.taxonomy.registry import TaxonomyRegistry
 
 
 class TestG2StructuredConflictFlow:
@@ -57,7 +57,7 @@ class TestG2StructuredConflictFlow:
     @pytest.fixture
     def mock_feature_flags(self):
         """Mock Feature Flags"""
-        with patch("src.infra.config.feature_flags.FeatureFlags") as mock:
+        with patch("app.infra.config.feature_flags.FeatureFlags") as mock:
             mock.is_enabled.return_value = True
             mock.is_g2_structured_stance_enabled.return_value = True
             mock.is_g2_conflict_dimensions_enabled.return_value = True
@@ -347,7 +347,7 @@ class TestG2V2BackwardCompatibility:
         """
         测试 flags 全关时使用 legacy 逻辑
         """
-        with patch("src.infra.config.feature_flags.FeatureFlags") as mock_flags:
+        with patch("app.infra.config.feature_flags.FeatureFlags") as mock_flags:
             # 所有 V2 flags 都关闭
             mock_flags.is_enabled.return_value = False
             mock_flags.is_g2_structured_stance_enabled.return_value = False
@@ -387,7 +387,7 @@ class TestG2V2BackwardCompatibility:
         """
         测试老客户端忽略新字段
         """
-        with patch("src.infra.config.feature_flags.FeatureFlags") as mock_flags:
+        with patch("app.infra.config.feature_flags.FeatureFlags") as mock_flags:
             mock_flags.is_enabled.return_value = False
 
             service = ConflictAlignmentService()
@@ -419,7 +419,7 @@ class TestG2V2BackwardCompatibility:
         """
         测试空 perspectives 不报错
         """
-        with patch("src.infra.config.feature_flags.FeatureFlags") as mock_flags:
+        with patch("app.infra.config.feature_flags.FeatureFlags") as mock_flags:
             mock_flags.is_enabled.return_value = True
 
             service = ConflictAlignmentService()
@@ -436,7 +436,7 @@ class TestG2V2BackwardCompatibility:
         """
         测试 skipped perspectives 不报错
         """
-        with patch("src.infra.config.feature_flags.FeatureFlags") as mock_flags:
+        with patch("app.infra.config.feature_flags.FeatureFlags") as mock_flags:
             mock_flags.is_enabled.return_value = False
 
             service = ConflictAlignmentService()
@@ -468,7 +468,7 @@ class TestG2V2StrictParticipants:
         """
         测试 strict_participants 语义不退化
         """
-        with patch("src.infra.config.feature_flags.FeatureFlags") as mock_flags:
+        with patch("app.infra.config.feature_flags.FeatureFlags") as mock_flags:
             mock_flags.is_enabled.return_value = False
 
             service = ConflictAlignmentService()

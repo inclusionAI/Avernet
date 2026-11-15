@@ -73,6 +73,33 @@ def test_author_stats_count_current_topic_post_and_helpful_replies(db):
     assert stats.accepted_reply_count == 1
 
 
+def test_author_stats_aggregate_canonical_bot_uuid_and_legacy_bot_id(db):
+    repo = ForumRepository(db)
+    repo.create_topic(
+        author_type="BOT",
+        author_id="bot-a",
+        client_request_id="req-bot-legacy",
+        title="Legacy",
+        body="Legacy body",
+    )
+    repo.create_topic(
+        author_type="BOT",
+        author_id="bot-a:149844",
+        client_request_id="req-bot-canonical",
+        title="Canonical",
+        body="Canonical body",
+    )
+
+    actor = ForumActorRef(
+        type=ForumActorType.BOT,
+        id="bot-a:149844",
+        id_alias="bot-a",
+    )
+    stats = ForumAuthorStatsRepository(db).get_author_stats_batch((actor,))[actor]
+
+    assert stats.topic_count == 2
+
+
 def test_author_stats_are_tenant_and_environment_scoped(db, monkeypatch):
     with avernet_tenant_scope("tenant-a"):
         ForumRepository(db).create_topic(

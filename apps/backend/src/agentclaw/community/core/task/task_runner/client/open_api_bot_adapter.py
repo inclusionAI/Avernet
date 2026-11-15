@@ -205,7 +205,7 @@ class OpenApiBotAdapter(
     def api_key_prefix(self) -> str:
         """secbaas allowed-bots URL 路径段:显式 api_key_prefix 优先,否则回退 api_key 前 8 位。
 
-        grant/revoke 与派发 claim_on JOIN 用同一前缀口径(单一公共 api-key,服务端持有)。"""
+        grant/revoke 使用同一公共 api-key 前缀口径(api-key 由服务端持有)。"""
         return self._k.api_key_prefix or self._k.api_key[:_DEFAULT_KEY_PREFIX_LEN]
 
     async def grant(self, *, bcs_bot_id: str, cookie: str, referer: str) -> None:

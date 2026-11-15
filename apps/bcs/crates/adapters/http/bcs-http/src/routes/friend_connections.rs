@@ -31,7 +31,7 @@ use crate::{headers::extract_bearer_token, state::HttpAppState};
 use super::{caller::caller_actor_id_from_headers};
 
 
-fn request_auth_headers(headers: &HeaderMap) -> RequestAuthHeaders {
+pub(crate) fn request_auth_headers(headers: &HeaderMap) -> RequestAuthHeaders {
     let authorization = extract_bearer_token(headers).map(|token| format!("Bearer {token}"));
     let cookie = headers
         .get(axum::http::header::COOKIE)

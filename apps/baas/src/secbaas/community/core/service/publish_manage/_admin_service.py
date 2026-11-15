@@ -7,6 +7,7 @@ bypassing normal state machine transitions.
 from __future__ import annotations
 
 from secbaas.community.api.bot_manage import BotStatus
+from secbaas.community.api.device_manage import DeviceStatus
 from secbaas.community.api.publish_manage import (
     ForceSuccessResult,
     PublishAdminService,
@@ -136,15 +137,26 @@ class DefaultPublishAdminService(PublishAdminService):
         *,
         device_uuid: str,
         tenant: str,
-        status: str,
+        status: DeviceStatus | None,
+        provider_device_id: str | None = None,
         operator: str,
     ) -> UpdateDeviceStatusResult:
-        """Update a device's status directly, bypassing normal state machine.
+        """Repair a device's status and/or provider binding directly.
 
         WARNING: Admin operation for test/development use only.
         Does not trigger any publish workflow or PaaS operation.
         Uses get_by_device_uuid_only() to allow cross-env admin access.
+
+        At least one of ``status`` / ``provider_device_id`` must be
+        supplied; ``None`` for either means "leave the stored value
+        unchanged". The value changes, the ``modifier`` audit stamp, and
+        ``gmt_modified`` are written in one UPDATE.
         """
+        if status is None and provider_device_id is None:
+            raise ValueError(
+                "at least one of status or provider_device_id must be provided"
+            )
+
         device = self._device_repo.get_by_device_uuid_only(
             device_uuid=device_uuid,
         )
@@ -152,24 +164,37 @@ class DefaultPublishAdminService(PublishAdminService):
             raise PublishNotFoundError(f"Device {device_uuid} not found")
 
         previous_status = device.status
+        previous_provider_device_id = device.provider_device_id
+        new_status = status.value if status is not None else previous_status
+        new_provider_device_id = (
+            provider_device_id
+            if provider_device_id is not None
+            else previous_provider_device_id
+        )
         logger.warning(
             f"ADMIN_UPDATE_DEVICE_STATUS: device_uuid={device_uuid} "
             f"tenant={device.tenant} env={device.env} "
             f"previous_status={previous_status} "
-            f"new_status={status} operator={operator}"
+            f"new_status={new_status} "
+            f"previous_provider_device_id={previous_provider_device_id} "
+            f"new_provider_device_id={new_provider_device_id} operator={operator}"
         )
 
         self._device_repo.update_status_by_device_uuid(
             device_uuid=device_uuid,
             tenant=device.tenant,
             env=device.env,
-            status=status,
+            status=new_status,
+            modifier=operator,
+            provider_device_id=provider_device_id,
         )
 
         return UpdateDeviceStatusResult(
             device_uuid=device_uuid,
             previous_status=previous_status,
-            new_status=status,
+            new_status=new_status,
+            previous_provider_device_id=previous_provider_device_id,
+            new_provider_device_id=new_provider_device_id,
         )
 
     async def update_bot_status(

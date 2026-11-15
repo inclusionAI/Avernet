@@ -75,9 +75,22 @@ export async function readPreparedPackMetadata(repoDir: string, workflowId: stri
     return raw as Record<string, unknown>;
   };
   const manifests = [...entries.keys()].filter(name => name === 'workflow.pack.yaml' || name.endsWith('/workflow.pack.yaml'));
-  if (manifests.includes('workflow.pack.yaml') && manifests.length > 1) throw new Error('Mixed root and nested Pack layout');
+  let candidateManifests = manifests;
+  if (manifests.includes('workflow.pack.yaml')) {
+    const manifest = yamlObject(await blob('workflow.pack.yaml'));
+    const rootDeclaresWorkflow = Array.isArray(manifest.workflows)
+      && manifest.workflows.some(entry => (typeof entry === 'string' ? entry : entry?.id) === workflowId);
+    const outsidePacksManifest = manifests.some(name => name !== 'workflow.pack.yaml' && !name.startsWith('packs/'));
+    if (rootDeclaresWorkflow && !outsidePacksManifest) {
+      // A root manifest that declares the workflow is authoritative. Files under
+      // packs/, including a historical nested manifest, are ordinary resources.
+      candidateManifests = ['workflow.pack.yaml'];
+    } else if (manifests.length > 1) {
+      throw new Error('Mixed root and nested Pack layout');
+    }
+  }
   let found: PreparedPackMetadata | undefined;
-  for (const name of manifests) {
+  for (const name of candidateManifests) {
     const parts = name.split('/');
     if (!(parts.length <= 2 || (parts.length === 3 && parts[0] === 'packs'))) continue;
     const manifestContent = await blob(name); const manifest = yamlObject(manifestContent);
@@ -88,7 +101,7 @@ export async function readPreparedPackMetadata(repoDir: string, workflowId: stri
     if (typeof manifest.id !== 'string' || !validPackGitId(manifest.id)
       || (parts.length > 1 && parts.at(-2) !== manifest.id)) throw new Error('Candidate pack identity mismatch');
     const packPath = name.slice(0, -'workflow.pack.yaml'.length);
-    if (manifests.some(other => {
+    if (candidateManifests.some(other => {
       const root = other.slice(0, -'workflow.pack.yaml'.length);
       return other !== name && (root.startsWith(packPath) || packPath.startsWith(root));
     })) throw new Error('Overlapping Pack layout');

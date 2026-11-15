@@ -12,6 +12,21 @@
   control-plane Service API.
 - Human-Principal authorization, Bot/Human projections, candidate visibility,
   reachability computation, and owner-scoped updates.
+- Candidate friend relationships come only from approved Connect/edge
+  relationships. Both `/candidates` and the deprecated `eligible-candidates`
+  alias share one strict, bounded read of approved default-profile Bot edges
+  through the fallible `ConnectService` page API. The first page fixes the
+  request's total; later page drift, short pages, duplicate identities or
+  persistence failures fail the whole request instead of returning a partial
+  or empty friend set. No cross-request friend cache exists, and candidate or
+  projection reads are accounted separately from friend-page SQL. The read
+  still costs O(F) returned rows and memory for F friends, and each paged
+  JOIN/COUNT may rescan the same edge/profile set, so the observed
+  `max(1, ceil(F/100))` page-query count does not by itself prove
+  large-scale performance.
+- `/candidates/search` shares the same single strict approved-edge read per
+  request and reuses that set across the semantic and name-fallback branches;
+  empty queries skip the friend read entirely.
 - Shared Bot responses (including `/bots/mine`) expose the current `avatar_url`.
   Projection reads only returned physical Bot IDs through one batched registry
   Core call after authorization/filtering/pagination. Empty and Human-only pages

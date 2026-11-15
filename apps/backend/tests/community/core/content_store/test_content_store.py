@@ -20,6 +20,7 @@ import yaml
 from agentclaw.community.core.content_store.errors import (
     ContentIntegrityError,
     ContentMissingError,
+    ContentStoreFault,
     ContentStoreError,
 )
 from agentclaw.community.core.content_store.models import (
@@ -29,6 +30,7 @@ from agentclaw.community.core.content_store.models import (
 from agentclaw.community.core.content_store.service import (
     ContentStoreService,
 )
+from agentclaw.community.testing.content_blob_store import LocalBlobStore
 from agentclaw.community.core.content_store.settings import (
     DEFAULT_CONTENT_STORE_DIR,
     content_store_root_from_config,
@@ -101,7 +103,7 @@ def _fetched(body: bytes = BODY, *, url: str = "https://content.example/a.bin",
 
 def _service(tmp_path: Path) -> tuple[ContentStoreService, _FakeRepository]:
     repo = _FakeRepository()
-    return ContentStoreService(repo, tmp_path / "store"), repo
+    return ContentStoreService(repo, LocalBlobStore(tmp_path / "store")), repo
 
 
 def _blob_file(tmp_path: Path, digest: str) -> Path:
@@ -358,7 +360,7 @@ def test_a_repository_failure_after_the_blob_is_the_standard_shape(tmp_path):
     # and the next store of the same digest reuses them without rewriting.
     repo = _FakeRepository()
     repo.fail_next = True
-    service = ContentStoreService(repo, tmp_path / "store")
+    service = ContentStoreService(repo, LocalBlobStore(tmp_path / "store"))
     with pytest.raises(RuntimeError, match="row insert failed"):
         service.store(_fetched(), scope=SCOPE,
                       source_url="https://content.example/a.bin")
@@ -463,7 +465,7 @@ def test_an_unparseable_provenance_url_is_refused(tmp_path):
 def test_a_relative_root_resolves_against_the_cwd(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     repo = _FakeRepository()
-    service = ContentStoreService(repo, Path(DEFAULT_CONTENT_STORE_DIR))
+    service = ContentStoreService(repo, LocalBlobStore(Path(DEFAULT_CONTENT_STORE_DIR)))
     service.store(_fetched(), scope=SCOPE, source_url="https://content.example/a.bin")
     assert (tmp_path / DEFAULT_CONTENT_STORE_DIR / "blobs").is_dir()
 
@@ -503,18 +505,17 @@ _SHIPPED_APP_YAML = (
 )
 
 
-def test_the_shipped_yaml_carries_the_neutral_default_root():
-    # The knob must exist and must ship neutral: a deployment's NAS path
-    # appears in its own overlay diff, never in community source.
-    tree = yaml.safe_load(_SHIPPED_APP_YAML.read_text(encoding="utf-8"))
-    settings = tree["user_config"]
-    assert (
-        settings["bot_config_manifest"]["content_store_dir"]
-        == DEFAULT_CONTENT_STORE_DIR
-    )
-    assert content_store_root_from_config(settings) == Path(
-        DEFAULT_CONTENT_STORE_DIR
-    )
+@pytest.mark.parametrize("overlay", ["application-test.yaml", "application-singlebox.yaml"])
+def test_the_local_tree_root_ships_neutral_in_the_profiles_that_use_it(overlay):
+    # Only the profiles that wire the local blob store read this key, so it
+    # lives in their overlays; a deployment keeps its bytes in object storage
+    # and the base file does not carry the key.
+    settings = yaml.safe_load((_SHIPPED_APP_YAML.parent / overlay).read_text(encoding="utf-8"))["user_config"]
+    assert settings["bot_config_manifest"]["content_store_dir"] == DEFAULT_CONTENT_STORE_DIR
+    assert content_store_root_from_config(settings) == Path(DEFAULT_CONTENT_STORE_DIR)
+
+    base = yaml.safe_load(_SHIPPED_APP_YAML.read_text(encoding="utf-8"))["user_config"]
+    assert "content_store_dir" not in base["bot_config_manifest"]
 
 
 # --- the CR rounds: linkage, literal hosts, durability's leftovers ---------
@@ -710,3 +711,101 @@ def test_store_produced_refuses_an_overwide_column_before_the_blob(tmp_path):
     with pytest.raises(ContentStoreError):
         service.store_produced(data, scope=SCOPE, origin="genome/capture", entry_identity="x" * 257)
     assert repo.rows == [] and not _blob_file(tmp_path, "sha256:" + hashlib.sha256(data).hexdigest()).exists()
+
+
+# --- the service over object storage ------------------------------------------
+
+
+class _RefusingStorage:
+    """An object storage that holds nothing and stores nothing."""
+
+    def get_etag(self, key):
+        return None
+
+    def put_object(self, key, content):
+        return False
+
+    def get_object(self, key):
+        return None
+
+
+def _object_service(tmp_path: Path, repo: _FakeRepository) -> ContentStoreService:
+    """One backend instance: its own service object over the shared object storage and database."""
+    from agentclaw.community.core.content_store.blobs import ObjectStorageBlobStore
+    from agentclaw.community.plugins.community.object_storage import CommunityFsObjectStorage
+
+    return ContentStoreService(repo, ObjectStorageBlobStore(CommunityFsObjectStorage(str(tmp_path / "objstore"))))
+
+
+def test_content_stored_by_one_instance_is_read_by_another(tmp_path):
+    repo = _FakeRepository()
+    first = _object_service(tmp_path, repo)
+    second = _object_service(tmp_path, repo)
+
+    fetched = first.store(_fetched(), scope=SCOPE, source_url="https://content.example/a.bin")
+    produced = first.store_produced(b"captured", scope=SCOPE, origin="genome/capture")
+
+    assert second.is_reachable(SCOPE, produced.digest, produced_by="genome")
+    assert second.read(fetched.digest) == BODY
+    assert second.read(produced.digest) == b"captured"
+
+
+def test_a_corrupted_object_fails_its_digest_on_read(tmp_path):
+    repo = _FakeRepository()
+    service = _object_service(tmp_path, repo)
+    record = service.store(_fetched(), scope=SCOPE, source_url="https://content.example/a.bin")
+    hex_digest = record.digest.partition(":")[2]
+    (tmp_path / "objstore" / "content-store" / "blobs" / hex_digest[:2] / hex_digest).write_bytes(b"x" * len(BODY))
+    with pytest.raises(ContentIntegrityError):
+        service.read(record.digest)
+
+
+def test_a_missing_object_is_missing_not_a_fault(tmp_path):
+    service = _object_service(tmp_path, _FakeRepository())
+    with pytest.raises(ContentMissingError):
+        service.read("sha256:" + "0" * 64)
+
+
+def test_store_fails_and_files_no_row_when_blob_write_faults(tmp_path):
+    from agentclaw.community.core.content_store.blobs import ObjectStorageBlobStore
+
+    repo = _FakeRepository()
+    service = ContentStoreService(repo, ObjectStorageBlobStore(_RefusingStorage()))
+    with pytest.raises(ContentStoreFault):
+        service.store(_fetched(), scope=SCOPE, source_url="https://content.example/a.bin")
+    with pytest.raises(ContentStoreFault):
+        service.store_produced(b"captured", scope=SCOPE, origin="genome/capture")
+    assert repo.rows == []
+
+
+def test_ensure_stored_writes_bytes_and_files_no_row(tmp_path):
+    service, repo = _service(tmp_path)
+    digest = service.ensure_stored(b"inline")
+    assert digest == "sha256:" + hashlib.sha256(b"inline").hexdigest()
+    assert service.read(digest) == b"inline"
+    assert repo.rows == []
+
+
+def test_ensure_stored_restores_a_blob_whose_row_outlived_it(tmp_path):
+    service, repo = _service(tmp_path)
+    record = service.store_produced(b"inline", scope=SCOPE, origin="manifest/inline")
+    _blob_file(tmp_path, record.digest).unlink()
+    with pytest.raises(ContentMissingError):
+        service.read(record.digest)
+
+    service.ensure_stored(b"inline")
+
+    assert service.read(record.digest) == b"inline"
+    assert len(repo.rows) == 1
+
+
+def test_re_recording_produced_bytes_restores_a_missing_blob(tmp_path):
+    """What a genome re-capture relies on: ``store_produced`` writes the bytes before it dedupes the row."""
+    service, repo = _service(tmp_path)
+    record = service.store_produced(b"captured", scope=SCOPE, origin="genome/capture")
+    _blob_file(tmp_path, record.digest).unlink()
+
+    service.store_produced(b"captured", scope=SCOPE, origin="genome/capture")
+
+    assert service.read(record.digest) == b"captured"
+    assert len(repo.rows) == 1

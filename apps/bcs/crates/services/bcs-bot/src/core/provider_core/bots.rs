@@ -97,6 +97,19 @@ impl ProviderBotCoreService for ProviderCore {
             ));
         };
 
+        // Organization membership is an explicit lifecycle boundary: a Bot
+        // must leave every active organization before Provider retirement.
+        // Check before any retirement write so the failed request cannot
+        // partially revoke authority, bindings, or runtime credentials.
+        if let Some(organizations) = &self.organizations {
+            if organizations
+                .has_active_membership_by_bot(&bcs_config::resolve_env_str(), &bot_id)
+                .await?
+            {
+                return Err(ServiceError::Conflict("bot_in_organization".into()));
+            }
+        }
+
         // The verified Provider identity is the REAL actor
         // (spec §3.1); no Human impersonation, no token.
         let mutation =
@@ -157,8 +170,15 @@ impl ProviderBotCoreService for ProviderCore {
         provider_admin_token: &str,
         params: RegisterProviderBotParams,
     ) -> ServiceResult<(ProviderBotBinding, Option<String>)> {
-        self.register_provider_bot_internal(provider_id, provider_admin_token, params)
+        self.register_provider_bot_internal(provider_id, provider_admin_token, params, Vec::new())
             .await
+    }
+
+    async fn register_provider_bot_with_initial_managers(
+        &self, provider_id: &str, provider_admin_token: &str,
+        params: RegisterProviderBotParams, initial_managers: Vec<String>,
+    ) -> ServiceResult<(ProviderBotBinding, Option<String>)> {
+        self.register_provider_bot_internal(provider_id, provider_admin_token, params, initial_managers).await
     }
 
     async fn list_provider_bots(

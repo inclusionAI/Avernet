@@ -17,13 +17,13 @@ class GroupCardStoryAssertions(unittest.TestCase):
         self.card = json.loads((FIXTURES / "manager-worker-card-template.json").read_text())
 
     def check(self, card):
-        STORY.assert_card(card, "group-mw-001", self.card["name"], "manager_worker")
+        STORY.assert_card(card, "group-mw-001", self.card["name"], "manager_worker", self.card["description"])
 
     def test_accepts_both_contract_fixtures(self):
         self.check(self.card)
         card = json.loads((FIXTURES / "state-machine-card-template.json").read_text())
         group_id = card["supportedInterfaces"][0]["url"].removeprefix("local://groups/")
-        STORY.assert_card(card, group_id, card["name"], "state_machine")
+        STORY.assert_card(card, group_id, card["name"], "state_machine", card["description"])
 
     def test_rejects_stale_name_and_description(self):
         for target in ("card", "skill"):

@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use async_trait::async_trait;
 
 use super::{ActorKind, GroupMessage, ServiceResult};
-use crate::types::{EventActor, GroupHumanNotifyPolicy};
+use crate::types::{EventActor, GroupHumanNotifyPolicy, GroupCardSnapshot};
 
 pub use bcs_domain::{
     DefaultDelivery, Group, GroupKind, GroupStatus, GroupStrategy, HumanMentionNotifyMode,
@@ -162,6 +162,12 @@ pub fn validate_sender_routes(
 /// Service for group management.
 #[async_trait]
 pub trait GroupCoreService: Send + Sync {
+    /// Read the current Group/Card snapshot without a display-cache fallback.
+    /// Only a missing Group returns None; storage/decoding failures are errors.
+    async fn read_card_snapshot(&self, _id: &str) -> ServiceResult<Option<GroupCardSnapshot>> {
+        Err(super::ServiceError::InternalError("Group Card snapshot reads are not configured".into()))
+    }
+
     /// Create or update a group.
     async fn upsert(&self, group: Group) -> ServiceResult<()>;
 

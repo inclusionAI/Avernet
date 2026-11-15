@@ -285,6 +285,46 @@ def bbs_result_not_holder():
     """Report without holding the claim → TaskStateError → 409."""
 
 
+# ===== POST /api/v1/collaboration/tasks/{task_id}/stop =====
+
+@endpoint_test(
+    method="POST",
+    path="/api/v1/collaboration/tasks/{task_id}/stop",
+    scenario="ok",
+    input=CaseInput(
+        path_params={"task_id": "t_stop_ok"},
+        json_body={"reason": "manual test", "operator": "endpoint-test"},
+    ),
+    seed=lambda w: _seed_graph(w, "t_stop_ok"),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "code": 200000,
+            "data": {
+                "task_id": "t_stop_ok",
+                "status": "CANCELLED",
+                "stopped_nodes": ["t_stop_ok"],
+                "reason": "manual test",
+                "operator": "endpoint-test",
+            },
+        },
+    ),
+)
+def stop_task_ok():
+    """Stopping a pending task transitions its root node to CANCELLED."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/v1/collaboration/tasks/{task_id}/stop",
+    scenario="not_found",
+    input=CaseInput(path_params={"task_id": "t_stop_missing"}),
+    expect=ExpectError(status=404),
+)
+def stop_task_not_found():
+    """Stopping a missing task returns the service's not-found error."""
+
+
 # ===== POST /api/v1/collaboration/tasks/callback/workflow_start =====
 
 @endpoint_test(

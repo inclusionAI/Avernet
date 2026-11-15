@@ -6,7 +6,7 @@ import {
   CreateBotTooltipTrigger,
 } from '@/components/BotWorkshop/CreateBotModal/CreateBotTooltip';
 import { cn } from '@/utils/cn';
-import { AlertTriangle, HelpCircle, KeyRound } from 'lucide-react';
+import { HelpCircle, KeyRound } from 'lucide-react';
 import React from 'react';
 
 interface CodefuseTokenFieldProps {
@@ -58,18 +58,14 @@ export const CodefuseTokenField: React.FC<CodefuseTokenFieldProps> = ({
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder="粘贴授权 Token"
+        aria-label="授权 Token"
+        aria-invalid={Boolean(validationError)}
         disabled={disabled}
         className={cn(
           'w-full rounded-lg border px-3 py-1.5 font-mono text-sm placeholder:text-slate-300 focus:border-transparent focus:outline-none focus:ring-1 disabled:bg-slate-50 disabled:text-slate-400',
           validationError ? 'border-amber-300 focus:ring-amber-200' : 'border-slate-200 focus:ring-slate-300',
         )}
       />
-      {validationError ? (
-        <div className="flex items-start gap-1.5 text-xs text-amber-600">
-          <AlertTriangle className="mt-0.5 h-3 w-3 flex-shrink-0" />
-          <span>{validationError}</span>
-        </div>
-      ) : null}
     </div>
   );
 };

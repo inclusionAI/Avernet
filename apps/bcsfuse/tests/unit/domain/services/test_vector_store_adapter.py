@@ -2,9 +2,9 @@
 
 import pytest
 
-from src.domain.services.vector_store_adapter import VectorStoreAdapter
-from src.domain.models.vector_point import VectorPoint
-from src.domain.models.vector_search_hit import VectorSearchHit
+from app.domain.services.vector_store_adapter import VectorStoreAdapter
+from app.domain.models.vector_point import VectorPoint
+from app.domain.models.vector_search_hit import VectorSearchHit
 
 
 class MockVectorStore:

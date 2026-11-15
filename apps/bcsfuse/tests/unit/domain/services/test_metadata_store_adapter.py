@@ -2,8 +2,8 @@
 
 import pytest
 
-from src.domain.services.metadata_store_adapter import MetadataStoreAdapter
-from src.domain.models.metadata_record import MetadataRecord
+from app.domain.services.metadata_store_adapter import MetadataStoreAdapter
+from app.domain.models.metadata_record import MetadataRecord
 
 
 class MockMetadataStore:

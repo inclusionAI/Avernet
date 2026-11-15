@@ -561,7 +561,7 @@ pub(super) async fn handle_web_send_with_result(
     }
     let freeze_session = session_snapshot_for_freeze(flow, cmd.session_id.as_deref()).await;
     let prepared_command = crate::queued_admission::prepare_group_admission_with_message(flow, &group, &cmd, &decision,
-        &sender_display_name, from_bot_owner.clone(), result_message.map(|result| (result.id.as_str(), &result.message))).await?;
+        &sender_display_name, from_bot_owner.clone(), result_message.map(|result| (result.id.as_str(), &result.message)), &caller_admission_targets).await?;
     // F1 (spec §8.2 — recheck R6): the managed row becomes runnable
     // THE MOMENT the durable admission commits (the queue publishes
     // it before this call returns, and any scan may pick it up).

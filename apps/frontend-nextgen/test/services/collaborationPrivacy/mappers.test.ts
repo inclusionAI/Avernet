@@ -185,6 +185,30 @@ describe('collaboration privacy service mappers', () => {
     });
   });
 
+  it('restores protected (组织可见) pending approvals so the approval link is not lost', () => {
+    const mapped = mapBotDtoToDomain(
+      createBot({
+        friend_ext: {
+          public_user_approval: {
+            puid: 'protected-puid',
+            status: 'PROCESSING',
+            visibility: 'protected',
+            approval_url: 'https://approval.example.com/ticket/dispatch/protected-puid',
+            view_friend_deps: [{ deptNo: 'TECH', deptName: '技术部' }],
+          },
+        },
+      }),
+    );
+
+    expect(mapped.pendingPublications.user).toEqual({
+      id: 'protected-puid',
+      audience: 'user',
+      target: { scope: 'restricted', organizationPaths: [] },
+      submittedAt: '',
+      approvalUrl: 'https://approval.example.com/ticket/dispatch/protected-puid',
+    });
+  });
+
   it('does not restore completed approvals or expose unsafe approval links', () => {
     const mapped = mapBotDtoToDomain(
       createBot({

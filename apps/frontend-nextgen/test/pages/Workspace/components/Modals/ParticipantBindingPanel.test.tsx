@@ -23,6 +23,8 @@ it('renders roles as a horizontal selector with binding status and previous/next
     />,
   );
 
+  expect(screen.getByText('角色绑定')).toHaveClass('text-xs');
+  expect(screen.getByText('写作者')).toHaveClass('text-xs');
   expect(screen.getByText('已绑定 1 / 3 个角色，共 1 个 Bot')).toBeInTheDocument();
   expect(screen.getByTestId('role-binding-strip')).toHaveClass('overflow-x-auto');
   expect(screen.getByRole('button', { name: '选择角色 编辑' })).toHaveAttribute('aria-pressed', 'false');

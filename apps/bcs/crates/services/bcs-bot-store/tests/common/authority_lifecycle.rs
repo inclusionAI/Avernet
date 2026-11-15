@@ -331,6 +331,7 @@ fn mutation(owner: &str) -> OwnershipInitialization {
     let sequence =
         COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     OwnershipInitialization {
+        initial_manager_user_ids: Vec::new(),
         owner_user_id: owner.to_string(),
         mutation: AuthorityMutation {
             mutation_id: format!("mutation-{owner}-{sequence}"),
@@ -464,9 +465,13 @@ mod registration;
 mod retirement;
 #[path="authority_lifecycle_retirement_races.rs"]
 mod retirement_races;
+#[path="authority_lifecycle_reactivation.rs"]
+mod reactivation;
 pub use registration::*;
 pub use retirement::*;
 pub use retirement_races::*;
+#[allow(unused_imports)]
+pub use reactivation::*;
 use registration::provider_record_ref;
 use retirement::{seed_pending_transfer,audit_actions};
 use bcs_service_api::core::provider::{ProviderRetire,ProviderRetireBranch};

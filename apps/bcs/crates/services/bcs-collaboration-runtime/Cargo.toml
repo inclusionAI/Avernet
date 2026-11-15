@@ -27,6 +27,7 @@ bcs-service-api = { workspace = true }
 chrono = { workspace = true }
 
 [dev-dependencies]
+bcs-db-migrations = { workspace = true }
 bcs-channel = { workspace = true }
 bcs-channel-api = { workspace = true }
 bcs-channel-store = { workspace = true }
@@ -43,3 +44,4 @@ bcs-session-store = { workspace = true }
 bcs-test-support = { workspace = true }
 tokio = { workspace = true }
 tracing-subscriber = { workspace = true }
+tracing = { workspace = true, features = ["log"] }

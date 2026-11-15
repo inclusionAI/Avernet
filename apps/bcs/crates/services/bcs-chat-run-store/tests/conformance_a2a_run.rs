@@ -215,3 +215,18 @@ async fn poll_mode_survives_storage_and_task_binding() {
     assert_eq!(store.compare_and_set(&running,1).await.unwrap(),Some(expected.clone()));
     assert_eq!(store.get(&running.run_id).await.unwrap(),Some(expected));
 }
+
+#[tokio::test]
+async fn custom_binding_round_trips_with_frozen_route_fingerprint() {
+    let db = Arc::new(LocalSqliteDbPlugin::new().unwrap()); initialize(db.as_ref()).await;
+    let store = DbA2aRunStore::new(db, "test".into(), DbSqlFlavor::Sqlite);
+    let mut record = initial(); record.interface.binding = A2aBinding::Custom;
+    record.interface.url = "custom-a2a://route/opaque".into();
+    record.scope.interface_url = record.interface.url.clone();
+    record.scope.route_fingerprint = Some("adapter-v1-target-hash".into());
+    assert!(store.create(&record).await.unwrap());
+    assert_eq!(store.get(&record.run_id).await.unwrap(),Some(record.clone()));
+    let accepted = accepted(record);
+    store.compare_and_set(&accepted,1).await.unwrap().unwrap();
+    assert_eq!(store.get(&accepted.run_id).await.unwrap().unwrap().interface.binding,A2aBinding::Custom);
+}

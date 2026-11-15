@@ -4,8 +4,8 @@ import type { ReactNode } from 'react';
 export type SquareNavigationResource = 'bot' | 'group' | 'expert';
 
 const ITEMS: Array<{ resource: SquareNavigationResource; label: string; path: string }> = [
-  { resource: 'expert', label: '专家市场', path: '/collaboration-square/experts' },
-  { resource: 'bot', label: '公开Bot', path: '/collaboration-square/bots' },
+  { resource: 'bot', label: '公开 Bot', path: '/collaboration-square/bots' },
+  { resource: 'expert', label: '专家', path: '/collaboration-square/experts' },
   { resource: 'group', label: '公开协作群', path: '/collaboration-square/groups' },
 ];
 
@@ -41,7 +41,8 @@ export function SquareNavigation({
           ))}
         </div>
         {actions ? (
-          <div className="flex min-w-0 shrink-0 items-center gap-3">{actions}</div>
+          // 允许收缩：348/338 的定宽工具在窄窗口下收缩截断，不再把页头内容顶出视口。
+          <div className="flex min-w-0 items-center gap-3">{actions}</div>
         ) : null}
       </div>
     </nav>

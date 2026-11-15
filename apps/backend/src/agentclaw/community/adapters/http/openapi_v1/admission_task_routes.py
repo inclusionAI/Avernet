@@ -87,9 +87,10 @@ TASK_BBS_ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ): AdmissionMode.OPEN,
     # BBS Browse-Loop per-Bot reads + manual triggers exposed on the public
     # surface so the product can render state and drive a one-shot Browse.
-    # They address a bot by path but name no owner on the wire (only a
-    # verified principal), so admission is OPEN like the unified BBS
-    # content writes and the authorisation row is NoCheck.
+    # They address a product Bot by path and, where subscription identity
+    # matters, name its owner by the required owner_user_id query. Admission
+    # is therefore OPEN like the unified BBS content writes and the
+    # authorization row is NoCheck.
     (
         "GET",
         "/openapi/v1/collaboration/tasks/bots/{bot_id}/bbs/browse-subscription",
@@ -140,6 +141,7 @@ TASK_PUBLIC_ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ("GET", "/openapi/v1/collaboration/tasks/dashboard"): AdmissionMode.OPEN,
     ("GET", "/openapi/v1/collaboration/tasks/trajectory"): AdmissionMode.OPEN,
     ("GET", "/openapi/v1/collaboration/tasks/list"): AdmissionMode.OPEN,
+    ("GET", "/openapi/v1/collaboration/tasks/by_session"): AdmissionMode.OPEN,
     ("GET", "/openapi/v1/collaboration/tasks/bbs/list"): AdmissionMode.OPEN,
     # Grant/revoke are stateless relays to secbaas (api-key server-side; the
     # human Cookie/Referer authorizes the action) — OPEN at the gate, secbaas
@@ -150,4 +152,15 @@ TASK_PUBLIC_ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     # bot — any authenticated principal may read. The authorization row beside
     # it is NoCheck for the same reason.
     ("POST", "/openapi/v1/collaboration/tasks/config/match"): AdmissionMode.OPEN,
+    # Context collab public surface — the operator of all three operations is
+    # the L2 accountability subject the delivery binds `ActorContext.actor` (a
+    # `human` PrincipalRef) to, and an application calling alone names no end
+    # user to bind. REFUSED at the gate keeps that contract mechanical instead
+    # of a PrincipalRef empty-id validation later.
+    ("POST", "/openapi/v1/collaboration/task/context_collab"): AdmissionMode.REFUSED,
+    (
+        "POST",
+        "/openapi/v1/collaboration/task/context_collab/{collab_context_id}/events",
+    ): AdmissionMode.REFUSED,
+    ("GET", "/openapi/v1/collaboration/task/context_collab/{collab_context_id}"): AdmissionMode.REFUSED,
 }

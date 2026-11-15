@@ -11,6 +11,7 @@ import {
 } from '@/components/ui/AlertDialog';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/Popover';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
+import { getDisplayParticipants, getParticipantDisplayCount } from '@/domain/collaboration/participantPresentation';
 import { cn } from '@/utils/cn';
 import { ChevronDown, MoreHorizontal, Settings2, Share2, Trash2 } from 'lucide-react';
 import React, { useRef, useState } from 'react';
@@ -69,9 +70,10 @@ export const GroupItem = React.memo(function GroupItem({
   // 操作区常显条件：展开 / 收藏 Tab / dots 菜单开启（2026-10-12 用户反馈移除选中态——
   // 群行不再有选中背景）。常显必须与下方标题让位 pr-[88px] 同条件生效，否则按钮与群名称重叠。
   const actionsPinned = expanded || sessionTab === 'favorite' || actionsOpen;
-  // 头像堆成员人数口径：participantCount 为列表接口权威总数；缺计数时用明细数组兜底。
-  // participants 明细由 useGroupWorkspace.enrichParticipants 按群详情补拉（列表接口只有计数）。
-  const stackTotalCount = group.participantCount > 0 ? group.participantCount : group.participants.length;
+  // 头像堆展示口径：优先列表接口下发的成员摘要（缺省回退完整明细），人数用接口权威计数；
+  // 显式 0 保持 0，仅在计数缺省/非法时回退到展示成员数。
+  const displayParticipants = getDisplayParticipants(group);
+  const stackTotalCount = getParticipantDisplayCount(group.participantCount, displayParticipants);
 
   // 点击群行只做展开/收起，不抢占右侧主舞台（2026-11-02 反馈：展开与切台解耦）；
   // 主舞台仅在用户点具体会话（onSelectSession）/竖轨头像直达时切换。
@@ -115,7 +117,7 @@ export const GroupItem = React.memo(function GroupItem({
           )}
         >
           <span className="flex h-9 w-9 shrink-0 items-center justify-center [&>span]:mr-0">
-            <GroupAvatarStack participants={group.participants} totalCount={stackTotalCount} size={20} />
+            <GroupAvatarStack participants={displayParticipants} totalCount={stackTotalCount} size={20} />
           </span>
           <span className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
             <TooltipProvider delayDuration={300}>

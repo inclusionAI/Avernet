@@ -140,6 +140,16 @@ class ApplicationCodingUnavailableError(Exception):
     """
 
 
+class IdentitySourceInvalidError(Exception):
+    """The declared identity Bot cannot supply identity to this Bot (→ 422).
+
+    The request is well-formed but names a source that does not exist, is not
+    visible to the caller, belongs to another entity, holds no issued passport,
+    or does not cover this Bot's declared scope. Distinct from a malformed
+    template (422 on the template contract) and from a deployment limitation.
+    """
+
+
 class StartupScriptUnsupportedError(Exception):
     """A bot whose container cannot run a startup script was sent one.
 

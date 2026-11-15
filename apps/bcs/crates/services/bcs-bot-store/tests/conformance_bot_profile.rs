@@ -8,9 +8,7 @@
 //! The bcs-admin full MySQL migration-chain gate mounts the same shared
 //! contract for the MySQL evidence.
 
-#[path = "../../../bootstrap/bcs/src/migrations.rs"]
-#[allow(dead_code)]
-mod bootstrap_migrations;
+use bcs_db_migrations as bootstrap_migrations;
 #[path = "support/bot_profile_fixture.rs"]
 mod fixture;
 #[path = "support/bot_profile_contract.rs"]

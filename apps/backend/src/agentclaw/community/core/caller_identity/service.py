@@ -578,6 +578,11 @@ class CallerIdentityService(CallerIdentityServiceProtocol):
             bot_call_type=bot_call_type,
             should_exchange_caller_token=should_exchange,
             binding_id=binding_id,
+            shared_teclaw_runtime=(
+                should_exchange
+                and not is_test_exchange
+                and bot.get("active_engine") == "teclaw"
+            ),
         )
 
     def authorize_iam_token_exchange(

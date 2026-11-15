@@ -21,6 +21,7 @@ const SESSION_ID: &str = "bcs_grp_gcguard:00000001";
 #[derive(Default)]
 struct RecordingGroupContextService {
     adds: Mutex<Vec<AddGroupContext>>,
+    preset_actors: Mutex<Vec<String>>,
 }
 
 #[async_trait]
@@ -28,6 +29,30 @@ impl GroupContextApplicationService for RecordingGroupContextService {
     async fn add(&self, command: AddGroupContext) -> Result<GroupContextAck, ApplicationError> {
         self.adds.lock().expect("adds lock").push(command);
         Ok(GroupContextAck::ok())
+    }
+
+    async fn list_presets(
+        &self,
+        _: &str,
+        _: &bcs_service_api::application::v1::AuthenticatedCaller,
+        _: Option<&str>,
+    ) -> Result<Vec<bcs_service_api::application::v1::GroupContextItemPreset>, ApplicationError> {
+        Ok(Vec::new())
+    }
+
+    async fn add_preset(&self, _: &str, actor: &str, _: String, _: String) -> Result<(), ApplicationError> {
+        self.preset_actors.lock().unwrap().push(actor.to_owned());
+        Ok(())
+    }
+
+    async fn update_preset(&self, _: &str, actor: &str, _: String, _: Option<String>, _: Option<String>) -> Result<(), ApplicationError> {
+        self.preset_actors.lock().unwrap().push(actor.to_owned());
+        Ok(())
+    }
+
+    async fn delete_preset(&self, _: &str, actor: &str, _: String) -> Result<(), ApplicationError> {
+        self.preset_actors.lock().unwrap().push(actor.to_owned());
+        Ok(())
     }
 
     async fn update(
@@ -100,6 +125,7 @@ async fn guard_with_group_member(
         inner.clone(),
         groups.clone(),
         sessions.clone() as Arc<dyn SessionRepoPort>,
+        Arc::new(bcs_test_support::NoopBotAuthorityPort),
     );
     (guard, inner)
 }
@@ -122,6 +148,7 @@ fn add_command(
     request_context: GroupContextRequestContext,
 ) -> AddGroupContext {
     AddGroupContext {
+        preset: false,
         actor_id: actor_id.to_string(),
         request_context,
         name: "test_context".to_string(),
@@ -354,4 +381,69 @@ async fn round_add_resolves_session_and_uses_session_membership_rule() {
         .await
         .expect_err("explicit sessionId and roundId must refer to one session");
     assert_eq!(error.code(), "invalid_param");
+}
+
+#[tokio::test]
+async fn preset_writes_require_live_authority_on_the_group_driver() {
+    use bcs_test_support::{authority_edge_fixture, grant_manager_edge, grant_owner_edge};
+
+    let authority = authority_edge_fixture();
+    grant_owner_edge(&authority.repo, "driver", "owner").await;
+    grant_manager_edge(&authority.repo, "driver", "admin").await;
+    grant_owner_edge(&authority.repo, "originator", "other").await;
+    let groups = Arc::new(GroupCore::with_repo(Arc::new(MemoryGroupRepo::new())));
+    let mut group = Group::new(
+        GROUP_ID, "driver", vec![Participant::bot("driver", ParticipantRole::Driver)],
+    );
+    group.originator = Some("originator".into());
+    groups.upsert(group).await.unwrap();
+    let inner = Arc::new(RecordingGroupContextService::default());
+    let guard = GroupContextAddAccessGuard::new(
+        inner.clone(), groups, Arc::new(MemorySessionRepo::new()), authority.hook,
+    );
+    for actor in ["human_other", "driver", "human_owner", "human_admin"] {
+        let results = [
+            guard.add_preset(GROUP_ID, actor, "timeline".into(), String::new()).await,
+            guard.update_preset(GROUP_ID, actor, "timeline".into(), None, Some("events".into())).await,
+            guard.delete_preset(GROUP_ID, actor, "timeline".into()).await,
+        ];
+        for result in results {
+            if matches!(actor, "human_owner" | "human_admin") {
+                result.unwrap();
+            } else {
+                assert_eq!(result.unwrap_err().code(), "permission_denied");
+            }
+        }
+    }
+    assert_eq!(*inner.preset_actors.lock().unwrap(),
+        ["human_owner", "human_owner", "human_owner", "human_admin", "human_admin", "human_admin"]);
+}
+
+#[tokio::test]
+async fn preset_discovery_requires_group_membership_or_an_explicit_session() {
+    use bcs_service_api::application::v1::{AuthenticatedBotIdentity, AuthenticatedCaller};
+
+    let (guard, _) = guard_with_group_member("group_member").await;
+    let bot = |id: &str| AuthenticatedCaller {
+        tenant: None,
+        user: None,
+        bot: Some(AuthenticatedBotIdentity {
+            bot_uuid: id.into(),
+            owner_id: String::new(),
+            app_id: 0,
+            agent_code: String::new(),
+        }),
+        app: None,
+        access_key: None,
+    };
+
+    guard.list_presets(GROUP_ID, &bot("group_member"), None).await.unwrap();
+    guard.list_presets(GROUP_ID, &bot("session_member"), Some(SESSION_ID)).await.unwrap();
+
+    let missing_session = guard.list_presets(GROUP_ID, &bot("session_member"), None).await.unwrap_err();
+    assert_eq!(missing_session.code(), "permission_denied");
+    assert!(missing_session.to_string().contains("--session-id"));
+
+    let outsider = guard.list_presets(GROUP_ID, &bot("outsider"), Some(SESSION_ID)).await.unwrap_err();
+    assert_eq!(outsider.code(), "permission_denied");
 }

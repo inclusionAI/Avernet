@@ -26,7 +26,11 @@ use bcs_service_api::application::caller_container::{
 };
 use bcs_service_api::application::caller_handoff::{HandoffClaim, HumanCallerDeliveryHandoffService};
 
-use readiness::dispatch_handoff_scope;
+// Re-exported (was a private `use`): the result-leg identity park in
+// queued_task_terminal must derive the SAME claim key the dispatch claim
+// (dispatch_once) and the readiness probe use — scope drift between park
+// and claim is a silent permanent identity loss (readiness.rs contract).
+pub(crate) use readiness::dispatch_handoff_scope;
 use bcs_service_api::application::caller_identity::CallerExecutionToken as ProofToken;
 use bcs_service_api::port::{
     CallerContainerMinimum, CallerDispatchAck, CallerDispatchAssociation, CallerExecutionSendPort, CallerOpaqueRef, ContainerRunAssociation,
@@ -837,9 +841,11 @@ impl CallerDispatchPipeline {
                                 .as_ref()
                                 .map(|history| history.history_cutoff_seq)
                                 .unwrap_or(0),
-                            // Run budget only: the lineage's lifetime is the
-                            // run window, never a token/container advisory.
-                            expires_at_ms: effective_not_after,
+                            // The lineage window: run budget BOUNDED by the
+                            // established subject's TTL — identity may only
+                            // shorten the visible expiry, never relabel-up
+                            // (the identity plugin's MAC binding rejects it).
+                            expires_at_ms: effective_not_after.min(identity_deadline),
                             // spec §8.3 delegation-only material: the root's
                             // stable pseudonymous subject, runtime-only,
                             // from the claimed ingress actor — the delegate

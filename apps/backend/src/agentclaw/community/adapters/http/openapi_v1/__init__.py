@@ -184,6 +184,7 @@ from .collaboration_bots import public_router as collaboration_public_router
 from agentclaw.community.adapters.http.bot_public.risk_routes import openapi_router as risk_openapi_router
 from .collaborating_bots import router as collaborating_bots_router
 from .task import task_router
+from .task.context_collab import router as task_context_collab_router
 from .bots.engine_version import router as engine_version_router
 from .bots.engine_config import router as engine_config_router
 from .bots.acli_clis import operations_router as acli_cli_operations_router
@@ -193,6 +194,7 @@ from .bots.config_manifest import router as config_manifest_router
 from .bots.config_manifest_apply import router as config_manifest_apply_router
 from .bots.create_with_manifest import router as create_with_manifest_router
 from .bots.copy import router as bot_copy_router
+from .bots.collaboration_repair import router as collaboration_repair_router
 from .bots.genome import router as genome_router
 from .org import dept_router as org_dept_router
 from .org import router as org_router
@@ -251,6 +253,7 @@ from .skills import router as skills_router
 from .skill_sets import router as skill_sets_router
 from .skill_sets.skill_center_references import router as skill_center_references_router
 from .service_envs import router as service_envs_router
+from .service_eval.router import router as service_eval_router
 from .service_publications import (
     edit_lock_router as service_edit_lock_router,
     router as service_lifecycle_router,
@@ -423,6 +426,7 @@ _ADDRESSED_BOT_SUBGROUPS = [
     render_screens_router,
     service_lifecycle_router,
     service_edit_lock_router,
+    service_eval_router,
     containers_router,
     diagnostics_router,
     channels_router,
@@ -458,6 +462,10 @@ _GRANT_CHECKED_SUBGROUPS = [
     # rather than the engine-runtime one, and mounting it here is what gives it
     # both. See ``bots/engine_config.py``.
     engine_config_router,
+    # One-shot collaboration repair names a Bot and is its owner's command; the
+    # router also declares the own-bot grant itself, and the mount states the
+    # same decision so the assembled surface shows it.
+    collaboration_repair_router,
 ]
 
 # Track C — the engine-runtime groups. Mounted separately because they document
@@ -708,6 +716,18 @@ def build_public_router() -> APIRouter:
     # the mount uses the base ERROR_RESPONSES, not USER_SCOPED_ERROR_RESPONSES.
     public.include_router(
         task_router,
+        responses=ERROR_RESPONSES,
+        dependencies=_PUBLIC_AUTH,
+    )
+    # Context collab public surface (create / append event / status) — the
+    # spec §6.1 openapi twin of the internal ``/api/v1/collaboration/task``
+    # copy. Not bot-scoped, no grant gate; the operator is the L2
+    # accountability subject the gateway authenticated, which delivery binds
+    # to the verified principal (REFUSED admission — an app-only caller names
+    # no end user to bind). Base error table like the task group: no route
+    # here is scoped by the caller's user_id.
+    public.include_router(
+        task_context_collab_router,
         responses=ERROR_RESPONSES,
         dependencies=_PUBLIC_AUTH,
     )

@@ -107,7 +107,7 @@ fn routers(db: Arc<ReadOnlyHistoryDb>, env: &str, user: &str, cutoff: u64) -> [R
         bot_authority: None,
     });
     let invitations = Arc::new(bcs_app_invitation::InvitationFriendshipServiceImpl::new(services.friend.clone(),
-        Arc::new(bcs_test_support::NoopFriendRequestCoreService), services.group.clone(), services.session_management.clone(),
+        Arc::new(bcs_test_support::NoopFriendService), services.group.clone(), services.session_management.clone(),
         services.registry.clone(), invite, Vec::new(), bcs_app_invitation::InvitationFriendshipServiceConfig { default_ttl_seconds: 60 })
     .with_bot_authority_hook(authority));
     let register = Arc::new(bcs_app_register::RegisterServiceImpl::new(Vec::new()));

@@ -10,7 +10,6 @@ import { LinkPanel } from '@/components/BotWorkshop/Editor/LinkPanel';
 import { MoreConfigPanel } from '@/components/BotWorkshop/Editor/MoreConfigPanel';
 import { RenderScreenPanel } from '@/components/BotWorkshop/Editor/RenderScreenPanel';
 import { ResourcePanel } from '@/components/BotWorkshop/Editor/ResourcePanel';
-import { RoutinePanel } from '@/components/BotWorkshop/Editor/RoutinePanel';
 import TaskEscort from '@/components/BotWorkshop/TaskEscort';
 import { Spin } from '@/components/ui/Spin';
 import type { BotDomain, BotRuntimeStage } from '@/domain/botWorkshop';
@@ -37,9 +36,11 @@ export function DetailPanelContent({
   currentSpaceId,
   runtimeStage,
   ownerId,
+  authenticatedUserId,
   onOpenFolder,
 }: {
   bot: BotDomain;
+  authenticatedUserId?: string;
   editor: ReturnType<typeof useBotEditor>;
   advanced: ReturnType<typeof useBotAdvancedConfig>;
   desktopPolicy: ReturnType<typeof desktopCapabilityPolicy>;
@@ -48,7 +49,7 @@ export function DetailPanelContent({
   hostingAllowed: ReturnType<typeof useHostingTabs>['hostingAllowed'];
   editable: boolean;
   isOwner: boolean;
-  /** 预发验证/全屏等锁定形态下Capability/Routine 使用紧凑布局 */
+  /** 预发验证/全屏等锁定形态下Capability 使用紧凑布局 */
   compact: boolean;
   /** 能力位注入的扩展面板构造器；无扩展时缺省 */
   ExtensionPanel?: ComponentType<BotEditorPanelContext>;
@@ -111,6 +112,8 @@ export function DetailPanelContent({
     <DwsHostingPanel key={`${bot.id}:${bot.ownerId}`} botId={bot.id} />
   ) : tab === 'capability' ? (
     <CapabilityPanel
+      authenticatedUserId={authenticatedUserId}
+      compact={compact}
       desktop={bot.deployment === 'local'}
       onLocalToggle={editor.toggleSkill}
       onLocalDelete={editor.deleteSkill}
@@ -162,17 +165,6 @@ export function DetailPanelContent({
       />
       {bot.deployment === 'local' ? <LinkPanel botId={bot.id} editable={editable && isOwner} /> : null}
     </>
-  ) : tab === 'routine' ? (
-    <RoutinePanel
-      routines={editor.routines}
-      editable={editable}
-      compact={compact}
-      pendingRoutineToggle={editor.pendingRoutineToggle}
-      onLoadModels={editor.loadRoutineModels}
-      onSave={editor.saveRoutine}
-      onToggle={editor.toggleRoutine}
-      onDelete={editor.deleteRoutine}
-    />
   ) : (
     <TaskEscort bot={bot} />
   );

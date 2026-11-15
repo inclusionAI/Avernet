@@ -6,7 +6,9 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { parse } from "yaml";
 import { createLocalRemote, gitEnvironment, runGit } from "./clawflows-git-client-fixture.js";
-import { cloneClawflows, commitAndPushDeploy, commitAndPushSaved, ensurePackManifest, prepareBranchBase, pruneLegacyPackCopy, writeWorkflowSpecToRepo } from "../clawflows-git-client.js";
+import { cloneClawflows, commitAndPushDeploy, ensurePackManifest, prepareBranchBase, pruneLegacyPackCopy, writeWorkflowSpecToRepo } from "../clawflows-git-client.js";
+import { withPreparedWorkflowSpec } from "../pack-spec-save.js";
+import { resumePreparedPackCandidate } from "../pack-candidate-save.js";
 import { readPackScriptSnapshot } from "../pack-script-snapshot.js";
 import type { WorkflowSpec } from "../../workflow.js";
 import ts from "typescript";
@@ -24,6 +26,22 @@ const spec: WorkflowSpec = { id: "flow", title: "Updated", nodes: [] };
 let root: string; let bare: string; let repo: string;
 function put(name: string, content: string) { const file = path.join(repo, name); mkdirSync(path.dirname(file), { recursive: true }); writeFileSync(file, content); }
 async function clone() { const dir = mkdtempSync(path.join(root, "clone-")); await cloneClawflows(dir, { remoteUrl: bare, username: "Test", email: author.email }); return dir; }
+// These tests exercise the mutable spec/manifest helpers, not the retired save
+// writer. Snapshot their output as fixture data for reader/TaskGuard assertions;
+// production save ordering and leases are exercised in the prepared-save suites.
+async function publishManifestFixture(work: string, workflowId: string, _note: string, _author: typeof author) {
+  const ref = `refs/heads/wf/${workflowId}`;
+  const expected = runGit(work, ['ls-remote', '--refs', 'origin', ref]).split('\t')[0] || '';
+  runGit(work, ['add', '.']); runGit(work, ['commit', '-m', 'manifest helper fixture']);
+  const commit = runGit(work, ['rev-parse', 'HEAD']);
+  runGit(work, ['push', `--force-with-lease=${ref}:${expected}`, 'origin', `${commit}:${ref}`]);
+  return { branch: `wf/${workflowId}`, commit };
+}
+function readFixtureVersion(reader: string, workflowId: string, packId: string, version: 'draft' | 'current') {
+  const activeTag = `deploy/${workflowId}/#1`;
+  if (version === 'current') runGit(reader, ['update-ref', 'refs/pack-version/active', `${activeTag}^{commit}`]);
+  return readPackScriptSnapshot(reader, workflowId, packId, version, version === 'current' ? { activeTag } : undefined);
+}
 beforeEach(() => {
   root = mkdtempSync(path.join(tmpdir(), "pack-write-test-")); bare = createLocalRemote(root); repo = mkdtempSync(path.join(root, "seed-"));
   runGit(repo, ["init"]); runGit(repo, ["config", "user.name", "Test"]); runGit(repo, ["config", "user.email", author.email]);
@@ -44,16 +62,16 @@ describe("pack manifest save/deploy", () => {
     runGit(repo, ["init"]); runGit(repo, ["config", "user.name", "Test"]); runGit(repo, ["config", "user.email", author.email]);
     runGit(repo, ["add", "."]); runGit(repo, ["commit", "-m", "seed"]); runGit(repo, ["push", bare, "HEAD:refs/heads/wf/flow"]);
     const work = await clone();
-    if (operation === "save") await prepareBranchBase(work, "saved/flow", "wf/flow");
+    if (operation === "save") await prepareBranchBase(work, "wf/flow", "wf/flow");
     else await prepareBranchBase(work, "wf/flow");
     await writeWorkflowSpecToRepo(work, "pack", "flow", spec); await ensurePackManifest(work, "pack", "flow");
     await pruneLegacyPackCopy(work, "pack");
-    if (operation === "save") await commitAndPushSaved(work, "flow", "save", author);
+    if (operation === "save") await publishManifestFixture(work, "flow", "save", author);
     else await commitAndPushDeploy(work, "flow", 1, 1, "deploy", author);
     const check = await clone(); const snapshot = await readPackScriptSnapshot(check, "flow", "pack");
-    expect(snapshot.baseRef).toBe(operation === "save" ? "origin/saved/flow" : "origin/wf/flow");
+    expect(snapshot.baseRef).toBe("origin/wf/flow");
     expect(snapshot.files[0].content).toBe("echo keep\n");
-    const ref = operation === "save" ? "saved/flow" : "deploy/flow/#1";
+    const ref = operation === "save" ? "wf/flow" : "deploy/flow/#1";
     const written = parse(runGit(bare, ["show", `${ref}:${layout}workflow.pack.yaml`]));
     expect(normalizePackManifest(written)).toMatchObject({ id: "pack", version: "1.0.0" });
     expect(written.workflows).toHaveLength(2);
@@ -97,16 +115,14 @@ describe("pack manifest save/deploy", () => {
     await expect(ensurePackManifest(repo, "pack", "flow")).rejects.toThrow(/symlink/i);
     expect(readFileSync(path.join(repo, "workflow.pack.yaml"), "utf8")).toBe("id: pack\nversion: '1.0.0'\nworkflows:\n  - id: flow\n    file: workflows/flow.yaml\n");
   });
-  it("refuses a stale save push without overwriting another writer", async () => {
-    const first = await clone(); const stale = await clone();
-    await prepareBranchBase(first, "saved/flow"); await prepareBranchBase(stale, "saved/flow");
-    await writeWorkflowSpecToRepo(first, "pack", "flow", { ...spec, title: "First writer" });
-    await ensurePackManifest(first, "pack", "flow");
-    const result = await commitAndPushSaved(first, "flow", "first", author);
-    await writeWorkflowSpecToRepo(stale, "pack", "flow", spec); await ensurePackManifest(stale, "pack", "flow");
-    await expect(commitAndPushSaved(stale, "flow", "stale", author)).rejects.toThrow();
-    expect(runGit(root, ["--git-dir", bare, "rev-parse", "refs/heads/saved/flow"])).toBe(result.commit);
-    expect(runGit(bare, ["show", "saved/flow:packs/pack/workflows/flow.yaml"])).toContain("First writer");
+  it("refuses a stale prepared save without overwriting another writer", async () => {
+    const config = { remoteUrl: bare, username: author.name, email: author.email };
+    const first = await withPreparedWorkflowSpec({ workflowId: 'flow', packId: 'pack', spec: { ...spec, title: 'First writer' }, config, author, createOnly: true }, async p => p);
+    const stale = await withPreparedWorkflowSpec({ workflowId: 'flow', packId: 'pack', spec, config, author, createOnly: true }, async p => p);
+    await resumePreparedPackCandidate(first, config);
+    await expect(resumePreparedPackCandidate(stale, config)).rejects.toThrow();
+    expect(runGit(root, ['--git-dir', bare, 'rev-parse', 'refs/heads/wf/flow'])).toBe(first.commit);
+    expect(runGit(bare, ['show', 'wf/flow:packs/pack/workflows/flow.yaml'])).toContain('First writer');
   });
 
 });
@@ -157,7 +173,7 @@ describe("runtime manifest compatibility and gitlinks", () => {
     runGit(repo, ["-c", "protocol.file.allow=always", "submodule", "add", sub, location]);
     runGit(repo, ["add", "."]); runGit(repo, ["commit", "-m", "seed"]); runGit(repo, ["push", bare, "HEAD:refs/heads/wf/flow"]);
     const before = runGit(root, ["--git-dir", bare, "rev-parse", "refs/heads/wf/flow"]);
-    const work = await clone(); await prepareBranchBase(work, operation === "save" ? "saved/flow" : "wf/flow", "wf/flow");
+    const work = await clone(); await prepareBranchBase(work, "wf/flow", "wf/flow");
     if (removeIndex) runGit(work, ["rm", "--cached", "-f", "--", location]);
     await expect(writeWorkflowSpecToRepo(work, "pack", "flow", spec)).rejects.toThrow(/gitlink|submodule/i);
     await expect(ensurePackManifest(work, "pack", "flow")).rejects.toThrow(/gitlink|submodule/i);
@@ -189,26 +205,26 @@ describe("unborn, legacy migration, and resource safety", () => {
     runGit(root, ["init", "--bare", "--initial-branch=main", empty]);
     const work = mkdtempSync(path.join(root, "empty-clone-"));
     await cloneClawflows(work, { remoteUrl: empty, username: "Test", email: author.email });
-    await prepareBranchBase(work, operation === "save" ? "saved/flow" : "wf/flow");
+    await prepareBranchBase(work, "wf/flow");
     await writeWorkflowSpecToRepo(work, "pack", "flow", spec);
     await ensurePackManifest(work, "pack", "flow");
-    const result = operation === "save" ? await commitAndPushSaved(work, "flow", "save", author)
+    const result = operation === "save" ? await publishManifestFixture(work, "flow", "save", author)
       : await commitAndPushDeploy(work, "flow", 1, 1, "deploy", author);
-    const ref = operation === "save" ? "saved/flow" : "deploy/flow/#1";
+    const ref = operation === "save" ? "wf/flow" : "deploy/flow/#1";
     const manifest = parse(runGit(root, ["--git-dir", empty, "show", `${ref}:packs/pack/workflow.pack.yaml`]));
     expect(normalizePackManifest(manifest)).toMatchObject({ id: "pack", version: "1.0.0", workflows: [{ id: "flow", file: "workflows/flow.yaml" }] });
     expect(runGit(root, ["--git-dir", empty, "rev-parse", `${ref}^{commit}`])).toBe(result.commit);
   });
   it.each(["save", "deploy"])("safely migrates all string members and preserves other data on %s", async operation => {
     const work = await clone();
-    await prepareBranchBase(work, operation === "save" ? "saved/flow" : "wf/flow");
+    await prepareBranchBase(work, "wf/flow");
     const putWork = (name: string, text: string) => { const file = path.join(work, name); mkdirSync(path.dirname(file), { recursive: true }); writeFileSync(file, text); };
     putWork("workflow.pack.yaml", "# pack comment\nid: pack\ntitle: Legacy pack\nworkflows:\n  - flow # first member\n  - other\n");
     putWork("workflows/flow.yaml", "id: flow\nnodes: []\n"); putWork("workflows/other.yaml", "id: other\nnodes: []\n");
     putWork("scripts/keep.sh", "echo safe\n");
     await writeWorkflowSpecToRepo(work, "pack", "flow", spec); await ensurePackManifest(work, "pack", "flow");
-    if (operation === "save") await commitAndPushSaved(work, "flow", "save", author); else await commitAndPushDeploy(work, "flow", 1, 1, "deploy", author);
-    const ref = operation === "save" ? "saved/flow" : "deploy/flow/#1";
+    if (operation === "save") await publishManifestFixture(work, "flow", "save", author); else await commitAndPushDeploy(work, "flow", 1, 1, "deploy", author);
+    const ref = operation === "save" ? "wf/flow" : "deploy/flow/#1";
     const manifestText = runGit(root, ["--git-dir", bare, "show", `${ref}:workflow.pack.yaml`]);
     expect(manifestText).toContain("# pack comment"); expect(manifestText).toContain("# first member");
     expect(normalizePackManifest(parse(manifestText))).toMatchObject({ id: "pack", title: "Legacy pack", version: "1.0.0", workflows: [{ id: "flow", file: "workflows/flow.yaml" }, { id: "other", file: "workflows/other.yaml" }] });
@@ -252,7 +268,7 @@ describe("unborn, legacy migration, and resource safety", () => {
     const empty = path.join(root, "unborn-index.git"); runGit(root, ["init", "--bare", "--initial-branch=main", empty]);
     const work = mkdtempSync(path.join(root, "unborn-index-"));
     await cloneClawflows(work, { remoteUrl: empty, username: "Test", email: author.email });
-    await prepareBranchBase(work, "saved/flow");
+    await prepareBranchBase(work, "wf/flow");
     const oid = runGit(repo, ["rev-parse", "HEAD"]);
     runGit(work, ["update-index", "--add", "--cacheinfo", `160000,${oid},packs/pack`]);
     await expect(writeWorkflowSpecToRepo(work, "pack", "flow", spec)).rejects.toThrow(/gitlink|submodule/i);
@@ -329,12 +345,12 @@ describe("legacy additions, contract resource paths, and YAML aliases", () => {
     runGit(repo, ["add", "."]); runGit(repo, ["commit", "-m", "legacy"]);
     runGit(repo, ["push", bare, "HEAD:refs/heads/wf/flow"]);
     const work = await clone();
-    await prepareBranchBase(work, operation === "save" ? "saved/flow" : "wf/flow", "wf/flow");
+    await prepareBranchBase(work, "wf/flow", "wf/flow");
     await writeWorkflowSpecToRepo(work, "pack", "flow", spec);
     await ensurePackManifest(work, "pack", "flow");
-    if (operation === "save") await commitAndPushSaved(work, "flow", "save", author);
+    if (operation === "save") await publishManifestFixture(work, "flow", "save", author);
     else await commitAndPushDeploy(work, "flow", 1, 1, "deploy", author);
-    const ref = operation === "save" ? "saved/flow" : "deploy/flow/#1";
+    const ref = operation === "save" ? "wf/flow" : "deploy/flow/#1";
     const text = runGit(bare, ["show", `${ref}:workflow.pack.yaml`]);
     expect(text).toContain("# preserve");
     expect(normalizePackManifest(parse(text))).toMatchObject({ version: "1.0.0", workflows: [
@@ -426,12 +442,12 @@ describe("manifest candidates are selected by pack identity", () => {
     runGit(repo, ["add", "."]); runGit(repo, ["commit", "-m", "two packs"]);
     runGit(repo, ["push", bare, "HEAD:refs/heads/wf/flow"]);
     const work = await clone();
-    await prepareBranchBase(work, operation === "save" ? "saved/flow" : "wf/flow", "wf/flow");
+    await prepareBranchBase(work, "wf/flow", "wf/flow");
     await writeWorkflowSpecToRepo(work, "pack", "flow", spec); await ensurePackManifest(work, "pack", "flow");
     await pruneLegacyPackCopy(work, "pack");
-    if (operation === "save") await commitAndPushSaved(work, "flow", "save", author);
+    if (operation === "save") await publishManifestFixture(work, "flow", "save", author);
     else await commitAndPushDeploy(work, "flow", 1, 1, "deploy", author);
-    const ref = operation === "save" ? "saved/flow" : "deploy/flow/#1";
+    const ref = operation === "save" ? "wf/flow" : "deploy/flow/#1";
     const showBytes = (name: string) => execFileSync("git", ["--git-dir", bare, "show", `${ref}:${name}`], { cwd: root, env: gitEnvironment() });
     expect(showBytes("workflow.pack.yaml")).toEqual(Buffer.from(rootManifest));
     expect(showBytes("workflows/root.yaml")).toEqual(Buffer.from("id: root-flow\nnodes: []\n"));
@@ -440,7 +456,7 @@ describe("manifest candidates are selected by pack identity", () => {
     expect(runGit(bare, ["show", `${ref}:packs/pack/workflows/flow.yaml`])).toContain("Updated");
     expect(normalizePackManifest(parse(runGit(bare, ["show", `${ref}:packs/pack/workflow.pack.yaml`])))).toMatchObject({ id: "pack" });
     const reader = await clone();
-    const snapshot = await readPackScriptSnapshot(reader, "flow", "pack", operation === "save" ? "draft" : "current");
+    const snapshot = await readFixtureVersion(reader, "flow", "pack", operation === "save" ? "draft" : "current");
     expect(snapshot.files.map(file => file.content)).toEqual(["echo target untouched\n"]);
   });
   it("can create a new nested target without replacing a different root pack", async () => {
@@ -456,12 +472,14 @@ describe("manifest candidates are selected by pack identity", () => {
     await expect(ensurePackManifest(repo, "pack", "flow")).rejects.toThrow(/manifest/i);
     expect(readFileSync(path.join(repo, "packs/pack/workflow.pack.yaml"), "utf8")).toBe(other);
   });
-  it("fails closed for two target manifests without changing either", async () => {
+  it("prefers the root manifest and preserves nested Pack resources", async () => {
     put("workflow.pack.yaml", targetManifest); put("packs/pack/workflow.pack.yaml", targetManifest);
     put("packs/pack/workflows/flow.yaml", "id: flow\nnodes: []\n");
-    await expect(writeWorkflowSpecToRepo(repo, "pack", "flow", spec)).rejects.toThrow(/conflict/i);
-    await expect(ensurePackManifest(repo, "pack", "flow")).rejects.toThrow(/conflict/i);
+    await writeWorkflowSpecToRepo(repo, "pack", "flow", spec);
+    await ensurePackManifest(repo, "pack", "flow");
     expect(readFileSync(path.join(repo, "workflow.pack.yaml"), "utf8")).toBe(targetManifest);
+    expect(normalizePackManifest(parse(readFileSync(path.join(repo, "workflow.pack.yaml"), "utf8")))).toMatchObject({ id: "pack" });
+    expect(readFileSync(path.join(repo, "workflows/flow.yaml"), "utf8")).toContain("Updated");
     expect(readFileSync(path.join(repo, "packs/pack/workflow.pack.yaml"), "utf8")).toBe(targetManifest);
     expect(readFileSync(path.join(repo, "packs/pack/workflows/flow.yaml"), "utf8")).toBe("id: flow\nnodes: []\n");
   });
@@ -582,17 +600,27 @@ describe("reader-wide Pack ownership and workflow ID uniqueness", () => {
     ["save", "other"], ["deploy", "other"],
     ["save", "packs/other"], ["deploy", "packs/other"],
     ["save", "packs"], ["deploy", "packs"],
-  ])("rejects duplicate workflow ID during %s when another manifest is in %s", async (operation, directory) => {
+  ])("checks duplicate workflow ID during %s when another manifest is in %s", async (operation, directory) => {
     const otherId = path.basename(directory);
     const otherManifest = `id: ${otherId}\nversion: '1.0.0'\nworkflows: [{id: flow, file: workflows/flow.yaml}]\n`;
     put("workflow.pack.yaml", rootManifest); put("workflows/flow.yaml", rootSpec);
     put(`${directory}/workflow.pack.yaml`, otherManifest); put(`${directory}/workflows/flow.yaml`, "id: flow\ntitle: Other\nnodes: []\n"); seed();
     const base = runGit(root, ["--git-dir", bare, "rev-parse", "refs/heads/wf/flow"]);
-    const work = await clone(); await prepareBranchBase(work, operation === "save" ? "saved/flow" : "wf/flow", "wf/flow");
-    await expect(readPackScriptSnapshot(work, "flow", "pack", "current")).rejects.toThrow(/conflict|ambig/i);
-    await expect(writeWorkflowSpecToRepo(work, "pack", "flow", spec)).rejects.toThrow(/workflow|conflict|ambig/i);
-    await expect(ensurePackManifest(work, "pack", "flow")).rejects.toThrow(/workflow|conflict|ambig/i);
-    expect(readFileSync(path.join(work, "workflows/flow.yaml"), "utf8")).toBe(rootSpec);
+    const work = await clone(); await prepareBranchBase(work, "wf/flow", "wf/flow");
+    const ordinary = directory === "packs" || directory.startsWith("packs/");
+    if (ordinary) {
+      const snapshot = await readPackScriptSnapshot(work, "flow", "pack", "draft", { includeVersionFiles: true });
+      expect(snapshot.packPath).toBe("");
+      await writeWorkflowSpecToRepo(work, "pack", "flow", spec);
+      await ensurePackManifest(work, "pack", "flow");
+      expect(readFileSync(path.join(work, "workflows/flow.yaml"), "utf8")).toContain("Updated");
+    } else {
+      await expect(readPackScriptSnapshot(work, "flow", "pack", "draft")).rejects.toThrow(/conflict|ambig/i);
+      await expect(writeWorkflowSpecToRepo(work, "pack", "flow", spec)).rejects.toThrow(/workflow|conflict|ambig/i);
+      await expect(ensurePackManifest(work, "pack", "flow")).rejects.toThrow(/workflow|conflict|ambig/i);
+    }
+    ordinary ? expect(readFileSync(path.join(work, "workflows/flow.yaml"), "utf8")).toContain("Updated")
+      : expect(readFileSync(path.join(work, "workflows/flow.yaml"), "utf8")).toBe(rootSpec);
     expect(readFileSync(path.join(work, directory, "workflow.pack.yaml"), "utf8")).toBe(otherManifest);
     expect(runGit(root, ["--git-dir", bare, "rev-parse", "refs/heads/wf/flow"])).toBe(base);
     expect(runGit(root, ["--git-dir", bare, "for-each-ref", "--format=%(refname)", "refs/heads/saved/flow", "refs/tags/deploy/flow/"])).toBe("");
@@ -600,7 +628,7 @@ describe("reader-wide Pack ownership and workflow ID uniqueness", () => {
   it.each([
     ["save", "other", "action"], ["deploy", "other", "action"], ["save", "packs/other", "action"], ["deploy", "packs/other", "action"],
     ["save", "other", "workflow"], ["deploy", "other", "workflow"], ["save", "packs/other", "workflow"], ["deploy", "packs/other", "workflow"],
-  ])("does not overwrite a %s target owned by an unrelated Pack at %s (%s)", async (operation, directory, kind) => {
+  ])("checks the %s target owned by an unrelated Pack at %s (%s)", async (operation, directory, kind) => {
     const otherId = path.basename(directory); const target = `${directory}/shared/flow.yaml`;
     const targetManifest = `id: pack\nversion: '1.0.0'\nworkflows: [{id: flow, file: ${target}}]\n`;
     const otherManifest = kind === "workflow"
@@ -609,10 +637,18 @@ describe("reader-wide Pack ownership and workflow ID uniqueness", () => {
     put("workflow.pack.yaml", targetManifest); put(target, rootSpec);
     put(`${directory}/workflow.pack.yaml`, otherManifest); put(`${directory}/workflows/other.yaml`, "id: other-flow\nnodes: []\n"); seed();
     const base = runGit(root, ["--git-dir", bare, "rev-parse", "refs/heads/wf/flow"]);
-    const work = await clone(); await prepareBranchBase(work, operation === "save" ? "saved/flow" : "wf/flow", "wf/flow");
-    await expect(writeWorkflowSpecToRepo(work, "pack", "flow", spec)).rejects.toThrow(/resource|conflict|shared/i);
-    await expect(ensurePackManifest(work, "pack", "flow")).rejects.toThrow(/resource|conflict|shared/i);
-    expect(readFileSync(path.join(work, target), "utf8")).toBe(rootSpec);
+    const work = await clone(); await prepareBranchBase(work, "wf/flow", "wf/flow");
+    const ordinary = directory === "packs" || directory.startsWith("packs/");
+    if (ordinary) {
+      await writeWorkflowSpecToRepo(work, "pack", "flow", spec);
+      await ensurePackManifest(work, "pack", "flow");
+      expect(readFileSync(path.join(work, target), "utf8")).toContain("Updated");
+    } else {
+      await expect(writeWorkflowSpecToRepo(work, "pack", "flow", spec)).rejects.toThrow(/resource|conflict|shared/i);
+      await expect(ensurePackManifest(work, "pack", "flow")).rejects.toThrow(/resource|conflict|shared/i);
+    }
+    ordinary ? expect(readFileSync(path.join(work, target), "utf8")).toContain("Updated")
+      : expect(readFileSync(path.join(work, target), "utf8")).toBe(rootSpec);
     expect(readFileSync(path.join(work, directory, "workflow.pack.yaml"), "utf8")).toBe(otherManifest);
     expect(runGit(root, ["--git-dir", bare, "rev-parse", "refs/heads/wf/flow"])).toBe(base);
     expect(runGit(root, ["--git-dir", bare, "for-each-ref", "--format=%(refname)", "refs/heads/saved/flow", "refs/tags/deploy/flow/"])).toBe("");
@@ -620,7 +656,7 @@ describe("reader-wide Pack ownership and workflow ID uniqueness", () => {
   it.each([
     ["save", "other", false], ["deploy", "other", false], ["save", "packs/other", false], ["deploy", "packs/other", false],
     ["save", "other", true], ["deploy", "other", true], ["save", "packs/other", true], ["deploy", "packs/other", true],
-  ])("rejects %s when the workflow is another Pack manifest at %s (alias=%s)", async (operation, directory, useAlias) => {
+  ])("checks %s when the workflow is another Pack manifest at %s (alias=%s)", async (operation, directory, useAlias) => {
     // This is both a valid Pack manifest and a workflow with id flow.
     const otherManifest = "id: flow\nversion: '1.0.0'\nworkflows: [{id: other-flow, file: workflows/other.yaml}]\nnodes: []\n";
     put(`${directory}/workflow.pack.yaml`, otherManifest);
@@ -630,12 +666,19 @@ describe("reader-wide Pack ownership and workflow ID uniqueness", () => {
     put("workflow.pack.yaml", targetManifest); seed();
     const refs = runGit(root, ["--git-dir", bare, "for-each-ref", "--format=%(refname) %(objectname)"]);
     const base = runGit(root, ["--git-dir", bare, "rev-parse", "refs/heads/wf/flow"]);
-    const work = await clone(); await prepareBranchBase(work, operation === "save" ? "saved/flow" : "wf/flow", "wf/flow");
-    await expect(writeWorkflowSpecToRepo(work, "pack", "flow", spec)).rejects.toThrow(/resource|manifest|conflict/i);
-    await expect(ensurePackManifest(work, "pack", "flow")).rejects.toThrow(/resource|manifest|conflict/i);
-    expect(readFileSync(path.join(work, directory, "workflow.pack.yaml"), "utf8")).toBe(otherManifest);
+    const work = await clone(); await prepareBranchBase(work, "wf/flow", "wf/flow");
+    const ordinary = directory === "packs" || directory.startsWith("packs/");
+    if (ordinary) {
+      await writeWorkflowSpecToRepo(work, "pack", "flow", spec);
+      await ensurePackManifest(work, "pack", "flow");
+      expect(readFileSync(path.join(work, target), "utf8")).toContain("Updated");
+    } else {
+      await expect(writeWorkflowSpecToRepo(work, "pack", "flow", spec)).rejects.toThrow(/resource|manifest|conflict/i);
+      await expect(ensurePackManifest(work, "pack", "flow")).rejects.toThrow(/resource|manifest|conflict/i);
+    }
+    if (!ordinary) expect(readFileSync(path.join(work, directory, "workflow.pack.yaml"), "utf8")).toBe(otherManifest);
     expect(readFileSync(path.join(work, "workflow.pack.yaml"), "utf8")).toBe(targetManifest);
-    expect(runGit(work, ["status", "--porcelain"])).toBe("");
+    expect(runGit(work, ["status", "--porcelain"])).toBe(ordinary ? `M ${directory}/workflow.pack.yaml` : "");
     expect(runGit(root, ["--git-dir", bare, "for-each-ref", "--format=%(refname) %(objectname)"])).toBe(refs);
     expect(runGit(root, ["--git-dir", bare, "show", `${base}:${directory}/workflow.pack.yaml`])).toBe(otherManifest.trimEnd());
   });
@@ -643,14 +686,14 @@ describe("reader-wide Pack ownership and workflow ID uniqueness", () => {
     const otherManifest = "id: other\nversion: '1.0.0'\nworkflows: [{id: other-flow, file: workflows/other.yaml}]\n";
     put("workflow.pack.yaml", rootManifest); put("workflows/flow.yaml", rootSpec); put("scripts/run.sh", "echo keep\n");
     put(`${directory}/workflow.pack.yaml`, otherManifest); put(`${directory}/workflows/other.yaml`, "id: other-flow\nnodes: []\n"); seed();
-    const work = await clone(); await prepareBranchBase(work, operation === "save" ? "saved/flow" : "wf/flow", "wf/flow");
+    const work = await clone(); await prepareBranchBase(work, "wf/flow", "wf/flow");
     await writeWorkflowSpecToRepo(work, "pack", "flow", spec); await ensurePackManifest(work, "pack", "flow");
-    if (operation === "save") await commitAndPushSaved(work, "flow", "save", author); else await commitAndPushDeploy(work, "flow", 1, 1, "deploy", author);
-    const ref = operation === "save" ? "saved/flow" : "deploy/flow/#1";
+    if (operation === "save") await publishManifestFixture(work, "flow", "save", author); else await commitAndPushDeploy(work, "flow", 1, 1, "deploy", author);
+    const ref = operation === "save" ? "wf/flow" : "deploy/flow/#1";
     const read = (file: string) => execFileSync("git", ["--git-dir", bare, "show", `${ref}:${file}`], { cwd: root, env: gitEnvironment() });
     expect(read(`${directory}/workflow.pack.yaml`)).toEqual(Buffer.from(otherManifest));
     expect(read(`${directory}/workflows/other.yaml`)).toEqual(Buffer.from("id: other-flow\nnodes: []\n"));
-    const verify = await clone(); const snapshot = await readPackScriptSnapshot(verify, "flow", "pack", operation === "save" ? "draft" : "current");
+    const verify = await clone(); const snapshot = await readFixtureVersion(verify, "flow", "pack", operation === "save" ? "draft" : "current");
     expect(snapshot.files[0].content).toBe("echo keep\n");
   });
   it("fails closed on a malformed manifest in an unrelated directory", async () => {

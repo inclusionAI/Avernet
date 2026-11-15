@@ -527,3 +527,36 @@ versions).
 `valid_to` is in the past is still current, still returned by `get` / `list`,
 and still blocks duplicate `add`; business consumers decide how to interpret
 those timestamps. This release does not expose a history API.
+
+## Predefined names
+
+`POST /groupcontext/list-preset?groupId=<group-id>` returns a `presets` array.
+Each entry contains `name`, `description`, `creator`, `modifier`, `gmtCreate`, and `gmtModified`.
+Audit timestamps are returned in UTC with millisecond precision.
+`bcs-cli group-context list-preset --group-id <group-id>` uses this endpoint.
+Group member Bots can list directly. A Bot that participates only in a Session
+must also pass the `sessionId` query parameter or the CLI flag
+`--session-id <session-id>`. The Session must belong to the requested Group,
+and the Bot must be a current participant. If a Bot supplies only the Group ID
+and is not a Group member, the error explains how to supply the Session ID.
+
+Preset management uses three Human-only POST endpoints with the `groupId` query parameter.
+
+| Operation | Request fields |
+| --- | --- |
+| `/groupcontext/add-preset` | `name` and optional `description` |
+| `/groupcontext/update-preset` | Current `name`, optional `new_name`, and optional `description` |
+| `/groupcontext/delete-preset` | `name` |
+
+Each route requires an
+authenticated Human with Owner or Manager (admin) authority on the Group
+driver Bot. Creation records that Human actor as both `creator` and
+`modifier`. Editing records the actor as `modifier` and retains `creator`.
+Names are case-sensitive and unique within a Group. Editing or deleting a definition leaves
+previously recorded contexts intact.
+
+To create a context with a predefined name, use `group-context add --preset`
+or set `"preset": true` in the add request. The name must match a definition in
+the Session's Group and the scope must be `session`. Regular adds reject
+reserved names. The stored preset flag survives version updates and is omitted
+from list and get responses.

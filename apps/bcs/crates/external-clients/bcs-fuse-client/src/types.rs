@@ -202,6 +202,15 @@ pub struct ExpertRecommendation {
 // Recommend Types
 // ============================================================================
 
+/// Provider recall scope of a recommend request.
+///
+/// Only the controlled availability values are expressible here; raw JSON or
+/// external HTTP types never enter the Core contract.
+#[derive(Debug, Clone, Serialize)]
+pub struct RecommendWorkerFilters {
+    pub availability: Vec<String>,
+}
+
 /// Recommend workers request sent to bcsfuse.
 ///
 /// Sent to `POST /api/v1/recommend`.
@@ -213,6 +222,10 @@ pub struct RecommendWorkersRequest {
     pub top_k: u32,
     /// Minimum relevance score threshold.
     pub min_score: f64,
+    /// Recall filters. `None` keeps the legacy byte-compatible body and the
+    /// provider default behaviour, so the field is omitted entirely.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filters: Option<RecommendWorkerFilters>,
 }
 
 /// Recommend workers response from bcsfuse.
@@ -326,6 +339,43 @@ mod tests {
             None => panic!("next_actions missing"),
         };
         assert_eq!(actions, vec!["step 1"]);
+    }
+
+    #[test]
+    fn recommend_request_omits_filters_when_absent_and_sends_controlled_values() {
+        let legacy = RecommendWorkersRequest {
+            question: "legacy".to_string(),
+            top_k: 20,
+            min_score: 0.0,
+            filters: None,
+        };
+        let body = serde_json::to_value(&legacy).expect("serialize legacy request");
+        assert!(body.get("filters").is_none());
+        assert_eq!(
+            body,
+            serde_json::json!({"question": "legacy", "topK": 20, "min_score": 0.0})
+        );
+
+        let authorized = RecommendWorkersRequest {
+            question: "authorized".to_string(),
+            top_k: 20,
+            min_score: 0.0,
+            filters: Some(RecommendWorkerFilters {
+                availability: ["public", "protected", "private"]
+                    .into_iter()
+                    .map(String::from)
+                    .collect(),
+            }),
+        };
+        assert_eq!(
+            serde_json::to_value(&authorized).expect("serialize authorized request"),
+            serde_json::json!({
+                "question": "authorized",
+                "topK": 20,
+                "min_score": 0.0,
+                "filters": {"availability": ["public", "protected", "private"]}
+            })
+        );
     }
 }
 

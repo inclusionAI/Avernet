@@ -532,8 +532,8 @@ class TestRelayDtoContract:
         assert patch.output_patch == {"output": "evidence"}
         assert patch.execution_decision == "ACCEPTED"
 
-    def test_event_level_artifacts_field_now_forbidden(self):
-        """event 内携带 artifacts(extra=forbid)→ to_domain 校验拒绝:顶层是唯一合法位置。"""
+    def test_event_level_artifacts_are_ignored_not_promoted(self):
+        """Unknown event keys are discarded; only top-level artifacts are consumed."""
 
         event = self._accepted_event()
         event["artifacts"] = [_wire_item()]
@@ -545,7 +545,4 @@ class TestRelayDtoContract:
             event_type=TaskReportEventType.EXECUTION_RESULT,
             event=event,
         )
-        # event 在报文上是宽松 dict,ExecutionEventDTO(extra=forbid) 的拒绝
-        # 发生在 to_domain 内(与 wire 路由的 4xx 信封一致)。
-        with pytest.raises(Exception):  # noqa: B017
-            dto.to_domain()
+        assert dto.to_domain().event.artifact_patch is None

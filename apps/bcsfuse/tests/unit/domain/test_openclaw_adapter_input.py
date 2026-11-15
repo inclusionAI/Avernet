@@ -10,11 +10,11 @@ from __future__ import annotations
 
 import pytest
 
-from src.domain.models.openclaw_adapter_input import (
+from app.domain.models.openclaw_adapter_input import (
     OpenClawAdapterInput,
     AdapterOptions,
 )
-from src.domain.models.execution_packet import (
+from app.domain.models.execution_packet import (
     ExecutionPacket,
     ContextPack,
     ResourcePack,
@@ -22,9 +22,9 @@ from src.domain.models.execution_packet import (
     Guardrails,
     OutputContract,
 )
-from src.domain.models.task_spec import TaskSpec, RiskLevel
-from src.domain.models.plan_draft import PlanDraft, PlanStep
-from src.domain.models.team_spec import TeamSpec, RoleAssignment
+from app.domain.models.task_spec import TaskSpec, RiskLevel
+from app.domain.models.plan_draft import PlanDraft, PlanStep
+from app.domain.models.team_spec import TeamSpec, RoleAssignment
 
 
 # =============================================================================

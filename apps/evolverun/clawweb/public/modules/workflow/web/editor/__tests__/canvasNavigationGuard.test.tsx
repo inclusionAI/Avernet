@@ -103,7 +103,7 @@ describe('canvas and Pack route guard', () => {
     const id = 'navigation-combined'
     const session = sessionFor(id)
     const file = { path: 'workflows/flow.yaml', contentBase64: 'b2xk', mode: '100644' as const }
-    const snapshot = { workflowId: id, packId: id, baseRef: `origin/wf/${id}`, baseCommit: 'a'.repeat(40), draftHead: null, versionFiles: [file] }
+    const snapshot = { workflowId: id, packId: id, baseRef: `refs/tags/deploy/${id}/#1`, baseCommit: 'a'.repeat(40), draftHead: null, versionFiles: [file] }
     updateVersion(session, 'current', { snapshot, files: [{ ...file, contentBase64: 'bmV3' }] })
     mount()
     act(() => store().updateSpecField('title', 'Unsaved'))

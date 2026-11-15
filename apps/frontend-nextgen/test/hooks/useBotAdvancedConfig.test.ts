@@ -5,7 +5,13 @@ import { botAdvancedConfigService } from '@/services/botWorkshop/botAdvancedConf
 import { act, renderHook, waitFor } from '@testing-library/react';
 
 jest.mock('@/services/botWorkshop/botAdvancedConfigService', () => ({
-  botAdvancedConfigService: { listIdentityFiles: jest.fn(), getIdentityFile: jest.fn(), saveIdentityFile: jest.fn() },
+  botAdvancedConfigService: {
+    listIdentityFiles: jest.fn(),
+    getIdentityFile: jest.fn(),
+    saveIdentityFile: jest.fn(),
+    listChannels: jest.fn(),
+    deleteChannel: jest.fn(),
+  },
 }));
 jest.mock('sonner', () => ({ toast: { success: jest.fn(), error: jest.fn() } }));
 
@@ -14,6 +20,19 @@ beforeEach(() => {
   jest.mocked(botAdvancedConfigService.listIdentityFiles).mockResolvedValue([{ type: 'RULES', exists: true }]);
   jest.mocked(botAdvancedConfigService.getIdentityFile).mockResolvedValue('# rules');
   jest.mocked(botAdvancedConfigService.saveIdentityFile).mockResolvedValue({ code: 200000, data: {} });
+  jest.mocked(botAdvancedConfigService.listChannels).mockResolvedValue([]);
+  jest.mocked(botAdvancedConfigService.deleteChannel).mockResolvedValue({ code: 200000, data: {} });
+});
+
+test('协作者修改渠道时透传 Bot Owner', async () => {
+  const { result } = renderHook(() => useBotAdvancedConfig('shared', true, 'owner', false, true));
+  await waitFor(() => expect(result.current.loading).toBe(false));
+
+  await act(async () => {
+    await result.current.deleteChannel(7);
+  });
+
+  expect(botAdvancedConfigService.deleteChannel).toHaveBeenCalledWith('shared', 7, 'owner');
 });
 
 test.each(['draft', 'verify', 'online'] as const)('MD 列表、读取、刷新共用 Bot Owner 和 %s 阶段', async (stage) => {

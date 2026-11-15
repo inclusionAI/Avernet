@@ -5,6 +5,7 @@ import { useDebounce } from '../hooks/useDebounce'
 import { getClientUser } from '@avernet/clawweb-shared/web/hooks/useClientUser'
 import StatusBadge from '@avernet/workflow/web/components/StatusBadge'
 import StatusFilter from '../components/StatusFilter'
+import RunMarkers from '../components/RunMarkers'
 import SearchInput from '@avernet/workflow/web/components/SearchInput'
 import TimeRangeFilter, { toTimeRange } from '../components/TimeRangeFilter'
 import EmptyState from '@avernet/workflow/web/components/EmptyState'
@@ -427,7 +428,7 @@ export default function WorkflowRuns() {
                     发起 Bot
                   </th>
                   <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
-                    环境
+                    运行引擎
                   </th>
                   <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
                     工作流版本
@@ -553,6 +554,7 @@ function RunRow({ run, onAutoHeal, onAnalyze, analyzeMutation }: { run: FlowRun;
     >
       <td className="whitespace-nowrap px-4 py-3">
         <div className="font-mono text-sm text-gray-900">{run.flow_id}</div>
+        <RunMarkers run={run} />
       </td>
       <td className="whitespace-nowrap px-4 py-3">
         <StatusBadge status={run.status} />

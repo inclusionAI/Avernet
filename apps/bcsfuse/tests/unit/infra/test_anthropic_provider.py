@@ -9,15 +9,15 @@ import pytest
 from unittest.mock import Mock, patch, MagicMock
 import httpx
 
-from src.infra.llm.providers.anthropic_compatible_provider import (
+from app.infra.llm.providers.anthropic_compatible_provider import (
     AnthropicCompatibleProvider,
     AnthropicProviderError,
     AnthropicAuthError,
     AnthropicProviderTimeout,
 )
-from src.domain.models.llm_request import LLMRequest
-from src.domain.models.llm_task_spec import LLMTaskSpec, TaskType
-from src.domain.models.llm_response import FinishReason
+from app.domain.models.llm_request import LLMRequest
+from app.domain.models.llm_task_spec import LLMTaskSpec, TaskType
+from app.domain.models.llm_response import FinishReason
 
 
 class TestAnthropicCompatibleProviderInit:
@@ -25,7 +25,7 @@ class TestAnthropicCompatibleProviderInit:
 
     def test_init_with_settings(self):
         """测试使用 settings 初始化"""
-        from src.infra.llm.config.llm_settings import LLMSettings
+        from app.infra.llm.config.llm_settings import LLMSettings
 
         settings = LLMSettings(
             base_url="https://api.example.com",
@@ -103,7 +103,7 @@ class TestAnthropicCompatibleProviderRequest:
 
     def test_build_request_body_basic(self):
         """测试构建基本请求体"""
-        from src.infra.llm.config.llm_settings import LLMSettings
+        from app.infra.llm.config.llm_settings import LLMSettings
 
         settings = LLMSettings(
             base_url="https://api.example.com",
@@ -127,7 +127,7 @@ class TestAnthropicCompatibleProviderRequest:
 
     def test_build_request_body_with_system_prompt(self):
         """测试构建带 system prompt 的请求体"""
-        from src.infra.llm.config.llm_settings import LLMSettings
+        from app.infra.llm.config.llm_settings import LLMSettings
 
         settings = LLMSettings(
             base_url="https://api.example.com",
@@ -149,7 +149,7 @@ class TestAnthropicCompatibleProviderRequest:
 
     def test_build_request_body_with_custom_params(self):
         """测试构建带自定义参数的请求体"""
-        from src.infra.llm.config.llm_settings import LLMSettings
+        from app.infra.llm.config.llm_settings import LLMSettings
 
         settings = LLMSettings(
             base_url="https://api.example.com",
@@ -176,7 +176,7 @@ class TestAnthropicCompatibleProviderResponse:
 
     def test_parse_success_response(self):
         """测试解析成功响应"""
-        from src.infra.llm.config.llm_settings import LLMSettings
+        from app.infra.llm.config.llm_settings import LLMSettings
 
         settings = LLMSettings(
             base_url="https://api.example.com",
@@ -210,7 +210,7 @@ class TestAnthropicCompatibleProviderResponse:
 
     def test_parse_response_with_stop_reason_length(self):
         """测试解析 length stop_reason"""
-        from src.infra.llm.config.llm_settings import LLMSettings
+        from app.infra.llm.config.llm_settings import LLMSettings
 
         settings = LLMSettings(
             base_url="https://api.example.com",
@@ -232,7 +232,7 @@ class TestAnthropicCompatibleProviderResponse:
 
     def test_parse_empty_response(self):
         """测试解析空响应"""
-        from src.infra.llm.config.llm_settings import LLMSettings
+        from app.infra.llm.config.llm_settings import LLMSettings
 
         settings = LLMSettings(
             base_url="https://api.example.com",
@@ -259,7 +259,7 @@ class TestAnthropicCompatibleProviderErrors:
 
     def test_handle_401_error(self):
         """测试处理 401 认证错误"""
-        from src.infra.llm.config.llm_settings import LLMSettings
+        from app.infra.llm.config.llm_settings import LLMSettings
 
         settings = LLMSettings(
             base_url="https://api.example.com",
@@ -280,7 +280,7 @@ class TestAnthropicCompatibleProviderErrors:
 
     def test_handle_403_error(self):
         """测试处理 403 权限错误"""
-        from src.infra.llm.config.llm_settings import LLMSettings
+        from app.infra.llm.config.llm_settings import LLMSettings
 
         settings = LLMSettings(
             base_url="https://api.example.com",
@@ -297,7 +297,7 @@ class TestAnthropicCompatibleProviderErrors:
 
     def test_handle_4xx_error(self):
         """测试处理 4xx 客户端错误"""
-        from src.infra.llm.config.llm_settings import LLMSettings
+        from app.infra.llm.config.llm_settings import LLMSettings
 
         settings = LLMSettings(
             base_url="https://api.example.com",
@@ -316,7 +316,7 @@ class TestAnthropicCompatibleProviderErrors:
 
     def test_handle_5xx_error(self):
         """测试处理 5xx 服务端错误"""
-        from src.infra.llm.config.llm_settings import LLMSettings
+        from app.infra.llm.config.llm_settings import LLMSettings
 
         settings = LLMSettings(
             base_url="https://api.example.com",
@@ -335,7 +335,7 @@ class TestAnthropicCompatibleProviderErrors:
 
     def test_handle_timeout(self):
         """测试处理超时"""
-        from src.infra.llm.config.llm_settings import LLMSettings
+        from app.infra.llm.config.llm_settings import LLMSettings
 
         settings = LLMSettings(
             base_url="https://api.example.com",
@@ -356,7 +356,7 @@ class TestAnthropicCompatibleProviderTokenSafety:
 
     def test_token_not_in_error_message(self):
         """测试 token 不出现在错误信息中"""
-        from src.infra.llm.config.llm_settings import LLMSettings
+        from app.infra.llm.config.llm_settings import LLMSettings
 
         secret_token = "sk-secret-token-12345"
         settings = LLMSettings(
@@ -379,7 +379,7 @@ class TestAnthropicCompatibleProviderTokenSafety:
 
     def test_token_only_in_header(self):
         """测试 token 只在 header 中"""
-        from src.infra.llm.config.llm_settings import LLMSettings
+        from app.infra.llm.config.llm_settings import LLMSettings
 
         settings = LLMSettings(
             base_url="https://api.example.com",
@@ -425,7 +425,7 @@ class TestAnthropicCompatibleProviderTokenSafety:
         Some Anthropic-compatible endpoints require dual auth headers.
         The provider automatically sends both to ensure compatibility.
         """
-        from src.infra.llm.config.llm_settings import LLMSettings
+        from app.infra.llm.config.llm_settings import LLMSettings
 
         settings = LLMSettings(
             base_url="https://mock-llm-endpoint.example.com/api/anthropic",
@@ -452,7 +452,7 @@ class TestAnthropicCompatibleProviderGenerate:
 
     def test_generate_success(self):
         """测试成功生成"""
-        from src.infra.llm.config.llm_settings import LLMSettings
+        from app.infra.llm.config.llm_settings import LLMSettings
 
         settings = LLMSettings(
             base_url="https://api.example.com",
@@ -486,7 +486,7 @@ class TestAnthropicCompatibleProviderGenerate:
 
     def test_generate_with_custom_model(self):
         """测试使用自定义模型"""
-        from src.infra.llm.config.llm_settings import LLMSettings
+        from app.infra.llm.config.llm_settings import LLMSettings
 
         settings = LLMSettings(
             base_url="https://api.example.com",

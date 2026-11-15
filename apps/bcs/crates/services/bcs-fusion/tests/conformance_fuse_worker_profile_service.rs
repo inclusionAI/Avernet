@@ -4,7 +4,9 @@ use std::time::Duration;
 
 use bcs_fuse_client::FuseClient;
 use bcs_fusion::FuseWorkerProfileService;
-use bcs_service_api::core::{WorkerProfile, WorkerProfileCoreService, WorkerRecommendCommand};
+use bcs_service_api::core::{
+    WorkerProfile, WorkerProfileCoreService, WorkerRecommendCommand, WorkerRecommendationScope,
+};
 use serde_json::{Value, json};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -171,6 +173,7 @@ async fn conformance_fuse_worker_profile_service_forwards_core_recommend_command
             query: "元歌协作".to_string(),
             top_k: 7,
             min_score: 0.42,
+            scope: WorkerRecommendationScope::LegacyDefault,
         },
         &[("bot-worker", 0.91, Some("Rust expert"))],
         &response,
@@ -205,4 +208,83 @@ async fn conformance_fuse_worker_profile_service_forwards_core_recommend_command
             },
         ]
     );
+}
+
+#[tokio::test]
+async fn conformance_fuse_worker_profile_service_maps_scope_to_controlled_availability_filters() {
+    let response = json!({"recommendations": []});
+    let (base_url, request_handle) =
+        spawn_worker_profile_server(vec![response.clone(), response]).await;
+    let client = Arc::new(FuseClient::for_test_with_url(base_url).expect("construct client"));
+    let service = FuseWorkerProfileService::new(client);
+
+    service
+        .recommend_workers(WorkerRecommendCommand {
+            query: "legacy recall".to_string(),
+            top_k: 20,
+            min_score: 0.0,
+            scope: WorkerRecommendationScope::LegacyDefault,
+        })
+        .await
+        .expect("legacy recommendation");
+    service
+        .recommend_workers(WorkerRecommendCommand {
+            query: "authorized recall".to_string(),
+            top_k: 20,
+            min_score: 0.0,
+            scope: WorkerRecommendationScope::AllVisibilities,
+        })
+        .await
+        .expect("all-visibilities recommendation");
+
+    let requests = timeout(IO_TIMEOUT, request_handle)
+        .await
+        .expect("worker-profile fixture join timed out")
+        .expect("worker-profile requests captured");
+    assert_eq!(requests.len(), 2);
+
+    // LegacyDefault keeps the byte-compatible request body: no `filters` key
+    // at all, so the BCSFuse provider default (private excluded) is preserved.
+    assert_eq!(
+        requests[0],
+        CapturedRequest {
+            method: "POST".to_string(),
+            path: "/api/v1/recommend".to_string(),
+            body: json!({
+                "question": "legacy recall",
+                "topK": 20,
+                "min_score": 0.0
+            }),
+        }
+    );
+    assert!(requests[0].body.get("filters").is_none());
+
+    assert_eq!(
+        requests[1],
+        CapturedRequest {
+            method: "POST".to_string(),
+            path: "/api/v1/recommend".to_string(),
+            body: json!({
+                "question": "authorized recall",
+                "topK": 20,
+                "min_score": 0.0,
+                "filters": {
+                    "availability": ["public", "protected", "private"]
+                }
+            }),
+        }
+    );
+    let keys = requests[1]
+        .body
+        .as_object()
+        .expect("request body object")
+        .keys()
+        .cloned()
+        .collect::<Vec<_>>();
+    assert_eq!(
+        keys,
+        vec!["filters", "min_score", "question", "topK"],
+        "no unknown fields are sent"
+    );
+    assert!(requests[1].body["topK"].as_u64().unwrap() <= 20);
 }

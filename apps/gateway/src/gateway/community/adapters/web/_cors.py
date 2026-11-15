@@ -43,8 +43,9 @@ import re
 from typing import TYPE_CHECKING, Any
 
 from starlette.middleware.cors import CORSMiddleware
-from starlette.responses import PlainTextResponse
 from starlette.types import ASGIApp
+
+from gateway.community.adapters.web._envelope import server_error_response
 
 if TYPE_CHECKING:
     from fastapi import FastAPI
@@ -131,12 +132,12 @@ def _install_server_error_handler(app: FastAPI, allow_list: _OriginAllowList) ->
 
     ``ServerErrorMiddleware`` sits above every ``add_middleware`` entry, so the
     response it writes for an escaped exception never passes through the CORS
-    middleware. The body stays what Starlette would have sent; the headers are
-    what turns an opaque "CORS error" in the console into a legible 500.
+    middleware. The body is the standard error envelope; the headers are what
+    turns an opaque "CORS error" in the console into a legible 500.
     """
 
     async def server_error(request: Request, exc: Exception) -> Response:
-        response = PlainTextResponse("Internal Server Error", status_code=500)
+        response = server_error_response(request)
         origin = request.headers.get("origin")
         if origin and allow_list.allows(origin):
             response.headers["Access-Control-Allow-Origin"] = origin

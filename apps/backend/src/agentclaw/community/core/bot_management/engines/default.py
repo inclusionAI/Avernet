@@ -92,6 +92,10 @@ class DefaultProvisioningStrategy(EngineProvisioningStrategy):
     def extract_runtime_token(self, ctx: BotProvisioningContext) -> str | None:
         return None
 
+    def requires_caller_chat_instance(self, ctx: BotProvisioningContext) -> bool:
+        """Teclaw isolates callers within its published service runtime."""
+        return self.engine_type != "teclaw"
+
     def uses_adapter_chat_session_lifecycle(self, ctx: BotProvisioningContext) -> bool:
         return True
 

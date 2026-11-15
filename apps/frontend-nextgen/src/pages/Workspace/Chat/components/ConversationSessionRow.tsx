@@ -20,10 +20,11 @@ import { Badge, Button, IconButton } from '@/components/ui';
 import type { BotChatSessionView } from '@/services/workspace/botSessionService';
 import { formatRelativeTime } from '@/utils/format';
 import { cn } from '@/utils/cn';
-import { Loader2, Star } from 'lucide-react';
+import { Star } from 'lucide-react';
 import React from 'react';
 import type { ConversationSessionRowActions } from '../hooks/useConversationSessionMenu';
 import { ConversationSessionActions } from './ConversationSessionActions';
+import { ConversationSessionStatus } from './ConversationSessionStatus';
 
 export interface ConversationSessionRowProps {
   session: BotChatSessionView;
@@ -51,6 +52,9 @@ export const ConversationSessionRow = React.memo(function ConversationSessionRow
 }: ConversationSessionRowProps) {
   const favorite = session.favorite === true;
   const timeText = formatRelativeTime(session.gmtModified);
+  // Browse-only Coding Bot 会隐藏已有 Session 的 mutation 入口（actions 和收藏回调都不传）。
+  // 此时 hover 没有右侧图标需要让位，标题热区和相对时间必须保持原位，避免时间先左移再消失。
+  const hasHoverActions = Boolean(actions) || Boolean(onToggleFavorite);
   return (
     <div className="group/row relative flex min-h-8 items-center">
       {/* 行背景胶囊:hover 与选中同几何(inset-x-2 全宽 rx6),选中 = bg-selected,
@@ -68,18 +72,13 @@ export const ConversationSessionRow = React.memo(function ConversationSessionRow
             : 'bg-muted/60 opacity-0 transition-opacity group-hover/row:opacity-100 group-focus-within/row:opacity-100 [@media(hover:none)]:opacity-100',
         )}
       />
-      {/* Bot 正在回复中(#2990 还原,2026-10-26 适配 52px 行几何):仅命中行渲染,
-          标题左侧缩进区(40-54px,标题起点 60px)绝对定位旋转指示,不占 flex 流,
-          标题起点不随 loading 出现跳动;只读行不渲染。 */}
-      {!readOnly && replyingSessionId === session.sessionId && (
-        <span
-          role="status"
-          aria-label="Bot 正在回复"
-          className="absolute left-[40px] top-1/2 z-10 -translate-y-1/2"
-        >
-          <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" aria-hidden="true" />
-        </span>
-      )}
+      {/* 会话左侧活动状态槽：标题始终使用固定缩进，因此状态出现/消失不会造成位移；
+          仅在收到 AIXCoding 有效状态或普通 Bot 正在回复时渲染图标，空闲/未知状态留空。 */}
+      <ConversationSessionStatus
+        botId={session.botId}
+        sessionId={session.sessionId}
+        showReplying={!readOnly && replyingSessionId === session.sessionId}
+      />
       <Button
         variant="ghost"
         aria-current={selected ? 'page' : undefined}
@@ -96,13 +95,14 @@ export const ConversationSessionRow = React.memo(function ConversationSessionRow
           // - hover/键盘聚焦/触屏,以及「…」菜单打开期间(trigger 钉住 data-state=open,鼠标离行仍可见)
           //   → 让至「…」左界,右界 96px(收藏 mr-2→pr-88,非收藏 mr-4→pr-80)。
           // 只读行无任何图标,维持基础内边距。
-          !readOnly && [
-            favorite && 'pr-[52px]',
-            !favorite && selected && 'pr-[44px]',
-            'group-hover/row:pr-[80px] group-focus-within/row:pr-[80px] [@media(hover:none)]:pr-[80px] group-has-[[data-state=open]]/row:pr-[80px]',
-            favorite &&
-              'group-hover/row:pr-[88px] group-focus-within/row:pr-[88px] [@media(hover:none)]:pr-[88px] group-has-[[data-state=open]]/row:pr-[88px]',
-          ],
+          !readOnly &&
+            hasHoverActions && [
+              favorite && 'pr-[52px]',
+              !favorite && selected && 'pr-[44px]',
+              'group-hover/row:pr-[80px] group-focus-within/row:pr-[80px] [@media(hover:none)]:pr-[80px] group-has-[[data-state=open]]/row:pr-[80px]',
+              favorite &&
+                'group-hover/row:pr-[88px] group-focus-within/row:pr-[88px] [@media(hover:none)]:pr-[88px] group-has-[[data-state=open]]/row:pr-[88px]',
+            ],
         )}
       >
         <span
@@ -126,6 +126,7 @@ export const ConversationSessionRow = React.memo(function ConversationSessionRow
             className={cn(
               'ml-1 shrink-0 text-[11px] font-normal leading-none text-content-hint',
               !readOnly &&
+                hasHoverActions &&
                 'transition-opacity group-hover/row:opacity-0 group-focus-within/row:opacity-0 [@media(hover:none)]:opacity-0 group-has-[[data-state=open]]/row:opacity-0',
             )}
           >

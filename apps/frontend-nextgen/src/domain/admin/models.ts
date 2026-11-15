@@ -33,13 +33,14 @@ export interface Space {
   isCreator?: boolean;
   /** 创建者用户 id（后端 creator_user_id，与 creator_user_name 同级） */
   creatorUserId?: string;
-  /** 创建者展示名/花名（后端 creator_user_name；空间卡片「创建者」列直接展示，替换原管理员计数） */
+  /** 创建者展示名/花名（后端 creator_user_name；可用于个人空间标识） */
   creatorUserName?: string;
   joinStatus?: SpaceJoinStatus;
   memberCount: number;
-  ownerCount: number;
+  /** 未返回计数时保留 undefined，展示为未知而非真实的 0。 */
+  ownerCount?: number;
   /** 空间内 Bot 数量 */
-  botCount: number;
+  botCount?: number;
   gmtCreate?: string;
   gmtModified: string;
 }
@@ -50,7 +51,7 @@ export interface SpaceMember {
   displayName?: string;
   role: SpaceRole;
   /** 该成员拥有管理员权限的 Bot 数量（成员表「权限」列）。 */
-  botPermissionCount: number;
+  botPermissionCount?: number;
   isCreator: boolean;
   gmtModified: string;
 }

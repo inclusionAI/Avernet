@@ -3,23 +3,18 @@ Tests for Worker Profile Retrieval Service
 
 Worker Profile Retrieval & Fusion Simulation Baseline
 
-测试范围：
-- WorkerProfileRetrievalService: mode-aware 检索
-- ScoringStrategy: 不同模式的评分策略
+测试范围：Fuse DTO 和 TC 当前资料检索契约。
 """
 
 from __future__ import annotations
 
 from typing import Optional
-from unittest.mock import Mock
 
-import pytest
-
-from src.domain.models.context_fragment import ContextFragment, ContextKind
-from src.domain.models.retrieval_mode import RetrievalMode
-from src.domain.models.scoring_signal import ScoringSignal, SignalType
-from src.domain.models.skill_profile import SkillProfile
-from src.domain.models.worker_profile import WorkerProfile, ProfileType
+from app.domain.models.context_fragment import ContextFragment, ContextKind
+from app.domain.models.retrieval_mode import RetrievalMode
+from app.domain.models.scoring_signal import ScoringSignal, SignalType
+from app.domain.models.skill_profile import SkillProfile
+from app.domain.models.worker_profile import ProfileType, WorkerProfile
 
 
 class MockWorkerProfileSource:
@@ -30,7 +25,7 @@ class MockWorkerProfileSource:
 
     def scan(self):
         """Scan all profiles"""
-        from src.domain.models.worker_profile import WorkerProfileScanResult
+        from app.domain.models.worker_profile import WorkerProfileScanResult
         return WorkerProfileScanResult(profiles=self._profiles)
 
     def get_profile(self, staff_id: str, profile_id: str) -> Optional[WorkerProfile]:
@@ -98,7 +93,7 @@ class TestRetrievalResult:
 
     def test_create_retrieval_result_success(self):
         """测试创建检索结果"""
-        from src.domain.services.worker_profile_retrieval_service import RetrievalResult
+        from app.domain.services.worker_profile_retrieval_service import RetrievalResult
 
         profile = create_test_profile(
             staff_id="001",
@@ -130,7 +125,7 @@ class TestRetrievalResult:
 
     def test_retrieval_result_with_multiple_signals(self):
         """测试带多个信号的检索结果"""
-        from src.domain.services.worker_profile_retrieval_service import RetrievalResult
+        from app.domain.services.worker_profile_retrieval_service import RetrievalResult
 
         profile = create_test_profile(
             staff_id="002",
@@ -174,335 +169,39 @@ class TestRetrievalResult:
         assert abs(result.signals[2].weighted_score - 0.09) < 0.001
 
 
-class TestWorkerProfileRetrievalService:
-    """测试 WorkerProfileRetrievalService"""
-
-    @pytest.fixture
-    def mock_source(self):
-        """Create mock source with test profiles"""
-        profiles = [
-            create_test_profile(
-                staff_id="001",
-                profile_id="default",
-                skills=["Python", "Web Development", "API Design"],
-                context_kinds=["agent", "soul"],
-            ),
-            create_test_profile(
-                staff_id="002",
-                profile_id="default",
-                skills=["Java", "Database", "System Design"],
-                context_kinds=["agent", "other"],
-            ),
-            create_test_profile(
-                staff_id="003",
-                profile_id="default",
-                skills=["Python", "Machine Learning", "Data Science"],
-                context_kinds=["soul", "other"],
-            ),
-        ]
-        return MockWorkerProfileSource(profiles)
-
-    def test_retrieve_profiles_basic(self, mock_source):
-        """测试基本检索功能"""
-        from src.domain.services.worker_profile_retrieval_service import (
-            WorkerProfileRetrievalService,
-        )
-
-        service = WorkerProfileRetrievalService(source=mock_source)
-
-        result = service.retrieve(
-            question="I need help with Python API development",
-            mode=RetrievalMode.AGENT,
-            top_k=5,
-        )
-
-        assert result is not None
-        assert len(result.results) > 0
-        assert all(r.total_score >= 0 for r in result.results)
-
-    def test_retrieve_profiles_returns_sorted_by_score(self, mock_source):
-        """测试结果按分数排序"""
-        from src.domain.services.worker_profile_retrieval_service import (
-            WorkerProfileRetrievalService,
-        )
-
-        service = WorkerProfileRetrievalService(source=mock_source)
-
-        result = service.retrieve(
-            question="Python Machine Learning",
-            mode=RetrievalMode.AGENT,
-            top_k=5,
-        )
-
-        scores = [r.total_score for r in result.results]
-        assert scores == sorted(scores, reverse=True)
-
-    def test_retrieve_profiles_respects_top_k(self, mock_source):
-        """测试 top_k 限制"""
-        from src.domain.services.worker_profile_retrieval_service import (
-            WorkerProfileRetrievalService,
-        )
-
-        service = WorkerProfileRetrievalService(source=mock_source)
-
-        result = service.retrieve(
-            question="programming",
-            mode=RetrievalMode.AGENT,
-            top_k=2,
-        )
-
-        assert len(result.results) <= 2
-
-    def test_retrieve_mode_agent(self, mock_source):
-        """测试 AGENT 模式检索"""
-        from src.domain.services.worker_profile_retrieval_service import (
-            WorkerProfileRetrievalService,
-        )
-
-        service = WorkerProfileRetrievalService(source=mock_source)
-
-        result = service.retrieve(
-            question="Python API",
-            mode=RetrievalMode.AGENT,
-            top_k=10,
-        )
-
-        # G1 应该关注直接相关性
-        assert result.mode == RetrievalMode.AGENT
-        assert len(result.results) > 0
-
-    def test_retrieve_mode_conflict_alignment(self, mock_source):
-        """测试 CONFLICT_ALIGNMENT 模式检索"""
-        from src.domain.services.worker_profile_retrieval_service import (
-            WorkerProfileRetrievalService,
-        )
-
-        service = WorkerProfileRetrievalService(source=mock_source)
-
-        result = service.retrieve(
-            question="architecture decision",
-            mode=RetrievalMode.CONFLICT_ALIGNMENT,
-            top_k=10,
-        )
-
-        assert result.mode == RetrievalMode.CONFLICT_ALIGNMENT
-        assert len(result.results) > 0
-
-    def test_retrieve_mode_expert_diagnosis(self, mock_source):
-        """测试 EXPERT_DIAGNOSIS 模式检索"""
-        from src.domain.services.worker_profile_retrieval_service import (
-            WorkerProfileRetrievalService,
-        )
-
-        service = WorkerProfileRetrievalService(source=mock_source)
-
-        result = service.retrieve(
-            question="system health check",
-            mode=RetrievalMode.EXPERT_DIAGNOSIS,
-            top_k=10,
-        )
-
-        # G5 应该优先领域覆盖/多样性
-        assert result.mode == RetrievalMode.EXPERT_DIAGNOSIS
-        assert len(result.results) > 0
-
-    def test_retrieve_generates_scoring_signals(self, mock_source):
-        """测试生成评分信号"""
-        from src.domain.services.worker_profile_retrieval_service import (
-            WorkerProfileRetrievalService,
-        )
-
-        service = WorkerProfileRetrievalService(source=mock_source)
-
-        result = service.retrieve(
-            question="Python API",
-            mode=RetrievalMode.AGENT,
-            top_k=10,
-        )
-
-        # 每个结果都应该有评分信号
-        for r in result.results:
-            assert len(r.signals) > 0
-            for signal in r.signals:
-                assert signal.raw_score >= 0
-                assert signal.weight >= 0
-                assert signal.weighted_score is not None
-
-    def test_retrieve_with_skill_filter(self, mock_source):
-        """测试基于技能过滤"""
-        from src.domain.services.worker_profile_retrieval_service import (
-            WorkerProfileRetrievalService,
-        )
-
-        service = WorkerProfileRetrievalService(source=mock_source)
-
-        result = service.retrieve(
-            question="Python",
-            mode=RetrievalMode.AGENT,
-            top_k=10,
-            skill_filter=["Python"],
-        )
-
-        # 所有结果都应该有 Python 技能
-        for r in result.results:
-            skill_names = [s.name for s in r.profile.active_skills]
-            assert "Python" in skill_names
-
-    def test_retrieve_with_profile_keys(self, mock_source):
-        """测试指定 profile keys"""
-        from src.domain.services.worker_profile_retrieval_service import (
-            WorkerProfileRetrievalService,
-        )
-
-        service = WorkerProfileRetrievalService(source=mock_source)
-
-        result = service.retrieve(
-            question="programming",
-            mode=RetrievalMode.AGENT,
-            top_k=10,
-            profile_keys=["staff_001:default"],
-        )
-
-        # 只返回指定的 profile
-        assert len(result.results) == 1
-        assert result.results[0].profile.staff_id == "001"
 
 
-class TestModeAwareScoring:
-    """测试 mode-aware 评分"""
-
-    @pytest.fixture
-    def diverse_source(self):
-        """Create source with diverse profiles for G5 testing"""
-        profiles = [
-            # Frontend 专家
-            create_test_profile(
-                staff_id="001",
-                profile_id="default",
-                skills=["React", "TypeScript", "CSS"],
-                context_kinds=["agent"],
-            ),
-            # Backend 专家
-            create_test_profile(
-                staff_id="002",
-                profile_id="default",
-                skills=["Python", "Django", "PostgreSQL"],
-                context_kinds=["agent"],
-            ),
-            # DevOps 专家
-            create_test_profile(
-                staff_id="003",
-                profile_id="default",
-                skills=["Kubernetes", "Docker", "CI/CD"],
-                context_kinds=["agent"],
-            ),
-            # Data 专家
-            create_test_profile(
-                staff_id="004",
-                profile_id="default",
-                skills=["Python", "Spark", "Machine Learning"],
-                context_kinds=["agent"],
-            ),
-            # Security 专家
-            create_test_profile(
-                staff_id="005",
-                profile_id="default",
-                skills=["Security", "Encryption", "Authentication"],
-                context_kinds=["agent"],
-            ),
-        ]
-        return MockWorkerProfileSource(profiles)
-
-    def test_g5_prioritizes_domain_diversity(self, diverse_source):
-        """测试 G5 优先领域多样性"""
-        from src.domain.services.worker_profile_retrieval_service import (
-            WorkerProfileRetrievalService,
-        )
-
-        service = WorkerProfileRetrievalService(source=diverse_source)
-
-        result = service.retrieve(
-            question="Python system development",
-            mode=RetrievalMode.EXPERT_DIAGNOSIS,
-            top_k=3,
-        )
-
-        # G5 应该返回多样化的专家
-        # 即使问题提到 Python，也应该包含其他领域专家
-        assert len(result.results) > 0
-
-        # 检查结果是多样化的（不同领域的技能）
-        all_skills = set()
-        for r in result.results:
-            for skill in r.profile.active_skills:
-                all_skills.add(skill.name)
-
-        # 应该有多种不同的技能领域
-        assert len(all_skills) >= 3
-
-    def test_g1_focuses_on_direct_relevance(self, diverse_source):
-        """测试 G1 关注直接相关性"""
-        from src.domain.services.worker_profile_retrieval_service import (
-            WorkerProfileRetrievalService,
-        )
-
-        service = WorkerProfileRetrievalService(source=diverse_source)
-
-        result = service.retrieve(
-            question="Python web development",
-            mode=RetrievalMode.AGENT,
-            top_k=3,
-        )
-
-        # G1 应该优先匹配 Python 相关的 profile
-        assert len(result.results) > 0
-
-        # 第一个结果应该是最相关的（有 Python 技能）
-        top_skills = [s.name for s in result.results[0].profile.active_skills]
-        assert "Python" in top_skills or "Django" in top_skills
+from app.adapters.http.dependencies import fusion_dependencies as dependencies
+from tests.contract.test_tc_catalog import runtime as tc_runtime  # noqa: F401
+from tests.contract.test_tc_catalog import sync
 
 
-class TestRetrievalServiceIntegration:
-    """检索服务集成测试"""
+def test_strict_missing_participant_cannot_fall_back_to_another_worker(tc_runtime):  # noqa: F811
+    client, _registry = tc_runtime
+    sync(client)
+    response = dependencies.get_profile_retrieval_service().retrieve(
+        "MySQL", RetrievalMode.EXPERT_DIAGNOSIS, profile_keys=["missing:legacy"],
+        strict_participants=True,
+    )
+    assert response.results == []
 
-    def test_retrieve_all_modes(self):
-        """测试所有模式的检索"""
-        from src.domain.services.worker_profile_retrieval_service import (
-            WorkerProfileRetrievalService,
-        )
 
-        profiles = [
-            create_test_profile(
-                staff_id="001",
-                profile_id="default",
-                skills=["Python", "API"],
-                context_kinds=["agent"],
-            ),
-        ]
-        source = MockWorkerProfileSource(profiles)
-        service = WorkerProfileRetrievalService(source=source)
+def test_non_strict_missing_participant_can_use_shared_retrieval(tc_runtime):  # noqa: F811
+    client, _registry = tc_runtime
+    sync(client)
+    response = dependencies.get_profile_retrieval_service().retrieve(
+        "MySQL", RetrievalMode.EXPERT_DIAGNOSIS, profile_keys=["missing:legacy"],
+        strict_participants=False,
+    )
+    assert [result.profile.staff_id for result in response.results] == ["bot:owner"]
 
-        for mode in RetrievalMode:
-            result = service.retrieve(
-                question="Python programming",
-                mode=mode,
-                top_k=5,
-            )
-            assert result.mode == mode
 
-    def test_retrieve_empty_profiles(self):
-        """测试空 profiles 检索"""
-        from src.domain.services.worker_profile_retrieval_service import (
-            WorkerProfileRetrievalService,
-        )
-
-        source = MockWorkerProfileSource([])
-        service = WorkerProfileRetrievalService(source=source)
-
-        result = service.retrieve(
-            question="test question",
-            mode=RetrievalMode.AGENT,
-            top_k=10,
-        )
-
-        assert len(result.results) == 0
+def test_deleted_participant_is_not_recovered_from_stale_profiles(tc_runtime):  # noqa: F811
+    client, _registry = tc_runtime
+    sync(client)
+    client.delete("/v1/workers/bot:owner").raise_for_status()
+    response = dependencies.get_profile_retrieval_service().retrieve(
+        "MySQL", RetrievalMode.EXPERT_DIAGNOSIS, profile_keys=["bot:owner:legacy"],
+        strict_participants=True,
+    )
+    assert response.results == []

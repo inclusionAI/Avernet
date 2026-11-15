@@ -846,6 +846,7 @@ def _mk_agent(run: dm.Run, name: str) -> dm.Agent:
 
 def _req(idempotency_key: str | None = None) -> SubmitRunRequest:
     return SubmitRunRequest(
+        identity_bot_id=IDENTITY_SOURCE,
         tenant=TENANT,
         goal="coverage-gap goal",
         agents=(dm.AgentSpec(name="a1", role="research"),),
@@ -1252,3 +1253,8 @@ def _envelope(name: str, schema: dict | None = None) -> dm.TaskEnvelope:
         name=name, objective=f"objective-{name}",
         output_schema=schema or {}, boundaries="", parent_goal="g",
     )
+#: The Bot every submit in this suite names as its identity source. The
+#: service refuses a submit without one, so the value is fixed here rather
+#: than repeated at each call site; the seam resolves it (or is unbound, in
+#: which case the service takes the id as given).
+IDENTITY_SOURCE = "identity-source-bot"

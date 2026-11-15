@@ -47,6 +47,13 @@ _DECLARED_PREFIXES = (
     # out of the broad collaboration→bcs namespace). Declared with its gateway
     # domain + route_security entry.
     "/openapi/v1/collaboration/tasks",
+    # BBS context collaboration protocol P1 (spec §6.1/§14.1): the Collet
+    # three-API surface under the singular `task` prefix, served by the
+    # backend via the `collaboration-task-context-collab` domain (carved out
+    # of the broad collaboration→bcs namespace, same as collaboration-tasks
+    # above). route_security inherits the /openapi/v1/collaboration/** rule;
+    # the backend enforces the gateway-signed principal itself.
+    "/openapi/v1/collaboration/task/context_collab",
     # Tenant source credentials (W3, #1471) ride the `bots` domain — a
     # literal group under /openapi/v1/bots, forward-verified by the same
     # entry, with its own app-required route_security rule (the group no

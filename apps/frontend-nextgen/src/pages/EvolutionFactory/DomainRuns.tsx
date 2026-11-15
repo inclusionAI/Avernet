@@ -31,9 +31,9 @@ export function DomainRuns({
         data && (
           <>
             <div className="overflow-x-auto rounded-lg border border-border">
-              <table className="w-full min-w-[1900px] table-fixed text-left text-xs">
+              <table className="w-full min-w-[2230px] table-fixed text-left text-xs">
                 <colgroup>
-                  {[240, 90, 240, 70, 100, 100, 90, 100, 160, 80, 160, 170, 170, 100, 160].map((width, i) => (
+                  {[240, 90, 240, 70, 110, 220, 110, 120, 160, 80, 160, 180, 180, 110, 160].map((width, i) => (
                     <col key={i} style={{ width }} />
                   ))}
                 </colgroup>
@@ -108,15 +108,27 @@ export function DomainRuns({
                         <td className="whitespace-nowrap p-3">
                           <StatusBadge status={run.status} />
                         </td>
-                        <td className="whitespace-nowrap p-3">
-                          {displayValue(run.score)} / {displayValue(run.maxScore)}
+                        <td className="p-3 tabular-nums">
+                          <Hint content={`${displayValue(run.score)} / ${displayValue(run.maxScore)}`}>
+                            <span className="block truncate whitespace-nowrap">
+                              {displayValue(run.score)} / {displayValue(run.maxScore)}
+                            </span>
+                          </Hint>
                         </td>
-                        <td className="whitespace-nowrap p-3">
-                          {run.passRate === null || run.passRate === undefined
-                            ? '—'
-                            : `${(run.passRate * 100).toFixed(1)}%`}
+                        <td className="p-3 tabular-nums">
+                          <span className="block truncate whitespace-nowrap">
+                            {run.passRate === null || run.passRate === undefined
+                              ? '—'
+                              : `${(run.passRate * 100).toFixed(1)}%`}
+                          </span>
                         </td>
-                        <td className="whitespace-nowrap p-3">{displayValue(run.tokenUsage?.totalTokens)}</td>
+                        <td className="p-3 tabular-nums">
+                          <Hint content={displayValue(run.tokenUsage?.totalTokens)}>
+                            <span className="block truncate whitespace-nowrap">
+                              {displayValue(run.tokenUsage?.totalTokens)}
+                            </span>
+                          </Hint>
+                        </td>
                         <td className="p-3">
                           <Hint content={run.model || undefined}>
                             <div className="truncate">{run.model || '—'}</div>

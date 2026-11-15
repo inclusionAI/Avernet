@@ -686,9 +686,9 @@ impl HttpAppState {
 
     pub fn dispatch_visibility_sync(&self, request: VisibilitySyncRequest) {
         let visibility_sync = self.visibility_sync.clone();
-        let _sync_task = tokio::spawn(async move {
+        let _sync_task = tokio::spawn(bcs_network_tracing::in_current_context(async move {
             visibility_sync.sync_visibility(request).await;
-        });
+        }));
     }
 
     pub fn with_message_config(

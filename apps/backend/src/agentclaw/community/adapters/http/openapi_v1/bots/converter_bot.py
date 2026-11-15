@@ -146,6 +146,7 @@ def _to_bot_metadata(d: dict[str, Any]) -> BotMetadata:
         avatar_url=bot_avatar_url(d),
         bot_id=d["bot_id"],
         owner_id=d.get("owner_id") or "",
+        owner_name=d.get("owner_name"),
         bot_name=d.get("bot_name") or "",
         bot_desc=d.get("bot_desc") or "",
         engine=d.get("active_engine") or "",

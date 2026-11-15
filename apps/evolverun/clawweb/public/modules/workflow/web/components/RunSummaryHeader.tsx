@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react'
 import type { FlowRun } from '@avernet/clawweb-shared/web/types'
 import StatusBadge from '@avernet/workflow/web/components/StatusBadge'
+import RunMarkers from './RunMarkers'
 import { useDeleteFlowRun, useRerunFlowRun, useAbortFlowRun } from '@avernet/clawweb-shared/web/api/hooks'
 
 interface RunSummaryHeaderProps {
@@ -185,6 +186,7 @@ export default function RunSummaryHeader({ run, nodeCount, succeededCount, faile
         <Stat label="创建者" value={run.user_id || run.triggered_by || '—'} mono={!!(run.user_id || run.triggered_by)} />
         <Stat label="发起 Bot" value={(run.origin_bot_id || '—') + (run.plugin_version ? ` / ${run.plugin_version}` : '')} mono={!!(run.origin_bot_id || run.plugin_version)} />
         <Stat label="运行引擎" value={run.engine || '—'} mono={!!run.engine} />
+        <RunMarkers run={run} variant="details" />
         <Stat label="耗时" value={formatDuration(run.total_duration_ms)} />
         <Stat label="开始时间" value={formatTime(run.started_at)} />
       </dl>

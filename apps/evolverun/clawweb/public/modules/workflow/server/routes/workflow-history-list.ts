@@ -4,6 +4,7 @@ import { requireWorkflowAccess } from '@avernet/clawweb-shared/server/services/w
 import { asyncHandler } from '@avernet/clawweb-shared/server/middleware/async-handler';
 import type { WorkflowDeployHistoryRepository } from '../repositories/workflow-deploy-history-repository.js';
 import type { WorkflowVersionSourceService } from '../contracts/workflow-version-source.js';
+import { editorActiveDeploymentToken } from '../services/editor-active-deployment-token.js';
 
 /** Release history and provenance share the same authenticated workflow boundary. */
 export function registerWorkflowHistoryListRoute(
@@ -50,7 +51,15 @@ export function registerWorkflowHistoryListRoute(
     // may be older than that page. Return it separately so clients do not
     // accidentally compare against the newest release instead.
     const active = await wfdhRepo.findActiveByWorkflowId(workflowId);
-    res.json({ workflowId, history, active: active ? { ...toHistoryItem(active, true), source: sources.get(active.deploy_number) ?? null } : null });
+    let activeToken: string | undefined;
+    if (active) {
+      try {
+        activeToken = editorActiveDeploymentToken(workflowId, active);
+      } catch {
+        // Legacy values may not be safe to bind; keep history readable without a token.
+      }
+    }
+    res.json({ workflowId, history, active: active ? { ...toHistoryItem(active, true), packId: active.pack_id, ...(activeToken === undefined ? {} : { activeToken }), source: sources.get(active.deploy_number) ?? null } : null });
   }));
 
 }

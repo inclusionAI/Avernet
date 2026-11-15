@@ -13,6 +13,10 @@ publication, including its original command and errors. Enabling metrics does
 not select the application's unconfigured default or change Group queue/legacy
 acceptance. Its implementation is isolated in message_flow_metrics.rs and keeps
 the existing metrics::InstrumentedMessageFlowService export.
+Native Task dispatch also forwards to the matching inner entrypoint with its
+request ID and command intact, rather than selecting the ordinary-dispatch
+fallback. Parent correlation, Caller inheritance and replay checks remain owned
+by the application; success and failure each record one Task dispatch metric.
 
 - Composition of the internal Bot self facade with the shared registry Core and
   deployment-owned `AgentIdentityFactoryRegistration` verifier. Public builds
@@ -61,8 +65,8 @@ the existing metrics::InstrumentedMessageFlowService export.
 Master epochs reconcile the durable policy version every five seconds to observe
 late writes from the previous replica. Failed checks retain the last snapshot
 and retry; they do not restart runs. Reconciliation is cancelled on demotion.
-The monitor boot ID belongs to the cumulative metrics object, not a sampler epoch,
-and remains stable when the same process regains leadership.
+The queue monitor interval state belongs to the shared metrics object and is
+retained when the same process regains leadership, without replaying emitted counts.
 
 - Coordination store composition using the selected cache plugin without additional settings.
 
@@ -72,6 +76,10 @@ Prometheus feature/config. A dedicated tracing target emits fixed-column records
 through the existing logging.outputs pipeline to message-delivery.log with the
 message-only raw format. Rotation, cleanup, asynchronous writers and LoggingGuard
 are shared with all other log outputs; no separate file infrastructure is used.
+CSV v2 replaces the unused type/code protocol with one 23-column summary per
+sample. Eight Send event delta columns support minute SUM aggregation; fixed
+queue gauge and health columns need no metric-code filtering. Delta state shares
+the metrics lifecycle across sampler restarts and requires no extra SQL queries.
 Failed snapshots retain values and expose freshness/success; writer errors remain
 visible through the logging system. No
 Bot/session/message IDs, message text, Provider keys or credentials enter monitor records.
@@ -165,6 +173,9 @@ Delivery wiring loads DB policy, rejects non-default legacy file policy, and sup
 ## Runtime ownership
 
 The crate owns process lifecycle, adapter mounting, and startup/shutdown wiring.
+The SQLite schema bootstrap and versioned migration chain are owned by the
+`bcs-db-migrations` library (normal dependency); this crate re-exports that
+API as `bcs::migrations` and calls it during startup.
 Eventing workers initialize in orchestrator registration order and shut down in
 reverse order; disabled Eventing injects a capability-disabled application
 service and registers no worker lifecycle.
@@ -272,3 +283,17 @@ allows anonymous calls only for Cards that permit them. It is injected into
 Provider-admin registration, scoped registration and runtime target resolution.
 It does not disable Provider management authentication or satisfy a Card that
 requires Bearer, OAuth or another unsupported scheme.
+
+## Network tracing scope
+
+Composition excludes exact matched routes for health/metrics, manifest/assets,
+WebSocket upgrades, `/me/repair-info`, `/admin/secret/{name}` and the retired
+`/groups/{id}/settings`. Their entire handler scope suppresses network tracing;
+routing, authentication and responses are unchanged. Other matched business and
+identity-support routes remain eligible, including error responses. The public
+executable still defaults to no installed network tracing provider.
+
+Logging owns the selected-event metadata fast path and bounded, reusable text
+scratch buffer. Formatting still runs before asynchronous output; see
+[request and operation observations](../../../docs/observability/request-operation-logging.md#semantics-and-cost)
+for allocation, reentrancy and retention limits.

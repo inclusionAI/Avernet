@@ -361,6 +361,10 @@ class OpenClawSessionAdapter(SessionService):
             message_count=0,
             total_input_tokens=0,
             total_output_tokens=0,
+            ext_info={"openclaw_creation": {
+                "session_id": patch_params["canonical_session_id"],
+                "model": patch_params["resolved_model"],
+            }},
         )
 
     async def delete(

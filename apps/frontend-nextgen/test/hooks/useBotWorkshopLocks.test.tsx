@@ -28,6 +28,25 @@ test('获取成功刷新后进入草稿编辑', async () => {
     '/bot-workshop/detail?type=edit&id=b1&runtime_stage=draft&owner_id=owner-1',
   );
 });
+test('草稿服务 Coding Bot 获取锁后进入 Coding Chat 而不是通用编辑页', async () => {
+  (botEditLockService.claim as jest.Mock).mockResolvedValue(undefined);
+  const load = jest.fn().mockResolvedValue(undefined);
+  const codingBot = mapBotDto({
+    bot_id: 'coding-bot',
+    owner_entity_id: 'owner-1',
+    bot_type: 'service',
+    display_state: 'service_draft',
+    engine: 'claude_code',
+    template_type: 'generalCC',
+  }).item;
+  const { result } = renderHook(() => useBotWorkshopLocks(load));
+
+  await act(async () => result.current.claimLock(codingBot));
+
+  expect(load).toHaveBeenCalledWith({ silent: true });
+  expect(history.push).toHaveBeenCalledWith('/coding/coding-chat?botId=coding-bot&ownerId=owner-1');
+});
+
 test('抢锁失败同步最新状态但不跳转', async () => {
   (botEditLockService.claim as jest.Mock).mockRejectedValue(new Error('被抢先持锁'));
   const load = jest.fn().mockResolvedValue(undefined);

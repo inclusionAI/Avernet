@@ -10,6 +10,21 @@ legacy owner/entity lookup; service-source mismatches fail closed.
 
 Service-bot domain — bot publication facade, BAAS service binding, sub-resource management.
 
+## Online retry and restart recovery
+
+Online publication retry and restart share the same candidate decision and
+ask the selected provider's `should_upgrade_not_live_bot(status)` policy for
+FAILED/STOPPED recovery. Its default preserves the provider's existing recovery
+capability, including custom providers that cannot recover either status.
+Teclaw alone specializes `FAILED` to reuse UPGRADE/UPDATE and preserve the binding:
+operation failure alone does not establish that its instance is gone. Teclaw
+`STOPPED` still retires the candidate before creating a replacement; ARCA recovers
+both statuses through UPDATE. `RELEASED`/`DESTROYING` or no candidate select creation,
+while `STOPPING`, missing status and failed status reads wait through the existing
+retry/error path. Explicit `BOT_NOT_FOUND`/`DEVICE_NOT_FOUND` during UPDATE retain
+the existing recreation fallback. Issuing UPDATE does not declare publication
+success; the existing workflow progress and callback results remain authoritative.
+
 ## Context Boundary
 
 ```yaml
@@ -24,6 +39,7 @@ provides:
   - "EmptyBotProcess"
   - "BotProcessRegistry"
   - "BotPublishService"
+  - "ServiceBotEvalService"
   - "BaasService"
   - "BaasServiceError"
   - "BaasNoActiveDevicesError"
@@ -50,6 +66,7 @@ internal_dependencies:
   - agentclaw.community.core.bot_knowledge.protocols    # optional best-effort stage selection Service API
   - agentclaw.community.kernel.file_count
   - agentclaw.community.plugin_api.file_count_runtime
+  - agentclaw.community.plugin_api.service_bot_eval  # service-Bot evaluation gate Protocol, context and uploaded material contract
   - agentclaw.community.core.base
   - agentclaw.community.kernel.build_ignore
   - agentclaw.community.core.repository.protocols.identity
@@ -151,6 +168,33 @@ The existing oversized central Bot/Publish services remain under the repository'
 pre-existing architecture allowlist; this compatibility fix does not extend it.
 Their remaining decomposition is a separate lifecycle/service refactor so this
 fix can be reviewed without moving unrelated creation and restart behavior.
+
+## Service-Bot evaluation gate
+
+`ServiceBotEvalService` authorizes and dispatches the unified service-Bot
+certification surface through the `ServiceBotEvalPlugin` Protocol. Caller-supplied
+owner and version inputs are never authoritative: it resolves the tenant-scoped
+Bot through `BotAddressResolver`, checks the actor's operable collaborator level,
+requires `bot_type=service`, and binds the addressed publish record from the
+Bot's current environment. `precheck` additionally requires a draft record;
+submission status may fall back to the latest record. A missing Bot and
+insufficient permission both report not found. Submit requires OWNER; detail,
+history, precheck, sync and submission status require MEMBER.
+
+The same service backs the bot-first public routes under
+`/openapi/v1/bots/{bot_id}/eval/...` (authorization rules in
+`adapters/http/openapi_v1/authorization_rules_service_eval.py`) and the legacy
+`/api/service-bot/eval/...` routes. Public profiles bind skip implementations
+that allow the release trigger; an enterprise composition supplies the real
+evaluator. The Protocol carries the server-derived context and already-read
+upload material, keeping transport and private provider details out of the
+community domain.
+
+Draft-to-staging publication also runs the gate's `precheck` after the draft
+lock check. A result whose `allowed` is not `True` raises
+`ServicePublicationGateBlockedError`; a `PENDING` gate status raises
+`ServicePublicationGatePendingError`. Both errors expose only the plugin's
+`gate_result` projection and map to HTTP 403/403210 and 409/409210.
 
 ## Publish operation ledger (#197)
 

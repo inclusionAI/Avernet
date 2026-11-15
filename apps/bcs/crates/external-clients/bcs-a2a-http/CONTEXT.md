@@ -8,6 +8,11 @@ The standard gRPC binding (`grpc_client`) uses the same pinned SDK models and
 protobuf conversion library. Composition supplies a policy-checked channel and
 trusted MOSN routing metadata; this low-level binding does not discover a target,
 select endpoints, retry submissions, or cancel Tasks when a stream is dropped.
+Its five operations declare gRPC invocation shape to `bcs-tracing-api`, preserving
+original status codes and recording only initial response readiness.
+The [loopback tracing tests](tests/grpc_tracing.rs) exercise all five operations
+against a real gRPC peer: propagation replacement, routing/auth metadata, tenant,
+response models, raw failure status and exactly-once completion before stream reads.
 Its five operations preserve task/event models and bounded typed ErrorInfo while
 excluding peer diagnostics. Bootstrap optionally injects validated `GrpcMeshConfig` into Card selection and
 delivery. Only explicitly configured Card interfaces can select gRPC; the channel
@@ -21,6 +26,14 @@ the expected deadline, then persists only its A2A correlation and validated
 pending message before exposing interaction cards or issuing a continuation.
 It does not call a Core contract via an import or facade re-export. Bootstrap
 supplies the application implementation; no implementation selection occurs here.
+
+REST clients retain default headers in `ClientWithDefaults`, outside the
+underlying reqwest transport. They are merged before tracing, so stale trace
+aliases and absent baggage cannot return at send time. Card fetch stays untraced;
+DNS pinning, TLS, credentials and redirect policy are unchanged. The binding
+exposes its five explicit BCS operations; its previous unused SDK `Deref` escape
+hatch is removed so calls cannot silently bypass the controlled header path.
+`bind_rest_client` accepts the wrapper (or a default-free reqwest client).
 
 Initial stream, async continuation, Task query/cancel and subscription share
 bounded REST error parsing so ProtoJSON typed ErrorInfo survives SDK binding
@@ -91,7 +104,8 @@ Projection updates must be committed only after event ingestion succeeds.
 The module implements Card validation/fetch, SDK event projection and the
 production `BotDeliveryPort`. `HttpA2aCardFetcher` implements `A2aCardPort`: bounded
 public JSON fetch, no redirects/proxy/credentials, configured DNS/IP policy pinned
-per attempt, TLS outside explicitly permitted loopback, and explicit rejection
+per attempt, HTTP/HTTPS under the shared domain URL policy (including non-loopback
+HTTP on trusted networks; private addresses still require deployment approval), and explicit rejection
 of unsupported no-cache/no-store declarations. Required extensions are injected
 by composition; unsupported capabilities never silently downgrade.
 
@@ -197,3 +211,5 @@ must match JSON-RPC 2.0 and request ID; errors retain numeric codes and typed da
 not remote diagnostics. The shared bounded SSE decoder unwraps each RPC response
 before the common delivery driver sees it. No 0.3 aliases, endpoint suffixes or
 binding fallback are introduced. Run persistence records json_rpc separately.
+
+Custom bindings normalize responses through bcs-a2a-binding-api::Client and share the existing task driver. Registration keeps raw Cards; selected opaque routes and fingerprints fence recovery/cancellation across configuration changes.

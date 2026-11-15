@@ -1,0 +1,6 @@
+{
+  "feature_name": "json-to-a2a",
+  "language": "zh-CN",
+  "phase": "validated",
+  "protocol_reference": "a2aproject/A2A@v1.0.0"
+}

@@ -14,6 +14,7 @@ from typing import Any
 from agentclaw.community.core.task.domain.errors import TaskStateError
 from agentclaw.community.core.task.domain.identity import (
     is_dispatchable_single_bot_assignee,
+    parse_scoped_bot_identity,
 )
 from agentclaw.community.core.task.domain.models import (
     NodeAction,
@@ -84,6 +85,97 @@ def _planned_relay_group_formation(value: Any) -> dict[str, Any]:
 
     return formation.to_dict()
 
+
+def _search_receipt_for_generation(node: TaskNode, relay_token: str) -> list[str]:
+    """Return candidate ids from the current generation's successful search.
+
+    The search endpoint records the authoritative candidate list in the node's
+    action log before Bot-side selection. Keeping the receipt keyed by a token
+    fingerprint prevents a failed search or a previous generation from becoming
+    the source of a successor assignee.
+    """
+
+    fingerprint = hashlib.sha256(relay_token.encode()).hexdigest()
+    for event in reversed(node.run_info.action_log):
+        payload = event.payload
+        if event.action != NodeAction.DISPATCH:
+            continue
+        if payload.get("phase") != "search":
+            continue
+        if payload.get("relay_token_fingerprint") != fingerprint:
+            continue
+        if payload.get("action_result") != "search":
+            raise TaskStateError(
+                "successor PLAN_RESULT requires a successful candidate search"
+            )
+        candidates: list[str] = []
+        for item in payload.get("candidates") or []:
+            if not isinstance(item, dict):
+                continue
+            bot_id = str(item.get("bot_id") or "").strip()
+            if bot_id:
+                candidates.append(bot_id)
+        return candidates
+    raise TaskStateError(
+        "successor PLAN_RESULT requires a current-generation candidate search"
+    )
+
+
+def _searched_runtime_identity(bot_id: str) -> tuple[str, str | None]:
+    """Project a searched external identity to the node's split runtime form.
+
+    Search candidates currently carry the external authoritative identity
+    (``bot_id:owner_id``); Relay runtime state stores ``run_info.assignee`` as the
+    product Bot ID and ``assignee_owner_id`` separately. Compare both parts so
+    the owner scope still cannot be changed by a successor plan.
+    """
+    normalized = str(bot_id or "").strip()
+    scoped = parse_scoped_bot_identity(normalized)
+    if scoped is not None:
+        return scoped
+    return normalized, None
+
+
+def _validate_successor_candidate_origin(
+    node: TaskNode, relay_token: str, successor: TaskNode
+) -> None:
+    candidates = _search_receipt_for_generation(node, relay_token)
+    mode = successor.run_info.run_mode
+    if mode == "bbs":
+        return
+    runtime_identities = {
+        _searched_runtime_identity(candidate)
+        for candidate in candidates
+        if str(candidate or "").strip()
+    }
+    if not runtime_identities:
+        raise TaskStateError(
+            "successor PLAN_RESULT requires at least one searched candidate"
+        )
+    if mode == "single_bot":
+        assignee = str(successor.run_info.assignee or "").strip()
+        owner = str(
+            successor.run_info.extend_props.get("assignee_owner_id") or ""
+        ).strip() or None
+        if (assignee, owner) not in runtime_identities:
+            raise TaskStateError(
+                "successor PLAN_RESULT assignee must come from searched candidates"
+            )
+        return
+    if mode == "coop_group":
+        candidate_ids = {
+            str(candidate).strip()
+            for candidate in candidates
+            if str(candidate or "").strip()
+        }
+        formation = successor.run_info.extend_props.get("pending_group_formation")
+        if not isinstance(formation, dict) or not isinstance(formation.get("bot_ids"), list):
+            return
+        for bot_id in formation["bot_ids"]:
+            if str(bot_id).strip() not in candidate_ids:
+                raise TaskStateError(
+                    "successor PLAN_RESULT group members must come from searched candidates"
+                )
 
 def _json_value(value: Any) -> Any:
     if isinstance(value, Enum):
@@ -436,6 +528,12 @@ def apply_relay_report(
                     if not is_dispatchable_single_bot_assignee(assignee):
                         raise TaskStateError("single_bot plan requires a real bot assignee")
                     assignee = str(assignee or "").strip()
+                    scoped_assignee = parse_scoped_bot_identity(assignee)
+                    if scoped_assignee is not None:
+                        assignee = scoped_assignee[0]
+                        next_node.run_info.extend_props["assignee_owner_id"] = (
+                            scoped_assignee[1]
+                        )
                     next_node.run_info.assignee = assignee
                     if (
                         next_node.run_info.extend_props.get("pending_group_formation")
@@ -460,6 +558,9 @@ def apply_relay_report(
                         is not None
                     ):
                         raise TaskStateError("BBS plan cannot carry a group formation")
+                _validate_successor_candidate_origin(
+                    node, command.relay_token, next_node
+                )
                 max_rounds = int(config.get("MAX_LOOP", 3))
                 node.run_info.progress_reason = command.progress_reason or None
                 node.run_info.end_time = now

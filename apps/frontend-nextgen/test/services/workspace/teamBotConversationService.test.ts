@@ -228,7 +228,7 @@ test('按 total 分页且按完整 bot_id/entity_id 去重，保留后端顺序'
   ]);
 });
 
-test('团队 Bot 直接消费接口返回的 Coding 模板', async () => {
+test('团队空间 Bot 直接消费接口返回的 Coding 模板', async () => {
   list.mockResolvedValue({
     code: 200000,
     data: {
@@ -244,7 +244,7 @@ test('团队 Bot 直接消费接口返回的 Coding 模板', async () => {
   });
 });
 
-test('历史 aicoding 团队 Bot 缺 template_type 时归一为个人 Coding Bot', async () => {
+test('历史 aicoding 团队空间 Bot 缺 template_type 时归一为个人 Coding Bot', async () => {
   list.mockResolvedValue({
     code: 200000,
     data: {

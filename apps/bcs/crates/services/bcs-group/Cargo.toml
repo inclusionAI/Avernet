@@ -24,7 +24,6 @@ uuid = { workspace = true }
 chrono = "0.4"
 
 # Error types
-thiserror = { workspace = true }
 
 # JSON comparison (callback_config equality)
 serde_json = { workspace = true }
@@ -36,6 +35,7 @@ bcs-domain      = { workspace = true }
 bcs-config      = { workspace = true }
 
 [dev-dependencies]
+bcs-db-migrations = { workspace = true }
 bcs-bot-store = { workspace = true }
 bcs-bot = { workspace = true }
 bcs-db-api = { workspace = true }

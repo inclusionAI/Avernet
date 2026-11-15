@@ -29,9 +29,20 @@ async fn memory_templates_follow_all_name_and_delete_paths() {
             event: None, mutation: GroupEventfulMutation::PatchMutableFields(GroupMutableFieldsPatch { label: Some("stale".into()), ..Default::default() }),
         }).await;
         assert!(matches!(failed, Err(ServiceError::Conflict(_))));
-        let before = repo.card_templates.read().await[id].clone();
         repo.patch_mutable_fields(id, GroupMutableFieldsPatch { context: Some("动态配置".into()), ..Default::default() }).await.unwrap();
-        assert_eq!(repo.card_templates.read().await[id], before);
+        assert_eq!(repo.card_templates.read().await[id]["description"], "动态配置");
+        assert_eq!(repo.card_templates.read().await[id]["skills"][0]["description"], "动态配置");
+        repo.patch_mutable_fields(id, GroupMutableFieldsPatch {
+            label: Some("新名称".into()), context: Some("新目标".into()), ..Default::default()
+        }).await.unwrap();
+        assert_eq!(repo.card_templates.read().await[id]["name"], "新名称");
+        assert_eq!(repo.card_templates.read().await[id]["description"], "新目标");
+        repo.commit_eventful_mutation(CommitGroupEventfulMutation {
+            group_id: id.into(), expected_version: group.version + 1, mutated_at_ms: 102,
+            event: None, mutation: GroupEventfulMutation::PatchMutableFields(GroupMutableFieldsPatch { context: Some(String::new()), ..Default::default() }),
+        }).await.unwrap();
+        assert_eq!(repo.card_templates.read().await[id]["description"], "");
+        assert_eq!(repo.card_templates.read().await[id]["skills"][0]["description"], "");
         group.label = None;
         repo.upsert(group).await.unwrap();
         assert_eq!(repo.card_templates.read().await[id]["name"], id);

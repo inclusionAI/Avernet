@@ -336,10 +336,9 @@ _NO_USER_DIMENSION = {
     # declared owner, so it sits in the no-user-dimension set.
     ("get", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bbs/browse-subscriptions"),
     # BBS Browse-Loop per-Bot reads + writes + manual triggers, exposed on the
-    # public surface: they address a bot by path but take only a verified
-    # principal (+ the declared owner_user_id query on join); the principal
-    # authorises the call and the owner names whose Bot is toggled, neither
-    # acts as an end user, so there is no user_id axis on the wire.
+    # public surface: they address a bot by path and declare the Bot owner via
+    # owner_user_id; the principal authorises the call and the owner names whose
+    # Bot is toggled, so there is no user_id axis on the wire.
     (
         "get",
         f"{PUBLIC_API_PREFIX}/collaboration/tasks/bots/{{bot_id}}/bbs/browse-subscription",
@@ -435,6 +434,21 @@ _NO_USER_DIMENSION = {
     # trajectory reads by task_id (the do_analysis=true trigger is a deployment-
     # configured bot, not a caller-chosen one) — no caller-supplied user_id dim.
     ("get", f"{PUBLIC_API_PREFIX}/collaboration/tasks/trajectory"),
+    ("get", f"{PUBLIC_API_PREFIX}/collaboration/tasks/by_session"),
+    # Context collab public surface (spec §6.1 openapi twin): the operator is
+    # the L2 accountability subject the delivery binds to the verified
+    # principal — admission is REFUSED, so the caller always names an end
+    # user, and the actor is reconciled server-side. No caller-supplied
+    # user_id dimension exists on the wire.
+    ("post", f"{PUBLIC_API_PREFIX}/collaboration/task/context_collab"),
+    (
+        "post",
+        f"{PUBLIC_API_PREFIX}/collaboration/task/context_collab/{{collab_context_id}}/events",
+    ),
+    (
+        "get",
+        f"{PUBLIC_API_PREFIX}/collaboration/task/context_collab/{{collab_context_id}}",
+    ),
 }
 
 # Read-only operations that accept a user_id as a caller-selected filter rather
@@ -636,9 +650,17 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 # Service environments add one Bot-addressed and two workflow/environment operations.
 # Risk-check routes add four user-scoped Bot-path operations.
 # The non-user Bot overview adds one Bot-path operation with no user_id.
-# The task_config match probe adds one operation without a path/query bot_id.
-# Catalogue profile uses bot_uuid rather than bot_id, adding another none entry.
-_BOT_ID_PLACEMENT = {"path": 219, "query": 1, "none": 143}
+# The task_config match probe addresses a bot id in the request body, so the
+# operation contributes no path/query bot_id parameter.
+# Catalogue profile addresses the bot by ``bot_uuid`` in the path, a different
+# spelling from the ``bot_id`` parameter this rule counts.
+# The owner-scoped collaboration repair adds one path-addressed, user-scoped
+# operation; the non-user Bot overview stays path-addressed in the same total.
+# The relay-session task read is account-level and carries no bot_id parameter.
+# Context collab (this change): the three operations under
+# /collaboration/task/context_collab address no bot, so "none" grows 144 -> 147.
+_BOT_ID_PLACEMENT = {"path": 226, "query": 1, "none": 147}
+
 
 
 def _schema() -> dict:
@@ -849,7 +871,11 @@ def test_the_pinned_number_of_operations_take_it():
     # DWS rollout eligibility also requires the explicit caller: 269 -> 270.
     # The genome registry (RSI-03) adds thirteen: 270 -> 283.
     # The default-model read adds one Bot-addressed user-scoped operation.
-    assert len(taking) == 291
+    # The owner-scoped collaboration repair adds one more: 291 -> 292 (and its
+    # path-addressed placement mirrors _BOT_ID_PLACEMENT["path"] 219 -> 220).
+    # The six service-Bot evaluation operations add six user-taking,
+    # path-addressed operations: 292 -> 298 / 220 -> 226.
+    assert len(taking) == 298
 
 
 def test_the_exempt_operations_take_none():

@@ -108,6 +108,17 @@ impl bcs_service_api::port::bot_authority::BotAuthorityPort for UnwiredBotAuthor
             "bot authority hook is not wired".to_string(),
         ))
     }
+
+    async fn ownerships_for(
+        &self,
+        _bot_ids: &[String],
+    ) -> bcs_service_api::ServiceResult<
+        Vec<Option<bcs_service_api::types::bot_authority::BotOwnershipView>>,
+    > {
+        Err(bcs_service_api::ServiceError::InternalError(
+            "bot authority hook is not wired".to_string(),
+        ))
+    }
 }
 
 static UNWIRED_BOT_AUTHORITY_FALLBACK: UnwiredBotAuthorityFallback =

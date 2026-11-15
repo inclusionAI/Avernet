@@ -8,15 +8,15 @@ from unittest.mock import MagicMock, patch
 import pytest
 from mysql.connector import IntegrityError as MySQLIntegrityError
 
-from src.application.services.worker_sync_merge import save_merged_profile
-from src.domain.models.worker_profile_content import WorkerProfileContent
-from src.infra.public.stores.in_memory_worker_profile_content_store import (
+from app.application.services.worker_sync_merge import save_merged_profile
+from app.domain.models.worker_profile_content import WorkerProfileContent
+from app.infra.public.stores.in_memory_worker_profile_content_store import (
     InMemoryWorkerProfileContentStore,
 )
-from src.infra.public.stores.mysql_worker_profile_content_store import (
+from app.infra.public.stores.mysql_worker_profile_content_store import (
     MySQLWorkerProfileContentStore,
 )
-from src.infra.public.stores.sqlite_worker_profile_content_store import (
+from app.infra.public.stores.sqlite_worker_profile_content_store import (
     SQLiteWorkerProfileContentStore,
 )
 

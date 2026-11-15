@@ -20,7 +20,7 @@ export interface ConversationPresentation {
 
 const STANDARD_PRESENTATION: ConversationPresentation = {
   variant: 'standard',
-  composerPlaceholder: '可使用 /file 引用文件、/link 引用链接、/skill 调用能力',
+  composerPlaceholder: '可使用 /file 引用文件、/skill 调用能力',
   composerExtensions: true,
   taskComposer: true,
   modelSelector: true,
@@ -51,6 +51,14 @@ const FRIEND_CODING_COMPAT_PRESENTATION: ConversationPresentation = {
   sidePane: false,
 };
 
+/** 好友 Bot（非 Coding）连接后的展示：能力位沿用标准形态（/file 会话文件引用可用），
+ *  但无 /skill 命令（canUseSkills 排除好友 Bot；skills 清单接口在 useBotSkills 内已对
+ *  isFriendBot 短路不请求），placeholder 不提示 /skill（2026-11-04 用户反馈修正）。 */
+const FRIEND_STANDARD_PRESENTATION: ConversationPresentation = {
+  ...STANDARD_PRESENTATION,
+  composerPlaceholder: '可使用 /file 引用文件',
+};
+
 function metadataSuggestsFriendCodingBot(bot: ChatBotView): boolean {
   const runtime = resolveBotRuntime({
     botId: bot.botId,
@@ -74,7 +82,9 @@ export function resolveConversationPresentation(
   if (!bot?.isFriendBot) return STANDARD_PRESENTATION;
 
   if (connectionRuntime.resolved) {
-    return isAicodingConnectionEngine(connectionRuntime.engine) ? FRIEND_CODING_COMPAT_PRESENTATION : STANDARD_PRESENTATION;
+    return isAicodingConnectionEngine(connectionRuntime.engine)
+      ? FRIEND_CODING_COMPAT_PRESENTATION
+      : FRIEND_STANDARD_PRESENTATION;
   }
 
   return metadataSuggestsFriendCodingBot(bot) ? FRIEND_CODING_COMPAT_PRESENTATION : FRIEND_RUNTIME_PENDING_PRESENTATION;

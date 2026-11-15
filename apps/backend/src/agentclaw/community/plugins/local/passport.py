@@ -45,6 +45,7 @@ class LocalPassportPlugin(MockSeam, PassportPlugin):
         access_mode: str | None = None,
         admins: list[str] | None = None,
         resource_scope: PassportResourceScope | None = None,
+        bot_type: str | None = None,
     ) -> None:
         mcp_codes, cli_items = unpack_resource_scope(resource_scope)
         logger.info(
@@ -97,6 +98,7 @@ class LocalPassportPlugin(MockSeam, PassportPlugin):
         cli_items: list[CliItem] | None = None,
         *,
         target_env: str | None = None,
+        bot_type: str | None = None,
     ) -> dict[str, Any] | None:
         validate_passport_target_env(target_env)
         logger.info(
@@ -133,6 +135,7 @@ class LocalPassportPlugin(MockSeam, PassportPlugin):
         workspace_path: str | None = None,
         admins: list[str] | None = None,
         cli_items: list[CliItem] | None = None,
+        bot_type: str | None = None,
     ) -> dict[str, Any] | None:
         logger.info(
             "[LocalPassportUpdate] apply_agent_passport: bot_id=%s, "
@@ -167,6 +170,7 @@ class LocalPassportPlugin(MockSeam, PassportPlugin):
         target_env: str | None = None,
         handoff_operation_id: str | None = None,
         expected_credential_id: str | None = None,
+        bot_type: str | None = None,
     ) -> dict[str, Any] | None:
         validate_passport_target_env(target_env)
         if handoff_operation_id is not None or expected_credential_id is not None:
@@ -187,6 +191,12 @@ class LocalPassportPlugin(MockSeam, PassportPlugin):
             "agent_code": f"local_{bot_id}",
             "token": f"mock_token_reissued_{bot_id}",
         }
+
+    def query_handoff_passport(
+        self, *, bot_id: str, owner_workno: str, entity_id: str,
+    ) -> dict[str, Any] | None:
+        # Local Passport has no durable credential history or handoff capability.
+        return None
 
     def owner_handoff_supported(
         self, *, bot_id: str, owner_workno: str, entity_id: str

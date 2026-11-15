@@ -2,17 +2,24 @@
  * The caller authorizes the write and durably journals prepared before push.
  * All Git publication uses the same CAS/recovery primitive as binary Pack edits.
  */
+import { workflowSavedGitRunner, initSavedWorkflowRepo, workflowSavedCommitMessage } from './workflow-saved-ref.js';
 import { stat, lstat, readFile, writeFile } from 'node:fs/promises';
-import { stringify as stringifyYaml } from 'yaml';
+import { stringify as stringifyYaml, parse as parseYaml } from 'yaml';
 import path from 'node:path';
 import { withGitOperation } from '@avernet/clawweb-shared/server/services/git-execution';
 import type { WorkflowSpec } from '../workflow.js';
-import { cloneClawflows, createTempRepo, removeTempRepo, writeWorkflowSpecToRepo, ensurePackManifest,
+import { createTempRepo, removeTempRepo, writeWorkflowSpecToRepo, ensurePackManifest,
   resolvePackPaths, type ClawFlowsGitConfig, type GitAuthor } from './clawflows-git-client.js';
 import { PackCandidateConflictError, PackCandidateOutcomeUnknownError, pushPreparedPackCandidate,
   type PreparedPackCandidate, type SavePackCandidateResult } from './pack-candidate-save.js';
-import { createPreparedGitBundle, readPreparedPackMetadata, readPreparedRemoteRefs, preparedGitRunner,
+import { createPreparedGitBundle, readPreparedPackMetadata,
   gitOidPattern, validPackGitId } from './pack-git-prepared.js';
+
+/** No fallback source exists for an already-known workflow. */
+export class WorkflowSaveRequiredError extends Error {
+  readonly code = 'SAVE_REQUIRED';
+  constructor() { super('Workflow wf snapshot is required before saving'); this.name = 'WorkflowSaveRequiredError'; }
+}
 
 export type PrepareWorkflowSpecInput = {
   workflowId: string;
@@ -20,11 +27,11 @@ export type PrepareWorkflowSpecInput = {
   spec: WorkflowSpec;
   config: ClawFlowsGitConfig;
   author: GitAuthor;
-  /** New identities may not adopt any existing workflow ref or default-branch Pack. */
+  /** New identities may not adopt an existing wf snapshot. */
   createOnly?: boolean;
-  /** Omission captures the observed remote saved head; null requires absence. */
+  /** Omission captures the observed remote wf head (wire name retained); null requires absence. */
   expectedSavedHead?: string | null;
-  /** If supplied, must match the selected saved, wf, or default-HEAD base. */
+  /** If supplied, must match the observed wf commit. */
   sourceCommit?: string;
 };
 
@@ -41,28 +48,16 @@ export async function withPreparedWorkflowSpec<T>(input: PrepareWorkflowSpecInpu
     let attempted: SavePackCandidateResult | undefined;
     let pending: Promise<SavePackCandidateResult> | undefined;
     try {
-      await cloneClawflows(dir, input.config);
-      const { text } = preparedGitRunner(dir);
-      const savedRef = `refs/heads/saved/${input.workflowId}`;
-      const wfRef = `refs/heads/wf/${input.workflowId}`;
-      const refs = await readPreparedRemoteRefs(dir, [savedRef, wfRef]);
-      const expectedSavedHead = refs.get(savedRef) ?? null;
+      const savedState = await initSavedWorkflowRepo(dir, input.workflowId, input.config);
+      const { text } = workflowSavedGitRunner(dir);
+      const expectedSavedHead = savedState.wfHead;
       if (input.expectedSavedHead !== undefined && input.expectedSavedHead !== expectedSavedHead) throw new PackCandidateConflictError();
-      const wf = refs.get(wfRef) ?? null;
-      if (input.createOnly && (expectedSavedHead !== null || wf !== null)) throw new PackCandidateConflictError();
-      let sourceCommit = expectedSavedHead ?? wf;
-      const sourceVersion = expectedSavedHead ? 'draft' : wf ? 'current' : 'initial';
-      if (sourceCommit === null) {
-        try { sourceCommit = await text(['rev-parse', '--verify', 'HEAD^{commit}']); }
-        catch (error) {
-          if ((error as { status?: number }).status !== 128) throw error;
-          // Only an absent branch behind a valid symbolic HEAD is truly unborn.
-          const head = await text(['symbolic-ref', '--quiet', 'HEAD']);
-          if (!head.startsWith('refs/heads/')) throw new Error('Invalid initial HEAD');
-          try { await text(['show-ref', '--verify', '--quiet', head]); throw new Error('Invalid initial commit'); }
-          catch (missing) { if ((missing as { status?: number }).status !== 1) throw missing; }
-        }
-      }
+      if (input.createOnly && expectedSavedHead !== null) throw new PackCandidateConflictError();
+      if (savedState.commit === null && input.createOnly !== true) throw new WorkflowSaveRequiredError();
+      const sourceCommit = savedState.commit;
+      const sourceVersion = sourceCommit ? 'current' : 'initial';
+      // With no wf, initialize a new Pack in this empty repo. Never checkout or
+      // inherit the remote default branch, which may be an unrelated old draft.
       if ((sourceCommit !== null && !gitOidPattern.test(sourceCommit))
         || (input.sourceCommit !== undefined && input.sourceCommit !== sourceCommit)) throw new PackCandidateConflictError();
       if (sourceCommit !== null) {
@@ -73,9 +68,7 @@ export async function withPreparedWorkflowSpec<T>(input: PrepareWorkflowSpecInpu
         await text(['read-tree', sourceCommit]);
       } else await text(['read-tree', '--empty']);
       if (input.createOnly) {
-        // A default-branch Pack or orphan spec is not evidence of ownership. The
-        // normal writer separately discovers all other manifests and refuses an
-        // ID collision before writing; these checks also forbid adopting a Pack.
+        // New Pack files must not pre-exist in this isolated empty repository.
         const paths = resolvePackPaths(dir, input.packId, input.workflowId);
         for (const file of [paths.manifestPath, paths.specPath]) {
           try { await lstat(file); throw new PackCandidateConflictError(); }
@@ -84,20 +77,22 @@ export async function withPreparedWorkflowSpec<T>(input: PrepareWorkflowSpecInpu
       }
       await writeWorkflowSpecToRepo(dir, input.packId, input.workflowId, input.spec);
       const previousPaths = resolvePackPaths(dir, input.packId, input.workflowId);
-      // The legacy writer normalizes on write. A new workflow must preserve the
-      // validated submitted document exactly, including numeric/absent version.
-      if (input.createOnly) await writeFile(previousPaths.specPath, stringifyYaml(input.spec, { lineWidth: 0 }));
+      // Preserve the DB document exactly, including numeric/absent version;
+      // normalization is for validation only, not an alternate Git document.
+      await writeFile(previousPaths.specPath, stringifyYaml(input.spec, { lineWidth: 0 }));
       let previousManifest: Buffer | undefined;
       try {
         if ((await stat(previousPaths.manifestPath)).size > 1024 * 1024) throw new Error('Manifest or workflow too large');
         previousManifest = await readFile(previousPaths.manifestPath);
       } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
-      await ensurePackManifest(dir, input.packId, input.workflowId);
+      // A YAML-only save must not normalize an unchanged legacy manifest.
+      // Its existing representation, comments, bytes and index mode are Pack data.
+      const declared = previousManifest ? parseYaml(previousManifest.toString('utf8'))?.workflows : undefined;
+      const includesWorkflow = Array.isArray(declared) && declared.some(item =>
+        (typeof item === 'string' ? item : item?.id) === input.workflowId);
+      if (!includesWorkflow) await ensurePackManifest(dir, input.packId, input.workflowId);
       const paths = resolvePackPaths(dir, input.packId, input.workflowId);
-      // A new workflow owns a new Pack, not the default branch's unrelated
-      // working tree. Its parent retains history, but its saved tree contains
-      // only this Pack so a root-layout default branch cannot create an invalid
-      // mixed root/nested snapshot.
+      // A new workflow owns only the newly initialized Pack.
       if (input.createOnly) await text(['read-tree', '--empty']);
       // Stage only the two owned files, directly from bytes. git add . would
       // apply filters and could accidentally rewrite inherited binary resources.
@@ -115,13 +110,16 @@ export async function withPreparedWorkflowSpec<T>(input: PrepareWorkflowSpecInpu
         await text(['update-index', '--add', '--cacheinfo', mode, oid, relative]);
       }
       const tree = await text(['write-tree']);
+      const packPath = path.relative(dir, path.dirname(paths.manifestPath)).split(path.sep).join('/');
+      const message = await workflowSavedCommitMessage(dir, input.workflowId, tree, { packId: input.packId,
+        packPath, workflowFile: path.relative(path.dirname(paths.manifestPath), paths.specPath).split(path.sep).join('/') });
       const commit = await text(['-c', `user.name=${input.author.name}`, '-c', `user.email=${input.author.email}`,
-        'commit-tree', tree, ...(sourceCommit === null ? [] : ['-p', sourceCommit]), '-m', `Save workflow ${input.workflowId}`]);
+        'commit-tree', tree, ...(sourceCommit === null ? [] : ['-p', sourceCommit]), '-m', message]);
       if (!gitOidPattern.test(commit)) throw new Error('Invalid candidate commit');
       const metadata = await readPreparedPackMetadata(dir, input.workflowId, commit);
       if (metadata.packId !== input.packId) throw new Error('Candidate pack identity mismatch');
       const prepared: PreparedPackCandidate = Object.freeze({ ...metadata, workflowId: input.workflowId,
-        branch: `saved/${input.workflowId}`, commit, sourceVersion, sourceCommit, expectedSavedHead,
+        branch: `wf/${input.workflowId}`, commit, sourceVersion, sourceCommit, expectedSavedHead,
         bundleBase64: await createPreparedGitBundle(dir, [commit]) });
       const result = await callback(prepared, () => {
         if (!active) return Promise.reject(new Error('Prepared candidate callback is no longer active'));

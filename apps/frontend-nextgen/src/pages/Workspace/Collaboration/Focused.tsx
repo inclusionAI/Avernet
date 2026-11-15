@@ -10,29 +10,31 @@ import { ArrowLeft } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import CollaborationPage from './index';
 
-function FocusedFrame({ onBack, children }: { onBack: () => void; children: ReactNode }) {
+function FocusedFrame({ onBack, showReturn, children }: { onBack: () => void; showReturn: boolean; children: ReactNode }) {
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
-      <div className="flex h-10 shrink-0 items-center border-b border-divider px-3">
-        <Button variant="ghost" size="sm" leftIcon={<ArrowLeft className="h-4 w-4" aria-hidden />} onClick={onBack}>
-          返回完整协作区
-        </Button>
-      </div>
+      {showReturn ? (
+        <div className="flex h-10 shrink-0 items-center border-b border-divider px-3">
+          <Button variant="ghost" size="sm" leftIcon={<ArrowLeft className="h-4 w-4" aria-hidden />} onClick={onBack}>
+            返回完整协作区
+          </Button>
+        </div>
+      ) : null}
       <div className="flex min-h-0 flex-1 flex-col">{children}</div>
     </div>
   );
 }
 
-function CollaborationOnlyPage() {
+function CollaborationOnlyPage({ showReturn }: { showReturn: boolean }) {
   const navigation = useFocusedCollaborationNavigation('only', null);
   return (
-    <FocusedFrame onBack={navigation.goBack}>
+    <FocusedFrame onBack={navigation.goBack} showReturn={showReturn}>
       <CollaborationPage />
     </FocusedFrame>
   );
 }
 
-function ScopedCollaborationPage({ mode, query }: { mode: 'group' | 'session'; query: string }) {
+function ScopedCollaborationPage({ mode, query, showReturn }: { mode: 'group' | 'session'; query: string; showReturn: boolean }) {
   const projectedQuery = useRef<string | null>(null);
   const model = useCollaborationScope(mode, query, projectedQuery);
   const navigation = useFocusedCollaborationNavigation(mode, model.scope, projectedQuery);
@@ -43,7 +45,7 @@ function ScopedCollaborationPage({ mode, query }: { mode: 'group' | 'session'; q
     if (isDesktop) setMobileListOpen(false);
   }, [isDesktop]);
   return (
-    <FocusedFrame onBack={navigation.goBack}>
+    <FocusedFrame onBack={navigation.goBack} showReturn={showReturn}>
       {model.error ? (
         <Empty
           title="无法打开指定协作区"
@@ -81,9 +83,10 @@ function ScopedCollaborationPage({ mode, query }: { mode: 'group' | 'session'; q
 export default function FocusedCollaborationPage() {
   const location = useLocation();
   const mode = getCollaborationPresentation(location.pathname);
+  const showReturn = new URLSearchParams(location.search).get('showReturn') !== 'false';
   return mode === 'group' || mode === 'session' ? (
-    <ScopedCollaborationPage mode={mode} query={location.search} />
+    <ScopedCollaborationPage mode={mode} query={location.search} showReturn={showReturn} />
   ) : (
-    <CollaborationOnlyPage />
+    <CollaborationOnlyPage showReturn={showReturn} />
   );
 }

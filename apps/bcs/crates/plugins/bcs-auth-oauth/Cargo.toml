@@ -13,7 +13,6 @@ axum = { workspace = true }
 bcs-auth-api = { workspace = true }
 bcs-jwt = { workspace = true }
 subtle = { workspace = true }
-tracing = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]

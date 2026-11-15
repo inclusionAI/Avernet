@@ -100,7 +100,11 @@ class CronTargetedOperationsMixin:
                 raise CronRelayError(
                     "Cron delegation requires Bot management permission", 403
                 ) from exc
-        if bot.get("call_type") == "caller" and runtime_stage != "online":
+        if (
+            bot.get("call_type") == "caller"
+            and str(bot.get("active_engine") or "").strip().lower() != "teclaw"
+            and runtime_stage != "online"
+        ):
             raise CronRelayError(
                 "Caller Cron targets only support runtime_stage=online", 400
             )

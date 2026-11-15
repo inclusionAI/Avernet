@@ -92,10 +92,18 @@ describe('CollaborationIdentityHeader', () => {
   });
 });
 
-it('read-only header has identity details but no switchable button or popover', () => {
+it('read-only header reuses the same chip row but disables switching', () => {
   mockUseWorkspaceIdentitySwitcherModel.mockReturnValue(model);
   render(<CollaborationIdentityHeader readOnly />);
-  expect(screen.getByText('当前协作身份')).toBeInTheDocument();
-  expect(screen.getByText('用户 ID：fengtai')).toBeInTheDocument();
-  expect(screen.queryByRole('button')).not.toBeInTheDocument();
+  // 与其他协作页面一致的 chip 行（h-12 区 + 名称 + (短ID) + 分段指示），禁点击无弹层。
+  expect(screen.getByRole('region', { name: '当前协作身份' })).toHaveClass('h-12', 'px-3');
+  const chip = screen.getByRole('button', { name: '当前协作身份：我' });
+  expect(chip).toBeDisabled();
+  expect(chip).toHaveClass('h-8', 'w-full');
+  expect(chip).toHaveTextContent('我');
+  expect(chip).toHaveTextContent('(fengtai)');
+  expect(screen.getByRole('img', { name: '我' })).toHaveAttribute('src', 'https://example.test/avatar.png');
+  fireEvent.click(chip);
+  expect(screen.queryByText('切换协作身份')).not.toBeInTheDocument();
+  expect(mockSwitchIdentity).not.toHaveBeenCalled();
 });

@@ -1,3 +1,5 @@
+use bcs_domain::group_context::{GroupContextItemPreset, GroupContextItemPresetChange};
+
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -40,6 +42,7 @@ impl GroupContextApplicationServiceImpl {
 
     async fn create(
         &self,
+        created_from_preset: bool,
         scope: ResolvedScope,
         name: String,
         content: String,
@@ -60,6 +63,7 @@ impl GroupContextApplicationServiceImpl {
         let now = Utc::now();
         self.repo
             .create_active(NewGroupContextEntry {
+                created_from_preset,
                 context_id: new_context_id(),
                 name,
                 scope_level: scope.scope_level,
@@ -106,6 +110,7 @@ impl GroupContextApplicationServiceImpl {
                 &old.scope,
                 expected_active_id,
                 NewGroupContextEntry {
+                    created_from_preset: old.created_from_preset,
                     context_id: old.context_id.clone(),
                     name,
                     scope_level: scope.scope_level,
@@ -127,8 +132,54 @@ impl GroupContextApplicationServiceImpl {
     }
 }
 
+impl GroupContextApplicationServiceImpl {
+    async fn change_preset(&self, group_id: &str, actor: &str, change: GroupContextItemPresetChange) -> Result<(), ApplicationError> {
+        validate_name(group_id)?;
+        validate_actor(actor)?;
+        match &change {
+            GroupContextItemPresetChange::Add { name, description } => {
+                validate_name(name)?;
+                validate_content(description)?;
+            }
+            GroupContextItemPresetChange::Edit { name, new_name, description } => {
+                validate_name(name)?;
+                if let Some(name) = new_name {
+                    validate_name(name)?;
+                }
+                if let Some(description) = description {
+                    validate_content(description)?;
+                }
+            }
+            GroupContextItemPresetChange::Delete { name } => validate_name(name)?,
+        }
+        tracing::info!(group_id, actor, operation = match &change {
+            GroupContextItemPresetChange::Add { .. } => "add",
+            GroupContextItemPresetChange::Edit { .. } => "update",
+            GroupContextItemPresetChange::Delete { .. } => "delete",
+        }, "Group Context preset mutation");
+        self.repo.change_preset(group_id, actor, change).await.map_err(map_store_error)
+    }
+}
+
 #[async_trait]
 impl GroupContextApplicationService for GroupContextApplicationServiceImpl {
+    async fn list_presets(&self, group_id: &str, _caller: &bcs_service_api::application::v1::AuthenticatedCaller, _session_id: Option<&str>) -> Result<Vec<GroupContextItemPreset>, ApplicationError> {
+        validate_name(group_id)?;
+        self.repo.list_presets(group_id).await.map_err(map_store_error)
+    }
+
+    async fn add_preset(&self, group_id: &str, actor: &str, name: String, description: String) -> Result<(), ApplicationError> {
+        self.change_preset(group_id, actor, GroupContextItemPresetChange::Add { name, description }).await
+    }
+
+    async fn update_preset(&self, group_id: &str, actor: &str, name: String, new_name: Option<String>, description: Option<String>) -> Result<(), ApplicationError> {
+        self.change_preset(group_id, actor, GroupContextItemPresetChange::Edit { name, new_name, description }).await
+    }
+
+    async fn delete_preset(&self, group_id: &str, actor: &str, name: String) -> Result<(), ApplicationError> {
+        self.change_preset(group_id, actor, GroupContextItemPresetChange::Delete { name }).await
+    }
+
     async fn add(&self, command: AddGroupContext) -> Result<GroupContextAck, ApplicationError> {
         let scope = resolve_scope(&command.request_context, command.scope_level)?;
         validate_actor(&command.actor_id)?;
@@ -137,7 +188,17 @@ impl GroupContextApplicationService for GroupContextApplicationServiceImpl {
         if let Some(collect_from) = command.collect_from.as_ref() {
             validate_policy("collect_from", collect_from)?;
         }
+        if command.preset && (command.scope_level != ScopeLevel::Session || command.request_context.group_id.is_none()) {
+            return Err(ApplicationError::invalid(INVALID_PARAM, "preset creation requires a session in a group"));
+        }
+        if let Some(group_id) = command.request_context.group_id.as_deref() {
+            let defined = self.repo.preset_exists(group_id, &command.name).await.map_err(map_store_error)?;
+            if defined != command.preset {
+                return Err(ApplicationError::invalid(INVALID_PARAM, "preset flag must match the group preset definition"));
+            }
+        }
         self.create(
+            command.preset,
             scope,
             command.name,
             command.content,
@@ -345,6 +406,7 @@ impl GroupContextApplicationService for GroupContextApplicationServiceImpl {
             }
             None => {
                 self.create(
+                    false,
                     scope,
                     command.name,
                     command.content,

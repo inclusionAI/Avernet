@@ -545,6 +545,7 @@ async fn owner_directory_fixture(
         owner,
         "status-token",
         bcs_service_api::types::bot_authority::OwnershipInitialization {
+            initial_manager_user_ids: Vec::new(),
             owner_user_id: owner.to_string(),
             mutation: authority_mutation("status-register", owner),
         },

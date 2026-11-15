@@ -1,20 +1,32 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { parse as parseYaml } from 'yaml'
 import type { WorkflowSpec } from '@avernet/clawweb-shared/web/types'
+import CloneWorkflowPanel, { type CloneWorkflowFormInput } from './CloneWorkflowPanel'
 
 interface CreateWorkflowModalProps {
   open: boolean
   onClose: () => void
-  onSubmit: (input: {
-    workflowId: string
-    spec: WorkflowSpec
-    facade?: { command?: string; remark?: string }
-  }) => Promise<void>
+  onSubmit: (input: CreateWorkflowSubmitInput) => Promise<void>
   isPending?: boolean
 }
 
 const COMMAND_PATTERN = /^[a-z0-9][a-z0-9_-]*[a-z0-9]$|^[a-z0-9]$/
-type CreateSource = 'blank' | 'paste' | 'file'
+type CreateSource = 'blank' | 'paste' | 'file' | 'clone'
+
+export type CreateWorkflowSubmitInput =
+  | {
+      source: 'clone'
+      sourceWorkflowId: string
+      workflowId: string
+      title: string
+      facade?: { command?: string; remark?: string }
+    }
+  | {
+      source: Exclude<CreateSource, 'clone'>
+      workflowId: string
+      spec: WorkflowSpec
+      facade?: { command?: string; remark?: string }
+    }
 
 function buildInitialSpec(workflowId: string, title: string): WorkflowSpec {
   return {
@@ -77,6 +89,7 @@ export default function CreateWorkflowModal({ open, onClose, onSubmit, isPending
   }, [command])
 
   const canSubmit = useMemo(() => {
+    if (source === 'clone') return false
     if (source !== 'blank') return !!yamlInput.trim()
     return !!workflowId.trim() && !!title.trim() && !idError && !commandError
   }, [source, yamlInput, workflowId, title, idError, commandError])
@@ -89,6 +102,7 @@ export default function CreateWorkflowModal({ open, onClose, onSubmit, isPending
   const handleSubmit = useCallback(async () => {
     if (!canSubmit || isPending) return
     try {
+      if (source === 'clone') return
       if (source !== 'blank') {
         const parsed = parseYaml(yamlInput) as WorkflowSpec
         if (!parsed?.id || !parsed?.title || !parsed?.version || !Array.isArray(parsed.nodes)) {
@@ -97,19 +111,34 @@ export default function CreateWorkflowModal({ open, onClose, onSubmit, isPending
         const facade = parsed.facade?.command
           ? { command: parsed.facade.command, remark: parsed.facade.remark }
           : undefined
-        await onSubmit({ workflowId: parsed.id, spec: parsed, facade })
+        await onSubmit({ source, workflowId: parsed.id, spec: parsed, facade })
       } else {
         const id = workflowId.trim()
         const displayTitle = title.trim() || id
         const cmd = command.trim()
         const facade = cmd ? { command: cmd, remark: remark.trim() || undefined } : undefined
-        await onSubmit({ workflowId: id, spec: buildInitialSpec(id, displayTitle), facade })
+        await onSubmit({ source: 'blank', workflowId: id, spec: buildInitialSpec(id, displayTitle), facade })
       }
       onClose()
     } catch (err) {
       setError(err instanceof Error ? err.message : '创建工作流失败')
     }
   }, [canSubmit, isPending, source, yamlInput, workflowId, title, command, remark, onSubmit, onClose])
+
+  const handleCloneSubmit = useCallback(async (input: CloneWorkflowFormInput) => {
+    try {
+      await onSubmit({
+        source: 'clone',
+        sourceWorkflowId: input.sourceWorkflowId,
+        workflowId: input.targetWorkflowId,
+        title: input.title,
+        facade: input.facade,
+      })
+      onClose()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '创建工作流失败')
+    }
+  }, [onSubmit, onClose])
 
   const handleImportFile = useCallback((file?: File) => {
     if (!file) return
@@ -151,11 +180,12 @@ export default function CreateWorkflowModal({ open, onClose, onSubmit, isPending
         </div>
 
         <div className="space-y-4 px-6 py-5">
-          <div className="grid grid-cols-3 gap-2" role="group" aria-label="创建方式">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4" role="group" aria-label="创建方式">
             {([
               ['blank', '空白工作流'],
               ['paste', '粘贴 YAML'],
               ['file', '导入 YAML'],
+              ['clone', '基于已有工作流'],
             ] as const).map(([value, label]) => (
               <button
                 key={value}
@@ -168,7 +198,7 @@ export default function CreateWorkflowModal({ open, onClose, onSubmit, isPending
             ))}
           </div>
 
-          {source === 'blank' ? <>
+          {source === 'clone' ? <CloneWorkflowPanel open={open} isPending={isPending} onSubmit={handleCloneSubmit} /> : source === 'blank' ? <>
           <div>
             <label className="mb-1.5 block text-sm font-medium text-gray-700">
               工作流 ID <span className="text-red-500">*</span>
@@ -285,7 +315,7 @@ export default function CreateWorkflowModal({ open, onClose, onSubmit, isPending
           >
             取消
           </button>
-          <button
+          {source !== 'clone' && <button
             onClick={handleSubmit}
             disabled={!canSubmit || isPending}
             className="flex min-w-[80px] items-center justify-center rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
@@ -298,7 +328,7 @@ export default function CreateWorkflowModal({ open, onClose, onSubmit, isPending
             ) : (
               source === 'blank' ? '创建' : '从 YAML 创建'
             )}
-          </button>
+          </button>}
         </div>
       </div>
     </div>

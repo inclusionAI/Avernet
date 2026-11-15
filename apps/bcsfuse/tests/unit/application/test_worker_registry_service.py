@@ -14,13 +14,13 @@ class TestWorkerRegistryServiceCreation:
 
     def test_service_importable(self):
         """验证 WorkerRegistryService 可导入"""
-        from src.application.services.worker_registry_service import WorkerRegistryService
+        from app.application.services.worker_registry_service import WorkerRegistryService
         assert WorkerRegistryService is not None
 
     def test_service_instantiation(self):
         """验证可以实例化"""
-        from src.application.services.worker_registry_service import WorkerRegistryService
-        from src.infra.repositories.in_memory_worker_repository import InMemoryWorkerRepository
+        from app.application.services.worker_registry_service import WorkerRegistryService
+        from app.infra.repositories.in_memory_worker_repository import InMemoryWorkerRepository
 
         repo = InMemoryWorkerRepository()
         service = WorkerRegistryService(repo)
@@ -32,8 +32,8 @@ class TestWorkerRegistryServiceCreateWorker:
 
     @pytest.fixture
     def service(self):
-        from src.application.services.worker_registry_service import WorkerRegistryService
-        from src.infra.repositories.in_memory_worker_repository import InMemoryWorkerRepository
+        from app.application.services.worker_registry_service import WorkerRegistryService
+        from app.infra.repositories.in_memory_worker_repository import InMemoryWorkerRepository
 
         repo = InMemoryWorkerRepository()
         return WorkerRegistryService(repo)
@@ -78,7 +78,7 @@ class TestWorkerRegistryServiceCreateWorker:
 
     def test_create_duplicate_worker_raises_error(self, service):
         """验证创建重复 Worker 抛出异常"""
-        from src.domain.exceptions import DuplicateWorkerException
+        from app.domain.exceptions import DuplicateWorkerException
 
         worker_data = {
             "id": "wrk_bot_001",
@@ -103,8 +103,8 @@ class TestWorkerRegistryServiceGetWorker:
 
     @pytest.fixture
     def service(self):
-        from src.application.services.worker_registry_service import WorkerRegistryService
-        from src.infra.repositories.in_memory_worker_repository import InMemoryWorkerRepository
+        from app.application.services.worker_registry_service import WorkerRegistryService
+        from app.infra.repositories.in_memory_worker_repository import InMemoryWorkerRepository
 
         repo = InMemoryWorkerRepository()
         return WorkerRegistryService(repo)
@@ -141,8 +141,8 @@ class TestWorkerRegistryServiceListWorkers:
 
     @pytest.fixture
     def service(self):
-        from src.application.services.worker_registry_service import WorkerRegistryService
-        from src.infra.repositories.in_memory_worker_repository import InMemoryWorkerRepository
+        from app.application.services.worker_registry_service import WorkerRegistryService
+        from app.infra.repositories.in_memory_worker_repository import InMemoryWorkerRepository
 
         repo = InMemoryWorkerRepository()
         return WorkerRegistryService(repo)
@@ -213,8 +213,8 @@ class TestWorkerRegistryServiceUpdateWorker:
 
     @pytest.fixture
     def service(self):
-        from src.application.services.worker_registry_service import WorkerRegistryService
-        from src.infra.repositories.in_memory_worker_repository import InMemoryWorkerRepository
+        from app.application.services.worker_registry_service import WorkerRegistryService
+        from app.infra.repositories.in_memory_worker_repository import InMemoryWorkerRepository
 
         repo = InMemoryWorkerRepository()
         return WorkerRegistryService(repo)
@@ -241,7 +241,7 @@ class TestWorkerRegistryServiceUpdateWorker:
 
     def test_update_nonexistent_worker_raises_error(self, service):
         """验证更新不存在的 Worker 抛出异常"""
-        from src.domain.exceptions import WorkerNotFoundException
+        from app.domain.exceptions import WorkerNotFoundException
 
         with pytest.raises(WorkerNotFoundException):
             service.update_worker("wrk_nonexistent", {"identity": {"name": "Updated", "handle": "@updated"}})
@@ -256,8 +256,8 @@ class TestWorkerRegistryServiceFiltering:
     @pytest.fixture
     def service_with_workers(self):
         """创建包含多个 Worker 的 service"""
-        from src.application.services.worker_registry_service import WorkerRegistryService
-        from src.infra.repositories.in_memory_worker_repository import InMemoryWorkerRepository
+        from app.application.services.worker_registry_service import WorkerRegistryService
+        from app.infra.repositories.in_memory_worker_repository import InMemoryWorkerRepository
 
         repo = InMemoryWorkerRepository()
         service = WorkerRegistryService(repo)

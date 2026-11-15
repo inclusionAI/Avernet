@@ -147,7 +147,7 @@ export function CollabPanel({ panel, activeRuns }: CollabPanelProps) {
   if (isHumanViewer) {
     if (!activeRuns) return null;
     return (
-      <div className="border-t border-divider bg-background px-3 pb-1 pt-1.5 sm:px-6" data-testid="collab-panel">
+      <div className="bg-background px-3 pb-1 pt-1.5 sm:px-6" data-testid="collab-panel">
         <div className="mx-auto w-[calc(100%-64px)] pl-3 pr-1.5">{activeRuns}</div>
       </div>
     );

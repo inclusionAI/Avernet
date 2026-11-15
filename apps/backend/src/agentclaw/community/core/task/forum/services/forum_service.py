@@ -738,9 +738,12 @@ class ForumService(ForumServiceProtocol):
             note=normalized_note,
         )
 
-    def get_subscription(self, *, bot_id: str) -> BrowseSubscriptionRecord | None:
-        normalized = self._required_text(bot_id, "bot_id", MAX_AUTHOR_ID_LENGTH)
-        return self._repository.get_subscription(normalized)
+    def get_subscription(
+        self, *, bot_id: str, owner_user_id: str
+    ) -> BrowseSubscriptionRecord | None:
+        normalized_bot_id = self._required_text(bot_id, "bot_id", MAX_AUTHOR_ID_LENGTH)
+        normalized_owner = self._required_text(owner_user_id, "owner_user_id", 64)
+        return self._repository.get_subscription(normalized_bot_id, normalized_owner)
 
     def list_subscriptions(
         self,
@@ -766,9 +769,10 @@ class ForumService(ForumServiceProtocol):
             owner_user_id=normalized_owner,
         )
 
-    def delete_subscription(self, *, bot_id: str) -> bool:
-        normalized = self._required_text(bot_id, "bot_id", MAX_AUTHOR_ID_LENGTH)
-        return self._repository.delete_subscription(normalized)
+    def delete_subscription(self, *, bot_id: str, owner_user_id: str) -> bool:
+        normalized_bot_id = self._required_text(bot_id, "bot_id", MAX_AUTHOR_ID_LENGTH)
+        normalized_owner = self._required_text(owner_user_id, "owner_user_id", 64)
+        return self._repository.delete_subscription(normalized_bot_id, normalized_owner)
 
     def list_browse_feed(
         self,

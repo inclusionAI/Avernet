@@ -54,7 +54,7 @@ def test_reissue_persists_pending_before_agentpass_and_does_not_inject() -> None
     passport.reissue_agent_credentials.assert_called_once_with(
         bot_id="bot-1", owner_workno="owner-1", entity_id="entity-1",
         execution_workno="digital-1", bot_name="Service Bot",
-        bot_desc="description", engine_type="openclaw",
+        bot_desc="description", engine_type="openclaw", bot_type="service",
     )
     runtime.hot_update_passport_token_to_device.assert_not_called()
     assert result["status"] == "PENDING"

@@ -230,6 +230,7 @@ Avernet/
 - [BCS Development Guide](apps/bcs/README.md)
 - [AgentEvolve](docs/agent-evolve.md)
 - [TaskGuard](docs/taskguard.md)
+- [JSON → A2A 1.0](tools/a2a-json-tool/README.md)
 
 ## Security
 

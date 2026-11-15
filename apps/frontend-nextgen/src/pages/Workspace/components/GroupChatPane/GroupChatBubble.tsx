@@ -1,7 +1,7 @@
 import { Badge } from '@/components/ui';
 import { MessageCopyAction, MessageInteractionToolbar } from '@/components/Workspace/MessageInteractionToolbar';
 import { MessageSenderLayout, MessageSenderMeta } from '@/components/Workspace/MessageSenderMeta';
-import type { GroupView, ParticipantView } from '@/domain/collaboration';
+import type { GroupView, ParticipantSummaryView, ParticipantView } from '@/domain/collaboration';
 import { isSameHumanIdentity } from '@/domain/userIdentity';
 import { getMessageText } from '@/pages/Workspace/hooks/useMessageInteractions';
 import type { ChatMessage } from '@tc-chat/core';
@@ -18,6 +18,8 @@ export interface GroupChatBubbleProps {
   isRequesting: boolean;
   group: GroupView;
   participants: ParticipantView[];
+  /** 会话展示成员摘要；缺省时回退完整 participants。头像解析优先生效。 */
+  displayParticipants?: ParticipantSummaryView[];
   sessionId?: string;
   /** 顶栏当前登录用户头像；用户消息优先复用此头像。 */
   userAvatarUrl?: string;
@@ -37,6 +39,7 @@ export function GroupChatBubble({
   isRequesting,
   group,
   participants,
+  displayParticipants,
   sessionId,
   userAvatarUrl,
   userIdentityId,
@@ -49,7 +52,9 @@ export function GroupChatBubble({
   if (message.role === 'system') {
     return <SystemMessageItem message={message} />;
   }
-  const sender = resolveSender(message, group, participants, userAvatarUrl, userIdentityId, userIdentityName);
+  const sender = resolveSender(
+    message, group, displayParticipants ?? participants, userAvatarUrl, userIdentityId, userIdentityName,
+  );
   const senderId = typeof message.extra?.senderId === 'string' ? message.extra.senderId : undefined;
   // user 仅代表 human 消息；必须匹配当前登录用户，不能把其他群成员也排到右侧。
   const isCurrentUser = message.role === 'user' && isSameHumanIdentity(senderId, userIdentityId, 'human');

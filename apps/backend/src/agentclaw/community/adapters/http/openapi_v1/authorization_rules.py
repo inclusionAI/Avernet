@@ -3,7 +3,9 @@
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 from .authorization_rules_catalog import CATALOG_AUTHORIZATION
 from .authorization_rules_genome import GENOME_AUTHORIZATION
+from .authorization_rules_metadata import METADATA_AUTHORIZATION
 from .authorization_rules_retiring import RETIRING_AUTHORIZATION
+from .authorization_rules_service_eval import SERVICE_EVAL_AUTHORIZATION
 from .authorization_rules_task import (
     TASK_BBS_AUTHORIZATION,
     TASK_PUBLIC_AUTHORIZATION,
@@ -30,6 +32,7 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         "service environment teardown intentionally has no Bot collaborator-level requirement"
     ),
     **{(method, DWS_PATH + suffix): OWNER_SCOPED for method, suffix in DWS_OPERATIONS},
+    **SERVICE_EVAL_AUTHORIZATION,
     ("GET", "/openapi/v1/bots/{bot_id}/classification"): NoCheck(
         "authenticated minimal classification before establishing Bot collaboration"
     ),
@@ -39,16 +42,12 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("POST", "/openapi/v1/bots/{bot_id}/links"): OWNER_SCOPED,
     ("PUT", "/openapi/v1/bots/{bot_id}/links/{resource_id}"): OWNER_SCOPED,
     ("DELETE", "/openapi/v1/bots/{bot_id}/links/{resource_id}"): OWNER_SCOPED,
+    # One-shot BCS collaboration repair. The command is the owner's and the
+    # service reconciles only the addressed Bot; collaborators have no say in
+    # what its ownership metadata says.
+    ("POST", "/openapi/v1/bots/{bot_id}/collaboration/repair"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}/local/start-progress"): OWNER_SCOPED,
-    ("GET", "/openapi/v1/bots/metadata/digital-employees"): NoCheck(
-        "authenticated tenant catalog for digital employee registration; creator filter is supplied by the platform"
-    ),
-    ("GET", "/openapi/v1/bots/metadata/digital-employees/{agent_id}"): NoCheck(
-        "authenticated tenant catalog for digital employee registration; public visibility approved for this integration"
-    ),
-    ("POST", "/openapi/v1/bots/metadata/queries"): NoCheck(
-        "tenant-wide display metadata for caller-supplied known bot ids"
-    ),
+    **METADATA_AUTHORIZATION,
     ("GET", "/openapi/v1/bots/{bot_id}/access"): NoCheck(
         "transitional; the handler checks the configured app_name allowlist"
     ),

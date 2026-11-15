@@ -1,7 +1,7 @@
 # Monitoring diagnosis-event/v4：标签与 Action 分离
 
-更新：2026-10-26。状态：本地实现；未提交、未部署、未调用真实自愈。
-工作树：`feat/monitoring-runtime-identity`。本文扩展 v3，不改变运行身份安全契约。
+更新：2026-11-13。本文扩展 v3，不改变运行身份安全契约。
+本次接收端同步 `recovery-eligibility/v3`；本地验证不代表合并、部署或真实自愈验收。
 
 ## 1. 统一对外定义
 
@@ -9,15 +9,15 @@
 - 是否人工纠错：诊断范围内，用户是否发出过针对 Bot 此前响应或执行的纠正、返工或调整指令。正常新任务、补充信息、授权、审批及确认不属于人工纠错。
 - TC Code：有证据支持的范围内问题归因，不等同当前未恢复状态。
 - `UNRESOLVED`：诊断失败；`ALERT`：诊断成功且任务未完成且有合法 TC；其余成功为 `PASS`。
-- 实时自愈业务资格：诊断成功、任务未完成、无人工纠错、有合法 TC。仅发送前计算，不新增持久标签。
+- 实时自愈业务资格：诊断成功 AND（任务未完成 OR 有合法 TC），人工纠错不参与资格判断。仅发送前计算，不新增持久标签。
 
-实时诊断当前轮次；历史诊断其窗口内的有效请求。二者范围不同，公式相同；历史不请求自愈。人工纠错/Biz_Tag 不参与告警判定，Biz_Tag 暂不参与自愈判定。
+实时诊断当前轮次；历史诊断其窗口内的有效请求。二者范围不同，告警公式相同；历史不请求自愈，由生产者/路由维持该边界，接收端不从 v4 标签推断诊断来源。人工纠错/Biz_Tag 不参与告警和自愈资格判定。
 
 PASS 不是“无故障”或“已完成”。过程发生问题而最终完成任务，可为 PASS + Code + confidence + Biz_Tag。未完成但没有可支持 Code，也是 PASS。不能通过清空 Code 或伪造完成标签改变 Action。
 
 ## 2. 传输和验证
 
-新写 schemaVersion：`claw-monitoring/diagnosis-event/v4`，对应 `diagnosis-actions/v1`。
+新写 schemaVersion：`claw-monitoring/diagnosis-event/v4`，告警对应 `diagnosis-actions/v1`，自愈资格独立使用 `recovery-eligibility/v3`。
 
 - 沿用完整 v3 字段集，所有键必需，runtimeIdentity 为平铺字符串对象或 null；保持 botId/entityId/env 复合身份。
 - 成功标签 handlerName 仅允许 COMPLETED / NOT_COMPLETED，humanIntervention 为严格布尔。
@@ -38,12 +38,10 @@ PASS 不是“无故障”或“已完成”。过程发生问题而最终完成
 |---|---|
 | 旧事件 | legacy_policy |
 | 诊断失败 | diagnosis_unresolved |
-| 已完成 | task_completed |
-| 无合法 Code | no_tc_code |
-| 用户人工纠错 | human_correction |
 | 标签组合不合法（防御性） | invalid_tags |
+| 已完成且无 Code | task_completed |
 
-仅 v4 未完成、无纠错、有 Code 的 ALERT 继续走白名单/身份/任务创建。优先返回的原因只用于定位，不改变公式；日志不记录运行凭据。
+仅合法 v4 成功事件中“未完成 OR 有合法 Code”继续走白名单/身份/任务创建，不再要求 ALERT 或无人工纠错。PASS + 已完成 + Code、PASS + 未完成 + 无 Code 均可具备资格；无 Code 沿用现有 `tc_fault_label=null` 接口，不编造归因。资格不等于已执行或已修复。优先返回的原因只用于定位，不改变公式；跳过日志标记自愈资格版本，不记录运行凭据。
 
 重复上报仍会调用 trigger，补偿“诊断落库成功、首次任务创建失败”的情况；保持稳定 delivery key，由既有任务服务幂等。不允许改成“只有首次插入触发”。拒绝冲突重放、权限隔离和失败传播保持原样。
 
@@ -96,10 +94,13 @@ online 是生命周期阶段，不是 env=prod 的别名。只有该设备 ID �
 
 ## 6. 测试与发布
 
-共享 `server/fixtures/monitoring/action-policy-v1.json` 与 CV 一致，覆盖失败及 8 个标签组合；fixture SHA-256：
+共享 `server/fixtures/monitoring/action-policy-v1.json` 保持历史内容，与 CV 一致，继续校验告警及传输；其中自愈列为旧规则，不作为当前资格依据。fixture SHA-256：
 `c93d606b4a1b18d571e7f7c1eb2b2568ab6c72a5b1ec3c94df282b272a633bd9`。
 
-覆盖：版本专用解析、Code/confidence/Action 矛盾、PASS 标签、纠错跳过、旧事件存储 ACK、重复/并发/丢 ACK/创建失败重试、运行身份保密、浏览器展示。
+当前资格由 `server/fixtures/monitoring/recovery-eligibility-v3.json` 的 9 个向量验证，与 CV 对应 fixture 字节一致，SHA-256：
+`e42022bf10f37df2c4c6ad66c169c908f25e06cf230d36c7db023af9dc15f75b`。
+
+覆盖：版本专用解析、Code/confidence/Action 矛盾、PASS 标签、有纠错仍可具备资格、无 Code 请求、旧事件存储 ACK、真实任务落库及重复/并发/丢 ACK/创建失败重试、白名单、运行身份保密、浏览器展示。所有任务执行器使用测试替身，不代表真实干预成功。
 本地命令：`npm run test:monitoring`、`npm run check`、`npm run build`、`npm run test:monitoring-preview`、`npm run check:monitoring-preview`、`npm test`。
 
 先接收/UI 后生产者；过渡阶段旧事件不再触发自动自愈，必须明确安排切换窗口。CV 日级历史默认 file-only，只有经确认的新口径独占目标才允许写 ODPS。

@@ -36,6 +36,7 @@ export function ChatPanel({
   messages,
   isRequesting,
   isLoadingMessages,
+  historyReady,
   connectionStatus,
   retryCount,
   supportState,
@@ -82,7 +83,7 @@ export function ChatPanel({
   });
   // 消息区两态强制（Spec AC-3/AC-7，预览反馈第五轮）：空消息一律骨架屏，确认后的真空会话
   // 才显示空态；demo 模式不接入（保持演示空态）。
-  const messageAreaSkeleton = useMessageAreaSkeleton({ messages, status: connectionStatus });
+  const messageAreaSkeleton = useMessageAreaSkeleton({ messages, status: connectionStatus, historyReady });
   const { editingMessageId, editMessage, cancelEdit, finishEdit } = useMessageEdit({
     sessionId: target?.id,
     isRequesting,
@@ -203,15 +204,14 @@ export function ChatPanel({
           actions={headerActions}
         />
 
-        {/* 消息区两态强制：空消息区一律骨架屏，空态文案仅对确认后的真空会话渲染；demo 保持原空态。
-            骨架为真实群聊解剖的回声(系统 pill/长短气泡/图片附件)，吸收历史装载缝隙。 */}
+        {/* 单聊 HTTP 历史就绪即展示；未提供独立就绪信号的场景保留原骨架策略。 */}
         {resolvedMode !== 'demo' && messageAreaSkeleton ? (
           <ChatMessageSkeleton />
         ) : (
           <ChatMessageList
             messages={messages}
             isRequesting={isRequesting}
-            isLoadingMessages={isLoadingMessages}
+            isLoadingMessages={!historyReady && isLoadingMessages}
             interactions={messageInteractions}
             onStop={onStop}
             onEditMessage={editMessage}
@@ -252,7 +252,7 @@ export function ChatPanel({
             loading={isRequesting}
             disabled={target.status !== 'available' || !isInteractive || isRequesting}
             submitType="enter"
-            placeholder={composerPlaceholder ?? '可使用 /file 引用文件、/link 引用链接、/skill 调用能力'}
+            placeholder={composerPlaceholder ?? '可使用 /file 引用文件、/skill 调用能力'}
             fileChip={fileChip}
             command={command}
             slots={{ header: composerHeader }}

@@ -116,6 +116,7 @@ pub async fn run_bot_controllable_contract(
     persistent_filters_constrain(fixture, env).await;
     human_self_entry_semantics(fixture, env).await;
     candidates_are_stably_ordered(fixture, env).await;
+    candidates_carry_row_created_at(fixture, env).await;
 }
 
 fn relations(
@@ -417,4 +418,40 @@ async fn candidates_are_stably_ordered(
         "candidates are stably ordered by id"
     );
     assert_eq!(ids(&first), ids(&second), "the order is repeatable");
+}
+
+/// The candidate projection carries the source row's
+/// persisted `created_at` (the application layer's
+/// mine-page order key): seeded rows on both stores
+/// stamp real creation times, so every candidate —
+/// the edge-backed Bot AND the Human self entry — must
+/// surface a populated value. Exact ordering on the
+/// value is pinned by the application-layer suites
+/// driving the memory store.
+async fn candidates_carry_row_created_at(
+    fixture: &(impl BotControllableContractFixture + ?Sized),
+    env: &str,
+) {
+    fixture
+        .seed_bot(env, "c_stamped", "stamped", ActorStatus::Online)
+        .await;
+    fixture
+        .grant_edge(env, "c_stamped", "stamp-user", BotAccessRelation::Owner)
+        .await;
+    fixture.seed_human_self(env, "stamp-user").await;
+    let candidates = fixture
+        .control_plane_repo()
+        .list_controllable(query(env, "stamp-user", None, None, None))
+        .await
+        .expect("list candidates");
+    for expected in ["c_stamped", "human_stamp-user"] {
+        let candidate = candidates
+            .iter()
+            .find(|candidate| candidate.id == expected)
+            .unwrap_or_else(|| panic!("{expected} is a candidate"));
+        assert!(
+            candidate.created_at > 0,
+            "{expected} carries its row's persisted created_at"
+        );
+    }
 }

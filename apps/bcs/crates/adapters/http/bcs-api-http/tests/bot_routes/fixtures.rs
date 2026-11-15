@@ -224,6 +224,7 @@ impl BotService for FakeBotService {
             items: vec![BotCandidate {
                 bot: physical_bot(),
                 is_friend: true,
+                owner_user_id: Some("owner-user-1".to_string()),
             }],
             total: 1,
             offset: 5,
@@ -242,7 +243,8 @@ impl BotService for FakeBotService {
         Ok(Page {
             items: vec![BotCandidate {
                 bot: physical_bot(),
-                is_friend: false,
+                is_friend: true,
+                owner_user_id: Some("owner-user-1".to_string()),
             }],
             total: 1,
             offset: 5,

@@ -32,6 +32,14 @@ from agentclaw.community.core.bot_copy.types import (
 #: only have run after this, so convergence requires it.
 _ACTIVE = "ACTIVE"
 
+#: A bot that died during provisioning — device allocation in ``bot_service.create_bot``
+#: happens *outside* the apply engine (``_do_allocate``), so its failure is not carried
+#: by any apply record and is not caught by the ``_is_failed`` gate above. The only
+#: signal derive-on-read has is the bot row's own status: once it is FAILED, the copy
+#: has failed too — surface FAILED (FE shows "复制失败" + retry) instead of lingering on
+#: a provisional "复制中" (FILE_SYNCED / BOT_STARTED).
+_FAILED_BOT_STATUSES = frozenset({"FAILED", "FAILED_STATUS", "DELETED"})
+
 
 def compute_copy_status(
     *,
@@ -55,6 +63,15 @@ def compute_copy_status(
     if _is_failed(pre) or _is_failed(on):
         return BotCopyStatus.FAILED
 
+    # A bot whose row has reached a terminal-failure status failed during
+    # provisioning — the failure lives in ``bot_service.create_bot`` (``_do_allocate``)
+    # outside the apply engine, so neither apply record carries it and the
+    # ``_is_failed`` gate above does not fire. Before any branch can mask it as an
+    # in-progress provisional state (FILE_SYNCED / BOT_STARTED), short-circuit to
+    # FAILED so FE surfaces "复制失败" + retry rather than a stuck "复制中".
+    if dst_bot_status in _FAILED_BOT_STATUSES:
+        return BotCopyStatus.FAILED
+
     if pre is None:
         # No pre_container apply record yet: license still pending, or create_job
         # has not reached apply_pre_container. Both surface as AUTH_PENDING to FE
@@ -70,19 +87,28 @@ def compute_copy_status(
     if on is None:
         # pre done, on_container not yet started: provisioning gap. Device already
         # ACTIVE means on_container apply is imminent — BOT_STARTED; else still
-        # provisioning — FILE_SYNCED.
-        return BotCopyStatus.BOT_STARTED if dst_bot_status == _ACTIVE else BotCopyStatus.FILE_SYNCED
+        # provisioning, pre done but device not up — CREATED. File sync runs in
+        # the on_container phase (after the device is up), so a pre-only state is
+        # never FILE_SYNCED: that value names an on_container signal, and the pre
+        # terminal here carries no such signal. (A FAILED bot is caught by the
+        # early gate above and never reaches here.)
+        return BotCopyStatus.BOT_STARTED if dst_bot_status == _ACTIVE else BotCopyStatus.CREATED
 
     if on.status == ApplyStatus.RUNNING.value:
         # on_container apply running: device is up (on only runs post-ACTIVE).
         return BotCopyStatus.BOT_STARTED
 
-    if on.status == ApplyStatus.SUCCEEDED.value:
-        # Both applies terminal + device up → converged. Device not yet ACTIVE
-        # means the report outran the device-alive callback — still BOT_STARTED.
+    if on.status in (ApplyStatus.SUCCEEDED.value, ApplyStatus.PARTIAL.value):
+        # on_container is terminal: SUCCEEDED fully converged; PARTIAL means some
+        # entries did not land but the phase finished (a retry must converge the
+        # remainder via detail-page manifest apply, not the copy retry endpoint).
+        # Either way, with the dst device ACTIVE the copy itself is converged —
+        # the bot is up and usable; the partial remainder is a separate concern.
+        # Device not yet ACTIVE means the report outran the device-alive callback
+        # — still BOT_STARTED.
         return BotCopyStatus.CONVERGED if dst_bot_status == _ACTIVE else BotCopyStatus.BOT_STARTED
 
-    # on_container PARTIAL or otherwise non-terminal: not converged.
+    # on_container otherwise non-terminal: not converged.
     return BotCopyStatus.BOT_STARTED
 
 

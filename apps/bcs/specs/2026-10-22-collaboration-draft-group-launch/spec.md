@@ -6,6 +6,8 @@ owners: [bcs, frontend]
 
 # 从协作定义副屏使用自己的 Bot 发起协作
 
+> 2026-10-27 修订：`apps/frontend` 发起方选择复用顶部 Bot Tab 数据，候选与建群复用原有 `/actors/list`、`/groups` 和宿主请求封装。第 6 节为当前接入契约；此前原生 Human/V1 入口的实现与验证属于历史记录，不再作为本前端的调用前提。
+
 ## 1. 当前实施决策（2026-10-23 更新）
 
 用户已授权采用“副屏预览 + frontend 主屏现有建群浮层”，并进一步要求通用建群入口和 Draft 初始内容可编辑。本轮保留既有 BCS 用户接口，不修改 Backend、Gateway、Runtime 或 frontend-nextgen。
@@ -53,12 +55,12 @@ owners: [bcs, frontend]
 ### 3.1 本版范围
 
 - 通用宿主事件打开既有建群配置；可选 schema 2 固定 Draft 作为初始内容。
-- 展示当前操作用户，查询其自有 Bot，选择发起 Bot。
+- 展示页面已有的操作用户，复用顶部 Tab 的自有 Bot 列表，选择发起 Bot。
 - 按发起 Bot 查询、搜索和分页展示可协作 Bot，并绑定角色。
 - 编辑群名、任务说明与本次建群 YAML；带 Draft 固定自定义协作，不显示模板切换；无 Draft 保留模板和三种群类型，不修改共享 Draft。
 - 用户确认后调用现有 BCS 建群入口；自定义协作沿用建群即启动语义，显示结果并提供进入新群的入口。
 - 补齐本链路需要的 BCS Draft V1 只读入口和 Panel 响应适配；验证真实登录用户权限和部署路由。
-- 补齐原生 BCS 宿主的 Human 浏览器入口，复用现有认证链和 V1 应用服务，保持 Gateway 认证独立。
+- frontend 沿用普通建群的宿主请求与登录处理；不新增身份确认接口或功能专用请求头，既有 V1 入口保持不变。
 
 ### 3.2 不在本版范围
 
@@ -141,47 +143,38 @@ owners: [bcs, frontend]
 
 ## 6. 请求与权限契约
 
-### 6.1 两类认证通道
+### 6.1 复用当前 frontend 的既有入口
 
-| 操作 | API | 授权来源 |
+| 操作 | 数据源 / API | 行为 |
 | --- | --- | --- |
-| 读取/校验固定 Draft | 原生 `/collaboration/drafts/{id}/revisions/{revision}` 及其 `/validate` | 无凭据、无自定义请求头；只需 ID 和 revision，撤销/删除状态仍生效 |
-| 本版补齐的部署读取入口 | `/api/v1/collaboration/drafts/{id}/revisions/{revision}` 及其 `/validate` | 同一 Draft 读取裁决；不会把普通用户登录升级为 Draft 管理权 |
-| 校验当前编辑文本 | 原生 `POST /collaboration/definitions/validate`，请求 `{definition_yaml}` | 既有只读校验契约；不需要 Draft 凭据 |
-| 当前用户 | `GET /openapi/v1/collaboration/me` | 已验证 Human 的最小投影，不返回凭据 |
-| 查询我的 Bot | `GET /openapi/v1/collaboration/bots/mine` | 宿主可信 Human 认证 |
-| 查询可协作候选 | `GET /openapi/v1/collaboration/bots/{originator}/candidates?purpose=collaboration` | Human 认证 + 对视角 Bot 的所有权 |
-| 创建并开始协作 | `POST /openapi/v1/collaboration/groups` | Human 认证 + 发起 Bot 所有权 + 参与者可协作检查 |
-| 原生 BCS 宿主的用户操作 | `/collaboration/user/me`、`/bots/mine`、`/bots/{originator}/candidates`、`POST /groups` | 现有 BCS Human 浏览器认证链，复用上述 V1 handler 和应用裁决 |
+| 读取/校验固定 Draft | 原生 `/collaboration/drafts/{id}/revisions/{revision}` 及 V1 只读投影 | 无凭据公开读取，固定版与完整性检查不变 |
+| 当前操作用户 | 页面已有 `userStore` | 仅展示，不向服务端声明用户身份，不请求 `/collaboration/user/me` |
+| 发起方 Bot | 顶部 Tab 使用的 `botNetworkStore.myBots` | 排除 Human 和未入网 Bot，保留名称、头像和状态；默认当前 Tab Bot；弹层内选择不改变聊天视角 |
+| 尚未初始化的 Bot 数据 | 既有 `initUnifiedBotTabs` / `/bots/my` | 仅在共享列表尚未加载或用户显式刷新时使用现有加载流程 |
+| 查询可协作候选 | `GET /actors/list` | 使用所选 `current_bot_uuid`、`cooperatable_only=true`、名称与分页参数，沿用普通建群的 ActorController |
+| 校验当前编辑文本 | `POST /collaboration/definitions/validate` | 通过既有 BcnController 校验当前 YAML |
+| 创建并开始协作 | `POST /groups` | 通过既有 BcnController 和 `CreateGroupParams`；沿用宿主登录、跨域、拦截器及服务端建群检查 |
 
-Draft V1 入口属于 BCS 适配器增量，只开放本流程所需的 GET 和 validate POST，不增加管理路由。V1 使用已有标准响应 envelope，Panel 解包后执行与原生响应相同的固定版/原文校验；原生协议不变。应用服务复用现有 Draft 服务，不能复制一套鉴权或存储实现。
+frontend 的 API 经现有请求封装发送，开源形态使用 `/bcnproxy`，部署宿主复用普通建群的地址和 Cookie 处理。此入口不再请求 `/collaboration/user/*` 或 OpenAPI，也不发送 `X-BCS-Expected-User`，不新增同源限制或 Nginx 请求头白名单要求。登录与权限仍由既有服务端处理，不使用协作助手凭据。
 
-现场核对确认：本地宿主只转发 `/bcnproxy`，直接请求 `/openapi` 返回宿主 404；直连 BCS V1 缺少 Gateway 签名 Principal 返回 401。本版通过独立原生浏览器入口解决，不让 Gateway 验证失败后降级。原生入口拒绝 Bot、Actor 和 Gateway Principal，调用既有 BCS Human cookie 认证链（本地沿用已配置的 local Human），不从 Bot owner 或请求体构造用户。
-
-Panel 的 Draft 预览继续使用已有 `apiBaseUrl/baseUrl`。主屏浮层由 frontend 自己选择可信请求入口：Draft 使用 `/bcnproxy/collaboration/drafts`，Human 操作使用 `/bcnproxy/collaboration/user`。成功链接为 `/bcn/chat/detail?id={groupId}&session={sessionId}&bot_uuid={humanActorId}`，未知结果链接为 `/bcn/chat/list?bot_uuid={humanActorId}`。不从消息读取 API base 或导航路径，不在认证失败后切换入口。frontend-nextgen 的 V1 路径与导航接入属于 roadmap，不再通过 Panel 默认值宣称已接通。
-
-用户范围请求携带 `X-BCS-Expected-User`，仅与服务端已验证 Human 做相等比较，不提供身份。原生 POST 必须携带此非简单请求头，并拒绝 `Sec-Fetch-Site: cross-site`；V1 既有调用者未提供该头时保持原行为。身份不一致在 handler 前拒绝；客户端清空配置，重新确认用户。原生入口和身份投影均 no-store。
-
-所有用户请求沿用宿主现有 cookie/可信认证链，由 BCS 服务端解析 Human。浮层不使用协作助手的 Bot 凭据，不依靠 `userId` 请求字段授予权限，不调用原生历史建群接口绕过 V1 所有权校验。登录信息缺失、凭据仅代表 Bot 或宿主认证不可用时，保留预览并禁用建群。
-
-必须以真实请求验证默认入口、已配置入口、header 透传和 V1 envelope。未完成该验证不能把“已有 props”视为可用部署，也不修改 Gateway 配置来掩盖本版范围以外的问题。
+Panel 的 Draft 预览及通用 `onOpenCreateGroup` 回调不变。创建成功使用响应中的群与初始会话 ID，按提交的群主 Bot 生成 `/bcn/chat/detail?id={groupId}&session={sessionId}&bot_uuid={driverBotId}` 并重新加载页面，以初始化新群访问身份。既有 V1/原生 Human API 不因本前端切换而删除或放宽；frontend-nextgen 的独立接入保留在 roadmap。
 
 ### 6.2 建群参数映射
 
 | 字段 | 来源 |
 | --- | --- |
 | `group_kind` | 固定 `normal` |
-| `originator` | 用户明确选择、服务端验证归属的自有 Bot ID |
-| `driver_bot_uuid` | 自定义协作使用发起 Bot；自由聊天/任务协作沿用原浮层选择的群主/Manager |
-| `name` / `context` | 用户确认的群名 / 任务说明；`context` 沿用当前 `{query: ...}` 会话输入语义 |
-| `participants` | 同一表单组装的成员 + 发起 Bot + driver 去重；群级角色沿用普通建群规则，不能把 YAML binding 名当群角色 |
-| `collaboration.strategy` | 当前表单选择的 `chat` / `manager_worker` / `state_machine` |
-| `collaboration.definition.content_yaml` | 仅自定义协作：提交前校验通过的当前编辑字符串，保持 UTF-8 字节与换行 |
-| `collaboration.participant_bindings` | 仅自定义协作：`[{binding, actor_ids: [botId]}]`，按当前校验结果映射，与 definition 同级 |
+| `originator` | 用户在弹层选择的自有 Bot UUID |
+| `driver_bot` | 自定义协作使用发起 Bot；普通协作沿用表单群主选择 |
+| `label` / `context` | 用户确认的群名 / 任务说明 |
+| `participants` | 表单成员与发起方、群主去重；状态机不填群角色，由 BCS 推导 |
+| `group_strategy` | `chat` / `manager_worker` / `state_machine` |
+| `collaboration_definition_yaml` | 校验后的当前字符串，保留 UTF-8 字节与换行 |
+| `participant_bindings` | 原有 `{binding: {source: manual, bot_ids: [...]}}` 结构 |
+| `create_initial_session` / `start_initial_run` | 创建初始会话；自定义协作明确启动初始 Run，不另发启动请求 |
+| 其他已有字段 | 保留普通表单的 `master_bot`、`routing_policy`、`auto_start_on_service_invocation`、`opening_message`、`event_subscriptions` |
 
-不调用 Backend task execute，不另发“启动一次”请求，不附带助手 token 或声明式用户 ID。Human 会话参与者按既有可信 caller 规则产生，不由模型填入的 Human ID 决定。
-
-BCS 在提交时重新校验发起方所有权、参与者关系、必需绑定和定义约束。候选请求与创建之间发生的权限变化必须拒绝，浮层刷新相关选择，不退回协作助手身份。
+BCS 继续使用原有登录身份解析、Bot 归属、参与者与定义校验。本次不修改 Backend、Gateway、Runtime、frontend-nextgen 或 BCS 服务端代码。
 
 ## 7. 提交状态与失败处理
 
@@ -193,7 +186,7 @@ BCS 在提交时重新校验发起方所有权、参与者关系、必需绑定�
 | 登录过期或明确的权限/参数拒绝 | 显示具体原因；仅当服务契约证明尚无创建副作用时归类为“明确未创建” |
 | 创建成功 | 保存响应中的真实群/会话 ID，显示进入入口；再次点击进入同一群，不重复创建 |
 | 创建请求超时、断网、5xx、响应无法解析 | 归类为“结果未知”，不自动重试、不换 key 重发，不声称群已回滚 |
-| 用户切换账号时请求已发出 | 丢弃对新用户 UI 的回写；旧请求可能已创建，不能向新用户暴露旧群详情 |
+| 弹层在请求中卸载 | 不跳转、不写回已卸载界面；请求可能已创建，不自动重试 |
 | 服务报错且补偿结果不确定 | 按“结果未知”处理，不能因为 HTTP 非 2xx 就推定没有群或 Run |
 
 “结果未知”显示：**“未能确认创建结果，请先到群列表检查，避免重复建群。”** 提供既有群列表入口，保留本次群名与配置用于人工核对；名称相同或查询不到都不能自动证明创建结果。首版不提供自动“重试创建”按钮。
@@ -204,7 +197,7 @@ BCS 在提交时重新校验发起方所有权、参与者关系、必需绑定�
 
 ### L01：真实宿主接入核对
 
-在已配置 `bcsPanel` 的宿主，用登录用户验证“我的 Bot → 指定自有 Bot 的 candidates → V1 建群认证”的调用条件，并核对进入群/群列表的导航能力。只读检查不能擅自创建真实群；写操作验收使用明确授权的测试 Bot 和群。记录请求入口、实际 Human 身份来源、响应格式和失败结果，不记录凭据。
+在已配置 `bcsPanel` 的宿主，用登录用户验证“顶部 Bot Tab → 指定发起方的可协作列表 → 既有建群接口”的调用条件，并核对进入群/群列表的导航能力。只读检查不能擅自创建真实群；写操作验收使用明确授权的测试 Bot 和群。记录请求入口、实际 Human 身份来源、响应格式和失败结果，不记录凭据。
 
 这是实现前置。宿主身份不明时先解决或记录接入边界，不能用假用户 ID、助手 token、私聊 session 反查或浏览器私有存储补身份。
 
@@ -214,7 +207,7 @@ BCS 在提交时重新校验发起方所有权、参与者关系、必需绑定�
 
 ### L03：副屏回调与主屏浮层
 
-Panel 只实现宿主回调。frontend 共用 UMD 宿主按需打开既有建群浮层，在同一表单内接入自有发起 Bot、Human 候选、可选 Draft 初始内容、当前 YAML 校验、提交锁和导航；不复制一套建群 UI，不新增助手工具命令。
+Panel 只实现宿主回调。frontend 共用 UMD 宿主按需打开既有建群浮层，在同一表单内接入自有发起 Bot、可协作候选、可选 Draft 初始内容、当前 YAML 校验、提交锁和导航；不复制一套建群 UI，不新增助手工具命令。
 
 ### L04：真实验收
 

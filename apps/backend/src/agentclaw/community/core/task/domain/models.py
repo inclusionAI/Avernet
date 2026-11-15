@@ -172,7 +172,7 @@ class TaskInfo:
     task_spec: TaskSpec
     source_type: str  # "bot" | "coop_group"
     owner_bot_id: str  # owning bot id
-    owner_user_id: str = ""  # owning user id, kept separate from owner_bot_id
+    owner_user_id: str = ""  # task initiator/visitor, distinct from the entry Bot owner
     execution_config: dict[str, Any] = field(
         default_factory=dict
     )  # 指定 bot/workflow yaml/MAX_DEPTH 等
@@ -643,6 +643,17 @@ class NodeOpResult:
     prev_status: Status | None = None
     new_status: Status | None = None
     error: str | None = None
+
+
+@dataclass
+class TaskStopResult:
+    """Task-level manual stop result."""
+
+    task_id: str
+    status: Status
+    stopped_nodes: list[str]
+    reason: str = "manual_stop"
+    operator: str = ""
 
 
 @dataclass

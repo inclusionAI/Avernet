@@ -53,6 +53,10 @@ pub struct LegacyGroupError {
 }
 
 impl LegacyGroupError {
+    pub(super) fn status(&self) -> StatusCode {
+        self.status
+    }
+
     fn new(status: StatusCode, message: impl Into<String>) -> Self {
         Self {
             status,

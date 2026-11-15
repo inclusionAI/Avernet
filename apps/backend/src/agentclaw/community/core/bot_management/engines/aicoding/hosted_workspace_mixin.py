@@ -7,18 +7,22 @@
 """
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from agentclaw.community.log import get_logger
+from agentclaw.community.plugin_api.bot_template_write_extension import (
+    TemplateWriteInvalidInput,
+)
 
+from ...services.aicoding.dima_workspace_capability import (
+    has_dima_workspace_enabled,
+)
 from ..provisioning import (
     BotProvisioningContext,
     HostedWorkspaceProvisioningError,
     hosted_workspace_not_eligible_error,
 )
-from ...services.aicoding.dima_workspace_capability import (
-    has_dima_workspace_enabled,
-)
+
 
 logger = get_logger(__name__)
 
@@ -37,7 +41,7 @@ class AicodingHostedWorkspaceMixin:
         *,
         bot_name: str,
         workspace_hosting_provider: Any,
-    ) -> Optional[str]:
+    ) -> str | None:
         """创建期为新 bot 开通托管工作空间，返回 workspace id。
 
         无需托管时返回 None（当前 bot 非编码场景直接跳过）。开通底层调用自身抛错
@@ -79,7 +83,7 @@ class AicodingHostedWorkspaceMixin:
         template_config: Any,
         template_service: Any,
         workspace_hosting_provider: Any,
-    ) -> Optional[str]:
+    ) -> str | None:
         """补救期为已存在 bot 确保托管工作空间存在（幂等），返回 workspace id。
 
         幂等：``template_config`` 已有 ``dima_space_id`` 则直接返回不重复开通。
@@ -124,6 +128,10 @@ class AicodingHostedWorkspaceMixin:
                 workspace_id,
                 ctx.bot_id,
             )
+        except TemplateWriteInvalidInput:
+            # @CfSecAICode 遵循消费金融安全编码 BE-AUTH-001/002 规范: 模板写的
+            # deliberate hook 拒绝属既有失败语义，不落入 best-effort 兜底。
+            raise
         except Exception as e:
             logger.error(
                 "[hosted_workspace.ensure] failed to persist template_config for bot %s: %s",

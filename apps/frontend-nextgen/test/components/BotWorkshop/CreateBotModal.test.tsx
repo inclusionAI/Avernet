@@ -94,6 +94,15 @@ test('创建云端 Bot（Open Core 形态）卡片化展示 OpenClaw + Claude Co
 });
 
 test('创建 Bot 时上传图片会写入提交参数中的 avatarUrl', async () => {
+  const imageSpy = jest.spyOn(globalThis, 'Image').mockImplementation(() => {
+    const image = {
+      naturalWidth: 1,
+      naturalHeight: 1,
+      onload: null as (() => void) | null,
+      set src(_value: string) { this.onload?.(); },
+    };
+    return image as unknown as HTMLImageElement;
+  });
   const onSubmit = jest.fn().mockResolvedValue(undefined);
   render(
     <CreateBotModal
@@ -106,7 +115,8 @@ test('创建 Bot 时上传图片会写入提交参数中的 avatarUrl', async ()
   );
   fireEvent.change(screen.getByPlaceholderText('例如：项目知识助手'), { target: { value: '头像 Bot' } });
   const input = screen.getByLabelText('上传 Bot 头像') as HTMLInputElement;
-  const file = new File(['image'], 'avatar.png', { type: 'image/png' });
+  const png = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/aWQAAAAASUVORK5CYII='), (char) => char.charCodeAt(0));
+  const file = new File([png], 'avatar.png', { type: 'image/png' });
   fireEvent.change(input, { target: { files: [file] } });
   await waitFor(() =>
     expect(screen.getByAltText('当前 Bot 头像')).toHaveAttribute(
@@ -119,6 +129,7 @@ test('创建 Bot 时上传图片会写入提交参数中的 avatarUrl', async ()
   expect(onSubmit).toHaveBeenCalledWith(
     expect.objectContaining({ name: '头像 Bot', avatarUrl: expect.stringMatching(/^data:image\/png;base64,/) }),
   );
+  imageSpy.mockRestore();
 });
 
 test('capability 引擎清单为空时显示错误并禁用创建，不回退硬编码引擎', () => {

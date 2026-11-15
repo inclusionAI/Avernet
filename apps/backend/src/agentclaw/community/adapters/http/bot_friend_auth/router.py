@@ -2,7 +2,8 @@
 
 Auth: ``Depends(require_user_caller)`` — forwarded gateway principal, same seam
 as ``/api/v1/work-orders/events``. agent_code is resolved INSIDE the service
-(via resolve_agent_code) using the bot_id + owner_work_no from the body.
+(via resolve_agent_code) after resolving the bot_id + compatibility locator
+from the body.
 """
 from __future__ import annotations
 

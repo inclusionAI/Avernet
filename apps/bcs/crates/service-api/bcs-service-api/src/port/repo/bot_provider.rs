@@ -47,6 +47,20 @@ pub trait BotProviderRepoPort: Send + Sync {
         owner: &str, token: &str,
     ) -> ServiceResult<()>;
 
+    /// Reactivate the tombstoned Provider/ref with a completely new registration
+    /// snapshot. The Bot UUID is retained; credentials, owner/manager authority
+    /// and the gateway projection are replaced atomically. Strict creates above
+    /// keep rejecting tombstones.
+    async fn restore_provider_bot_with_ownership(
+        &self, _record: BotProviderRecord, _capabilities: BotCapabilities,
+        _owner: &str, _token: &str,
+        _initialization: crate::types::bot_authority::OwnershipInitialization,
+    ) -> ServiceResult<()> {
+        Err(crate::ServiceError::InternalError(
+            "Provider Bot reactivation is not configured".into(),
+        ))
+    }
+
     /// Trusted atomic Provider registration with ownership
     /// initialization (bot authority spec §10.2).
     ///
@@ -66,6 +80,17 @@ pub trait BotProviderRepoPort: Send + Sync {
         Err(crate::types::ServiceError::InternalError(
             "trusted Provider registration is not configured".into(),
         ))
+    }
+
+    /// Provider-admin ordinary registration: Bot, binding and initial authority
+    /// commit together. Requires a Provider actor matching record.provider_id;
+    /// the Human-token entry remains Human-only. No version-0 Bot is published.
+    async fn create_provider_admin_bot_with_ownership(
+        &self, _record: BotProviderRecord, _capabilities: BotCapabilities,
+        _owner: &str, _token: &str,
+        _initialization: crate::types::bot_authority::OwnershipInitialization,
+    ) -> ServiceResult<()> {
+        Err(crate::ServiceError::InternalError("atomic Provider-admin registration is not configured".into()))
     }
 
     /// Strict create with Bot, ownership, gateway projection and validated

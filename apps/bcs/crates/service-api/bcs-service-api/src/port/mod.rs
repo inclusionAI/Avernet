@@ -1,3 +1,5 @@
+pub mod catalog_change;
+pub use catalog_change::CatalogChangePort;
 pub mod coordination_intent;
 pub mod a2a_card;
 pub use coordination_intent::*;

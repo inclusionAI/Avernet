@@ -27,7 +27,7 @@ function setup(version: Version = 'current', draftHead: string | null = null) {
     { path: 'new.bin', contentBase64: 'AP8=', mode: '100644' as const },
   ]
   const snapshot: Snapshot = { workflowId: id, packId: 'pack', canWrite: true,
-    baseRef: `origin/${version === 'current' ? 'wf' : 'saved'}/${id}`,
+    baseRef: (version === 'current' ? `refs/tags/deploy/${id}/#1` : `origin/wf/${id}`),
     baseCommit: version === 'current' ? A : B, draftHead: version === 'current' ? draftHead : B, versionFiles: files }
   publish(session, { ...session.state, version })
   updateVersion(session, version, { snapshot, files: candidate })
@@ -48,9 +48,9 @@ async function readInput(init: RequestInit): Promise<SaveInput> {
 // handling, loses candidate bytes/modes/CAS, or resends without a new user save.
 it.each([
   { version: 'current' as const, draftHead: null },
-  { version: 'current' as const, draftHead: B },
+  { version: 'current' as const, draftHead: A },
   { version: 'draft' as const, draftHead: B },
-])('keeps $version candidates editable after an origin denial (saved head $draftHead)', async ({ version, draftHead }) => {
+])('keeps $version candidates editable after an origin denial (草稿(wf) head $draftHead)', async ({ version, draftHead }) => {
   const { id, session, snapshot, candidate } = setup(version, draftHead)
   vi.spyOn(window, 'confirm').mockReturnValue(true)
   const onSaved = vi.fn()
@@ -95,10 +95,10 @@ it.each([
   let second: SaveInput | undefined
   fetchMock.mockImplementationOnce(async (_url: string, init: RequestInit) => {
     second = await readInput(init)
-    return new Response(JSON.stringify({ branch: `saved/${id}`, commit: C, requestId: second.requestId, version: 2, packId: 'pack' }))
+    return new Response(JSON.stringify({ branch: `wf/${id}`, commit: C, requestId: second.requestId, version: 2, packId: 'pack' }))
   })
   const saved = await savePackVersion(session, id, version, undefined, onSaved)
-  expect(saved).toMatchObject({ branch: `saved/${id}`, commit: C })
+  expect(saved).toMatchObject({ branch: `wf/${id}`, commit: C })
   expect(fetchMock).toHaveBeenCalledTimes(2)
   expect(second?.requestId).toEqual(expect.any(String))
   expect(second?.requestId).not.toBe(first.requestId)
@@ -159,9 +159,9 @@ it.each([
 it('keeps SAVE_OUTCOME_UNKNOWN frozen with its validated Git identity', async () => {
   const { id, session, candidate } = setup()
   vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ code: 'SAVE_OUTCOME_UNKNOWN',
-    branch: `saved/${id}`, commit: C }), { status: 503 })))
+    branch: `wf/${id}`, commit: C }), { status: 503 })))
   await savePackVersion(session, id, 'current')
-  expect(session.state.reconciliation).toMatchObject({ reason: 'server', identity: { branch: `saved/${id}`, commit: C }, attemptedFiles: candidate })
+  expect(session.state.reconciliation).toMatchObject({ reason: 'server', identity: { branch: `wf/${id}`, commit: C }, attemptedFiles: candidate })
   expect(session.state.versions.current.blocked).toBe(true)
 })
 
@@ -230,7 +230,7 @@ it('does not clear a newer source error when an explicitly retried save complete
   fetchMock.mockImplementationOnce(async (_url: string, init: RequestInit) => {
     const input = await readInput(init)
     return new Promise<Response>(resolve => {
-      finish = () => resolve(new Response(JSON.stringify({ branch: `saved/${id}`, commit: C,
+      finish = () => resolve(new Response(JSON.stringify({ branch: `wf/${id}`, commit: C,
         requestId: input.requestId, version: 2, packId: 'pack' })))
     })
   })

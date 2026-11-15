@@ -17,6 +17,9 @@ use bcs_test_support::{
     NoopRelationCoreService,
 };
 
+#[path = "support/friend_application_regressions.rs"]
+mod application_regressions;
+
 #[tokio::test]
 async fn memory_friend_store_passes_core_contract() {
     let repo = Arc::new(MemoryFriendRepo::new());

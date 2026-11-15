@@ -61,7 +61,7 @@ def test_all_releasable_states_backup_the_exact_old_sandbox(target, engine, stat
     s.record.status = status
     verify = prepare(s)
     verify()
-    assert s.provider._exec_shell_new.call_count == 2
+    assert s.provider._exec_shell_new.call_count == 1
     for call in s.provider._exec_shell_new.call_args_list:
         assert call.kwargs['device'].device_id == s.record.device_id
         assert call.kwargs['device'].device_props == {'sandbox_id': 'old-sandbox@8'}
@@ -72,7 +72,7 @@ def test_all_releasable_states_backup_the_exact_old_sandbox(target, engine, stat
     if status in {'FAILED', 'STOPPED'}:
         with pytest.raises(InvalidDeviceStatusError):
             s.router.exec_shell_new(s.record.device_id, 'echo ordinary-command')
-        assert s.provider._exec_shell_new.call_count == 2
+        assert s.provider._exec_shell_new.call_count == 1
 
 
 @pytest.mark.parametrize('failure', ['transport', 'invalid', 'timeout', 'failed', 'legacy', 'not_mounted'])
@@ -169,7 +169,7 @@ def test_missing_sandbox_is_degraded_but_later_target_appearance_blocks(target, 
     s.provider._exec_shell_new.assert_not_called()
 
 
-def test_running_backup_polls_before_final_verification(target):
+def test_running_backup_polls_until_success_without_rechecking(target):
     s = target
     committed = s.provider._exec_shell_new.return_value
     s.provider._exec_shell_new.side_effect = [response('running'), committed, committed]
@@ -178,7 +178,7 @@ def test_running_backup_polls_before_final_verification(target):
     assert s.provider._exec_shell_new.call_count == 2
     sleep.assert_called_once_with(backup.POLL_SECONDS)
     verify()
-    assert s.provider._exec_shell_new.call_count == 3
+    assert s.provider._exec_shell_new.call_count == 2
     for call in s.provider._exec_shell_new.call_args_list:
         assert call.kwargs['device'].device_props == {'sandbox_id': 'old-sandbox@8'}
         assert OPERATION in call.kwargs['shell_cmd']
@@ -186,7 +186,8 @@ def test_running_backup_polls_before_final_verification(target):
 
 
 @pytest.fixture(autouse=True)
-def nonfastdisk_compatibility_scope(monkeypatch):
-    """Legacy backup/fence tests; real detection and strict policy have their own suite."""
+def nonblocking_fastdisk_scope(monkeypatch):
+    """Exercise confirmed-fastdisk backup with blocking disabled; detection has its own suite."""
     from agentclaw.community.core.bot_management.engines.aicoding import restart_backup
-    monkeypatch.setattr(restart_backup, "_detect_fastdisk", lambda *args, **kwargs: False)
+    monkeypatch.setattr(restart_backup, "_detect_fastdisk", lambda *args, **kwargs: True)
+    monkeypatch.setattr(AicodingProvisioningStrategy, "_fastdisk_backup_blocking", lambda self: False)

@@ -1,17 +1,17 @@
 //! Protected Caller send over the existing Provider webhook. Association
 //! fields reuse envelope routing; dispatch control remains internal to BCS.
+use bcs_network_tracing::RequestBuilderExt;
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use bcs_domain::BotDeliveryTarget;
 use bcs_protocol::{
-    BCN_PROTOCOL_VERSION_HEADER, BCN_TIMESTAMP_HEADER, BcsFrame, ChannelInfo, ChannelSource,
-    RequestFrame,
+    BcsFrame, ChannelInfo, ChannelSource, RequestFrame,
 };
 use serde_json::Value;
 use tracing::{info, warn};
 
-use super::{HttpProviderTransport, provider_request_from_frame};
+use super::{HttpProviderTransport, provider_request_from_frame, with_bcn_headers};
 
 mod reception;
 
@@ -201,16 +201,19 @@ impl bcs_service_api::port::CallerExecutionSendPort for HttpProviderTransport {
             "2" | "2.0" => ("text/event-stream, application/json", "sse"),
             _ => ("application/json", "callback"),
         };
-        let request_fut = request_client
+        let http_request = request_client
             .post(guarded_url.as_str())
             .bearer_auth(service_credential.expose_secret())
             .header("Accept", accept)
             .header("Content-Type", "application/json; charset=utf-8")
-            .header(BCN_PROTOCOL_VERSION_HEADER, protocol_version.as_str())
-            .header(bcs_protocol::http::BCN_TRANSPORT_HEADER, transport)
-            .header(BCN_TIMESTAMP_HEADER, bcs_protocol::now_ms().to_string())
-            .json(&body)
-            .send();
+            .header(bcs_protocol::http::BCN_TRANSPORT_HEADER, transport);
+        let request_fut = with_bcn_headers(
+            http_request,
+            protocol_version,
+            &uuid::Uuid::new_v4().to_string(),
+        )
+        .json(&body)
+        .send_traced();
         let response = match tokio::time::timeout(
             Duration::from_millis(command.callback_timeout_ms),
             request_fut,
@@ -402,7 +405,7 @@ mod dns_rebinding_pinning_tests {
         let response = pinned
             .post(guarded.as_str())
             .json(&serde_json::json!({ "probe": true }))
-            .send()
+            .send_traced()
             .await
             .expect("the pinned client must connect to the guarded addrs");
         assert!(response.status().is_success());

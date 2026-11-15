@@ -26,8 +26,11 @@ impl BotServiceImpl {
         // Bot-authority spec §8.0 dynamic mine: persistent
         // candidates first, then ONE runtime observation,
         // then reachable/unreachable over ALL candidates,
-        // total AFTER the filter, offset/limit, and the
-        // batch page backfill (page fields, same sampling).
+        // the mine-page order over the same observation
+        // (Human self first, reachable before unreachable,
+        // created_at descending, id-ascending ties), total
+        // AFTER the filter, offset/limit, and the batch
+        // page backfill (page fields, same sampling).
         let first = self
             .mine_attempt(&staff_no, &command)
             .await?;
@@ -74,7 +77,7 @@ impl BotServiceImpl {
             .await
             .map_err(map_service_error)?;
 
-        let filtered: Vec<ControlledBotCandidate> = candidates
+        let mut filtered: Vec<ControlledBotCandidate> = candidates
             .into_iter()
             .filter(|candidate| match command.reachability {
                 None => true,
@@ -89,6 +92,19 @@ impl BotServiceImpl {
                 }
             })
             .collect();
+        // Mine-page order (the page contract): Human self
+        // first, then reachable before unreachable over
+        // the SAME §8.0 observation, `created_at`
+        // descending inside each group, bot id ascending
+        // as the deterministic tie-breaker. Applied
+        // unconditionally — an explicit reachability
+        // filter makes the group key constant, so the
+        // order degenerates to plain created-desc. One
+        // in-memory sort of the already-materialized
+        // candidate list; total and pagination follow.
+        filtered.sort_by(|left, right| {
+            mine_order_key(left, &snapshot).cmp(&mine_order_key(right, &snapshot))
+        });
         // total BEFORE pagination, AFTER the reachability
         // filter — never the truncated-head assumption
         // (spec §8.0).
@@ -220,11 +236,15 @@ impl BotServiceImpl {
     ///    Provider routable)`; a specified reachability keeps
     ///    excluding the Human self entry, per the pre-existing
     ///    behavior);
-    /// 4. `total` AFTER the filter, then offset/limit;
-    /// 5. the batch page backfill through the same Core, sharing
+    /// 4. the mine-page order over ALL filtered
+    ///    candidates: Human self first, then reachable
+    ///    before unreachable (SAME observation),
+    ///    `created_at` descending, bot id ascending ties;
+    /// 5. `total` AFTER the filter, then offset/limit;
+    /// 6. the batch page backfill through the same Core, sharing
     ///    the observation from step 2 for the reachability
     ///    projection;
-    /// 6. the page roles RE-DERIVED store-side (one fresh
+    /// 7. the page roles RE-DERIVED store-side (one fresh
     ///    `list_controllable`, no new WS observation and no
     ///    new provider batch): a page target that got deleted
     ///    OR whose owner/manager relation changed since the
@@ -384,6 +404,27 @@ fn candidate_is_reachable(
         && candidate.status == ActorStatus::Online
         && snapshot.active_bot_ids.contains(&candidate.id)
 }
+/// One candidate's mine-page order key: group rank
+/// (the Human self entry 0, reachable Bots 1,
+/// unreachable Bots 2), then `created_at` DESC, then
+/// the bot id ASC as the deterministic tie-breaker.
+/// The self group is why the Human entry leads the
+/// page: it carries no reachability semantics (any
+/// specified filter still excludes it upstream, per
+/// the pre-existing behavior).
+fn mine_order_key<'a>(
+    candidate: &'a ControlledBotCandidate,
+    snapshot: &RuntimeActivitySnapshot,
+) -> (u8, std::cmp::Reverse<u64>, &'a str) {
+    let group = if candidate.kind == ActorKind::Human {
+        0
+    } else if candidate_is_reachable(candidate, snapshot) {
+        1
+    } else {
+        2
+    };
+    (group, std::cmp::Reverse(candidate.created_at), candidate.id.as_str())
+}
 /// The public mine item label for one sampled candidate
 /// (spec §8 mine row): physical Bots carry their edge
 /// relation (`owner` | `manager`), and the Human self
@@ -403,7 +444,9 @@ fn mine_relation_label(
 }
 /// One sampled mine attempt (spec §8.0): candidates → ONE
 /// runtime observation → reachability over ALL candidates →
-/// total → offset/limit → batch page backfill.
+/// the mine-page order (self first, reachable first,
+/// created_at desc, id asc) → total → offset/limit →
+/// batch page backfill.
 ///
 /// `drift` reports whether the page backfill discovered a
 /// page target missing from the same store (deleted or

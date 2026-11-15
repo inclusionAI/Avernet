@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import pytest
 
-from src.domain.events import get_event_bus, reset_event_bus, WorkerProfileCreatedEvent
+from app.domain.events import get_event_bus, reset_event_bus, WorkerProfileCreatedEvent
 
 
 @pytest.fixture(autouse=True)

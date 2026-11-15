@@ -55,6 +55,7 @@ def device_port_bundle(
     resource_rows=None,
     cli_tool_service=None,
     shared_skills=None,
+    file_sync=None,
 ):
     """The device-backed bundle, over fakes, wrapped as the root wraps it.
 
@@ -108,6 +109,7 @@ def device_port_bundle(
         resource_rows=resource_rows or resource_rows_for()[0],
         cli_tool_service=cli_tool_service,
         shared_skills=shared_skills or FakeSharedSkills(),
+        file_sync=file_sync,
     )
     return lambda: bundle
 

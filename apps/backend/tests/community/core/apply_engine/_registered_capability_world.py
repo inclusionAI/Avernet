@@ -55,6 +55,7 @@ def registered_world(document, *, platform=False, resolver=None, world=None):
         resource_rows=resource_rows_for()[0],
         cli_tool_service=EmptyCliTools(),
         shared_skills=world.query,
+        file_sync=None,
     )
     strategy = (
         TeclawPlatformDelivery(ports=lambda: bundle, redeliver=no_redeliver)

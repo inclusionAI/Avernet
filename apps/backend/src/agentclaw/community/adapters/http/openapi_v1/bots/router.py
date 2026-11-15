@@ -225,6 +225,7 @@ def _sync_passport_identity(
     bot_name: str | None,
     bot_desc: str | None,
     engine_type: str | None,
+    bot_type: str,
 ) -> None:
     """Push renamed identity metadata or fail the completed-update contract."""
     try:
@@ -234,6 +235,7 @@ def _sync_passport_identity(
             bot_name=bot_name,
             bot_desc=bot_desc,
             engine_type=engine_type or DEFAULT_ENGINE_TYPE,
+            bot_type=bot_type,
         )
     except PassportError:
         raise
@@ -503,6 +505,7 @@ async def update_bot(
             bot_name=bot_name,
             bot_desc=body.bot_desc,
             engine_type=bot.get("active_engine"),
+            bot_type=str(bot.get("bot_type") or "personal"),
         )
     return envelope(_to_bot(bot), request)
 

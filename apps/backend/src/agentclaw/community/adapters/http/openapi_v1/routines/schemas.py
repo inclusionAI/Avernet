@@ -9,7 +9,10 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictStr, model_validator
+
+from agentclaw.community.adapters.http.openapi_v1.contracts import Page
+from .params import validate_target
 
 # `command` is a natural-language instruction handed to the bot as the user
 # message of a fresh session at fire time — the name is legacy, it was never a
@@ -101,10 +104,14 @@ class Routine(BaseModel):
                 "model": "qwen-max",
                 "timeout_secs": 3600,
                 "gmt_create": "2026-08-01T02:00:00+00:00",
+                "next_run_at": "2026-08-11T01:00:00+00:00",
                 "gmt_modified": "2026-08-10T02:00:00+00:00",
             }
         }
     )
+
+    device_uuid: str | None = Field(default=None, description="Resolved runtime device UUID; null when unreported.")
+    operator_id: str | None = Field(default=None, description="Resolved Caller identity; not a historical creator guarantee.")
 
     routine_id: str = Field(
         description="Identifier of the routine — an opaque string assigned by "
@@ -128,8 +135,8 @@ class Routine(BaseModel):
         default=None,
         description="Which runtime holds this definition — 'draft', 'verify' "
         "or 'online' for a service bot, null otherwise. The same definition "
-        "can exist in several runtimes; on a cross-bot list treat the pair "
-        "(routine_id, runtime_stage) as the distinct row.",
+        "can exist in several runtimes and instances. A row is identified by "
+        "(owner_id, bot_id, runtime_stage, device_uuid, operator_id, routine_id).",
     )
     name: str = Field(description="Human-readable routine name.")
     trigger: ScheduleTrigger = Field(description="When the routine fires.")
@@ -149,6 +156,10 @@ class Routine(BaseModel):
         default=None,
         description="How long a single firing may run (seconds); null when "
         "the engine reports none.",
+    )
+    next_run_at: str | None = Field(
+        default=None,
+        description="Next scheduled firing (ISO 8601 UTC); null when not reported.",
     )
     gmt_create: str = Field(
         description="When the routine was created (ISO 8601 UTC); empty when "
@@ -210,6 +221,19 @@ class RoutineSpec(BaseModel):
     )
 
 
+class RoutineTargetSpec(RoutineSpec):
+    """Create a routine in an existing runtime; routing fields are not job content."""
+
+    runtime_stage: Literal["draft", "verify", "online"] | None = Field(default=None, description="Existing runtime to create in. Omit for draft creation.")
+    device_uuid: StrictStr | None = Field(default=None, min_length=1, description="Existing instance UUID; requires an explicit runtime_stage.")
+    operator_id: StrictStr | None = Field(default=None, min_length=1, description="Caller identity; requires runtime_stage. Selecting another user requires Bot ADMIN.")
+
+    @model_validator(mode="after")
+    def validate_runtime_target(self):
+        validate_target(self.runtime_stage, self.device_uuid, self.operator_id)
+        return self
+
+
 class RoutineUpdate(BaseModel):
     """Partial update of a routine. Omitted fields are left unchanged."""
 
@@ -251,6 +275,13 @@ class RoutineUpdate(BaseModel):
     )
 
 
+class RoutineRunMessage(BaseModel):
+    """Text-only conversation entry; provider/authentication extensions are excluded."""
+
+    role: str = Field(description="Reported message role, or assistant when absent.")
+    content: str = Field(description="Reported text content; never interpreted as HTML.")
+
+
 class RoutineRun(BaseModel):
     """One execution of a routine."""
 
@@ -266,11 +297,21 @@ class RoutineRun(BaseModel):
         }
     )
 
+    bot_id: str | None = Field(default=None, description="Bot addressed by this runtime result; null when unreported.")
+    owner_id: str | None = Field(default=None, description="Authorized Bot owner; null when unreported.")
+    runtime_stage: str | None = Field(default=None, description="Resolved runtime stage; null when unreported.")
+    device_uuid: str | None = Field(default=None, description="Resolved runtime device UUID; null when unreported.")
+    operator_id: str | None = Field(default=None, description="Resolved Caller identity; null when unreported.")
+
     run_id: str = Field(
         description="Identifier of the run entry. Not guaranteed unique "
         "across a routine's history — treat the list positionally."
     )
     routine_id: str = Field(description="The routine that ran.")
+    input: str | None = Field(default=None, description="Historical run input, or the enclosing history response input; null when unreported.")
+    output: str | None = Field(default=None, description="Reported execution output; null when unreported.")
+    error: str | None = Field(default=None, description="Reported execution error; null when unreported.")
+    messages: list[RoutineRunMessage] = Field(default_factory=list, description="Reported conversation text in order, normalized from messages/conversation/turns. Empty does not imply a complete transcript.")
     # Two producers, two vocabularies — the run-now endpoint synthesizes its
     # own three values, the history read passes the engine's through — so this
     # is documented as open rather than published as an enum either endpoint
@@ -294,3 +335,45 @@ class RoutineRun(BaseModel):
         description="When the run finished (ISO 8601 UTC); null while the "
         "run is still in flight or when not reported.",
     )
+
+
+class RoutineFailedTarget(BaseModel):
+    """A failed runtime read, without private provider error text."""
+
+    bot_id: str | None = Field(default=None, description="Bot addressed by this runtime result; null when unreported.")
+    owner_id: str | None = Field(default=None, description="Authorized Bot owner; null when unreported.")
+    runtime_stage: str | None = Field(default=None, description="Resolved runtime stage; null when unreported.")
+    device_uuid: str | None = Field(default=None, description="Resolved runtime device UUID; null when unreported.")
+    operator_id: str | None = Field(default=None, description="Resolved Caller identity; null when unreported.")
+    reason: str = Field(description="Safe runtime failure category, without private provider details.")
+
+
+class RoutinePage(Page[Routine]):
+    failed_targets: list[RoutineFailedTarget] = Field(default_factory=list, description="Targets that could not complete the operation; successful rows are retained.")
+
+
+class RoutineRunPage(Page[RoutineRun]):
+    failed_targets: list[RoutineFailedTarget] = Field(default_factory=list, description="Targets that could not complete the operation; successful rows are retained.")
+
+
+class RoutineOperationResult(BaseModel):
+    """One instance's acknowledged operation; run timestamps remain unreported."""
+
+    bot_id: str | None = Field(default=None, description="Bot addressed by this runtime result; null when unreported.")
+    owner_id: str | None = Field(default=None, description="Authorized Bot owner; null when unreported.")
+    runtime_stage: str | None = Field(default=None, description="Resolved runtime stage; null when unreported.")
+    device_uuid: str | None = Field(default=None, description="Resolved runtime device UUID; null when unreported.")
+    operator_id: str | None = Field(default=None, description="Resolved Caller identity; null when unreported.")
+    success: bool = Field(description="Whether this runtime acknowledged the operation successfully.")
+    routine: Routine | None = Field(default=None, description="Updated definition for a successful instance; otherwise null.")
+    run: RoutineRun | None = Field(default=None, description="Trigger acknowledgement for a successful instance; otherwise null.")
+    reason: str | None = Field(default=None, description="Safe failure category; null for a successful operation.")
+
+
+class RoutineOperationBatch(BaseModel):
+    """Per-instance results from an existing published-runtime broadcast."""
+
+    results: list[RoutineOperationResult] = Field(description="One result per runtime instance; identical routine IDs are retained.")
+    succeeded: int = Field(ge=0, description="Number of successful instances reported by the relay.")
+    failed: int = Field(ge=0, description="Number of failed targets reported by the relay.")
+    failed_targets: list[RoutineFailedTarget] = Field(default_factory=list, description="Targets that could not complete the operation; successful rows are retained.")

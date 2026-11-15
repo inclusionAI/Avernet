@@ -89,6 +89,10 @@ impl A2aHttpTransport {
     }
 
     fn route_fingerprint(&self, interface:&bcs_service_api::types::a2a_bot::A2aInterface)->ServiceResult<Option<String>> {
+        if interface.binding==A2aBinding::Custom {
+            return bcs_a2a_binding_api::registry().fingerprint(&interface.url).map(Some)
+                .map_err(|_|invalid("custom route unavailable"));
+        }
         if interface.binding!=A2aBinding::Grpc {return Ok(None);}
         let mesh=self.inner.grpc.as_ref().ok_or_else(||invalid("gRPC mesh is not configured"))?;
         Ok(Some(mesh.fingerprint(&interface.url)?))
@@ -103,6 +107,14 @@ impl A2aHttpTransport {
         };
         let negotiated = record.extensions.iter().filter(|uri|matches!(uri.as_str(),crate::tools::EXTENSION | DEDUP_EXTENSION | crate::structured_exec::EXTENSION))
             .map(String::as_str).collect::<Vec<_>>().join(",");
+        if record.interface.binding == A2aBinding::Custom {
+            if record.scope.route_fingerprint != self.route_fingerprint(&record.interface)? {
+                return Err(invalid("frozen custom route changed; remote Task must not be retargeted"));
+            }
+            return bcs_a2a_binding_api::registry().client(&record.interface.url, record.interface.tenant.as_deref(),
+                bearer.as_deref(), &negotiated, Duration::from_millis(record.deadline_ms.saturating_sub(now_ms()).max(5_000)))
+                .map(BindingClient::Custom).map_err(|_|invalid("custom client unavailable"));
+        }
         if record.interface.binding == A2aBinding::Grpc {
             if record.scope.route_fingerprint!=self.route_fingerprint(&record.interface)? {
                 return Err(invalid("frozen gRPC route changed; remote Task must not be retargeted"));
@@ -193,6 +205,8 @@ impl A2aHttpTransport {
 impl BotDeliveryPort for A2aHttpTransport {
     async fn is_available(&self, target: &BotDeliveryTarget) -> bool {
         let binding_ready=match target {
+            BotDeliveryTarget::A2a {interface,..} if interface.binding==A2aBinding::Custom =>
+                bcs_a2a_binding_api::registry().fingerprint(&interface.url).is_ok(),
             BotDeliveryTarget::A2a {interface,..} if interface.binding==A2aBinding::Grpc =>
                 self.inner.grpc.as_ref().is_some_and(|mesh|mesh.supports(&interface.url)),
             BotDeliveryTarget::A2a {..}=>true,
@@ -320,7 +334,7 @@ impl BotDeliveryPort for A2aHttpTransport {
         };
         if !finished {
             let transport = self.clone();
-            tokio::spawn(async move {
+            tokio::spawn(bcs_network_tracing::in_current_context(async move {
                 let _lease = lease;
                 let result=if record.interface.update_mode==bcs_service_api::types::a2a::A2aUpdateMode::Poll {
                     transport.drive_poll(&mut record,&mut projection,receiver).await
@@ -328,7 +342,7 @@ impl BotDeliveryPort for A2aHttpTransport {
                 if result.is_err() {
                     transport.tracking_failed(&mut record).await;
                 }
-            });
+            }));
         }
         Ok(BotDeliveryResult { target_bot_id: bot_id.clone(), delivered: true, error: None })
     }

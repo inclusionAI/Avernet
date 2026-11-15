@@ -213,7 +213,7 @@ impl MySqlGroupStore {
                         params,
                     ),
                 ));
-                if patch.label.is_some() {
+                if patch.label.is_some() || patch.context.is_some() {
                     steps.push(self.card_template_upsert_step(&command.group_id)?);
                 }
             }

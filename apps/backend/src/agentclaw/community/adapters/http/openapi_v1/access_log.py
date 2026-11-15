@@ -70,6 +70,7 @@ from agentclaw.community.core.gateway_principal import (
     VerifiedCaller,
 )
 from agentclaw.community.log import get_logger
+from agentclaw.community.utils.runtime_list_timing import Timeline, current
 
 logger = get_logger()
 
@@ -77,6 +78,8 @@ logger = get_logger()
 #: field so every line has the same shape and a missing value is visible as a
 #: missing value, not as a field that happened not to be emitted.
 _ABSENT = "-"
+
+_LIST_PATH = re.compile(r"/openapi/v1/bots/(?:catalog/search|[^/]+/(?:models|connection|sessions(?:/favorites|/[^/]+/messages)?))")
 
 #: Substrings that mark a query parameter as carrying a secret, matched against
 #: the parameter *name*, case-insensitively. Kept in step with the gateway's own
@@ -272,6 +275,9 @@ class PublicApiAccessLogMiddleware:
         logger.debug("openapi_request_start %s", " ".join(self._request_fields(scope)))
 
         started = time.perf_counter()
+        token = None
+        if scope.get("method") == "GET" and _LIST_PATH.fullmatch(scope["path"]):
+            token = current.set(Timeline(started))
         status = 0
 
         async def _send(message: Message) -> None:
@@ -301,7 +307,11 @@ class PublicApiAccessLogMiddleware:
                 scope, status=0, started=started, error=type(exc).__name__
             )
             raise
-        self._log_completion(scope, status=status, started=started, error="")
+        else:
+            self._log_completion(scope, status=status, started=started, error="")
+        finally:
+            if token is not None:
+                current.reset(token)
 
     def _request_fields(self, scope: Scope) -> list[str]:
         """The fields known before the downstream app runs."""
@@ -347,6 +357,9 @@ class PublicApiAccessLogMiddleware:
             ]
             if error:
                 fields.append(_kv("error", error))
+            timeline = current.get()
+            if timeline is not None and timeline.started == started and duration_ms >= 500:
+                fields.append(_kv("phase_offsets_ms", ",".join(timeline.points)))
         except Exception:
             # A distinct prefix, not a degraded ``openapi_access`` line: a query
             # counting access lines must not silently count failures as though

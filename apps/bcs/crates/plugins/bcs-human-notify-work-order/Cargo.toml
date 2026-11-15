@@ -11,6 +11,7 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
+bcs-network-tracing.workspace = true
 async-trait = { workspace = true }
 bcs-config-api = { workspace = true }
 bcs-human-notify-api = { workspace = true }

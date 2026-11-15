@@ -647,7 +647,7 @@ pub async fn prepare_group_admission(
     sender_name: &str,
     sender_owner: Option<String>,
 ) -> ServiceResult<Option<AdmitMessageDeliveries>> {
-    prepare_group_admission_with_message(flow, group, command, decision, sender_name, sender_owner, None).await
+    prepare_group_admission_with_message(flow, group, command, decision, sender_name, sender_owner, None, &[]).await
 }
 
 pub(crate) async fn prepare_group_admission_with_message(
@@ -658,6 +658,7 @@ pub(crate) async fn prepare_group_admission_with_message(
     sender_name: &str,
     sender_owner: Option<String>,
     canonical_message: Option<(&str, &NewMessage)>,
+    caller_admission_targets: &[String],
 ) -> ServiceResult<Option<AdmitMessageDeliveries>> {
     // State-machine is an independently gated business flow, even when its
     // transport happens to be the group endpoint.
@@ -675,6 +676,20 @@ pub(crate) async fn prepare_group_admission_with_message(
         else if pending_context_carrier(flow, &target.bot_uuid, target.delivery_type, command.session_id.as_deref()).await? {
             let limit = policy.as_ref().map_or(100, |p| p.policy.bot(&target.bot_uuid).max_queued);
             selected.push((target, limit, true));
+        }
+        // Forced managed admission (spec §7.5.1, 2026-11-11 prod incident):
+        // a caller-enabled target is never deliverable on the ordinary
+        // inline transport — CallerConfigurationDeliveryGate refuses it
+        // closed there — so the web_send caller seam MUST own these rows
+        // regardless of the delivery policy's Enforce defaults. Without
+        // this branch a Human's speech toward a caller-enabled bot on a
+        // policy-disabled deployment falls to inline and dies at the
+        // gate with CALLER_EXECUTION_UNAVAILABLE. Limits come from the
+        // policy's per-bot values (mode-independent) with a queue-scale
+        // fallback when no live policy is composed.
+        else if caller_admission_targets.iter().any(|candidate| candidate == &target.bot_uuid) {
+            let limit = policy.as_ref().map_or(20, |p| p.policy.bot(&target.bot_uuid).max_queued);
+            selected.push((target, limit, false));
         }
     }
     if selected.is_empty() {
