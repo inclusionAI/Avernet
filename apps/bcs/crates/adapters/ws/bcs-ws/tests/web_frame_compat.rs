@@ -688,7 +688,10 @@ async fn frontend_socket_malformed_binary_and_abrupt_close_logs_keep_request_id(
         server.abort();
         let _ = server.await;
     }).await;
-    for (message, level) in [("Received unexpected binary frame", "WARN"), ("Frame dispatch error", "WARN"), ("WebSocket error", "ERROR")] {
+    // With transport error classification, abrupt socket close without a close frame
+    // is now detected as a transport-level disconnection (ClientClose), not a ProtocolError.
+    // The log level is INFO instead of ERROR.
+    for (message, level) in [("Received unexpected binary frame", "WARN"), ("Frame dispatch error", "WARN"), ("WebSocket transport close (client disconnected)", "INFO")] {
         let event = logs.iter().find(|event| event["fields"]["message"] == message).expect(message);
         assert_eq!(event["level"], level);
         assert_eq!(event["fields"]["request_id"], "web-socket-diagnostic");
