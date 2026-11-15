@@ -139,7 +139,7 @@ describe('WorkflowAiDrawer', () => {
     expect(submit()).toBeDisabled()
   })
 
-  it('reports errors inline and supports retry without applying a failed response', async () => {
+  it('reports errors inline and recovers the same request without applying a failed response', async () => {
     generate.mockRejectedValueOnce(new Error('生成服务暂时不可用'))
     const p = props()
     render(<WorkflowAiDrawer {...p} />)
@@ -148,9 +148,11 @@ describe('WorkflowAiDrawer', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('生成服务暂时不可用')
     expect(screen.getByRole('alert').parentElement).toHaveAttribute('aria-live', 'polite')
     expect(screen.queryByRole('button', { name: '应用草稿到当前 Editor' })).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '重试生成' }))
+    const attempt = generate.mock.calls[0][4]
+    fireEvent.click(screen.getByRole('button', { name: '恢复查询本次请求' }))
     await screen.findByText('已调整复核提示词')
     expect(generate).toHaveBeenCalledTimes(2)
+    expect(generate.mock.calls[1][4]).toBe(attempt)
     expect(p.onApply).not.toHaveBeenCalled()
   })
 
