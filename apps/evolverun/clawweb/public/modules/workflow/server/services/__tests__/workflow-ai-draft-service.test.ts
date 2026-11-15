@@ -1,224 +1,194 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createHash } from 'node:crypto';
+import { describe, expect, it, vi } from 'vitest';
 import { createWorkflowAiDraftService } from '../workflow-ai-draft-service.js';
 import { WorkflowAiDraftDispatchRejectedError, WorkflowAiDraftInvalidResultError } from '../../contracts/workflow-ai-draft.js';
-import { WorkflowAiDraftRepository } from '../../repositories/workflow-ai-draft-repository.js';
-import { aiDraftFixture, draftRequest, overlayYaml, targetBotId } from './workflow-ai-draft-fixtures.js';
-import type { IDatabase } from '@avernet/clawweb-shared/server/db';
-const closing: Array<() => Promise<void>> = [];
-afterEach(async () => { for (const close of closing.splice(0)) await close(); });
-async function fixture() {
-  const f = await aiDraftFixture(); closing.push(() => f.db.close());
-  let clock = 1_000_000, allowed = true;
-  const options = { db: f.db, execution: f.execution, now: () => clock, canEdit: vi.fn(async () => allowed) };
-  return { ...f, options, service: createWorkflowAiDraftService(options), advance: (ms: number) => { clock += ms; }, revoke: () => { allowed = false; } };
-}
-describe('Workflow YAML draft service conformance', () => {
-  it('freezes the complete Bot identity and exact envelope once without editing or deploying the workflow', async () => {
-    const f = await fixture(), request = draftRequest();
-    const a = await f.service.create('owner', 'flow', request);
-    expect(a.status).toBe('running');
+import { aiDraftSha256 } from '../workflow-ai-draft-validation.js';
+import { coreFixture, draftRequest, overlayYaml, targetBotId } from './workflow-ai-draft-core-fixtures.js';
+
+describe('Receipt-backed workflow AI draft service (no DB)', () => {
+  it('prepares without dispatch, then freezes exact input/native ID/server Bot across instances', async () => {
+    const f = coreFixture(), { request, prepared, context } = await f.prepare();
+    expect(prepared.inputSpecDigest).toBe(aiDraftSha256(overlayYaml));
+    expect(f.execution.dispatch).not.toHaveBeenCalled();
     vi.mocked(f.execution.resolveTarget).mockResolvedValue({ botId: 'replacement:another-owner' });
-    const b = await createWorkflowAiDraftService(f.options).create('owner', 'flow', { ...request, requestId: request.requestId.toUpperCase() });
-    expect(b).toEqual(a); expect(f.execution.dispatch).toHaveBeenCalledTimes(1);
-    expect(f.execution.resolveTarget).toHaveBeenCalledTimes(1);
-    const call = vi.mocked(f.execution.dispatch).mock.calls[0][0];
-    expect(call).toEqual({ actorId: 'owner', envelope: {
-      schemaVersion: 'workflow-yaml-draft/v1', taskType: 'workflow_yaml_draft', taskId: a.draftId, target: { botId: targetBotId },
+    expect(await f.service.create('owner', 'flow', request)).toEqual({ draftId: prepared.draftId, status: 'running' });
+    expect(f.execution.dispatch).toHaveBeenCalledWith({ actorId: 'owner', envelope: {
+      schemaVersion: 'workflow-yaml-draft/v1', taskType: 'workflow_yaml_draft', taskId: prepared.draftId, target: { botId: targetBotId },
       input: { schemaVersion: 'workflow-yaml-draft-input/v1', workflowId: 'flow', mode: request.mode, prompt: request.prompt,
-        workingCopy: { yaml: overlayYaml, sha256: createHash('sha256').update(overlayYaml).digest('hex') } },
+        workingCopy: { yaml: overlayYaml, sha256: aiDraftSha256(overlayYaml) } },
     } });
-    const row = await new WorkflowAiDraftRepository(f.db).get(a.draftId);
-    expect(JSON.parse(row!.envelope_json)).toEqual(call.envelope);
-    await expect(f.service.create('owner', 'flow', { ...request, prompt: 'different' })).rejects.toMatchObject({ code: 'IDEMPOTENCY_CONFLICT' });
-    const other = await f.service.create('other-editor', 'flow', request);
-    expect(other.draftId).not.toBe(a.draftId);
-    expect(f.raw.prepare('SELECT spec_json FROM workflow_specs').get()).toEqual({ spec_json: '{}' });
-    expect(f.raw.prepare('SELECT COUNT(*) AS n FROM workflow_deploy_history').get()).toEqual({ n: 0 });
-    f.setResult({ yaml: overlayYaml, summary: 'Unchanged is a valid candidate' }); f.advance(16_000);
-    expect(await f.service.get('owner', 'flow', a.draftId)).toMatchObject({ status: 'completed' });
-    expect(f.execution.poll).toHaveBeenCalledWith({ ...call, jobId: 'job' });
-  });
-  it('is available for DB-only workflows without Pack metadata or deployment history', async () => {
-    const f = await fixture();
-    f.raw.exec('UPDATE workflow_specs SET pack_id = NULL');
-    expect(await f.service.capabilities('owner', 'flow')).toEqual({ available: true });
-    expect(f.execution.resolveTarget).toHaveBeenCalledWith();
-    expect(await f.service.create('owner', 'flow', draftRequest())).toMatchObject({ status: 'running' });
-  });
-  it('keeps an unknown dispatch uncertain across retries, reads and restarts, then times out without polling or resubmitting', async () => {
-    const f = await fixture(), request = draftRequest();
-    vi.mocked(f.execution.dispatch).mockRejectedValue(new Error('credential-bearing provider error'));
-    const task = await f.service.create('owner', 'flow', request);
-    expect(task.status).toBe('dispatch_uncertain');
-    expect(await f.service.create('owner', 'flow', request)).toEqual(task);
-    f.setResult({ yaml: overlayYaml, summary: 'Cannot be fetched without a job ID' });
-    f.advance(16_000);
-    const restarted = createWorkflowAiDraftService(f.options);
-    expect(await restarted.reconcile()).toBe(1);
-    expect(await restarted.get('owner', 'flow', task.draftId)).toMatchObject({ status: 'dispatch_uncertain' });
-    f.advance(30 * 60_000);
-    expect(await restarted.get('owner', 'flow', task.draftId)).toMatchObject({ status: 'failed', error: 'DISPATCH_UNCERTAIN_TIMEOUT' });
-    expect(await restarted.create('owner', 'flow', request)).toMatchObject({ draftId: task.draftId, status: 'failed' });
+    f.setResult({ yaml: overlayYaml, summary: 'Candidate' });
+    expect(await createWorkflowAiDraftService(f.options).get('owner', 'flow', prepared.draftId, context)).toMatchObject({ status: 'completed' });
+    expect(f.execution.poll).toHaveBeenCalledWith({ actorId: 'owner', jobId: prepared.draftId, envelope: {
+      schemaVersion: 'workflow-yaml-draft/v1', taskType: 'workflow_yaml_draft', taskId: prepared.draftId, target: { botId: targetBotId },
+    } });
+    expect(f.execution.resolveTarget).toHaveBeenCalledTimes(1);
+    expect(f.options.canEdit).toHaveBeenCalledWith('flow', 'owner');
     expect(f.execution.dispatch).toHaveBeenCalledTimes(1);
-    expect(f.execution.poll).not.toHaveBeenCalled();
-    expect(JSON.stringify(f.raw.prepare('SELECT * FROM workflow_ai_drafts').all())).not.toContain('credential-bearing');
+  });
+  it('never accesses even a legacy database property', async () => {
+    const f = coreFixture(), db = new Proxy({}, { get() { throw new Error('private database access'); } });
+    const options = { ...f.options, db }, service = createWorkflowAiDraftService(options), request = draftRequest();
+    expect(await service.capabilities('owner', 'flow')).toEqual({ available: true });
+    const p = await service.prepare('owner', 'flow', request);
+    await service.create('owner', 'flow', { ...request, receipt: p.receipt });
+    await service.get('owner', 'flow', p.draftId, { receipt: p.receipt, currentYaml: request.currentYaml });
+    await service.cancel('owner', 'flow', p.draftId, { receipt: p.receipt });
+    expect(await service.reconcile()).toBe(0);
+  });
+  it('polls the expected native ID after lost acknowledgement without another create', async () => {
+    const f = coreFixture(), { request, prepared, context } = await f.prepare();
+    vi.mocked(f.execution.dispatch).mockRejectedValue(new Error('private provider token=secret'));
+    expect(await f.service.create('owner', 'flow', request)).toEqual({ draftId: prepared.draftId, status: 'dispatch_uncertain' });
+    f.setResult({ yaml: overlayYaml, summary: 'Accepted remotely' });
+    expect(await createWorkflowAiDraftService(f.options).get('owner', 'flow', prepared.draftId, context)).toMatchObject({ status: 'completed' });
+    expect(f.execution.poll).toHaveBeenCalledWith(expect.objectContaining({ jobId: prepared.draftId }));
+    expect(f.execution.dispatch).toHaveBeenCalledTimes(1);
   });
   it.each(['AUTO_HEAL_BOT_UNAVAILABLE', 'BAAS_AUTH_FAILED', 'BAAS_REQUEST_REJECTED'] as const)(
-    'terminally records a positive dispatch rejection and never retries it: %s', async code => {
-      const f = await fixture(), request = draftRequest();
+    'returns safe explicit rejection %s without pretending durable failure', async code => {
+      const f = coreFixture(), { request, prepared, context } = await f.prepare();
       vi.mocked(f.execution.dispatch).mockRejectedValue(new WorkflowAiDraftDispatchRejectedError(code));
-      const task = await f.service.create('owner', 'flow', request);
-      expect(task.status).toBe('failed');
-      expect(await f.service.get('owner', 'flow', task.draftId)).toMatchObject({ status: 'failed', error: code });
-      f.advance(31 * 60_000); await f.service.reconcile();
-      expect(await f.service.create('owner', 'flow', request)).toEqual(task);
-      expect(f.execution.dispatch).toHaveBeenCalledTimes(1); expect(f.execution.poll).not.toHaveBeenCalled();
+      expect(await f.service.create('owner', 'flow', request)).toEqual({ draftId: prepared.draftId, status: 'failed', error: code });
+      expect(await f.service.get('owner', 'flow', prepared.draftId, context)).toMatchObject({ status: 'running' });
     });
-  it.each(['', 'x'.repeat(256), 'invalid\njob', '\ud800'])(
-    'treats a malformed acknowledgement as uncertain, never as permission to resubmit', async jobId => {
-      const f = await fixture(), request = draftRequest();
-      vi.mocked(f.execution.dispatch).mockResolvedValue({ jobId });
-      const task = await f.service.create('owner', 'flow', request);
-      expect(task.status).toBe('dispatch_uncertain');
-      f.advance(16_000); await f.service.get('owner', 'flow', task.draftId); await f.service.create('owner', 'flow', request);
-      expect(f.execution.poll).not.toHaveBeenCalled(); expect(f.execution.dispatch).toHaveBeenCalledTimes(1);
-    });
-  it('requires owner and live workflow edit permission on every operation and background poll', async () => {
-    const f = await fixture(), task = await f.service.create('owner', 'flow', draftRequest());
-    await expect(f.service.get('other-editor', 'flow', task.draftId)).rejects.toMatchObject({ code: 'NOT_FOUND' });
-    await expect(f.service.cancel('other-editor', 'flow', task.draftId)).rejects.toMatchObject({ code: 'NOT_FOUND' });
-    await expect(f.service.cancel('owner', 'other-workflow', task.draftId)).rejects.toMatchObject({ code: 'NOT_FOUND' });
-    f.revoke();
-    for (const operation of [() => f.service.get('owner', 'flow', task.draftId), () => f.service.cancel('owner', 'flow', task.draftId),
-      () => f.service.capabilities('owner', 'flow'), () => f.service.create('owner', 'flow', draftRequest())]) {
-      await expect(operation()).rejects.toMatchObject({ code: 'FORBIDDEN' });
-    }
-    f.advance(16_000); await f.service.reconcile();
-    expect(f.raw.prepare('SELECT status, error_code FROM workflow_ai_drafts').get()).toEqual({ status: 'failed', error_code: 'EDIT_PERMISSION_REVOKED' });
-    expect(f.execution.poll).not.toHaveBeenCalled();
+  it.each(['', 'different-id', 'bad\njob', '\ud800'])('requires ack to equal native ID: %j', async jobId => {
+    const f = coreFixture(), { request, prepared, context } = await f.prepare();
+    vi.mocked(f.execution.dispatch).mockResolvedValue({ jobId });
+    expect(await f.service.create('owner', 'flow', request)).toEqual({ draftId: prepared.draftId, status: 'dispatch_uncertain' });
+    await f.service.get('owner', 'flow', prepared.draftId, context);
+    expect(f.execution.poll).toHaveBeenCalledWith(expect.objectContaining({ jobId: prepared.draftId }));
+    expect(f.execution.dispatch).toHaveBeenCalledTimes(1);
   });
-  it('rechecks edit permission after target resolution, before storing or dispatching', async () => {
-    const f = await fixture();
-    vi.mocked(f.execution.resolveTarget).mockImplementation(async () => { f.revoke(); return { botId: targetBotId }; });
-    await expect(f.service.create('owner', 'flow', draftRequest())).rejects.toMatchObject({ code: 'FORBIDDEN' });
-    expect(f.raw.prepare('SELECT COUNT(*) AS n FROM workflow_ai_drafts').get()).toEqual({ n: 0 });
+  it('requires a valid receipt on create/get/cancel before calling provider', async () => {
+    const f = coreFixture(), { request, prepared, context } = await f.prepare();
+    for (const receipt of [undefined, '', prepared.receipt + 'x', 'x'.repeat(4097)]) {
+      await expect(f.service.create('owner', 'flow', { ...request, receipt })).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+      await expect(f.service.get('owner', 'flow', prepared.draftId, { ...context, receipt: receipt! })).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+      await expect(f.service.cancel('owner', 'flow', prepared.draftId, { receipt: receipt! })).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+    }
+    expect(f.execution.dispatch).not.toHaveBeenCalled(); expect(f.execution.poll).not.toHaveBeenCalled();
+  });
+  it.each([{ prompt: 'Changed' }, { mode: 'create' as const }, { requestId: 'a32f818e-a44f-46ac-9396-9ed9fda1ca6b' },
+    { currentYaml: overlayYaml.replace('Unsaved', 'Changed') }])('binds create to exact input: %j', async change => {
+    const f = coreFixture(), { request } = await f.prepare();
+    await expect(f.service.create('owner', 'flow', { ...request, ...change })).rejects.toMatchObject({ code: 'IDEMPOTENCY_CONFLICT' });
     expect(f.execution.dispatch).not.toHaveBeenCalled();
   });
-  it('cancels locally and never polls or revives a cancelled task', async () => {
-    const f = await fixture(), request = draftRequest(), task = await f.service.create('owner', 'flow', request);
-    expect(await f.service.cancel('owner', 'flow', task.draftId)).toMatchObject({ status: 'cancelled' });
-    f.setResult({ yaml: overlayYaml, summary: 'Late' }); f.advance(16_000);
-    expect(await f.service.get('owner', 'flow', task.draftId)).toMatchObject({ status: 'cancelled' });
-    expect(await f.service.create('owner', 'flow', request)).toMatchObject({ status: 'cancelled' });
-    expect(await f.service.reconcile()).toBe(0);
-    expect(f.execution.poll).not.toHaveBeenCalled(); expect(f.execution.dispatch).toHaveBeenCalledTimes(1);
+  it('rejects substituted poll YAML or draft ID', async () => {
+    const f = coreFixture(), { prepared, context } = await f.prepare();
+    await expect(f.service.get('owner', 'flow', prepared.draftId, { ...context, currentYaml: overlayYaml + '\n' })).rejects.toMatchObject({ code: 'IDEMPOTENCY_CONFLICT' });
+    await expect(f.service.get('owner', 'flow', draftRequest().requestId, context)).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    expect(f.execution.poll).not.toHaveBeenCalled();
   });
-  it('returns a complete candidate only from a completed provider result', async () => {
-    const f = await fixture(), task = await f.service.create('owner', 'flow', draftRequest());
-    f.advance(16_000);
-    expect(await f.service.get('owner', 'flow', task.draftId)).toMatchObject({ status: 'running' });
-    f.setResult({ yaml: overlayYaml.replace('Unsaved', 'Generated'), summary: 'Improved' }); f.advance(16_000);
-    expect(await f.service.get('owner', 'flow', task.draftId)).toMatchObject({ status: 'completed', result: { summary: 'Improved' } });
-    expect(await f.service.cancel('owner', 'flow', task.draftId)).toMatchObject({ status: 'completed' });
+  it('isolates actor/workflow and checks live permission on every operation', async () => {
+    const f = coreFixture(), { request, prepared, context } = await f.prepare();
+    for (const [actor, workflow] of [['other-editor', 'flow'], ['owner', 'other-flow']]) {
+      await expect(f.service.create(actor, workflow, request)).rejects.toBeDefined();
+      await expect(f.service.get(actor, workflow, prepared.draftId, context)).rejects.toMatchObject({ code: 'NOT_FOUND' });
+      await expect(f.service.cancel(actor, workflow, prepared.draftId, { receipt: context.receipt })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    }
+    f.revoke();
+    for (const run of [() => f.service.capabilities('owner', 'flow'), () => f.service.prepare('owner', 'flow', draftRequest()),
+      () => f.service.create('owner', 'flow', request), () => f.service.get('owner', 'flow', prepared.draftId, context),
+      () => f.service.cancel('owner', 'flow', prepared.draftId, { receipt: context.receipt })]) await expect(run()).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    expect(f.execution.dispatch).not.toHaveBeenCalled(); expect(f.execution.poll).not.toHaveBeenCalled();
   });
-  it.each(['BAAS_EXECUTION_FAILED', 'secret=hidden'])(
-    'maps provider failure without fabricating YAML or exposing raw diagnostics: %s', async error => {
-      const f = await fixture(), task = await f.service.create('owner', 'flow', draftRequest());
-      vi.mocked(f.execution.poll).mockResolvedValue({ status: 'failed', error }); f.advance(16_000);
-      const detail = await f.service.get('owner', 'flow', task.draftId);
-      expect(detail).toMatchObject({ status: 'failed', error: error === 'secret=hidden' ? 'GENERATION_FAILED' : error });
+  it.each(['', ' ', '*', 'unknown', ' owner', 'owner\n', '\ud800'])('rejects invalid actor %j', async actor => {
+    const f = coreFixture(); await expect(f.service.prepare(actor, 'flow', draftRequest())).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    expect(f.execution.resolveTarget).not.toHaveBeenCalled();
+  });
+  it('rechecks permission after slow target resolution', async () => {
+    const f = coreFixture(); vi.mocked(f.execution.resolveTarget).mockImplementation(async () => { f.revoke(); return { botId: targetBotId }; });
+    await expect(f.service.prepare('owner', 'flow', draftRequest())).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    expect(f.execution.dispatch).not.toHaveBeenCalled();
+  });
+  it('cancel is local acknowledgement only; later GET may still complete', async () => {
+    const f = coreFixture(), { prepared, context } = await f.prepare();
+    expect(await f.service.cancel('owner', 'flow', prepared.draftId, { receipt: context.receipt })).toMatchObject({ status: 'cancelled' });
+    expect(f.execution.poll).not.toHaveBeenCalled(); expect(f.execution.dispatch).not.toHaveBeenCalled();
+    f.setResult({ yaml: overlayYaml, summary: 'Late' });
+    expect(await createWorkflowAiDraftService(f.options).get('owner', 'flow', prepared.draftId, context)).toMatchObject({ status: 'completed' });
+  });
+  it('times out at receipt deadline without dispatch or poll', async () => {
+    const f = coreFixture(), { request, prepared, context } = await f.prepare(); f.advance(30 * 60_000);
+    expect(await f.service.create('owner', 'flow', request)).toMatchObject({ status: 'failed', error: 'EXECUTION_TIMEOUT' });
+    expect(await f.service.get('owner', 'flow', prepared.draftId, context)).toMatchObject({ status: 'failed', error: 'EXECUTION_TIMEOUT' });
+    expect(f.execution.dispatch).not.toHaveBeenCalled(); expect(f.execution.poll).not.toHaveBeenCalled();
+  });
+  it('treats 404/transport errors as running and later recovers', async () => {
+    const f = coreFixture(), { prepared, context } = await f.prepare();
+    vi.mocked(f.execution.poll).mockRejectedValueOnce(Object.assign(new Error('private-token'), { status: 404 })).mockRejectedValueOnce(new Error('private-token'));
+    for (let i = 0; i < 2; i++) expect(await f.service.get('owner', 'flow', prepared.draftId, context)).toMatchObject({ status: 'running' });
+    f.setResult({ yaml: overlayYaml, summary: 'Recovered' });
+    expect(await f.service.get('owner', 'flow', prepared.draftId, context)).toMatchObject({ status: 'completed' });
+    expect(f.execution.dispatch).not.toHaveBeenCalled();
+  });
+  it.each(['BAAS_AUTH_FAILED', 'BAAS_GENERATION_FAILED', 'BAAS_PROVIDER_REJECTED', 'BAAS_EXECUTION_FAILED', 'SECRET_UPPERCASE', 'secret=hidden'])(
+    'sanitizes provider failure: %s', async error => {
+      const f = coreFixture(), { prepared, context } = await f.prepare(); vi.mocked(f.execution.poll).mockResolvedValue({ status: 'failed', error });
+      const detail = await f.service.get('owner', 'flow', prepared.draftId, context);
+      expect(detail).toMatchObject({ status: 'failed', error: error.startsWith('BAAS_') ? error : 'GENERATION_FAILED' });
       expect(detail.result).toBeUndefined();
     });
-  it('retries transient poll failures within the execution deadline without resubmitting', async () => {
-    const f = await fixture(), task = await f.service.create('owner', 'flow', draftRequest());
-    vi.mocked(f.execution.poll).mockRejectedValue(new Error('token=secret')); f.advance(16_000);
-    expect(await f.service.get('owner', 'flow', task.draftId)).toMatchObject({ status: 'running' });
-    f.advance(30 * 60_000);
-    expect(await f.service.get('owner', 'flow', task.draftId)).toMatchObject({ status: 'failed', error: 'EXECUTION_TIMEOUT' });
-    expect(f.execution.poll).toHaveBeenCalledTimes(1); expect(f.execution.dispatch).toHaveBeenCalledTimes(1);
+  it('sanitizes invalid-result exceptions and malformed provider statuses', async () => {
+    const f = coreFixture(), { prepared, context } = await f.prepare();
+    vi.mocked(f.execution.poll).mockRejectedValueOnce(new WorkflowAiDraftInvalidResultError('private-secret'));
+    expect(await f.service.get('owner', 'flow', prepared.draftId, context)).toMatchObject({ status: 'failed', error: 'INVALID_GENERATION_RESULT' });
+    vi.mocked(f.execution.poll).mockResolvedValue({ status: 'unknown' } as never);
+    expect(await f.service.get('owner', 'flow', prepared.draftId, context)).toMatchObject({ status: 'failed', error: 'INVALID_GENERATION_RESULT' });
   });
-  it('terminally rejects invalid provider result evidence', async () => {
-    const f = await fixture(), task = await f.service.create('owner', 'flow', draftRequest());
-    vi.mocked(f.execution.poll).mockRejectedValue(new WorkflowAiDraftInvalidResultError('private diagnostic')); f.advance(16_000);
-    expect(await f.service.get('owner', 'flow', task.draftId)).toMatchObject({ status: 'failed', error: 'INVALID_GENERATION_RESULT' });
-  });
-  it('keeps full UTF8 YAML beyond 8KB and enforces exact byte/prompt/schema limits', async () => {
-    const f = await fixture();
-    const large = overlayYaml + 'description: ' + '大'.repeat(20_000) + '\n';
-    const task = await f.service.create('owner', 'flow', { ...draftRequest(), currentYaml: large });
-    f.setResult({ yaml: large, summary: 'Full YAML' }); f.advance(16_000);
-    expect((await f.service.get('owner', 'flow', task.draftId)).result?.yaml).toBe(large);
+  it('preserves large UTF8 YAML and enforces byte/prompt/schema limits', async () => {
+    const f = coreFixture(), large = overlayYaml + 'description: ' + '大'.repeat(20_000) + '\n';
+    const { request, prepared, context } = await f.prepare({ ...draftRequest(), currentYaml: large });
+    await f.service.create('owner', 'flow', request); f.setResult({ yaml: large, summary: 'Full YAML' });
+    expect((await f.service.get('owner', 'flow', prepared.draftId, context)).result?.yaml).toBe(large);
     for (const change of [{ currentYaml: overlayYaml + 'description: ' + '大'.repeat(40_000) }, { prompt: 'x'.repeat(4001) },
       { currentYaml: overlayYaml.replace('id: flow', 'id: other') }, { currentYaml: 'id: flow\nnodes: []' }, { requestId: 'not-a-uuid' },
-      { currentYaml: overlayYaml + '\ud800' }]) await expect(f.service.create('owner', 'flow', { ...draftRequest(), ...change })).rejects.toBeDefined();
+      { currentYaml: overlayYaml + '\ud800' }]) await expect(f.service.prepare('owner', 'flow', { ...draftRequest(), ...change })).rejects.toBeDefined();
   });
   it.each([
     { yaml: overlayYaml.replace('version: 7', 'version: 8'), summary: 'Changed version' },
     { yaml: overlayYaml.replace('version: 7', 'version: "7"'), summary: 'Changed version type' },
     { yaml: overlayYaml.replace('id: flow', 'id: other'), summary: 'Changed identity' },
     { yaml: 'id: flow\nversion: 7\nnodes: []\n', summary: 'Invalid schema' },
-    { yaml: overlayYaml, summary: '\ud800' }, { yaml: overlayYaml, summary: 'x'.repeat(4001) },
-    { yaml: overlayYaml, summary: 'nul\0summary' },
-  ])('rejects invalid output or summary: $summary', async result => {
-    const f = await fixture(), task = await f.service.create('owner', 'flow', draftRequest());
-    f.setResult(result); f.advance(16_000);
-    expect(await f.service.get('owner', 'flow', task.draftId)).toMatchObject({ status: 'failed', error: 'INVALID_GENERATION_RESULT' });
+    { yaml: overlayYaml, summary: '\ud800' }, { yaml: overlayYaml, summary: 'x'.repeat(4001) }, { yaml: overlayYaml, summary: 'nul\0summary' },
+  ])('rejects invalid output: $summary', async result => {
+    const f = coreFixture(), { prepared, context } = await f.prepare(); f.setResult(result);
+    expect(await f.service.get('owner', 'flow', prepared.draftId, context)).toMatchObject({ status: 'failed', error: 'INVALID_GENERATION_RESULT' });
   });
-  it('reports missing provider or Bot binding honestly and does not store or dispatch', async () => {
-    const f = await fixture();
-    const disabled = createWorkflowAiDraftService({ ...f.options, execution: undefined, unavailableReason: 'AUTO_HEAL_DISABLED' });
-    expect(await disabled.capabilities('owner', 'flow')).toEqual({ available: false, reason: 'AUTO_HEAL_DISABLED' });
-    await expect(disabled.create('owner', 'flow', draftRequest())).rejects.toMatchObject({ code: 'CAPABILITY_UNAVAILABLE' });
+  it('requires receipt/provider wiring and resolves only server readiness, never SQL', async () => {
+    const f = coreFixture(), disabled = createWorkflowAiDraftService({ ...f.options, receipts: undefined });
+    expect(await disabled.capabilities('owner', 'flow')).toEqual({ available: false, reason: 'AI_DRAFT_RECOVERY_UNAVAILABLE' });
+    await expect(disabled.prepare('owner', 'flow', draftRequest())).rejects.toMatchObject({ code: 'CAPABILITY_UNAVAILABLE', message: 'AI_DRAFT_RECOVERY_UNAVAILABLE' });
+    const noProvider = createWorkflowAiDraftService({ ...f.options, execution: undefined, unavailableReason: 'AUTO_HEAL_DISABLED' });
+    expect(await noProvider.capabilities('owner', 'flow')).toEqual({ available: false, reason: 'AUTO_HEAL_DISABLED' });
     vi.mocked(f.execution.resolveTarget).mockRejectedValue(new Error('https://private?token=secret'));
     expect(await f.service.capabilities('owner', 'flow')).toEqual({ available: false, reason: 'AUTO_HEAL_BOT_UNAVAILABLE' });
-    await expect(f.service.create('owner', 'flow', draftRequest())).rejects.toMatchObject({ code: 'CAPABILITY_UNAVAILABLE', message: 'AUTO_HEAL_BOT_UNAVAILABLE' });
-    expect(f.raw.prepare('SELECT COUNT(*) AS n FROM workflow_ai_drafts').get()).toEqual({ n: 0 });
-    expect(f.execution.dispatch).not.toHaveBeenCalled();
+    await expect(f.service.prepare('owner', 'flow', draftRequest())).rejects.toMatchObject({ code: 'CAPABILITY_UNAVAILABLE', message: 'AUTO_HEAL_BOT_UNAVAILABLE' });
   });
-  it.each(['', ' ', ' bot:owner', 'bot:owner\n', '\ud800'])(
-    'does not advertise or dispatch an invalid resolved Bot binding', async botId => {
-      const f = await fixture(); vi.mocked(f.execution.resolveTarget).mockResolvedValue({ botId });
-      expect(await f.service.capabilities('owner', 'flow')).toEqual({ available: false, reason: 'AUTO_HEAL_BOT_UNAVAILABLE' });
-      await expect(f.service.create('owner', 'flow', draftRequest())).rejects.toMatchObject({ code: 'CAPABILITY_UNAVAILABLE' });
-      expect(f.execution.dispatch).not.toHaveBeenCalled();
-    });
-  it('refuses generation when durable storage is unavailable', async () => {
-    const f = await fixture();
-    const service = createWorkflowAiDraftService({ ...f.options, db: { ...f.db, dbType: 'noop' } as IDatabase });
-    expect(await service.capabilities('owner', 'flow')).toEqual({ available: false, reason: 'AI_DRAFT_STORAGE_UNAVAILABLE' });
-    expect(f.execution.resolveTarget).not.toHaveBeenCalled();
+  it.each(['', ' ', ' bot:owner', 'bot:owner\n', '\ud800'])('refuses invalid server binding %j', async botId => {
+    const f = coreFixture(); vi.mocked(f.execution.resolveTarget).mockResolvedValue({ botId });
+    expect(await f.service.capabilities('owner', 'flow')).toEqual({ available: false, reason: 'AUTO_HEAL_BOT_UNAVAILABLE' });
+    await expect(f.service.prepare('owner', 'flow', draftRequest())).rejects.toMatchObject({ code: 'CAPABILITY_UNAVAILABLE' });
   });
-  it('propagates persistence errors instead of returning successful terminal state', async () => {
-    const f = await fixture(), task = await f.service.create('owner', 'flow', draftRequest());
-    const broken = { ...f.db, dbType: f.db.dbType, dialect: f.db.dialect, query: f.db.query.bind(f.db),
-      exec: vi.fn(async (sql: string, params?: unknown[]) => { if (sql.includes('result_json')) throw new Error('write failed'); return f.db.exec(sql, params); }) } as unknown as IDatabase;
-    f.setResult({ yaml: overlayYaml, summary: 'Result' }); f.advance(16_000);
-    await expect(createWorkflowAiDraftService({ ...f.options, db: broken }).get('owner', 'flow', task.draftId)).rejects.toThrow('write failed');
-    expect(f.raw.prepare('SELECT status FROM workflow_ai_drafts').get()).toEqual({ status: 'running' });
+  it('does not honor browser-provided target/authority fields', async () => {
+    const f = coreFixture(), request = { ...draftRequest(), botId: 'attacker', target: { botId: 'attacker' } };
+    const p = await f.service.prepare('owner', 'flow', request); await f.service.create('owner', 'flow', { ...request, receipt: p.receipt });
+    expect(vi.mocked(f.execution.dispatch).mock.calls[0][0].envelope.target).toEqual({ botId: targetBotId });
   });
-  it('bounds acknowledgement CAS conflicts without reopening dispatch', async () => {
-    const f = await fixture(), request = draftRequest();
-    const update = WorkflowAiDraftRepository.prototype.update;
-    const spy = vi.spyOn(WorkflowAiDraftRepository.prototype, 'update').mockImplementation(function (row, patch, at) {
-      return Object.hasOwn(patch, 'job_id') ? Promise.resolve(false) : update.call(this, row, patch, at);
-    });
-    try {
-      await expect(f.service.create('owner', 'flow', request)).rejects.toMatchObject({ code: 'STATE_CONFLICT' });
-      expect(f.execution.dispatch).toHaveBeenCalledTimes(1);
-      expect(spy.mock.calls.filter(([, patch]) => Object.hasOwn(patch, 'job_id'))).toHaveLength(8);
-      expect(await f.service.create('owner', 'flow', request)).toMatchObject({ status: 'dispatch_uncertain' });
-      expect(f.execution.dispatch).toHaveBeenCalledTimes(1);
-    } finally { spy.mockRestore(); }
-  });
-  it('bounds cancel CAS conflicts without falsely claiming terminal', async () => {
-    const f = await fixture(), task = await f.service.create('owner', 'flow', draftRequest());
-    const spy = vi.spyOn(WorkflowAiDraftRepository.prototype, 'update').mockResolvedValue(false);
-    try {
-      await expect(f.service.cancel('owner', 'flow', task.draftId)).rejects.toMatchObject({ code: 'STATE_CONFLICT' });
-      expect(spy).toHaveBeenCalledTimes(8);
-      expect(f.raw.prepare('SELECT status FROM workflow_ai_drafts').get()).toEqual({ status: 'running' });
-    } finally { spy.mockRestore(); }
-    expect(await f.service.cancel('owner', 'flow', task.draftId)).toMatchObject({ status: 'cancelled' });
-  });
+});
+
+it('never emits signing secrets, provider diagnostics, prompts or YAML to logs/errors', async () => {
+  const logs = ['log', 'error', 'warn', 'info', 'debug'].map(method => vi.spyOn(console, method as 'log').mockImplementation(() => {}));
+  try {
+    const f = coreFixture(), { request, prepared, context } = await f.prepare();
+    vi.mocked(f.execution.dispatch).mockRejectedValue(new Error('private-token-secret ' + overlayYaml));
+    expect(await f.service.create('owner', 'flow', request)).toEqual({ draftId: prepared.draftId, status: 'dispatch_uncertain' });
+    vi.mocked(f.execution.poll).mockRejectedValue(new WorkflowAiDraftInvalidResultError('private-token-secret ' + overlayYaml));
+    const detail = await f.service.get('owner', 'flow', prepared.draftId, context);
+    expect(detail).toMatchObject({ status: 'failed', error: 'INVALID_GENERATION_RESULT' });
+    expect(JSON.stringify(detail)).not.toContain('private-token-secret');
+    expect(JSON.stringify(detail)).not.toContain(overlayYaml);
+    for (const log of logs) expect(log).not.toHaveBeenCalled();
+  } finally { logs.forEach(log => log.mockRestore()); }
 });

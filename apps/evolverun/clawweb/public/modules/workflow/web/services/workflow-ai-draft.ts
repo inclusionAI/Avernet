@@ -1,5 +1,5 @@
 import type { WorkflowSpec } from '@avernet/clawweb-shared/web/types'
-import { workflowAiApi, type WorkflowAiTask } from '../api/workflow-ai'
+import { workflowAiApi, type WorkflowAiPrepared, type WorkflowAiTask } from '../api/workflow-ai'
 import {
   assertWorkflowAiSpec, describeWorkflowAiChanges, parseWorkflowAiYaml,
   restoreLayout, workflowAiYaml, workflowSpecSignature, type WorkflowAiChange,
@@ -32,6 +32,19 @@ function candidateCheck<T>(check: () => T): T {
   catch (cause) { throw new WorkflowAiCandidateError(cause instanceof Error ? cause.message : 'AI 草稿无效') }
 }
 
+function validContextValue(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0 && value === value.trim()
+}
+
+function assertPrepared(prepared: WorkflowAiPrepared, digest: string | null) {
+  if (!validContextValue(prepared?.draftId) || !validContextValue(prepared?.receipt)) {
+    throw new WorkflowAiCandidateError('服务器未返回有效 AI 草稿任务 ID 或恢复凭据；未派发生成请求')
+  }
+  if (typeof prepared.inputSpecDigest !== 'string' || !/^[a-f0-9]{64}$/.test(prepared.inputSpecDigest) || digest !== null && prepared.inputSpecDigest !== digest) {
+    throw new WorkflowAiCandidateError('AI 草稿准备响应的输入 YAML 摘要不匹配；未派发生成请求')
+  }
+}
+
 function assertTask(task: WorkflowAiTask, workflowId: string, attempt: WorkflowAiAttempt, digest: string | null) {
   if (task?.draftId !== attempt.draftId || task?.workflowId !== workflowId) {
     throw new WorkflowAiCandidateError('AI 草稿任务或工作流不匹配；未接受草稿')
@@ -44,7 +57,7 @@ function assertTask(task: WorkflowAiTask, workflowId: string, attempt: WorkflowA
 /** No client-authored instructions, local templates, or save/deploy/run side effects. */
 export async function generateWorkflowAiDraft(
   mode: WorkflowAiMode, prompt: string, source: WorkflowSpec, signal?: AbortSignal,
-  attempt: WorkflowAiAttempt & { submitted?: boolean } = createWorkflowAiAttempt(),
+  attempt: WorkflowAiAttempt = createWorkflowAiAttempt(),
 ): Promise<WorkflowAiDraft> {
   if (!prompt.trim()) throw new WorkflowAiCandidateError('请输入想增加或修改的工作流能力')
   if ([...prompt].length > 4000) throw new WorkflowAiCandidateError('需求描述不能超过 4000 字符')
@@ -53,16 +66,17 @@ export async function generateWorkflowAiDraft(
   if (new TextEncoder().encode(currentYaml).byteLength > 100_000) throw new WorkflowAiCandidateError('当前 YAML 超过生成服务的 100000 UTF-8 字节限制，请先缩小工作流范围')
   const controller = new AbortController()
   let cancelSent = false
-  let submissionStarted = Boolean(attempt.draftId || attempt.submitted)
+  const recovering = Boolean(attempt.draftId || attempt.receipt || attempt.submitted)
+  let submissionStarted = recovering
   const cancelRemote = () => {
-    if (!attempt.draftId || cancelSent) return
+    if (!attempt.draftId || !attempt.receipt || cancelSent) return
     cancelSent = true
     void cancelWorkflowAiAttempt(baseline.id, attempt)
   }
   const cancel = () => controller.abort(signal?.reason)
   signal?.addEventListener('abort', cancel, { once: true })
   if (signal?.aborted) cancel()
-  const timeout = setTimeout(() => controller.abort(new Error('生成等待已超过 15 分钟：已停止本地等待并尽力向服务器记录取消；BaaS 无支持的停止接口，远端任务可能继续，未修改原工作流')), 15 * 60_000)
+  const timeout = setTimeout(() => controller.abort(new Error(`生成等待已超过 15 分钟：已停止本地等待并阻止应用；${submissionStarted ? '取消仅限本地，BaaS 无支持的停止接口，远端任务可能继续，未修改原工作流' : '尚未派发生成请求，可显式重试准备，未修改原工作流'}`)), 15 * 60_000)
   const requestSignal = controller.signal
   requestSignal.addEventListener('abort', cancelRemote, { once: true })
   const wait = <T,>(promise: Promise<T>) => abortable(promise, requestSignal)
@@ -70,43 +84,71 @@ export async function generateWorkflowAiDraft(
     requestSignal.throwIfAborted()
     const digest = await wait(workflowAiInputDigest(currentYaml))
     requestSignal.throwIfAborted()
-    if (!attempt.draftId) {
+    if (recovering) {
+      if (!validContextValue(attempt.draftId) || !validContextValue(attempt.receipt)) {
+        throw new WorkflowAiRecoveryError('旧 AI 草稿请求上下文缺少有效恢复凭据或任务 ID，无法恢复；不会准备或派发替代请求。请先核对原 BaaS 消息状态。', attempt)
+      }
+      // Known receipts recover by polling only, even after capabilities change.
+    } else {
       const capabilities = await wait(readWorkflowAiCapabilities(baseline.id, requestSignal))
       requestSignal.throwIfAborted()
       if (!capabilities.available) throw new Error(describeWorkflowAiUnavailable(capabilities.reason))
+      const input = { requestId: attempt.requestId, mode, prompt, currentYaml }
       try {
-        submissionStarted = true
-        attempt.submitted = true // Client-only fence; never included in the HTTP body.
-        const submission = workflowAiApi.generate(baseline.id, { requestId: attempt.requestId, mode, prompt, currentYaml }, requestSignal)
-          .then(submitted => {
-            if (typeof submitted?.draftId !== 'string' || !submitted.draftId) throw new Error('服务器未返回有效 AI 草稿任务 ID')
-            attempt.draftId = submitted.draftId
-            if (requestSignal.aborted) cancelRemote()
-            return submitted
-          })
-        await wait(submission)
+        const preparation = workflowAiApi.prepare(baseline.id, input, requestSignal).then(prepared => {
+          assertPrepared(prepared, digest)
+          if (requestSignal.aborted) {
+            // A late prepare did not send anything. Do not overwrite a newer
+            // explicit prepare retry sharing this attempt. Never dispatch here.
+            void cancelWorkflowAiAttempt(baseline.id, { requestId: attempt.requestId, draftId: prepared.draftId, receipt: prepared.receipt })
+            return prepared
+          }
+          // Preserve the receipt in this same in-memory attempt BEFORE any create.
+          if (!attempt.draftId && !attempt.receipt && !attempt.submitted) {
+            attempt.draftId = prepared.draftId
+            attempt.receipt = prepared.receipt
+          }
+          return prepared
+        })
+        await wait(preparation)
       } catch (cause) {
         requestSignal.throwIfAborted()
-        const status = (cause as { status?: number })?.status
-        if (status >= 400 && status < 500) throw cause
-        throw new WorkflowAiRecoveryError('BaaS 提交结果不确定：BaaS 可能已接收消息，远端任务可能继续。请恢复本次请求（复用 requestId），不会重复派发。', attempt)
+        if (cause instanceof WorkflowAiCandidateError) throw cause
+        throw new Error(`AI 草稿准备失败：尚未派发生成请求，可显式重试准备。${cause instanceof Error ? ` ${describeWorkflowAiError(cause.message)}` : ''}`)
+      }
+      requestSignal.throwIfAborted()
+      if (!attempt.submitted) {
+        // This is the only dispatch site. Recovery never calls create again.
+        submissionStarted = true
+        attempt.submitted = true
+        try {
+          const submitted = await wait(workflowAiApi.generate(baseline.id, { ...input, receipt: attempt.receipt! }, requestSignal))
+          requestSignal.throwIfAborted()
+          if (submitted?.draftId !== attempt.draftId) throw new Error('服务器返回的 AI 草稿任务 ID 不匹配')
+          if (submitted.status === 'failed') throw new WorkflowAiCandidateError(describeWorkflowAiError(submitted.error) || 'BaaS 明确拒绝本次请求；未接受草稿')
+          if (!['pending', 'running', 'dispatch_uncertain'].includes(submitted.status)) throw new Error('AI 草稿服务返回未知提交状态')
+        } catch (cause) {
+          requestSignal.throwIfAborted()
+          if (cause instanceof WorkflowAiCandidateError) throw cause
+          throw new WorkflowAiRecoveryError(`AI 草稿请求未确认：BaaS 可能已接收消息，远端任务可能继续。已保留恢复凭据和任务 ID；请恢复查询同一任务，不会重复派发。${cause instanceof Error ? ` ${cause.message}` : ''}`, attempt)
+        }
       }
     }
     for (;;) {
       requestSignal.throwIfAborted()
       let task: WorkflowAiTask
-      try { task = await wait(workflowAiApi.poll(baseline.id, attempt.draftId, requestSignal)) }
+      try { task = await wait(workflowAiApi.poll(baseline.id, attempt.draftId!, { receipt: attempt.receipt!, currentYaml }, requestSignal)) }
       catch (cause) {
         requestSignal.throwIfAborted()
         throw new WorkflowAiRecoveryError(`AI 草稿任务状态读取失败；请恢复查询同一任务，不会重新生成。${cause instanceof Error ? ` ${cause.message}` : ''}`, attempt)
       }
       requestSignal.throwIfAborted()
       assertTask(task, baseline.id, attempt, digest)
-      if (task.status === 'dispatch_uncertain') {
-        throw new WorkflowAiRecoveryError('BaaS 派发结果不确定：BaaS 可能已接收消息，远端任务可能继续。请恢复查询同一任务或取消；不会再次派发，也不会生成替代模板。', attempt)
+      if (task.status === 'running' && task.error) {
+        throw new WorkflowAiRecoveryError(`原任务查询暂不可用；请恢复查询同一任务，不会重新生成。${describeWorkflowAiError(task.error)}`, attempt)
       }
       if (task.status === 'failed') throw new WorkflowAiCandidateError(describeWorkflowAiError(task.error) || 'AI 草稿生成失败，请调整需求后重试')
-      if (task.status === 'cancelled') throw new WorkflowAiCandidateError('AI 草稿任务已在服务器记录为取消：本地停止等待并阻止应用；BaaS 无支持的停止接口，远端任务可能继续，原工作流未修改')
+      if (task.status === 'cancelled') throw new WorkflowAiCandidateError('AI 草稿已取消本地等待并阻止应用；取消不会持久记录，BaaS 无支持的停止接口，远端任务可能继续，原工作流未修改')
       if (task.status === 'completed') {
         const parsed = candidateCheck(() => parseWorkflowAiYaml(task.result?.yaml ?? '', baseline))
         let validation: Awaited<ReturnType<typeof workflowAiApi.validate>>
@@ -132,7 +174,7 @@ export async function generateWorkflowAiDraft(
           warnings: (validation.issues ?? []).filter(issue => issue.severity === 'warning').map(issue => `${issue.path}: ${issue.message}`),
         }
       }
-      if (task.status !== 'pending' && task.status !== 'running') throw new WorkflowAiCandidateError('AI 草稿服务返回未知状态')
+      if (task.status !== 'pending' && task.status !== 'running' && task.status !== 'dispatch_uncertain') throw new WorkflowAiCandidateError('AI 草稿服务返回未知状态')
       await delay(requestSignal)
     }
   } catch (cause) {

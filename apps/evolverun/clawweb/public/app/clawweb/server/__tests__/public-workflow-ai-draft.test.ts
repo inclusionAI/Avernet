@@ -9,6 +9,7 @@ const state = vi.hoisted(() => ({ db: null as IDatabase | null, reconcile: vi.fn
 vi.mock('@avernet/clawweb-shared/server/db', async original => ({
   ...await original<typeof import('@avernet/clawweb-shared/server/db')>(),
   initDatabase: async () => ({ db: state.db }), closeDatabase: () => state.close(),
+  resolveBaasConfig: () => ({ apiKey: "baas-test", iamtoken: "", baseUrl: "http://provider.example.invalid" }),
 }));
 vi.mock('@avernet/clawevolve', async () => {
   const { Router } = await import('express');
@@ -32,7 +33,7 @@ afterEach(async () => {
   await state.db?.close(); state.db = null;
   vi.restoreAllMocks(); vi.unstubAllEnvs(); state.close.mockReset(); state.reconcile.mockReset();
 });
-it('mounts the public capability route independently from Repair, enforces verified principal/ACL, and drains timer before DB close', async () => {
+it('mounts the public capability route independently from Repair, enforces verified principal/ACL, and adds no draft table or AI reconciliation timer', async () => {
   const db = new SqliteDatabase(new Database(':memory:')); state.db = db;
   await runMigrations(db, 'sqlite');
   await db.exec(`INSERT INTO workflow_specs (workflow_id, pack_id, spec_json, title, owner_id, gmt_create, gmt_modified)
@@ -62,12 +63,13 @@ it('mounts the public capability route independently from Repair, enforces verif
   expect((await fetch(url, { headers: { cookie: 'userId=editor' } })).status).toBe(401);
   expect((await fetch(url, { headers: { origin: 'https://evil.example' } })).status).toBe(403);
   expect((await fetch(url)).status).toBe(200); // fixed local developer admin
-  let release!: () => void;
-  state.reconcile.mockImplementation(() => new Promise<number>(resolve => { release = () => resolve(0); }));
-  timers[0](); expect(state.reconcile).toHaveBeenCalledTimes(1);
-  const stopped = lifecycle!.stop!();
-  await new Promise(resolve => setTimeout(resolve, 20));
-  expect(state.close).not.toHaveBeenCalled();
-  release(); await stopped; lifecycle = undefined;
+  // The existing repair monitor still owns its own 15-second interval.
+  // It must not scan or dispatch any Editor AI task.
+  expect(timers).toHaveLength(1);
+  timers[0]();
+  await new Promise(resolve => setImmediate(resolve));
+  expect(state.reconcile).not.toHaveBeenCalled();
+  expect(await db.query("SELECT name FROM sqlite_master WHERE name = 'workflow_ai_drafts'")).toEqual([]);
+  await lifecycle!.stop!(); lifecycle = undefined;
   expect(state.close).toHaveBeenCalledTimes(1);
 });

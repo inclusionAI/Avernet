@@ -1,4 +1,4 @@
-import { act, cleanup, renderHook } from '@testing-library/react'
+import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
 import { createHash, webcrypto } from 'node:crypto'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { stringify } from 'yaml'
@@ -11,7 +11,8 @@ const source: WorkflowSpec = { id: 'validation-recovery', title: 'Source', versi
 const candidate: WorkflowSpec = { ...source, title: 'AI draft' }
 const draftsPath = `/api/workflows/${source.id}/ai-drafts`
 const draftId = 'completed-draft'
-const taskPath = `${draftsPath}/${draftId}`
+const taskPath = `${draftsPath}/${draftId}/poll`
+const receipt = 'signed-receipt'
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status })
 const http = vi.fn()
 let currentYaml: string
@@ -23,11 +24,11 @@ beforeEach(() => {
   vi.stubGlobal('crypto', webcrypto)
   vi.stubGlobal('fetch', http)
 })
-afterEach(() => { cleanup(); vi.unstubAllGlobals() })
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks() })
 
 type TransportFailure =
   | { kind: 'validation'; failure: 'disconnect' | '503' | 'auth' | 'rate-limit' | 'invalid-yaml' | 'validation-rejection' | 'invalid-normalized-spec' | '422'; status?: 401 | 403 | 429 }
-  | { kind: 'submission'; failure: 'lost-ack' | 'capability-transport' | 'capability-unavailable' }
+  | { kind: 'submission'; failure: 'lost-ack' | 'lost-ack-503' | 'capability-transport' | 'capability-unavailable' }
 
 /** The hook, service and `workflowAiApi` remain real; only the HTTP boundary is synthetic. */
 function configureTransport(value: TransportFailure) {
@@ -38,16 +39,26 @@ function configureTransport(value: TransportFailure) {
       if (value.kind === 'submission' && value.failure === 'capability-unavailable' && capabilityReads === 2) return json({ available: false, reason: 'AUTO_HEAL_BOT_UNAVAILABLE' })
       return json({ available: true })
     }
+    if (url === `${draftsPath}/prepare` && init.method === 'POST') {
+      currentYaml = JSON.parse(String(init.body)).currentYaml
+      return json({ draftId, receipt, inputSpecDigest: createHash('sha256').update(currentYaml, 'utf8').digest('hex') })
+    }
     if (url === draftsPath && init.method === 'POST') {
       currentYaml = JSON.parse(String(init.body)).currentYaml
-      if (value.kind === 'submission' && submissions().length === 1) throw new TypeError('lost submission acknowledgment')
+      if (value.kind === 'submission' && submissions().length === 1) {
+        if (value.failure === 'lost-ack-503') return json({ error: 'lost create ack' }, 503)
+        throw new TypeError('lost submission acknowledgment')
+      }
       return json({ draftId, status: 'pending' })
     }
-    if (url === taskPath) return json({
+    if (url === taskPath && init.method === 'POST') {
+      expect(JSON.parse(String(init.body))).toEqual({ receipt, currentYaml })
+      return json({
       draftId, workflowId: source.id, status: 'completed',
       inputSpecDigest: createHash('sha256').update(currentYaml, 'utf8').digest('hex'),
       result: { yaml: value.kind === 'validation' && value.failure === 'invalid-yaml' ? 'null' : stringify(candidate), summary: 'Completed draft' },
-    })
+      })
+    }
     if (url === '/api/workflows/validate' && init.method === 'POST') {
       validations += 1
       const first = validations === 1
@@ -74,7 +85,7 @@ async function start() {
 const submissions = () => http.mock.calls.filter(([url, init]) => url === draftsPath && init.method === 'POST')
 
 describe('real hook/service duplicate-BaaS recovery', () => {
-  it.each(['capability-transport', 'capability-unavailable'] as const)('keeps the same submitted requestId when interrupted recovery fails readiness with %s', async failure => {
+  it.each(['lost-ack', 'lost-ack-503', 'capability-transport', 'capability-unavailable'] as const)('recovers %s with one prepare and one create, bypassing new capability checks', async failure => {
     configureTransport({ kind: 'submission', failure })
     const hook = renderHook(() => useWorkflowAiDraft(true, 'modify', source))
     act(() => hook.result.current.changePrompt('  原始需求\n'))
@@ -82,23 +93,21 @@ describe('real hook/service duplicate-BaaS recovery', () => {
     await act(async () => { await hook.result.current.generate() })
     expect(hook.result.current.recoverable).toBe(true)
     expect(submissions()).toHaveLength(1)
-    const first = String(submissions()[0][1].body)
-    const firstBody = JSON.parse(first)
-    expect(Object.keys(firstBody)).toEqual(['requestId', 'mode', 'prompt', 'currentYaml'])
-
-    await act(async () => { await hook.result.current.generate() })
-    expect(hook.result.current.recoverable).toBe(true)
-    expect(hook.result.current.error).toContain('AI 草稿')
-    expect(submissions()).toHaveLength(1)
+    const firstBody = JSON.parse(String(submissions()[0][1].body))
+    expect(Object.keys(firstBody)).toEqual(['requestId', 'mode', 'prompt', 'currentYaml', 'receipt'])
+    expect(firstBody.receipt).toBe(receipt)
 
     await act(async () => { await hook.result.current.generate() })
     expect(hook.result.current.recoverable).toBe(false)
+    expect(hook.result.current.error).toBeNull()
     expect(hook.result.current.result?.draft.spec).toEqual(candidate)
-    expect(submissions()).toHaveLength(2)
-    const secondBody = JSON.parse(String(submissions()[1][1].body))
-    expect(secondBody).toEqual(firstBody)
-    expect(secondBody.requestId).toBe(firstBody.requestId)
-    expect(secondBody.prompt).toBe('  原始需求\n')
+    expect(submissions()).toHaveLength(1)
+    expect(http.mock.calls.filter(([url]) => url === `${draftsPath}/prepare`)).toHaveLength(1)
+    expect(capabilityReads).toBe(1)
+    expect(http.mock.calls.map(([url]) => url)).toEqual([
+      `${draftsPath}/capabilities`, `${draftsPath}/prepare`, draftsPath, taskPath, '/api/workflows/validate',
+    ])
+    expect(firstBody.prompt).toBe('  原始需求\n')
   })
 
   it.each([
@@ -121,7 +130,7 @@ describe('real hook/service duplicate-BaaS recovery', () => {
     expect(JSON.parse(String(submissions()[0][1].body)).requestId).toBe(originalRequestId)
     expect(validations).toBe(2)
     expect(http.mock.calls.map(([url]) => url)).toEqual([
-      `${draftsPath}/capabilities`, draftsPath, taskPath, '/api/workflows/validate', taskPath, '/api/workflows/validate',
+      `${draftsPath}/capabilities`, `${draftsPath}/prepare`, draftsPath, taskPath, '/api/workflows/validate', taskPath, '/api/workflows/validate',
     ])
   })
 
@@ -144,7 +153,7 @@ describe('real hook/service duplicate-BaaS recovery', () => {
     expect(submissions()).toHaveLength(1)
     expect(JSON.parse(String(submissions()[0][1].body)).requestId).toBe(originalSubmission.requestId)
     expect(http.mock.calls.map(([url]) => url)).toEqual([
-      `${draftsPath}/capabilities`, draftsPath, taskPath, '/api/workflows/validate', taskPath, '/api/workflows/validate',
+      `${draftsPath}/capabilities`, `${draftsPath}/prepare`, draftsPath, taskPath, '/api/workflows/validate', taskPath, '/api/workflows/validate',
     ])
     expect(validations).toBe(2)
     expect(source.title).toBe('Source')
@@ -160,4 +169,47 @@ describe('real hook/service duplicate-BaaS recovery', () => {
     expect(submissions()).toHaveLength(1)
     expect(validations).toBe(failure === 'invalid-yaml' ? 0 : 1)
   })
+})
+
+
+it.each(['close', 'workflow', 'spec', 'mode', 'prompt', 'cancel', 'context', 'unmount'] as const)('never dispatches a late prepare ack after real hook %s invalidation', async change => {
+  let acknowledge!: (response: Response) => void
+  const late = new Promise<Response>(resolve => { acknowledge = resolve })
+  const storage = vi.spyOn(Storage.prototype, 'setItem')
+  http.mockImplementation(async (url: string, init: RequestInit) => {
+    if (url === `${draftsPath}/capabilities`) return json({ available: true })
+    if (url === `${draftsPath}/prepare`) {
+      currentYaml = JSON.parse(String(init.body)).currentYaml
+      return late
+    }
+    if (url === `${draftsPath}/${draftId}/cancel`) return json({ draftId, status: 'cancelled' })
+    throw new Error(`Unexpected HTTP request: ${url}`)
+  })
+  const view = renderHook(({ open, spec, context }) => useWorkflowAiDraft(open, 'modify', spec, context), {
+    initialProps: { open: true, spec: source, context: 'initial' },
+  })
+  act(() => view.result.current.changePrompt('需求'))
+  let pending!: Promise<void>
+  act(() => { pending = view.result.current.generate() })
+  // Native SubtleCrypto completes off-thread; synchronize on the request, not one timer tick.
+  await waitFor(() => expect(http.mock.calls.some(([url]) => url === `${draftsPath}/prepare`)).toBe(true))
+  if (change === 'close') view.rerender({ open: false, spec: source, context: 'initial' })
+  if (change === 'workflow') view.rerender({ open: true, spec: { ...source, id: 'another-workflow' }, context: 'initial' })
+  if (change === 'spec') view.rerender({ open: true, spec: { ...source, title: 'Edited' }, context: 'initial' })
+  if (change === 'mode') act(() => view.result.current.changeMode('create'))
+  if (change === 'prompt') act(() => view.result.current.changePrompt('另一个请求'))
+  if (change === 'cancel') act(() => view.result.current.cancel())
+  if (change === 'context') view.rerender({ open: true, spec: source, context: 'changed' })
+  if (change === 'unmount') view.unmount()
+  await act(async () => {
+    acknowledge(json({ draftId, receipt, inputSpecDigest: createHash('sha256').update(currentYaml).digest('hex') }))
+    await pending
+    await new Promise(resolve => setTimeout(resolve, 0))
+  })
+  expect(submissions()).toHaveLength(0)
+  expect(http.mock.calls.some(([url]) => url === taskPath)).toBe(false)
+  expect(http.mock.calls.some(([url]) => url === '/api/workflows/validate')).toBe(false)
+  if (change !== 'unmount') expect(view.result.current.result).toBeNull()
+  expect(storage).not.toHaveBeenCalled()
+  storage.mockRestore()
 })

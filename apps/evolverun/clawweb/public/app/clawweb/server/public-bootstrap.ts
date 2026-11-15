@@ -239,14 +239,6 @@ export function createClawWebBootstrap(options: { sessionRecovery?: SessionRecov
         ...(aiDraftExecution ? { execution: aiDraftExecution } : { unavailableReason: "AUTO_HEAL_BAAS_NOT_CONFIGURED" }),
       });
       app.use("/api/workflows", aiDraftRuntime.router);
-      let aiDraftPollPending: Promise<void> | null = null;
-      const aiDraftPoll = aiDraftExecution ? setInterval(() => {
-        if (aiDraftPollPending) return;
-        aiDraftPollPending = aiDraftRuntime.monitor.reconcile().then(() => undefined).catch(() => {
-          console.warn('[clawweb] AI draft reconciliation failed; will retry');
-        }).finally(() => { aiDraftPollPending = null; });
-      }, 15_000) : undefined;
-      aiDraftPoll?.unref();
       let repairPollBusy = false;
       const repairPoll = setInterval(() => {
         if (repairPollBusy) return;
@@ -403,9 +395,7 @@ export function createClawWebBootstrap(options: { sessionRecovery?: SessionRecov
       return {
         stop: async () => {
           if (repairPoll) clearInterval(repairPoll);
-          if (aiDraftPoll) clearInterval(aiDraftPoll);
           await closeHttpServer(server);
-          await aiDraftPollPending;
           await clawevolve.stop();
           await closeDatabase();
         },
