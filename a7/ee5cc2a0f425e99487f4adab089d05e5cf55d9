@@ -1,0 +1,21 @@
+apps/gateway/src/gateway/community/plugins/forwarder/httpx/_plugin.py
+  s_427b8a8eeb3e30::t_05a73f8de1f805 7-11,16,33-92,100-103,146-147
+apps/gateway/tests/contracts/spi/test_forwarder.py
+  s_427b8a8eeb3e30::t_aa7a1c25cbec12 488-628
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a7ee5cc2a0f425e99487f4adab089d05e5cf55d9",
+  "prompts": {},
+  "sessions": {
+    "s_427b8a8eeb3e30": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cfd9-be8d-78e1-bde3-da9a7f50e5a5",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

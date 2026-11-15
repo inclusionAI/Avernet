@@ -1,0 +1,56 @@
+apps/backend/specs/hourly-asc-refresh-20261115/001-spec.md
+  h_5b2ec9c12c4d18 1-10
+apps/backend/specs/hourly-asc-refresh-20261115/002-code-report.md
+  h_5b2ec9c12c4d18 1-29
+apps/backend/src/agentclaw/corp/core/caller_identity/README.md
+  h_5b2ec9c12c4d18 6,10,22,29-32,37,42-58,66,82-83,88-89
+apps/backend/src/agentclaw/corp/core/caller_identity/scheduled_refresh.py
+  h_5b2ec9c12c4d18 1,4-6,13-15,19,22,43-44,53-56,59-100,106-108,124-125,135-139,143-144,168-169
+apps/backend/src/agentclaw/corp/core/caller_identity/scheduled_refresh_lifecycle.py
+  h_5b2ec9c12c4d18 1-139
+apps/backend/src/agentclaw/corp/di/modules/infrastructure/corp/devices.py
+  h_5b2ec9c12c4d18 114,116
+apps/backend/src/agentclaw/corp/di/modules/infrastructure/corp/identity.py
+  h_5b2ec9c12c4d18 19,33,43,110,112,114,119-131,173-188,193-194,199
+apps/backend/src/agentclaw/corp/di/token_exchange.py
+  h_5b2ec9c12c4d18 5-7,12,49,54,57-88,99,101,104-105
+apps/backend/src/agentclaw/corp/plugins/prod/token_exchange_jit.py
+  h_5b2ec9c12c4d18 8,98-105,118,125,140,293
+apps/backend/tests/corp/core/caller_identity/conftest.py
+  h_5b2ec9c12c4d18 1-65
+apps/backend/tests/corp/core/caller_identity/test_due_caller_refresh.py
+  h_5b2ec9c12c4d18 1-119
+apps/backend/tests/corp/core/caller_identity/test_scheduled_refresh_lifecycle.py
+  h_5b2ec9c12c4d18 1-184
+apps/backend/tests/corp/core/caller_identity/test_token_expiry_coordination.py
+  h_5b2ec9c12c4d18 2,25,48
+apps/backend/tests/corp/core/test_quality_bot_admin_correction_scope.py
+  h_5b2ec9c12c4d18 425,451,453-456
+apps/backend/tests/corp/di/test_corp_devices_module_wiring.py
+  h_5b2ec9c12c4d18 98-99
+apps/backend/tests/corp/di/test_jit_config_loading.py
+  h_5b2ec9c12c4d18 58
+apps/backend/tests/corp/di/test_jit_teclaw_eligibility.py
+  h_5b2ec9c12c4d18 1-263
+apps/backend/tests/corp/di/test_jit_token_injection.py
+  h_5b2ec9c12c4d18 4,25,47,167
+apps/backend/tests/corp/di/test_token_exchange_adapters.py
+  h_5b2ec9c12c4d18 41,170,218
+apps/backend/tests/corp/plugins/prod/test_scheduled_caller.py
+  h_5b2ec9c12c4d18 19-25,202,410,437,457
+apps/backend/tests/corp/plugins/prod/test_token_exchange_jit.py
+  h_5b2ec9c12c4d18 47
+docs/flows/backend-runtime-targeting.md
+  h_5b2ec9c12c4d18 17-29
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "fe24bcdf442854935ba64532ca6cf98dc4f0fdce",
+  "prompts": {},
+  "humans": {
+    "h_5b2ec9c12c4d18": {
+      "author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}
