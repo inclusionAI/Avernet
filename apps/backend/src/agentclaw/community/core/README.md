@@ -30,7 +30,7 @@ common starting points, not an exhaustive ownership list:
 | --- | --- |
 | Identity and permissions | [access](access/README.md), [auth](auth/README.md), [caller identity](caller_identity/README.md), [application grants](bot_app_grant/README.md) |
 | Bot lifecycle and execution | [bot management](bot_management/README.md), [engine runtime](engine_runtime/README.md), [runtime binding](runtime_binding/README.md), [devices](devices/README.md) |
-| Publication | [service bot](service_bot/README.md), [task queue](task_queue/README.md) |
+| Publication | [service bot](service_bot/README.md), [bot_public](bot_public/README.md), [task queue](task_queue/README.md) |
 | Skills and configuration | [skill center](skill_center/README.md), [skills pool](skills_pool/README.md), [manifest](bot_config_manifest/README.md), [configuration surface](bot_config_surface/README.md) |
 | Conversations and collaboration | [bot chat](bot_chat/README.md), [group chat](group_chat/README.md), [expert chat](expert_chat/README.md), [agentswarm](agentswarm/README.md) |
 | Spaces and shared content | [spaces](spaces/README.md), [resources](resources/README.md), [content store](content_store/README.md), [workspace](workspace/README.md) |
