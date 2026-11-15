@@ -77,7 +77,13 @@ TASK_COMMISSION_PROFILE = ProductProfileDefinition(
         executor_submission_only=True,
         public_events_only=True,
         actions=(
-            WorkflowAction("start_task", "task.started", "Task", ("note",)),
+            WorkflowAction(
+                "start_task",
+                "task.started",
+                "Task",
+                ("note",),
+                required_role=ROLE_SELECTED_AGENT,
+            ),
             WorkflowAction(
                 "report_progress",
                 "task.progress.updated",
@@ -90,10 +96,26 @@ TASK_COMMISSION_PROFILE = ProductProfileDefinition(
                 "task.submitted",
                 "Task",
                 ("note", "artifacts"),
+                required_role=ROLE_SELECTED_AGENT,
             ),
-            WorkflowAction("accept_task", "task.accepted", "Task", ("note",)),
-            WorkflowAction("reject_task", "task.rejected", "Task", ("note",)),
-            WorkflowAction("cancel_task", "task.cancelled", "Task", ("note",)),
+            WorkflowAction(
+                "accept_task",
+                "task.accepted",
+                "Task",
+                ("note",),
+            ),
+            WorkflowAction(
+                "reject_task",
+                "task.rejected",
+                "Task",
+                ("note",),
+            ),
+            WorkflowAction(
+                "cancel_task",
+                "task.cancelled",
+                "Task",
+                ("note",),
+            ),
         ),
     ),
     governance=GovernanceRequirements(

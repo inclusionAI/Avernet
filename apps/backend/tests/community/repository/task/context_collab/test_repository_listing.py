@@ -17,8 +17,9 @@ from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs 
 from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_resource_refs import (
     SpaceRef,
 )
-from agentclaw.community.core.task.context_collab.l6_products.context_spec import (
-    ContextSpec,
+from tests.community.core.task.context_collab.creation_facts import (
+    create_collet_request,
+    creation_facts,
 )
 from agentclaw.community.core.task.context_collab.persistence.models import (
     ContextCollabColletModel,
@@ -32,12 +33,12 @@ PRINCIPAL = PrincipalRef(principal_type="human", principal_id="u_1001")
 EXECUTOR = AgentRef(agent_type="bot", agent_id="bot_coding_001")
 
 
-def _spec(product_kind: str, objective: str = "整理评审结论") -> ContextSpec:
+def _spec(product_kind: str, objective: str = "整理评审结论") -> dict:
     from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_resource_refs import (
         ResourceRef,
     )
 
-    return ContextSpec(
+    return creation_facts(
         space=SpaceRef(space_id="space_workspace_001", environment="prod"),
         principal_ref=PRINCIPAL,
         method_kind="Open + Group",
@@ -53,19 +54,21 @@ def _spec(product_kind: str, objective: str = "整理评审结论") -> ContextSp
 
 def _create(db, product_kind: str, objective: str = "整理评审结论"):
     from agentclaw.community.core.task.context_collab.persistence.repository import (
-        CreateContextRecordRequest,
+        CreateColletRecordRequest,
         InitialEventDraft,
     )
 
     repo = ContextCollabRepository(db, product_catalog=PRODUCT_CATALOG)
-    return repo.create_context(
-        CreateContextRecordRequest(
-            context_spec=_spec(product_kind, objective),
+    return repo.create_collet(
+        create_collet_request(
+            _spec(product_kind, objective),
+            space=SpaceRef(space_id="space_workspace_001", environment="prod"),
+            principal_ref=PRINCIPAL,
             initial_event=InitialEventDraft(
                 event_kind="task.created",
                 primitive_type="Task",
                 actor_ref=PRINCIPAL,
-                payload={"objective": objective, "resource_refs": []},
+                payload=_spec(product_kind, objective),
             ),
         )
     )
@@ -81,8 +84,8 @@ class TestListColletsByProduct:
 
         assert len(rows) == 1
         collet, spec, gmt_create = rows[0]
-        assert spec.objective == "公开讨论帖"
-        assert spec.product_kind == "bbs_public_discussion"
+        assert spec["objective"] == "公开讨论帖"
+        assert spec["product_kind"] == "bbs_public_discussion"
         assert collet.collet_id.startswith("collet_")
         assert gmt_create is not None
 
@@ -104,7 +107,7 @@ class TestListColletsByProduct:
             db, product_catalog=PRODUCT_CATALOG
         ).list_collets_by_product("bbs_public_discussion")
 
-        assert [r[1].objective for r in rows] == ["晚帖", "早帖"]
+        assert [r[1]["objective"] for r in rows] == ["晚帖", "早帖"]
         assert rows[0][0].collet_id == second.collet.collet_id
 
     def test_list_skips_undecodable_rows(self, db, engine):
@@ -115,22 +118,16 @@ class TestListColletsByProduct:
             bad = ContextCollabColletModel(
                 collab_context_id="collet_partial_row_1",
                 actor_ref=None,
-                context_spec=json.dumps(
+                scope=json.dumps({"space_id": "s_x", "environment": "prod"}),
+                creation_facts=json.dumps(
                     {
-                        "space": {
-                            "space_id": "s_x",
-                            "environment": "prod",
-                        },
-                        "principal_ref": {
-                            "principal_type": "human",
-                            "principal_id": "u_9",
-                        },
-                        "method_kind": "Single",
-                        "executor_ref": None,
                         "objective": "外部行",
                         "resource_refs": [],
+                        "method_kind": "Single",
+                        "executor_ref": None,
                         "product_kind": "bbs_public_discussion",
                         "workflow_kind": "bbs_public_discussion",
+                        "product_profile_ref": None,
                     }
                 ),
                 current_snapshot=None,

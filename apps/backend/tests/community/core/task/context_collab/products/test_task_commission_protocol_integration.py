@@ -172,7 +172,7 @@ def test_commission_protocol_and_persistence_integration(product_app, db, engine
     assert created.context_version == 2  # task.created + 正文 Message。
     record = repo.get_current_status(collet_id)
     assert record is not None
-    spec, instance = record.context_spec, record.product_instance
+    spec, instance = record.creation_facts, record.product_instance
     assert instance is not None
     assert instance.collet_ref == collet_id
     assert instance.profile_ref == profile.ref

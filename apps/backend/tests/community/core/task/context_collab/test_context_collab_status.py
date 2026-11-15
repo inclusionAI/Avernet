@@ -28,9 +28,7 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.collet i
     Collet,
     ColletState,
 )
-from agentclaw.community.core.task.context_collab.l6_products.context_spec import (
-    ContextSpec,
-)
+from tests.community.core.task.context_collab.creation_facts import creation_facts
 from agentclaw.community.core.task.context_collab.l4_context_primitives.task import Task
 from agentclaw.community.core.task.context_collab.l4_context_primitives.event_envelope import (
     EventRecord,
@@ -64,8 +62,8 @@ def make_actor(principal_id: str = "u_1001") -> ActorContext:
     return ActorContext(PrincipalRef("human", principal_id), source="api")
 
 
-def _spec() -> ContextSpec:
-    return ContextSpec(
+def _spec() -> dict:
+    return creation_facts(
         space=SpaceRef(space_id="space_workspace_001", environment="prod"),
         principal_ref=PRINCIPAL,
         method_kind="Single",
@@ -215,7 +213,7 @@ class _FakeStatusRepository:
         events = list(self.events.get(collab_context_id, []))
         return ContextStatusRecord(
             collet=collet,
-            context_spec=_spec(),
+            creation_facts=_spec(),
             tasks=(self.tasks[collab_context_id],)
             if self.tasks[collab_context_id] is not None
             else (),
@@ -224,8 +222,8 @@ class _FakeStatusRepository:
         )
 
     # 写路径在查询用例中不允许被触达;若被调用记录并报错。
-    def create_context(self, request) -> None:
-        self.write_calls.append(("create_context", request))
+    def create_collet(self, request) -> None:
+        self.write_calls.append(("create_collet", request))
         raise NotImplementedError("get_status must not write")
 
     def append_event(self, collab_context_id, request) -> None:

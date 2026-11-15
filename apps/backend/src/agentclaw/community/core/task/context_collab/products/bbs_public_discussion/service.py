@@ -46,16 +46,17 @@ from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime 
     current_axes,
 )
 from agentclaw.community.core.task.context_collab.l6_products.binding import (
-    prepare_product_spec,
+    prepare_product_profile,
 )
 from agentclaw.community.core.task.context_collab.l6_products.catalog import (
     ProductCatalog,
 )
-from agentclaw.community.core.task.context_collab.l6_products.context_spec import (
-    ContextSpec,
-)
 from agentclaw.community.core.task.context_collab.l6_products.creation_facts import (
+    creation_method_kind,
+    creation_profile_ref,
+    creation_product_kind,
     creation_payload,
+    creation_workflow_kind,
 )
 from agentclaw.community.core.task.context_collab.l6_products.profiles import (
     ProductProfile,
@@ -67,7 +68,7 @@ from agentclaw.community.core.task.context_collab.persistence.method_store impor
 from agentclaw.community.core.task.context_collab.persistence.repository import (
     AppendEventRecordRequest,
     ContextCollabRepositoryProtocol,
-    CreateContextRecordRequest,
+    CreateColletRecordRequest,
     EventAppendedRecord,
     InitialEventDraft,
 )
@@ -155,27 +156,47 @@ class BbsPublicDiscussionService:
     ) -> DiscussionCreatedView:
         title = _required_content(command.title, "title")
         body = _required_content(command.body, "body")
-        spec = ContextSpec(
-            space=command.space,
+        method_kind = MethodKind.OPEN_GROUP.value
+        self._authorizer.check_create(
+            method_kind=method_kind,
+            executor_ref=None,
+            actor=context,
+        )
+        profile = prepare_product_profile(
+            product_kind=ProductProfile.BBS_PUBLIC_DISCUSSION.value,
+            workflow_kind=WorkflowKind.BBS_PUBLIC_DISCUSSION.value,
+            method_kind=method_kind,
+            profile_ref=None,
             principal_ref=context.actor,
-            method_kind=MethodKind.OPEN_GROUP.value,
+            executor_ref=None,
+            catalog=self._product_catalog,
+        )
+        facts = creation_payload(
+            method_kind=method_kind,
             executor_ref=None,
             objective=title,
             resource_refs=tuple(command.resource_refs),
             product_kind=ProductProfile.BBS_PUBLIC_DISCUSSION.value,
             workflow_kind=WorkflowKind.BBS_PUBLIC_DISCUSSION.value,
+            product_profile_ref=profile.ref if profile is not None else None,
         )
-        spec = prepare_product_spec(spec, self._product_catalog)
-        self._authorizer.check_create(spec, context)
-
-        record = self._repo.create_context(
-            CreateContextRecordRequest(
-                context_spec=spec,
+        record = self._repo.create_collet(
+            CreateColletRecordRequest(
+                space=command.space,
+                principal_ref=context.actor,
+                method_kind=method_kind,
+                executor_ref=None,
+                objective=title,
+                resource_refs=tuple(command.resource_refs),
+                product_kind=ProductProfile.BBS_PUBLIC_DISCUSSION.value,
+                workflow_kind=WorkflowKind.BBS_PUBLIC_DISCUSSION.value,
+                product_profile_ref=profile.ref if profile is not None else None,
+                creation_facts=facts,
                 initial_event=InitialEventDraft(
                     event_kind=_CREATION_EVENT_KIND,
                     primitive_type=_CREATION_PRIMITIVE_TYPE,
                     actor_ref=context.actor,
-                    payload=creation_payload(spec, title),
+                    payload=facts,
                 ),
             )
         )
@@ -184,15 +205,19 @@ class BbsPublicDiscussionService:
             self._method_store,
             current_axes(),
             record.collet.collet_id,
-            spec,
-            context,
+            method_kind=method_kind,
+            principal_ref=context.actor,
+            executor_ref=None,
+            profile=profile,
+            context=context,
             now=_now(),
-            catalog=self._product_catalog,
         )
         appended = self._append_public_message(
             record.collet.collet_id,
             record.collet,
-            spec,
+            record.task,
+            record.creation_facts,
+            record.product_instance,
             actor_ref=context.actor,
             content=body,
             parent_event_id=None,
@@ -220,7 +245,7 @@ class BbsPublicDiscussionService:
         # 跨产品面拦截:非本产品 profile 的 Collet 一律按不存在处理(404),
         # 语义不得漂到别人的上下文上。
         if (
-            record.context_spec.product_kind
+            creation_product_kind(record.creation_facts)
             != ProductProfile.BBS_PUBLIC_DISCUSSION.value
         ):
             raise ContextCollabNotFoundError(
@@ -229,7 +254,8 @@ class BbsPublicDiscussionService:
             )
         validate_product_event(
             catalog=self._product_catalog,
-            spec=record.context_spec,
+            creation_facts=record.creation_facts,
+            product_instance=record.product_instance,
             task=record.task,
             event_kind=_POSTED_EVENT_KIND,
             primitive_type=_MESSAGE_PRIMITIVE,
@@ -243,7 +269,9 @@ class BbsPublicDiscussionService:
         appended = self._append_public_message(
             command.collab_context_id,
             record.collet,
-            record.context_spec,
+            record.task,
+            record.creation_facts,
+            record.product_instance,
             actor_ref=context.actor,
             content=content,
             parent_event_id=command.parent_event_id,
@@ -263,7 +291,9 @@ class BbsPublicDiscussionService:
         self,
         collab_context_id: str,
         collet,
-        spec: ContextSpec,
+        task,
+        creation_facts: dict,
+        product_instance,
         *,
         actor_ref,
         content: str,
@@ -285,7 +315,9 @@ class BbsPublicDiscussionService:
             visibility=intent.visibility,
             payload=intent.payload,
         )
-        self._authorizer.check_append(collet, spec, intent, context)
+        self._authorizer.check_append(
+            collet, task, creation_facts, product_instance, intent, context
+        )
         return self._repo.append_event(
             collab_context_id,
             AppendEventRecordRequest(
@@ -316,19 +348,19 @@ class BbsPublicDiscussionService:
         return [
             DiscussionSummaryView(
                 collet_id=collet.collet_id,
-                title=spec.objective,
+                title=facts["objective"],
                 initiator_id=collet.initiator_ref.principal_id,
                 message_count=counts.get(collet.collet_id, 0),
                 created_at=gmt_create,
             )
-            for collet, spec, gmt_create in rows
+            for collet, facts, gmt_create in rows
         ]
 
     def get_discussion(self, collab_context_id: str) -> DiscussionDetailView:
         """Query.project:一次给齐标题/正文/全部公开回帖。
 
-        title 读源合同(创建事实 spec §3 裁决 1):初始事件 payload 的
-        ``objective``,NULL-payload 外部行回退伴随 ``context_spec.objective``
+        title 读源合同(创建事实 §3 裁决 1):初始事件 payload 的
+        ``objective``,NULL-payload 外部行回退伴随 ``creation_facts["objective"]``
         (P3 撤列时移除)。body 与 replies **只投影 public**(读可见性
         裁决 F;visibility NULL 按 private 处理,事件 envelope 语义);
         孤儿帖 ``body=None``(发帖两步窗口态,合法领域可空)。
@@ -339,7 +371,7 @@ class BbsPublicDiscussionService:
                 f"collaboration context {collab_context_id!r} not found"
             )
         if (
-            record.context_spec.product_kind
+            creation_product_kind(record.creation_facts)
             != ProductProfile.BBS_PUBLIC_DISCUSSION.value
         ):
             raise ContextCollabNotFoundError(
@@ -347,11 +379,11 @@ class BbsPublicDiscussionService:
                 "a bbs public discussion"
             )
 
-        title = record.context_spec.objective
+        title = record.task.objective if record.task is not None else record.creation_facts["objective"]
         for event in record.events:
             if event.event_kind == _CREATION_EVENT_KIND:
-                # title 新主:初始事件 payload 的 objective(创建事实 spec
-                # §3 裁决 1);NULL-payload/缺键外部行回退伴随 spec.objective。
+                # title 新主:初始事件 payload 的 objective(创建事实
+                # §3 裁决 1);NULL-payload/缺键外部行回退伴随 Task.objective。
                 payload = event.payload
                 if isinstance(payload, dict):
                     objective = payload.get("objective")

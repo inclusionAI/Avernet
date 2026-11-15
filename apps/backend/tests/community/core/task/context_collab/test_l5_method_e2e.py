@@ -1,7 +1,7 @@
 """L5 method objects E2E:colit with real SQLite repository + L5 with real services sharing an in-memory store.
 
 Following the repository-backed pattern of ``test_l6_product_e2e.py`` (rather than fake-repository-only),
-the two test cases run the full authority-plane chain from L6 product form: create_context(Open + Group) → top-level
+the two test cases run the full authority-plane chain from L6 product form: create_collet(Open + Group) → top-level
 binding ACTIVE projection → group member operations → open opportunity application and admission (member product assertions) →
 nested Swarm plans (assurance-side machine chain) → Single delegated chain (compose NEST/DELEGATE_TO + select) →
 inspection conformance_evidence non-empty. Authorization uses the real structural implementation (owner principal),
@@ -64,7 +64,7 @@ from agentclaw.community.core.task.context_collab.persistence.repository import 
 )
 from agentclaw.community.core.task.context_collab.service_api import (
     ActorContext,
-    ContextCreateCommand,
+    ColletCreateCommand,
 )
 from agentclaw.community.core.task.context_collab.services.context_collab_service import (
     ContextCollabService,
@@ -100,7 +100,7 @@ def _actor(principal: PrincipalRef) -> ActorContext:
     return ActorContext(actor=principal, source="api")
 
 
-def _create_command(**overrides) -> ContextCreateCommand:
+def _create_command(**overrides) -> ColletCreateCommand:
     fields = {
         "space": SPACE,
         "principal_ref": OWNER,
@@ -116,7 +116,7 @@ def _create_command(**overrides) -> ContextCreateCommand:
         ],
     }
     fields.update(overrides)
-    return ContextCreateCommand(**fields)
+    return ColletCreateCommand(**fields)
 
 
 def _future_iso(hours: float = 1.0) -> str:
@@ -195,7 +195,7 @@ class TestL5MethodObjectsE2E:
         """Open+Group 顶层 → group 成员 → open 申请/录取(成员产物)→
         Single 委托链(bind/activate/select/delegate)→ 顶层 inspection
         conformance evidence 非空。"""
-        created = services.context_service.create_context(
+        created = services.context_service.create_collet(
             _create_command(), _actor(OWNER)
         )
         collab_id = created.collab_context_id
@@ -327,7 +327,7 @@ class TestL5MethodObjectsE2E:
         """嵌套 Swarm binding:declare profile → submit plan → validate →
         adopt → start(前沿 READY)→ allocate(分配即活即跑)→
         complete(stage SUCCEEDED + 分配 RELEASED)→ inspection。"""
-        created = services.context_service.create_context(
+        created = services.context_service.create_collet(
             _create_command(), _actor(OWNER)
         )
         collab_id = created.collab_context_id

@@ -56,8 +56,9 @@ def _base_axes():
 class ContextCollabColletModel(Base):
     """Bounded context and composition metadata, not Task lifecycle authority.
 
-    ``root_task_ref`` selects independent Task storage. ``context_spec`` retains
-    L6 creation/instance selection; it is not mutable Task or Method state.
+    ``root_task_ref`` selects independent Task storage. ``creation_facts`` retains
+    plain creation facts and the optional L6 ProductInstance; it is not mutable
+    Task or Method state. ``scope`` is the L4 Collet scope.
     Every accepted event advances ``context_version``; only Work advances Task.
     """
 
@@ -73,7 +74,8 @@ class ContextCollabColletModel(Base):
     # 创建主体引用(与初始 task.created 事件的 actor_ref 同值);可空:
     # 外部部分行可以没有;P1 创建路径恒写。
     actor_ref = Column(String(2048), nullable=True)
-    context_spec = Column(_medium_text(), nullable=False)
+    scope = Column(_medium_text(), nullable=False)
+    creation_facts = Column(_medium_text(), nullable=False)
     # Legacy-only compatibility column. New rows write NULL; a non-null root
     # Task reference always wins, even if an old snapshot is still present.
     current_snapshot = Column(_medium_text(), nullable=True)

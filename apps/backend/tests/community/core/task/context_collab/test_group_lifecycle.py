@@ -591,7 +591,7 @@ class TestCreatedContextProjection:
             store,
             AXES,
             COLLET_ID,
-            record.context_spec,
+            record.creation_facts,
             make_actor(),
             now=NOW,
             catalog=PRODUCT_CATALOG,
@@ -611,14 +611,14 @@ class TestCreatedContextProjection:
             assert row.joined_at == NOW
             assert row.left_at is None
             assert row.transitioned_from == ""
-            assert row.transition_reason == "create_context"
+            assert row.transition_reason == "create_collet"
             assert row.transitioned_by == PRINCIPAL_ID
         # 重复投影幂等:roster 与成员不重复落。
         again = project_created_context(
             store,
             AXES,
             COLLET_ID,
-            record.context_spec,
+            record.creation_facts,
             make_actor(),
             now="2026-11-12T09:30:00+00:00",
             catalog=PRODUCT_CATALOG,
@@ -638,7 +638,7 @@ class TestCreatedContextProjection:
             store,
             AXES,
             COLLET_ID,
-            record.context_spec,
+            record.creation_facts,
             make_actor(),
             now=NOW,
             catalog=PRODUCT_CATALOG,

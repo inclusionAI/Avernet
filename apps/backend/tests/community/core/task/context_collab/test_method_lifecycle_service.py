@@ -39,9 +39,7 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.collet i
     Collet,
     ColletState,
 )
-from agentclaw.community.core.task.context_collab.l6_products.context_spec import (
-    ContextSpec,
-)
+from tests.community.core.task.context_collab.creation_facts import creation_facts
 from agentclaw.community.core.task.context_collab.l4_context_primitives.task import Task
 from agentclaw.community.core.task.context_collab.l4_context_primitives.task import (
     TaskStatus,
@@ -89,8 +87,8 @@ def make_actor(principal_id: str = PRINCIPAL_ID) -> ActorContext:
     return ActorContext(actor=PrincipalRef("human", principal_id), source="api")
 
 
-def _context_spec(*, method_kind: str = "Single") -> ContextSpec:
-    return ContextSpec(
+def _context_spec(*, method_kind: str = "Single") -> dict:
+    return creation_facts(
         space=SpaceRef(space_id="space_workspace_001", environment="prod"),
         principal_ref=PrincipalRef("human", PRINCIPAL_ID),
         method_kind=method_kind,
@@ -136,7 +134,7 @@ def _status_record(**overrides) -> ContextStatusRecord:
     )
     return ContextStatusRecord(
         collet=collet,
-        context_spec=spec,
+        creation_facts=spec,
         tasks=(task,) if task is not None else (),
         task=task,
         events=[],
@@ -163,7 +161,7 @@ class _FakeCollabRepository:
     def get_current_status(self, collab_context_id: str):
         return self._records.get(collab_context_id)
 
-    def create_context(self, request):
+    def create_collet(self, request):
         raise NotImplementedError("fake only implements get_current_status")
 
     def append_event(self, collab_context_id: str, request):
@@ -533,7 +531,7 @@ class TestTerminateTopLevelGate:
             store,
             AXES,
             COLLET_ID,
-            record.context_spec,
+            record.creation_facts,
             make_actor(),
             now=NOW,
             catalog=PRODUCT_CATALOG,
@@ -615,7 +613,7 @@ class TestTopLevelProjection:
             store,
             AXES,
             COLLET_ID,
-            record.context_spec,
+            record.creation_facts,
             make_actor(),
             now=NOW,
             catalog=PRODUCT_CATALOG,
@@ -623,7 +621,7 @@ class TestTopLevelProjection:
         # spec §3.2 初始状态作者裁决:顶层投影直接 ACTIVE;§9.2 单向派生。
         assert binding.state is BindingState.ACTIVE
         assert binding.version == 1
-        assert binding.bind_reason == "create_context"
+        assert binding.bind_reason == "create_collet"
         assert binding.parent_scope_ref is None
         assert binding.method_kind == "Single"
         assert binding.method_names == ("Single",)
@@ -636,7 +634,7 @@ class TestTopLevelProjection:
             store,
             AXES,
             COLLET_ID,
-            record.context_spec,
+            record.creation_facts,
             make_actor(),
             now="2026-11-12T09:30:00+00:00",
             catalog=PRODUCT_CATALOG,
@@ -654,7 +652,7 @@ class TestTopLevelProjection:
             store,
             AXES,
             COLLET_ID,
-            record.context_spec,
+            record.creation_facts,
             make_actor(),
             now=NOW,
             catalog=PRODUCT_CATALOG,
@@ -675,7 +673,7 @@ class TestSelfHeal:
             store, AXES, COLLET_ID, repo, make_actor(), now=NOW, catalog=PRODUCT_CATALOG
         )
         assert healed.state is BindingState.ACTIVE
-        assert healed.bind_reason == "create_context_heal"
+        assert healed.bind_reason == "create_collet_heal"
         assert healed.method_kind == "Single"
         assert healed.method_names == ("Single",)
         assert len(store.list_bindings(AXES, COLLET_ID)) == 1
@@ -703,7 +701,7 @@ class TestSelfHeal:
             store,
             AXES,
             COLLET_ID,
-            record.context_spec,
+            record.creation_facts,
             make_actor(),
             now=NOW,
             catalog=PRODUCT_CATALOG,
@@ -729,7 +727,7 @@ class TestSelfHeal:
         result = service.inspect(
             COLLET_ID, top_level_binding_id(COLLET_ID), make_actor()
         )
-        assert result.binding["bind_reason"] == "create_context_heal"
+        assert result.binding["bind_reason"] == "create_collet_heal"
         assert result.state_summary["state"] == "ACTIVE"
         assert len(store.list_bindings(AXES, COLLET_ID)) == 1
         again = service.inspect(

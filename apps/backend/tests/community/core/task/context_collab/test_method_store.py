@@ -57,7 +57,7 @@ def _binding(
             "profile_versions": {names[0]: "0.2"},
             "state": state,
             "version": version,
-            "bind_reason": "create_context",
+            "bind_reason": "create_collet",
             "transitioned_from": "",
             "transition_reason": "initial bind",
             "transitioned_by": "principal-1",

@@ -23,8 +23,9 @@ from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_reso
     ResourceRef,
     SpaceRef,
 )
-from agentclaw.community.core.task.context_collab.l6_products.context_spec import (
-    ContextSpec,
+from tests.community.core.task.context_collab.creation_facts import (
+    create_collet_request,
+    creation_facts,
 )
 from agentclaw.community.core.task.context_collab.persistence.models import (
     ContextCollabColletModel,
@@ -33,7 +34,7 @@ from agentclaw.community.core.task.context_collab.persistence.models import (
 from agentclaw.community.core.task.context_collab.persistence.repository import (
     AppendEventRecordRequest,
     ContextCollabRepository,
-    CreateContextRecordRequest,
+    CreateColletRecordRequest,
     EventAppendedRecord,
     InitialEventDraft,
 )
@@ -48,8 +49,8 @@ MESSAGE_PAYLOAD = {
 }
 
 
-def _context_spec() -> ContextSpec:
-    return ContextSpec(
+def _context_spec() -> dict:
+    return creation_facts(
         space=SpaceRef(space_id="space_workspace_001", environment="prod"),
         principal_ref=CREATOR,
         method_kind="Single",
@@ -66,14 +67,16 @@ def _context_spec() -> ContextSpec:
 
 
 def _created_context(repo: ContextCollabRepository) -> str:
-    record = repo.create_context(
-        CreateContextRecordRequest(
-            context_spec=_context_spec(),
+    record = repo.create_collet(
+        create_collet_request(
+            _context_spec(),
+            space=SpaceRef(space_id="space_workspace_001", environment="prod"),
+            principal_ref=CREATOR,
             initial_event=InitialEventDraft(
                 event_kind="task.created",
                 primitive_type="Task",
                 actor_ref=CREATOR,
-                payload={"objective": OBJECTIVE},
+                payload=_context_spec(),
             ),
         )
     )

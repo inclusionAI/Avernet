@@ -1,4 +1,4 @@
-"""Durable L6 selection record, stored beside ContextSpec in its existing JSON column."""
+"""Durable L6 product selection facts stored with the creation facts."""
 
 from __future__ import annotations
 
@@ -8,17 +8,12 @@ import json
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabValidationError,
 )
-from agentclaw.community.core.task.context_collab.l6_products.context_spec import (
-    ContextSpec,
-)
 from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
     top_level_binding_id,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.participants import (
-    role_binding_ref,
-)
 from agentclaw.community.core.task.context_collab.l6_products.binding import (
-    validate_product_spec,
+    role_binding_refs,
+    validate_product_selection,
 )
 from agentclaw.community.core.task.context_collab.l6_products.catalog import (
     ProductCatalog,
@@ -27,8 +22,17 @@ from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     GovernanceRequirements,
     MethodRequirement,
     NegotiationResult,
+    ProductProfileDefinition,
     VersionedProfileRef,
     negotiate,
+)
+from agentclaw.community.core.task.context_collab.l6_products.creation_facts import (
+    creation_profile_ref,
+    decode_creation_facts,
+)
+from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
+    AgentRef,
+    PrincipalRef,
 )
 
 
@@ -43,18 +47,16 @@ class ProductInstance:
     domain_ref: VersionedProfileRef
     method_binding_refs: tuple[str, ...]
     method_profiles: tuple[MethodRequirement, ...]
-    # Each RoleBinding is identified by (Collet, role, participant), no new role authority.
     role_binding_refs: tuple[str, ...]
     governance: GovernanceRequirements
     negotiation: NegotiationResult
     creation_event_ref: str
 
     def to_dict(self) -> dict:
-        # JSON-normalized form (tuple -> list) is stable across persistence round trips.
         return json.loads(json.dumps(asdict(self)))
 
     @classmethod
-    def from_dict(cls, data: dict) -> ProductInstance:
+    def from_dict(cls, data: dict) -> "ProductInstance":
         try:
             result = data["negotiation"]
             if type(result["accepted"]) is not bool:
@@ -87,23 +89,43 @@ class ProductInstance:
                 raise ValueError("invalid product instance selection")
             return instance
         except (KeyError, TypeError, ValueError) as error:
-            raise ContextCollabValidationError(
-                f"invalid ProductInstance: {error}"
-            ) from error
+            raise ContextCollabValidationError(f"invalid ProductInstance: {error}") from error
 
 
-def _instance(
-    spec: ContextSpec,
-    collet_id: str,
-    event_id: str,
-    selection: NegotiationResult,
+def _resolve_profile(
+    facts: dict,
+    *,
+    principal_ref: PrincipalRef,
+    executor_ref: AgentRef | None,
     catalog: ProductCatalog,
-) -> ProductInstance:
-    profile = validate_product_spec(spec, catalog)
-    if profile is None or spec.product_profile_version is None:
+) -> ProductProfileDefinition:
+    normalized = decode_creation_facts(facts)
+    profile = validate_product_selection(
+        product_kind=normalized["product_kind"],
+        workflow_kind=normalized["workflow_kind"],
+        method_kind=normalized["method_kind"],
+        profile_ref=creation_profile_ref(normalized),
+        principal_ref=principal_ref,
+        executor_ref=executor_ref,
+        catalog=catalog,
+    )
+    if profile is None or creation_profile_ref(normalized) is None:
         raise ContextCollabValidationError(
             "ProductInstance requires a pinned profile version"
         )
+    return profile
+
+
+def _instance(
+    *,
+    facts: dict,
+    collet_id: str,
+    event_id: str,
+    principal_ref: PrincipalRef,
+    executor_ref: AgentRef | None,
+    profile: ProductProfileDefinition,
+    selection: NegotiationResult,
+) -> ProductInstance:
     return ProductInstance(
         instance_id=f"pi_{collet_id}",
         collet_ref=collet_id,
@@ -112,9 +134,7 @@ def _instance(
         domain_ref=profile.domain.ref,
         method_binding_refs=(top_level_binding_id(collet_id),),
         method_profiles=profile.composition.required_methods,
-        role_binding_refs=tuple(
-            role_binding_ref(collet_id, item) for item in spec.role_bindings
-        ),
+        role_binding_refs=role_binding_refs(collet_id, profile=profile),
         governance=profile.governance,
         negotiation=selection,
         creation_event_ref=event_id,
@@ -122,38 +142,66 @@ def _instance(
 
 
 def instantiate_product(
-    spec: ContextSpec, collet_id: str, event_id: str, catalog: ProductCatalog
-) -> ProductInstance:
-    profile = validate_product_spec(spec, catalog)
-    if profile is None or spec.product_profile_version is None:
-        raise ContextCollabValidationError(
-            "new ProductInstance requires a pinned profile version"
-        )
+    *,
+    facts: dict,
+    collet_id: str,
+    event_id: str,
+    principal_ref: PrincipalRef,
+    executor_ref: AgentRef | None,
+    catalog: ProductCatalog,
+) -> ProductInstance | None:
+    normalized = decode_creation_facts(facts)
+    if normalized["product_kind"] is None:
+        return None
+    profile = _resolve_profile(
+        normalized,
+        principal_ref=principal_ref,
+        executor_ref=executor_ref,
+        catalog=catalog,
+    )
     selection = negotiate(profile, catalog.capabilities())
     if not selection.accepted:
         raise ContextCollabValidationError(
             f"product negotiation rejected: {selection.missing_capabilities}"
         )
-    return _instance(spec, collet_id, event_id, selection, catalog)
+    return _instance(
+        facts=normalized,
+        collet_id=collet_id,
+        event_id=event_id,
+        principal_ref=principal_ref,
+        executor_ref=executor_ref,
+        profile=profile,
+        selection=selection,
+    )
 
 
 def decode_product_instance(
-    data: dict, spec: ContextSpec, collet_id: str, catalog: ProductCatalog
+    facts: dict,
+    *,
+    collet_id: str,
+    event_id: str,
+    principal_ref: PrincipalRef,
+    executor_ref: AgentRef | None,
+    catalog: ProductCatalog,
 ) -> ProductInstance | None:
-    """Validate historical facts, never renegotiate with today's available capabilities."""
-    raw = data.get("product_instance")
+    """Validate historical facts; never renegotiate with today's capabilities."""
+    normalized = decode_creation_facts(facts)
+    raw = normalized.get("product_instance")
+    profile_ref = creation_profile_ref(normalized)
     if raw is None:
-        if spec.product_profile_version is not None:
-            raise ContextCollabValidationError(
-                "pinned product is missing ProductInstance"
-            )
+        if profile_ref is not None:
+            raise ContextCollabValidationError("pinned product is missing ProductInstance")
         return None
     instance = ProductInstance.from_dict(raw)
+    profile = _resolve_profile(
+        normalized,
+        principal_ref=principal_ref,
+        executor_ref=executor_ref,
+        catalog=catalog,
+    )
     selection = instance.negotiation
-    profile = validate_product_spec(spec, catalog)
     if (
-        profile is None
-        or selection.selected_profile != profile.ref
+        selection.selected_profile != profile.ref
         or selection.missing_capabilities
         or selection.mode != "local_exact_match"
         or not isinstance(selection.reason, str)
@@ -164,16 +212,21 @@ def decode_product_instance(
         f"method:{item.method}@{item.version}"
         for item in profile.composition.optional_methods
     }
-    optional.update(
-        f"extension:{item}" for item in profile.compatibility.optional_extensions
-    )
+    optional.update(f"extension:{item}" for item in profile.compatibility.optional_extensions)
     if not set(selection.omitted_optional_capabilities) <= optional:
         raise ContextCollabValidationError(
             "unknown optional capability in persisted product negotiation"
         )
-    if instance != _instance(
-        spec, collet_id, instance.creation_event_ref, selection, catalog
-    ):
+    expected = _instance(
+        facts=normalized,
+        collet_id=collet_id,
+        event_id=event_id,
+        principal_ref=principal_ref,
+        executor_ref=executor_ref,
+        profile=profile,
+        selection=selection,
+    )
+    if instance != expected or instance.creation_event_ref != event_id:
         raise ContextCollabValidationError(
             "ProductInstance does not match persisted product bindings"
         )

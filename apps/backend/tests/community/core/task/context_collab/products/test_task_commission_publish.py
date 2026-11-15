@@ -53,7 +53,7 @@ from agentclaw.community.core.task.context_collab.persistence.repository import 
     AppendEventRecordRequest,
     ContextCreatedRecord,
     ContextStatusRecord,
-    CreateContextRecordRequest,
+    CreateColletRecordRequest,
     EventAppendedRecord,
 )
 from agentclaw.community.core.task.context_collab.products.task_commission.service import (
@@ -84,19 +84,19 @@ class _FakeRepo:
 
     def __init__(self) -> None:
         self._status: dict[str, ContextStatusRecord] = {}
-        self.create_calls: list[CreateContextRecordRequest] = []
+        self.create_calls: list[CreateColletRecordRequest] = []
         self.append_calls: list[tuple[str, AppendEventRecordRequest]] = []
 
-    def create_context(self, request: CreateContextRecordRequest):
+    def create_collet(self, request: CreateColletRecordRequest):
         self.create_calls.append(request)
         collab_context_id = "collet_" + uuid4().hex
         event_id = "evt_" + uuid4().hex
         now = datetime.now(timezone.utc)
         task = Task(
-            objective=request.context_spec.objective,
+            objective=request.objective,
             status="created",
-            principal_ref=request.context_spec.principal_ref,
-            executor_ref=request.context_spec.executor_ref,
+            principal_ref=request.principal_ref,
+            executor_ref=request.executor_ref,
             task_id="task_" + collab_context_id,
             collet_ref=collab_context_id,
             version=1,
@@ -109,7 +109,7 @@ class _FakeRepo:
             collet_id=collab_context_id,
             initiator_ref=request.initial_event.actor_ref,
             state=ColletState.ACTIVE,
-            scope=request.context_spec.space,
+            scope=request.space,
             current_event_id=event_id,
             version=1,
         )
@@ -127,14 +127,14 @@ class _FakeRepo:
         )
         self._status[collab_context_id] = ContextStatusRecord(
             collet=collet,
-            context_spec=request.context_spec,
+            creation_facts=request.creation_facts,
             tasks=(task,) if task is not None else (),
             task=task,
             events=[initial_event],
         )
         return ContextCreatedRecord(
             collet=collet,
-            context_spec=request.context_spec,
+            creation_facts=request.creation_facts,
             task=task,
             initial_event=initial_event,
         )
@@ -173,7 +173,7 @@ class _FakeRepo:
         )
         self._status[collab_context_id] = ContextStatusRecord(
             collet=new_collet,
-            context_spec=record.context_spec,
+            creation_facts=record.creation_facts,
             tasks=(new_task,) if new_task is not None else (),
             task=new_task,
             events=[*record.events, event],
@@ -181,7 +181,7 @@ class _FakeRepo:
         return EventAppendedRecord(
             event=event,
             collet=new_collet,
-            context_spec=record.context_spec,
+            creation_facts=record.creation_facts,
             task=new_task,
         )
 
@@ -264,7 +264,7 @@ class TestPublishTask:
         view = service.publish_task(_publish_command(), _actor())
 
         request = repo.create_calls[0]
-        spec = request.context_spec
+        spec = request.creation_facts
         assert spec.objective == TITLE
         assert spec.method_kind == "Open"
         assert spec.executor_ref is not None

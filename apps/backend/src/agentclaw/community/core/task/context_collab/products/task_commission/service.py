@@ -51,20 +51,21 @@ from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime 
     current_axes,
 )
 from agentclaw.community.core.task.context_collab.l6_products.binding import (
-    prepare_product_spec,
+    prepare_product_profile,
     product_definition,
 )
 from agentclaw.community.core.task.context_collab.l6_products.catalog import (
     ProductCatalog,
 )
-from agentclaw.community.core.task.context_collab.l6_products.context_spec import (
-    ContextSpec,
-)
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     VersionedProfileRef,
 )
 from agentclaw.community.core.task.context_collab.l6_products.creation_facts import (
+    creation_method_kind,
+    creation_profile_ref,
+    creation_product_kind,
     creation_payload,
+    creation_workflow_kind,
 )
 from agentclaw.community.core.task.context_collab.l6_products.profiles import (
     ProductProfile,
@@ -75,7 +76,7 @@ from agentclaw.community.core.task.context_collab.persistence.method_store impor
 from agentclaw.community.core.task.context_collab.persistence.repository import (
     AppendEventRecordRequest,
     ContextCollabRepositoryProtocol,
-    CreateContextRecordRequest,
+    CreateColletRecordRequest,
     EventAppendedRecord,
     InitialEventDraft,
 )
@@ -184,32 +185,50 @@ class TaskCommissionService:
         profile = self._product_catalog.get(
             command.product_profile_ref.profile_id, command.product_profile_ref.version
         )
-        publication = profile.require_publication()
-        spec = ContextSpec(
-            space=command.space,
+        method_kind = profile.composition.method_kind
+        executor_ref = AgentRef(agent_type="bot", agent_id=assignee)
+        profile = prepare_product_profile(
+            product_kind=profile.ref.profile_id,
+            workflow_kind=profile.workflow.ref.profile_id,
+            method_kind=method_kind,
+            profile_ref=profile.ref,
             principal_ref=context.actor,
-            method_kind=profile.composition.method_kind,
-            # 指定执行 bot:辅助执行者,不承担验收权(L6 先例)。
-            executor_ref=AgentRef(agent_type="bot", agent_id=assignee),
+            executor_ref=executor_ref,
+            catalog=self._product_catalog,
+        )
+        if profile is None:
+            raise ContextCollabValidationError("task commission requires a product profile")
+        publication = profile.require_publication()
+        self._authorizer.check_create(
+            method_kind=method_kind, executor_ref=executor_ref, actor=context
+        )
+        facts = creation_payload(
+            method_kind=method_kind,
+            executor_ref=executor_ref,
             objective=title,
             resource_refs=tuple(command.resource_refs),
             product_kind=profile.ref.profile_id,
             workflow_kind=profile.workflow.ref.profile_id,
+            product_profile_ref=profile.ref,
         )
-        spec = prepare_product_spec(
-            spec, self._product_catalog, selected_profile=profile.ref
-        )
-        self._authorizer.check_create(spec, context)
-
-        record = self._repo.create_context(
-            CreateContextRecordRequest(
-                context_spec=spec,
+        record = self._repo.create_collet(
+            CreateColletRecordRequest(
+                space=command.space,
+                principal_ref=context.actor,
+                method_kind=method_kind,
+                executor_ref=executor_ref,
+                objective=title,
+                resource_refs=tuple(command.resource_refs),
+                product_kind=profile.ref.profile_id,
+                workflow_kind=profile.workflow.ref.profile_id,
+                product_profile_ref=profile.ref,
+                creation_facts=facts,
                 completion_conditions=("提交任务说明所要求的成果，并由发布人验收通过",),
                 initial_event=InitialEventDraft(
                     event_kind=_CREATION_EVENT_KIND,
                     primitive_type=_CREATION_PRIMITIVE_TYPE,
                     actor_ref=context.actor,
-                    payload=creation_payload(spec, title),
+                    payload=facts,
                 ),
             )
         )
@@ -219,10 +238,12 @@ class TaskCommissionService:
             self._method_store,
             current_axes(),
             record.collet.collet_id,
-            spec,
-            context,
+            method_kind=method_kind,
+            principal_ref=context.actor,
+            executor_ref=executor_ref,
+            profile=profile,
+            context=context,
             now=_now(),
-            catalog=self._product_catalog,
         )
         # v1 retains publisher-mediated admission. v2 only publishes an owner-
         # authorized opportunity; the designated Bot must query/apply itself.
@@ -248,9 +269,10 @@ class TaskCommissionService:
             )
             publication.require_dispatch_ready(admission.state)
         appended = self._append_message(
-            command=None,
             collet=record.collet,
-            spec=spec,
+            task=record.task,
+            creation_facts=record.creation_facts,
+            product_instance=record.product_instance,
             context=context,
             expected_version=1,
             content=body,
@@ -387,12 +409,18 @@ class TaskCommissionService:
             raise ContextCollabNotFoundError(
                 f"collaboration context {command.collab_context_id!r} not found"
             )
-        if record.context_spec.product_kind != ProductProfile.TASK_COMMISSION.value:
+        if creation_product_kind(record.creation_facts) != ProductProfile.TASK_COMMISSION.value:
             raise ContextCollabNotFoundError(
                 f"collaboration context {command.collab_context_id!r} is not "
                 "a task commission"
             )
-        profile = product_definition(record.context_spec, self._product_catalog)
+        profile = product_definition(
+            product_kind=creation_product_kind(record.creation_facts),
+            workflow_kind=creation_workflow_kind(record.creation_facts),
+            method_kind=creation_method_kind(record.creation_facts),
+            profile_ref=creation_profile_ref(record.creation_facts),
+            catalog=self._product_catalog,
+        )
         if profile is None:
             raise ContextCollabValidationError(
                 "task commission requires a product profile"
@@ -446,7 +474,7 @@ class TaskCommissionService:
         # G1 先于机器守卫(spec §5.2 权威管线,与通用服务同序):授权话术
         # 不把 rule_id/守卫内幕泄露给本应最先拒掉的陌生 actor。
         self._authorizer.check_append(
-            record.collet, record.context_spec, intent, context
+            record.collet, task, record.creation_facts, record.product_instance, intent, context
         )
         if report is not None:
             executor = task.executor_ref
@@ -470,7 +498,8 @@ class TaskCommissionService:
             ensure_expected_version(report.expected_version, record.collet.version)
         validate_product_event(
             catalog=self._product_catalog,
-            spec=record.context_spec,
+            creation_facts=record.creation_facts,
+            product_instance=record.product_instance,
             task=task,
             event_kind=event_kind,
             primitive_type=intent.primitive_type,
@@ -528,9 +557,10 @@ class TaskCommissionService:
     def _append_message(
         self,
         *,
-        command,
         collet,
-        spec: ContextSpec,
+        task,
+        creation_facts: dict,
+        product_instance,
         context: ActorContext,
         expected_version: int,
         content: str,
@@ -550,7 +580,9 @@ class TaskCommissionService:
             visibility=intent.visibility,
             payload=intent.payload,
         )
-        self._authorizer.check_append(collet, spec, intent, context)
+        self._authorizer.check_append(
+            collet, task, creation_facts, product_instance, intent, context
+        )
         return self._repo.append_event(
             collet.collet_id,
             AppendEventRecordRequest(
@@ -575,19 +607,19 @@ class TaskCommissionService:
         return [
             TaskCommissionSummaryView(
                 collet_id=collet.collet_id,
-                title=spec.objective,
+                title=facts["objective"],
                 initiator_id=collet.initiator_ref.principal_id,
                 message_count=counts.get(collet.collet_id, 0),
                 created_at=gmt_create,
             )
-            for collet, spec, gmt_create in rows
+            for collet, facts, gmt_create in rows
         ]
 
     def detail_task(self, collab_context_id: str) -> TaskCommissionDetailView:
         """Query.project:标题/正文/机器状态/公开推进历史一次给齐。
 
         title 读源合同沿公开讨论先例(初始事件 payload objective,
-        NULL-payload 外部行回退伴随 spec.objective,P3 撤列时移除);
+        NULL-payload 外部行回退伴随 creation_facts["objective"],P3 撤列时移除);
         events 只投影 public(裁决 F),Task 控制事件与发言事件同列。
         """
         record = self._repo.get_current_status(collab_context_id)
@@ -595,7 +627,7 @@ class TaskCommissionService:
             raise ContextCollabNotFoundError(
                 f"collaboration context {collab_context_id!r} not found"
             )
-        if record.context_spec.product_kind != ProductProfile.TASK_COMMISSION.value:
+        if creation_product_kind(record.creation_facts) != ProductProfile.TASK_COMMISSION.value:
             raise ContextCollabNotFoundError(
                 f"collaboration context {collab_context_id!r} is not a task commission"
             )
@@ -645,8 +677,8 @@ class TaskCommissionService:
     @staticmethod
     def _title_of(record) -> str:
         """title 新主=初始事件 payload 的 objective;NULL-payload 回退
-        伴随 ``context_spec.objective``(P3 撤列时移除)。"""
-        title = record.context_spec.objective
+        伴随 ``creation_facts["objective"]``(P3 撤列时移除)。"""
+        title = record.task.objective if record.task is not None else record.creation_facts["objective"]
         for event in record.events:
             if event.event_kind == _CREATION_EVENT_KIND:
                 payload = event.payload

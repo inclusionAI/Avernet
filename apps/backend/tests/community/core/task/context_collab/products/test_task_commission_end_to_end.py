@@ -10,14 +10,12 @@ L5 Open 查询和提交申请,再以发布人授权的策略身份直接调用 O
 网关转发或 LLM 执行。
 """
 
-import runpy
 import secrets
 from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from functools import wraps
-from pathlib import Path
 from uuid import uuid4
 
 import jwt
@@ -42,6 +40,7 @@ from agentclaw.community.core.task.context_collab.l1_interoperate_deliver.delive
     A2aDeliveryPort,
 )
 from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
+    AgentRef,
     PrincipalRef,
 )
 from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_resource_refs import (
@@ -49,9 +48,6 @@ from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_reso
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.operations import (
     work as work_operations_module,
-)
-from agentclaw.community.core.task.context_collab.l4_context_primitives.participants import (
-    role_binding_ref,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
     top_level_binding_id,
@@ -64,6 +60,7 @@ from agentclaw.community.core.task.context_collab.l5_methods.operations.contract
     OpenApplicationCommand,
     OpenDecisionOpCommand,
     OpenMethodOpsServiceProtocol,
+    OpenOpportunityCommand,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime import (
     current_axes,
@@ -94,6 +91,7 @@ from agentclaw.community.core.task.context_collab.products.task_commission.servi
 )
 from agentclaw.community.core.task.context_collab.service_api import (
     ContextCollabServiceProtocol,
+    ColletCreateCommand,
     EventAppendCommand,
 )
 from agentclaw.community.di.modules.context_collab_products import (
@@ -109,6 +107,12 @@ from tests.community.factories.task_commission import (
 from tests.community.factories.task_commission import (
     OWNER,
     commission_report_request,
+)
+from tests.community.core.task.context_collab.products.task_commission_e2e_support import (
+    _AI_CODING_STEPS,
+    _participation_snapshot,
+    _simulate_ai_coding,
+    opportunities_query_request,
 )
 
 HUMAN = ActorContext(actor=PrincipalRef("human", "u_owner_001"), source="api")
@@ -210,7 +214,7 @@ def _trace_runtime(monkeypatch, injector: Injector) -> None:
         (
             ContextCollabRepositoryProtocol,
             {
-                "create_context": "创建并持久化 Collet、独立 Task 与初始事件",
+                "create_collet": "创建并持久化 Collet、独立 Task 与初始事件",
                 "append_event": "追加事件并原子保存 Task;返回已保存状态",
             },
         ),
@@ -227,7 +231,7 @@ def _trace_runtime(monkeypatch, injector: Injector) -> None:
         (commission_a2a, "_execute", "A2A HTTP 入站转换命令并调用产品服务"),
         (
             commission_service_module,
-            "prepare_product_spec",
+            "prepare_product_profile",
             "L6 校验产品 Profile 并准备创建合同",
         ),
         (
@@ -252,6 +256,18 @@ def _trace_runtime(monkeypatch, injector: Injector) -> None:
         ),
     ):
         _trace_call(monkeypatch, module, name, description)
+
+
+def _selected_agent_role_refs(record) -> list[str]:
+    """从持久化 ProductInstance 读取已创建的 selected-agent 角色引用。"""
+    assert record.product_instance is not None
+    refs = [
+        ref
+        for ref in record.product_instance.role_binding_refs
+        if "/role-bindings/selected-agent/" in ref
+    ]
+    assert refs
+    return refs
 
 
 @contextmanager
@@ -458,108 +474,54 @@ class SimulatedWorkingBot:
         return artifacts
 
 
-_AI_CODING_STEPS = (
-    (20, "写方案完成"),
-    (50, "编码完成"),
-    (80, "测试通过"),
-    (100, "生成 PR 提案,等待用户验收"),
-)
-
-
-def _simulate_ai_coding(
-    *,
-    tmp_path: Path,
-    task_id: str,
-    service: TaskCommissionServiceProtocol,
-    report_progress: Callable[[int, str], None],
-) -> list[str]:
-    """执行本地 AI coding 模拟,并通过回调逐步上报 L4 Work 进度。
-
-    这是测试夹具的业务动作,不是 Bot 的内置方法;Bot runtime 只负责
-    调用该函数、发送 progress/submit 入站消息。PR 仍是本地提案文件,
-    不冒充真实远端建 PR 或 LLM 执行。
-    """
-    plan, code = tmp_path / "plan.md", tmp_path / "calculator.py"
-    test_result, pr = tmp_path / "test-result.txt", tmp_path / "pull-request.md"
-    artifacts = [path.as_uri() for path in (plan, code, test_result, pr)]
-
-    assert service.detail_task(task_id).status == "in_progress"
-    for index, (percent, note) in enumerate(_AI_CODING_STEPS):
-        if index == 0:
-            plan.write_text(
-                "# 方案\n新增 add(a, b),覆盖正数、负数及零。", encoding="utf-8"
-            )
-        elif index == 1:
-            code.write_text(
-                "def add(a, b):\n    return a + b\n", encoding="utf-8"
-            )
-        elif index == 2:
-            add = runpy.run_path(str(code))["add"]
-            for a, b, expected in ((1, 2, 3), (-1, 1, 0), (0, 0, 0)):
-                assert add(a, b) == expected
-            test_result.write_text("3 passed", encoding="utf-8")
-        else:
-            pr.write_text(
-                "# PR 提案\n新增求和能力;方案、代码、3 项测试已完成。",
-                encoding="utf-8",
-            )
-
-        _flow_log(_TEST_DIRECTORY, f"5. AI coding: {note}, progress={percent}%")
-        report_progress(percent, note)
-        live = service.detail_task(task_id)
-        assert live.status == "in_progress"  # 100% is not accept or submit.
-        assert live.events[-1]["payload"] == {"note": note, "percent": percent}
-        assert live.events[-1]["actor_id"] == BOT_ASSIGNEE
-        assert all(
-            event["event_kind"] != "task.submitted" for event in live.events
-        )
-
-    assert test_result.read_text(encoding="utf-8") == "3 passed"
-    assert all(path.exists() for path in (plan, code, test_result, pr))
-    return artifacts
-
-
-def _opportunities_query_request(bot: SimulatedWorkingBot) -> dict:
-    """HTTP 边界测试用 L4 Query 信封;不是 Bot 内置的机会查询能力。"""
-    request = bot.report_request(TaskCommissionCreatedView("", "", "", "", 0))
-    op = request["params"]["message"]["parts"][0]["data"]
-    ctx = op["context"]
-    # Product-wide discovery needs no Collet handoff or existing membership.
-    ctx["collet_ref"] = ctx["method_binding_ref"] = None
-    ctx["product_profile_ref"]["version"] = str(bot.profile_ref.version)
-    op.update(
-        layer="L4",
-        operation_family="query",
-        action="opportunities",
-        mode="QUERY",
-        target_ref=ctx["product_profile_ref"].copy(),
-        expected_revision=None,
-        payload={},
-    )
-    return request
-
-
 def test_end_to_end_commission_flow(commission_deployment, tmp_path):
     """产品上线 → 建任务 → Bot Query/Apply → 策略 Screen/Admit → scoped Participant → Work → accept。"""
-    # 1. 产品同学新建 v2 Profile 并上线。当前产品上线是代码定义 + DI
-    #    安装,不是管理后台动态注册 API;不更改或迁移已上线的 v1。
+    # 1. 产品同学新建 v2 Profile 并上线。
     profile = build_self_service_commission_profile()
     assert profile.ref.version == 2
     assert profile.composition.method_kind == "Open"
     _flow_log(_TEST_DIRECTORY, "1. 产品同学定义任务代办 v2 Profile,通过 DI 部署上线")
+
     with commission_deployment(profile) as (service, working_bot, injector):
         assert injector.get(ProductCatalog).get("task_commission", 2) == profile
-        # 2. 业务同学在已上线产品上创建任务,只指定 Bot,不代 Bot 申请。
+        # 2. 业务同学通过 L4 Context.create 创建 Collet/Task 和正文 Message。
+        #    L6 负责精确选择已上线 Profile,L5 负责在创建后建立 Open binding;
+        #    机会由下面显式调用 L5 Open.publish_opportunity 发布。
         _flow_log(_TEST_DIRECTORY, "2. 业务同学创建代办任务,指定执行 Bot")
-        created = service.publish_task(
-            PublishTaskCommand(
-                title=TITLE,
-                body=BODY,
+        collab_service = injector.get(ContextCollabServiceProtocol)
+        created_context = collab_service.create_collet(
+            ColletCreateCommand(
                 space=SPACE,
-                assignee_agent_id=BOT_ASSIGNEE,
+                principal_ref=HUMAN.actor,
+                product_kind=profile.ref.profile_id,
+                workflow_kind=profile.workflow.ref.profile_id,
+                method_kind=profile.composition.method_kind,
+                executor_ref=AgentRef(agent_type="bot", agent_id=BOT_ASSIGNEE),
+                objective=TITLE,
+                resource_refs=[],
                 product_profile_ref=profile.ref,
             ),
             HUMAN,
+        )
+        appended = collab_service.append_event(
+            created_context.collab_context_id,
+            EventAppendCommand(
+                expected_version=created_context.context_version,
+                event_kind="user_interaction.posted",
+                primitive_type="Message",
+                actor_ref=HUMAN.actor,
+                parent_event=None,
+                visibility="public",
+                payload={"content": BODY},
+            ),
+            HUMAN,
+        )
+        created = TaskCommissionCreatedView(
+            collet_id=created_context.collab_context_id,
+            title=TITLE,
+            body_event_id=appended.event_id,
+            status="created",
+            context_version=appended.context_version,
         )
         task_id = created.collet_id
         assert created.status == "created"
@@ -570,6 +532,9 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
             TITLE,
             HUMAN.actor.principal_id,
         )
+
+
+
         store, axes = injector.get(MethodStoreProtocol), current_axes()
         binding_id = top_level_binding_id(task_id)
         assert injector.get(A2aDeliveryPort).bridge_records() == ()
@@ -581,6 +546,26 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
         assert store.get_roster(axes, binding_id, task_id) is None
         assert store.list_members(axes, binding_id, task_id) == []
         assert store.list_participant_bindings(axes, binding_id, task_id) == []
+        open_method = injector.get(OpenMethodOpsServiceProtocol)
+        _flow_log(_TEST_DIRECTORY, "2.1. 业务同学调用 L5 Open.publish_opportunity 发布机会")
+        published = open_method.publish_opportunity(
+            collab_context_id=task_id,
+            method_binding_id=binding_id,
+            command=OpenOpportunityCommand(
+                scope_ref=task_id,
+                participation_type="COLLET_PARTICIPANT",
+                opens_at=(datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat(),
+                admission_policy_refs=[
+                    "task_commission.designated_bot_self_application/1" #录取策略：指定 Bot 自己申请，并由任务产品的策略自动审核
+                ],
+                capacity=1, #表示这个机会最多允许多少个未终态申请占用名额
+                reason="task_commission.owner_authorized_publish", #本次发布操作的审计原因
+            ),
+            context=HUMAN, # actor context
+        )
+        assert published.accepted and published.state == "OPEN"
+        assert published.collab_context_id == task_id
+        assert published.method_binding_id == binding_id
         # Designation is not admission; even the real signed Bot cannot start yet.
         working_bot.request(
             commission_report_request(created), expected_status="REJECTED"
@@ -608,7 +593,7 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
             opportunity,
         )  # repeatable read
         # 同时保留产品级签名 HTTP Query 的真实路由/最小投影验证。
-        [discovered] = working_bot.request(_opportunities_query_request(working_bot))[
+        [discovered] = working_bot.request(opportunities_query_request(working_bot))[
             "data"
         ]["opportunities"]
         assert discovered == {
@@ -631,11 +616,7 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
             command=OpenApplicationCommand(
                 applicant_agent_ref=working_bot.bot_id,
                 accountable_principal_ref=working_bot.owner_id,
-                requested_role_refs=[
-                    role_binding_ref(task_id, role)
-                    for role in record.context_spec.role_bindings
-                    if role.role == "selected-agent"
-                ],
+                requested_role_refs=_selected_agent_role_refs(record),
                 reason="task_commission.bot_self_application",
             ),
             context=bot_context,
@@ -652,9 +633,7 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
         )
         # case 显式展开已发布策略的审核/录取步骤,不调用产品 review 封装。
         # 由发布人授权的 product_policy actor 执行,不是 Bot 自审。
-        policy_context = ActorContext(
-            record.context_spec.principal_ref, source="product_policy"
-        )
+        policy_context = ActorContext(HUMAN.actor, source="product_policy")
         [policy_ref] = opportunity.admission_policy_refs
         _flow_log(_TEST_DIRECTORY, "3.1. 产品策略调用 Open.screen: SUBMITTED → SCREENING")
         screened = open_method.screen(
@@ -779,23 +758,6 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
         _flow_log(_TEST_DIRECTORY, "完整用户旅程结束:用户 accept 后 status=done")
 
 
-def _participation_snapshot(service, injector, created):
-    """SQL observable state and all relevant Method facts, including dispatch."""
-    store, axes = injector.get(MethodStoreProtocol), current_axes()
-    context_id, binding = created.collet_id, top_level_binding_id(created.collet_id)
-    return (
-        service.detail_task(context_id),
-        store.get_binding(axes, binding, context_id),
-        store.get_roster(axes, binding, context_id),
-        tuple(store.list_members(axes, binding, context_id)),
-        tuple(store.list_participant_bindings(axes, binding, context_id)),
-        tuple(store.list_opportunities(axes, binding, context_id)),
-        tuple(store.list_applications(axes, binding, context_id)),
-        tuple(store.list_decisions(axes, binding, context_id)),
-        injector.get(A2aDeliveryPort).bridge_records(),
-    )
-
-
 def _publish_v2(service, profile, assignee=BOT_ASSIGNEE):
     return service.publish_task(
         PublishTaskCommand(
@@ -807,7 +769,7 @@ def _publish_v2(service, profile, assignee=BOT_ASSIGNEE):
 
 def _apply_to_created(bot, created):
     """独立验证现有签名 HTTP Apply 入口;不把 Open 能力封装成 Bot 方法。"""
-    opportunities = bot.request(_opportunities_query_request(bot))["data"]["opportunities"]
+    opportunities = bot.request(opportunities_query_request(bot))["data"]["opportunities"]
     [opportunity] = [
         item for item in opportunities if item["collab_context_id"] == created.collet_id
     ]
@@ -836,11 +798,9 @@ def test_task_application_review_rejects_unmatched_submission(
             OpenApplicationCommand(
                 applicant_agent_ref="other_bot" if mismatch == "applicant" else bot.bot_id,
                 accountable_principal_ref=bot.owner_id,
-                requested_role_refs=[] if mismatch == "roles" else [
-                    role_binding_ref(context_id, role)
-                    for role in record.context_spec.role_bindings
-                    if role.role == "selected-agent"
-                ],
+                requested_role_refs=(
+                    [] if mismatch == "roles" else _selected_agent_role_refs(record)
+                ),
             ),
             context,
         )
@@ -949,7 +909,7 @@ def test_partial_open_admission_does_not_authorize_execution(
     profile = build_self_service_commission_profile()
     with commission_deployment(profile) as (service, bot, injector):
         created = _publish_v2(service, profile)
-        [opportunity] = bot.request(_opportunities_query_request(bot))["data"][
+        [opportunity] = bot.request(opportunities_query_request(bot))["data"][
             "opportunities"
         ]
         before_sql = service.detail_task(created.collet_id)

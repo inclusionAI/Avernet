@@ -36,9 +36,7 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.collet i
     Collet,
     ColletState,
 )
-from agentclaw.community.core.task.context_collab.l6_products.context_spec import (
-    ContextSpec,
-)
+from tests.community.core.task.context_collab.creation_facts import creation_facts
 from agentclaw.community.core.task.context_collab.l4_context_primitives.task import Task
 from agentclaw.community.core.task.context_collab.l4_context_primitives.event_envelope import (
     EventRecord,
@@ -54,13 +52,13 @@ from agentclaw.community.core.task.context_collab.persistence.repository import 
     ContextCollabRepositoryProtocol,
     ContextCreatedRecord,
     ContextStatusRecord,
-    CreateContextRecordRequest,
+    CreateColletRecordRequest,
     EventAppendedRecord,
 )
 from agentclaw.community.core.task.context_collab.service_api import (
     ActorContext,
     ContextCollabServiceProtocol,
-    ContextCreateCommand,
+    ColletCreateCommand,
     EventAcceptedResult,
     EventAppendCommand,
 )
@@ -74,7 +72,7 @@ PRINCIPAL = PrincipalRef(principal_type="human", principal_id="u_1001")
 EXECUTOR = AgentRef(agent_type="bot", agent_id="bot_coding_001")
 
 
-def make_create_command(**overrides) -> ContextCreateCommand:
+def make_create_command(**overrides) -> ColletCreateCommand:
     """构造创建命令(spec §6.2 示例);与 Task 7 测试同形态,可按字段覆盖。"""
     fields = {
         "space": SpaceRef(space_id="space_workspace_001", environment="prod"),
@@ -91,7 +89,7 @@ def make_create_command(**overrides) -> ContextCreateCommand:
         ],
     }
     fields.update(overrides)
-    return ContextCreateCommand(**fields)
+    return ColletCreateCommand(**fields)
 
 
 def make_actor(
@@ -133,21 +131,21 @@ class _FakeContextCollabRepository:
 
     def __init__(self) -> None:
         self.collets: dict[str, Collet] = {}
-        self.context_specs: dict[str, ContextSpec] = {}
+        self.creation_facts: dict[str, ContextSpec] = {}
         self.tasks: dict[str, Task | None] = {}
         self.events: dict[str, list[EventRecord]] = {}
         self.append_calls: list[tuple[str, AppendEventRecordRequest]] = []
 
-    def create_context(
-        self, request: CreateContextRecordRequest
+    def create_collet(
+        self, request: CreateColletRecordRequest
     ) -> ContextCreatedRecord:
         collab_context_id = "collet_" + uuid4().hex
         event_id = "evt_" + uuid4().hex
         task = Task(
-            objective=request.context_spec.objective,
+            objective=request.objective,
             status=TaskStatus.CREATED.value,
-            principal_ref=request.context_spec.principal_ref,
-            executor_ref=request.context_spec.executor_ref,
+            principal_ref=request.principal_ref,
+            executor_ref=request.executor_ref,
             task_id="task_" + collab_context_id,
             collet_ref=collab_context_id,
             version=1,
@@ -160,7 +158,7 @@ class _FakeContextCollabRepository:
             collet_id=collab_context_id,
             initiator_ref=request.initial_event.actor_ref,
             state=ColletState.ACTIVE,
-            scope=request.context_spec.space,
+            scope=request.space,
             current_event_id=event_id,
             version=1,
         )
@@ -177,12 +175,12 @@ class _FakeContextCollabRepository:
             occurred_at=datetime.now(timezone.utc),
         )
         self.collets[collab_context_id] = collet
-        self.context_specs[collab_context_id] = request.context_spec
+        self.creation_facts[collab_context_id] = request.creation_facts
         self.tasks[collab_context_id] = task
         self.events[collab_context_id] = [initial_event]
         return ContextCreatedRecord(
             collet=collet,
-            context_spec=request.context_spec,
+            creation_facts=request.creation_facts,
             task=task,
             initial_event=initial_event,
         )
@@ -196,7 +194,7 @@ class _FakeContextCollabRepository:
         events = list(self.events.get(collab_context_id, []))
         return ContextStatusRecord(
             collet=collet,
-            context_spec=self.context_specs[collab_context_id],
+            creation_facts=self.creation_facts[collab_context_id],
             tasks=(self.tasks[collab_context_id],)
             if self.tasks[collab_context_id] is not None
             else (),
@@ -257,7 +255,7 @@ class _FakeContextCollabRepository:
         return EventAppendedRecord(
             event=event,
             collet=updated,
-            context_spec=self.context_specs[collab_context_id],
+            creation_facts=self.creation_facts[collab_context_id],
             task=new_task,
         )
 
@@ -271,7 +269,7 @@ def _make_service(**command_overrides):
         product_catalog=PRODUCT_CATALOG,
     )
     assert isinstance(service, ContextCollabServiceProtocol)
-    created = service.create_context(
+    created = service.create_collet(
         make_create_command(**command_overrides), make_actor()
     )
     return repo, service, created

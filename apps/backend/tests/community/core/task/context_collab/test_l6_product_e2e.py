@@ -36,7 +36,7 @@ from agentclaw.community.core.task.context_collab.persistence.repository import 
 )
 from agentclaw.community.core.task.context_collab.service_api import (
     ActorContext,
-    ContextCreateCommand,
+    ColletCreateCommand,
     EventAppendCommand,
 )
 from agentclaw.community.core.task.context_collab.services.context_collab_service import (
@@ -54,7 +54,7 @@ def _actor(principal: PrincipalRef) -> ActorContext:
     return ActorContext(actor=principal, source="api")
 
 
-def _create_command(**overrides) -> ContextCreateCommand:
+def _create_command(**overrides) -> ColletCreateCommand:
     fields = {
         "space": SPACE,
         "principal_ref": OWNER,
@@ -70,7 +70,7 @@ def _create_command(**overrides) -> ContextCreateCommand:
         ],
     }
     fields.update(overrides)
-    return ContextCreateCommand(**fields)
+    return ColletCreateCommand(**fields)
 
 
 def _append(
@@ -117,7 +117,7 @@ class TestBbsProductE2E:
             repository=ContextCollabRepository(db, product_catalog=PRODUCT_CATALOG),
             product_catalog=PRODUCT_CATALOG,
         )
-        created = service.create_context(_create_command(), _actor(OWNER))
+        created = service.create_collet(_create_command(), _actor(OWNER))
 
         assert created.current_snapshot["method_kind"] == "Open + Group"
         assert created.current_snapshot["executor_ref"] is None
@@ -184,7 +184,7 @@ class TestBbsProductE2E:
             repository=ContextCollabRepository(db, product_catalog=PRODUCT_CATALOG),
             product_catalog=PRODUCT_CATALOG,
         )
-        created = service.create_context(
+        created = service.create_collet(
             _create_command(
                 product_kind="bbs_help_request",
                 workflow_kind="bbs_help_request_goal",

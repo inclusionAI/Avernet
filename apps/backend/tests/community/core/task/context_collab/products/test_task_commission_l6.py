@@ -20,7 +20,7 @@ from agentclaw.community.core.task.context_collab.l5_methods.open_profile import
     ParticipationType,
 )
 from agentclaw.community.core.task.context_collab.l6_products.binding import (
-    prepare_product_spec,
+    prepare_product_profile,
 )
 from agentclaw.community.core.task.context_collab.l6_products.catalog import (
     ProductCatalog,
@@ -90,13 +90,15 @@ def test_commission_has_a_complete_declarative_publication_and_work_contract():
 def test_publish_uses_selected_profile_and_passes_actual_binding_to_method_adapter():
     service, repo, store = _service()
     created = service.publish_task(_publish_command(), _actor())
-    spec = repo.create_calls[0].context_spec
+    facts = repo.create_calls[0].creation_facts
     profile = TASK_COMMISSION_PROFILE
-    assert spec.product_kind == profile.ref.profile_id
-    assert spec.product_profile_version == profile.ref.version
-    assert spec.method_kind == profile.composition.method_kind
-    assert spec.workflow_kind == profile.workflow.ref.profile_id
-    assert spec.workflow_profile_version == profile.workflow.ref.version
+    assert facts["product_kind"] == profile.ref.profile_id
+    assert facts["product_profile_ref"] == {
+        "profile_id": profile.ref.profile_id,
+        "version": profile.ref.version,
+    }
+    assert facts["method_kind"] == profile.composition.method_kind
+    assert facts["workflow_kind"] == profile.workflow.ref.profile_id
     from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime import (
         current_axes,
     )
@@ -110,25 +112,39 @@ def test_publish_uses_selected_profile_and_passes_actual_binding_to_method_adapt
 def test_explicit_profile_selection_pins_exact_version_and_never_migrates():
     service, repo, _ = _service()
     service.publish_task(_publish_command(), _actor())
-    pinned = repo.create_calls[0].context_spec
-    unpinned = replace(
-        pinned,
-        product_profile_version=None,
-        workflow_profile_version=None,
-        participants=(),
-        role_bindings=(),
-    )
+    facts = repo.create_calls[0].creation_facts
     v2 = replace(TASK_COMMISSION_PROFILE, ref=VersionedProfileRef("task_commission", 2))
     catalog = ProductCatalog((TASK_COMMISSION_PROFILE, v2))
-    selected = prepare_product_spec(unpinned, catalog, selected_profile=v2.ref)
-    assert selected.product_profile_version == 2
-    assert selected.workflow_profile_version == 1
-    assert prepare_product_spec(unpinned, catalog).product_profile_version == 1
-    with pytest.raises(ContextCollabValidationError, match="unpinned"):
-        prepare_product_spec(pinned, catalog, selected_profile=v2.ref)
+    selected = prepare_product_profile(
+        product_kind=facts["product_kind"],
+        workflow_kind=facts["workflow_kind"],
+        method_kind=facts["method_kind"],
+        profile_ref=v2.ref,
+        principal_ref=PRINCIPAL,
+        executor_ref=AgentRef("bot", ASSIGNEE),
+        catalog=catalog,
+    )
+    assert selected.ref.version == 2
+    assert selected.workflow.ref.version == 1
+    default = prepare_product_profile(
+        product_kind=facts["product_kind"],
+        workflow_kind=facts["workflow_kind"],
+        method_kind=facts["method_kind"],
+        profile_ref=None,
+        principal_ref=PRINCIPAL,
+        executor_ref=AgentRef("bot", ASSIGNEE),
+        catalog=catalog,
+    )
+    assert default.ref.version == 1
     with pytest.raises(ContextCollabValidationError, match="does not match"):
-        prepare_product_spec(
-            unpinned, catalog, selected_profile=VersionedProfileRef("other", 1)
+        prepare_product_profile(
+            product_kind=facts["product_kind"],
+            workflow_kind=facts["workflow_kind"],
+            method_kind=facts["method_kind"],
+            profile_ref=VersionedProfileRef("other", 1),
+            principal_ref=PRINCIPAL,
+            executor_ref=AgentRef("bot", ASSIGNEE),
+            catalog=catalog,
         )
 
 

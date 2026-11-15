@@ -16,15 +16,16 @@ from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_reso
     ResourceRef,
     SpaceRef,
 )
-from agentclaw.community.core.task.context_collab.l6_products.context_spec import (
-    ContextSpec,
+from tests.community.core.task.context_collab.creation_facts import (
+    create_collet_request,
+    creation_facts,
 )
 from agentclaw.community.core.task.context_collab.persistence.models import (
     ContextCollabColletModel,
     ContextCollabEventModel,
 )
 from agentclaw.community.core.task.context_collab.persistence.repository import (
-    CreateContextRecordRequest,
+    CreateColletRecordRequest,
     ContextCollabRepository,
     ContextCreatedRecord,
     ContextStatusRecord,
@@ -38,9 +39,9 @@ EXECUTOR = AgentRef(agent_type="bot", agent_id="bot_coding_001")
 CREATOR = PrincipalRef(principal_type="human", principal_id="u_1001")
 
 
-def _context_spec(executor: AgentRef | None = EXECUTOR) -> ContextSpec:
+def _context_spec(executor: AgentRef | None = EXECUTOR) -> dict:
     """spec §6.2 指定执行请求示例的创建参数。"""
-    return ContextSpec(
+    return creation_facts(
         space=SpaceRef(space_id="space_workspace_001", environment="prod"),
         principal_ref=CREATOR,
         method_kind="Single",
@@ -58,14 +59,17 @@ def _context_spec(executor: AgentRef | None = EXECUTOR) -> ContextSpec:
 
 def _create_request(
     executor: AgentRef | None = EXECUTOR,
-) -> CreateContextRecordRequest:
-    return CreateContextRecordRequest(
-        context_spec=_context_spec(executor),
+) -> CreateColletRecordRequest:
+    facts = _context_spec(executor)
+    return create_collet_request(
+        facts,
+        space=SpaceRef(space_id="space_workspace_001", environment="prod"),
+        principal_ref=CREATOR,
         initial_event=InitialEventDraft(
             event_kind="task.created",
             primitive_type="Task",
             actor_ref=CREATOR,
-            payload={"objective": OBJECTIVE},
+            payload=facts,
         ),
     )
 
@@ -74,7 +78,7 @@ class TestCreateContext:
     def test_inserts_one_collet_and_one_initial_event(self, db):
         repo = ContextCollabRepository(db, product_catalog=PRODUCT_CATALOG)
 
-        record = repo.create_context(_create_request())
+        record = repo.create_collet(_create_request())
 
         assert isinstance(record, ContextCreatedRecord)
         with db.orm_session() as session:
@@ -93,25 +97,11 @@ class TestCreateContext:
             assert row.context_version == 1
             assert row.current_event_id == record.initial_event.event_id
             assert row.env == get_current_env()
-            assert json.loads(row.context_spec) == {
-                "space": {"space_id": "space_workspace_001", "environment": "prod"},
-                "principal_ref": {
-                    "principal_type": "human",
-                    "principal_id": "u_1001",
-                },
-                "method_kind": "Single",
-                "executor_ref": {"agent_type": "bot", "agent_id": "bot_coding_001"},
-                "objective": OBJECTIVE,
-                "resource_refs": [
-                    {
-                        "resource_type": "forum_topic",
-                        "resource_id": "topic_001",
-                        "revision": "3",
-                    }
-                ],
-                "product_kind": "team_todo",
-                "workflow_kind": "team_todo_execution",
+            assert json.loads(row.scope) == {
+                "space_id": "space_workspace_001",
+                "environment": "prod",
             }
+            assert json.loads(row.creation_facts) == _context_spec()
             assert row.current_snapshot is None
             assert row.root_task_ref == record.task.task_id
             assert record.task.task_id != record.collet.collet_id
@@ -130,7 +120,7 @@ class TestCreateContext:
                 "principal_id": "u_1001",
             }
             assert evt.visibility == "public"
-            assert json.loads(evt.payload) == {"objective": OBJECTIVE}
+            assert json.loads(evt.payload) == _context_spec()
             assert evt.context_version_after == 1
             assert isinstance(evt.occurred_at, datetime)
             assert evt.env == get_current_env()
@@ -149,20 +139,20 @@ class TestCreateContext:
         assert round_tripped.occurred_at.tzinfo is not None
         assert round_tripped.occurred_at.utcoffset() == timedelta(0)
         # 返回的领域对象与落库行一致。
-        assert record.context_spec == _context_spec()
+        assert record.creation_facts == _context_spec()
         assert record.current_snapshot.status == "created"
         assert record.current_snapshot.executor_ref == EXECUTOR
         assert record.collet.current_event_id == record.initial_event.event_id
         assert record.collet.version == 1
         assert record.initial_event.actor_ref == CREATOR
-        assert record.initial_event.payload == {"objective": OBJECTIVE}
+        assert record.initial_event.payload == _context_spec()
 
     def test_repeated_create_makes_a_second_context(self, db):
         """创建不设幂等键(spec 作者裁决):重复请求各建一个上下文。"""
         repo = ContextCollabRepository(db, product_catalog=PRODUCT_CATALOG)
 
-        first = repo.create_context(_create_request())
-        second = repo.create_context(_create_request())
+        first = repo.create_collet(_create_request())
+        second = repo.create_collet(_create_request())
 
         assert first.collet.collet_id != second.collet.collet_id
         assert first.initial_event.event_id != second.initial_event.event_id
@@ -170,7 +160,7 @@ class TestCreateContext:
             assert session.query(ContextCollabColletModel).count() == 2
             assert session.query(ContextCollabEventModel).count() == 2
         # 每次创建的 JSON 列均独立 round-trip 无损。
-        assert second.context_spec == first.context_spec
+        assert second.creation_facts == first.creation_facts
         assert second.current_snapshot == first.current_snapshot
         assert second.current_snapshot.executor_ref == EXECUTOR
 
@@ -185,8 +175,8 @@ class TestGetCurrentStatus:
         """仓储全量返回事件,顺序即自增 id;trunk 过滤不在仓储层(R9)。"""
         repo = ContextCollabRepository(db, product_catalog=PRODUCT_CATALOG)
         # 无执行 Agent 的创建请求:覆盖 executor_ref=None 的 JSON round-trip。
-        created = repo.create_context(_create_request(executor=None))
-        assert created.context_spec.executor_ref is None
+        created = repo.create_collet(_create_request(executor=None))
+        assert created.task.executor_ref is None
         assert created.current_snapshot.executor_ref is None
 
         full = repo.get_current_status(created.collet.collet_id)
