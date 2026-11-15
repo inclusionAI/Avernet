@@ -91,7 +91,9 @@ test('列表和详情均不把缺失状态显示成停用', async () => {
 test('启用任务确认后按目标执行，忙碌和无权限时不执行', async () => {
   const target = { ...task, enabled: true, runtime_stage: 'verify', device_uuid: 'device' };
   state.run.mockResolvedValue({ success: true });
-  const operate = jest.fn(async (work: () => Promise<unknown>) => work());
+  const operate = jest.fn(async (work: () => Promise<unknown>) => {
+    await work();
+  });
   const view = render(<RoutineActions {...props} operate={operate} task={target} />);
   fireEvent.click(screen.getByRole('button', { name: '立即执行' }));
   fireEvent.click(screen.getByRole('button', { name: '立即执行', hidden: false }));
