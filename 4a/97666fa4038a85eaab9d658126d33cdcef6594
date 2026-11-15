@@ -1,0 +1,19 @@
+apps/frontend-nextgen/config/config.local.ts
+  s_d23d2dd74fff18::t_1964238ac85594 132-133
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4a97666fa4038a85eaab9d658126d33cdcef6594",
+  "prompts": {},
+  "sessions": {
+    "s_d23d2dd74fff18": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a13a79-4a70-7a40-84da-33a34fa4f69f",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}
