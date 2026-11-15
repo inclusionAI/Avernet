@@ -13,6 +13,7 @@ if TYPE_CHECKING:
         SpaceMemberSummaryRecord,
         SpaceRecord,
         SpaceRole,
+        SpaceDeletedResult,
         SpaceScTeamRepairResult,
         SpaceSummaryRecord,
         SpaceType,
@@ -33,6 +34,9 @@ class SpaceServiceProtocol(Protocol):
 
     @abstractmethod
     def repair_sc_team_binding(self, *, space_id: int) -> SpaceScTeamRepairResult: ...
+
+    @abstractmethod
+    def delete_team(self, *, space_id: int, actor_id: str) -> SpaceDeletedResult: ...
 
     @abstractmethod
     def batch_query_personal(

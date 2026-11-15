@@ -43,6 +43,7 @@ from agentclaw.community.adapters.http.openapi_v1.spaces.schemas import (
     SpaceListScope,
     SearchFavoritesRequest,
     SpaceCreated,
+    SpaceDeleted,
     SpaceRole,
     SpaceType,
     SpaceItem,
@@ -282,6 +283,25 @@ async def create_team_space(
         name=body.space_name, creator_id=user_id, create_sc_team=not body.skip_sc
     )
     return created(_created_space(record), request)
+
+
+@router.delete(
+    "/{space_id}",
+    response_model=Envelope[SpaceDeleted],
+    dependencies=_REFUSES_APP_ONLY,
+)
+@envelope_errors
+async def delete_team_space(
+    space_id: SpaceIdPath,
+    request: Request,
+    caller: ActingCallerDep,
+    service: SpaceServiceProtocol = Injected(SpaceServiceProtocol),
+) -> Envelope[SpaceDeleted]:
+    actor_id = _require_user_delegation(caller)
+    result = service.delete_team(space_id=space_id, actor_id=actor_id)
+    return envelope(
+        SpaceDeleted(space_id=result.space_id, deleted=result.deleted), request
+    )
 
 
 @router.get(

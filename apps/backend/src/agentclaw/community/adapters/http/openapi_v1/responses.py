@@ -250,6 +250,7 @@ from agentclaw.community.core.spaces.errors import (
     SpaceMemberNotFoundError,
     SpaceNameInvalidError,
     SpaceNotFoundError,
+    SpaceResourcesExistError,
 )
 
 from agentclaw.community.core.mcp.errors import (
@@ -447,6 +448,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     **SPACE_SKILL_HTTP_ERRORS,
     SpaceCreatorInvariantError: (409, "Space creator cannot be removed or demoted"),
     PersonalSpaceInvariantError: (409, "Personal space membership is immutable"),
+    SpaceResourcesExistError: (409, "Space still has resources"),
     SkillCenterTeamCreateError: (
         502,
         SpacePublicErrorMessage.SKILL_CENTER_TEAM_CREATE_FAILED,

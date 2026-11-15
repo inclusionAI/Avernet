@@ -14,9 +14,12 @@ from agentclaw.community.core.repository.protocols.space_persistence_effects imp
 )
 from agentclaw.community.core.repository.protocols.spaces import SpaceRepositoryProtocol
 from agentclaw.community.core.spaces.errors import (
+    PersonalSpaceInvariantError,
+    SpaceAccessDeniedError,
     SpaceAlreadyExistsError,
     SpaceMemberAlreadyExistsError,
     SpaceNotFoundError,
+    SpaceResourcesExistError,
 )
 from agentclaw.community.core.spaces.models import (
     PersonalSpaceLookupRecord,
@@ -36,7 +39,10 @@ from agentclaw.community.core.work_orders.models import (
     WorkOrderStatus,
 )
 from agentclaw.community.core.work_orders.repository.models import WorkOrderModel
+from agentclaw.community.core.models.space_skill import SkillSpaceBinding
 from agentclaw.community.plugin_api.database import DatabasePlugin
+from agentclaw.community.plugin_api.models import BotModel
+from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
 
 
 class SpaceRepository(SpaceRepositoryProtocol):
@@ -235,6 +241,79 @@ class SpaceRepository(SpaceRepositoryProtocol):
                 .one_or_none()
             )
             return row.to_record() if row is not None else None
+
+    @contextmanager
+    def delete_empty_team_transaction(
+        self, *, space_id: int, actor_id: str, env: str
+    ):
+        """Lock and irreversibly hide one empty TEAM Space.
+
+        Both the caller's live ADMIN membership and the resource predicates are
+        repeated here. The earlier service check only rejects cheaply before a
+        transaction; this sequence decides what actually commits.
+        """
+        with self._db.transactional_orm_session() as db:
+            space = self._effects.lock_space(
+                db, space_id=space_id, environment=env
+            )
+            if space is None:
+                raise SpaceNotFoundError(f"space {space_id} not found")
+            if space.space_type != SpaceType.TEAM.value:
+                raise PersonalSpaceInvariantError(
+                    "personal space cannot be deleted"
+                )
+
+            admin = (
+                db.query(self._Member.id)
+                .filter(
+                    self._Member.space_id == space_id,
+                    self._Member.user_id == actor_id,
+                    self._Member.env == env,
+                    self._Member.status == "ACTIVE",
+                    self._Member.role.in_(("ADMIN", "ADMINISTRATOR")),
+                )
+                .first()
+            )
+            if admin is None:
+                raise SpaceAccessDeniedError("space admin role required")
+
+            tenant = get_current_avernet_tenant()
+            live_bot = (
+                db.query(BotModel.id)
+                .filter(
+                    BotModel.avernet_tenant == tenant,
+                    BotModel.env == env,
+                    BotModel.space_id == space_id,
+                    BotModel.is_delete == 0,
+                )
+                .first()
+            )
+            if live_bot is not None:
+                raise SpaceResourcesExistError(
+                    "space still has live bots or space skills"
+                )
+
+            live_skill = (
+                db.query(SkillSpaceBinding.id)
+                .filter(
+                    SkillSpaceBinding.avernet_tenant == tenant,
+                    SkillSpaceBinding.env == env,
+                    SkillSpaceBinding.space_id == space_id,
+                )
+                .first()
+            )
+            if live_skill is not None:
+                raise SpaceResourcesExistError(
+                    "space still has live bots or space skills"
+                )
+
+            space.deleted_at = func.now()
+            space.deleted_by = actor_id
+            space.updated_by = actor_id
+            space.sc_mapping_status = "INACTIVE"
+            db.flush()
+            db.refresh(space)
+            yield space.to_record()
 
     def backfill_sc_team_id(self, *, space_id: int, env: str, sc_team_id: str) -> bool:
         """Fill a missing SC Team id without overwriting a concurrent repair.

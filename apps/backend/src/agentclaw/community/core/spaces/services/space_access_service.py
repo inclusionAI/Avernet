@@ -65,6 +65,24 @@ class SpaceAccessService(SpaceAccessServiceProtocol):
             raise SpaceAccessDeniedError("space membership required")
         return space, member
 
+    def require_current_space_admin(self, *, space_id: int, user_id: str):
+        """Require a live ADMIN membership, without the creator exception.
+
+        Destructive Space deletion must not inherit the historical creator
+        exception in ``require_space_admin``. A creator who was removed or
+        demoted must lose deletion access exactly like any other former
+        administrator.
+        """
+        space = self.require_space(space_id=space_id)
+        member = self._repository.get_member(
+            space_id=space_id, user_id=user_id, env=get_current_env()
+        )
+        if member is None or member.role not in (
+            SpaceRole.ADMIN, SpaceRole.OWNER, SpaceRole.ADMINISTRATOR
+        ):
+            raise SpaceAccessDeniedError("space admin role required")
+        return space, member
+
     def require_space_admin(self, *, space_id: int, user_id: str):
         space = self.require_space(space_id=space_id)
         if space.created_by == user_id:
@@ -78,7 +96,7 @@ class SpaceAccessService(SpaceAccessServiceProtocol):
         if member is None or member.role not in (
             SpaceRole.ADMIN, SpaceRole.OWNER, SpaceRole.ADMINISTRATOR
         ):
-            raise SpaceAccessDeniedError("space owner role required")
+            raise SpaceAccessDeniedError("space admin role required")
         return space, member
 
     def require_space_owner(self, *, space_id: int, user_id: str):

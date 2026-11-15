@@ -26,8 +26,8 @@ import { SpaceJoinForm } from '../SpaceJoinForm';
 import { AddMembersModal } from './AddMembersModal';
 import { SpaceMemberRow } from './SpaceMemberRow';
 
-// clawweb=Avernet 暂无 DELETE /openapi/v1/bots/spaces/{id} 接口；UI 入口隐藏，后端补接口时翻 true。
-const DELETE_SPACE_SUPPORTED = false;
+// 后端已提供 DELETE /openapi/v1/bots/spaces/{id}；删除前会原子复核当前 ADMIN 与空资源条件。
+const DELETE_SPACE_SUPPORTED = true;
 
 export interface SpaceMemberListProps {
   space: Space;
@@ -103,7 +103,7 @@ export function SpaceMemberList({
     <div className="mt-auto flex items-center justify-end border-t border-divider pt-3">
       <ConfirmDialog
         title="确认删除该团队空间？"
-        description={`删除后「${space.spaceName}」及其资源将离线，且不可撤销`}
+        description={`删除后「${space.spaceName}」将不可访问，且不可撤销。请先迁移或处理归属该空间的 Bot 和能力。`}
         confirmText="删除"
         confirmVariant="destructive"
         onConfirm={() => onDeleteSpace?.(space.spaceId)}

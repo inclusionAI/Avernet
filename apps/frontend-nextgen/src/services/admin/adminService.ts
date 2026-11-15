@@ -157,10 +157,12 @@ export const adminService = {
     }
   },
 
-  /** 删除团队空间（仅 ADMIN；目标契约 §15-4，clawweb=Avernet 暂无此接口，UI 入口已隐藏）。 */
+  /** 删除团队空间（仅当前活跃 ADMIN；空资源校验由后端原子复核）。 */
   async deleteSpace(spaceId: number | string): Promise<SpaceServiceResult<boolean>> {
+    const user_id = await ensureUserId();
+    if (!user_id) return { error: MISSING_IDENTITY_ERROR };
     try {
-      await deleteSpaceApi(spaceId);
+      await deleteSpaceApi(spaceId, { user_id });
       return { data: true };
     } catch (e) {
       return { error: toServiceError(e) };

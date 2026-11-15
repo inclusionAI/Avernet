@@ -139,7 +139,7 @@ def test_require_space_owner_accepts_owner_and_rejects_member() -> None:
 
     _, owner = service.require_space_owner(space_id=7, user_id="owner-1")
     assert owner.role is SpaceRole.OWNER
-    with pytest.raises(SpaceAccessDeniedError, match="owner role required"):
+    with pytest.raises(SpaceAccessDeniedError, match="admin role required"):
         service.require_space_owner(space_id=7, user_id="member-1")
 
 
@@ -185,3 +185,62 @@ def test_require_space_member_defaults_to_runtime_env() -> None:
     repository.get_member.assert_called_once_with(
         space_id=7, user_id="member-1", env=get_current_env()
     )
+
+
+def _active_admin_member() -> SpaceMemberRecord:
+    return _member(role=SpaceRole.ADMIN)
+
+
+def test_require_current_space_admin_accepts_active_admin() -> None:
+    repository = MagicMock()
+    repository.get_space.return_value = _space(created_by="former-admin")
+    repository.get_member.return_value = _active_admin_member()
+
+    space, member = SpaceAccessService(repository).require_current_space_admin(
+        space_id=7, user_id="member-1"
+    )
+
+    assert space.id == 7
+    assert member.role is SpaceRole.ADMIN
+    repository.get_member.assert_called_once_with(
+        space_id=7, user_id="member-1", env="dev"
+    )
+
+
+def test_require_current_space_admin_rejects_ordinary_member() -> None:
+    repository = MagicMock()
+    repository.get_space.return_value = _space()
+    repository.get_member.return_value = _member(role=SpaceRole.MEMBER)
+
+    with pytest.raises(SpaceAccessDeniedError, match="admin role required"):
+        SpaceAccessService(repository).require_current_space_admin(
+            space_id=7, user_id="member-1"
+        )
+
+
+def test_require_current_space_admin_rejects_removed_or_demoted_creator() -> None:
+    repository = MagicMock()
+    repository.get_space.return_value = _space(created_by="member-1")
+    repository.get_member.return_value = None
+
+    with pytest.raises(SpaceAccessDeniedError, match="admin role required"):
+        SpaceAccessService(repository).require_current_space_admin(
+            space_id=7, user_id="member-1"
+        )
+
+
+def test_require_current_space_admin_accepts_historical_admin_aliases() -> None:
+    repository = MagicMock()
+    repository.get_space.return_value = _space(created_by="former-admin")
+    repository.get_member.side_effect = [
+        _member(role=SpaceRole.OWNER),
+        _member(role=SpaceRole.ADMINISTRATOR),
+    ]
+    service = SpaceAccessService(repository)
+
+    assert service.require_current_space_admin(
+        space_id=7, user_id="member-1"
+    )[1].role is SpaceRole.OWNER
+    assert service.require_current_space_admin(
+        space_id=7, user_id="member-1"
+    )[1].role is SpaceRole.ADMINISTRATOR

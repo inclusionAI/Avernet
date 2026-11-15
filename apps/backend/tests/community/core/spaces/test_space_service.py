@@ -15,6 +15,7 @@ from agentclaw.community.core.repository.implementations.spaces.space import (
 from agentclaw.community.core.spaces.errors import SpaceAlreadyExistsError
 from agentclaw.community.core.spaces.models import SpaceListScope, SpaceRecord, SpaceType
 from agentclaw.community.core.spaces.services.space_service import SpaceService
+from agentclaw.community.core.spaces.services.space_access_service import SpaceAccessService
 from agentclaw.community.plugin_api.staff_dept import (
     StaffProfileInfo,
     StaffProfileLookupError,
@@ -36,7 +37,12 @@ def _make_service(repository, skill_center, staff_dept=None):
         )
     if isinstance(repository, MagicMock):
         repository.get_team_space_by_name.return_value = None
-    return SpaceService(repository, skill_center, staff_dept)
+    return SpaceService(
+        repository,
+        SpaceAccessService(repository),
+        skill_center,
+        staff_dept,
+    )
 
 
 def _space(

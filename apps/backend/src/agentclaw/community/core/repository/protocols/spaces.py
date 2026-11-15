@@ -67,6 +67,12 @@ class SpaceRepositoryProtocol(Protocol):
         self, *, space_id: int, env: str, sc_team_id: str
     ) -> bool: ...
 
+
+    @abstractmethod
+    def delete_empty_team_transaction(
+        self, *, space_id: int, actor_id: str, env: str
+    ) -> ContextManager[SpaceRecord]: ...
+
     @abstractmethod
     def get_space_by_code(self, *, space_code: str, env: str) -> SpaceRecord | None: ...
 
