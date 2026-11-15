@@ -198,7 +198,7 @@ impl BotAuthorityRepoPort for MemoryBotRepo {
         let owner_count = approved_owner_count(&state, &env, bot_id);
         if owner_count != 1 {
             if owner_count == 0 {
-                if let Some(creator) = created_by_fallback(&self.bots, bot_id).await {
+                if let Some(creator) = self.bots.read().await.get(bot_id).and_then(|bot| bot.created_by.clone()) {
                     // Use created_by as owner: grant Owner if the
                     // caller matches, otherwise deny.
                     if user_id.strip_prefix("human_").is_some_and(|u| u == creator) {
@@ -291,7 +291,7 @@ impl BotAuthorityRepoPort for MemoryBotRepo {
             match owner_count {
                 1 => {}
                 0 => {
-                    if let Some(creator) = created_by_fallback(&self.bots, &query.bot_id).await {
+                    if let Some(creator) = self.bots.read().await.get(&query.bot_id).and_then(|bot| bot.created_by.clone()) {
                         // Use created_by as fallback owner for this query.
                         let legacy = if query.user_id.strip_prefix("human_").is_some_and(|u| u == creator) {
                             if memory_human_alive(self, &query.user_id).await {
@@ -349,7 +349,7 @@ impl BotAuthorityRepoPort for MemoryBotRepo {
         let state = self.authority.read().await;
         let owner_count = approved_owner_count(&state, &env, bot_id);
         if owner_count == 0 {
-            if let Some(creator) = created_by_fallback(&self.bots, bot_id).await {
+            if let Some(creator) = self.bots.read().await.get(bot_id).and_then(|bot| bot.created_by.clone()) {
                 return Ok(BotOwnershipView {
                     bot_id: bot_id.to_string(),
                     owner_user_id: creator.clone(),
@@ -416,7 +416,7 @@ impl BotAuthorityRepoPort for MemoryBotRepo {
         let state = self.authority.read().await;
         let owner_count = approved_owner_count(&state, &env, &query.bot_id);
         if owner_count == 0 {
-            if let Some(creator) = created_by_fallback(&self.bots, &query.bot_id).await {
+            if let Some(creator) = self.bots.read().await.get(&query.bot_id).and_then(|bot| bot.created_by.clone()) {
                 // Use created_by as owner with empty manager set.
                 return Ok(ManagerPage {
                     owner: BotOwnershipView {
@@ -2412,22 +2412,6 @@ fn transfer_view(
         .map(|row| view_from_row(row, now_ms())))
 }
 
-
-/// Read the `created_by` field of a bot as a fallback owner when the
-/// ownership-version > 0 but no approved owner edge exists (orphaned
-/// ownership). Returns `None` when the bot is absent or has no
-/// `created_by` record. The caller must still verify the Human actor
-/// is alive before granting any relation.
-async fn created_by_fallback(
-    bots: &std::sync::Arc<tokio::sync::RwLock<std::collections::HashMap<String, crate::memory::MemoryBotRow>>>,
-    bot_id: &str,
-) -> Option<String> {
-    bots
-        .read()
-        .await
-        .get(bot_id)
-        .and_then(|bot| bot.created_by.clone())
-}
 
 pub(super) fn owner_integrity_error(bot_id: &str, owner_count: usize) -> ServiceError {
     owner_integrity_error_message(if owner_count == 0 {

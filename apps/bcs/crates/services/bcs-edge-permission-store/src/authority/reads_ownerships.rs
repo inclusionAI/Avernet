@@ -77,6 +77,27 @@ impl DbBotAuthorityStore {
             }
         }
 
+        // Orphaned ownership fallback: version > 0 bots with no owner
+        // edge may still have a created_by record. Query it in one
+        // chunked pass so the in-memory store's created_by fallback
+        // has a SQL counterpart.
+        let orphaned: Vec<_> = id_refs
+            .iter()
+            .copied()
+            .filter(|bot| {
+                states.get(*bot).is_some_and(|version| *version > 0)
+                    && !owners.contains_key(*bot)
+            })
+            .collect();
+        let mut orphan_creators: HashMap<String, String> = HashMap::new();
+        for chunk in chunked(&orphaned) {
+            for (bot_id, creator) in self.legacy_creators_in(&chunk).await? {
+                if let Some(creator) = creator {
+                    orphan_creators.insert(bot_id, creator);
+                }
+            }
+        }
+
         // Migration-window shim parity with `roles_for`: only
         // version-0 bots consult the legacy creator fact, in one
         // chunked read per chunk (never per-bot).
@@ -112,11 +133,20 @@ impl DbBotAuthorityStore {
             }
             match owners.get(bot_id).map_or(0, Vec::len) {
                 0 => {
-                    // Orphaned ownership: project None instead of
-                    // erroring the batch. The in-memory store's
-                    // created_by fallback handles the same case;
-                    // the SQL store leaves it to bcs-admin.
-                    results.push(None);
+                    // Orphaned ownership: use created_by as fallback
+                    // owner when available; otherwise retain the
+                    // strict integrity error.
+                    if let Some(creator) = orphan_creators.get(bot_id) {
+                        results.push(Some(BotOwnershipView {
+                            bot_id: bot_id.clone(),
+                            owner_user_id: creator.clone(),
+                            owner_actor_id: human_actor_id(creator),
+                        }));
+                    } else {
+                        return Err(owner_integrity_error(format!(
+                            "bot {bot_id} has no approved owner edge"
+                        )));
+                    }
                     continue;
                 }
                 1 => {
