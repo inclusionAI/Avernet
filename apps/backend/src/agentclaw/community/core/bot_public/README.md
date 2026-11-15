@@ -72,6 +72,16 @@ closed. Friend approval and BCS friend-auth synchronization use the same
 compatibility locator, then send the resolved current Owner as the AgentPass
 operator. The strict repository `get_by_id_and_owner` contract is unchanged.
 
+The compatibility lookup matches `entity_id` or current `owner_id` exactly:
+zero matches returns not found, more than one match fails closed as ambiguous,
+and a single match is accepted. `bot_id` is not unique across entities, so a
+single match can still address the wrong Bot when the historical locator equals
+another entity's `entity_id` or `owner_id`. This is a known residual risk of the
+friend detail, friend list, friend-approval and friend-auth sync flows, and
+explicit product acceptance is not recorded. The locator applies only to these
+friend flows; authorization paths keep the strict `get_by_id_and_owner`
+contract. Source: Avernet PR #3918.
+
 ### BCSFuse publication synchronization
 
 - Legacy `POST /api/bots/{bot_id}/public` syncs user publication through
