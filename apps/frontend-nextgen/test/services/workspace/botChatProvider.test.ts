@@ -456,8 +456,8 @@ describe('botChatProvider', () => {
     await expect(p.loadHistory()).resolves.toEqual([expect.objectContaining({ id: 'new' })]);
     expect(p.hasMoreHistory).toBe(true);
     await expect(p.loadMoreHistory()).resolves.toEqual([expect.objectContaining({ id: 'old' })]);
-    expect(listMessagesPage).toHaveBeenNthCalledWith(1, bot, 'u', 'sid-1', 1, 50);
-    expect(listMessagesPage).toHaveBeenNthCalledWith(2, bot, 'u', 'sid-1', 2, 50);
+    expect(listMessagesPage).toHaveBeenNthCalledWith(1, bot, 'u', 'sid-1', 1, 50, undefined);
+    expect(listMessagesPage).toHaveBeenNthCalledWith(2, bot, 'u', 'sid-1', 2, 50, undefined);
     expect(p.hasMoreHistory).toBe(false);
   });
 
@@ -469,7 +469,7 @@ describe('botChatProvider', () => {
     });
     const p = createBotChatProvider({ bot, userId: 'u', sessionId: 'sid-1' });
     const out = await p.loadHistory();
-    expect(botSessionService.botSessionService.listMessagesPage).toHaveBeenCalledWith(bot, 'u', 'sid-1', 1, 50);
+    expect(botSessionService.botSessionService.listMessagesPage).toHaveBeenCalledWith(bot, 'u', 'sid-1', 1, 50, undefined);
     expect(out).toHaveLength(1);
   });
 });
@@ -544,6 +544,7 @@ it('团队连接、IAM 和消息历史使用登录用户与 entity owner，不�
     'team-session',
     1,
     50,
+    undefined,
   );
   await provider.disconnect();
 });
