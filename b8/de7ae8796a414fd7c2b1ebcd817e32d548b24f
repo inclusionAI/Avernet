@@ -1,0 +1,14 @@
+singlebox/ci/bcs.avernet.conf
+  h_45bbed694cc8b0 2
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b8de7ae8796a414fd7c2b1ebcd817e32d548b24f",
+  "prompts": {},
+  "humans": {
+    "h_45bbed694cc8b0": {
+      "author": "yuange.zjy <yuange.zjy@antgroup.com>"
+    }
+  }
+}

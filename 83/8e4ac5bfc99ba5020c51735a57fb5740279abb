@@ -1,0 +1,40 @@
+apps/bcs/crates/application/bcn-runtime-app/README.md
+  h_f4a73db4ad12be 33-36,61-65,83-91,100-101
+apps/bcs/crates/application/bcn-runtime-app/src/connector.rs
+  h_f4a73db4ad12be 29,135,254-255,257-258,427,487,525,542,546,558-561,604-611
+apps/bcs/crates/application/bcn-runtime-app/src/projection.rs
+  h_f4a73db4ad12be 44-69,75,77-86,88,95,97-101,103-104
+apps/bcs/crates/application/bcn-runtime-app/src/worker.rs
+  h_f4a73db4ad12be 229-231,324-350,372-373,375-376,380,398,400-401,420-423,568
+apps/bcs/crates/application/bcn-runtime-app/tests/common/faults.rs
+  h_f4a73db4ad12be 5-6,14-15,38-42
+apps/bcs/crates/application/bcn-runtime-app/tests/scheduling.rs
+  h_f4a73db4ad12be 1-19
+apps/bcs/crates/application/bcn-runtime-app/tests/uncertain_delivery.rs
+  h_f4a73db4ad12be 390-481
+apps/bcs/crates/contracts/bcn-runtime-model/README.md
+  h_f4a73db4ad12be 32-37
+apps/bcs/crates/contracts/bcn-runtime-model/src/connector.rs
+  h_f4a73db4ad12be 76-77
+apps/bcs/crates/contracts/bcn-runtime-model/tests/application_compatibility.rs
+  h_f4a73db4ad12be 51-58
+apps/bcs/crates/service-api/bcn-runtime-api/README.md
+  h_f4a73db4ad12be 62-68
+apps/bcs/crates/services/bcn-runtime-store/src/dispatch.rs
+  h_f4a73db4ad12be 28
+apps/bcs/crates/services/bcn-session-runner/README.md
+  h_f4a73db4ad12be 110-115
+apps/bcs/crates/services/bcn-session-runner/src/direct.rs
+  h_f4a73db4ad12be 148-150
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "838e4ac5bfc99ba5020c51735a57fb5740279abb",
+  "prompts": {},
+  "humans": {
+    "h_f4a73db4ad12be": {
+      "author": "元歌 <yuange.zjy@antgroup.com>"
+    }
+  }
+}

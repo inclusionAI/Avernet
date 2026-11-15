@@ -1,0 +1,35 @@
+apps/bcs/scripts/e2e-runner/bcs_e2e/authority_density/__init__.py
+  s_cecdc98e721f4b::t_aa0770540ba81b 1-46
+apps/bcs/scripts/e2e-runner/bcs_e2e/authority_density/contract.py
+  s_cecdc98e721f4b::t_60ec59a227f584 1-609
+apps/bcs/scripts/e2e-runner/bcs_e2e/authority_density/defect.py
+  s_cecdc98e721f4b::t_4185de44d01ccf 1-328
+apps/bcs/scripts/e2e-runner/bcs_e2e/authority_density/profile.py
+  s_cecdc98e721f4b::t_e706aac35874c8 1-213
+apps/bcs/scripts/e2e-runner/bcs_e2e/authority_density/registration_proposal.py
+  s_cecdc98e721f4b::t_d0fecfe982c072 1-68
+apps/bcs/scripts/e2e-runner/bcs_e2e/authority_density/reporting.py
+  s_cecdc98e721f4b::t_6d8a6c9d0ee391 1-58
+apps/bcs/scripts/e2e-runner/bcs_e2e/authority_density/run.py
+  s_cecdc98e721f4b::t_51464bf983ac57 1-327
+apps/bcs/scripts/e2e-runner/bcs_e2e/authority_density/transport.py
+  s_cecdc98e721f4b::t_23735973d8f427 1-128
+apps/bcs/scripts/e2e-runner/tests/test_authority_density.py
+  s_cecdc98e721f4b::t_f534c1957b64a3 1-716
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1a1bc3b8179eea5fc563d0759d78b66421efc666",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "Ling-3.1-flash"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

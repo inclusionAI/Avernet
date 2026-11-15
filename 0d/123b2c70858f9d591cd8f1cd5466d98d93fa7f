@@ -1,0 +1,84 @@
+apps/bcs/Cargo.lock
+  h_f4a73db4ad12be 337,350-366
+apps/bcs/Cargo.toml
+  h_f4a73db4ad12be 3,154
+apps/bcs/crates/contracts/bcn-runtime-model/Cargo.toml
+  h_f4a73db4ad12be 9
+apps/bcs/crates/contracts/bcn-runtime-model/README.md
+  h_f4a73db4ad12be 9-18
+apps/bcs/crates/contracts/bcn-runtime-model/src/storage.rs
+  h_f4a73db4ad12be 121-127,129,164-196
+apps/bcs/crates/contracts/bcn-runtime-model/tests/contracts.rs
+  h_f4a73db4ad12be 68,96
+apps/bcs/crates/contracts/bcn-runtime-model/tests/repository_identity.rs
+  h_f4a73db4ad12be 1-26
+apps/bcs/crates/service-api/bcn-runtime-api/README.md
+  h_f4a73db4ad12be 9-41
+apps/bcs/crates/service-api/bcn-runtime-api/src/port/repo.rs
+  h_f4a73db4ad12be 15-17,32-36,44-49,54-56,60,82,85-88,101-108
+apps/bcs/crates/service-api/bcn-runtime-api/tests/durable_operations_contract.rs
+  h_f4a73db4ad12be 9,11
+apps/bcs/crates/services/bcn-runtime-store/Cargo.toml
+  h_f4a73db4ad12be 1-24
+apps/bcs/crates/services/bcn-runtime-store/README.md
+  h_f4a73db4ad12be 1-174
+apps/bcs/crates/services/bcn-runtime-store/src/admission.rs
+  h_f4a73db4ad12be 1-61
+apps/bcs/crates/services/bcn-runtime-store/src/commands.rs
+  h_f4a73db4ad12be 1-71
+apps/bcs/crates/services/bcn-runtime-store/src/dispatch.rs
+  h_f4a73db4ad12be 1-145
+apps/bcs/crates/services/bcn-runtime-store/src/events.rs
+  h_f4a73db4ad12be 1-137
+apps/bcs/crates/services/bcn-runtime-store/src/inbox.rs
+  h_f4a73db4ad12be 1-66
+apps/bcs/crates/services/bcn-runtime-store/src/keys.rs
+  h_f4a73db4ad12be 1-20
+apps/bcs/crates/services/bcn-runtime-store/src/lib.rs
+  h_f4a73db4ad12be 1-21
+apps/bcs/crates/services/bcn-runtime-store/src/liveness.rs
+  h_f4a73db4ad12be 1-62
+apps/bcs/crates/services/bcn-runtime-store/src/ownership.rs
+  h_f4a73db4ad12be 1-33
+apps/bcs/crates/services/bcn-runtime-store/src/persistence.rs
+  h_f4a73db4ad12be 1-50
+apps/bcs/crates/services/bcn-runtime-store/src/query.rs
+  h_f4a73db4ad12be 1-23
+apps/bcs/crates/services/bcn-runtime-store/src/results.rs
+  h_f4a73db4ad12be 1-43
+apps/bcs/crates/services/bcn-runtime-store/src/session.rs
+  h_f4a73db4ad12be 1-125
+apps/bcs/crates/services/bcn-runtime-store/tests/admission.rs
+  h_f4a73db4ad12be 1-49
+apps/bcs/crates/services/bcn-runtime-store/tests/bounds.rs
+  h_f4a73db4ad12be 1-68
+apps/bcs/crates/services/bcn-runtime-store/tests/common/mod.rs
+  h_f4a73db4ad12be 1-38
+apps/bcs/crates/services/bcn-runtime-store/tests/common/observed.rs
+  h_f4a73db4ad12be 1-29
+apps/bcs/crates/services/bcn-runtime-store/tests/conformance_repositories.rs
+  h_f4a73db4ad12be 1-22
+apps/bcs/crates/services/bcn-runtime-store/tests/event_epochs.rs
+  h_f4a73db4ad12be 1-83
+apps/bcs/crates/services/bcn-runtime-store/tests/fencing.rs
+  h_f4a73db4ad12be 1-70
+apps/bcs/crates/services/bcn-runtime-store/tests/liveness.rs
+  h_f4a73db4ad12be 1-33
+apps/bcs/crates/services/bcn-runtime-store/tests/recovery.rs
+  h_f4a73db4ad12be 1-126
+apps/bcs/crates/services/bcn-runtime-store/tests/results.rs
+  h_f4a73db4ad12be 1-45
+docs/architecture/bcn-runtime.md
+  h_f4a73db4ad12be 244-297
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0d123b2c70858f9d591cd8f1cd5466d98d93fa7f",
+  "prompts": {},
+  "humans": {
+    "h_f4a73db4ad12be": {
+      "author": "元歌 <yuange.zjy@antgroup.com>"
+    }
+  }
+}

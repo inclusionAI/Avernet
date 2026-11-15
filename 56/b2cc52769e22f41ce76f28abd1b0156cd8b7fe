@@ -1,0 +1,27 @@
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-session-recovery/tests/test_recovery_runner.py
+  s_7739fafd4b71a4::t_296017c1879068 254-261,263-337,339-349
+  s_7739fafd4b71a4::t_715df4bf77289d 262,338
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-session-recovery/SKILL.md
+  s_7739fafd4b71a4::t_13588e0bcf8f66 149-151
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-session-recovery/scripts/recovery_ais/runner.py
+  s_7739fafd4b71a4::t_47633bfde1f88c 460
+  s_7739fafd4b71a4::t_1cbb9df6b5c6d6 274,284-289,412,445-451,453,455,466-467,478-481,484,486-490,492,497-500,579-580,606-612
+  s_7739fafd4b71a4::t_13588e0bcf8f66 452,454,647-650,652,654
+  s_7739fafd4b71a4::t_715df4bf77289d 468,653
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "56b2cc52769e22f41ce76f28abd1b0156cd8b7fe",
+  "prompts": {},
+  "sessions": {
+    "s_7739fafd4b71a4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c960-a592-7063-aabe-97bec0c53df5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}

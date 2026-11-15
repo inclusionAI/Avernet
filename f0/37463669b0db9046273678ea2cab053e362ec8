@@ -1,0 +1,25 @@
+apps/bcs/crates/adapters/http/bcs-http/tests/group_messages_contract.rs
+  s_8538143de29560::t_a843a81c9071a7 1368-1378
+apps/bcs/crates/services/bcs-message-flow/src/bot_event/coordination.rs
+  s_8538143de29560::t_75f513c06bc113 6,123-124,337,340,397,454
+apps/bcs/crates/services/bcs-message-flow/src/queued_group/projection.rs
+  s_8538143de29560::t_e756b2b4de9443 115
+apps/bcs/crates/services/bcs-message-flow/src/task_flow/dispatch.rs
+  s_8538143de29560::t_15efe11755e96b 76-88
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f037463669b0db9046273678ea2cab053e362ec8",
+  "prompts": {},
+  "sessions": {
+    "s_8538143de29560": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1abe4-191f-7a70-af7d-c9a7cb8741b5",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

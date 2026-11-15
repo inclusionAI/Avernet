@@ -1,0 +1,173 @@
+apps/baas/docs/teClawHttpAPI.md
+  s_4510c0a8802d3e::t_f016489e433988 12-14
+apps/baas/src/secbaas/enterprise/plugins/sandbox/teclaw/_real.py
+  s_4510c0a8802d3e::t_bf210804db31c8 16,99,110-131,143
+apps/baas/tests/unit/plugins/sandbox/teclaw/test_real.py
+  s_4510c0a8802d3e::t_191b8eaa144447 953,966,1673-1760
+apps/backend/src/agentclaw/corp/di/modules/infrastructure/corp/column.py
+  s_4510c0a8802d3e::t_fa2f44c9e79469 270-272
+apps/backend/src/agentclaw/corp/plugins/prod/auth_relationship.py
+  s_4510c0a8802d3e::t_c2656660d912e8 34
+apps/backend/tests/corp/di/test_local_k8s_column.py
+  s_4510c0a8802d3e::t_2a2c0e66b0565d 4-5,9-10,16-17,21,23-24,29-32,40,47,49,84-85,92-114
+apps/bcs-internal/Cargo.lock
+  s_4510c0a8802d3e::t_c898d46ae05ded 549,554,625,651,675,699-709,718-719,723,738-760,1096,1734,1817,1878,1910,2111,2144-2153,2203,2460,2566-2572
+apps/bcs-internal/Cargo.toml
+  s_4510c0a8802d3e::t_89f0a426e1ac81 3,40-42
+apps/bcs-internal/bcn-configs/a2a-sofarpc.toml
+  s_4510c0a8802d3e::t_21c00e6818aea9 1-8
+apps/bcs-internal/configs/a2a-sofarpc.toml
+  s_4510c0a8802d3e::t_e74e099fa18425 1-8
+apps/bcs-internal/crates/bootstrap/bcs-internal/Cargo.toml
+  s_4510c0a8802d3e::t_284e80cb17d31b 10
+apps/bcs-internal/crates/bootstrap/bcs-internal/src/main.rs
+  s_4510c0a8802d3e::t_c4f87bed41519a 39-41,47-49,58-70,80-101
+apps/bcs-internal/crates/plugins/bcs-a2a-sofarpc/Cargo.toml
+  s_4510c0a8802d3e::t_96ffec4faeb6e0 1-31
+apps/bcs-internal/crates/plugins/bcs-a2a-sofarpc/README.md
+  s_4510c0a8802d3e::t_ed2703c4fc486e 1-100
+apps/bcs-internal/crates/plugins/bcs-a2a-sofarpc/src/lib.rs
+  s_4510c0a8802d3e::t_55e9af6c5c55d6 1-125
+apps/bcs-internal/crates/plugins/bcs-a2a-sofarpc/src/triple.rs
+  s_4510c0a8802d3e::t_c7822dcfbf0e1c 1-49
+apps/bcs-internal/crates/plugins/bcs-a2a-sofarpc/tests/config_install.rs
+  s_4510c0a8802d3e::t_6f83390093e61a 1-27
+apps/bcs-internal/crates/plugins/bcs-a2a-sofarpc/tests/conformance.rs
+  s_4510c0a8802d3e::t_e6d5f61aef5eb4 1-135
+apps/bcs-internal/crates/plugins/bcs-a2a-sofarpc/tests/triple_wire.rs
+  s_4510c0a8802d3e::t_ce515edcb6d0b1 1-82
+apps/bcs-internal/scripts/check-p4.sh
+  s_4510c0a8802d3e::t_8cad38ef64d943 19
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-recovery-handbook/SKILL.md
+  s_4510c0a8802d3e::t_0db98f9c46872e 17,25,27
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-recovery-handbook/common/mcp/handbook.md
+  s_4510c0a8802d3e::t_4ea1db4f741b8f 21,23,27,32,46-50,81,211,220
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-recovery-handbook/common/network/handbook.md
+  s_4510c0a8802d3e::t_6efc66a4e8a052 19,21
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-recovery-handbook/common/skill/handbook.md
+  s_4510c0a8802d3e::t_bfb62dffc363f2 11-12,20-22,29
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-recovery-handbook/custom/97/skill/handbook.md
+  s_4510c0a8802d3e::t_247f7e814a5423 11,48,50,52
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-repair/references/tool-contract.md
+  s_4510c0a8802d3e::t_54c800229d6c72 7-12
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-session-recovery/SKILL.md
+  s_4510c0a8802d3e::t_edc2ff6dfcf09a 10,16,18,20,22,24,26,28,30,32,34-53,55,57-97,101,107,111-114,120,124-125,130,134-136,144-145,152-154,160,164-170,172,174,176-182,186-187,194-196,198-200,206,208,210-212,214,216,218,220,222,224,226,228,230,232,234,236,238,240,242,244,246,248,250,252,254,256,258,260,262-269,271,281-282,285,290,310,344
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-session-recovery/evals/recovery-behavior-cases.json
+  s_4510c0a8802d3e::t_1ca747ae68926e 1-230
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-session-recovery/scripts/recovery_ais/runner.py
+  s_4510c0a8802d3e::t_ed0d70b5c6bca2 47-48,50-56,89,133-134,136,140-147,152,154,184-192,194-201,269-271,459-460,467-468,471-473,476,479-480
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-session-recovery/tests/test_owner_feedback.py
+  s_4510c0a8802d3e::t_7105f0144fbe34 3,40-41,43,95-168
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-session-recovery/tests/test_recovery_runner.py
+  s_4510c0a8802d3e::t_35ba22efa50c59 946,952-953,957,1145-1175
+apps/evolverun/clawweb/docs/recovery-owner-feedback/README.md
+  s_4510c0a8802d3e::t_3193b5f56e3794 1,3,5,7,11,13-22,24,26,28,30,32,34,36,38,40-44,46,48,50,52,54,56,58-62,64,66-74
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/recovery-owner-callback.test.ts
+  s_4510c0a8802d3e::t_22d31d54030be6 5,36-37,39,41-42,62-101
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/recovery-owner-callback.ts
+  s_4510c0a8802d3e::t_bea81f1f7025e8 11,23-28
+apps/evolverun/docs/clawinsight/README.md
+  s_4510c0a8802d3e::t_bd31adbf718ee4 17,21-22
+apps/evolverun/docs/clawinsight/data-pipeline/session-sql-sources.md
+  s_4510c0a8802d3e::t_eb476718bcece9 1-85
+apps/proxy/conf/docker/nginx/lua/teclaw_config.lua
+  s_4510c0a8802d3e::t_214f0ce9740494 94-96
+apps/proxy/sofapyapp/configs/application-default.yaml
+  s_4510c0a8802d3e::t_0258736d4221cc 6
+apps/proxy/sofapyapp/configs/application-prepub.yaml
+  s_4510c0a8802d3e::t_ace31d9d455158 15
+apps/proxy/sofapyapp/configs/application-prod.yaml
+  s_4510c0a8802d3e::t_28392ad0f12e98 11
+apps/proxy/sofapyapp/configs/application.yaml
+  s_4510c0a8802d3e::t_44611e7e01375f 96
+apps/proxy/sofapyapp/servers/web/resolvers/teclaw_resolver.py
+  s_4510c0a8802d3e::t_28be4858e91ce0 12,29,38,56,96
+apps/proxy/tests/lua/test_teclaw_angw2.lua
+  s_4510c0a8802d3e::t_2c85b44f8d6295 1-50
+apps/proxy/tests/test_teclaw_config.py
+  s_4510c0a8802d3e::t_9e0c0672bdb717 16-18,23,48,58,67,77,90,98,105,111,121,133,138,156,165,175,184,192,200,209,238,250,264,349,362,388-425
+apps/proxy/tests/test_teclaw_lua.py
+  s_4510c0a8802d3e::t_b7b5a7999f7417 1-25
+autocoding/skills/teamclaw-defect-handoff/SKILL.md
+  s_4510c0a8802d3e::t_b5b2082988f58f 3,23,30,50,52-56,60,63,65,69,72,74-76,80-82,84,86
+autocoding/skills/teamclaw-defect-handoff/references/daytime-detect.md
+  s_4510c0a8802d3e::t_18b3c582c80fe5 1-21
+autocoding/skills/teamclaw-defect-handoff/references/group-messages.md
+  s_4510c0a8802d3e::t_a04a6af7f06fe2 1-119
+autocoding/skills/teamclaw-workflow/SKILL.md
+  s_4510c0a8802d3e::t_f7a70e0580cc80 52
+offline/clawinsight/README.md
+  s_4510c0a8802d3e::t_f4677b9bfbbb30 1-25
+offline/clawinsight/catalog/source-manifest.jsonl
+  s_4510c0a8802d3e::t_15a85c2a302b5f 1-14
+offline/clawinsight/odps_scripts/execute_sql/sql_00_ddl_tables.sql
+  s_4510c0a8802d3e::t_d535d7f0005485 1-153
+offline/clawinsight/odps_scripts/execute_sql/sql_01_aggregate_jsonl.sql
+  s_4510c0a8802d3e::t_046433a5658b8e 1-88
+offline/clawinsight/odps_scripts/execute_sql/sql_02_parse_sessions_json.sql
+  s_4510c0a8802d3e::t_8a47b54ef6cfac 1-56
+offline/clawinsight/odps_scripts/execute_sql/sql_03_join_extract.sql
+  s_4510c0a8802d3e::t_347849da9a28f4 1-159
+offline/clawinsight/odps_scripts/execute_sql/sql_13_session_mapping_create.sql
+  s_4510c0a8802d3e::t_f2f90f8d9312c4 1-19
+offline/clawinsight/odps_scripts/execute_sql/sql_13_session_mapping_insert.sql
+  s_4510c0a8802d3e::t_395ab7b4b31621 1-38
+offline/clawinsight/odps_scripts/sql_00_alter_session_full_di_add_skill_path.sql
+  s_4510c0a8802d3e::t_c99b1174dc7c85 1-12
+offline/clawinsight/odps_scripts/sql_00_create_table_with_comments.sql
+  s_4510c0a8802d3e::t_0f9803b97512ce 1-91
+offline/clawinsight/odps_scripts/sql_04_register_udf.sql
+  s_4510c0a8802d3e::t_80b71d511ee097 1-69
+offline/clawinsight/odps_scripts/sql_13_session_mapping_register_udf.sql
+  s_4510c0a8802d3e::t_172140063e67ae 1-26
+offline/clawinsight/odps_scripts/udf_extract_session_features.py
+  s_4510c0a8802d3e::t_460b381d16414f 1-484
+offline/clawinsight/odps_scripts/udf_extract_session_mapping.py
+  s_4510c0a8802d3e::t_49244ae54da912 1-52
+offline/clawinsight/odps_scripts/udf_session_features_metrics.py
+  s_4510c0a8802d3e::t_b9a7ce79a25048 1-911
+offline/clawinsight/tests/test_session_udf_regression.py
+  s_4510c0a8802d3e::t_5a4b5a84e526fd 1-169
+simulator/AGENTS.md
+  s_4510c0a8802d3e::t_924b89dfd1172c 71,147-224
+simulator/justfile
+  s_4510c0a8802d3e::t_818a19d42b9072 72
+simulator/modules/baas/config/application-dev.yaml
+  s_4510c0a8802d3e::t_787be05f9b8087 84-98
+simulator/modules/storage/sql/agentclawdb-structure.sql
+  s_4510c0a8802d3e::t_8886692fcea582 4392,11214,11247-11248,11389-11495
+simulator/scripts/cluster-common.sh
+  s_4510c0a8802d3e::t_18a09a309b38cc 760-768,779
+simulator/scripts/install-apparmor-profile.sh
+  s_4510c0a8802d3e::t_389f1ed92e0500 4-6,26-31,44-74,119
+simulator/scripts/k3d-apparmor-init.sh
+  s_4510c0a8802d3e::t_b23fe72bacfe0d 1-31
+simulator/scripts/k3d-start.sh
+  s_4510c0a8802d3e::t_8ab0a7c9f1002e 23-26,134-159,168,171
+simulator/scripts/start-service.sh
+  s_4510c0a8802d3e::t_88b5e1b7afe0f6 36,38-40,58-61,64-75,86-87,106
+simulator/scripts/tests/test-clawweb-baseline.sh
+  s_4510c0a8802d3e::t_41a00d6df42b5b 59-73
+simulator/scripts/tests/test-cluster-scripts.sh
+  s_4510c0a8802d3e::t_8cc0e7ced45387 996-1001,1055-1056,1058-1059,2516-2518,2812-2816,2872-2874,2905-2911,2916-2944,3754,3795-3796
+simulator/scripts/tests/test_apparmor.py
+  s_4510c0a8802d3e::t_8297e277b9f2cb 1-230
+simulator/tests/test_default_skills_command.py
+  s_4510c0a8802d3e::t_43202494cd9cd0 82-84,107
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e071aeda3ac30ed16f116a3294a4bd6932fbe572",
+  "prompts": {},
+  "sessions": {
+    "s_4510c0a8802d3e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1abc2-03c9-7d12-9760-9c632cf09e6e",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

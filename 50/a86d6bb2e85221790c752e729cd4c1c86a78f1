@@ -1,0 +1,25 @@
+apps/bcs/crates/adapters/http/bcs-api-http/tests/a2a_catalog_sync.rs
+  s_3390a382ab8b6f::t_fdc53d2add2eb6 1-3,7,11,57,59,66,68
+apps/bcs/crates/test-support/bcs-test-support/Cargo.toml
+  s_3390a382ab8b6f::t_9aeacf01686847 25,31-32
+apps/bcs/crates/test-support/bcs-test-support/src/contract/a2a_catalog_stack.rs
+  s_3390a382ab8b6f::t_2620e2bf75fd9d 1-89
+apps/bcs/crates/test-support/bcs-test-support/src/contract/mod.rs
+  s_3390a382ab8b6f::t_4670d47e34f8ef 33
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "50a86d6bb2e85221790c752e729cd4c1c86a78f1",
+  "prompts": {},
+  "sessions": {
+    "s_3390a382ab8b6f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ce64-b71e-7ab0-af3f-e8a007f31b16",
+        "model": "Ling-3.1-flash"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

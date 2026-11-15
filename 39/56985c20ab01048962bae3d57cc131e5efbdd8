@@ -1,0 +1,34 @@
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/session-recovery-runtime.ts
+  s_25c8d69584ee47::t_d8c36fe0e7d7aa 7-8,57-58,60
+apps/evolverun/clawweb/internal/modules/tclog/server/services/session-trajectory-reader.ts
+  s_25c8d69584ee47::t_d8c36fe0e7d7aa 2,6-7,60,113-115,118-134,163-169,172-174,176,178-183,185,187,193,197-199,211
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/index.ts
+  s_25c8d69584ee47::t_d8c36fe0e7d7aa 737
+apps/evolverun/clawweb/internal/modules/tclog/server/services/aivision-session-trajectory.ts
+  s_25c8d69584ee47::t_462c7044a63e68 1-32,34-37,39-40,43-46,51-58,62-77,80-115,121-122
+  s_25c8d69584ee47::t_7a1c2436a92c2e 33,38,41-42,47-50,59-61,78-79
+  s_25c8d69584ee47::t_889252187deab4 116-120
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/session-recovery-runtime.test.ts
+  s_25c8d69584ee47::t_c1454ef2a28d39 120,125,127,130-137,139
+apps/evolverun/clawweb/internal/modules/tclog/server/services/__tests__/session-trajectory-reader.test.ts
+  s_25c8d69584ee47::t_889252187deab4 3,8-58
+  s_25c8d69584ee47::t_65e7e79969bc8c 59
+apps/evolverun/docs/session-recovery-integration.md
+  s_25c8d69584ee47::t_c1454ef2a28d39 46-47
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3956985c20ab01048962bae3d57cc131e5efbdd8",
+  "prompts": {},
+  "sessions": {
+    "s_25c8d69584ee47": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c946-1fbb-7b62-8d1c-995aca01ed39",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,19 @@
+apps/backend/tests/community/core/service_bot/services/test_baas_service_get_http_info.py
+  s_b7a143718f646d::t_d0a963d43f01fe 166,172
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c8e864ff6f80ff3ae3ab3d87413eb90e2cbafd42",
+  "prompts": {},
+  "sessions": {
+    "s_b7a143718f646d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a0b5-c652-7a23-a4cd-32ac1ec8be83",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

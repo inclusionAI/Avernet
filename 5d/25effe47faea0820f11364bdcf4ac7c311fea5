@@ -1,0 +1,26 @@
+apps/bcsfuse/src/app/tc/v2.py
+  s_ce84d91f3d35be::t_31232906338c95 4-5,99-101,117-119
+apps/bcsfuse/packages/search-core/src/search_core/adapters/http/catalog_cards.py
+  s_ce84d91f3d35be::t_31232906338c95 56-61,63
+apps/bcsfuse/tests/contract/test_tc_same_instance_migration.py
+  s_ce84d91f3d35be::t_f8caba72f0672f 154-177,180-196,205-206
+  s_ce84d91f3d35be::t_458b951213a296 178-179,197-204
+apps/bcsfuse/docs/deploy/tc-card-migration.md
+  s_ce84d91f3d35be::t_e573bbfb514fb3 24-25
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "5d25effe47faea0820f11364bdcf4ac7c311fea5",
+  "prompts": {},
+  "sessions": {
+    "s_ce84d91f3d35be": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a5bb-a115-7280-8eb7-64cf057003e5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,49 @@
+apps/bcs/scripts/e2e-runner/bcs_e2e/collaboration_team_case_run.py
+  s_cecdc98e721f4b::t_97edf5565e72b6 130
+apps/bcs/scripts/e2e-runner/bcs_e2e/custom_collaboration_cli_case_run.py
+  s_cecdc98e721f4b::t_5efbdee431d8a7 52,597,609-610,618-619,720-721,759,849-850
+apps/bcs/scripts/e2e-runner/bcs_e2e/edge_friend_mutation_case_run.py
+  s_cecdc98e721f4b::t_b03f2f674aa616 325
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_collaboration_team_reporting.py
+  s_cecdc98e721f4b::t_51805d4a113bd4 30
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_session_service_parent_reporting.py
+  s_cecdc98e721f4b::t_b1f2c3cd7148a4 244-245
+apps/bcs/scripts/e2e-runner/bcs_e2e/remote_operator_cli_adapter.py
+  s_cecdc98e721f4b::t_3686e537b91427 28,627,659-660,664-665,671-673
+apps/bcs/scripts/e2e-runner/bcs_e2e/workspace_cli_create_get_contract.py
+  s_cecdc98e721f4b::t_7aa0a56d000b7a 8,108,153-154,178,185
+apps/bcs/scripts/e2e-runner/bcs_e2e/workspace_cli_detail_contract.py
+  s_cecdc98e721f4b::t_0fe963d6aa1883 8,140,165-166,190,197
+apps/bcs/scripts/e2e-runner/bcs_e2e/workspace_cli_fuse_contract.py
+  s_cecdc98e721f4b::t_0dcf366f41cbdb 8,158,183-184,213,220
+apps/bcs/scripts/e2e-runner/bcs_e2e/workspace_cli_list_contract.py
+  s_cecdc98e721f4b::t_1bba5af7186efe 8,161,184-185,207,214
+apps/bcs/scripts/e2e-runner/bcs_e2e/workspace_cli_member_contract.py
+  s_cecdc98e721f4b::t_a866a296283b19 8,151,184-185,212,219
+apps/bcs/scripts/e2e-runner/bcs_e2e/workspace_cli_status_contract.py
+  s_cecdc98e721f4b::t_4876323024f417 8,141,217-218,249,256
+apps/bcs/scripts/e2e-runner/bcs_e2e/workspace_roundtrip_contract.py
+  s_cecdc98e721f4b::t_697b032fb748fc 26,404,454-455,459-460,467
+apps/bcs/scripts/e2e-runner/tests/test_blocked_error_detail_lens.py
+  s_cecdc98e721f4b::t_2275a9e27f36b4 25-29,37-39,130-132,142-143,145-151,156-183
+apps/bcs/scripts/e2e-runner/tests/test_custom_collaboration_cli_case_run.py
+  s_cecdc98e721f4b::t_4ac1cf1883599c 889,940-943
+apps/bcs/scripts/e2e-runner/tests/test_local_collaboration_team_run.py
+  s_cecdc98e721f4b::t_8e90d11987d509 103,107
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "df1bce72b5bfa6c0f1d4a0d7ce06d15c54f96c67",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "Ling-3.1-flash"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

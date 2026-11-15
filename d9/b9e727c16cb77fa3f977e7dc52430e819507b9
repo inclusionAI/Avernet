@@ -1,0 +1,21 @@
+apps/evolverun/clawweb/internal/adapters/server/repositories/bot-directory.ts
+  s_9fc77bfda5cef2::t_c35fabca2edd17 213-215,242
+apps/evolverun/clawweb/internal/adapters/server/__tests__/bot-runtime-target.test.ts
+  s_9fc77bfda5cef2::t_ab80ec39d8e4a3 53-67
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d9b9e727c16cb77fa3f977e7dc52430e819507b9",
+  "prompts": {},
+  "sessions": {
+    "s_9fc77bfda5cef2": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c36b-16c9-7283-b0df-1cd3ad3e0e35",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}

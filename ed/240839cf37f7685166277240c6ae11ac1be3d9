@@ -1,0 +1,1107 @@
+apps/frontend-nextgen/src/components/agentswarm/PanelResizeHandle.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-86
+apps/frontend-nextgen/test/pages/Workspace/Chat/components/ConversationCollapsedRail.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 122-141
+apps/backend/src/agentclaw/community/core/task/task_clarification/models.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-54
+apps/backend/src/agentclaw/community/core/caller_identity/contracts.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 127
+apps/frontend-nextgen/assets/task-panel/src/panel/statusDerivation.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-176
+apps/frontend-nextgen/assets/task-panel/test/asset-delivery.mjs
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-21
+apps/frontend-nextgen/assets/task-panel/test/panel/artifactDescriptor.coverage.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-48
+apps/frontend-nextgen/assets/task-panel/README.md
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-140
+apps/frontend-nextgen/assets/task-panel/src/panel/TaskPanel.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-135
+apps/frontend-nextgen/assets/task-panel/test/panel/taskPanelMapper.coverage.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-192
+apps/frontend-nextgen/src/domain/agentswarm/draft.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-152
+apps/bcs/crates/services/bcs-session-store/tests/support/session_completion_recovery.rs
+  s_c3ece772cfb1b0::t_07c314e03986ef 2,155-272
+apps/frontend-nextgen/specs/2026-11-11-task-panel-shared-asset/test-migration-map.json
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-325
+apps/frontend-nextgen/src/pages/BotWorkshop/Evaluation/index.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-4,6,13,16,33-34,36-38,88-111,114,122-124,127-131,182-184,186-199,254-257,263,266
+apps/backend/specs/2026-11-12-teclaw-refresh-session-check/spec.md
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-26
+apps/frontend-nextgen/assets/task-panel/test/boundaries.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-25
+apps/frontend-nextgen/assets/task-panel/src/panel/MarkdownCell.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-171
+apps/frontend-nextgen/assets/task-panel/test/panel/sessionResolution.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-98
+apps/frontend-nextgen/src/domain/collaborationSquare/bcsBotMapper.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-96
+apps/backend/src/agentclaw/community/core/task/task_panel/manifest.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-43
+apps/frontend-nextgen/assets/task-panel/src/rich-content/sanitizeHtml.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-64
+apps/frontend-nextgen/assets/task-panel/src/data/taskSwitcher.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-44
+apps/frontend-nextgen/specs/2026-11-11-task-panel-shared-asset/migration-map.json
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-176
+apps/frontend-nextgen/assets/task-panel/src/data/taskStatus.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-33
+apps/frontend-nextgen/test/components/agentswarm/AgentComputePanel.flow.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-206
+apps/frontend-nextgen/src/stores/runGoalStore.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-42
+apps/frontend-nextgen/src/domain/agentswarm/identityOptions.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-59
+apps/backend/src/agentclaw/community/api/bot_friend_auth_service.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 21-23
+apps/frontend-nextgen/src/services/agentswarm/refusals.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-49
+apps/frontend-nextgen/assets/task-panel/src/panel/v2/TaskOutputSection.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-60
+apps/frontend-nextgen/test/domain/agentswarm/manifestSubmit.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-61
+apps/frontend-nextgen/test/stores/runGoalStore.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-35
+apps/frontend-nextgen/test/components/ui/SafeHtml.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 2,108-124
+  s_c3ece772cfb1b0::t_4f351d03a2676d 125
+apps/backend/tests/community/adapters/http/openapi_v1/routines/test_routines_handlers.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 113-117,120
+apps/backend/tests/community/core/agentswarm/test_bot_e2e.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 205-207,222-225,243-248,252-253,272,565,589-607
+apps/frontend-nextgen/src/services/backendApi/bots/botEditorController.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 186-190,193,197,204,273,277,385-392
+apps/frontend-nextgen/src/services/collaborationSquare/collaborationSquareApiHelpers.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 16
+apps/frontend-nextgen/assets/task-panel/LICENSE
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-176
+apps/frontend-nextgen/src/components/ui/Label.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-20
+apps/frontend-nextgen/assets/task-panel/src/panel/fixture.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-3
+apps/backend/src/agentclaw/community/core/bot_public/README.md
+  s_c3ece772cfb1b0::t_07c314e03986ef 63-74
+apps/frontend-nextgen/src/extensions/empty.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-2,24,45,61
+apps/frontend-nextgen/test/integration/taskPanel/v2/TaskNodePanelV2.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-236
+apps/frontend-nextgen/assets/task-panel/test/panel/TaskProgress.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-92
+apps/frontend-nextgen/test/integration/taskPanel/GroupDrillDown.coverage.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-330
+apps/backend/tests/community/contracts/gateway/test_service_backed_api_contracts.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 1277-1323
+apps/frontend-nextgen/assets/task-panel/test/panel/taskPanelMapper.execution.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-495
+apps/frontend-nextgen/assets/task-panel/tsconfig.json
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-8
+apps/backend/src/agentclaw/community/adapters/http/agentswarm/schemas.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 142-151
+apps/frontend-nextgen/src/components/BotWorkshop/BotCard/BotInfoCell.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 40-46,48-62,82-97,100
+apps/frontend-nextgen/test/services/tasks/panel/taskPanelHandleAdapter.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-79
+apps/frontend-nextgen/assets/task-panel/scripts/check-boundaries.mjs
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-50
+apps/frontend-nextgen/test/services/tasks/panel/taskPanelConversationAdapter.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-147
+apps/frontend-nextgen/src/hooks/useBotLocalSkillUpload.ts
+  s_c3ece772cfb1b0::t_d8a4525eed0607 14
+  s_c3ece772cfb1b0::t_07c314e03986ef 6-10,19
+apps/frontend-nextgen/test/components/BotWorkshop/ServiceBotEvaluation/EvalFileInput.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-33
+apps/frontend-nextgen/src/hooks/useSharedTaskPanelRecovery.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-69
+apps/frontend-nextgen/assets/task-panel/test/panel/outputEnvelope.coverage.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-61
+apps/frontend-nextgen/src/components/CollaborationPrivacy/BotGeneralConfigDialog/BotGeneralConfigDialogBody.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 12,101-107,111-112
+apps/frontend-nextgen/assets/task-panel/src/panel/artifactTime.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-39
+apps/frontend-nextgen/src/capabilities/types.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 745-753
+  s_c3ece772cfb1b0::t_8c43b2ef5f1198 744
+apps/backend/tests/community/endpoints/test_openapi_bot_metadata.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 114-155
+apps/frontend-nextgen/specs/2026-11-11-task-panel-shared-asset/tasks.md
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-256
+apps/frontend-nextgen/config/routes.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 29-30
+apps/backend/tests/community/core/task/task_runner/integration/test_semantic_keyword_bot_discover.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 14,134,159,173,268-327
+  s_c3ece772cfb1b0::t_1f0c4138bba959 328
+apps/frontend-nextgen/test/components/agentswarm/VerticalResizeHandle.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-78
+apps/frontend-nextgen/test/stores/sessionStatusBridge.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 97,106,109,131,136,139,146,152,301,307-325
+apps/frontend-nextgen/src/pages/AgentCompute/index.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-33
+apps/frontend-nextgen/test/hooks/useTaskExecution.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 6,68,238,263,271
+apps/backend/src/agentclaw/community/core/task/task_clarification/service_protocol.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-44
+apps/frontend-nextgen/assets/task-panel/test/panel/v2/ArtifactsSection.coverage.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-60
+apps/backend/tests/community/repository/task/test_intake_atomic_creation.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 33-35,134-178
+  s_c3ece772cfb1b0::t_63e7c0cb48137c 179-180
+apps/frontend-nextgen/test/components/agentswarm/RunStatusBadge.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-36
+apps/backend/tests/community/core/task/task_trajectory/test_trajectory_gates_reset.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 73-74
+apps/frontend-nextgen/test/components/BotWorkshop/DebugChatPanel.identity.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 76-77,80-82,128-164
+apps/frontend-nextgen/src/domain/agentswarm/options.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-94
+.github/workflows/singlebox-coverage.yml
+  s_c3ece772cfb1b0::t_07c314e03986ef 178,180-189
+apps/backend/tests/community/core/task/task_runner/integration/test_task_search_viewer.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 34,44,137-141,144,146,151-154,159,237-273
+apps/frontend-nextgen/assets/task-panel/src/controller/createTaskPanelController.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-203
+apps/frontend-nextgen/assets/task-panel/src/contracts/index.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-47
+apps/frontend-nextgen/test/helpers/taskPanelRuntime.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-41
+apps/backend/tests/community/core/task/task_center/test_task_service_relay.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 10,31-38,57,79-118
+  s_c3ece772cfb1b0::t_90e98d17a98745 119-120
+apps/backend/tests/community/knowledge_management/test_service.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 245
+apps/frontend-nextgen/assets/task-panel/src/panel/icons.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-225
+apps/frontend-nextgen/assets/task-panel/src/panel/types.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-198
+apps/frontend-nextgen/assets/task-panel/test/panel/taskArtifactStage.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-141
+apps/backend/tests/community/repository/bot/test_metadata_locators.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-191
+apps/frontend-nextgen/src/components/agentswarm/IdentityBotPicker.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-91
+apps/backend/src/agentclaw/community/core/service_bot/services/service_publication_facade.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 706
+apps/frontend-nextgen/assets/task-panel/package.json
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-63
+apps/frontend-nextgen/test/integration/taskPanel/TaskPanelFetcher.aceLogin.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-45
+apps/backend/specs/2026-09-23-task-cli/end-to-end-relay-design.md
+  s_c3ece772cfb1b0::t_07c314e03986ef 41,377
+apps/frontend-nextgen/assets/task-panel/src/panel/groupDisplay.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-93
+apps/frontend-nextgen/src/pages/Lab/Tasks/TaskArtifactsDrawer.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1,35-43
+apps/frontend-nextgen/src/hooks/useCollaborationActorOperationScope.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-27
+apps/frontend-nextgen/test/components/CollaborationPrivacy/ExternalBotGeneralConfigDialog.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 19
+apps/frontend-nextgen/test/services/collaborationSquare/publicBotMetadata.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-430
+apps/backend/src/agentclaw/community/core/bot_management/README.md
+  s_c3ece772cfb1b0::t_07c314e03986ef 171-178
+apps/frontend-nextgen/src/components/BotWorkshop/Editor/DebugChatPanel.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 212,247-267
+apps/frontend-nextgen/src/services/agentswarm/service.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-81
+apps/frontend-nextgen/test/pages/Workspace/hooks/useGroupChat.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 250
+apps/frontend-nextgen/test/services/backendApi/bots/botEditorController.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 334-350
+apps/frontend-nextgen/test/stores/agentComputePanelStore.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-68
+apps/frontend-nextgen/src/domain/agentswarm/examples.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-30
+apps/backend/src/agentclaw/community/api/README.md
+  s_c3ece772cfb1b0::t_07c314e03986ef 325
+apps/frontend-nextgen/assets/task-panel/src/panel/hooks/useGroupMemberNames.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-53
+apps/frontend-nextgen/src/shell/ReleaseNotesModal.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 5-6
+apps/backend/src/agentclaw/community/adapters/http/task/router.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 40,102
+apps/backend/src/agentclaw/community/core/task/task_harness/harness.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 4,55,81,106,194-227,318,320-321,505-509,944-950
+apps/frontend-nextgen/assets/task-panel/src/index.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-12
+apps/frontend-nextgen/test/components/Workspace/TaskPanelAssetBoundary.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-160
+apps/frontend-nextgen/src/services/tasks/panel/registerTaskPanel.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-7
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/bots/schemas.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 23-26
+apps/frontend-nextgen/src/hooks/useCollaborationSquarePagination.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-22
+apps/frontend-nextgen/assets/task-panel/src/panel/PanelMarkdown.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-10
+apps/frontend-nextgen/jest.config.cjs
+  s_c3ece772cfb1b0::t_07c314e03986ef 10-13
+apps/backend/specs/teclaw-caller-refresh/001-spec-output.md
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-122
+apps/frontend-nextgen/test/pages/AgentComputePage.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-49
+apps/frontend-nextgen/assets/task-panel/.gitignore
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-9
+apps/backend/tests/community/adapters/http/openapi_v1/inventory/test_inventory_handlers.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 248-253
+apps/backend/tests/community/core/caller_identity/test_service.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 1424-1441
+apps/frontend-nextgen/src/services/tasks/panel/taskPanelHandleAdapter.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-66
+apps/frontend-nextgen/assets/task-panel/src/panel/v2/TaskPanelV2.css
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-11
+apps/frontend-nextgen/assets/task-panel/scripts/serve-smoke.mjs
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-12
+apps/frontend-nextgen/assets/task-panel/test/panel/TaskInfoTab.coverage.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-53
+apps/frontend-nextgen/test/services/agentswarm/tenant.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-36
+apps/frontend-nextgen/test/collaborationPrivacyComponents.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 284-336,555-622,624
+  s_c3ece772cfb1b0::t_362cacac180f39 623,625
+apps/frontend-nextgen/test/pages/Workspace/Chat/components/ConversationSessionRow.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 26-41
+apps/backend/tests/community/endpoints/test_openapi_routines.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 95,212,343
+apps/frontend-nextgen/src/stores/agentComputePanelStore.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-68
+apps/frontend-nextgen/src/components/CollaborationSquare/SquareSearchBar/index.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 5,29-34,39-40,58,87-96
+apps/frontend-nextgen/src/domain/botWorkshop.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 73-74
+apps/frontend-nextgen/test/integration/taskPanel/v2/TaskArtifactPreviewDrawer.coverage.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-236
+apps/backend/src/agentclaw/community/core/task/task_harness/timeout_policy.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-29
+apps/backend/tests/community/core/bot_public/test_friend_auth_sync_service.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 18,20,32-35,47,50,96-121,123,125,145,147
+apps/frontend-nextgen/assets/task-panel/test/declarations.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-28
+apps/frontend-nextgen/test/domain/agentswarm/manifest.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-87
+.github/workflows/frontend-nextgen.yml
+  s_c3ece772cfb1b0::t_07c314e03986ef 52-54,57-67
+  s_c3ece772cfb1b0::t_71c9a95f5a847d 68
+apps/backend/src/agentclaw/community/core/task/README.md
+  s_c3ece772cfb1b0::t_07c314e03986ef 8-13
+apps/frontend-nextgen/src/services/tasks/panel/taskPanelConversationAdapter.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-60
+apps/frontend-nextgen/test/integration/taskPanel/GroupDrillDown.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-404
+apps/frontend-nextgen/test/components/Workspace/TaskLinkedSession.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 13-16
+apps/backend/src/agentclaw/community/core/expert_chat/services/expert_chat_session_runtime.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 73-84
+apps/frontend-nextgen/assets/task-panel/src/panel/hooks/useTaskArtifactPreview.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-79
+apps/backend/src/agentclaw/community/core/bot_management/engines/provisioning.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 221-224
+apps/frontend-nextgen/assets/task-panel/src/panel/sessionResolution.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-99
+apps/frontend-nextgen/test/services/collaborationPrivacy/mappers.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 188-211
+apps/frontend-nextgen/test/services/tasks/panel/taskPanelArchitecture.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-95
+apps/backend/src/agentclaw/community/core/task/task_center/task_service.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 29,35
+apps/frontend-nextgen/src/components/Common/RichContent/sanitizeHtml.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-64
+apps/frontend-nextgen/specs/2026-11-11-task-panel-shared-asset/research.md
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-81
+apps/frontend-nextgen/src/domain/tasks/taskSession.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-6
+apps/frontend-nextgen/src/services/botWorkshop/botPolicy.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 20,25-48,222-232
+apps/frontend-nextgen/test/services/tasks/panel/taskPanelRuntime.origin-regression.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-41
+apps/frontend-nextgen/test/stores/taskSidePanelStore.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 3,5,7-33
+apps/frontend-nextgen/src/components/BotWorkshop/Editor/CapabilityDetailDrawer.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-2
+apps/frontend-nextgen/src/pages/Workspace/Chat/StandardConversationStageContainer.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 111
+apps/frontend-nextgen/test/services/collaborationSquare/collaborationSquareRuntimeWiring.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 22-66,68-73,75,77-81,83,85,98,110-120,122-124,128-135,139,141,144,147-148,153-154,158
+apps/frontend-nextgen/src/hooks/useSessionTaskPanelBootstrap.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 2,6-7,90,92,96-102
+apps/backend/src/agentclaw/community/core/task/task_panel/__init__.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 1
+apps/frontend-nextgen/assets/task-panel/src/panel/v2/TaskSwitcherControl.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-228
+apps/frontend-nextgen/assets/task-panel/test/panel/theme.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-124
+apps/frontend-nextgen/test/hooks/useSpaceContext.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 352-389
+.dockerignore
+  s_c3ece772cfb1b0::t_07c314e03986ef 71-73
+apps/backend/tests/community/core/service_bot/services/test_service_publication_facade.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 813
+apps/frontend-nextgen/assets/task-panel/src/data/filePreview.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-86
+apps/frontend-nextgen/src/components/Workspace/persistentTaskPanelStaleRelease.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 4,19
+apps/frontend-nextgen/src/hooks/useTaskExecution.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 2-4,172,175-184
+apps/frontend-nextgen/src/components/CollaborationSquare/PublicBotCatalogPanel/index.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 92-93,144-145
+  s_c3ece772cfb1b0::t_42b42e247d5d94 146
+apps/frontend-nextgen/test/pages/Workspace/components/BotSessionFiles/BotSessionFilesRow.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 16-22,56-59
+apps/frontend-nextgen/test/sidePanel/UmdPanel.groupLaunch.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 56-66
+apps/frontend-nextgen/assets/task-panel/test/panel/TaskLoopView.switcher.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-159
+apps/frontend-nextgen/assets/task-panel/scripts/verify-independent.mjs
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-25
+apps/frontend-nextgen/src/components/Workspace/TaskPanelAdapter.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-98
+apps/frontend-nextgen/assets/task-panel/src/panel/tokens.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-99
+apps/backend/tests/community/adapters/http/openapi_v1/render_screens/test_render_screens_handlers.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 66,92,94,102,117,119,207,209
+apps/frontend-nextgen/src/domain/collaborationSquare/types.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 90,92-93,95,97,103,108-116,139,141-148,152-157,171-195,208-213,222,226-229,340-341
+apps/frontend-nextgen/test/services/collaborationSquare/publicBotCursor.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-416
+apps/frontend-nextgen/test/shell/bcsOnlyDiscoveryBoot.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-278,280-388
+  s_c3ece772cfb1b0::t_f079105c91124e 279
+apps/backend/src/agentclaw/community/core/task/task_runner/client/bcs_http_adapter.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 26-30,101-103,136-138,171-178
+apps/frontend-nextgen/assets/task-panel/test/panel/MarkdownCell.coverage.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-42
+apps/frontend-nextgen/test/services/tasks/panel/taskPanelRuntime.switcher.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-28
+apps/frontend-nextgen/assets/task-panel/src/public-api.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-10
+apps/frontend-nextgen/assets/task-panel/test/panel/sessionResolution.coverage.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-88
+apps/backend/src/agentclaw/community/core/bot_inventory/services/bot_inventory_service.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 561-573
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/WorkflowWorkspaceBrowserPop.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 12
+apps/backend/src/agentclaw/community/core/knowledge_management/README.md
+  s_c3ece772cfb1b0::t_07c314e03986ef 102-111
+apps/frontend-nextgen/src/hooks/useCollaborationPrivacy.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 140-154
+apps/frontend-nextgen/src/components/Workspace/ChatLayoutPanelSlot.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 30-31,98-101,116,121
+apps/frontend-nextgen/src/services/tasks/panel/taskPanelAssetLoader.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-95
+apps/backend/src/agentclaw/community/core/task/task_dispatch/search.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 43,57,76,99
+apps/frontend-nextgen/assets/task-panel/test/taskSwitcher.migration.md
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-225
+apps/frontend-nextgen/assets/task-panel/vite.config.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-13
+apps/backend/src/agentclaw/community/core/task/task_service_protocol.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 113
+apps/frontend-nextgen/assets/task-panel/src/data/taskClient.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-87
+apps/backend/src/agentclaw/community/core/agentswarm/repository/run/impl.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 185-193,202-203
+apps/frontend-nextgen/assets/task-panel/test/panel/taskSwitcherFixtures.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-35
+apps/frontend-nextgen/src/components/agentswarm/RunStatusBadge.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-24
+apps/backend/tests/community/knowledge_management/test_legacy_personal_bots.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 78
+apps/frontend-nextgen/assets/task-panel/src/history/parseTaskPanelDeclarations.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-38
+apps/frontend-nextgen/assets/task-panel/scripts/check-release-ref.mjs
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-12
+apps/frontend-nextgen/src/services/collaborationSquare/collaborationSquareGateway.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 3,13,25-26,28,33-35
+apps/backend/src/agentclaw/community/core/task/task_harness/centralized_recovery.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 5
+apps/frontend-nextgen/src/services/botWorkshop/botAdvancedConfigService.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 44,69-79,81,106-115,117-125
+apps/frontend-nextgen/src/services/collaborationSquare/collaborationSquareService.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 8,57-58,60,65,74-75,80,82,94,98,107-108,115-116
+apps/backend/specs/2026-11-06-task-search-viewer/plan.md
+  s_c3ece772cfb1b0::t_07c314e03986ef 54-60,63-66,68-70
+apps/frontend-nextgen/assets/task-panel/src/panel/taskPanelMapper.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-742
+apps/backend/tests/community/adapters/http/agentswarm/test_authorization_surface.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 73-74
+apps/frontend-nextgen/src/pages/MyTask/components/MyTaskDrawers.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1,95
+apps/frontend-nextgen/src/services/tasks/panel/taskPanelShell.css
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-8
+apps/frontend-nextgen/assets/task-panel/src/panel/v2/ArtifactsSection.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-289
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/bots/schemas_inventory.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-3,7-11,22-171
+apps/frontend-nextgen/src/capabilities/defaultCapabilities.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 44-60,360-361,363,366
+apps/frontend-nextgen/test/services/workspace/sessionFileCreator.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 3,10-16,41-45,49-53,56-60
+apps/frontend-nextgen/test/components/agentswarm/RunOptionsPanel.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-79
+apps/frontend-nextgen/src/components/agentswarm/AgentComputePanel.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-274
+apps/backend/src/agentclaw/community/core/expert_chat/README.md
+  s_c3ece772cfb1b0::t_07c314e03986ef 84-94
+apps/frontend-nextgen/test/components/Workspace/ChatLayoutPanelSlot.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 26-31,36,268,287,290,319,405,634-652
+apps/backend/src/agentclaw/community/core/bot_management/engines/default.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 95-98
+apps/backend/tests/community/core/task/task_harness/test_relay_stale_early_exit.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-198
+apps/frontend-nextgen/assets/task-panel/src/panel/v2/TaskArtifactPreviewDrawer.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-370
+apps/frontend-nextgen/README.md
+  s_c3ece772cfb1b0::t_07c314e03986ef 30-50
+apps/frontend-nextgen/test/hooks/useCollaborationSquareList.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-373
+apps/frontend-nextgen/test/hooks/useRunDetail.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-81
+apps/backend/src/agentclaw/community/core/bot_inventory/README.md
+  s_c3ece772cfb1b0::t_07c314e03986ef 64-71
+apps/frontend-nextgen/src/services/bcs/botCandidatesController.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-253
+apps/backend/src/agentclaw/community/core/task/task_center/task_service_relay.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 19,30-65,68-69,114,121-138,197-215,220,228-230,263-265,284-285
+apps/backend/tests/community/knowledge_management/test_activity_bot_name.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-64
+apps/backend/src/agentclaw/community/core/service_bot/services/service_bot_eval_service.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 125
+apps/frontend-nextgen/assets/task-panel/src/panel/TaskInfoTab.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-98
+apps/frontend-nextgen/src/domain/agentswarm/manifestTemplate.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-31
+apps/frontend-nextgen/test/integration/taskPanel/useTaskExecution.presentation.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-64
+apps/frontend-nextgen/src/domain/agentswarm/synthManifest.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-31
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/WorkflowWorkspaceWriteGuardPop.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 11
+apps/backend/src/agentclaw/community/adapters/http/task/schemas_relay_search.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 32-44
+apps/frontend-nextgen/assets/task-panel/test/panel/hooks/useGroupMemberNames.coverage.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-63
+apps/frontend-nextgen/test/pages/Workspace/Chat/hooks/useChatHeaderPanels.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 23-28,76
+apps/frontend-nextgen/src/components/BotWorkshop/ServiceBotEvaluation/EvaluationSubmissionCard.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-46
+apps/frontend-nextgen/src/pages/Workspace/Chat/hooks/useLegacyShareLinkGuard.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 9,48-55,93,134,139,142-145
+apps/frontend-nextgen/src/services/tasks/panel/taskPanelHistoryAdapter.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-29
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/render_screens/router.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 84-86,92-98
+apps/frontend-nextgen/test/helpers/taskPanelHost.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-12
+apps/frontend-nextgen/src/stores/taskSidePanelStoreTypes.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1
+apps/frontend-nextgen/src/components/agentswarm/VerticalResizeHandle.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-80
+apps/frontend-nextgen/test/services/botWorkshop/botAdvancedConfigService.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 65,85,156,172
+apps/frontend-nextgen/test/hooks/useBotEditor.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 8,15-17,49-69
+  s_c3ece772cfb1b0::t_ae7340cfa9bcd8 70-71
+apps/frontend-nextgen/src/services/tasks/panel/messageWindowLocate.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-71
+apps/frontend-nextgen/assets/task-panel/src/panel/v2/TaskArtifactsList.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-44
+apps/backend/src/agentclaw/community/core/agentswarm/service/protocols.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 401-402
+apps/backend/src/agentclaw/community/core/bot_public/services/friend_auth_sync_service.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 9-22,76-86,92,98
+apps/backend/tests/community/adapters/http/task/test_router.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 896
+apps/frontend-nextgen/src/components/Common/RichContent/index.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-2
+apps/frontend-nextgen/src/domain/agentswarm/manifest.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-135
+apps/frontend-nextgen/test/hooks/useCollaborationPrivacy.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 603-637
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/WorkflowWorkspaceTransition.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 12
+apps/frontend-nextgen/test/services/workspace/botRegistrationService.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 62-133
+apps/frontend-nextgen/src/hooks/useBotWorkshop.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 156
+apps/frontend-nextgen/assets/task-panel/test/panel/statusDerivation.coverage.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-47
+apps/frontend-nextgen/src/stores/taskSidePanelStore.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 2,4,6,8-10,12,37
+apps/frontend-nextgen/test/sidePanel/libraryCdnInjector.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 127-135
+apps/frontend-nextgen/assets/task-panel/test/panel/v2/taskPanelNav.coverage.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-55
+apps/frontend-nextgen/assets/task-panel/src/data/collectTaskArtifacts.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-29
+apps/frontend-nextgen/config/config.local.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 25-35,49-50,53-61,86-88,96-97
+apps/frontend-nextgen/assets/task-panel/src/rich-content/SafeHtml.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-164
+apps/frontend-nextgen/test/services/collaborationSquare/collaborationSquareApiAdapter.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1,3,6-54,56-62,65,67,69-75,77-81,83,86-99,102-109,112-115,117,121-122,125,127-128,130-131,133,135-143,146-153,155-167,170-174,176-183,185-189,191-199,203-210,212-215,217,220-223,225-230,233-237,240-241,244-250,254-255,257,260-261,263-286,288,290-295,298-299,301-303,305,307,399,402-403,406-414,416-419,422-429,431,481-482,485,487-515,517-520,523,525-562,564,568-573,575,577,579-582,584-589,591-594,597,599-602,604-615,617,619,621-624,626-631,633-635,637-653,655-657,660,662-665,667-672,674-686,688-693,695-699,701-708,710-731,733-736,739-742,744,746-754,756,758-762,764-769,771,773-775
+apps/frontend-nextgen/src/services/collaborationSquare/collaborationSquareApiAdapter.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1,3,6,11,21,34,38,41-43,45,58-59,62,106-191,197,199-212,214,216,218,236,238-243,245,248-260,266-271,273-282,284
+apps/frontend-nextgen/src/hooks/useServiceBotEvalMenuVisibility.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 2,9,52,54
+apps/frontend-nextgen/assets/task-panel/src/panel/v2/taskPanelNav.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-82
+apps/frontend-nextgen/src/pages/EvolutionFactory/OutputPrimitives.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-2
+apps/backend/src/agentclaw/community/adapters/http/task/manifest_routes.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-73
+apps/backend/tests/community/core/service_bot/services/test_service_bot_eval_service.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 103
+apps/frontend-nextgen/src/components/BotWorkshop/BotCard/BotStatusPublicationMenu.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 43,176-178
+apps/backend/src/agentclaw/community/core/task/task_clarification/bot_session_reader.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-46
+apps/frontend-nextgen/src/pages/BotWorkshop/index.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 28
+apps/backend/src/agentclaw/community/adapters/knowledge_platform/catalog.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 348-356,364
+apps/frontend-nextgen/test/domain/collaborationSquare/bcsBotMapper.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-162
+apps/frontend-nextgen/assets/task-panel/src/panel/v2/DagViewV2.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-153
+apps/frontend-nextgen/assets/task-panel/test/panel/v2/TaskOutputSection.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-62
+apps/frontend-nextgen/specs/2026-11-11-task-panel-shared-asset/plan.md
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-397
+apps/backend/src/agentclaw/community/core/task/task_runner/client/catalog_keyword_discover.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 67,71,96-97,147
+apps/frontend-nextgen/test/pages/Workspace/hooks/useGroupTaskRecoveryEntry.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-23
+apps/frontend-nextgen/assets/task-panel/src/panel/outputEnvelope.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-95
+apps/frontend-nextgen/src/services/agentswarm/http.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-132
+apps/backend/src/agentclaw/community/core/task/task_clarification/distillation.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-41
+apps/backend/tests/community/endpoints/test_task_panel_manifest.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-48
+apps/backend/src/agentclaw/community/core/task/task_harness/runtime_probe.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 178-180,183,185-191,194,209,221,376
+apps/frontend-nextgen/test/services/agentswarm/http.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-85
+singlebox/ci/tests/test_singlebox_coverage_workflow.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 96-106
+  s_c3ece772cfb1b0::t_ca3d4ceaf1fbaa 107-108
+apps/frontend-nextgen/assets/task-panel/src/panel/v2/NodeListViewV2.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-164
+apps/backend/src/agentclaw/community/core/task/task_panel/README.md
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-40
+apps/backend/src/agentclaw/community/core/repository/README.md
+  s_c3ece772cfb1b0::t_07c314e03986ef 82-104
+apps/frontend-nextgen/test/integration/taskPanel/v2/TaskOverviewV2.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-308
+apps/backend/src/agentclaw/community/core/bot_inventory/types.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 42
+apps/backend/specs/2026-09-16-distributed-relay-execution/bot-s1-s8-functional-contract.md
+  s_c3ece772cfb1b0::t_07c314e03986ef 1486,1505
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/routines/converter.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 41,59-60,78
+apps/backend/src/agentclaw/community/core/agentswarm/service/impl.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 238-239,241
+apps/frontend-nextgen/assets/task-panel/test/panel/v2/TaskArtifactPreviewDrawer.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-216
+apps/backend/src/agentclaw/community/core/repository/protocols/bot/bot.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 295-308
+  s_c3ece772cfb1b0::t_17564d203de224 294
+apps/frontend-nextgen/test/services/botWorkshop/botAccessPolicy.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 6,8
+apps/frontend-nextgen/assets/task-panel/test/panel/TaskArtifactsView.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-86
+apps/backend/src/agentclaw/community/api/task/task_manifest_service.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-8
+apps/frontend-nextgen/config/config.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 39-42
+apps/frontend-nextgen/test/domain/agentswarm/editAfterConfirm.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-59
+apps/backend/src/agentclaw/community/core/caller_identity/service.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 581-585
+apps/backend/tests/community/core/task/task_panel/test_storage.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-77
+apps/frontend-nextgen/test/components/agentswarm/ComputeConfigForm.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-138
+apps/frontend-nextgen/test/services/tasks/panel/taskPanelRuntime.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-176
+apps/frontend-nextgen/scripts/ci-guardrails.mjs
+  s_c3ece772cfb1b0::t_07c314e03986ef 103-106,120-125
+apps/frontend-nextgen/test/components/BotWorkshop/BotEvaluationHistoryMenu.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-61
+apps/frontend-nextgen/src/pages/Workspace/Chat/components/ConversationBotUnavailableTooltip.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 8,12-14,17,26,48
+apps/backend/src/agentclaw/community/core/task/task_center/task_service_queries.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 16-19
+apps/frontend-nextgen/assets/task-panel/test/panel/TaskPanel.includeActionLog.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-64
+apps/frontend-nextgen/assets/task-panel/test/release.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-26
+apps/frontend-nextgen/src/components/CollaborationSquare/SquarePageShell/index.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 22-26,30-31,36,38,48,61,84,106
+apps/frontend-nextgen/assets/task-panel/test/release-ref.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-44
+apps/frontend-nextgen/assets/task-panel/test/panel/icons.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-199
+apps/frontend-nextgen/test/services/agentswarm/types.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-47
+apps/backend/tests/community/adapters/http/task/test_schemas.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 773-811
+  s_c3ece772cfb1b0::t_c1993afd15c9a6 772
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/WorkflowWorkspaceNavigation.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 24
+apps/backend/src/agentclaw/community/core/caller_identity/session_validator.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 7,61-84
+  s_c3ece772cfb1b0::t_da03dcfb76f7d2 85
+apps/backend/src/agentclaw/community/core/knowledge_management/services/service.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 305-306
+apps/frontend-nextgen/src/services/collaborationSquare/publicBotMetadata.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-146
+apps/frontend-nextgen/src/services/bcs/UmdPanel.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1,76,172-180
+  s_c3ece772cfb1b0::t_1718db1e6edf89 181-182
+apps/frontend-nextgen/assets/task-panel/test/panel/v2/TaskSwitcherControl.coverage.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-201
+apps/frontend-nextgen/src/services/tasks/panel/taskPanelArtifactAdapter.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-43
+apps/frontend-nextgen/test/services/botWorkshop/botPolicy.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 7,31-45,123-141,292-317
+apps/frontend-nextgen/src/hooks/useServiceBotEval.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 11-16,20,25,43,51,72,76,83,95,102
+apps/frontend-nextgen/assets/task-panel/test/panel/v2/TaskPanelV2.coverage.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-109
+apps/frontend-nextgen/test/userFacingTerminology.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 9
+apps/frontend-nextgen/assets/task-panel/test/panel/v2/TaskSwitcherBar.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-186
+apps/frontend-nextgen/assets/task-panel/test/panel/v2/ArtifactsSection.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-107
+apps/frontend-nextgen/assets/task-panel/test/controllerHostMigration.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-98
+apps/frontend-nextgen/test/components/Workspace/TaskPanelAdapter.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-118
+apps/frontend-nextgen/assets/task-panel/test/data/taskClient.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-88
+apps/frontend-nextgen/test/integration/taskPanel/useTaskArtifactPreview.coverage.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-403
+apps/frontend-nextgen/test/hooks/useCollaborationSquare.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 3-4,7-9,27-37,49,61-66,121,131,146,235,267,317,376,420,445-446,448,454,457,474,499,506,508,525,598,678,752,810,847,883,885,888,890,899,909,911,924-926,962-967,974,1003,1008-1009,1344,1490-1518,1813-2243
+apps/backend/src/agentclaw/community/di/modules/caller_identity_module.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 143-145
+apps/frontend-nextgen/assets/task-panel/src/panel/TaskArtifactsView.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-50
+apps/backend/tests/community/adapters/http/task/router_test_support.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 193-196
+apps/frontend-nextgen/assets/task-panel/src/panel/TaskPanelFetcher.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-229
+apps/frontend-nextgen/specs/2026-11-09-bot-debug-slash/validation.md
+  s_c3ece772cfb1b0::t_07c314e03986ef 111-116
+apps/frontend-nextgen/test/collaborationSquareService.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 22,24-26,200,202,205-206,210,212-213,221-222,239,249-250,253-258,266,274-276,285-286,293,297-318,324,327-329,332-333,341,349,354-355,360,367-377,459-472
+  s_c3ece772cfb1b0::t_54faf887ce1b4e 473
+apps/backend/src/agentclaw/community/adapters/http/bot_friend_auth/schemas.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 21-25
+apps/backend/tests/community/core/bot_public/test_bot_public_service.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 95-102,1268-1270,1294-1296,1311-1315,1317-1330,1332-1347,1372,1382-1384,1398-1400,1414-1416,1435-1437,1459,1466,1479,1483,1499,1513,1529-1558,2149-2154,2159,2171-2174,2196,2222,2226,2242,2255,2258,2261-2282
+  s_c3ece772cfb1b0::t_9f4b1c4fcec761 2283
+apps/frontend-nextgen/src/typings/global.d.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 6-11,40-47
+apps/backend/src/agentclaw/community/core/bot_management/bcn_metadata.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 4,11-16,18-27,30-31,34
+apps/frontend-nextgen/assets/task-panel/src/panel/v2/TaskOverviewV2.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-39
+apps/frontend-nextgen/src/services/workspace/identityService.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 3,166-170
+apps/backend/src/agentclaw/community/core/knowledge_management/ports.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 52-56
+apps/frontend-nextgen/assets/task-panel/test/panel/artifactTime.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-22
+apps/frontend-nextgen/src/domain/collaborationSquare/mapper.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 313-314,325
+apps/frontend-nextgen/assets/task-panel/src/panel/theme.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-152
+apps/backend/tests/community/core/task/task_panel/test_manifest.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-56
+apps/frontend-nextgen/src/components/Workspace/TaskPanelHost.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-36
+apps/frontend-nextgen/assets/task-panel/test/panel/messageWindowLocate.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-81
+apps/frontend-nextgen/src/services/collaborationSquare/publicBotCursor.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-104
+apps/frontend-nextgen/test/pages/Lab/Tasks.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 12-15
+apps/frontend-nextgen/src/hooks/useRunPolling.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-114
+apps/backend/tests/community/core/task/task_harness/test_harness.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 421,427,435,440,455
+apps/frontend-nextgen/src/services/bcs/libraryCdnInjector.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 68-69
+apps/frontend-nextgen/src/components/Workspace/TaskComposerMenu/composerCapabilitiesMenuTypes.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 22-23
+apps/frontend-nextgen/src/domain/agentswarm/models.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-40
+apps/frontend-nextgen/src/components/agentswarm/ModelSelector.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-65
+apps/frontend-nextgen/src/pages/Workspace/Chat/components/ConversationSessionStatus.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 42,95,98,101
+apps/frontend-nextgen/src/components/Common/RichContent/SafeHtml.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-164
+apps/frontend-nextgen/assets/task-panel/src/panel/contract.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-168
+apps/frontend-nextgen/src/components/agentswarm/AgentFieldCard.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-230
+apps/backend/tests/community/core/bot_inventory/services/test_bot_inventory_service.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 606,821,834-838,842-868
+  s_c3ece772cfb1b0::t_592844d274b180 869-870
+apps/frontend-nextgen/test/domain/agentswarm/identityNotHardcoded.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-49
+apps/frontend-nextgen/test/domain/agentswarm/draft.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-95
+apps/frontend-nextgen/assets/task-panel/test/panel/v2/NodeListViewV2.coverage.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-187
+apps/frontend-nextgen/test/components/Workspace/TaskPanelHost.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-160
+apps/frontend-nextgen/src/pages/Workspace/Chat/components/ConversationSessionRow.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 75-76
+apps/frontend-nextgen/test/hooks/useRunList.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-87
+apps/frontend-nextgen/assets/task-panel/src/panel/artifactDescriptor.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-172
+apps/frontend-nextgen/src/components/Workspace/TaskLinkedSession.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-2,51,60
+apps/frontend-nextgen/test/integration/taskPanel/nodeSelection.noSend.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-56
+apps/frontend-nextgen/test/services/workspace/identityService.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 510-592
+apps/frontend-nextgen/test/domain/agentswarm/synthManifest.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-41
+apps/backend/tests/community/api/expert_chat/test_router.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 774-821
+apps/frontend-nextgen/assets/task-panel/test/panel/taskPanelMapper.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-591
+apps/frontend-nextgen/src/components/agentswarm/RunCard.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-70
+apps/frontend-nextgen/src/pages/CollaborationSquare/Experts/ExpertDetails.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1
+apps/frontend-nextgen/src/pages/Workspace/Chat/hooks/useChatHeaderPanels.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-2,50,102-105,174-175,180,193
+apps/frontend-nextgen/test/pages/Workspace/Chat/components/ConversationBotItem.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 409-427
+apps/frontend-nextgen/assets/task-panel/test/panel/artifactDescriptor.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-199
+apps/frontend-nextgen/specs/2026-11-11-task-panel-shared-asset/verification.md
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-215
+apps/frontend-nextgen/src/services/tasks/panel/taskPanelRuntime.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-154
+apps/backend/tests/community/adapters/http/agentswarm/test_goal_excerpt.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-39
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/render_screens/gating.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 36-37,43
+apps/frontend-nextgen/test/services/tasks/panel/taskPanelAssetLoader.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-117
+apps/backend/tests/community/core/agentswarm/repository/test_storage.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 109,113,392-411
+  s_c3ece772cfb1b0::t_d229d9e735bdac 412
+apps/frontend-nextgen/test/hooks/useLegacyShareLinkGuard.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 3,8,118-167,261-309
+  s_c3ece772cfb1b0::t_ca60dcb3fbe44e 310
+apps/frontend-nextgen/assets/task-panel/test/panel/DagViewInteractive.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-398
+apps/backend/src/agentclaw/community/core/repository/implementations/bot/metadata_locators.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-65
+apps/backend/tests/community/acceptance/bot_collaborator/test_explicit_standing_live.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 188-230,315-377
+apps/backend/src/agentclaw/community/adapters/http/bot_friend_auth/router.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 5-6
+apps/frontend-nextgen/src/services/agentswarm/types.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-247
+apps/frontend-nextgen/assets/task-panel/test/data/taskSwitcher.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-69
+apps/frontend-nextgen/assets/task-panel/src/panel/v2/TaskInfoSection.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-24
+apps/frontend-nextgen/src/services/workspace/filePreview.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-86
+apps/frontend-nextgen/test/components/BotWorkshop/BotInfoCell.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-44
+apps/frontend-nextgen/test/components/BotWorkshop/ServiceBotEvaluation/EvaluationHistoryCard.responsive.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-53
+apps/frontend-nextgen/src/hooks/useRunList.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-97
+apps/backend/src/agentclaw/community/di/modules/task_module.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 27-28,699-703
+  s_c3ece772cfb1b0::t_ae64ccc61bb1af 704
+apps/frontend-nextgen/test/integration/taskPanel/useTaskArtifactPreview.objectFile.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-77
+apps/backend/src/agentclaw/community/core/task/task_runner/client/candidate_search.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 119,141
+apps/frontend-nextgen/assets/task-panel/test/panel/groupDisplay.coverage.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-227
+apps/backend/tests/community/core/expert_chat/services/test_expert_chat_service.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 2534-2622
+apps/frontend-nextgen/src/services/backendApi/bots/botController.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 101-102,182-183,188
+apps/frontend-nextgen/src/pages/Workspace/components/GroupChatPane/sessionFileMarkdown.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1,3
+apps/backend/tests/community/core/caller_identity/test_shared_teclaw_iam.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-343
+apps/frontend-nextgen/src/components/CollaborationSquare/BotCard/index.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1,58-59
+apps/frontend-nextgen/test/hooks/useRunPolling.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-111
+apps/frontend-nextgen/src/hooks/useCollaborationSquare.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-2,5,76-79,128-138,153,157
+apps/frontend-nextgen/src/components/CollaborationPrivacy/PublicationEditor/RiskFlowBanners.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 12-16,21-22,27-28,64-77
+  s_c3ece772cfb1b0::t_0f4418ce99895e 78
+apps/backend/tests/community/core/task/task_harness/test_runtime_probe.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 95,104,107,109-111,114-121,311-323
+  s_c3ece772cfb1b0::t_b077be1d035d5d 324
+apps/frontend-nextgen/src/pages/Workspace/Chat/ConversationInteractiveStage.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 8-9,149-153,170-176
+apps/frontend-nextgen/test/domain/agentswarm/identityOptions.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-49
+apps/frontend-nextgen/test/domain/agentswarm/manifestTemplate.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-43
+apps/frontend-nextgen/src/services/backendApi/bots/serviceBotEvalController.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 63
+apps/frontend-nextgen/assets/task-panel/src/panel/testdata/artifactFixtures.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-124
+apps/frontend-nextgen/src/services/workspace/botRegistrationService.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 42-60,66-75
+apps/backend/src/agentclaw/community/core/caller_identity/iam_token_service.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 10,132-138,223-266
+  s_c3ece772cfb1b0::t_cfec0ecc5145f8 267-268
+apps/frontend-nextgen/test/hooks/useBotAdvancedConfig.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 8-14,23-35
+apps/frontend-nextgen/test/pages/Lab/TaskArtifactsDrawer.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-40
+apps/frontend-nextgen/assets/task-panel/src/panel/TaskLoopView.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-85
+apps/backend/src/agentclaw/community/core/task/task_panel/manifest_contract.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-82
+apps/frontend-nextgen/src/services/collaborationSquare/mockCollaborationSquareAdapter.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 19,25,56-60,64-69,72-84,87,89-92
+apps/frontend-nextgen/test/hooks/useCollaborationActorOperationScope.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-124
+apps/frontend-nextgen/src/components/agentswarm/RunDetailPanel.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-265
+apps/frontend-nextgen/tsconfig.json
+  s_c3ece772cfb1b0::t_07c314e03986ef 12-14
+apps/frontend-nextgen/assets/task-panel/src/panel/v2/TaskSwitcherBar.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-219
+apps/frontend-nextgen/test/capabilities/defaultCapabilities.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 337-381
+apps/backend/tests/community/core/task/task_runner/integration/test_bcs_http_adapter.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 9,204,206,224-235
+apps/backend/src/agentclaw/community/core/caller_identity/README.md
+  s_c3ece772cfb1b0::t_07c314e03986ef 37-40,54,57,60-90
+  s_c3ece772cfb1b0::t_b5a625f4727274 91
+apps/frontend-nextgen/src/components/Workspace/TaskComposerMenu/ComposerCapabilitiesMenu.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 36,48,54,70-71,172-187,205,268
+apps/frontend-nextgen/assets/task-panel/test/panel/TruncatedText.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-71
+apps/frontend-nextgen/assets/task-panel/test/umd-contract.mjs
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-35
+apps/frontend-nextgen/src/components/BotWorkshop/ServiceBotEvaluation/EvalFileInput.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 7,12,15,17-21
+apps/backend/src/agentclaw/community/adapters/http/task/relay_routes.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 85-87
+apps/frontend-nextgen/src/services/workspace/sessionFileUtils.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-3,66,72-73,98,100-104,114-116,120-121,277-278,281
+apps/frontend-nextgen/test/pages/BotWorkshop/Evaluation.identityGate.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-95
+apps/frontend-nextgen/assets/task-panel/vitest.config.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-5
+apps/backend/src/agentclaw/community/core/repository/implementations/bot/bot.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 501-508
+apps/frontend-nextgen/assets/task-panel/tsconfig.test.json
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-9
+apps/frontend-nextgen/assets/task-panel/src/panel/text.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-11
+apps/frontend-nextgen/src/components/CollaborationPrivacy/settingsSections.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 7,87-88,93-94,100-103,114,121-122,126-131,138
+apps/bcs/crates/services/bcs-session-store/src/mysql_operations/operations_1.rs
+  s_c3ece772cfb1b0::t_07c314e03986ef 349-353,356-357
+apps/frontend-nextgen/src/components/Workspace/TaskPanelAssetBoundary.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-65
+apps/frontend-nextgen/test/components/BotWorkshop/BotTable.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 9,823-898
+  s_c3ece772cfb1b0::t_2a3f490f5063af 899
+apps/frontend-nextgen/assets/task-panel/test/panel/v2/TaskInfoSection.coverage.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-53
+apps/frontend-nextgen/test/hooks/useSessionTaskPanelBootstrap.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 7,19-76,137,237,340,378,439,553-567
+apps/frontend-nextgen/docs/architecture/agent-compute.md
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-135
+apps/frontend-nextgen/src/hooks/useBotEditorCandidates.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 8,22,30,46
+apps/frontend-nextgen/test/config/bbsProxyConfig.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 54-118
+apps/frontend-nextgen/assets/task-panel/test/browser-smoke.html
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-16
+apps/frontend-nextgen/src/pages/Workspace/components/GroupChatPane/SessionFilesPreviewPane.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1
+apps/frontend-nextgen/src/components/CollaborationPrivacy/RelationCard/index.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 4,22-25,31-32,97-108
+apps/backend/tests/community/adapters/http/openapi_v1/test_friend_iam.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 9,17-21,37-49,57-60,69,94-97,126-136,149-150
+apps/backend/src/agentclaw/community/core/task/task_runner/client/semantic_keyword_bot_discover.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 14,18-25,33,43-56,103,116,126-128,160,171,173,180-196,215-216,253
+apps/frontend-nextgen/assets/task-panel/test/panel/TruncatedText.coverage.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-51
+apps/frontend-nextgen/src/hooks/useCollaborationSquareList.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 5,8,12,14,19-20,27,52-56,67,72-73,78,94-122,139-140,146,160,172,175,181-183,198,216-221,233,245
+apps/frontend-nextgen/specs/2026-11-11-task-panel-shared-asset/spec.md
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-50
+apps/frontend-nextgen/src/components/CollaborationPrivacy/BotGeneralConfigDialog/useUserRiskStatus.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-51
+apps/frontend-nextgen/src/hooks/useBotAdvancedConfig.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 64,66,68-69
+apps/frontend-nextgen/src/hooks/useRunDetail.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-77
+apps/frontend-nextgen/assets/task-panel/test/controller.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-248
+apps/frontend-nextgen/src/hooks/useBotPublicationMenu.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 19-20,87-91,103,140,143
+apps/frontend-nextgen/test/components/CollaborationPrivacy/BotGeneralConfigDialog.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 6-8,29-35,115,118,251,259,285-299,317,351,359,602-693
+  s_c3ece772cfb1b0::t_b1e629370b5b60 5
+apps/frontend-nextgen/assets/task-panel/src/panel/GroupDrillDown.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-861
+apps/frontend-nextgen/test/services/agentswarm/refusals.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-62
+apps/frontend-nextgen/src/hooks/useSpaceContext.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 12,179-182
+apps/frontend-nextgen/assets/task-panel/test/panel/statusDerivation.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-195
+apps/backend/src/agentclaw/community/core/token_exchange/orchestrator.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 44,49-53,62
+apps/frontend-nextgen/test/services/bcs/botCandidatesController.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-363
+apps/frontend-nextgen/src/hooks/useCollaborationSquareFriendActions.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-160
+apps/frontend-nextgen/src/components/agentswarm/RunOptionsPanel.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-134
+apps/backend/tests/community/adapters/http/agentswarm/test_http_adapter.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 48-54,123-124,126-127,358-393,450-451,499-501
+apps/frontend-nextgen/specs/2026-11-09-bot-debug-slash/spec.md
+  s_c3ece772cfb1b0::t_07c314e03986ef 40-45
+apps/frontend-nextgen/test/pages/BotWorkshop/DebugChatStage.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 46-48,69,71,73-74
+apps/frontend-nextgen/test/services/agentswarm/noAuthorizationTier.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-55
+apps/frontend-nextgen/test/services/botWorkshop/botEditorService.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 217-226,229,285,288
+apps/frontend-nextgen/test/services/tasks/panel/registerTaskPanel.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-35
+apps/backend/tests/community/core/bot_management/test_bcn_metadata.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 14,20,22,24-25,30,37-40,48-51,59,62-79
+apps/frontend-nextgen/test/domain/agentswarm/options.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-61
+apps/frontend-nextgen/src/services/collaborationPrivacy/friendApprovalAttributes.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 42-48,52-55,59
+apps/frontend-nextgen/assets/task-panel/src/panel/TruncatedText.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-129
+apps/frontend-nextgen/src/hooks/useBotEditor.ts
+  s_c3ece772cfb1b0::t_d8a4525eed0607 126
+  s_c3ece772cfb1b0::t_07c314e03986ef 34,39,114,118,131
+apps/frontend-nextgen/assets/task-panel/src/panel/v2/TaskNodePanelV2.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-198
+apps/frontend-nextgen/test/components/CollaborationSquare/PublicBotCatalogPanel.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 82-93
+apps/frontend-nextgen/test/components/agentswarm/PanelResizeHandle.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-78
+apps/frontend-nextgen/test/services/collaborationSquare/collaborationSquareApiAdapter.fixtures.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-145
+apps/frontend-nextgen/src/components/BotWorkshop/BotCard/BotManagementRuntimeItems.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 106,112,114,119-125
+apps/frontend-nextgen/src/components/CollaborationPrivacy/PublicationEditor/index.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 60-62,185-186
+apps/frontend-nextgen/test/domain/agentswarm/manifestAcceptedPayload.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-118
+apps/frontend-nextgen/src/pages/Workspace/hooks/useGroupChatHeaderPanels.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1,110-111,148-149,153,166
+apps/backend/src/agentclaw/community/core/task/task_clarification/extraction.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-36
+apps/frontend-nextgen/src/components/agentswarm/ComputeConfigForm.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-217
+apps/frontend-nextgen/src/components/BotWorkshop/ServiceBotEvaluation/EvaluationHistoryCard.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-67
+apps/frontend-nextgen/src/services/agentswarm/tenant.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-15
+apps/frontend-nextgen/assets/task-panel/src/panel/v2/TaskPanelV2.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-183
+.github/workflows/publish-task-panel.yml
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-59
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/routines/schemas.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 107,160-162
+  s_c3ece772cfb1b0::t_11d88d413c470d 163
+apps/frontend-nextgen/test/services/collaborationSquare/unsupportedCollaborationSquareAdapter.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1,6-16,19-29,32-46
+apps/frontend-nextgen/src/services/botWorkshop/botEditorService.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 195,199,248-255,260-261
+apps/frontend-nextgen/src/pages/Workspace/components/BotSessionFiles/BotSessionFilesRow.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 43
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/token/router.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 44-51,95-102,128,145-158,160
+apps/backend/src/agentclaw/community/core/bot_public/services/friend_catalog_actions.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 24-28,38-75,96-97,104-107,114,329-331,891,947
+apps/frontend-nextgen/assets/task-panel/src/panel/hostContext.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-11
+apps/frontend-nextgen/test/integration/taskPanel/v2/TaskPanelV2.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-258
+apps/frontend-nextgen/assets/task-panel/test/setup.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-7
+apps/frontend-nextgen/test/services/collaborationSquare/collaborationSquareApiAdapter.discovery.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-662
+apps/backend/src/agentclaw/community/adapters/http/agentswarm/router.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 97-111,252-261,277,280,288,293-296,310,315,512-532,542,560-562
+apps/backend/tests/community/core/task/task_panel/test_http.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-141
+apps/frontend-nextgen/test/components/BotWorkshop/BotStatusPublicationMenu.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 143-193,308
+apps/frontend-nextgen/test/integration/taskPanel/TaskPanelFetcher.coverage.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-467
+apps/frontend-nextgen/src/components/ScheduledTasks/RoutineRunConversation.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 6-7
+apps/frontend-nextgen/assets/task-panel/PUBLISHING.md
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-178
+apps/frontend-nextgen/test/domain/agentswarm/identityPickerSubmit.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-49
+apps/frontend-nextgen/assets/task-panel/src/panel/DagView.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-637
+apps/frontend-nextgen/assets/task-panel/src/panel/messageWindowLocate.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-71
+apps/frontend-nextgen/assets/task-panel/test/panel/taskSwitcher.navigation.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-50
+apps/backend/tests/community/core/token_exchange/test_pipeline.py
+  s_c3ece772cfb1b0::t_07c314e03986ef 178-212
+apps/frontend-nextgen/test/components/agentswarm/RunDetailPanel.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-158
+apps/frontend-nextgen/test/services/agentswarm/service.test.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-92
+apps/frontend-nextgen/test/components/CollaborationSquare/SquareSearchBar.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 75-107
+apps/frontend-nextgen/assets/task-panel/scripts/serve-assets.mjs
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-29
+apps/frontend-nextgen/assets/task-panel/test/rich-content/SafeHtml.asset.test.tsx
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-182
+apps/frontend-nextgen/src/components/BotWorkshop/ServiceBotEvaluation/evaluationStatus.ts
+  s_c3ece772cfb1b0::t_07c314e03986ef 1-17
+apps/frontend-nextgen/assets/task-panel/package-lock.json
+  s_c3ece772cfb1b0::t_dfed052a3dc3e3 1-3053
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ed240839cf37f7685166277240c6ae11ac1be3d9",
+  "prompts": {},
+  "sessions": {
+    "s_c3ece772cfb1b0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a09ddb-44c3-7291-a427-f725a1955ba0",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "evilcoda <yipu.hj@antgroup.com>"
+    }
+  }
+}

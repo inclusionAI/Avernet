@@ -1,0 +1,18 @@
+apps/bcsfuse/docs/architecture/composition-contract.md
+  h_5686002b4ce7b9 885-890
+apps/bcsfuse/src/app/bootstrap/embedding_runtime_provider_composition.py
+  h_5686002b4ce7b9 33,35-44,74-77,89-100,205
+apps/bcsfuse/tests/contract/test_async_embedding_batching_tdd.py
+  h_5686002b4ce7b9 379-434
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "159c6b1d61a6c20c39f68b993c7c34af36ac1efd",
+  "prompts": {},
+  "humans": {
+    "h_5686002b4ce7b9": {
+      "author": "文汐 <wenxi.sbw@antfin.com>"
+    }
+  }
+}

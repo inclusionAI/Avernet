@@ -1,0 +1,28 @@
+apps/frontend-nextgen/src/components/BotWorkshop/Editor/CapabilityPickerModal.tsx
+  s_79439ec6a1b301::t_d1f396a3810b71 9,68,117,132,144,147,221-222
+apps/frontend-nextgen/src/components/BotWorkshop/Editor/LocalSkillsPanel.tsx
+  s_79439ec6a1b301::t_d1f396a3810b71 5,24,47-48,55
+apps/frontend-nextgen/test/components/BotWorkshop/localSkillUploadErrors.test.ts
+  s_79439ec6a1b301::t_d1f396a3810b71 1
+apps/frontend-nextgen/src/hooks/useLocalSkillUploadError.ts
+  s_79439ec6a1b301::t_d1f396a3810b71 2-20
+  s_79439ec6a1b301::t_d85c1d9c4d47f0 1
+apps/frontend-nextgen/src/hooks/localSkillUploadErrors.ts
+  s_79439ec6a1b301::t_d1f396a3810b71 1-46
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b8584695dd435c947b78abd521700eacc2a0cfc5",
+  "prompts": {},
+  "sessions": {
+    "s_79439ec6a1b301": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cfae-5b10-75f3-9ddb-9a40d88bbad6",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

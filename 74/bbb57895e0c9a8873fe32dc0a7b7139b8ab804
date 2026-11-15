@@ -1,0 +1,19 @@
+apps/backend/src/agentclaw/community/adapters/http/bot_management/router.py
+  s_fec70fd8bb5588::t_c58a93e0658e6b 2877-2884
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "74bbb57895e0c9a8873fe32dc0a7b7139b8ab804",
+  "prompts": {},
+  "sessions": {
+    "s_fec70fd8bb5588": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a21e-bdd5-7eb1-a388-f113be12869f",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

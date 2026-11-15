@@ -1,0 +1,33 @@
+apps/backend/src/agentclaw/community/core/devices/services/baas_template_resolver.py
+  s_c3ece772cfb1b0::t_a99e8fead277d0 52,54,241-243,248,253,259,294,304,486,537-539
+  s_c3ece772cfb1b0::t_8039ec5814b663 540-541
+apps/backend/tests/community/core/bot_management/services/test_bot_service_restart_idempotency.py
+  s_c3ece772cfb1b0::t_a99e8fead277d0 806
+apps/backend/tests/community/core/devices/services/test_baas_template_resolver.py
+  s_c3ece772cfb1b0::t_549d06e6472874 1044,1064,1165,1186,1215
+apps/backend/src/agentclaw/community/core/bot_management/services/bot_service.py
+  s_c3ece772cfb1b0::t_a99e8fead277d0 926
+apps/backend/tests/community/core/devices/services/test_engine_scoped_template_override.py
+  s_c3ece772cfb1b0::t_034a5fef817830 55-58
+  s_c3ece772cfb1b0::t_872a16cfe6fa87 1-54,59-68
+apps/backend/src/agentclaw/community/core/devices/README.md
+  s_c3ece772cfb1b0::t_872a16cfe6fa87 20-26
+  s_c3ece772cfb1b0::t_034a5fef817830 18,27
+  s_c3ece772cfb1b0::t_f26a6deaa21c7a 19
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "625e6393fc2fc2135f1ba22310e736d7adec861c",
+  "prompts": {},
+  "sessions": {
+    "s_c3ece772cfb1b0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a09ddb-44c3-7291-a427-f725a1955ba0",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "evilcoda <yipu.hj@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,31 @@
+apps/bcs/scripts/e2e-runner/bcs_e2e/build_group_workspace_density.py
+  s_cecdc98e721f4b::t_6240199aacae82 1-471
+apps/bcs/scripts/e2e-runner/bcs_e2e/group_workspace_density.py
+  s_cecdc98e721f4b::t_c854ae78cc52ab 1-373
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_workspace_incident.py
+  s_cecdc98e721f4b::t_5816e4b3c77fd1 27,43-48,278,283,292,294-295,300,337-379,414-416,427,442,484-489,492-494,496-501
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_workspace_run.py
+  s_cecdc98e721f4b::t_b4f3a9c9a31e3b 98,111-113,198-215,240-241
+apps/bcs/scripts/e2e-runner/group-workspace-density-contract.json
+  s_cecdc98e721f4b::t_7c404194d72dbb 1-1454
+apps/bcs/scripts/e2e-runner/tests/test_group_workspace_density.py
+  s_cecdc98e721f4b::t_771ae82fdf15c8 1-447
+apps/bcs/scripts/e2e-runner/tests/test_local_workspace_incident.py
+  s_cecdc98e721f4b::t_b02486764e9fc2 47-83
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6114dbfbcc898ede935bf39ba074ee55562ee4f0",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "Ling-3.1-flash"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

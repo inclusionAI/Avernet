@@ -1,0 +1,28 @@
+apps/evolverun/clawweb/docs/repair-pack-layout.md
+  h_43af82e14600e4 1-75
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/pack-script-snapshot.test.ts
+  h_43af82e14600e4 5,16
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/pack-spec-save.test.ts
+  h_43af82e14600e4 82-119
+apps/evolverun/clawweb/public/modules/workflow/web/components/ScriptFilesTab.tsx
+  h_43af82e14600e4 76
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/ScriptFilesTab.readErrors.test.tsx
+  h_43af82e14600e4 1-169
+apps/evolverun/clawweb/public/modules/workflow/web/editor/packVersionSession.ts
+  h_43af82e14600e4 213-215,219-220
+apps/evolverun/clawweb/scripts/__tests__/repair-pack-layout.test.mjs
+  h_43af82e14600e4 1-494
+apps/evolverun/clawweb/scripts/repair-pack-layout.mjs
+  h_43af82e14600e4 1-257
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "eb2f1d76853e00f3ca7b919778175285c2157055",
+  "prompts": {},
+  "humans": {
+    "h_43af82e14600e4": {
+      "author": "fudapeng <fudp@example.com>"
+    }
+  }
+}

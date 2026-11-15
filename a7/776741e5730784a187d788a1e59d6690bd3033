@@ -1,0 +1,19 @@
+apps/backend/tests/community/core/bot_public/test_risk_publish_adapter.py
+  s_befd386ce20825::t_1a3137c1a3b0a5 46-56
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a7776741e5730784a187d788a1e59d6690bd3033",
+  "prompts": {},
+  "sessions": {
+    "s_befd386ce20825": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a17e54-391f-7460-a1a1-4f8e39166a4f",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}
