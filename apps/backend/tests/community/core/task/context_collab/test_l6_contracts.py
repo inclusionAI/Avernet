@@ -20,9 +20,6 @@ from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs 
 from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_resource_refs import (
     SpaceRef,
 )
-from agentclaw.community.core.task.context_collab.l6_products.context_spec import (
-    ContextSpec,
-)
 from agentclaw.community.core.task.context_collab.l4_context_primitives.participants import (
     Participant,
 )
@@ -33,6 +30,9 @@ from agentclaw.community.core.task.context_collab.l6_products.binding import (
 )
 from agentclaw.community.core.task.context_collab.l6_products.catalog import (
     ProductCatalog,
+)
+from agentclaw.community.core.task.context_collab.l6_products.context_spec import (
+    ContextSpec,
 )
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     MethodRequirement,
@@ -174,7 +174,7 @@ def test_unversioned_spec_maps_only_to_v1_and_pinned_role_facts_are_checked():
         )
     with pytest.raises(ContextCollabValidationError, match="unknown"):
         product_definition(
-            replace(pinned, product_profile_version=2), catalog=PRODUCT_CATALOG
+            replace(pinned, product_profile_version=999), catalog=PRODUCT_CATALOG
         )
     with pytest.raises(ContextCollabValidationError, match="version"):
         product_definition(

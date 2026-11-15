@@ -383,6 +383,14 @@ SWARM_SIGNATURES: dict[str, tuple] = {
 }
 
 OPEN_SIGNATURES: dict[str, tuple] = {
+    "query_opportunities": (
+        _params(
+            ("collab_context_id", "str"),
+            ("method_binding_id", "str"),
+            CTX,
+        ),
+        "tuple[OpenOpportunity, ...]",
+    ),
     "publish_opportunity": _binding_ops(
         "OpenOpportunityCommand", "ProfileOpAcceptedResult"
     ),

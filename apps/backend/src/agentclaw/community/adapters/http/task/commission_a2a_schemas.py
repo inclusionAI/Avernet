@@ -1,4 +1,4 @@
-"""Bounded A2A 0.3.0 JSON-RPC message/send -> ACCS L4 Work reports.
+"""Bounded A2A 0.3.0 JSON-RPC message/send -> ACCS Query/Open/Work.
 
 This is the real HTTP wire, not the P1 A2aMessage mock projection. An A2A
 ``user`` role denotes the sending client, which here is an authenticated Bot.
@@ -12,10 +12,6 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from agentclaw.community.core.task.context_collab.products.task_commission.service_api import (
-    TaskAdvanceCommand,
-    TaskExecutionReportCommand,
-)
 from agentclaw.community.core.errors import Forbidden
 from agentclaw.community.core.gateway_principal import GatewayBot
 from agentclaw.community.core.task.context_collab.errors import (
@@ -23,13 +19,16 @@ from agentclaw.community.core.task.context_collab.errors import (
 )
 from agentclaw.community.core.task.context_collab.l1_interoperate_deliver.common import (
     IdentityRef,
-    ObjectRef,
 )
 from agentclaw.community.core.task.context_collab.l1_interoperate_deliver.envelope import (
     AccsOperationEnvelope,
 )
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     VersionedProfileRef,
+)
+from agentclaw.community.core.task.context_collab.products.task_commission.service_api import (
+    TaskAdvanceCommand,
+    TaskExecutionReportCommand,
 )
 
 ISSUER = "avernet"
@@ -85,22 +84,15 @@ def _timestamp(value: str) -> datetime:
     return result
 
 
-def report_command(
+def authenticated_operation_deadline(
     operation: AccsOperationEnvelope, bot: GatewayBot
-) -> TaskExecutionReportCommand:
-    """Translate only supported, authenticated context; never trust caller IDs."""
+) -> datetime | None:
+    """Common signed identity/version/extension/deadline validation for this endpoint."""
     ctx = operation.context
     if ctx.caller != IdentityRef("AGENT", bot.bot_uuid, ISSUER):
         raise Forbidden("operation caller does not match authenticated Bot")
     if ctx.accountable_principal_ref != IdentityRef("PRINCIPAL", bot.owner_id, ISSUER):
         raise Forbidden("accountable principal does not match authenticated Bot owner")
-    if (
-        operation.layer != "L4"
-        or operation.operation_family != "work"
-        or operation.mode != "COMMAND"
-        or operation.action not in _ACTIONS
-    ):
-        raise ContextCollabValidationError("unsupported ACCS executor operation")
     if ctx.protocol_versions != {"accs": "0.2", "a2a": A2A_VERSION}:
         raise ContextCollabValidationError("unsupported protocol versions")
     if (
@@ -109,13 +101,31 @@ def report_command(
         or ctx.extensions
         or operation.input_refs
     ):
-        raise ContextCollabValidationError("unsupported report extension or idempotency contract")
-    # requested_at is attribution, not authority. Deadline is checked again in
-    # the product immediately before persistence, after validation and G1/G4.
+        raise ContextCollabValidationError(
+            "unsupported operation extension or idempotency contract"
+        )
+    # requested_at is attribution, not authority. Work additionally checks the
+    # deadline before its SQL commit; Query/Open have an ingress deadline only.
     _timestamp(ctx.requested_at)
     deadline = _timestamp(ctx.deadline) if ctx.deadline is not None else None
     if deadline is not None and deadline <= datetime.now(timezone.utc):
-        raise ContextCollabValidationError("report deadline has expired")
+        raise ContextCollabValidationError("operation deadline has expired")
+    return deadline
+
+
+def report_command(
+    operation: AccsOperationEnvelope, bot: GatewayBot
+) -> TaskExecutionReportCommand:
+    """Translate only supported, authenticated context; never trust caller IDs."""
+    deadline = authenticated_operation_deadline(operation, bot)
+    ctx = operation.context
+    if (
+        operation.layer != "L4"
+        or operation.operation_family != "work"
+        or operation.mode != "COMMAND"
+        or operation.action not in _ACTIONS
+    ):
+        raise ContextCollabValidationError("unsupported ACCS executor operation")
     target = operation.target_ref
     if (
         target is None
@@ -134,9 +144,15 @@ def report_command(
         or binding.object_type != "MethodBinding"
         or binding.issuer != ISSUER
         or binding.version is not None
-        or profile != ObjectRef("ProductProfile", "task_commission", "1", ISSUER)
+        or profile is None
+        or profile.object_type != "ProductProfile"
+        or profile.object_id != "task_commission"
+        or profile.issuer != ISSUER
+        or profile.version not in {"1", "2"}
     ):
-        raise ContextCollabValidationError("report requires a supported binding/product context")
+        raise ContextCollabValidationError(
+            "report requires a supported binding/product context"
+        )
     if type(operation.expected_revision) is not int or operation.expected_revision < 1:
         raise ContextCollabValidationError("report requires positive expected_revision")
     payload = ReportPayload.model_validate(operation.payload)
@@ -157,7 +173,9 @@ def report_command(
             artifacts=payload.artifacts,
         ),
         expected_version=operation.expected_revision,
-        product_profile_ref=VersionedProfileRef(profile.object_id, int(profile.version)),
+        product_profile_ref=VersionedProfileRef(
+            profile.object_id, int(profile.version)
+        ),
         method_binding_ref=binding.object_id,
         deadline=deadline,
     )

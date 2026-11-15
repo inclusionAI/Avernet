@@ -4,7 +4,8 @@
 - 治理面操作(lifecycle/group/swarm/open 属主操作):owner principal
   通过、owner executor 通过、陌生 actor 拒绝(``ContextCollabValidationError``,
   错误消息点名 op 与 actor 身份);
-- 读面操作(``inspect`` / ``validate_plan`` / ``submit_application``):
+- 读面/公开提交(``inspect`` / ``validate_plan`` / ``query_opportunities`` /
+  ``submit_application``):
   任意已认证 actor 通过,即使 principal_id/executor_id 双 None;
 - 身份注入语义:executor-only 上下文(executor_id 有值、principal_id 为
   None)executor 通过、principal 拒绝;双 None(上下文不可归属)治理
@@ -27,9 +28,9 @@ from agentclaw.community.core.task.context_collab.errors import (
 from agentclaw.community.core.task.context_collab.g1_secure_govern.method_authorization import (
     GROUP_OWNER_OPS,
     LIFECYCLE_OWNER_OPS,
-    MethodOpsAuthorizerProtocol,
     OPEN_OWNER_OPS,
     SWARM_OWNER_OPS,
+    MethodOpsAuthorizerProtocol,
     StructuralMethodOpsAuthorizer,
 )
 from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
@@ -183,6 +184,7 @@ def test_executor_only_context_executor_passes_principal_denied():
     [
         ("check_lifecycle_op", "inspect"),
         ("check_swarm_op", "validate_plan"),
+        ("check_open_op", "query_opportunities"),
         ("check_open_op", "submit_application"),
     ],
 )
@@ -326,6 +328,10 @@ def test_falsy_actor_identity_denied_everywhere():
         ),
         lambda: authorizer.check_swarm_op(
             "adopt_plan", binding, empty_actor, PRINCIPAL_ID, EXECUTOR_ID
+        ),
+        lambda: authorizer.check_open_op(
+            "query_opportunities", binding, empty_actor, None, PRINCIPAL_ID,
+            EXECUTOR_ID,
         ),
         lambda: authorizer.check_open_op(
             "submit_application", binding, empty_actor, None, PRINCIPAL_ID,

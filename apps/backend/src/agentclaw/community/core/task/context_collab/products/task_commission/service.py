@@ -1,7 +1,7 @@
 """任务代办产品编排(乙案:组合协议层,自持编不开通用北向合同)。
 
 依赖面(spec §3.1,架构测试执法)与公开讨论同矩阵;差异三处编排:
-- 发布:``method_kind=Open``(顶层单值,裁决 B)、
+- 发布:由精确版本 Profile 选择 Open(v1)或 Open + Group(v2)、
   ``executor_ref=AgentRef("bot", assignee)``、
   ``workflow_kind=task_commission_goal``;
 - Work 六动作:G1 授权后经共享 G4 产品合同校验时序与 typed executor
@@ -14,6 +14,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+
+from injector import inject
 
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabNotFoundError,
@@ -58,6 +60,9 @@ from agentclaw.community.core.task.context_collab.l6_products.catalog import (
 from agentclaw.community.core.task.context_collab.l6_products.context_spec import (
     ContextSpec,
 )
+from agentclaw.community.core.task.context_collab.l6_products.contracts import (
+    VersionedProfileRef,
+)
 from agentclaw.community.core.task.context_collab.l6_products.creation_facts import (
     creation_payload,
 )
@@ -80,11 +85,13 @@ from agentclaw.community.core.task.context_collab.products.bbs_public_discussion
 from agentclaw.community.core.task.context_collab.products.task_commission.dispatch import (
     LoggingTaskDispatch,
 )
-from agentclaw.community.core.task.context_collab.products.task_commission.profile import (
-    TASK_COMMISSION_PROFILE_REF,
+from agentclaw.community.core.task.context_collab.products.task_commission.publication import (
+    BotSelfApplicationAdmission,
 )
 from agentclaw.community.core.task.context_collab.products.task_commission.service_api import (
+    ApplyForTaskCommand,
     AssigneeAdmissionCommand,
+    AssigneeAdmissionReceipt,
     DispatchedTaskInfo,
     PublishTaskCommand,
     TaskAdvanceCommand,
@@ -93,6 +100,7 @@ from agentclaw.community.core.task.context_collab.products.task_commission.servi
     TaskDispatchPort,
     TaskExecutionReportCommand,
     TaskMethodOpsPort,
+    TaskOpportunityView,
 )
 from agentclaw.community.core.task.context_collab.products.task_commission.views import (
     TaskCommissionDetailView,
@@ -101,7 +109,6 @@ from agentclaw.community.core.task.context_collab.products.task_commission.views
 from agentclaw.community.core.task.context_collab.services.method_bootstrap import (
     project_created_context,
 )
-from injector import inject
 
 # 与通用创建路径逐字的初始事件形态。
 _CREATION_EVENT_KIND = "task.created"
@@ -133,7 +140,7 @@ class _AdvanceIntent:
 
 
 class TaskCommissionService:
-    """任务代办九用例编排:发布 + Work 六动作(T2),读两例(T3)。"""
+    """任务代办编排:发布、Bot Query/Apply、Work 六动作与读视图。"""
 
     @inject
     def __init__(
@@ -167,8 +174,15 @@ class TaskCommissionService:
         title = _required_content(command.title, "title")
         body = _required_content(command.body, "body")
         assignee = _required_content(command.assignee_agent_id, "assignee")
+        if (
+            command.product_profile_ref.profile_id
+            != ProductProfile.TASK_COMMISSION.value
+        ):
+            raise ContextCollabValidationError(
+                "commission requires a task_commission profile"
+            )
         profile = self._product_catalog.get(
-            TASK_COMMISSION_PROFILE_REF.profile_id, TASK_COMMISSION_PROFILE_REF.version
+            command.product_profile_ref.profile_id, command.product_profile_ref.version
         )
         publication = profile.require_publication()
         spec = ContextSpec(
@@ -199,7 +213,8 @@ class TaskCommissionService:
                 ),
             )
         )
-        # L5 顶层单值 MethodBinding 投影(Open 无 roster,store 失败如实上抛)。
+        # Project the selected L5 topology. v2 seeds only the owner roster;
+        # designated executor membership must be established by Open admission.
         binding = project_created_context(
             self._method_store,
             current_axes(),
@@ -209,23 +224,29 @@ class TaskCommissionService:
             now=_now(),
             catalog=self._product_catalog,
         )
-        # 发布即驱动真 Open 方法生命周期(spec §9 增量裁决,系统编排,
-        # 发布人 ActorContext):publish_opportunity → submit_application
-        # → screen → admit,指定执行 bot 至 ADMITTED。方法面失败如实
-        # 上抛(Collet 已持久不回滚——交付缝同款纪律);bot 仅在
-        # 生命周期完成后才被送达告知。
-        admission = self._method_ops_port.admit_designated_assignee(
-            AssigneeAdmissionCommand(
-                collab_context_id=record.collet.collet_id,
-                assignee_agent_id=assignee,
-                accountable_principal_id=context.actor.principal_id,
-                product_profile_ref=profile.ref,
-                method_binding_ref=binding.method_binding_id,
-            ),
-            context,
+        # v1 retains publisher-mediated admission. v2 only publishes an owner-
+        # authorized opportunity; the designated Bot must query/apply itself.
+        # Cross-store failures propagate without rolling back the SQL Collet.
+        admission_command = AssigneeAdmissionCommand(
+            collab_context_id=record.collet.collet_id,
+            assignee_agent_id=assignee,
+            accountable_principal_id=context.actor.principal_id,
+            product_profile_ref=profile.ref,
+            method_binding_ref=binding.method_binding_id,
         )
-        # The declared gate checks L5's receipt, not a second product state.
-        publication.require_dispatch_ready(admission.state)
+        self_application = isinstance(
+            publication.admission, BotSelfApplicationAdmission
+        )
+        if self_application:
+            # Publication is not an application and grants no executor membership.
+            self._method_ops_port.publish_designated_opportunity(
+                admission_command, context
+            )
+        else:
+            admission = self._method_ops_port.admit_designated_assignee(
+                admission_command, context
+            )
+            publication.require_dispatch_ready(admission.state)
         appended = self._append_message(
             command=None,
             collet=record.collet,
@@ -241,21 +262,55 @@ class TaskCommissionService:
             status=record.task.status,
             context_version=appended.collet.version,
         )
-        # 发布成功后自动送达指定执行 bot(交付缝;失败如实上抛,任务已
-        # 持久不回滚——ACCS:送达不等于也不改写上层权威)。
+        # v1 dispatches after publication/admission; v2 defers dispatch until
+        # Bot self-application is ADMITTED. Delivery never changes Work state.
+        if not self_application:
+            self._dispatch_port.dispatch_task_info(
+                DispatchedTaskInfo(
+                    collet_id=view.collet_id,
+                    title=title,
+                    body=body,
+                    assignee_agent_id=assignee,
+                    publisher_principal_id=context.actor.principal_id,
+                    product_profile_ref=profile.ref,
+                    method_binding_ref=binding.method_binding_id,
+                    context_version=view.context_version,
+                )
+            )
+        return view
+
+    def query_opportunities(
+        self, profile_ref: VersionedProfileRef, context: ActorContext
+    ) -> tuple[TaskOpportunityView, ...]:
+        """Authorized, read-only discovery; does not require prior membership."""
+        return self._method_ops_port.query_opportunities(profile_ref, context)
+
+    def apply_for_task(
+        self, command: ApplyForTaskCommand, context: ActorContext
+    ) -> AssigneeAdmissionReceipt:
+        """Bot applies; the declared owner policy screens/admit, then dispatches."""
+        receipt = self._method_ops_port.apply_for_task(command, context)
+        profile = self._product_catalog.get(
+            command.product_profile_ref.profile_id, command.product_profile_ref.version
+        )
+        profile.require_publication().require_dispatch_ready(receipt.state)
+        record = self._repo.get_current_status(command.collab_context_id)
+        if record is None:
+            raise ContextCollabNotFoundError("admitted task not found")
+        detail = self.detail_task(command.collab_context_id)
         self._dispatch_port.dispatch_task_info(
             DispatchedTaskInfo(
-                collet_id=view.collet_id,
-                title=title,
-                body=body,
-                assignee_agent_id=assignee,
-                publisher_principal_id=context.actor.principal_id,
+                collet_id=command.collab_context_id,
+                title=detail.title,
+                body=detail.body.content if detail.body else "",
+                assignee_agent_id=context.actor.principal_id,
+                publisher_principal_id=record.owner_principal_id,
                 product_profile_ref=profile.ref,
-                method_binding_ref=binding.method_binding_id,
-                context_version=view.context_version,
+                method_binding_ref=command.method_binding_ref,
+                context_version=record.collet.version,
             )
         )
-        return view
+        return receipt
 
     # ------------------------------------------------------- Work 六动作
 

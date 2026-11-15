@@ -6,6 +6,8 @@ never import this module; the legacy constructor remains an application facade.
 
 from __future__ import annotations
 
+from injector import inject
+
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabNotFoundError,
 )
@@ -49,7 +51,6 @@ from agentclaw.community.core.task.context_collab.persistence.method_store impor
 from agentclaw.community.core.task.context_collab.persistence.repository import (
     ContextCollabRepositoryProtocol,
 )
-from injector import inject
 
 
 def _resolve_method_spec(
@@ -72,6 +73,11 @@ def _resolve_method_spec(
         ),
         principal_id=spec.principal_ref.principal_id,
         executor_id=spec.executor_ref.agent_id if spec.executor_ref else None,
+        admit_executor_on_creation=not (
+            profile is not None
+            and profile.publication is not None
+            and profile.publication.admission.defer_executor_membership
+        ),
     )
 
 

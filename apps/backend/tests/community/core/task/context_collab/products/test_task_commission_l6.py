@@ -28,27 +28,28 @@ from agentclaw.community.core.task.context_collab.l6_products.catalog import (
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     VersionedProfileRef,
 )
-from agentclaw.community.core.task.context_collab.products.task_commission.profile import (
-    TASK_COMMISSION_PROFILE,
+from agentclaw.community.core.task.context_collab.l6_products.publication import (
+    OpenAdmissionPolicy,
+    OpenPublicationProfile,
 )
 from agentclaw.community.core.task.context_collab.method_service_api import (
     OpenMethodOpsServiceProtocol,
 )
-from agentclaw.community.core.task.context_collab.l6_products.publication import (
-    OpenAdmissionPolicy,
-    OpenPublicationProfile,
+from agentclaw.community.core.task.context_collab.products.task_commission.profile import (
+    TASK_COMMISSION_PROFILE,
+    build_self_service_commission_profile,
 )
 from agentclaw.community.core.task.context_collab.products.task_commission.service_api import (
     AssigneeAdmissionCommand,
 )
 from agentclaw.community.di.modules import task_commission_method_ops_adapter as adapter
+from tests.community.core.task.context_collab.product_catalog import PRODUCT_CATALOG
 from tests.community.core.task.context_collab.products.test_task_commission_publish import (
     ASSIGNEE,
     _actor,
     _publish_command,
     _service,
 )
-from tests.community.core.task.context_collab.product_catalog import PRODUCT_CATALOG
 
 
 def test_commission_has_a_complete_declarative_publication_and_work_contract():
@@ -262,3 +263,45 @@ def test_generic_open_policy_does_not_encode_commission_role_sources():
     with pytest.raises(ContextCollabValidationError, match="unsupported designated"):
         executor.admit_designated_assignee(command, _actor())
     assert ops.mock_calls == []
+
+
+def test_v2_adds_self_application_without_changing_v1_or_workflow():
+    legacy = PRODUCT_CATALOG.get("task_commission", 1)
+    profile = build_self_service_commission_profile()
+    assert PRODUCT_CATALOG.get("task_commission", 2) == profile
+    assert profile.ref == VersionedProfileRef("task_commission", 2)
+    assert profile.composition.method_kind == "Open + Group"
+    assert {
+        item.method: item.version for item in profile.composition.required_methods
+    } == {
+        "Open": "0.2",
+        "Group": "0.2",
+    }
+    policy = profile.require_publication().admission
+    assert policy.strategy == "designated_bot_self_application"
+    assert policy.participation_type is ParticipationType.GROUP_MEMBER
+    assert policy.capacity == 1
+    assert policy.defer_executor_membership is True
+    assert profile.workflow == legacy.workflow
+    assert legacy.composition.method_kind == "Open"
+    assert legacy.require_publication().admission.defer_executor_membership is False
+    assert (
+        legacy.require_publication().admission.participation_type
+        is ParticipationType.SINGLE_CONTRIBUTION
+    )
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"strategy": "publisher_mediated"},
+        {"participation_type": ParticipationType.SINGLE_CONTRIBUTION},
+        {"capacity": 2},
+        {"defer_executor_membership": False},
+        {"defer_executor_membership": 1},
+    ],
+)
+def test_self_application_policy_rejects_incompatible_semantics(overrides):
+    policy = build_self_service_commission_profile().require_publication().admission
+    with pytest.raises(ContextCollabValidationError):
+        replace(policy, **overrides)

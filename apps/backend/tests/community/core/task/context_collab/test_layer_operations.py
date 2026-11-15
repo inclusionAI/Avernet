@@ -4,6 +4,7 @@ from dataclasses import dataclass, replace
 from importlib import import_module
 
 import pytest
+
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabValidationError,
     ContextCollabVersionConflict,
@@ -162,6 +163,11 @@ def test_method_operations_use_lower_reader_and_resolved_facts(kind):
             OWNER,
         )
         assert result.state == "OPEN"
+        [opportunity] = service.query_opportunities(
+            COLLET_ID, binding_id, ActorContext(BOT, "a2a")
+        )
+        assert opportunity.opportunity_id == result.object_id
+        assert opportunity.scope_ref == "scope"
     else:
         service = SwarmMethodService(store, authorizer, reader)
         result = service.declare_execution_profile(

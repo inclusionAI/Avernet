@@ -1,4 +1,4 @@
-"""Reachable, Bot-authenticated A2A ingress for commission executor reports."""
+"""Bot-authenticated A2A ingress for commission discovery, application and Work."""
 
 from __future__ import annotations
 
@@ -20,6 +20,9 @@ from agentclaw.community.adapters.http.task.commission_a2a_schemas import (
     RpcRequest,
     SendParams,
     report_command,
+)
+from agentclaw.community.adapters.http.task.translator_commission_open_a2a import (
+    execute_open_operation,
 )
 from agentclaw.community.api.task.task_commission_service import (
     TaskCommissionServiceProtocol,
@@ -45,8 +48,8 @@ from agentclaw.community.core.task.context_collab.l1_interoperate_deliver.envelo
 from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
     PrincipalRef,
 )
-from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 from agentclaw.community.di import Injected
+from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["task-commission-a2a"])
@@ -54,55 +57,82 @@ _MAX_BODY_BYTES = 65536
 
 
 def _rpc_error(request_id: str | int | None, code: int, message: str) -> JSONResponse:
-    return JSONResponse({
-        "jsonrpc": "2.0", "id": request_id,
-        "error": {"code": code, "message": message},
-    })
+    return JSONResponse(
+        {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "error": {"code": code, "message": message},
+        }
+    )
 
 
 def _execute(
     operation: AccsOperationEnvelope,
     bot: GatewayBot,
     service: TaskCommissionServiceProtocol,
-) -> AccsOperationResult:
+) -> tuple[AccsOperationResult, dict | None]:
     op_ref = ObjectRef("Operation", operation.operation_id, None, ISSUER)
     try:
-        command = report_command(operation, bot)
-        # Bind the signed Bot's tenant on the same worker that reads/writes SQL
-        # and MethodStore. Never use a body/query tenant or the default tenant.
+        # SQL discovery and Work use the signed Bot tenant on this worker,
+        # never a body/query tenant. L5 retains its current single-tenant axes.
         with avernet_tenant_scope(bot.tenant):
+            if operation.operation_family in {"query", "open"}:
+                return execute_open_operation(operation, bot, service)
+            command = report_command(operation, bot)
             result = service.report_execution(
                 command,
                 ActorContext(PrincipalRef("bot", bot.bot_uuid), source="a2a"),
             )
         return AccsOperationResult(
-            op_ref, "SUCCEEDED",
-            (ObjectRef("Collet", result.collab_context_id, str(result.context_version), ISSUER),),
-            (ObjectRef("Event", result.event_id, None, ISSUER),), None,
-        )
+            op_ref,
+            "SUCCEEDED",
+            (
+                ObjectRef(
+                    "Collet",
+                    result.collab_context_id,
+                    str(result.context_version),
+                    ISSUER,
+                ),
+            ),
+            (ObjectRef("Event", result.event_id, None, ISSUER),),
+            None,
+        ), None
     except Forbidden:
-        category, message = "AUTHORIZATION", "Bot is not authorized for this report"
+        category, message = "AUTHORIZATION", "Bot is not authorized for this operation"
     except ContextCollabNotFoundError:
         category, message = "NOT_FOUND", "Task not found"
     except ContextCollabVersionConflict:
         category, message = "CONFLICT", "Stale revision; reconcile before retrying"
     except (ContextCollabValidationError, ValidationError):
-        category, message = "VALIDATION", "Invalid report, actor or task state"
+        category, message = "VALIDATION", "Invalid operation, actor or task state"
     except Exception:
-        logger.exception("Commission report failed; operation_id=%r", operation.operation_id[:256])
-        category, message = "INTERNAL", "Report failed; reconcile task state before retrying"
+        logger.exception(
+            "Commission operation failed; operation_id=%r", operation.operation_id[:256]
+        )
+        category, message = (
+            "INTERNAL",
+            "Operation failed; reconcile task state before retrying",
+        )
     return AccsOperationResult(
-        op_ref, "FAILED" if category == "INTERNAL" else "REJECTED", (), (),
+        op_ref,
+        "FAILED" if category == "INTERNAL" else "REJECTED",
+        (),
+        (),
         AccsError(
-            code=f"COMMISSION_{category}", message=message, retryable=False,
-            category=category, trace_id=operation.context.trace_id,
-            object_ref=None, details=None,
+            code=f"COMMISSION_{category}",
+            message=message,
+            retryable=False,
+            category=category,
+            trace_id=operation.context.trace_id,
+            object_ref=None,
+            details=None,
         ),
-    )
+    ), None
 
 
 @router.post(
-    RPC_PATH, response_class=JSONResponse,
+    RPC_PATH,
+    response_class=JSONResponse,
     openapi_extra={"x-avernet-security": {"bot": "required"}},
 )
 async def receive_executor_report(
@@ -134,11 +164,19 @@ async def receive_executor_report(
         operation = AccsOperationEnvelope.from_dict(params.message.parts[0].data)
     except (ValidationError, ContextCollabValidationError, TypeError, AttributeError):
         return _rpc_error(rpc_id, -32602, "Invalid params")
-    result = await run_in_threadpool(_execute, operation, bot, service)
-    return JSONResponse({
-        "jsonrpc": "2.0", "id": rpc.id,
-        "result": {
-            "kind": "message", "role": "agent", "messageId": str(uuid4()),
-            "parts": [{"kind": "data", "data": result.to_dict()}],
-        },
-    })
+    result, data = await run_in_threadpool(_execute, operation, bot, service)
+    parts = [{"kind": "data", "data": result.to_dict()}]
+    if data is not None:
+        parts.append({"kind": "data", "data": data})
+    return JSONResponse(
+        {
+            "jsonrpc": "2.0",
+            "id": rpc.id,
+            "result": {
+                "kind": "message",
+                "role": "agent",
+                "messageId": str(uuid4()),
+                "parts": parts,
+            },
+        }
+    )

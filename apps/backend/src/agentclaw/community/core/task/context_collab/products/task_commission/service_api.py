@@ -47,6 +47,8 @@ class PublishTaskCommand:
     space: SpaceRef
     assignee_agent_id: str
     resource_refs: list[ResourceRef] = field(default_factory=list)
+    # Creation-only exact selection; omission deliberately preserves v1.
+    product_profile_ref: VersionedProfileRef = VersionedProfileRef("task_commission", 1)
 
 
 @dataclass
@@ -114,8 +116,9 @@ class AssigneeAdmissionCommand:
 
     ``collab_context_id`` 即机会 scope_ref 与录取 admitted_scope_ref;
     ``assignee_agent_id`` 是被指派执行 bot(申请的 applicant_agent_ref);
-    ``accountable_principal_id`` 是发布发起人 principal_id——申请的
-    责任主体:系统代投的申请由发布人担责(withdraw 自助面同语义)。
+    ``accountable_principal_id`` 是发布发起人 principal_id:v1 代投申请
+    由发布人担责;v2 仅授权发布策略,真正 Bot 申请使用 ApplyForTaskCommand
+    中认证 Bot owner 的责任主体,不沿用发布人身份。
     ``product_profile_ref`` 固定本次采用的 L6 定义;适配器必须消费其中
     的 publication 合同,不能另选 latest。``method_binding_ref`` 是已
     实例化的 L5 绑定,不是发布人或执行者身份。
@@ -130,24 +133,68 @@ class AssigneeAdmissionCommand:
 
 @dataclass(frozen=True)
 class AssigneeAdmissionReceipt:
-    """方法面四步编排的受理回执;P1 供断言/审计,不进产品视图
-    (方法 store 行记录运行时结局,不承诺跨重启持久化)。"""
+    """Open admission receipt; v2 exposes scoped binding refs to the applicant.
+
+    MethodStore facts do not imply restart durability.
+    """
 
     opportunity_id: str
     application_id: str
     decision_id: str
     state: str
+    # Empty only for legacy SINGLE_CONTRIBUTION, which creates no binding.
+    admitted_scope_ref: str = ""
+    resulting_binding_refs: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class TaskOpportunityView:
+    """Minimal designated-Bot discovery projection; no applicant/policy history."""
+
+    collab_context_id: str
+    opportunity_id: str
+    method_binding_ref: str
+    product_profile_ref: VersionedProfileRef
+    title: str
+    scope_ref: str
+
+
+@dataclass(frozen=True)
+class ApplyForTaskCommand:
+    collab_context_id: str
+    opportunity_id: str
+    method_binding_ref: str
+    product_profile_ref: VersionedProfileRef
+    # Derived from the authenticated Bot owner, never the publisher's identity.
+    accountable_principal_id: str
 
 
 @runtime_checkable
 class TaskMethodOpsPort(Protocol):
-    """方法编排缝:发布即驱动真 Open 方法生命周期——
-    publish_opportunity → submit_application → screen → admit
-    (SINGLE_CONTRIBUTION、capacity=1、scope=collet),指定执行者至
-    ADMITTED。策略、容量、类型及顺序由所选 L6 publication 合同声明;
-    未支持的策略拒绝,失败原样传播,不回滚已创建的下层对象。
-    P1 系统编排,恒以发布人 ActorContext 调用;实现住 DI
-    适配层(产品白名单外的服务面经此缝进入,白名单零改动)。"""
+    """Profile-selected Open orchestration seam, implemented at DI assembly.
+
+    v1: publisher-mediated SINGLE_CONTRIBUTION admission during publication.
+    v2: publication only opens an opportunity; designated Bot Query/Apply invokes
+    owner-authorized automatic review and task-scoped Group membership. Query
+    is read-only. require_admitted guards Work through the shared G1 seam.
+    Unsupported strategies fail closed; partial failures propagate without rollback.
+    """
+
+    def publish_designated_opportunity(
+        self, command: AssigneeAdmissionCommand, context: ActorContext
+    ) -> str: ...
+
+    def query_opportunities(
+        self, profile_ref: VersionedProfileRef, context: ActorContext
+    ) -> tuple[TaskOpportunityView, ...]: ...
+
+    def apply_for_task(
+        self, command: ApplyForTaskCommand, context: ActorContext
+    ) -> AssigneeAdmissionReceipt: ...
+
+    def require_admitted(
+        self, collab_context_id: str, context: ActorContext
+    ) -> None: ...
 
     def admit_designated_assignee(
         self, command: AssigneeAdmissionCommand, context: ActorContext
@@ -182,6 +229,14 @@ class TaskCommissionServiceProtocol(Protocol):
     def publish_task(
         self, command: PublishTaskCommand, context: ActorContext
     ) -> TaskCommissionCreatedView: ...
+
+    def query_opportunities(
+        self, profile_ref: VersionedProfileRef, context: ActorContext
+    ) -> tuple[TaskOpportunityView, ...]: ...
+
+    def apply_for_task(
+        self, command: ApplyForTaskCommand, context: ActorContext
+    ) -> AssigneeAdmissionReceipt: ...
 
     def report_execution(
         self, command: TaskExecutionReportCommand, context: ActorContext

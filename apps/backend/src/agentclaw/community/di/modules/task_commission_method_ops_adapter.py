@@ -20,8 +20,13 @@ from __future__ import annotations
 
 from uuid import uuid4
 
+from injector import inject
+
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabValidationError,
+)
+from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context import (
+    ActorContext,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
     top_level_binding_id,
@@ -31,6 +36,9 @@ from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime 
 )
 from agentclaw.community.core.task.context_collab.l6_products.catalog import (
     ProductCatalog,
+)
+from agentclaw.community.core.task.context_collab.l6_products.contracts import (
+    VersionedProfileRef,
 )
 from agentclaw.community.core.task.context_collab.method_service_api import (
     OpenAdmitCommand,
@@ -43,11 +51,12 @@ from agentclaw.community.core.task.context_collab.products.task_commission.publi
     require_designated_admission,
 )
 from agentclaw.community.core.task.context_collab.products.task_commission.service_api import (
+    ApplyForTaskCommand,
     AssigneeAdmissionCommand,
     AssigneeAdmissionReceipt,
     TaskMethodOpsPort,
+    TaskOpportunityView,
 )
-from injector import inject
 
 
 class TaskCommissionOpenMethodAdapter(TaskMethodOpsPort):
@@ -128,4 +137,28 @@ class TaskCommissionOpenMethodAdapter(TaskMethodOpsPort):
             application_id=submitted.object_id,
             decision_id=decision_id,
             state=admitted.state,
+        )
+
+    def publish_designated_opportunity(
+        self, command: AssigneeAdmissionCommand, context: ActorContext
+    ) -> str:
+        raise ContextCollabValidationError(
+            "v1 adapter does not support Bot self-application"
+        )
+
+    def query_opportunities(
+        self, profile_ref: VersionedProfileRef, context: ActorContext
+    ) -> tuple[TaskOpportunityView, ...]:
+        raise ContextCollabValidationError("v1 adapter does not support Bot discovery")
+
+    def apply_for_task(
+        self, command: ApplyForTaskCommand, context: ActorContext
+    ) -> AssigneeAdmissionReceipt:
+        raise ContextCollabValidationError(
+            "v1 adapter does not support Bot self-application"
+        )
+
+    def require_admitted(self, collab_context_id: str, context: ActorContext) -> None:
+        raise ContextCollabValidationError(
+            "v1 adapter cannot establish executor membership"
         )

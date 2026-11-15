@@ -13,7 +13,6 @@ from agentclaw.community.core.task.context_collab.l5_methods.open_profile import
     ParticipationType,
 )
 
-
 if TYPE_CHECKING:
     from agentclaw.community.core.task.context_collab.l6_products.contracts import (
         ScenarioRole,
@@ -28,6 +27,8 @@ class OpenAdmissionPolicy:
     accountable_role: str
     participation_type: ParticipationType
     capacity: int
+    # Designation is not admission when the product defers executor membership.
+    defer_executor_membership: bool = False
 
     def __post_init__(self) -> None:
         if any(
@@ -35,6 +36,8 @@ class OpenAdmissionPolicy:
             for role in (self.applicant_role, self.accountable_role)
         ):
             raise ContextCollabValidationError("admission requires scenario roles")
+        if type(self.defer_executor_membership) is not bool:
+            raise ContextCollabValidationError("invalid executor membership policy")
         if type(self.capacity) is not int or self.capacity < 1:
             raise ContextCollabValidationError("admission capacity must be positive")
         if not isinstance(self.participation_type, ParticipationType):

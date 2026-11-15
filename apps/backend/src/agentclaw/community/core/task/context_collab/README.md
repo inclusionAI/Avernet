@@ -35,7 +35,7 @@ l5_methods/operations/
   initialization.py      # top-level Method/roster from resolved Method facts
   lifecycle.py           # binding lifecycle, inspect, compose and detach
   single.py / group.py   # separate operations; single_group.py preserves combined API
-  open/                  # opportunity/application/admission operations
+  open/                  # opportunity query/application/admission operations
   swarm/                 # execution profile/plan/stage operations
 services/
   context_collab_service.py  # generic cross-layer application entrypoints
@@ -64,6 +64,22 @@ products/
   versions during recovery. Initialization is idempotent and keeps existing
   terminated bindings; missing binding recovery retains the existing in-memory
   restart limitation (no durable method history is fabricated).
+- Product bootstrap resolves generic initial-roster constraints into
+  `ResolvedMethodSpec.admit_executor_on_creation`; L5 never interprets a product
+  strategy. [Commission v2](products/task_commission/README.md#v2-complete-journey-and-participation-boundary)
+  defers executor Group membership until Bot self-application is admitted. DI's
+  commission composition slice also installs the shared G1 admission guard, so
+  neither product nor generic L4 execution can bypass that task-scoped binding.
+  v1 and other products retain their existing structural behavior.
+- L5 Open owns `OpenMethodOpsServiceProtocol.query_opportunities`: a read-only
+  snapshot on an explicitly identified, ACTIVE Open binding. G1 requires an
+  authenticated actor, not existing membership. Only OPEN opportunities within
+  their application window and below capacity are returned; querying neither
+  reserves capacity nor admits an applicant. Product discovery selects its
+  authorized task/profile candidates and delegates these Method checks to L5,
+  retaining designation and product-policy filtering outside L5. The existing
+  signed HTTP product-discovery operation remains L4 Query; no new wire tuple
+  or global L5 discovery index is implied. See the [direct invocation example](products/task_commission/README.md#calling-l5-open-directly).
 - Old `services/*` operation imports are compatibility forwards, not duplicate
   implementations. The legacy lifecycle constructor additionally assembles the
   same recovery adapter for old `product_catalog=` callers. New DI uses the L5

@@ -21,6 +21,9 @@ from typing import Protocol, runtime_checkable
 from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context import (
     ActorContext,
 )
+from agentclaw.community.core.task.context_collab.l5_methods.open_profile import (
+    OpenOpportunity,
+)
 
 __all__ = [
     "ActorContext",
@@ -573,6 +576,24 @@ class SwarmMethodOpsServiceProtocol(Protocol):
 @runtime_checkable
 class OpenMethodOpsServiceProtocol(Protocol):
     """Open Profile 操作协议(spec §4.4);录取只对 ``admitted_scope_ref`` 生效,不产生 Space Membership。"""
+
+    def query_opportunities(
+        self,
+        collab_context_id: str,
+        method_binding_id: str,
+        context: ActorContext,
+    ) -> tuple[OpenOpportunity, ...]:
+        """Read available opportunities on one ACTIVE Open binding.
+
+        Requires a G1-authenticated actor, not prior participation. Returns OPEN
+        opportunities within their time window with free capacity; SUBMITTED,
+        SCREENING and ADMITTED applications occupy slots. This is a read-time
+        snapshot, not a reservation, eligibility decision or admission. No writes
+        or delivery occur. Missing bindings raise NotFound; non-Open/inactive
+        bindings and unauthorized callers raise ValidationError. Product-wide
+        discovery, designation and profile policy remain outside L5.
+        """
+        ...
 
     def publish_opportunity(
         self,

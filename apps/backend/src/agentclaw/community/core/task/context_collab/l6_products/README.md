@@ -43,15 +43,16 @@ repository compose the contracts.
 Shared G4 enforcement lives in
 [`g4_contracts_consistency/product_contract.py`](../g4_contracts_consistency/product_contract.py).
 
-## Installed v1 definitions
+## Installed definitions
 
-| Product ID | Workflow ID | Existing Method topology | Executor |
+| Product ref | Workflow ref | Existing Method topology | Executor |
 | --- | --- | --- | --- |
-| team_todo | team_todo_execution | Single | Required |
-| public_discussion | forum_public_discussion | Open + Group | Optional |
-| bbs_public_discussion | bbs_public_discussion | Open + Group | Optional |
-| bbs_help_request | bbs_help_request_goal | Open + Group | Optional |
-| task_commission | task_commission_goal | Open | Required |
+| team_todo@1 | team_todo_execution@1 | Single | Required |
+| public_discussion@1 | forum_public_discussion@1 | Open + Group | Optional |
+| bbs_public_discussion@1 | bbs_public_discussion@1 | Open + Group | Optional |
+| bbs_help_request@1 | bbs_help_request_goal@1 | Open + Group | Optional |
+| task_commission@1 | task_commission_goal@1 | Open | Required |
+| task_commission@2 | task_commission_goal@1 | Open + Group | Required; membership deferred to Open admission |
 
 This table records **this checkout's existing implementations**. It does not
 infer that every public discussion is Group, or that a designated executor
@@ -61,9 +62,9 @@ requires a new version; preserve old definitions for existing instances.
 ## task_commission consumes its selected definition
 
 [`products/task_commission/profile.py`](../products/task_commission/profile.py)
-owns the complete installed `task_commission@1` definition, rather than placing
-business templates in L6 or flags in a generic profile factory. Its specialized
-publisher-mediated `DesignatedOpenAdmission` belongs in
+owns the installed v1 and v2 definitions, rather than placing business templates
+in L6 or a generic profile factory. Their specialized `DesignatedOpenAdmission`
+and `BotSelfApplicationAdmission` policies belong in
 [`products/task_commission/publication.py`](../products/task_commission/publication.py).
 The other four existing compatibility definitions live in
 [`products/legacy_profiles.py`](../products/legacy_profiles.py), not L6. Neither
@@ -71,30 +72,36 @@ module registers itself; only DI chooses the installation.
 
 The product service and its bounded Open adapter consume the injected definition:
 
-- Creation explicitly selects `TASK_COMMISSION_PROFILE_REF`, reads its Method
-  composition and Workflow ref, and calls `prepare_product_spec` with that exact
-  selection. Explicit selection is creation-only: the input must have no pinned
-  versions or materialized role facts. Generic creation still selects v1; neither
-  path selects latest or migrates an existing instance.
+- `PublishTaskCommand.product_profile_ref` selects an exact installed definition
+  (default v1). Creation reads that definition's Method composition and Workflow
+  ref, then calls `prepare_product_spec` with the exact selection. This selector
+  is creation-only: the input must have no pinned versions or materialized role
+  facts. Generic creation still selects v1; neither path selects latest or
+  migrates an existing instance.
 - The publication contract maps `assignee` to the required typed executor and
   `owner` to the required principal. Catalog construction delegates role validation
   to the product's specialized policy. L6 only requires the referenced roles to
   exist and be required; it does not impose commission's executor/principal
-  source mapping on all Open products. The implemented strategy is
-  `publisher_mediated`: the publisher remains the
-  actor and accountable principal throughout; this does not impersonate the Bot
-  or claim that it autonomously applied. G1 still authorizes every L5 operation.
+  source mapping on all Open products. v1's `publisher_mediated` strategy keeps
+  the publisher as actor/accountable principal; it does not impersonate the Bot.
+  v2's `designated_bot_self_application` strategy uses the authenticated Bot as
+  applicant, its signed owner as accountable principal, and publisher-authorized
+  policy execution for automatic review. G1 still authorizes L5 operations.
 - The DI adapter consumes the exact selected publication policy:
   `publish_opportunity → submit_application → screen → admit`, with
   `SINGLE_CONTRIBUTION` and capacity 1 in v1. The product passes the actual
   projected top-level MethodBinding ID, not a publisher/executor identity.
   Unsupported strategies, step sequences and delivery policies fail closed;
   the bounded adapter also rejects a generic policy that is not this product's
-  designated-executor strategy. There is no arbitrary workflow DSL executor.
-- Both adapter and product check the L5 receipt is `ADMITTED` before dispatch.
-  The product also checks this before appending the body Message. Failure
-  propagates without rollback of already-created Collet/Method objects. No
-  automatic retry, compensation or atomic cross-store publication is implied.
+  designated-executor strategy. v2 publication only opens the opportunity;
+  the Bot's later Query/Apply runs admission with GROUP_MEMBER, capacity 1,
+  and verifies the resulting task-scoped GroupMemberBinding. There is no arbitrary
+  workflow DSL executor.
+- Dispatch requires the L5 receipt to be `ADMITTED`. v1 also checks this before
+  appending the body Message; v2 publishes body/opportunity before Bot application,
+  with no early dispatch. Failure propagates without rollback of already-created
+  Collet/Method objects. No automatic retry, compensation or atomic cross-store
+  publication/admission is implied.
 - Six Work entrypoints resolve action/event/primitive/payload mappings from the
   instance's exact WorkflowProfile. G4 checks declared control-event mappings,
   then the referenced G4 machine remains the only transition authority. L6
@@ -105,7 +112,10 @@ The product service and its bounded Open adapter consume the injected definition
   of remote acceptance. Tests exercise the local mock bridge, not live A2A.
 
 The internal `AssigneeAdmissionCommand` and `DispatchedTaskInfo` require those
-two refs; public creation and Work command fields are unchanged. Other products
+two refs; existing public user creation and Work wire fields remain unchanged.
+The bounded signed-Bot route additionally handles v2 Query/Apply; see the
+[commission wire contract](../products/task_commission/README.md#wire-contract-and-example).
+Other products
 may intentionally have no automatic Open publication contract. Such definitions
 cannot be consumed by this publication use case.
 
@@ -125,8 +135,12 @@ cannot be consumed by this publication use case.
 4. Existing L5 projection creates an explicit top-level MethodBinding. Its
    `profile_versions` come from the pinned product definition; its
    `role_binding_refs` identify the same L4 facts as ProductInstance. A role ref
-   is a local, Collet-qualified `(role, participant)` reference, not an independent identity or
-   resource permission authority.
+   is a local, Collet-qualified `(role, participant)` reference, not an independent
+   identity or resource permission authority. `OpenAdmissionPolicy.defer_executor_membership`
+   is a typed, generic composition constraint: application bootstrap resolves it
+   to L5's `ResolvedMethodSpec.admit_executor_on_creation`. L5 does not inspect
+   product strategy names. v2 seeds only the owner Group member; its designated
+   executor gains Group membership only through Open admission.
 
 **Transaction limit:** L5 projection remains a subsequent MethodStore write,
 not part of the SQL transaction. A failed projection propagates as an error;
@@ -142,12 +156,15 @@ the same G4 product validation, followed by existing G4 transition/guard
 resolution and repository CAS. G1 remains a separate prerequisite; L6 does not
 authorize an operation merely because a role/template mentions it.
 
-- `task_commission@1` selects strict Work semantics: only declared Task control
+- Both `task_commission` versions select strict Work semantics: only declared Task control
   events from an allowed source state; designated typed executor only for
   progress and submit; public events; `percent` is an integer in `[0,100]` and belongs only
   to progress reporting, never a Message-based side channel. Existing G4 guards
   check artifacts and owner acceptance/cancellation. Terminal/out-of-order
-  controls fail before writing.
+  controls fail before writing. v2 additionally installs an admission prerequisite
+  through shared G1: product and generic L4 start/progress/submit require the
+  designated Bot's active, task-scoped Open/Group binding. Designation alone or
+  admission to another task cannot authorize execution; revocation blocks it.
 - `bbs_public_discussion@1` requires public messages; a non-null reply parent
   must be a Message, never the `task.created` skeleton. Missing/cross-context
   parents remain the repository's responsibility. Root body/replies may have
@@ -165,10 +182,11 @@ authorize an operation merely because a role/template mentions it.
 
 ## Compatibility, read behavior and migration
 
-- Public creation fields and six-field creation payload remain unchanged. New
-  instances select v1; this change adds no request version selector or HTTP
-  endpoint. A product/workflow/Method mismatch is now rejected before persistence,
-  rather than accepted as unrelated labels.
+- Public user creation fields and six-field creation payload remain unchanged.
+  Generic creation and omitted product-service selection preserve v1. The product
+  service can explicitly select v2; no dynamic registration API or new route is
+  added. A product/workflow/Method mismatch is rejected before persistence, rather
+  than accepted as unrelated labels.
 - New product rows pin product/workflow versions and store explicit role facts.
   G1 compares identity **type and ID** through these facts. Legacy rows retain
   their old structural ID-based G1 matching; no backfill silently changes their
@@ -210,23 +228,23 @@ this minimum contract increment. Do not describe it as full ACCS conformance.
 ## Local commission product acceptance
 
 The [commission user-journey test](../../../../../../../tests/community/core/task/context_collab/products/test_task_commission_end_to_end.py)
-uses the actual `TaskModule` / `TaskPersistenceModule` assembly and installed
-product catalog. Infrastructure wiring stays in its fixture; the test body
-uses `TaskCommissionServiceProtocol` for owner business commands and observations,
-and a simulated working Bot for execution. Product assertions use responses,
-list/detail views and the exposed activity history, not ProductInstance,
-MethodStore or SQL. The Bot harness constructs authenticated A2A requests.
+uses the actual `TaskModule` / `TaskPersistenceModule`, isolated SQLite and the
+real catalog seam to deploy an authored v2 profile. Product staff define/deploy;
+business staff create/designate; the case directly invokes L5 Open's
+`query_opportunities` with the Bot actor and explicit context/binding, rather
+than a built-in working-Bot method. Product-wide signed HTTP Query is checked
+separately against that result; the Bot applies itself through signed A2A HTTP. Automatic review establishes the real
+task-scoped Group binding before dispatch or execution. The Bot then reports
+plan/code/test/PR-proposal steps, submits on successful return, and the owner
+explicitly accepts. Product observations use service responses/history; focused
+MethodStore assertions verify nonmutation and actual admission/membership.
 
-The journey is owner publication and discovery, simulated assignee start,
-proactive progress during local file generation, automatic result submission
-on successful return, then owner review and acceptance. A failed execution
-regression verifies that failure does not auto-submit. Bot reports traverse the
-real signed HTTP ingress and L4 Work actions; Open handles participation and
-admission, not result submission. The harness passes the published task to the
-simulated Bot and signs a local principal; it does not verify actual outbound
-notification receipt or gateway forwarding. Real product/repository services,
-the Open adapter and G1/G4 execute using isolated SQLite and the default local
-`MockA2aDelivery`.
+Negative cases check unrelated Bots, forged contexts, repeated Query, duplicate
+Apply, task isolation, revocation through both Work entrypoints and signed-tenant
+SQL discovery. Execution failure must not auto-submit in either v1 or v2. The
+harness signs a local principal; it does not verify gateway forwarding or actual
+outbound receipt. Outbound still uses local `MockA2aDelivery`. Open handles
+admission; progress/submission remain L4 Work, never Open operations.
 
 The separate [protocol/persistence integration suite](../../../../../../../tests/community/core/task/context_collab/products/test_task_commission_protocol_integration.py)
 retains pinned ProductInstance/role checks, the single Open binding,
@@ -252,8 +270,10 @@ DEPLOY_PROFILE=test .venv/bin/python -m pytest \
 The journey adds local HTTP/signature verification for simulated Bot reports;
 the protocol suite remains service-level integration. Neither verifies live
 remote A2A, autonomous Bot/LLM execution, artifact upload, production-database
-behavior or durable MethodStore restart. The journey creates a temporary local
-report file; its URI is submitted as a reference, not transferred or uploaded.
+behavior or durable MethodStore restart. The journey creates temporary plan/code/test/PR-proposal files and runs three
+local code checks; their URIs are references, not transferred/uploaded artifacts
+or proof of a real remote PR. L5 MethodStore still uses its existing single-tenant
+axes; SQL signed-tenant tests do not establish full MethodStore multitenancy.
 
 Verification owners:
 
@@ -284,8 +304,8 @@ unversioned rows. This fixes enforcement of the existing v1 assignee
 responsibility, without changing topology, upgrading profiles or rewriting old
 events. Publishers can still review results, but cannot report Bot progress.
 
-The earlier no-new-HTTP statement describes the initial L6 contract increment,
-not this follow-up. No transport or concrete product implementation has been
+The initial L6 contract increment added no HTTP endpoint; this follow-up uses
+the existing bounded signed-Bot route. No transport or concrete product implementation has been
 added to L6. The new transport adapter injects the product API Protocol.
 
 ## Independent Task authority follow-up (2026-11-13)
