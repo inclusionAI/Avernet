@@ -121,6 +121,11 @@ from agentclaw.community.core.service_bot.services.bot_process import (
     PersonalBotProcess,
     ServiceBotProcess,
 )
+from agentclaw.community.core.service_bot.services.release_audit_delivery import (
+    ReleaseAuditDelivery, ReleaseAuditDeliveryLifecycle,
+)
+from agentclaw.community.plugin_api.service_bot_release_audit import ServiceBotReleaseAuditPlugin
+from agentclaw.community.plugins.community.service_bot_release_audit import DatabaseServiceBotReleaseAudit
 from agentclaw.community.core.service_bot.services.bot_publish_service import BotPublishService
 from agentclaw.community.core.service_bot.services.service_artifact_lineage_reader import (
     ServiceArtifactLineageReader,
@@ -273,6 +278,9 @@ class ServiceBotModule(Module):
         )
 
     def configure(self, binder: Binder) -> None:
+        # Default audit sink also serves enterprise profiles through their DatabasePlugin.
+        binder.bind(ServiceBotReleaseAuditPlugin, to=DatabaseServiceBotReleaseAudit, scope=singleton)
+        binder.bind(ReleaseAuditDelivery, to=ReleaseAuditDelivery, scope=singleton)
         binder.bind(WorkspacePathFactory, to=WorkspacePathFactory, scope=singleton)
         # Offloads an oversized config_artifact out of the ac_bot_publish.ext
         # TEXT column into object storage; injected into the repo below.
@@ -738,6 +746,16 @@ class ServiceBotModule(Module):
             runtime_projector=runtime_projector,
             runtime_layout_probe=runtime_layout_probe,
         )
+
+    @singleton
+    @provider
+    @inject
+    def release_audit_delivery_lifecycle(
+        self, registry: HandlerRegistry, task_queue_service: TaskQueueService,
+        delivery: ReleaseAuditDelivery,
+    ) -> ReleaseAuditDeliveryLifecycle:
+        return ReleaseAuditDeliveryLifecycle(registry=registry, queue=task_queue_service,
+                                             delivery=delivery)
 
     @singleton
     @provider

@@ -3850,7 +3850,8 @@ async def test_process_draft_advances_to_building_and_enqueues_verify_flow():
     # User-driven advance: move DRAFT -> BUILDING synchronously under the lock,
     # then enqueue the durable verify_flow task for the remainder.
     publish_service.update_publish_status.assert_called_once_with(
-        1, PublishStatus.BUILDING.value, PublishStatus.DRAFT.value
+        1, PublishStatus.BUILDING.value, PublishStatus.DRAFT.value,
+        audit_operator_id="op",
     )
     tq.enqueue.assert_called_once()
     assert tq.enqueue.call_args.args[0] == "service_bot.publish.verify_flow"
@@ -3883,7 +3884,8 @@ async def test_process_validating_advances_to_online_pub_and_enqueues_release():
     svc, publish_service = _svc_with_record(record, task_queue_service=tq)
     result = await svc.process(publish_id=1, operator="op")
     publish_service.update_publish_status.assert_called_once_with(
-        1, PublishStatus.ONLINE_PUB.value, PublishStatus.VALIDATING.value
+        1, PublishStatus.ONLINE_PUB.value, PublishStatus.VALIDATING.value,
+        audit_operator_id="op",
     )
     tq.enqueue.assert_called_once()
     assert tq.enqueue.call_args.args[0] == "service_bot.publish.online_release"
@@ -5150,3 +5152,23 @@ async def test_execute_restore_draft_completed_operation_replay_is_noop():
     operation_repo.fail.assert_not_called()
     build_service.restore_teclaw_draft_async.assert_not_called()
     build_service.restore_draft_async.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_retry_audit_actor_is_separate_from_execution_owner():
+    record = _make_publish_record(
+        status=PublishStatus.FAILED.value,
+        ext={"source_status": PublishStatus.ONLINE_PUB.value},
+    )
+    queue = Mock()
+    svc, publish_service = _svc_with_record(record, task_queue_service=queue)
+
+    result = await svc.retry(
+        publish_id=1, operator="execution-owner", audit_operator_id="admin-actor"
+    )
+
+    assert result.status == PublishStatus.ONLINE_PUB
+    assert publish_service.update_publish_status_with_ext.call_args.kwargs[
+        "audit_operator_id"
+    ] == "admin-actor"
+    assert queue.enqueue.call_args.args[1]["operator"] == "execution-owner"

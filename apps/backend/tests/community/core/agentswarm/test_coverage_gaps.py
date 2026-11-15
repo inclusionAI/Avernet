@@ -1074,25 +1074,38 @@ class TestSwarmHandlerEdges:
         handler.set_slice_lost(True, "foreign-run")
         assert handler._slice_lost.is_set() is False
 
-    def test_stale_epoch_finalize_is_fenced_into_retry(self, db):
-        handler, repos, _ = _handler_env(
-            db, llm=RepeatingLLMProvider(_spawn_decision("a1", "objective-a1")),
-        )
+    @pytest.mark.parametrize("budget_elapsed", [False, True])
+    def test_stale_epoch_finalize_is_fenced_into_retry(self, db, monkeypatch, budget_elapsed):
+        # Hit finalization on the first decision: ten repeated spawn turns
+        # depend on runner speed and may reschedule before testing the fence.
+        handler, repos, _ = _handler_env(db, [_finish_decision("stale answer")])
         run = _mk_run()
         claim = _enqueue_claim(repos, run)
         stale_epoch = claim["claim_epoch"]
         repos["dispatch"].renew_lease(run.run_id, TENANT, WORKER, -1, stale_epoch)
         reclaimed = repos["dispatch"].reclaim_batch("worker-2", 10, 60)
         assert reclaimed[0]["claim_epoch"] == stale_epoch + 1
+        if budget_elapsed:
+            # Reproduce a loaded runner exhausting the slice before the first
+            # turn finishes, without sleeping or altering any global clocks.
+            monkeypatch.setattr(handler, "_deadline", lambda _run: time.monotonic() - 1)
 
         outcome = asyncio.run(handler.handle_slice(
             run.run_id, TENANT, stale_epoch, worker_id=WORKER,
         ))
         assert outcome == "retry"
-        # D28: the fenced-off FAILED transition must NOT land; the
+        # D28: the fenced-off terminal transition must NOT land; the
         # reclaimer owns the outcome for the run it now leases.
         stored = repos["run"].get(run.run_id, TENANT)
         assert stored.status is dm.RunStatus.RUNNING
+        assert stored.final_answer is None
+        with db.orm_session() as session:
+            dispatch = session.query(om.AcAgentSwarmRunDispatchModel).filter(
+                om.AcAgentSwarmRunDispatchModel.run_id == run.run_id,
+            ).one()
+            assert dispatch.claim_epoch == stale_epoch + 1
+            assert dispatch.claimed_by == "worker-2"
+            assert dispatch.status == "LEASED"
 
     def test_handoff_slice_applies_persona_then_finishes(self, db):
         script = [

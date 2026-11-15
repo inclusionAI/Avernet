@@ -207,6 +207,8 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
         version: Optional[int] = 1,
         last_pub_id: int = 0,
         ext: Optional[Dict[str, Any]] = None,
+        *,
+        operator_id: str | None = None,
     ) -> BotPublishRecord:
         """创建发布记录。
 
@@ -216,6 +218,7 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
             publish_bot_id: 发布后的 bot_id
             name: bot名称
             owner_id: 兼容入参；持久化时使用源 Bot 的 entity_id
+            operator_id: 已认证的变更发起人；内部历史调用可缺失，不从 Owner 推断
             permission_owner: 权限归属
             description: Optional[str] = None,
             owner_name: Optional[str] = None,
@@ -308,8 +311,9 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
             "env": self._env,
             "ext": ext,
             "permission_owner": permission_owner,
+            **({"audit_operator_id": operator_id} if operator_id is not None else {}),
         })
-        logger.info(f"[create_publish] id={record.id}, publish_bot_id={publish_bot_id}, owner={owner_id}")
+        logger.info(f"[create_publish] id={record.id}, publish_bot_id={publish_bot_id}, owner={owner_id}, audit_operator_id={operator_id}")
         return record
 
     def get_publish_by_bot_version(
@@ -347,6 +351,8 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
         publish_id: int,
         target_status: str,
         source_status: str,
+        *,
+        audit_operator_id: str | None = None,
     ) -> BotPublishRecord:
         """更新发布记录状态（乐观锁）。
 
@@ -361,7 +367,10 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
         Raises:
             PublishNotFoundError: 发布记录不存在或源状态不匹配
         """
-        record = self._repo.update_status(publish_id, target_status, source_status)
+        record = self._repo.update_status(
+            publish_id, target_status, source_status,
+            **({"audit_operator_id": audit_operator_id} if audit_operator_id is not None else {}),
+        )
         if not record:
             raise PublishNotFoundError(
                 f"Publish record not found or source status mismatch: "
@@ -377,6 +386,8 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
         ext: Dict[str, Any],
         source_status: str,
         expected_ext: Optional[Dict[str, Any]],
+        *,
+        audit_operator_id: str | None = None,
     ) -> BotPublishRecord:
         """更新发布记录状态和扩展字段（乐观锁）。
 
@@ -398,6 +409,7 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
             target_status=target_status,
             expected_ext=expected_ext,
             ext=ext,
+            **({"audit_operator_id": audit_operator_id} if audit_operator_id is not None else {}),
         )
         if not record:
             raise PublishNotFoundError(
@@ -901,6 +913,7 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
             permission_owner=permission_owner,
             description=description,
             owner_name=owner_name,
+            operator_id=owner_id,
         )
 
     def upgrade_publish(
@@ -996,6 +1009,7 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
             version=new_version,
             last_pub_id=publish_id,  # 关联原发布单（幂等 key）
             ext=new_ext,  # 仅携带 config_artifact 起点，不整体继承
+            operator_id=owner_id,
         )
 
         logger.info(f"[upgrade_publish] original_id={publish_id} -> new_id={new_record.id}, version={new_version}")
@@ -1241,6 +1255,8 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
     async def offline_publish(
         self,
         publish_id: int,
+        *,
+        operator_id: str | None = None,
     ) -> Dict[str, Any]:
         """下线发布单。
 
@@ -1313,7 +1329,9 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
 
         # Step 3: 如果是 SUCCESS 状态，检查是否有非终态发布单，有则不创建新发布单，没有则创建新草稿发布单
         if current_status == PublishStatus.SUCCESS:
-            self._release_or_redraft_on_offline(publish_record, publish_id, result)
+            self._release_or_redraft_on_offline(
+                publish_record, publish_id, result, operator_id=operator_id
+            )
 
         # Step 4: 如果是 VALIDATING 状态，将发布单置为草稿 (#197 CAS-guarded)
         if current_status == PublishStatus.VALIDATING:
@@ -1370,6 +1388,8 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
         publish_record: BotPublishRecord,
         publish_id: int,
         result: Dict[str, Any],
+        *,
+        operator_id: str | None = None,
     ) -> None:
         """SUCCESS-branch offline transition: mark the record RELEASED and, when no
         other non-terminal record exists for the bot, open a fresh draft for the
@@ -1430,6 +1450,7 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
             version=new_version,
             last_pub_id=publish_id,
             ext=None,
+            operator_id=operator_id,
         )
 
         result["new_publish_id"] = new_record.id
@@ -1471,9 +1492,11 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
         self,
         bot_id: str,
         owner_id: str,
+        *,
+        audit_operator_id: str | None = None,
     ) -> Dict[str, Any]:
         """将个人 Bot 升级为服务 Bot。
-        Args: bot_id: Bot ID, owner_id: Owner ID
+        Args: bot_id: Bot ID, owner_id: Owner ID; audit_operator_id: real authenticated actor
         Returns: Dict[bot, publish_record] - publish_record 已有则为 None
         Raises: BotNotFoundError, BotAlreadyServiceTypeError, BotTypeNotSupportedError
         """
@@ -1567,6 +1590,7 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
             permission_owner="owner",
             description=bot.get("bot_desc"),
             owner_name=bot.get("owner_name"),
+            operator_id=owner_id if audit_operator_id is None else audit_operator_id,
         )
 
         logger.info(f"[upgrade_bot_to_service] Bot upgraded: bot_id={bot_id}, publish_id={publish_record.id}")

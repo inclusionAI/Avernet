@@ -435,6 +435,7 @@ class TestUpgradePublish:
         assert insert_call_args is not None
         inserted_data = insert_call_args[0][0]
         assert inserted_data["ext"] is None
+        assert inserted_data["audit_operator_id"] == "user_001"
 
     def test_upgrade_publish_carries_config_artifact_only(self):
         """teclaw 形态：原 ext 有 config_artifact → 新草稿只带 config_artifact，
@@ -3951,3 +3952,51 @@ class TestDraftRestore:
             await service.restore_draft(2, operator="u1")
 
         assert len(operation_repo._operations) == 1
+
+
+def test_status_updates_forward_explicit_audit_actor_without_changing_owner():
+    repo = Mock()
+    record = _create_mock_record(record_id=1, status=PublishStatus.ONLINE_PUB)
+    repo.update_status.return_value = record
+    repo.compare_and_set_status_with_ext.return_value = record
+    service = _make_service(repo)
+
+    assert service.update_publish_status(
+        1, "online_pub", "validating", audit_operator_id="admin-actor"
+    ) is record
+    repo.update_status.assert_called_once_with(
+        1, "online_pub", "validating", audit_operator_id="admin-actor"
+    )
+
+    assert service.update_publish_status_with_ext(
+        1, "online_pub", {"retry": True}, "failed", {},
+        audit_operator_id="admin-actor",
+    ) is record
+    repo.compare_and_set_status_with_ext.assert_called_once_with(
+        publish_id=1, source_status="failed", target_status="online_pub",
+        expected_ext={}, ext={"retry": True}, audit_operator_id="admin-actor",
+    )
+
+
+def test_first_publish_records_authenticated_actor():
+    repo = Mock()
+    repo.get_by_publish_bot_id_and_version.return_value = None
+    repo.list_by_source_bot.return_value = []
+    repo.get_by_source_bot_and_version.return_value = None
+    repo.insert.return_value = _create_mock_record(record_id=1, status=PublishStatus.DRAFT)
+    bot_repo = Mock()
+    bot = {
+        "id": 100, "bot_id": "bot_001", "entity_id": "stable-entity",
+        "owner_id": "current-owner", "creator_id": "original-creator",
+        "bot_type": "service", "env": "dev",
+    }
+    bot_repo.get_by_id_and_owner.return_value = bot
+    service = _make_service(repo, bot_repo=bot_repo)
+
+    service.create_first_publish_for_bot(
+        "bot_001", "current-owner", "Service Bot"
+    )
+
+    inserted = repo.insert.call_args.args[0]
+    assert inserted["owner_id"] == "stable-entity"
+    assert inserted["audit_operator_id"] == "current-owner"

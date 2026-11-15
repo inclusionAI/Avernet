@@ -391,6 +391,8 @@ consumes:
   - get_server_host               # ditto
   - get_current_avernet_tenant    # tenant scoping (utils.avernet_tenant)
 internal_dependencies:
+  - agentclaw.community.kernel.service_bot_release_audit
+  - agentclaw.community.plugin_api.release_audit_models
   - agentclaw.community.core.mcp.errors  # scoped ownership can change after preflight
   - agentclaw.community.core.mcp.config_comparison  # pure HTTP Header/value equivalence for idempotent Apply claims
   - agentclaw.community.core.ports.mcp_config  # preserve / clear / replace on an atomic Direct MCP claim
