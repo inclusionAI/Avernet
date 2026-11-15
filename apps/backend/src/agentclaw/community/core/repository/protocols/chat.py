@@ -9,6 +9,8 @@ site. Domain imports are ``TYPE_CHECKING``-only — see the module docstring in
 from __future__ import annotations
 
 from abc import abstractmethod
+from contextlib import AbstractContextManager
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Protocol, TYPE_CHECKING, runtime_checkable
 
 if TYPE_CHECKING:
@@ -220,6 +222,20 @@ class ExpertChatInstanceRepository(Protocol):
 
         Returns:
             是否命中并更新了行。
+        """
+        ...
+
+
+    @abstractmethod
+    def caller_token_update(
+        self, *, user_id: str, bot_id: str, owner_id: str,
+        binding_id: int, expires_at: datetime,
+    ) -> AbstractContextManager[bool]:
+        """Serialize an install for the exact instance binding.
+
+        Yield False when the installed credential expires later or equally.
+        Yield True otherwise; record UTC expiry only on successful context exit.
+        Missing, replaced or released instances raise ValueError.
         """
         ...
 

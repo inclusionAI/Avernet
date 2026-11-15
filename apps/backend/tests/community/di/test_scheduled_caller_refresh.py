@@ -9,3 +9,13 @@ def test_public_profile_wires_noop_into_owner_callback(test_injector):
     assert isinstance(refresh, NoopScheduledCallerRefresh)
     assert test_injector.get(BotService)._scheduled_caller_refresh is refresh
     assert refresh.refresh(bot_id="b", owner_user_id="o", entity_id="e", env="dev") is None
+
+
+def test_public_runtime_ports_share_expiry_aware_updater(test_injector):
+    from agentclaw.community.api.caller_credential import CallerRuntimeUpdater
+    from agentclaw.community.core.caller_identity.expiry_runtime_updater import ExpiryAwareCallerRuntimeUpdater
+    from agentclaw.community.core.caller_identity.protocols import CallerRuntimeUpdaterProtocol
+
+    updater = test_injector.get(CallerRuntimeUpdater)
+    assert isinstance(updater, ExpiryAwareCallerRuntimeUpdater)
+    assert test_injector.get(CallerRuntimeUpdaterProtocol) is updater

@@ -9,6 +9,7 @@ ddl-parity-ac_expert_chat_bot_sessions.md`` (sessions) and
 ``specs/2026-07-13-caller-instance/design.md`` (caller instance).
 """
 import json
+from datetime import timezone
 
 from sqlalchemy import Column, DateTime, String, Text, UniqueConstraint
 from sqlalchemy.sql import func
@@ -151,6 +152,9 @@ class AcExpertChatInstance(Base):
 
     __tablename__ = "ac_expert_chat_instance"
 
+    # UTC expiry of the successfully installed Caller credential; NULL is unknown.
+    caller_token_expires_at = Column(DateTime, nullable=True)
+
     # DDL: id bigint(20) AUTO_INCREMENT.
     id = Column(
         AutoIncrementBigInteger,
@@ -194,6 +198,10 @@ class AcExpertChatInstance(Base):
             ext = None
         return {
             "id": self.id,
+            "caller_token_expires_at": (
+                self.caller_token_expires_at.replace(tzinfo=timezone.utc).isoformat()
+                if self.caller_token_expires_at else None
+            ),
             "bot_id": self.bot_id,
             "owner_id": self.owner_id,
             "user_id": self.user_id,
