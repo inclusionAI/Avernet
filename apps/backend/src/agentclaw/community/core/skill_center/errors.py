@@ -66,8 +66,12 @@ class LocalSkillInvalidPackageError(Exception):
         "wrapper_name_mismatch": "Skill directory name must match SKILL.md name",
     }
 
-    def __init__(self, reason: str = "invalid_package") -> None:
+    def __init__(
+        self, reason: str = "invalid_package", detail: str | None = None
+    ) -> None:
         super().__init__(reason)
+        self.reason = reason
+        self.detail = detail
         self.public_message = self._PUBLIC_MESSAGES.get(
             reason, self._PUBLIC_MESSAGES["invalid_package"]
         )
@@ -75,6 +79,10 @@ class LocalSkillInvalidPackageError(Exception):
 
 class LocalSkillTooLargeError(Exception):
     """A ZIP package exceeds a published upload limit."""
+
+    def __init__(self, reason: str = "too_large") -> None:
+        self.reason = reason
+        super().__init__(reason)
 
 
 class LocalSkillNotReadyError(Exception):

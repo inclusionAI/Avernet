@@ -33,11 +33,8 @@ logger = get_logger()
 # is nothing live to reuse or orphan — go straight to a fresh first release.
 _ONLINE_GONE_BAAS_STATUSES = frozenset({"RELEASED", "DESTROYING"})
 
-# BaaS bot statuses where the record still exists but the container is not live.
-# Whether these can be reused depends on the provider: a ``baas``/ARCA UPDATE
-# destroys+recreates the device in place (recovers), while a teclaw UPDATE only
-# re-delivers to the existing container and cannot rebuild a gone one — so for
-# teclaw these must be retired and recreated instead of upgraded.
+# BaaS statuses requiring provider-specific recovery. The selected behavior
+# decides whether to retry UPDATE or retire and recreate the candidate.
 #
 # ``STOPPING`` is deliberately NOT here: it has an active STOP publish in flight,
 # and BaaS ``create_publish`` rejects any new publish of a different type (an
@@ -180,12 +177,10 @@ class UpgradeResolutionMixin:
           rejects any new publish of a different type while it runs, so neither an
           UPGRADE nor a retire could land — the durable task retries until it
           settles to ``STOPPED``.
-        - ``FAILED`` / ``STOPPED`` → decided by the container's
-          ``ProviderBehavior.upgrade_recovers_not_live_bot``: ``UPGRADE`` for
-          ``baas``/ARCA (the UPDATE destroys+recreates the device in place and
-          recovers it), ``RETIRE_THEN_FIRST_RELEASE`` for teclaw (its UPDATE
-          cannot rebuild a gone container — it would just fail the publish and
-          strand the record).
+        - ``FAILED`` / ``STOPPED`` → delegated to the selected provider's
+          ``should_upgrade_not_live_bot(status)`` policy. By default it preserves
+          the provider's recovery capability. Teclaw specializes ``FAILED`` to
+          retry UPDATE; its ``STOPPED`` recovery still retires and recreates.
         - anything else (``PENDING``/unknown) → ``UPGRADE`` (optimistic; the deploy
           atom / progress poll settles a still-provisioning bot).
 
@@ -235,12 +230,12 @@ class UpgradeResolutionMixin:
             behavior = self._provider_behaviors.resolve(device_provider)
             decision = (
                 OnlineDeployDecision.UPGRADE
-                if behavior.upgrade_recovers_not_live_bot
+                if behavior.should_upgrade_not_live_bot(status)
                 else OnlineDeployDecision.RETIRE_THEN_FIRST_RELEASE
             )
             logger.info(
                 f"[PublishFlowService._decide_online_deploy] "
-                f"candidate not live: bot_uuid={bot_uuid}, status={status}, "
+                f"candidate recovery: bot_uuid={bot_uuid}, status={status}, "
                 f"provider={device_provider} -> {decision.value}"
             )
             return decision

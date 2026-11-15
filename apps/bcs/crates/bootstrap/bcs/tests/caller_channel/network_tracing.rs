@@ -22,13 +22,20 @@ impl Record for Completion {
 }
 
 impl NetworkTracer for Recorder {
+    fn log_correlation(&self, context: &bcs_tracing_api::Context) -> Option<bcs_tracing_api::LogCorrelation> {
+        let context = context.downcast_ref::<TraceContext>()?;
+        bcs_tracing_api::LogCorrelation::new(
+            "e2e_trace_id", &context.trace_id, "e2e_span_id", &context.span_id.to_string(),
+        )
+    }
+
     fn start(&self, info: &RequestInfo<'_>, incoming: &Carrier, parent: bcs_tracing_api::ParentContext<'_>) -> StartedTrace {
         let span_id = self.sequence.fetch_add(1, Ordering::Relaxed) + 1;
         let parent = parent.local.and_then(|context| context.downcast_ref::<TraceContext>());
         let trace_id = parent.map(|context| context.trace_id.clone())
             .or_else(|| incoming.iter().find(|(name, _)| name == "x-e2e-trace-id").map(|(_, value)| value.clone()))
             .unwrap_or_else(|| format!("e2e-{span_id}"));
-        let kind = match info.kind { Kind::HttpServer => "http_server", Kind::HttpClient => "http_client", Kind::RpcClient => "rpc_client" };
+        let kind = match info.kind { Kind::HttpServer => "http_server", Kind::HttpClient => "http_client", Kind::RpcClient | Kind::GrpcClient { .. } => "rpc_client" };
         let metadata = json!({
             "kind": kind, "method": info.method, "endpoint": info.endpoint,
             "request_size": info.request_size, "trace_id": trace_id,

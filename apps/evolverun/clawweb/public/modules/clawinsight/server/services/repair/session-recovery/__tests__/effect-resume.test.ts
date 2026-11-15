@@ -198,3 +198,15 @@ it("releases the slot when a registered execution is canceled before dispatch af
   expect((await current("next")).status).toBe("running");
   expect(ais.stopExecution).not.toHaveBeenCalled();
 });
+
+it("applies live interval and closes if the next round cannot fit in the configured window", async () => {
+  const settings = new AppConfigRepository(db);
+  await settings.create({ config_key: "session_recovery_effect_resume_pre",
+    config_json: '{"concurrency":2,"intervalSeconds":600,"windowSeconds":1200,"maxResumes":1}' });
+  const first = now - 600000;
+  await seed("next-fits", { effectWait: { firstAt: first, sinceAt: first, resumes: 0 } });
+  await seed("next-too-late", { effectWait: { firstAt: first, sinceAt: now, resumes: 0 } });
+  await service.maintenance();
+  expect(await current("next-fits")).toMatchObject({ status: "running", effectWait: { resumes: 1 } });
+  expect(await current("next-too-late")).toMatchObject({ status: "completed", judgment: { effect: "unknown" } });
+});

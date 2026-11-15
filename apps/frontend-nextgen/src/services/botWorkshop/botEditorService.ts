@@ -192,10 +192,11 @@ export const botEditorService = {
     spaceId: string | undefined,
     kind: 'skill' | 'mcp',
     mcpQuery?: { source: 'internal' | 'open-platform'; keyword?: string },
+    ownerId?: string,
   ) {
     if (kind === 'mcp') {
       const [boundMcps, mcpServers] = await Promise.all([
-        botEditorController.listBotMcps(botId),
+        botEditorController.listBotMcps(botId, ownerId),
         botEditorController.searchMarketMcpServers({
           keyword: mcpQuery?.keyword || undefined,
           tenants: mcpQuery?.source === 'open-platform' ? ['THIRD_PARTNER'] : undefined,
@@ -244,19 +245,20 @@ export const botEditorService = {
       ),
     };
   },
-  toggleSkill: (botId: string, skill: BotEditorSkill) =>
-    botEditorController.setSkillActive(botId, skill.id, !skill.active),
-  deleteSkill: (botId: string, skillId: string) => botEditorController.deleteSkill(botId, skillId),
-  uploadSkill: (botId: string, file: File) =>
-    file.arrayBuffer().then((body) => botEditorController.uploadSkill(botId, body)),
-  async uploadSkillFolder(botId: string, files: File[]) {
-    const response = await botEditorController.uploadSkillFolder(botId, files);
+  toggleSkill: (botId: string, skill: BotEditorSkill, ownerId?: string) =>
+    botEditorController.setSkillActive(botId, skill.id, !skill.active, ownerId),
+  deleteSkill: (botId: string, skillId: string, ownerId?: string) =>
+    botEditorController.deleteSkill(botId, skillId, ownerId),
+  uploadSkill: (botId: string, file: File, ownerId?: string) =>
+    file.arrayBuffer().then((body) => botEditorController.uploadSkill(botId, body, ownerId)),
+  async uploadSkillFolder(botId: string, files: File[], ownerId?: string) {
+    const response = await botEditorController.uploadSkillFolder(botId, files, ownerId);
     const skill = response.data?.skill;
     if (!skill?.skill_id) throw new Error('目录上传成功，但响应中缺少 skill_id');
     return { ...mapSkill(skill), source: 'local' as const };
   },
-  setMcpActive: (botId: string, mcp: BotEditorMcp, active: boolean) =>
-    botEditorController.setMcpActive(botId, mcp.serverCode, active),
+  setMcpActive: (botId: string, mcp: BotEditorMcp, active: boolean, ownerId?: string) =>
+    botEditorController.setMcpActive(botId, mcp.serverCode, active, ownerId),
   async createSkillSet(botId: string, name: string, ownerId?: string) {
     const created = await botEditorController.createSkillSet(botId, { name }, ownerId);
     const setId = created.data?.id;

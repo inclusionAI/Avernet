@@ -111,3 +111,15 @@ fn public_workspace_never_depends_on_internal_agentpass_implementation() {
         }
     }
 }
+
+#[test]
+fn versioned_a2a_is_owned_and_injected_by_v1_not_the_legacy_router() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let router = fs::read_to_string(root.join("src/v1/a2a/mod.rs")).unwrap();
+    let legacy = fs::read_to_string(root.join("../bcs-http/src/router.rs")).unwrap();
+    assert!(router.contains("/api/v1/collaboration/a2a/agents"));
+    assert!(!legacy.contains("/api/v1/collaboration/a2a/"));
+    let bootstrap = fs::read_to_string(root.join("../../../bootstrap/bcs/src/server/server_run.rs")).unwrap();
+    assert!(bootstrap.contains("with_a2a_service"));
+    assert!(bootstrap.contains("bcs_app_a2a_bot::v1::A2aApiService::new"));
+}

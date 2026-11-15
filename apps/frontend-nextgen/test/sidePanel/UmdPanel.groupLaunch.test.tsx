@@ -53,3 +53,14 @@ it('keeps an in-flight submission mounted when its source closes or another pane
   store.setBusy(false);
   store.close();
 });
+
+it('routes historical task UMD declarations through the platform host, never the supplied CDN', () => {
+  jest.mocked(resolveUmdComponent).mockClear();
+  render(<UmdPanel {...({ tab: { id: 'historical-task', params: {
+    cdn: 'https://untrusted.invalid/task.js', _componentKey: 'taskPanel.TaskLoopView',
+    entry: 'TaskLoopView', _libraryName: 'taskPanel', data: {},
+  } }, onInteraction: () => {} } as unknown as PanelContentProps)} />);
+  // Missing task identity is handled by the trusted adapter, not by executing a remote module.
+  expect(screen.getByText(/任务副屏缺少 taskId 参数/)).toBeTruthy();
+  expect(resolveUmdComponent).not.toHaveBeenCalled();
+});

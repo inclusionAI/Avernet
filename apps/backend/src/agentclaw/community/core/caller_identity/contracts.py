@@ -124,6 +124,7 @@ class CallerIamTokenContext:
     bot_call_type: McpCallType
     should_exchange_caller_token: bool
     binding_id: int | None = None
+    shared_teclaw_runtime: bool = False
 
 
 @dataclass(frozen=True)

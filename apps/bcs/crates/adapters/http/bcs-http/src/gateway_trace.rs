@@ -114,6 +114,10 @@ impl<B> MakeSpan<B> for BcnMakeSpan {
     }
 }
 
+/// Adapter-private classification for successful streaming callback responses.
+#[derive(Clone, Copy)]
+pub(crate) struct NonTerminalCallback;
+
 /// Correlates extractor/auth failures and cancellation before a handler is entered.
 pub async fn observe_request(
     mut request: axum::extract::Request,
@@ -131,6 +135,7 @@ pub async fn observe_request(
     let mut observation = RequestObservation {
         request_id: request_id.clone(), route,
         started: std::time::Instant::now(), completed: false,
+        log_correlation: bcs_tracing_api::current_log_correlation(),
     };
     tracing::info!(target: "bcs_http_access", request_id = %observation.request_id,
         route = %observation.route,
@@ -144,6 +149,8 @@ pub async fn observe_request(
     } else if response.status().is_success() { "success" } else { "http_error" };
     tracing::info!(target: "bcs_http_access", request_id = %observation.request_id,
         route = %observation.route, method = %method,
+        log_class = (!response.status().is_success() || response.extensions().get::<NonTerminalCallback>().is_none()).then_some("business_key"),
+        event_code = "http.request.response_ready",
         status = response.status().as_u16(), duration_ms = elapsed.as_secs_f64() * 1000.0,
         outcome,
         "http.request.response_ready");
@@ -155,14 +162,18 @@ struct RequestObservation {
     route: String,
     started: std::time::Instant,
     completed: bool,
+    log_correlation: Option<bcs_tracing_api::LogCorrelation>,
 }
 impl Drop for RequestObservation {
     fn drop(&mut self) {
         if !self.completed {
-            tracing::warn!(target: "bcs_http_access",
-                request_id = %self.request_id, route = %self.route,
-                duration_ms = self.started.elapsed().as_secs_f64() * 1000.0,
-                outcome = "cancelled", "http.request.cancelled");
+            bcs_tracing_api::with_log_correlation(self.log_correlation.clone(), || {
+                tracing::warn!(target: "bcs_http_access",
+                    log_class = "business_key", event_code = "http.request.cancelled",
+                    request_id = %self.request_id, route = %self.route,
+                    duration_ms = self.started.elapsed().as_secs_f64() * 1000.0,
+                    outcome = "cancelled", "http.request.cancelled");
+            });
         }
     }
 }
@@ -566,3 +577,7 @@ mod tests {
         }));
     }
 }
+
+#[cfg(test)]
+#[path = "gateway_trace_tests.rs"]
+mod key_log_tests;

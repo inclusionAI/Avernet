@@ -5,6 +5,7 @@
 ```yaml
 purpose: Resolve and install authenticated Caller identity without changing Owner policy.
 provides:
+  - ExpiryAwareCallerRuntimeUpdater
   - CallerIdentityService
   - CallerIamTokenService
   - CallerSessionValidator
@@ -12,6 +13,7 @@ provides:
   - NoopScheduledCallerRefresh
 consumes:
   - CallerTokenProviderProtocol
+  - DingTalkCallerTokenProvider
   - CallerRuntimeUpdaterProtocol
 internal_dependencies:
   - agentclaw.community.core
@@ -21,6 +23,16 @@ internal_dependencies:
 ```
 
 ### Change impact
+
+The existing IAM refresh endpoint accepts `token_type=dingtalk` for an opaque
+platform DeviceToken. It adds no caller or owner query parameters. This branch
+first authenticates the existing application signature, resolves the owner using
+the existing Bot locator, and invokes the optional
+`DingTalkCallerTokenProvider.exchange_dingtalk` capability. Only the verified
+upstream subject selects the existing Caller instance. Source credentials and
+query IDs are never decoded or used to infer caller identity. The service rejects
+invalid subject/token/expiry values and checks the exact binding before installing.
+The default `iam` flow and its provider contract remain unchanged.
 
 OpenAPI Caller context, MCP/CLI call-type writes and acli operations resolve
 their `OwnerIdDep` locator through `openapi_v1.bot_address` before passing an
@@ -34,7 +46,10 @@ Explicit OpenAPI friend IAM preparation carries a server-verified
 the effective chat stage, and loads the actual entity address from the exact
 Bot/owner pair. For Caller-mode services, installation is restricted to that
 subject's existing Caller instance, including when the subject is also the Bot
-owner. Owner inspection of another Human's conversation does not authorize
+owner. Teclaw shared-runtime refresh is the narrow exception described
+below: it uses the supplied nonblank session key without checking the Backend
+owned-session ledger.
+Owner inspection of another Human's conversation does not authorize
 credential installation there. The optional internal friend argument is not an
 authorization flag clients can supply directly to the application service.
 See `specs/2026-10-26-online-conversation-stage/spec.md` for the additive contract.
@@ -48,11 +63,43 @@ the Caller contracts and runtime updater. Existing non-TeClaw callers need no
 session parameter.
 
 TeClaw uses the existing `service` Bot eligibility and the trusted binding's
-`device_provider`. `CallerSessionValidator` requires nonempty session context
+`device_provider`. The existing `CallerSessionValidator.validate` requires nonempty session context
 for TeClaw before token exchange and direct identity installation. It keeps the
 existing authorized binding resolution and Bot permissions; there is no runtime
-session lookup or session ownership filtering. All eligible targets keep the
+session lookup or session ownership filtering in that legacy method. All existing eligible targets keep the
 existing per-target update success aggregation.
+
+### Shared Teclaw refresh
+
+The server-resolved `CallerIamTokenContext.shared_teclaw_runtime` capability is
+true only for active Caller-mode Teclaw services. IAM refresh across draft,
+verify and online uses the existing runtime resolver's AUTO policy to select the
+requested stage's shared binding, matching chat runtime selection without querying
+or creating an independent Caller instance. The refresh branch imposes no online
+stage or SERVICE_ONLINE source restriction. Other engines and temporary test
+exchange retain their existing Owner/lock and target-selection policies.
+
+Before signing,
+`validate_owned_shared_session` confirms an ACTIVE Teclaw binding, a nonblank
+session key. Missing keys are invalid requests. This shared refresh branch does
+not query the Backend-owned session index: absent, deleted or differently scoped
+ledger rows do not reject refresh. It does not establish ownership of the supplied
+session key; existing Caller authentication and target authorization remain in
+force. The method retains its existing name for internal call-site compatibility.
+No runtime session lookup or ownership record creation is performed.
+After signing, the application installs into the initially selected binding;
+it does not resolve the target or validate session context a second time. Shared
+refresh does not enforce a signing-time publication fence. Required signing,
+initial-target and installation errors remain errors.
+
+The `caller_shared_target_selected`, `caller_shared_target_rejected`,
+`caller_shared_target_refresh_succeeded`, and
+`caller_shared_session_validated/rejected` events identify the selected Bot,
+Owner, Caller, stage, binding/source and business session key where applicable.
+They never include token values or raw upstream error bodies. Public and
+enterprise composition use the existing binding and runtime-resolution ports;
+the validator no longer consumes the ExpertChat repository. No HTTP route,
+persistence schema or provider protocol is added.
 
 The BaaS Caller overlay uses `mode=append` and, only for TeClaw, `session_key`.
 The HTTP client encodes the query once. It retains `set`, `x-caller-token`, the
@@ -104,21 +151,35 @@ schema changes. Consumers constructing this internal context must supply entity;
 the in-repository producer and tests are updated together. A missing entity must
 not silently bypass another user's lock by querying a new Owner-qualified key.
 
-`ScheduledCallerRefreshProtocol` v1 is an additive Service API invoked after a
-service Bot's Owner Passport runtime update succeeds and
-`bot_service.SCHEDULED_CALLER_REFRESH_ENABLED` is enabled. This code-level rollout
-gate ships `True`; explicitly disabled callbacks
-keep the original Owner result without invoking Caller refresh. It does not gate
-interactive ASC provisioning. The composition root binds
-a no-op in public profiles and an enterprise service when ASC is supported.
-The explicit Bot entity is stable across Owner handoff; implementations resolve
-each actual Caller and sandbox independently. Caller refresh is best effort:
-preparation or refresh errors log safe metadata and preserve the successful Owner
-callback result. Original Owner update errors still propagate. Caller failures
-do not trigger Owner notification retries. This contract adds no scheduler
-and makes no continuous-validity guarantee between Owner renewal callbacks.
+`ScheduledCallerRefreshProtocol` is an explicit manual refresh capability with
+an enterprise implementation and a public no-op. Independent enterprise hourly
+scheduling uses the installed-expiry ledger; Owner Passport hot-update callbacks
+no longer invoke Caller refresh. Their original result and error semantics remain
+unchanged. The optional legacy BotService constructor port remains accepted for
+enterprise DI compatibility. Candidate enumeration uses an inclusive UTC cutoff,
+unknown expiry bootstrap, serving status and environment-scoped keyset pages;
+consumers validate actual engine, owner and physical target before exchange.
 
-For direct legacy `BotService` construction, omission of the optional refresh
-port means no scheduled-credential capability is installed. Production DI always
-provides an explicit no-op or enterprise implementation; errors from an installed
-implementation are never treated as an unconfigured capability.
+### Installed Caller expiry
+
+`ExpiryAwareCallerRuntimeUpdater` coordinates dedicated Caller-instance installs
+with the enterprise ASC refresh consumer through
+`ExpertChatInstanceRepository.caller_token_update`. The nullable UTC
+`ac_expert_chat_instance.caller_token_expires_at` records a successfully installed
+credential, not merely a successful token exchange. Under a real transaction row
+lock, a later or equal installed expiry skips both outbound replacement and the
+expiry write. A skipped installation remains a successful interactive IAM result.
+Shared service and test targets retain their existing installation behavior.
+
+The transaction stays open across the bounded outbound call and expiry write.
+A failed installation or database commit propagates; it cannot advance the
+recorded expiry. External installation and SQL commit are not an atomic pair: if
+the install succeeds but the commit fails, the ledger retains an earlier/unknown
+expiry, so later refresh may run again. Container replacement, a new instance
+publish or a non-serving lifecycle transition clears the stored expiry. Deploy
+`core/expert_chat/sql/2026_11_13_caller_token_expiry.sql` before this application
+change on an existing MySQL/OceanBase store. Existing records remain NULL until
+an installation succeeds. The enterprise scheduler consumes this ledger independently of Owner renewal.
+
+### Teclaw scope
+Teclaw Caller sessions and draft/pre/production stages share a runtime. This iteration excludes both Teclaw engines and Teclaw-provider bindings from Caller expiry coordination and ASC scheduled refresh: Teclaw has no scheduled-task support yet. Interactive IAM refresh keeps its existing runtime/outbound update and does not read or write `caller_token_expires_at`. Engine lookup also excludes legacy `baas` bindings for a Teclaw Bot; other providers retain the expiry policy.

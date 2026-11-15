@@ -207,11 +207,26 @@ See the [public contract](../../bcn-provider-agent-card-api-v0.1.zh-CN.md) for i
 
 ### Versioned BCS HTTP entry point
 
-The canonical control-plane entry point prefixes the existing `/a2a/...` route
-patterns with `/api/v1/collaboration`. This covers Agent registration, ID recovery,
-Card read/update/refresh, Provider-name registration/chat and run query/cancel.
-Root `/a2a/...` paths remain compatible aliases with identical authentication,
-request and response contracts. Registration `Location` stays under the entry
-point used by the caller. Gateway identity parsing is bypassed only for this
-namespace; BCS validates the original Provider-admin or Bot Bearer per operation.
+The canonical registration and Card management routes at `/api/v1/collaboration/a2a/**` belong to
+`bcs-api-http/src/v1/a2a`, injected with
+`application::v1::a2a::A2aService` by bootstrap. They cover registration, ID
+recovery, Card read/update/refresh and Provider-name registration. Chat and run
+query/cancel remain on legacy `/a2a/...` paths and are not exposed under this
+versioned prefix. The V1 routes do not call or depend on the legacy HTTP adapter.
+
+V1 success and error responses use `{code,message,data,request_id}`. HTTP 200
+and 201 map to 20000 and 20100; errors use the shared V1 application
+error mapping with the machine code in `data.error_code`. Domain management
+codes such as CARD_URL_REQUIRED retain their names. Framework-level bad paths,
+JSON, body limits and unsupported methods also return a V1 envelope. Responses
+carry no-store, request IDs and appropriate authentication/Allow/retry headers.
+Registration Location references the V1 Card resource. AgentCard contents are
+preserved unchanged inside the response data.
+
+Root `/a2a/...` endpoints remain in `bcs-http` with their original unwrapped
+success bodies and v0.1 error objects. Clients switching to the versioned prefix
+must unwrap `data`; this is a wire-contract correction to the aliases originally
+added in #3900. Provider administration remains Provider-admin Bearer scoped.
+Gateway identity parsing stays bypassed for these management routes, while the
+existing application performs credential and resource authorization.
 Remote AgentCard interface URLs and A2A wire bindings are unchanged.

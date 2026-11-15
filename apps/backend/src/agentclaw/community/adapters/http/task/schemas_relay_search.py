@@ -29,6 +29,19 @@ class TaskSearchRequestDTO(BaseModel):
     relay_token: str = Field(..., min_length=1)
     viewer_actor_type: SearchViewerType | None = None
     viewer_actor_id: StrictStr | None = Field(default=None, validate_default=True)
+    visibility: StrictStr | None = None
+
+    @field_validator("visibility", mode="after")
+    @classmethod
+    def _validate_visibility(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        tokens = [token.strip().lower() for token in value.split(",") if token.strip()]
+        if not tokens or any(token not in {"public", "protected"} for token in tokens):
+            raise ValueError(
+                "visibility must be a comma-delimited list of: public, protected"
+            )
+        return ",".join(dict.fromkeys(tokens))
 
     @field_validator("viewer_actor_id", mode="after")
     @classmethod

@@ -122,7 +122,7 @@ class ServiceBotEvalService:
             raise ServicePublicationConflictError("publication is not a draft")
 
         context = ServiceBotEvalContext(
-            bot_id=str(bot["id"]),
+            bot_id=str(bot["bot_id"]),
             bot_version=str(record.version),
             release_id=str(record.id),
             publish_id=str(record.id),

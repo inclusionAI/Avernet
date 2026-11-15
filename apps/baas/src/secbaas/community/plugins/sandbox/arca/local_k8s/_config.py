@@ -63,6 +63,7 @@ ENV_SHARED_PVC_NAME = "LOCAL_K8S_SHARED_PVC_NAME"
 ENV_SHARED_PVC_SIZE = "LOCAL_K8S_SHARED_PVC_SIZE"
 ENV_SHARED_PVC_HOST_MOUNT_PATH = "LOCAL_K8S_SHARED_PVC_HOST_MOUNT_PATH"
 ENV_APPARMOR_PROFILE = "LOCAL_K8S_APPARMOR_PROFILE"
+ENV_APPARMOR_MODE = "LOCAL_K8S_APPARMOR_MODE"
 # A2A 面（agent-card / rpc）的「浏览器可达」URL 模板，仅 out-of-cluster 之外的
 # in-cluster 部署需要（in-cluster 的 BaaS 自己只能看到 ClusterIP；NodePort 的
 # 端口号经 kube api 实查，host 形态是部署事实，不属于本插件的猜测范围）。
@@ -131,12 +132,22 @@ def _shared_pvc_size() -> str:
     return _env(ENV_SHARED_PVC_SIZE) or _SHARED_BOT_DATA_PVC_SIZE
 
 
-def _apparmor_profile_name() -> str:
+def _apparmor_profile_name() -> str | None:
     """返回 bot runtime 使用的 host AppArmor profile 名。
 
     该 profile 需要允许 bot runtime 使用 ``/dev/fuse`` 完成 FUSE 挂载，
     同时保持受限执行语义。
     """
+    # COSEC: opt-out is explicit local-development policy, never automatic
+    # fallback on a missing profile. None means omit the unsupported API field;
+    # it does not provide equivalent MAC isolation for privileged runtimes.
+    mode = _env(ENV_APPARMOR_MODE, "required")
+    if mode == "disabled":
+        return None
+    if mode != "required":
+        raise ValueError(
+            "local_k8s: LOCAL_K8S_APPARMOR_MODE must be required or disabled"
+        )
     profile = _env(ENV_APPARMOR_PROFILE, "arca-fuse")
     if profile is None or not str(profile).strip():
         raise ValueError(

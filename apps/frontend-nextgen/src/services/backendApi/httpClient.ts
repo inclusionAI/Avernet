@@ -41,10 +41,12 @@ export class BackendRequestError extends Error {
   toastKey?: string;
   /** 协议层默认提示是否已投递;Hook 守卫 helper(safeReportError)据此跳过自有 toast 防重复。 */
   alreadyHandled?: boolean;
+  /** 认证或邀请码门禁正在处理，此请求的错误提示必须静默。 */
+  silent?: boolean;
 
   constructor(
     message: string,
-    options: { status?: number; data?: unknown; apiPath: string; toastKey?: string; alreadyHandled?: boolean },
+    options: { status?: number; data?: unknown; apiPath: string; toastKey?: string; alreadyHandled?: boolean; silent?: boolean },
   ) {
     super(message);
     this.name = 'BackendRequestError';
@@ -53,6 +55,7 @@ export class BackendRequestError extends Error {
     this.apiPath = options.apiPath;
     this.toastKey = options.toastKey;
     this.alreadyHandled = options.alreadyHandled;
+    this.silent = options.silent;
   }
 }
 
@@ -64,7 +67,7 @@ export class BackendRequestError extends Error {
 export class AceLoginRedirectError extends Error {
   loginUrl?: string;
   constructor(loginUrl?: string) {
-    super('登录态失效，正在跳转登录…');
+    super('登录态已失效，请在弹出窗口完成重新登录。');
     this.name = 'AceLoginRedirectError';
     this.loginUrl = loginUrl;
   }
@@ -72,15 +75,19 @@ export class AceLoginRedirectError extends Error {
 
 /**
  * 由探测点(httpClient 内部 + raw-fetch 旁路:sessionService/groupExecuteService/副屏面板)统一调用,
- * 登记单飞登录跳转信号。纯触发器——副作用(toast + 当前标签页跳转)由顶层观察者
- * useGatewayLoginRedirect 在 Hook 层消费 store 的 pendingLogin 完成(守 Service 禁 toast/DOM)。
+ * 登记「等待重登」单飞信号。纯触发器——副作用(登录提示 Modal / window.open / 轮询恢复感知)由
+ * 全局 GatewayReauthModal 在组件层消费 store 的 pendingLogin 完成(守 Service 禁 toast/DOM,
+ * ace-gateway-popup-reauth D2)。
+ *
+ * `fromEpoch`:请求发出时捕获的认证代次;与当前代次不一致的晚到拦截体(发起于重登成功之前、
+ * 响应到达于其后)不登记,避免恢复后 Modal 被旧信号闪回(D5)。
  *
  * 收口在此而非让各旁路各自 import store:src/assets/** 副屏资产目录按 lint 规则禁止 import stores,
  * 只允许 import services,故把触发器收口在 service 层的 httpClient,旁路统一经此调用。
  */
-export function triggerAceLoginRedirect(loginUrl?: string): void {
+export function triggerAceLoginRedirect(loginUrl?: string, fromEpoch?: number): void {
   if (!loginUrl) return;
-  useLoginRedirectStore.getState().requestRedirect(loginUrl);
+  useLoginRedirectStore.getState().requestRedirect(loginUrl, fromEpoch);
 }
 
 /**
@@ -241,6 +248,7 @@ async function executeBackendRequest<T>(url: string, options: BackendRequestOpti
         apiPath,
         toastKey,
         alreadyHandled: true,
+        silent: true,
       });
     }
     // 默认提示投递(由顶层观察者 useErrorNotifyObserver 兜底发起):Service 层只 enqueue 上抛,不直接 toast,
@@ -255,22 +263,23 @@ async function executeBackendRequest<T>(url: string, options: BackendRequestOpti
       apiPath,
       toastKey,
       alreadyHandled: true,
+      silent: authDisposition === 'silent',
     });
   }
 
-  // 网关级 ACE 登录拦截体(HTTP 2xx + 登录 body):登记单飞跳转信号 + 抛 AceLoginRedirectError,
-  // 避免把登录体当作成功数据返回给无校验的调用方继续渲染。toast + window.location 由顶层观察者
-  // useGatewayLoginRedirect 消费 store 的 pendingLogin 完成（redirect 模式；prompt 模式由 ExternalLoginPromptModal 消费）。
+  // 网关级 ACE 登录拦截体(HTTP 2xx + 登录 body):登记单飞「等待重登」信号 + 抛 AceLoginRedirectError,
+  // 避免把登录体当作成功数据返回给无校验的调用方继续渲染。处置由全局 GatewayReauthModal 消费
+  // store 的 pendingLogin 完成(redirect=等待重登;prompt 模式由 ExternalLoginPromptModal 消费)。
   if (isAceLoginResponse(inspectData)) {
     const loginUrl = extractLoginUrl(inspectData);
     // loginStrategy 分支：外部(oauth-provider)→弹窗信号(不携带 ACE pubLogin url，由 /auth/url 取 provider)；
-    // 内部(ace-gateway)现状→硬跳转。两者都抛 AceLoginRedirectError 阻止 stale 渲染。
+    // 内部(ace-gateway)→等待重登弹窗信号(携带 pubLogin url)。两者都抛 AceLoginRedirectError 阻止 stale 渲染。
     if (useLoginStrategyStore.getState().loginStrategy === 'oauth-provider') {
       triggerLoginPrompt(requestAuthEpoch);
       // 外部模式不携带 ACE pubLogin url（provider url 由 /auth/url 取）；仍抛错阻止 stale 渲染。
       throw new AceLoginRedirectError();
     }
-    triggerAceLoginRedirect(loginUrl);
+    triggerAceLoginRedirect(loginUrl, requestAuthEpoch);
     throw new AceLoginRedirectError(loginUrl);
   }
 
@@ -289,6 +298,7 @@ async function executeBackendRequest<T>(url: string, options: BackendRequestOpti
       data: inspectData,
       apiPath,
       alreadyHandled: true,
+      silent: true,
     });
   }
 

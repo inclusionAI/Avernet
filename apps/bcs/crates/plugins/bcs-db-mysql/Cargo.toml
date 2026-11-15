@@ -18,5 +18,6 @@ mysql_async = { workspace = true }
 tracing     = { workspace = true }
 
 [dev-dependencies]
+tracing = { workspace = true, features = ["log"] }
 bcs-test-support = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

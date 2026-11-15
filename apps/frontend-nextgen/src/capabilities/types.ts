@@ -742,6 +742,16 @@ export interface AppCapabilities {
    */
   getGeneralConfigPublishApprovalEnabled: () => CapabilityResult<boolean>;
   /**
+   * 可选 Backend 增强（BCS 独立好友发现）是否启用：身份 engine/botType 补充、公开 Bot 的
+   * metadata 服务发布过滤与 Human 建聊跳转共用本开关；壳层
+   * `getShellVisibility().value.notificationBell` 从同一决策派生（关闭时铃铛不挂载，
+   * 未读轮询随挂载自然停止）。默认全栈未显式关闭时为 true；
+   * 运行时 `window.AVERNET_RUNTIME_CONFIG.PUBLIC_BOT_BACKEND_ENABLED === false`
+   * （由部署 profile 写入，布尔值）或编译常量 TEAMCLAW_PUBLIC_BOT_BACKEND_ENABLED=false
+   * 时为 false，运行时显式设置优先。同步签名，不发请求。
+   */
+  getPublicBotBackendEnabled: () => boolean;
+  /**
    * 壳层入口可见性（空间切换器 / 通知中心，见 `ShellVisibility`）。
    * Open Core（阿里云部署）默认 `notificationBell=true`、`spaceSwitcher=false`
    * （defaultCapabilities：展示通知中心，不展示侧栏空间切换器）；

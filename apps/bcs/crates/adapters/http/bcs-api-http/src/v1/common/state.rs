@@ -28,6 +28,7 @@ pub trait PrincipalVerificationState: Clone + Send + Sync + 'static {
 
 #[derive(Clone)]
 pub struct ApiState {
+    pub a2a_service: Option<Arc<dyn bcs_service_api::application::v1::a2a::A2aService>>,
     pub worker_task_service: Option<Arc<dyn bcs_service_api::application::TaskHandleService>>,
     pub bot_self_service: Option<Arc<dyn bcs_service_api::application::v1::BotSelfService>>,
     pub auth_service: Option<Arc<dyn ApplicationAuthService>>,
@@ -82,6 +83,7 @@ impl ApiState {
         principal_verifier: Arc<dyn PrincipalVerifier>,
     ) -> Self {
         Self {
+            a2a_service: None,
             worker_task_service: None,
             bot_self_service: None,
             auth_service: None,
@@ -112,6 +114,11 @@ impl ApiState {
             principal_verifier,
             trusted_browser_origins: None,
         }
+    }
+
+    pub fn with_a2a_service(mut self, service: Arc<dyn bcs_service_api::application::v1::a2a::A2aService>) -> Self {
+        self.a2a_service = Some(service);
+        self
     }
 
     /// Attach the trusted browser origins used by the per-actual-source

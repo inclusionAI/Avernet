@@ -498,6 +498,14 @@ class BotRepository(
             )
             return [b.to_dict() for b in bots]
 
+    def list_metadata_locator_candidates(
+        self, pairs: List[tuple[str, str]],
+    ) -> Dict[tuple[str, str], List[Dict[str, Any]]]:
+        from .metadata_locators import metadata_locator_candidates
+
+        with self._db.orm_session() as db:
+            return metadata_locator_candidates(db, pairs)
+
     def list_bots_by_owner_bot_pairs(
         self,
         pairs: List[tuple[str, str]],

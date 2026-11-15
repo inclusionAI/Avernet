@@ -183,24 +183,25 @@ export const botEditorController = {
     botId: string,
     options: { source?: 'LOCAL'; owner_id?: string; user_id?: string; page?: number; page_size?: number } = {},
   ) => request<BackendApiPage<SkillDto>>(path(botId, 'skills'), 'GET', { page: 1, page_size: 100, ...options }),
-  setSkillActive: (botId: string, skillId: string, active: boolean) =>
-    request(path(botId, `skills/${skillId}/${active ? 'activate' : 'deactivate'}`), 'POST'),
-  deleteSkill: (botId: string, skillId: string) => request(path(botId, `skills/${skillId}`), 'DELETE'),
-  uploadSkill: (botId: string, packageBody: ArrayBuffer) =>
+  setSkillActive: (botId: string, skillId: string, active: boolean, ownerId?: string) =>
+    request(path(botId, `skills/${skillId}/${active ? 'activate' : 'deactivate'}`), 'POST', { owner_id: ownerId }),
+  deleteSkill: (botId: string, skillId: string, ownerId?: string) =>
+    request(path(botId, `skills/${skillId}`), 'DELETE', { owner_id: ownerId }),
+  uploadSkill: (botId: string, packageBody: ArrayBuffer, ownerId?: string) =>
     backendRequest<BackendApiEnvelope<BackendUnknownRecord>>(path(botId, 'skills'), {
       method: 'POST',
-      params: userScopedParams(),
+      params: userScopedParams({ owner_id: ownerId }),
       rawBody: packageBody,
       headers: { 'Content-Type': 'application/zip' },
     }),
-  uploadSkillFolder: (botId: string, files: File[]) => {
+  uploadSkillFolder: (botId: string, files: File[], ownerId?: string) => {
     const body = new FormData();
     const paths = files.map((file) => (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name);
     files.forEach((file) => body.append('files', file, file.name));
     body.append('file_paths', JSON.stringify(paths));
     return backendRequest<BackendApiEnvelope<{ skill: SkillDto; operation: string }>>(
       path(botId, 'skills/upload-folder'),
-      { method: 'POST', params: userScopedParams(), rawBody: body },
+      { method: 'POST', params: userScopedParams({ owner_id: ownerId }), rawBody: body },
     );
   },
   listBotMcps: (botId: string, ownerId?: string) =>
@@ -269,10 +270,11 @@ export const botEditorController = {
       'GET',
       { request_id: requestId, page: 1, page_size: 20, owner_id: ownerId },
     ),
-  setMcpActive: (botId: string, serverCode: string, active: boolean) =>
+  setMcpActive: (botId: string, serverCode: string, active: boolean, ownerId?: string) =>
     request<BotMcpDto>(
       path(botId, `mcps/${encodeURIComponent(serverCode)}/${active ? 'activate' : 'deactivate'}`),
       'POST',
+      { owner_id: ownerId },
     ),
   listSkillSets: (botId: string) => request<SkillSetDto[]>(path(botId, 'skill-sets')),
   listSkillSetResources: (botId: string, ownerId?: string) =>
@@ -380,13 +382,14 @@ export const botEditorController = {
       stage: 'draft',
       owner_id: ownerId,
     }),
-  createChannel: (botId: string, body: BackendUnknownRecord) =>
-    request<ChannelDto>(path(botId, 'channels'), 'POST', {}, body),
-  updateChannel: (botId: string, channelId: number, body: BackendUnknownRecord) =>
-    request<ChannelDto>(path(botId, `channels/${channelId}`), 'PATCH', {}, body),
-  setChannelStatus: (botId: string, channelId: number, status: 'active' | 'inactive') =>
-    request<ChannelDto>(path(botId, `channels/${channelId}/status`), 'PUT', {}, { status }),
-  deleteChannel: (botId: string, channelId: number) => request(path(botId, `channels/${channelId}`), 'DELETE'),
+  createChannel: (botId: string, body: BackendUnknownRecord, ownerId?: string) =>
+    request<ChannelDto>(path(botId, 'channels'), 'POST', { owner_id: ownerId }, body),
+  updateChannel: (botId: string, channelId: number, body: BackendUnknownRecord, ownerId?: string) =>
+    request<ChannelDto>(path(botId, `channels/${channelId}`), 'PATCH', { owner_id: ownerId }, body),
+  setChannelStatus: (botId: string, channelId: number, status: 'active' | 'inactive', ownerId?: string) =>
+    request<ChannelDto>(path(botId, `channels/${channelId}/status`), 'PUT', { owner_id: ownerId }, { status }),
+  deleteChannel: (botId: string, channelId: number, ownerId?: string) =>
+    request(path(botId, `channels/${channelId}`), 'DELETE', { owner_id: ownerId }),
   getCallerContext: (botId: string, ownerId?: string) =>
     request<{
       editable: boolean;

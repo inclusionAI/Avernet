@@ -37,6 +37,7 @@ from agentclaw.community.adapters.http.task.schemas import (
     task_info_request_from_dto,
     trajectory_to_dto,
 )
+from agentclaw.community.adapters.http.task.manifest_routes import router as manifest_api_router
 from agentclaw.community.adapters.http.task.artifact_routes import router as artifact_api_router
 from agentclaw.community.adapters.http.task.artifact_object_file_routes import (
     router as artifact_object_file_router,
@@ -98,6 +99,7 @@ router.include_router(bbs_api_router)
 router.include_router(intake_api_router)
 router.include_router(benchmark_api_router)
 router.include_router(auto_api_router)
+router.include_router(manifest_api_router)
 router.include_router(task_read_api_router)
 router.include_router(task_config_router)
 router.include_router(artifact_api_router)

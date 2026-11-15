@@ -1059,8 +1059,19 @@ filter 是 Active-list 机制。所有操作均要求 verified principal、按 o
 | DELETE | `/openapi/v1/bots/{bot_id}/skills/{skill_id}` | 可恢复地删除一个 Inactive Local Skill | `Envelope[Deleted]` |
 | GET | `/openapi/v1/bots/skills/{skill_id}/readme` | 不选择 Bot，读取可见的共享或 Local 文档 | `Envelope[SkillContent]` |
 
-`413101` 只在原始 ZIP upload 上公开。稳定 Local Skill subcode 为 `400101`、`404000`、
+原始 ZIP 和目录上传的大小超限均返回 `413101`。稳定 Local Skill subcode 为 `400101`、`404000`、
 `409101`–`409104`、`413101`、`502101`、`502102`；既有公共类别保持原有 `xxx000` code。
+上传包无效保持 HTTP 400 / `400101`，超限保持 HTTP 413 / `413101`。
+错误 `data.reason` 为可选的稳定原因，调用方应容忍旧服务端无此字段及未知值，
+不得根据英文 `message` 分支。包结构原因：`invalid_package`、`invalid_zip`、
+`unreadable_archive`、`unsafe_file_path`、`duplicate_file_path`、`missing_skill_file`、
+`multiple_skill_files`、`invalid_wrapper`、`wrapper_name_mismatch`、`invalid_encoding`、
+`invalid_metadata`。元数据细分原因：`MISSING_FRONTMATTER`、`INVALID_FRONTMATTER`、
+`INVALID_ENCODING`、`MISSING_NAME`、`MISSING_DESCRIPTION`、`INVALID_NAME_TYPE`、
+`INVALID_DESCRIPTION_TYPE`、`EMPTY_NAME`、`EMPTY_DESCRIPTION`、`NAME_TOO_LONG`、
+`DESCRIPTION_TOO_LONG`、`INVALID_NAME`、`RESERVED_NAME`。超限原因：`too_large`、
+`file_too_large`、`too_many_files`、`expanded_too_large`、`compressed_too_large`。
+响应不包含原始文件内容或解析器异常。
 Generated OpenAPI 继续由 Backend Router 与 DTO 派生。
 
 **发布闸口：现在不得标记 Track B complete。** #725 的 cleanup-work DDL 必须先部署并验证，

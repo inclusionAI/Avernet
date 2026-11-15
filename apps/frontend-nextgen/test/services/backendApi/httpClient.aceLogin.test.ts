@@ -101,6 +101,24 @@ describe('httpClient ACE 登录拦截探测', () => {
     expect(useLoginRedirectStore.getState().pendingLoginUrl).toBe('https://login/first');
   });
 
+  // ace-gateway-popup-reauth D5:重登恢复(代次推进)后才到达的旧代拦截体不登记,
+  // 避免恢复后 Modal 被旧信号闪回;仍抛错阻止调用方把登录体当成功数据渲染。
+  it('晚到的旧代拦截体(请求发出于重登成功之前)不登记等待信号', async () => {
+    let resolveFetch!: (response: Response) => void;
+    const pendingResponse = new Promise<Response>((resolve) => {
+      resolveFetch = resolve;
+    });
+    global.fetch = jest.fn<typeof fetch>().mockImplementation(() => pendingResponse);
+
+    const pending = backendRequest('/openapi/v1/admin/spaces', { injectUserId: false });
+    await Promise.resolve(); // 请求已发出(epoch 已捕获),随后重登成功 → 代次推进。
+    useExternalAuthStore.getState().bumpAuthEpoch();
+    resolveFetch(jsonOk(aceBody('https://login/late')));
+
+    await expect(pending).rejects.toMatchObject({ name: 'AceLoginRedirectError' });
+    expect(useLoginRedirectStore.getState().pendingLogin).toBeUndefined();
+  });
+
   it('ACE 体缺失 buserviceErrorMsg 仍抛错但不登记跳转', async () => {
     global.fetch = jest.fn<typeof fetch>().mockResolvedValue(
       jsonOk({
@@ -223,6 +241,7 @@ describe('httpClient 未登录反应口与静默', () => {
     await expect(backendRequest('/openapi/v1/collaboration/sessions', { injectUserId: false })).rejects.toMatchObject({
       name: 'BackendRequestError',
       status: 500,
+      silent: true,
     });
 
     expect(useErrorNotifyStore.getState().queue).toHaveLength(0);

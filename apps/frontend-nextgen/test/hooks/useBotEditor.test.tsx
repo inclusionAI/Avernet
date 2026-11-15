@@ -5,13 +5,16 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { toast } from 'sonner';
 
 jest.mock('@/services/botWorkshop/botEditorService', () => ({
-  botEditorService: { load: jest.fn(), setSkillSetActive: jest.fn() },
+  botEditorService: { load: jest.fn(), loadCapabilityCandidates: jest.fn(), setSkillSetActive: jest.fn() },
 }));
 jest.mock('sonner', () => ({
   toast: { error: jest.fn(), success: jest.fn(), warning: jest.fn() },
 }));
 
 const mockedLoad = botEditorService.load as jest.MockedFunction<typeof botEditorService.load>;
+const mockedLoadCapabilityCandidates = botEditorService.loadCapabilityCandidates as jest.MockedFunction<
+  typeof botEditorService.loadCapabilityCandidates
+>;
 
 afterEach(() => jest.clearAllMocks());
 
@@ -41,6 +44,29 @@ it('桌面引擎能力上下文传入 Service，避免请求 Hermes 不支持的
   mockedLoad.mockRejectedValue(new Error('test load stopped'));
   renderHook(() => useBotEditor('bot-1', false, 'space-1', true, 'owner-1', true, 'local', 'hermes'));
   await waitFor(() => expect(mockedLoad).toHaveBeenCalledWith('bot-1', 'owner-1', 'local', 'hermes'));
+});
+
+it('协作者打开 MCP 候选时使用 Bot Owner 寻址', async () => {
+  mockedLoad.mockRejectedValue(new Error('test load stopped'));
+  mockedLoadCapabilityCandidates.mockResolvedValue({
+    availableMcps: [],
+    marketSkills: [],
+    skillCenterSkills: [],
+    workshopSkills: [],
+  });
+  const { result } = renderHook(() => useBotEditor('bot-1', false, 'space-1', true, 'owner-1'));
+
+  await act(async () => {
+    await result.current.loadCapabilityCandidates('mcp', { source: 'internal' });
+  });
+
+  expect(mockedLoadCapabilityCandidates).toHaveBeenCalledWith(
+    'bot-1',
+    'space-1',
+    'mcp',
+    { source: 'internal' },
+    'owner-1',
+  );
 });
 
 it('能力集停用只更新对应状态，不触发整页配置重载', async () => {

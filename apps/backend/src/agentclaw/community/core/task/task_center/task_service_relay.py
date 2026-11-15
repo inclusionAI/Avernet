@@ -16,6 +16,7 @@ from agentclaw.community.core.task.domain.models import (
     TaskCallbackData,
     TaskNodePatch,
     TaskReportCommand,
+    TaskReportEventType,
     TaskReportResult,
     TaskRuntimeProfile,
     task_spec_instruction,
@@ -26,8 +27,46 @@ from agentclaw.community.core.task.task_runner.client.relay_prompt import (
 
 logger = logging.getLogger("task.relay")
 
+# Temporary duty-domain fallback. Search quality work is still in progress; once
+# the normal catalog consistently returns duty bots, remove this table and the
+# private fallback helper below with it.
+_TEMPORARY_DUTY_CANDIDATES: tuple[BotCandidate, ...] = (
+    BotCandidate(
+        bot_id="20260407_025zmn4f:378611",
+        name="RiskProfilePlus BOT",
+        description="RP+ platform diagnostics",
+    ),
+    BotCandidate(
+        bot_id="20260403_wb2jcaof:328947",
+        name="UCT2.0 值班助手",
+        description="Strategy and dispatch diagnostics",
+    ),
+    BotCandidate(
+        bot_id="20260525_civbnttp:453718",
+        name="aliuct 值班助手",
+        description="UCT/aliuct strategy diagnostics",
+    ),
+    BotCandidate(
+        bot_id="20260407_jmg31orw:152819",
+        name="FeaturePro",
+        description="Feature creation and verification diagnostics",
+    ),
+    BotCandidate(
+        bot_id="20260415_w7wokfyw:323749",
+        name="处罚中心官方答疑助手",
+        description="Penalty and appeal guidance",
+    ),
+    BotCandidate(
+        bot_id="20260724_tilcdwii:272477",
+        name="yofa-agent",
+        description="Natural-language data and feature generation",
+    ),
+)
+
 
 class TaskServiceRelayMixin:
+    _temporary_duty_candidates: tuple[BotCandidate, ...] = _TEMPORARY_DUTY_CANDIDATES
+
     def _build_relay_root_execution_instruction(self, task_id: str) -> str:
         """Build the first baton for the existing requester/Bot session."""
         backend_url = str(self._api_base_url or "").strip().rstrip("/")
@@ -72,11 +111,30 @@ class TaskServiceRelayMixin:
         幂等:发射前查图 ``_relay_report_event_ids`` ——该 event_id 已有回执 =
         重放上报,跳过发射(apply 自身对重放返回既有结果,不重记账)。预查失败
         best-effort 视为未见过(宁可多发,不可漏观测)。"""
+        self._load_relay_report_action_log(command)
         already_known = self._relay_report_event_known(command)
         result = self._graph.apply_relay_report(command)
         if not already_known and command.trace is not None and command.trace.steps:
             self._emit_trace_step_rows(command)
         return result
+
+    def _load_relay_report_action_log(self, command: TaskReportCommand) -> None:
+        """Hydrate persisted search receipts on the report worker.
+
+        ``load_graph()`` intentionally does not hydrate diagnostic action logs.
+        A successor PLAN_RESULT, however, validates the assignee against the
+        current generation's persisted search receipt.  /search and report can
+        land on different application workers, so the report worker must load
+        the node action history after hydrating the graph and before applying
+        the successor plan.
+        """
+        if (
+            command.event_type != TaskReportEventType.PLAN_RESULT
+            or command.event is None
+        ):
+            return
+        graph = self._graph.query_task_dashboard(command.task_id)
+        self._graph.load_action_logs(graph)
 
     def _relay_report_event_known(self, command: TaskReportCommand) -> bool:
         """该 ``event_id`` 是否已有 relay 回执(= 重放上报)。读图失败 → False
@@ -136,10 +194,30 @@ class TaskServiceRelayMixin:
     def _report_node_patch(self, patch: TaskNodePatch) -> Any:
         return self._report_fact("NODE_PATCH", {"patch": patch})
 
+    def _temporary_duty_fallback(
+        self, candidates: list[BotCandidate]
+    ) -> tuple[list[BotCandidate], str, int]:
+        """Apply the temporary duty fallback directly inside search.
+
+        This is intentionally one small, removable policy method in the search
+        interface rather than a separate pluggable module.  If normal search
+        already returns one duty bot, keep the search result unchanged so the
+        fallback does not overwhelm relevance ranking.
+        """
+        duty_ids = {candidate.bot_id for candidate in self._temporary_duty_candidates}
+        if any(candidate.bot_id in duty_ids for candidate in candidates):
+            return candidates, "search", 0
+        return (
+            [*candidates, *self._temporary_duty_candidates],
+            "search_plus_fallback",
+            len(self._temporary_duty_candidates),
+        )
+
     async def search_bots(
         self, *, query: str, task_id: str, node_id: str, relay_token: str,
         viewer_actor_type: SearchViewerType | None = None,
         viewer_actor_id: str | None = None,
+        visibility: str | None = None,
     ) -> list[BotCandidate]:
         """Project the catalog result to the stable Relay BotCandidate model."""
         if not query.strip() or not task_id or not node_id:
@@ -147,7 +225,9 @@ class TaskServiceRelayMixin:
         viewer = normalize_search_viewer(viewer_actor_type, viewer_actor_id)
         relay_token_fingerprint = hashlib.sha256(relay_token.encode()).hexdigest()
         try:
-            raw = await self._relay_adapter.search.search_catalog(query, **viewer)
+            raw = await self._relay_adapter.search.search_catalog(
+                query, visibility=visibility, **viewer
+            )
         except Exception as exc:
             self._graph.append_action_event(
                 task_id,
@@ -180,6 +260,9 @@ class TaskServiceRelayMixin:
                 description=str(item.get("bot_desc") or item.get("description") or ""),
                 score=score,
             ))
+        candidates, candidate_source, fallback_candidate_count = (
+            self._temporary_duty_fallback(candidates)
+        )
         self._graph.append_action_event(
             task_id,
             node_id,
@@ -198,6 +281,8 @@ class TaskServiceRelayMixin:
                     }
                     for candidate in candidates
                 ],
+                "candidate_source": candidate_source,
+                "fallback_candidate_count": fallback_candidate_count,
                 "raw_item_count": raw.get("raw_item_count"),
                 "failed_keywords": list(raw.get("failed_keywords") or []),
             },

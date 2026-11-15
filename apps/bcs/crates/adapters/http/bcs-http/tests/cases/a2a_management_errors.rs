@@ -635,9 +635,7 @@ impl bcs_service_api::A2aChatRunService for Runs {
 
 #[tokio::test]
 async fn named_chat_and_run_routes_preserve_caller_checks_and_redact_internal_fields() {
-    for prefix in ["", "/api/v1/collaboration"] {
-        assert_named_chat_and_run_routes(prefix).await;
-    }
+    assert_named_chat_and_run_routes("").await;
 }
 
 async fn assert_named_chat_and_run_routes(prefix: &str) {

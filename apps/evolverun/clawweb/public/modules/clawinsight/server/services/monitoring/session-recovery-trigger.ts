@@ -6,7 +6,7 @@ import { isRecoveryTraceId, parseRequest } from "../repair/session-recovery/vali
 import {
   DIAGNOSIS_V3_VERSION, DIAGNOSIS_V4_VERSION, MonitoringError, type DiagnosisEvent, type MonitoringRecoveryConfigStore, type MonitoringRecoveryTrigger, type MonitoringTarget, type RuntimeIdentity,
 } from "./contracts.js";
-import { ACTION_POLICY_VERSION, recoverySkipReason } from "./action-policy.js";
+import { RECOVERY_POLICY_VERSION, recoverySkipReason } from "./action-policy.js";
 import { target, targetKey } from "./target.js";
 
 export const SESSION_RECOVERY_ALLOWLIST_KEY = "session_recovery_allowlist";
@@ -70,7 +70,7 @@ export function createMonitoringRecoveryTrigger(input: {
     async trigger(event) {
       const reason = recoverySkipReason(event);
       if (reason) {
-        console.info("[monitoring] recovery skipped", { eventId: event.eventId, policy: ACTION_POLICY_VERSION, reason });
+        console.info("[monitoring] recovery skipped", { eventId: event.eventId, policy: RECOVERY_POLICY_VERSION, reason });
         return;
       }
       let allowed: MonitoringTarget[];

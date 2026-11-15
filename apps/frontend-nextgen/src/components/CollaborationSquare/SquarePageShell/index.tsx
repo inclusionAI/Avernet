@@ -19,17 +19,23 @@ import { TrackExpo } from '@/tracking/TrackExpo';
 const LOAD_MORE_PRELOAD_DISTANCE = 420;
 const TASK_DESCRIPTION = '发现公开 BBS 求助任务，按关键词与状态筛选适合当前协作目标的任务。';
 
-export function SquarePageShell({ resource }: { resource: SquareResource }) {
+export interface SquarePageShellProps {
+  resource: SquareResource;
+}
+
+export function SquarePageShell({ resource }: SquarePageShellProps) {
   const square = useCollaborationSquare(resource);
   const scrollRootRef = useRef<HTMLElement>(null);
   const canLoadMore = square.hasMore && !square.loading && !square.loadingMore && !square.error;
+  // 稳定引用：面板把 loadMore 写进 IntersectionObserver effect 依赖，逐帧新建箭头函数会反复重建 observer。
+  const handleLoadMore = useCallback(() => square.loadMore(), [square.loadMore]);
   const handleScroll = useCallback(
     (event: UIEvent<HTMLElement>) => {
       const target = event.currentTarget;
       const distanceToBottom = target.scrollHeight - target.scrollTop - target.clientHeight;
-      if (canLoadMore && distanceToBottom <= LOAD_MORE_PRELOAD_DISTANCE) void square.loadMore();
+      if (canLoadMore && distanceToBottom <= LOAD_MORE_PRELOAD_DISTANCE) void handleLoadMore();
     },
-    [canLoadMore, square.loadMore],
+    [canLoadMore, handleLoadMore],
   );
 
   const botViewModel: BotCatalogViewModel = {
@@ -39,6 +45,7 @@ export function SquarePageShell({ resource }: { resource: SquareResource }) {
     busyKeys: square.busyKeys,
     query: square.botQuery,
     mode: square.botSearchMode,
+    searchResultMode: square.searchResultMode,
     loading: square.loading,
     error: square.error,
     hasMore: square.hasMore,
@@ -51,7 +58,7 @@ export function SquarePageShell({ resource }: { resource: SquareResource }) {
     },
     setMode: square.setBotSearchMode,
     reload: () => square.load(),
-    loadMore: () => square.loadMore(),
+    loadMore: handleLoadMore,
     primaryAction: square.primaryBotAction,
     share: (bot) => square.share('bot', bot.id, bot.name, bot.audience),
     openProfile: square.openBotProfile,
@@ -74,7 +81,7 @@ export function SquarePageShell({ resource }: { resource: SquareResource }) {
     error: square.error,
     hasMore: square.hasMore,
     loadingMore: square.loadingMore,
-    loadMore: () => square.loadMore(),
+    loadMore: handleLoadMore,
     loadMoreError: square.loadMoreError,
     reload: () => square.load(),
     openTaskDetail: square.openTaskDetail,
@@ -96,6 +103,7 @@ export function SquarePageShell({ resource }: { resource: SquareResource }) {
           resource="bot"
           query={botViewModel.query}
           mode={botViewModel.mode}
+          searchResultMode={botViewModel.searchResultMode}
           onQueryChange={botViewModel.setQuery}
           onModeChange={botViewModel.setMode}
           className="w-full min-w-0 md:w-[348px]"

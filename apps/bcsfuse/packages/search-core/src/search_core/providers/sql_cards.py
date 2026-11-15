@@ -10,6 +10,7 @@ from dataclasses import replace
 from typing import Any, Literal
 
 from search_core.api.cards import (
+    UNSET_MAPPING,
     CardRecord,
     CatalogConflict,
 )
@@ -223,7 +224,7 @@ class SqlCardRepository(CardWrites):
             if len(values) < batch_size:
                 return
 
-    def save(self, card, expected_revision):
+    def save(self, card, expected_revision, *, config=UNSET_MAPPING):
         if (
             expected_revision < 0
             or len(card.agent_id) > 128
@@ -240,7 +241,9 @@ class SqlCardRepository(CardWrites):
             and not current.card.deleted
             and current.card.source_version == card.source_version
         ):
-            if current.card == card:
+            if current.card == card and (
+                config is UNSET_MAPPING or config == current.config
+            ):
                 return current  # exact replay, including a response lost after commit
             raise CatalogConflict("source version already has different contents")
         if (current.revision if current else 0) != expected_revision:
@@ -281,6 +284,17 @@ class SqlCardRepository(CardWrites):
                     )
                     if cur.rowcount != 1:
                         raise CatalogConflict("revision conflict")
+                if config is not UNSET_MAPPING:
+                    self._execute(
+                        cur,
+                        f"UPDATE {self.table} SET config=?, gmt_modify=gmt_modify "
+                        "WHERE environment=? AND agent_id=?",
+                        (
+                            json.dumps(config, ensure_ascii=False, allow_nan=False),
+                            self.environment,
+                            card.agent_id,
+                        ),
+                    )
                 if card.deleted:
                     self._retire_documents(cur, card.agent_id, expected_revision + 1)
                 conn.commit()
@@ -289,7 +303,9 @@ class SqlCardRepository(CardWrites):
                 # Resolve a competing create without hiding an actual DB failure.
                 latest = self.get(card.agent_id)
                 if latest is not None:
-                    if latest.card == card:
+                    if latest.card == card and (
+                        config is UNSET_MAPPING or config == latest.config
+                    ):
                         return latest
                     raise CatalogConflict("concurrent Card creation") from error
             raise
@@ -301,7 +317,9 @@ class SqlCardRepository(CardWrites):
             current.prepared if current else None,
             "",
             current.profile if current else None,
-            current.config if current else None,
+            (current.config if current else None)
+            if config is UNSET_MAPPING
+            else config,
         )
 
     def delete(self, agent_id, expected_revision):

@@ -4,6 +4,7 @@ import {
   buildDraftOrPrestableServiceCodingBotChatHref,
   canEnterBotDetail,
   canOpenDraftOrPrestableServiceCodingBot,
+  canOpenServiceBotEvalHistory,
   getBotActionAvailability,
   getBotCollaborationMode,
   getBotEntryAvailability,
@@ -26,6 +27,21 @@ describe('botPolicy', () => {
     expect(getInventoryActionAvailability(viewer, 'edit').enabled).toBe(false);
     expect(canEnterBotDetail(viewer, 'visitor')).toBe(false);
     expect(getInventoryActionAvailability(bot, 'chat').enabled).toBe(false);
+  });
+  test('运行态服务 Bot 的明确协作者可进入只读配置页，但不获得编辑入口', () => {
+    const bot = mapBotDto({
+      bot_id: 'online-collaborated-bot',
+      owner_entity_id: 'owner',
+      bot_type: 'service',
+      kind: 'service',
+      engine: 'openclaw',
+      status: 'ACTIVE',
+      publish: { id: 1, status: 'SUCCESS', version: 1 },
+      actions: ['view', 'view_config', 'chat'],
+    }).item;
+
+    expect(canEnterBotDetail(bot, 'collaborator')).toBe(true);
+    expect(getInventoryActionAvailability(bot, 'edit')).toMatchObject({ visible: false, enabled: false });
   });
   test('部署中禁止进入、编辑和对话，但保留日志排障', () => {
     const bot = mapBotDto({ bot_id: 'b-1', status: 'PENDING', bot_type: 'service' }).item;
@@ -104,6 +120,25 @@ describe('botPolicy', () => {
     expect(actions.find((action) => action.action === 'edit')?.disabledReason).toContain('引擎未识别');
   });
 });
+  test('历史评测记录入口仅对 Owner 或具有服务 Bot 编辑权限的用户开放', () => {
+    const serviceBot = mapBotDto({
+      bot_id: 'service-history-bot',
+      owner_entity_id: 'owner',
+      bot_type: 'service',
+      kind: 'service',
+      engine: 'openclaw',
+      publish: { id: 1, status: 'SUCCESS', version: 1 },
+      actions: ['view', 'chat', 'restart_publish', 'offline'],
+    }).item;
+
+    expect(canOpenServiceBotEvalHistory(serviceBot, 'owner')).toBe(true);
+    expect(canOpenServiceBotEvalHistory({ ...serviceBot, actions: ['view', 'edit'] }, 'editor')).toBe(true);
+    expect(canOpenServiceBotEvalHistory({ ...serviceBot, actions: ['view', 'view_config'] }, 'editor')).toBe(true);
+    expect(canOpenServiceBotEvalHistory(serviceBot, 'space-member')).toBe(false);
+    expect(canOpenServiceBotEvalHistory(serviceBot)).toBe(false);
+    expect(canOpenServiceBotEvalHistory({ ...serviceBot, serviceMode: 'non-service' }, 'owner')).toBe(false);
+  });
+
 
 describe('服务化 Coding Bot 的发布 ID 映射', () => {
   test('预发 Inventory 卡片的数字 publication_id 映射为 botPublishId', () => {
@@ -253,6 +288,32 @@ describe('Bot 授权入口门禁', () => {
     expect(getBotCollaborationMode(codingPersonalBot, false)).toBe('request');
     expect(getBotCollaborationMode(serviceBot, true)).toBe('authorize');
     expect(getBotCollaborationMode(serviceBot, false)).toBe('request');
+  });
+
+  test('服务 Bot 的 view_config 表明当前用户已有显式协作关系', () => {
+    const bot = mapBotDto({
+      bot_id: 'service-readonly-collaborator-bot',
+      bot_type: 'service',
+      kind: 'service',
+      engine: 'openclaw',
+      space: { space_id: '12', kind: 'team' },
+      actions: ['view', 'view_config', 'chat'],
+    }).item;
+
+    expect(getBotCollaborationMode(bot, false)).toBeUndefined();
+  });
+
+  test('服务 Bot 无 edit 时由其他生命周期操作识别已获操作权限', () => {
+    const bot = mapBotDto({
+      bot_id: 'service-operator-bot',
+      bot_type: 'service',
+      kind: 'service',
+      engine: 'openclaw',
+      space: { space_id: '12', kind: 'team' },
+      actions: ['view', 'chat', 'restart_publish', 'offline'],
+    }).item;
+
+    expect(getBotCollaborationMode(bot, false)).toBeUndefined();
   });
 });
 

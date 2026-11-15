@@ -79,6 +79,7 @@ def create_catalog_search_app(
     updates_factory=CardUpdates,
     metadata_factory=CardMetadataRetrieval,
     http_app_factory=create_search_app,
+    allow_document_mapping=False,
 ):
     """All dependencies are injected; host owns and closes model/index clients.
 
@@ -278,11 +279,18 @@ def create_catalog_search_app(
     app.state.index_sync = sync_control
     app.state.index_key = updates.index_key
     app.state.active_index = active_index
-    app.include_router(create_card_router(updates, authorize_operator))
+    app.include_router(
+        create_card_router(
+            updates, authorize_operator, allow_document_mapping=allow_document_mapping
+        )
+    )
     if index_builds is not None and build_runner is not None:
         app.include_router(
             create_index_build_router(
-                index_builds, authorize_operator, trigger=build_runner.trigger
+                index_builds,
+                authorize_operator,
+                trigger=build_runner.trigger,
+                allow_document_mapping=allow_document_mapping,
             )
         )
 

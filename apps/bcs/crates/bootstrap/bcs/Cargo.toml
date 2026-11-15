@@ -21,18 +21,26 @@ name = "bcs-oauth-e2e"
 path = "tests/oauth_e2e/runner.rs"
 required-features = ["test-utils"]
 
+[[bin]]
+name = "bcs-a2a-grpc-peer"
+path = "tests/a2a_grpc/runner.rs"
+required-features = ["test-utils"]
+test = false
+
 [features]
 default = ["prometheus-metrics"]
 metrics = ["prometheus-metrics"]
 prometheus-metrics = ["dep:metrics", "dep:metrics-exporter-prometheus"]
-test-utils = ["dep:bcs-tracing-api", "dep:bcs-a2a-binding-api", "dep:a2a-e2e-sdk", "dep:reqwest-e2e"]
+test-utils = ["dep:bcs-a2a-binding-api", "dep:a2a-e2e-sdk", "dep:reqwest-e2e", "dep:a2a-pb-e2e", "dep:tonic-e2e"]
 
 [dependencies]
 bcs-a2a-binding-api = { workspace = true, optional = true }
 a2a-e2e-sdk = { package = "a2a-lf", version = "=0.4.2", optional = true }
-reqwest-e2e = { package = "reqwest", version = "0.13", default-features = false, features = ["rustls"], optional = true }
+reqwest-e2e = { package = "reqwest", version = "0.13", default-features = false, features = ["rustls", "json", "stream"], optional = true }
+a2a-pb-e2e = { package = "a2a-pb", version = "=0.3.2", optional = true }
+tonic-e2e = { package = "tonic", version = "0.14", features = ["transport"], optional = true }
 bcs-network-tracing.workspace = true
-bcs-tracing-api = { workspace = true, optional = true }
+bcs-tracing-api.workspace = true
 bcs-caller-identity-api = { workspace = true }
 bcs-observability = { workspace = true }
 # Async runtime
@@ -57,6 +65,7 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 tracing-appender    = { workspace = true }
 tracing-subscriber = { workspace = true }
+tracing-serde = { workspace = true }
 tracing-opentelemetry = { workspace = true }
 opentelemetry = { workspace = true }
 opentelemetry_sdk = { workspace = true }
@@ -217,6 +226,7 @@ clap = { workspace = true }
 chrono = { workspace = true }
 
 [dev-dependencies]
+log = "0.4"
 dirs = "5.0"
 futures-util = "0.3"
 rsa = { workspace = true }

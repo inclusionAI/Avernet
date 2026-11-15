@@ -15,6 +15,7 @@
 ## Allowed dependencies
 
 - Tracing logging/subscriber APIs, async timing, UUID and serialization utilities.
+- `bcs-tracing-api` for the optional, read-only log identity contract.
 
 ## Forbidden dependencies
 
@@ -50,17 +51,22 @@ one ordinary Rust implementation instead of duplicating its expression across
 tracing and legacy-log macro branches, whose source coverage can map to the unused
 branch. Existing log targets, fields, levels and request IDs are preserved.
 
-The package does not acquire, store or emit distributed trace IDs. Future tracing
-integration needs its own declared context/propagation contract; the base must
-never import its implementation. This extraction uses the existing tracing
-event/subscriber extension mechanism and adds no plugin runtime or spans.
+`observe_key_result` is explicit opt-in for selected outer dependency operations.
+It marks only error/cancelled/panicked completion and the existing one-time stalled
+warning as `log_class="business_key"`. Successful slow calls stay ordinary. The
+operation captures a bounded optional `bcs-tracing-api::LogCorrelation` and uses
+it during emission, including Drop outside the original request scope. Bootstrap
+owns field serialization. It creates no network spans, changes no headers, and
+never imports a provider/SDK implementation. Ordinary observe helpers and request
+summaries remain unselected. Request-ID helpers do not propagate this separate
+identity; derived tasks must explicitly capture it at their owning boundary.
 
 ## Change impact
 
 Public and internal operation callers depend on this package. GenAI encoders stay
 in bcs-telemetry. The temporary trace-ID helper APIs and added observation
 `trace_id` fields are removed from public and internal consumers together.
-Correlation uses request/operation IDs; levels, thresholds and result semantics
+Ordinary correlation uses request/operation IDs; levels, thresholds and result semantics
 are unchanged. Existing A2A tracing and dependency protocol trace fields remain
 independent. The public revision and internal path dependencies must move together.
 

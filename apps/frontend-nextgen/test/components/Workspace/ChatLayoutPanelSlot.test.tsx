@@ -23,11 +23,17 @@ jest.mock('@/services/myTask', () => ({
   isEnvelopeFailure: (result: { code: number }) => result.code !== 0,
 }));
 
+jest.mock('@/services/tasks/panel/taskPanelRuntime', () => {
+  const { createTestTaskPanelRuntime } = require('../../helpers/taskPanelRuntime');
+  return createTestTaskPanelRuntime({ bySession: (...args: any[]) => mockGetTaskBySession(...args), list: async () => ({ data: [] }) });
+});
+const mockHistory = { readPage: async () => ({ messages: [], nextCursor: null }) };
+
 /** 与 GroupWorkspaceArea 一致：先注册会话清理，再恢复任务，ref 由真实插槽负责。 */
 function GroupSessionPanelHarness({ sessionId }: { sessionId: string | null }): JSX.Element {
   const panelRef = React.useRef<PanelHandle | null>(null);
   useGroupChatPanelCleanup(sessionId, panelRef);
-  useSessionTaskPanelBootstrap({ sessionId, userId: 'u1', panelRef });
+  useSessionTaskPanelBootstrap({ sessionId, userId: 'u1', panelRef, history: mockHistory });
   return <ChatLayoutPanelSlot ref={panelRef} dismissOnOutside={false} />;
 }
 
@@ -259,7 +265,7 @@ describe('ChatLayoutPanelSlot', () => {
       navigationId = store.beginNavigation('t-selected', '/workspace/chat', 's1');
       store.markRouteCommitted(navigationId);
       store.markRouteHydrated(navigationId);
-      useTaskSidePanelStore.getState().setActiveTask('t-selected');
+      useTaskSidePanelStore.setState({ activeTaskId: 't-selected' });
     });
 
     // 根会话 hydration 可能重新发出历史任务面板消息，例如最新任务 t-latest。
@@ -278,10 +284,10 @@ describe('ChatLayoutPanelSlot', () => {
     act(() => ref.current?.openTab(selectedTaskTab));
     expect(mockRawHandle.openTab).not.toHaveBeenCalled();
 
-    // 用户通过下拉框显式切换任务时先更新 activeTaskId。此时该任务的 openTab 必须放行。
+    // 用户通过下拉框显式切换任务时登记 open intent（active fixture 仅模拟共享投影）。此时该任务的 openTab 必须放行。
     act(() => {
       const taskStore = useTaskSidePanelStore.getState();
-      taskStore.setActiveTask('t-user-picked');
+      useTaskSidePanelStore.setState({ activeTaskId: 't-user-picked' });
       taskStore.markTaskPanelOpenIntent('t-user-picked');
       ref.current?.openTab({
         id: 'task-t-user-picked',
@@ -310,7 +316,7 @@ describe('ChatLayoutPanelSlot', () => {
     const store = useTaskConversationNavigationStore.getState();
     const navigationId = store.beginNavigation('t1', '/workspace/collaboration', 's2');
     act(() => store.markRouteCommitted(navigationId));
-    act(() => useTaskSidePanelStore.getState().setActiveTask('t1'));
+    act(() => useTaskSidePanelStore.setState({ activeTaskId: 't1' }));
     // 模拟用户退出会话页：原插槽卸载，但导航 lease 尚未释放，持久宿主仍持有旧 Panel。
     rerender(<PersistentPanelHarness />);
     expect(screen.getByTestId('mock-persistent-panel-state')).toBeTruthy();
@@ -396,7 +402,7 @@ describe('ChatLayoutPanelSlot', () => {
     store.markRouteHydrated(navigationId);
     act(() => {
       const taskStore = useTaskSidePanelStore.getState();
-      taskStore.setActiveTask('t1');
+      useTaskSidePanelStore.setState({ activeTaskId: 't1' });
       taskStore.markTaskPanelOpenIntent('explicit-task');
     });
     render(<ChatLayoutPanelSlot ref={ref} {...asRootInjected({ bridge: 'bridge' })} />);
@@ -624,4 +630,23 @@ describe('ChatLayoutPanelSlot', () => {
     );
     expect(localStorage.getItem(PANEL_WIDTH_STORAGE_KEY)).toBe('560');
   });
+});
+
+it.each([false, true])('SDK internal tab-X acknowledges the controller (persistent=%s)', async persistent => {
+  const { getTaskPanelController } = require('@/services/tasks/panel/taskPanelRuntime');
+  const controller = await getTaskPanelController();
+  const tab = { id: 'custom-sdk-task-tab', type: 'taskPanel.TaskLoopView', title: 'T', closable: true, params: { taskId: 'sdk-task' } };
+  controller.adoptPresentedTask(tab);
+  useTaskConversationNavigationStore.getState().rememberTaskTab('sdk-task', tab);
+  const close = jest.spyOn(controller, 'closeTask');
+  const onTabClose = jest.fn();
+  const slot = <ChatLayoutPanelSlot onTabClose={onTabClose} />;
+  const mounted = render(persistent ? <PersistentPanelHarness>{slot}</PersistentPanelHarness> : slot);
+  try {
+    const callback = mockPanelRenders.at(-1)?.onTabClose as (id: string) => void;
+    act(() => { callback('custom-sdk-task-tab'); });
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(controller.getSnapshot().activeTaskId).toBeNull();
+    expect(onTabClose).toHaveBeenCalledWith('custom-sdk-task-tab');
+  } finally { mounted.unmount(); close.mockRestore(); }
 });

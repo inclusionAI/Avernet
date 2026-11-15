@@ -163,3 +163,63 @@ async fn legacy_admin_name_conflict_precedes_registry_write() {
     let (replayed,token)=admin.register_provider_bot_with_bot_uuid(&provider.provider.provider_id,&provider.provider_admin_token,params("first-name")).await.unwrap();
     assert_eq!(replayed.bot_uuid,"first-name");assert!(token.is_none());
 }
+
+#[tokio::test]
+async fn provider_delete_requires_leaving_every_organization() {
+    use bcs_organization_store::MemoryOrganizationRepo;
+    use bcs_service_api::core::{provider::ProviderRetireBranch, RetireProviderBotParams};
+    use bcs_service_api::port::repo::{
+        CreateOrganizationRecord, OrganizationRepoPort, UpsertOrganizationMemberRecord,
+    };
+
+    let dir = tempfile::tempdir().unwrap();
+    let bots = Arc::new(MemoryBotRepo::with_base_dir(dir.path().into()));
+    let providers = Arc::new(MemoryProviderStore::new());
+    let metadata = Arc::new(MemoryBotProviderStore::new(bots.clone(), providers.clone()));
+    let projection = Arc::new(ProviderBindingProjection::new(
+        providers.clone(), metadata.clone(), DownlinkDetectionSource::BotConnectionMode,
+    ));
+    let registry = Arc::new(BotCore::with_provider_repos(
+        bots, providers.clone(), providers.clone(), projection.clone(),
+    ).with_bot_provider_repo(metadata.clone()));
+    let organizations = Arc::new(MemoryOrganizationRepo::new());
+    let admin = ProviderCore::new(providers.clone(), providers.clone(), projection, registry.clone())
+        .with_bot_provider_repo(metadata.clone())
+        .with_organization_repo(organizations.clone());
+    let provider = admin.register_provider(
+        "Provider".into(), Some("https://example.org/hook".into()),
+        ProviderAuthMode::StaticBearer, "alice".into(), None, None,
+    ).await.unwrap();
+    let (bot, _) = admin.register_provider_bot_with_bot_uuid(
+        &provider.provider.provider_id,
+        &provider.provider_admin_token,
+        RegisterProviderBotParams {
+            bot_name: "Organization Bot".into(), provider_bot_ref: "organization-ref".into(),
+            owners: vec!["alice".into()], ..Default::default()
+        },
+    ).await.unwrap();
+    let env = bcs_config::resolve_env_str();
+    organizations.create_organization(CreateOrganizationRecord {
+        env: env.clone(), code: "org".into(), name: "Org".into(), description: None,
+        managing_provider_id: provider.provider.provider_id.clone(),
+    }).await.unwrap();
+    organizations.upsert_member(UpsertOrganizationMemberRecord {
+        env: env.clone(), organization_code: "org".into(), bot_uuid: bot.bot_uuid.clone(), role: None,
+    }).await.unwrap();
+
+    let params = RetireProviderBotParams {
+        provider_id: provider.provider.provider_id.clone(),
+        provider_admin_token: provider.provider_admin_token.clone(),
+        provider_bot_ref: "organization-ref".into(),
+        allow_unbound_owner_suffixed_bot: false,
+    };
+    let error = admin.retire_registered_bot(params.clone()).await.unwrap_err();
+    assert!(matches!(error, bcs_service_api::ServiceError::Conflict(reason) if reason == "bot_in_organization"));
+    assert!(!metadata.get_provider_bot(&bot.bot_uuid).await.unwrap().unwrap().is_deleted);
+    assert!(registry.try_get(&bot.bot_uuid).await.unwrap().is_some());
+
+    organizations.set_member_disabled(&env, "org", &bot.bot_uuid, true).await.unwrap();
+    let retired = admin.retire_registered_bot(params).await.unwrap();
+    assert!(retired.changed);
+    assert_eq!(retired.branch, ProviderRetireBranch::Metadata);
+}

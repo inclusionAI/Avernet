@@ -132,6 +132,13 @@ pub trait OrganizationRepoPort: Send + Sync {
         organization_code: &str,
         bot_uuid: &str,
     ) -> ServiceResult<Option<OrganizationMember>>;
+    /// Returns whether the Bot is still an active member of any organization.
+    /// Disabled organizations are expected to have disabled all memberships.
+    async fn has_active_membership_by_bot(
+        &self,
+        env: &str,
+        bot_uuid: &str,
+    ) -> ServiceResult<bool>;
     async fn get_member_statuses(
         &self,
         env: &str,

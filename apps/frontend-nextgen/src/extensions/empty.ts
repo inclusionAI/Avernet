@@ -1,14 +1,11 @@
-import { registerTaskPanel, TaskPanelAdapter } from '@/assets/TaskPanel';
+import { registerTaskPanel } from '@/services/tasks/panel/registerTaskPanel';
+import { TaskPanelAdapter } from '@/components/Workspace/TaskPanelAdapter';
 import { defaultCapabilities, getCapabilities } from '@/capabilities';
 import { TaskLoopCard } from '@/components/TaskCards';
-import { TaskPanelSwitcherSlot } from '@/components/Workspace/TaskPanelSwitcherSlot';
-import { useTaskPanelNavBinding } from '@/hooks/taskPanelNavBinding';
 import { registerUmdPanelHandler } from '@/services/bcs/UmdPanel';
 import { TASK_READ_API_BASE } from '@/services/tasks/taskConfig';
 import { ensureReactGlobal } from '@/services/workspace';
 import '@/services/workspace/chatBridge';
-import { useTaskConversationNavigationStore } from '@/stores/taskConversationNavigationStore';
-import { useTaskSidePanelStore } from '@/stores/taskSidePanelStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import * as SidePanelApi from '@tc-chat/ui/es/SidePanel';
 import type { PanelContentProps } from '@tc-chat/ui/es/SidePanelContent';
@@ -24,7 +21,7 @@ type SidePanelConfigureFn = (opts: { maxTabLabelLength?: number }) => void;
  * - 协作群消息查询：在群成员中找归属本人的 bot 作 view_bot_id（actor_id 末段 === 登录人工号）。
  * - 跨用户单聊：会话归属人 ≠ 登录人 时置无权限提示。
  *
- * assets 守卫禁止 TaskPanelAdapter 反查 teamclaw 业务层（stores/capabilities/services），故在此 wrapper 注入：
+ * 宿主 wrapper 负责产品身份与 API 配置，TaskPanelAdapter 仅转换 SDK props：
  * - userId：从登录态 human identity 取纯工号塞入 params.userId；params 已带（发起方/后端注入）优先沿用，缺省才回填登录人工号。
  * - taskApiBase：副屏的 dashboard/list 读接口统一走 /openapi/v1/collaboration/tasks 读公开面
  *   （前端经 gateway spanner 鉴权），不随 capability 切到内面 /api/v1——对齐后端安全收敛（删除非 openapi 接口，
@@ -39,33 +36,13 @@ const TaskPanelAdapterWithUser: ComponentType<PanelContentProps> = (props) => {
   const human = getCapabilities().getHumanIdentity();
   const loginUserId = human.status === 'available' ? human.value?.userId?.trim() || undefined : undefined;
   const incoming = props.params ?? {};
-  const taskId = typeof incoming.taskId === 'string' ? incoming.taskId : '';
-  React.useEffect(() => {
-    if (!taskId) return;
-    useTaskConversationNavigationStore.getState().rememberTaskTab(taskId, props.tab);
-    // AixUI 历史卡片没有路由 intent；挂载即说明它已触发当前面板展示，
-    // 记为全局焦点以便 by_session 自动恢复在同一会话多任务时不抢焦点。
-    useTaskSidePanelStore.getState().setActiveTask(taskId);
-  }, [props.tab, taskId]);
-  // V2 导航按 taskId 分片缝合 taskSidePanelStore(nav 不进 params:params 需可序列化落库,
-  // 且跨 tab 的选中/下钻态应由业务 store 统一持有,供 P4 会话联动消费)。hook 无条件调用。
-  const navBinding = useTaskPanelNavBinding(taskId);
-  const nav = taskId ? navBinding : undefined;
-  // userId：已带沿用，缺省回填登录人工号；taskApiBase：读公开面 /openapi/v1（gateway 鉴权），不随 capability 切内面。
   const params = {
     ...incoming,
     userId: incoming.userId ?? loginUserId,
     taskApiBase: TASK_READ_API_BASE,
   };
   // V2 多任务切换条:listTasks 数据 + openPanelTab 幂等 upsert 切换(内部无任务时自渲染 null)
-  const switcher = React.createElement(TaskPanelSwitcherSlot, {
-    currentTaskId: taskId,
-    params: incoming,
-  });
-  return React.createElement(
-    TaskPanelAdapter,
-    { ...props, params, nav, switcher } as PanelContentProps & { nav?: typeof nav; switcher?: typeof switcher },
-  );
+  return React.createElement(TaskPanelAdapter, { ...props, params });
 };
 
 /**
@@ -81,7 +58,7 @@ const TaskPanelAdapterWithUser: ComponentType<PanelContentProps> = (props) => {
  *   接管 type='umd' tab，修复引擎 resolveBusinessEntry entry 丢 libraryName 前缀的缺陷
  *   （`<AixUI component="lib.Comp">` → finalType='umd' → UmdPanel 按 _componentKey 重建点路径导出）
  * - registerTaskPanel()：第三轨任务协作 workflow 副屏本地注册（taskPanel.TaskLoopView → TaskPanelAdapter；legacy 别名 task-loop 兜底旧落库消息）
- *   随后业务层覆盖为 TaskPanelAdapterWithUser，注入登录用户工号（assets 守卫不能反查业务层）。
+ *   随后业务层覆盖为 TaskPanelAdapterWithUser，注入登录用户工号，展示仍由共享资产负责。
  *
  * 方式②数据桥（BCS manifest / Bot render screens → window.aixLibraryCdnMap）见 services/bcs/libraryCdnInjector，
  * 由 useGroupChat / useBotChat 进入会话时触发 queryAndRegister*() 接入。

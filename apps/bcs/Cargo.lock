@@ -322,6 +322,7 @@ name = "bcs"
 version = "0.1.4-beta.3"
 dependencies = [
  "a2a-lf",
+ "a2a-pb",
  "anyhow",
  "async-trait",
  "axum",
@@ -441,6 +442,7 @@ dependencies = [
  "hex",
  "inventory",
  "jsonwebtoken",
+ "log",
  "metrics",
  "metrics-exporter-prometheus",
  "opentelemetry",
@@ -462,11 +464,13 @@ dependencies = [
  "tokio-tungstenite 0.26.2",
  "tokio-util",
  "toml",
+ "tonic",
  "tower",
  "tower-http",
  "tracing",
  "tracing-appender",
  "tracing-opentelemetry",
+ "tracing-serde",
  "tracing-subscriber",
  "url",
  "urlencoding",
@@ -948,6 +952,7 @@ dependencies = [
  "bcs-route-security",
  "bcs-service-api",
  "bcs-test-support",
+ "bcs-tracing-api",
  "bcs-user-directory-api",
  "hex",
  "serde_json",
@@ -1828,6 +1833,7 @@ dependencies = [
  "hmac",
  "serde_json",
  "sha2",
+ "tempfile",
  "tokio",
  "tokio-test",
  "tracing",
@@ -2033,6 +2039,7 @@ dependencies = [
 name = "bcs-observability"
 version = "0.1.4-beta.3"
 dependencies = [
+ "bcs-tracing-api",
  "serde",
  "serde_json",
  "tokio",
@@ -2162,6 +2169,7 @@ dependencies = [
  "tokio",
  "tokio-test",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

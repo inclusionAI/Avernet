@@ -44,3 +44,11 @@ parallel Genome, promotion path, or experiment ledger.
 - [`benchmark/taxonomy-versioning.md`](benchmark/taxonomy-versioning.md): taxonomy
   snapshot binding, reviewed migration, and unique-question versus label-hit
   coverage accounting.
+
+- [`benchmark/outcome-process-assessment.md`](benchmark/outcome-process-assessment.md):
+  observable evidence for independent outcome/process judgments, incomplete
+  traces, alternative valid routes and future grader calibration.
+
+- [`benchmark/difficulty-calibration.md`](benchmark/difficulty-calibration.md):
+  four-dimensional difficulty assessment, initial bands and proposals for
+  representative-question calibration.

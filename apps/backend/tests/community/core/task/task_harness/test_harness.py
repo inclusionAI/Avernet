@@ -418,18 +418,13 @@ class TestHarnessOnlyPollsExecutionLeaves:
         assert patches[0].status == Status.HUNG
         assert patches[0].failure_reason == "relay_harness_probe_unavailable_exhausted"
 
-    def test_relay_active_no_progress_waits_for_runtime_terminal_state(
-        self, svc, graph
-    ):
+    def test_relay_active_no_progress_resumes_same_session(self, svc, graph):
         graph.extend_props["execution_config"]["orchestration_mode"] = "relay"
         _dispatch_running(svc, graph, "c1")
         node = svc._get_node(graph, "c1")
         node.run_info.extend_props["session_id"] = "s1"
         node.run_info.extend_props["relay_token"] = "token-1"
-        probe = _ScriptedProbe(
-            *[_runtime_result("active") for _ in range(12)],
-            _runtime_result("terminal_failed"),
-        )
+        probe = _ScriptedProbe(_runtime_result("active"))
         recovery = _FakeRelayRecovery()
         clock = _Clock(0.0)
         rec = Recorder()
@@ -437,11 +432,12 @@ class TestHarnessOnlyPollsExecutionLeaves:
             svc, rec, clock=clock, default_sla_timeout=1,
             runtime_probe=probe, runtime_probe_threshold=1,
             runtime_retry_threshold=3, relay_recovery=recovery,
+            active_no_progress_max_cycles=3,
         )
         h.register("t1")
         h._poll_once()
 
-        for _ in range(12):
+        for _ in range(2):
             clock.advance(10.0)
             assert h._poll_once() == []
             assert recovery.nodes == []
@@ -456,6 +452,7 @@ class TestHarnessOnlyPollsExecutionLeaves:
         assert len(recovery.nodes) == 1
         assert recovery.resume_steps == ["S1-S4a"]
         assert node.run_info.extend_props["relay_harness_resume_attempts"] == 1
+        assert h._runtime_seen[("t1", "c1")]["no_progress"] == 0
         assert rec.patches == []
 
     def test_relay_resume_is_step_aware_after_accepted_execution(

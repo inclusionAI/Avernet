@@ -3,8 +3,8 @@ import { Drawer, DrawerClose, DrawerContent, DrawerDescription, DrawerHeader, Dr
 import { Empty } from '@/components/ui/Empty';
 import { runStatusLabel } from '@/services/botScheduledTasks/results';
 import { stageNames, type RoutineRun } from '@/services/botScheduledTasks/types';
-import { SafeHtml } from '@/assets/TaskPanel/SafeHtml';
-import { sanitizeMarkdownHtml } from '@/assets/TaskPanel/sanitizeHtml';
+import { SafeHtml } from '@/components/Common/RichContent';
+import { sanitizeMarkdownHtml } from '@/components/Common/RichContent';
 import MarkdownIt from 'markdown-it';
 import { X } from 'lucide-react';
 import { useState } from 'react';

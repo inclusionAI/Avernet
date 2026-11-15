@@ -97,6 +97,19 @@ impl ProviderBotCoreService for ProviderCore {
             ));
         };
 
+        // Organization membership is an explicit lifecycle boundary: a Bot
+        // must leave every active organization before Provider retirement.
+        // Check before any retirement write so the failed request cannot
+        // partially revoke authority, bindings, or runtime credentials.
+        if let Some(organizations) = &self.organizations {
+            if organizations
+                .has_active_membership_by_bot(&bcs_config::resolve_env_str(), &bot_id)
+                .await?
+            {
+                return Err(ServiceError::Conflict("bot_in_organization".into()));
+            }
+        }
+
         // The verified Provider identity is the REAL actor
         // (spec §3.1); no Human impersonation, no token.
         let mutation =

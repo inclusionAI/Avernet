@@ -250,6 +250,7 @@ cli_gate_status=0
 # the next line lands at the new EOF). Skipped under --skip-start only if the
 # caller also set BCS_LOG to point elsewhere — otherwise reuse the default.
 bcs_log="${bcs_log:-${BCS_LOG:-$repo_root/singlebox/.dependencies/logs/bcs.log}}"
+export BCS_LOG="$bcs_log"
 cli_coverage_log="$cov_dir/cli_commands.log"
 if [[ "$aggregate_only" -eq 0 ]]; then
   : > "$bcs_log" 2>/dev/null || true
@@ -400,6 +401,7 @@ if [[ "$no_stop" -eq 0 ]]; then
     bcs-bot-store/src/memory_permission_profile.rs
     bcs-bot-store/src/memory_registration_create.rs
     bcs-bot-store/src/memory_registration_ownership.rs
+    bcs-bot-store/src/memory_provider_reactivation.rs
     bcs-bot-store/src/memory_retirement.rs
     # The collaboration-store split introduced memory_* module files; the four
     # below showed 0 E2E hits in the 2026-11 singlebox measurement (178+158+16+11

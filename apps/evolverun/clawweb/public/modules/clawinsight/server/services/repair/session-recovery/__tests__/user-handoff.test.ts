@@ -17,6 +17,7 @@ import { SessionRecoveryAgentService, recoveryTargetSnapshot } from "../agent-se
 import type { RecoveryTaskResult, RecoveryPlan, RecoveryStoredTask } from "../task-contracts.js";
 const exec = promisify(execFile), flush = () => new Promise(resolve => setImmediate(resolve));
 const actor = { userId: "owner", isAdmin: false };
+const phoneLikeOwnerRequestId = "00000000-0000-4000-8000-13800138000a";
 const request = { event_id: "event-fixture", tc_fault_label: "TC.MCP.PERMISSION", delivery_key: "initial-1", diagnosis: "原 MCP 操作失败", error_location: "原会话第1行",
   target: { entity_id: "owner", bot_id: "default", env: "prod", engine: "OC" }, session_key: "agent:main:session:original" };
 const plan: RecoveryPlan = { summary: "修正局部配置并重试", basis: "原工具调用失败，引用原会话证据", scope: "本任务目标的局部配置", verification: "原先失败的 MCP 操作成功并继续原任务",
@@ -47,6 +48,7 @@ it.each([
   let saved = await current(first.taskId);
   expect(saved.status).toBe("waiting_owner"); expect(saved.pending_results).toEqual([]);
   expect(runtime.sendMessage).toHaveBeenCalledTimes(hadInitial ? 1 : 0);
+  saved = await setOwnerRequestId(saved, phoneLikeOwnerRequestId);
   const requestId = saved.ownerRequest!.requestId;
   if (restart) await agent.report(saved, { phase: saved.phase, kind: "release" });
   await Promise.all([service.confirmOwner(saved.taskId, requestId, actor), service.confirmOwner(saved.taskId, requestId, actor)]);
@@ -615,11 +617,17 @@ it.each(["not_recovered", "unknown"] as const)("does not downgrade verified reco
   expect(notifier.notify).not.toHaveBeenCalled(); expect(runtime.sendMessage).toHaveBeenCalledOnce();
 });
 
-async function confirmPermissionRequest(task: RecoveryStoredTask) {
+async function setOwnerRequestId(task: RecoveryStoredTask, requestId: string) {
+  return (await tasks.update(task.taskId, task.version, value => ({ ...value, version: value.version + 1,
+    ownerRequest: { ...value.ownerRequest!, requestId } })))!;
+}
+
+async function confirmPermissionRequest(task: RecoveryStoredTask, requestId?: string) {
   const read = await inspect(task);
   await agent.report(await current(task.taskId), { phase: task.phase, kind: "owner_handoff", summary: "缺服务权限", evidence_ids: [read.evidenceId],
     owner_request: { reason: "permission", instructions: "开通服务权限" } });
-  const waiting = await current(task.taskId);
+  let waiting = await current(task.taskId);
+  if (requestId) waiting = await setOwnerRequestId(waiting, requestId);
   await service.confirmOwner(task.taskId, waiting.ownerRequest!.requestId, actor);
   const fresh = await inspect(await current(task.taskId), "fresh-after-permission");
   expect(fresh.status).toBe("succeeded");
@@ -628,8 +636,29 @@ async function confirmPermissionRequest(task: RecoveryStoredTask) {
 
 const ownerContinuation = { clientRequestId: "owner-continue", purpose: "权限反馈后恢复原任务", message: "请重试已开通权限的原操作。" };
 
+it("reuses an accepted legacy continuation with a redacted Owner request ID", async () => {
+  const { task } = await confirmPermissionRequest(await create(), phoneLikeOwnerRequestId);
+  const audit = new AgentToolCallRepository(db, "session_recovery");
+  const redactedId = "00000000-0000-4000-8000-[REDACTED_PHONE]a";
+  const identity = { callId: "tc-legacy-continuation", executionId: task.execution!.executionId,
+    authorizationScopeDigest: task.authorizationScopeDigest!, leaseOwner: "fixture-worker" };
+  await audit.createToolCall({ ...identity, taskId: task.taskId, stepId: task.current!.stepId, toolName: "retry_message",
+    operation: "retry_message", clientRequestId: "legacy-continuation", isWrite: true,
+    request: { ...ownerContinuation, owner_request_id: redactedId } });
+  await audit.claimToolCall({ ...identity, leaseExpiresAt: Math.floor(now / 1000) + 60 });
+  await audit.completeToolCall({ ...identity, status: "succeeded",
+    result: { status: "accepted", initial_message: false, owner_request_id: redactedId, recorded_at_ms: now } });
+
+  const replay = await agent.retryMessage(await current(task.taskId), ownerContinuation);
+  expect(replay).toMatchObject({ toolCallId: identity.callId, status: "succeeded" });
+  expect(runtime.sendMessage).not.toHaveBeenCalled();
+  await agent.report(await current(task.taskId), { kind: "assessment", phase: "assess", decision: "message",
+    summary: "继续观察已有投递", evidence_ids: [replay.evidenceId] });
+  expect((await current(task.taskId)).phase).toBe("observe");
+});
+
 it("allows a new attempt after a pre-dispatch failure, and concurrent attempts share one dispatch", async () => {
-  const { task } = await confirmPermissionRequest(await create());
+  const { task } = await confirmPermissionRequest(await create(), phoneLikeOwnerRequestId);
   vi.mocked(runtime.executeShell).mockRejectedValueOnce(new Error("temporary session locator failure"));
   const failed = await agent.retryMessage(task, ownerContinuation);
   expect(failed).toMatchObject({ status: "failed", result: { dispatched: false } });

@@ -13,6 +13,13 @@ import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
 import { render, screen } from '@testing-library/react';
 
+/** 独立按运行进程的当前时区计算期望值，避免在 Jest 启动后修改 TZ。 */
+function expectedLocalTime(iso: string): string {
+  const date = new Date(iso);
+  const localTime = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return localTime.toISOString().slice(0, 19).replace('T', ' ');
+}
+
 const noop = () => {};
 const actions = {
   onOpenPreview: noop,
@@ -46,9 +53,10 @@ function renderRow(file: BotSessionFileView, actionsOverride: Partial<typeof act
 
 describe('BotSessionFilesRow 元数据行 - 创建者信息三段展示', () => {
   it('Bot 生成带名：来源合段 + 创建时间 + 大小逐段拼接', () => {
-    renderRow(view({ creatorType: 'bot', creatorName: '报告助手', createdAt: '2026-11-09T02:15:30.123456Z' }));
-    // 三段一段不缺：UTC 锚时间（不随查看端时区漂移）。
-    expect(screen.getByText('Bot 生成 · 报告助手 · 2026-11-09 02:15:30 · 1.0 KB')).toBeInTheDocument();
+    const createdAt = '2026-11-09T02:15:30.123456Z';
+    renderRow(view({ creatorType: 'bot', creatorName: '报告助手', createdAt }));
+    // 三段一段不缺：创建时间按当前查看端的本地时区展示。
+    expect(screen.getByText(`Bot 生成 · 报告助手 · ${expectedLocalTime(createdAt)} · 1.0 KB`)).toBeInTheDocument();
   });
 
   it('用户上传名缺失：只显来源标签，无追加分隔名/占位符', () => {

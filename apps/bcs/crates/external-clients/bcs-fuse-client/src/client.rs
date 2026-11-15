@@ -180,7 +180,7 @@ impl FuseClient {
         group_id: &str,
         request: FuseRequest,
     ) -> Result<FuseResponse, FuseClientError> {
-        bcs_observability::observe_result("fuse.fuse", async {
+        bcs_observability::observe_key_result("fuse.fuse", async {
         let url = format!("{}/api/v1/groups/{}/fuse", self.base_url, group_id);
 
         let resp = self
@@ -213,7 +213,7 @@ impl FuseClient {
         &self,
         request: RecommendWorkersRequest,
     ) -> Result<(RecommendWorkersResponse, serde_json::Value), FuseClientError> {
-        bcs_observability::observe_result("fuse.recommend_workers", async {
+        bcs_observability::observe_key_result("fuse.recommend_workers", async {
         let url = format!("{}/api/v1/recommend", self.base_url);
 
         tracing::info!(
@@ -262,7 +262,7 @@ impl FuseClient {
         &self,
         worker_ids: &[String],
     ) -> Result<BatchWorkersResponse, FuseClientError> {
-        bcs_observability::observe_result("fuse.batch_query_workers", async {
+        bcs_observability::observe_key_result("fuse.batch_query_workers", async {
         let url = format!("{}/v1/workers/batch", self.base_url);
 
         let request = BatchWorkersRequest {

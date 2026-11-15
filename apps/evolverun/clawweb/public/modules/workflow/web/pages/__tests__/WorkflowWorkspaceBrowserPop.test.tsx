@@ -9,6 +9,7 @@ vi.mock('../../api/hooks', () => ({
   useCloneWorkflow: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useWorkflowTypes: () => ({ data: mocks.rows, isLoading: false, isError: false, error: null, refetch: mocks.refetch }),
   useCreateWorkflow: () => ({ mutateAsync: mocks.create, isPending: false }),
+  useCloneWorkflow: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useEditorWorkflowDocument: (id: string) => ({ data: id ? { id, title: id === 'a' ? 'Original' : 'Target', version: '1', nodes: [] } : undefined, isLoading: false }),
   useAutoHealDeploy: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }))

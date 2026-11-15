@@ -37,6 +37,7 @@ import { compareGitDatabase, type BaselineComparison } from '../editor/workflowB
 import { WorkflowDocumentAcknowledgedError } from '../editor/workflowDocumentSave'
 import { assertEditorWorkflowReadable, editorWorkflowReadIsCurrent } from '../editor/workflowWriteGuard'
 import WorkflowHistoryPanel from '../components/WorkflowHistoryPanel'
+import { useEditorAiIntegration } from './useEditorAiIntegration'
 import { formatCurrentSpecForDiff, formatSpecForDiff, historyComparisonUncertain, specsEqual } from '../components/WorkflowVersionDiff'
 import { api, fetchJson } from '@avernet/clawweb-shared/web/api/client'
 import type { WorkflowSpec, DeployHistoryItem, VersionSnapshot } from '@avernet/clawweb-shared/web/types'
@@ -45,7 +46,6 @@ type ViewMode = 'visual' | 'yaml' | 'split'
 type SaveMessage = { type: 'success' | 'error'; text: string } | null
 // Bind a workflow operation to the marker it created, across Editor remounts.
 const deploymentTokens = new WeakMap<object, string>()
-
 
 function hasUnsafePackEdits(id: string): boolean {
   const versions = sessionFor(id).state.versions
@@ -102,8 +102,6 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
   const [showWorkflowSettings, setShowWorkflowSettings] = useState(() =>
     Object.keys(useEditorStore.getState().pendingEdits ?? {}).some(key => key.startsWith('workflow:')))
   const [recoveredDrafts] = useState(() => Object.keys(useEditorStore.getState().pendingEdits ?? {}).length > 0)
-
-
   const { spec, isDirty, isLayoutDirty, selectedNodeId, validationErrors, loadSpec, importYaml, selectNode,
     sessionId: editorSessionId, _databaseSpec: databaseBaseline, pendingEdits = {}, actionError, setActionError, canUndo, canRedo, undo, redo } = useEditorStore()
   const creation = spec ? sessionFor(spec.id).state.creation : undefined
@@ -250,6 +248,9 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
   const hasUndeployedChanges = Boolean(effectiveActiveHistoryText !== undefined && databaseBaseline && !comparisonUncertain && !specsEqual(deployedSpecText, savedSpecText))
   const deploymentBaselineLabel = '生效'
 
+  const ai = useEditorAiIntegration({ spec, selectedWorkflowId, targetWorkflowId: initialWorkflowId, editorSessionId, loading: workflowLoading,
+    saving: workflowSaving || packCanvas.saving, saveInFlight: workflowSaveInFlight, hasPendingEdits,
+    onMessage: setSaveMessage, onApplied: () => setViewMode('split') })
   const handleOpenSaveDialog = useCallback(async () => {
     if (!useEditorStore.getState().spec) return
     const sessionId = useEditorStore.getState().sessionId
@@ -734,7 +735,7 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
           }} disabled={!spec} className="rounded-lg border border-input bg-card px-3 py-1.5 text-xs text-muted-foreground disabled:opacity-40">流程设置</button>
           <button type="button" onClick={() => undo?.()} disabled={!canUndo || hasPendingEdits} aria-label="撤销" className="rounded px-2 py-1 text-muted-foreground disabled:opacity-30">↶</button>
           <button type="button" onClick={() => redo?.()} disabled={!canRedo || hasPendingEdits} aria-label="重做" className="rounded px-2 py-1 text-muted-foreground disabled:opacity-30">↷</button></>}
-          <button
+          {ai.controls}<button
             type="button"
             onClick={() => setShowHistory(true)}
             disabled={!selectedWorkflowId}
@@ -859,7 +860,7 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
           />
         )}
 
-        {viewMode === 'visual' && <NodePalette />}
+        {viewMode === 'visual' && !ai.open && <NodePalette />}
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
           {workflowLoading && !spec ? <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">加载工作流…</div> :
             <div className="flex min-h-0 flex-1 overflow-hidden">
@@ -876,7 +877,7 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
               </div>
             </div>}
         </div>
-        {showWorkflowSettings ? <WorkflowSettingsPanel onClose={() => setShowWorkflowSettings(false)} /> : selectedNodeId ? <NodePropertyPanel /> :
+        {ai.open ? ai.drawer : showWorkflowSettings ? <WorkflowSettingsPanel onClose={() => setShowWorkflowSettings(false)} /> : selectedNodeId ? <NodePropertyPanel /> :
           <aside className="w-72 shrink-0 border-l border-border bg-card p-5" aria-label="编辑指引">
             <h2 className="text-sm font-semibold text-foreground">让每一步都清晰</h2>
             <p className="mt-3 text-xs leading-6 text-muted-foreground">从左侧添加节点，连接输出与输入，再选择节点填写当前任务。只有需要时才展开高级配置。</p>

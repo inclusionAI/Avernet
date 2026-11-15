@@ -8,7 +8,7 @@ export function TaskTimeline({ task, onSelect }: { task: Task; onSelect: (stepId
     <Section title="执行时间线">
       <ol className="space-y-0">
         {task.steps?.map((item, index) => (
-          <li key={item.stepId} className="relative flex gap-4 pb-6 last:pb-0">
+          <li key={item.stepId} className="relative flex gap-3 pb-4 last:pb-0">
             {index < (task.steps?.length ?? 0) - 1 && (
               <span aria-hidden="true" className="absolute left-3.5 top-8 bottom-0 w-px bg-divider" />
             )}
@@ -29,7 +29,7 @@ export function TaskTimeline({ task, onSelect }: { task: Task; onSelect: (stepId
                   variant="ghost"
                   style={{ height: 'auto', whiteSpace: 'normal' }}
                   type="button"
-                  className="font-medium"
+                  className="px-0 text-[13px] font-medium text-foreground hover:bg-transparent hover:text-primary"
                   onClick={() => {
                     onSelect(item.stepId);
                   }}
@@ -42,7 +42,7 @@ export function TaskTimeline({ task, onSelect }: { task: Task; onSelect: (stepId
                   {formatTime(item.startedAt)} → {formatTime(item.completedAt)}
                 </span>
               </div>
-              <p className="mt-2 text-sm text-muted-foreground">{item.summary || '等待执行结果'}</p>
+              <p className="mt-1 text-[13px] text-muted-foreground">{item.summary || '等待执行结果'}</p>
               {item.error?.message && (
                 <p className="mt-2 text-sm text-destructive">
                   {item.error.code}：{item.error.message}

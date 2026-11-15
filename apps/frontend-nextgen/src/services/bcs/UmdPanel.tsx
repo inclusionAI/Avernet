@@ -1,3 +1,4 @@
+import { TaskPanelAdapter } from '@/components/Workspace/TaskPanelAdapter';
 // @sdd: 方式② CDN UMD 副屏加载器（迁移自 ocb UmdPanel，适配新 `@tc-chat/ui` SDK）。
 //
 // 背景：新引擎 `@tc-chat/ui` 的 `resolveBusinessEntry` 在「全局 CDN map 命中」分支把
@@ -72,7 +73,7 @@ interface UmdState {
  * 其中 `params`（= resolveBusinessEntry 的 finalPayload）含 `cdn`/`entry`/`_componentKey`/`_libraryName`/`data`。
  * 加载完成后把 `data` 业务字段平铺给远程 UMD 组件（与引擎 CDNMount 行为一致）。
  */
-export function UmdPanel(props: PanelContentProps): React.ReactElement {
+function GenericUmdPanel(props: PanelContentProps): React.ReactElement {
   const { tab, onAction, onInteraction, eventEmitter } = props;
   const tabData = (tab?.params ?? tab?.payload ?? {}) as Record<string, unknown>;
 
@@ -166,6 +167,17 @@ export function UmdPanel(props: PanelContentProps): React.ReactElement {
       />
     </PanelRenderErrorBoundary>
   );
+}
+
+export function UmdPanel(props: PanelContentProps): React.ReactElement {
+  const payload = (props.tab?.params ?? props.tab?.payload ?? {}) as Record<string, unknown>;
+  const key = payload._componentKey ?? payload.entry;
+  if (key === 'taskPanel.TaskLoopView' || key === 'task-loop' ||
+    (payload._libraryName === 'taskPanel' && key === 'TaskLoopView')) {
+    const data = (payload.data ?? payload) as Record<string, unknown>;
+    return <TaskPanelAdapter {...props} params={data} />;
+  }
+  return <GenericUmdPanel {...props} />;
 }
 
 let registered = false;

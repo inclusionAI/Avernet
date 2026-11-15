@@ -1,4 +1,5 @@
 import { containsSecret, redactEvidenceValue } from "@avernet/clawweb-shared/server/services/redaction";
+import { parse, type Command, type Word } from "unbash";
 
 type ObjectValue = Record<string, unknown>;
 type ComparableUrl = { original: string; resource: string; credentials: string };
@@ -39,20 +40,52 @@ function sourceUrls(content: unknown): ComparableUrl[] {
     .flatMap(match => comparableUrl(match[1] ?? match[2]) ?? []));
 }
 
+function literalShellWord(word: Word): string | undefined {
+  const literal = word.parts?.every(part => part.type === "Literal" || part.type === "SingleQuoted"
+    || part.type === "AnsiCQuoted" || part.type === "DoubleQuoted" && part.parts.every(child => child.type === "Literal"));
+  return literal !== false ? word.value : undefined;
+}
+
+function commandUrls(source: string): ComparableUrl[] {
+  // Parse recorded Bash text only. A partial tree or a runtime expansion cannot prove an argument.
+  if (source.length > 128 * 1024) return [];
+  try {
+    const script = parse(source);
+    if (script.errors?.length) return [];
+
+    const downloads: Command[] = [];
+    const statements = script.commands.flatMap(({ command }) => command.type === "AndOr" ? command.commands : [command]);
+    for (const node of statements) {
+      const commands = node.type === "Pipeline" ? node.commands : [node];
+      for (const command of commands) {
+        if (command.type !== "Command") return [];
+        if (!command.name) continue;
+        const name = literalShellWord(command.name)?.split("/").at(-1);
+        if (name === undefined) return [];
+        if (name === "curl" || name === "wget") downloads.push(command);
+      }
+    }
+    if (downloads.length !== 1) return [];
+
+    const args = downloads[0].args.map(arg => arg.type === "Word" ? literalShellWord(arg) : undefined);
+    const urls: ComparableUrl[] = [];
+    for (const arg of args) {
+      if (arg === undefined) return [];
+      const url = comparableUrl(arg.startsWith("--url=") ? arg.slice("--url=".length) : arg);
+      if (url) urls.push(url);
+    }
+    return urls;
+  } catch {
+    return [];
+  }
+}
+
 function argumentUrls(value: unknown, depth = 0): ComparableUrl[] {
   if (depth > 8) return [];
   if (typeof value === "string") return [comparableUrl(value)].filter(url => url !== undefined);
   if (Array.isArray(value)) return value.flatMap(item => argumentUrls(item, depth + 1));
-  return Object.entries(object(value) ?? {}).flatMap(([key, item]) => {
-    if (key !== "command" || typeof item !== "string") return argumentUrls(item, depth + 1);
-    // Extract literal argument words without evaluating command syntax or expanding variables.
-    return [...item.matchAll(/(?:^|\s)((?:'[^']*'|"(?:\\.|[^"\\])*"|\\[\s\S]|[^\s"'\\])+)/g)].flatMap(([, word]) => {
-      if (word.startsWith("'") || word.startsWith('"')) {
-        return word.endsWith(word[0]) ? comparableUrl(word.slice(1, -1)) ?? [] : [];
-      }
-      return /[;&|*?]/.test(word.replace("?", "")) ? [] : comparableUrl(word) ?? [];
-    });
-  });
+  return Object.entries(object(value) ?? {}).flatMap(([key, item]) =>
+    key === "command" && typeof item === "string" ? commandUrls(item) : argumentUrls(item, depth + 1));
 }
 
 function uniqueUrls(values: ComparableUrl[], key: "original" | "normalized"): ComparableUrl[] {

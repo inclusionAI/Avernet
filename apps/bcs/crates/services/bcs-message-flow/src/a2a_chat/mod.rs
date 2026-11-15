@@ -350,9 +350,9 @@ impl A2aChatRunService for A2aChat {
             let service = self.clone();
             let run_id = cmd.run_id.clone();
             let timeout_ms = cmd.timeout_ms;
-            tokio::spawn(bcs_observability::in_current_context(async move {
+            tokio::spawn(bcs_tracing_api::in_current_log_context(bcs_observability::in_current_context(async move {
                 service.drain_async_run(run_id, response_rx, timeout_ms).await;
-            }));
+            })));
         }
 
         let delivery = if managed {
@@ -963,49 +963,7 @@ fn now_ms() -> u64 {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn direct_chat_failure_reason_maps_legacy_bot_error_text() {
-        assert_eq!(
-            direct_chat_failure_reason("Timeout waiting for bot response"),
-            DirectChatRunReason::Timeout
-        );
-        assert_eq!(
-            direct_chat_failure_reason("Agent response timed out before completion."),
-            DirectChatRunReason::Timeout
-        );
-        assert_eq!(
-            direct_chat_failure_reason("executor safety-net: time out"),
-            DirectChatRunReason::Timeout
-        );
-        assert_eq!(
-            direct_chat_failure_reason("target bot is not connected"),
-            DirectChatRunReason::BotNotConnected
-        );
-        assert_eq!(
-            direct_chat_failure_reason("blocked:policy"),
-            DirectChatRunReason::Blocked
-        );
-        assert_eq!(
-            direct_chat_failure_reason("unexpected model error"),
-            DirectChatRunReason::InternalError
-        );
-        assert_eq!(
-            direct_chat_service_error_reason(&ServiceError::InternalError(
-                "provider response header timeout after 5000ms".to_string()
-            )),
-            DirectChatRunReason::Timeout
-        );
-        assert_eq!(
-            direct_chat_service_error_reason(&ServiceError::InternalError(
-                "provider request failed: operation timed out".to_string()
-            )),
-            DirectChatRunReason::Timeout
-        );
-    }
-}
+mod tests;
 
 #[path = "dispatch.rs"]
 mod dispatch;

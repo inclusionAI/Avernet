@@ -626,8 +626,13 @@ it("accepts internal requests without independent tokens while execution tickets
     expect((await fetch(`${origin}/internal/monitoring/session-recoveries/${task.taskId}/continue`, { method: "POST" })).status).toBe(409);
     const headers = { "Content-Type": "application/json", Authorization: `Bearer ${input.credentials.executionTicket}` };
     expect((await fetch(`${worker}/bootstrap`)).status).toBe(401);
+    const taskReads = vi.spyOn(tasks, "find");
     const bootstrap = await fetch(`${worker}/bootstrap`, { headers }); expect(bootstrap.status).toBe(200);
+    expect(taskReads).toHaveBeenLastCalledWith(task.taskId, { forBootstrap: true });
     expect((await bootstrap.json()).task.execution.ticketDigest).toBeUndefined();
+    taskReads.mockClear();
+    expect((await fetch(`${worker}/heartbeat`, { method: "POST", headers, body: "{}" })).status).toBe(200);
+    expect(taskReads.mock.calls.some(([, options]) => options?.forBootstrap === true)).toBe(false);
     const read = await fetch(`${worker}/tools/session/read`, { method: "POST", headers, body: JSON.stringify({ clientRequestId: "http-read", purpose: "观察原故障及实际触达" }) });
     const evidence = await read.json(); expect(read.status).toBe(200); expect(evidence.result.delivery_confirmed).toBe(true);
     const ownerUrl = `${origin}/monitoring/session-recoveries/${task.taskId}`;

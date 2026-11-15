@@ -75,3 +75,18 @@ The Provider must already have an enabled static-bearer downlink identity mode;
 AgentPass identity-aware admission stays on the existing registration entry.
 
 Public Agent registration accepts BCN visibility (protected by default, or public/private). The typed policy is passed into atomic ownership/Card admission; Card updates preserve it unless explicitly supplied; refreshes never modify it. Card and visibility updates share one CAS-fenced transaction. Legacy registration retains protected visibility. This policy does not alter user_visibility or existing discovery, connection and invocation authorization; private is not an owner-only Human access mode.
+
+
+## V1 A2A application facade
+
+`v1::A2aApiService` implements `application::v1::a2a::A2aService` for
+registration, Provider/ref ID recovery, Card read/update/refresh and Provider-name
+registration. It reuses the existing Provider-admin management use cases and
+translates their errors into safe ApplicationErrors, retaining machine codes.
+Raw upstream diagnostics are excluded. Card admission, ownership, authorization
+and persistence remain in the existing management application. The facade adds
+no store calls, network implementation or cache, and has no Bot identity or
+chat-run dependency. Legacy chat/run handling is unchanged.
+
+`tests/conformance_a2a_v1.rs` covers all six management operations, Provider-admin
+credential forwarding, Card source/visibility forwarding and machine errors.

@@ -40,7 +40,7 @@ export function BotSessionFilesRow({
   // 创建者来源合段（2026-11-09 契约）：creator_type 未知（旧引擎存量）为 null，整段不
   // 渲染——不据资源 ID/文件名/登录用户猜测来源。
   const creatorLabel = describeSessionFileCreator(file.creatorType, file.creatorName);
-  // 创建时间只认 created_at（UTC 锚）；缺失/非法不渲染时间段，不回退其它时间字段。
+  // 创建时间只认 created_at（UTC 锚，展示转查看端本地时区）；缺失/非法不渲染时间段，不回退其它时间字段。
   const timeLabel = formatSessionUploadTime(file.createdAt);
   // 元数据三段「来源+创建者 · 创建时间 · 大小」逐段拼接：任一段缺省省略连带分隔点；
   // 三段全空回退现状（sizeBytes 缺省时 formatFileSize 已给 '--'）。

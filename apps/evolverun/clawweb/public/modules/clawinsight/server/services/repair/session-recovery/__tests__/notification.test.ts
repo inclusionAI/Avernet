@@ -24,6 +24,31 @@ function setup() {
 }
 const message = { taskId: "SR-notification", eventId: "call-1", kind: "message" as const };
 
+it("sends a single permission notice to the configured Bot group from a confirmed card delivery", async () => {
+  const { notifier, task, deps, sender, events, config } = setup();
+  task.status = "waiting_owner";
+  task.interventionStatus = "none";
+  task.ownerRequest = { requestId: "request-1", reason: "permission", status: "pending", revision: 1, resumePhase: "assess",
+    createdAtMs: 1, evidence_ids: [], summary: "Bot 无法读取评审文档。", instructions: "请申请评审文档的阅读权限。" };
+  const receipt: RecoveryTimelineEvent = { event_id: "card-receipt", kind: "notification", at_ms: 2, actor: "service",
+    summary: "Owner 待办卡片已同步", payload: { channel: "owner_card", owner_request_id: "request-1", operation: "create", state: "sent", sent: true } };
+  task.timeline.push(receipt, { ...receipt, event_id: "duplicate-receipt" });
+  config.findByKey.mockResolvedValue({ enabled: 1, config_json: JSON.stringify({ webhook: "https://business.invalid/send", timeout_seconds: 10,
+    bot_webhooks: [{ bot_id: "bot", entity_id: "owner", webhook: "https://test.invalid/send" }] }) });
+  const notice = { ...message, eventId: receipt.event_id, kind: "owner_card_sent" as const };
+  notifier.after(notice);
+  new SessionRecoveryGroupNotifier(deps).after({ ...notice, eventId: "duplicate-receipt" });
+  await vi.waitFor(() => expect(events.some(event => event.payload.sent === true)).toBe(true));
+  expect(sender.send).toHaveBeenCalledOnce();
+  const delivery = sender.send.mock.calls[0][0];
+  expect(delivery).toMatchObject({ webhook: "https://test.invalid/send", title: "会话自愈｜已向 Owner 发送权限待办卡片" });
+  expect(delivery.text).toContain("Bot 无法读取评审文档。");
+  expect(delivery.text).toContain("请申请评审文档的阅读权限。");
+  expect(delivery.text).toContain("等待 Owner 处理");
+  expect(delivery.text).toContain("已获取权限，继续任务");
+  expect(delivery.text).toContain("recoveryTaskId=SR-notification");
+});
+
 it.each([
   ["completed", "recovered", undefined],
   ["completed", "unknown", undefined],

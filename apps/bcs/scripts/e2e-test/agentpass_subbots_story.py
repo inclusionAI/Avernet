@@ -452,18 +452,39 @@ class Story:
             401,
             headers=principal,
         )
-        self.request(
-            "deleted slug cannot be reclaimed",
+        reactivated, _ = self.request(
+            "Provider registration reactivates a deleted slug",
             "POST",
             path + "/bots",
-            409,
-            body=registration,
+            body={**registration, "name": "E2E Reviewer Reactivated"},
+            token=admin,
+        )
+        gateway_token = reactivated["bot_runtime_token"]
+        self.check(
+            reactivated["bot_uuid"] == a["id"]
+            and gateway_token != a["token"],
+            "Gateway reactivation preserves the Bot UUID and rotates its token",
+        )
+        self.self_view(a, parent, status=401)
+        a["token"] = gateway_token
+        self.self_view(a, parent)
+
+        self.request(
+            "delete reactivated reviewer before scoped registration",
+            "DELETE",
+            path + "/bots/" + urllib.parse.quote(a["ref"], safe=""),
             token=admin,
         )
         self.request(
             "scoped path cannot reclaim deleted slug",
             "POST",
-            "/register?" + urllib.parse.urlencode({**query, "provider_bot_ref": f"{parent}:reviewer"}),
+            "/register?"
+            + urllib.parse.urlencode(
+                {
+                    **query,
+                    "provider_bot_ref": a["ref"],
+                }
+            ),
             409,
         )
         self.request(

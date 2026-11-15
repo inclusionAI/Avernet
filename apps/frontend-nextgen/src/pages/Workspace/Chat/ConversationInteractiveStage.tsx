@@ -5,6 +5,8 @@
 // 未选中会话由 ConversationSessionPlaceholder 承接；Agent Coding 已由页边界互斥地
 // 交给 CodingBotStageBoundary，本组件只负责普通 OpenClaw Runtime。
 import { ConversationComposerHost } from '@/components/Workspace/ConversationComposerHost';
+import { AgentComputePanel } from '@/components/agentswarm/AgentComputePanel';
+import { useAgentComputePanelStore } from '@/stores/agentComputePanelStore';
 import { ChatPanel } from '@/components/Workspace/ChatPanel';
 import { BotModelSelectorContainer } from '@/components/Workspace/ChatPanel/BotModelSelector';
 import { ComposerCapabilitiesMenu } from '@/components/Workspace/TaskComposerMenu';
@@ -144,6 +146,11 @@ export function ConversationInteractiveStage(props: {
                   capabilitySets={fileFeature.capabilitySets}
                   /* 平台注入的额外菜单行（capability 覆盖式插槽），如知识库引用入口。 */
                   extraMenuRows={composer.extraMenuRows}
+                  onAgentCompute={
+                    composerSession?.sessionId
+                      ? () => useAgentComputePanelStore.getState().open(composerSession.sessionId)
+                      : undefined
+                  }
                 />
               ) : undefined
             }
@@ -160,6 +167,13 @@ export function ConversationInteractiveStage(props: {
           />
         )}
       </ConversationComposerHost>
+      {/* 计算任务副屏：与对话并排（xl+ 占宽，窄屏覆盖），按会话隔离。 */}
+      <AgentComputePanel
+        sessionId={composerSession?.sessionId ?? ''}
+        userId={model.requesterIdentityId}
+        defaultIdentityBotId={composerBot?.realBotId ?? composerBot?.botId ?? null}
+        enabled={Boolean(composerSession?.sessionId)}
+      />
       {presentation.fileFeatures ? fileFeature.featureNode : null}
       {headerRightPanels}
     </div>

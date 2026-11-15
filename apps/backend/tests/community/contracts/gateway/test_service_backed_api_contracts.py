@@ -1274,6 +1274,53 @@ class TestServiceBackedBotPublicApiContracts:
             label="service-backed GET /api/v1/bot-public/my-friend-bots items[0]",
         )
 
+    def test_transferred_bot_keeps_existing_friend_access(self, gw_client, world):
+        _seed_bot(
+            world,
+            bot_id=PUBLIC_BOT_ID,
+            bot_name=PUBLIC_BOT_NAME,
+            entity_id=PUBLIC_OWNER_ID,
+            owner_id=OWNER_ID,
+            owner_name="TransferredOwner",
+            binding_id=303,
+            public="1",
+            friend_approval="0",
+        )
+        friend = _seed_bot_friend(world)
+        _assert_real_bot_public_service_bound(world)
+
+        record = gw_client.get(
+            "/api/v1/bot-public/friend-record",
+            params={
+                "target_entity_id": PUBLIC_OWNER_ID,
+                "target_bot_id": PUBLIC_BOT_ID,
+            },
+        ).json()
+        assert_success(record, "transferred Bot friend record")
+        assert record["data"]["id"] == friend["id"]
+        assert record["data"]["bot"]["entity_id"] == PUBLIC_OWNER_ID
+        assert record["data"]["bot"]["owner_id"] == OWNER_ID
+
+        friends = gw_client.get(
+            "/api/v1/bot-public/my-friend-bots",
+            params={"page": 1, "page_size": 20},
+        ).json()
+        assert_success(friends, "transferred Bot friend list")
+        assert friends["data"]["items"][0]["bot"]["owner_id"] == OWNER_ID
+
+        approval = gw_client.post(
+            "/api/v1/bot-public/friend-request-approval",
+            params={"bot_id": PUBLIC_BOT_ID, "owner_id": PUBLIC_OWNER_ID},
+        ).json()
+        assert_success(approval, "transferred Bot friend request")
+        assert approval["data"]["bot_friend_id"] == friend["id"]
+        assert world.get(BotFriendRepositoryProtocol).list_by_requester(
+            requester_entity_id=OWNER_ID,
+            status=BotFriendStatus.ACCEPTED,
+            page=1,
+            page_size=20,
+        )[0] == 1
+
     def test_friend_request_approval_auto_path_uses_real_service_contract(
         self,
         gw_client,

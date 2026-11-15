@@ -116,6 +116,7 @@ async def search_candidates(
     filters: dict[str, Any] | None = None,
     viewer_actor_type: SearchViewerType | None = None,
     viewer_actor_id: str | None = None,
+    visibility: str | None = None,
 ) -> CandidateSearchResult:
     """Search the same tokenized catalog candidate set for every task mode."""
     viewer = normalize_search_viewer(viewer_actor_type, viewer_actor_id)
@@ -137,6 +138,7 @@ async def search_candidates(
             max_tokens=max_tokens,
             min_score=min_score,
             filters=filters,
+            visibility=visibility,
             **viewer,
         )
 

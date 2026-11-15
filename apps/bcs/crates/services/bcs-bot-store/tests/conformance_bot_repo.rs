@@ -14,6 +14,9 @@ use bcs_test_support::contract::port::bot_metrics_snapshot_port_contract_tests;
 use bcs_test_support::contract::bot_registration_create::atomic_registration_creation_contract;
 use bcs_test_support::contract::repo::bot_repo_port_contract_tests;
 
+#[path = "support/streaming_regressions.rs"]
+mod streaming_regressions;
+
 #[tokio::test]
 async fn conformance_memory_atomic_registration_creation() {
     let temp = tempfile::tempdir().unwrap();

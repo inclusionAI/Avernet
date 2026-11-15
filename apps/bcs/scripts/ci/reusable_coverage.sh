@@ -17,8 +17,14 @@ coverage_env="$(cargo llvm-cov show-env --sh)"
 eval "$coverage_env"
 cargo llvm-cov clean --workspace
 cargo metadata --locked --format-version 1 > testresult/cargo-metadata.json
-cargo nextest list --workspace --locked --list-type binaries-only --message-format json \
-  > testresult/test-binaries.json
+if cargo nextest list --workspace --locked --list-type binaries-only --message-format json \
+  > testresult/test-binaries.json.tmp; then
+  mv testresult/test-binaries.json.tmp testresult/test-binaries.json
+else
+  status=$?
+  rm -f testresult/test-binaries.json.tmp
+  exit "$status"
+fi
 set +e
 cargo nextest run --cargo-metadata testresult/cargo-metadata.json \
   --binaries-metadata testresult/test-binaries.json --config-file "$config" \

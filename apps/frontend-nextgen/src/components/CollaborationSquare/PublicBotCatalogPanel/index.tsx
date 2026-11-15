@@ -89,6 +89,8 @@ export function PublicBotCatalogPanel({ vm, scrollRootRef, smartEmptyHint }: Pub
   };
   const smartEmpty = Boolean(smartEmptyHint) && vm.mode === 'smart' && !vm.query.trim();
   const showGrid = Boolean(activeActor) && !loading && !error && !smartEmpty && vm.bots.length > 0;
+  // 智能搜索降级为名称匹配：结果上方明示回退来源（BCS search_mode=name_fallback）。
+  const showNameFallbackHint = showGrid && vm.searchResultMode === 'name_fallback';
 
   useEffect(() => {
     if (smartEmpty || !hasMore || loading || loadingMore || error) return;
@@ -138,6 +140,9 @@ export function PublicBotCatalogPanel({ vm, scrollRootRef, smartEmptyHint }: Pub
             icon={<Bot aria-hidden className="h-5 w-5" />}
           />
         </Card>
+      )}
+      {showGrid && showNameFallbackHint && (
+        <p className="m-0 text-xs text-muted-foreground">未命中语义匹配，已按名称匹配展示结果</p>
       )}
       {showGrid && activeActor && (
         // dmore：3 列卡片网格，16px 间距（页头下 16px 起）。

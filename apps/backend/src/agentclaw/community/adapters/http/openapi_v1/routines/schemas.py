@@ -104,6 +104,7 @@ class Routine(BaseModel):
                 "model": "qwen-max",
                 "timeout_secs": 3600,
                 "gmt_create": "2026-08-01T02:00:00+00:00",
+                "next_run_at": "2026-08-11T01:00:00+00:00",
                 "gmt_modified": "2026-08-10T02:00:00+00:00",
             }
         }
@@ -155,6 +156,10 @@ class Routine(BaseModel):
         default=None,
         description="How long a single firing may run (seconds); null when "
         "the engine reports none.",
+    )
+    next_run_at: str | None = Field(
+        default=None,
+        description="Next scheduled firing (ISO 8601 UTC); null when not reported.",
     )
     gmt_create: str = Field(
         description="When the routine was created (ISO 8601 UTC); empty when "

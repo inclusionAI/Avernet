@@ -157,3 +157,24 @@ remain unchanged. To adopt this capability later, TC supplies its own source
 adapter and conversion/publisher rather than importing an Alipay implementation.
 The HTTP create/retry/status contract remains `PUT /api/v2/index-builds/{build_id}`
 and `GET /api/v2/index-builds/{build_id}`; it is mounted only by opting-in hosts.
+
+
+## Optional mapping-enabled hosts
+
+With `allow_document_mapping=True`, the build request additionally accepts
+`document_mapping` (the same template/path structure as the
+[Card mapping contract](card-management-api.md#可选的-card--doc-配置)) and
+`validation_card_ids` (up to five existing Cards). The host validates syntax and,
+if samples are supplied, renders those Cards before creating the build. A type
+or empty-search-text failure returns 422 without creating a task. Missing optional
+paths produce warnings; no samples produces `NO_VALIDATION_SAMPLE`. Samples do
+not guarantee that every Card in a full build will render successfully.
+
+The global mapping is frozen in the existing build's `config_json`; changing it
+requires a new index key. Omission on a retry inherits its stored rule. Mapping
+filter keys determine the new generation's configured filters; the host retains
+its mandatory system filters. Do not combine mapping with legacy `filter_fields`
+in the same request. A new generation without mapping retains the legacy builder.
+Activation, recovery, retry, concurrency fencing and vector reuse are unchanged.
+The build response includes configured mapping, and the creation response may
+include validation warnings. They are diagnostics, not persisted build state.

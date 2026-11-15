@@ -8,8 +8,13 @@ from fastapi import APIRouter, Depends, HTTPException, Path
 from pydantic import BaseModel, ConfigDict, Field
 
 from search_core.adapters.http.routes import Authenticator
-from search_core.api.index_builds import IndexBuildConflict, IndexBuildManagement
+from search_core.api.index_builds import (
+    IndexBuildConflict,
+    IndexBuildManagement,
+    MappedIndexBuildManagement,
+)
 from search_core.api.models import VerifiedIdentity
+from search_core.config.document_mapping import DocumentMapping, MappingError
 
 BuildId = Annotated[str, Path(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")]
 
@@ -19,6 +24,11 @@ class BuildRequest(BaseModel):
     embedding_model: str = Field(min_length=1, max_length=128)
     embedding_dimension: int = Field(strict=True, ge=1, le=8192)
     filter_fields: tuple[str, ...] | None = None
+
+
+class MappedBuildRequest(BuildRequest):
+    document_mapping: DocumentMapping | None = None
+    validation_card_ids: list[str] = Field(default_factory=list, max_length=5)
 
 
 class BuildStatus(BaseModel):
@@ -37,8 +47,13 @@ class BuildStatus(BaseModel):
     error_code: str
 
 
+class MappedBuildStatus(BuildStatus):
+    document_mapping: dict | None = None
+    warnings: list[dict] | None = None
+
+
 def response(row):
-    return BuildStatus(
+    return MappedBuildStatus(
         index_key=row.config.index_key,
         embedding_model=row.config.embedding_model,
         embedding_dimension=row.config.embedding_dimension,
@@ -48,28 +63,47 @@ def response(row):
         completed_count=row.completed_count if row.status != "configured" else None,
         total_count=row.total_count if row.status != "configured" else None,
         error_code=row.error_code,
+        document_mapping=row.config.document_mapping.stored()
+        if row.config.document_mapping
+        else None,
+        warnings=list(row.mapping_warnings) or None,
     )
 
 
 def create_index_build_router(
-    service: IndexBuildManagement,
+    service: IndexBuildManagement | MappedIndexBuildManagement,
     authorize_operator: Authenticator,
     *,
     trigger: Callable[[str], None] | None = None,
+    allow_document_mapping: bool = False,
 ):
     router = APIRouter(prefix="/api/v2/index-builds", tags=["index-builds"])
+
+    Request = MappedBuildRequest if allow_document_mapping else BuildRequest
+    Status = MappedBuildStatus if allow_document_mapping else BuildStatus
 
     @router.put(
         "/{build_id}",
         status_code=202,
-        response_model=BuildStatus,
+        response_model=Status,
         response_model_exclude_none=True,
     )
     async def create(
         build_id: BuildId,
-        body: BuildRequest,
+        body: Request,
         identity: Annotated[VerifiedIdentity, Depends(authorize_operator)],
     ):
+        options = {}
+        if {"document_mapping", "validation_card_ids"} & body.model_fields_set:
+            if not allow_document_mapping:
+                raise HTTPException(
+                    422, "document_mapping is not enabled for this application"
+                )
+            if "document_mapping" in body.model_fields_set:
+                options["document_mapping"] = (
+                    body.document_mapping.stored() if body.document_mapping else None
+                )
+            options["validation_card_ids"] = body.validation_card_ids
         try:
             row = await asyncio.to_thread(
                 service.create,
@@ -77,10 +111,13 @@ def create_index_build_router(
                 body.embedding_model,
                 body.embedding_dimension,
                 filter_fields=body.filter_fields,
+                **options,
             )
             if trigger is not None and row.status in {"pending", "running"}:
                 trigger(build_id)
             return response(row)
+        except MappingError as error:
+            raise HTTPException(422, [error.detail()]) from error
         except IndexBuildConflict as error:
             raise HTTPException(
                 409, "build ID already has different configuration"
@@ -90,9 +127,7 @@ def create_index_build_router(
         except Exception as error:
             raise HTTPException(503, "index build store unavailable") from error
 
-    @router.get(
-        "/{build_id}", response_model=BuildStatus, response_model_exclude_none=True
-    )
+    @router.get("/{build_id}", response_model=Status, response_model_exclude_none=True)
     async def status(
         build_id: BuildId,
         identity: Annotated[VerifiedIdentity, Depends(authorize_operator)],

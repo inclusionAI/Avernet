@@ -1,3 +1,4 @@
+import { createGroupTaskHistoryReader } from '@/services/tasks/panel/taskPanelHistoryAdapter';
 /**
  * useGroupChatHeaderPanels —— 协作群头部六图标域（收藏/历史消息/副屏）的开合编排（群侧孪生）。
  *
@@ -106,7 +107,8 @@ export function useGroupChatHeaderPanels(options: UseGroupChatHeaderPanelsOption
   const { session, messages, panelRef } = options;
   const sessionId = session?.sessionId ?? null;
 
-  useSessionTaskPanelBootstrap({ sessionId, userId: options.userId, panelRef });
+  const taskHistory = useMemo(() => createGroupTaskHistoryReader(null), [sessionId]);
+  const taskRecovery = useSessionTaskPanelBootstrap({ sessionId, kind: 'group', userId: options.userId, panelRef, history: taskHistory });
 
   // 副屏开合态：默认 false，经 ChatLayoutPanelSlot 承接 SDK onIsOpenChange 的真实态事件同步
   // （含渲染器「挂载即 openTab」的默认展开），toggle 仅乐观翻转、随后由真实态事件纠偏。
@@ -143,11 +145,12 @@ export function useGroupChatHeaderPanels(options: UseGroupChatHeaderPanelsOption
 
   // 副屏判空：无内容也不可重建 Task tab 时才禁用 Monitor；已打开的 TaskPanel 必须保持可切。
   const sidePaneDisabled = useMemo(
-    () => !sidePaneOpen && !sessionHasSidePaneContent(messages) && !taskTab,
-    [messages, sidePaneOpen, taskTab],
+    () => !sidePaneOpen && !sessionHasSidePaneContent(messages) && !taskTab && !['incomplete', 'error'].includes(taskRecovery.status),
+    [messages, sidePaneOpen, taskTab, taskRecovery.status],
   );
 
   const toggleSidePane = useCallback(() => {
+    if (['incomplete', 'error'].includes(taskRecovery.status)) { void taskRecovery.continueRecovery(); return; }
     setSidePaneOpen((current) => {
       const next = !current;
       const panel = panelRef.current;
@@ -160,7 +163,7 @@ export function useGroupChatHeaderPanels(options: UseGroupChatHeaderPanelsOption
       // 立即弹回（「打开一瞬又关闭」，切会话与渲染器 openTab 的时序竞态所致）。
       return reopenSidePaneTabsFromMessages(messages, panel, taskTab);
     });
-  }, [panelRef, messages, taskTab]);
+  }, [panelRef, messages, taskTab, taskRecovery.status, taskRecovery.continueRecovery]);
 
   const favorites = useMemo<GroupChatFavoritesModel>(() => {
     const favorite = session?.favorite === true;

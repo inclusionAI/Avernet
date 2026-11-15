@@ -1,0 +1,59 @@
+name: Publish task panel
+
+on:
+  push:
+    tags:
+      - 'task-panel-v*'
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: publish-task-panel-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish to npm
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: apps/frontend-nextgen/assets/task-panel
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+          package-manager-cache: false
+
+      - name: Verify release commit is on dev or a RELYYYYMMDD branch
+        run: node scripts/check-release-ref.mjs
+
+      - name: Verify tag matches package version
+        shell: bash
+        run: |
+          package_version="$(node -p "require('./package.json').version")"
+          expected_tag="task-panel-v${package_version}"
+
+          if [[ "${GITHUB_REF_NAME}" != "${expected_tag}" ]]; then
+            echo "Expected tag ${expected_tag}, but workflow was triggered by ${GITHUB_REF_NAME}."
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Inspect package contents
+        run: npm pack --dry-run
+
+      - name: Publish package
+        run: npm publish

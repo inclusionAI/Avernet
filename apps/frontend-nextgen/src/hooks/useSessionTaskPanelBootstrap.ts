@@ -1,41 +1,12 @@
 import type { TaskListItem } from '@/domain/tasks/models';
-import { resolveTaskMainSessionId } from '@/hooks/useTaskSwitcherTasks';
-import {
-  getTaskBySession,
-  isEnvelopeFailure,
-  listMyTasks,
-  normalizeMyTaskPage,
-} from '@/services/myTask';
-import type { ListMyTaskResult } from '@/services/myTask';
+import { resolveTaskMainSessionId } from '@/domain/tasks/taskSession';
 import { TASK_READ_API_BASE } from '@/services/tasks/taskConfig';
 import { resolveTaskPanelDefaultWidth } from '@/services/workspace/panelWidthMemory';
-import { useTaskSessionAssociationStore } from '@/stores/taskSessionAssociationStore';
-import { useTaskSidePanelStore } from '@/stores/taskSidePanelStore';
 import type { PanelHandle, PanelTab } from '@tc-chat/core';
-import { useEffect } from 'react';
+import { useSharedTaskPanelRecovery } from './useSharedTaskPanelRecovery';
+import type { ConversationRef, HistoryReader } from '@avernet-assets/task-panel';
 
 type PanelRef = React.RefObject<PanelHandle | null>;
-/**
- * 深链进入时，GroupChatPane/PanelHandle 可能晚于 Session selection 异步就位；
- * by_session/list 可能先返回。等待必须跟随当前 session 生命周期，而不是固定 2s，
- * 否则冷启动深链加载群列表/会话较慢时，自动恢复会在 panel 挂载前静默丢失。
- */
-const PANEL_HANDLE_POLL_INTERVAL_MS = 100;
-
-async function waitForPanelHandle(
-  panelRef: PanelRef,
-  isCancelled: () => boolean,
-): Promise<PanelHandle | null> {
-  while (!isCancelled()) {
-    const panel = panelRef.current;
-    if (panel) return panel;
-    await new Promise<void>((resolve) => {
-      setTimeout(resolve, PANEL_HANDLE_POLL_INTERVAL_MS);
-    });
-  }
-  return null;
-}
-
 /**
  * 解析会话归属人工号（session_id 末尾 :user:<owner>）。
  *
@@ -110,117 +81,24 @@ export function buildSessionTaskPanelTab(record: TaskListItem, userId: string): 
   };
 }
 
-function taskRecords(result: ListMyTaskResult): TaskListItem[] | null {
-  if (!result || isEnvelopeFailure(result) || !result.data) return null;
-  return Array.isArray(result.data) ? result.data : normalizeMyTaskPage(result.data).items;
-}
-
 /**
  * 进入会话时用任务执行记录或任务列表反查任务并打开副屏。
  *
  * by_session 返回同会话的全部轻量 task ref：默认打开最新一个；显式 task intent
  * 优先；AixUI 已经触发展示时不允许 by_session 抢焦点；普通会话保持 list 兜底。
  */
-export function useSessionTaskPanelBootstrap({
-  sessionId,
-  userId,
-  panelRef,
-  enabled = true,
-}: {
+export function useSessionTaskPanelBootstrap(options: {
   sessionId: string | null;
+  kind?: ConversationRef['kind'];
   userId: string | null;
   panelRef: PanelRef;
   enabled?: boolean;
-}): void {
-  // effect 依赖已限定会话边界；不要额外缓存执行标记，否则已取消的恢复会阻挡
-  // selectedSession 短暂为空后重入同一会话（以及 StrictMode 的 effect 重放）。
-  useEffect(() => {
-    if (!enabled || !sessionId || !userId) return undefined;
-    const requestedTaskId = useTaskSidePanelStore.getState().taskPanelOpenIntentTaskId;
-    const sessionOwnerUserId = resolveSessionOwnerUserId(sessionId, userId);
-    if (!sessionOwnerUserId) return undefined;
-    let cancelled = false;
-
-    const openTaskPanel = async (taskId: string, records: TaskListItem[] | null): Promise<void> => {
-      const panel = panelRef.current ?? (await waitForPanelHandle(panelRef, () => cancelled));
-      if (cancelled || !panel) return;
-      const record = records?.find((item) => item.task_id === taskId) ?? null;
-      useTaskSidePanelStore.getState().setActiveTask(taskId);
-      useTaskSidePanelStore.getState().markTaskPanelOpenIntent(taskId);
-      panel.openTab(
-        record
-          ? buildSessionTaskPanelTab(record, userId)
-          : buildRelayTaskPanelTab(taskId, userId),
-      );
-      useTaskSidePanelStore.getState().consumeTaskPanelOpenIntent(taskId);
-    };
-
-    void (async () => {
-      try {
-        const associationStore = useTaskSessionAssociationStore.getState();
-        // 残留焦点任务只在前一会话中有效。若 clean-up 被任务导航保活或 provider
-        // 重建时序拦住，bootstrap 也要按旧会话关联清掉它，避免挡住新会话恢复。
-        const staleActiveTaskId = useTaskSidePanelStore.getState().activeTaskId;
-        const previousSessionId = associationStore.activeSessionId;
-        if (
-          staleActiveTaskId &&
-          previousSessionId &&
-          previousSessionId !== sessionId &&
-          associationStore.activeSessionTaskIds.includes(staleActiveTaskId)
-        ) {
-          useTaskSidePanelStore.getState().clearActiveTask(staleActiveTaskId);
-        }
-
-        associationStore.setActiveSession(sessionId);
-
-        const sessionTask = await getTaskBySession(sessionId);
-        if (cancelled) return;
-        const sessionTaskRefs = sessionTask.ok ? sessionTask.data ?? [] : [];
-        associationStore.setActiveSessionTaskIds(
-          sessionId,
-          sessionTaskRefs.map((ref) => ref.task_id),
-        );
-
-        // 显式任务来源（任务列表“进入对话”）具有最高优先级，不会被默认 latest task 覆盖。
-        if (requestedTaskId) {
-          associationStore.setActiveSessionTaskIds(sessionId, [requestedTaskId]);
-          const requestedResult = await listMyTasks({ user_id: sessionOwnerUserId });
-          if (cancelled) return;
-          await openTaskPanel(requestedTaskId, taskRecords(requestedResult));
-          return;
-        }
-
-        // by_session 已命中：默认恢复最新关联 task。已展示的 AixUI task 不被抢焦点。
-        if (sessionTaskRefs.length > 0) {
-          if (useTaskSidePanelStore.getState().activeTaskId) return;
-          const latestResult = await listMyTasks({ user_id: sessionOwnerUserId });
-          if (cancelled) return;
-          const latestRef = sessionTaskRefs[0];
-          await openTaskPanel(latestRef.task_id, taskRecords(latestResult));
-          return;
-        }
-
-        // by_session 未命中时保持既有策略：已有副屏沿用，否则从任务列表选择当前会话最新任务。
-        if (useTaskSidePanelStore.getState().activeTaskId) return;
-        const result = await listMyTasks({ user_id: sessionOwnerUserId });
-        if (cancelled) return;
-        const records = taskRecords(result);
-        const latestRecord = records ? findLatestTaskForSession(records, sessionId) : null;
-        if (!latestRecord) return;
-        associationStore.setActiveSessionTaskIds(sessionId, [latestRecord.task_id]);
-        await openTaskPanel(latestRecord.task_id, records);
-      } catch {
-        // by_session 失败不算会话错误；恢复是增强体验，不能阻断会话打开。
-        if (!cancelled) {
-          useTaskSessionAssociationStore.getState().setActiveSessionTaskIds(sessionId, []);
-        }
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [enabled, panelRef, sessionId, userId]);
+  history?: HistoryReader | null;
+}) {
+  return useSharedTaskPanelRecovery({
+    conversation: options.sessionId ? { sessionId: options.sessionId, kind: options.kind ?? (options.sessionId.startsWith('bcs_grp_') ? 'group' : 'bot') } : null,
+    userId: options.userId, panelRef: options.panelRef,
+    enabled: options.enabled !== false, history: options.history ?? null,
+  });
 }
-
 export default useSessionTaskPanelBootstrap;

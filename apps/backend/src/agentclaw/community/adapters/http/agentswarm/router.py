@@ -94,6 +94,21 @@ TenantQuery = Annotated[
 ]
 
 
+def _owned_or_404(run, owner_id: str) -> None:
+    """Refuse a run the caller does not own, exactly as if it did not exist.
+
+    Same 404 as an unknown run on purpose: a distinct "forbidden" would tell a
+    caller that a run id exists in their tenant, which is precisely what
+    ownership scoping is meant to withhold. Runs predating ``owner_id`` carry an
+    empty value and stay readable rather than disappearing.
+    """
+    if run is None:
+        raise HTTPException(status_code=404, detail="run not found")
+    run_owner = (getattr(run, "owner_id", "") or "").strip()
+    if run_owner and run_owner != owner_id:
+        raise HTTPException(status_code=404, detail="run not found")
+
+
 def _audit(
     writer: AgentSwarmAuditWriter,
     *,
@@ -234,6 +249,16 @@ async def cancel_run(
     user: CurrentUserDep,
     audit_writer: AgentSwarmAuditWriterDep,
 ) -> CancelResponseDTO:
+    # Ownership is checked before the mutation: a run outside the caller's set
+    # must not be stoppable even though its id is known. A refused attempt is
+    # still audited -- a caller probing ids they cannot see is exactly what the
+    # trail exists to record.
+    try:
+        _owned_or_404(svc.get_run(run_id, tenant), user.staffId)
+    except HTTPException:
+        _audit(audit_writer, tenant=tenant, actor=user.staffId,
+               action=AuditAction.CANCEL_REQUESTED, reason="not_found")
+        raise
     status = await svc.cancel(run_id, tenant)
     if status == "not_found":
         _audit(audit_writer, tenant=tenant, actor=user.staffId,
@@ -249,11 +274,10 @@ async def get_run(
     run_id: str,
     svc: AgentSwarmServiceDep,
     tenant: TenantQuery,
-    _user: CurrentUserDep,
+    user: CurrentUserDep,
 ) -> RunSummaryDTO:
     run = svc.get_run(run_id, tenant)
-    if run is None:
-        raise HTTPException(status_code=404, detail="run not found")
+    _owned_or_404(run, user.staffId)
     return _to_summary(run)
 
 
@@ -261,12 +285,15 @@ async def get_run(
 async def list_runs(
     svc: AgentSwarmServiceDep,
     tenant: TenantQuery,
-    _user: CurrentUserDep,
+    user: CurrentUserDep,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     status: RunStatus | None = Query(None),
 ):
-    rp = svc.list_runs(tenant, status, page=page, page_size=page_size)
+    # Scoped to the caller: a tenant is a group, not a person, so a tenant-wide
+    # list would show one member another's prompts.
+    rp = svc.list_runs(tenant, status, page=page, page_size=page_size,
+                       owner_id=user.staffId)
     return RunListDTO(
         items=[_to_summary(r) for r in rp.items],
         total=rp.total,
@@ -280,13 +307,12 @@ async def run_detail(
     run_id: str,
     svc: AgentSwarmServiceDep,
     tenant: TenantQuery,
-    _user: CurrentUserDep,
+    user: CurrentUserDep,
 ) -> RunDetailDTO:
     from agentclaw.community.core.agentswarm.service.protocols import RunDetail
 
     detail: RunDetail | None = svc.get_run_detail(run_id, tenant)
-    if detail is None:
-        raise HTTPException(status_code=404, detail="run not found")
+    _owned_or_404(detail, user.staffId)
     return _to_detail_dto(detail)
 
 
@@ -483,6 +509,27 @@ def _to_domain(dto: SubmitRunDTO, owner_id: str = "") -> SubmitRunRequest:
     )
 
 
+_GOAL_EXCERPT_CHARS = 160
+"""How much of the goal a list row carries.
+
+Long enough to identify a run at a glance; the full goal is one detail read
+away. Chosen rather than computed from the row width, so the API contract does
+not change with the frontend's layout.
+"""
+
+
+def _goal_excerpt(goal: str) -> str:
+    """A goal shortened for listing, cut on a word boundary where one is near.
+
+    Whitespace — newlines in particular — collapses to single spaces: a goal is
+    free text and a list row must stay one line.
+    """
+    collapsed = " ".join((goal or "").split())
+    if len(collapsed) <= _GOAL_EXCERPT_CHARS:
+        return collapsed
+    return collapsed[:_GOAL_EXCERPT_CHARS].rstrip() + "…"
+
+
 def _to_summary(run) -> RunSummaryDTO:
     return RunSummaryDTO(
         run_id=run.run_id,
@@ -492,6 +539,7 @@ def _to_summary(run) -> RunSummaryDTO:
         error=run.error,
         started_at=run.started_at,
         ended_at=run.ended_at,
+        goal_excerpt=_goal_excerpt(run.goal),
     )
 
 
@@ -509,6 +557,9 @@ def _to_detail_dto(detail) -> RunDetailDTO:
         ended_at=detail.ended_at,
         tenant=detail.tenant,
         goal=detail.goal,
+        # Inherited from RunSummaryDTO; the detail carries the full goal, so the
+        # excerpt here only keeps the field populated for shared consumers.
+        goal_excerpt=_goal_excerpt(detail.goal),
         provider=detail.provider,
         agent_catalog=[
             AgentCatalogSpecDTO(

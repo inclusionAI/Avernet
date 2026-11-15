@@ -92,12 +92,11 @@ impl ProcessManager {
         extra_config: Option<serde_json::Value>,
     ) -> Result<u16, Box<dyn std::error::Error + Send + Sync>> {
 
-        // Build BCS binary path
-        let bcs_bin = std::env::current_exe()?
-            .parent()
-            .and_then(|p| p.parent())
-            .map(|p| p.join("bcs"))
-            .ok_or("Could not find bcs binary")?;
+        // Cargo's intermediate test layout is private. Nextest supplies the
+        // runtime path (including build-reuse remapping); older Cargo versions
+        // provide the integration-test executable path only at compile time.
+        let bcs_bin = PathBuf::from(std::env::var_os("CARGO_BIN_EXE_bcs")
+            .unwrap_or_else(|| env!("CARGO_BIN_EXE_bcs").into()));
 
         // Create configs directory with bcs-config.json
         // -c flag specifies the directory containing bcs-config.json
@@ -160,7 +159,9 @@ impl ProcessManager {
             .stderr(Stdio::piped());
 
         // Spawn and track immediately - ensures cleanup on failure
-        let mut child = cmd.spawn()?;
+        let mut child = cmd.spawn().map_err(|error| std::io::Error::new(
+            error.kind(), format!("Failed to start BCS at {}: {error}", bcs_bin.display()),
+        ))?;
         let (address_tx, address_rx) = std::sync::mpsc::channel();
 
         // Capture and print stdout/stderr in background

@@ -703,7 +703,7 @@ class ServicePublicationFacade:
             )
             self._require_draft_lock(bot_id, bot["owner_id"], actor_id)
             context = ServiceBotEvalContext(
-                bot_id=str(bot["id"]),
+                bot_id=str(bot["bot_id"]),
                 bot_version=str(record.version),
                 release_id=str(record.id),
                 publish_id=str(record.id),

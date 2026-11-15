@@ -11,12 +11,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
+from provider_sse_mock import write_reply
+
 
 class MockState:
     def __init__(self) -> None:
         self.lock = threading.Lock()
         self.provider_requests: list[dict[str, Any]] = []
-        self.provider_sse_replies: dict[str, str] = {}
+        self.provider_sse_replies: dict[str, dict[str, str]] = {}
         self.event_webhook_requests: list[dict[str, Any]] = []
         # Friend work-order surface: BCS re-addresses the forwarded principal
         # (iss=bcs) and posts TC friend grants to the bot-friend-auth endpoint;
@@ -102,8 +104,12 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(bot_ref, str) or not bot_ref or not isinstance(text, str) or not text:
                 self.send_json(400, {"error": "expected provider_bot_ref and reply text"})
                 return
+            mode = config.get("mode", "terminal")
+            if mode not in ("terminal", "eof", "read_error", "lag_recovery"):
+                self.send_json(400, {"error": "unsupported SSE reply mode"})
+                return
             with STATE.lock:
-                STATE.provider_sse_replies[bot_ref] = text
+                STATE.provider_sse_replies[bot_ref] = {"text": text, "mode": mode}
             self.send_json(200, {"ok": True})
             return
         if self.path == "/control/provider/clear":
@@ -167,17 +173,7 @@ class Handler(BaseHTTPRequestHandler):
                 if self.headers.get("x-bcn-transport") != "sse":
                     self.send_json(400, {"error": "expected SSE negotiation"})
                     return
-                self.send_response(200)
-                self.send_header("content-type", "text/event-stream; charset=utf-8")
-                self.send_header("connection", "close")
-                self.end_headers()
-                # Real response frames, not a test POST to /bot/events. A
-                # finite stream also catches the old whole-body JSON parser.
-                for seq, state in ((1, "delta"), (2, "final")):
-                    event = {"runId": body["id"], "seq": seq, "state": state, "content": reply}
-                    self.wfile.write(("event: chat\ndata: " + json.dumps(event) + "\n\n").encode())
-                    self.wfile.flush()
-                self.close_connection = True
+                write_reply(self, body["id"], reply)
                 return
             self.send_json(200, {"ok": True})
             return

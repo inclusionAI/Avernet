@@ -8,7 +8,7 @@ round-trip, blind partial ``update_instance`` (no-op when absent).
 from contextlib import contextmanager
 
 import pytest
-from sqlalchemy import Column, MetaData, Table, Text, UniqueConstraint, create_engine
+from sqlalchemy import Column, MetaData, Table, UniqueConstraint, create_engine
 from sqlalchemy.orm import sessionmaker
 
 from agentclaw.community.core.repository.implementations.chat.expert_chat_instance import ExpertChatInstanceRepository
@@ -68,6 +68,12 @@ class _FileSqliteDB:
             raise
         finally:
             db.close()
+
+    @contextmanager
+    def transactional_orm_session(self):
+        with self.orm_session() as db:
+            db.connection().exec_driver_sql("BEGIN IMMEDIATE")
+            yield db
 
     session = orm_session
 
@@ -181,7 +187,7 @@ def test_upsert_instance_mysql_dialect_with_mock():
     This test mocks the session to report MySQL dialect, covering the
     on_duplicate_key_update branch which uses mysql insert.
     """
-    from unittest.mock import MagicMock, patch
+    from unittest.mock import MagicMock
 
     # Create a fully mocked session that simulates MySQL dialect
     mock_db = MagicMock()
@@ -254,7 +260,7 @@ def test_update_instance_with_both_fields_mysql():
     mock_query.filter.return_value = mock_query
     mock_query.limit.return_value = mock_query
     mock_query.all.return_value = []
-    mock_query.update.return_value = 1  # 1 row updated
+    mock_session.execute.return_value.rowcount = 1
     mock_session.query.return_value = mock_query
 
     mock_db.orm_session.return_value = mock_session
@@ -267,7 +273,7 @@ def test_update_instance_with_both_fields_mysql():
     )
 
     assert result is True
-    assert mock_session.query.call_count == 2
+    assert mock_session.execute.call_count == 1
 
 
 def test_upsert_instance_returns_fallback_when_row_not_found(repo):

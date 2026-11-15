@@ -1,3 +1,4 @@
+import { getCapabilities } from '@/capabilities';
 import { Badge } from '@/components/ui/Badge';
 import { Avatar } from '@/components/ui/Avatar';
 import { Card } from '@/components/ui/Card';
@@ -54,6 +55,8 @@ export default function SquareBotCard({ bot, activeActor, busy, highlighted, onS
     targetActorId: getPublicBotTargetId(bot),
     relationshipStatus: bot.relationshipStatus,
     isOwnedByLoggedInUser: bot.isOwnedByLoggedInUser,
+    // BCS-only（Backend 关闭）时 Human 主操作转为「已是好友」展示，不再提供 Backend 私聊入口。
+    backendChatEnabled: getCapabilities().getPublicBotBackendEnabled(),
   });
   const canStartConversation = primaryAction === 'open_human_bot_conversation';
   const primaryDisabled =

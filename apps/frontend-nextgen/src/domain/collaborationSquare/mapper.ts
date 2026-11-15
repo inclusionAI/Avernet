@@ -310,6 +310,8 @@ export function mapBotProfileTransport(value: BotProfileTransport): PublicBotPro
 
 /**
  * 分享深链只依赖公开 Catalog 摘要。Catalog 不提供能力 ID/引擎信息，不能伪造成完整画像。
+ * BCS 候选摘要在 Backend 未配置/增强失败时也由此构建：bcsStatus 原样保留（画像增强
+ * 不得用 Backend Catalog 生命周期覆盖它）。
  */
 export function mapPublicBotCatalogSummaryToProfile(bot: PublicBot): PublicBotProfile {
   return {
@@ -320,6 +322,7 @@ export function mapPublicBotCatalogSummaryToProfile(bot: PublicBot): PublicBotPr
     ...(bot.friendRequestBotId ? { friendRequestBotId: bot.friendRequestBotId } : {}),
     ...(bot.isOwnedByLoggedInUser ? { isOwnedByLoggedInUser: true } : {}),
     ...(bot.shortProfile ? { shortProfile: bot.shortProfile } : {}),
+    ...(bot.bcsStatus ? { bcsStatus: bot.bcsStatus } : {}),
     capabilities: [],
     skills: [],
   };

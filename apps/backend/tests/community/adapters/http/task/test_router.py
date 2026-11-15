@@ -893,6 +893,7 @@ def test_relay_search_forwards_explicit_viewer_after_generation_check(
             "relay_token": "run-1",
             "viewer_actor_type": viewer_type,
             "viewer_actor_id": viewer_id,
+            "visibility": None,
         }
     ]
     assert response.json()["data"] == {

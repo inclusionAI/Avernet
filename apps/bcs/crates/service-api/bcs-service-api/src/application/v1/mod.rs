@@ -4,6 +4,7 @@
 //! HTTP requests into these commands and never pass credentials or
 //! request-supplied caller identities into domain services.
 
+pub mod a2a;
 pub mod auth;
 pub mod authorization;
 pub mod bot_authority;

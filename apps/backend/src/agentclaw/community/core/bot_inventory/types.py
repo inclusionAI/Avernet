@@ -39,6 +39,7 @@ class DisplayState(StrEnum):
 
 class BotAction(StrEnum):
     VIEW = "view"
+    VIEW_CONFIG = "view_config"
     CHAT = "chat"
     EDIT = "edit"
     DELETE = "delete"

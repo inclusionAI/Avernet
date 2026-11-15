@@ -15,6 +15,8 @@ AIS stop requests use `jobId` and the original submission user as `userNumber`, 
 
 Tasks use existing `ce_tasks` and `ce_steps`. Task extension JSON retains current execution identity and bounded state. Business phases use `ce_steps`; phase reports, complete plans, judgments and Owner decisions use the existing object store with immutable digest references. The timeline combines phase reports, tool audit and result-delivery acknowledgments. Full bounded source reads and operation receipts live in the existing tool audit; the timeline and judgments refer to their IDs. The Owner page loads full evidence on demand. Evidence redaction retains diagnostic message text while removing credentials and PII.
 
+Agent bootstrap retains every evidence entry and its original IDs. Repeated successful `trajectory_read` index pages (`read_scope=traces`) with truncated JSON excerpts may replace only that excerpt with a plain-text `same_content_as` reference to the first equivalent evidence entry and the current `recorded_at_ms`. The reference includes its own `tool_call_get` lookup and fits the existing AIS closeout 400-character text budget. Complete short JSON excerpts remain unchanged so the existing closeout fact filter can still compact them without expanding context. Each eligible entry also exposes its own `recorded_at_ms`, including the first. Equality uses the complete audited request and result, excluding only request `clientRequestId`, its derived `requestDigest`, and result `recorded_at_ms`; it also requires the same execution, authorization scope and preceding write. Pagination, coverage, sources, event timestamps and fields beyond the displayed excerpt remain significant. Content/observation reads, writes, failed or incomplete receipts and unaudited legacy evidence are not deduplicated. Full receipts remain available through the existing task-scoped `tool_call_get`; task detail, persistence, result callbacks and evidence validation keep the original evidence. Only the verified bootstrap read opts into retaining already-loaded audit references and comparing bodies, adding no database or remote reads. Ordinary task reads, maintenance batches, heartbeat and mutation hydration do not retain these references or deep-copy them. It does not impose a new total evidence limit or change the existing per-excerpt display limit.
+
 After a message attempt has been accepted or remains uncertain, a recovered observation with unconfirmed delivery stays running until delivery is confirmed or the existing observation deadline is reached. Recovery remains `recovered` while waiting. The service enforces this for initial and approved-plan messages using existing send audits; runner polling does not resend advice or reset deadlines. Observation expiry preserves confirmed recovery, while unknown effects keep the existing `waiting_effect` behavior. AIS execution limits, cancellation and user-continuation/Owner exit rules remain effective. TE AIVision traces can arrive late; absent traces do not prove non-delivery or independent recovery.
 
 Task status and recovery effect are separate. A channel accepting a message is not delivery evidence. Only a marked user message in the original session proves delivery. Agent response and recovery require semantic judgment with stored evidence; environmental write success does not prove recovery.
@@ -37,19 +39,31 @@ Owner waiting and effect waiting have separate deadlines. Owner expiry releases 
 
 ### Automatic effect resumption
 
-The existing recovery maintenance scan can resume an effect wait one hour after it was
-saved, up to three times and within 24 hours of the first wait. It resumes the same
-task and observation phase. Execution failures still use the existing retry policy.
-If the limit is reached with no confirmed effect, the task completes with effect
-`unknown` and reports through the existing result queue.
+The existing recovery maintenance scan resumes the same task and observation phase.
+The first wait starts the total window; the latest wait starts the next interval.
+A round is available only if the next possible start is strictly before the end
+of the window and the round budget has not been used. If no round can fit, an
+unresolved wait closes with effect `unknown` once in-flight work has settled.
+Execution failures within a round keep the existing execution retry policy.
 
 Enable this per control plane with `ce_app_config.session_recovery_effect_resume_pre`
-or `session_recovery_effect_resume_prod`. The enabled record holds a JSON integer
-`concurrency` (1–10). Start with 2 in pre. An absent or disabled record leaves
-automatic resumption off. The same scan finishes its existing work before processing
-a bounded number of due waits. Reserved, queued and running automatic executions
-count against the environment's shared limit until their AIS steps settle.
+or `session_recovery_effect_resume_prod`. The enabled record holds integer
+`concurrency` (1–10), and may set `intervalSeconds`, `windowSeconds` and
+`maxResumes`. Older enabled records default the new fields to 3600, 86400 and 3.
+An absent or disabled record leaves automatic resumption off. A busy environment
+or an interval that has not elapsed does not make a task eligible for offline
+recheck. A reserved or active round occupies its slot until its AIS steps settle.
 
+### Historical effect recheck
+
+The local operator scans the requested creation dates and schedules individual
+read-only executions. It uses the same live resume policy as online maintenance.
+The backend rechecks policy, task ownership, current execution and the latest
+diagnosis result before accepting and before saving a conclusion. The original
+task state, phase, completion reason and creation time are preserved. The AIS
+run can collect evidence but cannot send messages, change the target, trigger
+notifications or enter the normal repair workflow. Only a verified result is
+appended at a higher version through the existing diagnosis outbox.
 
 ## Handbook and Agent assessment
 

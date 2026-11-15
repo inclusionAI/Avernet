@@ -94,7 +94,7 @@ it('patches known rows only, retains omitted values, deduplicates, clears explic
   store.patch('ctx', [{ sessionId: sid, status }], new Set());
   expect(useSessionStatusStore.getState().statuses).toEqual({});
 });
-it('isolates view identity, gives normal rows the default conversation icon, and uses accessible text', () => {
+it('isolates view identity, leaves status-less rows empty, and uses accessible text', () => {
   useSessionStatusStore.getState().patch('ctx', [{ sessionId: sid, status }], new Set([sid]));
   const view = render(
     <>
@@ -103,13 +103,10 @@ it('isolates view identity, gives normal rows the default conversation icon, and
     </>,
   );
   expect(screen.getAllByLabelText('DevFlow：进行中')).toHaveLength(1);
-  const defaultIcons = view.container.querySelectorAll('svg.lucide-message-square');
-  expect(defaultIcons).toHaveLength(1);
-  // The neutral placeholder stays subtle and does not compete with DevFlow states.
-  expect(defaultIcons[0]).toHaveClass('text-content-icon');
+  expect(view.container.querySelectorAll('svg')).toHaveLength(1);
   act(() => useSessionStatusStore.getState().end('ctx'));
   expect(screen.queryByLabelText(/DevFlow/)).toBeNull();
-  expect(view.container.querySelectorAll('svg.lucide-message-square')).toHaveLength(2);
+  expect(view.container.querySelectorAll('svg')).toHaveLength(0);
 });
 
 it('buffers the initial snapshot before surface ready and swaps all rows to DevFlow icons together', () => {
@@ -131,28 +128,28 @@ it('buffers the initial snapshot before surface ready and swaps all rows to DevF
     </>,
   );
   expect(screen.queryByLabelText(/DevFlow/)).toBeNull();
-  expect(view.container.querySelectorAll('svg.lucide-message-square')).toHaveLength(2);
+  expect(view.container.querySelectorAll('svg')).toHaveLength(0);
 
   act(() => useSessionStatusStore.getState().commit('ctx'));
   expect(screen.getAllByLabelText('DevFlow：进行中')).toHaveLength(1);
   expect(screen.getAllByLabelText('DevFlow：已完成')).toHaveLength(1);
-  expect(view.container.querySelector('svg.lucide-message-square')).toBeNull();
+  expect(view.container.querySelectorAll('svg')).toHaveLength(2);
 });
 
-it('waits for both surface readiness and the initial status snapshot before deviating from the default icon', () => {
+it('waits for both surface readiness and the initial status snapshot before showing a status icon', () => {
   useSessionStatusStore.getState().begin('ctx', 'bot-a:owner');
   useSessionStatusStore.getState().patch('ctx', [{ sessionId: sid, status }], new Set([sid]));
   const view = render(<ConversationSessionStatus botId="bot-a:owner" sessionId={sid} />);
 
   act(() => useSessionStatusStore.getState().commit('ctx'));
   expect(screen.queryByLabelText(/DevFlow/)).toBeNull();
-  expect(view.container.querySelector('svg.lucide-message-square')).toBeTruthy();
+  expect(view.container.querySelector('svg')).toBeNull();
 
   act(() =>
     useSessionStatusStore.getState().patch('ctx', [{ sessionId: sid, status }], new Set([sid]), { snapshot: true }),
   );
   expect(screen.getByLabelText('DevFlow：进行中')).toBeTruthy();
-  expect(view.container.querySelector('svg.lucide-message-square')).toBeNull();
+  expect(view.container.querySelectorAll('svg')).toHaveLength(1);
 });
 it('treats the first normal patch from an older child as the initial snapshot', () => {
   const row = { sessionId: sid, botId: 'bot-a:owner', title: 'Title', messageCount: 1, gmtModified: '', gmtCreate: '' };
@@ -301,16 +298,31 @@ it('bridge applies to the originating Bot while another Bot is expanded; refetch
   expect(useConversationStore.getState().friendBotSessionsByBotId['bot-a:owner'].items).toEqual([]);
   unmount();
 });
-it('merges explicit idle into the neutral conversation placeholder, not a dashed circle', () => {
+it('renders no icon for explicit idle', () => {
   useSessionStatusStore
     .getState()
     .patch('ctx', [{ sessionId: sid, status: { code: 'idle', label: '空闲', tone: 'neutral' } }], new Set([sid]));
   const { container } = render(<ConversationSessionStatus botId="bot-a:owner" sessionId={sid} />);
   expect(screen.queryByLabelText(/DevFlow/)).toBeNull();
-  expect(container.querySelector('svg.lucide-circle-dashed')).toBeNull();
-  const icon = container.querySelector('svg.lucide-message-square');
-  expect(icon).toBeInTheDocument();
-  expect(icon).toHaveClass('size-[13px]', 'text-content-icon');
+  expect(container.querySelector('svg')).toBeNull();
+});
+
+it('renders no icon for an unsupported or unknown status code', () => {
+  useSessionStatusStore
+    .getState()
+    .patch('ctx', [{ sessionId: sid, status: { code: 'unknown-future-status', label: '未知', tone: 'neutral' } }], new Set([sid]));
+  const { container } = render(<ConversationSessionStatus botId="bot-a:owner" sessionId={sid} />);
+  expect(screen.queryByRole('status')).toBeNull();
+  expect(container.querySelector('svg')).toBeNull();
+});
+
+it('falls back to the normal reply spinner when an unsupported status is present', () => {
+  useSessionStatusStore
+    .getState()
+    .patch('ctx', [{ sessionId: sid, status: { code: 'unknown-future-status', label: '未知', tone: 'neutral' } }], new Set([sid]));
+  render(<ConversationSessionStatus botId="bot-a:owner" sessionId={sid} showReplying />);
+  expect(screen.getByLabelText('Bot 正在回复')).toBeInTheDocument();
+  expect(screen.queryByLabelText(/DevFlow/)).toBeNull();
 });
 
 it.each([

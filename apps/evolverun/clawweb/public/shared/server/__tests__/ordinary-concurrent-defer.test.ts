@@ -1,8 +1,11 @@
+import { migrations as currentMigrations } from '../schema.js';
 import { expect, it, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import { SqliteDatabase, closeDatabase, initDatabase, runMigrations, type IDatabase } from '../db.js';
 import { ordinaryRunRequestDdl } from '../schema-ordinary-run-request.js';
 import { sqliteDialect } from '../db/dialect.js';
+
+const latestSchemaVersion = Math.max(...currentMigrations.map(m => m.version));
 
 const v150 = 'Store idempotent ordinary run request associations';
 const v151 = 'Bind ordinary request associations to run incarnations';
@@ -12,7 +15,7 @@ it('rejects a v150 ledger BUSY race and retries when a peer has completed v151',
   const { tmpdir } = await import('node:os');
   const { join } = await import('node:path');
   const { migrations, sqliteTriggers } = await import('../schema.js');
-  const later = { version: 152, description: 'future migration', sql: ['INSERT INTO future_probe VALUES (1)'] };
+  const later = { version: latestSchemaVersion + 1, description: 'future migration', sql: ['INSERT INTO future_probe VALUES (1)'] };
   const dir = mkdtempSync(join(tmpdir(), 'ordinary-advanced-busy-')); const path = join(dir, 'db.sqlite');
   const peer = new Database(path); peer.pragma('journal_mode = WAL');
   peer.exec(`CREATE TABLE schema_version (id INTEGER PRIMARY KEY, gmt_modified INTEGER, version INTEGER, description TEXT);
@@ -47,7 +50,7 @@ it('rejects a v150 ledger BUSY race and retries when a peer has completed v151',
     expect(peer.prepare("SELECT name FROM sqlite_master WHERE type='trigger' AND name='trg_flow_runs_update'").get()).toEqual({ name: 'trg_flow_runs_update' });
     spy.mockRestore(); peer.exec('ROLLBACK');
     const retried = await initDatabase();
-    expect(await retried.db.query('SELECT MAX(version) AS v FROM schema_version')).toEqual([{ v: 152 }]);
+    expect(await retried.db.query('SELECT MAX(version) AS v FROM schema_version')).toEqual([{ v: later.version }]);
     expect(await retried.db.query('SELECT * FROM future_probe')).toEqual([{ value: 1 }]);
     expect(await retried.db.query("SELECT name FROM sqlite_master WHERE type='trigger' AND name='trg_flow_runs_update'"))
       .toEqual([{ name: 'trg_flow_runs_update' }]);

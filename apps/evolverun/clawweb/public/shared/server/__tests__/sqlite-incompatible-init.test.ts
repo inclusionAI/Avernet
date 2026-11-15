@@ -1,9 +1,12 @@
+import { migrations as currentMigrations } from '../schema.js';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { expect, it, vi } from 'vitest';
 import { closeDatabase, getRepositories, initDatabase, SqliteDatabase } from '../db.js';
+
+const latestSchemaVersion = Math.max(...currentMigrations.map(m => m.version));
 
 it.each([150, 151] as const)('rejects real SQLite v%s incompatible schema and retries after repair without closing', async version => {
   const dir = mkdtempSync(join(tmpdir(), 'clawweb-incompatible-init-'));
@@ -35,7 +38,7 @@ it.each([150, 151] as const)('rejects real SQLite v%s incompatible schema and re
     else peer.exec('ALTER TABLE flow_runs DROP COLUMN ordinary_run_marker; ALTER TABLE flow_runs ADD COLUMN ordinary_run_marker TEXT');
     const { db } = await initDatabase();
     expect(db.dbType).toBe('sqlite');
-    expect(await db.query('SELECT MAX(version) AS v FROM schema_version')).toEqual([{ v: 152 }]);
+    expect(await db.query('SELECT MAX(version) AS v FROM schema_version')).toEqual([{ v: latestSchemaVersion }]);
     expect(await db.query('SELECT request_key_hash, child_workflow_id FROM ordinary_run_requests')).toEqual([{ request_key_hash: 'key', child_workflow_id: 'workflow' }]);
     expect(await db.query('SELECT flow_id FROM flow_runs')).toEqual([{ flow_id: 'existing' }]);
   } finally {

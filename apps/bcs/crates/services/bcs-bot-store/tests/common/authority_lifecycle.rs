@@ -465,9 +465,13 @@ mod registration;
 mod retirement;
 #[path="authority_lifecycle_retirement_races.rs"]
 mod retirement_races;
+#[path="authority_lifecycle_reactivation.rs"]
+mod reactivation;
 pub use registration::*;
 pub use retirement::*;
 pub use retirement_races::*;
+#[allow(unused_imports)]
+pub use reactivation::*;
 use registration::provider_record_ref;
 use retirement::{seed_pending_transfer,audit_actions};
 use bcs_service_api::core::provider::{ProviderRetire,ProviderRetireBranch};

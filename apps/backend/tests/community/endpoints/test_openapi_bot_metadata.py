@@ -111,6 +111,48 @@ def _seed_default_bots(world) -> None:
         )
 
 
+def _seed_transferred_service(world) -> None:
+    init_principal_verifier_config(_Resolver(), "test-key", strict=False)
+    world.get(BotRepository).insert({
+        "bot_id": _BOT_ID,
+        "bot_name": "Transferred Service",
+        "owner_id": "current-owner",
+        "entity_id": "stable-entity",
+        "entity_type": "staff",
+        "creator_id": "historical-owner",
+        "status": "ACTIVE",
+        "active_engine": "openclaw",
+        "bot_type": "service",
+        "ext": {"bcn_provider_bot_ref": f"{_BOT_ID}:historical-owner"},
+    })
+
+
+@endpoint_test(
+    method="POST",
+    path="/openapi/v1/bots/metadata/queries",
+    scenario="batched_retained_bcn_reference_after_handoff",
+    seed=_seed_transferred_service,
+    input=CaseInput(
+        headers=_headers(), query_params={**_QUERY, "page_size": 100},
+        json_body={"bots": [
+            {"bot_id": _BOT_ID, "owner_id": "historical-owner"},
+            {"bot_id": _BOT_ID, "owner_id": "stable-entity"},
+            {"bot_id": "default", "owner_id": "unknown-owner"},
+        ]},
+    ),
+    expect=ExpectSuccess(status=200, json_contains={
+        "code": 200000, "data": {"total": 1, "items": [{
+            "bot_id": _BOT_ID, "owner_id": "current-owner",
+            "bcn_bot_id": f"{_BOT_ID}:historical-owner",
+            "bot_name": "Transferred Service", "online_available": False,
+            "live_version": None, "conversation_stage": "online",
+        }]},
+    }),
+)
+def search_bot_metadata_retained_reference():
+    """Actual HTTP/DI/ORM path preserves handoff addressing and deduplicates aliases."""
+
+
 @endpoint_test(
     method="POST",
     path="/openapi/v1/bots/metadata/queries",

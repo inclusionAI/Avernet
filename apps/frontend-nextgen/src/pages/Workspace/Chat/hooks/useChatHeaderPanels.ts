@@ -1,3 +1,5 @@
+import { createBotTaskHistoryReader } from '@/services/tasks/panel/taskPanelHistoryAdapter';
+import type { ChatBotView } from '@/services/workspace/botSessionService';
 /**
  * useChatHeaderPanels —— 对话页头部五图标域的开合编排（chat-header-panels）。
  *
@@ -45,6 +47,7 @@ export interface ChatHeaderFavoritesModel {
 
 export interface UseChatHeaderPanelsOptions {
   session: BotChatSessionView | null;
+  bot?: ChatBotView | null;
   /** 当前登录用户任务列表查询口径。 */
   userId: string | null;
   messages: ChatMessage[];
@@ -96,7 +99,10 @@ export function useChatHeaderPanels(options: UseChatHeaderPanelsOptions): UseCha
   const sessionId = session?.sessionId ?? null;
 
   const sidePaneEnabled = options.sidePaneEnabled !== false;
-  useSessionTaskPanelBootstrap({
+  const taskHistory = useMemo(() => options.bot && options.userId ? createBotTaskHistoryReader(options.bot, options.userId) : null, [options.bot, options.userId]);
+  const taskRecovery = useSessionTaskPanelBootstrap({
+    history: taskHistory,
+    kind: options.section === 'friend' ? 'friend' : 'bot',
     enabled: options.historyReady !== false,
     sessionId: sidePaneEnabled ? sessionId : null,
     userId: sidePaneEnabled ? options.userId : null,
@@ -165,12 +171,13 @@ export function useChatHeaderPanels(options: UseChatHeaderPanelsOptions): UseCha
 
   // 副屏判空：无内容也不可重建 Task tab 时才禁用 Monitor；已打开的 TaskPanel 必须保持可切。
   const sidePaneDisabled = useMemo(
-    () => !sidePaneEnabled || (!sidePaneOpen && !sessionHasSidePaneContent(messages) && !taskTab),
-    [messages, sidePaneEnabled, sidePaneOpen, taskTab],
+    () => !sidePaneEnabled || (!sidePaneOpen && !sessionHasSidePaneContent(messages) && !taskTab && !['incomplete', 'error'].includes(taskRecovery.status)),
+    [messages, sidePaneEnabled, sidePaneOpen, taskTab, taskRecovery.status],
   );
 
   const toggleSidePane = useCallback(() => {
     if (!sidePaneEnabled) return;
+    if (['incomplete', 'error'].includes(taskRecovery.status)) { void taskRecovery.continueRecovery(); return; }
     setSidePaneOpen((current) => {
       const next = !current;
       const panel = panelRef.current;
@@ -183,7 +190,7 @@ export function useChatHeaderPanels(options: UseChatHeaderPanelsOptions): UseCha
       // 立即弹回（「打开一瞬又关闭」）；重建成功即面板已展开，镜像同步为 true。
       return reopenSidePaneTabsFromMessages(messages, panel, taskTab);
     });
-  }, [panelRef, messages, sidePaneEnabled, taskTab]);
+  }, [panelRef, messages, sidePaneEnabled, taskTab, taskRecovery.status, taskRecovery.continueRecovery]);
 
   const favorites = useMemo<ChatHeaderFavoritesModel>(() => {
     const favorite = session?.favorite === true;

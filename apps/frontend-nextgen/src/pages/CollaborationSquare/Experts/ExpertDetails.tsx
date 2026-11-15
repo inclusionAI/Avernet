@@ -1,4 +1,4 @@
-import { sanitizeMarkdownHtml } from '@/assets/TaskPanel/sanitizeHtml';
+import { sanitizeMarkdownHtml } from '@/components/Common/RichContent';
 import CreateBotModal from '@/components/BotWorkshop/CreateBotModal';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';

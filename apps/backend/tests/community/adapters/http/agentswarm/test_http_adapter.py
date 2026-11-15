@@ -45,6 +45,13 @@ TENANT = "tenant-a"
 STAFF_ID = "staff-1"
 
 
+def _with_owner(run: dm.Run, owner_id: str) -> dm.Run:
+    """The same run, attributed to another account."""
+    import dataclasses
+
+    return dataclasses.replace(run, owner_id=owner_id)
+
+
 def _mk_run(status: dm.RunStatus = dm.RunStatus.COMPLETED) -> dm.Run:
     return dm.Run(
         run_id=dm.RunId("run-1"),
@@ -113,9 +120,11 @@ class StubAgentSwarmService:
         return self.run
 
     def list_runs(self, tenant: str, status: dm.RunStatus | None = None,
-                  *, page: int = 1, page_size: int = 20) -> dm.RunPage:
+                  *, page: int = 1, page_size: int = 20,
+                  owner_id: str | None = None) -> dm.RunPage:
         self.list_calls.append(
-            {"tenant": tenant, "status": status, "page": page, "page_size": page_size}
+            {"tenant": tenant, "status": status, "page": page,
+             "page_size": page_size, "owner_id": owner_id}
         )
         return dm.RunPage(items=(self.run,), total=1, page=page, page_size=page_size)
 
@@ -346,6 +355,42 @@ class TestCrossTenantIsolation:
         assert stub.submitted[-1].tenant == "tenant-b"
 
 
+class TestOwnershipIsolation:
+    """A tenant is a group, so runs must be scoped to their owner as well."""
+
+    def test_the_list_passes_the_caller_as_owner(self, client, stub):
+        client.get("/openapi/v1/agentswarm/runs", params={"tenant": TENANT})
+        assert stub.list_calls[-1]["owner_id"] == "staff-1", (
+            "a tenant-wide list would show one member another member's prompts"
+        )
+
+    def test_a_run_owned_by_someone_else_reads_as_missing(self, client, stub):
+        stub.run = _with_owner(stub.run, "someone-else")
+        assert client.get(
+            "/openapi/v1/agentswarm/runs/run-1", params={"tenant": TENANT}
+        ).status_code == 404
+
+    def test_a_run_owned_by_someone_else_cannot_be_cancelled(self, client, stub):
+        stub.run = _with_owner(stub.run, "someone-else")
+        assert client.post(
+            "/openapi/v1/agentswarm/runs/run-1/cancel", params={"tenant": TENANT}
+        ).status_code == 404
+        # The mutation is never attempted.
+        assert stub.cancelled == []
+
+    def test_the_callers_own_run_is_served(self, client, stub):
+        stub.run = _with_owner(stub.run, "staff-1")
+        assert client.get(
+            "/openapi/v1/agentswarm/runs/run-1", params={"tenant": TENANT}
+        ).status_code == 200
+
+    def test_a_run_predating_the_owner_column_stays_readable(self, client, stub):
+        stub.run = _with_owner(stub.run, "")
+        assert client.get(
+            "/openapi/v1/agentswarm/runs/run-1", params={"tenant": TENANT}
+        ).status_code == 200
+
+
 class TestSyncRunRoundTrip:
 
     def test_submit_sync_converts_dto_to_typed_request(self, client, stub):
@@ -402,6 +447,8 @@ class TestListRuns:
             "status": dm.RunStatus.COMPLETED,
             "page": 2,
             "page_size": 50,
+            # The caller, not the tenant, decides what the list contains.
+            "owner_id": "staff-1",
         }
         body = resp.json()
         assert body["total"] == 1
@@ -449,7 +496,9 @@ class TestCancel:
             "/openapi/v1/agentswarm/runs/run-1/cancel", params={"tenant": "tenant-b"}
         )
         assert resp.status_code == 404
-        assert stub.cancelled == [("run-1", "tenant-b")]
+        # Ownership is checked before the mutation is attempted, so a run the
+        # caller cannot see is never handed to the service at all.
+        assert stub.cancelled == []
 
 
 class TestSmokeRoutes:

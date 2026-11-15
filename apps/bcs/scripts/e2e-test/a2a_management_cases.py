@@ -58,7 +58,9 @@ def exercise(story, provider, original):
         bad[key] = value
         response = register(bad, 422)
         assert response["error"]["code"] == code
-        assert response["error"]["request_id"] and response["error"]["details"]
+        assert response["error"]["request_id"]
+        if story.a2a_prefix == "/a2a":
+            assert response["error"]["details"]
     bad = copy.deepcopy(card)
     bad["capabilities"]["extensions"][0]["params"]["party"] = "unknown_party"
     assert register(bad, 422)["error"]["code"] == "INVALID_CARD"

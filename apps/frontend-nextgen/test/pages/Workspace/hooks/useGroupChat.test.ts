@@ -247,7 +247,7 @@ it('手动切换群 session 时释放旧任务保活租约并清理副屏', asyn
   const store = useTaskConversationNavigationStore.getState();
   const navigationId = store.beginNavigation('task-old', '/workspace/collaboration', 's1');
   store.markRouteCommitted(navigationId);
-  useTaskSidePanelStore.getState().setActiveTask('task-old');
+  useTaskSidePanelStore.setState({ activeTaskId: 'task-old' });
 
   rerender({ current: { ...session, sessionId: 's2' } });
 

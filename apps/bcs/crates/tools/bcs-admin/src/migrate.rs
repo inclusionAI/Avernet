@@ -968,6 +968,10 @@ impl MigrationSelection {
 mod tests;
 
 #[cfg(test)]
+#[path = "migrate_regression_tests.rs"]
+mod regression_tests;
+
+#[cfg(test)]
 #[path = "migrate_fixed_loop_tests.rs"]
 mod fixed_loop_mysql_tests;
 

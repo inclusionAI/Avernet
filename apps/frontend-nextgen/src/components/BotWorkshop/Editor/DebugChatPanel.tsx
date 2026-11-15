@@ -209,7 +209,7 @@ export function DebugChatPanel({
         ) : null}
       </div>
       <div className="app-scrollbar min-h-0 flex-1 space-y-6 overflow-y-auto px-6 py-5">
-        {loading ? (
+        {loading || !identityId ? (
           <Spin tip="加载调试会话…" />
         ) : !session ? (
           <Empty compact title="暂无调试会话" description="新建会话后即可向当前 Bot 发送消息。" />
@@ -244,25 +244,27 @@ export function DebugChatPanel({
           </>
         )}
       </div>
-      <DebugChatInput
-        key={JSON.stringify([chatBot.realBotId, chatBot.ownerId, chatBot.engineOwnerId, identityId, chatBot.runtimeStage, session?.sessionId])}
-        bot={chatBot}
-        session={session}
-        userId={identityId}
-        isRequesting={debug.chat.isRequesting}
-        onClear={clearContext}
-        modelSelector={
-          <BotModelSelector
-            models={botModels.models}
-            activeModelId={botModels.activeModelId}
-            loading={botModels.isLoadingModels}
-            disabled={!session}
-            onSelect={(modelId) => void botModels.selectModel(modelId)}
-          />
-        }
-        onSend={debug.send}
-        onStop={debug.stop}
-      />
+      {session && identityId ? (
+        <DebugChatInput
+          key={JSON.stringify([chatBot.realBotId, chatBot.ownerId, chatBot.engineOwnerId, identityId, chatBot.runtimeStage, session?.sessionId])}
+          bot={chatBot}
+          session={session}
+          userId={identityId}
+          isRequesting={debug.chat.isRequesting}
+          onClear={clearContext}
+          modelSelector={
+            <BotModelSelector
+              models={botModels.models}
+              activeModelId={botModels.activeModelId}
+              loading={botModels.isLoadingModels}
+              disabled={!session}
+              onSelect={(modelId) => void botModels.selectModel(modelId)}
+            />
+          }
+          onSend={debug.send}
+          onStop={debug.stop}
+        />
+      ) : null}
     </aside>
   );
 }

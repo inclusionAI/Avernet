@@ -512,9 +512,9 @@ async def test_execute_upgrade_release_fallback_retires_only_on_device_not_found
     ("teclaw", "RELEASED", OnlineDeployDecision.FIRST_RELEASE),
     ("baas", "DESTROYING", OnlineDeployDecision.FIRST_RELEASE),
     ("teclaw", "DESTROYING", OnlineDeployDecision.FIRST_RELEASE),
-    # not-live-but-present → baas/ARCA rebuilds in place; teclaw must retire+recreate.
+    # FAILED retries reuse the candidate; STOPPED remains provider-dependent.
     ("baas", "FAILED", OnlineDeployDecision.UPGRADE),
-    ("teclaw", "FAILED", OnlineDeployDecision.RETIRE_THEN_FIRST_RELEASE),
+    ("teclaw", "FAILED", OnlineDeployDecision.UPGRADE),
     ("baas", "STOPPED", OnlineDeployDecision.UPGRADE),
     ("teclaw", "STOPPED", OnlineDeployDecision.RETIRE_THEN_FIRST_RELEASE),
     # STOPPING is a wait state (see test_decide_online_deploy_stopping_waits) —
@@ -1462,7 +1462,7 @@ async def test_restart_recreate_threads_config_artifact(in_place):
 
 @pytest.mark.asyncio
 async def test_restart_teclaw_not_live_target_retires_then_recreates():
-    # A teclaw online bot in STOPPED/FAILED can't be rebuilt by an UPDATE, so the
+    # A teclaw online bot in STOPPED can't be rebuilt by an UPDATE, so the
     # restart must retire it and recreate — never leaving it as an orphan.
     publish_service = Mock()
     publish_service.create_device_binding.return_value = 55

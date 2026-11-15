@@ -40,6 +40,7 @@ class TaskSearch:
     async def search(
         self, query: str, *, viewer_actor_type: SearchViewerType | None = None,
         viewer_actor_id: str | None = None,
+        visibility: str | None = None,
     ) -> Any:
         viewer = normalize_search_viewer(viewer_actor_type, viewer_actor_id)
         normalized = str(query or "").strip()
@@ -53,6 +54,7 @@ class TaskSearch:
             self._discover,
             normalized,
             user_id=self._user_id,
+            visibility=visibility,
             **viewer,
         )
 
@@ -71,6 +73,7 @@ class TaskSearch:
     async def search_catalog(
         self, query: str, *, viewer_actor_type: SearchViewerType | None = None,
         viewer_actor_id: str | None = None,
+        visibility: str | None = None,
     ) -> dict[str, Any]:
         """Return the public query-only candidate catalog with diagnostics."""
         viewer = normalize_search_viewer(viewer_actor_type, viewer_actor_id)
@@ -93,7 +96,7 @@ class TaskSearch:
                 (time.monotonic() - started_at) * 1000,
             )
             return self._response([], result=None)
-        result = await self.search(normalized, **viewer)
+        result = await self.search(normalized, visibility=visibility, **viewer)
         candidates = [
             self._project_candidate(item)
             for item in result.candidates

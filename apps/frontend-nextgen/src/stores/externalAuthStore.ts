@@ -32,6 +32,12 @@ export interface ExternalAuthState {
   setCheckingAuth: (loading: boolean) => void;
   setAuthenticated: (user: ExternalAuthUser) => void;
   setUnauthenticated: () => void;
+  /**
+   * 仅推进认证代次（不动 status/user 等 oauth 语义字段）。ace-gateway 重登恢复由观察者调用
+   * （ace-gateway-popup-reauth D5）：晚到的上一代认证请求的 401/ACE 拦截体在登记口按代次防线忽略，
+   * 复用与 oauth 侧同源的 `authEpoch` 计数。
+   */
+  bumpAuthEpoch: () => void;
   setAuthError: (message: string) => void;
   setLoginUrl: (url: string | null) => void;
   setLoadingLoginUrl: (loading: boolean) => void;
@@ -55,6 +61,7 @@ export const useExternalAuthStore = create<ExternalAuthState>((set) => ({
   setCheckingAuth: (isCheckingAuth) => set({ isCheckingAuth }),
   setAuthenticated: (user) => set((state) => ({ status: 'authenticated', user, error: null, isCheckingAuth: false, authEpoch: state.authEpoch + 1 })),
   setUnauthenticated: () => set({ status: 'unauthenticated', user: null, error: null, isCheckingAuth: false }),
+  bumpAuthEpoch: () => set((state) => ({ authEpoch: state.authEpoch + 1 })),
   setAuthError: (message) => set({ status: 'error', user: null, error: message, isCheckingAuth: false }),
   setLoginUrl: (loginUrl) => set({ loginUrl }),
   setLoadingLoginUrl: (isLoadingLoginUrl) => set({ isLoadingLoginUrl }),

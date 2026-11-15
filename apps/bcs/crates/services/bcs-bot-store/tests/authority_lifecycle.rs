@@ -54,6 +54,18 @@ async fn trusted_v1_tombstoned_bot_id_never_resurrects() {
 }
 
 #[tokio::test]
+async fn provider_reactivation_replaces_registration_and_authority() {
+    let fixture = lifecycle::new_sqlite_fixture().await;
+    lifecycle::provider_reactivation_replaces_registration_and_authority(&fixture).await;
+}
+
+#[tokio::test]
+async fn provider_reactivation_restores_legacy_binding_tombstone() {
+    let fixture = lifecycle::new_sqlite_fixture().await;
+    lifecycle::provider_reactivation_restores_legacy_binding_tombstone(&fixture).await;
+}
+
+#[tokio::test]
 async fn trusted_v1_registration_refuses_a_tombstoned_owner() {
     let fixture = lifecycle::new_sqlite_fixture().await;
     lifecycle::trusted_v1_registration_refuses_a_tombstoned_owner(&fixture).await;

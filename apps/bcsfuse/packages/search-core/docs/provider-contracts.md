@@ -108,7 +108,7 @@ and behavior are unchanged.
 - `CardRecord.preparation_key` carries the existing source-row error owner. Status
   exposes a source preparation error only when it belongs to the responding
   instance's index key; other generation failures are queried through build status.
-- HTTP Card writes accept only `card` and optional `resource_type`; reads return
+- HTTP Card writes accept `card`, `labels` and optional `resource_type`; reads return
   the complete merged business object and system revision. Optional internal
   operations settings are not accepted as an HTTP `search_config` field.
 - `CardRecord.prepared` is an optional host artifact-cache value, carried through
@@ -193,3 +193,34 @@ future slot, never catches up missed slots. A DRM period change takes effect
 without creating another worker. Late transactions behind a timestamp cursor
 are repaired by these checks; incremental polling alone is not a strict delivery
 latency guarantee. Tests: `test_card_incremental.py` and `test_catalog_startup.py`.
+
+
+### Optional document mapping contracts
+
+Hosts opt into `MappedCardManagement` and `MappedIndexBuildManagement` at HTTP
+composition. Ordinary services, request/response schemas and TC remain unchanged.
+`config.document_mapping.DocumentMapping` validates templates and paths; it has no
+business imports. The host projects its Card, retains its operational metadata,
+and uses the existing document publication/recovery path.
+
+`CardStore.upsert` optionally accepts `document_mapping` and `validate_mapping`.
+The sentinel means preserve; null/empty clears; nonempty replaces that config key.
+Other config keys must survive. The validator receives the complete merged
+snapshot and config on every CAS attempt and returns warnings; a failure must
+abort before writing. Saving Card/config is one transaction and one source
+revision. Mapping-only updates advance revision and modified time so existing
+change discovery sees them. Storage failures roll back both, and are never
+reported as success. The service retains responsibility for business validation.
+
+`IndexBuildConfig.document_mapping` is optional and immutable with its index key.
+Absent mapping is omitted from serialized configs for historical compatibility.
+Single-Card text overrides inherit unspecified templates; filter overrides may
+only replace globally declared keys. Old-generation readers ignore override keys
+not declared in that generation. They do not mutate saved overrides. The host
+must pass the selected mapping to incremental preparation and explicit rebuilds.
+Existing text/model/vector validity checks continue to control reuse.
+
+Conformance: `test_document_mapping.py` covers syntax/rendering;
+`test_card_management.py` covers atomic rollback and CAS retry. The Alipay suite
+covers host opt-in, pre-save validation, global build/selection, mapping clearing,
+operational metadata retention, Qdrant filtering and replica recovery.

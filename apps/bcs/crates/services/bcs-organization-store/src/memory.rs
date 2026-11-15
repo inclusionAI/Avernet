@@ -73,21 +73,36 @@ impl OrganizationRepoPort for MemoryOrganizationRepo {
         &self,
         input: UpdateOrganizationRecord,
     ) -> ServiceResult<Option<Organization>> {
-        let mut organizations = self.organizations.write().await;
-        let Some(organization) = organizations.get_mut(&(input.env, input.code)) else {
-            return Ok(None);
+        let key = (input.env.clone(), input.code.clone());
+        let disabled = input.disabled;
+        let updated = {
+            let mut organizations = self.organizations.write().await;
+            let Some(organization) = organizations.get_mut(&key) else {
+                return Ok(None);
+            };
+            if let Some(name) = input.name {
+                organization.name = name;
+            }
+            if let Some(description) = input.description {
+                organization.description = description;
+            }
+            if let Some(disabled) = disabled {
+                organization.disabled = disabled;
+            }
+            organization.updated_at = now_millis();
+            organization.clone()
         };
-        if let Some(name) = input.name {
-            organization.name = name;
+        if disabled == Some(true) {
+            let mut members = self.members.write().await;
+            let now = now_millis();
+            for member in members.values_mut().filter(|member| {
+                member.env == key.0 && member.organization_code == key.1
+            }) {
+                member.disabled = true;
+                member.updated_at = now;
+            }
         }
-        if let Some(description) = input.description {
-            organization.description = description;
-        }
-        if let Some(disabled) = input.disabled {
-            organization.disabled = disabled;
-        }
-        organization.updated_at = now_millis();
-        Ok(Some(organization.clone()))
+        Ok(Some(updated))
     }
 
     async fn list_organizations(
@@ -130,6 +145,17 @@ impl OrganizationRepoPort for MemoryOrganizationRepo {
         member.disabled = false;
         member.updated_at = now;
         Ok(member.clone())
+    }
+
+    async fn has_active_membership_by_bot(
+        &self,
+        env: &str,
+        bot_uuid: &str,
+    ) -> ServiceResult<bool> {
+        let members = self.members.read().await;
+        Ok(members.values().any(|member| {
+            member.env == env && member.bot_uuid == bot_uuid && !member.disabled
+        }))
     }
 
     async fn get_member(

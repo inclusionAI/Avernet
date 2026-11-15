@@ -245,16 +245,70 @@ def verify_caller_token_logs(root, story):
     }
     observed = {}
     for line in diagnostic_lines:
-        run = re.search(r'\brun_id=([^\s\x1b]+)', line)
-        quoted_match = re.search(r'\bcaller_token_json=("(?:[^"\\]|\\.)*")', line)
-        assert run and quoted_match, 'caller diagnostic missing correlation or JSON-quoted token'
-        value = json.loads(quoted_match[1])
-        # Console and file logging may both contain the same event.
-        assert run[1] not in observed or observed[run[1]] == value, 'conflicting caller diagnostic values'
-        observed[run[1]] = value
+        if line.startswith('{'):
+            record = json.loads(line)
+            run_id = record['run_id']
+            value = json.loads(record['caller_token_json'])
+        else:
+            run = re.search(r'\brun_id=([^\s\x1b]+)', line)
+            quoted_match = re.search(r'\bcaller_token_json=("(?:[^"\\]|\\.)*")', line)
+            assert run and quoted_match, 'caller diagnostic missing correlation or JSON-quoted token'
+            run_id = run[1]
+            value = json.loads(quoted_match[1])
+        # Console, text and JSON outputs may contain the same event.
+        assert run_id not in observed or observed[run_id] == value, 'conflicting caller diagnostic values'
+        observed[run_id] = value
     assert len(expected) == 3, 'expected two queued callers and one SSE caller'
     assert observed == expected, 'diagnostic tokens differ from the Provider wire values'
     print('Preproduction caller diagnostic matches actual Provider receipt: PASS', flush=True)
+
+
+def verify_business_logs(root, traces, streamed_run):
+    """Verify production formatters after the process drains its async writers."""
+    records = {str(record['span_id']): record for record in json.loads(traces.read_text())}
+
+    def unique_fields(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in ('e2e_trace_id', 'e2e_span_id'):
+                assert key not in result, f'duplicate correlation field: {key}'
+            result[key] = value
+        return result
+
+    rows = [json.loads(line, object_pairs_hook=unique_fields)
+            for line in (root / 'business.json.log').read_text().splitlines()]
+    text = (root / 'business.text.log').read_text().splitlines()
+    correlated = [row for row in rows if 'e2e_trace_id' in row]
+    assert correlated, 'selected business logs have no provider identity'
+    for row in rows:
+        assert ('e2e_trace_id' in row) == ('e2e_span_id' in row), 'partial identity pair'
+        if 'e2e_span_id' not in row:
+            continue
+        assert row.get('log_class') == 'business_key', 'unselected event enriched'
+        assert row['target'] != 'bcn_otel', 'OTel event enriched'
+        record = records[row['e2e_span_id']]
+        assert row['e2e_trace_id'] == record['trace_id'], 'log identity disagrees with network record'
+        if row.get('event_code') == 'http.request.response_ready':
+            assert record['kind'] == 'http_server'
+            assert record['outcome'] == f'Http({row["status"]})', 'log status disagrees with response'
+            assert isinstance(row['status'], int) and isinstance(row['duration_ms'], (int, float))
+            suffix = f'e2e_trace_id={row["e2e_trace_id"]} e2e_span_id={row["e2e_span_id"]}'
+            matching = [line for line in text if 'http.request.response_ready' in line
+                        and f'request_id={row["request_id"]} ' in line]
+            assert len(matching) == 1 and matching[0].endswith(suffix), 'text/JSON identities differ'
+    responses = [row for row in correlated if row.get('event_code') == 'http.request.response_ready']
+    assert {200, 401, 422} <= {row['status'] for row in responses}, 'success/auth/validation logs not covered'
+    starts = [row for row in rows if row.get('message') == 'http.request.started']
+    assert starts and all('e2e_trace_id' not in row for row in starts), 'ordinary request logs enriched'
+    health = [row for row in rows if row.get('event_code') == 'http.request.response_ready'
+              and row.get('route') == '/health']
+    assert health and all('e2e_trace_id' not in row for row in health), 'excluded health scope enriched'
+    closes = [row for row in rows if row.get('event_code') == 'sse.closed'
+              and row.get('run_id') == streamed_run]
+    assert len(closes) == 1, 'expected exactly one streaming close summary'
+    assert closes[0]['reason'] == 'terminal' and closes[0]['saw_terminal'] is True
+    assert closes[0]['frames'] == 1, 'diagnostics changed delivered SSE frames'
+    print(f'Live business log correlation: {len(correlated)} selected events; text/JSON, excluded scopes and SSE verified', flush=True)
 
 
 def run_story(binary, environment):
@@ -275,6 +329,13 @@ def run_story(binary, environment):
             'security': {'outbound_url': {'block_private_networks': True, 'allow_loopback': True}},
             'llm': {'type': 'none'}, 'bcsfuse': {'enabled': False}})
         config['logging'].update(default_level='debug', console=True)
+        # Both production formatters see the same real request events. Keep
+        # outputs inside this process fixture; no formatter/core calls in tests.
+        config['logging']['outputs'].extend([
+            {'name': f'business-{fmt}', 'path': str(root), 'file': f'business.{fmt}.log',
+             'level': 'debug', 'format': fmt, 'targets': ['*']}
+            for fmt in ('text', 'json')
+        ])
         config['secret'] = {'provider': 'env', 'providers': {'env': {'prefix': 'BCS_SECRET_'}}}
         config['bots_base_dir'] = str(root / 'bots')
         config['session_files']['backend'] = {'data_dir': str(root / 'files')}
@@ -316,6 +377,8 @@ def run_story(binary, environment):
                 process.wait(timeout=30)
                 assert process.returncode == 0, 'traced BCS did not shut down cleanly'
                 verify_network_traces(traces, provider)
+                verify_business_logs(root, traces, story.streamed_run)
+                traced_lines = len((root / 'business.json.log').read_text().splitlines())
                 process = subprocess.Popen([binary, '-c', str(config_path)], cwd=root, env=env, stdout=log, stderr=log)
                 for _ in range(150):
                     if process.poll() is not None:
@@ -342,6 +405,11 @@ def run_story(binary, environment):
                 process.send_signal(signal.SIGTERM)
                 process.wait(timeout=30)
                 provider.shutdown()
+            restarted = [json.loads(line) for line in
+                         (root / 'business.json.log').read_text().splitlines()[traced_lines:]]
+            assert any(row.get('log_class') == 'business_key' for row in restarted)
+            assert all('e2e_trace_id' not in row and 'e2e_span_id' not in row for row in restarted), \
+                'provider-free restart fabricated or retained a log identity'
             # Read-only inspection: no test writes to the queue or canonical stores.
             with sqlite3.connect(f'file:{root / "bcs.db"}?mode=ro', uri=True) as db:
                 durable = '\n'.join(db.iterdump())

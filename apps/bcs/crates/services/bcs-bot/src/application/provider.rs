@@ -414,7 +414,7 @@ impl ProviderManagementService for ProviderManagement {
             .provider_bot_core
             .get_provider_bot_binding_by_ref(&command.provider_id, &identity.provider_bot_ref)
             .await?
-            .is_some();
+            .is_some_and(|binding| !binding.disabled);
         let (binding, bot_runtime_token) = self
             .provider_bot_core
             .register_provider_bot_with_initial_managers(

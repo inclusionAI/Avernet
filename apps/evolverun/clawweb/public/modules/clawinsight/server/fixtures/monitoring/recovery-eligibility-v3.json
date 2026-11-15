@@ -1,0 +1,87 @@
+{
+  "policy_version": "recovery-eligibility/v3",
+  "alert_policy_version": "diagnosis-actions/v1",
+  "cases": [
+    {
+      "id": "A00",
+      "success": false,
+      "completed": null,
+      "correction": null,
+      "code": null,
+      "decision": "UNRESOLVED",
+      "recovery": false
+    },
+    {
+      "id": "A01",
+      "success": true,
+      "completed": true,
+      "correction": false,
+      "code": null,
+      "decision": "PASS",
+      "recovery": false
+    },
+    {
+      "id": "A02",
+      "success": true,
+      "completed": true,
+      "correction": false,
+      "code": "TC.MCP.NETWORK",
+      "decision": "PASS",
+      "recovery": true
+    },
+    {
+      "id": "A03",
+      "success": true,
+      "completed": true,
+      "correction": true,
+      "code": null,
+      "decision": "PASS",
+      "recovery": false
+    },
+    {
+      "id": "A04",
+      "success": true,
+      "completed": true,
+      "correction": true,
+      "code": "TC.MCP.NETWORK",
+      "decision": "PASS",
+      "recovery": true
+    },
+    {
+      "id": "A05",
+      "success": true,
+      "completed": false,
+      "correction": false,
+      "code": null,
+      "decision": "PASS",
+      "recovery": true
+    },
+    {
+      "id": "A06",
+      "success": true,
+      "completed": false,
+      "correction": false,
+      "code": "TC.MCP.NETWORK",
+      "decision": "ALERT",
+      "recovery": true
+    },
+    {
+      "id": "A07",
+      "success": true,
+      "completed": false,
+      "correction": true,
+      "code": null,
+      "decision": "PASS",
+      "recovery": true
+    },
+    {
+      "id": "A08",
+      "success": true,
+      "completed": false,
+      "correction": true,
+      "code": "TC.MCP.NETWORK",
+      "decision": "ALERT",
+      "recovery": true
+    }
+  ]
+}

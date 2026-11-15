@@ -8,16 +8,21 @@ import { useCallback, useEffect, useState } from 'react';
 
 const ACTIVE_TASK_STATUSES = new Set(['INIT', 'RUNNING', 'PENDING']);
 
-export function useServiceBotEval(botId?: string, botVersion?: string, ownerId?: string) {
+export function useServiceBotEval(
+  botId?: string,
+  botVersion?: string,
+  ownerId?: string,
+  enabled = true,
+) {
   const [detail, setDetail] = useState<Record<string, unknown>>({});
   const [history, setHistory] = useState<ServiceBotEvalHistoryDto | undefined>();
   const [submission, setSubmission] = useState<ServiceBotEvalSubmissionDto | undefined>();
-  const [loading, setLoading] = useState(Boolean(botId && botVersion));
+  const [loading, setLoading] = useState(Boolean(botId && botVersion && enabled));
   const [submitting, setSubmitting] = useState(false);
   const [actionError, setActionError] = useState<string>();
 
   const load = useCallback(async () => {
-    if (!botId || !botVersion) {
+    if (!botId || !botVersion || !enabled) {
       setLoading(false);
       return;
     }
@@ -35,7 +40,7 @@ export function useServiceBotEval(botId?: string, botVersion?: string, ownerId?:
     } finally {
       setLoading(false);
     }
-  }, [botId, botVersion, ownerId]);
+  }, [botId, botVersion, ownerId, enabled]);
 
   useEffect(() => {
     void load();
@@ -43,7 +48,7 @@ export function useServiceBotEval(botId?: string, botVersion?: string, ownerId?:
 
   const submit = useCallback(
     async (sampleFiles: File[], reportFiles: File[], triggerSource: ServiceBotEvalTriggerSource) => {
-      if (!botId || !botVersion) return;
+      if (!botId || !botVersion || !enabled) return;
       setSubmitting(true);
       try {
         const result = await serviceBotEvalService.submit(
@@ -64,18 +69,18 @@ export function useServiceBotEval(botId?: string, botVersion?: string, ownerId?:
         setSubmitting(false);
       }
     },
-    [botId, botVersion, ownerId],
+    [botId, botVersion, ownerId, enabled],
   );
 
   const refreshSubmission = useCallback(async (submissionId: string) => {
-    if (!botId) return;
+    if (!botId || !enabled) return;
     try {
       const result = await serviceBotEvalService.submission(botId, submissionId, ownerId);
       setSubmission(result);
     } catch (error) {
       setActionError(error instanceof Error ? error.message : '评测状态刷新失败');
     }
-  }, [botId, ownerId]);
+  }, [botId, ownerId, enabled]);
 
   useEffect(() => {
     if (!submission?.submission_id || !ACTIVE_TASK_STATUSES.has(submission.task_status)) return;
@@ -87,14 +92,14 @@ export function useServiceBotEval(botId?: string, botVersion?: string, ownerId?:
   }, [refreshSubmission, submission]);
 
   const sync = useCallback(async () => {
-    if (!botId || !botVersion) return;
+    if (!botId || !botVersion || !enabled) return;
     try {
       await serviceBotEvalService.sync(botId, botVersion, ownerId);
       await load();
     } catch (error) {
       setActionError(error instanceof Error ? error.message : '认证状态同步失败');
     }
-  }, [botId, botVersion, ownerId, load]);
+  }, [botId, botVersion, ownerId, enabled, load]);
 
   return {
     detail,

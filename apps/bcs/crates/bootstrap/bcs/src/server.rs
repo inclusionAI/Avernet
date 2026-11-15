@@ -187,6 +187,8 @@ mod server_construct;
 mod server_infrastructure;
 mod server_run;
 mod state;
+#[cfg(test)]
+mod state_default_tests;
 mod use_case_wiring;
 mod wiring_common;
 mod ws_dispatch;
@@ -306,7 +308,7 @@ mod tests {
                 provider_repos.provider_bindings.clone(),
             ).with_bot_provider_repo(provider_repos.bot_providers.clone()));
         let (_provider_core, _provider_bot_core, provider_management) =
-            build_provider_services_with_webhook_url_guard(
+            build_provider_services_with_webhook_url_guard_and_organization(
                 false,
                 &provider_repos,
                 bot_registry,
@@ -316,6 +318,7 @@ mod tests {
                 provider_control_plane.clone(),
                 cleanup.clone(),
                 Arc::new(NoopBotCatalogCleanupPort),
+                None,
             );
 
         let registered = provider_management

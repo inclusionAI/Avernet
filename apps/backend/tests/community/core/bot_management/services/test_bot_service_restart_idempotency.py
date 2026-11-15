@@ -803,6 +803,7 @@ class TestRestartGuardOrchestration:
             env="dev",
             user_id="user001",
             bot_type=bot_type,
+            engine_bucket=active_engine,
         )
 
     @pytest.mark.parametrize(

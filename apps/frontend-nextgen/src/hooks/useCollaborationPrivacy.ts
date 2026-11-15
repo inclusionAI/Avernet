@@ -137,6 +137,21 @@ export function useCollaborationPrivacy({
     // 打开弹窗/编辑器时恢复在途申请状态（spec「通用配置行在途状态」）
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [riskEnabled, riskBotId, userId]);
+  // 检测进入审批（APPROVING）边沿静默刷新一次协作数据：审批工单（puid + approval_url）
+  // 已由后端写入 BCS friend_ext，刷新让 RelationCard 的 pending 分支以审批外链接管
+  // 「查看审批进度」入口（risk 轮询只更新检测记录，不更新 friend_ext 视图）。
+  const riskApprovingRef = useRef(false);
+  useEffect(() => {
+    if (risk.uiState.kind !== 'approving') {
+      riskApprovingRef.current = false;
+      return;
+    }
+    if (riskApprovingRef.current) return;
+    riskApprovingRef.current = true;
+    void load(undefined, { silent: true });
+    // 仅在进入 approving 的边沿触发一次；重复触发无额外收益（load 引用随身份/范围重建）
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [risk.uiState.kind]);
   const submitPublication = useCallback(
     async (config: PublicConfig, deptEntries?: Array<{ deptNo: string; deptName: string }>) => {
       if (!publicationEditor) return;

@@ -23,30 +23,22 @@ const createActions = () => ({
 });
 
 describe('ConversationSessionRow 平齐化与热区分级（dmore 1:1）', () => {
-  it.each([false, true])(
-    '无树形 rail、有固定 13px 会话占位、无条数列，文字 13px 平齐排版（selected=%s）',
-    (selected) => {
-      const { container } = render(
-        <ConversationSessionRow session={session} selected={selected} onSelect={jest.fn()} />,
-      );
-      const row = container.firstElementChild as HTMLElement;
-      // 平齐化裁决（B1 tasks 6.1 + 本批 spec）：不出现树形竖线/折线指示元素。
-      expect(row.querySelector('[data-session-tree-rail]')).toBeNull();
-      expect(row.querySelector('[data-session-tree-elbow]')).toBeNull();
-      // 2026-11-06 状态桥视觉：所有 Bot 共用一个固定 14px 左侧槽位，
-      // 默认占位是弱化的 13px 对话图标，不改变标题起点或引入折线 rail。
-      const placeholder = container.querySelector('svg.lucide-message-square');
-      expect(placeholder).toBeInTheDocument();
-      expect(placeholder).toHaveClass('size-[13px]', 'text-content-icon');
-      // 稿二级行右余部无「N 条」列。
-      expect(screen.queryByText('21 条')).not.toBeInTheDocument();
-      // 文字 13px/18px；未选中与一级名称同色,选中点亮 #09090B(2026-11-02 稿=text-foreground)但不加黑加粗。
-      const title = screen.getByText('对话会话');
-      expect(title).toHaveClass('text-[13px]', 'leading-[18px]');
-      expect(title).toHaveClass('font-normal');
-      expect(title).toHaveClass(selected ? 'text-foreground' : 'text-content-strong');
-    },
-  );
+  it.each([false, true])('无树形 rail、无默认状态图标、无条数列，文字 13px 平齐排版（selected=%s）', (selected) => {
+    const { container } = render(<ConversationSessionRow session={session} selected={selected} onSelect={jest.fn()} />);
+    const row = container.firstElementChild as HTMLElement;
+    // 平齐化裁决（B1 tasks 6.1 + 本批 spec）：不出现树形竖线/折线指示元素。
+    expect(row.querySelector('[data-session-tree-rail]')).toBeNull();
+    expect(row.querySelector('[data-session-tree-elbow]')).toBeNull();
+    // 无有效状态时不展示兜底对话图标；标题仍由会话行固定缩进保持对齐。
+    expect(container.querySelector('svg.lucide-message-square')).toBeNull();
+    // 稿二级行右余部无「N 条」列。
+    expect(screen.queryByText('21 条')).not.toBeInTheDocument();
+    // 文字 13px/18px；未选中与一级名称同色,选中点亮 #09090B(2026-11-02 稿=text-foreground)但不加黑加粗。
+    const title = screen.getByText('对话会话');
+    expect(title).toHaveClass('text-[13px]', 'leading-[18px]');
+    expect(title).toHaveClass('font-normal');
+    expect(title).toHaveClass(selected ? 'text-foreground' : 'text-content-strong');
+  });
 
   it('标题对齐一级名称：固定头像槽后起排；非收藏行右缘内缩，收藏行右缘到边', () => {
     const { container, rerender } = render(

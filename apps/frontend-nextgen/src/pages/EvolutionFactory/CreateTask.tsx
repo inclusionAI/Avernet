@@ -10,6 +10,8 @@ import {
   validateDiagnosisSource,
 } from '@/domain/evolution/createTask';
 import { completedDiagnosis, isTaskType, labelOf, taskTypes } from '@/domain/evolution/types';
+import { Points } from '@/tracking/points';
+import { Tracert } from '@/utils/tracert';
 import { history, useLocation } from '@umijs/max';
 import { ArrowLeft } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -19,8 +21,6 @@ import { EvolutionSettings } from './EvolutionSettings';
 import PackForm from './PackForm';
 import { Choice, ErrorBox, Field, useResource } from './shared';
 import { useEvolutionContext } from './useEvolutionContext';
-import { Points } from '@/tracking/points';
-import { Tracert } from '@/utils/tracert';
 
 function CreateTaskContent() {
   const rawType = new URLSearchParams(useLocation().search).get('type') ?? '';
@@ -175,21 +175,13 @@ function CreateTaskContent() {
     </Field>
   );
   return (
-    <main className="h-full overflow-y-auto bg-background p-4 sm:p-6 lg:px-10">
-      <form onSubmit={submit} className="w-full min-w-0 space-y-4">
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <Button
-            variant="ghost"
-            style={{ height: 'auto', whiteSpace: 'normal' }}
-            type="button"
-            onClick={() => history.push('/evolution-factory')}
-          >
-            返回任务列表
-          </Button>
-          <span>/</span>
-          <span>创建{labelOf(type)}</span>
-        </div>
-        <header className="flex items-start gap-3 pb-2">
+    <main className="h-full overflow-y-auto bg-background">
+      <form onSubmit={submit} className="flex min-h-full w-full min-w-0 flex-col">
+        <header
+          className={`sticky top-0 z-10 flex min-h-[74px] shrink-0 items-center gap-2 bg-background px-5 py-4 ${
+            type === 'diagnose' ? '' : 'border-b border-divider'
+          }`}
+        >
           <Button
             type="button"
             variant="ghost"
@@ -199,53 +191,61 @@ function CreateTaskContent() {
           >
             <ArrowLeft size={18} />
           </Button>
-          <div>
-            <h1 className="text-[22px] font-semibold">创建{labelOf(type)}</h1>
-            <p className="mt-2 text-sm text-muted-foreground">
+          <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
+            <h1 className="m-0 text-2xl font-medium leading-[34px] text-foreground">创建{labelOf(type)}</h1>
+            <p className="m-0 text-xs leading-[18px] text-muted-foreground">
               {taskTypes.find((item) => item.type === type)?.description}
             </p>
           </div>
         </header>
-        <ErrorBox message={error} />
-        <ErrorBox message={models.error} retry={models.reload} />
-        {!models.loading && !models.error && !models.data?.defaultModel && (
-          <ErrorBox message="服务未配置默认模型，请联系管理员检查模型配置。" />
-        )}
-        <CreateTaskTarget
-          draft={draft}
-          set={set}
-          setDraft={setDraft}
-          bots={bots}
-          botPage={botPage}
-          setBotPage={setBotPage}
-        />
-        {type === 'diagnose' && (
-          <DiagnosisSettings
+        <div
+          className={`mx-auto w-full max-w-[1040px] flex-1 px-5 pb-6 ${
+            type === 'diagnose'
+              ? 'space-y-8 pt-0 [&_section>h2]:leading-6 [&_label>span:first-child]:leading-[22px]'
+              : 'space-y-[39px] pt-0.5'
+          }`}
+        >
+          <ErrorBox message={error} />
+          <ErrorBox message={models.error} retry={models.reload} />
+          {!models.loading && !models.error && !models.data?.defaultModel && (
+            <ErrorBox message="服务未配置默认模型，请联系管理员检查模型配置。" />
+          )}
+          <CreateTaskTarget
             draft={draft}
             set={set}
             setDraft={setDraft}
-            rangeDays={rangeDays}
-            setRangeDays={setRangeDays}
-            modelField={modelField}
+            bots={bots}
+            botPage={botPage}
+            setBotPage={setBotPage}
           />
-        )}
-        <EvolutionSettings
-          type={type}
-          draft={draft}
-          set={set}
-          domains={domains}
-          diagnoses={diagnoses}
-          sources={sources}
-          sourcePage={sourcePage}
-          setSourcePage={setSourcePage}
-          modelField={modelField}
-          domainField={domainField}
-          roundsField={roundsField}
-        />
-        <p className="rounded-lg border border-warning/30 bg-warning/5 p-3 text-xs leading-relaxed text-muted-foreground">
-          运行前维护：沿用现有行为，清理历史进化会话并重启目标 Bot 的 OpenClaw Gateway，可能影响正在运行的会话和任务。
-        </p>
-        <footer className="sticky bottom-0 flex justify-center gap-3 border-t border-divider bg-background py-4">
+          {type === 'diagnose' && (
+            <DiagnosisSettings
+              draft={draft}
+              set={set}
+              setDraft={setDraft}
+              rangeDays={rangeDays}
+              setRangeDays={setRangeDays}
+              modelField={modelField}
+            />
+          )}
+          <EvolutionSettings
+            type={type}
+            draft={draft}
+            set={set}
+            domains={domains}
+            diagnoses={diagnoses}
+            sources={sources}
+            sourcePage={sourcePage}
+            setSourcePage={setSourcePage}
+            modelField={modelField}
+            domainField={domainField}
+            roundsField={roundsField}
+          />
+          <p className="rounded-lg border border-warning/30 bg-warning/5 p-3 text-xs leading-relaxed text-muted-foreground">
+            运行前维护：沿用现有行为，清理历史进化会话并重启目标 Bot 的 OpenClaw Gateway，可能影响正在运行的会话和任务。
+          </p>
+        </div>
+        <footer className="sticky bottom-0 z-10 flex h-[72px] shrink-0 items-center justify-center gap-3 border-t border-divider bg-background px-5">
           <Button type="button" variant="outline" disabled={busy} onClick={() => history.push('/evolution-factory')}>
             取消
           </Button>

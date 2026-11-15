@@ -68,52 +68,27 @@ pub(super) fn db_provider_repos(
 }
 
 #[cfg(any(test, feature = "test-utils"))]
-pub(super) fn memory_organization_services(
-    provider_repos: &ProviderRepoBundle,
-    provider_core: Arc<dyn ProviderCoreService>,
-    bot_registry: Arc<dyn BotRegistryCoreService>,
-) -> (
-    Arc<dyn OrganizationCoreService>,
-    Arc<dyn OrganizationManagementService>,
-) {
-    let organization_repo: Arc<dyn OrganizationRepoPort> = Arc::new(MemoryOrganizationRepo::new());
-    build_organization_services(
-        organization_repo,
-        provider_repos,
-        provider_core,
-        bot_registry,
-    )
+pub(super) fn memory_organization_repo() -> Arc<dyn OrganizationRepoPort> {
+    Arc::new(MemoryOrganizationRepo::new())
 }
 
-pub(super) fn db_organization_services(
+pub(super) fn db_organization_repo(
     db_plugin: Arc<dyn bcs_db_api::DbPlugin>,
     db_kind: &DbPluginKind,
-    provider_repos: &ProviderRepoBundle,
-    provider_core: Arc<dyn ProviderCoreService>,
-    bot_registry: Arc<dyn BotRegistryCoreService>,
-) -> (
-    Arc<dyn OrganizationCoreService>,
-    Arc<dyn OrganizationManagementService>,
-) {
-    let organization_repo: Arc<dyn OrganizationRepoPort> = match db_kind {
-        DbPluginKind::LocalSqlite => Arc::new(DbOrganizationStore::sqlite(db_plugin.clone())),
-        DbPluginKind::Mysql => Arc::new(DbOrganizationStore::mysql(db_plugin.clone())),
+) -> Arc<dyn OrganizationRepoPort> {
+    match db_kind {
+        DbPluginKind::LocalSqlite => Arc::new(DbOrganizationStore::sqlite(db_plugin)),
+        DbPluginKind::Mysql => Arc::new(DbOrganizationStore::mysql(db_plugin)),
         DbPluginKind::External(provider) => {
             panic!(
                 "external database plugin '{}' has no organization store wiring",
                 provider
             )
         }
-    };
-    build_organization_services(
-        organization_repo,
-        provider_repos,
-        provider_core,
-        bot_registry,
-    )
+    }
 }
 
-fn build_organization_services(
+pub(super) fn build_organization_services(
     organization_repo: Arc<dyn OrganizationRepoPort>,
     provider_repos: &ProviderRepoBundle,
     provider_core: Arc<dyn ProviderCoreService>,
@@ -136,7 +111,7 @@ fn build_organization_services(
     (organization_core, organization_management)
 }
 
-pub(super) fn build_provider_services_with_webhook_url_guard(
+pub(super) fn build_provider_services_with_webhook_url_guard_and_organization(
     a2a_allow_anonymous:bool,
     repos: &ProviderRepoBundle,
     registry: Arc<dyn BotRegistryCoreService>,
@@ -146,18 +121,24 @@ pub(super) fn build_provider_services_with_webhook_url_guard(
     control_plane: Arc<dyn BotControlPlaneCoreService>,
     channel_binding_cleanup: Arc<dyn ChannelBindingCleanupPort>,
     bot_catalog_cleanup: Arc<dyn BotCatalogCleanupPort>,
+    organization_repo: Option<Arc<dyn OrganizationRepoPort>>,
 ) -> (
     Arc<dyn ProviderCoreService>,
     Arc<dyn ProviderBotCoreService>,
     Arc<dyn ProviderManagementService>,
 ) {
-    let provider_core_impl = Arc::new(ProviderCore::new_with_webhook_url_guard(
+    let provider_core_impl = ProviderCore::new_with_webhook_url_guard(
         repos.provider_repo.clone(),
         repos.provider_credentials.clone(),
         repos.provider_bindings.clone(),
         registry.clone(),
         webhook_url_guard,
-    ).with_bot_provider_repo(repos.bot_providers.clone()).with_a2a_anonymous(a2a_allow_anonymous));
+    ).with_bot_provider_repo(repos.bot_providers.clone()).with_a2a_anonymous(a2a_allow_anonymous);
+    let provider_core_impl = match organization_repo {
+        Some(repo) => provider_core_impl.with_organization_repo(repo),
+        None => provider_core_impl,
+    };
+    let provider_core_impl = Arc::new(provider_core_impl);
     let provider_core: Arc<dyn ProviderCoreService> = provider_core_impl.clone();
     let provider_bot_core: Arc<dyn ProviderBotCoreService> = provider_core_impl;
     let mut provider_management = ProviderManagement::new(

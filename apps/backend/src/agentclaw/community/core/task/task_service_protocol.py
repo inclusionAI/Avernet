@@ -110,6 +110,7 @@ class TaskServiceProtocol(Protocol):
         self, *, query: str, task_id: str, node_id: str, relay_token: str,
         viewer_actor_type: SearchViewerType | None = None,
         viewer_actor_id: str | None = None,
+        visibility: str | None = None,
     ) -> list[BotCandidate]: ...
 
     def attach_bbs_node(

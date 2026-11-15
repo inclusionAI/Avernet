@@ -66,6 +66,7 @@ sys.exit(int(os.environ.get('BUILD_RC','0')))
 set -eu
 test "$1" = --run-only
 test -f "$CASE_ROOT/build.json"
+test "$BCS_E2E_DIAGNOSTICS_DIR" = "$CASE_ROOT/reports/grpc-binding"
 touch "$CASE_ROOT/{name}-started"
 if [[ "${{HOLD:-0}}" == 1 ]]; then
   sleep 300 &
@@ -98,14 +99,15 @@ def command(root):
 
 
 @pytest.mark.parametrize('caller_rc,oauth_rc', [('0', '0'), ('17', '0'), ('0', '19')])
-def test_builds_both_bins_once_then_overlaps_and_joins_all_runs(companion_repo, caller_rc, oauth_rc):
+def test_builds_companion_bins_once_then_overlaps_and_joins_all_runs(companion_repo, caller_rc, oauth_rc):
     root, env = companion_repo
     result = subprocess.run(command(root), env={**env, 'CALLER_RC': caller_rc, 'OAUTH_RC': oauth_rc},
                             capture_output=True, text=True, timeout=15)
     assert result.returncode == (int(caller_rc) or int(oauth_rc)), result.stderr
     build = json.loads((root / 'build.json').read_text())
     assert build['args'] == ['build', '-p', 'bcs', '--features', 'test-utils',
-                             '--bin', 'bcs-caller-e2e', '--bin', 'bcs-oauth-e2e']
+                             '--bin', 'bcs-caller-e2e', '--bin', 'bcs-oauth-e2e',
+                             '--bin', 'bcs-a2a-grpc-peer']
     assert build['flags'] == '-Cinstrument-coverage -Clink-dead-code'
     assert build['target'].endswith('target/cov-e2e/llvm-cov-target')
     assert (root / 'caller-finished').exists() and (root / 'oauth-finished').exists()
@@ -156,30 +158,52 @@ def test_run_only_wrappers_use_prebuilt_bins_without_touching_shared_evidence(tm
     binary = runtime / f'debug/bcs-{name}-e2e'
     binary.write_text('#!/bin/sh\nexit 0\n')
     binary.chmod(0o755)
+    if name == 'caller':
+        grpc_peer = runtime / 'debug/bcs-a2a-grpc-peer'
+        grpc_peer.write_text('#!/bin/sh\nexit 0\n')
+        grpc_peer.chmod(0o755)
     shared = runtime / 'bcs-shared.profraw'
     shared.write_text('shared')
-    names = (['caller_execution_story.py', 'task_cache_story.py', 'custom_binding_story.py']
+    names = (['caller_execution_story.py', 'task_cache_story.py', 'custom_binding_story.py', 'custom_binding_story.py']
              if name == 'caller' else ['oauth/story.py'])
     events = tmp_path / 'events'
     for story in names:
         (scripts / 'e2e-test' / story).write_text(
-            'import os\nfrom pathlib import Path\n'
+            'import os, sys\nfrom pathlib import Path\n'
             'with Path(os.environ["EVENTS"]).open("a") as f: f.write(Path(__file__).name+"\\n")\n'
             'assert "%m-%p.profraw" in os.environ["LLVM_PROFILE_FILE"]\n'
+            'if "--grpc-peer-binary" in sys.argv:\n'
+            '    path = Path(sys.argv[sys.argv.index("--diagnostics-dir") + 1])\n'
+            '    path.mkdir(parents=True, exist_ok=True)\n'
+            '    (path / "peer-state.json").write_text("{}")\n'
         )
     tools = tmp_path / 'tools'
     tools.mkdir()
     cargo = tools / 'cargo'
     cargo.write_text('#!/bin/sh\nexit 99\n')
     cargo.chmod(0o755)
-    env = {**os.environ, 'EVENTS': str(events), 'PATH': str(tools) + ':' + os.environ['PATH']}
+    diagnostics = tmp_path / 'reports/grpc-binding'
+    env = {**os.environ, 'EVENTS': str(events), 'PATH': str(tools) + ':' + os.environ['PATH'],
+           'BCS_E2E_DIAGNOSTICS_DIR': str(diagnostics)}
     result = subprocess.run(['bash', str(scripts / f'{name}_e2e_coverage.sh'), '--run-only'],
                             env=env, capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
     assert events.read_text().splitlines() == [Path(n).name for n in names]
     assert shared.read_text() == 'shared'
+    if name == 'caller':
+        assert (diagnostics / 'peer-state.json').is_file()
+        grpc_peer.unlink()
+        events.unlink()
+        missing_peer = subprocess.run(['bash', str(scripts / 'caller_e2e_coverage.sh'), '--run-only'],
+                                      env=env, capture_output=True, text=True)
+        assert missing_peer.returncode != 0
+        assert 'bcs-a2a-grpc-peer' in missing_peer.stderr
+        assert not events.exists()
+        grpc_peer.write_text('#!/bin/sh\nexit 0\n')
+        grpc_peer.chmod(0o755)
+    else:
+        events.unlink()
     binary.unlink()
-    events.unlink()
     result = subprocess.run(['bash', str(scripts / f'{name}_e2e_coverage.sh'), '--run-only'],
                             env=env, capture_output=True, text=True)
     assert result.returncode != 0

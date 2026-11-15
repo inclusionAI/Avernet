@@ -810,6 +810,7 @@ async def test_staging_runs_when_actor_holds_lock(deps, monkeypatch):
 
     assert result["action"] == "publish_staging"
     assert result["operation_status"] == "pending"
+    assert deps.eval_gate.precheck.call_args.args[0].bot_id == "bot-1"
 
 
 @pytest.mark.asyncio

@@ -2,12 +2,14 @@
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { ACTION_POLICY_VERSION, deriveAlert, eligibleForRecovery, recoverySkipReason, type Tags } from '../action-policy.js';
+import { ACTION_POLICY_VERSION, RECOVERY_POLICY_VERSION, deriveAlert, eligibleForRecovery, recoverySkipReason, type Tags } from '../action-policy.js';
 import { TC_CODES, TAXONOMY_VERSION } from '../tc-catalog.js';
 import { DIAGNOSIS_V4_VERSION, DIAGNOSIS_VERSION } from '../contracts.js';
 import { parseDiagnosis } from '../validation.js';
 const bytes = readFileSync('server/fixtures/monitoring/action-policy-v1.json');
 const fixture = JSON.parse(bytes.toString());
+const recoveryBytes = readFileSync('server/fixtures/monitoring/recovery-eligibility-v3.json');
+const recoveryFixture = JSON.parse(recoveryBytes.toString());
 const base = JSON.parse(readFileSync('server/fixtures/monitoring/alert.json', 'utf8'));
 function wire(c: {success: boolean; completed: boolean | null; correction: boolean | null; code: string | null; decision: string}) {
   return { ...base, schemaVersion: DIAGNOSIS_V4_VERSION, runtimeIdentity: null,
@@ -22,13 +24,11 @@ it('pins the cross-repository fixture and all 67 codes', () => {
   expect([...TC_CODES].sort()).toEqual(fixture.codes);
 });
 describe.each(fixture.cases)('$id', c => {
-  it('derives both Actions and validates the complete wire', () => {
+  it('preserves alert decisions and validates the complete wire', () => {
     const tags: Tags | null = c.success ? {completed: c.completed, correction: c.correction, code: c.code} : null;
     expect(deriveAlert(tags)).toBe(c.decision);
-    expect(eligibleForRecovery(tags)).toBe(c.recovery);
     const event = parseDiagnosis(wire(c), base.eventId);
     expect(event.tcFaultLabel).toBe(c.code);
-    expect(recoverySkipReason(event) === null).toBe(c.recovery);
   });
 });
 it.each([
@@ -50,4 +50,19 @@ it('retains v2 rejection of PASS with a code, without reinterpreting legacy ALER
   const legacy = parseDiagnosis({...base, handlerName: 'COMPLETED'}, base.eventId);
   expect(legacy.decision).toBe('ALERT');
   expect(recoverySkipReason(legacy)).toBe('legacy_policy');
+});
+
+// Recovery has evolved independently; the v1 alert fixture remains frozen.
+it('pins the producer recovery v3 fixture', () => {
+  expect(createHash('sha256').update(recoveryBytes).digest('hex')).toBe('e42022bf10f37df2c4c6ad66c169c908f25e06cf230d36c7db023af9dc15f75b');
+  expect(recoveryFixture.policy_version).toBe(RECOVERY_POLICY_VERSION);
+  expect(recoveryFixture.alert_policy_version).toBe(ACTION_POLICY_VERSION);
+});
+describe.each(recoveryFixture.cases)('recovery v3 $id', c => {
+  it('keeps alert decisions unchanged while applying independent recovery eligibility', () => {
+    const tags: Tags | null = c.success ? {completed: c.completed, correction: c.correction, code: c.code} : null;
+    expect(deriveAlert(tags)).toBe(c.decision);
+    expect(eligibleForRecovery(tags)).toBe(c.recovery);
+    expect(recoverySkipReason(parseDiagnosis(wire(c), base.eventId)) === null).toBe(c.recovery);
+  });
 });

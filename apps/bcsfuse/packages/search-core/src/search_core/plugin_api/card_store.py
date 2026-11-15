@@ -4,10 +4,10 @@ Writes commit before returning; failed persistence must raise. Implementations
 own internal conflict retries. Callers do not supply revisions.
 """
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from typing import Any, Protocol
 
-from search_core.api.cards import CardRecord
+from search_core.api.cards import UNSET_MAPPING, CardRecord, UnsetMapping
 
 
 class CardStore(Protocol):
@@ -20,6 +20,8 @@ class CardStore(Protocol):
         search_config: dict[str, Any],
         *,
         labels: dict[str, list[str]] | None = None,
+        document_mapping: dict | None | UnsetMapping = UNSET_MAPPING,
+        validate_mapping: Callable | None = None,
     ) -> CardRecord: ...
     def remove(self, agent_id: str) -> None: ...
 

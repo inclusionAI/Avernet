@@ -1,10 +1,11 @@
 import { Button } from '@/components/ui/Button';
 import { Modal, ModalContent, ModalHeader, ModalTitle } from '@/components/ui/Modal';
 import { formatTime, type Step, type Task } from '@/domain/evolution/types';
-import { FileText } from 'lucide-react';
+import { ChartNoAxesCombined, FileText, GitCompare } from 'lucide-react';
+import { object, present } from './OutputPrimitives';
 import { stepName } from './presentation';
 import { Section } from './shared';
-import { outputHighlights, StepOutput } from './StepOutput';
+import { StepOutput } from './StepOutput';
 
 export function TaskArtifacts({
   task,
@@ -31,48 +32,56 @@ export function TaskArtifacts({
 }) {
   return (
     <Section title="产出物">
-      <p className="mb-4 text-xs leading-relaxed text-muted-foreground">
-        按执行步骤归档，查看诊断结论、目标规划和每轮优化结果。
-      </p>
       <div className="grid gap-3 md:grid-cols-3">
         {task.steps
           ?.filter((item) => item.output)
-          .map((item) => (
-            <Button
-              variant="ghost"
-              style={{ height: 'auto', whiteSpace: 'normal' }}
-              key={item.stepId}
-              type="button"
-              aria-label={`查看产出物 · ${stepName(item.stepType)} · ${item.stepId}`}
-              aria-pressed={selected === item.stepId}
-              className={`flex min-w-0 flex-col items-start rounded-xl border p-4 text-left transition-colors hover:border-primary hover:bg-primary/[0.02] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
-                selected === item.stepId ? 'border-primary/50 bg-primary/[0.03]' : 'border-border bg-card'
-              }`}
-              onClick={() => {
-                onSelect(item.stepId);
-              }}
-            >
-              <span className="mb-3 flex h-9 w-9 items-center justify-center rounded-lg bg-primary/5 text-primary">
-                <FileText size={18} />
-              </span>
-              <strong className="text-sm">
-                {stepName(item.stepType)}
-                {item.roundNo !== null && item.roundNo !== undefined ? ` · 第 ${item.roundNo} 轮` : ''}
-              </strong>
-              <p className="mt-2 text-xs leading-relaxed text-muted-foreground">{item.summary || '查看实际产出'}</p>
-              <div className="mb-4 mt-3 flex flex-wrap gap-1.5">
-                {outputHighlights(item.output!).map((label) => (
-                  <span key={label} className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
-                    {label}
+          .map((item) => {
+            const output = item.output!;
+            const changes = present(object(output.diff));
+            const comparison = present(object(output.scoreComparison));
+            const title = changes
+              ? '变更集'
+              : comparison
+              ? '跑分对比'
+              : present(object(output.diagnosis))
+              ? '诊断报告'
+              : typeof output.benchRunId === 'string' && output.benchRunId
+              ? '评测结果'
+              : stepName(item.stepType);
+            const Icon = changes ? GitCompare : comparison ? ChartNoAxesCombined : FileText;
+            return (
+              <Button
+                variant="ghost"
+                style={{ height: 'auto', whiteSpace: 'normal' }}
+                key={item.stepId}
+                type="button"
+                aria-label={`查看产出物 · ${stepName(item.stepType)} · ${item.stepId}`}
+                aria-pressed={selected === item.stepId}
+                className={`flex min-h-[100px] min-w-0 items-start justify-start gap-3 rounded-lg border p-4 text-left transition-colors hover:border-primary hover:bg-primary/5 ${
+                  selected === item.stepId ? 'border-primary/50 bg-primary/5' : 'border-border bg-card'
+                }`}
+                onClick={() => {
+                  onSelect(item.stepId);
+                }}
+              >
+                <span className="flex size-5 shrink-0 items-center justify-center text-primary">
+                  <Icon aria-hidden="true" size={20} />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <strong className="block text-[13px] font-medium">{title}</strong>
+                  <span className="mt-1 block line-clamp-2 text-xs font-normal leading-[18px] text-muted-foreground">
+                    {item.summary || '查看实际产出'}
                   </span>
-                ))}
-              </div>
-              <div className="mt-auto flex w-full items-center justify-between gap-2 border-t border-divider pt-3">
-                <span className="text-xs text-muted-foreground">{formatTime(item.completedAt)}</span>
-                <span className="text-xs font-medium text-primary">查看详情 →</span>
-              </div>
-            </Button>
-          ))}
+                  <span className="mt-2 block truncate text-[11px] font-normal text-muted-foreground">
+                    {stepName(item.stepType)}
+                    {item.roundNo !== null && item.roundNo !== undefined ? ` · 第 ${item.roundNo} 轮` : ''}
+                    {' · '}
+                    {formatTime(item.completedAt)}
+                  </span>
+                </span>
+              </Button>
+            );
+          })}
       </div>
       {!task.steps?.some((item) => item.output) && <p className="text-sm text-muted-foreground">暂无已生成的产出物</p>}
       <Modal open={outputOpen && Boolean(step?.output)} onOpenChange={setOutputOpen}>

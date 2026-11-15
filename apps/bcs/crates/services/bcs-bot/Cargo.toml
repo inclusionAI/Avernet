@@ -8,6 +8,7 @@ rust-version = { workspace = true }
 version = { workspace = true }
 
 [dependencies]
+bcs-tracing-api.workspace = true
 bcs-a2a-binding-api.workspace = true
 bcs-observability = { workspace = true }
 # Async runtime

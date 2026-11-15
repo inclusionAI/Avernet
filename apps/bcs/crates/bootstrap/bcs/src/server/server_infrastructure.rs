@@ -151,8 +151,9 @@ impl BcsServer {
                 provider_repos.provider_bindings.clone(),
             ).with_bot_provider_repo(provider_repos.bot_providers.clone()).with_catalog_changes(card_changes.clone().map(|queue| queue as Arc<dyn bcs_service_api::port::CatalogChangePort>)));
         let channel_binding_cleanup = Arc::new(DeferredChannelBindingCleanupPort::default());
+        let organization_repo = db_organization_repo(db_plugin.clone(), &db_kind);
         let (provider_core, provider_bot_core, provider_management) =
-            build_provider_services_with_webhook_url_guard(
+            build_provider_services_with_webhook_url_guard_and_organization(
                 config.a2a_allow_anonymous,
                 &provider_repos,
                 bot_registry.clone(),
@@ -162,14 +163,14 @@ impl BcsServer {
                 provider_control_plane.clone(),
                 channel_binding_cleanup.clone(),
                 build_bot_catalog_cleanup(&config, card_changes.as_ref()),
+                Some(organization_repo.clone()),
             );
         let (a2a_bot_management, a2a_card_queries) = super::a2a_wiring::build_card_management(
             db_plugin.clone(), db_flavor, provider_repos.bot_providers.clone(),
             provider_core.clone(), bot_registry.clone(), bot_repo.clone(), outbound_url_guard.clone(), config.a2a_grpc.as_ref(),
         )?;
-        let (organization_core, organization_management) = db_organization_services(
-            db_plugin.clone(),
-            &db_kind,
+        let (organization_core, organization_management) = build_organization_services(
+            organization_repo,
             &provider_repos,
             provider_core.clone(),
             bot_registry.clone(),

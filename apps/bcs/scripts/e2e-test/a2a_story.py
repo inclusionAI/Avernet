@@ -262,12 +262,27 @@ def visible_text(value):
 
 
 class A2aStory(Story):
-    def __init__(self, base, owner, peer, a2a_prefix="/a2a"):
+    def __init__(self, base, owner, peer, a2a_prefix="/a2a", *, cancel_via_workbench=False):
         super().__init__(base, owner)
         self.a2a_prefix = a2a_prefix
         self.peer = peer
         self.original_policy = None
         self.policy_revision = None
+        self.cancel_via_workbench = cancel_via_workbench
+
+    def request(self, method, path, body=None, **kwargs):
+        value = super().request(method, path, body, **kwargs)
+        if path.startswith("/api/v1/collaboration/a2a/"):
+            assert set(value) == {"code", "message", "data", "request_id"}
+            expected = kwargs.get("status", 200)
+            assert value["code"] == expected * 100
+            assert value["request_id"]
+            if expected >= 400:
+                assert "error_code" in value["data"]
+                # Existing rejection cases compare machine codes on both protocols.
+                return {"error": {"code": value["data"]["error_code"], "request_id": value["request_id"]}}
+            return value["data"]
+        return value
 
     def run(self):
         self.request("POST", "/me/ensure-human")
@@ -354,8 +369,11 @@ class A2aStory(Story):
         self.policy_revision = applied["version"]
         group = self.group(bot_id, [bot_id, "human_" + self.owner])
         session = self.request("POST", "/groups/" + group + "/sessions", {}, status=201)["session_id"]
+        # The gRPC journey exercises explicit public cancellation and all five
+        # RPCs. HTTP journeys retain the invalid-replacement cleanup regression.
+        second_cancel = "wait" if self.cancel_via_workbench else "replacement"
         for sequence, mode in enumerate(["stream", "stream", "message", "recover", "tools", "wait",
-                                         "stream", "replacement", "stream"], start=1):
+                                         "stream", second_cancel, "stream"], start=1):
             before = self.history(session)
             before_ids = {message["id"] for message in before}
             with self.peer.lock:
@@ -391,7 +409,7 @@ class A2aStory(Story):
                         break
                     time.sleep(0.05)
                 else:
-                    raise AssertionError("Exact remote Task was not canceled: " + mode)
+                    raise AssertionError(f"Exact remote Task was not canceled: mode={mode}, task_id={task_id}")
                 # The next real chat.send verifies that confirmed cleanup frees the queue slot.
                 continue
             expected = "A2A-ANSWER-" + str(sequence)
@@ -464,13 +482,13 @@ class A2aStory(Story):
             "expected_version": policy["version"], "policy": updated})
         self.policy_revision = applied["version"]
         token = registration["bot_runtime_token"]
-        path = self.a2a_prefix + "/providers/" + provider_name + "/bots/" + quote(reference, safe="") + "/chat-async"
+        path = "/a2a/providers/" + provider_name + "/bots/" + quote(reference, safe="") + "/chat-async"
         for sequence, mode in [(17, "poll_task"), (18, "poll_wait")]:
             with self.peer.lock:
                 self.peer.mode = mode
             accepted = self.request("POST", path, {"message": "A2A question " + str(sequence)}, token=token, status=202)
             assert accepted["provider_bot_ref"] == reference and "bot_uuid" not in accepted
-            run_path = self.a2a_prefix + "/chat/runs/" + accepted["run_id"]
+            run_path = "/a2a/chat/runs/" + accepted["run_id"]
             deadline = time.monotonic() + 20
             while time.monotonic() < deadline:
                 result = self.request("GET", run_path + "?wait_ms=500", token=token)

@@ -1,4 +1,5 @@
 use super::*;
+use bcs_service_api::port::repo::CompleteSessionWithEvent;
 use bcs_service_api::SessionStatus;
 use serde_json::json;
 
@@ -150,4 +151,122 @@ async fn completion_cas_handles_activation_races_and_returns_its_own_snapshot() 
             _ => unreachable!(),
         }
     }
+}
+
+struct EventfulCompletionRaceDb {
+    inner: Arc<dyn DbPlugin>,
+    finish_before_transaction: AtomicBool,
+    fail_transaction: AtomicBool,
+}
+
+#[async_trait]
+impl DbPlugin for EventfulCompletionRaceDb {
+    async fn query(&self, statement: DbStatement) -> DbResult<Vec<DbRow>> {
+        self.inner.query(statement).await
+    }
+
+    async fn execute(&self, statement: DbStatement) -> DbResult<DbExecuteResult> {
+        self.inner.execute(statement).await
+    }
+
+    async fn transaction(
+        &self,
+        steps: Vec<DbTransactionStep>,
+    ) -> DbResult<Vec<DbTransactionStepResult>> {
+        if self.fail_transaction.swap(false, Ordering::SeqCst) {
+            return Err(DbError::Backend(
+                "forced eventful completion transaction failure".into(),
+            ));
+        }
+        if self.finish_before_transaction.swap(false, Ordering::SeqCst) {
+            self.inner
+                .execute(DbStatement::with_params(
+                    "UPDATE bcs_group_sessions SET status = 'completed' WHERE env = ?",
+                    vec![DbValue::from("dev")],
+                ))
+                .await?;
+        }
+        self.inner.transaction(steps).await
+    }
+
+    async fn health_check(&self) -> DbResult<DbHealth> {
+        self.inner.health_check().await
+    }
+}
+
+fn completion_event(session: &bcs_service_api::Session) -> AppendEventRecord {
+    AppendEventRecord {
+        event: NewEvent {
+            event_id: format!("completed-{}", session.id),
+            event_type: "session.completed".into(),
+            schema_version: EVENT_SCHEMA_VERSION_V1.into(),
+            producer: "session-completion-recovery-test".into(),
+            producer_key: session.id.clone(),
+            occurred_at: "2026-11-12T00:00:00.000Z".into(),
+            subject: EventSubject {
+                subject_type: "session".into(),
+                id: session.id.clone(),
+            },
+            scope: EventScope {
+                group_id: Some(session.group_id.clone()),
+                session_id: Some(session.id.clone()),
+                ..EventScope::default()
+            },
+            stream_key: format!("session:{}", session.id),
+            actor: None,
+            correlation_id: None,
+            causation_event_id: None,
+            trace_id: None,
+            data: BTreeMap::new(),
+        },
+        recorded_at: "2026-11-12T00:00:00.001Z".into(),
+        retention_until_ms: 2_000_000_000_000,
+        env: "dev".into(),
+    }
+}
+
+#[tokio::test]
+async fn eventful_completion_returns_none_when_another_writer_finishes_first() {
+    let db = Arc::new(EventfulCompletionRaceDb {
+        inner: sqlite_db().await,
+        finish_before_transaction: AtomicBool::new(false),
+        fail_transaction: AtomicBool::new(false),
+    });
+    let repo = MySqlSessionStore::sqlite(db.clone(), "dev".into());
+    let session = repo.create("eventful-race", NewSessionParams::default()).await.unwrap();
+    db.finish_before_transaction.store(true, Ordering::SeqCst);
+
+    let result = repo.complete_if_running_with_event(CompleteSessionWithEvent {
+        session_id: session.id.clone(),
+        expected_activation_count: session.activation_count,
+        output: Some(json!("late result")),
+        error: None,
+        event: completion_event(&session),
+    }).await.unwrap();
+
+    assert!(result.is_none());
+    assert_eq!(repo.get(&session.id).await.unwrap().status, SessionStatus::Completed);
+}
+
+#[tokio::test]
+async fn eventful_completion_does_not_hide_other_transaction_failures() {
+    let db = Arc::new(EventfulCompletionRaceDb {
+        inner: sqlite_db().await,
+        finish_before_transaction: AtomicBool::new(false),
+        fail_transaction: AtomicBool::new(false),
+    });
+    let repo = MySqlSessionStore::sqlite(db.clone(), "dev".into());
+    let session = repo.create("eventful-failure", NewSessionParams::default()).await.unwrap();
+    db.fail_transaction.store(true, Ordering::SeqCst);
+
+    let error = repo.complete_if_running_with_event(CompleteSessionWithEvent {
+        session_id: session.id.clone(),
+        expected_activation_count: session.activation_count,
+        output: None,
+        error: None,
+        event: completion_event(&session),
+    }).await.unwrap_err();
+
+    assert!(error.to_string().contains("forced eventful completion transaction failure"));
+    assert_eq!(repo.get(&session.id).await.unwrap().status, SessionStatus::Running);
 }

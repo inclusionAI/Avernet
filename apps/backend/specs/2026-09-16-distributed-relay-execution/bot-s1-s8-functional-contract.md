@@ -1483,7 +1483,7 @@ local_acceptance_result: AcceptanceResult = AcceptanceResult(
 ### 14.1 EXECUTION_RESULT
 
 - Backend 以内部 `(task_id, node_id, attempt, EXECUTION_RESULT)` 识别当前尝试唯一的执行结果；同一尝试重复请求不重复写节点事实，同键不同内容返回冲突。
-- 接纳 `exec_error` 时记录该 attempt 失败并停止 S5，不能把错误 patch 当成已完成业务事实。只有新的执行代次重投才轮换 `relay_token`；`active + 无进展` 先等待引擎自身 timeout/终态，不直接进入 harness 续跑。进入恢复态后的 same-session 续跑不推进 attempt、不轮换 token；预算耗尽则进入 HUNG/待干预，不无限重试。
+- 接纳 `exec_error` 时记录该 attempt 失败并停止 S5，不能把错误 patch 当成已完成业务事实。只有新的执行代次重投才轮换 `relay_token`；`active + 无进展` 达到 stale-active 观察预算后进入同会话续跑。进入恢复态后的 same-session 续跑不推进 attempt、不轮换 token；预算耗尽则进入 HUNG/待干预，不无限重试。
 - S1 只投影当前 attempt 已接纳的执行 patch；旧失败 attempt 保留为审计轨迹，旧绑定的迟到 context/report/dispatch 不得推进当前节点。成功尝试接纳后才允许该节点唯一的 `PLAN_RESULT`。
 - `relay_token` 由 Backend 首派前签发，仅新的执行代次重投时轮换；same-session harness 续跑不轮换。Bot 只原样携带；`event_id` 由 Bot 调用层生成并在同一事件重试时复用。两者不是身份凭证。Relay 上报核心定位字段不携带 attempt 或图谱版本；`TaskContext.attempt` 是 S1 暴露的当前节点权威尝试号，仅用于对齐 `artifacts[].attempt`。
 
@@ -1502,7 +1502,7 @@ local_acceptance_result: AcceptanceResult = AcceptanceResult(
 
 ### 14.4 harness 恢复
 
-Runtime liveness 采用引擎状态作为事实源：`active + 有进展` 与 `active + 无进展` 都不直接恢复。`active + 无进展` 仅累计观察指标，并等待引擎自身 timeout/终态；只有转换成 `terminal_failed` / `timeout` / `aborted`、`terminal_success` 但图谱未收到报告，或连续 `unknown/unresponsive` 时才进入 same-session recovery。同一节点最多 2 次送达成功的 same-session resume；预算耗尽后显式置 `HUNG`。
+Runtime liveness 采用引擎状态作为事实源：`active + 有进展` 不恢复。`active + 无进展` 连续达到 Harness 观察预算（默认 15 个巡检周期，按部署巡检间隔约 30 分钟）时，视为 Turn 断裂的 stale-active，进入 same-session recovery；未达到预算前仅累计观察指标。`terminal_failed` / `timeout` / `aborted`、`terminal_success` 但图谱未收到报告，或连续 `unknown/unresponsive` 也进入 same-session recovery。同一节点最多 2 次送达成功的 same-session resume；预算耗尽后显式置 `HUNG`。
 
 `terminal_success_unreported` 的三个观察窗分别是 360 秒、600 秒、900 秒。该窗口从服务首次观察到 `terminal_success` 后开始计时；任何离开 `terminal_success` 的后续观察都会清空该计时基准，任务此前处于 active 等状态的时长不得消耗本窗口。`probe_unavailable` 不消耗 resume 预算，也不把部署或接口故障误判为 Bot 失活。
 

@@ -6,13 +6,13 @@ import { Modal, ModalContent, ModalHeader, ModalTitle } from '@/components/ui/Mo
 import { Pagination } from '@/components/ui/Pagination';
 import { Textarea } from '@/components/ui/Textarea';
 import type { Domain } from '@/domain/evolution/types';
+import { Points } from '@/tracking/points';
+import { Tracert } from '@/utils/tracert';
 import { history } from '@umijs/max';
 import { Plus, Search } from 'lucide-react';
 import { useCallback, useMemo, useState } from 'react';
 import { ErrorBox, Field, Hint, ListSkeleton, PlaceholderPanel, TablePanel, useResource } from './shared';
 import { useEvolutionContext } from './useEvolutionContext';
-import { Points } from '@/tracking/points';
-import { Tracert } from '@/utils/tracert';
 
 const linkClass = 'h-7 rounded-md px-1.5 text-[13px] font-normal text-primary hover:bg-primary/10 hover:text-primary';
 
@@ -98,11 +98,7 @@ export default function DomainList() {
         id: 'count',
         header: '模板数量',
         width: COLUMN_WIDTHS[3],
-        cell: (d) => (
-          <span className="inline-flex items-center rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
-            {d.templateCount} 个模板
-          </span>
-        ),
+        cell: (d) => <span className="text-[13px] text-foreground">{d.templateCount}</span>,
       },
       {
         id: 'description',
@@ -144,12 +140,15 @@ export default function DomainList() {
       <ErrorBox message={identity.error ?? domains.error} retry={domains.reload} />
       {/* 筛选行：搜索 + 右侧新建，与 Bot 管理工具行同 idiom。 */}
       <div className="mb-4 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-3">
-        <div className="relative w-full sm:w-[260px] sm:shrink-0">
-          <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+        <div className="relative w-full sm:w-[300px] sm:shrink-0">
+          <Search
+            size={14}
+            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+          />
           <Input
             aria-label="搜索 Domain"
             placeholder="搜索名称、Domain ID 或工号"
-            className="pl-9"
+            className="h-8 pl-9 text-[13px]"
             value={search}
             onChange={(e) => {
               setSearch(e.target.value);
@@ -159,7 +158,7 @@ export default function DomainList() {
         </div>
         <Button
           type="button"
-          className="ml-auto"
+          className="ml-auto sm:absolute sm:right-0 sm:top-0"
           leftIcon={<Plus size={14} />}
           onClick={() => {
             setError('');
@@ -181,12 +180,19 @@ export default function DomainList() {
               columns={columns}
               rows={items.slice((page - 1) * 10, page * 10)}
               getRowKey={(d) => `${d.ownerUserId}/${d.domainId}`}
-              rowHeight="h-18"
+              rowHeight="h-14"
               ariaLabel="Domain 列表"
               minWidth="min-w-[1000px]"
             />
           </TablePanel>
-          <Pagination current={page} pageSize={10} total={items.length} onChange={setPage} layout="between" className="mt-4" />
+          <Pagination
+            current={page}
+            pageSize={10}
+            total={items.length}
+            onChange={setPage}
+            layout="between"
+            className="mt-4"
+          />
         </>
       ) : (
         domains.data && (
@@ -204,7 +210,7 @@ export default function DomainList() {
           if (!busy) setOpen(v);
         }}
       >
-        <ModalContent className="max-w-[560px]" aria-describedby={undefined}>
+        <ModalContent className="max-w-[480px] gap-4 p-5" aria-describedby={undefined}>
           <ModalHeader>
             <ModalTitle className="text-base">新建 Domain</ModalTitle>
           </ModalHeader>

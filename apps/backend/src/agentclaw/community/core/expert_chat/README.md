@@ -81,3 +81,26 @@ collaborator membership. The Bot must exist in the tenant, and the Caller must
 already have an instance with a nonempty bot UUID. No administrator privilege or
 first-time provisioning is granted. User-authenticated endpoints retain their
 existing access policies.
+
+### Teclaw service chat runtime
+
+Teclaw service Bots, including Caller-identity Bots, create and use sessions on
+an existing successful online publication binding. Engine strategy capability
+`requires_caller_chat_instance` disables independent Caller runtime provisioning
+for Teclaw; other engines retain their existing allocation and polling behavior.
+Authorization precedes runtime selection. Backend-owned session indexes remain
+scoped to the session user, while adapter session creation and subsequent
+connection preparation use the same published runtime. No draft fallback or new
+container is introduced by creating a session.
+
+
+### Caller credential expiry ledger
+
+`AcExpertChatInstance.caller_token_expires_at` is nullable UTC time for the token
+successfully installed on the current dedicated Caller runtime. It is independent
+of ASC authorization expiry and session expiry. A new/replaced runtime starts with
+NULL, and progress-only writes preserve it. The repository's `caller_token_update`
+scope serializes the decision, outbound install and expiry write for one addressed
+instance; an equal/later installed expiry means skip installation. Initial schema
+creation includes the field; existing MySQL/OceanBase deployments apply
+[the additive migration](sql/2026_11_13_caller_token_expiry.sql) first.

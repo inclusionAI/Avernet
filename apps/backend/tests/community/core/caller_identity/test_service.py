@@ -1421,3 +1421,21 @@ def test_direct_caller_exchange_validates_and_preserves_original_session_context
     assert runtime_updater.update_caller_identity.call_args.kwargs["session_key"] == session_key
     assert runtime_updater.update_caller_identity.call_args.kwargs["binding_id"] == 19
     assert runtime_updater.update_caller_identity.call_args.kwargs["caller_token"] is caller_token
+
+
+@pytest.mark.parametrize(("engine", "call_type", "bot_type", "expected"), [
+    ("teclaw", "caller", "service", True),
+    ("openclaw", "caller", "service", False),
+    ("teclaw", "owner", "service", False),
+    ("teclaw", "caller", "personal", False),
+])
+def test_iam_context_shared_capability_uses_trusted_service_caller_metadata(
+    engine, call_type, bot_type, expected,
+):
+    bot = _bot(call_type=call_type)
+    bot.update(active_engine=engine, bot_type=bot_type)
+    service, _ = _service(bot=bot)
+    context = service.get_iam_token_context(
+        bot_id="bot-1", entity_id="entity-1", stage=CallerIdentityStage.ONLINE,
+    )
+    assert context.shared_teclaw_runtime is expected

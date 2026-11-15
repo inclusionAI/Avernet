@@ -4,6 +4,7 @@ Start with [Session Delete](session-delete.md) when applicable. Start with the s
 
 | Symptom | First evidence to distinguish | Existing guidance |
 | --- | --- | --- |
+| Unit-test CI fails at child startup or coverage gates | Inspect the executable path, JUnit failures and the three separate coverage-gate verdicts. | [Unit-test CI](unit-test-ci.md) |
 | Session deletion fails or differs across clients | Compare the caller and request with the protocol compatibility and conformance sections. | [Reference](../session-delete-protocol.md) |
 | Authentication or principal mismatch | Determine the authentication path and compare its inputs with the applicable contract; inspect the gateway principal contract for gateway calls. | [Reference](../../api-contracts/v1/authentication/contract.md) |
 | Service or provider selection is unclear | Trace the adapter, service API and selected provider through the documented crate boundaries and tests. | [Reference](../../README.md) |

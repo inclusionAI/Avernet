@@ -1,3 +1,4 @@
+import { migrations as currentMigrations } from '../schema.js';
 import Database from 'better-sqlite3';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
@@ -8,6 +9,8 @@ import { flowRunMarkersDdl, flowRunMarkersMigrations } from '../schema-flow-run-
 import { workflowSnapshotMigrations } from '../schema-workflow-snapshot.js';
 import { ordinaryRunRequestMigrations } from '../schema-ordinary-run-request.js';
 
+const latestSchemaVersion = Math.max(...currentMigrations.map(m => m.version));
+
 const migration = flowRunMarkersMigrations[0];
 const upgrade = (db: IDatabase) => migration.migrate!(db);
 
@@ -15,8 +18,8 @@ it('appends a unique version beyond every assembled historical migration, includ
   const all = [...migrations, ...workflowSnapshotMigrations, ...ordinaryRunRequestMigrations];
   expect(all.filter(m => m.version === migration.version)).toEqual([migration]);
   expect(migration.version).toBe(152);
-  expect(Math.max(...all.filter(m => m !== migration).map(m => m.version))).toBe(151);
-  expect(migrations.at(-1)).toBe(migration);
+  expect(Math.max(...all.filter(m => m.version < migration.version).map(m => m.version))).toBe(151);
+  expect(migrations.filter(m => m.version <= migration.version).at(-1)).toBe(migration);
   expect(migration.selfHealing).toBeUndefined();
 });
 
@@ -79,7 +82,7 @@ it('runs through the real migration ledger and does not repeat a completed upgra
   const raw = new Database(':memory:'); const db = new SqliteDatabase(raw);
   try {
     await runMigrations(db, 'sqlite');
-    expect(raw.prepare('SELECT MAX(version) AS v FROM schema_version').get()).toEqual({ v: 152 });
+    expect(raw.prepare('SELECT MAX(version) AS v FROM schema_version').get()).toEqual({ v: latestSchemaVersion });
     raw.exec("INSERT INTO flow_runs (flow_id,workflow_id,status,started_at,env,tag) VALUES ('nullable','workflow','running',1,NULL,NULL)");
     await runMigrations(db, 'sqlite');
     expect(raw.prepare('SELECT COUNT(*) AS n FROM schema_version WHERE version=152').get()).toEqual({ n: 1 });

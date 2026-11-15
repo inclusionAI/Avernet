@@ -108,6 +108,7 @@ export function StandardConversationStageContainer({
 
   // 头部五图标域编排（chat-header-panels）：收藏会话/会话管理/历史消息/资源管理/副屏。
   const headerPanels = useChatHeaderPanels({
+    bot,
     historyReady: botChat.historyReady,
     session: interactiveModel.selectedSession,
     userId,

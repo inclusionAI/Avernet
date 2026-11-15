@@ -202,7 +202,9 @@ def world():
 def _config() -> AgentSwarmConfig:
     orch = AgentSwarmOrchestrationConfig(
         max_turns=10,
-        slice_max_seconds=5.0,
+        setup_timeout=20.0,
+        per_attempt_timeout=5.0,
+        slice_max_seconds=30.0,
         slice_interval=0.0,
         orchestrator_turn_interval=0.01,
         agent_max_attempts=1,
@@ -217,6 +219,10 @@ def _config() -> AgentSwarmConfig:
 
 def _build_swarm(db, platform):
     cfg = _config()
+    setup_ceiling = (
+        cfg.orchestration.slice_max_seconds
+        - cfg.orchestration.per_attempt_timeout
+    )
     repos = {
         "run": RunRepository(db), "agent": AgentRepository(db),
         "message": MessageRepository(db), "result": AgentResultRepository(db),
@@ -234,10 +240,17 @@ def _build_swarm(db, platform):
         config=cfg,
     )
     runtime = SubagentRuntime(
-        factory=DefaultSubagentFactory(llm=llm, platform=platform),
+        factory=DefaultSubagentFactory(
+            llm=llm,
+            platform=platform,
+            setup_timeout=cfg.orchestration.setup_timeout,
+            setup_ceiling=setup_ceiling,
+        ),
         max_width=cfg.orchestration.max_width,
         max_attempts=cfg.orchestration.agent_max_attempts,
         per_task_timeout=cfg.orchestration.per_attempt_timeout,
+        setup_timeout=cfg.orchestration.setup_timeout,
+        setup_ceiling=setup_ceiling,
         artifact_inline_threshold=cfg.artifact_inline_threshold,
     )
     handler = SwarmRunHandler(
@@ -256,7 +269,7 @@ def _build_swarm(db, platform):
         round_repo=repos["round"], guard_repo=repos["guard"],
         result_repo=repos["result"], config=cfg,
     )
-    return service, worker, repos
+    return service, worker, handler, repos
 
 
 def _spawn_decision(*agents: tuple[str, str]) -> str:
@@ -549,7 +562,7 @@ class TestBotKindEndToEnd:
         )
         endpoints = _patch_engine_edges(monkeypatch, platform, ws)
 
-        service, worker, repos = _build_swarm(swarm_db, platform)
+        service, worker, handler, repos = _build_swarm(swarm_db, platform)
         req = SubmitRunRequest(
         identity_bot_id=IDENTITY_SOURCE,
             tenant=TENANT,
@@ -573,10 +586,25 @@ class TestBotKindEndToEnd:
         # between, and a later poll sees READY.
         pump = _TaskQueuePump(world)
         if defer_creation:
-            # A loaded runner can outlive the first slice before provisioning
-            # settles. Force that ordering without timing-sensitive sleeps:
-            # leave the task queue unpumped until the first slice returns.
-            await worker.run_once()
+            # Force a cooperative slice boundary after submission has landed,
+            # while leaving the task queue unpumped. This covers cross-slice
+            # resume without making the test's outcome depend on whether a
+            # loaded CI runner can finish provisioning inside a tiny deadline.
+            first_slice = asyncio.create_task(worker.run_once())
+            seam = world.get(ManifestCreationSeam)
+            for _ in range(500):
+                agents = repos["agent"].list_by_run(dm.RunId(run_id), TENANT)
+                if agents:
+                    expected_id = "agent_swarm_" + spawn_digest(
+                        run_id, agents[0].agent_id, 1, 16,
+                    )
+                    if seam.find_job(entity_id=OWNER, bot_id=expected_id) is not None:
+                        break
+                await asyncio.sleep(0.01)
+            else:
+                pytest.fail("first slice did not submit the bot creation job")
+            handler.set_slice_lost(True, dm.RunId(run_id))
+            await asyncio.wait_for(first_slice, timeout=10)
             unfinished = repos["run"].get(dm.RunId(run_id), TENANT)
             assert unfinished is not None
             assert unfinished.status is dm.RunStatus.RUNNING

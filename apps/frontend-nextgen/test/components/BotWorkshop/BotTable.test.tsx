@@ -6,7 +6,7 @@ import { botEditorService } from '@/services/botWorkshop/botEditorService';
 import * as botController from '@/services/backendApi/bots/botController';
 import type { BotDomain } from '@/services/botWorkshop';
 import { mapBotDto } from '@/services/botWorkshop/botMapper';
-import { getInventoryActionAvailability } from '@/services/botWorkshop/botPolicy';
+import { getBotCollaborationMode, getInventoryActionAvailability } from '@/services/botWorkshop/botPolicy';
 import '@testing-library/jest-dom';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
@@ -818,6 +818,83 @@ describe('Agent Coding Bot row actions', () => {
     fireEvent.click(requestButton);
     expect(onAuthorize).toHaveBeenCalledWith(bot);
     expect(onConversation).not.toHaveBeenCalled();
+  });
+
+  test('服务 Coding Bot 明确协作者线上无 edit 时仍展示去使用并隐藏申请入口', () => {
+    const bot = mapBotDto({
+      bot_id: 'service-collaborator-coding-bot',
+      bot_name: '服务协作者 Coding Bot',
+      owner_id: 'owner-1',
+      active_engine: 'claude_code',
+      template_type: 'generalCC',
+      bot_type: 'service',
+      kind: 'service',
+      display_state: 'service_online',
+      actions: ['view', 'chat', 'restart_publish', 'offline'],
+      space: { space_id: '1', kind: 'team' },
+    }).item;
+    const onConversation = jest.fn();
+    const onAuthorize = jest.fn();
+
+    renderTable(bot, {
+      onConversation,
+      onAction: jest.fn().mockResolvedValue(undefined),
+      getCollaborationMode: (item) => getBotCollaborationMode(item, false),
+      onAuthorize,
+    });
+
+    expect(screen.queryByRole('button', { name: '去申请 服务协作者 Coding Bot' })).not.toBeInTheDocument();
+    const useButton = screen.getByRole('button', { name: '去使用 服务协作者 Coding Bot' });
+    fireEvent.click(useButton);
+    expect(onConversation).toHaveBeenCalledWith(bot);
+
+    fireEvent.click(screen.getByRole('button', { name: '管理 服务协作者 Coding Bot' }));
+    expect(screen.queryByText('申请操作权限')).not.toBeInTheDocument();
+    expect(onAuthorize).not.toHaveBeenCalled();
+  });
+
+  test('服务 OpenClaw Bot 明确协作者隐藏申请入口，普通成员保留申请', () => {
+    const owner = 'owner-1';
+    const explicitCollaboratorBot = mapBotDto({
+      bot_id: 'service-collaborator-openclaw-bot',
+      bot_name: '服务协作者 OpenClaw Bot',
+      owner_id: owner,
+      engine: 'openclaw',
+      bot_type: 'service',
+      kind: 'service',
+      display_state: 'service_online',
+      actions: ['view', 'chat', 'restart_publish', 'offline'],
+      space: { space_id: '1', kind: 'team' },
+    }).item;
+    const spaceMemberBot = mapBotDto({
+      bot_id: 'space-member-openclaw-bot',
+      bot_name: '空间成员 OpenClaw Bot',
+      owner_id: owner,
+      engine: 'openclaw',
+      bot_type: 'service',
+      kind: 'service',
+      display_state: 'service_online',
+      actions: ['view', 'chat'],
+      space: { space_id: '1', kind: 'team' },
+    }).item;
+    const onAuthorize = jest.fn();
+
+    render(
+      <BotTable
+        bots={[explicitCollaboratorBot, spaceMemberBot]}
+        onView={noop}
+        onAction={jest.fn().mockResolvedValue(undefined)}
+        onAuthorize={onAuthorize}
+        getCollaborationMode={(item) => getBotCollaborationMode(item, false)}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '管理 服务协作者 OpenClaw Bot' }));
+    expect(screen.queryByText('申请操作权限')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '管理 空间成员 OpenClaw Bot' }));
+    fireEvent.click(screen.getByRole('button', { name: '申请操作权限' }));
+    expect(onAuthorize).toHaveBeenCalledWith(spaceMemberBot);
   });
 
   test('团队空间 Coding Bot 成员仍展示去使用', () => {

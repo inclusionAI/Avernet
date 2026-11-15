@@ -21,7 +21,8 @@ to the embedding composition root. Public executables use the default no-op.
 ## Behavior
 
 Incoming HTTP scope ends at response-header readiness. BCS composition excludes
-WebSocket endpoints, health/metrics probes and static manifest/assets routes.
+WebSocket endpoints, health/metrics probes, diagnostic/retired routes and static
+manifest/assets routes.
 It does not encompass WebSocket frames or consume streaming bodies. Client
 spans likewise end at response headers; gRPC clients record the initial status.
 Stream-message and final-trailer tracing require a separate future contract.

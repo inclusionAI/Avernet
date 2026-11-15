@@ -232,6 +232,9 @@ it("counts durable Owner feedback once while keeping recovery unknown and preser
   const first = await ask();
   await vi.waitFor(async () => expect((await current(task.taskId)).timeline.some(event => event.kind === "notification"
     && event.payload.channel === "owner_card" && event.payload.state === "sent")).toBe(true));
+  const cardReceipt = (await current(task.taskId)).timeline.find(event => event.payload.channel === "owner_card"
+    && event.payload.operation === "create" && event.payload.state === "sent")!;
+  expect(actionNotifier.after).toHaveBeenCalledWith({ taskId: task.taskId, eventId: cardReceipt.event_id, kind: "owner_card_sent" });
   expect(await current(task.taskId)).toMatchObject({ status: "waiting_owner", interventionStatus: "none", pending_results: [] });
   await expect(service.confirmOwner(task.taskId, first, { userId: "other", isAdmin: false })).rejects.toMatchObject({ status: 403 });
   await expect(service.confirmOwner(task.taskId, "stale-request", actor)).rejects.toMatchObject({ status: 409 });
@@ -247,6 +250,10 @@ it("counts durable Owner feedback once while keeping recovery unknown and preser
   await inspect(await current(task.taskId), "after-owner-feedback");
   const second = await ask();
   expect(second).not.toBe(first);
+  await vi.waitFor(async () => expect((await current(task.taskId)).timeline).toEqual(expect.arrayContaining([
+    expect.objectContaining({ payload: expect.objectContaining({ owner_request_id: second, channel: "owner_card", operation: "update", state: "sent" }) }),
+  ])));
+  expect(actionNotifier.after.mock.calls.filter(([notice]) => notice.kind === "owner_card_sent")).toHaveLength(1);
   await expect(service.confirmOwner(task.taskId, first, actor)).rejects.toMatchObject({ status: 409 });
   expect(await current(task.taskId)).toMatchObject({ status: "waiting_owner", interventionStatus: "performed", ownerRequest: { requestId: second, status: "pending" } });
   await service.confirmOwner(task.taskId, second, actor, "已处理剩余权限");
@@ -254,6 +261,22 @@ it("counts durable Owner feedback once while keeping recovery unknown and preser
   await service.reportResults();
   expect(callbacks.at(-1)).toMatchObject({ effect: "unknown", intervention_status: "performed" });
   expect(runtime.sendMessage).not.toHaveBeenCalled();
+});
+
+it.each([false, new Error("card delivery unconfirmed")])("does not announce disabled or unconfirmed private card delivery", async outcome => {
+  const task = await create();
+  const read = await inspect(task);
+  notifier.notifyOwnerRequest = vi.fn(async () => {
+    if (outcome instanceof Error) throw outcome;
+    return outcome;
+  });
+  await service.requestOwner(task.taskId, (await current(task.taskId)).version, { reason: "permission",
+    summary: "原资料访问权限不足", instructions: "请申请原资料读取权限",
+    evidence_ids: [read.evidenceId], executionId: task.execution!.executionId });
+  await vi.waitFor(async () => expect((await current(task.taskId)).timeline).toEqual(expect.arrayContaining([
+    expect.objectContaining({ payload: expect.objectContaining({ channel: "owner_card", operation: "create", sent: false }) }),
+  ])));
+  expect(actionNotifier.after).not.toHaveBeenCalled();
 });
 
 it("does not count environment-plan approval as a confirmed permission-handling receipt", async () => {

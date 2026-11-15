@@ -5,6 +5,12 @@
 > 权威源(冲突时以此为准):
 > - 设计三件套:`apps/backend/specs/2026-08-09-task-goal-driven-execution-framework/{plan,spec,tasks}.md`
 
+## 任务副屏资产
+
+展示、声明恢复与导航编排由独立的 [task-panel 资产](../../../../../../frontend-nextgen/assets/task-panel/README.md) 持有；
+frontend-nextgen 和旧产品仅适配宿主能力。资产构建不进入 Python 运行时，
+不改变本域的任务执行或 Relay 协议。
+
 ## 四层目录结构(对齐 `docs/arch/arch.rules.md §8`)
 
 | 层 | 路径 | 职责 |

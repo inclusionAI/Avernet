@@ -398,7 +398,8 @@ class AgentSwarmServiceProtocol(Protocol):
 
     @abstractmethod
     def list_runs(self, tenant: str, status: RunStatus | None = None,
-                  *, page: int = 1, page_size: int = 20) -> RunPage: ...
+                  *, page: int = 1, page_size: int = 20,
+                  owner_id: str | None = None) -> RunPage: ...
 
     @abstractmethod
     def run_events(self, run_id: str, tenant: str, after_agent_id: int = 0,

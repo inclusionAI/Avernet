@@ -327,3 +327,51 @@ async fn bot_events_accepts_callback_streaming_chat_error_message() {
         .unwrap()
         .terminal);
 }
+
+#[tokio::test]
+async fn callback_log_selection_keeps_final_and_rejection_but_skips_delta_and_tool_results() {
+    use std::io::Write;
+    use tracing::instrument::WithSubscriber;
+    #[derive(Clone, Default)]
+    struct Buffer(Arc<std::sync::Mutex<Vec<u8>>>);
+    impl Write for Buffer {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> { self.0.lock().unwrap().write(bytes) }
+        fn flush(&mut self) -> io::Result<()> { Ok(()) }
+    }
+    let TestApp { app, provider_core, provider_bot_core, run_context, _temp_dir, .. } = test_app(Arc::new(StaticAgentpassResolver::default()));
+    let registered = register_provider_bot(provider_core.as_ref(), provider_bot_core.as_ref(), ProviderAuthMode::StaticBearer, "key-logs").await;
+    let token = registered.bot_runtime_token.unwrap();
+    run_context.put_context(BotRunContext {
+        run_id: "key-run".into(), bot_id: registered.bot_uuid, group_id: "group-1".into(),
+        bcs_session_id: Some("group-1:abcdef12".into()), deadline_ms: bcs_protocol::now_ms() + 60_000, terminal: false,
+    }).await;
+    let app = app.layer(axum::middleware::from_fn(bcs_http::gateway_trace::observe_request));
+    let buffer = Buffer::default(); let output = buffer.clone();
+    let subscriber = tracing_subscriber::fmt().json().with_writer(move || output.clone()).finish();
+    async {
+        for (seq, payload) in [
+            json!({"event":"chat", "payload":{"state":"delta", "deltaText":"token"}}),
+            json!({"event":"agent", "payload":{"stream":"tool", "data":{"phase":"result", "name":"search", "toolCallId":"tc", "result":{}, "isError":false}}}),
+            json!({"event":"chat", "payload":{"state":"final", "message":{"content":[{"type":"text", "text":"done"}]}}}),
+        ].into_iter().enumerate() {
+            let mut body = payload;
+            body["run_id"] = json!("key-run"); body["seq"] = json!(seq + 1);
+            let response = app.clone().oneshot(Request::post("/bot/events")
+                .header("content-type", "application/json").header("X-BCN-Provider-Id", &registered.provider_id)
+                .header("authorization", format!("Bearer {token}"))
+                .body(Body::from(body.to_string())).unwrap()).await.unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            assert_eq!(response_json(response).await["ok"], true);
+        }
+        let rejected = app.oneshot(Request::post("/bot/events").header("content-type", "application/json")
+            .body(Body::from("{}" )).unwrap()).await.unwrap();
+        assert_eq!(rejected.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    }.with_subscriber(subscriber).await;
+    let text = String::from_utf8(buffer.0.lock().unwrap().clone()).unwrap();
+    let rows: Vec<Value> = text.lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+    let results: Vec<_> = rows.iter().filter(|r| r["fields"]["message"] == "http.request.response_ready").collect();
+    assert_eq!(results.len(), 4);
+    for row in &results[..2] { assert!(row["fields"].get("log_class").is_none()); }
+    for row in &results[2..] { assert_eq!(row["fields"]["log_class"], "business_key"); }
+    assert!(run_context.get_context("key-run").await.unwrap().terminal);
+}

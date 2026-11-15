@@ -7,9 +7,10 @@ from fastapi import APIRouter, Depends, HTTPException, Path
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 from search_core.adapters.http.routes import Authenticator
-from search_core.api.cards import CardManagement, CatalogConflict
+from search_core.api.cards import CardManagement, CatalogConflict, MappedCardManagement
 from search_core.api.models import VerifiedIdentity
 from search_core.catalog.cards import business_card
+from search_core.config.document_mapping import DocumentMapping, MappingError
 
 CardId = Annotated[str, Path(min_length=1, max_length=128, pattern=r"^\S+$")]
 
@@ -24,14 +25,26 @@ class CardWrite(BaseModel):
 
     @model_validator(mode="after")
     def ensure_changes(self):
-        if self.card is None and self.labels is None:
+        if (
+            self.card is None
+            and self.labels is None
+            and "document_mapping" not in self.model_fields_set
+        ):
             raise ValueError("provide card or labels")
         return self
+
+
+class MappedCardWrite(CardWrite):
+    document_mapping: DocumentMapping | None = None
 
 
 class Saved(BaseModel):
     saved: Literal[True] = True
     card_version: int
+
+
+class MappedSaved(Saved):
+    warnings: list[dict] | None = None
 
 
 class Deleted(BaseModel):
@@ -43,6 +56,10 @@ class CardDetails(BaseModel):
     card: dict[str, JsonValue]
     resource_type: Literal["agent", "group"]
     card_version: int
+
+
+class MappedCardDetails(CardDetails):
+    document_mapping: dict | None = None
 
 
 class CardStatus(BaseModel):
@@ -73,10 +90,11 @@ class ErrorBody(BaseModel):
 
 
 def create_card_router(
-    service: CardManagement,
+    service: CardManagement | MappedCardManagement,
     authorize_operator: Authenticator,
     *,
     status_model: type[CardStatus] = CardStatus,
+    allow_document_mapping: bool = False,
 ):
     router = APIRouter(
         prefix="/api/v2/agent-cards",
@@ -84,17 +102,29 @@ def create_card_router(
         responses={403: {"model": ErrorBody}, 503: {"model": ErrorBody}},
     )
 
+    WriteRequest = MappedCardWrite if allow_document_mapping else CardWrite
+
     @router.put(
         "/{agent_id}",
         status_code=202,
-        response_model=Saved,
+        response_model=MappedSaved if allow_document_mapping else Saved,
+        response_model_exclude_none=True,
         responses={400: {"model": ErrorBody}, 409: {"model": ErrorBody}},
     )
     async def save(
         agent_id: CardId,
-        body: CardWrite,
+        body: WriteRequest,
         identity: Annotated[VerifiedIdentity, Depends(authorize_operator)],
     ):
+        options = {}
+        if "document_mapping" in body.model_fields_set:
+            if not allow_document_mapping:
+                raise HTTPException(
+                    422, "document_mapping is not enabled for this application"
+                )
+            options["document_mapping"] = (
+                body.document_mapping.stored() if body.document_mapping else None
+            )
         try:
             row = await asyncio.to_thread(
                 service.upsert,
@@ -103,13 +133,20 @@ def create_card_router(
                 body.resource_type,
                 {},
                 labels=body.labels,
+                **options,
             )
+        except MappingError as error:
+            raise HTTPException(422, [error.detail()]) from error
         except CatalogConflict as error:
             raise HTTPException(409, "Card resource type cannot change") from error
         except ValueError as error:
             raise HTTPException(400, "invalid Card management metadata") from error
         except Exception as error:
             raise HTTPException(503, "Card persistence unavailable") from error
+        if allow_document_mapping:
+            return MappedSaved(
+                card_version=row.revision, warnings=list(row.mapping_warnings) or None
+            )
         return Saved(card_version=row.revision)
 
     @router.delete("/{agent_id}", status_code=202, response_model=Deleted)
@@ -141,7 +178,7 @@ def create_card_router(
 
     @router.get(
         "/{agent_id}",
-        response_model=CardDetails,
+        response_model=MappedCardDetails if allow_document_mapping else CardDetails,
         responses={404: {"model": ErrorBody}},
     )
     async def read(
@@ -156,11 +193,17 @@ def create_card_router(
             raise HTTPException(404, "Card not found") from error
         except Exception as error:
             raise HTTPException(503, "Card read unavailable") from error
-        return CardDetails(
+        details = CardDetails(
             labels=row.card.labels,
             card=business_card(row.card),
             resource_type=row.card.resource_type,
             card_version=row.revision,
         )
+        if allow_document_mapping:
+            return MappedCardDetails(
+                **details.model_dump(),
+                document_mapping=(row.config or {}).get("document_mapping"),
+            )
+        return details
 
     return router

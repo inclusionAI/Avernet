@@ -61,6 +61,14 @@ The legacy `/api/bots/search`, `/bots`, and `/lifecycle` contracts are unchanged
 Existing publication identifiers, diagnostic state, edit locks, and action policy
 remain intact. Projection reuses the existing batched publication read.
 
+`actions` distinguishes the public/basic-information `view` face from the
+configuration surface. `view_config` is emitted for an explicit service-Bot
+collaborator whose permission level is at least `MEMBER`; it is not emitted for
+a user whose `MEMBER` level is synthesized only from Space membership. The
+action grants read-only navigation and does not grant `edit` or any write
+operation. Owners continue to be identified by `owner_entity_id`, and existing
+clients that ignore the additive action remain compatible.
+
 For personal cloud Bots, stored `RECYCLED` maps to `display_state: dormant`
 even when `ext.dormant` is absent. The Owner receives `activate` in `actions`;
 collaborators do not. `RECYCLING` and `REACTIVATING` without a legacy dormant

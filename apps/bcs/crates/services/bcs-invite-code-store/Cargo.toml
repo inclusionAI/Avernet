@@ -17,6 +17,7 @@ tokio = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
+tempfile = { workspace = true }
 bcs-db-local = { workspace = true }
 hex = { workspace = true }
 hmac = { workspace = true }

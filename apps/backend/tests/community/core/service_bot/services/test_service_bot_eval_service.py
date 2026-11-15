@@ -100,6 +100,7 @@ def test_eval_context_serializes_datetime_and_date_modified(
     )
 
     assert release.version == 1
+    assert context.bot_id == "service-eval"
     assert context.latest_bot_modified_at == expected
 
 

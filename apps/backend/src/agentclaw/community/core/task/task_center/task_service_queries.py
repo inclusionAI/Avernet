@@ -13,6 +13,10 @@ from agentclaw.community.core.task.domain.identity import (
     resolve_scoped_entry_bot_identity as resolve_entry_bot_identity,
 )
 
+from agentclaw.community.core.task.domain.identity import (
+    resolve_scoped_entry_bot_identity as resolve_entry_bot_identity,
+)
+
 from agentclaw.community.utils.app_utils import get_current_executor_app
 
 from agentclaw.community.core.task.domain.models import (

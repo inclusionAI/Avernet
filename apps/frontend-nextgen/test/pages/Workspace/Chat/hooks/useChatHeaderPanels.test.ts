@@ -20,6 +20,12 @@ import { useTaskConversationNavigationStore } from '@/stores/taskConversationNav
 import type { ChatMessage, PanelHandle } from '@tc-chat/core';
 import { act, renderHook, waitFor } from '@testing-library/react';
 
+jest.mock('@/services/tasks/panel/taskPanelRuntime', () => {
+  const { createTestTaskPanelRuntime } = require('../../../../helpers/taskPanelRuntime');
+  return createTestTaskPanelRuntime({ bySession: (...args: any[]) => mockGetTaskBySession(...args), list: (...args: any[]) => mockListMyTasks(...args) });
+});
+jest.mock('@/services/tasks/panel/taskPanelHistoryAdapter', () => ({ createBotTaskHistoryReader: () => ({ readPage: async () => ({ messages: [], nextCursor: null }) }) }));
+
 function makeSession(overrides: Partial<BotChatSessionView> = {}): BotChatSessionView {
   return {
     sessionId: 'sess-1',
@@ -53,11 +59,18 @@ function makePanelMessages(): ChatMessage[] {
 
 function makeOptions(overrides: { messages?: ChatMessage[]; panelRef?: React.RefObject<PanelHandle | null>; userId?: string | null }) {
   const openTab = jest.fn();
+  const focusTab = jest.fn();
   const closePanel = jest.fn();
   const openPanel = jest.fn();
-  const handle = { openTab, closePanel, openPanel, closePanelForce: jest.fn() } as unknown as PanelHandle;
+  const handle: PanelHandle = {
+    openTab, focusTab, closePanel, openPanel,
+    closeTab: jest.fn(), updateTab: jest.fn(), closePanelForce: jest.fn(),
+    flushContext: jest.fn(() => ({ interactions: [], panelState: { tabs: [], activeTabId: null } })),
+    flushInteractions: jest.fn(() => []),
+  };
   return {
     openTab,
+    focusTab,
     closePanel,
     openPanel,
     options: {
@@ -67,6 +80,7 @@ function makeOptions(overrides: { messages?: ChatMessage[]; panelRef?: React.Ref
       section: 'managed' as const,
       userId: overrides.userId ?? null,
       botId: 'bot-1',
+      bot: { botId: 'bot-1' } as any,
       toggleFavorite: jest.fn().mockResolvedValue(true),
       favoritePending: jest.fn().mockReturnValue(false),
       openFileDrawer: jest.fn(),
@@ -97,7 +111,7 @@ it('收藏状态未知时禁用星标，后台确认后解除', () => {
 });
 
 it('打开已存在的单 bot 会话时 by_session 命中即恢复最新任务副屏', async () => {
-  const { options, openTab } = makeOptions({ messages: makeMessages(), userId: 'u1' });
+  const { options, openTab, focusTab } = makeOptions({ messages: makeMessages(), userId: 'u1' });
   mockGetTaskBySession.mockResolvedValue({
     ok: true,
     data: [
@@ -114,6 +128,7 @@ it('打开已存在的单 bot 会话时 by_session 命中即恢复最新任务�
     id: 'task-task-root',
     type: 'taskPanel.TaskLoopView',
   });
+  expect(focusTab).toHaveBeenLastCalledWith('task-task-root');
   expect(useTaskSidePanelStore.getState().activeTaskId).toBe('task-root');
 });
 
