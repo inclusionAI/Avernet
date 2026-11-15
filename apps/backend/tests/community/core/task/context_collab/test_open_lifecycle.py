@@ -3,6 +3,7 @@
 from dataclasses import replace
 
 import pytest
+
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabNotFoundError,
     ContextCollabValidationError,
@@ -24,7 +25,6 @@ from agentclaw.community.core.task.context_collab.method_service_api import (
     OpenMethodOpsServiceProtocol,
     OpenOpportunityOpCommand,
 )
-
 from tests.community.core.task.context_collab.open_profile_support import (
     AXES,
     COLLET_ID,
@@ -503,19 +503,17 @@ class TestOpenApplicationLifecycle:
         assert store.list_members(AXES, binding, COLLET_ID) == []
         assert store.list_allocations(AXES, binding, COLLET_ID) == []
 
-    def test_admit_collet_participant_is_p1_rejected(self):
-        _, _, lifecycle, service = make_open_service()
+    def test_collet_participant_opportunity_rejects_cross_collet_scope(self):
+        store, _, lifecycle, service = make_open_service()
         binding = active_open_binding(lifecycle)
-        with pytest.raises(
-            ContextCollabValidationError,
-            match="COLLET_PARTICIPANT",
-        ):
+        with pytest.raises(ContextCollabValidationError, match="scope must match"):
             service.publish_opportunity(
                 COLLET_ID,
                 binding,
                 opportunity_command(participation_type="COLLET_PARTICIPANT"),
                 make_actor(),
             )
+        assert store.list_opportunities(AXES, binding, COLLET_ID) == []
 
     def test_admit_requires_screening_state_and_is_idempotent(self):
         """机器裁决:未评审(SCREENING 前)不可录取;同 decision_id 重放

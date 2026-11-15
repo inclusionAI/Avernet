@@ -270,21 +270,18 @@ def test_v2_adds_self_application_without_changing_v1_or_workflow():
     profile = build_self_service_commission_profile()
     assert PRODUCT_CATALOG.get("task_commission", 2) == profile
     assert profile.ref == VersionedProfileRef("task_commission", 2)
-    assert profile.composition.method_kind == "Open + Group"
+    assert profile.composition.method_kind == "Open"
     assert {
         item.method: item.version for item in profile.composition.required_methods
     } == {
         "Open": "0.2",
-        "Group": "0.2",
     }
     policy = profile.require_publication().admission
     assert policy.strategy == "designated_bot_self_application"
-    assert policy.participation_type is ParticipationType.GROUP_MEMBER
+    assert policy.participation_type is ParticipationType.COLLET_PARTICIPANT
     assert policy.capacity == 1
-    assert policy.defer_executor_membership is True
     assert profile.workflow == legacy.workflow
     assert legacy.composition.method_kind == "Open"
-    assert legacy.require_publication().admission.defer_executor_membership is False
     assert (
         legacy.require_publication().admission.participation_type
         is ParticipationType.SINGLE_CONTRIBUTION
@@ -297,8 +294,8 @@ def test_v2_adds_self_application_without_changing_v1_or_workflow():
         {"strategy": "publisher_mediated"},
         {"participation_type": ParticipationType.SINGLE_CONTRIBUTION},
         {"capacity": 2},
-        {"defer_executor_membership": False},
-        {"defer_executor_membership": 1},
+        {"participation_type": ParticipationType.GROUP_MEMBER},
+        {"participation_type": ParticipationType.SWARM_ALLOCATION},
     ],
 )
 def test_self_application_policy_rejects_incompatible_semantics(overrides):

@@ -1,8 +1,10 @@
-"""L4 Participant / RoleBinding 值对象(spec §3.4 表)。
+"""L4 Participant / RoleBinding / scoped participation evidence.
 
 参与者是 Principal 或 Agent 在 Collet 内的协作身份,作为 Collet JSON /
 查询对象保存;RoleBinding 把产品角色绑定到 Participant,作为 Collet
 JSON / 事件事实保存。两者都没有独立生命周期,不建表。
+ScopedParticipantBinding 另存录取产生的限定 Collet 参与证据,不改写
+创建时的角色事实,也不引入独立成员生命周期。
 """
 
 from __future__ import annotations
@@ -113,3 +115,54 @@ def role_binding_ref(collet_id: str, binding: RoleBinding) -> str:
             quote(binding.participant_id, safe=""),
         )
     )
+
+
+@dataclass(frozen=True)
+class ScopedParticipantBinding:
+    """Bind an Agent IdentityRef to one Collet, independently of Group.
+
+    This local reference record is created by admission, not by designation.
+    It is immutable evidence, not an independent membership state machine.
+    Its authority must be checked against the admitting decision/application
+    and ACTIVE Method binding; retaining it after revocation grants no access.
+    No Space membership or resource grant is implied. Identity references use
+    the same opaque string form as Open applications, without guessing Agent
+    types or changing the creation-time Participant/RoleBinding facts.
+    """
+
+    participant_binding_id: str
+    scope_ref: str
+    participant_ref: str
+    role_binding_refs: tuple[str, ...] = ()
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "ScopedParticipantBinding":
+        fields = {
+            "participant_binding_id", "scope_ref", "participant_ref",
+            "role_binding_refs",
+        }
+        if not isinstance(data, dict) or set(data) - fields:
+            raise ContextCollabValidationError("invalid ScopedParticipantBinding fields")
+        roles = data.get("role_binding_refs", ())
+        if not isinstance(roles, (list, tuple)) or any(
+            not isinstance(ref, str) or not ref.strip() for ref in roles
+        ):
+            raise ContextCollabValidationError("invalid participant role references")
+        return cls(
+            participant_binding_id=_required_str(
+                data, "participant_binding_id", "ScopedParticipantBinding"
+            ),
+            scope_ref=_required_str(data, "scope_ref", "ScopedParticipantBinding"),
+            participant_ref=_required_str(
+                data, "participant_ref", "ScopedParticipantBinding"
+            ),
+            role_binding_refs=tuple(roles),
+        )
+
+    def to_dict(self) -> dict:
+        return {
+            "participant_binding_id": self.participant_binding_id,
+            "scope_ref": self.scope_ref,
+            "participant_ref": self.participant_ref,
+            "role_binding_refs": list(self.role_binding_refs),
+        }

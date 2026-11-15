@@ -39,6 +39,7 @@ class InMemoryMethodStoreBase:
         self._opportunities: dict = {}
         self._applications: dict = {}
         self._admission_decisions: dict = {}
+        self._participant_bindings: dict = {}
 
     @staticmethod
     def _key_in_context(key: tuple, axes, collab_context_id: str) -> bool:

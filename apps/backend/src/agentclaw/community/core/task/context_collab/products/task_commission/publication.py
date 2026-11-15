@@ -37,7 +37,6 @@ class DesignatedOpenAdmission(OpenAdmissionPolicy):
         super().__post_init__()
         if (
             self.strategy != "publisher_mediated"
-            or self.defer_executor_membership
             or self.participation_type is not ParticipationType.SINGLE_CONTRIBUTION
             or self.steps
             != ("publish_opportunity", "submit_application", "screen", "admit")
@@ -73,19 +72,17 @@ class BotSelfApplicationAdmission(OpenAdmissionPolicy):
 
     The accountable scenario role owns the publication policy; the application
     itself is accountable to the authenticated Bot owner.
-    Membership belongs only to the task's Open + Group Method binding. Neither
+    Participation belongs only to the task's Collet scope under Open. Neither
     designation nor discovery is admission or a Space/resource grant.
     """
 
     strategy: str = "designated_bot_self_application"
-    defer_executor_membership: bool = True
 
     def __post_init__(self) -> None:
         super().__post_init__()
         if (
             self.strategy != "designated_bot_self_application"
-            or not self.defer_executor_membership
-            or self.participation_type is not ParticipationType.GROUP_MEMBER
+            or self.participation_type is not ParticipationType.COLLET_PARTICIPANT
             or self.capacity != 1
         ):
             raise ContextCollabValidationError(

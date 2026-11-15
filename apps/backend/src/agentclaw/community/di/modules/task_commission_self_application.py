@@ -1,7 +1,8 @@
 """Bounded commission Open adapter: designated Bot discovery/apply and policy review.
 
-SQL owns task/designation/profile; MethodStore owns admission/member state. They
-are not atomic or restart-durable together. No Space membership/grant is written.
+SQL owns task/designation/profile; MethodStore owns admission/participant binding
+evidence. They are not atomic or restart-durable together. No Space membership/grant
+is written.
 """
 
 from uuid import uuid4
@@ -16,9 +17,6 @@ from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.participants import (
     role_binding_ref,
-)
-from agentclaw.community.core.task.context_collab.l5_methods.group_profile import (
-    MemberState,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
     BindingState,
@@ -93,7 +91,7 @@ class TaskCommissionSelfApplicationAdapter(TaskCommissionOpenMethodAdapter):
         profile = self._product_catalog.get(ref.profile_id, ref.version)
         if (
             profile.ref.profile_id != "task_commission"
-            or profile.composition.method_kind != "Open + Group"
+            or profile.composition.method_kind != "Open"
             or not isinstance(
                 profile.require_publication().admission, BotSelfApplicationAdmission
             )
@@ -179,7 +177,7 @@ class TaskCommissionSelfApplicationAdapter(TaskCommissionOpenMethodAdapter):
                     opportunity.admission_policy_refs != (_POLICY_REF,)
                     or opportunity.scope_ref != collet.collet_id
                     or opportunity.participation_type
-                    is not ParticipationType.GROUP_MEMBER
+                    is not ParticipationType.COLLET_PARTICIPANT
                     or opportunity.capacity
                     != profile.require_publication().admission.capacity
                 ):
@@ -234,6 +232,57 @@ class TaskCommissionSelfApplicationAdapter(TaskCommissionOpenMethodAdapter):
             ),
             context,
         )
+        return self.review_task_application(command, submitted.object_id, context)
+
+    def review_task_application(
+        self, command: ApplyForTaskCommand, application_id: str, context: ActorContext
+    ) -> AssigneeAdmissionReceipt:
+        """Continue the actual product policy after L5 submission, without reapply.
+
+        Discovery cannot be reused here: the submitted application occupies the
+        capacity-1 slot. Validate its stored facts and product eligibility instead.
+        L5 already checked the application window/capacity at submission time.
+        """
+        profile = self._self_service_profile(command.product_profile_ref)
+        record = self._repo.get_current_status(command.collab_context_id)
+        axes, binding_id = current_axes(), command.method_binding_ref
+        application = self._store.get_application(
+            axes, application_id, binding_id, command.collab_context_id
+        )
+        opportunity = self._store.get_opportunity(
+            axes, command.opportunity_id, binding_id, command.collab_context_id
+        )
+        binding = self._store.get_binding(axes, binding_id, command.collab_context_id)
+        if (
+            record is None
+            or not self._designated(record, context)
+            or record.task is None
+            or record.task.status != "created"
+            or product_definition(record.context_spec, self._product_catalog) != profile
+            or binding_id != top_level_binding_id(command.collab_context_id)
+            or binding is None
+            or binding.state is not BindingState.ACTIVE
+            or binding.method_names != ("Open",)
+            or application is None
+            or application.state is not ApplicationState.SUBMITTED
+            or application.opportunity_ref != command.opportunity_id
+            or application.applicant_agent_ref != context.actor.principal_id
+            or not command.accountable_principal_id.strip()
+            or application.accountable_principal_ref != command.accountable_principal_id
+            or opportunity is None
+            or opportunity.scope_ref != command.collab_context_id
+            or opportunity.participation_type is not ParticipationType.COLLET_PARTICIPANT
+            or opportunity.admission_policy_refs != (_POLICY_REF,)
+            or opportunity.capacity != profile.require_publication().admission.capacity
+        ):
+            raise ContextCollabValidationError("application unavailable for task review")
+        expected_roles = tuple(
+            role_binding_ref(command.collab_context_id, role)
+            for role in record.context_spec.role_bindings
+            if role.role == "selected-agent"
+        )
+        if not expected_roles or application.requested_role_refs != expected_roles:
+            raise ContextCollabValidationError("application roles do not match task")
         # The owner authorized this exact bounded rule when publishing the
         # opportunity. This is policy execution, not a forged inbound Bot/user.
         policy_context = ActorContext(
@@ -242,7 +291,7 @@ class TaskCommissionSelfApplicationAdapter(TaskCommissionOpenMethodAdapter):
         self._open_ops.screen(
             command.collab_context_id,
             binding_id,
-            submitted.object_id,
+            application_id,
             OpenDecisionOpCommand(reason=_POLICY_REF),
             policy_context,
         )
@@ -250,7 +299,7 @@ class TaskCommissionSelfApplicationAdapter(TaskCommissionOpenMethodAdapter):
         admitted = self._open_ops.admit(
             command.collab_context_id,
             binding_id,
-            submitted.object_id,
+            application_id,
             OpenAdmitCommand(
                 admitted_scope_ref=command.collab_context_id,
                 decision_id=decision_id,
@@ -268,7 +317,7 @@ class TaskCommissionSelfApplicationAdapter(TaskCommissionOpenMethodAdapter):
         self.require_admitted(command.collab_context_id, context)
         return AssigneeAdmissionReceipt(
             command.opportunity_id,
-            submitted.object_id,
+            application_id,
             decision_id,
             admitted.state,
             decision.admitted_scope_ref,
@@ -282,9 +331,13 @@ class TaskCommissionSelfApplicationAdapter(TaskCommissionOpenMethodAdapter):
         axes = current_axes()
         binding_id = top_level_binding_id(collab_context_id)
         binding = self._store.get_binding(axes, binding_id, collab_context_id)
-        if binding is None or binding.state is not BindingState.ACTIVE:
+        if (
+            binding is None
+            or binding.state is not BindingState.ACTIVE
+            or binding.method_names != ("Open",)
+        ):
             raise ContextCollabValidationError(
-                "execution requires an active Method binding"
+                "execution requires an active Open Method binding"
             )
         applications = {
             app.application_id: app
@@ -292,10 +345,17 @@ class TaskCommissionSelfApplicationAdapter(TaskCommissionOpenMethodAdapter):
                 axes, binding_id, collab_context_id
             )
         }
-        members = {
-            member.group_member_binding_id: member
-            for member in self._store.list_members(axes, binding_id, collab_context_id)
+        participants = {
+            participant.participant_binding_id: participant
+            for participant in self._store.list_participant_bindings(
+                axes, binding_id, collab_context_id
+            )
         }
+        expected_roles = tuple(
+            role_binding_ref(collab_context_id, role)
+            for role in record.context_spec.role_bindings
+            if role.role == "selected-agent"
+        )
         for decision in self._store.list_decisions(axes, binding_id, collab_context_id):
             app = applications.get(decision.application_ref)
             if (
@@ -311,13 +371,17 @@ class TaskCommissionSelfApplicationAdapter(TaskCommissionOpenMethodAdapter):
             if (
                 opportunity is None
                 or opportunity.scope_ref != collab_context_id
+                or opportunity.participation_type
+                is not ParticipationType.COLLET_PARTICIPANT
                 or opportunity.admission_policy_refs != (_POLICY_REF,)
             ):
                 continue
             if any(
-                ref in members
-                and members[ref].state is MemberState.ACTIVE
-                and members[ref].participant_ref == context.actor.principal_id
+                ref in participants
+                and participants[ref].scope_ref == collab_context_id
+                and participants[ref].participant_ref == context.actor.principal_id
+                and participants[ref].role_binding_refs == expected_roles
+                and app.requested_role_refs == expected_roles
                 for ref in decision.resulting_binding_refs
             ):
                 return

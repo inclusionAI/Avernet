@@ -134,18 +134,15 @@ def build_self_service_commission_profile() -> ProductProfileDefinition:
         TASK_COMMISSION_PROFILE,
         ref=SELF_SERVICE_COMMISSION_PROFILE_REF,
         composition=MethodCompositionTemplate(
-            method_kind="Open + Group",
+            method_kind="Open",
             scope="collet",
-            required_methods=(
-                MethodRequirement("Open", "0.2"),
-                MethodRequirement("Group", "0.2"),
-            ),
+            required_methods=(MethodRequirement("Open", "0.2"),),
         ),
         publication=OpenPublicationProfile(
             admission=BotSelfApplicationAdmission(
                 applicant_role="assignee",
                 accountable_role="owner",
-                participation_type=ParticipationType.GROUP_MEMBER,
+                participation_type=ParticipationType.COLLET_PARTICIPANT,
                 capacity=1,
             ),
         ),

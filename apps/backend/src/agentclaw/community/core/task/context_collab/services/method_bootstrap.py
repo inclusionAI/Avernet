@@ -73,11 +73,6 @@ def _resolve_method_spec(
         ),
         principal_id=spec.principal_ref.principal_id,
         executor_id=spec.executor_ref.agent_id if spec.executor_ref else None,
-        admit_executor_on_creation=not (
-            profile is not None
-            and profile.publication is not None
-            and profile.publication.admission.defer_executor_membership
-        ),
     )
 
 

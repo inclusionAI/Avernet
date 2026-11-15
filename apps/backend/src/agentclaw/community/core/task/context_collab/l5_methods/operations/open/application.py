@@ -16,13 +16,16 @@ SCREENING→ADMITTED 一条规则,跳过评审直接 admit 由机器拒绝。
   ``revoke_admission`` 的 swarm.allocation.revoke 裁决);
 - ``SINGLE_CONTRIBUTION`` → 仅记 artifact refs(resulting_binding_refs
   落申请的 proposed_artifact_refs),不产生参与绑定;
-- ``COLLET_PARTICIPANT`` → P1 拒绝(L4 参与者治理是 P2)。
+- ``COLLET_PARTICIPANT`` → immutable L4 ``ScopedParticipantBinding`` for
+  this exact Collet; authority follows the admitting application's G4 state,
+  so revoke invalidates participation without adding a second state machine.
 
 录取仅对 ``admitted_scope_ref`` 生效,不产生 Space Membership / Grant
 (G1 断言);``admit`` 的幂等键是 ``decision_id``(§8.3,同 ID 同形态
 早退、产物不重建);``revoke_admission`` 按 opportunity 类型终结产物:
 成员行经 group.remove_member 裁决 → REMOVED(roster 乐观并发,逐次
 bump 后取新基准)、分配经 swarm.allocation.revoke → REVOKED、
+COLLET_PARTICIPANT 保留身份绑定证据但随申请撤销失效;
 SINGLE_CONTRIBUTION 无产物可终结。
 """
 
@@ -42,6 +45,9 @@ from agentclaw.community.core.task.context_collab.g4_contracts_consistency.metho
 )
 from agentclaw.community.core.task.context_collab.g4_contracts_consistency.state_machine import (
     resolve_transition,
+)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.participants import (
+    ScopedParticipantBinding,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.group_profile import (
     GroupMemberBinding,
@@ -292,12 +298,24 @@ class OpenApplicationOpsMixin(OpenMethodServiceBase):
                 collab_context_id,
             )
             if existing_decision is not None:
+                if existing_decision.application_ref != application.application_id:
+                    raise ContextCollabValidationError(
+                        "admission decision belongs to another application"
+                    )
                 if _shape_of(
                     existing_decision.to_dict(), _ADMIT_REQUEST_FIELDS
                 ) == _shape_of(
                     {"admitted_scope_ref": command.admitted_scope_ref},
                     _ADMIT_REQUEST_FIELDS,
                 ):
+                    if application.state is ApplicationState.SCREENING:
+                        # A prior write failed after recording the decision.
+                        # Finish the G4 transition; do not recreate its binding.
+                        return self._transition_application(
+                            axes, collab_context_id, method_binding_id,
+                            application, context, command.reason,
+                            "open.application.admit",
+                        )
                     return ProfileOpAcceptedResult(
                         accepted=True,
                         collab_context_id=collab_context_id,
@@ -313,16 +331,31 @@ class OpenApplicationOpsMixin(OpenMethodServiceBase):
         # 机器前置先裁:非 SCREENING 的录取在产物/裁决落库之前即拒
         # (与 swarm allocate 的"失败抛错于任何写之前"同款纪律)。
         _resolve_application_state(application.state.value, "open.application.admit")
-        if opportunity.participation_type is (ParticipationType.COLLET_PARTICIPANT):
-            raise ContextCollabValidationError(
-                f"open opportunity {opportunity.opportunity_id!r} declares "
-                "participation type COLLET_PARTICIPANT, which requires L4 "
-                "participant governance and is not available in P1"
-            )
+        if opportunity.participation_type is ParticipationType.COLLET_PARTICIPANT:
+            if (
+                opportunity.scope_ref != collab_context_id
+                or command.admitted_scope_ref != opportunity.scope_ref
+            ):
+                raise ContextCollabValidationError(
+                    "COLLET_PARTICIPANT admission scope must match its Collet"
+                )
         resulting_refs: list[str] = []
         now = _now()
         reason = command.reason or "open.application.admit"
-        if opportunity.participation_type is ParticipationType.GROUP_MEMBER:
+        if opportunity.participation_type is ParticipationType.COLLET_PARTICIPANT:
+            participant = ScopedParticipantBinding.from_dict(
+                {
+                    "participant_binding_id": f"pb_{application.application_id}",
+                    "scope_ref": command.admitted_scope_ref,
+                    "participant_ref": application.applicant_agent_ref,
+                    "role_binding_refs": list(application.requested_role_refs),
+                }
+            )
+            self._store.insert_participant_binding(
+                axes, method_binding_id, participant, collab_context_id
+            )
+            resulting_refs.append(participant.participant_binding_id)
+        elif opportunity.participation_type is ParticipationType.GROUP_MEMBER:
             roster = self._ensure_roster(axes, method_binding_id, collab_context_id)
             member = GroupMemberBinding.from_dict(
                 {
@@ -542,6 +575,9 @@ class OpenApplicationOpsMixin(OpenMethodServiceBase):
                     self._store.update_allocation_state(
                         axes, method_binding_id, updated, collab_context_id
                     )
+        # COLLET_PARTICIPANT is immutable evidence, not an independently active
+        # member: only ADMITTED applications confer authority. The G4 revoke
+        # below immediately invalidates it; keep the record for audit/replay.
         # SINGLE_CONTRIBUTION 决策只记 artifact refs,无产物可终结。
         return self._transition_application(
             axes,

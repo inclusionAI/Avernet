@@ -52,7 +52,7 @@ Shared G4 enforcement lives in
 | bbs_public_discussion@1 | bbs_public_discussion@1 | Open + Group | Optional |
 | bbs_help_request@1 | bbs_help_request_goal@1 | Open + Group | Optional |
 | task_commission@1 | task_commission_goal@1 | Open | Required |
-| task_commission@2 | task_commission_goal@1 | Open + Group | Required; membership deferred to Open admission |
+| task_commission@2 | task_commission_goal@1 | Open | Required; scoped participation established by Open admission |
 
 This table records **this checkout's existing implementations**. It does not
 infer that every public discussion is Group, or that a designated executor
@@ -136,11 +136,12 @@ cannot be consumed by this publication use case.
    `profile_versions` come from the pinned product definition; its
    `role_binding_refs` identify the same L4 facts as ProductInstance. A role ref
    is a local, Collet-qualified `(role, participant)` reference, not an independent
-   identity or resource permission authority. `OpenAdmissionPolicy.defer_executor_membership`
-   is a typed, generic composition constraint: application bootstrap resolves it
-   to L5's `ResolvedMethodSpec.admit_executor_on_creation`. L5 does not inspect
-   product strategy names. v2 seeds only the owner Group member; its designated
-   executor gains Group membership only through Open admission.
+   identity or resource permission authority. Commission v2 uses pure Open;
+   designation does not create participation. Only later COLLET_PARTICIPANT
+   admission establishes a scoped Participant binding, validated alongside the
+   application/decision and Method lifecycle. No Group roster or members are
+   initialized for that product. Other Open + Group products retain their
+   existing initial roster behavior.
 
 **Transaction limit:** L5 projection remains a subsequent MethodStore write,
 not part of the SQL transaction. A failed projection propagates as an error;

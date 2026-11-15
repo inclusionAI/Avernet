@@ -261,7 +261,12 @@ class OpenApplicationCommand:
 
 @dataclass
 class OpenAdmitCommand:
-    """Open Admit 命令(spec §4.4);``SWARM_ALLOCATION`` 必须携带 ``target_stage_ref``(作者裁决)。"""
+    """Open admission command.
+
+    COLLET_PARTICIPANT requires admitted_scope_ref == opportunity.scope_ref ==
+    owning Collet ID. It creates an immutable L4 ScopedParticipantBinding, not
+    Group membership or a resource grant. SWARM_ALLOCATION needs target_stage_ref.
+    """
 
     admitted_scope_ref: str | None = None
     target_stage_ref: str | None = None
@@ -575,7 +580,15 @@ class SwarmMethodOpsServiceProtocol(Protocol):
 
 @runtime_checkable
 class OpenMethodOpsServiceProtocol(Protocol):
-    """Open Profile 操作协议(spec §4.4);录取只对 ``admitted_scope_ref`` 生效,不产生 Space Membership。"""
+    """Open admission operations; no Space membership or resource grants.
+
+    COLLET_PARTICIPANT supports the exact owning Collet scope only. Admit creates
+    an immutable ScopedParticipantBinding, referenced by AdmissionDecision.
+    Consumers must verify the matching decision, ADMITTED application, actor and
+    ACTIVE MethodBinding before treating that evidence as participation authority.
+    Revoke changes application state through G4; retained evidence grants nothing.
+    Group/Swarm bindings and artifact-only contributions keep their own semantics.
+    """
 
     def query_opportunities(
         self,

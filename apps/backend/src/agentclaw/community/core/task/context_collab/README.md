@@ -64,13 +64,14 @@ products/
   versions during recovery. Initialization is idempotent and keeps existing
   terminated bindings; missing binding recovery retains the existing in-memory
   restart limitation (no durable method history is fabricated).
-- Product bootstrap resolves generic initial-roster constraints into
-  `ResolvedMethodSpec.admit_executor_on_creation`; L5 never interprets a product
-  strategy. [Commission v2](products/task_commission/README.md#v2-complete-journey-and-participation-boundary)
-  defers executor Group membership until Bot self-application is admitted. DI's
-  commission composition slice also installs the shared G1 admission guard, so
-  neither product nor generic L4 execution can bypass that task-scoped binding.
-  v1 and other products retain their existing structural behavior.
+- Product bootstrap resolves Method facts without interpreting product policy
+  in L5. [Commission v2](products/task_commission/README.md#v2-complete-journey-and-participation-boundary)
+  uses **Open only**: COLLET_PARTICIPANT admission creates an immutable L4
+  ScopedParticipantBinding for the exact Collet, with no Group roster/member or
+  Single selection. Its authority requires the correlated ADMITTED application,
+  decision and ACTIVE Open binding. DI installs the shared G1 admission guard,
+  so product and generic L4 execution cannot bypass or reuse a revoked binding.
+  v1 and unrelated Open + Group products retain their structural behavior.
 - L5 Open owns `OpenMethodOpsServiceProtocol.query_opportunities`: a read-only
   snapshot on an explicitly identified, ACTIVE Open binding. G1 requires an
   authenticated actor, not existing membership. Only OPEN opportunities within
@@ -98,6 +99,7 @@ is invented for layers that do not yet have a corresponding use case.
 | --- | --- |
 | [Collet](l4_context_primitives/collet.py) | Bounded context identity, initiator, scope, lifecycle vocabulary, event head and context revision. The six-field Python layout is local, not a claim that ACCS mandates exactly six fields. The legacy repository still seeds `ACTIVE`; the separate Collet lifecycle path is not unified by this change. |
 | [Task](l4_context_primitives/task.py) | Independent L4 work-item ID, Collet/parent links, objective, completion conditions, responsible principal, designated executor, status, Task revision and event provenance. Not an A2A Task/execution attempt. |
+| [ScopedParticipantBinding](l4_context_primitives/participants.py) | Immutable task-scoped identity evidence created by Open COLLET_PARTICIPANT admission; validity derives from its admission application/decision and Method lifecycle, not an independent Group membership machine. |
 | [MethodBinding](l5_methods/method_binding.py) | L5 Method identity, scope and runtime facts. Neither ContextSpec nor ProductInstance substitutes for Method state. |
 | [ContextSpec](l6_products/context_spec.py) | L6/composition creation input and selected profile/role references. Existing JSON/wire fields are retained for compatibility, not treated as mutable Task state. |
 | [ProductInstance](l6_products/instance.py) | Pinned composition and evidence references; no second work-item state machine. |
