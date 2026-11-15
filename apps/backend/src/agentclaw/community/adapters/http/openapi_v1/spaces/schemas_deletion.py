@@ -4,6 +4,8 @@ from pydantic import BaseModel, Field
 
 
 class SpaceDeletedResult(BaseModel):
+    """The confirmed soft-deletion of one Team Space."""
+
     space_id: int = Field(
         ge=1, description="Space primary identifier that was deleted."
     )
