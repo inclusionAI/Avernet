@@ -154,9 +154,7 @@ async def test_run_creates_single_manager_bot_and_human_observer_group() -> None
 
 
 @pytest.mark.asyncio
-async def test_run_context_contains_complete_protocol_without_default_skill_dependency() -> (
-    None
-):
+async def test_run_context_loads_todo_runner_from_infra_without_symlink() -> None:
     bcs = _RecordingBcs()
     runtime = _runtime(bcs, tokens=_Tokens())
 
@@ -170,9 +168,14 @@ async def test_run_context_contains_complete_protocol_without_default_skill_depe
         "POST https://backend.example/api/v1/collaboration/todos/todo_1/report"
         in context
     )
-    assert "不依赖、也不得假定已默认加载 Todo Skill" in context
-    assert "按需加载机制" in context
-    assert "软链接" in context
+    assert "todo-runner Skill" in context
+    assert (
+        "/home/admin/.openclaw/workspace/skills-pool/skills-repo/infra/"
+        "todo-runner/SKILL.md"
+    ) in context
+    assert "每次收到 [todo-execute] 或 [todo-resume] 都必须" in context
+    assert "不要为 todo-runner 创建软链接" in context
+    assert "todo-runner skill unavailable" in context
 
 
 @pytest.mark.asyncio

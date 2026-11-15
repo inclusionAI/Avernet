@@ -54,15 +54,15 @@ current-generation `todo_execution_token`, the Backend URL, and concrete report/
 examples. Runtime metadata may repeat these values for observability, but Bot
 behavior must not depend on metadata being propagated by a transport.
 
-That message is the authoritative and complete Todo execution protocol. Todo
-does not depend on a default-loaded Todo Skill, does not create Skill symlinks,
-and does not hardcode an engine filesystem path. If the business task needs an
-additional Skill, the Bot may use only the runtime's governed, authorized,
-currently discoverable on-demand activation mechanism; an inactive Skill must
-not be assumed available. This public checkout contains no Todo Default Skill
-registration. If a deployment has an old Default SkillSet row, operators must
-remove it through that deployment's governed Skill Center configuration rather
-than adding a repository-side path workaround.
+Every dispatched or resumed run explicitly loads the `todo-runner` Skill from
+`/home/admin/.openclaw/workspace/skills-pool/skills-repo/infra/todo-runner/SKILL.md`
+before doing business work. The Skill stays in the shared `infra` repository:
+it is not installed into a Bot Default SkillSet and no link is created under
+`workspace/skills`. Direct loading is repeated for every `[todo-execute]` and
+`[todo-resume]`, so a missing or unreadable source fails the run instead of
+silently executing without the Todo protocol. The runtime message supplies the
+current execution ids, token, Backend URL, objective, and concrete endpoints;
+the Skill owns the stable execution and artifact-reporting procedure.
 
 The identities form one hierarchy rather than three unrelated caller inputs:
 
