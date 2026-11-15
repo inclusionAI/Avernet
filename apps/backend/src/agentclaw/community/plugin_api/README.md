@@ -184,6 +184,19 @@ runs in a worker thread and must be read-only, create/close any database session
 there, and never capture a request-thread Session. Pipeline stage ordering and
 failure isolation are unchanged.
 
+
+`TokenExchangeContext.actor_user_id` is the exact authenticated requester returned
+by `AuthPlugin.resolve_user_from_request(...).staffId`. It is separate from the
+Bot's resource `entity_id`, actual `owner_user_id`, and existing rollout-policy
+`user_list_entity_id`. The optional default `None` preserves constructor
+compatibility; runtime-target consumers must reject absent or empty actors and
+must not substitute resource, Owner or rollout identities. Caller-first plugin
+orchestration authenticates scoped IAM requests independently of caller-supplied
+friend identifiers, preserves the original Caller outcome on plugin failure,
+and does not normalize the authenticated subject. Non-IAM credential types are
+forwarded to the existing Caller service without constructing an unverified
+plugin actor; this does not add a new token-exchange capability.
+
 DeptLookupError is owned by plugin_api.staff_dept, matching the StaffDeptPlugin
 contract. The old HTTP errors module re-exports the same class identity for
 compatibility; core consumers do not import HTTP exceptions. No-department still
