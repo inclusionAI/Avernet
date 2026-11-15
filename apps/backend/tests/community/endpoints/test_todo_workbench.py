@@ -33,6 +33,7 @@ from agentclaw.community.core.task.todos.artifact_models import (
     TodoArtifactDownload,
     TodoArtifactKind,
     TodoArtifactRecord,
+    TodoExecutionCredential,
 )
 from agentclaw.community.core.task.todos.models import (
     AcceptanceVerdict,
@@ -182,6 +183,15 @@ def _artifact_record(
 
 
 class _FixedTodoArtifacts:
+    def issue_execution(self, **_kwargs: Any) -> TodoExecutionCredential:
+        return TodoExecutionCredential(execution_id="todoexec_1", token="todo-token")
+
+    def bind_run_id(self, **_kwargs: Any) -> None:
+        return None
+
+    def complete_execution(self, **_kwargs: Any) -> None:
+        return None
+
     def report_artifact(self, **_kwargs: Any) -> TodoArtifactRecord:
         return _artifact_record()
 
@@ -318,6 +328,11 @@ def _bind_todo_world(
     binder.bind(SpaceAccessServiceProtocol, to=_FixedSpaceAccess(), scope=singleton)
     binder.bind(BotRepository, to=_FixedBots(), scope=singleton)
     binder.bind(TodoCollaborationPort, to=collaboration, scope=singleton)
+    binder.bind(
+        TodoArtifactServiceProtocol,
+        to=_FixedTodoArtifacts(),
+        scope=singleton,
+    )
 
     if seed_context:
         context = collaboration.create_context(
@@ -668,7 +683,11 @@ def create_todo_interaction_conflict():
         path_params={"todo_id": "todo_1"},
         query_params=QUERY,
         headers=_principal_headers(),
-        json_body={"verdict": "approved", "message": "Looks good"},
+        json_body={
+            "decision_id": "decision_1",
+            "verdict": "approved",
+            "message": "Looks good",
+        },
     ),
     seed=lambda world: _bind_todo_world(
         world,
@@ -696,7 +715,7 @@ def accept_todo_ok():
         path_params={"todo_id": "todo_1"},
         query_params=QUERY,
         headers=_principal_headers(),
-        json_body={"verdict": "approved"},
+        json_body={"decision_id": "decision_1", "verdict": "approved"},
     ),
     seed=lambda world: _bind_todo_world(
         world, context_id="context_todo_1", seed_context=True

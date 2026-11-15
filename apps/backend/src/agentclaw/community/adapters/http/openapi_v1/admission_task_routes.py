@@ -165,7 +165,10 @@ TASK_PUBLIC_ADMISSION: dict[tuple[str, str], AdmissionMode] = {
         "POST",
         "/openapi/v1/collaboration/task/context_collab/{collab_context_id}/events",
     ): AdmissionMode.REFUSED,
-    ("GET", "/openapi/v1/collaboration/task/context_collab/{collab_context_id}"): AdmissionMode.REFUSED,
+    (
+        "GET",
+        "/openapi/v1/collaboration/task/context_collab/{collab_context_id}",
+    ): AdmissionMode.REFUSED,
 }
 
 
@@ -177,6 +180,11 @@ TASK_TODO_ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ("POST", "/openapi/v1/todos/{todo_id}/run"): AdmissionMode.REFUSED,
     ("GET", "/openapi/v1/todos/{todo_id}/events"): AdmissionMode.REFUSED,
     ("GET", "/openapi/v1/todos/{todo_id}/interactions"): AdmissionMode.REFUSED,
+    ("GET", "/openapi/v1/todos/{todo_id}/artifacts"): AdmissionMode.REFUSED,
+    (
+        "GET",
+        "/openapi/v1/todos/{todo_id}/artifacts/{artifact_id}/content",
+    ): AdmissionMode.REFUSED,
     ("POST", "/openapi/v1/todos/{todo_id}/interactions"): AdmissionMode.REFUSED,
     ("POST", "/openapi/v1/todos/{todo_id}/acceptance"): AdmissionMode.REFUSED,
 }

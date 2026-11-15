@@ -17,6 +17,7 @@ framework's frozen-baseline coverage gate for the three new routes.
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import time
 
 import jwt
@@ -196,7 +197,7 @@ def _seed_get_happy(world) -> None:
                 "status": "active",
                 "summary": None,
                 "content": "上下文做一下补充xxx",
-                "occurred_at": None,
+                "created_at": datetime(2026, 11, 15, tzinfo=timezone.utc),
             },
             task_progress=TaskProgressProjectionDTO(
                 total_events=2,

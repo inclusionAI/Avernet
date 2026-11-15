@@ -11,6 +11,7 @@ Route prefix is asserted to be the spec §6.1 exact form — singular ``task``.
 """
 
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -34,6 +35,9 @@ from agentclaw.community.core.task.context_collab.persistence.repository import 
 )
 from agentclaw.community.core.task.context_collab.services.context_collab_service import (
     ContextCollabService,
+)
+from agentclaw.community.plugins.local.context_collab_runtime import (
+    LocalContextCollabRuntimePlugin,
 )
 from agentclaw.community.api.task.context_collab_service import (
     ContextCollabServiceProtocol,
@@ -122,6 +126,7 @@ def client_world():
     service = RecordingContextCollabService(
         ContextCollabService(
             repository=ContextCollabRepository(InMemorySqliteDB(engine)),
+            runtime=LocalContextCollabRuntimePlugin(),
             authorizer=StructuralContextCollabAuthorizer(),
         )
     )
@@ -518,7 +523,7 @@ def _seed_get_happy(world) -> None:
                 "status": "active",
                 "summary": None,
                 "content": "上下文做一下补充xxx",
-                "occurred_at": None,
+                "created_at": datetime(2026, 11, 15, tzinfo=timezone.utc),
             },
             task_progress=TaskProgressProjectionDTO(
                 total_events=2,
