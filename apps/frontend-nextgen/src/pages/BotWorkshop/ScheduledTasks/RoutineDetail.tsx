@@ -1,12 +1,13 @@
+import { RoutineRunConversation } from '@/components/ScheduledTasks/RoutineRunConversation';
 import { Button } from '@/components/ui/Button';
 import { Empty } from '@/components/ui/Empty';
 import { Pagination } from '@/components/ui/Pagination';
-import type { createRoutineClient } from '@/services/botScheduledTasks/service';
 import { describeFailure, runStatusLabel } from '@/services/botScheduledTasks/results';
+import type { createRoutineClient } from '@/services/botScheduledTasks/service';
 import {
   stageNames,
-  type RoutineAddress,
   type ManagedRoutine,
+  type RoutineAddress,
   type RoutineContext,
   type RoutineRun,
   type RuntimePage,
@@ -14,7 +15,6 @@ import {
 import { getRoutineScheduleLabel } from '@/services/botWorkshop/routineSchedule';
 import { useEffect, useState, type ReactNode } from 'react';
 import { RoutineNextRun, useRoutineClock } from './RoutineNextRun';
-import { RoutineRunConversation } from '@/components/ScheduledTasks/RoutineRunConversation';
 export const formatTime = (value?: string) =>
   value
     ? Number.isNaN(Date.parse(value))
@@ -75,7 +75,7 @@ export function RoutineDetail({
   const fields: Array<[string, ReactNode]> = detail
     ? [
         ['任务名称', detail.name],
-        ['调度状态', detail.enabled ? '已启用' : '已停用'],
+        ['调度状态', detail.enabled === true ? '已启用' : detail.enabled === false ? '已停用' : '状态未知'],
         ['生效环境', detail.runtime_stage ? stageNames[detail.runtime_stage] || detail.runtime_stage : '未报告'],
         ['运行实例', detail.device_uuid || '未报告'],
         ['Caller', detail.operator_id || '未报告'],
@@ -154,9 +154,15 @@ export function RoutineDetail({
                   <div>开始：{formatTime(run.startedAt)}</div>
                   <div>结束：{formatTime(run.finishedAt)}</div>
                   <div>耗时：{run.duration || '未报告'}</div>
-                  {(!hideMissingTarget || run.runtime_stage?.trim()) && <div>环境：{run.runtime_stage ? stageNames[run.runtime_stage] || run.runtime_stage : '未报告'}</div>}
-                  {(!hideMissingTarget || run.device_uuid?.trim()) && <div className="break-all">运行实例：{run.device_uuid || '未报告'}</div>}
-                  {(!hideMissingTarget || run.operator_id?.trim()) && <div className="break-all">Caller：{run.operator_id || '未报告'}</div>}
+                  {(!hideMissingTarget || run.runtime_stage?.trim()) && (
+                    <div>环境：{run.runtime_stage ? stageNames[run.runtime_stage] || run.runtime_stage : '未报告'}</div>
+                  )}
+                  {(!hideMissingTarget || run.device_uuid?.trim()) && (
+                    <div className="break-all">运行实例：{run.device_uuid || '未报告'}</div>
+                  )}
+                  {(!hideMissingTarget || run.operator_id?.trim()) && (
+                    <div className="break-all">Caller：{run.operator_id || '未报告'}</div>
+                  )}
                 </dl>
                 <div className="mt-4 flex justify-end">
                   <RoutineRunConversation run={run} botType={context.bot_type} />
