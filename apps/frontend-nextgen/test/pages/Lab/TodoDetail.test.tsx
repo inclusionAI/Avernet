@@ -410,7 +410,7 @@ describe('TodoDetailPage', () => {
     });
   });
 
-  it('事件页展示 20 字拒绝摘要，互动页展示完整返工说明和问题楼层', async () => {
+  it('事件页展示 20 字拒绝摘要，互动页用引用预览展示问题点', async () => {
     const rejection = '请修正产品 B 的企业版价格，并补充官网来源、更新时间和无法确认项的风险说明。';
     const preview = `${Array.from(rejection).slice(0, 20).join('')}…`;
     const rejectedEvent = event(5, {
@@ -432,6 +432,11 @@ describe('TodoDetailPage', () => {
     ]);
     mockedService.loadTodoInteractions.mockResolvedValue([
       event(1, { eventType: 'task.created', actorType: 'human', content: todo.description }),
+      event(3, {
+        eventType: 'task.completed',
+        actorType: 'bot',
+        content: '产品 B 企业版价格缺少官网来源，当前价格仍需核验。',
+      }),
       rejectedEvent,
     ]);
 
@@ -445,7 +450,14 @@ describe('TodoDetailPage', () => {
     fireEvent.click(screen.getByRole('tab', { name: '互动' }));
     const interactionView = screen.getByRole('region', { name: '待办互动' });
     expect(within(interactionView).getByText(rejection)).toBeInTheDocument();
-    expect(within(interactionView).getByText('问题楼层：f3、f4')).toBeInTheDocument();
+    const quotes = within(interactionView).getByRole('group', { name: '问题引用' });
+    expect(within(quotes).getByText('f3')).toBeInTheDocument();
+    expect(within(quotes).getByText('数据分析助手')).toBeInTheDocument();
+    expect(within(quotes).getByText('产品 B 企业版价格缺少官网来源，当前价格仍需核验。')).toBeInTheDocument();
+    expect(within(quotes).getByText('f4')).toBeInTheDocument();
+    expect(within(quotes).getByText('产物')).toBeInTheDocument();
+    expect(within(quotes).getByText('定价与功能矩阵.xlsx · xlsx · 2 KB')).toBeInTheDocument();
+    expect(within(interactionView).queryByText('问题楼层：f3、f4')).not.toBeInTheDocument();
   });
 
   it('产物视图使用独立产物接口展示四类产物，并支持文件下载', async () => {

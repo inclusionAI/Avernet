@@ -61,16 +61,35 @@ function interactionContent(item: TodoEvent): string {
   return '该互动未包含文本内容。';
 }
 
-function rejectionTargetFloors(item: TodoEvent): number[] {
+function rejectionTargets(item: TodoEvent): TodoAcceptanceTarget[] {
   if (item.eventType !== 'task.rejected' || !Array.isArray(item.payload.targets)) return [];
   return item.payload.targets
     .map((target) => {
       if (!target || typeof target !== 'object') return null;
-      const floor = (target as Record<string, unknown>).floor;
-      return typeof floor === 'number' && Number.isInteger(floor) && floor > 0 ? floor : null;
+      const value = target as Record<string, unknown>;
+      const kind = value.kind;
+      const id = value.id;
+      const floor = value.floor;
+      if (
+        (kind !== 'event' && kind !== 'artifact') ||
+        typeof id !== 'string' ||
+        !id ||
+        typeof floor !== 'number' ||
+        !Number.isInteger(floor) ||
+        floor < 1
+      ) {
+        return null;
+      }
+      return { kind, id, floor };
     })
-    .filter((floor): floor is number => floor !== null)
-    .sort((left, right) => left - right);
+    .filter((target): target is TodoAcceptanceTarget => target !== null)
+    .sort((left, right) => left.floor - right.floor);
+}
+
+function previewText(value: string, maxLength = 60): string {
+  const normalized = value.replace(/\s+/g, ' ').trim();
+  const characters = Array.from(normalized);
+  return characters.length > maxLength ? `${characters.slice(0, maxLength).join('')}…` : normalized;
 }
 
 function selectedFloors(targets: TodoAcceptanceTarget[]): string {
@@ -182,6 +201,67 @@ function artifactPresentation(artifact: Exclude<TodoArtifact, { kind: 'text' }>)
   };
 }
 
+function targetKey(target: Pick<TodoAcceptanceTarget, 'kind' | 'id'>): string {
+  return `${target.kind}:${target.id}`;
+}
+
+function rejectionQuote(
+  target: TodoAcceptanceTarget,
+  entryByTarget: Map<string, Exclude<InteractionEntry, { kind: 'notice' }>>,
+  botName: string,
+  humanName: string,
+): { label: string; content: string } {
+  const referenced = entryByTarget.get(targetKey(target));
+  if (!referenced) {
+    return { label: target.kind === 'artifact' ? '产物' : '互动', content: '原内容暂不可用' };
+  }
+  if (referenced.kind === 'artifact') {
+    const presentation = artifactPresentation(referenced.artifact);
+    return {
+      label: '产物',
+      content: previewText(`${presentation.title} · ${presentation.meta}`),
+    };
+  }
+  return {
+    label: referenced.event.actorType === 'bot' ? botName : humanName,
+    content: previewText(interactionContent(referenced.event)) || '该互动未包含文本内容。',
+  };
+}
+
+function RejectionQuotes({
+  targets,
+  entryByTarget,
+  botName,
+  humanName,
+}: {
+  targets: TodoAcceptanceTarget[];
+  entryByTarget: Map<string, Exclude<InteractionEntry, { kind: 'notice' }>>;
+  botName: string;
+  humanName: string;
+}) {
+  if (targets.length === 0) return null;
+  return (
+    <div className="mt-3 space-y-2" role="group" aria-label="问题引用">
+      {targets.map((target) => {
+        const quote = rejectionQuote(target, entryByTarget, botName, humanName);
+        return (
+          <blockquote
+            key={targetKey(target)}
+            className="m-0 rounded-r-lg border-l-2 border-destructive/55 bg-muted/45 px-3 py-2"
+          >
+            <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+              <span className="text-destructive">f{target.floor}</span>
+              <span aria-hidden>·</span>
+              <span>{quote.label}</span>
+            </div>
+            <p className="m-0 mt-1 line-clamp-2 break-words text-xs leading-5 text-foreground/80">{quote.content}</p>
+          </blockquote>
+        );
+      })}
+    </div>
+  );
+}
+
 function QuestionMarker({
   active,
   enabled,
@@ -282,9 +362,17 @@ export function TodoInteractionPanel({
     [artifacts, events, interactions, resolvedBotName],
   );
   const selectedTargetKeys = useMemo(
-    () => new Set(selectedTargets.map((target) => `${target.kind}:${target.id}`)),
+    () => new Set(selectedTargets.map(targetKey)),
     [selectedTargets],
   );
+  const entryByTarget = useMemo(() => {
+    const indexed = new Map<string, Exclude<InteractionEntry, { kind: 'notice' }>>();
+    entries.forEach((entry) => {
+      if (entry.kind === 'message') indexed.set(`event:${entry.event.eventId}`, entry);
+      if (entry.kind === 'artifact') indexed.set(`artifact:${entry.artifact.artifactId}`, entry);
+    });
+    return indexed;
+  }, [entries]);
   const floors = selectedFloors(selectedTargets);
 
   const submit = async () => {
@@ -337,7 +425,7 @@ export function TodoInteractionPanel({
             if (entry.kind === 'message') {
               const actor = entry.event.actorType === 'bot' ? 'bot' : 'human';
               const target: TodoAcceptanceTarget = { kind: 'event', id: entry.event.eventId, floor };
-              const rejectionFloors = rejectionTargetFloors(entry.event);
+              const referencedTargets = rejectionTargets(entry.event);
               return (
                 <li
                   key={entry.id}
@@ -366,11 +454,12 @@ export function TodoInteractionPanel({
                       <p className="m-0 mt-3 whitespace-pre-wrap break-words text-sm leading-6 text-foreground">
                         {interactionContent(entry.event)}
                       </p>
-                      {rejectionFloors.length > 0 ? (
-                        <p className="m-0 mt-2 text-xs text-muted-foreground">
-                          问题楼层：{rejectionFloors.map((item) => `f${item}`).join('、')}
-                        </p>
-                      ) : null}
+                      <RejectionQuotes
+                        targets={referencedTargets}
+                        entryByTarget={entryByTarget}
+                        botName={resolvedBotName}
+                        humanName={humanName}
+                      />
                     </div>
                   </article>
                 </li>
