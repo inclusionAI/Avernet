@@ -25,10 +25,13 @@ from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_reso
 from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.contracts import (
     EventAppendCommand as EventAppendCommand,
 )
+from agentclaw.community.core.task.context_collab.l6_products.contracts import (
+    VersionedProfileRef,
+)
 
 
 @dataclass
-class ContextCreateCommand:
+class ColletCreateCommand:
     """创建协作上下文命令;字段与 spec §6.2 表格一一对应。
 
     创建不设幂等键(spec 作者裁决:调用方无需传入防重号)。
@@ -42,6 +45,8 @@ class ContextCreateCommand:
     executor_ref: AgentRef | None
     objective: str
     resource_refs: list[ResourceRef]
+    # Optional exact L6 selection; omission preserves the generic v1 fallback.
+    product_profile_ref: VersionedProfileRef | None = None
 
 
 @dataclass
@@ -100,8 +105,8 @@ class ContextCollabStatusProjection:
 class ContextCollabServiceProtocol(Protocol):
     """三个北向用例的服务协议;delivery 依赖本协议,不依赖实现类。"""
 
-    def create_context(
-        self, command: ContextCreateCommand, context: ActorContext
+    def create_collet(
+        self, command: ColletCreateCommand, context: ActorContext
     ) -> ContextCollabCreatedResult: ...
     def append_event(
         self, collab_context_id: str, command: EventAppendCommand, context: ActorContext

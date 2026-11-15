@@ -23,11 +23,9 @@ from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs 
 from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_resource_refs import (
     SpaceRef,
 )
-from agentclaw.community.core.task.context_collab.l6_products.context_spec import (
-    ContextSpec,
-)
+from tests.community.core.task.context_collab.creation_facts import creation_facts
 from agentclaw.community.core.task.context_collab.l6_products.binding import (
-    prepare_product_spec,
+    prepare_product_profile,
 )
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     VersionedProfileRef,
@@ -47,7 +45,7 @@ from agentclaw.community.core.task.context_collab.persistence.models import (
 )
 from agentclaw.community.core.task.context_collab.persistence.repository import (
     ContextCollabRepository,
-    CreateContextRecordRequest,
+    CreateColletRecordRequest,
     InitialEventDraft,
 )
 from agentclaw.community.core.task.context_collab.products.task_commission.service import (
@@ -59,7 +57,7 @@ from agentclaw.community.core.task.context_collab.products.task_commission.servi
 )
 from agentclaw.community.core.task.context_collab.service_api import (
     ActorContext,
-    ContextCreateCommand,
+    ColletCreateCommand,
     EventAppendCommand,
 )
 from agentclaw.community.core.task.context_collab.services.context_collab_service import (
@@ -99,7 +97,7 @@ def _command(**overrides):
         product_kind="task_commission",
         workflow_kind="task_commission_goal",
     )
-    return ContextCreateCommand(**(fields | overrides))
+    return ColletCreateCommand(**(fields | overrides))
 
 
 def _services(db, dispatch_port=None, *, catalog=PRODUCT_CATALOG):
@@ -167,7 +165,7 @@ def _counts(db):
 def test_invalid_product_composition_rejected_before_any_write(db, overrides):
     _, store, service, _ = _services(db)
     with pytest.raises(ContextCollabValidationError):
-        service.create_context(_command(**overrides), _actor())
+        service.create_collet(_command(**overrides), _actor())
     assert _counts(db) == (0, 0)
     assert store.list_bindings(current_axes(), "missing") == []
 
@@ -223,7 +221,7 @@ def test_both_entrypoints_use_same_executor_and_sequence_contract(db):
 
 def test_generic_message_is_nontransition_but_stale_control_is_conflict(db):
     _, _, service, _ = _services(db)
-    created = service.create_context(_command(), _actor())
+    created = service.create_collet(_command(), _actor())
     started = _append(service, created.collab_context_id, 1)
     message = _append(
         service,
@@ -250,7 +248,7 @@ def test_generic_message_is_nontransition_but_stale_control_is_conflict(db):
 )
 def test_generic_control_cannot_bypass_product_shape(db, overrides):
     _, _, service, _ = _services(db)
-    created = service.create_context(_command(), _actor())
+    created = service.create_collet(_command(), _actor())
     with pytest.raises(ContextCollabValidationError):
         _append(service, created.collab_context_id, 1, **overrides)
     assert _counts(db) == (1, 1)
@@ -261,7 +259,7 @@ def test_generic_control_cannot_bypass_product_shape(db, overrides):
 )
 def test_pinned_l4_roles_use_typed_identity_not_just_same_id(db, impostor):
     _, _, service, _ = _services(db)
-    created = service.create_context(_command(), _actor())
+    created = service.create_collet(_command(), _actor())
     with pytest.raises(ContextCollabValidationError, match="only the principal"):
         _append(service, created.collab_context_id, 1, actor=impostor)
     assert _counts(db) == (1, 1)
@@ -269,7 +267,7 @@ def test_pinned_l4_roles_use_typed_identity_not_just_same_id(db, impostor):
 
 def test_pinned_instance_round_trip_and_heal_do_not_renegotiate(db, monkeypatch):
     repo, store, service, _ = _services(db)
-    created = service.create_context(_command(), _actor())
+    created = service.create_collet(_command(), _actor())
     record = repo.get_current_status(created.collab_context_id)
     instance = record.product_instance
     assert instance.profile_ref.version == instance.workflow_ref.version == 1
@@ -281,26 +279,19 @@ def test_pinned_instance_round_trip_and_heal_do_not_renegotiate(db, monkeypatch)
     assert binding.profile_versions == {
         method.method: method.version for method in instance.method_profiles
     }
-    assert (
-        len(record.context_spec.participants)
-        == len(record.context_spec.role_bindings)
-        == 2
-    )
-    # Roles are collaboration-only; creation did not manufacture L3 grants.
-    assert record.context_spec.resource_refs == ()
-    assert set(record.context_spec.to_dict()) == {
-        "space",
-        "principal_ref",
-        "method_kind",
-        "executor_ref",
+    # L6 role references live in ProductInstance; creation facts remain plain
+    # facts and do not duplicate Collet/Task identity or role aggregates.
+    assert len(instance.role_binding_refs) == 2
+    assert record.creation_facts["resource_refs"] == []
+    assert set(record.creation_facts) == {
         "objective",
         "resource_refs",
+        "method_kind",
+        "executor_ref",
         "product_kind",
         "workflow_kind",
-        "product_profile_version",
-        "workflow_profile_version",
-        "participants",
-        "role_bindings",
+        "product_profile_ref",
+        "product_instance",
     }
 
     def cannot_negotiate(_self):
@@ -331,16 +322,16 @@ def test_pinned_instance_round_trip_and_heal_do_not_renegotiate(db, monkeypatch)
 )
 def test_corrupt_pinned_metadata_fails_closed(db, corruption):
     repo, _, service, _ = _services(db)
-    created = service.create_context(_command(), _actor())
+    created = service.create_collet(_command(), _actor())
     with db.orm_session() as session:
         row = session.query(ContextCollabColletModel).one()
-        data = json.loads(row.context_spec)
+        data = json.loads(row.creation_facts)
         if corruption == "missing_instance":
             del data["product_instance"]
         elif corruption == "role":
-            data["role_bindings"] = []
+            data["product_instance"]["role_binding_refs"] = []
         elif corruption == "version":
-            data["product_profile_version"] = 999
+            data["product_profile_ref"]["version"] = 999
         elif corruption == "evidence":
             data["product_instance"]["creation_event_ref"] = "not-the-initial-event"
         elif corruption == "method":
@@ -349,41 +340,38 @@ def test_corrupt_pinned_metadata_fails_closed(db, corruption):
             data["product_instance"]["negotiation"]["missing_capabilities"] = [
                 "method:Open@0.2"
             ]
-        row.context_spec = json.dumps(data)
+        row.creation_facts = json.dumps(data)
     with pytest.raises(ContextCollabValidationError):
         repo.get_current_status(created.collab_context_id)
 
 
 def test_legacy_rows_remain_readable_without_fabricated_negotiation(db):
     repo, _, service, _ = _services(db)
-    created = service.create_context(_command(), _actor())
+    created = service.create_collet(_command(), _actor())
     with db.orm_session() as session:
         row = session.query(ContextCollabColletModel).one()
-        data = json.loads(row.context_spec)
+        data = json.loads(row.creation_facts)
         for key in (
-            "product_profile_version",
-            "workflow_profile_version",
-            "participants",
-            "role_bindings",
+            "product_profile_ref",
             "product_instance",
         ):
             del data[key]
-        row.context_spec = json.dumps(data)
+        row.creation_facts = json.dumps(data)
     record = repo.get_current_status(created.collab_context_id)
     assert record.product_instance is None
-    assert record.context_spec.product_profile_version is None
-    assert record.context_spec.to_dict() == data
+    assert record.creation_facts["product_profile_ref"] is None
+    assert record.creation_facts == data
     assert _counts(db) == (1, 1)
 
 
 def test_unprofiled_generic_context_keeps_legacy_wire_contract(db):
     repo, _, service, _ = _services(db)
-    created = service.create_context(
+    created = service.create_collet(
         _command(product_kind=None, workflow_kind=None), _actor()
     )
     record = repo.get_current_status(created.collab_context_id)
     assert record.product_instance is None
-    assert "product_profile_version" not in record.context_spec.to_dict()
+    assert record.creation_facts["product_profile_ref"] is None
     assert set(record.events[0].payload) == {
         "objective",
         "resource_refs",
@@ -396,7 +384,7 @@ def test_unprofiled_generic_context_keeps_legacy_wire_contract(db):
 
 def test_bbs_generic_cannot_reply_to_task_skeleton(db):
     _, _, service, _ = _services(db)
-    created = service.create_context(
+    created = service.create_collet(
         _command(
             product_kind="bbs_public_discussion",
             workflow_kind="bbs_public_discussion",
@@ -420,7 +408,7 @@ def test_bbs_generic_cannot_reply_to_task_skeleton(db):
 
 def test_message_cannot_smuggle_commission_progress_evidence(db):
     _, _, service, _ = _services(db)
-    created = service.create_context(_command(), _actor())
+    created = service.create_collet(_command(), _actor())
     with pytest.raises(ContextCollabValidationError, match="only reportable"):
         _append(
             service,
@@ -440,11 +428,11 @@ def test_product_work_uses_exact_machine_even_for_legacy_v1(db, monkeypatch, leg
     )
 
     _, _, generic, product = _services(db)
-    created = generic.create_context(_command(), _actor())
+    created = generic.create_collet(_command(), _actor())
     if legacy:
         with db.orm_session() as session:
             row = session.query(ContextCollabColletModel).one()
-            data = json.loads(row.context_spec)
+            data = json.loads(row.creation_facts)
             for key in (
                 "product_profile_version",
                 "workflow_profile_version",
@@ -453,7 +441,7 @@ def test_product_work_uses_exact_machine_even_for_legacy_v1(db, monkeypatch, leg
                 "product_instance",
             ):
                 del data[key]
-            row.context_spec = json.dumps(data)
+            row.creation_facts = json.dumps(data)
     monkeypatch.setitem(state_machine.MACHINE_REGISTRY, "task_commission_goal", None)
     started = product.start_task(
         TaskAdvanceCommand(created.collab_context_id), _actor(BOT)
@@ -493,7 +481,7 @@ def test_commission_dispatch_correlates_persisted_selection_and_actual_l5_bindin
 def test_uninstalled_catalog_rejects_both_creators_before_any_write(db):
     _, store, generic, product = _services(db, catalog=ProductCatalog(()))
     for create in (
-        lambda: generic.create_context(_command(), _actor()),
+        lambda: generic.create_collet(_command(), _actor()),
         lambda: product.publish_task(
             PublishTaskCommand("deliver", "details", SPACE, "worker"), _actor()
         ),
@@ -518,30 +506,9 @@ def test_injected_exact_v2_survives_storage_recovery_and_shared_g4(db, monkeypat
     )
     catalog = ProductCatalog((v2,))
     repo, _, _, _ = _services(db, catalog=catalog)
-    spec = prepare_product_spec(
-        ContextSpec(
-            space=SPACE,
-            principal_ref=OWNER,
-            method_kind="Open",
-            executor_ref=AgentRef("bot", "worker"),
-            objective="deliver",
-            resource_refs=(),
-            product_kind="task_commission",
-            workflow_kind="task_commission_goal",
-        ),
-        catalog,
-        selected_profile=v2.ref,
-    )
-    created = repo.create_context(
-        CreateContextRecordRequest(
-            context_spec=spec,
-            initial_event=InitialEventDraft(
-                event_kind="task.created",
-                primitive_type="Task",
-                actor_ref=OWNER,
-                payload={"objective": "deliver"},
-            ),
-        )
+    _, _, generic, _ = _services(db, catalog=catalog)
+    created = generic.create_collet(
+        _command(product_profile_ref=v2.ref), _actor()
     )
     collet_id = created.collet.collet_id
     instance = repo.get_current_status(collet_id).product_instance
@@ -586,19 +553,16 @@ def test_injected_exact_v2_survives_storage_recovery_and_shared_g4(db, monkeypat
 
 def test_legacy_commission_progress_requires_typed_executor(db):
     _, _, generic, product = _services(db)
-    created = generic.create_context(_command(), _actor())
+    created = generic.create_collet(_command(), _actor())
     with db.orm_session() as session:
         row = session.query(ContextCollabColletModel).one()
-        data = json.loads(row.context_spec)
+        data = json.loads(row.creation_facts)
         for key in (
-            "product_profile_version",
-            "workflow_profile_version",
-            "participants",
-            "role_bindings",
+            "product_profile_ref",
             "product_instance",
         ):
             del data[key]
-        row.context_spec = json.dumps(data)
+        row.creation_facts = json.dumps(data)
     product.start_task(TaskAdvanceCommand(created.collab_context_id), _actor(BOT))
     for principal in (OWNER, PrincipalRef("human", BOT.principal_id)):
         with pytest.raises(ContextCollabValidationError, match="designated executor"):

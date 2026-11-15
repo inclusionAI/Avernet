@@ -2,7 +2,7 @@
 
 Wire models are the §6.5 OpenAPI schema names verbatim — ColletCreateRequest,
 EventCreateRequest, ContextCollabStatusResponse, TaskProgress,
-ContextSpec and the L2/L3 reference DTOs. Request models carry
+the creation request and the L2/L3 reference DTOs. Request models carry
 to_domain() builders for the service commands (the intake
 TaskIntakeCommandDTO.to_domain pattern); response models mirror exactly
 what ContextCollabService projects, including the occurred_at field
@@ -30,10 +30,11 @@ from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_reso
     ResourceRef,
     SpaceRef,
 )
+from agentclaw.community.core.task.context_collab.l6_products.contracts import VersionedProfileRef
 from agentclaw.community.core.task.context_collab.service_api import (
     ContextCollabCreatedResult,
     ContextCollabStatusProjection,
-    ContextCreateCommand,
+    ColletCreateCommand,
     EventAcceptedResult,
     EventAppendCommand,
 )
@@ -123,8 +124,8 @@ class ResourceRefDto(BaseModel):
 # ── 请求 DTO(spec §6.2 表 / §6.3 表,字段一一对应)─────────────────────────
 
 
-class ContextSpec(BaseModel):
-    """Nested context-spec shape published as its own schema (spec §6.5).
+class ColletCreateRequest(BaseModel):
+    """Flat creation request published as the collaboration request schema (spec §6.5).
 
     Fields map one-to-one onto the §6.2 create-request table; L2/L3/L5/L6
     information is held as references or enum strings rather than copied
@@ -167,9 +168,18 @@ class ContextSpec(BaseModel):
         description="Optional L3 external-resource references; resource "
         "content is never copied.",
     )
+    product_profile_id: str | None = Field(
+        default=None,
+        description="Optional exact L6 product profile identifier.",
+    )
+    product_profile_version: int | None = Field(
+        default=None,
+        ge=1,
+        description="Optional exact L6 product profile version.",
+    )
 
-    def to_domain(self) -> ContextCreateCommand:
-        return ContextCreateCommand(
+    def to_domain(self) -> ColletCreateCommand:
+        return ColletCreateCommand(
             space=self.space.to_domain(),
             principal_ref=self.principal_ref.to_domain(),
             product_kind=self.product_kind,
@@ -180,13 +190,12 @@ class ContextSpec(BaseModel):
             ),
             objective=self.objective,
             resource_refs=[ref.to_domain() for ref in self.resource_refs],
+            product_profile_ref=(
+                VersionedProfileRef(self.product_profile_id, self.product_profile_version)
+                if self.product_profile_id is not None and self.product_profile_version is not None
+                else None
+            ),
         )
-
-
-class ColletCreateRequest(ContextSpec):
-    """Create-collaboration-context request(spec §6.2;无幂等键字段)。"""
-
-    model_config = ConfigDict(extra="ignore")
 
 
 class EventCreateRequest(BaseModel):

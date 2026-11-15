@@ -24,16 +24,14 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.particip
     Participant,
 )
 from agentclaw.community.core.task.context_collab.l6_products.binding import (
-    prepare_product_spec,
+    prepare_product_profile,
     product_definition,
-    validate_product_spec,
+    validate_product_selection,
 )
 from agentclaw.community.core.task.context_collab.l6_products.catalog import (
     ProductCatalog,
 )
-from agentclaw.community.core.task.context_collab.l6_products.context_spec import (
-    ContextSpec,
-)
+from tests.community.core.task.context_collab.creation_facts import creation_facts
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     MethodRequirement,
     VersionedProfileRef,
@@ -56,7 +54,23 @@ def _spec(**overrides):
         product_kind="task_commission",
         workflow_kind="task_commission_goal",
     )
-    return ContextSpec(**(fields | overrides))
+    return creation_facts(**(fields | overrides))
+
+
+def _profile(facts: dict, catalog=PRODUCT_CATALOG, profile_ref=None):
+    return product_definition(
+        product_kind=facts["product_kind"],
+        workflow_kind=facts["workflow_kind"],
+        method_kind=facts["method_kind"],
+        profile_ref=profile_ref
+        if profile_ref is not None
+        else (
+            VersionedProfileRef(**facts["product_profile_ref"])
+            if facts.get("product_profile_ref") is not None
+            else None
+        ),
+        catalog=catalog,
+    )
 
 
 @pytest.mark.parametrize("profile", PRODUCT_PROFILES, ids=lambda p: p.ref.profile_id)
@@ -133,8 +147,8 @@ def test_bad_profile_version_rejected(version):
     with pytest.raises(ContextCollabValidationError, match="positive integer"):
         VersionedProfileRef("product", version)
     with pytest.raises(ContextCollabValidationError):
-        product_definition(
-            _spec(product_profile_version=version), catalog=PRODUCT_CATALOG
+        _profile(
+            _spec(product_profile_ref={"profile_id": "product", "version": version})
         )
 
 
@@ -159,29 +173,47 @@ def test_code_owned_catalog_does_not_require_extending_enum():
         )
 
 
-def test_unversioned_spec_maps_only_to_v1_and_pinned_role_facts_are_checked():
+def test_unversioned_selection_defaults_to_v1_and_pinned_selection_is_exact():
     spec = _spec()
-    assert product_definition(spec, catalog=PRODUCT_CATALOG).ref.version == 1
-    pinned = prepare_product_spec(spec, catalog=PRODUCT_CATALOG)
-    assert pinned.product_profile_version == pinned.workflow_profile_version == 1
-    assert len(pinned.participants) == len(pinned.role_bindings) == 2
-    assert validate_product_spec(pinned, catalog=PRODUCT_CATALOG) == product_definition(
-        spec, catalog=PRODUCT_CATALOG
+    assert _profile(spec).ref.version == 1
+    selected = prepare_product_profile(
+        product_kind=spec["product_kind"],
+        workflow_kind=spec["workflow_kind"],
+        method_kind=spec["method_kind"],
+        profile_ref=VersionedProfileRef("task_commission", 1),
+        principal_ref=PrincipalRef("human", "owner"),
+        executor_ref=AgentRef("bot", "worker"),
+        catalog=PRODUCT_CATALOG,
     )
-    with pytest.raises(ContextCollabValidationError, match="RoleBinding"):
-        validate_product_spec(
-            replace(pinned, role_bindings=()), catalog=PRODUCT_CATALOG
-        )
-    with pytest.raises(ContextCollabValidationError, match="unknown"):
-        product_definition(
-            replace(pinned, product_profile_version=999), catalog=PRODUCT_CATALOG
-        )
-    with pytest.raises(ContextCollabValidationError, match="version"):
-        product_definition(
-            replace(pinned, workflow_profile_version=2), catalog=PRODUCT_CATALOG
+    assert selected.ref == VersionedProfileRef("task_commission", 1)
+    assert validate_product_selection(
+        product_kind=spec["product_kind"],
+        workflow_kind=spec["workflow_kind"],
+        method_kind=spec["method_kind"],
+        profile_ref=selected.ref,
+        principal_ref=PrincipalRef("human", "owner"),
+        executor_ref=AgentRef("bot", "worker"),
+        catalog=PRODUCT_CATALOG,
+    ) == selected
+    with pytest.raises(ContextCollabValidationError, match="unknown product"):
+        _profile(
+            creation_facts(
+                objective="deliver",
+                method_kind="Open",
+                executor_ref=AgentRef("bot", "worker"),
+                product_kind="task_commission",
+                workflow_kind="task_commission_goal",
+                product_profile_ref={"profile_id": "task_commission", "version": 999},
+            )
         )
     with pytest.raises(ContextCollabValidationError, match="requires product_kind"):
-        product_definition(replace(pinned, product_kind=None), catalog=PRODUCT_CATALOG)
+        product_definition(
+            product_kind=None,
+            workflow_kind="task_commission_goal",
+            method_kind="Open",
+            profile_ref=None,
+            catalog=PRODUCT_CATALOG,
+        )
 
 
 def test_versioned_workflow_lookup_does_not_use_name_alias(monkeypatch):
@@ -197,11 +229,11 @@ def test_versioned_workflow_lookup_does_not_use_name_alias(monkeypatch):
     task = Task(
         task_id="task_versioned",
         collet_ref="collet_versioned",
-        objective=spec.objective,
+        objective=spec["objective"],
         status="created",
         version=1,
-        principal_ref=spec.principal_ref,
-        executor_ref=spec.executor_ref,
+        principal_ref=PrincipalRef("human", "owner"),
+        executor_ref=AgentRef("bot", "worker"),
         parent_task_ref=None,
         completion_conditions=(),
         created_event_ref="evt_created",
@@ -209,11 +241,11 @@ def test_versioned_workflow_lookup_does_not_use_name_alias(monkeypatch):
     )
     monkeypatch.setitem(state_machine.MACHINE_REGISTRY, "task_commission_goal", None)
     kwargs = dict(
-        workflow_kind=spec.workflow_kind,
+        workflow_kind=spec["workflow_kind"],
         task=task,
         event_kind="task.started",
         payload={},
-        actor=spec.principal_ref,
+        actor=PrincipalRef("human", "owner"),
     )
     assert resolve_workflow_status(**kwargs, workflow_version=1) == "in_progress"
     with pytest.raises(ContextCollabValidationError, match="unavailable"):

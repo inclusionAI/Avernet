@@ -46,7 +46,7 @@ class TopLevelBindingRecovery(Protocol):
     ) -> MethodBinding: ...
 
 
-_TOP_LEVEL_BIND_REASONS = frozenset({"create_context", "create_context_heal"})
+_TOP_LEVEL_BIND_REASONS = frozenset({"create_collet", "create_collet_heal"})
 
 
 def build_top_level_binding(
@@ -150,7 +150,7 @@ def _project_initial_roster(
                 "joined_at": now,
                 "left_at": None,
                 "transitioned_from": "",
-                "transition_reason": "create_context",
+                "transition_reason": "create_collet",
                 "transitioned_by": actor.actor.principal_id,
                 "transitioned_at": now,
             }
@@ -169,7 +169,7 @@ def initialize_top_level_binding(
     *,
     now: str,
 ) -> MethodBinding:
-    """create_context 成功后的顶层 ACTIVE 投影(spec §9.2)。
+    """create_collet 成功后的顶层 ACTIVE 投影(spec §9.2)。
 
     由 ``ResolvedMethodSpec`` 单向派生,不回写创建合同;同一 Collet 的
     重复投影幂等返回既有权威对象(不重写审计、不复活已终止对象)。
@@ -186,7 +186,7 @@ def initialize_top_level_binding(
         spec,
         actor,
         now=now,
-        bind_reason="create_context",
+        bind_reason="create_collet",
         reason="top-level projection",
     )
     stored = store.upsert_binding(axes, binding)

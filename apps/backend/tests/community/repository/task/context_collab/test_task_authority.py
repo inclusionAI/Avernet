@@ -21,8 +21,9 @@ from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_reso
 from agentclaw.community.core.task.context_collab.l4_context_primitives.task import (
     TaskUpdate,
 )
-from agentclaw.community.core.task.context_collab.l6_products.context_spec import (
-    ContextSpec,
+from tests.community.core.task.context_collab.creation_facts import (
+    create_collet_request,
+    creation_facts,
 )
 from agentclaw.community.core.task.context_collab.persistence.method_store import (
     InMemoryMethodStore,
@@ -35,7 +36,7 @@ from agentclaw.community.core.task.context_collab.persistence.models import (
 from agentclaw.community.core.task.context_collab.persistence.repository import (
     AppendEventRecordRequest,
     ContextCollabRepository,
-    CreateContextRecordRequest,
+    CreateColletRecordRequest,
     InitialEventDraft,
 )
 from agentclaw.community.core.task.context_collab.service_api import (
@@ -57,9 +58,9 @@ def repository(db):
 
 
 def _create(repository):
-    return repository.create_context(
-        CreateContextRecordRequest(
-            context_spec=ContextSpec(
+    return repository.create_collet(
+        create_collet_request(
+            creation_facts(
                 space=SpaceRef("task-space", "prod"),
                 principal_ref=OWNER,
                 method_kind="Single",
@@ -69,6 +70,8 @@ def _create(repository):
                 product_kind="team_todo",
                 workflow_kind="team_todo_execution",
             ),
+            space=SpaceRef("task-space", "prod"),
+            principal_ref=OWNER,
             initial_event=InitialEventDraft(
                 "task.created", "Task", OWNER, {"objective": "交付可验收的报告"}
             ),

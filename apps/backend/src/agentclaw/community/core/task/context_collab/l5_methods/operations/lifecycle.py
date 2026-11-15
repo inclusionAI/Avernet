@@ -116,7 +116,7 @@ _TERMINAL_COLLET_STATUSES = frozenset(
 
 # 顶层 binding 的 bind_reason 取值集合(创建投影 / 自愈重建),顶层
 # terminate 门槛据其判定;嵌套 bind(compose/delegate)无门槛。
-_TOP_LEVEL_BIND_REASONS = frozenset({"create_context", "create_context_heal"})
+_TOP_LEVEL_BIND_REASONS = frozenset({"create_collet", "create_collet_heal"})
 
 
 def _profile_versions(method_names: tuple[str, ...]) -> dict[str, str]:

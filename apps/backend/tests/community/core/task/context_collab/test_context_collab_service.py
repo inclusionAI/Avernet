@@ -1,6 +1,6 @@
 """Context collab 服务创建用例单测(Task 7)。
 
-覆盖 ``ContextCollabService.create_context``(spec §6.2 指定执行请求
+覆盖 ``ContextCollabService.create_collet``(spec §6.2 指定执行请求
 示例)、输入校验(未知枚举 / 空值 / 缺 executor)、幂等重放
 与结构授权器(§13:Single 必须有
 executor、append 身份、visibility 过滤)。仓储用手写 in-memory fake,
@@ -31,15 +31,16 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.collet i
     Collet,
     ColletState,
 )
-from agentclaw.community.core.task.context_collab.l6_products.context_spec import (
-    ContextSpec,
-)
+from tests.community.core.task.context_collab.creation_facts import creation_facts
 from agentclaw.community.core.task.context_collab.l4_context_primitives.task import Task
 from agentclaw.community.core.task.context_collab.l4_context_primitives.event_envelope import (
     EventRecord,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.task import (
     TaskStatus,
+)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.contracts import (
+    EventAppendCommand,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
     BindingState,
@@ -50,13 +51,13 @@ from agentclaw.community.core.task.context_collab.persistence.method_store impor
 from agentclaw.community.core.task.context_collab.persistence.repository import (
     ContextCollabRepositoryProtocol,
     ContextCreatedRecord,
-    CreateContextRecordRequest,
+    CreateColletRecordRequest,
 )
 from agentclaw.community.core.task.context_collab.service_api import (
     ActorContext,
     ContextCollabCreatedResult,
     ContextCollabServiceProtocol,
-    ContextCreateCommand,
+    ColletCreateCommand,
 )
 from agentclaw.community.core.task.context_collab.services.context_collab_service import (
     ContextCollabService,
@@ -71,7 +72,7 @@ PRINCIPAL = PrincipalRef(principal_type="human", principal_id="u_1001")
 EXECUTOR = AgentRef(agent_type="bot", agent_id="bot_coding_001")
 
 
-def make_create_command(**overrides) -> ContextCreateCommand:
+def make_create_command(**overrides) -> ColletCreateCommand:
     """用 spec §6.2 指定执行请求示例构造创建命令;可按字段覆盖。"""
     fields = {
         "space": SpaceRef(space_id="space_workspace_001", environment="prod"),
@@ -88,7 +89,7 @@ def make_create_command(**overrides) -> ContextCreateCommand:
         ],
     }
     fields.update(overrides)
-    return ContextCreateCommand(**fields)
+    return ColletCreateCommand(**fields)
 
 
 def make_actor(principal_id: str = "u_1001") -> ActorContext:
@@ -96,7 +97,7 @@ def make_actor(principal_id: str = "u_1001") -> ActorContext:
 
 
 class _FakeContextCollabRepository:
-    """手写 in-memory 仓储 fake,只实现 create_context 的 P1 语义。
+    """手写 in-memory 仓储 fake,只实现 create_collet 的 P1 语义。
 
     创建(不设幂等键,重复调用即重复创建):生成 ``collet_`` / ``evt_`` ID、
     初始快照(status=created、progress.percent=0、current_event_id=None)、
@@ -111,20 +112,20 @@ class _FakeContextCollabRepository:
         raise NotImplementedError("fake does not implement message counting")
 
     def __init__(self) -> None:
-        self.create_calls: list[CreateContextRecordRequest] = []
+        self.create_calls: list[CreateColletRecordRequest] = []
 
-    def create_context(
-        self, request: CreateContextRecordRequest
+    def create_collet(
+        self, request: CreateColletRecordRequest
     ) -> ContextCreatedRecord:
         self.create_calls.append(request)
 
         collab_context_id = "collet_" + uuid4().hex
         event_id = "evt_" + uuid4().hex
         task = Task(
-            objective=request.context_spec.objective,
+            objective=request.objective,
             status=TaskStatus.CREATED.value,
-            principal_ref=request.context_spec.principal_ref,
-            executor_ref=request.context_spec.executor_ref,
+            principal_ref=request.principal_ref,
+            executor_ref=request.executor_ref,
             task_id="task_" + collab_context_id,
             collet_ref=collab_context_id,
             version=1,
@@ -137,7 +138,7 @@ class _FakeContextCollabRepository:
             collet_id=collab_context_id,
             initiator_ref=request.initial_event.actor_ref,
             state=ColletState.ACTIVE,
-            scope=request.context_spec.space,
+            scope=request.space,
             current_event_id=event_id,
             version=1,
         )
@@ -155,16 +156,16 @@ class _FakeContextCollabRepository:
         )
         return ContextCreatedRecord(
             collet=collet,
-            context_spec=request.context_spec,
+            creation_facts=request.creation_facts,
             task=task,
             initial_event=initial_event,
         )
 
     def append_event(self, collab_context_id, request):
-        raise NotImplementedError("fake only implements create_context")
+        raise NotImplementedError("fake only implements create_collet")
 
     def get_current_status(self, collab_context_id, *, trunk_events):
-        raise NotImplementedError("fake only implements create_context")
+        raise NotImplementedError("fake only implements create_collet")
 
 
 class TestCreateContext:
@@ -178,7 +179,7 @@ class TestCreateContext:
         )
         actor = make_actor()
 
-        result = service.create_context(make_create_command(), actor)
+        result = service.create_collet(make_create_command(), actor)
 
         assert isinstance(result, ContextCollabCreatedResult)
         assert result.collab_context_id.startswith("collet_")
@@ -199,9 +200,9 @@ class TestCreateContext:
 
         # 服务传给仓储的创建请求语义(§6.2 / 初始事件)。
         request = repo.create_calls[0]
-        assert isinstance(request, CreateContextRecordRequest)
-        assert request.context_spec.method_kind == "Single"
-        assert request.context_spec.executor_ref == EXECUTOR
+        assert isinstance(request, CreateColletRecordRequest)
+        assert request.method_kind == "Single"
+        assert request.executor_ref == EXECUTOR
         assert request.initial_event.event_kind == "task.created"
         assert request.initial_event.primitive_type == "Task"
         assert request.initial_event.actor_ref == actor.actor
@@ -225,6 +226,7 @@ class TestCreateContext:
             },
             "product_kind": "team_todo",
             "workflow_kind": "team_todo_execution",
+            "product_profile_ref": {"profile_id": "team_todo", "version": 1},
         }
 
     def test_create_without_resource_refs_still_carries_empty_key(self):
@@ -237,7 +239,7 @@ class TestCreateContext:
             product_catalog=PRODUCT_CATALOG,
         )
 
-        service.create_context(make_create_command(resource_refs=[]), make_actor())
+        service.create_collet(make_create_command(resource_refs=[]), make_actor())
 
         request = repo.create_calls[0]
         assert request.initial_event.payload["resource_refs"] == []
@@ -249,7 +251,7 @@ class TestCreateContext:
             product_catalog=PRODUCT_CATALOG,
         )
         with pytest.raises(ContextCollabValidationError):
-            service.create_context(make_create_command(executor_ref=None), make_actor())
+            service.create_collet(make_create_command(executor_ref=None), make_actor())
 
     @pytest.mark.parametrize(
         "overrides",
@@ -273,7 +275,7 @@ class TestCreateContext:
             product_catalog=PRODUCT_CATALOG,
         )
         with pytest.raises(ContextCollabValidationError):
-            service.create_context(make_create_command(**overrides), make_actor())
+            service.create_collet(make_create_command(**overrides), make_actor())
 
     def test_service_satisfies_protocol(self):
         service = ContextCollabService(
@@ -293,13 +295,13 @@ class TestCreateContext:
         )
         for method_kind in ("Group", "Swarm"):
             with pytest.raises(ContextCollabValidationError, match="top-level"):
-                service.create_context(
+                service.create_collet(
                     make_create_command(method_kind=method_kind), make_actor()
                 )
         # 白名单内产品形态照常通过 G1 create 裁决(含 2026-11-13 新入的
         # 顶层单值 Open——任务代办产品的方法形态,spec 裁决 B)。
-        service.create_context(make_create_command(method_kind="Single"), make_actor())
-        service.create_context(
+        service.create_collet(make_create_command(method_kind="Single"), make_actor())
+        service.create_collet(
             make_create_command(
                 method_kind="Open + Group",
                 product_kind="public_discussion",
@@ -308,7 +310,7 @@ class TestCreateContext:
             make_actor(),
         )
         # 裸 "Open" 顶层放行:任务代办产品的协作形态。
-        service.create_context(
+        service.create_collet(
             make_create_command(
                 method_kind="Open",
                 product_kind="task_commission",
@@ -322,17 +324,17 @@ class _FixedIdContextCollabRepository(_FakeContextCollabRepository):
     """创建恒返回固定 collab_context_id 的 fake;用于顶层投影幂等用例的
     同命令重放(真实仓储创建不设幂等键,重放语义由 store 幂等承载)。"""
 
-    def create_context(
-        self, request: CreateContextRecordRequest
+    def create_collet(
+        self, request: CreateColletRecordRequest
     ) -> ContextCreatedRecord:
         self.create_calls.append(request)
         collab_context_id = "collet_projected_001"
         event_id = "evt_projected_001"
         task = Task(
-            objective=request.context_spec.objective,
+            objective=request.objective,
             status=TaskStatus.CREATED.value,
-            principal_ref=request.context_spec.principal_ref,
-            executor_ref=request.context_spec.executor_ref,
+            principal_ref=request.principal_ref,
+            executor_ref=request.executor_ref,
             task_id="task_" + collab_context_id,
             collet_ref=collab_context_id,
             version=1,
@@ -345,7 +347,7 @@ class _FixedIdContextCollabRepository(_FakeContextCollabRepository):
             collet_id=collab_context_id,
             initiator_ref=request.initial_event.actor_ref,
             state=ColletState.ACTIVE,
-            scope=request.context_spec.space,
+            scope=request.space,
             current_event_id=event_id,
             version=1,
         )
@@ -363,14 +365,14 @@ class _FixedIdContextCollabRepository(_FakeContextCollabRepository):
         )
         return ContextCreatedRecord(
             collet=collet,
-            context_spec=request.context_spec,
+            creation_facts=request.creation_facts,
             task=task,
             initial_event=initial_event,
         )
 
 
 class TestTopLevelProjection:
-    """create_context 成功路径的顶层 MethodBinding 投影(spec §9.2)。"""
+    """create_collet 成功路径的顶层 MethodBinding 投影(spec §9.2)。"""
 
     def test_create_projects_top_level_binding(self):
         store = InMemoryMethodStore()
@@ -379,18 +381,18 @@ class TestTopLevelProjection:
             repository=_FixedIdContextCollabRepository(),
             product_catalog=PRODUCT_CATALOG,
         )
-        created = service.create_context(make_create_command(), make_actor())
+        created = service.create_collet(make_create_command(), make_actor())
         bindings = store.list_bindings(current_axes(), created.collab_context_id)
         assert len(bindings) == 1
         binding = bindings[0]
         assert binding.state is BindingState.ACTIVE
-        assert binding.bind_reason == "create_context"
+        assert binding.bind_reason == "create_collet"
         assert binding.method_kind == "Single"
         assert binding.method_names == ("Single",)
         assert binding.participant_ref == "bot_coding_001"
 
         # 同命令重复创建(同 ID):顶层投影幂等,store 仍只一行。
-        again = service.create_context(make_create_command(), make_actor())
+        again = service.create_collet(make_create_command(), make_actor())
         assert again.collab_context_id == created.collab_context_id
         assert len(store.list_bindings(current_axes(), created.collab_context_id)) == 1
         rebound = store.list_bindings(current_axes(), created.collab_context_id)[0]
@@ -403,7 +405,7 @@ class TestTopLevelProjection:
             repository=_FixedIdContextCollabRepository(),
             product_catalog=PRODUCT_CATALOG,
         )
-        created = service.create_context(
+        created = service.create_collet(
             make_create_command(
                 method_kind="Open + Group",
                 executor_ref=None,
@@ -426,9 +428,11 @@ class _RecordingAuthorizer(StructuralContextCollabAuthorizer):
     def __init__(self) -> None:
         self.check_create_calls = []
 
-    def check_create(self, spec, actor) -> None:
-        self.check_create_calls.append((spec, actor))
-        super().check_create(spec, actor)
+    def check_create(self, *, method_kind, executor_ref, actor) -> None:
+        self.check_create_calls.append((method_kind, executor_ref, actor))
+        super().check_create(
+            method_kind=method_kind, executor_ref=executor_ref, actor=actor
+        )
 
 
 class TestAuthorizerSeam:
@@ -452,32 +456,18 @@ class TestAuthorizerSeam:
         )
         assert isinstance(authorizer, ContextCollabAuthorizerProtocol)
         actor = make_actor()
-        service.create_context(make_create_command(), actor)
+        service.create_collet(make_create_command(), actor)
         assert len(authorizer.check_create_calls) == 1
-        spec, checked_actor = authorizer.check_create_calls[0]
-        assert spec.method_kind == "Single"
+        method_kind, executor_ref, checked_actor = authorizer.check_create_calls[0]
+        assert method_kind == "Single"
+        assert executor_ref == EXECUTOR
         assert checked_actor is actor
 
 
-def _fake_spec() -> ContextSpec:
-    """构造带 principal/executor 的创建参数,供授权器身份测试用。"""
-    return ContextSpec(
-        space=SpaceRef(space_id="space_workspace_001", environment="prod"),
-        principal_ref=PrincipalRef("human", "u_1001"),
-        method_kind="Single",
-        executor_ref=AgentRef("bot", "bot_coding_001"),
-        objective=OBJECTIVE,
-        resource_refs=(),
-        product_kind=None,
-        workflow_kind=None,
-    )
-
-
 def _fake_collet() -> Collet:
-    """构造六字段最小 Collet,供授权器身份测试用。"""
     return Collet(
         collet_id="collet_todo_001",
-        initiator_ref=PrincipalRef("human", "u_1001"),
+        initiator_ref=PRINCIPAL,
         state=ColletState.ACTIVE,
         scope=SpaceRef(space_id="space_workspace_001", environment="prod"),
         current_event_id=None,
@@ -500,37 +490,82 @@ def _event(event_id: str, visibility: str) -> EventRecord:
     )
 
 
+def _fake_facts() -> dict:
+    return creation_facts(
+        method_kind="Single",
+        executor_ref=AgentRef("bot", "bot_coding_001"),
+        objective=OBJECTIVE,
+        resource_refs=(),
+        product_kind=None,
+        workflow_kind=None,
+    )
+
+
+def _fake_task() -> Task:
+    return Task(
+        task_id="task_collet_todo_001",
+        collet_ref="collet_todo_001",
+        objective=OBJECTIVE,
+        status=TaskStatus.CREATED.value,
+        version=1,
+        principal_ref=PRINCIPAL,
+        executor_ref=EXECUTOR,
+        parent_task_ref=None,
+        completion_conditions=(),
+        created_event_ref="evt_001",
+        last_event_ref="evt_001",
+    )
+
+
+def _append_command(*, actor: PrincipalRef, visibility: str = "private") -> EventAppendCommand:
+    return EventAppendCommand(
+        expected_version=1,
+        event_kind="task.progress.updated",
+        primitive_type="Activity",
+        actor_ref=actor,
+        parent_event=None,
+        visibility=visibility,
+        payload={},
+    )
+
+
 class TestStructuralAuthorizer:
     def test_check_create_single_requires_executor(self):
-        spec = ContextSpec(
-            space=SpaceRef(space_id="space_workspace_001", environment="prod"),
-            principal_ref=PRINCIPAL,
-            method_kind="Single",
-            executor_ref=None,
-            objective=OBJECTIVE,
-            resource_refs=(),
-            product_kind=None,
-            workflow_kind=None,
-        )
         with pytest.raises(ContextCollabValidationError):
-            StructuralContextCollabAuthorizer().check_create(spec, make_actor())
+            StructuralContextCollabAuthorizer().check_create(
+                method_kind="Single", executor_ref=None, actor=make_actor()
+            )
 
     def test_check_append_requires_principal_or_executor(self):
         authorizer = StructuralContextCollabAuthorizer()
         collet = _fake_collet()
-        spec = _fake_spec()
+        task = _fake_task()
+        facts = _fake_facts()
         # principal 通过
-        authorizer.check_append(collet, spec, None, make_actor("u_1001"))
+        authorizer.check_append(
+            collet, task, facts, None,
+            _append_command(actor=PRINCIPAL), make_actor("u_1001")
+        )
         # executor(agent_id 即 bot_coding_001)通过
-        authorizer.check_append(collet, spec, None, make_actor("bot_coding_001"))
+        bot_actor = PrincipalRef("bot", "bot_coding_001")
+        authorizer.check_append(
+            collet, task, facts, None,
+            _append_command(actor=bot_actor),
+            ActorContext(bot_actor, "a2a"),
+        )
         # 陌生 actor 拒绝
+        outsider = PrincipalRef("human", "u_9999")
         with pytest.raises(ContextCollabValidationError):
-            authorizer.check_append(collet, spec, None, make_actor("u_9999"))
+            authorizer.check_append(
+                collet, task, facts, None,
+                _append_command(actor=outsider), ActorContext(outsider, "api")
+            )
 
     def test_filter_visible_events_by_actor_role(self):
         authorizer = StructuralContextCollabAuthorizer()
         collet = _fake_collet()
-        spec = _fake_spec()
+        task = _fake_task()
+        facts = _fake_facts()
         events = [
             _event("evt_pub", "public"),
             _event("evt_ws", "workspace"),
@@ -538,20 +573,24 @@ class TestStructuralAuthorizer:
         ]
 
         principal_view = authorizer.filter_visible_events(
-            collet, spec, events, make_actor("u_1001")
+            collet, task, facts, None, events, make_actor("u_1001")
         )
         assert [e.event_id for e in principal_view] == [
-            "evt_pub",
-            "evt_ws",
-            "evt_priv",
+            "evt_pub", "evt_ws", "evt_priv"
         ]
 
         executor_view = authorizer.filter_visible_events(
-            collet, spec, events, make_actor("bot_coding_001")
+            collet,
+            task,
+            facts,
+            None,
+            events,
+            ActorContext(PrincipalRef("bot", "bot_coding_001"), "a2a"),
         )
         assert [e.event_id for e in executor_view] == ["evt_pub", "evt_ws"]
 
+        outsider = PrincipalRef("human", "u_9999")
         outsider_view = authorizer.filter_visible_events(
-            collet, spec, events, make_actor("u_9999")
+            collet, task, facts, None, events, ActorContext(outsider, "api")
         )
         assert [e.event_id for e in outsider_view] == ["evt_pub"]

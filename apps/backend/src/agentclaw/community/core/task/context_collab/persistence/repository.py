@@ -31,6 +31,7 @@ from agentclaw.community.core.task.context_collab.g3_observe_evaluate_evolve.vie
     project_current_snapshot,
 )
 from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
+    AgentRef,
     PrincipalRef,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
@@ -47,11 +48,20 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.task imp
     Task,
     TaskStatus,
 )
+from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_resource_refs import (
+    ResourceRef,
+    SpaceRef,
+)
 from agentclaw.community.core.task.context_collab.l6_products.catalog import (
     ProductCatalog,
 )
-from agentclaw.community.core.task.context_collab.l6_products.context_spec import (
-    ContextSpec,
+from agentclaw.community.core.task.context_collab.l6_products.contracts import (
+    VersionedProfileRef,
+)
+from agentclaw.community.core.task.context_collab.l6_products.creation_facts import (
+    creation_method_kind,
+    creation_product_kind,
+    decode_creation_facts,
 )
 from agentclaw.community.core.task.context_collab.l6_products.instance import (
     ProductInstance,
@@ -90,41 +100,77 @@ class InitialEventDraft:
 
 
 @dataclass
-class CreateContextRecordRequest:
-    """仓储创建请求;创建不设幂等键(spec 作者裁决:调用方无需防重)。"""
+class CreateColletRecordRequest:
+    """Flat L4/L6 creation inputs; no aggregate creation-spec object."""
 
-    context_spec: ContextSpec
+    space: SpaceRef
+    principal_ref: PrincipalRef
+    method_kind: str
+    executor_ref: AgentRef | None
+    objective: str
+    resource_refs: tuple[ResourceRef, ...]
+    product_kind: str | None
+    workflow_kind: str | None
+    product_profile_ref: VersionedProfileRef | None
     initial_event: InitialEventDraft
     completion_conditions: tuple[str, ...] = ()
+    creation_facts: dict | None = None
+
+
+@runtime_checkable
+class ContextCollabRepositoryProtocol(Protocol):
+    """SQL contract for Collet, Task and append-only Event authority."""
+
+    def create_collet(
+        self, request: CreateColletRecordRequest
+    ) -> ContextCreatedRecord: ...
+
+    def append_event(
+        self, collab_context_id: str, request: "AppendEventRecordRequest"
+    ) -> "EventAppendedRecord": ...
+
+    def get_current_status(
+        self, collab_context_id: str
+    ) -> "ContextStatusRecord | None": ...
+
+    def list_collets_by_product(
+        self, product_kind: str
+    ) -> "list[tuple[Collet, dict, datetime]]": ...
+
+    def count_message_events(
+        self, collab_context_ids: "Sequence[str]"
+    ) -> "dict[str, int]": ...
 
 
 class _RecordView:
-    """Compatibility view generated from Task; never used to adjudicate Work."""
+    """Compatibility views generated from Collet/Task and plain facts."""
+
+    collet: Collet
+    creation_facts: dict
+    task: Task | None
 
     @property
     def owner_principal_id(self) -> str:
-        """Creation identity for governance, including genuinely partial legacy rows."""
-        return self.context_spec.principal_ref.principal_id
+        return self.collet.initiator_ref.principal_id
 
     @property
     def designated_executor_id(self) -> str | None:
-        executor = self.context_spec.executor_ref
+        executor = self.task.executor_ref if self.task is not None else None
         return executor.agent_id if executor is not None else None
 
     @property
     def current_snapshot(self) -> CurrentSnapshot | None:
-        return project_current_snapshot(self.task, self.context_spec.method_kind)
+        if self.task is None:
+            return None
+        return project_current_snapshot(self.task, creation_method_kind(self.creation_facts))
 
 
 @dataclass
 class ContextCreatedRecord(_RecordView):
-    """New Collet, identified Task and creation evidence in one transaction.
-
-    ``current_snapshot`` is a derived compatibility property, not stored state.
-    """
+    """New Collet, identified Task and creation evidence in one transaction."""
 
     collet: Collet
-    context_spec: ContextSpec
+    creation_facts: dict
     task: Task
     initial_event: EventRecord
     product_instance: ProductInstance | None = None
@@ -132,16 +178,10 @@ class ContextCreatedRecord(_RecordView):
 
 @dataclass
 class ContextStatusRecord(_RecordView):
-    """``get_current_status`` 返回;events 按自增 id 升序即接纳顺序,
-    不做可见性过滤(visibility 过滤与 trunk 过滤在 service/Query 层)。
-
-    ``task`` is root Work authority; ``tasks`` enumerates this context's Tasks.
-    An explicitly partial legacy row may have neither. ``current_snapshot``
-    is a derived compatibility property, not a transition input.
-    """
+    """Current Collet, independent Task, event history and plain creation facts."""
 
     collet: Collet
-    context_spec: ContextSpec
+    creation_facts: dict
     task: Task | None
     events: list[EventRecord]
     tasks: tuple[Task, ...] = ()
@@ -154,33 +194,8 @@ class EventAppendedRecord(_RecordView):
 
     event: EventRecord
     collet: Collet
-    context_spec: ContextSpec
+    creation_facts: dict
     task: Task | None
-
-
-@runtime_checkable
-class ContextCollabRepositoryProtocol(Protocol):
-    """SQL contract for Collet, Task and append-only Event authority.
-
-    Creation starts both revisions at 1. Messages advance only Collet; Work
-    fences and advances both. Creation/appends add no replay-receipt contract.
-    """
-
-    def create_context(
-        self, request: CreateContextRecordRequest
-    ) -> ContextCreatedRecord: ...
-    def append_event(
-        self, collab_context_id: str, request: "AppendEventRecordRequest"
-    ) -> "EventAppendedRecord": ...
-    def get_current_status(
-        self, collab_context_id: str
-    ) -> "ContextStatusRecord | None": ...
-    def list_collets_by_product(
-        self, product_kind: str
-    ) -> "list[tuple[Collet, ContextSpec, datetime]]": ...
-    def count_message_events(
-        self, collab_context_ids: "Sequence[str]"
-    ) -> "dict[str, int]": ...
 
 
 def _dump_json(data: dict) -> str:
@@ -190,31 +205,23 @@ def _dump_json(data: dict) -> str:
 
 def _collet_from_row(
     row: ContextCollabColletModel,
-) -> tuple[Collet, ContextSpec]:
-    """落库行 → (``Collet``, L6 创建配置);显式逐字段构造。
-
-    严格解码(Ruling 方案 i):``actor_ref`` 列 NULL 的外部部分行不再
-    容忍,直接抛 ``ContextCollabValidationError``(聚合根的
-    ``initiator_ref`` 是必填身份)。Task 由独立存储严格加载;
-    ``scope`` 取 spec JSON 的 space;``state`` 暂以
-    ``ColletState.ACTIVE`` 种子(P2 换列读取)。
-    """
+) -> tuple[Collet, dict]:
+    """Decode the L4 Collet and plain creation facts from a storage row."""
     if row.actor_ref is None:
         raise ContextCollabValidationError(
-            f"collaboration context {row.collab_context_id!r} has a NULL "
-            "actor_ref column; the Collet aggregate requires a non-null "
-            "initiator_ref"
+            f"collaboration context {row.collab_context_id!r} has a NULL actor_ref column; "
+            "the Collet aggregate requires a non-null initiator_ref"
         )
-    spec = ContextSpec.from_dict(json.loads(row.context_spec))
+    facts = decode_creation_facts(json.loads(row.creation_facts))
     collet = Collet(
         collet_id=row.collab_context_id,
         initiator_ref=PrincipalRef.from_dict(json.loads(row.actor_ref)),
         state=ColletState.ACTIVE,
-        scope=spec.space,
+        scope=SpaceRef.from_dict(json.loads(row.scope)),
         current_event_id=row.current_event_id,
         version=int(row.context_version),
     )
-    return collet, spec
+    return collet, facts
 
 
 def _event_from_row(row: ContextCollabEventModel) -> EventRecord:
@@ -274,26 +281,37 @@ class ContextCollabRepository(ContextCollabRepositoryProtocol):
         transactional = getattr(self._db, "transactional_orm_session", None)
         return transactional() if transactional is not None else self._db.orm_session()
 
-    def create_context(
-        self, request: CreateContextRecordRequest
+    def create_collet(
+        self, request: CreateColletRecordRequest
     ) -> ContextCreatedRecord:
         """同一事务创建 Collet、独立 Task 及初始事件。
 
         创建不设幂等键(spec 作者裁决):重复调用即重复创建,自然防重
         由调用方保证。
         """
-        spec = request.context_spec
+        facts = decode_creation_facts(request.creation_facts or {
+            "objective": request.objective,
+            "resource_refs": [ref.to_dict() for ref in request.resource_refs],
+            "method_kind": request.method_kind,
+            "executor_ref": request.executor_ref.to_dict() if request.executor_ref else None,
+            "product_kind": request.product_kind,
+            "workflow_kind": request.workflow_kind,
+            "product_profile_ref": (
+                {"profile_id": request.product_profile_ref.profile_id, "version": request.product_profile_ref.version}
+                if request.product_profile_ref is not None else None
+            ),
+        })
         now = datetime.now(timezone.utc)
         collab_context_id = "collet_" + uuid4().hex
         event_id = "evt_" + uuid4().hex
         task = Task(
             task_id="task_" + uuid4().hex,
             collet_ref=collab_context_id,
-            objective=spec.objective,
+            objective=request.objective,
             status=TaskStatus.CREATED.value,
             version=1,
-            principal_ref=spec.principal_ref,
-            executor_ref=spec.executor_ref,
+            principal_ref=request.principal_ref,
+            executor_ref=request.executor_ref,
             parent_task_ref=None,
             completion_conditions=request.completion_conditions,
             created_event_ref=event_id,
@@ -318,30 +336,32 @@ class ContextCollabRepository(ContextCollabRepositoryProtocol):
             # 创建主体与初始事件的 actor_ref 同源(创建人)。
             initiator_ref=request.initial_event.actor_ref,
             state=ColletState.ACTIVE,
-            scope=spec.space,
+            scope=request.space,
             current_event_id=initial_event.event_id,
             version=1,
         )
         instance = (
             instantiate_product(
-                spec, collab_context_id, event_id, self._product_catalog
+                facts=facts,
+                collet_id=collab_context_id,
+                event_id=event_id,
+                principal_ref=request.principal_ref,
+                executor_ref=request.executor_ref,
+                catalog=self._product_catalog,
             )
-            if spec.product_profile_version is not None
+            if facts.get("product_profile_ref") is not None
             else None
         )
         with self._transaction() as db:
-            row = self._collet_row(collet, spec, task, now=now)
-            if instance is not None:
-                row.context_spec = _dump_json(
-                    {**spec.to_dict(), "product_instance": instance.to_dict()}
-                )
+            stored_facts = {**facts, **({"product_instance": instance.to_dict()} if instance is not None else {})}
+            row = self._collet_row(collet, stored_facts, task, now=now)
             db.add(row)
             db.add(self._task_row(task, now=now))
             db.add(self._event_row(initial_event, now=now))
             db.flush()
             return ContextCreatedRecord(
                 collet=collet,
-                context_spec=spec,
+                creation_facts=stored_facts,
                 task=task,
                 initial_event=initial_event,
                 product_instance=instance,
@@ -383,7 +403,7 @@ class ContextCollabRepository(ContextCollabRepositoryProtocol):
                     f"collaboration context {collab_context_id!r}"
                 )
 
-            previous, previous_spec = _collet_from_row(row)
+            previous, previous_facts = _collet_from_row(row)
             previous_task, _tasks = load_tasks(db, row)
             if previous_task is not None and row.root_task_ref is None:
                 old_rows = (
@@ -498,7 +518,7 @@ class ContextCollabRepository(ContextCollabRepositoryProtocol):
                     current_event_id=event.event_id,
                     version=context_version,
                 ),
-                context_spec=previous_spec,
+                creation_facts=previous_facts,
                 task=new_task,
             )
 
@@ -528,7 +548,7 @@ class ContextCollabRepository(ContextCollabRepositoryProtocol):
                 .order_by(ContextCollabEventModel.id.asc())
                 .all()
             )
-            collet, spec = _collet_from_row(row)
+            collet, facts = _collet_from_row(row)
             task, tasks = load_tasks(db, row)
             events = [_event_from_row(event_row) for event_row in event_rows]
             if row.root_task_ref is None:
@@ -536,10 +556,16 @@ class ContextCollabRepository(ContextCollabRepositoryProtocol):
             if task is not None and row.root_task_ref is None:
                 tasks = tuple(task if t.task_id == task.task_id else t for t in tasks)
             instance = decode_product_instance(
-                json.loads(row.context_spec),
-                spec,
-                collet.collet_id,
-                self._product_catalog,
+                facts,
+                collet_id=collet.collet_id,
+                event_id=event_rows[0].event_id if event_rows else "",
+                principal_ref=collet.initiator_ref,
+                executor_ref=(
+                    AgentRef.from_dict(facts["executor_ref"])
+                    if facts.get("executor_ref") is not None
+                    else None
+                ),
+                catalog=self._product_catalog,
             )
             if instance is not None and (
                 not event_rows or instance.creation_event_ref != event_rows[0].event_id
@@ -549,7 +575,7 @@ class ContextCollabRepository(ContextCollabRepositoryProtocol):
                 )
             return ContextStatusRecord(
                 collet=collet,
-                context_spec=spec,
+                creation_facts=facts,
                 task=task,
                 tasks=tasks,
                 events=events,
@@ -558,12 +584,12 @@ class ContextCollabRepository(ContextCollabRepositoryProtocol):
 
     def list_collets_by_product(
         self, product_kind: str
-    ) -> list[tuple[Collet, ContextSpec, datetime]]:
+    ) -> list[tuple[Collet, dict, datetime]]:
         """按 product profile 列 Collet(产品列表读,spec bbs-public-discussion §4)。
 
         域类型直出,零发明 record:元组三元素 = 聚合根、创建参数
         (过滤源 + 过渡期 title 伴随)、``gmt_create``。过滤在 Python 侧
-        解 ``context_spec`` JSON 后进行(§6-E 裁决:表小、方言差异大);
+        解 ``creation_facts`` JSON 后进行(§6-E 裁决:表小、方言差异大);
         按 ``gmt_create`` 倒序。**列表容错**:严格解码(``_collet_from_row``
         抛 ``ContextCollabValidationError``)的外部部分行跳过并告警——
         单点 ``get_current_status`` 维持方案 i 响亮失败,不动。
@@ -575,10 +601,10 @@ class ContextCollabRepository(ContextCollabRepositoryProtocol):
                 .order_by(ContextCollabColletModel.gmt_create.desc())
                 .all()
             )
-            listed: list[tuple[Collet, ContextSpec, datetime]] = []
+            listed: list[tuple[Collet, dict, datetime]] = []
             for row in rows:
                 try:
-                    collet, spec = _collet_from_row(row)
+                    collet, facts = _collet_from_row(row)
                 except ContextCollabValidationError as error:
                     _logger.warning(
                         "skip undecodable collab context row %s in product listing: %s",
@@ -586,9 +612,9 @@ class ContextCollabRepository(ContextCollabRepositoryProtocol):
                         error,
                     )
                     continue
-                if spec.product_kind != product_kind:
+                if creation_product_kind(facts) != product_kind:
                     continue
-                listed.append((collet, spec, row.gmt_create))
+                listed.append((collet, facts, row.gmt_create))
             return listed
 
     def count_message_events(self, collab_context_ids: Sequence[str]) -> dict[str, int]:
@@ -619,20 +645,17 @@ class ContextCollabRepository(ContextCollabRepositoryProtocol):
     @staticmethod
     def _collet_row(
         collet: Collet,
-        spec: ContextSpec,
+        creation_facts: dict,
         task: Task | None,
         *,
         now: datetime,
     ) -> ContextCollabColletModel:
-        """Persist context/composition plus root Task reference, never a view.
-
-        Tenant is stamped by the ORM guard. Task itself is stored separately.
-        """
+        """Persist L4 scope plus plain creation facts and root Task reference."""
         return ContextCollabColletModel(
             collab_context_id=collet.collet_id,
-            # 创建主体引用与初始事件 actor_ref 同源;严格解码后恒非空。
             actor_ref=_dump_json(collet.initiator_ref.to_dict()),
-            context_spec=_dump_json(spec.to_dict()),
+            scope=_dump_json(collet.scope.to_dict()),
+            creation_facts=_dump_json(creation_facts),
             current_snapshot=None,
             root_task_ref=task.task_id if task else None,
             current_event_id=collet.current_event_id,

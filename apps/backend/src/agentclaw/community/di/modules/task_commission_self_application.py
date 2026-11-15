@@ -16,6 +16,8 @@ from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context
     ActorContext,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.participants import (
+    ROLE_SELECTED_AGENT,
+    RoleBinding,
     role_binding_ref,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
@@ -32,6 +34,12 @@ from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime 
 )
 from agentclaw.community.core.task.context_collab.l6_products.binding import (
     product_definition,
+)
+from agentclaw.community.core.task.context_collab.l6_products.creation_facts import (
+    creation_method_kind,
+    creation_profile_ref,
+    creation_product_kind,
+    creation_workflow_kind,
 )
 from agentclaw.community.core.task.context_collab.l6_products.catalog import (
     ProductCatalog,
@@ -101,6 +109,22 @@ class TaskCommissionSelfApplicationAdapter(TaskCommissionOpenMethodAdapter):
             )
         return profile
 
+    @staticmethod
+    def _selected_agent_role_refs(
+        collab_context_id: str, profile: ProductProfileDefinition
+    ) -> tuple[str, ...]:
+        return tuple(
+            role_binding_ref(
+                collab_context_id,
+                RoleBinding(
+                    role=role.l4_role,
+                    participant_id=f"participant_{role.participant_source}",
+                ),
+            )
+            for role in profile.scenario_roles
+            if role.l4_role == ROLE_SELECTED_AGENT
+        )
+
     def publish_designated_opportunity(
         self, command: AssigneeAdmissionCommand, context: ActorContext
     ) -> str:
@@ -108,10 +132,16 @@ class TaskCommissionSelfApplicationAdapter(TaskCommissionOpenMethodAdapter):
         record = self._repo.get_current_status(command.collab_context_id)
         if (
             record is None
-            or record.context_spec.principal_ref != context.actor
+            or record.collet.initiator_ref != context.actor
             or command.accountable_principal_id != context.actor.principal_id
             or record.designated_executor_id != command.assignee_agent_id
-            or product_definition(record.context_spec, self._product_catalog) != profile
+            or product_definition(
+                product_kind=creation_product_kind(record.creation_facts),
+                workflow_kind=creation_workflow_kind(record.creation_facts),
+                method_kind=creation_method_kind(record.creation_facts),
+                profile_ref=creation_profile_ref(record.creation_facts),
+                catalog=self._product_catalog,
+            ) != profile
             or command.method_binding_ref
             != top_level_binding_id(command.collab_context_id)
         ):
@@ -135,7 +165,7 @@ class TaskCommissionSelfApplicationAdapter(TaskCommissionOpenMethodAdapter):
 
     @staticmethod
     def _designated(record: ContextStatusRecord, context: ActorContext) -> bool:
-        executor = record.context_spec.executor_ref
+        executor = record.task.executor_ref if record.task is not None else None
         return (
             executor is not None
             and context.actor.principal_type == "bot"
@@ -153,10 +183,10 @@ class TaskCommissionSelfApplicationAdapter(TaskCommissionOpenMethodAdapter):
             raise ContextCollabValidationError("opportunity discovery requires a Bot")
         axes = current_axes()
         views = []
-        for collet, spec, _ in self._repo.list_collets_by_product(
+        for collet, facts, _ in self._repo.list_collets_by_product(
             profile.ref.profile_id
         ):
-            if spec.product_profile_version != profile.ref.version:
+            if creation_profile_ref(facts) != profile.ref:
                 continue
             record = self._repo.get_current_status(collet.collet_id)
             if (
@@ -188,7 +218,7 @@ class TaskCommissionSelfApplicationAdapter(TaskCommissionOpenMethodAdapter):
                         opportunity.opportunity_id,
                         binding_id,
                         profile.ref,
-                        spec.objective,
+                        record.task.objective,
                         opportunity.scope_ref,
                     )
                 )
@@ -223,11 +253,10 @@ class TaskCommissionSelfApplicationAdapter(TaskCommissionOpenMethodAdapter):
             OpenApplicationCommand(
                 applicant_agent_ref=context.actor.principal_id,
                 accountable_principal_ref=command.accountable_principal_id,
-                requested_role_refs=[
-                    role_binding_ref(command.collab_context_id, role)
-                    for role in record.context_spec.role_bindings
-                    if role.role == "selected-agent"
-                ],
+                requested_role_refs=self._selected_agent_role_refs(
+                    command.collab_context_id,
+                    self._self_service_profile(command.product_profile_ref),
+                ),
                 reason="task_commission.bot_self_application",
             ),
             context,
@@ -258,7 +287,13 @@ class TaskCommissionSelfApplicationAdapter(TaskCommissionOpenMethodAdapter):
             or not self._designated(record, context)
             or record.task is None
             or record.task.status != "created"
-            or product_definition(record.context_spec, self._product_catalog) != profile
+            or product_definition(
+                product_kind=creation_product_kind(record.creation_facts),
+                workflow_kind=creation_workflow_kind(record.creation_facts),
+                method_kind=creation_method_kind(record.creation_facts),
+                profile_ref=creation_profile_ref(record.creation_facts),
+                catalog=self._product_catalog,
+            ) != profile
             or binding_id != top_level_binding_id(command.collab_context_id)
             or binding is None
             or binding.state is not BindingState.ACTIVE
@@ -276,17 +311,15 @@ class TaskCommissionSelfApplicationAdapter(TaskCommissionOpenMethodAdapter):
             or opportunity.capacity != profile.require_publication().admission.capacity
         ):
             raise ContextCollabValidationError("application unavailable for task review")
-        expected_roles = tuple(
-            role_binding_ref(command.collab_context_id, role)
-            for role in record.context_spec.role_bindings
-            if role.role == "selected-agent"
+        expected_roles = self._selected_agent_role_refs(
+            command.collab_context_id, profile
         )
         if not expected_roles or application.requested_role_refs != expected_roles:
             raise ContextCollabValidationError("application roles do not match task")
         # The owner authorized this exact bounded rule when publishing the
         # opportunity. This is policy execution, not a forged inbound Bot/user.
         policy_context = ActorContext(
-            record.context_spec.principal_ref, source="product_policy"
+            record.collet.initiator_ref, source="product_policy"
         )
         self._open_ops.screen(
             command.collab_context_id,
@@ -351,11 +384,16 @@ class TaskCommissionSelfApplicationAdapter(TaskCommissionOpenMethodAdapter):
                 axes, binding_id, collab_context_id
             )
         }
-        expected_roles = tuple(
-            role_binding_ref(collab_context_id, role)
-            for role in record.context_spec.role_bindings
-            if role.role == "selected-agent"
+        profile = product_definition(
+            product_kind=creation_product_kind(record.creation_facts),
+            workflow_kind=creation_workflow_kind(record.creation_facts),
+            method_kind=creation_method_kind(record.creation_facts),
+            profile_ref=creation_profile_ref(record.creation_facts),
+            catalog=self._product_catalog,
         )
+        if profile is None:
+            raise ContextCollabValidationError("task has no product profile")
+        expected_roles = self._selected_agent_role_refs(collab_context_id, profile)
         for decision in self._store.list_decisions(axes, binding_id, collab_context_id):
             app = applications.get(decision.application_ref)
             if (

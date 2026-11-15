@@ -31,9 +31,7 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.collet i
     Collet,
     ColletState,
 )
-from agentclaw.community.core.task.context_collab.l6_products.context_spec import (
-    ContextSpec,
-)
+from tests.community.core.task.context_collab.creation_facts import creation_facts
 from agentclaw.community.core.task.context_collab.l4_context_primitives.task import Task
 from agentclaw.community.core.task.context_collab.l4_context_primitives.event_envelope import (
     EventRecord,
@@ -80,13 +78,13 @@ class _FakeRepo:
         rows = [
             (
                 record.collet,
-                record.context_spec,
+                record.creation_facts,
                 self._gmt_create.get(
                     record.collet.collet_id, datetime(2026, 11, 13, 9, 0, 0)
                 ),
             )
             for record in self._status.values()
-            if record.context_spec.product_kind == product_kind
+            if record.creation_facts["product_kind"] == product_kind
         ]
         return sorted(rows, key=lambda row: row[2], reverse=True)
 
@@ -101,7 +99,7 @@ class _FakeRepo:
             if cid in self._status
         }
 
-    def create_context(self, request):
+    def create_collet(self, request):
         raise NotImplementedError("read tests use full-flow service")
 
 
@@ -210,8 +208,8 @@ def _adv(collab_context_id, **overrides):
     return TaskAdvanceCommand(**fields)
 
 
-def _open_group_spec(objective: str) -> ContextSpec:
-    return ContextSpec(
+def _open_group_spec(objective: str) -> dict:
+    return creation_facts(
         space=SPACE,
         principal_ref=PRINCIPAL,
         method_kind="Open + Group",
@@ -223,7 +221,7 @@ def _open_group_spec(objective: str) -> ContextSpec:
     )
 
 
-def _status_record(collab_context_id: str, spec: ContextSpec):
+def _status_record(collab_context_id: str, spec: dict):
     return ContextStatusRecord(
         collet=Collet(
             collet_id=collab_context_id,
@@ -233,7 +231,7 @@ def _status_record(collab_context_id: str, spec: ContextSpec):
             current_event_id=None,
             version=1,
         ),
-        context_spec=spec,
+        creation_facts=spec,
         tasks=(
             Task(
                 objective=spec.objective,
@@ -287,7 +285,7 @@ class _WriteRepoShim(_FakeRepo):
     def __init__(self):
         super().__init__()
 
-    def create_context(self, request):
+    def create_collet(self, request):
         from uuid import uuid4
 
         collab_context_id = "collet_" + uuid4().hex
@@ -296,10 +294,10 @@ class _WriteRepoShim(_FakeRepo):
 
         now = datetime.now(_tz.utc)
         task = Task(
-            objective=request.context_spec.objective,
+            objective=request.objective,
             status="created",
-            principal_ref=request.context_spec.principal_ref,
-            executor_ref=request.context_spec.executor_ref,
+            principal_ref=request.principal_ref,
+            executor_ref=request.executor_ref,
             task_id="task_" + collab_context_id,
             collet_ref=collab_context_id,
             version=1,
@@ -320,7 +318,7 @@ class _WriteRepoShim(_FakeRepo):
             collet_id=collab_context_id,
             initiator_ref=request.initial_event.actor_ref,
             state=_ColletState.ACTIVE,
-            scope=request.context_spec.space,
+            scope=request.space,
             current_event_id=event_id,
             version=1,
         )
@@ -338,14 +336,14 @@ class _WriteRepoShim(_FakeRepo):
         )
         self._status[collab_context_id] = ContextStatusRecord(
             collet=collet,
-            context_spec=request.context_spec,
+            creation_facts=request.creation_facts,
             tasks=(task,) if task is not None else (),
             task=task,
             events=[initial_event],
         )
         return ContextCreatedRecord(
             collet=collet,
-            context_spec=request.context_spec,
+            creation_facts=request.creation_facts,
             task=task,
             initial_event=initial_event,
         )
@@ -386,7 +384,7 @@ class _WriteRepoShim(_FakeRepo):
         )
         self._status[collab_context_id] = ContextStatusRecord(
             collet=new_collet,
-            context_spec=record.context_spec,
+            creation_facts=record.creation_facts,
             tasks=(new_task,) if new_task is not None else (),
             task=new_task,
             events=[*record.events, event],
@@ -398,6 +396,6 @@ class _WriteRepoShim(_FakeRepo):
         return EventAppendedRecord(
             event=event,
             collet=new_collet,
-            context_spec=record.context_spec,
+            creation_facts=record.creation_facts,
             task=new_task,
         )

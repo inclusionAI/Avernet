@@ -28,9 +28,7 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.collet i
     Collet,
     ColletState,
 )
-from agentclaw.community.core.task.context_collab.l6_products.context_spec import (
-    ContextSpec,
-)
+from tests.community.core.task.context_collab.creation_facts import creation_facts
 from agentclaw.community.core.task.context_collab.persistence.models import (
     ContextCollabColletModel,
 )
@@ -99,14 +97,14 @@ def test_unknown_top_level_keys_rejected():
     with pytest.raises(ContextCollabValidationError):
         Collet.from_dict(_collet_dict(collab_context_id="collet_todo_001"))
     with pytest.raises(ContextCollabValidationError):
-        Collet.from_dict(_collet_dict(context_spec={}))
+        Collet.from_dict(_collet_dict(creation_facts={}))
     with pytest.raises(ContextCollabValidationError):
         Collet.from_dict(_collet_dict(extra_key="x"))
 
 
-def _row_spec() -> ContextSpec:
+def _row_spec() -> dict:
     """裸 SQL 插行所需的最小创建参数 JSON。"""
-    return ContextSpec(
+    return creation_facts(
         space=SpaceRef(space_id="space_workspace_001", environment="prod"),
         principal_ref=PrincipalRef(principal_type="human", principal_id="u_1001"),
         method_kind="Single",
@@ -128,7 +126,7 @@ def test_null_initiator_row_decode_raises(db, engine):
             sql_insert(ContextCollabColletModel).values(
                 collab_context_id=context_id,
                 actor_ref=None,
-                context_spec=json.dumps(_row_spec().to_dict(), ensure_ascii=False),
+                creation_facts=json.dumps(_row_spec().to_dict(), ensure_ascii=False),
                 current_snapshot=None,
                 context_version=1,
             )

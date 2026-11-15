@@ -50,7 +50,7 @@ def _binding_dict(method_kind: str = "Single") -> dict:
         "config": {},
         "state": "BOUND",
         "version": 1,
-        "bind_reason": "create_context",
+        "bind_reason": "create_collet",
         "g3_subject_type": None,
         # 边最初以 BOUND 创建;时间戳由 store 层管理,这里仅是 ISO 字符串。
         "transitioned_from": "",

@@ -31,9 +31,7 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.collet i
     Collet,
     ColletState,
 )
-from agentclaw.community.core.task.context_collab.l6_products.context_spec import (
-    ContextSpec,
-)
+from tests.community.core.task.context_collab.creation_facts import creation_facts
 from agentclaw.community.core.task.context_collab.l4_context_primitives.task import Task
 from agentclaw.community.core.task.context_collab.l4_context_primitives.task import (
     TaskStatus,
@@ -62,8 +60,8 @@ def make_actor(principal_id: str = PRINCIPAL_ID) -> ActorContext:
     return ActorContext(actor=PrincipalRef("human", principal_id), source="api")
 
 
-def _context_spec(*, method_kind: str = "Single") -> ContextSpec:
-    return ContextSpec(
+def _context_spec(*, method_kind: str = "Single") -> dict:
+    return creation_facts(
         space=SpaceRef(space_id="space_workspace_001", environment="prod"),
         principal_ref=PrincipalRef("human", PRINCIPAL_ID),
         method_kind=method_kind,
@@ -101,7 +99,7 @@ def _status_record(collab_context_id: str = COLLET_ID) -> ContextStatusRecord:
     )
     return ContextStatusRecord(
         collet=collet,
-        context_spec=spec,
+        creation_facts=spec,
         tasks=(task,) if task is not None else (),
         task=task,
         events=[],
@@ -123,7 +121,7 @@ class _FakeCollabRepository:
     def get_current_status(self, collab_context_id: str):
         return self._records.get(collab_context_id)
 
-    def create_context(self, request):
+    def create_collet(self, request):
         raise NotImplementedError("fake only implements get_current_status")
 
     def append_event(self, request):

@@ -1,6 +1,6 @@
 """Context collab 服务用例编排(G1 校验 + G4 状态机 + G3 投影 + 仓储)。
 
-本文件实现 ``create_context``(spec §6.2)、``append_event``
+本文件实现 ``create_collet``(spec §6.2)、``append_event``
 (spec §6.3,接入 G4 状态机与守卫)与 ``get_status``(spec §6.4,
 纯读路径:visibility 过滤 → G3 投影 → 进度统计,不写任何行)。
 服务层不感知 HTTP/Pydantic,仓储与授权都以协议注入。
@@ -48,17 +48,18 @@ from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime 
     current_axes,
 )
 from agentclaw.community.core.task.context_collab.l6_products.binding import (
-    prepare_product_spec,
+    prepare_product_profile,
     product_definition,
 )
 from agentclaw.community.core.task.context_collab.l6_products.catalog import (
     ProductCatalog,
 )
-from agentclaw.community.core.task.context_collab.l6_products.context_spec import (
-    ContextSpec,
-)
 from agentclaw.community.core.task.context_collab.l6_products.creation_facts import (
+    creation_method_kind,
+    creation_profile_ref,
+    creation_product_kind,
     creation_payload,
+    creation_workflow_kind,
 )
 from agentclaw.community.core.task.context_collab.l6_products.profiles import (
     WorkflowKind,
@@ -69,7 +70,7 @@ from agentclaw.community.core.task.context_collab.persistence.method_store impor
 from agentclaw.community.core.task.context_collab.persistence.repository import (
     AppendEventRecordRequest,
     ContextCollabRepositoryProtocol,
-    CreateContextRecordRequest,
+    CreateColletRecordRequest,
     InitialEventDraft,
 )
 from agentclaw.community.core.task.context_collab.service_api import (
@@ -77,7 +78,7 @@ from agentclaw.community.core.task.context_collab.service_api import (
     ContextCollabCreatedResult,
     ContextCollabServiceProtocol,
     ContextCollabStatusProjection,
-    ContextCreateCommand,
+    ColletCreateCommand,
     EventAcceptedResult,
     EventAppendCommand,
     TaskProgressProjectionDTO,
@@ -160,8 +161,8 @@ class ContextCollabService(ContextCollabServiceProtocol):
         self._method_store = method_store
         self._authorizer = authorizer
 
-    def create_context(
-        self, command: ContextCreateCommand, context: ActorContext
+    def create_collet(
+        self, command: ColletCreateCommand, context: ActorContext
     ) -> ContextCollabCreatedResult:
         """创建用例(spec §6.2):校验 → G1 check → 仓储创建 → L5 顶层投影
         → 组装结果。
@@ -172,37 +173,52 @@ class ContextCollabService(ContextCollabServiceProtocol):
         (spec 作者裁决):重复调用即重复创建。
         """
         objective = _required_str(command.objective, "objective")
-        spec = ContextSpec(
-            space=command.space,
+        method_kind = MethodKind.from_wire(command.method_kind).value
+        self._authorizer.check_create(
+            method_kind=method_kind,
+            executor_ref=command.executor_ref,
+            actor=context,
+        )
+        if command.product_kind is None and command.workflow_kind is not None:
+            if command.workflow_kind not in {item.value for item in WorkflowKind}:
+                raise ContextCollabValidationError(
+                    f"unknown workflow_kind value: {command.workflow_kind!r}"
+                )
+        profile = prepare_product_profile(
+            product_kind=command.product_kind,
+            workflow_kind=command.workflow_kind,
+            method_kind=method_kind,
+            profile_ref=command.product_profile_ref,
             principal_ref=command.principal_ref,
-            method_kind=MethodKind.from_wire(command.method_kind).value,
+            executor_ref=command.executor_ref,
+            catalog=self._product_catalog,
+        )
+        facts = creation_payload(
+            method_kind=method_kind,
             executor_ref=command.executor_ref,
             objective=objective,
             resource_refs=tuple(command.resource_refs),
             product_kind=command.product_kind,
             workflow_kind=command.workflow_kind,
+            product_profile_ref=profile.ref if profile is not None else None,
         )
-        self._authorizer.check_create(spec, context)
-        if spec.product_kind is None and spec.workflow_kind is not None:
-            if spec.workflow_kind not in {item.value for item in WorkflowKind}:
-                raise ContextCollabValidationError(
-                    f"unknown workflow_kind value: {spec.workflow_kind!r}"
-                )
-        spec = prepare_product_spec(spec, self._product_catalog)
-
-        record = self._repository.create_context(
-            CreateContextRecordRequest(
-                context_spec=spec,
+        record = self._repository.create_collet(
+            CreateColletRecordRequest(
+                space=command.space,
+                principal_ref=command.principal_ref,
+                method_kind=method_kind,
+                executor_ref=command.executor_ref,
+                objective=objective,
+                resource_refs=tuple(command.resource_refs),
+                product_kind=command.product_kind,
+                workflow_kind=command.workflow_kind,
+                product_profile_ref=profile.ref if profile is not None else None,
+                creation_facts=facts,
                 initial_event=InitialEventDraft(
                     event_kind=CREATION_EVENT_KIND,
                     primitive_type=CREATION_PRIMITIVE_TYPE,
                     actor_ref=context.actor,
-                    # 创建事实全量入初始事件 payload(事件承载,spec
-                    # 2026-11-12-context-collab-l4-creation-event-facts):
-                    # 唯一装配点在 L6 ``creation_facts.creation_payload``,
-                    # 与产品层(products/)共用防漂移。恒带全部 key,None 也
-                    # 写 null——新行与存量行判别有据。
-                    payload=creation_payload(spec, objective),
+                    payload=facts,
                 ),
             )
         )
@@ -215,10 +231,12 @@ class ContextCollabService(ContextCollabServiceProtocol):
             self._method_store,
             current_axes(),
             record.collet.collet_id,
-            spec,
-            context,
+            method_kind=method_kind,
+            principal_ref=command.principal_ref,
+            executor_ref=command.executor_ref,
+            profile=profile,
+            context=context,
             now=_now(),
-            catalog=self._product_catalog,
         )
 
         # 结果快照是兼容视图;当前事件指针来自持久化的初始 Event。
@@ -256,14 +274,17 @@ class ContextCollabService(ContextCollabServiceProtocol):
             visibility=command.visibility,
             payload=command.payload,
         )
-        self._authorizer.check_append(collet, status.context_spec, command, context)
+        self._authorizer.check_append(
+            collet, status.task, status.creation_facts, status.product_instance, command, context
+        )
 
         # Fast stale-request rejection precedes sequence checks; repository CAS
         # remains authoritative for a writer racing after this read.
         ensure_expected_version(command.expected_version, collet.version)
         validate_product_event(
             catalog=self._product_catalog,
-            spec=status.context_spec,
+            creation_facts=status.creation_facts,
+            product_instance=status.product_instance,
             task=status.task,
             event_kind=command.event_kind,
             primitive_type=command.primitive_type,
@@ -273,7 +294,13 @@ class ContextCollabService(ContextCollabServiceProtocol):
             parent_event=command.parent_event,
             events=status.events,
         )
-        profile = product_definition(status.context_spec, self._product_catalog)
+        profile = product_definition(
+            product_kind=creation_product_kind(status.creation_facts),
+            workflow_kind=creation_workflow_kind(status.creation_facts),
+            method_kind=creation_method_kind(status.creation_facts),
+            profile_ref=creation_profile_ref(status.creation_facts),
+            catalog=self._product_catalog,
+        )
         machine_ref = (
             profile.workflow.state_machine_ref if profile is not None else None
         )
@@ -292,7 +319,7 @@ class ContextCollabService(ContextCollabServiceProtocol):
             actor=context.actor,
             workflow_kind=machine_ref.profile_id
             if machine_ref
-            else status.context_spec.workflow_kind,
+            else creation_workflow_kind(status.creation_facts),
             workflow_version=machine_ref.version if machine_ref else None,
         )
         record = prepared.commit(self._repository)
@@ -329,7 +356,7 @@ class ContextCollabService(ContextCollabServiceProtocol):
             )
         collet = status.collet
         visible_events = self._authorizer.filter_visible_events(
-            collet, status.context_spec, status.events, context
+            collet, status.task, status.creation_facts, status.product_instance, status.events, context
         )
         # 投影始终基于全量可见事件,不因 trunk 开关退化;
         # trunk 过滤 = 当前活动链(active_chain_ids)在投影条目上的子集。

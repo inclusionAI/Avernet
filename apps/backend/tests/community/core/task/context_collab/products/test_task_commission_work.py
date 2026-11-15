@@ -306,7 +306,7 @@ class TestBoundary:
                 current_event_id=None,
                 version=1,
             ),
-            context_spec=_bbs_spec(),
+            creation_facts=_bbs_spec(),
             task=None,
             events=[],
         )

@@ -47,13 +47,13 @@ def _actor_context(user: AuthenticatedUser) -> ActorContext:
 
 @router.post("/context_collab", response_model=Envelope[ContextCollabCreatedResultDto])
 @envelope_errors
-async def create_context_collab(
+async def create_collet_collab(
     body: ColletCreateRequest,
     request: Request,
     user: AuthenticatedUser = Depends(get_current_user),
     service: ContextCollabServiceProtocol = Injected(ContextCollabServiceProtocol),  # noqa: B008
 ) -> Envelope[ContextCollabCreatedResultDto]:
-    result = service.create_context(body.to_domain(), _actor_context(user))
+    result = service.create_collet(body.to_domain(), _actor_context(user))
     return envelope(created_result_to_dto(result), request)
 
 

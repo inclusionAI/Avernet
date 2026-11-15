@@ -19,9 +19,6 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.collet i
     Collet,
     ColletState,
 )
-from agentclaw.community.core.task.context_collab.l6_products.context_spec import (
-    ContextSpec,
-)
 from agentclaw.community.core.task.context_collab.l4_context_primitives.task import Task
 from agentclaw.community.core.task.context_collab.l4_context_primitives.task import (
     TaskStatus,
@@ -97,17 +94,17 @@ def _past_iso(hours: float = 1.0) -> str:
     return (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
 
 
-def _context_spec(*, method_kind: str = "Open + Group") -> ContextSpec:
-    return ContextSpec(
-        space=SpaceRef(space_id="space_workspace_001", environment="prod"),
-        principal_ref=PrincipalRef("human", PRINCIPAL_ID),
-        method_kind=method_kind,
-        executor_ref=AgentRef("bot", EXECUTOR_ID),
-        objective=OBJECTIVE,
-        resource_refs=(),
-        product_kind=None,
-        workflow_kind=None,
-    )
+def _creation_facts(*, method_kind: str = "Open + Group") -> dict:
+    """Plain persisted creation facts; L4/L5 objects stay separate."""
+    return {
+        "objective": OBJECTIVE,
+        "resource_refs": [],
+        "method_kind": method_kind,
+        "executor_ref": AgentRef("bot", EXECUTOR_ID).to_dict(),
+        "product_kind": None,
+        "workflow_kind": None,
+        "product_profile_ref": None,
+    }
 
 
 def _status_record(**overrides) -> ContextStatusRecord:
@@ -118,7 +115,7 @@ def _status_record(**overrides) -> ContextStatusRecord:
         "method_kind": "Open + Group",
     }
     fields.update(overrides)
-    spec = _context_spec(method_kind=fields["method_kind"])
+    creation_facts = _creation_facts(method_kind=fields["method_kind"])
     principal_ref = PrincipalRef("human", PRINCIPAL_ID)
     executor_ref = AgentRef("bot", EXECUTOR_ID)
     task = Task(
@@ -138,13 +135,13 @@ def _status_record(**overrides) -> ContextStatusRecord:
         collet_id=fields["collab_context_id"],
         initiator_ref=principal_ref,
         state=ColletState.ACTIVE,
-        scope=spec.space,
+        scope=SpaceRef(space_id="space_workspace_001", environment="prod"),
         current_event_id=None,
         version=1,
     )
     return ContextStatusRecord(
         collet=collet,
-        context_spec=spec,
+        creation_facts=creation_facts,
         tasks=(task,) if task is not None else (),
         task=task,
         events=[],
@@ -166,7 +163,7 @@ class _FakeCollabRepository:
     def get_current_status(self, collab_context_id: str):
         return self._records.get(collab_context_id)
 
-    def create_context(self, request):
+    def create_collet(self, request):
         raise NotImplementedError("fake only implements get_current_status")
 
     def append_event(self, collab_context_id: str, request):

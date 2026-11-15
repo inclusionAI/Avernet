@@ -39,9 +39,7 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.collet i
     Collet,
     ColletState,
 )
-from agentclaw.community.core.task.context_collab.l6_products.context_spec import (
-    ContextSpec,
-)
+from tests.community.core.task.context_collab.creation_facts import creation_facts
 from agentclaw.community.core.task.context_collab.l4_context_primitives.event_envelope import (
     EventRecord,
 )
@@ -90,12 +88,12 @@ class _FakeRepo:
         gmt = getattr(self, "_gmt_create", {})
         rows = []
         for record in self._status.values():
-            if record.context_spec.product_kind != product_kind:
+            if record.creation_facts["product_kind"] != product_kind:
                 continue
             rows.append(
                 (
                     record.collet,
-                    record.context_spec,
+                    record.creation_facts,
                     gmt.get(
                         record.collet.collet_id,
                         datetime.now(timezone.utc),
@@ -116,7 +114,7 @@ class _FakeRepo:
             if cid in self._status
         }
 
-    def create_context(self, request):
+    def create_collet(self, request):
         raise NotImplementedError("read tests use add_record")
 
     def append_event(self, collab_context_id, request):
@@ -161,8 +159,8 @@ class _FakeRepo:
         )
 
     @staticmethod
-    def bbs_spec(objective: str) -> ContextSpec:
-        return ContextSpec(
+    def bbs_spec(objective: str) -> dict:
+        return creation_facts(
             space=SPACE,
             principal_ref=PRINCIPAL,
             method_kind="Open + Group",
@@ -174,8 +172,8 @@ class _FakeRepo:
         )
 
     @staticmethod
-    def todo_spec() -> ContextSpec:
-        return ContextSpec(
+    def todo_spec() -> dict:
+        return creation_facts(
             space=SPACE,
             principal_ref=PRINCIPAL,
             method_kind="Single",
@@ -231,7 +229,7 @@ def _discussion(
         events.extend(extra_events)
     record = ContextStatusRecord(
         collet=repo.collet(collet_id),
-        context_spec=repo.bbs_spec(objective),
+        creation_facts=repo.bbs_spec(objective),
         task=None,
         events=events,
     )
@@ -270,7 +268,7 @@ class TestListDiscussions:
         repo = _FakeRepo()
         record = ContextStatusRecord(
             collet=repo.collet("collet_todo_row_0003"),
-            context_spec=_FakeRepo.todo_spec(),
+            creation_facts=_FakeRepo.todo_spec(),
             task=None,
             events=[],
         )
@@ -327,7 +325,7 @@ class TestGetDiscussion:
         collet_id = "collet_null_payload_01"
         record = ContextStatusRecord(
             collet=repo.collet(collet_id),
-            context_spec=_FakeRepo.bbs_spec("外部行的标题"),
+            creation_facts=_FakeRepo.bbs_spec("外部行的标题"),
             task=None,
             events=[
                 EventRecord(
@@ -390,7 +388,7 @@ class TestGetDiscussion:
         repo = _FakeRepo()
         record = ContextStatusRecord(
             collet=repo.collet("collet_foreign_0001"),
-            context_spec=_FakeRepo.todo_spec(),
+            creation_facts=_FakeRepo.todo_spec(),
             task=None,
             events=[],
         )
