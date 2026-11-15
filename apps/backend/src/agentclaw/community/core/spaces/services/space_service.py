@@ -6,6 +6,7 @@ from injector import inject
 
 from agentclaw.community.core.repository.protocols.spaces import SpaceRepositoryProtocol
 from agentclaw.community.core.spaces.errors import (
+    PersonalSpaceInvariantError,
     SpaceAlreadyExistsError,
     SpaceNameInvalidError,
     SpaceNotFoundError,
@@ -15,6 +16,7 @@ from agentclaw.community.core.spaces.errors import (
 )
 from agentclaw.community.core.spaces.models import (
     PersonalSpaceLookupRecord,
+    SpaceDeletedResult,
     SpaceRecord,
     SpaceScTeamRepairResult,
     SpaceListScope,
@@ -34,6 +36,7 @@ from agentclaw.community.plugin_api.staff_dept import (
 )
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.utils.work_no import normalize_work_no_for_lookup
+from agentclaw.community.core.spaces.services.space_access_service import SpaceAccessService
 from agentclaw.community.core.spaces.space_service_protocol import SpaceServiceProtocol
 
 
@@ -51,10 +54,12 @@ class SpaceService(SpaceServiceProtocol):
     def __init__(
         self,
         repository: SpaceRepositoryProtocol,
+        access: SpaceAccessService,
         skill_center_client: SkillCenterClient,
         staff_dept: StaffDeptPlugin,
     ) -> None:
         self._repository = repository
+        self._access = access
         self._skill_center_client = skill_center_client
         self._staff_dept = staff_dept
 
@@ -195,6 +200,27 @@ class SpaceService(SpaceServiceProtocol):
                 )
                 record.sc_team_id = result.team_id
         return record
+
+    def delete_team(self, *, space_id: int, actor_id: str) -> SpaceDeletedResult:
+        """Irreversibly hide an empty TEAM Space after a final state check.
+
+        The pre-check resolves the caller once, then the repository locks the
+        Space and repeats both the administrator and resource predicates inside
+        the transaction. Anything created between confirmation and commit rolls
+        the whole deletion back; it never silently deletes a newly non-empty
+        Space. Existing member rows are retained as audit facts -- every live
+        Space lookup filters ``deleted_at``, so the former entry no longer
+        grants access.
+        """
+        space, _ = self._access.require_current_space_admin(
+            space_id=space_id, user_id=actor_id
+        )
+        if space.space_type is SpaceType.TEAM:
+            with self._repository.delete_empty_team_transaction(
+                space_id=space_id, actor_id=actor_id, env=get_current_env()
+            ) as deleted:
+                return SpaceDeletedResult(space_id=deleted.id, deleted=True)
+        raise PersonalSpaceInvariantError("personal space cannot be deleted")
 
     def repair_sc_team_binding(self, *, space_id: int) -> SpaceScTeamRepairResult:
         """Repair one historical TEAM Space by lookup only; never create in SC.

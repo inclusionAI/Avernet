@@ -83,6 +83,13 @@ class SpaceMemberSummaryRecord(BaseModel):
     display_name: str | None = None
 
 
+class SpaceDeletedResult(BaseModel):
+    """Confirmed deletion of one Team Space."""
+
+    space_id: int
+    deleted: bool = True
+
+
 class PersonalSpaceLookupRecord(BaseModel):
     user_id: str
     space_id: int | None

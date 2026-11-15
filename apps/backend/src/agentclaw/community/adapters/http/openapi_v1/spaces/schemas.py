@@ -302,6 +302,16 @@ class PersonalSpaceInitialized(SpaceCreated):
     )
 
 
+class SpaceDeleted(BaseModel):
+    """Confirmation that a Team Space was deleted."""
+
+    space_id: int = Field(description="Identifier of the deleted Team Space.")
+    deleted: bool = Field(
+        default=True,
+        description="Always true; deletion is irreversible and not retriable.",
+    )
+
+
 class InitializePersonalSpaceRequest(BaseModel):
     """Optional controls for initializing the current user's personal Space."""
 

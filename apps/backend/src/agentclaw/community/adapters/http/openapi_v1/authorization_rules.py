@@ -752,6 +752,9 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("POST", "/openapi/v1/bots/spaces/personal/initialize"): NoCheck(
         "Space membership, adjudicated by the Space service"
     ),
+    ("DELETE", "/openapi/v1/bots/spaces/{space_id}"): NoCheck(
+        "Space ownership and resources, adjudicated by the Space service"
+    ),
     ("POST", "/openapi/v1/bots/spaces/{space_id}/join-requests"): NoCheck(
         "Space membership, adjudicated by the Space service"
     ),

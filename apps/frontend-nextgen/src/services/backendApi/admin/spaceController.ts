@@ -96,11 +96,15 @@ export function initializePersonalSpace(params: SpaceUserIdParams, body?: Initia
   });
 }
 
-// 删除团队空间（目标契约 §15-4；clawweb=Avernet 暂无此 DELETE 接口，UI 入口已隐藏，保留待后端补）。
-export function deleteSpace(space_id: number | string) {
-  return backendRequest<BackendApiEnvelope<{ deleted?: boolean }>>(SPACE_ENDPOINTS.detail(space_id), {
-    method: 'DELETE',
-  });
+// 删除团队空间（仅当前活跃 ADMIN 允许；user_id 为操作者，后端会校验 delegation 与空间资源）。
+export function deleteSpace(space_id: number | string, params: SpaceUserIdParams) {
+  return backendRequest<BackendApiEnvelope<{ space_id?: number; deleted?: boolean }>>(
+    SPACE_ENDPOINTS.detail(space_id),
+    {
+      method: 'DELETE',
+      params,
+    },
+  );
 }
 
 // 查询空间成员。

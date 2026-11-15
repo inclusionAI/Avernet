@@ -45,6 +45,10 @@ class SpaceScTeamRepairNotApplicableError(SpaceError):
     """Raised when repair is requested for a non-team Space."""
 
 
+class SpaceResourcesExistError(SpaceError):
+    """Raised when a Team Space still owns Bots or Space Skills."""
+
+
 class SpaceScTeamBindingNotFoundError(SpaceError):
     """Raised when SC has no Team for the Space external reference."""
 
