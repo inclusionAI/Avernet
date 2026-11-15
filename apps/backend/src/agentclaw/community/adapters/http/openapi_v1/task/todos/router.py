@@ -316,7 +316,10 @@ async def read_todo_artifact_content(
     artifact_id: Annotated[str, Path(description="Todo artifact identifier.")],
     principal: PrincipalDep,
     user_id: str = Query(min_length=1, description=USER_ID_DESCRIPTION),
-    disposition: Literal["inline", "attachment"] = Query(default="attachment"),
+    disposition: Literal["inline", "attachment"] = Query(
+        default="attachment",
+        description="Browser content disposition for preview or download.",
+    ),
     service: TodoArtifactServiceProtocol = Injected(TodoArtifactServiceProtocol),
 ) -> Response:
     """Proxy one file artifact for browser preview or download."""

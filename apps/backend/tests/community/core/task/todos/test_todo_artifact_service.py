@@ -110,6 +110,21 @@ class _ArtifactRepository:
         self.executions[execution_id] = row
         return row
 
+    def complete_active_execution(
+        self, *, todo_id: str, collab_context_id: str
+    ) -> None:
+        for execution_id, row in tuple(self.executions.items()):
+            if (
+                row.todo_id == todo_id
+                and row.collab_context_id == collab_context_id
+                and row.status is TodoExecutionStatus.ACTIVE
+            ):
+                self.executions[execution_id] = replace(
+                    row,
+                    status=TodoExecutionStatus.COMPLETED,
+                    updated_at=NOW,
+                )
+
     def create_artifact(self, **kwargs) -> TodoArtifactRecord:
         if self.fail_create_artifact is not None:
             raise self.fail_create_artifact
@@ -182,17 +197,14 @@ def _service(*, max_upload_mb: int = 1):
             key_prefix="task-artifacts", max_upload_mb=max_upload_mb
         ),
     )
-    credential = service.issue_execution(
-        todo_id="todo_1", collab_context_id="context_1", executor_id="bot_1"
-    )
+    credential = service.issue_execution(todo_id="todo_1", executor_id="bot_1")
     return service, artifacts, access, storage, credential
 
 
 def _report(service: TodoArtifactService, credential, **overrides):
     values: dict[str, Any] = {
         "todo_id": "todo_1",
-        "collab_context_id": "context_1",
-        "execution_id": credential.execution_id,
+        "todo_execution_id": credential.execution_id,
         "execution_token": credential.token,
         "artifact_name": "Result",
         "artifact_kind": TodoArtifactKind.TEXT,
@@ -201,6 +213,15 @@ def _report(service: TodoArtifactService, credential, **overrides):
     }
     values.update(overrides)
     return service.report_artifact(**values)
+
+
+def test_issue_execution_derives_context_from_todo() -> None:
+    _, artifacts, _, _, credential = _service()
+
+    execution = artifacts.get_execution(execution_id=credential.execution_id)
+
+    assert execution.todo_id == "todo_1"
+    assert execution.collab_context_id == "context_1"
 
 
 @pytest.mark.parametrize(
@@ -250,8 +271,7 @@ def test_file_upload_roundtrip_reuses_object_storage_and_authorizes_reader():
 
     record = service.upload_file(
         todo_id="todo_1",
-        collab_context_id="context_1",
-        execution_id=credential.execution_id,
+        todo_execution_id=credential.execution_id,
         execution_token=credential.token,
         artifact_name=None,
         file_name="../final report.pdf",
@@ -275,9 +295,7 @@ def test_file_upload_roundtrip_reuses_object_storage_and_authorizes_reader():
 
 def test_new_execution_replaces_old_token():
     service, _, _, _, first = _service()
-    service.issue_execution(
-        todo_id="todo_1", collab_context_id="context_1", executor_id="bot_1"
-    )
+    service.issue_execution(todo_id="todo_1", executor_id="bot_1")
 
     with pytest.raises(TodoExecutionAuthError):
         _report(service, first)
@@ -287,11 +305,10 @@ def test_new_execution_replaces_old_token():
     "override",
     [
         {"todo_id": "todo_other"},
-        {"collab_context_id": "context_other"},
         {"execution_token": "wrong-token"},
     ],
 )
-def test_execution_credential_is_bound_to_todo_context_and_token(override):
+def test_execution_credential_is_bound_to_todo_and_token(override):
     service, _, _, _, credential = _service()
 
     with pytest.raises(TodoExecutionAuthError):
@@ -319,8 +336,7 @@ def test_object_write_failure_does_not_persist_artifact():
     with pytest.raises(TodoArtifactStorageError):
         service.upload_file(
             todo_id="todo_1",
-            collab_context_id="context_1",
-            execution_id=credential.execution_id,
+            todo_execution_id=credential.execution_id,
             execution_token=credential.token,
             artifact_name="report",
             file_name="report.txt",
@@ -340,8 +356,7 @@ def test_database_failure_after_upload_propagates_and_leaves_unreferenced_object
     with pytest.raises(RuntimeError, match="database unavailable"):
         service.upload_file(
             todo_id="todo_1",
-            collab_context_id="context_1",
-            execution_id=credential.execution_id,
+            todo_execution_id=credential.execution_id,
             execution_token=credential.token,
             artifact_name="report",
             file_name="report.txt",
@@ -360,8 +375,7 @@ def test_upload_size_limit_is_enforced_before_object_write():
     with pytest.raises(TodoArtifactUploadTooLargeError):
         service.upload_file(
             todo_id="todo_1",
-            collab_context_id="context_1",
-            execution_id=credential.execution_id,
+            todo_execution_id=credential.execution_id,
             execution_token=credential.token,
             artifact_name="report",
             file_name="report.txt",
@@ -384,8 +398,7 @@ def test_object_read_statuses_are_mapped_to_domain_errors(status, error_type):
     service, _, _, storage, credential = _service()
     record = service.upload_file(
         todo_id="todo_1",
-        collab_context_id="context_1",
-        execution_id=credential.execution_id,
+        todo_execution_id=credential.execution_id,
         execution_token=credential.token,
         artifact_name="report",
         file_name="report.txt",
@@ -399,3 +412,16 @@ def test_object_read_statuses_are_mapped_to_domain_errors(status, error_type):
         service.read_file(
             todo_id="todo_1", artifact_id=record.artifact_id, actor_id="user_1"
         )
+
+
+def test_completed_execution_token_is_rejected() -> None:
+    service, artifacts, _, _, credential = _service()
+
+    service.complete_execution(todo_id="todo_1", collab_context_id="context_1")
+
+    assert (
+        artifacts.get_execution(execution_id=credential.execution_id).status
+        is TodoExecutionStatus.COMPLETED
+    )
+    with pytest.raises(TodoExecutionAuthError):
+        _report(service, credential)

@@ -37,6 +37,7 @@ from agentclaw.community.core.task.todos.errors import (
     TodoArtifactUploadTooLargeError,
     TodoExecutionAuthError,
     TodoNotFoundError,
+    TodoStateConflictError,
 )
 
 _SAFE_FILE_RE = re.compile(r"[^A-Za-z0-9._-]+")
@@ -59,12 +60,17 @@ class TodoArtifactService:
         self._config = storage_config
 
     def issue_execution(
-        self, *, todo_id: str, collab_context_id: str, executor_id: str
+        self, *, todo_id: str, executor_id: str
     ) -> TodoExecutionCredential:
+        todo = self._repository.get_todo(todo_id=todo_id)
+        if not todo.collab_context_id:
+            raise TodoStateConflictError(
+                "Todo execution requires a bound collaboration Context"
+            )
         token = secrets.token_urlsafe(32)
         row = self._artifacts.create_execution(
             todo_id=todo_id,
-            collab_context_id=collab_context_id,
+            collab_context_id=todo.collab_context_id,
             token_hash=self._token_hash(token),
             executor_id=executor_id,
         )
@@ -73,12 +79,19 @@ class TodoArtifactService:
     def bind_run_id(self, *, execution_id: str, run_id: str) -> None:
         self._artifacts.bind_run_id(execution_id=execution_id, run_id=run_id)
 
+    def complete_execution(
+        self, *, todo_id: str, collab_context_id: str
+    ) -> None:
+        self._artifacts.complete_active_execution(
+            todo_id=todo_id,
+            collab_context_id=collab_context_id,
+        )
+
     def report_artifact(
         self,
         *,
         todo_id: str,
-        collab_context_id: str,
-        execution_id: str,
+        todo_execution_id: str,
         execution_token: str,
         artifact_name: str,
         artifact_kind: TodoArtifactKind | str,
@@ -87,8 +100,7 @@ class TodoArtifactService:
     ) -> TodoArtifactRecord:
         execution = self._authorize(
             todo_id=todo_id,
-            collab_context_id=collab_context_id,
-            execution_id=execution_id,
+            execution_id=todo_execution_id,
             token=execution_token,
         )
         kind = self._kind(artifact_kind)
@@ -100,8 +112,8 @@ class TodoArtifactService:
         normalized["is_final_artifact"] = bool(is_final_artifact)
         return self._create(
             todo_id=todo_id,
-            collab_context_id=collab_context_id,
-            execution_id=execution_id,
+            collab_context_id=execution.collab_context_id,
+            execution_id=todo_execution_id,
             artifact_name=normalized_name,
             kind=kind,
             content=normalized,
@@ -112,8 +124,7 @@ class TodoArtifactService:
         self,
         *,
         todo_id: str,
-        collab_context_id: str,
-        execution_id: str,
+        todo_execution_id: str,
         execution_token: str,
         artifact_name: str | None,
         file_name: str,
@@ -123,8 +134,7 @@ class TodoArtifactService:
     ) -> TodoArtifactRecord:
         execution = self._authorize(
             todo_id=todo_id,
-            collab_context_id=collab_context_id,
-            execution_id=execution_id,
+            execution_id=todo_execution_id,
             token=execution_token,
         )
         if self._storage is None:
@@ -147,7 +157,7 @@ class TodoArtifactService:
                 self._config.key_prefix,
                 "todos",
                 todo_id,
-                execution_id,
+                todo_execution_id,
                 f"{digest}-{safe_name}",
             )
             if part.strip("/")
@@ -165,8 +175,8 @@ class TodoArtifactService:
         }
         return self._create(
             todo_id=todo_id,
-            collab_context_id=collab_context_id,
-            execution_id=execution_id,
+            collab_context_id=execution.collab_context_id,
+            execution_id=todo_execution_id,
             artifact_name=display_name,
             kind=TodoArtifactKind.FILE,
             content=content,
@@ -211,7 +221,6 @@ class TodoArtifactService:
         self,
         *,
         todo_id: str,
-        collab_context_id: str,
         execution_id: str,
         token: str,
     ):
@@ -222,7 +231,6 @@ class TodoArtifactService:
         valid = (
             execution.status is TodoExecutionStatus.ACTIVE
             and execution.todo_id == todo_id
-            and execution.collab_context_id == collab_context_id
             and bool(token)
             and hmac.compare_digest(execution.token_hash, self._token_hash(token))
         )

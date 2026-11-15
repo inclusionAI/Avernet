@@ -110,11 +110,16 @@ class FakeBotRepository:
 
 class FakeTodoArtifactService:
     def issue_execution(
-        self, *, todo_id: str, collab_context_id: str, executor_id: str
+        self, *, todo_id: str, executor_id: str
     ) -> TodoExecutionCredential:
         return TodoExecutionCredential(execution_id="todoexec_1", token="token_1")
 
     def bind_run_id(self, *, execution_id: str, run_id: str) -> None:
+        return None
+
+    def complete_execution(
+        self, *, todo_id: str, collab_context_id: str
+    ) -> None:
         return None
 
 

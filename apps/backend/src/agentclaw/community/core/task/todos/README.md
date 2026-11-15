@@ -32,6 +32,37 @@ While a Todo is `pending_acceptance`, posting a normal Human interaction atomica
 
 Resume retries are idempotent. Once B is `in_progress` or a later `task.started` exists, no additional resume is dispatched; the community runtime uses the triggering event ID as the executor message ID. A delivery failure leaves the claimed Todo `in_progress` and fails closed rather than reopening the interactive state during uncertain delivery.
 
+## Bot execution and artifact reporting contract
+
+Each dispatched or resumed Bot run receives the artifact-reporting contract in
+the message body. The contract contains `todo_id`, `todo_execution_id`, the
+current-generation `todo_execution_token`, the Backend URL, and concrete report/upload
+examples. Runtime metadata may repeat these values for observability, but Bot
+behavior must not depend on metadata being propagated by a transport.
+
+The identities form one hierarchy rather than three unrelated caller inputs:
+
+```text
+Todo / collab_context_id
+└── todo_execution_id
+    └── todo_execution_token
+```
+
+`collab_context_id` is the Todo's B-owned collaboration Context. A
+`todo_execution_id` identifies one execution generation within that Context,
+and its token authorizes artifact reporting only for that generation. The Bot
+therefore reports `todo_execution_id` plus the token; it does not report or
+choose `collab_context_id`. The Backend resolves the Context from the persisted
+execution and rejects executions that do not belong to the Todo in the URL.
+
+Issuing a replacement execution invalidates the previous generation. Marking
+the Context complete also completes its active execution, so the token cannot
+be reused after the run reaches acceptance. The public request field is
+`todo_execution_id`; the old `execution_id` spelling is accepted only as a
+temporary compatibility alias. A legacy `collab_context_id` request field may
+be parsed during that window but is ignored and never used for authorization or
+artifact persistence.
+
 
 ## Context Boundary
 

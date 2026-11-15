@@ -373,6 +373,65 @@ def test_todo_execution_replaces_previous_active_credential(db):
     assert artifact_repo.get_execution(execution_id=second.execution_id).token_hash != "second"
 
 
+def test_todo_execution_requires_current_bound_context(db):
+    from agentclaw.community.core.repository.implementations.task.todos.todo_artifact_repository import (
+        TodoArtifactRepository,
+    )
+
+    todo_repo = TodoRepository(db)
+    artifact_repo = TodoArtifactRepository(db)
+    todo = _create(todo_repo)
+    todo_repo.bind_context_if_pending(todo_id=todo.todo_id, collab_context_id="ctx_1")
+
+    with pytest.raises(TodoStateConflictError, match="Context"):
+        artifact_repo.create_execution(
+            todo_id=todo.todo_id,
+            collab_context_id="ctx_untrusted",
+            token_hash="a" * 64,
+            executor_id="bot_1",
+        )
+
+
+def test_todo_execution_completion_is_scoped_and_idempotent(db):
+    from agentclaw.community.core.repository.implementations.task.todos.todo_artifact_repository import (
+        TodoArtifactRepository,
+    )
+    from agentclaw.community.core.task.todos.artifact_models import TodoExecutionStatus
+
+    todo_repo = TodoRepository(db)
+    artifact_repo = TodoArtifactRepository(db)
+    todo = _create(todo_repo)
+    todo_repo.bind_context_if_pending(todo_id=todo.todo_id, collab_context_id="ctx_1")
+    execution = artifact_repo.create_execution(
+        todo_id=todo.todo_id,
+        collab_context_id="ctx_1",
+        token_hash="a" * 64,
+        executor_id="bot_1",
+    )
+
+    artifact_repo.complete_active_execution(
+        todo_id=todo.todo_id,
+        collab_context_id="ctx_other",
+    )
+    assert (
+        artifact_repo.get_execution(execution_id=execution.execution_id).status
+        is TodoExecutionStatus.ACTIVE
+    )
+
+    artifact_repo.complete_active_execution(
+        todo_id=todo.todo_id,
+        collab_context_id="ctx_1",
+    )
+    artifact_repo.complete_active_execution(
+        todo_id=todo.todo_id,
+        collab_context_id="ctx_1",
+    )
+    assert (
+        artifact_repo.get_execution(execution_id=execution.execution_id).status
+        is TodoExecutionStatus.COMPLETED
+    )
+
+
 def test_todo_artifact_repository_is_idempotent_and_scopes_artifact_to_todo(db):
     from agentclaw.community.core.repository.implementations.task.todos.todo_artifact_repository import (
         TodoArtifactRepository,

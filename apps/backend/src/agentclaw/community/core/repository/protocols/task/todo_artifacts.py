@@ -32,6 +32,14 @@ class TodoArtifactRepositoryProtocol(Protocol):
     def bind_run_id(self, *, execution_id: str, run_id: str) -> TodoExecutionRecord: ...
 
     @abstractmethod
+    def complete_active_execution(
+        self,
+        *,
+        todo_id: str,
+        collab_context_id: str,
+    ) -> None: ...
+
+    @abstractmethod
     def create_artifact(
         self,
         *,

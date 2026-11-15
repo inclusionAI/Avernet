@@ -25,6 +25,7 @@ from agentclaw.community.core.task.todos.artifact_models import (
 from agentclaw.community.core.task.todos.errors import (
     TodoArtifactNotFoundError,
     TodoNotFoundError,
+    TodoStateConflictError,
 )
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
@@ -61,6 +62,10 @@ class TodoArtifactRepository(TodoArtifactRepositoryProtocol):
             ).one_or_none()
             if todo is None:
                 raise TodoNotFoundError(f"Todo {todo_id} not found")
+            if todo.collab_context_id != collab_context_id:
+                raise TodoStateConflictError(
+                    "Todo execution Context does not match the current bound Context"
+                )
             self._scope(db.query(TodoExecutionModel), TodoExecutionModel).filter(
                 TodoExecutionModel.todo_id == todo_id,
                 TodoExecutionModel.status == TodoExecutionStatus.ACTIVE.value,
@@ -80,6 +85,21 @@ class TodoArtifactRepository(TodoArtifactRepositoryProtocol):
             db.flush()
             db.refresh(row)
             return row.to_record()
+
+    def complete_active_execution(
+        self,
+        *,
+        todo_id: str,
+        collab_context_id: str,
+    ) -> None:
+        with self._transaction() as db:
+            self._scope(db.query(TodoExecutionModel), TodoExecutionModel).filter(
+                TodoExecutionModel.todo_id == todo_id,
+                TodoExecutionModel.collab_context_id == collab_context_id,
+                TodoExecutionModel.status == TodoExecutionStatus.ACTIVE.value,
+            ).update(
+                {TodoExecutionModel.status: TodoExecutionStatus.COMPLETED.value}
+            )
 
     def get_execution(self, *, execution_id: str) -> TodoExecutionRecord:
         with self._db.orm_session() as db:

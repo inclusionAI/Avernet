@@ -269,14 +269,14 @@ class _Artifacts:
     def __init__(self) -> None:
         self.issue_calls: list[dict[str, str]] = []
         self.bind_calls: list[dict[str, str]] = []
+        self.complete_calls: list[dict[str, str]] = []
 
     def issue_execution(
-        self, *, todo_id: str, collab_context_id: str, executor_id: str
+        self, *, todo_id: str, executor_id: str
     ) -> TodoExecutionCredential:
         self.issue_calls.append(
             {
                 "todo_id": todo_id,
-                "collab_context_id": collab_context_id,
                 "executor_id": executor_id,
             }
         )
@@ -287,6 +287,16 @@ class _Artifacts:
 
     def bind_run_id(self, *, execution_id: str, run_id: str) -> None:
         self.bind_calls.append({"execution_id": execution_id, "run_id": run_id})
+
+    def complete_execution(
+        self, *, todo_id: str, collab_context_id: str
+    ) -> None:
+        self.complete_calls.append(
+            {
+                "todo_id": todo_id,
+                "collab_context_id": collab_context_id,
+            }
+        )
 
 
 def _service(
@@ -346,6 +356,9 @@ async def test_dispatch_creates_binds_runs_and_transitions_with_creator_identity
     assert collaboration.run_calls == [
         ("context_created", "creator_1", "todoexec_1", "token_1")
     ]
+    assert service._artifacts.issue_calls == [
+        {"todo_id": "todo_1", "executor_id": "bot_1"}
+    ]
     assert repository.calls[-1] == (
         "transition",
         "todo_1",
@@ -383,6 +396,9 @@ async def test_resume_claimed_interaction_resumes_latest_durable_event():
             "todoexec_1",
             "token_1",
         )
+    ]
+    assert service._artifacts.issue_calls == [
+        {"todo_id": "todo_1", "executor_id": "bot_1"}
     ]
     assert all(call[0] != "transition" for call in repository.calls)
 
@@ -773,6 +789,9 @@ async def test_refresh_moves_done_context_to_pending_acceptance_without_runtime_
 
     assert result.status is TodoStatus.PENDING_ACCEPTANCE
     assert collaboration.refresh_calls == []
+    assert service._artifacts.complete_calls == [
+        {"todo_id": "todo_1", "collab_context_id": "context_1"}
+    ]
 
 
 @pytest.mark.asyncio
@@ -797,6 +816,7 @@ async def test_refresh_keeps_claimed_interaction_waiting_for_resume():
     assert result.status is TodoStatus.IN_PROGRESS
     assert all(call[0] != "transition" for call in repository.calls)
     assert collaboration.refresh_calls == []
+    assert service._artifacts.complete_calls == []
 
 
 @pytest.mark.asyncio
@@ -815,6 +835,9 @@ async def test_refresh_projects_runtime_completion_to_pending_acceptance():
 
     assert result.status is TodoStatus.PENDING_ACCEPTANCE
     assert collaboration.refresh_calls == [("context_1", "creator_1")]
+    assert service._artifacts.complete_calls == [
+        {"todo_id": "todo_1", "collab_context_id": "context_1"}
+    ]
 
 
 @pytest.mark.asyncio

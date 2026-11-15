@@ -207,7 +207,6 @@ class TodoExecutionService(TodoExecutionServiceProtocol):
         if context.status == _CONTEXT_CREATED:
             credential = self._artifacts.issue_execution(
                 todo_id=todo.todo_id,
-                collab_context_id=context.collab_context_id,
                 executor_id=todo.bot_id,
             )
             context = await self._collaboration.run_context(
@@ -269,7 +268,6 @@ class TodoExecutionService(TodoExecutionServiceProtocol):
             )
         credential = self._artifacts.issue_execution(
             todo_id=todo.todo_id,
-            collab_context_id=todo.collab_context_id,
             executor_id=todo.bot_id,
         )
         context = await self._collaboration.resume_context(
@@ -354,6 +352,8 @@ class TodoExecutionService(TodoExecutionServiceProtocol):
             actor_id=todo.created_by,
         )
         if context.status == _CONTEXT_DONE:
+            if _unstarted_human_work(context) is not None:
+                return todo
             return self._mark_pending_acceptance(todo)
         if context.status == _CONTEXT_IN_PROGRESS:
             return todo
@@ -404,6 +404,14 @@ class TodoExecutionService(TodoExecutionServiceProtocol):
         return created
 
     def _mark_pending_acceptance(self, todo: TodoRecord) -> TodoRecord:
+        if not todo.collab_context_id:
+            raise TodoNotFoundError(
+                "Completed Todo collaboration Context is missing"
+            )
+        self._artifacts.complete_execution(
+            todo_id=todo.todo_id,
+            collab_context_id=todo.collab_context_id,
+        )
         return self._transition_or_reload(
             todo_id=todo.todo_id,
             expected=TodoStatus.IN_PROGRESS,

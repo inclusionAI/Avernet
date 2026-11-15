@@ -457,7 +457,9 @@ async def test_list_artifacts_returns_public_content_without_storage_id():
 
     assert payload.code == 200000
     assert payload.request_id == "trace-todo"
-    assert payload.data[0].kind is TodoArtifactKind.FILE
+    assert payload.data[0].kind.value == TodoArtifactKind.FILE.value
+    assert payload.data[0].todo_execution_id == "todoexec_1"
+    assert not hasattr(payload.data[0], "execution_id")
     assert payload.data[0].content == {
         "kind": "file",
         "file_name": "release report.pdf",

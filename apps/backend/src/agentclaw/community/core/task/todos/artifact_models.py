@@ -42,7 +42,7 @@ class TodoExecutionRecord:
 
 @dataclass(frozen=True)
 class TodoExecutionCredential:
-    """One-time plaintext credential returned only to the runtime caller."""
+    """Plaintext current-generation credential returned only to the runtime caller."""
 
     execution_id: str
     token: str

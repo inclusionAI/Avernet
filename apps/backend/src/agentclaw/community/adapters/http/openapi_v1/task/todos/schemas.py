@@ -41,6 +41,22 @@ class TodoStatusSchema(_DocumentedEnum):
     }
 
 
+class TodoArtifactKindSchema(_DocumentedEnum):
+    """Kind-specific rendering contract for a persisted Todo artifact."""
+
+    TEXT = "text"
+    FILE = "file"
+    URL_LINK = "url_link"
+    CODE = "code"
+
+    __descriptions__ = {
+        "text": "Inline textual output produced by the Bot.",
+        "file": "Object-backed file available through the content endpoint.",
+        "url_link": "A named external or internal URL produced by the Bot.",
+        "code": "Source code or a code-oriented result produced by the Bot.",
+    }
+
+
 class CreateTodoRequest(BaseModel):
     """Create one pending Todo in the selected product Space."""
 
@@ -77,10 +93,13 @@ class CreateTodoInteractionRequest(BaseModel):
 class TodoAcceptanceTargetRequest(BaseModel):
     """Stable event or artifact selected as a rejection problem point."""
 
-    kind: Literal["event", "artifact"]
+    kind: Literal["event", "artifact"] = Field(
+        description="Whether the rejection target identifies an event or artifact."
+    )
     id: str = Field(
         min_length=1,
         max_length=max(MAX_EVENT_ID_LENGTH, MAX_ARTIFACT_ID_LENGTH),
+        description="Stable identifier of the selected event or artifact.",
     )
     floor: int = Field(gt=0, description="Presentation-only interaction floor.")
 
@@ -126,13 +145,23 @@ class TodoArtifactResponse(BaseModel):
 class TodoArtifactRecordResponse(BaseModel):
     """One persisted Todo execution artifact."""
 
-    artifact_id: str
-    todo_id: str
-    execution_id: str
-    artifact_name: str
-    kind: TodoArtifactKind
-    content: dict[str, object]
-    created_at: str
+    artifact_id: str = Field(description="A-owned persisted artifact identifier.")
+    todo_id: str = Field(description="Todo that owns this artifact.")
+    todo_execution_id: str = Field(
+        description="Todo execution generation that reported this artifact."
+    )
+    artifact_name: str = Field(description="Human-readable artifact display name.")
+    kind: TodoArtifactKindSchema = Field(
+        description="Rendering and validation kind of this artifact."
+    )
+    content: dict[str, object] = Field(
+        description=(
+            "Kind-specific public artifact content; internal object-storage IDs are omitted."
+        )
+    )
+    created_at: str = Field(
+        description="Artifact creation timestamp in ISO-8601 format."
+    )
 
     @classmethod
     def from_record(cls, record: TodoArtifactRecord) -> "TodoArtifactRecordResponse":
@@ -142,9 +171,9 @@ class TodoArtifactRecordResponse(BaseModel):
         return cls(
             artifact_id=record.artifact_id,
             todo_id=record.todo_id,
-            execution_id=record.execution_id,
+            todo_execution_id=record.execution_id,
             artifact_name=record.artifact_name,
-            kind=record.artifact_kind,
+            kind=TodoArtifactKindSchema(record.artifact_kind.value),
             content=content,
             created_at=record.created_at.isoformat(),
         )

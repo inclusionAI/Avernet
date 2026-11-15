@@ -5,6 +5,9 @@ from __future__ import annotations
 from typing import Any
 
 from agentclaw.community.core.task.domain.identity import compose_bot_identity
+from agentclaw.community.core.task.todos.todo_execution_prompt import (
+    format_todo_execution_instruction,
+)
 from agentclaw.community.core.task.task_runner.client.ports import (
     OpenApiBotError,
     OpenApiBotPort,
@@ -27,20 +30,31 @@ from agentclaw.community.plugin_api.impl_registry import Mode, plugin_impl
 class CommunityContextCollabRuntimePlugin(ContextCollabRuntimePlugin):
     """Invoke the Context executor while keeping lifecycle policy in Core."""
 
-    def __init__(self, openapi_bot: OpenApiBotPort) -> None:
+    def __init__(
+        self,
+        openapi_bot: OpenApiBotPort,
+        *,
+        backend_url: str = "",
+    ) -> None:
         self._openapi_bot = openapi_bot
+        self._backend_url = backend_url
 
     async def run(self, request: ContextCollabRunRequest) -> ContextCollabRunResult:
         if not request.executor_owner_id:
             raise ContextCollabRuntimeError(
                 "Context executor owner is required for Bot runtime addressing"
             )
+        message = self._delivery_message(
+            request=request,
+            instruction=request.objective,
+            resume=False,
+        )
         try:
             result = await self._openapi_bot.send_message(
                 bot_id=compose_bot_identity(
                     request.executor_id, request.executor_owner_id
                 ),
-                message=request.objective,
+                message=message,
                 metadata=_runtime_metadata(request),
             )
         except OpenApiBotError as exc:
@@ -57,12 +71,17 @@ class CommunityContextCollabRuntimePlugin(ContextCollabRuntimePlugin):
             raise ContextCollabRuntimeError(
                 "Context executor owner is required for Bot runtime addressing"
             )
+        message = self._delivery_message(
+            request=request,
+            instruction=request.message,
+            resume=True,
+        )
         try:
             result = await self._openapi_bot.send_message(
                 bot_id=compose_bot_identity(
                     request.executor_id, request.executor_owner_id
                 ),
-                message=request.message,
+                message=message,
                 metadata=_runtime_metadata(request),
                 message_id=request.interaction_event_id,
             )
@@ -89,6 +108,35 @@ class CommunityContextCollabRuntimePlugin(ContextCollabRuntimePlugin):
             error=payload.get("error"),
             completed_at=payload.get("completed_at"),
             session_id=payload.get("session_id"),
+        )
+
+    def _delivery_message(
+        self,
+        *,
+        request: ContextCollabRunRequest | ContextCollabResumeRequest,
+        instruction: str,
+        resume: bool,
+    ) -> str:
+        execution_id = request.todo_execution_id
+        execution_token = request.todo_execution_token
+        if bool(execution_id) != bool(execution_token):
+            raise ContextCollabRuntimeError(
+                "Todo execution ID and token must be provided together"
+            )
+        if not execution_id or not execution_token:
+            return instruction
+        backend_url = self._backend_url.strip().rstrip("/")
+        if not backend_url:
+            raise ContextCollabRuntimeError(
+                "Backend URL is required for Todo execution delivery"
+            )
+        return format_todo_execution_instruction(
+            todo_id=request.todo_id,
+            todo_execution_id=execution_id,
+            todo_execution_token=execution_token,
+            backend_url=backend_url,
+            instruction=instruction,
+            resume=resume,
         )
 
 

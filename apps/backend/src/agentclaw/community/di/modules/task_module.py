@@ -339,7 +339,9 @@ class TaskModule(Module):
     @provider
     @inject
     def context_collab_runtime_plugin(
-        self, injector: Injector
+        self,
+        injector: Injector,
+        task_dispatch: TaskDispatchConfig,
     ) -> ContextCollabRuntimePlugin:
         """Select the deployment Bot runtime, failing closed when unbound."""
         try:
@@ -354,7 +356,10 @@ class TaskModule(Module):
             return UnavailableContextCollabRuntimePlugin(
                 "OpenApiBotPort resolved to None"
             )
-        return CommunityContextCollabRuntimePlugin(openapi_bot)
+        return CommunityContextCollabRuntimePlugin(
+            openapi_bot,
+            backend_url=task_dispatch.backend_url,
+        )
 
     @singleton
     @provider

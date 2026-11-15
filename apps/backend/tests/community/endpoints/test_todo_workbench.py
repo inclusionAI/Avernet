@@ -11,6 +11,9 @@ import jwt
 from injector import singleton
 
 from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_HEADER
+from agentclaw.community.api.task.todo_artifact_service import (
+    TodoArtifactServiceProtocol,
+)
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.task.todos import (
     TodoRepositoryProtocol,
@@ -25,6 +28,11 @@ from agentclaw.community.core.spaces.protocols import SpaceAccessServiceProtocol
 from agentclaw.community.core.task.todos.errors import (
     TodoNotFoundError,
     TodoStateConflictError,
+)
+from agentclaw.community.core.task.todos.artifact_models import (
+    TodoArtifactDownload,
+    TodoArtifactKind,
+    TodoArtifactRecord,
 )
 from agentclaw.community.core.task.todos.models import (
     AcceptanceVerdict,
@@ -137,6 +145,66 @@ class _FixedBots:
                 "owner_id": _USER_ID,
             }
         ]
+
+
+def _artifact_record(
+    *, kind: TodoArtifactKind = TodoArtifactKind.TEXT
+) -> TodoArtifactRecord:
+    content: dict[str, object]
+    if kind is TodoArtifactKind.FILE:
+        content = {
+            "kind": "file",
+            "storage_id": "task-artifacts/todos/todo_1/report.txt",
+            "file_name": "report.txt",
+            "file_type": "text/plain",
+            "size": 6,
+            "is_final_artifact": True,
+        }
+    else:
+        content = {
+            "kind": "text",
+            "text": "done",
+            "is_final_artifact": True,
+        }
+    return TodoArtifactRecord(
+        artifact_id="todoartifact_1",
+        todo_id="todo_1",
+        collab_context_id="context_todo_1",
+        execution_id="todoexec_1",
+        artifact_name="Result",
+        artifact_kind=kind,
+        content=content,
+        content_hash="hash",
+        creator=_BOT_ID,
+        created_at=_NOW,
+        updated_at=_NOW,
+    )
+
+
+class _FixedTodoArtifacts:
+    def report_artifact(self, **_kwargs: Any) -> TodoArtifactRecord:
+        return _artifact_record()
+
+    def upload_file(self, **_kwargs: Any) -> TodoArtifactRecord:
+        return _artifact_record(kind=TodoArtifactKind.FILE)
+
+    def list_artifacts(self, **_kwargs: Any) -> tuple[TodoArtifactRecord, ...]:
+        return (_artifact_record(kind=TodoArtifactKind.FILE),)
+
+    def read_file(self, **_kwargs: Any) -> TodoArtifactDownload:
+        return TodoArtifactDownload(
+            record=_artifact_record(kind=TodoArtifactKind.FILE),
+            payload=b"report",
+        )
+
+
+def _bind_artifact_world(world) -> None:
+    _enable_public_auth(world)
+    world.injector.binder.bind(
+        TodoArtifactServiceProtocol,
+        to=_FixedTodoArtifacts(),
+        scope=singleton,
+    )
 
 
 def _todo(
@@ -637,3 +705,180 @@ def accept_todo_ok():
 )
 def accept_todo_conflict():
     """A pending Todo cannot be accepted before B reports completion."""
+
+
+@endpoint_test(
+    method="GET",
+    path="/openapi/v1/todos/{todo_id}/artifacts",
+    scenario="list_persisted_artifacts",
+    input=CaseInput(
+        path_params={"todo_id": "todo_1"},
+        query_params=QUERY,
+        headers=_principal_headers(),
+    ),
+    seed=_bind_artifact_world,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "code": 200000,
+            "data": [
+                {
+                    "artifact_id": "todoartifact_1",
+                    "todo_execution_id": "todoexec_1",
+                    "kind": "file",
+                }
+            ],
+        },
+    ),
+)
+def list_todo_artifacts_ok():
+    """The authenticated Human can list persisted Bot artifacts."""
+
+
+@endpoint_test(
+    method="GET",
+    path="/openapi/v1/todos/{todo_id}/artifacts",
+    scenario="wrong_user",
+    input=CaseInput(
+        path_params={"todo_id": "todo_1"},
+        query_params={"user_id": "someone-else"},
+        headers=_principal_headers(),
+    ),
+    seed=_bind_artifact_world,
+    expect=ExpectError(status=403),
+)
+def list_todo_artifacts_forbidden():
+    """Artifact listing remains scoped to the authenticated Human."""
+
+
+@endpoint_test(
+    method="GET",
+    path="/openapi/v1/todos/{todo_id}/artifacts/{artifact_id}/content",
+    scenario="download_file",
+    input=CaseInput(
+        path_params={"todo_id": "todo_1", "artifact_id": "todoartifact_1"},
+        query_params={**QUERY, "disposition": "inline"},
+        headers=_principal_headers(),
+    ),
+    seed=_bind_artifact_world,
+    expect=ExpectSuccess(status=200),
+)
+def read_todo_artifact_content_ok():
+    """The authenticated Human can read file bytes through the Backend."""
+
+
+@endpoint_test(
+    method="GET",
+    path="/openapi/v1/todos/{todo_id}/artifacts/{artifact_id}/content",
+    scenario="wrong_user",
+    input=CaseInput(
+        path_params={"todo_id": "todo_1", "artifact_id": "todoartifact_1"},
+        query_params={"user_id": "someone-else"},
+        headers=_principal_headers(),
+    ),
+    seed=_bind_artifact_world,
+    expect=ExpectError(status=403),
+)
+def read_todo_artifact_content_forbidden():
+    """Artifact bytes are not exposed outside the authenticated Human scope."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/v1/collaboration/todos/{todo_id}/report",
+    scenario="report_text_artifact",
+    input=CaseInput(
+        path_params={"todo_id": "todo_1"},
+        headers={"X-Todo-Execution-Token": "todo-token"},
+        json_body={
+            "todo_execution_id": "todoexec_1",
+            "artifact_name": "Result",
+            "kind": "text",
+            "content": {"text": "done"},
+            "is_final_artifact": True,
+        },
+    ),
+    seed=_bind_artifact_world,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "code": 200000,
+            "data": {
+                "artifact_id": "todoartifact_1",
+                "todo_execution_id": "todoexec_1",
+            },
+        },
+    ),
+)
+def report_todo_artifact_ok():
+    """The active Bot generation reports a non-file artifact."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/v1/collaboration/todos/{todo_id}/report",
+    scenario="conflicting_execution_ids",
+    input=CaseInput(
+        path_params={"todo_id": "todo_1"},
+        headers={"X-Todo-Execution-Token": "todo-token"},
+        json_body={
+            "todo_execution_id": "todoexec_1",
+            "execution_id": "todoexec_old",
+            "artifact_name": "Result",
+            "kind": "text",
+            "content": {"text": "done"},
+        },
+    ),
+    seed=_bind_artifact_world,
+    expect=ExpectError(status=422),
+)
+def report_todo_artifact_rejects_conflicting_ids():
+    """The compatibility alias cannot select another execution generation."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/v1/collaboration/todos/{todo_id}/artifacts/object-file",
+    scenario="upload_file_artifact",
+    input=CaseInput(
+        path_params={"todo_id": "todo_1"},
+        headers={"X-Todo-Execution-Token": "todo-token"},
+        form_data={
+            "todo_execution_id": "todoexec_1",
+            "artifact_name": "Result",
+            "is_final_artifact": "true",
+        },
+        files=[("file", ("report.txt", b"report"))],
+    ),
+    seed=_bind_artifact_world,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "code": 200000,
+            "data": {
+                "artifact_id": "todoartifact_1",
+                "todo_execution_id": "todoexec_1",
+                "kind": "file",
+            },
+        },
+    ),
+)
+def upload_todo_artifact_file_ok():
+    """The active Bot generation uploads one object-backed file artifact."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/v1/collaboration/todos/{todo_id}/artifacts/object-file",
+    scenario="missing_execution_id",
+    input=CaseInput(
+        path_params={"todo_id": "todo_1"},
+        headers={"X-Todo-Execution-Token": "todo-token"},
+        form_data={"artifact_name": "Result"},
+        files=[("file", ("report.txt", b"report"))],
+    ),
+    seed=_bind_artifact_world,
+    expect=ExpectError(status=422),
+)
+def upload_todo_artifact_file_requires_execution_id():
+    """A file upload cannot be accepted without an execution generation."""
