@@ -1,0 +1,19 @@
+apps/backend/tests/community/repository/chat/test_caller_refresh_candidates.py
+  s_fc1557df5d7924::t_f1600645fe6ae1 2,7-35
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "68dcce63783ed6e4b999b23ccf9b9e081349553a",
+  "prompts": {},
+  "sessions": {
+    "s_fc1557df5d7924": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1dde0-66b5-7650-8147-9dd4121d1f49",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}
