@@ -223,6 +223,41 @@ def test_bot_space_assignment_requires_active_space(app, world):  # noqa: F811
         )
 
 
+def test_bot_creation_requires_active_space(app, world):  # noqa: F811
+    """Bot creation refuses a soft-deleted target Space.
+
+    Same serialization contract as assignment and skill ownership: the
+    creation transaction locks the owning Space row and revalidates it, so a
+    Space deleted by a concurrent transaction is observed instead of
+    receiving a live Bot after the deletion committed.
+    """
+    space_id = _seed_team(world, name="Deletion contract: bot creation guard")
+    world.get(SpaceDeletionServiceProtocol).delete_team_space(
+        space_id=space_id, actor_id=_OWNER
+    )
+    repository = world.get(BotRepository)
+    env = get_current_env()
+
+    with pytest.raises(SpaceNotFoundError):
+        repository.insert_with_initial_skill_layout(
+            {
+                "bot_id": "bot-create-1",
+                "bot_name": "bot-create-1",
+                "owner_id": _OWNER,
+                "owner_name": _OWNER,
+                "creator_id": _OWNER,
+                "entity_id": _OWNER,
+                "entity_type": "staff",
+                "active_engine": "moltis",
+                "bot_type": "service",
+                "status": "ACTIVE",
+                "space_id": space_id,
+                "env": env,
+            },
+            layout=None,
+        )
+
+
 def test_skill_ownership_requires_active_space(app, world):  # noqa: F811
     """Skill ownership creation refuses a soft-deleted Space.
 
