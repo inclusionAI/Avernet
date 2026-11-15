@@ -180,3 +180,6 @@ publish or a non-serving lifecycle transition clears the stored expiry. Deploy
 `core/expert_chat/sql/2026_11_13_caller_token_expiry.sql` before this application
 change on an existing MySQL/OceanBase store. Existing records remain NULL until
 an installation succeeds. This change adds no independent refresh scheduler.
+
+### Teclaw scope
+Teclaw Caller sessions and draft/pre/production stages share a runtime. This iteration excludes both Teclaw engines and Teclaw-provider bindings from Caller expiry coordination and ASC scheduled refresh: Teclaw has no scheduled-task support yet. Interactive IAM refresh keeps its existing runtime/outbound update and does not read or write `caller_token_expires_at`. Engine lookup also excludes legacy `baas` bindings for a Teclaw Bot; other providers retain the expiry policy.

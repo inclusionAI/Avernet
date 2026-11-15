@@ -223,8 +223,9 @@ class CallerIdentityModule(Module):
         baas_service: BaasService,
         instances: ExpertChatInstanceRepository,
         bindings: DeviceBindingRepository,
+        bots: BotRepository,
     ) -> CallerRuntimeUpdater:
-        return ExpiryAwareCallerRuntimeUpdater(instances=instances, delegate=baas_service, bindings=bindings)
+        return ExpiryAwareCallerRuntimeUpdater(instances=instances, delegate=baas_service, bindings=bindings, bots=bots)
 
     @singleton
     @provider

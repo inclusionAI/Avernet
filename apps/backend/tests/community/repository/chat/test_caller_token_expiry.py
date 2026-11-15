@@ -12,7 +12,7 @@ from tests.community.repository.chat.test_expert_chat_instance_unified import re
 
 def updater_bindings():
     return Mock(get_by_id=Mock(return_value=SimpleNamespace(
-        apply_reason="caller_instance:b1", applied_by="u1", status="ACTIVE",
+        apply_reason="caller_instance:b1", applied_by="u1", status="ACTIVE", device_provider="arca",
     )))
 
 
@@ -58,7 +58,7 @@ def test_runtime_updater_preserves_longer_token(repo, hours, caplog):
     with scope(repo, now + timedelta(hours=48)):
         pass
     delegate = Mock()
-    updater = ExpiryAwareCallerRuntimeUpdater(instances=repo, delegate=delegate, bindings=updater_bindings())
+    updater = ExpiryAwareCallerRuntimeUpdater(bots=Mock(get_by_id_and_entity=Mock(return_value={"active_engine": "openclaw"}), get_unique_by_id=Mock(return_value={"active_engine": "openclaw"})), instances=repo, delegate=delegate, bindings=updater_bindings())
     issued_expiry = now + timedelta(hours=hours)
     token = CallerToken("test-token", "u1", issued_expiry, "fingerprint")
     updater.update_caller_identity(
@@ -153,7 +153,7 @@ def test_updater_install_failure_does_not_advance_expiry(repo):
         pass
     delegate = Mock()
     delegate.update_caller_identity.side_effect = RuntimeError("private-failure")
-    updater = ExpiryAwareCallerRuntimeUpdater(instances=repo, delegate=delegate, bindings=updater_bindings())
+    updater = ExpiryAwareCallerRuntimeUpdater(bots=Mock(get_by_id_and_entity=Mock(return_value={"active_engine": "openclaw"}), get_unique_by_id=Mock(return_value={"active_engine": "openclaw"})), instances=repo, delegate=delegate, bindings=updater_bindings())
     issued_expiry = old + timedelta(days=2)
     with pytest.raises(RuntimeError):
         updater.update_caller_identity(
@@ -173,7 +173,7 @@ def test_service_or_test_targets_keep_existing_update_behavior(repo, test_exchan
     delegate = Mock()
     bindings = updater_bindings()
     bindings.get_by_id.return_value.apply_reason = "service"
-    updater = ExpiryAwareCallerRuntimeUpdater(instances=repo, delegate=delegate, bindings=bindings)
+    updater = ExpiryAwareCallerRuntimeUpdater(bots=Mock(get_by_id_and_entity=Mock(return_value={"active_engine": "openclaw"}), get_unique_by_id=Mock(return_value={"active_engine": "openclaw"})), instances=repo, delegate=delegate, bindings=bindings)
     issued_expiry = datetime.now(UTC) + timedelta(hours=1)
     updater.update_caller_identity(
         bot_id="b1", owner_user_id="o1", caller_user_id="u1",
@@ -251,7 +251,7 @@ async def test_iam_success_keeps_original_response_when_longer_token_installed(r
     with scope(repo, end):
         pass
     delegate = Mock()
-    updater = ExpiryAwareCallerRuntimeUpdater(instances=repo, delegate=delegate, bindings=updater_bindings())
+    updater = ExpiryAwareCallerRuntimeUpdater(bots=Mock(get_by_id_and_entity=Mock(return_value={"active_engine": "openclaw"}), get_unique_by_id=Mock(return_value={"active_engine": "openclaw"})), instances=repo, delegate=delegate, bindings=updater_bindings())
     service, identity, auth, *_ = _service(
         context=_context(owner_id="o1"),
         service_target=RuntimeBindingResolutionError("no shared target"),
@@ -283,7 +283,7 @@ def test_initial_iam_install_records_expiry(repo):
 
     seed(repo)
     delegate = Mock()
-    updater = ExpiryAwareCallerRuntimeUpdater(instances=repo, delegate=delegate, bindings=updater_bindings())
+    updater = ExpiryAwareCallerRuntimeUpdater(bots=Mock(get_by_id_and_entity=Mock(return_value={"active_engine": "openclaw"}), get_unique_by_id=Mock(return_value={"active_engine": "openclaw"})), instances=repo, delegate=delegate, bindings=updater_bindings())
     end = datetime.now(UTC) + timedelta(hours=1)
     updater.update_caller_identity(
         bot_id="b1", owner_user_id="o1", caller_user_id="u1", caller_token=CallerToken("secret", "u1", end, "fp"),
@@ -310,7 +310,7 @@ def test_preserving_expiry_cannot_bypass_target_checks(repo, change):
     elif change == "stale_ledger":
         repo.update_instance("u1", "b1", "o1", ext={"binding_id": 8})
     delegate = Mock()
-    updater = ExpiryAwareCallerRuntimeUpdater(instances=repo, delegate=delegate, bindings=bindings)
+    updater = ExpiryAwareCallerRuntimeUpdater(bots=Mock(get_by_id_and_entity=Mock(return_value={"active_engine": "openclaw"}), get_unique_by_id=Mock(return_value={"active_engine": "openclaw"})), instances=repo, delegate=delegate, bindings=bindings)
     issued_subject = "other" if change == "subject" else "u1"
     issued_expiry = end - timedelta(days=1)
     with pytest.raises((ValueError, CallerCredentialError)):
@@ -320,3 +320,52 @@ def test_preserving_expiry_cannot_bypass_target_checks(repo, change):
             stage="online", publish_id=None, binding_id=7,
         )
     delegate.update_caller_identity.assert_not_called()
+
+
+@pytest.mark.parametrize("stage", ["draft", "verify", "online"])
+@pytest.mark.parametrize("provider,engine", [("teclaw", "openclaw"), ("baas", "teclaw")])
+def test_teclaw_stages_keep_legacy_install_without_expiry_ledger(repo, stage, provider, engine, caplog):
+    from agentclaw.community.core.caller_identity.credential import CallerToken
+    from agentclaw.community.core.caller_identity.expiry_runtime_updater import ExpiryAwareCallerRuntimeUpdater
+
+    seed(repo)
+    old = datetime.now(UTC) + timedelta(days=2)
+    with scope(repo, old):
+        pass
+    bindings = updater_bindings()
+    bindings.get_by_id.return_value.device_provider = provider
+    bots = Mock(get_unique_by_id=Mock(return_value={"active_engine": engine}))
+    instances = Mock(wraps=repo)
+    delegate = Mock()
+    updater = ExpiryAwareCallerRuntimeUpdater(instances=instances, delegate=delegate, bindings=bindings, bots=bots)
+    # All stages target the same shared binding despite an older issued token.
+    issued_expiry = old - timedelta(days=1)
+    token = CallerToken("test-token", "u1", issued_expiry, "fingerprint")
+    with caplog.at_level("INFO"):
+        updater.update_caller_identity(bot_id="b1", owner_user_id="o1", caller_user_id="u1",
+                                       caller_token=token, stage=stage, publish_id=None, binding_id=7)
+    delegate.update_caller_identity.assert_called_once()
+    assert delegate.update_caller_identity.call_args.kwargs["binding_id"] == 7
+    instances.caller_token_update.assert_not_called()
+    assert expiry(repo) == old.isoformat()
+    assert "reason=teclaw_shared_runtime" in caplog.text
+    assert "test-token" not in caplog.text
+    if provider == "teclaw":
+        bots.get_unique_by_id.assert_not_called()
+
+
+def test_engine_lookup_failure_cannot_bypass_expiry_guard():
+    from agentclaw.community.core.caller_identity.credential import CallerToken
+    from agentclaw.community.core.caller_identity.expiry_runtime_updater import ExpiryAwareCallerRuntimeUpdater
+
+    instances, delegate = Mock(), Mock()
+    bots = Mock(get_unique_by_id=Mock(side_effect=RuntimeError("bot lookup unavailable")))
+    updater = ExpiryAwareCallerRuntimeUpdater(instances=instances, delegate=delegate,
+                                              bindings=updater_bindings(), bots=bots)
+    issued_expiry = datetime.now(UTC) + timedelta(hours=1)
+    token = CallerToken("test-token", "u1", issued_expiry, "fingerprint")
+    with pytest.raises(RuntimeError, match="bot lookup unavailable"):
+        updater.update_caller_identity(bot_id="b1", owner_user_id="o1", caller_user_id="u1",
+                                       caller_token=token, stage="online", publish_id=None, binding_id=7)
+    delegate.update_caller_identity.assert_not_called()
+    instances.caller_token_update.assert_not_called()
