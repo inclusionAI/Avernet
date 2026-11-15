@@ -9,9 +9,10 @@
 RF#2 与结构守卫在 ``_gate`` 落地:``"Open"`` 必须在 ``method_names``
 中(顶层 "Open + Group" 或嵌套 "Open" 均满足)——Group/Swarm binding
 上的 Open 剖面操作是结构漂移,直接拒绝;binding 非 ACTIVE 时副作用
-操作一律拒绝(spec §4 通用规则)。授权经 G1
-``MethodOpsAuthorizerProtocol.check_open_op``:七个治理面操作 owner
-面;``submit_application`` 公开面(任意已认证 actor);``withdraw``
+操作一律拒绝(spec §4 通用规则);可申请机会查询也要求 ACTIVE。授权经 G1
+``MethodOpsAuthorizerProtocol.check_open_op``:八个治理面操作 owner
+面;``query_opportunities`` 是公开只读面、``submit_application`` 是公开提交面
+(均要求已认证 actor,不要求已参与);``withdraw``
 是 self-help(与目标行 ``accountable_principal_ref`` 字符串相等才
 放行,调用方先定位目标行再授权,沿 group leave 先例)。P1 无身份
 注册表,字符串相等只保证"声明一致"(G1 §8.1)。
@@ -20,6 +21,8 @@ RF#2 与结构守卫在 ``_gate`` 落地:``"Open"`` 必须在 ``method_names``
 from __future__ import annotations
 
 from datetime import datetime, timezone
+
+from injector import inject
 
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabNotFoundError,
@@ -49,7 +52,6 @@ from agentclaw.community.core.task.context_collab.persistence.method_store impor
     MethodStoreProtocol,
     StoreAxes,
 )
-from injector import inject
 
 
 def _now() -> str:

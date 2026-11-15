@@ -1,4 +1,4 @@
-"""Commission-owned publisher-mediated designated-executor admission strategy."""
+"""Commission-owned, versioned designated-executor admission strategies."""
 
 from dataclasses import dataclass
 
@@ -37,6 +37,7 @@ class DesignatedOpenAdmission(OpenAdmissionPolicy):
         super().__post_init__()
         if (
             self.strategy != "publisher_mediated"
+            or self.defer_executor_membership
             or self.participation_type is not ParticipationType.SINGLE_CONTRIBUTION
             or self.steps
             != ("publish_opportunity", "submit_application", "screen", "admit")
@@ -64,3 +65,40 @@ def require_designated_admission(
     if not isinstance(policy, DesignatedOpenAdmission):
         raise ContextCollabValidationError("unsupported designated admission policy")
     return policy
+
+
+@dataclass(frozen=True)
+class BotSelfApplicationAdmission(OpenAdmissionPolicy):
+    """Designated Bot applies itself; owner policy automatically screens/admit.
+
+    The accountable scenario role owns the publication policy; the application
+    itself is accountable to the authenticated Bot owner.
+    Membership belongs only to the task's Open + Group Method binding. Neither
+    designation nor discovery is admission or a Space/resource grant.
+    """
+
+    strategy: str = "designated_bot_self_application"
+    defer_executor_membership: bool = True
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        if (
+            self.strategy != "designated_bot_self_application"
+            or not self.defer_executor_membership
+            or self.participation_type is not ParticipationType.GROUP_MEMBER
+            or self.capacity != 1
+        ):
+            raise ContextCollabValidationError(
+                "unsupported Bot self-application policy"
+            )
+
+    def validate_roles(self, roles: tuple[ScenarioRole, ...]) -> None:
+        super().validate_roles(roles)
+        sources = {role.name: role.participant_source for role in roles}
+        if (
+            sources[self.applicant_role] != "executor_ref"
+            or sources[self.accountable_role] != "principal_ref"
+        ):
+            raise ContextCollabValidationError(
+                "self-application requires designated executor and owner"
+            )

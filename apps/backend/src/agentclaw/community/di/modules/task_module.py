@@ -13,6 +13,7 @@ import logging
 import os
 from typing import Annotated
 
+
 from agentclaw.community.adapters.http.task.auth import (
     CallbackAuthenticator,
     NoopCallbackAuthenticator,
@@ -22,17 +23,6 @@ from agentclaw.community.api.bot_public_service import BotPublicServiceProtocol
 from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.api.cron_relay_service import CronRelayServiceProtocol
 from agentclaw.community.api.system_config_service import SystemConfigServiceProtocol
-from agentclaw.community.core.task.task_panel.manifest import TaskPanelManifestService
-from agentclaw.community.core.task.task_panel.manifest_contract import (
-    TaskPanelManifestServiceProtocol,
-)
-from agentclaw.community.core.task.task_dispatch.task_settings import (
-    HARNESS_POLLER,
-    SEARCH_SKILL,
-    SKILL_REPORT,
-    TaskSettingsService,
-    TaskSettingsServiceProtocol,
-)
 from agentclaw.community.api.task.bot_grant_reconciliation_service import (
     BotGrantReconciliationServiceProtocol,
 )
@@ -48,14 +38,12 @@ from agentclaw.community.api.task.forum_personal_center_activity_service import 
     ForumPersonalCenterActivityServiceProtocol,
 )
 from agentclaw.community.api.task.forum_service import ForumServiceProtocol
-from agentclaw.community.api.task.task_context_service import TaskContextServiceProtocol
 from agentclaw.community.api.task.task_grant_service import (
     TaskClaimGrantService,
     TaskClaimGrantServiceProtocol,
 )
 from agentclaw.community.api.task.task_loop_callback import TaskLoopCallbackProtocol
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
-from agentclaw.community.core.bot_management.services.bcn_service import BcnService
 from agentclaw.community.core.repository.implementations.task.feedback import (
     FeedbackRepository,
 )
@@ -86,9 +74,6 @@ from agentclaw.community.core.repository.protocols.task.forum import (
 from agentclaw.community.core.repository.protocols.task.forum_author_stats import (
     ForumAuthorStatsRepositoryProtocol,
 )
-from agentclaw.community.core.repository.protocols.task.forum_digest import (
-    ForumDigestReportRepositoryProtocol,
-)
 from agentclaw.community.core.repository.protocols.task.forum_interaction import (
     ForumInteractionRepositoryProtocol,
 )
@@ -102,17 +87,6 @@ from agentclaw.community.api.task.task_context_service import TaskContextService
 from agentclaw.community.core.task.services.bot_grant_reconciliation_service import (
     BotGrantReconciliationService,
 )
-from agentclaw.community.core.task.task_center.task_service import TaskService
-from agentclaw.community.core.task.task_center.task_intake import TaskIntakeHandler
-from agentclaw.community.core.task.task_center.bot_intake_skill import (
-    BotTaskIntakeSkill,
-)
-from agentclaw.community.core.task.task_center.intake_target_resolver import (
-    DefaultIntakeTargetResolver,
-)
-from agentclaw.community.core.task.repository.task_intake_repository import (
-    TaskIntakeRepositoryProtocol,
-)
 from agentclaw.community.core.task.context_collab.g1_secure_govern.authorization import (
     ContextCollabAuthorizerProtocol,
     StructuralContextCollabAuthorizer,
@@ -120,10 +94,6 @@ from agentclaw.community.core.task.context_collab.g1_secure_govern.authorization
 from agentclaw.community.core.task.context_collab.g1_secure_govern.method_authorization import (
     MethodOpsAuthorizerProtocol,
     StructuralMethodOpsAuthorizer,
-)
-from agentclaw.community.core.task.context_collab.l1_interoperate_deliver.delivery import (
-    A2aDeliveryPort,
-    MockA2aDelivery,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.collet_lifecycle import (
     ColletLifecycleService,
@@ -172,17 +142,6 @@ from agentclaw.community.core.task.context_collab.products.bbs_public_discussion
 from agentclaw.community.core.task.context_collab.products.service_api import (
     BbsPublicDiscussionServiceProtocol,
 )
-from agentclaw.community.core.task.context_collab.products.task_commission.dispatch import (
-    A2aTaskDispatch,
-)
-from agentclaw.community.core.task.context_collab.products.task_commission.service import (
-    TaskCommissionService,
-)
-from agentclaw.community.core.task.context_collab.products.task_commission.service_api import (
-    TaskCommissionServiceProtocol,
-    TaskDispatchPort,
-    TaskMethodOpsPort,
-)
 from agentclaw.community.core.task.context_collab.service_api import (
     ContextCollabServiceProtocol,
 )
@@ -220,9 +179,6 @@ from agentclaw.community.core.task.forum.interaction.personal_center_activity_se
 )
 from agentclaw.community.core.task.forum.interaction.target_verifier import (
     DatabaseForumInteractionTargetVerifier,
-)
-from agentclaw.community.core.task.forum.interaction.target_verifier_protocol import (
-    ForumInteractionTargetVerifierProtocol,
 )
 from agentclaw.community.core.task.forum.notifications.forum_notification_publisher import (
     ForumNotificationPublisher,
@@ -278,10 +234,6 @@ from agentclaw.community.core.task.task_panel.manifest import TaskPanelManifestS
 from agentclaw.community.core.task.task_panel.manifest_contract import (
     TaskPanelManifestServiceProtocol,
 )
-from agentclaw.community.core.task.task_runner.callback_correlation import (
-    CallbackCorrelationRegistry,
-    InMemoryCallbackCorrelationRegistry,
-)
 from agentclaw.community.core.task.task_runner.client.bcs_token_provider import (
     BcsTokenProvider,
 )
@@ -305,11 +257,8 @@ from agentclaw.community.core.task.task_runner.client.ports import (
     BcsClientPort,
     OpenApiBotPort,
 )
-from agentclaw.community.di.config import TaskDispatchConfig
 from agentclaw.community.di.modules.context_collab_products import build_product_catalog
-from agentclaw.community.di.modules.task_commission_method_ops_adapter import (
-    TaskCommissionOpenMethodAdapter,
-)
+from agentclaw.community.di.modules.task_commission_module import TaskCommissionModule
 from agentclaw.community.plugin_api.notify_sender import (
     QUALIFIER_BBS_DIGEST,
     NotifySenderPlugin,
@@ -426,17 +375,9 @@ class TaskModule(Module):
         )
         binder.bind(FeedbackRepositoryProtocol, to=FeedbackRepository, scope=singleton)
         binder.bind(FeedbackServiceProtocol, to=FeedbackService, scope=singleton)
-        # Context collab(BBS context collaboration protocol):service 协议绑定到
-        # 实现,repo 协议由 TaskPersistenceModule 绑定(轻量 injector 未装时取
-        # 不到即报错,与其余 repo 依赖同语义)。authorizer 协议必须显式绑定:
-        # python-injector 对带默认值的注解参数同样注入,``ContextCollabService.
-        # __init__`` 的 StructuralContextCollabAuthorizer 默认实例在 DI 构造
-        # 路径不生效;P2 策略授权器经 profile 模块覆写同一协议键即可替换。
-        binder.bind(
-            ContextCollabAuthorizerProtocol,
-            to=StructuralContextCollabAuthorizer,
-            scope=singleton,
-        )
+        # Commission installs the shared G1 admission guard and its product seams.
+        # Explicit singleton bindings remain replaceable by profile modules.
+        binder.install(TaskCommissionModule())
         # L5 method 内存存储(2026-11-12 L5 method objects spec §6):进程内
         # singleton,``ContextCollabService`` 构造路径新增 method_store 依赖
         # 后必须绑定;P2 持久化经同一 MethodStoreProtocol 键整体替换,服务层
@@ -464,18 +405,6 @@ class TaskModule(Module):
             BbsPublicDiscussionServiceProtocol, to=BbsPublicDiscussionService,
             scope=singleton,
         )
-        # 任务代办产品层(2026-11-13 task_commission spec §5):同款singleton,
-        # 顶层单值 Open 形态;复用既有仓储/作者器/MethodStore 绑定。
-        binder.bind(
-            TaskCommissionServiceProtocol, to=TaskCommissionService,
-            scope=singleton,
-        )
-        # 交办交付缝经 L1 mock 送达(2026-11-13 L1 interoperate-deliver spec
-        # 裁决 B):envelope+A2aMessage 承载;P2 真实 A2A 由交付侧经
-        # A2aDeliveryPort 同端口整体替换,产品编排零改动。LoggingTaskDispatch
-        # 保留为直接构造默认,DJ 不再绑它。
-        binder.bind(A2aDeliveryPort, to=MockA2aDelivery, scope=singleton)
-        binder.bind(TaskDispatchPort, to=A2aTaskDispatch, scope=singleton)
         # L5 method 服务接线(2026-11-12 L5 method objects spec §5/§13):
         # 授权器与四个服务协议全部显式 singleton 绑定——python-injector
         # 不自动解析未绑定键;四服务共享上面同一 MethodStoreProtocol
@@ -502,13 +431,6 @@ class TaskModule(Module):
         )
         binder.bind(
             OpenMethodOpsServiceProtocol, to=OpenMethodService,
-            scope=singleton,
-        )
-        # 方法编排缝(任务代办 spec §9):产品窄端口 → DI 适配器,发布即
-        # 驱动真 Open 方法生命周期;适配器 @inject 拉取上方 Open 方法服务
-        # singleton(交付缝 TaskDispatchPort 同款直接构造绑定)。
-        binder.bind(
-            TaskMethodOpsPort, to=TaskCommissionOpenMethodAdapter,
             scope=singleton,
         )
         binder.bind(

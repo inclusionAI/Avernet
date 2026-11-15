@@ -1,4 +1,6 @@
-"""Installed task_commission v1: explicit product semantics, no runtime engine."""
+"""Versioned task_commission definitions; explicit semantics, no runtime engine."""
+
+from dataclasses import replace
 
 from agentclaw.community.core.task.context_collab.l4_context_primitives.participants import (
     ROLE_RESPONSIBLE_USER,
@@ -24,6 +26,7 @@ from agentclaw.community.core.task.context_collab.l6_products.publication import
     OpenPublicationProfile,
 )
 from agentclaw.community.core.task.context_collab.products.task_commission.publication import (
+    BotSelfApplicationAdmission,
     DesignatedOpenAdmission,
 )
 
@@ -116,3 +119,34 @@ TASK_COMMISSION_PROFILE = ProductProfileDefinition(
         ),
     ),
 )
+
+
+SELF_SERVICE_COMMISSION_PROFILE_REF = VersionedProfileRef("task_commission", 2)
+
+
+def build_self_service_commission_profile() -> ProductProfileDefinition:
+    """Product authoring: a new immutable definition, deployed through DI.
+
+    Keep v1 installed for existing tasks. This is not a runtime registration API.
+    Workflow stays at v1: admission changes, Work/acceptance semantics do not.
+    """
+    return replace(
+        TASK_COMMISSION_PROFILE,
+        ref=SELF_SERVICE_COMMISSION_PROFILE_REF,
+        composition=MethodCompositionTemplate(
+            method_kind="Open + Group",
+            scope="collet",
+            required_methods=(
+                MethodRequirement("Open", "0.2"),
+                MethodRequirement("Group", "0.2"),
+            ),
+        ),
+        publication=OpenPublicationProfile(
+            admission=BotSelfApplicationAdmission(
+                applicant_role="assignee",
+                accountable_role="owner",
+                participation_type=ParticipationType.GROUP_MEMBER,
+                capacity=1,
+            ),
+        ),
+    )

@@ -1,7 +1,7 @@
 """L5 Open 服务机会面操作切片(spec §4.4):四个机会状态机操作 +
-公开提交。
+公开查询/提交。
 
-五个用例:``publish_opportunity`` / ``pause_opportunity`` /
+只读用例 ``query_opportunities`` 加五个写用例:``publish_opportunity`` / ``pause_opportunity`` /
 ``reopen_opportunity`` / ``close_opportunity`` / ``submit_application``。
 
 - 状态转换一律经 G4 声明式机器(``open_opportunity`` /
@@ -52,6 +52,7 @@ from agentclaw.community.core.task.context_collab.l5_methods.open_profile import
 )
 from agentclaw.community.core.task.context_collab.l5_methods.operations.contracts import (
     OpenApplicationCommand,
+    OpenMethodOpsServiceProtocol,
     OpenOpportunityCommand,
     OpenOpportunityOpCommand,
     ProfileOpAcceptedResult,
@@ -112,8 +113,46 @@ def _resolve_opportunity_state(from_state: str, event: str) -> str:
     return new_state
 
 
-class OpenOpportunityOpsMixin(OpenMethodServiceBase):
-    """机会面四操作 + 公开提交。"""
+class OpenOpportunityOpsMixin(OpenMethodServiceBase, OpenMethodOpsServiceProtocol):
+    """机会面四操作 + 公开查询/提交。"""
+
+    def query_opportunities(
+        self,
+        collab_context_id: str,
+        method_binding_id: str,
+        context: ActorContext,
+    ) -> tuple[OpenOpportunity, ...]:
+        """只读可申请机会快照;不保留名额、不审核资格、不建立参与绑定。"""
+        axes = self._gate(
+            "query_opportunities", collab_context_id, method_binding_id, context
+        )
+        now = datetime.now(timezone.utc)
+        applications = self._store.list_applications(
+            axes, method_binding_id, collab_context_id
+        )
+        available = []
+        for opportunity in self._store.list_opportunities(
+            axes, method_binding_id, collab_context_id
+        ):
+            if opportunity.state is not OpportunityState.OPEN:
+                continue
+            if now < _parse_timestamp(
+                opportunity.opens_at, "OpenOpportunity", "opens_at"
+            ):
+                continue
+            if opportunity.closes_at is not None and now > _parse_timestamp(
+                opportunity.closes_at, "OpenOpportunity", "closes_at"
+            ):
+                continue
+            occupying = sum(
+                application.opportunity_ref == opportunity.opportunity_id
+                and application.state in _CAPACITY_OCCUPYING_STATES
+                for application in applications
+            )
+            if opportunity.capacity is not None and occupying >= opportunity.capacity:
+                continue
+            available.append(opportunity)
+        return tuple(available)
 
     def _transition_opportunity(
         self,

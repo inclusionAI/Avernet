@@ -17,7 +17,7 @@ Grant / Policy Authority 后经本协议整体替换实现,服务层无需改动
 - 治理面操作(lifecycle/group/swarm/open 属主操作):actor 必须是
   principal 或 executor;``principal_id`` 与 ``executor_id`` 同时为 None
   表示上下文不可归属,治理操作一律拒绝(fail-safe);
-- 读面操作(``inspect`` / ``validate_plan``)与 ``submit_application``:
+- 读面操作(``inspect`` / ``validate_plan`` / ``query_opportunities``)与 ``submit_application``:
   任意已认证 actor(``actor.actor.principal_id`` 非空)通过——spec §3
   inspection 只返回投影,结构 P1 比照既有 GET status 路径按公开读处理;
 - self-help:``leave`` 比对 ``member.participant_ref``,
@@ -33,10 +33,12 @@ from typing import Any, Protocol, runtime_checkable
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabValidationError,
 )
+from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context import (
+    ActorContext,
+)
 from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
     MethodBinding,
 )
-from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context import ActorContext
 
 # lifecycle 治理面操作(inspect 为读面,单列)。
 LIFECYCLE_OWNER_OPS = frozenset(
@@ -100,6 +102,8 @@ OPEN_OWNER_OPS = frozenset(
         "revoke_admission",
     }
 )
+# open 读面:任意已认证 actor,不要求已经录取或持有参与绑定。
+OPEN_READ_OPS = frozenset({"query_opportunities"})
 # open 公开提交:任意已认证 actor。
 OPEN_PUBLIC_OPS = frozenset({"submit_application"})
 # open self-help 操作:比对 application.accountable_principal_ref。
@@ -297,8 +301,8 @@ class StructuralMethodOpsAuthorizer:
         principal_id: str | None = None,
         executor_id: str | None = None,
     ) -> None:
-        if op in OPEN_PUBLIC_OPS:
-            # submit_application:任意已认证 actor 可投递。
+        if op in OPEN_READ_OPS or op in OPEN_PUBLIC_OPS:
+            # 查询/提交:任意已认证 actor,不授予参与或 Resource 权限。
             _require_authenticated(op, binding, actor)
             return
         if op in OPEN_SELF_HELP_OPS:

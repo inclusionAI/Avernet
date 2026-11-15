@@ -1,10 +1,10 @@
 """L5 Open 方法剖面服务组装(spec §4.4 / §5;Task 12)。
 
-实现 ``OpenMethodOpsServiceProtocol`` 十个操作,与 Swarm 服务同款按
+实现 ``OpenMethodOpsServiceProtocol`` 的只读查询与十个写操作,与 Swarm 服务同款按
 1000 行 CI 边界拆片组装(spec §5):
 - 共用骨架(构造注入 / Collet 身份解析 / 治理面前置)在
   ``base.py``;
-- 机会面五操作(publish / pause / reopen / close / submit)在
+- 机会面查询(query_opportunities)与五个写操作(publish / pause / reopen / close / submit)在
   ``opportunity.py``;
 - 申请与录取面五操作(screen / reject / withdraw / admit /
   revoke_admission + 录取产物编排)在 ``application.py``。
@@ -28,7 +28,7 @@ from agentclaw.community.core.task.context_collab.l5_methods.operations.open.opp
 
 
 class OpenMethodService(OpenApplicationOpsMixin, OpenOpportunityOpsMixin):
-    """Open 十操作用例类(组装声明;行为与裁决见切片 docstring)。
+    """Open 查询与十个写操作用例类(组装声明;行为与裁决见切片 docstring)。
 
     构造注入(``@inject``)在 ``OpenMethodServiceBase.__init__``,P2
     替换 store / 授权器 / Collet 仓储任一实现零服务层改动;runtime

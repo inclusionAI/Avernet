@@ -32,6 +32,7 @@ class ResolvedMethodSpec:
     role_binding_refs: tuple[str, ...]
     principal_id: str
     executor_id: str | None
+    admit_executor_on_creation: bool = True
 
 
 class TopLevelBindingRecovery(Protocol):
@@ -113,7 +114,7 @@ def _project_initial_roster(
 ) -> None:
     """Open+Group 顶层投影的 roster + 初始成员行(spec §9.2 / §4.2)。
 
-    初始成员 = 应用解析后的 principal 与 executor(principal 与
+    初始成员 = 应用解析后的 principal,以及未延迟录取的 executor(principal 与
     executor 身份重合时只落一行),直接以 ACTIVE 创建(不经 INVITED /
     迁移规则,``transitioned_from`` 落空串,沿绑定初始 BOUND 行先例)。
     roster 自 revision 1 起,每个成员插入恰一次 bump(与"每成员变更
@@ -136,7 +137,7 @@ def _project_initial_roster(
     # 有序去重:principal 先于 executor;身份重合只落一行。
     participants: dict[str, str] = {}
     participants.setdefault(spec.principal_id, "principal")
-    if spec.executor_id is not None:
+    if spec.executor_id is not None and spec.admit_executor_on_creation:
         participants.setdefault(spec.executor_id, "executor")
     for index, (participant_id, role) in enumerate(participants.items()):
         member = GroupMemberBinding.from_dict(
@@ -174,7 +175,7 @@ def initialize_top_level_binding(
     由 ``ResolvedMethodSpec`` 单向派生,不回写创建合同;同一 Collet 的
     重复投影幂等返回既有权威对象(不重写审计、不复活已终止对象)。
     Group 面向的顶层(Open + Group)在创建投影时同步补挂 roster +
-    初始成员行(principal/executor ACTIVE,§4.2);Single 顶层不建
+    初始成员行(principal ACTIVE;executor 可由应用要求延迟至录取);Single 顶层不建
     roster。store 写失败如实上抛(内存写基本不会失败,但失败绝不让
     "有 Collet 无 binding"的响应伪装成功)。
     """
