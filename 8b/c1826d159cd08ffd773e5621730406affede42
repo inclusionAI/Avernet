@@ -1,0 +1,42 @@
+apps/backend/tests/community/core/caller_identity/test_dingtalk_iam_token.py
+  s_5c173f6b8a3b51::t_ef3f64c0adb0f0 57,81-82
+  s_5c173f6b8a3b51::t_1ffe7aacb88792 18,37-44,61-62,66-70,99-100,102,109,120-136,138,142
+  s_5c173f6b8a3b51::t_8025f64863f4e4 143-145,147-150,152,154-155,158-163
+  s_5c173f6b8a3b51::t_36e60719041dee 146,151,153,156-157
+apps/backend/specs/dingtalk-caller-token/002-code-report.md
+  s_5c173f6b8a3b51::t_d8df58f6e3b929 5,8,10,14,16,18-19,21
+  s_5c173f6b8a3b51::t_9bae33909c4cf0 12,20,22-24,26
+apps/backend/src/agentclaw/community/core/caller_identity/iam_token_service.py
+  s_5c173f6b8a3b51::t_3fa079f25fbe50 7,92,242,245-246,250,256-257,259-276
+apps/backend/src/agentclaw/community/core/caller_identity/caller_credential_protocol.py
+  s_5c173f6b8a3b51::t_3fa079f25fbe50 50,73,76
+apps/backend/tests/community/api/test_dingtalk_iam_token.py
+  s_5c173f6b8a3b51::t_1ffe7aacb88792 31,41-44,94-101
+  s_5c173f6b8a3b51::t_ef3f64c0adb0f0 102-128
+apps/backend/specs/dingtalk-caller-token/001-spec-output.md
+  s_5c173f6b8a3b51::t_9bae33909c4cf0 7
+  s_5c173f6b8a3b51::t_1ffe7aacb88792 3,5,9
+apps/backend/specs/dingtalk-caller-token/implementation-plan.md
+  s_5c173f6b8a3b51::t_1ffe7aacb88792 1,3
+  s_5c173f6b8a3b51::t_9bae33909c4cf0 5-8
+apps/backend/src/agentclaw/community/adapters/http/token_exchange/router.py
+  s_5c173f6b8a3b51::t_3fa079f25fbe50 120,126,128
+apps/backend/src/agentclaw/community/core/caller_identity/README.md
+  s_5c173f6b8a3b51::t_ef3f64c0adb0f0 27-34
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8bc1826d159cd08ffd773e5621730406affede42",
+  "prompts": {},
+  "sessions": {
+    "s_5c173f6b8a3b51": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ce92-ae83-7ee3-a7cd-2cd2e1135dca",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

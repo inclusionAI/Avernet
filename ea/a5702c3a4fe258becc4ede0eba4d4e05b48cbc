@@ -1,0 +1,32 @@
+CONTEXT-MAP.md
+  s_47ed8e91e4b8af::t_f406a51cd4f0f8 1-38
+apps/backend/docs/diagnostics/bot-runtime.md
+  s_47ed8e91e4b8af::t_f406a51cd4f0f8 1-50
+apps/backend/.gitignore
+  s_47ed8e91e4b8af::t_8c9d090b5ad46a 23-25
+docs/agents/knowledge-standard.md
+  s_47ed8e91e4b8af::t_f406a51cd4f0f8 1-2,4-30
+  s_47ed8e91e4b8af::t_6da54ec7c94340 3
+docs/flows/backend-runtime-targeting.md
+  s_47ed8e91e4b8af::t_f406a51cd4f0f8 1-46
+AGENTS.md
+  s_47ed8e91e4b8af::t_8d1a06efd5aac9 4-10
+apps/backend/README.md
+  s_47ed8e91e4b8af::t_d67f773151e97b 32-44,91-104
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "eaa5702c3a4fe258becc4ede0eba4d4e05b48cbc",
+  "prompts": {},
+  "sessions": {
+    "s_47ed8e91e4b8af": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c399-a9b4-7db3-b10d-10bee70838e6",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "卷瓜 <juangua.swj@antgroup.com>"
+    }
+  }
+}

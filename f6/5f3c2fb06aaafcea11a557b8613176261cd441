@@ -1,0 +1,58 @@
+apps/bcs-internal/Cargo.lock
+  h_f4a73db4ad12be 510-577,630,1608-1616,2528-2530
+apps/bcs-internal/Cargo.toml
+  h_f4a73db4ad12be 3-4,42-48
+apps/bcs-internal/crates/plugins/bcn-results-ob/Cargo.toml
+  h_f4a73db4ad12be 1-32
+apps/bcs-internal/crates/plugins/bcn-results-ob/README.md
+  h_f4a73db4ad12be 1-71
+apps/bcs-internal/crates/plugins/bcn-results-ob/migrations/001_runtime_results.sql
+  h_f4a73db4ad12be 1-18
+apps/bcs-internal/crates/plugins/bcn-results-ob/migrations/002_reconcile_manual_dev_schema.sql
+  h_f4a73db4ad12be 1-7
+apps/bcs-internal/crates/plugins/bcn-results-ob/src/lib.rs
+  h_f4a73db4ad12be 1-247
+apps/bcs-internal/crates/plugins/bcn-results-ob/src/schema.rs
+  h_f4a73db4ad12be 1-88
+apps/bcs-internal/crates/plugins/bcn-results-ob/tests/live_ob.rs
+  h_f4a73db4ad12be 1-188
+apps/bcs-internal/crates/plugins/bcn-results-ob/tests/results.rs
+  h_f4a73db4ad12be 1-142
+apps/bcs-internal/crates/plugins/bcn-storage-tbase/Cargo.toml
+  h_f4a73db4ad12be 1-21
+apps/bcs-internal/crates/plugins/bcn-storage-tbase/README.md
+  h_f4a73db4ad12be 1-81
+apps/bcs-internal/crates/plugins/bcn-storage-tbase/examples/probe.rs
+  h_f4a73db4ad12be 1-46
+apps/bcs-internal/crates/plugins/bcn-storage-tbase/src/atomic.lua
+  h_f4a73db4ad12be 1-94
+apps/bcs-internal/crates/plugins/bcn-storage-tbase/src/atomic.rs
+  h_f4a73db4ad12be 1-169
+apps/bcs-internal/crates/plugins/bcn-storage-tbase/src/heartbeat.lua
+  h_f4a73db4ad12be 1-18
+apps/bcs-internal/crates/plugins/bcn-storage-tbase/src/lib.rs
+  h_f4a73db4ad12be 1-107
+apps/bcs-internal/crates/plugins/bcn-storage-tbase/src/liveness.rs
+  h_f4a73db4ad12be 1-255
+apps/bcs-internal/crates/plugins/bcn-storage-tbase/src/probe.rs
+  h_f4a73db4ad12be 1-93
+apps/bcs-internal/crates/plugins/bcn-storage-tbase/tests/common/mod.rs
+  h_f4a73db4ad12be 1-37
+apps/bcs-internal/crates/plugins/bcn-storage-tbase/tests/contract.rs
+  h_f4a73db4ad12be 1-52
+apps/bcs-internal/crates/plugins/bcn-storage-tbase/tests/liveness.rs
+  h_f4a73db4ad12be 1-103
+apps/bcs-internal/crates/plugins/bcn-storage-tbase/tests/wire.rs
+  h_f4a73db4ad12be 1-235
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f65f3c2fb06aaafcea11a557b8613176261cd441",
+  "prompts": {},
+  "humans": {
+    "h_f4a73db4ad12be": {
+      "author": "元歌 <yuange.zjy@antgroup.com>"
+    }
+  }
+}

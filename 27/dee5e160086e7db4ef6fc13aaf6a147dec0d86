@@ -1,0 +1,41 @@
+apps/baas/src/secbaas/community/spi/bot_service/_protocols.py
+  s_5c173f6b8a3b51::t_6bf2e4e6d563ef 60
+apps/baas/src/secbaas/community/core/service/bcn/_bcn_service.py
+  s_5c173f6b8a3b51::t_6bf2e4e6d563ef 111
+apps/backend/src/agentclaw/community/core/caller_identity/README.md
+  s_5c173f6b8a3b51::t_6bf2e4e6d563ef 34-35
+apps/baas/tests/unit/core/service/bcn/test_bcn_service.py
+  s_5c173f6b8a3b51::t_6bf2e4e6d563ef 518
+apps/backend/specs/dingtalk-caller-token/002-code-report.md
+  s_5c173f6b8a3b51::t_6bf2e4e6d563ef 25,28-31
+apps/backend/specs/dingtalk-caller-token/implementation-plan.md
+  s_5c173f6b8a3b51::t_6bf2e4e6d563ef 11-12
+apps/baas/tests/unit/core/service/bot_run/test_bot_run_utils.py
+  s_5c173f6b8a3b51::t_6bf2e4e6d563ef 776,785,793
+apps/baas/src/secbaas/community/plugins/bot_service/real/_plugin.py
+  s_5c173f6b8a3b51::t_6bf2e4e6d563ef 527,530
+apps/baas/src/secbaas/community/core/service/bot_run/_binding_resolver.py
+  s_5c173f6b8a3b51::t_6bf2e4e6d563ef 120
+apps/baas/tests/unit/adapters/web/open_api/test_bcn_router.py
+  s_5c173f6b8a3b51::t_6bf2e4e6d563ef 146-147,153
+apps/baas/src/secbaas/community/adapters/web/routers/bcn_downlink/bcn_model.py
+  s_5c173f6b8a3b51::t_6bf2e4e6d563ef 164
+apps/backend/specs/dingtalk-caller-token/001-spec-output.md
+  s_5c173f6b8a3b51::t_4f3e0fc05c3589 7,9
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "27dee5e160086e7db4ef6fc13aaf6a147dec0d86",
+  "prompts": {},
+  "sessions": {
+    "s_5c173f6b8a3b51": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ce92-ae83-7ee3-a7cd-2cd2e1135dca",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

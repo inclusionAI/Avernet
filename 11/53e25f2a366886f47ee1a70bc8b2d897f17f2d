@@ -1,0 +1,28 @@
+apps/evolverun/docs/session-recovery-integration.md
+  s_9fc77bfda5cef2::t_4355944195a1d8 15-20,22
+  s_9fc77bfda5cef2::t_f35a5ec78bf49c 21
+apps/evolverun/clawweb/internal/adapters/server/__tests__/bot-runtime-target.test.ts
+  s_9fc77bfda5cef2::t_8f178f106c3769 2-4,37,141-168
+  s_9fc77bfda5cef2::t_f35a5ec78bf49c 169-183
+  s_9fc77bfda5cef2::t_cc8f3bcc09da63 18,33-34,73,77,81,91-140
+apps/evolverun/clawweb/internal/adapters/server/repositories/bot-directory.ts
+  s_9fc77bfda5cef2::t_4355944195a1d8 266-267,277-280,286
+  s_9fc77bfda5cef2::t_ecf785cddc77a8 256-265,268-276,281-285,287-298,300,306
+  s_9fc77bfda5cef2::t_f35a5ec78bf49c 214-222
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1153e25f2a366886f47ee1a70bc8b2d897f17f2d",
+  "prompts": {},
+  "sessions": {
+    "s_9fc77bfda5cef2": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c36b-16c9-7283-b0df-1cd3ad3e0e35",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}

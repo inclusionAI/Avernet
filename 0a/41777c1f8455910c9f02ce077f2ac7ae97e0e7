@@ -1,0 +1,26 @@
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/recovery-owner-callback-probe.ts
+  s_df9e33e486a942::t_c90203dfbd4fcf 1-3,5-13,18-23,25,27,29-30,32-38,40-41
+  s_df9e33e486a942::t_8f743ca9bec2ac 14-16,26,28,31,39
+  s_df9e33e486a942::t_8e1db61557e6a2 4,17,24
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/index.ts
+  s_df9e33e486a942::t_c90203dfbd4fcf 42,471
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/recovery-owner-callback-probe.test.ts
+  s_df9e33e486a942::t_8f743ca9bec2ac 44-46
+  s_df9e33e486a942::t_73f63f90b2e132 1-43,47-59
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0a41777c1f8455910c9f02ce077f2ac7ae97e0e7",
+  "prompts": {},
+  "sessions": {
+    "s_df9e33e486a942": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c461-e821-7eb2-8d5a-02b04e069135",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}
