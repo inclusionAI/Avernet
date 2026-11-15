@@ -11,7 +11,7 @@ from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
-from .schemas_config_manifest_capabilities import (
+from .schemas_manifest_discovery import (
     ConfigManifestCapabilities as ConfigManifestCapabilities,
     ManifestConstruct as ManifestConstruct,
     ManifestSkillReference as ManifestSkillReference,

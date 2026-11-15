@@ -1,4 +1,4 @@
-"""Public manifest capability-discovery response models for the bots group."""
+"""Manifest discovery response models for the bots HTTP API."""
 
 from __future__ import annotations
 

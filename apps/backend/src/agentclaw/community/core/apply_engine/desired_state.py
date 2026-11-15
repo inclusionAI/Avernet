@@ -194,7 +194,12 @@ class LocalSkillPackage:
 
 @dataclass(frozen=True)
 class CenterSkillByName:
-    """A Skill Center skill, found by the entry's name; the bot runs the version the Center publishes (ADR 0002)."""
+    """Deprecated compatibility form for Genome mutation's name-based references.
+
+    Retained until Genome adopts explicit UUID/code references; remove this
+    form as part of that migration. The bot tracks the published Center version
+    (ADR 0002).
+    """
 
 
 @dataclass(frozen=True)
