@@ -1,0 +1,29 @@
+apps/backend/src/agentclaw/corp/core/caller_identity/README.md
+  s_bb98e2f10840b6::t_7a3cb7c022c938 10,18-19,28-29,41-48
+apps/backend/src/agentclaw/corp/core/caller_identity/scheduled_refresh.py
+  s_bb98e2f10840b6::t_dc7613ba5875cd 16-17,33-34,39,64-72
+apps/backend/src/agentclaw/corp/core/caller_identity/scheduled_runtime_probe.py
+  s_bb98e2f10840b6::t_b9208fe68d3614 1-57
+apps/backend/src/agentclaw/corp/di/modules/infrastructure/corp/identity.py
+  s_bb98e2f10840b6::t_30216b74ecef49 4-5,19,22,31,105-106,111
+apps/backend/tests/corp/core/caller_identity/test_scheduled_runtime_probe.py
+  s_bb98e2f10840b6::t_03e3b23b9af46b 1-103
+apps/backend/tests/corp/plugins/prod/test_scheduled_caller.py
+  s_bb98e2f10840b6::t_6361fdb34ebb41 183,191-192,198,297,311-312,323-324,330-331,343-344,397,400,415,424,444,447-515
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "455f736503997894feaf37220e3a3501d6062689",
+  "prompts": {},
+  "sessions": {
+    "s_bb98e2f10840b6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a162ee-dd64-7f52-9208-9fd1326f32e5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

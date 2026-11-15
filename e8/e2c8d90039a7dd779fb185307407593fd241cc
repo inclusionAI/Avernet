@@ -1,0 +1,37 @@
+apps/bcs/crates/auxiliary/bcs-network-tracing/CONTEXT.md
+  s_b33d53d28ea1a2::t_0b5a6d67a3f303 24-25
+apps/bcs/crates/plugin-api/bcs-tracing-api/src/lib.rs
+  s_b33d53d28ea1a2::t_d158655ec80f09 8-14,28
+apps/bcs/crates/external-clients/bcs-a2a-http/CONTEXT.md
+  s_b33d53d28ea1a2::t_0b5a6d67a3f303 11-12
+apps/bcs/crates/bootstrap/bcs/tests/caller_channel/network_tracing.rs
+  s_b33d53d28ea1a2::t_5931ec458f1492 31
+apps/bcs/crates/external-clients/bcs-a2a-http/src/grpc_client.rs
+  s_b33d53d28ea1a2::t_5931ec458f1492 36,50,70,79,86,93,101
+apps/bcs/crates/bootstrap/bcs/src/server/server_run.rs
+  s_b33d53d28ea1a2::t_d158655ec80f09 344-346
+  s_b33d53d28ea1a2::t_e26c64560aa55a 652-655
+apps/bcs/crates/bootstrap/bcs/src/server/network_tracing_tests.rs
+  s_b33d53d28ea1a2::t_34e370130fcefc 1-41
+apps/bcs/crates/bootstrap/bcs/CONTEXT.md
+  s_b33d53d28ea1a2::t_0b5a6d67a3f303 286-294
+apps/bcs/crates/plugin-api/bcs-tracing-api/CONTEXT.md
+  s_b33d53d28ea1a2::t_0b5a6d67a3f303 3,21-34
+  s_b33d53d28ea1a2::t_18f29a8cfb2f4b 35
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e8e2c8d90039a7dd779fb185307407593fd241cc",
+  "prompts": {},
+  "sessions": {
+    "s_b33d53d28ea1a2": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ce81-7446-75a3-905e-4c92aec17aee",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Zimin Zhang <zhangzimin.zzm@antgroup.com>"
+    }
+  }
+}

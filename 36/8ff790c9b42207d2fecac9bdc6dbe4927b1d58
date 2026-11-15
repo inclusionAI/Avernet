@@ -1,0 +1,35 @@
+apps/backend/src/agentclaw/community/core/caller_identity/README.md
+  s_d23d2dd74fff18::t_f05622bd16533e 37-39,60,63-68,70,72-81,84,88-90
+apps/backend/src/agentclaw/community/core/caller_identity/iam_token_service.py
+  s_d23d2dd74fff18::t_6d7f582c4b7995 132,264-265
+apps/backend/src/agentclaw/community/core/caller_identity/session_validator.py
+  s_d23d2dd74fff18::t_074057c6fdc9aa 83-85
+apps/backend/tests/community/core/caller_identity/test_session_validator.py
+  s_d23d2dd74fff18::t_e46b4d527964f1 14
+apps/backend/tests/community/core/caller_identity/test_shared_teclaw_iam.py
+  s_d23d2dd74fff18::t_f72d0caf42f13a 3-4,86-87,89-90,109-116,123,139,144,149-150,152,155,170-173,178,181-182,186-187,201,214-218,222-223,228-230,237-241,262,309-317,319-330
+apps/frontend-nextgen/src/hooks/useBotEditor.ts
+  s_d23d2dd74fff18::t_eb16bfaf62ff84 125-129
+apps/frontend-nextgen/src/hooks/useBotLocalSkillUpload.ts
+  s_d23d2dd74fff18::t_125073cfa512b6 14-17
+apps/frontend-nextgen/test/shell/bcsOnlyDiscoveryBoot.test.tsx
+  s_d23d2dd74fff18::t_c1be8020331749 279
+singlebox/ci/tests/test_singlebox_coverage_workflow.py
+  s_d23d2dd74fff18::t_96f1643bf05f17 1,53,60-95,142-193
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "368ff790c9b42207d2fecac9bdc6dbe4927b1d58",
+  "prompts": {},
+  "sessions": {
+    "s_d23d2dd74fff18": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a13a79-4a70-7a40-84da-33a34fa4f69f",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

@@ -1,0 +1,58 @@
+apps/bcs/Cargo.lock
+  h_f4a73db4ad12be 370,380-385,387,392
+apps/bcs/crates/application/bcn-runtime-app/src/connector.rs
+  h_f4a73db4ad12be 44,47-73,96,169,223,251,254,257,259,262,307,309,767-769,771,774-779,789,792,804
+apps/bcs/crates/application/bcn-runtime-app/src/recovery.rs
+  h_f4a73db4ad12be 79-128
+apps/bcs/crates/application/bcn-runtime-app/src/results.rs
+  h_f4a73db4ad12be 62-112
+apps/bcs/crates/application/bcn-runtime-app/src/worker.rs
+  h_f4a73db4ad12be 37-38,41-67,82-83,103-104,107,114,147,155,386,389,392,394,397,402-403,507,510,535,537,623-626,628,631-636,646,649,661
+apps/bcs/crates/application/bcn-runtime-app/tests/results.rs
+  h_f4a73db4ad12be 91,93,99-120
+apps/bcs/crates/application/bcn-runtime-app/tests/run_liveness.rs
+  h_f4a73db4ad12be 1-56
+apps/bcs/crates/bootstrap/bcn-runtime/Cargo.toml
+  h_f4a73db4ad12be 9-11,34-41
+apps/bcs/crates/bootstrap/bcn-runtime/src/builder.rs
+  h_f4a73db4ad12be 75-86
+apps/bcs/crates/bootstrap/bcn-runtime/src/connectors.rs
+  h_f4a73db4ad12be 23-55
+apps/bcs/crates/bootstrap/bcn-runtime/src/lib.rs
+  h_f4a73db4ad12be 7-9
+apps/bcs/crates/bootstrap/bcn-runtime/src/management.rs
+  h_f4a73db4ad12be 1-96
+apps/bcs/crates/bootstrap/bcn-runtime/src/manifest.rs
+  h_f4a73db4ad12be 1-52
+apps/bcs/crates/bootstrap/bcn-runtime/tests/management.rs
+  h_f4a73db4ad12be 1-74
+apps/bcs/crates/bootstrap/bcn-runtime/tests/manifest.rs
+  h_f4a73db4ad12be 1-28
+apps/bcs/crates/bootstrap/bcs/src/lib.rs
+  h_f4a73db4ad12be 274-275
+apps/bcs/crates/bootstrap/bcs/src/server.rs
+  h_f4a73db4ad12be 186
+apps/bcs/crates/bootstrap/bcs/src/server/management.rs
+  h_f4a73db4ad12be 1-32
+apps/bcs/crates/contracts/bcn-runtime-model/src/error.rs
+  h_f4a73db4ad12be 16-17,48-49
+apps/bcs/crates/services/bcn-runtime-store/src/liveness_adapter.rs
+  h_f4a73db4ad12be 16-21
+apps/bcs/crates/services/bcn-runtime-store/src/ownership.rs
+  h_f4a73db4ad12be 25
+apps/bcs/crates/services/bcn-runtime-store/src/persistence.rs
+  h_f4a73db4ad12be 20,41,51-63
+docs/architecture/bcn-runtime.md
+  h_f4a73db4ad12be 349-383
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7c35e33ee1c93e73c2358b70b520e2b27812be8a",
+  "prompts": {},
+  "humans": {
+    "h_f4a73db4ad12be": {
+      "author": "元歌 <yuange.zjy@antgroup.com>"
+    }
+  }
+}

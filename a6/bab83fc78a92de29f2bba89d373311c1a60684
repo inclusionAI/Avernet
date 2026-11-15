@@ -1,0 +1,61 @@
+apps/frontend-nextgen/src/components/CollaborationPrivacy/BotGeneralConfigDialog/BotGeneralConfigDialogBody.tsx
+  s_6d6044b02bd54a::t_c339516655b06a 105-107
+  s_6d6044b02bd54a::t_cce5e695be6167 12
+apps/frontend-nextgen/src/components/CollaborationPrivacy/BotGeneralConfigDialog/useUserRiskStatus.ts
+  s_6d6044b02bd54a::t_87bd5cc050c56d 1-51
+apps/frontend-nextgen/src/components/CollaborationPrivacy/RelationCard/index.tsx
+  s_6d6044b02bd54a::t_bf409dd3863358 22-25
+  s_6d6044b02bd54a::t_5d7bd95798e81c 97
+  s_6d6044b02bd54a::t_7d43fbcdd1e2d1 4,31-32
+  s_6d6044b02bd54a::t_1914e7d4a51977 98-108
+apps/frontend-nextgen/src/components/CollaborationPrivacy/PublicationEditor/index.tsx
+  s_6d6044b02bd54a::t_1a8627f458143f 185-186
+  s_6d6044b02bd54a::t_606292479a7dd6 60-62
+apps/frontend-nextgen/test/components/CollaborationPrivacy/BotGeneralConfigDialog.test.tsx
+  s_6d6044b02bd54a::t_204fef70fa672d 29-35
+  s_6d6044b02bd54a::t_9430bd2c6b8b3e 6-8
+  s_6d6044b02bd54a::t_0a381155108bb4 686-690
+  s_6d6044b02bd54a::t_6e6cf3920b4bd8 635-664,666-669,676-685,691-693
+  s_6d6044b02bd54a::t_2d5dc53bda9917 602-634
+  s_6d6044b02bd54a::t_c6417ca2e58add 5
+apps/frontend-nextgen/test/collaborationPrivacyComponents.test.tsx
+  s_6d6044b02bd54a::t_a76adaa45f8181 555-625
+  s_6d6044b02bd54a::t_ad1015db0de208 303,316-317,334
+  s_6d6044b02bd54a::t_9c815349ce140e 284-302,304-315,318-333,335-336
+apps/frontend-nextgen/src/components/CollaborationPrivacy/PublicationEditor/RiskFlowBanners.tsx
+  s_6d6044b02bd54a::t_e2b76b3b223a62 12-16,21-22,27-28
+  s_6d6044b02bd54a::t_7e8735c17c0777 64-78
+apps/frontend-nextgen/src/pages/Workspace/components/BotSessionFiles/BotSessionFilesRow.tsx
+  s_1baa87bb9d5a3a::t_877b487265a678 43
+apps/frontend-nextgen/src/services/workspace/sessionFileUtils.ts
+  s_1baa87bb9d5a3a::t_a0e760b729aa93 104,106-110,120-122
+apps/frontend-nextgen/test/pages/Workspace/components/BotSessionFiles/BotSessionFilesRow.test.tsx
+  s_1baa87bb9d5a3a::t_62d8bf02986a9a 48-57,60-61
+apps/frontend-nextgen/test/services/workspace/sessionFileCreator.test.ts
+  s_1baa87bb9d5a3a::t_cd077359de8f36 3
+  s_1baa87bb9d5a3a::t_c82452dd084446 34-47,52-54,57-59
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a6bab83fc78a92de29f2bba89d373311c1a60684",
+  "prompts": {},
+  "sessions": {
+    "s_1baa87bb9d5a3a": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "7b1848ba-acd0-4428-9747-5009f4a3f56b",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    },
+    "s_6d6044b02bd54a": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "cd632900-c4d8-457b-b09b-d17673865885",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    }
+  }
+}

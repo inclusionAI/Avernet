@@ -1,0 +1,21 @@
+apps/backend/src/agentclaw/community/adapters/http/cron/router.py
+  s_d6190cf0834fa1::t_32a0a41f281fe2 90-91
+apps/backend/tests/community/endpoints/test_cron_router.py
+  s_d6190cf0834fa1::t_32a0a41f281fe2 256-291
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c39c2c405c242867b8b3c6dbab27e45e215249ac",
+  "prompts": {},
+  "sessions": {
+    "s_d6190cf0834fa1": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a19a1e-b309-72c1-8d49-1ab556b547db",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

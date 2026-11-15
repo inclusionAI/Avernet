@@ -1,0 +1,16 @@
+apps/evolverun/clawweb/public/app/clawweb/server/workflow-ai-draft-baas-execution.ts
+  h_bb3ca6fb13c5df 4,67
+apps/evolverun/clawweb/public/modules/clawevolve/server/services/baas-intervention.ts
+  h_bb3ca6fb13c5df 156
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "13811eec59e405bdb3939c9f8b26670bc7003f20",
+  "prompts": {},
+  "humans": {
+    "h_bb3ca6fb13c5df": {
+      "author": "fudapeng <dapeng.fdp@antgroup.com>"
+    }
+  }
+}

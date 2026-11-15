@@ -1,0 +1,19 @@
+apps/backend/tests/community/architecture/test_no_oversized_modules.py
+  s_530d1679367be6::t_e38e6fafe53293 96-100
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7c59ee4bb32b455781c93387566651ca876d3674",
+  "prompts": {},
+  "sessions": {
+    "s_530d1679367be6": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "e16628b6-75d3-4800-82ec-39cccf849f53",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

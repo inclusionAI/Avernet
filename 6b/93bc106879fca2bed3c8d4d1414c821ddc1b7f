@@ -1,0 +1,19 @@
+apps/backend/src/agentclaw/community/core/task/task_harness/harness.py
+  s_d23d2dd74fff18::t_07ff3a2651a94b 51,103,106,248,268,272
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6b93bc106879fca2bed3c8d4d1414c821ddc1b7f",
+  "prompts": {},
+  "sessions": {
+    "s_d23d2dd74fff18": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a13a79-4a70-7a40-84da-33a34fa4f69f",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

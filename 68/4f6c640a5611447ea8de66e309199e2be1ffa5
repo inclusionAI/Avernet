@@ -1,0 +1,16 @@
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/bot-workflow-permission-clone.test.ts
+  h_43af82e14600e4 105,110-124,140-146,230-266,295-300
+apps/evolverun/clawweb/public/modules/workflow/server/routes/bot-workflow-permission-clone.ts
+  h_43af82e14600e4 51-52,56-63,188,190-200,209-210,255-267,270-271
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "684f6c640a5611447ea8de66e309199e2be1ffa5",
+  "prompts": {},
+  "humans": {
+    "h_43af82e14600e4": {
+      "author": "fudapeng <fudp@example.com>"
+    }
+  }
+}

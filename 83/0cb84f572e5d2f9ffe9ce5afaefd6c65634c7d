@@ -1,0 +1,16 @@
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/approval-workbench-mount.test.ts
+  h_5f06d4d8b4bdd5 58-74
+submodules/avernet
+  h_5f06d4d8b4bdd5 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "830cb84f572e5d2f9ffe9ce5afaefd6c65634c7d",
+  "prompts": {},
+  "humans": {
+    "h_5f06d4d8b4bdd5": {
+      "author": "fudp <dapeng.fdp@antgroup.com>"
+    }
+  }
+}
