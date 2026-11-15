@@ -15,6 +15,7 @@ vi.mock('../../api/hooks', () => ({
   useAnalysisProgress: () => ({}), useRunEvolutionAnalysis: mocks.analysis,
 }))
 vi.mock('@avernet/clawweb-shared/web/api/hooks', () => ({ useFlowApprovals: () => ({ data: { items: [] } }) }))
+vi.mock('../../utils/use-recovered-flow-events', () => ({ useRecoveredFlowEvents: () => ({ data: [] }) }))
 vi.mock('../../components/RunSummaryHeader', () => ({ default: ({ run, readOnly }: { run: { flow_id: string }; readOnly: boolean }) => <div data-readonly={String(readOnly)}>摘要 {run.flow_id}</div> }))
 vi.mock('../../components/NodeExecutionList', () => ({ default: ({ nodes, renderSubworkflowLinks, onSelectNode, selectedNodeId, readOnly }: any) => <div data-readonly={String(readOnly)}><button onClick={() => onSelectNode('node-a')}>选择节点</button>{selectedNodeId && <span>已选择 {selectedNodeId}</span>}{nodes.filter((node: { executor_type: string }) => node.executor_type === 'subworkflow').map((node: { node_id: string }) => <div key={node.node_id}>{renderSubworkflowLinks(node)}</div>)}</div> }))
 vi.mock('../../components/RunDagView', () => ({ default: () => <div>DAG内容</div> }))
