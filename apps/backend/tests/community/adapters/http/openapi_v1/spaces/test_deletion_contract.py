@@ -19,6 +19,8 @@ from agentclaw.community.api.space_service import (
     SpaceMemberServiceProtocol,
     SpaceServiceProtocol,
 )
+from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.spaces.errors import SpaceNotFoundError
 from agentclaw.community.core.spaces.repository.models import SpaceMemberModel
 from agentclaw.community.core.repository.implementations.skill_center.space_skill import (
     SpaceSkillRepository,
@@ -180,6 +182,45 @@ def test_personal_space_delete_refused(app, world):  # noqa: F811
 
     assert resp.status_code == 409
     assert resp.json()["code"] == 409317
+
+
+def _seed_bot(world, *, bot_id: str, owner: str, space_id: int | None) -> None:
+    world.get(BotRepository).insert(
+        {
+            "bot_id": bot_id,
+            "bot_name": f"bot-{bot_id}",
+            "owner_id": owner,
+            "owner_name": owner,
+            "creator_id": owner,
+            "entity_id": owner,
+            "entity_type": "staff",
+            "active_engine": "moltis",
+            "bot_type": "service",
+            "status": "ACTIVE",
+            "space_id": space_id,
+        }
+    )
+
+
+def test_bot_space_assignment_requires_active_space(app, world):  # noqa: F811
+    """Bot space assignment refuses a soft-deleted target Space.
+
+    Same serialization contract as skill ownership: ``update_space_by_owner``
+    locks the target Space row and revalidates it inside the write
+    transaction, so a Space deleted by a concurrent transaction is observed
+    instead of being assigned to a Bot after the deletion committed.
+    """
+    space_id = _seed_team(world, name="Deletion contract: bot assignment guard")
+    _seed_bot(world, bot_id="bot-assign-1", owner=_OWNER, space_id=None)
+    world.get(SpaceDeletionServiceProtocol).delete_team_space(
+        space_id=space_id, actor_id=_OWNER
+    )
+    repository = world.get(BotRepository)
+
+    with pytest.raises(SpaceNotFoundError):
+        repository.update_space_by_owner(
+            bot_id="bot-assign-1", owner_id=_OWNER, space_id=space_id
+        )
 
 
 def test_skill_ownership_requires_active_space(app, world):  # noqa: F811
