@@ -1,0 +1,25 @@
+apps/backend/src/agentclaw/community/core/bot_public_risk/advance.py
+  s_befd386ce20825::t_a56e870fac16e9 22-31,100,167-168
+apps/backend/src/agentclaw/community/core/bot_public_risk/approval_guard.py
+  s_befd386ce20825::t_231fd6f161ca32 4,60-64,68-79
+apps/backend/tests/community/core/bot_public/test_risk_advance.py
+  s_befd386ce20825::t_07affc0df84794 320-333
+apps/backend/tests/community/core/bot_public/test_risk_tasks.py
+  s_befd386ce20825::t_3421254b27c3e2 797,854-891
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4ad081b53892bb1746ededb57ba793efe61aa205",
+  "prompts": {},
+  "sessions": {
+    "s_befd386ce20825": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a17e54-391f-7460-a1a1-4f8e39166a4f",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

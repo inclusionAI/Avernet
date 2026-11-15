@@ -1,0 +1,19 @@
+apps/backend/docs/arch/engine-capabilities.md
+  s_9cc530a04f0436::t_7f800a426c33a1 31-33
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a479706052e55cdac257e99f752c8db4931c7378",
+  "prompts": {},
+  "sessions": {
+    "s_9cc530a04f0436": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cbb6-600d-7911-853a-f044bc1358d8",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "卷瓜 <juangua.swj@antgroup.com>"
+    }
+  }
+}

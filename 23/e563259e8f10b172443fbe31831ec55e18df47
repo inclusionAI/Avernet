@@ -1,0 +1,46 @@
+apps/backend/specs/2026-11-12-context-collab-l6-product-forms/spec.md
+  h_059e888e5e4e82 1-176
+apps/backend/specs/2026-11-13-context-collab-l6-product-contracts/spec.md
+  h_059e888e5e4e82 1-376
+apps/backend/src/agentclaw/community/core/task/context_collab/g4_contracts_consistency/product_contract.py
+  h_059e888e5e4e82 1-146
+apps/backend/src/agentclaw/community/core/task/context_collab/g4_contracts_consistency/workflow_resolution.py
+  h_059e888e5e4e82 1-90
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/README.md
+  h_059e888e5e4e82 1-285
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/binding.py
+  h_059e888e5e4e82 1-177
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/catalog.py
+  h_059e888e5e4e82 1-104
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/contracts.py
+  h_059e888e5e4e82 1-226
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/instance.py
+  h_059e888e5e4e82 1-180
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/profiles.py
+  h_059e888e5e4e82 1,4-5,17,19-21,29-31
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/publication.py
+  h_059e888e5e4e82 1-73
+apps/backend/tests/community/core/task/context_collab/product_catalog.py
+  h_059e888e5e4e82 1-9
+apps/backend/tests/community/core/task/context_collab/test_l6_contracts.py
+  h_059e888e5e4e82 1-277
+apps/backend/tests/community/core/task/context_collab/test_l6_layering.py
+  h_059e888e5e4e82 1-66
+apps/backend/tests/community/core/task/context_collab/test_l6_product_e2e.py
+  h_059e888e5e4e82 1-327
+apps/backend/tests/community/core/task/context_collab/test_l6_runtime_contract.py
+  h_059e888e5e4e82 1-606
+apps/backend/tests/community/core/task/context_collab/test_workflow_resolution.py
+  h_059e888e5e4e82 1-119
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "23e563259e8f10b172443fbe31831ec55e18df47",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

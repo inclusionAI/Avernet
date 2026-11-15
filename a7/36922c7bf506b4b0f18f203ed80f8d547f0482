@@ -1,0 +1,26 @@
+apps/bcs/scripts/e2e-test/caller_execution_story.py
+  s_9e2e54049fb1e5::t_fb69ba9632d4d6 297
+  s_9e2e54049fb1e5::t_1cf180226727c9 266-272,275-296,298-313,332-338,380
+  s_9e2e54049fb1e5::t_c26507e5d4f782 381,408-412
+  s_9e2e54049fb1e5::t_351f28361988e3 273-274
+apps/bcs/crates/bootstrap/bcs/tests/caller_channel/README.md
+  s_9e2e54049fb1e5::t_c26507e5d4f782 25-33
+apps/bcs/crates/bootstrap/bcs/tests/caller_channel/network_tracing.rs
+  s_9e2e54049fb1e5::t_1cf180226727c9 25-31
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a736922c7bf506b4b0f18f203ed80f8d547f0482",
+  "prompts": {},
+  "sessions": {
+    "s_9e2e54049fb1e5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cf52-8e0f-7750-b4eb-cbba1ad9aac6",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Zimin Zhang <zhangzimin.zzm@antgroup.com>"
+    }
+  }
+}

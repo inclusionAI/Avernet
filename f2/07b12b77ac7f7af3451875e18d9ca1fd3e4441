@@ -1,0 +1,19 @@
+apps/gateway/tests/test_gateway_config.py
+  s_0e0389a35f491c::t_a5b4ac14a253ac 327-331
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f207b12b77ac7f7af3451875e18d9ca1fd3e4441",
+  "prompts": {},
+  "sessions": {
+    "s_0e0389a35f491c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a56a-2741-7ad2-b03c-29b728d6311b",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}

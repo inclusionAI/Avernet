@@ -1,0 +1,73 @@
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/bots/router.py
+  s_7d8e6acd12a072::t_ef775d3adec492 93
+apps/backend/src/agentclaw/community/adapters/http/task/relay_routes.py
+  s_7d8e6acd12a072::t_df5bca054e6dcd 84
+apps/backend/src/agentclaw/community/adapters/http/task/router.py
+  s_7d8e6acd12a072::t_b18a5c6f31c4e3 33,420-447
+apps/backend/src/agentclaw/community/adapters/http/task/schemas.py
+  s_7d8e6acd12a072::t_161672338aa785 205-211
+apps/backend/src/agentclaw/community/core/task/domain/models.py
+  s_7d8e6acd12a072::t_cd681ec53b6d87 648-658
+apps/backend/src/agentclaw/community/core/task/task_center/task_service.py
+  s_7d8e6acd12a072::t_f9fcc573845561 29,35,942-1030
+apps/backend/src/agentclaw/community/core/task/task_center/task_service_relay.py
+  s_7d8e6acd12a072::t_9892d708ebf8b8 5,140,148,161,191
+apps/backend/src/agentclaw/community/core/task/task_context/relay_report.py
+  s_7d8e6acd12a072::t_8ec1eca4277fff 89-179,561-563
+apps/backend/src/agentclaw/community/core/task/task_context/task_graph_service.py
+  s_7d8e6acd12a072::t_716f736bc613aa 71-72,77,83
+apps/backend/src/agentclaw/community/core/task/task_runner/client/relay_prompt.py
+  s_7d8e6acd12a072::t_6760e72b72e7f2 100,102-107,109-111
+apps/backend/src/agentclaw/community/core/task/task_service_protocol.py
+  s_7d8e6acd12a072::t_ef616477f18808 11,110,152-161
+apps/backend/tests/community/adapters/http/task/router_test_support.py
+  s_7d8e6acd12a072::t_818d8eb81bd9a5 193-194
+apps/backend/tests/community/adapters/http/task/test_node_update_api.py
+  s_7d8e6acd12a072::t_09a4c9d95a6a8a 18-22,30,35-50,169-176
+apps/backend/tests/community/adapters/http/task/test_router.py
+  s_7d8e6acd12a072::t_ffca4094bc4666 141,165,893,955
+apps/backend/tests/community/core/task/task_center/test_task_recovery.py
+  s_7d8e6acd12a072::t_428027698ef15b 3,29-47,84
+apps/backend/tests/community/core/task/task_center/test_task_service_relay.py
+  s_7d8e6acd12a072::t_ab065b94bbff54 59
+apps/backend/tests/community/core/task/task_context/test_relay_dynamic_coop_group.py
+  s_7d8e6acd12a072::t_922f6a819f9a30 5,19,83-98
+apps/backend/tests/community/core/task/task_context/test_relay_report.py
+  s_7d8e6acd12a072::t_9ec62aad3ed4db 3,37-55,82,169,177-277,642,689-691
+apps/backend/tests/community/core/task/task_context/test_task_graph_service.py
+  s_7d8e6acd12a072::t_187520fd492679 105-127
+apps/backend/tests/community/core/task/task_runner/integration/test_task_search_viewer.py
+  s_7d8e6acd12a072::t_214eba5fd1f88b 136,187,236
+apps/frontend-nextgen/src/pages/Workspace/GroupWorkspaceArea.tsx
+  s_7d8e6acd12a072::t_f1cc140e5a29eb 12,176,289
+apps/frontend-nextgen/src/pages/Workspace/components/GroupWorkspaceConversation.tsx
+  s_7d8e6acd12a072::t_7b9f43007b03ac 1-29
+apps/frontend-nextgen/src/pages/Workspace/hooks/useGroupWorkspace.ts
+  s_7d8e6acd12a072::t_64b845a538fdd0 44,55,165,171-172,176,178-179,190,219-221
+apps/frontend-nextgen/src/pages/Workspace/hooks/useGroupWorkspace.types.ts
+  s_7d8e6acd12a072::t_d73ad4c19d8224 13-15
+apps/frontend-nextgen/src/pages/Workspace/hooks/useSelectedGroupDetail.ts
+  s_7d8e6acd12a072::t_5bfd51108a9ebd 2,4,6-13,21-29,32-34,37-64
+apps/frontend-nextgen/test/pages/Workspace/hooks/useGroupWorkspace.test.ts
+  s_7d8e6acd12a072::t_60b573c7b29641 27,219,239,277,282-283,286,288-291
+apps/frontend-nextgen/test/pages/Workspace/hooks/useSelectedGroupDetail.test.ts
+  s_7d8e6acd12a072::t_302acde1398f23 4,6-10,13-14,17-22,25-26,30-36,39-42,46-52,54-125,127-138
+apps/frontend-nextgen/test/pages/Workspace/hooks/useSelectedGroupDetail.warmMount.test.ts
+  s_7d8e6acd12a072::t_1800caf563e795 55,59,73,78
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6f131b3abfa62ab463b9a732a46ce04c6a1fc45a",
+  "prompts": {},
+  "sessions": {
+    "s_7d8e6acd12a072": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c366-c232-7251-9d07-f4d478bdc6f0",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

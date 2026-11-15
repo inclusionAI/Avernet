@@ -1,0 +1,28 @@
+apps/bcsfuse/tests/contract/test_tc_same_instance_migration.py
+  s_ce84d91f3d35be::t_21878e6fb503db 16,34,40-41,229-237,239-240,271,280,295-296,300-301,305-306,309,311-315
+  s_ce84d91f3d35be::t_6286f0f1e47d52 238,246,275,281-283,292,297-299,302-304,310
+  s_ce84d91f3d35be::t_722d9c4fcefddb 307-308
+apps/bcsfuse/docs/deploy/tc-card-migration.md
+  s_ce84d91f3d35be::t_127c13ac1b47db 28
+apps/bcsfuse/src/app/tc/search.py
+  s_ce84d91f3d35be::t_127c13ac1b47db 4,15,32-64
+  s_ce84d91f3d35be::t_710366990cf463 65-66
+apps/bcsfuse/src/app/tc/bootstrap.py
+  s_ce84d91f3d35be::t_127c13ac1b47db 13,55-57,92-96
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2e5447f9bcdf5dae2677c5cd72ccef05689f6eda",
+  "prompts": {},
+  "sessions": {
+    "s_ce84d91f3d35be": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a5bb-a115-7280-8eb7-64cf057003e5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}

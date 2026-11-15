@@ -1,0 +1,25 @@
+apps/backend/specs/jit-token-best-effort/001-spec-output.md
+  s_8cab37de83b8f7::t_d16c09eeed8872 36-39
+  s_8cab37de83b8f7::t_05f2179f8f3784 40-41
+singlebox/ci/test_singlebox_composition_e2e.py
+  s_8cab37de83b8f7::t_67e5cea8eee5a1 15-16
+  s_8cab37de83b8f7::t_d16c09eeed8872 1-14,17-82
+singlebox/ci/singlebox_composition_e2e.sh
+  s_8cab37de83b8f7::t_59237b202fe3a3 78-79,83,157
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "75cc7d4418f517ac223348f88fd5fdd1cea02f79",
+  "prompts": {},
+  "sessions": {
+    "s_8cab37de83b8f7": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cf04-e630-70f0-9238-ea404406fbff",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

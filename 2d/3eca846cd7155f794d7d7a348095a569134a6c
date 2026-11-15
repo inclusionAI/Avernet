@@ -1,0 +1,37 @@
+apps/evolverun/clawweb/public/modules/workflow/docs/workflow-wf-save-tag-deploy.md
+  s_ebc19b85cd5061::t_2d272294eda8cb 56-92
+apps/evolverun/clawweb/public/modules/workflow/web/components/AutoHealPanel.tsx
+  s_ebc19b85cd5061::t_2d272294eda8cb 368
+apps/evolverun/clawweb/public/modules/workflow/web/components/AutoHealReviewDiff.tsx
+  s_ebc19b85cd5061::t_2d272294eda8cb 1-2,4-15,21-27,30-46,48-62,64-71,73-74
+  s_ebc19b85cd5061::t_20faab419108fb 3,16-20,28-29,47,63,72
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/AutoHealPanel.test.tsx
+  s_ebc19b85cd5061::t_bdffaf50d2d427 570,609-613,670-674
+  s_ebc19b85cd5061::t_df00bd30fe9375 576-580,669
+  s_ebc19b85cd5061::t_6ab5446e19cfb6 573
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/AutoHealSaveReview.test.tsx
+  s_ebc19b85cd5061::t_df00bd30fe9375 1-107,109-110,112-166
+  s_ebc19b85cd5061::t_7766b77e5ff111 108,111
+apps/evolverun/clawweb/public/modules/workflow/web/components/AutoHealSaveReview.tsx
+  s_ebc19b85cd5061::t_2d272294eda8cb 1-2,10-12,16
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/autoHealReviewDiffModel.test.ts
+  s_ebc19b85cd5061::t_4c02707b5346e6 1-126
+apps/evolverun/clawweb/public/modules/workflow/web/components/autoHealReviewDiffModel.ts
+  s_ebc19b85cd5061::t_85e3ac75be1b34 1-81
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2d3eca846cd7155f794d7d7a348095a569134a6c",
+  "prompts": {},
+  "sessions": {
+    "s_ebc19b85cd5061": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ba47-ee74-7003-b77f-e34955cdb56e",
+        "model": "GPT-6.1-SOL"
+      },
+      "human_author": "fudapeng <fudp@example.com>"
+    }
+  }
+}

@@ -1,0 +1,40 @@
+apps/bcsfuse/src/app/tc/card_profiles.py
+  s_ce84d91f3d35be::t_fdaa37c6472439 24-25,35,38,49-51
+  s_ce84d91f3d35be::t_354fabf268fc00 1-14,20-23,26-34,36-37,39-48,52-84,86-87,89-90,93-101,108-111,115,117
+  s_ce84d91f3d35be::t_7e1e818c9edf6b 85,88
+  s_ce84d91f3d35be::t_a60d5d246b5924 104
+  s_ce84d91f3d35be::t_ab455044f35998 114,116
+  s_ce84d91f3d35be::t_83c35ecd0a606b 91-92
+  s_ce84d91f3d35be::t_f661c0f5e7659e 15-19,102-103,105-107
+  s_ce84d91f3d35be::t_ffea98219c208d 112-113
+apps/bcsfuse/src/app/tc/search.py
+  s_ce84d91f3d35be::t_354fabf268fc00 22,42,66,75
+  s_ce84d91f3d35be::t_ffea98219c208d 199-201
+apps/bcsfuse/tests/contract/test_tc_same_instance_migration.py
+  s_ce84d91f3d35be::t_e437076b66b1ac 105-106,127-131,133,147-151
+  s_ce84d91f3d35be::t_7e1e818c9edf6b 99,110-111
+  s_ce84d91f3d35be::t_113fe750fcb145 7,96-98,100-104,108-109,112-116,118-122,125-126,134-135,137-139,144-146
+  s_ce84d91f3d35be::t_ab455044f35998 117
+  s_ce84d91f3d35be::t_f661c0f5e7659e 107,123-124,132,136
+  s_ce84d91f3d35be::t_ffea98219c208d 140-143
+  s_ce84d91f3d35be::t_ba79cf15943471 152-153
+apps/bcsfuse/src/app/tc/bootstrap.py
+  s_ce84d91f3d35be::t_cb324bfb7177b9 24-25
+  s_ce84d91f3d35be::t_7e1e818c9edf6b 18-23,26-37,88
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a984df5141d33c9d69299a458bb68caae7eb2696",
+  "prompts": {},
+  "sessions": {
+    "s_ce84d91f3d35be": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a5bb-a115-7280-8eb7-64cf057003e5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}

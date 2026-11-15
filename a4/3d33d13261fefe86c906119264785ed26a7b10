@@ -1,0 +1,19 @@
+apps/backend/specs/asc-caller-refresh-openapi-20261112/002-code-report.md
+  s_bb98e2f10840b6::t_5c4e3862ca489e 1-11
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a43d33d13261fefe86c906119264785ed26a7b10",
+  "prompts": {},
+  "sessions": {
+    "s_bb98e2f10840b6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a162ee-dd64-7f52-9208-9fd1326f32e5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

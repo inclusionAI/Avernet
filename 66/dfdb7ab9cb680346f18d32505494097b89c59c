@@ -20,6 +20,8 @@ apps/frontend-nextgen/src/hooks/useCommunityTopicList.ts
   h_059e888e5e4e82 1-134
 apps/frontend-nextgen/src/hooks/usePersonalCenter.ts
   h_059e888e5e4e82 10-17
+apps/backend/src/agentclaw/community/core/service_bot/services/baas_service.py
+  s_9936d53f7c0f1e::t_42f060ed4b81e0 3107
 ---
 {
   "schema_version": "authorship/3.0.0",
@@ -29,6 +31,32 @@ apps/frontend-nextgen/src/hooks/usePersonalCenter.ts
   "humans": {
     "h_059e888e5e4e82": {
       "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  },
+  "sessions": {
+    "s_530d1679367be6": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "e16628b6-75d3-4800-82ec-39cccf849f53",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    },
+    "s_9936d53f7c0f1e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a19cc5-6469-7cd0-96bc-5b4a43b7ce13",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    },
+    "s_e0cb98366a65ad": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "1d67472f-3033-4c3f-9f69-89e0d4112039",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
     }
   }
 }

@@ -1,0 +1,78 @@
+apps/bcs/crates/services/bcs-message-flow/tests/support/protected_dispatch_io.rs
+  s_7d9f4f65cedfaf::t_3e3f0adc585d0d 1-232
+apps/bcs/docs/native-task-caller.md
+  s_7d9f4f65cedfaf::t_c8486e34ada78d 12-14
+  s_7d9f4f65cedfaf::t_e3869d206433a0 22-24
+  s_7d9f4f65cedfaf::t_62fc1f1f737b02 19-21
+  s_7d9f4f65cedfaf::t_21d1dbc28d2722 15-18
+  s_c99700e6891408::t_2b764c4930f3d8 1-8,25-199
+  s_7d9f4f65cedfaf::t_ae11d76aba8884 9-11
+apps/bcs/crates/adapters/ws/bcs-ws/src/bot/dispatcher/tasks.rs
+  s_c99700e6891408::t_4ee23962339c37 119
+apps/bcs/crates/services/bcs-message-flow/src/bot_event.rs
+  s_c99700e6891408::t_08975cd2977a19 315
+apps/bcs/crates/services/bcs-message-flow/src/task_flow/dispatch.rs
+  s_c99700e6891408::t_aa8fa91a266c7d 7-14,96-110,172,176,180,239
+apps/bcs/crates/service-api/bcs-service-api/CONTEXT.md
+  s_7d9f4f65cedfaf::t_21d1dbc28d2722 768-769
+  s_7d9f4f65cedfaf::t_c1deaeed2fe045 705,762-767,770-774
+apps/bcs/crates/service-api/bcs-service-api/Cargo.toml
+  s_7d9f4f65cedfaf::t_21d1dbc28d2722 4
+apps/bcs/crates/adapters/ws/bcs-ws/CONTEXT.md
+  s_c99700e6891408::t_5550d26e8cb8a5 196-206
+apps/bcs/crates/services/bcs-message-flow/src/bot_event/persistence.rs
+  s_c99700e6891408::t_ab1b387e2a6d85 383-384
+apps/bcs/crates/services/bcs-message-flow/src/native_task.rs
+  s_c99700e6891408::t_9f9ade9582c874 1-155
+apps/bcs/crates/services/bcs-message-flow/src/task_flow.rs
+  s_c99700e6891408::t_164580cf274dc8 10
+apps/bcs/Cargo.lock
+  s_7d9f4f65cedfaf::t_5782adaaabc102 2232
+apps/bcs/scripts/ci/README.md
+  s_c99700e6891408::t_f22b20414cb1d8 108-120
+apps/bcs/scripts/ci/check-import-rules.sh
+  s_c99700e6891408::t_389ea4995dad44 40-45
+apps/bcs/crates/services/bcs-message-flow/src/lib.rs
+  s_c99700e6891408::t_9b55154a5009ef 12
+apps/bcs/crates/services/bcs-message-flow/tests/support/native_owner_task.rs
+  s_c99700e6891408::t_f75d0c5e8336c2 1-327
+apps/bcs/crates/services/bcs-message-flow/src/caller_delegation.rs
+  s_c99700e6891408::t_e2f9d7ebc91df2 88-150
+apps/bcs/crates/service-api/bcs-service-api/src/application/message_flow.rs
+  s_c99700e6891408::t_00fe3a3fc299d0 566-576
+apps/bcs/scripts/ci/tests/import_scope_regression.sh
+  s_c99700e6891408::t_fec351a8b1ac16 1-55
+apps/bcs/crates/services/bcs-message-flow/CONTEXT.md
+  s_c99700e6891408::t_285cf9904df1eb 456-469
+apps/bcs/crates/plugins/openclaw-channel-bcn/test/native-task-ordering.test.ts
+  s_c99700e6891408::t_1ad76ccbb2568f 1-80
+apps/bcs/crates/services/bcs-message-flow/src/group_flow.rs
+  s_c99700e6891408::t_bb3a649cafc541 69,167,770-773
+  s_c99700e6891408::t_b3cb3b100421e2 774-775
+apps/bcs/crates/services/bcs-message-flow/tests/caller_owner_relay_contract.rs
+  s_c99700e6891408::t_6690ae765ec48a 96,153,213,242,420-422
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a5a651f45264ce68fa88d13ec894f591de2b0aa8",
+  "prompts": {},
+  "sessions": {
+    "s_7d9f4f65cedfaf": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "3e32aee1-425a-45d9-a866-5e98ac005613",
+        "model": "glink/GLM-5.3:glink_domestic"
+      },
+      "human_author": "shengping <jeremy.lsp@antgroup.com>"
+    },
+    "s_c99700e6891408": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "s_c99700e6891408",
+        "model": "unknown"
+      },
+      "human_author": "shengping <jeremy.lsp@antgroup.com>"
+    }
+  }
+}

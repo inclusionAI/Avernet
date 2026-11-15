@@ -1,0 +1,21 @@
+apps/backend/src/agentclaw/corp/di/modules/infrastructure/corp/admin_bot_service_module.py
+  s_7eec2e6611e34d::t_ff08a6a13fd0de 21
+apps/backend/tests/corp/core/test_quality_bot_admin_correction_scope.py
+  s_7eec2e6611e34d::t_98e385b4b9408b 42,46,362-364,366,368-379,381-391
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1d9147aefc1159a7a7d6941b4b867abfe24584f2",
+  "prompts": {},
+  "sessions": {
+    "s_7eec2e6611e34d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1bafd-a7c2-7822-8e8e-2948c9c32788",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

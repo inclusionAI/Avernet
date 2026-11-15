@@ -1,0 +1,16 @@
+apps/backend/src/agentclaw/community/adapters/http/task/task_read_routes.py
+  h_059e888e5e4e82 1,33-36,41,85-103
+apps/backend/tests/community/endpoints/test_task_internal_router.py
+  h_059e888e5e4e82 23,429-475
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6a602bc43fe61d9e41ebc3218c5870b59d8e86ff",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

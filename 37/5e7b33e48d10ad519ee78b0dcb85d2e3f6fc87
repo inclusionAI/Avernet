@@ -1,0 +1,77 @@
+apps/bcs/crates/service-api/bcs-service-api/src/application/v1/a2a.rs
+  s_b407ecbadd402c::t_86f3d08a79ce78 1-6,9-67,75-77,82-83,90
+  s_b407ecbadd402c::t_e0f97a4b22020a 7-8,68-74,78-81,84-89
+apps/bcs/crates/adapters/http/bcs-api-http/src/v1/a2a/mod.rs
+  s_b407ecbadd402c::t_e0f97a4b22020a 8-14,31-33
+  s_b407ecbadd402c::t_1a50eefcdc87f2 1-7,15-30,34
+apps/bcs/crates/application/bcs-app-a2a-bot/src/v1.rs
+  s_b407ecbadd402c::t_86f3d08a79ce78 1-2,19,21-29,44-45,51,58-67,72-74,78-79,84-85,89-93,97-100,104-105,112,127-131,147-152,169,179-180,185-186,196-197,202,219-221,230,279-280,294-295,302,311-313,320-321,332-334,342-343,349-352,368-369,376-378
+  s_b407ecbadd402c::t_e0f97a4b22020a 3-18,20,30-43,46-50,52-57,68-71,75-77,80-83,86-88,94-96,101-103,106-111,113-126,132-146,153-168,170-178,181-184,187-195,198-201,203-218,222-229,231-278,281-293,296-301,303-310,314-319,322-331,335-341,344-348,353-367,370-375
+  s_b407ecbadd402c::t_5e60910ba46574 379-501
+apps/bcs/crates/adapters/http/bcs-api-http/src/v1/common/state.rs
+  s_b407ecbadd402c::t_1a50eefcdc87f2 31-32,87-88,121-125
+  s_b407ecbadd402c::t_99beda1b136883 126-127
+apps/bcs/crates/adapters/http/bcs-api-http/tests/a2a_routes.rs
+  s_b407ecbadd402c::t_f6511c423c3ce4 1,7,12-18,28-29,33,42-44,49-53,58,60,66-67,76-77,81-82,88-89,93,113,123-125,130-131,141-144,150-151,170-171,184-188,208-209,223,247-250,267,309-312,365,402-405,452
+  s_b407ecbadd402c::t_e0f97a4b22020a 2-6,8-11,19-27,30-32,34-41,45-48,54-57,59,61-65,68-75,78-80,83-87,90-92,94-112,114-122,126-129,132-140,145-149,152-169,172-183,189-207,210-222,224-246,251-266,268-308,313-364,366-401,406-451
+  s_b407ecbadd402c::t_5e60910ba46574 453-513
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/a2a_card_routes.rs
+  s_b407ecbadd402c::t_f6511c423c3ce4 212-227,235,336-345
+  s_b407ecbadd402c::t_ea908f8abd1807 346
+apps/bcs/crates/adapters/http/bcs-api-http/src/v1/a2a/chat.rs
+  s_b407ecbadd402c::t_1a50eefcdc87f2 5,16-21,23,25-27,29,31-42,46-47,53-57,72,108-110,117-120,143-145,151-154,177-178
+  s_b407ecbadd402c::t_e0f97a4b22020a 1-4,6-15,22,24,28,30,43-45,48-52,58-71,73-107,111-116,121-142,146-150,155-176
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/a2a_management_errors.rs
+  s_b407ecbadd402c::t_f6511c423c3ce4 638
+apps/bcs/crates/adapters/http/bcs-api-http/CONTEXT.md
+  s_b407ecbadd402c::t_e0f97a4b22020a 5-14,121-124
+  s_b407ecbadd402c::t_4d59790b151eb6 125
+docs/specs/a2a/minimal-card-registration-v1.md
+  s_b407ecbadd402c::t_e0f97a4b22020a 210-232
+apps/bcs/crates/application/bcs-app-a2a-bot/tests/conformance_a2a_v1.rs
+  s_b407ecbadd402c::t_1e5c38d91e66d3 1-2,24-25,30,39-42,50,58-59,62,75-76,122-125,148-150,155,160,163-165,170-171,180-181,184-185,189-190,205-206,223-226,241,246-249,288-291,345-348,357-358,362,366
+  s_b407ecbadd402c::t_e0f97a4b22020a 3-23,26-29,31-38,43-49,51-57,60-61,63-74,77-121,126-147,151-154,156-159,161-162,166-169,172-179,182-183,186-188,191-204,207-222,227-240,242-245,250-287,292-344,349-356,359-361,363-365
+apps/bcs/crates/adapters/http/bcs-api-http/src/v1/a2a/management.rs
+  s_b407ecbadd402c::t_e0f97a4b22020a 1-17,22-24,45-47,61-65,69-80,82-87,90-97,99-104,106,108-118,120-122,124-127,130-142,146-150,153-171,176-185,189-196,199-201,209-213
+  s_b407ecbadd402c::t_1a50eefcdc87f2 18-21,25-44,48-60,66-68,81,88-89,98,105,107,119,123,128-129,143-145,151-152,172-175,186-188,197-198,202-208,214-232
+apps/bcs/crates/adapters/http/bcs-http/CONTEXT.md
+  s_b407ecbadd402c::t_e0f97a4b22020a 142-147
+apps/bcs/crates/application/bcs-app-a2a-bot/src/lib.rs
+  s_b407ecbadd402c::t_86f3d08a79ce78 8
+apps/bcs/crates/adapters/http/bcs-api-http/src/v1/mod.rs
+  s_b407ecbadd402c::t_1a50eefcdc87f2 1,54
+docs/bcn-a2a-api-reference.zh-CN.md
+  s_b407ecbadd402c::t_5e60910ba46574 865
+  s_b407ecbadd402c::t_e0f97a4b22020a 217,234
+docs/bcn-a2a-integration-guide.zh-CN.md
+  s_b407ecbadd402c::t_e0f97a4b22020a 133
+apps/bcs/crates/bootstrap/bcs/src/server/server_run.rs
+  s_b407ecbadd402c::t_1a50eefcdc87f2 273-284
+apps/bcs/crates/adapters/http/bcs-api-http/tests/boundary_contract.rs
+  s_b407ecbadd402c::t_f6511c423c3ce4 114-125
+apps/bcs/crates/service-api/bcs-service-api/src/application/v1/mod.rs
+  s_b407ecbadd402c::t_86f3d08a79ce78 7
+apps/bcs/scripts/e2e-test/a2a_story.py
+  s_b407ecbadd402c::t_f6511c423c3ce4 272-285
+apps/bcs/crates/adapters/http/bcs-api-http/src/v1/a2a/transport.rs
+  s_b407ecbadd402c::t_e0f97a4b22020a 1-8,15-26,32-60,63-67,69-78,84-93,98-102,104-110,113-119,121-131,133-136,138-139,145-147,150-152,155-165,171-175,178-180,184
+  s_b407ecbadd402c::t_1a50eefcdc87f2 9-14,27-31,61-62,68,79-83,94-97,103,111-112,120,132,137,140-144,148-149,153-154,166-170,176-177,181-183,185
+apps/bcs/crates/application/bcs-app-a2a-bot/CONTEXT.md
+  s_b407ecbadd402c::t_e0f97a4b22020a 78-96
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "375e7b33e48d10ad519ee78b0dcb85d2e3f6fc87",
+  "prompts": {},
+  "sessions": {
+    "s_b407ecbadd402c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cac2-f0d2-77f0-a456-bfdea69a959b",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "卓人 <hx410025@antgroup.com>"
+    }
+  }
+}

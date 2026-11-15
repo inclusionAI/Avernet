@@ -1,0 +1,23 @@
+autocoding/skills/teamclaw-clarify/references/cdo-investigation.md
+  s_c44203aeccc976::t_b929cc1683e503 10
+autocoding/skills/teamclaw-clarify/references/runtime-evidence.md
+  s_c44203aeccc976::t_b929cc1683e503 33-49
+autocoding/skills/teamclaw-workflow/references/access-preflight.md
+  s_c44203aeccc976::t_b929cc1683e503 16
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8fbe6e90b6b00cb99c72e4bf0160feb57035c0b4",
+  "prompts": {},
+  "sessions": {
+    "s_c44203aeccc976": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c617-1f26-7602-b7ee-ead3b65f7719",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}
