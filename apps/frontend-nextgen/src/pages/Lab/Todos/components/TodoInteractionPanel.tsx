@@ -1,11 +1,15 @@
-import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
 import { Textarea } from '@/components/ui/Textarea';
-import { BotDisplayAvatar } from '@/components/Workspace/BotDisplayAvatar';
 import type { TodoAcceptanceTarget, TodoArtifact, TodoEvent } from '@/domain/todos/models';
-import { cn } from '@/utils/cn';
-import { ArrowRight, Bot, Code2, FileText, Link2, MessageSquarePlus, Pause, Send } from 'lucide-react';
+import { MessageSquarePlus, Send } from 'lucide-react';
 import { useMemo, useState } from 'react';
+import { TodoInteractionStream } from './TodoInteractionStream';
+import {
+  buildInteractionEntries,
+  indexEntriesByTarget,
+  selectedFloors,
+  targetKey,
+} from './todoInteractionModel';
 
 interface TodoInteractionPanelProps {
   interactions: TodoEvent[];
@@ -26,311 +30,6 @@ interface TodoInteractionPanelProps {
   onSubmitRejection: () => Promise<void> | void;
   onReadArtifact: (artifactId: string, disposition: 'inline' | 'attachment') => Promise<Blob>;
   onSubmit: (message: string) => Promise<boolean>;
-}
-
-type InteractionEntry =
-  | { kind: 'message'; id: string; event: TodoEvent }
-  | { kind: 'artifact'; id: string; artifact: Exclude<TodoArtifact, { kind: 'text' }> }
-  | { kind: 'notice'; id: string; content: string; createdAt: string; noticeType: 'started' | 'completed' };
-
-function formatTime(value: string): string {
-  if (!value) return '—';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
-}
-
-function eventKey(item: TodoEvent): string {
-  return item.eventId || `${item.executionId}-${item.eventSeq}`;
-}
-
-function payloadText(item: TodoEvent, key: 'content' | 'objective'): string {
-  const value = item.payload[key];
-  return typeof value === 'string' ? value : '';
-}
-
-function interactionContent(item: TodoEvent): string {
-  if (item.content) return item.content;
-  const content = payloadText(item, 'content');
-  if (content) return content;
-  if (item.eventType === 'task.created') {
-    const objective = payloadText(item, 'objective');
-    if (objective) return objective;
-  }
-  if (item.eventType === 'task.completed') return '本轮执行已完成，但未上报文本结果。';
-  return '该互动未包含文本内容。';
-}
-
-function rejectionTargets(item: TodoEvent): TodoAcceptanceTarget[] {
-  if (item.eventType !== 'task.rejected' || !Array.isArray(item.payload.targets)) return [];
-  return item.payload.targets
-    .map((target) => {
-      if (!target || typeof target !== 'object') return null;
-      const value = target as Record<string, unknown>;
-      const kind = value.kind;
-      const id = value.id;
-      const floor = value.floor;
-      if (
-        (kind !== 'event' && kind !== 'artifact') ||
-        typeof id !== 'string' ||
-        !id ||
-        typeof floor !== 'number' ||
-        !Number.isInteger(floor) ||
-        floor < 1
-      ) {
-        return null;
-      }
-      return { kind, id, floor };
-    })
-    .filter((target): target is TodoAcceptanceTarget => target !== null)
-    .sort((left, right) => left.floor - right.floor);
-}
-
-function previewText(value: string, maxLength = 60): string {
-  const normalized = value.replace(/\s+/g, ' ').trim();
-  const characters = Array.from(normalized);
-  return characters.length > maxLength ? `${characters.slice(0, maxLength).join('')}…` : normalized;
-}
-
-function selectedFloors(targets: TodoAcceptanceTarget[]): string {
-  return [...targets]
-    .sort((left, right) => left.floor - right.floor)
-    .map((target) => `f${target.floor}`)
-    .join('、');
-}
-
-function compareEvents(left: TodoEvent, right: TodoEvent): number {
-  if (left.eventSeq !== right.eventSeq) return left.eventSeq - right.eventSeq;
-  return new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime();
-}
-
-function buildEntries(
-  interactions: TodoEvent[],
-  events: TodoEvent[],
-  artifacts: TodoArtifact[],
-  botName: string,
-): InteractionEntry[] {
-  const enrichedInteractions = new Map(interactions.map((item) => [eventKey(item), item]));
-  const stream = new Map<string, TodoEvent>();
-  events.forEach((item) => stream.set(eventKey(item), enrichedInteractions.get(eventKey(item)) ?? item));
-  interactions.forEach((item) => stream.set(eventKey(item), item));
-
-  const nonTextArtifacts = artifacts.filter(
-    (artifact): artifact is Exclude<TodoArtifact, { kind: 'text' }> => artifact.kind !== 'text',
-  );
-  const renderedArtifactIds = new Set<string>();
-  const entries: InteractionEntry[] = [];
-
-  [...stream.values()].sort(compareEvents).forEach((item) => {
-    const key = eventKey(item);
-    if (
-      item.eventType === 'task.created' ||
-      item.eventType === 'user_interaction.posted' ||
-      item.eventType === 'task.rejected'
-    ) {
-      entries.push({ kind: 'message', id: `message-${key}`, event: item });
-      return;
-    }
-    if (item.eventType === 'task.started') {
-      entries.push({
-        kind: 'notice',
-        id: `notice-${key}`,
-        content: `${botName} 开始处理`,
-        createdAt: item.createdAt,
-        noticeType: 'started',
-      });
-      return;
-    }
-    if (item.eventType !== 'task.completed') return;
-
-    entries.push({ kind: 'message', id: `message-${key}`, event: item });
-    nonTextArtifacts
-      .filter((artifact) => artifact.executionId === item.executionId)
-      .sort((left, right) => new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime())
-      .forEach((artifact) => {
-        renderedArtifactIds.add(artifact.artifactId);
-        entries.push({ kind: 'artifact', id: `artifact-${artifact.artifactId}`, artifact });
-      });
-    entries.push({
-      kind: 'notice',
-      id: `notice-completed-${key}`,
-      content: '转为待处理，等待发起人验收',
-      createdAt: item.createdAt,
-      noticeType: 'completed',
-    });
-  });
-
-  nonTextArtifacts
-    .filter((artifact) => !renderedArtifactIds.has(artifact.artifactId))
-    .sort((left, right) => new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime())
-    .forEach((artifact) => entries.push({ kind: 'artifact', id: `artifact-${artifact.artifactId}`, artifact }));
-
-  return entries;
-}
-
-function formatFileSize(size: number): string {
-  if (!Number.isFinite(size) || size <= 0) return '未知大小';
-  if (size < 1024) return `${size} B`;
-  if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`;
-  return `${(size / 1024 / 1024).toFixed(1)} MB`;
-}
-
-function artifactPresentation(artifact: Exclude<TodoArtifact, { kind: 'text' }>) {
-  if (artifact.kind === 'file') {
-    const extension = artifact.content.fileName.split('.').pop()?.toLowerCase() || '文件';
-    return {
-      icon: <FileText className="size-5" aria-hidden />,
-      title: artifact.content.fileName || artifact.artifactName,
-      meta: `${extension} · ${formatFileSize(artifact.content.size)}`,
-      href: null,
-    };
-  }
-  if (artifact.kind === 'url_link') {
-    return {
-      icon: <Link2 className="size-5" aria-hidden />,
-      title: artifact.artifactName,
-      meta: artifact.content.type || '外部链接',
-      href: artifact.content.url,
-    };
-  }
-  return {
-    icon: <Code2 className="size-5" aria-hidden />,
-    title: artifact.content.codeBaseName || artifact.artifactName,
-    meta: artifact.content.prLink ? 'Pull Request' : '代码产物',
-    href: artifact.content.prLink || artifact.content.codeBaseAddress,
-  };
-}
-
-function targetKey(target: Pick<TodoAcceptanceTarget, 'kind' | 'id'>): string {
-  return `${target.kind}:${target.id}`;
-}
-
-function rejectionQuote(
-  target: TodoAcceptanceTarget,
-  entryByTarget: Map<string, Exclude<InteractionEntry, { kind: 'notice' }>>,
-  botName: string,
-  humanName: string,
-): { label: string; content: string } {
-  const referenced = entryByTarget.get(targetKey(target));
-  if (!referenced) {
-    return { label: target.kind === 'artifact' ? '产物' : '互动', content: '原内容暂不可用' };
-  }
-  if (referenced.kind === 'artifact') {
-    const presentation = artifactPresentation(referenced.artifact);
-    return {
-      label: '产物',
-      content: previewText(`${presentation.title} · ${presentation.meta}`),
-    };
-  }
-  return {
-    label: referenced.event.actorType === 'bot' ? botName : humanName,
-    content: previewText(interactionContent(referenced.event)) || '该互动未包含文本内容。',
-  };
-}
-
-function RejectionQuotes({
-  targets,
-  entryByTarget,
-  botName,
-  humanName,
-}: {
-  targets: TodoAcceptanceTarget[];
-  entryByTarget: Map<string, Exclude<InteractionEntry, { kind: 'notice' }>>;
-  botName: string;
-  humanName: string;
-}) {
-  if (targets.length === 0) return null;
-  return (
-    <div className="mt-3 space-y-2" role="group" aria-label="问题引用">
-      {targets.map((target) => {
-        const quote = rejectionQuote(target, entryByTarget, botName, humanName);
-        return (
-          <blockquote
-            key={targetKey(target)}
-            className="m-0 rounded-r-lg border-l-2 border-destructive/55 bg-muted/45 px-3 py-2"
-          >
-            <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-              <span className="text-destructive">f{target.floor}</span>
-              <span aria-hidden>·</span>
-              <span>{quote.label}</span>
-            </div>
-            <p className="m-0 mt-1 line-clamp-2 break-words text-xs leading-5 text-foreground/80">{quote.content}</p>
-          </blockquote>
-        );
-      })}
-    </div>
-  );
-}
-
-function QuestionMarker({
-  active,
-  enabled,
-  floor,
-  onClick,
-}: {
-  active: boolean;
-  enabled: boolean;
-  floor: number;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      aria-label={active ? `取消 f${floor} 问题点标记` : `标记 f${floor} 为问题点`}
-      aria-pressed={active}
-      disabled={!enabled}
-      className={cn(
-        'h-full min-h-12 w-1 rounded-full border-0 p-0 transition-colors',
-        active ? 'bg-destructive' : enabled ? 'bg-border hover:bg-destructive/45' : 'bg-transparent',
-      )}
-      onClick={onClick}
-    />
-  );
-}
-
-function ActorHeader({
-  actor,
-  createdAt,
-  botId,
-  botName,
-  humanName,
-  humanAvatarUrl,
-}: {
-  actor: 'human' | 'bot';
-  createdAt: string;
-  botId: string;
-  botName: string;
-  humanName: string;
-  humanAvatarUrl?: string;
-}) {
-  const isBot = actor === 'bot';
-  return (
-    <div className="flex items-center gap-3">
-      {isBot ? (
-        <BotDisplayAvatar botId={botId} name={botName} size={40} />
-      ) : (
-        <Avatar name={humanName} src={humanAvatarUrl} size={40} />
-      )}
-      <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <span className="truncate text-sm font-semibold text-foreground">{isBot ? botName : humanName}</span>
-        {isBot ? <span className="rounded-md bg-muted px-2 py-0.5 text-xs text-muted-foreground">Bot</span> : null}
-        <time className="text-sm tabular-nums text-muted-foreground">{formatTime(createdAt)}</time>
-      </div>
-    </div>
-  );
-}
-
-function NoticeRow({ entry }: { entry: Extract<InteractionEntry, { kind: 'notice' }> }) {
-  const Icon = entry.noticeType === 'started' ? Bot : Pause;
-  return (
-    <div className="flex justify-center py-1">
-      <div className="inline-flex items-center gap-2 rounded-full bg-muted/50 px-3 py-1.5 text-xs text-muted-foreground">
-        <Icon className="size-3.5" aria-hidden />
-        <span>{entry.content}</span>
-        <span>· {formatTime(entry.createdAt)}</span>
-      </div>
-    </div>
-  );
 }
 
 export function TodoInteractionPanel({
@@ -358,21 +57,14 @@ export function TodoInteractionPanel({
   const [artifactError, setArtifactError] = useState<string | null>(null);
   const resolvedBotName = botName?.trim() || botId || 'Bot';
   const entries = useMemo(
-    () => buildEntries(interactions, events, artifacts, resolvedBotName),
+    () => buildInteractionEntries(interactions, events, artifacts, resolvedBotName),
     [artifacts, events, interactions, resolvedBotName],
   );
   const selectedTargetKeys = useMemo(
     () => new Set(selectedTargets.map(targetKey)),
     [selectedTargets],
   );
-  const entryByTarget = useMemo(() => {
-    const indexed = new Map<string, Exclude<InteractionEntry, { kind: 'notice' }>>();
-    entries.forEach((entry) => {
-      if (entry.kind === 'message') indexed.set(`event:${entry.event.eventId}`, entry);
-      if (entry.kind === 'artifact') indexed.set(`artifact:${entry.artifact.artifactId}`, entry);
-    });
-    return indexed;
-  }, [entries]);
+  const entryByTarget = useMemo(() => indexEntriesByTarget(entries), [entries]);
   const floors = selectedFloors(selectedTargets);
 
   const submit = async () => {
@@ -409,132 +101,19 @@ export function TodoInteractionPanel({
         {rejectionMode ? <span className="ml-2 text-sm text-destructive">· 点楼层左侧竖条标记问题点</span> : null}
       </div>
 
-      {entries.length > 0 ? (
-        <ol className="m-0 list-none p-0">
-          {entries.map((entry, index) => {
-            const floor = index + 1;
-            const divider = index < entries.length - 1 ? 'border-b border-divider' : '';
-            if (entry.kind === 'notice') {
-              return (
-                <li key={entry.id} className={cn('py-5', divider)} data-floor={floor}>
-                  <NoticeRow entry={entry} />
-                </li>
-              );
-            }
-
-            if (entry.kind === 'message') {
-              const actor = entry.event.actorType === 'bot' ? 'bot' : 'human';
-              const target: TodoAcceptanceTarget = { kind: 'event', id: entry.event.eventId, floor };
-              const referencedTargets = rejectionTargets(entry.event);
-              return (
-                <li
-                  key={entry.id}
-                  className={cn('grid grid-cols-[4px_minmax(0,1fr)] gap-4 py-6', divider)}
-                  data-floor={floor}
-                >
-                  <QuestionMarker
-                    active={selectedTargetKeys.has(`event:${entry.event.eventId}`)}
-                    enabled={rejectionMode}
-                    floor={floor}
-                    onClick={() => onToggleTarget(target)}
-                  />
-                  <article className="min-w-0">
-                    <ActorHeader
-                      actor={actor}
-                      createdAt={entry.event.createdAt}
-                      botId={botId}
-                      botName={resolvedBotName}
-                      humanName={humanName}
-                      humanAvatarUrl={humanAvatarUrl}
-                    />
-                    <div className="pl-[52px]">
-                      {entry.event.eventType === 'task.rejected' ? (
-                        <p className="m-0 mt-3 text-xs font-medium text-destructive">验收不通过</p>
-                      ) : null}
-                      <p className="m-0 mt-3 whitespace-pre-wrap break-words text-sm leading-6 text-foreground">
-                        {interactionContent(entry.event)}
-                      </p>
-                      <RejectionQuotes
-                        targets={referencedTargets}
-                        entryByTarget={entryByTarget}
-                        botName={resolvedBotName}
-                        humanName={humanName}
-                      />
-                    </div>
-                  </article>
-                </li>
-              );
-            }
-
-            const presentation = artifactPresentation(entry.artifact);
-            const fileArtifact = entry.artifact.kind === 'file' ? entry.artifact : null;
-            const target: TodoAcceptanceTarget = { kind: 'artifact', id: entry.artifact.artifactId, floor };
-            const artifactCard = (
-              <div className="group flex min-h-16 w-full items-center gap-3 rounded-xl border border-border bg-background px-4 py-3 text-left text-foreground transition-colors hover:border-foreground/20 hover:bg-muted/20">
-                <span className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-muted text-foreground">
-                  {presentation.icon}
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-semibold">{presentation.title}</span>
-                  <span className="mt-0.5 block truncate text-xs text-muted-foreground">{presentation.meta}</span>
-                </span>
-                <ArrowRight
-                  className="size-5 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5"
-                  aria-hidden
-                />
-              </div>
-            );
-            return (
-              <li
-                key={entry.id}
-                className={cn('grid grid-cols-[4px_minmax(0,1fr)] gap-4 py-6', divider)}
-                data-floor={floor}
-              >
-                <QuestionMarker
-                  active={selectedTargetKeys.has(`artifact:${entry.artifact.artifactId}`)}
-                  enabled={rejectionMode}
-                  floor={floor}
-                  onClick={() => onToggleTarget(target)}
-                />
-                <article className="min-w-0">
-                  <ActorHeader
-                    actor="bot"
-                    createdAt={entry.artifact.createdAt}
-                    botId={botId}
-                    botName={resolvedBotName}
-                    humanName={humanName}
-                    humanAvatarUrl={humanAvatarUrl}
-                  />
-                  <div className="mt-3 pl-[52px]">
-                    {fileArtifact ? (
-                      <button
-                        type="button"
-                        className="block w-full border-0 bg-transparent p-0"
-                        aria-label={`打开产物 ${presentation.title}`}
-                        disabled={busyArtifactId === fileArtifact.artifactId}
-                        onClick={() => void openFileArtifact(fileArtifact)}
-                      >
-                        {artifactCard}
-                      </button>
-                    ) : (
-                      <a
-                        href={presentation.href || '#'}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="block no-underline"
-                      >
-                        {artifactCard}
-                      </a>
-                    )}
-                  </div>
-                </article>
-              </li>
-            );
-          })}
-        </ol>
-      ) : (
-        <p className="m-0 py-8 text-center text-sm text-muted-foreground">暂无互动记录。</p>
-      )}
+      <TodoInteractionStream
+        entries={entries}
+        entryByTarget={entryByTarget}
+        selectedTargetKeys={selectedTargetKeys}
+        rejectionMode={rejectionMode}
+        botId={botId}
+        botName={resolvedBotName}
+        humanName={humanName}
+        humanAvatarUrl={humanAvatarUrl}
+        busyArtifactId={busyArtifactId}
+        onToggleTarget={onToggleTarget}
+        onOpenFile={(artifact) => void openFileArtifact(artifact)}
+      />
 
       {artifactError ? (
         <p className="m-0 mt-4 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">

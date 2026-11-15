@@ -10,6 +10,7 @@ import { ArrowLeft, Bot, CalendarClock, ChevronDown, ChevronRight, FileText, His
 import { useEffect, useRef, useState } from 'react';
 import { TodoAcceptanceActions } from './components/TodoAcceptanceActions';
 import { TodoArtifactList } from './components/TodoArtifactList';
+import { TodoDetailItem, TodoDetailTab } from './components/TodoDetailPrimitives';
 import { TodoEventTimeline } from './components/TodoEventTimeline';
 import { TodoInteractionPanel } from './components/TodoInteractionPanel';
 
@@ -25,43 +26,6 @@ function formatDateTime(value?: string): string {
   if (!value) return '—';
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN', { hour12: false });
-}
-
-function DetailItem({ label, value, icon }: { label: string; value: React.ReactNode; icon: React.ReactNode }) {
-  return (
-    <div className="flex items-start gap-2">
-      <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-        {icon}
-      </span>
-      <div className="min-w-0">
-        <div className="text-xs text-muted-foreground">{label}</div>
-        <div className="mt-0.5 break-words text-xs font-medium text-foreground">{value || '—'}</div>
-      </div>
-    </div>
-  );
-}
-
-interface DetailTabProps {
-  active: boolean;
-  children: React.ReactNode;
-  onClick: () => void;
-}
-
-function DetailTab({ active, children, onClick }: DetailTabProps) {
-  return (
-    <button
-      type="button"
-      role="tab"
-      aria-selected={active}
-      className={cn(
-        '-mb-px border-x-0 border-t-0 border-b-2 bg-transparent px-1 pb-4 text-xl font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
-        active ? 'border-foreground text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground',
-      )}
-      onClick={onClick}
-    >
-      {children}
-    </button>
-  );
 }
 
 /** 独立待办详情页：围绕事件、互动和产物呈现执行过程。 */
@@ -185,18 +149,18 @@ export default function TodoDetailPage() {
                 </Button>
                 {detailsExpanded ? (
                   <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-x-6 gap-y-2 rounded-xl border border-border bg-muted/15 p-4">
-                    <DetailItem icon={<Bot className="size-4" />} label="Bot" value={todo.botName || todo.botId} />
-                    <DetailItem
+                    <TodoDetailItem icon={<Bot className="size-4" />} label="Bot" value={todo.botName || todo.botId} />
+                    <TodoDetailItem
                       icon={<FileText className="size-4" />}
                       label="当前空间"
                       value={currentSpace?.spaceName || `空间 ${todo.spaceId}`}
                     />
-                    <DetailItem
+                    <TodoDetailItem
                       icon={<CalendarClock className="size-4" />}
                       label="创建时间"
                       value={formatDateTime(todo.createdAt)}
                     />
-                    <DetailItem
+                    <TodoDetailItem
                       icon={<History className="size-4" />}
                       label="更新时间"
                       value={formatDateTime(todo.updatedAt)}
@@ -212,15 +176,15 @@ export default function TodoDetailPage() {
                 aria-label="待办详情视图"
                 className="flex items-center gap-12 border-b border-divider px-8 pt-6"
               >
-                <DetailTab active={view === 'events'} onClick={() => setView('events')}>
+                <TodoDetailTab active={view === 'events'} onClick={() => setView('events')}>
                   事件
-                </DetailTab>
-                <DetailTab active={view === 'interactions'} onClick={() => setView('interactions')}>
+                </TodoDetailTab>
+                <TodoDetailTab active={view === 'interactions'} onClick={() => setView('interactions')}>
                   互动
-                </DetailTab>
-                <DetailTab active={view === 'artifacts'} onClick={() => setView('artifacts')}>
+                </TodoDetailTab>
+                <TodoDetailTab active={view === 'artifacts'} onClick={() => setView('artifacts')}>
                   产物 {detail.artifacts.length}
-                </DetailTab>
+                </TodoDetailTab>
               </div>
 
               <div className="px-5 py-7 sm:px-8 sm:py-8">
