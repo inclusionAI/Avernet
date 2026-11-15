@@ -5,10 +5,10 @@ Versioned task-commission templates consume [L6 contracts](../../l6_products/REA
 not an L6 implementation or a second Task engine. DI explicitly installs their
 [definitions](profile.py); both use the `task_commission_goal@1` Work machine.
 
-| Profile | Method composition | Admission and dispatch |
+| Profile | Method composition | Admission and execution |
 | --- | --- | --- |
 | `task_commission@1` | Open | Publisher-mediated SINGLE_CONTRIBUTION during publication; no ongoing participant binding. |
-| `task_commission@2` | Open | Designated Bot queries/applies itself; owner-authorized automatic review creates a task-scoped Participant binding before dispatch. |
+| `task_commission@2` | Open | Designated Bot queries/applies itself; owner-authorized automatic review creates a task-scoped Participant binding before L4 Work starts. |
 
 Existing instances are never migrated. `PublishTaskCommand.product_profile_ref`
 selects an exact installed definition at creation; omission preserves v1. This
@@ -76,11 +76,17 @@ behavior is unchanged; the Bot ingress permits only executor start/progress/subm
    admitting application to remain ADMITTED and the Open MethodBinding ACTIVE.
    Revocation retains evidence but immediately removes execution eligibility.
    These records are not Space membership, resource grants or session access.
-5. After ADMITTED, dispatch provides task details and the starting revision.
-   Bot start/progress/submit use L4 Work. The shared G1 adapter requires active
-   scoped admission for these v2 events through **both product and generic L4**
-   writes. Admission to task A cannot authorize task B; Open revocation blocks
-   subsequent execution. Structural designation alone cannot start work.
+5. After ADMITTED, the caller invokes the task product's `start_task` Work
+   action with the Bot's authenticated `ActorContext`; it maps to the L4
+   semantic `Work.start` operation and is not a Bot built-in method. The Bot
+   then reports progress and submission through the existing product/A2A
+   ingress, which reuses the same L4 Work machinery. The generic
+   `ContextCollabService.append_event` is not a Work API; it is a generic event
+   append entrypoint.
+   The shared G1 adapter requires active scoped admission for these v2 events
+   through **both product and generic L4** writes. Admission to task A cannot
+   authorize task B; Open revocation blocks subsequent execution. Structural
+   designation alone cannot start work.
 6. Bot progress records plan, code, tests and PR-proposal steps. Successful
    execution submits artifact references and moves to `reviewing`; even 100%
    progress is not completion or acceptance. Only explicit publisher `accept`
@@ -186,13 +192,15 @@ participation grant. Submit/admit still perform their own checks.
 
 The case shows the real L5 calls in sequence: Query → SubmitApplication →
 Screen → Admit. Submission returns SUBMITTED, not an admission receipt; it does
-not implicitly screen, admit or dispatch. SCREENING still has no participant
+not implicitly screen, admit or start Work. SCREENING still has no participant
 binding or decision and cannot authorize Work. Admission creates the scoped
-participant binding and decision; the case then explicitly dispatches through
-`TaskDispatchPort` after checking admission. Open itself does not dispatch or
-start Work. Screening/admission use the publisher-authorized `product_policy`
-actor, not the applicant Bot. This case makes those lifecycle steps visible;
-it does not exercise the product review wrapper for this admission.
+participant binding and decision; the case then explicitly invokes the
+task product's `start_task` Work action with the Bot actor. This action maps to
+L4 semantic `Work.start`; it is not a Bot method and is not implemented by
+calling generic `append_event` directly. Open itself does not start Work.
+Screening/admission use the publisher-authorized `product_policy` actor,
+not the applicant Bot. This case makes those lifecycle steps visible; it does
+not exercise the product review wrapper for this admission.
 
 The production `review_task_application` continuation remains on both
 `TaskCommissionServiceProtocol` and `TaskMethodOpsPort`; HTTP Apply uses it
@@ -203,8 +211,8 @@ this continuation. There is no new HTTP operation or automatic submission hook.
 Product review cannot repeat opportunity discovery: the stored SUBMITTED
 application already occupies the capacity-1 slot. It validates that application's facts;
 L5 checked window/capacity at submission. Mismatches and repeat review are
-rejected without a second application, admission or dispatch. Review/write or
-dispatch failures still propagate, without automatic retry or compensation.
+rejected without a second application, admission or Work start. Review/write or
+execution failures still propagate, without automatic retry or compensation.
 
 The case checks that repeated reads do not mutate participation, neither
 submission nor screening can authorize Work, and admission consumes capacity.

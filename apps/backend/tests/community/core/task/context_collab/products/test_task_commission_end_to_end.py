@@ -1,13 +1,13 @@
-"""产品 Profile 上线 → 建任务 → Bot 自查机会/申请/录取 → Work → 用户验收。
+"""产品 Profile 上线 → 建任务 → Bot 自查机会/申请/录取 → L4 Work → 用户验收。
 
 用户通过产品 Service API 操作和观察;case 显式以 Bot ActorContext 调用
 L5 Open 查询和提交申请,再以发布人授权的策略身份直接调用 Open.screen/admit,
-录取后显式经 TaskDispatchPort 交付;执行上报通过签名 A2A HTTP 入站,
-使用真实产品 Profile、仓储、L5 Open 和 G1/G4。
-直接 Open 调用不验证 JWT;另保留真实产品策略的签名 HTTP Query/Apply 回归。Open 负责
-参与录取,进度与成果提交属于 L4 Work,不是新增的 Open 方法。
-仅模拟 Bot 执行、任务交接和网关签名;本地产物不上传,出站通知仍用
-MockA2aDelivery,不声称验证真实通知接收、网关转发或 LLM 执行。
+录取后由任务产品的 Work 动作入口启动 L4 Work;Bot 只负责执行并通过签名 A2A HTTP 入站上报。
+使用真实产品 Profile、仓储、L5 Open 和 G1/G4。直接 Open 调用不验证 JWT;
+另保留真实产品策略的签名 HTTP Query/Apply 回归。Open 负责参与录取,
+开始、进度与成果提交属于 L4 Work,不是 Bot 的内置方法或新的 Open 方法。
+仅模拟 Bot 执行和网关签名;本地产物不上传,不声称验证真实远端 Bot、
+网关转发或 LLM 执行。
 """
 
 import runpy
@@ -17,6 +17,7 @@ from contextlib import contextmanager
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from functools import wraps
+from pathlib import Path
 from uuid import uuid4
 
 import jwt
@@ -85,12 +86,10 @@ from agentclaw.community.core.task.context_collab.products.task_commission.profi
 )
 from agentclaw.community.core.task.context_collab.products.task_commission.service_api import (
     ApplyForTaskCommand,
-    DispatchedTaskInfo,
     PublishTaskCommand,
     TaskAdvanceCommand,
     TaskCommissionCreatedView,
     TaskCommissionServiceProtocol,
-    TaskDispatchPort,
     TaskMethodOpsPort,
 )
 from agentclaw.community.core.task.context_collab.service_api import (
@@ -197,7 +196,6 @@ def _trace_runtime(monkeypatch, injector: Injector) -> None:
                 "admit": "L5 Open 录取指定 Bot",
             },
         ),
-        (TaskDispatchPort, {"dispatch_task_info": "封装任务并交给 L1/A2A 交付端口"}),
         (
             A2aDeliveryPort,
             {"send_message": "本地 Mock 交付,不代表真实远端 Bot 收到通知"},
@@ -424,8 +422,11 @@ class SimulatedWorkingBot:
         self,
         created: TaskCommissionCreatedView,
         execute: Callable[[Callable[[int, str], None]], list[str]],
-    ) -> None:
-        revision = created.context_version
+        *,
+        initial_revision: int,
+    ) -> list[str]:
+        """执行已由 L4 Work 启动的任务;Bot 不拥有 start_task 方法。"""
+        revision = initial_revision
 
         def send(action: str, payload: dict) -> None:
             nonlocal revision
@@ -444,7 +445,8 @@ class SimulatedWorkingBot:
         def report_progress(percent: int, note: str) -> None:
             send("progress", {"percent": percent, "note": note})
 
-        send("start", {})
+        # start_task 已由调用方通过任务产品的 Work 动作入口完成。
+        # Bot 只上报实际执行过程,不能把自身的运行器当成 L4 Work API。
         # 不是 finally:执行或进度上报失败时不能伪造成功并自动提交。
         _flow_log(_TEST_DIRECTORY, "模拟 Bot 开始执行任务业务函数")
         artifacts = execute(report_progress)
@@ -453,6 +455,68 @@ class SimulatedWorkingBot:
             "submit",
             {"note": "执行完成,提交方案、代码、测试结果与 PR", "artifacts": artifacts},
         )
+        return artifacts
+
+
+_AI_CODING_STEPS = (
+    (20, "写方案完成"),
+    (50, "编码完成"),
+    (80, "测试通过"),
+    (100, "生成 PR 提案,等待用户验收"),
+)
+
+
+def _simulate_ai_coding(
+    *,
+    tmp_path: Path,
+    task_id: str,
+    service: TaskCommissionServiceProtocol,
+    report_progress: Callable[[int, str], None],
+) -> list[str]:
+    """执行本地 AI coding 模拟,并通过回调逐步上报 L4 Work 进度。
+
+    这是测试夹具的业务动作,不是 Bot 的内置方法;Bot runtime 只负责
+    调用该函数、发送 progress/submit 入站消息。PR 仍是本地提案文件,
+    不冒充真实远端建 PR 或 LLM 执行。
+    """
+    plan, code = tmp_path / "plan.md", tmp_path / "calculator.py"
+    test_result, pr = tmp_path / "test-result.txt", tmp_path / "pull-request.md"
+    artifacts = [path.as_uri() for path in (plan, code, test_result, pr)]
+
+    assert service.detail_task(task_id).status == "in_progress"
+    for index, (percent, note) in enumerate(_AI_CODING_STEPS):
+        if index == 0:
+            plan.write_text(
+                "# 方案\n新增 add(a, b),覆盖正数、负数及零。", encoding="utf-8"
+            )
+        elif index == 1:
+            code.write_text(
+                "def add(a, b):\n    return a + b\n", encoding="utf-8"
+            )
+        elif index == 2:
+            add = runpy.run_path(str(code))["add"]
+            for a, b, expected in ((1, 2, 3), (-1, 1, 0), (0, 0, 0)):
+                assert add(a, b) == expected
+            test_result.write_text("3 passed", encoding="utf-8")
+        else:
+            pr.write_text(
+                "# PR 提案\n新增求和能力;方案、代码、3 项测试已完成。",
+                encoding="utf-8",
+            )
+
+        _flow_log(_TEST_DIRECTORY, f"5. AI coding: {note}, progress={percent}%")
+        report_progress(percent, note)
+        live = service.detail_task(task_id)
+        assert live.status == "in_progress"  # 100% is not accept or submit.
+        assert live.events[-1]["payload"] == {"note": note, "percent": percent}
+        assert live.events[-1]["actor_id"] == BOT_ASSIGNEE
+        assert all(
+            event["event_kind"] != "task.submitted" for event in live.events
+        )
+
+    assert test_result.read_text(encoding="utf-8") == "3 passed"
+    assert all(path.exists() for path in (plan, code, test_result, pr))
+    return artifacts
 
 
 def _opportunities_query_request(bot: SimulatedWorkingBot) -> dict:
@@ -661,77 +725,33 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
             service.detail_task(task_id).status == "created"
         )  # admit is not Work.start
 
-        # Open 录取不负责派发;case 单独通过真实产品交付端口送达任务信息。
-        profile.require_publication().require_dispatch_ready(admitted.state)
-        injector.get(TaskMethodOpsPort).require_admitted(task_id, bot_context)
-        detail = service.detail_task(task_id)
-        assert detail.body is not None
-        injector.get(TaskDispatchPort).dispatch_task_info(
-            DispatchedTaskInfo(
-                collet_id=task_id,
-                title=detail.title,
-                body=detail.body.content,
-                assignee_agent_id=working_bot.bot_id,
-                publisher_principal_id=record.owner_principal_id,
-                product_profile_ref=profile.ref,
-                method_binding_ref=binding_id,
-                context_version=created.context_version,
-            )
+        # Open 只负责录取和建立参与绑定;任务执行通过任务产品暴露的 Work
+        # 动作入口启动。该入口映射到 L4 语义 Work.start,不是 Bot 的内置方法;
+        # Bot 仅以 ActorContext 作为调用主体,之后通过 A2A 入站上报执行过程。
+        # 不能把通用 ContextCollabService.append_event 当成 Work API:它是
+        # 通用事件追加入口,不表达 L4 Work.start 的语义。
+        started = service.start_task(
+            TaskAdvanceCommand(task_id, note="录取后启动任务执行"), bot_context
         )
-        assert len(injector.get(A2aDeliveryPort).bridge_records()) == 1
+        assert started.status == "in_progress"
+        assert service.detail_task(task_id).status == "in_progress"
+        assert injector.get(A2aDeliveryPort).bridge_records() == ()
 
-        # 5. 模拟 AI coding 的真实本地文件/测试动作,每步主动上报。
-        #    PR 是本地提案文件,不冒充真实远端建 PR/LLM 执行。
-        plan, code = tmp_path / "plan.md", tmp_path / "calculator.py"
-        test_result, pr = tmp_path / "test-result.txt", tmp_path / "pull-request.md"
-        artifacts = [path.as_uri() for path in (plan, code, test_result, pr)]
-        steps = [
-            (20, "写方案完成"),
-            (50, "编码完成"),
-            (80, "测试通过"),
-            (100, "生成 PR 提案,等待用户验收"),
-        ]
-
-        def ai_coding(report_progress):
-            assert service.detail_task(task_id).status == "in_progress"
-            for index, (percent, note) in enumerate(steps):
-                if index == 0:
-                    plan.write_text(
-                        "# 方案\n新增 add(a, b),覆盖正数、负数及零。", encoding="utf-8"
-                    )
-                elif index == 1:
-                    code.write_text(
-                        "def add(a, b):\n    return a + b\n", encoding="utf-8"
-                    )
-                elif index == 2:
-                    add = runpy.run_path(str(code))["add"]
-                    for a, b, expected in ((1, 2, 3), (-1, 1, 0), (0, 0, 0)):
-                        assert add(a, b) == expected
-                    test_result.write_text("3 passed", encoding="utf-8")
-                else:
-                    pr.write_text(
-                        "# PR 提案\n新增求和能力;方案、代码、3 项测试已完成。",
-                        encoding="utf-8",
-                    )
-                _flow_log(_TEST_DIRECTORY, f"5. AI coding: {note}, progress={percent}%")
-                report_progress(percent, note)
-                live = service.detail_task(task_id)
-                assert live.status == "in_progress"  # 100% is not accept or submit.
-                assert live.events[-1]["payload"] == {"note": note, "percent": percent}
-                assert live.events[-1]["actor_id"] == BOT_ASSIGNEE
-                assert all(
-                    event["event_kind"] != "task.submitted" for event in live.events
-                )
-            return artifacts
-
-        working_bot.run(
-            created, ai_coding
-        )  # successful return auto-submits, never accepts.
+        # 5. Bot runtime 只保留核心的 Work 执行入口;具体 AI coding 模拟
+        #    位于 case 外部的测试夹具中。
+        artifacts = working_bot.run(
+            created,
+            lambda report_progress: _simulate_ai_coding(
+                tmp_path=tmp_path,
+                task_id=task_id,
+                service=service,
+                report_progress=report_progress,
+            ),
+            initial_revision=started.context_version,
+        )  # L4 已 start;Bot 成功返回后通过入站上报 submit,从不自行 accept。
         review = service.detail_task(task_id)
         assert review.status == "reviewing"
         assert review.events[-1]["payload"]["artifacts"] == artifacts
-        assert test_result.read_text(encoding="utf-8") == "3 passed"
-        assert all(path.exists() for path in (plan, code, test_result, pr))
 
         # 6. 用户查看成果并明确 accept,而不是以 Bot 完工代替验收。
         _flow_log(_TEST_DIRECTORY, "6. 用户检查方案、代码、测试、PR 提案,确认 accept")
@@ -745,7 +765,7 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
             "task.created",
             "user_interaction.posted",
             "task.started",
-            *["task.progress.updated"] * 4,
+            *["task.progress.updated"] * len(_AI_CODING_STEPS),
             "task.submitted",
             "task.accepted",
         ]
@@ -753,7 +773,7 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
             event["payload"]["note"]
             for event in final.events
             if event["event_kind"] == "task.progress.updated"
-        ] == [note for _, note in steps]
+        ] == [note for _, note in _AI_CODING_STEPS]
         assert final.events[-1]["actor_id"] == HUMAN.actor.principal_id
         assert final.events[-2]["actor_id"] == BOT_ASSIGNEE
         _flow_log(_TEST_DIRECTORY, "完整用户旅程结束:用户 accept 后 status=done")
