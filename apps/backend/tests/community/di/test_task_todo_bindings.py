@@ -9,9 +9,11 @@ from agentclaw.community.core.task.context_collab.services.context_collab_servic
     ContextCollabService,
 )
 from agentclaw.community.di import todo_config
-from agentclaw.community.di.modules import todo_module
+from agentclaw.community.di.modules.task import todo_bindings
 from agentclaw.community.di.todo_config import TodoSchedulerConfig
-from agentclaw.community.di.modules.todo_module import TodoModule
+from agentclaw.community.di.modules.task.todo_bindings import (
+    TaskTodoBindings,
+)
 from agentclaw.community.plugins.community.todo_collaboration import (
     InProcessTodoCollaborationPlugin,
 )
@@ -20,7 +22,7 @@ ROOT = Path(__file__).resolve().parents[3]
 
 
 def _patch_block(monkeypatch: pytest.MonkeyPatch, value: Any) -> None:
-    monkeypatch.setattr(todo_module, "_block", lambda _name: value)
+    monkeypatch.setattr(todo_bindings, "_block", lambda _name: value)
 
 
 def test_todo_scheduler_config_defaults_to_enabled():
@@ -34,7 +36,7 @@ def test_todo_scheduler_config_defaults_to_enabled():
     )
 
 
-def test_todo_module_parses_scheduler_config(monkeypatch: pytest.MonkeyPatch):
+def test_task_todo_bindings_parse_scheduler_config(monkeypatch: pytest.MonkeyPatch):
     _patch_block(
         monkeypatch,
         {
@@ -49,7 +51,7 @@ def test_todo_module_parses_scheduler_config(monkeypatch: pytest.MonkeyPatch):
         },
     )
 
-    assert TodoModule().todo_scheduler_config() == TodoSchedulerConfig(
+    assert TaskTodoBindings().todo_scheduler_config() == TodoSchedulerConfig(
         enabled=True,
         interval=30,
         batch_size=25,
@@ -72,7 +74,7 @@ def test_todo_module_parses_scheduler_config(monkeypatch: pytest.MonkeyPatch):
         ),
     ],
 )
-def test_todo_module_rejects_invalid_scheduler_config(
+def test_task_todo_bindings_reject_invalid_scheduler_config(
     monkeypatch: pytest.MonkeyPatch,
     block: Any,
     match: str,
@@ -80,32 +82,33 @@ def test_todo_module_rejects_invalid_scheduler_config(
     _patch_block(monkeypatch, block)
 
     with pytest.raises(ValueError, match=match):
-        TodoModule().todo_scheduler_config()
+        TaskTodoBindings().todo_scheduler_config()
 
 
-def test_task_module_no_longer_owns_todo_bindings():
+def test_task_module_installs_task_owned_todo_bindings():
     source = (ROOT / "src/agentclaw/community/di/modules/task_module.py").read_text()
 
-    assert "TodoRepositoryProtocol" not in source
-    assert "TodoServiceProtocol" not in source
-    assert "TodoCollaborationPlugin" not in source
+    assert (
+        "from agentclaw.community.di.modules.task.todo_bindings import TaskTodoBindings"
+    ) in source
+    assert "binder.install(TaskTodoBindings())" in source
 
 
-def test_container_installs_todo_module():
+def test_container_does_not_install_peer_todo_module():
     source = (ROOT / "src/agentclaw/community/di/container.py").read_text()
 
-    assert "from agentclaw.community.di.modules.todo_module import TodoModule" in source
-    assert "TodoModule()," in source
+    assert "TodoModule" not in source
+    assert "todo_module" not in source
 
 
 def test_config_type_stays_in_dedicated_todo_config_module():
     assert todo_config.TodoSchedulerConfig is TodoSchedulerConfig
 
 
-def test_todo_module_wires_in_process_collaboration_adapter():
+def test_task_todo_bindings_wire_in_process_collaboration_adapter():
     context_collab = object.__new__(ContextCollabService)
 
-    plugin = TodoModule().todo_collaboration_plugin(context_collab)
+    plugin = TaskTodoBindings().todo_collaboration_plugin(context_collab)
 
     assert isinstance(plugin, InProcessTodoCollaborationPlugin)
     assert plugin._service is context_collab

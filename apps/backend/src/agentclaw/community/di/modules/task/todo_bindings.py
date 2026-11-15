@@ -1,4 +1,4 @@
-"""Composition root and strict configuration for the Todo workbench."""
+"""Task-owned dependency-injection bindings for the Todo workbench."""
 
 from __future__ import annotations
 
@@ -56,8 +56,8 @@ _TODO_KEYS = frozenset({"scheduler"})
 _SCHEDULER_KEYS = frozenset(field.name for field in fields(TodoSchedulerConfig))
 
 
-class TodoModule(Module):
-    """Own Todo persistence, application services, runtime adapter and loop."""
+class TaskTodoBindings(Module):
+    """Compose Todo persistence, services, runtime adapter, and scheduler."""
 
     def configure(self, binder: Binder) -> None:
         binder.bind(TodoRepositoryProtocol, to=TodoRepository, scope=singleton)
@@ -199,8 +199,7 @@ def _reject_unknown(
     unknown = sorted(str(key) for key in block if str(key) not in allowed)
     if unknown:
         raise ValueError(
-            f"unknown {where} key(s) "
-            + ", ".join(repr(key) for key in unknown)
+            f"unknown {where} key(s) " + ", ".join(repr(key) for key in unknown)
         )
 
 
@@ -237,4 +236,4 @@ def _bounded_int(
     return value
 
 
-__all__ = ["TodoModule"]
+__all__ = ["TaskTodoBindings"]

@@ -233,6 +233,41 @@ _LEGACY_TASK_DOMAIN_IMPORTS = frozenset({
     "agentclaw.community.core.repository.implementations.feedback",
 })
 
+_TODO_TASK_DOMAIN_REQUIRED_PATHS = (
+    "api/task/todo_service.py",
+    "api/task/todo_artifact_service.py",
+    "core/task/todos/service_protocol.py",
+    "core/task/todos/artifact_service_protocol.py",
+    "core/repository/protocols/task/todos.py",
+    "core/repository/protocols/task/todo_artifacts.py",
+    "core/repository/implementations/task/todos/todo_repository.py",
+    "core/repository/implementations/task/todos/todo_artifact_repository.py",
+    "adapters/http/task/todos/artifact_routes.py",
+    "adapters/http/openapi_v1/task/errors_todo.py",
+    "di/modules/task/todo_bindings.py",
+)
+_LEGACY_TODO_PARALLEL_PATHS = (
+    "core/todos",
+    "api/todo_service.py",
+    "api/task_todo_service.py",
+    "api/todo_artifact_service.py",
+    "core/repository/protocols/todos.py",
+    "core/repository/protocols/todo_artifacts.py",
+    "core/repository/implementations/todos",
+    "adapters/http/task/todo_artifact_routes.py",
+    "adapters/http/openapi_v1/errors_todo.py",
+    "di/modules/todo_module.py",
+)
+_LEGACY_TODO_PARALLEL_IMPORTS = frozenset({
+    "agentclaw.community.core.todos",
+    "agentclaw.community.core.repository.protocols.todos",
+    "agentclaw.community.core.repository.protocols.todo_artifacts",
+    "agentclaw.community.core.repository.implementations.todos",
+    "agentclaw.community.adapters.http.task.todo_artifact_routes",
+    "agentclaw.community.adapters.http.openapi_v1.errors_todo",
+    "agentclaw.community.di.modules.todo_module",
+})
+
 
 @pytest.mark.unit
 def test_bbs_and_feedback_sources_stay_in_the_task_domain() -> None:
@@ -277,5 +312,51 @@ def test_python_sources_do_not_import_legacy_bbs_feedback_modules() -> None:
                 )
     assert offenders == [], (
         "BBS/forum and task-feedback imports must use the task-domain module paths:\n  "
+        + "\n  ".join(offenders)
+    )
+
+
+@pytest.mark.unit
+def test_todo_sources_stay_in_the_task_domain() -> None:
+    """Todo is a Task subdomain and must not return to peer package paths."""
+
+    missing = [
+        relative
+        for relative in _TODO_TASK_DOMAIN_REQUIRED_PATHS
+        if not (_COMMUNITY_SRC_ROOT / relative).is_file()
+    ]
+    restored = [
+        relative
+        for relative in _LEGACY_TODO_PARALLEL_PATHS
+        if (_COMMUNITY_SRC_ROOT / relative).exists()
+    ]
+    assert missing == [], f"Missing Task-owned Todo source locations: {missing}"
+    assert restored == [], f"Parallel Todo paths restored: {restored}"
+
+
+@pytest.mark.unit
+def test_python_sources_do_not_import_parallel_todo_modules() -> None:
+    offenders: list[str] = []
+    for path in sorted(_COMMUNITY_SRC_ROOT.rglob("*.py")):
+        if "__pycache__" in path.parts:
+            continue
+        for node in ast.walk(_tree(path)):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name in _LEGACY_TODO_PARALLEL_IMPORTS:
+                        offenders.append(
+                            f"{path.relative_to(_COMMUNITY_SRC_ROOT)}:{node.lineno} "
+                            f"import {alias.name}"
+                        )
+            elif (
+                isinstance(node, ast.ImportFrom)
+                and node.module in _LEGACY_TODO_PARALLEL_IMPORTS
+            ):
+                offenders.append(
+                    f"{path.relative_to(_COMMUNITY_SRC_ROOT)}:{node.lineno} "
+                    f"from {node.module} import"
+                )
+    assert offenders == [], (
+        "Todo imports must use Task-owned module paths:\n  "
         + "\n  ".join(offenders)
     )

@@ -128,7 +128,6 @@ from agentclaw.community.di.modules.task_artifact_config_module import (
 )
 from agentclaw.community.di.modules.task_discovery_module import TaskDiscoveryModule
 from agentclaw.community.di.modules.task_module import TaskModule
-from agentclaw.community.di.modules.todo_module import TodoModule
 from agentclaw.community.di.modules.task_config_module import TaskConfigModule
 from agentclaw.community.di.modules.task_persistence_module import TaskPersistenceModule
 from agentclaw.community.di.modules.task_queue_module import TaskQueueModule
@@ -253,7 +252,6 @@ def build_injector(
         BotPublicRiskModule(),
         ExpertMarketModule(),
         TaskModule(),
-        TodoModule(),
         TaskConfigModule(),
         DevicesModule(),
         McpModule(),

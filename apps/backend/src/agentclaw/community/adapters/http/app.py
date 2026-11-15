@@ -145,7 +145,7 @@ from agentclaw.community.adapters.http.service_bot.router_file_count import rout
 from agentclaw.community.adapters.http.bot_collaborator import router as bot_collaborator_router  # noqa: E402
 from agentclaw.community.adapters.http.task import task_internal_router, task_callback_router  # noqa: E402
 from agentclaw.community.adapters.http.task.context_collab import router as context_collab_router  # noqa: E402
-from agentclaw.community.adapters.http.task.todo_artifact_routes import router as todo_artifact_router  # noqa: E402
+from agentclaw.community.adapters.http.task.todos.artifact_routes import router as todo_artifact_router  # noqa: E402
 # skills / skillsets / skill_scan / skill_auth 全部切换到新架构 (core/skill_center + device plugin 抽象)
 from agentclaw.community.adapters.http.skill_center import skills, skillsets, skill_scan, skill_auth, skill_category, verify, sync, batch_sync, installations_internal  # noqa: E402
 

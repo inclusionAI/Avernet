@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 from fastapi import Request, UploadFile
 
-from agentclaw.community.adapters.http.task.todo_artifact_routes import (
+from agentclaw.community.adapters.http.task.todos.artifact_routes import (
     ReportTodoArtifactRequest,
     report_todo_artifact,
     upload_todo_artifact_file,
@@ -122,9 +122,7 @@ async def test_file_route_passes_multipart_fields_and_hides_storage_id():
 
     response = await upload_todo_artifact_file(
         todo_id="todo_1",
-        request=_request(
-            "/api/v1/collaboration/todos/todo_1/artifacts/object-file"
-        ),
+        request=_request("/api/v1/collaboration/todos/todo_1/artifacts/object-file"),
         execution_token="secret-token",
         execution_id="todoexec_1",
         collab_context_id="context_1",

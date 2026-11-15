@@ -119,7 +119,7 @@ from agentclaw.community.adapters.http.openapi_v1.errors_source_credentials impo
 )
 from agentclaw.community.adapters.http.openapi_v1.errors_space import SpaceErrorCode, SpacePublicErrorMessage
 from agentclaw.community.adapters.http.openapi_v1.errors_space_skill import SPACE_SKILL_ERROR_CODES, SPACE_SKILL_HTTP_ERRORS
-from agentclaw.community.adapters.http.openapi_v1.errors_todo import (
+from agentclaw.community.adapters.http.openapi_v1.task.errors_todo import (
     TODO_HTTP_ERRORS,
 )
 from agentclaw.community.adapters.http.openapi_v1.errors_work_order import (

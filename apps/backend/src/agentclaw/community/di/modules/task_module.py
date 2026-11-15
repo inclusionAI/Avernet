@@ -202,6 +202,7 @@ from agentclaw.community.core.task.forum.interaction.target_verifier_protocol im
     ForumInteractionTargetVerifierProtocol,
 )
 from agentclaw.community.di.config import TaskDispatchConfig
+from agentclaw.community.di.modules.task.todo_bindings import TaskTodoBindings
 
 logger = logging.getLogger("task.module")
 
@@ -246,6 +247,9 @@ class TaskModule(Module):
     """Production bindings for the task module(社区核心,所有 profile 装配)。"""
 
     def configure(self, binder: Binder) -> None:
+        # Todo is a Task subdomain, like BBS/forum. Keep its bindings behind
+        # the Task composition boundary instead of installing a peer module.
+        binder.install(TaskTodoBindings())
         # TaskGraphService remains directly constructible for lightweight test
         # injectors. The full composition root attaches the graph repository in
         # the task_service provider below.
