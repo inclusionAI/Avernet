@@ -263,6 +263,7 @@ class ApplySkillSetCommands:
                 before_mcps,
                 platform_default_codes,
             )
+            desired_skill_identities: dict[int, str | int] = {}
             # Check current ownership before deleting omitted Sets: Replace is not a transfer.
             for target in sets:
                 own_id = (
@@ -284,7 +285,9 @@ class ApplySkillSetCommands:
                     ):
                         raise SkillSetControlPlaneNotFoundError()
                     require_skill_online(skill)
-                    center_membership_skill_uuid(skill)
+                    desired_skill_identities[skill_id] = (
+                        center_membership_skill_uuid(skill) or skill_id
+                    )
                     conflict = any(
                         item.id != own_id
                         and self._apply_set_owns_skill(item, skill, skill_exclusions)
@@ -350,9 +353,13 @@ class ApplySkillSetCommands:
                     member_changed = True
                 else:
                     fact = next(item for item in facts if item.id == row.id)
-                    member_changed = set(fact.skill_ids) != set(
-                        target.skill_ids
-                    ) or set(fact.mcp_codes) != set(target.mcp_codes)
+                    # Historical raw keys can collide with a different current
+                    # asset; a Center membership is identified by its UUID.
+                    member_changed = {
+                        uuid or skill_id for skill_id, uuid in fact.skill_references
+                    } != {
+                        desired_skill_identities[skill_id] for skill_id in target.skill_ids
+                    } or set(fact.mcp_codes) != set(target.mcp_codes)
                     changed = (
                         member_changed
                         or row.description != target.description
