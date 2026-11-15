@@ -34,7 +34,9 @@
 #   NPM_STRICT_SSL     npm strict-ssl toggle (default true)
 
 # ==================== Stage 1: BCS CLI Builder ====================
-FROM rust:1.91.0-bookworm AS bcs-cli-builder
+FROM rust:1.94.0-bookworm AS bcs-cli-builder
+
+ENV RUSTUP_TOOLCHAIN=1.94.0
 
 WORKDIR /opt/bcs
 

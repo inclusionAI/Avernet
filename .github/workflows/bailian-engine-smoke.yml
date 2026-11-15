@@ -130,9 +130,11 @@ jobs:
   build-bcs:
     runs-on: ubuntu-22.04
     timeout-minutes: 35
+    env:
+      RUSTUP_TOOLCHAIN: 1.94.0
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.94.0
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: apps/bcs

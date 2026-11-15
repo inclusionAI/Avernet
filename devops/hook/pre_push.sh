@@ -171,7 +171,7 @@ if matches_any '^apps/bcs/crates/plugins/deepseek-harness-channel-bcn/'; then
   run_heavy npm --prefix "$dsh_bcn_plugin" run ci
 fi
 
-if matches_any '^apps/bcs/'; then
+if matches_any '^(apps/bcs/|rust-toolchain\.toml$)'; then
   # BCS/BCN 默认强卡点:
   # 1) ci_test.sh 跑 Rust workspace 测试,第一个失败就退出。
   # 2) 统一 singlebox coverage 复用同一套真实产品栈,执行 BCS user-story
