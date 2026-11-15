@@ -158,6 +158,13 @@ class TaskCommissionOpenMethodAdapter(TaskMethodOpsPort):
             "v1 adapter does not support Bot self-application"
         )
 
+    def review_task_application(
+        self, command: ApplyForTaskCommand, application_id: str, context: ActorContext
+    ) -> AssigneeAdmissionReceipt:
+        raise ContextCollabValidationError(
+            "v1 adapter does not support Bot application review"
+        )
+
     def require_admitted(self, collab_context_id: str, context: ActorContext) -> None:
         raise ContextCollabValidationError(
             "v1 adapter cannot establish executor membership"

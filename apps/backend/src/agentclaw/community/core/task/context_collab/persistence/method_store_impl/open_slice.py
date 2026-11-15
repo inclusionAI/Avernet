@@ -28,6 +28,9 @@ from agentclaw.community.core.task.context_collab.errors import (
 from agentclaw.community.core.task.context_collab.g4_contracts_consistency.method_state_machines import (
     METHOD_MACHINE_REGISTRY,
 )
+from agentclaw.community.core.task.context_collab.l4_context_primitives.participants import (
+    ScopedParticipantBinding,
+)
 from agentclaw.community.core.task.context_collab.l5_methods.open_profile import (
     AdmissionDecision,
     ApplicationState,
@@ -271,6 +274,54 @@ class OpenSlice:
                 for key, decision in self._admission_decisions.items()
                 if self._key_in_binding(key, axes, collab_context_id,
                                         method_binding_id)
+            ]
+
+    def insert_participant_binding(
+        self,
+        axes: "StoreAxes",
+        method_binding_id: str,
+        binding: ScopedParticipantBinding,
+        collab_context_id: str,
+    ) -> ScopedParticipantBinding:
+        if binding.scope_ref != collab_context_id:
+            raise ContextCollabValidationError(
+                "participant binding scope must match its Collet"
+            )
+        key = self._id_key(
+            axes, collab_context_id, method_binding_id,
+            binding.participant_binding_id,
+        )
+        with self._lock:
+            return self._insert_open_object_locked(
+                self._participant_bindings, key, binding, "participant binding"
+            )
+
+    def get_participant_binding(
+        self,
+        axes: "StoreAxes",
+        participant_binding_id: str,
+        method_binding_id: str,
+        collab_context_id: str,
+    ) -> ScopedParticipantBinding | None:
+        with self._lock:
+            return self._participant_bindings.get(
+                self._id_key(
+                    axes, collab_context_id, method_binding_id, participant_binding_id
+                )
+            )
+
+    def list_participant_bindings(
+        self,
+        axes: "StoreAxes",
+        method_binding_id: str,
+        collab_context_id: str,
+    ) -> list[ScopedParticipantBinding]:
+        with self._lock:
+            return [
+                binding for key, binding in self._participant_bindings.items()
+                if self._key_in_binding(
+                    key, axes, collab_context_id, method_binding_id
+                )
             ]
 
     # ------------------------------------------------------------------

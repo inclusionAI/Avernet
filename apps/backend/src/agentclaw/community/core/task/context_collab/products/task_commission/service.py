@@ -1,7 +1,7 @@
 """任务代办产品编排(乙案:组合协议层,自持编不开通用北向合同)。
 
 依赖面(spec §3.1,架构测试执法)与公开讨论同矩阵;差异三处编排:
-- 发布:由精确版本 Profile 选择 Open(v1)或 Open + Group(v2)、
+- 发布:由精确版本 Profile 选择 Open(v1/v2)、
   ``executor_ref=AgentRef("bot", assignee)``、
   ``workflow_kind=task_commission_goal``;
 - Work 六动作:G1 授权后经共享 G4 产品合同校验时序与 typed executor
@@ -213,8 +213,8 @@ class TaskCommissionService:
                 ),
             )
         )
-        # Project the selected L5 topology. v2 seeds only the owner roster;
-        # designated executor membership must be established by Open admission.
+        # Project the selected L5 topology. Pure Open creates no Group roster;
+        # designated executor participation requires a separate Open admission.
         binding = project_created_context(
             self._method_store,
             current_axes(),
@@ -290,6 +290,25 @@ class TaskCommissionService:
     ) -> AssigneeAdmissionReceipt:
         """Bot applies; the declared owner policy screens/admit, then dispatches."""
         receipt = self._method_ops_port.apply_for_task(command, context)
+        self._dispatch_admitted_task(command, receipt, context)
+        return receipt
+
+    def review_task_application(
+        self, command: ApplyForTaskCommand, application_id: str, context: ActorContext
+    ) -> AssigneeAdmissionReceipt:
+        """Run the same product policy for an already-submitted L5 application."""
+        receipt = self._method_ops_port.review_task_application(
+            command, application_id, context
+        )
+        self._dispatch_admitted_task(command, receipt, context)
+        return receipt
+
+    def _dispatch_admitted_task(
+        self,
+        command: ApplyForTaskCommand,
+        receipt: AssigneeAdmissionReceipt,
+        context: ActorContext,
+    ) -> None:
         profile = self._product_catalog.get(
             command.product_profile_ref.profile_id, command.product_profile_ref.version
         )
@@ -310,7 +329,6 @@ class TaskCommissionService:
                 context_version=record.collet.version,
             )
         )
-        return receipt
 
     # ------------------------------------------------------- Work 六动作
 

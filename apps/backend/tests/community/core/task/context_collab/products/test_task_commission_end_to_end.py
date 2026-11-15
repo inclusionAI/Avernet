@@ -1,8 +1,10 @@
 """产品 Profile 上线 → 建任务 → Bot 自查机会/申请/录取 → Work → 用户验收。
 
 用户通过产品 Service API 操作和观察;case 显式以 Bot ActorContext 调用
-L5 Open 查询,申请/执行上报通过签名 A2A HTTP 入站,使用真实产品 Profile、
-仓储、Open 适配器和 G1/G4。直接查询是进程内调用,不验证 JWT。Open 负责
+L5 Open 查询和提交申请,再以发布人授权的策略身份直接调用 Open.screen/admit,
+录取后显式经 TaskDispatchPort 交付;执行上报通过签名 A2A HTTP 入站,
+使用真实产品 Profile、仓储、L5 Open 和 G1/G4。
+直接 Open 调用不验证 JWT;另保留真实产品策略的签名 HTTP Query/Apply 回归。Open 负责
 参与录取,进度与成果提交属于 L4 Work,不是新增的 Open 方法。
 仅模拟 Bot 执行、任务交接和网关签名;本地产物不上传,出站通知仍用
 MockA2aDelivery,不声称验证真实通知接收、网关转发或 LLM 执行。
@@ -12,6 +14,7 @@ import runpy
 import secrets
 from collections.abc import Callable
 from contextlib import contextmanager
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 from uuid import uuid4
@@ -25,6 +28,9 @@ from injector import Binder, Injector
 
 from agentclaw.community.adapters.http.task import commission_a2a, commission_a2a_auth
 from agentclaw.community.core.gateway_principal import PrincipalVerifierConfig
+from agentclaw.community.core.task.context_collab.errors import (
+    ContextCollabValidationError,
+)
 from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context import (
     ActorContext,
 )
@@ -43,13 +49,19 @@ from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_reso
 from agentclaw.community.core.task.context_collab.l4_context_primitives.operations import (
     work as work_operations_module,
 )
-from agentclaw.community.core.task.context_collab.l5_methods.group_profile import (
-    MemberState,
+from agentclaw.community.core.task.context_collab.l4_context_primitives.participants import (
+    role_binding_ref,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
     top_level_binding_id,
 )
+from agentclaw.community.core.task.context_collab.l5_methods.open_profile import (
+    ApplicationState,
+)
 from agentclaw.community.core.task.context_collab.l5_methods.operations.contracts import (
+    OpenAdmitCommand,
+    OpenApplicationCommand,
+    OpenDecisionOpCommand,
     OpenMethodOpsServiceProtocol,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime import (
@@ -72,12 +84,18 @@ from agentclaw.community.core.task.context_collab.products.task_commission.profi
     build_self_service_commission_profile,
 )
 from agentclaw.community.core.task.context_collab.products.task_commission.service_api import (
+    ApplyForTaskCommand,
+    DispatchedTaskInfo,
     PublishTaskCommand,
     TaskAdvanceCommand,
     TaskCommissionCreatedView,
     TaskCommissionServiceProtocol,
     TaskDispatchPort,
     TaskMethodOpsPort,
+)
+from agentclaw.community.core.task.context_collab.service_api import (
+    ContextCollabServiceProtocol,
+    EventAppendCommand,
 )
 from agentclaw.community.di.modules.context_collab_products import (
     INSTALLED_PRODUCT_PROFILES,
@@ -152,6 +170,7 @@ def _trace_runtime(monkeypatch, injector: Injector) -> None:
                 "publish_task": "业务同学发布指定 Bot 的代办任务",
                 "query_opportunities": "指定 Bot 只读查询机会,不提前加入协作",
                 "apply_for_task": "指定 Bot 自己申请,触发产品自动审核",
+                "review_task_application": "对既有申请运行产品自动审核并交付任务",
                 "report_execution": "接收 Bot 的 start/progress/submit 上报并校验上下文",
                 "_advance": "按产品 WorkflowProfile 推进 L4 Work 动作",
                 "accept_task": "发布人验收成果",
@@ -164,6 +183,7 @@ def _trace_runtime(monkeypatch, injector: Injector) -> None:
             {
                 "admit_designated_assignee": "兼容 v1 发布人代申请",
                 "publish_designated_opportunity": "只发布机会,等待 Bot 申请",
+                "review_task_application": "复用发布人授权的策略,不再提交申请",
                 "require_admitted": "确认有效的任务 scope 参与绑定",
             },
         ),
@@ -400,9 +420,6 @@ class SimulatedWorkingBot:
         ]
         return request
 
-    def apply(self, opportunity: dict) -> dict:
-        return self.request(self.application_request(opportunity))["data"]["admission"]
-
     def run(
         self,
         created: TaskCommissionCreatedView,
@@ -459,12 +476,12 @@ def _opportunities_query_request(bot: SimulatedWorkingBot) -> dict:
 
 
 def test_end_to_end_commission_flow(commission_deployment, tmp_path):
-    """产品上线 → 业务建任务 → Bot Query/Apply/Admit → scoped Group → Work → accept。"""
+    """产品上线 → 建任务 → Bot Query/Apply → 策略 Screen/Admit → scoped Participant → Work → accept。"""
     # 1. 产品同学新建 v2 Profile 并上线。当前产品上线是代码定义 + DI
     #    安装,不是管理后台动态注册 API;不更改或迁移已上线的 v1。
     profile = build_self_service_commission_profile()
     assert profile.ref.version == 2
-    assert profile.composition.method_kind == "Open + Group"
+    assert profile.composition.method_kind == "Open"
     _flow_log(_TEST_DIRECTORY, "1. 产品同学定义任务代办 v2 Profile,通过 DI 部署上线")
     with commission_deployment(profile) as (service, working_bot, injector):
         assert injector.get(ProductCatalog).get("task_commission", 2) == profile
@@ -493,10 +510,13 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
         binding_id = top_level_binding_id(task_id)
         assert injector.get(A2aDeliveryPort).bridge_records() == ()
         assert store.list_applications(axes, binding_id, task_id) == []
-        assert all(
-            m.participant_ref != BOT_ASSIGNEE
-            for m in store.list_members(axes, binding_id, task_id)
-        )
+        [binding] = store.list_bindings(axes, task_id)
+        assert binding.method_kind == "Open"
+        assert binding.method_names == ("Open",)
+        assert binding.profile_versions == {"Open": "0.2"}
+        assert store.get_roster(axes, binding_id, task_id) is None
+        assert store.list_members(axes, binding_id, task_id) == []
+        assert store.list_participant_bindings(axes, binding_id, task_id) == []
         # Designation is not admission; even the real signed Bot cannot start yet.
         working_bot.request(
             commission_report_request(created), expected_status="REJECTED"
@@ -509,7 +529,7 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
         )
         # 直接调用真正的 L5 Open Method;Bot 只是调用主体,不拥有查询实现。
         # 这是已知 task/binding 的进程内查询,ActorContext 由测试建立;
-        # 不冒充跨 Agent 调用或 JWT 认证(后续 Apply 仍走签名 HTTP)。
+        # Query/Apply 都不冒充跨 Agent 调用或 JWT 认证。
         open_method = injector.get(OpenMethodOpsServiceProtocol)
         bot_context = ActorContext(PrincipalRef("bot", working_bot.bot_id), "a2a")
         [opportunity] = open_method.query_opportunities(
@@ -519,6 +539,7 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
         )
         assert opportunity.method_binding_id == binding_id
         assert opportunity.scope_ref == task_id
+        assert opportunity.participation_type.value == "COLLET_PARTICIPANT"
         assert open_method.query_opportunities(task_id, binding_id, bot_context) == (
             opportunity,
         )  # repeatable read
@@ -536,45 +557,128 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
         }
         assert _participation_snapshot(service, injector, created) == before_query
         assert store.list_applications(axes, binding_id, task_id) == []
-        # Apply 引用来自上述 L5 查询结果,而不是 Bot 内部或手工猜测的机会 ID。
-        receipt = working_bot.apply(
-            {
-                "collab_context_id": task_id,
-                "method_binding_ref": opportunity.method_binding_id,
-                "opportunity_id": opportunity.opportunity_id,
-            }
+        # Apply 也直接调用 L5 Open Method,引用来自查询结果;Bot 只是申请主体。
+        record = injector.get(ContextCollabRepositoryProtocol).get_current_status(task_id)
+        assert record is not None
+        submitted = open_method.submit_application(
+            collab_context_id=task_id,
+            method_binding_id=opportunity.method_binding_id,
+            opportunity_ref=opportunity.opportunity_id,
+            command=OpenApplicationCommand(
+                applicant_agent_ref=working_bot.bot_id,
+                accountable_principal_ref=working_bot.owner_id,
+                requested_role_refs=[
+                    role_binding_ref(task_id, role)
+                    for role in record.context_spec.role_bindings
+                    if role.role == "selected-agent"
+                ],
+                reason="task_commission.bot_self_application",
+            ),
+            context=bot_context,
         )
-        assert len(injector.get(A2aDeliveryPort).bridge_records()) == 1
-        assert receipt["state"] == "ADMITTED"
+        assert submitted.accepted and submitted.state == "SUBMITTED"
+        [pending] = store.list_applications(axes, binding_id, task_id)
+        assert pending.application_id == submitted.object_id
+        assert pending.transitioned_by == working_bot.bot_id
+        assert store.list_participant_bindings(axes, binding_id, task_id) == []
+        assert store.list_decisions(axes, binding_id, task_id) == []
+        assert injector.get(A2aDeliveryPort).bridge_records() == ()
+        working_bot.request(
+            working_bot.report_request(created), expected_status="REJECTED"
+        )
+        # case 显式展开已发布策略的审核/录取步骤,不调用产品 review 封装。
+        # 由发布人授权的 product_policy actor 执行,不是 Bot 自审。
+        policy_context = ActorContext(
+            record.context_spec.principal_ref, source="product_policy"
+        )
+        [policy_ref] = opportunity.admission_policy_refs
+        _flow_log(_TEST_DIRECTORY, "3.1. 产品策略调用 Open.screen: SUBMITTED → SCREENING")
+        screened = open_method.screen(
+            collab_context_id=task_id,
+            method_binding_id=binding_id,
+            application_ref=submitted.object_id,
+            command=OpenDecisionOpCommand(reason=policy_ref),
+            context=policy_context,
+        )
+        assert screened.accepted and screened.state == "SCREENING"
+        assert screened.object_id == submitted.object_id
+        [screening] = store.list_applications(axes, binding_id, task_id)
+        assert screening.state is ApplicationState.SCREENING
+        assert screening.transitioned_by == HUMAN.actor.principal_id
+        assert store.list_participant_bindings(axes, binding_id, task_id) == []
+        assert store.list_decisions(axes, binding_id, task_id) == []
+        working_bot.request(
+            working_bot.report_request(created), expected_status="REJECTED"
+        )
+        assert injector.get(A2aDeliveryPort).bridge_records() == ()
+        _flow_log(_TEST_DIRECTORY, "3.2. 产品策略调用 Open.admit: SCREENING → ADMITTED")
+        decision_id = f"dec_{uuid4().hex[:12]}"
+        admitted = open_method.admit(
+            collab_context_id=task_id,
+            method_binding_id=binding_id,
+            application_ref=submitted.object_id,
+            command=OpenAdmitCommand(
+                admitted_scope_ref=task_id,
+                decision_id=decision_id,
+                reason=policy_ref,
+            ),
+            context=policy_context,
+        )
+        assert admitted.accepted and admitted.state == "ADMITTED"
+        assert admitted.object_id == submitted.object_id
+        assert injector.get(A2aDeliveryPort).bridge_records() == ()
         [application] = store.list_applications(axes, binding_id, task_id)
+        assert application.state is ApplicationState.ADMITTED
         assert application.applicant_agent_ref == BOT_ASSIGNEE
         assert (
             application.accountable_principal_ref == OWNER
         )  # Bot owner, not publisher.
         assert application.transitioned_by == HUMAN.actor.principal_id
 
-        # 4. 真正录取后才建立本任务 Method scope 内的 GroupMemberBinding。
+        # 4. 真正录取后才建立本任务 Collet scope 内的参与绑定,不创建 Group。
         _flow_log(
             _TEST_DIRECTORY,
-            "4. 录取建立限定任务 scope 的参与绑定,允许按 Open + Group 协作",
+            "4. 录取建立限定任务 scope 的参与绑定,单个 Bot 在纯 Open 录取后执行代办",
         )
-        assert receipt["admitted_scope_ref"] == task_id
-        [member_ref] = receipt["resulting_binding_refs"]
-        [member] = [
-            m
-            for m in store.list_members(axes, binding_id, task_id)
-            if m.group_member_binding_id == member_ref
-        ]
-        assert (member.participant_ref, member.method_binding_id, member.state) == (
-            BOT_ASSIGNEE,
-            binding_id,
-            MemberState.ACTIVE,
+        [decision] = store.list_decisions(axes, binding_id, task_id)
+        assert decision.admission_decision_id == decision_id
+        assert decision.admitted_scope_ref == task_id
+        [participant_ref] = decision.resulting_binding_refs
+        [participant] = store.list_participant_bindings(axes, binding_id, task_id)
+        assert participant.participant_binding_id == participant_ref
+        assert (participant.participant_ref, participant.scope_ref) == (
+            BOT_ASSIGNEE, task_id,
         )
-        assert member.role_binding_refs  # Scoped role correlation; not an L3 grant.
+        assert participant.role_binding_refs  # Scoped role correlation, no L3 grant.
+        assert decision.application_ref == application.application_id
+        assert decision.resulting_binding_refs == (participant_ref,)
+        assert store.get_roster(axes, binding_id, task_id) is None
+        assert store.list_members(axes, binding_id, task_id) == []
+        assert store.list_selections(axes, binding_id, task_id) == []
+        assert store.list_composition_edges(axes, task_id) == []
         assert open_method.query_opportunities(task_id, binding_id, bot_context) == ()
         assert (
             service.detail_task(task_id).status == "created"
         )  # admit is not Work.start
+
+        # Open 录取不负责派发;case 单独通过真实产品交付端口送达任务信息。
+        profile.require_publication().require_dispatch_ready(admitted.state)
+        injector.get(TaskMethodOpsPort).require_admitted(task_id, bot_context)
+        detail = service.detail_task(task_id)
+        assert detail.body is not None
+        injector.get(TaskDispatchPort).dispatch_task_info(
+            DispatchedTaskInfo(
+                collet_id=task_id,
+                title=detail.title,
+                body=detail.body.content,
+                assignee_agent_id=working_bot.bot_id,
+                publisher_principal_id=record.owner_principal_id,
+                product_profile_ref=profile.ref,
+                method_binding_ref=binding_id,
+                context_version=created.context_version,
+            )
+        )
+        assert len(injector.get(A2aDeliveryPort).bridge_records()) == 1
 
         # 5. 模拟 AI coding 的真实本地文件/测试动作,每步主动上报。
         #    PR 是本地提案文件,不冒充真实远端建 PR/LLM 执行。
@@ -664,6 +768,7 @@ def _participation_snapshot(service, injector, created):
         store.get_binding(axes, binding, context_id),
         store.get_roster(axes, binding, context_id),
         tuple(store.list_members(axes, binding, context_id)),
+        tuple(store.list_participant_bindings(axes, binding, context_id)),
         tuple(store.list_opportunities(axes, binding, context_id)),
         tuple(store.list_applications(axes, binding, context_id)),
         tuple(store.list_decisions(axes, binding, context_id)),
@@ -678,3 +783,191 @@ def _publish_v2(service, profile, assignee=BOT_ASSIGNEE):
         ),
         HUMAN,
     )
+
+
+def _apply_to_created(bot, created):
+    """独立验证现有签名 HTTP Apply 入口;不把 Open 能力封装成 Bot 方法。"""
+    opportunities = bot.request(_opportunities_query_request(bot))["data"]["opportunities"]
+    [opportunity] = [
+        item for item in opportunities if item["collab_context_id"] == created.collet_id
+    ]
+    return bot.request(bot.application_request(opportunity))["data"]["admission"]
+
+
+@pytest.mark.parametrize("mismatch", [
+    "actor", "accountable", "opportunity", "application", "binding", "profile",
+    "task", "roles", "applicant", "already_admitted",
+])
+def test_task_application_review_rejects_unmatched_submission(
+    commission_deployment, mismatch,
+):
+    """A known L5 application ID cannot bypass the real product admission policy."""
+    profile = build_self_service_commission_profile()
+    with commission_deployment(profile) as (service, bot, injector):
+        created = _publish_v2(service, profile)
+        context_id, binding = created.collet_id, top_level_binding_id(created.collet_id)
+        context = ActorContext(PrincipalRef("bot", bot.bot_id), "a2a")
+        open_method = injector.get(OpenMethodOpsServiceProtocol)
+        [opportunity] = open_method.query_opportunities(context_id, binding, context)
+        record = injector.get(ContextCollabRepositoryProtocol).get_current_status(context_id)
+        assert record is not None
+        submitted = open_method.submit_application(
+            context_id, binding, opportunity.opportunity_id,
+            OpenApplicationCommand(
+                applicant_agent_ref="other_bot" if mismatch == "applicant" else bot.bot_id,
+                accountable_principal_ref=bot.owner_id,
+                requested_role_refs=[] if mismatch == "roles" else [
+                    role_binding_ref(context_id, role)
+                    for role in record.context_spec.role_bindings
+                    if role.role == "selected-agent"
+                ],
+            ),
+            context,
+        )
+        command = ApplyForTaskCommand(
+            context_id, opportunity.opportunity_id, binding, profile.ref, bot.owner_id,
+        )
+        application_id = submitted.object_id
+        if mismatch == "actor":
+            context = HUMAN
+        elif mismatch == "accountable":
+            command = replace(command, accountable_principal_id="another_owner")
+        elif mismatch == "opportunity":
+            command = replace(command, opportunity_id="another_opportunity")
+        elif mismatch == "application":
+            application_id = "another_application"
+        elif mismatch == "binding":
+            command = replace(command, method_binding_ref="another_binding")
+        elif mismatch == "profile":
+            command = replace(command, product_profile_ref=TASK_COMMISSION_PROFILE.ref)
+        elif mismatch == "task":
+            other = _publish_v2(service, profile)
+            command = replace(
+                command, collab_context_id=other.collet_id,
+                method_binding_ref=top_level_binding_id(other.collet_id),
+            )
+        elif mismatch == "already_admitted":
+            service.review_task_application(command, application_id, context)
+        before = _participation_snapshot(service, injector, created)
+        with pytest.raises(ContextCollabValidationError):
+            service.review_task_application(command, application_id, context)
+        assert _participation_snapshot(service, injector, created) == before
+
+
+def test_pure_open_admission_is_task_scoped_and_revocable(commission_deployment):
+    profile = build_self_service_commission_profile()
+    with commission_deployment(profile) as (service, bot, injector):
+        first, second = _publish_v2(service, profile), _publish_v2(service, profile)
+        receipt = _apply_to_created(bot, first)
+        context = ActorContext(PrincipalRef("bot", BOT_ASSIGNEE), "a2a")
+        generic = injector.get(ContextCollabServiceProtocol)
+        # Same designated Bot, but only task A has admitted it.
+        before_second = _participation_snapshot(service, injector, second)
+        bot.request(bot.report_request(second), expected_status="REJECTED")
+        with pytest.raises(ContextCollabValidationError, match="participation binding"):
+            generic.append_event(
+                second.collet_id,
+                EventAppendCommand(
+                    second.context_version, "task.started", "Task", context.actor,
+                    None, "public", {},
+                ),
+                context,
+            )
+        assert _participation_snapshot(service, injector, second) == before_second
+        # Admission is live until revoked, independent of designation.
+        injector.get(TaskMethodOpsPort).require_admitted(first.collet_id, context)
+        injector.get(OpenMethodOpsServiceProtocol).revoke_admission(
+            first.collet_id, top_level_binding_id(first.collet_id),
+            receipt["application_id"], OpenDecisionOpCommand(reason="owner revoke"),
+            HUMAN,
+        )
+        before_first = _participation_snapshot(service, injector, first)
+        bot.request(bot.report_request(first), expected_status="REJECTED")
+        with pytest.raises(ContextCollabValidationError, match="participation binding"):
+            service.start_task(TaskAdvanceCommand(first.collet_id), context)
+        with pytest.raises(ContextCollabValidationError, match="participation binding"):
+            generic.append_event(
+                first.collet_id,
+                EventAppendCommand(
+                    first.context_version, "task.started", "Task", context.actor,
+                    None, "public", {},
+                ),
+                context,
+            )
+        assert _participation_snapshot(service, injector, first) == before_first
+        store, axes = injector.get(MethodStoreProtocol), current_axes()
+        binding = top_level_binding_id(first.collet_id)
+        # Preserve evidence without granting authority after revocation.
+        assert len(store.list_participant_bindings(axes, binding, first.collet_id)) == 1
+        assert store.get_roster(axes, binding, first.collet_id) is None
+        assert store.list_members(axes, binding, first.collet_id) == []
+
+
+@pytest.mark.parametrize("actor", [
+    HUMAN,
+    ActorContext(PrincipalRef("bot", "another_bot"), "a2a"),
+    ActorContext(PrincipalRef("human", BOT_ASSIGNEE), "api"),
+])
+def test_scoped_open_binding_cannot_authorize_another_identity(
+    commission_deployment, actor,
+):
+    profile = build_self_service_commission_profile()
+    with commission_deployment(profile) as (service, bot, injector):
+        created = _publish_v2(service, profile)
+        _apply_to_created(bot, created)
+        before = _participation_snapshot(service, injector, created)
+        with pytest.raises(ContextCollabValidationError):
+            injector.get(TaskMethodOpsPort).require_admitted(created.collet_id, actor)
+        with pytest.raises(ContextCollabValidationError):
+            service.start_task(TaskAdvanceCommand(created.collet_id), actor)
+        assert _participation_snapshot(service, injector, created) == before
+
+
+def test_partial_open_admission_does_not_authorize_execution(
+    commission_deployment, monkeypatch,
+):
+    profile = build_self_service_commission_profile()
+    with commission_deployment(profile) as (service, bot, injector):
+        created = _publish_v2(service, profile)
+        [opportunity] = bot.request(_opportunities_query_request(bot))["data"][
+            "opportunities"
+        ]
+        before_sql = service.detail_task(created.collet_id)
+        store, axes = injector.get(MethodStoreProtocol), current_axes()
+        update_application = store.update_application_state
+
+        def fail_admitted_write(axes, binding, application, context_id):
+            if application.state is ApplicationState.ADMITTED:
+                raise RuntimeError("application storage unavailable")
+            return update_application(axes, binding, application, context_id)
+
+        # Binding and decision are written, but the final application write fails.
+        # This is not a successful admission and must not dispatch or permit Work.
+        monkeypatch.setattr(store, "update_application_state", fail_admitted_write)
+        bot.request(bot.application_request(opportunity), expected_status="FAILED")
+        context_id, binding = created.collet_id, top_level_binding_id(created.collet_id)
+        [application] = store.list_applications(axes, binding, context_id)
+        assert application.state is ApplicationState.SCREENING
+        [participant] = store.list_participant_bindings(axes, binding, context_id)
+        [decision] = store.list_decisions(axes, binding, context_id)
+        assert decision.resulting_binding_refs == (participant.participant_binding_id,)
+        assert decision.application_ref == application.application_id
+        assert injector.get(A2aDeliveryPort).bridge_records() == ()
+        context = ActorContext(PrincipalRef("bot", BOT_ASSIGNEE), "a2a")
+        before = _participation_snapshot(service, injector, created)
+        with pytest.raises(ContextCollabValidationError, match="participation binding"):
+            injector.get(TaskMethodOpsPort).require_admitted(context_id, context)
+        bot.request(bot.report_request(created), expected_status="REJECTED")
+        with pytest.raises(ContextCollabValidationError, match="participation binding"):
+            service.start_task(TaskAdvanceCommand(context_id), context)
+        with pytest.raises(ContextCollabValidationError, match="participation binding"):
+            injector.get(ContextCollabServiceProtocol).append_event(
+                context_id,
+                EventAppendCommand(
+                    created.context_version, "task.started", "Task", context.actor,
+                    None, "public", {},
+                ),
+                context,
+            )
+        assert _participation_snapshot(service, injector, created) == before
+        assert service.detail_task(context_id) == before_sql

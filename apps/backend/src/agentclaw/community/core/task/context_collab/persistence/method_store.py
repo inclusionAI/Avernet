@@ -26,6 +26,9 @@ from typing import Protocol, runtime_checkable
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabValidationError,
 )
+from agentclaw.community.core.task.context_collab.l4_context_primitives.participants import (
+    ScopedParticipantBinding,
+)
 from agentclaw.community.core.task.context_collab.l5_methods.group_profile import (
     GroupMemberBinding,
     GroupRoster,
@@ -455,6 +458,32 @@ class MethodStoreProtocol(Protocol):
         method_binding_id: str,
         collab_context_id: str,
     ) -> list[AdmissionDecision]: ...
+
+    # Immutable Collet participation evidence created by Open admission. Reads
+    # include revoked admissions: callers must verify the application's state,
+    # decision provenance, scope and Method lifecycle before granting authority.
+    def insert_participant_binding(
+        self,
+        axes: StoreAxes,
+        method_binding_id: str,
+        binding: ScopedParticipantBinding,
+        collab_context_id: str,
+    ) -> ScopedParticipantBinding: ...
+
+    def get_participant_binding(
+        self,
+        axes: StoreAxes,
+        participant_binding_id: str,
+        method_binding_id: str,
+        collab_context_id: str,
+    ) -> ScopedParticipantBinding | None: ...
+
+    def list_participant_bindings(
+        self,
+        axes: StoreAxes,
+        method_binding_id: str,
+        collab_context_id: str,
+    ) -> list[ScopedParticipantBinding]: ...
 
 
 # Re-export(协议在上的拆分):impl 切片位于 method_store_impl/ 包,

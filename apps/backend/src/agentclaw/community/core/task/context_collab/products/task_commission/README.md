@@ -8,7 +8,7 @@ not an L6 implementation or a second Task engine. DI explicitly installs their
 | Profile | Method composition | Admission and dispatch |
 | --- | --- | --- |
 | `task_commission@1` | Open | Publisher-mediated SINGLE_CONTRIBUTION during publication; no ongoing participant binding. |
-| `task_commission@2` | Open + Group | Designated Bot queries/applies itself; owner-authorized automatic review creates task-scoped Group membership before dispatch. |
+| `task_commission@2` | Open | Designated Bot queries/applies itself; owner-authorized automatic review creates a task-scoped Participant binding before dispatch. |
 
 Existing instances are never migrated. `PublishTaskCommand.product_profile_ref`
 selects an exact installed definition at creation; omission preserves v1. This
@@ -18,7 +18,8 @@ existing public user creation DTO.
 ## Contracts and authority
 
 - [Service contract](service_api.py): publish, list/detail, Bot opportunity
-  Query/Apply, six Work actions and `report_execution` for inbound Bot reports.
+  Query/Apply, review of an existing L5 application, six Work actions and
+  `report_execution` for inbound Bot reports.
   The API layer re-exports only `TaskCommissionServiceProtocol`.
 - [Service](service.py): v1 preserves publisher-mediated admission before body
   publication/dispatch. v2 publishes an opportunity without applying for the Bot;
@@ -46,23 +47,35 @@ behavior is unchanged; the Bot ingress permits only executor start/progress/subm
    “Online” means an immutable code-owned definition installed into the actual
    application catalog, not a mutable registry or a mocked registration call.
 2. Business staff create a task with that exact profile and designate the Bot.
-   SQL stores the goal/body/executor; the Open + Group binding initially seeds
-   **only the owner**. A selected-agent RoleBinding is designation, not admission.
+   SQL stores the goal/body/executor; L5 creates only an **Open** MethodBinding,
+   with no Group roster, Group member or Single selection. A selected-agent
+   RoleBinding is designation, not admission.
 3. The designated, authenticated Bot calls **L5 Open's `query_opportunities`**
-   for a known Collet/MethodBinding, then **L5 Open.apply** as itself. The Method
-   service owns querying; the Bot is its caller, not the implementation owner.
+   for a known Collet/MethodBinding, then **L5 Open's `submit_application`** as
+   itself. The Method service owns both operations; the Bot is their caller,
+   not the implementation owner. The wire action name remains `apply`.
    Product-wide discovery is also available through the existing signed **L4
    Query** wire operation: product policy selects exact-profile, designated,
    created tasks, delegates active-window/capacity checks to L5 Open and filters
-   opportunity scope/policy/type. Neither query requires prior Group membership
-   or writes application, membership or delivery records.
-4. Apply rechecks availability and submits with the Bot as applicant and its
-   **signed Bot owner** as accountable principal (not necessarily the publisher).
+   opportunity scope/policy/type. Neither query requires prior participation
+   or writes application, participant binding or delivery records.
+4. HTTP Apply rechecks availability and submits with the Bot as applicant and
+   its **signed Bot owner** as accountable principal (not necessarily the publisher).
+   Its `review_task_application` continuation reviews the existing L5 application
+   without submitting again. Review validates the stored SUBMITTED application
+   against the exact task/profile/opportunity, designated Bot, trusted accountable
+   principal and selected-agent roles before making any admission writes.
    The publisher authorized the bounded capacity-1 rule when opening the task.
    The adapter executes `screen → admit` under that owner's `product_policy`
-   actor, then verifies the real AdmissionDecision and active GroupMemberBinding.
-   The admitted scope and resulting binding belong only to this task's top-level
-   Method. They are not Space membership, resource grants or session access.
+   actor. The in-process journey case instead shows both L5 calls explicitly
+   with the authorized policy actor, without using the review wrapper.
+   The opportunity uses `COLLET_PARTICIPANT`, not `GROUP_MEMBER` or
+   `SINGLE_CONTRIBUTION`. Open admission creates a real immutable L4
+   `ScopedParticipantBinding` and references it from the AdmissionDecision;
+   its scope is exactly this task's Collet. Binding validity requires the
+   admitting application to remain ADMITTED and the Open MethodBinding ACTIVE.
+   Revocation retains evidence but immediately removes execution eligibility.
+   These records are not Space membership, resource grants or session access.
 5. After ADMITTED, dispatch provides task details and the starting revision.
    Bot start/progress/submit use L4 Work. The shared G1 adapter requires active
    scoped admission for these v2 events through **both product and generic L4**
@@ -74,16 +87,38 @@ behavior is unchanged; the Bot ingress permits only executor start/progress/subm
    moves the task to `done`. Failed execution must not auto-submit.
 
 The guard is deliberately bounded to task execution, not a replacement for all
-G1/Governance policy: generic public Message contributions retain Open + Group
-structural semantics. The new Bot discovery projection reveals only designated
+G1/Governance policy: other Open + Group products retain their existing public
+Message contribution rules; pure Open commission does not acquire those rules. The new Bot discovery projection reveals only designated
 opportunities, not task history or other applicants. This is not full ACCS
 conformance or a general automatic-admission engine.
+
+### Pure-Open participant contract and compatibility
+
+The [L4 scoped identity value](../../l4_context_primitives/participants.py),
+[L5 admission contract](../../l5_methods/operations/contracts.py) and
+[MethodStore](../../persistence/method_store.py) define this bounded local path.
+`COLLET_PARTICIPANT` opportunity and admission scopes must both equal the owning
+Collet ID; nested/arbitrary scopes are rejected. The immutable binding records
+an Agent identity reference and requested role references. It does not mutate
+the creation-time designation or introduce a second participant lifecycle.
+Consumers must correlate the binding with the exact admission decision,
+ADMITTED application, actor and ACTIVE Open MethodBinding; a stored binding
+reference alone is not an authorization credential.
+
+This corrects the v2 definition's accidental Group composition in the current
+code-owned catalog; v1 and unrelated Open + Group products are unchanged. It is
+not an automatic migration of any previously stored v2 instance. Previously
+created v2 `Open + Group` contexts are incompatible with the corrected profile;
+no in-place conversion or historic admission rewrite is provided. Recreate test
+instances rather than relabeling their Group member records. MethodStore remains
+in-memory, with no new durable L4 participant-management API or SQL table.
 
 ## Calling L5 Open directly
 
 The [journey case](../../../../../../../../tests/community/core/task/context_collab/products/test_task_commission_end_to_end.py)
-resolves the real `OpenMethodOpsServiceProtocol` from its test injector and
-explicitly calls it with the Bot as the actor:
+resolves the real `OpenMethodOpsServiceProtocol` from its test injector. Query
+and application use the Bot actor; screening and admission use the publisher's
+authorized policy actor:
 
 ```python
 open_method = injector.get(OpenMethodOpsServiceProtocol)
@@ -92,9 +127,49 @@ open_method = injector.get(OpenMethodOpsServiceProtocol)
     method_binding_id=binding_id,
     context=bot_context,
 )
+submitted = open_method.submit_application(
+    collab_context_id=task_id,
+    method_binding_id=opportunity.method_binding_id,
+    opportunity_ref=opportunity.opportunity_id,
+    command=OpenApplicationCommand(
+        applicant_agent_ref=working_bot.bot_id,
+        accountable_principal_ref=working_bot.owner_id,
+        requested_role_refs=selected_agent_role_refs,
+    ),
+    context=bot_context,
+)
+assert submitted.state == "SUBMITTED"
+policy_context = ActorContext(
+    record.context_spec.principal_ref, source="product_policy"
+)
+[policy_ref] = opportunity.admission_policy_refs
+screened = open_method.screen(
+    collab_context_id=task_id,
+    method_binding_id=binding_id,
+    application_ref=submitted.object_id,
+    command=OpenDecisionOpCommand(reason=policy_ref),
+    context=policy_context,
+)
+assert screened.state == "SCREENING"
+decision_id = f"dec_{uuid4().hex[:12]}"
+admitted = open_method.admit(
+    collab_context_id=task_id,
+    method_binding_id=binding_id,
+    application_ref=submitted.object_id,
+    command=OpenAdmitCommand(
+        admitted_scope_ref=task_id,
+        decision_id=decision_id,
+        reason=policy_ref,
+    ),
+    context=policy_context,
+)
+assert admitted.state == "ADMITTED"
 ```
 
 `task_id` is the product's Collet ID; `binding_id` is its actual L5 MethodBinding.
+`selected_agent_role_refs` are canonical references to the task's existing
+selected-agent RoleBindings, built with L4 `role_binding_ref`; they do not
+create participation. The case resolves them from the actual creation record.
 This is a **known-binding, in-process call**, not product-wide/global discovery
 or independent JWT verification. The test constructs its trusted actor context;
 production delivery must establish it from verified authentication and inject
@@ -109,13 +184,36 @@ bindings and unauthorized actors are rejected. Results are a read-time snapshot,
 not a reservation, product eligibility decision, automatic application or
 participation grant. Submit/admit still perform their own checks.
 
-The case passes returned opportunity/binding references to signed HTTP Apply,
-checks that repeated reads do not mutate participation, then verifies that
-admission consumes capacity. It also exercises signed product-wide HTTP Query
+The case shows the real L5 calls in sequence: Query → SubmitApplication →
+Screen → Admit. Submission returns SUBMITTED, not an admission receipt; it does
+not implicitly screen, admit or dispatch. SCREENING still has no participant
+binding or decision and cannot authorize Work. Admission creates the scoped
+participant binding and decision; the case then explicitly dispatches through
+`TaskDispatchPort` after checking admission. Open itself does not dispatch or
+start Work. Screening/admission use the publisher-authorized `product_policy`
+actor, not the applicant Bot. This case makes those lifecycle steps visible;
+it does not exercise the product review wrapper for this admission.
+
+The production `review_task_application` continuation remains on both
+`TaskCommissionServiceProtocol` and `TaskMethodOpsPort`; HTTP Apply uses it
+before dispatch. Separate signed HTTP Apply cases exercise the real adapter,
+and review regressions cover rejected mismatches/replays. The v1 adapter rejects
+this continuation. There is no new HTTP operation or automatic submission hook.
+
+Product review cannot repeat opportunity discovery: the stored SUBMITTED
+application already occupies the capacity-1 slot. It validates that application's facts;
+L5 checked window/capacity at submission. Mismatches and repeat review are
+rejected without a second application, admission or dispatch. Review/write or
+dispatch failures still propagate, without automatic retry or compensation.
+
+The case checks that repeated reads do not mutate participation, neither
+submission nor screening can authorize Work, and admission consumes capacity.
+It also exercises signed product-wide HTTP Query
 and checks that its minimal projection matches the L5 result. Product filtering
 continues to hide unrelated Bots' tasks; L5 itself does not import product
-profiles, SQL discovery or designation rules. `SimulatedWorkingBot` has no
-built-in `query_opportunities` method.
+profiles, SQL discovery or designation rules. `SimulatedWorkingBot` has neither
+a built-in `query_opportunities` method nor an `apply` method. Separate regression
+cases send the actual signed HTTP Apply envelope to preserve ingress coverage.
 
 ## Bot ingress and authentication
 
@@ -164,7 +262,7 @@ signed identity, protocol-version and unsupported-extension checks still apply):
 | ACCS tuple: layer / family / action / mode | Target and context | Result data |
 | --- | --- | --- |
 | L4 / query / opportunities / QUERY | ProductProfile `task_commission`, version `2`; no Collet or Method context | Minimal available opportunity projections |
-| L5 / open / apply / COMMAND | OpenOpportunity target plus matching Collet and MethodBinding context; profile `task_commission@2` | Admission receipt with scope and resulting member binding refs |
+| L5 / open / apply / COMMAND | OpenOpportunity target plus matching Collet and MethodBinding context; profile `task_commission@2` | Admission receipt with scope and resulting participant binding refs |
 
 Both require `{}` payload and null `expected_revision`. The first response
 DataPart is always `AccsOperationResult`; successful Query/Apply adds a second
@@ -255,7 +353,7 @@ In the inbound COMMAND, `target_ref.version` stays null; concurrency is expresse
 by the mandatory integer `expected_revision`. The service checks the task's
 pinned product profile and canonical top-level MethodBinding reference; it does
 not treat that reference alone as a credential or lease. v2 additionally
-verifies active scoped Open/Group admission before execution.
+verifies active scoped Open admission before execution.
 
 ## Errors and delivery limits
 
@@ -285,7 +383,9 @@ verifies active scoped Open/Group admission before execution.
 
 ## Verification and change impact
 
-[L5 query contract tests](../../../../../../../../tests/community/core/task/context_collab/test_open_query.py)
+[Pure-Open participant tests](../../../../../../../../tests/community/core/task/context_collab/test_open_collet_participation.py)
+cover scoped binding creation/replay, scope rejection, storage isolation and
+write failures. [L5 query contract tests](../../../../../../../../tests/community/core/task/context_collab/test_open_query.py)
 cover nonmutation, authentication, binding isolation/lifecycle, opportunity
 states, application windows and per-opportunity capacity. Product consumer
 cases also assert actual delegation to L5 while retaining product-policy filters.
@@ -298,14 +398,22 @@ claims, cross-tenant input, stale replay and invalid state.
 also boot the real application/service graph; the
 [product journey](../../../../../../../../tests/community/core/task/context_collab/products/test_task_commission_end_to_end.py)
 deploys an authored v2 profile through the real catalog seam and uses the product
-service for owner commands. The case directly invokes L5 Open query under a
-Bot actor context; the simulated Bot also exercises product discovery, applies
-and reports through signed A2A HTTP. The test checks Query nonmutation, delayed dispatch,
-applicant/accountable identities and real task-scoped Group membership. It
+service for owner commands. The case directly invokes L5 Open query and application
+submission under a trusted Bot actor context, then explicitly continues through
+the real product review/dispatch path. The simulated Bot exercises product
+discovery and execution reporting through signed A2A HTTP; regression cases also
+exercise signed HTTP Apply. Review regressions reject mismatched task, binding,
+opportunity, profile, application, caller, accountable principal, requested roles
+and repeated review without additional writes/delivery. The test checks Query nonmutation, delayed dispatch,
+applicant/accountable identities and a real task-scoped Participant binding,
+with no Group roster or members. It
 writes plan/code/test/PR-proposal files, executes three local code checks,
-reports each step and auto-submits only after successful return. Negative cases
-cover unrelated Bots, forged contexts, duplicate apply, task isolation,
-revocation and both v1/v2 execution failures. Open handles participation/admission;
+reports each step and auto-submits only after successful return. Pure-Open
+regressions cover task isolation, revocation and identity mismatches across the
+product/generic execution boundary, including a partially failed admission where
+binding/decision evidence exists but the application is not ADMITTED. The L5
+participant suite checks scope,
+idempotency, storage isolation and propagated write failures. Open handles participation/admission;
 result submission is L4 Work. PR creation is a local proposal, not a remote PR,
 live Bot/LLM, gateway or artifact-upload test.
 

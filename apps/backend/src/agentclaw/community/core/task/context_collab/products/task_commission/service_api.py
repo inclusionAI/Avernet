@@ -175,7 +175,7 @@ class TaskMethodOpsPort(Protocol):
 
     v1: publisher-mediated SINGLE_CONTRIBUTION admission during publication.
     v2: publication only opens an opportunity; designated Bot Query/Apply invokes
-    owner-authorized automatic review and task-scoped Group membership. Query
+    owner-authorized automatic review and task-scoped participation. Query
     is read-only. require_admitted guards Work through the shared G1 seam.
     Unsupported strategies fail closed; partial failures propagate without rollback.
     """
@@ -191,6 +191,18 @@ class TaskMethodOpsPort(Protocol):
     def apply_for_task(
         self, command: ApplyForTaskCommand, context: ActorContext
     ) -> AssigneeAdmissionReceipt: ...
+
+    def review_task_application(
+        self, command: ApplyForTaskCommand, application_id: str, context: ActorContext
+    ) -> AssigneeAdmissionReceipt:
+        """Review an existing SUBMITTED application; never submit another one.
+
+        Revalidate the exact task/profile/opportunity, designated Bot, accountable
+        principal and requested roles before owner-authorized screen/admit. The
+        caller/owner must come from trusted authentication, as for apply_for_task.
+        Failed or repeated review propagates; no retry/compensation is implied.
+        """
+        ...
 
     def require_admitted(
         self, collab_context_id: str, context: ActorContext
@@ -237,6 +249,18 @@ class TaskCommissionServiceProtocol(Protocol):
     def apply_for_task(
         self, command: ApplyForTaskCommand, context: ActorContext
     ) -> AssigneeAdmissionReceipt: ...
+
+    def review_task_application(
+        self, command: ApplyForTaskCommand, application_id: str, context: ActorContext
+    ) -> AssigneeAdmissionReceipt:
+        """Continue after direct L5 submission: real policy review, then dispatch.
+
+        No submission, JWT verification or implicit hook is performed here. This
+        trusted in-process entrypoint shares the HTTP Apply policy/dispatch path;
+        bare L5 submit_application only creates a SUBMITTED application. Incoming
+        caller and accountable principal must already have been authenticated.
+        """
+        ...
 
     def report_execution(
         self, command: TaskExecutionReportCommand, context: ActorContext

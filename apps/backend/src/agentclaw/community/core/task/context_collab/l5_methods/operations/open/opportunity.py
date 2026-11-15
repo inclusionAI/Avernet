@@ -197,8 +197,8 @@ class OpenOpportunityOpsMixin(OpenMethodServiceBase, OpenMethodOpsServiceProtoco
         OPEN,落终态一次写);窗口形态校验见模块 docstring;幂等键
         ``opportunity_id``(§8.3)。
 
-        P1 结构裁决:``COLLET_PARTICIPANT`` 参与型机会在发布面即拒
-        (L4 参与者治理是 P2,不产生"可发布但不可录取"的悬空机会)。
+        ``COLLET_PARTICIPANT`` is bounded to this Collet's exact scope;
+        admission creates a scoped identity binding, not Group membership.
         """
         axes = self._gate(
             "publish_opportunity",
@@ -268,14 +268,12 @@ class OpenOpportunityOpsMixin(OpenMethodServiceBase, OpenMethodOpsServiceProtoco
                     f"{command.opportunity_id!r} differs from the stored "
                     "shape"
                 )
-        # P1 结构裁决(模块 docstring):COLLET_PARTICIPANT 机会发布即拒
-        # ——不产生"可发布但不可录取"的悬空机会;admit 面的同名裁断
-        # 保留为 belt-and-suspenders。
-        if candidate.participation_type is ParticipationType.COLLET_PARTICIPANT:
+        if (
+            candidate.participation_type is ParticipationType.COLLET_PARTICIPANT
+            and candidate.scope_ref != collab_context_id
+        ):
             raise ContextCollabValidationError(
-                f"open opportunity {candidate.opportunity_id!r} declares "
-                "participation type COLLET_PARTICIPANT, which requires L4 "
-                "participant governance and is not available in P1"
+                "COLLET_PARTICIPANT opportunity scope must match its Collet"
             )
         self._store.insert_opportunity(axes, candidate, collab_context_id)
         return ProfileOpAcceptedResult(

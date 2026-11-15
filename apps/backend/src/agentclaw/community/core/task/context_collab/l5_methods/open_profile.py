@@ -20,8 +20,9 @@ import 本模块。
 时间串(解析与窗口裁决在服务层),值对象只保证非空串形状。
 
 P1 裁决(spec §4.4):录取仅对 ``admitted_scope_ref`` 生效,不产生
-Space Membership / Grant(G1 断言在服务与测试面);``COLLET_PARTICIPANT``
-参与类型 P1 拒绝(L4 参与者治理, P2)。
+Space Membership / Grant(G1 断言在服务与测试面)。``COLLET_PARTICIPANT``
+creates an immutable L4 ScopedParticipantBinding for the exact Collet; its
+validity follows the admitting application's G4 state, not Group membership.
 """
 
 from __future__ import annotations
@@ -87,8 +88,8 @@ class ApplicationState(str, Enum):
 class ParticipationType(str, Enum):
     """参与类型(spec §4.4 YAML 闭合词汇);
 
-    ``COLLET_PARTICIPANT`` P1 拒绝(spec §4.4 作者裁决:L4 参与者治理
-    是 P2),wire 值仍合法——枚举只定义形状,拒绝在服务层裁决。
+    ``COLLET_PARTICIPANT`` creates a scoped Collet identity binding on admit;
+    this does not imply any Group/Space membership or resource grant.
     """
 
     COLLET_PARTICIPANT = "COLLET_PARTICIPANT"
@@ -404,7 +405,8 @@ class AdmissionDecision:
     与 SwarmExecutionRecord.operation_ref 同款审计标识口径);
     ``admitted_scope_ref`` 可空(录取仅对它生效,不产生 Space
     Membership / Grant,G1);``resulting_binding_refs`` 是录取产物
-    引用——GROUP_MEMBER 指向 group_member_binding、SWARM_ALLOCATION
+    引用——COLLET_PARTICIPANT 指向 L4 ScopedParticipantBinding;
+    GROUP_MEMBER 指向 group_member_binding、SWARM_ALLOCATION
     指向 stage allocation、SINGLE_CONTRIBUTION 仅记录 artifact refs
     不产生参与绑定(spec §4.4)。
     """
