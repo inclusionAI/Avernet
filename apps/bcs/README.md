@@ -14,6 +14,7 @@ Public BCS owns coordination contracts, services, adapters and reusable plugins;
 
 - [Local rules](AGENTS.md)
 - [API contracts](api-contracts/README.md)
+- [Distributed coordination contracts](crates/service-api/bcs-service-api/src/port/repo/distributed/README.md) — declarations; implementation pending
 - [Session deletion protocol](docs/session-delete-protocol.md)
 - [Flow navigation](docs/flows/README.md)
 - [Diagnostic navigation](docs/diagnostics/README.md)

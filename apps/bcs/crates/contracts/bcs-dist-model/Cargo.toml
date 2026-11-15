@@ -1,0 +1,15 @@
+[package]
+name = "bcs-dist-model"
+description = "Transport-independent distributed coordination data contracts"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }

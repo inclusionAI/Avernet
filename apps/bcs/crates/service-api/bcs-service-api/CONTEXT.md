@@ -1,5 +1,19 @@
 # bcs-service-api Context
 
+## Version 6.1.0: Distributed coordination contracts
+
+Add opt-in Gateway, Worker and Connector service/port declarations plus
+`bcs-dist-model` shared data. No existing trait method, wire endpoint, runtime
+registration or stored record changes. All workspace path consumers rebuild;
+the additive Service API version is 6.1.0.
+
+The [distributed contract](src/port/repo/distributed/README.md) owns admission,
+atomic checkpoint/effect replay, scheduling, consistent task recovery and
+dispatch ownership semantics. State and queue adapters remain replaceable.
+The [change record](../../../specs/2026-11-15-distributed-contracts/spec.md) links
+ordered implementation tasks and actual validation; concrete providers and
+runtime implementations remain pending.
+
 ## Version 5.1.0: Group Card snapshots
 
 `GroupCoreService` and `GroupRepoPort` add `read_card_snapshot`, returning

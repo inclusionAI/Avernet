@@ -5,6 +5,7 @@
 //! layers.
 
 pub mod collaboration_draft;
+pub mod dist_runtime;
 pub mod bot_authority;
 pub mod bot_control_plane;
 pub mod bot_profile;
