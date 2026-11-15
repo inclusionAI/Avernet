@@ -604,7 +604,9 @@ class SpaceRepository(SpaceRepositoryProtocol):
                 )
                 .one_or_none()
             )
-            if member is None or member.role != self._stored_role(SpaceRole.ADMIN):
+            # Historical ADMINISTRATOR rows are canonical ADMIN members; compare
+            # through the model normalization instead of the raw column value.
+            if member is None or member.to_record().role != SpaceRole.ADMIN:
                 raise SpaceAccessDeniedError("space owner role required")
             bot_ownership = (
                 db.query(BotModel.id)
