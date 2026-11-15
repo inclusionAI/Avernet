@@ -1,9 +1,38 @@
 """Real-store due selection and keyset pagination for hourly Caller refresh."""
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
 
-from tests.community.repository.chat.test_expert_chat_instance_unified import repo as repo
+from sqlalchemy import MetaData, create_engine
+from sqlalchemy.orm import sessionmaker
+
+from agentclaw.community.core.expert_chat.sqlite_models import AcExpertChatInstance
+from agentclaw.community.core.repository.implementations.chat.expert_chat_instance import ExpertChatInstanceRepository
+from agentclaw.community.plugin_api.models import BotModel
+
+
+class _CandidateDatabase:
+    def __init__(self, engine):
+        self._sessions = sessionmaker(bind=engine)
+
+    @contextmanager
+    def orm_session(self):
+        with self._sessions.begin() as db:
+            yield db
+
+
+@pytest.fixture
+def repo(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'caller_refresh.db'}")
+    schema = MetaData()
+    AcExpertChatInstance.__table__.to_metadata(schema)
+    BotModel.__table__.to_metadata(schema)
+    schema.create_all(engine)
+    try:
+        yield ExpertChatInstanceRepository(_CandidateDatabase(engine))
+    finally:
+        engine.dispose()
 
 
 @pytest.fixture(autouse=True)
