@@ -42,7 +42,12 @@ class TodoRepositoryProtocol(Protocol):
         page: int,
         page_size: int,
     ) -> TodoPage:
-        """Return a database-filtered page of persisted product Todos."""
+        """Return a database-filtered page of persisted product Todos.
+
+        An unfiltered page follows the workbench status-group order so pending
+        work is not hidden behind terminal rows. A status-filtered page remains
+        oldest-first within that state.
+        """
         ...
 
     @abstractmethod

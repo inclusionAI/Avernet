@@ -83,6 +83,65 @@ def test_list_todos_filters_status_search_bot_and_paginates_in_database(db):
     assert page.items == (repo.get_todo(todo_id=first.todo_id),)
 
 
+def test_list_todos_without_status_uses_workbench_group_order_before_paging(db):
+    repo = TodoRepository(db)
+    completed = _create(repo, title="completed")
+    _transition(repo, completed.todo_id, TodoStatus.PENDING, TodoStatus.IN_PROGRESS)
+    _transition(
+        repo,
+        completed.todo_id,
+        TodoStatus.IN_PROGRESS,
+        TodoStatus.PENDING_ACCEPTANCE,
+    )
+    _transition(
+        repo,
+        completed.todo_id,
+        TodoStatus.PENDING_ACCEPTANCE,
+        TodoStatus.COMPLETED,
+    )
+    awaiting_acceptance = _create(repo, title="awaiting acceptance")
+    _transition(
+        repo,
+        awaiting_acceptance.todo_id,
+        TodoStatus.PENDING,
+        TodoStatus.IN_PROGRESS,
+    )
+    _transition(
+        repo,
+        awaiting_acceptance.todo_id,
+        TodoStatus.IN_PROGRESS,
+        TodoStatus.PENDING_ACCEPTANCE,
+    )
+    running = _create(repo, title="running")
+    _transition(repo, running.todo_id, TodoStatus.PENDING, TodoStatus.IN_PROGRESS)
+    pending = _create(repo, title="pending needs dispatch")
+
+    first_page = repo.list_todos(
+        space_id=7,
+        keyword=None,
+        status=None,
+        bot_id=None,
+        page=1,
+        page_size=3,
+    )
+    second_page = repo.list_todos(
+        space_id=7,
+        keyword=None,
+        status=None,
+        bot_id=None,
+        page=2,
+        page_size=3,
+    )
+
+    assert first_page.total == 4
+    assert [todo.todo_id for todo in first_page.items] == [
+        pending.todo_id,
+        running.todo_id,
+        awaiting_acceptance.todo_id,
+    ]
+    assert [todo.todo_id for todo in second_page.items] == [completed.todo_id]
+
+
 def test_list_todos_by_status_is_oldest_first_and_limited(db):
     repo = TodoRepository(db)
     first = _create(repo, title="first")

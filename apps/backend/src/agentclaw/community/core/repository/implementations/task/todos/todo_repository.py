@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 
 from injector import inject
-from sqlalchemy import asc, or_
+from sqlalchemy import asc, case, or_
 
 from agentclaw.community.core.repository.implementations.task.todos.models import (
     TodoAcceptanceModel,
@@ -122,8 +122,18 @@ class TodoRepository(TodoRepositoryProtocol):
             if bot_id is not None:
                 query = query.filter(TodoModel.bot_id == bot_id)
             total = query.count()
+            order_by = [asc(TodoModel.gmt_create), asc(TodoModel.id)]
+            if status is None:
+                status_priority = case(
+                    (TodoModel.status == TodoStatus.PENDING.value, 0),
+                    (TodoModel.status == TodoStatus.IN_PROGRESS.value, 1),
+                    (TodoModel.status == TodoStatus.PENDING_ACCEPTANCE.value, 2),
+                    (TodoModel.status == TodoStatus.COMPLETED.value, 3),
+                    else_=4,
+                )
+                order_by.insert(0, status_priority)
             rows = (
-                query.order_by(asc(TodoModel.gmt_create), asc(TodoModel.id))
+                query.order_by(*order_by)
                 .offset((page - 1) * page_size)
                 .limit(page_size)
                 .all()

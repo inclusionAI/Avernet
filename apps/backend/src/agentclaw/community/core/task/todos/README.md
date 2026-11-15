@@ -4,6 +4,11 @@ This context owns the user-facing Todo product lifecycle, Space/Bot eligibility,
 automatic dispatch, acceptance decisions, and the public event/interaction view.
 Todo state is persisted by A as `pending`, `in_progress`,
 `pending_acceptance`, or `completed`; it is not recomputed during reads from B.
+The unfiltered workbench list is paged in its visible group order—`pending`,
+`in_progress`, `pending_acceptance`, then `completed`—and remains oldest-first
+inside each group. A status-filtered list is oldest-first within that state.
+This keeps dispatchable work on the first “全部” page without changing the
+scheduler's independent oldest-first status scans.
 
 Creating a Todo only persists `pending`. `TodoScheduler` periodically scans A-owned rows while holding a distributed lease. It processes `pending` first, then `pending_acceptance`, then `in_progress`:
 
