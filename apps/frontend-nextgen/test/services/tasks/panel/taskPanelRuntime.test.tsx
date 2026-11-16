@@ -9,6 +9,7 @@ let mockOrigin: { sessionId: string; kind: 'bot' } | null = { sessionId: 's1', k
 const mockLoad = jest.fn<() => Promise<any>>();
 jest.mock('@/capabilities', () => ({ getCapabilities: () => ({ getHumanIdentity: () => ({ status: 'available', value: mockViewer ? { userId: mockViewer } : null }) }) }));
 jest.mock('@/services/tasks/panel/taskPanelAssetLoader', () => ({ loadTaskPanelAsset: () => mockLoad() }));
+jest.mock('@/services/tasks/panel/taskPanelRecoveryLoader', () => ({ loadTaskPanelRecoveryAsset: () => mockLoad() }));
 jest.mock('@/services/tasks/panel/taskPanelArtifactAdapter', () => ({ taskPanelArtifacts: {} }));
 jest.mock('@/services/workspace/chatBridge', () => ({ chatBridge: { openPanelTab: jest.fn() } }));
 jest.mock('@/services/tasks/panel/taskPanelConversationAdapter', () => ({ captureTaskPanelOrigin: () => mockOrigin, restoreTaskPanelOrigin: async () => ({ status: 'ready' }), navigateTaskPanelConversation: async () => ({ status: 'ready' }) }));

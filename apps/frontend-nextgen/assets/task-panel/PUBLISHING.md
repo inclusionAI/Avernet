@@ -50,7 +50,7 @@ Keep these fields aligned with the publishing identity:
 `main`, `browser`, `unpkg` and `jsdelivr` point to `dist/index.umd.js`;
 `types` points to `dist/public-api.d.ts`. The public allowlist includes `dist`,
 README, this guide, LICENSE and the development static-server script. Inspect
-the archive: JS, CSS and declarations are expected; TypeScript implementation
+the archive: `index.umd.js`, `recovery.umd.js`, CSS and declarations are expected; TypeScript implementation
 source, credentials, node_modules and runtime state are not. Declarations belong
 in the published package, not generated host source directories.
 
@@ -81,7 +81,10 @@ access.
 
 The UMD embeds the package version automatically. Hosts check `hostApiVersion`
 and required exports, not a compiled-in package version. Select the verified
-immutable release URL in system-config after publication.
+immutable release URL in system-config after publication. Before deploying a host
+that uses headless recovery, publish both entries and verify `recovery.umd.js`,
+`index.umd.js` and `task-panel.css` under that same release directory. Older
+UI-only releases are not a recovery fallback.
 
 ## Publish from the selected release branch
 
