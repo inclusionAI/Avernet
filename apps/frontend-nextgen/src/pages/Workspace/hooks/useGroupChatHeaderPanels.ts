@@ -39,6 +39,8 @@ export interface GroupChatFavoritesModel {
 
 export interface UseGroupChatHeaderPanelsOptions {
   session: SessionView | null;
+  /** 切群刷新完成前，不消费首帧的旧会话缓存启动任务恢复。 */
+  taskRecoveryReady?: boolean;
   /** 当前登录用户任务列表查询口径。 */
   userId: string | null;
   /** 与消息区渲染同源的已载入消息（过滤后口径，保证每条搜索结果可定位）。 */
@@ -110,7 +112,7 @@ export function useGroupChatHeaderPanels(options: UseGroupChatHeaderPanelsOption
 
   const viewIdentity = useWorkspaceStore((state) => state.activeIdentityId);
   const taskHistory = useMemo(() => viewIdentity ? createGroupTaskHistoryReader(viewIdentity) : null, [sessionId, viewIdentity]);
-  const taskRecovery = useSessionTaskPanelBootstrap({ sessionId, kind: 'group', userId: options.userId, panelRef, history: taskHistory, historyScope: viewIdentity });
+  const taskRecovery = useSessionTaskPanelBootstrap({ sessionId: options.taskRecoveryReady === false ? null : sessionId, kind: 'group', userId: options.userId, panelRef, history: taskHistory, historyScope: viewIdentity });
 
   // 副屏开合态：默认 false，经 ChatLayoutPanelSlot 承接 SDK onIsOpenChange 的真实态事件同步
   // （含渲染器「挂载即 openTab」的默认展开），toggle 仅乐观翻转、随后由真实态事件纠偏。
