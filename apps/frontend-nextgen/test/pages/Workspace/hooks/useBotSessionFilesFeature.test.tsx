@@ -7,7 +7,7 @@ import { useBotSkills } from '@/pages/Workspace/hooks/useBotSkills';
 import type { BotChatSessionView, ChatBotView } from '@/services/workspace/botSessionService';
 import { beforeEach, expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom';
-import { fireEvent, render, renderHook, screen } from '@testing-library/react';
+import { act, fireEvent, render, renderHook, screen } from '@testing-library/react';
 
 // 资源面板跳转入口引入 history：jsdom 下真实 @umijs/max 会拉起 esbuild 触发
 // Buffer invariant 失败，按项目既有惯例用轻量桩替换（见 appRuntime.test.ts 等）。
@@ -74,6 +74,37 @@ it('好友 Bot 的 / 命令不展示 skill 入口', () => {
   const items = result.current.command.categories[0]?.items ?? [];
   expect(items.map((item) => item.name)).toEqual(['file', 'clear']);
   expect(mockedUseBotSessionFiles).toHaveBeenLastCalledWith('bot', 'session-1', 'human_900003', '2088', 'human_900003');
+});
+
+it.each([false, true])('桌面 Bot（团队协作=%s）可懒加载技能，但不加载会话文件', async (isTeamBot) => {
+  const loadSkills = jest.fn(async () => [
+    { skillId: 's1', name: 'task-loop', active: true, description: '执行任务', category: 'general' },
+  ]);
+  mockedUseBotSkills.mockReturnValue({ skills: [], isLoading: false, loadSkills });
+  const { result } = renderHook(() => useBotSessionFilesFeature(
+    { ...bot, botType: 'desktop', isTeamBot }, session, 'human_900003', jest.fn(),
+  ));
+  const skillEntry = () => result.current.command.categories[0].items!.find((item) => item.name === 'skill')!;
+  expect(loadSkills).not.toHaveBeenCalled();
+  await act(async () => { result.current.command.onSelect?.(skillEntry()); });
+  expect(loadSkills).toHaveBeenCalledTimes(1);
+  expect(skillEntry().subConfig!.categories[0].items?.map((item) => item.name)).toEqual(['task-loop']);
+  expect(skillEntry().subConfig!.format?.({ id: 's1', name: 'task-loop' })).toBe('/task-loop');
+  const fileEntry = result.current.command.categories[0].items!.find((item) => item.name === 'file')!;
+  await act(async () => { result.current.command.onSelect?.(fileEntry); });
+  expect(jest.mocked(useBotSessionFiles).mock.results.at(-1)!.value.refresh).not.toHaveBeenCalled();
+  expect(mockedUseBotSessionFiles.mock.calls.at(-1)?.[0]).toBeNull();
+  expect(mockedUseBotSessionFileUpload.mock.calls.at(-1)?.[0]).toBeNull();
+});
+
+it.each([
+  { chatable: false, isFriendBot: false },
+  { chatable: true, isFriendBot: true },
+])('桌面 Bot 不具备技能访问资格时不装配命令：%j', async (access) => {
+  const { result } = renderHook(() => useBotSessionFilesFeature(
+    { ...bot, botType: 'desktop', ...access }, session, 'human_900003', jest.fn(),
+  ));
+  expect(result.current.command.categories[0].items?.some((item) => item.name === 'skill')).toBe(false);
 });
 
 it('对话资源面板点击外部收起，入口再次点击不会先关闭又打开', () => {
