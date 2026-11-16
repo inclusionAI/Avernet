@@ -10,6 +10,8 @@ import pytest
 from fastapi import FastAPI
 from fastapi_injector import attach_injector
 from injector import Injector, Module
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
 from tests.community.adapters.http.openapi_v1.conftest import (
     mount_public_error_handlers,
@@ -37,7 +39,12 @@ from agentclaw.community.core.bot_inventory.services.lifecycle_view import BotLi
 from agentclaw.community.core.bot_inventory.adapters.service_lifecycle import (
     ServiceLifecycleView,
 )
-from agentclaw.community.core.service_bot.repository.models import BotPublishRecord, PublishStatus
+from agentclaw.community.core.repository.implementations.publishing.bot_publish import BotPublishRepository
+from agentclaw.community.core.service_bot.repository.config_artifact_offload import (
+    ARTIFACT_OSS_THRESHOLD_BYTES,
+    ConfigArtifactOffloader,
+)
+from agentclaw.community.core.service_bot.repository.models import BotPublishModel, BotPublishRecord, PublishStatus
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 
 
@@ -309,6 +316,54 @@ def test_service_cards_keep_their_own_publication(client, bot_service, publicati
     assert "offline" in cards[10]["actions"]
     assert "publish_staging" in cards[11]["actions"]
     publication_repo.list_by_source_bots.assert_called_once()
+
+
+def test_inventory_matches_full_records_without_reading_offloaded_artifacts(
+    client, bot_service, publication_repo, tmp_path,
+):
+    engine = create_engine(f"sqlite:///{tmp_path / 'publications.db'}")
+    BotPublishModel.__table__.create(engine)
+    db = MagicMock()
+    db.orm_session.side_effect = sessionmaker(bind=engine).begin
+    objects = {}
+
+    def put_object(key, body):
+        objects[key] = body
+        return True
+
+    oss = MagicMock()
+    oss.put_object.side_effect = put_object
+    oss.get_object.side_effect = objects.__getitem__
+    repo = BotPublishRepository(db, ConfigArtifactOffloader(oss))
+    large = {"body": "x" * ARTIFACT_OSS_THRESHOLD_BYTES}
+    for version, status, artifact in [
+        (1, PublishStatus.SUCCESS, {"body": "small"}),
+        (2, PublishStatus.DRAFT, large),
+    ]:
+        data = _publication(version, status, version).model_dump()
+        repo.insert({**data, "ext": {"config_artifact": artifact}})
+    assert len(objects) == 1
+    bot_service.list_bots_by_conditions.return_value = {
+        "total": 1, "items": [{**CLOUD, "bot_type": "service"}],
+    }
+
+    # Capture the same HTTP payload with the original fully hydrated input.
+    full_records = repo.list_by_source_bots([1], "dev")
+    draft = next(r for r in full_records if r.version == 2)
+    assert draft.ext["config_artifact"] == large
+    publication_repo.list_by_source_bots.return_value = full_records
+    url = "/openapi/v1/bots/all?is_service=true"
+    expected = _ok(client.get(url))
+    assert expected["total"] == 2
+    assert all(card["template_config"] for card in expected["items"])
+
+    publication_repo.list_by_source_bots.side_effect = repo.list_by_source_bots
+    oss.get_object.reset_mock()
+    assert _ok(client.get(url)) == expected
+    oss.get_object.assert_not_called()
+
+    assert repo.get_by_id(draft.id).ext["config_artifact"] == large
+    oss.get_object.assert_called_once_with(next(iter(objects)))
 
 
 def test_service_without_publication_does_not_fabricate_publish(client, bot_service):

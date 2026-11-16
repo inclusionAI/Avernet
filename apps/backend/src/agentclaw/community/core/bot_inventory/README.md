@@ -59,7 +59,9 @@ from checking it for `draft/deploying/prestable/running/offline`. Use
 for normalized card presentation. Keep using `actions` for available operations.
 The legacy `/api/bots/search`, `/bots`, and `/lifecycle` contracts are unchanged.
 Existing publication identifiers, diagnostic state, edit locks, and action policy
-remain intact. Projection reuses the existing batched publication read.
+remain intact. Projection reuses the batched publication read without fetching
+offloaded configuration artifacts: inventory cards use publication metadata
+only. The page's template configuration is loaded separately.
 
 `actions` distinguishes the public/basic-information `view` face from the
 configuration surface. `view_config` is emitted for an explicit service-Bot
