@@ -39,13 +39,15 @@ with role `manager`; the Todo creator joins as a non-speaking Human `observer`.
 The selected Bot is both `driver_bot` and `master_bot`. No second Bot and no
 `default` Bot is added. Because this is Bot collaboration, an executor is
 eligible only when the authoritative BCS agent visibility is exactly `public`;
-legacy Human-facing `ac_bots.public` does not grant eligibility. `protected`,
-`private`, missing or unknown visibility, and unavailable catalog metadata all
-fail closed. The rule is checked when creating a Todo, before its initial
-dispatch, and before resuming a Human interaction or rejection. Historical
-Todos remain readable if their Bot later becomes non-public, but no new or
-resumed run is delivered until that exact Bot identity is public again. Final
-delivery uses `inject_observers`, and later Human interaction resumes the same
+legacy Human-facing `ac_bots.public` does not grant eligibility. The authoritative
+catalog lookup uses the exact BCS Bot UUID as an explicit Bot viewer, so the
+agent-facing `visibility` rule is evaluated instead of the Human-facing
+`user_visibility` rule. `protected`, `private`, missing or unknown visibility,
+and unavailable catalog metadata all fail closed. The rule is checked when
+creating a Todo, before its initial dispatch, and before resuming a Human
+interaction or rejection. Historical Todos remain readable if their Bot later
+becomes non-public, but no new or resumed run is delivered until that exact
+Bot identity is public again. Final delivery uses `inject_observers`, and later Human interaction resumes the same
 BCS group session rather than creating another group. The public `/run`
 operation is a compensation/operator entry point; the ordinary frontend
 neither edits Todos nor exposes manual Run.

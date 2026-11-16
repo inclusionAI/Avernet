@@ -109,7 +109,11 @@ def _require_public_collaboration_bot(
             page=1,
             page_size=1,
             bot_uuids=(bot_uuid,),
-            filters=BotCatalogSearchFilters(visibility=("public",)),
+            filters=BotCatalogSearchFilters(
+                visibility=("public",),
+                viewer_actor_type="bot",
+                viewer_actor_id=bot_uuid,
+            ),
             caller=BotCatalogCaller(
                 tenant_id=get_current_avernet_tenant(),
                 user_id=actor_id,
