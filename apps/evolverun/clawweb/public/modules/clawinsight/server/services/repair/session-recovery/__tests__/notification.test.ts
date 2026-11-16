@@ -24,6 +24,18 @@ function setup() {
 }
 const message = { taskId: "SR-notification", eventId: "call-1", kind: "message" as const };
 
+it("keeps insufficient-evidence closeout silent even when its result hook is replayed", async () => {
+  const { notifier, task, tasks, sender, events } = setup();
+  task.status = "failed"; task.interventionStatus = "performed";
+  task.timeline = [{ event_id: "insufficient", kind: "execution", at_ms: 2, actor: "service",
+    summary: "证据不足", payload: { failure_code: "INSUFFICIENT_EVIDENCE" } }];
+  notifier.after({ ...message, eventId: "insufficient", kind: "result" });
+  await new Promise(resolve => setImmediate(resolve));
+  expect(tasks.find).toHaveBeenCalled();
+  expect(sender.send).not.toHaveBeenCalled();
+  expect(events).toEqual([]);
+});
+
 it("sends a single permission notice to the configured Bot group from a confirmed card delivery", async () => {
   const { notifier, task, deps, sender, events, config } = setup();
   task.status = "waiting_owner";

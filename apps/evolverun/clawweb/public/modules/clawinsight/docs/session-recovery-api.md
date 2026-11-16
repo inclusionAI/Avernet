@@ -299,6 +299,10 @@ Agent 通过已有 `runtime_inspect` 的 `engine_read` 查询 `GET /api/cron/run
 
 回报引用了不存在的证据 ID，或 `message` 判断缺少已保存的投递／拟发送记录时，返回 HTTP 422 并说明可纠正字段。纠错保留已核实的业务判断，证据引用必须使用工具返回的完整 ID。普通 `blocked` 省略 `reason`；执行归属、阶段或版本冲突继续返回 HTTP 409。
 
+当 bootstrap 的 `blockedReasons` 包含 `insufficient_evidence`，真实非 Debug 任务可在尚无 accepted／unknown 投递的 `assess` 或 `plan` 回报 `blocked.reason=insufficient_evidence`，用 `summary` 说明证据缺口并提供已有 `evidence_ids`（可为空数组）。服务沿用执行受阻的 `failed` 状态，保留已有业务效果，在执行事件记录 `failure_code=INSUFFICIENT_EVIDENCE`，不触发该次收口通知。`observe`／`verify` 仍提交 `observation` 并沿用效果等待；其他阶段、仿真和 Debug 拒绝此原因。后端先部署，新包按能力声明使用。
+
+权限待办和普通 Owner 转交均要求引用本任务成功的 `session_read`、`trajectory_read` 或 `runtime_inspect` 审计证据。读取成功只证明取得了现场，具体权限及人工处理条件由 Agent 对照适用手册和真实回执核实。
+
 `blocked.reason=target_unavailable` 将自愈流程正常结束为 `completed`，同时回传 `completion_reason=target_unavailable`、`effect=unknown`。该结论必须引用已留存的受控工具证据，且对应审计中有 Provider 明确返回的 `target_unavailable` 错误；普通 HTTP 404、会话缺失、超时或模型断言均不足以成立。页面显示“目标不可用”，不算自愈执行故障，也不宣称业务恢复；是否干预仍由实际工具审计判断。
 
 ### Owner 业务交接内容
