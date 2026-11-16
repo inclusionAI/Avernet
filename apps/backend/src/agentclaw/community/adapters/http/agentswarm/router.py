@@ -458,9 +458,6 @@ def _to_summary(run) -> RunSummaryDTO:
 
 
 def _to_detail_dto(detail) -> RunDetailDTO:
-    from agentclaw.community.adapters.http.agentswarm.schemas import (
-        AgentAttemptDetailDTO, AgentMessageDetailDTO,
-    )
     return RunDetailDTO(
         run_id=detail.run_id,
         status=detail.status,

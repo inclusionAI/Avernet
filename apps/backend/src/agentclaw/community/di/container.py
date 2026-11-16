@@ -125,6 +125,8 @@ from agentclaw.community.di.modules.task_trajectory_config_module import (
 )
 from agentclaw.community.di.modules.user_list_module import UserListModule
 from agentclaw.community.di.modules.work_orders_module import WorkOrdersModule
+from agentclaw.community.di.modules.evolution_jobs_module import EvolutionJobsModule
+from agentclaw.community.di.modules.evolution_runtime_module import EvolutionRuntimeModule
 from agentclaw.community.di.profile import DeployProfile
 from agentclaw.community.di.profile_modules import modules_for
 from agentclaw.community.log import get_logger
@@ -203,6 +205,8 @@ def build_injector(
         ContentStoreModule(),
         ApplyEngineModule(),
         BotGenomeModule(),
+        EvolutionJobsModule(),
+        EvolutionRuntimeModule(),
         BotInventoryModule(),
         SkillsPoolModule(),
         BotPublicModule(),

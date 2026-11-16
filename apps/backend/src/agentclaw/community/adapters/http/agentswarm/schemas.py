@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 from agentclaw.community.core.agentswarm.domain.models import (
     AgentKind, ProviderKind,

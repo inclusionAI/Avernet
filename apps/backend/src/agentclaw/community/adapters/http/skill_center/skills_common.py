@@ -4,7 +4,6 @@ import io
 import json
 import os
 import re
-import time
 import zipfile
 from pathlib import Path
 from typing import Any, Optional
