@@ -661,8 +661,9 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 # Todo adds one list operation with an optional bot_id query and nine operations
 # with no Bot dimension: query 1 -> 2, none 147 -> 156.
 # Team-space deletion adds one user-scoped operation with no Bot dimension:
-# none 156 -> 157.
-_BOT_ID_PLACEMENT = {"path": 226, "query": 2, "none": 157}
+# none 156 -> 157. The standard evaluation workflow adds seven Bot-path-addressed
+# user-scoped operations under /bots/{bot_id}/eval: path 226 -> 233.
+_BOT_ID_PLACEMENT = {"path": 233, "query": 2, "none": 157}
 
 
 
@@ -882,7 +883,10 @@ def test_the_pinned_number_of_operations_take_it():
     # user-scoped, so the merged surface grows 298 -> 308. Context-collab derives
     # its actor from the verified principal and adds no user_id query.
     # Team-space deletion adds one more user-taking operation: 308 -> 309.
-    assert len(taking) == 309
+    # The standard evaluation workflow adds seven more user-taking operations:
+    # sample-set read, task create/current read, environment create/current read/
+    # destroy, and result save: 309 -> 316.
+    assert len(taking) == 316
 
 
 def test_the_exempt_operations_take_none():
