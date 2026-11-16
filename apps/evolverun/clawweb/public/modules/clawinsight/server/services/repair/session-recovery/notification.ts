@@ -317,6 +317,7 @@ export class SessionRecoveryGroupNotifier implements RecoveryActionNotifier {
     const webhook = config.bot_webhooks?.find(item => item.bot_id === target.bot_id && item.entity_id === target.entity_id)?.webhook ?? config.webhook;
     const source = task.timeline.find(event => event.event_id === input.eventId);
     if (!source) return;
+    if (input.kind === "result" && source.payload.failure_code === "INSUFFICIENT_EVIDENCE") return;
     if (input.kind === "owner_card_sent" && (source.kind !== "notification" || source.payload.channel !== "owner_card"
       || source.payload.operation !== "create" || source.payload.state !== "sent" || source.payload.sent !== true)) return;
     const id = `notification-${input.kind}-${input.kind === "owner_card_sent" ? task.taskId : input.eventId}`;

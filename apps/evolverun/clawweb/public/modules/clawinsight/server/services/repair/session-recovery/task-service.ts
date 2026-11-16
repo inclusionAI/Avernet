@@ -10,7 +10,7 @@ import { effectResumeAction, effectResumeDispatchExpired, recoveryEffectWait } f
 import { definitiveEffect, recheckError, recheckUnavailable, validateEffectRecheckJudgment } from "./effect-recheck.js";
 import { recoveryMessagePending } from "./result.js";
 import { parseOwnerHandoffContent, parseRequest } from "./validation.js";
-import { confirmOwnerRequest, hasAssessmentDelivery, requestOwnerCooperation } from "./owner-cooperation.js";
+import { confirmOwnerRequest, hasAssessmentDelivery, requestOwnerCooperation, validateOwnerHandoffEvidence } from "./owner-cooperation.js";
 import { DingTalkCardNotDispatchedError } from "../../notifications/dingtalk-sender.js";
 import { recoveryHandbook, resolveRecoveryHandbook, type RecoveryHandbookConfigStore } from "./handbook.js";
 import { parseRecoverySimulationBatch, simulationReadTools, validateSimulationKnowledge, type RecoverySimulation, type RecoverySimulationAssessment } from "./simulation.js";
@@ -369,6 +369,8 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
     await this.mutate(taskId, version, value => {
       if (value.execution?.executionId !== input.executionId || value.execution.state === "ended") this.fail(409, "旧执行不能提交 Owner 处理事项");
       if (value.judgment?.effect === "recovered") this.fail(422, "原任务已恢复，请按正常效果流程回报；优化建议写入完成总结，不再请求 Owner 处理");
+      if (!Array.isArray(input.evidence_ids) || !input.evidence_ids.length) this.fail(422, "Owner 处理事项需要现场证据");
+      validateOwnerHandoffEvidence(value, input.evidence_ids);
       const { executionId: _execution, reportSummary, ...request } = input;
       return { ...value, ...requestOwnerCooperation(value, request, requestId, this.now()),
         timeline: [...value.timeline, this.event("waiting", "agent", reportSummary ?? request.summary, { owner_request_id: requestId, phase: value.phase })] };
@@ -512,9 +514,7 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
       const effect = input.effect ?? value.judgment?.effect ?? "unknown";
       if (effect === "recovered" || value.judgment?.effect === "recovered") this.fail(422, "原任务已恢复，不能以 owner_handoff 结束；assess 回报 decision=observe，plan 回报 observation，其他阶段按正常效果流程回报，优化建议写入完成总结");
       if (value.phase === "assess" && hasAssessmentDelivery(value)) this.fail(422, "已有本轮消息投递记录，不能转交结束并跳过效果回收；请回报 assessment、decision=message 进入 observe，不重复发送");
-      validateRecoveryEvidenceReferences(value, input.evidence_ids);
-      if (!value.evidence.some(item => input.evidence_ids.includes(item.evidence_id)
-        && ["session_read", "trajectory_read", "runtime_inspect"].includes(item.source))) this.fail(422, "Owner 转交必须引用受控现场读取，不能只引用诊断描述");
+      validateOwnerHandoffEvidence(value, input.evidence_ids);
       return { ...value, status: "completed", completionReason: "owner_handoff", version: value.version + 1,
         observationDeadlineAt: null, ownerDeadlineAt: null, requiresFreshObservation: false,
         ...(value.executionRetry ? { executionRetry: { ...value.executionRetry, retryAt: 0 } } : {}),
@@ -567,8 +567,10 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
       return { ...value, status: delay !== undefined ? "running" : "failed", version: value.version + 1,
         executionRetry: { failures, retryAt: delay !== undefined ? this.now() + delay : 0,
           ...(failedExecutionId ? { executionId: failedExecutionId } : {}) },
-        judgment: delay !== undefined ? value.judgment : this.failureJudgment(value, summary),
-        timeline: [...value.timeline, this.event("execution", "service", summary, { execution_id: executionId, retryable, failures, retry_at_ms: delay !== undefined ? this.now() + delay : null })] };
+        judgment: delay !== undefined ? value.judgment : failureCode === "INSUFFICIENT_EVIDENCE" && value.judgment
+          ? { ...value.judgment, summary } : this.failureJudgment(value, summary),
+        timeline: [...value.timeline, this.event("execution", "service", summary, { execution_id: executionId, retryable, failures, retry_at_ms: delay !== undefined ? this.now() + delay : null,
+          ...(failureCode ? { failure_code: failureCode } : {}) })] };
     }, finalSummary);
     const retrying = !!task.executionRetry?.retryAt;
     logRepairEvent("session-recovery", "session_recovery_task", retrying ? "retry_scheduled"
@@ -580,7 +582,7 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
         : failureCode && !task.simulation && task.level !== "debug" ? { count: 1 } : {}),
       ...(failureCode ? { errorCode: failureCode } : {}), outcome: "failed" });
     await this.deps.agent.release(task);
-    if (task.status === "failed") this.notifyGroup(task, "result");
+    if (task.status === "failed" && failureCode !== "INSUFFICIENT_EVIDENCE") this.notifyGroup(task, "result");
   }
 
   private failureJudgment(task: RecoveryStoredTask, summary: string): RecoveryJudgment {

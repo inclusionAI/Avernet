@@ -152,6 +152,8 @@ describe("self-healing task orchestration", () => {
     task.execution = { executionId: "exec", stepId: "step", ticketDigest: "digest", jobId: "job", ccSessionId: null,
       state: "running", leaseExpiresAt: 1000, decisionDeadlineAt: null, lastHeartbeatAt: 1, invalidatedAt: null };
     task.evidence = [{ evidence_id: "read", tool_call_id: "call", source: "session_read", location: "original", excerpt: "缺文档权限" }];
+    task.timeline.push({ event_id: "call", at_ms: 10, kind: "operation", actor: "agent", summary: "检查原会话",
+      payload: { raw_tool_call_id: "call", tool_name: "session_read", status: "succeeded" } });
     await service.requestOwner(task_id, task.version, { reason: "permission", summary: "缺文档权限", instructions: "申请原文档读取权限", evidence_ids: ["read"], executionId: "exec" });
     const pending = records.get(task_id)!;
     expect(pending).toMatchObject({ status: "waiting_owner", plan: null, pending_results: [] });
