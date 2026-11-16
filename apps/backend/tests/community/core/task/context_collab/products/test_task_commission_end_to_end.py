@@ -375,8 +375,8 @@ def commission_runtime(commission_deployment, request):
         yield service, bot
 
 
+"""产品上线 → 建任务 → Bot Query/Apply → 策略 Screen/Admit → scoped Participant → Work → accept。"""
 def test_end_to_end_commission_flow(commission_deployment, tmp_path):
-    """产品上线 → 建任务 → Bot Query/Apply → 策略 Screen/Admit → scoped Participant → Work → accept。"""
     # 1、初始化product profile
     profile = init_product_profile()
 
