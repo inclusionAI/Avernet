@@ -16,7 +16,7 @@ use bcs_service_api::core::session::{
 };
 use bcs_service_api::port::repo::{
     AddSessionParticipantWithEvent, CompleteSessionWithEvent, CreateSessionWithEvent, NewSessionParams,
-    RemoveSessionParticipantWithEvent, SessionRepoPort,
+    RemoveSessionParticipantWithEvent, SessionActivityCandidate, SessionRepoPort,
     UpdateSessionParticipantMessageViewScopeWithEvent,
 };
 use bcs_service_api::types::MessageViewScope;
@@ -282,6 +282,51 @@ impl SessionRepoPort for MemorySessionRepo {
                 participant_id.map_or(true, |pid| s.participants.iter().any(|p| p.bot_uuid == pid))
             })
             .count() as u64)
+    }
+
+    /// Same filter chain as [`Self::count_by_group`], projecting only the
+    /// sort inputs (id + the Session's own `created_at`) instead of cloning
+    /// full Sessions — the D5-revised recent-activity candidate read.
+    async fn list_activity_candidates_by_group(
+        &self,
+        group_id: &str,
+        status: Option<SessionStatus>,
+        title_contains: Option<&str>,
+        participant_id: Option<&str>,
+    ) -> ServiceResult<Vec<SessionActivityCandidate>> {
+        let st = self.state.read().await;
+        Ok(st
+            .sessions
+            .values()
+            .filter(|s| s.group_id == group_id)
+            .filter(|s| status.map(|want| s.status == want).unwrap_or(true))
+            .filter(|s| {
+                title_contains.map_or(true, |q| {
+                    s.session_title
+                        .as_deref()
+                        .unwrap_or("")
+                        .to_lowercase()
+                        .contains(&q.to_lowercase())
+                })
+            })
+            .filter(|s| {
+                participant_id.map_or(true, |pid| s.participants.iter().any(|p| p.bot_uuid == pid))
+            })
+            .map(|s| SessionActivityCandidate {
+                session_id: s.id.clone(),
+                created_at: s.created_at,
+            })
+            .collect())
+    }
+
+    /// One-lock batched load ordered like the requested ids; ids with no
+    /// persisted Session are absent from the result.
+    async fn try_get_many(&self, session_ids: &[String]) -> ServiceResult<Vec<Session>> {
+        let st = self.state.read().await;
+        Ok(session_ids
+            .iter()
+            .filter_map(|session_id| st.sessions.get(session_id).cloned())
+            .collect())
     }
 
     async fn list_running_service_after(

@@ -21,7 +21,7 @@ use bcs_service_api::core::session::{
 };
 use bcs_service_api::port::repo::{
     AddSessionParticipantWithEvent, AppendEventRecord, CompleteSessionWithEvent, CreateSessionWithEvent, NewSessionParams,
-    RemoveSessionParticipantWithEvent, SessionRepoPort,
+    RemoveSessionParticipantWithEvent, SessionActivityCandidate, SessionRepoPort,
     UpdateSessionParticipantMessageViewScopeWithEvent,
 };
 use bcs_service_api::types::MessageViewScope;
@@ -648,6 +648,20 @@ impl SessionRepoPort for MySqlSessionStore {
         title_contains: Option<&str>,
         participant_id: Option<&str>,
     ) -> ServiceResult<u64> { self.repo_count_by_group(group_id, status, title_contains, participant_id).await }
+
+    async fn list_activity_candidates_by_group(
+        &self,
+        group_id: &str,
+        status: Option<SessionStatus>,
+        title_contains: Option<&str>,
+        participant_id: Option<&str>,
+    ) -> ServiceResult<Vec<SessionActivityCandidate>> {
+        self.repo_list_activity_candidates_by_group(group_id, status, title_contains, participant_id).await
+    }
+
+    async fn try_get_many(&self, session_ids: &[String]) -> ServiceResult<Vec<Session>> {
+        self.repo_try_get_many(session_ids).await
+    }
 
     async fn list_running_service_after(
         &self,

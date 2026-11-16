@@ -544,3 +544,51 @@
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions.get("s-shared"), Some(&1_000));
     }
+
+    /// In-group per-session activity (D5 revised): `MAX(created_at)` per
+    /// session within exactly one group — a session in another group never
+    /// leaks into this group's map.
+    #[tokio::test]
+    async fn last_activity_in_group_returns_max_created_at_per_session() {
+        let repo = MemoryMessageRepo::new();
+        seed_activity(&repo, "g-a", "s-a1", &[1_000, 5_000, 3_000]).await;
+        seed_activity(&repo, "g-a", "s-a2", &[2_000]).await;
+        seed_activity(&repo, "g-b", "s-b1", &[9_000]).await;
+
+        let activity = repo.last_activity_in_group("g-a").await.unwrap();
+        assert_eq!(activity.len(), 2);
+        assert_eq!(activity.get("s-a1"), Some(&5_000));
+        assert_eq!(activity.get("s-a2"), Some(&2_000));
+        assert!(!activity.contains_key("s-b1"));
+        assert!(repo.last_activity_in_group("g-missing").await.unwrap().is_empty());
+    }
+
+    /// Sessions with no persisted message in the group are absent from the
+    /// map so callers keep the session's own `created_at` fallback (D1).
+    #[tokio::test]
+    async fn last_activity_in_group_omits_sessions_without_messages() {
+        let repo = MemoryMessageRepo::new();
+        seed_activity(&repo, "g-a", "s-with-messages", &[4_200]).await;
+
+        let activity = repo.last_activity_in_group("g-a").await.unwrap();
+        assert_eq!(activity.len(), 1);
+        assert!(!activity.contains_key("s-without-messages"));
+    }
+
+    /// The same env isolation as the id-batched reads: another env's
+    /// messages for an identical group/session id never leak in.
+    #[tokio::test]
+    async fn last_activity_in_group_never_counts_another_environment() {
+        let dev = MemoryMessageRepo::new().with_environment("dev".to_string());
+        let prod = MemoryMessageRepo::new().with_environment("prod".to_string());
+        seed_activity(&dev, "g-shared", "s-shared", &[1_000]).await;
+        seed_activity(&prod, "g-shared", "s-shared", &[9_000]).await;
+
+        let activity = dev.last_activity_in_group("g-shared").await.unwrap();
+        assert_eq!(activity.len(), 1);
+        assert_eq!(activity.get("s-shared"), Some(&1_000));
+        assert_eq!(
+            prod.last_activity_in_group("g-shared").await.unwrap().get("s-shared"),
+            Some(&9_000)
+        );
+    }

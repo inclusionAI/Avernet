@@ -210,4 +210,24 @@ pub trait MessageRepoPort: Send + Sync + 'static {
         let _ = session_ids;
         Ok(Default::default())
     }
+
+    /// Per-session activity keys within ONE group, in ONE aggregate round
+    /// trip (design D5 revised): `SELECT session_id, MAX(created_at) ...
+    /// GROUP BY session_id` over the group's persisted messages, keyed by
+    /// session id in epoch milliseconds. This is the bounded-read replacement
+    /// for feeding the same query a full candidate id list through
+    /// [`MessageRepoPort::last_activity_by_session_ids`] — the round-trip
+    /// count never grows with the number of sessions in the group. Same
+    /// global-clock and store-owned `env` isolation as the id-batched
+    /// variants; session ids with no persisted message in this group are
+    /// absent from the map, so callers fall back to the session's own
+    /// `created_at`. Default returns an empty map so noop/test impls keep
+    /// compiling; real impls (memory + mysql) override it.
+    async fn last_activity_in_group(
+        &self,
+        group_id: &str,
+    ) -> Result<std::collections::HashMap<String, u64>, MessageRepoError> {
+        let _ = group_id;
+        Ok(Default::default())
+    }
 }

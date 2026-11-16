@@ -795,6 +795,60 @@ struct CountingQueryDb {
     queries: AtomicUsize,
 }
 
+/// SQLite-backed recorder for the D5-revised read-shape assertions: every
+/// `query` the store issues is captured with its parameter count so the
+/// tests can prove the candidate read carries no LIMIT and the page-row
+/// fetch chunks at the bind bound.
+struct RecordingQueryDb {
+    inner: Arc<dyn DbPlugin>,
+    statements: std::sync::Mutex<Vec<String>>,
+    param_counts: std::sync::Mutex<Vec<usize>>,
+}
+
+impl RecordingQueryDb {
+    fn new(inner: Arc<dyn DbPlugin>) -> Self {
+        Self {
+            inner,
+            statements: std::sync::Mutex::new(Vec::new()),
+            param_counts: std::sync::Mutex::new(Vec::new()),
+        }
+    }
+
+    fn recordings(&self) -> (Vec<String>, Vec<usize>) {
+        (
+            self.statements.lock().expect("recording lock").clone(),
+            self.param_counts.lock().expect("recording lock").clone(),
+        )
+    }
+}
+
+#[async_trait]
+impl DbPlugin for RecordingQueryDb {
+    async fn query(&self, statement: DbStatement) -> DbResult<Vec<DbRow>> {
+        let sql = statement.sql().to_string();
+        let params = statement.params().len();
+        self.statements.lock().expect("recording lock").push(sql);
+        self.param_counts.lock().expect("recording lock").push(params);
+        self.inner.query(statement).await
+    }
+
+    async fn execute(&self, statement: DbStatement) -> DbResult<DbExecuteResult> {
+        self.inner.execute(statement).await
+    }
+
+    async fn transaction(
+        &self,
+        steps: Vec<DbTransactionStep>,
+    ) -> DbResult<Vec<DbTransactionStepResult>> {
+        self.inner.transaction(steps).await
+    }
+
+    async fn health_check(&self) -> DbResult<DbHealth> {
+        self.inner.health_check().await
+    }
+}
+
+
 impl CountingQueryDb {
     fn new(inner: Arc<dyn DbPlugin>) -> Self {
         Self {
@@ -987,6 +1041,85 @@ async fn sqlite_max_created_at_by_group_ids_batches_past_one_chunk() {
     assert_eq!(created.len(), 250);
     assert_eq!(created.get("act-chunk-000"), Some(&1_700_000_000_000));
     assert_eq!(created.get("act-chunk-249"), Some(&1_700_000_249_000));
+}
+
+/// D5 revision: the candidate read returns the FULL matching set in ONE
+/// round trip whose SQL carries no LIMIT / OFFSET / ORDER BY and selects
+/// only the two sort columns — a stale COUNT result can never truncate the
+/// recent-activity sort set, and no full Session row is hydrated for it.
+#[tokio::test]
+async fn sqlite_activity_candidates_full_set_in_one_unlimited_query() {
+    let db = sqlite_db().await;
+    let recording = Arc::new(RecordingQueryDb::new(db));
+    let repo = MySqlSessionStore::sqlite(recording.clone(), "dev".to_string());
+
+    let mut ids = Vec::new();
+    for _ in 0..205_u32 {
+        let session = repo
+            .create("act-cand-g", NewSessionParams::default())
+            .await
+            .expect("create session");
+        ids.push(session.id);
+    }
+
+    assert_eq!(
+        recording.recordings().0.len(),
+        0,
+        "create() writes must not show up as queries"
+    );
+
+    let candidates = repo
+        .list_activity_candidates_by_group("act-cand-g", None, None, None)
+        .await
+        .expect("activity candidates");
+
+    assert_eq!(candidates.len(), 205, "the whole set, no COUNT-derived truncation");
+    let candidate_ids: std::collections::HashSet<&str> =
+        candidates.iter().map(|candidate| candidate.session_id.as_str()).collect();
+    assert_eq!(candidate_ids.len(), ids.len());
+    for id in &ids {
+        assert!(candidate_ids.contains(id.as_str()), "missing candidate {id}");
+    }
+
+    let (statements, _) = recording.recordings();
+    assert_eq!(statements.len(), 1, "exactly one candidate round trip");
+    let sql = statements[0].to_uppercase();
+    assert!(!sql.contains("LIMIT"), "candidate query must carry no LIMIT: {sql}");
+    assert!(!sql.contains("OFFSET"), "candidate query must carry no OFFSET: {sql}");
+    assert!(!sql.contains("ORDER BY"), "no ORDER BY for the caller to redo: {sql}");
+    assert!(
+        !sql.contains("INPUT") && !sql.contains("OUTPUT") && !sql.contains("META"),
+        "the lightweight projection must not select full-row columns: {sql}"
+    );
+}
+
+/// The batched page-row fetch chunks at the store's 200-bind bound and returns
+/// only the requested rows; a vanished id is absent, never an error.
+#[tokio::test]
+async fn sqlite_try_get_many_chunks_beyond_the_bind_bound() {
+    let db = sqlite_db().await;
+    let recording = Arc::new(RecordingQueryDb::new(db));
+    let repo = MySqlSessionStore::sqlite(recording.clone(), "dev".to_string());
+
+    let mut ids = Vec::new();
+    for _ in 0..205_u32 {
+        let session = repo
+            .create("act-batch-g", NewSessionParams::default())
+            .await
+            .expect("create session");
+        ids.push(session.id);
+    }
+    ids.push("act-batch-g:ffffffff".to_string());
+
+    let sessions = repo.try_get_many(&ids).await.expect("batched page rows");
+
+    assert_eq!(sessions.len(), 205, "missing ids are absent, never an error");
+    let (statements, param_counts) = recording.recordings();
+    assert_eq!(statements.len(), 2, "ceil(206 / 200) round trips");
+    assert_eq!(param_counts, vec![201, 7], "env + at most 200 ids per chunk");
+    for sql in &statements {
+        assert!(sql.contains("session_id IN"), "chunked id fetch: {sql}");
+    }
 }
 
 /// Store-owned env isolation (design D1/D5): the same group id in another env

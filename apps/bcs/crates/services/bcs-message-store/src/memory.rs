@@ -198,6 +198,21 @@ impl MessageRepoPort for MemoryMessageRepo {
     async fn last_activity_by_session_ids(&self, session_ids: &[String]) -> Result<HashMap<String, u64>, MessageRepoError> {
         self.last_activity(session_ids, |message| message.session_id.as_str()).await
     }
+    /// Single pass over the stored log returning `MAX(created_at)` per session
+    /// for one group (the in-memory D5-revised aggregate). Ids with no message
+    /// in this group stay absent from the map.
+    async fn last_activity_in_group(&self, group_id: &str) -> Result<HashMap<String, u64>, MessageRepoError> {
+        let sessions = self.sessions.read().await;
+        let mut activity = HashMap::new();
+        for message in sessions.values().flat_map(|entry| &entry.messages) {
+            if message.group_id != group_id {
+                continue;
+            }
+            let entry = activity.entry(message.session_id.clone()).or_insert(message.created_at);
+            *entry = (*entry).max(message.created_at);
+        }
+        Ok(activity)
+    }
     fn delivery_repository(self: Arc<Self>) -> Option<Arc<dyn bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoPort>> {
         Some(self)
     }

@@ -945,6 +945,21 @@ impl GroupMessageHistoryService for MessageService {
                 )))
             })
     }
+
+    async fn last_activity_in_group(
+        &self,
+        group_id: &str,
+    ) -> Result<std::collections::HashMap<String, u64>, GroupUseCaseError> {
+        self.message_repo
+            .last_activity_in_group(group_id)
+            .await
+            .map_err(|e| {
+                GroupUseCaseError::Service(ServiceError::InternalError(format!(
+                    "message repo error: {}",
+                    e
+                )))
+            })
+    }
 }
 
 #[cfg(test)]

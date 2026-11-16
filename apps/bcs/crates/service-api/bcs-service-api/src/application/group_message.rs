@@ -117,4 +117,21 @@ pub trait GroupMessageHistoryService: Send + Sync {
         let _ = session_ids;
         Ok(Default::default())
     }
+
+    /// Per-session message activity keys within ONE group, in ONE aggregate
+    /// round trip (design D5 revised — the bounded-read session activity sort):
+    /// the max persisted message `created_at` per session id in epoch
+    /// milliseconds, under the same store-owned `env` isolation as
+    /// `last_activity_by_group_ids`. Session ids with no persisted message in
+    /// this group are absent from the map, so callers fall back to the
+    /// session's own `created_at`. Default returns an empty map so
+    /// implementations without the persisted message log degrade to the
+    /// `created_at` fallback ordering (D6) and keep compiling.
+    async fn last_activity_in_group(
+        &self,
+        group_id: &str,
+    ) -> Result<std::collections::HashMap<String, u64>, GroupUseCaseError> {
+        let _ = group_id;
+        Ok(Default::default())
+    }
 }

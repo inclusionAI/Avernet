@@ -2189,6 +2189,78 @@ pub async fn session_repo_contract_tests<T: SessionRepoPort + ?Sized>(repo: &T) 
             .expect("count_by_group after page"),
         3
     );
+
+    // list_activity_candidates_by_group — mirrors list_by_group filters
+    // exactly (status / title / participant), projecting only (id, created_at),
+    // and takes NO pagination limit: a stale COUNT can never truncate the
+    // recent-activity candidate set (design D5 revised).
+    let candidates = repo
+        .list_activity_candidates_by_group(group_id, None, None, None)
+        .await
+        .expect("candidates none");
+    assert_eq!(candidates.len(), 3);
+    let listed_by_id: std::collections::HashMap<&str, u64> = listed_all
+        .iter()
+        .map(|row| (row.id.as_str(), row.created_at))
+        .collect();
+    for candidate in &candidates {
+        assert_eq!(
+            listed_by_id.get(candidate.session_id.as_str()),
+            Some(&candidate.created_at),
+            "candidate projection must carry the Session's own created_at"
+        );
+    }
+    assert_eq!(
+        repo.list_activity_candidates_by_group(group_id, Some(SessionStatus::Running), None, None)
+            .await
+            .expect("candidates running")
+            .len(),
+        2
+    );
+    assert_eq!(
+        repo.list_activity_candidates_by_group(group_id, Some(SessionStatus::Completed), None, None)
+            .await
+            .expect("candidates completed")
+            .len(),
+        1
+    );
+    assert_eq!(
+        repo.list_activity_candidates_by_group(group_id, None, Some("hello"), None)
+            .await
+            .expect("candidates hello")
+            .len(),
+        1
+    );
+    assert_eq!(
+        repo.list_activity_candidates_by_group(group_id, None, None, Some("bot1"))
+            .await
+            .expect("candidates bot1")
+            .len(),
+        2
+    );
+    assert_eq!(
+        repo.list_activity_candidates_by_group(group_id, None, None, Some("bot-collector"))
+            .await
+            .expect("candidates bot-collector")
+            .len(),
+        1
+    );
+
+    // try_get_many — the batched page-row fetch: found ids come
+    // back, unknown ids are absent (never an error).
+    let batch = repo
+        .try_get_many(&[
+            s.id.clone(),
+            svc.id.clone(),
+            "repo-contract-session-missing:000000ff".to_string(),
+        ])
+        .await
+        .expect("try_get_many");
+    let batch_ids: std::collections::HashSet<&str> =
+        batch.iter().map(|session| session.id.as_str()).collect();
+    assert_eq!(batch_ids.len(), 2);
+    assert!(batch_ids.contains(s.id.as_str()));
+    assert!(batch_ids.contains(svc.id.as_str()));
 }
 
 pub async fn session_repo_port_contract_tests<T: SessionRepoPort + ?Sized>(repo: &T) {

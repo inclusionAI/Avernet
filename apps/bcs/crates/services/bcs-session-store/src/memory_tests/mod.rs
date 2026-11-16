@@ -614,3 +614,55 @@
         assert_eq!(created.get("g-000"), Some(&1_000));
         assert_eq!(created.get("g-249"), Some(&1_249));
     }
+
+    /// D5-revised candidates carry only the sort inputs: the ids and exact
+    /// `created_at` values match the `list_by_group` rows, filtered to the
+    /// requested group, with no pagination limit applied.
+    #[tokio::test]
+    async fn activity_candidates_project_id_and_created_at_like_the_listed_rows() {
+        let repo = MemorySessionRepo::new();
+        seed_created_at(&repo, "g-a", "g-a:00000001", 1_000).await;
+        seed_created_at(&repo, "g-a", "g-a:00000002", 5_000).await;
+        seed_created_at(&repo, "g-b", "g-b:00000001", 7_000).await;
+
+        let candidates = repo
+            .list_activity_candidates_by_group("g-a", None, None, None)
+            .await
+            .unwrap();
+        let mut keys: Vec<(&str, u64)> = candidates
+            .iter()
+            .map(|candidate| (candidate.session_id.as_str(), candidate.created_at))
+            .collect();
+        keys.sort();
+        assert_eq!(keys, vec![("g-a:00000001", 1_000), ("g-a:00000002", 5_000)]);
+        assert_eq!(
+            repo.list_activity_candidates_by_group("g-empty", None, None, None)
+                .await
+                .unwrap()
+                .len(),
+            0
+        );
+    }
+
+    /// The batched page-row fetch returns the found Sessions (ids with no
+    /// Session are absent, never an error) and issues no clone over the
+    /// missing entries; an empty request pays nothing.
+    #[tokio::test]
+    async fn try_get_many_returns_present_sessions_and_skips_missing() {
+        let repo = MemorySessionRepo::new();
+        seed_created_at(&repo, "g-a", "g-a:00000001", 1_000).await;
+        seed_created_at(&repo, "g-a", "g-a:00000002", 5_000).await;
+
+        let sessions = repo
+            .try_get_many(&[
+                "g-a:00000002".to_string(),
+                "g-a:000000ff".to_string(),
+                "g-a:00000001".to_string(),
+            ])
+            .await
+            .unwrap();
+        let ids: Vec<&str> = sessions.iter().map(|session| session.id.as_str()).collect();
+        assert_eq!(ids, vec!["g-a:00000002", "g-a:00000001"]);
+        assert_eq!(sessions[0].created_at, 5_000);
+        assert!(repo.try_get_many(&[]).await.unwrap().is_empty());
+    }

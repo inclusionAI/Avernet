@@ -9,8 +9,9 @@
 
 use super::*;
 use bcs_service_api::application::v1::{ApplicationError, Page, SessionListSort, SessionSummary};
+use bcs_service_api::port::repo::SessionActivityCandidate;
 use bcs_service_api::types::bot_profile::{AvatarChange, ProfileWrite};
-use bcs_service_api::ServiceError;
+use bcs_service_api::{ServiceError, Session, SessionStatus};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -35,11 +36,13 @@ const S_HIDDEN: &str = "g1:000000ff";
 
 /// Message-side session activity (design D1/D4). Every batched request is
 /// recorded so the suite can prove one lookup per call over exactly the
-/// intended id set — page-scoped on the default path, all candidates under
-/// `sort=last_activity`.
+/// intended scope — the page ids on the default path, ONE group-scoped
+/// aggregate call under `sort=last_activity` (whose result the facade applies
+/// only to its viewer-scoped candidate ids).
 struct StubActivityHistory {
     activity: Mutex<HashMap<String, u64>>,
     requested_ids: Mutex<Vec<Vec<String>>>,
+    in_group_requests: Mutex<Vec<String>>,
     fail: AtomicBool,
 }
 
@@ -53,6 +56,7 @@ impl StubActivityHistory {
                     .collect(),
             ),
             requested_ids: Mutex::new(Vec::new()),
+            in_group_requests: Mutex::new(Vec::new()),
             fail: AtomicBool::new(false),
         }
     }
@@ -65,6 +69,10 @@ impl StubActivityHistory {
 
     fn requests(&self) -> Vec<Vec<String>> {
         self.requested_ids.lock().expect("history lock").clone()
+    }
+
+    fn in_group_requests(&self) -> Vec<String> {
+        self.in_group_requests.lock().expect("history lock").clone()
     }
 }
 
@@ -106,6 +114,24 @@ impl GroupMessageHistoryService for StubActivityHistory {
                     .map(|timestamp| (session_id.clone(), *timestamp))
             })
             .collect())
+    }
+
+    async fn last_activity_in_group(
+        &self,
+        group_id: &str,
+    ) -> Result<HashMap<String, u64>, GroupUseCaseError> {
+        self.in_group_requests
+            .lock()
+            .expect("history lock")
+            .push(group_id.to_string());
+        if self.fail.load(Ordering::SeqCst) {
+            return Err(GroupUseCaseError::Service(ServiceError::InternalError(
+                "message activity store unavailable".into(),
+            )));
+        }
+        // The fixture's sessions all live in one group, so the stub's whole
+        // per-session map is that group's aggregate map.
+        Ok(self.activity.lock().expect("history lock").clone())
     }
 }
 
@@ -274,12 +300,17 @@ async fn created_at_sort_keeps_todays_order_and_reports_the_real_activity() {
         .expect("default sort");
     assert_eq!(session_ids(&default_page.items), vec![S_C, S_B, S_A]);
 
-    // One batched lookup over the PAGE ids only (design D4 access cost).
+    // One batched lookup over the PAGE ids only (design D4 access cost); the
+    // group-scoped activity aggregate stays unused on the created_at path.
     let requests = history.requests();
     assert_eq!(requests.len(), 2, "one batched lookup per list call");
     for request in &requests {
         assert_eq!(sorted_ids(request), vec![S_A, S_B, S_C]);
     }
+    assert!(
+        history.in_group_requests().is_empty(),
+        "created_at never issues the group activity aggregate"
+    );
 }
 
 #[tokio::test]
@@ -306,6 +337,7 @@ async fn created_at_sort_scopes_the_activity_lookup_to_the_page() {
     let requests = history.requests();
     assert_eq!(requests.len(), 1, "the default path must batch one lookup");
     assert_eq!(sorted_ids(&requests[0]), vec![S_C, S_D]);
+    assert!(history.in_group_requests().is_empty());
     assert_eq!(activity_of(&page.items, S_D), Some(MESSAGE_TIME + 400));
     assert_eq!(activity_of(&page.items, S_C), Some(MESSAGE_TIME + 300));
 }
@@ -397,13 +429,19 @@ async fn last_activity_sorts_globally_before_pagination_across_the_page_boundary
         "page 1 tail must outrank page 2 head under one global activity order"
     );
 
-    // Every `last_activity` call batched ONE lookup over ALL candidates,
-    // not the page: the key is needed before pagination.
-    let requests = history.requests();
-    assert_eq!(requests.len(), 2, "one batched lookup per list call");
-    for request in &requests {
-        assert_eq!(sorted_ids(request), vec![S_A, S_B, S_C, S_D, S_E]);
-    }
+    // Every `last_activity` call issues ONE group-scoped aggregate (the D5
+    // revision): the lightweight candidate projection carries each Session's
+    // own created_at, so ranking the whole candidate set costs one round trip
+    // instead of ceil(candidates / 200) id-batched lookups over full rows.
+    assert_eq!(
+        history.in_group_requests(),
+        vec!["g1".to_string(), "g1".to_string()],
+        "one group activity aggregate per list call"
+    );
+    assert!(
+        history.requests().is_empty(),
+        "the last_activity path must not batch per-id activity lookups"
+    );
 
     // The created_at mode of the same data is a different sequence, so the
     // assertions above cannot be satisfied by the repository's own order.
@@ -413,6 +451,9 @@ async fn last_activity_sorts_globally_before_pagination_across_the_page_boundary
         .await
         .expect("list created_at page 1");
     assert_eq!(session_ids(&created_page.items), vec![S_E, S_D]);
+    let requests = history.requests();
+    assert_eq!(requests.len(), 1, "created_at keeps the page-scoped lookup");
+    assert_eq!(sorted_ids(&requests[0]), vec![S_D, S_E]);
 }
 
 #[tokio::test]
@@ -494,12 +535,328 @@ async fn viewer_scope_excludes_foreign_sessions_from_the_page_and_the_keys() {
             .expect("list viewer-scoped Sessions");
         assert_eq!(page.total, 1, "only participant Sessions count under {sort:?}");
         assert_eq!(session_ids(&page.items), vec![S_A]);
-        // The foreign Session's much higher activity must not even be read:
-        // candidate resolution is viewer-scoped before any activity lookup.
-        let requests = history.requests();
-        let last_request = requests.last().expect("one activity lookup");
-        assert_eq!(last_request, &vec![S_A.to_string()]);
+        // The foreign Session is never even a candidate, so its much higher
+        // activity can never rank it into the page: candidate resolution is
+        // viewer-scoped before any activity read. The created_at path submits
+        // only the viewer's page ids; the last_activity path issues the
+        // group-scoped aggregate but applies it to nothing outside the page.
+        match sort {
+            SessionListSort::CreatedAt => {
+                let last_request = history.requests().last().cloned().expect("one lookup");
+                assert_eq!(last_request, vec![S_A.to_string()]);
+            }
+            SessionListSort::LastActivity => {
+                let in_group = history.in_group_requests();
+                assert_eq!(in_group, vec!["g1".to_string()], "exactly one group aggregate");
+                assert_eq!(
+                    history.requests().len(),
+                    1,
+                    "the only per-id lookup remains the earlier created_at page call"
+                );
+            }
+        }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Recording session repo: bounded read shape + stale COUNT injection
+// ---------------------------------------------------------------------------
+
+/// Session repo double wrapping the real memory store. It records the read
+/// shape the `last_activity` path pays per list call (ONE candidate
+/// projection + ONE batched page-row fetch) and can pin a STALE
+/// `count_by_group` result — the deterministic reproduction of a concurrent
+/// Session creation landing between the COUNT and the candidate read.
+struct RecordingSessionRepo {
+    inner: MemorySessionRepo,
+    stale_total: Option<u64>,
+    candidate_calls: Mutex<Vec<Option<String>>>,
+    batch_reads: Mutex<Vec<Vec<String>>>,
+}
+
+impl RecordingSessionRepo {
+    fn new(stale_total: Option<u64>) -> Self {
+        Self {
+            inner: MemorySessionRepo::new(),
+            stale_total,
+            candidate_calls: Mutex::new(Vec::new()),
+            batch_reads: Mutex::new(Vec::new()),
+        }
+    }
+
+    fn candidate_calls(&self) -> usize {
+        self.candidate_calls.lock().expect("repo lock").len()
+    }
+
+    fn batch_reads(&self) -> Vec<Vec<String>> {
+        self.batch_reads.lock().expect("repo lock").clone()
+    }
+}
+
+#[async_trait]
+impl SessionRepoPort for RecordingSessionRepo {
+    async fn create(&self, group_id: &str, params: NewSessionParams) -> ServiceResult<Session> {
+        self.inner.create(group_id, params).await
+    }
+    async fn get(&self, session_id: &str) -> Option<Session> {
+        self.inner.get(session_id).await
+    }
+    async fn belongs_to_group(&self, session_id: &str, group_id: &str) -> bool {
+        self.inner.belongs_to_group(session_id, group_id).await
+    }
+    async fn list_by_group(
+        &self,
+        group_id: &str,
+        status: Option<SessionStatus>,
+        offset: u64,
+        limit: u64,
+        title_contains: Option<&str>,
+        participant_id: Option<&str>,
+    ) -> Vec<Session> {
+        self.inner
+            .list_by_group(group_id, status, offset, limit, title_contains, participant_id)
+            .await
+    }
+    async fn latest_running(&self, group_id: &str) -> Option<Session> {
+        self.inner.latest_running(group_id).await
+    }
+    async fn complete_if_running(
+        &self,
+        session_id: &str,
+        output: Option<Value>,
+        error: Option<String>,
+    ) -> ServiceResult<Option<Session>> {
+        self.inner.complete_if_running(session_id, output, error).await
+    }
+    async fn reactivate(
+        &self,
+        session_id: &str,
+        new_input: Option<Value>,
+    ) -> ServiceResult<Session> {
+        self.inner.reactivate(session_id, new_input).await
+    }
+    async fn add_participant(
+        &self,
+        session_id: &str,
+        participant: Participant,
+    ) -> ServiceResult<Session> {
+        self.inner.add_participant(session_id, participant).await
+    }
+    async fn remove_participant(&self, session_id: &str, bot_uuid: &str) -> ServiceResult<Session> {
+        self.inner.remove_participant(session_id, bot_uuid).await
+    }
+    async fn update_participant_mode(
+        &self,
+        session_id: &str,
+        bot_uuid: &str,
+        mode: ParticipantMode,
+    ) -> ServiceResult<Session> {
+        self.inner
+            .update_participant_mode(session_id, bot_uuid, mode)
+            .await
+    }
+    async fn update_title(&self, session_id: &str, title: Option<String>) -> ServiceResult<Session> {
+        self.inner.update_title(session_id, title).await
+    }
+    async fn list_group_ids_by_session_participant(&self, bot_uuid: &str) -> Vec<String> {
+        self.inner.list_group_ids_by_session_participant(bot_uuid).await
+    }
+    async fn delete(&self, session_id: &str) -> ServiceResult<bool> {
+        self.inner.delete(session_id).await
+    }
+
+    async fn count_by_group(
+        &self,
+        group_id: &str,
+        status: Option<SessionStatus>,
+        title_contains: Option<&str>,
+        participant_id: Option<&str>,
+    ) -> ServiceResult<u64> {
+        match self.stale_total {
+            Some(total) => Ok(total),
+            None => {
+                self.inner
+                    .count_by_group(group_id, status, title_contains, participant_id)
+                    .await
+            }
+        }
+    }
+
+    async fn list_activity_candidates_by_group(
+        &self,
+        group_id: &str,
+        status: Option<SessionStatus>,
+        title_contains: Option<&str>,
+        participant_id: Option<&str>,
+    ) -> ServiceResult<Vec<SessionActivityCandidate>> {
+        self.candidate_calls
+            .lock()
+            .expect("repo lock")
+            .push(participant_id.map(str::to_string));
+        self.inner
+            .list_activity_candidates_by_group(group_id, status, title_contains, participant_id)
+            .await
+    }
+
+    async fn try_get_many(&self, session_ids: &[String]) -> ServiceResult<Vec<Session>> {
+        self.batch_reads
+            .lock()
+            .expect("repo lock")
+            .push(session_ids.to_vec());
+        self.inner.try_get_many(session_ids).await
+    }
+}
+
+/// Same wiring as [`Fixture::new_with_history_source`], except the facade's
+/// session repo is the recording double.
+async fn recording_repo_fixture(
+    history: &Arc<StubActivityHistory>,
+    repo: &Arc<RecordingSessionRepo>,
+) -> Fixture {
+    let recording_history = Arc::new(RecordingHistoryService::default());
+    let group_repo: Arc<dyn bcs_service_api::port::repo::GroupRepoPort> =
+        Arc::new(MemoryGroupRepo::new());
+    let groups = Arc::new(GroupCore::with_repo(group_repo.clone()));
+    let bots = Arc::new(BotCore::memory());
+    let relation = Arc::new(RelationCore::memory());
+    let friends = Arc::new(FriendCore::memory().with_relation(relation.clone()));
+    let friends_handle = friends.clone();
+    let session_repo: Arc<dyn SessionRepoPort> = repo.clone();
+    let runtime = Arc::new(RecordingRuntime::default());
+    let system_messages = Arc::new(RecordingSystemMessageService::default());
+    let sessions = Arc::new(SessionManagementServiceImpl::new(
+        session_repo.clone(),
+        group_repo,
+    ));
+    let authority_repo = Arc::new(MemoryBotRepo::new());
+    let authority_hook = bcs_test_support::authority_hook_for(authority_repo.clone());
+    let launch = Arc::new(
+        SessionLaunchApplication::new(
+            bots.clone(),
+            groups.clone(),
+            sessions.clone(),
+            runtime.clone(),
+            Arc::new(NoopSystemMessageService),
+        )
+        .with_bot_authority_hook(authority_hook.clone()),
+    );
+    let service = SessionServiceImpl::new(
+        launch,
+        sessions,
+        groups.clone(),
+        bots.clone(),
+        friends,
+        session_repo.clone(),
+        history.clone(),
+        runtime.clone(),
+        system_messages.clone(),
+    )
+    .with_bot_authority_hook(authority_hook)
+    .with_session_authorization_core(Arc::new(
+        bcs_session::SessionAuthorizationCoreImpl::new(session_repo.clone()),
+    ));
+    Fixture {
+        service,
+        groups,
+        bots,
+        friends: friends_handle,
+        history: recording_history,
+        runtime,
+        system_messages,
+        session_repo,
+        authority_repo,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// D5 revision: stale COUNT never truncates candidates; bounded page reads
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn last_activity_never_truncates_candidates_by_a_stale_count() {
+    // The reviewer's reproduction: A is the oldest Session but the most
+    // active; the COUNT saw 2 rows, then C was created. The old flow fetched
+    // the newest `total` (=2) Sessions as candidates and silently dropped A
+    // off page 1. The revised path selects candidates in one snapshot query
+    // that takes no count-derived limit, so A still ranks first.
+    let history = Arc::new(StubActivityHistory::new(&[(S_A, MESSAGE_TIME)]));
+    let repo = Arc::new(RecordingSessionRepo::new(Some(2)));
+    let fixture = recording_repo_fixture(&history, &repo).await;
+    fixture.add_bot("viewer").await;
+    fixture.store_group("g1", "driver", None).await;
+    seed_viewed_session(&fixture, S_A, "viewer").await;
+    seed_viewed_session_later(&fixture, S_B, "viewer").await;
+    seed_viewed_session_later(&fixture, S_C, "viewer").await;
+
+    let page = list_sessions(&fixture, activity_list("viewer", SessionListSort::LastActivity))
+        .await
+        .expect("list by last activity with a stale count");
+
+    // The stale total still leaks into the page metadata (paginated counts
+    // are best-effort), but it no longer truncates the CANDIDATE SET.
+    assert_eq!(page.total, 2);
+    assert_eq!(
+        session_ids(&page.items),
+        vec![S_A, S_C, S_B],
+        "the most-active Session survives a stale COUNT"
+    );
+    assert_eq!(repo.candidate_calls(), 1, "one candidate projection per list");
+    assert_eq!(
+        repo.batch_reads(),
+        vec![vec![S_A.to_string(), S_C.to_string(), S_B.to_string()]],
+        "full rows load once, for exactly the page ids"
+    );
+}
+
+#[tokio::test]
+async fn last_activity_limits_full_row_reads_to_the_page() {
+    let history = Arc::new(StubActivityHistory::new(&[
+        (S_A, MESSAGE_TIME + 500),
+        (S_B, MESSAGE_TIME + 400),
+        (S_C, MESSAGE_TIME + 300),
+        (S_D, MESSAGE_TIME + 200),
+        (S_E, MESSAGE_TIME + 100),
+    ]));
+    let repo = Arc::new(RecordingSessionRepo::new(None));
+    let fixture = recording_repo_fixture(&history, &repo).await;
+    fixture.add_bot("viewer").await;
+    fixture.store_group("g1", "driver", None).await;
+    for (index, session_id) in [S_A, S_B, S_C, S_D, S_E].into_iter().enumerate() {
+        if index > 0 {
+            tokio::time::sleep(Duration::from_millis(6)).await;
+        }
+        seed_viewed_session(&fixture, session_id, "viewer").await;
+    }
+
+    let mut command = activity_list("viewer", SessionListSort::LastActivity);
+    command.limit = 2;
+    let page = list_sessions(&fixture, command).await.expect("activity page 1");
+
+    assert_eq!(page.total, 5);
+    assert_eq!(session_ids(&page.items), vec![S_A, S_B]);
+    // Bounded read shape per list call: ONE candidate projection, ONE
+    // group-scoped activity aggregate, ONE batched row fetch of exactly the
+    // page ids — none of them grows with the candidate set beyond two
+    // lightweight columns per row.
+    assert_eq!(repo.candidate_calls(), 1);
+    assert_eq!(history.in_group_requests(), vec!["g1".to_string()]);
+    assert_eq!(
+        repo.batch_reads(),
+        vec![vec![S_A.to_string(), S_B.to_string()]]
+    );
+
+    // Page 2 repeats the same bounded shape.
+    let mut command = activity_list("viewer", SessionListSort::LastActivity);
+    command.offset = 2;
+    command.limit = 2;
+    let page = list_sessions(&fixture, command).await.expect("activity page 2");
+    assert_eq!(session_ids(&page.items), vec![S_C, S_D]);
+    assert_eq!(repo.candidate_calls(), 2);
+    assert_eq!(
+        repo.batch_reads()[1],
+        vec![S_C.to_string(), S_D.to_string()],
+        "page 2 loads exactly its own rows"
+    );
 }
 
 // ---------------------------------------------------------------------------

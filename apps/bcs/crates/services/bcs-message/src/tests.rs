@@ -616,6 +616,7 @@ struct SpyActivityMessageRepo {
     failure: Option<&'static str>,
     group_requests: Mutex<Vec<Vec<String>>>,
     session_requests: Mutex<Vec<Vec<String>>>,
+    in_group_requests: Mutex<Vec<String>>,
 }
 
 impl SpyActivityMessageRepo {
@@ -628,6 +629,7 @@ impl SpyActivityMessageRepo {
             failure: None,
             group_requests: Mutex::new(Vec::new()),
             session_requests: Mutex::new(Vec::new()),
+            in_group_requests: Mutex::new(Vec::new()),
         }
     }
 
@@ -644,6 +646,10 @@ impl SpyActivityMessageRepo {
 
     async fn session_requests(&self) -> Vec<Vec<String>> {
         self.session_requests.lock().await.clone()
+    }
+
+    async fn in_group_requests(&self) -> Vec<String> {
+        self.in_group_requests.lock().await.clone()
     }
 }
 
@@ -694,6 +700,17 @@ impl MessageRepoPort for SpyActivityMessageRepo {
             .lock()
             .await
             .push(session_ids.to_vec());
+        match self.failure {
+            Some(message) => Err(MessageRepoError::StorageError(message.to_string())),
+            None => Ok(self.activity.clone()),
+        }
+    }
+
+    async fn last_activity_in_group(
+        &self,
+        group_id: &str,
+    ) -> Result<std::collections::HashMap<String, u64>, MessageRepoError> {
+        self.in_group_requests.lock().await.push(group_id.to_string());
         match self.failure {
             Some(message) => Err(MessageRepoError::StorageError(message.to_string())),
             None => Ok(self.activity.clone()),
@@ -795,4 +812,47 @@ async fn last_activity_session_repo_failure_is_not_swallowed_into_empty_map() {
         other => panic!("unexpected error: {other:?}"),
     }
     assert_eq!(repo.session_requests().await, vec![ids]);
+}
+
+#[tokio::test]
+async fn last_activity_in_group_forwards_the_group_and_returns_repo_map() {
+    let repo = Arc::new(SpyActivityMessageRepo::returning(&[
+        ("s-a", 11_000),
+        ("s-b", 13_000),
+    ]));
+    let service = service_with_message_repo(repo.clone());
+
+    let activity = service
+        .last_activity_in_group("g-a")
+        .await
+        .expect("per-session group activity keys");
+
+    assert_eq!(activity.len(), 2);
+    assert_eq!(activity.get("s-a"), Some(&11_000));
+    assert_eq!(activity.get("s-b"), Some(&13_000));
+    assert_eq!(repo.in_group_requests().await, vec!["g-a".to_string()]);
+    assert!(repo.group_requests().await.is_empty());
+    assert!(repo.session_requests().await.is_empty());
+}
+
+#[tokio::test]
+async fn last_activity_in_group_repo_failure_is_not_swallowed_into_empty_map() {
+    let repo = Arc::new(SpyActivityMessageRepo::failing(
+        "group activity store unavailable",
+    ));
+    let service = service_with_message_repo(repo.clone());
+
+    let error = service
+        .last_activity_in_group("g-a")
+        .await
+        .expect_err("store failure must propagate");
+
+    match error {
+        GroupUseCaseError::Service(ServiceError::InternalError(message)) => assert!(
+            message.contains("group activity store unavailable"),
+            "unexpected message: {message}"
+        ),
+        other => panic!("unexpected error: {other:?}"),
+    }
+    assert_eq!(repo.in_group_requests().await, vec!["g-a".to_string()]);
 }

@@ -355,3 +355,43 @@
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions.get("s-shared"), Some(&1_000));
     }
+
+    /// D5-revised in-group aggregate: per-session `MAX(created_at)` over the
+    /// group's whole message log, in one round trip (design D5 Q4).
+    #[tokio::test]
+    async fn last_activity_in_group_returns_max_created_at_per_session() {
+        let (db, store) = activity_store("dev").await;
+        seed_activity(&db, "dev", "g-a", "g-a:s1", &[1_000, 5_000, 3_000]).await;
+        seed_activity(&db, "dev", "g-a", "g-a:s2", &[2_000]).await;
+        seed_activity(&db, "dev", "g-b", "g-b:s1", &[9_000]).await;
+        seed_activity(&db, "prod", "g-a", "g-a:s3", &[9_000]).await;
+
+        let activity = store.last_activity_in_group("g-a").await.unwrap();
+        assert_eq!(activity.len(), 2, "other groups / envs stay out");
+        assert_eq!(activity.get("g-a:s1"), Some(&5_000));
+        assert_eq!(activity.get("g-a:s2"), Some(&2_000));
+        assert!(store.last_activity_in_group("g-missing").await.unwrap().is_empty());
+    }
+
+    /// The aggregate issues exactly ONE query regardless of how many
+    /// sessions the group has — the bounded-read replacement for chunking
+    /// the candidate ids through `last_activity_by_session_ids`.
+    #[tokio::test]
+    async fn last_activity_in_group_stays_one_round_trip_as_the_group_grows() {
+        let (db, store) = activity_store("dev").await;
+        for index in 0..250_u32 {
+            seed_activity(&db, "dev", "g-big", &format!("g-big:s{index:03}"), &[1_000 + index as u64])
+                .await;
+        }
+        db.queried.lock().await.clear();
+
+        let activity = store.last_activity_in_group("g-big").await.unwrap();
+
+        assert_eq!(activity.len(), 250);
+        assert_eq!(activity.get("g-big:s000"), Some(&1_000));
+        assert_eq!(activity.get("g-big:s249"), Some(&1_249));
+        let queries = db.queried.lock().await;
+        assert_eq!(queries.len(), 1, "250 sessions aggregate in one round trip");
+        assert_eq!(queries[0].params().len(), 2, "env + group only, no id binds");
+        assert!(queries[0].sql().contains("GROUP BY session_id"));
+    }

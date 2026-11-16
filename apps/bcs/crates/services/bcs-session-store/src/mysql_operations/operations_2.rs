@@ -65,6 +65,113 @@ impl MySqlSessionStore {
 }
 
 impl MySqlSessionStore {
+    /// Lightweight candidate projection for the recent-activity session sort
+    /// (design D5 revised): SAME filter clauses as
+    /// [`Self::repo_try_list_by_group`] / [`Self::repo_count_by_group`]
+    /// (env + group_id + optional status / title_contains / participant JOIN)
+    /// but selects exactly two columns and applies NO ORDER BY / LIMIT /
+    /// OFFSET — the candidate set is decided by this single query alone, so a
+    /// separately-computed COUNT can never truncate genuinely-active sessions,
+    /// and no full row (`input`/`output`/`participants`/`meta`) is hydrated or
+    /// deserialized for sorting. Row order is unspecified; the caller owns the
+    /// authoritative activity ordering.
+    pub(super) async fn repo_list_activity_candidates_by_group(
+        &self,
+        group_id: &str,
+        status: Option<SessionStatus>,
+        title_contains: Option<&str>,
+        participant_id: Option<&str>,
+    ) -> ServiceResult<Vec<SessionActivityCandidate>> {
+        let mut conditions: Vec<String> =
+            vec!["s.env = ?".to_string(), "s.group_id = ?".to_string()];
+        let mut params: Vec<DbValue> =
+            vec![DbValue::from(self.env.as_str()), DbValue::from(group_id)];
+
+        if let Some(s) = status {
+            let status_str = match s {
+                SessionStatus::Running => "running",
+                SessionStatus::Completed => "completed",
+            };
+            conditions.push("s.status = ?".to_string());
+            params.push(DbValue::from(status_str));
+        }
+
+        if let Some(q) = title_contains {
+            conditions.push("s.session_title LIKE ?".to_string());
+            params.push(DbValue::from(format!("%{}%", q)));
+        }
+
+        let join_clause = if let Some(pid) = participant_id {
+            conditions.push("sp.bot_uuid = ?".to_string());
+            params.push(DbValue::from(pid));
+            "JOIN bcs_session_participants sp ON sp.env = s.env AND sp.session_id = s.session_id"
+        } else {
+            ""
+        };
+
+        let sql = format!(
+            "SELECT s.session_id, ({})*1000 AS gmt_create_ms FROM bcs_group_sessions s {join} \
+             WHERE {where_clause}",
+            self.flavor.unix_ts("s.gmt_create"),
+            join = join_clause,
+            where_clause = conditions.join(" AND "),
+        );
+
+        let rows = self
+            .db
+            .query(DbStatement::with_params(&sql, params))
+            .await
+            .map_err(|e| {
+                ServiceError::InternalError(format!(
+                    "activity candidates for Group '{group_id}': {e}"
+                ))
+            })?;
+        rows.iter()
+            .map(|row| {
+                Ok(SessionActivityCandidate {
+                    session_id: db_get_column(row, "session_id")
+                        .map_err(|e| ServiceError::InternalError(format!("session_id: {e}")))?,
+                    created_at: column_u64(row, "gmt_create_ms"),
+                })
+            })
+            .collect()
+    }
+}
+
+impl MySqlSessionStore {
+    /// Batched full-row load by Session ids (the D5-revised page-row fetch):
+    /// ONE round trip per chunk of at most 200 ids, env-scoped, no ORDER BY —
+    /// callers reconcile the authoritative order from their own id list. Ids
+    /// whose rows vanished (deleted between the candidate and page reads) are
+    /// simply absent from the result.
+    pub(super) async fn repo_try_get_many(&self, session_ids: &[String]) -> ServiceResult<Vec<Session>> {
+        if session_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let select_cols = self.select_cols();
+        let mut sessions = Vec::new();
+        for chunk in session_ids.chunks(200) {
+            let sql = format!(
+                "SELECT {select_cols} FROM bcs_group_sessions \
+                 WHERE env = ? AND session_id IN ({})",
+                vec!["?"; chunk.len()].join(", ")
+            );
+            let mut params: Vec<DbValue> = vec![DbValue::from(self.env.as_str())];
+            params.extend(chunk.iter().map(|session_id| DbValue::from(session_id.as_str())));
+            let rows = self
+                .db
+                .query(DbStatement::with_params(sql, params))
+                .await
+                .map_err(|e| ServiceError::InternalError(format!("session db batch read: {e}")))?;
+            for row in &rows {
+                sessions.push(row_to_session(row)?);
+            }
+        }
+        Ok(sessions)
+    }
+}
+
+impl MySqlSessionStore {
     /// Batched group activity key from session creation (design D2 Q2): the max
     /// `gmt_create` per group in epoch ms, over the sessions currently persisted
     /// for that group in this store's env. Binds follow the store's IN-list
