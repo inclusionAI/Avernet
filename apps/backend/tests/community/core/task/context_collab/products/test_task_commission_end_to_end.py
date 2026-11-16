@@ -432,15 +432,8 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
             context=HUMAN,
             now=_now(),
         )
-
-        created = TaskCommissionCreatedView(
-            collet_id=created_record.collet.collet_id,
-            title=TITLE,
-            body_event_id="",
-            status="created",
-            context_version=created_record.collet.version,
-        )
-        task_id = created.collet_id
+        assert binding is not None
+        task_id = created_record.collet.collet_id
 
         store, axes = injector.get(MethodStoreProtocol), current_axes()
         binding_id = top_level_binding_id(task_id)
@@ -532,6 +525,13 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
         assert injector.get(A2aDeliveryPort).bridge_records() == ()
 
         # 9. 模拟Agent执行任务，过程中上报信息
+        created = TaskCommissionCreatedView(
+            collet_id=created_record.collet.collet_id,
+            title=TITLE,
+            body_event_id="",
+            status="created",
+            context_version=created_record.collet.version,
+        )
         artifacts = working_bot.run(
             created,
             lambda report_progress: _simulate_ai_coding(
