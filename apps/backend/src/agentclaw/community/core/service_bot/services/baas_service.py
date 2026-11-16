@@ -3087,6 +3087,9 @@ class BaasService:  # pragma: no cover
             )
             raise
 
+    # Maximum retries for transient 5xx errors from the BaaS/TeClaw platform.
+    _OUTBOUND_RULE_MAX_RETRIES: int = 3
+
     def update_device_outbound_rule(
         self, paas_device_id: str, outbound_rule: OutBoundOperationRule,
         *, mode: Literal["append", "replace"] = "append",
@@ -3097,6 +3100,10 @@ class BaasService:  # pragma: no cover
         Teclaw 全局规则使用默认替换语义，不发送 mode 参数（append 仅支持 session 规则）。
         调用 PUT /api/v1/paas/devices/{paas_device_id}/outbound-rule?mode=append
 
+        对 BaaS/TeClaw 平台瞬时 5xx 错误（如 PLATFORM_ERROR）自动重试最多
+        ``_OUTBOUND_RULE_MAX_RETRIES`` 次（指数退避 1s/2s/4s）；非 5xx 错误
+        立即失败，不触发重试。
+
         Args:
             paas_device_id: PaaS 设备 ID（即 provider_device_id）
             outbound_rule: 出站规则对象
@@ -3105,7 +3112,7 @@ class BaasService:  # pragma: no cover
             是否更新成功
 
         Raises:
-            BaasServiceError: 更新失败
+            BaasServiceError: 更新失败（包括重试耗尽后）
         """
         route = f"/api/v1/paas/devices/{paas_device_id}/outbound-rule"
         payload = self._outbound_rule_to_dict(outbound_rule)
@@ -3122,44 +3129,82 @@ class BaasService:  # pragma: no cover
             "method=PUT route=%s paas_device_id=%s mode=%s mode_query_present=%s rules=%s",
             route, paas_device_id, mode, mode == "append", rules,
         )
-        try:
-            response = self._http.put(
-                route,
-                **({"params": {"mode": "append"}} if mode == "append" else {}),
-                json=payload,
-                timeout=30.0,
-            )
-            status_code = response.status_code
-            response.raise_for_status()
-            response_data = response.json()
-            result_code = response_data.get("code")
 
-            if result_code != 0:
-                raise BaasServiceError(
-                    f"BaaS API error: {response_data.get('message', 'Unknown error')}"
+        last_error: Exception | None = None
+        for attempt in range(1, self._OUTBOUND_RULE_MAX_RETRIES + 1):
+            try:
+                response = self._http.put(
+                    route,
+                    **({"params": {"mode": "append"}} if mode == "append" else {}),
+                    json=payload,
+                    timeout=30.0,
                 )
+                status_code = response.status_code
+                response.raise_for_status()
+                response_data = response.json()
+                result_code = response_data.get("code")
 
-            logger.info(
-                "baas_outbound_update_succeeded system=baas operation=update_device_outbound_rule "
-                "paas_device_id=%s mode=%s status_code=%s result_code=%s duration_ms=%s",
-                paas_device_id, mode, status_code, result_code,
-                int((time.perf_counter() - started) * 1000),
-            )
-            return True
+                if result_code != 0:
+                    raise BaasServiceError(
+                        f"BaaS API error: {response_data.get('message', 'Unknown error')}"
+                    )
 
-        except Exception as exc:
-            logger.error(
-                "baas_outbound_update_failed system=baas operation=update_device_outbound_rule "
-                "paas_device_id=%s mode=%s status_code=%s result_code=%s "
-                "error_type=%s duration_ms=%s",
-                paas_device_id, mode, status_code, result_code, type(exc).__name__,
-                int((time.perf_counter() - started) * 1000),
-            )
-            if isinstance(exc, httpx.HTTPStatusError):
+                logger.info(
+                    "baas_outbound_update_succeeded system=baas operation=update_device_outbound_rule "
+                    "paas_device_id=%s mode=%s status_code=%s result_code=%s duration_ms=%s",
+                    paas_device_id, mode, status_code, result_code,
+                    int((time.perf_counter() - started) * 1000),
+                )
+                return True
+
+            except httpx.HTTPStatusError as exc:
+                last_error = exc
+                status_code = exc.response.status_code
+                if status_code is not None and status_code >= 500 and attempt < self._OUTBOUND_RULE_MAX_RETRIES:
+                    delay = 2 ** (attempt - 1)  # 1s → 2s → 4s
+                    logger.warning(
+                        "baas_outbound_update_retrying system=baas operation=update_device_outbound_rule "
+                        "paas_device_id=%s mode=%s status_code=%s attempt=%s/%s delay_seconds=%s",
+                        paas_device_id, mode, status_code, attempt, self._OUTBOUND_RULE_MAX_RETRIES, delay,
+                    )
+                    time.sleep(delay)
+                    continue
+                # Non-5xx or final retry exhausted — fail immediately.
+                logger.error(
+                    "baas_outbound_update_failed system=baas operation=update_device_outbound_rule "
+                    "paas_device_id=%s mode=%s status_code=%s result_code=%s "
+                    "error_type=%s attempts=%s duration_ms=%s",
+                    paas_device_id, mode, status_code, result_code, type(exc).__name__,
+                    attempt,
+                    int((time.perf_counter() - started) * 1000),
+                )
                 raise BaasServiceError(
                     f"BaaS API error: {exc.response.status_code} - {exc.response.text}"
                 ) from exc
-            raise
+
+            except Exception as exc:
+                last_error = exc
+                logger.error(
+                    "baas_outbound_update_failed system=baas operation=update_device_outbound_rule "
+                    "paas_device_id=%s mode=%s status_code=%s result_code=%s "
+                    "error_type=%s attempts=%s duration_ms=%s",
+                    paas_device_id, mode, status_code, result_code, type(exc).__name__,
+                    attempt,
+                    int((time.perf_counter() - started) * 1000),
+                )
+                raise
+
+        # All retries exhausted — should be unreachable because the final
+        # iteration raises inside the except block, but guard defensively.
+        logger.error(
+            "baas_outbound_update_failed system=baas operation=update_device_outbound_rule "
+            "paas_device_id=%s mode=%s error_type=retries_exhausted attempts=%s duration_ms=%s",
+            paas_device_id, mode, self._OUTBOUND_RULE_MAX_RETRIES,
+            int((time.perf_counter() - started) * 1000),
+        )
+        raise BaasServiceError(
+            f"BaaS API error: all {self._OUTBOUND_RULE_MAX_RETRIES} retries exhausted for device {paas_device_id}"
+        ) from last_error
 
     def append_token_outbound_rule(
         self,

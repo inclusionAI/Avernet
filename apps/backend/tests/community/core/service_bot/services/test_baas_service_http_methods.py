@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import httpx
 import pytest
 
 from agentclaw.community.core.service_bot.services.deploy.managed_composer import (
@@ -354,3 +355,119 @@ class TestBaasServiceHttpMethods:
 
         with pytest.raises(BaasServiceError, match="device not found"):
             service.get_http_info(bind_id=1, port=20010)
+
+        # ── update_device_outbound_rule retry tests ──
+
+    def test_update_device_outbound_rule_retries_on_500_and_succeeds(self, monkeypatch):
+        """AC-1: 连续 2 次 500 后第 3 次 200 成功，日志含重试记录。"""
+        from agentclaw.community.core.service_bot.services import baas_service as baas_mod
+
+        service, http = _make_service()
+        test_logger = MagicMock()
+        monkeypatch.setattr(baas_mod, "logger", test_logger)
+
+        call_count = [0]
+
+        def _sequential_put(*args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] <= 2:
+                resp = MagicMock()
+                resp.status_code = 500
+                resp.raise_for_status.side_effect = httpx.HTTPStatusError(
+                    "server error",
+                    request=MagicMock(),
+                    response=MagicMock(status_code=500),
+                )
+                return resp
+            resp = MagicMock()
+            resp.status_code = 200
+            resp.raise_for_status.return_value = None
+            resp.json.return_value = {"code": 0, "message": "ok", "data": {}}
+            return resp
+
+        http.set_override("put", _sequential_put)
+
+        import time as _time
+        monkeypatch.setattr(baas_mod.time, "sleep", MagicMock())
+
+        rule = MagicMock()
+        rule.header_operation_rules = []
+
+        ok = service.update_device_outbound_rule("PAAS-1", rule)
+        assert ok is True
+
+        calls = http.calls_to("put")
+        assert len(calls) == 3, f"expected 3 PUT calls (2 fails + 1 success), got {len(calls)}"
+
+        # Verify retry warning was logged
+        warn_messages = [str(c) for c in test_logger.warning.call_args_list]
+        assert any("baas_outbound_update_retrying" in m for m in warn_messages), \
+            f"expected retry warning log, got: {warn_messages}"
+
+        # Verify success was logged
+        info_messages = [str(c) for c in test_logger.info.call_args_list]
+        assert any("baas_outbound_update_succeeded" in m for m in info_messages), \
+            f"expected success log, got: {info_messages}"
+
+    def test_update_device_outbound_rule_no_retry_on_4xx(self, monkeypatch):
+        """AC-4: 4xx 错误不触发重试，直接失败。"""
+        from agentclaw.community.core.service_bot.services import baas_service as baas_mod
+
+        service, http = _make_service()
+
+        def _fail_400(*args, **kwargs):
+            resp = MagicMock()
+            resp.status_code = 400
+            resp.raise_for_status.side_effect = httpx.HTTPStatusError(
+                "bad request",
+                request=MagicMock(),
+                response=MagicMock(status_code=400),
+            )
+            return resp
+
+        http.set_override("put", _fail_400)
+
+        import time as _time
+        monkeypatch.setattr(baas_mod.time, "sleep", MagicMock())
+
+        rule = MagicMock()
+        rule.header_operation_rules = []
+
+        from agentclaw.community.core.service_bot.services.baas_service import BaasServiceError
+        with pytest.raises(BaasServiceError, match="400"):
+            service.update_device_outbound_rule("PAAS-1", rule)
+
+        # Only 1 call — no retry on 4xx
+        assert len(http.calls_to("put")) == 1
+
+    def test_update_device_outbound_rule_retry_exhausted(self, monkeypatch):
+        """AC-3: 连续 3 次 500 全部失败，最终抛出 BaasServiceError。"""
+        from agentclaw.community.core.service_bot.services import baas_service as baas_mod
+
+        service, http = _make_service()
+
+        def _always_500(*args, **kwargs):
+            resp = MagicMock()
+            resp.status_code = 500
+            resp.raise_for_status.side_effect = httpx.HTTPStatusError(
+                "server error",
+                request=MagicMock(),
+                response=MagicMock(status_code=500),
+            )
+            return resp
+
+        http.set_override("put", _always_500)
+
+        import time as _time
+        monkeypatch.setattr(baas_mod.time, "sleep", MagicMock())
+
+        rule = MagicMock()
+        rule.header_operation_rules = []
+
+        from agentclaw.community.core.service_bot.services.baas_service import BaasServiceError
+        with pytest.raises(BaasServiceError, match="500"):
+            service.update_device_outbound_rule("PAAS-1", rule)
+
+        # 3 calls — all retries exhausted
+        assert len(http.calls_to("put")) == 3
+
