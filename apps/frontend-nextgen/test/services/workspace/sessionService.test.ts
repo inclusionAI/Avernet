@@ -370,6 +370,28 @@ it('addMember POSTs participant and returns refreshed session', async () => {
   ]);
 });
 
+// round-7 静默错误呈现族:错误语义不可再压平为「请稍后重试」,按状态透传语义化文案。
+it('addMember maps 403 to permission-denied semantics instead of generic retry copy', async () => {
+  sc.addSessionParticipant.mockRejectedValue({ status: 403 });
+  const res = await sessionService.addMember('s1', 'bot-2');
+  expect(res.ok).toBe(false);
+  expect(!res.ok && res.error.friendlyMessage).toBe('当前账号暂无权限执行该操作');
+});
+
+it('removeMember maps 404 to resource-gone semantics', async () => {
+  sc.deleteSessionParticipant.mockRejectedValue({ status: 404 });
+  const res = await sessionService.removeMember('s1', 'bot-2');
+  expect(res.ok).toBe(false);
+  expect(!res.ok && res.error.friendlyMessage).toBe('访问的资源不存在或已被移除');
+});
+
+it('addMember keeps operation-specific fallback for status-less failures', async () => {
+  sc.addSessionParticipant.mockRejectedValue(new Error('network'));
+  const res = await sessionService.addMember('s1', 'bot-2');
+  expect(res.ok).toBe(false);
+  expect(!res.ok && res.error.friendlyMessage).toBe('添加会话成员失败，请稍后重试。');
+});
+
 it('removeMember DELETEs participant and returns refreshed session', async () => {
   sc.deleteSessionParticipant.mockResolvedValue({
     code: 20000,

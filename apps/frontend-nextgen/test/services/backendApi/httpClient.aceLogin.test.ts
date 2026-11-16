@@ -71,15 +71,16 @@ describe('httpClient ACE 登录拦截探测', () => {
     expect(useLoginRedirectStore.getState().pendingLoginUrl).toBeUndefined();
   });
 
-  it('HTTP 401 不触发 ACE 跳转(走既有 BackendRequestError 路径)', async () => {
+  it('HTTP 401(无 ACE 登录体)→ 登记「等待重登」占位信号(无链接,探活补链)+ 静默抛 AceLoginRedirectError', async () => {
     global.fetch = jest.fn<typeof fetch>().mockResolvedValue(jsonStatus(401, { message: 'unauthorized' }));
 
     await expect(backendRequest('/openapi/v1/admin/spaces', { injectUserId: false })).rejects.toMatchObject({
-      name: 'BackendRequestError',
-      status: 401,
+      name: 'AceLoginRedirectError',
     });
 
+    expect(useLoginRedirectStore.getState().pendingLogin).toEqual({ mode: 'redirect' });
     expect(useLoginRedirectStore.getState().pendingLoginUrl).toBeUndefined();
+    expect(useErrorNotifyStore.getState().queue).toHaveLength(0);
   });
 
   it('单飞:并发两次 ACE 命中只登记首个 URL', async () => {
@@ -150,9 +151,10 @@ describe('httpClient ACE 登录拦截探测', () => {
 });
 
 // 未登录反应口与静默(external-oauth-login「未登录静默与统一登录处置」):
-// oauth 策略下未登录失败(HTTP 401 任意体 / 信封双方言 401 段体,含网关误包 HTTP 200 形态)→ 单飞登记登录弹窗信号,
-// 静默上抛 AceLoginRedirectError,不投递逐条通用错误 toast;已确认未登录态后的其余失败同样静默。
-// ace-gateway 行为不变(spec「登录处置信号统一出口与单飞」外部模式弹窗 Scenario)。
+// 未登录失败(HTTP 401 任意体 / 信封双方言 401 段体,含网关误包 HTTP 200 形态)两策略均 → 单飞登记
+// 登录信号,静默上抛 AceLoginRedirectError,不投递逐条通用错误 toast——oauth 登记 prompt 弹窗信号,
+// ace 登记 redirect「等待重登」信号(裸 401 无 ACE 登录体,占位无链接由探活补链)。
+// oauth 已确认未登录态后的其余失败同样静默;ace 非 401 失败维持照常投递。
 describe('httpClient 未登录反应口与静默', () => {
   const bcsUnauthBody = {
     code: 40100,
@@ -247,16 +249,16 @@ describe('httpClient 未登录反应口与静默', () => {
     expect(useErrorNotifyStore.getState().queue).toHaveLength(0);
   });
 
-  it('ace-gateway + 401 + unauthenticated 体 → 行为不变(BackendRequestError,无弹窗信号)', async () => {
+  it('ace-gateway + 401 + unauthenticated 体 → 占位「等待重登」信号 + 静默抛 AceLoginRedirectError,不入错误提示队列', async () => {
     useLoginStrategyStore.getState().setLoginStrategy('ace-gateway');
     global.fetch = jest.fn<typeof fetch>().mockResolvedValue(jsonStatus(401, bcsUnauthBody));
 
     await expect(backendRequest('/openapi/v1/admin/spaces', { injectUserId: false })).rejects.toMatchObject({
-      name: 'BackendRequestError',
-      status: 401,
+      name: 'AceLoginRedirectError',
     });
 
-    expect(useLoginRedirectStore.getState().pendingLogin).toBeUndefined();
+    expect(useLoginRedirectStore.getState().pendingLogin).toEqual({ mode: 'redirect' });
+    expect(useErrorNotifyStore.getState().queue).toHaveLength(0);
   });
 
   it('ace-gateway + 已确认未登录态 + 500 → 行为不变(照常投递默认提示)', async () => {

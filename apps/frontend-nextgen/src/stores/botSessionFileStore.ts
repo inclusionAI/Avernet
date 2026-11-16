@@ -19,8 +19,8 @@ export interface BotSessionFileView {
   createdAt: string | null;
 }
 
-/** 上传任务进程态(不等于后端 status)。 */
-export type UploadPhase = 'staged' | 'uploading' | 'completing' | 'failed' | 'ready';
+/** 上传任务进程态(不等于后端 status)。materializing=字节直传已完成,轮询物化中(无进度转圈)。 */
+export type UploadPhase = 'staged' | 'uploading' | 'completing' | 'materializing' | 'failed' | 'ready';
 
 export interface UploadTask {
   localId: string;
