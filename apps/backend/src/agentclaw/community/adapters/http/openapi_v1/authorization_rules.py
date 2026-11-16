@@ -694,8 +694,6 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("GET", "/openapi/v1/experts"): NoCheck("tenant-identical expert catalogue"),
     ("GET", "/openapi/v1/experts/categories"): NoCheck("tenant-identical expert catalogue"),
     ("GET", "/openapi/v1/experts/{expert_id}"): NoCheck("tenant-identical expert catalogue"),
-    ("POST", "/openapi/v1/bots/market/skills"): NoCheck("tenant-identical marketplace"),
-    ("GET", "/openapi/v1/bots/market/clis"): NoCheck("tenant-identical marketplace"),
     ("GET", "/openapi/v1/bots/mcp/servers"): NoCheck(
         "tenant-identical MCP catalogue and per-caller config"
     ),
