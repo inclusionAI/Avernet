@@ -5,9 +5,11 @@ use bcs_app_session::GroupContextAddAccessGuard;
 use bcs_domain::{GroupContextPolicy, ScopeLevel};
 use bcs_group::{GroupCore, MemoryGroupRepo};
 use bcs_service_api::application::v1::{
-    AddGroupContext, ApplicationError, GetGroupContext, GroupContextAck,
+    AddGroupContext, ApplicationError, AuthenticatedCaller, AuthenticatedUserIdentity,
+    GetGroupContext, GroupContextAck,
     GroupContextApplicationService, GroupContextGetResponse, GroupContextListResponse,
-    GroupContextRequestContext, ListGroupContexts, SystemSetGroupContext, UpdateGroupContext,
+    GroupContextRequestContext, ListGroupContexts, ListSharedGroupContexts, SharedGroupContextItem,
+    SystemSetGroupContext, UpdateGroupContext,
 };
 use bcs_service_api::port::repo::SessionRepoPort;
 use bcs_service_api::{
@@ -22,6 +24,7 @@ const SESSION_ID: &str = "bcs_grp_gcguard:00000001";
 struct RecordingGroupContextService {
     adds: Mutex<Vec<AddGroupContext>>,
     preset_actors: Mutex<Vec<String>>,
+    shared_queries: Mutex<Vec<ListSharedGroupContexts>>,
 }
 
 #[async_trait]
@@ -31,10 +34,18 @@ impl GroupContextApplicationService for RecordingGroupContextService {
         Ok(GroupContextAck::ok())
     }
 
+    async fn list_shared_contexts(
+        &self,
+        query: ListSharedGroupContexts,
+    ) -> Result<Vec<SharedGroupContextItem>, ApplicationError> {
+        self.shared_queries.lock().unwrap().push(query);
+        Ok(Vec::new())
+    }
+
     async fn list_presets(
         &self,
         _: &str,
-        _: &bcs_service_api::application::v1::AuthenticatedCaller,
+        _: &AuthenticatedCaller,
         _: Option<&str>,
     ) -> Result<Vec<bcs_service_api::application::v1::GroupContextItemPreset>, ApplicationError> {
         Ok(Vec::new())
@@ -421,7 +432,7 @@ async fn preset_writes_require_live_authority_on_the_group_driver() {
 
 #[tokio::test]
 async fn preset_discovery_requires_group_membership_or_an_explicit_session() {
-    use bcs_service_api::application::v1::{AuthenticatedBotIdentity, AuthenticatedCaller};
+    use bcs_service_api::application::v1::AuthenticatedBotIdentity;
 
     let (guard, _) = guard_with_group_member("group_member").await;
     let bot = |id: &str| AuthenticatedCaller {
@@ -446,4 +457,130 @@ async fn preset_discovery_requires_group_membership_or_an_explicit_session() {
 
     let outsider = guard.list_presets(GROUP_ID, &bot("outsider"), Some(SESSION_ID)).await.unwrap_err();
     assert_eq!(outsider.code(), "permission_denied");
+}
+
+#[tokio::test]
+async fn shared_info_checks_membership_and_limits_the_read_principals() {
+    use bcs_test_support::{authority_edge_fixture, grant_manager_edge, grant_owner_edge};
+
+    let authority = authority_edge_fixture();
+    grant_owner_edge(&authority.repo, "driver", "owner").await;
+    grant_owner_edge(&authority.repo, "guest", "other-owner").await;
+    grant_manager_edge(&authority.repo, "guest", "owner").await;
+    let groups = Arc::new(GroupCore::with_repo(Arc::new(MemoryGroupRepo::new())));
+    groups.upsert(Group::new(
+        GROUP_ID, "driver", vec![
+            Participant::bot("driver", ParticipantRole::Driver),
+            Participant::human("human_reader", ParticipantRole::Consultant),
+        ],
+    )).await.unwrap();
+    let mut public_group = Group::new("public-group", "driver", Vec::new());
+    public_group.visibility = "public".into();
+    groups.upsert(public_group).await.unwrap();
+    let sessions = Arc::new(MemorySessionRepo::new());
+    sessions.create(GROUP_ID, NewSessionParams {
+        id: Some(SESSION_ID.into()),
+        session_kind: SessionKind::Chat,
+        participants: vec![
+            Participant::bot("guest", ParticipantRole::Consultant),
+            Participant::human("human_reader", ParticipantRole::Consultant),
+        ],
+        ..Default::default()
+    }).await.unwrap();
+    let inner = Arc::new(RecordingGroupContextService::default());
+    let guard = GroupContextAddAccessGuard::new(inner.clone(), groups, sessions, authority.hook);
+    let caller = |id: &str| AuthenticatedCaller {
+        tenant: None,
+        user: Some(AuthenticatedUserIdentity {
+            id: id.into(),
+            username: id.into(),
+            display_name: None,
+            full_name: None,
+        }),
+        bot: None,
+        app: None,
+        access_key: None,
+    };
+    let owner = caller("owner");
+    let reader = caller("reader");
+
+    for (session, view_bot, human) in [
+        (Some(SESSION_ID), None, &owner),
+        (Some(SESSION_ID), Some("guest"), &owner),
+        (Some(SESSION_ID), None, &reader),
+        (None, None, &owner),
+        (None, None, &reader),
+        (None, Some("driver"), &owner),
+    ] {
+        guard.shared_info(GROUP_ID, session, view_bot, human).await.unwrap();
+    }
+    let outsider = caller("outsider");
+    guard.shared_info("public-group", None, None, &outsider).await.unwrap();
+    let anonymous = AuthenticatedCaller { user: None, ..outsider.clone() };
+    assert!(matches!(
+        guard.shared_info(GROUP_ID, None, None, &anonymous).await,
+        Err(ApplicationError::Unauthenticated)
+    ));
+    assert_eq!(
+        guard.shared_info(GROUP_ID, Some(SESSION_ID), Some("guest"), &anonymous)
+            .await.unwrap_err().code(),
+        "permission_denied"
+    );
+
+    for (group, session, view_bot, human, code) in [
+        (GROUP_ID, Some(SESSION_ID), Some("guest"), &reader, "permission_denied"),
+        (GROUP_ID, Some(SESSION_ID), Some("driver"), &owner, "permission_denied"),
+        (GROUP_ID, Some(SESSION_ID), None, &outsider, "permission_denied"),
+        (GROUP_ID, None, None, &outsider, "permission_denied"),
+        (GROUP_ID, None, Some("guest"), &owner, "permission_denied"),
+        (GROUP_ID, None, Some("driver"), &reader, "permission_denied"),
+        (GROUP_ID, Some("missing"), None, &owner, "session_not_found"),
+        ("missing", None, None, &owner, "group_not_found"),
+    ] {
+        assert_eq!(guard.shared_info(group, session, view_bot, human).await.unwrap_err().code(), code);
+    }
+    assert!(guard.can_manage_presets(GROUP_ID, "human_owner").await.unwrap());
+    assert!(!guard.can_manage_presets(GROUP_ID, "human_reader").await.unwrap());
+    assert_eq!(guard.can_manage_presets("missing", "human_owner").await.unwrap_err().code(), "group_not_found");
+
+    let queries = inner.shared_queries.lock().unwrap();
+    assert_eq!(queries.len(), 7);
+    let mut owner_ids = queries[0].actor_ids.clone();
+    owner_ids.sort();
+    assert_eq!(owner_ids, ["driver", "guest", "human_owner"]);
+    assert_eq!(queries[1].actor_ids, ["guest"]);
+    assert_eq!(queries[2].actor_ids, ["human_reader"]);
+    assert_eq!(queries[3].actor_ids, ["human_owner"]);
+    assert_eq!(queries[3].group_id, GROUP_ID);
+    assert_eq!(queries[3].session_id, None);
+    assert_eq!(queries[4].actor_ids, ["human_reader"]);
+    assert_eq!(queries[5].actor_ids, ["driver"]);
+    assert_eq!(queries[5].session_id, None);
+    assert_eq!(queries[6].group_id, "public-group");
+    assert_eq!(queries[6].actor_ids, ["human_outsider"]);
+}
+
+#[tokio::test]
+async fn shared_info_defaults_fail_closed_without_an_implementation() {
+    let service = bcs_test_support::NoopGroupContextService;
+    let caller = AuthenticatedCaller {
+        tenant: None,
+        user: None,
+        bot: None,
+        app: None,
+        access_key: None,
+    };
+    assert!(matches!(
+        service.shared_info(GROUP_ID, None, None, &caller).await,
+        Err(ApplicationError::Internal(_))
+    ));
+    assert!(matches!(
+        service.list_shared_contexts(ListSharedGroupContexts {
+            group_id: GROUP_ID.into(),
+            session_id: None,
+            actor_ids: Vec::new(),
+        }).await,
+        Err(ApplicationError::Internal(_))
+    ));
+    assert!(!service.can_manage_presets(GROUP_ID, "human_reader").await.unwrap());
 }

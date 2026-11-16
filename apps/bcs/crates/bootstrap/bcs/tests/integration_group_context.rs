@@ -616,7 +616,7 @@ async fn bot_cannot_manage_presets_but_can_use_a_defined_preset() {
     let add = "/groupcontext/add?groupId=preset-group&sessionId=preset-group:12345678";
     for operation in ["add", "update", "delete"] {
         let (status, _) = post_json(
-            &app, &format!("/groupcontext/{operation}-preset?groupId=preset-group"), token_for("admin"),
+            &app, &format!("/groupcontext/manage/{operation}-preset?groupId=preset-group"), token_for("admin"),
             json!({"name":"timeline"}),
         ).await;
         assert_eq!(status, StatusCode::FORBIDDEN);
@@ -629,6 +629,12 @@ async fn bot_cannot_manage_presets_but_can_use_a_defined_preset() {
     let (status, body) = post_json(&app, list, token_for("judge_bot"), json!({})).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["presets"][0]["creator"], "human_owner");
+    assert!(body.get("can_manage").is_none());
+    let (status, _) = post_json(
+        &app, "/groupcontext/manage/list-preset?groupId=preset-group", token_for("judge_bot"), json!({}),
+    ).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
 
     let (status, body) = post_json(&app, list, token_for("张三"), json!({})).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
@@ -663,6 +669,63 @@ async fn bot_cannot_manage_presets_but_can_use_a_defined_preset() {
     let existing = repo.get_active("timeline", "preset-group:12345678").await.unwrap().unwrap();
     assert!(existing.created_from_preset);
     assert_eq!(existing.content, "event");
+
+    for (round, name, readers) in [
+        ("first", "public_summary", json!([])),
+        ("second", "guest_summary", json!(["张三"])),
+        ("third", "driver_summary", json!(["judge_bot"])),
+    ] {
+        let uri = format!(
+            "/groupcontext/add?groupId=preset-group&sessionId=preset-group:12345678&roundId=preset-group:12345678:{round}"
+        );
+        let (status, body) = post_json(&app, &uri, token_for("judge_bot"), json!({
+            "name": name,
+            "scope_level": "round",
+            "content": name,
+            "visible_to": {"userIds": readers},
+        })).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+    }
+
+    let shared = "/groupcontext/shared-info?groupId=preset-group&sessionId=preset-group:12345678";
+    let (status, body) = post_json(&app, shared, token_for("张三"), json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let mut visible = names(&body, "items");
+    visible.sort();
+    assert_eq!(visible, ["guest_summary", "public_summary", "timeline"]);
+    assert_eq!(body["items"][0]["content"], "event");
+    assert_eq!(body["items"][0]["creator"], "judge_bot");
+    assert_eq!(post_json(&app, shared, token_for("admin"), json!({})).await.0, StatusCode::FORBIDDEN);
+
+    for (uri, expected) in [
+        ("/groupcontext/shared-info", StatusCode::BAD_REQUEST),
+        ("/groupcontext/shared-info?groupId=preset-group&roundId=unexpected", StatusCode::BAD_REQUEST),
+        ("/groupcontext/shared-info?groupId=preset-group&groupId=other-group", StatusCode::BAD_REQUEST),
+    ] {
+        let (status, body) = post_json(&app, uri, token_for("张三"), json!({})).await;
+        assert_eq!(status, expected, "{body}");
+        assert_eq!(body["status"], "invalid_param");
+    }
+    let (status, body) = post_json(&app, shared, "invalid-token", json!({})).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(body["status"], "invalid_param");
+
+    // A member's Bot credential cannot select a different Bot's perspective.
+    let (status, body) = post_json(
+        &app, &format!("{shared}&view_bot_id=judge_bot"), token_for("张三"), json!({}),
+    ).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(body["status"], "permission_denied");
+
+    let group_view = "/groupcontext/shared-info?groupId=preset-group";
+    let (status, body) = post_json(&app, group_view, token_for("judge_bot"), json!({})).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["items"], json!([]), "group view excludes Session entries");
+    let (status, body) = post_json(&app, group_view, token_for("张三"), json!({})).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+
+    let other = "/groupcontext/shared-info?groupId=preset-group&sessionId=other-group:12345678";
+    assert_eq!(post_json(&app, other, token_for("张三"), json!({})).await.0, StatusCode::BAD_REQUEST);
 }
 
 struct PresetTestIdentity;
@@ -701,19 +764,66 @@ impl bcs_http::state::UserIdentityPort for PresetTestIdentity {
 
 #[tokio::test]
 async fn human_preset_management_routes_persist_changes_and_report_validation_errors() {
-    use bcs_service_api::{Group, GroupCoreService, Participant, ParticipantRole};
+    assert_human_preset_management_routes(Arc::new(MemoryGroupContextRepo::new())).await;
+}
 
-    let repo = Arc::new(MemoryGroupContextRepo::new());
+#[tokio::test]
+#[ignore = "requires disposable MySQL; run devops/k8s-tests/bcs/test-k8s-bcs-presets.sh"]
+async fn mysql_human_preset_management_routes() {
+    use bcs_config_api::mysql::MysqlConnectionConfig;
+    use bcs_config_api::{MysqlDbConfig, StatementProtocol};
+    use bcs_db_api::{DbPlugin, DbStatement};
+    use bcs_db_mysql::{MysqlDbManager, MysqlDbPlugin};
+    use bcs_group_context_store::SqlGroupContextStore;
+
+    let port = std::env::var("BCS_PRESET_TEST_MYSQL_PORT").unwrap().parse().unwrap();
+    const PASSWORD_ENV: &str = "BCS_PRESET_TEST_MYSQL_PASSWORD";
+    let password = std::env::var(PASSWORD_ENV).unwrap();
+    let config = MysqlDbConfig::new()
+        .with_database("bcs_preset_e2e")
+        .with_connection(MysqlConnectionConfig {
+            connection_type: "direct".into(),
+            host: Some("127.0.0.1".into()),
+            port: Some(port),
+            user: Some("bcs".into()),
+            password: Some(password),
+            extra: Default::default(),
+        })
+        .with_statement_protocol(StatementProtocol::Text);
+    let manager = MysqlDbManager::new(config).await.expect("connect to disposable MySQL");
+    let db = Arc::new(MysqlDbPlugin::new(manager.clone(), "bcs"));
+    for migration in [
+        include_str!("../../../../migrations/mysql/033_group_context.sql"),
+        include_str!("../../../../migrations/mysql/034_group_context_owners.sql"),
+        include_str!("../../../../migrations/mysql/046_group_context_preset.sql"),
+    ] {
+        for sql in migration.split(';').map(str::trim).filter(|sql| !sql.is_empty()) {
+            db.execute(DbStatement::new(sql)).await.expect("apply Group Context DDL");
+        }
+    }
+    assert_human_preset_management_routes(Arc::new(SqlGroupContextStore::oceanbase(db))).await;
+    manager.close().await;
+}
+
+async fn assert_human_preset_management_routes(repo: Arc<dyn GroupContextRepo>) {
+    use bcs_service_api::{Group, GroupCoreService, NewSessionParams, Participant, ParticipantRole, SessionRepoPort};
+
     let authority = bcs_test_support::authority_edge_fixture();
     bcs_test_support::grant_owner_edge(&authority.repo, "preset-driver", "preset-owner").await;
     let groups = Arc::new(bcs_group::GroupCore::with_repo(Arc::new(bcs_group::MemoryGroupRepo::new())));
     groups.upsert(Group::new(
         "preset-group", "preset-driver", vec![Participant::bot("preset-driver", ParticipantRole::Driver)],
     )).await.unwrap();
+    let sessions = Arc::new(bcs_session_store::MemorySessionRepo::new());
+    sessions.create("preset-group", NewSessionParams {
+        id: Some("preset-group:12345678".into()),
+        participants: vec![Participant::bot("preset-driver", ParticipantRole::Driver)],
+        ..Default::default()
+    }).await.unwrap();
     let service = bcs_app_session::GroupContextAddAccessGuard::new(
         Arc::new(GroupContextApplicationServiceImpl::new(repo.clone())),
         groups,
-        Arc::new(bcs_session_store::MemorySessionRepo::new()),
+        sessions,
         authority.hook,
     );
     let services = Services::builder().group_context(Arc::new(service)).build_for_test();
@@ -724,11 +834,37 @@ async fn human_preset_management_routes_persist_changes_and_report_validation_er
         app.clone().oneshot(request)
     };
 
-    let add = "/groupcontext/add-preset?groupId=preset-group";
-    let update = "/groupcontext/update-preset?groupId=preset-group";
-    let delete = "/groupcontext/delete-preset?groupId=preset-group";
+    let response = post(
+        "/groupcontext/shared-info?groupId=preset-group&sessionId=preset-group:12345678&view_bot_id=preset-driver",
+        json!({}),
+    ).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response_json(response).await["items"], json!([]));
+
+    let response = post("/groupcontext/manage/list-preset?groupId=missing", json!({})).await.unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert_eq!(response_json(response).await["status"], "not_found");
+
+    let list = "/groupcontext/manage/list-preset?groupId=preset-group";
+    let response = post(list, json!({})).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response_json(response).await["can_manage"], true);
+
+    for uri in [
+        "/groupcontext/manage/list-preset",
+        "/groupcontext/manage/list-preset?groupId=preset-group&groupId=other-group",
+        "/groupcontext/manage/list-preset?groupId=preset-group&view_bot_id=preset-driver",
+    ] {
+        let response = post(uri, json!({})).await.unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{uri}");
+        assert_eq!(response_json(response).await["status"], "invalid_param");
+    }
+
+    let add = "/groupcontext/manage/add-preset?groupId=preset-group";
+    let update = "/groupcontext/manage/update-preset?groupId=preset-group";
+    let delete = "/groupcontext/manage/delete-preset?groupId=preset-group";
     for (uri, body) in [
-        ("/groupcontext/add-preset", json!({"name":"timeline"})),
+        ("/groupcontext/manage/add-preset", json!({"name":"timeline"})),
         (add, json!({})),
     ] {
         assert_eq!(post(uri, body).await.unwrap().status(), StatusCode::BAD_REQUEST);
@@ -748,10 +884,15 @@ async fn human_preset_management_routes_persist_changes_and_report_validation_er
     }
     let response = post(add, json!({"name":"events","description":"Duplicate"})).await.unwrap();
     assert_eq!(response.status(), StatusCode::CONFLICT);
-    assert_eq!(response_json(response).await["status"], "conflict");
+    let body = response_json(response).await;
+    assert_eq!(body["status"], "conflict");
+    assert_eq!(body["error_msg"], "events already exists in preset-group。请重命名后重试。");
 
-    let response = post(update, json!({"name":"events","description":"Updated events"})).await.unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
+    for _ in 0..2 {
+        let response = post(update, json!({"name":"events","description":"Updated events"})).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response_json(response).await["status"], "ok");
+    }
 
     let presets = repo.list_presets("preset-group").await.unwrap();
     assert_eq!(presets.len(), 1);
@@ -765,4 +906,8 @@ async fn human_preset_management_routes_persist_changes_and_report_validation_er
     assert_eq!(post(delete, body.clone()).await.unwrap().status(), StatusCode::OK);
     assert!(repo.list_presets("preset-group").await.unwrap().is_empty());
     assert_eq!(post(delete, body).await.unwrap().status(), StatusCode::NOT_FOUND);
+    let response = post(update, json!({"name":"events","new_name":"timeline"})).await.unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert_eq!(response_json(response).await["status"], "not_found");
+    assert!(repo.list_presets("preset-group").await.unwrap().is_empty());
 }

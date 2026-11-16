@@ -21,6 +21,7 @@ import httpx
 from agentclaw.community.core.task.task_runner.client.ports import (
     ApiKeyProvider,
     BotSendResult,
+    OpenApiBotError,
     OpenApiBotPort,
 )
 
@@ -41,7 +42,7 @@ def _resp_summary(resp) -> str:
         return "<unreadable>"
 
 
-class OpenApiError(Exception):
+class OpenApiError(OpenApiBotError):
     pass
 
 
@@ -275,23 +276,39 @@ class OpenApiBotAdapter(
             self._k.base_url,
             len(message or ""),
         )
-        async with self._client_for_current_loop() as client:
-            r = await client.post(
-                "/openapi/v1/messages",
-                json={
-                    "bot_id": bot_id, "message": message, "metadata": metadata,
-                    **({"message_id": message_id} if message_id else {}),
-                },
-                headers=self._headers(),
-            )
+        try:
+            async with self._client_for_current_loop() as client:
+                r = await client.post(
+                    "/openapi/v1/messages",
+                    json={
+                        "bot_id": bot_id,
+                        "message": message,
+                        "metadata": metadata,
+                        **({"message_id": message_id} if message_id else {}),
+                    },
+                    headers=self._headers(),
+                )
+        except httpx.HTTPError as exc:
+            raise OpenApiError("send_message transport failed") from exc
         logger.info(
             "[task][openapi_bot] <<< send_message status=%s body=%s",
             r.status_code,
             _resp_summary(r),
         )
         _map_status(r)
-        payload = r.json()
-        data = payload.get("data") or {}
+        try:
+            payload = r.json()
+        except ValueError as exc:
+            raise OpenApiError("send_message response is not valid JSON") from exc
+        if not isinstance(payload, dict):
+            raise OpenApiError("send_message response must be a JSON object")
+        raw_data = payload.get("data")
+        if raw_data is None:
+            data: dict[str, Any] = {}
+        elif isinstance(raw_data, dict):
+            data = raw_data
+        else:
+            raise OpenApiError("send_message response data must be a JSON object")
         message_id = data.get("message_id")
         code = payload.get("code")
         # 业务信封校验:HTTP 200 但 code!=0 或无 message_id(如 ACE 登录门/未授权),若不拦截会 run_id=None,

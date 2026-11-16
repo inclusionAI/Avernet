@@ -4,7 +4,7 @@ from agentclaw.community.core.bot_management.services.bot_service import BotServ
 from agentclaw.community.core.caller_identity.scheduled_refresh import NoopScheduledCallerRefresh
 
 
-def test_public_profile_wires_noop_into_owner_callback(test_injector):
+def test_public_profile_retains_explicit_refresh_port_for_legacy_di(test_injector):
     refresh = test_injector.get(ScheduledCallerRefreshProtocol)
     assert isinstance(refresh, NoopScheduledCallerRefresh)
     assert test_injector.get(BotService)._scheduled_caller_refresh is refresh

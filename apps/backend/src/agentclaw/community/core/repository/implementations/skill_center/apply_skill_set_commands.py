@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 from agentclaw.community.core.models.skill import Skill, SkillSet, SkillSetSkill
+from agentclaw.community.core.repository.implementations.skill_center.bot_mutation_fence import lock_bot_capabilities
 from agentclaw.community.core.models.mcp import SkillSetMCPServer
 from agentclaw.community.core.models.skill_installation_source import (
     SkillInstallationSourceKind,
@@ -200,6 +201,7 @@ class ApplySkillSetCommands:
         if len(names) != len(set(names)) or set(names) & set(remove_names):
             raise SkillSetControlPlaneConflictError("SKILL_SET_NAME_CONFLICT")
         with self._db.transactional_orm_session() as session:
+            lock_bot_capabilities(session, bot_id=scope.bot_id, entity_id=scope.owner_id, env=scope.env)
             old = self._snapshot(
                 session, scope.bot_id, scope.owner_id, engine_type=scope.engine_type
             )
@@ -402,6 +404,8 @@ class ApplySkillSetCommands:
                 owner_id=scope.owner_id,
                 candidate_ids=set(active_skills),
                 retired_ids=set(before_skills) - set(active_skills),
+                engine_type=scope.engine_type,
+                default_engine_types=scope.default_engine_types,
             )
             affected_mcps = set(before_mcps) | set(active_mcps)
             for skill_id in set(before_skills) | set(active_skills):

@@ -35,7 +35,10 @@ Manage every core entity lifecycle through a documented state machine:
 - **DeviceStatus** (`api/device_manage/_device.py`): container-mapped states —
   `PENDING` (provisioning), `ACTIVE` (running), `UPDATING` (drained,
   excluded from load balancing), `STOPPED` (provider destroyed, record kept),
-  `FAILED`, `OFFLINE` (reachable machine, daemon not running), `RELEASED`.
+  `FAILED`, `OFFLINE` (written when the host mng daemon disconnects or a
+  container heartbeat reports a status other than "ok"; does not imply the
+  device is reachable or that commands/restarts can be delivered, and a later
+  "ok" heartbeat can return it to `ACTIVE`), `RELEASED`.
 - **PublishStatus** (`api/publish_manage/_enums.py`): the gated pipeline
   machine `PENDING → ACTIVE → APPROVING → …` with terminals
   `REJECTED / FAILED / SUCCESS / REVOKED` (see ADR-0005); plus per-batch

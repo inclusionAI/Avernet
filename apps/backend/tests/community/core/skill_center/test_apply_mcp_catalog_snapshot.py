@@ -20,6 +20,13 @@ from ._test_skill_set_management_service_support import _Runtime, _skill_service
 @pytest.mark.asyncio
 async def test_bulk_new_mcp_uses_catalog_snapshot_and_keeps_existing_snapshot():
     db = _Database()
+    from agentclaw.community.plugin_api.models import BotModel
+
+    with db.transactional_orm_session() as session:
+        session.add(BotModel(
+            bot_id="bot-1", entity_id="true-owner", owner_id="true-owner",
+            entity_type="staff", creator_id="true-owner", env="dev",
+        ))
     service = _skill_service(CapabilityDesiredStateRepository(db), _Runtime())
     catalog = {
         "mcp.first": {

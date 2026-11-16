@@ -4,8 +4,10 @@ export const workflowAiUnavailable = 'AI 草稿服务不可用：请检查服务
 export const workflowAiCapabilityUnconfirmed = '无法确认 AI 草稿服务能力：能力检查传输失败；这不证明服务器 autoHeal.botId / BaaS 配置缺失。原工作流未修改。'
 
 const workflowAiErrorDescriptions: Record<string, string> = {
+  BAAS_POLL_UNAVAILABLE: 'BaaS 消息状态查询暂不可用：这不证明原任务失败或停止；请保留恢复凭据查询原任务，不要重新派发。',
+  AI_DRAFT_RECOVERY_UNAVAILABLE: 'AI 草稿请求凭据暂不可用：服务器无法签发恢复凭据，请管理员检查 BaaS 签名配置。原工作流未修改；已取得凭据的请求可继续查询，不要重新派发。',
   AUTO_HEAL_BAAS_NOT_CONFIGURED: '服务器 AutoHeal/BaaS 配置缺失或未启用：请检查服务器 effective autoHeal.botId 与 BaaS 传输配置；浏览器不会选择或覆盖 Bot。',
-  AUTO_HEAL_BOT_UNAVAILABLE: '服务器配置的 AutoHeal Bot 绑定不可用或无效：请检查 effective autoHeal.botId 对应的 BaaS Bot 是否存在、可用且绑定有效。',
+  AUTO_HEAL_BOT_UNAVAILABLE: '服务器配置的 AutoHeal Bot 绑定不可用或无效：请检查 effective autoHeal.botId 中的 Bot ID 与 owner，核对目标 BaaS 环境、endpoint 与配套 API key，并确认该 Bot 在该环境中的绑定为 ACTIVE。',
   BAAS_AUTH_FAILED: 'BaaS 认证或权限失败：请检查 BaaS API Key / IAM token 及相关权限；认证失败不能证明任务未被派发，可能在提交或轮询阶段发生。',
   BAAS_REQUEST_REJECTED: 'BaaS 明确拒绝本次请求：请检查 BaaS 请求策略、Bot 状态和输入限制，根据提供方错误信息调整后重试。',
   BAAS_GENERATION_FAILED: 'BaaS 生成失败：请检查上游任务状态或日志，并确认需求、Bot 配置和输入限制后重试。',
@@ -25,11 +27,12 @@ export function describeWorkflowAiError(reason?: string) {
 }
 
 export function describeWorkflowAiUnavailable(reason?: string) {
+  if (reason?.trim() === 'AI_DRAFT_RECOVERY_UNAVAILABLE') return describeWorkflowAiError(reason)
   return `${workflowAiUnavailable}${reason ? `服务端原因：${describeWorkflowAiError(reason)}。` : '服务器未返回具体原因。'}`
 }
-export type WorkflowAiAttempt = { requestId: string; draftId?: string }
+export type WorkflowAiAttempt = { requestId: string; draftId?: string; receipt?: string; submitted?: boolean }
 
-/** Recovery always reuses a persisted draft or the same idempotency key. */
+/** Request-session recovery only: reuse the signed receipt and fixed BaaS message ID. */
 export class WorkflowAiRecoveryError extends Error {
   constructor(message: string, public readonly attempt: WorkflowAiAttempt) { super(message) }
 }
@@ -73,19 +76,19 @@ export function delay(signal: AbortSignal): Promise<void> {
   })
 }
 
-/** Best-effort local server cancellation; BaaS has no supported remote stop. */
+/** Best-effort acknowledgement only; neither durable cancellation nor a BaaS stop. */
 export async function cancelWorkflowAiAttempt(workflowId: string, attempt: WorkflowAiAttempt): Promise<void> {
-  if (!attempt.draftId) return
+  if (!attempt.draftId || !attempt.receipt) return
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), 10_000)
-  try { await abortable(workflowAiApi.cancel(workflowId, attempt.draftId, controller.signal), controller.signal) }
-  catch { /* Best effort only; a failed server record must not promise that BaaS stopped. */ }
+  try { await abortable(workflowAiApi.cancel(workflowId, attempt.draftId, attempt.receipt, controller.signal), controller.signal) }
+  catch { /* Best effort only; this cannot promise durable cancellation or that BaaS stopped. */ }
   finally { clearTimeout(timeout) }
 }
 
 export async function workflowAiInputDigest(yaml: string): Promise<string | null> {
-  // Non-secure contexts rely on the server's immutable requestId -> draftId/input binding.
-  // Scoped workflow/draft IDs and a nonempty server digest are still checked on every poll.
+  // Non-secure contexts rely on the server-signed receipt's workflow/message/input binding.
+  // Scoped IDs and a nonempty 64-hex server digest are still checked before dispatch and on poll.
   if (!globalThis.crypto?.subtle) return null
   const hash = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(yaml))
   return [...new Uint8Array(hash)].map(value => value.toString(16).padStart(2, '0')).join('')

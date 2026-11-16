@@ -19,6 +19,8 @@ import { dialectFor, sqliteDialect, type Dialect } from "./db/dialect.js";
 import { readYamlConfig, getEnv, envInt, repairEnvInteger, resolveDbConfig,
   type ResolvedDbConfig, type YamlAntLogsConfig } from "./db/config.js";
 
+import { resolveAutoHealBaasEnvironment, type AutoHealBaasEnvironment } from "./auto-heal-baas.js";
+export { selectAutoHealBaasTransport, type AutoHealBaasEnvironment } from "./auto-heal-baas.js";
 export { configureClawWebRuntimeConfig } from "./db/config.js";
 
 // ── Types ──
@@ -599,6 +601,7 @@ export function resolveRepairServiceConfig(configPath?: string): ResolvedRepairS
 
 /** Resolve auto-heal config from env var > yaml. */
 export function resolveAutoHealConfig(configPath?: string): {
+  baasEnvironment: AutoHealBaasEnvironment;
   botId: string;
   diagnosisPrompt: string;
   pollTimeoutMs: number;
@@ -611,6 +614,7 @@ export function resolveAutoHealConfig(configPath?: string): {
 } {
   const yaml = readYamlConfig(configPath);
   return {
+    baasEnvironment: resolveAutoHealBaasEnvironment(getEnv("AUTO_HEAL_BAAS_ENVIRONMENT") ?? yaml.autoHeal?.baasEnvironment),
     botId: getEnv("AUTO_HEAL_BOT_ID") ?? yaml.autoHeal?.botId ?? "",
     diagnosisPrompt: getEnv("AUTO_HEAL_DIAGNOSIS_PROMPT") ?? yaml.autoHeal?.diagnosisPrompt ?? "",
     pollTimeoutMs: envInt("AUTO_HEAL_POLL_TIMEOUT_MS", yaml.autoHeal?.pollTimeoutMs ?? 1800000),

@@ -227,6 +227,18 @@ class ExpertChatInstanceRepository(Protocol):
 
 
     @abstractmethod
+    def list_caller_token_refresh_candidates(
+        self, *, expires_before: datetime, after_id: int = 0, limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Page current-environment serving instances with unknown/due expiry.
+
+        ``expires_before`` is timezone-aware and inclusive; ids are ascending
+        and strictly greater than ``after_id``. ``limit`` is between 1 and 1000.
+        Bot, engine and physical-binding eligibility are checked by the caller.
+        """
+        ...
+
+    @abstractmethod
     def caller_token_update(
         self, *, user_id: str, bot_id: str, owner_id: str,
         binding_id: int, expires_at: datetime,

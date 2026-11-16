@@ -1,4 +1,5 @@
 import { Router, type Request, type Response, type RequestHandler } from 'express';
+import { logWorkflowBackground } from '@avernet/clawweb-shared/server/services/workflow-background-log';
 import { WorkflowAiDraftError, type WorkflowAiDraftService } from '../contracts/workflow-ai-draft.js';
 
 /** Existing Pack CSRF contract, applied to this router's own routes only. */
@@ -35,31 +36,49 @@ export function createWorkflowAiDraftRouter(options: {
   }
   const csrf = guard(publicOrigins);
   const router = Router();
-  const handle = (run: (actorId: string, req: Request, res: Response) => Promise<void>): RequestHandler => async (req, res) => {
+  const handle = (operation: 'capabilities' | 'prepare' | 'create' | 'get' | 'cancel',
+    run: (actorId: string, req: Request, res: Response) => Promise<void>): RequestHandler => async (req, res) => {
+    let phase: 'principal' | 'service' = 'principal';
     try {
       const actor = await options.principal(req);
       if (!actor?.actorId?.trim()) { res.status(401).json({ code: 'UNAUTHORIZED', error: 'Unauthorized' }); return; }
+      phase = 'service';
       await run(actor.actorId, req, res);
     } catch (error) {
       if (error instanceof WorkflowAiDraftError) {
         const code = error.code;
-        // STATE_CONFLICT may follow accepted dispatch; keep the browser's requestId recoverable.
+        // Operational failures never authorize resubmitting a message with a new ID.
         res.status(code === 'INVALID_INPUT' ? 400 : code === 'PAYLOAD_TOO_LARGE' ? 413 : code === 'FORBIDDEN' ? 403
           : code === 'NOT_FOUND' ? 404 : code === 'IDEMPOTENCY_CONFLICT' ? 409 : 503).json({ code, error: error.message });
-      } else res.status(500).json({ code: 'INTERNAL_ERROR', error: 'AI draft request failed' });
+      } else {
+        // Fixed metadata only: error messages/stacks and request fields may
+        // contain credentials, SQL parameters, prompts or the complete YAML.
+        const name = error instanceof Error ? error.name : '';
+        logWorkflowBackground('workflow_ai_draft_request', 'failed', { operation, phase,
+          errorCode: ['Error', 'TypeError', 'RangeError', 'SyntaxError'].includes(name) ? name : 'INTERNAL_ERROR' });
+        res.status(500).json({ code: 'INTERNAL_ERROR', error: 'AI draft request failed' });
+      }
     }
   };
-  router.get('/:workflowId/ai-drafts/capabilities', csrf, handle(async (actorId, req, res) => {
+  router.get('/:workflowId/ai-drafts/capabilities', csrf, handle('capabilities', async (actorId, req, res) => {
     res.json(await options.service.capabilities(actorId, String(req.params.workflowId)));
   }));
-  router.post('/:workflowId/ai-drafts', csrf, handle(async (actorId, req, res) => {
+  router.post('/:workflowId/ai-drafts/prepare', csrf, handle('prepare', async (actorId, req, res) => {
+    res.json(await options.service.prepare(actorId, String(req.params.workflowId), req.body));
+  }));
+  router.post('/:workflowId/ai-drafts', csrf, handle('create', async (actorId, req, res) => {
     res.status(202).json(await options.service.create(actorId, String(req.params.workflowId), req.body));
   }));
-  router.get('/:workflowId/ai-drafts/:draftId', csrf, handle(async (actorId, req, res) => {
-    res.json(await options.service.get(actorId, String(req.params.workflowId), String(req.params.draftId)));
+  router.get('/:workflowId/ai-drafts/:draftId', csrf, handle('get', async (actorId, req, res) => {
+    // Legacy clients have no signed recovery context. Never allocate a
+    // replacement task or expose a BaaS message using only a browser ID.
+    res.status(410).json({ code: 'AI_DRAFT_RECEIPT_REQUIRED', error: 'Signed request context required' });
   }));
-  router.post('/:workflowId/ai-drafts/:draftId/cancel', csrf, handle(async (actorId, req, res) => {
-    res.json(await options.service.cancel(actorId, String(req.params.workflowId), String(req.params.draftId)));
+  router.post('/:workflowId/ai-drafts/:draftId/poll', csrf, handle('get', async (actorId, req, res) => {
+    res.json(await options.service.get(actorId, String(req.params.workflowId), String(req.params.draftId), req.body));
+  }));
+  router.post('/:workflowId/ai-drafts/:draftId/cancel', csrf, handle('cancel', async (actorId, req, res) => {
+    res.json(await options.service.cancel(actorId, String(req.params.workflowId), String(req.params.draftId), req.body));
   }));
   return router;
 }

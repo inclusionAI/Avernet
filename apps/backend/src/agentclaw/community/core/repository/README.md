@@ -283,6 +283,9 @@ provides:
   - TaskTrajectoryRepositoryProtocol
   - TaskDiscoveryLockRepositoryProtocol
   - TaskArtifactRepositoryProtocol
+  - TodoRepositoryProtocol
+  - TodoArtifactRepositoryProtocol
+  - TodoArtifactRepository
   # publishing
   - BotPublishRepositoryProtocol
   - PublishOperationRepository    # an ABC, not a Protocol — same role, same surface
@@ -385,16 +388,20 @@ provides:
   - TaskTrajectoryRepository
   - TaskDiscoveryLockRepository
   - TaskArtifactRepository
+  - TodoRepository
 consumes:
   - DatabasePlugin                # the per-profile session seam, injected into every implementation
   - get_current_env               # environment scoping (utils.env_utils)
   - get_server_host               # ditto
   - get_current_avernet_tenant    # tenant scoping (utils.avernet_tenant)
 internal_dependencies:
+  - agentclaw.community.core.base  # Declarative ORM base for Todo persistence models
+  - agentclaw.community.utils.avernet_tenant_guard  # Tenant column guard for Todo ORM models
   - agentclaw.community.core.mcp.errors  # scoped ownership can change after preflight
   - agentclaw.community.core.mcp.config_comparison  # pure HTTP Header/value equivalence for idempotent Apply claims
   - agentclaw.community.core.ports.mcp_config  # preserve / clear / replace on an atomic Direct MCP claim
   - agentclaw.community.kernel.bot_ownership_sync
+  - agentclaw.community.kernel.skill_mapping_identity  # shared runtime mapping identity for admission
   - agentclaw.community.core.engine_runtime.stage  # stage vocabulary; SQL/runtime selection parity is covered by conformance tests
   - agentclaw.community.core.engine_runtime.errors
   - agentclaw.community.core.space_knowledge.capture_guard

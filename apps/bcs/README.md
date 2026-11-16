@@ -171,8 +171,17 @@ crates/
 
 ### Prerequisites
 
-- **Rust** 1.80+ (`rustup` recommended)
+- **Rust** 1.94.0, selected by the repository's [`rust-toolchain.toml`](../../rust-toolchain.toml) (`rustup` required)
 - **cargo-nextest** for running tests: `cargo install cargo-nextest`
+
+Run `bash scripts/setup_dev_env.sh` from this directory to install the pinned
+toolchain and test tools without changing your global Rust default. Public CI,
+Singlebox, Bridge releases, and Rust builder images use the same compiler
+version. Verify the active compiler with `rustc -Vv`: it must report
+`release: 1.94.0` and commit `4a4ef493e3a1488c6e321570238084b38948f6db`.
+The workspace's `rust-version` remains its minimum supported Rust version;
+it does not select the compiler. Compiler upgrades must update these build
+entries together and rerun coverage gates with the new toolchain.
 
 ### Build and Run
 

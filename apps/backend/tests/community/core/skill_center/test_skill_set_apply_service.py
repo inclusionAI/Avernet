@@ -25,7 +25,15 @@ from tests.community.core.skill_center._test_skill_set_management_service_suppor
 
 @pytest.mark.asyncio
 async def test_bulk_apply_service_reads_and_replaces_without_runtime_for_platform():
-    service = _skill_service(CapabilityDesiredStateRepository(_Database()), _Runtime())
+    db = _Database()
+    from agentclaw.community.plugin_api.models import BotModel
+
+    with db.transactional_orm_session() as session:
+        session.add(BotModel(
+            bot_id="bot-1", entity_id="true-owner", owner_id="true-owner",
+            entity_type="staff", creator_id="true-owner", env="dev",
+        ))
+    service = _skill_service(CapabilityDesiredStateRepository(db), _Runtime())
     before = service.read_apply_snapshot(
         bot_id="bot-1", owner_id="true-owner", actor_id="true-owner"
     )

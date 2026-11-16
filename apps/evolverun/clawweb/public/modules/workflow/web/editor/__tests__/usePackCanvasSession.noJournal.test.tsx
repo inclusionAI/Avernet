@@ -668,7 +668,7 @@ it.each([401, 404] as const)('capability HTTP %i blocks existing-draft writes an
     const beforeFiles = structuredClone(session.state.versions.draft.files)
     const beforeSnapshot = structuredClone(session.state.versions.draft.snapshot)
     const beforeSpec = structuredClone(useEditorStore.getState().spec)
-    await act(async () => { await expect(hook.result.current.save()).rejects.toThrow('统一保存不可用，无法同步草稿(wf)工作流 YAML；数据库和 Git 均未写入，本地修改仍保留。') })
+    await act(async () => { await expect(hook.result.current.save()).rejects.toThrow(shape === 'write-denied' ? 'Pack 版本文件为只读，未发送保存。' : '统一保存不可用，无法同步草稿(wf)工作流 YAML；数据库和 Git 均未写入，本地修改仍保留。') })
     expect(session.state.versions.draft.files, shape).toEqual(beforeFiles)
     expect(session.state.versions.draft.snapshot, shape).toEqual(beforeSnapshot)
     expect(useEditorStore.getState().spec, shape).toEqual(beforeSpec)
@@ -676,7 +676,7 @@ it.each([401, 404] as const)('capability HTTP %i blocks existing-draft writes an
     expect(editorWorkflowWriteState(id).phase, shape).toBe('clear')
     expect(vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method !== 'GET'), shape).toEqual([])
     expect(vi.mocked(fetchJson).mock.calls.filter(([, init]) => init?.method && init.method !== 'GET'), shape).toEqual([])
-    expect(vi.mocked(fetch).mock.calls.filter(([url, init]) => String(url).endsWith('/unified-save') && init?.method === 'GET'), shape).toHaveLength(1)
+    expect(vi.mocked(fetch).mock.calls.filter(([url, init]) => String(url).endsWith('/unified-save') && init?.method === 'GET'), shape).toHaveLength(shape === 'write-denied' ? 0 : 1)
     hook.unmount(); vi.resetAllMocks(); vi.restoreAllMocks(); vi.unstubAllGlobals()
   }
 })
@@ -729,7 +729,7 @@ it.each([true, false])('unified save rejects divergent canvas and YAML without w
   const { hook, session, id, spec } = setup()
   act(() => { useEditorStore.getState().updateSpecField('title', 'Canvas'); editScript(session); const v = session.state.versions.draft
     updateVersion(session, 'draft', { snapshot: { ...v.snapshot!, canWrite }, files: v.files.map(f => f.path === `workflows/${id}.yaml` ? { ...f, contentBase64: btoa(stringify({ ...spec, title: 'File' })) } : f) }) })
-  await act(async () => { await expect(hook.result.current.save()).rejects.toThrow('画布和文件同时修改了工作流 YAML，请先统一内容；草稿仍保留。') })
+  await act(async () => { await expect(hook.result.current.save()).rejects.toThrow(canWrite ? '画布和文件同时修改了工作流 YAML，请先统一内容；草稿仍保留。' : 'Pack 版本文件为只读，未发送保存。') })
   expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === 'POST' || init?.method === 'PUT')).toBe(false)
   expect(vi.mocked(fetchJson).mock.calls.some(([url, init]) => isGitPut(url, init))).toBe(false)
   expect(useEditorStore.getState()._databaseSpec).toEqual(spec)
@@ -891,4 +891,27 @@ it('allows read-only comparison while unapplied form input is retained', async (
   expect(useEditorStore.getState().pendingEdits['workflow:title']).toBe('unapplied')
   act(() => hook.result.current.cancelReconciliation(review))
   expect(useEditorStore.getState().pendingEdits['workflow:title']).toBe('unapplied')
+})
+
+
+it('blocks a Pack denial arriving while the save capability probe is pending', async () => {
+  const { hook, session } = setup()
+  const base = session.state.versions.draft.snapshot!
+  act(() => {
+    useEditorStore.getState().updateSpecField('title', 'Keep local')
+    updateVersion(session, 'draft', { snapshot: null, files: [], loading: true })
+  })
+  let release!: () => void, began!: () => void
+  const gate = new Promise<void>(resolve => { release = resolve }), started = new Promise<void>(resolve => { began = resolve })
+  const original = vi.mocked(fetch).getMockImplementation()!
+  vi.mocked(fetch).mockImplementation(async (url, init) => {
+    if (init?.method === 'GET' && String(url).endsWith('/unified-save')) { began(); await gate }
+    return original(url, init)
+  })
+  let saving!: Promise<unknown>
+  act(() => { saving = hook.result.current.save() }); await started
+  act(() => updateVersion(session, 'draft', { snapshot: { ...base, canWrite: false }, files: structuredClone(base.versionFiles), loading: false }))
+  await act(async () => { release(); await expect(saving).rejects.toThrow(/Pack.*只读/) })
+  expect(vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === 'POST' || init?.method === 'PUT')).toEqual([])
+  expect(useEditorStore.getState().spec?.title).toBe('Keep local')
 })

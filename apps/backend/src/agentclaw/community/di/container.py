@@ -150,6 +150,7 @@ from agentclaw.community.di.openapi_user_id_bypass_config import (
 )
 from agentclaw.community.di.profile import DeployProfile
 from agentclaw.community.di.profile_modules import modules_for
+from agentclaw.community.di.todo_config import TodoSchedulerConfig
 from agentclaw.community.di.space_knowledge_capture_config import (
     SpaceKnowledgeCaptureConfig,
 )
@@ -336,6 +337,9 @@ def build_injector(
 
     _app_injector.get(OwnerHandoffPolicy)
     _app_injector.get(TaskQueueConfig)
+    # Todo scheduler config is strict; resolve it outside lifecycle discovery,
+    # whose compatibility behavior intentionally skips raising providers.
+    _app_injector.get(TodoSchedulerConfig)
     _app_injector.get(SpaceKnowledgeCaptureConfig)
     _app_injector.get(CanonicalCenterStoreConfig)
     _app_injector.get(DraftContentStoreConfig)

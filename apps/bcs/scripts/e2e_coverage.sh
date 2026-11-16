@@ -341,14 +341,28 @@ if [[ "$no_stop" -eq 0 ]]; then
   # so filter by source path via --ignore-filename-regex, which report supports.
   cov_ignore_regex='(test-support/bcs-test-support|tools/bcs-rule-bot|tools/bcs-admin|tools/bcs-bridge|plugins/bcs-db-mysql|plugins/bcs-llm-anthropic|auxiliary/ding-logger)/'
   set +e
+  report_status=0
   (
     cd "$bcs_dir"
     export CARGO_TARGET_DIR="$cov_dir"
-    cargo llvm-cov report --cobertura --output-path "$out_xml" --ignore-filename-regex "$cov_ignore_regex" > /dev/null 2>&1
-    cargo llvm-cov report --ignore-filename-regex "$cov_ignore_regex" > "$report_file" 2>&1
-    cargo llvm-cov report --summary-only --json --ignore-filename-regex "$cov_ignore_regex" > "$summary_json" 2>/dev/null
-  )
+    # OAuth/companion processes normally stop gracefully.  A rare writer can
+    # nevertheless leave one truncated runtime profile while the rest of the
+    # run is valid.  `--failure-mode any` (the default) poisons the merge on the
+    # first bad file; `all` keeps the warning, merges every readable profile,
+    # and still fails when no valid profile remains.
+    rm -f "$summary_json" "$report_file" "$out_xml"
+    local_status=0
+    cargo llvm-cov report --failure-mode all --cobertura --output-path "$out_xml" --ignore-filename-regex "$cov_ignore_regex" > /dev/null 2>&1 || local_status=$?
+    cargo llvm-cov report --failure-mode all --ignore-filename-regex "$cov_ignore_regex" > "$report_file" 2>&1 || local_status=$?
+    cargo llvm-cov report --failure-mode all --summary-only --json --ignore-filename-regex "$cov_ignore_regex" > "$summary_json" 2>/dev/null || local_status=$?
+    exit "$local_status"
+  ) || report_status=$?
   set -e
+  if [[ "$report_status" -ne 0 ]]; then
+    rm -f "$summary_json"
+    echo "FAIL: BCS LLVM coverage aggregation failed (status=$report_status)" >&2
+    cov_gate_status=1
+  fi
 
   echo ""
   echo "✓ Coverage report: $out_xml"

@@ -151,25 +151,14 @@ schema changes. Consumers constructing this internal context must supply entity;
 the in-repository producer and tests are updated together. A missing entity must
 not silently bypass another user's lock by querying a new Owner-qualified key.
 
-`ScheduledCallerRefreshProtocol` v1 is an additive Service API invoked after a
-service Bot's Owner Passport runtime update succeeds and
-`bot_service.SCHEDULED_CALLER_REFRESH_ENABLED` is enabled. This code-level rollout
-gate ships `True`; explicitly disabled callbacks
-keep the original Owner result without invoking Caller refresh. It does not gate
-interactive ASC provisioning. The composition root binds
-a no-op in public profiles and an enterprise service when ASC is supported.
-The explicit Bot entity is stable across Owner handoff; implementations resolve
-each actual Caller and sandbox independently. Caller refresh is best effort:
-preparation or refresh errors log safe metadata and preserve the successful Owner
-callback result. Original Owner update errors still propagate. Caller failures
-do not trigger Owner notification retries. This contract adds no scheduler
-and makes no continuous-validity guarantee between Owner renewal callbacks.
-
-For direct legacy `BotService` construction, omission of the optional refresh
-port means no scheduled-credential capability is installed. Production DI always
-provides an explicit no-op or enterprise implementation; errors from an installed
-implementation are never treated as an unconfigured capability.
-
+`ScheduledCallerRefreshProtocol` is an explicit manual refresh capability with
+an enterprise implementation and a public no-op. Independent enterprise hourly
+scheduling uses the installed-expiry ledger; Owner Passport hot-update callbacks
+no longer invoke Caller refresh. Their original result and error semantics remain
+unchanged. The optional legacy BotService constructor port remains accepted for
+enterprise DI compatibility. Candidate enumeration uses an inclusive UTC cutoff,
+unknown expiry bootstrap, serving status and environment-scoped keyset pages;
+consumers validate actual engine, owner and physical target before exchange.
 
 ### Installed Caller expiry
 
@@ -190,7 +179,7 @@ expiry, so later refresh may run again. Container replacement, a new instance
 publish or a non-serving lifecycle transition clears the stored expiry. Deploy
 `core/expert_chat/sql/2026_11_13_caller_token_expiry.sql` before this application
 change on an existing MySQL/OceanBase store. Existing records remain NULL until
-an installation succeeds. This change adds no independent refresh scheduler.
+an installation succeeds. The enterprise scheduler consumes this ledger independently of Owner renewal.
 
 ### Teclaw scope
 Teclaw Caller sessions and draft/pre/production stages share a runtime. This iteration excludes both Teclaw engines and Teclaw-provider bindings from Caller expiry coordination and ASC scheduled refresh: Teclaw has no scheduled-task support yet. Interactive IAM refresh keeps its existing runtime/outbound update and does not read or write `caller_token_expires_at`. Engine lookup also excludes legacy `baas` bindings for a Teclaw Bot; other providers retain the expiry policy.

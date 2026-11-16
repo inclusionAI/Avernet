@@ -716,6 +716,10 @@ def test_reference_set_and_track_latest_share_one_task_for_latest_combined_plan(
             self.outcomes.append(self._fanout.handle({"skill_id": version.skill_id}))
 
     class _DesiredStateRepository:
+        @contextmanager
+        def skill_batch(self, **_kwargs):
+            yield
+
         def get_set(self, **_kwargs):
             return {"id": "42", "is_active": True, "is_default": False}
 

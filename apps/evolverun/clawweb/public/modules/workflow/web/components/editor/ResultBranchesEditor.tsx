@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import type { WorkflowNode } from '@avernet/clawweb-shared/web/types'
 import { getResultBranches, withResultBranches, type ResultBranch } from '../../editor/contracts'
-import { useEditorStore } from '../../editor/store'
+import { editorIsReadOnly, useEditorStore } from '../../editor/store'
 import JsonDraftField, { isRecord } from './JsonDraftField'
 import { TextField } from './NodeFields'
 
@@ -37,6 +37,7 @@ export function validateBranchChange(before: WorkflowNode, after: WorkflowNode, 
 }
 
 export default function ResultBranchesEditor({ node, onPatch }: { node: WorkflowNode; onPatch: (patch: Partial<WorkflowNode>) => void }) {
+  const readOnly = useEditorStore(editorIsReadOnly)
   const nodes = useEditorStore(state => state.spec?.nodes ?? [])
   const pending = useEditorStore(state => Object.keys(state.pendingEdits).length > 0)
   const [candidate, setCandidate] = useState<ResultBranch | null>(null)
@@ -55,6 +56,7 @@ export default function ResultBranchesEditor({ node, onPatch }: { node: Workflow
     return validateBranchChange(node, { ...node, ...withResultBranches(node, next) }, nodes)
   }
   function save(next: ResultBranch[]) {
+    if (editorIsReadOnly(useEditorStore.getState())) return
     const error = errorFor(next)
     if (error) { useEditorStore.getState().setActionError(error); return }
     try { onPatch(withResultBranches(node, next)) }
@@ -86,9 +88,9 @@ export default function ResultBranchesEditor({ node, onPatch }: { node: Workflow
           validate={value => matchError(value) || errorFor(branches.map((item, i) => i === index ? { ...item, match: value as ResultBranch['match'] } : item))}
           onApply={value => onPatch(withResultBranches(node, branches.map((item, i) => i === index ? { ...item, match: value as ResultBranch['match'] } : item)))} />
         <div className="flex flex-wrap gap-2">
-          <button type="button" className={buttonClass} disabled={pending || index === 0 || !!(index > 0 && errorFor(moved(index, -1)))} onClick={() => save(moved(index, -1))}>上移</button>
-          <button type="button" className={buttonClass} disabled={pending || index === branches.length - 1 || !!(index < branches.length - 1 && errorFor(moved(index, 1)))} onClick={() => save(moved(index, 1))}>下移</button>
-          <button type="button" className={`${buttonClass} text-destructive`} disabled={pending || referenced}
+          <button type="button" className={buttonClass} disabled={readOnly || pending || index === 0 || !!(index > 0 && errorFor(moved(index, -1)))} onClick={() => save(moved(index, -1))}>上移</button>
+          <button type="button" className={buttonClass} disabled={readOnly || pending || index === branches.length - 1 || !!(index < branches.length - 1 && errorFor(moved(index, 1)))} onClick={() => save(moved(index, 1))}>下移</button>
+          <button type="button" className={`${buttonClass} text-destructive`} disabled={readOnly || pending || referenced}
             onClick={() => { if (window.confirm(`确认删除分支 ${branch.branchId}？`)) save(branches.filter((_, i) => i !== index)) }}>删除分支</button>
         </div>
         {referenced && <p className="text-xs text-muted-foreground">已有节点使用此标识；先解除分支归属才能删除或改名。</p>}
@@ -103,8 +105,8 @@ export default function ResultBranchesEditor({ node, onPatch }: { node: Workflow
           return errorFor(insert(value as ResultBranch))
         }}
         onApply={value => { onPatch(withResultBranches(node, insert(value as ResultBranch))); setCandidate(null) }} />
-      <button type="button" className={buttonClass} disabled={pending} onClick={() => setCandidate(null)}>取消新增分支</button>
-    </div> : <button type="button" className={`${buttonClass} w-full py-2 text-primary`} disabled={pending}
+      <button type="button" className={buttonClass} disabled={readOnly || pending} onClick={() => setCandidate(null)}>取消新增分支</button>
+    </div> : <button type="button" className={`${buttonClass} w-full py-2 text-primary`} disabled={readOnly || pending}
       onClick={() => setCandidate({ branchId: `branch-${crypto.randomUUID()}`, match: {} })}>添加结果分支</button>}
     <details className="rounded-md border border-input p-3">
       <summary className="cursor-pointer text-xs text-muted-foreground">完整结果路由 JSON（含扩展字段）</summary>

@@ -42,3 +42,5 @@ These entries are task-specific records. Inspect their individual status, eviden
 
 - [2026-11-11-edge-friend-cutover](2026-11-11-edge-friend-cutover/spec.md)
 - [2026-11-11-legacy-friend-cutover-fixes](2026-11-11-legacy-friend-cutover-fixes/spec.md)
+
+- [2026-11-12-bcs-large-file-split](2026-11-12-bcs-large-file-split/)（draft）：[spec](2026-11-12-bcs-large-file-split/spec.md)、[plan](2026-11-12-bcs-large-file-split/plan.md)。

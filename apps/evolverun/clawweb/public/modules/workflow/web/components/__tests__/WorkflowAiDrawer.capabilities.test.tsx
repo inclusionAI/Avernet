@@ -12,16 +12,19 @@ beforeEach(() => { api.capabilities.mockReset(); vi.mocked(generateWorkflowAiDra
 afterEach(cleanup)
 
 it.each([
-  ['AUTO_HEAL_BAAS_NOT_CONFIGURED', '配置缺失或未启用'] as const,
-  ['AUTO_HEAL_BOT_UNAVAILABLE', 'BaaS Bot 是否存在、可用且绑定有效'] as const,
-])('maps capability reason %s to actionable text without submitting a job', async (reason, guidance) => {
+  ['AUTO_HEAL_BAAS_NOT_CONFIGURED', '配置缺失或未启用', 'AI 草稿服务不可用'] as const,
+  ['AUTO_HEAL_BOT_UNAVAILABLE', 'AutoHeal Bot 绑定不可用或无效', 'AI 草稿服务不可用'] as const,
+  ['AI_DRAFT_RECOVERY_UNAVAILABLE', '无法签发恢复凭据', 'AI 草稿请求凭据暂不可用'] as const,
+])('maps capability reason %s to actionable text without submitting a job', async (reason, guidance, statusText) => {
   api.capabilities.mockResolvedValueOnce({ available: false, reason }).mockResolvedValueOnce({ available: true })
   render(<WorkflowAiDrawer {...props} />)
   fireEvent.change(screen.getByRole('textbox'), { target: { value: '需求' } })
-  const status = await screen.findByRole('status')
-  expect(status).toHaveTextContent('AI 草稿服务不可用')
+  await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(reason))
+  const status = screen.getByRole('status')
+  expect(status).toHaveTextContent(statusText)
   expect(status).toHaveTextContent(reason)
   expect(status).toHaveTextContent(guidance)
+  if (reason === 'AI_DRAFT_RECOVERY_UNAVAILABLE') expect(status).not.toHaveTextContent('请检查服务器 effective autoHeal.botId')
   expect(screen.getByRole('button', { name: '生成 YAML 草稿' })).toBeDisabled()
   fireEvent.submit(screen.getByRole('button', { name: '生成 YAML 草稿' }).closest('form')!)
   expect(generateWorkflowAiDraft).not.toHaveBeenCalled()
@@ -34,7 +37,8 @@ it('still explains server autoHeal.botId / BaaS when the reason is blank', async
   api.capabilities.mockResolvedValueOnce({ available: false })
   render(<WorkflowAiDrawer {...props} />)
   fireEvent.change(screen.getByRole('textbox'), { target: { value: '需求' } })
-  const status = await screen.findByRole('status')
+  await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('服务器未返回具体原因'))
+  const status = screen.getByRole('status')
   expect(status).toHaveTextContent('AI 草稿服务不可用')
   expect(status).toHaveTextContent('autoHeal.botId')
   expect(status).toHaveTextContent('BaaS')
@@ -58,7 +62,7 @@ it('does not call a capability transport failure proof that server config is mis
 
 it('offers recovery of BaaS dispatch uncertainty rather than a new generation action', async () => {
   api.capabilities.mockResolvedValue({ available: true })
-  const attempt = { requestId: 'fixed-request', draftId: 'existing-draft' }
+  const attempt = { requestId: 'fixed-request', draftId: 'existing-draft', receipt: 'signed-receipt', submitted: true }
   vi.mocked(generateWorkflowAiDraft).mockRejectedValue(new WorkflowAiRecoveryError(
     'BaaS 派发结果不确定：BaaS 可能已接收消息，远端任务可能继续。请恢复查询同一任务或取消；不会再次派发。',
     attempt,

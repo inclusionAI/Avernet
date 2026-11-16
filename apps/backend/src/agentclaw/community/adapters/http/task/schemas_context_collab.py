@@ -5,8 +5,9 @@ EventCreateRequest, ContextCollabStatusResponse, TaskProgress,
 ContextSpec and the L2/L3 reference DTOs. Request models carry
 to_domain() builders for the service commands (the intake
 TaskIntakeCommandDTO.to_domain pattern); response models mirror exactly
-what ContextCollabService projects, including the occurred_at field
-the GET current_event projection carries beyond the 7-field set.
+what ContextCollabService projects. The GET current_event maps the core
+``created_at`` timestamp to the public ``occurred_at`` field beyond the
+7-field progress set.
 
 Docstrings and Field descriptions are published verbatim into the public
 OpenAPI document (the /openapi/v1 twin mounts these models), so they stay
@@ -382,8 +383,8 @@ class TaskProgressEventDto(BaseModel):
 class CurrentEventDto(TaskProgressEventDto):
     """§6.4 current_event: a progress entry plus occurred_at.
 
-    The occurred_at field is the 8th field the service projects on the
-    current event and must not be dropped at the DTO layer.
+    The public occurred_at field maps the core projection's created_at
+    timestamp and must not be dropped at the DTO layer.
     """
 
     occurred_at: datetime | None = Field(
@@ -503,7 +504,7 @@ def status_to_dto(result: ContextCollabStatusProjection) -> ContextCollabStatusR
                 status=current_event["status"],
                 summary=current_event["summary"],
                 content=current_event["content"],
-                occurred_at=current_event["occurred_at"],
+                occurred_at=current_event["created_at"],
             )
             if current_event is not None
             else None

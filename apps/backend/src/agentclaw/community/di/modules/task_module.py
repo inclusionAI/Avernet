@@ -25,7 +25,9 @@ from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.api.cron_relay_service import CronRelayServiceProtocol
 from agentclaw.community.api.system_config_service import SystemConfigServiceProtocol
 from agentclaw.community.core.task.task_panel.manifest import TaskPanelManifestService
-from agentclaw.community.core.task.task_panel.manifest_contract import TaskPanelManifestServiceProtocol
+from agentclaw.community.core.task.task_panel.manifest_contract import (
+    TaskPanelManifestServiceProtocol,
+)
 from agentclaw.community.core.task.task_dispatch.task_settings import (
     HARNESS_POLLER,
     SEARCH_SKILL,
@@ -103,9 +105,6 @@ from agentclaw.community.core.task.context_collab.g1_secure_govern.authorization
     ContextCollabAuthorizerProtocol,
     StructuralContextCollabAuthorizer,
 )
-from agentclaw.community.core.task.context_collab.persistence.repository import (
-    ContextCollabRepositoryProtocol,
-)
 from agentclaw.community.core.task.context_collab.service_api import (
     ContextCollabServiceProtocol,
 )
@@ -148,12 +147,8 @@ from agentclaw.community.core.task.forum.browsing.subscription_provisioner impor
 from agentclaw.community.core.task.forum.digest.report_service import (
     BbsDigestReportService,
 )
-from agentclaw.community.core.task.forum.services.forum_service import ForumService
 from agentclaw.community.core.task.forum.interaction.forum_author_stats_service import (
     ForumAuthorStatsService,
-)
-from agentclaw.community.core.task.forum.interaction.forum_interaction_service import (
-    ForumInteractionService,
 )
 from agentclaw.community.core.task.forum.interaction.personal_center_activity_service import (
     ForumPersonalCenterActivityService,
@@ -177,6 +172,10 @@ from agentclaw.community.core.task.task_context.task_artifact.artifact_publish i
 from agentclaw.community.core.task.task_runner.client.bcs_token_provider import (
     BcsTokenProvider,
 )
+from agentclaw.community.core.task.task_runner.client.bcs_bot_token_provider import (
+    BcsBotTokenProvider,
+    NullBcsBotTokenProvider,
+)
 from agentclaw.community.core.task.task_runner.client.callback_data_enricher import (
     CallbackDataEnricher,
 )
@@ -185,6 +184,10 @@ from agentclaw.community.core.task.task_runner.callback_correlation import (
     InMemoryCallbackCorrelationRegistry,
 )
 from agentclaw.community.core.bot_management.services.bcn_service import BcnService
+from agentclaw.community.core.task.context_collab.executor import (
+    ContextCollabExecutor,
+    UnavailableContextCollabExecutor,
+)
 from agentclaw.community.core.task.task_runner.client.ports import (
     BcsClientPort,
     OpenApiBotPort,
@@ -201,6 +204,7 @@ from agentclaw.community.core.task.forum.interaction.target_verifier_protocol im
     ForumInteractionTargetVerifierProtocol,
 )
 from agentclaw.community.di.config import TaskDispatchConfig
+from agentclaw.community.di.modules.task.todo_bindings import TaskTodoBindings
 
 logger = logging.getLogger("task.module")
 
@@ -245,6 +249,9 @@ class TaskModule(Module):
     """Production bindings for the task module(社区核心,所有 profile 装配)。"""
 
     def configure(self, binder: Binder) -> None:
+        # Todo is a Task subdomain, like BBS/forum. Keep its bindings behind
+        # the Task composition boundary instead of installing a peer module.
+        binder.install(TaskTodoBindings())
         # TaskGraphService remains directly constructible for lightweight test
         # injectors. The full composition root attaches the graph repository in
         # the task_service provider below.
@@ -283,8 +290,14 @@ class TaskModule(Module):
             to=DatabaseForumInteractionTargetVerifier,
             scope=singleton,
         )
-        binder.bind(ForumAuthorStatsServiceProtocol, to=ForumAuthorStatsService, scope=singleton)
-        binder.bind(ForumInteractionServiceProtocol, to=NotifyingForumInteractionService, scope=singleton)
+        binder.bind(
+            ForumAuthorStatsServiceProtocol, to=ForumAuthorStatsService, scope=singleton
+        )
+        binder.bind(
+            ForumInteractionServiceProtocol,
+            to=NotifyingForumInteractionService,
+            scope=singleton,
+        )
         binder.bind(
             ForumPersonalCenterActivityServiceProtocol,
             to=ForumPersonalCenterActivityService,
@@ -322,6 +335,42 @@ class TaskModule(Module):
         # 不在此直绑,否则无参构造会漏掉 repo 注入。
         binder.bind(
             NoopCallbackAuthenticator, to=NoopCallbackAuthenticator, scope=singleton
+        )
+
+    @singleton
+    @provider
+    @inject
+    def context_collab_executor(
+        self,
+        injector: Injector,
+        task_dispatch: TaskDispatchConfig,
+    ) -> ContextCollabExecutor:
+        """Build the ContextCollab BCS executor, failing closed when unbound."""
+        try:
+            bcs = injector.get(BcsClientPort)
+        except Exception as exc:  # noqa: BLE001 lightweight deployment
+            logger.info(
+                "[task][context-collab] BcsClientPort unavailable: %s",
+                exc,
+            )
+            return UnavailableContextCollabExecutor(str(exc))
+        if bcs is None:
+            return UnavailableContextCollabExecutor(
+                "BcsClientPort resolved to None"
+            )
+        try:
+            bot_tokens = injector.get(BcsBotTokenProvider)
+        except Exception as exc:  # noqa: BLE001 lightweight deployment
+            logger.info(
+                "[task][context-collab] BcsBotTokenProvider unavailable; "
+                "using empty provider: %s",
+                exc,
+            )
+            bot_tokens = NullBcsBotTokenProvider()
+        return ContextCollabExecutor(
+            bcs,
+            bot_tokens=bot_tokens,
+            backend_url=task_dispatch.backend_url,
         )
 
     @singleton
@@ -497,11 +546,6 @@ class TaskModule(Module):
                 exc,
             )
             task_settings = None
-        from agentclaw.community.core.task.task_runner.client.bcs_bot_token_provider import (
-            BcsBotTokenProvider,
-            NullBcsBotTokenProvider,
-        )
-
         try:
             bot_token_provider = injector.get(BcsBotTokenProvider)
         except Exception as exc:  # noqa: BLE101 未绑定时降级为无 token provider
@@ -699,7 +743,9 @@ class TaskModule(Module):
     @singleton
     @provider
     @inject
-    def task_panel_manifest_service(self, config: SystemConfigServiceProtocol) -> TaskPanelManifestServiceProtocol:
+    def task_panel_manifest_service(
+        self, config: SystemConfigServiceProtocol
+    ) -> TaskPanelManifestServiceProtocol:
         return TaskPanelManifestService(config)
 
     @singleton

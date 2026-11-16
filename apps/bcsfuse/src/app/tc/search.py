@@ -38,8 +38,12 @@ class TcSearch:
         embedding_key,
         instance_id,
         profile_gateway=None,
+        index_config=None,
     ):
         self.catalog, self.index, self.reranker = catalog, index, reranker
+        self.filter_fields = (
+            frozenset(index_config.filter_fields) if index_config else FILTER_FIELDS
+        )
         self.pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="tc-search")
         self.caches = SearchCaches(
             result_entries=1024,
@@ -63,11 +67,15 @@ class TcSearch:
             index,
             embedding_key=embedding_key,
             instance_id=instance_id,
-            filter_fields=FILTER_FIELDS,
+            filter_fields=self.filter_fields,
             document_converter=TcDocumentConverter(),
             on_change=self.caches.changing,
             profile_gateway=profile_gateway,
+            index_key=index_config.index_key if index_config else "",
+            document_mapping=index_config.document_mapping if index_config else None,
+            protected_filter_fields=FILTER_FIELDS,
         )
+        self.catalog.write_card = self.updates.upsert
         self.execution = {
             name: DeadlineExecutor(self.pool, name=name, timeout_seconds=timeout)
             for name, timeout in (
@@ -94,7 +102,7 @@ class TcSearch:
             filters.setdefault("runtime_state", ["online"])
             filters.setdefault("availability", ["protected", "public"])
             filters.setdefault("lifecycle_state", ["active"])
-        extra = filters.keys() - FILTER_FIELDS - {"profile_key", "worker_id"}
+        extra = filters.keys() - self.filter_fields - {"profile_key", "worker_id"}
         if any(legacy_defaults or not is_label_filter(key) for key in extra):
             raise InvalidTcFilters("unsupported TC filter")
         for field, values in filters.items():
@@ -176,7 +184,12 @@ class TcSearch:
             return False
         labels = {key: values for key, values in filters.items() if key != "source_id"}
         return self.updates.eligible(worker_id, labels) and matches_row(
-            self.catalog.get(worker_id), labels
+            self.catalog.get(worker_id),
+            {
+                key: values
+                for key, values in labels.items()
+                if key in FILTER_FIELDS or is_label_filter(key)
+            },
         )
 
     def candidate(self, row, score, *, supplement=False, reasons=None):

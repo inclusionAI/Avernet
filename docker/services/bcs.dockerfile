@@ -1,7 +1,8 @@
 ########## Builder ##########
-FROM rust:1.91-bookworm AS builder
+FROM rust:1.94.0-bookworm AS builder
 
 ENV DEBIAN_FRONTEND=noninteractive \
+    RUSTUP_TOOLCHAIN=1.94.0 \
     CARGO_TERM_COLOR=never \
     CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
 

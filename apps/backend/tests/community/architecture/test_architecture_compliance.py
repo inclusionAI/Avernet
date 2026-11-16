@@ -177,6 +177,12 @@ _IMPORT_EXCEPTIONS: frozenset[tuple[str, str]] = frozenset({
         "core/spaces/services/space_member_service.py",
         "agentclaw.community.api.bot_manager_sync",
     ),
+    # SpaceDeletionService consumes the manager-sync Service API Protocol via DI
+    # (same pattern as space_management/space_member).
+    (
+        "core/spaces/services/space_deletion_service.py",
+        "agentclaw.community.api.bot_manager_sync",
+    ),
     # Extracted Passport/credentials side-effect segment from collaborator_service.py;
     # annotation-only usage.
     (

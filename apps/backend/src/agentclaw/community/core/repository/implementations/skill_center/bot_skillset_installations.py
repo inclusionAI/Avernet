@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from agentclaw.community.core.repository.implementations.skill_center.bot_mutation_fence import lock_bot_capabilities
+
 from collections.abc import Callable
 
 from sqlalchemy import and_, func, or_
@@ -134,6 +136,43 @@ def set_member_mcp_codes(scope, session, *, skill_set_id: int) -> set[str]:
 class BotSkillSetInstallations:
     """Mixed into the control-plane repository; uses its ``_db``, ``_scope``
     and ``_owned_set_scope``."""
+
+    def _require_unique_runtime_names(
+        self,
+        session,
+        *,
+        bot_id: str,
+        owner_id: str,
+        candidate_ids: set[int],
+        retired_ids: set[int] | None = None,
+        extra_ids: set[int] | None = None,
+        engine_type: str | None = None,
+        default_engine_types: tuple[str, ...] | None = None,
+    ) -> None:
+        from agentclaw.community.core.repository.implementations.skill_center.runtime_name_admission import (
+            require_unique_runtime_names,
+        )
+
+        effective: set[int] = set()
+        for row in self._bot_sets(
+            session, bot_id=bot_id, owner_id=owner_id,
+            engine_type=engine_type, default_engine_types=default_engine_types,
+        ):
+            if not (row.is_default or row.is_active):
+                continue
+            excluded = default_exclusions.excluded_skill_ids(
+                session, bot_id=bot_id, owner_id=owner_id, set_id=int(row.id)
+            ) if row.is_default else set()
+            effective.update(set_member_skill_ids(
+                self._scope, session, skill_set_id=int(row.id),
+                excluded_raw_ids=frozenset(excluded),
+            ))
+        others = ((self._installations(session, bot_id, owner_id) | effective)
+                  - (retired_ids or set())) | (extra_ids or set())
+        require_unique_runtime_names(
+            session, self._scope, candidates=candidate_ids, others=others
+        )
+
 
     def _member_ids(self, session, set_ids: set[int]) -> set[int]:
         """Resolve the same Skill identities used by installation repair."""
@@ -269,6 +308,7 @@ class BotSkillSetInstallations:
             return plan
 
         with self._db.transactional_orm_session() as session:
+            lock_bot_capabilities(session, bot_id=bot_id, entity_id=owner_id, env=env)
             plan = plan_resolver(
                 session,
                 bot_id=bot_id,

@@ -120,4 +120,3 @@ def test_an_inline_bot_source_carries_its_bot_id_straight_through() -> None:
     assert declared is not None
     (entry,) = declared.entries
     assert entry.source_bot_id == "inline_1"
-

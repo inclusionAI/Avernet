@@ -25,6 +25,7 @@ export function useWorkflowAiDraft(open: boolean, initialMode: WorkflowAiMode, s
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [recoverable, setRecoverable] = useState(false)
+  const [retryPreparation, setRetryPreparation] = useState(false)
   const attempt = useRef<WorkflowAiAttempt | null>(null)
   const attemptWorkflow = useRef<string | null>(null)
   const requestId = useRef(0)
@@ -47,6 +48,7 @@ export function useWorkflowAiDraft(open: boolean, initialMode: WorkflowAiMode, s
     setResult(null)
     setError(null)
     setRecoverable(false)
+    setRetryPreparation(false)
   }, [abort])
 
   // Reset session on close, workflow switch, or an externally selected mode.
@@ -63,6 +65,7 @@ export function useWorkflowAiDraft(open: boolean, initialMode: WorkflowAiMode, s
     setBusy(false)
     setError(null)
     setRecoverable(false)
+    setRetryPreparation(false)
     return abort
   }, [signature, contextKey, abort])
 
@@ -83,6 +86,7 @@ export function useWorkflowAiDraft(open: boolean, initialMode: WorkflowAiMode, s
     setResult(null)
     setError(null)
     setRecoverable(false)
+    setRetryPreparation(false)
     if (!prompt.trim()) {
       setError('请输入想增加或修改的工作流能力')
       return
@@ -110,8 +114,11 @@ export function useWorkflowAiDraft(open: boolean, initialMode: WorkflowAiMode, s
           attempt.current = cause.attempt
           setRecoverable(true)
         } else if (!(cause instanceof WorkflowAiCandidateError) && attempt.current) {
-          // A failed readiness/auth/transport check cannot erase an earlier submission.
-          setRecoverable(true)
+          // Only known receipt/submission contexts recover by polling. Before prepare
+          // succeeds no BaaS send occurred, so the user may explicitly retry prepare.
+          const known = Boolean(attempt.current.receipt || attempt.current.draftId || attempt.current.submitted)
+          setRecoverable(known)
+          setRetryPreparation(!known)
         } else attempt.current = null
         setError(cause instanceof Error ? cause.message : 'AI 草稿生成失败，请重试')
       }
@@ -127,7 +134,7 @@ export function useWorkflowAiDraft(open: boolean, initialMode: WorkflowAiMode, s
   const stale = Boolean(visibleResult && (visibleResult.draft.baseSignature !== signature || visibleResult.contextKey !== contextKey))
 
   return {
-    mode, prompt, result: visibleResult, busy, error, stale, recoverable,
+    mode, prompt, result: visibleResult, busy, error, stale, recoverable, retryPreparation,
     changeMode, changePrompt, generate, cancel: invalidate,
   }
 }

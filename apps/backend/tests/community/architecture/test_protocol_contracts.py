@@ -42,6 +42,11 @@ _CONTRACTS_DIRS = (
 #   (Task 11); the suite lands in Task 16, which removes this exemption.
 EXEMPT_PROTOCOLS: frozenset[str] = frozenset({"engine_ext_client"})
 
+# Nested Plugin API namespaces that are explicitly governed by Rule 25. Keep
+# this list narrow: other nested packages expose structural Protocols that do
+# not inherit the Plugin marker and follow their own contract rules.
+_NESTED_PLUGIN_MODULES: tuple[str, ...] = ()
+
 # B11: protocols whose conformance suite is **corp-resident** (the meaningful impl is
 # corp; community binds a noop). Their suite lives only in ``tests/corp/contracts``.
 # When corp is absent (extracted community repo / dist-builder staged run) the corp
@@ -54,15 +59,20 @@ def _discover_plugin_modules() -> set[str]:
     """Return the set of ``agentclaw.community.plugin_api`` submodule names that
     declare at least one Plugin Protocol.
 
-    Mirrors the discovery in ``test_plugin_pairing`` so the two tests
-    can't drift on what counts as a Plugin Protocol.
+    Top-level modules follow the historical pairing scan. Explicitly owned
+    nested namespaces are added through ``_NESTED_PLUGIN_MODULES`` so moving a
+    domain-specific protocol does not silently drop its contract gate.
     """
     import agentclaw.community.plugin_api as pkg
     modules: set[str] = set()
-    for mod_info in pkgutil.iter_modules(pkg.__path__):
-        name = mod_info.name
-        if name.startswith("_") or name in {"base", "impl_registry", "models"}:
-            continue
+    module_names = [
+        mod_info.name
+        for mod_info in pkgutil.iter_modules(pkg.__path__)
+        if not mod_info.name.startswith("_")
+        and mod_info.name not in {"base", "impl_registry", "models"}
+    ]
+    module_names.extend(_NESTED_PLUGIN_MODULES)
+    for name in module_names:
         mod = importlib.import_module(f"agentclaw.community.plugin_api.{name}")
         for attr in dir(mod):
             obj = getattr(mod, attr)
@@ -100,7 +110,8 @@ def test_every_plugin_protocol_has_a_contract_suite():
         # as covered corp-side there (they resolve normally in the monorepo).
         if name in _CORP_RESIDENT_PROTOCOLS and not corp_contracts_present:
             continue
-        candidates = [d / f"test_{name}.py" for d in _CONTRACTS_DIRS]
+        suite_name = name.rsplit(".", 1)[-1]
+        candidates = [d / f"test_{suite_name}.py" for d in _CONTRACTS_DIRS]
         suite = next((c for c in candidates if c.is_file()), None)
         if suite is None:
             failures.append(

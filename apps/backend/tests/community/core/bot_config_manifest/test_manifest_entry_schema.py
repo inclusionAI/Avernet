@@ -1158,4 +1158,3 @@ manifest:
         "manifest.bot_config.render_screen",
         "invalid_bot_config_kind",
     ) in _reject(document)
-

@@ -854,10 +854,14 @@ bcs_prereqs() {
         prereq_ok "BCS binaries already built; skipping cargo/protoc checks"
     else
         # Tool: Rust/Cargo
-        if check_rust_installed; then
+        if check_required_rust_toolchain; then
             prereq_ok "cargo: $(rustc --version 2>&1 | head -1)"
         else
-            prereq_error "$(bcs_cargo_not_found_message)"
+            if check_rust_installed; then
+                prereq_error "Rust/Cargo ${REQUIRED_RUST_TOOLCHAIN} is not available (required for building BCS). Run: ./singlebox/singlebox.sh install-tools"
+            else
+                prereq_error "$(bcs_cargo_not_found_message)"
+            fi
             has_error=true
         fi
 

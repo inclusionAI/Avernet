@@ -4,10 +4,13 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, Optional
 from sqlalchemy import func
+from agentclaw.community.core.spaces.errors import SpaceNotFoundError
+from agentclaw.community.core.spaces.repository.models import SpaceModel
 from agentclaw.community.core.bot_management.owner_handoff.guard import (
     assert_bot_mutable,
 )
 from agentclaw.community.log import get_logger
+from agentclaw.community.utils.env_utils import get_current_env
 
 logger = get_logger()
 
@@ -93,6 +96,38 @@ class BotMutationRepositoryMixin:
         """
         with self._db.orm_session() as db:
             self._assert_mutable_rows(db, bot_id=bot_id, owner_id=owner_id, env=env)
+            # Missing, deleted or cross-tenant target rows keep the historical
+            # no-op ``None`` result: validate the Space only when this write
+            # will actually happen.
+            bot = (
+                db.query(self.Model.id)
+                .filter(
+                    self.Model.bot_id == bot_id,
+                    self.Model.owner_id == owner_id,
+                    self.Model.is_delete == 0,
+                    self._env(env=env),
+                )
+                .first()
+            )
+            if bot is None:
+                return None
+            # Serialize with delete_team_space's row lock and revalidate the
+            # target Space inside this write transaction: without FOR UPDATE a
+            # concurrent soft-delete can commit between the service-level
+            # membership checks and this write, leaving the Bot assigned to a
+            # deleted Space even though the deletion's emptiness recheck passed.
+            target_space = (
+                db.query(SpaceModel)
+                .filter(
+                    SpaceModel.id == space_id,
+                    SpaceModel.env == (env or get_current_env()),
+                    SpaceModel.deleted_at.is_(None),
+                )
+                .with_for_update()
+                .one_or_none()
+            )
+            if target_space is None:
+                raise SpaceNotFoundError(f"space {space_id} not found")
             rowcount = (
                 db.query(self.Model)
                 .filter(

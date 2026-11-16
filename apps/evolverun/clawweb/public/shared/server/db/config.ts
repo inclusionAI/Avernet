@@ -205,6 +205,8 @@ type YamlRepairConfig = {
 };
 
 type YamlAutoHealConfig = {
+  /** Server-owned BaaS target; absent retains legacy prod, independent of host env. */
+  baasEnvironment?: "dev" | "pre" | "prod";
   botId?: string;
   diagnosisPrompt?: string;
   pollTimeoutMs?: number;

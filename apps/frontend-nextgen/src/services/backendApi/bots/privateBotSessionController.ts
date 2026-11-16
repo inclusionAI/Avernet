@@ -64,6 +64,7 @@ export interface BotRequestParams {
   stage?: 'draft' | 'verify' | 'online';
   owner_id?: string;
   f_user_id?: string;
+  device_uuid?: string;
 }
 
 /** GET /openapi/v1/bots/{bot_id}/sessions — 分页查询会话;session_key 为原始字符串,由 HTTP 层统一编码。 */

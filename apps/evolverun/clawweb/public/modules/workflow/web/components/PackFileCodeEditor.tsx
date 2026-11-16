@@ -39,11 +39,12 @@ function lineOffsets(text: string): number[] {
   return offsets
 }
 
-export default function PackFileCodeEditor({ path, value, onChange, disabled = false, ariaLabel = '文件内容', onKeyDown, layout = 'file' }: {
+export default function PackFileCodeEditor({ path, value, onChange, disabled = false, readOnly = false, ariaLabel = '文件内容', onKeyDown, layout = 'file' }: {
   path: string
   value: string
   onChange: (value: string) => void
   disabled?: boolean
+  readOnly?: boolean
   ariaLabel?: string
   onKeyDown?: KeyboardEventHandler<HTMLTextAreaElement>
   /** Fill the remaining flex space without the standalone file editor's 430px minimum. */
@@ -113,7 +114,8 @@ export default function PackFileCodeEditor({ path, value, onChange, disabled = f
       autoCorrect="off"
       value={value}
       disabled={disabled}
-      onChange={event => onChange(event.target.value)}
+      readOnly={readOnly}
+      onChange={event => { if (!readOnly) onChange(event.target.value) }}
       onKeyDown={onKeyDown}
       onScroll={syncViewport}
     />

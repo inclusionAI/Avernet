@@ -7,11 +7,12 @@ const transport = vi.hoisted(() => ({ fetchJson: vi.fn() }))
 vi.mock('@avernet/clawweb-shared/web/api/client', () => transport)
 import { generateWorkflowAiDraft, workflowSpecSignature } from './workflow-ai-draft'
 import { workflowAiYaml } from './workflow-ai-spec'
-import { WorkflowAiRecoveryError } from './workflow-ai-lifecycle'
+import { createWorkflowAiAttempt, WorkflowAiRecoveryError } from './workflow-ai-lifecycle'
 
 const wire = vi.fn()
 const capabilities = vi.fn()
 let inputYaml: string
+function prepared() { return { draftId: 'x', receipt: 'signed-receipt', inputSpecDigest: createHash('sha256').update(inputYaml).digest('hex') } }
 function submitted() { return { draftId: 'x', status: 'pending' } }
 function task(value: object) { return { draftId: 'x', workflowId: source.id, inputSpecDigest: createHash('sha256').update(inputYaml).digest('hex'), ...value } }
 
@@ -30,7 +31,7 @@ const candidate = (): WorkflowSpec => ({
 })
 function success(spec: WorkflowSpec = candidate(), baseline: WorkflowSpec = source) {
   inputYaml = workflowAiYaml(baseline)
-  wire.mockResolvedValueOnce(submitted())
+  wire.mockResolvedValueOnce(prepared()).mockResolvedValueOnce(submitted())
     .mockResolvedValueOnce(task({ status: 'completed', result: { yaml: stringify(spec), summary: '修改分析提示词' } }))
     .mockImplementationOnce(async (_url, init) => ({ valid: true, issues: [], normalizedSpec: JSON.parse(init.body).spec }))
 }
@@ -54,7 +55,7 @@ describe('real workflow AI draft generation', () => {
     success()
     const draft = await generateWorkflowAiDraft('modify', '只修改分析提示词', source)
     const [url, init] = wire.mock.calls[0]
-    expect(url).toBe(`/api/workflows/${source.id}/ai-drafts`)
+    expect(url).toBe(`/api/workflows/${source.id}/ai-drafts/prepare`)
     const body = JSON.parse(init.body)
     expect(body.prompt).toBe('只修改分析提示词')
     expect(body.mode).toBe('modify')
@@ -62,7 +63,7 @@ describe('real workflow AI draft generation', () => {
     expect(capabilities).toHaveBeenCalledOnce()
     expect(body.currentYaml).toContain('保留真实配置')
     expect(wire.mock.calls.map(call => call[0])).toEqual([
-      `/api/workflows/${source.id}/ai-drafts`, `/api/workflows/${source.id}/ai-drafts/x`, '/api/workflows/validate',
+      `/api/workflows/${source.id}/ai-drafts/prepare`, `/api/workflows/${source.id}/ai-drafts`, `/api/workflows/${source.id}/ai-drafts/x/poll`, '/api/workflows/validate',
     ])
     expect(draft.spec.nodes[0].executor.prompt).toBe('new prompt')
     expect(draft.spec.nodes[0]._x).toBe(12)
@@ -97,7 +98,7 @@ describe('real workflow AI draft generation', () => {
     const draft = await generateWorkflowAiDraft('modify', '只修改分析提示词', existing)
 
     const contextYaml = JSON.parse(wire.mock.calls[0][1].body).currentYaml
-    const validatedSpec = JSON.parse(wire.mock.calls[2][1].body).spec
+    const validatedSpec = JSON.parse(wire.mock.calls[3][1].body).spec
     expect(parse(contextYaml).nodes[1].onResult).toStrictEqual(onResult)
     expect(validatedSpec.nodes[1].onResult).toStrictEqual(onResult)
     expect(draft.spec.nodes[1]).toStrictEqual(existing.nodes[1])
@@ -117,7 +118,7 @@ describe('real workflow AI draft generation', () => {
 
   it('waits for a pending generation rather than returning mock nodes', async () => {
     vi.useFakeTimers()
-    wire.mockResolvedValueOnce(submitted())
+    wire.mockResolvedValueOnce(prepared()).mockResolvedValueOnce(submitted())
       .mockResolvedValueOnce(task({ status: 'running' }))
       .mockResolvedValueOnce(task({ status: 'completed', result: { yaml: stringify(candidate()), summary: 'new' } }))
       .mockImplementationOnce(async (_url, init) => ({ valid: true, issues: [], normalizedSpec: JSON.parse(init.body).spec }))
@@ -140,7 +141,7 @@ describe('real workflow AI draft generation', () => {
     [stringify({ ...candidate(), nodes: [{ ...source.nodes[0], dependsOn: ['missing'] }] }), '依赖'],
     [stringify({ ...candidate(), nodes: [{ ...source.nodes[0], dependsOn: ['analysis'] }] }), '环'],
   ])('rejects unsafe or invalid model YAML: %s', async (yaml, error) => {
-    wire.mockResolvedValueOnce(submitted())
+    wire.mockResolvedValueOnce(prepared()).mockResolvedValueOnce(submitted())
       .mockResolvedValueOnce(task({ status: 'completed', result: { yaml, summary: 'bad' } }))
     await expect(generateWorkflowAiDraft('modify', '修改', source)).rejects.toThrow(error)
   })
@@ -154,10 +155,10 @@ describe('real workflow AI draft generation', () => {
     const next = candidate()
     next.nodes.push({ id: '1', title: 'Numeric-looking ID', executor: { type: 'done' } })
     Object.assign(next.nodes[0], { onResult: [branch] })
-    wire.mockResolvedValueOnce(submitted())
+    wire.mockResolvedValueOnce(prepared()).mockResolvedValueOnce(submitted())
       .mockResolvedValueOnce(task({ status: 'completed', result: { yaml: stringify(next) } }))
     await expect(generateWorkflowAiDraft('modify', '修改', source)).rejects.toThrow('结果分支')
-    expect(wire).toHaveBeenCalledTimes(2)
+    expect(wire).toHaveBeenCalledTimes(3)
   })
 
   it('reports deletions and top-level changes rather than silently preserving a lossy replacement', async () => {
@@ -172,7 +173,7 @@ describe('real workflow AI draft generation', () => {
   })
 
   it('blocks backend validation failures, and never applies an unvalidated candidate', async () => {
-    wire.mockResolvedValueOnce(submitted())
+    wire.mockResolvedValueOnce(prepared()).mockResolvedValueOnce(submitted())
       .mockResolvedValueOnce(task({ status: 'completed', result: { yaml: stringify(candidate()), summary: 'generated' } }))
       .mockResolvedValueOnce({ valid: false, issues: [{ path: 'nodes', message: 'server says invalid', severity: 'error' }], normalizedSpec: null })
     await expect(generateWorkflowAiDraft('modify', '修改', source)).rejects.toThrow('server says invalid')
@@ -182,7 +183,7 @@ describe('real workflow AI draft generation', () => {
     const next = candidate()
     const onResult = { if: { approved: true }, then: { wait: { type: 'unsupported', prompt: '确认' } } }
     Object.assign(next.nodes[1], { onResult })
-    wire.mockResolvedValueOnce(submitted())
+    wire.mockResolvedValueOnce(prepared()).mockResolvedValueOnce(submitted())
       .mockResolvedValueOnce(task({ status: 'completed', result: { yaml: stringify(next) } }))
       .mockResolvedValueOnce({
         valid: false, normalizedSpec: null,
@@ -191,9 +192,9 @@ describe('real workflow AI draft generation', () => {
 
     await expect(generateWorkflowAiDraft('modify', '修改', source)).rejects.toThrow('must be human')
 
-    expect(wire).toHaveBeenCalledTimes(3)
-    expect(wire.mock.calls[2][0]).toBe('/api/workflows/validate')
-    expect(JSON.parse(wire.mock.calls[2][1].body).spec.nodes[1].onResult).toStrictEqual(onResult)
+    expect(wire).toHaveBeenCalledTimes(4)
+    expect(wire.mock.calls[3][0]).toBe('/api/workflows/validate')
+    expect(JSON.parse(wire.mock.calls[3][1].body).spec.nodes[1].onResult).toStrictEqual(onResult)
   })
 
   it.each([
@@ -203,16 +204,16 @@ describe('real workflow AI draft generation', () => {
     ['version', undefined, '版本'],
   ])('revalidates normalizedSpec %s=%s even when the generated YAML preserves identity', async (field, value, error) => {
     const before = structuredClone(source)
-    wire.mockResolvedValueOnce(submitted())
+    wire.mockResolvedValueOnce(prepared()).mockResolvedValueOnce(submitted())
       .mockResolvedValueOnce(task({ status: 'completed', result: { yaml: stringify(candidate()) } }))
       .mockResolvedValueOnce({ valid: true, issues: [], normalizedSpec: { ...candidate(), [field]: value } })
 
     await expect(generateWorkflowAiDraft('modify', '修改', source)).rejects.toThrow(error)
 
-    const validatedSpec = JSON.parse(wire.mock.calls[2][1].body).spec
+    const validatedSpec = JSON.parse(wire.mock.calls[3][1].body).spec
     expect(validatedSpec.id).toBe(source.id)
     expect(validatedSpec.version).toBe(source.version)
-    expect(wire).toHaveBeenCalledTimes(3)
+    expect(wire).toHaveBeenCalledTimes(4)
     expect(source).toStrictEqual(before)
   })
 
@@ -222,7 +223,7 @@ describe('real workflow AI draft generation', () => {
     normalizedSpec.nodes[0].executor.prompt = 'server-normalized prompt'
     normalizedSpec.nodes[0]._x = 999
     normalizedSpec.nodes[0]._y = 888
-    wire.mockResolvedValueOnce(submitted())
+    wire.mockResolvedValueOnce(prepared()).mockResolvedValueOnce(submitted())
       .mockResolvedValueOnce(task({ status: 'completed', result: { yaml: stringify(candidate()) } }))
       .mockResolvedValueOnce({ valid: true, issues: [], normalizedSpec })
 
@@ -245,22 +246,59 @@ describe('real workflow AI draft generation', () => {
     expect(wire).not.toHaveBeenCalled()
   })
 
+  it('preserves create HTTP 500 diagnostics and recovers only by POST poll, never create', async () => {
+    const attempt = createWorkflowAiAttempt()
+    const requestId = attempt.requestId
+    const httpError = Object.assign(new Error('API 500: {"error":"INTERNAL_ERROR"}'), { status: 500 })
+    wire.mockResolvedValueOnce(prepared()).mockRejectedValueOnce(httpError)
+
+    const failure = await generateWorkflowAiDraft('create', '增加能力', source, undefined, attempt).catch(cause => cause)
+
+    expect(failure).toBeInstanceOf(WorkflowAiRecoveryError)
+    expect(failure.message).toContain(httpError.message)
+    expect(failure.message).toContain('AI 草稿请求未确认')
+    expect(failure.message).toContain('远端任务可能继续')
+    expect(failure.message).toContain('不会重复派发')
+    expect(failure.attempt).toBe(attempt)
+    expect(attempt).toEqual({ requestId, submitted: true, draftId: 'x', receipt: 'signed-receipt' })
+    const originalInput = JSON.parse(wire.mock.calls[1][1].body)
+    expect(originalInput.requestId).toBe(requestId)
+    expect(originalInput.receipt).toBe('signed-receipt')
+    expect(originalInput).not.toHaveProperty('submitted')
+
+    wire.mockResolvedValueOnce(task({ status: 'completed', result: { yaml: stringify(candidate()) } }))
+      .mockImplementationOnce(async (_url, init) => ({ valid: true, issues: [], normalizedSpec: JSON.parse(init.body).spec }))
+    const draft = await generateWorkflowAiDraft('create', '增加能力', source, undefined, failure.attempt)
+
+    expect(draft.spec.nodes[0].executor.prompt).toBe('new prompt')
+    expect(wire.mock.calls.map(call => [call[0], call[1]?.method])).toEqual([
+      [`/api/workflows/${source.id}/ai-drafts/prepare`, 'POST'],
+      [`/api/workflows/${source.id}/ai-drafts`, 'POST'],
+      [`/api/workflows/${source.id}/ai-drafts/x/poll`, 'POST'],
+      ['/api/workflows/validate', 'POST'],
+    ])
+    expect(JSON.parse(wire.mock.calls[2][1].body)).toEqual({ receipt: 'signed-receipt', currentYaml: originalInput.currentYaml })
+    expect(capabilities).toHaveBeenCalledOnce()
+  })
+
   it('surfaces generation failure and empty results', async () => {
-    wire.mockResolvedValueOnce(submitted()).mockResolvedValueOnce(task({ status: 'failed', error: '模型不可用' }))
+    wire.mockResolvedValueOnce(prepared()).mockResolvedValueOnce(submitted()).mockResolvedValueOnce(task({ status: 'failed', error: '模型不可用' }))
     await expect(generateWorkflowAiDraft('modify', '修改', source)).rejects.toThrow('模型不可用')
-    wire.mockResolvedValueOnce(submitted()).mockResolvedValueOnce(task({ status: 'completed' }))
+    wire.mockResolvedValueOnce(prepared()).mockResolvedValueOnce(submitted()).mockResolvedValueOnce(task({ status: 'completed' }))
     await expect(generateWorkflowAiDraft('modify', '修改', source)).rejects.toThrow('YAML')
   })
 
   it.each([
-    ['generation', 1],
-    ['polling', 2],
-    ['validation', 3],
+    ['preparation', 1],
+    ['generation', 2],
+    ['polling', 3],
+    ['validation', 4],
   ])('aborts an in-flight %s request at the 15-minute deadline without further requests', async (_stage, requestCount) => {
     vi.useFakeTimers()
     const before = structuredClone(source)
-    if (requestCount > 1) wire.mockResolvedValueOnce(submitted())
-    if (requestCount > 2) {
+    if (requestCount > 1) wire.mockResolvedValueOnce(prepared())
+    if (requestCount > 2) wire.mockResolvedValueOnce(submitted())
+    if (requestCount > 3) {
       wire.mockResolvedValueOnce(task({ status: 'completed', result: { yaml: stringify(candidate()) } }))
     }
     let requestSignal: AbortSignal
@@ -289,13 +327,13 @@ describe('real workflow AI draft generation', () => {
   it('cancels during polling without further requests', async () => {
     vi.useFakeTimers()
     const controller = new AbortController()
-    wire.mockResolvedValueOnce(submitted()).mockResolvedValueOnce(task({ status: 'running' }))
+    wire.mockResolvedValueOnce(prepared()).mockResolvedValueOnce(submitted()).mockResolvedValueOnce(task({ status: 'running' }))
     const promise = generateWorkflowAiDraft('modify', '修改', source, controller.signal)
     const rejection = expect(promise).rejects.toThrow()
     await vi.advanceTimersByTimeAsync(1)
     controller.abort()
     await rejection
     await vi.advanceTimersByTimeAsync(30_000)
-    expect(wire).toHaveBeenCalledTimes(2)
+    expect(wire).toHaveBeenCalledTimes(3)
   })
 })

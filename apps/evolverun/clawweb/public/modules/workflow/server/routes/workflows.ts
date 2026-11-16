@@ -609,7 +609,11 @@ export function createWorkflowsRouter(
     const workflowId = String(req.params.workflowId);
     const canView = await hasWorkflowAccess(req, botPermRepo, workflowId, "view");
     const canEdit = await hasWorkflowAccess(req, botPermRepo, workflowId, "edit");
-    res.json({ workflowId, canView, canEdit });
+    const actorId = resolveWorkflowActorId(req);
+    const canExecute = Boolean(actorId && botPermRepo && await botPermRepo.hasExecutePermission(workflowId, actorId));
+    // Editor deployment publishes a complete Pack; legacy execute-only access is insufficient.
+    const canDeploy = Boolean(actorId && botPermRepo && await botPermRepo.hasEditPermission(workflowId, actorId));
+    res.json({ workflowId, canView, canEdit, canExecute, canDeploy });
   }));
 
   /** GET /:workflowId/bot-permissions — list bot permissions for a workflow editor */

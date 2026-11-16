@@ -30,7 +30,8 @@ from agentclaw.community.core.agentswarm.service.protocols import (
     BotAuthorizationDescriptor, BotAuthorizationSource,
     GlobalRunLimitExceeded, GuardEventDetailItem, GuardEventSummary,
     AgentKind,
-    IdentitySourceInvalid, IdentitySourceRequired,
+    IdentitySourceInvalid, IdentitySourceRefusal, IdentitySourceRequired,
+    IDENTITY_SOURCE_UNVERIFIED,
     QueueDepthExceeded, RoundDetailItem, RoundEvent, RunDetail, RunEvents,
     SubmitRunRequest, TenantRunLimitExceeded,
 )
@@ -104,12 +105,23 @@ class AgentSwarmService(AgentSwarmServiceProtocol):
             # service test that does not care about identity fail on wiring
             # it never exercised.
             return
-        if resolver.identity_source(
+        answer = resolver.identity_source(
             owner_id=(req.owner_id or "").strip(), bot_id=source_id,
-        ) is None:
+        )
+        if isinstance(answer, IdentitySourceRefusal):
             raise IdentitySourceInvalid(
-                source_id,
-                "is not a Bot owned by the caller holding an issued passport",
+                source_id, answer.code, message=answer.message,
+            )
+        if not isinstance(answer, str) or not answer.strip():
+            # Neither an agent code nor a reason: the seam answered something
+            # the contract does not define, so the source is unverified rather
+            # than silently accepted.
+            raise IdentitySourceInvalid(
+                source_id, IDENTITY_SOURCE_UNVERIFIED,
+                message=(
+                    f"identity source {source_id!r} could not be verified: the "
+                    "authorization seam returned no agent code"
+                ),
             )
 
     async def submit_async(self, req: SubmitRunRequest) -> str:

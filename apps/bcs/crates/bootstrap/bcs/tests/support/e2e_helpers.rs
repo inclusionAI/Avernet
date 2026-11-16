@@ -95,6 +95,9 @@ impl ProcessManager {
         // Cargo's intermediate test layout is private. Nextest supplies the
         // runtime path (including build-reuse remapping); older Cargo versions
         // provide the integration-test executable path only at compile time.
+        // (Relative current_exe arithmetic resolved to a nonexistent
+        // `debug/build/bcs-<hash>/bcs` under --binaries-metadata; observed
+        // failing in runs 43345664811, 43351522373, 43369707101.)
         let bcs_bin = PathBuf::from(std::env::var_os("CARGO_BIN_EXE_bcs")
             .unwrap_or_else(|| env!("CARGO_BIN_EXE_bcs").into()));
 
@@ -544,17 +547,31 @@ pub async fn get_bots(bcs_url: &str, token: &str) -> Result<serde_json::Value, B
 // bcs-cli Helpers
 // ============================================================================
 
+/// Resolve the bcs-cli binary robustly: explicit CI env (`BCS_E2E_CLI_BIN`)
+/// first (the CI coverage runner may execute test binaries outside
+/// `debug/deps`, which breaks the historical relative resolution), keeping the
+/// relative form only as a fallback.
+fn resolve_cli_bin() -> Result<PathBuf, Box<dyn std::error::Error>> {
+    if let Ok(path) = std::env::var("BCS_E2E_CLI_BIN") {
+        let path = PathBuf::from(path);
+        if path.is_file() {
+            return Ok(path);
+        }
+    }
+    std::env::current_exe()?
+        .parent()
+        .and_then(|p| p.parent())
+        .map(|p| p.join("bcs-cli"))
+        .ok_or_else(|| "Could not find bcs-cli binary".into())
+}
+
 /// Run bcs-cli without any token (for health check only)
 /// Used in non-E2E tests where no BCN plugin is running.
 pub fn run_bcs_cli_no_token(
     bcs_url: &str,
     args: &[&str],
 ) -> Result<String, Box<dyn std::error::Error>> {
-    let cli_bin = std::env::current_exe()?
-        .parent()
-        .and_then(|p| p.parent())
-        .map(|p| p.join("bcs-cli"))
-        .ok_or("Could not find bcs-cli binary")?;
+    let cli_bin = resolve_cli_bin()?;
 
     let url_arg = format!("--url={}", bcs_url);
 
@@ -584,11 +601,7 @@ pub fn run_bcs_cli_with_token(
     token: &str,
     args: &[&str],
 ) -> Result<String, Box<dyn std::error::Error>> {
-    let cli_bin = std::env::current_exe()?
-        .parent()
-        .and_then(|p| p.parent())
-        .map(|p| p.join("bcs-cli"))
-        .ok_or("Could not find bcs-cli binary")?;
+    let cli_bin = resolve_cli_bin()?;
 
     let url_arg = format!("--url={}", bcs_url);
 
@@ -620,11 +633,7 @@ pub fn run_bcs_cli_with_env_token(
     bot_data_dir: &PathBuf,
     args: &[&str],
 ) -> Result<String, Box<dyn std::error::Error>> {
-    let cli_bin = std::env::current_exe()?
-        .parent()
-        .and_then(|p| p.parent())
-        .map(|p| p.join("bcs-cli"))
-        .ok_or("Could not find bcs-cli binary")?;
+    let cli_bin = resolve_cli_bin()?;
 
     let url_arg = format!("--url={}", bcs_url);
 
@@ -657,11 +666,7 @@ pub fn run_bcs_cli_with_session_file(
     bot_data_dir: &PathBuf,
     args: &[&str],
 ) -> Result<String, Box<dyn std::error::Error>> {
-    let cli_bin = std::env::current_exe()?
-        .parent()
-        .and_then(|p| p.parent())
-        .map(|p| p.join("bcs-cli"))
-        .ok_or("Could not find bcs-cli binary")?;
+    let cli_bin = resolve_cli_bin()?;
 
     let url_arg = format!("--url={}", bcs_url);
 

@@ -57,7 +57,10 @@ def test_workflow_triggers_bcs_and_runs_canonical_gate():
     assert "--bcs-cli-min 100" in workflow
 
 
-def test_bcsfuse_change_runs_singlebox_coverage(tmp_path):
+@pytest.mark.parametrize(
+    "changed_path", ["apps/bcsfuse/src/app/tc/providers.py", "rust-toolchain.toml"]
+)
+def test_relevant_change_runs_singlebox_coverage(tmp_path, changed_path):
     import yaml
 
     def git(*args):
@@ -68,11 +71,11 @@ def test_bcsfuse_change_runs_singlebox_coverage(tmp_path):
     git("config", "user.email", "ci-test@example.com")
     git("commit", "--allow-empty", "-m", "baseline")
     base = git("rev-parse", "HEAD")
-    changed = tmp_path / "apps/bcsfuse/src/app/tc/providers.py"
-    changed.parent.mkdir(parents=True)
-    changed.write_text("# BCSFuse-only change\n", encoding="utf-8")
+    changed = tmp_path / changed_path
+    changed.parent.mkdir(parents=True, exist_ok=True)
+    changed.write_text("# Singlebox-relevant change\n", encoding="utf-8")
     git("add", ".")
-    git("commit", "-m", "change BCSFuse")
+    git("commit", "-m", "change Singlebox input")
 
     job = yaml.safe_load(WORKFLOW.read_text())["jobs"]["singlebox-coverage"]
     detect = next(step["run"] for step in job["steps"] if step.get("id") == "changes")
@@ -91,6 +94,20 @@ def test_bcsfuse_change_runs_singlebox_coverage(tmp_path):
         },
     )
     assert output.read_text().strip() == "skip=false"
+
+
+def test_bcs_coverage_merges_valid_profiles_and_fails_closed_on_aggregate_failure():
+    runner = (REPO_ROOT / "apps/bcs/scripts/e2e_coverage.sh").read_text(encoding="utf-8")
+    aggregation = runner.split('cov_ignore_regex=', 1)[1]
+
+    # LLVM's default `any` mode lets one truncated companion profile abort the
+    # report even when the remaining profiles are valid. `all` preserves the
+    # warning, merges readable profiles, and fails when no profile is valid.
+    assert aggregation.count("--failure-mode all") == 3
+    assert "rm -f \"$summary_json\"" in aggregation
+    assert "report_status=0" in aggregation
+    assert "FAIL: BCS LLVM coverage aggregation failed" in aggregation
+    assert "cov_gate_status=1" in aggregation
 
 
 def test_workflow_installs_pinned_protoc_without_apt():

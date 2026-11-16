@@ -6,6 +6,7 @@ from .admission_genome_routes import GENOME_ADMISSION
 from .admission_task_routes import (
     TASK_BBS_ADMISSION,
     TASK_PUBLIC_ADMISSION,
+    TASK_TODO_ADMISSION,
 )
 
 _SPACE_SKILL_BASE = "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}"
@@ -728,6 +729,7 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ("GET", "/openapi/v1/collaboration/bots/{bot_id}/public/risk-checks/{risk_check_id}"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     ("POST", "/openapi/v1/collaboration/bots/{bot_id}/public/risk-checks/{risk_check_id}/refresh"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     **TASK_PUBLIC_ADMISSION,
+    **TASK_TODO_ADMISSION,
     # Department directory search — a tenant-wide catalogue read, not a user's.
     # ── Source credentials (W3, #1471) — OPEN, application-operated ─────────
     # These are machine operations, and the *edge* is what makes them so:
@@ -764,6 +766,9 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ("POST", "/openapi/v1/bots/spaces/personal/initialize"): AdmissionMode.REFUSED,
     ("POST", "/openapi/v1/bots/spaces/create"): AdmissionMode.REFUSED,
     ("GET", "/openapi/v1/bots/spaces/{space_id}/members"): AdmissionMode.USER_GATED,
+    # Space deletion is a human-only write; the route's _REFUSES_APP_ONLY
+    # dependency enforces REFUSED, and the Space service owns the policy.
+    ("DELETE", "/openapi/v1/bots/spaces/{space_id}"): AdmissionMode.REFUSED,
     # The caller must arrive on behalf of a real user.  The handler then
     # resolves that user as the actor and SpaceAccessService enforces the
     # concrete space membership; this is deliberately not OPEN or

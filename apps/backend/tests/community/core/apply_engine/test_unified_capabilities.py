@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from agentclaw.community.plugin_api.models import BotModel
 from agentclaw.community.core.apply_engine.context import ApplyContext
 from agentclaw.community.core.apply_engine.capabilities import (
     Category,
@@ -40,9 +41,13 @@ from ._fakes import FakeManifestContent, FakeSharedSkills, FakeMcpConfigService,
 
 
 def rig():
-    service = _skill_service(
-        CapabilityDesiredStateRepository(_Database(shared=True)), _Runtime()
-    )
+    db = _Database(shared=True)
+    with db.transactional_orm_session() as session:
+        session.add(BotModel(
+            bot_id="bot-1", entity_id="true-owner", owner_id="true-owner",
+            entity_type="staff", creator_id="true-owner", env="dev",
+        ))
+    service = _skill_service(CapabilityDesiredStateRepository(db), _Runtime())
     sets = PlatformSkillSetApply(service)
     ctx = ApplyContext(
         bot_id="bot-1",

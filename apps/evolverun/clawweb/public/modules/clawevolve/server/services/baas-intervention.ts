@@ -44,6 +44,8 @@ export type InterventionParams = {
   retryTransientErrors?: boolean;
   /** Optional environment-specific transport selected by the owning workflow. */
   transportConfig?: { apiKey: string; iamtoken: string; baseUrl: string };
+  /** Caller-defined native message ID. Omit it to let BaaS allocate the ID. */
+  messageId?: string;
 };
 
 export type InterventionResult = {
@@ -83,6 +85,12 @@ const NON_JSON_SNIPPET_CHARS = 200;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function validCallerMessageId(value: string): boolean {
+  if (value.trim().length === 0 || value.length > 255) return false;
+  if (/[\u0000-\u001f\u007f-\u009f]/u.test(value)) return false;
+  return Buffer.from(value, "utf8").toString("utf8") === value;
 }
 
 function errorText(value: unknown): string | undefined {
@@ -204,12 +212,24 @@ export async function sendIntervention(params: InterventionParams): Promise<Inte
     };
   }
 
+  if (params.messageId !== undefined && (typeof params.messageId !== "string" || !validCallerMessageId(params.messageId))) {
+    return {
+      ok: false,
+      error: "BaaS message_id invalid: must be a non-empty string of at most 255 characters, without control characters or invalid UTF-8",
+      tokenExpired: false,
+      ...(params.retryTransientErrors === false ? { failureKind: "rejected" as const } : {}),
+    };
+  }
+
+  const strictFixedId = params.messageId !== undefined && params.retryTransientErrors === false;
+
   const url = `${config.baseUrl}/openapi/v1/messages`;
 
   const headers = buildBaasHeaders(config);
 
   const body = {
     bot_id: botId,
+    ...(params.messageId !== undefined ? { message_id: params.messageId } : {}),
     message,
     metadata: {
       // Only an existing session may be addressed. BaaS creates a new session
@@ -242,18 +262,24 @@ export async function sendIntervention(params: InterventionParams): Promise<Inte
 
       // Read once as text so a non-JSON body can still be described below.
       let rawBody = "";
+      let bodyReadSucceeded = true;
       try {
         rawBody = await res.text();
       } catch {
         rawBody = "";
+        bodyReadSucceeded = false;
       }
 
       let responseJson: BaasMessageResponse = {};
       let bodyWasJson = false;
+      let responseWasJsonObject = false;
       try {
         const parsed: unknown = JSON.parse(rawBody);
         bodyWasJson = true;
-        if (isRecord(parsed)) responseJson = parsed as BaasMessageResponse;
+        if (isRecord(parsed)) {
+          responseJson = parsed as BaasMessageResponse;
+          responseWasJsonObject = true;
+        }
       } catch {
         // Non-JSON body: an intermediary answered instead of BaaS.
       }
@@ -261,6 +287,46 @@ export async function sendIntervention(params: InterventionParams): Promise<Inte
       const details = errorDetails(responseJson)
         || nonJsonBodyDetails({ rawBody, bodyWasJson, contentType: res.headers.get("content-type") });
       const statusDetail = `${res.status}${details ? ` ${details}` : ""}`;
+      const hasBusinessError = [responseJson.code, responseJson.buserviceErrorCode]
+        .some(code => code != null && String(code).trim() !== "" && String(code) !== "0");
+
+      if (strictFixedId) {
+        if (res.ok && responseJson.data && !hasBusinessError) {
+          return {
+            ok: true,
+            messageId: responseJson.data.message_id,
+            sessionId: responseJson.data.session_id,
+          };
+        }
+
+        const baasErrorCode = responseJson.buserviceErrorCode;
+        if (typeof baasErrorCode === "string" && TOKEN_EXPIRED_CODES.includes(baasErrorCode)) {
+          return {
+            ok: false,
+            error: safeError(`IAM Token 已过期或无效 (HTTP ${statusDetail})`, config),
+            tokenExpired: true,
+            failureKind: "uncertain" as const,
+          };
+        }
+
+        const clearAuthRejection = (res.status === 401 || res.status === 403)
+          && bodyReadSucceeded
+          && responseWasJsonObject
+          && responseJson.data == null;
+        if (clearAuthRejection) {
+          return {
+            ok: false,
+            error: safeError(`BaaS API 错误: ${statusDetail}`, config),
+            failureKind: "rejected" as const,
+          };
+        }
+
+        return {
+          ok: false,
+          error: safeError(`BaaS API 错误: ${statusDetail}`, config),
+          failureKind: "uncertain" as const,
+        };
+      }
 
       // Check for token expiry in BaaS response
       const baasErrorCode = responseJson.buserviceErrorCode;
@@ -275,8 +341,6 @@ export async function sendIntervention(params: InterventionParams): Promise<Inte
 
       // Single-attempt callers need a positive business acknowledgement, not
       // merely HTTP 200 with a diagnostic envelope. Legacy behavior is unchanged.
-      const hasBusinessError = [responseJson.code, responseJson.buserviceErrorCode]
-        .some(code => code != null && String(code).trim() !== "" && String(code) !== "0");
       if (params.retryTransientErrors === false && hasBusinessError) {
         return { ok: false, error: safeError(`BaaS API 错误: ${statusDetail}`, config), failureKind: "rejected" };
       }

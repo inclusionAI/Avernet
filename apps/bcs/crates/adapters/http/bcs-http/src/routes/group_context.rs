@@ -30,6 +30,8 @@ pub(crate) struct GroupContextQuery {
     group_id: Option<String>,
     session_id: Option<String>,
     round_id: Option<String>,
+    #[serde(rename = "view_bot_id")]
+    view_bot_id: Option<String>,
 }
 
 impl GroupContextQuery {
@@ -128,6 +130,33 @@ pub(crate) async fn add(
     Ok(json_ok(result))
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct SharedInfoQuery {
+    group_id: Option<String>,
+    session_id: Option<String>,
+    #[serde(rename = "view_bot_id")]
+    view_bot_id: Option<String>,
+}
+
+pub(crate) async fn shared_info(
+    State(state): State<HttpAppState>,
+    headers: HeaderMap,
+    uri: Uri,
+    query: Result<Query<SharedInfoQuery>, QueryRejection>,
+) -> Result<Response, GroupContextHttpError> {
+    use super::group_messages::{application_caller, resolve_group_chat_caller};
+
+    let caller = resolve_group_chat_caller(&state, &headers, &uri).await
+        .map_err(|error| GroupContextHttpError::from_caller_status(error.status()))?;
+    let Query(query) = query.map_err(GroupContextHttpError::from_query_rejection)?;
+    let group_id = query.group_id.ok_or_else(|| ApplicationError::invalid("invalid_param", "groupId is required"))?;
+    let items = state.services.group_context
+        .shared_info(&group_id, query.session_id.as_deref(), query.view_bot_id.as_deref(), &application_caller(&caller))
+        .await?;
+    Ok(json_ok(serde_json::json!({ "items": items })))
+}
+
 pub(crate) async fn list_preset(
     State(state): State<HttpAppState>,
     headers: HeaderMap,
@@ -142,6 +171,29 @@ pub(crate) async fn list_preset(
     let group_id = query.group_id.ok_or_else(|| ApplicationError::invalid("invalid_param", "groupId is required"))?;
     let presets = state.services.group_context.list_presets(&group_id, &application_caller(&caller), query.session_id.as_deref()).await?;
     Ok(json_ok(serde_json::json!({ "presets": presets })))
+}
+
+pub(crate) async fn list_managed_presets(
+    State(state): State<HttpAppState>,
+    headers: HeaderMap,
+    uri: Uri,
+    query: Result<Query<GroupContextQuery>, QueryRejection>,
+) -> Result<Response, GroupContextHttpError> {
+    use super::group_messages::{GroupChatCaller, application_caller, resolve_group_chat_caller};
+
+    let caller = resolve_group_chat_caller(&state, &headers, &uri).await
+        .map_err(|error| GroupContextHttpError::from_caller_status(error.status()))?;
+    let Query(query) = query.map_err(GroupContextHttpError::from_query_rejection)?;
+    let group_id = query.group_id.ok_or_else(|| ApplicationError::invalid("invalid_param", "groupId is required"))?;
+    let GroupChatCaller::Human(human) = &caller else {
+        return Err(ApplicationError::forbidden_code("permission_denied", "preset management requires a Human caller").into());
+    };
+    if query.view_bot_id.is_some() {
+        return Err(ApplicationError::invalid("invalid_param", "preset management does not accept a Bot view").into());
+    }
+    let presets = state.services.group_context.list_presets(&group_id, &application_caller(&caller), query.session_id.as_deref()).await?;
+    let can_manage = state.services.group_context.can_manage_presets(&group_id, &human.actor_id).await?;
+    Ok(json_ok(serde_json::json!({ "presets": presets, "can_manage": can_manage })))
 }
 
 #[derive(Deserialize)]

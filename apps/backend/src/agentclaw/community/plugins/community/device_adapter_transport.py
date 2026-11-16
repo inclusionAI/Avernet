@@ -121,7 +121,7 @@ class CommunityDeviceAdapterTransport(DeviceAdapterTransport):
         except httpx.HTTPStatusError as exc:
             raise self._map_status_error(exc) from exc
         except httpx.RequestError as exc:
-            if timeout is not None and isinstance(exc, httpx.TimeoutException):
+            if isinstance(exc, httpx.TimeoutException):
                 raise DeviceAdapterTimeoutError(
                     f"Adapter request timed out: {method} {path}"
                 ) from exc
@@ -173,7 +173,7 @@ class CommunityDeviceAdapterTransport(DeviceAdapterTransport):
         except httpx.HTTPStatusError as exc:
             raise self._map_status_error(exc) from exc
         except httpx.RequestError as exc:
-            if timeout is not None and isinstance(exc, httpx.TimeoutException):
+            if isinstance(exc, httpx.TimeoutException):
                 raise DeviceAdapterTimeoutError(
                     f"Adapter request timed out: POST {path}"
                 ) from exc
@@ -216,7 +216,7 @@ class CommunityDeviceAdapterTransport(DeviceAdapterTransport):
                 await client.aclose()
                 raise
         except httpx.RequestError as exc:
-            if timeout is not None and isinstance(exc, httpx.TimeoutException):
+            if isinstance(exc, httpx.TimeoutException):
                 raise DeviceAdapterTimeoutError(
                     f"Adapter stream timed out: {method} {path}"
                 ) from exc

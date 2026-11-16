@@ -11,6 +11,7 @@ import { toast } from 'sonner';
 import { enrichFileRefContent } from './botChatMessagePrefill';
 import { prependUniqueMessages } from './groupChatHistoryUtils';
 import { useBotConnectionRuntime } from './useBotConnectionRuntime';
+import { useBotSessionRange } from './useBotSessionRange';
 import { useSessionDisplayStatus, type SessionEnterOutcome } from './useSessionDisplayStatus';
 
 export interface SendFileRefs {
@@ -31,6 +32,7 @@ export function useBotChat(
   const identityId = authenticatedUserId === undefined ? workspaceIdentityId : authenticatedUserId;
   const historyRefreshNonce = useWorkspaceStore((s) => s.historyRefreshNonce);
   const sessionId = session?.sessionId ?? null;
+  const sessionRange = useBotSessionRange(bot);
   const [supportState, setSupportState] = useState<BotChatState>({ phase: 'idle', error: null });
   const [connectionStatus, setConnectionStatus] = useState<ProviderConnectionStatus>('disconnected');
   // 连接状态仍等待双完成，但 HTTP 历史独立就绪，先供阅读，不等待 IAM/握手。
@@ -40,12 +42,10 @@ export function useBotChat(
   const [historyEmpty, setHistoryEmpty] = useState(false);
   const [hasMoreHistory, setHasMoreHistory] = useState(false);
   const [isLoadingMoreHistory, setIsLoadingMoreHistory] = useState(false);
-
   const provider = useMemo(() => {
     if (!bot || !sessionId || !identityId) return null;
-    return createBotChatProvider({ bot, userId: identityId, sessionId });
-  }, [bot, sessionId, identityId]);
-
+    return createBotChatProvider({ bot, userId: identityId, sessionId, range: sessionRange });
+  }, [bot, sessionId, identityId, sessionRange]);
   const connectionRuntime = useBotConnectionRuntime(provider);
   const historyDone = provider !== null && historyProvider === provider;
   const currentProvider = useRef(provider);

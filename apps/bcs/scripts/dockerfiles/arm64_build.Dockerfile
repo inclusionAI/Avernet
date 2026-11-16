@@ -1,12 +1,15 @@
 FROM registry.access.redhat.com/ubi9/ubi-minimal:9.5
 
-ARG RUST_VERSION=stable
+ARG RUST_VERSION=1.94.0
 ARG PROTOC_VERSION=25.3
 ARG PROTOC_URL=
 
 ENV RUSTUP_HOME=/usr/local/rustup
+ENV RUSTUP_TOOLCHAIN=1.94.0
 ENV CARGO_HOME=/usr/local/cargo
 ENV PATH=/usr/local/cargo/bin:${PATH}
+
+RUN test "${RUST_VERSION}" = "1.94.0"
 
 RUN microdnf install -y \
       gcc \
@@ -31,7 +34,7 @@ RUN set -eux; \
 
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
       | sh -s -- -y --no-modify-path --profile minimal --default-toolchain ${RUST_VERSION} \
-    && rustup component add rustfmt clippy \
+    && rustup component add --toolchain 1.94.0 rustfmt clippy \
     && printf '[source.crates-io]\nreplace-with = "aliyun"\n\n[source.aliyun]\nregistry = "sparse+https://mirrors.aliyun.com/crates.io-index/"\n' > ${CARGO_HOME}/config.toml \
     && rustc --version \
     && cargo --version

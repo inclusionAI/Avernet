@@ -134,3 +134,56 @@ Python 脚本路径定位用例未通过；相关 60 项验证不替代全量结
 本轮仍没有提交、推送、更新内部宿主子模块引用或部署。内部 Host 验证显式指向
 本地新构建的公共依赖；发布前必须同步公共依赖版本。未验证预发实际 Bot 绑定、
 SSO、BaaS 凭证或真实模型输出。未修改 `taskguard`、`docs/demos`。
+
+## 2026-11-15 无新增草稿表版本：本地验证补充
+
+本次用户约束替代旧版任务表方案。当前实现使用预先签发的 metadata receipt 与
+BaaS 原生固定 `message_id`，恢复只轮询原消息；不创建、读写或删除草稿任务表。
+v153 保留为空 SQL 的历史槽位。取消仅停止本地等待；不承诺远端停止、全局撤销或
+页面丢失内存上下文后的恢复。现行契约见[工作流 AI 草稿](../workflow-ai-drafts.md)。
+
+实际本地结果（Node 20，重建公共依赖后）：
+
+- Workflow：15 个聚焦文件，330 项通过。
+- Public app/runtime/BaaS/browser：5 个文件，97 项通过。
+- 共享 BaaS sender：84 项通过。
+- 迁移与 managed database 回归：59 项通过。
+- 企业宿主 AI/安全/Origin/shutdown：180 项通过，测试关联当前公共源码及重建产物，
+  不使用旧依赖产物冒充集成证据。
+- 合计 750 项定向回归通过；不代表仓库全量测试或远端 CI 全绿。
+- Shared、ClawEvolve、Workflow、ClawWeb 构建，以及受影响包和宿主默认生产
+  TypeScript 检查通过；包边界、文件尺寸、无跳过用例与 whitespace 检查通过。
+- 独立安全审查覆盖 provider namespace、固定 ID/冻结 Bot、保守派发分类、查询
+  操作性错误保留 context、ACL/期限、无表及 local-only cancel；无未解决代码级阻断。
+
+本轮未 commit、push 或部署，未调用真实 BaaS。没有据此确认先前预发 500 的实际
+SQL 根因，也未证明预发已支持当前 native-ID 契约、真实配置一致或 Bot 工具权限
+已经满足建议生成边界。发布时必须验证实际服务版本与新旧客户端兼容，不能为旧
+无凭据请求自动创建替代任务。未改 taskguard、docs/demos 或宿主 gitlink。
+
+## 2026-11-16 目标 BaaS 环境选择与失败分类
+
+现行配置契约补充 `autoHeal.baasEnvironment`（环境变量
+`AUTO_HEAL_BAAS_ENVIRONMENT` 优先），按配置的 Bot 运行环境选择完整 endpoint/key
+配对，不再让 Editor 的通用生产传输隐式决定 Bot 的目标环境。目标环境不是服务 Bot
+生命周期阶段；个人 Bot 不增加 `lifecycle_stage`。执行、轮询与 receipt 签名复用同一
+配对和双环境 namespace；该 namespace 升级会使旧 receipt 失效，不自动重派发。
+具体契约与诊断步骤见[工作流 AI 草稿](../workflow-ai-drafts.md)。
+
+本地合成数据验证：
+
+- Shared 配置/配对选择回归：68 项通过。
+- Public app/transport/receipt/失败分类：174 项通过，包含 53 项失败分类回归。
+- Workflow core/并发/校验/路由：101 项通过。
+- 前端生命周期/错误提示：89 项通过。
+- 关联企业宿主目标配置及真实 Host 路由：24 项通过；CI 脚本契约 47 项通过。
+- Shared、ClawEvolve、Workflow、ClawWeb 顺序构建通过；受影响公共包与企业宿主
+  默认生产 TypeScript 检查通过。
+- 扩展企业宿主全量运行：1,747 项通过、1 项失败、0 skipped；失败文件未在本次
+  修改中，断言观察到本地 Git 远端额外产生 `refs/notes/ai`。隔离复跑仍观察到
+  notes 引用变化及 `.git/ai` 清理竞态，未以删除断言或跳过用例掩盖。因此本记录
+  不宣称全量/远端 CI 全绿。
+
+未向真实 Bot 发消息，未修改数据库、Bot 绑定或已部署服务。目标 endpoint 的真实
+上游环境、配对凭据有效性与生成成功仍需配套发布后在授权环境验收；静态配置和
+本地模拟测试不能代替该验收。旧失败消息不会因配置修正而变为成功。

@@ -119,6 +119,9 @@ from agentclaw.community.adapters.http.openapi_v1.errors_source_credentials impo
 )
 from agentclaw.community.adapters.http.openapi_v1.errors_space import SpaceErrorCode, SpacePublicErrorMessage
 from agentclaw.community.adapters.http.openapi_v1.errors_space_skill import SPACE_SKILL_ERROR_CODES, SPACE_SKILL_HTTP_ERRORS
+from agentclaw.community.adapters.http.openapi_v1.task.errors_todo import (
+    TODO_HTTP_ERRORS,
+)
 from agentclaw.community.adapters.http.openapi_v1.errors_work_order import (
     WORK_ORDER_ERROR_STATUS, WORK_ORDER_ERROR_CODES,
 )
@@ -241,6 +244,7 @@ from agentclaw.community.core.market_favorites.errors import (
     FavoriteTargetInvalidError,
 )
 from agentclaw.community.core.spaces.errors import (
+    PersonalSpaceDeletionError,
     PersonalSpaceInvariantError,
     SpaceAccessDeniedError,
     SpaceAlreadyExistsError,
@@ -249,6 +253,7 @@ from agentclaw.community.core.spaces.errors import (
     SpaceMemberInvalidError,
     SpaceMemberNotFoundError,
     SpaceNameInvalidError,
+    SpaceNotEmptyError,
     SpaceNotFoundError,
 )
 
@@ -447,6 +452,11 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     **SPACE_SKILL_HTTP_ERRORS,
     SpaceCreatorInvariantError: (409, "Space creator cannot be removed or demoted"),
     PersonalSpaceInvariantError: (409, "Personal space membership is immutable"),
+    PersonalSpaceDeletionError: (
+        409,
+        SpacePublicErrorMessage.PERSONAL_SPACE_NOT_DELETABLE,
+    ),
+    SpaceNotEmptyError: (409, SpacePublicErrorMessage.SPACE_NOT_EMPTY),
     SkillCenterTeamCreateError: (
         502,
         SpacePublicErrorMessage.SKILL_CENTER_TEAM_CREATE_FAILED,
@@ -649,7 +659,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     LocalSkillLayoutRollbackError: (409, "Skill layout rollback is in progress"),
     LocalSkillEditLockUnavailableError: (503, "Skill update service is temporarily unavailable"),
     LocalSkillEditPausedError: (409, "Skill layout is being updated"),
-    SkillRuntimeNameConflictError: (409, "Skill runtime name conflicts with an active Skill"),
+    SkillRuntimeNameConflictError: (409, "Skill runtime name conflicts with another Skill"),
     SkillEngineNotSupportedError: (409, "Skill is not supported by this bot type and engine"),
     RepositoryCatalogNotFoundError: (404, "Not found"),
     RepositoryCatalogSyncInProgressError: (409, "Repository synchronization is already in progress"),
@@ -657,6 +667,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     **errors_skill_center.SKILL_CENTER_ENVELOPE_ERRORS,
     **SOURCE_CREDENTIALS_ENVELOPE_ERRORS,
     **GENOME_ENVELOPE_ERRORS,
+    **TODO_HTTP_ERRORS,
     FileTooLargeError: (413, "File too large for preview"),
     # download-dir: one fixed message for all three caps (per-file / count / total).
     DirectoryTooLargeError: (413, "Directory too large to download"),
@@ -871,6 +882,8 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
 # small, explicit override table lets a category expose a stable actionable
 # subcode without changing any existing public response.
 ENVELOPE_ERROR_CODES: dict[type[Exception], int] = {
+    PersonalSpaceDeletionError: SpaceErrorCode.PERSONAL_SPACE_NOT_DELETABLE,
+    SpaceNotEmptyError: SpaceErrorCode.SPACE_NOT_EMPTY,
     SkillCenterTeamCreateError: SpaceErrorCode.SKILL_CENTER_TEAM_CREATE_FAILED,
     **SPACE_SKILL_ERROR_CODES,
     **WORK_ORDER_ERROR_CODES,
@@ -918,6 +931,7 @@ _SKILL_SET_CONFLICT_CODES: dict[str, tuple[int, str]] = {
     "SKILL_SET_NAME_CONFLICT": (409206, "SkillSet name already exists"),
     "IDEMPOTENCY_KEY_REUSED": (409207, "Idempotency key was reused with a different request"),
     "BOT_MUTATION_BUSY": (409208, "Another SkillSet mutation is in progress"),
+    "SKILL_SET_STATE_CHANGED_RETRY": (409211, "SkillSet state changed; retry the request"),
 }
 
 

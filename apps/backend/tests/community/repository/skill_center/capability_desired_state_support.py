@@ -6,6 +6,7 @@ from datetime import datetime
 from sqlalchemy import create_engine
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
+from agentclaw.community.plugin_api.models import BotModel
 from agentclaw.community.core.base import Base
 from agentclaw.community.core.models.skill import (
     BotSkillInstallation,
@@ -28,6 +29,14 @@ class _Database:
         self.engine = create_engine("sqlite:///:memory:")
         Base.metadata.create_all(self.engine)
         self.sessions = sessionmaker(bind=self.engine, expire_on_commit=False)
+        # Persist synthetic identities so mutations use the real Bot fence.
+        with self.sessions.begin() as session:
+            for bot_id in ("bot", "bot-a", "default", "other-bot", "persisted-bot", "another-bot"):
+                for entity_id in ("owner", "owner-a", "owner-b", "other", "someone-else"):
+                    session.add(BotModel(
+                        bot_id=bot_id, entity_id=entity_id, owner_id=entity_id,
+                        entity_type="staff", creator_id=entity_id, env="dev",
+                    ))
 
     @contextmanager
     def orm_session(self):

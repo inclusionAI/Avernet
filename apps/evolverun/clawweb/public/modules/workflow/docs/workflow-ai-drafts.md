@@ -1,255 +1,267 @@
-# Workflow Editor AI drafts: AutoHeal/BaaS
+# Workflow Editor AI drafts: AutoHeal/BaaS, without a draft table
 
 ## Boundary and ownership
 
-Workflow owns the Editor draft Service API and its durable task records. The
-core service consumes the host-supplied `WorkflowAiDraftExecutionPort` Plugin
-API; the host assembles the existing AutoHeal/BaaS integration, verified
-identity, configuration, permissions and lifecycle. The browser consumes only
-the same-origin draft API below, not the BaaS client or provider credentials.
+Workflow owns suggestion generation and validation. The host supplies verified
+identity, live edit permission and the existing AutoHeal/BaaS execution adapter.
+The browser only calls the same-origin Editor draft API. BaaS owns message and
+execution state; ClawWeb does not create or query `workflow_ai_drafts`, store AI
+tasks in configuration/workflow tables, or substitute an instance-local Map.
 
-**Editor AI uses the same server-configured Bot as AutoHeal through existing
-BaaS.** The host resolves the effective `autoHeal.botId` using the existing
-AutoHeal configuration resolver (including its established environment-over-YAML
-precedence). It does not use the intelligent-onboarding default Bot or a
-browser-selected Bot. Pass the configured ID **verbatim**, including any suffix
-already present; never append the submitting user's ID or otherwise rewrite it.
-The actor identifies the authorized draft owner, not a replacement Bot target.
+**Editor uses the effective server `autoHeal.botId`, verbatim, including its
+configured owner suffix.** The submitting actor authorizes the request; it does
+not select a different Bot or replace the configured owner. Existing AutoHeal
+configuration precedence is retained. The configured Bot runtime environment, not
+the browser or ClawWeb deployment environment, selects its BaaS transport.
 
-Generation needs no AIStudio experiment, Snapshot, taskguard release, Pack
-baseline, Git mirror, branch or result commit. It must not fall back to those
-transports, intelligent onboarding, or a local template. This is not diagnosis
-or repair selection: a natural-language editing request does not invent repair
-items, and existing repair/publication contracts remain separate.
+No AIStudio experiment, Snapshot, taskguard release, Pack baseline, Git branch,
+intelligent-onboarding default Bot, or local template participates in generation.
+The provider is asked for a complete YAML suggestion, not a repair/run command.
+This prompt restriction is not a provider-enforced tool sandbox: a configured
+AutoHeal Bot's remote tool permissions remain a separate operational boundary.
+ClawWeb does not call workflow save/deploy/run APIs during this flow; do not infer
+from that fact that an unrestricted remote Bot cannot execute a tool.
+There is no generation fallback to another execution chain.
 
-The [ordinary Editor document boundary](workflow-editor-draft-boundary.md)
-continues to govern Apply/save/deploy. AI adds a candidate-generation step only:
-no generation, polling, cancellation, preview or Apply operation saves, deploys
-or runs the workflow. Durable AI task bookkeeping is not a workflow write.
+The [ordinary Editor document boundary](workflow-editor-draft-boundary.md) still
+governs Apply, Save and Deploy. Preparing, generating, polling, cancelling and
+applying a preview neither saves nor deploys nor runs a workflow.
 
-## Browser Service API (unchanged)
+## Configured Bot runtime environment
 
-All paths are relative to the current same-origin host. Every operation
-requires verified identity and workflow edit permission. Drafts are bound to
-the submitting actor and workflow; knowing a draft ID is not authorization.
-Mutations retain the existing same-origin/CSRF checks, including
-`X-Pack-Version-CSRF: 1` for draft submission and cancellation. Shared browser
-authentication, gzip, no-store and abort transport remain in use.
+`autoHeal.baasEnvironment` selects `dev`, `pre` or `prod` for the configured
+AutoHeal Bot. `AUTO_HEAL_BAAS_ENVIRONMENT` overrides that YAML field. An absent
+field retains the legacy `prod` selection; an explicitly invalid or empty
+selection fails closed. Administrators must configure the actual environment
+that owns the Bot and binding, not infer it from the environment of the Editor.
 
-- `GET /api/workflows/:workflowId/ai-drafts/capabilities` returns
-  `{ available, reason? }` before generation. Missing/invalid effective
-  `autoHeal.botId`, unavailable BaaS wiring or unavailable draft storage must be
-  reported honestly; never report a missing experiment or Git baseline.
-  `available: true` is readiness evidence, not proof of model quality or that a
-  later dispatch will succeed. A failed HTTP check is not proof of missing
-  configuration, and an unrelated 404 is not an onboarding fallback signal.
-- `POST /api/workflows/:workflowId/ai-drafts` accepts only the draft request
-  `{ requestId, mode, prompt, currentYaml }` and returns `{ draftId, status }`.
-  `create` means extend the current workflow; `modify` means adjust it, not
-  create a new workflow. The prompt is nonblank, at most 4,000 Unicode code
-  points, and is preserved without trimming. YAML is complete valid UTF-8, at
-  most 100,000 bytes, preserving workflow ID and version. Browser actor, Bot,
-  repository, branch, path or baseline fields confer no authority.
-- `GET /api/workflows/:workflowId/ai-drafts/:draftId` returns
-  `{ draftId, workflowId, status, inputSpecDigest, error?, result? }`.
-  States are `pending`, `running`, `dispatch_uncertain`, `completed`, `failed`
-  and `cancelled`. Only `completed` carries `result: { yaml, summary }`.
-- `POST /api/workflows/:workflowId/ai-drafts/:draftId/cancel` durably marks a
-  nonterminal **local draft task** cancelled. Terminal tasks stay terminal.
-  There is no supported BaaS stop operation: this does not promise that the
-  message or remote Bot execution has stopped. Late acknowledgements/results
-  cannot revive a cancelled task or be applied to the Editor.
-- Candidate validation still uses the existing read-only
-  `POST /api/workflows/validate` with `{ spec }`; only a valid response with a
-  valid `normalizedSpec` can become an applicable preview. No save API is
-  invoked by validation or Apply.
+The adapter and receipt signer resolve the **same complete endpoint and API-key
+pair** from `baas.environments[autoHeal.baasEnvironment]`. They do not combine a
+non-production endpoint with production credentials, use an incomplete target,
+or fall back to another environment. The existing shared IAM transport remains
+server-only. Each environment entry must point to the provider deployment whose
+Backend can resolve that Bot's environment-scoped identity and binding; naming a
+configuration slot `pre` while pointing it to production does not establish that
+property.
 
-## Capability reasons and provider failures
+The provider's Bot lifecycle stage is a separate concept. In particular, an
+ACTIVE personal Bot in a non-production environment does not become reachable
+by adding `bot_options.lifecycle_stage`. Editor drafting does not add that field,
+rewrite the Bot owner, publish the Bot or edit a provider binding.
 
-The browser maps the following server codes to actionable AutoHeal/BaaS text,
-not experiment/Git diagnostics. Keep the distinctions; a generic unavailable
-banner must not obscure whether configuration, binding, credentials, dispatch,
-provider execution, reply validation, local deadline or edit authorization failed.
+The signing namespace and execution drift fence include both the ClawWeb control
+environment and the selected Bot runtime environment, endpoint and credential.
+Changing the target invalidates old receipts before provider access. This
+namespace upgrade also invalidates receipts issued by versions that did not bind
+the selected Bot environment. It never converts an old request into a new
+submission; coordinated rollout must not recreate an uncertain legacy request. Previously failed provider
+messages remain failed; after an administrator corrects configuration, a new
+explicit user attempt is required for generation.
 
-| Code | Meaning and user action |
-| --- | --- |
-| `AUTO_HEAL_BAAS_NOT_CONFIGURED` | Effective server AutoHeal/BaaS configuration is missing or invalid; an administrator must check `autoHeal.botId` and the existing BaaS configuration. The browser cannot supply a replacement Bot. |
-| `AUTO_HEAL_BOT_UNAVAILABLE` | The configured AutoHeal Bot has no valid BaaS binding. Check that exact server-owned Bot identity and its BaaS binding; do not switch to onboarding or append a user suffix. |
-| `BAAS_AUTH_FAILED` | BaaS authentication/authorization failed; check server credentials and permissions. This may be discovered during dispatch **or polling** and does not prove that no remote task exists or that it stopped. |
-| `BAAS_REQUEST_REJECTED` | BaaS explicitly rejected dispatch. This is known rejection, not an unacknowledged submission. |
-| `BAAS_GENERATION_FAILED` | Polling reports that BaaS generation failed; no candidate may be applied. |
-| `BAAS_PROVIDER_REJECTED` | Polling reports rejection by the BaaS provider; check upstream provider configuration/permissions, not Git artifacts. |
-| `INVALID_GENERATION_RESULT` | The provider reply could not be parsed or failed the workflow schema/identity/version checks; the core rejects it rather than exposing or applying invented YAML. |
-| `EXECUTION_TIMEOUT` | The local server task deadline expired while waiting for a known message. Check that original message before any new dispatch; this does not prove the remote task stopped. |
-| `DISPATCH_UNCERTAIN_TIMEOUT` | The local deadline expired without a reliable dispatch acknowledgement. BaaS may have accepted the message; do not blindly redispatch or promise remote result recovery. |
-| `EDIT_PERMISSION_REVOKED` | The submitting actor no longer has workflow edit permission. Local processing ends; an administrator must check access. This is not a remote-stop acknowledgement. |
+## Prepare before dispatch
 
-Capabilities use `AUTO_HEAL_BAAS_NOT_CONFIGURED` or
-`AUTO_HEAL_BOT_UNAVAILABLE` for their respective unavailable reasons. Unknown
-helpful server errors remain visible with a safe generic context; an absent
-reason is explicitly unspecified, not evidence of a particular missing field.
-Failed/timeout capability HTTP checks remain **unconfirmed**. None of these
-messages changes draft state, recovery policy or the local-only cancel contract.
+A server-signed **receipt** binds an authorized actor, workflow, request UUID,
+exact input digest, source YAML digest, frozen Bot identity, BaaS message ID and
+validity window. It contains no prompt, YAML, provider credentials or result.
+The browser obtains this receipt **before** the first BaaS submission, keeping
+it in the current Editor attempt, not browser persistent storage or a URL.
 
-## Host execution Plugin API
+The host derives the receipt signer from its existing server-only BaaS API key
+with a separate cryptographic purpose and environment/provider namespace. No
+new browser key or database table is required. Replicas with the same configured
+key and namespace can validate the same receipt; a fresh process does not need an old process's memory. Credential rotation can
+invalidate receipts, and must never authorize a replacement dispatch. The
+namespace is re-evaluated on issue/verify; the execution adapter also rejects
+live provider/credential/environment drift before I/O. Separate services sharing
+an environment, provider and API credential share this signing trust domain;
+untrusted tenants must not share those credentials. Environment labels are not
+a unique deployment identity, and gray/prod may intentionally share a domain.
 
-The declarations in [the server contract](../server/contracts/workflow-ai-draft.ts)
-are authoritative. The call direction is Workflow core to the host adapter:
+The prepared `draftId` is the caller-assigned BaaS `message_id`. It is derived
+from the exact principal/workflow/request/input/target identity, independently
+of the issuing instance and timestamp. BaaS's existing message endpoint accepts
+that ID and owns its message-ID deduplication and persistence. The adapter sends
+it explicitly and accepts only a matching acknowledgement. This depends on the
+deployed BaaS supporting that contract; a mismatched acknowledgement is unknown,
+not success and not permission to resend with a new ID.
+
+## Browser Service API
+
+Every endpoint requires a verified principal and live workflow edit permission.
+The host's exact Origin allowlist and existing CSRF contract remain mandatory.
+Every POST, including polling, sends `X-Pack-Version-CSRF: 1`. Responses are
+`no-store`; shared authentication, gzip, bounded bodies and abort handling apply.
+Requests, receipts and result bodies must not enter generic request/payload logs.
+The namespace must be mounted before generic body/audit loggers in enterprise
+hosts; malformed, oversized and denied requests need the same protection.
+
+1. `GET /api/workflows/:workflowId/ai-drafts/capabilities`
+   returns `{ available, reason? }`. This checks execution/receipt readiness,
+   not a draft table or model quality. Failure of the capability transport does
+   not establish that Bot configuration is missing.
+2. `POST /api/workflows/:workflowId/ai-drafts/prepare`
+   accepts `{ requestId, mode, prompt, currentYaml }` and returns
+   `{ draftId, receipt, inputSpecDigest }`. This validates and signs the exact
+   input and server-selected target, but **does not send a BaaS message**.
+3. `POST /api/workflows/:workflowId/ai-drafts`
+   accepts the exact same input plus `receipt`, verifies the binding and sends
+   the prepared message ID. It returns `{ draftId, status, error? }` with 202.
+   A positive provider rejection returns `failed` and a sanitized error code;
+   uncertain transport returns `dispatch_uncertain` with the prepared ID.
+4. `POST /api/workflows/:workflowId/ai-drafts/:draftId/poll`
+   accepts `{ receipt, currentYaml }`, verifies ownership and exact YAML bytes,
+   and queries only the signed BaaS message ID. The response is
+   `{ draftId, workflowId, status, inputSpecDigest, error?, result? }`.
+   Only `completed` carries `{ yaml, summary }`. Polling never dispatches.
+5. `POST /api/workflows/:workflowId/ai-drafts/:draftId/cancel`
+   accepts `{ receipt }` and acknowledges cancellation of this **local attempt**.
+   It does not persist a cancellation, revoke all observers' receipts or stop
+   BaaS. Another authorized observer can still query the provider message.
+6. Legacy `GET /api/workflows/:workflowId/ai-drafts/:draftId` returns 410
+   `AI_DRAFT_RECEIPT_REQUIRED`, never message data based on a bare ID. A legacy
+   request without a signed context is not silently recreated.
+
+`create` means extending the current workflow; `modify` adjusts it. Both preserve
+workflow ID and the exact value/type of version. Requirements are nonblank and
+at most 4,000 Unicode code points, without silent trimming. YAML is complete,
+valid UTF-8 and at most 100,000 bytes. Browser actor/Bot/repository/branch fields
+confer no authority. Changing input requires a new user attempt; modifying input
+under an existing receipt is rejected before provider access.
+
+The receipt uses a bounded, versioned metadata payload and constant-time HMAC
+verification. Exact source digest, workflow and draft binding are checked at the
+server. Expiry is bounded to 30 minutes. Authorization and deadlines are checked
+again after asynchronous provider work, before returning a result.
+
+## Diagnosing provider failure without disclosing diagnostics
+
+A verified provider message in a terminal failure state is not a transport or
+YAML validation failure. A recognized `BotBindingNotFoundError` in its `error`
+field is mapped to the existing safe code `AUTO_HEAL_BOT_UNAVAILABLE`; unknown
+provider failures retain `BAAS_GENERATION_FAILED`. Raw errors, credentials,
+URLs, stack traces and failed-message content are not returned as draft YAML or
+copied into browser error text. Completed assistant content and outer API-error
+envelopes are not used to infer this terminal binding error.
+
+For `AUTO_HEAL_BOT_UNAVAILABLE`, check the configured full Bot identity and owner,
+the selected endpoint/key pair, and the Bot and binding in the provider's actual
+Backend environment. A Bot marked ACTIVE in one environment does not prove that
+another environment can find it. A failed run row with no provider session can
+also exist: the provider may persist the message before resolving its binding.
+The error is not evidence that ClawWeb needs a new task table.
+
+## Uncertainty, recovery and cancellation
+
+The browser records the prepared receipt and message ID before starting create,
+and marks the attempt submitted before sending the POST. A lost/5xx create
+response does not prove either rejection or acceptance. Its safe HTTP diagnostic
+is preserved. Recovery uses **only the original poll operation**, not another
+create call, new receipt or new message ID. A prepared request with no signed
+context cannot be treated as a fresh submission to work around a failure.
+
+An uncertain BaaS acknowledgement can be queried using the already-prepared ID.
+A BaaS 404 is not proof of rejection; it remains running within the deadline.
+Without a provider result, recovery cannot promise eventual success or redispatch.
+No background ClawWeb task monitor or database reconciliation is needed.
+`reconcile()` remains a no-op compatibility entry for older host composition.
+
+Browser polling is three seconds with a 15-minute local wait bound; each provider
+read is bounded. A valid completed draft whose read-only validation transport
+fails can be queried and validated again without regeneration. HTTP 401/403/429
+or network errors do not prove that candidate content is invalid. Provider poll
+401/403 and outer error envelopes (including HTTP 200 with an error code and
+no message data) are reported as `running` with a safe operational error. The
+browser offers recovery with the existing receipt, not a fresh generation.
+
+Cancellation, closing, changing context or local expiry aborts local waiting and
+prevents late Apply. BaaS has no supported stop API here. A local acknowledgement
+is not a durable/global cancelled state, and must never be described as one.
+There is no global ClawWeb cancellation record to synchronize across instances.
+Provider results remain read-only; late responses cannot bypass Editor context
+checks. Neither local nor receipt deadlines prove that the remote Bot stopped.
+
+## Host Plugin API and provider errors
+
+[The TypeScript declarations](../server/contracts/workflow-ai-draft.ts) own the
+execution and receipt contracts. Workflow calls the host execution port:
 
 ```ts
 resolveTarget(): Promise<{ botId: string }>
-dispatch(request: { actorId, envelope }): Promise<{ jobId: string }>
-poll(request: { actorId, envelope, jobId }): Promise<
+dispatch({ actorId, envelope }): Promise<{ jobId: string }>
+poll({ actorId, envelope, jobId }): Promise<
   | { status: 'running' }
   | { status: 'failed'; error: string }
   | { status: 'completed'; result: { yaml: string; summary: string } }
 >
 ```
 
-`resolveTarget` validates the effective server AutoHeal binding **and existing
-BaaS transport readiness**; it is not a browser selection or onboarding lookup.
-It returns only `{ botId }`, never transport credentials. That validated target
-is frozen in the persisted envelope. `dispatch` sends the generation request
-through the existing BaaS transport once. Its `jobId` is the acknowledged
-**BaaS message ID**, not an AIStudio execution ID, Git ref or browser request ID.
-`poll` follows the acknowledged, frozen BaaS message ID to translate BaaS
-status/result into the union above. Polling checks BaaS transport readiness,
-not the current AutoHeal Bot setting: a changed or missing current `botId` must
-neither retarget an existing message nor block its polling. Transport/credential
-availability can still affect that read. Transport uncertainty is not a terminal
-model failure. The port has no remote `stop` method or Git result-reader contract.
+The immutable envelope carries the prepared task ID, frozen Bot target, exact
+requirements and exact source YAML. Dispatch uses the existing `sendIntervention`
+with retries disabled and a top-level `message_id`. Poll uses the existing BaaS
+message result API. A changed current AutoHeal setting cannot retarget a signed
+request. Poll verifies the returned message ID and frozen Bot identity before
+accepting output. Transport changes invalidate old receipts/adapter contexts
+instead of sending them to another provider. Other than proven pre-acceptance
+rejection, provider HTTP/business errors remain uncertain until the fixed ID is
+queried; an HTTP 400 alone is not proof of non-acceptance.
 
-```text
-schemaVersion = workflow-yaml-draft/v1
-taskType = workflow_yaml_draft
-taskId = server-created draft ID
-target = { botId: <effective server autoHeal.botId, verbatim> }
-input = {
-  schemaVersion: workflow-yaml-draft-input/v1,
-  workflowId, mode, prompt,
-  workingCopy: { yaml: <complete submitted YAML>, sha256: <exact UTF-8 digest> }
-}
-```
+| Code | Meaning and action |
+| --- | --- |
+| `AI_DRAFT_RECOVERY_UNAVAILABLE` | The host cannot sign/verify draft receipts. Check server BaaS configuration; never send provider keys from the browser. |
+| `AUTO_HEAL_BAAS_NOT_CONFIGURED` | The existing AutoHeal/BaaS integration is unavailable; no fallback is dispatched. |
+| `AUTO_HEAL_BOT_UNAVAILABLE` | The exact configured AutoHeal Bot/binding is unavailable. Do not append the submitting actor or switch to onboarding. |
+| `BAAS_AUTH_FAILED` | Check provider credentials/permissions. A polling authorization failure does not prove that the remote execution stopped. |
+| `BAAS_POLL_UNAVAILABLE` | The outer message read failed, not a native task terminal state; retain the signed context and recover the same message. |
+| `BAAS_REQUEST_REJECTED` | BaaS positively rejected dispatch, distinct from an unknown acknowledgement. |
+| `BAAS_GENERATION_FAILED` / `BAAS_PROVIDER_REJECTED` | Provider execution failed or was rejected; no candidate may be applied. |
+| `INVALID_GENERATION_RESULT` | Reply parsing, workflow identity/version or output validation failed; no substitute YAML is produced. |
+| `EXECUTION_TIMEOUT` | The signed local waiting window expired; the remote Bot may continue. |
+| `AI_DRAFT_RECEIPT_REQUIRED` | An older client has no signed recovery context. Do not allocate and submit a replacement automatically. |
 
-The provider returns complete YAML and a bounded summary as data, not a script,
-patch, filesystem path or Git artifact. The server validates the candidate,
-workflow identity and unchanged version (value and type) against the frozen
-working copy before exposing a completed result. A lifecycle success alone is
-not successful YAML generation; missing or invalid output fails closed.
+Unexpected request diagnostics use `workflow_ai_draft_request` with fixed
+operation/phase metadata and allowlisted error names. Raw exceptions, stacks,
+provider credentials, receipts, prompts and YAML are not logged or returned.
+A generic `INTERNAL_ERROR` alone cannot identify the failed stage or establish
+whether BaaS accepted a message.
 
-## Identity, dispatch uncertainty and recovery
+## Candidate validation and Apply
 
-Request identity is durable and scoped to actor/workflow/`requestId`. Reusing it
-with changed mode, prompt or YAML is a conflict. The server persists the task
-and a dispatch-uncertain fence before calling BaaS; it must not blindly resend
-an uncertain submission. A positively rejected submission can be terminal
-(`AUTO_HEAL_BOT_UNAVAILABLE`, `BAAS_AUTH_FAILED`, `BAAS_REQUEST_REJECTED`). A lost
-acknowledgement is different: BaaS may already have accepted the message and
-the remote Bot may still be working. Without an acknowledged message ID there
-is nothing reliable to poll remotely. Keep `dispatch_uncertain` recoverable for
-local status/cancellation/deadline handling, not as a promise to discover the
-remote result or automatically retry delivery.
+The server validates complete provider YAML against the signed source identity
+and version, using bounded JSON-compatible YAML parsing. Numeric versions and
+non-boolean `on`/`off` IDs remain supported; aliases, depth and expansion are
+bounded. Invalid output is rejected rather than applied or replaced by a template.
 
-Browser recovery reuses the same `requestId` if the draft acknowledgement was
-lost, or polls the original `draftId` when known. A submitted/possibly submitted
-attempt remains recoverable across subsequent operational checks: a failed or
-unavailable capability check while recovering must not discard its request ID.
-The next explicit retry still uses that same request and complete input, not a
-fresh generation. Readiness failure is not evidence that a prior BaaS message
-was never accepted.
+The browser snapshots the current applied document before preparation. Unapplied
+YAML/config buffers and in-progress saves block generation/Apply. It checks
+exact input digest, task/workflow identity, duplicate IDs, references and cycles,
+then calls existing read-only `POST /api/workflows/validate` with `{ spec }`.
+Only valid normalized output can become a preview. Model-supplied canvas
+coordinates are not authority; existing layout is restored locally.
 
-A transient state conflict, read failure or validation transport failure must
-not create a new job. A completed draft whose read-only validation failed can
-be queried and validated again without regenerating. HTTP authentication,
-authorization and rate-limit failures (including 401, 403 and 429) are
-operational; a bare HTTP 4xx response is not proof of invalid candidate YAML.
-Keep the acknowledged draft identity and retry its read-only validation instead
-of submitting a replacement generation. Deterministic local parse/identity/
-version/schema rejection, an authoritative validation result with `valid: false`
-or an invalid normalized candidate remain blocked and are distinct from an
-HTTP failure. Explicit cancellation or a changed prompt/mode/editor context
-still invalidates the old attempt. No substitute template is produced on any
-failure, and no recovery failure auto-applies or saves a candidate.
+Diffs are computed from the final normalized candidate, not model assertions.
+Removal and top-level metadata changes require confirmation. Context/request
+checks reject stale or late results. Apply changes only the Editor working copy,
+marks it dirty and opens comparison; Save and Deploy remain explicit actions.
 
-`inputSpecDigest` is the lowercase hex SHA-256 of the **exact UTF-8 YAML bytes**
-submitted in `currentYaml`, not normalized YAML and not the semantic signature
-used to detect stale Editor previews. Every poll checks workflow/draft identity
-and a nonempty 64-hex digest. Where SubtleCrypto is available the browser also
-compares the locally computed exact digest; otherwise it relies on the server's
-immutable request-to-draft/input binding, not a guessed digest. Preserve the
-complete applied document and never silently truncate it to fit the limit.
+## Migration and verification boundaries
 
-Browser polling remains three seconds with a 15-minute local wait bound.
-Server reconciliation admits provider polls through a durable due-time slot
-(15 seconds), bounds CAS contention and never reopens dispatch. The server's
-30-minute task deadline is local bookkeeping; neither deadline proves the
-remote Bot has stopped. Expired pending records fail before any new dispatch, including idempotent
-replay and background recovery. Deadlines are rechecked after asynchronous
-provider work. Live edit permission is rechecked after polling, before result
-acceptance, and immediately before returning draft details. Cancellation and
-terminal transitions fence late work.
-Closing/changing context aborts local waits and attempts the local cancellation
-endpoint with its own bounded signal when a draft ID is known. If submission
-or cancellation acknowledgement is lost, local Editor safety still holds,
-but server cancellation and remote termination cannot be claimed.
+Migration slot v153 is reserved with **no DDL**. Fresh deployments do not create
+`workflow_ai_drafts`; an existing legacy table is neither read nor dropped.
+No replacement schema, configuration row per task, Redis deployment or shared
+filesystem journal is introduced. Existing identity/ACL storage is independent.
 
-## Editor validation and Apply guards
+Server and Editor artifacts must roll out together: a new Editor talking to an
+old server fails preparation before dispatch, while an old Editor's unsigned
+create/GET is rejected by a new server. Old table-backed in-flight requests do
+not acquire new signed contexts automatically. Do not silently retry them as
+new tasks or claim that mixed-version traffic transparently recovers.
 
-Generation captures an immutable copy of the current applied WorkflowSpec,
-serializes its full YAML without canvas coordinates, and preserves raw user
-requirements. An unapplied YAML/configuration buffer or in-progress save blocks
-generation/Apply instead of being silently included or overwritten.
+Synthetic tests cover no-table operation, preparation-before-dispatch, BaaS ID
+forwarding/ack matching, replica/restart receipt verification, exact input and
+principal binding, live grants, expiry, uncertain acknowledgement, read-only
+recovery, local-only cancellation, validation and late-Apply guards. Migration
+tests prove the reserved version creates nothing and preserves legacy rows.
 
-Both server and browser validate untrusted YAML as bounded JSON-compatible
-YAML 1.2 data. Numeric versions and non-boolean `on`/`off` IDs remain supported;
-recursive/excessively expanded aliases and invalid structures are rejected.
-The browser checks identity/version, duplicate node IDs, dependency references,
-known array-form result targets and dependency cycles. Runtime object-form
-`onResult`/extensions remain subject to authoritative server validation rather
-than a narrower invented browser protocol. Existing node coordinates survive;
-model-supplied coordinates are not accepted as layout authority.
-
-Preview diffs come from the final normalized candidate, not model assertions.
-Node removal or top-level metadata changes require explicit confirmation.
-Request/context guards reject late responses; workflow/document/layout changes
-mark results stale. Failed Editor imports are not successful Apply. Successful
-Apply updates memory, marks dirty and opens comparison only; the existing
-explicit Save and Deploy actions remain separate. Provider errors cannot block
-ordinary manual editing or database-only save.
-
-## Assembly, compatibility and verification
-
-Hosts inject the existing BaaS adapter using their verified principal resolver
-and current AutoHeal configuration. Credentials/private endpoints stay outside
-the public repository. Missing provider configuration disables AI with an
-explanation, not fake success. Draft storage must be available (the existing
-`workflow_ai_drafts` migration); a noop database cannot provide durable recovery.
-Hosts own bounded reconciliation, logging hygiene and shutdown. Authorization
-must resolve consistently across instances; a process-local login alias cache
-must not establish either a grant or revocation for another host's tasks.
-The internal mount supports canonical actor-ID administrator entries and
-explicit workflow edit grants, checked against live storage. A username-only
-admin entry does not elevate this draft service without one of those grants. Ingress origin
-validation uses a validated server-owned `publicOrigin`, not arbitrary forwarded
-headers; complete YAML and credentials must not leak into ordinary logs.
-
-This change replaces the server execution provider and related UI/docs, not the
-browser endpoints, task states, exact-byte digest or Apply/save/deploy contract.
-Propagation includes both host adapters/configuration and their port conformance
-tests; browser consumers retain the same async wire format. The retired
-experiment/Git protocol and deleted fixture files are not release prerequisites.
-Existing unrelated repair or Pack publication paths are not changed by this
-provider selection.
-
-- [Original UI intent and transport correction](specs/2026-11-13-workflow-ai-draft-editor.md)
-- [Editor document boundary](workflow-editor-draft-boundary.md)
-- Server source/tests: `server/contracts/workflow-ai-draft.ts`,
-  `server/services/workflow-ai-draft-service.ts` and its validation/service tests;
-  host adapter/runtime tests verify AutoHeal selection and BaaS message behavior.
-- Browser coverage: API/CSRF integration, `web/services/workflow-ai-*`, assistant
-  hooks/components and Editor integration regressions. Acceptance cases live in
-  executable tests, not a removed shared-fixture path.
-
-Synthetic tests establish local contract behavior only. Historical validation
-reports do not prove the new provider, live Bot configuration, BaaS credentials,
-remote model quality, host integration or deployment; report those gaps separately.
+These tests do not establish the deployed BaaS revision, real credentials/Bot
+binding, model quality or release status. Verify live integration separately;
+never infer deployment or incident closure from a local test result.

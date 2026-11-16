@@ -4,6 +4,8 @@ import type { PackScriptSnapshot, PackScriptVersion } from '../services/pack-scr
 type PackScriptsDependencies = {
   enabled?: boolean;
   resolvePrincipal: (req: Request) => Promise<{ actorId: string } | null>;
+  // Optional host read policy after verified identity; omission retains the edit ACL.
+  authorizeRead?(workflowId: string, actorId: string): Promise<boolean>;
   botPermRepo: { hasEditPermission(workflowId: string, actorId: string): Promise<boolean> } | null;
   workflowSpecRepo: { findByWorkflowId(workflowId: string): Promise<{ workflow_id: string; pack_id: string | null } | null> };
   // Host policy must authorize the entire returned Pack; some hosts may grant this
@@ -39,8 +41,11 @@ export function createPackScriptsRouter(deps: PackScriptsDependencies): Router {
         res.status(400).json({ error: 'Invalid snapshot version', code: 'INVALID_SNAPSHOT_VERSION' }); return;
       }
       const selectedVersion: PackScriptVersion | undefined = version === 'current' || version === 'draft' ? version : undefined;
-      if (!deps.botPermRepo || typeof deps.botPermRepo.hasEditPermission !== 'function'
-        || await deps.botPermRepo.hasEditPermission(workflowId, principal.actorId) !== true) {
+      const canRead = deps.authorizeRead
+        ? await deps.authorizeRead(workflowId, principal.actorId)
+        : !!deps.botPermRepo && typeof deps.botPermRepo.hasEditPermission === 'function'
+          && await deps.botPermRepo.hasEditPermission(workflowId, principal.actorId) === true;
+      if (canRead !== true) {
         res.status(403).json({ error: 'Forbidden', code: 'FORBIDDEN' }); return;
       }
       const row = await deps.workflowSpecRepo.findByWorkflowId(workflowId);

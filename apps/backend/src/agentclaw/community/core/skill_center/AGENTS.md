@@ -6,6 +6,10 @@
 
 下文 `community/` 指 `apps/backend/src/agentclaw/community/`；简称 `services/` 指本目录的 `services/`。仓库根 `AGENTS.md` 和 `docs/arch/` 仍规定通用架构约束。本目录 `README.md` 的 Context Boundary 继续承担机器可检验的依赖声明。
 
+## Skill 运行名称准入
+
+向 SkillSet 添加成员（包括未激活的 Set）或激活 Set 时，先比较候选名称与当前安装及目标 Set 成员。名称相同但运行映射来源不同则拒绝；来源身份相同可共存，无法解析的同名来源按冲突处理。历史冲突不会被自动清理。Skill 成员与激活、Direct Skill、Default Skill 排除、Apply Skill claim 及安装回填写事务在支持行锁的数据库上先锁定同一租户、环境和稳定 entity 下的 Bot 行；SQLite 使用数据库写事务。此锁不覆盖所有 Set 或 MCP 命令、全局 Default 模板修改或提交后的 Runtime 投影。
+
 ## B4 Bot 资源寻址兼容（2026-10-22）
 
 Bot-bound Local Skill 查询、内容、参数、安全观察、上传和删除先通过
@@ -130,7 +134,7 @@ Apply 的批量集合命令由 `services/skill_set_apply_service.py` 经正式�
 `read_apply_snapshot` 只读原始成员、适用 exclusions/policy、Installation 与资产依赖，
 不执行 flush；缺失或不可解析的资产元数据保留可诊断状态。Local 清理使用所有持久
 成员引用（含 inactive、非当前 engine 和 excluded Default），实际删除仍由原守卫复核。
-本批量事务沿用已有行锁和 Apply 互斥，不增加跨普通管理入口的共同锁、CAS 或唯一索引。
+本批量事务在同一事务内先获取稳定 entity 对应的 Bot 能力栅栏，与普通 Skill 成员、激活及 Direct Skill 写入共享该行锁；保留 Apply 互斥。该栅栏不覆盖全部 MCP 命令、全局 Default 模板修改或提交后的 Runtime 投影，不增加 CAS 或唯一索引。
 批量 Set 事务的旧供应使用解析后的真实资产 ID，不能将历史 raw 成员别名并入供应。
 不可用成员的遗留安装清理仅使用已记录且属于本次适用 active Set 的来源；Direct、
 其他 Set 与来源未知的安装不得因 raw 别名被撤销。显式 active 普通集及 Default

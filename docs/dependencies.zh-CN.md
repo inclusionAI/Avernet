@@ -12,7 +12,7 @@
 ./singlebox/singlebox.sh check
 ```
 
-`check` 只打印将使用的路径，并检查 BCS / frontend 预检项：Cargo / `protoc`、Node.js 主版本、npm、源码目录和端口。除少量本地 runtime 目录初始化外，它不会安装依赖、构建代码、启动服务、杀进程或修改全局配置。`check` 不会提前校验 5bot 启动脚本里的 OpenClaw / `jq`，这些会在实际启动本地 bot stack 时检查。Rust 最低版本由 Cargo 在构建阶段按 workspace 的 `rust-version` 校验。如果失败，手动安装缺失项后重新跑同一个检查。
+`check` 只打印将使用的路径，并检查 BCS / frontend 预检项：Cargo / `protoc`、Node.js 主版本、npm、源码目录和端口。除少量本地 runtime 目录初始化外，它不会安装依赖、构建代码、启动服务、杀进程或修改全局配置。`check` 不会提前校验 5bot 启动脚本里的 OpenClaw / `jq`，这些会在实际启动本地 bot stack 时检查。仓库的 [`rust-toolchain.toml`](../rust-toolchain.toml) 选择 Rust 1.94.0；workspace 的 `rust-version = "1.91"` 声明最低支持版本（MSRV），不负责选择编译器。如果失败，手动安装缺失项后重新跑同一个检查。
 
 如果你希望脚本帮助检查并安装缺失工具，可以改用：
 
@@ -36,7 +36,7 @@
 | 工具 | 用途 | 检查命令 | 说明 |
 | --- | --- | --- | --- |
 | macOS 或 Linux | 本地 quick start | `uname -a` | Linux 需要编译工具、`pkg-config`、SQLite / OpenSSL 开发库。 |
-| Rust 1.91+ | 构建 BCS | `rustc --version` | BCS workspace 声明了 `rust-version = "1.91"`。 |
+| 通过 rustup 安装的 Rust 1.94.0 | 构建 BCS | 在仓库根目录执行 `rustc --version` | 由 `rust-toolchain.toml` 固定；BCS workspace 的 MSRV 仍为 1.91。 |
 | Cargo | 构建 BCS | `cargo --version` | 随 Rust toolchain 安装。 |
 | `protoc` | BCS protobuf codegen | `protoc --version` | 需要安装 Protocol Buffers compiler。 |
 | SQLite 开发库 | BCS 本地存储 | `pkg-config --modversion sqlite3` | macOS 通常自带；Linux 需要安装 dev 包。 |
@@ -72,14 +72,21 @@ PKG_CONFIG_PATH="$(brew --prefix openssl@3)/lib/pkgconfig" pkg-config --modversi
 
 如果 OpenSSL 只有加上 `PKG_CONFIG_PATH` 才能被 `pkg-config` 找到，构建 BCS 前在当前 shell 中导出同一个变量。
 
-如果本机没有 Rust 1.91+，可以通过 `rustup` 安装：
+通过 `rustup` 安装 Rust 1.94.0 及其覆盖率组件。已有 rustup 时，只补充安装固定版本，不修改全局默认版本。在仓库根目录执行：
 
 ```bash
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
-  | sh -s -- -y --profile minimal --default-toolchain 1.91.0
-source ~/.cargo/env
-rustc --version
+if command -v rustup >/dev/null 2>&1; then
+  rustup toolchain install 1.94.0 --profile minimal --component llvm-tools
+else
+  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+    | sh -s -- -y --profile minimal --default-toolchain 1.94.0
+  source "${CARGO_HOME:-$HOME/.cargo}/env"
+  rustup component add --toolchain 1.94.0 llvm-tools
+fi
+rustc -Vv
 ```
+
+编译器应输出 `release: 1.94.0`。如果实际版本不同，检查是否设置了冲突的 `RUSTUP_TOOLCHAIN`，或 `PATH` 中是否有优先于 rustup 的其他编译器。
 
 用你常用的 Node 版本管理器安装或切换到 Node.js 22+，然后验证：
 
@@ -109,7 +116,7 @@ pkg-config --modversion openssl
 jq --version
 ```
 
-然后按上面的方式安装 Rust 1.91+、Node.js 22+、npm 和 OpenClaw。
+然后按上面的方式安装 Rust 1.94.0、Node.js 22+、npm 和 OpenClaw。
 
 ### Fedora
 
@@ -124,7 +131,7 @@ pkg-config --modversion openssl
 jq --version
 ```
 
-然后按上面的方式安装 Rust 1.91+、Node.js 22+、npm 和 OpenClaw。
+然后按上面的方式安装 Rust 1.94.0、Node.js 22+、npm 和 OpenClaw。
 
 ## 验证
 

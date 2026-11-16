@@ -22,6 +22,7 @@ from fastapi.testclient import TestClient
 from agentclaw.community.core.errors import DomainError
 from agentclaw.community.core.skill_center.errors import (
     McpPermissionDeniedError,
+    SkillRuntimeNameConflictError,
     SkillSetAccessDeniedError,
     SkillSetControlPlaneConflictError,
     SkillSetControlPlaneLockUnavailableError,
@@ -34,6 +35,7 @@ _ROUTE_MAP: dict[str, type[DomainError]] = {
     "notfound": SkillSetControlPlaneNotFoundError,
     "denied": SkillSetAccessDeniedError,
     "conflict": SkillSetControlPlaneConflictError,
+    "runtime-name": SkillRuntimeNameConflictError,
     "lock": SkillSetControlPlaneLockUnavailableError,
     "reconcile": SkillSetRuntimeReconcileError,
 }
@@ -98,6 +100,7 @@ def client() -> TestClient:
         ("notfound", 404, "Skill set not found"),
         ("denied", 403, "Forbidden"),
         ("conflict", 400, "Skill set operation conflict"),
+        ("runtime-name", 409, "SKILL_RUNTIME_NAME_CONFLICT"),
         ("lock", 409, "Skill set mutation unavailable"),
         ("reconcile", 500, "Skill set runtime sync failed"),
     ],

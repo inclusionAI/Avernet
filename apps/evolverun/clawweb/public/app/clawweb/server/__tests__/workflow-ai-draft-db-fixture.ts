@@ -1,6 +1,6 @@
 import Database from 'better-sqlite3';
 import { SqliteDatabase } from '@avernet/clawweb-shared/server/db/sqlite-database';
-import { workflowAiDraftMigrations } from '@avernet/clawweb-shared/server/schema-workflow-ai-draft';
+import { createWorkflowAiDraftReceipts } from '@avernet/workflow/server/services/workflow-ai-draft-receipts';
 import type { WorkflowAiDraftExecutionPort, WorkflowAiDraftResult } from '@avernet/workflow/server/contracts/workflow-ai-draft';
 import { randomUUID } from 'node:crypto';
 import { vi } from 'vitest';
@@ -9,7 +9,6 @@ export const draftRequest = () => ({ requestId: randomUUID(), mode: 'modify' as 
 export async function aiDraftFixture() {
   const raw = new Database(':memory:');
   const db = new SqliteDatabase(raw);
-  for (const m of workflowAiDraftMigrations) for (const sql of m.sql) await db.exec(db.dialect.renderDdl(sql));
   raw.exec(`CREATE TABLE workflow_specs (workflow_id TEXT PRIMARY KEY, pack_id TEXT, spec_json TEXT);
     INSERT INTO workflow_specs VALUES ('flow', 'pack', '{}');
     CREATE TABLE workflow_deploy_history (workflow_id TEXT, pack_id TEXT, tag_name TEXT, deploy_number INTEGER, action TEXT, is_active INTEGER);
@@ -19,8 +18,9 @@ export async function aiDraftFixture() {
   let result: WorkflowAiDraftResult | null = null;
   const execution: WorkflowAiDraftExecutionPort = {
     resolveTarget: vi.fn(async () => ({ botId: 'autoheal:configured-owner' })),
-    dispatch: vi.fn(async () => ({ jobId: 'job' })),
+    dispatch: vi.fn(async input => ({ jobId: input.envelope.taskId })),
     poll: vi.fn(async () => result ? { status: 'completed' as const, result } : { status: 'running' as const }),
   };
-  return { raw, db, execution, setResult: (value: typeof result) => { result = value; } };
+  const receipts = createWorkflowAiDraftReceipts('synthetic-runtime-receipt-key');
+  return { raw, db, execution, receipts, setResult: (value: typeof result) => { result = value; } };
 }

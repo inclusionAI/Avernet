@@ -67,7 +67,7 @@ class DumpOpenApiTests(unittest.TestCase):
             for method in path_item
             if method.lower() in HTTP_METHODS
         ]
-        self.assertEqual(len(operations), 74)
+        self.assertEqual(len(operations), 80)
         collection = contract["paths"][
             "/openapi/v1/collaboration/sessions/{session_id}/collect"
         ]
@@ -94,7 +94,7 @@ class DumpOpenApiTests(unittest.TestCase):
         self.assertTrue(all(len(tags or []) == 1 for tags in operation_tags))
         self.assertEqual(
             {tags[0] for tags in operation_tags},
-            set(COLLABORATION_TAGS),
+            set(COLLABORATION_TAGS + ["Group Context"]),
         )
 
     def test_dump_internal_contract_writes_only_internal_paths(self) -> None:

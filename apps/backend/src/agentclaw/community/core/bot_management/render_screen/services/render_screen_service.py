@@ -328,4 +328,3 @@ class RenderScreenService(RenderScreenServiceProtocol):
                 ))
 
         return RenderScreenCopyResult(rows=tuple(results))
-

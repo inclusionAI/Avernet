@@ -11,6 +11,7 @@ import { getBotIamToken } from '@/services/backendApi/privateChat/iamTokenContro
 import { OpenClawProvider, type ConnectionStatusEvent, type OpenClawProviderConfig } from '@tc-chat/adapters';
 import type { ChatMessage, ChatProvider, PromptFileRef, ResourceReference } from '@tc-chat/core';
 import { installCompleteFallback } from './botChatCompleteFallback';
+import type { ConversationSessionRequestRange } from '@/domain/conversation/types';
 import {
   BOT_MESSAGE_PAGE_SIZE,
   botSessionService,
@@ -74,6 +75,8 @@ interface BotChatProviderOptions {
   bot: ChatBotView;
   userId: string;
   sessionId: string;
+  /** 多实例服务 Bot 的实例范围;缺省按后端默认实例解析。 */
+  range?: ConversationSessionRequestRange;
   /** 注入 SDK Provider 构造(测试 stub);缺省真实 SDK。 */
   createSdkProvider?: (config: OpenClawProviderConfig) => OpenClawProvider;
   /** 注入 IAM token 拉取(测试 stub);缺省走 /openapi/v1/bots/{bot_id}/iam-token。 */
@@ -267,6 +270,7 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
         user_id: resolveUserId(this.options.userId),
         owner_id: this.options.bot.ownerId,
         ...(this.options.bot.isFriendBot ? { session_id: this.options.sessionId } : {}),
+        ...(this.options.range ? { device_uuid: this.options.range.deviceUuid } : {}),
       }),
     );
     const connectionEngine = resp.data?.engine?.trim().toLowerCase() || null;
@@ -625,6 +629,7 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
         this.options.sessionId,
         1,
         BOT_MESSAGE_PAGE_SIZE,
+        this.options.range,
       );
       this.historyPage = 1;
       this.loadedHistoryRawCount = page.rawCount;
@@ -652,6 +657,7 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
         this.options.sessionId,
         nextPage,
         BOT_MESSAGE_PAGE_SIZE,
+        this.options.range,
       );
       this.historyPage = nextPage;
       this.loadedHistoryRawCount += page.rawCount;

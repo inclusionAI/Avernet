@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from injector import inject
 
+from agentclaw.community.core.bot_management.addressing import stable_resource_owner_id
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.capability_desired_state import (
     CapabilityDesiredStateRepositoryProtocol,
@@ -53,7 +54,7 @@ class InstallationBackfillService(InstallationBackfillServiceProtocol):
             raise LocalSkillNotFoundError()
         self._repository.flush_installations(
             bot_id=bot_id,
-            owner_id=owner_id,
+            owner_id=stable_resource_owner_id(bot),
             env=str(bot["env"]),
             engine_type=bot_engine_type(bot),
             default_engine_types=bot_default_engine_types(bot),

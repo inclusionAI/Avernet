@@ -11,7 +11,8 @@ Avernet 维护可独立安装的 `search_core` 和 TC 应用 `app`。宿主维�
 | Card 管理 HTTP 接口、按字段合并、内部版本控制、SQL 保存与删除 | Avernet search-core |
 | 默认 Card 转换器、CardDocumentConverter / CardProjection、Doc 存储与模型/索引接口 | Avernet search-core |
 | Doc 加工与成组发布、增量同步/核对、恢复、缓存/流控/降级、Qdrant 进程生命周期 | Avernet search-core |
-| TC 的 Worker/Profile、ID 优先、分片聚合、生命周期和 Fuse | Avernet app |
+| Card 映射渲染/校验、版本构建、租约、重试和显式版本选择 | Avernet search-core |
+| TC 的 Worker/Profile、默认正文/过滤规则、ID 优先、分片聚合、生命周期和 Fuse | Avernet app |
 | 某业务 Card 字段的含义、正文和前置标签选择 | 对应应用的构建器 |
 | 私有数据库、模型协议、鉴权、配置订阅、TR 和部署组装 | 内部宿主 |
 
@@ -81,3 +82,7 @@ HTTP 搜索/推荐 → 公共检索流程 → Card 元数据回查 → 返回结
 真实业务在组装入口替换转换器、模型、索引与鉴权，复用同一加工和检索流程。
 具体步骤见 [独立启动指南](../../packages/search-core/docs/local-catalog.md)。
 公共能力抽取本身不改变支付宝历史 index_key；TC 的新表、入口兼容和后端选择由 TC 业务组装负责。
+
+TC 与支付宝共用 Card 映射和版本构建机制，各自保留业务默认转换器。TC 未选择新版本时
+保留历史默认 index_key 和集合；新版本先独立构建，配置选择后重启加载，旧版本保留回切。
+具体接口及操作见 [索引构建](../../packages/search-core/docs/index-rebuild.md#tc-construction-and-explicit-selection)。

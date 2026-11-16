@@ -230,6 +230,35 @@ class ExpertChatInstanceRepository(
         ))
         return case((same_target, self.Model.caller_token_expires_at), else_=None)
 
+    def list_caller_token_refresh_candidates(
+        self, *, expires_before: datetime, after_id: int = 0, limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        if (not isinstance(expires_before, datetime) or expires_before.tzinfo is None
+                or expires_before.utcoffset() is None):
+            raise ValueError("caller_refresh_cutoff_must_be_timezone_aware")
+        if isinstance(after_id, bool) or not isinstance(after_id, int) or after_id < 0:
+            raise ValueError("caller_refresh_cursor_invalid")
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 1000:
+            raise ValueError("caller_refresh_page_size_invalid")
+        cutoff = expires_before.astimezone(UTC).replace(tzinfo=None)
+        fields = {"env": get_current_env(), "after_id": after_id, "limit": limit,
+                  "expires_before": expires_before.isoformat()}
+        logger.info("caller_refresh_candidates_requested fields=%s", fields)
+        try:
+            with self._db.orm_session() as db:
+                rows = (db.query(self.Model).filter(
+                    self.Model.env == fields["env"], self.Model.id > after_id,
+                    self.Model.status.in_(("init", "success", "active")),
+                    (self.Model.caller_token_expires_at.is_(None)
+                     | (self.Model.caller_token_expires_at <= cutoff)),
+                ).order_by(self.Model.id.asc()).limit(limit).all())
+                result = [row.to_dict() for row in rows]
+        except Exception as exc:
+            logger.warning("caller_refresh_candidates_failed fields=%s error_type=%s", fields, type(exc).__name__)
+            raise
+        logger.info("caller_refresh_candidates_succeeded fields=%s count=%s", fields, len(result))
+        return result
+
     @contextmanager
     def caller_token_update(
         self, *, user_id: str, bot_id: str, owner_id: str,

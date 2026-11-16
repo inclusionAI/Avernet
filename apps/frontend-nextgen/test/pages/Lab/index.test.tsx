@@ -22,15 +22,17 @@ describe('LabLandingPage', () => {
     toastInfo.mockClear();
   });
 
-  test('渲染实验室落地页：hero 标题 + 社区/任务两张功能卡', () => {
+  test('渲染实验室落地页：hero 标题 + 社区/待办/任务三张独立功能卡', () => {
     render(<LabLandingPage />);
     expect(screen.getByRole('heading', { name: '实验室' })).toBeInTheDocument();
-    // PRD(TeamClaw-demo /lab)：社区 + 任务 两卡。
+    // 实验室原型：社区 + 待办 + 任务，待办不覆盖既有任务。
     const cards = screen.getAllByRole('article');
-    expect(cards).toHaveLength(2);
+    expect(cards).toHaveLength(3);
     expect(within(cards[0]).getByRole('heading', { name: '社区' })).toBeInTheDocument();
-    expect(within(cards[1]).getByRole('heading', { name: '任务' })).toBeInTheDocument();
-    expect(within(cards[1]).getByText(/查看跨Bot、跨群的协同任务/)).toBeInTheDocument();
+    expect(within(cards[1]).getByRole('heading', { name: '待办' })).toBeInTheDocument();
+    expect(within(cards[1]).getByText(/让 Bot 服务团队、帮助完成团队工作/)).toBeInTheDocument();
+    expect(within(cards[2]).getByRole('heading', { name: '任务' })).toBeInTheDocument();
+    expect(within(cards[2]).getByText(/查看跨Bot、跨群的协同任务/)).toBeInTheDocument();
 
     const card = within(cards[0]);
     expect(card.getByRole('heading', { name: '社区' })).toHaveClass('text-base');
@@ -52,6 +54,13 @@ describe('LabLandingPage', () => {
     const community = within(screen.getByRole('article', { name: '社区' }));
     fireEvent.click(community.getByRole('button', { name: '开始体验' }));
     expect(push).toHaveBeenLastCalledWith('/lab/community');
+  });
+
+  test('点待办卡「开始体验」跳新增待办工作台', () => {
+    render(<LabLandingPage />);
+    const todos = within(screen.getByRole('article', { name: '待办' }));
+    fireEvent.click(todos.getByRole('button', { name: '开始体验' }));
+    expect(push).toHaveBeenLastCalledWith('/lab/todos');
   });
 
   test('点任务卡「开始体验」跳任务列表页（任务类别）', () => {

@@ -1,8 +1,9 @@
 import type { WorkflowSpec } from '@avernet/clawweb-shared/web/types'
-import { useEditorStore } from '../../editor/store'
+import { editorIsReadOnly, useEditorStore } from '../../editor/store'
 import JsonDraftField from './JsonDraftField'
 
 export default function WorkflowSettingsPanel({ onClose }: { onClose: () => void }) {
+  const readOnly = useEditorStore(editorIsReadOnly)
   const { spec, updateSpecField, pendingEdits, setActionError } = useEditorStore()
   if (!spec) return null
   const { nodes: _nodes, ...settings } = spec
@@ -25,8 +26,8 @@ export default function WorkflowSettingsPanel({ onClose }: { onClose: () => void
     <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4">
       <p className="text-xs leading-5 text-muted-foreground">工作流输入、身份和默认配置集中在这里。已有配置会保留，不影响节点的简洁编辑。</p>
       <label className="block text-xs text-foreground">流程名称
-        <input className="mt-2 w-full rounded-md border border-input bg-background p-2" value={spec.title}
-          onChange={event => updateSpecField('title', event.target.value)} />
+        <input className="mt-2 w-full rounded-md border border-input bg-background p-2" readOnly={readOnly} value={spec.title}
+          onChange={event => { if (!readOnly) updateSpecField('title', event.target.value) }} />
       </label>
       <label className="block text-xs text-foreground">流程标识
         <input className="mt-2 w-full rounded-md border border-input bg-muted p-2 font-mono text-muted-foreground" readOnly value={spec.id} />

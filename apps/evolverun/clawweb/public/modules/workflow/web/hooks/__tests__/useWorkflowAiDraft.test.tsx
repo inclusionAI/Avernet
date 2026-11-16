@@ -143,7 +143,7 @@ describe('useWorkflowAiDraft request lifetime', () => {
 
 it('passes raw prompts and preserves an unknown/uncertain attempt identity when explicitly recovering', async () => {
   const { WorkflowAiRecoveryError } = await import('../../services/workflow-ai-lifecycle')
-  const attempt = { requestId: '0b6da915-b372-44cb-90fc-3fe721098fe6', draftId: 'persisted-draft' }
+  const attempt = { requestId: '0b6da915-b372-44cb-90fc-3fe721098fe6', draftId: 'prepared-draft', receipt: 'signed-receipt', submitted: true }
   generate.mockRejectedValueOnce(new WorkflowAiRecoveryError('派发结果不确定', attempt))
   const { result } = setup()
   act(() => result.current.changePrompt('  原始需求\n'))
@@ -158,7 +158,7 @@ it('passes raw prompts and preserves an unknown/uncertain attempt identity when 
 
 it('keeps the same attempt through a generic operational readiness failure and completes with the same requestId', async () => {
   const { WorkflowAiRecoveryError } = await import('../../services/workflow-ai-lifecycle')
-  const attempt = { requestId: '0b6da915-b372-44cb-90fc-3fe721098fe6' }
+  const attempt = { requestId: '0b6da915-b372-44cb-90fc-3fe721098fe6', submitted: true, draftId: 'draft', receipt: 'signed-receipt' }
   generate.mockRejectedValueOnce(new WorkflowAiRecoveryError('BaaS 提交结果不确定', attempt))
     .mockRejectedValueOnce(new Error('无法确认 AI 草稿服务能力'))
   const { result } = setup()
@@ -178,7 +178,10 @@ it('keeps the same attempt through a generic operational readiness failure and c
 
 it('clears only explicitly deterministic candidate failures while preserving operational errors', async () => {
   const { WorkflowAiCandidateError } = await import('../../services/workflow-ai-draft')
-  generate.mockRejectedValueOnce(new Error('operational failure after submission'))
+  generate.mockImplementationOnce(async (_mode, _prompt, _source, _signal, attempt) => {
+    Object.assign(attempt!, { submitted: true, draftId: 'draft', receipt: 'signed-receipt' })
+    throw new Error('operational failure after submission')
+  })
     .mockRejectedValueOnce(new WorkflowAiCandidateError('服务端返回 INVALID_GENERATION_RESULT'))
   const { result } = setup()
   act(() => result.current.changePrompt('需求'))
@@ -214,4 +217,17 @@ it('assigns a fresh preview identity to every completed generation', async () =>
   const firstId = result.current.result!.requestId
   await act(async () => { await result.current.generate() })
   expect(result.current.result!.requestId).not.toBe(firstId)
+})
+
+it('offers an explicit prepare retry, not polling, when no receipt or send exists', async () => {
+  generate.mockRejectedValueOnce(new Error('prepare failed before dispatch'))
+  const { result } = setup()
+  act(() => result.current.changePrompt('需求'))
+  await act(async () => { await result.current.generate() })
+  expect(result.current.recoverable).toBe(false)
+  expect(result.current.retryPreparation).toBe(true)
+  const attempt = generate.mock.calls[0][4]
+  await act(async () => { await result.current.generate() })
+  expect(generate.mock.calls[1][4]).toBe(attempt)
+  expect(result.current.result?.draft).toEqual(draft)
 })

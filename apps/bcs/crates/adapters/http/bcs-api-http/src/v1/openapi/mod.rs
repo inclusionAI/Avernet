@@ -18,6 +18,7 @@ pub fn protected_router() -> Router<ApiState> {
         routes::bot::router()
             .merge(routes::event_subscription::router())
             .merge(routes::group::router())
+            .merge(routes::group_context::router())
             .merge(routes::session::router())
             .merge(routes::invitation::router())
             .merge(routes::invite_code::protected_router())

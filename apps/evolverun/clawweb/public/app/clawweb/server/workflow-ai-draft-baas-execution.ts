@@ -1,23 +1,42 @@
 /** Composition adapter: Editor uses the exact same effective Bot/transport as
  * AutoHeal, but sends a suggestion-only prompt, never a repair/run command. */
 import { resolveAutoHealConfig, resolveBaasConfig } from '@avernet/clawweb-shared/server/db';
+import { selectAutoHealBaasTransport } from '@avernet/clawweb-shared/server/auto-heal-baas';
+import { getCurrentEnv } from '@avernet/clawweb-shared/server/env';
 import { buildBaasHeaders, sendIntervention } from '@avernet/clawevolve/server/services/baas-intervention';
-import { WorkflowAiDraftDispatchRejectedError, WorkflowAiDraftInvalidResultError,
+import { WorkflowAiDraftDispatchRejectedError, WorkflowAiDraftInvalidResultError, WorkflowAiDraftPollUnavailableError,
   type WorkflowAiDraftExecutionPort, type WorkflowAiDraftExecutionRequest } from '@avernet/workflow/server/contracts/workflow-ai-draft';
 import { decodeWorkflowAiDraftBaasReply } from './workflow-ai-draft-baas-reply.js';
 const BOT_ID = /^[^:\s]+:[^:\s]+$/;
-function transportConfiguration() {
-  const transport = resolveBaasConfig();
-  let url: URL;
-  try { url = new URL(transport.baseUrl); } catch { throw new Error('BAAS_NOT_CONFIGURED'); }
-  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash || !transport.apiKey) throw new Error('BAAS_NOT_CONFIGURED');
-  const local = ['127.0.0.1', 'localhost', '::1', '[::1]'].includes(url.hostname.toLowerCase());
-  if (process.platform === 'darwin' && !local && !transport.iamtoken) throw new Error('BAAS_NOT_CONFIGURED');
-  return transport;
+type ProviderNamespace = { apiKey: string; baseUrl: string; environment: string; controlEnvironment: string };
+type ValidatedTransport = ProviderNamespace & { iamtoken: string };
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+function localUrl(url: URL): boolean {
+  return ['127.0.0.1', 'localhost', '::1', '[::1]'].includes(url.hostname.toLowerCase());
+}
+function readTransport(): ValidatedTransport {
+  try {
+    const transport = selectAutoHealBaasTransport(resolveAutoHealConfig(), resolveBaasConfig());
+    const { baseUrl } = transport;
+    const url = new URL(baseUrl);
+    if (process.platform === 'darwin' && !localUrl(url) && !transport.iamtoken) throw new Error('BAAS_NOT_CONFIGURED');
+    // Copy scalars at the boundary; callers must not retain mutable config references.
+    const { apiKey, iamtoken, environment } = transport;
+    return { apiKey, baseUrl, environment, controlEnvironment: getCurrentEnv(), iamtoken };
+  } catch { throw new Error('BAAS_NOT_CONFIGURED'); }
+}
+function transportConfiguration({ apiKey, baseUrl, environment, controlEnvironment }: ProviderNamespace): ValidatedTransport {
+  const current = readTransport();
+  if (current.apiKey !== apiKey || current.baseUrl !== baseUrl || current.environment !== environment
+    || current.controlEnvironment !== controlEnvironment) throw new Error('BAAS_PROVIDER_CHANGED');
+  return current;
 }
 function targetConfiguration() {
-  const { botId } = resolveAutoHealConfig();
-  if (!BOT_ID.test(botId)) throw new Error('AUTO_HEAL_BOT_NOT_CONFIGURED');
+  let botId: string;
+  try { ({ botId } = resolveAutoHealConfig()); } catch { throw new Error('AUTO_HEAL_BOT_NOT_CONFIGURED'); }
+  if (typeof botId !== 'string' || !BOT_ID.test(botId) || Buffer.from(botId, 'utf8').toString('utf8') !== botId) throw new Error('AUTO_HEAL_BOT_NOT_CONFIGURED');
   return { botId };
 }
 export function workflowAiDraftMessage({ envelope }: WorkflowAiDraftExecutionRequest): string {
@@ -39,18 +58,47 @@ async function boundedJson(response: Response): Promise<unknown> {
       chunks.push(chunk.value);
     }
   } finally { reader.releaseLock(); }
-  return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); }
+  catch { throw new WorkflowAiDraftPollUnavailableError('BAAS_POLL_UNAVAILABLE'); }
+}
+function validBotId(value: unknown): value is string {
+  return typeof value === 'string' && BOT_ID.test(value)
+    && !/[\u0000-\u001f\u007f-\u009f]/u.test(value) && Buffer.from(value, 'utf8').toString('utf8') === value;
+}
+/** Mirrors BaaS normalize_bot_id: split at the final colon and strip only
+ * leading zeroes from the owner. Do not trim, lowercase, or use Number(). */
+function normalizeBotId(value: string): string {
+  const separator = value.lastIndexOf(':');
+  if (separator < 0) return value;
+  const owner = value.slice(separator + 1).replace(/^0+/, '');
+  return `${value.slice(0, separator)}:${owner || '0'}`;
+}
+function hasNonZeroBusinessCode(value: unknown): boolean {
+  return value != null && String(value).trim() !== '' && String(value) !== '0';
+}
+function isBusinessQueryFailure(value: unknown): boolean {
+  return isRecord(value)
+    && (hasNonZeroBusinessCode(value.code) || hasNonZeroBusinessCode(value.buserviceErrorCode) || value.data === null);
+}
+function validateResultIdentity(value: unknown, jobId: string, frozenBotId: string): void {
+  // Identity is authoritative only inside data. No outer-envelope fallback.
+  const outer = isRecord(value) && Object.hasOwn(value, 'data') ? value.data : undefined;
+  const data = isRecord(outer) ? outer : undefined;
+  if (!data || !validBotId(frozenBotId) || data.message_id !== jobId || !validBotId(data.bot_id)
+    || normalizeBotId(data.bot_id) !== normalizeBotId(frozenBotId)) throw new WorkflowAiDraftInvalidResultError('BAAS_RESULT_IDENTITY_MISMATCH');
 }
 /** Missing configuration disables capability without adding a timer or fallback. */
 export function createWorkflowAiDraftBaasExecution(): WorkflowAiDraftExecutionPort | undefined {
-  try { targetConfiguration(); transportConfiguration(); } catch { return undefined; }
+  let provider: ProviderNamespace;
+  try { provider = readTransport(); targetConfiguration(); } catch { return undefined; }
   return {
-    async resolveTarget() { transportConfiguration(); return targetConfiguration(); },
+    async resolveTarget() { transportConfiguration(provider); return targetConfiguration(); },
     async dispatch(request) {
       // Preserve the frozen, server-resolved full binding. Never append actorId.
-      const transport = transportConfiguration();
+      const transport = transportConfiguration(provider);
       const sent = await sendIntervention({ botId: request.envelope.target.botId, sessionId: null,
-        message: workflowAiDraftMessage(request), transportConfig: transport, retryTransientErrors: false });
+        message: workflowAiDraftMessage(request), transportConfig: transport, retryTransientErrors: false,
+        messageId: request.envelope.taskId });
       if (!sent.ok) {
         if (sent.failureKind === 'rejected') {
           const code = sent.tokenExpired || /(?:401|403|apiKey|iamtoken)/i.test(sent.error ?? '') ? 'BAAS_AUTH_FAILED'
@@ -59,18 +107,30 @@ export function createWorkflowAiDraftBaasExecution(): WorkflowAiDraftExecutionPo
         }
         throw new Error('BAAS_DISPATCH_UNCERTAIN');
       }
-      if (!sent.messageId || sent.messageId.length > 255 || /[\x00-\x1f\x7f]/.test(sent.messageId)) throw new Error('BAAS_DISPATCH_UNCERTAIN');
-      return { jobId: sent.messageId };
+      if (sent.messageId !== request.envelope.taskId) throw new Error('BAAS_DISPATCH_UNCERTAIN');
+      return { jobId: request.envelope.taskId };
     },
     async poll(request) {
-      const transport = transportConfiguration();
+      const transport = transportConfiguration(provider);
       const headers = buildBaasHeaders(transport);
-      const response = await fetch(`${transport.baseUrl.replace(/\/$/, '')}/openapi/v1/messages/${encodeURIComponent(request.jobId)}`,
-        { headers, redirect: 'error', signal: AbortSignal.timeout(15_000) });
+      let response: Response;
+      try {
+        response = await fetch(`${transport.baseUrl}/openapi/v1/messages/${encodeURIComponent(request.jobId)}`,
+          { headers, redirect: 'error', signal: AbortSignal.timeout(15_000) });
+      } catch { throw new WorkflowAiDraftPollUnavailableError('BAAS_POLL_UNAVAILABLE'); }
       if (response.status === 404) return { status: 'running' };
-      if (response.status === 401 || response.status === 403) return { status: 'failed', error: 'BAAS_AUTH_FAILED' };
-      if (!response.ok) throw new Error('BAAS_POLL_UNAVAILABLE');
-      return decodeWorkflowAiDraftBaasReply(await boundedJson(response));
+      if (response.status === 401 || response.status === 403) throw new WorkflowAiDraftPollUnavailableError('BAAS_AUTH_FAILED');
+      if (!response.ok) throw new WorkflowAiDraftPollUnavailableError('BAAS_POLL_UNAVAILABLE');
+      let body: unknown;
+      try { body = await boundedJson(response); }
+      catch (error) {
+        if (error instanceof WorkflowAiDraftInvalidResultError) throw error;
+        throw new WorkflowAiDraftPollUnavailableError('BAAS_POLL_UNAVAILABLE');
+      }
+      if (isBusinessQueryFailure(body)) throw new WorkflowAiDraftPollUnavailableError('BAAS_POLL_UNAVAILABLE');
+
+      validateResultIdentity(body, request.jobId, request.envelope.target.botId);
+      return decodeWorkflowAiDraftBaasReply(body);
     },
   };
 }

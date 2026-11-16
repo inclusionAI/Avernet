@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { parse, stringify } from 'yaml'
@@ -40,7 +41,7 @@ function deferred<T>() { let resolve!: (value: T) => void; let reject!: (error: 
 async function mount(version: 'current' | 'draft' = 'current') {
   const session = sessionFor(mocks.db!.id)
   publish(session, { ...session.state, version })
-  render(<Editor embedded initialWorkflowId={mocks.db!.id} />)
+  render(<Editor access={{ canView: true, canEdit: true, canDeploy: true }} embedded initialWorkflowId={mocks.db!.id} />)
   await waitFor(() => expect(session.state.versions[version].loading).toBe(false))
 }
 const click = (name: string) => fireEvent.click(screen.getByRole('button', { name, exact: true }))
@@ -553,11 +554,14 @@ describe('Editor DB workflow and 草稿(wf) Pack files', () => {
   })
   it('does not infer unified-save permission from a denied legacy canWrite flag', async () => {
     current.canWrite = false; await mount(); act(() => state().updateSpecField('title', 'DB only'))
-    await editFile('scripts/run', 'local'); click('保存')
-    await screen.findByText(/统一保存不可用，无法同步草稿\(wf\)工作流 YAML；数据库和 Git 均未写入/)
+    fireEvent.click(screen.getByRole('tab', { name: '脚本文件' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'scripts/run', exact: true }))
+    expect(screen.getByLabelText('文件内容')).toHaveAttribute('readonly')
+    click('保存')
+    await screen.findByText(/Pack 版本文件为只读，未发送保存/)
     expect(sessionFor(mocks.db!.id).state.versions.current.snapshot?.canWrite).toBe(false)
     expect(mocks.db!.title).toBe('Original'); expect(state().spec!.title).toBe('DB only'); expect(state().isDirty).toBe(true)
-    expect(screen.getByLabelText('文件内容')).toHaveValue('local'); expect(putCalls()).toHaveLength(0)
+    expect(screen.getByLabelText('文件内容')).toHaveValue('original'); expect(putCalls()).toHaveLength(0)
     expect(vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === 'POST' || init?.method === 'PUT')).toEqual([])
   })
   it('keeps pending drafts and Ctrl-S cannot bypass the apply boundary', async () => {
@@ -613,7 +617,7 @@ describe('Editor DB workflow and 草稿(wf) Pack files', () => {
   it('does not replace a dirty session baseline when saved moves during unmount', async () => {
     unifiedAvailable = true
     const session = sessionFor(mocks.db!.id); publish(session, { ...session.state, version: 'draft' })
-    const view = render(<Editor embedded initialWorkflowId={mocks.db!.id} />)
+    const view = render(<Editor access={{ canView: true, canEdit: true, canDeploy: true }} embedded initialWorkflowId={mocks.db!.id} />)
     await waitFor(() => expect(session.state.versions.draft.snapshot?.baseCommit).toBe(B))
     await editFile('scripts/run', 'Persist local'); view.unmount()
     saved = { ...saved, baseCommit: C, draftHead: C }
@@ -626,7 +630,7 @@ describe('Editor DB workflow and 草稿(wf) Pack files', () => {
       }
       return originalFetch(url, init)
     })
-    render(<Editor embedded initialWorkflowId={mocks.db!.id} />); fireEvent.click(screen.getByRole('tab', { name: '脚本文件' })); click('保存')
+    render(<Editor access={{ canView: true, canEdit: true, canDeploy: true }} embedded initialWorkflowId={mocks.db!.id} />); fireEvent.click(screen.getByRole('tab', { name: '脚本文件' })); click('保存')
     await screen.findByText(/统一保存未能完整确认.*HTTP 409/)
     expect(captured).toMatchObject({ sourceCommit: B, expectedSavedHead: B })
     expect(session.state.versions.draft.snapshot?.baseCommit).toBe(B)
@@ -635,7 +639,7 @@ describe('Editor DB workflow and 草稿(wf) Pack files', () => {
     expect(session.state.postSaveVerificationError).toBeTruthy()
   })
   it('retains a new draft and refuses a blind retry when creation is unknown', async () => {
-    mocks.db = null; state().reset({ force: true }); mocks.fetchJson.mockRejectedValue(new TypeError('lost')); render(<Editor />)
+    mocks.db = null; state().reset({ force: true }); mocks.fetchJson.mockRejectedValue(new TypeError('lost')); render(<Editor access={{ canView: true, canEdit: true, canDeploy: true }} />)
     click('更多操作'); fireEvent.click(screen.getByRole('menuitem', { name: '新建工作流' }))
     fireEvent.change(screen.getByLabelText('标识'), { target: { value: 'brand-new' } }); fireEvent.change(screen.getByLabelText('标题'), { target: { value: 'New' } }); click('Create'); click('保存')
     await screen.findByText(/新建结果尚未确认/); expect(state().spec?.id).toBe('brand-new'); expect(state().isDirty).toBe(true)
@@ -715,7 +719,7 @@ describe('Editor DB workflow and 草稿(wf) Pack files', () => {
   })
   it.each([['new workflow', 'conflict'], ['same ID new session', 'conflict'], ['new workflow', 'read failure'], ['same ID new session', 'read failure']] as const)('does not show a late %s / %s error', async (target, failure) => {
     const id = mocks.db!.id, pending = deferred<unknown>()
-    const view = render(<Editor embedded initialWorkflowId={id} />)
+    const view = render(<Editor access={{ canView: true, canEdit: true, canDeploy: true }} embedded initialWorkflowId={id} />)
     await waitFor(() => expect(sessionFor(id).state.versions.current.loading).toBe(false))
     click('部署'); await screen.findByRole('button', { name: '确认部署' })
     const original = mocks.fetchJson.getMockImplementation()!
@@ -730,7 +734,7 @@ describe('Editor DB workflow and 草稿(wf) Pack files', () => {
     } else {
       mocks.db = next
     }
-    view.rerender(<Editor embedded initialWorkflowId={next.id} />)
+    view.rerender(<Editor access={{ canView: true, canEdit: true, canDeploy: true }} embedded initialWorkflowId={next.id} />)
     await waitFor(() => expect(screen.getByText('· Replacement session')).toBeInTheDocument())
     expect(state().sessionId).not.toBe(previousSession)
     await act(async () => {
@@ -832,4 +836,112 @@ it('retains local edits when wf post-save verification returns only a legacy sna
   expect(session.state.versions.draft.files.find(f => f.path === 'scripts/run')!.contentBase64).toBe(btoa('unconfirmed files'))
   expect(session.state.postSaveVerificationError).toBeTruthy()
   expect(mocks.deploy).not.toHaveBeenCalled()
+})
+
+
+describe('authenticated workflow read-only permissions', () => {
+  it('loads a DB draft but blocks toolbar, keyboard, AI and Pack file writes for a viewer', async () => {
+    render(<Editor embedded initialWorkflowId={mocks.db!.id} access={{ canView: true, canEdit: false, canExecute: false }} />)
+    expect(await screen.findByText(/当前工作流为只读/)).toBeVisible()
+    for (const name of ['保存', '部署', 'AI 修改', '✦ AI 生成', '撤销', '重做']) {
+      expect(screen.getByRole('button', { name, exact: true })).toBeDisabled()
+    }
+    const before = structuredClone(state().spec)
+    act(() => state().updateSpecField('title', 'Forbidden'))
+    fireEvent.keyDown(window, { key: 's', ctrlKey: true })
+    fireEvent.keyDown(window, { key: 's', metaKey: true })
+    fireEvent.keyDown(window, { key: 'z', ctrlKey: true })
+    expect(state().spec).toEqual(before)
+    click('版本历史')
+    fireEvent.click(screen.getByRole('tab', { name: '脚本文件' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'scripts/run', exact: true }))
+    expect(screen.getByLabelText('文件内容')).toHaveAttribute('readonly')
+    expect(screen.queryByRole('button', { name: '新增文件' })).not.toBeInTheDocument()
+    expect(mocks.fetchJson.mock.calls.filter(([, init]) => init?.method && !['GET', 'HEAD'].includes(init.method))).toHaveLength(0)
+    expect(mocks.deploy).not.toHaveBeenCalled()
+  })
+
+  it('loads the normal DB draft read-only inside the real provider without blocking source reads', async () => {
+    state().reset({ force: true })
+    const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity, retry: false } } })
+    client.setQueryData(['workflow-access', mocks.db!.id], { canView: true, canEdit: false, canExecute: false })
+    render(<QueryClientProvider client={client}><Editor embedded initialWorkflowId={mocks.db!.id} /></QueryClientProvider>)
+    expect(await screen.findByText(/当前工作流为只读/)).toBeVisible()
+    expect(state().spec).toEqual(mocks.db)
+    expect(state()._databaseSpec).toEqual(mocks.baseline)
+    expect(screen.getByRole('button', { name: '保存', exact: true })).toBeDisabled()
+    fireEvent.keyDown(window, { key: 's', ctrlKey: true })
+    expect(mocks.fetchJson.mock.calls.filter(([, init]) => init?.method && !['GET', 'HEAD'].includes(init.method))).toHaveLength(0)
+    cleanup(); client.clear()
+  })
+
+  it.each([
+    [true, false, true], [false, true, false],
+  ])('uses explicit canDeploy=%s rather than raw execute=%s for the deployment toolbar', (canDeploy, canExecute, enabled) => {
+    render(<Editor embedded initialWorkflowId={mocks.db!.id} access={{ canView: true, canEdit: true, canExecute, canDeploy }} />)
+    expect(screen.getByRole('button', { name: '部署', exact: true }).hasAttribute('disabled')).toBe(!enabled)
+  })
+
+  it('deploys a saved candidate with explicit host deploy permission even when raw execute is false', async () => {
+    render(<Editor embedded initialWorkflowId={mocks.db!.id} access={{ canView: true, canEdit: true, canExecute: false, canDeploy: true }} />)
+    const session = sessionFor(mocks.db!.id)
+    await waitFor(() => expect(session.state.versions[session.state.version].snapshot).not.toBeNull())
+    click('部署'); await screen.findByRole('button', { name: '确认部署' })
+    confirmDeploy(); await screen.findByText(/部署成功/)
+    expect(mocks.deploy).toHaveBeenCalledTimes(1)
+  })
+
+  it('blocks unified Save and keyboard file writes when the selected Pack explicitly denies canWrite', async () => {
+    unifiedAvailable = true; current.canWrite = false
+    await mount()
+    act(() => state().updateSpecField('title', 'Retain local edit'))
+    fireEvent.keyDown(window, { key: 's', ctrlKey: true })
+    await screen.findByText(/Pack.*只读/)
+    expect(mocks.fetchJson.mock.calls.filter(([, init]) => init?.method === 'POST' || init?.method === 'PUT')).toHaveLength(0)
+    expect(state().spec?.title).toBe('Retain local edit')
+  })
+
+  it('does not dispatch a save after edit permission is revoked during database preflight', async () => {
+    unifiedAvailable = true
+    const view = render(<Editor embedded initialWorkflowId={mocks.db!.id} access={{ canView: true, canEdit: true }} />)
+    const session = sessionFor(mocks.db!.id)
+    await waitFor(() => expect(session.state.versions[session.state.version].snapshot).not.toBeNull())
+    act(() => state().updateSpecField('title', 'Keep local draft'))
+    const gate = deferred<unknown>(), original = mocks.fetchJson.getMockImplementation()!
+    let started = false
+    mocks.fetchJson.mockImplementation((url: string, init?: RequestInit) => {
+      if (url.endsWith('/editor-draft') && init?.method === 'GET') { started = true; return gate.promise }
+      return original(url, init)
+    })
+    click('保存'); await waitFor(() => expect(started).toBe(true))
+    view.rerender(<Editor embedded initialWorkflowId={mocks.db!.id} access={{ canView: true, canEdit: false }} />)
+    await act(async () => gate.resolve({ workflowId: mocks.db!.id, packId: 'pack', specJson: JSON.stringify(mocks.db), draftToken }))
+    await waitFor(() => expect(session.state.saving).toBe(false))
+    expect(mocks.fetchJson.mock.calls.filter(([, init]) => init?.method === 'POST' || init?.method === 'PUT')).toHaveLength(0)
+    expect(state().spec?.title).toBe('Keep local draft')
+  })
+
+  it('keeps existing workflows read-only without a provider or explicit capabilities', async () => {
+    render(<Editor embedded initialWorkflowId={mocks.db!.id} />)
+    expect(await screen.findByText(/当前工作流为只读/)).toBeVisible()
+    expect(screen.getByRole('button', { name: '保存', exact: true })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '部署', exact: true })).toBeDisabled()
+    fireEvent.keyDown(window, { key: 's', ctrlKey: true })
+    expect(mocks.fetchJson.mock.calls.filter(([, init]) => init?.method === 'POST' || init?.method === 'PUT')).toHaveLength(0)
+  })
+
+  it('does not offer Editor deployment to an execute-only user without explicit canDeploy', () => {
+    render(<Editor embedded initialWorkflowId={mocks.db!.id} access={{ canView: true, canEdit: false, canExecute: true }} />)
+    expect(screen.getByRole('button', { name: '部署', exact: true })).toBeDisabled()
+    expect(mocks.deploy).not.toHaveBeenCalled()
+  })
+
+  it('keeps edit permission without inferring deploy from a legacy access response', async () => {
+    render(<Editor embedded initialWorkflowId={mocks.db!.id} access={{ canView: true, canEdit: true }} />)
+    expect(screen.getByRole('button', { name: '保存', exact: true })).toBeEnabled()
+    expect(screen.getByRole('button', { name: '部署', exact: true })).toBeDisabled()
+    act(() => state().updateSpecField('title', 'Allowed'))
+    expect(state().spec?.title).toBe('Allowed')
+    expect(screen.getByRole('button', { name: 'AI 修改', exact: true })).toBeEnabled()
+  })
 })

@@ -130,10 +130,10 @@ export default function WorkflowAiDrawer({ open, mode, spec, contextKey, blocked
           </div>
           <button type="submit" aria-describedby={`${disclosureId}${blockedReason ? ` ${blockedId}` : ''}`} disabled={Boolean(blockedReason) || (!canGenerate && !ai.recoverable) || !spec || !ai.prompt.trim() || ai.busy}
             className="w-full rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground disabled:opacity-40">
-            {ai.busy ? '生成中…' : ai.recoverable ? '恢复查询本次请求' : ai.error ? '重试生成' : ai.stale ? '重新生成草稿' : '生成 YAML 草稿'}
+            {ai.busy ? '生成中…' : ai.recoverable ? '恢复查询本次请求' : ai.retryPreparation ? '重试准备请求' : ai.error ? '重试生成' : ai.stale ? '重新生成草稿' : '生成 YAML 草稿'}
           </button>
           {(ai.busy || ai.recoverable) && <button type="button" onClick={ai.cancel} className={`${secondaryButton} w-full`}>取消生成</button>}
-          <p className="text-xs text-muted-foreground">取消或关闭会停止本地等待并阻止应用，同时尽力向服务器记录取消。BaaS 没有已支持的停止接口，远程任务可能继续；不能承诺停止，迟到结果不会应用。</p>
+          <p className="text-xs text-muted-foreground">取消或关闭会停止本地等待并阻止应用，取消仅限本地，不会持久记录到服务器。BaaS 没有已支持的停止接口，远程任务可能继续；不能承诺停止，迟到结果不会应用。</p>
         </form>
         {ai.result && (
           <WorkflowAiDraftPreview key={ai.result.requestId} draft={ai.result.draft} baseSpec={ai.result.baseSpec} stale={ai.stale} busy={ai.busy} blockedReason={blockedReason}
