@@ -1,0 +1,18 @@
+docs/plans/2026-11-09-bcn-runtime-mvp-execution.md
+  h_f4a73db4ad12be 166-167
+docs/plans/2026-11-09-bcn-runtime-mvp.md
+  h_f4a73db4ad12be 23,282-285,288-289,292,297-298
+docs/plans/2026-11-09-bcn-tbase-lua-handoff.md
+  h_f4a73db4ad12be 1-236
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b438bf167b477c810e2db351fcb280ea3edd49fb",
+  "prompts": {},
+  "humans": {
+    "h_f4a73db4ad12be": {
+      "author": "元歌 <yuange.zjy@antgroup.com>"
+    }
+  }
+}

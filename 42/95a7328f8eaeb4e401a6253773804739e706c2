@@ -1,0 +1,19 @@
+apps/bcs-internal/bcn-configs/bcs-config.toml
+  s_83eaf4a5bf0412::t_f2fc0c6330e271 104,143
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4295a7328f8eaeb4e401a6253773804739e706c2",
+  "prompts": {},
+  "sessions": {
+    "s_83eaf4a5bf0412": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a4b1-6c88-7b43-a5ea-62db37597854",
+        "model": "gpt-6-astra"
+      },
+      "human_author": null
+    }
+  }
+}

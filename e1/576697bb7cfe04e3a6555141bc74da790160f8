@@ -1,0 +1,21 @@
+docs/designs/bcn-distributed-v3/api-and-runner-spi.md
+  s_d17067b1455b5b::t_b0a6b7f5bd06fb 57,61-63,67-79,82,84,86-88,94-95,99-119,122-124,127-129,232-234,289-309
+docs/designs/bcn-distributed-v3/README.md
+  s_d17067b1455b5b::t_b0a6b7f5bd06fb 2,12-13,20-27,40-43,58-67,107-109
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e1576697bb7cfe04e3a6555141bc74da790160f8",
+  "prompts": {},
+  "sessions": {
+    "s_d17067b1455b5b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a18b4d-1c7f-7b42-b40a-9bc82d2de313",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "yuange.zjy <yuange.zjy@antgroup.com>"
+    }
+  }
+}

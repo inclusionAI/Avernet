@@ -1,0 +1,18 @@
+apps/frontend-nextgen/src/assets/TaskPanel/v2/DagViewV2.tsx
+  h_059e888e5e4e82 4,6
+apps/frontend-nextgen/src/assets/TaskPanel/v2/TaskOverviewV2.tsx
+  h_059e888e5e4e82 3,5,7,24-30,32-37
+apps/frontend-nextgen/test/assets/TaskPanel/v2/TaskOverviewV2.test.tsx
+  h_059e888e5e4e82 2,193-198
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1f160fc012f238053a069d542d6c5217c94270e1",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

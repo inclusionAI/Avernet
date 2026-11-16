@@ -1,0 +1,81 @@
+apps/bcs/scripts/e2e-runner/bcs_e2e/inventory.py
+  s_cecdc98e721f4b::t_09fbbbb19f583e 217-263
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_authority_reporting.py
+  s_cecdc98e721f4b::t_aa4c9120322eff 16,94
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_caller_execution_reporting.py
+  s_cecdc98e721f4b::t_fef0a4ca9b2db3 13,75
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_channel_cli_reporting.py
+  s_cecdc98e721f4b::t_749183b68b5bb5 15,71
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_channel_reporting.py
+  s_cecdc98e721f4b::t_3e55b3c95a3607 12,68
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_collaboration_team_reporting.py
+  s_cecdc98e721f4b::t_7734cb1db038f4 18,87
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_custom_collaboration_reporting.py
+  s_cecdc98e721f4b::t_dd1677b51c1570 10,112
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_delivery_policy_reporting.py
+  s_cecdc98e721f4b::t_d7b11fa33a39e1 13,76
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_direct_chat_reporting.py
+  s_cecdc98e721f4b::t_1f4d99fa857713 12,67
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_draft_group_reporting.py
+  s_cecdc98e721f4b::t_747669c9ee393d 14,80
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_edge_friend_mutations_reporting.py
+  s_cecdc98e721f4b::t_934635b8d60cf9 19,87
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_edge_read_reporting.py
+  s_cecdc98e721f4b::t_e74a10cc9bba90 10,93
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_event_reporting.py
+  s_cecdc98e721f4b::t_3f8932286696f8 12,72
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_file_reporting.py
+  s_cecdc98e721f4b::t_49ba2554062b20 16,85
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_fixed_loop_reporting.py
+  s_cecdc98e721f4b::t_7c023bc7b3efb5 11,74
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_nested_fixed_loop_reporting.py
+  s_cecdc98e721f4b::t_0335bd837285d0 14,87
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_network_reporting.py
+  s_cecdc98e721f4b::t_c942f24fd19fe4 12,69
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_operator_cli_reporting.py
+  s_cecdc98e721f4b::t_3f0446443ed6a8 16,123
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_provider_api.py
+  s_cecdc98e721f4b::t_a8c8e08fcb8e54 22,123
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_provider_owner_reporting.py
+  s_cecdc98e721f4b::t_24d5fc9384c16c 20,83
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_provider_reporting.py
+  s_cecdc98e721f4b::t_ead114c5c09124 12,68
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_result_queue_reporting.py
+  s_cecdc98e721f4b::t_d9b0a1bda54350 14,81
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_service_policy_reporting.py
+  s_cecdc98e721f4b::t_593dfbeaf3739e 16,79
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_session_flow_reporting.py
+  s_cecdc98e721f4b::t_a70b3d6cf1467e 5,36
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_session_reporting.py
+  s_cecdc98e721f4b::t_53917a3fe7a37d 13,75
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_session_service_parent_reporting.py
+  s_cecdc98e721f4b::t_1bb7a914cc2a72 10,165
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_session_sharing_reporting.py
+  s_cecdc98e721f4b::t_a260c0f60490db 5,36
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_slow_judge_reporting.py
+  s_cecdc98e721f4b::t_1a5960356423b9 11,71
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_structured_reporting.py
+  s_cecdc98e721f4b::t_08f23c4f1f4fbe 12,83
+apps/bcs/scripts/e2e-runner/bcs_e2e/local_workspace_reporting.py
+  s_cecdc98e721f4b::t_bfaa53acf8c911 14,119
+apps/bcs/scripts/e2e-runner/bcs_e2e/session_owner/local_session_owner_reporting.py
+  s_cecdc98e721f4b::t_bdb9ed52a5de81 20,94
+apps/bcs/scripts/e2e-runner/tests/test_inventory_reviewed_binding_guard.py
+  s_cecdc98e721f4b::t_03ba6674835a37 1-116
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "5aae6c12dc3f96fa98b868a36645ddb2ab199519",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "Ling-3.1-flash"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

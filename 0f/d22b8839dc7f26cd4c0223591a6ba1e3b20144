@@ -1,0 +1,29 @@
+engine/adapter/scripts/session-files/README.md
+  s_f364df1c07a1e6::t_d111dd95b56d6d 29-32,54-66,78,85-87,91-93,126-129,135-140
+engine/adapter/scripts/session-files/session-file-publish/SKILL.md
+  s_f364df1c07a1e6::t_7fa2af9fafbe35 3,6-48,51,54-84
+engine/adapter/scripts/session-files/session-file-publish/scripts/teamclaw-session-file
+  s_f364df1c07a1e6::t_b04dd630c9e67d 8,57-78,84,86,118,120,124-169,197-200,202,218,224,231-234
+engine/adapter/scripts/session-files/tests/skill-cases.json
+  s_f364df1c07a1e6::t_7ab5e6fdcf735f 9-12,14,21-24,26,33-36,38,45-48,50,57-60,69-72,74,81-84,93-96,105-108,117-120,129-132,141-144,146,153-161,167-170,172,179-182,199-202,204,206-279
+engine/adapter/scripts/session-files/tests/test_cli.py
+  s_f364df1c07a1e6::t_42ee2f5a42e75d 3,37-43,57-63,71,74-75,97-100,104,109,120,195-298
+engine/adapter/scripts/session-files/tests/test_engine_integration.py
+  s_f364df1c07a1e6::t_471aeaaee53927 3,6,39,75,77-78,183-222
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0fd22b8839dc7f26cd4c0223591a6ba1e3b20144",
+  "prompts": {},
+  "sessions": {
+    "s_f364df1c07a1e6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a02001-8e2d-7e92-859e-df38c4b298ac",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

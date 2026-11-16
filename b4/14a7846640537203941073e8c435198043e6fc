@@ -1,0 +1,18 @@
+apps/backend/src/agentclaw/community/adapters/http/devices/router.py
+  h_dac96fb4da302f 412,451-457,520,567-573
+apps/backend/src/agentclaw/community/core/devices/services/baas_device_service.py
+  h_dac96fb4da302f 852-855,875-884
+apps/backend/src/agentclaw/community/core/service_bot/services/baas_service.py
+  h_dac96fb4da302f 2097-2117
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b414a7846640537203941073e8c435198043e6fc",
+  "prompts": {},
+  "humans": {
+    "h_dac96fb4da302f": {
+      "author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

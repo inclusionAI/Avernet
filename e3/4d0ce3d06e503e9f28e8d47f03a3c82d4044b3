@@ -1,0 +1,35 @@
+apps/backend/src/agentclaw/community/core/task/context_collab/g4_contracts_consistency/state_machine.py
+  s_e0cb98366a65ad::t_5158e2d8076c21 354-358,360-366
+  s_e0cb98366a65ad::t_c40f326847e390 340,342
+apps/backend/tests/community/core/task/context_collab/test_state_machine.py
+  s_e0cb98366a65ad::t_2917921403c471 244
+  s_e0cb98366a65ad::t_bfd3442d6c244a 273,280-293
+  s_e0cb98366a65ad::t_df9d657929fdad 37-38
+  s_e0cb98366a65ad::t_e2b7bd5f9a0044 202
+  s_e0cb98366a65ad::t_4ff1477c7e5b2d 218
+  s_e0cb98366a65ad::t_b2778a15a919b3 121-122
+  s_e0cb98366a65ad::t_6e9d3a0a9062c2 138
+  s_e0cb98366a65ad::t_551ad8b7b9a0ce 231
+  s_e0cb98366a65ad::t_0e71c5c99fa9f3 331-345
+  s_e0cb98366a65ad::t_8acb037f5d75a8 185-186
+  s_e0cb98366a65ad::t_5b966a16afbb6c 309-310
+  s_e0cb98366a65ad::t_9f98ddcd73175e 106-107
+  s_e0cb98366a65ad::t_7cd6a1c780046b 155
+  s_e0cb98366a65ad::t_1c0219d80b2568 294-296
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e34d0ce3d06e503e9f28e8d47f03a3c82d4044b3",
+  "prompts": {},
+  "sessions": {
+    "s_e0cb98366a65ad": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "1d67472f-3033-4c3f-9f69-89e0d4112039",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

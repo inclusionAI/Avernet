@@ -1,0 +1,19 @@
+apps/frontend-nextgen/src/domain/communityHelp/types.ts
+  s_099b525d116ac6::t_1cb914fa8874ce 1-61
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "62cc6039ff0d210a4dbf738360ded89a36f1e146",
+  "prompts": {},
+  "sessions": {
+    "s_099b525d116ac6": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "0faa0679-867e-4a88-88ee-47432c0214b4",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

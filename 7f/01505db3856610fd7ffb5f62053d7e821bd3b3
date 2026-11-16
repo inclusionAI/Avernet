@@ -1,0 +1,19 @@
+.gitmodules
+  s_a94046ffb15d68::t_fd8bad6bc6488a 4
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7f01505db3856610fd7ffb5f62053d7e821bd3b3",
+  "prompts": {},
+  "sessions": {
+    "s_a94046ffb15d68": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "s_a94046ffb15d68",
+        "model": "unknown"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

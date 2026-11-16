@@ -1,0 +1,25 @@
+apps/backend/src/agentclaw/corp/di/token_exchange.py
+  s_620fb772f449f4::t_98cd91d52d2d07 48
+apps/backend/src/agentclaw/corp/plugins/prod/token_exchange_jit.py
+  s_620fb772f449f4::t_63a0855235f6e8 10,194-195
+apps/backend/tests/corp/di/test_token_exchange_adapters.py
+  s_620fb772f449f4::t_98cd91d52d2d07 33,40,63,72,110,118,143,171,212,221,233
+apps/backend/src/agentclaw/corp/plugins/prod/passport.py
+  s_620fb772f449f4::t_98cd91d52d2d07 4-5,707-712
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b9be0e5822a1c6e25833acae3287311e2f3360e0",
+  "prompts": {},
+  "sessions": {
+    "s_620fb772f449f4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a123ca-8212-7ef2-8637-c02975d987a2",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "evilcoda <yipu.hj@antgroup.com>"
+    }
+  }
+}

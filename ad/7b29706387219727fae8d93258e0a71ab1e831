@@ -1,0 +1,14 @@
+apps/evolverun/clawweb/internal/modules/archive/server/routes/app-config.ts
+  h_bb3ca6fb13c5df 23,37
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ad7b29706387219727fae8d93258e0a71ab1e831",
+  "prompts": {},
+  "humans": {
+    "h_bb3ca6fb13c5df": {
+      "author": "fudapeng <dapeng.fdp@antgroup.com>"
+    }
+  }
+}

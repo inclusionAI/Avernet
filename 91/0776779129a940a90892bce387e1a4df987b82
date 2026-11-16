@@ -1,0 +1,30 @@
+apps/evolverun/clawweb/public/app/clawweb/server/__tests__/public-pack-security.test.ts
+  h_43af82e14600e4 114,226-227
+apps/evolverun/clawweb/public/app/clawweb/server/__tests__/public-unified-save-host.test.ts
+  h_43af82e14600e4 60,70,78,92-93,96-101,129,133-144,155,167,172-176,180
+apps/evolverun/clawweb/public/modules/workflow/docs/pack-version-write.md
+  h_43af82e14600e4 44-64
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/auto-heal-save-first-draft.test.ts
+  h_43af82e14600e4 92,100,121,125
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/auto-heal-wf-settings.test.ts
+  h_43af82e14600e4 22-24,27-28,31,36,40-51
+apps/evolverun/clawweb/public/modules/workflow/server/routes/auto-heal.ts
+  h_43af82e14600e4 184-185
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/auto-heal-save-db-first-draft.test.ts
+  h_43af82e14600e4 16,81-118
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/auto-heal-wf-save.test.ts
+  h_43af82e14600e4 85-86,122-145
+apps/evolverun/clawweb/public/modules/workflow/server/services/auto-heal-save-service.ts
+  h_43af82e14600e4 44,133-147,178,220,235,281-290
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "910776779129a940a90892bce387e1a4df987b82",
+  "prompts": {},
+  "humans": {
+    "h_43af82e14600e4": {
+      "author": "fudapeng <fudp@example.com>"
+    }
+  }
+}
