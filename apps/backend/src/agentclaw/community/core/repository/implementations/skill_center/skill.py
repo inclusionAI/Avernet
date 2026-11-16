@@ -54,6 +54,7 @@ from agentclaw.community.log import get_logger
 from agentclaw.community.core.skill_center.errors import (
     SkillAssetInUseError,
     SkillSetControlPlaneConflictError,
+    SkillSetControlPlaneNotFoundError,
 )
 from agentclaw.community.core.skill_center.offline_policy import require_skill_online
 from agentclaw.community.core.repository.implementations.skill_center.bot_skillset_installations import (
@@ -808,7 +809,9 @@ class SkillRepository(
                 self._require_unreferenced_for_delete(db, skill)
 
     @staticmethod
-    def _require_unreferenced_for_delete(db, skill, *, env: str | None = None) -> None:
+    def _require_unreferenced_for_delete(
+        db, skill, *, env: str | None = None, ignore_membership: bool = False
+    ) -> None:
         """Recheck database blockers while the exact Skill row is locked."""
         from agentclaw.community.core.models import (
             BotSkillInstallation,
@@ -840,12 +843,16 @@ class SkillRepository(
                 SkillSetSkill.skill_uuid == skill.skill_uuid,
             )
         membership_count = (
-            db.query(SkillSetSkill.id)
-            .filter(
-                SkillSetSkill.env == effective_env,
-                membership_identity,
+            0
+            if ignore_membership
+            else (
+                db.query(SkillSetSkill.id)
+                .filter(
+                    SkillSetSkill.env == effective_env,
+                    membership_identity,
+                )
+                .count()
             )
-            .count()
         )
         # ac_skill_member predates tenant/env columns. It is still served by
         # the legacy member APIs, so a matching UUID remains a global,
@@ -921,9 +928,7 @@ class SkillRepository(
             "version": version_count,
         }
         if any(blockers.values()):
-            raise SkillAssetInUseError(
-                blockers
-            )
+            raise SkillAssetInUseError(blockers)
 
     def replace_bot_local_skill(
         self,
@@ -1093,26 +1098,99 @@ class SkillRepository(
             )
         return self.get_by_id(skill_id)
 
+    def _bot_skills(self, db, bot_id: str, owner_id: str, env: str):
+        return (
+            db.query(self.Skill)
+            .filter(
+                self.Skill.bolt_id == bot_id,
+                self.Skill.user_id == _normalize_user_id(owner_id),
+                self.Skill.env == env,
+            )
+            .order_by(self.Skill.id)
+            .with_for_update()
+            .all()
+        )
+
+    def _delete_one_bot_skill(
+        self, db, skill, bot_id: str, owner_id: str, env: str
+    ) -> None:
+        local = str(skill.git_path or "").startswith("local://")
+        if local:
+            # Unknown or foreign Set ownership must remain untouched.  This
+            # includes historic orphan associations, which are out of scope.
+            blockers = (
+                db.query(self.SkillSetSkill.id)
+                .outerjoin(
+                    self.SkillSet, self.SkillSet.id == self.SkillSetSkill.skill_set_id
+                )
+                .filter(
+                    self.SkillSetSkill.skill_id == skill.id,
+                    self.SkillSetSkill.env == env,
+                    or_(
+                        self.SkillSet.id.is_(None),
+                        self.SkillSet.bolt_id != bot_id,
+                        self.SkillSet.bolt_id.is_(None),
+                        self.SkillSet.user_id != _normalize_user_id(owner_id),
+                        self.SkillSet.user_id.is_(None),
+                        self.SkillSet.env != env,
+                        self.SkillSet.env.is_(None),
+                    ),
+                )
+                .count()
+            )
+            if blockers:
+                raise SkillAssetInUseError({"membership": blockers})
+            owned_sets = db.query(self.SkillSet.id).filter(
+                self.SkillSet.bolt_id == bot_id,
+                self.SkillSet.user_id == _normalize_user_id(owner_id),
+                self.SkillSet.env == env,
+            )
+            db.query(self.SkillSetSkill).filter(
+                self.SkillSetSkill.skill_id == skill.id,
+                self.SkillSetSkill.env == env,
+                self.SkillSetSkill.skill_set_id.in_(owned_sets),
+            ).delete(synchronize_session=False)
+        self._require_unreferenced_for_delete(
+            db, skill, env=env, ignore_membership=local
+        )
+        db.query(self.Skill).filter(
+            self.Skill.id == skill.id,
+            self.Skill.bolt_id == bot_id,
+            self.Skill.user_id == _normalize_user_id(owner_id),
+            self.Skill.env == env,
+        ).delete(synchronize_session=False)
+        db.flush()
+
     def delete_by_bot_id(self, bot_id: str, owner_id: str) -> int:
         env = get_current_env()
         with self._db.transactional_orm_session() as db:
-            skills = (
-                db.query(self.Skill)
-                .filter(
-                    self.Skill.bolt_id == bot_id,
-                    self.Skill.user_id == _normalize_user_id(owner_id),
-                    self.Skill.env == env,
-                )
-                .order_by(self.Skill.id)
-                .with_for_update()
-                .all()
-            )
+            skills = self._bot_skills(db, bot_id, owner_id, env)
             for skill in skills:
-                self._require_unreferenced_for_delete(db, skill, env=env)
-            for skill in skills:
-                db.delete(skill)
-            db.flush()
+                self._delete_one_bot_skill(db, skill, bot_id, owner_id, env)
             return len(skills)
+
+    def cleanup_by_bot_id(self, bot_id: str, owner_id: str) -> dict:
+        """Delete each unreferenced asset; retain and report independently blocked ones."""
+        env = get_current_env()
+        deleted = 0
+        retained = 0
+        blocker_counts: dict[str, int] = {}
+        with self._db.transactional_orm_session() as db:
+            skills = self._bot_skills(db, bot_id, owner_id, env)
+            for skill in skills:
+                try:
+                    with db.begin_nested():
+                        self._delete_one_bot_skill(db, skill, bot_id, owner_id, env)
+                    deleted += 1
+                except SkillAssetInUseError as exc:
+                    retained += 1
+                    for kind, count in exc.blocker_counts.items():
+                        blocker_counts[kind] = blocker_counts.get(kind, 0) + count
+        return {
+            "deleted": deleted,
+            "retained": retained,
+            "blocker_counts": blocker_counts,
+        }
 
     def list_skill_set_references(
         self,
@@ -1277,6 +1355,31 @@ class SkillRepository(
                 }
                 for r in rows
             ]
+
+
+def _delete_set_rows(session, repository, set_ids: list[int]) -> None:
+    if not set_ids:
+        return
+    session.query(repository.SkillSetSkill).filter(
+        repository.SkillSetSkill.skill_set_id.in_(set_ids)
+    ).delete(synchronize_session=False)
+    # Some legacy production databases predate the MCP membership table.
+    # A savepoint keeps this compatibility case from invalidating the outer
+    # transaction on databases where a failed statement aborts the transaction.
+    try:
+        with session.begin_nested():
+            session.query(repository.SkillSetMCPServer).filter(
+                repository.SkillSetMCPServer.skill_set_id.in_(set_ids)
+            ).delete(synchronize_session=False)
+    except Exception as exc:
+        message = str(exc).lower()
+        if "ac_skill_set_mcp" not in message or (
+            "doesn't exist" not in message and "no such table" not in message
+        ):
+            raise
+    session.query(repository.SkillSet).filter(
+        repository.SkillSet.id.in_(set_ids)
+    ).delete(synchronize_session=False)
 
 
 class SkillSetRepository(
@@ -1562,16 +1665,20 @@ class SkillSetRepository(
         return self.get_by_id(skill_set_id)
 
     def delete(self, skill_set_id: str) -> bool:
-        with self._db.orm_session() as db:
-            rowcount = (
+        with self._db.transactional_orm_session() as db:
+            row = (
                 db.query(self.SkillSet)
                 .filter(
                     self.SkillSet.id == int(skill_set_id),
                     self.SkillSet.env == get_current_env(),
                 )
-                .delete(synchronize_session=False)
+                .with_for_update()
+                .one_or_none()
             )
-            return rowcount > 0
+            if row is None:
+                return False
+            _delete_set_rows(db, self, [row.id])
+            return True
 
     def add_skill_to_set(
         self,
@@ -1579,13 +1686,14 @@ class SkillSetRepository(
         skill_id: str,
         user_id: Optional[str] = None,
     ) -> bool:
-        with self._db.orm_session() as db:
+        with self._db.transactional_orm_session() as db:
             skill_set = (
                 db.query(self.SkillSet)
                 .filter(
                     self.SkillSet.id == int(skill_set_id),
                     self.SkillSet.env == get_current_env(),
                 )
+                .with_for_update()
                 .one_or_none()
             )
             skill = (
@@ -1599,6 +1707,10 @@ class SkillSetRepository(
             )
             if skill_set is None or skill is None:
                 return False
+            if str(skill.git_path or "").startswith("local://") and (
+                skill.bolt_id != skill_set.bolt_id or skill.user_id != skill_set.user_id
+            ):
+                raise SkillSetControlPlaneNotFoundError()
             require_skill_online(skill)
             membership_skill_uuid = center_membership_skill_uuid(skill)
             # Existing membership remains the successful idempotent result.
@@ -2542,7 +2654,7 @@ class SkillSetRepository(
 
     def delete_by_bot_id(self, bot_id: str, owner_id: str) -> int:
         env = get_current_env()
-        with self._db.orm_session() as db:
+        with self._db.transactional_orm_session() as db:
             ids = [
                 r[0]
                 for r in db.query(self.SkillSet.id)
@@ -2551,43 +2663,14 @@ class SkillSetRepository(
                     self.SkillSet.user_id == _normalize_user_id(owner_id),
                     self.SkillSet.env == env,
                 )
+                .order_by(self.SkillSet.id)
+                .with_for_update()
                 .all()
             ]
             count = len(ids)
             if count == 0:
                 return 0
-            db.query(self.SkillSetSkill).filter(
-                self.SkillSetSkill.skill_set_id.in_(ids)
-            ).delete(synchronize_session=False)
-            # Prod tolerates a missing ac_skill_set_mcp table (added
-            # after the original schema; legacy DBs may lack it) — it
-            # wraps this DELETE in a plain try/except swallowing
-            # "doesn't exist". Faithful reproduction = the SAME plain
-            # try/except, NOT a SAVEPOINT: prod's ZdasDB.orm_session()
-            # runs at isolation_level=AUTOCOMMIT, so a failed
-            # statement is its own auto-committed unit and does not
-            # taint the subsequent skill_set DELETE (exactly as prod's
-            # raw cursor.execute did). A begin_nested() SAVEPOINT
-            # would itself break under AUTOCOMMIT on MySQL/OceanBase
-            # (no outer txn → the ROLLBACK TO SAVEPOINT errors with
-            # "SAVEPOINT ... does not exist"). On SQLite (test/local)
-            # the table is always present so this branch is inert.
-            try:
-                db.query(self.SkillSetMCPServer).filter(
-                    self.SkillSetMCPServer.skill_set_id.in_(ids)
-                ).delete(synchronize_session=False)
-            except Exception as e:  # noqa: BLE001 - prod parity
-                msg = str(e)
-                if (
-                    "doesn't exist" not in msg
-                    and "no such table" not in msg
-                ):
-                    raise
-            db.query(self.SkillSet).filter(
-                self.SkillSet.bolt_id == bot_id,
-                self.SkillSet.user_id == _normalize_user_id(owner_id),
-                self.SkillSet.env == env,
-            ).delete(synchronize_session=False)
+            _delete_set_rows(db, self, ids)
             return count
 
     def set_skillset_active(

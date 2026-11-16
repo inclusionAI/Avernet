@@ -669,8 +669,26 @@ class TestDeleteBot:
         result = svc.delete_bot("mybot", "user001")
         assert result is True
         svc._cleanup_service.cleanup_single_bot_data.assert_called_once_with(
-            "mybot", "user001"
+            "mybot", "staff_user001"
         )
+
+    def test_cleanup_wrapper_surfaces_retained_skills(self, caplog):
+        svc = _make_service()
+        svc._cleanup_service.cleanup_single_bot_data.return_value = {
+            "skills_deleted": 0,
+            "skill_sets_deleted": 0,
+            "resources_deleted": 0,
+            "skill_installations_deleted": 0,
+            "mcp_installations_deleted": 0,
+            "errors": [],
+            "skills_retained": True,
+        }
+
+        result = svc._cleanup_bot_associated_data("mybot", "user001")
+
+        assert result["skills_retained"] is True
+        assert result["errors"] == []
+        assert "Cleanup incomplete" in caplog.text
 
     def test_the_startup_script_is_purged_keyed_by_entity_not_owner(self):
         """The script is stored under ``entity_id``, which is only *usually* the
