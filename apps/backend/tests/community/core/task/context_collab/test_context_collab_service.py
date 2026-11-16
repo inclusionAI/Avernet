@@ -55,11 +55,10 @@ from agentclaw.community.core.task.context_collab.persistence.repository import 
 )
 from agentclaw.community.core.task.context_collab.service_api import (
     ActorContext,
-    ContextCollabCreatedResult,
     ContextCollabServiceProtocol,
     ColletCreateCommand,
 )
-from agentclaw.community.core.task.context_collab.services.context_collab_service import (
+from agentclaw.community.core.task.context_collab.l4_context_primitives.context_collab_service import (
     ContextCollabService,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime import (
@@ -113,6 +112,7 @@ class _FakeContextCollabRepository:
 
     def __init__(self) -> None:
         self.create_calls: list[CreateColletRecordRequest] = []
+        self.created_records: list[ContextCreatedRecord] = []
 
     def create_collet(
         self, request: CreateColletRecordRequest
@@ -154,12 +154,14 @@ class _FakeContextCollabRepository:
             context_version_after=1,
             occurred_at=datetime.now(timezone.utc),
         )
-        return ContextCreatedRecord(
+        record = ContextCreatedRecord(
             collet=collet,
             creation_facts=request.creation_facts,
             task=task,
             initial_event=initial_event,
         )
+        self.created_records.append(record)
+        return record
 
     def append_event(self, collab_context_id, request):
         raise NotImplementedError("fake only implements create_collet")
@@ -181,22 +183,24 @@ class TestCreateContext:
 
         result = service.create_collet(make_create_command(), actor)
 
-        assert isinstance(result, ContextCollabCreatedResult)
-        assert result.collab_context_id.startswith("collet_")
-        assert result.context_version == 1
-        assert result.current_snapshot["objective"] == OBJECTIVE
-        assert result.current_snapshot["status"] == "created"
-        assert result.current_snapshot["method_kind"] == "Single"
-        assert result.current_snapshot["principal_ref"] == "u_1001"
-        assert result.current_snapshot["executor_ref"] == "bot_coding_001"
-        assert result.current_snapshot["progress"]["percent"] == 0
-        current_event_id = result.current_snapshot["progress"]["current_event_id"]
-        assert isinstance(current_event_id, str)
-        assert current_event_id.startswith("evt_")
-        assert result.current_event["event_id"] == current_event_id
-        assert result.current_event["event_kind"] == "task.created"
-        assert result.current_event["primitive_type"] == "Task"
-        assert result.current_event["parent_event"] is None
+        assert isinstance(result, Collet)
+        record = repo.created_records[0]
+        assert result is record.collet
+        assert result.collet_id.startswith("collet_")
+        assert result.version == 1
+        assert result.initiator_ref == actor.actor
+        assert result.scope == make_create_command().space
+        assert result.state is ColletState.ACTIVE
+        assert result.current_event_id == record.initial_event.event_id
+        assert result.current_event_id.startswith("evt_")
+        assert Collet.from_dict(result.to_dict()) == result
+        # Work and creation facts remain separate from the returned Collet.
+        assert record.task.objective == OBJECTIVE
+        assert record.task.status == "created"
+        assert record.task.principal_ref == PRINCIPAL
+        assert record.task.executor_ref == EXECUTOR
+        assert record.creation_facts["method_kind"] == "Single"
+        assert record.initial_event.parent_event is None
 
         # 服务传给仓储的创建请求语义(§6.2 / 初始事件)。
         request = repo.create_calls[0]
@@ -228,6 +232,52 @@ class TestCreateContext:
             "workflow_kind": "team_todo_execution",
             "product_profile_ref": {"profile_id": "team_todo", "version": 1},
         }
+
+    def test_create_repository_failure_does_not_return_collet(self):
+        error = RuntimeError("create write failed")
+
+        class FailingRepository(_FakeContextCollabRepository):
+            def create_collet(self, request):
+                raise error
+
+        class RecordingMethodStore(InMemoryMethodStore):
+            def __init__(self):
+                super().__init__()
+                self.writes = []
+
+            def upsert_binding(self, axes, binding):
+                self.writes.append(binding)
+                return super().upsert_binding(axes, binding)
+
+        store = RecordingMethodStore()
+        service = ContextCollabService(
+            repository=FailingRepository(),
+            method_store=store,
+            product_catalog=PRODUCT_CATALOG,
+        )
+        with pytest.raises(RuntimeError) as failure:
+            service.create_collet(make_create_command(), make_actor())
+        assert failure.value is error
+        assert store.writes == []
+
+    def test_create_binding_failure_does_not_return_success(self):
+        error = RuntimeError("binding write failed")
+
+        class FailingMethodStore(InMemoryMethodStore):
+            def upsert_binding(self, axes, binding):
+                raise error
+
+        repo = _FakeContextCollabRepository()
+        service = ContextCollabService(
+            repository=repo,
+            method_store=FailingMethodStore(),
+            product_catalog=PRODUCT_CATALOG,
+        )
+        with pytest.raises(RuntimeError) as failure:
+            service.create_collet(make_create_command(), make_actor())
+        assert failure.value is error
+        # SQL and the MethodStore are not a shared transaction; never mask failure.
+        assert len(repo.created_records) == 1
 
     def test_create_without_resource_refs_still_carries_empty_key(self):
         """空引用恒带空列表 key(spec resource-binding §2):新行与存量行
@@ -382,7 +432,7 @@ class TestTopLevelProjection:
             product_catalog=PRODUCT_CATALOG,
         )
         created = service.create_collet(make_create_command(), make_actor())
-        bindings = store.list_bindings(current_axes(), created.collab_context_id)
+        bindings = store.list_bindings(current_axes(), created.collet_id)
         assert len(bindings) == 1
         binding = bindings[0]
         assert binding.state is BindingState.ACTIVE
@@ -393,9 +443,9 @@ class TestTopLevelProjection:
 
         # 同命令重复创建(同 ID):顶层投影幂等,store 仍只一行。
         again = service.create_collet(make_create_command(), make_actor())
-        assert again.collab_context_id == created.collab_context_id
-        assert len(store.list_bindings(current_axes(), created.collab_context_id)) == 1
-        rebound = store.list_bindings(current_axes(), created.collab_context_id)[0]
+        assert again.collet_id == created.collet_id
+        assert len(store.list_bindings(current_axes(), created.collet_id)) == 1
+        rebound = store.list_bindings(current_axes(), created.collet_id)[0]
         assert rebound.transition_reason == "top-level projection"
 
     def test_create_projects_open_group_method_names(self):
@@ -414,7 +464,7 @@ class TestTopLevelProjection:
             ),
             make_actor(),
         )
-        binding = store.list_bindings(current_axes(), created.collab_context_id)[0]
+        binding = store.list_bindings(current_axes(), created.collet_id)[0]
         # 复合 wire 值投影为核心方法元组(spec §3.1),不能自由组合。
         assert binding.method_names == ("Open", "Group")
         assert binding.profile_versions == {"Open": "0.2", "Group": "0.2"}

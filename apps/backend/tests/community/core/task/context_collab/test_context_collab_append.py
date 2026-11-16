@@ -62,7 +62,7 @@ from agentclaw.community.core.task.context_collab.service_api import (
     EventAcceptedResult,
     EventAppendCommand,
 )
-from agentclaw.community.core.task.context_collab.services.context_collab_service import (
+from agentclaw.community.core.task.context_collab.l4_context_primitives.context_collab_service import (
     ContextCollabService,
 )
 from tests.community.core.task.context_collab.product_catalog import PRODUCT_CATALOG
@@ -279,7 +279,7 @@ class TestAppendEventHappyPath:
     def test_user_interaction_message_accepted(self):
         """spec §6.3 指定执行请求示例:无规则事件不动 status,版本 +1。"""
         repo, service, created = _make_service()
-        initial_event_id = created.current_event["event_id"]
+        initial_event_id = created.current_event_id
         command = make_append_command(
             "user_interaction.posted",
             expected_version=1,
@@ -291,11 +291,11 @@ class TestAppendEventHappyPath:
             visibility="workspace",
         )
 
-        result = service.append_event(created.collab_context_id, command, make_actor())
+        result = service.append_event(created.collet_id, command, make_actor())
 
         assert isinstance(result, EventAcceptedResult)
         assert result.accepted is True
-        assert result.collab_context_id == created.collab_context_id
+        assert result.collab_context_id == created.collet_id
         assert result.event_id.startswith("evt_")
         assert result.parent_event == initial_event_id
         assert result.event_kind == "user_interaction.posted"
@@ -306,7 +306,7 @@ class TestAppendEventHappyPath:
         # 服务传给仓储的请求语义(parent 透传,snapshot_updater 是纯函数)。
         request = repo.append_calls[0][1]
         assert isinstance(request, AppendEventRecordRequest)
-        assert repo.append_calls[0][0] == created.collab_context_id
+        assert repo.append_calls[0][0] == created.collet_id
         assert request.expected_version == 1
         assert request.event_kind == "user_interaction.posted"
         assert request.parent_event == initial_event_id
@@ -314,11 +314,11 @@ class TestAppendEventHappyPath:
         assert request.task_update is None
 
         # 仓储真的执行了 snapshot_updater 并 CAS 推进版本。
-        collet = repo.collets[created.collab_context_id]
+        collet = repo.collets[created.collet_id]
         assert collet.version == 2
-        assert repo.tasks[created.collab_context_id].status == "created"
+        assert repo.tasks[created.collet_id].status == "created"
         assert collet.current_event_id == result.event_id
-        assert len(repo.events[created.collab_context_id]) == 2
+        assert len(repo.events[created.collet_id]) == 2
 
 
 class TestStateMachineTransitions:
@@ -332,7 +332,7 @@ class TestStateMachineTransitions:
             payload={},
             visibility="public",
         )
-        result = service.append_event(created.collab_context_id, command, make_actor())
+        result = service.append_event(created.collet_id, command, make_actor())
         assert result.accepted is True
         assert result.event_kind == "task.started"
         assert result.context_version == 2
@@ -349,14 +349,14 @@ class TestStateMachineTransitions:
             actor_ref=bot_actor.actor,
             visibility="public",
         )
-        result = service.append_event(created.collab_context_id, command, bot_actor)
+        result = service.append_event(created.collet_id, command, bot_actor)
         assert result.accepted is True
         assert result.context_version == 2
         assert result.current_status == "in_progress"
 
     def test_task_submitted_without_artifacts_rejected(self):
         repo, service, created = _make_service()
-        cid = created.collab_context_id
+        cid = created.collet_id
         service.append_event(
             cid,
             make_append_command(
@@ -384,7 +384,7 @@ class TestStateMachineTransitions:
 
     def test_task_accepted_by_non_principal_rejected(self):
         repo, service, created = _make_service()
-        cid = created.collab_context_id
+        cid = created.collet_id
         principal = make_actor()
         service.append_event(
             cid,
@@ -427,7 +427,7 @@ class TestStateMachineTransitions:
 
     def test_task_lifecycle_reaches_done(self):
         repo, service, created = _make_service()
-        cid = created.collab_context_id
+        cid = created.collet_id
         principal = make_actor()
 
         started = service.append_event(
@@ -471,7 +471,7 @@ class TestStateMachineTransitions:
     def test_task_cancelled_from_created_by_principal(self):
         repo, service, created = _make_service()
         result = service.append_event(
-            created.collab_context_id,
+            created.collet_id,
             make_append_command(
                 "task.cancelled",
                 primitive_type="Task",
@@ -492,7 +492,7 @@ class TestStateMachineTransitions:
             method_kind="Open + Group",
         )
         result = service.append_event(
-            created.collab_context_id,
+            created.collet_id,
             make_append_command(
                 "task.started",
                 primitive_type="Task",
@@ -509,7 +509,7 @@ class TestStateMachineTransitions:
         """registered 机器 + 已注册事件但当前状态无出边 → status 不动。"""
         repo, service, created = _make_service()
         result = service.append_event(
-            created.collab_context_id,
+            created.collet_id,
             make_append_command(
                 "task.submitted",
                 primitive_type="Task",
@@ -531,7 +531,7 @@ class TestAppendEventRejections:
             "artifact.delivered", primitive_type="Activity", payload={}
         )
         with pytest.raises(ContextCollabValidationError, match="unregistered"):
-            service.append_event(created.collab_context_id, command, make_actor())
+            service.append_event(created.collet_id, command, make_actor())
         assert repo.append_calls == []
 
     def test_message_payload_with_content_ref_rejected(self):
@@ -541,14 +541,14 @@ class TestAppendEventRejections:
             payload={"content_ref": "space://res/xxx"},
         )
         with pytest.raises(ContextCollabValidationError, match="content_ref"):
-            service.append_event(created.collab_context_id, command, make_actor())
+            service.append_event(created.collet_id, command, make_actor())
         assert repo.append_calls == []
 
     def test_visibility_out_of_vocabulary_rejected(self):
         repo, service, created = _make_service()
         command = make_append_command("user_interaction.posted", visibility="team")
         with pytest.raises(ContextCollabValidationError, match="visibility"):
-            service.append_event(created.collab_context_id, command, make_actor())
+            service.append_event(created.collet_id, command, make_actor())
         assert repo.append_calls == []
 
     def test_outsider_actor_rejected_by_g1(self):
@@ -556,7 +556,7 @@ class TestAppendEventRejections:
         outsider = make_actor("human", "u_9999")
         command = make_append_command("task.started", actor_ref=outsider.actor)
         with pytest.raises(ContextCollabValidationError, match="only the principal"):
-            service.append_event(created.collab_context_id, command, outsider)
+            service.append_event(created.collet_id, command, outsider)
         assert repo.append_calls == []
 
     def test_unknown_collab_context_not_found(self):
@@ -580,10 +580,10 @@ class TestRepositorySemanticsPropagation:
             visibility="public",
         )
         with pytest.raises(ContextCollabVersionConflict):
-            service.append_event(created.collab_context_id, command, make_actor())
-        collet = repo.collets[created.collab_context_id]
+            service.append_event(created.collet_id, command, make_actor())
+        collet = repo.collets[created.collet_id]
         assert collet.version == 1
-        assert len(repo.events[created.collab_context_id]) == 1
+        assert len(repo.events[created.collet_id]) == 1
 
     def test_missing_parent_event_rejected(self):
         repo, service, created = _make_service()
@@ -591,8 +591,8 @@ class TestRepositorySemanticsPropagation:
             "user_interaction.posted", parent_event="evt_missing"
         )
         with pytest.raises(ContextCollabParentEventError):
-            service.append_event(created.collab_context_id, command, make_actor())
-        assert repo.collets[created.collab_context_id].version == 1
+            service.append_event(created.collet_id, command, make_actor())
+        assert repo.collets[created.collet_id].version == 1
 
 
 class TestAppendReduplication:
@@ -600,7 +600,7 @@ class TestAppendReduplication:
         """追加不设幂等键(spec 作者裁决):逐字重发被 ``expected_version``
         乐观并发拒绝(409,不落第二行);要追加新事件须带新版本号。"""
         repo, service, created = _make_service()
-        cid = created.collab_context_id
+        cid = created.collet_id
         command = make_append_command(
             "task.started",
             primitive_type="Task",

@@ -36,7 +36,7 @@ from agentclaw.community.core.task.context_collab.persistence.method_store impor
 from agentclaw.community.core.task.context_collab.persistence.repository import (
     ContextCollabRepository,
 )
-from agentclaw.community.core.task.context_collab.services.context_collab_service import (
+from agentclaw.community.core.task.context_collab.l4_context_primitives.context_collab_service import (
     ContextCollabService,
 )
 from agentclaw.community.api.task.context_collab_service import (
@@ -47,8 +47,11 @@ from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabValidationError,
     ContextCollabVersionConflict,
 )
+from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
+    Collet,
+    ColletState,
+)
 from agentclaw.community.core.task.context_collab.service_api import (
-    ContextCollabCreatedResult,
     ContextCollabStatusProjection,
     EventAcceptedResult,
     TaskProgressProjectionDTO,
@@ -97,9 +100,9 @@ class RecordingContextCollabService:
         self._inner = inner
         self.calls = []
 
-    def create_context(self, command, context):
-        self.calls.append("create_context")
-        return self._inner.create_context(command, context)
+    def create_collet(self, command, context):
+        self.calls.append("create_collet")
+        return self._inner.create_collet(command, context)
 
     def append_event(self, collab_context_id, command, context):
         self.calls.append("append_event")
@@ -233,6 +236,28 @@ def test_create_happy_path_envelope_and_snapshot(client_world):
     assert current_event["parent_event"] is None
     assert current_event["event_kind"] == "task.created"
     assert current_event["primitive_type"] == "Task"
+    assert client_world.service.calls == ["create_collet"]
+
+
+def test_create_without_executor_keeps_canonical_method_receipt(client_world):
+    created = create_context(client_world, {
+        "product_kind": "public_discussion",
+        "workflow_kind": "forum_public_discussion",
+        "method_kind": "Open + Group",
+        "executor_ref": None,
+    })
+    snapshot = created["current_snapshot"]
+    assert snapshot["method_kind"] == "Open + Group"
+    assert snapshot["executor_ref"] is None
+    assert snapshot["status"] == "created"
+    assert snapshot["progress"] == {
+        "percent": 0,
+        "completed_count": 0,
+        "active_count": 0,
+        "blocked_count": 0,
+        "current_event_id": created["current_event"]["event_id"],
+    }
+    assert client_world.service.calls == ["create_collet"]
 
 
 def test_create_route_path_is_singular_task(client_world):
@@ -476,34 +501,31 @@ _CASE_SNAPSHOT = {
 
 
 def _seed_create_happy(world) -> None:
-    def create_context(self, _command, _context):
-        return ContextCollabCreatedResult(
-            collab_context_id="collet_case_001",
-            context_version=1,
-            current_snapshot=dict(_CASE_SNAPSHOT),
-            current_event={
-                "event_id": "evt_case_001",
-                "parent_event": None,
-                "event_kind": "task.created",
-                "primitive_type": "Task",
-            },
+    def create_collet(self, _command, _context):
+        return Collet(
+            collet_id="collet_case_001",
+            initiator_ref=_command.principal_ref,
+            state=ColletState.ACTIVE,
+            scope=_command.space,
+            current_event_id="evt_case_001",
+            version=1,
         )
 
     bind_overrides(
         world,
         ContextCollabServiceProtocol,
-        {"create_context": create_context},
+        {"create_collet": create_collet},
     )
 
 
 def _seed_create_error(world) -> None:
-    def create_context(self, _command, _context):
+    def create_collet(self, _command, _context):
         raise ContextCollabValidationError("case: invalid create body")
 
     bind_overrides(
         world,
         ContextCollabServiceProtocol,
-        {"create_context": create_context},
+        {"create_collet": create_collet},
     )
 
 

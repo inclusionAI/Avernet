@@ -15,9 +15,13 @@ It implements bounded local contracts, not full ACCS conformance.
 - **Consumes:** injected `DatabasePlugin`, product catalog, MethodStore,
   authorization and delivery ports. DI chooses concrete implementations;
   HTTP adapters translate requests but do not own Task transitions.
-- **Dependencies:** L4 uses L2/L3 references and domain errors, not L5/L6
-  composition types or read projections. L6 composes lower-layer contracts;
-  concrete business templates stay in `products/`. G1–G4 cross-cut these layers.
+- **Dependencies:** L4 primitive models and narrow write operations use L2/L3
+  references and domain errors, not L5/L6 composition types or read projections.
+  The northbound `l4_context_primitives/context_collab_service.py` orchestrates
+  these operations with G1–G4, L6 profile validation and L5 Method bootstrap;
+  its placement does not make composition metadata part of the Collet model.
+  L6 composes lower-layer contracts; concrete business templates stay in
+  `products/`. G1–G4 cross-cut these layers.
 
 ## Operation ownership
 
@@ -26,10 +30,12 @@ HTTP route or a shared `services/` folder. This is a local implementation layout
 for ACCS semantic boundaries, not an ACCS-mandated Python directory tree.
 
 ```text
-l4_context_primitives/operations/
-  contracts.py           # EventAppendCommand, storage ports and append intent
-  collet_lifecycle.py    # create/activate/suspend/resume/complete/archive
-  work.py                # G4 Task resolution, Task fence and atomic append
+l4_context_primitives/
+  context_collab_service.py  # northbound create/append/query orchestration
+  operations/
+    contracts.py           # EventAppendCommand, storage ports and append intent
+    collet_lifecycle.py     # create/activate/suspend/resume/complete/archive
+    work.py                # G4 Task resolution, Task fence and atomic append
 l5_methods/operations/
   contracts.py           # Method commands, results and public protocols
   initialization.py      # top-level Method/roster from resolved Method facts
@@ -38,14 +44,13 @@ l5_methods/operations/
   open/                  # opportunity query/application/admission operations
   swarm/                 # execution profile/plan/stage operations
 services/
-  context_collab_service.py  # generic cross-layer application entrypoints
   method_bootstrap.py       # L6 creation contract -> L5 initialization/recovery
 products/
   task_commission/           # concrete product profile and business orchestration
   bbs_public_discussion/
 ```
 
-- L4/L5 consume narrow `CollaborationReader`/`EventWriter` ports, not L6's
+- L4/L5 operations consume narrow `CollaborationReader`/`EventWriter` ports, not L6's
   ContextSpec or the richer application repository contract. Persistence exposes
   creation principal/executor identity facts for governance, preserving existing
   ID-only Method/Collet rules even for partial legacy rows. These are **creation
@@ -92,6 +97,28 @@ exercise L4/L5 with records that have no ContextSpec or product catalog, shared
 Work fences, partial legacy Messages and propagated write failures. The real
 DI/SQL/product journey remains the integration evidence. No new operation family
 is invented for layers that do not yet have a corresponding use case.
+
+## Creation return contract
+
+`ContextCollabServiceProtocol.create_collet(command, context) -> Collet` returns
+exactly the persisted L4 object after initial Task/Event creation and L5 binding
+initialization. The implementation lives in
+[`l4_context_primitives/context_collab_service.py`](l4_context_primitives/context_collab_service.py)
+and DI selects it there; the old `services/context_collab_service.py` is removed.
+Library callers use `collet.collet_id`, `collet.version` and
+`collet.current_event_id`, not the former creation-result wrapper. Task objective,
+executor, creation facts and pinned product metadata keep their existing owners;
+returning Collet does not copy them onto the aggregate root. Persistence still
+returns its internal `ContextCreatedRecord` for application/product orchestration.
+
+Both HTTP faces retain their existing `collab_context_id`, `context_version`,
+`current_snapshot` and `current_event` response fields. The delivery serializer
+builds this **creation receipt** from the returned Collet and accepted command,
+using the canonical Method spelling and the initial Task/Event contract. It does
+not re-read a potentially advanced context or attach HTTP projections to Collet.
+Later state and authorized progress remain the separate `get_status` query.
+Creation is not idempotent; repository and MethodStore write failures propagate.
+The existing SQL/MethodStore transaction gap is not removed by this return change.
 
 ## State ownership
 
@@ -202,7 +229,9 @@ not historic control events:
 
 Changing Task state/version, query counters or legacy mapping affects generic
 services, G4, Method termination, product services, stored rows and existing
-clients interpreting progress. Keep their tests and migration aligned. Source
+clients interpreting progress. The creation return contract also affects DI,
+library consumers, both HTTP adapters and their test doubles; update them
+together when changing it. Keep their tests and migration aligned. Source
 imports of ContextSpec or snapshots must use their new owners; HTTP product
 fields and the six-key creation payload remain unchanged. The in-memory
 MethodStore and SQL/MethodStore/delivery transaction gap remain existing limits;

@@ -51,7 +51,7 @@ from agentclaw.community.core.task.context_collab.service_api import (
     ColletCreateCommand,
     EventAppendCommand,
 )
-from agentclaw.community.core.task.context_collab.services.context_collab_service import (
+from agentclaw.community.core.task.context_collab.l4_context_primitives.context_collab_service import (
     ContextCollabService,
 )
 from tests.community.core.task.context_collab.product_catalog import PRODUCT_CATALOG
@@ -197,7 +197,7 @@ class TestSpecAcceptance:
         assert _count(engine, ContextCollabEventModel) == 1
         spec = json.loads(
             _collet_json(
-                engine, created.collab_context_id, ContextCollabColletModel.context_spec
+                engine, created.collet_id, ContextCollabColletModel.context_spec
             )
         )
         # context_spec 携带任务目标、方法与执行者(引用值,不复制注册表)。
@@ -206,11 +206,11 @@ class TestSpecAcceptance:
         assert spec["executor_ref"] == EXECUTOR.to_dict()
         assert spec["principal_ref"] == PRINCIPAL.to_dict()
         # current_snapshot 携带进度(§3.4.2 ProgressSnapshot 五字段)。
-        snapshot = _stored_snapshot(engine, created.collab_context_id)
+        snapshot = _stored_snapshot(engine, created.collet_id)
         assert snapshot["objective"] == OBJECTIVE
         assert snapshot["status"] == "created"
         assert snapshot["version"] == 1
-        assert snapshot["task_id"] != created.collab_context_id
+        assert snapshot["task_id"] != created.collet_id
         assert snapshot["reported_percent"] is None
 
     def test_2_create_rejects_missing_executor_and_missing_principal(
@@ -245,13 +245,13 @@ class TestSpecAcceptance:
 
         msg_event_id = _append_message(
             service,
-            created.collab_context_id,
-            expected_version=created.context_version,
-            parent_event=created.current_event["event_id"],
+            created.collet_id,
+            expected_version=created.version,
+            parent_event=created.current_event_id,
             content=content,
         )
 
-        payload = _event_payload(engine, created.collab_context_id, msg_event_id)
+        payload = _event_payload(engine, created.collet_id, msg_event_id)
         assert payload["content"] == content
         assert "content_ref" not in payload
         # top-level 仅 content 一键:正文内联直存,没有任何内容引用键。
@@ -263,18 +263,18 @@ class TestSpecAcceptance:
         """§12.2 #4:事件都带 parent_event 字段;trunk_events=true 只筛选
         主干列表,current_snapshot / current_event / 统计两视角一致。"""
         created = service.create_collet(make_create_command(), make_actor())
-        initial_event_id = created.current_event["event_id"]
+        initial_event_id = created.current_event_id
         main_event_id = _append_message(  # 主干延续:parent=当前链头(初始事件)。
             service,
-            created.collab_context_id,
-            expected_version=created.context_version,
+            created.collet_id,
+            expected_version=created.version,
             parent_event=initial_event_id,
             content="主干消息",
         )
         branch_event_id = _append_message(  # 分支:parent 挂更早的初始事件。
             service,
-            created.collab_context_id,
-            expected_version=created.context_version + 1,
+            created.collet_id,
+            expected_version=created.version + 1,
             parent_event=initial_event_id,
             content="分支补充",
         )
@@ -282,17 +282,17 @@ class TestSpecAcceptance:
         # 分支才会落在链外(trunk_events=true 被滤除)。
         _append_message(
             service,
-            created.collab_context_id,
-            expected_version=created.context_version + 2,
+            created.collet_id,
+            expected_version=created.version + 2,
             parent_event=main_event_id,
             content="回到主干",
         )
 
         full = service.get_status(
-            created.collab_context_id, trunk_events=False, context=make_actor()
+            created.collet_id, trunk_events=False, context=make_actor()
         )
         trunk = service.get_status(
-            created.collab_context_id, trunk_events=True, context=make_actor()
+            created.collet_id, trunk_events=True, context=make_actor()
         )
 
         # 每个事件条目都带 parent_event 键(初始事件为 None 但键存在)。
@@ -304,7 +304,7 @@ class TestSpecAcceptance:
             branch_parent = conn.scalar(
                 select(ContextCollabEventModel.parent_event).where(
                     ContextCollabEventModel.collab_context_id
-                    == created.collab_context_id,
+                    == created.collet_id,
                     ContextCollabEventModel.event_id == branch_event_id,
                 )
             )
@@ -327,13 +327,13 @@ class TestSpecAcceptance:
         created = service.create_collet(make_create_command(), make_actor())
         _append_message(
             service,
-            created.collab_context_id,
-            expected_version=created.context_version,
-            parent_event=created.current_event["event_id"],
+            created.collet_id,
+            expected_version=created.version,
+            parent_event=created.current_event_id,
             content="进度与结构一并钉住",
         )
         status = service.get_status(
-            created.collab_context_id, trunk_events=False, context=make_actor()
+            created.collet_id, trunk_events=False, context=make_actor()
         )
 
         # 顶层恰好五键:标识 + 版本 + 快照 + 当前事件 + 进度;无多余段。
@@ -363,9 +363,9 @@ class TestSpecAcceptance:
         created = service.create_collet(make_create_command(), make_actor())
         _append_message(
             service,
-            created.collab_context_id,
-            expected_version=created.context_version,
-            parent_event=created.current_event["event_id"],
+            created.collet_id,
+            expected_version=created.version,
+            parent_event=created.current_event_id,
             content="第二次查询前的固定消息",
         )
         with engine.connect() as conn:
@@ -375,15 +375,15 @@ class TestSpecAcceptance:
                     ContextCollabColletModel.current_snapshot,
                 ).where(
                     ContextCollabColletModel.collab_context_id
-                    == created.collab_context_id
+                    == created.collet_id
                 )
             ).one()
 
         first = service.get_status(
-            created.collab_context_id, trunk_events=False, context=make_actor()
+            created.collet_id, trunk_events=False, context=make_actor()
         )
         second = service.get_status(
-            created.collab_context_id, trunk_events=True, context=make_actor()
+            created.collet_id, trunk_events=True, context=make_actor()
         )
 
         # 两次查询(含 trunk 视角)不推进聚合版本。
@@ -397,7 +397,7 @@ class TestSpecAcceptance:
                     ContextCollabColletModel.current_snapshot,
                 ).where(
                     ContextCollabColletModel.collab_context_id
-                    == created.collab_context_id
+                    == created.collet_id
                 )
             ).one()
         assert version_after == version_before
@@ -405,4 +405,4 @@ class TestSpecAcceptance:
         # 两次查询投影一致且 equal 落库快照(实时投影不改写权威行)。
         assert second.current_snapshot == first.current_snapshot
         assert snapshot_raw_before is None
-        assert _stored_snapshot(engine, created.collab_context_id)["version"] == 1
+        assert _stored_snapshot(engine, created.collet_id)["version"] == 1

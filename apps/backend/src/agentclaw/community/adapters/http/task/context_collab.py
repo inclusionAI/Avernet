@@ -24,7 +24,7 @@ from agentclaw.community.adapters.http.task.schemas_context_collab import (
     ContextCollabStatusResponse,
     EventAcceptedResultDto,
     EventCreateRequest,
-    created_result_to_dto,
+    created_collet_to_dto,
     event_accepted_to_dto,
     status_to_dto,
 )
@@ -53,8 +53,9 @@ async def create_collet_collab(
     user: AuthenticatedUser = Depends(get_current_user),
     service: ContextCollabServiceProtocol = Injected(ContextCollabServiceProtocol),  # noqa: B008
 ) -> Envelope[ContextCollabCreatedResultDto]:
-    result = service.create_collet(body.to_domain(), _actor_context(user))
-    return envelope(created_result_to_dto(result), request)
+    command = body.to_domain()
+    collet = service.create_collet(command, _actor_context(user))
+    return envelope(created_collet_to_dto(collet, command), request)
 
 
 @router.post(

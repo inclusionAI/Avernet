@@ -63,7 +63,7 @@ from agentclaw.community.core.task.context_collab.service_api import (
     ColletCreateCommand,
     EventAppendCommand,
 )
-from agentclaw.community.core.task.context_collab.services.context_collab_service import (
+from agentclaw.community.core.task.context_collab.l4_context_primitives.context_collab_service import (
     ContextCollabService,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime import (
@@ -225,10 +225,10 @@ def test_both_entrypoints_use_same_executor_and_sequence_contract(db):
 def test_generic_message_is_nontransition_but_stale_control_is_conflict(db):
     _, _, service, _ = _services(db)
     created = service.create_collet(_command(), _actor())
-    started = _append(service, created.collab_context_id, 1)
+    started = _append(service, created.collet_id, 1)
     message = _append(
         service,
-        created.collab_context_id,
+        created.collet_id,
         started.context_version,
         "user_interaction.posted",
         primitive_type="Message",
@@ -236,7 +236,7 @@ def test_generic_message_is_nontransition_but_stale_control_is_conflict(db):
     )
     assert message.current_status == "in_progress"
     with pytest.raises(ContextCollabVersionConflict):
-        _append(service, created.collab_context_id, 1)
+        _append(service, created.collet_id, 1)
     assert _counts(db) == (1, 3)
 
 
@@ -253,7 +253,7 @@ def test_generic_control_cannot_bypass_product_shape(db, overrides):
     _, _, service, _ = _services(db)
     created = service.create_collet(_command(), _actor())
     with pytest.raises(ContextCollabValidationError):
-        _append(service, created.collab_context_id, 1, **overrides)
+        _append(service, created.collet_id, 1, **overrides)
     assert _counts(db) == (1, 1)
 
 
@@ -264,19 +264,19 @@ def test_pinned_l4_roles_use_typed_identity_not_just_same_id(db, impostor):
     _, _, service, _ = _services(db)
     created = service.create_collet(_command(), _actor())
     with pytest.raises(ContextCollabValidationError, match="only the principal"):
-        _append(service, created.collab_context_id, 1, actor=impostor)
+        _append(service, created.collet_id, 1, actor=impostor)
     assert _counts(db) == (1, 1)
 
 
 def test_pinned_instance_round_trip_and_heal_do_not_renegotiate(db, monkeypatch):
     repo, store, service, _ = _services(db)
     created = service.create_collet(_command(), _actor())
-    record = repo.get_current_status(created.collab_context_id)
+    record = repo.get_current_status(created.collet_id)
     instance = record.product_instance
     assert instance.profile_ref.version == instance.workflow_ref.version == 1
-    assert instance.creation_event_ref == created.current_event["event_id"]
+    assert instance.creation_event_ref == created.current_event_id
     binding = store.get_binding(
-        current_axes(), instance.method_binding_refs[0], created.collab_context_id
+        current_axes(), instance.method_binding_refs[0], created.collet_id
     )
     assert binding.role_binding_refs == instance.role_binding_refs
     assert binding.profile_versions == {
@@ -304,12 +304,12 @@ def test_pinned_instance_round_trip_and_heal_do_not_renegotiate(db, monkeypatch)
 
     monkeypatch.setattr(ProductCatalog, "capabilities", cannot_negotiate)
     restarted_repo = ContextCollabRepository(db, product_catalog=LEGACY_PRODUCT_CATALOG)
-    recovered = restarted_repo.get_current_status(created.collab_context_id)
+    recovered = restarted_repo.get_current_status(created.collet_id)
     assert recovered.product_instance == instance
     healed = ensure_top_level_binding(
         InMemoryMethodStore(),
         current_axes(),
-        created.collab_context_id,
+        created.collet_id,
         restarted_repo,
         _actor(),
         now="2026-11-13T00:00:00+00:00",
@@ -345,7 +345,7 @@ def test_corrupt_pinned_metadata_fails_closed(db, corruption):
             ]
         row.creation_facts = json.dumps(data)
     with pytest.raises(ContextCollabValidationError):
-        repo.get_current_status(created.collab_context_id)
+        repo.get_current_status(created.collet_id)
 
 
 def test_legacy_rows_remain_readable_without_fabricated_negotiation(db):
@@ -360,7 +360,7 @@ def test_legacy_rows_remain_readable_without_fabricated_negotiation(db):
         ):
             del data[key]
         row.creation_facts = json.dumps(data)
-    record = repo.get_current_status(created.collab_context_id)
+    record = repo.get_current_status(created.collet_id)
     assert record.product_instance is None
     assert record.creation_facts["product_profile_ref"] is None
     assert record.creation_facts == data
@@ -372,7 +372,7 @@ def test_unprofiled_generic_context_keeps_legacy_wire_contract(db):
     created = service.create_collet(
         _command(product_kind=None, workflow_kind=None), _actor()
     )
-    record = repo.get_current_status(created.collab_context_id)
+    record = repo.get_current_status(created.collet_id)
     assert record.product_instance is None
     assert record.creation_facts["product_profile_ref"] is None
     assert set(record.events[0].payload) == {
@@ -399,12 +399,12 @@ def test_bbs_generic_cannot_reply_to_task_skeleton(db):
     with pytest.raises(ContextCollabValidationError, match="not a Message"):
         _append(
             service,
-            created.collab_context_id,
+            created.collet_id,
             1,
             "user_interaction.posted",
             primitive_type="Message",
             payload={"content": "reply"},
-            parent_event=created.current_event["event_id"],
+            parent_event=created.current_event_id,
         )
     assert _counts(db) == (1, 1)
 
@@ -415,7 +415,7 @@ def test_message_cannot_smuggle_commission_progress_evidence(db):
     with pytest.raises(ContextCollabValidationError, match="only reportable"):
         _append(
             service,
-            created.collab_context_id,
+            created.collet_id,
             1,
             "user_interaction.posted",
             primitive_type="Message",
@@ -447,7 +447,7 @@ def test_product_work_uses_exact_machine_even_for_legacy_v1(db, monkeypatch, leg
             row.creation_facts = json.dumps(data)
     monkeypatch.setitem(state_machine.MACHINE_REGISTRY, "task_commission_goal", None)
     started = product.start_task(
-        TaskAdvanceCommand(created.collab_context_id), _actor(BOT)
+        TaskAdvanceCommand(created.collet_id), _actor(BOT)
     )
     assert started.status == "in_progress"
 
@@ -566,15 +566,15 @@ def test_legacy_commission_progress_requires_typed_executor(db):
         ):
             del data[key]
         row.creation_facts = json.dumps(data)
-    product.start_task(TaskAdvanceCommand(created.collab_context_id), _actor(BOT))
+    product.start_task(TaskAdvanceCommand(created.collet_id), _actor(BOT))
     for principal in (OWNER, PrincipalRef("human", BOT.principal_id)):
         with pytest.raises(ContextCollabValidationError, match="designated executor"):
             product.report_progress(
-                TaskAdvanceCommand(created.collab_context_id, percent=20),
+                TaskAdvanceCommand(created.collet_id, percent=20),
                 _actor(principal),
             )
     progressed = product.report_progress(
-        TaskAdvanceCommand(created.collab_context_id, percent=20),
+        TaskAdvanceCommand(created.collet_id, percent=20),
         _actor(BOT),
     )
     assert progressed.context_version == 3
