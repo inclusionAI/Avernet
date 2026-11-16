@@ -1,7 +1,36 @@
 use super::ContractResult;
 use bcs_dist_model::*;
-use bcs_service_api::port::repo::distributed::{common::*, ownership::*, result::*, session::*};
+use bcs_service_api::port::repo::distributed::{
+    common::*,
+    inbox::{AdmitOutcome, AdmitRequest, InboxProducerPort},
+    ownership::*,
+    result::*,
+    session::*,
+};
 use std::time::Duration;
+
+/// Fresh session fixture, with spec/task created by admission and no checkpoint.
+/// These readbacks validate persistence; they are not required runtime round trips.
+pub async fn session_spec_admission_contract_tests(
+    producer: &dyn InboxProducerPort,
+    store: &dyn SessionStorePort,
+    request: AdmitRequest,
+) -> ContractResult {
+    let expected = request.create_session.clone().expect("new-session fixture");
+    let sid = &request.input.sid;
+    assert_eq!(store.get_spec(sid).await?, None);
+    let receipt = match producer.admit(request.clone()).await? {
+        AdmitOutcome::Accepted(receipt) => receipt,
+        other => panic!("fresh admission was not accepted: {other:?}"),
+    };
+    assert_eq!(store.get_spec(sid).await?, Some(expected.clone()));
+    assert_eq!(
+        producer.admit(request.clone()).await?,
+        AdmitOutcome::Duplicate(receipt)
+    );
+    assert_eq!(store.get_spec(sid).await?, Some(expected));
+    Ok(())
+}
 
 /// Request is the next valid commit for an acquired, isolated session.
 pub async fn session_store_port_contract_tests(

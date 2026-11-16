@@ -32,6 +32,8 @@ mod ports;
 mod recovery_tests;
 #[path = "distributed_harness/services.rs"]
 mod service_tests;
+#[path = "distributed_harness/session_spec.rs"]
+mod session_spec_tests;
 #[path = "distributed_harness/state.rs"]
 mod state_tests;
 #[path = "distributed_harness/task_feed.rs"]

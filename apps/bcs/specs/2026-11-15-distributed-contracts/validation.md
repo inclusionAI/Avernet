@@ -158,3 +158,23 @@ cargo +1.94.1 test --locked --manifest-path apps/bcs/Cargo.toml \
   revision, native TBase conditional-write/sealing behavior, and independent
   recovery-metadata persistence still require provider/CI validation. Earlier
   coverage results above are not a coverage claim for this revision.
+
+## Session specification read boundary — 2026-11-16
+
+Moved `get_spec` from `InboxProducerPort` to `SessionStorePort`. Producer,
+Consumer and ShardFeed remain separate; admission still owns initial spec/task
+creation, durable input and recoverable activation. No production implementation
+or extra runtime read was introduced.
+
+Repeated the three-crate test command above with Rust 1.94.1:
+
+- **340 tests/doc-tests passed, 0 failed, 1 existing ignored example**, including
+  **34 distributed harness self-tests**. The new cases check spec visibility
+  after admission before any checkpoint, unchanged frozen spec on retry, and
+  storage-error propagation instead of treating failure as absence.
+- Port-purity and store-boundary checks passed from `apps/bcs`. Changed Rust
+  formatting, whitespace, source-file size and local Markdown links passed.
+  One pre-existing indentation difference in `inbox.rs` is unchanged.
+- These remain assertion-harness self-tests using scripted doubles. Actual
+  provider conformance, runtime behavior and full final-revision CI/coverage
+  remain unverified.

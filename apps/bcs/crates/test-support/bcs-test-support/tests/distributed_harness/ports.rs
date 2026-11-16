@@ -10,10 +10,6 @@ impl InboxProducerPort for Script {
     async fn append_stream(&self, request: AppendAgentEvent) -> Result<InboxPos, StoreError> {
         self.call("InboxProducerPort::append_stream", (request,))
     }
-
-    async fn get_spec(&self, sid: &Sid) -> Result<Option<SessionSpec>, StoreError> {
-        self.call("InboxProducerPort::get_spec", (sid,))
-    }
 }
 
 #[async_trait]
@@ -92,6 +88,10 @@ impl InboxSchedulingPort for Script {
 
 #[async_trait]
 impl SessionStorePort for Script {
+    async fn get_spec(&self, sid: &Sid) -> Result<Option<SessionSpec>, StoreError> {
+        self.call("SessionStorePort::get_spec", (sid,))
+    }
+
     async fn acquire(
         &self,
         sid: &Sid,

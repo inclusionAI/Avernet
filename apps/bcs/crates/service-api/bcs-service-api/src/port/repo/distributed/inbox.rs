@@ -34,7 +34,6 @@ pub trait InboxProducerPort: Send + Sync {
     /// Intermediate events only; retry keeps (did, holder epoch, seq) unchanged.
     /// Success also requires activation, even if no notification can be delivered.
     async fn append_stream(&self, request: AppendAgentEvent) -> Result<InboxPos, StoreError>;
-    async fn get_spec(&self, sid: &Sid) -> Result<Option<SessionSpec>, StoreError>;
 }
 
 /// Ephemeral acknowledgement identity; not serializable or a recovery cursor.

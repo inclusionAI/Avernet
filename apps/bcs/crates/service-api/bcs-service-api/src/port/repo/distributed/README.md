@@ -10,7 +10,7 @@ implemented by this change. The Rust declarations own the exact method shapes.
 | SessionInbox | `InboxProducerPort`, `InboxConsumerPort`, `ShardFeedPort`, `InboxSchedulingPort` | Durable admission, replayable per-session input, acknowledgements and recoverable activation |
 | TaskFeed | `TaskPublisherPort`, `TaskReaderPort` | Committed output, task snapshots, consistent restore and resumable subscriptions |
 | DispatchBoard | `DispatchControlPort`, `DispatchQueuePort`, `HeldDispatchPort`, `CommandFeedPort` | Worker intent, Connector ownership, remote progress and notification hints |
-| Checkpoint | `SessionStorePort` | Per-session owner seal, atomic business commit, unknown-result resolution and recovery metadata |
+| Session state | `SessionStorePort` | Frozen spec reads, per-session owner seal, atomic business commit, unknown-result resolution and recovery metadata |
 | Ownership | `ShardLeasePort`, `MembershipPort` | Shard assignment and instance liveness; Unknown is not Dead |
 | Results | `ResultStorePort`, `BlobStorePort` | Immutable final archive and immutable payload storage |
 
@@ -24,6 +24,19 @@ Worker/Connector admin facades are application contracts. Their future engines
 implement `DistRuntimeControlPort`; service engines must not import application
 contracts just to expose health/drain. Delivery adapters call the application
 facades, not repo or core methods directly.
+
+Inbox production and consumption remain separate ports. `ShardFeedPort` remains
+the stateful read handle returned by `InboxConsumerPort::open`, owning watch/
+unwatch/next and the lifetime of subscriptions and read positions. No combined
+`SessionInboxPort` or one-method specification-reader port is introduced.
+
+`SessionStorePort::get_spec(sid)` reads the frozen specification, including after
+admission but before any checkpoint exists. It does not acquire ownership or
+create/refresh state. Absence is None; storage failure is an error. Moving this
+read does not move creation: `AdmitRequest.create_session` and `create_task`
+remain part of `InboxProducerPort::admit` and its durable input/activation
+guarantee. The API move prescribes neither a new storage layout nor extra runtime
+database calls. The total remains 23 service/port traits.
 
 ## Admission, identity and queue replacement
 
