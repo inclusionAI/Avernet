@@ -1,0 +1,21 @@
+apps/backend/tests/community/api/test_dingtalk_iam_token.py
+  s_5c173f6b8a3b51::t_8de685e07f46a1 2,30,45-51,53-67,71-83,95
+apps/backend/src/agentclaw/community/core/caller_identity/README.md
+  s_5c173f6b8a3b51::t_cee87e2e69592e 186-195
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "87c52fb7630d60db01b9a0f0f02304381b3d0ded",
+  "prompts": {},
+  "sessions": {
+    "s_5c173f6b8a3b51": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ce92-ae83-7ee3-a7cd-2cd2e1135dca",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

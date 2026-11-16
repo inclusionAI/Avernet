@@ -1,0 +1,19 @@
+apps/backend/tests/community/endpoints/test_space_deletion_router.py
+  s_c9c22d6ab6d0c7::t_18e2c69d153466 1-157
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7751786abfa4a0edf2183ab70268e8d44a233f28",
+  "prompts": {},
+  "sessions": {
+    "s_c9c22d6ab6d0c7": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1de48-2ae0-7de2-a2a7-b07f71ae8ab0",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

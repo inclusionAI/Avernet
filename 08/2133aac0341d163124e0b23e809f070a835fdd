@@ -1,0 +1,41 @@
+apps/bcs/specs/2026-11-15-distributed-contracts/validation.md
+  s_a9c87caa3de52e::t_72f57ba636a77a 161-180
+apps/bcs/specs/2026-11-15-distributed-contracts/tasks.md
+  s_a9c87caa3de52e::t_33a4835a574db8 51
+apps/bcs/crates/service-api/bcs-service-api/src/port/repo/distributed/README.md
+  s_a9c87caa3de52e::t_dcb25c557cd028 13,28-39
+  s_a9c87caa3de52e::t_95dc98ef422d96 40
+apps/bcs/crates/service-api/bcs-service-api/src/port/repo/distributed/session.rs
+  s_a9c87caa3de52e::t_5f8fc4efe58db4 154-158
+apps/bcs/specs/2026-11-15-distributed-contracts/spec.md
+  s_a9c87caa3de52e::t_dcb25c557cd028 29-34
+apps/bcs/crates/service-api/bcs-service-api/CONTEXT.md
+  s_a9c87caa3de52e::t_dcb25c557cd028 17-21
+apps/bcs/crates/test-support/bcs-test-support/tests/distributed_harness.rs
+  s_a9c87caa3de52e::t_dcb25c557cd028 35-36
+apps/bcs/crates/test-support/bcs-test-support/src/contract/distributed/state.rs
+  s_a9c87caa3de52e::t_5f8fc4efe58db4 3-5,9,12-33
+  s_a9c87caa3de52e::t_33a4835a574db8 6-8
+  s_a9c87caa3de52e::t_3197853152ddab 34
+apps/bcs/crates/test-support/bcs-test-support/tests/distributed_harness/ports.rs
+  s_a9c87caa3de52e::t_5f8fc4efe58db4 91-94
+apps/bcs/crates/test-support/bcs-test-support/tests/distributed_harness/session_spec.rs
+  s_a9c87caa3de52e::t_dcb25c557cd028 1-6,32-35,38-57,60-66,70-71,74-76
+  s_a9c87caa3de52e::t_33a4835a574db8 7-31,36-37,58-59,67-69,72-73
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "082133aac0341d163124e0b23e809f070a835fdd",
+  "prompts": {},
+  "sessions": {
+    "s_a9c87caa3de52e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d0b4-74ad-7423-9152-b7e80c647ef8",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "yuange.zjy <yuange.zjy@antgroup.com>"
+    }
+  }
+}

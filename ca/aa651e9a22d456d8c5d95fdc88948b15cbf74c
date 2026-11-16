@@ -1,0 +1,40 @@
+apps/backend/src/agentclaw/community/adapters/http/task/commission_a2a_schemas.py
+  h_059e888e5e4e82 151
+apps/backend/src/agentclaw/community/adapters/http/task/translator_commission_open_a2a.py
+  h_059e888e5e4e82 50
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/README.md
+  h_059e888e5e4e82 55,65-68,77-79,87-88,90-92,99-108,120-121,144-145,171,193-195,239-240,252-253
+apps/backend/src/agentclaw/community/core/task/context_collab/products/task_commission/README.md
+  h_059e888e5e4e82 10,13-14,24-27,39,44,46,87,115-121,268,273-274,364-365,379,409,476-477,490-491
+apps/backend/src/agentclaw/community/core/task/context_collab/products/task_commission/profile.py
+  h_059e888e5e4e82 33-36,147,150-151,153-156
+apps/backend/src/agentclaw/community/core/task/context_collab/products/task_commission/service.py
+  h_059e888e5e4e82 4,248-250,288-290
+apps/backend/src/agentclaw/community/core/task/context_collab/products/task_commission/service_api.py
+  h_059e888e5e4e82 50-51,121-122,137,177-179
+apps/backend/src/agentclaw/community/di/modules/context_collab_products.py
+  h_059e888e5e4e82 10,13
+apps/backend/src/agentclaw/community/di/modules/task_commission_module.py
+  h_059e888e5e4e82 37-38
+apps/backend/src/agentclaw/community/di/modules/task_commission_self_application.py
+  h_059e888e5e4e82 82
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_end_to_end.py
+  h_059e888e5e4e82 77-79,96,369-370,380-382,385,548,724,750,752,785,787,801,803,857,859,872,874
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_l6.py
+  h_059e888e5e4e82 31-34,44,59-61,64,68,72,291-295,325
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_publish.py
+  h_059e888e5e4e82 213-214,217,224-225,270-276
+apps/backend/tests/community/core/task/context_collab/test_l6_runtime_contract.py
+  h_059e888e5e4e82 33-35,81,106,306,316,498-500,540
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "caaa651e9a22d456d8c5d95fdc88948b15cbf74c",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}
