@@ -14,6 +14,11 @@ from agentclaw.community.core.cron.errors import CronApiTimeoutError
 from agentclaw.community.core.cron.protocols import DeviceBindingStatus
 from agentclaw.community.log import get_logger
 
+from agentclaw.community.plugin_api.device_adapter_transport import (
+    DeviceAdapterEndpointNotFoundError,
+    DeviceAdapterHTTPStatusError,
+)
+
 logger = get_logger()
 
 
@@ -343,6 +348,18 @@ class CronRuntimeTargetMixin:
                 e,
             )
             return {"success": False, "reason": "cron_api_timeout", "error": str(e)}
+        except (DeviceAdapterHTTPStatusError, DeviceAdapterEndpointNotFoundError) as e:
+            # Downstream errors from BaaS / Engine adapter are expected during
+            # normal bot lifecycle operations (sandbox creation / destruction,
+            # bot deletion, etc.) and should not trigger ERROR-level CDO alerts.
+            logger.warning(
+                "[_fetch_runtime_target_crons] Adapter request failed for "
+                "bot=%s stage=%s: %s",
+                target.bot_id,
+                target.runtime_stage,
+                e,
+            )
+            return {"success": False, "reason": "cron_api_failed", "error": str(e)}
         except Exception as e:
             logger.error(
                 "[_fetch_runtime_target_crons] Adapter request failed for "
