@@ -6,6 +6,9 @@ import runpy
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
+
+from fastapi.testclient import TestClient
 
 from agentclaw.community.core.task.context_collab.l1_interoperate_deliver.delivery import (
     A2aDeliveryPort,
@@ -26,6 +29,7 @@ from agentclaw.community.core.task.context_collab.products.task_commission.servi
 from tests.community.factories.task_commission import (
     BOT_ID as BOT_ASSIGNEE,
 )
+from tests.community.factories.task_commission import commission_report_request
 
 
 def opportunities_query_request(bot: Any) -> dict:
@@ -114,6 +118,122 @@ def _simulate_ai_coding(
     assert test_result.read_text(encoding="utf-8") == "3 passed"
     assert all(path.exists() for path in (plan, code, test_result, pr))
     return artifacts
+
+
+class SimulatedWorkingBot:
+    """测试用 Bot runtime:执行中提供上报工具,成功返回后才自动提交成果。"""
+
+    def __init__(
+        self,
+        client: TestClient,
+        signed_principal: str,
+        profile_ref,
+        bot_id: str,
+        owner_id: str,
+    ):
+        self.bot_id, self.owner_id = bot_id, owner_id
+        self.profile_ref = profile_ref
+        self.client = client
+        self.headers = {"X-Avernet-Principal": signed_principal}
+
+    def request(self, request: dict, *, expected_status="SUCCEEDED") -> dict:
+        message = request["params"]["message"]
+        operation = message["parts"][0]["data"]
+        request["id"] = str(uuid4())
+        message["messageId"] = str(uuid4())
+        operation["operation_id"] = str(uuid4())
+        operation["context"]["request_id"] = str(uuid4())
+        operation["context"]["product_profile_ref"]["version"] = str(
+            self.profile_ref.version
+        )
+        response = self.client.post(
+            "/a2a/task-commission", json=request, headers=self.headers
+        )
+        assert response.status_code == 200, response.text
+        parts = response.json()["result"]["parts"]
+        assert parts[0]["data"]["status"] == expected_status, parts
+        return {
+            "result": parts[0]["data"],
+            "data": parts[1]["data"] if len(parts) > 1 else {},
+        }
+
+    def report_request(
+        self, created, action="start", revision=None, payload=None
+    ) -> dict:
+        request = commission_report_request(
+            created,
+            action,
+            created.context_version if revision is None else revision,
+            payload,
+        )
+        ctx = request["params"]["message"]["parts"][0]["data"]["context"]
+        ctx["caller"]["identity_id"] = self.bot_id
+        ctx["accountable_principal_ref"]["identity_id"] = self.owner_id
+        return request
+
+    def application_request(self, opportunity: dict) -> dict:
+        context_id = opportunity["collab_context_id"]
+        request = self.report_request(
+            TaskCommissionCreatedView(context_id, "", "", "", 0)
+        )
+        op = request["params"]["message"]["parts"][0]["data"]
+        op.update(
+            layer="L5",
+            operation_family="open",
+            action="apply",
+            mode="COMMAND",
+            expected_revision=None,
+            target_ref={
+                "object_type": "OpenOpportunity",
+                "object_id": opportunity["opportunity_id"],
+                "version": None,
+                "issuer": "avernet",
+            },
+            payload={},
+        )
+        op["context"]["method_binding_ref"]["object_id"] = opportunity[
+            "method_binding_ref"
+        ]
+        return request
+
+    def run(
+        self,
+        created: TaskCommissionCreatedView,
+        execute: Callable[[Callable[[int, str], None]], list[str]],
+        *,
+        initial_revision: int,
+    ) -> list[str]:
+        """执行已由 L4 Work 启动的任务;Bot 不拥有 start_task 方法。"""
+        revision = initial_revision
+
+        def send(action: str, payload: dict) -> None:
+            nonlocal revision
+            request = self.report_request(created, action, revision, payload)
+            _flow_log(
+                _TEST_DIRECTORY,
+                f"模拟 Bot → POST /a2a/task-commission: action={action}, "
+                f"task={created.collet_id}, expected_revision={revision}",
+            )
+            result = self.request(request)["result"]
+            revision = int(result["result_refs"][0]["version"])
+            _flow_log(
+                _TEST_DIRECTORY, f"模拟 Bot 收到 {action} 成功回执, revision={revision}"
+            )
+
+        def report_progress(percent: int, note: str) -> None:
+            send("progress", {"percent": percent, "note": note})
+
+        # start_task 已由调用方通过任务产品的 Work 动作入口完成。
+        # Bot 只上报实际执行过程,不能把自身的运行器当成 L4 Work API。
+        # 不是 finally:执行或进度上报失败时不能伪造成功并自动提交。
+        _flow_log(_TEST_DIRECTORY, "模拟 Bot 开始执行任务业务函数")
+        artifacts = execute(report_progress)
+        _flow_log(_TEST_DIRECTORY, "模拟 Bot 业务函数成功返回产物,自动触发 submit")
+        send(
+            "submit",
+            {"note": "执行完成,提交方案、代码、测试结果与 PR", "artifacts": artifacts},
+        )
+        return artifacts
 
 
 def _participation_snapshot(service, injector, created):

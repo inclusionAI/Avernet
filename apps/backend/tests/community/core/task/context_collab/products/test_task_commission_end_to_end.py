@@ -11,7 +11,6 @@ L5 Open 查询和提交申请,再以发布人授权的策略身份直接调用 O
 """
 
 import secrets
-from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
@@ -49,6 +48,9 @@ from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_reso
 from agentclaw.community.core.task.context_collab.l4_context_primitives.operations import (
     work as work_operations_module,
 )
+from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.collet_lifecycle import (
+    ColletLifecycleService,
+)
 from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
     top_level_binding_id,
 )
@@ -63,16 +65,25 @@ from agentclaw.community.core.task.context_collab.l5_methods.operations.contract
     OpenOpportunityCommand,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime import (
+    _now,
     current_axes,
+)
+from agentclaw.community.core.task.context_collab.l6_products.binding import (
+    prepare_product_profile,
 )
 from agentclaw.community.core.task.context_collab.l6_products.catalog import (
     ProductCatalog,
+)
+from agentclaw.community.core.task.context_collab.l6_products.creation_facts import (
+    creation_payload,
 )
 from agentclaw.community.core.task.context_collab.persistence.method_store import (
     MethodStoreProtocol,
 )
 from agentclaw.community.core.task.context_collab.persistence.repository import (
     ContextCollabRepositoryProtocol,
+    CreateColletRecordRequest,
+    InitialEventDraft,
 )
 from agentclaw.community.core.task.context_collab.products.task_commission import (
     service as commission_service_module,
@@ -91,8 +102,10 @@ from agentclaw.community.core.task.context_collab.products.task_commission.servi
 )
 from agentclaw.community.core.task.context_collab.service_api import (
     ContextCollabServiceProtocol,
-    ColletCreateCommand,
     EventAppendCommand,
+)
+from agentclaw.community.core.task.context_collab.services.method_bootstrap import (
+    project_created_context,
 )
 from agentclaw.community.di.modules.context_collab_products import (
     INSTALLED_PRODUCT_PROFILES,
@@ -110,6 +123,7 @@ from tests.community.factories.task_commission import (
 )
 from tests.community.core.task.context_collab.products.task_commission_e2e_support import (
     _AI_CODING_STEPS,
+    SimulatedWorkingBot,
     _participation_snapshot,
     _simulate_ai_coding,
     opportunities_query_request,
@@ -358,122 +372,6 @@ def commission_runtime(commission_deployment, request):
         yield service, bot
 
 
-class SimulatedWorkingBot:
-    """测试用 Bot runtime:执行中提供上报工具,成功返回后才自动提交成果。"""
-
-    def __init__(
-        self,
-        client: TestClient,
-        signed_principal: str,
-        profile_ref,
-        bot_id: str,
-        owner_id: str,
-    ):
-        self.bot_id, self.owner_id = bot_id, owner_id
-        self.profile_ref = profile_ref
-        self.client = client
-        self.headers = {"X-Avernet-Principal": signed_principal}
-
-    def request(self, request: dict, *, expected_status="SUCCEEDED") -> dict:
-        message = request["params"]["message"]
-        operation = message["parts"][0]["data"]
-        request["id"] = str(uuid4())
-        message["messageId"] = str(uuid4())
-        operation["operation_id"] = str(uuid4())
-        operation["context"]["request_id"] = str(uuid4())
-        operation["context"]["product_profile_ref"]["version"] = str(
-            self.profile_ref.version
-        )
-        response = self.client.post(
-            "/a2a/task-commission", json=request, headers=self.headers
-        )
-        assert response.status_code == 200, response.text
-        parts = response.json()["result"]["parts"]
-        assert parts[0]["data"]["status"] == expected_status, parts
-        return {
-            "result": parts[0]["data"],
-            "data": parts[1]["data"] if len(parts) > 1 else {},
-        }
-
-    def report_request(
-        self, created, action="start", revision=None, payload=None
-    ) -> dict:
-        request = commission_report_request(
-            created,
-            action,
-            created.context_version if revision is None else revision,
-            payload,
-        )
-        ctx = request["params"]["message"]["parts"][0]["data"]["context"]
-        ctx["caller"]["identity_id"] = self.bot_id
-        ctx["accountable_principal_ref"]["identity_id"] = self.owner_id
-        return request
-
-    def application_request(self, opportunity: dict) -> dict:
-        context_id = opportunity["collab_context_id"]
-        request = self.report_request(
-            TaskCommissionCreatedView(context_id, "", "", "", 0)
-        )
-        op = request["params"]["message"]["parts"][0]["data"]
-        op.update(
-            layer="L5",
-            operation_family="open",
-            action="apply",
-            mode="COMMAND",
-            expected_revision=None,
-            target_ref={
-                "object_type": "OpenOpportunity",
-                "object_id": opportunity["opportunity_id"],
-                "version": None,
-                "issuer": "avernet",
-            },
-            payload={},
-        )
-        op["context"]["method_binding_ref"]["object_id"] = opportunity[
-            "method_binding_ref"
-        ]
-        return request
-
-    def run(
-        self,
-        created: TaskCommissionCreatedView,
-        execute: Callable[[Callable[[int, str], None]], list[str]],
-        *,
-        initial_revision: int,
-    ) -> list[str]:
-        """执行已由 L4 Work 启动的任务;Bot 不拥有 start_task 方法。"""
-        revision = initial_revision
-
-        def send(action: str, payload: dict) -> None:
-            nonlocal revision
-            request = self.report_request(created, action, revision, payload)
-            _flow_log(
-                _TEST_DIRECTORY,
-                f"模拟 Bot → POST /a2a/task-commission: action={action}, "
-                f"task={created.collet_id}, expected_revision={revision}",
-            )
-            result = self.request(request)["result"]
-            revision = int(result["result_refs"][0]["version"])
-            _flow_log(
-                _TEST_DIRECTORY, f"模拟 Bot 收到 {action} 成功回执, revision={revision}"
-            )
-
-        def report_progress(percent: int, note: str) -> None:
-            send("progress", {"percent": percent, "note": note})
-
-        # start_task 已由调用方通过任务产品的 Work 动作入口完成。
-        # Bot 只上报实际执行过程,不能把自身的运行器当成 L4 Work API。
-        # 不是 finally:执行或进度上报失败时不能伪造成功并自动提交。
-        _flow_log(_TEST_DIRECTORY, "模拟 Bot 开始执行任务业务函数")
-        artifacts = execute(report_progress)
-        _flow_log(_TEST_DIRECTORY, "模拟 Bot 业务函数成功返回产物,自动触发 submit")
-        send(
-            "submit",
-            {"note": "执行完成,提交方案、代码、测试结果与 PR", "artifacts": artifacts},
-        )
-        return artifacts
-
-
 def test_end_to_end_commission_flow(commission_deployment, tmp_path):
     """产品上线 → 建任务 → Bot Query/Apply → 策略 Screen/Admit → scoped Participant → Work → accept。"""
     # 1. 产品同学新建 v2 Profile 并上线。
@@ -484,57 +382,101 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
 
     with commission_deployment(profile) as (service, working_bot, injector):
         assert injector.get(ProductCatalog).get("task_commission", 2) == profile
-        # 2. 业务同学通过 L4 Context.create 创建 Collet/Task 和正文 Message。
-        #    L6 负责精确选择已上线 Profile,L5 负责在创建后建立 Open binding;
-        #    机会由下面显式调用 L5 Open.publish_opportunity 发布。
+        # 2. 业务同学通过 L4 Context.create 创建 Collet/Task,
+        #    再显式调用 L4 Collet.activate;L6 负责精确选择已上线 Profile,
+        #    L5 负责在创建后建立 Open binding。机会由下面显式调用
+        #    L5 Open.publish_opportunity 发布。
         _flow_log(_TEST_DIRECTORY, "2. 业务同学创建代办任务,指定执行 Bot")
-        collab_service = injector.get(ContextCollabServiceProtocol)
-        created_context = collab_service.create_collet(
-            ColletCreateCommand(
+        repository = injector.get(ContextCollabRepositoryProtocol)
+        method_store = injector.get(MethodStoreProtocol)
+        catalog = injector.get(ProductCatalog)
+        executor_ref = AgentRef(agent_type="bot", agent_id=BOT_ASSIGNEE)
+        selected_profile = prepare_product_profile(
+            product_kind=profile.ref.profile_id,
+            workflow_kind=profile.workflow.ref.profile_id,
+            method_kind=profile.composition.method_kind,
+            profile_ref=profile.ref,
+            principal_ref=HUMAN.actor,
+            executor_ref=executor_ref,
+            catalog=catalog,
+        )
+        assert selected_profile == profile
+        injector.get(ContextCollabAuthorizerProtocol).check_create(
+            method_kind=profile.composition.method_kind,
+            executor_ref=executor_ref,
+            actor=HUMAN,
+        )
+        creation_facts = creation_payload(
+            method_kind=profile.composition.method_kind,
+            executor_ref=executor_ref,
+            objective=TITLE,
+            resource_refs=(),
+            product_kind=profile.ref.profile_id,
+            workflow_kind=profile.workflow.ref.profile_id,
+            product_profile_ref=profile.ref,
+        )
+        _flow_log(_TEST_DIRECTORY, "2.1. L4 Context.create: 直接持久化 Collet/Task/初始事件")
+        created_record = repository.create_collet(
+            CreateColletRecordRequest(
                 space=SPACE,
                 principal_ref=HUMAN.actor,
+                method_kind=profile.composition.method_kind,
+                executor_ref=executor_ref,
+                objective=TITLE,
+                resource_refs=(),
                 product_kind=profile.ref.profile_id,
                 workflow_kind=profile.workflow.ref.profile_id,
-                method_kind=profile.composition.method_kind,
-                executor_ref=AgentRef(agent_type="bot", agent_id=BOT_ASSIGNEE),
-                objective=TITLE,
-                resource_refs=[],
                 product_profile_ref=profile.ref,
-            ),
-            HUMAN,
+                initial_event=InitialEventDraft(
+                    event_kind="task.created",
+                    primitive_type="Task",
+                    actor_ref=HUMAN.actor,
+                    payload=creation_facts,
+                ),
+                creation_facts=creation_facts,
+            )
         )
-        appended = collab_service.append_event(
-            created_context.collab_context_id,
-            EventAppendCommand(
-                expected_version=created_context.context_version,
-                event_kind="user_interaction.posted",
-                primitive_type="Message",
-                actor_ref=HUMAN.actor,
-                parent_event=None,
-                visibility="public",
-                payload={"content": BODY},
-            ),
-            HUMAN,
+        binding = project_created_context(
+            method_store,
+            current_axes(),
+            created_record.collet.collet_id,
+            method_kind=profile.composition.method_kind,
+            principal_ref=HUMAN.actor,
+            executor_ref=executor_ref,
+            profile=selected_profile,
+            context=HUMAN,
+            now=_now(),
         )
+        assert binding.method_kind == profile.composition.method_kind
+        lifecycle = injector.get(ColletLifecycleService)
+        lifecycle_created = lifecycle.create(
+            created_record.collet.collet_id,
+            HUMAN,
+            reason="L4 Collet 已创建",
+        )
+        assert lifecycle_created.state.value == "CREATED"
         created = TaskCommissionCreatedView(
-            collet_id=created_context.collab_context_id,
+            collet_id=created_record.collet.collet_id,
             title=TITLE,
-            body_event_id=appended.event_id,
+            body_event_id="",
             status="created",
-            context_version=appended.context_version,
+            context_version=created_record.collet.version,
         )
         task_id = created.collet_id
         assert created.status == "created"
-        assert service.detail_task(task_id).body.content == BODY
+        assert service.detail_task(task_id).body is None
         [summary] = service.list_tasks()
         assert (summary.collet_id, summary.title, summary.initiator_id) == (
             task_id,
             TITLE,
             HUMAN.actor.principal_id,
         )
-
-
-
+        _flow_log(_TEST_DIRECTORY, "2.2. L4 Context.activate: CREATED → ACTIVE")
+        activated = lifecycle.activate(
+            task_id, HUMAN, reason="任务已创建,进入可协作状态"
+        )
+        assert activated.old_state.value == "CREATED"
+        assert activated.new_state.value == "ACTIVE"
         store, axes = injector.get(MethodStoreProtocol), current_axes()
         binding_id = top_level_binding_id(task_id)
         assert injector.get(A2aDeliveryPort).bridge_records() == ()
@@ -547,6 +489,8 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
         assert store.list_members(axes, binding_id, task_id) == []
         assert store.list_participant_bindings(axes, binding_id, task_id) == []
         open_method = injector.get(OpenMethodOpsServiceProtocol)
+
+        # 2. 调用L5的OPEN方法创建机会
         _flow_log(_TEST_DIRECTORY, "2.1. 业务同学调用 L5 Open.publish_opportunity 发布机会")
         published = open_method.publish_opportunity(
             collab_context_id=task_id,
@@ -732,17 +676,35 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
         assert review.status == "reviewing"
         assert review.events[-1]["payload"]["artifacts"] == artifacts
 
+        # 协作上下文在等待用户验收期间进入 L4 SUSPENDED;这与 Task 的
+        # reviewing 状态独立,不会把 Collet 生命周期误当成 L4 Work 状态。
+        _flow_log(_TEST_DIRECTORY, "5.1. L4 Context.suspend: ACTIVE → SUSPENDED")
+        suspended = lifecycle.suspend(
+            task_id, HUMAN, reason="执行结果已提交,等待用户验收"
+        )
+        assert suspended.old_state.value == "ACTIVE"
+        assert suspended.new_state.value == "SUSPENDED"
+
         # 6. 用户查看成果并明确 accept,而不是以 Bot 完工代替验收。
         _flow_log(_TEST_DIRECTORY, "6. 用户检查方案、代码、测试、PR 提案,确认 accept")
         accepted = service.accept_task(
             TaskAdvanceCommand(task_id, note="成果符合要求,验收通过"), HUMAN
         )
         assert accepted.status == "done"
+        _flow_log(_TEST_DIRECTORY, "6.1. L4 Context.complete: SUSPENDED → COMPLETED")
+        completed = lifecycle.complete(
+            task_id, HUMAN, reason="用户已确认代办结果"
+        )
+        assert completed.old_state.value == "SUSPENDED"
+        assert completed.new_state.value == "COMPLETED"
+        _flow_log(_TEST_DIRECTORY, "6.2. L4 Context.archive: COMPLETED → ARCHIVED")
+        archived = lifecycle.archive(task_id, HUMAN, reason="任务归档")
+        assert archived.old_state.value == "COMPLETED"
+        assert archived.new_state.value == "ARCHIVED"
         final = service.detail_task(task_id)
         assert final.status == "done"
         assert [event["event_kind"] for event in final.events] == [
             "task.created",
-            "user_interaction.posted",
             "task.started",
             *["task.progress.updated"] * len(_AI_CODING_STEPS),
             "task.submitted",
