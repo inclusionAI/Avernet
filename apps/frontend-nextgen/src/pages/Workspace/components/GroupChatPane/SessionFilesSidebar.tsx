@@ -8,7 +8,7 @@ export type SessionFilesSidebarProps = SessionFilesPanelProps & {
 };
 
 /**
- * 资源管理内联副屏（群聊侧接线用）：ResizableWorkspaceSidebar + SessionFilesPanel
+ * 会话文件内联副屏（群聊侧接线用）：ResizableWorkspaceSidebar + SessionFilesPanel
  * 的固定组合，与单聊侧 BotSessionFileOverlays 的容器同构（对话区内联展开/收起、
  * 无蒙层抽屉；320-600px 可拖宽，默认 380，宽度持久化）。
  * SessionFilesPanel 保持「挂载 == 打开」的列表刷新语义，仅展开态渲染。
@@ -16,7 +16,7 @@ export type SessionFilesSidebarProps = SessionFilesPanelProps & {
 export function SessionFilesSidebar({ open = true, ...props }: SessionFilesSidebarProps) {
   return (
     <ResizableWorkspaceSidebar
-      ariaLabel="资源管理面板"
+      ariaLabel="会话文件面板"
       side="right"
       open={open}
       onDismiss={open ? props.onClose : undefined}

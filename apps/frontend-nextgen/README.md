@@ -63,6 +63,65 @@ Regression coverage lives in
 [`GroupMemberAvatar.test.tsx`](test/components/CollaborationSquare/GroupMemberAvatar.test.tsx)
 and [`GroupOwnerDisplay.test.tsx`](test/components/CollaborationSquare/GroupOwnerDisplay.test.tsx).
 
+## Collaborating Bot conversations
+
+In “对话 → 我协作的 Bot”, the origin filter supports both “我发起” and
+“他人发起”. Other-user conversations reuse the managed Bot friend-group flow:
+friend users load under the Bot's composite actor ID, and session/message reads
+retain the owner context, normalized friend ID, pagination and runtime stage.
+Other-user browsing is read-only; it does not enable session writes, a composer
+or a realtime chat connection. Backend authorization still applies.
+
+Managed and collaborating Bot other-user directories batch-query
+`POST /openapi/v1/collaboration/bots/query` with `human_<userId>` identities after
+relation pagination and deduplication. Nonblank Human `name` values replace
+numeric labels without changing user IDs or directory order. Missing names or
+lookup failures preserve existing relation names, falling back to the user ID.
+No employee-directory or legacy-frontend dependency is used.
+
+The other-user directory excludes the signed-in viewer by normalized Human ID,
+not by name or Bot ownership. Both fresh responses and reused directory caches
+apply this exclusion. A self-only friend result is an empty other-user list;
+stale expanded self groups do not trigger other-user session reads.
+
+Other-user group rows follow the compact sidebar density: 13px regular names,
+24px circular neutral user icons, 40px rows and 8px avatar/name spacing. Loading
+skeletons mirror the same geometry; hierarchical indentation and read-only
+session interactions are unchanged.
+
+Regression coverage lives in
+[`managedBotConversationService.test.ts`](test/services/workspace/managedBotConversationService.test.ts),
+[`teamBotSessionRequests.test.ts`](test/services/workspace/teamBotSessionRequests.test.ts),
+[`ConversationSidebarSessionFilters.test.tsx`](test/pages/Workspace/Chat/components/ConversationSidebarSessionFilters.test.tsx),
+[`ConversationFriendGroup.test.tsx`](test/pages/Workspace/Chat/components/ConversationFriendGroup.test.tsx),
+[`useManagedBotOthers.test.tsx`](test/pages/Workspace/Chat/hooks/useManagedBotOthers.test.tsx)
+and the managed/team read-only cases in
+[`ConversationPage.test.tsx`](test/pages/Workspace/Chat/ConversationPage.test.tsx).
+
+## Group session file preview
+
+The group file panel previews text files through a sandboxed iframe at the
+existing `show=true` content URL. A backend may redirect that URL to a
+presigned storage address, so reading it with browser JavaScript would require
+CORS on the final storage response. Direct browser navigation renders
+`text/markdown`, `text/plain`, and other inline text responses without a
+cross-origin body read. The iframe grants no scripts, same-origin permissions,
+popups, or downloads; users can still download from the panel toolbar. Server
+`Content-Type`, `Content-Disposition`, and framing policy determine whether a
+particular response renders inline. Group Markdown displays as raw browser
+text and JSON is not reformatted; no client-side size limit is applied.
+
+The shared [file preview classifier](src/services/workspace/filePreview.ts)
+recognizes common documentation, configuration, source-code, log, structured
+text, and conventional extensionless files by name or explicit text MIME
+(including JSON/XML suffixes). Preview recognition does not change the upload
+allowlist. The Bot preview still renders supplied text through the existing
+Markdown/plain-text UI; image, video, PDF and HTML paths are unchanged.
+Regression tests cover
+[format classification](test/services/workspace/sessionFilePreviewKind.test.ts),
+[group URL state](test/pages/Workspace/hooks/useSessionFilePreview.test.tsx), and
+[shared preview rendering](test/pages/Workspace/components/GroupChatPane/SessionFilesPreviewPane.test.tsx).
+
 ## Source synchronization
 
 `OPEN_CORE_MANIFEST.json` records the TeamClaw source commit. Changes originating in this public directory must be taken back into the TeamClaw Open Core baseline before the next export.

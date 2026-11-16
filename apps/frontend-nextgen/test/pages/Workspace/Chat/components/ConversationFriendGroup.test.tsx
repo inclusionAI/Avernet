@@ -2,6 +2,7 @@
 import type { ConversationFriendGroupView, ConversationSessionListState } from '@/domain/conversation/types';
 import type { ConversationFriendGroupProps } from '@/pages/Workspace/Chat/components/ConversationFriendGroup';
 import { ConversationFriendGroup } from '@/pages/Workspace/Chat/components/ConversationFriendGroup';
+import { ConversationFriendRowsSkeleton } from '@/pages/Workspace/Chat/components/ConversationSkeletons';
 import { describe, expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
@@ -124,5 +125,36 @@ describe('ConversationFriendGroup', () => {
     );
     expect(screen.getByRole('button', { name: '正在加载…' })).toBeDisabled();
     unmount();
+  });
+});
+
+describe('other-user row visual density', () => {
+  it.each([false, true])('matches compact list typography and avatar geometry (expanded=%s)', (expanded) => {
+    renderGroup(groupOf(), { expanded });
+    const button = screen.getByRole('button', { name: '风太' });
+    expect(button).toHaveClass('h-8', 'gap-2', 'font-normal');
+    expect(button.parentElement).toHaveClass('min-h-10', 'py-1');
+    expect(button.parentElement).not.toHaveClass('min-h-12');
+    expect(button.parentElement?.parentElement).toHaveClass('pl-6');
+    expect(screen.getByText('风太')).toHaveClass('text-[13px]', 'font-normal', 'leading-[18px]', 'text-content-strong');
+    const avatar = button.querySelector('span[aria-hidden="true"]');
+    expect(avatar).toHaveClass('h-6', 'w-6', 'rounded-full', 'bg-muted', 'text-muted-foreground');
+    expect(avatar).not.toHaveClass('ring-1');
+    expect(avatar?.querySelector('svg')).toHaveClass('h-3.5', 'w-3.5');
+    expect(button).not.toHaveTextContent('👤');
+  });
+
+  it('matches directory skeleton rows to the loaded row height, avatar and spacing', () => {
+    const { container } = render(<ConversationFriendRowsSkeleton rows={3} />);
+    const directory = container.firstElementChild;
+    expect(directory).toHaveClass('pl-6');
+    expect(directory).not.toHaveClass('gap-1', 'py-1');
+    const rows = Array.from(directory?.children ?? []);
+    expect(rows).toHaveLength(3);
+    for (const row of rows) {
+      expect(row).toHaveClass('min-h-10', 'gap-2', 'py-1');
+      expect(row.firstElementChild).toHaveClass('h-6', 'w-6', 'rounded-full');
+      expect(row.lastElementChild).toHaveClass('h-3');
+    }
   });
 });

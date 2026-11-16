@@ -237,7 +237,8 @@ describe('managedBotConversationService.listOtherSessions with session key', () 
     });
   });
 
-  it('still rejects team Bots before any session query when a key is supplied', async () => {
+  it('supports team Bot session-key searches with the existing owner and friend context', async () => {
+    mocked.listBotSessions.mockResolvedValue(sessionsEnvelope([sessionItem]));
     const result = await managedBotConversationService.listOtherSessions(
       { ...managedBot, isTeamBot: true },
       '447147',
@@ -246,7 +247,14 @@ describe('managedBotConversationService.listOtherSessions with session key', () 
       'agent:main:o',
     );
 
-    expect(mocked.listBotSessions).not.toHaveBeenCalled();
-    expect(result.ok).toBe(false);
+    expect(mocked.listBotSessions).toHaveBeenCalledWith('bot-a', {
+      user_id: '2088',
+      owner_id: '2088',
+      f_user_id: '447147',
+      page: 1,
+      page_size: 10,
+      session_key: 'agent:main:o',
+    });
+    expect(result.ok).toBe(true);
   });
 });

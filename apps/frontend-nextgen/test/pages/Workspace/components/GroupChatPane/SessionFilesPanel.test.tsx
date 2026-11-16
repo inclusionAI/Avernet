@@ -32,7 +32,7 @@ const participants: ParticipantView[] = [
   { actorId: 'human_1', kind: 'human', name: '风太', role: 'driver', mode: 'present' },
 ];
 
-describe('SessionFilesPanel（群聊「资源管理」右侧副屏，与单聊侧同构）', () => {
+describe('SessionFilesPanel（群聊「会话文件」右侧副屏，与单聊侧同构）', () => {
   beforeEach(() => {
     // 默认有 1 个就绪文件（供选中联动用例）；空态用例内自行置空。
     filesMock.files = [
@@ -48,12 +48,12 @@ describe('SessionFilesPanel（群聊「资源管理」右侧副屏，与单聊�
     filesMock.total = 1;
   });
 
-  it('副屏容器语义：统一面板头（标题「资源管理」+ 关闭按钮），无 Modal 弹窗语义', () => {
+  it('副屏容器语义：统一面板头（标题「会话文件」+ 关闭按钮），无 Modal 弹窗语义', () => {
     render(<SessionFilesPanel sessionId="s1" participants={participants} onClose={jest.fn()} />);
 
     // 面板头与单聊侧 BotSessionFilesPanel 同构（48px 标题行 + 关闭 X）。
-    expect(screen.getByRole('heading', { name: '资源管理' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '关闭资源管理面板' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '会话文件' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '关闭会话文件面板' })).toBeInTheDocument();
     // 不再出现 Modal 弹窗语义（dialog role）。
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });

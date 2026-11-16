@@ -117,7 +117,8 @@ export function buildSessionFileContentUrl(sessionId: string, fileId: string, sh
 }
 
 /**
- * 拉取文件内容字节（show=true 走网关流式返回，200 原始字节，不触发 302 预签名重定向）。
+ * 拉取文件内容字节；show=true 指定内联展示，但预签名存储仍可能返回 302。
+ * 需要 JS 读取的调用方必须满足最终存储响应的 CORS；群文件预览改由标签直接加载。
  * 复用浏览器会话凭证（credentials:include），与其它 backendRequest 同源鉴权一致，
  * 避免顶层窗口导航丢失鉴权导致 401。
  */

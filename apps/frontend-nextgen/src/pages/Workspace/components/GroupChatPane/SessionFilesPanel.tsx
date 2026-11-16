@@ -40,7 +40,7 @@ async function copyText(text: string): Promise<void> {
 }
 
 /**
- * 群聊「资源管理」右侧副屏：与单聊 BotSessionFilesPanel 同构（dmore artboard-008 对齐）——
+ * 群聊「会话文件」右侧副屏：与单聊 BotSessionFilesPanel 同构（dmore artboard-008 对齐）——
  * 48px 标题行 + 32px 筛选条（下划线 Tabs + 上传图标钮）+ 61px 紧排文件行。
  * 容器由父级提供（ResizableWorkspaceSidebar 语义）；内部为下钻式两视图：
  * 列表视图为主，点击文件行本体或行内「预览」按钮切到预览视图（带「返回文件列表」）；
@@ -110,9 +110,9 @@ export function SessionFilesPanel({
     <aside className="flex h-full flex-col bg-background">
       {/* 标题行（设计稿：48px，标题 14px 左起 20px，16px 关闭 X 右起 20px）。 */}
       <div className="flex h-12 shrink-0 items-center justify-between pl-5 pr-5">
-        <h3 className="m-0 text-sm font-normal leading-5 tracking-[-0.15px] text-foreground">资源管理</h3>
+        <h3 className="m-0 text-sm font-normal leading-5 tracking-[-0.15px] text-foreground">会话文件</h3>
         <IconButton
-          label="关闭资源管理面板"
+          label="关闭会话文件面板"
           icon={<X className="h-4 w-4" aria-hidden />}
           size="sm"
           variant="ghost"

@@ -6,7 +6,7 @@
 import { Button } from '@/components/ui';
 import type { ConversationFriendGroupView } from '@/domain/conversation/types';
 import { cn } from '@/utils/cn';
-import { ChevronDown, ChevronRight } from 'lucide-react';
+import { ChevronDown, ChevronRight, UserRound } from 'lucide-react';
 import React from 'react';
 import { AvatarTile } from '../../components/AvatarTile';
 import { ListErrorState } from '../../components/ListErrorState';
@@ -45,7 +45,7 @@ export const ConversationFriendGroup = React.memo(function ConversationFriendGro
     <div className="pl-6">
       <div
         className={cn(
-          'group relative flex min-h-12 items-center gap-2 px-4 py-1.5 transition-colors',
+          'group relative flex min-h-10 items-center gap-2 px-4 py-1 transition-colors',
           expanded ? 'bg-muted' : 'hover:bg-accent/50',
         )}
       >
@@ -54,14 +54,17 @@ export const ConversationFriendGroup = React.memo(function ConversationFriendGro
           aria-label={group.friend.displayName}
           aria-expanded={expanded}
           onClick={onToggle}
-          className="flex h-auto min-w-0 flex-1 items-center justify-start gap-3 rounded-none px-0 py-1 text-left hover:bg-transparent"
+          className="flex h-8 min-w-0 flex-1 items-center justify-start gap-2 rounded-none px-0 py-0 text-left font-normal hover:bg-transparent"
         >
           <AvatarTile
             label={group.friend.displayName}
-            className={expanded ? 'bg-primary/15 text-primary ring-1 ring-primary/30' : undefined}
-            fallbackContent={<span className="text-[10px] font-semibold">👤</span>}
+            className="h-6 w-6 rounded-full bg-muted text-muted-foreground"
+            fallbackContent={<UserRound className="h-3.5 w-3.5" aria-hidden="true" />}
           />
-          <span className="min-w-0 flex-1 truncate text-sm text-foreground">{group.friend.displayName}</span>
+          {/* 与 Bot/会话行同为 13px 常规字重，避免继承 Button 的默认中等字重。 */}
+          <span className="min-w-0 flex-1 truncate text-[13px] font-normal leading-[18px] tracking-[-0.08px] text-content-strong">
+            {group.friend.displayName}
+          </span>
         </Button>
         {/* 展开箭头:鼠标可点的折叠入口(点击转发同一 toggle);语义/键盘由主按钮承载,
             不参与 Tab 序、对读屏隐藏。 */}

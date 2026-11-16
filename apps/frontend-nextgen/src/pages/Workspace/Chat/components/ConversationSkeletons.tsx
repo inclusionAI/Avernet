@@ -1,6 +1,6 @@
 // 会话列表 / 好友目录的骨架占位:不铺整块灰板,而是逐行「回声」真实内容的几何——
 // 32px 会话行、61px 标题起点(含真实按钮的 1px 边框),
-// 好友分组行 = 头像方板 + 名称条,与 AvatarTile+displayName 行同构。
+// 好友分组行 = 24px 圆形头像 + 名称条,与 AvatarTile+displayName 行同构。
 // 标题条宽度刻意错落,避免均质相连块的机器感;bar 用 Skeleton(ui 层 shimmer)。
 import { Skeleton } from '@/components/ui';
 import { cn } from '@/utils/cn';
@@ -59,11 +59,11 @@ const FRIEND_NAME_WIDTHS = ['w-[38%]', 'w-[26%]', 'w-[33%]'];
 /** 好友分组行骨架:复刻 ConversationFriendGroup 分组行(头像 + 名称)的几何与 pl-6 缩进。 */
 export function ConversationFriendRowsSkeleton({ rows = 3 }: { rows?: number }) {
   return (
-    <div aria-hidden="true" className="flex flex-col gap-1 py-1 pl-6">
+    <div aria-hidden="true" className="flex flex-col pl-6">
       {Array.from({ length: rows }, (_, index) => (
-        <div key={index} className="flex min-h-12 items-center gap-2 px-4 py-1.5">
-          <Skeleton.Block className="h-8 w-8 shrink-0 rounded-md" />
-          <Skeleton.Block className={cn('h-4 rounded-full', FRIEND_NAME_WIDTHS[index % FRIEND_NAME_WIDTHS.length])} />
+        <div key={index} className="flex min-h-10 items-center gap-2 px-4 py-1">
+          <Skeleton.Block className="h-6 w-6 shrink-0 rounded-full" />
+          <Skeleton.Block className={cn('h-3 rounded-full', FRIEND_NAME_WIDTHS[index % FRIEND_NAME_WIDTHS.length])} />
         </div>
       ))}
     </div>

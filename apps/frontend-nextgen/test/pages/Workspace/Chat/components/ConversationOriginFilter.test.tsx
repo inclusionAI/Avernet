@@ -118,18 +118,15 @@ it('hides every scope option and its indicator when favorites are unsupported', 
   expect(screen.getByRole('button', { name: '发起人筛选' })).not.toHaveClass('bg-primary/10');
 });
 
-it('团队他人来源显示开发中且原生禁用，鼠标/键盘不触发选择；我的来源仍可选', () => {
+it('协作 Bot 可选择他人来源并切回我的来源', () => {
   const handlers = callbacks();
-  render(<ConversationOriginFilter botId="team:entity" origin="mine" scope="all" othersDisabled {...handlers} />);
+  render(<ConversationOriginFilter botId="team:entity" origin="mine" scope="all" {...handlers} />);
   const others = screen.getByRole('button', { name: '他人发起' });
-  expect(others).toBeDisabled();
-  expect(others).toHaveClass('text-muted-foreground');
+  expect(others).toBeEnabled();
   fireEvent.click(others);
-  fireEvent.keyDown(others, { key: 'Enter' });
-  fireEvent.keyDown(others, { key: ' ' });
-  expect(handlers.onOriginChange).not.toHaveBeenCalled();
+  expect(handlers.onOriginChange).toHaveBeenCalledWith('others');
   fireEvent.click(screen.getByRole('button', { name: '我发起' }));
-  expect(handlers.onOriginChange).toHaveBeenCalledWith('mine');
+  expect(handlers.onOriginChange).toHaveBeenLastCalledWith('mine');
 });
 
 describe('好友 Bot 会话范围筛选(supportsOrigin=false)', () => {
