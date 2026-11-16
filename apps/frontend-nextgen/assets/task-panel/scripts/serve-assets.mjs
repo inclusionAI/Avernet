@@ -9,8 +9,10 @@ export const assetPath = `/task-panel/${version}`;
 export function createAssetServer() {
   const files = new Map([
     [`${assetPath}/index.umd.js`, ['index.umd.js', 'application/javascript; charset=utf-8']],
+    [`${assetPath}/recovery.umd.js`, ['recovery.umd.js', 'application/javascript; charset=utf-8']],
     [`${assetPath}/task-panel.css`, ['task-panel.css', 'text/css; charset=utf-8']],
     ['/task-panel/index.umd.js', ['index.umd.js', 'application/javascript; charset=utf-8']],
+    ['/task-panel/recovery.umd.js', ['recovery.umd.js', 'application/javascript; charset=utf-8']],
     ['/task-panel/task-panel.css', ['task-panel.css', 'text/css; charset=utf-8']],
   ]);
   return http.createServer(async (req, res) => {

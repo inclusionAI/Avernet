@@ -6,7 +6,7 @@ import { TaskPanelAssetBoundary } from '@/components/Workspace/TaskPanelAssetBou
 import { loadTaskPanelAsset, type TaskPanelAsset } from '@/services/tasks/panel/taskPanelAssetLoader';
 import { nextgenTaskPanelHost } from '@/services/tasks/panel/taskPanelRuntime';
 
-jest.mock('@/services/backendApi/httpClient', () => ({ backendRequest: jest.fn() }));
+jest.mock('@/services/backendApi/httpClient', () => ({ backendRequest: jest.fn(), BackendRequestError: jest.requireActual<typeof import('@/services/backendApi/httpClient')>('@/services/backendApi/httpClient').BackendRequestError }));
 jest.mock('@/services/tasks/panel/taskPanelAssetLoader', () => ({ loadTaskPanelAsset: jest.fn() }));
 jest.mock('@/services/tasks/panel/taskPanelRuntime', () => ({ nextgenTaskPanelHost: { getViewer: () => ({ userId: 'viewer' }) }, getTaskPanelRuntimeGeneration: () => 0, subscribeTaskPanelRuntime: () => () => {} }));
 

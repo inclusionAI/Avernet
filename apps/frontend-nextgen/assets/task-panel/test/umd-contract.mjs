@@ -33,3 +33,39 @@ assert.equal(interactions.length, 0, 'UMD task browsing must not emit Bot intera
 controller.dispose();
 console.log('PASS: real UMD exports/version, host React singleton and silent task browsing');
 dom.window.close();
+// Discovery must execute without a DOM, React singleton, styles or UI exports.
+const headless = { console, setTimeout, clearTimeout, AbortController, URL, URLSearchParams };
+const recoverySource = await readFile(new URL('../dist/recovery.umd.js', import.meta.url), 'utf8');
+runInNewContext(recoverySource, headless);
+const recovery = headless.taskPanelRecovery;
+assert.equal(recovery.assetVersion, pkg.version);
+assert.equal(recovery.hostApiVersion, asset.hostApiVersion);
+assert.deepEqual(Object.keys(recovery).sort(), ['assetVersion', 'createTaskPanelController', 'hostApiVersion']);
+let historyReads = 0;
+const probe = recovery.createTaskPanelController({ ...host,
+  transport: { requestJson: async () => ({ code: 200000, data: { items: [] } }) },
+  history: { readPage: async () => { historyReads++; return { messages: [], nextCursor: null }; } },
+  present: () => assert.fail('An ordinary empty conversation must not present task UI'),
+});
+await probe.enterConversation({ sessionId: 'ordinary-group', kind: 'group' });
+assert.equal(probe.getSnapshot().recovery.status, 'not-found');
+assert.equal(historyReads, 1);
+probe.dispose();
+assert.ok(Buffer.byteLength(recoverySource) < Buffer.byteLength(await readFile(new URL('../dist/index.umd.js', import.meta.url))), 'Recovery must not include the complete UI bundle');
+console.log('PASS: headless recovery without React/DOM/CSS; empty conversations never present task UI');
+const recovered = [];
+const historyController = recovery.createTaskPanelController({ ...host,
+  transport: { requestJson: async () => ({ code: 200000, data: { items: [] } }) },
+  history: { readPage: async (_conversation, cursor) => cursor === null
+    ? { messages: [{ id: 'ordinary', content: 'normal group message', timestamp: 3 }], nextCursor: 'older' }
+    : { messages: [
+      { id: 'new', timestamp: 2, content: `<AixUI type="panel" component="taskPanel.TaskLoopView" params='{"taskId":"new"}'/>` },
+      { id: 'old', timestamp: 1, content: `<AixUI type="panel" component="taskPanel.TaskLoopView" params='{"taskId":"old"}'/>` },
+    ], nextCursor: null } },
+  present: tab => recovered.push(tab.params.taskId),
+});
+await historyController.enterConversation({ sessionId: 'group-with-old-task-cards', kind: 'group' });
+assert.deepEqual(recovered, ['old', 'new']);
+assert.equal(historyController.getSnapshot().activeTaskId, 'new');
+historyController.dispose();
+console.log('PASS: real headless bundle preserves paginated task-card recovery, tab ordering and default focus');
