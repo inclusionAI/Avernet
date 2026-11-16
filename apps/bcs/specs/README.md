@@ -45,3 +45,5 @@ These entries are task-specific records. Inspect their individual status, eviden
 
 - [2026-11-12-bcs-large-file-split](2026-11-12-bcs-large-file-split/)（draft）：[spec](2026-11-12-bcs-large-file-split/spec.md)、[plan](2026-11-12-bcs-large-file-split/plan.md)。
 - [2026-11-13 AgentCard Fuse synchronization (proposed)](2026-11-13-agentcard-fuse-sync/spec.md)
+
+- [2026-11-16 Group as an Agent — A2A ingress (proposed)](2026-11-16-group-as-agent/spec.md): configurable BCS-token authentication, public + `supportA2A` eligibility, per-round Tasks, artifacts, cancellation and recovery. [Implementation plan](2026-11-16-group-as-agent/plan.md).
