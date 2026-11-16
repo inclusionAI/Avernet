@@ -122,7 +122,7 @@ it('未选会话时会话 ID 胶囊与会话级图标钮隐藏，群名/计数�
   expect(screen.queryByRole('button', { name: '复制会话 ID' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: '管理会话' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: '历史消息' })).not.toBeInTheDocument();
-  expect(screen.queryByRole('button', { name: '资源管理' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '会话文件' })).not.toBeInTheDocument();
   // 群级能力保留：分享协作群与管理协作群；副屏与会话无关恒渲染。
   expect(screen.getByRole('button', { name: '分享协作群' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: '管理协作群' })).toBeInTheDocument();
@@ -175,7 +175,7 @@ it('摘要驱动成员头像与 Humans/Bots 计数，选中会话加入状态仍
   expect(screen.getByRole('status')).toHaveTextContent('未加入当前会话');
 });
 
-it('右侧图标将共享信息放在历史消息和资源管理之间', () => {
+it('右侧图标将共享信息放在历史消息和会话文件之间', () => {
   const onTogglePanel = jest.fn();
   render(<GroupHeader {...buildProps({ onTogglePanel })} />);
 
@@ -197,7 +197,7 @@ it('右侧图标将共享信息放在历史消息和资源管理之间', () => {
   expect(screen.getByRole('button', { name: '分享会话' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: '管理会话' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: '历史消息' })).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: '资源管理' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '会话文件' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: '副屏' })).toBeInTheDocument();
 
   fireEvent.click(screen.getByRole('button', { name: '历史消息' }));
@@ -226,7 +226,7 @@ it('收藏按钮跟随 favorites 模型：收藏态填充、点击透传、无�
 
 it('图标钮面板开合状态以 aria-pressed 表达', () => {
   const { rerender } = render(<GroupHeader {...buildProps({ activePanel: 'resources' })} />);
-  expect(screen.getByRole('button', { name: '关闭资源管理' })).toHaveAttribute('aria-pressed', 'true');
+  expect(screen.getByRole('button', { name: '关闭会话文件' })).toHaveAttribute('aria-pressed', 'true');
   rerender(<GroupHeader {...buildProps({ activePanel: 'sessionManage' })} />);
   expect(screen.getByRole('button', { name: '关闭会话管理' })).toHaveAttribute('aria-pressed', 'true');
   rerender(<GroupHeader {...buildProps({ activePanel: 'history' })} />);
@@ -320,4 +320,21 @@ it('选中会话右上角提供定位图标，不代替会话设置或重新选�
   expect(onTogglePanel).not.toHaveBeenCalled();
   view.rerender(<GroupHeader {...buildProps({ onLocateSession, selectedSession: null })} />);
   expect(screen.queryByRole('button', { name: '定位当前会话' })).not.toBeInTheDocument();
+});
+
+it('协作群文件入口在悬停和打开后使用「会话文件」提示，不影响面板切换', async () => {
+  const onTogglePanel = jest.fn();
+  const { rerender } = render(<GroupHeader {...buildProps({ onTogglePanel })} />);
+  const button = screen.getByRole('button', { name: '会话文件' });
+  fireEvent.pointerMove(button, { pointerType: 'mouse' });
+  fireEvent.focusIn(button);
+  expect(await screen.findByRole('tooltip')).toHaveTextContent('会话文件');
+  fireEvent.click(button);
+  expect(onTogglePanel).toHaveBeenCalledWith('resources');
+
+  rerender(<GroupHeader {...buildProps({ activePanel: 'resources', onTogglePanel })} />);
+  const closeButton = screen.getByRole('button', { name: '关闭会话文件' });
+  expect(closeButton).toHaveAttribute('aria-pressed', 'true');
+  fireEvent.click(closeButton);
+  expect(onTogglePanel).toHaveBeenLastCalledWith('none');
 });

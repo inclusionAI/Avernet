@@ -4,6 +4,7 @@
 // origin,陈旧响应互不覆盖。请求完成只清理自己的在途标记,旧请求不清洗新请求的身份
 // (在途标记按 token 认领:force 重试覆盖同 key 旧标记时,旧请求完成后不得清洗新请求)。
 import type { ConversationBotView } from '@/domain/conversation/types';
+import { isSameHumanIdentity } from '@/domain/userIdentity';
 import { BOT_SESSION_PAGE_SIZE } from '@/services/workspace/botSessionService';
 import { managedBotConversationService } from '@/services/workspace/managedBotConversationService';
 import { useConversationStore } from '@/stores/conversationStore';
@@ -84,7 +85,9 @@ export function canWriteOthers(
 /** 好友目录首拉(force 供 retry 用):身份含过滤代次,目录按新条件重拉不受旧请求阻塞。 */
 export function loadOthersDirectory(ctx: OthersRequestContext, view: ConversationBotView, force: boolean): void {
   const botId = view.bot.botId;
-  if (!ctx.userId.current) return;
+  const viewerUserId = ctx.userId.current;
+  if (!viewerUserId) return;
+  const isViewer = (userId: string) => isSameHumanIdentity(userId, viewerUserId, 'human');
   const store = useConversationStore.getState();
   // 目录数据不随 key 变化,但身份须含过滤代次:key 变化删除缓存重拉目录,旧请求不得阻塞/写回。
   const revision = filterRevisionOf(botId, store);
@@ -93,7 +96,20 @@ export function loadOthersDirectory(ctx: OthersRequestContext, view: Conversatio
   const cached = store.sessionsByBotId[botId];
   // 已成功(含确认空列表)不自动拉;失败等待 retryDirectory,避免反应式 effect 循环。
   const loadedOnce = cached?.origin === 'others' && !cached.friendDirectory.loading && !cached.friendDirectory.error;
-  if (!force && loadedOnce) return;
+  if (!force && loadedOnce) {
+    // 复用旧目录缓存时同样排除当前查看者，不能只过滤新返回的好友关系。
+    if (cached.friendDirectory.items.some((user) => isViewer(user.userId))) {
+      patchOthersView(botId, (item) => ({
+        ...item,
+        friendDirectory: {
+          ...item.friendDirectory,
+          items: item.friendDirectory.items.filter((user) => !isViewer(user.userId)),
+        },
+        friendGroups: Object.fromEntries(Object.entries(item.friendGroups).filter(([userId]) => !isViewer(userId))),
+      }));
+    }
+    return;
+  }
   const genKey = `${botId}|others`;
   const generation = othersNextGeneration(ctx, genKey);
   const epoch = ctx.epoch.current;
@@ -118,8 +134,12 @@ export function loadOthersDirectory(ctx: OthersRequestContext, view: Conversatio
           friendDirectory: { ...item.friendDirectory, loading: false, error: result.error.friendlyMessage },
         };
       }
-      const friendGroups = { ...item.friendGroups };
-      for (const user of result.data) {
+      // 好友关系可能包含登录人自己；others 按当前查看者过滤，不按 Bot owner 或展示名过滤。
+      const users = result.data.filter((user) => !isViewer(user.userId));
+      const friendGroups = Object.fromEntries(
+        Object.entries(item.friendGroups).filter(([userId]) => !isViewer(userId)),
+      );
+      for (const user of users) {
         // 目录是好友资料的权威来源:分组先于目录建好(过滤变化触发的同轮重拉会以
         // userId 兜底)时,在此补写真实资料;分组的会话/加载/展开状态原样保留。
         const existing = friendGroups[user.userId];
@@ -132,7 +152,7 @@ export function loadOthersDirectory(ctx: OthersRequestContext, view: Conversatio
               expanded: false,
             };
       }
-      return { ...item, friendDirectory: { items: result.data, loading: false, error: null }, friendGroups };
+      return { ...item, friendDirectory: { items: users, loading: false, error: null }, friendGroups };
     });
   });
 }
@@ -145,7 +165,7 @@ export function loadOthersFriendSessions(
   force: boolean,
 ): void {
   const botId = view.bot.botId;
-  if (!ctx.userId.current) return;
+  if (!ctx.userId.current || isSameHumanIdentity(friendUserId, ctx.userId.current, 'human')) return;
   const store = useConversationStore.getState();
   const group = store.sessionsByBotId[botId]?.friendGroups[friendUserId];
   const sessionKey = sessionKeyOf(botId, store);

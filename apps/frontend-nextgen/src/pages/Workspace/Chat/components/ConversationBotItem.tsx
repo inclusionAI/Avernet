@@ -194,7 +194,6 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
           showFilter={showFilter}
           supportsOrigin={isManaged}
           supportsFavorites={canFavorite}
-          othersDisabled={section === 'team' && !bot.isAgentCodingBot}
           origin={origin}
           scope={scope}
           onOriginChange={onOriginChange}

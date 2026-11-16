@@ -176,3 +176,47 @@ describe('SessionFilesPreviewPane（预览体渲染）', () => {
     expect(onReference).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('group text URL preview', () => {
+  it.each(['说明.md', '配置.json', '服务.yaml', '样式.scss', 'Dockerfile'])(
+    'navigates %s inside a fully sandboxed iframe',
+    (name) => {
+      const onDownload = jest.fn();
+      const onBack = jest.fn();
+      const contentUrl = 'https://gateway.example/content?show=true';
+      const { container } = render(
+        <PreviewPane
+          file={{ name, size: 9837 }}
+          filesStateEmpty={false}
+          preview={textPreview({ contentUrl })}
+          onDownload={onDownload}
+          onBack={onBack}
+        />,
+      );
+      const iframe = screen.getByTitle(name);
+      expect(iframe).toHaveAttribute('src', contentUrl);
+      expect(iframe).toHaveAttribute('sandbox', '');
+      expect(iframe).not.toHaveAttribute('srcdoc');
+      expect(container.querySelector('pre')).toBeNull();
+      expect(screen.queryByText('该文件类型暂不支持预览')).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: '下载' }));
+      fireEvent.click(screen.getByRole('button', { name: '返回文件列表' }));
+      expect(onDownload).toHaveBeenCalledTimes(1);
+      expect(onBack).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('preserves supplied Bot Markdown even when a content URL is also available', () => {
+    const { container } = render(
+      <PreviewPane
+        file={{ name: '说明.md', size: 100 }}
+        filesStateEmpty={false}
+        preview={textPreview({ contentUrl: 'https://gateway.example/content', text: '# Bot 原有预览' })}
+        onDownload={jest.fn()}
+        onBack={jest.fn()}
+      />,
+    );
+    expect(screen.getByRole('heading', { name: 'Bot 原有预览' })).toBeInTheDocument();
+    expect(container.querySelector('iframe')).toBeNull();
+  });
+});
