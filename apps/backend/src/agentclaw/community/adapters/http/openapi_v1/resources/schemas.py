@@ -70,9 +70,11 @@ class FileEntry(BaseModel):
     # on purpose. ``modified_at`` is provider-dependent — the local device's
     # listing returns name/path/is_dir only — and a field populated on some
     # engines and null on others is the shape the engine-backed spec (G6)
-    # rejected. ``readonly`` is always false in a listing: ``is_readonly``
-    # matches dotfiles and workspace-root identity files, and ``list_dir``
-    # filters both out before it is ever consulted.
+    # rejected. ``readonly`` is an internal policy flag (dotfiles, workspace
+    # root identifiers, and protected system subtrees are among the matches);
+    # this public schema does not surface it. The shared skills-repo tree can
+    # therefore return a ``readonly`` marker internally while these clients
+    # still receive only the four fields above.
 
 
 class Preview(BaseModel):
