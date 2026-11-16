@@ -441,11 +441,11 @@ class OpenOpportunityOpRequest(BaseModel):
 
 
 class OpenApplicationRequest(BaseModel):
-    """公开提交申请请求;``accountable_principal_ref`` 是 withdraw 的
-    self-help 比对目标。"""
+    """Application body; identity/context comes from authentication, not JSON."""
+
+    model_config = ConfigDict(extra="forbid")
 
     applicant_agent_ref: str = Field(..., description="申请人 agent 引用")
-    accountable_principal_ref: str = Field(..., description="申请责任主体")
     capability_evidence_refs: list[str] = Field(default_factory=list)
     proposed_artifact_refs: list[str] = Field(default_factory=list)
     requested_role_refs: list[str] = Field(default_factory=list)
@@ -454,10 +454,13 @@ class OpenApplicationRequest(BaseModel):
     )
     reason: str = Field("", description="申请原因;落审计")
 
-    def to_domain(self) -> OpenApplicationCommand:
+    def to_domain(
+        self, opportunity_ref: str, actor_context: ActorContext
+    ) -> OpenApplicationCommand:
         return OpenApplicationCommand(
+            opportunity_ref=opportunity_ref,
+            actor_context=actor_context,
             applicant_agent_ref=self.applicant_agent_ref,
-            accountable_principal_ref=self.accountable_principal_ref,
             capability_evidence_refs=self.capability_evidence_refs,
             proposed_artifact_refs=self.proposed_artifact_refs,
             requested_role_refs=self.requested_role_refs,

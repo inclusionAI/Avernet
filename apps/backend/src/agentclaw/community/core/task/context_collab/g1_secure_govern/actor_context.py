@@ -22,3 +22,7 @@ class ActorContext:
 
     actor: PrincipalRef
     source: str  # "api" | "openapi" | "a2a"
+    # Trusted authentication provenance (e.g. the signed Bot owner), not JSON.
+    # Optional for operations that do not need accountability; a human acts for
+    # themselves when omitted. Bot application submission requires this fact.
+    accountable_principal_ref: PrincipalRef | None = None

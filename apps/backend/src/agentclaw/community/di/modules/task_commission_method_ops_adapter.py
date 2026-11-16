@@ -93,15 +93,12 @@ class TaskCommissionOpenMethodAdapter(TaskMethodOpsPort):
             ),
         )
         submitted = self._open_ops.submit_application(
-            command.collab_context_id,
-            binding_id,
-            published.object_id,
             OpenApplicationCommand(
+                opportunity_ref=published.object_id,
+                actor_context=context,
                 applicant_agent_ref=command.assignee_agent_id,
-                accountable_principal_ref=(command.accountable_principal_id),
                 reason="task_commission.designated_assignee",
             ),
-            context,
         )
         self._open_ops.screen(
             command.collab_context_id,

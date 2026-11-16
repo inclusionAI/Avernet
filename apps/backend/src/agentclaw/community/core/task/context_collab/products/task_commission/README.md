@@ -180,19 +180,22 @@ published = open_method.publish_opportunity(
     )
 )
 assert published.accepted and published.state == "OPEN"
+# Built from verified Bot authentication (UUID and signed owner), not request JSON.
+bot_context = ActorContext(
+    PrincipalRef("bot", working_bot.bot_uuid), source="a2a",
+    accountable_principal_ref=PrincipalRef("human", working_bot.owner_id),
+)
 [opportunity] = open_method.query_opportunities(
     actor_context=bot_context,
 )
 submitted = open_method.submit_application(
-    collab_context_id=task_id,
-    method_binding_id=opportunity.method_binding_id,
-    opportunity_ref=opportunity.opportunity_id,
     command=OpenApplicationCommand(
-        applicant_agent_ref=working_bot.bot_id,
-        accountable_principal_ref=working_bot.owner_id,
+        opportunity_ref=opportunity.opportunity_id,
+        actor_context=bot_context,
+        applicant_agent_ref=working_bot.bot_uuid,
+        capability_evidence_refs=["evidence://calculator-coding"],
         requested_role_refs=selected_agent_role_refs,
     ),
-    context=bot_context,
 )
 assert submitted.state == "SUBMITTED"
 policy_context = ActorContext(

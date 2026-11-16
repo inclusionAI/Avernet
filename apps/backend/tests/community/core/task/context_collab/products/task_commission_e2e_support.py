@@ -144,7 +144,8 @@ class SimulatedWorkingBot:
         bot_id: str,
         owner_id: str,
     ):
-        self.bot_id, self.owner_id = bot_id, owner_id
+        self.bot_uuid = bot_id  # Exact UUID used in the signed gateway principal.
+        self.bot_id, self.owner_id = self.bot_uuid, owner_id
         self.profile_ref = profile_ref
         self.client = client
         self.headers = {"X-Avernet-Principal": signed_principal}

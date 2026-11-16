@@ -232,15 +232,12 @@ class TestL5MethodObjectsE2E:
         )
         assert published.state == "OPEN"
         application = services.open.submit_application(
-            collab_id,
-            open_binding,
-            "opp_e2e",
             OpenApplicationCommand(
+                opportunity_ref="opp_e2e",
+                actor_context=_actor(PrincipalRef("human", "u_stranger_001")),
                 applicant_agent_ref="bot_contrib_001",
-                accountable_principal_ref="u_contrib_001",
                 proposed_artifact_refs=["artifact://reply"],
-            ),
-            _actor(PrincipalRef("human", "u_stranger_001")),
+            )
         )
         assert application.state == "SUBMITTED"
         services.open.screen(

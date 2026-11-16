@@ -241,21 +241,25 @@ class TaskCommissionSelfApplicationAdapter(TaskCommissionOpenMethodAdapter):
         record = self._repo.get_current_status(command.collab_context_id)
         if record is None:
             raise ContextCollabValidationError("task not found")
-        binding_id = command.method_binding_ref
+        if (
+            context.accountable_principal_ref is None
+            or context.accountable_principal_ref.principal_id
+            != command.accountable_principal_id
+        ):
+            raise ContextCollabValidationError(
+                "application owner must match authenticated Bot owner"
+            )
         submitted = self._open_ops.submit_application(
-            command.collab_context_id,
-            binding_id,
-            command.opportunity_id,
             OpenApplicationCommand(
+                opportunity_ref=command.opportunity_id,
+                actor_context=context,
                 applicant_agent_ref=context.actor.principal_id,
-                accountable_principal_ref=command.accountable_principal_id,
                 requested_role_refs=self._selected_agent_role_refs(
                     command.collab_context_id,
                     self._self_service_profile(command.product_profile_ref),
                 ),
                 reason="task_commission.bot_self_application",
             ),
-            context,
         )
         return self.review_task_application(command, submitted.object_id, context)
 

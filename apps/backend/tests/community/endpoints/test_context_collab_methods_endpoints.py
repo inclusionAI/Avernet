@@ -357,11 +357,9 @@ class TestMethodBindingsDelivery:
         )
         assert legacy.status_code == 404
         application = client.post(
-            f"{PREFIX}/context_collab/{collab_id}/method-bindings"
-            f"/{binding_id}/open/opportunities/opp_http/applications",
+            f"{PREFIX}/context_collab/open/opportunities/opp_http/applications",
             json={
                 "applicant_agent_ref": "bot_contrib_001",
-                "accountable_principal_ref": "u_member_001",
                 "proposed_artifact_refs": ["artifact://reply"],
             },
         )

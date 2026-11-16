@@ -254,10 +254,16 @@ class OpenOpportunityOpCommand:
 
 @dataclass
 class OpenApplicationCommand:
-    """Open SubmitApplication 命令(spec §4.4);责任主体必填,``application_id`` 为幂等键。"""
+    """Open submission; resolve the owning Collet/Method from opportunity_ref.
 
+    actor_context is trusted G1 provenance, including the signed owner for a
+    Bot applicant. Capability evidence is retained on the application, not a
+    permission grant. application_id is the optional idempotency key.
+    """
+
+    opportunity_ref: str
+    actor_context: ActorContext
     applicant_agent_ref: str
-    accountable_principal_ref: str
     capability_evidence_refs: list[str] = field(default_factory=list)
     proposed_artifact_refs: list[str] = field(default_factory=list)
     requested_role_refs: list[str] = field(default_factory=list)
@@ -649,12 +655,7 @@ class OpenMethodOpsServiceProtocol(Protocol):
         context: ActorContext,
     ) -> ProfileOpAcceptedResult: ...
     def submit_application(
-        self,
-        collab_context_id: str,
-        method_binding_id: str,
-        opportunity_ref: str,
-        command: OpenApplicationCommand,
-        context: ActorContext,
+        self, command: OpenApplicationCommand
     ) -> ProfileOpAcceptedResult: ...
     def screen(
         self,
