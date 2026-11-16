@@ -68,27 +68,6 @@ TASK_COMMISSION_PROFILE = ProductProfileCreateCommand(
             ("execute", "report_progress", "submit"),
         ),
     ),
-    domain=DomainProfile(
-        VersionedProfileRef("task_commission.domain", 1),
-        (
-            DomainMapping("collaboration", "L4.Collet"),
-            DomainMapping("goal", "L4.Task"),
-            DomainMapping("posting", "L4.Message"),
-            DomainMapping("deliverable", "L4.Artifact"),
-            DomainMapping("resource", "L3.Resource"),
-        ),
-    ),
-    # Task的
-    workflow=WorkflowProfile(
-        ref=VersionedProfileRef("task_commission_goal", 1),
-        state_machine_ref=VersionedProfileRef("task_commission_goal", 1),
-        completion_states=("done",),
-        compensation_events=("task.rejected", "task.cancelled"),
-        strict_control_events=True,
-        executor_submission_only=True,
-        public_events_only=True,
-        actions=STANDARD_TASK_CONTRACT.actions,
-    ),
     # g1-g4的定义
     governance=GovernanceRequirements(
         policy="g1.structural/1",
