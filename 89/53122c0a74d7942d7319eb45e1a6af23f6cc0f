@@ -1,0 +1,25 @@
+apps/backend/tests/community/repository/skill_center/test_apply_set_membership_replacement.py
+  s_bcc2d0974a665d::t_f3b2d96af87d67 1-21,24-29,72-79,84-97
+  s_bcc2d0974a665d::t_c1bfdf2fc7104e 22-23
+  s_bcc2d0974a665d::t_c969eab9cef7aa 30-71,80-83
+apps/backend/src/agentclaw/community/core/skill_center/AGENTS.md
+  s_bcc2d0974a665d::t_152d69fea98186 117
+apps/backend/src/agentclaw/community/core/repository/implementations/skill_center/apply_skill_set_commands.py
+  s_bcc2d0974a665d::t_24f00932113bd4 266,288-290,356-362
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8953122c0a74d7942d7319eb45e1a6af23f6cc0f",
+  "prompts": {},
+  "sessions": {
+    "s_bcc2d0974a665d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a9d9-072f-7481-adc1-c3e3d78b7fd1",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}
