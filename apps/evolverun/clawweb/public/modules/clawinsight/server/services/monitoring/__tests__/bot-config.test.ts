@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, it } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
 import { migrations } from '@avernet/clawweb-shared/server/schema';
 import { database } from './test-database.js';
@@ -10,7 +10,7 @@ import { configureBots } from '../bot-config-service.js';
 import { createMonitoringReferences } from '../target-ref.js';
 import { parseBotNotifications } from '../bot-config-contracts.js';
 import { migrateBotDiagnosisRecoveryConfigs } from '../bot-config-migration.js';
-import { requireRecoveryEnabled, recoveryNotifications } from '../../repair/session-recovery/bot-configuration.js';
+import { requireRecoveryEnabled, recoveryNotifications, recoveryConfigurations } from '../../repair/session-recovery/bot-configuration.js';
 
 let db: IDatabase, configs: BotDiagnosisRecoveryConfigRepository, directory: SqlMonitoringBotDirectory;
 const scope = { tenant: 'one', allowedTargetEnvs: ['pre', 'prod'] };
@@ -92,9 +92,10 @@ it('dry-runs migration, deduplicates routes and preserves edited rows on rerun',
     bot_webhooks: ['a', 'b'].map(bot_id => ({ bot_id, entity_id: '001', webhook: 'https://private.invalid/send' })) }) });
   await db.exec("INSERT INTO ce_tasks VALUES ('SR-history', 'session_recovery', ?)", [JSON.stringify({ request: { target: { bot_id: 'c', entity_id: '001', env: 'pre' } } })]);
   const dry = await migrateBotDiagnosisRecoveryConfigs(db, directory, scope, { updatedBy: '001' });
-  expect(dry).toMatchObject({ applied: false, routeCount: 2, skipped: 0, warnings: [] });
-  expect(dry.planned).toHaveLength(3);
+  expect(dry).toMatchObject({ applied: false, routeCount: 1, skipped: 0, warnings: [] });
+  expect(dry.planned).toHaveLength(2);
   expect(await configs.find({ ...target, botId: 'a' })).toBeNull();
+  expect(dry.planned.map(item => item.botId)).toEqual(['a', 'b']);
   expect(JSON.stringify(dry)).not.toMatch(/https:/);
   await migrateBotDiagnosisRecoveryConfigs(db, directory, scope, { updatedBy: '001', apply: true });
   const a = (await configs.find({ ...target, botId: 'a' }))!, b = (await configs.find({ ...target, botId: 'b' }))!;
@@ -103,6 +104,112 @@ it('dry-runs migration, deduplicates routes and preserves edited rows on rerun',
   expect(parseBotNotifications(a.configJson).group).toEqual(parseBotNotifications(b.configJson).group);
   await configs.setSwitches(a, switches(1, false));
   const repeat = await migrateBotDiagnosisRecoveryConfigs(db, directory, scope, { updatedBy: '001', apply: true });
-  expect(repeat.planned).toEqual([]); expect(repeat.skipped).toBe(3);
+  expect(repeat.planned).toEqual([]); expect(repeat.skipped).toBe(2);
   expect((await configs.find(a))?.recoveryEnabled).toBe(false);
+});
+
+
+async function legacy() {
+  await bot();
+  const app = new AppConfigRepository(db);
+  await app.create({ config_key: 'session_recovery_allowlist', config_json: JSON.stringify({ allowed_bots: [
+    { bot_id: target.botId, entity_id: target.entityId, env: target.env },
+  ] }) });
+  await app.create({ config_key: 'session_recovery_owner_notifications', config_json: JSON.stringify({
+    bot_overrides: [{ bot_id: 'default', entity_id: '001', env: 'prod', enabled: true }],
+  }) });
+  await app.update('session_recovery_owner_notifications', { enabled: 0 });
+  await app.create({ config_key: 'session_recovery_notifications', config_json: JSON.stringify({
+    webhook: 'https://business.invalid/send', timeout_seconds: 10,
+    bot_webhooks: [{ bot_id: 'default', entity_id: '001', webhook: 'https://private.invalid/send' }],
+  }) });
+  return app;
+}
+const recoveryRequest = { target: { bot_id: 'default', entity_id: '001', env: 'prod', engine: 'OC' } } as Parameters<typeof requireRecoveryEnabled>[1];
+const disabledNotifications = { owner: false, group: null };
+
+it('reads legacy admission and exact Owner notification overrides until a new row exists', async () => {
+  const app = await legacy();
+  const source = await app.findByKey('session_recovery_allowlist');
+  await expect(requireRecoveryEnabled(configs, recoveryRequest, app)).resolves.toBeUndefined();
+  expect(await recoveryNotifications(configs, recoveryRequest.target, app)).toEqual({ owner: true,
+    group: { webhook: 'https://private.invalid/send', timeout_seconds: 10 } });
+  expect((await recoveryConfigurations(configs, [target], app))[0]).toMatchObject({ diagnosisEnabled: false, recoveryEnabled: true, version: 0 });
+  // The single UI action writes only the new table. Explicit false wins over the legacy allowlist.
+  await configureBots(configs, directory, refs, principal, { botRef: refs.encode(target, 'one'), enabled: false, version: 0 });
+  await expect(requireRecoveryEnabled(configs, recoveryRequest, app)).rejects.toMatchObject({ code: 'recovery_disabled' });
+  expect(await recoveryNotifications(configs, recoveryRequest.target, app)).toEqual(disabledNotifications);
+  expect((await recoveryConfigurations(configs, [target], app))[0]).toMatchObject({ recoveryEnabled: false, version: 1 });
+  expect(await app.findByKey('session_recovery_allowlist')).toEqual(source);
+});
+
+it('preserves Bot, directory entity, Owner and environment boundaries for legacy admission', async () => {
+  const app = await legacy();
+  for (const patch of [{ bot_id: 'Default' }, { entity_id: '1' }, { env: 'pre' }]) {
+    const request = { target: { ...recoveryRequest.target, ...patch } } as typeof recoveryRequest;
+    await expect(requireRecoveryEnabled(configs, request, app)).rejects.toMatchObject({ code: 'recovery_disabled' });
+    expect(await recoveryNotifications(configs, request.target, app)).toEqual(disabledNotifications);
+  }
+  await app.update('session_recovery_allowlist', { config_json: JSON.stringify({ allowed_bots: [
+    { bot_id: target.botId, entity_id: '001', env: 'prod' }, // Owner is not the directory entity.
+  ] }) });
+  await expect(requireRecoveryEnabled(configs, recoveryRequest, app)).rejects.toMatchObject({ code: 'recovery_disabled' });
+  await bot(); // Ambiguous directory identity must not fall back, even with matching legacy notifications.
+  expect(await recoveryNotifications(configs, recoveryRequest.target, app)).toEqual(disabledNotifications);
+});
+
+it('never turns new-table errors into absence or falls back after invalid new notification settings', async () => {
+  const app = await legacy();
+  const read = vi.spyOn(app, 'findByKey');
+  const fail = vi.spyOn(configs, 'find').mockRejectedValue(new Error('new table unavailable'));
+  await expect(requireRecoveryEnabled(configs, recoveryRequest, app)).rejects.toMatchObject({ code: 'recovery_configuration_unavailable' });
+  expect(await recoveryNotifications(configs, recoveryRequest.target, app)).toEqual(disabledNotifications);
+  expect(read).not.toHaveBeenCalled();
+  fail.mockRestore();
+  await configs.setSwitches(target, switches(0));
+  for (const raw of ['{}', '{', '{"notifications":{"owner":{"enabled":"true"}}}', '{"notifications":{"group":{"enabled":true,"route_id":"missing"}}}']) {
+    await db.exec('UPDATE ce_bot_diagnosis_recovery_config SET config_json = ?', [raw]);
+    expect(await recoveryNotifications(configs, recoveryRequest.target, app)).toEqual(disabledNotifications);
+  }
+  expect(read.mock.calls.flat()).not.toContain('session_recovery_notifications');
+  expect(read.mock.calls.flat()).not.toContain('session_recovery_owner_notifications');
+});
+
+it('keeps the migrated Bot independent of legacy availability and uses only its referenced group', async () => {
+  const app = await legacy();
+  await configs.setSwitches(target, switches(0));
+  await db.exec('UPDATE ce_bot_diagnosis_recovery_config SET config_json = ?', [JSON.stringify({
+    notifications: { owner: { enabled: true }, group: { enabled: true, route_id: 'test_group' } },
+  })]);
+  await app.create({ config_key: 'session_recovery_notification_routes', config_json: JSON.stringify({ routes: {
+    test_group: { webhook: 'https://new-private.invalid/send', timeout_seconds: 5 },
+  } }) });
+  await db.exec('UPDATE ce_app_config SET config_json = ? WHERE config_key = ?', ['{', 'session_recovery_allowlist']);
+  await db.exec('UPDATE ce_app_config SET config_json = ? WHERE config_key = ?', ['{', 'session_recovery_notifications']);
+  await expect(requireRecoveryEnabled(configs, recoveryRequest, app)).resolves.toBeUndefined();
+  expect(await recoveryNotifications(configs, recoveryRequest.target, app)).toEqual({ owner: true,
+    group: { webhook: 'https://new-private.invalid/send', timeout_seconds: 5 } });
+  await configs.setSwitches(target, switches(1, false));
+  await expect(requireRecoveryEnabled(configs, recoveryRequest, app)).rejects.toMatchObject({ code: 'recovery_disabled' });
+  // Closing admission does not cancel notification work for an existing task.
+  expect((await recoveryNotifications(configs, recoveryRequest.target, app)).group?.webhook).toBe('https://new-private.invalid/send');
+  await app.update('session_recovery_notification_routes', { enabled: 0 });
+  expect((await recoveryNotifications(configs, recoveryRequest.target, app)).group).toBeNull();
+});
+
+it('does not write diagnosis-only, notification-only or historical targets during migration', async () => {
+  const app = await legacy();
+  await bot('diagnosed'); await bot('notified'); await bot('historical');
+  await db.exec("INSERT INTO ce_tasks VALUES ('SR-old', 'session_recovery', ?)", [JSON.stringify({ request: {
+    target: { bot_id: 'historical', entity_id: '001', env: 'prod' },
+  } })]);
+  await app.update('session_recovery_owner_notifications', { config_json: JSON.stringify({ bot_overrides: [
+    { bot_id: 'notified', entity_id: '001', env: 'prod', enabled: true },
+  ] }) });
+  const read = vi.spyOn(db, 'query');
+  const result = await migrateBotDiagnosisRecoveryConfigs(db, directory, scope, { updatedBy: '001', apply: true });
+  expect(result.planned.map(item => item.botId)).toEqual(['default']);
+  expect(result.planned[0]).toMatchObject({ diagnosisEnabled: false, recoveryEnabled: true });
+  expect(read.mock.calls.some(([sql]) => sql.includes('insight_monitoring') || sql.includes('FROM ce_tasks'))).toBe(false);
+  expect(await configs.findMany(['diagnosed', 'notified', 'historical'].map(botId => ({ ...target, botId })))).toEqual([null, null, null]);
 });

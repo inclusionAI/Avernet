@@ -1,4 +1,5 @@
 /** Composition root. Host-owned connections/identity; lazy, fail-closed, no implicit DB fallback. */
+import { AppConfigRepository } from '@avernet/clawevolve/server/repositories/app-config-repository';
 import type { Request } from 'express';
 import { getRepositories, type IDatabase } from '@avernet/clawweb-shared/server/db';
 import { MonitoringRepository } from '../../repositories/monitoring-repository.js';
@@ -51,7 +52,7 @@ export function createMonitoringRuntime(
       const resolver = createTargetResolver(integration.directory, integration.scope, integration.bindings);
       const references = createMonitoringReferences(now);
       assembled = { integration, service: createMonitoringService(repository, resolver, now, integration.recovery),
-        browser: createMonitoringBrowserService(repository, integration.directory, references, integration.scope, now, new BotDiagnosisRecoveryConfigRepository(getDb())) };
+        browser: createMonitoringBrowserService(repository, integration.directory, references, integration.scope, now, new BotDiagnosisRecoveryConfigRepository(getDb()), new AppConfigRepository(getDb())) };
       return assembled;
     } catch (error) {
       if (error instanceof MonitoringError) throw error;

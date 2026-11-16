@@ -1,3 +1,5 @@
+import { migrations } from '@avernet/clawweb-shared/server/schema';
+import { requireRecoveryEnabled } from '../../services/repair/session-recovery/bot-configuration.js';
 import { botDiagnosisRecoveryMigrations } from '@avernet/clawweb-shared/server/schema-bot-diagnosis-recovery';
 import { BotDiagnosisRecoveryConfigRepository } from '../../repositories/bot-diagnosis-recovery-config-repository.js';
 import { initializeMonitoringSqlite } from "../../services/monitoring/schema.js";
@@ -78,7 +80,10 @@ beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), "monitoring-contract-"));
   db = database(join(dir, "runtime.sqlite3"));
   await initializeMonitoringSqlite(db);
-    await botDiagnosisRecoveryMigrations[0].migrate!(db);
+  await botDiagnosisRecoveryMigrations[0].migrate!(db);
+  const configMigration = migrations.find(m => m.version === 134)!;
+  await configMigration.migrate?.(db);
+  for (const ddl of configMigration.sql) await db.exec(db.dialect.renderDdl(ddl));
   await start();
 }, 30000);
 afterEach(async () => {
@@ -398,6 +403,8 @@ describe("diagnosis report -> Bot recovery switch -> durable recovery task", () 
 
   async function automaticRecovery(botId = "mock-bot-te") {
     await stop();
+    await db.exec('CREATE TABLE ac_bots (bot_id TEXT, entity_id TEXT, owner_id TEXT, env TEXT, is_delete INTEGER DEFAULT 0)');
+    await db.exec("INSERT INTO ac_bots (bot_id, entity_id, owner_id, env) VALUES (?, '001234', '001234', 'prod')", [botId]);
     const config = new BotDiagnosisRecoveryConfigRepository(db);
     await config.setSwitches({ botId, entityId: '001234', env: 'prod' }, { diagnosisEnabled: true, recoveryEnabled: true, expectedVersion: 0, updatedBy: '001234' });
     const objects = new Map<string, Buffer>();
@@ -409,6 +416,7 @@ describe("diagnosis report -> Bot recovery switch -> durable recovery task", () 
     const agent = { start: vi.fn().mockResolvedValue(undefined), release: vi.fn().mockResolvedValue(undefined), listExecutions: vi.fn().mockResolvedValue([]),
       terminate: vi.fn().mockResolvedValue({ status: "remote_stopped", aisJobId: "job" }) };
     const service = new SessionRecoveryTaskService({ controlPlaneEnvironment: "pre", tasks, agent,
+      authorizeCreation: request => requireRecoveryEnabled(config, request, new AppConfigRepository(db)),
       notifier: { notify: vi.fn() }, reporter: { report: vi.fn() }, observationMs: 3600000 });
     recovery = createMonitoringRecoveryTrigger({ config, service });
     await start();

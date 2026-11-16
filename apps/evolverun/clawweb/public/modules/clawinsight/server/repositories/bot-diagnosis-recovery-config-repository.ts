@@ -15,12 +15,16 @@ const project = (r: Row): BotDiagnosisRecoveryConfig => ({ botId: r.bot_id, enti
 export class BotDiagnosisRecoveryConfigRepository implements BotDiagnosisRecoveryConfigStore {
   constructor(private readonly db: IDatabase) {}
   async findForOwner(target: { botId: string; ownerId: string; env: string }): Promise<BotDiagnosisRecoveryConfig | null> {
+    const resolved = await this.resolveTargetForOwner(target);
+    return resolved ? this.find(resolved) : null;
+  }
+  async resolveTargetForOwner(target: { botId: string; ownerId: string; env: string }): Promise<MonitoringTarget | null> {
     // Recovery requests carry Owner IDs. Resolve the current directory entity rather than assuming they are identical.
     const exact = (column: string) => this.db.dbType === 'sqlite' ? `${column} COLLATE BINARY` : `BINARY ${column}`;
     const bots = await this.db.query<{ entity_id: string }>(`SELECT entity_id FROM ac_bots WHERE is_delete = 0
       AND ${exact('bot_id')} = ? AND ${exact('owner_id')} = ? AND ${exact('env')} = ? LIMIT 2`, [target.botId, target.ownerId, target.env]);
     if (bots.length !== 1) return null;
-    return this.find({ botId: target.botId, entityId: bots[0].entity_id, env: target.env });
+    return { botId: target.botId, entityId: bots[0].entity_id, env: target.env };
   }
   async find(target: MonitoringTarget): Promise<BotDiagnosisRecoveryConfig | null> {
     return (await this.findMany([target]))[0];

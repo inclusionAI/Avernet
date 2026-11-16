@@ -384,7 +384,7 @@ it("reads the explicit Bot Owner switch for each send and ignores the legacy glo
   expect(await notifier.notify(input)).toBe(true);
   row.configJson = '{"notifications":{"owner":{"enabled":false}}}';
   expect(await notifier.notify(input)).toBe(false);
-  bots.findForOwner.mockRejectedValueOnce(new Error('database unavailable'));
+  bots.find.mockRejectedValueOnce(new Error('database unavailable'));
   expect(await notifier.notify(input)).toBe(false);
   config.findByKey.mockRejectedValueOnce(new Error('transport config unavailable'));
   expect(await notifier.notify(input)).toBe(false);
@@ -473,4 +473,37 @@ it("describes a failed business verification as unrecovered rather than an execu
   await vi.waitFor(() => expect(events.some(event => event.payload.sent === true)).toBe(true));
   expect(sender.send.mock.calls[0][0].title).not.toContain("执行失败");
   expect(sender.send.mock.calls[0][0].text).toContain("原任务未恢复");
+});
+
+
+it('delivers legacy and migrated notifications through the same claim and audit pipeline', async () => {
+  const { notifier, botConfigurations, config, sender, task, events } = setup();
+  task.request.target.env = 'prod';
+  const saved = (await botConfigurations.find({ botId: 'bot', entityId: 'owner', env: 'prod' }))!;
+  botConfigurations.find.mockResolvedValue(null);
+  config.findByKey.mockImplementation(async key => {
+    if (key === SESSION_RECOVERY_OWNER_NOTIFICATIONS_KEY) return { enabled: 0, config_json: '{}' };
+    if (key === SESSION_RECOVERY_NOTIFICATIONS_KEY) return { enabled: 1, config_json: JSON.stringify({
+      webhook: 'https://business.invalid/send', timeout_seconds: 10,
+      bot_webhooks: [{ bot_id: 'bot', entity_id: 'owner', webhook: 'https://legacy-private.invalid/send' }],
+    }) };
+    return { enabled: 1, config_json: JSON.stringify({ routes: { test: { webhook: 'https://migrated-private.invalid/send', timeout_seconds: 5 } } }) };
+  });
+  notifier.after(message);
+  await vi.waitFor(() => expect(events.some(event => event.payload.sent)).toBe(true));
+  expect(sender.send).toHaveBeenLastCalledWith(expect.objectContaining({ webhook: 'https://legacy-private.invalid/send' }));
+  botConfigurations.find.mockResolvedValue(saved);
+  notifier.after(message); // Changing policy cannot claim/deliver the same notification twice.
+  await new Promise(resolve => setImmediate(resolve));
+  expect(sender.send).toHaveBeenCalledOnce();
+  task.timeline.push({ ...task.timeline[0], event_id: 'call-2' });
+  notifier.after({ ...message, eventId: 'call-2' });
+  await vi.waitFor(() => expect(sender.send).toHaveBeenCalledTimes(2));
+  expect(sender.send).toHaveBeenLastCalledWith(expect.objectContaining({ webhook: 'https://migrated-private.invalid/send', timeoutSeconds: 5 }));
+  expect(JSON.stringify(events)).not.toContain('https:');
+  saved.configJson = '{}';
+  task.timeline.push({ ...task.timeline[0], event_id: 'call-3' });
+  notifier.after({ ...message, eventId: 'call-3' });
+  await new Promise(resolve => setImmediate(resolve));
+  expect(sender.send).toHaveBeenCalledTimes(2); // No inheritance from the still-enabled legacy channel.
 });
