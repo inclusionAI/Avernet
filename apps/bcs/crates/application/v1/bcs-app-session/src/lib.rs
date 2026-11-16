@@ -26,7 +26,7 @@ pub use delivery_admission::{DeliveryAdmissionServiceImpl, ERROR_INTERNAL_READ};
 pub use file::SessionFileApplicationServiceImpl;
 pub use group_context_access::GroupContextAddAccessGuard;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -40,9 +40,9 @@ use bcs_service_api::application::v1::{
     session::{
         AddSessionParticipant, CollectSession, CompleteSession, CreateSession,
         CreateSessionOutcome, DeleteSession, DeleteSessionParticipant, GetSession, ListSessions,
-        SessionCollectionResult, SessionCompletionResult, SessionDetail, SessionParticipant,
-        SessionService, SessionStatus as V1SessionStatus, SessionSummary, UncollectSession,
-        UpdateSession, UpdateSessionParticipant,
+        SessionCollectionResult, SessionCompletionResult, SessionDetail, SessionListSort,
+        SessionParticipant, SessionService, SessionStatus as V1SessionStatus, SessionSummary,
+        UncollectSession, UpdateSession, UpdateSessionParticipant,
     },
 };
 use bcs_service_api::core::SessionAuthorizationCoreService;
@@ -288,31 +288,76 @@ impl SessionService for SessionServiceImpl {
         self.load_group(&command.group_id).await?;
         let participant_id = Some(view_actor_id.as_str());
         let status = command.status.map(map_status_to_domain);
-        let mut sessions = self
-            .sessions
-            .list_by_group(
-                &command.group_id,
-                status,
-                command.offset,
-                command.limit,
-                None,
-                participant_id,
-            )
-            .await
-            .map_err(map_session_error)?;
-        // Repo ORDER BY already guarantees created_at DESC, session_id ASC
-        // (VSN7M); keep this sort as a no-op safety net for impls that do not
-        // honour the ordered contract.
-        sessions.sort_by(|a, b| {
-            b.created_at
-                .cmp(&a.created_at)
-                .then_with(|| a.id.cmp(&b.id))
-        });
+        // The pre-pagination count of the viewer-scoped candidate set. It is
+        // also the full-set page size `last_activity` fetches (design D5).
         let total = self
             .session_repo
             .count_by_group(&command.group_id, status, None, participant_id)
             .await
             .map_err(map_service_error)?;
+        // Design D4/D5: viewer scope resolves FIRST and always — both paths
+        // read only Sessions the View Actor participates in. `last_activity`
+        // needs the key globally, so it batches ONE lookup over ALL candidates
+        // and sorts in-app BEFORE pagination; the default mode keeps today's
+        // repository ordering and pays ONE batched lookup over the PAGE ids.
+        let (sessions, activity) = match command.sort {
+            SessionListSort::CreatedAt => {
+                let mut sessions = self
+                    .sessions
+                    .list_by_group(
+                        &command.group_id,
+                        status,
+                        command.offset,
+                        command.limit,
+                        None,
+                        participant_id,
+                    )
+                    .await
+                    .map_err(map_session_error)?;
+                // Repo ORDER BY already guarantees created_at DESC, session_id ASC
+                // (VSN7M); keep this sort as a no-op safety net for impls that do not
+                // honour the ordered contract.
+                sessions.sort_by(|a, b| {
+                    b.created_at
+                        .cmp(&a.created_at)
+                        .then_with(|| a.id.cmp(&b.id))
+                });
+                let page_ids = sessions
+                    .iter()
+                    .map(|session| session.id.clone())
+                    .collect::<Vec<_>>();
+                let activity = self.session_activity_keys(&page_ids).await?;
+                (sessions, activity)
+            }
+            SessionListSort::LastActivity => {
+                let candidates = self
+                    .sessions
+                    .list_by_group(&command.group_id, status, 0, total, None, participant_id)
+                    .await
+                    .map_err(map_session_error)?;
+                let candidate_ids = candidates
+                    .iter()
+                    .map(|session| session.id.clone())
+                    .collect::<Vec<_>>();
+                let activity = self.session_activity_keys(&candidate_ids).await?;
+                // This in-app sort is the authoritative order for this mode
+                // (the repo returned its `created_at` order): the D1 key with
+                // the session's own `created_at` fallback and `session_id ASC`
+                // as the stable tie-break, applied before pagination.
+                let mut ordered = candidates;
+                ordered.sort_by(|a, b| {
+                    let left = activity.get(&a.id).copied().unwrap_or(a.created_at);
+                    let right = activity.get(&b.id).copied().unwrap_or(b.created_at);
+                    right.cmp(&left).then_with(|| a.id.cmp(&b.id))
+                });
+                let page = ordered
+                    .into_iter()
+                    .skip(saturating_usize(command.offset))
+                    .take(saturating_usize(command.limit))
+                    .collect::<Vec<_>>();
+                (page, activity)
+            }
+        };
         // Surface per-session collected state for the view actor, but only
         // when the request explicitly names that actor (mirrors the legacy
         // `list_sessions_for_group` gating: collected is only meaningful
@@ -342,7 +387,12 @@ impl SessionService for SessionServiceImpl {
         let items = sessions
             .iter()
             .map(|s| {
-                let mut summary = project_summary(s, &avatars);
+                // The same map entry for a given Session under every mode; a
+                // Session with no persisted messages falls back to its own
+                // `created_at` (D1), never `None`.
+                let last_activity_at =
+                    Some(activity.get(&s.id).copied().unwrap_or(s.created_at));
+                let mut summary = project_summary(s, &avatars, last_activity_at);
                 if command.view_bot_id.is_some() {
                     summary.collected = Some(collected_set.contains(&s.id));
                 }
@@ -756,6 +806,33 @@ impl SessionService for SessionServiceImpl {
     }
 }
 
+// ── recent-activity list keys ─────────────────────────────────────────
+
+impl SessionServiceImpl {
+    /// One batched D1 session-activity lookup for a list call (design
+    /// D4/D5/D6): the max persisted message `created_at` per session id. The
+    /// default mode submits the PAGE ids, `last_activity` submits every
+    /// viewer-scoped candidate; an empty page pays no store read. A lookup
+    /// error fails the request (500) instead of serving a mis-ordered or
+    /// mis-dated page.
+    async fn session_activity_keys(
+        &self,
+        session_ids: &[String],
+    ) -> Result<HashMap<String, u64>, ApplicationError> {
+        if session_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        self.history
+            .last_activity_by_session_ids(session_ids)
+            .await
+            .map_err(|error| {
+                ApplicationError::internal(format!(
+                    "Session message activity lookup failed: {error}"
+                ))
+            })
+    }
+}
+
 // ── projection helpers ────────────────────────────────────────────────
 
 fn merge_participant_state_machine_snapshot(
@@ -769,6 +846,10 @@ fn merge_participant_state_machine_snapshot(
 }
 
 // ── error mappers ─────────────────────────────────────────────────────
+
+fn saturating_usize(value: u64) -> usize {
+    usize::try_from(value).unwrap_or(usize::MAX)
+}
 
 fn map_session_error(error: SessionUseCaseError) -> ApplicationError {
     match error {

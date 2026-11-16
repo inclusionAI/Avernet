@@ -25,9 +25,9 @@ use bcs_service_api::application::v1::{
     AddSessionParticipant, ApplicationError as V1ApplicationError, AuthenticatedAppIdentity,
     AuthenticatedBotIdentity, AuthenticatedCaller, AuthenticatedUserIdentity, CollectSession,
     CompleteSession, CreateSession, DeleteSession, DeleteSessionParticipant, GetSession,
-    ListSessionMessages, ListSessions, SessionMessageService, SessionParticipantInput,
-    SessionService, SessionStatus as V1SessionStatus, UncollectSession, UpdateSession,
-    UpdateSessionParticipant,
+    ListSessionMessages, ListSessions, SessionListSort, SessionMessageService,
+    SessionParticipantInput, SessionService, SessionStatus as V1SessionStatus, UncollectSession,
+    UpdateSession, UpdateSessionParticipant,
 };
 use bcs_service_api::port::{ParticipantViewBindingPort, ParticipantViewScopeChangeLease};
 use bcs_service_api::port::repo::{NewSessionParams, SessionRepoPort};
@@ -374,6 +374,27 @@ impl Fixture {
     }
 
     async fn new_with_bots(bots: Arc<BotCore>) -> Self {
+        let history = Arc::new(RecordingHistoryService::default());
+        Self::new_with_history_source(bots, history.clone(), history).await
+    }
+
+    /// Fixture whose Session facade reads batched activity keys from `source`
+    /// (recent-activity sort suite). The recording history double stays
+    /// available as a field for the message-history suites but is not the
+    /// facade's history source.
+    async fn new_with_activity_history(
+        bots: Arc<BotCore>,
+        source: Arc<dyn GroupMessageHistoryService>,
+    ) -> Self {
+        let history = Arc::new(RecordingHistoryService::default());
+        Self::new_with_history_source(bots, source, history).await
+    }
+
+    async fn new_with_history_source(
+        bots: Arc<BotCore>,
+        history_source: Arc<dyn GroupMessageHistoryService>,
+        history: Arc<RecordingHistoryService>,
+    ) -> Self {
         let group_repo: Arc<dyn bcs_service_api::port::repo::GroupRepoPort> =
             Arc::new(MemoryGroupRepo::new());
         let groups = Arc::new(GroupCore::with_repo(group_repo.clone()));
@@ -381,7 +402,6 @@ impl Fixture {
         let friends = Arc::new(FriendCore::memory().with_relation(relation.clone()));
         let friends_handle = friends.clone();
         let session_repo: Arc<dyn SessionRepoPort> = Arc::new(MemorySessionRepo::new());
-        let history = Arc::new(RecordingHistoryService::default());
         let runtime = Arc::new(RecordingRuntime::default());
         let system_messages = Arc::new(RecordingSystemMessageService::default());
         let sessions = Arc::new(SessionManagementServiceImpl::new(
@@ -415,7 +435,7 @@ impl Fixture {
             bots.clone(),
             friends,
             session_repo.clone(),
-            history.clone(),
+            history_source,
             runtime.clone(),
             system_messages.clone(),
         )
@@ -818,3 +838,6 @@ mod avatars;
 
 #[path = "v1_session_service/avatar_budget.rs"]
 mod avatar_budget;
+
+#[path = "v1_session_service/activity_sort.rs"]
+mod activity_sort;
