@@ -153,24 +153,22 @@ class TestRunChat:
         assert result.data.run_id == "run-draft"
 
     @pytest.mark.asyncio
-    async def test_lifecycle_stage_bot_options_not_dict(self):
-        """bot_options is not a dict → lifecycle_stage is None."""
-        api_key = _make_api_key_record()
-        ctx = _make_context()
-        req = _make_run_request(metadata={"bot_options": "not-a-dict"})
+    @pytest.mark.parametrize("value", [None, "", "secret-marker", 0, 1, False, [], [1]])
+    async def test_rejects_non_object_bot_options_before_runner(self, value):
+        runner = AsyncMock()
+        request = _make_run_request(metadata={"bot_options": value})
 
-        mock_runner = AsyncMock()
-        mock_runner.chat = AsyncMock(return_value="run-bad")
+        with pytest.raises(HTTPException) as exc:
+            await run_chat(
+                request=request,
+                api_key_record=_make_api_key_record(),
+                context=_make_context(),
+                bot_runner=runner,
+            )
 
-        result = await run_chat(
-            request=req,
-            api_key_record=api_key,
-            context=ctx,
-            bot_runner=mock_runner,
-        )
-
-        assert result.code == 0
-        assert result.data.run_id == "run-bad"
+        assert exc.value.status_code == 400
+        assert exc.value.detail == {"code": 40001, "message": "Invalid parameter"}
+        runner.chat.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_bot_not_found_returns_404(self):
