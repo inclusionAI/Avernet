@@ -500,3 +500,14 @@ exclusive cursor and at most 100 keys. No collaborator presence, roster bound,
 or Space eligibility read is required. These are read-only v1 contracts, with
 no schema, sync-state, or persistence-write change. Missing/deleted rows and
 SQL failures fail closed rather than supplying a replacement Owner.
+
+## Caller installation transaction
+
+`ExpertChatInstanceRepository.caller_token_refresh` locks the exact scoped
+instance before signing and yields its latest snapshot. Callers recheck due time
+and target identity under that lock, install the credential, then set the state's
+`expires_at`. Unset expiry and exceptional exits leave the ledger unchanged;
+submitted expiry must be aware, future and strictly advance the installed value.
+`caller_token_update` uses the same scope for IAM's existing longer-token check.
+Production transactions use SELECT FOR UPDATE; SQLite tests verify serialized
+transaction behavior and rollback, not production row-lock implementation.
