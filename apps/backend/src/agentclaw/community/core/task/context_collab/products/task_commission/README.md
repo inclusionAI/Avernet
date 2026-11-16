@@ -75,8 +75,15 @@ those references without renegotiating or selecting latest.
    through [DI installation](../../../../../di/modules/context_collab_products.py).
    “Online” means an immutable code-owned definition installed into the actual
    application catalog, not a mutable registry or a mocked registration call.
-2. Business staff create a task with that exact profile and designate the Bot.
-   SQL stores the goal/body/executor; L5 creates only an **Open** MethodBinding,
+2. Business staff first create L4 work with `ColletCreateCommand(to_space,
+   principal_ref, objective, executor_refs=(bot,))`. This atomically stores Collet,
+   root Task and initial Event without a Profile or binding input. They then call
+   `ProductInstantiationServiceProtocol.instantiate(ProductInstantiateCommand(
+   collet_id, profile_ref, expected_version), context)` to select that exact L6
+   profile and initialize L5. This separate installation preserves initial L4
+   evidence and requires an untouched Collet. L4 accepts zero/one/many executors;
+   this product still requires one scalar assignee. Existing product publishers
+   retain their combined application flow. L5 creates only an **Open** MethodBinding,
    with no Group roster, Group member or Single selection. A selected-agent
    RoleBinding is designation, not admission.
 3. The designated, authenticated Bot calls **L5 Open's `query_opportunities`**
@@ -503,7 +510,8 @@ mock delivery nor signed local HTTP establishes live L1 interoperability.
 
 The journey fixture temporarily wraps selected real calls to print
 `[commission-flow][module/directory]` entries, returns and resulting statuses.
-It covers L6 profile preparation, L5 query/admission, mock outbound delivery,
+It covers L6 profile preparation, pure L4 creation, explicit L6 instantiation,
+L5 query/admission, mock outbound delivery,
 authenticated HTTP ingress, G1/G4 checks and atomic Collet/Task/Event writes.
 These wrappers preserve real execution and are removed after each test; they
 add no production stdout and do not dump credentials or request bodies.

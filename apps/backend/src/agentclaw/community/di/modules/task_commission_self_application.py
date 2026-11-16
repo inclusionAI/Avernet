@@ -58,7 +58,7 @@ from agentclaw.community.core.task.context_collab.method_service_api import (
 from agentclaw.community.core.task.context_collab.persistence.method_store import (
     MethodStoreProtocol,
 )
-from agentclaw.community.core.task.context_collab.persistence.repository import (
+from agentclaw.community.core.task.context_collab.l6_products.persistence.repository import (
     ContextCollabRepositoryProtocol,
     ContextStatusRecord,
 )

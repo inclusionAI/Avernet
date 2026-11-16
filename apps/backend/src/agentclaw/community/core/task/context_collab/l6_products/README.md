@@ -2,14 +2,18 @@
 
 Owner: Backend `core/task/context_collab`. This layer defines versioned product
 composition; it is not another Task engine, identity registry or permission
-system. These are internal, transport-free domain contracts, not a new Service
-API or product-specific wire protocol.
+system. It owns internal, transport-free domain contracts and composition
+Service APIs, not a new HTTP/ACCS operation family or product-specific wire protocol.
 
 ## Provides and consumes
 
 | Contract | Owner/source | Meaning |
 | --- | --- | --- |
 | ProductProfileCreateCommand / create_product_profile | [operations/](operations/) | Typed, pure creation operation: validate and return an immutable definition without installation, instances or runtime writes. |
+| ProductInstantiateCommand / ProductInstantiationServiceProtocol | [operations/contracts.py](operations/contracts.py), [implementation](operations/product_instantiation.py) | Explicit pinned selection on existing untouched L4 work, then invoke L5 initialization. |
+| CollaborationCreateCommand / ContextCollabServiceProtocol | [service_api.py](service_api.py), [implementation](operations/collaboration_creation.py) | Legacy combined Method/product creation extension over L4; root API is an identity reexport. |
+| ProductCollaborationPolicy | [operations/collaboration_policy.py](operations/collaboration_policy.py) | Product-aware adapter to L4-owned policy ports; interprets selected L6 evidence without owning Work or query execution. |
+| ProductMethodBindingRecovery | [operations/method_bootstrap.py](operations/method_bootstrap.py) | Translates pinned product/identity facts into L5 initialization/recovery inputs through L5-owned operations and ports. |
 | ProductProfileDefinition | [contracts.py](contracts.py) | Versioned composition, scenario roles, optional domain/workflow mappings, Task contract selection, compatibility and G1–G4 implementation requirements. |
 | MethodCompositionTemplate | [contracts.py](contracts.py) | Required/optional Method versions and instantiation scope. Current runtime supports one explicit Collet-scoped top-level binding, including the existing composite binding representation. |
 | ScenarioRole | [binding.py](binding.py) | Maps owner/assignee to actual L4 Participant and RoleBinding facts. No L3 grant is created. |
@@ -26,7 +30,7 @@ an installed/default global catalog. Product teams author concrete definitions i
 `products/`; the composition root explicitly installs them in
 [`di/modules/context_collab_products.py`](../../../../di/modules/context_collab_products.py).
 `TaskModule` provides one catalog per injector and injects that same instance into
-repositories, generic/product services, application Method bootstrap/recovery and the bounded
+repositories, generic/product services, L6 Method bootstrap/recovery and the bounded
 Open adapter. Pure selection, instance and G4 helpers require this catalog
 explicitly; none fall back to global/default product installation. An empty or
 incomplete installation rejects unknown profiles rather than silently recovering
@@ -96,8 +100,9 @@ non-installation and shared rejection rules.
 
 L6 pure modules consume L2–L5 value contracts and the installed L5 profile
 catalog. They do not import concrete product definitions/services, DI,
-repositories, HTTP or remote clients. Application services and the existing
-repository compose the contracts.
+repositories, HTTP or remote clients. L6 composition operations consume the
+existing repository/MethodStore contracts and invoke lower-layer operations;
+concrete product services and DI remain outside L6.
 Shared G4 enforcement lives in
 [`g4_contracts_consistency/product_contract.py`](../g4_contracts_consistency/product_contract.py).
 
@@ -225,6 +230,77 @@ may intentionally have no automatic Open publication contract. Such definitions
 cannot be consumed by this publication use case.
 
 ## Instantiation and persistence
+
+### Persistence ownership
+
+[`persistence/repository.py`](persistence/repository.py) owns product selection,
+product listing and the rich legacy composition adapter;
+[`persistence/records.py`](persistence/records.py) owns its request/results and
+`ProductRecordDecoder`. The actual primitive SQL repository, canonical ORM
+models, Task/evidence checks and lower-only creation are in
+[`L4 persistence`](../l4_context_primitives/persistence/).
+The L6 adapter delegates primitive SQL operations to L4 while preserving legacy
+rich results and atomic combined creation. The old shared
+`context_collab/persistence/repository.py` path reexports this L6 adapter only;
+it is not the L4 injection contract.
+
+The composition root separately binds an exact L4 repository instance to the
+L4-owned repository Protocol. It supplies `ProductRecordDecoder` at the storage
+read seam so L6/G1/G4 can inspect pinned metadata from the same SQL snapshot,
+without a second lookup or an upper-layer import in L4. Primitive creation does
+not invoke that decoder or query a catalog. A standalone L4 repository instead
+uses the lower-only decoder with no product dependency. The existing metadata
+column/table names and tenant/env isolation remain unchanged.
+
+### Explicit installation on an existing Collet
+
+Pure L4 `create_collet(ColletCreateCommand, context)` does not select a Profile,
+Method or bindings. Its input contains only space, responsible principal,
+objective and zero/one/many designated executor references. To apply a product,
+call the separate L6-owned
+[`ProductInstantiationServiceProtocol`](operations/contracts.py):
+
+```python
+instance = product_instantiation.instantiate(
+    ProductInstantiateCommand(
+        collet_id=collet.collet_id,
+        profile_ref=profile.ref,
+        expected_version=collet.version,
+    ),
+    actor_context,
+)
+```
+
+[`operations/product_instantiation.py`](operations/product_instantiation.py)
+authorizes only the Collet initiator or responsible principal and resolves the
+exact installed version; it never selects latest. The repository CAS installs
+immutable selection on an untouched Collet/root Task (both revision 1), rejecting
+stale, repeated or conflicting selections. It validates the selection against
+the existing objective, typed executor and creation evidence. The original Task
+and Event remain unchanged, as do their revisions and the Collet event head.
+The L6 operation then invokes L5 initialization for the pinned Method and role references.
+
+**Current product limit:** ScenarioRole's `executor_ref` source is scalar.
+This installation path rejects multiple designated executors rather than dropping
+all but the first; required-role rules may also reject unassigned Tasks. These
+are upper-layer product constraints, not restrictions on L4 creation. Supporting
+multi-subject product roles requires a separate contract evolution.
+
+SQL selection and MethodStore writes are separate transactions. A SQL error
+rolls back selection and no binding is created. A MethodStore error propagates;
+SQL selection may already be committed, and the existing top-level recovery
+adapter can rebuild that binding. Retrying installation cannot replace selection.
+A method-independent Collet cannot be healed into an invented default Method.
+[SQLite tests](../../../../../../../tests/community/repository/task/context_collab/test_product_instantiation.py)
+cover these boundaries and the [commission journey](../../../../../../../tests/community/core/task/context_collab/products/test_task_commission_end_to_end.py)
+uses the injected operation before calling Open.
+
+### Existing combined application/product flows
+
+The existing `create_collaboration(CollaborationCreateCommand, context)` HTTP
+facade is owned by [L6](operations/collaboration_creation.py); concrete product
+publishers stay in `products/`. These upper-layer combined creation flows are not
+the pure L4 command:
 
 1. Generic creation validates the existing wire/method structure and G1 policy.
    Product services construct their declared product composition and also use G1.
@@ -401,7 +477,8 @@ axes; SQL signed-tenant tests do not establish full MethodStore multitenancy.
 Verification owners:
 
 - [Commission declaration/adapter tests](../../../../../../../tests/community/core/task/context_collab/products/test_task_commission_l6.py).
-- [L6 dependency/installation gates](../../../../../../../tests/community/core/task/context_collab/test_l6_layering.py).
+- [L6 dependency/installation gates](../../../../../../../tests/community/core/task/context_collab/test_l6_layering.py): no reverse imports from concrete products, DI or legacy compatibility entrypoints.
+- [L6 service placement/compatibility tests](../../../../../../../tests/community/core/task/context_collab/test_l6_service_placement.py): product orchestration ownership, canonical type identity and inherited L5 operations.
 - [DI singleton wiring](../../../../../../../tests/community/core/task/context_collab/test_service_real_repository.py).
 - [Optional-profile runtime tests](../../../../../../../tests/community/core/task/context_collab/test_optional_product_profiles.py): both contract modes, action/role/acceptance fences, exact machine selection, JSON validation and recovery without renegotiation.
 - [HTTP profile-version translation tests](../../../../../../../tests/community/adapters/http/task/test_commission_profile_versions.py): canonical positive versions, malformed selectors and oversized integer validation.
@@ -446,12 +523,24 @@ migration or permit mixed snapshot/Task-authoritative writers.
 
 ## Layer-owned operation boundary
 
-L6 resolves creation/profile contracts; it does not execute Method operations or
-own Work transitions. Application `services/method_bootstrap.py` translates
+Definition and Service API modules remain free of runtime/persistence and
+transport dependencies. They may consume G1's `ActorContext` value contract,
+not its authorizer implementation. Runtime composition and policy adapters
+belong in `operations/`, separate from these definitions.
+
+L6 owns product instantiation, the legacy combined creation entrypoint and
+product-aware policy/bootstrap/recovery adapters. It composes by invoking L5
+operations, never by reimplementing Method rules or Work transitions.
+[`operations/method_bootstrap.py`](operations/method_bootstrap.py) translates
 creation identities and pinned catalog versions into L5 `ResolvedMethodSpec`.
-L5 owns
-initial binding/roster creation and consumes an injected recovery port; it never
-imports L6 to heal a binding. Application/product Task/workflow selection
-supplies a machine ID/version to L4 Work, not a ProductProfile object. See the
+L5 owns binding/roster creation and consumes an injected recovery port; it never
+imports L6 to heal a binding. The L6
+[legacy lifecycle constructor](operations/method_lifecycle.py) only assembles that
+adapter for old `product_catalog=` callers; its Method operations are inherited
+from L5. New DI injects the L5 implementation and recovery port separately.
+
+L6 product Task/workflow selection supplies a machine ID/version to L4 Work,
+not a ProductProfile object. `services/` and root APIs only reexport layer-owned
+implementations/contracts, and L6 must not import them back. See the
 [operation ownership map](../README.md#operation-ownership) for ports, compatibility
 imports and preserved restart/transaction limitations.

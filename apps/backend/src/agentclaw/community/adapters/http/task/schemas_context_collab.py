@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_serializer
 
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabValidationError,
@@ -36,7 +36,7 @@ from agentclaw.community.core.task.context_collab.l5_methods.method_binding impo
 from agentclaw.community.core.task.context_collab.l6_products.contracts import VersionedProfileRef
 from agentclaw.community.core.task.context_collab.service_api import (
     ContextCollabStatusProjection,
-    ColletCreateCommand,
+    CollaborationCreateCommand,
     EventAcceptedResult,
     EventAppendCommand,
 )
@@ -180,21 +180,22 @@ class ColletCreateRequest(BaseModel):
         description="Optional exact L6 product profile version.",
     )
 
-    def to_domain(self) -> ColletCreateCommand:
-        return ColletCreateCommand(
+    def to_domain(self) -> CollaborationCreateCommand:
+        return CollaborationCreateCommand(
             to_space=self.space.to_domain(),
             principal_ref=self.principal_ref.to_domain(),
             product_kind=self.product_kind,
             workflow_kind=self.workflow_kind,
             method_kind=self.method_kind,
-            executor_ref=(
-                self.executor_ref.to_domain() if self.executor_ref else None
-            ),
+            executor_ref=(self.executor_ref.to_domain() if self.executor_ref else None),
             objective=self.objective,
             resource_refs=[ref.to_domain() for ref in self.resource_refs],
             product_profile_ref=(
-                VersionedProfileRef(self.product_profile_id, self.product_profile_version)
-                if self.product_profile_id is not None and self.product_profile_version is not None
+                VersionedProfileRef(
+                    self.product_profile_id, self.product_profile_version
+                )
+                if self.product_profile_id is not None
+                and self.product_profile_version is not None
                 else None
             ),
         )
@@ -307,8 +308,21 @@ class CurrentSnapshotDto(BaseModel):
         default=None,
         description="Bare id of the executing agent, when one is bound.",
     )
-    method_kind: str = Field(description="L5 collaboration method in effect.")
+    executor_refs: list[str] | None = Field(
+        default=None,
+        description="All executor ids for multiple-executor Work; absent for legacy single/unassigned views.",
+    )
+    method_kind: str | None = Field(
+        description="Selected L5 method; null before binding."
+    )
     progress: ProgressDto = Field(description="Progress counters.")
+
+    @model_serializer(mode="wrap")
+    def serialize(self, handler):
+        data = handler(self)
+        if self.executor_refs is None:
+            data.pop("executor_refs", None)
+        return data
 
 
 class ContextEventBriefDto(BaseModel):
@@ -463,13 +477,18 @@ def _snapshot_to_dto(snapshot: dict) -> CurrentSnapshotDto:
         status=snapshot["status"],
         principal_ref=_principal_id(snapshot["principal_ref"]),
         executor_ref=_principal_id(snapshot["executor_ref"]),
+        executor_refs=(
+            [_principal_id(ref) for ref in snapshot["executor_refs"]]
+            if "executor_refs" in snapshot
+            else None
+        ),
         method_kind=snapshot["method_kind"],
         progress=ProgressDto(**progress),
     )
 
 
 def created_collet_to_dto(
-    collet: Collet, command: ColletCreateCommand
+    collet: Collet, command: CollaborationCreateCommand
 ) -> ContextCollabCreatedResultDto:
     """Preserve the creation wire receipt without adding read views to Collet.
 

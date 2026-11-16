@@ -48,10 +48,10 @@ from agentclaw.community.core.task.context_collab.persistence.repository import 
 )
 from agentclaw.community.core.task.context_collab.service_api import (
     ActorContext,
-    ColletCreateCommand,
+    CollaborationCreateCommand,
     EventAppendCommand,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.context_collab_service import (
+from agentclaw.community.core.task.context_collab.l6_products.operations.collaboration_creation import (
     ContextCollabService,
 )
 from tests.community.core.task.context_collab.product_catalog import PRODUCT_CATALOG
@@ -74,7 +74,7 @@ _EVENT_ENTRY_FIELDS = frozenset(
 )
 
 
-def make_create_command(**overrides) -> ColletCreateCommand:
+def make_create_command(**overrides) -> CollaborationCreateCommand:
     """构造创建命令(spec §6.2 指定执行请求示例);可按字段覆盖。"""
     fields = {
         "space": SpaceRef(space_id="space_workspace_001", environment="prod"),
@@ -91,7 +91,7 @@ def make_create_command(**overrides) -> ColletCreateCommand:
         ],
     }
     fields.update(overrides)
-    return ColletCreateCommand(**fields)
+    return CollaborationCreateCommand(**fields)
 
 
 def make_actor() -> ActorContext:
@@ -191,7 +191,7 @@ class TestSpecAcceptance:
     ):
         """§12.2 #1:创建落 1 行 Collet + 1 行初始 Event;目标/方法/执行者
         与进度都在 Collet JSON 快照中(引擎直查列证,非服务回声)。"""
-        created = service.create_collet(make_create_command(), make_actor())
+        created = service.create_collaboration(make_create_command(), make_actor())
 
         assert _count(engine, ContextCollabColletModel) == 1
         assert _count(engine, ContextCollabEventModel) == 1
@@ -224,7 +224,7 @@ class TestSpecAcceptance:
         领域校验错。Capability/外部授权由 P2 接缝补充,不在 P1 范围。
         """
         with pytest.raises(ContextCollabValidationError, match="executor_ref"):
-            service.create_collet(make_create_command(executor_ref=None), make_actor())
+            service.create_collaboration(make_create_command(executor_ref=None), make_actor())
 
         # responsible(principal_ref)在请求中缺失 → wire 解析为命令字段的
         # 取值路径即拒绝;不允许装配出无责任主体的创建命令。
@@ -240,7 +240,7 @@ class TestSpecAcceptance:
     ):
         """§12.2 #3:user_interaction.posted 正文直接 payload.content,
         不出现 content_ref(引擎直查落库 payload,非服务回声)。"""
-        created = service.create_collet(make_create_command(), make_actor())
+        created = service.create_collaboration(make_create_command(), make_actor())
         content = "评审结论:G4 合约一致性优先落地"
 
         msg_event_id = _append_message(
@@ -262,7 +262,7 @@ class TestSpecAcceptance:
     ):
         """§12.2 #4:事件都带 parent_event 字段;trunk_events=true 只筛选
         主干列表,current_snapshot / current_event / 统计两视角一致。"""
-        created = service.create_collet(make_create_command(), make_actor())
+        created = service.create_collaboration(make_create_command(), make_actor())
         initial_event_id = created.current_event_id
         main_event_id = _append_message(  # 主干延续:parent=当前链头(初始事件)。
             service,
@@ -324,7 +324,7 @@ class TestSpecAcceptance:
     def test_5_status_shape_is_three_sections_without_steps(self, service):
         """§12.2 #5:查询返回 current_snapshot / current_event /
         task_progress.events[],不使用 steps[] 字段(顶层键集逐字钉死)。"""
-        created = service.create_collet(make_create_command(), make_actor())
+        created = service.create_collaboration(make_create_command(), make_actor())
         _append_message(
             service,
             created.collet_id,
@@ -360,7 +360,7 @@ class TestSpecAcceptance:
     def test_6_get_status_does_not_rewrite_collet(self, service, engine):
         """§12.2 #6:查询纯读:连续 get_status 不推进 context_version、
         不反向改写落库的 Collet 快照(引擎直查列证)。"""
-        created = service.create_collet(make_create_command(), make_actor())
+        created = service.create_collaboration(make_create_command(), make_actor())
         _append_message(
             service,
             created.collet_id,

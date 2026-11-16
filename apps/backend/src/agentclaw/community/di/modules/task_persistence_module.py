@@ -92,7 +92,18 @@ from agentclaw.community.core.task.task_context.task_graph_service import (
 from agentclaw.community.core.task.repository.task_intake_repository import (
     TaskIntakeRepository, TaskIntakeRepositoryProtocol,
 )
-from agentclaw.community.core.task.context_collab.persistence.repository import (
+from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.records import (
+    ContextCollabRepositoryProtocol as L4ContextCollabRepositoryProtocol,
+)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.repository import (
+    ContextCollabRepository as L4ContextCollabRepository,
+)
+from agentclaw.community.core.task.context_collab.l6_products.catalog import ProductCatalog
+from agentclaw.community.core.task.context_collab.l6_products.persistence.records import (
+    ContextStatusRecord,
+    ProductRecordDecoder,
+)
+from agentclaw.community.core.task.context_collab.l6_products.persistence.repository import (
     ContextCollabRepository,
     ContextCollabRepositoryProtocol,
 )
@@ -114,6 +125,7 @@ from agentclaw.community.core.task.task_context.task_artifact.artifact_object_st
     TaskArtifactStorageConfig,
 )
 from agentclaw.community.di.task_trajectory_config import TrajectoryAnalysisConfig
+from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.core.task.task_context.task_artifact.artifact_object_storage import (
     TaskArtifactObjectStoragePlugin,
 )
@@ -124,10 +136,21 @@ logger = logging.getLogger("task.persistence")
 class TaskPersistenceModule(Module):
     """Bind the 5 task repository contracts to their unified ORM implementations."""
 
+    @singleton
+    @provider
+    def l4_context_collab_repository(
+        self,
+        db: DatabasePlugin,
+        catalog: ProductCatalog,
+    ) -> L4ContextCollabRepositoryProtocol[ContextStatusRecord]:
+        # L4 owns SQL and only sees a lower read contract. L6 decodes optional
+        # product metadata from that same read; creation never invokes it.
+        return L4ContextCollabRepository(db, ProductRecordDecoder(catalog))
+
     def configure(self, binder: Binder) -> None:
         binder.bind(TaskIntakeRepositoryProtocol, to=TaskIntakeRepository, scope=singleton)
-        # Context collab(BBS context collaboration protocol spec 2026-11-09):
-        # Collet/Event 两表 ORM 仓储,与上面的 intake 绑定同款 singleton。
+        # L6 product storage is separate from the L4 primitive provider above.
+        # Both delegate Collet/Task/Event SQL to the same canonical L4 models.
         binder.bind(
             ContextCollabRepositoryProtocol,
             to=ContextCollabRepository,

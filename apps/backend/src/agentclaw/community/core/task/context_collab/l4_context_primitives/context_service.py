@@ -1,21 +1,24 @@
-"""Context collab 服务用例编排(G1 校验 + G4 状态机 + G3 投影 + 仓储)。
+"""L4 collaboration: create, Work, append and authorized read orchestration.
 
-本文件实现 ``create_collet``(spec §6.2)、显式 L4 Work ``start``、
-``append_event``(spec §6.3,接入 G4 状态机与守卫)与 ``get_status``(spec §6.4,
-纯读路径:visibility 过滤 → G3 投影 → 进度统计,不写任何行)。
-``get_events`` 返回 G1 可见的 L4 事件事实,供库调用方读取成果引用等 payload。
-服务层不感知 HTTP/Pydantic,仓储与授权都以协议注入。
+Policy adapters interpret optional upper-layer constraints; this service owns
+schema validation, G1/G4 sequencing, Task resolution, CAS commits and G3 queries.
+It never imports an application service, Profile, Binding, catalog or rich repo.
 """
 
 from __future__ import annotations
+
+from typing import Generic, TypeVar
 
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabNotFoundError,
     ContextCollabValidationError,
 )
-from agentclaw.community.core.task.context_collab.g1_secure_govern.authorization import (
-    ContextCollabAuthorizerProtocol,
-    StructuralContextCollabAuthorizer,
+from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context import (
+    ActorContext,
+)
+from agentclaw.community.core.task.context_collab.g1_secure_govern.collet_creation import (
+    ColletCreationAuthorizer,
+    StructuralColletCreationAuthorizer,
 )
 from agentclaw.community.core.task.context_collab.g2_keep_reliable_live.reliability import (
     ensure_expected_version,
@@ -26,82 +29,37 @@ from agentclaw.community.core.task.context_collab.g3_observe_evaluate_evolve.obs
     build_progress,
     project_events,
 )
-from agentclaw.community.core.task.context_collab.g4_contracts_consistency.product_contract import (
-    validate_product_event,
-)
 from agentclaw.community.core.task.context_collab.g4_contracts_consistency.schema import (
     validate_event_body,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import Collet
+from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
+    Collet,
+)
 from agentclaw.community.core.task.context_collab.l4_context_primitives.event_envelope import (
     EventRecord,
+)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.contracts import (
+    AppendEventRecordRequest,
+    ColletCreateCommand,
+    EventAppendCommand,
+    WorkStartCommand,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.work import (
     prepare_event_append,
 )
-from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
-    MethodKind,
-    parse_method_kinds,
-)
-from agentclaw.community.core.task.context_collab.l5_methods.method_profile import (
-    METHOD_PROFILE_REGISTRY,
-)
-from agentclaw.community.core.task.context_collab.l5_methods.operations.initialization import (
-    ResolvedMethodSpec,
-    initialize_top_level_binding,
-)
-from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime import (
-    _now,
-    current_axes,
-)
-from agentclaw.community.core.task.context_collab.l6_products.binding import (
-    product_definition,
-)
-from agentclaw.community.core.task.context_collab.l6_products.catalog import (
-    ProductCatalog,
-)
-from agentclaw.community.core.task.context_collab.l6_products.creation_facts import (
-    creation_method_kind,
-    creation_profile_ref,
-    creation_product_kind,
-    creation_payload,
-    creation_workflow_kind,
-)
-from agentclaw.community.core.task.context_collab.l6_products.task_contracts import (
-    resolve_event_contract,
-)
-from agentclaw.community.core.task.context_collab.persistence.method_store import (
-    MethodStoreProtocol,
-)
-from agentclaw.community.core.task.context_collab.persistence.repository import (
-    AppendEventRecordRequest,
-    ContextCollabRepositoryProtocol,
-    CreateColletRecordRequest,
-    InitialEventDraft,
-)
-from agentclaw.community.core.task.context_collab.service_api import (
-    ActorContext,
-    ContextCollabServiceProtocol,
+from agentclaw.community.core.task.context_collab.l4_context_primitives.context_service_protocol import (
     ContextCollabStatusProjection,
-    ColletCreateCommand,
+    ContextServiceProtocol,
     EventAcceptedResult,
-    EventAppendCommand,
     TaskProgressProjectionDTO,
-    WorkStartCommand,
 )
-from injector import inject
+from agentclaw.community.core.task.context_collab.l4_context_primitives.service_ports import (
+    CollaborationPolicy,
+    CollaborationReadState,
+    CollaborationStore,
+)
 
-CREATION_EVENT_KIND = "task.created"
-CREATION_PRIMITIVE_TYPE = "Task"
-
-
-def _required_str(value: object, field: str) -> str:
-    """必填字符串校验;空串/非字符串抛 ``ContextCollabValidationError``。"""
-    if not isinstance(value, str) or not value.strip():
-        raise ContextCollabValidationError(
-            f"{field} must be a non-empty string, got: {value!r}"
-        )
-    return value
+StateT = TypeVar("StateT", bound=CollaborationReadState)
 
 
 _EVENT_PROJECTION_FIELDS = (
@@ -123,102 +81,36 @@ def _event_projection_dict(projection: EventProjection) -> dict:
     return {field: getattr(projection, field) for field in _EVENT_PROJECTION_FIELDS}
 
 
-class ContextCollabService(ContextCollabServiceProtocol):
-    """L4 北向创建、Work.start、追加与只读查询;复用 G1/G4 与原子写入。"""
+class ContextService(ContextServiceProtocol, Generic[StateT]):
+    """Concrete L4 service; injected ports carry storage and G1/G4 policies.
 
-    @inject
+    StateT binds a reader and its policy adapter to the same read snapshot.
+    L4 sees only CollaborationReadState; no extra metadata is interpreted here.
+    """
+
     def __init__(
         self,
-        repository: ContextCollabRepositoryProtocol,
-        method_store: MethodStoreProtocol,
-        authorizer: ContextCollabAuthorizerProtocol = StructuralContextCollabAuthorizer(),
-        *,
-        product_catalog: ProductCatalog,
+        repository: CollaborationStore[StateT],
+        policy: CollaborationPolicy[StateT],
+        authorizer: ColletCreationAuthorizer = StructuralColletCreationAuthorizer(),
     ) -> None:
-        self._product_catalog = product_catalog
         self._repository = repository
-        self._method_store = method_store
+        self._policy = policy
         self._authorizer = authorizer
 
     def create_collet(
         self, command: ColletCreateCommand, context: ActorContext
     ) -> Collet:
-        """创建用例(spec §6.2):校验 → G1 check → 仓储创建 → L5 顶层投影
-        → 返回持久化 Collet。
-
-        method/wire 与 objective 校验后走 G1 结构授权;产品选择元数据原样
-        透传,本用例不解析/校验 L6 Profile,也不自动选择版本或派生角色引用。
-        Single executor 与顶层 method 白名单由 G1 校验。创建不设幂等键
-        (spec 作者裁决):重复调用即重复创建。
-        """
-        ## TODO: remove profile id ref
-        objective = _required_str(command.objective, "objective")
-        method_kind = MethodKind.from_wire(command.method_kind).value
-        self._authorizer.check_create(
-            method_kind=method_kind,
-            executor_ref=command.executor_ref,
-            actor=context,
-        )
-        facts = creation_payload(
-            method_kind=method_kind,
-            executor_ref=command.executor_ref,
-            objective=objective,
-            resource_refs=tuple(command.resource_refs),
-            product_kind=command.product_kind,
-            workflow_kind=command.workflow_kind,
-            product_profile_ref=command.product_profile_ref,
-        )
-        record = self._repository.create_collet(
-            CreateColletRecordRequest(
-                space=command.to_space,
-                principal_ref=command.principal_ref,
-                method_kind=method_kind,
-                executor_ref=command.executor_ref,
-                objective=objective,
-                resource_refs=tuple(command.resource_refs),
-                product_kind=command.product_kind,
-                workflow_kind=command.workflow_kind,
-                product_profile_ref=command.product_profile_ref,
-                creation_facts=facts,
-                initial_event=InitialEventDraft(
-                    event_kind=CREATION_EVENT_KIND,
-                    primitive_type=CREATION_PRIMITIVE_TYPE,
-                    actor_ref=context.actor,
-                    payload=facts,
-                ),
-            )
-        )
-
-        # 仅按显式 Method/身份事实初始化 L5 绑定,不读取 L6 Profile。
-        # store 写失败原样上抛;同上下文重复投影幂等。
-        # TODO
-        initialize_top_level_binding(
-            self._method_store,
-            current_axes(),
-            record.collet.collet_id,
-            ResolvedMethodSpec(
-                method_kind=method_kind,
-                profile_versions={
-                    kind.value: METHOD_PROFILE_REGISTRY[kind.value].profile_version
-                    for kind in parse_method_kinds(method_kind)
-                },
-                role_binding_refs=(),
-                principal_id=command.principal_ref.principal_id,
-                executor_id=command.executor_ref.agent_id if command.executor_ref else None,
-            ),
-            context,
-            now=_now(),
-        )
-
-        return record.collet
+        self._authorizer.check_create_collet(command=command, actor=context)
+        return self._repository.create_l4_collet(command, context.actor).collet
 
     def start(
         self, collab_context_id: str, command: WorkStartCommand, context: ActorContext
     ) -> EventAcceptedResult:
         """L4 Work.start, not a product action or an arbitrary event append.
 
-        The root Task and pinned lifecycle are resolved by the shared northbound
-        pipeline. G1 (including admission), product contracts, G4 guards and both
+        The root Task and pinned lifecycle are resolved by this L4
+        pipeline through its G1/G4 policy ports. G1 (including admission), product contracts, G4 guards and both
         Task/Collet revision fences remain authoritative. No delivery side effect.
         """
         # TODO: invoke l4 task start operate
@@ -272,36 +164,12 @@ class ContextCollabService(ContextCollabServiceProtocol):
             visibility=command.visibility,
             payload=command.payload,
         )
-        self._authorizer.check_append(
-            collet, status.task, status.creation_facts, status.product_instance, command, context
-        )
+        self._policy.check_append(status, command, context)
 
-        # Fast stale-request rejection precedes sequence checks; repository CAS
-        # remains authoritative for a writer racing after this read.
+        # Preserve early stale rejection before product-specific sequence checks.
+        # SQL CAS remains authoritative against concurrent writes after this read.
         ensure_expected_version(command.expected_version, collet.version)
-        validate_product_event(
-            catalog=self._product_catalog,
-            creation_facts=status.creation_facts,
-            product_instance=status.product_instance,
-            task=status.task,
-            event_kind=command.event_kind,
-            primitive_type=command.primitive_type,
-            visibility=command.visibility,
-            payload=command.payload,
-            actor=context.actor,
-            parent_event=command.parent_event,
-            events=status.events,
-        )
-        profile = product_definition(
-            product_kind=creation_product_kind(status.creation_facts),
-            workflow_kind=creation_workflow_kind(status.creation_facts),
-            method_kind=creation_method_kind(status.creation_facts),
-            profile_ref=creation_profile_ref(status.creation_facts),
-            catalog=self._product_catalog,
-        )
-        machine_ref = (
-            resolve_event_contract(profile).state_machine_ref if profile is not None else None
-        )
+        lifecycle = self._policy.validate_append(status, command, context)
         prepared = prepare_event_append(
             collab_context_id,
             AppendEventRecordRequest(
@@ -315,10 +183,8 @@ class ContextCollabService(ContextCollabServiceProtocol):
             ),
             task=status.task,
             actor=context.actor,
-            workflow_kind=machine_ref.profile_id
-            if machine_ref
-            else creation_workflow_kind(status.creation_facts),
-            workflow_version=machine_ref.version if machine_ref else None,
+            workflow_kind=lifecycle.workflow_kind,
+            workflow_version=lifecycle.workflow_version,
             require_transition=require_transition,
         )
         record = prepared.commit(self._repository)
@@ -354,9 +220,7 @@ class ContextCollabService(ContextCollabServiceProtocol):
                 f"collaboration context {collab_context_id!r} not found"
             )
         collet = status.collet
-        visible_events = self._authorizer.filter_visible_events(
-            collet, status.task, status.creation_facts, status.product_instance, status.events, context
-        )
+        visible_events = self._policy.filter_visible_events(status, context)
         # 投影始终基于全量可见事件,不因 trunk 开关退化;
         # trunk 过滤 = 当前活动链(active_chain_ids)在投影条目上的子集。
         projection = project_events(
@@ -387,6 +251,10 @@ class ContextCollabService(ContextCollabServiceProtocol):
         if status.task is not None and status.task in visible_tasks:
             # Compatibility response only; authoritative Work state is status.task.
             view = status.current_snapshot
+            if view is None:
+                raise ContextCollabValidationError(
+                    "Task response projection is missing"
+                )
             snapshot = view.to_dict()
             snapshot["progress"] = progress.to_dict()
         current_event = None
@@ -417,13 +285,4 @@ class ContextCollabService(ContextCollabServiceProtocol):
             raise ContextCollabNotFoundError(
                 f"collaboration context {collab_context_id!r} not found"
             )
-        return list(
-            self._authorizer.filter_visible_events(
-                status.collet,
-                status.task,
-                status.creation_facts,
-                status.product_instance,
-                status.events,
-                context,
-            )
-        )
+        return list(self._policy.filter_visible_events(status, context))

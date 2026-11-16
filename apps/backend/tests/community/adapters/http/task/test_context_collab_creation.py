@@ -3,9 +3,13 @@
 from copy import deepcopy
 
 import pytest
-
 from agentclaw.community.adapters.http.task.schemas_context_collab import (
     created_collet_to_dto,
+    status_to_dto,
+)
+from agentclaw.community.core.task.context_collab.g3_observe_evaluate_evolve.views import (
+    CurrentSnapshot,
+    ProgressSnapshot,
 )
 from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
     AgentRef,
@@ -18,7 +22,11 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.collet i
     Collet,
     ColletState,
 )
-from agentclaw.community.core.task.context_collab.service_api import ColletCreateCommand
+from agentclaw.community.core.task.context_collab.service_api import (
+    CollaborationCreateCommand,
+    ContextCollabStatusProjection,
+    TaskProgressProjectionDTO,
+)
 
 
 @pytest.mark.parametrize(
@@ -32,7 +40,7 @@ from agentclaw.community.core.task.context_collab.service_api import ColletCreat
 def test_creation_receipt_keeps_wire_shape_and_inputs(
     method_kind, canonical_method, executor
 ):
-    command = ColletCreateCommand(
+    command = CollaborationCreateCommand(
         to_space=SpaceRef("space", "test"),
         principal_ref=PrincipalRef("human", "owner"),
         product_kind=None,
@@ -83,7 +91,7 @@ def test_creation_receipt_keeps_wire_shape_and_inputs(
 
 
 def test_creation_receipt_rejects_missing_initial_event():
-    command = ColletCreateCommand(
+    command = CollaborationCreateCommand(
         to_space=SpaceRef("space", "test"),
         principal_ref=PrincipalRef("human", "owner"),
         product_kind=None,
@@ -104,3 +112,36 @@ def test_creation_receipt_rejects_missing_initial_event():
 
     with pytest.raises(ValueError, match="initial event"):
         created_collet_to_dto(collet, command)
+
+
+@pytest.mark.parametrize("count", [0, 1, 2])
+def test_methodless_status_preserves_all_executors_and_legacy_wire_shape(count):
+    executors = tuple(AgentRef("bot", f"worker-{i}") for i in range(count))
+    view = CurrentSnapshot(
+        objective="Deliver work",
+        status="created",
+        principal_ref=PrincipalRef("human", "owner"),
+        executor_ref=executors[0] if count == 1 else None,
+        executor_refs=executors if count > 1 else (),
+        method_kind=None,
+        progress=ProgressSnapshot(),
+    )
+    response = status_to_dto(
+        ContextCollabStatusProjection(
+            collab_context_id="collet_created",
+            context_version=1,
+            current_snapshot=view.to_dict(),
+            current_event=None,
+            task_progress=TaskProgressProjectionDTO(total_events=0, events=[]),
+        )
+    )
+    payload = response.model_dump()["current_snapshot"]
+    assert payload["method_kind"] is None
+    assert payload["executor_ref"] == ("worker-0" if count == 1 else None)
+    if count > 1:
+        assert payload["executor_refs"] == ["worker-0", "worker-1"]
+    else:
+        assert "executor_refs" not in payload
+    # The compatibility serializer also respects normal Pydantic exclusions.
+    filtered = response.current_snapshot.model_dump(exclude={"executor_refs"})
+    assert "executor_refs" not in filtered

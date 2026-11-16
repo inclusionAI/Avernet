@@ -15,6 +15,22 @@ from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs 
 )
 
 
+def normalize_executor_refs(
+    refs: tuple[AgentRef, ...] | list[AgentRef],
+) -> tuple[AgentRef, ...]:
+    """Validate an ordered set of typed executors; empty means unassigned."""
+    if not isinstance(refs, (tuple, list)) or any(
+        not isinstance(ref, AgentRef) for ref in refs
+    ):
+        raise ContextCollabValidationError("executor_refs must contain typed AgentRefs")
+    result = tuple(refs)
+    for ref in result:
+        AgentRef.from_dict(ref.to_dict())
+    if len(set(result)) != len(result):
+        raise ContextCollabValidationError("executor_refs must not contain duplicates")
+    return result
+
+
 class TaskStatus(str, Enum):
     CREATED = "created"
     IN_PROGRESS = "in_progress"
@@ -40,7 +56,7 @@ class Task:
     status: str
     version: int
     principal_ref: PrincipalRef
-    executor_ref: AgentRef | None
+    executor_refs: tuple[AgentRef, ...]
     parent_task_ref: str | None
     completion_conditions: tuple[str, ...]
     created_event_ref: str | None
@@ -54,13 +70,13 @@ class Task:
             value = getattr(self, key)
             if not isinstance(value, str) or not value.strip():
                 raise ContextCollabValidationError(f"Task.{key} must be non-empty")
-        if not isinstance(self.principal_ref, PrincipalRef) or (
-            self.executor_ref is not None
-            and not isinstance(self.executor_ref, AgentRef)
-        ):
+        if not isinstance(self.principal_ref, PrincipalRef):
             raise ContextCollabValidationError(
                 "Task requires typed principal/executor references"
             )
+        object.__setattr__(
+            self, "executor_refs", normalize_executor_refs(self.executor_refs)
+        )
         if not isinstance(self.status, str) or self.status not in {
             item.value for item in TaskStatus
         }:
@@ -113,8 +129,17 @@ class Task:
         if self.version > 1 and self.last_event_ref is None:
             raise ContextCollabValidationError("updated Task requires update evidence")
 
+    @property
+    def executor_ref(self) -> AgentRef | None:
+        """Legacy single-executor view; multiple executors have no sole executor.
+
+        Collection-aware Work/authorization must use executor_refs, not this view.
+        """
+        return self.executor_refs[0] if len(self.executor_refs) == 1 else None
+
     def to_dict(self) -> dict:
         data = asdict(self)
+        data["executor_refs"] = [ref.to_dict() for ref in self.executor_refs]
         data["completion_conditions"] = list(self.completion_conditions)
         return data
 
@@ -124,11 +149,35 @@ class Task:
             raise ContextCollabValidationError("Task must be an object")
         try:
             values = dict(data)
+            if not isinstance(values["principal_ref"], dict):
+                raise ContextCollabValidationError(
+                    "Task principal_ref must be an object"
+                )
             values["principal_ref"] = PrincipalRef.from_dict(values["principal_ref"])
-            executor = values["executor_ref"]
-            values["executor_ref"] = (
-                AgentRef.from_dict(executor) if executor is not None else None
-            )
+            if "executor_refs" in values:
+                if "executor_ref" in values or not isinstance(
+                    values["executor_refs"], list
+                ):
+                    raise ContextCollabValidationError(
+                        "ambiguous or invalid Task executors"
+                    )
+                if any(not isinstance(ref, dict) for ref in values["executor_refs"]):
+                    raise ContextCollabValidationError(
+                        "Task executor_refs must contain objects"
+                    )
+                values["executor_refs"] = tuple(
+                    AgentRef.from_dict(ref) for ref in values["executor_refs"]
+                )
+            else:
+                # Explicit read compatibility for the previously persisted Task JSON.
+                executor = values.pop("executor_ref")
+                if executor is not None and not isinstance(executor, dict):
+                    raise ContextCollabValidationError(
+                        "Task executor_ref must be an object or null"
+                    )
+                values["executor_refs"] = (
+                    (AgentRef.from_dict(executor),) if executor is not None else ()
+                )
             conditions = values["completion_conditions"]
             if not isinstance(conditions, list):
                 raise ContextCollabValidationError(

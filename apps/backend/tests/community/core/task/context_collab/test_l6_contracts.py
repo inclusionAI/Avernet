@@ -233,7 +233,7 @@ def test_versioned_workflow_lookup_does_not_use_name_alias(monkeypatch):
         status="created",
         version=1,
         principal_ref=PrincipalRef("human", "owner"),
-        executor_ref=AgentRef("bot", "worker"),
+        executor_refs=(AgentRef("bot", "worker"),),
         parent_task_ref=None,
         completion_conditions=(),
         created_event_ref="evt_created",
@@ -269,13 +269,11 @@ def test_participant_requires_exactly_one_identity(principal, agent):
         )
 
 
-def test_l6_contracts_do_not_import_runtime_or_transport():
-    import ast
-    from pathlib import Path
-
-    from agentclaw.community.core.task.context_collab import l6_products
-
+def _allowed_l6_definition_import(module: str) -> bool:
     root = "agentclaw.community.core.task.context_collab."
+    # ActorContext is a transport-free G1 value contract, not an authorizer.
+    if module == root + "g1_secure_govern.actor_context":
+        return True
     allowed = (
         "errors",
         "l2_agent_network",
@@ -284,6 +282,39 @@ def test_l6_contracts_do_not_import_runtime_or_transport():
         "l5_methods",
         "l6_products",
     )
+    return any(
+        module == root + part or module.startswith(root + part + ".")
+        for part in allowed
+    )
+
+
+@pytest.mark.parametrize(
+    ("part", "allowed"),
+    [
+        ("g1_secure_govern.actor_context", True),
+        ("l4_context_primitives.context_service_protocol", True),
+        ("g1_secure_govern.authorization", False),
+        ("g4_contracts_consistency.product_contract", False),
+        ("persistence.repository", False),
+        ("persistence.method_store", False),
+        ("services.method_bootstrap", False),
+        ("products.task_commission.profile", False),
+        ("service_api", False),
+        ("l4_context_primitives_unrelated", False),
+    ],
+)
+def test_l6_definition_import_probe_keeps_runtime_out(part, allowed):
+    assert _allowed_l6_definition_import(
+        "agentclaw.community.core.task.context_collab." + part
+    ) is allowed
+
+
+def test_l6_contracts_do_not_import_runtime_or_transport():
+    import ast
+    from pathlib import Path
+
+    from agentclaw.community.core.task.context_collab import l6_products
+
     for path in Path(l6_products.__file__).parent.glob("*.py"):
         for node in ast.walk(ast.parse(path.read_text())):
             if isinstance(node, ast.ImportFrom):
@@ -294,7 +325,7 @@ def test_l6_contracts_do_not_import_runtime_or_transport():
                 continue
             for module in modules:
                 if module.startswith("agentclaw."):
-                    assert module.startswith(tuple(root + item for item in allowed)), (
+                    assert _allowed_l6_definition_import(module), (
                         path.name,
                         module,
                     )

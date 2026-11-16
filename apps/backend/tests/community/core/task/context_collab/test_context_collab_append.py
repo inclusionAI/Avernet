@@ -58,11 +58,11 @@ from agentclaw.community.core.task.context_collab.persistence.repository import 
 from agentclaw.community.core.task.context_collab.service_api import (
     ActorContext,
     ContextCollabServiceProtocol,
-    ColletCreateCommand,
+    CollaborationCreateCommand,
     EventAcceptedResult,
     EventAppendCommand,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.context_collab_service import (
+from agentclaw.community.core.task.context_collab.l6_products.operations.collaboration_creation import (
     ContextCollabService,
 )
 from tests.community.core.task.context_collab.product_catalog import PRODUCT_CATALOG
@@ -72,7 +72,7 @@ PRINCIPAL = PrincipalRef(principal_type="human", principal_id="u_1001")
 EXECUTOR = AgentRef(agent_type="bot", agent_id="bot_coding_001")
 
 
-def make_create_command(**overrides) -> ColletCreateCommand:
+def make_create_command(**overrides) -> CollaborationCreateCommand:
     """构造创建命令(spec §6.2 示例);与 Task 7 测试同形态,可按字段覆盖。"""
     fields = {
         "space": SpaceRef(space_id="space_workspace_001", environment="prod"),
@@ -89,7 +89,7 @@ def make_create_command(**overrides) -> ColletCreateCommand:
         ],
     }
     fields.update(overrides)
-    return ColletCreateCommand(**fields)
+    return CollaborationCreateCommand(**fields)
 
 
 def make_actor(
@@ -145,7 +145,7 @@ class _FakeContextCollabRepository:
             objective=request.objective,
             status=TaskStatus.CREATED.value,
             principal_ref=request.principal_ref,
-            executor_ref=request.executor_ref,
+            executor_refs=((request.executor_ref,) if request.executor_ref is not None else ()),
             task_id="task_" + collab_context_id,
             collet_ref=collab_context_id,
             version=1,
@@ -259,6 +259,12 @@ class _FakeContextCollabRepository:
             task=new_task,
         )
 
+    def create_l4_collet(self, command, actor_ref):
+        raise NotImplementedError("application-only fake")
+
+    def attach_product_instance(self, collab_context_id, **kwargs):
+        raise NotImplementedError("application-only fake")
+
 
 def _make_service(**command_overrides):
     repo = _FakeContextCollabRepository()
@@ -269,7 +275,7 @@ def _make_service(**command_overrides):
         product_catalog=PRODUCT_CATALOG,
     )
     assert isinstance(service, ContextCollabServiceProtocol)
-    created = service.create_collet(
+    created = service.create_collaboration(
         make_create_command(**command_overrides), make_actor()
     )
     return repo, service, created

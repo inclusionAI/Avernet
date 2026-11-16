@@ -86,7 +86,7 @@ class ColletLifecycleService:
     ) -> ColletCreatedResult:
         """注册 Context.create 的 CREATED 初态,不伪造 ``collet.created`` 迁移。
 
-        Collet/Task/Event 的持久化创建仍由 L4 ``ContextCollabService`` 完成;
+        Collet/Task/Event 的持久化创建仍由 L4 ``ContextService`` 完成;
         这里只把同一个 Collet 注册到 P1 生命周期 store,使后续
         ``activate`` 能严格按 ``CREATED → ACTIVE`` 裁决。重启后未注册的
         历史 Collet 继续沿兼容语义由 ``get_or_seed`` 取 ACTIVE。

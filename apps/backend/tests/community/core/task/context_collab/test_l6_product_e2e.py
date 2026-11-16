@@ -36,10 +36,10 @@ from agentclaw.community.core.task.context_collab.persistence.repository import 
 )
 from agentclaw.community.core.task.context_collab.service_api import (
     ActorContext,
-    ColletCreateCommand,
+    CollaborationCreateCommand,
     EventAppendCommand,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.context_collab_service import (
+from agentclaw.community.core.task.context_collab.l6_products.operations.collaboration_creation import (
     ContextCollabService,
 )
 from tests.community.core.task.context_collab.product_catalog import PRODUCT_CATALOG
@@ -54,7 +54,7 @@ def _actor(principal: PrincipalRef) -> ActorContext:
     return ActorContext(actor=principal, source="api")
 
 
-def _create_command(**overrides) -> ColletCreateCommand:
+def _create_command(**overrides) -> CollaborationCreateCommand:
     fields = {
         "space": SPACE,
         "principal_ref": OWNER,
@@ -70,7 +70,7 @@ def _create_command(**overrides) -> ColletCreateCommand:
         ],
     }
     fields.update(overrides)
-    return ColletCreateCommand(**fields)
+    return CollaborationCreateCommand(**fields)
 
 
 def _append(
@@ -117,7 +117,7 @@ class TestBbsProductE2E:
             repository=ContextCollabRepository(db, product_catalog=PRODUCT_CATALOG),
             product_catalog=PRODUCT_CATALOG,
         )
-        created = service.create_collet(_create_command(), _actor(OWNER))
+        created = service.create_collaboration(_create_command(), _actor(OWNER))
 
         status = service.get_status(
             created.collet_id, trunk_events=False, context=_actor(OWNER)
@@ -187,7 +187,7 @@ class TestBbsProductE2E:
             repository=ContextCollabRepository(db, product_catalog=PRODUCT_CATALOG),
             product_catalog=PRODUCT_CATALOG,
         )
-        created = service.create_collet(
+        created = service.create_collaboration(
             _create_command(
                 product_kind="bbs_help_request",
                 workflow_kind="bbs_help_request_goal",

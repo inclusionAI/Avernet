@@ -36,7 +36,7 @@ from agentclaw.community.core.task.context_collab.persistence.method_store impor
 from agentclaw.community.core.task.context_collab.persistence.repository import (
     ContextCollabRepository,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.context_collab_service import (
+from agentclaw.community.core.task.context_collab.l6_products.operations.collaboration_creation import (
     ContextCollabService,
 )
 from agentclaw.community.api.task.context_collab_service import (
@@ -100,9 +100,9 @@ class RecordingContextCollabService:
         self._inner = inner
         self.calls = []
 
-    def create_collet(self, command, context):
-        self.calls.append("create_collet")
-        return self._inner.create_collet(command, context)
+    def create_collaboration(self, command, context):
+        self.calls.append("create_collaboration")
+        return self._inner.create_collaboration(command, context)
 
     def append_event(self, collab_context_id, command, context):
         self.calls.append("append_event")
@@ -236,7 +236,7 @@ def test_create_happy_path_envelope_and_snapshot(client_world):
     assert current_event["parent_event"] is None
     assert current_event["event_kind"] == "task.created"
     assert current_event["primitive_type"] == "Task"
-    assert client_world.service.calls == ["create_collet"]
+    assert client_world.service.calls == ["create_collaboration"]
 
 
 def test_create_without_executor_keeps_canonical_method_receipt(client_world):
@@ -257,7 +257,7 @@ def test_create_without_executor_keeps_canonical_method_receipt(client_world):
         "blocked_count": 0,
         "current_event_id": created["current_event"]["event_id"],
     }
-    assert client_world.service.calls == ["create_collet"]
+    assert client_world.service.calls == ["create_collaboration"]
 
 
 def test_create_route_path_is_singular_task(client_world):
@@ -501,7 +501,7 @@ _CASE_SNAPSHOT = {
 
 
 def _seed_create_happy(world) -> None:
-    def create_collet(self, _command, _context):
+    def create_collaboration(self, _command, _context):
         return Collet(
             collet_id="collet_case_001",
             initiator_ref=_command.principal_ref,
@@ -514,18 +514,18 @@ def _seed_create_happy(world) -> None:
     bind_overrides(
         world,
         ContextCollabServiceProtocol,
-        {"create_collet": create_collet},
+        {"create_collaboration": create_collaboration},
     )
 
 
 def _seed_create_error(world) -> None:
-    def create_collet(self, _command, _context):
+    def create_collaboration(self, _command, _context):
         raise ContextCollabValidationError("case: invalid create body")
 
     bind_overrides(
         world,
         ContextCollabServiceProtocol,
-        {"create_collet": create_collet},
+        {"create_collaboration": create_collaboration},
     )
 
 

@@ -46,7 +46,7 @@ from agentclaw.community.core.task.context_collab.service_api import (
     ContextCollabStatusProjection,
     TaskProgressProjectionDTO,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.context_collab_service import (
+from agentclaw.community.core.task.context_collab.l6_products.operations.collaboration_creation import (
     ContextCollabService,
 )
 from tests.community.core.task.context_collab.product_catalog import PRODUCT_CATALOG
@@ -81,7 +81,7 @@ def _task() -> Task:
         objective=OBJECTIVE,
         status="in_progress",
         principal_ref=PRINCIPAL,
-        executor_ref=EXECUTOR,
+        executor_refs=((EXECUTOR,) if EXECUTOR is not None else ()),
         task_id="task_" + "collet_001",
         collet_ref="collet_001",
         version=1,
@@ -229,6 +229,12 @@ class _FakeStatusRepository:
     def append_event(self, collab_context_id, request) -> None:
         self.write_calls.append(("append_event", collab_context_id, request))
         raise NotImplementedError("get_status must not write")
+
+    def create_l4_collet(self, command, actor_ref):
+        raise NotImplementedError("application-only fake")
+
+    def attach_product_instance(self, collab_context_id, **kwargs):
+        raise NotImplementedError("application-only fake")
 
 
 def _make_service(

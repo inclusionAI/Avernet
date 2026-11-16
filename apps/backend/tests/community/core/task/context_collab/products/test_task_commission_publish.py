@@ -96,7 +96,7 @@ class _FakeRepo:
             objective=request.objective,
             status="created",
             principal_ref=request.principal_ref,
-            executor_ref=request.executor_ref,
+            executor_refs=((request.executor_ref,) if request.executor_ref is not None else ()),
             task_id="task_" + collab_context_id,
             collet_ref=collab_context_id,
             version=1,

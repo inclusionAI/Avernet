@@ -2,7 +2,7 @@
 
 用户通过产品 Service API 操作和观察;case 显式以 Bot ActorContext 调用
 L5 Open 查询和提交申请,再以发布人授权的策略身份直接调用 Open.screen/admit,
-录取后直接调用 L4 Work.start;Bot 只负责执行并通过签名 A2A HTTP 入站上报。
+录取后直接调用 L4 协作服务的 Work.start;Bot 只负责执行并通过签名 A2A HTTP 入站上报。
 使用真实产品 Profile、仓储、L5 Open 和 G1/G4。直接 Open 调用不验证 JWT;
 另保留真实产品策略的签名 HTTP Query/Apply 回归。Open 负责参与录取,
 开始、进度与成果提交属于 L4 Work,不是 Bot 的内置方法或新的 Open 方法。
@@ -51,6 +51,10 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.operatio
 from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.collet_lifecycle import (
     ColletLifecycleService,
 )
+from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.contracts import (
+    ColletCreateCommand,
+    WorkStartCommand,
+)
 from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
     top_level_binding_id,
 )
@@ -90,7 +94,14 @@ from agentclaw.community.core.task.context_collab.products.task_commission.publi
 from agentclaw.community.core.task.context_collab.persistence.method_store import (
     MethodStoreProtocol,
 )
-from agentclaw.community.core.task.context_collab.persistence.repository import (
+from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.records import (
+    ContextCollabRepositoryProtocol as L4ContextCollabRepositoryProtocol,
+)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.repository import (
+    ContextCollabRepository as L4ContextCollabRepository,
+)
+from agentclaw.community.core.task.context_collab.l6_products.persistence.records import ContextStatusRecord
+from agentclaw.community.core.task.context_collab.l6_products.persistence.repository import (
     ContextCollabRepositoryProtocol,
 )
 from agentclaw.community.core.task.context_collab.products.task_commission import (
@@ -107,10 +118,12 @@ from agentclaw.community.core.task.context_collab.products.task_commission.servi
     TaskCommissionServiceProtocol,
     TaskMethodOpsPort,
 )
-from agentclaw.community.core.task.context_collab.service_api import (
-    ColletCreateCommand,
-    ContextCollabServiceProtocol,
-    WorkStartCommand,
+from agentclaw.community.core.task.context_collab.l6_products.operations.contracts import (
+    ProductInstantiateCommand,
+    ProductInstantiationServiceProtocol,
+)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.context_service_protocol import (
+    ContextServiceProtocol,
 )
 from agentclaw.community.di.modules.context_collab_products import (
     INSTALLED_PRODUCT_PROFILES,
@@ -161,28 +174,29 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
 
     # 动态注入
     with commission_deployment(l6_profile) as (service, working_bot, injector):
-        l4_collab_service = injector.get(ContextCollabServiceProtocol)
+        l4_context_operate = injector.get(ContextServiceProtocol)
         l2_executor_ref = AgentRef(agent_type="bot", agent_id=BOT_ASSIGNEE)
         store, axes = injector.get(MethodStoreProtocol), current_axes()
         l5_open_method = injector.get(OpenMethodOpsServiceProtocol)
 
         # 2、通过L4层操作创建Collet
-        l4_collet = l4_collab_service.create_collet(
+        l4_collet = l4_context_operate.create_collet(
             ColletCreateCommand(
-                to_space=SPACE,                                   # TODO: Collect所属的空间（长期持续管理的空间，比如小队、团队空间）
-                principal_ref=HUMAN.actor,                        # 代办任务负责人  TODO：只是执行态？
-                product_kind=l6_profile.ref.profile_id,           # 所属产品类型
-                workflow_kind=l6_profile.workflow.ref.profile_id if l6_profile.workflow else None,
-                method_kind=l6_profile.composition.method_kind,   # 绑定的方法
-                executor_ref=l2_executor_ref,                     # 指定的执行bot
-                objective=OBJECTIVE,                                  # 代办任务目标
-                resource_refs=[],                                 # 输入引用的资源
-                product_profile_ref=l6_profile.ref,               # profile ref
+                to_space=SPACE,  # TODO: Collect所属的空间（长期持续管理的空间，比如小队、团队空间）
+                principal_ref=HUMAN.actor,  # 代办任务负责人  TODO：只是执行态？
+                objective=OBJECTIVE,
+                executor_refs=(l2_executor_ref,),  # () / (bot,) / (bot1, bot2, ...)
             ),
-            HUMAN,                                                # 代办任务创建人
+            HUMAN,  # 代办任务创建人
         )
-
         collect_id = l4_collet.collet_id
+
+        # 3、L6 实例化选择产品并编排 L5 Method/角色引用;不是 L4 create 的副作用。
+        instance = injector.get(ProductInstantiationServiceProtocol).instantiate(
+            ProductInstantiateCommand(collect_id, l6_profile.ref, l4_collet.version),
+            HUMAN,
+        )
+        assert instance.collet_ref == collect_id
         binding_id = top_level_binding_id(collect_id)
 
         # 4、调用L5的OPEN方法-创建机会
@@ -235,7 +249,7 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
         repository = injector.get(ContextCollabRepositoryProtocol)
         before_admission = repository.get_current_status(collect_id)
         with pytest.raises(ContextCollabValidationError):
-            l4_collab_service.start(
+            l4_context_operate.start(
                 collect_id, WorkStartCommand(expected_version=l4_collet.version), bot_context
             )
         assert repository.get_current_status(collect_id) == before_admission
@@ -272,8 +286,8 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
         assert application.state is ApplicationState.ADMITTED
         assert application.applicant_agent_ref == BOT_ASSIGNEE
 
-        # 8、直接调用 L4 Work.start;不是产品 start_task 或通用事件追加接口。
-        started = l4_collab_service.start(
+        # 8、直接调用 L4 服务的 Work.start;不是产品 start_task 或通用事件追加接口。
+        started = l4_context_operate.start(
             collect_id,
             WorkStartCommand(
                 expected_version=l4_collet.version,
@@ -317,15 +331,15 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
         )
         assert accepted.status == "done"
 
-        # 11. 通过 L4 查询 Collet 内 Task 的最终状态与提交的产物,不依赖产品详情接口。
+        # 11. 经应用门面的 L4 查询读取 Task 状态与产物,不依赖产品详情接口。
         # TODO: 管理时、运行时分开
-        final = l4_collab_service.get_status(collect_id, trunk_events=False, context=HUMAN)
+        final = l4_context_operate.get_status(collect_id, trunk_events=False, context=HUMAN)
         assert final.current_snapshot is not None
         assert final.current_snapshot["status"] == "done"
         assert final.context_version == accepted.context_version
         assert final.current_snapshot["progress"]["percent"] == 100
 
-        final_events = l4_collab_service.get_events(collect_id, context=HUMAN)
+        final_events = l4_context_operate.get_events(collect_id, context=HUMAN)
         assert [event.event_kind for event in final_events] == [
             "task.created",
             "task.started",
@@ -391,7 +405,7 @@ def _trace_call(monkeypatch, owner, name: str, description: str) -> None:
         snapshot = getattr(result, "current_snapshot", None)
         status = getattr(result, "status", getattr(result, "state", None))
         if snapshot is not None:
-            status = snapshot.status
+            status = snapshot.get("status") if isinstance(snapshot, dict) else snapshot.status
         if isinstance(result, str):
             status = result  # resolve_workflow_status 的返回值。
         suffix = f", status={status}" if status is not None else ""
@@ -438,8 +452,13 @@ def _trace_runtime(monkeypatch, injector: Injector) -> None:
             },
         ),
         (
-            ContextCollabServiceProtocol,
-            {"start": "L4 Work.start: 经 G1/G4 启动根 Task,不派发 Bot"},
+            ContextServiceProtocol,
+            {
+                "create_collet": "L4 服务创建 Collet、根 Task 与初始 Event",
+                "start": "L4 服务经 G1/G4 启动根 Task,不派发 Bot",
+                "get_status": "L4 服务读取授权后的状态投影",
+                "get_events": "L4 服务读取可见事件事实",
+            },
         ),
         (
             A2aDeliveryPort,
@@ -453,11 +472,15 @@ def _trace_runtime(monkeypatch, injector: Injector) -> None:
             },
         ),
         (
-            ContextCollabRepositoryProtocol,
+            L4ContextCollabRepositoryProtocol[ContextStatusRecord],
             {
-                "create_collet": "创建并持久化 Collet、独立 Task 与初始事件",
-                "append_event": "追加事件并原子保存 Task;返回已保存状态",
+                "create_l4_collet": "L4 仓储原子持久化 Collet、独立 Task 与初始事件",
+                "append_event": "L4 仓储追加事件并原子保存 Task;返回已保存状态",
             },
+        ),
+        (
+            ContextCollabRepositoryProtocol,
+            {"attach_product_instance": "L6 显式选择产品实例,不改写初始事件"},
         ),
     ):
         implementation = type(injector.get(protocol))

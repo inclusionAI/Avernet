@@ -83,7 +83,17 @@ def resolve_workflow_status(
     guard_input = GuardEvaluationInput(
         actor=actor,
         responsible=task.principal_ref,
-        executor=task.executor_ref,
+        executor=next(
+            (
+                ref
+                for ref in task.executor_refs
+                if (
+                    ref.agent_type == actor.principal_type
+                    and ref.agent_id == actor.principal_id
+                )
+            ),
+            None,
+        ),
         payload=payload,
         task_id=task.task_id,
     )

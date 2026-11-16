@@ -54,7 +54,7 @@ async def create_collet_collab(
     service: ContextCollabServiceProtocol = Injected(ContextCollabServiceProtocol),  # noqa: B008
 ) -> Envelope[ContextCollabCreatedResultDto]:
     command = body.to_domain()
-    collet = service.create_collet(command, _actor_context(user))
+    collet = service.create_collaboration(command, _actor_context(user))
     return envelope(created_collet_to_dto(collet, command), request)
 
 

@@ -22,7 +22,7 @@ from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs 
 from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_resource_refs import (
     SpaceRef,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.context_collab_service import (
+from agentclaw.community.core.task.context_collab.l6_products.operations.collaboration_creation import (
     ContextCollabService,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.operations.open.service import (
@@ -70,10 +70,10 @@ from agentclaw.community.core.task.context_collab.products.task_commission.servi
 )
 from agentclaw.community.core.task.context_collab.service_api import (
     ActorContext,
-    ColletCreateCommand,
+    CollaborationCreateCommand,
     EventAppendCommand,
 )
-from agentclaw.community.core.task.context_collab.services.method_bootstrap import (
+from agentclaw.community.core.task.context_collab.l6_products.operations.method_bootstrap import (
     ensure_top_level_binding,
 )
 from agentclaw.community.di.modules.task_commission_method_ops_adapter import (
@@ -131,8 +131,8 @@ def runtime(db, request):
 
 def _create(runtime):
     profile, _, _, _, generic, _ = runtime
-    return generic.create_collet(
-        ColletCreateCommand(
+    return generic.create_collaboration(
+        CollaborationCreateCommand(
             to_space=SPACE,
             principal_ref=OWNER.actor,
             product_kind=profile.ref.profile_id,
@@ -399,7 +399,7 @@ def test_optional_profiles_still_validate_creation_before_persistence(
 ):
     profile, _, _, _, generic, _ = runtime
     workflow_kind = profile.workflow.ref.profile_id if profile.workflow else None
-    command = ColletCreateCommand(
+    command = CollaborationCreateCommand(
         to_space=SPACE,
         principal_ref=OWNER.actor,
         product_kind=profile.ref.profile_id,
@@ -411,7 +411,7 @@ def test_optional_profiles_still_validate_creation_before_persistence(
         product_profile_ref=profile.ref,
     )
     with pytest.raises(ContextCollabValidationError):
-        generic.create_collet(command, OWNER)
+        generic.create_collaboration(command, OWNER)
     with db.orm_session() as session:
         assert session.query(ContextCollabColletModel).count() == 0
 
