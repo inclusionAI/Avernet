@@ -57,7 +57,7 @@ beforeEach(() => {
   vi.stubGlobal('fetch', post)
 })
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); vi.resetAllMocks() })
-async function setup(script: boolean) {
+async function setup(script: boolean, { canWrite = true } = {}) {
   const id = `unified-hook-${++counter}`, spec = { id, title: 'Original', version: '1', nodes: [] }
   row = { workflowId: id, packId: null, specJson: JSON.stringify(spec), draftToken: token }
   const source = await readEditorWorkflowSource(id)
@@ -65,7 +65,7 @@ async function setup(script: boolean) {
   const files = [{ path: 'workflow.pack.yaml', contentBase64: encode(stringify({ id, workflows: [id] })), mode: '100644' as const },
     { path: `workflows/${id}.yaml`, contentBase64: encode(stringify(spec)), mode: '100644' as const },
     { path: 'scripts/a.sh', contentBase64: encode('old'), mode: '100644' as const }]
-  snapshot = { workflowId: id, packId: id, baseRef: `origin/wf/${id}`, baseCommit: old, draftHead: old, canWrite: false, versionFiles: files }
+  snapshot = { workflowId: id, packId: id, baseRef: `origin/wf/${id}`, baseCommit: old, draftHead: old, canWrite, versionFiles: files }
   const session = sessionFor(id)
   publish(session, { ...session.state, version: 'draft', versions: { ...session.state.versions, draft: { snapshot, files: structuredClone(files), loading: false, error: null, blocked: false, notice: null } } })
   if (script) updateVersion(session, 'draft', { files: files.map(f => f.path === 'scripts/a.sh' ? { ...f, contentBase64: encode('new') } : f) })
@@ -135,12 +135,75 @@ it('does not trust even a correlated pre-write rejection without origin-bound pr
 
 it('does not advertise unified capability based on legacy pack-version canWrite', async () => {
   const ctx = await setup(false)
-  act(() => {
-    const state = ctx.session.state.versions.draft
-    updateVersion(ctx.session, 'draft', { snapshot: { ...state.snapshot!, canWrite: true } })
-  })
+  expect(ctx.session.state.versions.draft.snapshot?.canWrite).toBe(true)
   expect(ctx.hook.result.current.canWrite).toBe(false)
+  expect(post).not.toHaveBeenCalled()
   await act(async () => { await expect(ctx.hook.result.current.save()).resolves.toMatchObject({ commit }) })
+  expect(post.mock.calls.map(([, init]) => init.method)).toEqual(['GET', 'POST'])
+})
+
+it('rejects an initially read-only Pack before any fetch and preserves database, YAML and file drafts without locking', async () => {
+  const ctx = await setup(true, { canWrite: false })
+  act(() => {
+    const draft = ctx.session.state.versions.draft
+    updateVersion(ctx.session, 'draft', { files: draft.files.map(f => f.path === `workflows/${ctx.id}.yaml`
+      ? { ...f, contentBase64: encode(stringify(useEditorStore.getState().spec)) } : f) })
+  })
+  const before = structuredClone(ctx.session.state.versions.draft)
+  const beforeRow = structuredClone(row), beforeSnapshot = structuredClone(snapshot)
+  const beforeSpec = structuredClone(useEditorStore.getState().spec)
+  vi.mocked(fetchJson).mockClear()
+  vi.mocked(api.workflows.get).mockClear()
+  await act(async () => { await expect(ctx.hook.result.current.save()).rejects.toThrow('Pack 版本文件为只读，未发送保存。') })
+  expect(post).not.toHaveBeenCalled()
+  expect(fetchJson).not.toHaveBeenCalled()
+  expect(api.workflows.get).not.toHaveBeenCalled()
+  expect(window.confirm).not.toHaveBeenCalled()
+  expect(row).toEqual(beforeRow)
+  expect(snapshot).toEqual(beforeSnapshot)
+  expect(ctx.session.state.versions.draft).toEqual(before)
+  expect(useEditorStore.getState().spec).toEqual(beforeSpec)
+  expect(useEditorStore.getState().isDirty).toBe(true)
+  expect(ctx.session.state.saving).toBe(false)
+  expect(ctx.session.state.postSaveVerificationError).toBeFalsy()
+  expect(editorWorkflowWriteState(ctx.id).phase).toBe('clear')
+})
+
+it('does not POST if the Pack becomes read-only during capability discovery and preserves all drafts without locking', async () => {
+  const ctx = await setup(true)
+  act(() => {
+    const draft = ctx.session.state.versions.draft
+    updateVersion(ctx.session, 'draft', { files: draft.files.map(f => f.path === `workflows/${ctx.id}.yaml`
+      ? { ...f, contentBase64: encode(stringify(useEditorStore.getState().spec)) } : f) })
+  })
+  const before = structuredClone(ctx.session.state.versions.draft)
+  const beforeRow = structuredClone(row), beforeSnapshot = structuredClone(snapshot)
+  const beforeSpec = structuredClone(useEditorStore.getState().spec)
+  let release!: () => void
+  const gate = new Promise<void>(resolve => { release = resolve })
+  const original = post.getMockImplementation()!
+  post.mockImplementationOnce(async (url: string, init: RequestInit) => { await gate; return original(url, init) })
+  vi.mocked(fetchJson).mockClear()
+  vi.mocked(api.workflows.get).mockClear()
+  let saving!: ReturnType<typeof ctx.hook.result.current.save>
+  act(() => { saving = ctx.hook.result.current.save() })
+  expect(post.mock.calls.map(([url, init]) => [url, init.method])).toEqual([
+    [`/api/workflows/${ctx.id}/unified-save`, 'GET'],
+  ])
+  act(() => updateVersion(ctx.session, 'draft', { snapshot: { ...ctx.session.state.versions.draft.snapshot!, canWrite: false } }))
+  await act(async () => { release(); await expect(saving).rejects.toThrow('Pack 版本文件为只读，未发送保存。') })
+  expect(post.mock.calls.map(([, init]) => init.method)).toEqual(['GET'])
+  expect(fetchJson).not.toHaveBeenCalled()
+  expect(api.workflows.get).not.toHaveBeenCalled()
+  expect(window.confirm).not.toHaveBeenCalled()
+  expect(row).toEqual(beforeRow)
+  expect(snapshot).toEqual(beforeSnapshot)
+  expect(ctx.session.state.versions.draft).toEqual({ ...before, snapshot: { ...before.snapshot!, canWrite: false } })
+  expect(useEditorStore.getState().spec).toEqual(beforeSpec)
+  expect(useEditorStore.getState().isDirty).toBe(true)
+  expect(ctx.session.state.saving).toBe(false)
+  expect(ctx.session.state.postSaveVerificationError).toBeFalsy()
+  expect(editorWorkflowWriteState(ctx.id).phase).toBe('clear')
 })
 
 it('does not prompt, dispatch or lock when an existing draft lacks unified capability, and can retry when restored', async () => {
