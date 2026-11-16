@@ -94,6 +94,11 @@ export function createMonitoringRouter(runtime: MonitoringRuntime = createMonito
     const user = await principal(req);
     await runtime.browser!.enroll(user, req.body);
   });
+  router.post('/monitoring/configurations', json({ limit: '4kb', inflate: false }), async (req, res) => {
+    const user = await principal(req);
+    if (!runtime.browser?.configure) throw new MonitoringError('NOT_READY', '诊断监控配置尚未就绪。');
+    res.json(await runtime.browser.configure(user, req.body));
+  });
   router.use("/monitoring", requireClawInsightAdmin);
   router.get("/monitoring/bots", async (req, res) => {
     if (Object.keys(req.query).length) throw new MonitoringError("INVALID_EVENT", "不支持此查询参数。");

@@ -2,6 +2,8 @@ import { fetchJson } from '@avernet/clawweb-shared/web/api/client';
 import type { SessionRecoverySummary, SessionRecoveryTask } from '../types/session-recovery';
 const BASE = '/api/insight/v1/monitoring/session-recoveries';
 export const sessionRecoveryApi = {
+  tasks: (query: { page: number; pageSize: number; botId: string; env: string; status: string }, signal?: AbortSignal) =>
+    fetchJson<import('../types/session-recovery').SessionRecoveryListPage>(`${BASE}/tasks?${new URLSearchParams(Object.entries(query).map(([k, v]) => [k, String(v)]))}`, { signal }),
   toolCall: (taskId: string, toolCallId: string) => fetchJson<unknown>(`${BASE}/${encodeURIComponent(taskId)}/tool-calls/${encodeURIComponent(toolCallId)}`),
   list: (eventId: string, signal?: AbortSignal) => fetchJson<{ items: SessionRecoverySummary[] }>(`${BASE}?event_id=${encodeURIComponent(eventId)}`, { signal }),
   detail: (id: string, signal?: AbortSignal) => fetchJson<SessionRecoveryTask>(`${BASE}/${encodeURIComponent(id)}`, { signal }),

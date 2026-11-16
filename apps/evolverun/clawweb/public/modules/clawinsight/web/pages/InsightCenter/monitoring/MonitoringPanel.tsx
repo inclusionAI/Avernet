@@ -18,7 +18,9 @@ const diagnosisFilters = [
 ] as const;
 const states = { HEALTHY: '监控正常', ERROR: '检查异常', UNKNOWN: '状态未知', PAUSED: '已暂停' };
 
-export default function MonitoringPanel({ isAdmin = false }: { isAdmin?: boolean }) {
+export default function MonitoringPanel({ isAdmin = false, embedded = false, revision: configRevision = 0, onOpenSettings }: {
+  isAdmin?: boolean; embedded?: boolean; revision?: number; onOpenSettings?: () => void;
+}) {
   const [selected, setSelected] = useState<BotOption | null>(null);
   const botRef = selected?.botRef ?? '';
   const [botsRevision, setBotsRevision] = useState(0);
@@ -72,7 +74,6 @@ export default function MonitoringPanel({ isAdmin = false }: { isAdmin?: boolean
           value = await monitoringApi.targetStatus(botRef, query, current.signal);
           if (!live()) return;
           setStatus(value); setStatusError('');
-          if (value.enrollmentState !== 'ENROLLED') { setLoadedPage(null); setError(''); return; }
         } catch (failure) {
           if (live()) {
             setStatusError(monitoringErrorText(current.signal.reason ?? failure));
@@ -116,23 +117,28 @@ export default function MonitoringPanel({ isAdmin = false }: { isAdmin?: boolean
     const interval = setInterval(load, 30000);
     document.addEventListener('visibilitychange', visibility);
     return () => { disposed = true; controller?.abort(); clearTimeout(timer); clearInterval(interval); document.removeEventListener('visibilitychange', visibility); };
-  }, [botRef, query, queryKey, revision, invalidDates]);
+  }, [botRef, query, queryKey, revision, configRevision, invalidDates]);
 
   const change = (patch: Partial<MonitoringQuery>) => { pageCorrectionUsed.current = false; setError(''); setQuery(current => ({ ...current, ...patch, page: patch.page ?? 1 })); };
 
   const filtered = Boolean(query.businessProblemCategory || query.businessProblemSubtype || query.startDate || query.endDate || query.keyword || query.decision !== 'ALL');
   const clearFilters = () => { setKeywordInput(''); change({ ...initialQuery(), businessProblemCategory: '', businessProblemSubtype: '', pageSize: query.pageSize }); };
   const lastCheck = timeParts(status?.monitoring?.lastSuccessfulCheckAt ?? null);
-  const healthClass = statusError ? 'unknown' : status?.monitoring?.status === 'HEALTHY' ? '' : status?.monitoring?.status.toLowerCase() ?? 'unknown';
-  return <div className="insight-monitoring">
-    <div className="page-heading"><div><h1>Agent 诊断治愈</h1><p>实时监测 Bot 任务执行状态，诊断会话异常，助力“罢工”的 Bot 恢复运行</p></div></div>
-    <MonitoringControls selected={selected} isAdmin={isAdmin} revision={botsRevision} loading={loading} startDate={query.startDate} endDate={query.endDate}
+  const config = status?.configuration;
+  const healthClass = statusError || config && !config.diagnosisEnabled ? 'unknown' : status?.monitoring?.status === 'HEALTHY' ? '' : status?.monitoring?.status.toLowerCase() ?? 'unknown';
+  const statusText = statusError ? '状态未更新' : !status ? '状态加载中…' : config && !config.diagnosisEnabled
+    ? config.recoveryEnabled ? '仅开启自愈' : '诊断监控已关闭'
+    : config?.diagnosisEnabled && !status.monitoring ? '等待首次检查'
+    : status.monitoring ? `${config && !config.recoveryEnabled ? '仅开启诊断 · ' : ''}${states[status.monitoring.status]}` : '未监控';
+  return <div className={`insight-monitoring${embedded ? ' monitoring-embedded' : ''}`}>
+    {!embedded && <div className="page-heading"><div><h1>Agent 诊断</h1><p>实时监测 Bot 任务执行状态，诊断会话异常，助力“罢工”的 Bot 恢复运行</p></div></div>}
+    <MonitoringControls selected={selected} isAdmin={isAdmin} revision={botsRevision + configRevision} loading={loading} startDate={query.startDate} endDate={query.endDate}
       onBotChange={bot => { if (bot.botRef !== botRef) { setSelected(bot); setStatus(null); change({}); } }} onDatesChange={change}
       onUnavailable={failure => { ++requestSequence.current; setLoading(false); setSelected(null); setStatus(null); setLoadedPage(null); setOpenIds(new Set()); setStatusError(monitoringErrorText(failure)); }}
       onRefresh={() => { setBotsRevision(x => x + 1); setRevision(x => x + 1); }}>
       {botRef && <>
         <div className="status-bar" role="region" aria-label="Bot 监控状态">
-          <div className="status-left"><span className={`health ${healthClass}`}><span className="dot" />{statusError ? '状态未更新' : status ? status.monitoring ? states[status.monitoring.status] : '未监控' : '状态加载中…'}</span><span className="separator" /><span className="status-time" title={displayTime(status?.monitoring?.lastSuccessfulCheckAt ?? null)}>最近成功检查 {lastCheck ? `${lastCheck.day} ${lastCheck.time}` : '—'}</span></div>
+          <div className="status-left"><span className={`health ${healthClass}`}><span className="dot" />{statusText}</span><span className="separator" /><span className="status-time" title={displayTime(status?.monitoring?.lastSuccessfulCheckAt ?? null)}>最近成功检查 {lastCheck ? `${lastCheck.day} ${lastCheck.time}` : '—'}</span></div>
           <span className="live-refresh" title="页面可见时每 30 秒自动刷新"><Icon name="refresh" />{loading ? '正在更新…' : updatedAt ? `更新于 ${timeParts(updatedAt)?.time}` : '每 30 秒刷新'}</span>
         </div>
         {statusError && <div className="status-errors"><p role="alert" className="error-banner">{statusError}{pageData && ' 当前保留上次结果，尚未更新。'}</p></div>}
@@ -140,8 +146,8 @@ export default function MonitoringPanel({ isAdmin = false }: { isAdmin?: boolean
     </MonitoringControls>
     {!botRef && <p className="monitoring-empty">选择一个 Bot，查看监控状态和诊断结果。</p>}
     {!botRef && (statusError || error) && <p role="alert" className="error-banner">{statusError || error}</p>}
-    {status?.enrollmentState === 'NOT_ENROLLED' && selected && <MonitoringEnrollment key={botRef} bot={status} />}
-    {botRef && status?.enrollmentState === 'ENROLLED' && <>
+    {status?.enrollmentState === 'NOT_ENROLLED' && selected && !pageData?.total && <MonitoringEnrollment key={botRef} bot={status} onOpenSettings={onOpenSettings} />}
+    {botRef && status && <>
       <div className="records-title"><h2>诊断记录</h2><span className="sort-note" title="按会话时间倒序排列，时间未知的记录在最后"><Icon name="sort" />最新会话优先</span></div>
       <section aria-label="诊断记录" className="records-panel" aria-busy={loading}>
         <div className="records-toolbar">

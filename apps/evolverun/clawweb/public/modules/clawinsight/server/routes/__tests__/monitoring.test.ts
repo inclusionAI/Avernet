@@ -1,3 +1,5 @@
+import { botDiagnosisRecoveryMigrations } from '@avernet/clawweb-shared/server/schema-bot-diagnosis-recovery';
+import { BotDiagnosisRecoveryConfigRepository } from '../../repositories/bot-diagnosis-recovery-config-repository.js';
 import { initializeMonitoringSqlite } from "../../services/monitoring/schema.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import express from "express";
@@ -11,7 +13,7 @@ import { AppConfigRepository } from "@avernet/clawevolve/server/repositories/app
 import { EvolveRepository } from "@avernet/clawevolve/server/repositories/evolve-repository";
 import { SessionRecoveryTaskRepository } from "../../repositories/repair/session-recovery-task-repository.js";
 import { SessionRecoveryTaskService } from "../../services/repair/session-recovery/task-service.js";
-import { createMonitoringRecoveryTrigger, SESSION_RECOVERY_ALLOWLIST_KEY } from "../../services/monitoring/session-recovery-trigger.js";
+import { createMonitoringRecoveryTrigger } from "../../services/monitoring/session-recovery-trigger.js";
 import { DIAGNOSIS_V3_VERSION, DIAGNOSIS_V4_VERSION } from "../../services/monitoring/contracts.js";
 import { runtimeIdentity } from "../../services/monitoring/__tests__/runtime-identity-fixture.js";
 import { MonitoringError } from "../../services/monitoring/contracts.js";
@@ -76,6 +78,7 @@ beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), "monitoring-contract-"));
   db = database(join(dir, "runtime.sqlite3"));
   await initializeMonitoringSqlite(db);
+    await botDiagnosisRecoveryMigrations[0].migrate!(db);
   await start();
 }, 30000);
 afterEach(async () => {
@@ -363,7 +366,7 @@ describe('monitoring browser HTTP identity and enrollment boundary', () => {
     const path = `/monitoring/targets/${ref}`;
     const enroll = () => call('/monitoring/enrollments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ botRef: ref }) });
     expect((await call(`${path}/status`)).body).toMatchObject({ enrollmentState: 'NOT_ENROLLED', monitoring: null });
-    expect((await call(`${path}/diagnoses`)).status).toBe(409);
+    expect((await call(`${path}/diagnoses`)).status).toBe(200);
     const exec = vi.spyOn(db, 'exec');
     expect(await enroll()).toMatchObject({ status: 501, body: { error: { code: 'MONITORING_ENROLLMENT_NOT_IMPLEMENTED' } } });
     expect(exec).not.toHaveBeenCalled();
@@ -376,16 +379,14 @@ describe('monitoring browser HTTP identity and enrollment boundary', () => {
   });
 });
 
-describe("diagnosis report -> allowlist -> durable recovery task", () => {
+describe("diagnosis report -> Bot recovery switch -> durable recovery task", () => {
   // Schema creation is fixture setup; keep the normal test timeout for the HTTP and persistence assertions.
   beforeEach(async () => { await runMigrations(db, "sqlite"); }, 30000);
 
   async function automaticRecovery(botId = "mock-bot-te") {
     await stop();
-    const config = new AppConfigRepository(db);
-    await config.create({ config_key: SESSION_RECOVERY_ALLOWLIST_KEY, config_json: JSON.stringify({
-      allowed_bots: [{ bot_id: botId, entity_id: "001234", env: "prod" }],
-    }) });
+    const config = new BotDiagnosisRecoveryConfigRepository(db);
+    await config.setSwitches({ botId, entityId: '001234', env: 'prod' }, { diagnosisEnabled: true, recoveryEnabled: true, expectedVersion: 0, updatedBy: '001234' });
     const objects = new Map<string, Buffer>();
     const artifacts = {
       putObject: async (key: string, content: Buffer) => { objects.set(key, Buffer.from(content)); return { etag: null }; },
@@ -519,11 +520,12 @@ describe("diagnosis report -> allowlist -> durable recovery task", () => {
     const { input, config, agent } = await automaticRecovery();
     expect((await post({ ...input, entityId: "another-owner" })).status).toBe(201);
     expect(agent.start).not.toHaveBeenCalled();
-    await config.update(SESSION_RECOVERY_ALLOWLIST_KEY, { config_json: "null" });
+    const lookup = vi.spyOn(config, "find").mockRejectedValue(new Error("storage unavailable"));
     expect((await post(input)).status).toBe(409);
     const next = { ...input, eventId: "another-event", diagnosisId: "another-event" };
     expect((await post(next)).status).toBe(503);
-    await config.update(SESSION_RECOVERY_ALLOWLIST_KEY, { enabled: 0 });
+    lookup.mockRestore();
+    await config.setSwitches({ botId: input.botId, entityId: '001234', env: 'prod' }, { diagnosisEnabled: true, recoveryEnabled: false, expectedVersion: 1, updatedBy: '001234' });
     expect(await post(next)).toMatchObject({ status: 200, body: { duplicate: true } });
     expect(await db.query("SELECT task_id FROM ce_tasks WHERE task_type = 'session_recovery'")).toHaveLength(0);
     expect(agent.start).not.toHaveBeenCalled();

@@ -9,7 +9,7 @@ import FailureTasks from "./FailureTasks";
 import ImprovementItems from "./ImprovementItems";
 import InsightOverview from "./InsightOverview";
 import { InsightIcon } from "./InsightUi";
-import MonitoringPanel from "./monitoring/MonitoringPanel";
+import MonitoringWorkspace from "./monitoring/MonitoringWorkspace";
 import { MonitoringIcon } from "./monitoring/MonitoringIcon";
 import "./monitoring/monitoring.css";
 import { useInsightViewport } from "./useInsightViewport";
@@ -63,12 +63,12 @@ export default function InsightCenter() {
       <div className="insight-sidebar-inner">
         <div className="insight-workspace-title"><span className="insight-workspace-icon"><MonitoringIcon name="grid" /></span>效果中心</div>
         <nav aria-label="效果中心功能" className="insight-side-nav">
-          {[{ active: !monitoring, label: "Agent 治理", value: false, icon: "chart" as const }, ...(canViewMonitoring ? [{ active: monitoring, label: "Agent 诊断治愈", value: true, icon: "pulse" as const }] : [])].map(item =>
+          {[{ active: !monitoring, label: "Agent 治理", value: false, icon: "chart" as const }, ...(canViewMonitoring ? [{ active: monitoring, label: "Agent 诊断", value: true, icon: "pulse" as const }] : [])].map(item =>
             <button key={item.label} type="button" aria-current={item.active ? "page" : undefined} onClick={() => select(item.value)} className={item.active ? "active" : ""}><MonitoringIcon name={item.icon} />{item.label}</button>)}
         </nav>
       </div>
     </aside>
-    <div className="insight-content" role="region" aria-label="效果中心内容" tabIndex={0}>{monitoring && recoveryTaskId ? <SessionRecoveryDetail taskId={recoveryTaskId} onBack={() => { const next = new URLSearchParams(params); next.delete("recoveryTaskId"); setParams(next); }} /> : monitoring ? <MonitoringPanel key={`${user?.userId}:${user?.isClawInsightAdmin}`} isAdmin={user?.isClawInsightAdmin === true} /> : <GovernanceCenter />}</div>
+    <div className="insight-content" role="region" aria-label="效果中心内容" tabIndex={0}>{monitoring && recoveryTaskId ? <SessionRecoveryDetail taskId={recoveryTaskId} onBack={() => { const next = new URLSearchParams(params); next.delete("recoveryTaskId"); setParams(next); }} /> : monitoring ? <MonitoringWorkspace key={`${user?.userId}:${user?.isClawInsightAdmin}`} isAdmin={user?.isClawInsightAdmin === true} /> : <GovernanceCenter />}</div>
   </div>;
 }
 

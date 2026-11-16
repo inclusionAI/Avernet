@@ -37,3 +37,6 @@ export type SessionRecoveryTask = {
   termination?: SessionRecoveryTermination;
 };
 export type SessionRecoverySummary = { task_id: string; status: SessionRecoveryTask['status']; phase: SessionRecoveryTask['phase']; effect: string; completion_reason?: SessionRecoveryTask['completionReason'] };
+export type SessionRecoveryListItem = { taskId: string; botId: string; entityId: string; env: string; sessionKey: string;
+  status: SessionRecoveryTask['status']; phase: SessionRecoveryTask['phase']; effect: string; createdAt: number | string };
+export type SessionRecoveryListPage = { items: SessionRecoveryListItem[]; page: number; pageSize: number; total: number };

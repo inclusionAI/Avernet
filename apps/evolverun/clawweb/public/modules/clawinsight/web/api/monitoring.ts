@@ -10,6 +10,10 @@ export function monitoringWindow(query: Pick<MonitoringQuery, 'startDate' | 'end
   });
 }
 export const monitoringApi = {
+  configure: (input: { botRef: string; version: number; enabled: boolean } | { all: true; enabled: boolean }) =>
+    fetchJson<{ updated: number; failed: string[] }>(`${BASE}/configurations`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
+    }),
   options: (scope: BotScope, q: string, dates: Pick<MonitoringQuery, 'startDate' | 'endDate'>, cursor: string | null, signal?: AbortSignal) => {
     const params = monitoringWindow(dates);
     params.set('scope', scope); params.set('q', q); params.set('limit', '20');

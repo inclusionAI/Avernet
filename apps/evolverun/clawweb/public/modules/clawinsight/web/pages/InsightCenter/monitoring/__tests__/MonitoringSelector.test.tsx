@@ -131,8 +131,7 @@ describe('unmonitored Bot contact information', () => {
   it.each([true, false])('is display-only when canRequestEnrollment=%s', canRequestEnrollment => {
     render(<MonitoringEnrollment bot={{ ...bot('001'), capabilities: { canView: true, canRequestEnrollment } }} />);
     expect(screen.getByRole('region', { name: '未监控 Bot' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: '此 Bot 尚未纳入监控范围。' })).toBeInTheDocument();
-    expect(screen.getByText('如有需要请联系@沐荛添加监控 Bot。')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '此 Bot 尚未开启诊断监控。' })).toBeInTheDocument();
     expect(screen.getByText('Bot 001 · default · 001')).toBeInTheDocument();
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();

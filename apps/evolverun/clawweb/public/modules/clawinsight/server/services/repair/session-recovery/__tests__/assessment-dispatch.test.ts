@@ -1,3 +1,5 @@
+import { enableRecoveryFixture } from './bot-config-fixture.js';
+import { BotDiagnosisRecoveryConfigRepository } from '../../../../repositories/bot-diagnosis-recovery-config-repository.js';
 import Database from "better-sqlite3";
 import { expect, it, vi } from "vitest";
 import { SqliteDatabase, runMigrations } from "@avernet/clawweb-shared/server/db";
@@ -14,6 +16,7 @@ it.each([
   const db = new SqliteDatabase(new Database(":memory:"));
   try {
     await runMigrations(db, "sqlite");
+    await enableRecoveryFixture(db);
     const repo = new EvolveRepository(db), objects = new Map<string, Buffer>();
     const target: ResolvedBotTarget = { provider: "baas", environment: "prod", ownerId: "owner", botId: "default",
       deviceId: "fixture", bindingId: "binding", activeEngine };
@@ -40,6 +43,13 @@ it.each([
     await vi.waitFor(async () => expect((await stored.find(task_id))?.execution?.jobId).toBe("fixture-job"));
     expect(execute).toHaveBeenCalledOnce();
     expect(trajectory.read).not.toHaveBeenCalled();
+    await new BotDiagnosisRecoveryConfigRepository(db).setSwitches({ botId: 'default', entityId: 'owner', env: 'prod' },
+      { diagnosisEnabled: false, recoveryEnabled: false, expectedVersion: 1, updatedBy: 'owner' });
+    const replay = { event_id: 'late-trajectory', delivery_key: 'late-trajectory', diagnosis: '原任务受阻', tc_fault_label: null,
+      target: { env: 'prod', entity_id: 'owner', bot_id: 'default', engine }, session_key: 'agent:main:session:original', ...hint };
+    await expect(runtime.service.create(replay, { userId: 'owner', isAdmin: false })).resolves.toMatchObject({ task_id });
+    await expect(runtime.service.create({ ...replay, event_id: 'new-disabled', delivery_key: 'new-disabled' }, { userId: 'internal', isAdmin: true }))
+      .rejects.toMatchObject({ code: 'recovery_disabled' });
 
     const task = (await stored.find(task_id))!;
     expect(await runtime.agent!.bootstrap(task)).toMatchObject({

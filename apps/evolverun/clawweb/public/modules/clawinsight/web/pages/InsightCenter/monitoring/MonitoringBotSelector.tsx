@@ -5,10 +5,11 @@ import { MonitoringIcon as Icon } from './MonitoringIcon';
 import { useBotPickerLayout } from './useBotPickerLayout';
 
 type Props = {
+  autoSelect?: boolean;
   selected: BotOption | null; isAdmin: boolean; startDate: string; endDate: string;
   revision: number; onSelect: (bot: BotOption) => void; onUnavailable: (error: unknown) => void;
 };
-export function MonitoringBotSelector({ selected, isAdmin, startDate, endDate, revision, onSelect, onUnavailable }: Props) {
+export function MonitoringBotSelector({ selected, isAdmin, startDate, endDate, revision, onSelect, onUnavailable, autoSelect = true }: Props) {
   const [open, setOpen] = useState(false);
   const [scope, setScope] = useState<BotScope>('mine');
   const [draft, setDraft] = useState(''), [q, setQ] = useState('');
@@ -44,14 +45,14 @@ export function MonitoringBotSelector({ selected, isAdmin, startDate, endDate, r
       if (!active) return;
       setItems(previous => cursor ? [...previous, ...page.items.filter(b => !previous.some(p => p.botRef === b.botRef))] : page.items);
       setNextCursor(page.nextCursor); setLoadedContext(context);
-      if (!autoSelected.current && scope === 'mine' && !q && page.items[0]) {
+      if (autoSelect && !autoSelected.current && scope === 'mine' && !q && page.items[0]) {
         autoSelected.current = true;
         callback.current(page.items[0]);
       }
     }).catch(e => { if (active) { if ([401, 403, 404].includes(e?.status)) { setItems([]); unavailable.current(e); } setError(monitoringErrorText(controller.signal.reason ?? e)); setNextCursor(null); } })
       .finally(() => { if (active) { clearTimeout(timer); setLoading(false); } });
     return () => { active = false; controller.abort(); clearTimeout(timer); };
-  }, [scope, q, cursor, startDate, endDate, revision, retry, context]);
+  }, [scope, q, cursor, startDate, endDate, revision, retry, context, autoSelect]);
   useEffect(() => {
     if (!open) return;
     input.current?.focus();

@@ -4,10 +4,11 @@ import type { SessionRecoveryApi } from "../repair/session-recovery/contracts.js
 import { SessionRecoveryError } from "../repair/session-recovery/errors.js";
 import { isRecoveryTraceId, parseRequest } from "../repair/session-recovery/validation.js";
 import {
-  DIAGNOSIS_V3_VERSION, DIAGNOSIS_V4_VERSION, MonitoringError, type DiagnosisEvent, type MonitoringRecoveryConfigStore, type MonitoringRecoveryTrigger, type MonitoringTarget, type RuntimeIdentity,
+  DIAGNOSIS_V3_VERSION, DIAGNOSIS_V4_VERSION, MonitoringError, type DiagnosisEvent, type MonitoringRecoveryTrigger, type MonitoringTarget, type RuntimeIdentity,
 } from "./contracts.js";
 import { RECOVERY_POLICY_VERSION, recoverySkipReason } from "./action-policy.js";
 import { target, targetKey } from "./target.js";
+import type { BotDiagnosisRecoveryConfigStore } from './bot-config-contracts.js';
 
 export const SESSION_RECOVERY_ALLOWLIST_KEY = "session_recovery_allowlist";
 
@@ -15,7 +16,7 @@ function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function parseAllowlist(value: unknown): MonitoringTarget[] {
+export function parseLegacyRecoveryAllowlist(value: unknown): MonitoringTarget[] {
   if (!record(value) || Object.keys(value).some(key => key !== "allowed_bots") || !Array.isArray(value.allowed_bots)) {
     throw new Error("Invalid recovery allowlist");
   }
@@ -63,7 +64,7 @@ export function buildRecoveryTarget(event: DiagnosisEvent) {
 }
 
 export function createMonitoringRecoveryTrigger(input: {
-  config: MonitoringRecoveryConfigStore;
+  config: Pick<BotDiagnosisRecoveryConfigStore, 'find'>;
   service: SessionRecoveryApi | null;
 }): MonitoringRecoveryTrigger {
   return {
@@ -73,19 +74,14 @@ export function createMonitoringRecoveryTrigger(input: {
         console.info("[monitoring] recovery skipped", { eventId: event.eventId, policy: RECOVERY_POLICY_VERSION, reason });
         return;
       }
-      let allowed: MonitoringTarget[];
       try {
-        const row = await input.config.findByKey(SESSION_RECOVERY_ALLOWLIST_KEY);
-        if (!row || row.enabled === 0) return;
-        if (row.enabled !== 1) throw new Error("Invalid recovery configuration state");
-        allowed = parseAllowlist(JSON.parse(row.config_json));
+        if (!(await input.config.find(event))?.recoveryEnabled) return;
       } catch (error) {
-        console.error("[monitoring] recovery unavailable", { eventId: event.eventId, reason: "allowlist_unavailable" });
+        console.error("[monitoring] recovery unavailable", { eventId: event.eventId, reason: "configuration_unavailable" });
         logRepairEvent("session-recovery", "session_recovery_trigger", "configuration_unavailable", { eventId: event.eventId,
           botId: event.botId, targetEnvironment: event.env, ...repairLogError(error) });
-        throw new MonitoringError("NOT_READY", "自愈内测白名单暂不可用或格式无效。");
+        throw new MonitoringError("NOT_READY", "自愈配置暂不可用。");
       }
-      if (!allowed.some(entry => targetKey(entry) === targetKey(event))) return;
       const recoveryTarget = buildRecoveryTarget(event);
       if (recoveryTarget === null) {
         console.warn("[monitoring] recovery skipped", { eventId: event.eventId, reason: "runtime_identity_unavailable_or_mismatched" });

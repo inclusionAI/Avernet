@@ -1,3 +1,4 @@
+import { enableRecoveryFixture } from './bot-config-fixture.js';
 import Database from "better-sqlite3";
 import { expect, it, vi } from "vitest";
 import { SqliteDatabase, runMigrations } from "@avernet/clawweb-shared/server/db";
@@ -13,6 +14,7 @@ it("freezes DB team routes through production assembly, SQLite persistence, boot
   const db = new SqliteDatabase(new Database(":memory:"));
   try {
     await runMigrations(db, "sqlite");
+    await enableRecoveryFixture(db);
     const repo = new EvolveRepository(db), config = new AppConfigRepository(db), objects = new Map<string, Buffer>();
     const artifacts: RecoveryArtifactStore = {
       putObject: async (key, content) => { objects.set(key, Buffer.from(content)); return { etag: null }; },

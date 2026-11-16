@@ -10,7 +10,7 @@ export function paginationTokens(current: number, total: number): number[] {
 }
 
 type Props = {
-  data: DiagnosisPage | null;
+  data: (Pick<DiagnosisPage, 'page' | 'pageSize' | 'total' | 'totalPages'> & { items: readonly unknown[] }) | null;
   pageSize: number;
   loading: boolean;
   /** Changes only for explicit query/target changes, never for a background refresh. */

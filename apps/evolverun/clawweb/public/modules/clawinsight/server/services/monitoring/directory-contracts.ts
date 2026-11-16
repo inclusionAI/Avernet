@@ -37,6 +37,7 @@ export interface MonitoringReferences {
 export type BotOption = {
   botRef: string; botName: string; botId: string; ownerId: string; env: string;
   enrollmentState: 'ENROLLED' | 'NOT_ENROLLED'; monitoring: MonitoringSummary | null;
+  configuration?: { diagnosisEnabled: boolean; recoveryEnabled: boolean; version: number };
   capabilities: { canView: true; canRequestEnrollment: boolean };
 };
 export type BotOptionsPage = { items: BotOption[]; nextCursor: string | null; window: MonitoringWindow };
@@ -46,4 +47,5 @@ export interface MonitoringBrowserApi {
   status(principal: MonitoringPrincipal, ref: string, query: Record<string, unknown>): Promise<BotOption>;
   diagnoses(principal: MonitoringPrincipal, ref: string, query: Record<string, unknown>): Promise<DiagnosisPage>;
   enroll(principal: MonitoringPrincipal, input: unknown): Promise<never>;
+  configure?(principal: MonitoringPrincipal, input: unknown): Promise<{ updated: number; failed: string[] }>;
 }

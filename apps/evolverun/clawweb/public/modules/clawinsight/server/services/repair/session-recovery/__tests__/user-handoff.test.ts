@@ -1,3 +1,4 @@
+import { notificationBotConfig } from './bot-config-fixture.js';
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdtemp, mkdir, writeFile, appendFile, readFile, realpath, rm } from "node:fs/promises";
@@ -494,7 +495,7 @@ function useNativeOwnerCards() {
   const sender = { sendNotification: vi.fn(), sendCard: vi.fn(), updateCard: vi.fn() };
   const cards = new SessionRecoveryNotifier(sender, "https://pre.invalid", {
     findByKey: async () => ({ enabled: 1, config_json: JSON.stringify({ card: { pre: { template_id: "template", callback_route_key: "route" } } }) }),
-  }, "pre");
+  }, "pre", notificationBotConfig());
   notifier.notify.mockImplementation(input => cards.notify(input));
   notifier.notifyOwnerRequest = vi.fn(input => cards.notifyOwnerRequest(input));
   return sender;
