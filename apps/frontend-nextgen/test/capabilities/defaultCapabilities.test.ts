@@ -135,6 +135,13 @@ describe('Open Core default capabilities', () => {
     expect(defaultCapabilities.getBotMcpPickerEnabled()).toEqual({ status: 'available', value: false });
   });
 
+  test('getBotMcpPickerSources 默认全量来源（与既有 Segmented 行为一致，零变化）', () => {
+    expect(defaultCapabilities.getBotMcpPickerSources()).toEqual({
+      status: 'available',
+      value: ['internal', 'open-platform'],
+    });
+  });
+
   test('getProductBrand 默认 Avernet（横版 wordmark + 方版 mark 视觉组件）', () => {
     const r = defaultCapabilities.getProductBrand();
     expect(r.status).toBe('available');

@@ -11,6 +11,8 @@ const mockDetailUrl = jest.fn((skill: { source?: string }) => ({
 jest.mock('@/capabilities', () => ({
   getCapabilities: () => ({
     getBotMcpPickerEnabled: () => ({ value: true }),
+    // Open Core 默认全量来源（getBotMcpPickerSources 插槽契约，零行为变化）。
+    getBotMcpPickerSources: () => ({ value: ['internal', 'open-platform'] }),
     getBotSkillPickerSources: () => ({ value: ['market', 'workshop', 'mine'] }),
     getBotSkillPickerDetailUrl: (skill: { source?: string }) => mockDetailUrl(skill),
   }),
