@@ -65,6 +65,47 @@ impl MySqlSessionStore {
 }
 
 impl MySqlSessionStore {
+    /// Batched group activity key from session creation (design D2 Q2): the max
+    /// `gmt_create` per group in epoch ms, over the sessions currently persisted
+    /// for that group in this store's env. Binds follow the store's IN-list
+    /// precedent (`has_group_session_participant`): at most 200 ids per round
+    /// trip, one aggregate per chunk, maxima merged across chunks. Group ids
+    /// with no persisted session stay absent so callers keep the group's own
+    /// `created_at` fallback.
+    pub(super) async fn repo_max_created_at_by_group_ids(
+        &self,
+        group_ids: &[String],
+    ) -> ServiceResult<HashMap<String, u64>> {
+        let mut created: HashMap<String, u64> = HashMap::new();
+        for chunk in group_ids.chunks(200) {
+            let sql = format!(
+                "SELECT group_id, MAX({})*1000 AS gmt_create_ms FROM bcs_group_sessions \
+                 WHERE env = ? AND group_id IN ({}) GROUP BY group_id",
+                self.flavor.unix_ts("gmt_create"),
+                vec!["?"; chunk.len()].join(", ")
+            );
+            let mut params: Vec<DbValue> = vec![DbValue::from(self.env.as_str())];
+            params.extend(chunk.iter().map(|group_id| DbValue::from(group_id.as_str())));
+            let rows = self
+                .db
+                .query(DbStatement::with_params(sql, params))
+                .await
+                .map_err(|e| {
+                    ServiceError::InternalError(format!("group session activity query: {e}"))
+                })?;
+            for row in rows {
+                let group_id: String = db_get_column(&row, "group_id")
+                    .map_err(|e| ServiceError::InternalError(format!("group_id: {e}")))?;
+                let created_at = column_u64(&row, "gmt_create_ms");
+                let entry = created.entry(group_id).or_insert(created_at);
+                *entry = (*entry).max(created_at);
+            }
+        }
+        Ok(created)
+    }
+}
+
+impl MySqlSessionStore {
     pub(super) async fn repo_list_running_service_after(
         &self,
         after_session_id: Option<&str>,

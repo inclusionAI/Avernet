@@ -636,6 +636,32 @@ impl SessionRepoPort for MemorySessionRepo {
         limit: u64,
     ) -> Vec<Session> { self.repo_list_collected_by_group(group_id, bot_uuid, status, title_contains, offset, limit).await }
 
+    /// Single pass over the stored sessions returning the max `created_at` per
+    /// requested group (design D2 Q2 shape, folded in Rust). The memory repo
+    /// holds only this process's rows and has no env dimension, so no env
+    /// filter applies. Only currently persisted rows count, so a hard-deleted
+    /// session drops out through [`Self::delete`]; groups without sessions stay
+    /// absent so callers keep their own `created_at` fallback.
+    async fn max_created_at_by_group_ids(
+        &self,
+        group_ids: &[String],
+    ) -> ServiceResult<HashMap<String, u64>> {
+        if group_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let wanted: std::collections::HashSet<&str> = group_ids.iter().map(String::as_str).collect();
+        let state = self.state.read().await;
+        let mut created = HashMap::new();
+        for session in state.sessions.values() {
+            if !wanted.contains(session.group_id.as_str()) {
+                continue;
+            }
+            let entry = created.entry(session.group_id.clone()).or_insert(session.created_at);
+            *entry = (*entry).max(session.created_at);
+        }
+        Ok(created)
+    }
+
     async fn collected_at_map(&self, session_ids: &[&str], bot_uuid: &str) -> Vec<(String, u64)> {
         let st = self.state.read().await;
         session_ids

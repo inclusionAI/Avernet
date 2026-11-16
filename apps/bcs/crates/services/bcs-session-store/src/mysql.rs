@@ -5,6 +5,7 @@
 #[path = "mysql_registry.rs"]
 mod registry;
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -715,6 +716,13 @@ impl SessionRepoPort for MySqlSessionStore {
     }
 
     async fn delete(&self, session_id: &str) -> ServiceResult<bool> { self.repo_delete(session_id).await }
+
+    async fn max_created_at_by_group_ids(
+        &self,
+        group_ids: &[String],
+    ) -> ServiceResult<HashMap<String, u64>> {
+        self.repo_max_created_at_by_group_ids(group_ids).await
+    }
 
     async fn collect(&self, session_id: &str, bot_uuid: &str) -> ServiceResult<()> { self.repo_collect(session_id, bot_uuid).await }
 
