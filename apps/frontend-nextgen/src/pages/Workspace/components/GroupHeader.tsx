@@ -65,7 +65,7 @@ export interface GroupHeaderProps {
 /**
  * header chip（dmore artboard-003 群对话标题栏，48px 顶栏）：群身份 chip（头像堆/群名/会话 ID
  * 胶囊/用户与 Bot 计数）+ 右侧 28px 图标钮列。会话操作依次为收藏、分享、会话管理、历史消息、
- * 共享信息、资源管理和副屏。收藏、会话管理、历史消息、资源管理和副屏与 ChatHeaderActions 同构。
+ * 共享信息、会话文件和副屏。收藏、会话管理、历史消息、会话文件和副屏与 ChatHeaderActions 同构。
  * 历史消息由右缘 GroupHistorySidebar 承载；顶栏连接状态与对话页同形，输入帽条保留重连操作。
  *
  * 窄宽让位（container query 量外层 wrapper 宽度而非 viewport，副屏/管理面板挤压主区时同样生效）：
@@ -248,7 +248,7 @@ export function GroupHeader({
             )}
             {selectedSession ? (
               <GroupHeaderIcon
-                label={activePanel === 'resources' ? '关闭资源管理' : '资源管理'}
+                label={activePanel === 'resources' ? '关闭会话文件' : '会话文件'}
                 icon={<FolderOpen className="size-4" aria-hidden />}
                 active={activePanel === 'resources'}
                 onClick={() => onTogglePanel(activePanel === 'resources' ? 'none' : 'resources')}

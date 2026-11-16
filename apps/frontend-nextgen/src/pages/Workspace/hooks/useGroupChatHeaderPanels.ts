@@ -3,7 +3,7 @@ import { createGroupTaskHistoryReader } from '@/services/tasks/panel/taskPanelHi
  * useGroupChatHeaderPanels —— 协作群头部六图标域（收藏/历史消息/副屏）的开合编排（群侧孪生）。
  *
  * 与 chat 侧 useChatHeaderPanels 的差异：
- * - 右缘面板互斥由 GroupWorkspaceArea 的单一 activePanel 统一（会话管理/历史消息/资源管理），
+ * - 右缘面板互斥由 GroupWorkspaceArea 的单一 activePanel 统一（会话管理/历史消息/会话文件），
  *   本 Hook 不再持有面板开关态，只承载纯本地域：收藏模型（SessionView.favorite）、
  *   历史搜索（前端过滤，Service 同源）、副屏镜像开合。
  * - 群侧 GroupChatPane 在会话切换时 closePanelForce()，故副屏开合态必须随切换复位
