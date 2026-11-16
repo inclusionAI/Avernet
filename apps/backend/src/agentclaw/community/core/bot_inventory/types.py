@@ -130,6 +130,8 @@ class BotInventoryItem:
     # lives in template_type + the public projection of template_config).
     template_type: str | None = None
     template_config: Mapping[str, Any] | None = None
+    # Repository ISO creation time for ordering, not part of the HTTP response.
+    bot_created_at: str = ""
 
 
 @dataclass(frozen=True)

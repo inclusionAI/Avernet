@@ -166,14 +166,10 @@ class BotInventoryService(BotInventoryServiceProtocol):
                     bot_ids=bot_ids,
                 )
             )
-        cards.sort(
-            key=lambda c: (
-                c.deploy_mode.value,
-                c.bot_name,
-                c.bot_id,
-                -(c.publication_version or 0),
-            )
-        )
+        # Stable sorts keep a Bot's publication cards in lifecycle display
+        # order and give equally old Bots a repeatable order across pages.
+        cards.sort(key=lambda c: (c.bot_id, c.owner_entity_id, c.deploy_mode.value))
+        cards.sort(key=lambda c: c.bot_created_at, reverse=True)
         total = len(cards)
         start = (page - 1) * page_size
         page_cards = cards[start : start + page_size]
@@ -528,6 +524,7 @@ class BotInventoryService(BotInventoryServiceProtocol):
                 lifecycle_card.internal_status if lifecycle_card else None
             ),
             template_type=_optional_str(row.get("template_type")),
+            bot_created_at=row.get("gmt_create") or "",
         )
 
     @staticmethod
