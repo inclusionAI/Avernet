@@ -133,13 +133,11 @@ def test_cron_crud_and_published_baas_runtime_live(live_backend, acceptance_fs_r
         )
         assert verify_response.status_code == 200, verify_response.text
         verify_body = verify_response.json()
-        assert verify_body["success"] is True, verify_body
-        verify_bot = verify_body["data"]["bot"]
-        assert verify_bot["bot_type"] == "service", verify_body
-        assert verify_bot["runtime_stage"] == "verify", verify_body
-        assert verify_bot["publish_status"] == "success", verify_body
-        assert "runtime_stage" not in verify_body["data"], verify_body
-        assert "publish_status" not in verify_body["data"], verify_body
+        # Default/arca/baas providers destroy the verify bot after online success,
+        # so the success publish record only remains a live target for teclaw.
+        assert verify_body["success"] is False, verify_body
+        assert verify_body["error_code"] == 404, verify_body
+        assert verify_body["data"] is None, verify_body
 
         running_response = client.get(
             "/api/cron/running",
