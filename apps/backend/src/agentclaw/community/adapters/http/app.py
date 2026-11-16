@@ -326,6 +326,7 @@ from agentclaw.community.core.skill_center.errors import (  # noqa: E402
     McpPermissionDeniedError,
     LocalSkillNotReadyError,
     SkillSetAccessDeniedError,
+    SkillRuntimeNameConflictError,
     SkillSetControlPlaneConflictError,
     SkillSetControlPlaneLockUnavailableError,
     SkillSetControlPlaneNotFoundError,
@@ -365,6 +366,7 @@ _DOMAIN_ERROR_STATUS_MAP: dict[type[DomainError], int] = {
     # 400, not 409: the published wire echoes the reason code as a rejected
     # request and clients already parse it that way. Kept-as-is deliberately.
     SkillSetControlPlaneConflictError: 400,
+    SkillRuntimeNameConflictError: 409,
     # 409, not 503. The mutation fence could not be taken, so the command never
     # ran and the service itself is up and serving, which is the only thing a
     # 503 is allowed to mean. Answering 503 also tells proxies and clients to

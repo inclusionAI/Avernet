@@ -14,6 +14,8 @@ activation routes.
 
 from __future__ import annotations
 
+from agentclaw.community.core.repository.implementations.skill_center.bot_mutation_fence import lock_bot_capabilities
+
 from typing import Any
 
 from agentclaw.community.core.ports.mcp_config import McpConfigWriteIntent
@@ -337,6 +339,7 @@ class ApplyClaimCommands:
         before this runs. A runtime name a Set supplies is refused.
         """
         with self._db.transactional_orm_session() as session:
+            lock_bot_capabilities(session, bot_id=bot_id, entity_id=owner_id)
             supplied, _mcps = self._set_supply(
                 session,
                 bot_id=bot_id,
@@ -412,6 +415,7 @@ class ApplyClaimCommands:
     ) -> DesiredStateMutation:
         """Remove one Direct Skill; refuse one whose runtime name a Set supplies."""
         with self._db.transactional_orm_session() as session:
+            lock_bot_capabilities(session, bot_id=bot_id, entity_id=owner_id)
             supplied, _mcps = self._set_supply(
                 session,
                 bot_id=bot_id,

@@ -24,6 +24,7 @@ from tests.community.core.skill_center._skill_set_management_bot_doubles import 
 
 
 import re
+from contextlib import nullcontext
 
 from dataclasses import replace
 
@@ -81,6 +82,9 @@ class _Repository:
         self.set_active_calls = []
         self.update_calls = []
         self.add_mcp_calls = []
+
+    def skill_batch(self, **_kwargs):
+        return nullcontext()
 
     def update_set(self, **kwargs):
         self.update_calls.append(kwargs)
