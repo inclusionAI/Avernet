@@ -37,6 +37,7 @@ bcs-auth-api    = { workspace = true }
 bcs-auth-oauth  = { workspace = true }
 bcs-jwt         = { workspace = true }
 bcs-cache-api   = { workspace = true }
+bcs-store-api   = { workspace = true }
 bcs-db-api      = { workspace = true }
 bcs-llm-api     = { workspace = true }
 bcs-human-notify-api = { workspace = true }

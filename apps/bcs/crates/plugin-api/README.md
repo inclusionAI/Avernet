@@ -16,6 +16,11 @@ capabilities such as cache or database access.
 
 ## Contract Shape
 
+- [`bcs-store-api`](bcs-store-api/README.md) owns runtime state capabilities: KV,
+  conditional writes, atomic JSON, versioned sorted sets and ordered streams.
+  Service stores own business protocols; providers own storage guarantees.
+  Advanced support is explicit and cannot degrade to best-effort writes.
+
 - `bcs-cache-api` owns cache primitives: byte values, hash fields, TTL, and
   conditional writes. Business cache keys and invalidation policy belong to the
   service store layer.

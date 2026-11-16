@@ -1,0 +1,16 @@
+[package]
+name = "bcs-store-api"
+description = "Runtime storage capability contracts, independent of backend commands"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+async-trait = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
