@@ -70,6 +70,10 @@ from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime 
 from agentclaw.community.core.task.context_collab.l6_products.catalog import (
     ProductCatalog,
 )
+from agentclaw.community.core.task.context_collab.l6_products.operations import (
+    ProductProfileCreateCommand,
+    create_product_profile,
+)
 from agentclaw.community.core.task.context_collab.persistence.method_store import (
     MethodStoreProtocol,
 )
@@ -81,7 +85,6 @@ from agentclaw.community.core.task.context_collab.products.task_commission impor
 )
 from agentclaw.community.core.task.context_collab.products.task_commission.profile import (
     TASK_COMMISSION_PROFILE,
-    init_product_profile,
 )
 from agentclaw.community.core.task.context_collab.products.task_commission.service_api import (
     ApplyForTaskCommand,
@@ -351,7 +354,21 @@ def commission_deployment(db, monkeypatch):
 
 
 @pytest.fixture(
-    params=[TASK_COMMISSION_PROFILE, init_product_profile()],
+    params=[
+        TASK_COMMISSION_PROFILE,
+        create_product_profile(
+            ProductProfileCreateCommand(
+                ref=TASK_COMMISSION_PROFILE.ref,
+                composition=TASK_COMMISSION_PROFILE.composition,
+                scenario_roles=TASK_COMMISSION_PROFILE.scenario_roles,
+                domain=TASK_COMMISSION_PROFILE.domain,
+                workflow=TASK_COMMISSION_PROFILE.workflow,
+                governance=TASK_COMMISSION_PROFILE.governance,
+                compatibility=TASK_COMMISSION_PROFILE.compatibility,
+                publication=TASK_COMMISSION_PROFILE.publication,
+            )
+        ),
+    ],
     ids=["legacy", "initial"],
 )
 def commission_runtime(commission_deployment, request):
@@ -362,15 +379,26 @@ def commission_runtime(commission_deployment, request):
 
 """产品上线 → 建任务 → Bot Query/Apply → 策略 Screen/Admit → scoped Participant → Work → accept。"""
 def test_end_to_end_commission_flow(commission_deployment, tmp_path):
-    # 1、初始化product profile
-    profile = init_product_profile()
+    # 1、通过 L6 操作创建 product profile（相比协议新增）
+    profile = create_product_profile(
+        ProductProfileCreateCommand(
+            ref=TASK_COMMISSION_PROFILE.ref,                         # 版本
+            composition=TASK_COMMISSION_PROFILE.composition,         # 绑定的method信息（这里是OPEN方法）
+            scenario_roles=TASK_COMMISSION_PROFILE.scenario_roles,   # 涉及哪些角色
+            domain=TASK_COMMISSION_PROFILE.domain,
+            workflow=TASK_COMMISSION_PROFILE.workflow,
+            governance=TASK_COMMISSION_PROFILE.governance,
+            compatibility=TASK_COMMISSION_PROFILE.compatibility,
+            publication=TASK_COMMISSION_PROFILE.publication,
+        )
+    )
 
-    # 2、动态注入
+    # 动态注入
     with commission_deployment(profile) as (service, working_bot, injector):
         collab_service = injector.get(ContextCollabServiceProtocol)
         executor_ref = AgentRef(agent_type="bot", agent_id=BOT_ASSIGNEE)
 
-        # 3、通过 L4 北向用例创建 Collet（同时创建 Task、初始事件并投影 L5 MethodBinding）
+        # 2、通过 L4 北向用例创建 Collet（同时创建 Task、初始事件并投影 L5 MethodBinding）
         collet = collab_service.create_collet(
             ColletCreateCommand(
                 space=SPACE,

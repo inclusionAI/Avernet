@@ -43,6 +43,9 @@ l5_methods/operations/
   single.py / group.py   # separate operations; single_group.py preserves combined API
   open/                  # opportunity query/application/admission operations
   swarm/                 # execution profile/plan/stage operations
+l6_products/operations/
+  contracts.py             # ProductProfileCreateCommand: authored definition input
+  product_profile.py       # create_product_profile: validate/return, no installation
 services/
   method_bootstrap.py       # L6 creation contract -> L5 initialization/recovery
 products/
@@ -50,6 +53,10 @@ products/
   bbs_public_discussion/
 ```
 
+- L6 [profile creation](l6_products/README.md#create-a-product-profile) is a pure
+  `create_product_profile` operation returning `ProductProfileDefinition`. Creation
+  and catalog installation share validation but remain separate; neither profile
+  authoring nor role declarations grant runtime participation or create a Collet.
 - L4/L5 operations consume narrow `CollaborationReader`/`EventWriter` ports, not L6's
   ContextSpec or the richer application repository contract. Persistence exposes
   creation principal/executor identity facts for governance, preserving existing
