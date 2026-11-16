@@ -226,37 +226,51 @@ class BaasDeviceFileSystem(DeviceFileSystem):
             "[%s.list_dir] bot_uuid=%s dir=%s recursive=%s",
             type(self).__name__, self._bot_uuid, dir_path, recursive,
         )
-        try:
-            resp = await asyncio.to_thread(
-                self._transport.post,
-                "/api/file/list",
-                json={"dir_path": dir_path, "recursive": recursive},
-            )
-            resp.raise_for_status()
-            result = resp.json()
-            return result.get("data", {}).get("files", [])
-        except httpx.HTTPStatusError as e:
-            # Match the ``DeviceFileSystem`` contract: a device-level 404 means
-            # the directory is absent. This is common for first-use staging and
-            # rollback paths, and callers already distinguish ``None`` from an
-            # empty directory. Keep proxy routing 404s observable: they mean the
-            # request never reached the device, so treating them as absence would
-            # hide an unavailable Bot/device.
-            if e.response.status_code == 404 and not _is_proxy_routing_failure(
-                e.response
-            ):
-                logger.debug(
-                    "[%s.list_dir] not found: %s", type(self).__name__, dir_path
+        max_retries = 1
+        for attempt in range(max_retries + 1):
+            try:
+                resp = await asyncio.to_thread(
+                    self._transport.post,
+                    "/api/file/list",
+                    json={"dir_path": dir_path, "recursive": recursive},
                 )
-                return None
-            logger.error(
-                "[%s.list_dir] HTTP %d: %s",
-                type(self).__name__, e.response.status_code, dir_path,
-            )
-            raise
-        except Exception as e:
-            logger.error("[%s.list_dir] error: %s", type(self).__name__, e)
-            raise
+                resp.raise_for_status()
+                result = resp.json()
+                return result.get("data", {}).get("files", [])
+            except httpx.HTTPStatusError as e:
+                # Match the ``DeviceFileSystem`` contract: a device-level 404 means
+                # the directory is absent. This is common for first-use staging and
+                # rollback paths, and callers already distinguish ``None`` from an
+                # empty directory. Keep proxy routing 404s observable: they mean the
+                # request never reached the device, so treating them as absence would
+                # hide an unavailable Bot/device.
+                if e.response.status_code == 404 and not _is_proxy_routing_failure(
+                    e.response
+                ):
+                    logger.debug(
+                        "[%s.list_dir] not found: %s", type(self).__name__, dir_path
+                    )
+                    return None
+                logger.error(
+                    "[%s.list_dir] HTTP %d: %s",
+                    type(self).__name__, e.response.status_code, dir_path,
+                )
+                raise
+            except httpx.TimeoutException as e:
+                if attempt < max_retries:
+                    logger.warning(
+                        "[%s.list_dir] attempt %d/%d timed out (retrying): %s",
+                        type(self).__name__, attempt + 1, max_retries + 1, e,
+                    )
+                    continue
+                logger.error(
+                    "[%s.list_dir] all %d attempts timed out for %s",
+                    type(self).__name__, max_retries + 1, dir_path,
+                )
+                raise
+            except Exception as e:
+                logger.error("[%s.list_dir] error: %s", type(self).__name__, e)
+                raise
 
     async def exists(self, path: str) -> bool:
         # ``exists`` is a boolean probe, so a genuine 404 is the answer (False), not
