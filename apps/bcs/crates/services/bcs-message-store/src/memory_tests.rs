@@ -386,3 +386,161 @@
         );
         assert!(!second.has_more);
     }
+
+    /// Seed one session's persisted log for the activity-key tests. The
+    /// messages are appended directly (like the fixtures above) so each row
+    /// controls its own `created_at` and group:
+    async fn seed_activity(
+        repo: &MemoryMessageRepo,
+        group_id: &str,
+        session_id: &str,
+        created_at: &[u64],
+    ) {
+        let mut sessions = repo.sessions.write().await;
+        let entry = sessions.entry(session_id.to_string()).or_default();
+        for (index, at) in created_at.iter().enumerate() {
+            let seq = entry.seq + 1;
+            entry.seq = seq;
+            let mut message = make_msg(session_id, &format!("{session_id}-{index}"), seq);
+            message.group_id = group_id.to_string();
+            message.created_at = *at;
+            entry.messages.push(message);
+        }
+    }
+
+    /// Empty id lists short-circuit to an empty map instead of scanning or
+    /// querying for nothing.
+    #[tokio::test]
+    async fn last_activity_empty_id_list_is_an_empty_map() {
+        let repo = MemoryMessageRepo::new();
+        seed_activity(&repo, "g-a", "s-a", &[1_000]).await;
+
+        assert!(repo.last_activity_by_group_ids(&[]).await.unwrap().is_empty());
+        assert!(repo.last_activity_by_session_ids(&[]).await.unwrap().is_empty());
+    }
+
+    /// Per-id activity is `MAX(created_at)` in epoch ms — not the first, the
+    /// last appended, nor the session sequence.
+    #[tokio::test]
+    async fn last_activity_returns_max_created_at_per_group_and_session() {
+        let repo = MemoryMessageRepo::new();
+        seed_activity(&repo, "g-a", "s-a", &[1_000, 5_000, 3_000]).await;
+        seed_activity(&repo, "g-b", "s-b", &[2_000, 7_000, 4_000]).await;
+
+        let groups = repo
+            .last_activity_by_group_ids(&["g-a".to_string(), "g-b".to_string()])
+            .await
+            .unwrap();
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups.get("g-a"), Some(&5_000));
+        assert_eq!(groups.get("g-b"), Some(&7_000));
+
+        let sessions = repo
+            .last_activity_by_session_ids(&["s-a".to_string(), "s-b".to_string()])
+            .await
+            .unwrap();
+        assert_eq!(sessions.len(), 2);
+        assert_eq!(sessions.get("s-a"), Some(&5_000));
+        assert_eq!(sessions.get("s-b"), Some(&7_000));
+    }
+
+    /// Ids without any persisted message are absent from the map so callers
+    /// keep their own `created_at` fallback (design D1).
+    #[tokio::test]
+    async fn last_activity_omits_ids_without_messages() {
+        let repo = MemoryMessageRepo::new();
+        seed_activity(&repo, "g-known", "s-known", &[4_200]).await;
+
+        let groups = repo
+            .last_activity_by_group_ids(&["g-known".to_string(), "g-missing".to_string()])
+            .await
+            .unwrap();
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups.get("g-known"), Some(&4_200));
+        assert!(!groups.contains_key("g-missing"));
+
+        let sessions = repo
+            .last_activity_by_session_ids(&["s-known".to_string(), "s-missing".to_string()])
+            .await
+            .unwrap();
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions.get("s-known"), Some(&4_200));
+        assert!(!sessions.contains_key("s-missing"));
+    }
+
+    /// More distinct ids than one SQL chunk (200) must all be answered; the
+    /// memory store has no chunking, this guards the shared contract.
+    #[tokio::test]
+    async fn last_activity_covers_ids_beyond_one_chunk() {
+        let repo = MemoryMessageRepo::new();
+        for index in 0..250_u64 {
+            seed_activity(
+                &repo,
+                &format!("g-{index:03}"),
+                &format!("s-{index:03}"),
+                &[1_000 + index],
+            )
+            .await;
+        }
+
+        let group_ids: Vec<String> = (0..250).map(|index| format!("g-{index:03}")).collect();
+        let groups = repo.last_activity_by_group_ids(&group_ids).await.unwrap();
+        assert_eq!(groups.len(), 250);
+        assert_eq!(groups.get("g-000"), Some(&1_000));
+        assert_eq!(groups.get("g-249"), Some(&1_249));
+
+        let session_ids: Vec<String> = (0..250).map(|index| format!("s-{index:03}")).collect();
+        let sessions = repo.last_activity_by_session_ids(&session_ids).await.unwrap();
+        assert_eq!(sessions.len(), 250);
+        assert_eq!(sessions.get("s-000"), Some(&1_000));
+        assert_eq!(sessions.get("s-249"), Some(&1_249));
+    }
+
+    /// A candidate with thousands of messages next to shallow ones must still
+    /// report its own maximum.
+    #[tokio::test]
+    async fn last_activity_deep_history_candidate_uses_its_max() {
+        let repo = MemoryMessageRepo::new();
+        let deep: Vec<u64> = (1..=3_000).map(|value| 1_000 + value).collect();
+        seed_activity(&repo, "g-deep", "s-deep", &deep).await;
+        seed_activity(&repo, "g-shallow", "s-shallow", &[9_000_000]).await;
+
+        let groups = repo
+            .last_activity_by_group_ids(&["g-deep".to_string(), "g-shallow".to_string()])
+            .await
+            .unwrap();
+        assert_eq!(groups.get("g-deep"), Some(&4_000));
+        assert_eq!(groups.get("g-shallow"), Some(&9_000_000));
+
+        let sessions = repo
+            .last_activity_by_session_ids(&["s-deep".to_string(), "s-shallow".to_string()])
+            .await
+            .unwrap();
+        assert_eq!(sessions.get("s-deep"), Some(&4_000));
+        assert_eq!(sessions.get("s-shallow"), Some(&9_000_000));
+    }
+
+    /// Activity is store-owned per env (the same isolation the history reads
+    /// rely on): another env's messages for the same ids never leak in.
+    #[tokio::test]
+    async fn last_activity_never_counts_another_environment() {
+        let dev = MemoryMessageRepo::new().with_environment("dev".to_string());
+        let prod = MemoryMessageRepo::new().with_environment("prod".to_string());
+        seed_activity(&dev, "g-shared", "s-shared", &[1_000]).await;
+        seed_activity(&prod, "g-shared", "s-shared", &[9_000]).await;
+        seed_activity(&prod, "g-prod-only", "s-prod-only", &[9_000]).await;
+
+        let groups = dev
+            .last_activity_by_group_ids(&["g-shared".to_string(), "g-prod-only".to_string()])
+            .await
+            .unwrap();
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups.get("g-shared"), Some(&1_000));
+
+        let sessions = dev
+            .last_activity_by_session_ids(&["s-shared".to_string(), "s-prod-only".to_string()])
+            .await
+            .unwrap();
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions.get("s-shared"), Some(&1_000));
+    }

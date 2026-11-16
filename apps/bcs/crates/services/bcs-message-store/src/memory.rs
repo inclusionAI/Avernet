@@ -116,6 +116,32 @@ impl MemoryMessageRepo {
         self.event_store = Some(event_store);
         self
     }
+
+    /// Single env-scoped pass over the stored log returning `MAX(created_at)`
+    /// per requested id (design D2 Q1/Q3 shape). The repo owns exactly one env
+    /// (`with_environment`), so its own messages are the env filter. Ids with
+    /// no message stay absent from the map.
+    async fn last_activity(
+        &self,
+        ids: &[String],
+        key: for<'a> fn(&'a PersistedMessage) -> &'a str,
+    ) -> Result<HashMap<String, u64>, MessageRepoError> {
+        if ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let wanted: std::collections::HashSet<&str> = ids.iter().map(String::as_str).collect();
+        let sessions = self.sessions.read().await;
+        let mut activity = HashMap::new();
+        for message in sessions.values().flat_map(|entry| &entry.messages) {
+            let id = key(message);
+            if !wanted.contains(id) {
+                continue;
+            }
+            let entry = activity.entry(id.to_string()).or_insert(message.created_at);
+            *entry = (*entry).max(message.created_at);
+        }
+        Ok(activity)
+    }
 }
 
 #[async_trait]
@@ -165,6 +191,12 @@ impl MessageRepoPort for MemoryMessageRepo {
         let sessions = self.sessions.read().await;
         let ids: std::collections::BTreeSet<_> = ids.iter().collect();
         Ok(sessions.get(session_id).map(|s| s.messages.iter().filter(|m| ids.contains(&m.message_id)).cloned().collect()).unwrap_or_default())
+    }
+    async fn last_activity_by_group_ids(&self, group_ids: &[String]) -> Result<HashMap<String, u64>, MessageRepoError> {
+        self.last_activity(group_ids, |message| message.group_id.as_str()).await
+    }
+    async fn last_activity_by_session_ids(&self, session_ids: &[String]) -> Result<HashMap<String, u64>, MessageRepoError> {
+        self.last_activity(session_ids, |message| message.session_id.as_str()).await
     }
     fn delivery_repository(self: Arc<Self>) -> Option<Arc<dyn bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoPort>> {
         Some(self)
