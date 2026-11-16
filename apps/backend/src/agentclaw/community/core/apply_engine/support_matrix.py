@@ -164,6 +164,10 @@ _VERDICTS: dict[tuple[Category, SourceKind], SourceRefusal | None] = {
     (Category.RESOURCES, SourceKind.CONTENT): None,
     (Category.RESOURCES, SourceKind.OSS): None,
     (Category.RESOURCES, SourceKind.GIT): None,
+    (Category.CAPABILITIES, SourceKind.CONTENT): _SKILL_IS_A_PACKAGE,
+    (Category.CAPABILITIES, SourceKind.OSS): None,
+    (Category.CAPABILITIES, SourceKind.GIT): None,
+    (Category.CAPABILITIES, SourceKind.BOT): _BOT_SOURCE_IS_RESOURCES_ONLY,
     (Category.RESOURCES, SourceKind.BOT): None,
     # A skill is a package; only a fetch can deliver one — never a bot source.
     (Category.SKILLS, SourceKind.CONTENT): _SKILL_IS_A_PACKAGE,

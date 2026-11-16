@@ -34,7 +34,14 @@ from agentclaw.community.core.content_store import DIGEST_RE
 from agentclaw.community.core.ports.mcp_config import McpConfigWriteIntent
 
 __all__ = [
+    "CenterSkill",
     "CenterSkillByName",
+    "CenterSkillRef",
+    "CenterSkillByCode",
+    "DesiredSkillSet",
+    "DefaultSkillSetRef",
+    "DesiredCapabilities",
+    "CapabilityDeclaration",
     "Declaration",
     "DesiredBotConfig",
     "DesiredBotFileSync",
@@ -188,7 +195,29 @@ class LocalSkillPackage:
 
 @dataclass(frozen=True)
 class CenterSkillByName:
-    """A Skill Center skill, found by the entry's name; the bot runs the version the Center publishes (ADR 0002)."""
+    """Deprecated compatibility form for Genome mutation's name-based references.
+
+    Retained until Genome adopts explicit UUID/code references; remove this
+    form as part of that migration. The bot tracks the published Center version
+    (ADR 0002).
+    """
+
+
+@dataclass(frozen=True)
+class CenterSkillRef:
+    """An existing Center asset, selected by its stable UUID."""
+
+    skill_uuid: str
+
+
+@dataclass(frozen=True)
+class CenterSkillByCode:
+    """A public Center asset, prepared only during an actual Apply write."""
+
+    skill_code: str
+
+
+CenterSkill = CenterSkillRef | CenterSkillByCode
 
 
 @dataclass(frozen=True)
@@ -204,7 +233,7 @@ class RepoSkillPath:
 @dataclass(frozen=True)
 class DesiredSkill:
     name: str
-    source: LocalSkillPackage | CenterSkillByName | RepoSkillPath
+    source: LocalSkillPackage | CenterSkillByName | CenterSkill | RepoSkillPath
     note: str | None = None
 
     def __post_init__(self) -> None:
@@ -218,7 +247,7 @@ class DesiredSkill:
     def origin(self) -> SkillOrigin:
         if isinstance(self.source, LocalSkillPackage):
             return SkillOrigin.LOCAL
-        if isinstance(self.source, CenterSkillByName):
+        if isinstance(self.source, (CenterSkillByName, CenterSkillRef, CenterSkillByCode)):
             return SkillOrigin.CENTER
         return SkillOrigin.REPO
 
@@ -457,6 +486,75 @@ class DesiredEngineConfig:
 
 
 @dataclass(frozen=True)
+class DesiredSkillSet:
+    name: str
+    is_active: bool
+    skills: tuple[DesiredSkill, ...]
+    mcp: tuple[str, ...]
+    description: str | None = None
+
+    def __post_init__(self) -> None:
+        _require(bool(self.name) and self.name != "default", "a regular SkillSet needs a non-reserved name")
+        Declaration(self.skills)
+        _require(len(set(self.mcp)) == len(self.mcp), "duplicate MCP member in one SkillSet")
+
+    @property
+    def identity(self) -> str:
+        return self.name
+
+
+@dataclass(frozen=True)
+class DefaultSkillSetRef:
+    identity: ClassVar[str] = "default"
+
+
+@dataclass(frozen=True)
+class DesiredCapabilities:
+    skills: Declaration[DesiredSkill] | None = None
+    skill_sets: Declaration[DesiredSkillSet | DefaultSkillSetRef] | None = None
+    mcp: Declaration[DesiredMcpServer] | None = None
+    identity: ClassVar[str] = "capabilities"
+
+    def children(self) -> tuple[tuple[str, Declaration[Any] | None], ...]:
+        return (("skills", self.skills), ("skill_sets", self.skill_sets), ("mcp", self.mcp))
+
+
+@dataclass(frozen=True)
+class CapabilityDeclaration(Declaration[DesiredCapabilities]):
+    """One execution entry with the existing per-child report view."""
+
+    @classmethod
+    def from_target(cls, target: DesiredCapabilities) -> CapabilityDeclaration | None:
+        if all(child is None for _, child in target.children()):
+            return None
+        return cls((target,), cls._failures(target))
+
+    @staticmethod
+    def _failures(target: DesiredCapabilities) -> tuple[EntryFailure, ...]:
+        return tuple(
+            EntryFailure(f"{prefix}/{failure.identity}", failure.reason)
+            for prefix, child in target.children() if child is not None
+            for failure in child.failures
+        )
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        _require(len(self.entries) == 1, "capabilities needs exactly one aggregate entry")
+        target = self.entries[0]
+        _require(isinstance(target, DesiredCapabilities), "capabilities needs a DesiredCapabilities target")
+        _require(any(child is not None for _, child in target.children()), "capabilities has no participating scope")
+        _require(self.failures == self._failures(target), "capability failures must match child declarations")
+
+    @property
+    def identities(self) -> tuple[str, ...]:
+        return tuple(
+            f"{prefix}/{identity}"
+            for prefix, child in self.entries[0].children() if child is not None
+            for identity in child.identities
+        )
+
+
+@dataclass(frozen=True)
 class DesiredBotConfig:
     """The ``bot_config`` mapping: per-kind configuration the bot carries.
 
@@ -487,12 +585,22 @@ class DesiredState:
     mcp: Declaration[DesiredMcpServer] | None = None
     engine_config: Declaration[DesiredEngineConfig] | None = None
     cli_tools: Declaration[DesiredCliTool] | None = None
+    capabilities: Declaration[DesiredCapabilities] | None = None
     bot_file_sync: Declaration[DesiredBotFileSync] | None = None
     bot_config: Declaration[DesiredBotConfig] | None = None
 
     EMPTY: ClassVar[DesiredState]
 
     def __post_init__(self) -> None:
+        if self.skills is not None or self.mcp is not None:
+            _require(self.capabilities is None, "cannot mix capabilities with legacy skills/mcp input")
+            object.__setattr__(self, "capabilities", CapabilityDeclaration.from_target(
+                DesiredCapabilities(skills=self.skills, mcp=self.mcp)
+            ))
+            object.__setattr__(self, "skills", None)
+            object.__setattr__(self, "mcp", None)
+        if self.capabilities is not None:
+            _require(isinstance(self.capabilities, CapabilityDeclaration), "capabilities needs CapabilityDeclaration")
         if self.resources is not None:
             _check_resource_layout(self.resources.entries)
 
@@ -524,8 +632,7 @@ _FIELD_BY_CONSTRUCT: dict[Construct, str] = {
     Section.SCRIPT: "script",
     Category.IDENTITY: "identity",
     Category.RESOURCES: "resources",
-    Category.SKILLS: "skills",
-    Category.MCP: "mcp",
+    Category.CAPABILITIES: "capabilities",
     Category.ENGINE_CONFIG: "engine_config",
     Category.CLI_TOOLS: "cli_tools",
     Section.BOT_FILE_SYNC: "bot_file_sync",

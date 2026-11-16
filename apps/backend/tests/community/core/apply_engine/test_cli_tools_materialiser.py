@@ -13,6 +13,9 @@ reads the stored bytes. ``compiling_cli_tools`` is that road over fakes.
 """
 from __future__ import annotations
 
+from tests.community.core.apply_engine._capability_facts import build_test_materialisers as build_materialisers
+
+
 from types import SimpleNamespace
 
 import hashlib
@@ -364,9 +367,6 @@ async def test_a_failed_entry_carries_a_reason_and_a_successful_one_a_note() -> 
 
 
 def test_the_materialiser_is_registered_under_its_own_construct() -> None:
-    from agentclaw.community.core.apply_engine.registry import (
-        build_materialisers,
-    )
 
     registry = build_materialisers(
         script_service=object(), activation_service=object(),

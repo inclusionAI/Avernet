@@ -1,17 +1,15 @@
-"""``manifest.skills`` → ``DesiredSkill``: a validated local package, stored as one tree.
+"""Skill declarations → Local packages or stable shared-asset references.
 
-The Manifest grammar declares local packages only (a ``source`` or ``from``
-that delivers a zip, a tar.gz or a git tree); Skill Center and
-shared-repository skills are the genome compiler's. The fetched bytes are
-validated through the same ``SkillPackageValidator`` the manual upload runs,
-and the package's files are filed as one ``acm-tree-v1`` blob — the shape the
-genome stores a local skill in, so the two compilers agree on the digest.
+Direct and ordinary SkillSet members use this same compiler and fetch session.
+Local bytes pass the existing package validator before being filed as a tree;
+Repo paths and Center UUID/code remain references for the capability resolver.
 """
 
 from __future__ import annotations
 
 import asyncio
 import tempfile
+from uuid import UUID
 from pathlib import Path
 from typing import Any, Mapping, Optional, Sequence
 
@@ -22,6 +20,9 @@ from agentclaw.community.core.apply_engine.desired_state import (
     EntryFailure,
     LocalSkillPackage,
     ContentRef,
+    RepoSkillPath,
+    CenterSkillRef,
+    CenterSkillByCode,
 )
 from agentclaw.community.core.bot_config_manifest.sources.entry_delivery import EntryDelivery
 from agentclaw.community.core.bot_config_manifest.sources.source_resolver import DeclaredSourceResolver
@@ -87,6 +88,15 @@ async def compile_skills(
             failures.append(EntryFailure(name, "declared more than once in this category"))
             continue
         seen.add(name)
+        origin = entry.get("origin", "local")
+        if origin == "repo":
+            desired.append(DesiredSkill(name, RepoSkillPath(entry["repo_path"])))
+            continue
+        if origin == "center":
+            source = (CenterSkillRef(str(UUID(entry["skill_uuid"]))) if "skill_uuid" in entry
+                      else CenterSkillByCode(entry["skill_code"]))
+            desired.append(DesiredSkill(name, source))
+            continue
         if isinstance(entry.get("content"), str):
             failures.append(
                 EntryFailure(

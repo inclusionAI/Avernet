@@ -36,8 +36,7 @@ DELIVERED = (
     Section.SCRIPT,
     Category.IDENTITY,
     Category.RESOURCES,
-    Category.SKILLS,
-    Category.MCP,
+    Category.CAPABILITIES,
 )
 
 
@@ -56,13 +55,14 @@ def test_every_example_revision_compiles_to_a_total_state_that_mirrors_its_spec(
     state = compile_spec(spec, BlobDir())
     assert state.declared == DELIVERED
     assert state.cli_tools is None and state.engine_config is None
+    assert state.capabilities.entries[0].skill_sets is None
     assert state.identity.entries == tuple(DesiredIdentityFile(e.type, ContentRef(e.digest)) for e in spec.persona)
     for entry, desired in zip(spec.resources, state.resources.entries, strict=True):
         expected = DesiredResourceTree if entry.path.endswith("/") else DesiredResourceFile
         assert isinstance(desired, expected) and desired.path == entry.path
         assert (desired.tree if isinstance(desired, DesiredResourceTree) else desired.content).digest == entry.digest
-    assert [s.name for s in state.skills.entries] == [e.name for e in spec.skills]
-    assert [m.server_code for m in state.mcp.entries] == [e.server_code for e in spec.tools.mcp]
+    assert [s.name for s in state.capabilities.entries[0].skills.entries] == [e.name for e in spec.skills]
+    assert [m.server_code for m in state.capabilities.entries[0].mcp.entries] == [e.server_code for e in spec.tools.mcp]
     if spec.script is None:
         assert state.script == Declaration(())
     else:
@@ -79,11 +79,11 @@ def test_skill_origins_and_mcp_overrides_take_their_typed_source() -> None:
     )
     assert any(isinstance(s, RepoSkill) for s in spec.skills)
     state = compile_spec(spec, BlobDir())
-    sources = {s.name: s.source for s in state.skills.entries}
+    sources = {s.name: s.source for s in state.capabilities.entries[0].skills.entries}
     assert sources["weather"] == RepoSkillPath("team/weather")
     assert all(isinstance(s, (LocalSkillPackage, CenterSkillByName, RepoSkillPath)) for s in sources.values())
     for entry in spec.tools.mcp:
-        desired = next(m for m in state.mcp.entries if m.server_code == entry.server_code)
+        desired = next(m for m in state.capabilities.entries[0].mcp.entries if m.server_code == entry.server_code)
         expected = McpOverride.from_config(entry.config.to_json()) if entry.config is not None else None
         assert desired == DesiredMcpServer(entry.server_code, expected)
 

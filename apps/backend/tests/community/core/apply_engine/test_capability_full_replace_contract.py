@@ -20,12 +20,9 @@ from agentclaw.community.core.apply_engine.activation_delegates import (
 )
 from agentclaw.community.core.apply_engine.context import ApplyContext
 from agentclaw.community.core.apply_engine.delivery import ArcaDelivery
-from agentclaw.community.core.apply_engine.materialisers.mcp import (
-    McpMaterialiser,
-)
-from agentclaw.community.core.apply_engine.materialisers.skills import (
-    SkillsMaterialiser,
-)
+from agentclaw.community.core.apply_engine.materialisers.capabilities import CapabilitiesMaterialiser
+from agentclaw.community.core.apply_engine.skill_set_apply_delegates import DeviceSkillSetApply
+from agentclaw.community.core.skill_center.services.skill_set_management_service import SkillSetManagementService
 from agentclaw.community.core.apply_engine.orchestrator import (
     ApplyOrchestrator,
 )
@@ -84,6 +81,7 @@ from ._fakes import (
     OSS_BUCKET,
     EngineRig,
     build_skill_zip,
+    FakeMcpConfigService,
     manifest_compiler,
     real_validator,
     seeded_object_store,
@@ -138,9 +136,8 @@ class _Center:
         return {"has_permission": True, "access_level": "PUBLIC"}
 
 
-class _McpConfig:
-    def validate_bot_override(self, **_kwargs) -> dict:
-        return {"valid": True, "error": None}
+class _McpConfig(FakeMcpConfigService):
+    pass
 
 
 class _Runtime:
@@ -339,7 +336,7 @@ def _context(bot: dict, *, apply_id: str | None) -> ApplyContext:
 
 def _rig(*, overlap: bool):
     """The real persistence, reader and activation service behind both materialisers, and the parsed document."""
-    db = _Database()
+    db = _Database(shared=True)
     bots = BotRepository(db)
     skills = SkillRepository(db)
     desired = CapabilityDesiredStateRepository(db)
@@ -366,20 +363,23 @@ def _rig(*, overlap: bool):
     objects = seeded_object_store({key: package})
     content = FakeManifestContent()
     fetcher = DeclaredSourceResolver(content, FakeObjectCredentials(), objects)
+    from ._mcp_config_support import Center
+    center = Center()
+    management = SkillSetManagementService(
+        repository=desired, bot_repo=bots, runtime=runtime, legacy_factory=object(), passport=object(),
+        authorization=_Authorization(), audit_log_repo=_Audit(), mcp_center=center,
+        mcp_auth=center, mcp_config=_McpConfig(), ext_info_provider=lambda _: {}, recovery=MagicMock(),
+    )
     orchestrator = EngineRig(
         ApplyOrchestrator(
-            {
-                Category.SKILLS: SkillsMaterialiser(
-                    uploads, activation, reader, real_validator(), content, FakeSharedSkills()
-                ),
-                Category.MCP: McpMaterialiser(
-                    activation, _Center(), _McpConfig(), reader
-                ),
-            },
+            {Category.CAPABILITIES: CapabilitiesMaterialiser(
+                uploads, activation, real_validator(), content, FakeSharedSkills(),
+                object(), DeviceSkillSetApply(management), center, _McpConfig(),
+            )},
             steps=ArcaDelivery(lambda: None).steps_for,
         ),
         manifest_compiler(content=content, resolver=fetcher),
-        only={Category.SKILLS, Category.MCP},
+        only={Category.CAPABILITIES},
     )
     digest = "sha256:" + hashlib.sha256(package).hexdigest()
     document = f"""schema_version: 1
@@ -403,6 +403,10 @@ manifest:
         is_teclaw=lambda _engine: False,
     )
     parsed = validate_document(document, capabilities).parsed
+    if not overlap:
+        parsed['manifest']['skill_sets'] = [
+            {'name': 'ordinary', 'is_active': True, 'skills': [], 'mcp': [{'server_code': 'mcp.set'}]}
+        ]
     bot = bots.get_by_id_and_owner("bot-1", "owner")
     assert bot is not None
 
@@ -427,7 +431,7 @@ async def test_a_declaration_that_overlaps_a_skill_set_is_refused_before_anythin
         failed = {
             (c.construct, e.identity) for c in report.categories for e in c.entries if e.outcome is EntryOutcome.FAILED
         }
-        assert failed == {(Category.SKILLS, "dependent"), (Category.MCP, "mcp.explicit")}
+        assert failed == {(Category.CAPABILITIES, "skills/dependent"), (Category.CAPABILITIES, "mcp/mcp.explicit")}
     assert runtime.scopes == []
     with db.orm_session() as session:
         assert session.query(SkillSetSkill).count() == 1
@@ -455,12 +459,12 @@ async def test_combined_full_replace_dry_run_and_apply_use_real_persistence():
 
     dry_categories = {category.construct: category for category in dry_run.categories}
     assert dry_run.status is ApplyStatus.SUCCEEDED
-    assert dry_categories[Category.SKILLS].entries[0].outcome is EntryOutcome.UPDATED
-    assert dry_categories[Category.MCP].removals == ("mcp.omit",)
+    assert dry_categories[Category.CAPABILITIES].entries[0].outcome is EntryOutcome.UPDATED
+    assert dry_categories[Category.CAPABILITIES].removals == ("mcp/mcp.omit",)
     dry_dependency = next(
         entry
-        for entry in dry_categories[Category.MCP].entries
-        if entry.identity == "mcp.dep"
+        for entry in dry_categories[Category.CAPABILITIES].entries
+        if entry.identity == "mcp/mcp.dep"
     )
     assert dry_dependency.outcome is EntryOutcome.UPDATED
     assert runtime.scopes == []
@@ -482,12 +486,12 @@ async def test_combined_full_replace_dry_run_and_apply_use_real_persistence():
 
     categories = {category.construct: category for category in report.categories}
     assert report.status is ApplyStatus.SUCCEEDED
-    assert categories[Category.SKILLS].entries[0].outcome is EntryOutcome.UPDATED
-    assert categories[Category.MCP].removals == ("mcp.omit",)
+    assert categories[Category.CAPABILITIES].entries[0].outcome is EntryOutcome.UPDATED
+    assert categories[Category.CAPABILITIES].removals == ("mcp/mcp.omit",)
     dependency = next(
         entry
-        for entry in categories[Category.MCP].entries
-        if entry.identity == "mcp.dep"
+        for entry in categories[Category.CAPABILITIES].entries
+        if entry.identity == "mcp/mcp.dep"
     )
     assert dependency.outcome is EntryOutcome.UPDATED
     assert "Skill dependency" in (dependency.note or "")

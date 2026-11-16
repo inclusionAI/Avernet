@@ -1,6 +1,6 @@
 """Limits and the deployment allowlist for the manifest fetch road (W2, #1470).
 
-Single source for every number the transport enforces — schema §5 of
+Single source for per-entry numbers the transport enforces — schema §5 of
 ``docs/bot-config-manifest/manifest-schema.zh-CN.md``. Fetch-time limits
 (remote content sizes) live here and nowhere else: the schema module refuses
 at PUT only what it can see at write time, and duplicating fetch numbers
@@ -24,6 +24,10 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Callable, Mapping
 
+from agentclaw.community.core.apply_engine.fetch_budget import (  # noqa: F401 — compatibility exports
+    APPLY_BUDGET_S,
+    APPLY_FETCH_TOTAL_LIMIT,
+)
 from agentclaw.community.core.apply_engine.unpack import (  # noqa: F401  re-exported: the fetch vocabulary
     ARCHIVE_MEMBER_LIMIT,
     ARCHIVE_UNPACKED_LIMIT,
@@ -68,14 +72,6 @@ assert set(FETCH_ENTRY_LIMITS) == {c.value for c in FetchCategory}, (
 )
 
 #: ``schema §5`` — one archive may not explode beyond this many members.
-
-#: ``schema §5`` — totals for a single apply run, LEDGERED by W5's
-#: ``apply/budget.ApplyFetchBudget`` (carried on ``ApplyContext``,
-#: consulted before each entry's fetch and charged after): an apply that
-#: outruns these ends in bounded time rather than holding the per-bot apply
-#: lock past the TTL the stale-lock reaper trusts.
-APPLY_FETCH_TOTAL_LIMIT = 500 * 1024 * 1024
-APPLY_BUDGET_S = 300.0
 
 #: Per network operation (each hop, each read). A multi-hop entry is
 #: therefore NOT bounded to one of these — its wall clock is bounded by the
@@ -170,9 +166,9 @@ class FetchBudget:
     names when it asks how many bytes and how long it may take. The
     *apply-scope* ledger (shared wall clock and byte total) is a different
     object at a different layer:
-    ``apply/budget.ApplyFetchBudget``, consulted per entry by the entry
-    fetch pipeline (W5). The two share this module's numbers and nothing
-    else.
+    ``apply_engine.fetch_budget.ApplyFetchBudget``, consulted per entry by
+    the entry fetch pipeline (W5). The Apply-owned ledger and total limits
+    are re-exported through the historical Manifest imports for compatibility.
     """
 
     category: str = "resources_file"
