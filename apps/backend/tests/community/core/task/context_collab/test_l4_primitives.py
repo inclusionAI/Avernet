@@ -123,9 +123,26 @@ def test_context_spec_round_trip_with_none_executor_ref():
         ResourceRef(resource_type="repo", resource_id="repo_001", revision="3"),
     )
     assert isinstance(spec.resource_refs, tuple)
+    assert spec.executor_owner_id is None
     dumped = spec.to_dict()
     assert dumped == SPEC_DICT
     assert ContextSpec.from_dict(dumped) == spec
+
+
+def test_context_spec_round_trip_preserves_executor_owner_id():
+    data = dict(SPEC_DICT)
+    data["executor_owner_id"] = "another_user"
+
+    spec = ContextSpec.from_dict(data)
+
+    assert spec.executor_owner_id == "another_user"
+    assert spec.to_dict() == data
+    assert ContextSpec.from_dict(spec.to_dict()) == spec
+
+
+def test_context_spec_rejects_empty_executor_owner_id():
+    with pytest.raises(ContextCollabValidationError, match="executor_owner_id"):
+        ContextSpec.from_dict({**SPEC_DICT, "executor_owner_id": ""})
 
 
 def test_context_spec_round_trip_with_executor_and_optional_profiles():

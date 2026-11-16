@@ -32,7 +32,6 @@ The trusted engine `POST /api/internal/runs` path accepts an optional
 `parent_relation` only when covered by the existing engine signature. The server
 locks and validates the parent run, its currently-running node execution, its
 persisted immutable workflow snapshot, and—when present—the durable fanout
-<<<<<<< HEAD
 group/item dispatch claim. On an externally provisioned database that predates
 migration v145, `flow_runs.workflow_snapshot_json` may be absent; in that
 compatibility mode only a deployment-bound run (with valid `workflow_version`

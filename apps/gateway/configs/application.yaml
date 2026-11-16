@@ -239,6 +239,9 @@ user_config:
       app: optional
       bot: optional
 
+    "/openapi/v1/collaboration/tasks/todos/**":
+      user: required
+
     "/openapi/v1/bots/**":
       user: optional
       app: optional
@@ -477,6 +480,9 @@ user_config:
           source: file
           path: schemas/bots.openapi.json
           refresh_seconds: 300
+      # Human Todo workbench: rides collaboration-tasks under
+      # /openapi/v1/collaboration/tasks/todos and forwards verbatim to the
+      # backend's public OpenAPI artifact.
       # The backend's agent-swarm surface: submit/poll/cancel SSE runs under
       # /openapi/v1/agentswarm (additive-only within v1; a breaking change
       # ships as /openapi/v2/agentswarm). Forwards verbatim — the gateway only

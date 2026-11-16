@@ -13,7 +13,7 @@ afterEach(cleanup)
 
 it.each([
   ['AUTO_HEAL_BAAS_NOT_CONFIGURED', '配置缺失或未启用', 'AI 草稿服务不可用'] as const,
-  ['AUTO_HEAL_BOT_UNAVAILABLE', 'BaaS Bot 是否存在、可用且绑定有效', 'AI 草稿服务不可用'] as const,
+  ['AUTO_HEAL_BOT_UNAVAILABLE', 'AutoHeal Bot 绑定不可用或无效', 'AI 草稿服务不可用'] as const,
   ['AI_DRAFT_RECOVERY_UNAVAILABLE', '无法签发恢复凭据', 'AI 草稿请求凭据暂不可用'] as const,
 ])('maps capability reason %s to actionable text without submitting a job', async (reason, guidance, statusText) => {
   api.capabilities.mockResolvedValueOnce({ available: false, reason }).mockResolvedValueOnce({ available: true })

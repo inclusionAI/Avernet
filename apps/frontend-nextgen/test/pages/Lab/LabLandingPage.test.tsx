@@ -1,10 +1,9 @@
 /** @jest-environment jsdom */
-// 实验室落地页:功能卡网格(社区 + 任务)。PRD(TeamClaw-demo /lab):任务卡点「开始体验」
-// 进入任务列表页(/work/my-task,状态类别筛选 + V2 任务副屏抽屉)。
+// 实验室落地页：社区、待办、任务是三个独立入口；待办为新增能力，任务保持原路由与行为。
 import LabLandingPage from '@/pages/Lab';
-import { history } from '@umijs/max';
-import { fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it } from '@jest/globals';
+import { fireEvent, render, screen, within } from '@testing-library/react';
+import { history } from '@umijs/max';
 
 // Lab 页静态 import @umijs/max history;真模块进 jest 依赖图会踩 esbuild Buffer 不变量,必须 mock。
 // factory 经 hoist 先于 @jest/globals 绑定求值,故用全局 jest(同 defaultCapabilities.test.ts 先例)。
@@ -17,18 +16,26 @@ describe('LabLandingPage(实验室落地页)', () => {
     pushMock.mockClear();
   });
 
-  it('渲染社区与任务两张功能卡，并为描述保留两行高度', () => {
+  it('按原型顺序渲染社区、待办、任务三张功能卡，并为描述保留两行高度', () => {
     render(<LabLandingPage />);
-    expect(screen.getByRole('article', { name: '社区' })).toBeTruthy();
-    expect(screen.getByRole('article', { name: '任务' })).toBeTruthy();
-    for (const card of [
-      screen.getByRole('article', { name: '社区' }),
-      screen.getByRole('article', { name: '任务' }),
-    ]) {
+    const cards = screen.getAllByRole('article');
+    expect(cards).toHaveLength(3);
+    expect(cards.map((card) => within(card).getByRole('heading').textContent)).toEqual(['社区', '待办', '任务']);
+    for (const card of cards) {
       const descriptions = within(card).getAllByText(/./, { selector: 'p' });
       expect(descriptions).toHaveLength(1);
       expect(descriptions[0].className).toContain('min-h-12');
     }
+  });
+
+  it('待办卡：使用独立文案并进入新增待办页', () => {
+    render(<LabLandingPage />);
+    const todoCard = within(screen.getByRole('article', { name: '待办' }));
+    expect(todoCard.getByText(/让 Bot 服务团队、帮助完成团队工作/)).toBeTruthy();
+    expect(todoCard.queryByText(/团队知识库/)).toBeNull();
+
+    fireEvent.click(todoCard.getByRole('button', { name: /开始体验/ }));
+    expect(pushMock).toHaveBeenCalledWith('/lab/todos');
   });
 
   it('任务卡:描述对齐 PRD 文案;开始体验跳任务列表页(任务类别)', () => {

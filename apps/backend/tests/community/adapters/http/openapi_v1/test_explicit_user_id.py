@@ -657,11 +657,12 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 # The owner-scoped collaboration repair adds one path-addressed, user-scoped
 # operation; the non-user Bot overview stays path-addressed in the same total.
 # The relay-session task read is account-level and carries no bot_id parameter.
-# Context collab (this change): the three operations under
-# /collaboration/task/context_collab address no bot, so "none" grows 144 -> 147.
-# Team-space deletion adds the user-scoped DELETE /bots/spaces/{space_id},
-# which addresses no bot either: "none" grows 147 -> 148.
-_BOT_ID_PLACEMENT = {"path": 226, "query": 1, "none": 148}
+# Context collab adds three operations with no Bot dimension: none 144 -> 147.
+# Todo adds one list operation with an optional bot_id query and nine operations
+# with no Bot dimension: query 1 -> 2, none 147 -> 156.
+# Team-space deletion adds one user-scoped operation with no Bot dimension:
+# none 156 -> 157.
+_BOT_ID_PLACEMENT = {"path": 226, "query": 2, "none": 157}
 
 
 
@@ -877,10 +878,11 @@ def test_the_pinned_number_of_operations_take_it():
     # path-addressed placement mirrors _BOT_ID_PLACEMENT["path"] 219 -> 220).
     # The six service-Bot evaluation operations add six user-taking,
     # path-addressed operations: 292 -> 298 / 220 -> 226.
-    # Team-space deletion adds the user-taking DELETE /bots/spaces/{space_id}:
-    # 298 -> 299 (its operation addresses a Space, not a Bot, so the
-    # _BOT_ID_PLACEMENT "none" bucket grows separately).
-    assert len(taking) == 299
+    # All ten Todo routes, including the two persisted-artifact reads, are also
+    # user-scoped, so the merged surface grows 298 -> 308. Context-collab derives
+    # its actor from the verified principal and adds no user_id query.
+    # Team-space deletion adds one more user-taking operation: 308 -> 309.
+    assert len(taking) == 309
 
 
 def test_the_exempt_operations_take_none():

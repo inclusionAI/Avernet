@@ -1019,13 +1019,30 @@ class TestSwarmHandlerEdges:
 
     def test_wait_any_mode_resumes_once_one_ref_satisfied(self, db):
         script = [
-            _spawn_decision("a1", "objective-a1"),
             _wait_decision("a1", "ghost", mode="any"),
             _finish_decision("done via any-wait"),
         ]
         handler, repos, _ = _handler_env(db, script)
         run = _mk_run()
         claim = _enqueue_claim(repos, run)
+
+        # Persist one satisfied ref and one real, permanently-unsatisfied ref.
+        # This exercises the ANY predicate itself without depending on an
+        # asynchronously scheduled test subagent finishing inside the slice
+        # wall-clock budget under a heavily loaded xdist worker.
+        satisfied = _mk_agent(run, "a1")
+        repos["agent"].create(satisfied)
+        repos["result"].create(dm.AgentResult(
+            id=dm.ResultId(uuid.uuid4().hex),
+            run_id=run.run_id,
+            tenant=TENANT,
+            source_agent_id=satisfied.agent_id,
+            payload={"answer": "a1"},
+            artifact_key=None,
+            routed_at=dm.EpochMillis(int(time.time() * 1000)),
+        ))
+        _spin_ref(repos, run)
+
         outcome = asyncio.run(handler.handle_slice(
             run.run_id, TENANT, claim["claim_epoch"], worker_id=WORKER,
         ))

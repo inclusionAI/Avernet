@@ -85,6 +85,20 @@ def test_aggregate_phase_preserves_evidence_runs_all_gates_and_cleans_profiles(p
     assert (phase_repo[0] / 'bcs.log').read_text() == 'previous-hit\n'
 
 
+def test_aggregate_phase_fails_closed_when_all_reports_cannot_merge(phase_repo):
+    path, _, events, profile = phase_repo
+    missing_profile = path / 'apps/bcs/target/cov-e2e/llvm-cov-target/missing.profraw'
+    result, lines = run(
+        phase_repo, '--skip-start', '--aggregate-only', PROFILE=str(missing_profile)
+    )
+    assert result.returncode == 1, result.stderr
+    assert lines.count('report') == 3
+    assert profile.exists() is False
+    assert 'FAIL: BCS LLVM coverage aggregation failed' in result.stderr
+    summary = path / 'apps/bcs/target/cov-e2e/summary.json'
+    assert summary.exists() is False
+
+
 def test_default_still_runs_all_tests_and_reports_after_failure(phase_repo):
     result, events = run(phase_repo, '--skip-start', CALLER_RC='8')
     assert result.returncode == 8, result.stderr

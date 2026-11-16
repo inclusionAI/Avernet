@@ -64,13 +64,19 @@ def _chain_records():
 def _projection(event_id, status, primitive_type="Task"):
     return EventProjection(
         event_id=event_id,
+        event_seq=1,
         parent_event=None,
         event_kind="task.progress.updated",
         primitive_type=primitive_type,
+        actor_id="u_1001",
+        actor_type="human",
+        execution_id="",
+        context_version=1,
         status=status,
         summary=None,
         content=None,
-        occurred_at=OCCURRED_AT,
+        artifacts=(),
+        created_at=OCCURRED_AT,
     )
 
 
@@ -99,9 +105,7 @@ def test_project_events_trunk_filter_keeps_status_and_order():
     records = _chain_records()
     full = project_events(records, current_event_id="evt_004")
     trunk_ids = active_chain_ids(records, "evt_004")
-    trunk = project_events(
-        records, current_event_id="evt_004", trunk_ids=trunk_ids
-    )
+    trunk = project_events(records, current_event_id="evt_004", trunk_ids=trunk_ids)
 
     assert [p.event_id for p in trunk] == [
         "evt_001",
@@ -163,9 +167,7 @@ def test_build_progress_last_percent_wins_and_current_event_passthrough():
         _projection("evt_004", "active"),
         _projection("evt_005", "pending"),
     ]
-    snapshot = build_progress(
-        projections, current_event_id="evt_003", last_percent=40
-    )
+    snapshot = build_progress(projections, current_event_id="evt_003", last_percent=40)
 
     assert snapshot.percent == 40
     assert snapshot.current_event_id == "evt_003"

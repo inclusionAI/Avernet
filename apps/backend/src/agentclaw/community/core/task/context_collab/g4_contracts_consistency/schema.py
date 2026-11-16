@@ -22,6 +22,7 @@ REGISTERED_EVENT_KINDS: frozenset[str] = frozenset(
         "task.rejected",
         "task.cancelled",
         "task.completed",
+        "artifact.reported",
         "user_interaction.posted",
     }
 )
