@@ -34,7 +34,7 @@ def _snapshot(status: str) -> Task:
         objective="整理任务代办 spec",
         status=status,
         principal_ref=PRINCIPAL,
-        executor_ref=EXECUTOR,
+        executor_refs=((EXECUTOR,) if EXECUTOR is not None else ()),
         task_id="task_" + "collet_fixture",
         collet_ref="collet_fixture",
         version=1,

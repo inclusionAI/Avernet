@@ -77,7 +77,7 @@ from agentclaw.community.core.task.context_collab.l6_products.profiles import (
 from agentclaw.community.core.task.context_collab.persistence.method_store import (
     MethodStoreProtocol,
 )
-from agentclaw.community.core.task.context_collab.persistence.repository import (
+from agentclaw.community.core.task.context_collab.l6_products.persistence.repository import (
     AppendEventRecordRequest,
     ContextCollabRepositoryProtocol,
     CreateColletRecordRequest,
@@ -111,7 +111,7 @@ from agentclaw.community.core.task.context_collab.products.task_commission.views
     TaskCommissionDetailView,
     TaskCommissionSummaryView,
 )
-from agentclaw.community.core.task.context_collab.services.method_bootstrap import (
+from agentclaw.community.core.task.context_collab.l6_products.operations.method_bootstrap import (
     project_created_context,
 )
 

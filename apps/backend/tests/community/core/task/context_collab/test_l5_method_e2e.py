@@ -64,9 +64,9 @@ from agentclaw.community.core.task.context_collab.persistence.repository import 
 )
 from agentclaw.community.core.task.context_collab.service_api import (
     ActorContext,
-    ColletCreateCommand,
+    CollaborationCreateCommand,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.context_collab_service import (
+from agentclaw.community.core.task.context_collab.l6_products.operations.collaboration_creation import (
     ContextCollabService,
 )
 from agentclaw.community.core.task.context_collab.services.method_lifecycle_service import (
@@ -100,7 +100,7 @@ def _actor(principal: PrincipalRef) -> ActorContext:
     return ActorContext(actor=principal, source="api")
 
 
-def _create_command(**overrides) -> ColletCreateCommand:
+def _create_command(**overrides) -> CollaborationCreateCommand:
     fields = {
         "space": SPACE,
         "principal_ref": OWNER,
@@ -116,7 +116,7 @@ def _create_command(**overrides) -> ColletCreateCommand:
         ],
     }
     fields.update(overrides)
-    return ColletCreateCommand(**fields)
+    return CollaborationCreateCommand(**fields)
 
 
 def _future_iso(hours: float = 1.0) -> str:
@@ -195,7 +195,7 @@ class TestL5MethodObjectsE2E:
         """Open+Group 顶层 → group 成员 → open 申请/录取(成员产物)→
         Single 委托链(bind/activate/select/delegate)→ 顶层 inspection
         conformance evidence 非空。"""
-        created = services.context_service.create_collet(
+        created = services.context_service.create_collaboration(
             _create_command(), _actor(OWNER)
         )
         collab_id = created.collet_id
@@ -327,7 +327,7 @@ class TestL5MethodObjectsE2E:
         """嵌套 Swarm binding:declare profile → submit plan → validate →
         adopt → start(前沿 READY)→ allocate(分配即活即跑)→
         complete(stage SUCCEEDED + 分配 RELEASED)→ inspection。"""
-        created = services.context_service.create_collet(
+        created = services.context_service.create_collaboration(
             _create_command(), _actor(OWNER)
         )
         collab_id = created.collet_id

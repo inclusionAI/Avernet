@@ -1,4 +1,4 @@
-"""Plain creation-event facts shared by L4 persistence and L6 selection.
+"""Application decoder for lower creation facts and optional L6 selection.
 
 ACCS does not define a ``ContextSpec`` aggregate.  The L4 Collet owns scope and
 initiator, the L4 Task owns objective/executor, and L6 contributes only the
@@ -19,6 +19,9 @@ from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs 
 from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_resource_refs import (
     ResourceRef,
 )
+from agentclaw.community.core.task.context_collab.l4_context_primitives.task import (
+    normalize_executor_refs,
+)
 from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
     MethodKind,
 )
@@ -32,6 +35,7 @@ _CREATION_FACT_KEYS = frozenset(
         "resource_refs",
         "method_kind",
         "executor_ref",
+        "executor_refs",
         "product_kind",
         "workflow_kind",
         "product_profile_ref",
@@ -80,6 +84,24 @@ def decode_creation_facts(data: dict[str, Any]) -> dict:
     objective = data.get("objective")
     if not isinstance(objective, str) or not objective.strip():
         raise ContextCollabValidationError("creation facts objective must be non-empty")
+    if "executor_refs" in data:
+        if set(data) != {"objective", "executor_refs"} or not isinstance(
+            data["executor_refs"], list
+        ):
+            raise ContextCollabValidationError(
+                "invalid method-independent L4 creation facts"
+            )
+        if any(not isinstance(ref, dict) for ref in data["executor_refs"]):
+            raise ContextCollabValidationError(
+                "creation executor_refs must contain objects"
+            )
+        refs = normalize_executor_refs(
+            tuple(AgentRef.from_dict(ref) for ref in data["executor_refs"])
+        )
+        return {
+            "objective": objective,
+            "executor_refs": [ref.to_dict() for ref in refs],
+        }
     raw_resources = data.get("resource_refs")
     if not isinstance(raw_resources, list):
         raise ContextCollabValidationError("creation facts resource_refs must be a list")
@@ -132,18 +154,18 @@ def decode_creation_facts(data: dict[str, Any]) -> dict:
     return normalized
 
 
-def creation_method_kind(facts: dict) -> str:
-    return decode_creation_facts(facts)["method_kind"]
+def creation_method_kind(facts: dict) -> str | None:
+    return decode_creation_facts(facts).get("method_kind")
 
 
 def creation_product_kind(facts: dict) -> str | None:
-    return decode_creation_facts(facts)["product_kind"]
+    return decode_creation_facts(facts).get("product_kind")
 
 
 def creation_workflow_kind(facts: dict) -> str | None:
-    return decode_creation_facts(facts)["workflow_kind"]
+    return decode_creation_facts(facts).get("workflow_kind")
 
 
 def creation_profile_ref(facts: dict) -> VersionedProfileRef | None:
-    raw = decode_creation_facts(facts)["product_profile_ref"]
+    raw = decode_creation_facts(facts).get("product_profile_ref")
     return VersionedProfileRef(**raw) if raw is not None else None

@@ -1,4 +1,6 @@
-"""L4 storage ports. Implementations may return richer application records.
+"""L4 commands and narrow storage ports.
+
+Storage implementations may return richer application records.
 
 Reader exposes Work authority and creation identities, never a ProductProfile.
 Writer must atomically fence Collet and (when supplied) Task revisions; errors
@@ -14,7 +16,11 @@ from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabValidationError,
 )
 from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
+    AgentRef,
     PrincipalRef,
+)
+from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_resource_refs import (
+    SpaceRef,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
     Collet,
@@ -26,7 +32,51 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.event_en
 from agentclaw.community.core.task.context_collab.l4_context_primitives.task import (
     Task,
     TaskUpdate,
+    normalize_executor_refs,
 )
+
+
+@dataclass(frozen=True)
+class ColletCreateCommand:
+    """L4 Collet and root Work creation; no product, method or binding inputs.
+
+    executor_refs is an ordered set: () is unassigned; one or many AgentRefs
+    are equally valid. It does not grant admission, roles or resource access.
+    Lists supplied by library callers are normalized to an immutable tuple.
+    """
+
+    to_space: SpaceRef
+    principal_ref: PrincipalRef
+    objective: str
+    executor_refs: tuple[AgentRef, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.objective, str) or not self.objective.strip():
+            raise ContextCollabValidationError("objective must be a non-empty string")
+        if not isinstance(self.to_space, SpaceRef) or not isinstance(
+            self.principal_ref, PrincipalRef
+        ):
+            raise ContextCollabValidationError(
+                "creation requires typed Space/Principal references"
+            )
+        SpaceRef.from_dict(self.to_space.to_dict())
+        PrincipalRef.from_dict(self.principal_ref.to_dict())
+        object.__setattr__(
+            self, "executor_refs", normalize_executor_refs(self.executor_refs)
+        )
+
+
+class CreatedCollet(Protocol):
+    @property
+    def collet(self) -> Collet: ...
+
+
+class ColletWriter(Protocol):
+    def create_l4_collet(
+        self, command: ColletCreateCommand, actor_ref: PrincipalRef
+    ) -> CreatedCollet:
+        """Atomically persist Collet, root Task and task.created, without bindings."""
+        ...
 
 
 @dataclass

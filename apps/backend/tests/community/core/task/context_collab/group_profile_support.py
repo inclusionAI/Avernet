@@ -103,7 +103,7 @@ def _status_record(**overrides) -> ContextStatusRecord:
         objective=OBJECTIVE,
         status=fields["status"],
         principal_ref=principal_ref,
-        executor_ref=executor_ref,
+        executor_refs=((executor_ref,) if executor_ref is not None else ()),
         task_id="task_" + fields["collab_context_id"],
         collet_ref=fields["collab_context_id"],
         version=1,

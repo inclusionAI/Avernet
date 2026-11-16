@@ -54,6 +54,10 @@ from agentclaw.community.core.task.context_collab.persistence.collet_lifecycle_s
 from agentclaw.community.core.task.context_collab.persistence.method_store import (
     MethodStoreProtocol,
 )
+from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.records import (
+    ContextCollabRepositoryProtocol as L4ContextCollabRepositoryProtocol,
+)
+from agentclaw.community.core.task.context_collab.l6_products.persistence.records import ContextStatusRecord
 from agentclaw.community.core.task.context_collab.persistence.repository import (
     ContextCollabRepositoryProtocol,
 )
@@ -419,6 +423,11 @@ class _StubContextCollabRepoModule(Module):
 
     @singleton
     @provider
+    def l4_collab_repo(self) -> L4ContextCollabRepositoryProtocol[ContextStatusRecord]:
+        return self.collab_repo()
+
+    @singleton
+    @provider
     def collab_repo(self) -> ContextCollabRepositoryProtocol:
         class _Repo:
             def get_current_status(self, collab_context_id: str):
@@ -468,7 +477,7 @@ def test_task_module_binds_l5_method_services_and_authorizer_singletons():
     assert swarm._store is store  # noqa: SLF001
     assert open_service._store is store  # noqa: SLF001
     reader = inj.get(CollaborationReader)
-    assert reader is inj.get(ContextCollabRepositoryProtocol)
+    assert reader is inj.get(L4ContextCollabRepositoryProtocol[ContextStatusRecord])
     assert lifecycle._collab_repo is reader
     assert group._collab_repo is reader
     assert swarm._collab_repo is reader
@@ -555,3 +564,61 @@ def test_task_module_binds_task_commission_service_singleton():
     assert inj.get(TaskCommissionServiceProtocol) is service
     assert service._authorizer is inj.get(ContextCollabAuthorizerProtocol)  # noqa: SLF001
     assert service._method_store is inj.get(MethodStoreProtocol)  # noqa: SLF001
+
+
+def test_product_instantiation_protocol_resolves_l6_implementation():
+    from agentclaw.community.core.task.context_collab.l6_products.operations.contracts import (
+        ProductInstantiationServiceProtocol,
+    )
+    from agentclaw.community.core.task.context_collab.l6_products.operations.product_instantiation import (
+        ProductInstantiationService,
+    )
+
+    inj = Injector([TaskModule(), _StubDiscoverModule(), _StubContextCollabRepoModule()])
+    service = inj.get(ProductInstantiationServiceProtocol)
+    assert isinstance(service, ProductInstantiationService)
+    assert type(service).__module__.endswith("l6_products.operations.product_instantiation")
+    assert service is inj.get(ProductInstantiationServiceProtocol)
+    assert service._repository is inj.get(ContextCollabRepositoryProtocol)
+    assert service._store is inj.get(MethodStoreProtocol)
+    assert service._authorizer is inj.get(ContextCollabAuthorizerProtocol)
+
+
+def test_task_module_binds_complete_l4_service_directly():
+    from agentclaw.community.core.task.context_collab.l4_context_primitives.context_service import (
+        ContextService,
+    )
+    from agentclaw.community.core.task.context_collab.l4_context_primitives.context_service_protocol import (
+        ContextServiceProtocol,
+    )
+
+    inj = Injector([TaskModule(), _StubDiscoverModule(), _StubContextCollabRepoModule()])
+    service = inj.get(ContextServiceProtocol)
+    assert type(service) is ContextService
+    assert service is inj.get(ContextServiceProtocol)
+    assert service._repository is inj.get(L4ContextCollabRepositoryProtocol[ContextStatusRecord])
+    assert service._repository is not inj.get(ContextCollabRepositoryProtocol)
+    assert service._authorizer is inj.get(ContextCollabAuthorizerProtocol)
+
+
+def test_combined_creation_protocol_resolves_l6_implementation():
+    from agentclaw.community.core.task.context_collab import service_api as legacy_api
+    from agentclaw.community.core.task.context_collab.l6_products.operations.collaboration_policy import (
+        ProductCollaborationPolicy,
+    )
+    from agentclaw.community.core.task.context_collab.l6_products.operations.collaboration_creation import (
+        ContextCollabService,
+    )
+    from agentclaw.community.core.task.context_collab.l6_products.service_api import (
+        ContextCollabServiceProtocol,
+    )
+
+    inj = Injector([TaskModule(), _StubDiscoverModule(), _StubContextCollabRepoModule()])
+    service = inj.get(ContextCollabServiceProtocol)
+    assert type(service) is ContextCollabService
+    assert service is inj.get(legacy_api.ContextCollabServiceProtocol)
+    assert service is inj.get(ContextCollabServiceProtocol)
+    assert isinstance(service._policy, ProductCollaborationPolicy)
+    assert service._repository is inj.get(ContextCollabRepositoryProtocol)
+    assert service._method_store is inj.get(MethodStoreProtocol)
+    assert service._authorizer is inj.get(ContextCollabAuthorizerProtocol)

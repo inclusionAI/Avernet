@@ -18,6 +18,9 @@ from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs 
 from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_resource_refs import (
     SpaceRef,
 )
+from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.repository import (
+    ContextCollabRepository as L4ContextCollabRepository,
+)
 from agentclaw.community.core.task.context_collab.l4_context_primitives.task import (
     TaskUpdate,
 )
@@ -43,7 +46,7 @@ from agentclaw.community.core.task.context_collab.service_api import (
     ActorContext,
     EventAppendCommand,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.context_collab_service import (
+from agentclaw.community.core.task.context_collab.l6_products.operations.collaboration_creation import (
     ContextCollabService,
 )
 from tests.community.core.task.context_collab.product_catalog import PRODUCT_CATALOG
@@ -364,7 +367,7 @@ def test_invalid_task_authority_fails_closed_without_snapshot_fallback(
                     created.task, task_id=child_id, parent_task_ref=parent_id
                 )
                 session.add(
-                    ContextCollabRepository._task_row(
+                    L4ContextCollabRepository._task_row(
                         child, now=datetime.now(timezone.utc)
                     )
                 )

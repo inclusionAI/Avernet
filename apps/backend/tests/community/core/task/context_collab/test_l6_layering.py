@@ -1,11 +1,10 @@
-"""L6 contracts cannot install or reverse-import concrete products and DI."""
+"""L6 owns composition without reverse-importing products, DI or legacy shims."""
 
 import ast
 from importlib.util import resolve_name
 from pathlib import Path
 
 import pytest
-
 from agentclaw.community.core.task.context_collab.l6_products import catalog
 
 _L6 = Path(catalog.__file__).parent
@@ -24,7 +23,13 @@ def _forbidden_imports(source: str, package: str) -> list[str]:
             modules.append(module)
             # Also catch `from context_collab import products`.
             modules.extend(f"{module}.{alias.name}" for alias in node.names)
-    forbidden = (f"{_CC}.products", "agentclaw.community.di")
+    forbidden = (
+        f"{_CC}.products",
+        f"{_CC}.services",
+        f"{_CC}.service_api",
+        f"{_CC}.method_service_api",
+        "agentclaw.community.di",
+    )
     return [
         module
         for module in modules
@@ -34,7 +39,7 @@ def _forbidden_imports(source: str, package: str) -> list[str]:
     ]
 
 
-def test_l6_has_no_product_or_composition_root_dependencies():
+def test_l6_has_no_product_composition_root_or_compatibility_dependencies():
     paths = sorted(_L6.rglob("*.py"))
     assert paths
     for path in paths:
@@ -50,12 +55,21 @@ def test_l6_has_no_product_or_composition_root_dependencies():
     [
         f"from {_CC}.products.task_commission.profile import TASK_COMMISSION_PROFILE",
         f"from {_CC} import products",
-        "from ..products.task_commission.profile import TASK_COMMISSION_PROFILE",
+        "from ...products.task_commission.profile import TASK_COMMISSION_PROFILE",
         "from agentclaw.community.di.modules.context_collab_products import build_product_catalog",
+        f"from {_CC}.services.method_bootstrap import project_created_context",
+        f"import {_CC}.services.method_lifecycle_service",
+        f"from {_CC}.service_api import CollaborationCreateCommand",
+        f"from {_CC}.method_service_api import OpenMethodOpsServiceProtocol",
+        f"from {_CC} import services",
+        f"from {_CC} import service_api",
+        "from ... import services",
+        "from ...service_api import CollaborationCreateCommand",
+        "from ...services.method_bootstrap import project_created_context",
     ],
 )
 def test_probe_detects_reverse_dependencies(source):
-    assert _forbidden_imports(source, f"{_CC}.l6_products")
+    assert _forbidden_imports(source, f"{_CC}.l6_products.operations")
 
 
 def test_l6_catalog_has_no_implicit_runtime_installation():
@@ -64,3 +78,15 @@ def test_l6_catalog_has_no_implicit_runtime_installation():
     )
     assert not hasattr(catalog, "DEFAULT_PRODUCT_CATALOG")
     assert not hasattr(catalog, "BUILTIN_PRODUCT_PROFILES")
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "from ..operations.method_bootstrap import project_created_context",
+        "from ..service_api import CollaborationCreateCommand",
+        f"from {_CC}.l5_methods.operations.contracts import OpenMethodOpsServiceProtocol",
+    ],
+)
+def test_probe_allows_canonical_layer_imports(source):
+    assert not _forbidden_imports(source, f"{_CC}.l6_products.operations")

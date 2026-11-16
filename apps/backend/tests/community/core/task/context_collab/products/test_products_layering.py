@@ -1,7 +1,7 @@
 """架构测试:products/ import 白名单机械执法(spec §3.1,乙案裁决 H)。
 
-白名单 = 协议层模块(l*/g*) + errors + 三处基建端口(仓储协议、
-MethodStore、L5 顶层投影)。``service_api``/通用服务等其余模块对产品
+白名单 = 协议层模块(l*/g*) + errors + 两处基建端口(仓储协议、
+MethodStore)。``service_api``/通用服务等其余模块对产品
 永久禁止;违规即红。含"故意违规探针"自证测试有效(先证红再撤探针)。
 """
 
@@ -16,7 +16,7 @@ _PRODUCTS_SRC = (
 assert _PRODUCTS_SRC.is_dir(), f"products src tree missing: {_PRODUCTS_SRC}"
 
 _CC = "agentclaw.community.core.task.context_collab"
-# 层模块 + errors + 三处基建端口(spec §3.1 逐字)。
+# 层模块 + errors + 仓储/MethodStore 端口;产品 bootstrap 使用 L6,不再依赖 services。
 _ALLOWED_CONTEXT_COLLAB_PARTS = {
     "l1_interoperate_deliver",
     "l2_agent_network",
@@ -31,7 +31,6 @@ _ALLOWED_CONTEXT_COLLAB_PARTS = {
     "g4_contracts_consistency",
     "persistence.repository",
     "persistence.method_store",
-    "services.method_bootstrap",
 }
 def _imported_modules(tree: ast.Module) -> list[str]:
     modules: list[str] = []
@@ -116,3 +115,12 @@ def test_probe_violation_is_detected():
         )
     )
     assert _violating_modules(good) == []
+
+
+def test_probe_blocks_bootstrap_compatibility_import():
+    modules = _imported_modules(
+        ast.parse(
+            f"from {_CC}.services.method_bootstrap import project_created_context\n"
+        )
+    )
+    assert _violating_modules(modules) == [f"{_CC}.services.method_bootstrap"]

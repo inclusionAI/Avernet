@@ -133,7 +133,7 @@ _CASE_SNAPSHOT = {
 
 
 def _seed_create_happy(world) -> None:
-    def create_collet(self, _command, context):
+    def create_collaboration(self, _command, context):
         # The public face binds the L2 actor to the verified principal id and
         # marks the delivery source; anything else is an adapter regression.
         assert context.actor.principal_id == _CALLER
@@ -148,7 +148,7 @@ def _seed_create_happy(world) -> None:
         )
 
     bind_overrides(
-        world, ContextCollabServiceProtocol, {"create_collet": create_collet},
+        world, ContextCollabServiceProtocol, {"create_collaboration": create_collaboration},
     )
 
 

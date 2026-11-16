@@ -70,11 +70,11 @@ from agentclaw.community.core.task.context_collab.persistence.repository import 
 from agentclaw.community.core.task.context_collab.service_api import (
     ActorContext,
     ContextCollabServiceProtocol,
-    ColletCreateCommand,
+    CollaborationCreateCommand,
     EventAppendCommand,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import Collet
-from agentclaw.community.core.task.context_collab.l4_context_primitives.context_collab_service import (
+from agentclaw.community.core.task.context_collab.l6_products.operations.collaboration_creation import (
     ContextCollabService,
 )
 from agentclaw.community.di import DeployProfile, build_injector
@@ -92,7 +92,7 @@ PRINCIPAL = PrincipalRef(principal_type="human", principal_id="u_1001")
 EXECUTOR = AgentRef(agent_type="bot", agent_id="bot_coding_001")
 
 
-def make_create_command(**overrides) -> ColletCreateCommand:
+def make_create_command(**overrides) -> CollaborationCreateCommand:
     """构造创建命令(spec §6.2 指定执行请求示例);可按字段覆盖。"""
     fields = {
         "space": SpaceRef(space_id="space_workspace_001", environment="prod"),
@@ -109,7 +109,7 @@ def make_create_command(**overrides) -> ColletCreateCommand:
         ],
     }
     fields.update(overrides)
-    return ColletCreateCommand(**fields)
+    return CollaborationCreateCommand(**fields)
 
 
 def make_actor(
@@ -195,7 +195,7 @@ def _create_started(service) -> tuple[str, str, int]:
 
     返回 (collab_context_id, initial_event_id, 版本 after started)。
     """
-    created = service.create_collet(make_create_command(), make_actor())
+    created = service.create_collaboration(make_create_command(), make_actor())
     started = service.append_event(
         created.collet_id,
         make_append_command(
@@ -215,7 +215,7 @@ def _create_started(service) -> tuple[str, str, int]:
 
 class TestAcceptanceFlows:
     def test_a01_create_persists_one_collet_and_one_event(self, service, engine, db):
-        created = service.create_collet(make_create_command(), make_actor())
+        created = service.create_collaboration(make_create_command(), make_actor())
 
         assert isinstance(created, Collet)
         assert created.collet_id.startswith("collet_")
@@ -263,7 +263,7 @@ class TestAcceptanceFlows:
     def test_a02_append_user_interaction_posted_native_payload_and_version(
         self, service, engine
     ):
-        created = service.create_collet(make_create_command(), make_actor())
+        created = service.create_collaboration(make_create_command(), make_actor())
         content = "评审结论:G4 合约一致性优先落地"
 
         result = service.append_event(
@@ -305,7 +305,7 @@ class TestAcceptanceFlows:
         }
 
     def test_a03_task_started_moves_snapshot_to_in_progress(self, service, engine):
-        created = service.create_collet(make_create_command(), make_actor())
+        created = service.create_collaboration(make_create_command(), make_actor())
 
         result = service.append_event(
             created.collet_id,
@@ -344,7 +344,7 @@ class TestAcceptanceFlows:
         assert snapshot["status"] == "in_progress"
 
     def test_a06_submitted_then_accepted_reaches_done(self, service, engine):
-        created = service.create_collet(make_create_command(), make_actor())
+        created = service.create_collaboration(make_create_command(), make_actor())
         started = service.append_event(
             created.collet_id,
             make_append_command(
@@ -388,7 +388,7 @@ class TestAcceptanceFlows:
         assert _collet_snapshot(engine, created.collet_id)["status"] == "done"
 
     def test_a07_a08_trunk_events_flag_lists_only_trunk(self, service, engine):
-        created = service.create_collet(make_create_command(), make_actor())
+        created = service.create_collaboration(make_create_command(), make_actor())
         initial_event_id = created.current_event_id
         started = service.append_event(
             created.collet_id,
@@ -445,8 +445,8 @@ class TestAcceptanceFlows:
 
     def test_a09_repeated_create_makes_distinct_contexts(self, service, engine):
         """创建不设幂等键(spec 作者裁决):重复调用各建一个上下文。"""
-        first = service.create_collet(make_create_command(), make_actor())
-        second = service.create_collet(make_create_command(), make_actor())
+        first = service.create_collaboration(make_create_command(), make_actor())
+        second = service.create_collaboration(make_create_command(), make_actor())
 
         assert first.collet_id != second.collet_id
         assert second.version == 1
@@ -456,7 +456,7 @@ class TestAcceptanceFlows:
     def test_a09_verbatim_resubmit_rejected_by_cas(self, service, engine):
         """追加无幂等键(Ruling R8):同版本逐字重发被 CAS 拒绝,
         不落第二条事件;带新版本号才能追加新事件。"""
-        created = service.create_collet(make_create_command(), make_actor())
+        created = service.create_collaboration(make_create_command(), make_actor())
         first = service.append_event(
             created.collet_id,
             make_append_command(
@@ -506,7 +506,7 @@ class TestAcceptanceFlows:
     def test_a09_stale_expected_version_conflicts_without_partial_writes(
         self, service, engine
     ):
-        created = service.create_collet(make_create_command(), make_actor())
+        created = service.create_collaboration(make_create_command(), make_actor())
         started = service.append_event(
             created.collet_id,
             make_append_command(
@@ -611,7 +611,7 @@ class TestNullablePartialRows:
     def test_snapshotless_collet_gets_null_snapshot_but_full_progress(
         self, service, engine
     ):
-        created = service.create_collet(make_create_command(), make_actor())
+        created = service.create_collaboration(make_create_command(), make_actor())
         self._null_snapshot_collet(engine, created.collet_id)
 
         result = service.get_status(
@@ -624,7 +624,7 @@ class TestNullablePartialRows:
         assert result.current_event["event_kind"] == "task.created"
 
     def test_append_onto_snapshotless_collet_keeps_null_snapshot(self, service, engine):
-        created = service.create_collet(make_create_command(), make_actor())
+        created = service.create_collaboration(make_create_command(), make_actor())
         self._null_snapshot_collet(engine, created.collet_id)
 
         appended = service.append_event(
@@ -654,7 +654,7 @@ class TestNullablePartialRows:
     def test_partial_event_row_decodes_and_null_visibility_is_private(
         self, service, engine
     ):
-        created = service.create_collet(make_create_command(), make_actor())
+        created = service.create_collaboration(make_create_command(), make_actor())
         # 外部写入的部分事件行:primitive_type/actor_ref/visibility/payload/
         # version_after 全 NULL。
         with engine.connect() as conn:

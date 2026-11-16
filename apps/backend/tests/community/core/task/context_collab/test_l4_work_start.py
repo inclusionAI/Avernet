@@ -23,8 +23,17 @@ from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs 
 from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_resource_refs import (
     SpaceRef,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.context_collab_service import (
-    ContextCollabService,
+from agentclaw.community.core.task.context_collab.l6_products.operations.collaboration_creation import (
+    ContextCollabService as ApplicationCollabService,
+)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.context_service import (
+    ContextService,
+)
+from agentclaw.community.core.task.context_collab.g1_secure_govern.authorization import (
+    StructuralContextCollabAuthorizer,
+)
+from agentclaw.community.core.task.context_collab.l6_products.operations.collaboration_policy import (
+    ProductCollaborationPolicy,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.contracts import (
     WorkStartCommand as CanonicalWorkStartCommand,
@@ -55,10 +64,13 @@ from agentclaw.community.core.task.context_collab.products.task_commission.profi
     TASK_COMMISSION_PROFILE,
 )
 from agentclaw.community.core.task.context_collab.service_api import (
-    ColletCreateCommand,
-    ContextCollabServiceProtocol,
+    CollaborationCreateCommand,
     EventAppendCommand,
     WorkStartCommand,
+)
+
+from agentclaw.community.core.task.context_collab.l4_context_primitives.context_service_protocol import (
+    ContextServiceProtocol,
 )
 
 OWNER = ActorContext(PrincipalRef("human", "owner"), "api")
@@ -93,9 +105,11 @@ def runtime(db, request):
     )
     catalog = ProductCatalog((profile,))
     repo = ContextCollabRepository(db, product_catalog=catalog)
-    service = ContextCollabService(repo, InMemoryMethodStore(), product_catalog=catalog)
-    collet = service.create_collet(
-        ColletCreateCommand(
+    composer = ApplicationCollabService(
+        repo, InMemoryMethodStore(), product_catalog=catalog
+    )
+    collet = composer.create_collaboration(
+        CollaborationCreateCommand(
             to_space=SpaceRef("work-space", "test"),
             principal_ref=OWNER.actor,
             product_kind=profile.ref.profile_id,
@@ -107,6 +121,10 @@ def runtime(db, request):
             product_profile_ref=profile.ref,
         ),
         OWNER,
+    )
+    authorizer = StructuralContextCollabAuthorizer()
+    service = ContextService(
+        repo, ProductCollaborationPolicy(catalog, authorizer), authorizer
     )
     return service, repo, collet.collet_id
 
@@ -152,7 +170,7 @@ def test_start_requires_string_note(note):
 @pytest.mark.parametrize("note", ["", "录取后启动任务执行"])
 def test_start_updates_root_task_and_returns_persisted_receipt(runtime, note):
     service, repo, cid = runtime
-    assert isinstance(service, ContextCollabServiceProtocol)
+    assert isinstance(service, ContextServiceProtocol)
     assert WorkStartCommand is CanonicalWorkStartCommand
     # A Message advances Collet only: neither fence may substitute for the other.
     _append(
@@ -306,9 +324,11 @@ def test_explicit_start_is_strict_even_when_generic_append_is_permissive(
 ):
     catalog = ProductCatalog(LEGACY_PRODUCT_PROFILES)
     repo = ContextCollabRepository(db, product_catalog=catalog)
-    service = ContextCollabService(repo, InMemoryMethodStore(), product_catalog=catalog)
-    collet = service.create_collet(
-        ColletCreateCommand(
+    composer = ApplicationCollabService(
+        repo, InMemoryMethodStore(), product_catalog=catalog
+    )
+    collet = composer.create_collaboration(
+        CollaborationCreateCommand(
             to_space=SpaceRef("space", "test"),
             principal_ref=OWNER.actor,
             product_kind=product,
@@ -319,6 +339,10 @@ def test_explicit_start_is_strict_even_when_generic_append_is_permissive(
             resource_refs=[],
         ),
         OWNER,
+    )
+    authorizer = StructuralContextCollabAuthorizer()
+    service = ContextService(
+        repo, ProductCollaborationPolicy(catalog, authorizer), authorizer
     )
     runtime = service, repo, collet.collet_id
     if case == "repeated":

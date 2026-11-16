@@ -95,11 +95,17 @@ from agentclaw.community.core.task.context_collab.g1_secure_govern.method_author
     MethodOpsAuthorizerProtocol,
     StructuralMethodOpsAuthorizer,
 )
+from agentclaw.community.core.task.context_collab.l4_context_primitives.context_service import (
+    ContextService,
+)
 from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.collet_lifecycle import (
     ColletLifecycleService,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.contracts import (
     CollaborationReader,
+)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.context_service_protocol import (
+    ContextServiceProtocol,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.operations.initialization import (
     TopLevelBindingRecovery,
@@ -119,6 +125,24 @@ from agentclaw.community.core.task.context_collab.l5_methods.operations.swarm.se
 from agentclaw.community.core.task.context_collab.l6_products.catalog import (
     ProductCatalog,
 )
+from agentclaw.community.core.task.context_collab.l6_products.operations.collaboration_creation import (
+    ContextCollabService,
+)
+from agentclaw.community.core.task.context_collab.l6_products.operations.collaboration_policy import (
+    ProductCollaborationPolicy,
+)
+from agentclaw.community.core.task.context_collab.l6_products.operations.contracts import (
+    ProductInstantiationServiceProtocol,
+)
+from agentclaw.community.core.task.context_collab.l6_products.operations.method_bootstrap import (
+    ProductMethodBindingRecovery,
+)
+from agentclaw.community.core.task.context_collab.l6_products.operations.product_instantiation import (
+    ProductInstantiationService,
+)
+from agentclaw.community.core.task.context_collab.l6_products.service_api import (
+    ContextCollabServiceProtocol,
+)
 from agentclaw.community.core.task.context_collab.method_service_api import (
     GroupMethodOpsServiceProtocol,
     MethodLifecycleServiceProtocol,
@@ -133,23 +157,17 @@ from agentclaw.community.core.task.context_collab.persistence.method_store impor
     InMemoryMethodStore,
     MethodStoreProtocol,
 )
-from agentclaw.community.core.task.context_collab.persistence.repository import (
-    ContextCollabRepositoryProtocol,
+from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.records import (
+    ContextCollabRepositoryProtocol as L4ContextCollabRepositoryProtocol,
+)
+from agentclaw.community.core.task.context_collab.l6_products.persistence.records import (
+    ContextStatusRecord,
 )
 from agentclaw.community.core.task.context_collab.products.bbs_public_discussion.service import (
     BbsPublicDiscussionService,
 )
 from agentclaw.community.core.task.context_collab.products.service_api import (
     BbsPublicDiscussionServiceProtocol,
-)
-from agentclaw.community.core.task.context_collab.service_api import (
-    ContextCollabServiceProtocol,
-)
-from agentclaw.community.core.task.context_collab.l4_context_primitives.context_collab_service import (
-    ContextCollabService,
-)
-from agentclaw.community.core.task.context_collab.services.method_bootstrap import (
-    ProductMethodBindingRecovery,
 )
 from agentclaw.community.core.task.feedback.services.feedback_service import (
     FeedbackService,
@@ -436,6 +454,11 @@ class TaskModule(Module):
         binder.bind(
             ContextCollabServiceProtocol, to=ContextCollabService, scope=singleton
         )
+        binder.bind(
+            ProductInstantiationServiceProtocol,
+            to=ProductInstantiationService,
+            scope=singleton,
+        )
         # BBS Browse Loop — runner (push seam), scheduler (framework cron), and the
         # backend-owned Bot-side cron manager (openclaw mode). Singletons are also
         # discoverable by the application lifecycle auto-start path.
@@ -451,10 +474,23 @@ class TaskModule(Module):
 
     @provider
     def collaboration_reader(
-        self, repository: ContextCollabRepositoryProtocol
+        self, repository: L4ContextCollabRepositoryProtocol[ContextStatusRecord]
     ) -> CollaborationReader:
         """Expose the same repository through L4's narrow read contract."""
         return repository
+
+    @singleton
+    @provider
+    def l4_context_service(
+        self,
+        repository: L4ContextCollabRepositoryProtocol[ContextStatusRecord],
+        authorizer: ContextCollabAuthorizerProtocol,
+        catalog: ProductCatalog,
+    ) -> ContextServiceProtocol:
+        """L4 owns all operations; retain selected G1 admission and G4 contracts."""
+        return ContextService(
+            repository, ProductCollaborationPolicy(catalog, authorizer), authorizer
+        )
 
     @singleton
     @provider

@@ -84,7 +84,7 @@ def make_task():
         objective="Produce a report",
         status="created",
         principal_ref=OWNER.actor,
-        executor_ref=AgentRef("bot", "worker"),
+        executor_refs=(AgentRef("bot", "worker"),),
         parent_task_ref=None,
         completion_conditions=(),
         created_event_ref="evt_created",

@@ -175,7 +175,7 @@ def instantiate_product(
     catalog: ProductCatalog,
 ) -> ProductInstance | None:
     normalized = decode_creation_facts(facts)
-    if normalized["product_kind"] is None:
+    if normalized.get("product_kind") is None:
         return None
     profile = _resolve_profile(
         normalized,

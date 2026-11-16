@@ -10,6 +10,10 @@ from agentclaw.community.core.task.context_collab.errors import (
 from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context import (
     ActorContext,
 )
+from agentclaw.community.core.task.context_collab.g1_secure_govern.collet_creation import (
+    ColletCreationAuthorizer,
+    StructuralColletCreationAuthorizer,
+)
 from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
     Collet,
 )
@@ -40,7 +44,7 @@ TOP_LEVEL_METHOD_KINDS = frozenset(
 
 
 @runtime_checkable
-class ContextCollabAuthorizerProtocol(Protocol):
+class ContextCollabAuthorizerProtocol(ColletCreationAuthorizer, Protocol):
     def check_create(
         self, *, method_kind: str, executor_ref, actor: ActorContext
     ) -> None: ...
@@ -71,11 +75,10 @@ def _is_principal(task: Task | None, actor: ActorContext) -> bool:
 
 
 def _is_executor(task: Task | None, actor: ActorContext) -> bool:
-    executor = task.executor_ref if task is not None else None
-    return (
-        executor is not None
-        and actor.actor.principal_type == executor.agent_type
-        and actor.actor.principal_id == executor.agent_id
+    return task is not None and any(
+        actor.actor.principal_type == ref.agent_type
+        and actor.actor.principal_id == ref.agent_id
+        for ref in task.executor_refs
     )
 
 
@@ -88,7 +91,9 @@ def _is_public_open_message(creation_facts: dict, command) -> bool:
     )
 
 
-class StructuralContextCollabAuthorizer(ContextCollabAuthorizerProtocol):
+class StructuralContextCollabAuthorizer(
+    StructuralColletCreationAuthorizer, ContextCollabAuthorizerProtocol
+):
     """P1 structural rules; external membership/grants remain a replaceable seam."""
 
     def check_create(

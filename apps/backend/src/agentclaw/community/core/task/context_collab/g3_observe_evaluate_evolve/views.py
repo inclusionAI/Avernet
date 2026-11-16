@@ -13,6 +13,7 @@ from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs 
 from agentclaw.community.core.task.context_collab.l4_context_primitives.task import (
     Task,
     TaskStatus,
+    normalize_executor_refs,
 )
 
 
@@ -50,6 +51,15 @@ def _required_dict(data: dict, key: str, owner: str) -> dict:
 
 def _principal_ref_from_dict(data: dict, owner: str) -> PrincipalRef:
     return PrincipalRef.from_dict(_required_dict(data, "principal_ref", owner))
+
+
+def _executor_refs_from_dict(data: dict) -> tuple[AgentRef, ...]:
+    refs = data.get("executor_refs", [])
+    if not isinstance(refs, list) or any(not isinstance(ref, dict) for ref in refs):
+        raise ContextCollabValidationError(
+            "CurrentSnapshot.executor_refs must contain objects"
+        )
+    return normalize_executor_refs(tuple(AgentRef.from_dict(ref) for ref in refs))
 
 
 def _executor_ref_from_dict(data: dict, owner: str) -> AgentRef | None:
@@ -106,16 +116,19 @@ class CurrentSnapshot:
     Explicit legacy storage decoding is the only import boundary; new writes
     persist Task and transitions consume Task, not this response view.
 
-    ``status`` 必须是 ``TaskStatus`` 合法字符串;``method_kind`` 必须是
-    non-empty display label; it does not own MethodBinding state.
+    status is a TaskStatus string. method_kind is a non-empty display label
+    when selected, or None on a method-independent L4 Collet. It never owns
+    MethodBinding state. executor_refs retains plural designated executors;
+    legacy zero/one-executor responses keep their existing wire shape.
     """
 
     objective: str
     status: str
     principal_ref: PrincipalRef
     executor_ref: AgentRef | None
-    method_kind: str
+    method_kind: str | None
     progress: ProgressSnapshot
+    executor_refs: tuple[AgentRef, ...] = ()
 
     @classmethod
     def from_dict(cls, data: dict) -> "CurrentSnapshot":
@@ -124,17 +137,18 @@ class CurrentSnapshot:
             raise ContextCollabValidationError(f"unknown status value: {raw_status!r}")
         return cls(
             objective=_required_str(data, "objective", "CurrentSnapshot"),
+            executor_refs=_executor_refs_from_dict(data),
             status=raw_status,
             principal_ref=_principal_ref_from_dict(data, "CurrentSnapshot"),
             executor_ref=_executor_ref_from_dict(data, "CurrentSnapshot"),
-            method_kind=_required_str(data, "method_kind", "CurrentSnapshot"),
+            method_kind=_optional_str(data, "method_kind", "CurrentSnapshot"),
             progress=ProgressSnapshot.from_dict(
                 _required_dict(data, "progress", "CurrentSnapshot")
             ),
         )
 
     def to_dict(self) -> dict:
-        return {
+        result = {
             "objective": self.objective,
             "status": self.status,
             "principal_ref": self.principal_ref.to_dict(),
@@ -144,10 +158,13 @@ class CurrentSnapshot:
             "method_kind": self.method_kind,
             "progress": self.progress.to_dict(),
         }
+        if self.executor_refs:
+            result["executor_refs"] = [ref.to_dict() for ref in self.executor_refs]
+        return result
 
 
 def project_current_snapshot(
-    task: Task | None, method_kind: str
+    task: Task | None, method_kind: str | None
 ) -> CurrentSnapshot | None:
     if task is None:
         return None
@@ -156,6 +173,7 @@ def project_current_snapshot(
         status=task.status,
         principal_ref=task.principal_ref,
         executor_ref=task.executor_ref,
+        executor_refs=task.executor_refs if len(task.executor_refs) > 1 else (),
         method_kind=method_kind,
         progress=ProgressSnapshot(),
     )

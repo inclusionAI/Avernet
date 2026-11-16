@@ -1,0 +1,389 @@
+"""L4 SQL repository: actual creation, Task/Event CAS and read implementation.
+
+No catalog, ProductInstance, Profile or Binding is imported here. Read codecs
+validate optional deployment metadata at the storage boundary; creation is
+self-contained and atomically writes exactly Collet, root Task and Event.
+"""
+
+from __future__ import annotations
+
+from dataclasses import replace
+from datetime import datetime, timezone
+from typing import Generic, Sequence, TypeVar
+from uuid import uuid4
+
+from agentclaw.community.core.task.context_collab.errors import (
+    ContextCollabNotFoundError,
+    ContextCollabParentEventError,
+    ContextCollabValidationError,
+    ContextCollabVersionConflict,
+)
+from agentclaw.community.core.task.context_collab.g2_keep_reliable_live.reliability import (
+    ensure_expected_version,
+)
+from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
+    PrincipalRef,
+)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
+    Collet,
+)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.event_envelope import (
+    EventRecord,
+)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.contracts import (
+    AppendEventRecordRequest,
+    ColletCreateCommand,
+)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.creation import (
+    build_created_collet,
+)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.models import (
+    ContextCollabColletModel,
+    ContextCollabEventModel,
+    ContextCollabTaskModel,
+)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.records import (
+    CollaborationRecordDecoder,
+    CreatedColletRecord,
+    InitialEventDraft,
+    PrimitiveReadState,
+    StoredEventAppend,
+)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.row_codec import (
+    _collet_from_row,
+    _dump_json,
+    _event_from_row,
+    _parent_event_exists,
+)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.task_storage import (
+    legacy_progress,
+    load_tasks,
+)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.service_ports import (
+    CollaborationReadState,
+)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.task import Task
+from agentclaw.community.plugin_api.database import DatabasePlugin
+from agentclaw.community.utils.env_utils import get_current_env
+from sqlalchemy import func
+
+StateT = TypeVar("StateT", bound=CollaborationReadState)
+
+
+class ContextCollabRepository(Generic[StateT]):
+    def __init__(
+        self, db: DatabasePlugin, record_decoder: CollaborationRecordDecoder[StateT]
+    ) -> None:
+        self._db = db
+        self._record_decoder = record_decoder
+
+    def _transaction(self):
+        transactional = getattr(self._db, "transactional_orm_session", None)
+        return transactional() if transactional is not None else self._db.orm_session()
+
+    def create_l4_collet(
+        self, command: ColletCreateCommand, actor_ref: PrincipalRef
+    ) -> CreatedColletRecord:
+        facts = {
+            "objective": command.objective,
+            "executor_refs": [ref.to_dict() for ref in command.executor_refs],
+        }
+        record = build_created_collet(
+            command, InitialEventDraft("task.created", "Task", actor_ref, facts)
+        )
+        self.persist_created(record, _dump_json(facts))
+        return record
+
+    def persist_created(
+        self, record: CreatedColletRecord, creation_facts_json: str
+    ) -> None:
+        """Store one creation atomically; opaque JSON is an SQL column, not policy.
+
+        Upper-layer creation can supply its own serialized metadata without
+        changing L4 command/model contracts. This method never decodes it.
+        """
+        now = record.initial_event.occurred_at
+        with self._transaction() as db:
+            db.add(
+                self._collet_row(
+                    record.collet, creation_facts_json, record.task, now=now
+                )
+            )
+            db.add(self._task_row(record.task, now=now))
+            db.add(self._event_row(record.initial_event, now=now))
+            db.flush()
+
+    def append_event(
+        self, collab_context_id: str, request: "AppendEventRecordRequest"
+    ) -> StoredEventAppend:
+        """Append an Event and fence Collet plus any resolved Work update.
+
+        持锁事务:读 Collet → 校验其版本/parent → 加载 Task → Task CAS
+        (Work 才推进)→ 插事件 → Collet CAS。Legacy Task 在同一事务物化。
+        追加不设幂等键,事件顺序即插入顺序(自增 id),主干在查询时由
+        活动链推导(spec 作者裁决)。``with_for_update()`` 在
+        MySQL/OceanBase 上是行锁,SQLite 测试驱动上优雅降级为普通读,
+        由 CAS WHERE 把关。任何写失败原样上抛,异常路径靠事务回滚
+        保证不落半态。
+        """
+        with self._transaction() as db:
+            row = (
+                db.query(ContextCollabColletModel)
+                .filter(
+                    ContextCollabColletModel.collab_context_id == collab_context_id,
+                    ContextCollabColletModel.env == get_current_env(),
+                )
+                .with_for_update()
+                .one_or_none()
+            )
+            if row is None:
+                raise ContextCollabNotFoundError(
+                    f"collaboration context {collab_context_id!r} not found"
+                )
+            ensure_expected_version(request.expected_version, int(row.context_version))
+            if request.parent_event is not None and not _parent_event_exists(
+                db, collab_context_id, request.parent_event
+            ):
+                raise ContextCollabParentEventError(
+                    f"parent_event {request.parent_event!r} does not exist in "
+                    f"collaboration context {collab_context_id!r}"
+                )
+
+            previous = _collet_from_row(row)
+            self._record_decoder.validate(row.creation_facts)
+            previous_task, _tasks = load_tasks(db, row)
+            if previous_task is not None and row.root_task_ref is None:
+                old_rows = (
+                    db.query(ContextCollabEventModel)
+                    .filter(
+                        ContextCollabEventModel.collab_context_id == collab_context_id,
+                        ContextCollabEventModel.env == get_current_env(),
+                    )
+                    .order_by(ContextCollabEventModel.id.asc())
+                    .all()
+                )
+                previous_task = legacy_progress(
+                    previous_task, [_event_from_row(e) for e in old_rows]
+                )
+            context_version = request.expected_version + 1
+            now = datetime.now(timezone.utc)
+            event = EventRecord(
+                collab_context_id=collab_context_id,
+                event_id="evt_" + uuid4().hex,
+                parent_event=request.parent_event,
+                event_kind=request.event_kind,
+                primitive_type=request.primitive_type,
+                actor_ref=request.actor_ref,
+                visibility=request.visibility,
+                payload=dict(request.payload),
+                context_version_after=context_version,
+                occurred_at=now,
+            )
+            is_work = request.primitive_type in {
+                "Task",
+                "Activity",
+            } and request.event_kind.startswith("task.")
+            if is_work and request.task_update is None:
+                raise ContextCollabValidationError(
+                    "Work append requires a versioned TaskUpdate"
+                )
+            new_task = previous_task
+            if request.task_update is not None:
+                if previous_task is None:
+                    raise ContextCollabValidationError("cannot update a missing Task")
+                if request.primitive_type not in {
+                    "Task",
+                    "Activity",
+                } or not request.event_kind.startswith("task."):
+                    raise ContextCollabValidationError(
+                        "only Work events may update a Task"
+                    )
+                new_task = request.task_update.apply(
+                    previous_task,
+                    event_id=event.event_id,
+                    event_kind=request.event_kind,
+                    payload=request.payload,
+                )
+                event = replace(
+                    event,
+                    task_ref=new_task.task_id,
+                    task_version_after=new_task.version,
+                )
+            if new_task is not None:
+                if row.root_task_ref is None:
+                    db.add(self._task_row(new_task, now=now))
+                elif request.task_update is not None:
+                    updated = (
+                        db.query(ContextCollabTaskModel)
+                        .filter(
+                            ContextCollabTaskModel.task_id == new_task.task_id,
+                            ContextCollabTaskModel.collab_context_id
+                            == collab_context_id,
+                            ContextCollabTaskModel.env == get_current_env(),
+                            ContextCollabTaskModel.task_version
+                            == previous_task.version,
+                        )
+                        .update(
+                            {
+                                "task_data": _dump_json(new_task.to_dict()),
+                                "task_version": new_task.version,
+                            },
+                            synchronize_session=False,
+                        )
+                    )
+                    if updated != 1:
+                        raise ContextCollabVersionConflict("Task CAS failed")
+            db.add(self._event_row(event, now=now))
+            updated_rows = (
+                db.query(ContextCollabColletModel)
+                .filter(
+                    ContextCollabColletModel.id == row.id,
+                    ContextCollabColletModel.context_version
+                    == request.expected_version,
+                )
+                .update(
+                    {
+                        "current_snapshot": None,
+                        "root_task_ref": new_task.task_id if new_task else None,
+                        "current_event_id": event.event_id,
+                        "context_version": context_version,
+                    },
+                    synchronize_session=False,
+                )
+            )
+            if updated_rows != 1:
+                raise ContextCollabVersionConflict(
+                    f"cas update on collet {collab_context_id!r} affected "
+                    f"{updated_rows} rows for expected_version "
+                    f"{request.expected_version}"
+                )
+            db.flush()
+            return StoredEventAppend(
+                event=event,
+                collet=replace(
+                    previous,
+                    current_event_id=event.event_id,
+                    version=context_version,
+                ),
+                creation_facts_json=row.creation_facts,
+                task=new_task,
+            )
+
+    def get_current_status(self, collab_context_id: str) -> StateT | None:
+        """读取 Collet + 全量事件列表(spec §9.4 规则 3:只读,不写库)。
+
+        事件按自增 id 升序返回(即接纳顺序);主干(trunk)过滤在查询投影
+        层由活动链推导,仓储不持有 is_trunk/sequence 概念;不存在返回 ``None``。
+        """
+        with self._db.orm_session() as db:
+            row = (
+                db.query(ContextCollabColletModel)
+                .filter(
+                    ContextCollabColletModel.collab_context_id == collab_context_id,
+                    ContextCollabColletModel.env == get_current_env(),
+                )
+                .one_or_none()
+            )
+            if row is None:
+                return None
+            event_rows = (
+                db.query(ContextCollabEventModel)
+                .filter(
+                    ContextCollabEventModel.collab_context_id == collab_context_id,
+                    ContextCollabEventModel.env == get_current_env(),
+                )
+                .order_by(ContextCollabEventModel.id.asc())
+                .all()
+            )
+            collet = _collet_from_row(row)
+            task, tasks = load_tasks(db, row)
+            events = [_event_from_row(event_row) for event_row in event_rows]
+            if row.root_task_ref is None:
+                task = legacy_progress(task, events)
+            if task is not None and row.root_task_ref is None:
+                tasks = tuple(task if t.task_id == task.task_id else t for t in tasks)
+            return self._record_decoder.decode(
+                PrimitiveReadState(collet, task, tasks, events), row.creation_facts
+            )
+
+    def count_message_events(self, collab_context_ids: Sequence[str]) -> dict[str, int]:
+        """按 Collet 计 Message 事件数(GROUP BY 单查询,禁 N+1)。
+
+        键=collab_context_id,值=``primitive_type='Message'`` 事件总数
+        (含首帖正文);请求中没有事件的 id 不出现在结果键里。Task 类
+        控制事件不参与计数。
+        """
+        if not collab_context_ids:
+            return {}
+        with self._db.orm_session() as db:
+            rows = (
+                db.query(
+                    ContextCollabEventModel.collab_context_id,
+                    func.count(ContextCollabEventModel.id),
+                )
+                .filter(
+                    ContextCollabEventModel.collab_context_id.in_(collab_context_ids),
+                    ContextCollabEventModel.primitive_type == "Message",
+                    ContextCollabEventModel.env == get_current_env(),
+                )
+                .group_by(ContextCollabEventModel.collab_context_id)
+                .all()
+            )
+            return {collab_context_id: int(count) for collab_context_id, count in rows}
+
+    @staticmethod
+    def _collet_row(
+        collet: Collet,
+        creation_facts_json: str,
+        task: Task | None,
+        *,
+        now: datetime,
+    ) -> ContextCollabColletModel:
+        """Persist L4 scope plus plain creation facts and root Task reference."""
+        return ContextCollabColletModel(
+            collab_context_id=collet.collet_id,
+            actor_ref=_dump_json(collet.initiator_ref.to_dict()),
+            scope=_dump_json(collet.scope.to_dict()),
+            creation_facts=creation_facts_json,
+            current_snapshot=None,
+            root_task_ref=task.task_id if task else None,
+            current_event_id=collet.current_event_id,
+            context_version=collet.version,
+            env=get_current_env(),
+            gmt_create=now,
+            gmt_modified=now,
+        )
+
+    @staticmethod
+    def _event_row(event: EventRecord, *, now: datetime) -> ContextCollabEventModel:
+        """``EventRecord`` 领域对象 → 落库行;append-only,gmt_modified 与 gmt_create 同值写入。"""
+        return ContextCollabEventModel(
+            collab_context_id=event.collab_context_id,
+            event_id=event.event_id,
+            task_ref=event.task_ref,
+            task_version_after=event.task_version_after,
+            parent_event=event.parent_event,
+            event_kind=event.event_kind,
+            primitive_type=event.primitive_type,
+            actor_ref=_dump_json(event.actor_ref.to_dict()),
+            visibility=event.visibility,
+            payload=_dump_json(event.payload),
+            context_version_after=event.context_version_after,
+            occurred_at=event.occurred_at,
+            env=get_current_env(),
+            gmt_create=now,
+            gmt_modified=now,
+        )
+
+    @staticmethod
+    def _task_row(task: Task, *, now: datetime) -> ContextCollabTaskModel:
+        return ContextCollabTaskModel(
+            task_id=task.task_id,
+            collab_context_id=task.collet_ref,
+            parent_task_ref=task.parent_task_ref,
+            task_version=task.version,
+            task_data=_dump_json(task.to_dict()),
+            env=get_current_env(),
+            gmt_create=now,
+            gmt_modified=now,
+        )

@@ -67,10 +67,10 @@ from agentclaw.community.core.task.context_collab.persistence.method_store impor
 from agentclaw.community.core.task.context_collab.persistence.repository import (
     ContextCollabRepository,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.context_collab_service import (
+from agentclaw.community.core.task.context_collab.l6_products.operations.collaboration_creation import (
     ContextCollabService,
 )
-from agentclaw.community.core.task.context_collab.services.method_bootstrap import (
+from agentclaw.community.core.task.context_collab.l6_products.operations.method_bootstrap import (
     ProductMethodBindingRecovery,
 )
 from fastapi.testclient import TestClient
