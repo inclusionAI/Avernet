@@ -76,7 +76,7 @@ those references without renegotiating or selecting latest.
    “Online” means an immutable code-owned definition installed into the actual
    application catalog, not a mutable registry or a mocked registration call.
 2. Business staff first create L4 work with `ColletCreateCommand(to_space,
-   principal_ref, objective, executor_refs=(bot,))`. This atomically stores Collet,
+   initiator_ref, objective, executor_refs=(bot,))`. This atomically stores Collet,
    root Task and initial Event without a Profile or binding input. They then call
    `ProductInstantiationServiceProtocol.instantiate(ProductInstantiateCommand(
    collet_id, profile_ref, expected_version), context)` to select that exact L6

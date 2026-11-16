@@ -39,7 +39,7 @@ def build_created_collet(
         objective=command.objective,
         status=TaskStatus.CREATED.value,
         version=1,
-        principal_ref=command.principal_ref,
+        principal_ref=command.initiator_ref,
         executor_refs=command.executor_refs,
         parent_task_ref=None,
         completion_conditions=completion_conditions,

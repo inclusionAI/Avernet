@@ -57,7 +57,7 @@ class NoUpperAccess:
 def _command(**kwargs):
     return ColletCreateCommand(
         to_space=SpaceRef("space", "test"),
-        principal_ref=OWNER.actor,
+        initiator_ref=OWNER.actor,
         objective="Deliver independently identified work",
         **kwargs,
     )
@@ -84,10 +84,11 @@ def test_create_retains_zero_one_or_many_executors_without_upper_access(
     assert ExportedColletCreateCommand is ColletCreateCommand
     assert {field.name for field in fields(command)} == {
         "to_space",
-        "principal_ref",
+        "initiator_ref",
         "objective",
         "executor_refs",
     }
+    assert command.initiator_ref == OWNER.actor
     assert command.executor_refs == expected_refs
     assert persisted.collet == created
     assert persisted.collet.version == persisted.task.version == 1
@@ -128,6 +129,23 @@ def test_create_retains_zero_one_or_many_executors_without_upper_access(
     else:
         assert view["executor_ref"] == (
             expected_refs[0].to_dict() if expected_refs else None
+        )
+
+
+def test_command_rejects_legacy_principal_keyword():
+    with pytest.raises(TypeError, match="principal_ref"):
+        _command(principal_ref=OWNER.actor)
+
+
+@pytest.mark.parametrize(
+    "initiator", [None, "owner", WORKERS[0], PrincipalRef("human", "")]
+)
+def test_command_requires_valid_initiator_reference(initiator):
+    with pytest.raises(ContextCollabValidationError):
+        ColletCreateCommand(
+            to_space=SpaceRef("space", "test"),
+            initiator_ref=initiator,
+            objective="Deliver work",
         )
 
 

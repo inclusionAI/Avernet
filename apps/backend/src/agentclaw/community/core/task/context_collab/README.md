@@ -216,9 +216,11 @@ inherits L4's five use cases, not a second copy. New direct L4 consumers import
 from L4 explicitly:
 
 The canonical [`ColletCreateCommand`](l4_context_primitives/operations/contracts.py)
-has exactly four fields: `to_space`, `principal_ref`, `objective`, `executor_refs`.
+has exactly four fields: `to_space`, `initiator_ref`, `objective`, `executor_refs`.
 There is no Profile ID/reference, Method selection, or Method/Role/ResourceBinding
 input. L4 does not import L5, L6, the application facade or the rich repository.
+The command's `initiator_ref` initializes the root Task's `principal_ref`;
+Collet `initiator_ref` and creation-event provenance retain the authenticated actor.
 
 ```python
 from agentclaw.community.core.task.context_collab.l4_context_primitives.context_service_protocol import (
@@ -230,7 +232,7 @@ l4_collab_service = injector.get(ContextServiceProtocol)
 collet = l4_collab_service.create_collet(
     ColletCreateCommand(
         to_space=space_ref,
-        principal_ref=owner_ref,
+        initiator_ref=owner_ref,
         objective="Deliver work",
         executor_refs=(bot_a, bot_b),  # omit or () for unassigned; (bot_a,) for one
     ),

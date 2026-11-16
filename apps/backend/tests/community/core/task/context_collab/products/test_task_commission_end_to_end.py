@@ -183,7 +183,7 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
         l4_collet = l4_context_operate.create_collet(
             ColletCreateCommand(
                 to_space=SPACE,  # TODO: Collect所属的空间（长期持续管理的空间，比如小队、团队空间）
-                principal_ref=HUMAN.actor,  # 代办任务负责人  TODO：只是执行态？
+                initiator_ref=HUMAN.actor,  # 发起主体引用
                 objective=OBJECTIVE,
                 executor_refs=(l2_executor_ref,),  # () / (bot,) / (bot1, bot2, ...)
             ),
