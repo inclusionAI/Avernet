@@ -74,8 +74,8 @@ class DomainProfile:
 
 
 @dataclass(frozen=True)
-class WorkflowAction:
-    """A product action maps to an L4 event, not another transition table."""
+class TaskAction:
+    """A Work action maps to an L4 event, not a Bot execution plan."""
 
     name: str
     event_kind: str
@@ -96,6 +96,42 @@ class WorkflowAction:
             raise ContextCollabValidationError(
                 "duplicate workflow action payload field"
             )
+
+
+# Compatibility import for existing authored WorkflowProfiles.
+WorkflowAction = TaskAction
+
+
+@dataclass(frozen=True)
+class TaskLifecycleContract:
+    """Versioned Work semantics over L4 Task, independent of product orchestration.
+
+    Transitions/guards remain solely in the referenced G4 machine. The registry
+    owns exact immutable versions; products select them, never copy the machine.
+    """
+
+    ref: VersionedProfileRef
+    state_machine_ref: VersionedProfileRef
+    completion_states: tuple[str, ...]
+    compensation_events: tuple[str, ...]
+    actions: tuple[TaskAction, ...]
+    strict_control_events: bool = True
+    executor_submission_only: bool = True
+    public_events_only: bool = True
+
+    def __post_init__(self) -> None:
+        names = [action.name for action in self.actions]
+        events = [action.event_kind for action in self.actions]
+        if len(set(names)) != len(names) or len(set(events)) != len(events):
+            raise ContextCollabValidationError("duplicate Task action mapping")
+
+    def action(self, name: str) -> TaskAction:
+        for action in self.actions:
+            if action.name == name:
+                return action
+        raise ContextCollabValidationError(
+            f"Task contract has no declared action {name!r}"
+        )
 
 
 @dataclass(frozen=True)
@@ -150,10 +186,15 @@ class ProductProfileDefinition:
     ref: VersionedProfileRef
     composition: MethodCompositionTemplate
     scenario_roles: tuple[ScenarioRole, ...]
-    domain: DomainProfile
-    workflow: WorkflowProfile
     governance: GovernanceRequirements
     compatibility: CompatibilityRequirements
+    # None means standard L3/L4 vocabulary, not a fabricated domain profile.
+    domain: DomainProfile | None = None
+    # None means no product orchestration, NOT an unrestricted Task lifecycle.
+    workflow: WorkflowProfile | None = None
+    # With no workflow, omission selects the fixed standard Task contract @1.
+    # With a legacy workflow, None preserves its existing Task/action contract.
+    task_contract_ref: VersionedProfileRef | None = None
     # None means this product declares no automatic Open publication use case.
     publication: OpenPublicationProfile | None = None
 

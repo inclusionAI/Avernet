@@ -18,17 +18,20 @@ from agentclaw.community.core.task.context_collab.l6_products.publication import
 
 @dataclass(frozen=True)
 class ProductProfileCreateCommand:
-    """Author an exact, immutable definition; all non-publication fields are required.
+    """Author an exact immutable definition; domain/orchestration are optional.
 
-    ``publication=None`` explicitly declares no automatic Open publication use case.
+    Without workflow, a fixed versioned standard Task contract still applies.
+    ``domain=None`` uses standard L3/L4 terms. ``publication=None`` declares
+    no automatic Open publication use case.
     Creation does not allocate a version, install a profile or create an instance.
     """
 
     ref: VersionedProfileRef
     composition: MethodCompositionTemplate
     scenario_roles: tuple[ScenarioRole, ...]
-    domain: DomainProfile
-    workflow: WorkflowProfile
     governance: GovernanceRequirements
     compatibility: CompatibilityRequirements
+    domain: DomainProfile | None = None
+    workflow: WorkflowProfile | None = None
+    task_contract_ref: VersionedProfileRef | None = None
     publication: OpenPublicationProfile | None = None

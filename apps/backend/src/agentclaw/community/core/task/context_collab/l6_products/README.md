@@ -10,13 +10,14 @@ API or product-specific wire protocol.
 | Contract | Owner/source | Meaning |
 | --- | --- | --- |
 | ProductProfileCreateCommand / create_product_profile | [operations/](operations/) | Typed, pure creation operation: validate and return an immutable definition without installation, instances or runtime writes. |
-| ProductProfileDefinition | [contracts.py](contracts.py) | Versioned composition, scenario roles, domain/workflow mappings, compatibility and G1–G4 implementation requirements. |
+| ProductProfileDefinition | [contracts.py](contracts.py) | Versioned composition, scenario roles, optional domain/workflow mappings, Task contract selection, compatibility and G1–G4 implementation requirements. |
 | MethodCompositionTemplate | [contracts.py](contracts.py) | Required/optional Method versions and instantiation scope. Current runtime supports one explicit Collet-scoped top-level binding, including the existing composite binding representation. |
 | ScenarioRole | [binding.py](binding.py) | Maps owner/assignee to actual L4 Participant and RoleBinding facts. No L3 grant is created. |
 | DomainProfile | [contracts.py](contracts.py) | Maps product vocabulary to L3 Resource and L4 Collet/Task/Message/Artifact authority, not duplicate product-owned entities. |
-| WorkflowProfile | [contracts.py](contracts.py) | References a versioned G4 machine over L4 Task state, or explicitly declares a nontransition event stream. Includes completion states and compensating control events. |
+| TaskLifecycleContract / TaskAction | [task_contracts.py](task_contracts.py), [contracts.py](contracts.py) | Reusable, exactly versioned Task lifecycle/action contract, independent of product orchestration. References the existing G4 machine; never executes a Bot plan. |
+| WorkflowProfile | [contracts.py](contracts.py) | Optional product orchestration contract. Existing profiles own their action mappings and reference a versioned G4 machine over L4 Task, or explicitly declare a nontransition event stream. Not required merely to run an autonomous Bot. |
 | OpenAdmissionPolicy / OpenPublicationProfile | [publication.py](publication.py) | Shared participation/role/capacity constraints, ADMITTED delivery gate and partial-failure behavior. Concrete products own specialized admission strategies and step order; L6 does not execute them. |
-| ProductInstance | [instance.py](instance.py) | Durable selection/evidence references: product/workflow/domain versions, actual top-level MethodBinding ID, selected Method versions, RoleBinding references, governance requirements and negotiation result. No independent lifecycle state. |
+| ProductInstance | [instance.py](instance.py) | Durable selection/evidence references: product and selected Task/workflow/domain versions, actual top-level MethodBinding ID, selected Method versions, RoleBinding references, governance requirements and negotiation result. No independent lifecycle state. |
 | Compatibility selection | `negotiate(profile, offer)` | Exact required profile/Method/ACCS/layer/extension/governance match. Reports missing required and omitted optional capabilities separately. Never silently chooses a newer version or weaker policy. |
 
 `profiles.py` retains the wire ID enums for compatibility; IDs alone are not
@@ -43,8 +44,9 @@ runtime registry, catalog database or registration API.
 [`create_product_profile(command)`](operations/product_profile.py) is the L6
 library operation for authoring a `ProductProfileDefinition`. Its typed input is
 [`ProductProfileCreateCommand`](operations/contracts.py): exact `ref`, Method
-composition, scenario roles, domain/workflow mappings, governance and compatibility
-requirements, plus optional Open publication. `publication=None` intentionally
+composition, scenario roles, governance and compatibility requirements, plus
+optional domain, workflow, Task contract selection and Open publication.
+`publication=None` intentionally
 means there is no automatic Open publication use case.
 
 ```python
@@ -58,8 +60,8 @@ profile = create_product_profile(
         ref=profile_ref,
         composition=composition,
         scenario_roles=scenario_roles,
-        domain=domain,
-        workflow=workflow,
+        # Autonomous Bot: no domain/workflow boilerplate.
+        # Fixed standard_task@1 still governs Task actions and completion.
         governance=governance,
         compatibility=compatibility,
         publication=publication,
@@ -74,7 +76,8 @@ all supplied IDs, versions and product-specific admission strategies; it does no
 allocate versions, select latest, switch participation types or execute admission.
 [`validation.py`](validation.py) owns the shared structural checks used by both
 creation and catalog installation (Method composition/scope, role mappings,
-workflow role requirements and publication contracts). Invalid definitions raise
+Task/workflow role requirements and publication contracts). Invalid definitions
+raise
 `ContextCollabValidationError`. Direct dataclass construction remains compatible;
 installation still validates it. Reference uniqueness is enforced within each
 catalog, not by this stateless creation operation.
@@ -97,6 +100,48 @@ repositories, HTTP or remote clients. Application services and the existing
 repository compose the contracts.
 Shared G4 enforcement lives in
 [`g4_contracts_consistency/product_contract.py`](../g4_contracts_consistency/product_contract.py).
+
+## Optional domain and product orchestration
+
+- `domain=None` (the default) uses standard L3/L4 vocabulary. No synthetic
+  DomainProfile, domain reference or product-owned Task is created. Supply a
+  DomainProfile only when the product needs an explicit vocabulary mapping.
+- `workflow=None` (the default) means no product-specific orchestration. It does
+  **not** remove Task lifecycle, action, authorization or acceptance rules. The
+  resolver selects the fixed `standard_task@1` contract, never an installed
+  latest version. `task_contract_ref=VersionedProfileRef("standard_task", 1)` is
+  the equivalent explicit selection; unavailable exact contracts are rejected
+  during authoring and catalog installation.
+- [`standard_task@1`](task_contracts.py) defines `start_task`, `report_progress`,
+  `submit_task`, `accept_task`, `reject_task` and `cancel_task` mappings. It reuses
+  the existing G4 `task_commission_goal@1` machine (the historical name is kept),
+  not a copied transition table. A required `selected-agent` role must come
+  from `executor_ref`. Executor reporting, public Task controls, artifact guards,
+  owner review/cancellation and Collet/Task CAS still apply through both product
+  Work and generic append. Progress 100 is not acceptance; submission reaches
+  `reviewing`, and owner acceptance reaches `done`.
+- An explicit WorkflowProfile preserves its existing action/machine/event-stream
+  semantics. Current composition supports **one** Task authority: supplying both
+  `workflow` and `task_contract_ref` is rejected rather than merging or weakening
+  their rules. General workflow orchestration/DSL execution is not implemented.
+- A Bot's internal plan, tool loop, coding steps or execution attempts do not
+  require WorkflowProfile. Use one when the product needs declared product-level
+  coordination or different event/Task semantics, not to describe how a single
+  Bot reasons. The standard Task contract does not schedule those steps.
+
+ProductInstance persists absent `domain_ref` / `workflow_ref` as null and pins
+`task_contract_ref=standard_task@1` for the default path. Legacy workflow-owned
+instances retain their old JSON shape (no new Task-contract field). Strict
+loading checks the exact selection against the installed definition; missing or
+mismatched references fail closed. Historical reads and Method recovery do not
+renegotiate capabilities or choose a newer contract. These references use the
+existing `creation_facts` JSON storage; no new table or backfill is needed.
+
+Do not mutate an installed product version to remove its old references. Author
+and explicitly install a **new product version** for new instances; preserve old
+definitions and machines. The default DI installation remains
+`task_commission@1` with its original domain/workflow. The autonomous `@2` in the
+journey test is a test-local installation, not a production catalog upgrade.
 
 ## Installed definitions
 
@@ -130,10 +175,9 @@ The product service and its bounded Open adapter consume the injected definition
 
 - `PublishTaskCommand.product_profile_ref` selects an exact installed definition
   (default `task_commission@1`). Creation reads that definition's Method
-  composition and Workflow ref, then calls `prepare_product_spec` with the exact
-  selection. This selector
-  is creation-only: the input must have no pinned versions or materialized role
-  facts. Generic creation still selects v1; neither path selects latest or
+  composition and optional Workflow ref, then calls `prepare_product_profile`
+  with the exact selection. This selector is creation-only. Generic creation
+  without an exact profile ref still selects v1; neither path selects latest or
   migrates an existing instance.
 - The publication contract maps `assignee` to the required typed executor and
   `owner` to the required principal. Catalog construction delegates role validation
@@ -162,7 +206,8 @@ The product service and its bounded Open adapter consume the injected definition
   automatic retry, compensation or atomic cross-store publication/admission is
   implied.
 - Six Work entrypoints resolve action/event/primitive/payload mappings from the
-  instance's exact WorkflowProfile. G4 checks declared control-event mappings,
+  instance's exact standard Task contract or explicit WorkflowProfile. G4 checks
+  declared control-event mappings,
   then the referenced G4 machine remains the only transition authority. L6
   contains no copied state transition table.
 - The existing lowered **L4/message/publish EVENT** delivery carries selected
@@ -183,21 +228,25 @@ cannot be consumed by this publication use case.
 
 1. Generic creation validates the existing wire/method structure and G1 policy.
    Product services construct their declared product composition and also use G1.
-2. `prepare_product_spec` verifies the product/workflow/Method tuple and required
-   role subjects, negotiates against **local installed** capabilities, pins
-   product/workflow versions, and materializes L4 Participant/RoleBinding facts.
+2. `prepare_product_profile` verifies the product/optional-workflow/Method tuple
+   and required role subjects, and negotiates against **local installed**
+   capabilities. Creation facts pin the exact product version; the installed
+   immutable definition selects domain/workflow or standard Task contract refs.
+   A workflow-free definition requires `workflow_kind=None`; a mismatched
+   explicit value is rejected, not ignored.
 3. The repository atomically writes Collet, an independent root L4 Task,
    initial Event and ProductInstance metadata. Task has its own ID/revision;
    `current_snapshot` is a derived G3 response, not persisted Work authority.
    The instance occupies the reserved `product_instance` member of the existing
-   `context_spec` JSON column. ContextSpec and its decoder belong to L6; L4
-   Collet/Task do not depend on that decoder or own the product selection.
+   `creation_facts` JSON column. L6 owns selection decoding; L4 Collet/Task do not
+   depend on that decoder or own product configuration.
 4. Existing L5 projection creates an explicit top-level MethodBinding. Its
    `profile_versions` come from the pinned product definition; its
-   `role_binding_refs` identify the same L4 facts as ProductInstance. A role ref
+   `role_binding_refs` identify the same declared roles as ProductInstance.
+   Runtime role checks resolve their typed subjects from L4 Task. A role ref
    is a local, Collet-qualified `(role, participant)` reference, not an independent
    identity or resource permission authority. The installed task_commission@1
-profile uses pure Open;
+   profile uses pure Open;
    designation does not create participation. Only later COLLET_PARTICIPANT
    admission establishes a scoped Participant binding, validated alongside the
    application/decision and Method lifecycle. No Group roster or members are
@@ -218,7 +267,8 @@ the same G4 product validation, followed by existing G4 transition/guard
 resolution and repository CAS. G1 remains a separate prerequisite; L6 does not
 authorize an operation merely because a role/template mentions it.
 
-- Both `task_commission` versions select strict Work semantics: only declared Task control
+- Both standard Task contracts and the commission's explicit workflow select
+  strict Work semantics: only declared Task control
   events from an allowed source state; designated typed executor only for
   progress and submit; public events; `percent` is an integer in `[0,100]` and belongs only
   to progress reporting, never a Message-based side channel. Existing G4 guards
@@ -249,8 +299,9 @@ authorize an operation merely because a role/template mentions it.
   `task_commission@1` profile. The product service can explicitly select that
   exact definition; no dynamic registration API or new route is added. A product/workflow/Method mismatch is rejected before persistence, rather
   than accepted as unrelated labels.
-- New product rows pin product/workflow versions and store explicit role facts.
-  G1 compares identity **type and ID** through these facts. Legacy rows retain
+- New product rows pin the product version and selected Task/workflow/domain
+  references. Role checks compare identity **type and ID** against L4 Task;
+  designation does not create an admitted participant. Legacy rows retain
   their old structural ID-based G1 matching; no backfill silently changes their
   identity semantics.
 - Unversioned legacy rows retain their original JSON shape and remain readable
@@ -261,7 +312,7 @@ authorize an operation merely because a role/template mentions it.
   references fail closed. Reading a historical selection never renegotiates
   against today's installed capabilities. Top-level recovery reuses pinned
   Method versions and role refs rather than substituting installed latest.
-- Product summary listing retains its existing tolerant ContextSpec-only decode;
+- Product summary listing retains its existing tolerant creation-facts decode;
   it is a discovery projection, not evidence of validated ProductInstance or
   creation-event references. Detail reads and operation loads use the strict
   instance validation above. A listed row may consequently fail strict loading.
@@ -291,16 +342,24 @@ this minimum contract increment. Do not describe it as full ACCS conformance.
 
 The [commission user-journey test](../../../../../../../tests/community/core/task/context_collab/products/test_task_commission_end_to_end.py)
 uses the actual `TaskModule` / `TaskPersistenceModule`, isolated SQLite and the
-real catalog seam to deploy an authored `task_commission@1` profile. Product
-staff define/deploy;
-business staff create/designate; the case directly invokes L5 Open's
+real catalog seam to deploy both an explicit-domain/workflow `task_commission@1`
+and an autonomous `task_commission@2` with neither field supplied. Product
+staff define/deploy; business staff create/designate; the case directly invokes L5 Open's
 `query_opportunities` with the Bot actor and explicit context/binding, rather
 than a built-in working-Bot method. Product-wide signed HTTP Query is checked
-separately against that result; the Bot applies itself through signed A2A HTTP. Automatic review establishes the real
-task-scoped Group binding before dispatch or execution. The Bot then reports
+separately against that result. The main journey explicitly calls L5
+SubmitApplication → Screen → Admit with the Bot/policy actors; separate
+regressions exercise signed HTTP Apply. Admission establishes the real
+task-scoped Participant binding before execution, with no Group roster/member.
+The Bot then reports
 plan/code/test/PR-proposal steps, submits on successful return, and the owner
 explicitly accepts. Product observations use service responses/history; focused
-MethodStore assertions verify nonmutation and actual admission/membership.
+MethodStore assertions verify nonmutation and actual scoped admission.
+
+The journey's compatibility offer explicitly declares only local L2–L5 evidence.
+The authored source's L1 requirement is preserved: the local catalog does not
+advertise L1, and a required L1 still rejects negotiation. Mock HTTP/outbound
+transport is not a reason to fabricate an interoperability capability.
 
 Negative cases check unrelated Bots, forged contexts, repeated Query, duplicate
 Apply, task isolation, revocation through both Work entrypoints and signed-tenant
@@ -344,6 +403,8 @@ Verification owners:
 - [Commission declaration/adapter tests](../../../../../../../tests/community/core/task/context_collab/products/test_task_commission_l6.py).
 - [L6 dependency/installation gates](../../../../../../../tests/community/core/task/context_collab/test_l6_layering.py).
 - [DI singleton wiring](../../../../../../../tests/community/core/task/context_collab/test_service_real_repository.py).
+- [Optional-profile runtime tests](../../../../../../../tests/community/core/task/context_collab/test_optional_product_profiles.py): both contract modes, action/role/acceptance fences, exact machine selection, JSON validation and recovery without renegotiation.
+- [HTTP profile-version translation tests](../../../../../../../tests/community/adapters/http/task/test_commission_profile_versions.py): canonical positive versions, malformed selectors and oversized integer validation.
 - [Definition/compatibility tests](../../../../../../../tests/community/core/task/context_collab/test_l6_contracts.py).
 - [SQLite runtime/bypass/selection tests](../../../../../../../tests/community/core/task/context_collab/test_l6_runtime_contract.py).
 - Existing `tests/community/core/task/context_collab/products/` tests enforce
@@ -376,8 +437,8 @@ added to L6. The new transport adapter injects the product API Protocol.
 
 The [collaboration boundary](../README.md) owns the Task/Collet distinction,
 read-projection semantics and [database cutover](../sql/2026_11_13_context_collab_task.sql).
-ContextSpec is now L6 composition input; CurrentSnapshot and ProgressSnapshot
-are G3 views. G4 consumes persisted Task, and generic/product Work uses typed
+Plain creation facts hold the selected L6 references; CurrentSnapshot and
+ProgressSnapshot are G3 views. G4 consumes persisted Task, and generic/product Work uses typed
 Task/Collet version fences. Existing product profile versions, creation payloads
 and public product IDs are unchanged. The existing `new_instances_only` policy
 concerns product-profile changes; it does not remove the prerequisite storage
@@ -387,9 +448,10 @@ migration or permit mixed snapshot/Task-authoritative writers.
 
 L6 resolves creation/profile contracts; it does not execute Method operations or
 own Work transitions. Application `services/method_bootstrap.py` translates
-ContextSpec and pinned catalog versions into L5 `ResolvedMethodSpec`. L5 owns
+creation identities and pinned catalog versions into L5 `ResolvedMethodSpec`.
+L5 owns
 initial binding/roster creation and consumes an injected recovery port; it never
-imports L6 to heal a binding. Application/product workflow selection supplies a
-machine ID/version to L4 Work, not a ProductProfile object. See the
+imports L6 to heal a binding. Application/product Task/workflow selection
+supplies a machine ID/version to L4 Work, not a ProductProfile object. See the
 [operation ownership map](../README.md#operation-ownership) for ports, compatibility
 imports and preserved restart/transaction limitations.

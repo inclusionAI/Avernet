@@ -49,7 +49,8 @@ def product_definition(
             "selected profile does not match product_kind"
         )
     profile = catalog.get(product_kind, version)
-    if workflow_kind != profile.workflow.ref.profile_id:
+    expected_workflow = profile.workflow.ref.profile_id if profile.workflow else None
+    if workflow_kind != expected_workflow:
         raise ContextCollabValidationError(
             f"workflow_kind {workflow_kind!r} is incompatible with product {product_kind!r}"
         )
@@ -80,18 +81,27 @@ def validate_product_selection(
     )
     if profile is None:
         return None
-    sources = {"principal_ref": principal_ref, "executor_ref": executor_ref}
-    for role in profile.scenario_roles:
-        if role.required and sources.get(role.participant_source) is None:
-            raise ContextCollabValidationError(
-                f"product role {role.name!r} requires {role.participant_source}"
-            )
+    validate_role_sources(profile, principal_ref, executor_ref)
     result = negotiate(profile, catalog.capabilities())
     if not result.accepted:
         raise ContextCollabValidationError(
             f"product negotiation rejected: {result.missing_capabilities}"
         )
     return profile
+
+
+def validate_role_sources(
+    profile: ProductProfileDefinition,
+    principal_ref: PrincipalRef,
+    executor_ref: AgentRef | None,
+) -> None:
+    """Validate typed subjects without renegotiating a historical selection."""
+    sources = {"principal_ref": principal_ref, "executor_ref": executor_ref}
+    for role in profile.scenario_roles:
+        if role.required and sources.get(role.participant_source) is None:
+            raise ContextCollabValidationError(
+                f"product role {role.name!r} requires {role.participant_source}"
+            )
 
 
 def prepare_product_profile(
