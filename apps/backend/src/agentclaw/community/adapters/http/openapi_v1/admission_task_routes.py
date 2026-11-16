@@ -174,17 +174,17 @@ TASK_PUBLIC_ADMISSION: dict[tuple[str, str], AdmissionMode] = {
 
 #: Todo workbench is a browser Human self-service surface; app-only callers are refused.
 TASK_TODO_ADMISSION: dict[tuple[str, str], AdmissionMode] = {
-    ("GET", "/openapi/v1/todos"): AdmissionMode.REFUSED,
-    ("POST", "/openapi/v1/todos"): AdmissionMode.REFUSED,
-    ("GET", "/openapi/v1/todos/{todo_id}"): AdmissionMode.REFUSED,
-    ("POST", "/openapi/v1/todos/{todo_id}/run"): AdmissionMode.REFUSED,
-    ("GET", "/openapi/v1/todos/{todo_id}/events"): AdmissionMode.REFUSED,
-    ("GET", "/openapi/v1/todos/{todo_id}/interactions"): AdmissionMode.REFUSED,
-    ("GET", "/openapi/v1/todos/{todo_id}/artifacts"): AdmissionMode.REFUSED,
+    ("GET", "/openapi/v1/collaboration/tasks/todos"): AdmissionMode.REFUSED,
+    ("POST", "/openapi/v1/collaboration/tasks/todos"): AdmissionMode.REFUSED,
+    ("GET", "/openapi/v1/collaboration/tasks/todos/{todo_id}"): AdmissionMode.REFUSED,
+    ("POST", "/openapi/v1/collaboration/tasks/todos/{todo_id}/run"): AdmissionMode.REFUSED,
+    ("GET", "/openapi/v1/collaboration/tasks/todos/{todo_id}/events"): AdmissionMode.REFUSED,
+    ("GET", "/openapi/v1/collaboration/tasks/todos/{todo_id}/interactions"): AdmissionMode.REFUSED,
+    ("GET", "/openapi/v1/collaboration/tasks/todos/{todo_id}/artifacts"): AdmissionMode.REFUSED,
     (
         "GET",
-        "/openapi/v1/todos/{todo_id}/artifacts/{artifact_id}/content",
+        "/openapi/v1/collaboration/tasks/todos/{todo_id}/artifacts/{artifact_id}/content",
     ): AdmissionMode.REFUSED,
-    ("POST", "/openapi/v1/todos/{todo_id}/interactions"): AdmissionMode.REFUSED,
-    ("POST", "/openapi/v1/todos/{todo_id}/acceptance"): AdmissionMode.REFUSED,
+    ("POST", "/openapi/v1/collaboration/tasks/todos/{todo_id}/interactions"): AdmissionMode.REFUSED,
+    ("POST", "/openapi/v1/collaboration/tasks/todos/{todo_id}/acceptance"): AdmissionMode.REFUSED,
 }

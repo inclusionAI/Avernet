@@ -45,8 +45,8 @@ from agentclaw.community.core.task.context_collab.service_api import (
 from agentclaw.community.core.task.context_collab.services.context_collab_service import (
     ContextCollabService,
 )
-from agentclaw.community.plugins.local.task.context_collab_runtime import (
-    LocalContextCollabRuntimePlugin,
+from tests.community.core.task.context_collab.executor_fakes import (
+    RecordingContextCollabExecutor,
 )
 
 COLLET_ID = "collet_001"
@@ -211,7 +211,7 @@ def _make_service(
     repo = _FakeStatusRepository(collet or _collet(), events or _fixture_events())
     assert isinstance(repo, ContextCollabRepositoryProtocol)
     service = ContextCollabService(
-        repository=repo, runtime=LocalContextCollabRuntimePlugin()
+        repository=repo, executor=RecordingContextCollabExecutor()
     )
     assert isinstance(service, ContextCollabServiceProtocol)
     return repo, service

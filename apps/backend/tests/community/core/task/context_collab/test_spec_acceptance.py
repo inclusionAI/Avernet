@@ -51,8 +51,8 @@ from agentclaw.community.core.task.context_collab.service_api import (
 from agentclaw.community.core.task.context_collab.services.context_collab_service import (
     ContextCollabService,
 )
-from agentclaw.community.plugins.local.task.context_collab_runtime import (
-    LocalContextCollabRuntimePlugin,
+from tests.community.core.task.context_collab.executor_fakes import (
+    RecordingContextCollabExecutor,
 )
 
 OBJECTIVE = "整理 Context 协作协议评审结论并提交可评审 PR"
@@ -127,7 +127,7 @@ def service(db) -> ContextCollabService:
     """挂真 SQLite 仓储的服务;authorizer 走构造默认(结构授权器)。"""
     return ContextCollabService(
         repository=ContextCollabRepository(db),
-        runtime=LocalContextCollabRuntimePlugin(),
+        executor=RecordingContextCollabExecutor(),
     )
 
 

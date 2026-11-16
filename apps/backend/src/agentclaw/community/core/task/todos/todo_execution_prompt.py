@@ -21,8 +21,8 @@ def format_todo_execution_instruction(
 ) -> str:
     """Build the complete Todo execution and artifact-reporting instruction."""
     backend = backend_url.rstrip("/")
-    report_url = f"{backend}/api/v1/collaboration/todos/{todo_id}/report"
-    upload_url = f"{backend}/api/v1/collaboration/todos/{todo_id}/artifacts/object-file"
+    report_url = f"{backend}/api/v1/collaboration/tasks/todos/{todo_id}/report"
+    upload_url = f"{backend}/api/v1/collaboration/tasks/todos/{todo_id}/artifacts/object-file"
     example = {
         "todo_execution_id": todo_execution_id,
         "artifact_name": "执行结果",

@@ -1,4 +1,4 @@
-"""Tests for the production BCS Context collaboration runtime adapter."""
+"""Tests for the Context collaboration BCS executor."""
 
 from __future__ import annotations
 
@@ -10,13 +10,11 @@ from agentclaw.community.core.task.task_runner.client.bcs_http_adapter import (
     BcsClientError,
     BcsCreateGroupResult,
 )
-from agentclaw.community.plugin_api.task.context_collab_runtime import (
+from agentclaw.community.core.task.context_collab.executor import (
+    ContextCollabExecutor,
+    ContextCollabExecutorError,
     ContextCollabResumeRequest,
     ContextCollabRunRequest,
-    ContextCollabRuntimeError,
-)
-from agentclaw.community.plugins.community.task.context_collab_runtime import (
-    CommunityContextCollabRuntimePlugin,
 )
 
 
@@ -104,13 +102,13 @@ def _resume_request(*, group_id: str | None = "group_1") -> ContextCollabResumeR
     )
 
 
-def _runtime(
+def _executor(
     bcs: _RecordingBcs,
     *,
     tokens: _Tokens | None = None,
     backend_url: str = "https://backend.example/",
-) -> CommunityContextCollabRuntimePlugin:
-    return CommunityContextCollabRuntimePlugin(
+) -> ContextCollabExecutor:
+    return ContextCollabExecutor(
         bcs,
         bot_tokens=tokens,
         backend_url=backend_url,
@@ -121,9 +119,9 @@ def _runtime(
 async def test_run_creates_single_manager_bot_and_human_observer_group() -> None:
     bcs = _RecordingBcs()
     tokens = _Tokens()
-    runtime = _runtime(bcs, tokens=tokens)
+    executor = _executor(bcs, tokens=tokens)
 
-    result = await runtime.run(_request())
+    result = await executor.run(_request())
 
     assert result.run_id is None
     assert result.group_id == "group_1"
@@ -156,16 +154,16 @@ async def test_run_creates_single_manager_bot_and_human_observer_group() -> None
 @pytest.mark.asyncio
 async def test_run_context_loads_todo_runner_from_infra_without_symlink() -> None:
     bcs = _RecordingBcs()
-    runtime = _runtime(bcs, tokens=_Tokens())
+    executor = _executor(bcs, tokens=_Tokens())
 
-    await runtime.run(_request())
+    await executor.run(_request())
 
     context = bcs.create_calls[0].context
     assert "[todo-execute]" in context
     assert "todo_id=todo_1" in context
     assert "todo_execution_id=todoexec_1" in context
     assert (
-        "POST https://backend.example/api/v1/collaboration/todos/todo_1/report"
+        "POST https://backend.example/api/v1/collaboration/tasks/todos/todo_1/report"
         in context
     )
     assert "todo-runner Skill" in context
@@ -184,10 +182,10 @@ async def test_run_rejects_missing_executor_owner_before_bcs(
     owner_id: str | None,
 ) -> None:
     bcs = _RecordingBcs()
-    runtime = _runtime(bcs, tokens=_Tokens())
+    executor = _executor(bcs, tokens=_Tokens())
 
-    with pytest.raises(ContextCollabRuntimeError, match="owner"):
-        await runtime.run(_request(owner_id=owner_id))
+    with pytest.raises(ContextCollabExecutorError, match="owner"):
+        await executor.run(_request(owner_id=owner_id))
 
     assert bcs.create_calls == []
 
@@ -203,43 +201,43 @@ async def test_run_rejects_missing_executor_owner_before_bcs(
 async def test_run_fails_closed_without_real_group_session_handle(
     create_result: BcsCreateGroupResult,
 ) -> None:
-    runtime = _runtime(
+    executor = _executor(
         _RecordingBcs(create_result=create_result),
         tokens=_Tokens(),
     )
 
-    with pytest.raises(ContextCollabRuntimeError, match="group/session"):
-        await runtime.run(_request())
+    with pytest.raises(ContextCollabExecutorError, match="group/session"):
+        await executor.run(_request())
 
 
 @pytest.mark.asyncio
 async def test_run_translates_known_bcs_failure() -> None:
     error = BcsClientError("unavailable")
-    runtime = _runtime(_RecordingBcs(create_error=error), tokens=_Tokens())
+    executor = _executor(_RecordingBcs(create_error=error), tokens=_Tokens())
 
-    with pytest.raises(ContextCollabRuntimeError, match="creation") as exc_info:
-        await runtime.run(_request())
+    with pytest.raises(ContextCollabExecutorError, match="creation") as exc_info:
+        await executor.run(_request())
 
     assert exc_info.value.__cause__ is error
 
 
 @pytest.mark.asyncio
 async def test_run_does_not_hide_unexpected_programming_error() -> None:
-    runtime = _runtime(
+    executor = _executor(
         _RecordingBcs(create_error=AssertionError("adapter bug")),
         tokens=_Tokens(),
     )
 
     with pytest.raises(AssertionError, match="adapter bug"):
-        await runtime.run(_request())
+        await executor.run(_request())
 
 
 @pytest.mark.asyncio
 async def test_resume_uses_same_session_bot_bearer_and_event_id() -> None:
     bcs = _RecordingBcs()
-    runtime = _runtime(bcs, tokens=_Tokens("session-token"))
+    executor = _executor(bcs, tokens=_Tokens("session-token"))
 
-    result = await runtime.resume(_resume_request())
+    result = await executor.resume(_resume_request())
 
     assert result.run_id is None
     assert result.group_id == "group_1"
@@ -258,12 +256,12 @@ async def test_resume_uses_same_session_bot_bearer_and_event_id() -> None:
 @pytest.mark.asyncio
 async def test_resume_requires_existing_group_and_bot_token() -> None:
     bcs = _RecordingBcs()
-    runtime = _runtime(bcs, tokens=_Tokens(None))
+    executor = _executor(bcs, tokens=_Tokens(None))
 
-    with pytest.raises(ContextCollabRuntimeError, match="Bot token"):
-        await runtime.resume(_resume_request())
-    with pytest.raises(ContextCollabRuntimeError, match="group_id"):
-        await runtime.resume(_resume_request(group_id=None))
+    with pytest.raises(ContextCollabExecutorError, match="Bot token"):
+        await executor.resume(_resume_request())
+    with pytest.raises(ContextCollabExecutorError, match="group_id"):
+        await executor.resume(_resume_request(group_id=None))
 
     assert bcs.chat_calls == []
 
@@ -271,13 +269,13 @@ async def test_resume_requires_existing_group_and_bot_token() -> None:
 @pytest.mark.asyncio
 async def test_resume_translates_known_bcs_failure() -> None:
     error = BcsClientError("unavailable")
-    runtime = _runtime(
+    executor = _executor(
         _RecordingBcs(chat_error=error),
         tokens=_Tokens(),
     )
 
-    with pytest.raises(ContextCollabRuntimeError, match="resume") as exc_info:
-        await runtime.resume(_resume_request())
+    with pytest.raises(ContextCollabExecutorError, match="resume") as exc_info:
+        await executor.resume(_resume_request())
 
     assert exc_info.value.__cause__ is error
 
@@ -306,9 +304,9 @@ async def test_get_group_status_normalizes_session_state(
             }
         }
     )
-    runtime = _runtime(bcs)
+    executor = _executor(bcs)
 
-    result = await runtime.get_run(
+    result = await executor.get_run(
         group_id="group_1",
         session_id="session_1",
     )
@@ -324,7 +322,7 @@ async def test_get_group_status_normalizes_session_state(
 
 @pytest.mark.asyncio
 async def test_get_group_status_rejects_direct_run_handle() -> None:
-    runtime = _runtime(_RecordingBcs())
+    executor = _executor(_RecordingBcs())
 
-    with pytest.raises(ContextCollabRuntimeError, match="group_id"):
-        await runtime.get_run("run_1")
+    with pytest.raises(ContextCollabExecutorError, match="group_id"):
+        await executor.get_run("run_1")

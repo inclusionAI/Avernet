@@ -66,46 +66,46 @@ function readArtifacts(data: TodoArtifactDto[]): TodoArtifact[] {
 
 export async function loadTodos(query: TodoListQuery): Promise<TodoPage> {
   const response = await listTodos(query);
-  const data = unwrap(response, '/openapi/v1/todos');
+  const data = unwrap(response, '/openapi/v1/collaboration/tasks/todos');
   return readPage(data, query);
 }
 
 export async function loadTodo(todoId: string): Promise<TodoRecord> {
   const response = await getTodo(todoId);
-  return mapTodoDto(unwrap(response, `/openapi/v1/todos/${encodeURIComponent(todoId)}`));
+  return mapTodoDto(unwrap(response, `/openapi/v1/collaboration/tasks/todos/${encodeURIComponent(todoId)}`));
 }
 
 export async function addTodo(input: CreateTodoInput): Promise<TodoRecord> {
   const response = await createTodo(input);
-  return mapTodoDto(unwrap(response, '/openapi/v1/todos'));
+  return mapTodoDto(unwrap(response, '/openapi/v1/collaboration/tasks/todos'));
 }
 
 export async function acceptTodo(todoId: string, input: TodoAcceptanceInput): Promise<TodoRecord> {
   const response = await submitTodoAcceptance(todoId, input);
-  return mapTodoDto(unwrap(response, `/openapi/v1/todos/${encodeURIComponent(todoId)}/acceptance`));
+  return mapTodoDto(unwrap(response, `/openapi/v1/collaboration/tasks/todos/${encodeURIComponent(todoId)}/acceptance`));
 }
 
 export async function loadTodoInteractions(todoId: string): Promise<TodoEvent[]> {
   const response = await listTodoInteractions(todoId);
-  const data = unwrap(response, `/openapi/v1/todos/${encodeURIComponent(todoId)}/interactions`);
+  const data = unwrap(response, `/openapi/v1/collaboration/tasks/todos/${encodeURIComponent(todoId)}/interactions`);
   return readList(data);
 }
 
 export async function addTodoInteraction(todoId: string, input: CreateTodoInteractionInput): Promise<TodoEvent> {
   const response = await createTodoInteraction(todoId, input);
-  const data = unwrap(response, `/openapi/v1/todos/${encodeURIComponent(todoId)}/interactions`);
+  const data = unwrap(response, `/openapi/v1/collaboration/tasks/todos/${encodeURIComponent(todoId)}/interactions`);
   return mapTodoEventDto(data);
 }
 
 export async function loadTodoEvents(todoId: string): Promise<TodoEvent[]> {
   const response = await listTodoEvents(todoId);
-  const data = unwrap(response, `/openapi/v1/todos/${encodeURIComponent(todoId)}/events`);
+  const data = unwrap(response, `/openapi/v1/collaboration/tasks/todos/${encodeURIComponent(todoId)}/events`);
   return readList(data);
 }
 
 export async function startTodoRun(todoId: string): Promise<TodoRecord> {
   const response = await runTodo(todoId);
-  const data = unwrap(response, `/openapi/v1/todos/${encodeURIComponent(todoId)}/run`);
+  const data = unwrap(response, `/openapi/v1/collaboration/tasks/todos/${encodeURIComponent(todoId)}/run`);
   return mapTodoDto(data);
 }
 
@@ -113,7 +113,7 @@ export type { TodoStatus };
 
 export async function loadTodoArtifacts(todoId: string): Promise<TodoArtifact[]> {
   const response = await listTodoArtifacts(todoId);
-  const data = unwrap(response, `/openapi/v1/todos/${encodeURIComponent(todoId)}/artifacts`);
+  const data = unwrap(response, `/openapi/v1/collaboration/tasks/todos/${encodeURIComponent(todoId)}/artifacts`);
   return readArtifacts(data);
 }
 

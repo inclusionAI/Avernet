@@ -17,14 +17,14 @@ Status: **confirmed**
 
 ## A 对前端 API
 
-- `GET /openapi/v1/todos`
-- `POST /openapi/v1/todos`
-- `GET /openapi/v1/todos/{todo_id}`
-- `POST /openapi/v1/todos/{todo_id}/run`（补偿/运维）
-- `GET /openapi/v1/todos/{todo_id}/events`
-- `GET /openapi/v1/todos/{todo_id}/interactions`
-- `POST /openapi/v1/todos/{todo_id}/interactions`
-- `POST /openapi/v1/todos/{todo_id}/acceptance`
+- `GET /openapi/v1/collaboration/tasks/todos`
+- `POST /openapi/v1/collaboration/tasks/todos`
+- `GET /openapi/v1/collaboration/tasks/todos/{todo_id}`
+- `POST /openapi/v1/collaboration/tasks/todos/{todo_id}/run`（补偿/运维）
+- `GET /openapi/v1/collaboration/tasks/todos/{todo_id}/events`
+- `GET /openapi/v1/collaboration/tasks/todos/{todo_id}/interactions`
+- `POST /openapi/v1/collaboration/tasks/todos/{todo_id}/interactions`
+- `POST /openapi/v1/collaboration/tasks/todos/{todo_id}/acceptance`
 
 Todo 编辑不属于本轮范围；现存 PATCH 兼容面不在普通前端暴露。
 

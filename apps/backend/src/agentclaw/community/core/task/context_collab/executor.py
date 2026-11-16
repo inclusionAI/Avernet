@@ -1,8 +1,9 @@
-"""Community Context runtime backed by a BCS manager-worker group session."""
+"""Execute Todo collaboration Contexts through the existing Task BCS client."""
 
 from __future__ import annotations
 
 import uuid
+from dataclasses import dataclass
 
 from agentclaw.community.core.task.domain.identity import compose_bot_identity
 from agentclaw.community.core.task.task_runner.client.bcs_bot_token_provider import (
@@ -16,15 +17,6 @@ from agentclaw.community.core.task.task_runner.client.ports import BcsClientPort
 from agentclaw.community.core.task.todos.todo_execution_prompt import (
     format_todo_execution_instruction,
 )
-from agentclaw.community.plugin_api.task.context_collab_runtime import (
-    ContextCollabResumeRequest,
-    ContextCollabRunRequest,
-    ContextCollabRunResult,
-    ContextCollabRunStatus,
-    ContextCollabRuntimeError,
-    ContextCollabRuntimePlugin,
-)
-from agentclaw.community.plugin_api.impl_registry import Mode, plugin_impl
 
 _HUMAN_OBSERVER_ROUTING_POLICY = {"default_bot_final_delivery": "inject_observers"}
 _RUNNING_STATUSES = {"created", "pending", "active", "running", "in_progress"}
@@ -32,12 +24,70 @@ _COMPLETED_STATUSES = {"completed", "done", "succeeded", "success"}
 _FAILED_STATUSES = {"failed", "error", "aborted", "cancelled", "canceled"}
 
 
-@plugin_impl(
-    mode=Mode.PROD,
-    rationale="run Todo Contexts in a BCS manager-worker group with Human observer",
-)
-class CommunityContextCollabRuntimePlugin(ContextCollabRuntimePlugin):
-    """Run one selected Todo Bot as manager with the creator as observer."""
+class ContextCollabExecutorError(RuntimeError):
+    """The configured Context executor could not execute the request."""
+
+
+@dataclass(frozen=True)
+class ContextCollabRunRequest:
+    """Input for starting the executor bound to a collaboration Context."""
+
+    collab_context_id: str
+    executor_id: str
+    principal_id: str
+    objective: str
+    todo_id: str
+    executor_owner_id: str | None = None
+    todo_execution_id: str | None = None
+    todo_execution_token: str | None = None
+
+
+@dataclass(frozen=True)
+class ContextCollabResumeRequest:
+    """Input for continuing the previous executor session."""
+
+    collab_context_id: str
+    executor_id: str
+    principal_id: str
+    todo_id: str
+    session_id: str
+    message: str
+    interaction_event_id: str
+    executor_owner_id: str | None = None
+    todo_execution_id: str | None = None
+    todo_execution_token: str | None = None
+    group_id: str | None = None
+
+
+@dataclass(frozen=True)
+class ContextCollabRunResult:
+    """External execution handles recorded on the next ``task.started`` event."""
+
+    run_id: str | None
+    session_id: str | None
+    group_id: str | None = None
+
+
+@dataclass(frozen=True)
+class ContextCollabRunStatus:
+    """Snapshot of one external executor run or BCS group session."""
+
+    run_id: str | None
+    status: str
+    result: object | None
+    error: object | None
+    completed_at: str | None
+    session_id: str | None
+    group_id: str | None = None
+
+
+class ContextCollabExecutor:
+    """Run one selected Todo Bot as BCS manager with its creator as observer.
+
+    This is a Task-core execution component, not a deployment Plugin. It reuses
+    Task's existing BCS port, request DTO, HTTP adapter binding, and Bot-token
+    provider without changing ``TaskExecutor``.
+    """
 
     def __init__(
         self,
@@ -84,13 +134,13 @@ class CommunityContextCollabRuntimePlugin(ContextCollabRuntimePlugin):
         try:
             result = await self._bcs.create_group(group_request)
         except BcsClientError as exc:
-            raise ContextCollabRuntimeError(
+            raise ContextCollabExecutorError(
                 "Context executor group creation failed"
             ) from exc
         group_id = str(result.group_id or "").strip()
         session_id = str(result.session_id or "").strip()
         if not group_id or not session_id:
-            raise ContextCollabRuntimeError(
+            raise ContextCollabExecutorError(
                 "Context executor group creation returned no group/session handle"
             )
         return ContextCollabRunResult(
@@ -105,12 +155,12 @@ class CommunityContextCollabRuntimePlugin(ContextCollabRuntimePlugin):
         driver = self._driver_identity(request)
         group_id = str(request.group_id or "").strip()
         if not group_id:
-            raise ContextCollabRuntimeError(
+            raise ContextCollabExecutorError(
                 "Context executor group_id is required for session resume"
             )
         token = self._bot_token(driver)
         if not token:
-            raise ContextCollabRuntimeError(
+            raise ContextCollabExecutorError(
                 "Context executor Bot token is required for BCS session resume"
             )
         message = self._delivery_message(
@@ -126,12 +176,12 @@ class CommunityContextCollabRuntimePlugin(ContextCollabRuntimePlugin):
                 idempotency_key=request.interaction_event_id,
             )
         except BcsClientError as exc:
-            raise ContextCollabRuntimeError(
+            raise ContextCollabExecutorError(
                 "Context executor session resume failed"
             ) from exc
         returned_session_id = str(result.get("session_id") or "").strip()
         if returned_session_id and returned_session_id != request.session_id:
-            raise ContextCollabRuntimeError(
+            raise ContextCollabExecutorError(
                 "Context executor session resume returned a different session"
             )
         return ContextCollabRunResult(
@@ -148,23 +198,23 @@ class CommunityContextCollabRuntimePlugin(ContextCollabRuntimePlugin):
         session_id: str | None = None,
     ) -> ContextCollabRunStatus:
         if run_id is not None or not group_id:
-            raise ContextCollabRuntimeError(
+            raise ContextCollabExecutorError(
                 "BCS Context status lookup requires group_id and no run_id"
             )
         try:
             group = await self._bcs.get_group(group_id)
         except BcsClientError as exc:
-            raise ContextCollabRuntimeError(
+            raise ContextCollabExecutorError(
                 "Context executor group status lookup failed"
             ) from exc
         session = group.get("session") or {}
         if not isinstance(session, dict):
-            raise ContextCollabRuntimeError(
+            raise ContextCollabExecutorError(
                 "Context executor group returned an invalid session snapshot"
             )
         returned_session_id = str(session.get("session_id") or session_id or "").strip()
         if session_id and returned_session_id and returned_session_id != session_id:
-            raise ContextCollabRuntimeError(
+            raise ContextCollabExecutorError(
                 "Context executor group returned a different session"
             )
         return ContextCollabRunStatus(
@@ -181,7 +231,7 @@ class CommunityContextCollabRuntimePlugin(ContextCollabRuntimePlugin):
         self, request: ContextCollabRunRequest | ContextCollabResumeRequest
     ) -> str:
         if not request.executor_owner_id:
-            raise ContextCollabRuntimeError(
+            raise ContextCollabExecutorError(
                 "Context executor owner is required for BCS Bot addressing"
             )
         return compose_bot_identity(
@@ -204,14 +254,14 @@ class CommunityContextCollabRuntimePlugin(ContextCollabRuntimePlugin):
         execution_id = request.todo_execution_id
         execution_token = request.todo_execution_token
         if bool(execution_id) != bool(execution_token):
-            raise ContextCollabRuntimeError(
+            raise ContextCollabExecutorError(
                 "Todo execution ID and token must be provided together"
             )
         if not execution_id or not execution_token:
             return instruction
         backend_url = self._backend_url.strip().rstrip("/")
         if not backend_url:
-            raise ContextCollabRuntimeError(
+            raise ContextCollabExecutorError(
                 "Backend URL is required for Todo execution delivery"
             )
         return format_todo_execution_instruction(
@@ -235,22 +285,24 @@ def _normalize_group_status(value: object) -> str:
     return normalized.upper()
 
 
-class UnavailableContextCollabRuntimePlugin(ContextCollabRuntimePlugin):
-    """Fail-closed runtime used when the deployment has no BCS port."""
+class UnavailableContextCollabExecutor:
+    """Fail closed when this deployment has no Task BCS port."""
 
     def __init__(self, reason: str) -> None:
         self._reason = reason
 
     async def run(self, request: ContextCollabRunRequest) -> ContextCollabRunResult:
-        raise ContextCollabRuntimeError(
-            "Context collaboration runtime is unavailable: " + self._reason
+        del request
+        raise ContextCollabExecutorError(
+            "Context collaboration executor is unavailable: " + self._reason
         )
 
     async def resume(
         self, request: ContextCollabResumeRequest
     ) -> ContextCollabRunResult:
-        raise ContextCollabRuntimeError(
-            "Context collaboration runtime is unavailable: " + self._reason
+        del request
+        raise ContextCollabExecutorError(
+            "Context collaboration executor is unavailable: " + self._reason
         )
 
     async def get_run(
@@ -261,6 +313,6 @@ class UnavailableContextCollabRuntimePlugin(ContextCollabRuntimePlugin):
         session_id: str | None = None,
     ) -> ContextCollabRunStatus:
         del run_id, group_id, session_id
-        raise ContextCollabRuntimeError(
-            "Context collaboration runtime is unavailable: " + self._reason
+        raise ContextCollabExecutorError(
+            "Context collaboration executor is unavailable: " + self._reason
         )

@@ -184,9 +184,9 @@ from agentclaw.community.core.task.task_runner.callback_correlation import (
     InMemoryCallbackCorrelationRegistry,
 )
 from agentclaw.community.core.bot_management.services.bcn_service import BcnService
-from agentclaw.community.plugins.community.task.context_collab_runtime import (
-    CommunityContextCollabRuntimePlugin,
-    UnavailableContextCollabRuntimePlugin,
+from agentclaw.community.core.task.context_collab.executor import (
+    ContextCollabExecutor,
+    UnavailableContextCollabExecutor,
 )
 from agentclaw.community.core.task.task_runner.client.ports import (
     BcsClientPort,
@@ -198,9 +198,6 @@ from agentclaw.community.core.task.task_discovery.frontend_url import (
 from agentclaw.community.plugin_api.notify_sender import (
     QUALIFIER_BBS_DIGEST,
     NotifySenderPlugin,
-)
-from agentclaw.community.plugin_api.task.context_collab_runtime import (
-    ContextCollabRuntimePlugin,
 )
 from agentclaw.community.plugin_api.staff_dept import StaffDeptPlugin
 from agentclaw.community.core.task.forum.interaction.target_verifier_protocol import (
@@ -343,12 +340,12 @@ class TaskModule(Module):
     @singleton
     @provider
     @inject
-    def context_collab_runtime_plugin(
+    def context_collab_executor(
         self,
         injector: Injector,
         task_dispatch: TaskDispatchConfig,
-    ) -> ContextCollabRuntimePlugin:
-        """Select the deployment BCS group runtime, failing closed when unbound."""
+    ) -> ContextCollabExecutor:
+        """Build the ContextCollab BCS executor, failing closed when unbound."""
         try:
             bcs = injector.get(BcsClientPort)
         except Exception as exc:  # noqa: BLE001 lightweight deployment
@@ -356,9 +353,9 @@ class TaskModule(Module):
                 "[task][context-collab] BcsClientPort unavailable: %s",
                 exc,
             )
-            return UnavailableContextCollabRuntimePlugin(str(exc))
+            return UnavailableContextCollabExecutor(str(exc))
         if bcs is None:
-            return UnavailableContextCollabRuntimePlugin(
+            return UnavailableContextCollabExecutor(
                 "BcsClientPort resolved to None"
             )
         try:
@@ -370,7 +367,7 @@ class TaskModule(Module):
                 exc,
             )
             bot_tokens = NullBcsBotTokenProvider()
-        return CommunityContextCollabRuntimePlugin(
+        return ContextCollabExecutor(
             bcs,
             bot_tokens=bot_tokens,
             backend_url=task_dispatch.backend_url,

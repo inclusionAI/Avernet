@@ -26,9 +26,6 @@ _DECLARED_PREFIXES = (
     # the user. Declared with its gateway domain + route_security entries.
     "/openapi/v1/org",
     "/openapi/v1/spaces",
-    # Human Todo workbench, routed by the gateway's existing `todos` domain
-    # and protected by the /openapi/v1/todos/** route_security rule.
-    "/openapi/v1/todos",
     "/openapi/v1/work-orders",
     "/openapi/v1/work-order-notifications",
     "/openapi/v1/org/user",

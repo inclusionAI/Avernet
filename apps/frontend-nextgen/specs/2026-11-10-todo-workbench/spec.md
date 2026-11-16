@@ -25,14 +25,14 @@ Status: **approved**
 
 ## A 对前端 API
 
-- `GET /openapi/v1/todos`：按当前空间分页查询，支持关键词、状态和负责人（Bot）筛选。
-- `POST /openapi/v1/todos`：创建待处理待办。
-- `GET /openapi/v1/todos/{todoId}`：详情。
-- `GET /openapi/v1/todos/{todoId}/events`：完整事件时序。
-- `GET /openapi/v1/todos/{todoId}/interactions`：Human 互动/验收事件投影。
-- `POST /openapi/v1/todos/{todoId}/interactions`：`{ message }`。
-- `POST /openapi/v1/todos/{todoId}/acceptance`：`{ verdict, message? }`。
-- `POST /openapi/v1/todos/{todoId}/run`：仅作为自动调度补偿接口，不在普通前端流程中暴露。
+- `GET /openapi/v1/collaboration/tasks/todos`：按当前空间分页查询，支持关键词、状态和负责人（Bot）筛选。
+- `POST /openapi/v1/collaboration/tasks/todos`：创建待处理待办。
+- `GET /openapi/v1/collaboration/tasks/todos/{todoId}`：详情。
+- `GET /openapi/v1/collaboration/tasks/todos/{todoId}/events`：完整事件时序。
+- `GET /openapi/v1/collaboration/tasks/todos/{todoId}/interactions`：Human 互动/验收事件投影。
+- `POST /openapi/v1/collaboration/tasks/todos/{todoId}/interactions`：`{ message }`。
+- `POST /openapi/v1/collaboration/tasks/todos/{todoId}/acceptance`：`{ verdict, message? }`。
+- `POST /openapi/v1/collaboration/tasks/todos/{todoId}/run`：仅作为自动调度补偿接口，不在普通前端流程中暴露。
 
 ## 验收标准
 

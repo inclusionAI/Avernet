@@ -82,7 +82,7 @@ async def test_report_route_passes_execution_credential_and_returns_public_recor
             content={"text": "done"},
             is_final_artifact=True,
         ),
-        request=_request("/api/v1/collaboration/todos/todo_1/report"),
+        request=_request("/api/v1/collaboration/tasks/todos/todo_1/report"),
         execution_token="secret-token",
         service=service,
     )
@@ -146,7 +146,7 @@ async def test_file_route_passes_multipart_fields_and_hides_storage_id():
 
     response = await upload_todo_artifact_file(
         todo_id="todo_1",
-        request=_request("/api/v1/collaboration/todos/todo_1/artifacts/object-file"),
+        request=_request("/api/v1/collaboration/tasks/todos/todo_1/artifacts/object-file"),
         execution_token="secret-token",
         todo_execution_id="todoexec_1",
         execution_id=None,
@@ -187,7 +187,7 @@ async def test_file_route_accepts_legacy_execution_id_during_compatibility_windo
 
     await upload_todo_artifact_file(
         todo_id="todo_1",
-        request=_request("/api/v1/collaboration/todos/todo_1/artifacts/object-file"),
+        request=_request("/api/v1/collaboration/tasks/todos/todo_1/artifacts/object-file"),
         execution_token="secret-token",
         todo_execution_id=None,
         execution_id="todoexec_legacy",
@@ -224,7 +224,7 @@ async def test_file_route_rejects_conflicting_execution_identifiers():
         await upload_todo_artifact_file(
             todo_id="todo_1",
             request=_request(
-                "/api/v1/collaboration/todos/todo_1/artifacts/object-file"
+                "/api/v1/collaboration/tasks/todos/todo_1/artifacts/object-file"
             ),
             execution_token="secret-token",
             todo_execution_id="todoexec_new",

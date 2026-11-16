@@ -35,8 +35,8 @@ from agentclaw.community.core.task.todos.collaboration.protocol import (
     TodoCollaborationEventRequest,
     TodoCollaborationPort,
 )
-from agentclaw.community.plugin_api.task.context_collab_runtime import (
-    ContextCollabRuntimeError,
+from agentclaw.community.core.task.context_collab.executor import (
+    ContextCollabExecutorError,
 )
 
 
@@ -109,7 +109,7 @@ class InProcessTodoCollaborationAdapter(TodoCollaborationPort):
                 todo_execution_id=todo_execution_id,
                 todo_execution_token=todo_execution_token,
             )
-        except ContextCollabRuntimeError as exc:
+        except ContextCollabExecutorError as exc:
             raise TodoCollaborationError(
                 "ContextCollab runtime could not start the Todo executor"
             ) from exc
@@ -128,7 +128,7 @@ class InProcessTodoCollaborationAdapter(TodoCollaborationPort):
         actor = _actor_context(actor_id, "human")
         try:
             projection = await self._service.refresh_run(collab_context_id, actor)
-        except ContextCollabRuntimeError as exc:
+        except ContextCollabExecutorError as exc:
             raise TodoCollaborationError(
                 "ContextCollab runtime could not refresh the Todo executor"
             ) from exc
@@ -156,7 +156,7 @@ class InProcessTodoCollaborationAdapter(TodoCollaborationPort):
                 todo_execution_id=todo_execution_id,
                 todo_execution_token=todo_execution_token,
             )
-        except ContextCollabRuntimeError as exc:
+        except ContextCollabExecutorError as exc:
             raise TodoCollaborationError(
                 "ContextCollab runtime could not resume the Todo executor"
             ) from exc

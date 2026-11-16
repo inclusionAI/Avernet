@@ -1,4 +1,4 @@
-"""Consumer contract for the Context collaboration runtime Plugin API."""
+"""Consumer contract for the Context collaboration executor boundary."""
 
 from __future__ import annotations
 
@@ -39,12 +39,12 @@ from agentclaw.community.core.task.context_collab.service_api import (
 from agentclaw.community.core.task.context_collab.services.context_collab_service import (
     ContextCollabService,
 )
-from agentclaw.community.plugins.local.task.context_collab_runtime import (
-    LocalContextCollabRuntimePlugin,
-)
-from agentclaw.community.plugin_api.task.context_collab_runtime import (
+from agentclaw.community.core.task.context_collab.executor import (
     ContextCollabRunResult,
     ContextCollabRunStatus,
+)
+from tests.community.core.task.context_collab.executor_fakes import (
+    RecordingContextCollabExecutor,
 )
 
 
@@ -185,10 +185,10 @@ class RecordingGroupRuntime:
 
 
 @pytest.mark.asyncio
-async def test_context_run_reaches_runtime_plugin_and_persists_started_event():
+async def test_context_run_reaches_executor_and_persists_started_event():
     repository = RecordingContextRepository()
-    runtime = LocalContextCollabRuntimePlugin()
-    service = ContextCollabService(repository=repository, runtime=runtime)
+    runtime = RecordingContextCollabExecutor()
+    service = ContextCollabService(repository=repository, executor=runtime)
 
     result = await service.run_context(
         "context_1",
@@ -218,8 +218,8 @@ async def test_context_run_reaches_runtime_plugin_and_persists_started_event():
 @pytest.mark.asyncio
 async def test_local_runtime_exposes_running_status_after_start():
     repository = RecordingContextRepository()
-    runtime = LocalContextCollabRuntimePlugin()
-    service = ContextCollabService(repository=repository, runtime=runtime)
+    runtime = RecordingContextCollabExecutor()
+    service = ContextCollabService(repository=repository, executor=runtime)
 
     await service.run_context(
         "context_1",
@@ -237,8 +237,8 @@ async def test_local_runtime_exposes_running_status_after_start():
 @pytest.mark.asyncio
 async def test_context_resume_uses_previous_session_and_persists_new_start():
     repository = RecordingContextRepository()
-    runtime = LocalContextCollabRuntimePlugin()
-    service = ContextCollabService(repository=repository, runtime=runtime)
+    runtime = RecordingContextCollabExecutor()
+    service = ContextCollabService(repository=repository, executor=runtime)
     actor = ActorContext(actor=PrincipalRef("human", "user_1"), source="todo")
     await service.run_context("context_1", actor)
     runtime.set_run_status_for_test(
@@ -290,8 +290,8 @@ async def test_context_resume_uses_previous_session_and_persists_new_start():
 @pytest.mark.parametrize("runtime_status", ["PENDING", "RUNNING"])
 async def test_refresh_keeps_non_terminal_runtime_in_progress(runtime_status: str):
     repository = RecordingContextRepository()
-    runtime = LocalContextCollabRuntimePlugin()
-    service = ContextCollabService(repository=repository, runtime=runtime)
+    runtime = RecordingContextCollabExecutor()
+    service = ContextCollabService(repository=repository, executor=runtime)
     actor = ActorContext(actor=PrincipalRef("human", "user_1"), source="api")
     await service.run_context("context_1", actor)
     runtime.set_run_status_for_test("run_1", status=runtime_status)
@@ -306,8 +306,8 @@ async def test_refresh_keeps_non_terminal_runtime_in_progress(runtime_status: st
 @pytest.mark.asyncio
 async def test_refresh_completed_runtime_appends_once_and_is_idempotent():
     repository = RecordingContextRepository()
-    runtime = LocalContextCollabRuntimePlugin()
-    service = ContextCollabService(repository=repository, runtime=runtime)
+    runtime = RecordingContextCollabExecutor()
+    service = ContextCollabService(repository=repository, executor=runtime)
     actor = ActorContext(actor=PrincipalRef("human", "user_1"), source="api")
     await service.run_context("context_1", actor)
     runtime.set_run_status_for_test(
@@ -342,8 +342,8 @@ async def test_refresh_failed_terminal_runtime_does_not_complete_context(
     runtime_status: str,
 ):
     repository = RecordingContextRepository()
-    runtime = LocalContextCollabRuntimePlugin()
-    service = ContextCollabService(repository=repository, runtime=runtime)
+    runtime = RecordingContextCollabExecutor()
+    service = ContextCollabService(repository=repository, executor=runtime)
     actor = ActorContext(actor=PrincipalRef("human", "user_1"), source="api")
     await service.run_context("context_1", actor)
     runtime.set_run_status_for_test(
@@ -368,8 +368,8 @@ async def test_refresh_rejects_in_progress_context_without_runtime_handle():
             status="in_progress",
         ),
     )
-    runtime = LocalContextCollabRuntimePlugin()
-    service = ContextCollabService(repository=repository, runtime=runtime)
+    runtime = RecordingContextCollabExecutor()
+    service = ContextCollabService(repository=repository, executor=runtime)
 
     with pytest.raises(
         ContextCollabValidationError,
@@ -386,8 +386,8 @@ async def test_refresh_rejects_in_progress_context_without_runtime_handle():
 @pytest.mark.asyncio
 async def test_refresh_treats_concurrent_done_transition_as_idempotent_success():
     repository = ConcurrentCompletionRepository()
-    runtime = LocalContextCollabRuntimePlugin()
-    service = ContextCollabService(repository=repository, runtime=runtime)
+    runtime = RecordingContextCollabExecutor()
+    service = ContextCollabService(repository=repository, executor=runtime)
     actor = ActorContext(actor=PrincipalRef("human", "user_1"), source="api")
     await service.run_context("context_1", actor)
     runtime.set_run_status_for_test("run_1", status="COMPLETED")
@@ -401,8 +401,8 @@ async def test_refresh_treats_concurrent_done_transition_as_idempotent_success()
 @pytest.mark.asyncio
 async def test_refresh_propagates_version_conflict_when_context_is_not_done():
     repository = StaleConflictRepository()
-    runtime = LocalContextCollabRuntimePlugin()
-    service = ContextCollabService(repository=repository, runtime=runtime)
+    runtime = RecordingContextCollabExecutor()
+    service = ContextCollabService(repository=repository, executor=runtime)
     actor = ActorContext(actor=PrincipalRef("human", "user_1"), source="api")
     await service.run_context("context_1", actor)
     runtime.set_run_status_for_test("run_1", status="COMPLETED")
@@ -415,7 +415,7 @@ async def test_refresh_propagates_version_conflict_when_context_is_not_done():
 async def test_group_runtime_persists_real_handles_refreshes_and_resumes_same_session():
     repository = RecordingContextRepository()
     runtime = RecordingGroupRuntime()
-    service = ContextCollabService(repository=repository, runtime=runtime)
+    service = ContextCollabService(repository=repository, executor=runtime)
     actor = ActorContext(actor=PrincipalRef("human", "user_1"), source="todo")
 
     started = await service.run_context("context_1", actor)

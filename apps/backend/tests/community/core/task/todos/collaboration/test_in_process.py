@@ -19,8 +19,8 @@ from agentclaw.community.core.task.context_collab.service_api import (
     EventAcceptedResult,
     TaskProgressProjectionDTO,
 )
-from agentclaw.community.plugin_api.task.context_collab_runtime import (
-    ContextCollabRuntimeError,
+from agentclaw.community.core.task.context_collab.executor import (
+    ContextCollabExecutorError,
 )
 from agentclaw.community.core.task.todos.collaboration.protocol import (
     TodoCollaborationContextRequest,
@@ -352,7 +352,7 @@ async def test_refresh_context_run_calls_service_with_human_actor() -> None:
 @pytest.mark.asyncio
 async def test_refresh_context_run_translates_runtime_failure() -> None:
     service = _RecordingContextService()
-    failure = ContextCollabRuntimeError("runtime unavailable")
+    failure = ContextCollabExecutorError("runtime unavailable")
 
     async def fail_refresh(collab_context_id, context):
         raise failure
@@ -407,7 +407,7 @@ async def test_run_context_translates_runtime_failure_to_todo_boundary() -> None
         todo_execution_id=None,
         todo_execution_token=None,
     ):
-        raise ContextCollabRuntimeError("runtime unavailable")
+        raise ContextCollabExecutorError("runtime unavailable")
 
     service.run_context = fail_run
     adapter = InProcessTodoCollaborationAdapter(service)

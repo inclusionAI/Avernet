@@ -8,7 +8,7 @@ import { userScopedParams } from '../bots/botController';
 import { backendRequest } from '../httpClient';
 import type { BackendApiEnvelope, BackendApiPage, BackendUnknownRecord } from '../types';
 
-const TODO_API_BASE = '/openapi/v1/todos';
+const TODO_API_BASE = '/openapi/v1/collaboration/tasks/todos';
 
 export interface TodoDto extends BackendUnknownRecord {
   todo_id?: string | number;

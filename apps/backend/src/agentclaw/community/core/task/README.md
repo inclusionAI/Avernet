@@ -30,6 +30,7 @@ core/task/
 ├── domain/                        # TaskSpec/TaskNode/Graph 等共享领域模型
 ├── feedback/                       # task 域反馈通道(models/service/DDL)
 ├── forum/                          # BBS Topic/Post、Browse Loop 订阅/feed/报告
+├── context_collab/                 # Context 生命周期与 Todo BCS 执行器
 ├── todos/                          # Todo 生命周期、自动调度、验收与事件/互动投影
 ├── task_center/                   # TaskService facade、intake/delivery/relay/control Mixin 与双模式入口
 ├── task_plan/                     # TaskPlanner + static_plan.py 统一领域定义/Runtime
@@ -174,6 +175,13 @@ stateDiagram-v2
 
 - 多节点投递并发:`asyncio.gather` + `asyncio.Semaphore(_DELIVER_CONCURRENCY=8)` **下沉 `TaskRunner.start_run` 内部**(投递是 runner 职责;engine 批量调 `start_run`,不持锁内拆单节点)。
 - 对齐 backend `desktop_bot/lifecycle.py` 的 `_check_one_bot` Semaphore 限流模式,防多节点投递雪崩。
+
+### Todo ContextCollab 执行边界
+
+Todo ContextCollab 不注册独立 Plugin。`core/task/context_collab/executor.py`
+直接复用 Task 已有的 `BcsClientPort`、`BcsCreateGroupRequest`、
+`BcsBotTokenProvider` 及其 DI adapter/binding，复制 Todo 所需的群创建、恢复和
+状态查询编排；本轮不修改 `TaskExecutor`，也不抽取 Task/Todo 公共执行层。
 
 ### BCS Bot 身份边界
 

@@ -45,7 +45,7 @@ EXEMPT_PROTOCOLS: frozenset[str] = frozenset({"engine_ext_client"})
 # Nested Plugin API namespaces that are explicitly governed by Rule 25. Keep
 # this list narrow: other nested packages expose structural Protocols that do
 # not inherit the Plugin marker and follow their own contract rules.
-_NESTED_PLUGIN_MODULES: tuple[str, ...] = ("task.context_collab_runtime",)
+_NESTED_PLUGIN_MODULES: tuple[str, ...] = ()
 
 # B11: protocols whose conformance suite is **corp-resident** (the meaningful impl is
 # corp; community binds a noop). Their suite lives only in ``tests/corp/contracts``.

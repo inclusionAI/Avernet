@@ -1,27 +1,20 @@
-"""Deterministic local Context runtime used by tests and offline development."""
+"""Deterministic Context executor fakes shared by ContextCollab tests."""
 
 from __future__ import annotations
 
 import itertools
 
-from agentclaw.community.plugin_api.task.context_collab_runtime import (
-    ContextCollabRuntimeError,
+from agentclaw.community.core.task.context_collab.executor import (
+    ContextCollabExecutorError,
     ContextCollabResumeRequest,
     ContextCollabRunRequest,
     ContextCollabRunResult,
     ContextCollabRunStatus,
-    ContextCollabRuntimePlugin,
 )
-from agentclaw.community.plugin_api.impl_registry import Flavor, Mode, plugin_impl
 
 
-@plugin_impl(
-    mode=Mode.LOCAL,
-    flavor=Flavor.SIMULATOR,
-    rationale="record Context run requests without reaching an external Bot",
-)
-class LocalContextCollabRuntimePlugin(ContextCollabRuntimePlugin):
-    """Recording runtime whose generated handles are stable and observable."""
+class RecordingContextCollabExecutor:
+    """Record requests and expose deterministic direct-run handles."""
 
     def __init__(self) -> None:
         self.requests: list[ContextCollabRunRequest] = []
@@ -76,15 +69,15 @@ class LocalContextCollabRuntimePlugin(ContextCollabRuntimePlugin):
     ) -> ContextCollabRunStatus:
         del session_id
         if group_id is not None or run_id is None:
-            raise ContextCollabRuntimeError(
-                "local Context runtime supports direct run_id lookup only"
+            raise ContextCollabExecutorError(
+                "recording Context executor supports direct run_id lookup only"
             )
         self.get_run_requests.append(run_id)
         try:
             return self._runs[run_id]
         except KeyError as exc:
-            raise ContextCollabRuntimeError(
-                f"unknown local Context executor run: {run_id!r}"
+            raise ContextCollabExecutorError(
+                f"unknown recording Context executor run: {run_id!r}"
             ) from exc
 
     def set_run_status_for_test(
@@ -97,11 +90,10 @@ class LocalContextCollabRuntimePlugin(ContextCollabRuntimePlugin):
         completed_at: str | None = None,
         session_id: str | None = None,
     ) -> None:
-        """Control a recorded run deterministically in tests and local simulations."""
         previous = self._runs.get(run_id)
         if previous is None:
-            raise ContextCollabRuntimeError(
-                f"unknown local Context executor run: {run_id!r}"
+            raise ContextCollabExecutorError(
+                f"unknown recording Context executor run: {run_id!r}"
             )
         self._runs[run_id] = ContextCollabRunStatus(
             run_id=run_id,

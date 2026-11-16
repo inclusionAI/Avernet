@@ -247,9 +247,7 @@ _TODO_TASK_DOMAIN_REQUIRED_PATHS = (
     "adapters/http/task/todos/artifact_routes.py",
     "adapters/http/openapi_v1/task/errors_todo.py",
     "di/modules/task/todo_bindings.py",
-    "plugin_api/task/context_collab_runtime.py",
-    "plugins/community/task/context_collab_runtime.py",
-    "plugins/local/task/context_collab_runtime.py",
+    "core/task/context_collab/executor.py",
 )
 _LEGACY_TODO_PARALLEL_PATHS = (
     "core/todos",

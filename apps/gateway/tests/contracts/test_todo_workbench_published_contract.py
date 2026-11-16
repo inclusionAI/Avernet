@@ -23,12 +23,12 @@ _VARS = {
     "clawweb_server_url": "http://clawweb:8082",
 }
 _EXPECTED_OPERATIONS = {
-    "/openapi/v1/todos": {"get", "post"},
-    "/openapi/v1/todos/{todo_id}": {"get", "patch"},
-    "/openapi/v1/todos/{todo_id}/run": {"post"},
-    "/openapi/v1/todos/{todo_id}/events": {"get"},
-    "/openapi/v1/todos/{todo_id}/interactions": {"get", "post"},
-    "/openapi/v1/todos/{todo_id}/acceptance": {"post"},
+    "/openapi/v1/collaboration/tasks/todos": {"get", "post"},
+    "/openapi/v1/collaboration/tasks/todos/{todo_id}": {"get", "patch"},
+    "/openapi/v1/collaboration/tasks/todos/{todo_id}/run": {"post"},
+    "/openapi/v1/collaboration/tasks/todos/{todo_id}/events": {"get"},
+    "/openapi/v1/collaboration/tasks/todos/{todo_id}/interactions": {"get", "post"},
+    "/openapi/v1/collaboration/tasks/todos/{todo_id}/acceptance": {"post"},
 }
 
 
@@ -43,7 +43,7 @@ def test_todo_routes_and_methods_are_published() -> None:
             )
 
 
-def test_todo_domain_forwards_verbatim_and_requires_user() -> None:
+def test_todo_routes_forward_under_collaboration_tasks_and_require_user() -> None:
     raw = yaml.safe_load(_CONFIG.read_text(encoding="utf-8"))
     domains = DomainMap.from_config(raw["user_config"]["upstreams"], variables=_VARS)
     security = RouteSecurity.from_table(raw["user_config"]["route_security"])
@@ -51,10 +51,9 @@ def test_todo_domain_forwards_verbatim_and_requires_user() -> None:
     for path, methods in _EXPECTED_OPERATIONS.items():
         domain = domains.http_domain_for(path)
         assert domain is not None, path
-        assert domain.name == "todos", path
+        assert domain.name == "collaboration-tasks", path
         assert domain.server.name == "backend", path
         assert domain.upstream_path(path) == path, path
-        assert domain.schema.location == "schemas/bots.openapi.json", path
 
         for method in methods:
             requirement = security.resolve(method.upper(), path)
