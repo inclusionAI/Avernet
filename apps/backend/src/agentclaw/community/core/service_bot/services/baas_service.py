@@ -403,6 +403,108 @@ class BotConfig:
         return result
 
 
+# ── Retry helpers for transient BaaS transport errors ──────────────────────
+# These helpers add exponential-backoff retry for transient network failures
+# (timeouts, server disconnects) that the ant_baselib tracing hook wraps as
+# "Error in httpx send hook", obscuring the real cause. They are deliberately
+# kept as module-level functions rather than woven into HttpClient so that:
+#  - the HttpClient Protocol / HttpxClient implementation stays untouched;
+#  - retry policy is scoped to BaaS calls (not every HTTP call in the system);
+#  - only read-only GET calls are retried (mutations are not idempotent).
+
+from typing import Callable, TypeVar
+
+T = TypeVar("T")
+
+# Transport errors that are safe to retry (all httpx.RequestError subclasses).
+_RETRYABLE_TRANSPORT_ERRORS = (
+    httpx.TimeoutException,
+    httpx.RemoteProtocolError,
+    httpx.ConnectError,
+    httpx.ReadError,
+    httpx.WriteError,
+    httpx.NetworkError,
+)
+
+_MAX_RETRIES = 3
+_BASE_BACKOFF = 1.0  # seconds; doubles each retry → 1s, 2s, 4s
+
+
+def _extract_error_chain(exc: BaseException) -> str:
+    """Walk ``__cause__`` / ``__context__`` to expose the underlying cause.
+
+    When ``ant_baselib``'s httpx send hook wraps a real transport error inside
+    a generic "Error in httpx send hook", this surfaces the actual timeout /
+    disconnect message so operators can diagnose the incident.
+    """
+    parts = [str(exc)]
+    seen = {id(exc)}
+    cause = exc.__cause__ or exc.__context__
+    while cause is not None:
+        if id(cause) in seen:
+            break
+        seen.add(id(cause))
+        parts.append(str(cause))
+        cause = cause.__cause__ or cause.__context__
+    return " | ".join(parts)
+
+
+def _is_retryable_transport_error(exc: BaseException) -> bool:
+    """Return True for transient transport errors, including wrapped ones."""
+    if isinstance(exc, _RETRYABLE_TRANSPORT_ERRORS):
+        return True
+    if "Error in httpx send hook" in str(exc):
+        cause = exc.__cause__ or exc.__context__
+        return isinstance(cause, _RETRYABLE_TRANSPORT_ERRORS)
+    return False
+
+
+def _with_retry(
+    logger_obj,
+    operation: str,
+    fn: Callable[[], T],
+    *,
+    max_retries: int = _MAX_RETRIES,
+    base_backoff: float = _BASE_BACKOFF,
+) -> T:
+    """Call *fn* with exponential-backoff retry on transient transport errors.
+
+    Non-retryable exceptions (HTTPStatusError, application errors) propagate
+    immediately without retry.  After *max_retries* retries are exhausted the
+    last error is re-raised as ``BaasServiceError`` with the full error chain.
+    """
+    last_error: BaseException | None = None
+    for attempt in range(max_retries + 1):
+        try:
+            return fn()
+        except Exception as exc:
+            last_error = exc
+            if not _is_retryable_transport_error(exc):
+                raise
+            if attempt < max_retries:
+                delay = base_backoff * (2 ** attempt)
+                logger_obj.warning(
+                    "[BaasService._with_retry] %s transient error "
+                    "(attempt %d/%d, retry in %.1fs): %s",
+                    operation, attempt + 1, max_retries,
+                    delay, _extract_error_chain(exc),
+                )
+                time.sleep(delay)
+            else:
+                logger_obj.error(
+                    "[BaasService._with_retry] %s exhausted %d retries: %s",
+                    operation, max_retries, _extract_error_chain(exc),
+                )
+    if last_error is not None:
+        msg = (
+            f"Failed after {max_retries + 1} attempts: "
+            f"{_extract_error_chain(last_error)}"
+        )
+        raise BaasServiceError(msg) from last_error
+    raise RuntimeError("_with_retry: unreachable")  # pragma: no cover
+
+
+
 class BaasService:  # pragma: no cover
     """BaaS 服务 - 与 BaaS 层 API 交互。
 
@@ -1881,10 +1983,14 @@ class BaasService:  # pragma: no cover
             params["include_devices"] = "true"
 
         try:
-            response = self._http.get(
-                f"/api/v1/publishes/{publish_id}/progress",
-                params=params,
-                timeout=30.0,
+            response = _with_retry(
+                logger,
+                f"get_publish_progress(publish_id={publish_id})",
+                lambda: self._http.get(
+                    f"/api/v1/publishes/{publish_id}/progress",
+                    params=params,
+                    timeout=30.0,
+                ),
             )
             response.raise_for_status()
 
@@ -1928,7 +2034,7 @@ class BaasService:  # pragma: no cover
                 f"[BaasService.get_publish_progress] "
                 f"Failed to get publish progress: {e}"
             )
-            raise BaasServiceError(f"Failed to get publish progress: {e}")
+            raise BaasServiceError(f"Failed to get publish progress: {_extract_error_chain(e)}")
 
     def get_ws_info(
         self,
@@ -2830,10 +2936,14 @@ class BaasService:  # pragma: no cover
         )
 
         try:
-            response = self._http.get(
-                f"/api/v1/bots/{bot_uuid}/devices",
-                params={"tenant": effective_tenant},
-                timeout=timeout,
+            response = _with_retry(
+                logger,
+                f"list_devices_by_bot_uuid(bot_uuid={bot_uuid})",
+                lambda: self._http.get(
+                    f"/api/v1/bots/{bot_uuid}/devices",
+                    params={"tenant": effective_tenant},
+                    timeout=timeout,
+                ),
             )
             response.raise_for_status()
             response_data = response.json()
@@ -2869,7 +2979,7 @@ class BaasService:  # pragma: no cover
                 f"[BaasService.list_devices_by_bot_uuid] Request error: {e}"
             )
             raise BaasServiceError(
-                f"Failed to list devices by bot_uuid: {e}"
+                f"Failed to list devices by bot_uuid: {_extract_error_chain(e)}"
             )
 
     def restart_devices(
@@ -3726,10 +3836,14 @@ class BaasService:  # pragma: no cover
             params["ws_conn_mode"] = ws_conn_mode
 
         try:
-            response = self._http.get(
-                f"/api/v1/bots/{device_id}/http-info",
-                params=params,
-                timeout=timeout,
+            response = _with_retry(
+                logger,
+                f"get_http_info(device_id={device_id})",
+                lambda: self._http.get(
+                    f"/api/v1/bots/{device_id}/http-info",
+                    params=params,
+                    timeout=timeout,
+                ),
             )
             response.raise_for_status()
 
@@ -3770,7 +3884,7 @@ class BaasService:  # pragma: no cover
                 f"[BaasService.get_http_info] "
                 f"Failed to get http info: {e}"
             )
-            raise BaasServiceError(f"Failed to get http info: {e}")
+            raise BaasServiceError(f"Failed to get http info: {_extract_error_chain(e)}")
 
     def invoke_http(
         self,
