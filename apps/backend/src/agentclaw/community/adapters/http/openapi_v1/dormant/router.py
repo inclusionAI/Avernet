@@ -141,7 +141,7 @@ async def recycle_dormant_bot(
     resubmit destruction. HTTP 502 means synchronous resource release failed;
     503 means the worker is unavailable or durable admission is unconfirmed.
     """
-    result = await run_in_threadpool(
+    result = await run_in_threadpool(  # allow-run-in-threadpool: synchronous Protocol method
         service.submit,
         bot_id=bot_id,
         owner_id=owner_id,
@@ -213,7 +213,7 @@ async def get_recycle_operation(
     optional `entity_id` and deprecated `owner_id` alias as POST /recycle;
     conflicting owner parameters return 422. This is separate from Bot /status.
     """
-    result = await run_in_threadpool(
+    result = await run_in_threadpool(  # allow-run-in-threadpool: synchronous Protocol method
         service.get_operation,
         bot_id=bot_id,
         owner_id=owner_id,
@@ -299,7 +299,7 @@ async def activate_dormant_bot(
     provisioning restores backup data; no separate activation operation handle
     is introduced, and the latest recycle result is retained.
     """
-    result = await run_in_threadpool(
+    result = await run_in_threadpool(  # allow-run-in-threadpool: synchronous Protocol method
         service.activate,
         bot_id=bot_id,
         owner_id=owner_id,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from inspect import iscoroutinefunction
 from unittest.mock import MagicMock
 
 import pytest
@@ -34,6 +35,8 @@ from agentclaw.community.core.bot_collaborator.protocols import (
 )
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 from agentclaw.community.core.bot_dormant.audit_service import DormantAuditService
+from agentclaw.community.core.bot_dormant.activate_service import ActivateBotService
+from agentclaw.community.core.bot_dormant.recycle_service import RecycleBotService
 from agentclaw.community.core.bot_management.engines.aicoding.recycle_state import RecycleUnavailable
 from agentclaw.community.core.bot_dormant.types import BotLifecycleResult
 from agentclaw.community.core.bot_management.services.bot_service import (
@@ -46,6 +49,23 @@ from agentclaw.community.core.gateway_principal import (
     GatewayApp,
     VerifiedCaller,
 )
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [
+        BotDormantRecycleOperationProtocol.submit,
+        BotDormantRecycleOperationProtocol.get_operation,
+        BotDormantActivateServiceProtocol.activate,
+        RecycleBotService.submit,
+        RecycleBotService.get_operation,
+        ActivateBotService.activate,
+    ],
+    ids=lambda operation: operation.__qualname__,
+)
+def test_threadpool_targets_are_synchronous(operation):
+    """Guard the route's documented exceptions to the name-only async check."""
+    assert not iscoroutinefunction(operation)
 
 
 @pytest.fixture
@@ -372,7 +392,6 @@ def test_query_owner_alias_conflict_is_422(client, recycle_service):
 
 @pytest.mark.parametrize("engine,http_status", [("openclaw", 200), ("claude_code", 202)])
 def test_real_recycle_facade_selects_engine_execution_policy(engine, http_status):
-    from agentclaw.community.core.bot_dormant.recycle_service import RecycleBotService
     from agentclaw.community.core.bot_management.engines.restart_contract import RecycleServices
 
     bots, passport, audit, operations = (MagicMock() for _ in range(4))
