@@ -1,0 +1,18 @@
+apps/bcs-internal/crates/plugins/bcs-a2a-sofarpc/README.md
+  h_10f6235a5d078a 8,25
+apps/bcs-internal/crates/plugins/bcs-a2a-sofarpc/src/lib.rs
+  h_10f6235a5d078a 93,95
+apps/bcs-internal/crates/plugins/bcs-a2a-sofarpc/tests/conformance.rs
+  h_10f6235a5d078a 44,98-105,109-113
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3c241417544491a2790206092143ad9b7f304db4",
+  "prompts": {},
+  "humans": {
+    "h_10f6235a5d078a": {
+      "author": "卓人 <hx410025@antgroup.com>"
+    }
+  }
+}
