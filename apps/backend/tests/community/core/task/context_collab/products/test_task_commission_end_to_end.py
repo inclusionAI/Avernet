@@ -420,7 +420,7 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path, orchestrati
     # 动态注入
     with commission_deployment(l6_profile) as (service, working_bot, injector):
         l4_collab_service = injector.get(ContextCollabServiceProtocol)
-        executor_ref = AgentRef(agent_type="bot", agent_id=BOT_ASSIGNEE)
+        l2_executor_ref = AgentRef(agent_type="bot", agent_id=BOT_ASSIGNEE)
         store, axes = injector.get(MethodStoreProtocol), current_axes()
         l5_open_method = injector.get(OpenMethodOpsServiceProtocol)
 
@@ -432,7 +432,7 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path, orchestrati
                 product_kind=l6_profile.ref.profile_id,           # profile id
                 workflow_kind=l6_profile.workflow.ref.profile_id if l6_profile.workflow else None,
                 method_kind=l6_profile.composition.method_kind,   # 绑定的方法
-                executor_ref=executor_ref,                        # 指定的执行bot
+                executor_ref=l2_executor_ref,                        # 指定的执行bot
                 objective=TITLE,                                  # 代办任务目标
                 resource_refs=[],                                 # 输入引用的资源
                 product_profile_ref=l6_profile.ref,               # profile ref
