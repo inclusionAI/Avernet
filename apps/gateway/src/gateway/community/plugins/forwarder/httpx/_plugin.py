@@ -13,7 +13,6 @@ from contextlib import asynccontextmanager
 
 import httpx
 
-from gateway.community.config._models import ForwarderPluginConfig
 from gateway.community.logger import get_logger
 from gateway.community.spi.forwarder import (
     Forwarder,
@@ -37,21 +36,27 @@ class HttpxForwarder(Forwarder):
     def __init__(
         self,
         client: httpx.AsyncClient | None = None,
-        config: ForwarderPluginConfig | None = None,
+        *,
+        connect_timeout: float = 5.0,
+        read_timeout: float = 120.0,
+        write_timeout: float = 5.0,
+        pool_timeout: float = 5.0,
     ) -> None:
         self._client = client
         self._owns_client = client is None
-        self._config = config or ForwarderPluginConfig()
+        self._connect_timeout = connect_timeout
+        self._read_timeout = read_timeout
+        self._write_timeout = write_timeout
+        self._pool_timeout = pool_timeout
 
     def _get_client(self) -> httpx.AsyncClient:
         if self._client is None:
-            cfg = self._config
             self._client = httpx.AsyncClient(
                 timeout=httpx.Timeout(
-                    connect=cfg.connect_timeout,
-                    read=cfg.read_timeout,
-                    write=cfg.write_timeout,
-                    pool=cfg.pool_timeout,
+                    connect=self._connect_timeout,
+                    read=self._read_timeout,
+                    write=self._write_timeout,
+                    pool=self._pool_timeout,
                 ),
             )
         return self._client

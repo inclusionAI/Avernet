@@ -54,7 +54,10 @@ class PluginContainer(containers.DeclarativeContainer):
         config.plugins.forwarder,
         httpx=providers.Singleton(
             HttpxForwarder,
-            config=config.plugins.forwarder_config,
+            connect_timeout=config.plugins.forwarder_config.connect_timeout,
+            read_timeout=config.plugins.forwarder_config.read_timeout,
+            write_timeout=config.plugins.forwarder_config.write_timeout,
+            pool_timeout=config.plugins.forwarder_config.pool_timeout,
         ),
     )
 
