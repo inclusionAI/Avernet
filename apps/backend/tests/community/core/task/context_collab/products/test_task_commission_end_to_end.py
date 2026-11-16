@@ -393,10 +393,7 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path, orchestrati
             composition=TASK_COMMISSION_PROFILE.composition,          # 绑定L5层方法，这里是OPEN方法
             scenario_roles=TASK_COMMISSION_PROFILE.scenario_roles,    # 角色信息
             governance=TASK_COMMISSION_PROFILE.governance,            # g1-g4配置
-            compatibility=replace(                                    # 能力需求声明
-                TASK_COMMISSION_PROFILE.compatibility,
-                required_layers=("L1", "L2", "L3", "L4", "L5"),
-            ),
+            compatibility=TASK_COMMISSION_PROFILE.compatibility,      # 能力需求声明
             publication=TASK_COMMISSION_PROFILE.publication
         )
     )

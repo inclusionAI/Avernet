@@ -78,7 +78,7 @@ TASK_COMMISSION_PROFILE = ProductProfileCreateCommand(
     # 能力需求声明
     compatibility=CompatibilityRequirements(
         accs_revision="0.2",
-        required_layers=("L1", "L2", "L3", "L4", "L5"),
+        required_layers=("L2", "L3", "L4", "L5"),
         required_extensions=(),
         optional_extensions=(),
         downgrade_policy="reject_missing_required",
