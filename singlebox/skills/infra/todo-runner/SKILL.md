@@ -54,7 +54,7 @@ Content-Type: application/json
 ```json
 {
   "todo_execution_id": "{todo_execution_id}",
-  "artifact_name": "可读的产物名称",
+  "artifact_name": "简短、可读的产物标题，例如：AI 发展预测分析",
   "kind": "text",
   "content": {},
   "is_final_artifact": true
@@ -75,7 +75,7 @@ Content-Type: application/json
 向运行时消息给出的 object-file 地址发送 `multipart/form-data`：
 
 - `todo_execution_id`
-- `artifact_name`（可选）
+- `artifact_name`（必填）：简短、可读的产物标题，例如「AI 发展预测分析」；不要填文件名，不要用完整正文代替
 - `is_final_artifact`
 - `file`
 

@@ -21,15 +21,15 @@ function sortEvents<T extends { eventSeq: number }>(events: T[]): T[] {
 }
 
 export function useTodoDetail(todoId: string | null, onListRefresh?: () => Promise<void> | void) {
-  const selectedTodo = useTodoStore((state) => state.selectedTodo);
-  const interactions = useTodoStore((state) => state.interactions);
-  const events = useTodoStore((state) => state.events);
-  const artifacts = useTodoStore((state) => state.artifacts);
-  const loading = useTodoStore((state) => state.detailLoading);
+  const storedSelectedTodo = useTodoStore((state) => state.selectedTodo);
+  const storedInteractions = useTodoStore((state) => state.interactions);
+  const storedEvents = useTodoStore((state) => state.events);
+  const storedArtifacts = useTodoStore((state) => state.artifacts);
+  const detailLoading = useTodoStore((state) => state.detailLoading);
   const eventsLoading = useTodoStore((state) => state.eventsLoading);
   const artifactsLoading = useTodoStore((state) => state.artifactsLoading);
   const mutationLoading = useTodoStore((state) => state.mutationLoading);
-  const error = useTodoStore((state) => state.detailError);
+  const storedError = useTodoStore((state) => state.detailError);
   const eventsError = useTodoStore((state) => state.eventsError);
   const artifactsError = useTodoStore((state) => state.artifactsError);
   const setSelectedTodo = useTodoStore((state) => state.setSelectedTodo);
@@ -47,6 +47,17 @@ export function useTodoDetail(todoId: string | null, onListRefresh?: () => Promi
   const requestRef = useRef(0);
   const eventRequestRef = useRef(0);
   const artifactRequestRef = useRef(0);
+  const loadedTodoIdRef = useRef<string | null>(null);
+
+  // Store 是全局详情缓存；换 ID 时先按当前 ID 派生空数据，避免路由先渲染上一个 Todo。
+  const selectedTodo = storedSelectedTodo?.todoId === todoId ? storedSelectedTodo : null;
+  const hasCurrentDetail = selectedTodo !== null;
+  const interactions = hasCurrentDetail ? storedInteractions : [];
+  const events = hasCurrentDetail ? storedEvents : [];
+  const artifacts = hasCurrentDetail ? storedArtifacts.filter((item) => item.todoId === todoId) : [];
+  const error =
+    hasCurrentDetail || detailLoading || loadedTodoIdRef.current === todoId ? storedError : null;
+  const loading = detailLoading || Boolean(todoId && !hasCurrentDetail && !error);
 
   const refreshEvents = useCallback(async () => {
     if (!todoId) return;
@@ -113,13 +124,17 @@ export function useTodoDetail(todoId: string | null, onListRefresh?: () => Promi
   }, [refreshArtifacts, refreshEvents, resetDetail, setError, setInteractions, setLoading, setSelectedTodo, todoId]);
 
   useEffect(() => {
+    if (loadedTodoIdRef.current !== todoId) {
+      loadedTodoIdRef.current = todoId;
+      resetDetail();
+    }
     void refresh();
     return () => {
       requestRef.current += 1;
       eventRequestRef.current += 1;
       artifactRequestRef.current += 1;
     };
-  }, [refresh]);
+  }, [refresh, resetDetail, todoId]);
 
   useEffect(() => {
     if (!todoId || selectedTodo?.status !== 'in_progress') return;

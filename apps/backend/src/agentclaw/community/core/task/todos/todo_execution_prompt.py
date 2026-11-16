@@ -66,7 +66,7 @@ def format_todo_execution_instruction(
             "文件产物上传：",
             f"POST {upload_url}",
             f"X-Todo-Execution-Token: {todo_execution_token}",
-            "multipart/form-data 字段：todo_execution_id、artifact_name（可选）、"
+            "multipart/form-data 字段：todo_execution_id、artifact_name（必填，写简短、可读的产物标题，不要填文件名或完整正文）、"
             "is_final_artifact、file。",
             "最终执行结果必须至少上报一个产物；只有 HTTP 成功响应才算上报成功。"
             "收到凭证失效、鉴权失败或状态冲突时停止，不得自行生成新的 ID 或 token。",
