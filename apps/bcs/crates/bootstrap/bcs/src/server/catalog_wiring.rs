@@ -48,4 +48,17 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn new_card_changes_materializes_only_for_enabled_v2() {
+        let mut config = crate::BcsConfig::default();
+        config.bcsfuse.enabled = false;
+        config.bcsfuse.api_version = bcs_fuse_client::BcsFuseApiVersion::V2;
+        assert!(new_card_changes(&config).is_none());
+        config.bcsfuse.enabled = true;
+        config.bcsfuse.api_version = bcs_fuse_client::BcsFuseApiVersion::V1;
+        assert!(new_card_changes(&config).is_none());
+        config.bcsfuse.api_version = bcs_fuse_client::BcsFuseApiVersion::V2;
+        assert!(new_card_changes(&config).is_some());
+    }
 }
