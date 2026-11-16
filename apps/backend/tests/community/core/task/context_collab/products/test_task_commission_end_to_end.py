@@ -427,17 +427,17 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path, orchestrati
         # 2、通过L4层操作创建Collet（同时创建 Task、初始事件并投影 L5 MethodBinding）
         l4_collet = l4_collab_service.create_collet(
             ColletCreateCommand(
-                to_space=SPACE,                                # Task所属的空间（长期持续管理的空间，比如小队、团队空间）
-                principal_ref=HUMAN.actor,                     # 代办任务负责人（提交人）
+                to_space=SPACE,                                   # Task所属的空间（长期持续管理的空间，比如小队、团队空间）
+                principal_ref=HUMAN.actor,                        # 代办任务负责人（提交人）
                 product_kind=l6_profile.ref.profile_id,           # profile id
                 workflow_kind=l6_profile.workflow.ref.profile_id if l6_profile.workflow else None,
                 method_kind=l6_profile.composition.method_kind,   # 绑定的方法
-                executor_ref=executor_ref,                     # 指定的执行bot
-                objective=TITLE,                               # 代办任务目标
-                resource_refs=[],                              # 输入引用的资源
+                executor_ref=executor_ref,                        # 指定的执行bot
+                objective=TITLE,                                  # 代办任务目标
+                resource_refs=[],                                 # 输入引用的资源
                 product_profile_ref=l6_profile.ref,               # profile ref
             ),
-            HUMAN,                                             # 代办任务创建人
+            HUMAN,                                                # 代办任务创建人
         )
 
         collect_id = l4_collet.collet_id
