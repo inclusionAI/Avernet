@@ -389,15 +389,13 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path, orchestrati
     # 1、创建product profile
     profile = create_product_profile(
         ProductProfileCreateCommand(
-            ref=VersionedProfileRef("task_commission", 1),
-            composition=TASK_COMMISSION_PROFILE.composition,
-            scenario_roles=TASK_COMMISSION_PROFILE.scenario_roles,
-            governance=TASK_COMMISSION_PROFILE.governance,
-            # 此夹具验证本地库/SQL/HTTP,不声明端到端 L1 交付能力。
-            # 不改动产品源码中用户声明的 L1 要求,也不伪造 catalog 能力。
-            compatibility=replace(
+            ref=VersionedProfileRef("task_commission", 1),            # 版本
+            composition=TASK_COMMISSION_PROFILE.composition,          # 绑定L5层方法，这里是OPEN方法
+            scenario_roles=TASK_COMMISSION_PROFILE.scenario_roles,    # 角色信息
+            governance=TASK_COMMISSION_PROFILE.governance,            # g1-g4配置
+            compatibility=replace(                                    # 能力需求声明
                 TASK_COMMISSION_PROFILE.compatibility,
-                required_layers=("L2", "L3", "L4", "L5"),
+                required_layers=("L1", "L2", "L3", "L4", "L5"),
             ),
             publication=TASK_COMMISSION_PROFILE.publication
         )
