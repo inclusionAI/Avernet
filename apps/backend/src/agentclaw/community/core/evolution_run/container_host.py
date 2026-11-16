@@ -60,7 +60,9 @@ class ContainerHost:
 
     async def _execute(self) -> None:
         worker_id = self.worker_id_factory()
-        token = self.tokens.issue(worker_id) if self.tokens is not None else ""
+        token = ""
+        if self.tokens is not None:
+            token = self.tokens.issue(worker_id)
         try:
             spec = job_worker_spec(
                 worker_id=worker_id,

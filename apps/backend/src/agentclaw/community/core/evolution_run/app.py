@@ -130,7 +130,8 @@ def build_evolution_runtime(
             **kwargs,
         )
 
-    issuer = JobTokenIssuer(secret=secrets.token_bytes(32))
+    signing_key = secrets.token_bytes(32)
+    issuer = JobTokenIssuer(secret=signing_key)
     channel = JobChannel(
         store=store,
         jobs=jobs,

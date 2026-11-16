@@ -13,6 +13,14 @@ from agentclaw.community.core.evolution_run.job_wire import decode_files
 __all__ = ["HttpWorkerTransport"]
 
 
+def _with_fence(fencing_token: str, **fields: Any) -> dict[str, Any]:
+    """把 fencing token 与其它字段合并成请求体（键名保持与协议一致）。"""
+    payload: dict[str, Any] = {}
+    payload["fencing_token"] = fencing_token
+    payload.update(fields)
+    return payload
+
+
 class HttpWorkerTransport:
     """worker 侧的 `WorkerTransport`：把每个方法映射成一个 HTTP 请求。"""
 
@@ -57,13 +65,13 @@ class HttpWorkerTransport:
 
     async def heartbeat(self, job_id: str, fencing_token: str) -> dict[str, Any]:
         response = await self._post(
-            f"/jobs/{job_id}:heartbeat", {"fencing_token": fencing_token}
+            f"/jobs/{job_id}:heartbeat", _with_fence(fencing_token)
         )
         return response.json()
 
     async def files(self, job_id: str, fencing_token: str) -> dict[str, bytes]:
         response = await self._post(
-            f"/jobs/{job_id}/files", {"fencing_token": fencing_token}
+            f"/jobs/{job_id}/files", _with_fence(fencing_token)
         )
         return decode_files(response.json()["files"])
 
@@ -71,7 +79,7 @@ class HttpWorkerTransport:
                      patch: dict[str, Any]) -> dict[str, Any]:
         response = await self._post(
             f"/jobs/{job_id}/candidates",
-            {"fencing_token": fencing_token, "patch": patch},
+            _with_fence(fencing_token, patch=patch),
         )
         return response.json()
 
@@ -79,7 +87,7 @@ class HttpWorkerTransport:
                       candidate_id: str) -> dict[str, Any]:
         response = await self._http().get(
             f"{self._endpoint}/jobs/{job_id}/candidates/{candidate_id}/verdict",
-            params={"fencing_token": fencing_token},
+            params=_with_fence(fencing_token),
         )
         if response.status_code == 401:
             raise PermissionError("job protocol rejected the caller: verdict")
@@ -93,13 +101,13 @@ class HttpWorkerTransport:
                        summary: dict[str, Any]) -> None:
         await self._post(
             f"/jobs/{job_id}:complete",
-            {"fencing_token": fencing_token, "summary": summary},
+            _with_fence(fencing_token, summary=summary),
         )
 
     async def fail(self, job_id: str, fencing_token: str, reason: str) -> None:
         await self._post(
             f"/jobs/{job_id}:fail",
-            {"fencing_token": fencing_token, "reason": reason},
+            _with_fence(fencing_token, reason=reason),
         )
 
     async def experience_sessions(
@@ -108,8 +116,7 @@ class HttpWorkerTransport:
     ) -> list[Any]:
         response = await self._post(
             f"/jobs/{job_id}/experience/sessions",
-            {"fencing_token": fencing_token, "days": days,
-             "limit": limit, "revision": revision},
+            _with_fence(fencing_token, days=days, limit=limit, revision=revision),
         )
         return response.json()
 
@@ -119,8 +126,7 @@ class HttpWorkerTransport:
     ) -> list[Any]:
         response = await self._post(
             f"/jobs/{job_id}/experience/feedback",
-            {"fencing_token": fencing_token, "days": days,
-             "kinds": kinds, "limit": limit},
+            _with_fence(fencing_token, days=days, kinds=kinds, limit=limit),
         )
         return response.json()
 
@@ -130,8 +136,10 @@ class HttpWorkerTransport:
     ) -> dict[str, Any]:
         response = await self._post(
             f"/jobs/{job_id}/models:complete",
-            {"fencing_token": fencing_token, "messages": messages,
-             "model": model, "max_tokens": max_tokens},
+            _with_fence(
+                fencing_token, messages=messages, model=model,
+                max_tokens=max_tokens,
+            ),
         )
         return response.json()
 
@@ -142,9 +150,11 @@ class HttpWorkerTransport:
     ) -> str:
         response = await self._post(
             f"/jobs/{job_id}/agents:start",
-            {"fencing_token": fencing_token, "definition": definition,
-             "workspace_id": workspace_id, "prompt": prompt,
-             "idempotency_key": idempotency_key, "timeout_s": timeout_s},
+            _with_fence(
+                fencing_token, definition=definition,
+                workspace_id=workspace_id, prompt=prompt,
+                idempotency_key=idempotency_key, timeout_s=timeout_s,
+            ),
         )
         return response.json()["operation_id"]
 
@@ -153,7 +163,7 @@ class HttpWorkerTransport:
     ) -> dict[str, Any]:
         response = await self._http().get(
             f"{self._endpoint}/jobs/{job_id}/operations/{operation_id}",
-            params={"fencing_token": fencing_token},
+            params=_with_fence(fencing_token),
         )
         if response.status_code == 401:
             raise PermissionError("job protocol rejected the caller: operation")
@@ -168,7 +178,7 @@ class HttpWorkerTransport:
     ) -> dict[str, Any]:
         response = await self._post(
             f"/jobs/{job_id}/operations/{operation_id}:cancel",
-            {"fencing_token": fencing_token},
+            _with_fence(fencing_token),
         )
         return response.json()
 
@@ -177,7 +187,7 @@ class HttpWorkerTransport:
     ) -> None:
         await self._post(
             f"/jobs/{job_id}/log",
-            {"fencing_token": fencing_token, "lines": lines},
+            _with_fence(fencing_token, lines=lines),
         )
 
     async def artifacts_put(
@@ -185,7 +195,7 @@ class HttpWorkerTransport:
     ) -> str:
         response = await self._http().put(
             f"{self._endpoint}/jobs/{job_id}/artifacts/{name}",
-            params={"fencing_token": fencing_token},
+            params=_with_fence(fencing_token),
             content=content,
         )
         if response.status_code == 401:

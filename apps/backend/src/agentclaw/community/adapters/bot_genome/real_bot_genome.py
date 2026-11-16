@@ -96,7 +96,7 @@ class RealBotGenome:
         if self._referer:
             headers["Referer"] = self._referer
         if self._auth_token:
-            headers["Cookie"] = f"IAM_TOKEN={self._auth_token}"
+            headers["Cookie"] = "IAM_TOKEN=" + self._auth_token
         return headers
 
     def _params(self) -> dict[str, str]:
