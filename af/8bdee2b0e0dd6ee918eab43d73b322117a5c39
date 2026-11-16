@@ -1,0 +1,23 @@
+apps/gateway/src/gateway/community/bootstrap/plugins/_plugin_core.py
+  s_8829b0210fcc61::t_0d6e77ba3ba54e 57-60
+apps/gateway/src/gateway/community/plugins/forwarder/httpx/_plugin.py
+  s_8829b0210fcc61::t_f38e07ac0aa765 39-43,47-50,56-59
+apps/gateway/tests/unit/core/forwarding/test_forwarder_config.py
+  s_8829b0210fcc61::t_f035a0ae2e0573 10-11,21-23,37-38,42,47-55
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "af8bdee2b0e0dd6ee918eab43d73b322117a5c39",
+  "prompts": {},
+  "sessions": {
+    "s_8829b0210fcc61": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e453-9889-7bf0-b151-4358e0a751e6",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}
