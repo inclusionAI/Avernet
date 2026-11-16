@@ -424,15 +424,15 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path, orchestrati
         store, axes = injector.get(MethodStoreProtocol), current_axes()
         l5_open_method = injector.get(OpenMethodOpsServiceProtocol)
 
-        # 2、通过L4层操作创建Collet（同时创建 Task、初始事件并投影 L5 MethodBinding）
+        # 2、通过L4层操作创建Collet
         l4_collet = l4_collab_service.create_collet(
             ColletCreateCommand(
-                to_space=SPACE,                                   # Task所属的空间（长期持续管理的空间，比如小队、团队空间）
-                principal_ref=HUMAN.actor,                        # 代办任务负责人（提交人）
-                product_kind=l6_profile.ref.profile_id,           # profile id
+                to_space=SPACE,                                   # TODO: Collect所属的空间（长期持续管理的空间，比如小队、团队空间）
+                principal_ref=HUMAN.actor,                        # 代办任务负责人  TODO：只是执行态？
+                product_kind=l6_profile.ref.profile_id,           # 所属产品类型
                 workflow_kind=l6_profile.workflow.ref.profile_id if l6_profile.workflow else None,
                 method_kind=l6_profile.composition.method_kind,   # 绑定的方法
-                executor_ref=l2_executor_ref,                        # 指定的执行bot
+                executor_ref=l2_executor_ref,                     # 指定的执行bot
                 objective=TITLE,                                  # 代办任务目标
                 resource_refs=[],                                 # 输入引用的资源
                 product_profile_ref=l6_profile.ref,               # profile ref
@@ -445,11 +445,11 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path, orchestrati
 
         # 4、调用L5的OPEN方法-创建机会
         published = l5_open_method.publish_opportunity(
-            collab_context_id=collect_id,
+            collab_context_id=collect_id,                      # TODO
             method_binding_id=binding_id,                      # 绑定的方法
             command=OpenOpportunityCommand(
                 scope_ref=collect_id,
-                participation_type="COLLET_PARTICIPANT",
+                participation_type="COLLET_PARTICIPANT",       # TODO
                 opens_at=(datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat(),
                 admission_policy_refs=[
                     "task_commission.designated_bot_self_application/1" #录取策略：指定 Bot 自己申请，并由任务产品的策略自动审核
@@ -463,8 +463,8 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path, orchestrati
 
         # 5、调用L5的OPEN方法-查询机会（实际应该是Agent自己调用）
         bot_context = ActorContext(PrincipalRef("bot", working_bot.bot_id), "a2a")
-        [opportunity] = l5_open_method.query_opportunities(
-            collab_context_id=collect_id,
+        [opportunity] = l5_open_method.query_opportunities(  ## TODO bot mock
+            collab_context_id=collect_id,                    ## TODO collect_id, 只需要context_id，
             method_binding_id=binding_id,
             context=bot_context,
         )
@@ -480,10 +480,10 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path, orchestrati
             method_binding_id=opportunity.method_binding_id,
             opportunity_ref=opportunity.opportunity_id,
             command=OpenApplicationCommand(
-                applicant_agent_ref=working_bot.bot_id,                # 提交申请的bot自身信息
-                accountable_principal_ref=working_bot.owner_id,
-                requested_role_refs=_selected_agent_role_refs(record),
-                reason="task_commission.bot_self_application",         # 声明本次查询的真实调用者，并经过授权检查；它不是查询目标，也不代表这个 Bot 已获得参与或执行任务的权限。
+                applicant_agent_ref=working_bot.bot_id,                  # 提交申请的bot自身信息, TODO: uuid
+                accountable_principal_ref=HUMAN.actor.principal_id,      # TODO
+                requested_role_refs=_selected_agent_role_refs(record),   # TODO
+                reason="task_commission.bot_self_application",           # 声明本次查询的真实调用者，并经过授权检查；它不是查询目标，也不代表这个 Bot 已获得参与或执行任务的权限。
             ),
             context=bot_context,
         )
@@ -512,7 +512,7 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path, orchestrati
         assert screened.object_id == submitted.object_id
 
         decision_id = f"dec_{uuid4().hex[:12]}"
-        admitted = l5_open_method.admit(
+        admitted = l5_open_method.admit(  # 要不要中心化的service
             collab_context_id=collect_id,
             method_binding_id=binding_id,
             application_ref=submitted.object_id,
@@ -576,6 +576,7 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path, orchestrati
         assert accepted.status == "done"
 
         # 11. 通过 L4 查询 Collet 内 Task 的最终状态与提交的产物,不依赖产品详情接口。
+        # TODO: 管理时、运行时分开
         final = l4_collab_service.get_status(collect_id, trunk_events=False, context=HUMAN)
         assert final.current_snapshot is not None
         assert final.current_snapshot["status"] == "done"

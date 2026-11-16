@@ -191,6 +191,7 @@ class ContextCollabService(ContextCollabServiceProtocol):
 
         # 仅按显式 Method/身份事实初始化 L5 绑定,不读取 L6 Profile。
         # store 写失败原样上抛;同上下文重复投影幂等。
+        # TODO
         initialize_top_level_binding(
             self._method_store,
             current_axes(),
