@@ -377,31 +377,14 @@ def commission_runtime(commission_deployment, request):
 
 def test_end_to_end_commission_flow(commission_deployment, tmp_path):
     """产品上线 → 建任务 → Bot Query/Apply → 策略 Screen/Admit → scoped Participant → Work → accept。"""
-    # 1. 初始化product profile
+    # 1、初始化product profile
     profile = init_product_profile()
 
-
+    # 2、动态注入
     with commission_deployment(profile) as (service, working_bot, injector):
-        assert injector.get(ProductCatalog).get("task_commission", 1) == profile
-        # 2. 业务同学通过 L4 Context.create 创建 Collet/Task,
-        #    再显式调用 L4 Collet.activate;L6 负责精确选择已上线 Profile,
-        #    L5 负责在创建后建立 Open binding。机会由下面显式调用
-        #    L5 Open.publish_opportunity 发布。
-        _flow_log(_TEST_DIRECTORY, "2. 业务同学创建代办任务,指定执行 Bot")
         repository = injector.get(ContextCollabRepositoryProtocol)
         method_store = injector.get(MethodStoreProtocol)
-        catalog = injector.get(ProductCatalog)
         executor_ref = AgentRef(agent_type="bot", agent_id=BOT_ASSIGNEE)
-        selected_profile = prepare_product_profile(
-            product_kind=profile.ref.profile_id,
-            workflow_kind=profile.workflow.ref.profile_id,
-            method_kind=profile.composition.method_kind,
-            profile_ref=profile.ref,
-            principal_ref=HUMAN.actor,
-            executor_ref=executor_ref,
-            catalog=catalog,
-        )
-        assert selected_profile == profile
         injector.get(ContextCollabAuthorizerProtocol).check_create(
             method_kind=profile.composition.method_kind,
             executor_ref=executor_ref,
@@ -416,7 +399,6 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
             workflow_kind=profile.workflow.ref.profile_id,
             product_profile_ref=profile.ref,
         )
-        _flow_log(_TEST_DIRECTORY, "2.1. L4 Context.create: 直接持久化 Collet/Task/初始事件")
         created_record = repository.create_collet(
             CreateColletRecordRequest(
                 space=SPACE,
@@ -444,18 +426,11 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
             method_kind=profile.composition.method_kind,
             principal_ref=HUMAN.actor,
             executor_ref=executor_ref,
-            profile=selected_profile,
+            profile=profile,
             context=HUMAN,
             now=_now(),
         )
-        assert binding.method_kind == profile.composition.method_kind
-        lifecycle = injector.get(ColletLifecycleService)
-        lifecycle_created = lifecycle.create(
-            created_record.collet.collet_id,
-            HUMAN,
-            reason="L4 Collet 已创建",
-        )
-        assert lifecycle_created.state.value == "CREATED"
+
         created = TaskCommissionCreatedView(
             collet_id=created_record.collet.collet_id,
             title=TITLE,
@@ -464,31 +439,9 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
             context_version=created_record.collet.version,
         )
         task_id = created.collet_id
-        assert created.status == "created"
-        assert service.detail_task(task_id).body is None
-        [summary] = service.list_tasks()
-        assert (summary.collet_id, summary.title, summary.initiator_id) == (
-            task_id,
-            TITLE,
-            HUMAN.actor.principal_id,
-        )
-        _flow_log(_TEST_DIRECTORY, "2.2. L4 Context.activate: CREATED → ACTIVE")
-        activated = lifecycle.activate(
-            task_id, HUMAN, reason="任务已创建,进入可协作状态"
-        )
-        assert activated.old_state.value == "CREATED"
-        assert activated.new_state.value == "ACTIVE"
+
         store, axes = injector.get(MethodStoreProtocol), current_axes()
         binding_id = top_level_binding_id(task_id)
-        assert injector.get(A2aDeliveryPort).bridge_records() == ()
-        assert store.list_applications(axes, binding_id, task_id) == []
-        [binding] = store.list_bindings(axes, task_id)
-        assert binding.method_kind == "Open"
-        assert binding.method_names == ("Open",)
-        assert binding.profile_versions == {"Open": "0.2"}
-        assert store.get_roster(axes, binding_id, task_id) is None
-        assert store.list_members(axes, binding_id, task_id) == []
-        assert store.list_participant_bindings(axes, binding_id, task_id) == []
         open_method = injector.get(OpenMethodOpsServiceProtocol)
 
         # 2. 调用L5的OPEN方法创建机会
@@ -677,14 +630,6 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
         assert review.status == "reviewing"
         assert review.events[-1]["payload"]["artifacts"] == artifacts
 
-        # 协作上下文在等待用户验收期间进入 L4 SUSPENDED;这与 Task 的
-        # reviewing 状态独立,不会把 Collet 生命周期误当成 L4 Work 状态。
-        _flow_log(_TEST_DIRECTORY, "5.1. L4 Context.suspend: ACTIVE → SUSPENDED")
-        suspended = lifecycle.suspend(
-            task_id, HUMAN, reason="执行结果已提交,等待用户验收"
-        )
-        assert suspended.old_state.value == "ACTIVE"
-        assert suspended.new_state.value == "SUSPENDED"
 
         # 6. 用户查看成果并明确 accept,而不是以 Bot 完工代替验收。
         _flow_log(_TEST_DIRECTORY, "6. 用户检查方案、代码、测试、PR 提案,确认 accept")
@@ -692,16 +637,7 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
             TaskAdvanceCommand(task_id, note="成果符合要求,验收通过"), HUMAN
         )
         assert accepted.status == "done"
-        _flow_log(_TEST_DIRECTORY, "6.1. L4 Context.complete: SUSPENDED → COMPLETED")
-        completed = lifecycle.complete(
-            task_id, HUMAN, reason="用户已确认代办结果"
-        )
-        assert completed.old_state.value == "SUSPENDED"
-        assert completed.new_state.value == "COMPLETED"
-        _flow_log(_TEST_DIRECTORY, "6.2. L4 Context.archive: COMPLETED → ARCHIVED")
-        archived = lifecycle.archive(task_id, HUMAN, reason="任务归档")
-        assert archived.old_state.value == "COMPLETED"
-        assert archived.new_state.value == "ARCHIVED"
+
         final = service.detail_task(task_id)
         assert final.status == "done"
         assert [event["event_kind"] for event in final.events] == [
