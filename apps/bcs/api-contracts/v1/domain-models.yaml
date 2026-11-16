@@ -712,6 +712,17 @@ NormalGroupSummary:
     updated_at:
       type: integer
       minimum: 0
+    last_activity_at:
+      type: integer
+      minimum: 0
+      description: >-
+        Conversation activity key in epoch milliseconds: the newest persisted
+        message or Session creation across the Group's Sessions, falling back
+        to `created_at` when the Group has no activity rows. Populated on
+        `GET /openapi/v1/collaboration/groups` under every `sort` mode.
+        Absent (never null) on the public discovery catalog
+        (`GET /openapi/v1/collaboration/public-groups`), which does not
+        compute it.
 DirectMessageGroupSummary:
   type: object
   additionalProperties: false
@@ -769,6 +780,17 @@ DirectMessageGroupSummary:
     updated_at:
       type: integer
       minimum: 0
+    last_activity_at:
+      type: integer
+      minimum: 0
+      description: >-
+        Conversation activity key in epoch milliseconds: the newest persisted
+        message or Session creation across the Group's Sessions, falling back
+        to `created_at` when the Group has no activity rows. Populated on
+        `GET /openapi/v1/collaboration/groups` under every `sort` mode.
+        Absent (never null) on the public discovery catalog
+        (`GET /openapi/v1/collaboration/public-groups`), which does not
+        compute it.
 GroupSummary:
   oneOf:
     - $ref: "#/NormalGroupSummary"
@@ -1300,6 +1322,15 @@ SessionSummary:
         Whether the view actor (the `view_bot_id` resolved by the request) has
         collected this session. Surfaced only when `view_bot_id` is explicitly
         supplied; absent otherwise.
+    last_activity_at:
+      type: integer
+      minimum: 0
+      description: >-
+        Conversation activity key in epoch milliseconds: the newest persisted
+        message in the Session, falling back to the Session's `created_at` when
+        it has no persisted messages. Populated on
+        `GET /openapi/v1/collaboration/groups/{group_id}/sessions` under every
+        `sort` mode and absent (never null) when the value is unknown.
 
 SessionDetail:
   type: object

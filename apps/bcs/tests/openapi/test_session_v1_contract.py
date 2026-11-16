@@ -28,7 +28,7 @@ def test_session_list_and_history_use_the_shared_view_actor_contract() -> None:
     list_queries = _query_parameters(list_sessions)
     message_queries = _query_parameters(list_messages)
 
-    assert set(list_queries) == {"offset", "limit", "status", "view_bot_id"}
+    assert set(list_queries) == {"offset", "limit", "status", "view_bot_id", "sort"}
     assert set(message_queries) == {
         "before",
         "limit",
@@ -41,6 +41,11 @@ def test_session_list_and_history_use_the_shared_view_actor_contract() -> None:
         "minLength": 1,
     }
     assert list_queries["view_bot_id"].get("required", False) is False
+    assert list_queries["sort"]["schema"] == {
+        "type": "string",
+        "enum": ["created_at", "last_activity"],
+        "default": "created_at",
+    }
     assert message_queries["include_pending"]["schema"] == {
         "type": "boolean",
         "default": False,

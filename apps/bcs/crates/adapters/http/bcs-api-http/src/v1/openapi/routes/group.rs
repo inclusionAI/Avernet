@@ -46,6 +46,7 @@ async fn list_groups(
     let Query(query) = query.map_err(|error| invalid_request(&request_id, error.body_text()))?;
     let membership = query.membership_filter();
     let kind = query.kind_filter();
+    let sort = query.sort_filter();
     let result = state
         .group_service
         .list_groups(ListGroups {
@@ -58,6 +59,7 @@ async fn list_groups(
             membership,
             kind,
             strategy: query.strategy,
+            sort,
         })
         .await
         .map_err(|error| application_error_response(&request_id, error))?;
