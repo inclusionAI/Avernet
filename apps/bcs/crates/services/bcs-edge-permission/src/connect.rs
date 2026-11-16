@@ -568,6 +568,27 @@ impl DbConnectService {
         }
     }
 
+    /// Resolve the display name for a friend-list entry.
+    ///
+    /// Priority: nick name (花名) > full name > staff no (工号).
+    /// The `UserDirectoryPlugin` currently provides only `nick_name`;
+    /// full-name support can layer in later. Falls back to the staff no
+    /// (stripped of the `human_` prefix) for human actors when the directory
+    /// is not wired or the lookup misses.
+    async fn resolve_friend_entry_name(&self, actor_id: &str, kind: ActorKind) -> Option<String> {
+        if let Some(name) = self.resolve_actor_display_name(actor_id).await {
+            return Some(name);
+        }
+        if kind == ActorKind::Human {
+            let staff_no = actor_id
+                .strip_prefix("human_")
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string());
+            return staff_no;
+        }
+        None
+    }
+
     /// Find pending `Connect` requests from `from` → `to` in this env.
     ///
     /// Implemented on top of the existing `list_inbox(to, env, status)` (the

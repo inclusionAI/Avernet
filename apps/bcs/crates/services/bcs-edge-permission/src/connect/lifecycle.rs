@@ -630,19 +630,18 @@ impl ConnectService for DbConnectService {
 
     async fn list_friends(&self, actor: &str) -> ServiceResult<Vec<FriendListEntry>> {
         let ids = self.edge_grants.list_friends(actor, &self.env).await;
-        let entries = ids
-            .into_iter()
-            .map(|id| FriendListEntry {
-                actor_id: id.clone(),
-                // TODO(installment-3): enrich name/summary/is_online via the
-                // bot registry / presence port. Left None for now; the plan
-                // marks enrichment as optional for T13.
-                name: None,
+        let mut entries = Vec::with_capacity(ids.len());
+        for id in ids {
+            let kind = actor_kind_of(&id);
+            let name = self.resolve_friend_entry_name(&id, kind).await;
+            entries.push(FriendListEntry {
+                actor_id: id,
+                name,
                 summary: None,
                 is_online: false,
-                kind: actor_kind_of(&id),
-            })
-            .collect();
+                kind,
+            });
+        }
         Ok(entries)
     }
 
@@ -652,13 +651,18 @@ impl ConnectService for DbConnectService {
         query: FriendListQuery,
     ) -> ServiceResult<FriendEntriesPage> {
         let page = self.edge_grants.list_friends_paginated(actor, &self.env, query).await?;
-        let items = page.items.into_iter().map(|id| FriendListEntry {
-            kind: actor_kind_of(&id),
-            actor_id: id,
-            name: None,
-            summary: None,
-            is_online: false,
-        }).collect();
+        let mut items: Vec<FriendListEntry> = Vec::with_capacity(page.items.len());
+        for id in page.items {
+            let kind = actor_kind_of(&id);
+            let name = self.resolve_friend_entry_name(&id, kind).await;
+            items.push(FriendListEntry {
+                kind,
+                actor_id: id,
+                name,
+                summary: None,
+                is_online: false,
+            });
+        }
         Ok(FriendEntriesPage { items, total: page.total })
     }
 
