@@ -1,5 +1,5 @@
 /** @jest-environment jsdom */
-import { beforeEach, expect, it, jest } from '@jest/globals';
+import { afterEach, beforeEach, expect, it, jest } from '@jest/globals';
 jest.mock('@/services/backendApi/httpClient', () => ({ backendRequest: jest.fn(), BackendRequestError: jest.requireActual<typeof import('@/services/backendApi/httpClient')>('@/services/backendApi/httpClient').BackendRequestError }));
 let load: () => Promise<any>;
 let request: jest.Mock;
@@ -9,14 +9,20 @@ const manifest = (value = url) => ({ code: 200000, data: {
   schema_version: 1, env: 'pre', bundles: [{ name: 'taskPanel', url: value }],
 } });
 const asset = () => ({ hostApiVersion: 1, assetVersion: '0.2.0', TaskLoopView: () => null, createTaskPanelController: () => ({}) });
-const tick = async () => { for (let i = 0; i < 5; i++) await Promise.resolve(); };
+const tick = async () => { for (let i = 0; i < 30; i++) await Promise.resolve(); };
 async function ready() {
   const promise = load(); await tick();
+  if (!document.querySelector('script')) {
+    document.querySelector('link')!.dispatchEvent(new Event('load')); await tick();
+  }
   global.taskPanel = asset(); document.querySelector('script')!.dispatchEvent(new Event('load'));
   document.querySelector('link')!.dispatchEvent(new Event('load'));
   return promise;
 }
+const originalFetch = global.fetch;
+afterEach(() => { global.fetch = originalFetch; });
 beforeEach(() => {
+  global.fetch = jest.fn(async (path: string) => ({ ok: true, headers: { get: () => path.endsWith('.css') ? 'text/css' : 'application/javascript' } }));
   jest.resetModules(); document.head.innerHTML = ''; delete global.taskPanel;
   request = require('@/services/backendApi/httpClient').backendRequest;
   request.mockResolvedValue(manifest() as never);
@@ -113,5 +119,88 @@ it('loads local unpublished assets in development without calling the backend ma
     expect(request).not.toHaveBeenCalled();
     expect(document.querySelector('script')!.src).toBe(new URL('/task-panel/index.umd.js', window.location.href).href);
     expect(document.querySelector('link')!.href).toBe(new URL('/task-panel/task-panel.css', window.location.href).href);
+  } finally { process.env.NODE_ENV = previous; }
+});
+
+const developmentFallback = 'https://gw.alipayobjects.com/render/p/hitu_npm/@avernet-assets/task-panel/1.0.1/dist/index.umd.js';
+it.each(['offline', 'html', 'css', 'http'])('uses the complete remote release when local assets are unavailable: %s', async failure => {
+  const previous = process.env.NODE_ENV;
+  try {
+    process.env.NODE_ENV = 'development';
+    global.fetch = jest.fn(async (path: string) => {
+      if (failure === 'offline') throw new TypeError('Failed to fetch');
+      return { ok: failure !== 'http', headers: { get: () => failure === 'html' || (failure === 'css' && path.endsWith('.css')) ? 'text/html' : 'application/javascript' } };
+    });
+    await ready();
+    expect(document.querySelector('script')!.src).toBe(developmentFallback);
+    expect(document.querySelector('link')!.href).toBe(new URL('task-panel.css', developmentFallback).href);
+    expect(request).not.toHaveBeenCalled();
+  } finally { process.env.NODE_ENV = previous; }
+});
+it('keeps the evaluated development release when local resources later disappear', async () => {
+  const previous = process.env.NODE_ENV;
+  try {
+    process.env.NODE_ENV = 'development';
+    const loaded = await ready();
+    global.fetch = jest.fn(async () => { throw new TypeError('offline'); });
+    await expect(load()).resolves.toBe(loaded);
+    expect(document.querySelectorAll('script')).toHaveLength(1);
+    expect(document.querySelector('script')!.src).toBe(new URL('/task-panel/index.umd.js', window.location.href).href);
+    expect(global.fetch).not.toHaveBeenCalled();
+  } finally { process.env.NODE_ENV = previous; }
+});
+
+it('falls back after the local probe times out', async () => {
+  const previous = process.env.NODE_ENV;
+  jest.useFakeTimers();
+  try {
+    process.env.NODE_ENV = 'development';
+    global.fetch = jest.fn((_path: string, options: RequestInit) => new Promise((_resolve, reject) => {
+      options.signal!.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+    }));
+    const pending = load(); await tick();
+    await jest.advanceTimersByTimeAsync(3_000); await tick();
+    expect(document.querySelector('script')!.src).toBe(developmentFallback);
+    global.taskPanel = asset(); document.querySelector('script')!.dispatchEvent(new Event('load'));
+    document.querySelector('link')!.dispatchEvent(new Event('load'));
+    await expect(pending).resolves.toBe(global.taskPanel);
+  } finally { process.env.NODE_ENV = previous; jest.useRealTimers(); }
+});
+
+it.each(['error', 'timeout'])('falls back as a complete release when CSS HEAD succeeds but its stylesheet load fails: %s', async failure => {
+  const previous = process.env.NODE_ENV;
+  jest.useFakeTimers();
+  try {
+    process.env.NODE_ENV = 'development';
+    const pending = load(); await tick();
+    const localStyle = document.querySelector('link')!;
+    expect(localStyle.href).toBe(new URL('/task-panel/task-panel.css', window.location.href).href);
+    expect(document.querySelector('script')).toBeNull();
+    if (failure === 'error') localStyle.dispatchEvent(new Event('error'));
+    else await jest.advanceTimersByTimeAsync(3_000);
+    await tick();
+    expect(localStyle.isConnected).toBe(false);
+    expect(document.querySelector('script')!.src).toBe(developmentFallback);
+    expect(document.querySelectorAll('link')).toHaveLength(1);
+    expect(document.querySelector('link')!.href).toBe(new URL('task-panel.css', developmentFallback).href);
+    global.taskPanel = asset(); document.querySelector('script')!.dispatchEvent(new Event('load'));
+    document.querySelector('link')!.dispatchEvent(new Event('load'));
+    await expect(pending).resolves.toBe(global.taskPanel);
+  } finally { process.env.NODE_ENV = previous; jest.useRealTimers(); }
+});
+it('reuses the successfully loaded local stylesheet without issuing a second stylesheet load', async () => {
+  const previous = process.env.NODE_ENV;
+  try {
+    process.env.NODE_ENV = 'development';
+    const pending = load(); await tick();
+    const localStyle = document.querySelector('link')!;
+    expect(document.querySelector('script')).toBeNull();
+    localStyle.dispatchEvent(new Event('load')); await tick();
+    expect(document.querySelector('link')).toBe(localStyle);
+    expect(localStyle.media).toBe('all');
+    expect(document.querySelectorAll('link')).toHaveLength(1);
+    expect(document.querySelector('script')!.src).toBe(new URL('/task-panel/index.umd.js', window.location.href).href);
+    global.taskPanel = asset(); document.querySelector('script')!.dispatchEvent(new Event('load'));
+    await expect(pending).resolves.toBe(global.taskPanel);
   } finally { process.env.NODE_ENV = previous; }
 });

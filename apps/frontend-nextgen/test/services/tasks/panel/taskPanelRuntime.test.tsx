@@ -176,3 +176,28 @@ it('a cold SDK card binds its authenticated route without waiting for visible hi
   expect(global.fetch).not.toHaveBeenCalled();
   unregister();
 });
+
+it('opt-in diagnostics link a pending association cancellation to the force-close caller', async () => {
+  const key = 'teamclaw:task-panel-debug';
+  const debugWindow = window as Window & { __taskPanelDebugLog?: string[] };
+  const info = jest.spyOn(console, 'info').mockImplementation(() => {});
+  localStorage.setItem(key, '1'); delete debugWindow.__taskPanelDebugLog;
+  try {
+    global.fetch = jest.fn(async (_path: unknown, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')), { once: true });
+    })) as typeof fetch;
+    const controller = await runtime.getTaskPanelController();
+    runtime.configureTaskPanelSession({ sessionId: 'diagnostic-session', kind: 'group' }, { history });
+    const pending = controller.enterConversation({ sessionId: 'diagnostic-session', kind: 'group' });
+    await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(1));
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { taskNavigationAwareHandle } = require('@/services/tasks/panel/taskPanelHandleAdapter');
+    taskNavigationAwareHandle({ closePanelForce: jest.fn() }).closePanelForce();
+    await pending;
+    const records = debugWindow.__taskPanelDebugLog!.map(line => JSON.parse(line.replace('[task-panel-debug] ', '')));
+    const aborted = records.find(record => record.event === 'request.abort');
+    expect(aborted).toEqual(expect.objectContaining({ sessionId: 'diagnostic-session', stack: expect.stringContaining('taskPanelHandleAdapter') }));
+    expect(records.map(record => record.event)).toContain('panel.close-force');
+    expect(records.find(record => record.event === 'request.end')).toEqual(expect.objectContaining({ requestId: aborted.requestId, aborted: true }));
+  } finally { localStorage.removeItem(key); delete debugWindow.__taskPanelDebugLog; info.mockRestore(); }
+});

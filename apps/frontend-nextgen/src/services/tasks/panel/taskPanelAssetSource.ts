@@ -3,6 +3,13 @@ import { useErrorNotifyStore } from '@/stores/errorNotifyStore';
 
 let selectedReleaseUrl: string | null = null;
 let selectedVersion: string | null = null;
+export const TASK_PANEL_DEV_FALLBACK_URL = 'https://gw.alipayobjects.com/render/p/hitu_npm/@avernet-assets/task-panel/1.0.1/dist/index.umd.js';
+let developmentRelease: Promise<string> | null = null;
+let developmentStyle: HTMLLinkElement | null = null;
+export function getTaskPanelDevelopmentStyle(url: string): HTMLLinkElement | null {
+  return developmentStyle?.isConnected && developmentStyle.href === new URL('task-panel.css', url).href ? developmentStyle : null;
+}
+
 /** Both entries must originate from the same immutable release in this page. */
 export function pinTaskPanelRelease(url: string): void {
   if (selectedReleaseUrl && selectedReleaseUrl !== url) throw new Error('任务副屏资产来源已变化或未知，请刷新页面后重试。');
@@ -26,9 +33,47 @@ function bundleUrl(value: unknown): string {
   return url.href;
 }
 
+async function discoverDevelopmentRelease(): Promise<string> {
+  const localUrl = new URL('/task-panel/index.umd.js', window.location.href).href;
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), 3_000);
+  const style = document.createElement('link');
+  style.rel = 'stylesheet'; style.href = new URL('task-panel.css', localUrl).href;
+  style.media = 'not all'; style.dataset.taskPanelSource = localUrl;
+  try {
+    // Probe the whole release before either entry executes; dev HTML is not an asset.
+    const probes: [string, RegExp][] = [
+      [localUrl, /^(?:application|text)\/(?:javascript|ecmascript)(?:;|$)/i],
+      [new URL('recovery.umd.js', localUrl).href, /^(?:application|text)\/(?:javascript|ecmascript)(?:;|$)/i],
+      [new URL('task-panel.css', localUrl).href, /^text\/css(?:;|$)/i],
+    ];
+    await Promise.all(probes.map(async ([url, contentType]) => {
+      const response = await fetch(url, { method: 'HEAD', cache: 'no-store', signal: controller.signal });
+      if (!response.ok || !contentType.test(response.headers.get('content-type') ?? '')) {
+        throw new Error('本地任务副屏资源不可用。');
+      }
+    }));
+    // A successful HEAD is not proof that the browser can load the stylesheet.
+    await new Promise<void>((resolve, reject) => {
+      style.onload = () => resolve();
+      style.onerror = () => reject(new Error('本地任务副屏样式加载失败。'));
+      controller.signal.addEventListener('abort', () => reject(new Error('本地任务副屏资源加载超时。')), { once: true });
+      if (controller.signal.aborted) { reject(new Error('本地任务副屏资源加载超时。')); return; }
+      document.head.appendChild(style);
+    });
+    developmentStyle = style;
+    return localUrl;
+  } catch {
+    style.remove();
+    return TASK_PANEL_DEV_FALLBACK_URL;
+  } finally { style.onload = null; style.onerror = null; window.clearTimeout(timer); controller.abort(); }
+}
+
 export async function discoverTaskPanelUrl(): Promise<string> {
   if (process.env.NODE_ENV === 'development') {
-    return new URL('/task-panel/index.umd.js', window.location.href).href;
+    if (selectedReleaseUrl) return selectedReleaseUrl;
+    developmentRelease ??= discoverDevelopmentRelease();
+    return developmentRelease;
   }
   const controller = new AbortController();
   const timer = window.setTimeout(() => controller.abort(), 30_000);
