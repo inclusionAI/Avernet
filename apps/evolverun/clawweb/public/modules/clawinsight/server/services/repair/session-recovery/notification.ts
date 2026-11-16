@@ -7,53 +7,13 @@ import type { RecoveryStoredTask, RecoveryTaskStore, RecoveryTimelineEvent } fro
 import { resolveTaskControlPlaneEnvironment, type AgentControlPlaneEnvironment } from "../common/task-control-plane.js";
 import { logRepairEvent, repairLogError } from "../common/logging.js";
 import type { BotDiagnosisRecoveryConfigStore } from '../../monitoring/bot-config-contracts.js';
-import { recoveryNotifications, recoveryGroupRoute, RECOVERY_NOTIFICATION_ROUTES_KEY } from './bot-configuration.js';
+import { recoveryNotifications } from './bot-configuration.js';
+import { cardConfiguration, SESSION_RECOVERY_OWNER_NOTIFICATIONS_KEY, type RecoveryAppConfigStore } from './legacy-configuration.js';
+export { legacyOwnerNotificationEnabled, legacyWebhookConfig, SESSION_RECOVERY_OWNER_NOTIFICATIONS_KEY, SESSION_RECOVERY_NOTIFICATIONS_KEY } from './legacy-configuration.js';
 
-export const SESSION_RECOVERY_OWNER_NOTIFICATIONS_KEY = "session_recovery_owner_notifications";
-type NotificationConfigStore = { findByKey(key: string): Promise<{ enabled: number; config_json: string } | null> };
 export type RecoveryNotificationSender = Pick<DingTalkNotificationSender, "sendNotification"> & Partial<Pick<DingTalkNotificationSender, "sendCard" | "updateCard">>;
 export function recoveryOwnerCardTrackId(taskId: string, environment: AgentControlPlaneEnvironment): string {
   return `sr-owner:${environment}:${taskId}`;
-}
-
-function cardConfiguration(value: unknown): Partial<Record<AgentControlPlaneEnvironment, { template_id: string; callback_route_key?: string }>> {
-  if (value === undefined) return {};
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid recovery card configuration");
-  for (const [environment, item] of Object.entries(value)) {
-    if (!["pre", "prod"].includes(environment) || !item || typeof item !== "object" || Array.isArray(item)
-      || Object.keys(item).some(key => !["template_id", "callback_route_key"].includes(key))
-      || typeof item.template_id !== "string" || !item.template_id.trim() || item.template_id.length > 256
-      || item.callback_route_key !== undefined && (typeof item.callback_route_key !== "string" || !item.callback_route_key.trim() || item.callback_route_key.length > 256)) throw new Error("Invalid recovery card configuration");
-  }
-  return value;
-}
-
-export function legacyOwnerNotificationEnabled(raw: string, enabled: number, input: Parameters<RecoveryTaskNotifier["notify"]>[0]): boolean {
-  let value;
-  try { value = JSON.parse(raw); }
-  catch { throw new Error("Invalid recovery owner notification JSON"); }
-  if (!value || typeof value !== "object" || Array.isArray(value)
-    || Object.keys(value).some(key => !["bot_overrides", "card"].includes(key))
-    || value.bot_overrides !== undefined && !Array.isArray(value.bot_overrides)) {
-    throw new Error("Invalid recovery owner notification configuration");
-  }
-  cardConfiguration(value.card);
-  const targets = new Set<string>();
-  let matched: boolean | undefined;
-  for (const item of value.bot_overrides ?? []) {
-    if (!item || typeof item !== "object" || Array.isArray(item)
-      || Object.keys(item).some(key => !["bot_id", "entity_id", "env", "enabled"].includes(key))
-      || typeof item.bot_id !== "string" || !item.bot_id.trim() || item.bot_id !== item.bot_id.trim()
-      || typeof item.entity_id !== "string" || !item.entity_id.trim() || item.entity_id !== item.entity_id.trim()
-      || !["pre", "prod"].includes(item.env) || typeof item.enabled !== "boolean") {
-      throw new Error("Invalid recovery owner notification Bot override");
-    }
-    const key = JSON.stringify([item.bot_id, item.entity_id, item.env]);
-    if (targets.has(key)) throw new Error("Duplicate recovery owner notification Bot override");
-    targets.add(key);
-    if (item.bot_id === input.botId && item.entity_id === input.ownerId && item.env === input.targetEnvironment) matched = item.enabled;
-  }
-  return matched ?? (enabled === 1);
 }
 
 function cardText(text: string): string {
@@ -70,7 +30,7 @@ function ownerCardText(text: string, overflow: string): string {
 
 export class SessionRecoveryNotifier implements RecoveryTaskNotifier {
   constructor(private readonly sender: RecoveryNotificationSender | null | undefined,
-    private readonly publicBaseUrl: string, private readonly config: NotificationConfigStore,
+    private readonly publicBaseUrl: string, private readonly config: RecoveryAppConfigStore,
     private readonly controlPlaneEnvironment?: AgentControlPlaneEnvironment,
     private readonly botConfigurations?: BotDiagnosisRecoveryConfigStore) {}
 
@@ -102,7 +62,7 @@ export class SessionRecoveryNotifier implements RecoveryTaskNotifier {
   private async prepareOwnerCard(task: RecoveryStoredTask) {
     const request = task.ownerRequest, environment = this.controlPlaneEnvironment;
     if (!request || !environment || resolveTaskControlPlaneEnvironment(task) !== environment) return;
-    if (!(await recoveryNotifications(this.botConfigurations, task.request.target)).owner) return;
+    if (!(await recoveryNotifications(this.botConfigurations, task.request.target, this.config)).owner) return;
     const row = await this.config.findByKey(SESSION_RECOVERY_OWNER_NOTIFICATIONS_KEY);
     if (!row) return;
     const config = cardConfiguration(JSON.parse(row.config_json).card)[environment];
@@ -116,7 +76,7 @@ export class SessionRecoveryNotifier implements RecoveryTaskNotifier {
     const row = await this.config.findByKey(SESSION_RECOVERY_OWNER_NOTIFICATIONS_KEY).catch(() => null);
     if (!row) return false;
     try {
-      if (!(await recoveryNotifications(this.botConfigurations, { bot_id: input.botId, entity_id: input.ownerId, env: input.targetEnvironment, engine: 'OC' })).owner) return false;
+      if (!(await recoveryNotifications(this.botConfigurations, { bot_id: input.botId, entity_id: input.ownerId, env: input.targetEnvironment, engine: 'OC' }, this.config)).owner) return false;
       cardConfiguration(JSON.parse(row.config_json).card);
     } catch (error) {
       logRepairEvent("session-recovery", "session_recovery_notification", "configuration_invalid", {
@@ -151,38 +111,7 @@ export class SessionRecoveryNotifier implements RecoveryTaskNotifier {
   }
 }
 
-export const SESSION_RECOVERY_NOTIFICATIONS_KEY = "session_recovery_notifications";
 type GroupNotification = Parameters<RecoveryActionNotifier["after"]>[0];
-type BotWebhook = { bot_id: string; entity_id: string; webhook: string };
-type WebhookConfig = { webhook: string; timeout_seconds: number; bot_webhooks?: BotWebhook[] };
-
-export function legacyWebhookConfig(raw: string): WebhookConfig {
-  const value = JSON.parse(raw);
-  if (!value || typeof value !== "object" || Array.isArray(value)
-    || Object.keys(value).some(key => !["webhook", "timeout_seconds", "bot_webhooks"].includes(key))
-    || typeof value.webhook !== "string" || new URL(value.webhook).protocol !== "https:"
-    || !Number.isSafeInteger(value.timeout_seconds) || value.timeout_seconds < 1 || value.timeout_seconds > 60) {
-    throw new Error("Invalid recovery notification configuration");
-  }
-  if (value.bot_webhooks !== undefined) {
-    if (!Array.isArray(value.bot_webhooks)) throw new Error("Invalid recovery Bot notification configuration");
-    const targets = new Set<string>();
-    for (const item of value.bot_webhooks) {
-      if (!item || typeof item !== "object" || Array.isArray(item)
-        || Object.keys(item).some(key => !["bot_id", "entity_id", "webhook"].includes(key))
-        || typeof item.bot_id !== "string" || !item.bot_id.trim() || item.bot_id !== item.bot_id.trim()
-        || typeof item.entity_id !== "string" || !item.entity_id.trim() || item.entity_id !== item.entity_id.trim()
-        || typeof item.webhook !== "string" || new URL(item.webhook).protocol !== "https:") {
-        throw new Error("Invalid recovery Bot notification configuration");
-      }
-      const target = JSON.stringify([item.bot_id, item.entity_id]);
-      if (targets.has(target)) throw new Error("Duplicate recovery Bot notification target");
-      targets.add(target);
-    }
-  }
-  return value;
-}
-
 type MarkdownNode = { type: string; value?: string; children?: MarkdownNode[] };
 function plainText(node: MarkdownNode): string {
   // Full commands, raw HTML and images belong in the linked task, not in a short notification.
@@ -295,7 +224,7 @@ export class SessionRecoveryGroupNotifier implements RecoveryActionNotifier {
   constructor(private readonly deps: {
     controlPlaneEnvironment: AgentControlPlaneEnvironment;
     tasks: Pick<RecoveryTaskStore, "find" | "appendNotification">;
-    config: NotificationConfigStore;
+    config: RecoveryAppConfigStore;
     botConfigurations?: BotDiagnosisRecoveryConfigStore;
     sender: { send(input: { webhook: string; timeoutSeconds: number; title: string; text: string }): Promise<void> };
     publicBaseUrl: string;
@@ -310,11 +239,7 @@ export class SessionRecoveryGroupNotifier implements RecoveryActionNotifier {
   private async notify(input: GroupNotification): Promise<void> {
     const task = await this.deps.tasks.find(input.taskId);
     if (!task || resolveTaskControlPlaneEnvironment(task) !== this.deps.controlPlaneEnvironment) return;
-    const notifications = await recoveryNotifications(this.deps.botConfigurations, task.request.target);
-    if (!notifications.group) return;
-    const row = await this.deps.config.findByKey(RECOVERY_NOTIFICATION_ROUTES_KEY);
-    if (row?.enabled !== 1) return;
-    const config = recoveryGroupRoute(row.config_json, notifications.group.routeId);
+    const config = (await recoveryNotifications(this.deps.botConfigurations, task.request.target, this.deps.config)).group;
     if (!config) return;
     // Reuse the complete tool audit; uncertain delivery must not be treated as no intervention.
     if (input.kind === "result" && task.interventionStatus === "none") return;

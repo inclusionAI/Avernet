@@ -8,6 +8,7 @@ export type BotDiagnosisRecoveryConfig = MonitoringTarget & {
 };
 
 export interface BotDiagnosisRecoveryConfigStore {
+  resolveTargetForOwner(target: { botId: string; ownerId: string; env: string }): Promise<MonitoringTarget | null>;
   findForOwner(target: { botId: string; ownerId: string; env: string }): Promise<BotDiagnosisRecoveryConfig | null>;
   find(target: MonitoringTarget): Promise<BotDiagnosisRecoveryConfig | null>;
   findMany(targets: readonly MonitoringTarget[]): Promise<Array<BotDiagnosisRecoveryConfig | null>>;

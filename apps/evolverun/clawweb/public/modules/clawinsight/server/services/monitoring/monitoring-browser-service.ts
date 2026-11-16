@@ -4,10 +4,12 @@ import type { BotOption, BotScope, DirectoryBot, DirectoryScope, MonitoringBotDi
 import { browserDiagnosisQuery, parseWindow, queryKeys } from './browser-validation.js';
 import type { BotDiagnosisRecoveryConfig, BotDiagnosisRecoveryConfigStore } from './bot-config-contracts.js';
 import { configureBots } from './bot-config-service.js';
+import { recoveryConfigurations } from '../repair/session-recovery/bot-configuration.js';
+import type { RecoveryAppConfigStore } from '../repair/session-recovery/legacy-configuration.js';
 
 export function createMonitoringBrowserService(store: MonitoringStore, directory: MonitoringBotDirectory,
   references: MonitoringReferences, storageScope: DirectoryScope, now: () => number = Date.now,
-  configurations?: BotDiagnosisRecoveryConfigStore): MonitoringBrowserApi {
+  configurations?: BotDiagnosisRecoveryConfigStore, legacyConfig?: RecoveryAppConfigStore): MonitoringBrowserApi {
   function authorize(p: MonitoringPrincipal) {
     if (!p.isAuthenticated || !p.staffId?.trim()) throw new MonitoringError('UNAUTHENTICATED', '请先登录。');
     if (!p.tenant || p.tenant !== storageScope.tenant || !p.allowedTargetEnvs.length
@@ -76,7 +78,7 @@ export function createMonitoringBrowserService(store: MonitoringStore, directory
         page = await directory.search({ principal: p, scope, q, limit, after });
       }
       const summaries = await store.summaries(page.items, window);
-      const configs = await configurations?.findMany(page.items);
+      const configs = configurations ? await recoveryConfigurations(configurations, page.items, legacyConfig) : undefined;
       const items = page.items.map((bot, index) => option(bot, summaries[index], p.tenant, configs?.[index]));
       const nextAfter = page.items.length ? page.items[page.items.length - 1].directoryId : after;
       return { items, nextCursor: page.hasMore && nextAfter ? references.cursor(nextAfter, context) : null, window };
@@ -85,7 +87,7 @@ export function createMonitoringBrowserService(store: MonitoringStore, directory
       const bot = await visible(p, ref);
       queryKeys(query, ['start', 'end']);
       const [summary] = await store.summaries([bot], parseWindow(query, now()));
-      return option(bot, summary, p.tenant, await configurations?.find(bot));
+      return option(bot, summary, p.tenant, configurations ? (await recoveryConfigurations(configurations, [bot], legacyConfig))[0] : undefined);
     },
     async diagnoses(p, ref, query) {
       const bot = await visible(p, ref);

@@ -35,7 +35,7 @@ Only explicit boolean `true` enables a channel. Missing settings, malformed
 JSON, invalid notification fields, ambiguous ownership or failed configuration
 reads skip notifications. Unknown top-level properties remain available for
 future features. No per-Bot webhook is stored and no global notification default
-is inherited at runtime.
+is inherited for a Bot with a new-table record.
 
 Group destinations stay in **`ce_app_config`**, under
 `session_recovery_notification_routes`:
@@ -48,15 +48,27 @@ The registry row must have `enabled = 1`. A missing/invalid referenced route or
 failed send never selects another route/channel. Existing claims and delivery
 audit remain in use. The existing `session_recovery_owner_notifications.card`
 configuration still supplies Owner card templates/callback routes by **ClawWeb
-control-plane** environment; its old `enabled`/`bot_overrides` no longer grant
-notifications. Ordinary paused Owner notices remain paused.
+control-plane** environment. Its `enabled`/`bot_overrides` govern only Bots that
+have no new-table record. Ordinary paused Owner notices remain paused.
 
 ## Behavior and HTTP contracts
 
-- Automatic diagnosis-triggered recovery reads `recovery_enabled` on every
-  event. Production direct recovery creation checks it too, before persistence
-  or execution. Missing configuration denies new admission; unavailable storage
-  is retryable. Existing idempotent requests return their original Task.
+- All production recovery admission resolves policy in the recovery service,
+  before persistence or execution. Automatic diagnosis-triggered requests use
+  that same service. A new row is authoritative, including explicit false;
+  only a missing row consults the enabled legacy allowlist. Missing both denies
+  admission; unavailable storage is retryable. Existing idempotent requests
+  return their original Task without requiring admission again.
+- `bot-configuration.ts` owns new/legacy source selection for admission, visible
+  switches and notifications. `legacy-configuration.ts` contains read-only
+  parsers for the old keys. Only an unambiguous current Owner/directory lookup
+  permits recovery admission or notifications. Read failures are never absence.
+- `createMonitoringRecoveryTrigger` still accepts the old host's `config`
+  argument (`findByKey`), as well as the intermediate `find` argument. They are
+  deprecated and are not read: the supplied recovery service must enforce
+  admission. `recovery_disabled` is a successful skip; unavailable service or
+  configuration returns a retryable error. OCB's existing production assembly
+  therefore remains compatible with this Avernet version.
 - Closing the switches stops new admission. Existing tasks, feedback, results,
   observation/verification and termination keep their established lifecycle.
   Debug/simulation retain their existing explicit paths.
@@ -70,8 +82,12 @@ notifications. Ordinary paused Owner notices remain paused.
   additions. `{updated, failed}` reports partial success; stale entries are not
   overwritten. Retry reloads versions. No notification preferences are written
   through this endpoint.
-- Existing Bot options/status add `configuration` with both flags and version.
-  Historical check/diagnosis data remains separate and readable after disabling.
+- Existing Bot options/status return the effective recovery switch. Legacy-only
+  Bots have `diagnosisEnabled: false`, their legacy recovery state, and version 0.
+  The first UI write creates a new row, with `{}` notification JSON: it takes
+  complete ownership and notifications remain off until explicitly configured.
+  This does not copy or modify legacy notification preferences. Historical
+  check/diagnosis data remains separate and readable after disabling.
 - `GET /api/insight/v1/monitoring/session-recoveries/tasks` lists the authenticated
   user's tasks using `page`, `pageSize` (1–50), optional exact `botId`, `env`, and
   task `status`. It reads only page-sized detail artifacts, not execution audit
@@ -95,29 +111,44 @@ to work. No application configuration or notification management page is added.
    Supply the existing shared DB, monitoring directory and trusted scope.
    **The default is dry-run**; inspect `planned`, `warnings`, `skipped`, and
    `routeCount`. Reports contain route references, never webhook addresses.
-3. The candidate set includes persisted Bot checks, enabled recovery allowlist
-   identities, explicit legacy notification targets, and historical task targets.
-   Diagnosis starts from persisted checks (review stale roster entries during
-   dry-run); recovery starts from the enabled allowlist. Notification-only or
-   historical-task-only targets do not acquire admission switches.
-4. Owner migration materializes exact Bot/Owner/environment overrides before the
-   old default, including a true override under a disabled default. Group
-   overrides take precedence over the old default group. Identical webhook and
-   timeout pairs share a deterministic route ID; private test groups stay mapped
-   to their exact Bots. Invalid settings stay disabled and are reported.
+3. **Only enabled legacy recovery allowlist identities are candidates.** No
+   diagnosis checks, notification-only overrides or historical Task targets are
+   scanned. Resolve current directory ownership; deleted/unresolvable targets
+   are reported and skipped. New rows start with diagnosis disabled and recovery
+   enabled. This migration does not configure upstream diagnosis.
+4. For those candidates only, materialize exact Bot/Owner/environment overrides
+   before the old Owner default, including a true override under a disabled
+   default. Group overrides precede the old default. Identical webhook/timeout
+   pairs share a deterministic route ID. Invalid settings stay off and are
+   reported. Existing new-table rows, including explicit disabled rows, are skipped.
 5. Apply the reviewed plan with `{updatedBy, apply: true}`. Source versions are
-   rechecked/locked inside the transaction. Existing new-table rows are skipped,
-   including operator/user changes. Duplicate insertion conflicts roll back;
-   rerun dry-run instead of overwriting. Repeating migration is safe. Legacy
-   source keys are preserved for audit, never used as runtime fallback.
-6. Deploy the matching Avernet and OCB revisions together after backfill. Avoid
-   serving old and new admission/notifier implementations concurrently: route
-   traffic only after the new pool is ready and retire old consumers before
-   exposing switch writes. Verify owner access, a private notification route,
-   pending tasks, and the intended target environments before enabling traffic.
+   rechecked/locked in the transaction. Insertion conflicts roll back; rerun
+   dry-run instead of overwriting. **Migration is explicit, never startup work.**
+   Legacy policy keys are not rewritten by migration, runtime or the UI.
+6. Deploy the compatible Avernet implementation first. Its unchanged OCB
+   production caller can still use legacy configuration while the new table is
+   empty. Provision the table before deployment: missing table/read errors stop
+   admission rather than falling back. Do not mix switch writes with older,
+   non-compatible consumers that cannot honor new-row precedence.
+7. Pilot one current-owner Bot by writing its complete new row and referenced
+   group route. Initially retain its legacy entry. Verify admission, notification
+   destination, disabling new admission and existing Task lifecycle. Only then
+   remove that Bot's legacy allowlist entry through the reviewed data-change
+   process. Other Bots continue to use their existing configuration.
 
-Rollback requires reviewing post-cutover switch/JSON changes; the preserved
-legacy keys are a snapshot, not a continuously synchronized rollback policy.
-Pause new admission/notification consumers before restoring a reviewed legacy
-configuration. Preserve the new table and Task/Step/audit history. No upstream
-diagnosis deployment, live Bot operation, or production migration is implicit.
+## Removing compatibility later
+
+After migration, check remaining legacy-only current Bots and in-flight Task
+notification targets before removing old policies. Remove the legacy branches
+from `bot-configuration.ts`, their parser exports and the deprecated trigger
+argument once all hosts have dropped it. Admission, Task execution, notification
+claims, audit and UI writes remain the same pipeline; none needs a second
+implementation or distributed new/old conditionals. Retain the Owner card
+transport configuration while it still supplies templates/callback routes.
+
+Rollback to a pre-compatible implementation can ignore new-table disables and
+send using old destinations. Preserved legacy keys are **not** a synchronized
+rollback policy: reconcile post-migration switches/routes and retire old
+consumers before allowing writes. Preserve the new table and Task/Step/audit
+history. No deployment, live Bot operation, upstream diagnosis change or
+production migration is performed merely by installing this code.
