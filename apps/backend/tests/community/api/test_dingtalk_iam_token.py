@@ -1,6 +1,5 @@
 import inspect
-import importlib
-from unittest.mock import AsyncMock
+import logging
 
 import pytest
 from fastapi import FastAPI
@@ -28,14 +27,11 @@ async def test_unknown_source_rejected_without_exchange():
 
 
 @pytest.mark.asyncio
-async def test_dingtalk_uses_existing_locators_and_ignores_extra_identity_queries(monkeypatch):
+async def test_dingtalk_uses_existing_locators_and_ignores_extra_identity_queries():
     service = _service()
-    authenticate = AsyncMock()
-    monkeypatch.setattr(importlib.import_module("agentclaw.community.adapters.http.token_exchange.router"), "require_baas_caller", authenticate)
     async with AsyncClient(transport=ASGITransport(app=_app(service)), base_url="http://test") as client:
         response = await client.get("/api/v1/token/iam", params={"token_type": "dingtalk", "user_id": "caller", "owner_id": "owner", "bot_id": "bot"}, headers={"Cookie": "IAM_TOKEN=device-secret"})
     assert response.status_code == 200
-    authenticate.assert_awaited_once()
     kwargs = service.get_iam_token.call_args.kwargs
     assert kwargs["token_type"] == "dingtalk"
     assert "expected_user_id" not in kwargs
@@ -46,51 +42,45 @@ async def test_dingtalk_uses_existing_locators_and_ignores_extra_identity_querie
 
 
 @pytest.mark.asyncio
-async def test_device_missing_signed_principal_cannot_reach_service(monkeypatch):
-    from fastapi import HTTPException
-    service = _service()
-    authenticate = AsyncMock(side_effect=HTTPException(status_code=401))
-    monkeypatch.setattr(importlib.import_module("agentclaw.community.adapters.http.token_exchange.router"), "require_baas_caller", authenticate)
+@pytest.mark.parametrize("principal", [None, "untrusted-principal-secret"])
+async def test_device_exchange_does_not_require_app_principal(principal, caplog):
+    caplog.set_level(logging.INFO)
+    service = _service(iam_token="device-secret")
+    headers = {"Cookie": "IAM_TOKEN=device-secret", "Authorization": "Bearer authorization-secret"}
+    if principal is not None:
+        headers["X-Avernet-Principal"] = principal
     async with AsyncClient(transport=ASGITransport(app=_app(service)), base_url="http://test") as client:
-        response = await client.get("/api/v1/token/iam", params={"token_type": "dingtalk", "user_id": "caller", "owner_id": "owner"})
-    assert response.status_code == 401
-    service.get_iam_token.assert_not_called()
+        response = await client.get("/api/v1/token/iam", params={"token_type": "dingtalk", "bot_id": "bot", "entity_id": "entity", "stage": "draft", "session_key": "caller-session"}, headers=headers)
+    assert response.status_code == 200
+    assert response.json() == {"success": True, "iam_token": "device-secret"}
+    service.get_iam_token.assert_awaited_once()
+    kwargs = service.get_iam_token.call_args.kwargs
+    assert kwargs["iam_token"] == "device-secret"
+    assert kwargs["token_type"] == "dingtalk"
+    assert kwargs["entity_id"] == "entity"
+    assert kwargs["session_key"] == "caller-session"
+    assert kwargs["auth_request"].headers["authorization"] == "Bearer authorization-secret"
+    assert "caller_iam_request_received" in caplog.text
+    assert "caller_iam_response_succeeded" in caplog.text
+    assert "caller-session" in caplog.text
+    for secret in ("device-secret", "authorization-secret", "untrusted-principal-secret"):
+        assert secret not in caplog.text
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("principal_kind", ["valid", "missing", "wrong-key", "expired", "wrong-issuer"])
-async def test_device_requires_real_baas_signature(monkeypatch, principal_kind, caplog):
-    import secrets
-    import time
-    import jwt
-    from fastapi.responses import JSONResponse
-    from agentclaw.community.adapters.http.openapi_v1.errors import MissingPrincipalError
-    from agentclaw.community.core.gateway_principal import PrincipalVerifierConfig
+async def test_device_missing_cookie_is_rejected_by_service_without_exchange(caplog):
+    from tests.community.core.caller_identity.test_iam_token_service import _service as core_service
 
-    key = secrets.token_hex(32)
-    config = PrincipalVerifierConfig(signing_key=key, issuer="gateway", audience="backend")
-    dependencies = importlib.import_module("agentclaw.community.adapters.http.org.dependencies")
-    monkeypatch.setattr(dependencies, "get_principal_verifier_config", lambda: config)
-    service = _service()
-    app = _app(service)
-
-    @app.exception_handler(MissingPrincipalError)
-    async def missing_principal(_request, _error):
-        return JSONResponse({"error": "unauthorized"}, status_code=401)
-
-    now = int(time.time())
-    claims = {"iss": "baas" if principal_kind != "wrong-issuer" else "gateway", "iat": now - 120,
-              "exp": now + 300 if principal_kind != "expired" else now - 60}
-    principal = jwt.encode(claims, secrets.token_hex(32) if principal_kind == "wrong-key" else key, algorithm="HS256")
-    headers = {"Cookie": "IAM_TOKEN=device-secret"}
-    if principal_kind != "missing":
-        headers["X-Avernet-Principal"] = principal
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        response = await client.get("/api/v1/token/iam", params={"token_type": "dingtalk", "user_id": "caller", "owner_id": "owner", "bot_id": "bot"}, headers=headers)
-    assert response.status_code == (200 if principal_kind == "valid" else 401)
-    assert service.get_iam_token.call_count == (1 if principal_kind == "valid" else 0)
-    assert principal not in caplog.text
-    assert "device-secret" not in caplog.text
+    caplog.set_level(logging.INFO)
+    service, identity, _, provider, _, _, _ = core_service()
+    async with AsyncClient(transport=ASGITransport(app=_app(service)), base_url="http://test") as client:
+        response = await client.get("/api/v1/token/iam", params={"token_type": "dingtalk", "bot_id": "bot-1"})
+    assert response.status_code == 400
+    assert response.json() == {"success": False, "error": "CALLER_CREDENTIAL_REQUEST_INVALID"}
+    provider.exchange_dingtalk.assert_not_called()
+    identity.exchange_caller_identity.assert_not_called()
+    assert "caller_dingtalk_failed" in caplog.text
+    assert "caller_iam_response_failed" in caplog.text
 
 
 def test_iam_schema_adds_only_source_selector():
@@ -102,7 +92,7 @@ def test_iam_schema_adds_only_source_selector():
 
 
 @pytest.mark.asyncio
-async def test_extra_query_identity_cannot_change_verified_caller_target(monkeypatch):
+async def test_extra_query_identity_cannot_change_verified_caller_target():
     from dataclasses import replace
     from datetime import datetime, timedelta
     from types import SimpleNamespace
@@ -114,7 +104,6 @@ async def test_extra_query_identity_cannot_change_verified_caller_target(monkeyp
     provider.exchange_dingtalk.return_value = replace(_caller_token(), subject_user_id="007654", expires_at=datetime.now() + timedelta(hours=1))
     bindings.resolve.side_effect = None
     bindings.resolve.return_value = ResolvedRuntimeBinding(41, RuntimeBindingSource.CALLER_INSTANCE)
-    monkeypatch.setattr(importlib.import_module("agentclaw.community.adapters.http.token_exchange.router"), "require_baas_caller", AsyncMock())
     async with AsyncClient(transport=ASGITransport(app=_app(service)), base_url="http://test") as client:
         response = await client.get("/api/v1/token/iam", params={"token_type": "dingtalk", "bot_id": "bot-1", "entity_id": "entity-1", "user_id": "attacker-selected-user", "owner_id": "attacker-selected-owner"}, headers={"Cookie": "IAM_TOKEN=device-secret"})
     assert response.status_code == 200
