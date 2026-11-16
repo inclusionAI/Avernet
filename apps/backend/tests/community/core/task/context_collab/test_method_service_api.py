@@ -51,7 +51,7 @@ from agentclaw.community.core.task.context_collab.service_api import (
 
 MISSING = dataclasses.MISSING
 
-# 统一尾参:所有方法以 ..., command, context: ActorContext 收尾。
+# 除 publish_opportunity 的完整命令外,操作均以 context: ActorContext 收尾。
 CTX = ("context", "ActorContext")
 
 
@@ -170,9 +170,11 @@ COMMAND_FIELDS: dict[type, list[tuple[str, object]]] = {
         ("reason", ""),
     ],
     OpenOpportunityCommand: [
+        ("collab_context_id", MISSING),
         ("scope_ref", MISSING),
         ("participation_type", MISSING),
         ("opens_at", MISSING),
+        ("context", MISSING),
         ("opportunity_id", None),
         ("requirement_refs", []),
         ("admission_policy_refs", []),
@@ -391,8 +393,8 @@ OPEN_SIGNATURES: dict[str, tuple] = {
         ),
         "tuple[OpenOpportunity, ...]",
     ),
-    "publish_opportunity": _binding_ops(
-        "OpenOpportunityCommand", "ProfileOpAcceptedResult"
+    "publish_opportunity": (
+        _params(("command", "OpenOpportunityCommand")), "ProfileOpAcceptedResult"
     ),
     "pause_opportunity": _binding_ops(
         "OpenOpportunityOpCommand", "ProfileOpAcceptedResult",

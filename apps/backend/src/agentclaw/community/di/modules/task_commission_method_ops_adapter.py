@@ -88,16 +88,15 @@ class TaskCommissionOpenMethodAdapter(TaskMethodOpsPort):
                 "publication requires the Collet's top-level binding"
             )
         published = self._open_ops.publish_opportunity(
-            command.collab_context_id,
-            binding_id,
             OpenOpportunityCommand(
+                collab_context_id=command.collab_context_id,
+                context=context,
                 scope_ref=command.collab_context_id,
                 participation_type=policy.participation_type.value,
                 opens_at=_now(),
                 capacity=policy.capacity,
                 reason="task_commission.publish",
             ),
-            context,
         )
         submitted = self._open_ops.submit_application(
             command.collab_context_id,

@@ -46,7 +46,7 @@ def _snapshot(store, binding):
 def published():
     store, _, lifecycle, service = make_open_service()
     binding = active_open_binding(lifecycle)
-    service.publish_opportunity(COLLET_ID, binding, opportunity_command(), make_actor())
+    service.publish_opportunity(opportunity_command())
     return store, binding, service
 
 
@@ -138,22 +138,17 @@ def test_capacity_is_counted_per_opportunity_and_query_is_binding_scoped(publish
         ),
         COLLET_ID,
     )
-    service.publish_opportunity(
-        COLLET_ID,
-        binding,
-        opportunity_command(opportunity_id="opp_free", capacity=1),
-        make_actor(),
-    )
+    service.publish_opportunity(opportunity_command(opportunity_id="opp_free", capacity=1))
     other_binding = replace(
         store.get_binding(AXES, binding, COLLET_ID), method_binding_id="mb_other"
     )
     store.upsert_binding(AXES, other_binding)
-    service.publish_opportunity(
-        COLLET_ID,
-        other_binding.method_binding_id,
-        opportunity_command(opportunity_id="opp_other_binding"),
-        make_actor(),
-    )
+    # Publish while B is the only ACTIVE Open binding, then restore A to
+    # verify query/capacity isolation with both bindings ACTIVE.
+    original_binding = store.get_binding(AXES, binding, COLLET_ID)
+    store.replace_binding(AXES, replace(original_binding, state=BindingState.SUSPENDED))
+    service.publish_opportunity(opportunity_command(opportunity_id="opp_other_binding"))
+    store.replace_binding(AXES, original_binding)
     [result] = service.query_opportunities(COLLET_ID, binding, make_actor())
     assert result.opportunity_id == "opp_free"
     with pytest.raises(ContextCollabNotFoundError):

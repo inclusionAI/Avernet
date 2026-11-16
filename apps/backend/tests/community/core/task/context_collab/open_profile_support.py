@@ -205,6 +205,8 @@ def active_open_binding(
 def opportunity_command(**overrides) -> OpenOpportunityCommand:
     """机会发布命令基型:未来开窗、无穷闭窗、GROUP_MEMBER 型。"""
     fields = {
+        "collab_context_id": COLLET_ID,
+        "context": make_actor(),
         "scope_ref": "task_scope_open_001",
         "participation_type": "GROUP_MEMBER",
         "opens_at": _iso_offset(-1),
@@ -242,12 +244,7 @@ def published_opportunity(
 ) -> str:
     """发布一个开放机会并返回 opportunity_id。"""
     active_open_binding(lifecycle, binding_id)
-    service.publish_opportunity(
-        COLLET_ID,
-        binding_id,
-        opportunity_command(**opportunity_overrides),
-        make_actor(),
-    )
+    service.publish_opportunity(opportunity_command(**opportunity_overrides))
     return "opp_alpha"
 
 
