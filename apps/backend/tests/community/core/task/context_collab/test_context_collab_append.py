@@ -131,7 +131,7 @@ class _FakeContextCollabRepository:
 
     def __init__(self) -> None:
         self.collets: dict[str, Collet] = {}
-        self.creation_facts: dict[str, ContextSpec] = {}
+        self.creation_facts: dict[str, dict] = {}
         self.tasks: dict[str, Task | None] = {}
         self.events: dict[str, list[EventRecord]] = {}
         self.append_calls: list[tuple[str, AppendEventRecordRequest]] = []
