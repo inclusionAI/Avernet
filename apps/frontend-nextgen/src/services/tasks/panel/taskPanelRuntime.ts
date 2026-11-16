@@ -11,7 +11,7 @@ import { useTaskSidePanelStore } from '@/stores/taskSidePanelStore';
 import { useTaskSessionAssociationStore } from '@/stores/taskSessionAssociationStore';
 import { useTaskConversationNavigationStore } from '@/stores/taskConversationNavigationStore';
 import { taskPanelArtifacts } from './taskPanelArtifactAdapter';
-import { loadTaskPanelAsset } from './taskPanelAssetLoader';
+import { loadTaskPanelRecoveryAsset } from './taskPanelRecoveryLoader';
 import type { ConversationRef, TaskPanelDeclaration, TaskPanelHost, TaskPanelController } from '@avernet-assets/task-panel';
 
 function viewerId(): string | null {
@@ -96,7 +96,7 @@ export async function getTaskPanelController(): Promise<TaskPanelController> {
   if (!loading) {
     ownerViewerId = userId; observedViewerId = userId;
     const revision = generation;
-    const pending = loadTaskPanelAsset().then(asset => {
+    const pending = loadTaskPanelRecoveryAsset().then(asset => {
       if (revision !== generation || viewerId() !== userId) throw Object.assign(new Error('任务副屏身份已失效。'), { name: 'AbortError' });
       const active = asset.createTaskPanelController(nextgenTaskPanelHost);
       controller = active;

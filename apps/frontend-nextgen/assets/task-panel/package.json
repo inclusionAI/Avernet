@@ -1,6 +1,6 @@
 {
   "name": "@avernet-assets/task-panel",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Shared task side-panel asset and conversation recovery runtime",
   "license": "Apache-2.0",
   "type": "module",
@@ -14,7 +14,7 @@
     "scripts/serve-assets.mjs"
   ],
   "scripts": {
-    "build": "vite build && tsc --emitDeclarationOnly",
+    "build": "vite build && vite build --mode recovery && tsc --emitDeclarationOnly",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
     "test": "vitest run",
     "test:umd": "node test/umd-contract.mjs",

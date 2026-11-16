@@ -1,6 +1,6 @@
 /** @jest-environment jsdom */
 import { beforeEach, expect, it, jest } from '@jest/globals';
-jest.mock('@/services/backendApi/httpClient', () => ({ backendRequest: jest.fn() }));
+jest.mock('@/services/backendApi/httpClient', () => ({ backendRequest: jest.fn(), BackendRequestError: jest.requireActual<typeof import('@/services/backendApi/httpClient')>('@/services/backendApi/httpClient').BackendRequestError }));
 let load: () => Promise<any>;
 let request: jest.Mock;
 const global = window as any;

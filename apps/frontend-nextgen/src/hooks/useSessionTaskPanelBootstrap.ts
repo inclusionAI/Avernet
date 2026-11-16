@@ -94,11 +94,12 @@ export function useSessionTaskPanelBootstrap(options: {
   panelRef: PanelRef;
   enabled?: boolean;
   history?: HistoryReader | null;
+  historyScope?: string | null;
 }) {
   return useSharedTaskPanelRecovery({
     conversation: options.sessionId ? { sessionId: options.sessionId, kind: options.kind ?? (options.sessionId.startsWith('bcs_grp_') ? 'group' : 'bot') } : null,
     userId: options.userId, panelRef: options.panelRef,
-    enabled: options.enabled !== false, history: options.history ?? null,
+    enabled: options.enabled !== false, history: options.history ?? null, historyScope: options.historyScope,
   });
 }
 export default useSessionTaskPanelBootstrap;
