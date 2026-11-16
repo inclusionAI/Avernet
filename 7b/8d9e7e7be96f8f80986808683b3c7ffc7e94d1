@@ -1,0 +1,42 @@
+simulator/modules/zbcsfuse/docker/Dockerfile
+  s_4a04db21844527::t_4fbab14add2b02 7,11,149
+simulator/.simulator.conf.example
+  s_4a04db21844527::t_6ef57352872d9a 72
+  s_4a04db21844527::t_d94df74ca5f9da 58-61
+simulator/modules/zbcsfuse/tests/selftest.sh
+  s_4a04db21844527::t_4fbab14add2b02 6
+simulator/modules/bcsfuse/manifest/pod.yaml
+  s_4a04db21844527::t_d94df74ca5f9da 33-65,86-96,103-104,107,138-141
+simulator/AGENTS.md
+  s_4a04db21844527::t_d94df74ca5f9da 818,1444,1451-1453
+  s_4a04db21844527::t_6ef57352872d9a 819,1439,1443,1445-1450
+  s_4a04db21844527::t_8464a153771444 1454
+simulator/scripts/cluster-common.sh
+  s_4a04db21844527::t_e118f6479c9af3 721-724
+  s_4a04db21844527::t_d94df74ca5f9da 666,685-686,700,717-720
+  s_4a04db21844527::t_97a5abfc0b3fef 725
+simulator/modules/zbcsfuse/manifest/pod.yaml
+  s_4a04db21844527::t_4fbab14add2b02 5,37-69,103-104,107,138-141
+simulator/modules/zbcsfuse/config/application-dev.yaml
+  s_4a04db21844527::t_4fbab14add2b02 6,13,31-33
+simulator/reliability/manifests/zbcsfuse-search-real.yaml
+  s_4a04db21844527::t_6ef57352872d9a 20,85,100-102,150,171-202,234,238
+simulator/reliability/AGENTS.md
+  s_4a04db21844527::t_c98fbbd3966fe9 250-252
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7b8d9e7e7be96f8f80986808683b3c7ffc7e94d1",
+  "prompts": {},
+  "sessions": {
+    "s_4a04db21844527": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cfe8-6cab-7bc3-b01d-580c09c07f37",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}

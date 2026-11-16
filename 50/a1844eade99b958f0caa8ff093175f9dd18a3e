@@ -1,0 +1,25 @@
+apps/backend/src/agentclaw/community/plugins/community/space_skill_source.py
+  s_edf46fcbab38c5::t_ca69575494049c 103,261,266
+  s_edf46fcbab38c5::t_12a93852c33443 12
+apps/backend/tests/community/plugins/test_space_skill_source_adapter.py
+  s_edf46fcbab38c5::t_4676f4e789a37f 58-60
+  s_edf46fcbab38c5::t_ca69575494049c 17,44,57,61
+apps/backend/src/agentclaw/community/core/skill_center/AGENTS.md
+  s_edf46fcbab38c5::t_12a93852c33443 137
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "50a1844eade99b958f0caa8ff093175f9dd18a3e",
+  "prompts": {},
+  "sessions": {
+    "s_edf46fcbab38c5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c940-a59d-7633-a002-5161c102349e",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

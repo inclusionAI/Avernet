@@ -1,0 +1,14 @@
+src/engine/src/engine/community/api/skills/router.py
+  h_dac96fb4da302f 235-240,275-280,308-313
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "45d0ee03faa368200107a89d29d314d9290a725a",
+  "prompts": {},
+  "humans": {
+    "h_dac96fb4da302f": {
+      "author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

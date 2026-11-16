@@ -1,0 +1,48 @@
+apps/evolverun/clawweb/public/modules/workflow/web/components/PackVersionEditor.tsx
+  s_0d747a1d195070::t_3ec77d2bd74143 2,294,299
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/WorkflowBaselineComparison.test.tsx
+  s_0d747a1d195070::t_2c94c412efc3ea 115-151,153-188
+  s_0d747a1d195070::t_5f5cbdb4e7d428 152
+  s_0d747a1d195070::t_93e443c6ac0438 2,12,16,20-33,39-40
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/PackVersionEditor.test.tsx
+  s_0d747a1d195070::t_7b6874ef146f8a 20-49,53,61
+  s_0d747a1d195070::t_19a352abeb59bf 50-52,54-60
+apps/evolverun/clawweb/public/modules/workflow/web/components/PackFileCodeEditor.tsx
+  s_0d747a1d195070::t_3ec77d2bd74143 1-121
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/SyntaxHighlightedText.test.tsx
+  s_0d747a1d195070::t_7b6874ef146f8a 1-76
+apps/evolverun/clawweb/public/modules/workflow/web/components/syntaxHighlighting.ts
+  s_0d747a1d195070::t_3ec77d2bd74143 1-113
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/PackFileCodeEditor.test.tsx
+  s_0d747a1d195070::t_7b6874ef146f8a 1-2,4-91,93-95,97-113,115-119,121-144,173-182
+  s_0d747a1d195070::t_2c94c412efc3ea 3,92,96,114,120,145-172
+apps/evolverun/clawweb/public/modules/workflow/web/components/SyntaxHighlightedText.tsx
+  s_0d747a1d195070::t_3ec77d2bd74143 1-38
+apps/evolverun/clawweb/public/modules/workflow/web/components/WorkflowBaselineComparison.tsx
+  s_0d747a1d195070::t_d832b36e6c8713 12
+  s_0d747a1d195070::t_6f5b410a79f814 50-51
+apps/evolverun/clawweb/public/modules/workflow/web/components/YamlEditor.tsx
+  s_0d747a1d195070::t_2d72848b6fd24d 8,223,235
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/WorkflowDiffPanesHighlighting.test.tsx
+  s_0d747a1d195070::t_27c6824424340e 1-176
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/YamlEditor.test.tsx
+  s_0d747a1d195070::t_07b0e2fdbd5a22 1,63-64
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/YamlEditorHighlighting.test.tsx
+  s_0d747a1d195070::t_5e1b9c5d644639 1-153
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6d35d4377d9c9cf4d644436d39587b2f6d0671e3",
+  "prompts": {},
+  "sessions": {
+    "s_0d747a1d195070": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c32e-6f54-7660-9574-1c7f1e0f2b2e",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "fudapeng <fudp@example.com>"
+    }
+  }
+}

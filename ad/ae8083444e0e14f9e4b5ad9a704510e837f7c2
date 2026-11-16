@@ -1,0 +1,27 @@
+apps/bcs-internal/third_party/tracer-rust/tracer-core/tests/context_contract.rs
+  s_376050007d0974::t_e416ec4901431d 1-240
+apps/bcs-internal/crates/bootstrap/bcs-internal/Cargo.toml
+  s_376050007d0974::t_470b259b98532e 33
+apps/bcs-internal/third_party/tracer-rust/tracer-core/tests/lifecycle.rs
+  s_376050007d0974::t_08908b7211b565 1-13,16-53,55-71,73-74,77-129,131,133-136
+  s_376050007d0974::t_708bceaa4e4104 14-15,54,72,75-76,130,132
+apps/bcs-internal/crates/bootstrap/bcs-internal/src/main.rs
+  s_376050007d0974::t_470b259b98532e 116-159
+  s_376050007d0974::t_e8988ab07ac1ce 115
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "adae8083444e0e14f9e4b5ad9a704510e837f7c2",
+  "prompts": {},
+  "sessions": {
+    "s_376050007d0974": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1af56-3f8c-72a1-8070-747ccd82cb4f",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Zimin Zhang <zhangzimin.zzm@antgroup.com>"
+    }
+  }
+}

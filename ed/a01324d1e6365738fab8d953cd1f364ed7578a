@@ -1,0 +1,23 @@
+apps/bcs/scripts/e2e-runner/bcs_e2e/edge_read_contract.py
+  s_cecdc98e721f4b::t_f8d51bd78b178c 24
+apps/bcs/scripts/e2e-runner/bcs_e2e/edge_search_contract.py
+  s_cecdc98e721f4b::t_88d934f297335e 22
+apps/bcs/scripts/e2e-runner/tests/test_migration_inventory.py
+  s_cecdc98e721f4b::t_5a7907fcf062d9 14,265
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "eda01324d1e6365738fab8d953cd1f364ed7578a",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "Ling-3.1-flash"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

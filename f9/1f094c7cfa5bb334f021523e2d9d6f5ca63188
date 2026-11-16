@@ -1,0 +1,41 @@
+apps/bcs/scripts/e2e-runner/bcs_e2e/case_command_registration.py
+  s_cecdc98e721f4b::t_ab47240cc3d6b1 10,52,269-277
+apps/bcs/scripts/e2e-runner/bcs_e2e/cli.py
+  s_cecdc98e721f4b::t_5d2f3f9c023301 65,657-666
+apps/bcs/scripts/e2e-runner/bcs_e2e/edge_permission_backlog/case.py
+  s_cecdc98e721f4b::t_2ec702579d3b08 1-100
+apps/bcs/scripts/e2e-runner/bcs_e2e/edge_permission_backlog/case_run.py
+  s_cecdc98e721f4b::t_01ae70548cc393 1-138
+apps/bcs/scripts/e2e-runner/bcs_e2e/edge_permission_backlog/reporting.py
+  s_cecdc98e721f4b::t_c97e880793de2d 1-24
+apps/bcs/scripts/e2e-runner/bcs_e2e/inventory.py
+  s_cecdc98e721f4b::t_ba43fe26986cf0 91
+apps/bcs/scripts/e2e-runner/bcs_e2e/migration_inventory.py
+  s_cecdc98e721f4b::t_43c2d2c1675942 773,776-780
+apps/bcs/scripts/e2e-runner/executor-migration.json
+  s_cecdc98e721f4b::t_81bd73a38892f3 305,314
+apps/bcs/scripts/e2e-runner/tests/test_edge_permission_backlog.py
+  s_cecdc98e721f4b::t_07f5e6f5d2451a 1-179
+apps/bcs/scripts/e2e-runner/tests/test_local_backlog_story_commands.py
+  s_cecdc98e721f4b::t_52763a9bb9daf8 344-403
+apps/bcs/scripts/e2e-runner/tests/test_local_edge_friend_mutation_contract.py
+  s_cecdc98e721f4b::t_7dd7e121b2b514 243,245,247-251
+apps/bcs/scripts/e2e-runner/tests/test_migration_inventory.py
+  s_cecdc98e721f4b::t_0886d96bcbb52a 635
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f91f094c7cfa5bb334f021523e2d9d6f5ca63188",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "Ling-3.1-flash"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

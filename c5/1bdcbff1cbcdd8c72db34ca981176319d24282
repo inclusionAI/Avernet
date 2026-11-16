@@ -1,0 +1,23 @@
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/fanout-state-fixture.ts
+  s_4d7ff3a9a5b741::t_049eda94a4cac2 15
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/__tests__/fanouts.test.ts
+  s_4d7ff3a9a5b741::t_4d8e86709360dd 35-40
+apps/evolverun/clawweb/public/modules/workflow/docs/subworkflow-observability.md
+  s_4d7ff3a9a5b741::t_d08d82285d9e72 150-182
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c51bdcbff1cbcdd8c72db34ca981176319d24282",
+  "prompts": {},
+  "sessions": {
+    "s_4d7ff3a9a5b741": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "4bf21e2a-2b8a-4610-ac3d-d02883a9a7da",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "fudapeng <fudp@example.com>"
+    }
+  }
+}

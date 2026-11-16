@@ -1,0 +1,71 @@
+apps/baas/README.md
+  s_47ed8e91e4b8af::t_fa27cd1d3e3919 7
+apps/baas/docs/agents/existing-knowledge.md
+  s_47ed8e91e4b8af::t_cd96b482009f05 1-41
+apps/baas/docs/arch/README.md
+  s_47ed8e91e4b8af::t_ba80ef0c6350aa 7-8,14-15
+apps/baas/docs/diagnostics/README.md
+  s_47ed8e91e4b8af::t_3b88017742957e 16-17
+apps/baas/docs/flows/README.md
+  s_47ed8e91e4b8af::t_63690b744a8fb0 15-16
+apps/baas/specs/README.md
+  s_47ed8e91e4b8af::t_69deb19c3f4b5b 8-13
+apps/backend/README.md
+  s_47ed8e91e4b8af::t_a5a3e67e6dc402 7
+apps/backend/docs/adr/README.md
+  s_47ed8e91e4b8af::t_2f1d20e54477d7 6-40
+apps/backend/docs/agents/existing-knowledge.md
+  s_47ed8e91e4b8af::t_85f9c925ea154a 1-180
+apps/backend/docs/arch/README.md
+  s_47ed8e91e4b8af::t_03374e4975d040 12-13
+apps/backend/docs/diagnostics/README.md
+  s_47ed8e91e4b8af::t_dc495236ae36ae 14-15
+apps/backend/docs/flows/README.md
+  s_47ed8e91e4b8af::t_084d95834d7076 15-16
+apps/backend/specs/README.md
+  s_47ed8e91e4b8af::t_732a123af4f003 12-172
+apps/bcs/README.md
+  s_47ed8e91e4b8af::t_526df3d98017d7 7
+apps/bcs/docs/adr/README.md
+  s_47ed8e91e4b8af::t_b85cdcf72bd6fd 6-9
+apps/bcs/docs/agents/existing-knowledge.md
+  s_47ed8e91e4b8af::t_2a8d1e5f16fd4d 1-249
+apps/bcs/docs/arch/README.md
+  s_47ed8e91e4b8af::t_92779477bcd5bd 12-13
+apps/bcs/docs/diagnostics/README.md
+  s_47ed8e91e4b8af::t_201993a9858f1f 16-17
+apps/bcs/docs/flows/README.md
+  s_47ed8e91e4b8af::t_b5fcbf37851de1 14-15
+apps/bcs/specs/README.md
+  s_47ed8e91e4b8af::t_6d6ecf78ea7f9a 8-41
+apps/bcsfuse/README.md
+  s_47ed8e91e4b8af::t_4823886e673fab 7
+apps/bcsfuse/docs/adr/README.md
+  s_47ed8e91e4b8af::t_eea453af35fc7f 6-9
+apps/bcsfuse/docs/agents/existing-knowledge.md
+  s_47ed8e91e4b8af::t_c2d33efc115e6a 1-45
+apps/bcsfuse/docs/arch/README.md
+  s_47ed8e91e4b8af::t_307d18c73122bc 12-13
+apps/bcsfuse/docs/diagnostics/README.md
+  s_47ed8e91e4b8af::t_b3a1467c505f09 16-17
+apps/bcsfuse/docs/flows/README.md
+  s_47ed8e91e4b8af::t_6d918bf7415120 15-16
+apps/bcsfuse/specs/README.md
+  s_47ed8e91e4b8af::t_8b5b09851b551c 8-13
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a3bec3752c6a21aa4c1fbd49c32e583d1850ea95",
+  "prompts": {},
+  "sessions": {
+    "s_47ed8e91e4b8af": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c399-a9b4-7db3-b10d-10bee70838e6",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

@@ -1,0 +1,20 @@
+apps/frontend-nextgen/src/hooks/useSessionTaskPanelBootstrap.ts
+  h_059e888e5e4e82 15,135-136,144-145,189,199,211
+apps/frontend-nextgen/src/pages/Workspace/hooks/useGroupChatPanelCleanup.ts
+  h_059e888e5e4e82 19-24
+apps/frontend-nextgen/test/components/Workspace/ChatLayoutPanelSlot.test.tsx
+  h_059e888e5e4e82 7-8,11,13,16,19-33,116-117,121-152
+apps/frontend-nextgen/test/hooks/useSessionTaskPanelBootstrap.test.tsx
+  h_059e888e5e4e82 15,368-466
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f09e094c29d7292887edbc4ebeb110088372bc34",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

@@ -1,0 +1,24 @@
+apps/backend/specs/2026-11-09-bbs-context-collaboration-protocol/spec.md
+  s_530d1679367be6::t_5b1d26680fdaff 892
+apps/backend/src/agentclaw/community/core/task/context_collab/sql/2026_11_11_context_collab.sql
+  s_530d1679367be6::t_63814eb5d3f8f0 37
+apps/backend/src/agentclaw/community/core/task/context_collab/persistence/models.py
+  s_530d1679367be6::t_8cc0e920005a9e 20
+  s_530d1679367be6::t_efc22c4406c4de 147
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f2d1a26ca3de16b717c769f728754ef97f098032",
+  "prompts": {},
+  "sessions": {
+    "s_530d1679367be6": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "e16628b6-75d3-4800-82ec-39cccf849f53",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

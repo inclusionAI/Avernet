@@ -1,0 +1,21 @@
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/authorization_rules_caller_identity.py
+  s_bb98e2f10840b6::t_52e2eee0936e3e 1-20
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/authorization_rules.py
+  s_bb98e2f10840b6::t_52e2eee0936e3e 5,43
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e75f6e12f450725931c0f28a19bd686e27687139",
+  "prompts": {},
+  "sessions": {
+    "s_bb98e2f10840b6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a162ee-dd64-7f52-9208-9fd1326f32e5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

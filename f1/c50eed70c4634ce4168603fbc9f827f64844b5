@@ -1,0 +1,35 @@
+src/ecb/ecb/application/task_benchmark/oncall_case_evaluation/service.py
+  s_7517e37f6fcee5::t_cdbc73d8828a3d 17-22,36,299-307,311-314,859,861,865,897-905,907-908,921-988
+  s_7517e37f6fcee5::t_f172258c2ff723 989
+src/ecb/ecb/servers/web/task_benchmark_wiring.py
+  s_7517e37f6fcee5::t_ccff6d9fbc9553 322-334,339-340
+src/ecb/tests/application/task_benchmark/oncall_case_evaluation/test_llm_judge.py
+  s_7517e37f6fcee5::t_3569d0153535e4 65,67-121,123-124,127-129,132,134-142,145,148,167-179,232-243,268-269,272-278,280-298,300-302
+  s_7517e37f6fcee5::t_a6a57ef9e094d4 270-271,279,299
+  s_7517e37f6fcee5::t_e1876d0401d8c0 1-64,66,122,125-126,146,149-162,164-166,180-231,244-267
+  s_7517e37f6fcee5::t_9aff7d3bf2eaf1 130-131,133,143-144,147,163
+src/ecb/ecb/application/task_benchmark/oncall_case_evaluation/llm_judge.py
+  s_7517e37f6fcee5::t_dcb0a991e602c4 1-30,40,46-47,49,63,123-124,146-171,173-177,180-183,185-190,198,213,215-216,228-302
+  s_7517e37f6fcee5::t_ac32fe7e3871b9 76-77,138-141
+  s_7517e37f6fcee5::t_a6a57ef9e094d4 219-224,226-227
+  s_7517e37f6fcee5::t_699b390d6cab8c 41-45,50-62
+  s_7517e37f6fcee5::t_9aff7d3bf2eaf1 197
+  s_7517e37f6fcee5::t_da66d79d6c4d61 31-39,48,64-75,78-122,125-137,142-145,172,178-179,184,191-196,199-208,214,217-218,225
+  s_7517e37f6fcee5::t_4ed200772906c1 209-212
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f1c50eed70c4634ce4168603fbc9f827f64844b5",
+  "prompts": {},
+  "sessions": {
+    "s_7517e37f6fcee5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a9dc-9a35-7de0-88fa-7da8184fb762",
+        "model": "GLM-5.3"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

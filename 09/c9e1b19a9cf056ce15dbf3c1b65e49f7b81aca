@@ -1,0 +1,45 @@
+apps/backend/src/agentclaw/corp/plugins/prod/token_exchange_jit.py
+  s_fc1557df5d7924::t_1614ac7207861f 8,98-105,118,125,140,293
+apps/backend/tests/corp/di/test_jit_token_injection.py
+  s_fc1557df5d7924::t_7c06e07c0402ea 4,25,47,167
+apps/backend/tests/corp/di/test_jit_config_loading.py
+  s_fc1557df5d7924::t_7c06e07c0402ea 58
+apps/backend/tests/corp/plugins/prod/test_token_exchange_jit.py
+  s_fc1557df5d7924::t_7c06e07c0402ea 47
+docs/flows/backend-runtime-targeting.md
+  s_fc1557df5d7924::t_f85b74787ec4e4 17-29
+apps/backend/tests/corp/di/test_token_exchange_adapters.py
+  s_fc1557df5d7924::t_7c06e07c0402ea 41,170
+  s_fc1557df5d7924::t_13da89ae391fc1 218
+apps/backend/tests/corp/di/test_jit_teclaw_eligibility.py
+  s_fc1557df5d7924::t_29e2c695713603 9,195-263
+  s_fc1557df5d7924::t_7c06e07c0402ea 64
+  s_fc1557df5d7924::t_ab7bd74eaa9a6a 5,10-13,18-21,24,26,37,42,45-47,49,51-54,56-61,66-87,89-139,155-158,160-189,192-194
+  s_fc1557df5d7924::t_efcdd4f06dde53 6,14-17,25
+  s_fc1557df5d7924::t_6974c49702d71b 1-4,7-8,22-23,27-36,38-41,43-44,48,50,55,62-63,65,88,159,190-191
+  s_fc1557df5d7924::t_6aee4fb6fff5c5 140-154
+apps/backend/src/agentclaw/corp/di/token_exchange.py
+  s_fc1557df5d7924::t_1614ac7207861f 6-7,49,54,57,64,69-74,76-77,79-81,83-87
+  s_fc1557df5d7924::t_05c13a735b1057 63,82,88,99,101,104-105
+  s_fc1557df5d7924::t_f85b74787ec4e4 5,12,75,78
+  s_fc1557df5d7924::t_5c10ce6942b08d 58-62
+  s_fc1557df5d7924::t_d78a395f3ab05f 65-68
+apps/backend/src/agentclaw/corp/di/modules/infrastructure/corp/identity.py
+  s_fc1557df5d7924::t_1614ac7207861f 41,157-172,177-178,183
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "09c9e1b19a9cf056ce15dbf3c1b65e49f7b81aca",
+  "prompts": {},
+  "sessions": {
+    "s_fc1557df5d7924": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1dde0-66b5-7650-8147-9dd4121d1f49",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

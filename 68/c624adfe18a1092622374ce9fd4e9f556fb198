@@ -1,0 +1,32 @@
+apps/bcsfuse/docs/deployment/zbcsfuse-sre-tr-load-test.md
+  s_9e428ec8192673::t_5af2df00f5d485 78
+apps/bcsfuse/internal/bcsfuse_internal/bootstrap/zbcsfuse.py
+  s_9e428ec8192673::t_5af2df00f5d485 262
+  s_9e428ec8192673::t_d9368b65952748 3
+apps/bcsfuse/tests/alipay/test_tr_server.py
+  s_9e428ec8192673::t_6e28ea9ab66d65 4,6-7,77,79-88,94-96,126,194
+apps/bcsfuse/tests/alipay/test_tr_discover.py
+  s_9e428ec8192673::t_d9368b65952748 184-185
+  s_9e428ec8192673::t_5af2df00f5d485 37,71,75,87,132-136,266,318-320,367,398,402-404,414-416,450,457-458
+  s_9e428ec8192673::t_987060dc7f63cb 462-475
+apps/bcsfuse/internal/zbcsfuse_internal/adapters/tr_discover.py
+  s_9e428ec8192673::t_5af2df00f5d485 1,4,179-180,196-223
+apps/bcsfuse/internal/bcsfuse_internal/providers/discover_tr.py
+  s_9e428ec8192673::t_5af2df00f5d485 1,8-9,26,33-37,39-41,44-45,48-51,54,60-70
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "68c624adfe18a1092622374ce9fd4e9f556fb198",
+  "prompts": {},
+  "sessions": {
+    "s_9e428ec8192673": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1673c-d8f0-7222-9db7-0c957c6d5e32",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}

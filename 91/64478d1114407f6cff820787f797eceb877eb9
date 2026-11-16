@@ -1,0 +1,30 @@
+apps/backend/src/agentclaw/corp/di/token_exchange.py
+  s_620fb772f449f4::t_0acee6d9a81e2d 51-56,58-64
+apps/backend/src/agentclaw/corp/plugins/prod/passport.py
+  s_620fb772f449f4::t_98cd91d52d2d07 4-5,707-712
+apps/backend/src/agentclaw/corp/plugins/prod/token_exchange_jit.py
+  s_620fb772f449f4::t_0acee6d9a81e2d 8,195-210
+apps/backend/tests/corp/plugins/prod/test_token_exchange_jit.py
+  s_620fb772f449f4::t_fa85b37c026feb 324
+apps/backend/tests/corp/di/test_token_exchange_adapters.py
+  s_620fb772f449f4::t_1f6de02e70b883 223-226,233-240
+  s_620fb772f449f4::t_98cd91d52d2d07 33,41,64,73,112,120,145,173,248
+  s_620fb772f449f4::t_0acee6d9a81e2d 38,74
+  s_620fb772f449f4::t_87d51ab82e884d 241-242
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9164478d1114407f6cff820787f797eceb877eb9",
+  "prompts": {},
+  "sessions": {
+    "s_620fb772f449f4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a123ca-8212-7ef2-8637-c02975d987a2",
+        "model": "gpt-6-astra"
+      },
+      "human_author": null
+    }
+  }
+}

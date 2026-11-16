@@ -1,0 +1,33 @@
+apps/bcs/scripts/e2e-runner/bcs_e2e/artifact.py
+  s_cecdc98e721f4b::t_383ec4eb1c3075 117-122
+apps/bcs/scripts/e2e-runner/bcs_e2e/draft_delivery/checks.py
+  s_cecdc98e721f4b::t_3f53e3d132e92b 142,144,162,234-257
+apps/bcs/scripts/e2e-runner/bcs_e2e/draft_delivery/contract.py
+  s_cecdc98e721f4b::t_7202ebea789860 45
+apps/bcs/scripts/e2e-runner/bcs_e2e/draft_delivery/story.py
+  s_cecdc98e721f4b::t_f44c82da694af9 1-326
+apps/bcs/scripts/e2e-runner/draft-delivery-migration-contract.json
+  s_cecdc98e721f4b::t_10830bfd1c75c6 18
+apps/bcs/scripts/e2e-runner/tests/test_draft_delivery_checks.py
+  s_cecdc98e721f4b::t_9ca2732cc2f272 166-167,172,193,197
+apps/bcs/scripts/e2e-runner/tests/test_draft_delivery_contract.py
+  s_cecdc98e721f4b::t_1c33d43f422806 28,30,37,87,128-131
+apps/bcs/scripts/e2e-runner/tests/test_draft_delivery_story.py
+  s_cecdc98e721f4b::t_249c40ef487f25 1-204
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a242e9f8eac15a7310b9ac5f517189ac750fc022",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "Ling-3.1-flash"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

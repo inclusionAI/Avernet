@@ -1,0 +1,19 @@
+apps/backend/src/agentclaw/community/core/expert_chat/README.md
+  s_edf09d9cb9f10c::t_30dbdb7f7eacc0 53-56
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "fdb179fa3ed571a5fb95b29c1b83e14eef45c4a5",
+  "prompts": {},
+  "sessions": {
+    "s_edf09d9cb9f10c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c617-046a-7441-bc8f-a1cf3118dc24",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

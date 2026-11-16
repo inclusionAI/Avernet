@@ -1,0 +1,26 @@
+apps/backend/specs/2026-10-28-service-env-eval-api/spec.md
+  h_b419236b0792fa 56,58-59,159-180
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/service_envs/router.py
+  h_b419236b0792fa 6,19,44-47,60-63,69-77,80
+apps/backend/src/agentclaw/community/api/publish_flow_service.py
+  h_b419236b0792fa 6-7,42,48-49
+apps/backend/src/agentclaw/community/core/service_bot/services/publish_flow/eval_publish_mixin.py
+  h_b419236b0792fa 6-7,47,71,138-144,156
+apps/backend/tests/community/adapters/http/openapi_v1/test_service_env_endpoints.py
+  h_b419236b0792fa 43,245-265
+apps/backend/tests/community/core/service_bot/services/publish_flow/test_eval_publish_external_params.py
+  h_b419236b0792fa 150-186
+apps/backend/tests/community/endpoints/test_openapi_service_envs.py
+  h_b419236b0792fa 49-50,132-165
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ee6eb68ff5d4ff6075e209641d02b26dfea83f5f",
+  "prompts": {},
+  "humans": {
+    "h_b419236b0792fa": {
+      "author": "hongwei.quhw <hongwei.quhw@antfin.com>"
+    }
+  }
+}

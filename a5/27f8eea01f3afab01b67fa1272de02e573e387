@@ -1,0 +1,41 @@
+CONTEXT-MAP.md
+  s_47ed8e91e4b8af::t_efbd66e3403299 5-6,16,24,57
+apps/backend/docs/flows/README.md
+  s_47ed8e91e4b8af::t_efbd66e3403299 12-13
+docs/agents/knowledge-standard.md
+  s_47ed8e91e4b8af::t_b02b1026a2eb2c 3
+apps/baas/README.md
+  s_47ed8e91e4b8af::t_fa7c419e79b79a 3-14
+apps/baas/docs/diagnostics/README.md
+  s_47ed8e91e4b8af::t_7a36e5ed836fd2 1-11
+apps/baas/docs/flows/README.md
+  s_47ed8e91e4b8af::t_6578fce8c62b3b 1-9
+apps/bcs-internal/README.md
+  s_47ed8e91e4b8af::t_7ebb0bd6c3e2a3 3-14
+apps/bcs-internal/docs/diagnostics/README.md
+  s_47ed8e91e4b8af::t_a5c83d68ff4d4b 1-11
+apps/bcs-internal/docs/flows/README.md
+  s_47ed8e91e4b8af::t_0717b218845ca3 1-9
+apps/bcsfuse/README.md
+  s_47ed8e91e4b8af::t_9b5e1b24c75d28 3-14
+apps/bcsfuse/docs/diagnostics/README.md
+  s_47ed8e91e4b8af::t_c62191cef0aa6a 1-11
+apps/bcsfuse/docs/flows/README.md
+  s_47ed8e91e4b8af::t_721079f9a7784e 1-10
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a527f8eea01f3afab01b67fa1272de02e573e387",
+  "prompts": {},
+  "sessions": {
+    "s_47ed8e91e4b8af": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c399-a9b4-7db3-b10d-10bee70838e6",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "卷瓜 <juangua.swj@antgroup.com>"
+    }
+  }
+}
