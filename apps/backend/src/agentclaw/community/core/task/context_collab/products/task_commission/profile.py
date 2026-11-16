@@ -84,7 +84,8 @@ TASK_COMMISSION_PROFILE = ProductProfileCreateCommand(
         downgrade_policy="reject_missing_required",
         migration_policy="new_instances_only",
     ),
-    publication=OpenPublicationProfile(                                  # 产品发布参与机会时使用的规则
+    # 产品发布参与机会时使用的规则
+    publication=OpenPublicationProfile(
         admission=DesignatedOpenAdmission(
             applicant_role="assignee",
             accountable_role="owner",
