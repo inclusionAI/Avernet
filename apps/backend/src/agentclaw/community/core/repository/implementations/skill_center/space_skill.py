@@ -127,6 +127,10 @@ class SpaceSkillRepository(SpaceSkillRepositoryProtocol):
                         space_id=ownership_data["space_id"],
                     )
                     return self._creation_replay_result(session, replay, env=env)
+                # Take the same row lock delete_team_space holds: without FOR
+                # UPDATE a concurrent soft-delete can commit between this read
+                # and the ownership insert, leaving a Skill bound to a deleted
+                # Space even though the deletion's emptiness recheck passed.
                 space = (
                     session.query(SpaceModel)
                     .filter(
@@ -134,6 +138,7 @@ class SpaceSkillRepository(SpaceSkillRepositoryProtocol):
                         SpaceModel.env == env,
                         SpaceModel.deleted_at.is_(None),
                     )
+                    .with_for_update()
                     .one_or_none()
                 )
                 if space is None:

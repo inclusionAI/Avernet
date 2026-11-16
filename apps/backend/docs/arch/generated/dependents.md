@@ -29,6 +29,7 @@ modules that import it. Built from the actual import graph.
 ## `agentclaw.community.core.agentswarm`
 
 - `agentclaw.community.api`
+- `agentclaw.community.core.bot_management`
 - `agentclaw.community.plugins.local`
 
 ## `agentclaw.community.core.aicoding`

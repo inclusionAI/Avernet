@@ -473,7 +473,9 @@ def submit_bot_creation_with_manifest(
     spec = _prepare_create(spec=spec, context=context, bot_service=bot_service)
 
     # Before anything is written: an invalid source must not strand a manifest.
-    identity_source = resolve_identity_source(spec=spec, bot_service=bot_service)
+    identity_source = resolve_identity_source(
+        spec=spec, bot_service=bot_service, passport_plugin=passport_plugin,
+    )
 
     bot_name = validate_bot_name(spec.bot_name) if spec.bot_name is not None else None
     bot_service.check_create_bot_preflight(
@@ -808,7 +810,9 @@ def complete_bot_authorization(
 
     # The code comes from the identity source when nothing was applied for.
     agent_code = (
-        inherited_agent_code(spec=spec, bot_service=bot_service)
+        inherited_agent_code(
+            spec=spec, bot_service=bot_service, passport_plugin=passport_plugin,
+        )
         if authorized
         else _query_agent_code(passport_plugin, bot_id=bot_id, user_id=user_id)
     )

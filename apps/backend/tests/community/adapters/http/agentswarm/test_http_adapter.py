@@ -35,6 +35,8 @@ from agentclaw.community.core.agentswarm.service.protocols import (
     GuardEventDetailItem, GuardEventSummary, IdentitySourceInvalid,
     IdentitySourceRequired, QueueDepthExceeded, RoundDetailItem,
     RoundEvent, RunDetail, RunEvents, SubmitRunRequest, TenantRunLimitExceeded,
+    IDENTITY_SOURCE_NO_PASSPORT, IDENTITY_SOURCE_NOT_OWNED,
+    IDENTITY_SOURCE_UNVERIFIED,
 )
 from agentclaw.community.api.agentswarm_service import (
     AgentSwarmServiceProtocol,
@@ -679,6 +681,84 @@ class TestErrorMapping:
 
         assert resp.status_code == 422
         assert "20261110_source" in resp.json()["error"]
+
+    @pytest.mark.parametrize("reason", [
+        IDENTITY_SOURCE_NOT_OWNED,
+        IDENTITY_SOURCE_NO_PASSPORT,
+        IDENTITY_SOURCE_UNVERIFIED,
+    ])
+    def test_each_identity_source_case_answers_its_own_422_body(
+            self, client, stub, reason):
+        """One envelope, one status, three bodies -- each saying what to do."""
+        message = f"identity source '20261110_source' refused: {reason}"
+        stub.submit_error = IdentitySourceInvalid(
+            "20261110_source", reason, message=message)
+        resp = client.post("/openapi/v1/agentswarm/runs", json=_spec_body())
+
+        assert resp.status_code == 422
+        assert set(resp.json()) == {"error"}
+        assert resp.json()["error"] == message
+
+    def test_the_three_identity_source_bodies_are_distinct(self, client, stub):
+        bodies = set()
+        for reason in (IDENTITY_SOURCE_NOT_OWNED, IDENTITY_SOURCE_NO_PASSPORT,
+                       IDENTITY_SOURCE_UNVERIFIED):
+            stub.submit_error = IdentitySourceInvalid(
+                "20261110_source", reason)
+            resp = client.post("/openapi/v1/agentswarm/runs", json=_spec_body())
+            assert resp.status_code == 422
+            bodies.add(resp.json()["error"])
+        assert len(bodies) == 3
+
+    def test_the_unverified_body_never_claims_the_bot_has_no_passport(
+            self, client, stub):
+        """A provider outage must not read as a verdict on the Bot."""
+        stub.submit_error = IdentitySourceInvalid(
+            "20261110_source", IDENTITY_SOURCE_UNVERIFIED)
+        resp = client.post("/openapi/v1/agentswarm/runs", json=_spec_body())
+
+        assert resp.status_code == 422
+        error = resp.json()["error"]
+        assert "could not be verified" in error
+        assert "holds no issued passport" not in error
+
+    def test_the_no_passport_body_says_the_bot_holds_no_passport(
+            self, client, stub):
+        stub.submit_error = IdentitySourceInvalid(
+            "20261110_source", IDENTITY_SOURCE_NO_PASSPORT)
+        resp = client.post("/openapi/v1/agentswarm/runs", json=_spec_body())
+
+        assert resp.status_code == 422
+        assert "holds no issued passport" in resp.json()["error"]
+
+    def test_an_invalid_source_rejection_records_its_case_in_the_audit(
+            self, client, stub, audit):
+        stub.submit_error = IdentitySourceInvalid(
+            "20261110_source", IDENTITY_SOURCE_NOT_OWNED)
+        resp = client.post("/openapi/v1/agentswarm/runs", json=_spec_body())
+
+        assert resp.status_code == 422
+        (row,) = audit.rows
+        assert row == {
+            "tenant": TENANT, "actor": STAFF_ID,
+            "action": "submit_rejected",
+            "reason": "identity_source_invalid_not_owned",
+            "run_id": None, "source": "http",
+        }
+
+    @pytest.mark.parametrize("reason", [
+        IDENTITY_SOURCE_NOT_OWNED,
+        IDENTITY_SOURCE_NO_PASSPORT,
+        IDENTITY_SOURCE_UNVERIFIED,
+    ])
+    def test_each_identity_source_case_is_audited_apart(
+            self, client, stub, audit, reason):
+        """An outage (unverified) must not be buried under caller mistakes."""
+        stub.submit_error = IdentitySourceInvalid("20261110_source", reason)
+        client.post("/openapi/v1/agentswarm/runs", json=_spec_body())
+
+        (row,) = audit.rows
+        assert row["reason"] == f"identity_source_invalid_{reason}"
 
 
 class TestAuthWiring:

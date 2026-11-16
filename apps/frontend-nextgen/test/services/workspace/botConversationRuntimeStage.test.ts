@@ -2,7 +2,9 @@
 import { backendRequest } from '@/services/backendApi/httpClient';
 import {
   botSessionService,
+  buildConversationSessionRequestRange,
   resolveChatRuntimeStage,
+  supportsConversationInstanceScope,
   withFriendBotRequestParams,
   type ChatBotView,
 } from '@/services/workspace/botSessionService';
@@ -151,3 +153,42 @@ test.each(['personal', 'desktop', undefined])(
     for (const [, options] of request.mock.calls) expect(options?.params).not.toHaveProperty('stage');
   },
 );
+
+test('多实例范围会话详情和消息历史都透传 device_uuid', async () => {
+  const range = { deviceUuid: 'device-1', stage: 'online' as const };
+  request.mockClear();
+
+  const detailResult = await botSessionService.getSessionDetail(base, 'human_viewer', 's1', range);
+  const detailOptions = request.mock.calls.find(([url]) => url.endsWith('/sessions/s1'))?.[1];
+  const messagesResult = await botSessionService.listMessagesPage(
+    base,
+    'human_viewer',
+    's1',
+    1,
+    50,
+    range,
+  );
+  const messagesOptions = request.mock.calls.find(([url]) => url.endsWith('/sessions/s1/messages'))?.[1];
+
+  expect(detailResult.ok).toBe(true);
+  expect(messagesResult.messages).toEqual([]);
+  for (const options of [detailOptions, messagesOptions]) {
+    expect(options?.params).toMatchObject({
+      user_id: 'viewer',
+      owner_id: 'entity',
+      stage: 'online',
+      device_uuid: 'device-1',
+    });
+  }
+});
+
+test('buildConversationSessionRequestRange derives stage and supportsConversationInstanceScope gates supported bots', () => {
+  const range = buildConversationSessionRequestRange(
+    { ...base, runtimeStage: 'online' as const },
+    'device-1',
+  );
+  expect(range).toEqual({ deviceUuid: 'device-1', stage: 'online' });
+  expect(supportsConversationInstanceScope({ ...base, runtimeStage: 'online' as const })).toBe(true);
+  expect(supportsConversationInstanceScope({ ...base, isFriendBot: true })).toBe(false);
+  expect(supportsConversationInstanceScope({ ...base, engine: 'teclaw' })).toBe(false);
+});

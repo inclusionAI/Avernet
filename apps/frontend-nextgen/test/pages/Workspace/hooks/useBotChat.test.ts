@@ -2,6 +2,7 @@
 import { useBotChat } from '@/pages/Workspace/hooks/useBotChat';
 import { createBotChatProvider, isAicodingConnectionEngine } from '@/services/workspace/botChatProvider';
 import type { BotChatSessionView, ChatBotView } from '@/services/workspace/botSessionService';
+import { useConversationStore } from '@/stores/conversationStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { beforeEach, expect, it, jest } from '@jest/globals';
 import { act, renderHook, waitFor } from '@testing-library/react';
@@ -55,6 +56,7 @@ beforeEach(() => {
   });
   useWorkspaceStore.getState().resetWorkspace();
   useWorkspaceStore.setState({ activeIdentityId: 'human-1' });
+  useConversationStore.setState({ instanceSelectionByBotId: {} });
   const fn = () => jest.fn<any>();
   mockProvider = {
     loadHistory: fn().mockResolvedValue([]),
@@ -90,6 +92,23 @@ beforeEach(() => {
 it('仅当 bot 与 session 齐全时创建 provider', () => {
   renderHook(() => useBotChat(bot, session));
   expect(mockedFactory).toHaveBeenCalledWith({ bot, userId: 'human-1', sessionId: 's1' });
+});
+
+it('service Bot 会把已选实例范围传给 provider', () => {
+  const serviceBot = {
+    ...bot,
+    botType: 'service',
+    engine: 'openclaw',
+    runtimeStage: 'online' as const,
+  };
+  useConversationStore.setState({ instanceSelectionByBotId: { [serviceBot.botId]: 'device-1' } });
+  renderHook(() => useBotChat(serviceBot, session));
+  expect(mockedFactory).toHaveBeenCalledWith({
+    bot: serviceBot,
+    userId: 'human-1',
+    sessionId: 's1',
+    range: { deviceUuid: 'device-1', stage: 'online' },
+  });
 });
 
 it('切换 session 触发 connect + loadHistory', async () => {

@@ -23,6 +23,15 @@ function reply(data: Record<string, unknown>): string {
   }
   return text(data.content) || text(data.text) || text(data.message) || text(data.body);
 }
+function terminalFailure(error: unknown): 'AUTO_HEAL_BOT_UNAVAILABLE' | 'BAAS_GENERATION_FAILED' {
+  // Poll validates provider/message/Bot identity before decoding. Only a bounded
+  // provider error string may select an allowlisted code; never echo diagnostics.
+  if (typeof error === 'string' && error.length <= 4096
+    && /^(?:BotBindingNotFoundError(?::|$)|Bot binding not found:)/.test(error.trim())) {
+    return 'AUTO_HEAL_BOT_UNAVAILABLE';
+  }
+  return 'BAAS_GENERATION_FAILED';
+}
 export function decodeWorkflowAiDraftBaasReply(value: unknown): WorkflowAiDraftPollResult {
   const outer = record(value);
   if (!outer) throw new WorkflowAiDraftInvalidResultError('INVALID_BAAS_RESPONSE');
@@ -34,7 +43,9 @@ export function decodeWorkflowAiDraftBaasReply(value: unknown): WorkflowAiDraftP
   const data = Object.hasOwn(outer, 'data') ? record(outer.data) : outer;
   if (!data) throw new WorkflowAiDraftInvalidResultError('INVALID_BAAS_RESPONSE');
   const status = String(data.status ?? data.message_status ?? '').toLowerCase();
-  if (['failed', 'error', 'cancelled', 'canceled', 'stopped', 'aborted', 'time_out'].includes(status)) return { status: 'failed', error: 'BAAS_GENERATION_FAILED' };
+  if (['failed', 'error', 'cancelled', 'canceled', 'stopped', 'aborted', 'time_out'].includes(status)) {
+    return { status: 'failed', error: terminalFailure(Object.hasOwn(outer, 'data') ? data.error : undefined) };
+  }
   if (['running', 'pending', 'processing', 'queued', 'accepted'].includes(status)) return { status: 'running' };
   const completed = ['completed', 'complete', 'succeeded', 'success', 'done'].includes(status);
   if (status && !completed) return { status: 'running' };

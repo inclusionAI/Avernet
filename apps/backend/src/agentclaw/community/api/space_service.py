@@ -10,12 +10,14 @@ from __future__ import annotations
 
 from agentclaw.community.core.spaces.space_service_protocol import (
     SpaceAccessServiceProtocol,
+    SpaceDeletionServiceProtocol,
     SpaceMemberServiceProtocol,
     SpaceServiceProtocol,
 )
 
 __all__ = [
     "SpaceAccessServiceProtocol",
+    "SpaceDeletionServiceProtocol",
     "SpaceMemberServiceProtocol",
     "SpaceServiceProtocol",
 ]

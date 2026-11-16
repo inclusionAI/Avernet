@@ -1,5 +1,16 @@
 # bcs-http Context
 
+## Direct chat empty-input rejection (v1)
+
+POST /bots/{id}/chat-async and its named Provider/Bot alias retain caller
+credential authentication before application admission. The real direct-chat
+service rejects message="" with InvalidOperation; the existing HTTP mapping is
+400 and the chat digest records success=false/status_code=400, not acceptance.
+The UUID route retains {error,status}; the named alias retains its existing
+sanitized "Chat admission failed" error body. No Run is returned or admitted.
+The text-only DTO has no attachment field. Nonempty text is passed unchanged,
+including whitespace-only text. Other attachment-capable routes are unchanged.
+
 ## Provides
 
 `POST /providers/{provider_id}/bots` accepts optional `agent_card_url` and
