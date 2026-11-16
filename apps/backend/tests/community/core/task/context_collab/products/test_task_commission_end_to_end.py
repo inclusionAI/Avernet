@@ -399,7 +399,7 @@ def commission_runtime(commission_deployment, request):
 @pytest.mark.parametrize("orchestration", ["legacy_workflow", "autonomous"])
 def test_end_to_end_commission_flow(commission_deployment, tmp_path, orchestration):
     # 1、调用L6层的方法，创建product profile
-    profile = create_product_profile(
+    l6_profile = create_product_profile(
         ProductProfileCreateCommand(
             ref=VersionedProfileRef("task_commission", 1),            # 版本
             composition=TASK_COMMISSION_PROFILE.composition,          # 绑定L5层方法，这里是OPEN方法
@@ -418,33 +418,33 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path, orchestrati
     )
 
     # 动态注入
-    with commission_deployment(profile) as (service, working_bot, injector):
-        collab_service = injector.get(ContextCollabServiceProtocol)
+    with commission_deployment(l6_profile) as (service, working_bot, injector):
+        l4_collab_service = injector.get(ContextCollabServiceProtocol)
         executor_ref = AgentRef(agent_type="bot", agent_id=BOT_ASSIGNEE)
         store, axes = injector.get(MethodStoreProtocol), current_axes()
-        open_method = injector.get(OpenMethodOpsServiceProtocol)
+        l5_open_method = injector.get(OpenMethodOpsServiceProtocol)
 
         # 2、通过L4层操作创建Collet（同时创建 Task、初始事件并投影 L5 MethodBinding）
-        collet = collab_service.create_collet(
+        l4_collet = l4_collab_service.create_collet(
             ColletCreateCommand(
                 to_space=SPACE,                                # Task所属的空间（长期持续管理的空间，比如小队、团队空间）
                 principal_ref=HUMAN.actor,                     # 代办任务负责人（提交人）
-                product_kind=profile.ref.profile_id,           # profile id
-                workflow_kind=profile.workflow.ref.profile_id if profile.workflow else None,
-                method_kind=profile.composition.method_kind,   # 绑定的方法
+                product_kind=l6_profile.ref.profile_id,           # profile id
+                workflow_kind=l6_profile.workflow.ref.profile_id if l6_profile.workflow else None,
+                method_kind=l6_profile.composition.method_kind,   # 绑定的方法
                 executor_ref=executor_ref,                     # 指定的执行bot
                 objective=TITLE,                               # 代办任务目标
                 resource_refs=[],                              # 输入引用的资源
-                product_profile_ref=profile.ref,               # profile id and version
+                product_profile_ref=l6_profile.ref,               # profile id and version
             ),
             HUMAN,                                             # 代办任务创建人
         )
 
-        collect_id = collet.collet_id
+        collect_id = l4_collet.collet_id
         binding_id = top_level_binding_id(collect_id)
 
         # 4、调用L5的OPEN方法-创建机会
-        published = open_method.publish_opportunity(
+        published = l5_open_method.publish_opportunity(
             collab_context_id=collect_id,
             method_binding_id=binding_id,                      # 绑定的方法
             command=OpenOpportunityCommand(
@@ -463,7 +463,7 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path, orchestrati
 
         # 5、调用L5的OPEN方法-查询机会（实际应该是Agent自己调用）
         bot_context = ActorContext(PrincipalRef("bot", working_bot.bot_id), "a2a")
-        [opportunity] = open_method.query_opportunities(
+        [opportunity] = l5_open_method.query_opportunities(
             collab_context_id=collect_id,
             method_binding_id=binding_id,
             context=bot_context,
@@ -475,7 +475,7 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path, orchestrati
         record = injector.get(ContextCollabRepositoryProtocol).get_current_status(collect_id)
         assert record.task is not None
         task_id = record.task.task_id
-        submitted = open_method.submit_application(
+        submitted = l5_open_method.submit_application(
             collab_context_id=collect_id,
             method_binding_id=opportunity.method_binding_id,
             opportunity_ref=opportunity.opportunity_id,
@@ -493,15 +493,15 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path, orchestrati
         repository = injector.get(ContextCollabRepositoryProtocol)
         before_admission = repository.get_current_status(collect_id)
         with pytest.raises(ContextCollabValidationError):
-            collab_service.start(
-                collect_id, WorkStartCommand(expected_version=collet.version), bot_context
+            l4_collab_service.start(
+                collect_id, WorkStartCommand(expected_version=l4_collet.version), bot_context
             )
         assert repository.get_current_status(collect_id) == before_admission
 
         # 7、针对每个机会，检查申请信息，并选择一个候选者录取
         policy_context = ActorContext(HUMAN.actor, source="product_policy")   # 采用product profile中定义的录取策略
         [policy_ref] = opportunity.admission_policy_refs
-        screened = open_method.screen(
+        screened = l5_open_method.screen(
             collab_context_id=collect_id,
             method_binding_id=binding_id,
             application_ref=submitted.object_id,
@@ -512,7 +512,7 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path, orchestrati
         assert screened.object_id == submitted.object_id
 
         decision_id = f"dec_{uuid4().hex[:12]}"
-        admitted = open_method.admit(
+        admitted = l5_open_method.admit(
             collab_context_id=collect_id,
             method_binding_id=binding_id,
             application_ref=submitted.object_id,
@@ -531,10 +531,10 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path, orchestrati
         assert application.applicant_agent_ref == BOT_ASSIGNEE
 
         # 8、直接调用 L4 Work.start;不是产品 start_task 或通用事件追加接口。
-        started = collab_service.start(
+        started = l4_collab_service.start(
             collect_id,
             WorkStartCommand(
-                expected_version=collet.version,
+                expected_version=l4_collet.version,
                 note="录取后启动任务执行",
             ),
             bot_context,
@@ -545,11 +545,11 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path, orchestrati
 
         # 9. 模拟Agent执行任务，过程中上报信息
         created = TaskCommissionCreatedView(
-            collet_id=collet.collet_id,
+            collet_id=l4_collet.collet_id,
             title=TITLE,
             body_event_id="",
             status="created",
-            context_version=collet.version,
+            context_version=l4_collet.version,
         )
         artifacts = working_bot.run(
             created,
@@ -576,13 +576,13 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path, orchestrati
         assert accepted.status == "done"
 
         # 11. 通过 L4 查询 Collet 内 Task 的最终状态与提交的产物,不依赖产品详情接口。
-        final = collab_service.get_status(collect_id, trunk_events=False, context=HUMAN)
+        final = l4_collab_service.get_status(collect_id, trunk_events=False, context=HUMAN)
         assert final.current_snapshot is not None
         assert final.current_snapshot["status"] == "done"
         assert final.context_version == accepted.context_version
         assert final.current_snapshot["progress"]["percent"] == 100
 
-        final_events = collab_service.get_events(collect_id, context=HUMAN)
+        final_events = l4_collab_service.get_events(collect_id, context=HUMAN)
         assert [event.event_kind for event in final_events] == [
             "task.created",
             "task.started",
