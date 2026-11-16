@@ -41,7 +41,7 @@ class ColletCreateCommand:
     创建不设幂等键(spec 作者裁决:调用方无需传入防重号)。
     """
 
-    space: SpaceRef
+    to_space: SpaceRef
     principal_ref: PrincipalRef
     product_kind: str | None
     workflow_kind: str | None

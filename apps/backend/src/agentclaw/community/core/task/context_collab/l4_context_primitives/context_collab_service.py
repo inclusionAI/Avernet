@@ -181,7 +181,7 @@ class ContextCollabService(ContextCollabServiceProtocol):
         )
         record = self._repository.create_collet(
             CreateColletRecordRequest(
-                space=command.space,
+                space=command.to_space,
                 principal_ref=command.principal_ref,
                 method_kind=method_kind,
                 executor_ref=command.executor_ref,

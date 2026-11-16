@@ -33,7 +33,7 @@ def test_creation_receipt_keeps_wire_shape_and_inputs(
     method_kind, canonical_method, executor
 ):
     command = ColletCreateCommand(
-        space=SpaceRef("space", "test"),
+        to_space=SpaceRef("space", "test"),
         principal_ref=PrincipalRef("human", "owner"),
         product_kind=None,
         workflow_kind=None,
@@ -46,7 +46,7 @@ def test_creation_receipt_keeps_wire_shape_and_inputs(
         collet_id="collet_created",
         initiator_ref=PrincipalRef("human", "creator"),
         state=ColletState.ACTIVE,
-        scope=command.space,
+        scope=command.to_space,
         current_event_id="evt_created",
         version=1,
     )
@@ -84,7 +84,7 @@ def test_creation_receipt_keeps_wire_shape_and_inputs(
 
 def test_creation_receipt_rejects_missing_initial_event():
     command = ColletCreateCommand(
-        space=SpaceRef("space", "test"),
+        to_space=SpaceRef("space", "test"),
         principal_ref=PrincipalRef("human", "owner"),
         product_kind=None,
         workflow_kind=None,
@@ -97,7 +97,7 @@ def test_creation_receipt_rejects_missing_initial_event():
         collet_id="collet_created",
         initiator_ref=command.principal_ref,
         state=ColletState.ACTIVE,
-        scope=command.space,
+        scope=command.to_space,
         current_event_id=None,
         version=1,
     )

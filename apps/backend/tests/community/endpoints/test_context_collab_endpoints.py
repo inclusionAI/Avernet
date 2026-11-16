@@ -506,7 +506,7 @@ def _seed_create_happy(world) -> None:
             collet_id="collet_case_001",
             initiator_ref=_command.principal_ref,
             state=ColletState.ACTIVE,
-            scope=_command.space,
+            scope=_command.to_space,
             current_event_id="evt_case_001",
             version=1,
         )

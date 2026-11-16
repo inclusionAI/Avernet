@@ -133,7 +133,7 @@ def _create(runtime):
     profile, _, _, _, generic, _ = runtime
     return generic.create_collet(
         ColletCreateCommand(
-            space=SPACE,
+            to_space=SPACE,
             principal_ref=OWNER.actor,
             product_kind=profile.ref.profile_id,
             workflow_kind=profile.workflow.ref.profile_id if profile.workflow else None,
@@ -400,7 +400,7 @@ def test_optional_profiles_still_validate_creation_before_persistence(
     profile, _, _, _, generic, _ = runtime
     workflow_kind = profile.workflow.ref.profile_id if profile.workflow else None
     command = ColletCreateCommand(
-        space=SPACE,
+        to_space=SPACE,
         principal_ref=OWNER.actor,
         product_kind=profile.ref.profile_id,
         workflow_kind="wrong" if case == "workflow_mismatch" else workflow_kind,
