@@ -136,12 +136,10 @@ from tests.community.core.task.context_collab.products.task_commission_e2e_suppo
 
 HUMAN = ActorContext(actor=PrincipalRef("human", "u_owner_001"), source="api")
 SPACE = SpaceRef(space_id="space_workspace_001", environment="test")
-TITLE = "为计算器增加求和能力"
-BODY = "完成方案、编码和测试,生成待评审 PR,提交成果后由业务同学验收。"
+OBJECTIVE = "为计算器增加求和能力:完成方案、编码和测试,生成待评审 PR,提交成果后由业务同学验收。"
 
 """产品上线 → 建任务 → Bot Query/Apply → 策略 Screen/Admit → scoped Participant → Work → accept。"""
-@pytest.mark.parametrize("orchestration", ["legacy_workflow", "autonomous"])
-def test_end_to_end_commission_flow(commission_deployment, tmp_path, orchestration):
+def test_end_to_end_commission_flow(commission_deployment, tmp_path):
     # 1、调用L6层的方法，创建product profile
     l6_profile = create_product_profile(
         ProductProfileCreateCommand(
@@ -177,7 +175,7 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path, orchestrati
                 workflow_kind=l6_profile.workflow.ref.profile_id if l6_profile.workflow else None,
                 method_kind=l6_profile.composition.method_kind,   # 绑定的方法
                 executor_ref=l2_executor_ref,                     # 指定的执行bot
-                objective=TITLE,                                  # 代办任务目标
+                objective=OBJECTIVE,                                  # 代办任务目标
                 resource_refs=[],                                 # 输入引用的资源
                 product_profile_ref=l6_profile.ref,               # profile ref
             ),
@@ -290,7 +288,7 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path, orchestrati
         # 9. 模拟Agent执行任务，过程中上报信息
         created = TaskCommissionCreatedView(
             collet_id=l4_collet.collet_id,
-            title=TITLE,
+            title=OBJECTIVE,
             body_event_id="",
             status="created",
             context_version=l4_collet.version,
