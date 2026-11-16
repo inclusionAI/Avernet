@@ -421,15 +421,15 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path, orchestrati
             HUMAN,                                             # 代办任务创建人
         )
 
-        task_id = collet.collet_id
-        binding_id = top_level_binding_id(task_id)
+        collect_id = collet.collet_id
+        binding_id = top_level_binding_id(collect_id)
 
         # 4、调用L5的OPEN方法-创建机会
         published = open_method.publish_opportunity(
-            collab_context_id=task_id,
+            collab_context_id=collect_id,
             method_binding_id=binding_id,
             command=OpenOpportunityCommand(
-                scope_ref=task_id,
+                scope_ref=collect_id,
                 participation_type="COLLET_PARTICIPANT",
                 opens_at=(datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat(),
                 admission_policy_refs=[
@@ -445,17 +445,17 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path, orchestrati
         # 5、调用L5的OPEN方法-查询机会
         bot_context = ActorContext(PrincipalRef("bot", working_bot.bot_id), "a2a")
         [opportunity] = open_method.query_opportunities(
-            collab_context_id=task_id,
+            collab_context_id=collect_id,
             method_binding_id=binding_id,
             context=bot_context,
         )
         assert opportunity.method_binding_id == binding_id
-        assert opportunity.scope_ref == task_id
+        assert opportunity.scope_ref == collect_id
 
         # 6、调用 L5 Open Method的-提交申请。
-        record = injector.get(ContextCollabRepositoryProtocol).get_current_status(task_id)
+        record = injector.get(ContextCollabRepositoryProtocol).get_current_status(collect_id)
         submitted = open_method.submit_application(
-            collab_context_id=task_id,
+            collab_context_id=collect_id,
             method_binding_id=opportunity.method_binding_id,
             opportunity_ref=opportunity.opportunity_id,
             command=OpenApplicationCommand(
@@ -472,7 +472,7 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path, orchestrati
         policy_context = ActorContext(HUMAN.actor, source="product_policy")
         [policy_ref] = opportunity.admission_policy_refs
         screened = open_method.screen(
-            collab_context_id=task_id,
+            collab_context_id=collect_id,
             method_binding_id=binding_id,
             application_ref=submitted.object_id,
             command=OpenDecisionOpCommand(reason=policy_ref),
@@ -483,11 +483,11 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path, orchestrati
 
         decision_id = f"dec_{uuid4().hex[:12]}"
         admitted = open_method.admit(
-            collab_context_id=task_id,
+            collab_context_id=collect_id,
             method_binding_id=binding_id,
             application_ref=submitted.object_id,
             command=OpenAdmitCommand(
-                admitted_scope_ref=task_id,
+                admitted_scope_ref=collect_id,
                 decision_id=decision_id,
                 reason=policy_ref,
             ),
@@ -496,16 +496,16 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path, orchestrati
         assert admitted.accepted and admitted.state == "ADMITTED"
         assert admitted.object_id == submitted.object_id
         assert injector.get(A2aDeliveryPort).bridge_records() == ()
-        [application] = store.list_applications(axes, binding_id, task_id)
+        [application] = store.list_applications(axes, binding_id, collect_id)
         assert application.state is ApplicationState.ADMITTED
         assert application.applicant_agent_ref == BOT_ASSIGNEE
 
         # 8、通用事件追加入口,不表达 L4 Work.start 的语义。
         started = service.start_task(
-            TaskAdvanceCommand(task_id, note="录取后启动任务执行"), bot_context
+            TaskAdvanceCommand(collect_id, note="录取后启动任务执行"), bot_context
         )
         assert started.status == "in_progress"
-        assert service.detail_task(task_id).status == "in_progress"
+        assert service.detail_task(collect_id).status == "in_progress"
         assert injector.get(A2aDeliveryPort).bridge_records() == ()
 
         # 9. 模拟Agent执行任务，过程中上报信息
@@ -520,13 +520,13 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path, orchestrati
             created,
             lambda report_progress: _simulate_ai_coding(
                 tmp_path=tmp_path,
-                task_id=task_id,
+                task_id=collect_id,
                 service=service,
                 report_progress=report_progress,
             ),
             initial_revision=started.context_version,
         )
-        review = service.detail_task(task_id)
+        review = service.detail_task(collect_id)
         assert review.status == "reviewing"
         assert review.events[-1]["payload"]["artifacts"] == artifacts
 
@@ -534,18 +534,18 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path, orchestrati
         # 10. 用户查看成果并明确 accept,而不是以 Bot 完工代替验收。
         _flow_log(_TEST_DIRECTORY, "6. 用户检查方案、代码、测试、PR 提案,确认 accept")
         accepted = service.accept_task(
-            TaskAdvanceCommand(task_id, note="成果符合要求,验收通过"), HUMAN
+            TaskAdvanceCommand(collect_id, note="成果符合要求,验收通过"), HUMAN
         )
         assert accepted.status == "done"
 
         # 11. 通过 L4 查询 Collet 内 Task 的最终状态与提交的产物,不依赖产品详情接口。
-        final = collab_service.get_status(task_id, trunk_events=False, context=HUMAN)
+        final = collab_service.get_status(collect_id, trunk_events=False, context=HUMAN)
         assert final.current_snapshot is not None
         assert final.current_snapshot["status"] == "done"
         assert final.context_version == accepted.context_version
         assert final.current_snapshot["progress"]["percent"] == 100
 
-        final_events = collab_service.get_events(task_id, context=HUMAN)
+        final_events = collab_service.get_events(collect_id, context=HUMAN)
         assert [event.event_kind for event in final_events] == [
             "task.created",
             "task.started",
