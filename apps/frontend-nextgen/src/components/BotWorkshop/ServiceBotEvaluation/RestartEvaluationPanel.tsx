@@ -159,9 +159,6 @@ export function RestartEvaluationPanel({
                 ))}
               </SelectContent>
             </Select>
-            <p className="m-0 text-xs text-muted-foreground">
-              样本集由 TeamClaw 后端代理 MASA 获取，frontend-nextgen 不直接依赖 MASA。
-            </p>
             {selectedSampleSet ? (
               <div className="rounded-lg border border-border bg-muted/30 px-4 py-3 text-xs text-muted-foreground">
                 当前样本数：{selectedSampleSet.sample_count}
