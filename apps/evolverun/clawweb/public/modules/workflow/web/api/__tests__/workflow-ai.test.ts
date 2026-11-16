@@ -10,24 +10,28 @@ beforeEach(() => { http.mockReset(); http.mockImplementation(async () => new Res
 afterEach(() => vi.unstubAllGlobals())
 
 describe('dedicated workflow AI draft wire', () => {
-  it('keeps the unchanged ai-drafts wire and preserves raw input, CSRF auth and signals', async () => {
+  it('uses prepare/create/POST-poll/cancel wire and preserves raw input, CSRF auth and signals', async () => {
     await workflowAiApi.capabilities('flow/name', signal)
-    await workflowAiApi.generate('flow/name', input, signal)
-    await workflowAiApi.poll('flow/name', 'draft/id', signal)
+    await workflowAiApi.prepare('flow/name', input, signal)
+    await workflowAiApi.generate('flow/name', { ...input, receipt: 'signed-receipt' }, signal)
+    await workflowAiApi.poll('flow/name', 'draft/id', { receipt: 'signed-receipt', currentYaml: input.currentYaml }, signal)
     const cancelSignal = new AbortController().signal
-    await workflowAiApi.cancel('flow/name', 'draft/id', cancelSignal)
+    await workflowAiApi.cancel('flow/name', 'draft/id', 'signed-receipt', cancelSignal)
     expect(http.mock.calls.map(([url]) => url)).toEqual([
-      '/api/workflows/flow%2Fname/ai-drafts/capabilities', '/api/workflows/flow%2Fname/ai-drafts',
-      '/api/workflows/flow%2Fname/ai-drafts/draft%2Fid', '/api/workflows/flow%2Fname/ai-drafts/draft%2Fid/cancel',
+      '/api/workflows/flow%2Fname/ai-drafts/capabilities', '/api/workflows/flow%2Fname/ai-drafts/prepare', '/api/workflows/flow%2Fname/ai-drafts',
+      '/api/workflows/flow%2Fname/ai-drafts/draft%2Fid/poll', '/api/workflows/flow%2Fname/ai-drafts/draft%2Fid/cancel',
     ])
     const body = JSON.parse(http.mock.calls[1][1].body)
     expect(body).toEqual(input)
     expect(Object.keys(body)).toEqual(['requestId', 'mode', 'prompt', 'currentYaml'])
     expect(http.mock.calls[1][1].method).toBe('POST')
-    expect(http.mock.calls[3][1].method).toBe('POST')
+    expect(JSON.parse(http.mock.calls[2][1].body)).toEqual({ ...input, receipt: 'signed-receipt' })
+    expect(JSON.parse(http.mock.calls[3][1].body)).toEqual({ receipt: 'signed-receipt', currentYaml: input.currentYaml })
+    expect(JSON.parse(http.mock.calls[4][1].body)).toEqual({ receipt: 'signed-receipt' })
     http.mock.calls.forEach(([, init], index) => {
-      expect(init.signal).toBe(index === 3 ? cancelSignal : signal)
-      expect(init.headers['X-Pack-Version-CSRF']).toBe(index === 1 || index === 3 ? '1' : undefined)
+      expect(init.method).toBe(index > 0 ? 'POST' : undefined)
+      expect(init.signal).toBe(index === 4 ? cancelSignal : signal)
+      expect(init.headers['X-Pack-Version-CSRF']).toBe(index > 0 ? '1' : undefined)
       expect(init.headers['X-User-Id']).toBe('test-user')
       expect(init.headers['X-User-Name']).toBe(encodeURIComponent('测试用户'))
       expect(init.cache).toBe('no-store')
@@ -36,11 +40,16 @@ describe('dedicated workflow AI draft wire', () => {
 
   it('retains shared gzip for full source snapshots', async () => {
     const large = { ...input, currentYaml: `id: flow\nprompt: ${'汉'.repeat(20_000)}` }
-    await workflowAiApi.generate('flow', large, signal)
-    const init = http.mock.calls[0][1]
-    expect(init.headers['Content-Encoding']).toBe('gzip')
-    expect(init.headers['X-Pack-Version-CSRF']).toBe('1')
-    expect(JSON.parse(gunzipSync(init.body).toString('utf8'))).toEqual(large)
+    await workflowAiApi.prepare('flow', large, signal)
+    await workflowAiApi.generate('flow', { ...large, receipt: 'signed-receipt' }, signal)
+    await workflowAiApi.poll('flow', 'draft/id', { receipt: 'signed-receipt', currentYaml: large.currentYaml }, signal)
+    const expected = [large, { ...large, receipt: 'signed-receipt' }, { receipt: 'signed-receipt', currentYaml: large.currentYaml }]
+    http.mock.calls.forEach(([, init], index) => {
+      expect(init.headers['Content-Encoding']).toBe('gzip')
+      expect(init.headers['X-Pack-Version-CSRF']).toBe('1')
+      expect(init.signal).toBe(signal)
+      expect(JSON.parse(gunzipSync(init.body).toString('utf8'))).toEqual(expected[index])
+    })
   })
 
   it('retains server normalization validation and propagates HTTP failures', async () => {

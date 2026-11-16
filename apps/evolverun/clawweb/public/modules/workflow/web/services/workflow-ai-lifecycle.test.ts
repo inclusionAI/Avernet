@@ -2,9 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createHash, webcrypto } from 'node:crypto'
 import type { WorkflowSpec } from '@avernet/clawweb-shared/web/types'
 import { stringify } from 'yaml'
-const api = vi.hoisted(() => ({ capabilities: vi.fn(), generate: vi.fn(), poll: vi.fn(), cancel: vi.fn(), validate: vi.fn() }))
+const api = vi.hoisted(() => ({ capabilities: vi.fn(), prepare: vi.fn(), generate: vi.fn(), poll: vi.fn(), cancel: vi.fn(), validate: vi.fn() }))
 vi.mock('../api/workflow-ai', () => ({ workflowAiApi: api }))
-import { generateWorkflowAiDraft } from './workflow-ai-draft'
+import { generateWorkflowAiDraft, WorkflowAiCandidateError } from './workflow-ai-draft'
 import { createWorkflowAiAttempt, WorkflowAiRecoveryError } from './workflow-ai-lifecycle'
 import { workflowAiYaml } from './workflow-ai-spec'
 
@@ -21,6 +21,7 @@ beforeEach(() => {
   vi.useFakeTimers(); Object.values(api).forEach(mock => mock.mockReset())
   vi.stubGlobal('crypto', { randomUUID: () => webcrypto.randomUUID(), subtle: { digest: async (_algorithm, bytes) => createHash('sha256').update(bytes).digest().buffer } })
   api.capabilities.mockResolvedValue({ available: true })
+  api.prepare.mockImplementation(async (_id, input) => ({ draftId: 'draft', receipt: 'signed-receipt', inputSpecDigest: digest(input.currentYaml) }))
   api.generate.mockResolvedValue({ draftId: 'draft', status: 'pending' })
   api.poll.mockResolvedValue(completed())
   api.cancel.mockResolvedValue(task('cancelled'))
@@ -61,6 +62,17 @@ describe('AutoHeal/BaaS draft lifecycle safety', () => {
     expect(api.poll).not.toHaveBeenCalled()
   })
 
+  it('reports an unavailable receipt signer without misdiagnosing Bot configuration or submitting', async () => {
+    api.capabilities.mockResolvedValueOnce({ available: false, reason: 'AI_DRAFT_RECOVERY_UNAVAILABLE' })
+    const failure = (await generateWorkflowAiDraft('modify', '需求', source).catch(cause => cause)) as Error
+    expect(failure).toBeInstanceOf(Error)
+    expect(failure.message).toContain('AI_DRAFT_RECOVERY_UNAVAILABLE')
+    expect(failure.message).toContain('无法签发恢复凭据')
+    expect(failure.message).not.toContain('请检查服务器 effective autoHeal.botId')
+    expect(api.generate).not.toHaveBeenCalled()
+    expect(api.poll).not.toHaveBeenCalled()
+  })
+
   it('does not treat capability transport failure as proof that server config is missing', async () => {
     api.capabilities.mockRejectedValueOnce(new Error('offline'))
     const failure = (await generateWorkflowAiDraft('modify', '需求', source).catch(cause => cause as Error)) as Error
@@ -96,58 +108,54 @@ describe('AutoHeal/BaaS draft lifecycle safety', () => {
     expect(api.validate).not.toHaveBeenCalled()
   })
 
-  it('uses scoped persisted task binding when SubtleCrypto is unavailable', async () => {
+  it('uses signed receipt task binding when SubtleCrypto is unavailable', async () => {
     vi.stubGlobal('crypto', { randomUUID: () => webcrypto.randomUUID() })
     await expect(generateWorkflowAiDraft('modify', '需求', source)).resolves.toHaveProperty('workflowId', source.id)
     api.poll.mockResolvedValueOnce(task('completed', { workflowId: 'other' }))
     await expect(generateWorkflowAiDraft('modify', '需求', source)).rejects.toThrow('不匹配')
   })
 
-  it('recovers a network-unknown BaaS submission with the exact same requestId', async () => {
+  it.each([new TypeError('lost response'), Object.assign(new Error('service failed'), { status: 503 })])('recovers a lost create ack using its prepared receipt only: %s', async cause => {
     const attempt = createWorkflowAiAttempt()
-    api.generate.mockRejectedValueOnce(new TypeError('lost response'))
-    const failure = (await generateWorkflowAiDraft('modify', '需求', source, undefined, attempt).catch(cause => cause)) as WorkflowAiRecoveryError
+    api.generate.mockImplementationOnce(async (_id, input) => {
+      expect(attempt).toEqual({ requestId: input.requestId, draftId: 'draft', receipt: 'signed-receipt', submitted: true })
+      throw cause
+    })
+    const failure = await generateWorkflowAiDraft('modify', '需求', source, undefined, attempt).catch(error => error)
     expect(failure).toBeInstanceOf(WorkflowAiRecoveryError)
     expect(failure.message).toContain('BaaS 可能已接收消息')
-    expect((failure as WorkflowAiRecoveryError).message).toContain('远端任务可能继续')
-    expect((failure as WorkflowAiRecoveryError).message).toContain('不会重复派发')
+    expect(failure.message).toContain('远端任务可能继续')
+    expect(failure.message).toContain('不会重复派发')
+    expect(attempt.receipt).toBe('signed-receipt')
     await generateWorkflowAiDraft('modify', '需求', source, undefined, attempt)
-    expect(api.generate).toHaveBeenCalledTimes(2)
-    expect(api.generate.mock.calls[0][1]).toEqual(api.generate.mock.calls[1][1])
+    expect(api.prepare).toHaveBeenCalledOnce()
+    expect(api.generate).toHaveBeenCalledOnce()
+    expect(api.poll).toHaveBeenCalledExactlyOnceWith(source.id, 'draft', { receipt: 'signed-receipt', currentYaml: workflowAiYaml(source) }, expect.any(AbortSignal))
   })
 
-  it.each(['transport-failed', 'available-false'] as const)('keeps an interrupted submission recoverable when recovery capabilities report %s', async interruption => {
+  it.each(['transport-failed', 'available-false'] as const)('bypasses changed capabilities when recovering a known receipt: %s', async interruption => {
     const attempt = createWorkflowAiAttempt()
     api.generate.mockRejectedValueOnce(new TypeError('lost response'))
     const interrupted = await generateWorkflowAiDraft('modify', ' 原始需求\n', source, undefined, attempt).catch(cause => cause)
     expect(interrupted).toBeInstanceOf(WorkflowAiRecoveryError)
     if (interruption === 'transport-failed') api.capabilities.mockRejectedValueOnce(new Error('readiness disconnected'))
-    else api.capabilities.mockResolvedValueOnce({ available: false, reason: 'AUTO_HEAL_BOT_UNAVAILABLE' })
+    else api.capabilities.mockResolvedValueOnce({ available: false, reason: 'AI_DRAFT_RECOVERY_UNAVAILABLE' })
 
-    const middle = await generateWorkflowAiDraft('modify', ' 原始需求\n', source, undefined, attempt).catch(cause => cause)
-    expect(middle).toBeInstanceOf(WorkflowAiRecoveryError)
-    expect(middle.attempt).toBe(attempt)
-
-    await generateWorkflowAiDraft('modify', ' 原始需求\n', source, undefined, attempt)
-    expect(api.generate).toHaveBeenCalledTimes(2)
-    expect(api.generate.mock.calls[0][1]).toEqual(api.generate.mock.calls[1][1])
-    expect(api.generate.mock.calls[1][1].requestId).toBe(attempt.requestId)
-  })
-
-  it('does not auto-retry dispatch_uncertain; recovery only polls the persisted draft', async () => {
-    const attempt = createWorkflowAiAttempt()
-    api.poll.mockResolvedValueOnce(task('dispatch_uncertain'))
-    const failure = (await generateWorkflowAiDraft('modify', '需求', source, undefined, attempt).catch(cause => cause as WorkflowAiRecoveryError)) as WorkflowAiRecoveryError
-    expect(failure.message).toContain('BaaS 派发结果不确定')
-    expect(failure.message).toContain('BaaS 可能已接收消息')
-    expect(failure.message).toContain('远端任务可能继续')
-    expect(failure.message).toContain('不会再次派发')
-    expect(api.generate).toHaveBeenCalledOnce()
-    expect(api.poll).toHaveBeenCalledOnce()
-    await generateWorkflowAiDraft('modify', '需求', source, undefined, attempt)
+    await expect(generateWorkflowAiDraft('modify', ' 原始需求\n', source, undefined, attempt)).resolves.toHaveProperty('summary', 'Draft')
+    expect(api.prepare).toHaveBeenCalledOnce()
     expect(api.generate).toHaveBeenCalledOnce()
     expect(api.capabilities).toHaveBeenCalledOnce()
+  })
+
+  it('continues polling dispatch_uncertain at the same native message ID without another send', async () => {
+    api.generate.mockResolvedValueOnce({ draftId: 'draft', status: 'dispatch_uncertain' })
+    api.poll.mockResolvedValueOnce(task('dispatch_uncertain'))
+    const pending = generateWorkflowAiDraft('modify', '需求', source)
+    await vi.advanceTimersByTimeAsync(3000)
+    await expect(pending).resolves.toHaveProperty('summary', 'Draft')
+    expect(api.generate).toHaveBeenCalledOnce()
     expect(api.poll).toHaveBeenCalledTimes(2)
+    expect(api.poll.mock.calls.every(([id, message, input]) => id === source.id && message === 'draft' && input.receipt === 'signed-receipt')).toBe(true)
   })
 
   it('recovers polling failures without re-submitting the model job', async () => {
@@ -198,15 +206,15 @@ describe('AutoHeal/BaaS draft lifecycle safety', () => {
     expect(api.validate).not.toHaveBeenCalled()
   })
 
-  it.each(['capabilities', 'generate', 'poll', 'validate'])('bounds non-cooperative %s at 15 minutes and best-effort cancels known jobs', async stage => {
+  it.each(['capabilities', 'prepare', 'generate', 'poll', 'validate'])('bounds non-cooperative %s at 15 minutes and best-effort cancels known jobs', async stage => {
     api[stage].mockReturnValueOnce(new Promise(() => {}))
     const promise = generateWorkflowAiDraft('modify', '需求', source)
     const rejection = expect(promise).rejects.toThrow('15 分钟')
     await vi.advanceTimersByTimeAsync(15 * 60_000)
     await rejection
-    if (stage === 'poll' || stage === 'validate') {
+    if (stage === 'generate' || stage === 'poll' || stage === 'validate') {
       expect(api.cancel).toHaveBeenCalledOnce()
-      expect(api.cancel.mock.calls[0][2].aborted).toBe(false)
+      expect(api.cancel.mock.calls[0][3].aborted).toBe(false)
     } else expect(api.cancel).not.toHaveBeenCalled()
     expect(vi.getTimerCount()).toBe(0)
   })
@@ -218,13 +226,13 @@ describe('AutoHeal/BaaS draft lifecycle safety', () => {
     const promise = generateWorkflowAiDraft('modify', '需求', source, controller.signal)
     const rejection = expect(promise).rejects.toThrow()
     await vi.advanceTimersByTimeAsync(0)
-    const pollSignal = api.poll.mock.calls[0][2]
+    const pollSignal = api.poll.mock.calls[0][3]
     controller.abort()
     await rejection
     expect(pollSignal.aborted).toBe(true)
     expect(api.cancel).toHaveBeenCalledOnce()
-    expect(api.cancel.mock.calls[0][2]).not.toBe(pollSignal)
-    expect(api.cancel.mock.calls[0][2].aborted).toBe(false)
+    expect(api.cancel.mock.calls[0][3]).not.toBe(pollSignal)
+    expect(api.cancel.mock.calls[0][3].aborted).toBe(false)
     late.resolve(completed())
     await vi.advanceTimersByTimeAsync(0)
     expect(api.validate).not.toHaveBeenCalled()
@@ -239,9 +247,9 @@ describe('AutoHeal/BaaS draft lifecycle safety', () => {
     await vi.advanceTimersByTimeAsync(0)
     controller.abort()
     await rejection
-    late.resolve({ draftId: 'late-draft', status: 'pending' })
+    late.resolve({ draftId: 'draft', status: 'pending' })
     await vi.advanceTimersByTimeAsync(0)
-    expect(api.cancel).toHaveBeenCalledWith(source.id, 'late-draft', expect.any(AbortSignal))
+    expect(api.cancel).toHaveBeenCalledExactlyOnceWith(source.id, 'draft', 'signed-receipt', expect.any(AbortSignal))
     expect(api.poll).not.toHaveBeenCalled()
   })
 
@@ -255,7 +263,7 @@ describe('AutoHeal/BaaS draft lifecycle safety', () => {
     controller.abort()
     await rejection
     await vi.advanceTimersByTimeAsync(10_000)
-    expect(api.cancel.mock.calls[0][2].aborted).toBe(true)
+    expect(api.cancel.mock.calls[0][3].aborted).toBe(true)
     expect(api.validate).not.toHaveBeenCalled()
     expect(vi.getTimerCount()).toBe(0)
   })
@@ -271,24 +279,25 @@ describe('AutoHeal/BaaS draft lifecycle safety', () => {
     await rejection
     await Promise.resolve()
     expect(api.cancel).toHaveBeenCalledOnce()
-    expect(api.cancel.mock.calls[0][2].aborted).toBe(false)
+    expect(api.cancel.mock.calls[0][3].aborted).toBe(false)
     expect(api.generate).toHaveBeenCalledOnce()
     expect(api.poll).toHaveBeenCalledOnce()
     expect(api.validate).not.toHaveBeenCalled()
     expect(vi.getTimerCount()).toBe(0)
   })
 
-  it('describes a cancelled server record without promising that BaaS stopped', async () => {
+  it('describes local cancellation without promising that BaaS stopped', async () => {
     api.poll.mockResolvedValueOnce(task('cancelled'))
     const failure = (await generateWorkflowAiDraft('modify', '需求', source).catch(cause => cause as Error)) as Error
-    expect(failure.message).toContain('服务器记录为取消')
+    expect(failure.message).toContain('取消不会持久记录')
+    expect(failure.message).not.toContain('服务器记录为取消')
     expect(failure.message).toContain('BaaS 无支持的停止接口')
     expect(failure.message).toContain('远端任务可能继续')
     expect(api.validate).not.toHaveBeenCalled()
   })
 })
 
-it('keeps a stable requestId for a submission whose response times out', async () => {
+it('keeps a signed receipt for a submission whose response times out', async () => {
   const attempt = createWorkflowAiAttempt()
   api.generate.mockReturnValueOnce(new Promise(() => {}))
   const pending = generateWorkflowAiDraft('modify', '需求', source, undefined, attempt)
@@ -296,8 +305,9 @@ it('keeps a stable requestId for a submission whose response times out', async (
   await vi.advanceTimersByTimeAsync(15 * 60_000)
   await failure
   await generateWorkflowAiDraft('modify', '需求', source, undefined, attempt)
-  expect(api.generate).toHaveBeenCalledTimes(2)
-  expect(api.generate.mock.calls[0][1]).toEqual(api.generate.mock.calls[1][1])
+  expect(api.prepare).toHaveBeenCalledOnce()
+  expect(api.generate).toHaveBeenCalledOnce()
+  expect(api.poll.mock.calls[0][1]).toBe('draft')
 })
 
 it('accepts 4000 Unicode code points without trimming the raw requirement', async () => {
@@ -368,3 +378,171 @@ it('does not infer an invalid candidate from a bare validation HTTP 422 transpor
   expect(api.generate).toHaveBeenCalledOnce()
   expect(api.validate).toHaveBeenCalledTimes(2)
 })
+
+
+it.each([
+  { draftId: '' }, { draftId: ' ' }, { draftId: null }, { receipt: '' }, { receipt: ' ' }, { receipt: null },
+  { inputSpecDigest: '' }, { inputSpecDigest: 'wrong' }, { inputSpecDigest: 'b'.repeat(64) },
+])('fails closed on malformed or wrongly bound prepare responses: %j', async wrong => {
+  api.prepare.mockResolvedValueOnce({ draftId: 'draft', receipt: 'signed-receipt', inputSpecDigest: digest(workflowAiYaml(source)), ...wrong })
+  await expect(generateWorkflowAiDraft('modify', '需求', source)).rejects.toBeInstanceOf(WorkflowAiCandidateError)
+  expect(api.generate).not.toHaveBeenCalled()
+  expect(api.poll).not.toHaveBeenCalled()
+})
+
+it.each(['', 'invalid', null])('still requires a nonempty 64-hex prepare digest without SubtleCrypto: %s', async inputSpecDigest => {
+  vi.stubGlobal('crypto', { randomUUID: () => webcrypto.randomUUID() })
+  api.prepare.mockResolvedValueOnce({ draftId: 'draft', receipt: 'signed-receipt', inputSpecDigest })
+  await expect(generateWorkflowAiDraft('modify', '需求', source)).rejects.toThrow('摘要不匹配')
+  expect(api.generate).not.toHaveBeenCalled()
+})
+
+it('retries prepare explicitly after a failure that cannot have dispatched BaaS', async () => {
+  const attempt = createWorkflowAiAttempt()
+  api.prepare.mockRejectedValueOnce(new Error('signer offline'))
+  const error = await generateWorkflowAiDraft('modify', '需求', source, undefined, attempt).catch(cause => cause)
+  expect(error).not.toBeInstanceOf(WorkflowAiRecoveryError)
+  expect(error.message).toContain('尚未派发生成请求')
+  expect(attempt).toEqual({ requestId: attempt.requestId })
+  expect(api.generate).not.toHaveBeenCalled()
+  await generateWorkflowAiDraft('modify', '需求', source, undefined, attempt)
+  expect(api.prepare).toHaveBeenCalledTimes(2)
+  expect(api.prepare.mock.calls[0][1]).toEqual(api.prepare.mock.calls[1][1])
+  expect(api.generate).toHaveBeenCalledOnce()
+})
+
+it.each([{ submitted: true }, { draftId: 'legacy-id' }, { submitted: true, draftId: 'legacy-id' }, { receipt: 'receipt-only' }])('cannot recover a legacy attempt or prepare a replacement without full context: %j', async old => {
+  const attempt = { requestId: 'legacy', ...old }
+  for (let count = 0; count < 2; count++) {
+    await expect(generateWorkflowAiDraft('modify', '需求', source, undefined, attempt)).rejects.toThrow('无法恢复')
+  }
+  expect(api.capabilities).not.toHaveBeenCalled()
+  expect(api.prepare).not.toHaveBeenCalled()
+  expect(api.generate).not.toHaveBeenCalled()
+  expect(api.poll).not.toHaveBeenCalled()
+})
+
+it('never replaces the prepared ID with a different create acknowledgment', async () => {
+  const attempt = createWorkflowAiAttempt()
+  api.generate.mockResolvedValueOnce({ draftId: 'unexpected-id', status: 'pending' })
+  await expect(generateWorkflowAiDraft('modify', '需求', source, undefined, attempt)).rejects.toThrow('任务 ID 不匹配')
+  expect(attempt.draftId).toBe('draft')
+  expect(attempt.receipt).toBe('signed-receipt')
+  expect(api.poll).not.toHaveBeenCalled()
+  await generateWorkflowAiDraft('modify', '需求', source, undefined, attempt)
+  expect(api.generate).toHaveBeenCalledOnce()
+  expect(api.poll.mock.calls[0][1]).toBe('draft')
+})
+
+it('treats create failed+error as an explicit terminal rejection without polling', async () => {
+  api.generate.mockResolvedValueOnce({ draftId: 'draft', status: 'failed', error: 'BAAS_REQUEST_REJECTED' })
+  const error = await generateWorkflowAiDraft('modify', '需求', source).catch(cause => cause)
+  expect(error).toBeInstanceOf(WorkflowAiCandidateError)
+  expect(error.message).toContain('BAAS_REQUEST_REJECTED')
+  expect(error.message).toContain('明确拒绝')
+  expect(api.poll).not.toHaveBeenCalled()
+  expect(api.validate).not.toHaveBeenCalled()
+})
+
+it.each(['cancel', 'timeout'])('never dispatches a late prepare acknowledgment after %s', async action => {
+  const late = deferred<{ draftId: string; receipt: string; inputSpecDigest: string }>()
+  api.prepare.mockReturnValueOnce(late.promise)
+  const controller = new AbortController()
+  const attempt = createWorkflowAiAttempt()
+  const pending = generateWorkflowAiDraft('modify', '需求', source, controller.signal, attempt)
+  const rejected = expect(pending).rejects.toThrow()
+  await vi.advanceTimersByTimeAsync(0)
+  if (action === 'cancel') controller.abort()
+  else await vi.advanceTimersByTimeAsync(15 * 60_000)
+  await rejected
+  late.resolve({ draftId: 'draft', receipt: 'signed-receipt', inputSpecDigest: digest(workflowAiYaml(source)) })
+  await vi.advanceTimersByTimeAsync(0)
+  expect(attempt.receipt).toBeUndefined()
+  expect(attempt.submitted).not.toBe(true)
+  expect(api.generate).not.toHaveBeenCalled()
+  expect(api.poll).not.toHaveBeenCalled()
+  expect(api.validate).not.toHaveBeenCalled()
+  expect(api.cancel).toHaveBeenCalledExactlyOnceWith(source.id, 'draft', 'signed-receipt', expect.any(AbortSignal))
+  // Only an explicit user retry can prepare and dispatch a new request.
+  await generateWorkflowAiDraft('modify', '需求', source, undefined, attempt)
+  expect(api.prepare).toHaveBeenCalledTimes(2)
+  expect(api.generate).toHaveBeenCalledOnce()
+})
+
+it('recovers from a new service instance using only the existing session receipt', async () => {
+  const attempt = createWorkflowAiAttempt()
+  api.generate.mockRejectedValueOnce(new Error('lost create ack'))
+  await expect(generateWorkflowAiDraft('modify', '需求', source, undefined, attempt)).rejects.toThrow('请求未确认')
+  vi.resetModules()
+  const fresh = await import('./workflow-ai-draft')
+  await expect(fresh.generateWorkflowAiDraft('modify', '需求', source, undefined, attempt)).resolves.toHaveProperty('summary', 'Draft')
+  expect(api.prepare).toHaveBeenCalledOnce()
+  expect(api.generate).toHaveBeenCalledOnce()
+  expect(api.capabilities).toHaveBeenCalledOnce()
+})
+
+
+it('does not let a timed-out prepare overwrite a newer explicit retry of the same attempt', async () => {
+  const oldPrepare = deferred<{ draftId: string; receipt: string; inputSpecDigest: string }>()
+  api.prepare.mockReturnValueOnce(oldPrepare.promise)
+  const attempt = createWorkflowAiAttempt()
+  const first = generateWorkflowAiDraft('modify', '需求', source, undefined, attempt)
+  const rejected = expect(first).rejects.toThrow('尚未派发生成请求')
+  await vi.advanceTimersByTimeAsync(15 * 60_000)
+  await rejected
+  const pendingPoll = deferred<ReturnType<typeof completed>>()
+  api.poll.mockReturnValueOnce(pendingPoll.promise)
+  const retry = generateWorkflowAiDraft('modify', '需求', source, undefined, attempt)
+  await vi.advanceTimersByTimeAsync(0)
+  oldPrepare.resolve({ draftId: 'old-unsent-id', receipt: 'old-receipt', inputSpecDigest: digest(workflowAiYaml(source)) })
+  await vi.advanceTimersByTimeAsync(0)
+  expect(attempt).toEqual({ requestId: attempt.requestId, draftId: 'draft', receipt: 'signed-receipt', submitted: true })
+  pendingPoll.resolve(completed())
+  await expect(retry).resolves.toHaveProperty('summary', 'Draft')
+  expect(api.generate).toHaveBeenCalledOnce()
+  expect(api.cancel).toHaveBeenCalledWith(source.id, 'old-unsent-id', 'old-receipt', expect.any(AbortSignal))
+})
+
+
+it('dispatches once even if two callers share the same in-memory attempt', async () => {
+  const attempt = createWorkflowAiAttempt()
+  api.prepare.mockResolvedValueOnce({ draftId: 'draft', receipt: 'signed-receipt', inputSpecDigest: digest(workflowAiYaml(source)) })
+    .mockResolvedValueOnce({ draftId: 'unused-id', receipt: 'unused-receipt', inputSpecDigest: digest(workflowAiYaml(source)) })
+  await Promise.all([
+    generateWorkflowAiDraft('modify', '需求', source, undefined, attempt),
+    generateWorkflowAiDraft('modify', '需求', source, undefined, attempt),
+  ])
+  expect(api.generate).toHaveBeenCalledOnce()
+  expect(attempt).toEqual({ requestId: attempt.requestId, draftId: 'draft', receipt: 'signed-receipt', submitted: true })
+  expect(api.poll.mock.calls.every(([, id, input]) => id === 'draft' && input.receipt === 'signed-receipt')).toBe(true)
+})
+
+it.each(['HTTP 400: binding rejected', '60001: binding rejected after acceptance'])('polls the original receipt after uncertain rejection and accepts only its real terminal failure: %s', async error => {
+  const attempt = createWorkflowAiAttempt()
+  api.generate.mockResolvedValueOnce({ draftId: 'draft', status: 'dispatch_uncertain' })
+  api.poll.mockResolvedValueOnce(task('failed', { error }))
+  const failure = await generateWorkflowAiDraft('modify', '需求', source, undefined, attempt).catch(cause => cause)
+  expect(failure).toBeInstanceOf(WorkflowAiCandidateError)
+  expect(failure.message).toBe(error)
+  expect(api.prepare).toHaveBeenCalledOnce()
+  expect(api.generate).toHaveBeenCalledOnce()
+  expect(api.poll).toHaveBeenCalledExactlyOnceWith(source.id, 'draft', { receipt: 'signed-receipt', currentYaml: workflowAiYaml(source) }, expect.any(AbortSignal))
+  expect(api.validate).not.toHaveBeenCalled()
+  expect(attempt.draftId).toBe('draft')
+  expect(attempt.receipt).toBe('signed-receipt')
+})
+
+it.each(['BAAS_AUTH_FAILED', 'BAAS_POLL_UNAVAILABLE'])('recovers an operational poll error %s without dropping the signed receipt or sending again', async code => {
+  const attempt = createWorkflowAiAttempt();
+  api.poll.mockResolvedValueOnce(task('running', { error: code }));
+  const failure = await generateWorkflowAiDraft('modify', '需求', source, undefined, attempt).catch(cause => cause);
+  expect(failure).toBeInstanceOf(WorkflowAiRecoveryError);
+  expect(failure.attempt).toBe(attempt);
+  expect(failure.message).toContain(code);
+  expect(attempt).toMatchObject({ draftId: 'draft', receipt: 'signed-receipt', submitted: true });
+  expect(api.prepare).toHaveBeenCalledOnce(); expect(api.generate).toHaveBeenCalledOnce();
+  await expect(generateWorkflowAiDraft('modify', '需求', source, undefined, attempt)).resolves.toHaveProperty('workflowId', source.id);
+  expect(api.prepare).toHaveBeenCalledOnce(); expect(api.generate).toHaveBeenCalledOnce();
+  expect(api.poll).toHaveBeenCalledTimes(2);
+  expect(api.poll.mock.calls[1].slice(0, 3)).toEqual(api.poll.mock.calls[0].slice(0, 3));
+});

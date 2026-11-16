@@ -266,6 +266,61 @@ describe("sendIntervention HTTP error details", () => {
   });
 });
 
+describe("sendIntervention caller message IDs", () => {
+  it.each([
+    "d0594cc0-0ef7-4c93-ab90-a3d95f4316ab",
+    "caller-defined/message:任务",
+    "x".repeat(255),
+  ])("forwards the exact optional message_id %s without changing metadata or Bot suffix", async (messageId) => {
+    const fetchMock = vi.fn<typeof fetch>(async (_url, init) => {
+      const body = JSON.parse(init!.body as string);
+      return new Response(JSON.stringify({ code: 0, data: { message_id: body.message_id } }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    expect(await sendIntervention({ ...params, messageId, retryTransientErrors: false })).toEqual({
+      ok: true, messageId, sessionId: undefined,
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const [, init] = fetchMock.mock.calls[0]!;
+    expect(init?.redirect).toBe("error");
+    expect(JSON.parse(init!.body as string)).toEqual({
+      bot_id: params.botId, message: params.message, message_id: messageId,
+      metadata: { session_id: params.sessionId, sender_options: { from: "owner" } },
+    });
+  });
+
+  it.each(["", "   ", "x".repeat(256), "line\nbreak", "null\0byte", "delete\x7f", "control\u0085", "\ud800", "\udfff", null, 42])(
+    "rejects invalid supplied message_id %j before sending", async (messageId) => {
+      const fetchMock = vi.fn<typeof fetch>();
+      vi.stubGlobal("fetch", fetchMock);
+      const result = await sendIntervention({ ...params, messageId: messageId as string, retryTransientErrors: false });
+      expect(result).toMatchObject({ ok: false, failureKind: "rejected" });
+      expect(result.error).toContain("message_id");
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it("does not add fenced failure metadata to legacy callers with an invalid supplied ID", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetchMock);
+    expect(await sendIntervention({ ...params, messageId: "" })).toEqual({
+      ok: false,
+      error: expect.stringContaining("message_id"),
+      tokenExpired: false,
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps the legacy request body byte-for-byte when messageId is omitted or undefined", async () => {
+    const fetchMock = mockResponse({ data: { message_id: "provider-assigned" } }, 200);
+    await sendIntervention(params);
+    await sendIntervention({ ...params, messageId: undefined });
+    const expected = JSON.stringify({ bot_id: params.botId, message: params.message,
+      metadata: { session_id: params.sessionId, sender_options: { from: "owner" } } });
+    expect(fetchMock.mock.calls.map(([, init]) => init?.body)).toEqual([expected, expected]);
+  });
+});
+
 describe("sendIntervention request metadata", () => {
   it.each([undefined, "draft", "verify", "online"] as const)(
     "preserves the target and emits lifecycle metadata only for the explicit %s stage",
@@ -311,6 +366,61 @@ describe("sendIntervention request metadata", () => {
   });
 });
 
+describe('strict acceptance for fixed-ID single-attempt submissions', () => {
+  const messageId = 'd0594cc0-0ef7-4c93-ab90-a3d95f4316ab';
+  const strict = () => ({ ...params, messageId, retryTransientErrors: false });
+  it.each([
+    { status: 400, payload: { detail: { code: 60001, message: 'Bot binding not found after DB-first insertion' } } },
+    { status: 404, payload: { detail: { code: 60001 } } },
+    { status: 422, payload: { detail: 'validation or intermediary failure' } },
+    { status: 429, payload: {} }, { status: 503, payload: {} },
+    { status: 502, payload: { code: 60001 } },
+    { status: 200, payload: { code: 60001, data: { message_id: messageId } } },
+    { status: 200, payload: { buserviceErrorCode: 'TOKEN_EXPIRED' } },
+    { status: 400, payload: { buserviceErrorCode: 'TOKEN_INVALID' } },
+    { status: 401, payload: { code: 0, data: { message_id: messageId } } },
+    { status: 403, payload: { buserviceErrorCode: 'TOKEN_EXPIRED', data: { message_id: messageId } } },
+    { status: 401, payload: { data: {} } },
+  ])('does not claim pre-accept rejection for HTTP $status: $payload', async ({ status, payload }) => {
+    const fetchMock = mockResponse(payload, status);
+    expect(await sendIntervention(strict())).toMatchObject({ ok: false, failureKind: 'uncertain' });
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0][1]?.redirect).toBe('error');
+  });
+  it.each([401, 403])('keeps clear pre-accept HTTP %s authentication rejection', async status => {
+    const fetchMock = mockResponse({ detail: { code: 40103, message: 'Token invalid' }, data: null }, status);
+    expect(await sendIntervention(strict())).toMatchObject({ ok: false, failureKind: 'rejected' });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+  it.each([401, 403])('keeps lost authentication response bodies uncertain for HTTP %s', async status => {
+    const fetchMock = vi.fn<typeof fetch>(async () => {
+      const response = new Response('', { status });
+      vi.spyOn(response, 'text').mockRejectedValue(new Error('ack body lost'));
+      return response;
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    expect(await sendIntervention(strict())).toMatchObject({ ok: false, failureKind: 'uncertain' });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+  it.each(['input', 'bot', 'credential'])('preserves definite local %s rejection before I/O', async failure => {
+    const fetchMock = vi.fn<typeof fetch>(); vi.stubGlobal('fetch', fetchMock);
+    const input = strict();
+    if (failure === 'input') input.messageId = '';
+    if (failure === 'bot') input.botId = 'bare-id';
+    if (failure === 'credential') input.transportConfig = { ...input.transportConfig!, apiKey: '' };
+    expect(await sendIntervention(input)).toMatchObject({ ok: false, failureKind: 'rejected' });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+  it('redacts credentials and private input in uncertain errors without weakening key protection', async () => {
+    mockResponse({ code: 60001, message: `failure ${params.transportConfig!.apiKey} / ${params.transportConfig!.iamtoken}`,
+      private_echo: { input: 'private-editor-yaml' } }, 400);
+    const result = await sendIntervention(strict());
+    expect(result).toMatchObject({ ok: false, failureKind: 'uncertain' });
+    expect(result.error).toContain('[REDACTED]');
+    for (const secret of [params.transportConfig!.apiKey, params.transportConfig!.iamtoken, 'private-editor-yaml']) expect(result.error).not.toContain(secret);
+  });
+});
+
 describe('durably fenced single-attempt submissions', () => {
   it.each(['network', 'gateway'])('reports an unknown outcome without POST retry (%s)', async failure => {
     const fetchMock = vi.fn<typeof fetch>(async () => {
@@ -318,7 +428,7 @@ describe('durably fenced single-attempt submissions', () => {
       return new Response('{}', { status: 502 });
     });
     vi.stubGlobal('fetch', fetchMock);
-    expect(await sendIntervention({ ...params, retryTransientErrors: false })).toMatchObject({ ok: false, failureKind: 'uncertain' });
+    expect(await sendIntervention({ ...params, messageId: "d0594cc0-0ef7-4c93-ab90-a3d95f4316ab", retryTransientErrors: false })).toMatchObject({ ok: false, failureKind: 'uncertain' });
     expect(fetchMock).toHaveBeenCalledOnce();
   });
   it('distinguishes positive rejection from unknown delivery', async () => {
