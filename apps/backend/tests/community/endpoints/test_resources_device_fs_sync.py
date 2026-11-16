@@ -228,6 +228,40 @@ def delete_file_arca_removes_exact_path():
     """Deleting a resource file on an Arca bot removes exactly that path."""
 
 
+def _seed_readonly_skill_repo(world) -> None:
+    """Seed the shared repo so a wrongly proxied delete cannot erase it."""
+    ws = _seed_arca_bot(world, bot_id="bot_res_del_repo_ro")
+    target = ws / "skills-pool" / "skills-repo" / "test1"
+    (target / "SKILL.md").parent.mkdir(parents=True, exist_ok=True)
+    (target / "SKILL.md").write_text("shared skill", encoding="utf-8")
+    world._readonly_skill_repo = target
+
+
+def _assert_readonly_skill_repo_untouched(_response, world) -> None:
+    assert world._readonly_skill_repo.exists()
+
+
+@endpoint_test(
+    method="DELETE",
+    path="/api/resources/files",
+    scenario="error_readonly_skill_repo_403",
+    input=CaseInput(
+        # The shared repo tree is ARCA's read-only mount; the guard must reject
+        # it at the workspace address before any filesystem traversal.
+        query_params={
+            "path": "skills-pool/skills-repo/test1",
+            "bot_id": "bot_res_del_repo_ro",
+        },
+        headers={"x-user-id": _OWNER},
+    ),
+    seed=_seed_readonly_skill_repo,
+    expect=ExpectError(status=403),
+    extra_assertions=(_assert_readonly_skill_repo_untouched,),
+)
+def delete_file_readonly_skill_repo_returns_403():
+    """Deleting a readonly skill repo directory → 403, no device operation."""
+
+
 @endpoint_test(
     method="DELETE",
     path="/api/resources/files",

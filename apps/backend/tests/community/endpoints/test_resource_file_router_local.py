@@ -167,6 +167,63 @@ def local_delete_readonly():
     """Deleting a root identity .md file is rejected (403)."""
 
 
+# ── delete shared read-only skill repos → 403, no disk delete ────────────────
+
+
+def _seed_readonly_skill_repo(world):
+    """Seed actual shared-repo files so a returned request cannot erase them."""
+    _seed_local_bot(world)
+    paths = (
+        "skills-pool/skills-repo/test1/SKILL.md",
+        "skills/skills-repo/test1/SKILL.md",
+    )
+    readonly = []
+    for rel in paths:
+        path = _ws(world) / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("shared skill", encoding="utf-8")
+        readonly.append(path)
+    world._readonly_skill_repo = readonly
+
+
+def _assert_readonly_skill_repo_untouched(response, world) -> None:
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Cannot delete read-only file"
+    assert all(path.exists() for path in world._readonly_skill_repo)
+
+
+@endpoint_test(
+    method="DELETE",
+    path="/api/resources/files",
+    scenario="error_pool_skill_repo_delete_readonly",
+    input=CaseInput(
+        query_params={"path": "skills-pool/skills-repo/test1", "bot_id": _BOT, "owner_id": _OWNER},
+        headers={"x-user-id": _OWNER},
+    ),
+    seed=_seed_readonly_skill_repo,
+    expect=ExpectError(status=403, json_contains={"detail": "Cannot delete read-only file"}),
+    extra_assertions=(_assert_readonly_skill_repo_untouched,),
+)
+def pool_skill_repo_delete_readonly():
+    """Deleting the ARCA READ_ONLY pool repo is refused at the API edge."""
+
+
+@endpoint_test(
+    method="DELETE",
+    path="/api/resources/files",
+    scenario="error_legacy_skill_repo_delete_readonly",
+    input=CaseInput(
+        query_params={"path": "skills/skills-repo/test1", "bot_id": _BOT, "owner_id": _OWNER},
+        headers={"x-user-id": _OWNER},
+    ),
+    seed=_seed_readonly_skill_repo,
+    expect=ExpectError(status=403, json_contains={"detail": "Cannot delete read-only file"}),
+    extra_assertions=(_assert_readonly_skill_repo_untouched,),
+)
+def legacy_skill_repo_delete_readonly():
+    """The legacy shared-repo address uses the same read-only deletion guard."""
+
+
 # ── delete a real file → 200, gone from disk ─────────────────────────────────
 
 
