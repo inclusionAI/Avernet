@@ -10,12 +10,12 @@ from agentclaw.community.core.task.task_runner.client.bcs_http_adapter import (
     BcsClientError,
     BcsCreateGroupResult,
 )
-from agentclaw.community.plugin_api.context_collab_runtime import (
+from agentclaw.community.plugin_api.task.context_collab_runtime import (
     ContextCollabResumeRequest,
     ContextCollabRunRequest,
     ContextCollabRuntimeError,
 )
-from agentclaw.community.plugins.community.context_collab_runtime import (
+from agentclaw.community.plugins.community.task.context_collab_runtime import (
     CommunityContextCollabRuntimePlugin,
 )
 

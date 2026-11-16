@@ -184,7 +184,7 @@ from agentclaw.community.core.task.task_runner.callback_correlation import (
     InMemoryCallbackCorrelationRegistry,
 )
 from agentclaw.community.core.bot_management.services.bcn_service import BcnService
-from agentclaw.community.plugins.community.context_collab_runtime import (
+from agentclaw.community.plugins.community.task.context_collab_runtime import (
     CommunityContextCollabRuntimePlugin,
     UnavailableContextCollabRuntimePlugin,
 )
@@ -199,7 +199,7 @@ from agentclaw.community.plugin_api.notify_sender import (
     QUALIFIER_BBS_DIGEST,
     NotifySenderPlugin,
 )
-from agentclaw.community.plugin_api.context_collab_runtime import (
+from agentclaw.community.plugin_api.task.context_collab_runtime import (
     ContextCollabRuntimePlugin,
 )
 from agentclaw.community.plugin_api.staff_dept import StaffDeptPlugin

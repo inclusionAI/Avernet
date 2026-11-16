@@ -11,7 +11,7 @@
 frontend-nextgen 和旧产品仅适配宿主能力。资产构建不进入 Python 运行时，
 不改变本域的任务执行或 Relay 协议。
 
-## 四层目录结构(对齐 `docs/arch/arch.rules.md §8`)
+## Task 所有权目录结构(对齐 `docs/arch/arch.rules.md §8`)
 
 | 层 | 路径 | 职责 |
 |---|---|---|
@@ -19,6 +19,8 @@ frontend-nextgen 和旧产品仅适配宿主能力。资产构建不进入 Pytho
 | core/ | `community/core/task/` | 业务实现(transport-agnostic,禁 transport import) |
 | adapters/http/ | `community/adapters/http/task/`(内部:execute/dashboard/list 公开面镜像 + callback-report/bbs/feedback/todos,不经 spanner)+ `community/adapters/http/openapi_v1/task/`(前端公开面:execute/dashboard/list + bbs/feedback/todos,经 gateway spanner) | HTTP transport(thin:router+schema,不持 domain policy) |
 | di/modules/ | `community/di/modules/task_module.py` + `community/di/modules/task/` | Task composition root；BBS/Todo 等子域绑定不得恢复为与 Task 并列的业务模块 |
+| plugin_api/task/ | `community/plugin_api/task/` | Task 拥有、可替换的出站能力契约；core 只依赖协议，不依赖具体插件 |
+| plugins/{community,local}/task/ | `community/plugins/community/task/` + `community/plugins/local/task/` | Task 出站能力的生产适配器与本地模拟器；保留插件分层，但不得漂移回通用顶层 |
 
 ## core/task/ 目录树
 

@@ -74,7 +74,7 @@ from agentclaw.community.core.task.context_collab.service_api import (
     TaskProgressProjectionDTO,
 )
 from agentclaw.community.log import get_logger
-from agentclaw.community.plugin_api.context_collab_runtime import (
+from agentclaw.community.plugin_api.task.context_collab_runtime import (
     ContextCollabResumeRequest,
     ContextCollabRunRequest,
     ContextCollabRuntimePlugin,

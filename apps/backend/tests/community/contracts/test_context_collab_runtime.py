@@ -39,10 +39,10 @@ from agentclaw.community.core.task.context_collab.service_api import (
 from agentclaw.community.core.task.context_collab.services.context_collab_service import (
     ContextCollabService,
 )
-from agentclaw.community.plugins.local.context_collab_runtime import (
+from agentclaw.community.plugins.local.task.context_collab_runtime import (
     LocalContextCollabRuntimePlugin,
 )
-from agentclaw.community.plugin_api.context_collab_runtime import (
+from agentclaw.community.plugin_api.task.context_collab_runtime import (
     ContextCollabRunResult,
     ContextCollabRunStatus,
 )

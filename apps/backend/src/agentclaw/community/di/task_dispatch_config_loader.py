@@ -1,4 +1,4 @@
-"""YAML-to-TODO adapter for the task_dispatch typed configuration."""
+"""YAML loader for the typed Task dispatch configuration."""
 
 from __future__ import annotations
 
@@ -42,15 +42,6 @@ def load_task_dispatch_config(
         parsed = urlparse(callback_url)
         if parsed.scheme in {"http", "https"} and parsed.netloc:
             backend_url = f"{parsed.scheme}://{parsed.netloc}"
-    timeout = coerce(
-        task_dispatch_block,
-        "todo_collab_timeout_seconds",
-        float,
-        defaults.todo_collab_timeout_seconds,
-        "task_dispatch",
-    )
-    if timeout <= 0:
-        raise ValueError("task_dispatch.todo_collab_timeout_seconds must be positive")
     return cfg.TaskDispatchConfig(
         backend_url=backend_url or defaults.backend_url,
         task_search_skill_enabled=coerce(
@@ -67,12 +58,4 @@ def load_task_dispatch_config(
             defaults.skill_report_enabled,
             "task_dispatch",
         ),
-        todo_collab_base_url=coerce(
-            task_dispatch_block,
-            "todo_collab_base_url",
-            str,
-            defaults.todo_collab_base_url,
-            "task_dispatch",
-        ).strip(),
-        todo_collab_timeout_seconds=timeout,
     )

@@ -16,7 +16,7 @@ from agentclaw.community.core.task.task_runner.client.ports import BcsClientPort
 from agentclaw.community.core.task.todos.todo_execution_prompt import (
     format_todo_execution_instruction,
 )
-from agentclaw.community.plugin_api.context_collab_runtime import (
+from agentclaw.community.plugin_api.task.context_collab_runtime import (
     ContextCollabResumeRequest,
     ContextCollabRunRequest,
     ContextCollabRunResult,

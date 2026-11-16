@@ -19,7 +19,7 @@ from agentclaw.community.core.task.context_collab.service_api import (
     EventAcceptedResult,
     TaskProgressProjectionDTO,
 )
-from agentclaw.community.plugin_api.context_collab_runtime import (
+from agentclaw.community.plugin_api.task.context_collab_runtime import (
     ContextCollabRuntimeError,
 )
 from agentclaw.community.core.task.todos.collaboration.protocol import (

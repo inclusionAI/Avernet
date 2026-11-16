@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import itertools
 
-from agentclaw.community.plugin_api.context_collab_runtime import (
+from agentclaw.community.plugin_api.task.context_collab_runtime import (
     ContextCollabRuntimeError,
     ContextCollabResumeRequest,
     ContextCollabRunRequest,
