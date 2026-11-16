@@ -183,3 +183,13 @@ an installation succeeds. The enterprise scheduler consumes this ledger independ
 
 ### Teclaw scope
 Teclaw Caller sessions and draft/pre/production stages share a runtime. This iteration excludes both Teclaw engines and Teclaw-provider bindings from Caller expiry coordination and ASC scheduled refresh: Teclaw has no scheduled-task support yet. Interactive IAM refresh keeps its existing runtime/outbound update and does not read or write `caller_token_expires_at`. Engine lookup also excludes legacy `baas` bindings for a Teclaw Bot; other providers retain the expiry policy.
+
+For `GET /api/v1/token/iam?token_type=dingtalk`, the DeviceToken is supplied
+in the `IAM_TOKEN` cookie. This branch does not require a BaaS
+`X-Avernet-Principal` JWT and does not use that header to select the Caller.
+The exchange provider validates the source credential and returns the Caller
+subject; the service derives the Owner from the Bot context, requires a valid
+CallerToken, and resolves and rechecks the exact Caller-instance binding before
+installation. Missing source credentials or failed exchange/target checks still
+reject the request. The BaaS app-caller-connection endpoint retains its separate
+service-principal authentication contract.
