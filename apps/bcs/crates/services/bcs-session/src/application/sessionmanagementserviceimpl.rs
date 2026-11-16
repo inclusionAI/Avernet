@@ -260,7 +260,6 @@ impl SessionManagementService for SessionManagementWithRuntimeCleanup {
     ) -> Result<std::collections::HashMap<String, u64>, SessionUseCaseError> {
         self.inner.max_created_at_by_group_ids(group_ids).await
     }
-
 }
 
 impl SessionManagementServiceImpl {

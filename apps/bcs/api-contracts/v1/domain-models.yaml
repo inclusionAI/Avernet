@@ -1328,9 +1328,12 @@ SessionSummary:
       description: >-
         Conversation activity key in epoch milliseconds: the newest persisted
         message in the Session, falling back to the Session's `created_at` when
-        it has no persisted messages. Populated on
-        `GET /openapi/v1/collaboration/groups/{group_id}/sessions` under every
-        `sort` mode and absent (never null) when the value is unknown.
+        it has no persisted messages. On
+        `GET /openapi/v1/collaboration/groups/{group_id}/sessions` items it is
+        always present (integer milliseconds) under every `sort` mode,
+        including that `created_at` fallback case (never null); omitted only
+        where the value is not computed. Session detail is unaffected: it gains
+        no field.
 
 SessionDetail:
   type: object
