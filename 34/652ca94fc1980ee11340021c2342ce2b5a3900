@@ -1,0 +1,19 @@
+submodules/avernet
+  s_5c173f6b8a3b51::t_7c9a30cf4a5de3 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "34652ca94fc1980ee11340021c2342ce2b5a3900",
+  "prompts": {},
+  "sessions": {
+    "s_5c173f6b8a3b51": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ce92-ae83-7ee3-a7cd-2cd2e1135dca",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}
