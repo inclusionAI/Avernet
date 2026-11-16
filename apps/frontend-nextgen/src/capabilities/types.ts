@@ -1,6 +1,17 @@
 import type { BotEditorSkill } from '@/domain/botEditor';
-import type { BotHealthCapability } from '@/domain/botHealthCheck';
 import type { ConversationSessionRequestRange } from '@/domain/conversation';
+import type { BotHealthCapability } from '@/domain/botHealthCheck';
+import type {
+  CodingBotSessionArchiveItem,
+  CodingBotSessionArchiveRestoreRequestSummary,
+  CodingBotSessionArchiveRestoreStatus,
+  CodingBotSessionArchiveSource,
+  CodingBotSessionArchiveAvailability,
+  CodingBotSessionArchivePreviewMessage,
+  CodingBotSessionArchivePreviewResult,
+  CodingBotRestoredSessionItem,
+  ConversationSessionArchiveListState,
+} from '@/domain/conversation';
 import type { NavigationItem } from '@/shell/navigation';
 import type { RouteMeta } from '@/shell/routeMeta';
 import type { ComponentType } from 'react';
@@ -462,6 +473,95 @@ export type CodingBotSessionActionResult =
   | { ok: true; session?: CodingBotSessionSummary; favorite?: boolean }
   | { ok: false; message: string; code?: CodingBotSessionActionErrorCode };
 
+export type {
+  CodingBotSessionArchiveItem,
+  CodingBotSessionArchiveRestoreRequestSummary,
+  CodingBotSessionArchiveRestoreStatus,
+  CodingBotSessionArchiveSource,
+  CodingBotRestoredSessionItem,
+  CodingBotSessionArchivePreviewMessage,
+  CodingBotSessionArchivePreviewResult,
+  ConversationSessionArchiveListState,
+};
+
+export interface CodingBotSessionArchiveListInput {
+  botId: string;
+  ownerId?: string;
+  userId?: string;
+  publishId?: string | number;
+  stage?: 'verify' | 'online';
+  cursor?: string | null;
+  limit?: number;
+  /** 恢复轮询专用：按 operationId 查询恢复结果，不拉普通归档首页。 */
+  operationId?: string;
+}
+
+export interface CodingBotSessionArchiveListResultOk {
+  ok: true;
+  items: CodingBotSessionArchiveItem[];
+  nextCursor: string | null;
+  catalogRevision: number | null;
+  availability: CodingBotSessionArchiveAvailability;
+  restoreAvailability: CodingBotSessionArchiveAvailability;
+}
+
+export type CodingBotSessionArchiveListResult =
+  | CodingBotSessionArchiveListResultOk
+  | { ok: false; message: string };
+
+export interface CodingBotSessionArchiveRestoreInput {
+  botId: string;
+  ownerId?: string;
+  userId?: string;
+  publishId?: string | number;
+  stage?: 'verify' | 'online';
+  sessionKeys: string[];
+}
+
+export interface CodingBotSessionArchiveRestoreResultOk {
+  ok: true;
+  requested: CodingBotSessionArchiveRestoreRequestSummary[];
+  operationIds: string[];
+}
+
+export type CodingBotSessionArchiveRestoreResult =
+  | CodingBotSessionArchiveRestoreResultOk
+  | { ok: false; message: string };
+
+export interface CodingBotSessionArchivePreviewInput {
+  botId: string;
+  ownerId?: string;
+  userId?: string;
+  publishId?: string | number;
+  stage?: 'verify' | 'online';
+  sessionKey: string;
+  archiveId: string;
+}
+
+export interface CodingBotRestoredSessionListInput {
+  botId: string;
+  ownerId?: string;
+  userId?: string;
+  publishId?: string | number;
+  stage?: 'verify' | 'online';
+}
+
+export interface CodingBotRestoredSessionListResultOk {
+  ok: true;
+  items: CodingBotRestoredSessionItem[];
+}
+
+export type CodingBotRestoredSessionListResult =
+  | CodingBotRestoredSessionListResultOk
+  | { ok: false; message: string };
+
+export interface CodingBotSessionArchiveHost {
+  list(input: CodingBotSessionArchiveListInput): Promise<CodingBotSessionArchiveListResult>;
+  restore(input: CodingBotSessionArchiveRestoreInput): Promise<CodingBotSessionArchiveRestoreResult>;
+  preview(input: CodingBotSessionArchivePreviewInput): Promise<CodingBotSessionArchivePreviewResult>;
+  listRestored(input: CodingBotRestoredSessionListInput): Promise<CodingBotRestoredSessionListResult>;
+}
+
 /**
  * Coding Bot 对话工作区宿主能力。Open Core 默认 null;internal overlay 注入
  * 真实微应用 Stage。开源侧只依赖该组件合同,不感知任何内部 URL。
@@ -486,6 +586,8 @@ export interface CodingBotConversationHost {
    */
   createSession?: (input: CodingBotSessionCreateInput) => Promise<CodingBotSessionActionResult>;
   runSessionAction?: (input: CodingBotSessionActionInput) => Promise<CodingBotSessionActionResult>;
+  /** Coding Bot 会话归档能力。Open Core 不注实现；旧 Child 缺方法时必须返回 unsupported。 */
+  sessionArchive?: CodingBotSessionArchiveHost;
 }
 
 /**

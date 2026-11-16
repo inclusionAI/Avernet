@@ -121,18 +121,20 @@ export default function ConversationPage(): JSX.Element {
   const codingBotPreload = getCapabilities().getCodingBotConversationHost().value?.preload;
 
   // interactive.bot 只有在目标 Session 已解析后才存在，太晚。这里从目录推导当前
-  // 选中 Bot，以便在“Bot 已识别、Session 未就绪”时就开始预载 qiankun 入口资产。
+  // 选中 Bot，以便在“Bot 已识别、Session 未就绪”时就挂载 embedded Stage。
   const selectedCodingBot = useMemo(() => {
     const selectedBot = managedAndTeamBots.find(
       (view) => view.section === store.selectedSection && view.bot.botId === store.selectedBotId,
     )?.bot;
     return selectedBot?.isAgentCodingBot === true ? selectedBot : null;
   }, [managedAndTeamBots, store.selectedBotId, store.selectedSection]);
-  const shouldPreloadCodingBot = selectedCodingBot !== null;
 
+  // `/workspace/chat` 是 Coding Bot 的主对话入口，页面挂载后先预载 qiankun 入口资产。
+  // 这里不等待目录解析：目录接口在弱网/慢查询时会成为首个瓶颈，若等它返回才开始
+  // 下载 Agentcoding，用户点击“新建会话”时仍会进入冷启动窗口。
   useEffect(() => {
-    if (shouldPreloadCodingBot) codingBotPreload?.();
-  }, [codingBotPreload, shouldPreloadCodingBot]);
+    codingBotPreload?.();
+  }, [codingBotPreload]);
 
   // URL 已指定 Bot 但目录仍在解析时不能挂载普通 Runtime;否则 Coding Bot 会在
   // 目录返回前短暂初始化 useBotChat(null)。这个轻量 Stage 只等待目录结论。

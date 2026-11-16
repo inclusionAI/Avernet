@@ -4,7 +4,8 @@
 // 气泡版式对齐 dmore artboard-003「click筛选icon」(Frame 1912056215,171×154):白底圆角 8、
 // 多层投影,分组小题「发起人」「会话」(12px,颜色取设计 #525252/70% 合成 ≈ #868686 →
 // text-content-soft),双组灰轨分段控件(轨道 #F5F5F5 → bg-muted,选中白胶囊 h26/r6 +
-// 0 1px 3px 阴影 + 文字 #09090B),弹层内边距 13/17、组间距 16、胶囊随内容自适应宽。
+// 0 1px 3px 阴影 + 文字 #09090B),弹层内边距 13/17、组间距 16、胶囊随内容自适应宽;两选项态
+// 保留 171px 最小宽,三选项态(Coding Bot)按内容扩展,不再使用固定 171px 裁切。
 import { IconButton, Popover, PopoverContent, PopoverTrigger, Segmented } from '@/components/ui';
 import type { ConversationOrigin, ConversationSessionScope } from '@/domain/conversation/types';
 import { cn } from '@/utils/cn';
@@ -14,11 +15,15 @@ import { useState } from 'react';
 export interface ConversationOriginFilterProps {
   botId: string;
   origin: ConversationOrigin;
-  /** 当前生效读取范围(others 强制 all)。 */
+  /** 当前生效读取范围;普通 Bot 的 others 归一为 all,Coding Bot 保留收藏/归档组合。 */
   scope: ConversationSessionScope;
   /** 是否展示「发起人」分组;好友 Bot 无归属概念,仅保留「会话」范围(dmore 截图 3.png)。 */
   supportsOrigin?: boolean;
   supportsFavorites?: boolean;
+  /** Coding Bot 归档列表能力；仅当前已挂载 Runtime 的 Bot 暴露。 */
+  supportsArchives?: boolean;
+  /** Coding Bot 的协作来源；由 capability host 归类后列表消费。 */
+  supportsCollab?: boolean;
   /** 外部显隐类注入（行级 hover 群发 + 激活常显，2026-11-04 操作组显隐重构）。 */
   triggerClassName?: string;
   onOriginChange(origin: ConversationOrigin): void;
@@ -42,28 +47,26 @@ export function ConversationOriginFilter({
   scope,
   supportsOrigin = true,
   supportsFavorites = true,
+  supportsArchives = false,
+  supportsCollab = false,
   triggerClassName,
   onOriginChange,
   onScopeChange,
 }: ConversationOriginFilterProps) {
   const [open, setOpen] = useState(false);
   // 激活态:管理/团队看归属(others)或范围(favorite);好友只看范围。
-  const filterActive = (supportsOrigin && origin === 'others') || (supportsFavorites && scope === 'favorite');
+  const filterActive =
+    (supportsOrigin && origin !== 'mine') ||
+    (supportsFavorites && scope === 'favorite') ||
+    (supportsArchives && scope === 'archived');
   // 功能名与气泡分组标题(发起人/会话)对齐,避免「发起归属」内部术语。
   const triggerName = supportsOrigin ? (supportsFavorites ? '发起人与会话筛选' : '发起人筛选') : '会话筛选';
-  // 状态双维度全展示:发起人与会话范围都露出(others/无收藏能力时气泡本就只有发起人分组,
-  // 不补会话维度),避免已收藏过滤生效时 tooltip 只报「我发起的」、蓝点来源不明。
-  const triggerState = supportsOrigin
-    ? origin === 'mine'
-      ? supportsFavorites
-        ? scope === 'favorite'
-          ? '我发起的 · 已收藏'
-          : '我发起的 · 全部'
-        : '我发起的'
-      : '他人发起的'
-    : scope === 'favorite'
-    ? '已收藏'
-    : '全部';
+  // 状态双维度全展示:普通 Bot 的 others 仍保持旧版仅发起人分组;Coding Bot 的
+  // others/collab 需保留收藏/归档组合,避免筛选生效后蓝点来源不明。
+  const originLabel =
+    origin === 'mine' ? '我发起' : origin === 'others' ? '他人发起' : '协作';
+  const scopeLabel = scope === 'favorite' && supportsFavorites ? '已收藏' : scope === 'archived' && supportsArchives ? '已归档' : '全部';
+  const triggerState = supportsOrigin ? `${originLabel} · ${scopeLabel}` : scopeLabel;
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -95,7 +98,7 @@ export function ConversationOriginFilter({
         forceMount
         align="end"
         className={cn(
-          'flex w-[171px] flex-col gap-4 rounded-lg px-[13px] py-[17px]',
+          'flex w-[max-content] min-w-[171px] max-w-[calc(100vw-16px)] flex-col gap-4 rounded-lg px-[13px] py-[17px]',
           // 稿面多层投影实测(dmore artboard-003):0 9 28 8 / 0 6 16 / 0 3 6 -4px。
           'shadow-[0_9px_28px_8px_rgba(0,10,26,0.04),0_6px_16px_0px_rgba(0,10,26,0.07),0_3px_6px_-4px_rgba(155,166,185,0.11)]',
           // 关闭时仍然挂载(供状态测试与动画),仅以 hidden 收起;open 态恢复显示。
@@ -113,6 +116,7 @@ export function ConversationOriginFilter({
               options={[
                 { value: 'mine', label: '我发起' },
                 { value: 'others', label: '他人发起' },
+                ...(supportsCollab ? [{ value: 'collab' as const, label: '协作' }] : []),
               ]}
               onChange={(next) => {
                 onOriginChange(next);
@@ -123,7 +127,7 @@ export function ConversationOriginFilter({
             />
           </section>
         )}
-        {origin === 'mine' && supportsFavorites && (
+        {(origin === 'mine' || (supportsArchives && ['others', 'collab'].includes(origin))) && supportsFavorites && (
           <section>
             <p className="m-0 text-xs font-normal leading-4 text-content-soft">会话</p>
             <Segmented
@@ -132,7 +136,8 @@ export function ConversationOriginFilter({
               value={scope}
               options={[
                 { value: 'all', label: '全部' },
-                { value: 'favorite', label: '已收藏' },
+                ...(supportsFavorites ? [{ value: 'favorite' as const, label: '已收藏' }] : []),
+                ...(supportsArchives ? [{ value: 'archived' as const, label: '已归档' }] : []),
               ]}
               onChange={(next) => {
                 onScopeChange(next);
