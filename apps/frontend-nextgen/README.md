@@ -98,6 +98,30 @@ Regression coverage lives in
 and the managed/team read-only cases in
 [`ConversationPage.test.tsx`](test/pages/Workspace/Chat/ConversationPage.test.tsx).
 
+## Group session file preview
+
+The group file panel previews text files through a sandboxed iframe at the
+existing `show=true` content URL. A backend may redirect that URL to a
+presigned storage address, so reading it with browser JavaScript would require
+CORS on the final storage response. Direct browser navigation renders
+`text/markdown`, `text/plain`, and other inline text responses without a
+cross-origin body read. The iframe grants no scripts, same-origin permissions,
+popups, or downloads; users can still download from the panel toolbar. Server
+`Content-Type`, `Content-Disposition`, and framing policy determine whether a
+particular response renders inline. Group Markdown displays as raw browser
+text and JSON is not reformatted; no client-side size limit is applied.
+
+The shared [file preview classifier](src/services/workspace/filePreview.ts)
+recognizes common documentation, configuration, source-code, log, structured
+text, and conventional extensionless files by name or explicit text MIME
+(including JSON/XML suffixes). Preview recognition does not change the upload
+allowlist. The Bot preview still renders supplied text through the existing
+Markdown/plain-text UI; image, video, PDF and HTML paths are unchanged.
+Regression tests cover
+[format classification](test/services/workspace/sessionFilePreviewKind.test.ts),
+[group URL state](test/pages/Workspace/hooks/useSessionFilePreview.test.tsx), and
+[shared preview rendering](test/pages/Workspace/components/GroupChatPane/SessionFilesPreviewPane.test.tsx).
+
 ## Source synchronization
 
 `OPEN_CORE_MANIFEST.json` records the TeamClaw source commit. Changes originating in this public directory must be taken back into the TeamClaw Open Core baseline before the next export.
