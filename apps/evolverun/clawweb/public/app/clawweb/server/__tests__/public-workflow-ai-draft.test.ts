@@ -9,7 +9,8 @@ const state = vi.hoisted(() => ({ db: null as IDatabase | null, reconcile: vi.fn
 vi.mock('@avernet/clawweb-shared/server/db', async original => ({
   ...await original<typeof import('@avernet/clawweb-shared/server/db')>(),
   initDatabase: async () => ({ db: state.db }), closeDatabase: () => state.close(),
-  resolveBaasConfig: () => ({ apiKey: "baas-test", iamtoken: "", baseUrl: "http://provider.example.invalid" }),
+  resolveBaasConfig: () => ({ apiKey: "baas-test", iamtoken: "", baseUrl: "http://provider.example.invalid",
+    environments: { prod: { apiKey: "baas-test", baseUrl: "http://provider.example.invalid" } } }),
 }));
 vi.mock('@avernet/clawevolve', async () => {
   const { Router } = await import('express');

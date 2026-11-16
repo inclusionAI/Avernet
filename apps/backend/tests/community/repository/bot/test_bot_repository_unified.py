@@ -24,6 +24,7 @@ from agentclaw.community.core.service_bot.repository.models import BotPublishMod
 from agentclaw.community.plugin_api.models import BotModel
 from agentclaw.community.core.repository.implementations.bot.bot import BotRepository
 from agentclaw.community.core.devices.repository.models import EntityDeviceBinding
+from agentclaw.community.core.spaces.repository.models import SpaceModel
 from agentclaw.community.utils.env_utils import get_current_env
 
 pytestmark = pytest.mark.integration
@@ -58,6 +59,9 @@ def db(tmp_path):
     BotPublishModel.__table__.create(engine)
     EntityDeviceBinding.__table__.create(engine)
     BotCollaboratorModel.__table__.create(engine)
+    # update_space_by_owner validates the target Space inside its write
+    # transaction, so the isolated schema carries the Space table too.
+    SpaceModel.__table__.create(engine)
     return _FileSqliteDB(engine)
 
 
@@ -932,7 +936,23 @@ def test_list_by_conditions_treats_like_wildcards_literally(repo):
 # ── structured Business Space assignment ───────────────────────────
 
 
-def test_update_space_by_owner_persists_space_and_modifier(repo):
+def _seed_space(db, *, space_id: int, env: str):
+    with db.orm_session() as s:
+        s.add(
+            SpaceModel(
+                id=space_id,
+                space_code=f"spc-{space_id}",
+                space_type="TEAM",
+                name=f"Space {space_id}",
+                env=env,
+                created_by="emp1",
+                updated_by="emp1",
+            )
+        )
+
+
+def test_update_space_by_owner_persists_space_and_modifier(repo, db):
+    _seed_space(db, space_id=42, env=get_current_env())
     repo.insert(_data(bot_id="space-bot", space_id=7, modifier_id="creator"))
 
     out = repo.update_space_by_owner(bot_id="space-bot", owner_id="emp1", space_id=42)
@@ -975,6 +995,7 @@ def test_get_by_id_and_owner_explicit_env(repo, db):
 
 
 def test_update_space_by_owner_explicit_env(repo, db):
+    _seed_space(db, space_id=9, env="prod")
     rec = repo.insert(_data())
     with repo._db.orm_session() as s:
         from agentclaw.community.plugin_api.models import BotModel

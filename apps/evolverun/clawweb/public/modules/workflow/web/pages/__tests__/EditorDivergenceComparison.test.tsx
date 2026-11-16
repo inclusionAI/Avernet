@@ -63,7 +63,7 @@ beforeEach(() => {
 })
 afterEach(() => { cleanup(); vi.useRealTimers(); useEditorStore.getState().reset({ force: true }); vi.restoreAllMocks() })
 async function openComparison() {
-  const view = render(<Editor embedded initialWorkflowId="review-wf" />)
+  const view = render(<Editor access={{ canView: true, canEdit: true, canDeploy: true }} embedded initialWorkflowId="review-wf" />)
   await waitFor(() => expect(useEditorStore.getState().spec?.id).toBe('review-wf'))
   click('查看差异')
   await screen.findByRole('dialog', { name: '对比数据库和 Git 工作流' })
@@ -88,7 +88,7 @@ it('warns about a difference without blocking save or deployment and defaults to
 })
 
 it('requires confirmation before replacing local edits with Git; returning leaves them intact', async () => {
-  render(<Editor embedded initialWorkflowId="review-wf" />)
+  render(<Editor access={{ canView: true, canEdit: true, canDeploy: true }} embedded initialWorkflowId="review-wf" />)
   await waitFor(() => expect(useEditorStore.getState().spec?.id).toBe('review-wf'))
   act(() => useEditorStore.getState().updateSpecField('title', 'Local edit'))
   mocks.current = { ...mocks.current!, candidateSpecJson: JSON.stringify(useEditorStore.getState().spec) }
@@ -144,7 +144,7 @@ it('does not apply an outdated Git choice after the comparison baseline changes'
   const view = await openComparison()
   fireEvent.click(gitChoice()); click('使用 Git 内容')
   mocks.current = { ...mocks.current!, revision: 'session:2', expectedDraftToken: 'c'.repeat(64) }
-  view.rerender(<Editor embedded initialWorkflowId="review-wf" />)
+  view.rerender(<Editor access={{ canView: true, canEdit: true, canDeploy: true }} embedded initialWorkflowId="review-wf" />)
   const confirm = screen.getByRole('alertdialog', { name: '确认替换当前编辑' })
   expect(within(confirm).getByRole('button', { name: '确认替换' })).toBeDisabled()
   expect(within(dialog()).getByRole('alert')).toHaveTextContent(/变化|重新/)
@@ -155,7 +155,7 @@ it('does not apply an outdated Git choice after the comparison baseline changes'
 it('disables selecting Git when the comparison became stale before a choice', async () => {
   const view = await openComparison()
   mocks.current = { ...mocks.current!, revision: 'session:2', expectedDraftToken: 'c'.repeat(64) }
-  view.rerender(<Editor embedded initialWorkflowId="review-wf" />)
+  view.rerender(<Editor access={{ canView: true, canEdit: true, canDeploy: true }} embedded initialWorkflowId="review-wf" />)
   expect(gitChoice()).toBeDisabled()
   expect(within(dialog()).getByRole('alert')).toHaveTextContent(/变化|重新/)
   expect(useEditorStore.getState().spec?.title).toBe('DB draft')
@@ -163,7 +163,7 @@ it('disables selecting Git when the comparison became stale before a choice', as
 })
 
 async function prepareGitOverwriteWithLocalEdit() {
-  render(<Editor embedded initialWorkflowId="review-wf" />)
+  render(<Editor access={{ canView: true, canEdit: true, canDeploy: true }} embedded initialWorkflowId="review-wf" />)
   await waitFor(() => expect(useEditorStore.getState().spec?.id).toBe('review-wf'))
   act(() => useEditorStore.getState().updateSpecField('title', 'Keep local edit'))
   mocks.current = { ...mocks.current!, candidateSpecJson: JSON.stringify(useEditorStore.getState().spec) }

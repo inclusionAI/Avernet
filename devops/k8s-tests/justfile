@@ -65,6 +65,10 @@ k8s-proxy-up:
 k8s-proxy-down:
     @./{{proxy-script}} down
 
+# Run the BCS preset HTTP E2E against a disposable MySQL Pod on local Kubernetes.
+k8s-bcs-presets:
+    @./bcs/test-k8s-bcs-presets.sh
+
 # ── Combined avernet stack (all services + shared mariadb/redis) ─────────
 
 # Build all images, apply shared infra, deploy all services, wait healthy.

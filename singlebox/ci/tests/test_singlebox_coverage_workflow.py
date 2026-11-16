@@ -96,6 +96,20 @@ def test_relevant_change_runs_singlebox_coverage(tmp_path, changed_path):
     assert output.read_text().strip() == "skip=false"
 
 
+def test_bcs_coverage_merges_valid_profiles_and_fails_closed_on_aggregate_failure():
+    runner = (REPO_ROOT / "apps/bcs/scripts/e2e_coverage.sh").read_text(encoding="utf-8")
+    aggregation = runner.split('cov_ignore_regex=', 1)[1]
+
+    # LLVM's default `any` mode lets one truncated companion profile abort the
+    # report even when the remaining profiles are valid. `all` preserves the
+    # warning, merges readable profiles, and fails when no profile is valid.
+    assert aggregation.count("--failure-mode all") == 3
+    assert "rm -f \"$summary_json\"" in aggregation
+    assert "report_status=0" in aggregation
+    assert "FAIL: BCS LLVM coverage aggregation failed" in aggregation
+    assert "cov_gate_status=1" in aggregation
+
+
 def test_workflow_installs_pinned_protoc_without_apt():
     workflow = WORKFLOW.read_text(encoding="utf-8")
     install_step = workflow.split("- name: Install protoc", 1)[1].split(

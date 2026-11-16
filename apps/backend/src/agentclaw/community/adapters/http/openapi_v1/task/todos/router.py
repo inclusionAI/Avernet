@@ -83,7 +83,7 @@ def call_user(*, user_id: str, principal: Principal) -> str:
 
 
 router = APIRouter(
-    prefix="/openapi/v1/todos",
+    prefix="/openapi/v1/collaboration/tasks/todos",
     tags=["todos"],
     route_class=PublicAPIRoute,
     dependencies=[Depends(refuse_app_only_caller)],

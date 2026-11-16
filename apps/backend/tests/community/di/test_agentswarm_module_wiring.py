@@ -337,3 +337,75 @@ class TestConfiguredOrchestration:
         )
         assert evaluator._wall_clock_seconds == 1800.0
         assert evaluator._no_progress_threshold == 6
+
+
+# ── the identity-source seam's composition ─────────────────────────────
+
+class _FakeBotRepo:
+    """Stands in for the BotRepository binding — the one DB-facing edge.
+
+    The graph root cannot be edited here, so the repository is the edge
+    indirection that lets the composition ask about a Bot without a live
+    database. The passport plugin is NOT substituted: resolving it through
+    the composition is what proves tcauthmng is bound on the submit path.
+    """
+
+    def __init__(self, rows: dict[str, dict]) -> None:
+        self._rows = rows
+        self.queries: list[tuple[str, str]] = []
+
+    def get_by_id_and_owner(self, bot_id: str, owner_id: str) -> dict | None:
+        self.queries.append((bot_id, owner_id))
+        return self._rows.get(bot_id)
+
+
+def _composition(test_injector, rows: dict[str, dict]):
+    """The service the graph root composes, with only the repo replaced."""
+    from agentclaw.community.core.agentswarm.service import AgentSwarmService
+    from agentclaw.community.core.repository.protocols.bot import BotRepository
+
+    repo = _FakeBotRepo(rows)
+    test_injector.binder.bind(BotRepository, to=repo)
+    return test_injector.get(AgentSwarmService)._authorization_source, repo
+
+
+class TestTheIdentitySourceSeamIsComposedWithThePassportProvider:
+    """The fallback is only real if the graph root binds a provider.
+
+    Exercised through the composition rather than a hand-built seam: an
+    unbound plugin would make `_authorization_source` degrade to ``None``
+    (the seam absent entirely), and every case below would fail.
+    """
+
+    def test_the_composition_binds_a_seam_with_a_plugin_that_queries(
+            self, test_injector):
+        """A seam with no bound plugin cannot answer the fallback at all."""
+        seam, _ = _composition(test_injector, {})
+        assert seam is not None
+        assert callable(getattr(seam._passport, "query_agent_passport", None))
+
+    def test_an_older_bot_whose_passport_lives_only_with_the_provider(
+            self, test_injector):
+        """No cached `ext.passport`; the bound provider still answers.
+
+        The provider's own answer is asserted to carry an issued agent code
+        first, so an empty answer can never masquerade as a pass.
+        """
+        seam, repo = _composition(test_injector, {
+            SOURCE: {"bot_id": SOURCE, "owner_id": OWNER},
+        })
+        answer = seam._passport.query_agent_passport(SOURCE, OWNER)
+        assert isinstance(answer, dict)
+        assert answer.get("status", "ISSUED") == "ISSUED"
+        assert answer["agent_code"]
+
+        code = seam.identity_source(owner_id=OWNER, bot_id=SOURCE)
+        assert code == answer["agent_code"]
+        # Ownership was settled from the Bot row before the provider.
+        assert repo.queries == [(SOURCE, OWNER)]
+
+
+# ── identity-source constants ──────────────────────────────────────────
+
+OWNER = "49912"
+SOURCE = "20231101_old_bot"

@@ -247,6 +247,7 @@ _TODO_TASK_DOMAIN_REQUIRED_PATHS = (
     "adapters/http/task/todos/artifact_routes.py",
     "adapters/http/openapi_v1/task/errors_todo.py",
     "di/modules/task/todo_bindings.py",
+    "core/task/context_collab/executor.py",
 )
 _LEGACY_TODO_PARALLEL_PATHS = (
     "core/todos",
@@ -262,6 +263,9 @@ _LEGACY_TODO_PARALLEL_PATHS = (
     "plugin_api/todo_collaboration.py",
     "plugins/community/todo_collaboration.py",
     "plugins/local/todo_collaboration.py",
+    "plugin_api/context_collab_runtime.py",
+    "plugins/community/context_collab_runtime.py",
+    "plugins/local/context_collab_runtime.py",
 )
 _LEGACY_TODO_PARALLEL_IMPORTS = frozenset(
     {
@@ -275,6 +279,9 @@ _LEGACY_TODO_PARALLEL_IMPORTS = frozenset(
         "agentclaw.community.plugin_api.todo_collaboration",
         "agentclaw.community.plugins.community.todo_collaboration",
         "agentclaw.community.plugins.local.todo_collaboration",
+        "agentclaw.community.plugin_api.context_collab_runtime",
+        "agentclaw.community.plugins.community.context_collab_runtime",
+        "agentclaw.community.plugins.local.context_collab_runtime",
     }
 )
 

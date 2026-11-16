@@ -97,6 +97,8 @@ internal_dependencies:
   - agentclaw.community.core.repository.protocols.skill_center    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.skills_pool    # persisted initial layout and restart selection
   - agentclaw.community.core.repository.protocols.capability_desired_state    # explicit Skill/MCP Installation purge during Bot deletion
+  - agentclaw.community.core.agentswarm.identity_rule    # the one identity-source rule, shared with the submit seam
+  - agentclaw.community.core.agentswarm.service.protocols    # that rule's refusal vocabulary
   - agentclaw.community.core.base
   - agentclaw.community.core.bot_app_grant.protocols    # sweep contract: deletion withdraws the bot's app authorizations
   - agentclaw.community.core.bot_startup_script.protocols    # sweep contract: deletion removes the bot's stored startup script

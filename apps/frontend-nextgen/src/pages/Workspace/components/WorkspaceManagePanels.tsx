@@ -74,6 +74,7 @@ export function WorkspaceManagePanels(props: WorkspaceManagePanelsProps) {
           <GroupManagePanel
             key={group.groupId}
             group={group}
+            sessionId={session?.groupId === group.groupId ? session.sessionId : undefined}
             advancedConfigEnabled={props.groupAdvancedConfigEnabled}
             canManage={canManage}
             candidates={identities}

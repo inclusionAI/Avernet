@@ -33,7 +33,7 @@ afterEach(() => { cleanup(); useEditorStore.getState().reset({ force: true }) })
 
 async function openWithHistory(raw: string) {
   mocks.snapshot.mockResolvedValue({ deployNumber: 7, version: 3, specJson: raw })
-  render(<Editor embedded initialWorkflowId="comparison-test" />)
+  render(<Editor access={{ canView: true, canEdit: true, canDeploy: true }} embedded initialWorkflowId="comparison-test" />)
   await waitFor(() => expect(mocks.snapshot).toHaveBeenCalledWith('comparison-test', 7))
   await act(async () => {})
 }

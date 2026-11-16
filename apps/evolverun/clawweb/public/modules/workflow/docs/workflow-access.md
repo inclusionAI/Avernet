@@ -40,3 +40,30 @@ The backend-facing Clone route preserves its HTTP contract and merges exact Bot
 permissions without duplicate rows. See [Clone persistence and OceanBase index
 preflight](bot-workflow-permission-clone.md) for its unique-key invariant,
 concurrency limits and the deploy-before-code index DDL.
+
+## Browser editor capabilities
+
+`GET /api/workflows/:workflowId/access` retains its existing workflow identity,
+`canView`, and `canEdit` fields and additively reports `canExecute` plus
+`canDeploy`. Execution is the execution grant; Editor snapshot deployment publishes a
+complete Pack and requires an actual edit grant. Execute-only permission remains
+valid only for the separate legacy AutoHeal deployment path, not the Editor
+snapshot protocol. `canDeploy` therefore reflects the Editor-specific policy. Clients must not infer execution from
+editing or infer any write grant from a successful document/Pack read.
+
+The editor treats a loaded workflow as read-only while its write capabilities
+are unknown, unavailable, or denied. Readers may inspect the canvas, authored
+YAML, history, and authorized Pack files without enabling graph/form/file edits,
+AI modification, save shortcuts, or unauthorized deployment. A new local,
+unsaved workflow retains the existing explicit creation path. Every server write
+still independently authenticates and rechecks its actual authorization and CAS
+preconditions; capability responses are advisory, not write credentials.
+
+A host may provide a broader authenticated workflow-view policy without changing
+these default public ACLs. The Pack routers expose the explicit GET-only
+`authorizeRead` callback documented in `pack-scripts-read.md` and
+`pack-version-write.md`; it cannot authorize PUT, operation reconciliation, or
+runtime execution. Host-specific read-only compositions must authenticate before
+reading and confine any permissive policy to documented read endpoints. Secret
+configuration, permission administration, and runtime scopes are not implicitly
+part of workflow viewing.

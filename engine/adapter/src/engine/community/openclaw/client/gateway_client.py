@@ -33,6 +33,7 @@ from engine.community.openclaw.config import OpenClawConfig
 
 from engine.community.openclaw.client.gateway_connection import GatewayConnection
 from engine.community.openclaw.client.child_runs import ChildRuns, is_child_event, is_parent_continuation
+from engine.community.openclaw.client.merged_announce import MergedAnnounce
 
 log = logging.getLogger("openclaw-client")
 _DEBUG = os.getenv("OPENCLAW_DEBUG_EVENTS", "").lower() in {"1", "true", "yes", "on"}
@@ -221,7 +222,9 @@ class OpenClawGatewayClient(GatewayConnection):
         if not self._connected:
             raise ConnectionError("Not connected")
 
-        event_queue: asyncio.Queue[Optional[EventFrame]] = asyncio.Queue()
+        event_queue: asyncio.Queue[EventFrame | MergedAnnounce | None] = asyncio.Queue()
+        revision = 0
+        merge_check: asyncio.Task[None] | None = None
         ack_pending = on_ack is not None
         early_events: list[tuple[Callable[[EventFrame], None], EventFrame]] = []
         early_bytes = 0
@@ -393,7 +396,25 @@ class OpenClawGatewayClient(GatewayConnection):
             )
             return True
 
+        async def check_merged_announce(probe: MergedAnnounce) -> None:
+            if done or revision != probe.revision:
+                return
+            parent_key = probe.event.payload["sessionKey"]
+            try:
+                response = await self.send_request("sessions.describe", {"key": parent_key}, timeout=2)
+                session = (response.payload or {}).get("session") or {}
+                verified = response.ok and session.get("key") == parent_key and await asyncio.wait_for(
+                    probe.verify_persisted(self._config.session_transcript_dir, session["sessionId"]),
+                    timeout=2,
+                )
+            except Exception as exc:
+                log.info("[chat_stream][merged_announce_unverified] reason=%s", type(exc).__name__)
+                return
+            if verified and not done and revision == probe.revision:
+                event_queue.put_nowait(probe)
+
         def on_chat_event(event: EventFrame) -> None:
+            nonlocal revision, merge_check
             nonlocal done, emitted_non_terminal, filter_drop_count
             nonlocal pending_compaction_finals, pending_early_final
             nonlocal suppressed_compaction_lifecycle_ends, waiting_for_subagent_resume
@@ -424,6 +445,7 @@ class OpenClawGatewayClient(GatewayConnection):
             if is_announce_event(payload) and state == "final":
                 if not children.complete_announce(payload_run_id):
                     return
+            revision += 1
             is_foreground_run = isinstance(payload_run_id, str) and (
                 payload_run_id in allowed_run_ids or payload_run_id == run_id
             )
@@ -563,6 +585,20 @@ class OpenClawGatewayClient(GatewayConnection):
                 ):
                     if is_foreground_run:
                         waiting_for_subagent_resume = True
+                    elif (
+                        event.event == "chat" and is_announce_event(payload)
+                        and waiting_for_subagent_resume and children.pending_count == 0
+                        and len(children.runs) == 2 and merge_check is None
+                        and children.unannounced_count == 1 and payload.get("message")
+                    ):
+                        source = children.announce_child(payload_run_id)
+                        sibling_run, sibling = next(
+                            (r, c) for r, c in children.runs.items() if not (c.announced or c.parent_covered)
+                        )
+                        if source and source.session_key != sibling.session_key:
+                            merge_check = asyncio.create_task(check_merged_announce(MergedAnnounce(
+                                event, revision, source.session_key, sibling.session_key, sibling_run,
+                            )))
                     # Never flush this old final when a child later completes.
                     log.info(
                         "[chat_stream][subagent_parent_final_deferred] "
@@ -710,6 +746,14 @@ class OpenClawGatewayClient(GatewayConnection):
                         else timeout
                     )
                     event = await asyncio.wait_for(event_queue.get(), timeout=wait_timeout)
+                    if isinstance(event, MergedAnnounce):
+                        probe = event
+                        if done or revision != probe.revision:
+                            continue
+                        event = probe.event
+                        event.payload["_source_event"] = "chat"
+                        log.info("[chat_stream][merged_announce_final] verified=true")
+                        done = True
                     if event is None:
                         if pending_early_final is not None:
                             payload = pending_early_final.payload or {}
@@ -820,6 +864,9 @@ class OpenClawGatewayClient(GatewayConnection):
 
         finally:
             done = True
+            if merge_check is not None:
+                merge_check.cancel()
+                await asyncio.gather(merge_check, return_exceptions=True)
             self.off_event("chat", on_chat_event)
             self.off_event("agent", on_chat_event)
             self.off_event("approval.requested", on_approval_requested)

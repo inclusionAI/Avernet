@@ -36,8 +36,8 @@ from agentclaw.community.core.task.context_collab.persistence.repository import 
 from agentclaw.community.core.task.context_collab.services.context_collab_service import (
     ContextCollabService,
 )
-from agentclaw.community.plugins.local.context_collab_runtime import (
-    LocalContextCollabRuntimePlugin,
+from tests.community.core.task.context_collab.executor_fakes import (
+    RecordingContextCollabExecutor,
 )
 from agentclaw.community.api.task.context_collab_service import (
     ContextCollabServiceProtocol,
@@ -126,7 +126,7 @@ def client_world():
     service = RecordingContextCollabService(
         ContextCollabService(
             repository=ContextCollabRepository(InMemorySqliteDB(engine)),
-            runtime=LocalContextCollabRuntimePlugin(),
+            executor=RecordingContextCollabExecutor(),
             authorizer=StructuralContextCollabAuthorizer(),
         )
     )

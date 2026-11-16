@@ -94,8 +94,11 @@ runtime line coverage of at least 54%, method coverage of at least 48%,
 100% HTTP endpoint and bcs-cli leaf-command coverage, and E2E changed-line
 coverage above 65% for changes with at least 20 instrumentable changed lines in
 the BCS E2E scope (no exemption; smaller or out-of-scope changes are reported
-only). Its canonical artifacts
-are copied to `singlebox/.dependencies/coverage/singlebox/reports/bcs/` and are
+only). BCS reports merge with `--failure-mode all`: one truncated runtime
+profile does not poison the remaining valid profiles, and the report still
+fails closed when aggregation produces no valid coverage. Its canonical
+artifacts are copied to `singlebox/.dependencies/coverage/singlebox/reports/bcs/`
+and are
 included in `summary.json`, `summary.md`, and `dashboard.html`. Keep pre-push
 and `.github/workflows/singlebox-coverage.yml` pointed at this same entrypoint,
 then run `verify_singlebox_coverage_artifacts.py` against the generated report

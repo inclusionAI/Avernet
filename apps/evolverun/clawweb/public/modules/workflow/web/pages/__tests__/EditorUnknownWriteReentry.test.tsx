@@ -78,7 +78,7 @@ async function setup() {
   const snapshot = { packPath: '', workflowId: id, packId: 'pack', canWrite: true, baseRef: `origin/wf/${id}`, baseCommit: 'a'.repeat(40), draftHead: 'a'.repeat(40), versionFiles: files }
   const session = sessionFor(id)
   publish(session, { ...session.state, version: 'draft', versions: { ...session.state.versions, draft: { snapshot, files, loading: false, error: null, blocked: false, notice: null } } })
-  const page = render(<QueryClientProvider client={client}><Editor embedded initialWorkflowId={id} /></QueryClientProvider>)
+  const page = render(<QueryClientProvider client={client}><Editor access={{ canView: true, canEdit: true, canExecute: true, canDeploy: true }} embedded initialWorkflowId={id} /></QueryClientProvider>)
   await waitFor(() => expect(useEditorStore.getState().spec?.title).toBe('Original'))
   act(() => useEditorStore.getState().updateSpecField('title', 'Committed'))
   return { id, page }
@@ -99,7 +99,7 @@ it('blocks two real QueryClients before a pending write settles, then remains bl
   expect(useEditorStore.getState().spec?.title).toBe('Committed')
   expect(useEditorStore.getState().isDirty).toBe(true)
   page.unmount(); act(() => useEditorStore.getState().reset({ force: true }))
-  render(<QueryClientProvider client={second}><Editor embedded initialWorkflowId={id} /></QueryClientProvider>)
+  render(<QueryClientProvider client={second}><Editor access={{ canView: true, canEdit: true, canExecute: true, canDeploy: true }} embedded initialWorkflowId={id} /></QueryClientProvider>)
   expect(screen.getByText('加载工作流…')).toBeInTheDocument()
   expect(useEditorStore.getState().spec).toBeNull()
   await act(async () => { oldGate!.resolve(); await oldRead })
@@ -123,7 +123,7 @@ it('does not unlock when a GET can happen before the server commits late', async
   expect(useEditorStore.getState().isDirty).toBe(true)
   db = { ...db, title: 'Committed late' }
   page.unmount(); act(() => useEditorStore.getState().reset({ force: true }))
-  render(<QueryClientProvider client={client}><Editor embedded initialWorkflowId={id} /></QueryClientProvider>)
+  render(<QueryClientProvider client={client}><Editor access={{ canView: true, canEdit: true, canExecute: true, canDeploy: true }} embedded initialWorkflowId={id} /></QueryClientProvider>)
   expect(await screen.findByText(/数据库写入结果未终结/)).toBeInTheDocument()
   expect(useEditorStore.getState().spec).toBeNull()
   expect(writes).toBe(1)

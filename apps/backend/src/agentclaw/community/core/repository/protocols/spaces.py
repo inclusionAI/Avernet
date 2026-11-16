@@ -63,6 +63,17 @@ class SpaceRepositoryProtocol(Protocol):
     def get_space(self, *, space_id: int, env: str) -> SpaceRecord | None: ...
 
     @abstractmethod
+    def delete_team_space(self, *, space_id: int, actor_id: str, env: str) -> None:
+        """Soft-delete a Team Space inside one write transaction.
+
+        The implementation must lock the Space row, re-validate the caller's
+        current effective membership role and re-check that the Space owns no
+        Bot or Skill before writing the soft-delete columns, raising the
+        domain leaf errors on any violation.
+        """
+        ...
+
+    @abstractmethod
     def backfill_sc_team_id(
         self, *, space_id: int, env: str, sc_team_id: str
     ) -> bool: ...

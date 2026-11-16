@@ -25,7 +25,7 @@ Acceptance is event-first. The client supplies a stable `decision_id`; A first f
 
 Target IDs are durable references. `floor` is presentation metadata captured from the interaction view and is not used as a domain identity. The event retains the full Human instruction and selected targets so the interaction timeline can reconstruct the rejection even after a refresh or retry.
 
-A and B run in the same process in the production composition root, so the adapter calls `ContextCollabServiceProtocol` directly rather than making an internal HTTP self-call. The creator remains the Human principal while Bot runtime addressing uses the Bot record owner. The default ContextCollab status projection keeps its existing northbound field set; the Todo in-process adapter explicitly requests event payloads for its richer interaction projection.
+A and B run in the same process in the production composition root, so the adapter calls `ContextCollabServiceProtocol` directly rather than making an internal HTTP self-call. The creator remains the Human principal while Bot runtime addressing uses the Bot record owner. The default ContextCollab status projection keeps its existing northbound field set; the Todo in-process adapter explicitly requests event payloads for its richer interaction projection. ContextCollab execution is a Task-core executor, not a deployment Plugin: it directly reuses Task's `BcsClientPort`, `BcsCreateGroupRequest`, `BcsBotTokenProvider`, and existing BCS DI adapter without modifying `TaskExecutor` or introducing a shared Task/Todo abstraction.
 
 `TodoCollaborationPort` is an internal Task/Todo consumer boundary, not a globally replaceable Plugin API. `InProcessTodoCollaborationAdapter` is the production composition and delegates to the same-process `ContextCollabServiceProtocol`; it is fixed by `TaskTodoBindings` rather than selected by deployment Profile. The deterministic fake lives under Todo tests and is not shipped or registered as a local plugin.
 
@@ -39,20 +39,22 @@ with role `manager`; the Todo creator joins as a non-speaking Human `observer`.
 The selected Bot is both `driver_bot` and `master_bot`. No second Bot and no
 `default` Bot is added. Because this is Bot collaboration, an executor is
 eligible only when the authoritative BCS agent visibility is exactly `public`;
-legacy Human-facing `ac_bots.public` does not grant eligibility. `protected`,
-`private`, missing or unknown visibility, and unavailable catalog metadata all
-fail closed. The rule is checked when creating a Todo, before its initial
-dispatch, and before resuming a Human interaction or rejection. Historical
-Todos remain readable if their Bot later becomes non-public, but no new or
-resumed run is delivered until that exact Bot identity is public again. Final
-delivery uses `inject_observers`, and later Human interaction resumes the same
+legacy Human-facing `ac_bots.public` does not grant eligibility. The authoritative
+catalog lookup uses the exact BCS Bot UUID as an explicit Bot viewer, so the
+agent-facing `visibility` rule is evaluated instead of the Human-facing
+`user_visibility` rule. `protected`, `private`, missing or unknown visibility,
+and unavailable catalog metadata all fail closed. The rule is checked when
+creating a Todo, before its initial dispatch, and before resuming a Human
+interaction or rejection. Historical Todos remain readable if their Bot later
+becomes non-public, but no new or resumed run is delivered until that exact
+Bot identity is public again. Final delivery uses `inject_observers`, and later Human interaction resumes the same
 BCS group session rather than creating another group. The public `/run`
 operation is a compensation/operator entry point; the ordinary frontend
 neither edits Todos nor exposes manual Run.
 
 While a Todo is `pending_acceptance`, posting a normal Human interaction atomically claims A as `pending_acceptance -> in_progress`, then append-only records `user_interaction.posted` in B. Rejection uses the same resume mechanism after its B-first acceptance event and A-side state projection. Status refresh keeps A `in_progress` while B is still `done` and the latest Human-work event has not yet been followed by `task.started`. The scheduler then resumes B from that event and reuses the previous executor session.
 
-Resume retries are idempotent. Once B is `in_progress` or a later `task.started` exists, no additional resume is dispatched; the community runtime uses the triggering event ID as the BCS session-chat idempotency key. A delivery failure leaves the claimed Todo `in_progress` and fails closed rather than reopening the interactive state during uncertain delivery.
+Resume retries are idempotent. Once B is `in_progress` or a later `task.started` exists, no additional resume is dispatched; the ContextCollab executor uses the triggering event ID as the BCS session-chat idempotency key. A delivery failure leaves the claimed Todo `in_progress` and fails closed rather than reopening the interactive state during uncertain delivery.
 
 ## Bot execution and artifact reporting contract
 

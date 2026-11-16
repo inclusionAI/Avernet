@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 
 import httpx
 
+from secbaas.community.core.repository.bot_run import TERMINAL_STATUSES
 from secbaas.community.logger import get_logger
 
 from ._models import CallbackPayload, CallbackResult
@@ -55,6 +56,14 @@ class HttpCallback:
         record = self._run_repository.get_by_run_id(run_id=run_id)
         if record is None:
             logger.warning("[callback] record not found: run_id=%s", run_id)
+            return
+
+        if record.status not in TERMINAL_STATUSES:
+            logger.error(
+                "[callback] refusing non-terminal result: run_id=%s, status=%s",
+                run_id,
+                record.status,
+            )
             return
 
         metadata = record.metadata or {}

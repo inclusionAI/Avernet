@@ -371,3 +371,29 @@ describe('editing guard and branch regressions', () => {
     expect(useEditorStore.getState().pendingEdits).toEqual({})
   })
 })
+
+
+it('lets a viewer inspect node settings but not change properties, duplicate or delete', () => {
+  load()
+  const before = structuredClone(useEditorStore.getState().spec)
+  act(() => useEditorStore.getState().setEditAccess({ workflowId: 'test', canEdit: false }))
+  expect(screen.getByLabelText('节点名称')).toHaveAttribute('readonly')
+  expect(screen.getByRole('button', { name: '复制节点' })).toBeDisabled()
+  expect(screen.getByRole('button', { name: '删除节点' })).toBeDisabled()
+  expect(screen.getByRole('button', { name: '关闭节点面板' })).toBeEnabled()
+  expect(useEditorStore.getState().spec).toEqual(before)
+})
+
+
+it('allows discarding a pending JSON draft after edit permission is revoked so browsing is not trapped', () => {
+  load()
+  details('完整节点 JSON')
+  fireEvent.change(screen.getByLabelText('完整节点配置'), { target: { value: JSON.stringify({ ...current(), title: 'Pending' }) } })
+  act(() => useEditorStore.getState().setEditAccess({ workflowId: 'test', canEdit: false }))
+  expect(screen.getByRole('button', { name: '应用 完整节点配置' })).toBeDisabled()
+  expect(screen.getByRole('button', { name: '放弃 完整节点配置' })).toBeEnabled()
+  fireEvent.click(screen.getByRole('button', { name: '放弃 完整节点配置' }))
+  expect(useEditorStore.getState().pendingEdits).toEqual({})
+  expect(screen.getByRole('button', { name: '关闭节点面板' })).toBeEnabled()
+  expect(current().title).toBe('业务名称')
+})

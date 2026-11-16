@@ -116434,10 +116434,10 @@
         ]
       }
     },
-    "/openapi/v1/todos/{todo_id}/run": {
+    "/openapi/v1/collaboration/tasks/todos/{todo_id}/run": {
       "post": {
         "description": "Start a draft Todo and attach it to one B collaboration context.",
-        "operationId": "run_todo_openapi_v1_todos__todo_id__run_post",
+        "operationId": "run_todo_openapi_v1_collaboration_tasks_todos__todo_id__run_post",
         "parameters": [
           {
             "description": "A-owned Todo identifier.",
@@ -116616,10 +116616,10 @@
         ]
       }
     },
-    "/openapi/v1/todos": {
+    "/openapi/v1/collaboration/tasks/todos": {
       "get": {
         "description": "List the caller's Todos in the selected product Space.",
-        "operationId": "list_todos_openapi_v1_todos_get",
+        "operationId": "list_todos_openapi_v1_collaboration_tasks_todos_get",
         "parameters": [
           {
             "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
@@ -116864,7 +116864,7 @@
       },
       "post": {
         "description": "Create one draft Todo for a Space-eligible Bot.",
-        "operationId": "create_todo_openapi_v1_todos_post",
+        "operationId": "create_todo_openapi_v1_collaboration_tasks_todos_post",
         "parameters": [
           {
             "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
@@ -117042,10 +117042,10 @@
         ]
       }
     },
-    "/openapi/v1/todos/{todo_id}": {
+    "/openapi/v1/collaboration/tasks/todos/{todo_id}": {
       "get": {
         "description": "Return one Todo visible to the authenticated Human.",
-        "operationId": "get_todo_openapi_v1_todos__todo_id__get",
+        "operationId": "get_todo_openapi_v1_collaboration_tasks_todos__todo_id__get",
         "parameters": [
           {
             "description": "A-owned Todo identifier.",
@@ -117225,7 +117225,7 @@
       },
       "patch": {
         "description": "Patch one draft Todo after re-checking Space and Bot eligibility.",
-        "operationId": "update_todo_openapi_v1_todos__todo_id__patch",
+        "operationId": "update_todo_openapi_v1_collaboration_tasks_todos__todo_id__patch",
         "parameters": [
           {
             "description": "A-owned Todo identifier.",
@@ -117414,10 +117414,10 @@
         ]
       }
     },
-    "/openapi/v1/todos/{todo_id}/acceptance": {
+    "/openapi/v1/collaboration/tasks/todos/{todo_id}/acceptance": {
       "post": {
         "description": "Approve or reject the execution currently pending acceptance.",
-        "operationId": "submit_todo_acceptance_openapi_v1_todos__todo_id__acceptance_post",
+        "operationId": "submit_todo_acceptance_openapi_v1_collaboration_tasks_todos__todo_id__acceptance_post",
         "parameters": [
           {
             "description": "A-owned Todo identifier.",
@@ -117606,10 +117606,10 @@
         ]
       }
     },
-    "/openapi/v1/todos/{todo_id}/events": {
+    "/openapi/v1/collaboration/tasks/todos/{todo_id}/events": {
       "get": {
         "description": "Project the complete B event stream for one running Todo.",
-        "operationId": "list_todo_events_openapi_v1_todos__todo_id__events_get",
+        "operationId": "list_todo_events_openapi_v1_collaboration_tasks_todos__todo_id__events_get",
         "parameters": [
           {
             "description": "A-owned Todo identifier.",
@@ -117788,10 +117788,10 @@
         ]
       }
     },
-    "/openapi/v1/todos/{todo_id}/interactions": {
+    "/openapi/v1/collaboration/tasks/todos/{todo_id}/interactions": {
       "get": {
         "description": "Return only Human interaction and acceptance events from B.",
-        "operationId": "list_todo_interactions_openapi_v1_todos__todo_id__interactions_get",
+        "operationId": "list_todo_interactions_openapi_v1_collaboration_tasks_todos__todo_id__interactions_get",
         "parameters": [
           {
             "description": "A-owned Todo identifier.",
@@ -117971,7 +117971,7 @@
       },
       "post": {
         "description": "Append one Human interaction event while the Todo awaits acceptance.",
-        "operationId": "create_todo_interaction_openapi_v1_todos__todo_id__interactions_post",
+        "operationId": "create_todo_interaction_openapi_v1_collaboration_tasks_todos__todo_id__interactions_post",
         "parameters": [
           {
             "description": "A-owned Todo identifier.",

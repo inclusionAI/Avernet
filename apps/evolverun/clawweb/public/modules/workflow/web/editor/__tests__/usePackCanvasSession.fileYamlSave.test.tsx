@@ -162,3 +162,18 @@ it('retains a real drag after YAML adoption and blocks divergent file-only save'
   expect(useEditorStore.getState().positions.step).toEqual({ x: 701, y: 303 })
   expect(useEditorStore.getState().isLayoutDirty).toBe(true); expect(postCount).toBe(1)
 })
+
+
+it('adopts a confirmed file-only YAML save after edit access is revoked without inventing write uncertainty', async () => {
+  const ctx = await setup(), changed = { id: ctx.id, title: 'File change', version: '1', nodes: [node] }
+  editYaml(ctx, stringify(changed))
+  let saving!: Promise<unknown>
+  act(() => { saving = ctx.hook.result.current.save() }); await started
+  act(() => useEditorStore.getState().setEditAccess({ workflowId: ctx.id, canEdit: false }))
+  await act(async () => { release(); await expect(saving).resolves.toMatchObject({ mode: 'unified', commit: savedOid }) })
+  expect(useEditorStore.getState().spec).toEqual(changed)
+  expect(useEditorStore.getState().isDirty).toBe(false)
+  expect(useEditorStore.getState().editAccess?.canEdit).toBe(false)
+  expect(editorWorkflowWriteState(ctx.id).phase).toBe('clear')
+  expect(postCount).toBe(1)
+})

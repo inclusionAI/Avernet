@@ -177,7 +177,7 @@ async def test_list_todos_maps_product_page_without_internal_fields():
     service = _RecordedService()
 
     payload = await list_todos(
-        request=_request("GET", "/openapi/v1/todos"),
+        request=_request("GET", "/openapi/v1/collaboration/tasks/todos"),
         page_params=_PageParams(page=2, page_size=25),
         space_id=42,
         principal={"user_id": "human_1"},
@@ -222,7 +222,7 @@ async def test_create_todo_returns_201_and_passes_body_fields():
             description="Summarize the changes",
             bot_id="bot_1",
         ),
-        request=_request("POST", "/openapi/v1/todos"),
+        request=_request("POST", "/openapi/v1/collaboration/tasks/todos"),
         response=response,
         principal={"user_id": "human_1"},
         user_id="human_1",
@@ -252,14 +252,14 @@ async def test_get_and_run_use_authenticated_actor():
 
     detail = await get_todo(
         todo_id="todo_1",
-        request=_request("GET", "/openapi/v1/todos/todo_1"),
+        request=_request("GET", "/openapi/v1/collaboration/tasks/todos/todo_1"),
         principal={"user_id": "human_1"},
         user_id="human_1",
         service=service,
     )
     started = await run_todo(
         todo_id="todo_1",
-        request=_request("POST", "/openapi/v1/todos/todo_1/run"),
+        request=_request("POST", "/openapi/v1/collaboration/tasks/todos/todo_1/run"),
         principal={"user_id": "human_1"},
         user_id="human_1",
         service=service,
@@ -279,14 +279,14 @@ async def test_events_and_interactions_project_b_event_records():
 
     events = await list_todo_events(
         todo_id="todo_1",
-        request=_request("GET", "/openapi/v1/todos/todo_1/events"),
+        request=_request("GET", "/openapi/v1/collaboration/tasks/todos/todo_1/events"),
         principal={"user_id": "human_1"},
         user_id="human_1",
         service=service,
     )
     history = await list_todo_interactions(
         todo_id="todo_1",
-        request=_request("GET", "/openapi/v1/todos/todo_1/interactions"),
+        request=_request("GET", "/openapi/v1/collaboration/tasks/todos/todo_1/interactions"),
         principal={"user_id": "human_1"},
         user_id="human_1",
         service=service,
@@ -316,7 +316,7 @@ async def test_create_interaction_uses_message_only_and_returns_created_event():
     payload = await create_todo_interaction(
         todo_id="todo_1",
         body=CreateTodoInteractionRequest(message="Please include the rollback plan"),
-        request=_request("POST", "/openapi/v1/todos/todo_1/interactions"),
+        request=_request("POST", "/openapi/v1/collaboration/tasks/todos/todo_1/interactions"),
         response=response,
         principal={"user_id": "human_1"},
         user_id="human_1",
@@ -351,7 +351,7 @@ async def test_acceptance_returns_updated_todo_and_passes_verdict():
             verdict=AcceptanceVerdict.APPROVED,
             message="Looks good",
         ),
-        request=_request("POST", "/openapi/v1/todos/todo_1/acceptance"),
+        request=_request("POST", "/openapi/v1/collaboration/tasks/todos/todo_1/acceptance"),
         principal={"user_id": "human_1"},
         user_id="human_1",
         service=service,
@@ -387,7 +387,7 @@ async def test_rejection_forwards_full_message_and_stable_targets():
                 {"kind": "artifact", "id": "artifact_1", "floor": 3},
             ],
         ),
-        request=_request("POST", "/openapi/v1/todos/todo_1/acceptance"),
+        request=_request("POST", "/openapi/v1/collaboration/tasks/todos/todo_1/acceptance"),
         principal={"user_id": "human_1"},
         user_id="human_1",
         service=service,
@@ -449,7 +449,7 @@ async def test_list_artifacts_returns_public_content_without_storage_id():
 
     payload = await list_todo_artifacts(
         todo_id="todo_1",
-        request=_request("GET", "/openapi/v1/todos/todo_1/artifacts"),
+        request=_request("GET", "/openapi/v1/collaboration/tasks/todos/todo_1/artifacts"),
         principal={"user_id": "human_1"},
         user_id="human_1",
         service=service,

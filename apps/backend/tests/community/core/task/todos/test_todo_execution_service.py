@@ -397,6 +397,11 @@ async def test_dispatch_creates_binds_runs_and_transitions_with_creator_identity
     assert result.collab_context_id == "context_created"
     assert access.calls == [{"space_id": 7, "user_id": "creator_1", "env": "pre"}]
     assert bots.calls == ["bot_1"]
+    catalog = service._catalog_metadata
+    assert catalog.calls[0]["bot_uuids"] == ("bot_1:bot_owner_1",)
+    assert catalog.calls[0]["filters"].visibility == ("public",)
+    assert catalog.calls[0]["filters"].viewer_actor_type == "bot"
+    assert catalog.calls[0]["filters"].viewer_actor_id == "bot_1:bot_owner_1"
     request = collaboration.create_calls[0]
     assert request.space_id == "7"
     assert request.environment == "pre"

@@ -6,6 +6,8 @@ import type { PackScriptSnapshot, PackScriptVersion } from '../services/pack-scr
 export type PackVersionChange = { path: string; operation: 'delete' } | { path: string; operation: 'create' | 'replace'; contentBase64: string; mode: '100644' | '100755' };
 type Dependencies = {
   resolvePrincipal(req: Request): Promise<{ actorId: string } | null>;
+  // Optional host read policy after verified identity; omission retains the edit ACL.
+  authorizeRead?(workflowId: string, actorId: string): Promise<boolean>;
   botPermRepo: { hasEditPermission(workflowId: string, actorId: string): Promise<boolean>; hasExecutePermission?(workflowId: string, actorId: string): Promise<boolean> } | null;
   workflowSpecRepo: { findByWorkflowId(workflowId: string): Promise<{ workflow_id: string; pack_id: string | null } | null> } | null;
   readActiveSnapshot?(workflowId: string, version: PackScriptVersion): Promise<PackScriptSnapshot>;
@@ -54,7 +56,21 @@ export function createPackVersionRouter(deps: Dependencies): Router {
       const workflowId = req.params.workflowId;
       if (!validId(workflowId)) { res.status(400).json({ error: 'Invalid request', code: 'INVALID_REQUEST' }); return; }
       phase = 'permission';
-      if (!deps.botPermRepo || await deps.botPermRepo.hasEditPermission(workflowId, principal.actorId) !== true) { res.status(403).json({ error: 'Forbidden', code: 'FORBIDDEN' }); return; }
+      let canEdit: boolean;
+      if (req.method === 'GET' && deps.authorizeRead) {
+        let canRead: boolean;
+        try { canRead = await deps.authorizeRead(workflowId, principal.actorId); }
+        // A policy rejection is not an operation receipt; never reflect its fields.
+        catch { throw new Error('Read authorization unavailable'); }
+        if (canRead !== true) { res.status(403).json({ error: 'Forbidden', code: 'FORBIDDEN' }); return; }
+        // Read permission never grants writes. An unavailable write ACL must not
+        // fail an independently authorized read or advertise write capability.
+        try { canEdit = await deps.botPermRepo?.hasEditPermission(workflowId, principal.actorId) === true; }
+        catch { canEdit = false; }
+      } else {
+        canEdit = !!deps.botPermRepo && await deps.botPermRepo.hasEditPermission(workflowId, principal.actorId) === true;
+        if (!canEdit) { res.status(403).json({ error: 'Forbidden', code: 'FORBIDDEN' }); return; }
+      }
       if (!deps.workflowSpecRepo) { res.status(503).json({ error: 'Service unavailable', code: 'SERVICE_UNAVAILABLE' }); return; }
       phase = 'workflow';
       const row = await deps.workflowSpecRepo.findByWorkflowId(workflowId);
@@ -76,7 +92,7 @@ export function createPackVersionRouter(deps: Dependencies): Router {
           && typeof activeHistory.activeToken === 'string' && /^[a-f0-9]{64}$/.test(activeHistory.activeToken)
           ? { activeHistory } : {};
         const warning = version === 'current' && activeHistoryMismatch === true ? { activeHistoryMismatch: true } : {};
-        res.json({ ...response, ...evidence, ...warning, canWrite: !!deps.saveCandidate }); return;
+        res.json({ ...response, ...evidence, ...warning, canWrite: canEdit && !!deps.saveCandidate }); return;
       }
       if (!deps.saveCandidate) { res.status(503).json({ error: 'Version saving unavailable', code: 'SERVICE_UNAVAILABLE' }); return; }
       if (Object.keys(req.query).length) { res.status(400).json({ error: 'Invalid request', code: 'INVALID_REQUEST' }); return; }

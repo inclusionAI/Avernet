@@ -16,6 +16,9 @@ import { stringify as stringifyYaml } from 'yaml'
 import { UNSAFE_LocationContext } from 'react-router-dom'
 import { useEditorWorkflowDocument, useAutoHealDeploy } from '../api/hooks'
 import { QueryClientContext } from '@tanstack/react-query'
+import { useEditorShortcuts } from '../editor/useEditorShortcuts'
+import EditorToolbar from '../components/editor/EditorToolbar'
+import { useEditorPermissions, type WorkflowEditorAccess } from '../editor/useEditorPermissions'
 import { createWorkflowPack } from '../editor/newWorkflowSave'
 import { useEditorStore, type EditorState } from '../editor/store'
 import WorkflowPackSidebar from '../components/WorkflowPackSidebar'
@@ -55,13 +58,15 @@ function hasUnsafePackEdits(id: string): boolean {
 interface EditorProps {
   /** Embedded inside another page (e.g. 任务护航 workspace): hides the workflow sidebar and fills parent height. */
   embedded?: boolean
+  /** Optional verified capabilities for isolated/embedded consumers. */
+  access?: WorkflowEditorAccess
   /** Workflow to open — controlled by the parent in embedded mode. */
   initialWorkflowId?: string | null
   /** Workspace owns browser POP transitions and commits the editor session. */
   workspaceManagedPop?: boolean
 }
 
-export default function Editor({ embedded = false, initialWorkflowId, workspaceManagedPop = false }: EditorProps) {
+export default function Editor({ embedded = false, initialWorkflowId, workspaceManagedPop = false, access }: EditorProps) {
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null>(() => {
     const live = useEditorStore.getState()
     return live.spec && live._savedSpec === null ? null : live.spec?.id ?? initialWorkflowId ?? null
@@ -104,6 +109,17 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
   const [recoveredDrafts] = useState(() => Object.keys(useEditorStore.getState().pendingEdits ?? {}).length > 0)
   const { spec, isDirty, isLayoutDirty, selectedNodeId, validationErrors, loadSpec, importYaml, selectNode,
     sessionId: editorSessionId, _databaseSpec: databaseBaseline, pendingEdits = {}, actionError, setActionError, canUndo, canRedo, undo, redo } = useEditorStore()
+  const { canEdit, canDeploy, pending: accessPending } = useEditorPermissions(selectedWorkflowId, access)
+  const permissions = useRef({ canEdit, canDeploy })
+  permissions.current = { canEdit, canDeploy }
+  useLayoutEffect(() => {
+    useEditorStore.getState().setEditAccess({ workflowId: selectedWorkflowId ?? spec?.id ?? null, canEdit })
+  }, [selectedWorkflowId, spec?.id, canEdit, editorSessionId])
+  const requireEdit = () => {
+    if (permissions.current.canEdit) return true
+    setSaveMessage({ type: 'error', text: '当前工作流为只读，不能修改或保存。' })
+    return false
+  }
   const creation = spec ? sessionFor(spec.id).state.creation : undefined
   const hasPendingEdits = Object.keys(pendingEdits).length > 0
   const packRevision = useSyncExternalStore(subscribePackVersions, packVersionsRevision, packVersionsRevision)
@@ -248,10 +264,11 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
   const hasUndeployedChanges = Boolean(effectiveActiveHistoryText !== undefined && databaseBaseline && !comparisonUncertain && !specsEqual(deployedSpecText, savedSpecText))
   const deploymentBaselineLabel = '生效'
 
-  const ai = useEditorAiIntegration({ spec, selectedWorkflowId, targetWorkflowId: initialWorkflowId, editorSessionId, loading: workflowLoading,
+  const ai = useEditorAiIntegration({ spec, selectedWorkflowId, targetWorkflowId: initialWorkflowId, editorSessionId, canEdit, loading: workflowLoading,
     saving: workflowSaving || packCanvas.saving, saveInFlight: workflowSaveInFlight, hasPendingEdits,
     onMessage: setSaveMessage, onApplied: () => setViewMode('split') })
   const handleOpenSaveDialog = useCallback(async () => {
+    if (!requireEdit()) return
     if (!useEditorStore.getState().spec) return
     const sessionId = useEditorStore.getState().sessionId
     const workflowId = selectedWorkflowId
@@ -318,6 +335,7 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
   }, [selectedWorkflowId, packCanvas, queryClient, setSaveMessage, clearMergeReview])
 
   const confirmMergeReview = async (approval: ReconciliationApproval) => {
+    if (!requireEdit()) return
     if (!visibleMerge || !mergeAdapter || workflowSaveInFlight.current) return
     const { workflowId, sessionId, review } = visibleMerge
     workflowSaveInFlight.current = true; setWorkflowSaving(true)
@@ -339,6 +357,7 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
   }
 
   const applyYamlToEditor = useCallback((incoming: WorkflowSpec) => {
+    if (!requireEdit()) throw new Error('当前工作流为只读。')
     const previousId = useEditorStore.getState().spec?.id
     useEditorStore.getState().setActionError(null)
     importYaml(incoming)
@@ -348,6 +367,7 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
   }, [importYaml])
 
   const useGitFromComparison = async () => {
+    if (!requireEdit()) return
     if (!visibleMerge || !mergeAdapter || workflowSaveInFlight.current) return
     const { workflowId, sessionId, review } = visibleMerge
     const current = () => selectedWorkflowRef.current === workflowId && useEditorStore.getState().sessionId === sessionId
@@ -369,6 +389,7 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
   }
 
   const handleYamlImport = useCallback(() => {
+    if (!requireEdit()) return
     try {
       const parsed = parseWorkflowYaml(yamlInput)
       if (!confirmDiscardEditor()) return
@@ -383,6 +404,7 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
   }, [yamlInput, importYaml, setSaveMessage])
 
   const handleImportFile = useCallback(() => {
+    if (!requireEdit()) return
     const input = document.createElement('input')
     input.type = 'file'
     input.accept = '.yaml,.yml'
@@ -438,6 +460,7 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
 
   // Deploy the explicitly confirmed saved tree without rewriting its workflow YAML.
   const runDeploy = useCallback(async () => {
+    if (!permissions.current.canDeploy) return
     if (!selectedWorkflowId || !deployCandidate || !deployReviewed || deployInFlight.current) return
     const id = selectedWorkflowId, candidate = deployCandidate, session = sessionFor(id)
     const live = useEditorStore.getState()
@@ -460,6 +483,7 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
         || candidate.packRevision !== packVersionsRevision() || !now._savedSpec || !sameExecutionSpec(db, now._savedSpec)) {
         throw new Error('数据库草稿或本地编辑已变化，请重新读取并确认。')
       }
+      if (!permissions.current.canDeploy) return
       const input = { workflowId: id, packId: candidate.packId, candidateCommit: candidate.commit, expectedActiveCommit: candidate.expectedActiveCommit, expectedDraftToken: candidate.draftToken,
         requestId: crypto.randomUUID(), note: 'editor deploy', autoRun: false, snapshotProtocol: 'saved-tree-v2' as const, confirmedFileDiff: true as const }
       bindEditorDeploymentWriteEpoch(input, candidate.writeEpoch)
@@ -553,6 +577,7 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
   }, [visibleRecovery, setSaveMessage])
 
   const handleDeployClick = useCallback(async () => {
+    if (!permissions.current.canDeploy) return
     if (!selectedWorkflowId || deployInFlight.current) return
     if (isEditorDeploymentPending(selectedWorkflowId)) { setSaveMessage({ type: 'error', text: '部署操作正在进行，不能重复部署。' }); return }
     try { assertDeploymentAvailable(selectedWorkflowId) } catch (err) {
@@ -639,25 +664,8 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
 
   const saving = workflowSaving || packCanvas.saving
 
-  // Keyboard shortcut: Ctrl/Cmd+S saves the current workflow.
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 's') {
-        e.preventDefault()
-        if (spec && !saving) handleOpenSaveDialog()
-      }
-      if (showDeployConfirm || showHistory || showNewDialog || showYamlImport) return
-      const target = e.target as HTMLElement | null
-      if (target instanceof Element && target.closest('input, textarea, select, [contenteditable=true]')) return
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
-        e.preventDefault()
-        if (e.shiftKey) redo?.(); else undo?.()
-      }
-    }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
-  }, [spec, saving, handleOpenSaveDialog, undo, redo, showDeployConfirm, showHistory, showNewDialog, showYamlImport])
-
+  useEditorShortcuts({ canEdit, canSave: !!spec && !saving, save: handleOpenSaveDialog, undo, redo,
+    modalOpen: showDeployConfirm || showHistory || showNewDialog || showYamlImport })
 
   const cycleError = validationErrors.find((e) => e.type === 'cycle')
 
@@ -681,94 +689,20 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
         >{label}</button>)}
       </div>
       {workspaceTab === 'scripts' && packRisk && <p role="status" className="px-4 py-2 text-sm">版本文件有未保存更改或保存状态不确定；切换标签后仍保留在本页面会话中。请先处理，不能部署旧草稿。</p>}
-      {/* Toolbar */}
-      <div className="flex min-h-12 items-center justify-between gap-4 overflow-x-auto border-b border-border bg-card px-4 py-2">
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="truncate font-mono text-xs font-medium text-slate-700">
-            {spec ? `${spec.id}${spec.version !== undefined ? ` v${spec.version}` : ''}` : '未加载工作流'}
-          </span>
-          {spec?.title && <span className="hidden truncate text-xs text-slate-400 xl:inline">· {spec.title}</span>}
-          {isDirty && <span className="shrink-0 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700">未保存</span>}
-          {selectedWorkflowId &&
-            (latestDeploy ? (
-              <span className="hidden shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] text-slate-500 2xl:inline">
-                {deploymentBaselineLabel} v{latestDeploy.version} · deploy #{latestDeploy.deployNumber}
-              </span>
-            ) : (
-              <span className="hidden text-[10px] text-slate-400 2xl:inline">{deploymentBaselineStatus === 'ready' ? '未发布 · 数据库暂存稿' : '生效状态未确认'}</span>
-            ))}
-          {comparisonUncertain && latestDeploy && (
-            <span role="status" className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800">
-              无法判断数据库内容与{deploymentBaselineLabel} v{latestDeploy.version} 是否有差异：历史内容来源不确定或无法无损解析
-            </span>
-          )}
-          {hasUndeployedChanges && latestDeploy && (
-            <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800">
-              数据库内容与{deploymentBaselineLabel} v{latestDeploy.version} 有差异
-            </span>
-          )}
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <div hidden={workspaceTab !== 'workflow'} className={workspaceTab === 'workflow' ? 'flex rounded-lg bg-slate-100 p-0.5' : 'hidden'} aria-label="编辑器视图">
-            <button
-              onClick={() => setViewMode('visual')}
-              className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${viewMode === 'visual' ? 'bg-card text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
-            >
-              画布
-            </button>
-            <button
-              onClick={() => setViewMode('split')}
-              className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${viewMode === 'split' ? 'bg-card text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
-            >
-              对照
-            </button>
-            <button
-              onClick={() => setViewMode('yaml')}
-              className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${viewMode === 'yaml' ? 'bg-card text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
-            >
-              YAML
-            </button>
-          </div>
-          {workspaceTab === 'workflow' && <><button type="button" onClick={() => {
-            if (hasPendingEdits) { setActionError?.('请先应用或放弃未完成的配置草稿'); return }
-            setShowWorkflowSettings(open => !open)
-          }} disabled={!spec} className="rounded-lg border border-input bg-card px-3 py-1.5 text-xs text-muted-foreground disabled:opacity-40">流程设置</button>
-          <button type="button" onClick={() => undo?.()} disabled={!canUndo || hasPendingEdits} aria-label="撤销" className="rounded px-2 py-1 text-muted-foreground disabled:opacity-30">↶</button>
-          <button type="button" onClick={() => redo?.()} disabled={!canRedo || hasPendingEdits} aria-label="重做" className="rounded px-2 py-1 text-muted-foreground disabled:opacity-30">↷</button></>}
-          {ai.controls}<button
-            type="button"
-            onClick={() => setShowHistory(true)}
-            disabled={!selectedWorkflowId}
-            className="rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:text-slate-300"
-          >
-            版本历史
-          </button>
-          {!embedded && <div className="relative">
-            <button type="button" aria-label="更多操作" aria-expanded={showMore} onClick={() => setShowMore((open) => !open)} className="rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50">更多 ···</button>
-            {showMore && <><button type="button" aria-label="关闭更多操作" className="fixed inset-0 z-40 cursor-default" onClick={() => setShowMore(false)} /><div role="menu" className="absolute right-0 top-full z-50 mt-2 w-44 overflow-hidden rounded-xl border border-border bg-card p-1.5 shadow-[0_16px_40px_rgba(15,23,42,0.16)]">
-              <button role="menuitem" onClick={() => { setShowNewDialog(true); setShowMore(false) }} className="block w-full rounded-lg px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50">新建工作流</button>
-              <button role="menuitem" onClick={() => { setShowYamlImport(true); setYamlInput(''); setShowMore(false) }} className="block w-full rounded-lg px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50">粘贴 YAML</button>
-              <button role="menuitem" onClick={() => { handleImportFile(); setShowMore(false) }} className="block w-full rounded-lg px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50">导入 YAML 文件</button>
-              <button role="menuitem" onClick={() => { handleYamlExport(); setShowMore(false) }} disabled={!spec} className="block w-full rounded-lg px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50 disabled:text-slate-300">导出 YAML</button>
-            </div></>}
-          </div>}
-          <button
-            onClick={handleOpenSaveDialog}
-            disabled={!spec || saving || creation?.pending}
-            className="rounded-lg bg-primary px-4 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-40"
-          >
-            {saving || creation?.pending ? '正在保存…' : '保存'}
-          </button>
-          <button
-            type="button"
-            onClick={handleDeployClick}
-            disabled={!selectedWorkflowId || deployMutation.isPending}
-            className="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-100 disabled:text-slate-300"
-          >
-            {deployMutation.isPending ? '部署中…' : '部署'}
-          </button>
-        </div>
-      </div>
+      <EditorToolbar
+        spec={spec} isDirty={isDirty} selectedWorkflowId={selectedWorkflowId} latestDeploy={latestDeploy} deploymentBaselineLabel={deploymentBaselineLabel}
+        deploymentBaselineStatus={deploymentBaselineStatus} comparisonUncertain={comparisonUncertain} hasUndeployedChanges={hasUndeployedChanges} workspaceTab={workspaceTab} viewMode={viewMode}
+        setViewMode={setViewMode} hasPendingEdits={hasPendingEdits} setActionError={setActionError} setShowWorkflowSettings={setShowWorkflowSettings} canUndo={canUndo}
+        canRedo={canRedo} undo={undo} redo={redo} saving={saving}
+        aiControls={ai.controls} setShowHistory={setShowHistory} embedded={embedded} showMore={showMore} setShowMore={setShowMore}
+        setShowNewDialog={setShowNewDialog} setShowYamlImport={setShowYamlImport} setYamlInput={setYamlInput} handleImportFile={handleImportFile} handleYamlExport={handleYamlExport}
+        handleOpenSaveDialog={handleOpenSaveDialog} creationPending={creation?.pending} handleDeployClick={handleDeployClick} deployPending={deployMutation.isPending} canEdit={canEdit}
+        canDeploy={canDeploy}
+      />
+
+      {selectedWorkflowId && !canEdit && <p role="status" className="border-b border-border bg-muted px-4 py-2 text-sm text-muted-foreground">
+        {accessPending ? '正在确认权限，暂以只读方式浏览。' : '当前工作流为只读。你可以查看画布、YAML、版本历史和脚本文件；修改和保存需要编辑权限，部署需要部署权限。'}
+      </p>}
 
       {/* Validation banner */}
       {cycleError && (
@@ -880,18 +814,18 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
         {ai.open ? ai.drawer : showWorkflowSettings ? <WorkflowSettingsPanel onClose={() => setShowWorkflowSettings(false)} /> : selectedNodeId ? <NodePropertyPanel /> :
           <aside className="w-72 shrink-0 border-l border-border bg-card p-5" aria-label="编辑指引">
             <h2 className="text-sm font-semibold text-foreground">让每一步都清晰</h2>
-            <p className="mt-3 text-xs leading-6 text-muted-foreground">从左侧添加节点，连接输出与输入，再选择节点填写当前任务。只有需要时才展开高级配置。</p>
+            <p className="mt-3 text-xs leading-6 text-muted-foreground">{canEdit ? '从左侧添加节点，连接输出与输入，再选择节点填写当前任务。只有需要时才展开高级配置。' : '选择画布节点查看配置，或切换到 YAML、版本历史和脚本文件查看内容。'}</p>
             <button type="button" onClick={() => setShowWorkflowSettings(true)} disabled={!spec || hasPendingEdits} className="mt-5 rounded-lg border border-input px-3 py-2 text-xs text-muted-foreground disabled:opacity-40">查看流程设置</button>
           </aside>}
 
       </div>
 
       <div id="editor-panel-scripts" role="tabpanel" aria-labelledby="editor-tab-scripts" hidden={workspaceTab !== 'scripts'} className={workspaceTab === 'scripts' ? 'min-h-0 flex-1 overflow-hidden' : 'hidden'}>
-        {workspaceTab === 'scripts' && <ScriptFilesTab key={selectedWorkflowId ?? 'unsaved'} workflowId={selectedWorkflowId} onSave={() => void handleOpenSaveDialog()} canvasDirty={isDirty || hasPendingEdits} savePending={saving} showSaveError={false} showSaveButton={false} />}
+        {workspaceTab === 'scripts' && <ScriptFilesTab key={selectedWorkflowId ?? 'unsaved'} workflowId={selectedWorkflowId} readOnly={!canEdit} onSave={() => void handleOpenSaveDialog()} canvasDirty={isDirty || hasPendingEdits} savePending={saving} showSaveError={false} showSaveButton={false} />}
       </div>
 
       {/* YAML Import Modal */}
-      {showYamlImport && (
+      {showYamlImport && canEdit && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
           <div className="w-full max-w-2xl rounded-lg bg-card p-6 shadow-xl">
             <h3 className="mb-3 text-lg font-semibold text-gray-900">导入 YAML</h3>
@@ -981,7 +915,7 @@ export default function Editor({ embedded = false, initialWorkflowId, workspaceM
       )}
 
       {/* Confirm the entire saved tree, after the server checks its DB projection. */}
-      {showDeployConfirm && selectedWorkflowId && deployCandidate && deployCandidate.workflowId === selectedWorkflowId && (
+      {showDeployConfirm && canDeploy && selectedWorkflowId && deployCandidate && deployCandidate.workflowId === selectedWorkflowId && (
         <EditorDeployConfirmDialog
           candidate={deployCandidate}
           activeHistory={activeHistoryReview}

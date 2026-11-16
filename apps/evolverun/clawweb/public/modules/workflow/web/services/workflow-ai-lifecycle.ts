@@ -7,7 +7,7 @@ const workflowAiErrorDescriptions: Record<string, string> = {
   BAAS_POLL_UNAVAILABLE: 'BaaS 消息状态查询暂不可用：这不证明原任务失败或停止；请保留恢复凭据查询原任务，不要重新派发。',
   AI_DRAFT_RECOVERY_UNAVAILABLE: 'AI 草稿请求凭据暂不可用：服务器无法签发恢复凭据，请管理员检查 BaaS 签名配置。原工作流未修改；已取得凭据的请求可继续查询，不要重新派发。',
   AUTO_HEAL_BAAS_NOT_CONFIGURED: '服务器 AutoHeal/BaaS 配置缺失或未启用：请检查服务器 effective autoHeal.botId 与 BaaS 传输配置；浏览器不会选择或覆盖 Bot。',
-  AUTO_HEAL_BOT_UNAVAILABLE: '服务器配置的 AutoHeal Bot 绑定不可用或无效：请检查 effective autoHeal.botId 对应的 BaaS Bot 是否存在、可用且绑定有效。',
+  AUTO_HEAL_BOT_UNAVAILABLE: '服务器配置的 AutoHeal Bot 绑定不可用或无效：请检查 effective autoHeal.botId 中的 Bot ID 与 owner，核对目标 BaaS 环境、endpoint 与配套 API key，并确认该 Bot 在该环境中的绑定为 ACTIVE。',
   BAAS_AUTH_FAILED: 'BaaS 认证或权限失败：请检查 BaaS API Key / IAM token 及相关权限；认证失败不能证明任务未被派发，可能在提交或轮询阶段发生。',
   BAAS_REQUEST_REJECTED: 'BaaS 明确拒绝本次请求：请检查 BaaS 请求策略、Bot 状态和输入限制，根据提供方错误信息调整后重试。',
   BAAS_GENERATION_FAILED: 'BaaS 生成失败：请检查上游任务状态或日志，并确认需求、Bot 配置和输入限制后重试。',

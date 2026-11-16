@@ -19,6 +19,9 @@ interface Snapshot { spec: WorkflowSpec | null; positions: Positions; selectedNo
 export interface EditorState extends Snapshot {
   /** Monotonic editor lifetime, independent of workflow ID, saved baseline and undo history. */
   sessionId: number
+  /** Bound to the loaded document, not the user's display identity. Null means the store has not yet been bound by an Editor. */
+  editAccess: { workflowId: string | null; canEdit: boolean } | null
+  setEditAccess: (access: { workflowId: string | null; canEdit: boolean }) => void
   isDirty: boolean
   /** Layout is session-only and has an independent loss boundary from the spec. */
   isLayoutDirty: boolean
@@ -47,6 +50,8 @@ export interface EditorState extends Snapshot {
   undo: () => void
   redo: () => void
   completeSave: (savedSpec: WorkflowSpec, specAtRequest: WorkflowSpec, sessionId: number, initialDatabaseSpec?: WorkflowSpec, expectedInitialActive?: ActiveDraftBaseline) => boolean
+  /** Internal receipt adoption, only for the already confirmed DB/saved document. */
+  adoptConfirmedSave: (spec: WorkflowSpec, expected: EditorState) => boolean
   markClean: (savedSpec?: WorkflowSpec) => void
   importYaml: (spec: WorkflowSpec) => void
   reset: (options?: { force?: boolean }) => void
@@ -103,7 +108,7 @@ function historyInitial(): HistoryState {
 const positiveDeployNumber = (value: number | null | undefined): value is number =>
   value !== null && Number.isSafeInteger(value) && value > 0
 function initial(sessionId = 0) {
-  return { sessionId, spec: null, positions: {}, selectedNodeId: null, isDirty: false, isLayoutDirty: false, validationErrors: [], pendingEdits: {}, actionError: null, canUndo: false, canRedo: false, ...historyInitial() }
+  return { editAccess: null as EditorState['editAccess'], sessionId, spec: null, positions: {}, selectedNodeId: null, isDirty: false, isLayoutDirty: false, validationErrors: [], pendingEdits: {}, actionError: null, canUndo: false, canRedo: false, ...historyInitial() }
 }
 
 /** Positions live only in this editor session, not localStorage or the execution document.
@@ -130,10 +135,26 @@ export function prepareWorkflowSession(incoming: WorkflowSpec): { spec: Workflow
   } catch { return null }
 }
 
+/** Permission refreshes are not document changes. All other state, including
+ * dirty drafts, layout, history and session identity, retains exact comparison. */
+export function editorStateMatches(expected: EditorState, current: EditorState): boolean {
+  if (expected === current) return true
+  const keys = Object.keys(expected) as (keyof EditorState)[]
+  return keys.length === Object.keys(current).length
+    && keys.every(key => key === 'editAccess' || Object.is(expected[key], current[key]))
+}
+
+export function editorIsReadOnly(state: Pick<StoreState, 'spec' | '_savedSpec' | 'editAccess'>): boolean {
+  // A new, unsaved document retains the existing create policy.
+  return state._savedSpec !== null && state.editAccess !== null
+    && (state.editAccess.workflowId !== state.spec?.id || !state.editAccess.canEdit)
+}
+
 export const useEditorStore = create<StoreState>((set, get) => {
   const fail = (message: string) => { set({ actionError: message }); return false }
   const ready = () => !Object.keys(get().pendingEdits).length || fail('有未应用草稿，请先应用或放弃: ' + Object.values(get().pendingEdits).join('; '))
-  const active = () => ready() && (!!get().spec || fail('尚未加载工作流'))
+  const writable = () => !editorIsReadOnly(get()) || fail('当前工作流为只读，不能修改或保存。')
+  const active = () => writable() && ready() && (!!get().spec || fail('尚未加载工作流'))
   const nodeExists = (id: string) => !!get().spec?.nodes.some((node) => node.id === id) || fail(`节点不存在: ${id}`)
 
   function commit(next: Snapshot) {
@@ -165,6 +186,10 @@ export const useEditorStore = create<StoreState>((set, get) => {
 
   return {
     ...initial(),
+    setEditAccess: (editAccess) => {
+      const previous = get().editAccess
+      if (previous?.workflowId !== editAccess.workflowId || previous?.canEdit !== editAccess.canEdit) set({ editAccess })
+    },
     loadSpec: (incoming, databaseSpec = incoming, activeDeployNumber) => {
       if (!ready()) return
       const state = get()
@@ -183,19 +208,19 @@ export const useEditorStore = create<StoreState>((set, get) => {
       const spec = clone(incoming)
       const positions = positionsFor(spec, state)
       const baseline = state.spec?.id === spec.id && state.isLayoutDirty ? state._baselinePositions : positions
-      set({ ...initial(state.sessionId + 1), spec, positions, _baselinePositions: clone(baseline), isLayoutDirty: !equal(positions, baseline), _savedSpec: clone(spec), _databaseSpec: clone(databaseSpec), _databasePackId: databaseSpec === null && activeBaseline?.deployNumber === activeDeployNumber ? activeBaseline.packId : originalDraftPackId(databaseSpec), _activeBaseline: activeBaseline?.deployNumber === activeDeployNumber ? activeBaseline : undefined, _activeDeployNumber: databaseSpec === null ? activeDeployNumber : null, validationErrors: validateSpec(spec) })
+      set({ ...initial(state.sessionId + 1), editAccess: state.editAccess, spec, positions, _baselinePositions: clone(baseline), isLayoutDirty: !equal(positions, baseline), _savedSpec: clone(spec), _databaseSpec: clone(databaseSpec), _databasePackId: databaseSpec === null && activeBaseline?.deployNumber === activeDeployNumber ? activeBaseline.packId : originalDraftPackId(databaseSpec), _activeBaseline: activeBaseline?.deployNumber === activeDeployNumber ? activeBaseline : undefined, _activeDeployNumber: databaseSpec === null ? activeDeployNumber : null, validationErrors: validateSpec(spec) })
     },
     replaceSession: (incoming, expected, isNew, databaseSpec = incoming, activeDeployNumber) => {
-      if (get() !== expected) return false
+      if (!editorStateMatches(expected, get())) return false
       const prepared = prepareWorkflowSession(incoming)
       const database = isNew || databaseSpec === null ? null : prepareWorkflowSession(databaseSpec)
       if (!prepared
         || !isNew && databaseSpec !== null && (!database || database.spec.id !== prepared.spec.id || activeDeployNumber !== undefined && activeDeployNumber !== null)
         || !isNew && databaseSpec === null && !positiveDeployNumber(activeDeployNumber)
-        || get() !== expected) return false
+        || !editorStateMatches(expected, get())) return false
       const { spec, positions, errors } = prepared
       const activeBaseline = !isNew && databaseSpec === null ? originalActiveDraftBaseline(incoming) : undefined
-      set({ ...initial(expected.sessionId + 1), spec, positions, _baselinePositions: clone(positions),
+      set({ ...initial(expected.sessionId + 1), editAccess: get().editAccess, spec, positions, _baselinePositions: clone(positions),
         _savedSpec: isNew ? null : clone(spec), _databaseSpec: database ? clone(database.spec) : null, _databasePackId: isNew ? undefined : databaseSpec === null && activeBaseline?.deployNumber === activeDeployNumber ? activeBaseline.packId : originalDraftPackId(databaseSpec), _activeBaseline: activeBaseline?.deployNumber === activeDeployNumber ? activeBaseline : undefined, _activeDeployNumber: !isNew && databaseSpec === null ? activeDeployNumber : null, isDirty: isNew, validationErrors: errors })
       return true
     },
@@ -289,6 +314,7 @@ export const useEditorStore = create<StoreState>((set, get) => {
     },
     setValidationErrors: (errors) => set({ validationErrors: clone(errors) }),
     setPendingEdit: (key, message) => {
+      if (message !== null && !writable()) return
       const pendingEdits = { ...get().pendingEdits }
       if (message === null) delete pendingEdits[key]
       else Object.defineProperty(pendingEdits, key, { value: message, enumerable: true, configurable: true, writable: true })
@@ -306,7 +332,7 @@ export const useEditorStore = create<StoreState>((set, get) => {
       else finishTransaction()
     },
     undo: () => {
-      if (!ready()) return
+      if (!writable() || !ready()) return
       finishTransaction()
       const state = get(), previous = state._past.at(-1)
       if (!previous) { set({ actionError: null }); return }
@@ -316,7 +342,7 @@ export const useEditorStore = create<StoreState>((set, get) => {
         validationErrors: previous.spec ? validateSpec(previous.spec) : [], actionError: null })
     },
     redo: () => {
-      if (!ready()) return
+      if (!writable() || !ready()) return
       finishTransaction()
       const state = get(), next = state._future.at(-1)
       if (!next) { set({ actionError: null }); return }
@@ -365,6 +391,16 @@ export const useEditorStore = create<StoreState>((set, get) => {
         validationErrors: validateSpec(spec), actionError: null })
       return true
     },
+    adoptConfirmedSave: (incoming, expected) => {
+      const state = get()
+      if (!editorStateMatches(expected, state) || Object.keys(state.pendingEdits).length
+        || !equal(incoming, state._databaseSpec) || !equal(incoming, state._savedSpec)
+        || validateSpec(incoming).some(error => error.type === 'invalid-structure')) return false
+      // Unlike a user import, this consumes a confirmed receipt even if access
+      // was revoked after dispatch. It never grants permission for another write.
+      commit({ spec: clone(incoming), positions: positionsFor(incoming, state), selectedNodeId: null })
+      return true
+    },
     markClean: (savedSpec) => {
       const state = get()
       if (!state.spec) { fail('尚未加载工作流，不能标记已保存'); return }
@@ -375,7 +411,7 @@ export const useEditorStore = create<StoreState>((set, get) => {
         isDirty: !equal(state.spec, baseline), actionError: null })
     },
     importYaml: (incoming) => {
-      if (!ready()) return
+      if (!writable() || !ready()) return
       if (validateSpec(incoming).some((error) => error.type === 'invalid-structure')) { fail('导入结构无效，未替换当前文档'); return }
       const spec = clone(incoming)
       commit({ spec, positions: positionsFor(spec, get()), selectedNodeId: null })

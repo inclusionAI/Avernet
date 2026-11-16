@@ -2,7 +2,8 @@
 import type { Request, Router } from 'express';
 import { createHmac } from 'node:crypto';
 import { getCurrentEnv } from '@avernet/clawweb-shared/server/env';
-import { resolveBaasConfig, type IDatabase } from '@avernet/clawweb-shared/server/db';
+import { selectAutoHealBaasTransport } from '@avernet/clawweb-shared/server/auto-heal-baas';
+import { resolveAutoHealConfig, resolveBaasConfig, type IDatabase } from '@avernet/clawweb-shared/server/db';
 import { BotWorkflowPermissionRepository } from '@avernet/clawweb-shared/server/repositories/bot-workflow-permission-repository';
 import { createWorkflowAiDraftReceipts } from '@avernet/workflow/server/services/workflow-ai-draft-receipts';
 import { createWorkflowAiDraftService } from '@avernet/workflow/server/services/workflow-ai-draft-service';
@@ -20,16 +21,16 @@ export function createWorkflowAiDraftRuntime(db: IDatabase, options: {
 }): { service: WorkflowAiDraftService; router: Router; monitor: { reconcile(limit?: number): Promise<number> } } {
   const permissions = new BotWorkflowPermissionRepository(db);
   const configuredReceipts = () => {
-    const transport = resolveBaasConfig();
-    const endpoint = new URL(transport.baseUrl);
-    if (!transport.apiKey || !['https:', 'http:'].includes(endpoint.protocol)
-      || endpoint.username || endpoint.password || endpoint.search || endpoint.hash) throw new Error('AI_DRAFT_RECOVERY_UNAVAILABLE');
-    // Re-evaluate the trusted namespace on every issue/verify, so a live
-    // credential/provider change revokes old receipts before provider I/O.
-    const key = createHmac('sha256', transport.apiKey)
-      .update(JSON.stringify(['workflow-ai-draft-receipts/v1', getCurrentEnv(), endpoint.href.replace(/\/$/, '')]))
-      .digest('base64url');
-    return createWorkflowAiDraftReceipts(key);
+    try {
+      const transport = selectAutoHealBaasTransport(resolveAutoHealConfig(), resolveBaasConfig());
+      // Re-evaluate the trusted namespace on every issue/verify, so a live
+      // credential/provider/control-env/target-env change revokes old receipts
+      // before provider I/O, even when two target envs share a URL and key.
+      const key = createHmac('sha256', transport.apiKey)
+        .update(JSON.stringify(['workflow-ai-draft-receipts/v1', getCurrentEnv(), transport.environment, transport.baseUrl]))
+        .digest('base64url');
+      return createWorkflowAiDraftReceipts(key);
+    } catch { throw new Error('AI_DRAFT_RECOVERY_UNAVAILABLE'); }
   };
   let receipts = options.receipts;
   if (!receipts) {

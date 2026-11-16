@@ -73,12 +73,12 @@ from agentclaw.community.core.task.context_collab.service_api import (
     EventAppendCommand,
     TaskProgressProjectionDTO,
 )
-from agentclaw.community.log import get_logger
-from agentclaw.community.plugin_api.context_collab_runtime import (
+from agentclaw.community.core.task.context_collab.executor import (
+    ContextCollabExecutor,
     ContextCollabResumeRequest,
     ContextCollabRunRequest,
-    ContextCollabRuntimePlugin,
 )
+from agentclaw.community.log import get_logger
 
 logger = get_logger(__name__)
 
@@ -285,11 +285,11 @@ class ContextCollabService(ContextCollabServiceProtocol):
     def __init__(
         self,
         repository: ContextCollabRepositoryProtocol,
-        runtime: ContextCollabRuntimePlugin,
+        executor: ContextCollabExecutor,
         authorizer: ContextCollabAuthorizerProtocol = StructuralContextCollabAuthorizer(),
     ) -> None:
         self._repository = repository
-        self._runtime = runtime
+        self._executor = executor
         self._authorizer = authorizer
 
     def create_context(
@@ -459,7 +459,7 @@ class ContextCollabService(ContextCollabServiceProtocol):
                 "collaboration context run requires exactly one todo resource_ref"
             )
 
-        runtime_result = await self._runtime.run(
+        runtime_result = await self._executor.run(
             ContextCollabRunRequest(
                 collab_context_id=collab_context_id,
                 executor_id=executor.agent_id,
@@ -598,7 +598,7 @@ class ContextCollabService(ContextCollabServiceProtocol):
                 "collaboration context resume requires one todo resource_ref"
             )
 
-        runtime_result = await self._runtime.resume(
+        runtime_result = await self._executor.resume(
             ContextCollabResumeRequest(
                 collab_context_id=collab_context_id,
                 executor_id=executor.agent_id,
@@ -740,7 +740,7 @@ class ContextCollabService(ContextCollabServiceProtocol):
                 "in_progress BCS collaboration context requires task.started session_id"
             )
 
-        runtime_status = await self._runtime.get_run(
+        runtime_status = await self._executor.get_run(
             run_id,
             group_id=group_id,
             session_id=session_id,

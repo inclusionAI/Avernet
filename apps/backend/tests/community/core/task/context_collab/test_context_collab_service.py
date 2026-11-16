@@ -53,8 +53,8 @@ from agentclaw.community.core.task.context_collab.service_api import (
 from agentclaw.community.core.task.context_collab.services.context_collab_service import (
     ContextCollabService,
 )
-from agentclaw.community.plugins.local.context_collab_runtime import (
-    LocalContextCollabRuntimePlugin,
+from tests.community.core.task.context_collab.executor_fakes import (
+    RecordingContextCollabExecutor,
 )
 
 OBJECTIVE = "整理 Context 协作协议评审结论并提交可评审 PR"
@@ -146,7 +146,7 @@ class TestCreateContext:
         repo = _FakeContextCollabRepository()
         assert isinstance(repo, ContextCollabRepositoryProtocol)
         service = ContextCollabService(
-            repository=repo, runtime=LocalContextCollabRuntimePlugin()
+            repository=repo, executor=RecordingContextCollabExecutor()
         )
         actor = make_actor()
 
@@ -182,7 +182,7 @@ class TestCreateContext:
     def test_single_without_executor_rejected(self):
         service = ContextCollabService(
             repository=_FakeContextCollabRepository(),
-            runtime=LocalContextCollabRuntimePlugin(),
+            executor=RecordingContextCollabExecutor(),
         )
         with pytest.raises(ContextCollabValidationError):
             service.create_context(make_create_command(executor_ref=None), make_actor())
@@ -205,7 +205,7 @@ class TestCreateContext:
     def test_invalid_create_payload_rejected(self, overrides):
         service = ContextCollabService(
             repository=_FakeContextCollabRepository(),
-            runtime=LocalContextCollabRuntimePlugin(),
+            executor=RecordingContextCollabExecutor(),
         )
         with pytest.raises(ContextCollabValidationError):
             service.create_context(make_create_command(**overrides), make_actor())
@@ -213,7 +213,7 @@ class TestCreateContext:
     def test_service_satisfies_protocol(self):
         service = ContextCollabService(
             repository=_FakeContextCollabRepository(),
-            runtime=LocalContextCollabRuntimePlugin(),
+            executor=RecordingContextCollabExecutor(),
         )
         assert isinstance(service, ContextCollabServiceProtocol)
 
@@ -233,7 +233,7 @@ class TestAuthorizerSeam:
     def test_default_authorizer_is_structural(self):
         service = ContextCollabService(
             repository=_FakeContextCollabRepository(),
-            runtime=LocalContextCollabRuntimePlugin(),
+            executor=RecordingContextCollabExecutor(),
         )
         assert isinstance(service, ContextCollabServiceProtocol) and isinstance(
             service._authorizer, StructuralContextCollabAuthorizer
@@ -243,7 +243,7 @@ class TestAuthorizerSeam:
         authorizer = _RecordingAuthorizer()
         service = ContextCollabService(
             repository=_FakeContextCollabRepository(),
-            runtime=LocalContextCollabRuntimePlugin(),
+            executor=RecordingContextCollabExecutor(),
             authorizer=authorizer,
         )
         assert isinstance(authorizer, ContextCollabAuthorizerProtocol)
