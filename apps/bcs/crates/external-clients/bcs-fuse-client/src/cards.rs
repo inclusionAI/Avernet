@@ -69,12 +69,26 @@ impl FuseClient {
         &self, id: &str, request: &CardWriteRequest,
     ) -> Result<CardWriteResponse, FuseClientError> {
         let url = self.card_url(id)?;
-        let response = self.sync_client.request(|http| http.put(url).json(request))
-            .send_traced().await?.error_for_status()?.json::<CardWriteResponse>().await?;
-        if !response.saved {
-            return Err(FuseClientError::InvalidResponse("Card was not saved".into()));
+        let mut observation = crate::card_observation::CardWriteObservation::start(id, "PUT", Some(request));
+        let result: Result<CardWriteResponse, FuseClientError> = async {
+            let response = self.sync_client.request(|http| http.put(url).json(request))
+                .send_traced().await?;
+            observation.status = Some(response.status().as_u16());
+            observation.stage = "status";
+            let response = response.error_for_status()?;
+            observation.stage = "decode";
+            let response = response.json::<CardWriteResponse>().await?;
+            observation.stage = "ack";
+            if !response.saved {
+                return Err(FuseClientError::InvalidResponse("Card was not saved".into()));
+            }
+            Ok(response)
+        }.await;
+        match &result {
+            Ok(response) => observation.succeeded(Some(response.card_version)),
+            Err(error) => observation.failed(error),
         }
-        Ok(response)
+        result
     }
 
     pub async fn delete_card(&self, id: &str) -> Result<(), FuseClientError> {
@@ -82,12 +96,26 @@ impl FuseClient {
         struct Deleted { deleted: bool }
         // Fuse returns 202 even for absent Cards; a route-level 404 is an error.
         let url = self.card_url(id)?;
-        let response = self.sync_client.request(|http| http.delete(url))
-            .send_traced().await?.error_for_status()?.json::<Deleted>().await?;
-        if !response.deleted {
-            return Err(FuseClientError::InvalidResponse("Card was not deleted".into()));
+        let mut observation = crate::card_observation::CardWriteObservation::start(id, "DELETE", None);
+        let result: Result<(), FuseClientError> = async {
+            let response = self.sync_client.request(|http| http.delete(url))
+                .send_traced().await?;
+            observation.status = Some(response.status().as_u16());
+            observation.stage = "status";
+            let response = response.error_for_status()?;
+            observation.stage = "decode";
+            let response = response.json::<Deleted>().await?;
+            observation.stage = "ack";
+            if !response.deleted {
+                return Err(FuseClientError::InvalidResponse("Card was not deleted".into()));
+            }
+            Ok(())
+        }.await;
+        match &result {
+            Ok(()) => observation.succeeded(None),
+            Err(error) => observation.failed(error),
         }
-        Ok(())
+        result
     }
 
     pub async fn search_cards(

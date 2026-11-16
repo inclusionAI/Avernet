@@ -22,11 +22,14 @@ bcs-config      = { workspace = true }
 bcs-db-local    = { workspace = true }
 bcs-bot         = { workspace = true }
 bcs-bot-store   = { workspace = true }
+bcs-app-a2a-bot = { workspace = true }
 bcs-app-bot     = { workspace = true }
 bcs-edge-permission = { workspace = true }
 bcs-edge-permission-store = { workspace = true }
 bcs-app-register = { workspace = true }
 bcs-route-security = { workspace = true }
+bcs-fuse-client = { workspace = true }
+bcs-fusion      = { workspace = true }
 bcs-relation    = { workspace = true }
 bcs-auth-api    = { workspace = true }
 bcs-auth-oauth  = { workspace = true }

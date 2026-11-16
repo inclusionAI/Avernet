@@ -8,11 +8,25 @@ use bcs_service_api::port::repo::{a2a_bot::{A2aBotRecord, A2aBotRepoPort}, bot_p
 pub struct A2aBotCore {
     cards: Arc<dyn A2aBotRepoPort>,
     bots: Arc<dyn BotProviderRepoPort>,
+    catalog_changes: Option<Arc<dyn bcs_service_api::port::CatalogChangePort>>,
 }
 
 impl A2aBotCore {
     pub fn new(cards: Arc<dyn A2aBotRepoPort>, bots: Arc<dyn BotProviderRepoPort>) -> Self {
-        Self { cards, bots }
+        Self { cards, bots, catalog_changes: None }
+    }
+    pub fn with_catalog_changes(mut self, port: Option<Arc<dyn bcs_service_api::port::CatalogChangePort>>) -> Self {
+        self.catalog_changes = port;
+        self
+    }
+
+    fn notify_card_change(&self, record: &A2aBotRecord, mutation: &'static str) {
+        if let Some(port) = &self.catalog_changes {
+            super::a2a_provider_registration::log_catalog_change(
+                mutation, &record.bot_uuid, &record.provider_id, &record.provider_bot_ref, record.revision,
+            );
+            port.agent_changed(&record.bot_uuid);
+        }
     }
 }
 
@@ -56,7 +70,9 @@ impl A2aBotCoreService for A2aBotCore {
     async fn replace_card(&self, record:A2aBotRecord)->ServiceResult<A2aBotRecord> {
         let binding=self.provider_binding(&record.provider_id,&record.bot_uuid).await?;
         if binding.provider_bot_ref!=record.provider_bot_ref {return Err(ServiceError::Conflict("A2A Bot binding changed".into()));}
-        self.cards.replace(&record).await
+        let saved = self.cards.replace(&record).await?;
+        self.notify_card_change(&saved, "replace_card");
+        Ok(saved)
     }
 
     async fn commit_card_with_visibility(&self,record:A2aBotRecord,expected:u64,visibility:Option<bcs_service_api::types::a2a_bot::A2aRegistrationVisibility>)->ServiceResult<A2aBotRecord> {
@@ -65,6 +81,7 @@ impl A2aBotCoreService for A2aBotCore {
         if !self.cards.compare_and_set_with_visibility(&record,expected,visibility).await? {
             return Err(ServiceError::Conflict("A2A Card configuration changed".into()));
         }
+        self.notify_card_change(&record, "commit_card_with_visibility");
         Ok(record)
     }
     async fn commit_card(&self, record: A2aBotRecord, expected_revision: u64) -> ServiceResult<A2aBotRecord> {
@@ -75,6 +92,7 @@ impl A2aBotCoreService for A2aBotCore {
         if !self.cards.compare_and_set(&record, expected_revision).await? {
             return Err(ServiceError::Conflict("A2A Card configuration changed".into()));
         }
+        self.notify_card_change(&record, "commit_card");
         Ok(record)
     }
 }
