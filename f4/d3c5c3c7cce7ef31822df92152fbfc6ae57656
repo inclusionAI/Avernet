@@ -1,0 +1,23 @@
+apps/agentclawscs/docs/agents/existing-knowledge.md
+  s_7d2d5efac8fdba::t_6c238fad6267d9 36-37
+apps/agentclawscs/docs/arch/README.md
+  s_7d2d5efac8fdba::t_fca88f5cc526d3 56,62-63
+apps/agentclawscs/docs/diagnostics/README.md
+  s_7d2d5efac8fdba::t_c03a9adb617b9a 14
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f4d3c5c3c7cce7ef31822df92152fbfc6ae57656",
+  "prompts": {},
+  "sessions": {
+    "s_7d2d5efac8fdba": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e354-c8b2-7970-80b4-5825865bcea4",
+        "model": "GLM-5.3"
+      },
+      "human_author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}
