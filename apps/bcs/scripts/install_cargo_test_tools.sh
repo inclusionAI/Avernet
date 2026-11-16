@@ -80,7 +80,7 @@ install_tool() {
     fi
   done
   echo "  ! prebuilt $binary unavailable; falling back to cargo install" >&2
-  cargo install "$binary" --locked --version "$version"
+  (cd "$script_dir/.." && cargo install "$binary" --locked --version "$version")
 }
 
 tools=("$@")

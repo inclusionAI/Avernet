@@ -63,3 +63,28 @@ def test_generic_baas_failure_returns_friendly_response_not_500():
     assert resp.error_code == 50000
     assert resp.data is None
     assert resp.message
+
+
+def test_unavailable_subtype_preserves_both_legacy_device_routes():
+    from agentclaw.community.adapters.http.devices.router import get_device_connection_by_bot
+    from agentclaw.community.core.devices.errors import DeviceUnavailableError
+    from agentclaw.community.core.devices.services.baas_device_service import BaasDeviceUnavailableError
+    from agentclaw.community.core.service_bot.baas_service_errors import BaasNoActiveDevicesError
+
+    cause = BaasNoActiveDevicesError(status_code=404)
+    error = BaasDeviceUnavailableError(f"Failed to get device connection: {cause}")
+    error.__cause__ = cause
+    assert isinstance(error, (BaasDeviceServiceError, DeviceUnavailableError))
+    assert isinstance(error, BaasDeviceServiceError)
+    assert isinstance(error, DeviceUnavailableError)
+    assert error.__cause__ is cause
+    service = MagicMock()
+    service.get_device_connection.side_effect = error
+    service.get_device_connection_by_bot.side_effect = error
+    first = _call(service)
+    second = asyncio.run(get_device_connection_by_bot(
+        bot_id="bot", port=None, device_uuid=None, ws_conn_mode=None,
+        default_tag=None, user=_user(), service=service,
+    ))
+    assert first.error_code == second.error_code == 40303
+    assert first.success is second.success is False

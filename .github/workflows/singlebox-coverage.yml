@@ -48,6 +48,7 @@ jobs:
       USE_CN_MIRROR: ${{ inputs.use_cn_mirror && '1' || '' }}
       BCN_PLUGIN_SOURCE: source
       CARGO_TERM_COLOR: always
+      RUSTUP_TOOLCHAIN: 1.94.0
       QDRANT_MODE: server
       QDRANT_URL: http://127.0.0.1:6333
       QDRANT_GRPC_PORT: "6334"
@@ -101,6 +102,7 @@ jobs:
           changed_file_list="$(mktemp)"
           trap 'rm -f "$changed_file_list"' EXIT
           if ! git diff --name-only -z "${base_ref}" "${GITHUB_SHA}" -- \
+            rust-toolchain.toml \
             singlebox \
             apps/backend \
             apps/baas \
@@ -153,9 +155,8 @@ jobs:
       - name: Install Rust toolchain
         if: steps.changes.outputs.skip != 'true'
         run: |
-          rustup toolchain install stable --profile minimal
-          rustup default stable
-          rustup component add llvm-tools
+          rustup toolchain install 1.94.0 --profile minimal --component llvm-tools
+          rustup default 1.94.0
           echo "${HOME}/.cargo/bin" >> "${GITHUB_PATH}"
           rustc --version
           cargo --version

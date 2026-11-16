@@ -120,6 +120,7 @@ def matches_row(row, filters):
 class TcCatalog:
     def __init__(self, repository):
         self.repository = repository
+        self.write_card = repository.upsert
 
     def get(self, worker_id):
         row = self.repository.get(worker_id)
@@ -161,7 +162,7 @@ class TcCatalog:
         data = current.card.source_card if current else {}
         fields = sync_changes(current, payload)
         self.validate({**data, **fields})
-        row = self.repository.upsert(
+        row = self.write_card(
             worker_id,
             fields,
             resource_type="agent",
@@ -176,7 +177,7 @@ class TcCatalog:
         current = self.require(worker_id)
         data = {**current.card.source_card, **fields}
         self.validate(data)
-        return self.repository.upsert(
+        return self.write_card(
             worker_id,
             fields,
             resource_type="agent",
@@ -215,6 +216,10 @@ class TcCatalog:
             row = self.require(worker_id)
             if version is not None and version != row.revision:
                 raise CatalogConflict("configuration version conflict")
+            if "document_mapping" in fields and fields["document_mapping"] != (
+                row.config or {}
+            ).get("document_mapping"):
+                raise ValueError("change document_mapping through the Card endpoint")
             config = {**(row.config or {}), **fields}
             config = WorkerConfig.model_validate(config).model_dump(mode="json")
             if config == row.config:

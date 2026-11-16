@@ -25,7 +25,8 @@ export function useRoutineClock() {
 export function RoutineNextRun({ task, now }: { task: RoutineSchedule; now: number }) {
   const { cron, timezone, enabled } = task;
   const next = useMemo(() => estimateNextRun({ cron, timezone, enabled }, now), [cron, timezone, enabled, now]);
-  if (!task.enabled) return <span className="text-muted-foreground">已停用</span>;
+  if (task.enabled === false) return <span className="text-muted-foreground">已停用</span>;
+  if (task.enabled !== true) return <span className="text-muted-foreground">状态未知</span>;
   const description = next
     ? `按 Cron 和 ${task.timezone} 估算，实际执行以运行环境为准`
     : '缺少有效的五段 Cron 或时区，无法估算';

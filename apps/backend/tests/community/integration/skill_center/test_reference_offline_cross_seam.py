@@ -12,6 +12,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from agentclaw.community.core.base import Base
+from agentclaw.community.plugin_api.models import BotModel
 from agentclaw.community.core.models.skill import (
     BotSkillInstallation,
     Skill,
@@ -202,6 +203,7 @@ def test_reference_persists_g5_offline_failure_without_capability_writes(
     monkeypatch.setenv("SERVER_ENV", "pre")
     db = _Database()
     with avernet_tenant_scope("teamclaw"), db.transactional_orm_session() as session:
+        session.add(BotModel(id=101, bot_id="bot-a", entity_id="owner-a", owner_id="owner-a", entity_type="staff", creator_id="owner-a", env="pre"))
         session.add(
             Skill(
                 id=10,

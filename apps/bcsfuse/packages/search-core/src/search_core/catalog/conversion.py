@@ -11,7 +11,7 @@ class DefaultCardDocumentConverter:
     def __init__(self, *, filter_fields=frozenset()):
         self.filter_fields = frozenset(filter_fields)
 
-    def convert(self, card):
+    def convert(self, card, *, allow_empty_text=False):
         source = business_card(card)
         parts = []
         for name in ("name", "description"):
@@ -32,7 +32,7 @@ class DefaultCardDocumentConverter:
                     v.strip() for v in tags if isinstance(v, str) and v.strip()
                 )
         text = "\n".join(parts)
-        if not text:
+        if not text and not allow_empty_text:
             raise ValueError(
                 "default converter requires name, description or skill text"
             )
@@ -49,4 +49,6 @@ class DefaultCardDocumentConverter:
             ):
                 raise ValueError("filter labels must be nonempty strings")
             labels[key] = tuple(dict.fromkeys(v.strip() for v in values))
-        return CardProjection([DocumentText("main", text, text)], labels)
+        return CardProjection(
+            [DocumentText("main", text, text)] if text else (), labels
+        )

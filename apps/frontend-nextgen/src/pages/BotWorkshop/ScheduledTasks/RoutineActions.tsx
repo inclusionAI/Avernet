@@ -24,8 +24,15 @@ export function RoutineActions({
     Boolean(task.runtime_stage && task.runtime_stage !== 'draft') &&
     !preciseTarget(context, task);
   const contentDisabled = disabled || stageOnly;
+  const statusUnknown = typeof task.enabled !== 'boolean';
+  const runHint = statusUnknown
+    ? '状态未知，请刷新后重试'
+    : task.enabled === false
+    ? '任务已停用，请先启用任务'
+    : undefined;
   return (
     <div className="flex flex-wrap justify-end gap-2" onClick={(event) => event.stopPropagation()}>
+      {runHint && <span className="self-center text-xs text-muted-foreground">{runHint}</span>}
       <ConfirmDialog
         title={`立即执行「${task.name}」`}
         description={
@@ -34,21 +41,26 @@ export function RoutineActions({
             : '将在任务指定的运行目标触发一次执行。'
         }
         confirmText="立即执行"
-        disabled={disabled || !task.enabled}
+        disabled={disabled || task.enabled !== true}
         onConfirm={() => operate(() => state.run(task), '已触发执行，请刷新历史记录查看结果')}
       >
-        <Button size="sm" variant="outline" disabled={disabled || !task.enabled}>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={disabled || task.enabled !== true}
+          aria-label={runHint ? `立即执行：${runHint}` : undefined}
+        >
           立即执行
         </Button>
       </ConfirmDialog>
       <ConfirmDialog
         title={`${task.enabled ? '停用' : '启用'}「${task.name}」`}
         description={stageOnly ? '此请求可能同步该运行态的多个实例，仅修改启停状态。' : '此操作会变更后续自动调度。'}
-        disabled={disabled}
+        disabled={disabled || statusUnknown}
         onConfirm={() => operate(() => state.toggle(task), task.enabled ? '任务已停用' : '任务已启用')}
       >
-        <Button size="sm" variant="outline" disabled={disabled}>
-          {task.enabled ? '停用' : '启用'}
+        <Button size="sm" variant="outline" disabled={disabled || statusUnknown}>
+          {statusUnknown ? '状态未知' : task.enabled ? '停用' : '启用'}
         </Button>
       </ConfirmDialog>
       <Button size="sm" variant="outline" disabled={contentDisabled} onClick={() => onEdit(task)}>

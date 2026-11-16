@@ -127,6 +127,8 @@ def test_storage_failure_shuts_down_initialized_host():
 
 
 def test_composition_failure_closes_open_index_and_host(monkeypatch):
+    from types import SimpleNamespace
+
     from app.tc import bootstrap
 
     context, startup = build_context()
@@ -136,7 +138,16 @@ def test_composition_failure_closes_open_index_and_host(monkeypatch):
         def close(self):
             closed.append(True)
 
-    monkeypatch.setattr(bootstrap, "storage", lambda context: (object(), Index()))
+    def no_database_access():
+        raise AssertionError("composition must not connect to the build store")
+
+    repository = SimpleNamespace(
+        connect=no_database_access,
+        upsert=no_database_access,
+        environment="test",
+        placeholder="?",
+    )
+    monkeypatch.setattr(bootstrap, "storage", lambda context: (repository, Index()))
 
     def fail(*args, **kwargs):
         raise RuntimeError("model unavailable")

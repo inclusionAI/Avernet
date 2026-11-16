@@ -13,9 +13,11 @@ vi.mock('@avernet/clawweb-shared/web/hooks/useClientUser', () => ({ getClientUse
 const workflowId = 'csrf-wire'
 const draftsPath = `/api/workflows/${workflowId}/ai-drafts`
 const input = { requestId: 'b1d4c678-2233-4455-8899-aabbccddeeff', mode: 'modify' as const, prompt: '原始需求', currentYaml: 'id: csrf-wire\n' }
+const receipt = 'signed-receipt'
 const task = { draftId: 'test-draft', workflowId, status: 'running' as const, inputSpecDigest: 'a'.repeat(64) }
 const service: WorkflowAiDraftService = {
   capabilities: vi.fn(async () => ({ available: true })),
+  prepare: vi.fn(async () => ({ draftId: task.draftId, receipt, inputSpecDigest: task.inputSpecDigest })),
   create: vi.fn(async () => ({ draftId: task.draftId, status: 'pending' as const })),
   get: vi.fn(async () => task),
   cancel: vi.fn(async () => ({ ...task, status: 'cancelled' as const })),
@@ -55,35 +57,51 @@ afterEach(async () => {
 })
 
 describe('real workflow AI API -> Express CSRF contract', () => {
-  it('submits and cancels with the marker required by the unchanged router guard', async () => {
+  it('prepares, submits, polls and cancels with the marker required by the router guard', async () => {
     const signal = new AbortController().signal
-    const submitted = await workflowAiApi.generate(workflowId, input, signal)
+    const prepared = await workflowAiApi.prepare(workflowId, input, signal)
+    expect(prepared).toEqual({ draftId: task.draftId, receipt, inputSpecDigest: task.inputSpecDigest })
+    const submitted = await workflowAiApi.generate(workflowId, { ...input, receipt }, signal)
     expect(submitted).toEqual({ draftId: task.draftId, status: 'pending' })
-    const cancelled = await workflowAiApi.cancel(workflowId, submitted.draftId, signal)
+    expect(await workflowAiApi.poll(workflowId, prepared.draftId, { receipt, currentYaml: input.currentYaml }, signal)).toEqual(task)
+    const cancelled = await workflowAiApi.cancel(workflowId, submitted.draftId, receipt, signal)
     expect(cancelled.status).toBe('cancelled')
-    expect(statuses).toEqual([202, 200])
+    // Cancellation is local/stateless: another observer can still read BaaS.
+    expect(await workflowAiApi.poll(workflowId, prepared.draftId, { receipt, currentYaml: input.currentYaml }, signal)).toEqual(task)
+    expect(statuses).toEqual([200, 202, 200, 200, 200])
     expect(received).toEqual([
-      { path: draftsPath, csrf: '1' }, { path: `${draftsPath}/${task.draftId}/cancel`, csrf: '1' },
+      { path: `${draftsPath}/prepare`, csrf: '1' }, { path: draftsPath, csrf: '1' },
+      { path: `${draftsPath}/${task.draftId}/poll`, csrf: '1' },
+      { path: `${draftsPath}/${task.draftId}/cancel`, csrf: '1' },
+      { path: `${draftsPath}/${task.draftId}/poll`, csrf: '1' },
     ])
-    expect(service.create).toHaveBeenCalledExactlyOnceWith('test-user', workflowId, input)
-    expect(service.cancel).toHaveBeenCalledExactlyOnceWith('test-user', workflowId, task.draftId)
+    expect(service.prepare).toHaveBeenCalledExactlyOnceWith('test-user', workflowId, input)
+    expect(service.create).toHaveBeenCalledExactlyOnceWith('test-user', workflowId, { ...input, receipt })
+    expect(service.get).toHaveBeenCalledWith('test-user', workflowId, task.draftId, { receipt, currentYaml: input.currentYaml })
+    expect(service.cancel).toHaveBeenCalledExactlyOnceWith('test-user', workflowId, task.draftId, { receipt })
   })
 
-  it('still rejects both POSTs without the CSRF marker before calling the service', async () => {
-    await expect(fetchJson(draftsPath, { method: 'POST', body: JSON.stringify(input) })).rejects.toThrow('CSRF_REJECTED')
-    await expect(fetchJson(`${draftsPath}/${task.draftId}/cancel`, { method: 'POST' })).rejects.toThrow('CSRF_REJECTED')
-    expect(statuses).toEqual([403, 403])
+  it.each([
+    ['/prepare', input], ['', { ...input, receipt }],
+    [`/${task.draftId}/poll`, { receipt, currentYaml: input.currentYaml }], [`/${task.draftId}/cancel`, { receipt }],
+  ])('rejects POST %s without the CSRF marker before calling the service', async (path, body) => {
+    await expect(fetchJson(`${draftsPath}${path}`, { method: 'POST', body: JSON.stringify(body) })).rejects.toThrow('CSRF_REJECTED')
+    expect(statuses).toEqual([403])
+    expect(service.prepare).not.toHaveBeenCalled()
     expect(service.create).not.toHaveBeenCalled()
+    expect(service.get).not.toHaveBeenCalled()
     expect(service.cancel).not.toHaveBeenCalled()
   })
 
-  it('leaves capabilities/poll/validation free of a new CSRF header requirement', async () => {
+  it('leaves capabilities/validation unchanged and never uses the legacy GET poll', async () => {
     const signal = new AbortController().signal
     await expect(workflowAiApi.capabilities(workflowId, signal)).resolves.toEqual({ available: true })
-    await expect(workflowAiApi.poll(workflowId, task.draftId, signal)).resolves.toEqual(task)
     const spec = { id: workflowId, title: 'Flow', version: '1', nodes: [] }
     await expect(workflowAiApi.validate(spec, signal)).resolves.toEqual({ valid: true, issues: [], normalizedSpec: spec })
-    expect(statuses).toEqual([200, 200, 200])
+    expect(statuses).toEqual([200, 200])
     expect(received.every(request => request.csrf === undefined)).toBe(true)
+    await expect(fetchJson(`${draftsPath}/${task.draftId}`, { signal })).rejects.toThrow('AI_DRAFT_RECEIPT_REQUIRED')
+    expect(statuses).toEqual([200, 200, 410])
+    expect(service.get).not.toHaveBeenCalled()
   })
 })

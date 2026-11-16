@@ -15,6 +15,7 @@ from agentclaw.community.core.repository.skill_center_reference_types import (
 )
 from agentclaw.community.core.skill_center.errors import (
     SkillOfflineError,
+    SkillRuntimeNameConflictError,
     SkillSetAccessDeniedError,
     SkillSetControlPlaneConflictError,
     SkillSetControlPlaneNotFoundError,
@@ -62,10 +63,12 @@ _PUBLIC_REFERENCE_ERRORS = {
     "SC_MARKET_UNAVAILABLE": "Skill Center is temporarily unavailable",
     "MATERIALIZATION_FAILED": "Exact Version materialization failed",
     "SKILL_OFFLINE": "Skill is offline",
+    "SKILL_RUNTIME_NAME_CONFLICT": "Skill runtime name conflicts with another Skill",
     "SKILL_SET_NOT_FOUND": "SkillSet is not available",
     "RUNTIME_PROJECTION_FAILED": "Runtime projection failed",
     "SKILL_SET_FORBIDDEN": "Forbidden",
     "SKILL_SET_UPDATE_FAILED": "SkillSet update failed",
+    "SKILL_SET_STATE_CHANGED_RETRY": "SkillSet state changed repeatedly; retry the request",
 }
 
 
@@ -389,19 +392,22 @@ class SkillCenterReferenceProcessor:
                 len(ready),
                 bool(target.get("is_active") or target.get("is_default")),
             )
-            outcomes = await self._skill_sets.add_skills(
-                bot_id=batch.bot_id,
-                owner_id=batch.owner_id,
-                user_id=batch.actor_id,
-                set_id=batch.skill_set_id,
-                # Materialization runs concurrently, so local IDs may become
-                # ready in a different order on each replay. The batch has set
-                # semantics, but sorting its numeric IDs keeps the wire and
-                # idempotent observability stable.
-                skill_ids=skill_ids,
-            )
+            for attempt in range(_MAX_ITEM_ATTEMPTS):
+                try:
+                    outcomes = await self._skill_sets.add_skills(
+                        bot_id=batch.bot_id,
+                        owner_id=batch.owner_id,
+                        user_id=batch.actor_id,
+                        set_id=batch.skill_set_id,
+                        skill_ids=skill_ids,
+                    )
+                    break
+                except SkillSetControlPlaneConflictError as exc:
+                    if str(exc) != "SKILL_SET_STATE_CHANGED_RETRY" or attempt == _MAX_ITEM_ATTEMPTS - 1:
+                        raise
         except (
             SkillOfflineError,
+            SkillRuntimeNameConflictError,
             SkillSetAccessDeniedError,
             SkillSetControlPlaneConflictError,
             SkillSetControlPlaneNotFoundError,
@@ -510,12 +516,16 @@ def _positive_int(value: object, field: str) -> int:
 def _final_add_error_code(error: Exception | None) -> str:
     if error is None:
         return "SKILL_SET_UPDATE_FAILED"
+    if isinstance(error, SkillRuntimeNameConflictError):
+        return "SKILL_RUNTIME_NAME_CONFLICT"
     if isinstance(error, SkillOfflineError):
         return "SKILL_OFFLINE"
     if isinstance(error, SkillSetControlPlaneNotFoundError):
         return "SKILL_SET_NOT_FOUND"
     if isinstance(error, SkillSetRuntimeReconcileError):
         return "RUNTIME_PROJECTION_FAILED"
+    if isinstance(error, SkillSetControlPlaneConflictError) and str(error) == "SKILL_SET_STATE_CHANGED_RETRY":
+        return "SKILL_SET_STATE_CHANGED_RETRY"
     if isinstance(error, SkillSetAccessDeniedError):
         return "SKILL_SET_FORBIDDEN"
     return "SKILL_SET_UPDATE_FAILED"
@@ -549,6 +559,7 @@ class SkillCenterReferenceTaskHandler:
         ):
             return Fail("request_id must be a non-empty unpadded string")
         return asyncio.run(self._processor.process(request_id))
+
 
 
 __all__ = ["SkillCenterReferenceProcessor", "SkillCenterReferenceTaskHandler"]

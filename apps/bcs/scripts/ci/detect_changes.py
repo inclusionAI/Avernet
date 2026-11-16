@@ -35,6 +35,7 @@ def resolve_base(event: str) -> str:
 
 def relevant(path: str) -> bool:
     return (path.startswith('apps/bcs/')
+            or path == 'rust-toolchain.toml'
             or path == '.github/workflows/unit-tests.yml'
             or path == 'singlebox/ci/tests/test_unit_test_workflow_diff.py'
             or (path.startswith('singlebox/ci/tests/')

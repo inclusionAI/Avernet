@@ -134,3 +134,29 @@ Python 脚本路径定位用例未通过；相关 60 项验证不替代全量结
 本轮仍没有提交、推送、更新内部宿主子模块引用或部署。内部 Host 验证显式指向
 本地新构建的公共依赖；发布前必须同步公共依赖版本。未验证预发实际 Bot 绑定、
 SSO、BaaS 凭证或真实模型输出。未修改 `taskguard`、`docs/demos`。
+
+## 2026-11-15 无新增草稿表版本：本地验证补充
+
+本次用户约束替代旧版任务表方案。当前实现使用预先签发的 metadata receipt 与
+BaaS 原生固定 `message_id`，恢复只轮询原消息；不创建、读写或删除草稿任务表。
+v153 保留为空 SQL 的历史槽位。取消仅停止本地等待；不承诺远端停止、全局撤销或
+页面丢失内存上下文后的恢复。现行契约见[工作流 AI 草稿](../workflow-ai-drafts.md)。
+
+实际本地结果（Node 20，重建公共依赖后）：
+
+- Workflow：15 个聚焦文件，330 项通过。
+- Public app/runtime/BaaS/browser：5 个文件，97 项通过。
+- 共享 BaaS sender：84 项通过。
+- 迁移与 managed database 回归：59 项通过。
+- 企业宿主 AI/安全/Origin/shutdown：180 项通过，测试关联当前公共源码及重建产物，
+  不使用旧依赖产物冒充集成证据。
+- 合计 750 项定向回归通过；不代表仓库全量测试或远端 CI 全绿。
+- Shared、ClawEvolve、Workflow、ClawWeb 构建，以及受影响包和宿主默认生产
+  TypeScript 检查通过；包边界、文件尺寸、无跳过用例与 whitespace 检查通过。
+- 独立安全审查覆盖 provider namespace、固定 ID/冻结 Bot、保守派发分类、查询
+  操作性错误保留 context、ACL/期限、无表及 local-only cancel；无未解决代码级阻断。
+
+本轮未 commit、push 或部署，未调用真实 BaaS。没有据此确认先前预发 500 的实际
+SQL 根因，也未证明预发已支持当前 native-ID 契约、真实配置一致或 Bot 工具权限
+已经满足建议生成边界。发布时必须验证实际服务版本与新旧客户端兼容，不能为旧
+无凭据请求自动创建替代任务。未改 taskguard、docs/demos 或宿主 gitlink。

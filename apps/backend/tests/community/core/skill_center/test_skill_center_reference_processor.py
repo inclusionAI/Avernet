@@ -14,6 +14,8 @@ from agentclaw.community.core.repository.skill_center_reference_types import (
 )
 from agentclaw.community.core.skill_center.errors import (
     SkillOfflineError,
+    SkillRuntimeNameConflictError,
+    SkillSetControlPlaneConflictError,
 )
 from agentclaw.community.core.skill_center.materialization_contract import (
     PublishedMaterializedSkillVersion,
@@ -434,3 +436,49 @@ def test_final_membership_infrastructure_failure_propagates_for_task_retry() -> 
         status is SkillCenterReferenceStatus.FAILED
         for _reference_id, status, _fields in references.transitions
     )
+
+
+def test_set_state_race_retries_without_failing_references():
+    class RacingSets(_SkillSets):
+        async def add_skills(self, **kwargs):
+            if not self.add_calls:
+                self.add_calls.append(kwargs)
+                raise SkillSetControlPlaneConflictError("SKILL_SET_STATE_CHANGED_RETRY")
+            return await super().add_skills(**kwargs)
+
+    references = _References()
+    processor = _processor(references=references, skill_sets=RacingSets(), materializer=_Materializer())
+    assert isinstance(asyncio.run(processor.process("request-a")), Complete)
+    assert all(item.status is SkillCenterReferenceStatus.COMPLETED for item in references.batch.items)
+
+
+def test_repeated_set_state_race_finishes_with_visible_failure():
+    class RacingSets(_SkillSets):
+        async def add_skills(self, **kwargs):
+            self.add_calls.append(kwargs)
+            raise SkillSetControlPlaneConflictError("SKILL_SET_STATE_CHANGED_RETRY")
+
+    references = _References()
+    sets = RacingSets()
+    processor = _processor(references=references, skill_sets=sets, materializer=_Materializer())
+    assert isinstance(asyncio.run(processor.process("request-a")), Complete)
+    assert len(sets.add_calls) == 3
+    assert all(item.status is SkillCenterReferenceStatus.FAILED for item in references.batch.items)
+    assert all(item.error_code == "SKILL_SET_STATE_CHANGED_RETRY" for item in references.batch.items)
+
+
+def test_name_conflict_is_a_terminal_per_item_result():
+    class ConflictingSets(_SkillSets):
+        async def add_skills(self, **kwargs):
+            return [
+                SkillSetSkillOutcome(skill_id=kwargs["skill_ids"][0], changed=True),
+                SkillSetSkillOutcome(skill_id=kwargs["skill_ids"][1], error=SkillRuntimeNameConflictError()),
+            ]
+
+    references = _References()
+    processor = _processor(references=references, skill_sets=ConflictingSets(), materializer=_Materializer())
+    assert isinstance(asyncio.run(processor.process("request-a")), Complete)
+    assert references.batch.items[0].status == SkillCenterReferenceStatus.COMPLETED
+    assert references.batch.items[1].status == SkillCenterReferenceStatus.FAILED
+    failures = [fields for _, status, fields in references.transitions if status == SkillCenterReferenceStatus.FAILED]
+    assert failures[0]["error_code"] == "SKILL_RUNTIME_NAME_CONFLICT"

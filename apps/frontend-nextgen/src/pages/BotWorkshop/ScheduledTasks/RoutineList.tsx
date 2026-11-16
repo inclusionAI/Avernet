@@ -3,8 +3,8 @@ import { Empty } from '@/components/ui/Empty';
 import { Input } from '@/components/ui/Input';
 import { Pagination } from '@/components/ui/Pagination';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select';
-import { getRoutineScheduleLabel } from '@/services/botWorkshop/routineSchedule';
 import { stageNames, type ManagedRoutine, type RoutineStage } from '@/services/botScheduledTasks/types';
+import { getRoutineScheduleLabel } from '@/services/botWorkshop/routineSchedule';
 import type { ReactNode } from 'react';
 import { RoutineNextRun, useRoutineClock } from './RoutineNextRun';
 export function RoutineList({
@@ -127,7 +127,9 @@ export function RoutineList({
                   <td className="whitespace-nowrap px-3 py-4 text-xs">
                     <RoutineNextRun task={task} now={now} />
                   </td>
-                  <td className="px-3 py-4">{task.enabled ? '已启用' : '已停用'}</td>
+                  <td className="px-3 py-4">
+                    {task.enabled === true ? '已启用' : task.enabled === false ? '已停用' : '状态未知'}
+                  </td>
                   <td className="px-3 py-4">{actions(task)}</td>
                 </tr>
               ))}

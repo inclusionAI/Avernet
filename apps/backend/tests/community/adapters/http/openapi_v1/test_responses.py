@@ -702,6 +702,23 @@ async def test_platform_default_mcp_direct_conflict_has_a_stable_public_error():
 
 
 @pytest.mark.asyncio
+async def test_skill_set_state_race_has_a_retryable_public_conflict():
+    import json
+
+    from agentclaw.community.core.skill_center.errors import SkillSetControlPlaneConflictError
+
+    @envelope_errors
+    async def handler(request: Request):
+        raise SkillSetControlPlaneConflictError("SKILL_SET_STATE_CHANGED_RETRY")
+
+    response = await handler(request=_request())
+    body = json.loads(bytes(response.body))
+    assert response.status_code == 409
+    assert body["code"] == 409211
+    assert body["message"] == "SkillSet state changed; retry the request"
+
+
+@pytest.mark.asyncio
 async def test_mcp_not_found_is_indistinguishable_from_bots_not_found():
     """A missing MCP server and a masked bot 404 answer byte-identical bodies."""
     import json

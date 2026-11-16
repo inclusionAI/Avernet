@@ -133,8 +133,11 @@ class ActiveSkillSetReferenceError(RuntimeError):
     """A Skill became referenced by an active custom SkillSet."""
 
 
-class SkillRuntimeNameConflictError(Exception):
-    """A Direct activation would create an ambiguous runtime entry name."""
+class SkillRuntimeNameConflictError(DomainError):
+    """A Skill would create an ambiguous runtime entry name."""
+
+    def __init__(self) -> None:
+        super().__init__("SKILL_RUNTIME_NAME_CONFLICT")
 
 
 class SkillEngineNotSupportedError(Exception):
