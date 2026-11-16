@@ -2,16 +2,22 @@
 import type { ConversationBotView } from '@/domain/conversation/types';
 import { useConversationDeepLinkSessionHydration } from '@/pages/Workspace/Chat/hooks/useConversationDeepLinkSessionHydration';
 import type { ChatBotView } from '@/services/workspace/botSessionService';
+import { botContainerService } from '@/services/botWorkshop/botContainerService';
 import { botSessionService } from '@/services/workspace/botSessionService';
 import { conversationInitialState, useConversationStore } from '@/stores/conversationStore';
 import { beforeEach, describe, expect, it } from '@jest/globals';
 import { act, renderHook, waitFor } from '@testing-library/react';
 
-jest.mock('@/services/workspace/botSessionService', () => ({
-  botSessionService: { getSessionDetail: require('jest-mock').fn() },
+jest.mock('@/services/workspace/botSessionService', () => {
+  const actual = jest.requireActual('@/services/workspace/botSessionService');
+  return { ...actual, botSessionService: { getSessionDetail: require('jest-mock').fn() } };
+});
+jest.mock('@/services/botWorkshop/botContainerService', () => ({
+  botContainerService: { list: require('jest-mock').fn() },
 }));
 
 const getSessionDetail = botSessionService.getSessionDetail as unknown as jest.Mock;
+const listBotContainers = botContainerService.list as unknown as jest.Mock;
 
 const managedBot: ChatBotView = {
   botId: 'bot-a:1',
@@ -41,6 +47,22 @@ const codingBot: ChatBotView = {
   isAgentCodingBot: true,
 };
 const codingView: ConversationBotView = { bot: codingBot, section: 'team' };
+
+const serviceBot: ChatBotView = {
+  ...managedBot,
+  botId: 'service-bot:1',
+  realBotId: 'service-bot',
+  ownerId: '1',
+  displayName: '多实例 Service Bot',
+  botType: 'service',
+  engine: 'openclaw',
+  runtimeStage: 'online',
+};
+const serviceView: ConversationBotView = {
+  bot: serviceBot,
+  section: 'managed',
+  origin: 'mine',
+} as unknown as ConversationBotView;
 const emptyList = {
   items: [],
   page: 1,
@@ -115,6 +137,7 @@ function renderDeepLinkHydration(
 
 beforeEach(() => {
   getSessionDetail.mockReset();
+  listBotContainers.mockReset();
   useConversationStore.setState({ ...conversationInitialState });
 });
 
@@ -278,5 +301,50 @@ describe('useConversationDeepLinkSessionHydration', () => {
     });
 
     expect(useConversationStore.getState().selectedSessionSnapshot).toBeNull();
+  });
+  it('多实例 Service Bot 深链会话会按实例逐个探测并选中正确容器', async () => {
+    useConversationStore.setState({
+      ...conversationInitialState,
+      selectedBotId: 'service-bot:1',
+      selectedSection: 'managed',
+      selectedOrigin: 'mine',
+      selectedScope: 'all',
+      selectedSessionId: 's-service',
+    });
+    listBotContainers.mockResolvedValue({
+      botId: serviceBot.botId,
+      instances: [{ id: 'device-a' }, { id: 'device-b' }],
+    });
+    getSessionDetail.mockImplementation((bot, userId, sessionId, range) => {
+      if (range?.deviceUuid === 'device-b') {
+        return {
+          ok: true,
+          data: { ...sessionOfSessionId('s-service'), botId: serviceBot.botId },
+        };
+      }
+      return { ok: false, error: { code: 'NOT_FOUND', friendlyMessage: 'not found', canRetry: true } };
+    });
+
+    renderDeepLinkHydration('1', [serviceView]);
+    await waitFor(() => expect(getSessionDetail).toHaveBeenCalledTimes(2));
+
+    expect(getSessionDetail).toHaveBeenNthCalledWith(
+      1,
+      serviceBot,
+      '1',
+      's-service',
+      { deviceUuid: 'device-a', stage: 'online' },
+    );
+    expect(getSessionDetail).toHaveBeenNthCalledWith(
+      2,
+      serviceBot,
+      '1',
+      's-service',
+      { deviceUuid: 'device-b', stage: 'online' },
+    );
+
+    const state = useConversationStore.getState();
+    expect(state.instanceSelectionByBotId[serviceBot.botId]).toBe('device-b');
+    expect(state.selectedSessionSnapshot?.session.sessionId).toBe('s-service');
   });
 });
