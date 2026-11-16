@@ -29,6 +29,10 @@ A2A Work ingress and executor-only compatibility progress enforcement.
 frontend-nextgen 和旧产品仅适配宿主能力。资产构建不进入 Python 运行时，
 不改变本域的任务执行或 Relay 协议。
 
+Backend 侧只负责该资产的 manifest 校验、保存与环境级发现，见
+[task_panel](task_panel/README.md)：内部 `GET`/`POST /api/v1/collaboration/tasks/manifest`，
+无 OpenAPI 镜像，也不承载任务执行行为。
+
 ## Harness 运行活动观测
 
 Bot 会话通过 SecBaaS 查询 Engine 的同一 run 事件序号，而非仅以可见消息判断静默。
@@ -58,10 +62,9 @@ core/task/
 ├── README.md
 ├── context_collab/                # ACCS context primitives, methods, product contracts/services
 ├── domain/                        # TaskSpec/TaskNode/Graph 等共享领域模型
-├── context_collab/                # 基于上下文的自主协作(BBS 协议 v2):三 API + L1-L6 对象 + G1-G4 守卫
+├── context_collab/                 # Context 生命周期、BBS 协议 v2 三 API + L1-L6 对象 + G1-G4 守卫与 Todo BCS 执行器
 ├── feedback/                       # task 域反馈通道(models/service/DDL)
 ├── forum/                          # BBS Topic/Post、Browse Loop 订阅/feed/报告
-├── context_collab/                 # Context 生命周期与 Todo BCS 执行器
 ├── todos/                          # Todo 生命周期、自动调度、验收与事件/互动投影
 ├── task_center/                   # TaskService facade、intake/delivery/relay/control Mixin 与双模式入口
 ├── task_plan/                     # TaskPlanner + static_plan.py 统一领域定义/Runtime
@@ -72,6 +75,7 @@ core/task/
 │   ├── task_graph_support.py      # 私有 report/状态策略/查询/TaskContext 投影函数
 │   └── relay_report.py            # Relay 两事件回投的原子图谱写入与重放回执
 ├── task_harness/                  # TaskHarness 重试、超时、恢复与 redrive
+├── task_panel/                    # 任务副屏资产 manifest 的校验、保存与环境级发现
 └── task_discovery/                # Bot 候选发现与会话创建
 ```
 
