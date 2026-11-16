@@ -481,7 +481,7 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path, orchestrati
                 applicant_agent_ref=working_bot.bot_id,                # 提交申请的bot自身信息
                 accountable_principal_ref=working_bot.owner_id,
                 requested_role_refs=_selected_agent_role_refs(record),
-                reason="task_commission.bot_self_application",
+                reason="task_commission.bot_self_application",         # 声明本次查询的真实调用者，并经过授权检查；它不是查询目标，也不代表这个 Bot 已获得参与或执行任务的权限。
             ),
             context=bot_context,
         )
