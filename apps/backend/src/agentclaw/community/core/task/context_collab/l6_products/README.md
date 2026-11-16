@@ -9,6 +9,7 @@ API or product-specific wire protocol.
 
 | Contract | Owner/source | Meaning |
 | --- | --- | --- |
+| ProductProfileCreateCommand / create_product_profile | [operations/](operations/) | Typed, pure creation operation: validate and return an immutable definition without installation, instances or runtime writes. |
 | ProductProfileDefinition | [contracts.py](contracts.py) | Versioned composition, scenario roles, domain/workflow mappings, compatibility and G1–G4 implementation requirements. |
 | MethodCompositionTemplate | [contracts.py](contracts.py) | Required/optional Method versions and instantiation scope. Current runtime supports one explicit Collet-scoped top-level binding, including the existing composite binding representation. |
 | ScenarioRole | [binding.py](binding.py) | Maps owner/assignee to actual L4 Participant and RoleBinding facts. No L3 grant is created. |
@@ -35,6 +36,60 @@ Installing a profile requires explicit code/composition changes and tests, not a
 enum change. Constructing a separate catalog does **not** dynamically register a
 runtime product. Tests may assemble isolated catalogs. There is no mutable
 runtime registry, catalog database or registration API.
+
+
+## Create a product profile
+
+[`create_product_profile(command)`](operations/product_profile.py) is the L6
+library operation for authoring a `ProductProfileDefinition`. Its typed input is
+[`ProductProfileCreateCommand`](operations/contracts.py): exact `ref`, Method
+composition, scenario roles, domain/workflow mappings, governance and compatibility
+requirements, plus optional Open publication. `publication=None` intentionally
+means there is no automatic Open publication use case.
+
+```python
+from agentclaw.community.core.task.context_collab.l6_products.operations import (
+    ProductProfileCreateCommand,
+    create_product_profile,
+)
+
+profile = create_product_profile(
+    ProductProfileCreateCommand(
+        ref=profile_ref,
+        composition=composition,
+        scenario_roles=scenario_roles,
+        domain=domain,
+        workflow=workflow,
+        governance=governance,
+        compatibility=compatibility,
+        publication=publication,
+    )
+)
+# Installation is a separate, explicit composition-root step:
+catalog = ProductCatalog((profile,))
+```
+
+Creation returns the definition itself, not an installation receipt. It preserves
+all supplied IDs, versions and product-specific admission strategies; it does not
+allocate versions, select latest, switch participation types or execute admission.
+[`validation.py`](validation.py) owns the shared structural checks used by both
+creation and catalog installation (Method composition/scope, role mappings,
+workflow role requirements and publication contracts). Invalid definitions raise
+`ContextCollabValidationError`. Direct dataclass construction remains compatible;
+installation still validates it. Reference uniqueness is enforced within each
+catalog, not by this stateless creation operation.
+
+Creating a definition performs no I/O, runtime authorization, capability
+negotiation, global registration, catalog mutation or Collet/Task/Method creation.
+It is not an authenticated HTTP/ACCS write endpoint or a guarantee that the
+referenced machine/Method versions are locally installed. Product code supplies
+business templates; DI explicitly installs the resulting definitions and later
+selection negotiates the installed capabilities. Commission's
+[`init_product_profile`](../products/task_commission/profile.py) calls this
+operation with its authored command, preserving its selected publication policy.
+The [creation tests](../../../../../../../tests/community/core/task/context_collab/test_l6_product_profile_operations.py)
+cover successful creation, immutability, exact versions, both admission strategies,
+non-installation and shared rejection rules.
 
 L6 pure modules consume L2–L5 value contracts and the installed L5 profile
 catalog. They do not import concrete product definitions/services, DI,

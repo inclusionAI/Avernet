@@ -22,6 +22,10 @@ from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     WorkflowAction,
     WorkflowProfile,
 )
+from agentclaw.community.core.task.context_collab.l6_products.operations import (
+    ProductProfileCreateCommand,
+    create_product_profile,
+)
 from agentclaw.community.core.task.context_collab.l6_products.publication import (
     OpenPublicationProfile,
 )
@@ -36,7 +40,7 @@ from agentclaw.community.core.task.context_collab.products.task_commission.publi
 # responsibility (authorization bug fix), not a profile migration.
 TASK_COMMISSION_PROFILE_REF = VersionedProfileRef("task_commission", 1)
 
-TASK_COMMISSION_PROFILE = ProductProfileDefinition(
+TASK_COMMISSION_PROFILE = ProductProfileCreateCommand(
     ref=TASK_COMMISSION_PROFILE_REF,
     composition=MethodCompositionTemplate(
         method_kind="Open",
@@ -133,7 +137,7 @@ TASK_COMMISSION_PROFILE = ProductProfileDefinition(
         downgrade_policy="reject_missing_required",
         migration_policy="new_instances_only",
     ),
-    publication=OpenPublicationProfile(
+    publication=OpenPublicationProfile(                                  # 产品发布参与机会时使用的规则
         admission=DesignatedOpenAdmission(
             applicant_role="assignee",
             accountable_role="owner",
@@ -143,32 +147,13 @@ TASK_COMMISSION_PROFILE = ProductProfileDefinition(
     ),
 )
 
-
 SELF_SERVICE_COMMISSION_PROFILE_REF = VersionedProfileRef("task_commission", 1)
 
 
 def init_product_profile() -> ProductProfileDefinition:
-    """Initialize the installed task-commission Product Profile.
+    """Create the authored task-commission definition through the L6 operation.
 
-    The initial product keeps the original ``task_commission@1`` reference;
-    self-application is part of that initial contract rather than a versioned
-    upgrade. The returned definition is immutable and is installed explicitly
-    by the DI composition root.
+    Keep its exact version and publication policy; DI explicitly installs the
+    returned definition. Creating a profile does not mutate a runtime catalog.
     """
-    return replace(
-        TASK_COMMISSION_PROFILE,
-        ref=SELF_SERVICE_COMMISSION_PROFILE_REF,
-        composition=MethodCompositionTemplate(
-            method_kind="Open",
-            scope="collet",
-            required_methods=(MethodRequirement("Open", "0.2"),),
-        ),
-        publication=OpenPublicationProfile(
-            admission=BotSelfApplicationAdmission(
-                applicant_role="assignee",
-                accountable_role="owner",
-                participation_type=ParticipationType.COLLET_PARTICIPANT,
-                capacity=1,
-            ),
-        ),
-    )
+    return create_product_profile(TASK_COMMISSION_PROFILE)
