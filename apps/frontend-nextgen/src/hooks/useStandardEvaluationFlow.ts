@@ -6,38 +6,16 @@ import {
   type StandardQualityTask,
   type StandardTaskEnvironment,
 } from '@/services/botWorkshop/standardEvaluationService';
-
-export type StandardEvaluationStepKey =
-  | 'create_environment'
-  | 'confirm_sample_set'
-  | 'execute_evaluation'
-  | 'evaluation_report'
-  | 'save_evaluation_result';
-
-export type StandardEvaluationStepStatus = 'pending' | 'running' | 'done' | 'failed';
-
-export interface StandardEvaluationStep {
-  key: StandardEvaluationStepKey;
-  title: string;
-  description: string;
-}
-
-export interface StandardEvaluationStepState extends StandardEvaluationStep {
-  status: StandardEvaluationStepStatus;
-}
-
-const STANDARD_EVALUATION_STEPS: StandardEvaluationStep[] = [
-  { key: 'create_environment', title: '创建评测环境', description: '基于 Eval 区服务 Bot 构建并部署评测环境。' },
-  { key: 'confirm_sample_set', title: '确认评测样本集', description: '展示并确认用户已选定的 MASA 评测样本集。' },
-  { key: 'execute_evaluation', title: '评测执行', description: 'TeamClaw 后端驱动 MASA 标准评测并同步任务进展。' },
-  { key: 'evaluation_report', title: '评测报告', description: '展示本次 MASA 评测报告。' },
-  { key: 'save_evaluation_result', title: '评测结果保存', description: '统一写入门禁结论，并在完成后由后端回收 Eval 区环境。' },
-];
-
-const TERMINAL_TASK_STATUSES = new Set(['success', 'failed']);
-
-/** 评测目标输入待 MASA 侧现化后开放；关闭时不阻塞标准评测发起。 */
-export const EVALUATION_GOAL_INPUT_ENABLED = false;
+import {
+  applyEvaluationTaskSteps,
+  createInitialEvaluationSteps,
+  EVALUATION_GOAL_INPUT_ENABLED,
+  getEvaluationTaskSaveStatus,
+  TERMINAL_TASK_STATUSES,
+  waitForStandardEnvironmentReady,
+  type StandardEvaluationStepKey,
+  type StandardEvaluationStepStatus,
+} from '@/services/botWorkshop/standardEvaluationWorkflow';
 
 export interface StandardEvaluationFlowInput {
   botId: string;
@@ -64,9 +42,7 @@ export function useStandardEvaluationFlow({
   const [goalFile, setGoalFile] = useState<File>();
   const [goalPrompt, setGoalPrompt] = useState('');
   const [running, setRunning] = useState(false);
-  const [steps, setSteps] = useState<StandardEvaluationStepState[]>(
-    STANDARD_EVALUATION_STEPS.map((step) => ({ ...step, status: 'pending' as const })),
-  );
+  const [steps, setSteps] = useState(createInitialEvaluationSteps);
   const [evaluationTask, setEvaluationTask] = useState<StandardQualityTask>();
   const [environment, setEnvironment] = useState<StandardTaskEnvironment>();
   const [error, setError] = useState<string>();
@@ -88,7 +64,7 @@ export function useStandardEvaluationFlow({
 
   const resetSteps = useCallback(() => {
     currentStepKeyRef.current = 'create_environment';
-    setSteps(STANDARD_EVALUATION_STEPS.map((step) => ({ ...step, status: 'pending' as const })));
+    setSteps(createInitialEvaluationSteps());
   }, []);
 
   const loadSampleSets = useCallback(async () => {
@@ -139,43 +115,14 @@ export function useStandardEvaluationFlow({
       if (!selectedSet) throw new Error('所选评测样本集不存在');
 
       updateStep('create_environment', 'running');
-      let standardEnvironment = await standardEvaluationService.createStandardEnvironment({
+      await waitForStandardEnvironmentReady({
         botId,
         botVersion,
         ownerId,
+        isAlive: () => aliveRef.current,
+        onEnvironmentUpdate: setEnvironment,
       });
       if (!aliveRef.current) return;
-      setEnvironment(standardEnvironment);
-
-      const environmentDeadline = Date.now() + 30 * 60 * 1000;
-      if (standardEnvironment.supported !== false && standardEnvironment.build_status !== 'active') {
-        while (Date.now() < environmentDeadline) {
-          if (['failed', 'not_found'].includes(standardEnvironment.build_status)) {
-            throw new Error(standardEnvironment.error || '标准评测环境构建失败');
-          }
-
-          await new Promise<void>((resolve) => {
-            window.setTimeout(resolve, 3000);
-          });
-          standardEnvironment = await standardEvaluationService.getStandardEnvironmentCurrent({
-            botId,
-            botVersion,
-            ownerId,
-          });
-          if (!aliveRef.current) return;
-          setEnvironment(standardEnvironment);
-          if (standardEnvironment.build_status === 'active') break;
-        }
-
-        if (standardEnvironment.supported !== false && standardEnvironment.build_status !== 'active') {
-          throw new Error('等待标准评测环境构建超时');
-        }
-      } else if (
-        standardEnvironment.supported !== false &&
-        ['failed', 'not_found'].includes(standardEnvironment.build_status)
-      ) {
-        throw new Error(standardEnvironment.error || '标准评测环境构建失败');
-      }
       updateStep('create_environment', 'done');
 
       updateStep('confirm_sample_set', 'running');
@@ -197,8 +144,7 @@ export function useStandardEvaluationFlow({
       const taskDeadline = Date.now() + 30 * 60 * 1000;
       let currentSaveStatus: string | undefined;
       while (Date.now() < taskDeadline) {
-        const saveStep = task.steps?.find((step) => step.key === 'save_evaluation_result');
-        currentSaveStatus = saveStep?.status;
+        currentSaveStatus = getEvaluationTaskSaveStatus(task);
 
         if (currentSaveStatus === 'DONE') break;
         if (currentSaveStatus === 'FAILED') break;
@@ -215,12 +161,7 @@ export function useStandardEvaluationFlow({
         if (!aliveRef.current) return;
         setEvaluationTask(task);
         if (task.environment) setEnvironment(task.environment);
-        task.steps?.forEach((step) => {
-          if (step.status === 'DONE') updateStep(step.key as StandardEvaluationStepKey, 'done');
-          if (step.status === 'FAILED') updateStep(step.key as StandardEvaluationStepKey, 'failed');
-          if (step.status === 'RUNNING') updateStep(step.key as StandardEvaluationStepKey, 'running');
-          if (step.status === 'WAITING') updateStep(step.key as StandardEvaluationStepKey, 'pending');
-        });
+        applyEvaluationTaskSteps(task, updateStep);
       }
 
       if (currentSaveStatus !== 'DONE') {

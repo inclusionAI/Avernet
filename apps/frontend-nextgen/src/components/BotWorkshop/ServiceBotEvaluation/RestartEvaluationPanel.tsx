@@ -4,10 +4,8 @@ import { Badge, type BadgeTone } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select';
 import { Textarea } from '@/components/ui/Textarea';
-import {
-  EVALUATION_GOAL_INPUT_ENABLED,
-  useStandardEvaluationFlow,
-} from '@/hooks/useStandardEvaluationFlow';
+import { useStandardEvaluationFlow } from '@/hooks/useStandardEvaluationFlow';
+import { EVALUATION_GOAL_INPUT_ENABLED } from '@/services/botWorkshop/standardEvaluationWorkflow';
 import { ExternalLink, RefreshCw } from 'lucide-react';
 
 interface RestartEvaluationPanelProps {
