@@ -84,10 +84,16 @@ not by name or Bot ownership. Both fresh responses and reused directory caches
 apply this exclusion. A self-only friend result is an empty other-user list;
 stale expanded self groups do not trigger other-user session reads.
 
+Other-user group rows follow the compact sidebar density: 13px regular names,
+24px circular neutral user icons, 40px rows and 8px avatar/name spacing. Loading
+skeletons mirror the same geometry; hierarchical indentation and read-only
+session interactions are unchanged.
+
 Regression coverage lives in
 [`managedBotConversationService.test.ts`](test/services/workspace/managedBotConversationService.test.ts),
 [`teamBotSessionRequests.test.ts`](test/services/workspace/teamBotSessionRequests.test.ts),
-[`ConversationSidebarSessionFilters.test.tsx`](test/pages/Workspace/Chat/components/ConversationSidebarSessionFilters.test.tsx)
+[`ConversationSidebarSessionFilters.test.tsx`](test/pages/Workspace/Chat/components/ConversationSidebarSessionFilters.test.tsx),
+[`ConversationFriendGroup.test.tsx`](test/pages/Workspace/Chat/components/ConversationFriendGroup.test.tsx),
 [`useManagedBotOthers.test.tsx`](test/pages/Workspace/Chat/hooks/useManagedBotOthers.test.tsx)
 and the managed/team read-only cases in
 [`ConversationPage.test.tsx`](test/pages/Workspace/Chat/ConversationPage.test.tsx).
