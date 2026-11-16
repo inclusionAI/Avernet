@@ -28,6 +28,7 @@ from agentclaw.community.utils.runtime_list_timing import mark
 from agentclaw.community.core.devices.errors import (
     DeviceDomainError,
     DeviceServiceError,
+    DeviceUnavailableError,
 )
 from agentclaw.community.core.devices.models import OperatorContext
 from agentclaw.community.core.devices.services.device_service import DeviceService
@@ -315,6 +316,10 @@ class EngineConnectionService(EngineConnectionServiceProtocol):
                     caller_id=caller_id,
                 )
         except BaasNoActiveDevicesError as exc:
+            raise EngineDeviceNotReadyError(
+                f"device unavailable for bot={bot_id}"
+            ) from exc
+        except DeviceUnavailableError as exc:
             raise EngineDeviceNotReadyError(
                 f"device unavailable for bot={bot_id}"
             ) from exc
