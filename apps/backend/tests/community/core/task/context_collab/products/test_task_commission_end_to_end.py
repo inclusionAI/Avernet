@@ -427,7 +427,7 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path, orchestrati
         # 4、调用L5的OPEN方法-创建机会
         published = open_method.publish_opportunity(
             collab_context_id=collect_id,
-            method_binding_id=binding_id,
+            method_binding_id=binding_id,                      # 绑定的方法
             command=OpenOpportunityCommand(
                 scope_ref=collect_id,
                 participation_type="COLLET_PARTICIPANT",
@@ -435,14 +435,14 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path, orchestrati
                 admission_policy_refs=[
                     "task_commission.designated_bot_self_application/1" #录取策略：指定 Bot 自己申请，并由任务产品的策略自动审核
                 ],
-                capacity=1, #表示这个机会最多允许多少个未终态申请占用名额
+                capacity=1,              #表示这个机会最多允许多少个未终态申请占用名额
                 reason="task_commission.owner_authorized_publish", #本次发布操作的审计原因
             ),
             context=HUMAN, # actor context
         )
         assert published.accepted and published.state == "OPEN"
 
-        # 5、调用L5的OPEN方法-查询机会
+        # 5、调用L5的OPEN方法-查询机会（实际应该是Agent自己调用）
         bot_context = ActorContext(PrincipalRef("bot", working_bot.bot_id), "a2a")
         [opportunity] = open_method.query_opportunities(
             collab_context_id=collect_id,
@@ -459,7 +459,7 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path, orchestrati
             method_binding_id=opportunity.method_binding_id,
             opportunity_ref=opportunity.opportunity_id,
             command=OpenApplicationCommand(
-                applicant_agent_ref=working_bot.bot_id,
+                applicant_agent_ref=working_bot.bot_id,                # 提交申请的bot自身信息
                 accountable_principal_ref=working_bot.owner_id,
                 requested_role_refs=_selected_agent_role_refs(record),
                 reason="task_commission.bot_self_application",
@@ -468,8 +468,8 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path, orchestrati
         )
         assert submitted.accepted and submitted.state == "SUBMITTED"
 
-        # 7、针对每个机会，检查有哪些申请者，并选择一个候选者
-        policy_context = ActorContext(HUMAN.actor, source="product_policy")
+        # 7、针对每个机会，检查申请信息，并选择一个候选者录取
+        policy_context = ActorContext(HUMAN.actor, source="product_policy")   # 采用product profile中定义的录取策略
         [policy_ref] = opportunity.admission_policy_refs
         screened = open_method.screen(
             collab_context_id=collect_id,
