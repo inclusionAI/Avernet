@@ -235,10 +235,11 @@ def test_adapter_executes_exact_selected_policy_and_declared_steps():
     assert args[0].actor_context is actor
     assert args[0].capacity == policy.capacity == 2
     assert args[0].participation_type is policy.participation_type
-    application = ops.submit_application.call_args.args[3]
+    application = ops.submit_application.call_args.args[0]
     assert application.applicant_agent_ref == ASSIGNEE
-    assert application.accountable_principal_ref == actor.actor.principal_id
-    assert all(call.args[-1] is actor for call in ops.mock_calls[1:])
+    assert application.actor_context is actor
+    assert application.opportunity_ref == "opp"
+    assert all(call.args[-1] is actor for call in ops.mock_calls[2:])
     assert receipt.application_id == "app"
     assert receipt.state == "ADMITTED"
 

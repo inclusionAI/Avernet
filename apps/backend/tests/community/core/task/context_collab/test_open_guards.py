@@ -10,6 +10,7 @@ from agentclaw.community.core.task.context_collab.g1_secure_govern.method_author
     OPEN_PUBLIC_OPS,
     OPEN_SELF_HELP_OPS,
 )
+from agentclaw.community.core.task.context_collab.l5_methods.open_profile import OpenOpportunity
 from agentclaw.community.core.task.context_collab.method_service_api import (
     BindMethodCommand,
     MethodStateChangeCommand,
@@ -19,7 +20,9 @@ from agentclaw.community.core.task.context_collab.method_service_api import (
 )
 
 from tests.community.core.task.context_collab.open_profile_support import (
+    AXES,
     COLLET_ID,
+    opportunity_dict,
     OWNER_OPS_ALL,
     active_open_binding,
     application_command,
@@ -33,7 +36,7 @@ class TestOpenGuards:
     def test_rf2_non_active_binding_rejected(self):
         """RF#2:binding 非 ACTIVE 时副作用操作一律拒绝(公开提交
         submit_application 同为副作用面)。"""
-        _, _, lifecycle, service = make_open_service()
+        store, _, lifecycle, service = make_open_service()
         lifecycle.bind(
             COLLET_ID,
             BindMethodCommand(
@@ -44,6 +47,13 @@ class TestOpenGuards:
             make_actor(),
         )
         bound = "mb_open_bound"
+        store.insert_opportunity(
+            AXES,
+            OpenOpportunity.from_dict(opportunity_dict(
+                opportunity_id="opp_x", method_binding_id=bound,
+            )),
+            COLLET_ID,
+        )
         callables = [
             lambda: service.publish_opportunity(opportunity_command()),
             lambda: service.pause_opportunity(
@@ -68,7 +78,7 @@ class TestOpenGuards:
                 make_actor(),
             ),
             lambda: service.submit_application(
-                COLLET_ID, bound, "opp_x", application_command(), make_actor()
+                application_command(opportunity_ref="opp_x", actor_context=make_actor())
             ),
             lambda: service.screen(
                 COLLET_ID,
@@ -154,11 +164,7 @@ class TestOpenGuards:
                 stranger,
             )
         service.submit_application(
-            COLLET_ID,
-            binding,
-            "opp_alpha",
-            application_command(),
-            make_actor(),
+            application_command(opportunity_ref="opp_alpha", actor_context=make_actor())
         )
         with pytest.raises(ContextCollabValidationError, match="u_9999"):
             service.screen(
@@ -190,9 +196,7 @@ class TestOpenGuards:
             )
         with pytest.raises(ContextCollabNotFoundError):
             service.submit_application(
-                COLLET_ID,
-                "mb_ghost",
-                "opp_none",
-                application_command(),
-                make_actor(),
+                application_command(
+                    opportunity_ref="opp_none", actor_context=make_actor()
+                )
             )

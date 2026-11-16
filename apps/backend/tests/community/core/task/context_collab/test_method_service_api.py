@@ -183,8 +183,9 @@ COMMAND_FIELDS: dict[type, list[tuple[str, object]]] = {
     ],
     OpenOpportunityOpCommand: [("reason", "")],
     OpenApplicationCommand: [
+        ("opportunity_ref", MISSING),
+        ("actor_context", MISSING),
         ("applicant_agent_ref", MISSING),
-        ("accountable_principal_ref", MISSING),
         ("capability_evidence_refs", []),
         ("proposed_artifact_refs", []),
         ("requested_role_refs", []),
@@ -403,9 +404,8 @@ OPEN_SIGNATURES: dict[str, tuple] = {
         "OpenOpportunityOpCommand", "ProfileOpAcceptedResult",
         ("opportunity_ref", "str"),
     ),
-    "submit_application": _binding_ops(
-        "OpenApplicationCommand", "ProfileOpAcceptedResult",
-        ("opportunity_ref", "str"),
+    "submit_application": (
+        _params(("command", "OpenApplicationCommand")), "ProfileOpAcceptedResult"
     ),
     "screen": _binding_ops(
         "OpenDecisionOpCommand", "ProfileOpAcceptedResult",

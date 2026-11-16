@@ -46,6 +46,9 @@ from agentclaw.community.core.task.context_collab.l5_methods.open_profile import
     OpenOpportunity,
     ParticipationApplication,
 )
+from agentclaw.community.core.task.context_collab.l5_methods.operations.contracts import (
+    OpenApplicationCommand,
+)
 from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime import (
     current_axes,
 )
@@ -98,6 +101,51 @@ class OpenMethodServiceBase:
                 f"collaboration context {collab_context_id!r}"
             )
         return binding
+
+    def _resolve_application_opportunity(
+        self, opportunity_ref: str
+    ) -> tuple[MethodBinding, OpenOpportunity]:
+        """Resolve an exact ref in current axes; scoped duplicate IDs fail closed."""
+        if not isinstance(opportunity_ref, str) or not opportunity_ref.strip():
+            raise ContextCollabValidationError("opportunity_ref must not be empty")
+        axes = current_axes()
+        candidates = []
+        for binding in self._store.list_bindings_in_axes(axes):
+            opportunity = self._store.get_opportunity(
+                axes, opportunity_ref, binding.method_binding_id, binding.collab_context_id
+            )
+            if opportunity is not None:
+                candidates.append((binding, opportunity))
+        if not candidates:
+            raise ContextCollabNotFoundError(
+                f"open opportunity {opportunity_ref!r} not found in current axes"
+            )
+        if len(candidates) != 1:
+            raise ContextCollabValidationError(
+                f"ambiguous opportunity_ref {opportunity_ref!r} in current axes"
+            )
+        return candidates[0]
+
+    @staticmethod
+    def _application_accountability(command: OpenApplicationCommand) -> str:
+        context = command.actor_context
+        if context.actor.principal_type == "bot":
+            if command.applicant_agent_ref != context.actor.principal_id:
+                raise ContextCollabValidationError(
+                    "Bot applicant must match authenticated actor"
+                )
+            principal = context.accountable_principal_ref
+            if principal is None or not principal.principal_id.strip():
+                raise ContextCollabValidationError(
+                    "Bot application requires authenticated owner"
+                )
+            return principal.principal_id
+        principal = context.accountable_principal_ref
+        if principal is not None and principal != context.actor:
+            raise ContextCollabValidationError(
+                "accountability must match authenticated actor"
+            )
+        return context.actor.principal_id
 
     def _resolve_publish_binding(self, collab_context_id: str) -> str:
         """Resolve one ACTIVE Open binding; never prefer top-level or first."""

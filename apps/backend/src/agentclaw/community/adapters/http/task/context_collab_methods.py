@@ -829,13 +829,11 @@ async def close_open_opportunity(
 
 
 @router.post(
-    _BINDINGS + "/{binding_id}/open/opportunities/{opportunity_id}/applications",
+    "/context_collab/open/opportunities/{opportunity_id}/applications",
     response_model=Envelope[ProfileOpAcceptedDto],
 )
 @envelope_errors
 async def submit_open_application(
-    collab_context_id: str,
-    binding_id: str,
     opportunity_id: str,
     body: OpenApplicationRequest,
     request: Request,
@@ -843,8 +841,7 @@ async def submit_open_application(
     service: OpenMethodOpsServiceProtocol = Injected(OpenMethodOpsServiceProtocol),  # noqa: B008
 ) -> Envelope[ProfileOpAcceptedDto]:
     result = service.submit_application(
-        collab_context_id, binding_id, opportunity_id, body.to_domain(),
-        _actor_context(user),
+        body.to_domain(opportunity_id, _actor_context(user))
     )
     return envelope(_profile_accepted(result), request)
 

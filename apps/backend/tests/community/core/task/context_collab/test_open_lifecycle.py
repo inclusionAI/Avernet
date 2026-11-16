@@ -60,9 +60,7 @@ class TestOpenOpportunityLifecycle:
         with pytest.raises(ContextCollabValidationError, match="ISO timestamp"):
             service.publish_opportunity(opportunity_command(closes_at="soon"))
         with pytest.raises(ContextCollabValidationError, match="later than opens_at"):
-            service.publish_opportunity(
-                opportunity_command(closes_at=_iso_offset(-1))
-            )
+            service.publish_opportunity(opportunity_command(closes_at=_iso_offset(-1)))
 
     def test_publish_replay_and_shape_conflict(self):
         store, _, lifecycle, service = make_open_service()
@@ -74,9 +72,7 @@ class TestOpenOpportunityLifecycle:
         assert replay.object_id == first.object_id
         assert len(store.list_opportunities(AXES, binding, COLLET_ID)) == 1
         with pytest.raises(ContextCollabValidationError, match="stored shape"):
-            service.publish_opportunity(
-                opportunity_command(capacity=1)
-            )
+            service.publish_opportunity(opportunity_command(capacity=1))
 
     def test_pause_reopen_close_reachability(self):
         """作者裁决补漏:ReopenOpportunity(PAUSED→OPEN)必须可达;
@@ -136,26 +132,22 @@ class TestOpenOpportunityLifecycle:
         binding = active_open_binding(lifecycle)
         service.publish_opportunity(opportunity_command())
         submitted = service.submit_application(
-            COLLET_ID,
-            binding,
-            "opp_alpha",
-            application_command(),
-            make_actor("u_stranger_001"),
+            application_command(
+                opportunity_ref="opp_alpha", actor_context=make_actor("u_stranger_001")
+            )
         )
         assert submitted.accepted is True
         assert submitted.object_id == "app_1"
         assert submitted.state == "SUBMITTED"
         application = store.get_application(AXES, "app_1", binding, COLLET_ID)
         assert application.opportunity_ref == "opp_alpha"
-        assert application.accountable_principal_ref == "u_member_001"
+        assert application.accountable_principal_ref == "u_stranger_001"
         assert application.transitioned_from == ""
         # 幂等重放:同 ID 同形态返回既有对象,不新增行。
         replay = service.submit_application(
-            COLLET_ID,
-            binding,
-            "opp_alpha",
-            application_command(),
-            make_actor("u_stranger_002"),
+            application_command(
+                opportunity_ref="opp_alpha", actor_context=make_actor("u_stranger_001")
+            )
         )
         assert replay.object_id == "app_1"
         assert len(store.list_applications(AXES, binding, COLLET_ID)) == 1
@@ -169,11 +161,9 @@ class TestOpenOpportunityLifecycle:
             ContextCollabValidationError, match="before the window opens"
         ):
             service.submit_application(
-                COLLET_ID,
-                binding,
-                "opp_future",
-                application_command(),
-                make_actor(),
+                application_command(
+                    opportunity_ref="opp_future", actor_context=make_actor()
+                )
             )
         # 兼容已有存储中的过期窗口,仍拒绝申请。
         service.publish_opportunity(opportunity_command(opportunity_id="opp_closed"))
@@ -187,32 +177,30 @@ class TestOpenOpportunityLifecycle:
             ContextCollabValidationError, match="after the window closes"
         ):
             service.submit_application(
-                COLLET_ID,
-                binding,
-                "opp_closed",
-                application_command(),
-                make_actor(),
+                application_command(
+                    opportunity_ref="opp_closed", actor_context=make_actor()
+                )
             )
         # 容量:capacity=1,两个申请人,第二个拒绝。
         service.publish_opportunity(
             opportunity_command(opportunity_id="opp_capped", capacity=1)
         )
         service.submit_application(
-            COLLET_ID,
-            binding,
-            "opp_capped",
-            application_command(applicant_agent_ref="bot_a", application_id="app_ca"),
-            make_actor(),
+            application_command(
+                opportunity_ref="opp_capped",
+                actor_context=make_actor(),
+                applicant_agent_ref="bot_a",
+                application_id="app_ca",
+            )
         )
         with pytest.raises(ContextCollabValidationError, match="capacity"):
             service.submit_application(
-                COLLET_ID,
-                binding,
-                "opp_capped",
                 application_command(
-                    applicant_agent_ref="bot_b", application_id="app_cb"
-                ),
-                make_actor(),
+                    opportunity_ref="opp_capped",
+                    actor_context=make_actor(),
+                    applicant_agent_ref="bot_b",
+                    application_id="app_cb",
+                )
             )
 
     def test_submit_requires_open_opportunity_and_unique_applicant(self):
@@ -230,11 +218,9 @@ class TestOpenOpportunityLifecycle:
             ContextCollabValidationError, match="only be submitted while"
         ):
             service.submit_application(
-                COLLET_ID,
-                binding,
-                "opp_alpha",
-                application_command(),
-                make_actor(),
+                application_command(
+                    opportunity_ref="opp_alpha", actor_context=make_actor()
+                )
             )
         service.reopen_opportunity(
             COLLET_ID,
@@ -244,21 +230,17 @@ class TestOpenOpportunityLifecycle:
             make_actor(),
         )
         service.submit_application(
-            COLLET_ID,
-            binding,
-            "opp_alpha",
-            application_command(),
-            make_actor(),
+            application_command(opportunity_ref="opp_alpha", actor_context=make_actor())
         )
         with pytest.raises(
             ContextCollabValidationError, match="non-terminal application"
         ):
             service.submit_application(
-                COLLET_ID,
-                binding,
-                "opp_alpha",
-                application_command(application_id="app_dup"),
-                make_actor(),
+                application_command(
+                    opportunity_ref="opp_alpha",
+                    actor_context=make_actor(),
+                    application_id="app_dup",
+                )
             )
 
 
@@ -268,11 +250,7 @@ class TestOpenApplicationLifecycle:
         binding = active_open_binding(lifecycle)
         service.publish_opportunity(opportunity_command())
         service.submit_application(
-            COLLET_ID,
-            binding,
-            "opp_alpha",
-            application_command(),
-            make_actor(),
+            application_command(opportunity_ref="opp_alpha", actor_context=make_actor())
         )
         screened = service.screen(
             COLLET_ID, binding, "app_1", OpenDecisionOpCommand(), make_actor()
@@ -291,11 +269,12 @@ class TestOpenApplicationLifecycle:
         assert application.transition_reason == "不合条件"
         # reject_r1:未经评审直接拒。
         service.submit_application(
-            COLLET_ID,
-            binding,
-            "opp_alpha",
-            application_command(application_id="app_r1", applicant_agent_ref="bot_x"),
-            make_actor(),
+            application_command(
+                opportunity_ref="opp_alpha",
+                actor_context=make_actor(),
+                application_id="app_r1",
+                applicant_agent_ref="bot_x",
+            )
         )
         directly = service.reject(
             COLLET_ID, binding, "app_r1", OpenDecisionOpCommand(), make_actor()
@@ -309,11 +288,7 @@ class TestOpenApplicationLifecycle:
         binding = active_open_binding(lifecycle)
         service.publish_opportunity(opportunity_command())
         service.submit_application(
-            COLLET_ID,
-            binding,
-            "opp_alpha",
-            application_command(),
-            make_actor(),
+            application_command(opportunity_ref="opp_alpha", actor_context=make_actor("u_member_001"))
         )
         # 陌生人拒绝;owner(PRINCIPAL_ID ≠ u_member_001)也拒绝。
         with pytest.raises(ContextCollabValidationError, match="u_9999"):
@@ -342,11 +317,12 @@ class TestOpenApplicationLifecycle:
         assert withdrawn.state == "WITHDRAWN"
         # SCREENING 后机器无 withdraw 出边。
         service.submit_application(
-            COLLET_ID,
-            binding,
-            "opp_alpha",
-            application_command(application_id="app_s", applicant_agent_ref="bot_y"),
-            make_actor(),
+            application_command(
+                opportunity_ref="opp_alpha",
+                actor_context=make_actor("u_member_001"),
+                application_id="app_s",
+                applicant_agent_ref="bot_y",
+            )
         )
         service.screen(
             COLLET_ID, binding, "app_s", OpenDecisionOpCommand(), make_actor()

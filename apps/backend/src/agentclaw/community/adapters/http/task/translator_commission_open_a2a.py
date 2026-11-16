@@ -53,7 +53,11 @@ def execute_open_operation(
     ):
         raise ContextCollabValidationError("unsupported opportunity operation context")
     ref = VersionedProfileRef(profile.object_id, int(profile.version))
-    actor = ActorContext(PrincipalRef("bot", bot.bot_uuid), source="a2a")
+    actor = ActorContext(
+        PrincipalRef("bot", bot.bot_uuid),
+        source="a2a",
+        accountable_principal_ref=PrincipalRef("human", bot.owner_id),
+    )
     if (
         operation.layer,
         operation.operation_family,

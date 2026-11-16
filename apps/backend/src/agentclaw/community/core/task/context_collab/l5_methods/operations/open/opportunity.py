@@ -17,7 +17,7 @@
   OPEN 且容量未满——同机会非终态申请(SUBMITTED/SCREENING/
   ADMITTED)计数 < capacity,capacity 为 ``None`` 不设上限;
 - ``submit_application`` 是公开面(G1 OPEN_PUBLIC_OPS):任意已认证
-  actor 可投递,冒名顶替的防线是"申请责任主体必填"——授权比对在
+  actor 可投递;责任主体取可信上下文,不由申请命令声明。授权比对在
   withdraw 的 self-help 面;产物行带审计四字段 + submitted_at;
 - 幂等重放(§8.3):publish 按 ``opportunity_id``、submit 按
   ``application_id``,同 ID 同请求形态返回既有已受理对象,异形态
@@ -77,7 +77,7 @@ _APPLICATION_MACHINE = METHOD_MACHINE_REGISTRY["open_application"]
 
 # 幂等重放(§8.3)的"请求形态"白名单(排服务端时间/审计/状态机事实):
 # opportunity 重放比对机会结构;application 重放比对申请四引用 + 三组
-# refs(责任主体与申请人都是请求形态,不参与身份判定)。
+# refs(责任主体由可信上下文派生,重放不可更换责任归属)。
 _OPPORTUNITY_REQUEST_FIELDS = (
     "method_binding_id",
     "scope_ref",
@@ -385,28 +385,25 @@ class OpenOpportunityOpsMixin(OpenMethodServiceBase, OpenMethodOpsServiceProtoco
         )
 
     def submit_application(
-        self,
-        collab_context_id: str,
-        method_binding_id: str,
-        opportunity_ref: str,
-        command: OpenApplicationCommand,
-        context: ActorContext,
+        self, command: OpenApplicationCommand
     ) -> ProfileOpAcceptedResult:
         """SubmitApplication 用例(公开面,任意已认证 actor,spec §4.4):
         机会必须 OPEN、在窗口内、容量未满;产物是 SUBMITTED 申请行
-        (提交即责任声明确认,无机器迁移,transitioned_from 空串沿
+        (责任归属取可信上下文,无机器迁移,transitioned_from 空串沿
         invite 先例)。幂等键 ``application_id``(§8.3);"同 (机会,
         申请人) 非终态唯一"在存储层。
         """
+        context, opportunity_ref = command.actor_context, command.opportunity_ref
+        binding, opportunity = self._resolve_application_opportunity(opportunity_ref)
+        collab_context_id = binding.collab_context_id
+        method_binding_id = binding.method_binding_id
         axes = self._gate(
             "submit_application",
             collab_context_id,
             method_binding_id,
             context,
         )
-        opportunity = self._require_opportunity(
-            axes, collab_context_id, method_binding_id, opportunity_ref
-        )
+        accountable_principal_ref = self._application_accountability(command)
         if opportunity.state is not OpportunityState.OPEN:
             raise ContextCollabValidationError(
                 f"open opportunity {opportunity_ref!r} is "
@@ -457,7 +454,7 @@ class OpenOpportunityOpsMixin(OpenMethodServiceBase, OpenMethodOpsServiceProtoco
                 "application_id": (command.application_id or f"app_{uuid4().hex[:12]}"),
                 "opportunity_ref": opportunity_ref,
                 "applicant_agent_ref": command.applicant_agent_ref,
-                "accountable_principal_ref": (command.accountable_principal_ref),
+                "accountable_principal_ref": accountable_principal_ref,
                 "capability_evidence_refs": list(command.capability_evidence_refs),
                 "proposed_artifact_refs": list(command.proposed_artifact_refs),
                 "requested_role_refs": list(command.requested_role_refs),

@@ -215,7 +215,10 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
         assert published.accepted and published.state == "OPEN"
 
         # 5、调用L5的OPEN方法-查询机会（实际应该是Agent自己调用）
-        bot_context = ActorContext(PrincipalRef("bot", working_bot.bot_id), "a2a")
+        bot_context = ActorContext(
+            PrincipalRef("bot", working_bot.bot_uuid), "a2a",
+            accountable_principal_ref=PrincipalRef("human", working_bot.owner_id),
+        )
         [opportunity] = l5_open_method.query_opportunities(
             actor_context=bot_context,
         )
@@ -227,18 +230,20 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
         assert record.task is not None
         task_id = record.task.task_id
         submitted = l5_open_method.submit_application(
-            collab_context_id=collect_id,
-            method_binding_id=opportunity.method_binding_id,
-            opportunity_ref=opportunity.opportunity_id,
             command=OpenApplicationCommand(
-                applicant_agent_ref=working_bot.bot_id,                  # 提交申请的bot自身信息, TODO: uuid
-                accountable_principal_ref=HUMAN.actor.principal_id,      # TODO
+                opportunity_ref=opportunity.opportunity_id,
+                actor_context=bot_context,
+                applicant_agent_ref=working_bot.bot_uuid,
+                capability_evidence_refs=["evidence://calculator-coding"],
                 requested_role_refs=_selected_agent_role_refs(record),   # TODO
                 reason="task_commission.bot_self_application",           # 声明本次查询的真实调用者，并经过授权检查；它不是查询目标，也不代表这个 Bot 已获得参与或执行任务的权限。
             ),
-            context=bot_context,
         )
         assert submitted.accepted and submitted.state == "SUBMITTED"
+        application = store.get_application(axes, submitted.object_id, binding_id, collect_id)
+        assert application.applicant_agent_ref == working_bot.bot_uuid
+        assert application.accountable_principal_ref == working_bot.owner_id
+        assert application.capability_evidence_refs == ("evidence://calculator-coding",)
 
         # 提交申请还不等于录取,不能启动 Work;拒绝不能写入 Task/Event。
         repository = injector.get(ContextCollabRepositoryProtocol)
@@ -365,6 +370,53 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
         assert submitted_event.actor_ref == bot_context.actor
         _flow_log(_TEST_DIRECTORY, "完整用户旅程结束:L4 查询确认 status=done 且产物完整")
 
+
+
+@pytest.mark.parametrize("self_application", [False, True], ids=["publisher_proxy", "signed_bot"])
+def test_command_only_submission_through_product_adapters(
+    commission_deployment, self_application
+):
+    definition = TASK_COMMISSION_PROFILE
+    if self_application:
+        definition = replace(
+            definition,
+            publication=OpenPublicationProfile(
+                admission=BotSelfApplicationAdmission(
+                    applicant_role="assignee", accountable_role="owner",
+                    participation_type=ParticipationType.COLLET_PARTICIPANT, capacity=1,
+                )
+            ),
+        )
+    profile = create_product_profile(definition)
+    with commission_deployment(
+        profile, bot_id="bot_uuid.other-owner", owner_id="u_other_bot_owner"
+    ) as (service, working_bot, injector):
+        created = service.publish_task(
+            PublishTaskCommand(
+                title="Command-only application", body="Check product adapter wiring",
+                space=SPACE, assignee_agent_id=working_bot.bot_uuid,
+                product_profile_ref=profile.ref,
+            ), HUMAN,
+        )
+        store, axes = injector.get(MethodStoreProtocol), current_axes()
+        binding = top_level_binding_id(created.collet_id)
+        if self_application:
+            response = working_bot.request(opportunities_query_request(working_bot))
+            [opportunity] = response["data"]["opportunities"]
+            assert store.list_applications(axes, binding, created.collet_id) == []
+            forged = working_bot.application_request(opportunity)
+            operation = forged["params"]["message"]["parts"][0]["data"]
+            operation["context"]["accountable_principal_ref"]["identity_id"] = HUMAN.actor.principal_id
+            working_bot.request(forged, expected_status="REJECTED")
+            assert store.list_applications(axes, binding, created.collet_id) == []
+            working_bot.request(working_bot.application_request(opportunity))
+        [application] = store.list_applications(axes, binding, created.collet_id)
+        assert application.applicant_agent_ref == working_bot.bot_uuid
+        assert application.state is ApplicationState.ADMITTED
+        assert application.accountable_principal_ref == (
+            working_bot.owner_id if self_application else HUMAN.actor.principal_id
+        )
+        assert application.capability_evidence_refs == ()
 
 
 _TEST_DIRECTORY = __name__.rsplit(".", 1)[0].replace(".", "/")

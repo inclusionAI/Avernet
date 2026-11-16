@@ -150,7 +150,7 @@ products/
   is removed. HTTP builds the command identity from verified authentication,
   not JSON. The HTTP publish body also omits `scope_ref` and `opens_at` and
   rejects caller-supplied overrides; the Collet comes from the route. Other Open
-  routes remain binding-scoped. See the
+  routes, except submission described below, remain binding-scoped. See the
   [publication regressions](../../../../../../tests/community/core/task/context_collab/test_open_publication.py).
 - L5 Open owns `OpenMethodOpsServiceProtocol.query_opportunities(actor_context)`:
   read-only discovery across Collets and MethodBindings in the current
@@ -167,6 +167,31 @@ products/
   product-discovery operation remains L4 Query; no new HTTP route or wire tuple
   is introduced. See the [query regressions](../../../../../../tests/community/core/task/context_collab/test_open_query.py)
   and [direct invocation example](products/task_commission/README.md#calling-l5-open-directly).
+- L5 Open submission is `submit_application(OpenApplicationCommand(...))` with
+  no separate scope, binding or context arguments. The command requires
+  `opportunity_ref`, trusted `actor_context` and `applicant_agent_ref`; optional
+  `capability_evidence_refs`, artifact/role refs and the idempotency key are
+  retained on the application. Evidence is a declaration, not an authorization
+  grant. The opportunity must resolve uniquely across bindings in the current
+  tenant/environment: missing is NotFound and ambiguous scoped IDs fail validation,
+  including duplicates under inactive bindings. The actual owning binding still
+  passes Open/ACTIVE/G1 checks; window, capacity and nonterminal-applicant guards
+  remain unchanged. This uses the in-memory scoped store, not a new global index.
+  The command has no `accountable_principal_ref`: persisted accountability comes
+  from trusted G1 provenance. Human proxy submissions use the authenticated human;
+  Bot self-submissions require applicant == authenticated Bot UUID and a verified
+  owner in `ActorContext.accountable_principal_ref`. That optional typed provenance
+  is not needed for discovery or ordinary Work, but missing Bot ownership fails
+  submission closed. The signed A2A adapter supplies the owner, which may differ
+  from the task publisher. Audit still records the actual submitting actor;
+  withdraw still requires the persisted accountable principal. Same-ID replay
+  compares resolved accountability and evidence as well as other request facts.
+  HTTP submission is now
+  `POST /api/v1/collaboration/task/context_collab/open/opportunities/{opportunity_id}/applications`;
+  the previous Collet/MethodBinding-scoped submit route is removed rather than
+  ignoring its path scope. HTTP rejects caller-supplied actor/accountability
+  overrides. See [submission regressions](../../../../../../tests/community/core/task/context_collab/test_open_submission.py)
+  and [real HTTP cases](../../../../../../tests/community/endpoints/test_open_submission_cases.py).
 - All `services/*` modules are import-only compatibility forwards, not
   implementations. Product instantiation, product-aware policy, combined creation
   and Method bootstrap/recovery live in L6. The L6 legacy lifecycle constructor

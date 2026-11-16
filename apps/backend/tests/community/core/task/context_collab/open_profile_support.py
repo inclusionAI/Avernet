@@ -226,7 +226,8 @@ def application_command(**overrides) -> OpenApplicationCommand:
     """申请命令基型;字段可覆盖。"""
     fields = {
         "applicant_agent_ref": "bot_worker_001",
-        "accountable_principal_ref": "u_member_001",
+        "opportunity_ref": "opp_alpha",
+        "actor_context": make_actor("u_member_001"),
         "capability_evidence_refs": ["evidence://skill"],
         "proposed_artifact_refs": ["artifact://draft"],
         "requested_role_refs": ["role_binding_py"],
@@ -257,11 +258,11 @@ def submitted_application(
 ) -> str:
     """对机会投一条 SUBMITTED 申请并返回 application_id。"""
     service.submit_application(
-        COLLET_ID,
-        binding_id,
-        opportunity_ref,
-        application_command(**application_overrides),
-        make_actor(),
+        application_command(
+            opportunity_ref=opportunity_ref,
+            actor_context=make_actor("u_member_001"),
+            **application_overrides,
+        )
     )
     return "app_1"
 
