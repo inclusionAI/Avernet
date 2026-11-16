@@ -347,6 +347,19 @@ describe("monitoring HTTP -> module schema -> repository -> GET", () => {
 
 describe('monitoring browser HTTP identity and enrollment boundary', () => {
   beforeEach(() => { principal.isClawInsightAdmin = false; });
+  it('lets authenticated owners configure Bots without admin access and rejects stale or foreign writes', async () => {
+    clawInsightAdmin = false;
+    const { createMonitoringReferences } = await import('../../services/monitoring/target-ref.js');
+    const ref = createMonitoringReferences().encode({ botId: 'mock-bot-te', entityId: '001234', env: 'test' }, 'test');
+    const configure = (version: number) => call('/monitoring/configurations', { method: 'POST',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ botRef: ref, enabled: true, version }) });
+    expect(await configure(0)).toMatchObject({ status: 200, body: { updated: 1, failed: [] } });
+    expect((await configure(0)).status).toBe(409);
+    principal.staffId = 'another-owner'; principal.isClawInsightAdmin = true;
+    expect((await configure(1)).status).toBe(403);
+    principal.isAuthenticated = false;
+    expect((await configure(1)).status).toBe(401);
+  });
   it('does not grant legacy reads from a forged host role flag', async () => {
     clawInsightAdmin = true;
     expect((await call('/monitoring/bots')).status).toBe(403);
