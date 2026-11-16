@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from datetime import datetime
 from typing import Any, Protocol, runtime_checkable
 
 from agentclaw.community.core.caller_identity.contracts import (
+    CallerExpiryCorrectionError as CallerExpiryCorrectionError,
     CallerIamTokenContext,
     CallerIdentityStage,
 )
@@ -135,3 +137,11 @@ __all__ = [
     "CallerRuntimeUpdaterProtocol",
     "CallerTokenProviderProtocol",
 ]
+
+
+@runtime_checkable
+class CallerExpiryCorrectionServiceProtocol(Protocol):
+    """Correct one existing expiry ledger under an administrative CAS command."""
+    def correct(self, *, actor_id: str, bot_id: str, entity_id: str, caller_user_id: str,
+                binding_id: int, expires_at: datetime, expected_expires_at: datetime | None,
+                reason: str) -> dict: ...

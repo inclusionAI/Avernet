@@ -279,6 +279,33 @@ class ExpertChatInstanceRepository(
             yield True
             state.expires_at = expires_at
 
+    def correct_caller_token_expiry(
+        self, *, user_id: str, bot_id: str, owner_id: str, binding_id: int,
+        expires_at: datetime, expected_expires_at: datetime | None,
+    ) -> dict:
+        if expires_at.tzinfo is None or (expected_expires_at is not None and expected_expires_at.tzinfo is None):
+            raise ValueError("caller_token_expiry_invalid")
+        expiry = expires_at.astimezone(UTC).replace(tzinfo=None)
+        expected = (expected_expires_at.astimezone(UTC).replace(tzinfo=None)
+                    if expected_expires_at is not None else None)
+        with self._db.transactional_orm_session() as db:
+            # COSEC: exact entity address only; correction shares IAM/ASC's instance row lock.
+            row = (db.query(self.Model).filter(
+                self.Model.user_id == user_id, self.Model.bot_id == bot_id,
+                self.Model.owner_id == owner_id, self.Model.env == get_current_env(),
+            ).populate_existing().with_for_update().first())
+            if (row is None or row.status not in {"init", "success", "active"}
+                    or (row.to_dict()["ext"] or {}).get("binding_id") != binding_id):
+                raise ValueError("caller_instance_changed")
+            previous = row.caller_token_expires_at
+            if previous != expected:
+                raise ValueError("caller_token_expiry_conflict")
+            row.caller_token_expires_at = expiry
+            db.flush()
+            instance_id = row.id
+        return {"instance_id": instance_id, "previous_expires_at":
+                previous.replace(tzinfo=UTC).isoformat() if previous is not None else None}
+
     @contextmanager
     def caller_token_refresh(
         self, *, user_id: str, bot_id: str, owner_id: str, binding_id: int,
