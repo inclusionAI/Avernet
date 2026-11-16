@@ -1,0 +1,14 @@
+apps/backend/src/agentclaw/community/core/task/context_collab/l4_context_primitives/context_collab_service.py
+  h_059e888e5e4e82 231
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "08f83d5400e928646ad52e5f11172138a7d141bb",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

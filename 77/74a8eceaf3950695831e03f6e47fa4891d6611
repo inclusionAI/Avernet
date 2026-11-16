@@ -1,0 +1,48 @@
+apps/evolverun/clawweb/public/shared/server/__tests__/auto-heal-baas.test.ts
+  s_a2c4e8508fb06b::t_7d7a46a571356a 1-76
+  s_913510881d8932::t_e49cfd977e11bb 77-173
+apps/evolverun/clawweb/public/app/clawweb/server/__tests__/workflow-ai-draft-baas-failure.test.ts
+  s_112142b24c3d96::t_3730bccc87b784 1-161
+apps/evolverun/clawweb/public/app/clawweb/server/__tests__/workflow-ai-draft-receipt-host.test.ts
+  s_913510881d8932::t_0da4965609b2a3 3-11,14-16,24-29,45-54,65-84,86,88-89,92,94-96,101,105-130
+apps/evolverun/clawweb/public/app/clawweb/server/workflow-ai-draft-runtime.ts
+  s_913510881d8932::t_91592dc132eac2 5-6,24-33
+apps/evolverun/clawweb/public/modules/workflow/docs/specs/2026-11-13-workflow-ai-draft-validation.md
+  s_112142b24c3d96::t_192d86f71c6ea5 163-189
+apps/evolverun/clawweb/public/modules/workflow/docs/workflow-ai-drafts.md
+  s_913510881d8932::t_f2bebb59a8516e 14-15,30-60,136-152
+apps/evolverun/clawweb/public/modules/workflow/web/services/workflow-ai-lifecycle.ts
+  s_913510881d8932::t_a67aae8234dca3 10
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7774a8eceaf3950695831e03f6e47fa4891d6611",
+  "prompts": {},
+  "sessions": {
+    "s_112142b24c3d96": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e229-db08-76a3-a481-be09cda70ea6",
+        "model": "GPT-6.1-SOL"
+      },
+      "human_author": "fudapeng <dapeng.fdp@antgroup.com>"
+    },
+    "s_913510881d8932": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e20f-c995-7ca1-9014-39cd3ea795ac",
+        "model": "GPT-6.1-SOL"
+      },
+      "human_author": "fudapeng <dapeng.fdp@antgroup.com>"
+    },
+    "s_a2c4e8508fb06b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e21c-942f-7340-bce2-31f97e990507",
+        "model": "GPT-6.1-SOL"
+      },
+      "human_author": "fudapeng <dapeng.fdp@antgroup.com>"
+    }
+  }
+}
