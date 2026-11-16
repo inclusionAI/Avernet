@@ -915,6 +915,36 @@ impl GroupMessageHistoryService for MessageService {
             Ok(fallback_result)
         }
     }
+
+    async fn last_activity_by_group_ids(
+        &self,
+        group_ids: &[String],
+    ) -> Result<std::collections::HashMap<String, u64>, GroupUseCaseError> {
+        self.message_repo
+            .last_activity_by_group_ids(group_ids)
+            .await
+            .map_err(|e| {
+                GroupUseCaseError::Service(ServiceError::InternalError(format!(
+                    "message repo error: {}",
+                    e
+                )))
+            })
+    }
+
+    async fn last_activity_by_session_ids(
+        &self,
+        session_ids: &[String],
+    ) -> Result<std::collections::HashMap<String, u64>, GroupUseCaseError> {
+        self.message_repo
+            .last_activity_by_session_ids(session_ids)
+            .await
+            .map_err(|e| {
+                GroupUseCaseError::Service(ServiceError::InternalError(format!(
+                    "message repo error: {}",
+                    e
+                )))
+            })
+    }
 }
 
 #[cfg(test)]
