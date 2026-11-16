@@ -27,8 +27,12 @@ from agentclaw.community.core.service_bot.errors import (
     ServicePublicationConflictError,
     ServicePublicationNotFoundError,
 )
-from agentclaw.community.api.quality_service import QualityTaskServiceProtocol
-from agentclaw.community.api.task_processor_service import TaskProcessorProtocol
+from agentclaw.community.core.quality.quality_service_protocol import (
+    QualityTaskServiceProtocol,
+)
+from agentclaw.community.core.quality.task_processor_service_protocol import (
+    TaskProcessorProtocol,
+)
 from agentclaw.community.plugin_api.http_client import HttpClient, QUALIFIER_MASA_AGENT_EVAL
 from agentclaw.community.plugin_api.service_bot_eval import (
     ServiceBotEvalContext,
