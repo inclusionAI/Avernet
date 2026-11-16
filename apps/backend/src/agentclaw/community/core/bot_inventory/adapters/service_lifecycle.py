@@ -205,7 +205,10 @@ class ServiceLifecycleView(ServiceLifecyclePort):
                     live_version=live.version if live else None,
                     has_draft=has_draft,
                 )
-                for record in self._visible(records)
+                # Select the visible versions by lifecycle policy first.
+                for record in sorted(
+                    self._visible(records), key=lambda r: r.gmt_create, reverse=True
+                )
             )
             result[bot_id] = cards or (
                 ServiceLifecycleCard(
