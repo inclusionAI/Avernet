@@ -435,7 +435,7 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path, orchestrati
                 executor_ref=executor_ref,                     # 指定的执行bot
                 objective=TITLE,                               # 代办任务目标
                 resource_refs=[],                              # 输入引用的资源
-                product_profile_ref=l6_profile.ref,               # profile id and version
+                product_profile_ref=l6_profile.ref,               # profile ref
             ),
             HUMAN,                                             # 代办任务创建人
         )

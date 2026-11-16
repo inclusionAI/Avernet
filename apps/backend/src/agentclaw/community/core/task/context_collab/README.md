@@ -133,6 +133,13 @@ builds this **creation receipt** from the returned Collet and accepted command,
 using the canonical Method spelling and the initial Task/Event contract. It does
 not re-read a potentially advanced context or attach HTTP projections to Collet.
 Later state and authorized progress remain the separate `get_status` query.
+The L4 creation use case does not resolve or validate an L6 ProductProfile,
+select a default product version, or derive product role references. Existing
+product-selection fields are forwarded unchanged for compatibility; callers that
+need a pinned selection supply it explicitly. Initial L5 binding uses the method
+registry's versions and no product role references. Product-aware validation and
+bootstrap remain the responsibility of the existing product/application paths;
+the repository's ProductInstance handling is unchanged by this narrow change.
 Creation is not idempotent; repository and MethodStore write failures propagate.
 The existing SQL/MethodStore transaction gap is not removed by this return change.
 

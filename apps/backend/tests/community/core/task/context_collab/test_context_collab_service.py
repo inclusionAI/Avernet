@@ -45,6 +45,10 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.operatio
 from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
     BindingState,
 )
+from agentclaw.community.core.task.context_collab.l6_products.catalog import ProductCatalog
+from agentclaw.community.core.task.context_collab.l6_products.contracts import (
+    VersionedProfileRef,
+)
 from agentclaw.community.core.task.context_collab.persistence.method_store import (
     InMemoryMethodStore,
 )
@@ -74,7 +78,7 @@ EXECUTOR = AgentRef(agent_type="bot", agent_id="bot_coding_001")
 def make_create_command(**overrides) -> ColletCreateCommand:
     """用 spec §6.2 指定执行请求示例构造创建命令;可按字段覆盖。"""
     fields = {
-        "space": SpaceRef(space_id="space_workspace_001", environment="prod"),
+        "to_space": SpaceRef(space_id="space_workspace_001", environment="prod"),
         "principal_ref": PRINCIPAL,
         "product_kind": "team_todo",
         "workflow_kind": "team_todo_execution",
@@ -230,7 +234,7 @@ class TestCreateContext:
             },
             "product_kind": "team_todo",
             "workflow_kind": "team_todo_execution",
-            "product_profile_ref": {"profile_id": "team_todo", "version": 1},
+            "product_profile_ref": None,
         }
 
     def test_create_repository_failure_does_not_return_collet(self):
@@ -306,14 +310,10 @@ class TestCreateContext:
     @pytest.mark.parametrize(
         "overrides",
         [
-            {"product_kind": "os"},
-            {"workflow_kind": "unknown"},
             {"method_kind": "swarm"},
             {"objective": ""},
         ],
         ids=[
-            "unknown-product-kind",
-            "unknown-workflow-kind",
             "unknown-method-kind",
             "empty-objective",
         ],
@@ -326,6 +326,36 @@ class TestCreateContext:
         )
         with pytest.raises(ContextCollabValidationError):
             service.create_collet(make_create_command(**overrides), make_actor())
+
+    @pytest.mark.parametrize("profile_ref", [None, VersionedProfileRef("external", 9)])
+    def test_create_passes_product_metadata_without_resolving_profile(self, profile_ref):
+        repo = _FakeContextCollabRepository()
+        store = InMemoryMethodStore()
+        service = ContextCollabService(
+            repository=repo,
+            method_store=store,
+            product_catalog=ProductCatalog(()),
+        )
+        created = service.create_collet(
+            make_create_command(
+                product_kind="external",
+                workflow_kind="external_workflow",
+                product_profile_ref=profile_ref,
+            ),
+            make_actor(),
+        )
+
+        request = repo.create_calls[0]
+        assert request.product_kind == "external"
+        assert request.workflow_kind == "external_workflow"
+        assert request.product_profile_ref is profile_ref
+        assert request.creation_facts["product_profile_ref"] == (
+            {"profile_id": "external", "version": 9} if profile_ref else None
+        )
+        assert request.initial_event.payload == request.creation_facts
+        [binding] = store.list_bindings(current_axes(), created.collet_id)
+        assert binding.profile_versions == {"Single": "0.2"}
+        assert binding.role_binding_refs == ()
 
     def test_service_satisfies_protocol(self):
         service = ContextCollabService(

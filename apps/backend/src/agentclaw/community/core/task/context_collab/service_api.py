@@ -50,7 +50,7 @@ class ColletCreateCommand:
     executor_ref: AgentRef | None
     objective: str
     resource_refs: list[ResourceRef]
-    # Optional exact L6 selection; omission preserves the generic v1 fallback.
+    # Opaque selection supplied by the caller; L4 does not resolve/pin a profile.
     product_profile_ref: VersionedProfileRef | None = None
 
 
@@ -105,6 +105,7 @@ class ContextCollabServiceProtocol(Protocol):
     ) -> Collet:
         """创建并返回持久化的 Collet;成功前完成初始 Task/Event 与 L5 绑定。
 
+        产品元数据仅透传,不解析 Profile/补版本/派生角色引用。
         不返回 Task 或 HTTP 快照;创建不设幂等键,写入失败原样抛出。
         """
         ...
