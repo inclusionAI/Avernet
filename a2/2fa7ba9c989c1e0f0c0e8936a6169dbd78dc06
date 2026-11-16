@@ -1,0 +1,37 @@
+apps/frontend-nextgen/src/extensions/internal.ts
+  s_f25e37c81adc81::t_1833a7c850bc32 135-136
+  s_f25e37c81adc81::t_2619247bd88fdb 144,152
+  s_f25e37c81adc81::t_fc47c80d295fb9 49,52
+apps/frontend-nextgen/src/internal/brand/TeamClawLogo.tsx
+  s_f25e37c81adc81::t_f20f74b858da11 22
+  s_f25e37c81adc81::t_76b1d0735c42dc 15-16,18-21,23-24
+apps/frontend-nextgen/src/internal/shell/navIcons.tsx
+  s_f25e37c81adc81::t_9768cae435db1c 33
+  s_f25e37c81adc81::t_055bb649e34a9b 1-32,34-69
+submodules/avernet
+  s_1d9cf05cb64a53::t_f08981a4d4b6b6 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a22fa7ba9c989c1e0f0c0e8936a6169dbd78dc06",
+  "prompts": {},
+  "sessions": {
+    "s_1d9cf05cb64a53": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "11538b87-c8aa-4c8d-a63d-a8a4d0affc4c",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    },
+    "s_f25e37c81adc81": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "79f5877d-dc7e-44ad-afcb-ac480847d969",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    }
+  }
+}
