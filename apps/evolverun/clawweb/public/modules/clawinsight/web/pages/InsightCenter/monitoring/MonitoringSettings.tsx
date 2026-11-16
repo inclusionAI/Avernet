@@ -11,16 +11,17 @@ export function MonitoringSettings({ onClose, onChanged }: { onClose: () => void
   const [revision, setRevision] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [loadError, setLoadError] = useState('');
   const [message, setMessage] = useState('');
   const cursor = cursors[cursors.length - 1];
   useEffect(() => { const el = dialog.current; el?.showModal(); return () => el?.close(); }, []);
   useEffect(() => { const timer = setTimeout(() => { setSearch(q.trim()); setCursors([null]); }, 250); return () => clearTimeout(timer); }, [q]);
   useEffect(() => {
-    const controller = new AbortController(); let active = true; setPage(null); setError('');
+    const controller = new AbortController(); let active = true; setPage(null); setLoadError('');
     const timer = setTimeout(() => controller.abort(new DOMException('Timeout', 'TimeoutError')), 15000);
     monitoringApi.options('mine', search, { startDate: '', endDate: '' }, cursor, controller.signal)
       .then(value => { if (!controller.signal.aborted) setPage(value); })
-      .catch(failure => { if (active) setError(monitoringErrorText(controller.signal.reason ?? failure)); })
+      .catch(failure => { if (active) setLoadError(monitoringErrorText(controller.signal.reason ?? failure)); })
       .finally(() => clearTimeout(timer));
     return () => { active = false; controller.abort(); clearTimeout(timer); };
   }, [search, cursor, revision]);
@@ -40,9 +41,9 @@ export function MonitoringSettings({ onClose, onChanged }: { onClose: () => void
       <button type="button" disabled={busy} onClick={() => void save({ all: true, enabled: true })}>一键全开</button>
       <button type="button" disabled={busy} onClick={() => void save({ all: true, enabled: false })}>一键全关</button></div>
     <p className="settings-hint">批量操作适用于当前账号已有的全部 Bot，包含其他分页和未命中搜索的 Bot。</p>
-    {error && <p role="alert" className="error-banner">{error}<button type="button" onClick={() => setRevision(value => value + 1)}>重试</button></p>}
+    {(error || loadError) && <p role="alert" className="error-banner">{error || loadError}<button type="button" disabled={busy} onClick={() => { setError(''); setRevision(value => value + 1); }}>刷新</button></p>}
     {message && <p role="status">{message}</p>}
-    {!page && !error && <p role="status">正在加载…</p>}
+    {!page && !loadError && <p role="status">正在加载…</p>}
     {page?.items.length === 0 && <p>没有找到 Bot。</p>}
     <ul className="settings-bots">{page?.items.map(bot => {
       const config = bot.configuration, enabled = config?.diagnosisEnabled === true && config.recoveryEnabled === true;

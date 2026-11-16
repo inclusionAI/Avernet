@@ -30,3 +30,12 @@ it('uses the server whole-roster operation from any search/page and displays par
   await waitFor(() => expect(api.configure).toHaveBeenCalledWith({ all: true, enabled: false }));
   expect(await screen.findByText('已更新 60 个 Bot，1 个未成功，请刷新后重试。')).toBeInTheDocument();
 });
+it('keeps a save conflict visible after refreshing the latest Bot configuration', async () => {
+  api.configure.mockRejectedValue({ status: 409 });
+  render(<MonitoringSettings onChanged={vi.fn()} onClose={vi.fn()} />);
+  await screen.findByText('部分开启');
+  fireEvent.click(screen.getByRole('switch', { name: '我的 Bot 诊断监控' }));
+  await waitFor(() => expect(api.options).toHaveBeenCalledTimes(2));
+  expect(await screen.findByText('部分开启')).toBeInTheDocument();
+  expect(screen.getByRole('alert')).toHaveTextContent('配置已被更新，请刷新后重试。');
+});
