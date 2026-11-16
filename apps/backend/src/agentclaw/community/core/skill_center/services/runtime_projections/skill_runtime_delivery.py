@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+from agentclaw.community.core.devices.services.device_context import DeviceOfflineError
 from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
 )
@@ -154,6 +155,8 @@ class SkillRuntimeDelivery:
                     source_layout=source_layout,
                 )
             return await self._apply_legacy_device_sync(plan, service_factory)
+        if applied.reason is MappingResultReason.DEVICE_OFFLINE:
+            raise DeviceOfflineError("Device is offline during mapping apply")
         return self._logical_mapping_result(
             plan=plan,
             retired_mappings=retired,
@@ -464,6 +467,10 @@ class SkillRuntimeDelivery:
                 mapping_contract_version=contract,
                 apply_mode=MappingApplyMode.BEST_EFFORT,
             )
+            if isinstance(raw_published, MappingPublishResult) and (
+                raw_published.reason is MappingResultReason.DEVICE_OFFLINE
+            ):
+                raise DeviceOfflineError("Device is offline during mapping publish")
             if self._mapping_contract_is_unsupported(raw_published):
                 return self._unsupported_mapping_contract_result()
             raw_verified = await self._pool_runtime.verify_mappings(
@@ -475,10 +482,16 @@ class SkillRuntimeDelivery:
                 mapping_contract_version=contract,
                 apply_mode=MappingApplyMode.BEST_EFFORT,
             )
+            if isinstance(raw_verified, MappingVerificationResult) and (
+                raw_verified.reason is MappingResultReason.DEVICE_OFFLINE
+            ):
+                raise DeviceOfflineError("Device is offline during mapping verification")
             if self._mapping_contract_is_unsupported(raw_verified):
                 return self._unsupported_mapping_contract_result()
             published = self._publish_result(raw_published)
             verified = self._verification_result(raw_verified)
+        except DeviceOfflineError:
+            raise
         except Exception as exc:
             raise SkillSetRuntimeReconcileError() from exc
         return self._mapping_result(

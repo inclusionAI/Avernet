@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import pytest
 
-from agentclaw.community.core.devices.services.device_context import DeviceContext
+from agentclaw.community.core.devices.services.device_context import DeviceContext, DeviceOfflineError
 from agentclaw.community.core.skill_center.canonical_center_store import (
     CanonicalCenterVersionIdentity,
 )
@@ -14,6 +14,7 @@ from agentclaw.community.core.skill_center.center_content_distribution import (
     CenterContentPendingPackage,
 )
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
+    ProjectionScope,
     ResolvedSkillPlan,
     RuntimeProjectionStatus,
 )
@@ -22,6 +23,9 @@ from agentclaw.community.core.skill_center.runtime_resolver import (
 )
 from agentclaw.community.core.skill_center.services.runtime_projections.skill_runtime_delivery import (
     SkillRuntimeDelivery,
+)
+from agentclaw.community.core.skill_center.services.runtime_projections.per_domain import (
+    PerDomainRuntimeProjection,
 )
 from agentclaw.community.core.skills_pool.models import (
     MappingApplyResult,
@@ -536,6 +540,38 @@ async def test_aggregate_degraded_status_survives_empty_items() -> None:
 
     assert result.status is RuntimeProjectionStatus.DEGRADED
     assert result.issues[0].code == "SKILL_MAPPING_RUNTIME_UNAVAILABLE"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["publish_mappings", "verify_mappings"])
+async def test_legacy_mapping_delivery_preserves_confirmed_device_offline(operation: str) -> None:
+    pool = _RecordingPoolRuntime(fallback=True)
+
+    async def offline(**kwargs):
+        if operation == "publish_mappings":
+            return MappingPublishResult(
+                published=False, status=MappingProjectionStatus.PENDING,
+                reason=MappingResultReason.DEVICE_OFFLINE,
+            )
+        return MappingVerificationResult(
+            valid=False, status=MappingProjectionStatus.PENDING,
+            reason=MappingResultReason.DEVICE_OFFLINE,
+        )
+
+    setattr(pool, operation, offline)
+    asset = RegisteredSkillAsset(skill_id=8, name="repo-skill", git_path="git://team/repo-skill")
+    delivery = _delivery(pool, _MissingLayoutRepository())
+
+    with pytest.raises(DeviceOfflineError):
+        await delivery.deliver(plan=_plan(asset), service_factory=_Factory(_LegacyRuntimeService()))
+
+    projection = PerDomainRuntimeProjection(skill_delivery=delivery)
+    result = await projection.apply(
+        plan=_plan(asset), scope=ProjectionScope(skills=True),
+        service_factory=_Factory(_LegacyRuntimeService()),
+    )
+    assert result.status is RuntimeProjectionStatus.PENDING
+    assert result.issues[0].code == "DESKTOP_DEVICE_OFFLINE"
 
 
 @pytest.mark.asyncio
