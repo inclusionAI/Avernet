@@ -1,0 +1,36 @@
+apps/baas/tests/unit/spi/tracer/test_tracer_plugins_sofa.py
+  s_d2bf2069ff97fe::t_1c14daf596262c 56,58-60,63
+  s_d2bf2069ff97fe::t_15950bd289746d 55,57,61-62
+apps/baas/src/secbaas/enterprise/plugins/tracer/sofa/__init__.py
+  s_d2bf2069ff97fe::t_412c97e29f972e 13,36-40
+apps/baas/README.md
+  s_d2bf2069ff97fe::t_e5adcb065eb927 20
+apps/baas/tests/unit/spi/tracer/test_caller_token_diagnostic.py
+  s_d2bf2069ff97fe::t_1c14daf596262c 1-17,20-36,38-86,89-101,105-174
+  s_d2bf2069ff97fe::t_a09b963b7c5ce7 87-88,102-104
+  s_d2bf2069ff97fe::t_291e817548b311 18-19
+  s_d2bf2069ff97fe::t_23a64529716478 37
+apps/baas/docs/diagnostics/investigation.md
+  s_d2bf2069ff97fe::t_7de01a75cc5469 23-25
+  s_d2bf2069ff97fe::t_e5adcb065eb927 12,15-22,26-38
+  s_d2bf2069ff97fe::t_a09b963b7c5ce7 13-14
+apps/baas/src/secbaas/enterprise/plugins/tracer/sofa/_caller_token_diagnostic.py
+  s_d2bf2069ff97fe::t_412c97e29f972e 1-51,54-68
+  s_d2bf2069ff97fe::t_a09b963b7c5ce7 52-53
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1a668f61210d638722f847961594e319985d4cf3",
+  "prompts": {},
+  "sessions": {
+    "s_d2bf2069ff97fe": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ce8a-9474-7172-8e43-0c593e52a6e9",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "卓人 <hx410025@antgroup.com>"
+    }
+  }
+}

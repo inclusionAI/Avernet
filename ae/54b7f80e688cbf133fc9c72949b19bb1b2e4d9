@@ -1,0 +1,26 @@
+apps/bcs-internal/crates/plugins/bcs-channel-dingtalk/src/mention_notify.rs
+  s_9d15f054d87965::t_aadab790df530c 605
+  s_9d15f054d87965::t_1d15cad74b3d1c 204
+apps/bcs-internal/crates/plugins/bcs-channel-dingtalk/src/outbound.rs
+  s_9d15f054d87965::t_64c0fec87501b3 1145
+  s_9d15f054d87965::t_a870288657ca82 1136
+  s_9d15f054d87965::t_193ff5166674c4 3631-3633
+  s_9d15f054d87965::t_8ad99181fe84aa 3145-3148
+  s_9d15f054d87965::t_3fbddde320a524 3630
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ae54b7f80e688cbf133fc9c72949b19bb1b2e4d9",
+  "prompts": {},
+  "sessions": {
+    "s_9d15f054d87965": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "21b1cf6e-407b-45fc-ab4e-3bf0bfc02aa6",
+        "model": "default"
+      },
+      "human_author": "卓人 <hx410025@antgroup.com>"
+    }
+  }
+}
