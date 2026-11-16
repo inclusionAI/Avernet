@@ -181,3 +181,103 @@ def test_precheck_rejects_non_draft_publication(monkeypatch):
             required_level=PermissionLevel.MEMBER,
             require_draft=True,
         )
+
+
+class _StandardTaskRecord:
+    id = 123
+    uuid = "quality-123"
+    task_type = "eval"
+    biz_type = "service_bot_single"
+    status = "success"
+    ext: dict = {}
+
+
+@pytest.mark.parametrize(
+    ("status", "ext", "expected"),
+    [
+        ("success", {"standard_result_save_status": "SKIPPED"}, False),
+        ("success", {"standard_result_saved": True}, False),
+        ("success", {}, True),
+        ("failed", {"standard_result_save_status": "SAVING"}, True),
+        ("task_executed", {"standard_result_save_status": "SAVING"}, False),
+    ],
+)
+def test_pending_standard_save_detects_only_unsaved_terminal_tasks(status, ext, expected):
+    record = _StandardTaskRecord()
+    record.status = status
+    record.ext = ext
+    assert ServiceBotEvalService._is_pending_standard_save(record) is expected
+
+
+def test_public_environment_result_hides_infrastructure_identifiers():
+    result = ServiceBotEvalService._public_standard_environment_result(
+        {
+            "supported": True,
+            "default_tag": "eval",
+            "destroyed": True,
+            "binding_id": "binding-secret",
+            "device_id": "device-secret",
+            "eval_headers": {"X-Eval-Id": "eval-secret"},
+            "reason": "standard_eval_finished",
+        },
+        reason="standard_eval_finished",
+    )
+    assert result == {
+        "supported": True,
+        "default_tag": "eval",
+        "destroyed": True,
+        "destroy_status": "succeeded",
+        "reason": "standard_eval_finished",
+        "error": "",
+    }
+
+
+def test_standard_task_snapshot_hides_environment_routing_internals():
+    record = _StandardTaskRecord()
+    record.ext = {
+        "standard_environment": {
+            "supported": True,
+            "default_tag": "eval",
+            "build_status": "active",
+            "binding_id": "binding-secret",
+            "device_id": "device-secret",
+            "eval_headers": {"X-Eval-Id": "eval-secret"},
+        },
+    }
+    snapshot = ServiceBotEvalService._standard_task_snapshot(record)
+    assert snapshot["environment"] == {
+        "supported": True,
+        "default_tag": "eval",
+        "build_status": "active",
+        "build_info": "",
+        "error": "",
+    }
+    assert snapshot["environment_status"] == "active"
+
+
+def test_standard_task_snapshot_exposes_section_seven_task_id_and_flow_steps():
+    record = _StandardTaskRecord()
+    record.ext = {
+        "set_uuid": "set-1",
+        "sample_set_name": "标准样本集",
+        "sample_set_count": 300,
+        "eval_progress": {
+            "status": "completed",
+            "report": {"reportUrl": "https://example.test/report"},
+        },
+        "standard_result_saved": True,
+    }
+    snapshot = ServiceBotEvalService._standard_task_snapshot(record)
+    assert snapshot["id"] == 123
+    assert snapshot["task_id"] == 123
+    assert snapshot["uuid"] == "quality-123"
+    assert snapshot["report_url"] == "https://example.test/report"
+    assert snapshot["set_name"] == "标准样本集"
+    assert [step["key"] for step in snapshot["steps"]] == [
+        "create_environment",
+        "confirm_sample_set",
+        "execute_evaluation",
+        "evaluation_report",
+        "save_evaluation_result",
+    ]
+    assert snapshot["steps"][-1]["status"] == "DONE"

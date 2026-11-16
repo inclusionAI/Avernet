@@ -121,8 +121,33 @@ class TaskProcessor:
         if not task:
             raise ValueError(f"Task not found: {id}")
 
-        # Get publish_id from ext field
+        # Initial standard-evaluation validation can use the caller-managed
+        # Eval-zone Bot APIs.  When that lifecycle result is supplied, the task
+        # must not create and destroy a second BaaS evaluation bot here.
         ext = dict(task.ext) if task.ext else {}
+        prebuilt_env = ext.get("eval_env") if isinstance(ext.get("eval_env"), dict) else None
+        if prebuilt_env:
+            build_status = str(prebuilt_env.get("build_status") or "")
+            logger.info(
+                "[to_env_preparing] id=%s using prebuilt Eval-zone env: status=%s",
+                id,
+                build_status,
+            )
+            if build_status == "active":
+                self._transition_to(id, TaskStatus.INIT.value, TaskStatus.ENV_READY.value, ext)
+                return self.to_task_created(id)
+            if build_status == "failed":
+                ext["error_msg"] = str(
+                    prebuilt_env.get("error")
+                    or prebuilt_env.get("build_info")
+                    or "Prebuilt evaluation environment failed"
+                )
+                self._repository.update_ext(id, ext)
+                return self.to_env_released(id, TaskStatus.INIT.value, TaskStatus.FAILED.value)
+            self._transition_to(id, TaskStatus.INIT.value, TaskStatus.ENV_PREPARING.value, ext)
+            return self.to_env_ready(id)
+
+        # Get publish_id from ext field
         publish_id = ext.get("publish_id")
         if not publish_id:
             raise ValueError(f"Task {id} missing publish_id in ext field")
@@ -171,6 +196,24 @@ class TaskProcessor:
             raise ValueError(f"Task not found: {id}")
 
         ext = dict(task.ext) if task.ext else {}
+        prebuilt_env = ext.get("eval_env") if isinstance(ext.get("eval_env"), dict) else None
+        if prebuilt_env:
+            build_status = str(prebuilt_env.get("build_status") or "")
+            logger.info("[to_env_ready] id=%s prebuilt env status=%s", id, build_status)
+            if build_status == "active":
+                self._transition_to(id, TaskStatus.ENV_PREPARING.value, TaskStatus.ENV_READY.value, ext)
+                return self.to_task_created(id)
+            if build_status == "failed":
+                ext["error_msg"] = str(
+                    prebuilt_env.get("error")
+                    or prebuilt_env.get("build_info")
+                    or "Prebuilt evaluation environment failed"
+                )
+                self._repository.update_ext(id, ext)
+                return self.to_env_released(id, TaskStatus.ENV_PREPARING.value, TaskStatus.FAILED.value)
+            self._repository.update_ext(id, ext)
+            return task
+
         baas_publish_id = ext.get("baas_publish_id")
         if not baas_publish_id:
             raise ValueError(f"Task {id} missing baas_publish_id in ext field")
@@ -229,11 +272,22 @@ class TaskProcessor:
             # 评测API要求的格式: bot_id:owner_id
             bot_id_with_owner = f"{bot_id}:{owner_id}"
 
-            env = f"{task.task_type}-{task.uuid}"
+            eval_env = ext.get("eval_env") if isinstance(ext.get("eval_env"), dict) else {}
+            eval_headers = eval_env.get("eval_headers") if isinstance(eval_env.get("eval_headers"), dict) else {}
+            env = str(
+                eval_headers.get("X-Eval-Id")
+                or f"{task.task_type}-{task.uuid}"
+            )
 
             logger.info("[to_task_created] Calling /eval/start: env=%s, bot_id=%s, set_uuid=%s, version=%s", env, bot_id_with_owner, set_uuid, version)
 
-            set_task_uuid = self._call_eval_start_api(env, bot_id_with_owner, set_uuid, version)
+            set_task_uuid = self._call_eval_start_api(
+                env,
+                bot_id_with_owner,
+                set_uuid,
+                version,
+                headers={str(k): str(v) for k, v in eval_headers.items()} or None,
+            )
             ext["set_task_uuid"] = set_task_uuid
             logger.info("[to_task_created] Got set_task_uuid=%s", set_task_uuid)
 
@@ -285,6 +339,12 @@ class TaskProcessor:
             raise ValueError(f"Task not found: {id}")
 
         ext = dict(task.ext) if task.ext else {}
+        if isinstance(ext.get("eval_env"), dict):
+            # The caller owns this prebuilt Eval-zone Bot lifecycle and will
+            # destroy it after persisting the result (with a TTL fallback).
+            logger.info("[to_env_released] id=%s skipping BaaS teardown for prebuilt env", id)
+            return self._transition_to(id, source_status, target_status, ext)
+
         bot_uuid = ext.get("bot_uuid")
         if bot_uuid:
             operator = task.operator_id or "system"
@@ -306,17 +366,27 @@ class TaskProcessor:
 
         return self._transition_to(id, source_status, target_status, ext)
 
-    def _call_eval_start_api(self, env: str, bot_id: str, set_uuid: str, version: str) -> str:
+    def _call_eval_start_api(
+        self,
+        env: str,
+        bot_id: str,
+        set_uuid: str,
+        version: str,
+        *,
+        headers: dict[str, str] | None = None,
+    ) -> str:
         """Call /eval/start API and return set_task_uuid."""
-        response = self._masa_eval_http.post(
-            "/eval/start",
-            json={
+        request_kwargs: dict[str, Any] = {
+            "json": {
                 "env": env,
                 "bot_id": bot_id,
                 "set_uuid": set_uuid,
                 "version": version,
-            },
-        )
+            }
+        }
+        if headers:
+            request_kwargs["headers"] = headers
+        response = self._masa_eval_http.post("/eval/start", **request_kwargs)
         logger.info("[eval_start] response status=%s body=%s", response.status_code, response.text)
         response.raise_for_status()
 

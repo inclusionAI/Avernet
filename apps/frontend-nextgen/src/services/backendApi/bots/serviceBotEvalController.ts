@@ -56,15 +56,25 @@ export interface ServiceBotEvalSubmissionDto extends BackendUnknownRecord {
 export interface ServiceBotEvalHistoryRecord extends BackendUnknownRecord {
   id?: string;
   record_id?: string;
+  release_id?: string;
+  publish_id?: string;
+  bot_id?: string;
+  bot_version?: string;
   mode?: string;
   status?: string;
+  gate_status?: string;
+  cert_id?: string;
+  upload_id?: string;
+  cert_result?: string;
   summary?: string;
+  decision_reason?: string;
   report_url?: string;
   archive_download_url?: string;
   evaluated_at?: string;
 }
 
 export interface ServiceBotEvalHistoryDto extends BackendUnknownRecord {
+  current_release?: ServiceBotEvalHistoryRecord | null;
   records: ServiceBotEvalHistoryRecord[];
   page: {
     page_no: number;

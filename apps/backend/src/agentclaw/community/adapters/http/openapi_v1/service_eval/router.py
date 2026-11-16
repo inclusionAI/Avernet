@@ -19,7 +19,12 @@ from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import O
 from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
 from agentclaw.community.adapters.http.openapi_v1.responses import envelope, envelope_errors
 from agentclaw.community.adapters.http.service_bot.eval_files import read_upload_files
-from .schemas import ServiceBotEvalSubmissionForm
+from .schemas import (
+    ServiceBotEvalSubmissionForm,
+    ServiceBotStandardEvalEnvironmentCreateForm,
+    ServiceBotStandardEvalResultForm,
+    ServiceBotStandardEvalTaskForm,
+)
 from agentclaw.community.api.service_bot_eval import ServiceBotEvalServiceProtocol
 from agentclaw.community.di import Injected
 
@@ -130,6 +135,179 @@ async def get_submission(
         owner_id=owner_id,
     )
     return envelope(result, request)
+
+
+@router.get(
+    "/versions/{bot_version}/sample-sets",
+    response_model=Envelope[dict[str, Any]],
+)
+@envelope_errors
+async def list_standard_sample_sets(
+    bot_id: BotIdPath,
+    bot_version: BotVersionPath,
+    request: Request,
+    actor_id: UserIdDep,
+    owner_id: OwnerIdDep,
+    service: ServiceBotEvalServiceProtocol = Injected(ServiceBotEvalServiceProtocol),
+) -> Envelope[dict[str, Any]]:
+    """Read the MASA sample sets available to one service-Bot version."""
+    result = await service.list_standard_sample_sets(
+        bot_id,
+        bot_version,
+        actor_id=actor_id,
+        owner_id=owner_id,
+    )
+    return envelope(result, request)
+
+
+@router.post(
+    "/versions/{bot_version}/tasks",
+    response_model=Envelope[dict[str, Any]],
+)
+@envelope_errors
+async def create_standard_task(
+    bot_id: BotIdPath,
+    bot_version: BotVersionPath,
+    request: Request,
+    payload: ServiceBotStandardEvalTaskForm,
+    actor_id: UserIdDep,
+    owner_id: OwnerIdDep,
+    service: ServiceBotEvalServiceProtocol = Injected(ServiceBotEvalServiceProtocol),
+) -> Envelope[dict[str, Any]]:
+    """Create one server-driven standard evaluation task."""
+    result = await service.create_standard_task(
+        bot_id,
+        bot_version,
+        actor_id=actor_id,
+        owner_id=owner_id,
+        task=payload.model_dump(),
+    )
+    return envelope(result, request, message="标准评测任务已创建")
+
+
+@router.get(
+    "/versions/{bot_version}/tasks/current",
+    response_model=Envelope[dict[str, Any]],
+)
+@envelope_errors
+async def get_current_standard_task(
+    bot_id: BotIdPath,
+    bot_version: BotVersionPath,
+    request: Request,
+    actor_id: UserIdDep,
+    owner_id: OwnerIdDep,
+    service: ServiceBotEvalServiceProtocol = Injected(ServiceBotEvalServiceProtocol),
+) -> Envelope[dict[str, Any]]:
+    """Read the current server-driven standard evaluation task."""
+    result = await service.get_current_standard_task(
+        bot_id,
+        bot_version,
+        actor_id=actor_id,
+        owner_id=owner_id,
+    )
+    return envelope(result, request)
+
+
+@router.post(
+    "/versions/{bot_version}/standard-eval/results",
+    response_model=Envelope[dict[str, Any]],
+)
+@envelope_errors
+async def save_standard_result(
+    bot_id: BotIdPath,
+    bot_version: BotVersionPath,
+    request: Request,
+    payload: ServiceBotStandardEvalResultForm,
+    actor_id: UserIdDep,
+    owner_id: OwnerIdDep,
+    service: ServiceBotEvalServiceProtocol = Injected(ServiceBotEvalServiceProtocol),
+) -> Envelope[dict[str, Any]]:
+    """Persist a finished standard evaluation as the release's gate result."""
+    result = await service.save_standard_result(
+        bot_id,
+        bot_version,
+        actor_id=actor_id,
+        owner_id=owner_id,
+        result=payload.model_dump(exclude={"trigger_source"}),
+        trigger_source=payload.trigger_source,
+    )
+    return envelope(result, request, message="标准评测结果已保存")
+
+
+@router.post(
+    "/versions/{bot_version}/environments",
+    response_model=Envelope[dict[str, Any]],
+)
+@envelope_errors
+async def create_standard_environment(
+    bot_id: BotIdPath,
+    bot_version: BotVersionPath,
+    request: Request,
+    payload: ServiceBotStandardEvalEnvironmentCreateForm,
+    actor_id: UserIdDep,
+    owner_id: OwnerIdDep,
+    service: ServiceBotEvalServiceProtocol = Injected(ServiceBotEvalServiceProtocol),
+) -> Envelope[dict[str, Any]]:
+    """Create or request the current server-managed standard evaluation environment."""
+    result = await service.create_standard_environment(
+        bot_id,
+        bot_version,
+        actor_id=actor_id,
+        owner_id=owner_id,
+        environment=payload.model_dump(),
+    )
+    return envelope(result, request, message="评测环境创建请求已提交，请轮询构建状态")
+
+
+@router.get(
+    "/versions/{bot_version}/environments/current",
+    response_model=Envelope[dict[str, Any]],
+)
+@envelope_errors
+async def get_current_standard_environment(
+    bot_id: BotIdPath,
+    bot_version: BotVersionPath,
+    request: Request,
+    actor_id: UserIdDep,
+    owner_id: OwnerIdDep,
+    service: ServiceBotEvalServiceProtocol = Injected(ServiceBotEvalServiceProtocol),
+) -> Envelope[dict[str, Any]]:
+    """Read the current server-managed standard evaluation environment."""
+    result = await service.get_current_standard_environment(
+        bot_id,
+        bot_version,
+        actor_id=actor_id,
+        owner_id=owner_id,
+    )
+    return envelope(result, request)
+
+
+@router.delete(
+    "/versions/{bot_version}/environments/current",
+    response_model=Envelope[dict[str, Any]],
+)
+@envelope_errors
+async def destroy_standard_environment(
+    bot_id: BotIdPath,
+    bot_version: BotVersionPath,
+    request: Request,
+    actor_id: UserIdDep,
+    owner_id: OwnerIdDep,
+    reason: Annotated[
+        str,
+        Query(max_length=256, description="The business reason recorded for destroying the evaluation environment"),
+    ] = "standard_eval_finished",
+    service: ServiceBotEvalServiceProtocol = Injected(ServiceBotEvalServiceProtocol),
+) -> Envelope[dict[str, Any]]:
+    """Destroy the current server-managed evaluation environment after use."""
+    result = await service.destroy_standard_environment(
+        bot_id,
+        bot_version,
+        actor_id=actor_id,
+        owner_id=owner_id,
+        reason=reason,
+    )
+    return envelope(result, request, message="评测环境销毁请求已处理")
 
 
 @router.get(

@@ -1,8 +1,8 @@
 """OpenAPI v1 endpoint cases for service-Bot unified evaluation.
 
 The cases run the real public router, the public permission seam, the real
-ServiceBotEvalService, and the community evaluation plugin. They keep the six
-new OpenAPI routes inside endpoint coverage's happy + error requirement.
+ServiceBotEvalService, and the community evaluation plugin. They keep all
+service-Bot evaluation OpenAPI routes inside endpoint coverage's happy + error requirement.
 """
 
 from __future__ import annotations
@@ -21,11 +21,15 @@ from agentclaw.community.utils.gateway_principal_config import (
     init_principal_verifier_config,
 )
 from tests.community.factories.access import make_staff_user
+from agentclaw.community.plugin_api.http_client import HttpClient, QUALIFIER_MASA_AGENT_EVAL
+from typing import Annotated
+from tests.community.factories.quality import make_quality_task
 from tests.community.framework import (
     CaseInput,
     ExpectError,
     ExpectSuccess,
     endpoint_test,
+    json_response,
 )
 
 _OWNER = "u_eval_openapi"
@@ -74,8 +78,25 @@ def _seed_principal(world) -> None:
 
 
 def _seed_service_bot(world) -> None:
-    """Seed the owner, a service Bot, and its draft publication record."""
+    """Seed the owner, a service Bot, its publication record, and MASA sample sets."""
     _seed_principal(world)
+    masa_eval_http = world.get(Annotated[HttpClient, QUALIFIER_MASA_AGENT_EVAL])
+    masa_eval_http.set_response(
+        "get",
+        json_response(
+            {
+                "support": True,
+                "sets": [
+                    {
+                        "uuid": "set-standard-1",
+                        "name": "标准评测样本集",
+                        "description": "标准评测样本集",
+                        "sample_count": 300,
+                    }
+                ],
+            }
+        ),
+    )
     bot = world.get(BotRepository).insert(
         {
             "bot_id": _BOT_ID,
@@ -140,6 +161,11 @@ _ROUTES: list[tuple[str, str, dict, dict]] = [
         "POST",
         "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/simple-cert/sync",
         happy={"data": {"gate_status": "SKIPPED", "allowed": True}},
+    ),
+    _cases(
+        "GET",
+        "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/sample-sets",
+        happy={"data": {"support": True, "sets": [{"uuid": "set-standard-1"}]}},
     ),
 ]
 
@@ -253,3 +279,243 @@ def _submission_cases() -> None:
 
 
 _submission_cases()
+
+
+def _standard_task_cases() -> None:
+    create_path = "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/tasks"
+    current_path = create_path + "/current"
+    body = {
+        "set_uuid": "set-standard-1",
+        "goal_type": "json",
+        "goal_json": {"metric": "accuracy"},
+        "trigger_source": "manual_restart_eval",
+    }
+    for happy_case, seed in ((True, _seed_service_bot), (False, _seed_principal)):
+        @endpoint_test(
+            method="POST",
+            path=create_path,
+            scenario="happy" if happy_case else "bot_not_found",
+            input=CaseInput(
+                path_params={"bot_id": _BOT_ID, "bot_version": _VERSION},
+                query_params=_QUERY,
+                headers=_HEADERS,
+                json_body=body,
+            ),
+            seed=seed,
+            expect=ExpectSuccess(
+                status=200,
+                json_contains={
+                    "code": 200000,
+                    "message": "标准评测任务已创建",
+                    "data": {"task_type": "eval", "set_uuid": "set-standard-1"},
+                },
+            )
+            if happy_case
+            else ExpectError(status=404, json_contains={"message": "Not found", "data": None}),
+        )
+        def create_standard_task_case() -> None:
+            pass
+
+        create_standard_task_case.__name__ = (
+            "standard_eval_create_task_happy" if happy_case else "standard_eval_create_task_error"
+        )
+
+    def _seed_current_task(world) -> None:
+        _seed_service_bot(world)
+        make_quality_task(
+            world,
+            bot_id=_BOT_ID,
+            owner_id=_OWNER,
+            status="success",
+            ext={
+                "source": "standard_eval",
+                "version": int(_VERSION),
+                "set_uuid": "set-standard-1",
+                "sample_set_name": "标准评测样本集",
+                "sample_set_count": 300,
+                "standard_result_saved": True,
+                "eval_progress": {
+                    "status": "completed",
+                    "report": {"reportUrl": "https://reports.example.test/report"},
+                },
+            },
+        )
+
+    for happy_case, seed in ((True, _seed_current_task), (False, _seed_principal)):
+        @endpoint_test(
+            method="GET",
+            path=current_path,
+            scenario="happy" if happy_case else "bot_not_found",
+            input=CaseInput(
+                path_params={"bot_id": _BOT_ID, "bot_version": _VERSION},
+                query_params=_QUERY,
+                headers=_HEADERS,
+            ),
+            seed=seed,
+            expect=ExpectSuccess(
+                status=200,
+                json_contains={
+                    "code": 200000,
+                    "data": {
+                        "status": "success",
+                        "set_uuid": "set-standard-1",
+                        "report_url": "https://reports.example.test/report",
+                    },
+                },
+            )
+            if happy_case
+            else ExpectError(status=404, json_contains={"message": "Not found", "data": None}),
+        )
+        def current_standard_task_case() -> None:
+            pass
+
+        current_standard_task_case.__name__ = (
+            "standard_eval_current_task_happy" if happy_case else "standard_eval_current_task_error"
+        )
+
+
+_standard_task_cases()
+
+
+def _standard_environment_cases() -> None:
+    create_path = "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/environments"
+    current_path = create_path + "/current"
+    create_body = {"default_tag": "eval", "ttl_minutes": 120}
+    for happy_case, seed in ((True, _seed_service_bot), (False, _seed_principal)):
+        @endpoint_test(
+            method="POST",
+            path=create_path,
+            scenario="happy" if happy_case else "bot_not_found",
+            input=CaseInput(
+                path_params={"bot_id": _BOT_ID, "bot_version": _VERSION},
+                query_params=_QUERY,
+                headers=_HEADERS,
+                json_body=create_body,
+            ),
+            seed=seed,
+            expect=ExpectSuccess(
+                status=200,
+                json_contains={
+                    "code": 200000,
+                    "message": "评测环境创建请求已提交，请轮询构建状态",
+                    "data": {"default_tag": "eval", "build_status": "not_supported"},
+                },
+            )
+            if happy_case
+            else ExpectError(status=404, json_contains={"message": "Not found", "data": None}),
+        )
+        def create_environment_case() -> None:
+            pass
+
+        create_environment_case.__name__ = (
+            "standard_eval_create_environment_happy" if happy_case else "standard_eval_create_environment_error"
+        )
+
+    for happy_case, seed in ((True, _seed_service_bot), (False, _seed_principal)):
+        @endpoint_test(
+            method="GET",
+            path=current_path,
+            scenario="happy" if happy_case else "bot_not_found",
+            input=CaseInput(
+                path_params={"bot_id": _BOT_ID, "bot_version": _VERSION},
+                query_params=_QUERY,
+                headers=_HEADERS,
+            ),
+            seed=seed,
+            expect=ExpectSuccess(
+                status=200,
+                json_contains={
+                    "code": 200000,
+                    "data": {"supported": False, "build_status": "not_supported"},
+                },
+            )
+            if happy_case
+            else ExpectError(status=404, json_contains={"message": "Not found", "data": None}),
+        )
+        def current_environment_case() -> None:
+            pass
+
+        current_environment_case.__name__ = (
+            "standard_eval_current_environment_happy" if happy_case else "standard_eval_current_environment_error"
+        )
+
+    for happy_case, seed in ((True, _seed_service_bot), (False, _seed_principal)):
+        @endpoint_test(
+            method="DELETE",
+            path=current_path,
+            scenario="happy" if happy_case else "bot_not_found",
+            input=CaseInput(
+                path_params={"bot_id": _BOT_ID, "bot_version": _VERSION},
+                query_params=_QUERY | {"reason": "standard_eval_finished"},
+                headers=_HEADERS,
+            ),
+            seed=seed,
+            expect=ExpectSuccess(
+                status=200,
+                json_contains={
+                    "code": 200000,
+                    "message": "评测环境销毁请求已处理",
+                    "data": {"destroyed": False, "destroy_status": "skipped"},
+                },
+            )
+            if happy_case
+            else ExpectError(status=404, json_contains={"message": "Not found", "data": None}),
+        )
+        def destroy_environment_case() -> None:
+            pass
+
+        destroy_environment_case.__name__ = (
+            "standard_eval_destroy_environment_happy" if happy_case else "standard_eval_destroy_environment_error"
+        )
+
+
+_standard_environment_cases()
+
+
+def _standard_result_cases() -> None:
+    path = "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/standard-eval/results"
+    body = {
+        "task_id": 1,
+        "task_uuid": "quality-task-1",
+        "task_status": "success",
+        "gate_status": "PASSED",
+        "trigger_source": "manual_restart_standard_eval",
+        "sample_set_uuid": "set-1",
+        "sample_set_name": "标准样本集",
+        "sample_count": 10,
+        "report_url": "https://reports.example.test/report",
+        "progress": {"set_task_uuid": "masa-task-1"},
+    }
+    for happy_case, seed in ((True, _seed_service_bot), (False, _seed_principal)):
+
+        @endpoint_test(
+            method="POST",
+            path=path,
+            scenario="happy" if happy_case else "bot_not_found",
+            input=CaseInput(
+                path_params={"bot_id": _BOT_ID, "bot_version": _VERSION},
+                query_params=_QUERY,
+                headers=_HEADERS,
+                json_body=body,
+            ),
+            seed=seed,
+            expect=ExpectSuccess(
+                status=200,
+                json_contains={
+                    "code": 200000,
+                    "message": "标准评测结果已保存",
+                    "data": {"saved": False},
+                },
+            )
+            if happy_case
+            else ExpectError(status=404, json_contains={"message": "Not found", "data": None}),
+        )
+        def standard_result_case() -> None:
+            pass
+
+        standard_result_case.__name__ = (
+            "standard_eval_result_happy" if happy_case else "standard_eval_result_error"
+        )
+
+
+_standard_result_cases()

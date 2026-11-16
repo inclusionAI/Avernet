@@ -83,3 +83,42 @@ class ServiceBotEvalPlugin(Plugin, Protocol):
     async def sync(self, context: ServiceBotEvalContext) -> dict[str, Any]:
         """Synchronize cached certification state and return the latest view."""
         ...
+
+    async def save_standard_result(
+        self,
+        context: ServiceBotEvalContext,
+        result: dict[str, Any],
+        *,
+        trigger_source: str = "manual_restart_standard_eval",
+    ) -> dict[str, Any]:
+        """Persist one finished orchestration result into the unified gate."""
+        ...
+
+    async def create_standard_environment(
+        self,
+        context: ServiceBotEvalContext,
+        *,
+        default_tag: str = "eval",
+        ttl_minutes: int = 120,
+    ) -> dict[str, Any]:
+        """Create or request one server-managed standard evaluation environment."""
+        ...
+
+    async def get_standard_environment_status(
+        self,
+        context: ServiceBotEvalContext,
+        *,
+        default_tag: str = "eval",
+    ) -> dict[str, Any]:
+        """Read the latest server-managed evaluation environment status."""
+        ...
+
+    async def destroy_standard_environment(
+        self,
+        context: ServiceBotEvalContext,
+        *,
+        default_tag: str = "eval",
+        reason: str = "standard_eval_finished",
+    ) -> dict[str, Any]:
+        """Destroy the server-managed evaluation environment after the task."""
+        ...
