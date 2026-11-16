@@ -42,11 +42,16 @@ class TokenExchangeOrchestrator:
         is_test_exchange: bool,
         session_key: str | None = None,
         friend_user_id: str | None = None,
+        token_type: str = "iam",
     ) -> CallerIamTokenOutcome:
+        logger.info("caller_token_source_selected bot_id=%s stage=%s token_type=%s",
+                    bot_id, stage.value, token_type)
         caller_error: Exception | None = None
         caller_outcome: CallerIamTokenOutcome | None = None
         try:
             caller_kwargs: dict[str, str] = {}
+            if token_type != "iam":
+                caller_kwargs["token_type"] = token_type
             if session_key is not None:
                 caller_kwargs["session_key"] = session_key
             if friend_user_id is not None:
