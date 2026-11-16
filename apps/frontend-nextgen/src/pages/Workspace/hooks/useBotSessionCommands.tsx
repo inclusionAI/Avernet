@@ -10,7 +10,9 @@ import type { UseBotSessionFilesResult } from './useBotSessionFiles';
 import type { UseBotSkillsResult } from './useBotSkills';
 
 interface Options {
+  /** 会话文件功能可用；桌面 Bot 为 false，不影响技能命令。 */
   enabled: boolean;
+  /** 身份、会话及 Bot 对话资格均已就绪，并且不是好友 Bot。 */
   canUseSkills: boolean;
   files: UseBotSessionFilesResult;
   skillsState: UseBotSkillsResult;
@@ -49,7 +51,7 @@ export function useBotSessionCommands({
   }, [enabled, refreshFiles, handleReference]);
 
   const loadSkills = useCallback(async (): Promise<CommandItem[]> => {
-    if (!enabled || !canUseSkills) return [];
+    if (!canUseSkills) return [];
     const skills = await skillsState.loadSkills();
     return skills.map((s) => ({
       id: `__skill__${s.skillId}`,
@@ -58,7 +60,7 @@ export function useBotSessionCommands({
       icon: <Zap className="h-3.5 w-3.5 text-muted-foreground" />,
       data: { skill_id: s.skillId },
     }));
-  }, [enabled, canUseSkills, skillsState.loadSkills]);
+  }, [canUseSkills, skillsState.loadSkills]);
 
   useEffect(() => {
     setFileItems([]);

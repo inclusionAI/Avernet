@@ -425,7 +425,7 @@ it('超过 20 项时明确拒绝，不静默截断提交', async () => {
   expect(controller.createSkillCenterReferences).not.toHaveBeenCalled();
 });
 
-it('新建能力集后立即启用', async () => {
+it('新建能力集明确返回未启用时兼容自动启用', async () => {
   controller.createSkillSet.mockResolvedValue({
     data: { id: 'set-1', name: '研发能力集', is_default: false, is_active: false },
   });
@@ -436,6 +436,20 @@ it('新建能力集后立即启用', async () => {
   await botEditorService.createSkillSet('bot-1', '研发能力集', 'owner-1');
 
   expect(controller.createSkillSet).toHaveBeenCalledWith('bot-1', { name: '研发能力集' }, 'owner-1');
+  expect(controller.setSkillSetActive).toHaveBeenCalledWith('bot-1', 'set-1', true, 'owner-1');
+});
+
+it('新建能力集已启用时不重复触发运行时激活', async () => {
+  const created = { data: { id: 'set-1', name: '研发能力集', is_default: false, is_active: true } };
+  controller.createSkillSet.mockResolvedValueOnce(created);
+  await expect(botEditorService.createSkillSet('bot-1', '研发能力集', 'owner-1')).resolves.toBe(created);
+  expect(controller.setSkillSetActive).not.toHaveBeenCalled();
+});
+
+it('新建响应缺少状态时保留历史激活兼容逻辑', async () => {
+  // 模拟旧服务端缺少当前 DTO 必填字段的实际 JSON 响应。
+  controller.createSkillSet.mockResolvedValueOnce(JSON.parse('{"data":{"id":"set-1","name":"研发能力集"}}'));
+  await botEditorService.createSkillSet('bot-1', '研发能力集', 'owner-1');
   expect(controller.setSkillSetActive).toHaveBeenCalledWith('bot-1', 'set-1', true, 'owner-1');
 });
 

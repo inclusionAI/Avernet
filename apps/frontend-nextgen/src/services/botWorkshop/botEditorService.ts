@@ -263,7 +263,10 @@ export const botEditorService = {
     const created = await botEditorController.createSkillSet(botId, { name }, ownerId);
     const setId = created.data?.id;
     if (!setId) throw new Error('能力集已创建，但响应缺少能力集标识，无法自动启用');
-    await botEditorController.setSkillSetActive(botId, setId, true, ownerId);
+    // 新建空集默认已启用，无需再次触发完整运行时投影；兼容旧服务端的未启用响应。
+    if (created.data?.is_active !== true) {
+      await botEditorController.setSkillSetActive(botId, setId, true, ownerId);
+    }
     return created;
   },
   updateSkillSet: (botId: string, id: string, name: string, ownerId?: string) => botEditorController.updateSkillSet(botId, id, { name }, ownerId),

@@ -3,8 +3,6 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Empty } from '@/components/ui/Empty';
-import { Input } from '@/components/ui/Input';
-import { Modal, ModalContent, ModalDescription, ModalFooter, ModalHeader, ModalTitle } from '@/components/ui/Modal';
 import { Switch } from '@/components/ui/Switch';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import type { BotCapabilitySet, BotEditorSkill } from '@/domain/botEditor';
@@ -15,6 +13,7 @@ import { useCapabilitySetExpansion } from '@/hooks/useCapabilitySetExpansion';
 import { CapabilityDetailDrawer } from './CapabilityDetailDrawer';
 import { CapabilityMembers } from './CapabilityMembers';
 import { CapabilityPickerModal } from './CapabilityPickerModal';
+import { CreateCapabilitySetModal } from './CreateCapabilitySetModal';
 import type { CapabilityPicker, CapabilitySetManagerProps } from './capabilitySetManagerTypes';
 export type { CapabilitySetManagerProps } from './capabilitySetManagerTypes';
 
@@ -39,7 +38,6 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
   } = props;
   const expansion = useCapabilitySetExpansion(sets, props.botId, props.authenticatedUserId, props.ownerId);
   const [createOpen, setCreateOpen] = useState(false);
-  const [name, setName] = useState('');
   const [picker, setPicker] = useState<CapabilityPicker>();
   const [pickerSuspendedForDetail, setPickerSuspendedForDetail] = useState(false);
   const [detailTarget, setDetailTarget] = useState<CapabilityDetailTarget>();
@@ -59,11 +57,6 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
     if (url) window.open(url, '_blank', 'noopener,noreferrer');
   };
 
-  const create = async () => {
-    await onCreate(name.trim());
-    setName('');
-    setCreateOpen(false);
-  };
   return (
     <div className="flex min-h-full flex-col bg-background">
       <div className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-divider bg-card px-8 lg:px-10">
@@ -210,29 +203,7 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
           setPickerSuspendedForDetail(false);
         }}
       />
-      <Modal open={createOpen} onOpenChange={setCreateOpen}>
-        <ModalContent>
-          <ModalHeader>
-            <ModalTitle>新建能力集</ModalTitle>
-            <ModalDescription>创建后默认为启用状态。</ModalDescription>
-          </ModalHeader>
-          <Input
-            autoFocus
-            value={name}
-            maxLength={100}
-            placeholder="输入能力集名称"
-            onChange={(event) => setName(event.target.value)}
-          />
-          <ModalFooter>
-            <Button variant="secondary" onClick={() => setCreateOpen(false)}>
-              取消
-            </Button>
-            <Button disabled={!name.trim()} onClick={() => void create()}>
-              创建
-            </Button>
-          </ModalFooter>
-        </ModalContent>
-      </Modal>
+      <CreateCapabilitySetModal open={createOpen} onOpenChange={setCreateOpen} onCreate={onCreate} />
       {picker ? (
         <CapabilityPickerModal
           kind={picker.kind}
