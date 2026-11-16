@@ -24,9 +24,9 @@ export function DebugChatInput({ onClear, ...props }: Props) {
         {...props}
         capabilitySets={files.capabilitySets}
         command={files.command}
-        fileChip={files.fileChip}
+        fileChip={files.filesSupported ? files.fileChip : undefined}
         senderRef={files.senderRef}
-        onUpload={files.openUpload}
+        onUpload={files.filesSupported ? files.openUpload : undefined}
       />
       {files.featureNode}
     </>

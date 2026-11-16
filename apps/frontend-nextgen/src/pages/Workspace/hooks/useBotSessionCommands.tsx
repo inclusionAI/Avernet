@@ -12,6 +12,7 @@ import type { UseBotSkillsResult } from './useBotSkills';
 interface Options {
   /** 会话文件功能可用；桌面 Bot 为 false，不影响技能命令。 */
   enabled: boolean;
+  canUseFiles: boolean;
   /** 身份、会话及 Bot 对话资格均已就绪，并且不是好友 Bot。 */
   canUseSkills: boolean;
   files: UseBotSessionFilesResult;
@@ -23,6 +24,7 @@ interface Options {
 
 export function useBotSessionCommands({
   enabled,
+  canUseFiles,
   canUseSkills,
   files,
   skillsState,
@@ -36,7 +38,7 @@ export function useBotSessionCommands({
   const refreshFiles = files.refresh;
   // 命令展开才读取当前会话；刷新后取最新 store，避免读取旧闭包。
   const loadFiles = useCallback(async (): Promise<CommandItem[]> => {
-    if (!enabled) return [];
+    if (!enabled || !canUseFiles) return [];
     await refreshFiles();
     const { readyFiles } = useBotSessionFileStore.getState();
     return readyFiles.map((f) => ({
@@ -48,7 +50,7 @@ export function useBotSessionCommands({
       preventInsert: true,
       onSelect: () => handleReference(f),
     }));
-  }, [enabled, refreshFiles, handleReference]);
+  }, [enabled, canUseFiles, refreshFiles, handleReference]);
 
   const loadSkills = useCallback(async (): Promise<CommandItem[]> => {
     if (!canUseSkills) return [];
@@ -94,6 +96,7 @@ export function useBotSessionCommands({
   const commandItems = useMemo<CommandItem[]>(
     () =>
       buildBotSessionCommandItems({
+        canUseFiles,
         canUseSkills,
         skillItems,
         fileItems,
@@ -102,7 +105,7 @@ export function useBotSessionCommands({
         onClear,
         onSelectSkill: handleSelectSkill,
       }),
-    [canUseSkills, skillItems, fileItems, skillsState.isLoading, files.isLoadingList, onClear, handleSelectSkill],
+    [canUseFiles, canUseSkills, skillItems, fileItems, skillsState.isLoading, files.isLoadingList, onClear, handleSelectSkill],
   );
 
   const command = useMemo<CommandConfig>(

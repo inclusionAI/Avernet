@@ -57,6 +57,7 @@ let mockModelSelectorProps: {
 let mockComposerMenuProps: { disabled?: boolean; disabledReason?: string | null } | null = null;
 
 const mockFileFeature: UseBotSessionFilesFeatureResult = {
+  filesSupported: true,
   senderRef: { current: null },
   fileChip: { label: '文件', onPick: () => {}, onRemove: () => {} },
   command: { categories: [], onSelect: () => {}, format: () => '' },

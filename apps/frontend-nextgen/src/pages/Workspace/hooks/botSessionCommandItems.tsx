@@ -3,6 +3,7 @@ import type { CommandItem } from '@tc-chat/ui/es/Sender';
 import { Eraser, FileIcon, Zap } from 'lucide-react';
 
 export interface BuildBotSessionCommandItemsParams {
+  canUseFiles: boolean;
   /** 好友 Bot 不开放 skill 命令。 */
   canUseSkills: boolean;
   skillItems: CommandItem[];
@@ -16,6 +17,7 @@ export interface BuildBotSessionCommandItemsParams {
 
 /** /skill（二级技能面板）+ /file（引用会话文件）+ /clear（清空上下文）三个命令项。 */
 export function buildBotSessionCommandItems({
+  canUseFiles,
   canUseSkills,
   skillItems,
   fileItems,
@@ -49,7 +51,7 @@ export function buildBotSessionCommandItems({
   };
   return [
     ...(canUseSkills ? [skillCommand] : []),
-    {
+    ...(canUseFiles ? [{
       id: '__file_entry__',
       name: 'file',
       description: '引用本会话已上传的文件',
@@ -69,7 +71,7 @@ export function buildBotSessionCommandItems({
         onSelect: () => {},
         format: () => '',
       },
-    },
+    } satisfies CommandItem] : []),
     {
       id: '__clear__',
       name: 'clear',

@@ -23,6 +23,7 @@ const files: UseBotSessionFilesResult = {
 function useCommands(overrides = {}) {
   return useBotSessionCommands({
     enabled: true,
+    canUseFiles: true,
     canUseSkills: true,
     files,
     skillsState: skills,

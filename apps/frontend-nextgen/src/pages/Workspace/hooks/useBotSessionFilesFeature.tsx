@@ -1,6 +1,7 @@
 /** useBotSessionFilesFeature — 装配单聊会话文件的上传/管理/引用 + /clear /skill 命令,
  *  返回 ChatPanel 所需的 fileChip / command / fileToolbar / senderRef / 副屏面板节点。 */
 import type { BotRuntimeStage } from '@/domain/botWorkshop';
+import { supportsBotSessionFiles } from '@/domain/botSessionFileCapability';
 import type { ComposerCapabilitySetsState } from '@/components/Workspace/CapabilitySetViewer/types';
 import { BotSessionFileOverlays } from '@/pages/Workspace/components/BotSessionFiles/BotSessionFileOverlays';
 import { useBotResourceJump } from '@/pages/Workspace/hooks/useBotResourceJump';
@@ -17,6 +18,7 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
 export interface UseBotSessionFilesFeatureResult {
+  filesSupported: boolean;
   senderRef: React.RefObject<SenderRef | null>;
   fileChip: FileChipConfig;
   command: CommandConfig;
@@ -44,7 +46,8 @@ export function useBotSessionFilesFeature(
   onClear: () => Promise<void>,
   stageOverride?: BotRuntimeStage,
 ): UseBotSessionFilesFeatureResult {
-  const botId = bot?.botType === 'desktop' ? null : bot?.realBotId ?? null;
+  const filesSupported = supportsBotSessionFiles(bot);
+  const botId = filesSupported ? bot?.realBotId ?? null : null;
   const sessionId = session?.sessionId ?? null;
   const ownerId = bot?.ownerId;
   // Debug input supplies its exact stage; ordinary callers retain their existing request shape.
@@ -130,21 +133,21 @@ export function useBotSessionFilesFeature(
   );
 
   const command = useBotSessionCommands({
-    enabled, canUseSkills, files, skillsState, handleReference, handleSelectSkill, onClear,
+    enabled, canUseFiles: filesSupported, canUseSkills, files, skillsState, handleReference, handleSelectSkill, onClear,
   });
 
   // 上传文件仍在 ComposerCapabilitiesMenu（onUpload）；文件管理入口已迁至单聊顶栏
   // （ChatPanel onManageFiles → openFileDrawer），fileToolbar 不渲染独立按钮。
   const fileToolbar = useMemo(() => null, []);
 
-  const openFileDrawer = useCallback(() => setDrawerOpen(true), []);
+  const openFileDrawer = useCallback(() => { if (enabled) setDrawerOpen(true); }, [enabled]);
   const closeFileDrawer = useCallback(() => setDrawerOpen(false), []);
-  const openUpload = useCallback(() => setUploadOpen(true), []);
+  const openUpload = useCallback(() => { if (enabled) setUploadOpen(true); }, [enabled]);
 
   // 资源管理面板 → Bot 完整资源目录：露出/置灰/跨空间切换由独立 Hook 承担。
   const resourceJump = useBotResourceJump(bot, stage);
 
-  const featureNode = (
+  const featureNode = filesSupported ? (
     <BotSessionFileOverlays
       botId={botId}
       sessionId={sessionId}
@@ -162,9 +165,10 @@ export function useBotSessionFilesFeature(
       onReference={handleReference}
       resourceJump={resourceJump}
     />
-  );
+  ) : null;
 
   return {
+    filesSupported,
     senderRef,
     fileChip,
     command,
