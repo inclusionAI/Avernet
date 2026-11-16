@@ -24,6 +24,7 @@ from agentclaw.community.core.service_bot.services.publish_exceptions import (
     BotNotFoundError,
     BotNotServiceTypeError,
     BotPublishServiceError,
+    EvalBindingNotFoundError,
     BotTypeNotSupportedError,
     PublishAlreadyExistsError,
     PublishNotFoundError,
@@ -735,7 +736,7 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
                     "device_id": eval_binding.device_id,
                 }
 
-            raise BotPublishServiceError(
+            raise EvalBindingNotFoundError(
                 f"未找到 bot_id={bot_id} 的评测环境绑定信息"
                 f"（task_uuid={task_uuid}, 两条路径均无结果）"
             )
