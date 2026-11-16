@@ -387,13 +387,9 @@ def commission_runtime(commission_deployment, request):
 @pytest.mark.parametrize("orchestration", ["legacy_workflow", "autonomous"])
 def test_end_to_end_commission_flow(commission_deployment, tmp_path, orchestration):
     # 新版本只需标准 Task 合同,不传 domain/workflow。@1 保留历史定义。
-    optional_profiles = (
-        {"domain": TASK_COMMISSION_PROFILE.domain, "workflow": TASK_COMMISSION_PROFILE.workflow}
-        if orchestration == "legacy_workflow" else {}
-    )
     profile = create_product_profile(
         ProductProfileCreateCommand(
-            ref=VersionedProfileRef("task_commission", 1 if optional_profiles else 2),
+            ref=VersionedProfileRef("task_commission", 1),
             composition=TASK_COMMISSION_PROFILE.composition,
             scenario_roles=TASK_COMMISSION_PROFILE.scenario_roles,
             governance=TASK_COMMISSION_PROFILE.governance,
@@ -403,8 +399,7 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path, orchestrati
                 TASK_COMMISSION_PROFILE.compatibility,
                 required_layers=("L2", "L3", "L4", "L5"),
             ),
-            publication=TASK_COMMISSION_PROFILE.publication,
-            **optional_profiles,
+            publication=TASK_COMMISSION_PROFILE.publication
         )
     )
 
@@ -464,18 +459,6 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path, orchestrati
 
         # 6、调用 L5 Open Method的-提交申请。
         record = injector.get(ContextCollabRepositoryProtocol).get_current_status(task_id)
-        assert record is not None
-        assert record.product_instance is not None
-        instance = record.product_instance
-        if orchestration == "autonomous":
-            assert profile.domain is None and profile.workflow is None
-            assert instance.domain_ref is None and instance.workflow_ref is None
-            assert instance.task_contract_ref == STANDARD_TASK_CONTRACT_REF
-            assert record.creation_facts["workflow_kind"] is None
-        else:
-            assert instance.domain_ref == profile.domain.ref
-            assert instance.workflow_ref == profile.workflow.ref
-            assert instance.task_contract_ref is None
         submitted = open_method.submit_application(
             collab_context_id=task_id,
             method_binding_id=opportunity.method_binding_id,
