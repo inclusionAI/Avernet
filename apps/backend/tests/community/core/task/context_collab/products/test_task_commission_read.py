@@ -318,7 +318,7 @@ class _WriteRepoShim(_FakeRepo):
             collet_id=collab_context_id,
             initiator_ref=request.initial_event.actor_ref,
             state=_ColletState.ACTIVE,
-            scope=request.space,
+            scope=request.to_space,
             current_event_id=event_id,
             version=1,
         )

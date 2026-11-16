@@ -406,7 +406,7 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path, orchestrati
         # 2、通过 L4 北向用例创建 Collet（同时创建 Task、初始事件并投影 L5 MethodBinding）
         collet = collab_service.create_collet(
             ColletCreateCommand(
-                space=SPACE,
+                to_space=SPACE,
                 principal_ref=HUMAN.actor,
                 product_kind=profile.ref.profile_id,
                 workflow_kind=profile.workflow.ref.profile_id if profile.workflow else None,

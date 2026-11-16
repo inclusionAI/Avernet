@@ -189,7 +189,7 @@ class TestCreateContext:
         assert result.collet_id.startswith("collet_")
         assert result.version == 1
         assert result.initiator_ref == actor.actor
-        assert result.scope == make_create_command().space
+        assert result.scope == make_create_command().to_space
         assert result.state is ColletState.ACTIVE
         assert result.current_event_id == record.initial_event.event_id
         assert result.current_event_id.startswith("evt_")

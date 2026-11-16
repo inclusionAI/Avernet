@@ -182,7 +182,7 @@ class ColletCreateRequest(BaseModel):
 
     def to_domain(self) -> ColletCreateCommand:
         return ColletCreateCommand(
-            space=self.space.to_domain(),
+            to_space=self.space.to_domain(),
             principal_ref=self.principal_ref.to_domain(),
             product_kind=self.product_kind,
             workflow_kind=self.workflow_kind,
