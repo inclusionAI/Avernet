@@ -18,6 +18,17 @@ from agentclaw.community.plugin_api.http_client import (
     HttpClientRequestError,
     HttpClientStatusError,
 )
+
+# ant_baselib 的 tracing wrapper 会将 httpx 传输层错误包装为
+# HttpxCallingException。社区部署不含 ant_baselib，因此为可选导入。
+try:  # pragma: no cover - corp-only dependency
+    from ant_baselib.tracer.patches.httpx_client import (
+        HttpxCallingException as _HttpxCallingException,
+    )
+    _TRANSPORT_WRAP_EXCS: tuple[type[BaseException], ...] = (_HttpxCallingException,)
+except Exception:  # pragma: no cover - community deployments
+    _TRANSPORT_WRAP_EXCS = ()
+
 from agentclaw.community.core.devices.services import mcp_device_transport as mcp_transport
 
 logger = get_logger()
@@ -117,7 +128,7 @@ class BaasDeviceSyncService(DeviceSync):
                 ):
                     raise
                 error_detail = f"HTTP {error.response.status_code}"
-            except HttpClientRequestError as error:
+            except (HttpClientRequestError, *_TRANSPORT_WRAP_EXCS) as error:
                 if delay_seconds is None:
                     raise
                 error_detail = str(error)
