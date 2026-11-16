@@ -14,7 +14,8 @@
   由 ``resolve_transition`` 抛 ``ContextCollabValidationError`` 向外传。
 
 ``TASK_COMMISSION_PRECONDITIONS`` 仅为兼容导出,从机器迁移派生;
-G4 机器是唯一迁移权威。L6 WorkflowProfile 选择是否严格拒绝越序控制事件,
+G4 机器是唯一迁移权威。显式 Work 操作要求匹配迁移;通用追加是否严格拒绝越序控制事件
+由所选 L6 Task/Workflow 合同决定,
 通用与产品入口都经共享 G4 检查,不另建时序表。
 """
 
@@ -43,8 +44,14 @@ def resolve_workflow_status(
     payload: dict,
     actor,
     workflow_version: int | None = None,
+    require_transition: bool = False,
 ) -> str | None:
-    """Adjudicate an identified L4 Task, never a query snapshot or create DTO."""
+    """Adjudicate Task; explicit Work operations require a matching transition.
+
+    Generic event append retains its historical unmatched-event/no-machine
+    behavior. Work.start opts into strict resolution instead of a successful
+    append that leaves the Task unchanged.
+    """
     machine = (
         MACHINE_REGISTRY.get(workflow_kind)
         if workflow_version is None
@@ -52,6 +59,10 @@ def resolve_workflow_status(
     )
     if workflow_version is not None and machine is None:
         raise ContextCollabValidationError("versioned workflow machine is unavailable")
+    if require_transition and task is None:
+        raise ContextCollabValidationError("cannot advance Work without an L4 Task")
+    if require_transition and machine is None:
+        raise ContextCollabValidationError("Work operation requires a Task lifecycle machine")
     if task is None:
         # Existing partial rows intentionally have no Task state to adjudicate.
         return None
@@ -64,6 +75,10 @@ def resolve_workflow_status(
         if rule.event_name == event_kind and current_status in rule.from_states
     ]
     if not matched_rules:
+        if require_transition:
+            raise ContextCollabValidationError(
+                f"Work event {event_kind!r} is not allowed from status {current_status!r}"
+            )
         return current_status
     guard_input = GuardEvaluationInput(
         actor=actor,

@@ -10,6 +10,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
+from agentclaw.community.core.task.context_collab.errors import (
+    ContextCollabValidationError,
+)
 from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
     PrincipalRef,
 )
@@ -75,6 +78,25 @@ class EventWriter(Protocol):
     def append_event(
         self, collab_context_id: str, request: AppendEventRecordRequest
     ) -> AppendedEvent: ...
+
+
+@dataclass(frozen=True)
+class WorkStartCommand:
+    """Start the root Task of an existing Collet, fencing its Collet revision.
+
+    Actor/event identity and public visibility are chosen by the L4 entrypoint,
+    not supplied by the caller. Starting neither dispatches an Agent nor creates
+    an Activity/external execution attempt.
+    """
+
+    expected_version: int
+    note: str = ""
+
+    def __post_init__(self) -> None:
+        if type(self.expected_version) is not int or self.expected_version < 1:
+            raise ContextCollabValidationError("expected_version must be positive")
+        if not isinstance(self.note, str):
+            raise ContextCollabValidationError("Work start note must be a string")
 
 
 @dataclass

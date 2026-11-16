@@ -2,7 +2,7 @@
 
 用户通过产品 Service API 操作和观察;case 显式以 Bot ActorContext 调用
 L5 Open 查询和提交申请,再以发布人授权的策略身份直接调用 Open.screen/admit,
-录取后由任务产品的 Work 动作入口启动 L4 Work;Bot 只负责执行并通过签名 A2A HTTP 入站上报。
+录取后直接调用 L4 Work.start;Bot 只负责执行并通过签名 A2A HTTP 入站上报。
 使用真实产品 Profile、仓储、L5 Open 和 G1/G4。直接 Open 调用不验证 JWT;
 另保留真实产品策略的签名 HTTP Query/Apply 回归。Open 负责参与录取,
 开始、进度与成果提交属于 L4 Work,不是 Bot 的内置方法或新的 Open 方法。
@@ -56,6 +56,7 @@ from agentclaw.community.core.task.context_collab.l5_methods.method_binding impo
 )
 from agentclaw.community.core.task.context_collab.l5_methods.open_profile import (
     ApplicationState,
+    ParticipationType,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.operations.contracts import (
     OpenAdmitCommand,
@@ -80,6 +81,12 @@ from agentclaw.community.core.task.context_collab.l6_products.operations import 
     ProductProfileCreateCommand,
     create_product_profile,
 )
+from agentclaw.community.core.task.context_collab.l6_products.publication import (
+    OpenPublicationProfile,
+)
+from agentclaw.community.core.task.context_collab.products.task_commission.publication import (
+    BotSelfApplicationAdmission,
+)
 from agentclaw.community.core.task.context_collab.persistence.method_store import (
     MethodStoreProtocol,
 )
@@ -103,6 +110,7 @@ from agentclaw.community.core.task.context_collab.products.task_commission.servi
 from agentclaw.community.core.task.context_collab.service_api import (
     ColletCreateCommand,
     ContextCollabServiceProtocol,
+    WorkStartCommand,
 )
 from agentclaw.community.di.modules.context_collab_products import (
     INSTALLED_PRODUCT_PROFILES,
@@ -210,6 +218,10 @@ def _trace_runtime(monkeypatch, injector: Injector) -> None:
                 "screen": "L5 Open 审核参与申请",
                 "admit": "L5 Open 录取指定 Bot",
             },
+        ),
+        (
+            ContextCollabServiceProtocol,
+            {"start": "L4 Work.start: 经 G1/G4 启动根 Task,不派发 Bot"},
         ),
         (
             A2aDeliveryPort,
@@ -394,7 +406,14 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path, orchestrati
             scenario_roles=TASK_COMMISSION_PROFILE.scenario_roles,    # 角色信息
             governance=TASK_COMMISSION_PROFILE.governance,            # g1-g4配置
             compatibility=TASK_COMMISSION_PROFILE.compatibility,      # 能力需求声明
-            publication=TASK_COMMISSION_PROFILE.publication
+            publication=OpenPublicationProfile(                       # OPEN方法发布录取策略
+                admission=BotSelfApplicationAdmission(                # 指定执行者、发布人代办录取的策略
+                    applicant_role="assignee",
+                    accountable_role="owner",
+                    participation_type=ParticipationType.COLLET_PARTICIPANT,  # 录取为当前 Collet 的参与者
+                    capacity=1,  # 最多一个未终态申请占用名额
+                ),
+            ),
         )
     )
 
@@ -468,6 +487,15 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path, orchestrati
         )
         assert submitted.accepted and submitted.state == "SUBMITTED"
 
+        # 提交申请还不等于录取,不能启动 Work;拒绝不能写入 Task/Event。
+        repository = injector.get(ContextCollabRepositoryProtocol)
+        before_admission = repository.get_current_status(collect_id)
+        with pytest.raises(ContextCollabValidationError):
+            collab_service.start(
+                collect_id, WorkStartCommand(expected_version=collet.version), bot_context
+            )
+        assert repository.get_current_status(collect_id) == before_admission
+
         # 7、针对每个机会，检查申请信息，并选择一个候选者录取
         policy_context = ActorContext(HUMAN.actor, source="product_policy")   # 采用product profile中定义的录取策略
         [policy_ref] = opportunity.admission_policy_refs
@@ -500,11 +528,16 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path, orchestrati
         assert application.state is ApplicationState.ADMITTED
         assert application.applicant_agent_ref == BOT_ASSIGNEE
 
-        # 8、通用事件追加入口,不表达 L4 Work.start 的语义。
-        started = service.start_task(
-            TaskAdvanceCommand(collect_id, note="录取后启动任务执行"), bot_context
+        # 8、直接调用 L4 Work.start;不是产品 start_task 或通用事件追加接口。
+        started = collab_service.start(
+            collect_id,
+            WorkStartCommand(
+                expected_version=collet.version,
+                note="录取后启动任务执行",
+            ),
+            bot_context,
         )
-        assert started.status == "in_progress"
+        assert started.accepted and started.current_status == "in_progress"
         assert service.detail_task(collect_id).status == "in_progress"
         assert injector.get(A2aDeliveryPort).bridge_records() == ()
 

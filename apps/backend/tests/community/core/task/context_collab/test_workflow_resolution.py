@@ -114,3 +114,41 @@ class TestTaskCommissionPreconditions:
                 "blocked",
             },
         }
+
+
+class TestExplicitWorkTransition:
+    @pytest.mark.parametrize(
+        "task,kind,version,error",
+        [
+            (None, "team_todo_execution", None, "without an L4 Task"),
+            (_snapshot("created"), None, None, "lifecycle machine"),
+            (_snapshot("created"), "not_registered", None, "lifecycle machine"),
+            (_snapshot("created"), "team_todo_execution", 999, "unavailable"),
+            (_snapshot("in_progress"), "team_todo_execution", None, "not allowed"),
+            (_snapshot("done"), "team_todo_execution", None, "not allowed"),
+        ],
+    )
+    def test_requires_task_machine_and_matching_transition(
+        self, task, kind, version, error
+    ):
+        with pytest.raises(ContextCollabValidationError, match=error):
+            resolve_workflow_status(
+                workflow_kind=kind,
+                workflow_version=version,
+                task=task,
+                event_kind="task.started",
+                payload={},
+                actor=PRINCIPAL,
+                require_transition=True,
+            )
+
+    def test_transition_guard_still_applies(self):
+        with pytest.raises(ContextCollabValidationError, match="guard"):
+            resolve_workflow_status(
+                workflow_kind="team_todo_execution",
+                task=_snapshot("created"),
+                event_kind="task.started",
+                payload={},
+                actor=PrincipalRef("human", "stranger"),
+                require_transition=True,
+            )
