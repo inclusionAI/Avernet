@@ -8,8 +8,7 @@ if (!preset) throw new Error(`Unknown PRESET: ${presetName}`);
 const gateway = process.env.TEAMCLAW_GW_BASE || preset.servers.TEAMCLAW_GW;
 const bcsEndpointPre = process.env.BCS_ENDPOINT_PRE || preset.servers.BCS_ENDPOINT_PRE;
 const bcsEndpointProd = process.env.BCS_ENDPOINT_PROD || preset.servers.BCS_ENDPOINT_PROD;
-// Task APIs may be deployed as a dedicated service. Default to Gateway so a single-upstream
-// Open Core deployment remains runnable; operators can split it with TASK_ENGINE_UPSTREAM.
+// Internal task APIs may use a dedicated Engine; public /openapi task APIs always use Gateway.
 const taskEngine = process.env.TASK_ENGINE_UPSTREAM || gateway;
 const admin = process.env.TEAMCLAW_ADMIN_BASE || preset.servers.TEAMCLAW_ADMIN;
 const privateChatManagement =
@@ -62,12 +61,11 @@ export default defineConfig({
     '/openapi/v1/bots/work-order-notifications': proxy(admin),
     '/openapi/v1/bots/work-orders': proxy(admin),
     '/openapi/v1/bots/spaces': proxy(admin),
-    // BBS 已登记到 Gateway；两个更窄的匹配必须位于通用 task engine 路由之前。
+    // 任务公开接口（包括 BBS）统一经过 Gateway，不直连 Task Engine。
     // 预发时 gateway 由 TEAMCLAW_GW_BASE 注入为 teamclawgw-pre，公开仓库不硬编码部署域名。
     '/openapi/v1/collaboration/tasks/bbs': proxy(gateway, true),
     '/openapi/v1/collaboration/tasks/bots/*/bbs/**': proxy(gateway, true),
-    // 其余任务执行/进度/授权仍可走独立 Task Engine。
-    '/openapi/v1/collaboration/tasks': proxy(taskEngine, true),
+    '/openapi/v1/collaboration/tasks': proxy(gateway, true),
     '/openapi': proxy(gateway, true),
     // 本地直连 Task Engine 调试：必须位于通用 collaboration Gateway 路由之前。
     '/api/v1/collaboration/tasks': proxy(taskEngine, true),

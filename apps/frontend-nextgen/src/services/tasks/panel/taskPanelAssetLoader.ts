@@ -1,6 +1,6 @@
 import React from 'react';
 import ReactDOM from 'react-dom';
-import { discoverTaskPanelUrl, pinTaskPanelRelease, pinTaskPanelVersion } from './taskPanelAssetSource';
+import { discoverTaskPanelUrl, pinTaskPanelRelease, pinTaskPanelVersion, getTaskPanelDevelopmentStyle } from './taskPanelAssetSource';
 import type { TaskPanelAsset } from '@avernet-assets/task-panel';
 export type { TaskPanelAsset } from '@avernet-assets/task-panel';
 
@@ -28,11 +28,15 @@ export function loadTaskPanelAsset(): Promise<TaskPanelAsset> {
       pinTaskPanelVersion(asset.assetVersion);
       return asset;
     };
-    const style = document.createElement('link');
-    style.rel = 'stylesheet'; style.href = new URL('task-panel.css', url).href;
-    style.dataset.taskPanelSource = url;
+    const preparedStyle = getTaskPanelDevelopmentStyle(url);
+    const style = preparedStyle ?? document.createElement('link');
+    if (!preparedStyle) {
+      style.rel = 'stylesheet'; style.href = new URL('task-panel.css', url).href;
+      style.dataset.taskPanelSource = url;
+    }
+    style.media = 'all';
     let script: HTMLScriptElement | null = null;
-    let styleReady = false;
+    let styleReady = Boolean(preparedStyle);
     let scriptReady = Boolean(evaluatedAsset);
     let settled = false;
     let timer: number;
@@ -47,7 +51,7 @@ export function loadTaskPanelAsset(): Promise<TaskPanelAsset> {
     timer = window.setTimeout(() => fail(new Error('任务副屏加载超时，请重试。')), 30_000);
     style.onload = () => { styleReady = true; finish(); };
     style.onerror = () => fail(new Error('任务副屏样式加载失败，请重试。'));
-    document.head.appendChild(style);
+    if (!preparedStyle) document.head.appendChild(style);
     if (!scriptReady) {
       selectedUrl = url;
       script = document.createElement('script'); script.src = url; script.async = true;

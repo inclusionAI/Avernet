@@ -1,3 +1,4 @@
+import { logTaskPanelDiagnostic, traceTaskPanelRequest } from './taskPanelDiagnostics';
 import { captureTaskPanelOrigin, navigateTaskPanelConversation, restoreTaskPanelOrigin } from './taskPanelConversationAdapter';
 import { getCapabilities } from '@/capabilities';
 import { extractLoginUrl, isAceLoginResponse } from '@/services/backendApi/aceLoginBody';
@@ -43,13 +44,19 @@ export const nextgenTaskPanelHost: TaskPanelHost = {
   getViewer: () => { const id = viewerId(); return id ? { userId: id } : null; },
   getConversation: () => conversation,
   transport: { async requestJson(path, signal) {
-    // 捕获请求发出时的认证代次:晚到的 ACE 拦截体(重登成功后才到达)不登记,避免恢复后 Modal 闪回。
-    const requestAuthEpoch = useExternalAuthStore.getState().authEpoch;
-    const response = await fetch(path, { credentials: 'include', signal });
-    if (!response.ok) throw Object.assign(new Error(`请求失败（${response.status}）`), { status: response.status });
-    const body: unknown = await response.json();
-    if (isAceLoginResponse(body)) { triggerAceLoginRedirect(extractLoginUrl(body), requestAuthEpoch); throw Object.assign(new Error('登录状态已失效。'), { name: 'AbortError', status: 401 }); }
-    return body;
+    const diagnostic = traceTaskPanelRequest(path, signal);
+    let failure: unknown;
+    try {
+      // 捕获请求发出时的认证代次:晚到的 ACE 拦截体(重登成功后才到达)不登记,避免恢复后 Modal 闪回。
+      const requestAuthEpoch = useExternalAuthStore.getState().authEpoch;
+      const response = await fetch(path, { credentials: 'include', signal });
+      diagnostic?.response(response.status);
+      if (!response.ok) throw Object.assign(new Error(`请求失败（${response.status}）`), { status: response.status });
+      const body: unknown = await response.json();
+      if (isAceLoginResponse(body)) { triggerAceLoginRedirect(extractLoginUrl(body), requestAuthEpoch); throw Object.assign(new Error('登录状态已失效。'), { name: 'AbortError', status: 401 }); }
+      return body;
+    } catch (error) { failure = error; throw error; }
+    finally { diagnostic?.end(failure); }
   } },
   artifacts: taskPanelArtifacts, history: { readPage: (...args) => history.readPage(...args) },
   present: (...args) => present(...args), navigate: (...args) => navigate(...args),
@@ -63,6 +70,7 @@ export function bindTaskPanelInteraction(callback: TaskPanelHost['recordInteract
 export function peekTaskPanelController(): TaskPanelController | null { return controller; }
 /** Identity loss is never a navigation handoff. Invalidate pending asset loads as well. */
 export function resetTaskPanelRuntime() {
+  logTaskPanelDiagnostic('runtime.reset', { generation, sessionId: conversation?.sessionId, ownerViewerId }, true);
   generation++; observedViewerId = viewerId();
   const previous = controller; controller = null; loading = null; ownerViewerId = null;
   previous?.dispose(); unsubscribeSnapshot?.(); unsubscribeSnapshot = null;
@@ -100,9 +108,11 @@ export async function getTaskPanelController(): Promise<TaskPanelController> {
       if (revision !== generation || viewerId() !== userId) throw Object.assign(new Error('任务副屏身份已失效。'), { name: 'AbortError' });
       const active = asset.createTaskPanelController(nextgenTaskPanelHost);
       controller = active;
+      logTaskPanelDiagnostic('runtime.controller-created', { generation: revision, viewerId: userId });
       // Legacy selectors are output-only projections. Commands never flow back from this mirror.
       unsubscribeSnapshot = active.subscribe(() => {
         const snapshot = active.getSnapshot();
+        logTaskPanelDiagnostic('controller.snapshot', { generation, sessionId: snapshot.conversation?.sessionId, activeTaskId: snapshot.activeTaskId, recoveryStatus: snapshot.recovery?.status });
         useTaskSidePanelStore.setState({ activeTaskId: snapshot.activeTaskId });
         if (snapshot.conversation) {
           const associations = useTaskSessionAssociationStore.getState();
@@ -142,6 +152,7 @@ export function configureTaskPanelSession(ref: ConversationRef, options: {
   history: TaskPanelHost['history']; present?: TaskPanelHost['present']; navigate?: TaskPanelHost['navigate'];
   preserve?: TaskPanelHost['preservePanel']; captureOrigin?: TaskPanelHost['captureOrigin']; restoreOrigin?: TaskPanelHost['restoreOrigin'];
 }) {
+  logTaskPanelDiagnostic('runtime.bind', { fromSessionId: conversation?.sessionId, sessionId: ref.sessionId, generation });
   conversation = ref; history = options.history;
   if (options.present) present = options.present;
   if (options.navigate) navigate = options.navigate;
@@ -150,6 +161,7 @@ export function configureTaskPanelSession(ref: ConversationRef, options: {
   if (options.restoreOrigin) restoreOrigin = options.restoreOrigin;
 }
 export function releaseTaskPanelSession(sessionId: string, expectedGeneration = generation) {
+  logTaskPanelDiagnostic('runtime.release', { sessionId, boundSessionId: conversation?.sessionId, expectedGeneration, generation, preserving }, true);
   if (expectedGeneration !== generation) return;
   if (ownerViewerId && ownerViewerId !== viewerId()) { resetTaskPanelRuntime(); return; }
   if (conversation?.sessionId !== sessionId || preserving) return;
