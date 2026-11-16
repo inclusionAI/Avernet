@@ -598,19 +598,18 @@ class OpenMethodOpsServiceProtocol(Protocol):
 
     def query_opportunities(
         self,
-        collab_context_id: str,
-        method_binding_id: str,
-        context: ActorContext,
+        actor_context: ActorContext,
     ) -> tuple[OpenOpportunity, ...]:
-        """Read available opportunities on one ACTIVE Open binding.
+        """Discover available opportunities in the current tenant/environment.
 
-        Requires a G1-authenticated actor, not prior participation. Returns OPEN
-        opportunities within their time window with free capacity; SUBMITTED,
-        SCREENING and ADMITTED applications occupy slots. This is a read-time
-        snapshot, not a reservation, eligibility decision or admission. No writes
-        or delivery occur. Missing bindings raise NotFound; non-Open/inactive
-        bindings and unauthorized callers raise ValidationError. Product-wide
-        discovery, designation and profile policy remain outside L5.
+        Requires a G1-authenticated actor, not prior participation. Searches all
+        ACTIVE bindings declaring Open and omits bindings denied by G1. Returns
+        OPEN opportunities within their time window with free capacity;
+        SUBMITTED, SCREENING and ADMITTED applications occupy slots within the
+        exact Collet/binding/opportunity. No candidates returns an empty tuple;
+        unauthorized discovery raises ValidationError even on an empty store.
+        This read-time snapshot performs no writes, reservations or admission.
+        Product designation and profile eligibility policy remain outside L5.
         """
         ...
 

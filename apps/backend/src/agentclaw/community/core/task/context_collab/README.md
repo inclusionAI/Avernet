@@ -144,15 +144,21 @@ products/
   is removed. HTTP builds the command identity from verified authentication,
   not JSON. Other Open routes remain binding-scoped. See the
   [publication regressions](../../../../../../tests/community/core/task/context_collab/test_open_publication.py).
-- L5 Open owns `OpenMethodOpsServiceProtocol.query_opportunities`: a read-only
-  snapshot on an explicitly identified, ACTIVE Open binding. G1 requires an
-  authenticated actor, not existing membership. Only OPEN opportunities within
-  their application window and below capacity are returned; querying neither
-  reserves capacity nor admits an applicant. Product discovery selects its
-  authorized task/profile candidates and delegates these Method checks to L5,
-  retaining designation and product-policy filtering outside L5. The existing
-  signed HTTP product-discovery operation remains L4 Query; no new wire tuple
-  or global L5 discovery index is implied. See the [direct invocation example](products/task_commission/README.md#calling-l5-open-directly).
+- L5 Open owns `OpenMethodOpsServiceProtocol.query_opportunities(actor_context)`:
+  read-only discovery across Collets and MethodBindings in the current
+  tenant/environment, without caller-supplied Collet or binding IDs. G1 validates
+  the actor before enumeration, including an empty store, and checks each
+  candidate binding; denied, inactive and non-Open bindings are omitted. Only
+  OPEN opportunities within their application window and below capacity are
+  returned. Capacity remains isolated by Collet, binding and opportunity;
+  querying neither reserves capacity nor admits an applicant. No candidates
+  returns an empty tuple. MethodStore's `list_bindings_in_axes` supplies the
+  tenant/environment-bounded candidate snapshot, not a durable global index.
+  Product discovery filters the L5 result by authorized task/profile,
+  designation and product policy outside L5. The existing signed HTTP
+  product-discovery operation remains L4 Query; no new HTTP route or wire tuple
+  is introduced. See the [query regressions](../../../../../../tests/community/core/task/context_collab/test_open_query.py)
+  and [direct invocation example](products/task_commission/README.md#calling-l5-open-directly).
 - All `services/*` modules are import-only compatibility forwards, not
   implementations. Product instantiation, product-aware policy, combined creation
   and Method bootstrap/recovery live in L6. The L6 legacy lifecycle constructor

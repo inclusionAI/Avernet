@@ -170,7 +170,7 @@ def test_method_operations_use_lower_reader_and_resolved_facts(kind):
         )
         assert result.state == "OPEN"
         [opportunity] = service.query_opportunities(
-            COLLET_ID, binding_id, ActorContext(BOT, "a2a")
+            actor_context=ActorContext(BOT, "a2a")
         )
         assert opportunity.opportunity_id == result.object_id
         assert opportunity.scope_ref == "scope"

@@ -149,6 +149,13 @@ class MethodOpsAuthorizerProtocol(Protocol):
         executor_id: str | None = None,
     ) -> None: ...
 
+    def check_open_discovery(self, actor_context: ActorContext) -> None:
+        """Authorize discovery before enumeration, including an empty store.
+
+        Candidate bindings are additionally checked through check_open_op.
+        """
+        ...
+
     def check_open_op(
         self,
         op: str,
@@ -291,6 +298,14 @@ class StructuralMethodOpsAuthorizer:
             _require_authenticated(op, binding, actor)
             return
         _require_owner(op, binding, actor, principal_id, executor_id)
+
+    def check_open_discovery(self, actor_context: ActorContext) -> None:
+        """公开发现只要求已认证身份;不建立任何参与或资源授权。"""
+        if not _is_authenticated_identity(_actor_identity(actor_context)):
+            raise ContextCollabValidationError(
+                "method op 'query_opportunities' is not allowed for actor "
+                f"{_actor_identity(actor_context)!r}"
+            )
 
     def check_open_op(
         self,

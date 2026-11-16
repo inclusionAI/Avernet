@@ -87,14 +87,15 @@ those references without renegotiating or selecting latest.
    with no Group roster, Group member or Single selection. A selected-agent
    RoleBinding is designation, not admission.
 3. The designated, authenticated Bot calls **L5 Open's `query_opportunities`**
-   for a known Collet/MethodBinding, then **L5 Open's `submit_application`** as
-   itself. The Method service owns both operations; the Bot is their caller,
-   not the implementation owner. The wire action name remains `apply`.
+   with only its `actor_context` to discover available opportunities in the
+   current tenant/environment, then **L5 Open's `submit_application`** as itself
+   for the returned opportunity's Collet/MethodBinding. The Method service owns
+   both operations; the Bot is their caller, not the implementation owner. The wire action name remains `apply`.
    Product-wide discovery is also available through the existing signed **L4
-   Query** wire operation: product policy selects exact-profile, designated,
-   created tasks, delegates active-window/capacity checks to L5 Open and filters
-   opportunity scope/policy/type. Neither query requires prior participation
-   or writes application, participant binding or delivery records.
+   Query** wire operation: L5 Open checks active bindings, windows and capacity;
+   product policy then filters exact-profile, designated, created tasks and each
+   opportunity's binding/scope/policy/type. Neither query requires prior
+   participation or writes application, participant binding or delivery records.
 4. HTTP Apply rechecks availability and submits with the Bot as applicant and
    its **signed Bot owner** as accountable principal (not necessarily the publisher).
    Its `review_task_application` continuation reviews the existing L5 application
@@ -167,9 +168,7 @@ authorized policy actor:
 ```python
 open_method = injector.get(OpenMethodOpsServiceProtocol)
 [opportunity] = open_method.query_opportunities(
-    collab_context_id=task_id,
-    method_binding_id=binding_id,
-    context=bot_context,
+    actor_context=bot_context,
 )
 submitted = open_method.submit_application(
     collab_context_id=task_id,
@@ -214,8 +213,12 @@ assert admitted.state == "ADMITTED"
 `selected_agent_role_refs` are canonical references to the task's existing
 selected-agent RoleBindings, built with L4 `role_binding_ref`; they do not
 create participation. The case resolves them from the actual creation record.
-This is a **known-binding, in-process call**, not product-wide/global discovery
-or independent JWT verification. The test constructs its trusted actor context;
+This is an **in-process discovery call** across ACTIVE Open bindings in the
+current tenant/environment, not independent JWT verification. The isolated
+journey has one available opportunity; real callers may receive zero or many.
+L5 availability does not establish designation or product eligibility: the
+product discovery adapter still filters by pinned profile, exact Collet/binding,
+Bot designation and task state. The test constructs its trusted actor context;
 production delivery must establish it from verified authentication and inject
 its service dependency. Cross-Agent callers still use L1/A2A.
 

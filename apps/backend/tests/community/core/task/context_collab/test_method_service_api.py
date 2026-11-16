@@ -51,7 +51,8 @@ from agentclaw.community.core.task.context_collab.service_api import (
 
 MISSING = dataclasses.MISSING
 
-# 除 publish_opportunity 的完整命令外,操作均以 context: ActorContext 收尾。
+# 除 publish_opportunity 的完整命令、query_opportunities 的 actor_context 外,
+# 操作均以 context: ActorContext 收尾。
 CTX = ("context", "ActorContext")
 
 
@@ -386,11 +387,7 @@ SWARM_SIGNATURES: dict[str, tuple] = {
 
 OPEN_SIGNATURES: dict[str, tuple] = {
     "query_opportunities": (
-        _params(
-            ("collab_context_id", "str"),
-            ("method_binding_id", "str"),
-            CTX,
-        ),
+        _params(("actor_context", "ActorContext")),
         "tuple[OpenOpportunity, ...]",
     ),
     "publish_opportunity": (

@@ -12,7 +12,8 @@ RF#2 与结构守卫在 ``_gate`` 落地:``"Open"`` 必须在 ``method_names``
 操作一律拒绝(spec §4 通用规则);可申请机会查询也要求 ACTIVE。授权经 G1
 ``MethodOpsAuthorizerProtocol.check_open_op``:八个治理面操作 owner
 面;``query_opportunities`` 是公开只读面、``submit_application`` 是公开提交面
-(均要求已认证 actor,不要求已参与);``withdraw``
+(均要求已认证 actor,不要求已参与);发现查询先经无绑定的
+``check_open_discovery`` 授权,再筛选并授权各 ACTIVE Open binding;``withdraw``
 是 self-help(与目标行 ``accountable_principal_ref`` 字符串相等才
 放行,调用方先定位目标行再授权,沿 group leave 先例)。P1 无身份
 注册表,字符串相等只保证"声明一致"(G1 §8.1)。
@@ -132,12 +133,9 @@ class OpenMethodServiceBase:
         与 Single/Group/Swarm 服务同款;self-help 操作(withdraw)由
         授权器比对 ``application.accountable_principal_ref``,调用方
         先定位目标行再授权。"""
-        record = self._collab_repo.get_current_status(collab_context_id)
-        if record is None:
-            principal_id, executor_id = None, binding.participant_ref
-        else:
-            executor_id = record.designated_executor_id
-            principal_id = record.owner_principal_id
+        principal_id, executor_id = self._authorization_identities(
+            binding, collab_context_id
+        )
         self._authorizer.check_open_op(
             op,
             binding,
@@ -146,6 +144,14 @@ class OpenMethodServiceBase:
             principal_id=principal_id,
             executor_id=executor_id,
         )
+
+    def _authorization_identities(
+        self, binding: MethodBinding, collab_context_id: str
+    ) -> tuple[str | None, str | None]:
+        record = self._collab_repo.get_current_status(collab_context_id)
+        if record is None:
+            return None, binding.participant_ref
+        return record.owner_principal_id, record.designated_executor_id
 
     def _gate_preface(
         self,

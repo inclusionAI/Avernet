@@ -177,6 +177,21 @@ def test_list_bindings_preserves_insertion_order_and_context_scope():
     ]
 
 
+def test_list_bindings_in_axes_spans_collets_but_isolates_tenant_and_env():
+    store = InMemoryMethodStore()
+    first = _binding(state="ACTIVE")
+    second = _binding(collab_context_id="ctx-2", state="SUSPENDED")
+    store.upsert_binding(AXES_A, first)
+    store.upsert_binding(AXES_B, _binding(version=2))
+    store.upsert_binding(StoreAxes(AXES_A.avernet_tenant, "test"), _binding(version=3))
+    store.upsert_binding(AXES_A, second)
+    assert store.list_bindings_in_axes(AXES_A) == [first, second]
+    assert store.list_bindings_in_axes(StoreAxes("unused", "test")) == []
+    # The result is a snapshot container; mutating it cannot change the store.
+    store.list_bindings_in_axes(AXES_A).clear()
+    assert store.list_bindings_in_axes(AXES_A) == [first, second]
+
+
 # ---------------------------------------------------------------------------
 # composition edge 切片
 # ---------------------------------------------------------------------------

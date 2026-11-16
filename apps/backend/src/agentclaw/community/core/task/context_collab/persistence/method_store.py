@@ -109,6 +109,14 @@ class MethodStoreProtocol(Protocol):
         self, axes: StoreAxes, collab_context_id: str
     ) -> list[MethodBinding]: ...
 
+    def list_bindings_in_axes(self, axes: StoreAxes) -> list[MethodBinding]:
+        """List all bindings across Collets in exactly this tenant/environment.
+
+        Preserves insertion order without applying lifecycle or authorization
+        policy; callers must filter candidates before exposing opportunities.
+        """
+        ...
+
     def insert_composition_edge(
         self, axes: StoreAxes, edge: MethodCompositionEdge
     ) -> MethodCompositionEdge: ...

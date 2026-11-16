@@ -53,7 +53,7 @@ def _screen(service, binding, **application_overrides):
 
 def test_collet_participant_query_admit_replay_and_revoke():
     store, service, binding = _pure_open()
-    assert len(service.query_opportunities(COLLET_ID, binding, make_actor())) == 1
+    assert len(service.query_opportunities(actor_context=make_actor())) == 1
     assert store.list_participant_bindings(AXES, binding, COLLET_ID) == []
     app = submitted_application(service, binding_id=binding)
     with pytest.raises(ContextCollabValidationError, match="does not accept event"):

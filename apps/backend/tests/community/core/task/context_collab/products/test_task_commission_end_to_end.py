@@ -218,10 +218,8 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
 
         # 5、调用L5的OPEN方法-查询机会（实际应该是Agent自己调用）
         bot_context = ActorContext(PrincipalRef("bot", working_bot.bot_id), "a2a")
-        [opportunity] = l5_open_method.query_opportunities(  ## TODO bot mock
-            collab_context_id=collect_id,                    ## TODO collect_id, 只需要context_id，
-            method_binding_id=binding_id,
-            context=bot_context,
+        [opportunity] = l5_open_method.query_opportunities(
+            actor_context=bot_context,
         )
         assert opportunity.method_binding_id == binding_id
         assert opportunity.scope_ref == collect_id

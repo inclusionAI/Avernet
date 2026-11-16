@@ -181,6 +181,7 @@ class TaskCommissionSelfApplicationAdapter(TaskCommissionOpenMethodAdapter):
         if context.actor.principal_type != "bot" or not context.actor.principal_id:
             raise ContextCollabValidationError("opportunity discovery requires a Bot")
         axes = current_axes()
+        opportunities = self._open_ops.query_opportunities(actor_context=context)
         views = []
         for collet, facts, _ in self._repo.list_collets_by_product(
             profile.ref.profile_id
@@ -199,11 +200,10 @@ class TaskCommissionSelfApplicationAdapter(TaskCommissionOpenMethodAdapter):
             binding = self._store.get_binding(axes, binding_id, collet.collet_id)
             if binding is None or binding.state is not BindingState.ACTIVE:
                 continue
-            for opportunity in self._open_ops.query_opportunities(
-                collet.collet_id, binding_id, context
-            ):
+            for opportunity in opportunities:
                 if (
-                    opportunity.admission_policy_refs != (_POLICY_REF,)
+                    opportunity.method_binding_id != binding_id
+                    or opportunity.admission_policy_refs != (_POLICY_REF,)
                     or opportunity.scope_ref != collet.collet_id
                     or opportunity.participation_type
                     is not ParticipationType.COLLET_PARTICIPANT
