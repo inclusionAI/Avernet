@@ -108,6 +108,19 @@ class TeclawDeviceFileSystem(DeviceFileSystem):
             response.raise_for_status()
             logger.info("[TeclawDeviceFileSystem.delete_file] removed %s", engine_path)
             return True
+        except httpx.HTTPStatusError as e:
+            # Teclaw's 404 cannot distinguish an absent target from an
+            # unavailable route. Keep the existing False contract and reduce
+            # the observability volume without treating an expected missing
+            # target as an engine failure.
+            if e.response.status_code == 404:
+                logger.warning(
+                    "[TeclawDeviceFileSystem.delete_file] %s: HTTP 404 target missing or unavailable route",
+                    engine_path,
+                )
+                return False
+            logger.error("[TeclawDeviceFileSystem.delete_file] error: %s: %s", engine_path, e)
+            return False
         except Exception as e:
             logger.error("[TeclawDeviceFileSystem.delete_file] error: %s: %s", engine_path, e)
             return False
