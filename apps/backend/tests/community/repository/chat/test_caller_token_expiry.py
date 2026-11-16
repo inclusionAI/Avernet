@@ -444,3 +444,30 @@ def test_refresh_scope_waiter_observes_iam_committed_expiry(repo):
         first.result(timeout=5)
         second.result(timeout=5)
     assert observed == [end.isoformat()]
+
+
+def test_refresh_and_iam_select_the_same_row_for_update(repo):
+    from sqlalchemy import event
+    from sqlalchemy.dialects import mysql
+    from sqlalchemy.orm import Session
+
+    seed(repo)
+    locked = []
+
+    def capture(execution):
+        statement = execution.statement
+        if getattr(statement, "_for_update_arg", None) is not None:
+            locked.append(statement.compile(dialect=mysql.dialect()))
+
+    event.listen(Session, "do_orm_execute", capture)
+    try:
+        with refresh_scope(repo):
+            pass
+        with scope(repo, datetime.now(UTC) + timedelta(days=2)):
+            pass
+    finally:
+        event.remove(Session, "do_orm_execute", capture)
+    assert len(locked) == 2
+    assert str(locked[0]) == str(locked[1])
+    assert str(locked[0]).endswith("FOR UPDATE")
+    assert locked[0].params == locked[1].params
