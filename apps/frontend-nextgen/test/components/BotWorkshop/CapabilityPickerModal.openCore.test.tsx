@@ -19,7 +19,7 @@ test('Open Core / 阿里云部署添加 Skill 时仅展示我的 Skill', () => {
     />,
   );
 
-  expect(screen.getByRole('button', { name: '我的 Skill' })).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '我的 Skill' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: '引用市场 Skill' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: '引用空间 Skill' })).not.toBeInTheDocument();
   expect(screen.getByText('我的本地 Skill')).toBeInTheDocument();

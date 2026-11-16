@@ -92,7 +92,9 @@ test('桌面本地 Skill 的上传、启停和删除管理收敛到添加 Skill 
   expect(onLocalToggle).toHaveBeenCalledWith(expect.objectContaining({ id: 'local-1' }));
 });
 
-test('添加 MCP 只展示引用市场 MCP，不展示引用工坊 MCP', () => {
+// MCP 来源恒为市场（sources=['market']）：单来源时来源切换器整体隐藏
+// （孤悬「引用市场 MCP」选中项无切换意义；弹窗描述与搜索 placeholder 已交代范围）。
+test('添加 MCP 单来源时隐藏来源切换器，不渲染任何来源选项', () => {
   render(
     <CapabilityPickerModal
       kind="mcp"
@@ -107,7 +109,7 @@ test('添加 MCP 只展示引用市场 MCP，不展示引用工坊 MCP', () => {
     />,
   );
 
-  expect(screen.getByRole('button', { name: '引用市场 MCP' })).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '引用市场 MCP' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: '引用工坊 MCP' })).not.toBeInTheDocument();
 });
 
