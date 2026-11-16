@@ -70,6 +70,12 @@ from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime 
 from agentclaw.community.core.task.context_collab.l6_products.catalog import (
     ProductCatalog,
 )
+from agentclaw.community.core.task.context_collab.l6_products.contracts import (
+    VersionedProfileRef,
+)
+from agentclaw.community.core.task.context_collab.l6_products.task_contracts import (
+    STANDARD_TASK_CONTRACT_REF,
+)
 from agentclaw.community.core.task.context_collab.l6_products.operations import (
     ProductProfileCreateCommand,
     create_product_profile,
@@ -180,7 +186,7 @@ def _trace_runtime(monkeypatch, injector: Injector) -> None:
                 "apply_for_task": "指定 Bot 自己申请,触发产品自动审核",
                 "review_task_application": "对既有申请运行产品自动审核并交付任务",
                 "report_execution": "接收 Bot 的 start/progress/submit 上报并校验上下文",
-                "_advance": "按产品 WorkflowProfile 推进 L4 Work 动作",
+                "_advance": "按固定 Task/Workflow 合同推进 L4 Work 动作",
                 "accept_task": "发布人验收成果",
                 "list_tasks": "查询用户任务列表",
                 "detail_task": "读取任务状态、正文及操作历史",
@@ -378,18 +384,27 @@ def commission_runtime(commission_deployment, request):
 
 
 """产品上线 → 建任务 → Bot Query/Apply → 策略 Screen/Admit → scoped Participant → Work → accept。"""
-def test_end_to_end_commission_flow(commission_deployment, tmp_path):
-    # 1、通过 L6 操作创建 product profile（相比协议新增）
+@pytest.mark.parametrize("orchestration", ["legacy_workflow", "autonomous"])
+def test_end_to_end_commission_flow(commission_deployment, tmp_path, orchestration):
+    # 新版本只需标准 Task 合同,不传 domain/workflow。@1 保留历史定义。
+    optional_profiles = (
+        {"domain": TASK_COMMISSION_PROFILE.domain, "workflow": TASK_COMMISSION_PROFILE.workflow}
+        if orchestration == "legacy_workflow" else {}
+    )
     profile = create_product_profile(
         ProductProfileCreateCommand(
-            ref=TASK_COMMISSION_PROFILE.ref,                         # 版本
-            composition=TASK_COMMISSION_PROFILE.composition,         # 绑定的method信息（这里是OPEN方法）
-            scenario_roles=TASK_COMMISSION_PROFILE.scenario_roles,   # 涉及哪些角色
-            domain=TASK_COMMISSION_PROFILE.domain,
-            workflow=TASK_COMMISSION_PROFILE.workflow,
+            ref=VersionedProfileRef("task_commission", 1 if optional_profiles else 2),
+            composition=TASK_COMMISSION_PROFILE.composition,
+            scenario_roles=TASK_COMMISSION_PROFILE.scenario_roles,
             governance=TASK_COMMISSION_PROFILE.governance,
-            compatibility=TASK_COMMISSION_PROFILE.compatibility,
+            # 此夹具验证本地库/SQL/HTTP,不声明端到端 L1 交付能力。
+            # 不改动产品源码中用户声明的 L1 要求,也不伪造 catalog 能力。
+            compatibility=replace(
+                TASK_COMMISSION_PROFILE.compatibility,
+                required_layers=("L2", "L3", "L4", "L5"),
+            ),
             publication=TASK_COMMISSION_PROFILE.publication,
+            **optional_profiles,
         )
     )
 
@@ -404,7 +419,7 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
                 space=SPACE,
                 principal_ref=HUMAN.actor,
                 product_kind=profile.ref.profile_id,
-                workflow_kind=profile.workflow.ref.profile_id,
+                workflow_kind=profile.workflow.ref.profile_id if profile.workflow else None,
                 method_kind=profile.composition.method_kind,
                 executor_ref=executor_ref,
                 objective=TITLE,
@@ -450,6 +465,17 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
         # 6、调用 L5 Open Method的-提交申请。
         record = injector.get(ContextCollabRepositoryProtocol).get_current_status(task_id)
         assert record is not None
+        assert record.product_instance is not None
+        instance = record.product_instance
+        if orchestration == "autonomous":
+            assert profile.domain is None and profile.workflow is None
+            assert instance.domain_ref is None and instance.workflow_ref is None
+            assert instance.task_contract_ref == STANDARD_TASK_CONTRACT_REF
+            assert record.creation_facts["workflow_kind"] is None
+        else:
+            assert instance.domain_ref == profile.domain.ref
+            assert instance.workflow_ref == profile.workflow.ref
+            assert instance.task_contract_ref is None
         submitted = open_method.submit_application(
             collab_context_id=task_id,
             method_binding_id=opportunity.method_binding_id,

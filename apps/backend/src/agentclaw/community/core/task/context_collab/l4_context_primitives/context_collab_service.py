@@ -60,6 +60,9 @@ from agentclaw.community.core.task.context_collab.l6_products.creation_facts imp
     creation_payload,
     creation_workflow_kind,
 )
+from agentclaw.community.core.task.context_collab.l6_products.task_contracts import (
+    resolve_event_contract,
+)
 from agentclaw.community.core.task.context_collab.l6_products.profiles import (
     WorkflowKind,
 )
@@ -268,7 +271,7 @@ class ContextCollabService(ContextCollabServiceProtocol):
             catalog=self._product_catalog,
         )
         machine_ref = (
-            profile.workflow.state_machine_ref if profile is not None else None
+            resolve_event_contract(profile).state_machine_ref if profile is not None else None
         )
         prepared = prepare_event_append(
             collab_context_id,

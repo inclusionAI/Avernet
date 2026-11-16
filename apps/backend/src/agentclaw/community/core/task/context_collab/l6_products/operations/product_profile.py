@@ -28,6 +28,7 @@ def create_product_profile(
         scenario_roles=command.scenario_roles,
         domain=command.domain,
         workflow=command.workflow,
+        task_contract_ref=command.task_contract_ref,
         governance=command.governance,
         compatibility=command.compatibility,
         publication=command.publication,

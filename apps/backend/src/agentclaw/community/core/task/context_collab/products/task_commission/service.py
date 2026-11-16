@@ -67,6 +67,9 @@ from agentclaw.community.core.task.context_collab.l6_products.creation_facts imp
     creation_payload,
     creation_workflow_kind,
 )
+from agentclaw.community.core.task.context_collab.l6_products.task_contracts import (
+    resolve_event_contract,
+)
 from agentclaw.community.core.task.context_collab.l6_products.profiles import (
     ProductProfile,
 )
@@ -189,7 +192,7 @@ class TaskCommissionService:
         executor_ref = AgentRef(agent_type="bot", agent_id=assignee)
         profile = prepare_product_profile(
             product_kind=profile.ref.profile_id,
-            workflow_kind=profile.workflow.ref.profile_id,
+            workflow_kind=profile.workflow.ref.profile_id if profile.workflow else None,
             method_kind=method_kind,
             profile_ref=profile.ref,
             principal_ref=context.actor,
@@ -208,7 +211,7 @@ class TaskCommissionService:
             objective=title,
             resource_refs=tuple(command.resource_refs),
             product_kind=profile.ref.profile_id,
-            workflow_kind=profile.workflow.ref.profile_id,
+            workflow_kind=profile.workflow.ref.profile_id if profile.workflow else None,
             product_profile_ref=profile.ref,
         )
         record = self._repo.create_collet(
@@ -220,7 +223,7 @@ class TaskCommissionService:
                 objective=title,
                 resource_refs=tuple(command.resource_refs),
                 product_kind=profile.ref.profile_id,
-                workflow_kind=profile.workflow.ref.profile_id,
+                workflow_kind=profile.workflow.ref.profile_id if profile.workflow else None,
                 product_profile_ref=profile.ref,
                 creation_facts=facts,
                 completion_conditions=("提交任务说明所要求的成果，并由发布人验收通过",),
@@ -427,7 +430,8 @@ class TaskCommissionService:
             raise ContextCollabValidationError(
                 "task commission requires a product profile"
             )
-        operation = profile.workflow.action(action)
+        contract = resolve_event_contract(profile)
+        operation = contract.action(action)
         event_kind = operation.event_kind
         task = record.task
         if task is None:
@@ -512,10 +516,10 @@ class TaskCommissionService:
         )
         # 机器是唯一 status 裁决者:守卫 FAIL 在此响亮冒出(如无 artifacts
         # 提交);只有 Work 推进 Task,Message 不改变 Task 状态或版本。
-        machine_ref = profile.workflow.state_machine_ref
+        machine_ref = contract.state_machine_ref
         if machine_ref is None:
             raise ContextCollabValidationError(
-                "task commission requires a workflow machine"
+                "task commission requires a Task lifecycle machine"
             )
         prepared = prepare_event_append(
             command.collab_context_id,

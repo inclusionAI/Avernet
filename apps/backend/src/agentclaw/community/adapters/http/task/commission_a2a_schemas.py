@@ -148,11 +148,19 @@ def report_command(
         or profile.object_type != "ProductProfile"
         or profile.object_id != "task_commission"
         or profile.issuer != ISSUER
-        or profile.version != "1"
+        or profile.version is None
+        or not profile.version.isascii()
+        or not profile.version.isdecimal()
+        or profile.version.startswith("0")
     ):
         raise ContextCollabValidationError(
             "report requires a supported binding/product context"
         )
+    try:
+        profile_version = int(profile.version)
+    except ValueError as error:
+        # Python also rejects decimal strings beyond its integer conversion limit.
+        raise ContextCollabValidationError("invalid product profile version") from error
     if type(operation.expected_revision) is not int or operation.expected_revision < 1:
         raise ContextCollabValidationError("report requires positive expected_revision")
     payload = ReportPayload.model_validate(operation.payload)
@@ -173,9 +181,7 @@ def report_command(
             artifacts=payload.artifacts,
         ),
         expected_version=operation.expected_revision,
-        product_profile_ref=VersionedProfileRef(
-            profile.object_id, int(profile.version)
-        ),
+        product_profile_ref=VersionedProfileRef(profile.object_id, profile_version),
         method_binding_ref=binding.object_id,
         deadline=deadline,
     )

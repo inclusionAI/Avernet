@@ -12,8 +12,9 @@ from agentclaw.community.core.task.context_collab.l5_methods.method_binding impo
     top_level_binding_id,
 )
 from agentclaw.community.core.task.context_collab.l6_products.binding import (
+    product_definition,
     role_binding_refs,
-    validate_product_selection,
+    validate_role_sources,
 )
 from agentclaw.community.core.task.context_collab.l6_products.catalog import (
     ProductCatalog,
@@ -25,6 +26,9 @@ from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     ProductProfileDefinition,
     VersionedProfileRef,
     negotiate,
+)
+from agentclaw.community.core.task.context_collab.l6_products.task_contracts import (
+    resolve_event_contract,
 )
 from agentclaw.community.core.task.context_collab.l6_products.creation_facts import (
     creation_profile_ref,
@@ -43,17 +47,22 @@ class ProductInstance:
     instance_id: str
     collet_ref: str
     profile_ref: VersionedProfileRef
-    workflow_ref: VersionedProfileRef
-    domain_ref: VersionedProfileRef
+    workflow_ref: VersionedProfileRef | None
+    domain_ref: VersionedProfileRef | None
     method_binding_refs: tuple[str, ...]
     method_profiles: tuple[MethodRequirement, ...]
     role_binding_refs: tuple[str, ...]
     governance: GovernanceRequirements
     negotiation: NegotiationResult
     creation_event_ref: str
+    # Absent only for historical WorkflowProfile-owned Task semantics.
+    task_contract_ref: VersionedProfileRef | None = None
 
     def to_dict(self) -> dict:
-        return json.loads(json.dumps(asdict(self)))
+        data = json.loads(json.dumps(asdict(self)))
+        if self.task_contract_ref is None:
+            del data["task_contract_ref"]
+        return data
 
     @classmethod
     def from_dict(cls, data: dict) -> "ProductInstance":
@@ -65,8 +74,16 @@ class ProductInstance:
                 instance_id=data["instance_id"],
                 collet_ref=data["collet_ref"],
                 profile_ref=VersionedProfileRef(**data["profile_ref"]),
-                workflow_ref=VersionedProfileRef(**data["workflow_ref"]),
-                domain_ref=VersionedProfileRef(**data["domain_ref"]),
+                workflow_ref=(
+                    VersionedProfileRef(**data["workflow_ref"])
+                    if data["workflow_ref"] is not None
+                    else None
+                ),
+                domain_ref=(
+                    VersionedProfileRef(**data["domain_ref"])
+                    if data["domain_ref"] is not None
+                    else None
+                ),
                 method_binding_refs=tuple(data["method_binding_refs"]),
                 method_profiles=tuple(
                     MethodRequirement(**item) for item in data["method_profiles"]
@@ -84,6 +101,11 @@ class ProductInstance:
                     mode=result["mode"],
                 ),
                 creation_event_ref=data["creation_event_ref"],
+                task_contract_ref=(
+                    VersionedProfileRef(**data["task_contract_ref"])
+                    if "task_contract_ref" in data
+                    else None
+                ),
             )
             if instance.to_dict() != data or not instance.negotiation.accepted:
                 raise ValueError("invalid product instance selection")
@@ -100,19 +122,18 @@ def _resolve_profile(
     catalog: ProductCatalog,
 ) -> ProductProfileDefinition:
     normalized = decode_creation_facts(facts)
-    profile = validate_product_selection(
+    profile = product_definition(
         product_kind=normalized["product_kind"],
         workflow_kind=normalized["workflow_kind"],
         method_kind=normalized["method_kind"],
         profile_ref=creation_profile_ref(normalized),
-        principal_ref=principal_ref,
-        executor_ref=executor_ref,
         catalog=catalog,
     )
     if profile is None or creation_profile_ref(normalized) is None:
         raise ContextCollabValidationError(
             "ProductInstance requires a pinned profile version"
         )
+    validate_role_sources(profile, principal_ref, executor_ref)
     return profile
 
 
@@ -130,8 +151,11 @@ def _instance(
         instance_id=f"pi_{collet_id}",
         collet_ref=collet_id,
         profile_ref=profile.ref,
-        workflow_ref=profile.workflow.ref,
-        domain_ref=profile.domain.ref,
+        workflow_ref=profile.workflow.ref if profile.workflow else None,
+        domain_ref=profile.domain.ref if profile.domain else None,
+        task_contract_ref=(
+            resolve_event_contract(profile).ref if profile.workflow is None else None
+        ),
         method_binding_refs=(top_level_binding_id(collet_id),),
         method_profiles=profile.composition.required_methods,
         role_binding_refs=role_binding_refs(collet_id, profile=profile),

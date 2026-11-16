@@ -3,7 +3,8 @@
 Owner: Backend `core/task/context_collab/products/task_commission`.
 Versioned task-commission templates consume [L6 contracts](../../l6_products/README.md),
 not an L6 implementation or a second Task engine. DI explicitly installs their
-[definitions](profile.py); both use the `task_commission_goal@1` Work machine.
+[definition](profile.py). Its explicit workflow and the reusable standard Task
+contract use the same exact `task_commission_goal@1` G4 machine.
 
 | Profile | Method composition | Admission and execution |
 | --- | --- | --- |
@@ -25,7 +26,9 @@ existing public user creation DTO.
   an opportunity without applying for the Bot; dispatch waits for the Bot's own
   application to reach ADMITTED. A separately assembled publisher-mediated
   definition remains available only for compatibility tests.
-- [Workflow definition](profile.py): progress requires `selected-agent`.
+- [Workflow definition](profile.py) for historical `@1`, or the selected
+  [standard Task contract](../../l6_products/task_contracts.py) when orchestration
+  is omitted: executor actions require `selected-agent`.
   Shared [G4 validation](../../g4_contracts_consistency/product_contract.py)
   enforces it for **both product and generic L4 writes**. Submission retains
   its executor-only rule. G1 authorization, machine guards and repository CAS
@@ -38,8 +41,33 @@ existing public user creation DTO.
 Making the existing assignee `report_progress` responsibility enforceable is a
 **task_commission@1 authorization bug fix**, not a topology change or automatic version
 migration. Previously accepted owner-reported progress is now rejected. Existing
-stored events are not rewritten. Internal owner-controlled start/review/cancel
-behavior is unchanged; the Bot ingress permits only executor start/progress/submit.
+stored events are not rewritten. Owner review/cancellation remains governed by
+G1 and machine guards; start/progress/submit require the executor. The Bot ingress
+permits only those three executor actions.
+
+## Autonomous products without domain/workflow boilerplate
+
+New authored definitions may omit both `domain` and `workflow`. `domain=None`
+uses standard vocabulary; `workflow=None` selects the fixed `standard_task@1`
+lifecycle/action contract, not an unrestricted Task or a Bot execution workflow.
+The Bot still chooses its own plan/tools; the product only constrains observable
+start, progress, submission, review, rejection and cancellation.
+
+The [L6 authoring example](../../l6_products/README.md#create-a-product-profile)
+shows the omitted fields. Keep the required executor role, composition,
+governance and truthful compatibility declaration. Generic creation supplies
+`workflow_kind=None` for such a definition; product publication derives this
+value. Work uses the same G1/G4 checks, artifact requirement, owner acceptance and
+Task/Collet revision fences as the explicit workflow path. Optional profiles do
+not remove the installed admission prerequisite.
+
+The default installed `task_commission@1` remains unchanged, including its old
+domain/workflow references and default publish selector. Use a new exact product
+version and explicit DI installation for new instances; do not strip historical
+`@1` definitions or migrate existing rows implicitly. The journey's autonomous
+`task_commission@2` is installed only in its test injector. Its ProductInstance
+pins `standard_task@1` and records null domain/workflow refs. Recovery validates
+those references without renegotiating or selecting latest.
 
 ## task_commission@1 complete journey and participation boundary
 
@@ -147,7 +175,7 @@ submitted = open_method.submit_application(
 )
 assert submitted.state == "SUBMITTED"
 policy_context = ActorContext(
-    record.context_spec.principal_ref, source="product_policy"
+    record.collet.initiator_ref, source="product_policy"
 )
 [policy_ref] = opportunity.admission_policy_refs
 screened = open_method.screen(
@@ -288,7 +316,11 @@ a durable idempotency/replay contract.
 
 `accept`, `reject`, `cancel` and arbitrary payload fields are refused on this
 endpoint. A progress report is an L4 Task control event, not a Message side
-channel. No artifact file upload is performed by this route.
+channel. No artifact file upload is performed by this route. Work accepts
+canonical
+positive product-version strings, not just `"1"`; the service still requires the
+exact persisted ProductInstance version and MethodBinding. This is not dynamic
+installation or permission to switch a running task to another product version.
 
 Example progress request (fake identities; replace all task/context references,
 revision, request IDs and timestamp with the actual current values):
@@ -406,10 +438,12 @@ claims, cross-tenant input, stale replay and invalid state.
 [Endpoint framework cases](../../../../../../../../tests/community/endpoints/test_task_commission_a2a_endpoints.py)
 also boot the real application/service graph; the
 [product journey](../../../../../../../../tests/community/core/task/context_collab/products/test_task_commission_end_to_end.py)
-deploys an authored `task_commission@1` profile through the real catalog seam and uses the product
-service for owner commands. The case directly invokes L5 Open query and application
-submission under a trusted Bot actor context, then explicitly continues through
-the real product review/dispatch path. The simulated Bot exercises product
+deploys both an explicit-workflow `task_commission@1` and an autonomous
+`task_commission@2` (omitting domain/workflow) through the real catalog seam, then
+uses the product service for owner commands. The main case directly invokes L5
+Open Query/SubmitApplication as the Bot and Screen/Admit as the policy actor;
+separate regression cases cover the product review/dispatch continuation.
+The simulated Bot exercises product
 discovery and execution reporting through signed A2A HTTP; regression cases also
 exercise signed HTTP Apply. Review regressions reject mismatched task, binding,
 opportunity, profile, application, caller, accountable principal, requested roles
@@ -425,6 +459,13 @@ participant suite checks scope,
 idempotency, storage isolation and propagated write failures. Open handles participation/admission;
 result submission is L4 Work. PR creation is a local proposal, not a remote PR,
 live Bot/LLM, gateway or artifact-upload test.
+
+[Optional-profile runtime tests](../../../../../../../../tests/community/core/task/context_collab/test_optional_product_profiles.py)
+add both-mode no-write rejection, exact machine version, Task/Collet fences,
+metadata corruption and recovery checks. The successful local fixtures explicitly
+declare L2–L5 compatibility only. Source L1 requirements remain unchanged and
+are rejected by the local catalog, which does not advertise L1 support; neither
+mock delivery nor signed local HTTP establishes live L1 interoperability.
 
 The journey fixture temporarily wraps selected real calls to print
 `[commission-flow][module/directory]` entries, returns and resulting statuses.
@@ -479,8 +520,9 @@ listed above still apply.
 
 ## Layer-owned execution path
 
-Product actions resolve the pinned WorkflowProfile, event mapping, role/sequence
-contract and Bot report context in this module. Both this product and generic
+Product actions resolve the pinned standard Task contract or explicit
+WorkflowProfile, event mapping, role/sequence contract and Bot report context in
+this module. Both this product and generic
 append then call L4 `operations/work.py`: preparation applies G4 and produces the
 exact Task fence; commit atomically persists through the repository. Report
 deadlines remain between preparation and commit. L5 Open operations now live in

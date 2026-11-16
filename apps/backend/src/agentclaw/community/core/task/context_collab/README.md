@@ -43,9 +43,11 @@ l5_methods/operations/
   single.py / group.py   # separate operations; single_group.py preserves combined API
   open/                  # opportunity query/application/admission operations
   swarm/                 # execution profile/plan/stage operations
-l6_products/operations/
-  contracts.py             # ProductProfileCreateCommand: authored definition input
-  product_profile.py       # create_product_profile: validate/return, no installation
+l6_products/
+  task_contracts.py          # standard_task@1: fixed Task contract, not a Bot plan
+  operations/
+    contracts.py            # ProductProfileCreateCommand: authored definition input
+    product_profile.py      # create_product_profile: validate/return, no installation
 services/
   method_bootstrap.py       # L6 creation contract -> L5 initialization/recovery
 products/
@@ -57,14 +59,20 @@ products/
   `create_product_profile` operation returning `ProductProfileDefinition`. Creation
   and catalog installation share validation but remain separate; neither profile
   authoring nor role declarations grant runtime participation or create a Collet.
+  `domain` is optional vocabulary mapping; omitting `workflow` selects the fixed
+  [standard Task contract](l6_products/README.md#optional-domain-and-product-orchestration),
+  not an unrestricted lifecycle. Product-specific coordination is optional and
+  does not describe an autonomous Bot's internal tool/plan loop.
 - L4/L5 operations consume narrow `CollaborationReader`/`EventWriter` ports, not L6's
-  ContextSpec or the richer application repository contract. Persistence exposes
+  product selection metadata or the richer application repository contract.
+  Persistence exposes
   creation principal/executor identity facts for governance, preserving existing
   ID-only Method/Collet rules even for partial legacy rows. These are **creation
   identities**, not reassignment or a replacement for typed Task executor checks
   on Bot reporting. Task remains Work authority.
 - Application/product entrypoints retain event-schema checks, G1 authorization,
-  product contracts, pinned workflow selection and their existing error order.
+  product contracts, pinned Task/workflow contract selection and existing error
+  order.
   They pass only the selected machine ID/version and explicit event intent into
   L4 `prepare_event_append`. It produces a TaskUpdate and exact Task/Collet
   fences; `PreparedEventAppend.commit` uses the same repository transaction for
@@ -77,13 +85,14 @@ products/
   terminated bindings; missing binding recovery retains the existing in-memory
   restart limitation (no durable method history is fabricated).
 - Product bootstrap resolves Method facts without interpreting product policy
-  in L5. [Commission v2](products/task_commission/README.md#v2-complete-journey-and-participation-boundary)
+  in L5. [Installed commission](products/task_commission/README.md#task_commission1-complete-journey-and-participation-boundary)
   uses **Open only**: COLLET_PARTICIPANT admission creates an immutable L4
   ScopedParticipantBinding for the exact Collet, with no Group roster/member or
   Single selection. Its authority requires the correlated ADMITTED application,
   decision and ACTIVE Open binding. DI installs the shared G1 admission guard,
   so product and generic L4 execution cannot bypass or reuse a revoked binding.
-  v1 and unrelated Open + Group products retain their structural behavior.
+  Separately assembled legacy publisher-mediated and unrelated Open + Group
+  products retain their structural behavior.
 - L5 Open owns `OpenMethodOpsServiceProtocol.query_opportunities`: a read-only
   snapshot on an explicitly identified, ACTIVE Open binding. G1 requires an
   authenticated actor, not existing membership. Only OPEN opportunities within
@@ -100,7 +109,7 @@ products/
   canonical command classes, preserving object identity and wire fields.
 
 The [functional port tests](../../../../../../tests/community/core/task/context_collab/test_layer_operations.py)
-exercise L4/L5 with records that have no ContextSpec or product catalog, shared
+exercise L4/L5 with records that have no product metadata or catalog, shared
 Work fences, partial legacy Messages and propagated write failures. The real
 DI/SQL/product journey remains the integration evidence. No new operation family
 is invented for layers that do not yet have a corresponding use case.
@@ -134,13 +143,13 @@ The existing SQL/MethodStore transaction gap is not removed by this return chang
 | [Collet](l4_context_primitives/collet.py) | Bounded context identity, initiator, scope, lifecycle vocabulary, event head and context revision. The six-field Python layout is local, not a claim that ACCS mandates exactly six fields. The legacy repository still seeds `ACTIVE`; the separate Collet lifecycle path is not unified by this change. |
 | [Task](l4_context_primitives/task.py) | Independent L4 work-item ID, Collet/parent links, objective, completion conditions, responsible principal, designated executor, status, Task revision and event provenance. Not an A2A Task/execution attempt. |
 | [ScopedParticipantBinding](l4_context_primitives/participants.py) | Immutable task-scoped identity evidence created by Open COLLET_PARTICIPANT admission; validity derives from its admission application/decision and Method lifecycle, not an independent Group membership machine. |
-| [MethodBinding](l5_methods/method_binding.py) | L5 Method identity, scope and runtime facts. Neither ContextSpec nor ProductInstance substitutes for Method state. |
-| [ContextSpec](l6_products/context_spec.py) | L6/composition creation input and selected profile/role references. Existing JSON/wire fields are retained for compatibility, not treated as mutable Task state. |
-| [ProductInstance](l6_products/instance.py) | Pinned composition and evidence references; no second work-item state machine. |
+| [MethodBinding](l5_methods/method_binding.py) | L5 Method identity, scope and runtime facts. Neither creation facts nor ProductInstance substitutes for Method state. |
+| [Creation facts](l6_products/creation_facts.py) | Plain creation input and pinned L6 selection references, not a Collet/Task aggregate or mutable Work state. |
+| [ProductInstance](l6_products/instance.py) | Pinned composition and selected Task/workflow/domain references; absent optional profiles stay null. No second work-item state machine. |
 | [CurrentSnapshot / ProgressSnapshot](g3_observe_evaluate_evolve/views.py) | Read/response projections. CurrentSnapshot derives from Task; G3 computes authorized query progress. Neither is an ordinary runtime persistence or transition input. Explicit old-row decoding is the only snapshot-authority compatibility boundary. |
 | [EventRecord](l4_context_primitives/event_envelope.py) | Append-only accepted facts. New Work events record `task_ref` and `task_version_after` separately from the Collet revision. Message events omit both. |
 
-[G4 workflow resolution](g4_contracts_consistency/workflow_resolution.py) consumes
+[G4 Task transition resolution](g4_contracts_consistency/workflow_resolution.py) consumes
 Task, not CurrentSnapshot. Generic and product entrypoints share G4 validation
 and the selected versioned machine. The repository receives a typed
 `TaskUpdate(task_ref, expected_version, status)` and fences its exact Task
@@ -247,7 +256,7 @@ services, G4, Method termination, product services, stored rows and existing
 clients interpreting progress. The creation return contract also affects DI,
 library consumers, both HTTP adapters and their test doubles; update them
 together when changing it. Keep their tests and migration aligned. Source
-imports of ContextSpec or snapshots must use their new owners; HTTP product
-fields and the six-key creation payload remain unchanged. The in-memory
+imports of product selection or snapshots must use their owning boundaries;
+HTTP product fields and the six-key creation payload remain unchanged. The in-memory
 MethodStore and SQL/MethodStore/delivery transaction gap remain existing limits;
 this change does not add live A2A execution or a recursive workflow engine.

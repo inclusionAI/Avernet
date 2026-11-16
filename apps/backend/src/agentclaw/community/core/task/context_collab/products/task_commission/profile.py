@@ -19,12 +19,14 @@ from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     ProductProfileDefinition,
     ScenarioRole,
     VersionedProfileRef,
-    WorkflowAction,
     WorkflowProfile,
 )
 from agentclaw.community.core.task.context_collab.l6_products.operations import (
     ProductProfileCreateCommand,
     create_product_profile,
+)
+from agentclaw.community.core.task.context_collab.l6_products.task_contracts import (
+    STANDARD_TASK_CONTRACT,
 )
 from agentclaw.community.core.task.context_collab.l6_products.publication import (
     OpenPublicationProfile,
@@ -76,6 +78,7 @@ TASK_COMMISSION_PROFILE = ProductProfileCreateCommand(
             DomainMapping("resource", "L3.Resource"),
         ),
     ),
+    # Task的
     workflow=WorkflowProfile(
         ref=VersionedProfileRef("task_commission_goal", 1),
         state_machine_ref=VersionedProfileRef("task_commission_goal", 1),
@@ -84,57 +87,19 @@ TASK_COMMISSION_PROFILE = ProductProfileCreateCommand(
         strict_control_events=True,
         executor_submission_only=True,
         public_events_only=True,
-        actions=(
-            WorkflowAction(
-                "start_task",
-                "task.started",
-                "Task",
-                ("note",),
-                required_role=ROLE_SELECTED_AGENT,
-            ),
-            WorkflowAction(
-                "report_progress",
-                "task.progress.updated",
-                "Task",
-                ("note", "percent"),
-                required_role=ROLE_SELECTED_AGENT,
-            ),
-            WorkflowAction(
-                "submit_task",
-                "task.submitted",
-                "Task",
-                ("note", "artifacts"),
-                required_role=ROLE_SELECTED_AGENT,
-            ),
-            WorkflowAction(
-                "accept_task",
-                "task.accepted",
-                "Task",
-                ("note",),
-            ),
-            WorkflowAction(
-                "reject_task",
-                "task.rejected",
-                "Task",
-                ("note",),
-            ),
-            WorkflowAction(
-                "cancel_task",
-                "task.cancelled",
-                "Task",
-                ("note",),
-            ),
-        ),
+        actions=STANDARD_TASK_CONTRACT.actions,
     ),
+    # g1-g4的定义
     governance=GovernanceRequirements(
         policy="g1.structural/1",
         reliability="g2.optimistic-version/1",
         observation="g3.event-projection/1",
         consistency="g4.product-contract/1",
     ),
+    # 能力需求声明
     compatibility=CompatibilityRequirements(
         accs_revision="0.2",
-        required_layers=("L2", "L3", "L4", "L5"),
+        required_layers=("L1", "L2", "L3", "L4", "L5"),
         required_extensions=(),
         optional_extensions=(),
         downgrade_policy="reject_missing_required",

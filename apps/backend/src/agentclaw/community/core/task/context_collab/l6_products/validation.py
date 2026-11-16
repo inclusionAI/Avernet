@@ -3,11 +3,18 @@
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabValidationError,
 )
+from agentclaw.community.core.task.context_collab.l4_context_primitives.participants import (
+    ROLE_SELECTED_AGENT,
+)
 from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
     parse_method_kinds,
 )
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     ProductProfileDefinition,
+    TaskLifecycleContract,
+)
+from agentclaw.community.core.task.context_collab.l6_products.task_contracts import (
+    resolve_event_contract,
 )
 
 
@@ -37,7 +44,18 @@ def validate_product_profile(definition: ProductProfileDefinition) -> None:
             raise ContextCollabValidationError(
                 "unsupported scenario role participant source"
             )
-    for action in definition.workflow.actions:
+    contract = resolve_event_contract(definition)
+    if isinstance(contract, TaskLifecycleContract):
+        if not any(
+            role.l4_role == ROLE_SELECTED_AGENT
+            and role.participant_source == "executor_ref"
+            and role.required
+            for role in definition.scenario_roles
+        ):
+            raise ContextCollabValidationError(
+                "standard Task contract requires a designated executor role"
+            )
+    for action in contract.actions:
         if action.required_role is not None and action.required_role not in roles:
             raise ContextCollabValidationError(
                 "workflow action requires an undeclared scenario role"
@@ -47,5 +65,5 @@ def validate_product_profile(definition: ProductProfileDefinition) -> None:
         policy.validate_roles(definition.scenario_roles)
         if "Open" not in {method.method for method in methods}:
             raise ContextCollabValidationError("Open publication requires Open Method")
-        if not definition.workflow.actions:
-            raise ContextCollabValidationError("publication requires workflow actions")
+        if not contract.actions:
+            raise ContextCollabValidationError("publication requires Task/workflow actions")
