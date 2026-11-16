@@ -614,6 +614,7 @@ async fn session_only_nonmember_dm_summary_omits_peer_actor() {
             membership: MembershipFilter::SessionOnly,
             kind: GroupKindFilter::Dm,
             strategy: None,
+            sort: GroupListSort::CreatedAt,
         })
         .await
         .expect("list related DMs");
@@ -676,6 +677,7 @@ async fn dm_summary_projection_rejects_a_corrupted_three_participant_dm() {
             membership: MembershipFilter::Direct,
             kind: GroupKindFilter::Dm,
             strategy: None,
+            sort: GroupListSort::CreatedAt,
         })
         .await;
     assert!(result.is_err(), "a ≠2-participant DM page must not be served");

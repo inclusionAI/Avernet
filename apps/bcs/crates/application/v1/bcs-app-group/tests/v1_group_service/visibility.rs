@@ -74,6 +74,7 @@ async fn list_filters_deduplicates_before_pagination_and_direct_wins() {
             membership: MembershipFilter::All,
             kind: GroupKindFilter::All,
             strategy: Some(V1GroupStrategy::StateMachine),
+            sort: GroupListSort::CreatedAt,
         })
         .await
         .expect("list groups");
@@ -107,6 +108,7 @@ async fn list_filters_deduplicates_before_pagination_and_direct_wins() {
             membership: MembershipFilter::SessionOnly,
             kind: GroupKindFilter::All,
             strategy: None,
+            sort: GroupListSort::CreatedAt,
         })
         .await
         .expect("list session-only");
@@ -151,6 +153,7 @@ async fn list_groups_filters_by_visibility() {
             membership: MembershipFilter::Direct,
             kind: GroupKindFilter::All,
             strategy: None,
+            sort: GroupListSort::CreatedAt,
         })
         .await
         .expect("list public Groups");
@@ -208,6 +211,7 @@ async fn list_session_only_groups_filters_by_visibility() {
             membership: MembershipFilter::SessionOnly,
             kind: GroupKindFilter::All,
             strategy: None,
+            sort: GroupListSort::CreatedAt,
         })
         .await
         .expect("list private session-only Groups");
@@ -278,6 +282,7 @@ async fn list_defaults_to_the_authenticated_human_and_accepts_only_authorized_vi
         membership: MembershipFilter::All,
         kind: GroupKindFilter::All,
         strategy: None,
+        sort: GroupListSort::CreatedAt,
     };
 
     let default_view = fixture
@@ -572,6 +577,7 @@ async fn list_groups_sorts_by_created_at_desc_not_updated_at() {
             membership: MembershipFilter::All,
             kind: GroupKindFilter::All,
             strategy: None,
+            sort: GroupListSort::CreatedAt,
         })
         .await
         .expect("list groups");

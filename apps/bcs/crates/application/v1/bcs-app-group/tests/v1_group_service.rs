@@ -19,8 +19,8 @@ use bcs_service_api::application::v1::{
     CreateDirectMessageGroup, CreateGroup, CreateGroupSpec, CreateParticipant, DeleteGroup,
     EventSinkInput, GetGroup, GroupDeliveryPolicy, GroupDetail, GroupEventSubscriptionProvisioner,
     GroupKindFilter, GroupPatch, GroupService, GroupStrategy as V1GroupStrategy, GroupSummary,
-    GroupVisibility, InlineGroupEventSubscriptionRequest, ListGroups, ListPublicGroups,
-    Membership, MembershipFilter,
+    GroupListSort, GroupVisibility, InlineGroupEventSubscriptionRequest, ListGroups, ListPublicGroups,
+    Membership, MembershipFilter, Page,
     PendingGroupEventSubscriptions, PreparedGroupEventSubscriptions, UpdateGroup,
 };
 use bcs_service_api::types::{EventActor, EventActorType, EventPayload, OpeningMessage};
@@ -28,11 +28,14 @@ use bcs_service_api::{
     BotCapabilities, BotRegistryCoreService, CancelStateMachineRunCommand,
     ChannelBindingCleanupPort, CollaborationDefinition, CollaborationDefinitionRef,
     CollaborationRuntimeError, CollaborationRuntimeService, ConfigureGroupRuntimeCommand,
-    ConfigureGroupRuntimeOutcome, CreateOrReactivateCommand, DefaultDelivery, DefinitionYamlSource,
-    FriendCoreService, FriendRepoPort, Group, GroupCollaborationDefinitionView, GroupCoreService,
-    GroupStrategy, HandleBotTerminalEventCommand, HandleBotTerminalEventOutcome, NewSessionParams,
-    Participant, ParticipantRole, RelationCoreService, RoutingMode, RoutingPolicy, ServiceError,
-    ServiceResult, SessionHistoryResult, SessionManagementService, StartStateMachineRunCommand,
+    ConfigureGroupRuntimeOutcome, CreateOrReactivateCommand, CreateOrReactivateOutcome,
+    DefaultDelivery, DefinitionYamlSource, FriendCoreService, FriendRepoPort, Group,
+    GroupCollaborationDefinitionView, GroupCoreService, GroupHistoryCommand, GroupHistoryResult,
+    GroupMessageHistoryService, GroupStrategy, GroupUseCaseError, HandleBotTerminalEventCommand,
+    HandleBotTerminalEventOutcome, NewSessionParams, Participant, ParticipantMode, ParticipantRole,
+    RelationCoreService, RoutingMode, RoutingPolicy, ServiceError, ServiceResult,
+    SessionHistoryCommand, SessionHistoryResult, SessionManagementService, SessionStatus,
+    SessionUseCaseError, StartStateMachineRunCommand,
     StartStateMachineRunOutcome, StateMachineDeliveryCorrelation, StateMachineRun,
     StateMachineRunStatus, StateMachineRunView, SystemMessageService,
 };
@@ -258,6 +261,64 @@ impl Fixture {
             friends,
             relation,
             sessions,
+        }
+    }
+
+    /// Activity-sort fixture: the facade reads its group activity keys from
+    /// the supplied history/session doubles instead of the in-memory stores.
+    /// `history: None` builds a facade WITHOUT
+    /// `with_group_message_history` (the unwired degradation case).
+    async fn new_with_activity_services(
+        history: Option<Arc<dyn GroupMessageHistoryService>>,
+        sessions: Arc<dyn SessionManagementService>,
+    ) -> Self {
+        let group_repo = Arc::new(MemoryGroupRepo::new());
+        let groups = Arc::new(GroupCore::with_repo(group_repo.clone()));
+        let bots = Arc::new(BotCore::memory());
+        let relation = Arc::new(RelationCore::memory());
+        let friends = Arc::new(FriendCore::memory().with_relation(relation.clone()));
+        let concrete_sessions = Arc::new(SessionManagementServiceImpl::new(
+            Arc::new(MemorySessionRepo::new()),
+            group_repo,
+        ));
+        let system_message: Arc<dyn SystemMessageService> = Arc::new(NoopSystemMessageService);
+        let authority_repo = Arc::new(MemoryBotRepo::new());
+        let management = Arc::new(
+            GroupManagement::new(
+                groups.clone(),
+                bots.clone(),
+                friends.clone(),
+                relation.clone(),
+                GroupConfig::default(),
+                concrete_sessions.clone(),
+                system_message,
+            )
+            .with_bot_authority(bcs_test_support::authority_hook_for(
+                authority_repo.clone(),
+            ))
+            .for_v1_openapi(),
+        );
+        let mut service = GroupServiceImpl::new(
+            groups.clone(),
+            bots.clone(),
+            friends.clone(),
+            sessions,
+            management,
+        )
+        .with_bot_authority_hook(bcs_test_support::authority_hook_for(
+            authority_repo.clone(),
+        ));
+        if let Some(history) = history {
+            service = service.with_group_message_history(history);
+        }
+        Self {
+            service,
+            groups,
+            bots,
+            friends,
+            relation,
+            sessions: concrete_sessions,
+            authority_repo,
         }
     }
 
@@ -945,3 +1006,6 @@ mod avatars;
 
 #[path = "v1_group_service/avatar_budget.rs"]
 mod avatar_budget;
+
+#[path = "v1_group_service/activity_sort.rs"]
+mod activity_sort;

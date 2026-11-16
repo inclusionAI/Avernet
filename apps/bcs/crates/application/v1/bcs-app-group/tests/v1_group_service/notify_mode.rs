@@ -71,6 +71,7 @@ async fn update_round_trips_human_mention_notify_mode_for_normal_groups() {
             membership: MembershipFilter::All,
             kind: GroupKindFilter::All,
             strategy: None,
+            sort: GroupListSort::CreatedAt,
         })
         .await
         .expect("list Groups");
