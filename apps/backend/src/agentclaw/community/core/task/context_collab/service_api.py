@@ -23,6 +23,9 @@ from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_reso
     SpaceRef,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import Collet
+from agentclaw.community.core.task.context_collab.l4_context_primitives.event_envelope import (
+    EventRecord,
+)
 from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.contracts import (
     EventAppendCommand as EventAppendCommand,
 )
@@ -94,7 +97,7 @@ class ContextCollabStatusProjection:
 
 @runtime_checkable
 class ContextCollabServiceProtocol(Protocol):
-    """三个北向用例的服务协议;delivery 依赖本协议,不依赖实现类。"""
+    """北向创建、追加与只读查询协议;delivery 依赖本协议,不依赖实现类。"""
 
     def create_collet(
         self, command: ColletCreateCommand, context: ActorContext
@@ -111,3 +114,9 @@ class ContextCollabServiceProtocol(Protocol):
     def get_status(
         self, collab_context_id: str, *, trunk_events: bool, context: ActorContext
     ) -> ContextCollabStatusProjection: ...
+
+    def get_events(
+        self, collab_context_id: str, *, context: ActorContext
+    ) -> list[EventRecord]:
+        """按接纳顺序返回 G1 可见事件,包含成果引用等原始 payload;不写状态。"""
+        ...

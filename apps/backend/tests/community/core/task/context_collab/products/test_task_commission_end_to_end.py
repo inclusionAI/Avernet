@@ -506,9 +506,15 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
         )
         assert accepted.status == "done"
 
-        final = service.detail_task(task_id)
-        assert final.status == "done"
-        assert [event["event_kind"] for event in final.events] == [
+        # 11. 通过 L4 查询 Collet 内 Task 的最终状态与提交的产物,不依赖产品详情接口。
+        final = collab_service.get_status(task_id, trunk_events=False, context=HUMAN)
+        assert final.current_snapshot is not None
+        assert final.current_snapshot["status"] == "done"
+        assert final.context_version == accepted.context_version
+        assert final.current_snapshot["progress"]["percent"] == 100
+
+        final_events = collab_service.get_events(task_id, context=HUMAN)
+        assert [event.event_kind for event in final_events] == [
             "task.created",
             "task.started",
             *["task.progress.updated"] * len(_AI_CODING_STEPS),
@@ -516,10 +522,15 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
             "task.accepted",
         ]
         assert [
-            event["payload"]["note"]
-            for event in final.events
-            if event["event_kind"] == "task.progress.updated"
+            event.payload["note"]
+            for event in final_events
+            if event.event_kind == "task.progress.updated"
         ] == [note for _, note in _AI_CODING_STEPS]
-        assert final.events[-1]["actor_id"] == HUMAN.actor.principal_id
-        assert final.events[-2]["actor_id"] == BOT_ASSIGNEE
-        _flow_log(_TEST_DIRECTORY, "完整用户旅程结束:用户 accept 后 status=done")
+        [submitted_event] = [
+            event for event in final_events if event.event_kind == "task.submitted"
+        ]
+        assert submitted_event.payload is not None
+        assert submitted_event.payload["artifacts"] == artifacts
+        assert final_events[-1].actor_ref == HUMAN.actor
+        assert submitted_event.actor_ref == bot_context.actor
+        _flow_log(_TEST_DIRECTORY, "完整用户旅程结束:L4 查询确认 status=done 且产物完整")
