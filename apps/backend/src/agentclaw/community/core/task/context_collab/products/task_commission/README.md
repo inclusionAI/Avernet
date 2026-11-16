@@ -7,11 +7,11 @@ not an L6 implementation or a second Task engine. DI explicitly installs their
 
 | Profile | Method composition | Admission and execution |
 | --- | --- | --- |
-| `task_commission@1` | Open | Publisher-mediated SINGLE_CONTRIBUTION during publication; no ongoing participant binding. |
-| `task_commission@2` | Open | Designated Bot queries/applies itself; owner-authorized automatic review creates a task-scoped Participant binding before L4 Work starts. |
+| `task_commission@1` | Open | Designated Bot queries/applies itself; owner-authorized automatic review creates a task-scoped Participant binding before L4 Work starts. |
 
 Existing instances are never migrated. `PublishTaskCommand.product_profile_ref`
-selects an exact installed definition at creation; omission preserves v1. This
+selects an exact installed definition at creation; omission selects the installed
+`task_commission@1` definition. This
 service command does not add a dynamic product-management API or change the
 existing public user creation DTO.
 
@@ -21,9 +21,10 @@ existing public user creation DTO.
   Query/Apply, review of an existing L5 application, six Work actions and
   `report_execution` for inbound Bot reports.
   The API layer re-exports only `TaskCommissionServiceProtocol`.
-- [Service](service.py): v1 preserves publisher-mediated admission before body
-  publication/dispatch. v2 publishes an opportunity without applying for the Bot;
-  dispatch waits for the Bot's own application to reach ADMITTED.
+- [Service](service.py): the installed `task_commission@1` definition publishes
+  an opportunity without applying for the Bot; dispatch waits for the Bot's own
+  application to reach ADMITTED. A separately assembled publisher-mediated
+  definition remains available only for compatibility tests.
 - [Workflow definition](profile.py): progress requires `selected-agent`.
   Shared [G4 validation](../../g4_contracts_consistency/product_contract.py)
   enforces it for **both product and generic L4 writes**. Submission retains
@@ -35,14 +36,14 @@ existing public user creation DTO.
   the typed executor fallback, not a fabricated RoleBinding.
 
 Making the existing assignee `report_progress` responsibility enforceable is a
-**v1 authorization bug fix**, not a topology change or automatic version
+**task_commission@1 authorization bug fix**, not a topology change or automatic version
 migration. Previously accepted owner-reported progress is now rejected. Existing
 stored events are not rewritten. Internal owner-controlled start/review/cancel
 behavior is unchanged; the Bot ingress permits only executor start/progress/submit.
 
-## v2 complete journey and participation boundary
+## task_commission@1 complete journey and participation boundary
 
-1. Product staff author `build_self_service_commission_profile()` and deploy it
+1. Product staff author `init_product_profile()` and deploy it
    through [DI installation](../../../../../di/modules/context_collab_products.py).
    “Online” means an immutable code-owned definition installed into the actual
    application catalog, not a mutable registry or a mocked registration call.
@@ -83,7 +84,7 @@ behavior is unchanged; the Bot ingress permits only executor start/progress/subm
    ingress, which reuses the same L4 Work machinery. The generic
    `ContextCollabService.append_event` is not a Work API; it is a generic event
    append entrypoint.
-   The shared G1 adapter requires active scoped admission for these v2 events
+   The shared G1 adapter requires active scoped admission for these task_commission@1 events
    through **both product and generic L4** writes. Admission to task A cannot
    authorize task B; Open revocation blocks subsequent execution. Structural
    designation alone cannot start work.
@@ -111,13 +112,13 @@ Consumers must correlate the binding with the exact admission decision,
 ADMITTED application, actor and ACTIVE Open MethodBinding; a stored binding
 reference alone is not an authorization credential.
 
-This corrects the v2 definition's accidental Group composition in the current
-code-owned catalog; v1 and unrelated Open + Group products are unchanged. It is
-not an automatic migration of any previously stored v2 instance. Previously
-created v2 `Open + Group` contexts are incompatible with the corrected profile;
-no in-place conversion or historic admission rewrite is provided. Recreate test
-instances rather than relabeling their Group member records. MethodStore remains
-in-memory, with no new durable L4 participant-management API or SQL table.
+The installed `task_commission@1` definition is pure Open: admission creates a
+scoped Participant binding and never creates a Group roster or Group member. The
+separately assembled `TASK_COMMISSION_PROFILE` keeps the publisher-mediated
+compatibility strategy for isolated legacy tests; it is not installed in the
+default catalog. No in-place conversion or historic admission rewrite is
+provided. MethodStore remains in-memory, with no new durable L4
+participant-management API or SQL table.
 
 ## Calling L5 Open directly
 
@@ -264,13 +265,13 @@ necessarily a human. No streaming, notifications, remote A2A Task/session
 continuation, metadata/configuration options or arbitrary A2A methods are
 supported. This is not the engine adapter's A2A 1.0 wire format.
 
-v2 additionally supports these bounded operations on the same route (common
+The installed profile supports these bounded operations on the same route (common
 signed identity, protocol-version and unsupported-extension checks still apply):
 
 | ACCS tuple: layer / family / action / mode | Target and context | Result data |
 | --- | --- | --- |
-| L4 / query / opportunities / QUERY | ProductProfile `task_commission`, version `2`; no Collet or Method context | Minimal available opportunity projections |
-| L5 / open / apply / COMMAND | OpenOpportunity target plus matching Collet and MethodBinding context; profile `task_commission@2` | Admission receipt with scope and resulting participant binding refs |
+| L4 / query / opportunities / QUERY | ProductProfile `task_commission`, version `1`; no Collet or Method context | Minimal available opportunity projections |
+| L5 / open / apply / COMMAND | OpenOpportunity target plus matching Collet and MethodBinding context; profile `task_commission@1` | Admission receipt with scope and resulting participant binding refs |
 
 Both require `{}` payload and null `expected_revision`. The first response
 DataPart is always `AccsOperationResult`; successful Query/Apply adds a second
@@ -360,8 +361,8 @@ After each successful report, use the new Collet revision from
 In the inbound COMMAND, `target_ref.version` stays null; concurrency is expressed
 by the mandatory integer `expected_revision`. The service checks the task's
 pinned product profile and canonical top-level MethodBinding reference; it does
-not treat that reference alone as a credential or lease. v2 additionally
-verifies active scoped Open admission before execution.
+not treat that reference alone as a credential or lease. The installed profile
+also verifies active scoped Open admission before execution.
 
 ## Errors and delivery limits
 
@@ -375,7 +376,7 @@ verifies active scoped Open admission before execution.
   without disclosing exception details or claiming a successful write.
 - No durable replay receipt or idempotency-key contract exists here. Replaying
   after an uncertain response can conflict; **do not increment and blindly retry**.
-  Reconcile authoritative state first. v2 opportunity discovery is not a full
+  Reconcile authoritative state first. Opportunity discovery is not a full
   task-state/revision reconciliation endpoint; a refreshed authorized handoff
   is still needed after an execution conflict. Discovery does not solve that gap.
 - [Outbound dispatch](dispatch.py) still uses local `MockA2aDelivery`; this change
@@ -405,7 +406,7 @@ claims, cross-tenant input, stale replay and invalid state.
 [Endpoint framework cases](../../../../../../../../tests/community/endpoints/test_task_commission_a2a_endpoints.py)
 also boot the real application/service graph; the
 [product journey](../../../../../../../../tests/community/core/task/context_collab/products/test_task_commission_end_to_end.py)
-deploys an authored v2 profile through the real catalog seam and uses the product
+deploys an authored `task_commission@1` profile through the real catalog seam and uses the product
 service for owner commands. The case directly invokes L5 Open query and application
 submission under a trusted Bot actor context, then explicitly continues through
 the real product review/dispatch path. The simulated Bot exercises product
@@ -472,8 +473,8 @@ See the [collaboration boundary](../../README.md) for projection semantics,
 read-only legacy decoding and the required [Task storage migration](../../sql/2026_11_13_context_collab_task.sql).
 Do not deploy new runtime code against the old schema or mix it with old
 snapshot writers. The Task storage cutover itself does not change v1 Open admission topology or
-turn result submission into an L5 Open operation; v2 admission is the explicit
-new profile described above. Outbound delivery and MethodStore limits
+turn result submission into an L5 Open operation; self-application admission
+is the explicit `task_commission@1` behavior described above. Outbound delivery and MethodStore limits
 listed above still apply.
 
 ## Layer-owned execution path
@@ -486,5 +487,5 @@ deadlines remain between preparation and commit. L5 Open operations now live in
 `l5_methods/operations/open/`; Open still handles admission, not result submission.
 The journey's local trace wraps the actual L4 preparation/commit and G4 resolver,
 so console directory labels follow the moved implementations rather than a
-hardcoded execution narrative. Existing Work actions/reports and v1 profile semantics remain unchanged;
-v2 selects the new admission topology explicitly. See the [operation map](../../README.md#operation-ownership).
+hardcoded execution narrative. Existing Work actions/reports remain unchanged; the installed profile selects
+the self-application admission topology explicitly. See the [operation map](../../README.md#operation-ownership).

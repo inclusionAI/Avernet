@@ -210,17 +210,19 @@ def _method_port(repo, store):
     from agentclaw.community.core.task.context_collab.l5_methods.operations.open.service import (
         OpenMethodService,
     )
-    from agentclaw.community.di.modules.task_commission_method_ops_adapter import (
-        TaskCommissionOpenMethodAdapter,
+    from agentclaw.community.di.modules.task_commission_self_application import (
+        TaskCommissionSelfApplicationAdapter,
     )
 
-    return TaskCommissionOpenMethodAdapter(
+    return TaskCommissionSelfApplicationAdapter(
         open_ops=OpenMethodService(
             store=store,
             authorizer=StructuralMethodOpsAuthorizer(),
             collab_repo=repo,
         ),
         product_catalog=PRODUCT_CATALOG,
+        store=store,
+        repository=repo,
     )
 
 
@@ -265,13 +267,13 @@ class TestPublishTask:
 
         request = repo.create_calls[0]
         spec = request.creation_facts
-        assert spec.objective == TITLE
-        assert spec.method_kind == "Open"
-        assert spec.executor_ref is not None
-        assert spec.executor_ref.agent_id == ASSIGNEE
-        assert spec.product_kind == "task_commission"
-        assert spec.workflow_kind == "task_commission_goal"
-        assert request.initial_event.payload == creation_payload(spec, TITLE)
+        assert spec["objective"] == TITLE
+        assert spec["method_kind"] == "Open"
+        assert spec["executor_ref"] is not None
+        assert spec["executor_ref"]["agent_id"] == ASSIGNEE
+        assert spec["product_kind"] == "task_commission"
+        assert spec["workflow_kind"] == "task_commission_goal"
+        assert request.initial_event.payload == spec
 
         collet_id, append_request = repo.append_calls[0]
         assert collet_id == view.collet_id

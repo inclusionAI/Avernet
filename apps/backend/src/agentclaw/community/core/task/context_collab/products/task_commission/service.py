@@ -1,7 +1,7 @@
 """任务代办产品编排(乙案:组合协议层,自持编不开通用北向合同)。
 
 依赖面(spec §3.1,架构测试执法)与公开讨论同矩阵;差异三处编排:
-- 发布:由精确版本 Profile 选择 Open(v1/v2)、
+- 发布:由精确版本 Profile 选择 Open、
   ``executor_ref=AgentRef("bot", assignee)``、
   ``workflow_kind=task_commission_goal``;
 - Work 六动作:G1 授权后经共享 G4 产品合同校验时序与 typed executor
@@ -245,8 +245,9 @@ class TaskCommissionService:
             context=context,
             now=_now(),
         )
-        # v1 retains publisher-mediated admission. v2 only publishes an owner-
-        # authorized opportunity; the designated Bot must query/apply itself.
+        # The installed self-application profile only publishes an owner-authorized
+        # opportunity; the designated Bot must query/apply itself. A separately
+        # assembled publisher-mediated profile remains a compatibility path.
         # Cross-store failures propagate without rolling back the SQL Collet.
         admission_command = AssigneeAdmissionCommand(
             collab_context_id=record.collet.collet_id,
@@ -284,8 +285,9 @@ class TaskCommissionService:
             status=record.task.status,
             context_version=appended.collet.version,
         )
-        # v1 dispatches after publication/admission; v2 defers dispatch until
-        # Bot self-application is ADMITTED. Delivery never changes Work state.
+        # The self-application profile defers dispatch until the Bot application is
+        # ADMITTED; publisher-mediated compatibility profiles dispatch after
+        # publication/admission. Delivery never changes Work state.
         if not self_application:
             self._dispatch_port.dispatch_task_info(
                 DispatchedTaskInfo(

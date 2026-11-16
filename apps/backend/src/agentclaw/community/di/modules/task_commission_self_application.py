@@ -79,7 +79,7 @@ _POLICY_REF = "task_commission.designated_bot_self_application/1"
 
 
 class TaskCommissionSelfApplicationAdapter(TaskCommissionOpenMethodAdapter):
-    """Extends, rather than redefines, v1's publisher-mediated compatibility path."""
+    """Implements the installed task_commission@1 self-application path."""
 
     @inject
     def __init__(

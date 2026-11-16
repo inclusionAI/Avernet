@@ -148,7 +148,7 @@ def report_command(
         or profile.object_type != "ProductProfile"
         or profile.object_id != "task_commission"
         or profile.issuer != ISSUER
-        or profile.version not in {"1", "2"}
+        or profile.version != "1"
     ):
         raise ContextCollabValidationError(
             "report requires a supported binding/product context"

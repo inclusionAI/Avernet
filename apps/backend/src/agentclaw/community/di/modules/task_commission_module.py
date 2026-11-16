@@ -34,8 +34,8 @@ from agentclaw.community.di.modules.task_commission_self_application import (
 
 class TaskCommissionModule(Module):
     def configure(self, binder: Binder) -> None:
-        # v1 keeps structural G1; v2 additionally requires scoped Open admission.
-        # Generic L4 and product Work resolve the same guard.
+        # The installed task_commission@1 profile additionally requires scoped Open
+        # admission. Generic L4 and product Work resolve the same guard.
         binder.bind(
             ContextCollabAuthorizerProtocol,
             to=CommissionAdmissionAuthorizer,
