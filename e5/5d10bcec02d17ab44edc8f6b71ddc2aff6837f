@@ -1,0 +1,25 @@
+apps/backend/src/agentclaw/corp/plugins/prod/cache.py
+  s_bb98e2f10840b6::t_df1dc37f9881ec 234-246
+apps/backend/specs/caller-lock-renew-diagnostics-20261116/001-spec.md
+  s_bb98e2f10840b6::t_df1dc37f9881ec 1-3
+apps/backend/tests/corp/infrastructure/test_cache_lock.py
+  s_bb98e2f10840b6::t_df1dc37f9881ec 186-214
+apps/backend/src/agentclaw/corp/core/caller_identity/README.md
+  s_bb98e2f10840b6::t_347ecd4c57bfc9 90-98
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e55d10bcec02d17ab44edc8f6b71ddc2aff6837f",
+  "prompts": {},
+  "sessions": {
+    "s_bb98e2f10840b6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a162ee-dd64-7f52-9208-9fd1326f32e5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}
