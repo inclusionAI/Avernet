@@ -13,3 +13,11 @@ class DesktopBotServiceError(Exception):
 
 class DesktopBotOrphanError(DesktopBotServiceError):
     """BaaS confirmed bot not found (orphan)."""
+
+
+class MachineNotConnectedError(DesktopBotServiceError):
+    """BaaS confirms a predictable machine connectivity state."""
+
+    def __init__(self, message: str, baas_error_code: str | None = None) -> None:
+        super().__init__(message)
+        self.baas_error_code = baas_error_code
