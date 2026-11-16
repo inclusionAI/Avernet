@@ -1,0 +1,313 @@
+apps/bcsfuse/src/app/tc/card_profiles.py
+  s_ce84d91f3d35be::t_fdaa37c6472439 30-31,41,44,55-57
+  s_ce84d91f3d35be::t_354fabf268fc00 1-5,7-9,11-16,26-29,32-40,42-43,45-54,58-66,99-113,130-135,140,151,153-154,157-164,168,171,179,181
+  s_ce84d91f3d35be::t_7e1e818c9edf6b 141,152
+  s_ce84d91f3d35be::t_83c35ecd0a606b 155-156
+  s_ce84d91f3d35be::t_f661c0f5e7659e 19
+  s_ce84d91f3d35be::t_ffea98219c208d 172-173
+  s_ce84d91f3d35be::t_f6df53ca8146ef 69-71,74,77,79,89,174-178
+  s_ce84d91f3d35be::t_b543c428f4f037 6,17-18,20,22,24-25,67-68,72-73,75-76,78,80-84,90-91,136-139,165-167,180
+  s_ce84d91f3d35be::t_4082f6ab20ea92 86-88,142,170
+  s_ce84d91f3d35be::t_2d527adb59669a 23
+  s_ce84d91f3d35be::t_dd850185b725ca 169
+  s_ce84d91f3d35be::t_22432d6390e23e 21,143-146,148-150
+  s_9e428ec8192673::t_f774ebdc621d00 85,147
+  s_ce84d91f3d35be::t_38509d5e079bac 10,92,93-94,96-98,114-116,118-129
+  s_ce84d91f3d35be::t_c3f415bda91013 117
+  s_ce84d91f3d35be::t_8010513f97f2cc 95
+apps/bcsfuse/src/app/tc/search.py
+  s_ce84d91f3d35be::t_354fabf268fc00 22,40
+  s_ce84d91f3d35be::t_ffea98219c208d 189-191
+  s_ce84d91f3d35be::t_c9e06de21dd1e8 7,121-126,128-141,145,149-150
+  s_ce84d91f3d35be::t_12142d6b33d96f 60-69,127,264
+apps/bcsfuse/tests/contract/test_tc_same_instance_migration.py
+  s_ce84d91f3d35be::t_e437076b66b1ac 90-91,115-119,121,135-139
+  s_ce84d91f3d35be::t_7e1e818c9edf6b 84,98-99
+  s_ce84d91f3d35be::t_113fe750fcb145 7,81-83,85-89,96-97,100-104,107-110,113-114,122-123,125-127,132-134
+  s_ce84d91f3d35be::t_f661c0f5e7659e 111-112,120,124
+  s_ce84d91f3d35be::t_ffea98219c208d 128-131
+  s_ce84d91f3d35be::t_ba79cf15943471 140-141
+  s_ce84d91f3d35be::t_f8caba72f0672f 142-145,147-148,150-157,168,173,177,179,182-195,197,207-208
+  s_ce84d91f3d35be::t_458b951213a296 180-181,199-205
+  s_ce84d91f3d35be::t_ac23aeb5f0f979 6,92-95,105,146,158-167,172,196,198,206-208,210,213,236-237,244,258,265,268
+  s_ce84d91f3d35be::t_bc90d9d51c0a70 169-171,174-176
+  s_ce84d91f3d35be::t_b7d524de4324bf 214-217,218-235,255-256
+  s_ce84d91f3d35be::t_cd5ce50780630c 212,240-243,245,250-253,263-264,266-267,272-273,278
+  s_ce84d91f3d35be::t_58f8d6804bfdaa 239,246-249,254,269-271,274-277
+  s_ce84d91f3d35be::t_8010513f97f2cc 13,209,257,260-261
+  s_f9448a67993c61::t_eac616106472f6 259,262
+  s_ce84d91f3d35be::t_246d1affe81cd4 294,355-356,490-492
+  s_ce84d91f3d35be::t_e756c8f06f8874 1,31,106,149,178,211,238,281-282,296-298,319-320,323,330,375,380,408,422,453,455,474,499,538
+  s_ce84d91f3d35be::t_5602498a6eccbe 289-290
+  s_ce84d91f3d35be::t_b097abecb7e606 284-285
+apps/bcsfuse/src/app/tc/bootstrap.py
+  s_ce84d91f3d35be::t_cb324bfb7177b9 24-25
+  s_ce84d91f3d35be::t_7e1e818c9edf6b 18-23,26-37,82
+  s_ce84d91f3d35be::t_12142d6b33d96f 57-58,72-74,84-85,100-101,105,107,109,174,182-183,191-192
+apps/bcsfuse/src/app/tc/v2.py
+  s_ce84d91f3d35be::t_31232906338c95 4,98-100
+  s_ce84d91f3d35be::t_d99eb188cf65f4 116
+  s_9e428ec8192673::t_630c391db46dd5 78,89
+apps/bcsfuse/packages/search-core/src/search_core/adapters/http/catalog_cards.py
+  s_ce84d91f3d35be::t_31232906338c95 56-60,62
+  s_e7fe9f07a64c50::t_8d0b2f1b318edd 61,64-67
+apps/bcsfuse/docs/deploy/tc-card-migration.md
+  s_ce84d91f3d35be::t_e573bbfb514fb3 17-18
+  s_ce84d91f3d35be::t_8010513f97f2cc 20-21
+  s_ce84d91f3d35be::t_aa8ebbd0c69509 19
+  s_ce84d91f3d35be::t_fd688317bb7e69 5-6,11-12,26,30-38,102,107
+apps/bcsfuse/packages/search-core/src/search_core/core/memory_cache.py
+  s_9e428ec8192673::t_5bb7f3652f9e5b 11-43,145
+  s_9e428ec8192673::t_69c2ae2be32fbd 67-74,78-79,84,96,100-106,109-110,112,116-117,119,121,123-135,137-142,146-147,162-167,184-186,195-202
+apps/bcsfuse/packages/search-core/tests/test_cache_copy.py
+  s_9e428ec8192673::t_676f71f8b2fc74 1-77
+apps/bcsfuse/packages/search-core/src/search_core/adapters/http/index_builds.py
+  s_f9448a67993c61::t_f90b806cf61bd0 4,75-77,116-117
+  s_e7fe9f07a64c50::t_0390af93d30855 11-15,17,29-33,50-54,56,66-69,74,78,82-84,88,93,96-106,114,119-120,130
+apps/bcsfuse/packages/search-core/src/search_core/core/index_build_runner.py
+  s_f9448a67993c61::t_f90b806cf61bd0 1-51
+apps/bcsfuse/packages/search-core/tests/test_card_incremental.py
+  s_f9448a67993c61::t_8019fbdc118045 1-99
+  s_f9448a67993c61::t_b09f9015d8af7b 100-188
+  s_f9448a67993c61::t_1b099d0ad38508 189-208
+apps/bcsfuse/packages/search-core/src/search_core/bootstrap/catalog.py
+  s_f9448a67993c61::t_f90b806cf61bd0 32,138-139,146-147,287-289,294-295
+  s_9e428ec8192673::t_2fd62d2d30c9d6 102,192,259
+  s_e7fe9f07a64c50::t_e647488d382e56 82,282-286,290-293
+apps/bcsfuse/packages/search-core/tests/test_build_on_demand.py
+  s_f9448a67993c61::t_b09f9015d8af7b 38-73
+  s_f9448a67993c61::t_8019fbdc118045 1-37
+apps/bcsfuse/packages/search-core/docs/index-rebuild.md
+  s_f9448a67993c61::t_916bbc7b91280a 130-144
+  s_e7fe9f07a64c50::t_bc2b41ff87f369 160-180
+apps/bcsfuse/packages/search-core/docs/provider-contracts.md
+  s_f9448a67993c61::t_c609a30fba0720 169-195
+  s_e7fe9f07a64c50::t_bc895b06fc88ed 111,196-226
+apps/bcsfuse/packages/search-core/src/search_core/catalog/updates.py
+  s_f9448a67993c61::t_868137d67f1f25 13,118-121,126-130,132,339-363,365-368,370-387,389,395-396,405-435,464,477-479,484,486,502-507
+  s_9e428ec8192673::t_5a36bf72fa1cfe 199,234,440
+apps/bcsfuse/packages/search-core/src/search_core/config/index_sync.py
+  s_f9448a67993c61::t_e3dd0f51a1b43e 28
+apps/bcsfuse/packages/search-core/src/search_core/plugin_api/card_store.py
+  s_f9448a67993c61::t_05636fe7645e7a 27-42
+  s_e7fe9f07a64c50::t_190ecd9b9c2edd 7,10,23-24
+apps/bcsfuse/packages/search-core/src/search_core/providers/card_schema.py
+  s_f9448a67993c61::t_db12c9900500df 30-33
+apps/bcsfuse/packages/search-core/src/search_core/providers/sql_cards.py
+  s_f9448a67993c61::t_84274b9c9060b0 173-226
+  s_e7fe9f07a64c50::t_93f207089678ed 13,227,244-246,287-297,306-308,320-322
+apps/bcsfuse/packages/search-core/tests/test_qdrant_modes.py
+  s_ce84d91f3d35be::t_c3f415bda91013 1,15,19,21-25,34-37
+  s_ce84d91f3d35be::t_8010513f97f2cc 122,241-295
+apps/bcsfuse/packages/search-core/tests/test_native_keyword.py
+  s_ce84d91f3d35be::t_1b448173af9bd3 1-18,20-27,29,33-41,43,46-52,56-57,73-74,76-78,80-82,96-100,102-111
+  s_ce84d91f3d35be::t_c3f415bda91013 112-115,117-159
+  s_f9448a67993c61::t_264e01fd3166ab 28,30,44-45,53-55,79,101
+  s_ad0fbd97cedc90::t_a491c88d56a4d7 32,93
+  s_ad0fbd97cedc90::t_6d12b4b43a5816 19,31,42,58-72,75,83-92,94-95
+  s_ad0fbd97cedc90::t_7f05f42b7e711b 116
+apps/bcsfuse/packages/search-core/docs/local-catalog.md
+  s_ce84d91f3d35be::t_173f19ba23e893 14
+  s_ce84d91f3d35be::t_c8c8c018a23ed2 4,15,21,24-25
+apps/bcsfuse/packages/search-core/src/search_core/providers/keyword.py
+  s_ce84d91f3d35be::t_6539f27473a01e 1,3-4,11-12,19-24,29-31,35,45-49,67,70-79,84-92,136,138-139,143,197-203,205-217,219-221,230-231
+  s_ce84d91f3d35be::t_cdcf4e5205545b 80-82
+  s_ad0fbd97cedc90::t_a491c88d56a4d7 43,51-55,194,218
+apps/bcsfuse/.env.example
+  s_ce84d91f3d35be::t_bf5c1d42cc58d4 30
+  s_ce84d91f3d35be::t_709b0d0a771256 28,31-34
+apps/bcsfuse/packages/search-core/pyproject.toml
+  s_ce84d91f3d35be::t_6539f27473a01e 16
+apps/bcsfuse/packages/search-core/README.md
+  s_ce84d91f3d35be::t_8010513f97f2cc 88
+  s_ce84d91f3d35be::t_96fd14ee7f0556 8,26
+  s_ce84d91f3d35be::t_21bc077f5afad7 47-51,82-84,89-120
+  s_9e428ec8192673::t_a3ffaf4b75b4da 121-135
+  s_9e428ec8192673::t_09c46e4fc896ba 136-140
+apps/bcsfuse/src/app/infra/public/vectorstores/qdrant_keyword_index.py
+  s_ce84d91f3d35be::t_6539f27473a01e 1,6
+apps/bcsfuse/packages/search-core/src/search_core/catalog/documents.py
+  s_ce84d91f3d35be::t_8010513f97f2cc 8,68,144-145
+apps/bcsfuse/packages/search-core/tests/test_keyword_names.py
+  s_ce84d91f3d35be::t_8010513f97f2cc 1-12,14-49,51-55,57-77,79-80
+  s_ce84d91f3d35be::t_98e333515eac64 13,50,56,78
+apps/bcsfuse/conftest.py
+  s_ce84d91f3d35be::t_819883b418c6e5 36-37
+  s_f9448a67993c61::t_0a1c7ad96f68c1 1-35,38-40
+.github/workflows/search-core.yml
+  s_ce84d91f3d35be::t_acbdda9336e477 17-25,33-34,36-37
+apps/bcsfuse/packages/search-core/src/search_core/bootstrap/local.py
+  s_ce84d91f3d35be::t_f3069dc0466c04 1,91-92
+apps/bcsfuse/packages/search-core/src/search_core/providers/qdrant_index.py
+  s_ce84d91f3d35be::t_6586bcfb7ac05a 1,17-19,44-46,48,58
+  s_ad0fbd97cedc90::t_a491c88d56a4d7 32,47
+apps/bcsfuse/packages/search-core/tests/test_catalog_startup.py
+  s_ce84d91f3d35be::t_446a94fa383c24 1-2,131
+apps/bcsfuse/packages/search-core/tests/test_catalog_table_isolation.py
+  s_ce84d91f3d35be::t_edb9c42f32d3ab 3-4,52
+apps/bcsfuse/packages/search-core/tests/test_embedding_singleflight_drm.py
+  s_ce84d91f3d35be::t_cf0e7ee33a5f8a 3-4,54-58
+apps/bcsfuse/packages/search-core/tests/test_index_status_details.py
+  s_ce84d91f3d35be::t_5a8b291b25ab11 3-4,46-50
+  s_ce84d91f3d35be::t_d99eb188cf65f4 98-100,116-120,127-129
+  s_ce84d91f3d35be::t_79fd734282377b 94-97,101,106-115,121-126,130-142
+  s_ce84d91f3d35be::t_c81e40a8f70b33 143-144
+apps/bcsfuse/packages/search-core/tests/test_provider_execution.py
+  s_ce84d91f3d35be::t_522880535456e3 3-4,82-84,107-109
+apps/bcsfuse/packages/search-core/tests/test_public_catalog.py
+  s_f9448a67993c61::t_5cd24a10f9870a 3-4,17-19,143-145
+apps/bcsfuse/packages/search-core/tests/test_retrieval_pipeline.py
+  s_f9448a67993c61::t_e149d9d0d1d3b0 1,18-22
+apps/bcsfuse/src/app/infra/public/vectorstores/qdrant_mysql_vector_store.py
+  s_f9448a67993c61::t_6b02f363f34203 76
+apps/bcsfuse/src/app/infra/public/vectorstores/qdrant_sqlite_vector_store.py
+  s_f9448a67993c61::t_8b22830571074d 25,39
+apps/bcsfuse/docs/archive/legacy-tc/legacy_providers.py.txt
+  s_f9448a67993c61::t_16357808185185 43
+apps/bcsfuse/tests/contract/test_keyword_retrieval.py
+  s_f9448a67993c61::t_eb7fa8dbf18728 3-4,37
+apps/bcsfuse/tests/contract/test_mysql_vector_decode_failures.py
+  s_f9448a67993c61::t_786ed354e52f14 3-4,68-71
+apps/bcsfuse/tests/contract/test_qdrant_mysql_vector_store_contract.py
+  s_f9448a67993c61::t_05757f9c2c2e69 20-21,49,57,78,222,362
+apps/bcsfuse/tests/contract/test_qdrant_sqlite_get_contract.py
+  s_f9448a67993c61::t_0f00daa28d99cb 3-4,19,31,39-43,53-57
+apps/bcsfuse/tests/contract/test_qdrant_sqlite_recovery.py
+  s_f9448a67993c61::t_82a5ab5e86c1cf 3-4,15,40,54-58,76,88-90,100,126-128,138-142,162-164
+apps/bcsfuse/tests/contract/test_tc_catalog.py
+  s_f9448a67993c61::t_5ed12531105a1f 16
+  s_ce84d91f3d35be::t_79fd734282377b 43-59
+apps/bcsfuse/tests/contract/test_vector_point_lookup.py
+  s_f9448a67993c61::t_e654e2b63dd270 3-4,58-63,74-78,93-97
+apps/bcsfuse/tests/integration/test_mysql_backup_restore_e2e.py
+  s_f9448a67993c61::t_dc5054d3769ca6 24-25,87,398,500,502,583
+apps/bcsfuse/tests/integration/test_opencore_app_startup_health_e2e.py
+  s_ce84d91f3d35be::t_5f3caa1d489a65 19
+apps/bcsfuse/tests/integration/test_qdrant_durable_sync_e2e.py
+  s_f9448a67993c61::t_367dc3df365de9 3-4,43,94-105
+apps/bcsfuse/tests/integration/test_qdrant_mysql_performance_smoke.py
+  s_f9448a67993c61::t_54957e4e24a60e 35-36,90,518
+apps/bcsfuse/tests/integration/test_qdrant_mysql_rebuild_e2e.py
+  s_f9448a67993c61::t_11af792034981d 26-27,68,301
+apps/bcsfuse/tests/integration/test_real_llm_embedding.py
+  s_f9448a67993c61::t_37a8a8940a07c5 17-18,262,293
+apps/bcsfuse/tests/integration/test_worker_vector_index_flow.py
+  s_f9448a67993c61::t_eccac76a6029a0 7-8,66,245,259
+apps/bcsfuse/tests/qdrant_support.py
+  s_f9448a67993c61::t_bb9f9098a66eb8 1-23
+apps/bcsfuse/tests/unit/application/test_worker_vector_index_service.py
+  s_f9448a67993c61::t_5223328ae5c4fa 3-4,38,328,340
+apps/bcsfuse/tests/unit/infra/test_qdrant_durable_vector_store.py
+  s_f9448a67993c61::t_c34c4bd3cb0047 3-4,97
+apps/bcsfuse/uv.lock
+  s_ce84d91f3d35be::t_c74e51331fd8b8 1304,1310,1314,1321-1322,1324,1565-1573
+apps/bcsfuse/packages/search-core/src/search_core/adapters/http/card_diagnostics.py
+  s_ce84d91f3d35be::t_87110e8185d511 35-47,52
+apps/bcsfuse/packages/search-core/docs/card-management-api.md
+  s_ce84d91f3d35be::t_87110e8185d511 157-158,166-167,186-188
+  s_e7fe9f07a64c50::t_b31b60433433ff 233-276
+apps/bcsfuse/packages/search-core/src/search_core/catalog/inspection.py
+  s_ce84d91f3d35be::t_87110e8185d511 55-59
+apps/bcsfuse/tests/contract/test_tc_http_compat.py
+  s_ce84d91f3d35be::t_c46c3e0aa2b46c 117-133,138-145,149-150
+  s_ce84d91f3d35be::t_c22f8c8e166826 134-137,146-148
+apps/bcsfuse/src/app/tc/routes.py
+  s_ce84d91f3d35be::t_0aab0f61afd5cc 130-133,135-137,141-146,158-159
+  s_ce84d91f3d35be::t_c22f8c8e166826 138-140
+  s_ce84d91f3d35be::t_12142d6b33d96f 134,180
+apps/bcsfuse/packages/search-core/src/search_core/application/cache.py
+  s_9e428ec8192673::t_2e4f7f96fe40e0 64,70-79,97,102-105,111-115,117-118,122,129,131,134-139
+apps/bcsfuse/packages/search-core/src/search_core/application/card_metadata.py
+  s_9e428ec8192673::t_fe9db251207406 36,41,58,60,62-68,73-75,119-127
+apps/bcsfuse/packages/search-core/tests/test_card_metadata_coalescing.py
+  s_9e428ec8192673::t_e4c0591246f442 72
+apps/bcsfuse/packages/search-core/tests/test_card_metadata_refresh.py
+  s_9e428ec8192673::t_2f0766ebec2e81 1-217
+apps/bcsfuse/packages/search-core/docs/search-api.md
+  s_9e428ec8192673::t_17e35361dce0fe 110-113
+apps/bcsfuse/packages/search-core/src/search_core/application/emergency.py
+  s_9e428ec8192673::t_be7b14035c3a57 73-75,101,146-150
+apps/bcsfuse/packages/search-core/src/search_core/application/search.py
+  s_9e428ec8192673::t_18bc4b8e22120d 151-156
+apps/bcsfuse/packages/search-core/src/search_core/config/search.py
+  s_9e428ec8192673::t_d530d4090f4819 12,53
+apps/bcsfuse/packages/search-core/tests/test_retrieval_resilience.py
+  s_9e428ec8192673::t_3f03a836edafaa 165-207
+apps/bcsfuse/packages/search-core/tests/test_retrieval_review.py
+  s_9e428ec8192673::t_8550c5ec094241 37,81,83
+apps/bcsfuse/packages/search-core/tests/test_search_timing.py
+  s_9e428ec8192673::t_5da95c2dc34bc3 223
+apps/bcsfuse/packages/search-core/tests/test_native_async_models.py
+  s_ce84d91f3d35be::t_48f4ffc4e089ba 84-85
+apps/bcsfuse/packages/search-core/tests/test_score_details.py
+  s_ce84d91f3d35be::t_48f4ffc4e089ba 62
+apps/bcsfuse/packages/search-core/tests/test_document_mapping.py
+  s_e7fe9f07a64c50::t_08fce0fac5f6ab 11,18,38,50-88
+  s_e7fe9f07a64c50::t_1d17a842e72a4c 1-10,12-17,19-37,39-49
+apps/bcsfuse/packages/search-core/src/search_core/adapters/http/cards.py
+  s_e7fe9f07a64c50::t_5b92f0f446f3c1 10,13,28-32,37-40,46-49,61-64,93,97,105-106,110-111,116,119-127,136,138-139,146-149,181,196,202-207
+apps/bcsfuse/packages/search-core/src/search_core/api/cards.py
+  s_e7fe9f07a64c50::t_08ccee95ddad56 6,15-21,40,56-70
+apps/bcsfuse/packages/search-core/src/search_core/api/index_builds.py
+  s_e7fe9f07a64c50::t_9b470c5d751d56 8-9,25,43-57
+apps/bcsfuse/packages/search-core/src/search_core/config/document_mapping.py
+  s_e7fe9f07a64c50::t_36633ab5fbf7b3 1-234
+apps/bcsfuse/packages/search-core/src/search_core/config/index_builds.py
+  s_e7fe9f07a64c50::t_db72a104ecbdef 5-7,17-24
+apps/bcsfuse/packages/search-core/src/search_core/core/index_builds.py
+  s_e7fe9f07a64c50::t_6a8711b3508f0f 40-42,56
+apps/bcsfuse/packages/search-core/src/search_core/providers/card_writes.py
+  s_e7fe9f07a64c50::t_6eef306dc13477 3,6,22-32,62-68,74,76-81,92-94,96-100
+apps/bcsfuse/packages/search-core/src/search_core/providers/sql_index_builds.py
+  s_e7fe9f07a64c50::t_0b3aecae9a2497 92
+apps/bcsfuse/packages/search-core/tests/test_card_management.py
+  s_e7fe9f07a64c50::t_795ed80465cd8b 249-304
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9b2363d6deff729741a7145f23edf0516ffda67b",
+  "prompts": {},
+  "sessions": {
+    "s_9e428ec8192673": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1673c-d8f0-7222-9db7-0c957c6d5e32",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    },
+    "s_ad0fbd97cedc90": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c937-6a91-7c43-9e32-8c272e10e7e9",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    },
+    "s_ce84d91f3d35be": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a5bb-a115-7280-8eb7-64cf057003e5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    },
+    "s_e7fe9f07a64c50": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cf7a-1d65-7ce2-80b0-e54cb93b8362",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    },
+    "s_f9448a67993c61": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c37b-a948-7d12-8346-7160e12ca8b0",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}

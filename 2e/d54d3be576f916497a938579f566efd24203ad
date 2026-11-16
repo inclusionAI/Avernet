@@ -1,0 +1,16 @@
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/index.ts
+  h_bb3ca6fb13c5df 75,576
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/workflow-clone-mount.ts
+  h_bb3ca6fb13c5df 1-25
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2ed54d3be576f916497a938579f566efd24203ad",
+  "prompts": {},
+  "humans": {
+    "h_bb3ca6fb13c5df": {
+      "author": "fudapeng <dapeng.fdp@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,115 @@
+docs/flows/backend-runtime-targeting.md
+  s_47ed8e91e4b8af::t_09278e06ccec5e 1-59
+apps/backend/docs/diagnostics/runtime-targeting.md
+  s_47ed8e91e4b8af::t_09278e06ccec5e 1-56
+docs/agents/knowledge-standard.md
+  s_47ed8e91e4b8af::t_09278e06ccec5e 1-4,8-26,29-31,98-141
+  s_47ed8e91e4b8af::t_3d4e7c1aeff3aa 52-68,74-89,97
+  s_47ed8e91e4b8af::t_53797ed917ac49 69-73,90-96
+  s_47ed8e91e4b8af::t_a801d8b7be7674 27-28
+  s_47ed8e91e4b8af::t_31d9eabbc423d0 32-47
+  s_47ed8e91e4b8af::t_6c96bfe29b67d9 48-51
+  s_47ed8e91e4b8af::t_efbd66e3403299 5-7
+CONTEXT-MAP.md
+  s_47ed8e91e4b8af::t_86fe52d1f28f29 19,70-72,74,80
+  s_47ed8e91e4b8af::t_13ad517f26f6e0 31-32,64-66,68-69
+  s_47ed8e91e4b8af::t_8e7badf210bdcd 33,35-63
+  s_47ed8e91e4b8af::t_efbd66e3403299 22,24-25,34,67,73
+CONTEXT.md
+  s_47ed8e91e4b8af::t_54347d22849887 383,386-387
+  s_47ed8e91e4b8af::t_387864feee7abf 1,5-8,10,90,158,268,282,332,346,366,397,400
+  s_47ed8e91e4b8af::t_6c96bfe29b67d9 3-4,12-34,36-38,40,42-44,46,48-50,52,54-56,58,60-62,64,66-68,70-88,92-100,102,104-106,108,110-112,114,116-118,120,122-124,126,128-156,160-182,184-186,188,190-192,194,196-198,200,202-204,206,208-210,212,214-216,218,220-222,224,226-228,230,232-266,270-274,276-280,284-294,296-298,300,302-304,306,308-310,312,314-330,334-338,340-344,348-352,354-356,358-364,368-376,378,380-384,388-396,398-399,401
+apps/backend/README.md
+  s_47ed8e91e4b8af::t_bb1048de645214 8-21,100-112
+  s_47ed8e91e4b8af::t_53797ed917ac49 123-124
+  s_47ed8e91e4b8af::t_3d4e7c1aeff3aa 113-122,125-128
+apps/backend/docs/bot-manager-sync-operations.md
+  s_47ed8e91e4b8af::t_9f1aeb7f62cdfe 3
+  s_47ed8e91e4b8af::t_eeba798d33e374 4-52
+apps/backend/docs/flows/bot-manager-sync.md
+  s_47ed8e91e4b8af::t_6cdbb1824ef25c 1-281
+docs/agents/domain.md
+  s_47ed8e91e4b8af::t_03ffd3ccff11a4 18-21,28
+apps/backend/docs/bot-ownership-sync-operations.md
+  s_47ed8e91e4b8af::t_abdec6f6e524fe 3,189
+apps/backend/specs/2026-10-27-bcs-manager-sync/spec.md
+  s_47ed8e91e4b8af::t_3d4e7c1aeff3aa 12-16
+AGENTS.md
+  s_47ed8e91e4b8af::t_dd0eb2e814ad0c 1,3-4,6,8-12,14,16,18-30,34
+  s_47ed8e91e4b8af::t_8563c0c50ae5bf 31
+  s_47ed8e91e4b8af::t_8e7badf210bdcd 32-33
+docs/agents/development.md
+  s_47ed8e91e4b8af::t_169189230d1e84 1-97
+docs/agents/pull-requests.md
+  s_47ed8e91e4b8af::t_73bc1f3178cab3 1-68
+docs/agents/validation.md
+  s_47ed8e91e4b8af::t_6cc68ea18bd306 1-122
+singlebox/ci/tests/test_pre_push_hook.py
+  s_47ed8e91e4b8af::t_4ac983ff913d08 507-508,526
+apps/backend/docs/diagnostics/README.md
+  s_47ed8e91e4b8af::t_5a8094d22943ff 1-11
+  s_47ed8e91e4b8af::t_df42893724188f 12-13
+apps/backend/docs/flows/README.md
+  s_47ed8e91e4b8af::t_7263931299e833 1-11
+  s_47ed8e91e4b8af::t_efbd66e3403299 12-14
+apps/backend/specs/README.md
+  s_47ed8e91e4b8af::t_2d77f31d1c1508 1-11
+docs/adr/README.md
+  s_47ed8e91e4b8af::t_f93a553f97fb82 1-11
+docs/agents/templates/README.md
+  s_47ed8e91e4b8af::t_82e154ac742d44 1-12
+docs/agents/templates/adr.md
+  s_47ed8e91e4b8af::t_7ad0df5aa95c66 1-13
+docs/agents/templates/app.md
+  s_47ed8e91e4b8af::t_90c15b0c8ff865 1-13
+docs/agents/templates/diagnostic.md
+  s_47ed8e91e4b8af::t_30211591b20800 1-13
+docs/agents/templates/domain.md
+  s_47ed8e91e4b8af::t_18f4b06908029c 1-13
+docs/agents/templates/flow.md
+  s_47ed8e91e4b8af::t_33a9cea5191b9b 1-13
+docs/agents/templates/spec.md
+  s_47ed8e91e4b8af::t_6fd79fb3d13b5b 1-13
+docs/arch/README.md
+  s_47ed8e91e4b8af::t_7dd0068520347d 1-11
+  s_47ed8e91e4b8af::t_c9edec2e7e2486 12-13
+docs/flows/README.md
+  s_47ed8e91e4b8af::t_7df88e3303be42 1-11
+  s_47ed8e91e4b8af::t_be425a59fc53d6 12-13
+apps/backend/AGENTS.md
+  s_47ed8e91e4b8af::t_7f8fa1c8b77b33 1-5
+apps/baas/README.md
+  s_47ed8e91e4b8af::t_1b05a2059a0d8a 3-14
+apps/baas/docs/diagnostics/README.md
+  s_47ed8e91e4b8af::t_d37179c801875f 1-11
+apps/baas/docs/flows/README.md
+  s_47ed8e91e4b8af::t_2737302b1446a3 1-10
+apps/bcs/README.md
+  s_47ed8e91e4b8af::t_af6bd9a672e66c 3-15
+apps/bcs/docs/diagnostics/README.md
+  s_47ed8e91e4b8af::t_53f766b94c85be 1-11
+apps/bcs/docs/flows/README.md
+  s_47ed8e91e4b8af::t_10e169528b4686 1-9
+apps/bcsfuse/README.md
+  s_47ed8e91e4b8af::t_152e8b10ada797 3-15
+apps/bcsfuse/docs/diagnostics/README.md
+  s_47ed8e91e4b8af::t_4584c82cdd33a5 1-11
+apps/bcsfuse/docs/flows/README.md
+  s_47ed8e91e4b8af::t_ad88ab2721a35d 1-10
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "681670044ca057136ae488db8936a8b6e5e4b248",
+  "prompts": {},
+  "sessions": {
+    "s_47ed8e91e4b8af": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c399-a9b4-7db3-b10d-10bee70838e6",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

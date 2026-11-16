@@ -1,0 +1,14 @@
+apps/evolverun/clawweb/public/modules/workflow/web/components/ScriptFilesTab.tsx
+  h_43af82e14600e4 59-68,91-93,95,105
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "475ab16698c1e86b14f55640e5e87171a3303257",
+  "prompts": {},
+  "humans": {
+    "h_43af82e14600e4": {
+      "author": "fudapeng <fudp@example.com>"
+    }
+  }
+}

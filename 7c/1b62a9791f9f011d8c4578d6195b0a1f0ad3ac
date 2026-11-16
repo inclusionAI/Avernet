@@ -1,0 +1,19 @@
+apps/bcs/scripts/ci/reusable_coverage.sh
+  s_3bce8baaaba8df::t_92f51f4e5971d4 22-35
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7c1b62a9791f9f011d8c4578d6195b0a1f0ad3ac",
+  "prompts": {},
+  "sessions": {
+    "s_3bce8baaaba8df": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "c239fbe4-43c9-4f5b-a71b-b3954967dc51",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "shengping <jeremy.lsp@antgroup.com>"
+    }
+  }
+}

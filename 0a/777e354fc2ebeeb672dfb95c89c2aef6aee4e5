@@ -1,0 +1,49 @@
+docs/specs/a2a/minimal-card-registration-v1.md
+  s_b407ecbadd402c::t_b35274763a4450 210,213-215,217-218,229-231
+apps/bcs/crates/application/bcs-app-a2a-bot/tests/conformance_a2a_v1.rs
+  s_b407ecbadd402c::t_504d663e4e4d95 7,16,108,110,115
+  s_b407ecbadd402c::t_b35274763a4450 9-11
+apps/bcs/crates/adapters/http/bcs-api-http/tests/a2a_routes.rs
+  s_b407ecbadd402c::t_b35274763a4450 453-457
+  s_b407ecbadd402c::t_504d663e4e4d95 114,119,127,218,443-452,458-460
+  s_b407ecbadd402c::t_8f88424781d665 461
+apps/bcs/scripts/e2e-test/a2a_story.py
+  s_b407ecbadd402c::t_504d663e4e4d95 481,487
+apps/bcs/crates/service-api/bcs-service-api/src/application/v1/a2a.rs
+  s_b407ecbadd402c::t_504d663e4e4d95 1
+apps/bcs/crates/adapters/http/bcs-api-http/CONTEXT.md
+  s_b407ecbadd402c::t_b35274763a4450 5-13,122
+docs/bcn-a2a-integration-guide.zh-CN.md
+  s_b407ecbadd402c::t_b35274763a4450 133
+docs/bcn-a2a-api-reference.zh-CN.md
+  s_b407ecbadd402c::t_b35274763a4450 217,221,230-233,235
+apps/bcs/crates/adapters/http/bcs-api-http/src/v1/a2a/mod.rs
+  s_b407ecbadd402c::t_504d663e4e4d95 1,11
+apps/bcs/crates/application/bcs-app-a2a-bot/src/v1.rs
+  s_b407ecbadd402c::t_b35274763a4450 184
+  s_b407ecbadd402c::t_504d663e4e4d95 1,7,20-21,97
+apps/bcs/crates/adapters/http/bcs-http/CONTEXT.md
+  s_b407ecbadd402c::t_b35274763a4450 142,145-146
+apps/bcs/crates/bootstrap/bcs/src/server/server_run.rs
+  s_b407ecbadd402c::t_504d663e4e4d95 277,280-281
+apps/bcs/crates/adapters/http/bcs-api-http/src/v1/common/state.rs
+  s_b407ecbadd402c::t_504d663e4e4d95 119
+apps/bcs/crates/application/bcs-app-a2a-bot/CONTEXT.md
+  s_b407ecbadd402c::t_b35274763a4450 82-89,91-92
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0a777e354fc2ebeeb672dfb95c89c2aef6aee4e5",
+  "prompts": {},
+  "sessions": {
+    "s_b407ecbadd402c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cac2-f0d2-77f0-a456-bfdea69a959b",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "卓人 <hx410025@antgroup.com>"
+    }
+  }
+}

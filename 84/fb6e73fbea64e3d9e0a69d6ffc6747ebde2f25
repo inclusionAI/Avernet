@@ -1,0 +1,20 @@
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-recovery-handbook/custom/97/skill/handbook.md
+  s_054de12be81e2b::t_0cff822a029554 58
+  s_054de12be81e2b::t_bedd362a68ab8c 54,60-66
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "84fb6e73fbea64e3d9e0a69d6ffc6747ebde2f25",
+  "prompts": {},
+  "sessions": {
+    "s_054de12be81e2b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d30a-cdae-7660-ae2f-bac7fee8cfa8",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}

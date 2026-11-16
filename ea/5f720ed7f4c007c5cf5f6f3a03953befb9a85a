@@ -1,0 +1,98 @@
+apps/frontend-nextgen/src/components/BotWorkshop/CreateBotModal/CreateBotFormFields.tsx
+  s_2cb160c1e91f68::t_22294387f12ba6 11-12,55,120,166,251
+apps/backend/src/agentclaw/community/core/bot_management/README.md
+  s_2cb160c1e91f68::t_5858629274050d 15-20
+apps/frontend-nextgen/src/components/BotWorkshop/BotAvatar/AvatarSettings.tsx
+  s_2cb160c1e91f68::t_a73bc34760d658 39
+  s_2cb160c1e91f68::t_22294387f12ba6 7,15,25,74
+apps/backend/src/agentclaw/community/core/bot_management/create_flow.py
+  s_2cb160c1e91f68::t_f5eecb88a09387 29,223-224
+apps/frontend-nextgen/src/components/BotWorkshop/BotBasicInfoDialog.tsx
+  s_2cb160c1e91f68::t_22294387f12ba6 22,61,70,152
+  s_2cb160c1e91f68::t_c2761b97beaf64 76
+apps/frontend-nextgen/src/components/BotWorkshop/BotAvatar/prepareAvatar.ts
+  s_2cb160c1e91f68::t_2eead5138efaa3 1-4,53-76,81-84,86-100
+  s_2cb160c1e91f68::t_fd1b255b748113 5-52,77-80,85
+apps/frontend-nextgen/src/services/botWorkshop/botWorkshopService.ts
+  s_2cb160c1e91f68::t_8ca00b73704c9f 317-318
+apps/backend/src/agentclaw/community/core/desktop_bot/services/desktop_creation_lifecycle.py
+  s_2cb160c1e91f68::t_b98143f5c70e94 14
+  s_2cb160c1e91f68::t_0981d0ecf4b3fc 141
+apps/frontend-nextgen/test/components/BotWorkshop/CreateBotModal/CreateBotFormFields.test.tsx
+  s_2cb160c1e91f68::t_144e0400f040df 8-9,13-14,90-104
+  s_40621bc596f67b::t_3f5ff7e7d2a76a 105
+apps/backend/src/agentclaw/community/core/bot_management/services/bot_service.py
+  s_2cb160c1e91f68::t_f5eecb88a09387 22,1504-1506,3258-3259
+apps/backend/tests/community/core/bot_management/services/test_bot_service_bcn_sync.py
+  s_2cb160c1e91f68::t_f52ceda9d337d2 389-403
+apps/frontend-nextgen/src/components/BotWorkshop/BotAvatar/AvatarEditor.tsx
+  s_2cb160c1e91f68::t_1e79eb0416c1a4 5-6,8,20,22,25,27,29,31-41,68,97
+  s_2cb160c1e91f68::t_fd1b255b748113 56,92
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/responses.py
+  s_2cb160c1e91f68::t_f5eecb88a09387 58,551
+apps/backend/src/agentclaw/community/adapters/http/bot_management/router.py
+  s_2cb160c1e91f68::t_2e96df697a8d4f 19
+  s_2cb160c1e91f68::t_e0343c6c547711 1525
+  s_2cb160c1e91f68::t_17e4e39e1a5a83 1306,1526,2749
+  s_2cb160c1e91f68::t_d4e67e8f99fb9e 46,1305,2748
+apps/frontend-nextgen/test/hooks/useBotWorkshopCopyFlow.test.tsx
+  s_2cb160c1e91f68::t_2fde3d070b226a 37-51
+  s_2cb160c1e91f68::t_b6851ebd1e29d9 1-4,6-15,17-36,52
+  s_2cb160c1e91f68::t_d1cab43825bca3 5,16
+apps/frontend-nextgen/src/components/BotWorkshop/CopyBotModal/CopyBotFormFields.tsx
+  s_2cb160c1e91f68::t_22294387f12ba6 9-10,41,47,89,154
+apps/backend/src/agentclaw/community/core/desktop_bot/services/desktop_bot_service.py
+  s_2cb160c1e91f68::t_e0343c6c547711 19,792
+  s_2cb160c1e91f68::t_0981d0ecf4b3fc 694-698,793-797
+apps/backend/src/agentclaw/community/adapters/http/desktop/router.py
+  s_2cb160c1e91f68::t_17e4e39e1a5a83 8,134,235
+  s_2cb160c1e91f68::t_f1347ba4a2d4bd 14,133,234
+apps/backend/src/agentclaw/community/core/bot_management/avatar.py
+  s_2cb160c1e91f68::t_f4d9e861b9b8b9 8
+  s_2cb160c1e91f68::t_07bc9a367e22b8 20-25
+  s_2cb160c1e91f68::t_f8948769728bdd 7,9-19,26-27
+apps/backend/src/agentclaw/community/adapters/http/error_logging.py
+  s_2cb160c1e91f68::t_f8948769728bdd 74
+apps/backend/tests/community/core/desktop_bot/services/test_desktop_bot_service.py
+  s_2cb160c1e91f68::t_9e51c78d75cd79 261-266
+  s_2cb160c1e91f68::t_15e4791571e803 245-260,267
+apps/frontend-nextgen/test/components/BotWorkshop/BotAvatar/prepareAvatar.test.ts
+  s_2cb160c1e91f68::t_0a01aa06331745 2-21,31,33-39,64-70,79-80,84-87
+  s_2cb160c1e91f68::t_5c3d614af9d75d 22-30,32,40-48,61-63,71-78,81-83
+  s_2cb160c1e91f68::t_7cba72e8ce1cf4 49-60
+  s_2cb160c1e91f68::t_5f58a679678811 1
+apps/backend/tests/community/adapters/http/test_desktop_avatar_error.py
+  s_2cb160c1e91f68::t_c18a49db15b9e1 1-27
+apps/backend/tests/community/adapters/http/openapi_v1/test_desktop_metadata.py
+  s_2cb160c1e91f68::t_f52ceda9d337d2 89-104
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/desktop_metadata.py
+  s_2cb160c1e91f68::t_5858629274050d 41-44
+apps/frontend-nextgen/src/hooks/useBotWorkshopCopyFlow.ts
+  s_2cb160c1e91f68::t_8ca00b73704c9f 3,46,94-102,110-111,126,131,146,166,176
+  s_2cb160c1e91f68::t_902e328dc3af65 103
+  s_2cb160c1e91f68::t_0d5f0956e29adc 47-48,105,109,112,130,132,141
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ea5f720ed7f4c007c5cf5f6f3a03953befb9a85a",
+  "prompts": {},
+  "sessions": {
+    "s_2cb160c1e91f68": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cb41-f3ec-75c3-af57-d49ef5d0077e",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    },
+    "s_40621bc596f67b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cb41-f9a2-75c3-8556-2339c0498dac",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

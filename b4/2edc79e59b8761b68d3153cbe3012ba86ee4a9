@@ -1,0 +1,33 @@
+docs/specs/2026-09-17-local-skill-package-apply/spec.md
+  s_edf46fcbab38c5::t_b1d89ff5f749c6 134-135
+apps/backend/tests/community/core/skill_center/test_skill_package_validator.py
+  s_edf46fcbab38c5::t_62faadaa9189a9 507-515,562,565-567
+  s_edf46fcbab38c5::t_281812fc014fa0 493-506,516-520
+  s_edf46fcbab38c5::t_1ac92797177cd0 521
+apps/backend/src/agentclaw/community/core/skill_center/skill_package.py
+  s_edf46fcbab38c5::t_a3bca8a6407c5b 252-253
+  s_edf46fcbab38c5::t_62faadaa9189a9 267
+  s_edf46fcbab38c5::t_8cd1b2bd4a38e7 238,240-246,250,254-256,265-266
+apps/backend/tests/community/core/skill_center/test_skill_version_materializer.py
+  s_edf46fcbab38c5::t_64fc1b4fd9ec11 34-37,228-247,251,258-262
+  s_edf46fcbab38c5::t_62faadaa9189a9 248-250,252-257,499-501
+  s_edf46fcbab38c5::t_2f1195c89a623f 263-264
+apps/backend/src/agentclaw/community/core/skill_center/AGENTS.md
+  s_edf46fcbab38c5::t_b1d89ff5f749c6 136
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b42edc79e59b8761b68d3153cbe3012ba86ee4a9",
+  "prompts": {},
+  "sessions": {
+    "s_edf46fcbab38c5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c940-a59d-7633-a002-5161c102349e",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

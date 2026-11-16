@@ -1,0 +1,33 @@
+apps/backend/src/agentclaw/community/api/task/context_collab_service.py
+  s_e0cb98366a65ad::t_68d0702caf2d56 1-5
+apps/backend/tests/community/core/task/context_collab/test_context_collab_service.py
+  s_e0cb98366a65ad::t_de1fdc9a333313 281-292
+  s_e0cb98366a65ad::t_33af030f229946 1-31,33-148,155-158,160-280,293-373
+  s_e0cb98366a65ad::t_133376b94f8445 149-154
+  s_e0cb98366a65ad::t_67d341ebb0d3a7 32
+  s_e0cb98366a65ad::t_7413e1e7497dab 159
+apps/backend/src/agentclaw/community/core/task/context_collab/persistence/repository.py
+  s_e0cb98366a65ad::t_b8487b41f1fd08 1-69
+apps/backend/src/agentclaw/community/core/task/context_collab/service_api.py
+  s_e0cb98366a65ad::t_a3bbeeb752c2e7 1-115
+apps/backend/src/agentclaw/community/core/task/context_collab/g1_secure_govern/authorization.py
+  s_e0cb98366a65ad::t_279483737bf28f 1-94
+apps/backend/src/agentclaw/community/core/task/context_collab/services/context_collab_service.py
+  s_e0cb98366a65ad::t_c23a09b80aeb91 1-175
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4ea1f4e3b3b37ccdc5e896dc40a38b8a70ecbe6b",
+  "prompts": {},
+  "sessions": {
+    "s_e0cb98366a65ad": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "1d67472f-3033-4c3f-9f69-89e0d4112039",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

@@ -1,0 +1,76 @@
+apps/backend/tests/community/repository/chat/test_caller_token_expiry.py
+  s_bb98e2f10840b6::t_e1dfdfaffd86bf 1-9,11-60,62-142,156,175,194-195,202,285,287
+  s_bb98e2f10840b6::t_4b4605467eb830 10
+  s_bb98e2f10840b6::t_4fb81c61ae649e 146-147,149,152-153,155,167-168,170-171,180,183,189-192,201,205-228,230-233,235-274,278-279,281-283,288,290,296,298-301,309,317
+  s_bb98e2f10840b6::t_d5c0f63bef55f0 61
+  s_bb98e2f10840b6::t_b0c3dd89df54bc 143-145
+  s_bb98e2f10840b6::t_8447f46e608d57 148
+  s_bb98e2f10840b6::t_838d204b7f175d 150-151
+  s_bb98e2f10840b6::t_53a37c971dfef6 154
+  s_bb98e2f10840b6::t_59bd12f1304b98 157-159,164-166
+  s_bb98e2f10840b6::t_64433336f008bd 169
+  s_bb98e2f10840b6::t_f65a6ec5339d82 172-174
+  s_bb98e2f10840b6::t_3a8a19e5a74cb6 176-179
+  s_bb98e2f10840b6::t_c1802794b630aa 181-182
+  s_bb98e2f10840b6::t_42b63a64bc5fa1 184-188
+  s_bb98e2f10840b6::t_1856a717386485 193
+  s_bb98e2f10840b6::t_e785c573a1b276 196-200
+  s_bb98e2f10840b6::t_30a1e6b31c4003 203-204
+  s_bb98e2f10840b6::t_b87523f56f6543 229
+  s_bb98e2f10840b6::t_0c4e98f72a9da4 234
+  s_bb98e2f10840b6::t_50f909f5eef816 275-277
+  s_bb98e2f10840b6::t_6331c7ef9671d2 280
+  s_bb98e2f10840b6::t_463d5793fbbe17 284
+  s_bb98e2f10840b6::t_930244a6a5af90 286
+  s_bb98e2f10840b6::t_a0f93f65d37849 289
+  s_bb98e2f10840b6::t_d7b58228cb3bb3 291-295
+  s_bb98e2f10840b6::t_61a95d532c3db2 297
+  s_bb98e2f10840b6::t_6e66a4744ee0cd 302-304,306-308
+  s_bb98e2f10840b6::t_eb0b6bed1d3cbb 310-312,314-316
+apps/backend/src/agentclaw/community/core/expert_chat/sql/2026_11_13_caller_token_expiry.sql
+  s_bb98e2f10840b6::t_4b4605467eb830 1-6
+apps/backend/src/agentclaw/community/di/modules/caller_identity_module.py
+  s_bb98e2f10840b6::t_4b4605467eb830 45-46,224,234,236
+  s_bb98e2f10840b6::t_1345a0381602cf 225,227
+apps/backend/src/agentclaw/community/core/caller_identity/expiry_runtime_updater.py
+  s_bb98e2f10840b6::t_4b4605467eb830 1-3,7-15,18-32,40-50
+  s_bb98e2f10840b6::t_484c9917a272e7 4-6,33-37
+  s_bb98e2f10840b6::t_cb406d2e92f27c 16-17
+  s_bb98e2f10840b6::t_4a880959b9b989 38-39
+apps/backend/src/agentclaw/community/core/expert_chat/sqlite_models.py
+  s_bb98e2f10840b6::t_4b4605467eb830 12,155-157,201-204
+apps/backend/src/agentclaw/community/core/repository/implementations/chat/expert_chat_instance.py
+  s_bb98e2f10840b6::t_4b4605467eb830 33-35,39,196-202,209-211,217,219-263
+  s_bb98e2f10840b6::t_a798b13cd96121 133,155-159
+apps/backend/tests/community/repository/chat/test_expert_chat_instance_unified.py
+  s_bb98e2f10840b6::t_c997db90f1d5bb 72-77,390
+  s_bb98e2f10840b6::t_484c9917a272e7 263,276
+  s_bb98e2f10840b6::t_586313a00dd9e0 11,190
+apps/backend/src/agentclaw/community/core/repository/protocols/chat.py
+  s_bb98e2f10840b6::t_4b4605467eb830 12-13,229-238
+  s_bb98e2f10840b6::t_27390661cf34b3 239-242
+apps/backend/src/agentclaw/community/core/caller_identity/README.md
+  s_bb98e2f10840b6::t_f8f3b412469247 8,161-182
+apps/backend/src/agentclaw/community/core/expert_chat/README.md
+  s_bb98e2f10840b6::t_09687802238f72 91-102
+apps/backend/tests/community/core/caller_identity/test_shared_teclaw_iam.py
+  s_bb98e2f10840b6::t_cc4ce0be636596 68,122
+apps/backend/tests/community/di/test_scheduled_caller_refresh.py
+  s_bb98e2f10840b6::t_c3c0d7e68e7e55 12-21
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f1c9aea51023e1c3bea9a45383f61cf5aeb661bd",
+  "prompts": {},
+  "sessions": {
+    "s_bb98e2f10840b6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a162ee-dd64-7f52-9208-9fd1326f32e5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

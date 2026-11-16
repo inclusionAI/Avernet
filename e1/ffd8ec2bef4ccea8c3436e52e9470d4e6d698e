@@ -1,0 +1,20 @@
+apps/backend/tests/community/plugins/community/test_device_adapter_transport.py
+  s_e9ae8c1f28ec71::t_333aa96a7fd1d2 2,154,200,223-226,245-248
+  s_e9ae8c1f28ec71::t_d007f92ee69289 213-222,227-244,249-255
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e1ffd8ec2bef4ccea8c3436e52e9470d4e6d698e",
+  "prompts": {},
+  "sessions": {
+    "s_e9ae8c1f28ec71": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1dfef-455c-73c0-b946-43fc6d3b72a8",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

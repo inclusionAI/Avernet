@@ -1,0 +1,25 @@
+src/ecb/tests/application/task_benchmark/oncall_case_evaluation/test_service.py
+  s_7517e37f6fcee5::t_1c3b71710d2f35 765,805,812,871-874
+  s_7517e37f6fcee5::t_a3c104b8114523 763,767-772,781,797,807,813-814,868-870,875,879-880
+  s_7517e37f6fcee5::t_97fb6ed8c170a7 784
+  s_7517e37f6fcee5::t_aa7e500a8c5a76 766
+src/ecb/ecb/application/task_benchmark/oncall_case_evaluation/service.py
+  s_7517e37f6fcee5::t_97fb6ed8c170a7 489
+  s_7517e37f6fcee5::t_070efef2d124ed 13,28,526-527,572-578,620-625,629,632-636,647,657-673
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "5c5dd91ac5820772297e9e84b1140b7911220957",
+  "prompts": {},
+  "sessions": {
+    "s_7517e37f6fcee5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a9dc-9a35-7de0-88fa-7da8184fb762",
+        "model": "GLM-5.3"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

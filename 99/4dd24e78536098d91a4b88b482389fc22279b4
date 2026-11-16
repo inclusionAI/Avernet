@@ -1,0 +1,129 @@
+apps/bcs-internal/crates/plugins/bcs-tracing-sofa/tests/client_versions.rs
+  s_de8b18a148c239::t_29aae6806288ea 1-47
+apps/bcs-internal/crates/plugins/bcs-theta/src/lib.rs
+  s_de8b18a148c239::t_a3be499c912d73 114
+apps/bcs-internal/crates/plugins/bcs-bailian/Cargo.toml
+  s_de8b18a148c239::t_a3be499c912d73 14
+apps/bcs-internal/crates/external-clients/bcs-layotto/Cargo.toml
+  s_de8b18a148c239::t_d7da9dbe709c6f 14
+apps/bcs-internal/third_party/tracer-rust/README.md
+  s_de8b18a148c239::t_dbbdcc707ecf0d 20-21
+  s_de8b18a148c239::t_6f81e4583af470 1-19,22-23
+apps/bcs-internal/third_party/tracer-rust/tracer-core/src/tracer/mod.rs
+  s_de8b18a148c239::t_be493195a31258 1-561
+apps/bcs-internal/crates/plugins/bcs-buservice-user-directory/Cargo.toml
+  s_de8b18a148c239::t_a3be499c912d73 14
+apps/bcs-internal/docs/sofa-tracer.md
+  s_de8b18a148c239::t_14c181a3b941ca 80-103
+  s_de8b18a148c239::t_6f81e4583af470 1-79
+apps/bcs-internal/crates/plugins/bcs-security-gateway-agentpass/Cargo.toml
+  s_de8b18a148c239::t_a3be499c912d73 14
+apps/bcs-internal/crates/plugins/bcs-security-gateway-agentpass/src/client.rs
+  s_de8b18a148c239::t_a3be499c912d73 109
+apps/bcs-internal/crates/plugins/bcs-channel-dingtalk/Cargo.toml
+  s_de8b18a148c239::t_a3be499c912d73 11
+apps/bcs-internal/crates/plugins/bcs-tracing-sofa/CONTEXT.md
+  s_de8b18a148c239::t_6f81e4583af470 1-36
+apps/bcs-internal/Cargo.toml
+  s_de8b18a148c239::t_be493195a31258 4-5,45-48
+apps/bcs-internal/crates/plugins/bcs-theta/Cargo.toml
+  s_de8b18a148c239::t_a3be499c912d73 14
+apps/bcs-internal/crates/bootstrap/bcs-internal/src/main.rs
+  s_de8b18a148c239::t_b2785b81014d11 42-47,49-51,57-59,84-94
+  s_de8b18a148c239::t_be0da5a03e71d2 48
+  s_de8b18a148c239::t_539e85ce091d03 95-96
+apps/bcs-internal/crates/plugins/bcs-caller-identity-agentpass/Cargo.toml
+  s_de8b18a148c239::t_a3be499c912d73 14
+apps/bcs-internal/crates/external-clients/bcs-layotto/src/mist/client.rs
+  s_de8b18a148c239::t_d7da9dbe709c6f 122,125-127,158,160-162,181-189
+  s_de8b18a148c239::t_755c4c9d8f34f4 190-191
+apps/bcs-internal/crates/plugins/bcs-auth-agentpass/src/remote_identity.rs
+  s_de8b18a148c239::t_210eebe3025fe3 5
+  s_de8b18a148c239::t_a3be499c912d73 70
+apps/bcs-internal/crates/plugins/bcs-auth-agentpass/src/lib.rs
+  s_de8b18a148c239::t_a3be499c912d73 253
+  s_de8b18a148c239::t_a1189108306928 410,425
+apps/bcs-internal/crates/plugins/bcs-tracing-sofa/tests/trace_chain.rs
+  s_de8b18a148c239::t_dbbdcc707ecf0d 231-232
+  s_de8b18a148c239::t_f44271efb09b3e 1-47,52-56,59-61,63-149,152-230,233-266
+  s_de8b18a148c239::t_29aae6806288ea 48-51,57-58,62,150-151
+apps/bcs-internal/crates/plugins/bcs-caller-identity-agentpass/src/client.rs
+  s_de8b18a148c239::t_a3be499c912d73 81
+apps/bcs-internal/crates/plugins/bcs-auth-agentpass/Cargo.toml
+  s_de8b18a148c239::t_210eebe3025fe3 11
+apps/bcs-internal/crates/plugins/bcs-tracing-sofa/Cargo.toml
+  s_de8b18a148c239::t_286d14be25c3d0 14,18-20
+  s_de8b18a148c239::t_5f531367e13218 1-11,13,15-17,22-24
+  s_de8b18a148c239::t_29aae6806288ea 12,21
+apps/bcs-internal/crates/plugins/bcs-channel-dingtalk/src/failure_notifier.rs
+  s_de8b18a148c239::t_a3be499c912d73 305
+apps/bcs-internal/crates/plugins/bcs-bailian/src/lib.rs
+  s_de8b18a148c239::t_a3be499c912d73 178
+apps/agentclawscs/docker/bcs/scripts/admin/bin/start.sh
+  s_de8b18a148c239::t_be0da5a03e71d2 24-26
+  s_de8b18a148c239::t_44da36fafb02c4 21-23
+apps/bcs-internal/third_party/tracer-rust/tracer-core/src/appender/mod.rs
+  s_de8b18a148c239::t_be493195a31258 1-32,34-74,78,86-209,223-244
+  s_de8b18a148c239::t_dbbdcc707ecf0d 33,75-77,79-85
+  s_de8b18a148c239::t_da9ed01099b397 210-222
+apps/bcs-internal/crates/plugins/bcs-channel-dingtalk/src/http_client.rs
+  s_de8b18a148c239::t_a3be499c912d73 113
+apps/bcs-internal/crates/plugins/bcs-tracing-sofa/src/lib.rs
+  s_de8b18a148c239::t_3a1948222c4a5a 114-116
+  s_de8b18a148c239::t_dbbdcc707ecf0d 85-93
+  s_de8b18a148c239::t_5f531367e13218 1-66,68-84,94-113,117-148
+  s_de8b18a148c239::t_29aae6806288ea 67
+apps/bcs-internal/crates/bootstrap/bcs-internal/Cargo.toml
+  s_de8b18a148c239::t_be493195a31258 11-12
+apps/agentclawscs/docker/bcn/scripts/admin/bin/start.sh
+  s_de8b18a148c239::t_be0da5a03e71d2 24-26
+  s_de8b18a148c239::t_1a4c6f3bbaa1cf 21-23
+apps/bcs-internal/README.md
+  s_de8b18a148c239::t_c0b7f0e040970d 67
+apps/bcs-internal/crates/plugins/bcs-channel-dingtalk/src/outbound.rs
+  s_de8b18a148c239::t_a3be499c912d73 243
+apps/bcs-internal/crates/plugins/bcs-tracing-sofa/src/sink.rs
+  s_de8b18a148c239::t_da9ed01099b397 69-84
+  s_de8b18a148c239::t_5f531367e13218 1-53,59-68
+  s_de8b18a148c239::t_3a1948222c4a5a 54-58
+apps/bcs-internal/crates/plugins/bcs-buservice-user-directory/src/lib.rs
+  s_de8b18a148c239::t_a3be499c912d73 335,386
+apps/bcs-internal/third_party/tracer-rust/SOURCE-SHA256.txt
+  s_de8b18a148c239::t_a23d4d5497b9ff 1-12
+apps/bcs-internal/third_party/tracer-rust/tracer-core/Cargo.toml
+  s_de8b18a148c239::t_5498680971b33b 1-20
+apps/bcs-internal/third_party/tracer-rust/tracer-core/src/constant.rs
+  s_de8b18a148c239::t_54c6ce66c25514 1-72
+apps/bcs-internal/third_party/tracer-rust/tracer-core/src/context/mod.rs
+  s_de8b18a148c239::t_06c5bebeb76cda 1-1112
+apps/bcs-internal/third_party/tracer-rust/tracer-core/src/facade/mod.rs
+  s_de8b18a148c239::t_b21ca71675f10c 1-103
+apps/bcs-internal/third_party/tracer-rust/tracer-core/src/lib.rs
+  s_de8b18a148c239::t_32aaab4b43307f 1-8
+apps/bcs-internal/third_party/tracer-rust/tracer-core/src/util/atomic.rs
+  s_de8b18a148c239::t_2b45a40e5d6481 1-47
+apps/bcs-internal/third_party/tracer-rust/tracer-core/src/util/mod.rs
+  s_de8b18a148c239::t_8e897979e8590a 1-15
+apps/bcs-internal/third_party/tracer-rust/tracer-core/src/util/string_map.rs
+  s_de8b18a148c239::t_e7049f41a65692 1-56
+apps/bcs-internal/third_party/tracer-rust/tracer-core/src/util/time.rs
+  s_de8b18a148c239::t_b92cfb8fb8c9c0 1-67
+apps/bcs-internal/third_party/tracer-rust/tracer-core/src/util/trace_id.rs
+  s_de8b18a148c239::t_e1caa782e7afdb 1-203
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "994dd24e78536098d91a4b88b482389fc22279b4",
+  "prompts": {},
+  "sessions": {
+    "s_de8b18a148c239": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a659-522b-7611-85d7-89f0d4fb9517",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Zimin Zhang <zhangzimin.zzm@antgroup.com>"
+    }
+  }
+}

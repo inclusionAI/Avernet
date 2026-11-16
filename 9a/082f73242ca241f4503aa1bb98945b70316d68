@@ -1,0 +1,33 @@
+apps/bcsfuse/packages/search-core/README.md
+  s_9e428ec8192673::t_a3ffaf4b75b4da 121-135
+apps/bcsfuse/packages/search-core/src/search_core/application/cache.py
+  s_9e428ec8192673::t_2e4f7f96fe40e0 64,70-79,97,102-105,111-115,117-118,122,129,131,134-139
+apps/bcsfuse/packages/search-core/src/search_core/application/card_metadata.py
+  s_9e428ec8192673::t_fe9db251207406 36,41,58,60,62-68,73-75,119-127
+apps/bcsfuse/packages/search-core/src/search_core/catalog/updates.py
+  s_9e428ec8192673::t_5a36bf72fa1cfe 199,234,440
+apps/bcsfuse/packages/search-core/src/search_core/core/memory_cache.py
+  s_9e428ec8192673::t_69c2ae2be32fbd 67-74,78-79,84,96,100-106,109-110,112,116-117,119,121,123-135,137-142,146-147,162-167,184-186,195-202
+apps/bcsfuse/packages/search-core/tests/test_card_metadata_coalescing.py
+  s_9e428ec8192673::t_e4c0591246f442 72
+apps/bcsfuse/packages/search-core/tests/test_card_metadata_refresh.py
+  s_9e428ec8192673::t_2f0766ebec2e81 1-217
+apps/bcsfuse/src/app/tc/v2.py
+  s_9e428ec8192673::t_630c391db46dd5 78,89
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9a082f73242ca241f4503aa1bb98945b70316d68",
+  "prompts": {},
+  "sessions": {
+    "s_9e428ec8192673": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1673c-d8f0-7222-9db7-0c957c6d5e32",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}

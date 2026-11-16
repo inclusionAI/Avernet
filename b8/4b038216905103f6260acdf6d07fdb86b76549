@@ -1,0 +1,40 @@
+apps/evolverun/clawweb/public/modules/workflow/docs/pack-version-write.md
+  h_43af82e14600e4 159-187,252-270,272
+apps/evolverun/clawweb/public/modules/workflow/web/components/FrozenPackVersionViewer.tsx
+  h_43af82e14600e4 44-84
+apps/evolverun/clawweb/public/modules/workflow/web/components/PackReconciliationNotice.tsx
+  h_43af82e14600e4 1-41
+apps/evolverun/clawweb/public/modules/workflow/web/components/ScriptFilesTab.tsx
+  h_43af82e14600e4 6,10-11,13,15,59,71-76,78,91
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/EditorDraftRecovery.test.tsx
+  h_43af82e14600e4 1,277
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/FrozenPackVersionViewerUI.test.tsx
+  h_43af82e14600e4 1-90
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/ScriptFilesReconciliationUI.test.tsx
+  h_43af82e14600e4 1-107
+apps/evolverun/clawweb/public/modules/workflow/web/editor/__tests__/packRenameSessionSafety.test.tsx
+  h_43af82e14600e4 1-226
+apps/evolverun/clawweb/public/modules/workflow/web/editor/__tests__/packVersionOriginRejection.test.ts
+  h_43af82e14600e4 1-243
+apps/evolverun/clawweb/public/modules/workflow/web/editor/packVersionSave.ts
+  h_43af82e14600e4 49-57,89,117-119
+apps/evolverun/clawweb/public/modules/workflow/web/editor/packVersionSession.ts
+  h_43af82e14600e4 29-31,43,77,87,89-95,97,99,158
+apps/evolverun/clawweb/public/modules/workflow/web/editor/usePackCanvasSession.ts
+  h_43af82e14600e4 4,39,168,179
+apps/evolverun/clawweb/public/modules/workflow/web/pages/Editor.tsx
+  h_43af82e14600e4 121-124,620,627,672
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/EditorSaveDeploy.test.tsx
+  h_43af82e14600e4 134-151,199-250
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b84b038216905103f6260acdf6d07fdb86b76549",
+  "prompts": {},
+  "humans": {
+    "h_43af82e14600e4": {
+      "author": "fudapeng <fudp@example.com>"
+    }
+  }
+}

@@ -1,0 +1,32 @@
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_dispatch_bridge.py
+  s_64261436edbb0b::t_9e589837abc5f2 12-13,118-225
+apps/backend/tests/community/core/task/context_collab/test_l1_wire_objects.py
+  s_64261436edbb0b::t_9e589837abc5f2 312-328
+apps/backend/src/agentclaw/community/core/task/context_collab/l1_interoperate_deliver/delivery.py
+  s_64261436edbb0b::t_4fa40b89d40d68 79-81,83
+apps/backend/src/agentclaw/community/core/task/context_collab/products/task_commission/dispatch.py
+  s_64261436edbb0b::t_4fa40b89d40d68 16-18,119-126,128
+apps/backend/tests/community/core/task/context_collab/test_l1_delivery_mock.py
+  s_64261436edbb0b::t_9e589837abc5f2 144-157
+apps/backend/tests/community/di/test_task_module.py
+  s_64261436edbb0b::t_0c0bc66c4157ea 475-478
+apps/backend/src/agentclaw/community/core/task/context_collab/l1_interoperate_deliver/common.py
+  s_64261436edbb0b::t_4fa40b89d40d68 317,320-321,332,359-361,376-378
+  s_64261436edbb0b::t_4084c56b481aa9 340-344
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7413907fd39cda21012db80e4dc1f21c6c001914",
+  "prompts": {},
+  "sessions": {
+    "s_64261436edbb0b": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "6abdaae9-3cab-4f39-a132-80de8a711d13",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

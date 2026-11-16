@@ -1,0 +1,19 @@
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-session-recovery/tests/test_delivery_observation.py
+  s_5fc3e54b0a0d49::t_00785e52370dc0 1-92
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "66fc250efbf7129054653175a22020595ee79c49",
+  "prompts": {},
+  "sessions": {
+    "s_5fc3e54b0a0d49": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a996-a70d-7011-966d-daf0ae150832",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}

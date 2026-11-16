@@ -1,0 +1,25 @@
+apps/backend/src/agentclaw/corp/plugins/prod/token_exchange_jit.py
+  s_389b99dfb07306::t_ae861c62169112 1,32,99,121,123,129-130
+apps/backend/tests/corp/di/test_jit_token_injection.py
+  s_389b99dfb07306::t_f72b7dfa7c48d2 101-108,125,193
+apps/backend/tests/corp/di/test_token_exchange_adapters.py
+  s_389b99dfb07306::t_6ab604d25d274c 16,19,23,65-67,73,81,248-259
+apps/backend/tests/corp/plugins/prod/test_token_exchange_jit.py
+  s_389b99dfb07306::t_ff7b7894abb20f 52-53,55-56,59-60,63,69,75-76,84-85,87-92,112-121,275,277,296-297,301,348-349,357,360,370-371,376,379
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "16c8191c48aae65a599d4422b21d6616496b848b",
+  "prompts": {},
+  "sessions": {
+    "s_389b99dfb07306": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1868f-6bae-7722-8360-9deb42df0431",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

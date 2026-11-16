@@ -1,0 +1,26 @@
+apps/bcs/crates/bootstrap/bcs/src/logging/correlation/tests.rs
+  s_bca1c8af0f82c8::t_c7cc230bbebb9b 26-27,30-31,40,128-129,132-144
+  s_bca1c8af0f82c8::t_2f1410677d9806 47-127,130-131,145-190
+apps/bcs/docs/observability/request-operation-logging.md
+  s_bca1c8af0f82c8::t_c518bc41aa24b0 92-105
+apps/bcs/crates/bootstrap/bcs/src/logging/correlation.rs
+  s_bca1c8af0f82c8::t_c7ce7f381a7670 17,30-44,52-60
+apps/bcs/crates/bootstrap/bcs/CONTEXT.md
+  s_bca1c8af0f82c8::t_1181f14f030d46 295-299
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "43feee7c3de16ca2f94e143610841840bdc3a6a6",
+  "prompts": {},
+  "sessions": {
+    "s_bca1c8af0f82c8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d2b5-7d8c-70c3-8fa2-d211cf71e805",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Zimin Zhang <zhangzimin.zzm@antgroup.com>"
+    }
+  }
+}
