@@ -10,5 +10,5 @@ export async function enableRecoveryFixture(db: IDatabase) {
 }
 export function notificationBotConfig(configJson = '{"notifications":{"owner":{"enabled":true},"group":{"enabled":true,"route_id":"test"}}}') {
   const row = { botId: 'bot', entityId: 'owner', env: 'prod', diagnosisEnabled: true, recoveryEnabled: true, configJson, version: 1 };
-  return { resolveTargetForOwner: vi.fn(async () => ({ botId: row.botId, entityId: row.entityId, env: row.env })), find: vi.fn<BotDiagnosisRecoveryConfigStore['find']>(async () => row), findMany: vi.fn(async () => [row]), findForOwner: vi.fn(async () => row), setSwitches: vi.fn() } satisfies BotDiagnosisRecoveryConfigStore;
+  return { resolveTargetForOwner: vi.fn(async () => ({ botId: row.botId, entityId: row.entityId, env: row.env })), find: vi.fn<BotDiagnosisRecoveryConfigStore['find']>(async () => row), findMany: vi.fn(async () => [row]), findForOwner: vi.fn(async () => row), setSwitches: vi.fn(), replaceConfiguration: vi.fn() } satisfies BotDiagnosisRecoveryConfigStore;
 }

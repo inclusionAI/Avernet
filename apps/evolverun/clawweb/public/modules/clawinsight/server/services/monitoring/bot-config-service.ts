@@ -1,6 +1,19 @@
 import { MonitoringError } from './contracts.js';
-import type { BotDiagnosisRecoveryConfigStore } from './bot-config-contracts.js';
-import type { MonitoringBotDirectory, MonitoringPrincipal, MonitoringReferences } from './directory-contracts.js';
+import { validBotConfiguration, type BotDiagnosisRecoveryConfigStore } from './bot-config-contracts.js';
+import type { DirectoryBot, MonitoringBotDirectory, MonitoringPrincipal, MonitoringReferences } from './directory-contracts.js';
+
+export function replaceBotConfiguration(store: BotDiagnosisRecoveryConfigStore, bot: DirectoryBot, updatedBy: string, input: unknown) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new MonitoringError('INVALID_EVENT', '配置参数无效。');
+  const value = input as Record<string, unknown>;
+  const { diagnosisEnabled, recoveryEnabled, version, configJson } = value;
+  if (Object.keys(value).some(key => !['diagnosisEnabled', 'recoveryEnabled', 'version', 'configJson'].includes(key))
+    || typeof diagnosisEnabled !== 'boolean' || typeof recoveryEnabled !== 'boolean'
+    || typeof version !== 'number' || !Number.isSafeInteger(version) || version < 0
+    || typeof configJson !== 'string' || Buffer.byteLength(configJson) > 8192 || !validBotConfiguration(configJson)) {
+    throw new MonitoringError('INVALID_EVENT', '配置参数或通知配置无效。');
+  }
+  return store.replaceConfiguration(bot, { diagnosisEnabled, recoveryEnabled, configJson, expectedVersion: version, updatedBy });
+}
 
 /** Only current owners may write, including when the caller can read all Bots. */
 export async function configureBots(store: BotDiagnosisRecoveryConfigStore | undefined, directory: MonitoringBotDirectory,

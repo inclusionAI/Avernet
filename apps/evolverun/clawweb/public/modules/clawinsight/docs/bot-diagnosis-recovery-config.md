@@ -77,11 +77,20 @@ have no new-table record. Ordinary paused Owner notices remain paused.
   `{ "all": true, "enabled": false }`. The one visible switch writes both
   flags; 0 is the expected version for a missing row. Only the current owner may
   write, including callers who have administrator read access.
+- An authenticated ClawInsight administrator can read or replace a single Bot's
+  full configuration within the existing tenant and target-environment scope via `GET` or `PUT`
+  `/api/insight/v1/monitoring/configurations/:botRef`. Both return
+  `{ configuration }`; a GET with no stored row returns `{ configuration: null }`.
+  The PUT body contains independent booleans `diagnosisEnabled` and
+  `recoveryEnabled`, the expected `version` (0 for insert), and `configJson`
+  (a JSON object encoded as a string, at most 8 KiB). PUT replaces both switches
+  and the JSON in one write. To omit notification settings, send `"{}"`.
+  Notification channels accept route references and booleans as above.
+  Stale versions return 409. Group URLs still come from the shared registry.
 - Bulk operations use the existing owner directory and traverse all keyset
   pages, irrespective of UI search/page. They affect existing Bots, not future
   additions. `{updated, failed}` reports partial success; stale entries are not
-  overwritten. Retry reloads versions. No notification preferences are written
-  through this endpoint.
+  overwritten. Retry reloads versions. This POST only writes switches.
 - Existing Bot options/status return the effective recovery switch. Legacy-only
   Bots have `diagnosisEnabled: false`, their legacy recovery state, and version 0.
   The first UI write creates a new row, with `{}` notification JSON: it takes

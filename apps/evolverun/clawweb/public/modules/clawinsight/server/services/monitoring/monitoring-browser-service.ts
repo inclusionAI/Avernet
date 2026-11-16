@@ -3,7 +3,7 @@ import type { BotOption, BotScope, DirectoryBot, DirectoryScope, MonitoringBotDi
   MonitoringPrincipal, MonitoringReferences } from './directory-contracts.js';
 import { browserDiagnosisQuery, parseWindow, queryKeys } from './browser-validation.js';
 import type { BotDiagnosisRecoveryConfig, BotDiagnosisRecoveryConfigStore } from './bot-config-contracts.js';
-import { configureBots } from './bot-config-service.js';
+import { configureBots, replaceBotConfiguration } from './bot-config-service.js';
 import { recoveryConfigurations } from '../repair/session-recovery/bot-configuration.js';
 import type { RecoveryAppConfigStore } from '../repair/session-recovery/legacy-configuration.js';
 
@@ -25,6 +25,14 @@ export function createMonitoringBrowserService(store: MonitoringStore, directory
       throw new MonitoringError('BOT_NOT_FOUND', 'Bot 不存在或无权访问。');
     }
     return bot;
+  }
+  async function configurationTarget(p: MonitoringPrincipal, ref: string) {
+    authorize(p);
+    if (!p.isClawInsightAdmin) throw new MonitoringError('FORBIDDEN', '需要监控管理员权限。');
+    if (!configurations) throw new MonitoringError('NOT_READY', '诊断监控配置尚未就绪。');
+    const bot = await directory.get(references.decode(ref, p.tenant), p);
+    if (!bot) throw new MonitoringError('BOT_NOT_FOUND', 'Bot 不存在或无权访问。');
+    return { bot, store: configurations };
   }
   function option(bot: DirectoryBot, summary: MonitoringSummary | null, tenant: string, config?: BotDiagnosisRecoveryConfig | null): BotOption {
     return { botRef: references.encode(bot, tenant), botName: bot.botName, botId: bot.botId, ownerId: bot.ownerId, env: bot.env,
@@ -57,6 +65,14 @@ export function createMonitoringBrowserService(store: MonitoringStore, directory
     async configure(p, input) {
       authorize(p);
       return configureBots(configurations, directory, references, p, input);
+    },
+    async readConfiguration(p, ref) {
+      const { bot, store } = await configurationTarget(p, ref);
+      return store.find(bot);
+    },
+    async replaceConfiguration(p, ref, input) {
+      const { bot, store } = await configurationTarget(p, ref);
+      return replaceBotConfiguration(store, bot, p.staffId, input);
     },
     async options(p, query) {
       authorize(p);

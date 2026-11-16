@@ -1,6 +1,6 @@
 import type { IDatabase } from '@avernet/clawweb-shared/server/db';
 import { MonitoringError, type MonitoringTarget } from '../services/monitoring/contracts.js';
-import type { BotDiagnosisRecoveryConfig, BotDiagnosisRecoveryConfigStore } from '../services/monitoring/bot-config-contracts.js';
+import type { BotConfigurationWrite, BotDiagnosisRecoveryConfig, BotDiagnosisRecoveryConfigStore } from '../services/monitoring/bot-config-contracts.js';
 import { targetKey } from '../services/monitoring/target.js';
 
 type Row = { bot_id: string; entity_id: string; env: string; diagnosis_enabled: number;
@@ -38,22 +38,30 @@ export class BotDiagnosisRecoveryConfigRepository implements BotDiagnosisRecover
     }
     return targets.map(t => found.get(targetKey(t)) ?? null);
   }
-  async setSwitches(target: MonitoringTarget, input: { diagnosisEnabled: boolean; recoveryEnabled: boolean; expectedVersion: number; updatedBy: string }): Promise<BotDiagnosisRecoveryConfig> {
+  setSwitches(target: MonitoringTarget, input: BotConfigurationWrite): Promise<BotDiagnosisRecoveryConfig> {
+    return this.save(target, input);
+  }
+  replaceConfiguration(target: MonitoringTarget, { configJson, ...input }: BotConfigurationWrite & { configJson: string }): Promise<BotDiagnosisRecoveryConfig> {
+    return this.save(target, input, configJson);
+  }
+  private async save(target: MonitoringTarget, input: BotConfigurationWrite, configJson?: string): Promise<BotDiagnosisRecoveryConfig> {
     const now = this.db.dialect.now();
     if (input.expectedVersion === 0) {
       try {
         await this.db.exec(`INSERT INTO ce_bot_diagnosis_recovery_config
           (bot_id, entity_id, env, diagnosis_enabled, recovery_enabled, config_json, version, updated_by, gmt_create, gmt_modified)
           VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`,
-        [...params(target), Number(input.diagnosisEnabled), Number(input.recoveryEnabled), '{}', input.updatedBy, now, now]);
+        [...params(target), Number(input.diagnosisEnabled), Number(input.recoveryEnabled), configJson ?? '{}', input.updatedBy, now, now]);
       } catch (error) {
         if (await this.find(target)) throw new MonitoringError('EVENT_CONFLICT', '配置已更新，请刷新后重试。');
         throw error;
       }
     } else {
-      const result = await this.db.exec(`UPDATE ce_bot_diagnosis_recovery_config SET diagnosis_enabled = ?, recovery_enabled = ?,
+      const configColumn = configJson === undefined ? '' : 'config_json = ?, ';
+      const configParams = configJson === undefined ? [] : [configJson];
+      const result = await this.db.exec(`UPDATE ce_bot_diagnosis_recovery_config SET diagnosis_enabled = ?, recovery_enabled = ?, ${configColumn}
         version = version + 1, updated_by = ?, gmt_modified = ? WHERE ${predicate} AND version = ?`,
-      [Number(input.diagnosisEnabled), Number(input.recoveryEnabled), input.updatedBy, now, ...params(target), input.expectedVersion]);
+      [Number(input.diagnosisEnabled), Number(input.recoveryEnabled), ...configParams, input.updatedBy, now, ...params(target), input.expectedVersion]);
       if (!result.affectedRows) throw new MonitoringError('EVENT_CONFLICT', '配置已更新，请刷新后重试。');
     }
     return (await this.find(target))!;

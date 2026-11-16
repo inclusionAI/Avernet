@@ -70,6 +70,8 @@ export function createMonitoringRuntime(
     },
     browser: {
       configure: async (...args) => services().browser.configure!(...args),
+      readConfiguration: async (...args) => services().browser.readConfiguration!(...args),
+      replaceConfiguration: async (...args) => services().browser.replaceConfiguration!(...args),
       options: async (...args) => services().browser.options(...args),
       status: async (...args) => services().browser.status(...args),
       diagnoses: async (...args) => services().browser.diagnoses(...args),
