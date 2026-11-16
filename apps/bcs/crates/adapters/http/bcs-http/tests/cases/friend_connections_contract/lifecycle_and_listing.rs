@@ -3,6 +3,7 @@ use super::*;
 #[tokio::test]
 async fn friend_connection_request_accepts_via_recorded_service() {
     let connect = Arc::new(RecordingConnectService::default());
+    connect.request_lookup.lock().await.insert("77".into(), pending_request("77", "peer-bot", "caller-bot"));
     let temp_dir = TempDir::new().unwrap();
     let app = build_app(
         &temp_dir,
@@ -37,6 +38,7 @@ async fn friend_connection_request_accepts_via_recorded_service() {
 #[tokio::test]
 async fn friend_connection_request_rejects_with_reason() {
     let connect = Arc::new(RecordingConnectService::default());
+    connect.request_lookup.lock().await.insert("88".into(), pending_request("88", "peer-bot", "caller-bot"));
     let temp_dir = TempDir::new().unwrap();
     let app = build_app(
         &temp_dir,

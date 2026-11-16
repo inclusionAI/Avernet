@@ -22,7 +22,10 @@ def format_todo_execution_instruction(
     """Build the complete Todo execution and artifact-reporting instruction."""
     backend = backend_url.rstrip("/")
     report_url = f"{backend}/api/v1/collaboration/tasks/todos/{todo_id}/report"
-    upload_url = f"{backend}/api/v1/collaboration/tasks/todos/{todo_id}/artifacts/object-file"
+    complete_url = f"{backend}/api/v1/collaboration/tasks/todos/{todo_id}/complete"
+    upload_url = (
+        f"{backend}/api/v1/collaboration/tasks/todos/{todo_id}/artifacts/object-file"
+    )
     example = {
         "todo_execution_id": todo_execution_id,
         "artifact_name": "执行结果",
@@ -67,6 +70,15 @@ def format_todo_execution_instruction(
             "is_final_artifact、file。",
             "最终执行结果必须至少上报一个产物；只有 HTTP 成功响应才算上报成功。"
             "收到凭证失效、鉴权失败或状态冲突时停止，不得自行生成新的 ID 或 token。",
+            "所有产物成功上报后，必须最后调用一次完成接口：",
+            f"POST {complete_url}",
+            f"X-Todo-Execution-Token: {todo_execution_token}",
+            json.dumps(
+                {"todo_execution_id": todo_execution_id},
+                ensure_ascii=False,
+                indent=2,
+            ),
+            "只有完成接口返回 HTTP 成功，本轮执行才算结束。",
             "安全要求：token 只能用于上述请求头，不得写入 Bot 回复、产物内容、"
             "文件、日志或转发给其他主体。metadata 仅用于链路观测，不能依赖其完成上报。",
         ]

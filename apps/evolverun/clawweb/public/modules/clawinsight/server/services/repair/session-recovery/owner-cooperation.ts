@@ -28,6 +28,18 @@ export function hasAssessmentDelivery(task: Pick<RecoveryStoredTask, "ownerReque
   });
 }
 
+/** A read receipt supports investigation; it is not itself proof of missing permission. */
+export function validateOwnerHandoffEvidence(task: RecoveryStoredTask, ids: string[]): void {
+  validateRecoveryEvidenceReferences(task, ids);
+  const reads = new Set(task.timeline.filter(event => event.kind === "operation" && event.payload.status === "succeeded"
+    && ["session_read", "trajectory_read", "runtime_inspect"].includes(String(event.payload.tool_name)))
+    .map(event => event.payload.raw_tool_call_id ?? event.payload.tool_call_id));
+  if (!task.evidence.some(item => ids.includes(item.evidence_id)
+    && ["session_read", "trajectory_read", "runtime_inspect"].includes(item.source) && reads.has(item.tool_call_id))) {
+    fail(422, "Owner 处理事项需要成功的受控现场读取证据；结合实际回执按手册核实处理条件，读取失败本身不证明需要 Owner 处理");
+  }
+}
+
 /** Permission handling is separate from the one environment Plan. */
 export function requestOwnerCooperation(state: RecoveryTaskState, input: RecoveryOwnerRequestInput, requestId: string, now: number): RecoveryTaskState {
   if (state.simulation || state.level === "debug" || state.status !== "running" || state.phase === "apply") fail(409, "当前不能等待 Owner 处理事项");

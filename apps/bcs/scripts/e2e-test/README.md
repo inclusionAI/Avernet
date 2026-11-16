@@ -45,3 +45,20 @@ The CI supervisor supplies a diagnostics directory inside its report tree:
 Artifact append/final flags, states and observed cancellations, without request
 bodies, configuration or credentials. These files survive story failures and are
 included in the existing Singlebox artifact upload.
+
+## TC friend-auth-sync authorization
+
+The `edge_permission` suite loads
+[`tc_friend_auth_sync.sh`](tc_friend_auth_sync.sh) for the Human-to-TC-Bot
+work-order callback journey. It provisions a protected Bot owned by `85020`,
+then submits a pending request as a different Human (`153998`). In Singlebox's
+local auth mode, each call explicitly selects its `X-Mock-User-Id`; the signed
+`X-Avernet-Principal` forwarded to work-order/sync ports carries the same Human.
+A forwarded principal alone does not select the local authenticated caller.
+
+The applicant's approval must return 403 without a friend-auth-sync call. The
+owner's approval must succeed and produce exactly one grant for applicant
+`153998`, preserving owner `85020` in the re-addressed principal (`iss=bcs`,
+`aud=backend`). Both identities remain explicit during cleanup and listing so
+this scenario does not inherit the suite's default mock user. The test uses the
+existing Provider/Judge HTTP mock and does not bypass receiver authorization.

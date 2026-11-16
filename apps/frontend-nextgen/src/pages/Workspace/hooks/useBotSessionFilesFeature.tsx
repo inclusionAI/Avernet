@@ -113,7 +113,8 @@ export function useBotSessionFilesFeature(
   }, []);
 
   const enabled = !!botId && !!sessionId && !!userId;
-  const canUseSkills = !bot?.isFriendBot;
+  // 桌面 Bot 只禁用文件能力；Skill 使用真实 Bot 地址与会话资格独立判断。
+  const canUseSkills = !!bot?.realBotId && !!sessionId && !!userId && !!bot.chatable && !bot.isFriendBot;
 
   const fileChip = useMemo<FileChipConfig>(
     () => ({

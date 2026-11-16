@@ -312,7 +312,7 @@ async fn build_app_with_authority(
     bot_query: Arc<dyn BotQueryService>,
     user_identity: Option<Arc<dyn UserIdentityPort>>,
     token_map: Option<(&str, &str)>,
-    authority: Option<Arc<bcs_test_support::LazySeedAuthorityHook>>,
+    authority: Option<Arc<dyn bcs_service_api::port::bot_authority::BotAuthorityPort>>,
 ) -> axum::Router {
     let registry = Arc::new(BotCore::with_base_dir(temp_dir.path().to_path_buf()));
     if let Some((token, bot_id)) = token_map {
@@ -342,3 +342,28 @@ mod request_authorization;
 
 #[path = "friend_connections_contract/lifecycle_and_listing.rs"]
 mod lifecycle_and_listing;
+
+
+fn pending_request(id: &str, from: &str, to: &str) -> PermissionRequest {
+    PermissionRequest {
+        request_id: id.to_string(),
+        edge_id: None,
+        env: "dev".to_string(),
+        from_id: from.to_string(),
+        to_id: to.to_string(),
+        request_kind: RequestKind::Connect,
+        requested_ref_id: None,
+        requested_rules: None,
+        message: None,
+        status: RequestStatus::Pending,
+        decision_reason: None,
+        created_by: from.to_string(),
+        decided_by: None,
+        decided_at: None,
+        created_at: 0,
+        updated_at: 0,
+    }
+}
+
+#[path = "friend_connections_contract/decision_authorization.rs"]
+mod decision_authorization;

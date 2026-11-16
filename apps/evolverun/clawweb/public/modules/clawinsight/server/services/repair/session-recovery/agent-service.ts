@@ -28,7 +28,7 @@ import { addSessionReadCoverage, boundedSessionReadCoverage } from "./session-re
 import { cronJobId, cronRunSessionId } from "./session-identity.js";
 import { savedRecoveryHandbook } from "./handbook.js";
 import { hasAssessmentDelivery, ownerContinuationState } from "./owner-cooperation.js";
-import { recoveryTaskResult } from "./task-state.js";
+import { recoveryTaskResult, validateRecoveryEvidenceReferences } from "./task-state.js";
 import { recoveryResult } from "./result.js";
 import type { RecoveryAgentExecutor } from "./task-service.js";
 import type { RecoveryActionNotifier, RecoveryExecutionView, RecoveryTermination, SessionRecoveryTaskApi, SessionRecoveryAgentApi } from "./contracts.js";
@@ -410,7 +410,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
           ...(event === latestMessage ? { result: Object.fromEntries(["status", "delivery_key", "initial_message", "dry_run", "dispatched"].map(key => [key, (event.payload.result as Record<string, unknown>)[key]])) } : {}) } : event.payload })),
         evidence: bootstrapEvidence(business.evidence, trajectoryIndexReads),
       }, handbook: savedRecoveryHandbook(task),
-      timings: { heartbeatSeconds: 20, decisionPollSeconds: 20 }, ownerCooperationProtocol: "session-recovery-owner/v1", ownerHandoffProtocol: "session-recovery-handoff/v1", planProtocol: {
+      timings: { heartbeatSeconds: 20, decisionPollSeconds: 20 }, blockedReasons: ["insufficient_evidence"], ownerCooperationProtocol: "session-recovery-owner/v1", ownerHandoffProtocol: "session-recovery-handoff/v1", planProtocol: {
         allowedOperations: recoveryActionOperations,
         operationScope: "所有 Agent 执行动作需在方案内提供参考 Engine 请求或结构化 operationScope: { operation, target? }。operation 必须取自 allowedOperations，不自行构造动作名；定时任务启用和禁用使用 cron.update，target 填定时任务ID，文件操作的 target 填绝对路径。合法动作名不代表目标支持该操作，实际接口与工具以 tools.engine 和 supportedActionTypes 为准。参数内容可调整，主要动作和对象不可更换。MCP 和用户 Skill 的全部变更交给 Owner，写入 owner_cooperation；无需 Agent 操作时 actions 用空数组。Owner 完成配合后再继续验证和重试。Cron 必须使用声明的接口工具。Shell 仅承载其余获批环境动作，不得绕过接口或变更 MCP／Skill；服务不解析完整 Shell 业务语义。",
         unknownWrite: "未知写入先读取现场，用 reconcile_write 提交 applied / not_applied 和后续读取证据。原调用记录保持不可变；核实后可继续方案，不会自动重放。",
@@ -747,13 +747,20 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
         { summary: body.summary, evidence_ids: body.evidence_ids as string[], executionId: task.execution!.executionId }, body.final_summary);
       else if (body.reason === "target_unavailable") await this.deps.business().finishForTargetUnavailable(task.taskId, task.version,
         { summary: body.summary, evidence_ids: body.evidence_ids as string[], executionId: task.execution!.executionId }, body.final_summary);
-      else if (body.reason !== undefined) fail(422, "未知的结束原因。普通受阻请省略 reason，保留 kind=blocked、当前 phase 和原因 summary；不要改为 message 决策。user_continued 仅用于已核实的用户续聊，target_unavailable 需要 Provider 明确的目标不可用证据。符合手册转交条件时使用 kind=owner_handoff，并提供处理指引和现场 evidence_ids。");
+      else if (body.reason !== undefined && body.reason !== "insufficient_evidence") fail(422, "未知的结束原因。普通受阻请省略 reason；证据不足可使用 insufficient_evidence，保留当前阶段及证据缺口。user_continued 用于已核实的用户续聊，target_unavailable 需要 Provider 明确回执。按当前阶段回报，不改造业务判断以结束任务。");
       else {
+        const insufficientEvidence = body.reason === "insufficient_evidence";
+        if (insufficientEvidence) {
+          if (task.simulation || task.level === "debug" || !["assess", "plan"].includes(task.phase)) fail(422, "证据不足收口仅适用于真实任务的 assess 或 plan；observe/verify 仍按实际效果观察");
+          if (!Array.isArray(body.evidence_ids)) fail(422, "证据不足需保留已有读取回执引用，可为空数组，并在 summary 说明缺口");
+          validateRecoveryEvidenceReferences(task, body.evidence_ids as string[]);
+        }
         if (!task.simulation && task.level !== "debug") {
           if (task.phase === "assess" && hasAssessmentDelivery(task)) fail(422, "已有本轮消息投递记录，不能用普通 blocked 跳过效果回收。请回报 kind=assessment、decision=message 进入 observe；保留实际投递和执行事实，不重复发送。投递结果未知不代表已触达，随后按读取证据判断。");
           if (task.phase === "observe" || task.phase === "verify") fail(422, "当前阶段需要 kind=observation，分别回报触达、响应及 recovered / not_recovered / unknown 效果；原任务未恢复不等于自愈执行失败，不能用普通 blocked 代替效果判断。证据不足用 unknown，不能补造恢复或未恢复。observe 中确认未恢复将进入完整方案；verify 中确认未恢复将结束处理。");
         }
-        await this.deps.business().executionFailure(task.taskId, redactPersistableText(body.summary, 8000), task.execution!.executionId, false, body.final_summary);
+        await this.deps.business().executionFailure(task.taskId, redactPersistableText(body.summary, 8000), task.execution!.executionId, false, body.final_summary,
+          insufficientEvidence ? "INSUFFICIENT_EVIDENCE" : undefined);
       }
     }
     else fail(422, "未知业务回报类型");

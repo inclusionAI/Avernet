@@ -96,7 +96,7 @@ pub async fn accept_friend_request(
     uri: Uri,
     Path(id): Path<String>,
 ) -> Result<Json<FriendApiResponse>, HttpAdapterError> {
-    let caller = resolve_caller(&state, &headers, &uri, None, None).await?;
+    let caller = resolve_request_decider(&state, &headers, &uri, &id).await?;
     let edge_ids = state
         .connect
         .approve(&id, &caller, Some(request_auth_headers(&headers)))
@@ -112,7 +112,7 @@ pub async fn reject_friend_request(
     Path(id): Path<String>,
     body: Option<Json<DecisionBody>>,
 ) -> Result<Json<FriendApiResponse>, HttpAdapterError> {
-    let caller = resolve_caller(&state, &headers, &uri, None, None).await?;
+    let caller = resolve_request_decider(&state, &headers, &uri, &id).await?;
     // Body is optional: bcs-cli POSTs reject with no body / no content-type.
     let reason = body.and_then(|Json(b)| b.reason);
     state.connect.reject(&id, &caller, reason).await?;
@@ -223,6 +223,20 @@ pub async fn list_friends_by_actor(
     Ok(Json(envelope(&FriendListResponse { items, total })))
 }
 
+/// Authenticate before lookup, then authorize against the persisted receiver.
+/// This must precede the lifecycle call, including its idempotent return paths.
+async fn resolve_request_decider(
+    state: &HttpAppState,
+    headers: &HeaderMap,
+    uri: &Uri,
+    request_id: &str,
+) -> Result<String, HttpAdapterError> {
+    let caller = resolve_caller(state, headers, uri, None, None).await?;
+    let request = state.connect.get_request(request_id).await?;
+    authorize_actor(state, &caller, &request.to_id, !request.to_id.starts_with("human_")).await?;
+    Ok(request.to_id)
+}
+
 /// Resolve the caller actor id from request context for friend-connections endpoints.
 ///
 /// friend-connections security model (stricter than old `/friends/*`):
@@ -266,19 +280,30 @@ async fn resolve_caller(
         _ => actor_id.to_string(),
     };
 
+    authorize_actor(state, &bearer, &canonical, actor_kind == Some("bot")).await?;
+    Ok(canonical)
+}
+
+/// Share the live act-as check between creation and request decisions.
+async fn authorize_actor(
+    state: &HttpAppState,
+    bearer: &str,
+    canonical: &str,
+    is_bot: bool,
+) -> Result<(), HttpAdapterError> {
     if canonical == bearer {
-        return Ok(canonical);
+        return Ok(());
     }
 
-    if matches!(actor_kind, Some("bot")) && bearer.starts_with("human_") {
-        let staff_no = bearer.strip_prefix("human_").unwrap_or(&bearer);
+    if is_bot && bearer.starts_with("human_") {
+        let staff_no = bearer.strip_prefix("human_").unwrap_or(bearer);
         match state
             .services
             .bot_authority_hook
-            .can_manage(staff_no, &canonical)
+            .can_manage(staff_no, canonical)
             .await
         {
-            Ok(true) => return Ok(canonical),
+            Ok(true) => return Ok(()),
             Ok(false) => {}
             Err(error) => {
                 return Err(HttpAdapterError::Service(

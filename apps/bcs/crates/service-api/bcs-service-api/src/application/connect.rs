@@ -57,6 +57,8 @@ pub struct RequestsPage {
 #[async_trait]
 pub trait ConnectService: Send + Sync {
     /// Human→Bot: 1 request (+1 edge on approve). Bot↔Bot: 2 requests (+2 edges).
+    /// The second Bot↔Bot row is a generated reverse mirror, not an independent
+    /// peer request; it cannot be decided directly.
     async fn create_connect(
         &self,
         caller: &str,
@@ -114,6 +116,7 @@ pub trait ConnectService: Send + Sync {
     ) -> ServiceResult<FriendEntriesPage>;
 
     /// Owner inbox / sent list (`GET /friends/requests`). Paginated.
+    /// Generated reverse Connect mirrors are excluded before totals and pagination.
     async fn list_requests(
         &self,
         actor: &str,

@@ -373,6 +373,49 @@ it("requires saved scene evidence and never notifies from Debug or an in-progres
   expect(notifier.notify).not.toHaveBeenCalled();
 });
 
+it.each([false, true])("rejects failed-read evidence for Owner handoff (permission card: %s)", async permission => {
+  const sender = useNativeOwnerCards();
+  let task = await create();
+  vi.mocked(runtime.executeShell).mockRejectedValueOnce(new Error("session read unavailable"));
+  const read = await inspect(task, "failed-owner-basis");
+  expect(read.status).toBe("failed");
+  task = await current(task.taskId);
+  await expect(agent.report(task, { kind: "owner_handoff", phase: task.phase, summary: "读取失败，无法核实原任务权限",
+    evidence_ids: [read.evidenceId], ...(permission ? { owner_request: { reason: "permission", instructions: "请申请权限" } } : {}) }))
+    .rejects.toMatchObject({ status: 422 });
+  await flush();
+  expect(await current(task.taskId)).toMatchObject({ version: task.version, status: "running", phase: "assess" });
+  expect(sender.sendCard).not.toHaveBeenCalled();
+  expect(actionNotifier.after).not.toHaveBeenCalled();
+});
+
+it.each(["assess", "plan"] as const)("records insufficient evidence in %s without losing prior effect or notifying", async phase => {
+  const sender = useNativeOwnerCards();
+  const task = phase === "plan" ? await toPlan(await create()) : await create();
+  expect((await agent.bootstrap(task)).blockedReasons).toContain("insufficient_evidence");
+  actionNotifier.after.mockClear();
+  await agent.report(task, { kind: "blocked", phase, reason: "insufficient_evidence", summary: "缺少可核实的授权回执",
+    evidence_ids: [], final_summary: "保留证据缺口，本次未形成有依据的 Owner 事项。" });
+  const saved = await current(task.taskId);
+  expect(saved).toMatchObject({ status: "failed", phase, judgment: { effect: task.judgment?.effect ?? "unknown" } });
+  expect(saved.ownerRequest).toBeUndefined();
+  expect(saved.timeline).toContainEqual(expect.objectContaining({ kind: "execution", payload: expect.objectContaining({ failure_code: "INSUFFICIENT_EVIDENCE" }) }));
+  expect(saved.interventionStatus).toBe(task.interventionStatus);
+  expect(actionNotifier.after).not.toHaveBeenCalled();
+  expect(sender.sendCard).not.toHaveBeenCalled();
+});
+
+it.each(["assess", "observe", "verify"] as const)("does not use insufficient evidence to skip post-delivery %s", async phase => {
+  const first = await create();
+  await agent.retryMessage(first, { clientRequestId: "advice", purpose: "纠正原调用", message: "按正确入参继续原任务" });
+  let task = await current(first.taskId);
+  if (phase !== "assess") task = (await tasks.update(task.taskId, task.version, value => ({ ...value, version: value.version + 1, phase })))!;
+  await expect(agent.report(task, { kind: "blocked", phase, reason: "insufficient_evidence", summary: "暂时没有效果证据", evidence_ids: [] }))
+    .rejects.toMatchObject({ status: 422 });
+  expect(await current(task.taskId)).toMatchObject({ status: "running", phase, version: task.version });
+  expect(runtime.sendMessage).toHaveBeenCalledTimes(1);
+});
+
 
 it("accepts an older package's permission report through the generic Owner handoff", async () => {
   let task = await create(); const read = await inspect(task); task = await current(task.taskId);

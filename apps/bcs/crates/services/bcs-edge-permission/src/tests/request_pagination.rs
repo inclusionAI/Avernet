@@ -55,10 +55,10 @@ use super::*;
         assert_eq!(all_bot.items[0].status, RequestStatus::Approved);
     }
     #[tokio::test]
-    async fn list_requests_all_dedupes_and_appplies_pagination() {
+    async fn list_requests_all_filters_reverse_mirror_before_pagination() {
         // All = inbox ∪ sent, deduped by request_id. For a Bot↔Bot connect,
-        // each side's All view sees both rows (one from_id, one to_id) — no
-        // dedup collapse (distinct request_ids), exercising the union + sort.
+        // the generated reverse row is not a second user-facing request and
+        // must be removed before computing the total and slicing pages.
         let (eg, pp, rq, bc, db) = assemble().await;
         seed_bot(&db, "x:btA", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
         seed_bot(&db, "x:btB", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
@@ -69,26 +69,28 @@ use super::*;
             .expect("pending bot↔bot");
         assert_eq!(pending.request_ids.len(), 2);
 
-        // btA's All view: inbox (btB→btA) ∪ sent (btA→btB) ⇒ 2 rows.
+        // btA's All view contains only the original forward request.
         let all = svc
             .list_requests("x:btA", RequestDirection::All, None, 1, 20)
             .await
             .expect("all ok");
-        assert_eq!(all.total, 2);
-        assert_eq!(all.items.len(), 2);
-        // Pagination: page_size=1 returns 1 item, total stays 2.
+        assert_eq!(all.total, 1);
+        assert_eq!(all.items.len(), 1);
+        assert_eq!(all.items[0].request_id, pending.request_ids[0]);
+
+        // Filtering happens before pagination: the second page is empty and
+        // the total does not include the hidden reverse row.
         let page1 = svc
             .list_requests("x:btA", RequestDirection::All, None, 1, 1)
             .await
             .expect("page1 ok");
-        assert_eq!(page1.total, 2);
+        assert_eq!(page1.total, 1);
         assert_eq!(page1.items.len(), 1);
+        assert_eq!(page1.items[0].request_id, pending.request_ids[0]);
         let page2 = svc
             .list_requests("x:btA", RequestDirection::All, None, 2, 1)
             .await
             .expect("page2 ok");
-        assert_eq!(page2.items.len(), 1);
-        // The two pages return distinct request_ids (union order is stable
-        // within a run: gmt_modified DESC).
-        assert_ne!(page1.items[0].request_id, page2.items[0].request_id);
+        assert_eq!(page2.total, 1);
+        assert!(page2.items.is_empty());
     }

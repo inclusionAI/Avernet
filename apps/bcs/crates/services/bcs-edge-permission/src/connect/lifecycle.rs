@@ -1,6 +1,13 @@
 //! Connect request lifecycle and listing.
 use super::*;
 
+/// Bot↔Bot creation stores a generated reverse row for the second directed
+/// edge. It is not an independent request from the peer and must not be exposed
+/// as one. A genuine peer-initiated request has `created_by == from_id`.
+fn is_internal_reverse_connect(request: &PermissionRequest) -> bool {
+    request.request_kind == RequestKind::Connect && request.created_by != request.from_id
+}
+
 #[async_trait]
 impl ConnectService for DbConnectService {
     async fn create_connect(
@@ -61,7 +68,28 @@ impl ConnectService for DbConnectService {
         // Pending (don't re-insert, don't 409 — return the existing state).
         let pending = self.find_pending_connect(caller, to_bot).await?;
         if !pending.is_empty() {
-            let request_ids: Vec<String> = pending.into_iter().map(|r| r.request_id).collect();
+            let mut request_ids: Vec<String> = pending
+                .iter()
+                .filter(|request| !is_internal_reverse_connect(request))
+                .map(|request| request.request_id.clone())
+                .collect();
+            if request_ids.is_empty() {
+                // A peer creating in the opposite direction finds our generated
+                // reverse mirror. Return the original logical request instead
+                // of an internal ID that cannot be decided directly.
+                request_ids = self
+                    .find_pending_connect(to_bot, caller)
+                    .await?
+                    .into_iter()
+                    .filter(|request| !is_internal_reverse_connect(request))
+                    .map(|request| request.request_id)
+                    .collect();
+            }
+            if request_ids.is_empty() {
+                return Err(ServiceError::InternalError(
+                    "pending connect pair has no user-authored request".to_string(),
+                ));
+            }
             return Ok(ConnectResult {
                 request_ids,
                 edge_ids: vec![],
@@ -243,6 +271,13 @@ impl ConnectService for DbConnectService {
                 ServiceError::FriendRequestNotFound(request_id.to_string())
             })?;
 
+        if is_internal_reverse_connect(&req) {
+            return Err(ServiceError::Forbidden(format!(
+                "request '{}' is a generated reverse mirror and cannot be decided directly",
+                req.request_id
+            )));
+        }
+
         if let Some(registry) = &self.collaboration_registry {
             registry.collaboration_owner(&[req.from_id.clone(), req.to_id.clone()]).await?;
         }
@@ -377,6 +412,13 @@ impl ConnectService for DbConnectService {
                 self.log_request_lookup_miss("reject", request_id, Some(decider));
                 ServiceError::FriendRequestNotFound(request_id.to_string())
             })?;
+
+        if is_internal_reverse_connect(&req) {
+            return Err(ServiceError::Forbidden(format!(
+                "request '{}' is a generated reverse mirror and cannot be decided directly",
+                req.request_id
+            )));
+        }
 
         if req.status == RequestStatus::Approved {
             return Err(ServiceError::CannotRejectAccepted);
@@ -666,6 +708,13 @@ impl ConnectService for DbConnectService {
             }
         };
 
+        // Hide generated reverse Connect rows before computing totals or
+        // slicing the page. They implement the second directed edge, not a
+        // second user-facing request from the peer.
+        let all: Vec<PermissionRequest> = all
+            .into_iter()
+            .filter(|request| !is_internal_reverse_connect(request))
+            .collect();
         let total = all.len() as u32;
         let page_size = if page_size == 0 { 20 } else { page_size };
         let page = if page == 0 { 1 } else { page };
