@@ -171,11 +171,9 @@ COMMAND_FIELDS: dict[type, list[tuple[str, object]]] = {
         ("reason", ""),
     ],
     OpenOpportunityCommand: [
-        ("collab_context_id", MISSING),
-        ("scope_ref", MISSING),
+        ("collet_id", MISSING),
+        ("actor_context", MISSING),
         ("participation_type", MISSING),
-        ("opens_at", MISSING),
-        ("context", MISSING),
         ("opportunity_id", None),
         ("requirement_refs", []),
         ("admission_policy_refs", []),

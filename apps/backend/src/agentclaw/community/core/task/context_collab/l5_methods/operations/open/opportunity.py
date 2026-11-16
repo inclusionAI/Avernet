@@ -10,9 +10,9 @@
   transitioned_from="DRAFT");``ReopenOpportunity``(PAUSED→OPEN)
   是作者裁决补齐的可达性;open_opportunity 机器的 CANCELLED 态与
   cancel 事件在 P1 协议无对应操作(§5),词汇按机器保留;
-- 窗口裁决(spec §4.4):publish 校验窗口形态——``opens_at`` 可解析、
-  ``closes_at`` 给了就必须可解析且晚于 ``opens_at``(发布表达的是
-  声明意图,不与 now 比对);``submit_application`` 校验窗口归属
+- 窗口裁决(spec §4.4):publish 以首次发布的服务端当前时间记录 ``opens_at``;
+  ``closes_at`` 给了就必须可解析且晚于该起点。幂等重放沿用首次起点,
+  不延长窗口;``submit_application`` 校验窗口归属
   (opens_at ≤ now, closes_at 缺省或 now ≤ closes_at)且机会必须
   OPEN 且容量未满——同机会非终态申请(SUBMITTED/SCREENING/
   ADMITTED)计数 < capacity,capacity 为 ``None`` 不设上限;
@@ -51,7 +51,6 @@ from agentclaw.community.core.task.context_collab.l5_methods.open_profile import
     OpenOpportunity,
     OpportunityState,
     ParticipationApplication,
-    ParticipationType,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.operations.contracts import (
     OpenApplicationCommand,
@@ -86,7 +85,6 @@ _OPPORTUNITY_REQUEST_FIELDS = (
     "requirement_refs",
     "admission_policy_refs",
     "capacity",
-    "opens_at",
     "closes_at",
 )
 _APPLICATION_REQUEST_FIELDS = (
@@ -221,7 +219,7 @@ class OpenOpportunityOpsMixin(OpenMethodServiceBase, OpenMethodOpsServiceProtoco
         ``COLLET_PARTICIPANT`` is bounded to this Collet's exact scope;
         admission creates a scoped identity binding, not Group membership.
         """
-        collab_context_id, context = command.collab_context_id, command.context
+        collab_context_id, context = command.collet_id, command.actor_context
         method_binding_id = self._resolve_publish_binding(collab_context_id)
         axes = self._gate(
             "publish_opportunity",
@@ -230,30 +228,37 @@ class OpenOpportunityOpsMixin(OpenMethodServiceBase, OpenMethodOpsServiceProtoco
             context,
         )
         opportunity_id = command.opportunity_id or f"opp_{uuid4().hex[:12]}"
-        opens_at = _parse_timestamp(
-            command.opens_at, "OpenOpportunityCommand", "opens_at"
+        existing = (
+            self._store.get_opportunity(
+                axes, opportunity_id, method_binding_id, collab_context_id
+            )
+            if command.opportunity_id is not None
+            else None
         )
+        now = _now()
+        # Replays retain the initial opening time, even after the window expires.
+        opens_at = existing.opens_at if existing is not None else now
+        opens_at_dt = _parse_timestamp(opens_at, "OpenOpportunity", "opens_at")
         if command.closes_at is not None:
             closes_at = _parse_timestamp(
                 command.closes_at, "OpenOpportunityCommand", "closes_at"
             )
-            if closes_at <= opens_at:
+            if closes_at <= opens_at_dt:
                 raise ContextCollabValidationError(
                     f"open opportunity closes_at {command.closes_at!r} must "
-                    f"be later than opens_at {command.opens_at!r}"
+                    f"be later than opens_at {opens_at!r}"
                 )
         reason = command.reason or "open.opportunity.publish"
-        now = _now()
         candidate = OpenOpportunity.from_dict(
             {
                 "opportunity_id": opportunity_id,
                 "method_binding_id": method_binding_id,
-                "scope_ref": command.scope_ref,
+                "scope_ref": command.collet_id,
                 "participation_type": command.participation_type.value,
                 "requirement_refs": list(command.requirement_refs),
                 "admission_policy_refs": list(command.admission_policy_refs),
                 "capacity": command.capacity,
-                "opens_at": command.opens_at,
+                "opens_at": opens_at,
                 "closes_at": command.closes_at,
                 # open_opportunity 机器的初始态;publish 迁移后落 OPEN。
                 "state": OpportunityState.OPEN.value,
@@ -267,36 +272,22 @@ class OpenOpportunityOpsMixin(OpenMethodServiceBase, OpenMethodOpsServiceProtoco
         _resolve_opportunity_state(
             OpportunityState.DRAFT.value, "open.opportunity.publish"
         )
-        if command.opportunity_id is not None:
-            existing = self._store.get_opportunity(
-                axes,
-                command.opportunity_id,
-                method_binding_id,
-                collab_context_id,
-            )
-            if existing is not None:
-                if _shape_of(
-                    existing.to_dict(), _OPPORTUNITY_REQUEST_FIELDS
-                ) == _shape_of(candidate.to_dict(), _OPPORTUNITY_REQUEST_FIELDS):
-                    return ProfileOpAcceptedResult(
-                        accepted=True,
-                        collab_context_id=collab_context_id,
-                        method_binding_id=method_binding_id,
-                        object_kind="open_opportunity",
-                        object_id=existing.opportunity_id,
-                        state=existing.state.value,
-                    )
-                raise ContextCollabValidationError(
-                    f"idempotent re-submit of open opportunity "
-                    f"{command.opportunity_id!r} differs from the stored "
-                    "shape"
+        if existing is not None:
+            if _shape_of(
+                existing.to_dict(), _OPPORTUNITY_REQUEST_FIELDS
+            ) == _shape_of(candidate.to_dict(), _OPPORTUNITY_REQUEST_FIELDS):
+                return ProfileOpAcceptedResult(
+                    accepted=True,
+                    collab_context_id=collab_context_id,
+                    method_binding_id=method_binding_id,
+                    object_kind="open_opportunity",
+                    object_id=existing.opportunity_id,
+                    state=existing.state.value,
                 )
-        if (
-            candidate.participation_type is ParticipationType.COLLET_PARTICIPANT
-            and candidate.scope_ref != collab_context_id
-        ):
             raise ContextCollabValidationError(
-                "COLLET_PARTICIPANT opportunity scope must match its Collet"
+                f"idempotent re-submit of open opportunity "
+                f"{command.opportunity_id!r} differs from the stored "
+                "shape"
             )
         self._store.insert_opportunity(axes, candidate, collab_context_id)
         return ProfileOpAcceptedResult(

@@ -58,16 +58,16 @@ class TestOpenOpportunityLifecycle:
         _, _, lifecycle, service = make_open_service()
         active_open_binding(lifecycle)
         with pytest.raises(ContextCollabValidationError, match="ISO timestamp"):
-            service.publish_opportunity(opportunity_command(opens_at="soon"))
+            service.publish_opportunity(opportunity_command(closes_at="soon"))
         with pytest.raises(ContextCollabValidationError, match="later than opens_at"):
             service.publish_opportunity(
-                opportunity_command(opens_at=_iso_offset(1), closes_at=_iso_offset(-1))
+                opportunity_command(closes_at=_iso_offset(-1))
             )
 
     def test_publish_replay_and_shape_conflict(self):
         store, _, lifecycle, service = make_open_service()
         binding = active_open_binding(lifecycle)
-        # 同一份命令两次提交(时间戳字段是请求形态,重放必须同值)。
+        # 同一份命令两次提交,服务端开放时间不属于请求形态。
         command = opportunity_command()
         first = service.publish_opportunity(command)
         replay = service.publish_opportunity(command)
@@ -75,7 +75,7 @@ class TestOpenOpportunityLifecycle:
         assert len(store.list_opportunities(AXES, binding, COLLET_ID)) == 1
         with pytest.raises(ContextCollabValidationError, match="stored shape"):
             service.publish_opportunity(
-                opportunity_command(scope_ref="task_scope_other")
+                opportunity_command(capacity=1)
             )
 
     def test_pause_reopen_close_reachability(self):
@@ -159,9 +159,11 @@ class TestOpenOpportunityLifecycle:
         )
         assert replay.object_id == "app_1"
         assert len(store.list_applications(AXES, binding, COLLET_ID)) == 1
-        # 未开窗(未来 opens_at)拒绝。
-        service.publish_opportunity(
-            opportunity_command(opportunity_id="opp_future", opens_at=_iso_offset(2))
+        # 兼容已有存储中的未来窗口;发布命令不再接受 opens_at。
+        service.publish_opportunity(opportunity_command(opportunity_id="opp_future"))
+        future = store.get_opportunity(AXES, "opp_future", binding, COLLET_ID)
+        store.update_opportunity_state(
+            AXES, replace(future, opens_at=_iso_offset(2)), COLLET_ID
         )
         with pytest.raises(
             ContextCollabValidationError, match="before the window opens"
@@ -173,13 +175,13 @@ class TestOpenOpportunityLifecycle:
                 application_command(),
                 make_actor(),
             )
-        # 已闭窗拒绝。
-        service.publish_opportunity(
-            opportunity_command(
-                opportunity_id="opp_closed",
-                opens_at=_iso_offset(-2),
-                closes_at=_iso_offset(-1),
-            ),
+        # 兼容已有存储中的过期窗口,仍拒绝申请。
+        service.publish_opportunity(opportunity_command(opportunity_id="opp_closed"))
+        expired = store.get_opportunity(AXES, "opp_closed", binding, COLLET_ID)
+        store.update_opportunity_state(
+            AXES,
+            replace(expired, opens_at=_iso_offset(-2), closes_at=_iso_offset(-1)),
+            COLLET_ID,
         )
         with pytest.raises(
             ContextCollabValidationError, match="after the window closes"
@@ -471,16 +473,14 @@ class TestOpenApplicationLifecycle:
         assert store.list_members(AXES, binding, COLLET_ID) == []
         assert store.list_allocations(AXES, binding, COLLET_ID) == []
 
-    def test_collet_participant_opportunity_rejects_cross_collet_scope(self):
+    def test_collet_participant_opportunity_uses_own_collet_scope(self):
         store, _, lifecycle, service = make_open_service()
         binding = active_open_binding(lifecycle)
-        with pytest.raises(ContextCollabValidationError, match="scope must match"):
-            service.publish_opportunity(
-                opportunity_command(
-                    participation_type=ParticipationType.COLLET_PARTICIPANT
-                )
-            )
-        assert store.list_opportunities(AXES, binding, COLLET_ID) == []
+        service.publish_opportunity(
+            opportunity_command(participation_type=ParticipationType.COLLET_PARTICIPANT)
+        )
+        [opportunity] = store.list_opportunities(AXES, binding, COLLET_ID)
+        assert opportunity.scope_ref == COLLET_ID
 
     def test_admit_requires_screening_state_and_is_idempotent(self):
         """机器裁决:未评审(SCREENING 前)不可录取;同 decision_id 重放

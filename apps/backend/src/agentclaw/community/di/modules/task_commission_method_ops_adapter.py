@@ -8,8 +8,7 @@ import 法约束),把产品的 ``TaskMethodOpsPort`` 四步翻译到
 
 幂等键统一服务端生成(``opportunity_id``/``application_id`` 传
 ``None``):每次 ``publish_task`` 都是新 Collet,编排无重放路径;
-确定性键 + 重打时间戳反而触发 replay 形状校验(``opens_at`` 参与
-机会形态比对)——除非将来引入"对既有 Collet 重跑发布"。
+服务端记录首次发布时间,同 ID 同请求形态重放不会重开窗口。
 
 失败不翻译、不吞:任一步抛错原样上穿发布编排(Collet 已持久不
 回滚);screen/admit 中途失败留下的 OPEN 机会孤儿行是 P1 接受的
@@ -30,9 +29,6 @@ from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context
 )
 from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
     top_level_binding_id,
-)
-from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime import (
-    _now,
 )
 from agentclaw.community.core.task.context_collab.l6_products.catalog import (
     ProductCatalog,
@@ -89,11 +85,9 @@ class TaskCommissionOpenMethodAdapter(TaskMethodOpsPort):
             )
         published = self._open_ops.publish_opportunity(
             OpenOpportunityCommand(
-                collab_context_id=command.collab_context_id,
-                context=context,
-                scope_ref=command.collab_context_id,
+                collet_id=command.collab_context_id,
+                actor_context=context,
                 participation_type=policy.participation_type,
-                opens_at=_now(),
                 capacity=policy.capacity,
                 reason="task_commission.publish",
             ),

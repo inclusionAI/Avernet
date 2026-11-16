@@ -19,9 +19,7 @@ from agentclaw.community.core.task.context_collab.l5_methods.open_profile import
 
 def _body(**overrides):
     return {
-        "scope_ref": "collet_enum",
         "participation_type": "COLLET_PARTICIPANT",
-        "opens_at": "2026-01-01T00:00:00+00:00",
         **overrides,
     }
 
@@ -34,8 +32,8 @@ def test_open_request_converts_wire_value_to_domain_enum(participation_type):
     context = ActorContext(PrincipalRef("human", "owner"), "api")
     command = request.to_domain("collet_enum", context)
     assert command.participation_type is participation_type
-    assert command.collab_context_id == "collet_enum"
-    assert command.context is context
+    assert command.collet_id == "collet_enum"
+    assert command.actor_context is context
     wire = request.model_dump(mode="json", exclude_unset=True)
     assert type(wire["participation_type"]) is str
     assert wire == body
@@ -67,3 +65,13 @@ def test_open_request_schema_declares_the_existing_enum():
     assert schema["$defs"]["ParticipationType"]["enum"] == [
         participation_type.value for participation_type in ParticipationType
     ]
+
+
+@pytest.mark.parametrize("removed", ["scope_ref", "opens_at"])
+def test_open_request_rejects_caller_scope_and_opening_time(removed):
+    with pytest.raises(ValidationError) as exc_info:
+        OpenOpportunityRequest.model_validate(_body(**{removed: "caller_override"}))
+    [error] = exc_info.value.errors()
+    assert error["loc"] == (removed,)
+    assert error["type"] == "extra_forbidden"
+    assert removed not in OpenOpportunityRequest.model_json_schema()["properties"]

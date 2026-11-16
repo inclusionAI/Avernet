@@ -161,11 +161,9 @@ def test_method_operations_use_lower_reader_and_resolved_facts(kind):
         service = OpenMethodService(store, authorizer, reader)
         result = service.publish_opportunity(
             OpenOpportunityCommand(
-                collab_context_id=COLLET_ID,
-                scope_ref="scope",
+                collet_id=COLLET_ID,
+                actor_context=OWNER,
                 participation_type=ParticipationType.SINGLE_CONTRIBUTION,
-                opens_at=NOW,
-                context=OWNER,
             ),
         )
         assert result.state == "OPEN"
@@ -173,7 +171,7 @@ def test_method_operations_use_lower_reader_and_resolved_facts(kind):
             actor_context=ActorContext(BOT, "a2a")
         )
         assert opportunity.opportunity_id == result.object_id
-        assert opportunity.scope_ref == "scope"
+        assert opportunity.scope_ref == COLLET_ID
     else:
         service = SwarmMethodService(store, authorizer, reader)
         result = service.declare_execution_profile(

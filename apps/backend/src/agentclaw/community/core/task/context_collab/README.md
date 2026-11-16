@@ -125,8 +125,14 @@ products/
   Separately assembled legacy publisher-mediated and unrelated Open + Group
   products retain their structural behavior.
 - L5 Open publication is `publish_opportunity(OpenOpportunityCommand(...))`.
-  The command requires `collab_context_id`, participation fields and a trusted
-  caller `context`; `participation_type` uses the existing `ParticipationType`
+  The command's first two fields are `collet_id` and trusted `actor_context`,
+  followed by the required `participation_type` and optional publication fields.
+  Neither `scope_ref` nor `opens_at` is an input: the persisted opportunity scope
+  is always `collet_id`, and its opening timestamp is the server's current UTC
+  time at first publication. An optional `closes_at` must be later than that
+  timestamp. Same-ID, same-shape replay preserves the original opening time,
+  audit and current state, even after the window expires; generated timestamps
+  are not request-shape fields. `participation_type` uses the existing `ParticipationType`
   enum to declare the admission outcome, not participant count. HTTP accepts
   the same four string values, validates them into the enum before building
   the command, and rejects unknown values with 422. Neither the method
@@ -136,13 +142,15 @@ products/
   existing G1 authorization, G4 transition, audit and binding-scoped idempotency
   checks. No Open binding is NotFound; no ACTIVE candidate or multiple ACTIVE
   candidates is ValidationError, with no opportunity write. It never picks the
-  first/top-level binding or infers binding scope from participation `scope_ref`.
+  first/top-level binding or infers binding scope from a participant scope.
   The result supplies `method_binding_id` for subsequent binding-scoped operations.
   The internal HTTP publish route is now
   `POST /api/v1/collaboration/task/context_collab/{collab_context_id}/open/opportunities`;
   the previous `/method-bindings/{binding_id}/open/opportunities` publish route
   is removed. HTTP builds the command identity from verified authentication,
-  not JSON. Other Open routes remain binding-scoped. See the
+  not JSON. The HTTP publish body also omits `scope_ref` and `opens_at` and
+  rejects caller-supplied overrides; the Collet comes from the route. Other Open
+  routes remain binding-scoped. See the
   [publication regressions](../../../../../../tests/community/core/task/context_collab/test_open_publication.py).
 - L5 Open owns `OpenMethodOpsServiceProtocol.query_opportunities(actor_context)`:
   read-only discovery across Collets and MethodBindings in the current

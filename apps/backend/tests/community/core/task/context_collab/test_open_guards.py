@@ -135,7 +135,7 @@ class TestOpenGuards:
         binding = active_open_binding(lifecycle)
         stranger = make_actor("u_9999")
         with pytest.raises(ContextCollabValidationError, match="u_9999"):
-            service.publish_opportunity(opportunity_command(context=stranger))
+            service.publish_opportunity(opportunity_command(actor_context=stranger))
         service.publish_opportunity(opportunity_command())
         with pytest.raises(ContextCollabValidationError, match="u_9999"):
             service.pause_opportunity(

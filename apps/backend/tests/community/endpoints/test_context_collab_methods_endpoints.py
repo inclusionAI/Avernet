@@ -343,9 +343,7 @@ class TestMethodBindingsDelivery:
         published = client.post(
             f"{PREFIX}/context_collab/{collab_id}/open/opportunities",
             json={
-                "scope_ref": "task_scope_open_http",
                 "participation_type": "SINGLE_CONTRIBUTION",
-                "opens_at": "2026-01-01T00:00:00+00:00",
                 "opportunity_id": "opp_http",
             },
         )
@@ -380,9 +378,7 @@ class TestMethodBindingsDelivery:
         rejected = client_world.post(
             f"{PREFIX}/context_collab/{collab_id}/open/opportunities",
             json={
-                "scope_ref": collab_id,
                 "participation_type": value,
-                "opens_at": "2026-01-01T00:00:00+00:00",
             },
         )
         assert rejected.status_code == 422, rejected.text
@@ -422,19 +418,31 @@ class TestMethodBindingsDelivery:
         result = client.post(
             f"{PREFIX}/context_collab/{collab_id}/open/opportunities",
             json={
-                "scope_ref": "task_scope_open_http",
                 "participation_type": "SINGLE_CONTRIBUTION",
-                "opens_at": "2026-01-01T00:00:00+00:00",
-                # Request-body values must not replace the authenticated actor.
-                "context": {
-                    "actor": {
-                        "principal_type": "human",
-                        "principal_id": AUTHENTICATED_STAFF_ID,
-                    },
-                },
             },
         )
         assert result.status_code == status, result.text
+
+    @pytest.mark.parametrize(
+        "field,value",
+        [
+            ("scope_ref", "other_collet"),
+            ("opens_at", "2026-01-01T00:00:00+00:00"),
+            ("context", {"actor": {"principal_id": AUTHENTICATED_STAFF_ID}}),
+            ("actor_context", {"actor": {"principal_id": AUTHENTICATED_STAFF_ID}}),
+        ],
+    )
+    def test_open_publication_rejects_server_owned_fields(
+        self, client_world, field, value
+    ):
+        # Validation must reject overrides before binding resolution or authz.
+        result = client_world.post(
+            f"{PREFIX}/context_collab/any_collet/open/opportunities",
+            json={"participation_type": "SINGLE_CONTRIBUTION", field: value},
+        )
+        assert result.status_code == 422, result.text
+        assert result.json()["detail"][0]["loc"] == ["body", field]
+        assert result.json()["detail"][0]["type"] == "extra_forbidden"
 
     def test_bare_top_level_method_kind_rejected_through_http(self, client_world):
         """裸 Group/Swarm 不能替代产品声明的顶层组合;Open 是代办合法组合。"""

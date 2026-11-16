@@ -224,11 +224,9 @@ class TestL5MethodObjectsE2E:
         open_binding = top_binding
         published = services.open.publish_opportunity(
             OpenOpportunityCommand(
-                collab_context_id=collab_id,
-                context=_actor(OWNER),
-                scope_ref="task_scope_open_e2e",
+                collet_id=collab_id,
+                actor_context=_actor(OWNER),
                 participation_type=ParticipationType.GROUP_MEMBER,
-                opens_at=_future_iso(-1),
                 opportunity_id="opp_e2e",
             ),
         )

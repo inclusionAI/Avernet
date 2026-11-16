@@ -31,9 +31,7 @@ _PATH = "/api/v1/collaboration/task/context_collab/{collab_context_id}/open/oppo
 _OWNER = "u_open_publisher"
 _BINDING = "mb_open_publish_case"
 _BODY = {
-    "scope_ref": "scope://contribution",
     "participation_type": "SINGLE_CONTRIBUTION",
-    "opens_at": "2026-01-01T00:00:00+00:00",
     "opportunity_id": "opp_publish_case",
     "reason": "authenticated publication",
 }
@@ -72,6 +70,8 @@ def _assert_publication(response, world):
     row = world.get(MethodStoreProtocol).get_opportunity(
         current_axes(), result["object_id"], _BINDING, result["collab_context_id"]
     )
+    assert row.scope_ref == result["collab_context_id"]
+    assert row.opens_at == row.transitioned_at
     assert row.transitioned_by == _OWNER
     assert row.transition_reason == _BODY["reason"]
 

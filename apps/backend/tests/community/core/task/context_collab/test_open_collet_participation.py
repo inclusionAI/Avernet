@@ -38,7 +38,7 @@ def _pure_open():
     binding = active_open_binding(lifecycle)
     service.publish_opportunity(
         opportunity_command(
-            scope_ref=COLLET_ID, participation_type=ParticipationType.COLLET_PARTICIPANT
+            participation_type=ParticipationType.COLLET_PARTICIPANT
         ),
     )
     return store, service, binding

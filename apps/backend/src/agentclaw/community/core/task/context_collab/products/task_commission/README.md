@@ -161,12 +161,25 @@ participant-management API or SQL table.
 ## Calling L5 Open directly
 
 The [journey case](../../../../../../../../tests/community/core/task/context_collab/products/test_task_commission_end_to_end.py)
-resolves the real `OpenMethodOpsServiceProtocol` from its test injector. Query
-and application use the Bot actor; screening and admission use the publisher's
+resolves the real `OpenMethodOpsServiceProtocol` from its test injector.
+Publication uses the publisher actor; query and application use the Bot actor;
+screening and admission use the publisher's
 authorized policy actor:
 
 ```python
 open_method = injector.get(OpenMethodOpsServiceProtocol)
+published = open_method.publish_opportunity(
+    OpenOpportunityCommand(
+        collet_id=task_id,
+        actor_context=owner_context,
+        participation_type=ParticipationType.COLLET_PARTICIPANT,
+        capacity=1,
+        admission_policy_refs=[
+            "task_commission.designated_bot_self_application/1"
+        ],
+    )
+)
+assert published.accepted and published.state == "OPEN"
 [opportunity] = open_method.query_opportunities(
     actor_context=bot_context,
 )
@@ -210,6 +223,10 @@ assert admitted.state == "ADMITTED"
 ```
 
 `task_id` is the product's Collet ID; `binding_id` is its actual L5 MethodBinding.
+Publication derives the persisted `scope_ref` from `collet_id` and records the
+server's current UTC time as `opens_at`; callers supply neither field. Same-ID
+replay preserves that first timestamp and current state rather than reopening
+the window. Optional `closes_at` must be later than the first opening time.
 `selected_agent_role_refs` are canonical references to the task's existing
 selected-agent RoleBindings, built with L4 `role_binding_ref`; they do not
 create participation. The case resolves them from the actual creation record.
@@ -231,7 +248,7 @@ bindings and unauthorized actors are rejected. Results are a read-time snapshot,
 not a reservation, product eligibility decision, automatic application or
 participation grant. Submit/admit still perform their own checks.
 
-The case shows the real L5 calls in sequence: Query → SubmitApplication →
+The case shows the real L5 calls in sequence: PublishOpportunity → Query → SubmitApplication →
 Screen → Admit. Submission returns SUBMITTED, not an admission receipt; it does
 not implicitly screen, admit or start Work. SCREENING still has no participant
 binding or decision and cannot authorize Work. Admission creates the scoped
