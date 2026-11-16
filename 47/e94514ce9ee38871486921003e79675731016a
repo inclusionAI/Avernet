@@ -1,0 +1,25 @@
+apps/bcs/scripts/e2e-runner/tests/test_local_provider_subbots_checks.py
+  s_cecdc98e721f4b::t_a4f74d93df82ab 1-251
+apps/bcs/scripts/e2e-runner/tests/test_local_provider_subbots_contract.py
+  s_cecdc98e721f4b::t_a1ac8687999a75 1-178
+apps/bcs/scripts/e2e-runner/tests/test_local_provider_subbots_run.py
+  s_cecdc98e721f4b::t_f68dd788423887 1-197
+apps/bcs/scripts/e2e-runner/tests/test_local_provider_subbots_runtime.py
+  s_cecdc98e721f4b::t_844326386eee0a 1-84
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "47e94514ce9ee38871486921003e79675731016a",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "DeepSeek-V4.1-Flash"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

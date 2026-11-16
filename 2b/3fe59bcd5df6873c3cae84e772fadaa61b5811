@@ -1,0 +1,42 @@
+apps/bcsfuse/tests/contract/test_tc_same_instance_migration.py
+  s_ce84d91f3d35be::t_ac23aeb5f0f979 6,108-111,121,162,174-183,188,212,214,222-229,253-262,266-277
+  s_ce84d91f3d35be::t_bc90d9d51c0a70 185-187,190-192
+  s_ce84d91f3d35be::t_b7d524de4324bf 230-252,263-265
+apps/bcsfuse/src/app/tc/search.py
+  s_ce84d91f3d35be::t_2d527adb59669a 210,215
+  s_ce84d91f3d35be::t_2fe27f449b1082 4-5,9-10,33-47,119,153-169,196-209,211-214,216-243,312
+apps/bcsfuse/docs/deploy/tc-card-migration.md
+  s_ce84d91f3d35be::t_2d527adb59669a 26-27
+apps/bcsfuse/src/app/tc/card_profiles.py
+  s_ce84d91f3d35be::t_f6df53ca8146ef 68-70,73,76,78,88,107-110,166-170
+  s_ce84d91f3d35be::t_b543c428f4f037 6,16-17,19,21,23-24,66-67,71-72,74-75,77,79-83,89-90,97-99,101-102,105-106,111,128-131,157-159,172
+  s_ce84d91f3d35be::t_4082f6ab20ea92 85-87,134,162
+  s_ce84d91f3d35be::t_2d527adb59669a 22,103-104
+  s_ce84d91f3d35be::t_dd850185b725ca 100,161
+  s_ce84d91f3d35be::t_22432d6390e23e 20,135-138,140-142
+  s_9e428ec8192673::t_f774ebdc621d00 84,139
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2b3fe59bcd5df6873c3cae84e772fadaa61b5811",
+  "prompts": {},
+  "sessions": {
+    "s_9e428ec8192673": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1673c-d8f0-7222-9db7-0c957c6d5e32",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    },
+    "s_ce84d91f3d35be": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a5bb-a115-7280-8eb7-64cf057003e5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}

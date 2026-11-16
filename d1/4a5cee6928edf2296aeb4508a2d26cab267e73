@@ -1,0 +1,23 @@
+apps/frontend-nextgen/src/components/BotWorkshop/BotCard/BotCopyActionsCell.tsx
+  s_502dbf3f3ce405::t_3aab64f4d5f609 1-40
+apps/frontend-nextgen/src/components/BotWorkshop/BotCard/BotCopyDeleteAction.tsx
+  s_502dbf3f3ce405::t_3aab64f4d5f609 1-48
+apps/frontend-nextgen/src/hooks/useBotTableColumns.tsx
+  s_502dbf3f3ce405::t_3aab64f4d5f609 2,143-145
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d14a5cee6928edf2296aeb4508a2d26cab267e73",
+  "prompts": {},
+  "sessions": {
+    "s_502dbf3f3ce405": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1bf38-d50b-74a2-af65-1d53dfb9cd45",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

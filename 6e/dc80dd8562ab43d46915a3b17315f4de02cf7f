@@ -1,0 +1,48 @@
+apps/backend/specs/jit-token-best-effort/001-spec-output.md
+  s_8cab37de83b8f7::t_15b15d2c3594bf 32-35
+  s_8cab37de83b8f7::t_42a85b42895e82 1-31
+apps/backend/tests/corp/di/test_jit_best_effort.py
+  s_8cab37de83b8f7::t_1b763fa0a8b7f7 1-19,25-54,58,60-62,64-91,93-116,118-199,232-234
+  s_8cab37de83b8f7::t_349dd28f0d82e1 92
+  s_8cab37de83b8f7::t_490d9a950adc4d 20-24
+  s_8cab37de83b8f7::t_15b15d2c3594bf 59,63,200-227,235-237
+  s_8cab37de83b8f7::t_5c4b85f5a0c2bb 55-57,117,228-231
+apps/backend/tests/corp/di/test_jit_config_loading.py
+  s_8cab37de83b8f7::t_37b3abc19531b8 57
+apps/backend/src/agentclaw/corp/plugins/prod/README.md
+  s_8cab37de83b8f7::t_e186c8e6fef75b 157-168
+  s_8cab37de83b8f7::t_66885b8a2da72a 137,146-156
+apps/backend/src/agentclaw/corp/plugins/prod/token_exchange_jit.py
+  s_8cab37de83b8f7::t_d045c64da678ff 8,98-105,118,125,140,293
+apps/backend/src/agentclaw/corp/di/token_exchange.py
+  s_8cab37de83b8f7::t_e186c8e6fef75b 10,14,24-43,114
+  s_8cab37de83b8f7::t_14eda1a87d082c 5,74,80,88-111
+  s_8cab37de83b8f7::t_cbea9b3bc46721 112
+apps/backend/tests/corp/di/test_jit_token_injection.py
+  s_8cab37de83b8f7::t_349dd28f0d82e1 24,46,58-59,167
+apps/backend/src/agentclaw/corp/di/modules/infrastructure/corp/identity.py
+  s_8cab37de83b8f7::t_14eda1a87d082c 41,152-154,156
+  s_8cab37de83b8f7::t_e1811ce1d9ad94 155,162-169,174
+  s_8cab37de83b8f7::t_e186c8e6fef75b 33,138
+  s_8cab37de83b8f7::t_ca007501d29b0b 157
+apps/backend/tests/corp/di/test_token_exchange_adapters.py
+  s_8cab37de83b8f7::t_aab1a2959ad0f5 170
+apps/backend/tests/corp/plugins/prod/test_token_exchange_jit.py
+  s_8cab37de83b8f7::t_b99c9f2a1187cc 46,82,387-395
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6edc80dd8562ab43d46915a3b17315f4de02cf7f",
+  "prompts": {},
+  "sessions": {
+    "s_8cab37de83b8f7": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cf04-e630-70f0-9238-ea404406fbff",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,18 @@
+apps/evolverun/clawweb/public/modules/workflow/web/components/PackVersionEditor.tsx
+  h_43af82e14600e4 14-24,73-92,95,103,131,134,223-230,235-322
+apps/evolverun/clawweb/public/modules/workflow/web/components/ScriptFilesTab.tsx
+  h_43af82e14600e4 97
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/PackVersionEditor.test.tsx
+  h_43af82e14600e4 29-49
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d59f7afe3c4b5993853fff5d9e96b63bd96dc2a8",
+  "prompts": {},
+  "humans": {
+    "h_43af82e14600e4": {
+      "author": "fudapeng <fudp@example.com>"
+    }
+  }
+}
