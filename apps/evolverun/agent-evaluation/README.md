@@ -3,7 +3,7 @@
 ## Ownership
 
 This package owns reusable deterministic question gates, bounded historical-candidate
-selection and lexical similarity. It has no network,
+selection, lexical similarity and trajectory-rubric alignment. It has no network,
 provider credentials, platform submission, model fallback or production write path.
 Enterprise adapters consume the installed package; do not maintain copied implementations.
 
@@ -26,7 +26,9 @@ python -m unittest discover -s tests -v
 - `baseline_filter`: caller-pinned SHA256, exact tags and explicitly supplied aliases;
   unknown tags are not evidence that related questions do not exist.
 - `baseline_similarity`: lexical similarity for candidate review, not semantic acceptance.
-
+- `agent_evaluation.judge.alignment.RUBRIC_JUDGE_ALIGNMENT`: rubric drafting contract.
+  Missing/truncated evidence is `null`; inability to observe is not proof of failure.
+  A genuinely inapplicable process criterion is distinct from missing evidence.
 
 Shape validation and fixture labels are not semantic review, actor execution,
 production readiness, or approval of a question bank. Keep historical dataset versions
