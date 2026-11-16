@@ -14,6 +14,15 @@ const botOf = (overrides: Partial<ChatBotView> = {}): ChatBotView => ({
 const unresolved = { resolved: false, engine: null };
 
 describe('resolveConversationPresentation', () => {
+  it('Teclaw 隐藏会话文件资源入口，但保留技能命令和其他对话能力', () => {
+    const presentation = resolveConversationPresentation(botOf({ engine: 'teclaw' }));
+    expect(presentation.resourceManager).toBe(false);
+    expect(presentation.fileFeatures).toBe(true); // 共用的命令宿主仍支持 /skill。
+    expect(presentation.composerPlaceholder).not.toContain('/file');
+    expect(presentation.composerPlaceholder).toContain('/skill');
+    expect(presentation.modelSelector).toBe(true);
+    expect(presentation.taskComposer).toBe(true);
+  });
   it('普通 Bot 使用完整标准会话能力', () => {
     expect(resolveConversationPresentation(botOf())).toEqual(
       expect.objectContaining({
