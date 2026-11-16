@@ -37,8 +37,8 @@ describe('domain/conversation types', () => {
   });
 
   it('type contracts hold at compile time', () => {
-    const originEnum: Equal<ConversationOrigin, 'mine' | 'others'> = true;
-    const scopeEnum: Equal<ConversationSessionScope, 'all' | 'favorite'> = true;
+    const originEnum: Equal<ConversationOrigin, 'mine' | 'others' | 'collab'> = true;
+    const scopeEnum: Equal<ConversationSessionScope, 'all' | 'favorite' | 'archived'> = true;
     const sectionEnum: Equal<ConversationBotSection, 'managed' | 'team' | 'friend'> = true;
     const friendGroupState: Equal<ConversationFriendGroupView['state'], 'unloaded' | 'loading' | 'loaded' | 'error'> =
       true;
@@ -52,7 +52,7 @@ describe('domain/conversation types', () => {
       { items: ConversationUserView[]; loading: boolean; error: string | null }
     > = true;
     const managedViewShape: Equal<
-      Pick<ManagedBotConversationView, 'botId' | 'origin' | 'scope' | 'sessions' | 'friendDirectory' | 'friendGroups'>,
+      Pick<ManagedBotConversationView, 'botId' | 'origin' | 'scope' | 'sessions' | 'sessionArchives' | 'friendDirectory' | 'friendGroups'>,
       ManagedBotConversationView
     > = true;
     expect([

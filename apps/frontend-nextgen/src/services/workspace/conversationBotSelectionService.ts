@@ -1,8 +1,4 @@
-import type {
-  ConversationBotSection,
-  ConversationOrigin,
-  ConversationSessionScope,
-} from '@/domain/conversation';
+import type { ConversationBotSection, ConversationOrigin, ConversationSessionScope } from '@/domain/conversation';
 import { useConversationStore } from '@/stores/conversationStore';
 
 export interface ConversationBotSelectionTarget {
@@ -10,13 +6,13 @@ export interface ConversationBotSelectionTarget {
   section: ConversationBotSection;
   origin: ConversationOrigin;
   scope: ConversationSessionScope;
-  /** Coding Bot 的 others 复用扁平会话列表，不走好友分组目录。 */
-  flatCodingOthers?: boolean;
+  /** Coding Bot 的非 mine 来源复用扁平会话列表，不走好友分组目录。 */
+  flatCodingSharedSessions?: boolean;
 }
 
 /** 仅返回目标当前来源/范围的列表，不能把上一范围缓存当成已加载。 */
 function getList(target: ConversationBotSelectionTarget) {
-  if (target.origin !== 'mine' && !target.flatCodingOthers) return undefined;
+  if (target.origin !== 'mine' && !target.flatCodingSharedSessions) return undefined;
   const state = useConversationStore.getState();
   if (target.section === 'friend') return state.friendBotSessionsByBotId[target.botId];
   const cache = state.sessionsByBotId[target.botId];

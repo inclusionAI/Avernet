@@ -92,6 +92,7 @@ export function loadSessionPage(
     ? managedCache?.origin === origin && managedCache?.scope === scope && !managedCache?.sessions.error
     : Boolean(state && !state.error);
   if (!more && cachedHit && !(state?.hasMore && state.items.length === 0)) return;
+  if (isManagedConversationSection(sectionOf) && scope === 'archived') return;
   if (!more && isManagedConversationSection(sectionOf) && origin === 'others' && !view.bot.isAgentCodingBot) return;
   ctx.inFlight.add(requestKey);
   const generation = ctx.generation.current;

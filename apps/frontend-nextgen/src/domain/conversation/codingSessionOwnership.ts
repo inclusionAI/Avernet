@@ -39,7 +39,19 @@ export function isSameCodingSessionUserId(left?: string | number | null, right?:
  * 列表归类沿用 AIXCoding 的兼容策略：无法从旧 session id 提取创建者时归入 mine，
  * 避免历史会话升级后从用户列表中消失。
  */
+/** relay 创建的协作派发会话；协作身份优先于创建者身份。 */
+export function isCollabCodingSessionId(sessionId: string): boolean {
+  return /:agent:member-task$/.test(sessionId);
+}
+
+/** BCS-CLI 接入会话的创建者段是 Bot owner，不是真人发起者，应归入他人发起。 */
+function isBcsCliCodingSessionId(sessionId: string): boolean {
+  return sessionId.startsWith('bcs-cli:');
+}
+
 export function codingSessionOriginOf(sessionId: string, currentUserId: string): ConversationOrigin {
+  if (isCollabCodingSessionId(sessionId)) return 'collab';
+  if (isBcsCliCodingSessionId(sessionId)) return 'others';
   const creatorUserId = extractCodingSessionCreatorUserId(sessionId);
   return !creatorUserId || isSameCodingSessionUserId(creatorUserId, currentUserId) ? 'mine' : 'others';
 }
@@ -49,6 +61,8 @@ export function resolveCodingSessionOrigin(
   sessionId?: string | null,
   currentUserId?: string | number | null,
 ): ConversationOrigin | null {
+  if (isCollabCodingSessionId(sessionId ?? '')) return 'collab';
+  if (isBcsCliCodingSessionId(sessionId ?? '')) return 'others';
   const creatorUserId = extractCodingSessionCreatorUserId(sessionId ?? '');
   const normalizedCurrentUserId = normalizeCodingSessionUserId(currentUserId);
   if (!creatorUserId || !normalizedCurrentUserId || normalizedCurrentUserId === 'anonymous') return null;

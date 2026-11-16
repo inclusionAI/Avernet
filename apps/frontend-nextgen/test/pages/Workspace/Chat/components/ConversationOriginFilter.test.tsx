@@ -45,6 +45,50 @@ describe('ConversationOriginFilter', () => {
     expect(screen.queryByText('已收藏')).not.toBeInTheDocument();
   });
 
+  it('keeps the coding Bot scope group available for others', () => {
+    const handlers = callbacks();
+    render(
+      <ConversationOriginFilter
+        botId="coding:2088"
+        origin="others"
+        scope="archived"
+        supportsArchives
+        supportsCollab
+        onOriginChange={handlers.onOriginChange}
+        onScopeChange={handlers.onScopeChange}
+      />,
+    );
+
+    expect(screen.getByText('会话')).toBeInTheDocument();
+    expect(screen.getByText('已归档')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '已归档' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('sizes the coding Bot filter popover to its three-tab content', () => {
+    const handlers = callbacks();
+    render(
+      <ConversationOriginFilter
+        botId="coding:2088"
+        origin="mine"
+        scope="all"
+        supportsArchives
+        supportsCollab
+        onOriginChange={handlers.onOriginChange}
+        onScopeChange={handlers.onScopeChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '发起人与会话筛选' }));
+    expect(screen.getByRole('button', { name: '协作' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '已归档' })).toBeInTheDocument();
+
+    const grouping = screen.getByText('发起人').closest('[data-radix-popper-content-wrapper]');
+    const content = grouping?.firstElementChild;
+    expect(content).toHaveClass('w-[max-content]');
+    expect(content).toHaveClass('min-w-[171px]');
+    expect(content).not.toHaveClass('w-[171px]');
+  });
+
   it('marks the active origin and scope options', () => {
     const { onOriginChange, onScopeChange } = callbacks();
     render(

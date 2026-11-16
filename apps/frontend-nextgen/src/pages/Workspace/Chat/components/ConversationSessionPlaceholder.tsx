@@ -36,6 +36,10 @@ export function ConversationSessionPlaceholder({
                 ? `${model.botName} 暂无会话`
                 : model.status === 'favorite-empty'
                 ? '暂无已收藏会话'
+                : model.status === 'archive-empty'
+                ? '暂无已归档会话'
+                : model.status === 'archive-unselected'
+                ? '请选择一个归档会话'
                 : '请选择一个会话'
             }
             description={
@@ -45,6 +49,10 @@ export function ConversationSessionPlaceholder({
                 ? '创建会话后，即可开始与此 Bot 对话。'
                 : model.status === 'favorite-empty'
                 ? '切换到全部会话查看已有会话，或创建新会话。'
+                : model.status === 'archive-empty'
+                ? '切换到全部会话查看已有会话，或从左侧筛选恢复归档。'
+                : model.status === 'archive-unselected'
+                ? '可从左侧查看消息摘要，或恢复需要继续对话的会话。'
                 : '请从左侧列表选择会话；如尚未加载目标会话，可继续加载更多。'
             }
             action={
@@ -60,7 +68,7 @@ export function ConversationSessionPlaceholder({
                 <Button variant="outline" onClick={model.retry}>
                   重试
                 </Button>
-              ) : model.status === 'favorite-empty' ? (
+              ) : model.status === 'favorite-empty' || model.status === 'archive-empty' ? (
                 <Button variant="outline" onClick={model.showAll}>
                   查看全部会话
                 </Button>
