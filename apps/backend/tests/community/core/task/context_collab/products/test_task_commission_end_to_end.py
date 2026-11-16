@@ -386,7 +386,7 @@ def commission_runtime(commission_deployment, request):
 """产品上线 → 建任务 → Bot Query/Apply → 策略 Screen/Admit → scoped Participant → Work → accept。"""
 @pytest.mark.parametrize("orchestration", ["legacy_workflow", "autonomous"])
 def test_end_to_end_commission_flow(commission_deployment, tmp_path, orchestration):
-    # 1、创建product profile
+    # 1、调用L6层的方法，创建product profile
     profile = create_product_profile(
         ProductProfileCreateCommand(
             ref=VersionedProfileRef("task_commission", 1),            # 版本
