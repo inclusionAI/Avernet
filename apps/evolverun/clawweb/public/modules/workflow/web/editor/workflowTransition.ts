@@ -1,6 +1,6 @@
 import { carryActiveDraftBaseline, editorWorkflowSourceIsCurrent } from '../api/editorWorkflowSource'
 import type { WorkflowSpec } from '@avernet/clawweb-shared/web/types'
-import { prepareWorkflowSession, useEditorStore, type EditorState } from './store'
+import { editorStateMatches, prepareWorkflowSession, useEditorStore, type EditorState } from './store'
 import { hasAnyPackVersionRisk, hasAnyPackVersionUpload, packVersionsRevision } from './packVersionSession'
 
 export type WorkflowTransition = { readonly state: EditorState; readonly packRevision: number }
@@ -17,7 +17,7 @@ export function beginWorkflowTransition(): WorkflowTransition | null {
 }
 
 export function workflowTransitionIsCurrent(approval: WorkflowTransition): boolean {
-  return !hasAnyPackVersionUpload() && packVersionsRevision() === approval.packRevision && useEditorStore.getState() === approval.state
+  return !hasAnyPackVersionUpload() && packVersionsRevision() === approval.packRevision && editorStateMatches(approval.state, useEditorStore.getState())
 }
 
 export function prepareWorkflowTransition(approval: WorkflowTransition, target: WorkflowSpec, expectedId: string): WorkflowSpec | null {

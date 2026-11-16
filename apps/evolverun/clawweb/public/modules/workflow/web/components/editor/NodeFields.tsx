@@ -1,6 +1,6 @@
 import { useId, type ChangeEvent } from 'react'
 import type { WorkflowNode } from '@avernet/clawweb-shared/web/types'
-import { useEditorStore } from '../../editor/store'
+import { editorIsReadOnly, useEditorStore } from '../../editor/store'
 import JsonDraftField, { isRecord } from './JsonDraftField'
 
 export const inputClass = 'w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-primary disabled:opacity-50'
@@ -9,6 +9,7 @@ export const configSummary = (value: unknown) => value === undefined ? '未配�
 
 // Immediate form edits report rejection without throwing out of a DOM event.
 function changeField(action: () => void) {
+  if (editorIsReadOnly(useEditorStore.getState())) return
   try { action() }
   catch (cause) { useEditorStore.getState().setActionError(cause instanceof Error ? cause.message : String(cause)) }
 }
@@ -17,14 +18,15 @@ export function TextField({ label, value, onChange, multiline = false, descripti
   label: string; value: unknown; onChange?: (value: string) => void
   multiline?: boolean; description?: string; readOnly?: boolean
 }) {
+  const locked = useEditorStore(editorIsReadOnly)
   const id = useId()
   const pending = useEditorStore(state => Object.keys(state.pendingEdits).length > 0)
   const compatible = value === undefined || typeof value === 'string'
   const props = {
     id, value: typeof value === 'string' ? value : value === undefined ? '' : JSON.stringify(value),
-    className: inputClass, readOnly: readOnly || !compatible, disabled: pending && !readOnly,
+    className: inputClass, readOnly: locked || readOnly || !compatible, disabled: pending && !readOnly && !locked,
     onChange: (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-      if (!pending && !readOnly && compatible) changeField(() => onChange?.(event.target.value))
+      if (!locked && !pending && !readOnly && compatible) changeField(() => onChange?.(event.target.value))
     },
   }
   return <div className="space-y-2">
@@ -38,14 +40,15 @@ export function TextField({ label, value, onChange, multiline = false, descripti
 export function SelectField({ label, value, options, onChange }: {
   label: string; value: unknown; options: readonly [string, string][]; onChange: (value: string | undefined) => void
 }) {
+  const locked = useEditorStore(editorIsReadOnly)
   const id = useId()
   const pending = useEditorStore(state => Object.keys(state.pendingEdits).length > 0)
   const known = options.some(([key]) => key === value)
   return <div className="space-y-2">
     <label htmlFor={id} className="block text-sm font-medium">{label}</label>
-    <select id={id} className={inputClass} disabled={pending} value={value === undefined ? 'missing' : JSON.stringify(value)}
+    <select id={id} className={inputClass} disabled={locked || pending} value={value === undefined ? 'missing' : JSON.stringify(value)}
       onChange={event => {
-        if (pending) return
+        if (locked || pending) return
         if (event.target.value === 'missing') {
           if (value !== undefined && window.confirm(`确认删除「${label}」的显式配置，恢复引擎默认行为？`)) changeField(() => onChange(undefined))
         } else changeField(() => onChange(JSON.parse(event.target.value)))
@@ -59,6 +62,7 @@ export function SelectField({ label, value, options, onChange }: {
 }
 
 export default function NodeFields({ node, onPatch }: { node: WorkflowNode; onPatch: (patch: Partial<WorkflowNode>) => void }) {
+  const readOnly = useEditorStore(editorIsReadOnly)
   const executor = node.executor
   const pending = useEditorStore(state => Object.keys(state.pendingEdits).length > 0)
   function setField(key: string, value: unknown) {
@@ -95,10 +99,10 @@ export default function NodeFields({ node, onPatch }: { node: WorkflowNode; onPa
         {args.map((arg, index) => <div key={index} className="space-y-1">
           <TextField label={`参数 ${index + 1}`} value={arg}
             onChange={value => setField('args', args.map((item, i) => i === index ? value : item))} />
-          <button type="button" className={buttonClass} disabled={pending} aria-label={`删除参数 ${index + 1}`}
+          <button type="button" className={buttonClass} disabled={readOnly || pending} aria-label={`删除参数 ${index + 1}`}
             onClick={() => { if (window.confirm(`确认删除参数 ${index + 1}？`)) changeField(() => setField('args', args.filter((_, i) => i !== index))) }}>删除此参数</button>
         </div>)}
-        <button type="button" className={buttonClass} disabled={pending} onClick={() => changeField(() => setField('args', [...args, '']))}>添加参数</button>
+        <button type="button" className={buttonClass} disabled={readOnly || pending} onClick={() => changeField(() => setField('args', [...args, '']))}>添加参数</button>
       </div> : <p className="text-xs text-muted-foreground">参数不是字符串数组，保留原始配置；请使用 JSON 编辑。</p>}
       <details className="rounded-md border border-input p-3" open={!simpleArgs}>
         <summary className="cursor-pointer text-sm font-medium">原始参数 JSON</summary>

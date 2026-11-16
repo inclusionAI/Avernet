@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import JsonDraftField from '../editor/JsonDraftField'
+import WorkflowSettingsPanel from '../editor/WorkflowSettingsPanel'
 import { useEditorStore } from '../../editor/store'
 
 beforeEach(() => {
@@ -219,4 +220,19 @@ it('retains a rejected JSON apply across remount and can retry or restore the pr
   expect(screen.getByLabelText('参数')).toHaveValue(JSON.stringify(props.value, null, 2))
   expect(screen.getByRole('button', { name: '放弃 参数' })).toBeDisabled()
   expect(useEditorStore.getState().pendingEdits).toEqual({})
+})
+
+
+it('allows local settings draft discard after revocation while preserving read-only values', () => {
+  const store = useEditorStore.getState()
+  store.loadSpec({ id: 'settings-viewer', title: 'Settings', version: '1', input: { original: true }, nodes: [] })
+  render(<WorkflowSettingsPanel onClose={() => {}} />)
+  fireEvent.change(screen.getByLabelText('工作流输入'), { target: { value: '{"pending":true}' } })
+  act(() => useEditorStore.getState().setEditAccess({ workflowId: 'settings-viewer', canEdit: false }))
+  expect(screen.getByLabelText('流程名称')).toHaveAttribute('readonly')
+  expect(screen.getByRole('button', { name: '应用 工作流输入' })).toBeDisabled()
+  expect(screen.getByRole('button', { name: '放弃 工作流输入' })).toBeEnabled()
+  fireEvent.click(screen.getByRole('button', { name: '放弃 工作流输入' }))
+  expect(useEditorStore.getState().pendingEdits).toEqual({})
+  expect(useEditorStore.getState().spec?.input).toEqual({ original: true })
 })

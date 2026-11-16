@@ -1,5 +1,5 @@
 import { useId, useState } from 'react'
-import { useEditorStore } from '../../editor/store'
+import { editorIsReadOnly, useEditorStore } from '../../editor/store'
 import { clearDraft, readDraft, writeDraft } from '../../editor/draftCache'
 
 export interface JsonDraftFieldProps {
@@ -46,6 +46,7 @@ export default function JsonDraftField(props: JsonDraftFieldProps) {
 }
 
 function Draft({ label, value, onApply, draftKey, validate, description, rows = 6, allowRemove, onRemove, sessionId }: JsonDraftFieldProps & { sessionId: number }) {
+  const readOnly = useEditorStore(editorIsReadOnly)
   const id = useId()
   const serialized = serialize(value)
   const owner = useEditorStore(state => state.spec?.id ?? null)
@@ -91,6 +92,7 @@ function Draft({ label, value, onApply, draftKey, validate, description, rows = 
   }
 
   function apply() {
+    if (editorIsReadOnly(useEditorStore.getState())) return
     if (sessionId !== useEditorStore.getState().sessionId || !draft.dirty || error || conflict || blockedByOtherDrafts()) return
     const removed = removedPaths(value, parsed)
     if (removed.length && !window.confirm(`应用将删除以下字段或内容：\n${removed.join('\n')}\n确认删除并应用？`)) return
@@ -108,6 +110,7 @@ function Draft({ label, value, onApply, draftKey, validate, description, rows = 
   }
 
   function remove() {
+    if (editorIsReadOnly(useEditorStore.getState())) return
     if (sessionId !== useEditorStore.getState().sessionId || draft.dirty || !onRemove || blockedByOtherDrafts() || !window.confirm(`确认删除「${label}」字段？`)) return
     try { onRemove(); setApplyError(null) }
     catch (cause) { setApplyError(cause instanceof Error ? cause.message : String(cause)) }
@@ -117,10 +120,11 @@ function Draft({ label, value, onApply, draftKey, validate, description, rows = 
   return (
     <div className="space-y-2">
       <label htmlFor={id} className="block text-sm font-medium">{label}</label>
-      <textarea id={id} value={text} rows={rows} spellCheck={false}
+      <textarea id={id} readOnly={readOnly} value={text} rows={rows} spellCheck={false}
         aria-invalid={!!message} aria-describedby={`${id}-help${message ? ` ${id}-error` : ''}`}
         className="w-full rounded-md border border-input bg-background p-2 font-mono text-xs focus-visible:outline-primary"
         onChange={event => {
+          if (editorIsReadOnly(useEditorStore.getState())) return
           if (sessionId !== useEditorStore.getState().sessionId) return
           const next = event.target.value
           const dirty = next !== serialized
@@ -137,12 +141,12 @@ function Draft({ label, value, onApply, draftKey, validate, description, rows = 
       </p>
       {message && <p id={`${id}-error`} role="alert" className="break-words text-xs text-destructive">{message}</p>}
       <div className="flex flex-wrap gap-2">
-        <button type="button" aria-label={`应用 ${label}`} onClick={apply} disabled={!draft.dirty || !!error || conflict}
+        <button type="button" aria-label={`应用 ${label}`} onClick={apply} disabled={readOnly || !draft.dirty || !!error || conflict}
           className={`${buttonClass} bg-primary text-primary-foreground`}>应用</button>
         <button type="button" aria-label={`放弃 ${label}`} onClick={discard} disabled={!draft.dirty}
           className={`${buttonClass} bg-background`}>放弃</button>
         {allowRemove && onRemove && <button type="button" aria-label={`删除 ${label}`} onClick={remove}
-          disabled={draft.dirty || value === undefined} className={`${buttonClass} text-destructive`}>删除字段</button>}
+          disabled={readOnly || draft.dirty || value === undefined} className={`${buttonClass} text-destructive`}>删除字段</button>}
       </div>
     </div>
   )

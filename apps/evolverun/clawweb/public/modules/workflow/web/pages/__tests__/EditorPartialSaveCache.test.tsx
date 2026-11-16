@@ -40,7 +40,7 @@ async function setup(withClient = true) {
   publish(session, { ...session.state, version: 'draft', versions: { ...session.state.versions, draft: { snapshot, files, loading: false, error: null, blocked: false, notice: null } } })
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })
   for (const key of [['editor-workflow-document', id], ['editor-workflow-document', 'other'], ['db-workflows'], ['workflow-types']]) client.setQueryData(key, { old: true })
-  render(withClient ? <QueryClientProvider client={client}><Editor embedded initialWorkflowId={id} /></QueryClientProvider> : <Editor embedded initialWorkflowId={id} />)
+  render(withClient ? <QueryClientProvider client={client}><Editor access={{ canView: true, canEdit: true, canExecute: true, canDeploy: true }} embedded initialWorkflowId={id} /></QueryClientProvider> : <Editor access={{ canView: true, canEdit: true, canExecute: true, canDeploy: true }} embedded initialWorkflowId={id} />)
   act(() => {
     useEditorStore.getState().updateSpecField('title', 'Saved DB')
     updateVersion(session, 'draft', { files: files.map(f => f.path === 'scripts/run' ? file('scripts/run', 'Local file') : f) })

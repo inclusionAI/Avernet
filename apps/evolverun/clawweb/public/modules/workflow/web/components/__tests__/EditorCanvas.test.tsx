@@ -6,6 +6,7 @@ import type { WorkflowNode, WorkflowSpec } from '@avernet/clawweb-shared/web/typ
 import type { EditorCanvasNode } from '../editor/EditorFlowNode'
 import EditorCanvas from '../EditorCanvas'
 import NodePalette from '../NodePalette'
+import { NODE_CATALOG } from '../../editor/nodeCatalog'
 import { useEditorStore } from '../../editor/store'
 import { branchHandleId, canvasTheme, canvasThemeClasses, GENERAL_SOURCE_HANDLE, NODE_DRAG_TYPE } from '../editor/CanvasPresentation'
 
@@ -389,4 +390,28 @@ describe('EditorCanvas connections and edge actions', () => {
     expect(useEditorStore.getState().spec!.nodes).toHaveLength(1)
     expect(useEditorStore.getState().pendingEdits).toEqual({ 'node:a:json': '未应用 JSON' })
   })
+})
+
+
+it('keeps canvas navigation but blocks read-only palette, drag, connect, delete and history shortcuts', async () => {
+  load([node('a'), node('b')])
+  useEditorStore.getState().setEditAccess({ workflowId: 'canvas-test', canEdit: false })
+  const before = structuredClone({ spec: useEditorStore.getState().spec, positions: useEditorStore.getState().positions })
+  render(<><NodePalette /><EditorCanvas onNodeClick={() => {}} /></>)
+  expect(screen.getByRole('button', { name: `添加${NODE_CATALOG[0].label}` })).toBeDisabled()
+  expect(props()).toMatchObject({ nodesDraggable: false, nodesConnectable: false, edgesReconnectable: false, deleteKeyCode: null })
+  fireEvent.click(screen.getByRole('button', { name: '选择 a' }))
+  expect(useEditorStore.getState().selectedNodeId).toBe('a')
+  expect(screen.getByRole('button', { name: '删除节点' })).toBeDisabled()
+  fireEvent.keyDown(screen.getByTestId('react-flow'), { key: 'Delete' })
+  fireEvent.keyDown(screen.getByTestId('react-flow'), { key: 'z', ctrlKey: true })
+  act(() => {
+    props().onConnect!(connection('a', 'b'))
+    props().onNodesChange!([{ type: 'position', id: 'a', position: { x: 900, y: 800 }, dragging: true }])
+  })
+  fireEvent.drop(screen.getByTestId('editor-canvas-dropzone'), { dataTransfer: { getData: () => 'action' }, clientX: 100, clientY: 100 })
+  expect(useEditorStore.getState().spec).toEqual(before.spec)
+  expect(useEditorStore.getState().positions).toEqual(before.positions)
+  expect(window.confirm).not.toHaveBeenCalled()
+  expect(screen.getByRole('button', { name: '总览' })).toBeEnabled()
 })

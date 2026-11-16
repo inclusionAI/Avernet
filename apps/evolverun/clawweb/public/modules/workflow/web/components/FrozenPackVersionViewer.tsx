@@ -36,13 +36,13 @@ function displayText(base64: string): string | null {
 }
 
 /** Read-only representation; binary downloads preserve bytes and modes are displayed. */
-export default function FrozenPackVersionViewer({ files }: { files: PackVersionFile[] }) {
+export default function FrozenPackVersionViewer({ files, reason = '对账期间只读' }: { files: PackVersionFile[]; reason?: string }) {
   const [selectedPath, setSelectedPath] = useState<string | null>(() => files[0]?.path ?? null)
   const [error, setError] = useState(false)
   const selected = files.find(file => file.path === selectedPath)
   const text = selected ? displayText(selected.contentBase64) : null
   return <section aria-label="冻结版本文件" className="min-w-0 space-y-2">
-    <p className="text-[11px] leading-relaxed text-muted-foreground">对账期间只读；文本可复制，二进制可下载。文件内容可能包含敏感信息。</p>
+    <p className="text-[11px] leading-relaxed text-muted-foreground">{reason}；文本可复制，二进制可下载。文件内容可能包含敏感信息。</p>
     <div className="flex min-w-0 flex-col overflow-hidden rounded-lg border border-border bg-card md:flex-row">
       <aside aria-label="冻结 Pack 文件导航" className="min-w-0 shrink-0 border-b border-border bg-muted/30 p-3 md:w-[235px] md:border-b-0 md:border-r">
         <div className="mb-3 flex items-center justify-between gap-2">

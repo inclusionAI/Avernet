@@ -182,3 +182,12 @@ describe('real workspace and embedded editor transitions', () => {
   })
 
 })
+
+
+// These isolated navigation fixtures exercise an explicitly authorized editor.
+// Production permission fetching is covered by EditorWorkflowTransition tests.
+vi.mock('../Editor', async importOriginal => {
+  const { default: ActualEditor } = await importOriginal<typeof import('../Editor')>()
+  return { default: (props: Parameters<typeof ActualEditor>[0]) =>
+    <ActualEditor {...props} access={{ canView: true, canEdit: true, canDeploy: true }} /> }
+})

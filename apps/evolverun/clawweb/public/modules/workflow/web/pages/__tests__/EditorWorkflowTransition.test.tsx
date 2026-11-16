@@ -1,17 +1,18 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { WorkflowSpec } from '@avernet/clawweb-shared/web/types'
 
-const mocks = vi.hoisted(() => ({ get: vi.fn(), documents: new Map<string, unknown>(), history: vi.fn(), snapshot: vi.fn() }))
+const mocks = vi.hoisted(() => ({ getAccess: vi.fn(), get: vi.fn(), documents: new Map<string, unknown>(), history: vi.fn(), snapshot: vi.fn() }))
 vi.mock('../../api/hooks', () => ({
   useEditorWorkflowDocument: (id: string) => ({ data: id ? { id, title: id === 'a' ? 'Original' : 'Target', version: '1', nodes: [] } : undefined, isLoading: false }),
   useAutoHealDeploy: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }))
 vi.mock('@avernet/clawweb-shared/web/api/client', () => ({ api: { workflows: { get: async (id: string) => {
   const value = await mocks.get(id); mocks.documents.set(id, value); return value
-}, getHistory: mocks.history, getDeploySnapshot: mocks.snapshot } }, fetchJson: (url: string) => {
+}, getAccess: mocks.getAccess, getHistory: mocks.history, getDeploySnapshot: mocks.snapshot } }, fetchJson: (url: string) => {
   const match = url.match(/^\/api\/workflows\/([^/]+)\/editor-draft$/)
   if (!match) return new Promise(() => {})
   const id = decodeURIComponent(match[1])
@@ -35,7 +36,7 @@ const A: WorkflowSpec = { id: 'a', title: 'Original', version: '1', nodes: [] }
 const B: WorkflowSpec = { id: 'b', title: 'Target', version: '1', nodes: [] }
 const state = () => useEditorStore.getState()
 function deferred<T>() { let resolve!: (value: T) => void; let reject!: (error: Error) => void; const promise = new Promise<T>((a, b) => { resolve = a; reject = b }); return { promise, resolve, reject } }
-function mount() { render(<MemoryRouter><Editor initialWorkflowId="a" /></MemoryRouter>) }
+function mount() { render(<MemoryRouter><Editor access={{ canView: true, canEdit: true, canDeploy: true }} initialWorkflowId="a" /></MemoryRouter>) }
 function makeDraft() {
   state().updateSpecField('title', 'Unsaved')
   const session = state().sessionId
@@ -135,14 +136,14 @@ describe('standalone editor workflow transition', () => {
 describe('embedded editor controlled target', () => {
   it('defers an early Router POP render until workspace has resolved its transaction', () => {
     const session = makeDraft()
-    const view = render(<MemoryRouter><WorkspacePopPendingContext.Provider value={false}><Editor embedded workspaceManagedPop initialWorkflowId="a" /></WorkspacePopPendingContext.Provider></MemoryRouter>)
+    const view = render(<MemoryRouter><WorkspacePopPendingContext.Provider value={false}><Editor access={{ canView: true, canEdit: true, canDeploy: true }} embedded workspaceManagedPop initialWorkflowId="a" /></WorkspacePopPendingContext.Provider></MemoryRouter>)
     // Router renders B before the native POP listener has claimed the event.
-    view.rerender(<MemoryRouter><WorkspacePopPendingContext.Provider value><Editor embedded workspaceManagedPop initialWorkflowId="b" /></WorkspacePopPendingContext.Provider></MemoryRouter>)
+    view.rerender(<MemoryRouter><WorkspacePopPendingContext.Provider value><Editor access={{ canView: true, canEdit: true, canDeploy: true }} embedded workspaceManagedPop initialWorkflowId="b" /></WorkspacePopPendingContext.Provider></MemoryRouter>)
     expect(window.confirm).not.toHaveBeenCalled()
     expect(mocks.get).not.toHaveBeenCalled()
     expect(state().sessionId).toBe(session)
     // Cancellation restores A; there is no second confirmation or target read.
-    view.rerender(<MemoryRouter><WorkspacePopPendingContext.Provider value={false}><Editor embedded workspaceManagedPop initialWorkflowId="a" /></WorkspacePopPendingContext.Provider></MemoryRouter>)
+    view.rerender(<MemoryRouter><WorkspacePopPendingContext.Provider value={false}><Editor access={{ canView: true, canEdit: true, canDeploy: true }} embedded workspaceManagedPop initialWorkflowId="a" /></WorkspacePopPendingContext.Provider></MemoryRouter>)
     expect(window.confirm).not.toHaveBeenCalled()
     expect(state().spec?.title).toBe('Unsaved')
     expect(readDraft(session, 'yaml')?.text).toBe('unapplied')
@@ -150,26 +151,26 @@ describe('embedded editor controlled target', () => {
 
   it('keeps the old draft when a controlled target is cancelled', () => {
     const session = makeDraft(); vi.mocked(window.confirm).mockReturnValue(false)
-    const view = render(<MemoryRouter><Editor embedded initialWorkflowId="a" /></MemoryRouter>)
-    view.rerender(<MemoryRouter><Editor embedded initialWorkflowId="b" /></MemoryRouter>)
+    const view = render(<MemoryRouter><Editor access={{ canView: true, canEdit: true, canDeploy: true }} embedded initialWorkflowId="a" /></MemoryRouter>)
+    view.rerender(<MemoryRouter><Editor access={{ canView: true, canEdit: true, canDeploy: true }} embedded initialWorkflowId="b" /></MemoryRouter>)
     expect(window.confirm).toHaveBeenCalledTimes(1); expect(mocks.get).not.toHaveBeenCalled()
     expect(state().sessionId).toBe(session); expect(state().spec?.id).toBe('a')
     expect(readDraft(session, 'yaml')?.text).toBe('unapplied')
   })
   it('keeps the old draft on a controlled target read failure', async () => {
     const session = makeDraft(); mocks.get.mockRejectedValueOnce(new Error('offline'))
-    const view = render(<MemoryRouter><Editor embedded initialWorkflowId="a" /></MemoryRouter>)
-    view.rerender(<MemoryRouter><Editor embedded initialWorkflowId="b" /></MemoryRouter>)
+    const view = render(<MemoryRouter><Editor access={{ canView: true, canEdit: true, canDeploy: true }} embedded initialWorkflowId="a" /></MemoryRouter>)
+    view.rerender(<MemoryRouter><Editor access={{ canView: true, canEdit: true, canDeploy: true }} embedded initialWorkflowId="b" /></MemoryRouter>)
     expect(await screen.findByText(/工作流读取失败/)).toBeInTheDocument()
     expect(window.confirm).toHaveBeenCalledTimes(1); expect(state().sessionId).toBe(session)
     expect(state().spec?.id).toBe('a'); expect(readDraft(session, 'yaml')?.text).toBe('unapplied')
   })
   it.each(['a', null, undefined] as const)('ignores a late B response after the controlled target changes to %s', async next => {
     const session = makeDraft(); const target = deferred<WorkflowSpec>(); mocks.get.mockReturnValueOnce(target.promise)
-    const view = render(<MemoryRouter><Editor embedded initialWorkflowId="a" /></MemoryRouter>)
-    view.rerender(<MemoryRouter><Editor embedded initialWorkflowId="b" /></MemoryRouter>)
+    const view = render(<MemoryRouter><Editor access={{ canView: true, canEdit: true, canDeploy: true }} embedded initialWorkflowId="a" /></MemoryRouter>)
+    view.rerender(<MemoryRouter><Editor access={{ canView: true, canEdit: true, canDeploy: true }} embedded initialWorkflowId="b" /></MemoryRouter>)
     expect(mocks.get).toHaveBeenCalledOnce()
-    view.rerender(<MemoryRouter><Editor embedded initialWorkflowId={next} /></MemoryRouter>)
+    view.rerender(<MemoryRouter><Editor access={{ canView: true, canEdit: true, canDeploy: true }} embedded initialWorkflowId={next} /></MemoryRouter>)
     await act(async () => { target.resolve(B); await target.promise })
     expect(state().sessionId).toBe(session); expect(state().spec?.id).toBe('a')
     expect(state().spec?.title).toBe('Unsaved'); expect(state().pendingEdits).toHaveProperty('yaml')
@@ -178,9 +179,9 @@ describe('embedded editor controlled target', () => {
   })
   it('ignores an obsolete B failure after the controlled target returns to A', async () => {
     const session = makeDraft(); const target = deferred<WorkflowSpec>(); mocks.get.mockReturnValueOnce(target.promise)
-    const view = render(<MemoryRouter><Editor embedded initialWorkflowId="a" /></MemoryRouter>)
-    view.rerender(<MemoryRouter><Editor embedded initialWorkflowId="b" /></MemoryRouter>)
-    view.rerender(<MemoryRouter><Editor embedded initialWorkflowId="a" /></MemoryRouter>)
+    const view = render(<MemoryRouter><Editor access={{ canView: true, canEdit: true, canDeploy: true }} embedded initialWorkflowId="a" /></MemoryRouter>)
+    view.rerender(<MemoryRouter><Editor access={{ canView: true, canEdit: true, canDeploy: true }} embedded initialWorkflowId="b" /></MemoryRouter>)
+    view.rerender(<MemoryRouter><Editor access={{ canView: true, canEdit: true, canDeploy: true }} embedded initialWorkflowId="a" /></MemoryRouter>)
     await act(async () => { target.reject(new Error('obsolete')); await target.promise.catch(() => {}) })
     expect(screen.queryByText(/工作流读取失败/)).not.toBeInTheDocument()
     expect(state().sessionId).toBe(session); expect(state().spec?.id).toBe('a')
@@ -188,8 +189,8 @@ describe('embedded editor controlled target', () => {
   })
   it('commits a controlled target only after loading, without a second prompt', async () => {
     const session = makeDraft(); const target = deferred<WorkflowSpec>(); mocks.get.mockReturnValueOnce(target.promise)
-    const view = render(<MemoryRouter><Editor embedded initialWorkflowId="a" /></MemoryRouter>)
-    view.rerender(<MemoryRouter><Editor embedded initialWorkflowId="b" /></MemoryRouter>)
+    const view = render(<MemoryRouter><Editor access={{ canView: true, canEdit: true, canDeploy: true }} embedded initialWorkflowId="a" /></MemoryRouter>)
+    view.rerender(<MemoryRouter><Editor access={{ canView: true, canEdit: true, canDeploy: true }} embedded initialWorkflowId="b" /></MemoryRouter>)
     expect(state().sessionId).toBe(session)
     await act(async () => { target.resolve(B); await target.promise })
     expect(state().spec).toEqual(B); expect(state()._databaseSpec).toEqual(B); expect(readDraft(session, 'yaml')).toBeUndefined()
@@ -199,11 +200,71 @@ describe('embedded editor controlled target', () => {
     mocks.get.mockRejectedValue({ status: 404, body: '{"code":"WORKFLOW_NOT_FOUND"}' })
     mocks.history.mockResolvedValue({ workflowId: 'b', history: [], active: { deployNumber: 2, version: 1, isActive: true, action: 'rollback' } })
     mocks.snapshot.mockResolvedValue({ workflowId: 'b', deployNumber: 2, version: 1, specJson: JSON.stringify(B) })
-    const view = render(<MemoryRouter><Editor embedded initialWorkflowId="a" /></MemoryRouter>)
-    view.rerender(<MemoryRouter><Editor embedded initialWorkflowId="b" /></MemoryRouter>)
+    const view = render(<MemoryRouter><Editor access={{ canView: true, canEdit: true, canDeploy: true }} embedded initialWorkflowId="a" /></MemoryRouter>)
+    view.rerender(<MemoryRouter><Editor access={{ canView: true, canEdit: true, canDeploy: true }} embedded initialWorkflowId="b" /></MemoryRouter>)
     await waitFor(() => expect(state().spec).toEqual(B))
     expect(state()._databaseSpec).toBeNull()
     expect(mocks.snapshot).toHaveBeenCalledWith('b', 2)
   })
 
+})
+
+
+describe('real permission queries during workflow navigation', () => {
+  it.each([
+    ['sidebar', false], ['sidebar', true], ['controlled', false], ['controlled', true],
+  ] as const)('allows %s navigation while pending source permission settles to edit=%s', async (mode, canEdit) => {
+    const permission = deferred<{ canView: boolean; canEdit: boolean; canExecute: boolean }>()
+    const target = deferred<WorkflowSpec>()
+    mocks.getAccess.mockImplementation((id: string) => id === 'a' ? permission.promise : Promise.resolve({ canView: true, canEdit: false, canExecute: false }))
+    mocks.get.mockReturnValueOnce(target.promise)
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<QueryClientProvider client={client}><MemoryRouter><Editor initialWorkflowId={mode === 'controlled' ? 'b' : 'a'} /></MemoryRouter></QueryClientProvider>)
+    if (mode === 'sidebar') fireEvent.click(screen.getByText('选择 B'))
+    await waitFor(() => expect(mocks.get).toHaveBeenCalledWith('b'))
+    await act(async () => permission.resolve({ canView: true, canEdit, canExecute: false }))
+    await waitFor(() => expect(state().editAccess?.canEdit).toBe(canEdit))
+    await act(async () => target.resolve(B))
+    await waitFor(() => expect(state().spec).toEqual(B))
+    expect(screen.getByTestId('selection')).toHaveTextContent('b')
+    expect(await screen.findByText(/当前工作流为只读/)).toBeVisible()
+    expect(screen.queryByText(/工作流切换未完成/)).not.toBeInTheDocument()
+    expect(window.confirm).not.toHaveBeenCalled()
+    cleanup(); client.clear()
+  })
+
+  it('allows a view-only user to create and edit a local unsaved workflow under existing create policy', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity, retry: false } } })
+    client.setQueryData(['workflow-access', 'a'], { canView: true, canEdit: false, canDeploy: false })
+    render(<QueryClientProvider client={client}><MemoryRouter><Editor initialWorkflowId="a" /></MemoryRouter></QueryClientProvider>)
+    expect(await screen.findByText(/当前工作流为只读/)).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: '更多操作' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '新建工作流' }))
+    const inputs = screen.getAllByPlaceholderText('我的工作流')
+    fireEvent.change(inputs[0], { target: { value: 'local-new' } })
+    fireEvent.change(inputs[1], { target: { value: 'New local workflow' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }))
+    act(() => state().updateSpecField('title', 'Editable local workflow'))
+    expect(state().spec).toMatchObject({ id: 'local-new', title: 'Editable local workflow' })
+    expect(state()._savedSpec).toBeNull()
+    expect(screen.getByRole('button', { name: '保存', exact: true })).toBeEnabled()
+    cleanup(); client.clear()
+  })
+
+  it('still rejects a switch if content changes after permission metadata settles', async () => {
+    const permission = deferred<{ canView: boolean; canEdit: boolean; canExecute: boolean }>()
+    const target = deferred<WorkflowSpec>()
+    mocks.getAccess.mockReturnValue(permission.promise); mocks.get.mockReturnValueOnce(target.promise)
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<QueryClientProvider client={client}><MemoryRouter><Editor initialWorkflowId="a" /></MemoryRouter></QueryClientProvider>)
+    fireEvent.click(screen.getByText('选择 B'))
+    await act(async () => permission.resolve({ canView: true, canEdit: true, canExecute: false }))
+    await waitFor(() => expect(state().editAccess?.canEdit).toBe(true))
+    act(() => state().updateSpecField('title', 'Keep my concurrent edit'))
+    await act(async () => target.resolve(B))
+    expect(await screen.findByText(/工作流切换未完成/)).toBeVisible()
+    expect(state().spec?.id).toBe('a')
+    expect(state().spec?.title).toBe('Keep my concurrent edit')
+    cleanup(); client.clear()
+  })
 })
