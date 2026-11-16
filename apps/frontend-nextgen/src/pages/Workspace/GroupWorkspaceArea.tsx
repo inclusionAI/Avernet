@@ -5,9 +5,8 @@ import { useWorkspaceStore } from '@/stores/workspaceStore';
 import React, { useCallback, useState } from 'react';
 import { GroupChatAbortUnsupportedDialog } from './components/GroupChatAbortUnsupportedDialog';
 import { GroupChatPane } from './components/GroupChatPane';
-import { GroupHistorySidebar } from './components/GroupChatPane/GroupHistorySidebar';
-import { SessionFilesSidebar } from './components/GroupChatPane/SessionFilesSidebar';
 import { GroupMembersPanelSlot } from './components/GroupMembersPanelSlot';
+import { GroupSessionSidebars } from './components/GroupSessionSidebars';
 import { GroupWorkspaceSidebar } from './components/GroupWorkspaceSidebar';
 import { GroupWorkspaceConversation } from './components/GroupWorkspaceConversation';
 import { CreateGroupModal } from './components/Modals/CreateGroupModal';
@@ -268,24 +267,19 @@ export function GroupWorkspaceArea({
           onRemoveSessionMember={sessionManage.removeMember}
           onShareSession={handleShareSession}
         />
-        {sessions.selectedSession ? (
-          <>
-            {/* 资源管理/历史消息：对话区内联副屏（open 开合、宽度记忆），与单聊侧同形。 */}
-            <SessionFilesSidebar
-              open={activePanel === 'resources'}
-              sessionId={sessions.selectedSession.sessionId}
-              participants={sessions.selectedSession.participants}
-              authenticatedUser={userIdentityId ? { userId: userIdentityId, name: userIdentityName } : null}
-              onClose={closeHeaderPanels}
-            />
-            <GroupHistorySidebar
-              open={activePanel === 'history'}
-              search={headerPanels.historySearch}
-              onLocate={headerPanels.locateMessage}
-              onClose={closeHeaderPanels}
-            />
-          </>
-        ) : null}
+        {(sessions.selectedSession || selectedGroup) && (
+          <GroupSessionSidebars
+            activePanel={activePanel}
+            session={sessions.selectedSession}
+            group={selectedGroup}
+            activeIdentity={ws.activeIdentity}
+            userIdentityId={userIdentityId}
+            userIdentityName={userIdentityName}
+            search={headerPanels.historySearch}
+            onLocate={headerPanels.locateMessage}
+            onClose={closeHeaderPanels}
+          />
+        )}
       </GroupWorkspaceConversation>
       <CreateGroupModal
         open={createGroupDialog.open}

@@ -5,6 +5,7 @@ pub mod event_subscription;
 pub mod friendship;
 pub mod friend_connection;
 pub mod group;
+pub(crate) mod group_context;
 pub mod invitation;
 pub mod register;
 pub mod session;

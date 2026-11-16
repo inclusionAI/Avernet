@@ -17,7 +17,19 @@ from scripts.validate_openapi_contract import load_contract  # noqa: E402
 
 HTTP_METHODS = {"get", "post", "put", "patch", "delete", "head", "options", "trace"}
 
-EXPECTED_OPERATIONS = {
+GROUP_CONTEXT_OPERATIONS = {
+    ("post", f"/openapi/v1/collaboration/groupcontext/{operation}")
+    for operation in (
+        "shared-info",
+        "list-preset",
+        "manage/list-preset",
+        "manage/add-preset",
+        "manage/update-preset",
+        "manage/delete-preset",
+    )
+}
+
+EXPECTED_OPERATIONS = GROUP_CONTEXT_OPERATIONS | {
     ("get", "/openapi/v1/collaboration/me"),
     ("get", "/openapi/v1/auth/url"),
     ("get", "/openapi/v1/auth/callback/{provider}"),
@@ -142,6 +154,8 @@ def test_operations_use_the_approved_gateway_security_boundary() -> None:
                 "/openapi/v1/collaboration/invite-codes/claim",
             }:
                 expected = {}
+            elif (method, path) in GROUP_CONTEXT_OPERATIONS:
+                expected = {"user": "required"}
             elif path == "/openapi/v1/collaboration/public-groups":
                 expected = {"user": "required"}
             elif path == "/openapi/v1/collaboration/register/token":
