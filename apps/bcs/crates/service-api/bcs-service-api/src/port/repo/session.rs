@@ -415,4 +415,22 @@ pub trait SessionRepoPort: Send + Sync {
     async fn collected_at_map(&self, _session_ids: &[&str], _bot_uuid: &str) -> Vec<(String, u64)> {
         Vec::new()
     }
+
+    /// Batched group activity key from session creation (design D1/D4): the max
+    /// `gmt_create` per group id, in epoch milliseconds, over the sessions
+    /// currently persisted for that group.
+    ///
+    /// Only existing rows count: a hard-deleted session contributes nothing
+    /// here (its `gmt_create` is gone); messages it left behind still count
+    /// through the message-side lookup. Group ids with no persisted sessions
+    /// are absent from the map, so callers fall back to the group's own
+    /// `created_at`. Default returns an empty map so noop/test impls keep
+    /// compiling; real impls (memory + mysql) override it.
+    async fn max_created_at_by_group_ids(
+        &self,
+        group_ids: &[String],
+    ) -> ServiceResult<std::collections::HashMap<String, u64>> {
+        let _ = group_ids;
+        Ok(Default::default())
+    }
 }

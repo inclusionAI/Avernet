@@ -177,4 +177,37 @@ pub trait MessageRepoPort: Send + Sync + 'static {
             has_more: false,
         })
     }
+
+    /// Batched group activity key for the recent-activity list sort (design
+    /// D1/D4): the max persisted message `created_at` per group id, in epoch
+    /// milliseconds, over every persisted message row regardless of sender,
+    /// message type or audience.
+    ///
+    /// There is no `env` parameter because the store owns its environment (the
+    /// same store-per-env isolation as the history reads above): a dev/session
+    /// store cannot leak another env's message log. Group ids with no persisted
+    /// messages are absent from the map. Default returns an empty map so
+    /// noop/test impls keep compiling; real impls (memory + mysql) override it.
+    async fn last_activity_by_group_ids(
+        &self,
+        group_ids: &[String],
+    ) -> Result<std::collections::HashMap<String, u64>, MessageRepoError> {
+        let _ = group_ids;
+        Ok(Default::default())
+    }
+
+    /// Batched session activity key for the recent-activity list sort (design
+    /// D1/D4): the max persisted message `created_at` per session id, in epoch
+    /// milliseconds, with the same global-clock and store-owned `env` isolation
+    /// as [`MessageRepoPort::last_activity_by_group_ids`]. Session ids with no
+    /// persisted messages are absent from the map, so callers fall back to the
+    /// session's own `created_at`. Default returns an empty map so noop/test
+    /// impls keep compiling.
+    async fn last_activity_by_session_ids(
+        &self,
+        session_ids: &[String],
+    ) -> Result<std::collections::HashMap<String, u64>, MessageRepoError> {
+        let _ = session_ids;
+        Ok(Default::default())
+    }
 }

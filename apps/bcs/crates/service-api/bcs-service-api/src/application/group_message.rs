@@ -86,4 +86,35 @@ pub trait GroupMessageHistoryService: Send + Sync {
     ) -> Result<SessionHistoryResult, GroupUseCaseError> {
         self.get_session_history(cmd).await
     }
+
+    /// Batched group activity keys for the recent-activity list sort (design
+    /// D1/D4): the max persisted message `created_at` per group id, in epoch
+    /// milliseconds. The implementation's store owns `env` isolation, so the
+    /// caller cannot read another environment's message log. Group ids with no
+    /// persisted messages are absent from the map.
+    ///
+    /// Default returns an empty map so every existing implementation keeps
+    /// compiling: implementations without the persisted message log (for
+    /// example the legacy bot-delivery fallback) degrade to the `created_at`
+    /// fallback (D1/D6) rather than sourcing activity from delivery internals.
+    async fn last_activity_by_group_ids(
+        &self,
+        group_ids: &[String],
+    ) -> Result<std::collections::HashMap<String, u64>, GroupUseCaseError> {
+        let _ = group_ids;
+        Ok(Default::default())
+    }
+
+    /// Batched session activity keys for the recent-activity list sort (design
+    /// D1/D4): the max persisted message `created_at` per session id, in epoch
+    /// milliseconds, under the same store-owned `env` isolation as
+    /// `last_activity_by_group_ids`. Session ids with no persisted messages are
+    /// absent from the map. Default returns an empty map.
+    async fn last_activity_by_session_ids(
+        &self,
+        session_ids: &[String],
+    ) -> Result<std::collections::HashMap<String, u64>, GroupUseCaseError> {
+        let _ = session_ids;
+        Ok(Default::default())
+    }
 }

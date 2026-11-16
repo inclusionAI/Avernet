@@ -266,4 +266,21 @@ pub trait SessionManagementService: Send + Sync {
     ) -> Result<Vec<(String, u64)>, SessionUseCaseError> {
         Ok(Vec::new())
     }
+
+    /// Batched group activity key from session creation (design D1/D4): the max
+    /// `gmt_create` per group id, in epoch milliseconds, over the sessions
+    /// currently persisted for that group. Hard-deleted sessions contribute
+    /// nothing (their rows are gone); their retained messages still count via
+    /// the message-side lookup. Group ids with no persisted sessions are absent
+    /// from the map.
+    ///
+    /// Default returns an empty map so every existing implementation keeps
+    /// compiling; the real implementation delegates to its `SessionRepoPort`.
+    async fn max_created_at_by_group_ids(
+        &self,
+        group_ids: &[String],
+    ) -> Result<std::collections::HashMap<String, u64>, SessionUseCaseError> {
+        let _ = group_ids;
+        Ok(Default::default())
+    }
 }
