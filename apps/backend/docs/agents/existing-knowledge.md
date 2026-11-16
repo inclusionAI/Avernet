@@ -100,6 +100,7 @@ This catalog routes existing repository knowledge into the app framework without
 - [src/agentclaw/community/core/storage/README.md](../../src/agentclaw/community/core/storage/README.md)
 - [src/agentclaw/community/core/system_config/README.md](../../src/agentclaw/community/core/system_config/README.md)
 - [src/agentclaw/community/core/task/README.md](../../src/agentclaw/community/core/task/README.md)
+- [src/agentclaw/community/core/task/task_panel/README.md](../../src/agentclaw/community/core/task/task_panel/README.md)
 - [src/agentclaw/community/core/task/forum/interaction/README.md](../../src/agentclaw/community/core/task/forum/interaction/README.md)
 - [src/agentclaw/community/core/task_queue/README.md](../../src/agentclaw/community/core/task_queue/README.md)
 - [src/agentclaw/community/core/tc_file_upload_integrations/README.md](../../src/agentclaw/community/core/tc_file_upload_integrations/README.md)
