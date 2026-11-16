@@ -30,7 +30,7 @@ export function GroupSessionSidebars({
   const groupId = session?.groupId ?? group?.groupId;
   return (
     <>
-      {/* 资源管理/共享信息/历史消息：对话区内联副屏（open 开合、宽度记忆），与单聊侧同形。 */}
+      {/* 会话文件/共享信息/历史消息：对话区内联副屏（open 开合、宽度记忆），与单聊侧同形。 */}
       {session && (
         <SessionFilesSidebar
           open={activePanel === 'resources'}

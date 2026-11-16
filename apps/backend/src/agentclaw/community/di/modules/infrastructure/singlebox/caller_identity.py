@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from injector import Binder, Module, singleton
 
+from agentclaw.community.api.caller_credential import CALLER_CREDENTIAL_PROVIDER_UNAVAILABLE
 from agentclaw.community.api.caller_iam_token_service import (
     CallerIamTokenServiceProtocol,
 )
@@ -28,7 +29,10 @@ class SingleboxCallerIamTokenService:
         entity_id: str | None,
         is_test_exchange: bool,
         session_key: str | None = None,
+        token_type: str = "iam",
     ) -> CallerIamTokenOutcome:
+        if token_type != "iam":
+            return CallerIamTokenOutcome(iam_token="", error=CALLER_CREDENTIAL_PROVIDER_UNAVAILABLE)
         return CallerIamTokenOutcome(iam_token="mock_iam_token")
 
 

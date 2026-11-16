@@ -1,4 +1,5 @@
 import { resolveBotRuntime } from '@/adapters/bot-runtime/resolveBotRuntime';
+import { supportsBotSessionFiles } from '@/domain/botSessionFileCapability';
 import {
   isAicodingConnectionEngine,
   type BotConnectionRuntime,
@@ -79,12 +80,22 @@ export function resolveConversationPresentation(
   bot: ChatBotView | null,
   connectionRuntime: BotConnectionRuntime = { resolved: false, engine: null },
 ): ConversationPresentation {
-  if (!bot?.isFriendBot) return STANDARD_PRESENTATION;
+  if (!bot?.isFriendBot) return {
+    ...STANDARD_PRESENTATION,
+    resourceManager: supportsBotSessionFiles(bot),
+    composerPlaceholder: supportsBotSessionFiles(bot)
+      ? STANDARD_PRESENTATION.composerPlaceholder : '可使用 /skill 调用能力',
+  };
 
   if (connectionRuntime.resolved) {
     return isAicodingConnectionEngine(connectionRuntime.engine)
       ? FRIEND_CODING_COMPAT_PRESENTATION
-      : FRIEND_STANDARD_PRESENTATION;
+      : {
+        ...FRIEND_STANDARD_PRESENTATION,
+        resourceManager: supportsBotSessionFiles(bot),
+        composerPlaceholder: supportsBotSessionFiles(bot)
+          ? FRIEND_STANDARD_PRESENTATION.composerPlaceholder : '请输入你的问题或任务',
+      };
   }
 
   return metadataSuggestsFriendCodingBot(bot) ? FRIEND_CODING_COMPAT_PRESENTATION : FRIEND_RUNTIME_PENDING_PRESENTATION;

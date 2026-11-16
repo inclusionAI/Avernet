@@ -136,6 +136,12 @@ export function BotUploadFilesModal({
                       组装中
                     </span>
                   )}
+                  {task.phase === 'materializing' && (
+                    <span className="flex items-center gap-1 text-xs text-primary">
+                      <LoaderCircle className="h-3 w-3 animate-spin" />
+                      物化中
+                    </span>
+                  )}
                   {task.phase === 'uploading' && (
                     <div className="mt-1 flex items-center gap-2">
                       <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">

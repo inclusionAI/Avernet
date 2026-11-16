@@ -135,7 +135,7 @@ export function ConversationInteractiveStage(props: {
                   onOpened={() => Tracert.click(Points.workspaceChat.openWorkflowMenu)}
                   execution={taskExecution}
                   enableWorkflow
-                  onUpload={model.desktopFileFeaturesHidden ? undefined : fileFeature.openUpload}
+                  onUpload={fileFeature.filesSupported ? fileFeature.openUpload : undefined}
                   disabled={model.taskComposerDisabled}
                   disabledReason={model.taskComposerDisabledReason}
                   selections={taskExecution.selections}
@@ -155,7 +155,7 @@ export function ConversationInteractiveStage(props: {
               ) : undefined
             }
             fileChip={
-              presentation.fileFeatures && !model.desktopFileFeaturesHidden ? fileFeature.fileChip : undefined
+              presentation.fileFeatures && fileFeature.filesSupported ? fileFeature.fileChip : undefined
             }
             command={presentation.fileFeatures ? composer.command : undefined}
             fileToolbar={presentation.fileFeatures ? fileFeature.fileToolbar : undefined}

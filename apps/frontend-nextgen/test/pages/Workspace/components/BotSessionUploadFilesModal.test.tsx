@@ -96,4 +96,21 @@ describe('BotUploadFilesModal', () => {
     fireEvent.click(screen.getByRole('button', { name: '添加至会话' }));
     expect(onAddToSession).toHaveBeenCalledTimes(1);
   });
+
+  it('物化中阶段渲染转圈提示，不渲染进度条', () => {
+    render(
+      <BotUploadFilesModal
+        open
+        onClose={() => {}}
+        queue={[createTask({ phase: 'materializing', progress: 100 })]}
+        isUploading
+        stageFiles={() => []}
+        submit={() => Promise.resolve()}
+        onAddToSession={() => {}}
+        removeTask={() => {}}
+      />,
+    );
+    expect(screen.getByText('物化中')).toBeInTheDocument();
+    expect(screen.queryByText('待上传')).not.toBeInTheDocument();
+  });
 });

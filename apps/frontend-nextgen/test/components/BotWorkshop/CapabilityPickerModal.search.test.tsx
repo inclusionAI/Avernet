@@ -4,7 +4,11 @@ import { useSkillCenterPicker } from '@/hooks/useSkillCenterPicker';
 import '@testing-library/jest-dom';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 jest.mock('@/capabilities', () => ({
-  getCapabilities: () => ({ getBotSkillPickerSources: () => ({ value: ['market', 'mine'] }) }),
+  getCapabilities: () => ({
+    getBotSkillPickerSources: () => ({ value: ['market', 'mine'] }),
+    // Open Core 默认全量来源（getBotMcpPickerSources 插槽契约，零行为变化）。
+    getBotMcpPickerSources: () => ({ value: ['internal', 'open-platform'] }),
+  }),
 }));
 jest.mock('@/hooks/useSkillCenterPicker');
 it('服务端命中不二次过滤，选择最多20项且可以取消选择', async () => {

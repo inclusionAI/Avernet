@@ -41,8 +41,6 @@ export interface ConversationBotItemActionsProps {
   supportsOrigin: boolean;
   /** 收藏支持(好友 Bot 范围筛选)。 */
   supportsFavorites: boolean;
-  /** 团队分组禁用「他人发起」归属项。 */
-  othersDisabled: boolean;
   origin: ConversationOrigin;
   scope: ConversationSessionScope;
   onOriginChange(origin: ConversationOrigin): void;
@@ -74,7 +72,6 @@ export function ConversationBotItemActions(props: ConversationBotItemActionsProp
     showFilter,
     supportsOrigin,
     supportsFavorites,
-    othersDisabled,
     origin,
     scope,
     onOriginChange,
@@ -150,7 +147,6 @@ export function ConversationBotItemActions(props: ConversationBotItemActionsProp
           scope={scope}
           supportsOrigin={supportsOrigin}
           supportsFavorites={supportsFavorites}
-          othersDisabled={othersDisabled}
           triggerClassName={cn(iconVisibility, filterActive && 'opacity-100')}
           onOriginChange={onOriginChange}
           onScopeChange={onScopeChange}

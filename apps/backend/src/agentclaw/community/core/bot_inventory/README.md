@@ -46,6 +46,12 @@ still run before restart; unrelated programming errors are not reclassified.
 
 ## Inventory status contract
 
+`GET /openapi/v1/bots/all` orders Bots by creation time, newest first,
+regardless of name or deployment mode. Within each service Bot, visible
+publications are ordered by their own creation time, newest first. Pagination
+applies to this combined card list. Editing a Bot or adding a publication
+does not move it ahead of a more recently created Bot.
+
 `GET /openapi/v1/bots/all` exposes the stored Bot status for every card kind
 (`PENDING`, `PROVISIONING`, `ACTIVE`, etc.), matching `GET /openapi/v1/bots`.
 Service cards additionally expose a bounded `publish` object with `id`,

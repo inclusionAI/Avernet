@@ -94,7 +94,9 @@ export function DebugChatComposer({
             disabled={disabled}
             loading={isRequesting}
             submitType="enter"
-            placeholder={composer.placeholder ?? '可使用 /file 引用文件、/skill 调用能力、/clear 清空上下文'}
+            placeholder={composer.placeholder ?? (fileChip
+              ? '可使用 /file 引用文件、/skill 调用能力、/clear 清空上下文'
+              : '可使用 /skill 调用能力、/clear 清空上下文')}
             command={composer.command}
             slots={{ header: composer.header }}
             fileChip={fileChip}

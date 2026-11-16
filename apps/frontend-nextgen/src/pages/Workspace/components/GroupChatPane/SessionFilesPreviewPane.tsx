@@ -95,8 +95,8 @@ function PreviewBody({ file, preview, onDownload }: PreviewBodyProps) {
   }
 
   if (preview.kind === 'text' && preview.text !== null) {
-    /* 文本自绘（验收微调）：md 走富文本渲染，json 美化缩进，其余等宽原文；
-       px-6 py-4 呼吸边，替换 iframe（浏览器纯文本样式不可控）。
+    /* 已提供文本内容时沿用单聊自绘：md 走富文本渲染，json 美化缩进，其余等宽原文；
+       群文件未提供文本内容，走下方 iframe 导航以避开跨域字节读取。
        滚动契约：分支根 flex-1（非 h-full 百分比——overflow 父级下解析不可靠），
        最内层 overflow-y-auto 独占滚动。 */
     return (
@@ -123,9 +123,9 @@ function PreviewBody({ file, preview, onDownload }: PreviewBodyProps) {
     );
   }
 
-  if (preview.kind === 'html' && preview.contentUrl) {
-    /* 网页沙箱渲染（清单 §一）：sandbox 空值 = 全限制（禁脚本/禁同源/禁弹窗），
-       零 XSS 面；静态渲染页面内容。 */
+  if ((preview.kind === 'html' || (preview.kind === 'text' && preview.text === null)) && preview.contentUrl) {
+    /* 群文本以 src 导航跟随存储重定向，不 fetch 字节或读取跨域 frame DOM。
+       保留上方单聊自绘文本分支；sandbox 空值禁脚本/同源权限/弹窗/下载。 */
     return (
       <div className="flex min-h-0 flex-1 flex-col">
         <iframe title={file.name} src={preview.contentUrl} sandbox="" className="min-h-0 w-full flex-1 bg-background" />

@@ -90,11 +90,33 @@ it.each([false, true])('桌面 Bot（团队协作=%s）可懒加载技能，但�
   expect(loadSkills).toHaveBeenCalledTimes(1);
   expect(skillEntry().subConfig!.categories[0].items?.map((item) => item.name)).toEqual(['task-loop']);
   expect(skillEntry().subConfig!.format?.({ id: 's1', name: 'task-loop' })).toBe('/task-loop');
-  const fileEntry = result.current.command.categories[0].items!.find((item) => item.name === 'file')!;
-  await act(async () => { result.current.command.onSelect?.(fileEntry); });
+  expect(result.current.command.categories[0].items?.some((item) => item.name === 'file')).toBe(false);
   expect(jest.mocked(useBotSessionFiles).mock.results.at(-1)!.value.refresh).not.toHaveBeenCalled();
   expect(mockedUseBotSessionFiles.mock.calls.at(-1)?.[0]).toBeNull();
   expect(mockedUseBotSessionFileUpload.mock.calls.at(-1)?.[0]).toBeNull();
+});
+
+it.each(['personal', 'service'])('Teclaw %s 禁用所有会话文件入口，但保留 Skill 与能力集', async (botType) => {
+  const loadSkills = jest.fn(async () => []);
+  mockedUseBotSkills.mockReturnValue({ skills: [], isLoading: false, loadSkills });
+  const { result } = renderHook(() => useBotSessionFilesFeature(
+    { ...bot, botType, engine: 'teclaw' }, session, 'human_900003', jest.fn(),
+  ));
+  expect(result.current.filesSupported).toBe(false);
+  expect(result.current.featureNode).toBeNull();
+  expect(result.current.capabilitySets).not.toBeNull();
+  expect(result.current.command.categories[0].items?.map((item) => item.name)).toEqual(['skill', 'clear']);
+  await act(async () => {
+    result.current.openFileDrawer();
+    result.current.openUpload();
+    result.current.fileChip.onPick(jest.fn(), jest.fn());
+    result.current.command.onSelect?.(result.current.command.categories[0].items![0]);
+  });
+  expect(loadSkills).toHaveBeenCalledTimes(1);
+  expect(result.current.fileDrawerOpen).toBe(false);
+  expect(mockedUseBotSessionFiles.mock.calls.at(-1)?.[0]).toBeNull();
+  expect(mockedUseBotSessionFileUpload.mock.calls.at(-1)?.[0]).toBeNull();
+  expect(jest.mocked(useBotSessionFiles).mock.results.at(-1)!.value.refresh).not.toHaveBeenCalled();
 });
 
 it.each([

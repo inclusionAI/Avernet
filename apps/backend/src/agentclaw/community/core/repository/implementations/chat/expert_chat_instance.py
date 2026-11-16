@@ -38,6 +38,7 @@ from typing import Any, Dict, Optional
 from injector import inject
 from sqlalchemy import case, func, literal, update, and_
 
+from agentclaw.community.core.repository.caller_token_refresh_types import CallerTokenRefresh
 from agentclaw.community.core.repository.implementations.bot.resource_locator import resource_locator
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
@@ -266,27 +267,45 @@ class ExpertChatInstanceRepository(
     ) -> Iterator[bool]:
         if expires_at.tzinfo is None or expires_at <= datetime.now(UTC):
             raise ValueError("caller_token_expiry_invalid")
-        expiry = expires_at.astimezone(UTC).replace(tzinfo=None)
+        expiry = expires_at.astimezone(UTC)
+        with self.caller_token_refresh(user_id=user_id, bot_id=bot_id, owner_id=owner_id,
+                                       binding_id=binding_id) as state:
+            current = state.instance.get("caller_token_expires_at")
+            if current is not None and datetime.fromisoformat(current) >= expiry:
+                logger.info("caller_token_expiry_preserved bot_id=%s binding_id=%s expires_at=%s",
+                            bot_id, binding_id, current)
+                yield False
+                return
+            yield True
+            state.expires_at = expires_at
+
+    @contextmanager
+    def caller_token_refresh(
+        self, *, user_id: str, bot_id: str, owner_id: str, binding_id: int,
+    ) -> Iterator[CallerTokenRefresh]:
         env = get_current_env()
-        # COSEC: lock the exact tenant-scoped instance across outbound install
-        # and persistence. AUTOCOMMIT orm_session cannot provide this exclusion.
+        # COSEC: IAM and scheduled signing hold the same exact scoped row lock.
         with self._db.transactional_orm_session() as db:
             owner_id = resource_locator(db, bot_id, owner_id)
             row = (db.query(self.Model).filter(
                 self.Model.user_id == user_id, self.Model.bot_id == bot_id,
                 self.Model.owner_id == owner_id, self.Model.env == env,
-            ).with_for_update().first())
+            ).populate_existing().with_for_update().first())
             if (row is None or row.status not in {"init", "success", "active"}
                     or (row.to_dict()["ext"] or {}).get("binding_id") != binding_id):
                 raise ValueError("caller_instance_changed")
             fields = {"bot_id": bot_id, "owner_id": owner_id, "caller_user_id": user_id,
                       "env": env, "binding_id": binding_id}
-            if row.caller_token_expires_at is not None and row.caller_token_expires_at >= expiry:
-                logger.info("caller_token_expiry_preserved fields=%s expires_at=%s", fields,
-                            row.caller_token_expires_at.isoformat())
-                yield False
+            logger.info("caller_token_refresh_locked fields=%s", fields)
+            state = CallerTokenRefresh(instance=row.to_dict())
+            yield state
+            if state.expires_at is None:
                 return
-            yield True
+            if state.expires_at.tzinfo is None or state.expires_at <= datetime.now(UTC):
+                raise ValueError("caller_token_expiry_invalid")
+            expiry = state.expires_at.astimezone(UTC).replace(tzinfo=None)
+            if row.caller_token_expires_at is not None and row.caller_token_expires_at >= expiry:
+                raise ValueError("caller_token_expiry_not_advanced")
             row.caller_token_expires_at = expiry
             db.flush()
-        logger.info("caller_token_expiry_recorded fields=%s expires_at=%s", fields, expires_at.isoformat())
+        logger.info("caller_token_expiry_recorded fields=%s expires_at=%s", fields, state.expires_at.isoformat())

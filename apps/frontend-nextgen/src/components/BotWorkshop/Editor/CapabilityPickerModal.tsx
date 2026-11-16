@@ -1,4 +1,4 @@
-import { getCapabilities } from '@/capabilities';
+import { getCapabilities, type BotMcpPickerSource } from '@/capabilities';
 import { Button } from '@/components/ui/Button';
 import { Empty } from '@/components/ui/Empty';
 import { Input } from '@/components/ui/Input';
@@ -6,16 +6,16 @@ import { Modal, ModalContent, ModalDescription, ModalFooter, ModalHeader, ModalT
 import { Segmented } from '@/components/ui/Segmented';
 import type { BotEditorMcp, BotEditorSkill } from '@/domain/botEditor';
 import { useSkillCenterPicker } from '@/hooks/useSkillCenterPicker';
-import { useLocalSkillUploadError } from '@/hooks/useLocalSkillUploadError';
+import { useLocalSkillFolderUpload } from './useLocalSkillFolderUpload';
 import { Search } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { readDirectoryFiles, type DirectoryHandle } from './capabilityPickerDirectory';
 import { CapabilityPickerItemCard, pickerItemId } from './CapabilityPickerItemCard';
 import { CapabilityPickerLocalSkills } from './CapabilityPickerLocalSkills';
+import { useMcpPickerSources } from './useMcpPickerSources';
 
 type Source = 'mine' | 'market' | 'workshop';
 type MarketSource = 'skillcenter-market' | 'teamclaw-market';
-type McpMarketSource = 'internal' | 'open-platform';
+type McpMarketSource = BotMcpPickerSource;
 type PickerItem = BotEditorSkill | BotEditorMcp;
 
 interface CapabilityPickerModalProps {
@@ -64,11 +64,17 @@ export function CapabilityPickerModal({
   const [keyword, setKeyword] = useState('');
   const [selected, setSelected] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
-  const [uploading, setUploading] = useState(false);
-  const uploadError = useLocalSkillUploadError();
+  // 「我的 Skill」文件夹上传（useLocalSkillFolderUpload）：上传中状态/错误提示/目录选择收口。
+  const { uploading, uploadError, canPickDirectory, uploadFolder } = useLocalSkillFolderUpload(
+    onUploadFolder,
+    setSelected,
+  );
   const [deletingId, setDeletingId] = useState<string>();
   const searchMcpRef = useRef(onSearchMcp);
   searchMcpRef.current = onSearchMcp;
+  // MCP 来源插槽（useMcpPickerSources）：选项按 capability 清单过滤，选中值归一到允许来源，
+  // 搜索只发允许来源；描述文案随来源数自适应。
+  const { mcpSourceOptions, activeMcpSource, mcpDescription } = useMcpPickerSources(mcpMarketSource);
   const remoteSearch = kind === 'skill' && source === 'market' && marketSource === 'skillcenter-market';
   const remoteMcpSearch = kind === 'mcp';
   const skillCenter = useSkillCenterPicker(open && remoteSearch, keyword);
@@ -92,11 +98,10 @@ export function CapabilityPickerModal({
   useEffect(() => {
     if (!open || kind !== 'mcp' || !searchMcpRef.current) return;
     const timer = setTimeout(() => {
-      void searchMcpRef.current?.(mcpMarketSource, keyword.trim()).catch(() => undefined);
+      void searchMcpRef.current?.(activeMcpSource, keyword.trim()).catch(() => undefined);
     }, 300);
     return () => clearTimeout(timer);
-  }, [kind, keyword, mcpMarketSource, open]);
-  const canPickDirectory = typeof window !== 'undefined' && 'showDirectoryPicker' in window;
+  }, [kind, keyword, activeMcpSource, open]);
   /** 「我的 Skill」未添加卡片可删除（DELETE /openapi/v1/bots/{bot_id}/skills/{skill_id}，onLocalDelete 由页面层实现并刷新列表）。 */
   const canDeleteMine = kind === 'skill' && source === 'mine' && editable && Boolean(onLocalDelete);
   const deleteMySkill = async (id: string) => {
@@ -126,29 +131,6 @@ export function CapabilityPickerModal({
       setSubmitting(false);
     }
   };
-  const uploadFolder = async () => {
-    if (!onUploadFolder || !canPickDirectory) return;
-    setUploading(true);
-    uploadError.setMessage('');
-    try {
-      const pickerWindow = window as Window & {
-        showDirectoryPicker?: (options?: { mode?: 'read' }) => Promise<DirectoryHandle>;
-      };
-      const directoryHandle = await pickerWindow.showDirectoryPicker?.({ mode: 'read' });
-      if (!directoryHandle) return;
-      const files = await readDirectoryFiles(directoryHandle);
-      if (files.length) {
-        const skill = await onUploadFolder(files);
-        setSelected((current) => [...new Set([...current, skill.id])]);
-      } else {
-        uploadError.setMessage('所选目录没有可上传的文件，请确认目录包含 SKILL.md。');
-      }
-    } catch (error) {
-      uploadError.handleError(error);
-    } finally {
-      setUploading(false);
-    }
-  };
   return (
     <Modal open={open} onOpenChange={(next) => (next ? onOpenChange(true) : close())}>
       <ModalContent size="lg" className="flex max-h-[calc(100dvh-2rem)] flex-col overflow-hidden">
@@ -156,27 +138,31 @@ export function CapabilityPickerModal({
           <ModalTitle>添加 {kind === 'skill' ? 'Skill' : 'MCP'}</ModalTitle>
           <ModalDescription>
             {kind === 'mcp'
-              ? '从 MCP 市场选择，可按来源分类和搜索后一次添加多个能力。'
+              ? mcpDescription
               : kind === 'skill' && sources.length === 1
               ? '从我的 Skill 中选择，可一次添加多个能力。'
               : '从市场或能力工坊选择，可一次添加多个能力。'}
           </ModalDescription>
         </ModalHeader>
         <div className="app-scrollbar min-h-0 flex-1 space-y-4 overflow-y-auto">
-          <Segmented
-            value={source}
-            onChange={(value) => {
-              setSource(value as Source);
-              setSelected([]);
-              setKeyword('');
-            }}
-            options={[
-              { value: 'market', label: kind === 'skill' ? '引用市场 Skill' : '引用市场 MCP' },
-              ...(kind === 'skill' ? [{ value: 'workshop' as const, label: '引用空间 Skill' }] : []),
-              ...(kind === 'skill' ? [{ value: 'mine' as const, label: '我的 Skill' }] : []),
-            ].filter((option) => sources.includes(option.value as Source))}
-            className="w-fit"
-          />
+          {/* 来源切换器：仅多来源时渲染——单来源（MCP 恒为市场；Open Core Skill 仅「我的」）
+              保留一个永远选中的孤悬选项无切换意义，弹窗描述与搜索 placeholder 已交代范围。 */}
+          {sources.length > 1 && (
+            <Segmented
+              value={source}
+              onChange={(value) => {
+                setSource(value as Source);
+                setSelected([]);
+                setKeyword('');
+              }}
+              options={[
+                { value: 'market', label: kind === 'skill' ? '引用市场 Skill' : '引用市场 MCP' },
+                ...(kind === 'skill' ? [{ value: 'workshop' as const, label: '引用空间 Skill' }] : []),
+                ...(kind === 'skill' ? [{ value: 'mine' as const, label: '我的 Skill' }] : []),
+              ].filter((option) => sources.includes(option.value as Source))}
+              className="w-fit"
+            />
+          )}
           {kind === 'skill' && source === 'market' ? (
             <Segmented
               value={marketSource}
@@ -192,18 +178,17 @@ export function CapabilityPickerModal({
               className="w-fit"
             />
           ) : null}
-          {kind === 'mcp' ? (
+          {/* MCP 一级来源 Segmented：选项由 getBotMcpPickerSources 过滤（部署 overlay 可收窄）；
+              仅剩单一来源时不渲染切换器（默认全量两来源，Open Core 行为不变）。 */}
+          {kind === 'mcp' && mcpSourceOptions.length > 1 ? (
             <Segmented
-              value={mcpMarketSource}
+              value={activeMcpSource}
               onChange={(value) => {
                 setMcpMarketSource(value);
                 setSelected([]);
                 setKeyword('');
               }}
-              options={[
-                { value: 'internal', label: '内部 MCP' },
-                { value: 'open-platform', label: '开放平台' },
-              ]}
+              options={mcpSourceOptions}
               className="w-fit"
             />
           ) : null}
