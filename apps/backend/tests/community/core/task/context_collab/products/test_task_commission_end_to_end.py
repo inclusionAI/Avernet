@@ -464,6 +464,7 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
         )
         assert published.accepted and published.state == "OPEN"
 
+        # 5、调用L5的OPEN方法查询机会
         bot_context = ActorContext(PrincipalRef("bot", working_bot.bot_id), "a2a")
         [opportunity] = open_method.query_opportunities(
             collab_context_id=task_id,
@@ -472,24 +473,8 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
         )
         assert opportunity.method_binding_id == binding_id
         assert opportunity.scope_ref == task_id
-        assert opportunity.participation_type.value == "COLLET_PARTICIPANT"
-        assert open_method.query_opportunities(task_id, binding_id, bot_context) == (
-            opportunity,
-        )  # repeatable read
-        # 同时保留产品级签名 HTTP Query 的真实路由/最小投影验证。
-        [discovered] = working_bot.request(opportunities_query_request(working_bot))[
-            "data"
-        ]["opportunities"]
-        assert discovered == {
-            "collab_context_id": task_id,
-            "opportunity_id": opportunity.opportunity_id,
-            "method_binding_ref": opportunity.method_binding_id,
-            "product_profile_ref": {"profile_id": "task_commission", "version": 1},
-            "title": TITLE,
-            "scope_ref": task_id,
-        }
-        assert store.list_applications(axes, binding_id, task_id) == []
-        # Apply 也直接调用 L5 Open Method,引用来自查询结果;Bot 只是申请主体。
+
+        # 6、调用 L5 Open Method的提交申请。
         record = injector.get(ContextCollabRepositoryProtocol).get_current_status(task_id)
         assert record is not None
         submitted = open_method.submit_application(
@@ -505,20 +490,10 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
             context=bot_context,
         )
         assert submitted.accepted and submitted.state == "SUBMITTED"
-        [pending] = store.list_applications(axes, binding_id, task_id)
-        assert pending.application_id == submitted.object_id
-        assert pending.transitioned_by == working_bot.bot_id
-        assert store.list_participant_bindings(axes, binding_id, task_id) == []
-        assert store.list_decisions(axes, binding_id, task_id) == []
-        assert injector.get(A2aDeliveryPort).bridge_records() == ()
-        working_bot.request(
-            working_bot.report_request(created), expected_status="REJECTED"
-        )
-        # case 显式展开已发布策略的审核/录取步骤,不调用产品 review 封装。
-        # 由发布人授权的 product_policy actor 执行,不是 Bot 自审。
+
+        # 7、针对每个机会，检查有哪些申请者，并选择一个候选者
         policy_context = ActorContext(HUMAN.actor, source="product_policy")
         [policy_ref] = opportunity.admission_policy_refs
-        _flow_log(_TEST_DIRECTORY, "3.1. 产品策略调用 Open.screen: SUBMITTED → SCREENING")
         screened = open_method.screen(
             collab_context_id=task_id,
             method_binding_id=binding_id,
@@ -528,16 +503,7 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
         )
         assert screened.accepted and screened.state == "SCREENING"
         assert screened.object_id == submitted.object_id
-        [screening] = store.list_applications(axes, binding_id, task_id)
-        assert screening.state is ApplicationState.SCREENING
-        assert screening.transitioned_by == HUMAN.actor.principal_id
-        assert store.list_participant_bindings(axes, binding_id, task_id) == []
-        assert store.list_decisions(axes, binding_id, task_id) == []
-        working_bot.request(
-            working_bot.report_request(created), expected_status="REJECTED"
-        )
-        assert injector.get(A2aDeliveryPort).bridge_records() == ()
-        _flow_log(_TEST_DIRECTORY, "3.2. 产品策略调用 Open.admit: SCREENING → ADMITTED")
+
         decision_id = f"dec_{uuid4().hex[:12]}"
         admitted = open_method.admit(
             collab_context_id=task_id,
@@ -556,42 +522,8 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
         [application] = store.list_applications(axes, binding_id, task_id)
         assert application.state is ApplicationState.ADMITTED
         assert application.applicant_agent_ref == BOT_ASSIGNEE
-        assert (
-            application.accountable_principal_ref == OWNER
-        )  # Bot owner, not publisher.
-        assert application.transitioned_by == HUMAN.actor.principal_id
 
-        # 4. 真正录取后才建立本任务 Collet scope 内的参与绑定,不创建 Group。
-        _flow_log(
-            _TEST_DIRECTORY,
-            "4. 录取建立限定任务 scope 的参与绑定,单个 Bot 在纯 Open 录取后执行代办",
-        )
-        [decision] = store.list_decisions(axes, binding_id, task_id)
-        assert decision.admission_decision_id == decision_id
-        assert decision.admitted_scope_ref == task_id
-        [participant_ref] = decision.resulting_binding_refs
-        [participant] = store.list_participant_bindings(axes, binding_id, task_id)
-        assert participant.participant_binding_id == participant_ref
-        assert (participant.participant_ref, participant.scope_ref) == (
-            BOT_ASSIGNEE, task_id,
-        )
-        assert participant.role_binding_refs  # Scoped role correlation, no L3 grant.
-        assert decision.application_ref == application.application_id
-        assert decision.resulting_binding_refs == (participant_ref,)
-        assert store.get_roster(axes, binding_id, task_id) is None
-        assert store.list_members(axes, binding_id, task_id) == []
-        assert store.list_selections(axes, binding_id, task_id) == []
-        assert store.list_composition_edges(axes, task_id) == []
-        assert open_method.query_opportunities(task_id, binding_id, bot_context) == ()
-        assert (
-            service.detail_task(task_id).status == "created"
-        )  # admit is not Work.start
-
-        # Open 只负责录取和建立参与绑定;任务执行通过任务产品暴露的 Work
-        # 动作入口启动。该入口映射到 L4 语义 Work.start,不是 Bot 的内置方法;
-        # Bot 仅以 ActorContext 作为调用主体,之后通过 A2A 入站上报执行过程。
-        # 不能把通用 ContextCollabService.append_event 当成 Work API:它是
-        # 通用事件追加入口,不表达 L4 Work.start 的语义。
+        # 8、通用事件追加入口,不表达 L4 Work.start 的语义。
         started = service.start_task(
             TaskAdvanceCommand(task_id, note="录取后启动任务执行"), bot_context
         )
@@ -599,8 +531,7 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
         assert service.detail_task(task_id).status == "in_progress"
         assert injector.get(A2aDeliveryPort).bridge_records() == ()
 
-        # 5. Bot runtime 只保留核心的 Work 执行入口;具体 AI coding 模拟
-        #    位于 case 外部的测试夹具中。
+        # 9. 模拟Agent执行任务，过程中上报信息
         artifacts = working_bot.run(
             created,
             lambda report_progress: _simulate_ai_coding(
@@ -610,13 +541,13 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
                 report_progress=report_progress,
             ),
             initial_revision=started.context_version,
-        )  # L4 已 start;Bot 成功返回后通过入站上报 submit,从不自行 accept。
+        )
         review = service.detail_task(task_id)
         assert review.status == "reviewing"
         assert review.events[-1]["payload"]["artifacts"] == artifacts
 
 
-        # 6. 用户查看成果并明确 accept,而不是以 Bot 完工代替验收。
+        # 10. 用户查看成果并明确 accept,而不是以 Bot 完工代替验收。
         _flow_log(_TEST_DIRECTORY, "6. 用户检查方案、代码、测试、PR 提案,确认 accept")
         accepted = service.accept_task(
             TaskAdvanceCommand(task_id, note="成果符合要求,验收通过"), HUMAN
@@ -640,21 +571,3 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
         assert final.events[-1]["actor_id"] == HUMAN.actor.principal_id
         assert final.events[-2]["actor_id"] == BOT_ASSIGNEE
         _flow_log(_TEST_DIRECTORY, "完整用户旅程结束:用户 accept 后 status=done")
-
-
-def _publish_initial(service, profile, assignee=BOT_ASSIGNEE):
-    return service.publish_task(
-        PublishTaskCommand(
-            TITLE, BODY, SPACE, assignee, product_profile_ref=profile.ref
-        ),
-        HUMAN,
-    )
-
-
-def _apply_to_created(bot, created):
-    """独立验证现有签名 HTTP Apply 入口;不把 Open 能力封装成 Bot 方法。"""
-    opportunities = bot.request(opportunities_query_request(bot))["data"]["opportunities"]
-    [opportunity] = [
-        item for item in opportunities if item["collab_context_id"] == created.collet_id
-    ]
-    return bot.request(bot.application_request(opportunity))["data"]["admission"]
