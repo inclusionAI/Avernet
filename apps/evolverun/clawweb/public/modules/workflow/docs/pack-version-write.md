@@ -5,6 +5,42 @@
 > records the former dual-branch contract; its saved-write, wf-production and
 > DB-only AutoHeal behavior must not be used to implement new clients.
 
+## Current router read authorization
+
+This section describes the current public router extension only; the historical
+branch/save behavior below remains superseded by the contract linked above.
+
+`GET /api/workflows/:workflowId/pack-version?version=current|draft` requires a
+server-verified, non-empty principal. By default it retains the existing workflow
+**edit ACL** check, including failure-closed behavior when that provider is
+missing or rejects. A trusted host may explicitly inject the optional dependency
+`authorizeRead(workflowId: string, actorId: string): Promise<boolean>` to replace
+only this GET's read gate. It runs after verified identity and workflow-ID
+validation, before workflow DB/Git access. Only exact `true` grants the read;
+`false` returns 403 and rejection returns a sanitized 503, without fallback or
+DB/Git reads. Rejected policy errors are never exposed as operation receipts.
+A host may opt into reads for all strictly authenticated users,
+independent of its edit/admin roster. Public defaults and host wiring do not
+change. The same read gate covers ordinary and active-only snapshot callbacks.
+
+`canWrite` is **not** inferred from a read grant: it is true only when the
+existing edit-ACL adapter explicitly grants that actor edit permission and the
+host supplies `saveCandidate`. An adapter may supply the host's actual effective
+edit permission, including its existing administrator policy. Missing, false or
+unavailable edit authorization produces `canWrite: false` for an independently
+authorized GET; an edit-ACL rejection must not fail that read or leak provider
+errors. Without `authorizeRead`, the original edit check still fails closed.
+The response flag is advisory; every write still checks its existing ACL.
+
+PUT and `/pack-operations/:requestId` status/reconciliation do not call or
+inherit `authorizeRead`. PUT keeps its edit ACL; operation recovery retains its
+actor/workflow scoping and existing edit/execute rules. Whole-Pack authorization
+for scripts remains the separate binding described in
+[the scripts read contract](pack-scripts-read.md). No-store, identifier/ref
+validation, sanitized errors, and all write/deployment checks remain unchanged.
+The focused conformance cases live in
+`server/routes/__tests__/pack-authenticated-read.test.ts`.
+
 ## Historical scope
 
 This document describes the current working-tree implementation, including
@@ -30,8 +66,9 @@ switch; see `pack-operation-migration.md` for the exact conditions and limits.
 snapshot from `wf/<id>` for `current` or `saved/<id>` for `draft`. A missing
 ref is not replaced with the other ref. New browser editing sessions default to
 `draft`; a missing or unreadable draft remains an error until the user explicitly
-selects another version or retries. `canWrite` indicates that the host has
-installed a Pack-file save handler, not that a journal or recovery exists.
+selects another version or retries. The historical `canWrite` flag indicated an installed Pack-file save handler;
+the current flag additionally requires actual edit permission as described above.
+Neither form indicates that a journal or recovery exists.
 The explicit version reader fetches only this workflow's two branch tips, without
 checking out the default branch or fetching all repository history. It verifies
 that the advertised refs still match during the read and fails closed if they

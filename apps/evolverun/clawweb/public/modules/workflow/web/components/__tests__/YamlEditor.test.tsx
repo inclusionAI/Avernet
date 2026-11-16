@@ -213,3 +213,33 @@ describe('YAML apply notice follows the actual DB save state', () => {
     expect(mocks.fetchJson).not.toHaveBeenCalled()
   })
 })
+
+
+it('shows selectable read-only YAML without validating, caching or applying keyboard edits', () => {
+  useEditorStore.getState().loadSpec(spec)
+  useEditorStore.getState().setEditAccess({ workflowId: spec.id, canEdit: false })
+  const onImport = vi.fn()
+  render(<YamlEditor spec={spec} onImport={onImport} />)
+  expect(screen.getByLabelText('工作流 YAML')).toHaveAttribute('readonly')
+  change()
+  fireEvent.keyDown(screen.getByLabelText('工作流 YAML'), { key: 'Enter', ctrlKey: true })
+  fireEvent.keyDown(screen.getByLabelText('工作流 YAML'), { key: 'Tab' })
+  expect(screen.getByLabelText('工作流 YAML')).toHaveValue(stringify(spec, { lineWidth: 0 }))
+  expect(screen.getByRole('button', { name: '校验并应用' })).toBeDisabled()
+  expect(useEditorStore.getState().pendingEdits).toEqual({})
+  expect(mocks.validate).not.toHaveBeenCalled()
+  expect(onImport).not.toHaveBeenCalled()
+})
+
+it('ignores an in-flight YAML validation result after edit access is revoked', async () => {
+  useEditorStore.getState().loadSpec(spec)
+  let resolve!: (value: unknown) => void
+  mocks.validate.mockReturnValue(new Promise(r => { resolve = r }))
+  const onImport = vi.fn()
+  render(<YamlEditor spec={spec} onImport={onImport} />)
+  change(); fireEvent.click(screen.getByRole('button', { name: '校验并应用' }))
+  act(() => useEditorStore.getState().setEditAccess({ workflowId: spec.id, canEdit: false }))
+  await act(async () => resolve({ valid: true }))
+  expect(onImport).not.toHaveBeenCalled()
+  expect(screen.getByRole('button', { name: '校验并应用' })).toBeDisabled()
+})

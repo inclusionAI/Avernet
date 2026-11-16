@@ -32,7 +32,7 @@ import Editor from '../Editor'
 const A = 'a'.repeat(40), B = 'b'.repeat(40)
 let seq = 0
 function snapshot(version: 'current' | 'draft' = 'current') { return { packPath: '', workflowId: mocks.id, packId: 'pack', canWrite: true, baseRef: (version === 'current' ? `refs/tags/deploy/${mocks.id}/#1` : `origin/wf/${mocks.id}`), baseCommit: A, draftHead: version === 'current' ? null : A, versionFiles: [{ path: 'workflow.pack.yaml', contentBase64: btoa(stringify({ id: 'pack', workflows: [{ id: mocks.id, file: 'flows/main.yaml' }] })), mode: '100644' }, { path: 'flows/main.yaml', contentBase64: btoa(stringify({ id: mocks.id, title: 'Flow', version: '1', nodes: [] })), mode: '100644' }, { path: 'scripts/test', contentBase64: 'b2xk', mode: '100644' }] } }
-function Shell() { const navigate = useNavigate(); return <><Link to="/outside">离开</Link><button onClick={() => navigate(-1)}>后退</button><Routes><Route path="/editor" element={<Editor embedded initialWorkflowId={mocks.id} />} /><Route path="/outside" element={<h1>外部</h1>} /></Routes></> }
+function Shell() { const navigate = useNavigate(); return <><Link to="/outside">离开</Link><button onClick={() => navigate(-1)}>后退</button><Routes><Route path="/editor" element={<Editor access={{ canView: true, canEdit: true, canDeploy: true }} embedded initialWorkflowId={mocks.id} />} /><Route path="/outside" element={<h1>外部</h1>} /></Routes></> }
 function mount() { return render(<MemoryRouter initialEntries={['/outside', '/editor']} initialIndex={1}><Shell /></MemoryRouter>) }
 async function openFile() { fireEvent.click(screen.getByRole('tab', { name: '脚本文件' })); fireEvent.click(await screen.findByRole('button', { name: 'scripts/test' })) }
 function enableUnifiedSave() {

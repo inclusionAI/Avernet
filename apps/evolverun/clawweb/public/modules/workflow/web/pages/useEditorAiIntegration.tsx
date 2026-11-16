@@ -2,7 +2,7 @@ import { useLayoutEffect, useRef, useState } from 'react'
 import type { WorkflowSpec } from '@avernet/clawweb-shared/web/types'
 import WorkflowAiDrawer from '../components/WorkflowAiDrawer'
 import EditorAiControls from '../components/EditorAiControls'
-import { useEditorStore } from '../editor/store'
+import { editorIsReadOnly, useEditorStore } from '../editor/store'
 import { workflowSpecSignature, type WorkflowAiDraft, type WorkflowAiMode } from '../services/workflow-ai-draft'
 import { assertWorkflowAiSpec } from '../services/workflow-ai-spec'
 
@@ -12,6 +12,7 @@ type Options = {
   selectedWorkflowId: string | null
   targetWorkflowId?: string | null
   editorSessionId: number
+  canEdit: boolean
   loading: boolean
   saving: boolean
   saveInFlight: { current: boolean }
@@ -27,7 +28,7 @@ function contextKey() {
 
 /** AI owns neither the upstream document nor save/deploy/split/YAML-editor state. */
 export function useEditorAiIntegration(options: Options) {
-  const { spec, selectedWorkflowId, targetWorkflowId, editorSessionId, loading, saving, saveInFlight, hasPendingEdits, onMessage, onApplied } = options
+  const { spec, selectedWorkflowId, targetWorkflowId, editorSessionId, canEdit, loading, saving, saveInFlight, hasPendingEdits, onMessage, onApplied } = options
   const [session, setSession] = useState<{ id: number; mode: WorkflowAiMode; editorSessionId: number } | null>(null)
   const sequence = useRef(0)
   const activeSession = useRef<number | null>(null)
@@ -37,12 +38,17 @@ export function useEditorAiIntegration(options: Options) {
   useLayoutEffect(() => {
     activeSession.current = null
     setSession(null)
-  }, [selectedWorkflowId, targetWorkflowId, editorSessionId])
+  }, [selectedWorkflowId, targetWorkflowId, editorSessionId, canEdit])
   const close = () => { activeSession.current = null; setSession(null) }
-  const disabled = !spec || loading || saving || hasPendingEdits || Boolean(selectedWorkflowId && selectedWorkflowId !== spec.id)
+  const disabled = !canEdit || !spec || loading || saving || hasPendingEdits || Boolean(selectedWorkflowId && selectedWorkflowId !== spec.id)
 
   function open(mode: WorkflowAiMode) {
     const state = useEditorStore.getState()
+    const live = current.current
+    if (!live.canEdit || editorIsReadOnly(state)) {
+      onMessage({ type: 'error', text: '当前工作流为只读，不能生成或应用 AI 草稿。' })
+      return
+    }
     if (disabled || saveInFlight.current || Object.keys(state.pendingEdits ?? {}).length) {
       onMessage({ type: 'error', text: '请先加载当前工作流，并应用或放弃未完成的配置草稿，等待保存完成。' })
       return
@@ -55,7 +61,7 @@ export function useEditorAiIntegration(options: Options) {
   function apply(draft: WorkflowAiDraft) {
     const state = useEditorStore.getState()
     const live = current.current
-    if (!session || activeSession.current !== session.id || session.editorSessionId !== state.sessionId
+    if (!live.canEdit || editorIsReadOnly(state) || !session || activeSession.current !== session.id || session.editorSessionId !== state.sessionId
       || live.loading || live.saving || saveInFlight.current || Object.keys(state.pendingEdits ?? {}).length
       || !state.spec || draft.workflowId !== state.spec.id || draft.spec.id !== state.spec.id
       || live.selectedWorkflowId && live.selectedWorkflowId !== state.spec.id
@@ -81,9 +87,9 @@ export function useEditorAiIntegration(options: Options) {
   }
 
   return {
-    open: session !== null && session.editorSessionId === editorSessionId,
+    open: canEdit && session !== null && session.editorSessionId === editorSessionId,
     controls: <EditorAiControls disabled={disabled} hasPendingEdits={hasPendingEdits} onOpen={open} />,
-    drawer: session && session.editorSessionId === editorSessionId ? <WorkflowAiDrawer key={session.id} open mode={session.mode}
+    drawer: canEdit && session && session.editorSessionId === editorSessionId ? <WorkflowAiDrawer key={session.id} open mode={session.mode}
       contextKey={key} spec={loading || selectedWorkflowId && spec?.id !== selectedWorkflowId ? null : spec}
       blockedReason={hasPendingEdits ? '请先应用或放弃未完成的配置草稿，再生成或应用 AI 草稿。'
         : saving ? '工作流正在保存，请等待完成后再生成或应用 AI 草稿。' : undefined}

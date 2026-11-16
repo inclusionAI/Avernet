@@ -3,6 +3,7 @@ import type { WorkflowNode } from '@avernet/clawweb-shared/web/types'
 import { getNodeMeta } from '../../editor/nodeCatalog'
 
 interface EditorCanvasToolbarProps {
+  readOnly?: boolean
   nodes: WorkflowNode[]
   canUndo: boolean
   canRedo: boolean
@@ -29,7 +30,7 @@ export default function EditorCanvasToolbar(props: EditorCanvasToolbarProps) {
       <span aria-hidden="true" className="mx-1 h-4 border-l border-input" />
       <button type="button" className={buttonClass} onClick={props.onFit} disabled={!props.nodes.length}>总览</button>
       <button type="button" className={buttonClass} onClick={props.onReadableZoom} disabled={!props.nodes.length} title="以可读比例定位选中节点或首个节点">100%</button>
-      {props.selection && <button type="button" className={`${buttonClass} !text-destructive`} onClick={props.onDelete} disabled={props.hasPendingEdits}>{props.selection === 'edge' ? '删除连线' : '删除节点'}</button>}
+      {props.selection && <button type="button" className={`${buttonClass} !text-destructive`} onClick={props.onDelete} disabled={props.readOnly || props.hasPendingEdits}>{props.selection === 'edge' ? '删除连线' : '删除节点'}</button>}
       <form className="relative ml-auto min-w-28 flex-1 max-w-52" role="search" onSubmit={(event) => { event.preventDefault(); if (matches[0]) focus(matches[0].id) }}>
         <input aria-label="查找画布节点" placeholder="查找节点…" value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === 'Escape') setQuery('') }}
           className="w-full rounded-md border border-input bg-background px-2.5 py-1.5 text-xs outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring" />

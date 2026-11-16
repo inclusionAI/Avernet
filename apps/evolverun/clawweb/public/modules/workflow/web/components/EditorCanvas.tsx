@@ -4,7 +4,7 @@ import {
   type Edge, type Connection, type OnNodesChange, type OnEdgesChange, type OnBeforeDelete,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { useEditorStore } from '../editor/store'
+import { editorIsReadOnly, useEditorStore } from '../editor/store'
 import { canConnect, computeDagLayout, dependencies } from '../editor/graph'
 import { getResultBranches } from '../editor/contracts'
 import { NODE_CATALOG, createEditorNode } from '../editor/nodeCatalog'
@@ -19,6 +19,7 @@ export interface EditorCanvasProps {
 }
 
 function EditorCanvasInner({ onNodeClick }: EditorCanvasProps) {
+  const readOnly = useEditorStore(editorIsReadOnly)
   const {
     spec, positions, selectedNodeId, validationErrors, actionError, pendingEdits,
     canUndo, canRedo, undo, redo, beginTransaction, endTransaction, setActionError,
@@ -106,7 +107,7 @@ function EditorCanvasInner({ onNodeClick }: EditorCanvasProps) {
   }, [connectionError, setActionError, addEdge])
 
   const startDrag = useCallback(() => {
-    if (dragActive.current) return
+    if (editorIsReadOnly(useEditorStore.getState()) || dragActive.current) return
     beginTransaction()
     dragActive.current = true
   }, [beginTransaction])
@@ -143,6 +144,7 @@ function EditorCanvasInner({ onNodeClick }: EditorCanvasProps) {
   }, [selectNode, selectedEdgeId])
 
   const deleteSelection = useCallback((nodeIds: string[], edges: Edge[]) => {
+    if (editorIsReadOnly(useEditorStore.getState())) return
     if (Object.keys(useEditorStore.getState().pendingEdits).length) {
       setActionError('请先应用或放弃未应用的编辑，再删除节点或连线。')
       return
@@ -167,6 +169,7 @@ function EditorCanvasInner({ onNodeClick }: EditorCanvasProps) {
 
   const onDrop = useCallback((event: React.DragEvent) => {
     event.preventDefault()
+    if (editorIsReadOnly(useEditorStore.getState())) return
     const type = event.dataTransfer.getData(NODE_DRAG_TYPE)
     if (!NODE_CATALOG.some((entry) => entry.type === type)) return
     const position = screenToFlowPosition({ x: event.clientX, y: event.clientY })
@@ -193,18 +196,19 @@ function EditorCanvasInner({ onNodeClick }: EditorCanvasProps) {
         if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') {
           event.preventDefault()
           event.stopPropagation() // Do not also trigger the host Editor's history shortcut.
+          if (editorIsReadOnly(useEditorStore.getState())) return
           if (hasPendingEdits) { setActionError('请先应用或放弃未应用的编辑，再撤销或重做。'); return }
           if (event.shiftKey) redo(); else undo()
         }
       }}>
-      <EditorCanvasToolbar nodes={spec.nodes} canUndo={canUndo} canRedo={canRedo} hasPendingEdits={hasPendingEdits} selection={selection}
+      <EditorCanvasToolbar nodes={spec.nodes} readOnly={readOnly} canUndo={canUndo && !readOnly} canRedo={canRedo && !readOnly} hasPendingEdits={hasPendingEdits} selection={selection}
         onUndo={undo} onRedo={redo} onFocus={(id) => { chooseNode(id); focusNode(id) }}
         onFit={() => { void fitView({ padding: 0.2, minZoom: 0.08, maxZoom: 1, duration: 240 }) }}
         onReadableZoom={() => { const id = selectedNodeId ?? spec.nodes[0]?.id; if (id) focusNode(id) }}
         onDelete={() => deleteSelection(selectedEdge ? [] : selectedNodeId ? [selectedNodeId] : [], selectedEdge ? [selectedEdge] : [])} />
       {actionError && <div role="alert" className="flex items-start justify-between gap-3 border-b border-destructive/20 bg-destructive/10 px-3 py-2 text-xs text-destructive"><span>{actionError}</span><button type="button" onClick={() => setActionError(null)} aria-label="关闭操作提示" className="shrink-0 rounded px-1 focus-visible:ring-2 focus-visible:ring-ring">×</button></div>}
       {validationErrors.length > 0 && <details className="border-b border-input bg-card px-3 py-2 text-xs text-destructive"><summary className="cursor-pointer">{validationErrors.length} 项配置问题（原始定义已保留）</summary><ul className="mt-2 max-h-28 list-inside list-disc overflow-auto">{validationErrors.map((error, index) => <li key={index}>{error.nodeId ? `${error.nodeId}: ` : ''}{error.message}</li>)}</ul></details>}
-      <div className="relative min-h-48 flex-1" data-testid="editor-canvas-dropzone" onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy' }} onDrop={onDrop}>
+      <div className="relative min-h-48 flex-1" data-testid="editor-canvas-dropzone" onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = readOnly ? 'none' : 'copy' }} onDrop={onDrop}>
         <ReactFlow<EditorCanvasNode, Edge> nodes={flowNodes} edges={flowEdges} nodeTypes={nodeTypes} style={canvasTheme} className={canvasThemeClasses}
           onConnect={onConnect} isValidConnection={(connection) => connectionError(connection) === null}
           onConnectEnd={(_event, state) => {
@@ -220,16 +224,17 @@ function EditorCanvasInner({ onNodeClick }: EditorCanvasProps) {
           }}
           onEdgeClick={(_event, edge) => { selectNode(null); if (useEditorStore.getState().selectedNodeId === null) setSelectedEdgeId(edge.id) }}
           onPaneClick={() => { selectNode(null); setSelectedEdgeId(null) }} onBeforeDelete={onBeforeDelete}
-          deleteKeyCode={['Delete', 'Backspace']} multiSelectionKeyCode={null} selectionKeyCode={null}
+          nodesDraggable={!readOnly} nodesConnectable={!readOnly} edgesReconnectable={!readOnly}
+          deleteKeyCode={readOnly ? null : ['Delete', 'Backspace']} multiSelectionKeyCode={null} selectionKeyCode={null}
           defaultViewport={{ x: typeof spec.nodes[0]?._x === 'number' ? 48 - first.x : 24, y: 64 - first.y, zoom: 1 }} minZoom={0.08} maxZoom={2} proOptions={{ hideAttribution: true }}
           ariaLabelConfig={{ 'controls.zoomIn.ariaLabel': '放大', 'controls.zoomOut.ariaLabel': '缩小', 'controls.fitView.ariaLabel': '适应全部节点', 'minimap.ariaLabel': '流程小地图' }}>
           <Background gap={20} size={1} />
           <Controls showInteractive={false} orientation="horizontal" fitViewOptions={{ padding: 0.2, minZoom: 0.08, maxZoom: 1 }} aria-label="画布缩放控制" className="overflow-hidden rounded-lg border border-input shadow-sm" />
           <MiniMap pannable zoomable aria-label="流程小地图" nodeColor={(node) => node.selected ? 'var(--canvas-primary)' : 'var(--canvas-muted-foreground)'} className="overflow-hidden rounded-lg border border-input" style={{ width: 140, height: 96 }} />
         </ReactFlow>
-        {!spec.nodes.length && <div className="pointer-events-none absolute inset-0 flex items-center justify-center"><div className="rounded-xl border border-dashed border-input bg-card/90 px-8 py-6 text-center"><p className="text-sm font-medium">从一个节点开始</p><p className="mt-2 text-xs text-muted-foreground">点击左侧节点，或将它拖到这里</p></div></div>}
+        {!spec.nodes.length && <div className="pointer-events-none absolute inset-0 flex items-center justify-center"><div className="rounded-xl border border-dashed border-input bg-card/90 px-8 py-6 text-center"><p className="text-sm font-medium">{readOnly ? '此工作流尚无节点' : '从一个节点开始'}</p>{!readOnly && <p className="mt-2 text-xs text-muted-foreground">点击左侧节点，或将它拖到这里</p>}</div></div>}
       </div>
-      <footer className="flex flex-wrap items-center gap-3 border-t border-input bg-card px-3 py-2 text-[10px] text-muted-foreground"><span>{spec.nodes.length} 个节点 · {flowEdges.length} 条连线</span>{selectedEdge && <span className="text-primary">已选择连线 · Delete 删除</span>}<span className="ml-auto">拖动空白处平移 · Delete 删除 · Ctrl/⌘ Z 撤销</span></footer>
+      <footer className="flex flex-wrap items-center gap-3 border-t border-input bg-card px-3 py-2 text-[10px] text-muted-foreground"><span>{spec.nodes.length} 个节点 · {flowEdges.length} 条连线</span>{selectedEdge && <span className="text-primary">已选择连线{!readOnly && ' · Delete 删除'}</span>}<span className="ml-auto">{readOnly ? '只读 · 可平移、缩放和选择节点' : '拖动空白处平移 · Delete 删除 · Ctrl/⌘ Z 撤销'}</span></footer>
     </section>
   )
 }

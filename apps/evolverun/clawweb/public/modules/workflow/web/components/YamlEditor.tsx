@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { stringify } from 'yaml'
 import { api } from '@avernet/clawweb-shared/web/api/client'
 import type { WorkflowSpec, WorkflowValidationIssue } from '@avernet/clawweb-shared/web/types'
-import { useEditorStore } from '../editor/store'
+import { editorIsReadOnly, useEditorStore } from '../editor/store'
 import { clearDraft, readDraft, writeDraft } from '../editor/draftCache'
 import { normalizationChanges, parseWorkflowYaml } from '../editor/yamlDraft'
 import PackFileCodeEditor from './PackFileCodeEditor'
@@ -20,6 +20,7 @@ interface NormalizationReview {
 const serialize = (spec: WorkflowSpec | null) => spec ? stringify(spec, { lineWidth: 0 }) : ''
 
 export default function YamlEditor({ spec, onImport }: YamlEditorProps) {
+  const readOnly = useEditorStore(editorIsReadOnly)
   const { setPendingEdit, sessionId, spec: liveSpec, _databaseSpec } = useEditorStore()
   const [restored] = useState(() => {
     const draft = readDraft(sessionId, 'yaml')
@@ -48,6 +49,10 @@ export default function YamlEditor({ spec, onImport }: YamlEditorProps) {
   const previousSpec = useRef(spec)
   const currentSpec = useRef(spec)
   currentSpec.current = spec
+
+  useEffect(() => {
+    if (readOnly) { revision.current++; setValidating(false); setReview(null) }
+  }, [readOnly])
 
   useEffect(() => {
     mounted.current = true
@@ -91,6 +96,7 @@ export default function YamlEditor({ spec, onImport }: YamlEditorProps) {
     : `已应用 ${appliedCount} 个节点的配置。${savedToDatabase ? '已保存到数据库。' : '尚未保存到服务器。'}`
 
   const changeText = useCallback((value: string) => {
+    if (editorIsReadOnly(useEditorStore.getState())) return
     if (session.current !== useEditorStore.getState().sessionId) return
     revision.current++
     dirtyRef.current = true
@@ -107,6 +113,7 @@ export default function YamlEditor({ spec, onImport }: YamlEditorProps) {
   }, [setPendingEdit])
 
   const applySpec = useCallback((value: WorkflowSpec) => {
+    if (editorIsReadOnly(useEditorStore.getState())) return
     if (session.current !== useEditorStore.getState().sessionId) return
     const otherDrafts = Object.keys(useEditorStore.getState().pendingEdits ?? {}).filter(key => key !== 'yaml')
     if (otherDrafts.length) { setError('请先应用或放弃其他配置草稿，再应用 YAML'); return }
@@ -133,6 +140,7 @@ export default function YamlEditor({ spec, onImport }: YamlEditorProps) {
   }, [onImport, setPendingEdit])
 
   const apply = useCallback(async () => {
+    if (editorIsReadOnly(useEditorStore.getState())) return
     if (!dirtyRef.current || validating || session.current !== useEditorStore.getState().sessionId) return
     if (owner.current !== currentSpec.current?.id) {
       setError('工作流已切换，请先放弃旧工作流的 YAML 草稿，避免覆盖其他工作流')
@@ -146,7 +154,7 @@ export default function YamlEditor({ spec, onImport }: YamlEditorProps) {
     const requestSession = session.current
     // Read the live store, not only a render/effect ref: reset + same-ID reload
     // can happen in one batch before React observes the new props/session.
-    const isCurrentRequest = () => mounted.current && requestRevision === revision.current
+    const isCurrentRequest = () => !editorIsReadOnly(useEditorStore.getState()) && mounted.current && requestRevision === revision.current
       && requestSession === useEditorStore.getState().sessionId && currentSpec.current?.id === requestOwner
     setValidating(true)
     setIssues([])
@@ -200,7 +208,7 @@ export default function YamlEditor({ spec, onImport }: YamlEditorProps) {
       <div className="text-xs text-muted-foreground">YAML 配置 {dirty && <span className="ml-2 text-warning">未应用草稿</span>}</div>
       <div className="flex gap-2">
         {dirty && <button type="button" onClick={discard} className="rounded-md border border-input px-2 py-1 text-xs text-muted-foreground">放弃 YAML 草稿</button>}
-        <button type="button" onClick={() => void apply()} disabled={!spec || !dirty || localInvalid || validating}
+        <button type="button" onClick={() => void apply()} disabled={readOnly || !spec || !dirty || localInvalid || validating}
           className="rounded-md bg-primary px-3 py-1 text-xs text-primary-foreground disabled:opacity-40">
           {validating ? '校验中…' : '校验并应用'}
         </button>
@@ -220,11 +228,11 @@ export default function YamlEditor({ spec, onImport }: YamlEditorProps) {
         if (revision.current === review.revision) applySpec(review.spec)
       }} className="rounded-md border border-input bg-card px-2 py-1">确认采用规范化结果</button>
     </div>}
-    <PackFileCodeEditor path="workflow.yaml" ariaLabel="工作流 YAML" layout="fill" value={text} onChange={changeText}
-      disabled={!spec}
+    <PackFileCodeEditor path="workflow.yaml" ariaLabel="工作流 YAML" layout="fill" value={readOnly && !dirty ? serialize(spec) : text} onChange={changeText}
+      disabled={!spec} readOnly={readOnly}
       onKeyDown={event => {
         if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') { event.preventDefault(); void apply() }
-        if (event.key === 'Tab') {
+        if (event.key === 'Tab' && !readOnly) {
           event.preventDefault()
           const input = event.currentTarget
           const start = input.selectionStart
