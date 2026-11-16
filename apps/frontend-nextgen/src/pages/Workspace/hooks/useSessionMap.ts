@@ -27,6 +27,8 @@ export interface UseSessionMapResult {
   rawByGroupId: Record<string, SessionView[]>;
   /** 选中群详情加载中（chat pane 骨架用）。 */
   isLoading: boolean;
+  /** 当前选中群已完成切群刷新，可供依赖会话的后台恢复使用。 */
+  isSelectionReady: boolean;
   /** 以函数式更新整个 map（rename/remove 等多群遍历委托 sessionService）。 */
   applyMapUpdate: (fn: (cur: Record<string, SessionView[]>) => Record<string, SessionView[]>) => void;
   /** 更新单群会话列表（create 等）。 */
@@ -141,7 +143,7 @@ export function useSessionMap(
     [],
   );
 
-  const { reloadGroup, loadMoreSessions } = useSessionMapRequests({
+  const { reloadGroup, loadMoreSessions, isSelectionPending } = useSessionMapRequests({
     groupId,
     expandedGroupIds,
     activeIdentityId,
@@ -200,6 +202,7 @@ export function useSessionMap(
   return {
     rawByGroupId,
     isLoading,
+    isSelectionReady: Boolean(groupId && rawByGroupId[groupId] !== undefined && !isSelectionPending && !inFlightRef.current.has(groupId)),
     applyMapUpdate,
     updateGroupSessions,
     reloadGroup,

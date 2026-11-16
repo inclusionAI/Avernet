@@ -29,7 +29,7 @@ export function TaskLoopView({ host, controller, onSelectTask, ...props }: TaskL
   useEffect(() => {
     setAttention({});
     setRecords(userId ? snapshot?.records ?? [] : []);
-    if (!controller || props.switcher || !userId || !owner || !props.taskId) return;
+    if (!controller || !conversationId || props.switcher || !userId || !owner || !props.taskId) return;
     const abort = new AbortController(); let running = false; let previous: readonly TaskListRecord[] | null = null;
     const refresh = async () => {
       if (running || document.visibilityState === 'hidden') return;

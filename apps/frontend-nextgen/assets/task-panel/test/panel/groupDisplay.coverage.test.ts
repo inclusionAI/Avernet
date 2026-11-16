@@ -65,12 +65,12 @@ const groups: GroupMemberInfoByGroupId = {
 };
 
 describe('collectTaskGroupIds 群抽取', () => {
-  it('按 bbs/群节点/可下钻节点抽取 group_id/assignee,并 trim 去重', () => {
+  it('按明确群标识抽取群 ID,并 trim 去重', () => {
     const ids = collectTaskGroupIds(
       taskView({
         nodes: [
-          // bbs 执行模态也是群节点 → assignee 作为群 id
-          nodeView({ id: 'n-bbs', runMode: 'bbs', groupId: null, assignee: ' bbs-grp ' }),
+          // assignee 仅在明确为 BCS 群 ID 时回退
+          nodeView({ id: 'n-bbs', runMode: 'bbs', groupId: null, assignee: ' bcs_grp_bbs ' }),
           // 协作群节点带 group_id
           nodeView({ id: 'n-coop', runMode: 'coop_group', groupId: 'g-coop' }),
           // 可下钻但无 group_id/assignee → 跳过
@@ -80,7 +80,7 @@ describe('collectTaskGroupIds 群抽取', () => {
         ],
       }),
     );
-    expect(ids).toEqual(['bbs-grp', 'g-coop']);
+    expect(ids).toEqual(['bcs_grp_bbs', 'g-coop']);
   });
 });
 

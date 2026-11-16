@@ -17,12 +17,22 @@ function isGroupNode(node: TaskNodeView | undefined): boolean {
   );
 }
 
+/** 展示信息只使用明确群标识；执行者可能是 Bot，不能无条件作为群 ID。 */
+function resolveDisplayGroupId(node: TaskNodeView): string | null {
+  if (!isGroupNode(node)) return null;
+  const explicit = node.groupId?.trim();
+  if (explicit) return explicit;
+  const sessionGroup = node.sessionId?.trim().match(/^(bcs_grp_[^:\s]+):\S+$/)?.[1];
+  if (sessionGroup) return sessionGroup;
+  const assignee = node.assignee?.trim();
+  return assignee && /^bcs_grp_[^:\s]+$/.test(assignee) ? assignee : null;
+}
+
 export function collectTaskGroupIds(task: TaskView): string[] {
   const ids = new Set<string>();
   for (const node of task.nodes) {
-    if (!isGroupNode(node)) continue;
-    const id = node.groupId ?? node.assignee;
-    if (id?.trim()) ids.add(id.trim());
+    const id = resolveDisplayGroupId(node);
+    if (id) ids.add(id);
   }
   return [...ids];
 }
@@ -61,7 +71,7 @@ function resolveArtifactOwnerLabel(
     return owner === task.sourceGroupId && task.mainSessionName?.trim() ? task.mainSessionName : owner;
   }
   if (isGroupNode(node)) {
-    const groupLabel = memberLabel(node.groupId ?? node.assignee, groups);
+    const groupLabel = memberLabel(resolveDisplayGroupId(node), groups);
     if (groupLabel) return groupLabel;
   }
   if (owner === node.assignee && node.assigneeName?.trim()) return node.assigneeName;
@@ -76,7 +86,7 @@ export function enrichTaskGroupDisplay(task: TaskView, groups: GroupMemberInfoBy
   if (!Object.keys(groups).length) return task;
   const mapNode = (node: TaskNodeView): TaskNodeView => {
     if (!isGroupNode(node)) return node;
-    const label = memberLabel(node.groupId ?? node.assignee, groups);
+    const label = memberLabel(resolveDisplayGroupId(node), groups);
     return label ? { ...node, executorLabel: label } : node;
   };
   const mapArtifacts = (artifacts: TaskArtifactView[], node?: TaskNodeView): TaskArtifactView[] =>
