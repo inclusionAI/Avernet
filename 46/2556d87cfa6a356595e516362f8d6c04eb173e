@@ -1,0 +1,369 @@
+apps/agentclawscs/README.md
+  s_b6f36ed162c9bd::t_523056d9671362 28
+apps/agentclawscs/docker/bcn/Dockerfile
+  s_b6f36ed162c9bd::t_496bd4c291a1c2 33,43-45
+apps/agentclawscs/docker/bcn/logrotate.conf
+  s_b6f36ed162c9bd::t_5d8e1ca2d10aef 13-14
+apps/agentclawscs/docker/bcn/scripts/admin/bin/start-logrotate.sh
+  s_b6f36ed162c9bd::t_568db366ed1c4b 4,7,17,43
+apps/agentclawscs/docker/bcn/scripts/admin/bin/start.sh
+  s_b6f36ed162c9bd::t_590fe8826e4f20 9,19-26
+apps/agentclawscs/docker/bcs/Dockerfile
+  s_b6f36ed162c9bd::t_ba5082a0df95b9 44,54-56
+apps/agentclawscs/docker/bcs/logrotate.conf
+  s_b6f36ed162c9bd::t_7a0f4391eeb0c8 13-14
+apps/agentclawscs/docker/bcs/scripts/admin/bin/start-logrotate.sh
+  s_b6f36ed162c9bd::t_d1d608a0f59bcd 4,7,17,43
+apps/agentclawscs/docker/bcs/scripts/admin/bin/start.sh
+  s_b6f36ed162c9bd::t_e8146225f89307 9,19-26
+apps/agentclawscs/docker/utils/rotate-bcs-logs.sh
+  s_b6f36ed162c9bd::t_2fa23ab4cb3454 1-118
+apps/agentclawscs/docker/utils/test-rotate-bcs-logs.sh
+  s_b6f36ed162c9bd::t_1177807f9768a4 1-274
+apps/agentclawscs/docs/agents/existing-knowledge.md
+  s_b6f36ed162c9bd::t_f126a0959158ac 30-31
+apps/agentclawscs/docs/arch/README.md
+  s_b6f36ed162c9bd::t_c5ccb91c1c4a69 40
+apps/baas/docs/diagnostics/README.md
+  s_b6f36ed162c9bd::t_ec5097a57ce08a 10
+apps/baas/docs/diagnostics/arca-sdk-exception-boundaries.md
+  s_b6f36ed162c9bd::t_d8c56af146ec54 1-71
+apps/baas/docs/diagnostics/investigation.md
+  s_b6f36ed162c9bd::t_55dc3192f91f6b 9
+apps/backend/docs/diagnostics/investigation.md
+  s_b6f36ed162c9bd::t_7353491f7c2c6b 16
+apps/backend/specs/caller-lock-renew-diagnostics-20261116/001-spec.md
+  s_b6f36ed162c9bd::t_50f9d4657a6c32 1-3
+apps/backend/src/agentclaw/corp/core/caller_identity/README.md
+  s_b6f36ed162c9bd::t_6fbf93b98ab464 90-98
+apps/backend/src/agentclaw/corp/plugins/prod/cache.py
+  s_b6f36ed162c9bd::t_5e293a79c41de8 234-247
+apps/backend/tests/corp/infrastructure/test_cache_lock.py
+  s_b6f36ed162c9bd::t_5ca952cc576ba4 186-215
+apps/bcs-internal/Cargo.lock
+  s_b6f36ed162c9bd::t_4cb1e8c5cd385c 144,189,515,649,655,828,888,891,946,949,1063,1197,1250,1790,1892-1893,1902,2123,2287,2318,2513,2533-2550,2768-2773,3515,3618-3623,3650-3671,3878,4809,5560,6634,7251-7262,7715-7720
+apps/bcs-internal/Cargo.toml
+  s_b6f36ed162c9bd::t_25cd91c9c5ec69 4-5,45-48
+apps/bcs-internal/README.md
+  s_b6f36ed162c9bd::t_36036b51fd8fe9 67
+apps/bcs-internal/crates/bootstrap/bcs-internal/Cargo.toml
+  s_b6f36ed162c9bd::t_d6f57c2306f33f 11-12,33
+apps/bcs-internal/crates/bootstrap/bcs-internal/src/main.rs
+  s_b6f36ed162c9bd::t_b98a474d5d1abf 42-51,57-60,85-97,107-189,196,202,205
+apps/bcs-internal/crates/external-clients/bcs-layotto/src/mist/client.rs
+  s_b6f36ed162c9bd::t_55d924e77db602 124-125,157-158
+apps/bcs-internal/crates/plugins/bcs-auth-agentpass/Cargo.toml
+  s_b6f36ed162c9bd::t_2885890a4d3573 11,33
+apps/bcs-internal/crates/plugins/bcs-auth-agentpass/src/identity.rs
+  s_b6f36ed162c9bd::t_bfd80b54f77e6d 54,58
+apps/bcs-internal/crates/plugins/bcs-auth-agentpass/src/identity_tests.rs
+  s_b6f36ed162c9bd::t_0891744089b7d1 7-41
+apps/bcs-internal/crates/plugins/bcs-auth-agentpass/src/lib.rs
+  s_b6f36ed162c9bd::t_c8c0617e8224ee 15,253,410,425
+apps/bcs-internal/crates/plugins/bcs-auth-agentpass/src/remote_identity.rs
+  s_b6f36ed162c9bd::t_ad0523b9fba36b 5,70
+apps/bcs-internal/crates/plugins/bcs-auth-cookie/CONTEXT.md
+  s_b6f36ed162c9bd::t_003363d1d40fc0 85-88
+apps/bcs-internal/crates/plugins/bcs-auth-cookie/Cargo.toml
+  s_b6f36ed162c9bd::t_7ed919bbb2485c 11,34
+apps/bcs-internal/crates/plugins/bcs-auth-cookie/src/remote.rs
+  s_b6f36ed162c9bd::t_e5903edebe6d4d 45,221
+apps/bcs-internal/crates/plugins/bcs-auth-cookie/src/remote_tests.rs
+  s_b6f36ed162c9bd::t_003d1a834f8773 43-45,358-360,365-366
+apps/bcs-internal/crates/plugins/bcs-buservice-user-directory/Cargo.toml
+  s_b6f36ed162c9bd::t_27ae9280edf876 14
+apps/bcs-internal/crates/plugins/bcs-buservice-user-directory/src/lib.rs
+  s_b6f36ed162c9bd::t_77e3179c6c14f5 7,335,386
+apps/bcs-internal/crates/plugins/bcs-caller-identity-agentpass/Cargo.toml
+  s_b6f36ed162c9bd::t_387541cf7fcc74 14
+apps/bcs-internal/crates/plugins/bcs-caller-identity-agentpass/src/client.rs
+  s_b6f36ed162c9bd::t_b81a13722f72e6 2,81
+apps/bcs-internal/crates/plugins/bcs-security-gateway-agentpass/Cargo.toml
+  s_b6f36ed162c9bd::t_67adfce39b256b 14
+apps/bcs-internal/crates/plugins/bcs-security-gateway-agentpass/src/client.rs
+  s_b6f36ed162c9bd::t_32e0162dd298da 7,90,109
+apps/bcs-internal/crates/plugins/bcs-theta/Cargo.toml
+  s_b6f36ed162c9bd::t_9b5356c478d8e3 14
+apps/bcs-internal/crates/plugins/bcs-theta/src/lib.rs
+  s_b6f36ed162c9bd::t_2df7d47355fc77 1,110,114
+apps/bcs-internal/crates/plugins/bcs-tracing-sofa/CONTEXT.md
+  s_b6f36ed162c9bd::t_82b6f40d107284 1-97
+apps/bcs-internal/crates/plugins/bcs-tracing-sofa/Cargo.toml
+  s_b6f36ed162c9bd::t_0e3bb547d61671 1-24
+apps/bcs-internal/crates/plugins/bcs-tracing-sofa/src/lib.rs
+  s_b6f36ed162c9bd::t_c0d3ca79ca0e84 1-190
+apps/bcs-internal/crates/plugins/bcs-tracing-sofa/src/sink.rs
+  s_b6f36ed162c9bd::t_520c04d3af6ff3 1-241
+apps/bcs-internal/crates/plugins/bcs-tracing-sofa/tests/client_versions.rs
+  s_b6f36ed162c9bd::t_4c283023a6145b 1-135
+apps/bcs-internal/crates/plugins/bcs-tracing-sofa/tests/support/broken_stderr.rs
+  s_b6f36ed162c9bd::t_e608e239affb78 1-40
+apps/bcs-internal/crates/plugins/bcs-tracing-sofa/tests/trace_chain.rs
+  s_b6f36ed162c9bd::t_8169471ba02434 1-692
+apps/bcs-internal/docs/diagnostics/README.md
+  s_b6f36ed162c9bd::t_ffb654bd6c7ef3 10-12
+apps/bcs-internal/docs/observability-logging.md
+  s_b6f36ed162c9bd::t_94e022ad0d8888 13-17
+apps/bcs-internal/docs/sofa-tracer.md
+  s_b6f36ed162c9bd::t_4f27d74fea8d25 1-411
+apps/bcs-internal/scripts/check-p4.sh
+  s_b6f36ed162c9bd::t_fdb3a72d052f9f 20
+apps/bcs-internal/specs/2026-11-12-sofa-business-log-correlation/README.md
+  s_b6f36ed162c9bd::t_3dde76f77a83ca 1-187
+apps/bcs-internal/specs/2026-11-12-sofa-business-log-correlation/selection.md
+  s_b6f36ed162c9bd::t_ede893f5b40222 1-71
+apps/bcs-internal/specs/2026-11-12-sofa-interface-inventory/README.md
+  s_b6f36ed162c9bd::t_aad4b82a04327a 1-177
+apps/bcs-internal/specs/2026-11-12-sofa-interface-inventory/http.md
+  s_b6f36ed162c9bd::t_d003b5c18901f1 1-465
+apps/bcs-internal/specs/2026-11-12-sofa-interface-inventory/platform-eligibility.md
+  s_b6f36ed162c9bd::t_9ceeb8609b712e 1-132
+apps/bcs-internal/specs/2026-11-12-sofa-interface-inventory/plugins.md
+  s_b6f36ed162c9bd::t_59d1ac05e94850 1-186
+apps/bcs-internal/specs/README.md
+  s_b6f36ed162c9bd::t_9be47f64140d61 13-14
+apps/bcs-internal/tests/support/network_trace.rs
+  s_b6f36ed162c9bd::t_e0225276895857 1-22
+apps/bcs-internal/third_party/tracer-rust/LICENSE-APACHE
+  s_b6f36ed162c9bd::t_f0295b6c14fe74 1-201
+apps/bcs-internal/third_party/tracer-rust/README.md
+  s_b6f36ed162c9bd::t_cf363b0a7d1aff 1-37
+apps/bcs-internal/third_party/tracer-rust/SOURCE-SHA256.txt
+  s_b6f36ed162c9bd::t_035d7e38697790 1-12
+apps/bcs-internal/third_party/tracer-rust/tracer-core/Cargo.toml
+  s_b6f36ed162c9bd::t_f97d29771de132 1-20
+apps/bcs-internal/third_party/tracer-rust/tracer-core/src/appender/mod.rs
+  s_b6f36ed162c9bd::t_85d03f83335709 1-499
+apps/bcs-internal/third_party/tracer-rust/tracer-core/src/constant.rs
+  s_b6f36ed162c9bd::t_7cacec22d0a714 1-72
+apps/bcs-internal/third_party/tracer-rust/tracer-core/src/context/mod.rs
+  s_b6f36ed162c9bd::t_eb1f57004a2c67 1-1112
+apps/bcs-internal/third_party/tracer-rust/tracer-core/src/facade/mod.rs
+  s_b6f36ed162c9bd::t_e8543bba2cbf76 1-103
+apps/bcs-internal/third_party/tracer-rust/tracer-core/src/lib.rs
+  s_b6f36ed162c9bd::t_a90019515b10f8 1-8
+apps/bcs-internal/third_party/tracer-rust/tracer-core/src/tracer/mod.rs
+  s_b6f36ed162c9bd::t_aae3f68e846aae 1-563
+apps/bcs-internal/third_party/tracer-rust/tracer-core/src/util/atomic.rs
+  s_b6f36ed162c9bd::t_463bf67307f967 1-47
+apps/bcs-internal/third_party/tracer-rust/tracer-core/src/util/mod.rs
+  s_b6f36ed162c9bd::t_fdcef9cf0f4810 1-15
+apps/bcs-internal/third_party/tracer-rust/tracer-core/src/util/string_map.rs
+  s_b6f36ed162c9bd::t_d7e4e5f871e14b 1-56
+apps/bcs-internal/third_party/tracer-rust/tracer-core/src/util/time.rs
+  s_b6f36ed162c9bd::t_b645f4be1172e8 1-84
+apps/bcs-internal/third_party/tracer-rust/tracer-core/src/util/trace_id.rs
+  s_b6f36ed162c9bd::t_004451c1b82af0 1-248
+apps/bcs-internal/third_party/tracer-rust/tracer-core/tests/context_contract.rs
+  s_b6f36ed162c9bd::t_3b1e24bde506af 1-240
+apps/bcs-internal/third_party/tracer-rust/tracer-core/tests/lifecycle.rs
+  s_b6f36ed162c9bd::t_865c270e07503e 1-136
+apps/evolverun/clawweb-skills/clawevolve-skills/README.md
+  s_b6f36ed162c9bd::t_3db0b1014796f5 45-54
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-recovery-handbook/common/mcp/handbook.md
+  s_b6f36ed162c9bd::t_75b748504dce7f 21,27,29,127,202,207-208,213,217-219
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-session-recovery/SKILL.md
+  s_b6f36ed162c9bd::t_0d6760906e5ec2 79,83,91-92,253-260
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-session-recovery/scripts/recovery_ais/runner.py
+  s_b6f36ed162c9bd::t_457e6f8e074af0 79,97-100,103,187,209,223-224,364,396,656
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-session-recovery/tests/test_owner_feedback.py
+  s_b6f36ed162c9bd::t_8627b01668019f 21-23,26-43
+apps/evolverun/clawweb/docs/pack-scripts-browser-auth.md
+  s_b6f36ed162c9bd::t_542f727cf835fe 8-56,133-135,140-141,145-146,149,263
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/editor-draft-host.test.ts
+  s_b6f36ed162c9bd::t_17f7e2bcd66c19 67-68
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/pack-browser-read-host.test.ts
+  s_b6f36ed162c9bd::t_b6fcbd15f36ec1 1-139
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/pack-scripts-browser-auth.test.ts
+  s_b6f36ed162c9bd::t_a475b45cacb9f6 21,25,28,42
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/pack-scripts-full-path.test.ts
+  s_b6f36ed162c9bd::t_4dfc52c9671247 38,79,81,99,109
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/pack-scripts.test.ts
+  s_b6f36ed162c9bd::t_7c8ef8872dcf97 94,102,104,112-113,141-144,147,149-150,152-155,157,160-165,167,173,185-192,200,202-205,214,218-228
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/pack-version-browser-login.test.ts
+  s_b6f36ed162c9bd::t_7b0eb610eaab29 44,70,84-90,100,175-200
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/pack-version-persistence.test.ts
+  s_b6f36ed162c9bd::t_7e62e84d3ae453 161,164-172
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/run-view-workflow-types.test.ts
+  s_b6f36ed162c9bd::t_7dc31182d7e338 1-133
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/workflow-ai-draft-host.test.ts
+  s_b6f36ed162c9bd::t_290b7cd673de1b 10,19-25,30,32-33,38,42-44,48,59-81,86,88-89,92-104,106-107,110-111,113-116,118,120-122,124-125,127-129,132-134,136-140,142,144,147-148,150,152-156,158-161,164-165,168-169,171-173,176-197
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/workflow-ai-draft-runtime.test.ts
+  s_b6f36ed162c9bd::t_251432f0326337 17,35-36,44,49,65,67,70,73,75-76,112-113,135-136,141-150,161-169,182-191,193,198,200-214
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/workflow-ai-draft-security.test.ts
+  s_b6f36ed162c9bd::t_71ee6a27bebabb 26-27,41,70-71
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/workflow-ai-draft-target-config.test.ts
+  s_b6f36ed162c9bd::t_63f20e4eb032af 1-108
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/workflow-browser-reads.test.ts
+  s_b6f36ed162c9bd::t_6bea9620e03810 1-286
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/index.ts
+  s_b6f36ed162c9bd::t_4b5a5fc7f9d481 73-74,550,552-561
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/pack-scripts.ts
+  s_b6f36ed162c9bd::t_acd3eac84450ab 27,117,150,226,257-258,290,297-299
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/run-view-workflow-types.ts
+  s_b6f36ed162c9bd::t_2b524d41c1543e 1,4,6-10,16-17,20-22,25,32-37,40-54,67,71,75,80
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/workflow-ai-draft-runtime.ts
+  s_b6f36ed162c9bd::t_ac857fa6672b54 2,34-35,94-97
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/workflow-browser-reads.ts
+  s_b6f36ed162c9bd::t_31568a5751e5b2 1-129
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/workflow-draft-reader.ts
+  s_b6f36ed162c9bd::t_3eb426b2c11543 1-22
+apps/evolverun/clawweb/internal/configs/application-default.yaml
+  s_b6f36ed162c9bd::t_2248a1d1d33228 220-221,227,232,288-290
+apps/frontend-nextgen/jest.config.cjs
+  s_b6f36ed162c9bd::t_62732cad8213a9 22-26
+apps/frontend-nextgen/scripts/assemble-internal.sh
+  s_b6f36ed162c9bd::t_154a9d6b3dafdc 209-219
+apps/frontend-nextgen/scripts/public-tests.list
+  s_b6f36ed162c9bd::t_69d013862bdb46 62-72,74-107,153-154,208-211
+apps/frontend-nextgen/tsconfig.json
+  s_b6f36ed162c9bd::t_b090e2151939cf 22-27
+autocoding/README.md
+  s_b6f36ed162c9bd::t_e51319e7923673 99
+autocoding/evals/clarify-investigation-disposition.md
+  s_b6f36ed162c9bd::t_80e23b73fe55ae 41-64,75-78
+autocoding/evals/implement-exception-mapping.md
+  s_b6f36ed162c9bd::t_4b2c91ef6ba798 1-29
+autocoding/skills/teamclaw-clarify/SKILL.md
+  s_b6f36ed162c9bd::t_049b165138ae8f 30
+autocoding/skills/teamclaw-clarify/references/cdo-investigation.md
+  s_b6f36ed162c9bd::t_c70fae765cdd45 19-27,37
+autocoding/skills/teamclaw-clarify/references/no-fix.md
+  s_b6f36ed162c9bd::t_09f3b53aa02c7e 3,5,7,9,11,13-20,22,24,26,28,30,47,49
+autocoding/skills/teamclaw-implement/SKILL.md
+  s_b6f36ed162c9bd::t_731e1c1324b61b 26,40-41,50,53
+autocoding/skills/teamclaw-implement/references/delivery.md
+  s_b6f36ed162c9bd::t_5646f3eb453111 4,10,79-84,88,92
+autocoding/skills/teamclaw-implement/references/execution.md
+  s_b6f36ed162c9bd::t_5597812be7d5ae 7
+autocoding/skills/teamclaw-implement/references/metrics.md
+  s_b6f36ed162c9bd::t_9b2b2a4edd80cb 4
+autocoding/skills/teamclaw-implement/references/stage-events.md
+  s_b6f36ed162c9bd::t_92f156401466ed 15
+autocoding/skills/teamclaw-implement/scripts/impl/reporting.py
+  s_b6f36ed162c9bd::t_e035f620f9888c 13-33,38-58,62-68,70,78,87-88,144-153,220,236-238
+autocoding/skills/teamclaw-implement/scripts/impl/runner.py
+  s_b6f36ed162c9bd::t_c04633402ec8da 5,58-60,64-68,144-145,147,149-164
+autocoding/skills/teamclaw-implement/scripts/implement.py
+  s_b6f36ed162c9bd::t_a821deccc23d8b 37-39,143-144
+autocoding/skills/teamclaw-implement/tests/test_reporting.py
+  s_b6f36ed162c9bd::t_06c65c3f564df1 128-206
+autocoding/skills/teamclaw-implement/tests/test_workflow_handoff.py
+  s_b6f36ed162c9bd::t_7691fc1cb4eac2 88-106
+autocoding/skills/teamclaw-plan/SKILL.md
+  s_b6f36ed162c9bd::t_e774d3be106894 34-35,46
+autocoding/skills/teamclaw-plan/references/delivery.md
+  s_b6f36ed162c9bd::t_317925798a224a 12-13,33
+autocoding/skills/teamclaw-plan/references/no-fix.md
+  s_b6f36ed162c9bd::t_0d2fd9d9e54f66 3,5,7,9,11,13-20,22,24,26,28,30,47,49
+autocoding/skills/teamclaw-plan/references/project-context.md
+  s_b6f36ed162c9bd::t_3c831e789959de 49
+autocoding/skills/teamclaw-pr-debate/SKILL.md
+  s_b6f36ed162c9bd::t_c1a26d31701106 17,35
+autocoding/skills/teamclaw-pr-debate/references/delivery.md
+  s_b6f36ed162c9bd::t_f0dc137a27fee7 4
+autocoding/skills/teamclaw-pr-debate/references/platforms.md
+  s_b6f36ed162c9bd::t_97ae62c2a1634b 57
+autocoding/skills/teamclaw-workflow/SKILL.md
+  s_b6f36ed162c9bd::t_2913f9d0d8d47e 17,27,36,43,62
+autocoding/tests/test_clarify_routing.py
+  s_b6f36ed162c9bd::t_54e8b2c5696740 38-43
+docs/create-bot-flow.md
+  s_b6f36ed162c9bd::t_579bb3c883a0c2 3-4,19,33-36,40-41,44-45,47-48,50,53,55,57,67,71,73,75,77,79,89,101,103,118,134,142,146,149,155,163,171-174,189,208
+docs/rfcs/accs/README.md
+  s_b6f36ed162c9bd::t_232ceb4b672eb5 100
+simulator/host-image/Dockerfile
+  s_b6f36ed162c9bd::t_e320bd48482f56 216-228,235
+simulator/justfile
+  s_b6f36ed162c9bd::t_c7f4405fc8a8fe 344-347,351
+simulator/modules/storage/sql/agentclawdb-structure.sql
+  s_b6f36ed162c9bd::t_9dacfeeeb541d9 9008-9033
+simulator/reliability/AGENTS.md
+  s_b6f36ed162c9bd::t_20310496c344c0 157-176,496-505,658-671
+simulator/reliability/README.md
+  s_b6f36ed162c9bd::t_a6270289ec6142 8,28-29
+simulator/reliability/chaos.sh
+  s_b6f36ed162c9bd::t_9e3bac8be83770 142-149
+simulator/reliability/chaoslab/README.md
+  s_b6f36ed162c9bd::t_555229bd0bd230 200-220
+simulator/reliability/chaoslab/src/chaoslab/app.py
+  s_b6f36ed162c9bd::t_8498f8ea078ed5 436-487,489-496,504-507,512-514,518,523-524,530,532-546,552-554,848-849,851-854,856-857
+simulator/reliability/chaoslab/src/chaoslab/core/_model.py
+  s_b6f36ed162c9bd::t_2b6b2e3b6bcf5e 38-46,52,56-57
+simulator/reliability/chaoslab/src/chaoslab/core/_spec.py
+  s_b6f36ed162c9bd::t_2700f7d39fac6c 23,383-385
+simulator/reliability/chaoslab/src/chaoslab/engine.py
+  s_b6f36ed162c9bd::t_3ca35bd9e251c5 28,98,102-136
+simulator/reliability/chaoslab/src/chaoslab/plugins/instruments/_a2a_probe.py
+  s_b6f36ed162c9bd::t_8a3fa260d275d7 93-97
+simulator/reliability/chaoslab/src/chaoslab/plugins/instruments/_baas_probe.py
+  s_b6f36ed162c9bd::t_a52d67ded5233e 107-111
+simulator/reliability/chaoslab/src/chaoslab/plugins/instruments/_zbcsfuse_search_probe.py
+  s_b6f36ed162c9bd::t_0c3d035b5efbc9 96-100
+simulator/reliability/chaoslab/src/chaoslab/plugins/verdicts/_ratio_elevated.py
+  s_b6f36ed162c9bd::t_e428a884c9f1f9 6-7,9-14,19-25,27-33,40-42,47,49,57-58,60-65,70-71,74-75
+simulator/reliability/chaoslab/src/chaoslab/plugins/verdicts/_semantic_degrade.py
+  s_b6f36ed162c9bd::t_ca33f38ff1c689 50-57,59-60,74-75,84-87,91-92
+simulator/reliability/chaoslab/src/chaoslab/plugins/verdicts/_state_held.py
+  s_b6f36ed162c9bd::t_26fcca8ea987a1 15-20,25-31,33-39,46-48,55,57,65,68-72,74,77-78,81-82,85
+simulator/reliability/chaoslab/src/chaoslab/plugins/verdicts/_stats.py
+  s_b6f36ed162c9bd::t_9c55d052caa97a 1-27
+simulator/reliability/chaoslab/src/chaoslab/plugins/verdicts/_throughput_collapsed.py
+  s_b6f36ed162c9bd::t_6994ef211766d3 9-10,14,18-23,28-34,36-42,49-51,56,58,66,69-70,72-73,76-77,79,81-83,85-86,89,92-93,98-99
+simulator/reliability/chaoslab/src/chaoslab/spi/__init__.py
+  s_b6f36ed162c9bd::t_09eaf142c9c2c6 63,65
+simulator/reliability/chaoslab/src/chaoslab/spi/_instrument.py
+  s_b6f36ed162c9bd::t_a76c8f93cdbcfa 17-24,29,36,80-92,94
+simulator/reliability/chaoslab/src/chaoslab/spi/_verdict.py
+  s_b6f36ed162c9bd::t_7a8e3b309777e7 33-36
+simulator/reliability/chaoslab/tests/unit/contracts/test_app.py
+  s_b6f36ed162c9bd::t_ebd5dc80a8d12d 893-1040
+simulator/reliability/chaoslab/tests/unit/contracts/test_engine.py
+  s_b6f36ed162c9bd::t_ef6d42dfb2e994 157-170
+simulator/reliability/chaoslab/tests/unit/contracts/test_model.py
+  s_b6f36ed162c9bd::t_c68257ae8867ae 47,52-55
+simulator/reliability/chaoslab/tests/unit/contracts/test_sampling_capacity.py
+  s_b6f36ed162c9bd::t_bca1b1db15ee91 1-159
+simulator/reliability/chaoslab/tests/unit/contracts/test_spec.py
+  s_b6f36ed162c9bd::t_96d0308b78843b 105-128
+simulator/reliability/chaoslab/tests/unit/contracts/test_valid_samples.py
+  s_b6f36ed162c9bd::t_e336cfba07eb99 1-97
+simulator/reliability/chaoslab/tests/unit/contracts/test_verdict_basis.py
+  s_b6f36ed162c9bd::t_cc36293720b04b 1-142
+simulator/reliability/experiments/a2a-task-held-delay-100ms.yaml
+  s_b6f36ed162c9bd::t_fe3aa14e9e8ba5 16-18,50-52,55-61,64
+simulator/reliability/resources/instruments_defs/a2a-probe.yaml
+  s_b6f36ed162c9bd::t_53b0819c596be8 16-17
+simulator/reliability/resources/instruments_defs/baas-probe.yaml
+  s_b6f36ed162c9bd::t_e4468ced5b852f 22-23
+simulator/reliability/resources/instruments_defs/latency-probe.yaml
+  s_b6f36ed162c9bd::t_7b256121f1e112 12-13
+simulator/reliability/resources/instruments_defs/zbcsfuse-search-probe.yaml
+  s_b6f36ed162c9bd::t_60ea3c4c76fe65 18-19
+submodules/avernet
+  s_d23d2dd74fff18::t_8579504fd1470c 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "462556d87cfa6a356595e516362f8d6c04eb173e",
+  "prompts": {},
+  "sessions": {
+    "s_b6f36ed162c9bd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1da46-fbad-7ba2-9c7e-ab42a36547d5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    },
+    "s_d23d2dd74fff18": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a13a79-4a70-7a40-84da-33a34fa4f69f",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}
