@@ -63,6 +63,35 @@ Regression coverage lives in
 [`GroupMemberAvatar.test.tsx`](test/components/CollaborationSquare/GroupMemberAvatar.test.tsx)
 and [`GroupOwnerDisplay.test.tsx`](test/components/CollaborationSquare/GroupOwnerDisplay.test.tsx).
 
+## Collaborating Bot conversations
+
+In “对话 → 我协作的 Bot”, the origin filter supports both “我发起” and
+“他人发起”. Other-user conversations reuse the managed Bot friend-group flow:
+friend users load under the Bot's composite actor ID, and session/message reads
+retain the owner context, normalized friend ID, pagination and runtime stage.
+Other-user browsing is read-only; it does not enable session writes, a composer
+or a realtime chat connection. Backend authorization still applies.
+
+Managed and collaborating Bot other-user directories batch-query
+`POST /openapi/v1/collaboration/bots/query` with `human_<userId>` identities after
+relation pagination and deduplication. Nonblank Human `name` values replace
+numeric labels without changing user IDs or directory order. Missing names or
+lookup failures preserve existing relation names, falling back to the user ID.
+No employee-directory or legacy-frontend dependency is used.
+
+The other-user directory excludes the signed-in viewer by normalized Human ID,
+not by name or Bot ownership. Both fresh responses and reused directory caches
+apply this exclusion. A self-only friend result is an empty other-user list;
+stale expanded self groups do not trigger other-user session reads.
+
+Regression coverage lives in
+[`managedBotConversationService.test.ts`](test/services/workspace/managedBotConversationService.test.ts),
+[`teamBotSessionRequests.test.ts`](test/services/workspace/teamBotSessionRequests.test.ts),
+[`ConversationSidebarSessionFilters.test.tsx`](test/pages/Workspace/Chat/components/ConversationSidebarSessionFilters.test.tsx)
+[`useManagedBotOthers.test.tsx`](test/pages/Workspace/Chat/hooks/useManagedBotOthers.test.tsx)
+and the managed/team read-only cases in
+[`ConversationPage.test.tsx`](test/pages/Workspace/Chat/ConversationPage.test.tsx).
+
 ## Source synchronization
 
 `OPEN_CORE_MANIFEST.json` records the TeamClaw source commit. Changes originating in this public directory must be taken back into the TeamClaw Open Core baseline before the next export.

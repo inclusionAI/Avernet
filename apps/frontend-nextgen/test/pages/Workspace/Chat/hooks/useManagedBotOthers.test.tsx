@@ -350,3 +350,124 @@ describe('useManagedBotOthers', () => {
     expect(listOtherSessions).not.toHaveBeenCalled();
   });
 });
+
+describe.each(['managed', 'team'] as const)('%s others directory excludes the viewer', (section) => {
+  it.each(['327325', 'human_327325', 'user_id:327325'])(
+    'filters the signed-in user %s by ID, not by display name or Bot owner',
+    async (userId) => {
+      const view: ConversationBotView = {
+        ...managedBot,
+        section,
+        bot: { ...managedBot.bot, isTeamBot: section === 'team' },
+      };
+      loadFriendUsers.mockResolvedValue({
+        ok: true,
+        data: ['327325', '2088', '447147'].map((id) => ({ userId: id, displayName: '同名用户' })),
+      });
+      renderHook(() => useManagedBotOthers({ userId, managedBots: [view], enabled: true }));
+      enableOthers();
+
+      await waitFor(() => {
+        const cached = useConversationStore.getState().sessionsByBotId[view.bot.botId];
+        expect(cached?.friendDirectory.items).toEqual([
+          { userId: '2088', displayName: '同名用户' },
+          { userId: '447147', displayName: '同名用户' },
+        ]);
+        expect(Object.keys(cached.friendGroups)).toEqual(['2088', '447147']);
+      });
+      expect(loadFriendUsers).toHaveBeenCalledTimes(1);
+    },
+  );
+});
+
+describe('others self-only and stale group handling', () => {
+  it('treats a self-only friend directory as successfully empty', async () => {
+    loadFriendUsers.mockResolvedValue(okUsers(['327325']));
+    renderHook(() => useManagedBotOthers({ userId: '327325', managedBots: [managedBot], enabled: true }));
+    enableOthers();
+
+    await waitFor(() => {
+      const cached = useConversationStore.getState().sessionsByBotId[managedBot.bot.botId];
+      expect(cached?.friendDirectory).toEqual({ items: [], loading: false, error: null });
+      expect(cached.friendGroups).toEqual({});
+    });
+    expect(loadFriendUsers).toHaveBeenCalledTimes(1);
+    expect(listOtherSessions).not.toHaveBeenCalled();
+  });
+
+  it('removes a legacy self group on directory retry without changing other cached sessions', async () => {
+    loadFriendUsers.mockResolvedValue(okUsers(['327325', '447147']));
+    const { result } = renderHook(() =>
+      useManagedBotOthers({ userId: '327325', managedBots: [managedBot], enabled: true }),
+    );
+    enableOthers();
+    await waitFor(() =>
+      expect(useConversationStore.getState().sessionsByBotId[managedBot.bot.botId]?.friendDirectory.loading).toBe(
+        false,
+      ),
+    );
+    const cached = useConversationStore.getState().sessionsByBotId[managedBot.bot.botId];
+    const otherGroup = {
+      ...cached.friendGroups['447147'],
+      state: 'loaded' as const,
+      sessions: okSessions(['other-session']).data,
+    };
+    act(() =>
+      useConversationStore.getState().setManagedBotCache(managedBot.bot.botId, {
+        ...cached,
+        friendGroups: {
+          '447147': otherGroup,
+          '327325': { ...otherGroup, friend: userIdOf('327325') },
+        },
+      }),
+    );
+    act(() => result.current.retryDirectory(managedBot.bot.botId));
+
+    await waitFor(() => {
+      const refreshed = useConversationStore.getState().sessionsByBotId[managedBot.bot.botId];
+      expect(loadFriendUsers).toHaveBeenCalledTimes(2);
+      expect(refreshed.friendDirectory.loading).toBe(false);
+      expect(refreshed.friendGroups['327325']).toBeUndefined();
+      expect(refreshed.friendGroups['447147']).toEqual(otherGroup);
+    });
+  });
+
+  it('does not request the viewer sessions from a stale expanded self group or retry', async () => {
+    loadFriendUsers.mockResolvedValue(okUsers(['327325', '447147']));
+    act(() => useConversationStore.getState().setExpandedFriend(managedBot.bot.botId, '327325', true));
+    const { result } = renderHook(() =>
+      useManagedBotOthers({ userId: 'human_327325', managedBots: [managedBot], enabled: true }),
+    );
+    enableOthers();
+    await waitFor(() => expect(loadFriendUsers).toHaveBeenCalledTimes(1));
+    await act(async () => Promise.resolve());
+    act(() => result.current.retryFriendSessions(managedBot.bot.botId, '327325'));
+    expect(listOtherSessions).not.toHaveBeenCalled();
+    expect(
+      useConversationStore.getState().sessionsByBotId[managedBot.bot.botId].friendGroups['327325'],
+    ).toBeUndefined();
+  });
+});
+
+it('excludes the newly signed-in user when reusing an already loaded directory', async () => {
+  loadFriendUsers.mockResolvedValue(okUsers(['447147', '555001']));
+  const { rerender } = renderHook(
+    ({ userId }) => useManagedBotOthers({ userId, managedBots: [managedBot], enabled: true }),
+    { initialProps: { userId: '327325' } },
+  );
+  enableOthers();
+  await waitFor(() =>
+    expect(useConversationStore.getState().sessionsByBotId[managedBot.bot.botId]?.friendDirectory.items).toHaveLength(
+      2,
+    ),
+  );
+
+  rerender({ userId: 'human_447147' });
+
+  await waitFor(() => {
+    const cached = useConversationStore.getState().sessionsByBotId[managedBot.bot.botId];
+    expect(cached.friendDirectory.items).toEqual([userIdOf('555001')]);
+    expect(cached.friendGroups['447147']).toBeUndefined();
+  });
+  expect(loadFriendUsers).toHaveBeenCalledTimes(1);
+});
