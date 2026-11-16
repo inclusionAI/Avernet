@@ -6,6 +6,9 @@ from typing import Any, Iterable
 
 from injector import inject
 
+from agentclaw.community.core.bot_public.catalog_metadata import (
+    BotCatalogMetadataServiceProtocol,
+)
 from agentclaw.community.core.errors import ValidationError
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.task.todos import (
@@ -77,12 +80,14 @@ class TodoService(TodoServiceProtocol):
         repository: TodoRepositoryProtocol,
         space_access: SpaceAccessServiceProtocol,
         bot_repository: BotRepository,
+        catalog_metadata: BotCatalogMetadataServiceProtocol,
         collaboration: TodoCollaborationPort,
         execution: TodoExecutionServiceProtocol,
     ) -> None:
         self._repository = repository
         self._space_access = space_access
         self._bot_repository = bot_repository
+        self._catalog_metadata = catalog_metadata
         self._collaboration = collaboration
         self._execution = execution
 
@@ -152,6 +157,7 @@ class TodoService(TodoServiceProtocol):
         )
         bot = resolve_todo_bot(
             bot_repository=self._bot_repository,
+            catalog_metadata=self._catalog_metadata,
             space=space,
             actor_id=normalized_actor_id,
             bot_id=normalized_bot_id,

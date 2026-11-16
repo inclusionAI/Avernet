@@ -11,6 +11,7 @@ import { eligibleTodoBots } from './botScope';
 import { TodoBoard } from './components/TodoBoard';
 import { TodoCreateModal } from './components/TodoCreateModal';
 import { TodoToolbar } from './components/TodoToolbar';
+import { loadPublicTodoBotCatalogIds } from '@/services/todos/todoBotCatalogService';
 
 /** 实验室待办工作台：当前空间内的待办列表、事件时序、互动和验收。 */
 export default function LabTodosPage() {
@@ -39,11 +40,13 @@ export default function LabTodosPage() {
     }
     let aborted = false;
     setBotsLoading(true);
-    botWorkshopService
+    void botWorkshopService
       .list({ spaceId: String(currentSpaceId), page: 1, pageSize: 100 })
-      .then((result) => {
+      .then(async (result) => {
         if (aborted) return;
-        setBots(eligibleTodoBots(result.items, currentSpace, currentUserId));
+        const publicCatalogIds = await loadPublicTodoBotCatalogIds(result.items);
+        if (aborted) return;
+        setBots(eligibleTodoBots(result.items, currentSpace, currentUserId, publicCatalogIds));
       })
       .catch((cause) => {
         if (aborted) return;
@@ -57,6 +60,11 @@ export default function LabTodosPage() {
       aborted = true;
     };
   }, [currentSpace, currentSpaceId, currentUserId, spaceInitialized]);
+
+  useEffect(() => {
+    if (botsLoading || !todos.botId) return;
+    if (!bots.some((bot) => bot.botId === todos.botId)) todos.setBotId(undefined);
+  }, [bots, botsLoading, todos.botId, todos.setBotId]);
 
   return (
     <main className="app-scrollbar h-full min-h-0 overflow-y-auto">

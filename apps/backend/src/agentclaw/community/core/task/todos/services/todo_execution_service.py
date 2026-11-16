@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from injector import inject
 
+from agentclaw.community.core.bot_public.catalog_metadata import (
+    BotCatalogMetadataServiceProtocol,
+)
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.task.todos import (
     TodoRepositoryProtocol,
@@ -165,12 +168,14 @@ class TodoExecutionService(TodoExecutionServiceProtocol):
         repository: TodoRepositoryProtocol,
         space_access: SpaceAccessServiceProtocol,
         bot_repository: BotRepository,
+        catalog_metadata: BotCatalogMetadataServiceProtocol,
         collaboration: TodoCollaborationPort,
         artifacts: TodoArtifactServiceProtocol,
     ) -> None:
         self._repository = repository
         self._space_access = space_access
         self._bot_repository = bot_repository
+        self._catalog_metadata = catalog_metadata
         self._collaboration = collaboration
         self._artifacts = artifacts
 
@@ -193,6 +198,7 @@ class TodoExecutionService(TodoExecutionServiceProtocol):
         )
         bot = resolve_todo_bot(
             bot_repository=self._bot_repository,
+            catalog_metadata=self._catalog_metadata,
             space=space,
             actor_id=todo.created_by,
             bot_id=todo.bot_id,
@@ -266,6 +272,18 @@ class TodoExecutionService(TodoExecutionServiceProtocol):
             raise TodoStateConflictError(
                 f"Interacting Todo has inconsistent Context state {context.status}"
             )
+
+        space, _member = self._space_access.require_space_member(
+            space_id=todo.space_id,
+            user_id=todo.created_by,
+        )
+        resolve_todo_bot(
+            bot_repository=self._bot_repository,
+            catalog_metadata=self._catalog_metadata,
+            space=space,
+            actor_id=todo.created_by,
+            bot_id=todo.bot_id,
+        )
         credential = self._artifacts.issue_execution(
             todo_id=todo.todo_id,
             executor_id=todo.bot_id,

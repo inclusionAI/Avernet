@@ -11,6 +11,12 @@ import pytest
 from injector import singleton
 
 from agentclaw.community.api.task.todo_service import TodoServiceProtocol
+from agentclaw.community.core.bot_public.catalog_metadata import (
+    BotCatalogAddress,
+    BotCatalogMetadata,
+    BotCatalogMetadataPage,
+    BotCatalogMetadataServiceProtocol,
+)
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.task.todos import (
     TodoRepositoryProtocol,
@@ -108,6 +114,24 @@ class FakeBotRepository:
         ]
 
 
+class FakeBotCatalogMetadata:
+    def search_public_bot_metadata(self, **kwargs):
+        items = tuple(
+            BotCatalogMetadata(
+                address=BotCatalogAddress(
+                    bot_id=bot_uuid.rsplit(":", 1)[0],
+                    entity_id=bot_uuid.rsplit(":", 1)[1],
+                ),
+                kind="bot",
+                bot_uuid=bot_uuid,
+                actor_kind="bot",
+                visibility="public",
+            )
+            for bot_uuid in kwargs["bot_uuids"]
+        )
+        return BotCatalogMetadataPage(total=len(items), items=items)
+
+
 class FakeTodoArtifactService:
     def issue_execution(
         self, *, todo_id: str, executor_id: str
@@ -159,6 +183,11 @@ def bind_consumer_contract(
     binder.bind(TodoRepositoryProtocol, to=repository, scope=singleton)
     binder.bind(SpaceAccessServiceProtocol, to=FakeSpaceAccess(), scope=singleton)
     binder.bind(BotRepository, to=FakeBotRepository(), scope=singleton)
+    binder.bind(
+        BotCatalogMetadataServiceProtocol,
+        to=FakeBotCatalogMetadata(),
+        scope=singleton,
+    )
     binder.bind(TodoCollaborationPort, to=collaboration, scope=singleton)
     binder.bind(
         TodoArtifactServiceProtocol,

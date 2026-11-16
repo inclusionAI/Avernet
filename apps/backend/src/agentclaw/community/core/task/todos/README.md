@@ -37,10 +37,18 @@ Todo delivery uses the same `singlebot_2_group` shape as Task: BCS creates one
 real `manager_worker` group whose only Bot participant is the selected executor
 with role `manager`; the Todo creator joins as a non-speaking Human `observer`.
 The selected Bot is both `driver_bot` and `master_bot`. No second Bot and no
-`default` Bot is added. Final delivery uses `inject_observers`, and later Human
-interaction resumes the same BCS group session rather than creating another
-group. The public `/run` operation is a compensation/operator entry point; the
-ordinary frontend neither edits Todos nor exposes manual Run.
+`default` Bot is added. Because this is Bot collaboration, an executor is
+eligible only when the authoritative BCS agent visibility is exactly `public`;
+legacy Human-facing `ac_bots.public` does not grant eligibility. `protected`,
+`private`, missing or unknown visibility, and unavailable catalog metadata all
+fail closed. The rule is checked when creating a Todo, before its initial
+dispatch, and before resuming a Human interaction or rejection. Historical
+Todos remain readable if their Bot later becomes non-public, but no new or
+resumed run is delivered until that exact Bot identity is public again. Final
+delivery uses `inject_observers`, and later Human interaction resumes the same
+BCS group session rather than creating another group. The public `/run`
+operation is a compensation/operator entry point; the ordinary frontend
+neither edits Todos nor exposes manual Run.
 
 While a Todo is `pending_acceptance`, posting a normal Human interaction atomically claims A as `pending_acceptance -> in_progress`, then append-only records `user_interaction.posted` in B. Rejection uses the same resume mechanism after its B-first acceptance event and A-side state projection. Status refresh keeps A `in_progress` while B is still `done` and the latest Human-work event has not yet been followed by `task.started`. The scheduler then resumes B from that event and reuses the previous executor session.
 
@@ -117,10 +125,12 @@ consumes:
   - TodoRepositoryProtocol
   - SpaceAccessServiceProtocol
   - BotRepository
+  - BotCatalogMetadataServiceProtocol
   - CachePlugin
   - TodoCollaborationPort
   - TodoArtifactServiceProtocol
 internal_dependencies:
+  - agentclaw.community.core.bot_public.catalog_metadata
   - agentclaw.community.core.errors
   - agentclaw.community.core.repository.protocols
   - agentclaw.community.core.spaces

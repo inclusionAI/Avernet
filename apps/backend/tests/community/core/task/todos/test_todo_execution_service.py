@@ -7,6 +7,12 @@ from typing import Any
 
 import pytest
 
+from agentclaw.community.core.bot_public.catalog_metadata import (
+    BotCatalogAddress,
+    BotCatalogMetadata,
+    BotCatalogMetadataPage,
+    BotCatalogMetadataUnavailableError,
+)
 from agentclaw.community.core.spaces.models import SpaceType
 from agentclaw.community.core.task.todos.artifact_models import TodoExecutionCredential
 from agentclaw.community.core.task.todos.errors import (
@@ -190,6 +196,42 @@ class _Bots:
         return self.rows
 
 
+class _Catalog:
+    def __init__(
+        self,
+        public_bot_uuids: set[str] | None = None,
+        *,
+        unavailable: bool = False,
+    ) -> None:
+        self.public_bot_uuids = (
+            {"bot_1:bot_owner_1"}
+            if public_bot_uuids is None
+            else public_bot_uuids
+        )
+        self.unavailable = unavailable
+        self.calls: list[dict[str, Any]] = []
+
+    def search_public_bot_metadata(self, **kwargs):
+        self.calls.append(kwargs)
+        if self.unavailable:
+            raise BotCatalogMetadataUnavailableError()
+        items = []
+        for bot_uuid in kwargs["bot_uuids"]:
+            if bot_uuid not in self.public_bot_uuids:
+                continue
+            bot_id, owner_id = bot_uuid.rsplit(":", 1)
+            items.append(
+                BotCatalogMetadata(
+                    address=BotCatalogAddress(bot_id=bot_id, entity_id=owner_id),
+                    kind="bot",
+                    bot_uuid=bot_uuid,
+                    actor_kind="bot",
+                    visibility="public",
+                )
+            )
+        return BotCatalogMetadataPage(total=len(items), items=tuple(items))
+
+
 class _Collaboration:
     def __init__(
         self,
@@ -307,6 +349,8 @@ def _service(
     contexts: tuple[TodoCollaborationContext, ...] = (),
     created_context: TodoCollaborationContext | None = None,
     refreshed_context: TodoCollaborationContext | None = None,
+    public_bot_uuids: set[str] | None = None,
+    catalog_unavailable: bool = False,
 ):
     repository = _Repository(todo or _todo())
     access = _SpaceAccess(space)
@@ -322,13 +366,24 @@ def _service(
             }
         ]
     )
+    catalog = _Catalog(
+        public_bot_uuids,
+        unavailable=catalog_unavailable,
+    )
     collaboration = _Collaboration(
         contexts=contexts,
         created_context=created_context,
         refreshed_context=refreshed_context,
     )
     artifacts = _Artifacts()
-    service = TodoExecutionService(repository, access, bots, collaboration, artifacts)
+    service = TodoExecutionService(
+        repository,
+        access,
+        bots,
+        catalog,
+        collaboration,
+        artifacts,
+    )
     return service, repository, access, bots, collaboration
 
 
@@ -365,6 +420,31 @@ async def test_dispatch_creates_binds_runs_and_transitions_with_creator_identity
         TodoStatus.PENDING,
         TodoStatus.IN_PROGRESS,
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "public_bot_uuids,catalog_unavailable,error",
+    [
+        (set(), False, "not public"),
+        (None, True, "visibility is unavailable"),
+    ],
+)
+async def test_dispatch_fails_closed_when_bot_is_not_confirmed_public(
+    public_bot_uuids,
+    catalog_unavailable,
+    error,
+):
+    service, repository, _, _, collaboration = _service(
+        public_bot_uuids=public_bot_uuids,
+        catalog_unavailable=catalog_unavailable,
+    )
+
+    with pytest.raises(TodoBotScopeError, match=error):
+        await service.dispatch_pending(todo_id="todo_1")
+
+    assert repository.todo.status is TodoStatus.PENDING
+    assert collaboration.create_calls == []
 
 
 @pytest.mark.asyncio
@@ -446,6 +526,46 @@ async def test_resume_rejected_acceptance_resumes_original_bot_session():
     assert first.status is TodoStatus.IN_PROGRESS
     assert second.status is TodoStatus.IN_PROGRESS
     assert [call[2] for call in collaboration.resume_calls] == ["event_rejected"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "public_bot_uuids,catalog_unavailable,error",
+    [
+        (set(), False, "not public"),
+        (None, True, "visibility is unavailable"),
+    ],
+)
+async def test_resume_fails_closed_when_bot_is_no_longer_public(
+    public_bot_uuids,
+    catalog_unavailable,
+    error,
+):
+    context = replace(
+        _context("context_1", "done"),
+        events=(
+            _event("event_completed", 1, "task.completed"),
+            _event("event_interaction", 2, "user_interaction.posted"),
+        ),
+    )
+    service, repository, access, bots, collaboration = _service(
+        todo=_todo(
+            status=TodoStatus.IN_PROGRESS,
+            collab_context_id=context.collab_context_id,
+        ),
+        contexts=(context,),
+        public_bot_uuids=public_bot_uuids,
+        catalog_unavailable=catalog_unavailable,
+    )
+
+    with pytest.raises(TodoBotScopeError, match=error):
+        await service.resume_claimed_interaction(todo_id="todo_1")
+
+    assert repository.todo.status is TodoStatus.IN_PROGRESS
+    assert access.calls == [{"space_id": 7, "user_id": "creator_1"}]
+    assert bots.calls == ["bot_1"]
+    assert collaboration.resume_calls == []
+    assert service._artifacts.issue_calls == []
 
 
 @pytest.mark.asyncio
