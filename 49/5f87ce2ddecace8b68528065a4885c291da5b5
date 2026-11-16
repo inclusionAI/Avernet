@@ -1,0 +1,31 @@
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-session-recovery/SKILL.md
+  s_7b2b3fe9896460::t_bdca18e2369854 91-92
+  s_7b2b3fe9896460::t_ca99c24985f7e3 253-260
+  s_7b2b3fe9896460::t_e39a368cd924ed 79,83
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-session-recovery/scripts/recovery_ais/runner.py
+  s_7b2b3fe9896460::t_bdca18e2369854 187,209,396
+  s_7b2b3fe9896460::t_05d9fbc6dabb58 79,97-100,103,364
+  s_7b2b3fe9896460::t_e39a368cd924ed 223-224,656
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-session-recovery/tests/test_owner_feedback.py
+  s_7b2b3fe9896460::t_2d201c46bf5cf3 21-23,26-43
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-recovery-handbook/common/mcp/handbook.md
+  s_7b2b3fe9896460::t_e39a368cd924ed 21,27,29,127,202,207-208,213,217-219
+apps/evolverun/clawweb-skills/clawevolve-skills/README.md
+  s_7b2b3fe9896460::t_2d201c46bf5cf3 45-54
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "495f87ce2ddecace8b68528065a4885c291da5b5",
+  "prompts": {},
+  "sessions": {
+    "s_7b2b3fe9896460": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e2f7-7ab3-7873-9290-5b6880ed01e4",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}
