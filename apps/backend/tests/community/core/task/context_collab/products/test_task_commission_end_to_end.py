@@ -74,6 +74,9 @@ from agentclaw.community.core.task.context_collab.l6_products.binding import (
 from agentclaw.community.core.task.context_collab.l6_products.catalog import (
     ProductCatalog,
 )
+from agentclaw.community.core.task.context_collab.l6_products.contracts import (
+    VersionedProfileRef,
+)
 from agentclaw.community.core.task.context_collab.l6_products.creation_facts import (
     creation_payload,
 )
@@ -90,7 +93,7 @@ from agentclaw.community.core.task.context_collab.products.task_commission impor
 )
 from agentclaw.community.core.task.context_collab.products.task_commission.profile import (
     TASK_COMMISSION_PROFILE,
-    build_self_service_commission_profile,
+    init_product_profile,
 )
 from agentclaw.community.core.task.context_collab.products.task_commission.service_api import (
     ApplyForTaskCommand,
@@ -363,8 +366,8 @@ def commission_deployment(db, monkeypatch):
 
 
 @pytest.fixture(
-    params=[TASK_COMMISSION_PROFILE, build_self_service_commission_profile()],
-    ids=["v1", "v2"],
+    params=[TASK_COMMISSION_PROFILE, init_product_profile()],
+    ids=["legacy", "initial"],
 )
 def commission_runtime(commission_deployment, request):
     # Keep failure behavior for both the legacy and self-application flows.
@@ -374,14 +377,12 @@ def commission_runtime(commission_deployment, request):
 
 def test_end_to_end_commission_flow(commission_deployment, tmp_path):
     """产品上线 → 建任务 → Bot Query/Apply → 策略 Screen/Admit → scoped Participant → Work → accept。"""
-    # 1. 产品同学新建 v2 Profile 并上线。
-    profile = build_self_service_commission_profile()
-    assert profile.ref.version == 2
-    assert profile.composition.method_kind == "Open"
-    _flow_log(_TEST_DIRECTORY, "1. 产品同学定义任务代办 v2 Profile,通过 DI 部署上线")
+    # 1. 初始化product profile
+    profile = init_product_profile()
+
 
     with commission_deployment(profile) as (service, working_bot, injector):
-        assert injector.get(ProductCatalog).get("task_commission", 2) == profile
+        assert injector.get(ProductCatalog).get("task_commission", 1) == profile
         # 2. 业务同学通过 L4 Context.create 创建 Collet/Task,
         #    再显式调用 L4 Collet.activate;L6 负责精确选择已上线 Profile,
         #    L5 负责在创建后建立 Open binding。机会由下面显式调用
@@ -544,7 +545,7 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
             "collab_context_id": task_id,
             "opportunity_id": opportunity.opportunity_id,
             "method_binding_ref": opportunity.method_binding_id,
-            "product_profile_ref": {"profile_id": "task_commission", "version": 2},
+            "product_profile_ref": {"profile_id": "task_commission", "version": 1},
             "title": TITLE,
             "scope_ref": task_id,
         }
@@ -720,7 +721,7 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
         _flow_log(_TEST_DIRECTORY, "完整用户旅程结束:用户 accept 后 status=done")
 
 
-def _publish_v2(service, profile, assignee=BOT_ASSIGNEE):
+def _publish_initial(service, profile, assignee=BOT_ASSIGNEE):
     return service.publish_task(
         PublishTaskCommand(
             TITLE, BODY, SPACE, assignee, product_profile_ref=profile.ref
@@ -746,9 +747,9 @@ def test_task_application_review_rejects_unmatched_submission(
     commission_deployment, mismatch,
 ):
     """A known L5 application ID cannot bypass the real product admission policy."""
-    profile = build_self_service_commission_profile()
+    profile = init_product_profile()
     with commission_deployment(profile) as (service, bot, injector):
-        created = _publish_v2(service, profile)
+        created = _publish_initial(service, profile)
         context_id, binding = created.collet_id, top_level_binding_id(created.collet_id)
         context = ActorContext(PrincipalRef("bot", bot.bot_id), "a2a")
         open_method = injector.get(OpenMethodOpsServiceProtocol)
@@ -781,9 +782,9 @@ def test_task_application_review_rejects_unmatched_submission(
         elif mismatch == "binding":
             command = replace(command, method_binding_ref="another_binding")
         elif mismatch == "profile":
-            command = replace(command, product_profile_ref=TASK_COMMISSION_PROFILE.ref)
+            command = replace(command, product_profile_ref=VersionedProfileRef("other", 1))
         elif mismatch == "task":
-            other = _publish_v2(service, profile)
+            other = _publish_initial(service, profile)
             command = replace(
                 command, collab_context_id=other.collet_id,
                 method_binding_ref=top_level_binding_id(other.collet_id),
@@ -797,9 +798,9 @@ def test_task_application_review_rejects_unmatched_submission(
 
 
 def test_pure_open_admission_is_task_scoped_and_revocable(commission_deployment):
-    profile = build_self_service_commission_profile()
+    profile = init_product_profile()
     with commission_deployment(profile) as (service, bot, injector):
-        first, second = _publish_v2(service, profile), _publish_v2(service, profile)
+        first, second = _publish_initial(service, profile), _publish_initial(service, profile)
         receipt = _apply_to_created(bot, first)
         context = ActorContext(PrincipalRef("bot", BOT_ASSIGNEE), "a2a")
         generic = injector.get(ContextCollabServiceProtocol)
@@ -853,9 +854,9 @@ def test_pure_open_admission_is_task_scoped_and_revocable(commission_deployment)
 def test_scoped_open_binding_cannot_authorize_another_identity(
     commission_deployment, actor,
 ):
-    profile = build_self_service_commission_profile()
+    profile = init_product_profile()
     with commission_deployment(profile) as (service, bot, injector):
-        created = _publish_v2(service, profile)
+        created = _publish_initial(service, profile)
         _apply_to_created(bot, created)
         before = _participation_snapshot(service, injector, created)
         with pytest.raises(ContextCollabValidationError):
@@ -868,9 +869,9 @@ def test_scoped_open_binding_cannot_authorize_another_identity(
 def test_partial_open_admission_does_not_authorize_execution(
     commission_deployment, monkeypatch,
 ):
-    profile = build_self_service_commission_profile()
+    profile = init_product_profile()
     with commission_deployment(profile) as (service, bot, injector):
-        created = _publish_v2(service, profile)
+        created = _publish_initial(service, profile)
         [opportunity] = bot.request(opportunities_query_request(bot))["data"][
             "opportunities"
         ]

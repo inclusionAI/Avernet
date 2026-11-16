@@ -52,7 +52,7 @@ Shared G4 enforcement lives in
 | bbs_public_discussion@1 | bbs_public_discussion@1 | Open + Group | Optional |
 | bbs_help_request@1 | bbs_help_request_goal@1 | Open + Group | Optional |
 | task_commission@1 | task_commission_goal@1 | Open | Required |
-| task_commission@2 | task_commission_goal@1 | Open | Required; scoped participation established by Open admission |
+
 
 This table records **this checkout's existing implementations**. It does not
 infer that every public discussion is Group, or that a designated executor
@@ -62,9 +62,10 @@ requires a new version; preserve old definitions for existing instances.
 ## task_commission consumes its selected definition
 
 [`products/task_commission/profile.py`](../products/task_commission/profile.py)
-owns the installed v1 and v2 definitions, rather than placing business templates
-in L6 or a generic profile factory. Their specialized `DesignatedOpenAdmission`
-and `BotSelfApplicationAdmission` policies belong in
+owns the installed `task_commission@1` definition, rather than placing business
+templates in L6 or a generic profile factory. The specialized
+`DesignatedOpenAdmission` compatibility policy and
+`BotSelfApplicationAdmission` policy belong in
 [`products/task_commission/publication.py`](../products/task_commission/publication.py).
 The other four existing compatibility definitions live in
 [`products/legacy_profiles.py`](../products/legacy_profiles.py), not L6. Neither
@@ -73,8 +74,9 @@ module registers itself; only DI chooses the installation.
 The product service and its bounded Open adapter consume the injected definition:
 
 - `PublishTaskCommand.product_profile_ref` selects an exact installed definition
-  (default v1). Creation reads that definition's Method composition and Workflow
-  ref, then calls `prepare_product_spec` with the exact selection. This selector
+  (default `task_commission@1`). Creation reads that definition's Method
+  composition and Workflow ref, then calls `prepare_product_spec` with the exact
+  selection. This selector
   is creation-only: the input must have no pinned versions or materialized role
   facts. Generic creation still selects v1; neither path selects latest or
   migrates an existing instance.
@@ -82,26 +84,28 @@ The product service and its bounded Open adapter consume the injected definition
   `owner` to the required principal. Catalog construction delegates role validation
   to the product's specialized policy. L6 only requires the referenced roles to
   exist and be required; it does not impose commission's executor/principal
-  source mapping on all Open products. v1's `publisher_mediated` strategy keeps
-  the publisher as actor/accountable principal; it does not impersonate the Bot.
-  v2's `designated_bot_self_application` strategy uses the authenticated Bot as
+  source mapping on all Open products. The installed
+  `designated_bot_self_application` strategy uses the authenticated Bot as
   applicant, its signed owner as accountable principal, and publisher-authorized
-  policy execution for automatic review. G1 still authorizes L5 operations.
+  policy execution for automatic review. The separately assembled
+  `publisher_mediated` strategy is retained only for compatibility tests. G1
+  still authorizes L5 operations.
 - The DI adapter consumes the exact selected publication policy:
   `publish_opportunity → submit_application → screen → admit`, with
   `SINGLE_CONTRIBUTION` and capacity 1 in v1. The product passes the actual
   projected top-level MethodBinding ID, not a publisher/executor identity.
   Unsupported strategies, step sequences and delivery policies fail closed;
   the bounded adapter also rejects a generic policy that is not this product's
-  designated-executor strategy. v2 publication only opens the opportunity;
-  the Bot's later Query/Apply runs admission with GROUP_MEMBER, capacity 1,
-  and verifies the resulting task-scoped GroupMemberBinding. There is no arbitrary
-  workflow DSL executor.
-- Dispatch requires the L5 receipt to be `ADMITTED`. v1 also checks this before
-  appending the body Message; v2 publishes body/opportunity before Bot application,
-  with no early dispatch. Failure propagates without rollback of already-created
-  Collet/Method objects. No automatic retry, compensation or atomic cross-store
-  publication/admission is implied.
+  designated-executor strategy. The installed profile publication only opens the
+  opportunity; the Bot's later Query/Apply runs admission with
+  `COLLET_PARTICIPANT`, capacity 1, and verifies the resulting task-scoped
+  ParticipantBinding. There is no arbitrary workflow DSL executor.
+- Dispatch requires the L5 receipt to be `ADMITTED`. The installed profile
+  publishes the body/opportunity before Bot application, with no early dispatch;
+  the compatibility publisher-mediated path dispatches after admission. Failure
+  propagates without rollback of already-created Collet/Method objects. No
+  automatic retry, compensation or atomic cross-store publication/admission is
+  implied.
 - Six Work entrypoints resolve action/event/primitive/payload mappings from the
   instance's exact WorkflowProfile. G4 checks declared control-event mappings,
   then the referenced G4 machine remains the only transition authority. L6
@@ -113,7 +117,8 @@ The product service and its bounded Open adapter consume the injected definition
 
 The internal `AssigneeAdmissionCommand` and `DispatchedTaskInfo` require those
 two refs; existing public user creation and Work wire fields remain unchanged.
-The bounded signed-Bot route additionally handles v2 Query/Apply; see the
+The bounded signed-Bot route also handles Query/Apply for the installed profile;
+see the
 [commission wire contract](../products/task_commission/README.md#wire-contract-and-example).
 Other products
 may intentionally have no automatic Open publication contract. Such definitions
@@ -136,7 +141,8 @@ cannot be consumed by this publication use case.
    `profile_versions` come from the pinned product definition; its
    `role_binding_refs` identify the same L4 facts as ProductInstance. A role ref
    is a local, Collet-qualified `(role, participant)` reference, not an independent
-   identity or resource permission authority. Commission v2 uses pure Open;
+   identity or resource permission authority. The installed task_commission@1
+profile uses pure Open;
    designation does not create participation. Only later COLLET_PARTICIPANT
    admission establishes a scoped Participant binding, validated alongside the
    application/decision and Method lifecycle. No Group roster or members are
@@ -162,7 +168,7 @@ authorize an operation merely because a role/template mentions it.
   progress and submit; public events; `percent` is an integer in `[0,100]` and belongs only
   to progress reporting, never a Message-based side channel. Existing G4 guards
   check artifacts and owner acceptance/cancellation. Terminal/out-of-order
-  controls fail before writing. v2 additionally installs an admission prerequisite
+  controls fail before writing. The installed profile additionally installs an admission prerequisite
   through shared G1: product and generic L4 start/progress/submit require the
   designated Bot's active, task-scoped Open/Group binding. Designation alone or
   admission to another task cannot authorize execution; revocation blocks it.
@@ -184,9 +190,9 @@ authorize an operation merely because a role/template mentions it.
 ## Compatibility, read behavior and migration
 
 - Public user creation fields and six-field creation payload remain unchanged.
-  Generic creation and omitted product-service selection preserve v1. The product
-  service can explicitly select v2; no dynamic registration API or new route is
-  added. A product/workflow/Method mismatch is rejected before persistence, rather
+  Generic creation and omitted product-service selection use the installed
+  `task_commission@1` profile. The product service can explicitly select that
+  exact definition; no dynamic registration API or new route is added. A product/workflow/Method mismatch is rejected before persistence, rather
   than accepted as unrelated labels.
 - New product rows pin product/workflow versions and store explicit role facts.
   G1 compares identity **type and ID** through these facts. Legacy rows retain
@@ -230,7 +236,8 @@ this minimum contract increment. Do not describe it as full ACCS conformance.
 
 The [commission user-journey test](../../../../../../../tests/community/core/task/context_collab/products/test_task_commission_end_to_end.py)
 uses the actual `TaskModule` / `TaskPersistenceModule`, isolated SQLite and the
-real catalog seam to deploy an authored v2 profile. Product staff define/deploy;
+real catalog seam to deploy an authored `task_commission@1` profile. Product
+staff define/deploy;
 business staff create/designate; the case directly invokes L5 Open's
 `query_opportunities` with the Bot actor and explicit context/binding, rather
 than a built-in working-Bot method. Product-wide signed HTTP Query is checked
@@ -242,7 +249,8 @@ MethodStore assertions verify nonmutation and actual admission/membership.
 
 Negative cases check unrelated Bots, forged contexts, repeated Query, duplicate
 Apply, task isolation, revocation through both Work entrypoints and signed-tenant
-SQL discovery. Execution failure must not auto-submit in either v1 or v2. The
+SQL discovery. Execution failure must not auto-submit in either the installed self-application
+path or the compatibility path. The
 harness signs a local principal; it does not verify gateway forwarding or actual
 outbound receipt. Outbound still uses local `MockA2aDelivery`. Open handles
 admission; progress/submission remain L4 Work, never Open operations.

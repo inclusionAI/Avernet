@@ -28,6 +28,10 @@ from agentclaw.community.core.task.context_collab.l6_products.catalog import (
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     VersionedProfileRef,
 )
+from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
+    AgentRef,
+    PrincipalRef,
+)
 from agentclaw.community.core.task.context_collab.l6_products.publication import (
     OpenAdmissionPolicy,
     OpenPublicationProfile,
@@ -37,7 +41,7 @@ from agentclaw.community.core.task.context_collab.method_service_api import (
 )
 from agentclaw.community.core.task.context_collab.products.task_commission.profile import (
     TASK_COMMISSION_PROFILE,
-    build_self_service_commission_profile,
+    init_product_profile,
 )
 from agentclaw.community.core.task.context_collab.products.task_commission.service_api import (
     AssigneeAdmissionCommand,
@@ -52,17 +56,20 @@ from tests.community.core.task.context_collab.products.test_task_commission_publ
 )
 
 
+PRINCIPAL = PrincipalRef("human", "u_1001")
+
+
 def test_commission_has_a_complete_declarative_publication_and_work_contract():
     profile = PRODUCT_CATALOG.get("task_commission", 1)
-    assert profile is TASK_COMMISSION_PROFILE
+    assert profile == init_product_profile()
     publication = profile.require_publication()
     assert publication.admission.applicant_role == "assignee"
     assert publication.admission.accountable_role == "owner"
-    assert publication.admission.strategy == "publisher_mediated"
+    assert publication.admission.strategy == "designated_bot_self_application"
     assert publication.admission.capacity == 1
     assert (
         publication.admission.participation_type
-        is ParticipationType.SINGLE_CONTRIBUTION
+        is ParticipationType.COLLET_PARTICIPANT
     )
     assert publication.dispatch_after is ApplicationState.ADMITTED
     assert publication.partial_failure == "propagate_without_rollback"
@@ -281,11 +288,11 @@ def test_generic_open_policy_does_not_encode_commission_role_sources():
     assert ops.mock_calls == []
 
 
-def test_v2_adds_self_application_without_changing_v1_or_workflow():
-    legacy = PRODUCT_CATALOG.get("task_commission", 1)
-    profile = build_self_service_commission_profile()
-    assert PRODUCT_CATALOG.get("task_commission", 2) == profile
-    assert profile.ref == VersionedProfileRef("task_commission", 2)
+def test_initial_profile_uses_self_application_without_version_bump():
+    legacy = TASK_COMMISSION_PROFILE
+    profile = init_product_profile()
+    assert PRODUCT_CATALOG.get("task_commission", 1) == profile
+    assert profile.ref == VersionedProfileRef("task_commission", 1)
     assert profile.composition.method_kind == "Open"
     assert {
         item.method: item.version for item in profile.composition.required_methods
@@ -315,6 +322,6 @@ def test_v2_adds_self_application_without_changing_v1_or_workflow():
     ],
 )
 def test_self_application_policy_rejects_incompatible_semantics(overrides):
-    policy = build_self_service_commission_profile().require_publication().admission
+    policy = init_product_profile().require_publication().admission
     with pytest.raises(ContextCollabValidationError):
         replace(policy, **overrides)

@@ -47,7 +47,8 @@ class PublishTaskCommand:
     space: SpaceRef
     assignee_agent_id: str
     resource_refs: list[ResourceRef] = field(default_factory=list)
-    # Creation-only exact selection; omission deliberately preserves v1.
+    # Creation-only exact selection; omission selects the installed task_commission@1
+    # self-application profile.
     product_profile_ref: VersionedProfileRef = VersionedProfileRef("task_commission", 1)
 
 
@@ -117,8 +118,8 @@ class AssigneeAdmissionCommand:
     ``collab_context_id`` 即机会 scope_ref 与录取 admitted_scope_ref;
     ``assignee_agent_id`` 是被指派执行 bot(申请的 applicant_agent_ref);
     ``accountable_principal_id`` 是发布发起人 principal_id:v1 代投申请
-    由发布人担责;v2 仅授权发布策略,真正 Bot 申请使用 ApplyForTaskCommand
-    中认证 Bot owner 的责任主体,不沿用发布人身份。
+    由发布人担责;初始自助申请 Profile 仅授权发布策略,真正 Bot 申请使用
+    ApplyForTaskCommand 中认证 Bot owner 的责任主体,不沿用发布人身份。
     ``product_profile_ref`` 固定本次采用的 L6 定义;适配器必须消费其中
     的 publication 合同,不能另选 latest。``method_binding_ref`` 是已
     实例化的 L5 绑定,不是发布人或执行者身份。
@@ -133,7 +134,7 @@ class AssigneeAdmissionCommand:
 
 @dataclass(frozen=True)
 class AssigneeAdmissionReceipt:
-    """Open admission receipt; v2 exposes scoped binding refs to the applicant.
+    """Open admission receipt; self-application exposes scoped binding refs.
 
     MethodStore facts do not imply restart durability.
     """
@@ -173,9 +174,9 @@ class ApplyForTaskCommand:
 class TaskMethodOpsPort(Protocol):
     """Profile-selected Open orchestration seam, implemented at DI assembly.
 
-    v1: publisher-mediated SINGLE_CONTRIBUTION admission during publication.
-    v2: publication only opens an opportunity; designated Bot Query/Apply invokes
-    owner-authorized automatic review and task-scoped participation. Query
+    The installed task_commission@1 profile publishes an opportunity; the
+    designated Bot Query/Apply invokes owner-authorized automatic review and
+    task-scoped participation. Query
     is read-only. require_admitted guards Work through the shared G1 seam.
     Unsupported strategies fail closed; partial failures propagate without rollback.
     """

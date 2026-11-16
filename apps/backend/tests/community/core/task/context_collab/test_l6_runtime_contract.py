@@ -30,6 +30,9 @@ from agentclaw.community.core.task.context_collab.l6_products.binding import (
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     VersionedProfileRef,
 )
+from agentclaw.community.core.task.context_collab.products.legacy_profiles import (
+    LEGACY_PRODUCT_PROFILES,
+)
 from agentclaw.community.core.task.context_collab.products.task_commission.profile import (
     TASK_COMMISSION_PROFILE,
 )
@@ -75,7 +78,7 @@ from agentclaw.community.core.task.context_collab.l5_methods.operations.open.ser
 from agentclaw.community.di.modules.task_commission_method_ops_adapter import (
     TaskCommissionOpenMethodAdapter,
 )
-from tests.community.core.task.context_collab.product_catalog import PRODUCT_CATALOG
+LEGACY_PRODUCT_CATALOG = ProductCatalog((*LEGACY_PRODUCT_PROFILES, TASK_COMMISSION_PROFILE))
 
 OWNER = PrincipalRef("human", "owner")
 BOT = PrincipalRef("bot", "worker")
@@ -100,7 +103,7 @@ def _command(**overrides):
     return ColletCreateCommand(**(fields | overrides))
 
 
-def _services(db, dispatch_port=None, *, catalog=PRODUCT_CATALOG):
+def _services(db, dispatch_port=None, *, catalog=LEGACY_PRODUCT_CATALOG):
     repo = ContextCollabRepository(db, product_catalog=catalog)
     store = InMemoryMethodStore()
     authorizer = StructuralContextCollabAuthorizer()
@@ -300,7 +303,7 @@ def test_pinned_instance_round_trip_and_heal_do_not_renegotiate(db, monkeypatch)
         )
 
     monkeypatch.setattr(ProductCatalog, "capabilities", cannot_negotiate)
-    restarted_repo = ContextCollabRepository(db, product_catalog=PRODUCT_CATALOG)
+    restarted_repo = ContextCollabRepository(db, product_catalog=LEGACY_PRODUCT_CATALOG)
     recovered = restarted_repo.get_current_status(created.collab_context_id)
     assert recovered.product_instance == instance
     healed = ensure_top_level_binding(
@@ -310,7 +313,7 @@ def test_pinned_instance_round_trip_and_heal_do_not_renegotiate(db, monkeypatch)
         restarted_repo,
         _actor(),
         now="2026-11-13T00:00:00+00:00",
-        catalog=PRODUCT_CATALOG,
+        catalog=LEGACY_PRODUCT_CATALOG,
     )
     assert healed.profile_versions == binding.profile_versions
     assert healed.role_binding_refs == binding.role_binding_refs
@@ -492,9 +495,9 @@ def test_uninstalled_catalog_rejects_both_creators_before_any_write(db):
     assert store.list_bindings(current_axes(), "missing") == []
 
 
-def test_injected_exact_v2_survives_storage_recovery_and_shared_g4(db, monkeypatch):
-    # No v1 is installed: consulting a global/default catalog cannot pass this test.
-    # v2 deliberately allows private messages, unlike the installed v1 contract.
+def test_injected_exact_profile_survives_storage_recovery_and_shared_g4(db, monkeypatch):
+    # The isolated catalog deliberately allows private messages, unlike the
+    # installed initial contract.
     v2 = replace(
         TASK_COMMISSION_PROFILE,
         ref=VersionedProfileRef("task_commission", 2),
@@ -534,7 +537,7 @@ def test_injected_exact_v2_survives_storage_recovery_and_shared_g4(db, monkeypat
     assert healed.profile_versions == {"Open": "0.2"}
     assert healed.role_binding_refs == instance.role_binding_refs
     assert (healed.method_binding_id,) == instance.method_binding_refs
-    # Generic G4 must use injected v2, not reject using v1's public-only rule.
+    # Generic G4 must use the injected profile, not the installed public-only rule.
     message = _append(
         generic,
         collet_id,

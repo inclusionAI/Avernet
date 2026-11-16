@@ -30,9 +30,10 @@ from agentclaw.community.core.task.context_collab.products.task_commission.publi
     DesignatedOpenAdmission,
 )
 
-# New behavior/topology needs a new ref; existing instances never select latest.
-# Executor-only progress below enforces the existing v1 assignee responsibility
-# (authorization bug fix), not a profile migration.
+# The installed self-application behavior intentionally reuses the
+# task_commission@1 reference; existing instances never select latest.
+# Executor-only progress below enforces the task_commission@1 assignee
+# responsibility (authorization bug fix), not a profile migration.
 TASK_COMMISSION_PROFILE_REF = VersionedProfileRef("task_commission", 1)
 
 TASK_COMMISSION_PROFILE = ProductProfileDefinition(
@@ -143,14 +144,16 @@ TASK_COMMISSION_PROFILE = ProductProfileDefinition(
 )
 
 
-SELF_SERVICE_COMMISSION_PROFILE_REF = VersionedProfileRef("task_commission", 2)
+SELF_SERVICE_COMMISSION_PROFILE_REF = VersionedProfileRef("task_commission", 1)
 
 
-def build_self_service_commission_profile() -> ProductProfileDefinition:
-    """Product authoring: a new immutable definition, deployed through DI.
+def init_product_profile() -> ProductProfileDefinition:
+    """Initialize the installed task-commission Product Profile.
 
-    Keep v1 installed for existing tasks. This is not a runtime registration API.
-    Workflow stays at v1: admission changes, Work/acceptance semantics do not.
+    The initial product keeps the original ``task_commission@1`` reference;
+    self-application is part of that initial contract rather than a versioned
+    upgrade. The returned definition is immutable and is installed explicitly
+    by the DI composition root.
     """
     return replace(
         TASK_COMMISSION_PROFILE,
