@@ -255,7 +255,7 @@ column/table names and tenant/env isolation remain unchanged.
 ### Explicit installation on an existing Collet
 
 Pure L4 `create_collet(ColletCreateCommand, context)` does not select a Profile,
-Method or bindings. Its input contains only space, responsible principal,
+Method or bindings. Its input contains only space, initiator reference,
 objective and zero/one/many designated executor references. To apply a product,
 call the separate L6-owned
 [`ProductInstantiationServiceProtocol`](operations/contracts.py):

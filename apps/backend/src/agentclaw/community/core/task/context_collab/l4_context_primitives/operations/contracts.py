@@ -46,7 +46,7 @@ class ColletCreateCommand:
     """
 
     to_space: SpaceRef
-    principal_ref: PrincipalRef
+    initiator_ref: PrincipalRef
     objective: str
     executor_refs: tuple[AgentRef, ...] = ()
 
@@ -54,13 +54,13 @@ class ColletCreateCommand:
         if not isinstance(self.objective, str) or not self.objective.strip():
             raise ContextCollabValidationError("objective must be a non-empty string")
         if not isinstance(self.to_space, SpaceRef) or not isinstance(
-            self.principal_ref, PrincipalRef
+            self.initiator_ref, PrincipalRef
         ):
             raise ContextCollabValidationError(
                 "creation requires typed Space/Principal references"
             )
         SpaceRef.from_dict(self.to_space.to_dict())
-        PrincipalRef.from_dict(self.principal_ref.to_dict())
+        PrincipalRef.from_dict(self.initiator_ref.to_dict())
         object.__setattr__(
             self, "executor_refs", normalize_executor_refs(self.executor_refs)
         )

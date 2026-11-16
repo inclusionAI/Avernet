@@ -48,7 +48,7 @@ def _seed_publication(world):
     collet = world.get(ContextServiceProtocol).create_collet(
         ColletCreateCommand(
             to_space=SpaceRef("space_publication", "prod"),
-            principal_ref=actor.actor,
+            initiator_ref=actor.actor,
             objective="Publish a contribution opportunity",
         ),
         actor,

@@ -186,7 +186,7 @@ class ContextCollabRepository:
         record = build_created_collet(
             ColletCreateCommand(
                 to_space=request.space,
-                principal_ref=request.principal_ref,
+                initiator_ref=request.principal_ref,
                 objective=request.objective,
                 executor_refs=request.executor_refs
                 or (
