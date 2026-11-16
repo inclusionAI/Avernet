@@ -2,9 +2,6 @@ name: ClawWeb CI
 
 on:
   pull_request:
-    paths:
-      - "apps/evolverun/clawweb/**"
-      - ".github/workflows/clawweb-ci.yml"
   workflow_dispatch:
 
 permissions:
@@ -26,8 +23,41 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Always produce a check result; unrelated PRs skip only the heavy steps.
+      - name: Detect ClawWeb changes
+        id: changes
+        working-directory: ${{ github.workspace }}
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ -z "$BASE_SHA" ]; then
+            echo "Missing PR base SHA" >&2
+            exit 1
+          fi
+          changed_files="$(mktemp)"
+          trap 'rm -f "$changed_files"' EXIT
+          # Compare the PR base with the checked-out merge commit. Diff failures
+          # must fail the check, not be interpreted as an unrelated change.
+          git diff --name-only --no-renames -z "$BASE_SHA" "$GITHUB_SHA" -- \
+            apps/evolverun/clawweb .github/workflows/clawweb-ci.yml > "$changed_files"
+          if [ -s "$changed_files" ]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "No ClawWeb changes; skipping build and tests."
+          fi
 
       - name: Set up Node.js
+        if: steps.changes.outputs.skip == 'false'
         uses: actions/setup-node@v4
         with:
           node-version: "20.19.0"
@@ -35,23 +65,28 @@ jobs:
           cache-dependency-path: apps/evolverun/clawweb/package-lock.json
 
       - name: Install dependencies
+        if: steps.changes.outputs.skip == 'false'
         run: npm ci --no-audit --no-fund
 
       - name: Build packages
+        if: steps.changes.outputs.skip == 'false'
         run: npm run ci:build
 
       - name: Check packages
+        if: steps.changes.outputs.skip == 'false'
         run: npm run ci:check
 
       - name: Verify test runner
+        if: steps.changes.outputs.skip == 'false'
         run: node --test scripts/ci/run-tests.test.mjs
 
       - name: Test packages with coverage
+        if: steps.changes.outputs.skip == 'false'
         continue-on-error: false
         run: npm run test:ci
 
       - name: Publish test summary
-        if: always()
+        if: always() && steps.changes.outputs.skip == 'false'
         run: |
           if [ -f test-results/summary.md ]; then
             cat test-results/summary.md >> "$GITHUB_STEP_SUMMARY"
@@ -60,7 +95,7 @@ jobs:
           fi
 
       - name: Upload test reports
-        if: always()
+        if: always() && steps.changes.outputs.skip == 'false'
         uses: actions/upload-artifact@v4
         with:
           name: clawweb-test-results
