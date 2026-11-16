@@ -28,14 +28,18 @@ export interface GroupContextView {
 // that Human’s Bot authority and the requested Group or Session membership.
 const path = '/openapi/v1/collaboration/groupcontext';
 
-function request<T>(operation: string, view: GroupContextView, data: object, signal?: AbortSignal) {
-  return backendRequest<BackendApiEnvelope<T>>(`${path}/${operation}`, {
+async function request<T>(operation: string, view: GroupContextView, data: object, signal?: AbortSignal) {
+  const response = await backendRequest<BackendApiEnvelope<T>>(`${path}/${operation}`, {
     method: 'POST',
     params: { ...view },
     data,
     signal,
     injectUserId: false,
-  }).then((response) => response.data);
+  });
+  if (response.data == null) {
+    throw new Error(response.message ?? '接口返回为空');
+  }
+  return response.data;
 }
 
 export function listSharedInfo(view: GroupContextView, signal: AbortSignal) {
