@@ -16,6 +16,9 @@ mod group_human_mention_notify_mode;
 #[path = "tests/group_context_owners.rs"]
 mod group_context_owners;
 
+#[path = "tests/message_activity_indexes.rs"]
+mod message_activity_indexes;
+
 async fn column_names(db: &dyn DbPlugin, table: &str) -> DbResult<Vec<String>> {
     let rows = db
         .query(DbStatement::new(format!("PRAGMA table_info({table})")))
@@ -269,6 +272,7 @@ async fn fresh_sqlite_migrations_create_human_output_metadata() -> DbResult<()> 
             (42, "auth_session_version".to_string(), "sqlite".to_string()),
             (43, "delivery_session_lookup".to_string(), "sqlite".to_string()),
             (44, "group_context_preset".to_string(), "sqlite".to_string()),
+            (45, "message_activity_indexes".to_string(), "sqlite".to_string()),
         ]
     );
     Ok(())
@@ -279,7 +283,7 @@ async fn sqlite_migration_plan_reports_all_versions() -> DbResult<()> {
     let db = LocalSqliteDbPlugin::new()?;
 
     let report = check_sqlite_migrations(&db).await?;
-    assert_eq!(report.pending_versions.len(), 44);
+    assert_eq!(report.pending_versions.len(), 45);
     assert_eq!(report.pending_versions[0].version, 1);
     assert_eq!(report.pending_versions[0].name, "init_schema");
     assert!(report.pending_versions[0].statements.is_empty());
@@ -739,6 +743,7 @@ async fn sqlite_migrations_are_idempotent() -> DbResult<()> {
             (42, "auth_session_version".to_string(), "sqlite".to_string()),
             (43, "delivery_session_lookup".to_string(), "sqlite".to_string()),
             (44, "group_context_preset".to_string(), "sqlite".to_string()),
+            (45, "message_activity_indexes".to_string(), "sqlite".to_string()),
         ]
     );
     Ok(())

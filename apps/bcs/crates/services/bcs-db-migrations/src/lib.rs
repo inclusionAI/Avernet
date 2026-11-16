@@ -161,6 +161,7 @@ const SQLITE_VERSIONED_MIGRATIONS: &[SqliteMigration] = &[
     SqliteMigration { version: 42, name: "auth_session_version" },
     SqliteMigration { version: 43, name: "delivery_session_lookup" },
     SqliteMigration { version: 44, name: "group_context_preset" },
+    SqliteMigration { version: 45, name: "message_activity_indexes" },
 ];
 
 pub fn sqlite_target_version() -> i64 {
@@ -575,6 +576,18 @@ async fn apply_sqlite_migration_body(
                 }
                 db.execute(DbStatement::new(sql)).await?;
             }
+            Ok(())
+        }
+        // Read-time conversation-activity aggregates (design D2 gate): the
+        // covering keys behind `sort=last_activity` on both list endpoints.
+        45 => {
+            let steps = bcs_db_api::split_sql_statements(include_str!(
+                "../../../../migrations/sqlite/045_message_activity_indexes.sql"
+            ))
+            .into_iter()
+            .map(|sql| DbTransactionStep::Execute(DbStatement::new(sql)))
+            .collect();
+            db.transaction(steps).await?;
             Ok(())
         }
         _ => Ok(()),
