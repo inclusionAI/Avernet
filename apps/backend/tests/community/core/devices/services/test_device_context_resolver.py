@@ -311,3 +311,44 @@ def test_resolve_for_binding_handles_missing_bot_gracefully(
     ctx = resolver.resolve_for_binding(3, "user-1", bot_id="bot-orphan")
 
     assert ctx.bot_type == ""
+
+
+# ── RELEASED binding 拒绝 ──
+
+def test_released_binding_resolve_for_binding_raises_device_not_bound(
+    resolver, fake_binding_repo
+):
+    """RELEASED status 的 binding 经 resolve_for_binding 应抛 DeviceNotBoundError。"""
+    binding = _mock_binding(301, "teclaw")
+    binding.status = "RELEASED"
+    fake_binding_repo.get_by_id.return_value = binding
+
+    with pytest.raises(DeviceNotBoundError, match="RELEASED"):
+        resolver.resolve_for_binding(301, "user-1", bot_id="bot-301")
+
+
+def test_released_binding_resolve_for_bot_raises_device_not_bound(
+    resolver, fake_binding_repo
+):
+    """RELEASED status 的 binding 经 resolve_for_bot 应抛 DeviceNotBoundError。"""
+    binding = _mock_binding(302, "teclaw")
+    binding.status = "RELEASED"
+    fake_binding_repo.get_active_by_bot_and_owner.return_value = binding
+
+    with pytest.raises(DeviceNotBoundError, match="RELEASED"):
+        resolver.resolve_for_bot("bot-302", "user-1")
+
+
+def test_released_binding_resolve_for_binding_invoke_raises_device_not_bound(
+    resolver, fake_binding_repo, fake_bot_repo
+):
+    """RELEASED status 的 binding 经 resolve_for_binding_invoke 应抛 DeviceNotBoundError。"""
+    binding = _mock_binding(303, "baas")
+    binding.status = "RELEASED"
+    fake_binding_repo.get_by_id.return_value = binding
+    fake_bot_repo.get_by_id_and_owner.return_value = {"bot_type": "service"}
+
+    with pytest.raises(DeviceNotBoundError, match="RELEASED"):
+        resolver.resolve_for_binding_invoke(
+            303, "owner-1", bot_id="service-bot"
+        )
