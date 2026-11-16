@@ -354,10 +354,11 @@ def test_resolve_transition_ambiguous_matches_raise():
 
 # ---------------------------------------------------------------- §4.3 守卫事实
 
-def _input(actor=P_RESPONSIBLE, responsible=P_RESPONSIBLE, executor=None, payload=None):
+def _input(actor=P_RESPONSIBLE, responsible=P_RESPONSIBLE, executor=None, payload=None,
+           task_id="t-1"):
     return GuardEvaluationInput(
         actor=actor, responsible=responsible, executor=executor,
-        payload={} if payload is None else payload,
+        payload={} if payload is None else payload, task_id=task_id,
     )
 
 
@@ -409,9 +410,11 @@ def test_guard_required_artifacts_present():
 def test_guard_event_matches_task():
     guard = GUARD_REGISTRY["event_matches_task"]
     assert guard(_input(payload={"progress": "50%"})).verdict == "PASS"
-    outcome = guard(_input(payload={"task_id": "t-1"}))
-    assert outcome.verdict == "FAIL"
-    assert outcome.reason == "explicit task_id not supported in P1"
+    assert guard(_input(payload={"task_id": "t-1"})).verdict == "PASS"
+    for task_id in ("other-task", "", None, 123, True):
+        outcome = guard(_input(payload={"task_id": task_id}))
+        assert outcome.verdict == "FAIL"
+        assert outcome.reason == "payload task_id does not match the L4 Task"
 
 
 def test_guard_registry_covers_all_machine_guard_refs():

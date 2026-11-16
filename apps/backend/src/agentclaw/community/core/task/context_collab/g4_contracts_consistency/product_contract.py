@@ -27,6 +27,7 @@ from agentclaw.community.core.task.context_collab.l6_products.creation_facts imp
 )
 from agentclaw.community.core.task.context_collab.l6_products.instance import ProductInstance
 from agentclaw.community.core.task.context_collab.l6_products.task_contracts import (
+    TASK_PROGRESS_DETAIL_FIELDS,
     resolve_event_contract,
 )
 
@@ -75,6 +76,22 @@ def validate_product_event(
         if event_kind != "task.progress.updated":
             raise ContextCollabValidationError(
                 "task percent is only reportable by report_progress"
+            )
+    if contract.executor_submission_only and event_kind.startswith("task."):
+        for field_name in TASK_PROGRESS_DETAIL_FIELDS:
+            if field_name not in payload:
+                continue
+            if event_kind != "task.progress.updated":
+                raise ContextCollabValidationError(
+                    f"task {field_name} is only reportable by report_progress"
+                )
+            if not isinstance(payload[field_name], str):
+                raise ContextCollabValidationError(
+                    f"task {field_name} must be a string"
+                )
+        if "task_id" in payload and (task is None or payload["task_id"] != task.task_id):
+            raise ContextCollabValidationError(
+                "report task_id does not match the L4 Task"
             )
     machine_ref = contract.state_machine_ref
     machine = (

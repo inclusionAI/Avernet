@@ -406,7 +406,7 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path, orchestrati
             scenario_roles=TASK_COMMISSION_PROFILE.scenario_roles,    # 角色信息
             governance=TASK_COMMISSION_PROFILE.governance,            # g1-g4配置
             compatibility=TASK_COMMISSION_PROFILE.compatibility,      # 能力需求声明
-            publication=OpenPublicationProfile(                       # OPEN方法发布录取策略
+            publication=OpenPublicationProfile(                       # OPEN方法发布录取策略 TODO:change_name
                 admission=BotSelfApplicationAdmission(                # 指定执行者、发布人代办录取的策略
                     applicant_role="assignee",
                     accountable_role="owner",
@@ -473,6 +473,8 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path, orchestrati
 
         # 6、调用 L5 Open Method的-提交申请。
         record = injector.get(ContextCollabRepositoryProtocol).get_current_status(collect_id)
+        assert record.task is not None
+        task_id = record.task.task_id
         submitted = open_method.submit_application(
             collab_context_id=collect_id,
             method_binding_id=opportunity.method_binding_id,
@@ -553,10 +555,12 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path, orchestrati
             created,
             lambda report_progress: _simulate_ai_coding(
                 tmp_path=tmp_path,
-                task_id=collect_id,
+                collet_id=collect_id,
+                task_id=task_id,
                 service=service,
                 report_progress=report_progress,
             ),
+            task_id=task_id,
             initial_revision=started.context_version,
         )
         review = service.detail_task(collect_id)
@@ -591,6 +595,15 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path, orchestrati
             for event in final_events
             if event.event_kind == "task.progress.updated"
         ] == [note for _, note in _AI_CODING_STEPS]
+        progress_events = [
+            event for event in final_events if event.event_kind == "task.progress.updated"
+        ]
+        assert task_id != collect_id
+        for index, event in enumerate(progress_events):
+            assert event.payload["task_id"] == task_id
+            assert event.payload["progress"]
+            assert event.payload["error_msg"] == ""
+            assert event.payload["reason"] == f"产物已生成：{artifacts[index]}"
         [submitted_event] = [
             event for event in final_events if event.event_kind == "task.submitted"
         ]

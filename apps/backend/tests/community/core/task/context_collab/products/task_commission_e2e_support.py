@@ -52,6 +52,9 @@ def opportunities_query_request(bot: Any) -> dict:
     return request
 
 
+ProgressReporter = Callable[[int, str, str, str, str], None]
+
+
 _AI_CODING_STEPS = (
     (20, "写方案完成"),
     (50, "编码完成"),
@@ -70,9 +73,10 @@ def _flow_log(directory: str, message: str) -> None:
 def _simulate_ai_coding(
     *,
     tmp_path: Path,
+    collet_id: str,
     task_id: str,
     service: TaskCommissionServiceProtocol,
-    report_progress: Callable[[int, str], None],
+    report_progress: ProgressReporter,
 ) -> list[str]:
     """执行本地 AI coding 模拟,并通过回调逐步上报 L4 Work 进度。
 
@@ -84,7 +88,7 @@ def _simulate_ai_coding(
     test_result, pr = tmp_path / "test-result.txt", tmp_path / "pull-request.md"
     artifacts = [path.as_uri() for path in (plan, code, test_result, pr)]
 
-    assert service.detail_task(task_id).status == "in_progress"
+    assert service.detail_task(collet_id).status == "in_progress"
     for index, (percent, note) in enumerate(_AI_CODING_STEPS):
         if index == 0:
             plan.write_text(
@@ -106,10 +110,19 @@ def _simulate_ai_coding(
             )
 
         _flow_log(_TEST_DIRECTORY, f"5. AI coding: {note}, progress={percent}%")
-        report_progress(percent, note)
-        live = service.detail_task(task_id)
+        progress = f"已完成 {index + 1}/{len(_AI_CODING_STEPS)} 个步骤：{note}"
+        reason = f"产物已生成：{artifacts[index]}"
+        report_progress(percent, note, progress, "", reason)
+        live = service.detail_task(collet_id)
         assert live.status == "in_progress"  # 100% is not accept or submit.
-        assert live.events[-1]["payload"] == {"note": note, "percent": percent}
+        assert live.events[-1]["payload"] == {
+            "note": note,
+            "percent": percent,
+            "progress": progress,
+            "error_msg": "",
+            "reason": reason,
+            "task_id": task_id,
+        }
         assert live.events[-1]["actor_id"] == BOT_ASSIGNEE
         assert all(
             event["event_kind"] != "task.submitted" for event in live.events
@@ -199,8 +212,9 @@ class SimulatedWorkingBot:
     def run(
         self,
         created: TaskCommissionCreatedView,
-        execute: Callable[[Callable[[int, str], None]], list[str]],
+        execute: Callable[[ProgressReporter], list[str]],
         *,
+        task_id: str,
         initial_revision: int,
     ) -> list[str]:
         """执行已由 L4 Work 启动的任务;Bot 不拥有 start_task 方法。"""
@@ -212,7 +226,7 @@ class SimulatedWorkingBot:
             _flow_log(
                 _TEST_DIRECTORY,
                 f"模拟 Bot → POST /a2a/task-commission: action={action}, "
-                f"task={created.collet_id}, expected_revision={revision}",
+                f"task={task_id}, collet={created.collet_id}, expected_revision={revision}",
             )
             result = self.request(request)["result"]
             revision = int(result["result_refs"][0]["version"])
@@ -220,8 +234,17 @@ class SimulatedWorkingBot:
                 _TEST_DIRECTORY, f"模拟 Bot 收到 {action} 成功回执, revision={revision}"
             )
 
-        def report_progress(percent: int, note: str) -> None:
-            send("progress", {"percent": percent, "note": note})
+        def report_progress(
+            percent: int, note: str, progress: str, error_msg: str, reason: str
+        ) -> None:
+            send("progress", {
+                "percent": percent,
+                "note": note,
+                "progress": progress,
+                "error_msg": error_msg,
+                "reason": reason,
+                "task_id": task_id,
+            })
 
         # 调用方已直接通过 L4 Work.start 启动任务。
         # Bot 只上报实际执行过程,不能把自身的运行器当成 L4 Work API。

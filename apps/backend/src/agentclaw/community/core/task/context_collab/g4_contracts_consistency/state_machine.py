@@ -110,6 +110,8 @@ class GuardEvaluationInput:
     responsible: PrincipalRef
     executor: AgentRef | None
     payload: dict
+    # Authoritative local Work subject, never inferred from the report payload.
+    task_id: str
 
 
 GuardFunction = Callable[[GuardEvaluationInput], GuardOutcome]
@@ -412,9 +414,12 @@ def _guard_event_matches_task(
 ) -> GuardOutcome:
     if "task_id" not in evaluation.payload:
         return GuardOutcome(verdict="PASS", reason="no explicit task_id in payload")
+    task_id = evaluation.payload["task_id"]
+    if isinstance(task_id, str) and task_id == evaluation.task_id:
+        return GuardOutcome(verdict="PASS", reason="payload task_id matches the L4 Task")
     return GuardOutcome(
         verdict="FAIL",
-        reason="explicit task_id not supported in P1",
+        reason="payload task_id does not match the L4 Task",
     )
 
 

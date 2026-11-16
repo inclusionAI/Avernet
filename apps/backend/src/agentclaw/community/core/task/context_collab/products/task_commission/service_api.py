@@ -6,7 +6,7 @@
 ``list_tasks`` = Query.project/search(用户 HTTP 后置)。
 ``report_execution`` 是 Bot 入站执行报告合同,复用 Work 动作及 G1/G4/CAS。
 
-`T | None` 只用于合法领域可空:``note``(可选备注)与孤儿 ``body``。
+`T | None` 表示合法可省略的备注、进度报告字段与孤儿 ``body``。
 """
 
 from __future__ import annotations
@@ -55,12 +55,21 @@ class PublishTaskCommand:
 @dataclass
 class TaskAdvanceCommand:
     """Work 六动作共用命令形;``note`` 可选备注,``percent`` 仅 progress 用
-    (0-100 整数,启用既存 percent 协议词汇),``artifacts`` 仅 submit 用。"""
+    (0-100 整数),``artifacts`` 仅 submit 用。
+
+    ``progress`` 描述当前进度,``error_msg`` 记录错误(无错可传空串),
+    ``reason`` 记录关键证据,``task_id`` 指真实 L4 Task ID,不是 Collet ID。
+    四项仅 progress 用;None 表示旧调用者未提供,不写入事件。
+    """
 
     collab_context_id: str
     note: str | None = None
     percent: int | None = None
     artifacts: list[str] = field(default_factory=list)
+    progress: str | None = None
+    error_msg: str | None = None
+    reason: str | None = None
+    task_id: str | None = None
 
 
 @dataclass(frozen=True)

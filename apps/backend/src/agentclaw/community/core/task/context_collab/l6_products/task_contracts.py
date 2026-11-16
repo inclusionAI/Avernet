@@ -16,6 +16,8 @@ from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     WorkflowProfile,
 )
 
+TASK_PROGRESS_DETAIL_FIELDS = ("progress", "error_msg", "reason", "task_id")
+
 # Never change this default to "latest". Existing omitted selections pin @1.
 STANDARD_TASK_CONTRACT_REF = VersionedProfileRef("standard_task", 1)
 STANDARD_TASK_CONTRACT = TaskLifecycleContract(
@@ -36,7 +38,7 @@ STANDARD_TASK_CONTRACT = TaskLifecycleContract(
             "report_progress",
             "task.progress.updated",
             "Task",
-            ("note", "percent"),
+            ("note", "percent", *TASK_PROGRESS_DETAIL_FIELDS),
             required_role=ROLE_SELECTED_AGENT,
         ),
         TaskAction(

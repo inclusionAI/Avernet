@@ -318,8 +318,28 @@ a durable idempotency/replay contract.
 | ACCS Work action | Product Work action | Payload | Caller |
 | --- | --- | --- | --- |
 | `start` | `start_task` | optional `note` | designated Bot |
-| `progress` | `report_progress` | optional `note`, integer `percent` 0–100 | designated Bot |
+| `progress` | `report_progress` | optional `note`, integer `percent` 0–100, `progress`, `error_msg`, `reason`, `task_id` | designated Bot |
 | `submit` | `submit_task` | optional `note`, nonblank `artifacts` references; machine requires evidence | designated Bot |
+
+Progress details are additive: old `percent`/`note` reports still work. Omitted
+(or null) detail fields are not written to the event; an explicit empty string
+is retained, for example `error_msg=""` when no error occurred.
+
+| Progress field | Meaning |
+| --- | --- |
+| `progress` | String describing the current execution progress, separate from numerical `percent` |
+| `error_msg` | String describing an execution error; reporting it does not automatically fail, complete or submit the Task |
+| `reason` | String containing key evidence, such as a generated artifact reference or test result |
+| `task_id` | Actual L4 root `Task.task_id`, **not** the Collet ID or a remote A2A task ID; if supplied, it must match the targeted Collet's Task |
+
+These four fields are accepted only by `progress`. The three descriptive fields
+are bounded to 16,000 characters each at HTTP ingress; `task_id` is bounded to
+1–256 characters. The shared G4 product contract also checks string types and
+Task identity for in-process/product and generic L4 appends. The report target
+and concurrency fence remain the Collet and its `expected_revision`; the new
+payload Task ID is correlation, not authorization or a routing override. Details
+are persisted in `task.progress.updated` event payloads and can be read through
+L4 `get_events`; they do not add database columns or change lifecycle rules.
 
 `accept`, `reject`, `cancel` and arbitrary payload fields are refused on this
 endpoint. A progress report is an L4 Task control event, not a Message side
@@ -356,7 +376,14 @@ revision, request IDs and timestamp with the actual current values):
           },
           "expected_revision": 3,
           "input_refs": [],
-          "payload": {"percent": 50, "note": "初稿完成"},
+          "payload": {
+            "percent": 50,
+            "note": "初稿完成",
+            "progress": "已完成方案和编码，正在运行测试",
+            "error_msg": "",
+            "reason": "artifact://draft 已生成",
+            "task_id": "task_demo"
+          },
           "context": {
             "request_id": "req-progress-1",
             "idempotency_key": null,

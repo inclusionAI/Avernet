@@ -85,6 +85,7 @@ def resolve_workflow_status(
         responsible=task.principal_ref,
         executor=task.executor_ref,
         payload=payload,
+        task_id=task.task_id,
     )
     guard_results = {
         guard_ref: GUARD_REGISTRY[guard_ref](guard_input)
