@@ -21,6 +21,44 @@ beforeEach(() => {
 });
 
 describe('useBotSessionFileUpload', () => {
+  it('字节直传完成后将 onPhase 阶段回写为组装中 → 物化中,避免 100% 进度条停滞无反馈', async () => {
+    let resolveUpload!: (value: unknown) => void;
+    let emitPhase!: (phase: 'completing' | 'materializing') => void;
+    uploadOne.mockImplementationOnce(
+      (_botId: string, _sessionId: string, _userId: string, _file: File, opts: { onPhase?: (phase: 'completing' | 'materializing') => void }) => {
+        emitPhase = opts.onPhase as (phase: 'completing' | 'materializing') => void;
+        return new Promise((resolve) => {
+          resolveUpload = resolve;
+        });
+      },
+    );
+    const { result } = renderHook(() => useBotSessionFileUpload('bot-1', 'session-1', 'user-1'));
+
+    act(() => {
+      result.current.stageFiles([new File(['content'], '需求说明.md')]);
+      void result.current.submit();
+    });
+
+    act(() => emitPhase('completing'));
+    expect(useBotSessionFileStore.getState().uploadTasks[0]).toMatchObject({
+      phase: 'completing',
+      progress: 100,
+    });
+
+    act(() => emitPhase('materializing'));
+    expect(useBotSessionFileStore.getState().uploadTasks[0]).toMatchObject({ phase: 'materializing' });
+
+    await act(async () => {
+      resolveUpload({
+        ok: true,
+        data: { resourceId: 'resource-1', displayName: '需求说明.md', status: 'ready', sizeBytes: 10, errorCode: null },
+      });
+    });
+    await waitFor(() =>
+      expect(useBotSessionFileStore.getState().uploadTasks[0]).toMatchObject({ phase: 'ready' }),
+    );
+  });
+
   it('支持选中文件后立即提交，并将完成上传的文件保留为可引用任务', async () => {
     uploadOne.mockResolvedValue({
       ok: true,

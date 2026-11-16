@@ -178,7 +178,7 @@ describe('未登录处置(oauth-provider 策略,通道 A)', () => {
     expect(useLoginRedirectStore.getState().pendingLogin).toBeUndefined();
   });
 
-  it('ace-gateway(默认策略)→ 行为不变:照常投递默认提示', () => {
+  it('ace-gateway(默认策略)未登录命中 → 无链接单飞「等待重登」信号 + 静默抛 AceLoginRedirectError', () => {
     useLoginStrategyStore.getState().setLoginStrategy('ace-gateway');
     const response = {
       status: 200,
@@ -186,9 +186,9 @@ describe('未登录处置(oauth-provider 策略,通道 A)', () => {
       data: { code: 40100, message: 'Authentication is required', request_id: 'r' },
     };
 
-    expect(() => teamclawResponseInterceptor(response)).toThrow(RequestProtocolError);
+    expect(() => teamclawResponseInterceptor(response)).toThrow(AceLoginRedirectError);
 
-    expect(useLoginRedirectStore.getState().pendingLogin).toBeUndefined();
-    expect(useErrorNotifyStore.getState().queue).toHaveLength(1);
+    expect(useLoginRedirectStore.getState().pendingLogin).toEqual({ mode: 'redirect' });
+    expect(useErrorNotifyStore.getState().queue).toHaveLength(0);
   });
 });

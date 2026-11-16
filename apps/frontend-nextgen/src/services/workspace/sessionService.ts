@@ -16,6 +16,7 @@ import {
 } from '@/services/backendApi/collaboration/sessionController';
 import { triggerAceLoginRedirect } from '@/services/backendApi/httpClient';
 import { useErrorNotifyStore } from '@/stores/errorNotifyStore';
+import { friendlyStatusFallback } from '@/utils/requestErrorHandler';
 import { useExternalAuthStore } from '@/stores/externalAuthStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import type { DomainError, DomainResult } from './identityService';
@@ -82,7 +83,10 @@ export const sessionService = {
       if (status === 409) {
         return { ok: false, error: toDomainError('SESSION_CONFLICT', '会话状态已变更，请刷新后重试。') };
       }
-      return { ok: false, error: toDomainError('SESSION_CREATE_FAILED', '创建会话失败，请稍后重试。') };
+      return {
+        ok: false,
+        error: toDomainError('SESSION_CREATE_FAILED', friendlyStatusFallback(status, '创建会话失败，请稍后重试。')),
+      };
     }
   },
 
@@ -95,7 +99,10 @@ export const sessionService = {
       if (status === 409) {
         return { ok: false, error: toDomainError('SESSION_CONFLICT', '会话状态已变更，请刷新后重试。') };
       }
-      return { ok: false, error: toDomainError('SESSION_RENAME_FAILED', '重命名会话失败，请稍后重试。') };
+      return {
+        ok: false,
+        error: toDomainError('SESSION_RENAME_FAILED', friendlyStatusFallback(status, '重命名会话失败，请稍后重试。')),
+      };
     }
   },
 
@@ -108,7 +115,10 @@ export const sessionService = {
       if (status === 409) {
         return { ok: false, error: toDomainError('SESSION_CONFLICT', '会话状态已变更，请刷新后重试。') };
       }
-      return { ok: false, error: toDomainError('SESSION_DELETE_FAILED', '删除会话失败，请稍后重试。') };
+      return {
+        ok: false,
+        error: toDomainError('SESSION_DELETE_FAILED', friendlyStatusFallback(status, '删除会话失败，请稍后重试。')),
+      };
     }
   },
 
@@ -185,7 +195,13 @@ export const sessionService = {
       if (status === 409) {
         return { ok: false, error: toDomainError('SESSION_CONFLICT', '会话状态已变更，请刷新后重试。') };
       }
-      return { ok: false, error: toDomainError('SESSION_MEMBER_MODE_FAILED', '更新会话成员状态失败，请稍后重试。') };
+      return {
+        ok: false,
+        error: toDomainError(
+          'SESSION_MEMBER_MODE_FAILED',
+          friendlyStatusFallback(status, '更新会话成员状态失败，请稍后重试。'),
+        ),
+      };
     }
   },
 
@@ -203,7 +219,13 @@ export const sessionService = {
       if (status === 409) {
         return { ok: false, error: toDomainError('SESSION_CONFLICT', '会话状态已变更，请刷新后重试。') };
       }
-      return { ok: false, error: toDomainError('SESSION_MEMBER_SCOPE_FAILED', '切换消息视角失败，请稍后重试。') };
+      return {
+        ok: false,
+        error: toDomainError(
+          'SESSION_MEMBER_SCOPE_FAILED',
+          friendlyStatusFallback(status, '切换消息视角失败，请稍后重试。'),
+        ),
+      };
     }
   },
 
@@ -217,7 +239,13 @@ export const sessionService = {
       if (status === 409) {
         return { ok: false, error: toDomainError('SESSION_CONFLICT', '会话状态已变更，请刷新后重试。') };
       }
-      return { ok: false, error: toDomainError('SESSION_MEMBER_ADD_FAILED', '添加会话成员失败，请稍后重试。') };
+      return {
+        ok: false,
+        error: toDomainError(
+          'SESSION_MEMBER_ADD_FAILED',
+          friendlyStatusFallback(status, '添加会话成员失败，请稍后重试。'),
+        ),
+      };
     }
   },
 
@@ -231,7 +259,13 @@ export const sessionService = {
       if (status === 409) {
         return { ok: false, error: toDomainError('SESSION_CONFLICT', '会话状态已变更，请刷新后重试。') };
       }
-      return { ok: false, error: toDomainError('SESSION_MEMBER_REMOVE_FAILED', '移除会话成员失败，请稍后重试。') };
+      return {
+        ok: false,
+        error: toDomainError(
+          'SESSION_MEMBER_REMOVE_FAILED',
+          friendlyStatusFallback(status, '移除会话成员失败，请稍后重试。'),
+        ),
+      };
     }
   },
 

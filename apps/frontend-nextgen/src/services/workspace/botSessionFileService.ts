@@ -112,7 +112,9 @@ export const botSessionFileService = {
     return null;
   },
 
-  /** 上传单个文件:申请凭证 → 直传字节 → complete → 轮询物化到 ready/failed。 */
+  /** 上传单个文件:申请凭证 → 直传字节 → complete → 轮询物化到 ready/failed。
+   *  onPhase 上报字节直传后的编排阶段(completing=completeUpload / materializing=轮询物化),
+   *  供 UI 展示「组装中」/「物化中」转圈,避免 100% 进度条长时间停滞引发焦虑。 */
   async uploadOne(
     botId: string,
     sessionId: string,
@@ -123,6 +125,7 @@ export const botSessionFileService = {
       stage?: BotRuntimeStage;
       signal?: AbortSignal;
       onProgress?: (loaded: number, total: number) => void;
+      onPhase?: (phase: 'completing' | 'materializing') => void;
     },
   ): Promise<DomainResult<BotSessionFileView>> {
     const params = buildParams(userId, opts.ownerId, opts.stage);
@@ -135,6 +138,7 @@ export const botSessionFileService = {
 
       await directUpload(intent, file, opts.signal ?? new AbortController().signal, opts.onProgress);
 
+      opts.onPhase?.('completing');
       const completed = await completeUpload(botId, sessionId, params, {
         resource_id: intent.resourceId,
         transfer_id: intent.transferId,
@@ -145,11 +149,21 @@ export const botSessionFileService = {
         return { ok: false, error: toDomainError({ status: 422 }, '文件物化失败') };
       }
 
-      // 轮询物化状态到 ready / device_sync_failed
+      opts.onPhase?.('materializing');
+      // 轮询物化状态到 ready / device_sync_failed。5xx/网络抖动容忍继续轮询;4xx 致命不再重试。
       const deadline = Date.now() + POLL_DEADLINE;
       while (Date.now() < deadline) {
         await sleep(POLL_INTERVAL);
-        const status = await getMaterializeStatus(botId, sessionId, intent.resourceId, params);
+        let status;
+        try {
+          status = await getMaterializeStatus(botId, sessionId, intent.resourceId, params);
+        } catch (err) {
+          const httpStatus = (err as { status?: number } | null)?.status;
+          if (typeof httpStatus === 'number' && httpStatus >= 400 && httpStatus < 500) {
+            return { ok: false, error: toDomainError(err, '文件物化失败') };
+          }
+          continue;
+        }
         if (status.status === 'ready') return { ok: true, data: mapView(status) };
         if (status.status === 'device_sync_failed' || status.status === 'deleted') {
           return {
