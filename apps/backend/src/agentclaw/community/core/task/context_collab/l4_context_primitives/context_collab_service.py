@@ -228,6 +228,7 @@ class ContextCollabService(ContextCollabServiceProtocol):
         pipeline. G1 (including admission), product contracts, G4 guards and both
         Task/Collet revision fences remain authoritative. No delivery side effect.
         """
+        # TODO: invoke l4 task start operate
         return self._append_event(
             collab_context_id,
             EventAppendCommand(
