@@ -243,15 +243,17 @@ class SkillSetRuntimeProjection:
             for server_code in sorted(claimed):
                 detail = self.mcp_center.get_mcp_detail(server_code)
                 if not detail:
-                    # Only ever a code we are actually installing — an
-                    # unrelated catalogue gap cannot reach here and block the
-                    # whole projection.
-                    logger.error(
-                        "[sync_mcp_delivery] no catalogue detail for %s, bot_id=%s",
+                    # Session-scoped or virtual MCPs (like yuquemcpsession)
+                    # can appear in the passport without catalogue data.
+                    # Skip them gracefully rather than blocking the entire
+                    # sync for all other MCPs.
+                    logger.warning(
+                        "[sync_mcp_delivery] skipping MCP without catalogue "
+                        "detail: server_code=%s, bot_id=%s",
                         server_code,
                         self.bot_id,
                     )
-                    return False
+                    continue
                 entries.append(detail)
             if entries:
                 logger.info(
