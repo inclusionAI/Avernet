@@ -23,6 +23,7 @@ calls (test_ctor_partial_params_falls_back_to_pathlib pins this).
 """
 from __future__ import annotations
 
+import asyncio
 import shutil
 from pathlib import Path
 from typing import Any, Callable
@@ -35,6 +36,17 @@ from agentclaw.community.log import get_logger
 from agentclaw.community.core.devices.services.device_filesystem import DeviceFileSystem
 
 logger = get_logger()
+
+
+#: Agentclawproxy/BaaS can answer 502/503/504 while routing a released bot.
+#: Read-only file calls are idempotent, so a bounded retry belongs at the plugin
+#: boundary rather than spreading device-retry policy through callers. Mutating
+#: calls and non-HTTP failures stay fail-closed.
+_RETRYABLE_BAAS_STATUS_CODES = frozenset({502, 503, 504})
+
+# Bounded retries are only for one-shot calls. This excludes a persistent local
+# outage from a user-visible 502.
+_BAAS_RETRY_DELAY_SECONDS = (1.0, 2.0, 4.0)
 
 
 def _passthrough(path: str) -> str:
@@ -66,6 +78,7 @@ class LocalDeviceFileSystem(DeviceFileSystem):
         *,
         json_body: dict | None = None,
         timeout: float = 30.0,
+        retryable: bool = False,
     ) -> httpx.Response:
         """Resolve container URL + token via BaaS get_http_info, then POST.
 
@@ -76,6 +89,12 @@ class LocalDeviceFileSystem(DeviceFileSystem):
 
         Caller is responsible for ``response.raise_for_status()`` and the
         per-method error mapping per spec §4.2.
+
+        When ``retryable=True`` and the container returns a transient BaaS
+        status (502/503/504), sleeps ``_BAAS_RETRY_DELAY_SECONDS[attempt]``
+        and retries, up to ``1 + len(_BAAS_RETRY_DELAY_SECONDS)`` total
+        HTTP calls. Read-only callers pass True; mutating callers leave the
+        default False (fail-closed).
 
         Raises:
             BaasServiceError: get_http_info failure transparently propagates.
@@ -91,8 +110,25 @@ class LocalDeviceFileSystem(DeviceFileSystem):
         # 不能再拼一遍，否则 /api/file/upload/api/file/upload double → 404。
         url = info.http_url
         headers = {"openclawToken": info.token}
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            return await client.post(url, json=json_body or {}, headers=headers)
+        response: httpx.Response | None = None
+        max_attempts = 1 + len(_BAAS_RETRY_DELAY_SECONDS)
+        for attempt in range(max_attempts):
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                response = await client.post(url, json=json_body or {}, headers=headers)
+            if not retryable or response.status_code not in _RETRYABLE_BAAS_STATUS_CODES:
+                return response
+            if attempt < len(_BAAS_RETRY_DELAY_SECONDS):
+                delay = _BAAS_RETRY_DELAY_SECONDS[attempt]
+                logger.warning(
+                    "[LocalDeviceFileSystem.baas.request] %s → %d,"
+                    " retry %d/%d after %.1fs",
+                    api_path, response.status_code,
+                    attempt + 1, len(_BAAS_RETRY_DELAY_SECONDS), delay,
+                )
+                await asyncio.sleep(delay)
+        # All retryable attempts exhausted → return last response so the
+        # caller's raise_for_status() surfaces the error (fail-closed).
+        return response
 
     # ── Public API: dispatches to _baas_* or _pathlib_* per ctor mode ──
 
@@ -260,7 +296,7 @@ class LocalDeviceFileSystem(DeviceFileSystem):
             self._binding_ctx.binding_id, file_path,
         )
         response = await self._baas_request(
-            "/api/file/read", json_body={"file_path": file_path}
+            "/api/file/read", json_body={"file_path": file_path}, retryable=True
         )
         if response.status_code == 404:
             logger.debug(
@@ -332,6 +368,7 @@ class LocalDeviceFileSystem(DeviceFileSystem):
         response = await self._baas_request(
             "/api/file/list",
             json_body={"dir_path": dir_path, "recursive": recursive},
+            retryable=True,
         )
         if response.status_code == 404:
             return None
