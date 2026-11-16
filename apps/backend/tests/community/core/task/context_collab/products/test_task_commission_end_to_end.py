@@ -405,7 +405,7 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path, orchestrati
         store, axes = injector.get(MethodStoreProtocol), current_axes()
         open_method = injector.get(OpenMethodOpsServiceProtocol)
 
-        # 2、通过 L4 北向用例创建 Collet（同时创建 Task、初始事件并投影 L5 MethodBinding）
+        # 2、通过L4层操作创建Collet（同时创建 Task、初始事件并投影 L5 MethodBinding）
         collet = collab_service.create_collet(
             ColletCreateCommand(
                 to_space=SPACE,                                # Task所属的空间（长期持续管理的空间，比如小队、团队空间）
