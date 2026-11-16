@@ -3,6 +3,7 @@
 本文件实现 ``create_collet``(spec §6.2)、``append_event``
 (spec §6.3,接入 G4 状态机与守卫)与 ``get_status``(spec §6.4,
 纯读路径:visibility 过滤 → G3 投影 → 进度统计,不写任何行)。
+``get_events`` 返回 G1 可见的 L4 事件事实,供库调用方读取成果引用等 payload。
 服务层不感知 HTTP/Pydantic,仓储与授权都以协议注入。
 """
 
@@ -32,6 +33,9 @@ from agentclaw.community.core.task.context_collab.g4_contracts_consistency.schem
     validate_event_body,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import Collet
+from agentclaw.community.core.task.context_collab.l4_context_primitives.event_envelope import (
+    EventRecord,
+)
 from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.work import (
     prepare_event_append,
 )
@@ -115,7 +119,7 @@ def _event_projection_dict(projection: EventProjection) -> dict:
 
 
 class ContextCollabService(ContextCollabServiceProtocol):
-    """三个北向用例的服务实现;P1 默认注入结构授权器。"""
+    """北向创建、追加与只读查询实现;P1 默认注入结构授权器。"""
 
     @inject
     def __init__(
@@ -369,4 +373,24 @@ class ContextCollabService(ContextCollabServiceProtocol):
                 total_events=len(listed_projection),
                 events=[_event_projection_dict(entry) for entry in listed_projection],
             ),
+        )
+
+    def get_events(
+        self, collab_context_id: str, *, context: ActorContext
+    ) -> list[EventRecord]:
+        """只读查询可见事件及 payload;复用 G1,不绕过 private/workspace 边界。"""
+        status = self._repository.get_current_status(collab_context_id)
+        if status is None:
+            raise ContextCollabNotFoundError(
+                f"collaboration context {collab_context_id!r} not found"
+            )
+        return list(
+            self._authorizer.filter_visible_events(
+                status.collet,
+                status.task,
+                status.creation_facts,
+                status.product_instance,
+                status.events,
+                context,
+            )
         )

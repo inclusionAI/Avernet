@@ -201,6 +201,14 @@ Production DDL execution must be verified separately.
 
 ## Query progress
 
+Library callers query final Task state through the L4 service's `get_status`
+and read accepted artifact references from `get_events(..., context=actor)`.
+The latter returns L4 `EventRecord` facts in acceptance order after the same G1
+visibility filtering as status queries; `task.submitted` payloads carry the
+submitted `artifacts`. Both queries are read-only, do not fetch artifact contents
+or change Collet/Task revisions, and do not add fields or routes to the HTTP API.
+They are separate reads, not a cross-call snapshot guarantee.
+
 [G3 observation](g3_observe_evaluate_evolve/observation.py) counts work items,
 not historic control events:
 
