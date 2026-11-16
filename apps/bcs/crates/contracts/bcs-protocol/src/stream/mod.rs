@@ -20,3 +20,5 @@ pub use provider_text::{
 /// Reserved adapter-to-application metadata. Delivery adapters must remove any
 /// client-supplied value and stamp this key only after canonical validation.
 pub const TASK_INTENT_ELIGIBLE_KEY: &str = "_bcs_task_intent_eligible";
+
+pub mod sse;

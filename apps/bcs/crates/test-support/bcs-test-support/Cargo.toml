@@ -14,6 +14,9 @@ workspace = true
 diagnostic-logs = ["dep:bcs-observability", "dep:tracing", "dep:tracing-subscriber"]
 
 [dependencies]
+bcn-runtime-model.workspace = true
+bcn-runtime-api.workspace = true
+bcn-runtime-storage-api.workspace = true
 bcs-caller-identity-api = { workspace = true }
 bcs-domain      = { workspace = true }
 bcs-protocol    = { workspace = true }
