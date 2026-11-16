@@ -28,6 +28,10 @@ from agentclaw.community.core.cron.protocols import DeviceBindingStatus
 from agentclaw.community.core.cron.errors import CronRelayError
 from agentclaw.community.core.cron.services.cron_relay import CronRelayService
 from agentclaw.community.core.cron.services import cron_runtime_targets
+from agentclaw.community.plugin_api.device_adapter_transport import (
+    DeviceAdapterEndpointNotFoundError,
+    DeviceAdapterHTTPStatusError,
+)
 from agentclaw.community.core.cron.services.cron_runtime_targets import (
     CronRuntimeTarget,
 )
@@ -1177,6 +1181,239 @@ class TestRuntimeQueryConcurrency:
 
         assert all(result["success"] for result in results)
         assert transport.invoke.await_count == len(targets)
+
+
+class TestRuntimeTargetBotMissingClassification:
+    missing_response_text = (
+        '{\n  "detail": {\n    "error": "BOT_NOT_FOUND",\n    "message": "bot not found"\n  }\n}'
+    )
+
+    @pytest.mark.parametrize(
+        "error,expected",
+        [
+            (
+                DeviceAdapterEndpointNotFoundError(missing_response_text),
+                True,
+            ),
+            (
+                RuntimeError(
+                    "Adapter returned HTTP 404: " + missing_response_text
+                ),
+                True,
+            ),
+            (
+                DeviceAdapterEndpointNotFoundError('{"detail": "Not Found"}'),
+                False,
+            ),
+            (
+                DeviceAdapterHTTPStatusError(
+                    404,
+                    '{"error_code": "BOT-123", "message": "bot-123 missing"}',
+                ),
+                False,
+            ),
+            (
+                DeviceAdapterHTTPStatusError(404, "device not found"),
+                False,
+            ),
+            (
+                DeviceAdapterHTTPStatusError(
+                    500,
+                    "Adapter returned HTTP 404: " + missing_response_text,
+                ),
+                False,
+            ),
+            (
+                DeviceAdapterEndpointNotFoundError(None),
+                False,
+            ),
+            (RuntimeError("Adapter request failed"), False),
+        ],
+    )
+    def test_is_target_bot_missing_uses_exact_http_and_error_code(
+        self,
+        error,
+        expected,
+    ):
+        svc = _make_service()
+
+        assert svc._is_target_bot_missing(error) is expected
+
+    @pytest.mark.asyncio
+    async def test_fetch_target_classifies_bot_missing_without_error_logging(
+        self,
+        monkeypatch,
+    ):
+        log = MagicMock()
+        monkeypatch.setattr(cron_runtime_targets, "logger", log)
+
+        device_provider = MagicMock()
+        device_provider.get_device.return_value = _make_device()
+        resolver = MagicMock()
+        resolver.resolve_for_bot.return_value = _make_ctx()
+        transport = MagicMock()
+        transport.invoke = AsyncMock(
+            side_effect=DeviceAdapterEndpointNotFoundError(
+                self.missing_response_text
+            )
+        )
+        svc = _make_service(
+            device_provider=device_provider,
+            resolver=resolver,
+            transport=transport,
+        )
+        target = CronRuntimeTarget(
+            bot_id="missing-bot",
+            bot_name="Missing Bot",
+            owner_id="owner-1",
+            bot_type="personal",
+            runtime_stage="draft",
+            binding_id=42,
+        )
+
+        result = await svc._fetch_runtime_target_crons(target, "owner-1")
+
+        assert result == {
+            "success": False,
+            "reason": "bot_not_found",
+            "error": (
+                "Adapter returned HTTP 404: "
+                + self.missing_response_text
+            ),
+        }
+        log.error.assert_not_called()
+        assert "cron_api_failed" not in result.values()
+
+    @pytest.mark.asyncio
+    async def test_fetch_target_keeps_error_log_for_other_http_404(
+        self,
+        monkeypatch,
+    ):
+        log = MagicMock()
+        monkeypatch.setattr(cron_runtime_targets, "logger", log)
+
+        device_provider = MagicMock()
+        device_provider.get_device.return_value = _make_device()
+        resolver = MagicMock()
+        resolver.resolve_for_bot.return_value = _make_ctx()
+        transport = MagicMock()
+        transport.invoke = AsyncMock(
+            side_effect=DeviceAdapterEndpointNotFoundError(
+                '{"detail": "Not Found"}'
+            )
+        )
+        svc = _make_service(
+            device_provider=device_provider,
+            resolver=resolver,
+            transport=transport,
+        )
+        target = CronRuntimeTarget(
+            bot_id="personal-bot",
+            bot_name="Personal Bot",
+            owner_id="owner-1",
+            bot_type="personal",
+            runtime_stage="draft",
+            binding_id=42,
+        )
+
+        result = await svc._fetch_runtime_target_crons(target, "owner-1")
+
+        assert result["reason"] == "cron_api_failed"
+        assert "cron_api_failed" in result.values()
+        assert log.error.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_list_all_crons_preserves_target_bot_missing_reason(self, monkeypatch):
+        log = MagicMock()
+        monkeypatch.setattr(cron_runtime_targets, "logger", log)
+
+        bot_list = {
+            "items": [
+                {
+                    "bot_id": "service-bot",
+                    "owner_id": "owner-1",
+                    "binding_id": 10,
+                    "bot_name": "Service Bot",
+                    "bot_type": "service",
+                }
+            ]
+        }
+        bot_provider = MagicMock()
+        bot_provider.get_bot.return_value = bot_list["items"][0]
+        bot_provider.list_bots_by_owner.return_value = bot_list
+        bot_provider.list_bots_by_owner_or_collaborator.return_value = bot_list
+
+        publish_repo = MagicMock()
+        publish_repo.get_latest_by_source_bot_id_and_owner_and_status.return_value = (
+            _make_publish_record(
+                publish_id=101,
+                status=PublishStatus.VALIDATING.value,
+                binding_key="verify",
+                binding_id=20,
+            )
+        )
+
+        device_provider = MagicMock()
+        device_provider.get_device.return_value = _make_device(
+            device_provider="baas"
+        )
+        device_provider.list_devices_by_runtime_binding.return_value = ["DEVICE-001"]
+        resolver = MagicMock()
+        resolver.resolve_for_bot.return_value = _make_ctx(
+            binding_id=10,
+            bot_id="service-bot",
+            user_id="owner-1",
+        )
+        resolver.resolve_for_binding_invoke.return_value = _make_ctx(
+            binding_id=20,
+            bot_id="service-bot",
+            user_id="owner-1",
+            device_uuid="DEVICE-001",
+        )
+        transport = MagicMock()
+        transport.invoke = AsyncMock(
+            side_effect=DeviceAdapterEndpointNotFoundError(
+                self.missing_response_text
+            )
+        )
+        svc = _make_service(
+            bot_provider=bot_provider,
+            device_provider=device_provider,
+            resolver=resolver,
+            transport=transport,
+            publish_repo=publish_repo,
+        )
+
+        result = await svc.list_all_crons(
+            user_id="owner-1",
+            nick_name="Owner",
+            bot_id="service-bot",
+            runtime_stage="verify",
+        )
+
+        assert transport.invoke.await_count == 1
+        assert result["success"] is True
+        assert result["data"] == []
+        assert result["failed_targets"] == [
+            {
+                "bot_id": "service-bot",
+                "bot_name": "Service Bot",
+                "owner_id": "owner-1",
+                "runtime_stage": "verify",
+                "publish_id": 101,
+                "device_uuid": "DEVICE-001",
+                "reason": "bot_not_found",
+                "message": (
+                    "Adapter returned HTTP 404: "
+                    + self.missing_response_text
+                ),
+            }
+        ]
+        assert all(
+            item["reason"] != "cron_api_failed"
+            for item in result["failed_targets"]
+        )
+        log.error.assert_not_called()
 
 
 class TestListRunningCronsOwnerId:

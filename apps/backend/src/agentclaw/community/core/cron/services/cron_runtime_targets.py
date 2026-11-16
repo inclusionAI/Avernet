@@ -66,6 +66,22 @@ class CronRuntimeTargetMixin:
             return value.get(field)
         return getattr(value, field, None)
 
+    @staticmethod
+    def _is_target_bot_missing(error: Any) -> bool:
+        """识别运行目标转发时 BaaS 明确抛出的 bot 删除信号。"""
+
+        # 404 的语义依赖响应体中的稳定错误码，避免把普通 endpoint 404、
+        # 实例级 404 或任务级 not-found 误判成 runtime target 已删除。
+        status_code = getattr(error, "status_code", None)
+        response_text = str(getattr(error, "response_text", ""))
+        if status_code is not None:
+            return status_code == 404 and "BOT_NOT_FOUND" in response_text
+
+        # 某些中间层会抛出新异常但不透传 status_code；此时只把文本中
+        # HTTP 404 与删除信号同时出现当作删除信号。
+        text = str(error)
+        return "HTTP 404" in text and "BOT_NOT_FOUND" in text
+
     # ── 运行实例展开 ──────────────────────────────────────────────
 
     async def _get_runtime_devices(self, target: CronRuntimeTarget) -> list[str]:
@@ -344,6 +360,9 @@ class CronRuntimeTargetMixin:
             )
             return {"success": False, "reason": "cron_api_timeout", "error": str(e)}
         except Exception as e:
+            if self._is_target_bot_missing(e):
+                return {"success": False, "reason": "bot_not_found", "error": str(e)}
+
             logger.error(
                 "[_fetch_runtime_target_crons] Adapter request failed for "
                 "bot=%s stage=%s: %s",
