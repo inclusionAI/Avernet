@@ -593,3 +593,80 @@ async fn v1_friend_connection_requester_cannot_decide_internal_reverse_request()
         );
     }
 }
+
+/// A V1-created request must not become self-decidable through the legacy alias.
+async fn assert_legacy_friend_decision_authorization(action: &str, expected: RequestStatus) {
+    let temp_dir = helpers::create_temp_bots_dir();
+    let bots_dir = temp_dir.path().to_path_buf();
+    let (addr, _handle, state) = helpers::start_test_server_with_state(&bots_dir).await;
+    let http = reqwest::Client::new();
+    let (caller, caller_token) = register_owned_bot(addr, "legacy-requester", "caller").await;
+    let (target, target_token) = register_owned_bot(addr, "legacy-receiver", "target").await;
+    let (_, outsider_token) = register_owned_bot(addr, "legacy-outsider", "outsider").await;
+    let response = http
+        .post(format!("http://{addr}/openapi/v1/collaboration/friend-connections/requests"))
+        .header("x-avernet-principal", principal("legacy-requester"))
+        .json(&json!({
+            "from_actor": {"type": "bot", "id": caller},
+            "to_actor": {"type": "bot", "id": target}
+        }))
+        .send().await.expect("create pending request");
+    assert_eq!(response.status(), reqwest::StatusCode::CREATED);
+    let body: serde_json::Value = response.json().await.expect("create body");
+    assert_eq!(body["data"]["status"], "pending");
+    let ids: Vec<&str> = body["data"]["request_ids"].as_array().expect("request ids")
+        .iter().map(|id| id.as_str().expect("request id")).collect();
+    assert_eq!(ids.len(), 2);
+    let url = format!("http://{addr}/collaboration/friend-connections/requests/{}/{action}", ids[0]);
+
+    for token in [&caller_token, &outsider_token] {
+        let response = http.post(&url).bearer_auth(token).send().await.expect("unauthorized decision");
+        assert_eq!(response.status(), reqwest::StatusCode::FORBIDDEN, "{action} must require the receiver");
+        for id in &ids {
+            assert_eq!(state.connect_service.get_request(id).await.expect("unchanged row").status, RequestStatus::Pending);
+        }
+        assert!(state.connect_service.list_friends(&caller).await.expect("caller friends").is_empty());
+        assert!(state.connect_service.list_friends(&target).await.expect("target friends").is_empty());
+    }
+
+    // The receiver can decide and retry; wire shapes and paired transitions stay intact.
+    for _ in 0..2 {
+        let response = http.post(&url).bearer_auth(&target_token).send().await.expect("receiver decision");
+        assert_eq!(response.status(), reqwest::StatusCode::OK);
+        let body: serde_json::Value = response.json().await.expect("decision body");
+        assert_eq!(body["success"], true);
+        if action == "accept" {
+            assert!(!body["data"]["edge_ids"].as_array().expect("edge ids").is_empty());
+        } else {
+            assert_eq!(body["data"]["status"], "rejected");
+        }
+        for id in &ids {
+            assert_eq!(state.connect_service.get_request(id).await.expect("decided row").status, expected);
+        }
+    }
+    let friends = state.connect_service.list_friends(&caller).await.expect("caller friends");
+    assert_eq!(friends.len(), if action == "accept" { 1 } else { 0 });
+    if action == "accept" {
+        assert_eq!(friends[0].actor_id, target);
+    }
+
+    // A decided request must not bypass authorization through an idempotent return.
+    for token in [&caller_token, &outsider_token] {
+        let response = http.post(&url).bearer_auth(token).send().await.expect("unauthorized retry");
+        assert_eq!(response.status(), reqwest::StatusCode::FORBIDDEN);
+    }
+    // Internal reverse mirrors remain non-actionable even for their apparent receiver.
+    let mirror_url = format!("http://{addr}/collaboration/friend-connections/requests/{}/{action}", ids[1]);
+    let response = http.post(mirror_url).bearer_auth(&caller_token).send().await.expect("mirror retry");
+    assert_eq!(response.status(), reqwest::StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn legacy_friend_accept_requires_receiver_before_mutation_and_retry() {
+    assert_legacy_friend_decision_authorization("accept", RequestStatus::Approved).await;
+}
+
+#[tokio::test]
+async fn legacy_friend_reject_requires_receiver_before_mutation_and_retry() {
+    assert_legacy_friend_decision_authorization("reject", RequestStatus::Rejected).await;
+}

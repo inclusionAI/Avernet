@@ -208,3 +208,31 @@ strategy/scope-only restrictions, pending metadata, and failed writes. The exist
 OpenAPI v1 owner/manager PATCH path lacks the independent BCSFuse V1 visibility
 sync; that separate propagation gap is recorded here but intentionally not changed
 by this Provider-only fix.
+
+## Friend-connection decision authorization
+
+The legacy `/collaboration/friend-connections/requests/{id}/accept` and
+`.../reject` routes authenticate before looking up the request, then authorize
+against its persisted `to_id`. Only that receiver Bot or a Human authorized by
+its current `BotAuthorityPort::can_manage` check may decide. Controlling the
+requester does not grant receiver authority. The check precedes all lifecycle
+calls, including idempotent retries; authority storage failures remain internal
+errors rather than allowing the decision or masquerading as a denial.
+Creation and decisions share the same act-as authorization helper. The shared
+ConnectService still rejects generated reverse mirrors, even if the caller can
+represent the mirror's apparent receiver. Existing success envelopes, edge IDs,
+reject reasons and forwarded approval auth headers are preserved.
+
+The added authorization read is one request-ID lookup (at most one SQL row),
+plus at most one live authority check for a Human acting as the receiver Bot.
+For an initialized Bot, the SQL authority implementation performs up to four
+bounded queries: Bot state (one row), owner integrity (at most two rows), Human
+liveness (one row), and that Human's management edges (at most two rows). Memory
+composition uses its existing in-process stores. Authentication and the
+lifecycle's existing reads/writes are unchanged; denied decisions never invoke
+lifecycle mutation. No cache, scan, retry loop, new transaction or external
+network call is added. Tests establish correctness, not production load limits.
+
+Evidence: [route implementation](src/routes/friend_connections.rs),
+[authority and failure contracts](tests/cases/friend_connections_contract/decision_authorization.rs),
+and [real-HTTP cross-entry lifecycle regressions](../../../bootstrap/bcs/tests/integration_friend_connect_store.rs).
