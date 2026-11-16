@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
 struct NamedTarget;
 #[async_trait::async_trait]
 impl A2aBotManagementService for NamedTarget {
-    async fn resolve_named_target(&self, provider: &str, bot: &str) -> ServiceResult<String> {
+    async fn resolve_provider_ref_target(&self, provider: &str, bot: &str) -> ServiceResult<String> {
         assert_eq!((provider, bot), ("provider", "target"));
         Ok("target-bot".into())
     }
