@@ -1706,6 +1706,63 @@ class TestTaskProcessor:
         assert result == done
 
     @pytest.mark.asyncio
+    async def test_non_terminal_prebuilt_env_stays_in_env_preparing(
+        self, processor, mock_repo, mock_publish_flow_service
+    ):
+        """A still-building prebuilt environment must not be treated as failed."""
+        task = make_task(
+            id=1,
+            status="init",
+            ext={
+                "publish_id": 8,
+                "eval_env": {"build_status": "building"},
+            },
+        )
+        env_preparing = make_task(
+            id=1,
+            status="env_preparing",
+            ext={**task.ext, "source_status": "init"},
+        )
+        mock_repo.get_by_id.return_value = task
+
+        with (
+            patch.object(
+                processor,
+                "_transition_to",
+                return_value=env_preparing,
+            ) as mock_transition,
+            patch.object(processor, "to_env_ready", return_value=env_preparing),
+        ):
+            result = await processor.to_env_preparing(1)
+
+        mock_publish_flow_service.eval_publish.assert_not_called()
+        mock_transition.assert_called_once_with(
+            1,
+            TaskStatus.INIT.value,
+            TaskStatus.ENV_PREPARING.value,
+            task.ext,
+        )
+        assert result == env_preparing
+
+    def test_env_ready_with_non_terminal_prebuilt_env_returns_current_task(
+        self, processor, mock_repo, mock_publish_flow_service
+    ):
+        """A still-building prebuilt environment is persisted but not failed."""
+        task = make_task(
+            id=1,
+            status="env_preparing",
+            ext={"eval_env": {"build_status": "building"}},
+        )
+        mock_repo.get_by_id.return_value = task
+
+        result = processor.to_env_ready(1)
+
+        assert result == task
+        mock_publish_flow_service.get_baas_publish_progress.assert_not_called()
+        ext_update = mock_repo.update_ext.call_args.args[1]
+        assert ext_update["eval_env"]["build_status"] == "building"
+
+    @pytest.mark.asyncio
     async def test_init_with_failed_prebuilt_env_marks_task_failed(
         self, processor, mock_repo, mock_publish_flow_service
     ):

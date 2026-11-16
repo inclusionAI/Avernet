@@ -77,3 +77,35 @@ async def test_community_eval_gate_preserves_the_same_no_op_contract(
     assert (await plugin.get_submission(context, "submission-1"))["submission_id"] == "submission-1"
     assert (await plugin.history(context))["records"] == []
     assert (await plugin.sync(context))["allowed"] is True
+    saved_result = await plugin.save_standard_result(
+        context,
+        result={"task_id": 1001},
+        trigger_source="manual_restart_standard_eval",
+    )
+    assert saved_result["saved"] is False
+    assert saved_result["gate_status"] == "SKIPPED"
+
+    environment = await plugin.create_standard_environment(
+        context,
+        default_tag="community-eval",
+        ttl_minutes=30,
+    )
+    assert environment["supported"] is False
+    assert environment["default_tag"] == "community-eval"
+    assert environment["build_status"] == "not_supported"
+
+    status = await plugin.get_standard_environment_status(
+        context,
+        default_tag="community-eval",
+    )
+    assert status["supported"] is False
+    assert status["build_status"] == "not_supported"
+
+    destroyed = await plugin.destroy_standard_environment(
+        context,
+        default_tag="community-eval",
+        reason="standard_eval_finished",
+    )
+    assert destroyed["supported"] is False
+    assert destroyed["destroyed"] is False
+    assert destroyed["reason"] == "standard_eval_finished"
