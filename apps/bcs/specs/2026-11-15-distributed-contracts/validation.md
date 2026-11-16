@@ -75,3 +75,52 @@ Its full workspace discovery/build was not run for this declaration-only change.
 
 See [ordered development tasks](tasks.md) and the owning
 [contract semantics](../../crates/service-api/bcs-service-api/src/port/repo/distributed/README.md).
+
+## CI coverage follow-up — 2026-11-16
+
+The original [BCS CI job](https://github.com/inclusionAI/Avernet/actions/runs/43726757541/job/132850255451)
+passed all 8,387 tests and the 88.75% overall line-coverage gate, but failed
+changed-line coverage: 0 of 338 instrumentable added lines were covered.
+All 338 lines belonged to the five distributed assertion-harness modules.
+The new model/Service API serialization tests did run; none called the reusable
+harnesses because production providers do not exist yet. Replaying the downloaded
+JUnit/Cobertura reports through the unchanged `scripts/cov_gate.py` reproduced
+the failure locally.
+
+The [distributed_harness integration target](../../crates/test-support/bcs-test-support/tests/distributed_harness.rs)
+now invokes all 23 harness entries through test-only scripted doubles. It checks
+exact method arguments and call ordering, positive outcomes, storage-error
+propagation, and deliberate violations of admission/content idempotency, commit
+resolution, activation settlement, dispatch ownership, pending-input confirmation,
+access control, reducer determinism, frozen definitions and replay-gap reporting.
+It adds no production provider, role loop, dependency, interface or gate exemption.
+These tests verify the assertions themselves; backend conformance and fault
+recovery remain unverified until actual providers run the shared harnesses.
+
+Executed from `apps/bcs` with Rust 1.94.1:
+
+```sh
+cargo +1.94.1 test --locked -p bcs-test-support --test distributed_harness
+cargo +1.94.1 test --locked -p bcs-dist-model -p bcs-service-api -p bcs-test-support --quiet
+cargo +1.94.1 llvm-cov --locked -p bcs-test-support --test distributed_harness \
+  --cobertura --output-path /tmp/pr4020-focused-coverage.xml
+```
+
+- Harness self-tests: **25 passed**, including negative scenarios; all 23 entries
+  are called. Related crate tests/doc-tests: **331 passed, 0 failed**, with one
+  existing ignored documentation example.
+- Focused instrumented run: **331/338 harness lines covered (97.93%)**, above
+  the unchanged 85% changed-line requirement. This focused run is not a full
+  workspace overall-coverage result.
+- Local Rust 1.94.1 `llvm-tools` download timed out. The coverage command used
+  explicit `LLVM_COV`/`LLVM_PROFDATA` paths to the already installed LLVM 21.1.2
+  tools, an isolated `CARGO_LLVM_COV_TARGET_DIR`, line-tables-only debug info and
+  `CARGO_INCREMENTAL=0`. The repository's Rust 1.94.0 pin is unchanged; the
+  original GitHub job successfully provisioned that exact toolchain.
+- Changed files pass whitespace and 1,000-line source-file checks. Production
+  contracts and existing unrelated work are unchanged. Full workspace/MySQL
+  verification of the follow-up is delegated to the new GitHub CI run.
+- The enabled pre-push secret scanner also flagged the original serialization
+  fixture's opaque cursor text as a credential literal. Its value is now the
+  explicit `example` placeholder; backend/generation/scope assertions are
+  unchanged. The five model persistence-shape tests were rerun and passed.

@@ -11,11 +11,11 @@ fn admission_identity_has_no_physical_queue_offset() -> Result<(), serde_json::E
 
 #[test]
 fn replay_position_preserves_backend_generation_and_scope() -> Result<(), serde_json::Error> {
-    let wire = json!({"sid":"session-a","token":{"backend":"backend-a","generation":"log-v3","value":"opaque-position"}});
+    let wire = json!({"sid":"session-a","token":{"backend":"backend-a","generation":"log-v3","value":"example"}});
     let position: InboxPos = serde_json::from_value(wire.clone())?;
     assert_eq!(serde_json::to_value(&position)?, wire);
     let different_generation: InboxPos = serde_json::from_value(json!({
-        "sid":"session-a","token":{"backend":"backend-a","generation":"log-v4","value":"opaque-position"}
+        "sid":"session-a","token":{"backend":"backend-a","generation":"log-v4","value":"example"}
     }))?;
     assert_ne!(position, different_generation);
     Ok(())
