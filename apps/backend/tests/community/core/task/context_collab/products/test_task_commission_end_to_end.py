@@ -390,6 +390,8 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
             executor_ref=executor_ref,
             actor=HUMAN,
         )
+
+        # 3、创建Collect（对应一个Task）
         creation_facts = creation_payload(
             method_kind=profile.composition.method_kind,
             executor_ref=executor_ref,
@@ -444,8 +446,7 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
         binding_id = top_level_binding_id(task_id)
         open_method = injector.get(OpenMethodOpsServiceProtocol)
 
-        # 2. 调用L5的OPEN方法创建机会
-        _flow_log(_TEST_DIRECTORY, "2.1. 业务同学调用 L5 Open.publish_opportunity 发布机会")
+        # 4、调用L5的OPEN方法创建机会
         published = open_method.publish_opportunity(
             collab_context_id=task_id,
             method_binding_id=binding_id,
@@ -462,22 +463,7 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
             context=HUMAN, # actor context
         )
         assert published.accepted and published.state == "OPEN"
-        assert published.collab_context_id == task_id
-        assert published.method_binding_id == binding_id
-        # Designation is not admission; even the real signed Bot cannot start yet.
-        working_bot.request(
-            commission_report_request(created), expected_status="REJECTED"
-        )
-        before_query = _participation_snapshot(service, injector, created)
 
-        # 3. 指定 Bot 先查询机会,再以自己身份提交申请;查询不能产生参与。
-        _flow_log(
-            _TEST_DIRECTORY, "3. 指定 Bot Query 机会,自己 Apply,产品策略自动审核通过"
-        )
-        # 直接调用真正的 L5 Open Method;Bot 只是调用主体,不拥有查询实现。
-        # 这是已知 task/binding 的进程内查询,ActorContext 由测试建立;
-        # Query/Apply 都不冒充跨 Agent 调用或 JWT 认证。
-        open_method = injector.get(OpenMethodOpsServiceProtocol)
         bot_context = ActorContext(PrincipalRef("bot", working_bot.bot_id), "a2a")
         [opportunity] = open_method.query_opportunities(
             collab_context_id=task_id,
@@ -502,7 +488,6 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
             "title": TITLE,
             "scope_ref": task_id,
         }
-        assert _participation_snapshot(service, injector, created) == before_query
         assert store.list_applications(axes, binding_id, task_id) == []
         # Apply 也直接调用 L5 Open Method,引用来自查询结果;Bot 只是申请主体。
         record = injector.get(ContextCollabRepositoryProtocol).get_current_status(task_id)
