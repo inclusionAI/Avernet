@@ -87,29 +87,19 @@ impl MemoryBotRepo {
                         })
                         .map(|(key, _)| &key.2)
                         .collect();
-                    if owners.len() == 0 {
-                        // Orphaned ownership: fall back to created_by.
-                        bots.get(bot_id)
-                            .and_then(|bot| bot.created_by.clone())
-                            .map(|creator| BotOwnershipView {
-                                bot_id: bot_id.clone(),
-                                owner_user_id: creator.clone(),
-                                owner_actor_id: human_actor_id(&creator),
-                            })
-                    } else if owners.len() != 1 {
+                    if owners.len() != 1 {
                         return Err(owner_integrity_error(bot_id, owners.len()));
-                    } else {
-                        let owner = owners[0].clone();
-                        Some(BotOwnershipView {
-                            bot_id: bot_id.clone(),
-                            owner_user_id: human_user_id_of_actor(&owner).ok_or_else(|| {
-                                owner_integrity_error_message(format!(
-                                    "owner edge subject '{owner}' is not a Human actor id"
-                                ))
-                            })?,
-                            owner_actor_id: owner,
-                        })
                     }
+                    let owner = owners[0].clone();
+                    Some(BotOwnershipView {
+                        bot_id: bot_id.clone(),
+                        owner_user_id: human_user_id_of_actor(&owner).ok_or_else(|| {
+                            owner_integrity_error_message(format!(
+                                "owner edge subject '{owner}' is not a Human actor id"
+                            ))
+                        })?,
+                        owner_actor_id: owner,
+                    })
                 }
             };
             projections.insert(bot_id.as_str(), projection);

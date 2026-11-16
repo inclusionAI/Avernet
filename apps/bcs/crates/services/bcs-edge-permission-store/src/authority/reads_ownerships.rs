@@ -63,6 +63,9 @@ impl DbBotAuthorityStore {
                     && !owners.contains_key(*bot)
             })
             .collect();
+        // Also query created_by for live orphaned bots (version > 0, no
+        // owner edge) as a fallback owner in one chunked pass.
+        let mut orphan_creators: HashMap<String, String> = HashMap::new();
         for chunk in chunked(&unowned_initialized) {
             let live: HashSet<String> = self
                 .bot_states_in(&chunk)
@@ -70,30 +73,14 @@ impl DbBotAuthorityStore {
                 .into_iter()
                 .map(|(bot_id, _)| bot_id)
                 .collect();
-            for bot_id in chunk {
-                if !live.contains(bot_id) {
-                    states.remove(bot_id);
-                }
-            }
-        }
-
-        // Orphaned ownership fallback: version > 0 bots with no owner
-        // edge may still have a created_by record. Query it in one
-        // chunked pass so the in-memory store's created_by fallback
-        // has a SQL counterpart.
-        let orphaned: Vec<_> = id_refs
-            .iter()
-            .copied()
-            .filter(|bot| {
-                states.get(*bot).is_some_and(|version| *version > 0)
-                    && !owners.contains_key(*bot)
-            })
-            .collect();
-        let mut orphan_creators: HashMap<String, String> = HashMap::new();
-        for chunk in chunked(&orphaned) {
             for (bot_id, creator) in self.legacy_creators_in(&chunk).await? {
                 if let Some(creator) = creator {
                     orphan_creators.insert(bot_id, creator);
+                }
+            }
+            for bot_id in &chunk {
+                if !live.contains(*bot_id) {
+                    states.remove(*bot_id);
                 }
             }
         }

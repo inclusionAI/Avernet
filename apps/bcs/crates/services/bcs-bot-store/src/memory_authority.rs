@@ -196,26 +196,10 @@ impl BotAuthorityRepoPort for MemoryBotRepo {
         // Owner completeness is part of the state: corrupt states
         // error out for uninvolved principals too (spec §3.2.2).
         let owner_count = approved_owner_count(&state, &env, bot_id);
-        if owner_count != 1 {
-            if owner_count == 0 {
-                if let Some(creator) = self.bots.read().await.get(bot_id).and_then(|bot| bot.created_by.clone()) {
-                    // Use created_by as owner: grant Owner if the
-                    // caller matches, otherwise deny.
-                    if user_id.strip_prefix("human_").is_some_and(|u| u == creator) {
-                        // spec §3.1: only a LIVE Human actor authorizes
-                        if memory_human_alive(self, user_id).await {
-                            return Ok(Some(BotAccessRelation::Owner));
-                        }
-                        return Ok(None);
-                    }
-                    // The manager set is missing, so no manager relation
-                    // can be projected.
-                    return Ok(None);
-                }
-            }
+        let owner = if owner_count != 1 {
             return Err(owner_integrity_error(bot_id, owner_count));
-        }
-        let owner = state
+        } else {
+            state
                 .edges
                 .iter()
                 .find(|(key, (status, ref_id))| {
@@ -226,7 +210,8 @@ impl BotAuthorityRepoPort for MemoryBotRepo {
                         && *ref_id == 0
                 })
                 .map(|(key, _)| key.2.clone())
-                .expect("count promised one owner");
+                .expect("count promised one owner")
+        };
         if human_user_id_of_actor(&owner).is_none() {
             return Err(owner_integrity_error_message(format!(
                 "owner edge subject '{owner}' is not a Human actor id"
@@ -291,20 +276,6 @@ impl BotAuthorityRepoPort for MemoryBotRepo {
             match owner_count {
                 1 => {}
                 0 => {
-                    if let Some(creator) = self.bots.read().await.get(&query.bot_id).and_then(|bot| bot.created_by.clone()) {
-                        // Use created_by as fallback owner for this query.
-                        let legacy = if query.user_id.strip_prefix("human_").is_some_and(|u| u == creator) {
-                            if memory_human_alive(self, &query.user_id).await {
-                                Some(BotAccessRelation::Owner)
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        };
-                        results.push(legacy);
-                        continue;
-                    }
                     return Err(owner_integrity_error(&query.bot_id, 0));
                 }
                 count => {
@@ -348,16 +319,6 @@ impl BotAuthorityRepoPort for MemoryBotRepo {
         }
         let state = self.authority.read().await;
         let owner_count = approved_owner_count(&state, &env, bot_id);
-        if owner_count == 0 {
-            if let Some(creator) = self.bots.read().await.get(bot_id).and_then(|bot| bot.created_by.clone()) {
-                return Ok(BotOwnershipView {
-                    bot_id: bot_id.to_string(),
-                    owner_user_id: creator.clone(),
-                    owner_actor_id: human_actor_id(&creator),
-                });
-            }
-            return Err(not_initialized_error(bot_id));
-        }
         if owner_count != 1 {
             return Err(owner_integrity_error(bot_id, owner_count));
         }
@@ -415,21 +376,6 @@ impl BotAuthorityRepoPort for MemoryBotRepo {
         }
         let state = self.authority.read().await;
         let owner_count = approved_owner_count(&state, &env, &query.bot_id);
-        if owner_count == 0 {
-            if let Some(creator) = self.bots.read().await.get(&query.bot_id).and_then(|bot| bot.created_by.clone()) {
-                // Use created_by as owner with empty manager set.
-                return Ok(ManagerPage {
-                    owner: BotOwnershipView {
-                        bot_id: query.bot_id.clone(),
-                        owner_user_id: creator.clone(),
-                        owner_actor_id: human_actor_id(&creator),
-                    },
-                    items: Vec::new(),
-                    total: 0,
-                });
-            }
-            return Err(not_initialized_error(&query.bot_id));
-        }
         if owner_count != 1 {
             return Err(owner_integrity_error(&query.bot_id, owner_count));
         }
@@ -2411,7 +2357,6 @@ fn transfer_view(
         .get(&(env, key.bot_id.clone(), key.target_owner_actor_id.clone()))
         .map(|row| view_from_row(row, now_ms())))
 }
-
 
 pub(super) fn owner_integrity_error(bot_id: &str, owner_count: usize) -> ServiceError {
     owner_integrity_error_message(if owner_count == 0 {
