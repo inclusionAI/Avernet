@@ -1,0 +1,629 @@
+apps/backend/src/agentclaw/community/core/task/task_center/task_service.py
+  s_bb98e2f10840b6::t_84b7256758094e 90-91,95
+apps/frontend-nextgen/src/components/BotWorkshop/BotCard/botTableTypes.ts
+  s_bb98e2f10840b6::t_84b7256758094e 28-29,39-40,64-65,75-76
+apps/frontend-nextgen/test/pages/BotWorkshop/DebugChatStage.test.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 4,32-34,41,59,68-71
+apps/frontend-nextgen/test/hooks/useBotWorkshopLocks.test.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 31-49
+apps/backend/tests/community/core/service_bot/services/test_service_publication_facade.py
+  s_bb98e2f10840b6::t_84b7256758094e 20-21,88,112-119,131,816-844
+  s_bb98e2f10840b6::t_04b417b1206d1f 845-846
+apps/frontend-nextgen/src/hooks/useBotTableColumns.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 34,38-39,84-85,154-155,196-197,224-227
+apps/backend/tests/community/di/test_service_bot_module_bindings.py
+  s_bb98e2f10840b6::t_84b7256758094e 1-15
+apps/backend/src/agentclaw/community/core/apply_engine/materialisers/nas_bot_file_sync.py
+  s_bb98e2f10840b6::t_84b7256758094e 107-115,184-185
+  s_bb98e2f10840b6::t_f8b2751cfab877 186
+apps/backend/src/agentclaw/community/core/task/domain/models.py
+  s_bb98e2f10840b6::t_84b7256758094e 649-658
+  s_bb98e2f10840b6::t_c4e58036131512 648
+apps/backend/src/agentclaw/community/core/task/task_center/task_service_relay.py
+  s_bb98e2f10840b6::t_84b7256758094e 5,140,148,161,191
+apps/backend/src/agentclaw/community/plugins/local/README.md
+  s_bb98e2f10840b6::t_84b7256758094e 105
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/service_eval/__init__.py
+  s_bb98e2f10840b6::t_84b7256758094e 1
+apps/frontend-nextgen/src/pages/Workspace/GroupWorkspaceArea.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 5,12,50-52,62-63,65-74,96-97,157,176,239,252,271-289
+apps/frontend-nextgen/src/services/botWorkshop/botEditorService.ts
+  s_bb98e2f10840b6::t_84b7256758094e 260-261,264,267-270,281-283,286,290,301,308
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/errors_payloads.py
+  s_bb98e2f10840b6::t_84b7256758094e 19-22,43-44,66-72
+apps/frontend-nextgen/src/services/workspace/conversationService.ts
+  s_bb98e2f10840b6::t_84b7256758094e 5,76,102-104
+apps/backend/specs/2026-11-10-openapi-iam-session-key/spec.md
+  s_bb98e2f10840b6::t_84b7256758094e 1-21
+apps/frontend-nextgen/src/pages/Workspace/components/GroupChatPane/GroupHistorySidebar.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 5-6,9,14-15,22,24-32
+apps/frontend-nextgen/src/components/BotWorkshop/Editor/capabilitySetManagerTypes.ts
+  s_bb98e2f10840b6::t_84b7256758094e 6-7
+apps/frontend-nextgen/test/components/BotWorkshop/BotDormantLifecycle.test.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 5,94-118,120-128,130-147,149-154
+apps/backend/tests/community/core/bot_management/test_owner_handoff_preflight.py
+  s_bb98e2f10840b6::t_84b7256758094e 1-198
+apps/frontend-nextgen/src/domain/conversation/types.ts
+  s_bb98e2f10840b6::t_84b7256758094e 23
+apps/frontend-nextgen/test/services/botWorkshop/botWorkshopService.test.ts
+  s_bb98e2f10840b6::t_84b7256758094e 2,15,28,527-580
+  s_bb98e2f10840b6::t_2d7994274384d6 581-582
+apps/backend/tests/community/core/apply_engine/materialisers/test_bot_file_sync.py
+  s_bb98e2f10840b6::t_84b7256758094e 153-179
+apps/frontend-nextgen/src/pages/Workspace/components/Modals/CreateGroupFooter.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 23,29,32
+apps/frontend-nextgen/test/stores/sessionStatusBridge.test.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 1-394
+apps/backend/specs/caller-asc-owner-refresh/001-spec-output.md
+  s_bb98e2f10840b6::t_84b7256758094e 7
+apps/frontend-nextgen/src/pages/Workspace/components/CollaborationIdentityHeader.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 2,8-10,18,20-27
+apps/frontend-nextgen/test/components/BotWorkshop/CreateBotModal/agentCoding/DynamicTemplateFieldLogic.test.ts
+  s_bb98e2f10840b6::t_84b7256758094e 1-29
+apps/frontend-nextgen/test/pages/Workspace/hooks/useSelectedGroupDetail.warmMount.test.ts
+  s_bb98e2f10840b6::t_84b7256758094e 55,59,73,78
+apps/frontend-nextgen/src/pages/Workspace/Chat/CodingBotStageBoundary.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 119
+apps/frontend-nextgen/src/components/BotWorkshop/BotCard/BotTable.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 30-33,86-89
+apps/frontend-nextgen/src/domain/conversation/sessionStatusReceiver.ts
+  s_bb98e2f10840b6::t_84b7256758094e 1-66
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/responses.py
+  s_bb98e2f10840b6::t_84b7256758094e 334-335,568-575,885-886
+apps/frontend-nextgen/src/services/workspace/botSessionFileService.ts
+  s_bb98e2f10840b6::t_84b7256758094e 58-62
+apps/frontend-nextgen/src/pages/Workspace/Chat/hooks/useConversationRouteResolver.ts
+  s_bb98e2f10840b6::t_84b7256758094e 3,11,52-54,111,118-127,129,143-147
+apps/frontend-nextgen/src/services/botWorkshop/botWorkshopService.ts
+  s_bb98e2f10840b6::t_84b7256758094e 30,349-366
+apps/backend/src/agentclaw/community/core/service_bot/services/service_publication_facade.py
+  s_bb98e2f10840b6::t_84b7256758094e 61-62,82-85,120,131,705-720
+apps/frontend-nextgen/src/stores/releaseNotesStore.ts
+  s_bb98e2f10840b6::t_84b7256758094e 1-74
+apps/frontend-nextgen/test/pages/Workspace/hooks/useBotSessionFiles.test.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 23-32,54-56,145-150
+apps/frontend-nextgen/src/pages/Workspace/components/Modals/CreateGroupModal.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 72,271,281
+apps/backend/tests/community/core/bot_public/test_bot_public_service.py
+  s_bb98e2f10840b6::t_84b7256758094e 1532,1567,1597,1619,1645,1666,1702,1706,1741,1746,1779,1826
+apps/backend/specs/2026-11-09-catalog-search-budget/spec.md
+  s_bb98e2f10840b6::t_84b7256758094e 1-49
+apps/backend/tests/community/acceptance/bot_ownership_sync/live_case.py
+  s_bb98e2f10840b6::t_84b7256758094e 89,95-113
+  s_bb98e2f10840b6::t_e73b6a1c69d5d9 114
+apps/frontend-nextgen/src/components/BotWorkshop/BotCard/BotTableActionsCell.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 1-105
+apps/frontend-nextgen/src/pages/Workspace/Chat/components/ConversationSessionRow.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 23,27,75-83
+apps/backend/tests/community/core/task/task_context/test_relay_dynamic_coop_group.py
+  s_bb98e2f10840b6::t_84b7256758094e 5,19,83-98
+apps/frontend-nextgen/test/services/botWorkshop/botPolicy.test.ts
+  s_bb98e2f10840b6::t_84b7256758094e 217-218,220-246,252-255
+apps/backend/src/agentclaw/community/core/service_bot/README.md
+  s_bb98e2f10840b6::t_84b7256758094e 53
+apps/backend/src/agentclaw/community/core/repository/protocols/bot/bot.py
+  s_bb98e2f10840b6::t_84b7256758094e 305-315
+  s_bb98e2f10840b6::t_92f8ba000523a5 304
+apps/backend/src/agentclaw/community/core/repository/implementations/bot/bot.py
+  s_bb98e2f10840b6::t_84b7256758094e 52,511,523-544
+  s_bb98e2f10840b6::t_00819413130c2c 545
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/access_log.py
+  s_bb98e2f10840b6::t_84b7256758094e 82
+apps/backend/tests/community/adapters/http/openapi_v1/test_bots_endpoints.py
+  s_bb98e2f10840b6::t_84b7256758094e 549
+apps/backend/tests/community/core/space_knowledge/test_membership_activation_races.py
+  s_bb98e2f10840b6::t_84b7256758094e 174-176,186,193
+apps/backend/src/agentclaw/community/core/bot_management/owner_handoff/preflight.py
+  s_bb98e2f10840b6::t_84b7256758094e 1-95
+apps/frontend-nextgen/src/components/BotWorkshop/BotCard/BotPrimaryActionsCell.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 4,13-14,60-61,73,77-83,95,100-101,103-106,114,158,175-176
+apps/frontend-nextgen/test/services/botWorkshop/botAvatarGenerator.test.ts
+  s_bb98e2f10840b6::t_84b7256758094e 12-18
+apps/frontend-nextgen/test/components/BotWorkshop/CreateBotModal/CreateBotFormFields.test.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 1-142
+apps/backend/src/agentclaw/community/plugin_api/passport.py
+  s_bb98e2f10840b6::t_84b7256758094e 391-398
+apps/frontend-nextgen/src/hooks/useServiceBotEvalMenuVisibility.ts
+  s_bb98e2f10840b6::t_84b7256758094e 1-57
+apps/frontend-nextgen/src/pages/Workspace/Chat/hooks/useChatHeaderPanels.ts
+  s_bb98e2f10840b6::t_84b7256758094e 12-14,26-28,34-35,74-75,114-125,132-135,139,158-159,215,221
+apps/backend/tests/community/endpoints/test_service_bot_eval.py
+  s_bb98e2f10840b6::t_84b7256758094e 1-326
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/bots/schemas_metadata.py
+  s_bb98e2f10840b6::t_84b7256758094e 46-52
+apps/frontend-nextgen/src/stores/sessionStatusStore.ts
+  s_bb98e2f10840b6::t_84b7256758094e 1-96
+apps/frontend-nextgen/src/pages/Workspace/Chat/components/ConversationSessionStatus.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 1-156
+apps/backend/src/agentclaw/community/core/task/task_context/task_graph_service.py
+  s_bb98e2f10840b6::t_84b7256758094e 70-71,76,82,871-873
+apps/backend/src/agentclaw/community/core/bot_public/services/catalog_pagination.py
+  s_bb98e2f10840b6::t_84b7256758094e 3-9,12-65,83-98
+apps/frontend-nextgen/src/pages/Workspace/components/Modals/CollaborationTemplatePicker.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 52,54
+apps/frontend-nextgen/src/services/workspace/sessionFileUtils.ts
+  s_bb98e2f10840b6::t_84b7256758094e 81-123
+apps/backend/specs/caller-refresh-owner-isolation/001-spec-output.md
+  s_bb98e2f10840b6::t_84b7256758094e 1-21
+apps/backend/tests/community/di/test_profile_and_modules_for.py
+  s_bb98e2f10840b6::t_84b7256758094e 247
+apps/frontend-nextgen/src/hooks/useSkillSetActivation.ts
+  s_bb98e2f10840b6::t_84b7256758094e 16,38,57
+apps/frontend-nextgen/test/services/backendApi/bots/iamTokenController.test.ts
+  s_bb98e2f10840b6::t_84b7256758094e 26-28,30-48
+apps/backend/tests/community/adapters/http/openapi_v1/test_runtime_list_timing.py
+  s_bb98e2f10840b6::t_84b7256758094e 37
+apps/backend/tests/community/contracts/test_passport.py
+  s_bb98e2f10840b6::t_84b7256758094e 163,169,174,187
+apps/frontend-nextgen/src/pages/Workspace/Chat/StandardConversationStageContainer.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 130-131
+apps/frontend-nextgen/test/pages/Workspace/Chat/hooks/useConversationSessions.test.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 5-6,74-86
+  s_bb98e2f10840b6::t_fc950066ea78f6 87-88
+apps/frontend-nextgen/src/pages/Workspace/components/Modals/ParticipantRow.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 1,31,49,52
+apps/frontend-nextgen/src/domain/botWorkshop.ts
+  s_bb98e2f10840b6::t_84b7256758094e 29-39,71-72,77-78
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/bots/converter_bot.py
+  s_bb98e2f10840b6::t_84b7256758094e 149
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/service_eval/schemas.py
+  s_bb98e2f10840b6::t_84b7256758094e 1-44
+apps/frontend-nextgen/src/pages/Workspace/Chat/hooks/sessionHistorySearchModel.ts
+  s_bb98e2f10840b6::t_84b7256758094e 1-52
+apps/backend/tests/community/repository/task/test_intake_atomic_creation.py
+  s_bb98e2f10840b6::t_84b7256758094e 6,81-96,100,424,467,511,555,606
+apps/frontend-nextgen/test/components/BotWorkshop/DebugChatPanel.identity.test.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 16
+apps/frontend-nextgen/src/components/BotWorkshop/BotCard/BotStatusCell.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 14-15,51-52,92-96
+apps/frontend-nextgen/src/components/BotWorkshop/BotCard/BotManagementMenu.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 23-24,51-52,263-264
+apps/frontend-nextgen/src/pages/BotWorkshop/Detail/DetailPanelContent.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 39,43,115
+apps/backend/tests/community/endpoints/test_service_bot_eval_openapi.py
+  s_bb98e2f10840b6::t_84b7256758094e 1-255
+apps/frontend-nextgen/src/pages/Workspace/Chat/ConversationPage.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 7,271
+apps/frontend-nextgen/src/components/BotWorkshop/CreateBotModal/agentCoding/legacy/appcoding/AppCodingConfigForm.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 98-100,116-117,121,225,233
+apps/frontend-nextgen/test/hooks/useReleaseNotes.test.ts
+  s_bb98e2f10840b6::t_84b7256758094e 30,32,39,47,55,61-63,66,68-70,75,80,82-86,89-90,93-94,99-162,174-175,178,184,188,193-195
+apps/frontend-nextgen/src/components/BotWorkshop/CreateBotModal/agentCoding/AgentCodingSection.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 16-19,113-114
+apps/backend/src/agentclaw/community/di/modules/infrastructure/community/service_bot_eval.py
+  s_bb98e2f10840b6::t_84b7256758094e 1-20
+apps/frontend-nextgen/src/pages/Workspace/components/BotSessionFiles/BotSessionFilesRow.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 4-9,32-38,40-49,60-65,91,137
+apps/backend/src/agentclaw/community/adapters/http/task/router.py
+  s_bb98e2f10840b6::t_84b7256758094e 33,420-446
+  s_bb98e2f10840b6::t_5cf59d7d2c2ac4 447
+apps/frontend-nextgen/src/pages/Workspace/components/Modals/CollaborationGroupLaunchDialog.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 1,64,70,89,95
+apps/frontend-nextgen/test/services/workspace/sessionFileCreator.test.ts
+  s_bb98e2f10840b6::t_84b7256758094e 1-58
+apps/frontend-nextgen/src/pages/Workspace/hooks/useFocusedCollaborationNavigation.ts
+  s_bb98e2f10840b6::t_84b7256758094e 2,26-35
+apps/frontend-nextgen/src/services/backendApi/bots/botController.ts
+  s_bb98e2f10840b6::t_84b7256758094e 251-258,262
+apps/frontend-nextgen/src/pages/Workspace/components/GroupChatPane/SessionFilesSidebar.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 2,5-8,11-14,16,18,20-22,24,26-27
+apps/frontend-nextgen/src/services/backendApi/bots/botSessionFileController.ts
+  s_bb98e2f10840b6::t_84b7256758094e 28-37
+apps/frontend-nextgen/test/pages/Workspace/hooks/useBotSessionFileCommand.test.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 34
+apps/frontend-nextgen/src/pages/Workspace/hooks/useWorkspacePage.ts
+  s_bb98e2f10840b6::t_84b7256758094e 2,68
+apps/backend/tests/community/core/task/task_center/test_task_service_relay.py
+  s_bb98e2f10840b6::t_84b7256758094e 59
+apps/backend/tests/community/adapters/http/task/router_test_support.py
+  s_bb98e2f10840b6::t_84b7256758094e 193-194
+apps/frontend-nextgen/src/pages/Workspace/components/Modals/GroupLeaderSelect.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 37,46,48,54,56,60,102
+apps/frontend-nextgen/test/components/BotWorkshop/CreateBotModal/agentCoding/legacy/appcoding/CodingModelConfigField.test.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 1-111
+apps/frontend-nextgen/test/services/botWorkshop/botManagementActionService.test.ts
+  s_bb98e2f10840b6::t_84b7256758094e 39-43
+apps/frontend-nextgen/src/pages/Workspace/components/Modals/BindingSlot.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 56-57
+apps/backend/src/agentclaw/community/core/apply_engine/materialisers/bot_file_sync.py
+  s_bb98e2f10840b6::t_84b7256758094e 36-37,58-59,116-123
+apps/backend/src/agentclaw/community/core/repository/implementations/bot/owner_handoff.py
+  s_bb98e2f10840b6::t_84b7256758094e 126-137
+apps/frontend-nextgen/test/pages/Workspace/GroupWorkspaceAreaManagePanel.test.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 152-153,155,233,242-243
+apps/backend/src/agentclaw/community/core/caller_identity/README.md
+  s_bb98e2f10840b6::t_84b7256758094e 42-48
+apps/frontend-nextgen/src/pages/Workspace/hooks/useRecommendCandidates.ts
+  s_bb98e2f10840b6::t_84b7256758094e 35,44,85
+apps/frontend-nextgen/src/pages/Workspace/hooks/useSelectedGroupDetail.ts
+  s_bb98e2f10840b6::t_84b7256758094e 2,4,6-13,21-29,32-34,37-64
+apps/backend/src/agentclaw/community/core/task/task_context/task_graph_support.py
+  s_bb98e2f10840b6::t_84b7256758094e 831-889
+apps/frontend-nextgen/src/pages/Workspace/hooks/usePickerLists.ts
+  s_bb98e2f10840b6::t_84b7256758094e 31,66
+apps/frontend-nextgen/test/stores/botSessionFileStore.test.ts
+  s_bb98e2f10840b6::t_84b7256758094e 15-26
+apps/backend/tests/community/adapters/http/openapi_v1/test_explicit_user_id.py
+  s_bb98e2f10840b6::t_84b7256758094e 646,860-862
+apps/backend/tests/community/core/bot_management/test_owner_handoff.py
+  s_bb98e2f10840b6::t_84b7256758094e 30-33,130-138,174,192-193,464-603,847-848,854,866,883-886,888-895,906-907,909
+apps/backend/tests/community/adapters/http/task/test_node_update_api.py
+  s_bb98e2f10840b6::t_84b7256758094e 18-22,30,35-50,169-175
+  s_bb98e2f10840b6::t_e2f0150636aef4 176
+apps/frontend-nextgen/test/pages/Workspace/components/Modals/GroupParticipantPicker.test.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 2,9,162,208,215,282-323
+apps/frontend-nextgen/src/components/BotWorkshop/CreateBotModal/agentCoding/legacy/appcoding/CodingModelConfigField.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 161-162
+apps/frontend-nextgen/src/services/backendApi/privateChat/iamTokenController.ts
+  s_bb98e2f10840b6::t_84b7256758094e 12-18,38,48-56
+apps/backend/src/agentclaw/community/plugins/local/service_bot_eval.py
+  s_bb98e2f10840b6::t_84b7256758094e 1-111
+apps/frontend-nextgen/test/pages/Workspace/hooks/useGroupWorkspace.test.ts
+  s_bb98e2f10840b6::t_84b7256758094e 27,219,239,277,282-283,286,288-291
+apps/frontend-nextgen/test/services/workspace/collaborationCandidateService.test.ts
+  s_bb98e2f10840b6::t_84b7256758094e 42-67,347-366,370,395-398,405,414-436,449,465
+apps/backend/src/agentclaw/community/core/service_bot/errors.py
+  s_bb98e2f10840b6::t_84b7256758094e 34-53
+apps/backend/tests/community/endpoints/test_owner_handoff_router.py
+  s_bb98e2f10840b6::t_84b7256758094e 21-23,37,61-65,68,78-81
+apps/frontend-nextgen/src/pages/Workspace/Chat/hooks/sidePanePanelMutex.ts
+  s_bb98e2f10840b6::t_84b7256758094e 1-83
+apps/frontend-nextgen/test/components/BotWorkshop/CreateBotModal/agentCoding/legacy/appcoding/codefuseTokenValidation.test.ts
+  s_bb98e2f10840b6::t_84b7256758094e 1-37
+apps/backend/tests/community/core/task/task_center/test_task_recovery.py
+  s_bb98e2f10840b6::t_84b7256758094e 3,29-47,84
+apps/frontend-nextgen/test/components/CollaborationSquare/SquareNavigation.test.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 13,32
+apps/frontend-nextgen/src/components/BotWorkshop/ServiceBotEvaluation/ServiceBotEvalGateBlockedModal.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 1-32
+apps/frontend-nextgen/test/components/BotWorkshop/CreateBotModal/agentCoding/legacy/appcoding/AppCodingConfigUtils.test.ts
+  s_bb98e2f10840b6::t_84b7256758094e 1-13
+apps/frontend-nextgen/test/components/BotWorkshop/DebugChatPanel.header.test.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 13
+apps/frontend-nextgen/test/hooks/useBotWorkshop.test.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 204,210,217,220,222,240,242,245-248
+apps/frontend-nextgen/test/pages/Workspace/hooks/useBotSessionFileStages.test.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 10-19
+apps/backend/tests/community/adapters/http/openapi_v1/bot_public/test_catalog_thread_offload.py
+  s_bb98e2f10840b6::t_84b7256758094e 1-34
+singlebox/ci/tests/test_singlebox_companion_coverage.py
+  s_bb98e2f10840b6::t_84b7256758094e 28-46,138-140
+apps/backend/src/agentclaw/community/adapters/http/service_bot/eval_files.py
+  s_bb98e2f10840b6::t_84b7256758094e 1-72
+apps/frontend-nextgen/src/pages/Workspace/components/WorkspaceManagePanels.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 10,58-61,64-73,96-97,99-108,127-128
+apps/frontend-nextgen/test/components/Workspace/BotDisplayAvatar.test.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 34-38
+apps/frontend-nextgen/src/pages/Workspace/Chat/hooks/useSessionStatusBridge.ts
+  s_bb98e2f10840b6::t_84b7256758094e 1-78
+apps/backend/src/agentclaw/community/adapters/http/task/relay_routes.py
+  s_bb98e2f10840b6::t_84b7256758094e 84
+apps/frontend-nextgen/src/pages/Workspace/hooks/useGroupWorkspace.types.ts
+  s_bb98e2f10840b6::t_84b7256758094e 13-15
+apps/frontend-nextgen/test/pages/Workspace/FocusedCollaboration.test.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 78-91,100-109
+apps/backend/src/agentclaw/community/di/profile_modules.py
+  s_bb98e2f10840b6::t_84b7256758094e 61-63,93,364-366,412
+apps/backend/tests/community/architecture/test_http_adapter_layer_is_http_only.py
+  s_bb98e2f10840b6::t_84b7256758094e 82-84
+apps/backend/tests/community/core/apply_engine/materialisers/test_nas_bot_file_sync.py
+  s_bb98e2f10840b6::t_84b7256758094e 236-265
+apps/backend/src/agentclaw/community/adapters/http/task/schemas.py
+  s_bb98e2f10840b6::t_84b7256758094e 205-211
+apps/backend/tests/community/core/task/task_runner/integration/test_task_search_viewer.py
+  s_bb98e2f10840b6::t_84b7256758094e 136,187,236
+apps/frontend-nextgen/docs/session-status-bridge.md
+  s_bb98e2f10840b6::t_84b7256758094e 1-84
+apps/frontend-nextgen/src/hooks/useBotWorkshopActions.ts
+  s_bb98e2f10840b6::t_84b7256758094e 4,8,13,31-32,40,42,50-54,86
+apps/frontend-nextgen/test/shell/HelpMenu.test.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 4,18-19,25,54,70-76
+apps/frontend-nextgen/src/hooks/useBotEditor.ts
+  s_bb98e2f10840b6::t_84b7256758094e 36,166,168-169,173,177,181
+apps/frontend-nextgen/src/hooks/useBotWorkshop.ts
+  s_bb98e2f10840b6::t_84b7256758094e 16-20,46,81-82,118,121-144
+apps/frontend-nextgen/src/hooks/useCapabilitySetExpansion.ts
+  s_bb98e2f10840b6::t_84b7256758094e 1-37
+apps/frontend-nextgen/src/domain/conversation/resolveRouteTarget.ts
+  s_bb98e2f10840b6::t_84b7256758094e 1-17
+apps/frontend-nextgen/src/pages/Workspace/components/GroupWorkspaceConversation.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 1-29
+apps/backend/src/agentclaw/community/di/modules/service_bot_module.py
+  s_bb98e2f10840b6::t_84b7256758094e 60-62,104,163-165,837-854,869,882,885-891
+  s_bb98e2f10840b6::t_d1331e39d47aba 892
+apps/backend/tests/community/core/bot_public/test_catalog_scan_budget.py
+  s_bb98e2f10840b6::t_84b7256758094e 1-149
+apps/frontend-nextgen/src/components/BotWorkshop/BotCard/BotStatusPublicationMenu.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 2,4-11,13,20-21,24-30,32,42-49,51-55,57-86,88-89,91-92,94,97-110,112-154,156-184
+apps/frontend-nextgen/src/pages/BotWorkshop/Evaluation/index.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 1-287
+apps/frontend-nextgen/src/pages/Workspace/Collaboration/Focused.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 13,16-22,28,31,37,48,86,88,90
+apps/frontend-nextgen/src/pages/Workspace/components/Modals/CollaborationFlowAside.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 47,62
+apps/frontend-nextgen/src/services/backendApi/bots/serviceBotEvalController.ts
+  s_bb98e2f10840b6::t_84b7256758094e 1-148
+apps/frontend-nextgen/config/routes.ts
+  s_bb98e2f10840b6::t_84b7256758094e 59
+apps/frontend-nextgen/test/components/CollaborationSquare/GroupMemberAvatar.test.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 18,30-34
+  s_bb98e2f10840b6::t_fcc66acef7ec74 35-36
+apps/frontend-nextgen/src/pages/Workspace/components/Modals/CreateGroupHeader.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 6-7
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/authorization_rules.py
+  s_bb98e2f10840b6::t_84b7256758094e 8,35
+apps/frontend-nextgen/test/hooks/useCapabilitySetExpansion.test.ts
+  s_bb98e2f10840b6::t_84b7256758094e 1-87
+apps/frontend-nextgen/src/pages/Workspace/hooks/useGroupChatHeaderPanels.ts
+  s_bb98e2f10840b6::t_84b7256758094e 6-7,14-15,21,48-51,57-58,64,71-73,116-125,135-136,188,192
+apps/frontend-nextgen/src/stores/botSessionFileStore.ts
+  s_bb98e2f10840b6::t_84b7256758094e 11-19
+apps/frontend-nextgen/src/components/BotWorkshop/Editor/DebugChatComposer.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 4-7,10,13,16-19,24-42,44,49-52,58-62,67-74,76-90,92
+apps/frontend-nextgen/src/components/BotWorkshop/CreateBotModal/agentCoding/DynamicTemplateFieldLogic.ts
+  s_bb98e2f10840b6::t_84b7256758094e 3,93-105,131
+apps/frontend-nextgen/test/components/BotWorkshop/CapabilitySetManager.test.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 43,80,226,232-252
+  s_bb98e2f10840b6::t_82c3dc8d87570e 253
+apps/frontend-nextgen/test/components/CollaborationPrivacy/ExternalBotGeneralConfigDialog.test.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 67-69
+apps/frontend-nextgen/test/services/botWorkshop/botRestartTracking.test.ts
+  s_bb98e2f10840b6::t_84b7256758094e 1-255
+apps/backend/tests/community/core/service_bot/services/test_publish_owner_handoff_lifecycle.py
+  s_bb98e2f10840b6::t_84b7256758094e 191
+apps/frontend-nextgen/test/pages/Workspace/components/CollaborationIdentityHeader.test.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 95,98-104,106-108
+apps/frontend-nextgen/test/services/backendApi/bots/botEditorController.test.ts
+  s_bb98e2f10840b6::t_84b7256758094e 266,268,275-281
+  s_bb98e2f10840b6::t_ba004f5ffff06f 282
+apps/frontend-nextgen/src/services/botWorkshop/botPolicy.ts
+  s_bb98e2f10840b6::t_84b7256758094e 190-196
+apps/frontend-nextgen/test/components/BotWorkshop/BotTable.test.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 5,737-738,750,754,760-761,763-766,794,803-804,807,812-813,816-819,823-847,1072
+apps/frontend-nextgen/test/pages/Workspace/Chat/components/ConversationTargetPlaceholder.test.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 1-29
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/bot_public/router.py
+  s_bb98e2f10840b6::t_84b7256758094e 32,238-239
+apps/frontend-nextgen/src/hooks/useServiceBotEval.ts
+  s_bb98e2f10840b6::t_84b7256758094e 1-110
+apps/frontend-nextgen/src/pages/Workspace/Collaboration/index.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 5,32,35
+apps/backend/src/agentclaw/community/adapters/http/boot.py
+  s_bb98e2f10840b6::t_84b7256758094e 53,67-84
+  s_bb98e2f10840b6::t_1332b2655b1378 85
+apps/frontend-nextgen/test/pages/Workspace/hooks/useSelectedGroupDetail.test.ts
+  s_bb98e2f10840b6::t_84b7256758094e 4,6-10,13-14,17-22,25-26,30-36,39-42,46-52,54-125,127-138
+apps/frontend-nextgen/test/pages/Workspace/components/Modals/ParticipantBindingPanel.test.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 26-27
+apps/backend/tests/community/endpoints/test_openapi_bot_metadata.py
+  s_bb98e2f10840b6::t_84b7256758094e 74-92,134,177-205
+  s_bb98e2f10840b6::t_63edb9c24dfa0d 206-207
+apps/frontend-nextgen/src/shell/routeMeta.ts
+  s_bb98e2f10840b6::t_84b7256758094e 87
+apps/frontend-nextgen/test/domain/workspaceRoute.test.ts
+  s_bb98e2f10840b6::t_84b7256758094e 1,54-76
+apps/frontend-nextgen/src/components/BotWorkshop/Editor/CapabilitySetManager.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 13-14,40,61,90,97,99
+apps/frontend-nextgen/test/services/backendApi/bots/serviceBotEvalController.test.ts
+  s_bb98e2f10840b6::t_84b7256758094e 1-36
+apps/backend/tests/community/endpoints/test_task_endpoints.py
+  s_bb98e2f10840b6::t_84b7256758094e 288-327
+apps/frontend-nextgen/test/services/workspace/conversationService.test.ts
+  s_bb98e2f10840b6::t_84b7256758094e 1,4,56,60-63,349-392
+  s_bb98e2f10840b6::t_8a79dfcaebafb9 393
+apps/frontend-nextgen/test/components/BotWorkshop/BotStatusPublicationMenu.test.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 2,4-5,7-68,70-189,196-197,199,204-277
+apps/backend/tests/community/repository/bot/test_catalog_join_budget.py
+  s_bb98e2f10840b6::t_84b7256758094e 1-61
+apps/frontend-nextgen/src/components/BotWorkshop/CreateBotModal/agentCoding/legacy/appcoding/CodefuseTokenField.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 9,61-62
+apps/backend/specs/enable-scheduled-caller-refresh/001-spec-output.md
+  s_bb98e2f10840b6::t_583fe56d3c53c8 8-11
+apps/frontend-nextgen/src/components/BotWorkshop/ServiceBotEvaluation/EvalFileInput.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 1-26
+apps/frontend-nextgen/src/components/BotWorkshop/BotCard/botManagementPolicy.ts
+  s_bb98e2f10840b6::t_84b7256758094e 21,24-31
+  s_bb98e2f10840b6::t_0d839c01fd3f97 32
+apps/frontend-nextgen/src/components/CollaborationPrivacy/BotGeneralConfigDialog/BotGeneralConfigDialogBody.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 217
+apps/backend/src/agentclaw/community/core/task/task_runner/client/relay_prompt.py
+  s_bb98e2f10840b6::t_84b7256758094e 100,102-107,109-111
+apps/frontend-nextgen/src/pages/CollaborationSquare/Experts/index.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 183
+apps/frontend-nextgen/src/pages/Workspace/components/Modals/GroupConfigFields.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 86,94,98-99,116,121,134,152,169,179,191-194,201,228,231
+apps/frontend-nextgen/src/pages/Workspace/components/Modals/GroupParticipantPicker.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 21,72,100,158,175,181-182
+apps/frontend-nextgen/test/pages/Workspace/hooks/useGroupChatHeaderPanels.test.ts
+  s_bb98e2f10840b6::t_84b7256758094e 49,53-59,306-386
+apps/backend/tests/community/core/task/task_context/test_relay_report.py
+  s_bb98e2f10840b6::t_84b7256758094e 3,37-55,82,169,177-277,642,689-691
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/service_eval/router.py
+  s_bb98e2f10840b6::t_84b7256758094e 1-185
+apps/frontend-nextgen/src/components/BotWorkshop/CreateBotModal/agentCoding/legacy/appcoding/compat/token.ts
+  s_bb98e2f10840b6::t_84b7256758094e 107-116,136-139
+apps/backend/src/agentclaw/community/core/task/task_service_protocol.py
+  s_bb98e2f10840b6::t_84b7256758094e 11,110,152-160
+  s_bb98e2f10840b6::t_59ea79e1d2bdac 161
+apps/backend/src/agentclaw/community/core/service_bot/services/service_bot_eval_service.py
+  s_bb98e2f10840b6::t_84b7256758094e 1-248
+apps/frontend-nextgen/src/services/botWorkshop/botManagementActionService.ts
+  s_bb98e2f10840b6::t_84b7256758094e 3,9-12,18
+apps/backend/src/agentclaw/community/api/service_bot_eval.py
+  s_bb98e2f10840b6::t_84b7256758094e 1-70
+apps/frontend-nextgen/src/domain/conversation/sessionStatusProtocol.ts
+  s_bb98e2f10840b6::t_84b7256758094e 1-24
+apps/frontend-nextgen/src/pages/BotWorkshop/index.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 12,19,28,40,63-74,147,174-177,244-249
+apps/backend/src/agentclaw/community/adapters/http/app.py
+  s_bb98e2f10840b6::t_84b7256758094e 39,71-73,143,940
+apps/backend/src/agentclaw/community/plugin_api/service_bot_eval.py
+  s_bb98e2f10840b6::t_84b7256758094e 1-85
+apps/frontend-nextgen/src/components/BotWorkshop/CreateBotModal/ExpertCreationResult.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 50
+apps/backend/tests/community/adapters/http/task/test_router.py
+  s_bb98e2f10840b6::t_84b7256758094e 141,165,893,955
+apps/backend/src/agentclaw/community/api/README.md
+  s_bb98e2f10840b6::t_84b7256758094e 182
+apps/frontend-nextgen/src/hooks/useBotWorkshopLocks.ts
+  s_bb98e2f10840b6::t_84b7256758094e 3-6,23-27
+apps/frontend-nextgen/test/services/workspace/botSessionFileService.test.ts
+  s_bb98e2f10840b6::t_84b7256758094e 3,228-230,251-286
+  s_bb98e2f10840b6::t_402143b3b9f01a 287
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/authorization_rules_service_eval.py
+  s_bb98e2f10840b6::t_84b7256758094e 1-27
+apps/frontend-nextgen/test/services/backendApi/bots/botController.test.ts
+  s_bb98e2f10840b6::t_84b7256758094e 142,151-167
+  s_bb98e2f10840b6::t_c13a8c98d60f6f 168-170
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/admission_routes.py
+  s_bb98e2f10840b6::t_84b7256758094e 35-40
+apps/backend/tests/community/adapters/http/openapi_v1/engine_runtime/test_stage_addressing.py
+  s_bb98e2f10840b6::t_84b7256758094e 115-124
+apps/backend/tests/community/core/bot_public/test_online_catalog.py
+  s_bb98e2f10840b6::t_84b7256758094e 26,29,66,68
+apps/frontend-nextgen/src/pages/Workspace/components/Modals/ParticipantBindingPanel.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 44,82
+apps/backend/src/agentclaw/community/core/bot_management/owner_handoff/service.py
+  s_bb98e2f10840b6::t_84b7256758094e 26,73,81,113-120,124-129,135,244-271,281-285,385
+apps/backend/src/agentclaw/community/core/repository/README.md
+  s_bb98e2f10840b6::t_84b7256758094e 21-24
+apps/frontend-nextgen/test/pages/Workspace/components/Modals/CreateGroupModal.test.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 2,129-223,284,288,424,500,503
+apps/backend/src/agentclaw/community/core/bot_management/owner_handoff/contracts.py
+  s_bb98e2f10840b6::t_84b7256758094e 32-36
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/token/router.py
+  s_bb98e2f10840b6::t_84b7256758094e 91-101,138-144
+apps/frontend-nextgen/test/services/workspace/botChatProvider.test.ts
+  s_bb98e2f10840b6::t_84b7256758094e 76-78,86-88,160,188-191,222-226,312-317,538-540,566-571
+apps/frontend-nextgen/src/services/botWorkshop/botRestartTracking.ts
+  s_bb98e2f10840b6::t_84b7256758094e 1-208
+apps/frontend-nextgen/src/components/BotWorkshop/BotCard/menuPrimitives.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 43-59
+apps/frontend-nextgen/src/components/CollaborationSquare/SquareNavigation/index.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 8
+apps/backend/src/agentclaw/community/plugins/community/service_bot_eval.py
+  s_bb98e2f10840b6::t_84b7256758094e 1-111
+apps/frontend-nextgen/src/services/workspace/botChatProvider.ts
+  s_bb98e2f10840b6::t_84b7256758094e 243,247-258
+apps/frontend-nextgen/test/pages/Workspace/components/BotSessionFiles/BotSessionFilesPanel.test.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 20-22,94-113,134-143,154-183,233-242,249
+apps/frontend-nextgen/src/components/BotWorkshop/CreateBotModal/index.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 208
+apps/frontend-nextgen/src/pages/BotWorkshop/Detail/index.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 180
+apps/frontend-nextgen/src/domain/workspaceRoute.ts
+  s_bb98e2f10840b6::t_84b7256758094e 58-70
+apps/frontend-nextgen/test/pages/Workspace/hooks/useBotSessionCommands.test.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 47,85
+apps/frontend-nextgen/src/services/backendApi/collaboration/publicBotController.ts
+  s_bb98e2f10840b6::t_84b7256758094e 19-21
+apps/backend/src/agentclaw/community/core/task/task_center/task_service_control.py
+  s_bb98e2f10840b6::t_84b7256758094e 1-151
+apps/backend/src/agentclaw/community/core/bot_management/owner_handoff/README.md
+  s_bb98e2f10840b6::t_84b7256758094e 10,35,192-267
+apps/frontend-nextgen/src/components/Workspace/ChatPanel/ChatPanel.css
+  s_bb98e2f10840b6::t_84b7256758094e 14-23
+apps/frontend-nextgen/test/components/BotWorkshop/DebugChatComposer.test.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 3-5,7,9-41,43-60,62-63,65-68,72-79,82-83,85-93,95,97-100,104-107,109-114,118-119,122-134
+apps/frontend-nextgen/test/pages/Workspace/hooks/useGroupCreateDialog.test.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 52-55
+apps/frontend-nextgen/src/pages/Workspace/hooks/useGroupWorkspace.ts
+  s_bb98e2f10840b6::t_84b7256758094e 44,55,165,171-172,176,178-179,190,219-221
+apps/frontend-nextgen/src/components/BotWorkshop/Editor/DebugChatPanel.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 15,18,20,37-54,97-106,261,275-276,279-283,296
+apps/frontend-nextgen/src/services/botWorkshop/serviceBotEvalService.ts
+  s_bb98e2f10840b6::t_84b7256758094e 1-44
+apps/frontend-nextgen/test/pages/Workspace/hooks/useGroupCollaborationPicker.test.ts
+  s_bb98e2f10840b6::t_84b7256758094e 106,115,232,267-280
+  s_bb98e2f10840b6::t_7dc0538674771b 281
+apps/frontend-nextgen/test/pages/Workspace/Chat/components/ConversationSessionRow.test.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 3,26-49
+apps/frontend-nextgen/src/hooks/useReleaseNotes.ts
+  s_bb98e2f10840b6::t_84b7256758094e 6-7,9,15-16,19,21,23,28-31,34,37-40,43,46-48
+apps/frontend-nextgen/test/services/botWorkshop/botEditorService.test.ts
+  s_bb98e2f10840b6::t_84b7256758094e 301,429,431-432
+apps/frontend-nextgen/test/pages/Workspace/components/Modals/CreateGroupModal.profileDiscovery.test.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 1-60
+apps/frontend-nextgen/src/pages/Workspace/components/Modals/SelectedParticipantChip.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 1-2,30
+apps/frontend-nextgen/src/capabilities/types.ts
+  s_bb98e2f10840b6::t_84b7256758094e 114-118,126-127,131-132,364-365,388-389,462-466
+apps/backend/src/agentclaw/community/core/bot_public/services/friend_catalog_actions.py
+  s_bb98e2f10840b6::t_84b7256758094e 8,462-463,466,549,557-558
+apps/backend/src/agentclaw/community/core/caller_identity/scheduled_refresh.py
+  s_bb98e2f10840b6::t_84b7256758094e 13-14
+apps/frontend-nextgen/src/components/BotWorkshop/BotCard/BotManagementRuntimeItems.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 4,7,11,19-20,29-30,48,92-119,198-212
+apps/frontend-nextgen/src/hooks/useBotPublicationMenu.ts
+  s_bb98e2f10840b6::t_84b7256758094e 1-149
+apps/frontend-nextgen/test/pages/Workspace/Chat/hooks/conversationLegacyRoute.test.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 1-52
+apps/frontend-nextgen/test/pages/Workspace/components/BotSessionFiles/BotSessionFilesRow.test.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 1-93
+apps/backend/tests/community/plugins/local/test_ownership_acceptance_preflight.py
+  s_bb98e2f10840b6::t_84b7256758094e 1-46
+apps/frontend-nextgen/src/pages/Workspace/components/GroupMembersPanelSlot.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 6,16,18,21,23-25,29-39
+apps/backend/tests/community/core/service_bot/services/test_service_bot_eval_service.py
+  s_bb98e2f10840b6::t_84b7256758094e 1-182
+apps/frontend-nextgen/src/components/Workspace/BotDisplayAvatar.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 3,14
+apps/backend/src/agentclaw/community/adapters/http/service_bot/router_eval.py
+  s_bb98e2f10840b6::t_84b7256758094e 1-224
+apps/backend/src/agentclaw/community/core/bot_public/README.md
+  s_bb98e2f10840b6::t_84b7256758094e 49-57
+apps/backend/src/agentclaw/community/di/modules/infrastructure/test/service_bot_eval.py
+  s_bb98e2f10840b6::t_84b7256758094e 1-18
+apps/backend/tests/community/di/test_owner_handoff_preflight_wiring.py
+  s_bb98e2f10840b6::t_84b7256758094e 1-15
+apps/backend/tests/community/contracts/test_service_bot_eval.py
+  s_bb98e2f10840b6::t_84b7256758094e 1-79
+apps/frontend-nextgen/src/components/BotWorkshop/CreateBotModal/CreateBotFormFields.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 22,43,133-138,244-249
+apps/backend/tests/community/core/task/task_context/test_task_graph_service.py
+  s_bb98e2f10840b6::t_84b7256758094e 105-127
+apps/frontend-nextgen/src/services/backendApi/bots/botEngineVersionDtos.ts
+  s_bb98e2f10840b6::t_84b7256758094e 38-42
+apps/backend/tests/community/adapters/http/openapi_v1/test_friend_iam.py
+  s_bb98e2f10840b6::t_84b7256758094e 63-68,78-101
+  s_bb98e2f10840b6::t_a975dac26659d8 102-103
+apps/frontend-nextgen/src/services/workspace/collaborationCandidateService.ts
+  s_bb98e2f10840b6::t_84b7256758094e 16,84-110,337,343,366,368-371
+apps/frontend-nextgen/src/pages/Workspace/Chat/components/ConversationTargetPlaceholder.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 1-31
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/__init__.py
+  s_bb98e2f10840b6::t_84b7256758094e 255,428
+apps/frontend-nextgen/test/components/BotWorkshop/DebugChatPanel.userMessage.test.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 13
+apps/frontend-nextgen/src/pages/Workspace/hooks/useAllAvailableBots.ts
+  s_bb98e2f10840b6::t_84b7256758094e 1,3,6-8,12-26,28-33,39,43
+apps/backend/src/agentclaw/community/core/task/task_context/relay_report.py
+  s_bb98e2f10840b6::t_84b7256758094e 89-179,561-563
+apps/frontend-nextgen/src/services/backendApi/bots/botEditorController.ts
+  s_bb98e2f10840b6::t_84b7256758094e 256,261,266,270,280,283,287-291,298-299,304-305
+apps/frontend-nextgen/test/pages/Workspace/Chat/hooks/useChatHeaderPanels.test.ts
+  s_bb98e2f10840b6::t_84b7256758094e 57-58,62,259-318
+  s_bb98e2f10840b6::t_c5c8a8c7f9b4b5 319
+apps/frontend-nextgen/src/pages/Workspace/components/Modals/DraftGroupForm.tsx
+  s_bb98e2f10840b6::t_84b7256758094e 134,144
+apps/backend/tests/community/adapters/http/task/test_relay_report_trajectory_e2e.py
+  s_bb98e2f10840b6::t_84b7256758094e 23,71,594-606
+apps/frontend-nextgen/src/domain/botAvatar.ts
+  s_bb98e2f10840b6::t_84b7256758094e 18-22
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "043a46f4bded133012dd655c6c1917e98f6b5d93",
+  "prompts": {},
+  "sessions": {
+    "s_bb98e2f10840b6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a162ee-dd64-7f52-9208-9fd1326f32e5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

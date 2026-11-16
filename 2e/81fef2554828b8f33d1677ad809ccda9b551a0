@@ -1,0 +1,33 @@
+src/ecb/ecb/interfaces/task_benchmark/oncall_effect_router.py
+  s_7517e37f6fcee5::t_599338f10aaeb8 6
+  s_7517e37f6fcee5::t_30c9fe06dafd80 67,69-71
+src/ecb/tests/application/task_benchmark/oncall_case_evaluation/test_service.py
+  s_7517e37f6fcee5::t_6c94eada5e0b02 357-403
+  s_7517e37f6fcee5::t_0d57133f665f4c 311-355
+  s_7517e37f6fcee5::t_2b11c4dd9299ce 356
+src/ecb/tests/interfaces/task_benchmark/test_online_router.py
+  s_7517e37f6fcee5::t_6c94eada5e0b02 344-370
+  s_7517e37f6fcee5::t_aec7f8679d15ce 371
+src/ecb/ecb/application/task_benchmark/oncall_case_evaluation/service.py
+  s_7517e37f6fcee5::t_2a4f2d31b742cd 448-473
+  s_7517e37f6fcee5::t_30c9fe06dafd80 323,474-526
+  s_7517e37f6fcee5::t_4851013dc3b1af 527
+src/ecb/ecb/servers/web/app.py
+  s_7517e37f6fcee5::t_0d57133f665f4c 924-934
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2e81fef2554828b8f33d1677ad809ccda9b551a0",
+  "prompts": {},
+  "sessions": {
+    "s_7517e37f6fcee5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a9dc-9a35-7de0-88fa-7da8184fb762",
+        "model": "GLM-5.3"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

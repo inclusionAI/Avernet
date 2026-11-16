@@ -1,0 +1,20 @@
+apps/bcs/scripts/e2e-test/caller_delegation_chain_story.py
+  h_7ecb107b24dd7d 2,4-9,53,66-67,85,95-102,115,135-144,146,148-155,158,160-178,182-199,216,220-221,226-227,229-231,233-235,238-242,244-245,248,252-253,262,270,277-296,299-300,308-328,337-341,349-350
+apps/bcs/scripts/e2e-test/caller_identity_story.sh
+  h_7ecb107b24dd7d 44,49
+apps/bcs/scripts/e2e_coverage.sh
+  h_7ecb107b24dd7d 397-399
+apps/bcs/scripts/test_changed_line_cov.py
+  h_7ecb107b24dd7d 5-6,184-188,200-202,204-216
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3979018cbfdc326c72833018eb36c692534758df",
+  "prompts": {},
+  "humans": {
+    "h_7ecb107b24dd7d": {
+      "author": "shengping <jeremy.lsp@antgroup.com>"
+    }
+  }
+}

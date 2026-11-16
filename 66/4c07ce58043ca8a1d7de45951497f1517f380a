@@ -1,0 +1,23 @@
+apps/bcs/crates/adapters/http/bcs-http/tests/group_messages_contract.rs
+  s_8538143de29560::t_ef9698d20b1216 1375-1376
+apps/bcs/crates/services/bcs-message-flow/src/group_flow/web_send.rs
+  s_8538143de29560::t_45f2ed2df69e81 787,810-815,817,820
+apps/bcs/crates/services/bcs-message-flow/tests/operation_output_uncertainty.rs
+  s_8538143de29560::t_976833ba043930 37-39,72-74
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "664c07ce58043ca8a1d7de45951497f1517f380a",
+  "prompts": {},
+  "sessions": {
+    "s_8538143de29560": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1abe4-191f-7a70-af7d-c9a7cb8741b5",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

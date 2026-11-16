@@ -1,0 +1,33 @@
+apps/backend/src/agentclaw/community/plugins/community/device_adapter_transport.py
+  s_9c5b6d45358b18::t_bae40cc93c6566 21,60-62,70-83,92,108-109,133,136
+apps/backend/src/agentclaw/community/core/devices/services/conn_info_builders/teclaw_builder.py
+  s_9c5b6d45358b18::t_a29efdef14e459 58-59
+apps/backend/tests/community/core/devices/services/conn_info_builders/test_teclaw_builder.py
+  s_9c5b6d45358b18::t_c9b06ccabe6b2e 62-84
+apps/backend/src/agentclaw/community/adapters/http/bot_collaborator/router.py
+  s_5214d188f2d4fd::t_7b5a0a808e728a 765-767,769,795-801,803,844-846,891-893,895,930-932,934,959-965,967,990-992,994
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "fe7e29259ce0555f873a8b49167f200765b8b970",
+  "prompts": {},
+  "sessions": {
+    "s_5214d188f2d4fd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a160-fa49-7110-a1ce-a9db64a45f59",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    },
+    "s_9c5b6d45358b18": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a157-d086-74e0-b4bd-3dcfd235491a",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

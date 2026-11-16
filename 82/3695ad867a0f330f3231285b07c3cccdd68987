@@ -1,0 +1,48 @@
+apps/backend/specs/README.md
+  h_059e888e5e4e82 15-16,145-152
+apps/backend/src/agentclaw/community/adapters/http/app.py
+  h_059e888e5e4e82 148,899-900,902
+apps/backend/src/agentclaw/community/adapters/http/task/commission_a2a.py
+  h_059e888e5e4e82 1-144
+apps/backend/src/agentclaw/community/adapters/http/task/commission_a2a_auth.py
+  h_059e888e5e4e82 1-23
+apps/backend/src/agentclaw/community/adapters/http/task/commission_a2a_schemas.py
+  h_059e888e5e4e82 1-163
+apps/backend/src/agentclaw/community/core/gateway_principal/README.md
+  h_059e888e5e4e82 45,119-127
+apps/backend/src/agentclaw/community/core/gateway_principal/__init__.py
+  h_059e888e5e4e82 45,71
+apps/backend/src/agentclaw/community/core/gateway_principal/verifier.py
+  h_059e888e5e4e82 44-45,354-378
+apps/backend/src/agentclaw/community/di/modules/context_collab_products.py
+  h_059e888e5e4e82 1-18
+apps/backend/src/agentclaw/community/di/modules/task_commission_method_ops_adapter.py
+  h_059e888e5e4e82 1-130
+apps/backend/src/agentclaw/community/di/modules/task_module.py
+  h_059e888e5e4e82 18-20,109-164,364-435,452-456
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_a2a_ingress.py
+  h_059e888e5e4e82 1-257
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_end_to_end.py
+  h_059e888e5e4e82 1-352
+apps/backend/tests/community/di/test_task_module.py
+  h_059e888e5e4e82 44-106,374-511
+apps/backend/tests/community/endpoints/test_task_commission_a2a_endpoints.py
+  h_059e888e5e4e82 1-84
+apps/gateway/configs/application.yaml
+  h_059e888e5e4e82 198-200,540-546
+apps/gateway/tests/unit/core/authn/test_route_security.py
+  h_059e888e5e4e82 642-655
+apps/gateway/tests/unit/core/forwarding/test_commission_a2a_routing.py
+  h_059e888e5e4e82 1-27
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "823695ad867a0f330f3231285b07c3cccdd68987",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

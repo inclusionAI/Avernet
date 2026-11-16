@@ -1,0 +1,19 @@
+apps/backend/specs/caller-refresh-owner-isolation/001-spec-output.md
+  s_bb98e2f10840b6::t_6ce139cd1ec4ae 18-21
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e2e06c3c7107ac28e50201d0c20e4156db0a658a",
+  "prompts": {},
+  "sessions": {
+    "s_bb98e2f10840b6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a162ee-dd64-7f52-9208-9fd1326f32e5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

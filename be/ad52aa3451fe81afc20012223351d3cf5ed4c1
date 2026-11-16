@@ -1,0 +1,19 @@
+apps/backend/tests/community/core/task/task_center/test_task_service_relay.py
+  s_4efef845bd857d::t_5967980d74859d 30-37
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "bead52aa3451fe81afc20012223351d3cf5ed4c1",
+  "prompts": {},
+  "sessions": {
+    "s_4efef845bd857d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a181bc-3434-7bf3-a0d5-19c01487b59e",
+        "model": "GLM-5.3"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

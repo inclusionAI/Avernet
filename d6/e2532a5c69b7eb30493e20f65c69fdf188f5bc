@@ -1,0 +1,47 @@
+apps/frontend/src/hooks/__tests__/useScheduledTasks.list.test.ts
+  s_8ca561d791eb71::t_fec3666c6fd1b7 2-4,6-128,130-165,183
+  s_8ca561d791eb71::t_f5c25d6ab87a21 1
+  s_8ca561d791eb71::t_27848ed5e745f4 5
+  s_8ca561d791eb71::t_1546460661c758 129,166-182
+  s_8ca561d791eb71::t_269032a30ac3b2 184-186
+apps/frontend/src/services/backend-api/CronController.ts
+  s_8ca561d791eb71::t_7c7492bec2f78a 307
+  s_68438866e3020f::t_3f7bb01d3eb795 308-315,317
+apps/frontend/src/stores/scheduledTaskStore.ts
+  s_8ca561d791eb71::t_ce4f1aade3e5f4 60,76-82,109,133-145,149-150,154-158,277-278
+  s_8ca561d791eb71::t_30602cbcf8499c 59,61-62,74-75,108,110-111,131-132,146-148,151-153,159-161
+  s_68438866e3020f::t_d336c4245799ce 162-165,279-282
+apps/frontend/src/hooks/useScheduledTasks.ts
+  s_8ca561d791eb71::t_ce4f1aade3e5f4 383,410-413,417-420,458-465,480
+  s_8ca561d791eb71::t_9ded6879aa2d27 409,414-416,427,473
+  s_8ca561d791eb71::t_6dc524929e4055 382
+  s_68438866e3020f::t_f079dd5f17327d 481-482,485,1280-1281
+apps/frontend/src/pages/Cron/ScheduledTaskListPage.tsx
+  s_8ca561d791eb71::t_ea5ecd7cd40df7 127,170,172-173,177-180,182,301-304
+  s_8ca561d791eb71::t_6dc524929e4055 126,300,305-307
+  s_68438866e3020f::t_cc4cba94e7f18c 181
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d6e2532a5c69b7eb30493e20f65c69fdf188f5bc",
+  "prompts": {},
+  "sessions": {
+    "s_68438866e3020f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c617-19d3-72f0-b004-25acfac2a3e5",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    },
+    "s_8ca561d791eb71": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c617-122d-7073-a0a3-c040db32cceb",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

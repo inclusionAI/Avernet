@@ -1,0 +1,25 @@
+apps/backend/src/agentclaw/community/api/task/task_config_service.py
+  s_bd0bcfef0e8f99::t_d505d496ba9cff 1-14
+apps/backend/src/agentclaw/community/core/task/task_config/service.py
+  s_bd0bcfef0e8f99::t_993c8e472dd9fd 1-134
+apps/backend/src/agentclaw/community/core/task/task_config/task_config_service_protocol.py
+  s_bd0bcfef0e8f99::t_fa976fb781b229 1-38
+apps/backend/tests/community/core/task/test_task_config_service.py
+  s_bd0bcfef0e8f99::t_28b1c93f6fc0a5 1-97
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4bdb6c55bba8197b10e6a45eb33dc45908868f95",
+  "prompts": {},
+  "sessions": {
+    "s_bd0bcfef0e8f99": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "a9e52d73-cd84-45d1-9518-6fcc1c7b41ff",
+        "model": "antchat/GLM-5.2"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

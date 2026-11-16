@@ -1,0 +1,125 @@
+apps/bcs/crates/adapters/http/bcs-http/src/gateway_trace.rs
+  s_c6f186a0e9db90::t_eb621a970713a0 118-120,138,152-153,165,170-176
+  s_c6f186a0e9db90::t_fc477e03870265 117,580-583
+apps/bcs/crates/services/bcs-routing/src/security/interceptor.rs
+  s_c6f186a0e9db90::t_ef441b087f6b68 89,113,152
+  s_c6f186a0e9db90::t_fb0a30cde57ef5 99
+apps/bcs/crates/services/bcs-bot/Cargo.toml
+  s_c6f186a0e9db90::t_470e95952206f5 11
+apps/bcs/crates/plugins/bcs-storage-baas/src/lib.rs
+  s_c6f186a0e9db90::t_ef441b087f6b68 218,290,304,321,345
+apps/bcs/Cargo.toml
+  s_c6f186a0e9db90::t_032360ffa73390 176
+apps/bcs/crates/plugin-api/bcs-tracing-api/src/log_correlation/tests.rs
+  s_c6f186a0e9db90::t_ac390f3ab43464 1-103
+apps/bcs/crates/external-clients/bcs-fuse-client/src/client.rs
+  s_c6f186a0e9db90::t_ef441b087f6b68 183,216,265
+apps/bcs/crates/auxiliary/bcs-observability/src/operation.rs
+  s_c6f186a0e9db90::t_eb621a970713a0 104-105,114-118,137-142,175-180,198-203
+  s_c6f186a0e9db90::t_2f103675cc375e 119-122,204-209
+apps/bcs/crates/bootstrap/bcs/src/logging/correlation.rs
+  s_c6f186a0e9db90::t_8b2b1105290cda 1,3-4,6,8-31,36-37,39-40,45-47,49-50,52-71,74-75,77-82
+  s_c6f186a0e9db90::t_1133e764d5421b 34,38
+  s_518423a44db212::t_db97eac4ef946b 2,5,7,32-33,35,41-44,48,51,72-73,76,83-87
+apps/bcs/crates/services/bcs-collaboration-runtime/src/runtime/logging.rs
+  s_c6f186a0e9db90::t_ef441b087f6b68 14,113,206,231,250,274
+  s_c6f186a0e9db90::t_74fd563523c3f5 57,80,151,174
+apps/bcs/crates/adapters/http/bcs-http/Cargo.toml
+  s_c6f186a0e9db90::t_470e95952206f5 14
+apps/bcs/crates/adapters/http/bcs-http/src/chat_digest.rs
+  s_c6f186a0e9db90::t_ef441b087f6b68 44
+apps/bcs/crates/bootstrap/bcs/Cargo.toml
+  s_c6f186a0e9db90::t_470e95952206f5 28,35
+  s_c6f186a0e9db90::t_032360ffa73390 60
+apps/bcs/crates/plugin-api/bcs-tracing-api/CONTEXT.md
+  s_c6f186a0e9db90::t_882f5390270182 142
+  s_c6f186a0e9db90::t_cb9a49043a54f7 3,111-113,124-141,143-151,155-156
+apps/bcs/crates/services/bcs-message-flow/src/group_flow/delivery.rs
+  s_c6f186a0e9db90::t_ef441b087f6b68 512,552
+  s_c6f186a0e9db90::t_74fd563523c3f5 595,614
+apps/bcs/crates/plugin-api/bcs-tracing-api/src/log_correlation.rs
+  s_c6f186a0e9db90::t_4e774406685634 1-76
+apps/bcs/crates/adapters/http/bcs-http/src/routes/bot_events.rs
+  s_c6f186a0e9db90::t_74fd563523c3f5 211,294,336,340-344
+apps/bcs/crates/bootstrap/bcs/src/logging/correlation/tests.rs
+  s_518423a44db212::t_3f16b470e59c66 1,4-5,9,15,19,21,42-43,76
+  s_162d03d2dcfa52::t_8acb3858b386e1 77,81,87,94,116
+  s_c6f186a0e9db90::t_c70bfa5ea4ae01 2-3,6-8,10-14,16-18,20,22-41,44-75,78-80,82-86,107,115
+  s_c6f186a0e9db90::t_8d2b1fba64137c 88-93,95-106,108-114
+apps/bcs/crates/plugin-api/bcs-auth-api/src/chain.rs
+  s_c6f186a0e9db90::t_ef441b087f6b68 79
+apps/bcs/crates/services/bcs-message-flow/src/task_flow/support.rs
+  s_c6f186a0e9db90::t_ef441b087f6b68 549,583
+  s_c6f186a0e9db90::t_74fd563523c3f5 617,638
+apps/bcs/crates/auxiliary/bcs-observability/src/lib.rs
+  s_c6f186a0e9db90::t_eb621a970713a0 8
+apps/bcs/crates/plugin-api/bcs-tracing-api/src/lib.rs
+  s_c6f186a0e9db90::t_4e774406685634 4-6,71-74
+apps/bcs/crates/adapters/http/bcs-provider-http/src/network.rs
+  s_c6f186a0e9db90::t_ef441b087f6b68 129
+apps/bcs/crates/adapters/http/bcs-provider-http/src/lib.rs
+  s_c6f186a0e9db90::t_ef441b087f6b68 86
+  s_c6f186a0e9db90::t_8ca59c5853d012 139
+apps/bcs/crates/bootstrap/bcs/src/logging.rs
+  s_c6f186a0e9db90::t_470e95952206f5 27-28,363,375,387
+apps/bcs/crates/services/bcs-bot/src/application/provider_events.rs
+  s_c6f186a0e9db90::t_74fd563523c3f5 213,216,218,484-485,490,511,523,527
+apps/bcs/crates/services/bcs-message-flow/src/a2a_chat/mod.rs
+  s_c6f186a0e9db90::t_74fd563523c3f5 353,355
+  s_c6f186a0e9db90::t_f27b5cc8b5c0d4 966
+apps/bcs/crates/auxiliary/bcs-observability/Cargo.toml
+  s_c6f186a0e9db90::t_470e95952206f5 14
+apps/bcs/crates/services/bcs-message-flow/src/bot_event/protocol.rs
+  s_c6f186a0e9db90::t_ef441b087f6b68 419,512
+  s_c6f186a0e9db90::t_74fd563523c3f5 552,574
+apps/bcs/Cargo.lock
+  s_c6f186a0e9db90::t_e9affb2369d309 470,951,2035
+apps/bcs/crates/adapters/http/bcs-http/src/gateway_trace_tests.rs
+  s_c6f186a0e9db90::t_ee29525b5968f1 1-80
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/bot_events_contract/agent_events.rs
+  s_c6f186a0e9db90::t_68fa36a71144d2 330-377
+apps/bcs/crates/adapters/http/bcs-provider-http/src/sse_loop_tests.rs
+  s_c6f186a0e9db90::t_243a759da84dd3 697-751
+apps/bcs/crates/adapters/http/bcs-provider-http/src/stream.rs
+  s_c6f186a0e9db90::t_92ed2b07491c00 59,74,97,104,120,124,162,179,210,223-231,373-374,386-387,390
+apps/bcs/crates/auxiliary/bcs-observability/CONTEXT.md
+  s_c6f186a0e9db90::t_fdb15f25800916 18,54-62,69
+apps/bcs/crates/auxiliary/bcs-observability/tests/key_operations.rs
+  s_c6f186a0e9db90::t_31a92793ee929b 1-54
+apps/bcs/crates/services/bcs-message-flow/src/a2a_chat/tests.rs
+  s_c6f186a0e9db90::t_e5d84c47ff9d17 1-41
+apps/bcs/docs/observability/request-operation-logging.md
+  s_c6f186a0e9db90::t_e1bc49dd52b900 24-27,109-110,120-121,124-143
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "166f785de38aa2abc3935dfe73d33cba77a3586c",
+  "prompts": {},
+  "sessions": {
+    "s_162d03d2dcfa52": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ca64-6172-79e1-b224-26153e624f0f",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Zimin Zhang <zhangzimin.zzm@antgroup.com>"
+    },
+    "s_518423a44db212": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c9e3-c1a3-77c1-ad95-fd9122627769",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Zimin Zhang <zhangzimin.zzm@antgroup.com>"
+    },
+    "s_c6f186a0e9db90": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ce58-f8f5-7010-9226-98a33c7ac8ca",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Zimin Zhang <zhangzimin.zzm@antgroup.com>"
+    }
+  }
+}

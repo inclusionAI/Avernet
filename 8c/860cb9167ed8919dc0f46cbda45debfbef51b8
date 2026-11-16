@@ -1,0 +1,19 @@
+apps/bcs/crates/services/bcs-coordination-store/src/lib.rs
+  s_f092bf69080dc2::t_e6022a6599eb17 83,119,130,138
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8c860cb9167ed8919dc0f46cbda45debfbef51b8",
+  "prompts": {},
+  "sessions": {
+    "s_f092bf69080dc2": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1abff-a81d-7901-a20f-6208f6b1245b",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}
