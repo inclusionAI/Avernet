@@ -11,6 +11,7 @@ from agentclaw.community.core.devices.services.device_context import (
     DeviceConnectionUnavailableError,
     DeviceOfflineError,
 )
+from agentclaw.community.core.devices.models import DeviceBindingStatus
 from agentclaw.community.core.devices.services.conn_info_builders.baas_builder import (
     BaasConnInfoBuilder,
 )
@@ -122,6 +123,12 @@ def test_build_preserves_explicit_device_offline_as_provider_neutral_error(
 
     with pytest.raises(DeviceOfflineError):
         builder.build(fake_binding, user_id="user-1")
+
+    # Verify binding status was synced
+    fake_device_repo.update_status.assert_called_once_with(
+        binding_id=42,
+        status=DeviceBindingStatus.STOPPED.value,
+    )
 
 
 def test_build_preserves_transient_connection_failure_without_calling_it_offline(
@@ -336,3 +343,58 @@ def test_build_default_device_uuid_none_omits_from_conn_info(
     assert "device_uuid" not in conn_info
     # get_ws_info 仍收到 device_uuid=None(默认值)
     assert fake_baas_service.get_ws_info.call_args.kwargs.get("device_uuid") is None
+
+
+
+# ── Binding status sync on device offline ──────────────────────────
+
+
+def test_build_offline_updates_binding_status_to_stopped(
+    fake_binding, fake_baas_service, fake_bot_repo, fake_device_repo
+):
+    """BaasNoActiveDevicesError -> update_status(STOPPED) -> DeviceOfflineError."""
+    fake_baas_service.get_ws_info.side_effect = BaasNoActiveDevicesError(
+        status_code=404
+    )
+    builder = _make_builder(fake_baas_service, fake_bot_repo, fake_device_repo)
+
+    with pytest.raises(DeviceOfflineError) as exc_info:
+        builder.build(fake_binding, user_id="user-1")
+
+    assert "No active device for binding=42" in str(exc_info.value)
+    fake_device_repo.update_status.assert_called_once_with(
+        binding_id=42,
+        status="STOPPED",
+    )
+
+
+def test_build_offline_still_raises_when_update_status_fails(
+    fake_binding, fake_baas_service, fake_bot_repo, fake_device_repo
+):
+    """update_status failure does not block DeviceOfflineError (AC-4)."""
+    fake_baas_service.get_ws_info.side_effect = BaasNoActiveDevicesError(
+        status_code=404
+    )
+    fake_device_repo.update_status.side_effect = RuntimeError("db down")
+    builder = _make_builder(fake_baas_service, fake_bot_repo, fake_device_repo)
+
+    with pytest.raises(DeviceOfflineError) as exc_info:
+        builder.build(fake_binding, user_id="user-1")
+
+    assert "No active device for binding=42" in str(exc_info.value)
+    fake_device_repo.update_status.assert_called_once()
+
+
+def test_build_transient_error_does_not_update_binding_status(
+    fake_binding, fake_baas_service, fake_bot_repo, fake_device_repo
+):
+    """Transient error does not trigger binding status sync (offline only)."""
+    fake_baas_service.get_ws_info.side_effect = BaasTransientServiceError(
+        "BaaS transport timeout"
+    )
+    builder = _make_builder(fake_baas_service, fake_bot_repo, fake_device_repo)
+
+    with pytest.raises(DeviceConnectionUnavailableError):
+        builder.build(fake_binding, user_id="user-1")
+
+    fake_device_repo.update_status.assert_not_called()

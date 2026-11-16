@@ -11,6 +11,7 @@ from agentclaw.community.core.devices.services.device_context import (
     DeviceConnectionUnavailableError,
     DeviceOfflineError,
 )
+from agentclaw.community.core.devices.models import DeviceBindingStatus
 from agentclaw.community.core.service_bot.baas_service_errors import (
     BaasNoActiveDevicesError,
     BaasTransientServiceError,
@@ -67,6 +68,7 @@ class BaasConnInfoBuilder:
                 device_uuid=device_uuid,
             )
         except BaasNoActiveDevicesError as error:
+            self._sync_binding_offline(binding)
             raise DeviceOfflineError(
                 f"No active device for binding={binding.id}"
             ) from error
@@ -128,6 +130,29 @@ class BaasConnInfoBuilder:
             device_uuid=device_uuid,
             sandbox_client=self._sandbox_client,
         )
+
+    def _sync_binding_offline(self, binding: DeviceBindingRecord) -> None:
+        """Sync binding status to STOPPED when BaaS confirms device is offline.
+
+        Best-effort: a failure to update the binding status is logged but
+        does not suppress the DeviceOfflineError that follows.
+        """
+        try:
+            self._device_repo.update_status(
+                binding_id=binding.id,
+                status=DeviceBindingStatus.STOPPED.value,
+            )
+            logger.info(
+                "[BaasConnInfoBuilder] synced binding status to STOPPED: "
+                "binding_id=%s device_id=%s",
+                binding.id, binding.device_id,
+            )
+        except Exception as exc:
+            logger.warning(
+                "[BaasConnInfoBuilder] failed to sync binding status: "
+                "binding_id=%s: %s",
+                binding.id, exc,
+            )
 
     def _resolve_bot(self, binding: DeviceBindingRecord) -> dict[str, Any] | None:
         """两步反查策略,对齐 ``BaasDeviceService._resolve_bot_by_binding_id``。"""
