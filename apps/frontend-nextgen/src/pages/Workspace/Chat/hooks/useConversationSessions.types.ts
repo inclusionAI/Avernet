@@ -1,9 +1,11 @@
 import type { ConversationBotSection, ConversationSessionScope } from '@/domain/conversation/types';
 import type { ConversationFavoritesModel } from './useConversationFavorites';
+import type { ConversationSessionArchivesModel } from './useConversationSessionArchives';
 import type { ConversationSessionActionsModel } from './useConversationSessionActions';
 
 export interface ConversationSessionsModel {
   favorites: ConversationFavoritesModel;
+  archives: ConversationSessionArchivesModel;
   actions: ConversationSessionActionsModel;
   openBotIds: Record<string, true>;
   toggleBot(botId: string, section: ConversationBotSection): void;

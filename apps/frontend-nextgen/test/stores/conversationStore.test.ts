@@ -376,6 +376,29 @@ describe('conversationStore selectedSessionSnapshot', () => {
     expect(useConversationStore.getState().selectedSessionSnapshot).toBeNull();
   });
 
+  it('已归档范围只改变左栏列表,不卸载已打开的主会话', () => {
+    const store = useConversationStore.getState();
+    store.setSelectedSessionSnapshot(snapshotOf());
+    store.selectConversation(identity);
+
+    store.setManagedBotScope('bot-a:1', 'archived');
+    let state = useConversationStore.getState();
+    expect(state.selectedScope).toBe('archived');
+    expect(state.effectiveScopeByManagedBotId['bot-a:1']).toBe('archived');
+    expect(state.selectedSessionId).toBe('s1');
+    expect(state.selectedSessionSnapshot).toMatchObject({ scope: 'archived', session: { sessionId: 's1' } });
+
+    store.setManagedBotScope('bot-a:1', 'all');
+    state = useConversationStore.getState();
+    expect(state.selectedScope).toBe('all');
+    expect(state.selectedSessionId).toBe('s1');
+    expect(state.selectedSessionSnapshot).toMatchObject({ scope: 'all', session: { sessionId: 's1' } });
+
+    // favorite 仍是强过滤语义:不属于该范围的已打开会话要关闭。
+    store.setManagedBotScope('bot-a:1', 'favorite');
+    expect(useConversationStore.getState().selectedSessionId).toBeNull();
+  });
+
   it('reset 清空快照', () => {
     const store = useConversationStore.getState();
     store.setSelectedSessionSnapshot(snapshotOf());

@@ -6,6 +6,7 @@ import { extractCodingSessionCreatorUserId } from '@/domain/conversation/codingS
 import type {
   ConversationBotSection,
   ConversationBotView,
+  ConversationOrigin,
   ConversationSessionScope,
 } from '@/domain/conversation/types';
 import { isManagedConversationSection } from '@/domain/conversation/types';
@@ -18,6 +19,7 @@ import {
 } from './conversationSessionPageRequest';
 import { useConversationBotExpansion } from './useConversationBotExpansion';
 import { useConversationFavorites } from './useConversationFavorites';
+import { useConversationSessionArchives } from './useConversationSessionArchives';
 import { useConversationFavoriteScope } from './useConversationFavoriteScope';
 import { useConversationSessionActions } from './useConversationSessionActions';
 import { useConversationSessionCreation } from './useConversationSessionCreation';
@@ -47,6 +49,23 @@ export function useConversationSessions(options: {
   }, [managedBots, friendBots]);
   const expandBot = useConversationBotExpansion(userId);
   const sessionCreation = useConversationSessionCreation(userId, botByBotId);
+  const focusRestoredSession = useCallback(
+    ({ view, origin, sessionId }: { view: ConversationBotView; origin: ConversationOrigin; sessionId: string }) => {
+      const botId = view.bot.botId;
+      const storeNow = useConversationStore.getState();
+      storeNow.setManagedBotScope(botId, 'all');
+      storeNow.selectConversation({
+        botId,
+        section: view.section,
+        origin,
+        scope: 'all',
+        friendUserId: null,
+        sessionId,
+      });
+    },
+    [],
+  );
+  const archives = useConversationSessionArchives({ userId, managedBots, onRestoredSessionFocus: focusRestoredSession });
   // 请求上下文(代次/在途去重)挂载一份;分页请求主体拆见 ./conversationSessionPageRequest。
   const requestCtxRef = useRef<ConversationSessionRequestContext | null>(null);
   if (!requestCtxRef.current) requestCtxRef.current = createSessionRequestContext(userId);
@@ -69,6 +88,7 @@ export function useConversationSessions(options: {
     const botId = view.bot.botId;
     // origin=others 的管理 Bot 会话由 useManagedBotOthers 接管,这里不加载。
     if (isManagedConversationSection(view.section)) {
+      if ((useConversationStore.getState().effectiveScopeByManagedBotId[botId] ?? 'all') === 'archived') return;
       const origin = useConversationStore.getState().originByManagedBotId[botId] ?? 'mine';
       // Coding Bot 的会话接口返回共享实例内的混合创建者列表，others 也由
       // 同一列表按 sessionId 分流；普通 Bot 仍由 useManagedBotOthers 的好友模型承接。
@@ -172,6 +192,7 @@ export function useConversationSessions(options: {
       // friend 范围由 Store 快照在 loadPage 内读取,入参 scope 仅用于 managed 缓存一致性校验。
       if (isManagedConversationSection(section)) {
         const store = useConversationStore.getState();
+        if (scope === 'archived') return;
         const cached = store.sessionsByBotId[botId];
         const origin = store.originByManagedBotId[botId] ?? 'mine';
         if (!cached || cached.origin !== origin || cached.scope !== scope) return;
@@ -192,6 +213,7 @@ export function useConversationSessions(options: {
   return {
     actions,
     favorites,
+    archives,
     openBotIds: expandedBotIds,
     toggleBot,
     selectMineSession: (botId, sessionId) =>

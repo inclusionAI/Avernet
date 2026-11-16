@@ -228,6 +228,36 @@ describe('useConversationDeepLinkSessionHydration', () => {
     });
   });
 
+  it('Coding Bot archived 深链保留 session 并写入归档身份的会话快照', async () => {
+    const sessionId = 'user:100:session:mine:agent:coding-bot';
+    useConversationStore.setState({
+      ...conversationInitialState,
+      selectedBotId: codingBot.botId,
+      selectedSection: 'team',
+      selectedOrigin: 'mine',
+      selectedScope: 'archived',
+      selectedSessionId: sessionId,
+      effectiveScopeByManagedBotId: { [codingBot.botId]: 'archived' },
+    });
+    getSessionDetail.mockResolvedValue({
+      ok: true,
+      data: { ...sessionOfSessionId(sessionId), botId: codingBot.botId },
+    });
+
+    renderDeepLinkHydration('100', [codingView]);
+
+    await waitFor(() => expect(getSessionDetail).toHaveBeenCalledWith(codingBot, '100', sessionId));
+    await waitFor(() => {
+      expect(useConversationStore.getState().selectedSessionSnapshot).toMatchObject({
+        section: 'team',
+        botId: codingBot.botId,
+        origin: 'mine',
+        scope: 'archived',
+        session: { sessionId },
+      });
+    });
+  });
+
   it('普通 Bot others 仍由只读好友链路处理，不调用会话详情接口', async () => {
     useConversationStore.setState({
       ...conversationInitialState,

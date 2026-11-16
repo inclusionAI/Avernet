@@ -16,6 +16,8 @@ export interface BotRowLayoutInputs {
   expanded: boolean;
   unavailable: boolean;
   hasSessionControls: boolean;
+  /** Coding Bot 归档能力可用时，已归档范围也继续暴露 Bot 行的 sessionID 检索入口。 */
+  supportsArchives: boolean;
   /** 实例范围聚合行标记（🔍 检索/实例命中时计入常显让位）。 */
   searchMarked: boolean;
   /** 「Bot 管理」菜单入口条件成立（回调存在且 bot.spaceId 有值）。 */
@@ -25,7 +27,7 @@ export interface BotRowLayoutInputs {
 export interface BotRowLayout {
   filterActive: boolean;
   searchActive: boolean;
-  /** 搜索入口仅在有效范围 all 下展示：favorite 清空并隐藏（切回 all 不恢复），others 强制 all 保留。 */
+  /** 搜索入口在 all 下保留；Coding Bot 已归档 scope 复用同一入口，不在归档列表内另建搜索框。 */
   searchVisible: boolean;
   showFilter: boolean;
   showMenu: boolean;
@@ -49,14 +51,16 @@ export function resolveBotRowLayout(inputs: BotRowLayoutInputs): BotRowLayout {
     expanded,
     unavailable,
     hasSessionControls,
+    supportsArchives,
     searchMarked,
     hasManagement,
   } = inputs;
-  // 筛选/搜索的激活与可见:归属 others 或 favorite 范围点亮筛选;归属+范围筛选对管理 Bot 开放,
-  // 好友 Bot 仅在有收藏能力时暴露「会话」范围(TEClaw 无收藏接口,不发收藏请求)。
-  const filterActive = (isManaged && origin === 'others') || (canFavorite && scope === 'favorite');
+  // 筛选/搜索的激活与可见:归属 others 或非默认范围点亮筛选;归属+范围筛选对管理 Bot 开放,
+  // 好友 Bot 仅在有收藏能力时暴露「会话」范围。Coding Bot 归档范围复用 Bot 行 sessionID
+  // 检索，避免归档列表内再出现第二个搜索框。
+  const filterActive = (isManaged && origin !== 'mine') || (canFavorite && scope === 'favorite') || scope === 'archived';
   const searchActive = sessionKey !== '';
-  const searchVisible = scope === 'all';
+  const searchVisible = scope === 'all' || (scope === 'archived' && supportsArchives);
   const showFilter = isManaged || canFavorite;
   const showMenu = hasManagement && !isOthers;
   const stripVisible = (hasSessionControls && !unavailable) || (unavailable && showMenu);
