@@ -175,7 +175,7 @@ describe('AutoHeal/BaaS draft lifecycle safety', () => {
   })
 
   it.each([
-    ['AUTO_HEAL_BOT_UNAVAILABLE', '请检查 effective autoHeal.botId 对应的 BaaS Bot'],
+    ['AUTO_HEAL_BOT_UNAVAILABLE', '请检查 effective autoHeal.botId'],
     ['BAAS_AUTH_FAILED', '认证失败不能证明任务未被派发'],
     ['BAAS_REQUEST_REJECTED', 'BaaS 明确拒绝本次请求'],
     ['BAAS_GENERATION_FAILED', '检查上游任务状态或日志'],
@@ -190,6 +190,21 @@ describe('AutoHeal/BaaS draft lifecycle safety', () => {
     expect(failure.message).toContain(code)
     expect(failure.message).toContain(guidance)
     expect(api.validate).not.toHaveBeenCalled()
+  })
+
+  it('describes a terminal binding failure with the code and effective provider binding checks, not workflow edits or retry', async () => {
+    api.poll.mockResolvedValueOnce(task('failed', { error: 'AUTO_HEAL_BOT_UNAVAILABLE' }))
+    const failure = await generateWorkflowAiDraft('modify', '需求', source).catch(cause => cause)
+    expect(failure).toBeInstanceOf(WorkflowAiCandidateError)
+    expect(failure.message).toContain('AUTO_HEAL_BOT_UNAVAILABLE')
+    for (const detail of ['effective autoHeal.botId', 'owner', 'BaaS 环境', 'endpoint', '配套 API key', 'ACTIVE']) {
+      expect(failure.message).toContain(detail)
+    }
+    expect(failure.message).not.toMatch(/YAML|重试|lifecycleStage/)
+    expect(api.generate).toHaveBeenCalledOnce()
+    expect(api.poll).toHaveBeenCalledOnce()
+    expect(api.validate).not.toHaveBeenCalled()
+    expect(api.cancel).not.toHaveBeenCalled()
   })
 
   it.each(['上游返回原始诊断：请检查 Bot 输出后重试', 'constructor', 'toString', '__proto__'])('preserves unknown failed-task error %s instead of treating it as a known code', async message => {

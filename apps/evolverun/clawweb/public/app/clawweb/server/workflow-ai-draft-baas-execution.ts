@@ -1,13 +1,14 @@
 /** Composition adapter: Editor uses the exact same effective Bot/transport as
  * AutoHeal, but sends a suggestion-only prompt, never a repair/run command. */
 import { resolveAutoHealConfig, resolveBaasConfig } from '@avernet/clawweb-shared/server/db';
+import { selectAutoHealBaasTransport } from '@avernet/clawweb-shared/server/auto-heal-baas';
 import { getCurrentEnv } from '@avernet/clawweb-shared/server/env';
 import { buildBaasHeaders, sendIntervention } from '@avernet/clawevolve/server/services/baas-intervention';
 import { WorkflowAiDraftDispatchRejectedError, WorkflowAiDraftInvalidResultError, WorkflowAiDraftPollUnavailableError,
   type WorkflowAiDraftExecutionPort, type WorkflowAiDraftExecutionRequest } from '@avernet/workflow/server/contracts/workflow-ai-draft';
 import { decodeWorkflowAiDraftBaasReply } from './workflow-ai-draft-baas-reply.js';
 const BOT_ID = /^[^:\s]+:[^:\s]+$/;
-type ProviderNamespace = { apiKey: string; baseUrl: string; environment: string };
+type ProviderNamespace = { apiKey: string; baseUrl: string; environment: string; controlEnvironment: string };
 type ValidatedTransport = ProviderNamespace & { iamtoken: string };
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -15,29 +16,21 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function localUrl(url: URL): boolean {
   return ['127.0.0.1', 'localhost', '::1', '[::1]'].includes(url.hostname.toLowerCase());
 }
-function canonicalBaasUrl(value: string): string {
-  const url = new URL(value);
-  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw new Error('BAAS_NOT_CONFIGURED');
-  // URL constructor canonicalizes scheme, host and dot-segments. Remove only
-  // one trailing slash so a root endpoint remains distinguishable from a path
-  // endpoint while still composing cleanly with /openapi/v1/messages.
-  return url.href.replace(/\/$/, '');
-}
 function readTransport(): ValidatedTransport {
   try {
-    const transport = resolveBaasConfig();
-    const baseUrl = canonicalBaasUrl(transport.baseUrl);
-    if (typeof transport.apiKey !== 'string' || !transport.apiKey) throw new Error('BAAS_NOT_CONFIGURED');
+    const transport = selectAutoHealBaasTransport(resolveAutoHealConfig(), resolveBaasConfig());
+    const { baseUrl } = transport;
     const url = new URL(baseUrl);
     if (process.platform === 'darwin' && !localUrl(url) && !transport.iamtoken) throw new Error('BAAS_NOT_CONFIGURED');
     // Copy scalars at the boundary; callers must not retain mutable config references.
-    const { apiKey, iamtoken } = transport;
-    return { apiKey, baseUrl, environment: getCurrentEnv(), iamtoken };
+    const { apiKey, iamtoken, environment } = transport;
+    return { apiKey, baseUrl, environment, controlEnvironment: getCurrentEnv(), iamtoken };
   } catch { throw new Error('BAAS_NOT_CONFIGURED'); }
 }
-function transportConfiguration({ apiKey, baseUrl, environment }: ProviderNamespace): ValidatedTransport {
+function transportConfiguration({ apiKey, baseUrl, environment, controlEnvironment }: ProviderNamespace): ValidatedTransport {
   const current = readTransport();
-  if (current.apiKey !== apiKey || current.baseUrl !== baseUrl || current.environment !== environment) throw new Error('BAAS_PROVIDER_CHANGED');
+  if (current.apiKey !== apiKey || current.baseUrl !== baseUrl || current.environment !== environment
+    || current.controlEnvironment !== controlEnvironment) throw new Error('BAAS_PROVIDER_CHANGED');
   return current;
 }
 function targetConfiguration() {

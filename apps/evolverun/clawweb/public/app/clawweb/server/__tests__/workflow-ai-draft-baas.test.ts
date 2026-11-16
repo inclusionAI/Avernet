@@ -1,11 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const state = vi.hoisted(() => ({ botId: 'autoheal-bot:configured-owner', apiKey: 'baas-test',
-  baseUrl: 'http://127.0.0.1:1', iamtoken: '', environment: 'pre', unavailable: false }));
+  baseUrl: 'http://127.0.0.1:1', iamtoken: '', environment: 'pre', baasEnvironment: 'pre',
+  prodApiKey: 'provider-test', prodBaseUrl: 'http://127.0.0.1:9', unavailable: false }));
 vi.mock('@avernet/clawweb-shared/server/db', async original => ({
   ...await original<typeof import('@avernet/clawweb-shared/server/db')>(),
-  resolveAutoHealConfig: () => ({ botId: state.botId }),
+  resolveAutoHealConfig: () => ({ botId: state.botId, baasEnvironment: state.baasEnvironment }),
   resolveSmartOnboardingConfig: () => ({ defaultBotId: 'wrong-onboarding:logged-in-user' }),
-  resolveBaasConfig: () => { if (state.unavailable) throw new Error('private config failure baas-test'); return state; },
+  resolveBaasConfig: () => {
+    if (state.unavailable) throw new Error('private config failure baas-test');
+    const { prodApiKey, prodBaseUrl } = state;
+    return { apiKey: prodApiKey, baseUrl: prodBaseUrl, iamtoken: state.iamtoken, environments: {
+      dev: { apiKey: '', baseUrl: '' }, pre: { apiKey: state.apiKey, baseUrl: state.baseUrl },
+      prod: { apiKey: prodApiKey, baseUrl: prodBaseUrl },
+    } };
+  },
 }));
 vi.mock('@avernet/clawweb-shared/server/env', async original => ({
   ...await original<typeof import('@avernet/clawweb-shared/server/env')>(), getCurrentEnv: () => state.environment,
@@ -24,7 +32,8 @@ const baasResult = (messageId: string, botId: string, data: Record<string, unkno
   message_id: messageId, bot_id: botId, session_id: 'synthetic-session', created_at: '2026-11-15T00:00:00Z', status: 'completed', content: yaml, ...data,
 } });
 beforeEach(() => { Object.assign(state, { botId: 'autoheal-bot:configured-owner', apiKey: 'baas-test',
-  baseUrl: 'http://127.0.0.1:1', iamtoken: '', environment: 'pre', unavailable: false }); });
+  baseUrl: 'http://127.0.0.1:1', iamtoken: '', environment: 'pre', baasEnvironment: 'pre',
+  prodApiKey: 'provider-test', prodBaseUrl: 'http://127.0.0.1:9', unavailable: false }); });
 afterEach(() => { vi.unstubAllGlobals(); });
 describe('Editor AutoHeal/BaaS adapter', () => {
   it('sends the complete configured AutoHeal binding through the existing BaaS transport, not onboarding/user identity', async () => {
@@ -39,6 +48,8 @@ describe('Editor AutoHeal/BaaS adapter', () => {
     expect(url).toBe('http://127.0.0.1:1/openapi/v1/messages');
     const sent = JSON.parse(init.body as string);
     expect(sent.bot_id).toBe('autoheal-bot:configured-owner');
+    expect(sent).not.toHaveProperty('lifecycle_stage');
+    expect(init.headers).toMatchObject({ Authorization: 'Bearer baas-test' });
     expect(sent.message_id).toBe(taskId);
     expect(sent.message_id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
     expect(init.redirect).toBe('error');
@@ -51,6 +62,30 @@ describe('Editor AutoHeal/BaaS adapter', () => {
     state.botId = ''; expect(createWorkflowAiDraftBaasExecution()).toBeUndefined();
     state.botId = 'bare-id'; expect(createWorkflowAiDraftBaasExecution()).toBeUndefined();
     state.botId = 'bot:owner'; state.apiKey = ''; expect(createWorkflowAiDraftBaasExecution()).toBeUndefined();
+  });
+  it.each(['dev', 'pre', 'prod'])('selects the explicit pre target independently of host environment %s', async host => {
+    state.environment = host;
+    const fetch = vi.fn<typeof globalThis.fetch>(async (_url, init) => new Response(JSON.stringify(init?.method === 'POST'
+      ? { data: { message_id: taskId } } : baasResult(taskId, state.botId))));
+    vi.stubGlobal('fetch', fetch);
+    const port = createWorkflowAiDraftBaasExecution()!;
+    expect(await port.dispatch(request())).toEqual({ jobId: taskId });
+    expect(await port.poll({ ...request(), jobId: taskId })).toMatchObject({ status: 'completed' });
+    expect(fetch.mock.calls.map(([url]) => url)).toEqual([
+      'http://127.0.0.1:1/openapi/v1/messages', `http://127.0.0.1:1/openapi/v1/messages/${taskId}`,
+    ]);
+    for (const [, init] of fetch.mock.calls) expect(init?.headers).toMatchObject({ Authorization: 'Bearer baas-test' });
+  });
+  it.each([
+    { field: 'apiKey', value: '' }, { field: 'apiKey', value: '   ' },
+    { field: 'baseUrl', value: '' }, { field: 'baseUrl', value: '   ' },
+    { field: 'baseUrl', value: 'not-a-url' }, { field: 'baasEnvironment', value: '' },
+    { field: 'baasEnvironment', value: 'gray' }, { field: 'baasEnvironment', value: 'missing' },
+  ] as const)('never falls back to the complete prod pair for invalid pre configuration ($field: $value)', ({ field, value }) => {
+    state[field] = value;
+    const fetch = vi.fn<typeof globalThis.fetch>(); vi.stubGlobal('fetch', fetch);
+    expect(createWorkflowAiDraftBaasExecution()).toBeUndefined();
+    expect(fetch).not.toHaveBeenCalled();
   });
   it('keeps DB-first binding errors uncertain without echoing provider details', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ message: '60001 Bot binding not found: hidden:owner' }), { status: 400 })));
@@ -186,14 +221,17 @@ describe('Editor AutoHeal/BaaS adapter', () => {
 });
 describe('BaaS provider namespace fence', () => {
   it.each(['dispatch', 'poll', 'resolveTarget'] as const)('blocks changed namespaces before %s I/O', async operation => {
-    for (const field of ['origin', 'path', 'credential', 'environment'] as const) {
-      state.baseUrl = 'http://127.0.0.1:1/provider/tenant-a'; state.apiKey = 'baas-test'; state.environment = 'pre';
+    for (const field of ['origin', 'path', 'credential', 'environment', 'target-environment'] as const) {
+      state.baseUrl = 'http://127.0.0.1:1/provider/tenant-a'; state.apiKey = 'baas-test'; state.environment = 'pre'; state.baasEnvironment = 'pre';
       const port = createWorkflowAiDraftBaasExecution()!;
       const frozen = request();
       if (field === 'origin') state.baseUrl = 'http://127.0.0.1:2/provider/tenant-a';
       if (field === 'path') state.baseUrl = 'http://127.0.0.1:1/provider/tenant-b';
       if (field === 'credential') state.apiKey = 'provider-test';
       if (field === 'environment') state.environment = 'prod';
+      if (field === 'target-environment') {
+        state.prodApiKey = state.apiKey; state.prodBaseUrl = state.baseUrl; state.baasEnvironment = 'prod';
+      }
       const fetch = vi.fn<typeof globalThis.fetch>(); vi.stubGlobal('fetch', fetch);
       const pending = operation === 'dispatch' ? port.dispatch(frozen) : operation === 'poll'
         ? port.poll({ ...frozen, jobId: taskId }) : port.resolveTarget();
@@ -202,10 +240,12 @@ describe('BaaS provider namespace fence', () => {
     }
   });
   it.each(['dispatch', 'poll', 'resolveTarget'] as const)('fails safely on live config revocation before %s', async operation => {
-    for (const field of ['missing-key', 'invalid-url', 'config-error'] as const) {
-      state.apiKey = 'baas-test'; state.baseUrl = 'http://127.0.0.1:1'; state.unavailable = false;
+    for (const field of ['missing-key', 'missing-url', 'invalid-url', 'invalid-environment', 'config-error'] as const) {
+      state.apiKey = 'baas-test'; state.baseUrl = 'http://127.0.0.1:1'; state.unavailable = false; state.baasEnvironment = 'pre';
       const port = createWorkflowAiDraftBaasExecution()!, frozen = request();
       if (field === 'missing-key') state.apiKey = '';
+      if (field === 'missing-url') state.baseUrl = '';
+      if (field === 'invalid-environment') state.baasEnvironment = 'prepub';
       if (field === 'invalid-url') state.baseUrl = 'https://user:private-credential@example.invalid/api?secret=value';
       if (field === 'config-error') state.unavailable = true;
       const fetch = vi.fn<typeof globalThis.fetch>(); vi.stubGlobal('fetch', fetch);
