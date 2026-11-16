@@ -145,7 +145,7 @@ from agentclaw.community.core.task.context_collab.products.service_api import (
 from agentclaw.community.core.task.context_collab.service_api import (
     ContextCollabServiceProtocol,
 )
-from agentclaw.community.core.task.context_collab.services.context_collab_service import (
+from agentclaw.community.core.task.context_collab.l4_context_primitives.context_collab_service import (
     ContextCollabService,
 )
 from agentclaw.community.core.task.context_collab.services.method_bootstrap import (

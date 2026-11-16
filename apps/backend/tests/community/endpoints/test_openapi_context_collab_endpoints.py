@@ -32,8 +32,11 @@ from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabNotFoundError,
     ContextCollabVersionConflict,
 )
+from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
+    Collet,
+    ColletState,
+)
 from agentclaw.community.core.task.context_collab.service_api import (
-    ContextCollabCreatedResult,
     ContextCollabStatusProjection,
     EventAcceptedResult,
     TaskProgressProjectionDTO,
@@ -130,25 +133,22 @@ _CASE_SNAPSHOT = {
 
 
 def _seed_create_happy(world) -> None:
-    def create_context(self, _command, context):
+    def create_collet(self, _command, context):
         # The public face binds the L2 actor to the verified principal id and
         # marks the delivery source; anything else is an adapter regression.
         assert context.actor.principal_id == _CALLER
         assert context.source == "openapi"
-        return ContextCollabCreatedResult(
-            collab_context_id="collet_case_001",
-            context_version=1,
-            current_snapshot=dict(_CASE_SNAPSHOT),
-            current_event={
-                "event_id": "evt_case_001",
-                "parent_event": None,
-                "event_kind": "task.created",
-                "primitive_type": "Task",
-            },
+        return Collet(
+            collet_id="collet_case_001",
+            initiator_ref=_command.principal_ref,
+            state=ColletState.ACTIVE,
+            scope=_command.space,
+            current_event_id="evt_case_001",
+            version=1,
         )
 
     bind_overrides(
-        world, ContextCollabServiceProtocol, {"create_context": create_context},
+        world, ContextCollabServiceProtocol, {"create_collet": create_collet},
     )
 
 
@@ -251,7 +251,17 @@ def _seed_get_missing(world) -> None:
         status=200,
         json_contains={
             "code": 200000,
-            "data": {"collab_context_id": "collet_case_001", "context_version": 1},
+            "data": {
+                "collab_context_id": "collet_case_001",
+                "context_version": 1,
+                "current_snapshot": _CASE_SNAPSHOT,
+                "current_event": {
+                    "event_id": "evt_case_001",
+                    "parent_event": None,
+                    "event_kind": "task.created",
+                    "primitive_type": "Task",
+                },
+            },
         },
     ),
 )

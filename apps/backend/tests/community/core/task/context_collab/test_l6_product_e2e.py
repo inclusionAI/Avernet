@@ -39,7 +39,7 @@ from agentclaw.community.core.task.context_collab.service_api import (
     ColletCreateCommand,
     EventAppendCommand,
 )
-from agentclaw.community.core.task.context_collab.services.context_collab_service import (
+from agentclaw.community.core.task.context_collab.l4_context_primitives.context_collab_service import (
     ContextCollabService,
 )
 from tests.community.core.task.context_collab.product_catalog import PRODUCT_CATALOG
@@ -119,19 +119,22 @@ class TestBbsProductE2E:
         )
         created = service.create_collet(_create_command(), _actor(OWNER))
 
-        assert created.current_snapshot["method_kind"] == "Open + Group"
-        assert created.current_snapshot["executor_ref"] is None
-        spec = _context_spec(engine, created.collab_context_id)
+        status = service.get_status(
+            created.collet_id, trunk_events=False, context=_actor(OWNER)
+        )
+        assert status.current_snapshot["method_kind"] == "Open + Group"
+        assert status.current_snapshot["executor_ref"] is None
+        spec = _context_spec(engine, created.collet_id)
         assert spec["product_kind"] == "bbs_public_discussion"
         assert spec["workflow_kind"] == "bbs_public_discussion"
 
         # A BBS body is a root Message, never a reply to the Task skeleton.
         parent_event = None
-        version = created.context_version
+        version = created.version
 
         owner_post = _append(
             service,
-            collab_context_id=created.collab_context_id,
+            collab_context_id=created.collet_id,
             expected_version=version,
             event_kind="user_interaction.posted",
             primitive_type="Message",
@@ -143,7 +146,7 @@ class TestBbsProductE2E:
 
         participant_post = _append(
             service,
-            collab_context_id=created.collab_context_id,
+            collab_context_id=created.collet_id,
             expected_version=owner_post.context_version,
             event_kind="user_interaction.posted",
             primitive_type="Message",
@@ -154,7 +157,7 @@ class TestBbsProductE2E:
         assert participant_post.context_version == 3
 
         status = service.get_status(
-            created.collab_context_id,
+            created.collet_id,
             trunk_events=False,
             context=_actor(PARTICIPANT),
         )
@@ -169,7 +172,7 @@ class TestBbsProductE2E:
 
         # Public Open+Group Message is visible to an unrelated authenticated reader.
         reader_status = service.get_status(
-            created.collab_context_id,
+            created.collet_id,
             trunk_events=True,
             context=_actor(PrincipalRef("human", "u_reader_9999")),
         )
@@ -193,17 +196,20 @@ class TestBbsProductE2E:
             ),
             _actor(OWNER),
         )
-        assert created.current_snapshot["status"] == "created"
-        spec = _context_spec(engine, created.collab_context_id)
+        status = service.get_status(
+            created.collet_id, trunk_events=False, context=_actor(OWNER)
+        )
+        assert status.current_snapshot["status"] == "created"
+        spec = _context_spec(engine, created.collet_id)
         assert spec["product_kind"] == "bbs_help_request"
         assert spec["workflow_kind"] == "bbs_help_request_goal"
 
-        parent_event = created.current_event["event_id"]
-        version = created.context_version
+        parent_event = created.current_event_id
+        version = created.version
 
         context_description = _append(
             service,
-            collab_context_id=created.collab_context_id,
+            collab_context_id=created.collet_id,
             expected_version=version,
             event_kind="user_interaction.posted",
             primitive_type="Message",
@@ -213,7 +219,7 @@ class TestBbsProductE2E:
         )
         public_hint = _append(
             service,
-            collab_context_id=created.collab_context_id,
+            collab_context_id=created.collet_id,
             expected_version=context_description.context_version,
             event_kind="user_interaction.posted",
             primitive_type="Message",
@@ -226,7 +232,7 @@ class TestBbsProductE2E:
         # unrelated participants may reply publicly but cannot advance the goal.
         with pytest.raises(ContextCollabValidationError, match="only the principal"):
             service.append_event(
-                created.collab_context_id,
+                created.collet_id,
                 EventAppendCommand(
                     expected_version=public_hint.context_version,
                     event_kind="task.started",
@@ -242,7 +248,7 @@ class TestBbsProductE2E:
         # L2 helper-agent actor is mapped as the L4 designated executor in G1.
         started = _append(
             service,
-            collab_context_id=created.collab_context_id,
+            collab_context_id=created.collet_id,
             expected_version=public_hint.context_version,
             event_kind="task.started",
             primitive_type="Task",
@@ -253,7 +259,7 @@ class TestBbsProductE2E:
 
         progress = _append(
             service,
-            collab_context_id=created.collab_context_id,
+            collab_context_id=created.collet_id,
             expected_version=started.context_version,
             event_kind="task.progress.updated",
             primitive_type="Activity",
@@ -266,7 +272,7 @@ class TestBbsProductE2E:
 
         submitted = _append(
             service,
-            collab_context_id=created.collab_context_id,
+            collab_context_id=created.collet_id,
             expected_version=progress.context_version,
             event_kind="task.submitted",
             primitive_type="Task",
@@ -280,7 +286,7 @@ class TestBbsProductE2E:
 
         accepted = _append(
             service,
-            collab_context_id=created.collab_context_id,
+            collab_context_id=created.collet_id,
             expected_version=submitted.context_version,
             event_kind="task.accepted",
             primitive_type="Task",
@@ -290,7 +296,7 @@ class TestBbsProductE2E:
         assert accepted.current_status == "done"
 
         status = service.get_status(
-            created.collab_context_id,
+            created.collet_id,
             trunk_events=True,
             context=_actor(PARTICIPANT),
         )
@@ -313,7 +319,7 @@ class TestBbsProductE2E:
         # unrelated participants; permission to post is not blanket write access.
         with pytest.raises(ContextCollabValidationError):
             service.append_event(
-                created.collab_context_id,
+                created.collet_id,
                 EventAppendCommand(
                     expected_version=accepted.context_version,
                     event_kind="user_interaction.posted",

@@ -4,10 +4,10 @@ Wire models are the §6.5 OpenAPI schema names verbatim — ColletCreateRequest,
 EventCreateRequest, ContextCollabStatusResponse, TaskProgress,
 the creation request and the L2/L3 reference DTOs. Request models carry
 to_domain() builders for the service commands (the intake
-TaskIntakeCommandDTO.to_domain pattern); response models mirror exactly
-what ContextCollabService projects. The GET current_event maps the core
-``created_at`` timestamp to the public ``occurred_at`` field beyond the
-7-field progress set.
+TaskIntakeCommandDTO.to_domain pattern). The creation receipt combines the
+returned Collet with the accepted command; other responses serialize service
+projections, including the occurred_at field
+the GET current_event projection carries beyond the 7-field set.
 
 Docstrings and Field descriptions are published verbatim into the public
 OpenAPI document (the /openapi/v1 twin mounts these models), so they stay
@@ -31,9 +31,10 @@ from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_reso
     ResourceRef,
     SpaceRef,
 )
+from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import Collet
+from agentclaw.community.core.task.context_collab.l5_methods.method_binding import MethodKind
 from agentclaw.community.core.task.context_collab.l6_products.contracts import VersionedProfileRef
 from agentclaw.community.core.task.context_collab.service_api import (
-    ContextCollabCreatedResult,
     ContextCollabStatusProjection,
     ColletCreateCommand,
     EventAcceptedResult,
@@ -467,17 +468,36 @@ def _snapshot_to_dto(snapshot: dict) -> CurrentSnapshotDto:
     )
 
 
-def created_result_to_dto(result: ContextCollabCreatedResult) -> ContextCollabCreatedResultDto:
-    event = result.current_event
+def created_collet_to_dto(
+    collet: Collet, command: ColletCreateCommand
+) -> ContextCollabCreatedResultDto:
+    """Preserve the creation wire receipt without adding read views to Collet.
+
+    The successful create contract guarantees a root Task in ``created`` and
+    its initial ``task.created`` event. Echo the accepted creation facts, using
+    the domain parser for the canonical Method spelling. Do not re-read status:
+    a concurrent append must not change this receipt into a later-state view.
+    """
+    if collet.current_event_id is None:
+        raise ValueError("created Collet must reference its initial event")
     return ContextCollabCreatedResultDto(
-        collab_context_id=result.collab_context_id,
-        context_version=result.context_version,
-        current_snapshot=_snapshot_to_dto(result.current_snapshot),
+        collab_context_id=collet.collet_id,
+        context_version=collet.version,
+        current_snapshot=CurrentSnapshotDto(
+            objective=command.objective,
+            status="created",
+            principal_ref=command.principal_ref.principal_id,
+            executor_ref=(
+                command.executor_ref.agent_id if command.executor_ref else None
+            ),
+            method_kind=MethodKind.from_wire(command.method_kind).value,
+            progress=ProgressDto(percent=0, current_event_id=collet.current_event_id),
+        ),
         current_event=ContextEventBriefDto(
-            event_id=event["event_id"],
-            parent_event=event["parent_event"],
-            event_kind=event["event_kind"],
-            primitive_type=event["primitive_type"],
+            event_id=collet.current_event_id,
+            parent_event=None,
+            event_kind="task.created",
+            primitive_type="Task",
         ),
     )
 

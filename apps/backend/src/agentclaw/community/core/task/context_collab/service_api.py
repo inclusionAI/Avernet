@@ -1,7 +1,7 @@
 """Context collab Service API 契约(transport-agnostic,spec §6)。
 
-命令/结果对象字段与三个北向 API 请求表格一一对应;delivery 层做
-解析与序列化,本模块不感知 HTTP。返回投影命名带 ``Projection``
+创建返回 L4 ``Collet``;其余命令/结果由 delivery 层解析与序列化,
+本模块不感知 HTTP。查询投影命名带 ``Projection``
 后缀,避免与 adapter Pydantic DTO(spec §6.5 的
 ``ContextCollabStatusResponse`` 等 wire 名)重名。
 """
@@ -22,6 +22,7 @@ from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_reso
     ResourceRef,
     SpaceRef,
 )
+from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import Collet
 from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.contracts import (
     EventAppendCommand as EventAppendCommand,
 )
@@ -47,16 +48,6 @@ class ColletCreateCommand:
     resource_refs: list[ResourceRef]
     # Optional exact L6 selection; omission preserves the generic v1 fallback.
     product_profile_ref: VersionedProfileRef | None = None
-
-
-@dataclass
-class ContextCollabCreatedResult:
-    """创建用例结果;``current_snapshot`` 为 §6.2 响应形态(含 progress)。"""
-
-    collab_context_id: str
-    context_version: int
-    current_snapshot: dict  # CurrentSnapshot 派生的 §6.2 响应投影
-    current_event: dict  # 初始事件基础字段投影
 
 
 @dataclass
@@ -107,7 +98,13 @@ class ContextCollabServiceProtocol(Protocol):
 
     def create_collet(
         self, command: ColletCreateCommand, context: ActorContext
-    ) -> ContextCollabCreatedResult: ...
+    ) -> Collet:
+        """创建并返回持久化的 Collet;成功前完成初始 Task/Event 与 L5 绑定。
+
+        不返回 Task 或 HTTP 快照;创建不设幂等键,写入失败原样抛出。
+        """
+        ...
+
     def append_event(
         self, collab_context_id: str, command: EventAppendCommand, context: ActorContext
     ) -> EventAcceptedResult: ...

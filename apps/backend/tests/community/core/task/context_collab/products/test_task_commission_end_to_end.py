@@ -65,28 +65,16 @@ from agentclaw.community.core.task.context_collab.l5_methods.operations.contract
     OpenOpportunityCommand,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime import (
-    _now,
     current_axes,
-)
-from agentclaw.community.core.task.context_collab.l6_products.binding import (
-    prepare_product_profile,
 )
 from agentclaw.community.core.task.context_collab.l6_products.catalog import (
     ProductCatalog,
-)
-from agentclaw.community.core.task.context_collab.l6_products.contracts import (
-    VersionedProfileRef,
-)
-from agentclaw.community.core.task.context_collab.l6_products.creation_facts import (
-    creation_payload,
 )
 from agentclaw.community.core.task.context_collab.persistence.method_store import (
     MethodStoreProtocol,
 )
 from agentclaw.community.core.task.context_collab.persistence.repository import (
     ContextCollabRepositoryProtocol,
-    CreateColletRecordRequest,
-    InitialEventDraft,
 )
 from agentclaw.community.core.task.context_collab.products.task_commission import (
     service as commission_service_module,
@@ -104,11 +92,8 @@ from agentclaw.community.core.task.context_collab.products.task_commission.servi
     TaskMethodOpsPort,
 )
 from agentclaw.community.core.task.context_collab.service_api import (
+    ColletCreateCommand,
     ContextCollabServiceProtocol,
-    EventAppendCommand,
-)
-from agentclaw.community.core.task.context_collab.services.method_bootstrap import (
-    project_created_context,
 )
 from agentclaw.community.di.modules.context_collab_products import (
     INSTALLED_PRODUCT_PROFILES,
@@ -382,64 +367,31 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
 
     # 2、动态注入
     with commission_deployment(profile) as (service, working_bot, injector):
-        repository = injector.get(ContextCollabRepositoryProtocol)
-        method_store = injector.get(MethodStoreProtocol)
+        collab_service = injector.get(ContextCollabServiceProtocol)
         executor_ref = AgentRef(agent_type="bot", agent_id=BOT_ASSIGNEE)
-        injector.get(ContextCollabAuthorizerProtocol).check_create(
-            method_kind=profile.composition.method_kind,
-            executor_ref=executor_ref,
-            actor=HUMAN,
-        )
 
-        # 3、创建Collect（对应一个Task）
-        creation_facts = creation_payload(
-            method_kind=profile.composition.method_kind,
-            executor_ref=executor_ref,
-            objective=TITLE,
-            resource_refs=(),
-            product_kind=profile.ref.profile_id,
-            workflow_kind=profile.workflow.ref.profile_id,
-            product_profile_ref=profile.ref,
-        )
-        created_record = repository.create_collet(
-            CreateColletRecordRequest(
+        # 3、通过 L4 北向用例创建 Collet（同时创建 Task、初始事件并投影 L5 MethodBinding）
+        collet = collab_service.create_collet(
+            ColletCreateCommand(
                 space=SPACE,
                 principal_ref=HUMAN.actor,
+                product_kind=profile.ref.profile_id,
+                workflow_kind=profile.workflow.ref.profile_id,
                 method_kind=profile.composition.method_kind,
                 executor_ref=executor_ref,
                 objective=TITLE,
-                resource_refs=(),
-                product_kind=profile.ref.profile_id,
-                workflow_kind=profile.workflow.ref.profile_id,
+                resource_refs=[],
                 product_profile_ref=profile.ref,
-                initial_event=InitialEventDraft(
-                    event_kind="task.created",
-                    primitive_type="Task",
-                    actor_ref=HUMAN.actor,
-                    payload=creation_facts,
-                ),
-                creation_facts=creation_facts,
-            )
+            ),
+            HUMAN,
         )
-        binding = project_created_context(
-            method_store,
-            current_axes(),
-            created_record.collet.collet_id,
-            method_kind=profile.composition.method_kind,
-            principal_ref=HUMAN.actor,
-            executor_ref=executor_ref,
-            profile=profile,
-            context=HUMAN,
-            now=_now(),
-        )
-        assert binding is not None
-        task_id = created_record.collet.collet_id
+        task_id = collet.collet_id
 
         store, axes = injector.get(MethodStoreProtocol), current_axes()
         binding_id = top_level_binding_id(task_id)
         open_method = injector.get(OpenMethodOpsServiceProtocol)
 
-        # 4、调用L5的OPEN方法创建机会
+        # 4、调用L5的OPEN方法-创建机会
         published = open_method.publish_opportunity(
             collab_context_id=task_id,
             method_binding_id=binding_id,
@@ -457,7 +409,7 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
         )
         assert published.accepted and published.state == "OPEN"
 
-        # 5、调用L5的OPEN方法查询机会
+        # 5、调用L5的OPEN方法-查询机会
         bot_context = ActorContext(PrincipalRef("bot", working_bot.bot_id), "a2a")
         [opportunity] = open_method.query_opportunities(
             collab_context_id=task_id,
@@ -467,7 +419,7 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
         assert opportunity.method_binding_id == binding_id
         assert opportunity.scope_ref == task_id
 
-        # 6、调用 L5 Open Method的提交申请。
+        # 6、调用 L5 Open Method的-提交申请。
         record = injector.get(ContextCollabRepositoryProtocol).get_current_status(task_id)
         assert record is not None
         submitted = open_method.submit_application(
@@ -526,11 +478,11 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
 
         # 9. 模拟Agent执行任务，过程中上报信息
         created = TaskCommissionCreatedView(
-            collet_id=created_record.collet.collet_id,
+            collet_id=collet.collet_id,
             title=TITLE,
             body_event_id="",
             status="created",
-            context_version=created_record.collet.version,
+            context_version=collet.version,
         )
         artifacts = working_bot.run(
             created,

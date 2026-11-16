@@ -25,18 +25,13 @@ from agentclaw.community.core.task.context_collab.g3_observe_evaluate_evolve.obs
     build_progress,
     project_events,
 )
-from agentclaw.community.core.task.context_collab.g3_observe_evaluate_evolve.views import (
-    CurrentSnapshot,
-)
 from agentclaw.community.core.task.context_collab.g4_contracts_consistency.product_contract import (
     validate_product_event,
 )
 from agentclaw.community.core.task.context_collab.g4_contracts_consistency.schema import (
     validate_event_body,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.event_envelope import (
-    EventRecord,
-)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import Collet
 from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.work import (
     prepare_event_append,
 )
@@ -75,7 +70,6 @@ from agentclaw.community.core.task.context_collab.persistence.repository import 
 )
 from agentclaw.community.core.task.context_collab.service_api import (
     ActorContext,
-    ContextCollabCreatedResult,
     ContextCollabServiceProtocol,
     ContextCollabStatusProjection,
     ColletCreateCommand,
@@ -99,30 +93,6 @@ def _required_str(value: object, field: str) -> str:
             f"{field} must be a non-empty string, got: {value!r}"
         )
     return value
-
-
-def _created_snapshot_projection(snapshot: CurrentSnapshot) -> dict:
-    """把 ``CurrentSnapshot`` 投影为 spec §6.2 响应形态。
-
-    §6.2 响应中 ``principal_ref`` / ``executor_ref`` 是裸 ID 字符串
-    (非引用对象);返回新 dict(嵌套 progress 也是新构造),可安全改写。
-    """
-    data = snapshot.to_dict()
-    data["principal_ref"] = snapshot.principal_ref.principal_id
-    data["executor_ref"] = (
-        snapshot.executor_ref.agent_id if snapshot.executor_ref else None
-    )
-    return data
-
-
-def _created_event_projection(event: EventRecord) -> dict:
-    """初始事件在创建响应里的基础字段投影(spec §6.2 ``current_event``)。"""
-    return {
-        "event_id": event.event_id,
-        "parent_event": event.parent_event,
-        "event_kind": event.event_kind,
-        "primitive_type": event.primitive_type,
-    }
 
 
 _EVENT_PROJECTION_FIELDS = (
@@ -163,9 +133,9 @@ class ContextCollabService(ContextCollabServiceProtocol):
 
     def create_collet(
         self, command: ColletCreateCommand, context: ActorContext
-    ) -> ContextCollabCreatedResult:
+    ) -> Collet:
         """创建用例(spec §6.2):校验 → G1 check → 仓储创建 → L5 顶层投影
-        → 组装结果。
+        → 返回持久化 Collet。
 
         method/wire 与 objective 校验后走 G1 结构授权;L6 校验产品、工作流、
         方法组合并钉住版本/RoleBinding,无产品的 L4 创建保留原合同。
@@ -239,15 +209,7 @@ class ContextCollabService(ContextCollabServiceProtocol):
             now=_now(),
         )
 
-        # 结果快照是兼容视图;当前事件指针来自持久化的初始 Event。
-        snapshot = _created_snapshot_projection(record.current_snapshot)
-        snapshot["progress"]["current_event_id"] = record.initial_event.event_id
-        return ContextCollabCreatedResult(
-            collab_context_id=record.collet.collet_id,
-            context_version=record.collet.version,
-            current_snapshot=snapshot,
-            current_event=_created_event_projection(record.initial_event),
-        )
+        return record.collet
 
     def append_event(
         self, collab_context_id: str, command: EventAppendCommand, context: ActorContext

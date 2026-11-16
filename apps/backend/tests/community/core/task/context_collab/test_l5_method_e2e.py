@@ -66,7 +66,7 @@ from agentclaw.community.core.task.context_collab.service_api import (
     ActorContext,
     ColletCreateCommand,
 )
-from agentclaw.community.core.task.context_collab.services.context_collab_service import (
+from agentclaw.community.core.task.context_collab.l4_context_primitives.context_collab_service import (
     ContextCollabService,
 )
 from agentclaw.community.core.task.context_collab.services.method_lifecycle_service import (
@@ -198,7 +198,7 @@ class TestL5MethodObjectsE2E:
         created = services.context_service.create_collet(
             _create_command(), _actor(OWNER)
         )
-        collab_id = created.collab_context_id
+        collab_id = created.collet_id
         top_binding = top_level_binding_id(collab_id)
         # 顶层 ACTIVE 投影(spec §9.2)。
         top = services.store.get_binding(AXES, top_binding, collab_id)
@@ -330,7 +330,7 @@ class TestL5MethodObjectsE2E:
         created = services.context_service.create_collet(
             _create_command(), _actor(OWNER)
         )
-        collab_id = created.collab_context_id
+        collab_id = created.collet_id
         swarm_binding = _bind_and_activate(services, collab_id, "Swarm", "mb_swarm_e2e")
         # 执行剖面声明。
         profile = services.swarm.declare_execution_profile(
