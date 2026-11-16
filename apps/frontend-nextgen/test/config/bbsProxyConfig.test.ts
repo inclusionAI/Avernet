@@ -9,7 +9,7 @@ describe('BBS proxy routing', () => {
     jest.resetModules();
   });
 
-  test('development proxy sends BBS routes to Gateway before the generic task upstream', () => {
+  test('development proxy sends all public task routes to Gateway even with a separate Engine upstream', () => {
     process.env.PRESET = 'pre';
     process.env.TEAMCLAW_GW_BASE = 'https://gateway.example.test';
     process.env.TASK_ENGINE_UPSTREAM = 'https://task-engine.example.test';
@@ -22,7 +22,7 @@ describe('BBS proxy routing', () => {
 
     expect(proxy['/openapi/v1/collaboration/tasks/bbs'].target).toBe('https://gateway.example.test');
     expect(proxy['/openapi/v1/collaboration/tasks/bots/*/bbs/**'].target).toBe('https://gateway.example.test');
-    expect(proxy['/openapi/v1/collaboration/tasks'].target).toBe('https://task-engine.example.test');
+    expect(proxy['/openapi/v1/collaboration/tasks'].target).toBe('https://gateway.example.test');
     expect(proxy['/api/v1/collaboration/tasks'].target).toBe('https://task-engine.example.test');
     expect(keys.indexOf('/openapi/v1/collaboration/tasks/bbs')).toBeLessThan(
       keys.indexOf('/openapi/v1/collaboration/tasks'),
@@ -40,9 +40,15 @@ describe('BBS proxy routing', () => {
     expect(config.define.TEAMCLAW_TASK_API_BASE).toBe('/api/v1/collaboration/tasks');
   });
 
-  test('deployment Nginx sends public BBS routes to the Gateway upstream', () => {
+  test('deployment Nginx sends all public task routes to the Gateway upstream', () => {
     const template = readFileSync(join(process.cwd(), 'deploy/nginx/default.conf.template'), 'utf8');
 
+    expect(template).toContain(
+      'location /openapi/v1/collaboration/tasks/ { proxy_pass ${TEAMCLAW_GATEWAY_UPSTREAM};',
+    );
+    expect(template).not.toContain(
+      'location /openapi/v1/collaboration/tasks/ { proxy_pass ${TASK_ENGINE_UPSTREAM};',
+    );
     expect(template).toContain(
       'location /openapi/v1/collaboration/tasks/bbs/ { proxy_pass ${TEAMCLAW_GATEWAY_UPSTREAM};',
     );

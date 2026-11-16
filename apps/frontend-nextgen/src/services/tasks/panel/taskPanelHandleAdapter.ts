@@ -1,3 +1,4 @@
+import { logTaskPanelDiagnostic } from './taskPanelDiagnostics';
 import type { PanelHandle, PanelTab } from '@tc-chat/core';
 import { shouldPreserveTaskPanelDuringNavigation } from '@/services/tasks/taskConversationNavigation';
 import { useTaskConversationNavigationStore } from '@/stores/taskConversationNavigationStore';
@@ -67,7 +68,9 @@ export function taskNavigationAwareHandle(handle: PanelHandle): PanelHandle {
       handle.closePanel();
     },
     closePanelForce: () => {
-      if (shouldPreserveTaskPanelDuringNavigation()) return;
+      const preserving = shouldPreserveTaskPanelDuringNavigation();
+      logTaskPanelDiagnostic('panel.close-force', { preserving, controllerSessionId: peekTaskPanelController()?.getSnapshot?.()?.conversation?.sessionId }, true);
+      if (preserving) return;
       // 普通会话切换会清空全部 tabs，同步丢弃旧任务宿主与焦点任务状态。
       // 否则 activeTaskId 会残留到下一个 session，把 by_session 自动恢复挡在
       // “已展示任务不抢焦点”分支，表现为刷新后能打开、切换后打不开。

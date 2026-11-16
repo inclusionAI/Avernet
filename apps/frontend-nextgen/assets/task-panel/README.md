@@ -26,12 +26,13 @@
 
 | 文件 | 用途 |
 | --- | --- |
-| `dist/index.umd.js` | 浏览器运行代码，全局导出 `taskPanel` |
+| `dist/recovery.umd.js` | 轻量恢复内核，全局导出 `taskPanelRecovery`，不依赖 React、DOM 或 CSS |
+| `dist/index.umd.js` | 按需加载的任务视图，全局导出 `taskPanel` |
 | `dist/task-panel.css` | 副屏样式，与 JS 使用同一发布版本 |
 | `dist/public-api.d.ts` | 宿主接入所需的 TypeScript 类型 |
 
 - 本地开发与测试使用 Node.js 22 或更高版本。
-- 运行时由宿主提供 React 18 和 ReactDOM 18，UMD 不重复打包这两个依赖。
+- 任务 UI 运行时由宿主提供 React 18 和 ReactDOM 18；恢复内核不需要这两个依赖。
 - 类型通过 `import type` 从 `@avernet-assets/task-panel` 引用；运行代码通过 UMD 加载，不将包内实现编译进宿主。
 
 ## 本地开发与集成测试
@@ -47,6 +48,7 @@ npm run serve
 静态服务默认监听 `127.0.0.1:43820`。新老宿主的开发配置通过代理加载：
 
 ```text
+/task-panel/recovery.umd.js
 /task-panel/index.umd.js
 /task-panel/task-panel.css
 ```
@@ -76,7 +78,14 @@ node scripts/serve-smoke.mjs
 GET /api/v1/collaboration/tasks/manifest
 ```
 
-宿主从响应的 `data.bundles` 中找到 `name=taskPanel` 的 JS 地址，并加载同目录的 `task-panel.css`。加载后检查 `hostApiVersion` 和所需导出是否兼容；不在宿主代码中写死组件版本。
+宿主从响应的 `data.bundles` 中找到 `name=taskPanel` 的 JS 地址：
+
+- 进入会话时只加载同目录的 `recovery.umd.js`，由共享控制器查询 `by_session`、分页查找历史任务卡片并执行任务列表兜底。没有任务时不加载完整 UI 或 CSS。
+- 发现任务或显式打开任务后，SDK 挂载任务视图，才加载 `index.umd.js` 和 `task-panel.css`；产物等显式任务页面同样按需加载。
+- 两个入口来自同一源码包、同一发布目录并校验版本一致，宿主不另写一套恢复规则，不隐式回退到完整 UI 或其他发布版本。
+- 恢复独立于聊天主链路，保留分页预算、继续查找、取消及局部错误重试；任务组件失败不得阻断普通会话。群历史扫描沿用当前 Bot/Human 查看身份，切换视角后取消旧扫描。
+
+加载后检查 `hostApiVersion` 和所需导出是否兼容；不在宿主代码中写死组件版本。
 
 组件发布完成、后端接口部署就绪后，通过以下接口保存完整配置：
 
@@ -102,6 +111,8 @@ Content-Type: application/json
 
 更新配置后，用户完整刷新页面即可加载新版本，无需为了修改资产版本重新构建宿主。已打开页面不热切换 UMD；加载失败时显示错误，不静默回退到其他版本。回滚时将配置恢复为上一版验证过的资源地址，再刷新页面。
 
+**宿主部署前，先发布包含两个入口的新组件版本，并把 manifest 指向该版本，验证三个资产均可访问。** 仅含 `index.umd.js` 的旧发布不支持轻量恢复入口；宿主不会为此回退到完整 UI。回滚新组件时需同步回滚依赖轻量入口的宿主，不能混用发布目录。
+
 **npm 发布、后端部署和 manifest 配置是三个独立步骤。** 完成发布后仍需在目标环境检查 manifest、JS/CSS 加载，以及新老产品的卡片调起、历史恢复、节点导航和产物访问。
 
 版本升级、首次发布、Trusted Publisher 和 tag 发布流程见 [发布指南](PUBLISHING.md)。
@@ -119,6 +130,8 @@ Content-Type: application/json
 | `parseTaskPanelDeclarations` | 识别消息中的任务副屏声明 |
 | `TaskPanelHostContext` | 为共享视图提供宿主能力 |
 | `hostApiVersion` / `assetVersion` | 接口兼容性检查与资产版本诊断 |
+
+`taskPanelRecovery` 只导出 `createTaskPanelController`、`hostApiVersion` 和 `assetVersion`；视图及宿主 Context 仍由完整 `taskPanel` 入口提供。两个入口复用同一控制器源码，宿主只创建一个控制器实例。
 
 接入时应遵守：
 

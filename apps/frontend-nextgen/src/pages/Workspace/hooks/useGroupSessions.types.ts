@@ -12,6 +12,8 @@ export interface UseGroupSessionsResult {
   loadMoreErrorByGroupId: Record<string, string>;
   loadMoreSessions: (groupId: string) => Promise<void>;
   isSessionsLoading: boolean;
+  /** 会话已由当前群的最新列表或指定会话入口确认，任务恢复可启动。 */
+  isSessionSelectionReady: boolean;
   selectedSessionId: string | null;
   selectedSession: SessionView | null;
   favoriteSessionIds: string[];

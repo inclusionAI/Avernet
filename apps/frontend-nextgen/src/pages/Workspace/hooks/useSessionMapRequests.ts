@@ -243,5 +243,8 @@ export function useSessionMapRequests({
     ],
   );
 
-  return { reloadGroup, loadMoreSessions };
+  // Readiness must cover the render before the refresh effect clears cached data.
+  const isSelectionPending = Boolean(groupId && activeIdentityId &&
+    lastLoadedKeyRef.current !== `${identityEpochRef.current}:${groupId}`);
+  return { reloadGroup, loadMoreSessions, isSelectionPending };
 }

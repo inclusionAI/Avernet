@@ -44,6 +44,7 @@ export function useGroupSessions(
   const {
     rawByGroupId,
     isLoading,
+    isSelectionReady,
     applyMapUpdate,
     updateGroupSessions,
     reloadGroup,
@@ -224,6 +225,7 @@ export function useGroupSessions(
     loadMoreErrorByGroupId,
     loadMoreSessions,
     isSessionsLoading: isLoading,
+    isSessionSelectionReady: Boolean(selectedSession && (pinnedSession || isSelectionReady)),
     selectedSessionId,
     selectedSession,
     favoriteSessionIds,

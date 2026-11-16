@@ -6,7 +6,7 @@ import { chatBridge } from '@/services/workspace/chatBridge';
 import type { TaskPanelDeclaration } from '@avernet-assets/task-panel';
 
 jest.mock('@/capabilities', () => ({ getCapabilities: () => ({ getHumanIdentity: () => ({ status: 'available', value: { userId: 'viewer' } }) }) }));
-jest.mock('@/services/tasks/panel/taskPanelAssetLoader', () => ({ loadTaskPanelAsset: async () => require('../../../../assets/task-panel/src/controller/createTaskPanelController') }));
+jest.mock('@/services/tasks/panel/taskPanelRecoveryLoader', () => ({ loadTaskPanelRecoveryAsset: async () => require('../../../../assets/task-panel/src/controller/createTaskPanelController') }));
 jest.mock('@/services/tasks/panel/taskPanelArtifactAdapter', () => ({ taskPanelArtifacts: {} }));
 jest.mock('@/services/workspace/chatBridge', () => ({ chatBridge: { openPanelTab: jest.fn() } }));
 jest.mock('@/services/tasks/panel/taskPanelConversationAdapter', () => ({ captureTaskPanelOrigin: () => null, navigateTaskPanelConversation: async () => ({ status: 'ready' }) }));
