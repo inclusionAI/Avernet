@@ -1,4 +1,4 @@
-name: ClawWeb CI
+name: ClawWeb Unit Tests
 
 on:
   pull_request:
@@ -8,12 +8,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: clawweb-ci-${{ github.workflow }}-${{ github.ref }}
+  group: clawweb-unit-tests-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  check-and-build:
-    name: Check and build
+  clawweb:
+    name: ClawWeb unit tests
     runs-on: ubuntu-latest
     timeout-minutes: 20
     defaults:
