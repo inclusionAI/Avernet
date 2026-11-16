@@ -106,6 +106,7 @@ provides:
   - PlatformSkillSetApply
   - DesiredSkillSet
   - DefaultSkillSetRef
+  - CenterSkill  # explicit Center UUID or public code reference
   - CenterSkillRef
   - CenterSkillByCode
   - CURRENT_CATEGORIES  # active vocabulary; historical Skills/MCP are decode-only

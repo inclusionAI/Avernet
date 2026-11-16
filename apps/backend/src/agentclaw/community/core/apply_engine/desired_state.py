@@ -34,6 +34,7 @@ from agentclaw.community.core.content_store import DIGEST_RE
 from agentclaw.community.core.ports.mcp_config import McpConfigWriteIntent
 
 __all__ = [
+    "CenterSkill",
     "CenterSkillByName",
     "CenterSkillRef",
     "CenterSkillByCode",
@@ -216,6 +217,9 @@ class CenterSkillByCode:
     skill_code: str
 
 
+CenterSkill = CenterSkillRef | CenterSkillByCode
+
+
 @dataclass(frozen=True)
 class RepoSkillPath:
     """A shared-repository skill, by its path in the repository."""
@@ -229,7 +233,7 @@ class RepoSkillPath:
 @dataclass(frozen=True)
 class DesiredSkill:
     name: str
-    source: LocalSkillPackage | CenterSkillByName | CenterSkillRef | CenterSkillByCode | RepoSkillPath
+    source: LocalSkillPackage | CenterSkillByName | CenterSkill | RepoSkillPath
     note: str | None = None
 
     def __post_init__(self) -> None:
