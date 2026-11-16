@@ -88,6 +88,8 @@ export interface BotDomain {
    * bot 即普通 bot,不再展示复制进度/重试入口。未走复制流程的 bot 字段缺失(undefined)。
    */
   copyState?: BotCopyStateSummary | null;
+  /** 标记当前用户是该 Bot 的协作者（非 owner），对操作入口有限制。 */
+  isCollaboratorBot?: boolean;
 }
 
 /**
