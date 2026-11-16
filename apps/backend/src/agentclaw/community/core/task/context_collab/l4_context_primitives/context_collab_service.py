@@ -41,13 +41,20 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.operatio
 )
 from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
     MethodKind,
+    parse_method_kinds,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.method_profile import (
+    METHOD_PROFILE_REGISTRY,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.operations.initialization import (
+    ResolvedMethodSpec,
+    initialize_top_level_binding,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime import (
     _now,
     current_axes,
 )
 from agentclaw.community.core.task.context_collab.l6_products.binding import (
-    prepare_product_profile,
     product_definition,
 )
 from agentclaw.community.core.task.context_collab.l6_products.catalog import (
@@ -62,9 +69,6 @@ from agentclaw.community.core.task.context_collab.l6_products.creation_facts imp
 )
 from agentclaw.community.core.task.context_collab.l6_products.task_contracts import (
     resolve_event_contract,
-)
-from agentclaw.community.core.task.context_collab.l6_products.profiles import (
-    WorkflowKind,
 )
 from agentclaw.community.core.task.context_collab.persistence.method_store import (
     MethodStoreProtocol,
@@ -84,9 +88,6 @@ from agentclaw.community.core.task.context_collab.service_api import (
     EventAppendCommand,
     TaskProgressProjectionDTO,
     WorkStartCommand,
-)
-from agentclaw.community.core.task.context_collab.services.method_bootstrap import (
-    project_created_context,
 )
 from injector import inject
 
@@ -145,31 +146,18 @@ class ContextCollabService(ContextCollabServiceProtocol):
         """创建用例(spec §6.2):校验 → G1 check → 仓储创建 → L5 顶层投影
         → 返回持久化 Collet。
 
-        method/wire 与 objective 校验后走 G1 结构授权;L6 校验产品、工作流、
-        方法组合并钉住版本/RoleBinding,无产品的 L4 创建保留原合同。
+        method/wire 与 objective 校验后走 G1 结构授权;产品选择元数据原样
+        透传,本用例不解析/校验 L6 Profile,也不自动选择版本或派生角色引用。
         Single executor 与顶层 method 白名单由 G1 校验。创建不设幂等键
         (spec 作者裁决):重复调用即重复创建。
         """
+        ## TODO: remove profile id ref
         objective = _required_str(command.objective, "objective")
         method_kind = MethodKind.from_wire(command.method_kind).value
         self._authorizer.check_create(
             method_kind=method_kind,
             executor_ref=command.executor_ref,
             actor=context,
-        )
-        if command.product_kind is None and command.workflow_kind is not None:
-            if command.workflow_kind not in {item.value for item in WorkflowKind}:
-                raise ContextCollabValidationError(
-                    f"unknown workflow_kind value: {command.workflow_kind!r}"
-                )
-        profile = prepare_product_profile(
-            product_kind=command.product_kind,
-            workflow_kind=command.workflow_kind,
-            method_kind=method_kind,
-            profile_ref=command.product_profile_ref,
-            principal_ref=command.principal_ref,
-            executor_ref=command.executor_ref,
-            catalog=self._product_catalog,
         )
         facts = creation_payload(
             method_kind=method_kind,
@@ -178,7 +166,7 @@ class ContextCollabService(ContextCollabServiceProtocol):
             resource_refs=tuple(command.resource_refs),
             product_kind=command.product_kind,
             workflow_kind=command.workflow_kind,
-            product_profile_ref=profile.ref if profile is not None else None,
+            product_profile_ref=command.product_profile_ref,
         )
         record = self._repository.create_collet(
             CreateColletRecordRequest(
@@ -190,7 +178,7 @@ class ContextCollabService(ContextCollabServiceProtocol):
                 resource_refs=tuple(command.resource_refs),
                 product_kind=command.product_kind,
                 workflow_kind=command.workflow_kind,
-                product_profile_ref=profile.ref if profile is not None else None,
+                product_profile_ref=command.product_profile_ref,
                 creation_facts=facts,
                 initial_event=InitialEventDraft(
                     event_kind=CREATION_EVENT_KIND,
@@ -201,19 +189,23 @@ class ContextCollabService(ContextCollabServiceProtocol):
             )
         )
 
-        # L5 顶层投影(2026-11-12 L5 method objects spec §3.2/§9.2):Collet
-        # 落库成功后同步落顶层 ACTIVE MethodBinding——由上面的 ``spec`` 单向
-        # 派生,不回写 ``context_spec``;store 写失败如实上抛,绝不让
-        # "有 Collet 无 binding"的响应伪装成功。同上下文重复投影幂等。
-        project_created_context(
+        # 仅按显式 Method/身份事实初始化 L5 绑定,不读取 L6 Profile。
+        # store 写失败原样上抛;同上下文重复投影幂等。
+        initialize_top_level_binding(
             self._method_store,
             current_axes(),
             record.collet.collet_id,
-            method_kind=method_kind,
-            principal_ref=command.principal_ref,
-            executor_ref=command.executor_ref,
-            profile=profile,
-            context=context,
+            ResolvedMethodSpec(
+                method_kind=method_kind,
+                profile_versions={
+                    kind.value: METHOD_PROFILE_REGISTRY[kind.value].profile_version
+                    for kind in parse_method_kinds(method_kind)
+                },
+                role_binding_refs=(),
+                principal_id=command.principal_ref.principal_id,
+                executor_id=command.executor_ref.agent_id if command.executor_ref else None,
+            ),
+            context,
             now=_now(),
         )
 
