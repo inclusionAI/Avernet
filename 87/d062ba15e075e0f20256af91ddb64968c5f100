@@ -1,0 +1,19 @@
+.aci/zbcsfuse/zbcsfuse-prod-deploy.aci.yml
+  s_20c3b110241190::t_43e8eb7850e3c1 1-42
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "87d062ba15e075e0f20256af91ddb64968c5f100",
+  "prompts": {},
+  "sessions": {
+    "s_20c3b110241190": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a18bb2-2a7d-74a3-9f9b-e05b95d7b339",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}
