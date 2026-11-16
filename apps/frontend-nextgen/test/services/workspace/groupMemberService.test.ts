@@ -53,4 +53,26 @@ describe('groupMemberService', () => {
     expect(res.ok).toBe(false);
     expect(!res.ok && res.error.code).toBe('GROUP_CONFLICT');
   });
+
+  // round-7 静默错误呈现族:错误语义不可再压平为「请稍后重试」,按状态透传语义化文案。
+  it('addMember maps 403 to permission-denied semantics instead of generic retry copy', async () => {
+    gc.addGroupParticipant.mockRejectedValue({ status: 403 });
+    const res = await groupMemberService.addMember('g1', 'bot-2');
+    expect(res.ok).toBe(false);
+    expect(!res.ok && res.error.friendlyMessage).toBe('当前账号暂无权限执行该操作');
+  });
+
+  it('removeMember maps 404 to resource-gone semantics', async () => {
+    gc.deleteGroupParticipant.mockRejectedValue({ status: 404 });
+    const res = await groupMemberService.removeMember('g1', 'bot-2');
+    expect(res.ok).toBe(false);
+    expect(!res.ok && res.error.friendlyMessage).toBe('访问的资源不存在或已被移除');
+  });
+
+  it('leaveGroup keeps operation-specific fallback for status-less failures', async () => {
+    gc.deleteGroupParticipant.mockRejectedValue(new Error('network'));
+    const res = await groupMemberService.leaveGroup('g1', 'bot-2');
+    expect(res.ok).toBe(false);
+    expect(!res.ok && res.error.friendlyMessage).toBe('退出协作群失败，请稍后重试。');
+  });
 });

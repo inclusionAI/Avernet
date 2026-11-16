@@ -6,10 +6,10 @@ import { useLoginStrategyStore } from '@/stores/loginStrategyStore';
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 
 /**
- * 未登录失败处置决策(external-oauth-login「未登录静默与统一登录处置」):
- * A/B 两请求通道共用的单一决策点——oauth 策略下未登录失败(HTTP 401 / 信封双方言 401 段体)→
- * 弹窗信号 + `login-prompt-silent`;已确认未登录态后的其余失败 → `silent`;
- * ace-gateway 一律 `default`(行为不变)。
+ * 未登录失败处置决策(external-oauth-login「未登录静默与统一登录处置」+ round-7 静默错误呈现族):
+ * A/B 两请求通道共用的单一决策点——未登录失败(HTTP 401 / 信封双方言 401 段体)两策略均 →
+ * 登录信号 + `login-prompt-silent`(oauth 弹 `requestPrompt` / ace 「等待重登」`requestRedirect`,
+ * 无链接时占位登记由探活补链);oauth 已确认未登录态后的其余失败 → `silent`;其余 → `default`。
  */
 describe('resolveAuthFailureDisposition', () => {
   const resetExternalAuth = (): void =>
@@ -58,14 +58,27 @@ describe('resolveAuthFailureDisposition', () => {
     expect(useLoginRedirectStore.getState().pendingLogin).toBeUndefined();
   });
 
-  it('ace-gateway 策略 → 一律 default(含 401/未登录体,行为不变)', () => {
+  it('ace-gateway 策略下未登录命中(裸 401 / 信封未登录体)→ 无链接单飞「等待重登」信号 + login-prompt-silent', () => {
+    useLoginStrategyStore.getState().setLoginStrategy('ace-gateway');
+
+    expect(resolveAuthFailureDisposition({ status: 401, data: { message: 'unauthorized' } })).toBe(
+      'login-prompt-silent',
+    );
+    expect(useLoginRedirectStore.getState().pendingLogin).toEqual({ mode: 'redirect' });
+
+    useLoginRedirectStore.getState().reset();
+    expect(resolveAuthFailureDisposition({ status: 200, data: { code: 40100, message: 'x' } })).toBe(
+      'login-prompt-silent',
+    );
+    expect(useLoginRedirectStore.getState().pendingLogin).toEqual({ mode: 'redirect' });
+  });
+
+  it('ace-gateway 策略下非未登录失败 → default(不登记等待重登信号)', () => {
     useLoginStrategyStore.getState().setLoginStrategy('ace-gateway');
     useExternalAuthStore.getState().setUnauthenticated();
 
-    expect(resolveAuthFailureDisposition({ status: 401, data: { data: { error_code: 'unauthenticated' } } })).toBe(
-      'default',
-    );
     expect(resolveAuthFailureDisposition({ status: 500, data: null })).toBe('default');
+    expect(resolveAuthFailureDisposition({ status: 403, data: { code: 40300 } })).toBe('default');
     expect(useLoginRedirectStore.getState().pendingLogin).toBeUndefined();
   });
 

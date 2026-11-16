@@ -22,8 +22,9 @@ describe('loginRedirectStore', () => {
     expect(useLoginRedirectStore.getState().pendingLoginUrl).toBe('https://login.example/first');
   });
 
-  it('requestRedirect 空串/空白串不生效', () => {
+  it('requestRedirect 空串/缺省按「无链接占位」登记(裸 401 无 ACE 登录体可取链,探活补链)', () => {
     useLoginRedirectStore.getState().requestRedirect('   ');
+    expect(useLoginRedirectStore.getState().pendingLogin).toEqual({ mode: 'redirect' });
     expect(useLoginRedirectStore.getState().pendingLoginUrl).toBeUndefined();
   });
 

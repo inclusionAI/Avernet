@@ -11,6 +11,7 @@ describe('requestErrorHandler', () => {
   test('按 HTTP 状态返回友好中文文案', () => {
     expect(extractFriendlyErrorMessage({ response: { status: 401, data: {} } })).toContain('登录');
     expect(extractFriendlyErrorMessage({ response: { status: 403, data: {} } })).toContain('权限');
+    expect(extractFriendlyErrorMessage({ response: { status: 404, data: {} } })).toContain('不存在');
     expect(extractFriendlyErrorMessage({ response: { status: 429, data: {} } })).toContain('频繁');
     expect(extractFriendlyErrorMessage({ response: { status: 503, data: {} } })).toContain('服务器');
   });

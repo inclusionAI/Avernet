@@ -86,6 +86,20 @@ function overrideBackendMessage(message: string): string {
   return BACKEND_MESSAGE_CHINESE_OVERRIDES[message] ?? message;
 }
 
+/**
+ * 按 HTTP 状态回退的语义化中文文案:后端无可读 message 时,401/403/404 等语义仍以
+ * 中文预设透传给用户(缺陷 2026111600120664873:静默错误呈现族,错误语义不可区分)。
+ * 供协议层 extractFriendlyErrorMessage 与 service 层 catch 压平错误(群/会话成员操作等)共用同一口径。
+ */
+export function friendlyStatusFallback(status: number | undefined, fallback: string): string {
+  if (status === 401) return '登录已过期，请重新登录';
+  if (status === 403) return '当前账号暂无权限执行该操作';
+  if (status === 404) return '访问的资源不存在或已被移除';
+  if (status === 429) return '请求过于频繁，请稍后再试';
+  if (status !== undefined && status >= 500) return '服务器暂时不可用，请稍后重试';
+  return fallback;
+}
+
 export function extractFriendlyErrorMessage(error: unknown, fallback = DEFAULT_ERROR_MESSAGE): string {
   const status = getErrorStatus(error);
   const message = extractErrorMessage(error, '');
@@ -102,13 +116,7 @@ export function extractFriendlyErrorMessage(error: unknown, fallback = DEFAULT_E
   // 已知英文固定串(配额/上限类)在此映射为中文,与创建/复制两路 toast 保持一致。
   if (message) return overrideBackendMessage(message);
 
-  // 无可读 message 时,按 HTTP 状态回退预设文案。
-  if (status === 401) return '登录已过期，请重新登录';
-  if (status === 403) return '当前账号暂无权限执行该操作';
-  if (status === 429) return '请求过于频繁，请稍后再试';
-  if (status && status >= 500) return '服务器暂时不可用，请稍后重试';
-
-  return fallback;
+  return friendlyStatusFallback(status, fallback);
 }
 
 export function normalizeRequestError(
