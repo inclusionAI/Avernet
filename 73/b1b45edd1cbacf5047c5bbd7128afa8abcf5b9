@@ -1,0 +1,22 @@
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/method_binding.py
+  s_a5f125bde83e04::t_dd2afb5c7dc7f6 1,7-13,18
+  s_a5f125bde83e04::t_bcf8372c928425 74-383
+apps/backend/tests/community/core/task/context_collab/test_method_binding.py
+  s_a5f125bde83e04::t_6be7e826979640 1-455
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "73b1b45edd1cbacf5047c5bbd7128afa8abcf5b9",
+  "prompts": {},
+  "sessions": {
+    "s_a5f125bde83e04": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "0433ddbf-9b42-46c4-b365-8eb872c67797",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}
