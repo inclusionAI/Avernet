@@ -216,6 +216,7 @@ class BaasDeviceHeaderUpdater:
             return []
 
         updated_devices: list[dict] = []
+        failed_devices: list[dict] = []
         for physical_device in devices:
             paas_device_id = physical_device.get("provider_device_id")
             device_uuid = physical_device.get("device_uuid", "")
@@ -225,21 +226,41 @@ class BaasDeviceHeaderUpdater:
                     f"device_id={device.device_id}, device_uuid={device_uuid}"
                 )
                 continue
-            self._baas_service.update_device_outbound_rule(
-                paas_device_id,
-                outbound_rule,
-                **({"mode": "replace"} if device.device_provider == TECLAW_DEVICE_PROVIDER else {}),
-            )
-            updated_devices.append(
-                {
+            try:
+                self._baas_service.update_device_outbound_rule(
+                    paas_device_id,
+                    outbound_rule,
+                    **({"mode": "replace"} if device.device_provider == TECLAW_DEVICE_PROVIDER else {}),
+                )
+                updated_devices.append(
+                    {
+                        "device_uuid": device_uuid,
+                        "paas_device_id": paas_device_id,
+                    }
+                )
+                logger.info(
+                    f"[BaasDeviceHeaderUpdater.update] Device updated: "
+                    f"device_id={device.device_id}, device_uuid={device_uuid}, "
+                    f"paas_device_id={paas_device_id}"
+                )
+            except Exception as exc:
+                logger.error(
+                    f"[BaasDeviceHeaderUpdater.update] Device update failed (continuing): "
+                    f"device_id={device.device_id}, device_uuid={device_uuid}, "
+                    f"paas_device_id={paas_device_id}, error={exc}"
+                )
+                failed_devices.append({
                     "device_uuid": device_uuid,
                     "paas_device_id": paas_device_id,
-                }
-            )
-            logger.info(
-                f"[BaasDeviceHeaderUpdater.update] Device updated: "
-                f"device_id={device.device_id}, device_uuid={device_uuid}, "
-                f"paas_device_id={paas_device_id}"
+                    "error": str(exc),
+                })
+
+        if failed_devices:
+            logger.warning(
+                f"[BaasDeviceHeaderUpdater.update] Partial success: "
+                f"device_id={device.device_id}, bot_uuid={bot_uuid}, "
+                f"updated={len(updated_devices)}, failed={len(failed_devices)}, "
+                f"failed_paas_ids={[d['paas_device_id'] for d in failed_devices]}"
             )
         return updated_devices
 
