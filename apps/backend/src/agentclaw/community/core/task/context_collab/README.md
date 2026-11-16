@@ -124,6 +124,22 @@ products/
   so product and generic L4 execution cannot bypass or reuse a revoked binding.
   Separately assembled legacy publisher-mediated and unrelated Open + Group
   products retain their structural behavior.
+- L5 Open publication is `publish_opportunity(OpenOpportunityCommand(...))`.
+  The command requires `collab_context_id`, participation fields and a trusted
+  caller `context`; neither the method arguments nor the command contain a
+  binding ID. The service resolves exactly one ACTIVE binding declaring Open
+  within that Collet and the current tenant/environment, then applies the
+  existing G1 authorization, G4 transition, audit and binding-scoped idempotency
+  checks. No Open binding is NotFound; no ACTIVE candidate or multiple ACTIVE
+  candidates is ValidationError, with no opportunity write. It never picks the
+  first/top-level binding or infers binding scope from participation `scope_ref`.
+  The result supplies `method_binding_id` for subsequent binding-scoped operations.
+  The internal HTTP publish route is now
+  `POST /api/v1/collaboration/task/context_collab/{collab_context_id}/open/opportunities`;
+  the previous `/method-bindings/{binding_id}/open/opportunities` publish route
+  is removed. HTTP builds the command identity from verified authentication,
+  not JSON. Other Open routes remain binding-scoped. See the
+  [publication regressions](../../../../../../tests/community/core/task/context_collab/test_open_publication.py).
 - L5 Open owns `OpenMethodOpsServiceProtocol.query_opportunities`: a read-only
   snapshot on an explicitly identified, ACTIVE Open binding. G1 requires an
   authenticated actor, not existing membership. Only OPEN opportunities within

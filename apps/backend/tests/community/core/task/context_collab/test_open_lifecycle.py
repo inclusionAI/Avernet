@@ -45,9 +45,7 @@ class TestOpenOpportunityLifecycle:
     def test_publish_projects_open_opportunity(self):
         store, _, lifecycle, service = make_open_service()
         binding = active_open_binding(lifecycle)
-        result = service.publish_opportunity(
-            COLLET_ID, binding, opportunity_command(), make_actor()
-        )
+        result = service.publish_opportunity(opportunity_command())
         assert result.accepted is True
         assert result.object_kind == "open_opportunity"
         assert result.state == "OPEN"
@@ -58,20 +56,12 @@ class TestOpenOpportunityLifecycle:
 
     def test_publish_window_shape_validation(self):
         _, _, lifecycle, service = make_open_service()
-        binding = active_open_binding(lifecycle)
+        active_open_binding(lifecycle)
         with pytest.raises(ContextCollabValidationError, match="ISO timestamp"):
-            service.publish_opportunity(
-                COLLET_ID,
-                binding,
-                opportunity_command(opens_at="soon"),
-                make_actor(),
-            )
+            service.publish_opportunity(opportunity_command(opens_at="soon"))
         with pytest.raises(ContextCollabValidationError, match="later than opens_at"):
             service.publish_opportunity(
-                COLLET_ID,
-                binding,
-                opportunity_command(opens_at=_iso_offset(1), closes_at=_iso_offset(-1)),
-                make_actor(),
+                opportunity_command(opens_at=_iso_offset(1), closes_at=_iso_offset(-1))
             )
 
     def test_publish_replay_and_shape_conflict(self):
@@ -79,16 +69,13 @@ class TestOpenOpportunityLifecycle:
         binding = active_open_binding(lifecycle)
         # 同一份命令两次提交(时间戳字段是请求形态,重放必须同值)。
         command = opportunity_command()
-        first = service.publish_opportunity(COLLET_ID, binding, command, make_actor())
-        replay = service.publish_opportunity(COLLET_ID, binding, command, make_actor())
+        first = service.publish_opportunity(command)
+        replay = service.publish_opportunity(command)
         assert replay.object_id == first.object_id
         assert len(store.list_opportunities(AXES, binding, COLLET_ID)) == 1
         with pytest.raises(ContextCollabValidationError, match="stored shape"):
             service.publish_opportunity(
-                COLLET_ID,
-                binding,
-                opportunity_command(scope_ref="task_scope_other"),
-                make_actor(),
+                opportunity_command(scope_ref="task_scope_other")
             )
 
     def test_pause_reopen_close_reachability(self):
@@ -96,9 +83,7 @@ class TestOpenOpportunityLifecycle:
         CloseOpportunity 是终态,后继迁移由机器拒绝。"""
         store, _, lifecycle, service = make_open_service()
         binding = active_open_binding(lifecycle)
-        service.publish_opportunity(
-            COLLET_ID, binding, opportunity_command(), make_actor()
-        )
+        service.publish_opportunity(opportunity_command())
         paused = service.pause_opportunity(
             COLLET_ID,
             binding,
@@ -149,9 +134,7 @@ class TestOpenOpportunityLifecycle:
         OPEN、在窗口内、容量未满。"""
         store, _, lifecycle, service = make_open_service()
         binding = active_open_binding(lifecycle)
-        service.publish_opportunity(
-            COLLET_ID, binding, opportunity_command(), make_actor()
-        )
+        service.publish_opportunity(opportunity_command())
         submitted = service.submit_application(
             COLLET_ID,
             binding,
@@ -178,10 +161,7 @@ class TestOpenOpportunityLifecycle:
         assert len(store.list_applications(AXES, binding, COLLET_ID)) == 1
         # 未开窗(未来 opens_at)拒绝。
         service.publish_opportunity(
-            COLLET_ID,
-            binding,
-            opportunity_command(opportunity_id="opp_future", opens_at=_iso_offset(2)),
-            make_actor(),
+            opportunity_command(opportunity_id="opp_future", opens_at=_iso_offset(2))
         )
         with pytest.raises(
             ContextCollabValidationError, match="before the window opens"
@@ -195,14 +175,11 @@ class TestOpenOpportunityLifecycle:
             )
         # 已闭窗拒绝。
         service.publish_opportunity(
-            COLLET_ID,
-            binding,
             opportunity_command(
                 opportunity_id="opp_closed",
                 opens_at=_iso_offset(-2),
                 closes_at=_iso_offset(-1),
             ),
-            make_actor(),
         )
         with pytest.raises(
             ContextCollabValidationError, match="after the window closes"
@@ -216,10 +193,7 @@ class TestOpenOpportunityLifecycle:
             )
         # 容量:capacity=1,两个申请人,第二个拒绝。
         service.publish_opportunity(
-            COLLET_ID,
-            binding,
-            opportunity_command(opportunity_id="opp_capped", capacity=1),
-            make_actor(),
+            opportunity_command(opportunity_id="opp_capped", capacity=1)
         )
         service.submit_application(
             COLLET_ID,
@@ -242,9 +216,7 @@ class TestOpenOpportunityLifecycle:
     def test_submit_requires_open_opportunity_and_unique_applicant(self):
         _, _, lifecycle, service = make_open_service()
         binding = active_open_binding(lifecycle)
-        service.publish_opportunity(
-            COLLET_ID, binding, opportunity_command(), make_actor()
-        )
+        service.publish_opportunity(opportunity_command())
         service.pause_opportunity(
             COLLET_ID,
             binding,
@@ -292,9 +264,7 @@ class TestOpenApplicationLifecycle:
     def test_screen_then_reject_both_rules(self):
         store, _, lifecycle, service = make_open_service()
         binding = active_open_binding(lifecycle)
-        service.publish_opportunity(
-            COLLET_ID, binding, opportunity_command(), make_actor()
-        )
+        service.publish_opportunity(opportunity_command())
         service.submit_application(
             COLLET_ID,
             binding,
@@ -335,9 +305,7 @@ class TestOpenApplicationLifecycle:
         字符串相等才放行;机器仅 SUBMITTED 可退(SCREENING 后不可自助退)。"""
         _, _, lifecycle, service = make_open_service()
         binding = active_open_binding(lifecycle)
-        service.publish_opportunity(
-            COLLET_ID, binding, opportunity_command(), make_actor()
-        )
+        service.publish_opportunity(opportunity_command())
         service.submit_application(
             COLLET_ID,
             binding,
@@ -508,10 +476,7 @@ class TestOpenApplicationLifecycle:
         binding = active_open_binding(lifecycle)
         with pytest.raises(ContextCollabValidationError, match="scope must match"):
             service.publish_opportunity(
-                COLLET_ID,
-                binding,
-                opportunity_command(participation_type="COLLET_PARTICIPANT"),
-                make_actor(),
+                opportunity_command(participation_type="COLLET_PARTICIPANT")
             )
         assert store.list_opportunities(AXES, binding, COLLET_ID) == []
 
@@ -521,10 +486,7 @@ class TestOpenApplicationLifecycle:
         store, _, lifecycle, service = make_open_service()
         binding = active_open_binding(lifecycle)
         service.publish_opportunity(
-            COLLET_ID,
-            binding,
-            opportunity_command(participation_type="GROUP_MEMBER"),
-            make_actor(),
+            opportunity_command(participation_type="GROUP_MEMBER")
         )
         submitted_application(service, "opp_alpha", binding)
         with pytest.raises(ContextCollabValidationError, match="does not accept event"):

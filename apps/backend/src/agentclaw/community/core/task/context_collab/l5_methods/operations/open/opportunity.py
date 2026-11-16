@@ -188,10 +188,7 @@ class OpenOpportunityOpsMixin(OpenMethodServiceBase, OpenMethodOpsServiceProtoco
 
     def publish_opportunity(
         self,
-        collab_context_id: str,
-        method_binding_id: str,
         command: OpenOpportunityCommand,
-        context: ActorContext,
     ) -> ProfileOpAcceptedResult:
         """PublishOpportunity 用例:建机会并一步发布(DRAFT──publish→
         OPEN,落终态一次写);窗口形态校验见模块 docstring;幂等键
@@ -200,6 +197,8 @@ class OpenOpportunityOpsMixin(OpenMethodServiceBase, OpenMethodOpsServiceProtoco
         ``COLLET_PARTICIPANT`` is bounded to this Collet's exact scope;
         admission creates a scoped identity binding, not Group membership.
         """
+        collab_context_id, context = command.collab_context_id, command.context
+        method_binding_id = self._resolve_publish_binding(collab_context_id)
         axes = self._gate(
             "publish_opportunity",
             collab_context_id,

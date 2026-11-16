@@ -150,9 +150,9 @@ class TaskCommissionSelfApplicationAdapter(TaskCommissionOpenMethodAdapter):
             )
         policy = profile.require_publication().admission
         return self._open_ops.publish_opportunity(
-            command.collab_context_id,
-            command.method_binding_ref,
             OpenOpportunityCommand(
+                collab_context_id=command.collab_context_id,
+                context=context,
                 scope_ref=command.collab_context_id,
                 participation_type=policy.participation_type.value,
                 capacity=policy.capacity,
@@ -160,7 +160,6 @@ class TaskCommissionSelfApplicationAdapter(TaskCommissionOpenMethodAdapter):
                 admission_policy_refs=[_POLICY_REF],
                 reason="task_commission.owner_authorized_auto_admission",
             ),
-            context,
         ).object_id
 
     @staticmethod

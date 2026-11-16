@@ -218,19 +218,18 @@ class TestL5MethodObjectsE2E:
             GroupMemberCommand(participant_ref="u_forum_1001"),
             _actor(OWNER),
         )
-        # open:嵌套 Open binding → publish(GROUP_MEMBER 型)→ 公开提交
+        # open:复用唯一 ACTIVE Open 顶层绑定 → publish(GROUP_MEMBER 型)→ 公开提交
         # → screen → admit(录取产物 = 本 binding 的 ACTIVE 成员行)。
-        open_binding = _bind_and_activate(services, collab_id, "Open", "mb_open_e2e")
+        open_binding = top_binding
         published = services.open.publish_opportunity(
-            collab_id,
-            open_binding,
             OpenOpportunityCommand(
+                collab_context_id=collab_id,
+                context=_actor(OWNER),
                 scope_ref="task_scope_open_e2e",
                 participation_type="GROUP_MEMBER",
                 opens_at=_future_iso(-1),
                 opportunity_id="opp_e2e",
             ),
-            _actor(OWNER),
         )
         assert published.state == "OPEN"
         application = services.open.submit_application(

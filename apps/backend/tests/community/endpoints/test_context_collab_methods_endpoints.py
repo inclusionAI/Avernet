@@ -340,22 +340,8 @@ class TestMethodBindingsDelivery:
             f"{PREFIX}/context_collab", json=create_body("Open + Group")
         )
         collab_id = created.json()["data"]["collab_context_id"]
-        client.post(
-            f"{PREFIX}/context_collab/{collab_id}/method-bindings",
-            json={
-                "method_kind": "Open",
-                "method_binding_id": "mb_open_http",
-                "parent_scope_ref": "task_scope_root",
-            },
-        )
-        client.post(
-            f"{PREFIX}/context_collab/{collab_id}/method-bindings"
-            f"/mb_open_http/activate",
-            json={"reason": ""},
-        )
         published = client.post(
-            f"{PREFIX}/context_collab/{collab_id}/method-bindings"
-            f"/mb_open_http/open/opportunities",
+            f"{PREFIX}/context_collab/{collab_id}/open/opportunities",
             json={
                 "scope_ref": "task_scope_open_http",
                 "participation_type": "SINGLE_CONTRIBUTION",
@@ -365,9 +351,16 @@ class TestMethodBindingsDelivery:
         )
         assert published.status_code == 200, published.text
         assert published.json()["data"]["state"] == "OPEN"
+        binding_id = published.json()["data"]["method_binding_id"]
+        # Do not keep a binding-scoped publish route that silently ignores its ID.
+        legacy = client.post(
+            f"{PREFIX}/context_collab/{collab_id}/method-bindings"
+            f"/{binding_id}/open/opportunities", json={},
+        )
+        assert legacy.status_code == 404
         application = client.post(
             f"{PREFIX}/context_collab/{collab_id}/method-bindings"
-            f"/mb_open_http/open/opportunities/opp_http/applications",
+            f"/{binding_id}/open/opportunities/opp_http/applications",
             json={
                 "applicant_agent_ref": "bot_contrib_001",
                 "accountable_principal_ref": "u_member_001",
@@ -376,6 +369,54 @@ class TestMethodBindingsDelivery:
         )
         assert application.status_code == 200, application.text
         assert application.json()["data"]["state"] == "SUBMITTED"
+
+    @pytest.mark.parametrize(
+        "case,status", [("missing", 404), ("ambiguous", 422), ("stranger", 422)]
+    )
+    def test_binding_free_publication_preserves_resolution_and_auth_errors(
+        self, client_world, case, status
+    ):
+        client = client_world
+        created = client.post(
+            f"{PREFIX}/context_collab",
+            json=create_body("Single" if case == "missing" else "Open + Group"),
+        )
+        assert created.status_code == 200, created.text
+        collab_id = created.json()["data"]["collab_context_id"]
+        if case == "ambiguous":
+            bound = client.post(
+                f"{PREFIX}/context_collab/{collab_id}/method-bindings",
+                json={
+                    "method_kind": "Open", "method_binding_id": "second_open",
+                    "parent_scope_ref": "task_scope_root",
+                },
+            )
+            assert bound.status_code == 200, bound.text
+            activated = client.post(
+                f"{PREFIX}/context_collab/{collab_id}/method-bindings/second_open/activate",
+                json={},
+            )
+            assert activated.status_code == 200, activated.text
+        elif case == "stranger":
+            client.app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(
+                id="SSO", staffId="stranger", operatorName="stranger"
+            )
+        result = client.post(
+            f"{PREFIX}/context_collab/{collab_id}/open/opportunities",
+            json={
+                "scope_ref": "task_scope_open_http",
+                "participation_type": "SINGLE_CONTRIBUTION",
+                "opens_at": "2026-01-01T00:00:00+00:00",
+                # Request-body values must not replace the authenticated actor.
+                "context": {
+                    "actor": {
+                        "principal_type": "human",
+                        "principal_id": AUTHENTICATED_STAFF_ID,
+                    },
+                },
+            },
+        )
+        assert result.status_code == status, result.text
 
     def test_bare_top_level_method_kind_rejected_through_http(self, client_world):
         """裸 Group/Swarm 不能替代产品声明的顶层组合;Open 是代办合法组合。"""

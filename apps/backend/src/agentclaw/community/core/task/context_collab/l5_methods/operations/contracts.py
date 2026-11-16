@@ -226,11 +226,16 @@ class SwarmStageOutcomeCommand:
 
 @dataclass
 class OpenOpportunityCommand:
-    """Open PublishOpportunity 命令(spec §4.4);``opportunity_id`` 为幂等键。"""
+    """发布机会的完整输入;服务解析 Collet 内唯一 ACTIVE Open 绑定。
 
+    ``context`` 由可信调用边界提供;``opportunity_id`` 为幂等键。
+    """
+
+    collab_context_id: str
     scope_ref: str
     participation_type: str  # "COLLET_PARTICIPANT" | "GROUP_MEMBER" | "SWARM_ALLOCATION" | "SINGLE_CONTRIBUTION"
     opens_at: str
+    context: ActorContext
     opportunity_id: str | None = None
     requirement_refs: list[str] = field(default_factory=list)
     admission_policy_refs: list[str] = field(default_factory=list)
@@ -610,11 +615,15 @@ class OpenMethodOpsServiceProtocol(Protocol):
 
     def publish_opportunity(
         self,
-        collab_context_id: str,
-        method_binding_id: str,
         command: OpenOpportunityCommand,
-        context: ActorContext,
-    ) -> ProfileOpAcceptedResult: ...
+    ) -> ProfileOpAcceptedResult:
+        """Publish on the Collet's unique ACTIVE Open binding, with G1 checks.
+
+        Missing Open bindings raise NotFound; no ACTIVE candidate or multiple
+        ACTIVE candidates raise ValidationError without writing an opportunity.
+        The accepted result identifies the resolved binding for later operations.
+        """
+        ...
     def pause_opportunity(
         self,
         collab_context_id: str,

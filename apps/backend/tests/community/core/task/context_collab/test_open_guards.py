@@ -45,9 +45,7 @@ class TestOpenGuards:
         )
         bound = "mb_open_bound"
         callables = [
-            lambda: service.publish_opportunity(
-                COLLET_ID, bound, opportunity_command(), make_actor()
-            ),
+            lambda: service.publish_opportunity(opportunity_command()),
             lambda: service.pause_opportunity(
                 COLLET_ID,
                 bound,
@@ -124,10 +122,8 @@ class TestOpenGuards:
         lifecycle.activate(
             COLLET_ID, group_binding, MethodStateChangeCommand(), make_actor()
         )
-        with pytest.raises(ContextCollabValidationError, match="declare Open"):
-            service.publish_opportunity(
-                COLLET_ID, group_binding, opportunity_command(), make_actor()
-            )
+        with pytest.raises(ContextCollabNotFoundError, match="no Open method binding"):
+            service.publish_opportunity(opportunity_command())
 
     def test_owner_ops_reject_stranger(self):
         """T6:八个 owner 操作不放行陌生人(frozenset pin + 行为 pin);
@@ -139,12 +135,8 @@ class TestOpenGuards:
         binding = active_open_binding(lifecycle)
         stranger = make_actor("u_9999")
         with pytest.raises(ContextCollabValidationError, match="u_9999"):
-            service.publish_opportunity(
-                COLLET_ID, binding, opportunity_command(), stranger
-            )
-        service.publish_opportunity(
-            COLLET_ID, binding, opportunity_command(), make_actor()
-        )
+            service.publish_opportunity(opportunity_command(context=stranger))
+        service.publish_opportunity(opportunity_command())
         with pytest.raises(ContextCollabValidationError, match="u_9999"):
             service.pause_opportunity(
                 COLLET_ID,
@@ -187,9 +179,7 @@ class TestOpenGuards:
     def test_missing_binding_and_opportunity_not_found(self):
         _, _, _, service = make_open_service()
         with pytest.raises(ContextCollabNotFoundError):
-            service.publish_opportunity(
-                COLLET_ID, "mb_ghost", opportunity_command(), make_actor()
-            )
+            service.publish_opportunity(opportunity_command())
         with pytest.raises(ContextCollabNotFoundError):
             service.pause_opportunity(
                 COLLET_ID,

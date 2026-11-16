@@ -157,10 +157,13 @@ def test_method_operations_use_lower_reader_and_resolved_facts(kind):
     elif kind == "Open":
         service = OpenMethodService(store, authorizer, reader)
         result = service.publish_opportunity(
-            COLLET_ID,
-            binding_id,
-            OpenOpportunityCommand("scope", "SINGLE_CONTRIBUTION", NOW),
-            OWNER,
+            OpenOpportunityCommand(
+                collab_context_id=COLLET_ID,
+                scope_ref="scope",
+                participation_type="SINGLE_CONTRIBUTION",
+                opens_at=NOW,
+                context=OWNER,
+            ),
         )
         assert result.state == "OPEN"
         [opportunity] = service.query_opportunities(

@@ -201,9 +201,9 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
 
         # 4、调用L5的OPEN方法-创建机会
         published = l5_open_method.publish_opportunity(
-            collab_context_id=collect_id,                      # TODO
-            method_binding_id=binding_id,                      # 绑定的方法
-            command=OpenOpportunityCommand(
+            OpenOpportunityCommand(
+                collab_context_id=collect_id,
+                context=HUMAN, # actor context
                 scope_ref=collect_id,
                 participation_type="COLLET_PARTICIPANT",       # TODO
                 opens_at=(datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat(),
@@ -213,7 +213,6 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
                 capacity=1,              #表示这个机会最多允许多少个未终态申请占用名额
                 reason="task_commission.owner_authorized_publish", #本次发布操作的审计原因
             ),
-            context=HUMAN, # actor context
         )
         assert published.accepted and published.state == "OPEN"
 

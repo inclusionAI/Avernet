@@ -230,14 +230,16 @@ def test_adapter_executes_exact_selected_policy_and_declared_steps():
     policy = profile.require_publication().admission
     assert tuple(call[0] for call in ops.mock_calls) == policy.steps
     args = ops.publish_opportunity.call_args.args
-    assert args[:2] == (command.collab_context_id, command.method_binding_ref)
-    assert args[2].capacity == policy.capacity == 2
-    assert args[2].participation_type == policy.participation_type.value
-    assert args[2].scope_ref == command.collab_context_id
+    assert len(args) == 1
+    assert args[0].collab_context_id == command.collab_context_id
+    assert args[0].context is actor
+    assert args[0].capacity == policy.capacity == 2
+    assert args[0].participation_type == policy.participation_type.value
+    assert args[0].scope_ref == command.collab_context_id
     application = ops.submit_application.call_args.args[3]
     assert application.applicant_agent_ref == ASSIGNEE
     assert application.accountable_principal_ref == actor.actor.principal_id
-    assert all(call.args[-1] is actor for call in ops.mock_calls)
+    assert all(call.args[-1] is actor for call in ops.mock_calls[1:])
     assert receipt.application_id == "app"
     assert receipt.state == "ADMITTED"
 

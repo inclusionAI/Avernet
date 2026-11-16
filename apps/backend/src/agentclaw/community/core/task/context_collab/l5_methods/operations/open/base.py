@@ -98,6 +98,27 @@ class OpenMethodServiceBase:
             )
         return binding
 
+    def _resolve_publish_binding(self, collab_context_id: str) -> str:
+        """Resolve one ACTIVE Open binding; never prefer top-level or first."""
+        if not isinstance(collab_context_id, str) or not collab_context_id.strip():
+            raise ContextCollabValidationError("collab_context_id must not be empty")
+        bindings = [
+            binding
+            for binding in self._store.list_bindings(current_axes(), collab_context_id)
+            if "Open" in binding.method_names
+        ]
+        if not bindings:
+            raise ContextCollabNotFoundError(
+                f"no Open method binding in collaboration context {collab_context_id!r}"
+            )
+        active = [binding for binding in bindings if binding.state is BindingState.ACTIVE]
+        if len(active) != 1:
+            raise ContextCollabValidationError(
+                "publish_opportunity requires exactly one ACTIVE Open method binding "
+                f"in collaboration context {collab_context_id!r}, found {len(active)}"
+            )
+        return active[0].method_binding_id
+
     def _authorize(
         self,
         op: str,

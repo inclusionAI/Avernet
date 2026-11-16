@@ -748,20 +748,19 @@ async def fail_swarm_stage(
 
 
 @router.post(
-    _BINDINGS + "/{binding_id}/open/opportunities",
+    "/context_collab/{collab_context_id}/open/opportunities",
     response_model=Envelope[ProfileOpAcceptedDto],
 )
 @envelope_errors
 async def publish_open_opportunity(
     collab_context_id: str,
-    binding_id: str,
     body: OpenOpportunityRequest,
     request: Request,
     user: AuthenticatedUser = Depends(get_current_user),
     service: OpenMethodOpsServiceProtocol = Injected(OpenMethodOpsServiceProtocol),  # noqa: B008
 ) -> Envelope[ProfileOpAcceptedDto]:
     result = service.publish_opportunity(
-        collab_context_id, binding_id, body.to_domain(), _actor_context(user)
+        body.to_domain(collab_context_id, _actor_context(user))
     )
     return envelope(_profile_accepted(result), request)
 

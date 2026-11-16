@@ -34,6 +34,7 @@ from agentclaw.community.core.task.context_collab.method_service_api import (
     SwarmStageOutcomeCommand,
     UpdateBindingConfigCommand,
 )
+from agentclaw.community.core.task.context_collab.service_api import ActorContext
 
 
 # ---------------------------------------------------------------------------
@@ -412,8 +413,12 @@ class OpenOpportunityRequest(BaseModel):
     closes_at: str | None = Field(None, description="窗口终点(ISO)")
     reason: str = Field("", description="发布原因;落审计")
 
-    def to_domain(self) -> OpenOpportunityCommand:
+    def to_domain(
+        self, collab_context_id: str, context: ActorContext
+    ) -> OpenOpportunityCommand:
         return OpenOpportunityCommand(
+            collab_context_id=collab_context_id,
+            context=context,
             scope_ref=self.scope_ref,
             participation_type=self.participation_type,
             opens_at=self.opens_at,
