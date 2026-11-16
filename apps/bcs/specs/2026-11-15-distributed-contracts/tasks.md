@@ -59,12 +59,12 @@ run the same suite. Backend guarantees must be verified before rollout.
 
 | ID | Files / deliverable | Depends on | Acceptance |
 | --- | --- | --- | --- |
-| W1 | `crates/services/bcs-dist-worker/src/{ownership,recovery}.rs` | S2 | Claim, per-session seal and actual activation of all pending sessions, including future due times; stale owner rejected |
+| W1 | `crates/services/bcs-dist-worker/src/{ownership,recovery}.rs` | S2 | Atomic expected-epoch claim, per-session seal and actual activation of all pending sessions, including future due times; stale owner rejected |
 | W2 | `src/{reader,session_actor,scheduler}.rs` | W1 | Bounded per-session buffers, parallel sessions, progress-only batches; token-before-work-check settlement; no starvation in due scan |
 | W3 | `crates/services/bcs-dist-runner-fsm/`; reducer tests | D0 | Reuse frozen workflow definition; pure deterministic reduction; no clock/IO/random calls; task ordering and interactions |
-| W4 | `src/{processor,committer,effects}.rs`; `tests/commit_replay.rs` | W2, W3 | Candidate state only becomes committed after confirmation; fixed effect IDs; previous required effects gate next commit; partial event replay cannot skip gaps |
+| W4 | `src/{processor,committer,effects}.rs`; `tests/commit_replay.rs` | W2, W3 | Sealed-owner/expected-commit-sequence check and candidate write are atomic; fixed effect IDs; previous required effects gate next commit; partial event replay cannot skip gaps |
 | W5 | `src/{results,cancellation}.rs`; `tests/finalization.rs` | W4 | Save result before terminal; crash before second commit recovers result reference; next task starts after required terminal effects |
-| W6 | `src/{supervisor,quarantine}.rs`; fault tests | W4, C3 | Lost notifications repaired; recovery attempts persisted before dangerous replay; unresolved dispatches remain supervised |
+| W6 | `src/{supervisor,quarantine}.rs`; fault tests | W4, C3 | Lost notifications repaired; recovery attempts deduplicated by attempt ID before dangerous replay, without advancing business sequence or overwriting outbox; unresolved dispatches remain supervised |
 | W7 | Engine control port, `crates/application/bcs-app-dist-runtime/` admin facade, metrics and bounded cache eviction | W1-W6 | Engine implements port, application exposes service; controlled handoff, useful lag/fence/conflict metrics, eviction preserves recoverability |
 
 ## Connector work

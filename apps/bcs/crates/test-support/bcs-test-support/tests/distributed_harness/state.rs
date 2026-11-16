@@ -4,11 +4,16 @@ use harness::state::*;
 fn commit_script() -> (Script, CommitRequest) {
     let request = CommitRequest {
         owner: owner(),
-        expected_revision: Revision("revision-7".into()),
+        expected_commit_seq: CommitSeq(7),
         commit_id: proof().commit_id,
         content_digest: proof().content_digest,
         candidate: checkpoint(),
     };
+    let mut competing = request.clone();
+    competing.commit_id.0.push_str("-competing");
+    let mut unsealed = request.clone();
+    unsealed.owner.owner.epoch = WorkerEpoch(15);
+    unsealed.commit_id.0.push_str("-unsealed");
     let script = Script::default()
         .expect(
             "SessionStorePort::commit",
@@ -30,7 +35,6 @@ fn commit_script() -> (Script, CommitRequest) {
             (&request.owner.sid,),
             ok(Some(CheckpointEnvelope {
                 owner: owner().owner,
-                revision: proof().revision,
                 checkpoint: request.candidate.clone(),
                 recovery: RecoveryMetadata {
                     takeover_streak: 0,
@@ -39,6 +43,16 @@ fn commit_script() -> (Script, CommitRequest) {
                     last_active_at: TimestampMillis(100),
                 },
             })),
+        )
+        .expect(
+            "SessionStorePort::commit",
+            (&competing,),
+            ok(CommitOutcome::CommitSeqConflict),
+        )
+        .expect(
+            "SessionStorePort::commit",
+            (&unsealed,),
+            ok(CommitOutcome::Fenced),
         );
     (script, request)
 }
@@ -65,7 +79,7 @@ async fn checkpoint_rejects_unresolved_commit_and_missing_persistence() {
             "assertion",
         )
         .await;
-        script.remaining(3 - index);
+        script.remaining(5 - index);
     }
 }
 
@@ -78,23 +92,44 @@ async fn checkpoint_does_not_turn_a_fenced_commit_into_success() {
         "first commit failed",
     )
     .await;
-    script.remaining(3);
+    script.remaining(5);
 }
 
 #[tokio::test]
-async fn lease_checks_stable_claim_identity_on_retry() -> ContractResult {
+async fn checkpoint_rejects_competing_commit_unsealed_owner_and_incorrect_receipt() {
+    for index in [0, 4, 5] {
+        let (script, request) = commit_script();
+        if index == 0 {
+            let mut receipt = proof();
+            receipt.sequence = CommitSeq(9);
+            script.replace(index, ok(CommitOutcome::Committed(receipt)));
+        } else {
+            script.replace(index, ok(CommitOutcome::AlreadyCommitted(proof())));
+        }
+        rejects(
+            session_store_port_contract_tests(&script, request),
+            "assertion",
+        )
+        .await;
+        script.remaining(5 - index);
+    }
+}
+
+fn lease_script(expected_epoch: Option<WorkerEpoch>) -> (Script, ClaimShard) {
     let request = ClaimShard {
         shard: owner().shard,
         me: instance(),
-        expected: None,
+        expected_epoch,
         request_id: RequestId("claim-a".into()),
     };
+    let mut claimed_owner = owner().owner;
+    claimed_owner.epoch = WorkerEpoch(expected_epoch.map_or(1, |epoch| epoch.0 + 1));
     let claim = ShardClaim {
         shard: owner().shard,
-        owner: owner().owner,
-        revision: Revision("claim-revision".into()),
-        authority: "claim-proof".into(),
+        owner: claimed_owner,
     };
+    let mut competing = request.clone();
+    competing.request_id.0.push_str("-competing");
     let script = Script::default()
         .expect(
             "ShardLeasePort::claim",
@@ -105,17 +140,53 @@ async fn lease_checks_stable_claim_identity_on_retry() -> ContractResult {
             "ShardLeasePort::claim",
             (&request,),
             ok(LeaseClaim::AlreadyClaimed(claim)),
+        )
+        .expect(
+            "ShardLeasePort::claim",
+            (&competing,),
+            ok(LeaseClaim::Conflict),
         );
-    shard_lease_port_contract_tests(&script, request).await?;
-    script.done();
+    (script, request)
+}
+
+#[tokio::test]
+async fn lease_checks_initial_epoch_takeover_and_stable_retry() -> ContractResult {
+    for expected in [None, Some(WorkerEpoch(13))] {
+        let (script, request) = lease_script(expected);
+        shard_lease_port_contract_tests(&script, request).await?;
+        script.done();
+    }
     Ok(())
+}
+
+#[tokio::test]
+async fn lease_rejects_unchanged_epoch_or_a_second_winner() {
+    for index in [0, 2] {
+        let (script, request) = lease_script(Some(WorkerEpoch(13)));
+        let mut claimed_owner = owner().owner;
+        if index == 0 {
+            claimed_owner.epoch = WorkerEpoch(13);
+        }
+        script.replace(
+            index,
+            ok(LeaseClaim::Claimed(ShardClaim {
+                shard: request.shard,
+                owner: claimed_owner,
+            })),
+        );
+        rejects(
+            shard_lease_port_contract_tests(&script, request),
+            "assertion",
+        )
+        .await;
+        script.remaining(2 - index);
+    }
 }
 
 #[tokio::test]
 async fn membership_checks_lease_identity_and_drain_transition() -> ContractResult {
     let lease = MembershipLease {
         instance: instance(),
-        authority: "membership-proof".into(),
     };
     let script = Script::default()
         .expect(
@@ -165,6 +236,54 @@ async fn final_result_checks_idempotency_and_authorized_readback() -> ContractRe
     result_store_port_contract_tests(&script, source(), record).await?;
     script.done();
     Ok(())
+}
+
+fn lost_membership_script() -> (Script, MembershipLease) {
+    let lost = MembershipLease {
+        instance: Instance {
+            node: instance().node,
+            incarnation: "retired-boot".into(),
+        },
+    };
+    let script = Script::default()
+        .expect(
+            "MembershipPort::renew",
+            (&lost, Duration::from_secs(60)),
+            ok(Renewal::Lost),
+        )
+        .expect("MembershipPort::set_draining", (&lost,), ok(Renewal::Lost))
+        .expect(
+            "MembershipPort::liveness",
+            (&instance(),),
+            ok(Liveness::Alive),
+        );
+    (script, lost)
+}
+
+#[tokio::test]
+async fn lost_membership_cannot_revive_or_change_the_replacement() -> ContractResult {
+    let (script, lost) = lost_membership_script();
+    membership_lost_lease_contract_tests(&script, &lost, &instance()).await?;
+    script.done();
+    Ok(())
+}
+
+#[tokio::test]
+async fn membership_rejects_reviving_old_lease_or_draining_new_instance() {
+    for index in [0, 1, 2] {
+        let (script, lost) = lost_membership_script();
+        if index == 2 {
+            script.replace(index, ok(Liveness::Dead));
+        } else {
+            script.replace(index, ok(Renewal::Renewed));
+        }
+        rejects(
+            membership_lost_lease_contract_tests(&script, &lost, &instance()),
+            "assertion",
+        )
+        .await;
+        script.remaining(2 - index);
+    }
 }
 
 #[tokio::test]

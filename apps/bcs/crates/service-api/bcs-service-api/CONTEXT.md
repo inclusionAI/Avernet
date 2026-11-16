@@ -14,6 +14,22 @@ The [change record](../../../specs/2026-11-15-distributed-contracts/spec.md) lin
 ordered implementation tasks and actual validation; concrete providers and
 runtime implementations remain pending.
 
+Distributed ownership uses `ShardOwner` for the shard-assigned identity and
+`SessionOwnership` for the processing identity obtained by sealing a specific session.
+Shard claims compare `expected_epoch`; business commits compare
+`expected_commit_seq` together with the sealed owner. Owner/checkpoint records,
+commit receipts and recovery responses expose no independent revision. Recovery
+metadata has an idempotent control-write path that preserves business state and
+outbox; dispatch recheck revisions and inbox scheduling tokens remain separate.
+`ShardClaim`, `MembershipLease` and `SessionOwnership` contain identities, not authority
+strings; providers still validate current claims and exact unexpired registrations.
+Old incarnations cannot renew or drain a replacement, and a lost lease cannot
+be revived by renew. Session commits validate sid-to-shard membership and the
+exact sealed node/incarnation/epoch atomically with the sequence check/write;
+caller-supplied identities alone grant no rights. Commit proofs remain.
+These refine the unpublished 6.1.0 distributed declarations only; no existing
+runtime or deployed persistence format changes.
+
 ## Version 5.1.0: Group Card snapshots
 
 `GroupCoreService` and `GroupRepoPort` add `read_card_snapshot`, returning

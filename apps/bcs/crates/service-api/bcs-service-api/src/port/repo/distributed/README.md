@@ -56,6 +56,43 @@ partition can advance its broker acknowledgement only across a contiguous
 committed prefix, even if later sessions have already completed. Duplicate
 physical records may produce a progress-only batch with no logical inputs.
 
+## Shard identity and session ownership
+
+`ShardOwner { instance, epoch }` is the identity assigned by shard acquisition.
+`ShardClaim.owner`, the sealed checkpoint owner, and commit receipts share this
+type. A checkpoint stores the shard identity last sealed into that session, not
+a live reference to the current shard owner. `SessionOwnership { sid, shard,
+owner }` remains the session-scoped processing identity returned by acquisition.
+Providers validate that sid belongs to shard and that the exact owner was sealed
+into this session; constructing the value from a shard claim or inventing a
+larger epoch alone cannot authorize a write.
+
+`ClaimShard.expected_epoch` is the atomic claim precondition: None means the
+shard has never been owned, otherwise the current epoch must match exactly.
+After validating takeover eligibility, assign epoch 1 or the previous epoch + 1.
+Preserve ownership history, reject overflow, and never treat Unknown liveness as
+Dead. An exact request-ID/content retry returns the original claim; another
+request using the same old epoch conflicts. No independent owner revision is
+exposed. Every owner change, including planned handoff, advances the epoch.
+
+`ShardClaim` carries only shard and owner identity, with no generic authority
+string. Session acquisition must validate shard, node, incarnation, epoch and
+current claim validity against stored facts before sealing; possession of the
+Rust value alone grants no processing rights.
+
+`MembershipLease` likewise contains only the registered `Instance`. Registration
+binds that instance to an immutable runtime role; retrying an active registration
+is idempotent, while changing its role is invalid. Co-located roles use distinct
+instance identities. `renew` and `set_draining` atomically require the exact,
+current, unexpired registration; an old incarnation cannot update a replacement.
+Lost leases return Lost without recreating or reviving membership. Re-registration
+after loss requires a fresh incarnation so an old lease cannot become valid again.
+Liveness remains Alive/Dead/Unknown: an uncertain read is never proof of death.
+No authority string is carried by `SessionOwnership` either. Session operations
+validate the exact sealed node/incarnation/epoch and session scope against stored
+facts. `CommitReceipt.proof` remains durable evidence for committed effects; it
+is not removed with the ownership placeholder strings.
+
 ## Checkpoint and effect replay
 
 1. Claim the shard, enumerate **all** pending sessions (including future due
@@ -68,16 +105,25 @@ physical records may produce a progress-only batch with no logical inputs.
    string is not proof of a committed effect.
 4. Build a candidate without mutating confirmed state. Commit state, consumed
    position, sequence progress, deadlines and the fixed batch together under
-   owner and expected-revision checks.
+   session/shard scope, exact sealed-owner and `expected_commit_seq` checks.
 5. A timeout is `OutcomeUnknown`. Resolve the same commit ID and digest or retry
    that identity; do not invent the next commit or start effects on uncertainty.
 6. Replay with the original source commit, effect ID and content digest.
    `AlreadyApplied` requires matching durable evidence. An older event ID or
    equal version by itself is insufficient.
 
-Commit admission also validates matching session/owner scope, monotonic
-`commit_seq`, supported formats, outbox source commit, deterministic effect IDs
-and same-ID content. Providers must validate authority/proof against stored
+New checkpoints start at `commit_seq=0`. A new business commit requires the
+current sequence to equal `expected_commit_seq` and the candidate sequence to
+equal that value + 1, with overflow rejected. The check and write are atomic.
+Another commit based on the old sequence returns `CommitSeqConflict`; an owner
+lost through session sealing is `Fenced`. With valid ownership, an exact
+committed ID/content retry returns its original receipt even though its expected
+sequence is now old.
+Matching only the sequence never proves that this request committed.
+
+Commit admission also validates matching session/owner scope,
+supported formats, outbox source commit, deterministic effect IDs
+and same-ID content. Providers must validate ownership and commit proofs against stored
 facts; public Rust fields are not cryptographic capabilities by themselves.
 
 `AppendEvents` keeps predecessor evidence and applies partially completed batches
@@ -90,8 +136,29 @@ Result finalization uses two business commits: first AwaitingResult + SaveResult
 then, after confirmed immutable archival, publish the terminal result reference.
 If the process dies between them, replaying SaveResult recovers the same reference.
 Ownership and recovery metadata writes must not clear that batch. Recovery
-attempts are persisted idempotently before risky replay; repeated metadata
-changes do not count as business progress that resets the failure streak.
+attempts are persisted idempotently before risky replay. The control write
+validates the sealed owner and `expected_commit_seq`, updates recovery metadata
+only, and never advances the business sequence or replaces checkpoint/outbox.
+Repeating an attempt ID cannot increment the count again; an advanced head
+returns Conflict and a lost owner returns Fenced. Concurrent metadata updates
+must be serialized, and stale attempts cannot undo a business-progress reset.
+`CheckpointEnvelope.recovery` is a loaded view of this independently managed
+metadata, not a field copied into the next business candidate. Only actual
+business progress resets the failure streak.
+
+Owner records, checkpoint envelopes, commit receipts and recovery responses
+expose no independent revision. Storage adapters may use native versions or
+transactions internally. A TBase adapter may encode business writes using
+`epoch * 10^9 + commit_seq`, with range/overflow checks, and reserve the epoch
+boundary for sealing. Such encoding is not part of the portable API and does not
+by itself prove atomic owner/sequence checks or cross-path fencing. Recovery
+metadata must use an independent safe control-write protocol; it cannot rewrite
+the business checkpoint at the same timestamp or consume a timestamp reserved
+for its next commit. These backend guarantees remain to be verified.
+
+Dispatch recheck `Revision` and inbox `ScheduleToken` remain: concurrent control
+updates can invalidate a scheduling decision without a new Worker epoch or
+business commit. They are separate from owner/checkpoint versioning.
 
 ## Schedule race and notification loss
 
@@ -156,6 +223,10 @@ conformance. Future fixtures must extend them with at least:
 | --- | --- |
 | Admission persisted but activation/notification interrupted | Retry/repair finds input; never acknowledge unrecoverable input |
 | Commit applied but response lost | Resolve same ID/digest; no duplicate business commit |
+| Two claims use the same expected epoch | Only one new request wins; exact retry retains the same claim |
+| Same owner submits competing commits from one sequence | Only one advances; the other returns CommitSeqConflict |
+| Recovery attempt repeats or races with business progress | Count once; preserve checkpoint/outbox; stale head cannot undo reset |
+| Expired/old-incarnation lease renews or drains | Return Lost; never revive it or change the replacement registration |
 | Old owner writes after seal; old effect replays after new owner | Commit rejected; valid historical effects remain idempotent |
 | New input races with settle, including equal due score | New activation survives or settle returns NeedsRecheck |
 | Partial event append, snapshot lag, trim during restore/follow | Ordered recovery, consistent cut or explicit Gap |
