@@ -1,0 +1,1175 @@
+apps/backend/src/agentclaw/community/core/task/context_collab/g3_observe_evaluate_evolve/observation.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 14,40,44-47,51-53,61-63,110,114,118-131,135-137
+apps/backend/src/agentclaw/community/core/spaces/space_service_protocol.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 93-98
+apps/backend/src/agentclaw/community/core/caller_identity/README.md
+  s_bcc2d0974a665d::t_432b79eed8a5a5 154-161,182
+apps/backend/src/agentclaw/community/core/agentswarm/README.md
+  s_bcc2d0974a665d::t_432b79eed8a5a5 42
+apps/frontend-nextgen/src/pages/Workspace/GroupWorkspaceArea.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 9,270-282
+docs/specs/backend/2026-11-10-todo-workbench/design.md
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-71
+apps/evolverun/clawweb/public/modules/workflow/docs/pack-version-write.md
+  s_bcc2d0974a665d::t_432b79eed8a5a5 8-43,69-71
+apps/frontend-nextgen/src/services/workspace/botSessionService.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 125-141,404,410-413,513,523-526
+apps/backend/src/agentclaw/community/core/spaces/services/space_deletion_service.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-62
+apps/evolverun/clawweb/public/modules/workflow/server/services/workflow-ai-draft-receipts.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-88
+apps/bcs/crates/services/bcs-bot/tests/bot_use_cases/connection.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-255
+apps/evolverun/clawweb/public/modules/workflow/web/components/editor/NodeFields.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 3,12,21,27,29,43,49,51,65,102,105
+apps/bcs/crates/adapters/http/bcs-http/src/routes/group_context.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 33-34,133-159,176-197
+  s_bcc2d0974a665d::t_2183bc5b61e9f7 198
+apps/backend/src/agentclaw/community/core/skill_center/errors.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 136-140
+apps/bcsfuse/packages/search-core/tests/test_mapped_projection.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-81
+apps/bcs/crates/adapters/ws/bcs-ws/tests/frame_compat/run_aliases.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-211
+apps/backend/src/agentclaw/community/adapters/http/task/todos/artifact_routes.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-177
+apps/bcs/crates/service-api/bcs-service-api/src/application/v1/group_context.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 196-211,216-235
+  s_bcc2d0974a665d::t_92d524d0c80c41 236
+apps/backend/src/agentclaw/community/di/container.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 153,340-342
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/EditorSaveDeploy.test.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1,44,557-561,564,620,633,642,722,737,840-946
+  s_bcc2d0974a665d::t_b8e21bc0f41acf 947
+apps/evolverun/clawweb/public/shared/server/__tests__/workflow-ai-draft-migration.test.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 8-9,11-15,17-18,20-24
+docs/dependencies.zh-CN.md
+  s_bcc2d0974a665d::t_432b79eed8a5a5 15,39,75,78-86,89-90,119,134
+apps/backend/docs/agent-swarm-user-guide/user-guide.zh-CN.md
+  s_bcc2d0974a665d::t_432b79eed8a5a5 22-23,74-89,118,121-135,262-283,293,295,397-399,519,545
+apps/bcs/scripts/ci/detect_changes.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 38
+apps/frontend-nextgen/src/pages/Workspace/hooks/useGroupPresets.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-73
+apps/baas/src/secbaas/community/core/service/bot_run/_worker.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 30-33,261-263,276-277,307,495,497-498,501-519,521-522,527,529-531,536,538,541-542,548-570,651-654,685-688,713-715,739,741-742
+apps/bcsfuse/packages/search-core/src/search_core/catalog/mapping.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-44
+apps/gateway/configs/application.yaml
+  s_bcc2d0974a665d::t_432b79eed8a5a5 242-244,325-327,483-485
+apps/backend/tests/community/repository/skill_center/test_mcp_override_lifecycle.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 12,25-27
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/EditorDivergenceSaveDeploy.test.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 52
+apps/backend/src/agentclaw/community/core/task/todos/services/todo_artifact_service.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-458
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/session_handler_edges/participants_edges.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-255
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/JsonDraftField.test.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 4,224-237
+  s_bcc2d0974a665d::t_1689394040fe2c 238
+apps/backend/src/agentclaw/community/core/spaces/errors.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 44-51
+apps/gateway/configs/schemas/bcn.openapi.json
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/EditorAi.test.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 62,70,79,92,104,117,130,141,154,159,165,180
+apps/backend/tests/community/architecture/test_task_module_responsibility_guards.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 203,225-286,325-328,337-380
+  s_bcc2d0974a665d::t_f08a6ea5b3c4f9 381
+apps/backend/tests/community/core/task/todos/collaboration/test_consumer_contract.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-292
+apps/bcs/docs/waivers/agentpass-subbots-source-size.md
+  s_bcc2d0974a665d::t_432b79eed8a5a5 27-51
+apps/frontend-nextgen/config/routes.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 45,48-50
+apps/evolverun/clawweb/public/modules/workflow/web/editor/useEditorPermissions.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-26
+apps/evolverun/clawweb/public/modules/workflow/server/routes/pack-scripts.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 7-8,44-48
+apps/frontend-nextgen/src/services/backendApi/todos/todoMapper.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-136
+apps/frontend-nextgen/src/pages/Workspace/components/GroupHeader.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 16,27,33,67-68,183,192,203,219,226,234,241-248,250,257
+apps/backend/tests/community/core/task/context_collab/test_reliability_observation.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 67,71-74,78-79,108,170
+apps/backend/src/agentclaw/community/core/repository/implementations/task/todos/__init__.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-10
+apps/backend/tests/community/repository/skill_center/test_bot_mutation_fence.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-24
+apps/evolverun/clawweb/public/modules/workflow/web/components/YamlEditor.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 5,23,53-56,99,116,143,157,211,231-232,235
+apps/backend/tests/community/core/task/todos/test_todo_artifact_service.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-566
+apps/bcs/crates/bootstrap/bcs/tests/integration_group_context.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 619,632-637,672-728,767-809,817-822,826,837-865,867,887-889,891-895,909-912
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/admission_routes.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 9,732,769-771
+apps/backend/src/agentclaw/community/core/repository/protocols/capability_desired_state.py
+  s_bcc2d0974a665d::t_a793f992fa38de 6,50
+  s_bcc2d0974a665d::t_432b79eed8a5a5 51-52
+  s_bcc2d0974a665d::t_65c85cabdfd8e7 53-54
+apps/frontend-nextgen/test/pages/Workspace/Chat/hooks/useConversationDeepLinkSessionHydration.test.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 5,11-16,20,50-65,140,305-348
+  s_bcc2d0974a665d::t_71a67538487232 349
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/task/__init__.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1,3-5,7-10,13-21
+docs/specs/backend/2026-11-10-todo-workbench/spec.md
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-67
+apps/frontend-nextgen/src/hooks/useTodoDetail.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-215
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/workflow-ai-draft-core-fixtures.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-34
+apps/evolverun/clawweb/public/modules/workflow/web/editor/usePackCanvasSession.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 10,79,140-141,160,227,252,269,307,367,373,470,480-483
+apps/backend/src/agentclaw/community/core/skill_center/README.md
+  s_bcc2d0974a665d::t_432b79eed8a5a5 446-451
+apps/frontend-nextgen/src/pages/Lab/Todos/components/TodoCreateModal.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-96
+.github/workflows/architecture-checks.yml
+  s_bcc2d0974a665d::t_432b79eed8a5a5 26,44-45,56,58
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/pack-authenticated-read.test.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-240
+docs/specs/backend/2026-11-10-todo-workbench/proposal.md
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-32
+apps/backend/specs/hourly-asc-refresh-20261115/002-code-report.md
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-18
+apps/frontend-nextgen/src/services/backendApi/collaboration/groupContextController.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-66
+apps/backend/tests/community/repository/skill_center/test_skill_installation_sources.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 10,22-26
+apps/evolverun/clawweb/public/app/clawweb/server/__tests__/public-workflow-ai-draft.test.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 12-13,37,67-74
+apps/backend/tests/community/adapters/http/openapi_v1/engine_runtime/test_connection.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 330-416
+apps/frontend-nextgen/src/stores/todoStore.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-84
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/EditorCanvas.test.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 9,394-416
+  s_bcc2d0974a665d::t_185ac713081cbf 417
+apps/bcs/scripts/e2e-test/cli-stories.sh
+  s_bcc2d0974a665d::t_432b79eed8a5a5 561-566,568,570,572-575,607,614,616,624-705,816-824
+  s_bcc2d0974a665d::t_15811571d9fbae 825
+apps/backend/src/agentclaw/community/plugin_api/task/__init__.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1
+apps/backend/tests/community/adapters/http/resources/test_file_search_download_helpers.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 551-711
+apps/backend/src/agentclaw/community/core/task/context_collab/l4_context_primitives/collet.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 102,122-124,128,140-142
+apps/bcs/crates/adapters/http/bcs-http/src/routes/sessions/collections.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-140
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/EditorDraftRecovery.test.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 38
+apps/evolverun/clawweb/public/modules/workflow/web/services/workflow-ai-draft.test.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 10,15,34,58,66,101,121,144,158,161,176,186,195-197,207,213,216,226,249-283,285,287,292-295,299-301,330,337
+apps/evolverun/clawweb/public/modules/workflow/web/hooks/__tests__/useWorkflowAiDraft.test.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 146,161,181-184,221-232
+  s_bcc2d0974a665d::t_52f92ec4fa84eb 233
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/EditorUnknownWriteReentry.test.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 81,102,126
+apps/backend/tests/community/repository/skill_center/test_apply_runtime_name_default_exclusions.py
+  s_bcc2d0974a665d::t_8a802950458cdb 1-18,20-32,34-47,49-72
+  s_bcc2d0974a665d::t_6c37828b7e2198 19,33,48
+apps/backend/src/agentclaw/community/di/todo_config.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-18
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/session_handler_edges/creation.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-252
+apps/backend/tests/community/di/test_task_todo_bindings.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-114
+apps/bcs/crates/services/bcs-message-flow/tests/suite_caller_admission.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 8-9
+apps/bcs/scripts/e2e-test/session_management_edges_story.sh
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-11
+.github/workflows/publish-bcs-bridge.yml
+  s_bcc2d0974a665d::t_432b79eed8a5a5 9,19-21,41,92,140
+apps/evolverun/clawweb/public/app/clawweb/server/__tests__/workflow-ai-draft-runtime.test.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 9-10,13,18,20-23,25,27,30,32,36-37,39-40,42-44,46,48
+apps/frontend-nextgen/src/pages/Workspace/hooks/useBotChat.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 14,35,47-48
+apps/backend/src/agentclaw/community/core/task/context_collab/g4_contracts_consistency/state_machine.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 136-140,199-200,258,270-272,373-374,384-385,395-396,415-416,439-460,463-518
+apps/frontend-nextgen/test/hooks/useTodoDetail.test.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-167
+apps/bcs/docs/group-context-api.md
+  s_bcc2d0974a665d::t_432b79eed8a5a5 531-557,570-575,579-582,584-585,589-591
+apps/backend/src/agentclaw/community/core/bot_management/identity_source.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 9-13,20-24,30-32,38-49,54,61-64,86-101,138,152-163
+apps/frontend-nextgen/src/pages/Lab/Todos/index.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-115
+apps/backend/src/agentclaw/community/api/task/todo_service.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-5
+docs/specs/backend/2026-11-10-todo-workbench/pipeline/config.yaml
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-24
+apps/backend/src/agentclaw/community/core/skill_center/services/skill_center_reference_processor.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 18,66,71,395-407,410,519-520,527-528
+  s_bcc2d0974a665d::t_07608335750b16 564
+apps/backend/src/agentclaw/community/core/task/context_collab/g4_contracts_consistency/schema.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 25
+apps/frontend-nextgen/src/pages/Lab/Todos/botScope.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-32
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/spaces/router.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 64-66,76,804-817
+  s_bcc2d0974a665d::t_2ae5aab1bcb379 818-819
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/session_handler_edges/session_application.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-135
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/workflow-ai-draft-storage.test.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-81
+apps/frontend-nextgen/test/pages/Lab/LabLandingPage.test.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 2,5-6,19,21-24,31-40,58
+apps/backend/src/agentclaw/community/core/task/todos/services/__init__.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-5
+apps/backend/tests/community/endpoints/test_todo_workbench.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-932
+apps/bcs/crates/services/bcs-organization/tests/management.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 181-190
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/EditorPackSafety.test.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 35
+apps/frontend-nextgen/src/pages/Lab/Todos/components/TodoInteractionActorHeader.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-37
+apps/bcs/crates/services/bcs-organization/tests/management/candidates.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-242
+apps/bcs/crates/services/bcs-message-flow/tests/cases/conformance_direct_a2a.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 18-19,23-24,72-77,80,85,191,204,212,222,234
+apps/backend/tests/community/core/engine_runtime/test_connection_offline_cause.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-71
+apps/backend/tests/community/core/task/context_collab/test_context_collab_status.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 48-50,213-215,225,247,257,261,265-271,292,296-299,303-304,310-329,362-364,371-374,389-393,395-396,399-404,425-426,432,443-444,464-470,472,489-493,510-515,552,562-563
+apps/backend/src/agentclaw/community/core/repository/implementations/skill_center/apply_skill_set_commands.py
+  s_bcc2d0974a665d::t_a793f992fa38de 8,204
+  s_bcc2d0974a665d::t_a2a9d8fee0df31 407-408
+apps/backend/tests/community/core/task/todos/collaboration/fakes.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-288
+apps/backend/src/agentclaw/community/core/task/todos/collaboration/protocol.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-138
+apps/bcs/crates/adapters/ws/bcs-ws/tests/frame_compat/coordination_echo.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-551
+apps/evolverun/clawweb/public/modules/workflow/web/editor/__tests__/store.readOnly.test.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-45
+apps/backend/tests/community/di/test_agentswarm_module_wiring.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 340-411
+apps/backend/src/agentclaw/community/adapters/http/skill_center/skillsets_common.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 21,42,53
+apps/baas/src/secbaas/community/core/service/callback/_http_callback.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 19,61-66
+  s_bcc2d0974a665d::t_f668a06792657b 67-68
+apps/evolverun/clawweb/public/modules/workflow/web/components/ScriptFilesTab.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 10-11,13,15,22,52,72,78,87,106,112,115
+apps/bcs/crates/adapters/ws/bcs-ws/tests/frame_compat/task_dispatch.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-145
+apps/bcs/scripts/test-structured-routing/setup.sh
+  s_bcc2d0974a665d::t_432b79eed8a5a5 48
+apps/backend/tests/community/core/task/context_collab/executor_fakes.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-105
+apps/frontend-nextgen/src/pages/Workspace/hooks/useBotSessionRange.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-18
+apps/frontend-nextgen/test/pages/Workspace/components/GroupHeader.test.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 178,191
+docs/specs/backend/2026-11-10-todo-workbench/tasks.md
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-36
+apps/bcs/crates/bootstrap/bcs/tests/support/e2e_helpers.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 98-100,550-567,574,604,636,669
+apps/backend/tests/community/core/devices/services/test_baas_connection_unavailable.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-54
+apps/backend/src/agentclaw/community/plugin_api/device_adapter_transport.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 99
+apps/backend/src/agentclaw/community/di/modules/task/todo_bindings.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-241
+apps/frontend-nextgen/test/pages/Workspace/hooks/useBotChat.test.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 5,59,97-111
+  s_bcc2d0974a665d::t_c18e4951c3b362 112-113
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/EditorDivergenceComparison.test.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 66,91,147,158,166
+apps/baas/tests/unit/core/service/bot_run/test_worker.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 140-141,148,158-168,312,593-594,607,670,716,850
+apps/backend/src/agentclaw/community/core/task/todos/services/todo_execution_service.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-473
+apps/backend/src/agentclaw/community/plugins/community/agentswarm/bot_authorization.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 32,34-35,73-75,78-86,90-94,103-106,108-113
+apps/evolverun/clawweb/public/modules/workflow/web/components/editor/EditorToolbar.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-115
+apps/evolverun/clawweb/public/modules/workflow/web/components/FrozenPackVersionViewer.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 39,45
+apps/evolverun/clawweb/public/modules/workflow/server/routes/pack-version.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 9-10,59-73,95
+apps/evolverun/clawweb/public/modules/workflow/web/editor/__tests__/usePackCanvasSession.noJournal.test.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 671,679,732,895-916
+  s_bcc2d0974a665d::t_092f3d9998a007 917
+apps/bcs/specs/2026-11-12-bcs-large-file-split/plan.md
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-820
+apps/backend/src/agentclaw/community/core/task/todos/sql/2026_11_10_todos.sql
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-80
+apps/backend/src/agentclaw/community/core/repository/implementations/spaces/space.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 12-13,19-20,23,26,581-637
+apps/backend/tests/community/adapters/http/openapi_v1/spaces/test_deletion_contract.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-293
+apps/backend/tests/community/core/task/context_collab/test_event_schema.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 33
+apps/backend/tests/community/core/task/context_collab/test_service_real_repository.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 12,63-65,103,124-127,274-276,298,310,312,315,458-460,529,559-561,580,637-638
+apps/backend/src/agentclaw/community/core/task/todos/artifact_models.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-69
+apps/backend/src/agentclaw/community/core/task/todos/bot_scope.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-144
+apps/bcs/crates/adapters/http/bcs-http/CONTEXT.md
+  s_bcc2d0974a665d::t_432b79eed8a5a5 3-13
+apps/backend/src/agentclaw/community/core/task/todos/collaboration/in_process.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-368
+apps/bcs/crates/services/bcs-message-flow/src/a2a_chat/dispatch.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 6,312-321
+  s_bcc2d0974a665d::t_6ae15852de5488 322
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/EditorWorkflowTransition.test.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1,8,15,39,139,141,146,154-155,162-163,170-171,173,182-184,192-193,203-204,211-269
+  s_bcc2d0974a665d::t_d16ce8345e8e28 270
+apps/frontend-nextgen/src/pages/Lab/Todos/components/TodoBoard.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-237
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/EditorWorkflowIsolation.test.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 54,206-216,255,289,292
+apps/bcs/crates/services/bcs-message-flow/tests/cases/caller_inline_policy_off_contract.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 115-119,121
+apps/baas/docs/adr/0004-lifecycle-state-machines.md
+  s_bcc2d0974a665d::t_432b79eed8a5a5 38-41
+apps/backend/tests/community/core/task/task_runner/integration/test_open_api_bot_adapter.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 10,119-169
+  s_bcc2d0974a665d::t_d2a33f33be275c 170-171
+apps/bcs/crates/services/bcs-message-flow/src/a2a_chat/mod.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 5-6,304
+apps/evolverun/clawweb/public/shared/server/auto-heal-baas.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-46
+apps/frontend-nextgen/src/pages/Workspace/components/ManagePanel/ManagePanelHeader.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 8,10,14,23,28
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/EditorPartialSaveCache.test.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 43
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/task/todos/router.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-362
+apps/backend/src/agentclaw/community/core/task/todos/artifact_service_protocol.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-63
+apps/evolverun/clawweb/public/modules/workflow/web/components/editor/EditorCanvasToolbar.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 6,33
+apps/backend/src/agentclaw/community/plugins/local/task/__init__.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1
+apps/bcs/crates/adapters/http/bcs-api-http/tests/group_routes.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 547-576
+apps/bcs/scripts/test-master-slave/setup.sh
+  s_bcc2d0974a665d::t_432b79eed8a5a5 38
+rust-toolchain.toml
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-4
+singlebox/ci/tests/test_singlebox_e2e_phases.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 88-101
+apps/bcs/crates/adapters/http/bcs-http/src/routes/sessions/lifecycle.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-277
+apps/backend/tests/community/core/agentswarm/test_identity_source_contract.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 28-30,75-78,83,85-86,91-134,181-182,184-190,193,195-197,199-200,202-204,206-210,212,219-385
+.github/workflows/singlebox-coverage.yml
+  s_bcc2d0974a665d::t_432b79eed8a5a5 51,105,158-159
+apps/frontend-nextgen/src/hooks/useTodos.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-128
+apps/frontend-nextgen/src/pages/Workspace/Chat/hooks/useConversationDeepLinkSessionHydration.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 6-13,15,27-76,108,142,144-154,164-176,187-191,193-199,215-216
+devops/k8s-tests/justfile
+  s_bcc2d0974a665d::t_432b79eed8a5a5 68-71
+apps/backend/tests/community/services/test_skill_set_service_symlink_mappings.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 12,38-40
+apps/evolverun/clawweb/public/modules/workflow/docs/specs/2026-11-13-workflow-ai-draft-validation.md
+  s_bcc2d0974a665d::t_432b79eed8a5a5 137-189
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/YamlEditor.test.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 216-245
+apps/bcs/crates/adapters/http/bcs-http/src/routes/sessions/creation.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-198
+apps/backend/src/agentclaw/community/kernel/skill_mapping_identity.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-34
+apps/backend/src/agentclaw/community/core/spaces/services/__init__.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 2,6-11
+apps/bcs/crates/services/bcs-bot/tests/bot_use_cases/queries.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-461
+apps/backend/tests/community/repository/task/todos/test_todo_repository.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-529
+apps/bcsfuse/src/app/tc/bootstrap.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 6,58-59,74-109,114,116,118-122,142,148-149,156
+apps/backend/tests/community/repository/chat/test_caller_refresh_candidates.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-126
+singlebox/ci/tests/test_singlebox_coverage_workflow.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 60-63,74-76,78,99-110
+  s_bcc2d0974a665d::t_1c89294cb0f671 111-112
+apps/backend/tests/community/core/task/context_collab/test_l4_primitives.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 126,132-145
+  s_bcc2d0974a665d::t_992f91055ef94f 146-147
+apps/frontend-nextgen/test/pages/Lab/Todos.test.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-383
+apps/bcs/crates/services/bcs-message-flow/tests/support/direct_a2a_empty_input.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-101
+apps/bcsfuse/packages/search-core/src/search_core/catalog/conversion.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 14,35,52-54
+apps/backend/tests/community/core/skill_center/test_desktop_skill_recovery.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 719-722
+apps/frontend-nextgen/src/services/workspace/botChatProvider.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 14,78-79,273,632,660
+apps/frontend-nextgen/src/pages/MyTask/components/RoutineTaskTab.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 180,253-256
+apps/backend/tests/community/core/task/context_collab/test_context_collab_service.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 56-58,101-103,148-150,183-186,188,206-209,214-217,234-240,245-247,320,336-340,343-344,346-348,352-353,357-358
+apps/backend/tests/community/core/task/context_collab/test_executor.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-328
+apps/evolverun/clawweb/public/modules/workflow/web/api/__tests__/workflow-ai.route.integration.test.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 16,20,60,62-64,66-67,69-71,73-76,78-81,84-90,92,96,101,103-105
+apps/evolverun/clawweb/public/modules/workflow/web/components/editor/JsonDraftField.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 2,49,95,113,123,127,144,149
+apps/frontend-nextgen/src/pages/Lab/Todos/components/TodoDetailPrimitives.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-41
+docs/specs/backend/2026-11-10-todo-workbench/pipeline/state.json
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-2105
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/authorization_rules.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 12,789,985
+apps/backend/tests/community/core/skill_center/test_skill_center_reference_processor.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 17-18,439-484
+apps/frontend-nextgen/src/pages/Lab/Todos/components/TodoEventTimeline.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-206
+apps/backend/src/agentclaw/community/core/repository/implementations/skill_center/bot_skillset_installations.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 5-6,140-176,311
+apps/backend/specs/hourly-asc-refresh-20261115/001-spec.md
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-13
+apps/evolverun/clawweb/public/modules/workflow/web/hooks/useWorkflowAiDraft.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 28,51,68,89,117-121,137
+apps/backend/src/agentclaw/community/core/task/todos/__init__.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-17
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/workflow-ai-draft-fixtures.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 21
+apps/backend/tests/community/endpoints/test_space_deletion_router.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-157
+apps/backend/src/agentclaw/community/plugins/community/device_adapter_transport.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 124,176,219
+devops/hook/pre_push.sh
+  s_bcc2d0974a665d::t_432b79eed8a5a5 174
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/session_handler_edges/participants.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-804
+apps/backend/src/agentclaw/community/di/modules/task_module.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 28-30,175-178,187-190,207,252-254,293-300,340-375,746-748
+apps/bcs/scripts/install_cargo_test_tools.sh
+  s_bcc2d0974a665d::t_432b79eed8a5a5 83
+apps/evolverun/clawweb/public/shared/server/db.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 22-23,604,617
+apps/frontend-nextgen/src/pages/Lab/Todos/components/TodoInteractionArtifactEntry.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-96
+apps/backend/tests/community/core/task/context_collab/test_state_machine.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 43,45,60,73-128,135-141,149,157-159,166-168,171,174-176,209-211,217-222,226,228-230,237-238,240,242,280-282,285,294-296,299,308,311-313,321-329,333-354,360-362,369,378-380,397-399,405,408-410,427-429
+apps/bcs/crates/adapters/http/bcs-api-http/src/v1/openapi/routes/group_context.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-212
+apps/evolverun/clawweb/public/modules/workflow/web/components/NodePalette.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 2,12,20,23,32
+apps/evolverun/clawweb/public/app/clawweb/server/__tests__/workflow-ai-draft-baas-failure.test.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-161
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/WorkflowWorkspaceBrowserPop.test.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 294-302
+apps/backend/tests/community/repository/skill_center/test_skill_batch_and_runtime_name_admission.py
+  s_bcc2d0974a665d::t_a793f992fa38de 1-342
+apps/bcs/specs/README.md
+  s_bcc2d0974a665d::t_432b79eed8a5a5 45-46
+apps/backend/src/agentclaw/community/adapters/http/task/todos/__init__.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1
+apps/bcs/crates/adapters/ws/bcs-ws/tests/web_frame_compat/bound_messages.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-163
+apps/evolverun/clawweb/public/modules/workflow/web/services/workflow-ai-lifecycle.test.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 5,7,24,65-75,111,118,120-124,127-129,131-133,136,142,144-147,150-151,153-155,158,178,195-209,224,230,232,244,249-250,265,267,281,297,304,307-308,315,323-325,396-563
+apps/backend/src/agentclaw/community/core/agentswarm/service/protocols.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 11,67-94,111-113,116-121,324-329,332,335-339
+apps/frontend-nextgen/src/domain/todos/models.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-122
+apps/frontend-nextgen/test/pages/Workspace/components/ManagePanel/SharedInfoList.test.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-89
+apps/bcsfuse/packages/search-core/docs/card-management-api.md
+  s_bcc2d0974a665d::t_432b79eed8a5a5 239-240,278-282
+apps/backend/src/agentclaw/community/core/skills_pool/mapping_intent.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 7,37,46-47,49-50
+apps/backend/src/agentclaw/community/core/task/context_collab/services/context_collab_service.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 19,40-42,61,68,76-83,98-104,142,146-149,153-154,158-160,164,166-169,213,234-280,288,292,322-325,353,416-680,682-686,694-846,858,862,881-883,893-894
+engine/adapter/src/engine/community/openclaw/client/merged_announce.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-123
+apps/bcs/crates/services/bcs-message-flow/src/managed_delivery/service.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 538-547
+apps/evolverun/clawweb/public/modules/workflow/web/editor/__tests__/useEditorPermissions.test.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-62
+apps/bcs/crates/adapters/ws/bcs-ws/tests/web_frame_compat/chat_send.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-462
+apps/bcs/crates/application/v1/bcs-app-group-context/src/service.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 12,160-166,301-319
+  s_bcc2d0974a665d::t_cd1102b6c25f53 320-321
+apps/backend/tests/community/adapters/http/openapi_v1/task/todos/test_todo_endpoints.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-505
+apps/bcs/crates/services/bcs-organization/tests/management/conformance.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-52
+apps/bcs/scripts/dockerfiles/arm64_build.Dockerfile
+  s_bcc2d0974a665d::t_432b79eed8a5a5 3,8,12-13,37
+apps/evolverun/clawweb/public/modules/workflow/web/services/workflow-ai-lifecycle.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 7-8,10,30,33,35,79,81,84-85,90-91
+apps/backend/tests/community/core/skill_center/services/test_collect_bot_active_mcps_union.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 13,44-46
+apps/bcsfuse/src/app/tc/card_profiles.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 106-107,114-116
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/WorkflowAiDrawer.test.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 53-54,143,152-156,159-161
+apps/frontend-nextgen/src/pages/Lab/Todos/components/TodoToolbar.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-100
+apps/frontend-nextgen/src/pages/Workspace/components/GroupHeaderIcon.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-32
+apps/backend/src/agentclaw/community/core/task/todos/todo_execution_prompt.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-77
+apps/backend/src/agentclaw/community/core/repository/implementations/skill_center/direct_installation_commands.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 10-11,58,98,130
+apps/backend/src/agentclaw/community/core/repository/protocols/task/todo_artifacts.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-60
+apps/backend/src/agentclaw/community/core/skill_center/services/installation_backfill_service.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 23,57
+apps/backend/src/agentclaw/community/core/task/todos/scheduler.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-223
+apps/bcs/tests/openapi/test_dump_openapi.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 70,97
+singlebox/ci/tests/test_bcs_rust_toolchain.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-47
+apps/bcs/crates/services/bcs-bot/tests/bot_use_cases/discovery.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-318
+apps/bcs/crates/service-api/bcs-service-api/src/application/a2a_chat.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 105-106,128-130
+apps/frontend-nextgen/src/shell/routeMeta.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 129-135
+  s_bcc2d0974a665d::t_9ad7522cfee815 128
+apps/backend/src/agentclaw/community/core/task/task_runner/client/ports.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 26-33,45-47
+apps/bcs/scripts/e2e_coverage.sh
+  s_bcc2d0974a665d::t_432b79eed8a5a5 344,348-359,361-365
+apps/backend/src/agentclaw/community/core/task/todos/services/todo_service.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-659
+apps/bcs/crates/adapters/ws/bcs-ws/tests/web_frame_compat/interactions.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-298
+apps/evolverun/clawweb/public/modules/workflow/web/editor/__tests__/packRenameSessionSafety.test.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 161,176,193
+apps/frontend-nextgen/src/pages/Workspace/components/ManagePanel/SharedInfoList.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-62
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/session_handler_edges/history_chat.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-705
+apps/bcsfuse/docs/architecture/search-core-boundary.md
+  s_bcc2d0974a665d::t_432b79eed8a5a5 14-15,85-88
+apps/backend/tests/community/architecture/agentswarm/test_isolation.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 80-85,89
+apps/bcs/crates/adapters/ws/bcs-ws/tests/web_frame_compat/abort.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-365
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/NodePropertyPanel.test.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 374-399
+apps/frontend-nextgen/test/pages/Lab/index.test.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 25,28,30,32-35,59-63
+  s_bcc2d0974a665d::t_6da2dd777558a5 64-65
+apps/backend/src/agentclaw/community/core/repository/protocols/chat.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 230-240
+  s_bcc2d0974a665d::t_a2f9628eddd0f2 229
+devops/k8s-tests/bcs/test-k8s-bcs-presets.sh
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-79
+apps/backend/src/agentclaw/community/di/task_dispatch_config_loader.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-61
+singlebox/modules/bcs.sh
+  s_bcc2d0974a665d::t_432b79eed8a5a5 857,860-864
+apps/backend/src/agentclaw/community/core/task/todos/service_protocol.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-88
+apps/frontend-nextgen/src/pages/BotWorkshop/ScheduledTasks/RoutineDetail.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1,6,10,78,157-165
+apps/bcs/crates/services/bcs-bot/tests/bot_use_cases/organization_discovery.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-278
+apps/bcs/crates/adapters/ws/bcs-ws/tests/frame_compat/interactions.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-635
+apps/frontend-nextgen/src/pages/Lab/Todos/TodoDetailPage.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-268
+apps/backend/docs/agent-swarm-user-guide/user-guide.md
+  s_bcc2d0974a665d::t_432b79eed8a5a5 26-31,92-110,139,142-166,311,315-345,358,360,494-501,629,656-661
+apps/bcs/crates/services/bcs-bot/tests/bot_use_cases.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 439-450
+apps/frontend-nextgen/src/services/backendApi/todos/todoController.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-190
+apps/frontend-nextgen/src/pages/Workspace/components/GroupChatPane/SharedInfoSidebar.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-35
+apps/frontend-nextgen/src/domain/todos/status.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-27
+apps/bcs/crates/adapters/http/bcs-api-http/src/v1/common/state.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 42,95
+apps/backend/tests/community/core/task/todos/collaboration/test_in_process.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-513
+apps/backend/src/agentclaw/community/core/repository/protocols/spaces.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 66-75
+  s_bcc2d0974a665d::t_789abc195d6b1e 65
+apps/evolverun/clawweb/public/modules/workflow/web/components/WorkflowAiDrawer.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 133,136
+apps/evolverun/clawweb/public/modules/workflow/web/editor/useEditorShortcuts.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-26
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/EditorReconciliationBridge.test.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 58,70,176
+apps/bcs/tests/openapi/test_contract.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 20-32,157-158
+apps/bcs/crates/adapters/ws/bcs-ws/tests/web_frame_compat/ingress_identity.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-235
+apps/evolverun/clawweb/public/modules/clawevolve/server/services/baas-intervention.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 47-48,90-95,215-225,232,265,270,275,279-282,290-329
+apps/frontend-nextgen/test/shell/routeMeta.test.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 37-45
+singlebox/ci/tests/test_bcs_ci_change_detection.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 94-95
+docker/services/bcs.dockerfile
+  s_bcc2d0974a665d::t_432b79eed8a5a5 2,5
+apps/backend/src/agentclaw/community/core/repository/implementations/skill_center/runtime_name_admission.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-56
+docker/minibcn/Dockerfile.ocb
+  s_bcc2d0974a665d::t_432b79eed8a5a5 4,12,19
+  s_bcc2d0974a665d::t_4cb620e8427da7 20
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/WorkflowWorkspaceTransition.test.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 185-193
+apps/frontend-nextgen/test/services/backendApi/todos/todoService.test.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-71
+apps/evolverun/clawweb/public/modules/workflow/web/hooks/__tests__/useWorkflowAiDraft.integration.test.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1,14-15,27,31,42-45,48-51,54-56,60-61,88,96-98,102,104-110,133,156,173-214
+  s_bcc2d0974a665d::t_9e4d4fce673bc6 215
+apps/backend/tests/community/architecture/test_protocol_contracts.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 45-49,62-64,68-75,113-114
+apps/backend/tests/community/core/task/todos/test_todo_service.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-1021
+apps/evolverun/clawweb/public/modules/workflow/server/routes/workflow-ai-drafts.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 2,39-41,45,50,53-60,63,66-69,72-78,80-81
+apps/evolverun/clawweb/public/modules/workflow/web/components/EditorCanvas.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 7,22,110,147,172,199,204,211,227-228,235,237
+singlebox/env/rust.sh
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-156
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/task/todos/schemas.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-290
+apps/bcs/crates/application/v1/bcs-app-session/src/group_context_access.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 10-11,16,179-299
+apps/bcs/crates/services/bcs-message-flow/src/a2a_chat/frame.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-82
+apps/frontend-nextgen/specs/2026-11-10-todo-workbench/spec.md
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-48
+apps/backend/src/agentclaw/community/core/repository/implementations/skill_center/space_skill.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 130-133,141
+apps/backend/src/agentclaw/community/core/repository/README.md
+  s_bcc2d0974a665d::t_432b79eed8a5a5 286-288,391,398-399,404
+apps/backend/src/agentclaw/community/api/task/todo_artifact_service.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-7
+apps/bcs/crates/adapters/http/bcs-http/src/router.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 268,270-273
+apps/bcs/crates/tools/bcs-bridge/core/tests/plugin_shutdown.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 176-178
+apps/evolverun/clawweb/public/modules/workflow/server/services/workflow-ai-draft-service.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-7,9-16,18-20,22,26,29-35,38,40,42,46-52,54-56,58-64,68,70-84,88-89,91-94,96-109,112-113,115,117-146,148-153,155
+apps/frontend-nextgen/src/services/workspace/groupContextService.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-2
+apps/bcs/crates/services/bcs-group-context-store/tests/conformance_group_context_repo.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 213-242
+apps/frontend-nextgen/src/services/backendApi/todos/todoService.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-126
+apps/evolverun/clawweb/public/modules/workflow/web/api/__tests__/workflow-ai.test.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 13,15-17,19,21-22,28-30,32-34,43-52
+apps/bcs/crates/services/bcs-organization/tests/management/runtime_membership.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-251
+apps/frontend-nextgen/src/pages/Lab/index.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 5-7,10,14,35-41,62-64,100,103
+apps/bcs/crates/adapters/ws/bcs-ws/tests/frame_compat/diagnostics.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-98
+apps/baas/docs/flows/bot-run-callback.md
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-52
+apps/backend/src/agentclaw/community/core/repository/implementations/task/todos/todo_artifact_repository.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-180
+apps/backend/tests/community/adapters/http/agentswarm/test_identity_source_http.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-138
+apps/backend/tests/community/core/bot_management/test_identity_source.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 55-76,112,115-118,135-138,233-236,238-378
+apps/backend/tests/community/core/task/todos/collaboration/conftest.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-6
+apps/bcs/crates/adapters/ws/bcs-ws/tests/frame_compat/v3_events.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-374
+apps/frontend-nextgen/src/components/Admin/SpaceMemberList/index.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 29-30
+apps/frontend-nextgen/src/pages/Workspace/components/WorkspaceManagePanels.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 77
+apps/backend/src/agentclaw/community/adapters/http/app.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 148,323,330,370,377-388,911
+apps/bcs/scripts/dev-gateway.sh
+  s_bcc2d0974a665d::t_432b79eed8a5a5 112
+apps/bcsfuse/packages/search-core/src/search_core/catalog/documents.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 39-41,49-50
+apps/backend/src/agentclaw/community/api/README.md
+  s_bcc2d0974a665d::t_432b79eed8a5a5 135-136,141-142
+apps/bcs/crates/adapters/http/bcs-api-http/src/v1/openapi/mod.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 21
+engine/adapter/src/engine/community/openclaw/client/gateway_client.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 36,225-227,399-415,417,448,588-601,749-756,867-869
+apps/evolverun/clawweb/public/modules/workflow/server/routes/workflows.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 612-616
+engine/adapter/src/engine/community/openclaw/client/tests/test_merged_announce.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-127
+apps/bcsfuse/packages/search-core/docs/index-rebuild.md
+  s_bcc2d0974a665d::t_432b79eed8a5a5 110,153-206
+apps/backend/src/agentclaw/community/core/repository/implementations/chat/expert_chat_instance.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 233-261
+apps/bcs/crates/services/bcs-message-flow/CONTEXT.md
+  s_bcc2d0974a665d::t_432b79eed8a5a5 39-49
+apps/frontend-nextgen/src/pages/Lab/Todos/components/TodoInteractionPanel.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-184
+apps/backend/tests/community/repository/skill_center/test_apply_skill_sets_bot_fence.py
+  s_bcc2d0974a665d::t_5c92f8e334f93c 1-42
+apps/evolverun/clawweb/public/app/clawweb/server/workflow-ai-draft-baas-execution.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 4-5,7,11-34,37-39,61-88,92-93,95,98,100-101,110-111,114,116-120,122-133
+docs/dependencies.md
+  s_bcc2d0974a665d::t_432b79eed8a5a5 26-29,71,109-111,114-122,125-127,157,172
+apps/bcsfuse/tests/unit/bootstrap/test_app_factory.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 130-131,141-150
+apps/baas/src/secbaas/community/core/service/bot_run/_internal_protocols.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 31,34-36
+apps/backend/tests/community/core/bot_management/services/test_scheduled_caller_refresh.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1,31,37-41,46,54-55,95,101,103,107
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/useEditorAiIntegration.readOnly.test.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-71
+apps/backend/tests/community/endpoints/test_context_collab_endpoints.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 14,39-41,129,526
+apps/evolverun/clawweb/public/modules/workflow/docs/specs/2026-11-13-workflow-ai-draft-editor.md
+  s_bcc2d0974a665d::t_432b79eed8a5a5 149-162
+apps/evolverun/clawweb/public/modules/workflow/web/services/workflow-ai-draft.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 2,35-47,60,69-70,72,79,87-92,96,98-113,116-134,140,147-148,151,177
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/session_handler_edges/lifecycle.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-739
+apps/bcs/crates/adapters/ws/bcs-ws/tests/web_frame_compat/diagnostics.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-176
+apps/bcs/scripts/setup_dev_env.sh
+  s_bcc2d0974a665d::t_432b79eed8a5a5 8,23-24,56-61,65-66,68,72-83,161,164-166,173-175
+apps/bcs/crates/services/bcs-group-context-store/src/memory.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 178-197
+apps/backend/tests/community/architecture/test_local_no_external_deps.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 48,52-61,81
+apps/backend/tests/community/core/task/context_collab/test_execution_integration.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-481
+apps/backend/tests/community/plugins/community/test_device_adapter_transport.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 2,154,184-200,213-253
+  s_bcc2d0974a665d::t_e81843a410a2d7 254-255
+apps/evolverun/clawweb/public/app/clawweb/server/__tests__/workflow-ai-draft-baas.test.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 2-4,7,9-16,18-21,26,28,31-36,40-42,46,51-55,66-90,92-127,130,137-207,211,217-357,377-379,382-387,390-391,393-405,420
+apps/gateway/tests/unit/scripts/test_gate_and_publish.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 90,92
+apps/backend/tests/community/core/task/context_collab/test_spec_acceptance.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 54-56,66,70-73,77-78,128-131,152-154,170,243,270,338,363,423-425
+apps/frontend-nextgen/src/components/Common/PageHeader.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 11,14,25-44
+apps/backend/tests/community/integration/skill_center/test_reference_offline_cross_seam.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 15,206
+apps/backend/src/agentclaw/community/core/task/todos/errors.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-54
+singlebox/ci/tests/test_bcs_cargo_test_tools.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 42,111-112
+apps/backend/tests/community/core/task/todos/collaboration/test_fake.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-118
+apps/frontend-nextgen/src/services/backendApi/bots/privateBotSessionController.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 67
+apps/bcs/api-contracts/v1/openapi.yaml
+  s_bcc2d0974a665d::t_432b79eed8a5a5 78-89
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/spaces/schemas_deletion.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-12
+apps/bcs/crates/adapters/http/bcs-http/src/routes/sessions/participants.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-668
+apps/evolverun/clawweb/public/modules/workflow/web/components/editor/WorkflowSettingsPanel.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 2,6,29-30
+apps/backend/src/agentclaw/community/core/devices/services/baas_device_service.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 11,81-83,852,872-873
+apps/backend/tests/community/core/task/task_runner/integration/test_ports.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 4-5,23-24
+  s_bcc2d0974a665d::t_92dd9536329181 25-26
+apps/backend/src/agentclaw/community/core/repository/implementations/skill_center/capability_desired_state.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 10-13,85,99,355-356,455-463,510-511,580,634-635,691
+apps/bcsfuse/tests/contract/test_tc_document_mapping.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-276
+apps/backend/src/agentclaw/community/core/devices/errors.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 18-21
+apps/frontend-nextgen/src/pages/Lab/Todos/components/TodoAcceptanceActions.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-77
+apps/frontend-nextgen/src/pages/Workspace/components/ManagePanel/ManagePanelTabs.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 7,37-39
+singlebox/skills/infra/todo-runner/SKILL.md
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-92
+apps/bcs/specs/2026-11-12-bcs-large-file-split/spec.md
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-281
+apps/backend/src/agentclaw/community/adapters/http/agentswarm/router.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 56-57,235,237-240,242-243,434-462
+apps/backend/src/agentclaw/community/core/skill_center/AGENTS.md
+  s_bcc2d0974a665d::t_432b79eed8a5a5 9-12
+  s_bcc2d0974a665d::t_5c92f8e334f93c 137
+apps/evolverun/clawweb/public/app/clawweb/server/workflow-ai-draft-baas-reply.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 26-34,46-48
+apps/bcs/crates/adapters/ws/bcs-ws/tests/frame_compat/chat_events.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-239
+apps/frontend-nextgen/test/services/backendApi/todos/todoController.test.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-172
+apps/bcsfuse/src/app/tc/search.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 41,44-46,70,74-76,78,105,187-192
+apps/frontend-nextgen/src/pages/Workspace/components/ManagePanel/GroupManagePanel.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 12-13,23,44-45,64,98,103-104,252-272
+apps/backend/src/agentclaw/community/adapters/http/task/schemas_context_collab.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 8-10,386-387,507
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/authorization_rules_task.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 74,130-132,136-138,142-144,148-150,157-159,163-165,186-220
+  s_bcc2d0974a665d::t_db45da80d8679b 221
+apps/bcsfuse/packages/search-core/docs/provider-contracts.md
+  s_bcc2d0974a665d::t_432b79eed8a5a5 201,203-211,233-235
+apps/backend/tests/community/adapters/http/agentswarm/test_http_adapter.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 38-39,685-761
+  s_bcc2d0974a665d::t_8713852da7e0c7 762
+apps/bcsfuse/packages/search-core/src/search_core/catalog/index_builds.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-92
+apps/frontend-nextgen/test/pages/Lab/Todos/todoBotCatalog.test.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-46
+apps/frontend-nextgen/src/pages/BotWorkshop/ScheduledTasks/RoutineActions.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 27-32,35,44,47-52,59,62-63
+apps/baas/tests/unit/core/service/bot_run/test_worker_timeout_callback.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-278
+.github/workflows/search-core.yml
+  s_bcc2d0974a665d::t_432b79eed8a5a5 42
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/responses.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 122-124,247,256,455-459,662,670,885-886,934
+apps/bcs/crates/adapters/http/bcs-api-http/src/v1/openapi/routes/mod.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 8
+apps/backend/tests/community/adapters/http/openapi_v1/test_explicit_user_id.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 660-665,881-885
+apps/backend/tests/community/di/test_task_dispatch_config_provider.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 9
+apps/bcs/crates/adapters/http/bcs-http/src/routes/sessions/queries.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-293
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/session_handler_edges.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-880
+apps/frontend-nextgen/src/pages/Workspace/hooks/useSharedInfo.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-29
+apps/bcs/crates/adapters/ws/bcs-ws/tests/web_frame_compat/bound_connection.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-262
+apps/backend/src/agentclaw/community/core/repository/implementations/task/todos/todo_repository.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-258
+apps/backend/tests/community/adapters/http/openapi_v1/test_responses.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 705-720
+  s_bcc2d0974a665d::t_c2402a95924993 704
+.github/workflows/bailian-engine-smoke.yml
+  s_bcc2d0974a665d::t_432b79eed8a5a5 133-134,137
+apps/bcs/crates/adapters/http/bcs-http/src/routes/sessions/chat.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-241
+apps/backend/src/agentclaw/community/api/space_service.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 13,20
+apps/backend/src/agentclaw/community/core/task/context_collab/service_api.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 29,47,73,91-102,108-110,132-167
+apps/backend/src/agentclaw/community/core/bot_management/create_flow.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 476-478,813-815
+apps/backend/tests/community/architecture/test_architecture_compliance.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 180-185
+apps/backend/src/agentclaw/community/core/task/todos/execution_protocol.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-26
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/WorkflowAiDrawer.capabilities.test.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 15-18,22-24,27,40-41,65
+docker/agent/avernet.dockerfile
+  s_bcc2d0974a665d::t_432b79eed8a5a5 37-39
+apps/frontend-nextgen/test/pages/BotWorkshop/RoutineDisabled.test.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-110
+apps/bcs/crates/adapters/http/bcs-http/src/routes/sessions/history.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-347
+apps/bcs/crates/services/bcs-bot/tests/bot_use_cases/status.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-138
+apps/frontend-nextgen/src/pages/Workspace/components/ManagePanel/GroupPresetPanel.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-69
+apps/bcsfuse/src/app/tc/index_builds.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-148
+apps/backend/tests/community/repository/bot/test_bot_repository_unified.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 27,62-64,939-955,998
+apps/backend/tests/community/adapters/http/devices/test_get_device_connection_errors.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 66-90
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/errors_space.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 41-42,80-81
+apps/backend/src/agentclaw/community/core/repository/implementations/bot/mutations.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 7-8,13,99-130
+apps/backend/tests/community/adapters/http/skill_center/test_skillset_error_status_mapping.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 25,38,103
+apps/bcs/crates/adapters/ws/bcs-ws/tests/web_frame_compat.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 2-19,570-575,580-585,587,591,597-599,603-604,607-611,614-620
+apps/frontend-nextgen/src/pages/Workspace/components/ManagePanel/SharedInfoCard.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-69
+apps/backend/tests/community/core/task/todos/test_todo_execution_service.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-1044
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/__init__.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 242,723-725
+  s_bcc2d0974a665d::t_e0dd5f831983cd 726-727
+apps/backend/src/agentclaw/community/core/schema.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 70
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/admission_task_routes.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 35-38,168-189
+apps/baas/tests/unit/core/service/bot_run/test_worker_timeout.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-513
+apps/backend/src/agentclaw/community/core/agentswarm/identity_rule.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-146
+apps/bcs/scripts/e2e-test/session_management_edges_story.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-747
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/workflow-access-capabilities.test.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-44
+apps/frontend-nextgen/src/services/todos/todoBotCatalogService.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-33
+apps/evolverun/clawweb/public/modules/workflow/docs/workflow-ai-drafts.md
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1,5-186,190-191,198-267
+apps/bcs/crates/services/bcs-bot/tests/bot_use_cases/authority_writes.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-417
+apps/backend/src/agentclaw/community/core/task/todos/README.md
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-155
+apps/backend/tests/community/adapters/http/task/todos/test_artifact_routes.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-241
+apps/bcs/crates/adapters/http/bcs-api-http/tests/group_routes/group_context.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-276
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/EditorAiMode.test.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 133,164,194-212
+  s_bcc2d0974a665d::t_2f29a60c4f5898 213-216
+apps/bcs/crates/adapters/http/bcs-http/tests/support/bot_chat_empty_input.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-131
+apps/frontend-nextgen/src/services/todos/todoService.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-19
+apps/evolverun/clawweb/public/modules/workflow/docs/workflow-access.md
+  s_bcc2d0974a665d::t_432b79eed8a5a5 43-69
+singlebox/verity/test_singlebox_toolchain.sh
+  s_bcc2d0974a665d::t_432b79eed8a5a5 38-39,44-46,49-257,481-487
+apps/backend/tests/community/adapters/http/task/todos/__init__.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1
+apps/bcsfuse/packages/search-core/src/search_core/catalog/updates.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 12,17,19-24,28-29,84-85,104-105,167-230,232-238,246
+apps/evolverun/clawweb/public/app/clawweb/server/__tests__/workflow-ai-draft-db-fixture.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 3,21,24-25
+apps/frontend-nextgen/src/pages/BotWorkshop/ScheduledTasks/RoutineList.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 7,130-131
+  s_bcc2d0974a665d::t_8c03e9da6361fa 132
+apps/evolverun/clawweb/public/modules/workflow/web/editor/__tests__/usePackCanvasSession.fileYamlSave.test.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 165-179
+apps/bcs/crates/adapters/ws/bcs-ws/tests/web_frame_compat/subscriptions.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-281
+apps/bcsfuse/src/app/tc/v2.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 5,7,13,31-40,96,126-155,158-170,172,180-192
+  s_bcc2d0974a665d::t_3657aac82661bd 193
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/task/todos/__init__.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-5
+apps/evolverun/clawweb/public/shared/server/db/config.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 208-209
+apps/bcs/crates/services/bcs-organization/tests/management/membership.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-291
+apps/backend/tests/community/core/task/todos/test_todo_scheduler.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-318
+apps/bcsfuse/src/app/tc/providers.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 57,61-63,67-68,156-157,160-162
+apps/frontend-nextgen/test/services/backendApi/todos/todoController.http.test.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-46
+apps/backend/src/agentclaw/community/core/task/context_collab/executor.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-318
+docs/specs/backend/2026-11-10-todo-workbench/pipeline/config.json
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-31
+apps/backend/src/agentclaw/community/core/agentswarm/service/impl.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 33-34,108,110-111,113-124
+apps/bcs/README.md
+  s_bcc2d0974a665d::t_432b79eed8a5a5 174,177-184
+  s_bcc2d0974a665d::t_db651bfce2f63a 185
+apps/backend/src/agentclaw/community/core/task/todos/models.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-98
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/workflow-ai-drafts.test.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 4,7,11-14,16-19,21,24-25,27-32,34-35,37,39-49,53,55-56,59,61-64,66-68,70-71,73-76,79-82,84-92,94-100,102-108,110-119,121-131,133-138,140
+apps/frontend-nextgen/src/pages/Lab/Todos/components/todoInteractionModel.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-229
+apps/evolverun/clawweb/public/modules/workflow/web/components/editor/ResultBranchesEditor.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 4,40,59,91-93,108-109
+apps/backend/src/agentclaw/community/core/repository/implementations/skill_center/apply_claim_commands.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 17-18,357,440
+apps/bcs/crates/adapters/ws/bcs-ws/tests/frame_compat.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 34,40-60,736-742,744,747,749,755-756,760,763-774,776-778,781-795
+apps/backend/src/agentclaw/community/core/repository/implementations/bot/initial_layout.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 12-14,44-62
+apps/backend/tests/community/di/test_scheduled_caller_refresh.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 7
+apps/bcs/crates/services/bcs-group-context-store/src/store.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 107-115,565-593
+  s_bcc2d0974a665d::t_1833fa89936fe5 594
+apps/evolverun/clawweb/public/app/clawweb/server/__tests__/workflow-ai-draft-receipt-host.test.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-131
+apps/evolverun/clawweb/public/modules/clawevolve/server/services/__tests__/baas-intervention.test.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 269-323,369-423,431
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/task/errors_todo.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-35
+apps/evolverun/clawweb/public/modules/workflow/web/pages/useEditorAiIntegration.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 5,15,31,41,43,47-51,64,90,92
+apps/bcs/crates/adapters/http/bcs-http/src/routes/sessions.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 14-15,19-36
+apps/evolverun/clawweb/public/shared/server/schema-workflow-ai-draft.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 3-5,8-9
+apps/gateway/tests/contracts/test_todo_workbench_published_contract.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-63
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/EditorHistoryComparison.test.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 36
+apps/backend/src/agentclaw/community/core/bot_management/README.md
+  s_bcc2d0974a665d::t_432b79eed8a5a5 100-101
+apps/backend/tests/community/plugins/community/task/__init__.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1
+apps/backend/src/agentclaw/community/core/repository/implementations/skill_center/default_exclusion_commands.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 10-11,82-83,157-158,222
+apps/bcs/scripts/ci/reusable_coverage.sh
+  s_bcc2d0974a665d::t_432b79eed8a5a5 20-43
+apps/backend/src/agentclaw/community/core/skill_center/services/_skill_set_membership_commands.py
+  s_bcc2d0974a665d::t_a793f992fa38de 17,205-207,211,224-228
+apps/bcs/crates/bootstrap/bcs/src/server/server_run.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 283
+apps/backend/src/agentclaw/community/di/modules/spaces_module.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 18,87,350-362
+  s_bcc2d0974a665d::t_136064d25805e3 363
+apps/backend/src/agentclaw/community/core/repository/protocols/task/todos.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-92
+apps/bcs/crates/services/bcs-organization/tests/management/member_profile.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-283
+apps/frontend-nextgen/src/pages/Lab/Todos/components/TodoInteractionStream.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-192
+apps/baas/src/secbaas/community/core/service/bot_runtime/dispatcher/_device_selector.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 137-141
+apps/bcs/scripts/e2e-test/e2e.sh
+  s_bcc2d0974a665d::t_432b79eed8a5a5 97
+singlebox/env/toolchain.sh
+  s_bcc2d0974a665d::t_432b79eed8a5a5 782-783
+apps/frontend-nextgen/src/pages/Workspace/components/GroupSessionSidebars.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-70
+.github/workflows/unit-tests.yml
+  s_bcc2d0974a665d::t_432b79eed8a5a5 123,170-171
+apps/frontend-nextgen/src/pages/Lab/Todos/components/TodoArtifactList.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-238
+apps/frontend-nextgen/test/pages/MyTask/RoutineTaskTab.test.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 38-52
+apps/bcs/crates/application/v1/bcs-app-session/Cargo.toml
+  s_bcc2d0974a665d::t_432b79eed8a5a5 14
+apps/backend/tests/community/repository/task/todos/conftest.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-49
+apps/backend/tests/community/endpoints/test_openapi_context_collab_endpoints.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 20,200
+apps/backend/tests/community/core/skill_center/test_skill_set_management_service_part6.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 2,12,211,230-246,726-748
+apps/backend/src/agentclaw/community/core/agentswarm/repository/audit/impl.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 15-19
+apps/bcs/api-contracts/v1/openapi/group-context.yaml
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-655
+apps/backend/src/agentclaw/community/adapters/http/agentswarm/schemas.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 120-124,142,148-151
+singlebox/ci/tests/test_pre_push_dispatch.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 8-9,23-24,42-43
+apps/frontend-nextgen/src/pages/BotWorkshop/ScheduledTasks/RoutineNextRun.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 28-29
+apps/evolverun/clawweb/public/modules/workflow/web/components/PackFileCodeEditor.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 42,47,117-118
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/ScriptFilesTab.readErrors.test.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 116,128,132,149
+apps/backend/src/agentclaw/community/di/modules/task/__init__.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1
+apps/bcs/crates/adapters/ws/bcs-ws/tests/frame_compat/connection.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-201
+apps/evolverun/clawweb/public/modules/workflow/web/editor/store.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 22-24,53-54,111,138-152,156-157,189-192,211,214,220,223,317,335,345,394-403,414
+apps/bcs/crates/services/bcs-message-flow/tests/cases/caller_admission_refusal_paths.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-396
+apps/evolverun/clawweb/public/app/clawweb/server/__tests__/workflow-ai-browser-contract.test.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 18,20,32,39-41,43-47,49
+apps/backend/src/agentclaw/community/core/task/README.md
+  s_bcc2d0974a665d::t_432b79eed8a5a5 14,20-23,33-34,179-185,199
+apps/backend/src/agentclaw/community/core/caller_identity/scheduled_refresh.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1,8,13-15
+apps/backend/src/agentclaw/community/di/modules/config_module.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 25,913-918
+apps/backend/tests/community/core/skill_center/test_installation_backfill_service.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 28
+apps/backend/src/agentclaw/community/core/task/task_runner/client/open_api_bot_adapter.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 24,45,279-292,299-311
+apps/evolverun/clawweb/public/modules/workflow/web/components/NodePropertyPanel.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 2,23,87,135-137
+apps/backend/tests/community/plugins/community/agentswarm/test_chat_bridge.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 271-275,283-284,352
+apps/frontend-nextgen/test/pages/Lab/TodoDetail.test.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-634
+apps/backend/src/agentclaw/community/core/engine_runtime/connection.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 31,322
+  s_bcc2d0974a665d::t_ee8df49004ecd1 323-325
+apps/backend/src/agentclaw/community/core/repository/implementations/task/todos/models.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-239
+apps/backend/tests/community/core/agentswarm/test_coverage_gaps.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1028-1045
+apps/bcsfuse/src/app/tc/catalog.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 123,165,180,219-222
+apps/backend/tests/community/repository/skill_center/capability_desired_state_support.py
+  s_bcc2d0974a665d::t_a793f992fa38de 9,32-39
+apps/frontend-nextgen/test/services/workspace/botChatProvider.test.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 459-460,472,547
+apps/evolverun/clawweb/public/modules/workflow/server/contracts/workflow-ai-draft.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 2,5-12,15-26,41-51,55,59-65,71,75-78,82
+apps/backend/src/agentclaw/community/core/repository/implementations/skill_center/bot_mutation_fence.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-55
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/EditorNoJournal.test.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 57,152,492,526
+apps/evolverun/clawweb/public/modules/workflow/web/pages/Editor.tsx
+  s_bcc2d0974a665d::t_432b79eed8a5a5 19-21,61-62,69,112-122,267,271,338,360,370,392,407,463,486,580,667-668,692-705,817,824,828,918
+apps/frontend-nextgen/test/services/workspace/botConversationRuntimeStage.test.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 5,7,156-194
+docs/agents/validation.md
+  s_bcc2d0974a665d::t_432b79eed8a5a5 97-101
+apps/backend/src/agentclaw/community/adapters/http/resources/file_search_download_router.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 259-266,273,306-310,313-314,317,319-320,328-329,342,346,592-600,621-622,624-625,627
+apps/bcs/crates/adapters/http/bcs-http/tests/suite_sessions.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 17-18
+apps/baas/docs/flows/README.md
+  s_bcc2d0974a665d::t_432b79eed8a5a5 5
+apps/baas/tests/unit/core/service/bot_run/test_worker_abort.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-807
+apps/evolverun/clawweb/public/shared/server/__tests__/auto-heal-baas.test.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-173
+apps/backend/src/agentclaw/community/core/devices/device_service_protocol.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 37-39
+apps/backend/src/agentclaw/community/plugins/community/task/__init__.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1
+apps/bcs/crates/application/v1/bcs-app-session/tests/group_context_access_guard.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 8-9,11-12,27,37-44,48,435,461-586
+apps/backend/tests/community/core/task/context_collab/test_context_collab_append.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 64-66,96,129-131,221-223,247,288,317-319,346-348,356-359,390-392,400-403,411-414,430-432,442,447-449,465-466,498
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/workflow-ai-draft-concurrency.test.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1,3-5,7-14,16-21,23-31,33-34,36-40,42-46,48-53,55-59,61-65,69-76,78-82
+apps/frontend-nextgen/test/pages/Lab/Todos/botScope.test.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-61
+apps/evolverun/clawweb/public/app/clawweb/server/workflow-ai-draft-runtime.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1,3-6,8,11,19-20,23-45
+apps/evolverun/clawweb/public/modules/workflow/web/editor/workflowTransition.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 3,20
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/bot_chat_contract.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 881-883
+apps/evolverun/clawweb/public/modules/workflow/docs/pack-scripts-read.md
+  s_bcc2d0974a665d::t_432b79eed8a5a5 9-15,46,52,55,63
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/workflow-ai-draft-service.test.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1,4-11,13-15,17,19-44,48-49,51-52,54-67,69-80,83-123,126-130,133-144,147,154-164,167,169-172,174-177,180-193
+  s_bcc2d0974a665d::t_21f63eac714680 194
+apps/evolverun/clawweb/public/modules/workflow/web/api/workflow-ai.ts
+  s_bcc2d0974a665d::t_432b79eed8a5a5 8-9,24-29,34-37,39-42
+apps/backend/tests/community/core/skill_center/_test_skill_set_management_service_support.py
+  s_bcc2d0974a665d::t_432b79eed8a5a5 27,86-87
+  s_bcc2d0974a665d::t_593a591b2b4512 88
+apps/bcs/crates/adapters/ws/bcs-ws/tests/frame_compat/tracing.rs
+  s_bcc2d0974a665d::t_432b79eed8a5a5 1-191
+apps/backend/docs/arch/generated/dependents.md
+  s_bcc2d0974a665d::t_b041bfc9a0f3b6 32
+apps/backend/tests/community/core/apply_engine/test_unified_capabilities.py
+  s_bcc2d0974a665d::t_a1833d53a65dda 8,44-50
+apps/backend/tests/community/core/skill_center/test_apply_mcp_catalog_snapshot.py
+  s_bcc2d0974a665d::t_35c9daa957b12a 23-29
+apps/backend/tests/community/core/skill_center/test_skill_set_apply_service.py
+  s_bcc2d0974a665d::t_8c69af5ab2269e 28-36
+apps/bcs/Cargo.lock
+  s_bcc2d0974a665d::t_d35cd62844df86 802
+apps/gateway/configs/schemas/bots.openapi.json
+  s_bcc2d0974a665d::t_11f2659fb6063d 2419-2431,32442-32997,110304-111997,111999,112003-112006,112009,112011,112014-112015,112017,112022-112031,112037,112164,112166,112170,112172-112173,112176,112178,112181-112184,112189,112191-112192,112194-112212,112221,112348,112350,112352,112354-112355,112358,112360,112363-112364,112366,112375,112386,112513,112515,112519,112521-112532,112534-112535,112541,112668,112674-112677,112680-112682,112685-112686,112696,112823,112829-112832,112835-112838,112840-112842,112851,112978,112980,112984-112987,112990-112993,112995-112997,113006,113133,113137-113152,113154-113155,113161,113288,113292,113294-113295,113298,113300,113303-113304,113314,113441,113445,113447-113448,113451,113453,113456-113468,113470,113479-113487,113490,113497,113624,113630,113632-113633,113636,113638,113641-113642,113646-113683,113717,113844,113848-113853,113856-113858,113861-113862,113865-113881,113884-113896,113902,114029,114031,114035,114037-114044,114046-114048,114054,114181,114183,114187-114190,114193-114196,114198-114254,114263,114390,114392,114394,114396-114403,114405-114407,114413,114540,114542,114546,114548-114555,114557-114559,114565,114692,114694,114698-114701,114704-114706,114709-114710,114713-114769,114777,114904,114906,114908-114919,114921-114923,114929,115056,115058,115060-115065,115068-115070,115073-115074,115079,115081-115082,115084-115087,115089-115129,115132,115138,115265,115267,115271,115273-115274,115277-115279,115282-115285,115295,115422,115424,115428,115430-115431,115434,115436,115439-115441,115451,115578,115580,115584-115596,115599-115611,115617,115653-115667,115728-115742,115772-115786,115789,115791,115795,115797-115798,115801,115803-115816,115821,115828-115829,115833,115835,115838-115842,115844-115845,115849,115851,115855,115857,115862,115868,115881,116008,116010,116012-116017,116023,116150,116152,116156-116170,116172-116173,116179,116306,116308,116312-116315,116318-116320,116323-116325,116330,116332-116333,116335-116338,116342-116351,116353,116357,116393-116407,116427,116431,116494,116496,116500,116502-116513,116516-116528,116534,116570-116584,116676,116678,116682,116684-116685,116688,116690,116693-116695,116700,116702-116703,116705-116708,116712,116714,116717-116727,116731,116733,116738,116744-116772,116781,116817-116831,116923,116925,116927-116930,116933,116935,116938,116940,116945-116954,116960,116996-117010,117102,117104,117108,117110-117111,117114-117125,117130,117142,117178-117192,117284,117286,117288-117291,117294,117296,117299-117300,117317-117326,117332,117381,117474,117476,117480-117483,117486-117489,117491-117492,117497,117499-117500,117502-117504,117509-117518,117524,117560-117574,117666,117668,117672,117674-117700,117706,117742-117756,117848,117850,117854,117856-117857,117860,117862,117865-117878,117888,117924-117938,118030,118032,118034,118036-118037,118040,118042,118045-118046,118067,118074,118078,118127,118147-118151,118153,118157,118220,118222
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "98298cbe072b5aedf7b250462740c3fd6c4094f9",
+  "prompts": {},
+  "sessions": {
+    "s_bcc2d0974a665d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a9d9-072f-7481-adc1-c3e3d78b7fd1",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}
