@@ -1,5 +1,7 @@
+import { botDiagnosisRecoveryMigrations } from '@avernet/clawweb-shared/server/schema-bot-diagnosis-recovery';
 /** Explicit loopback-only UI acceptance fixture; never imported by production. */
 import express from 'express';
+import { previewRecoveries } from './recovery';
 import Database from 'better-sqlite3';
 import { readFileSync } from 'node:fs';
 import { SqliteDatabase } from '@avernet/clawweb-shared/server/db';
@@ -13,6 +15,7 @@ import { parseCheck, parseDiagnosis } from '../server/services/monitoring/valida
 export async function createPreviewApp() {
   const db = new SqliteDatabase(new Database(':memory:'));
   await initializeMonitoringSqlite(db);
+  await botDiagnosisRecoveryMigrations[0].migrate!(db);
   await db.exec(`CREATE TABLE ac_bots (id INTEGER PRIMARY KEY AUTOINCREMENT, bot_id TEXT, entity_id TEXT, env TEXT,
     active_engine TEXT DEFAULT 'teclaw', bot_name TEXT, owner_id TEXT, owner_name TEXT, avernet_tenant TEXT, is_delete INTEGER DEFAULT 0)`);
   const scope = { tenant: 'teamclaw', allowedTargetEnvs: ['dev', 'prod'] };
@@ -63,6 +66,7 @@ export async function createPreviewApp() {
       isAdmin: false, isClawInsightAdmin: current === 'admin' });
   });
   app.use((req, _res, next) => { req.isClawInsightAdmin = role(req.headers.cookie) === 'admin'; next(); });
+  app.use('/api/insight/v1', await previewRecoveries(db, req => Boolean(role(req.headers.cookie))));
   app.use('/api/insight/v1', createMonitoringRouter(runtime));
   return { app, db, close: () => db.close() };
 }

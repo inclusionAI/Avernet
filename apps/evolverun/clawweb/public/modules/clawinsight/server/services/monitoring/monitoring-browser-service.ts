@@ -2,9 +2,12 @@ import { MonitoringError, type MonitoringStore, type MonitoringSummary } from '.
 import type { BotOption, BotScope, DirectoryBot, DirectoryScope, MonitoringBotDirectory, MonitoringBrowserApi,
   MonitoringPrincipal, MonitoringReferences } from './directory-contracts.js';
 import { browserDiagnosisQuery, parseWindow, queryKeys } from './browser-validation.js';
+import type { BotDiagnosisRecoveryConfig, BotDiagnosisRecoveryConfigStore } from './bot-config-contracts.js';
+import { configureBots } from './bot-config-service.js';
 
 export function createMonitoringBrowserService(store: MonitoringStore, directory: MonitoringBotDirectory,
-  references: MonitoringReferences, storageScope: DirectoryScope, now: () => number = Date.now): MonitoringBrowserApi {
+  references: MonitoringReferences, storageScope: DirectoryScope, now: () => number = Date.now,
+  configurations?: BotDiagnosisRecoveryConfigStore): MonitoringBrowserApi {
   function authorize(p: MonitoringPrincipal) {
     if (!p.isAuthenticated || !p.staffId?.trim()) throw new MonitoringError('UNAUTHENTICATED', '请先登录。');
     if (!p.tenant || p.tenant !== storageScope.tenant || !p.allowedTargetEnvs.length
@@ -21,9 +24,10 @@ export function createMonitoringBrowserService(store: MonitoringStore, directory
     }
     return bot;
   }
-  function option(bot: DirectoryBot, summary: MonitoringSummary | null, tenant: string): BotOption {
+  function option(bot: DirectoryBot, summary: MonitoringSummary | null, tenant: string, config?: BotDiagnosisRecoveryConfig | null): BotOption {
     return { botRef: references.encode(bot, tenant), botName: bot.botName, botId: bot.botId, ownerId: bot.ownerId, env: bot.env,
       enrollmentState: summary ? 'ENROLLED' : 'NOT_ENROLLED', monitoring: summary,
+      configuration: { diagnosisEnabled: config?.diagnosisEnabled ?? false, recoveryEnabled: config?.recoveryEnabled ?? false, version: config?.version ?? 0 },
       capabilities: { canView: true, canRequestEnrollment: !summary } };
   }
   function directoryIdBefore(left: string, right: string): boolean {
@@ -48,6 +52,10 @@ export function createMonitoringBrowserService(store: MonitoringStore, directory
     return { items: eligible.slice(0, limit), hasMore: eligible.length > limit };
   }
   return {
+    async configure(p, input) {
+      authorize(p);
+      return configureBots(configurations, directory, references, p, input);
+    },
     async options(p, query) {
       authorize(p);
       queryKeys(query, ['scope', 'q', 'limit', 'cursor', 'start', 'end']);
@@ -68,7 +76,8 @@ export function createMonitoringBrowserService(store: MonitoringStore, directory
         page = await directory.search({ principal: p, scope, q, limit, after });
       }
       const summaries = await store.summaries(page.items, window);
-      const items = page.items.map((bot, index) => option(bot, summaries[index], p.tenant));
+      const configs = await configurations?.findMany(page.items);
+      const items = page.items.map((bot, index) => option(bot, summaries[index], p.tenant, configs?.[index]));
       const nextAfter = page.items.length ? page.items[page.items.length - 1].directoryId : after;
       return { items, nextCursor: page.hasMore && nextAfter ? references.cursor(nextAfter, context) : null, window };
     },
@@ -76,12 +85,11 @@ export function createMonitoringBrowserService(store: MonitoringStore, directory
       const bot = await visible(p, ref);
       queryKeys(query, ['start', 'end']);
       const [summary] = await store.summaries([bot], parseWindow(query, now()));
-      return option(bot, summary, p.tenant);
+      return option(bot, summary, p.tenant, await configurations?.find(bot));
     },
     async diagnoses(p, ref, query) {
       const bot = await visible(p, ref);
       const parsed = browserDiagnosisQuery(query, now());
-      if (!(await store.readStatus(bot)).check) throw new MonitoringError('NOT_ENROLLED', '此 Bot 尚未加入监控。');
       return store.listDiagnoses(bot, parsed);
     },
     async enroll(p, input) {

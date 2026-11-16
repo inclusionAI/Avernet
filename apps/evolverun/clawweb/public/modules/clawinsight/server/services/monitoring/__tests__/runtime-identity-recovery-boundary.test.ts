@@ -21,9 +21,7 @@ const event = parseDiagnosis({ ...original, botId: "default", engine: "OC", env:
   schemaVersion: DIAGNOSIS_V4_VERSION, runtimeIdentity }, original.eventId);
 function setup() {
   const service = { create: vi.fn().mockResolvedValue({ status: "accepted" }) };
-  const config = { findByKey: vi.fn().mockResolvedValue({ enabled: 1, config_json: JSON.stringify({
-    allowed_bots: [{ bot_id: event.botId, entity_id: event.entityId, env: event.env }],
-  }) }) };
+  const config = { find: vi.fn().mockResolvedValue({ botId: event.botId, entityId: event.entityId, env: event.env, diagnosisEnabled: true, recoveryEnabled: true, configJson: '{}', version: 1 }) };
   return { service, trigger: createMonitoringRecoveryTrigger({ service, config }) };
 }
 beforeEach(() => { vi.restoreAllMocks(); boundary.parse.mockClear(); });

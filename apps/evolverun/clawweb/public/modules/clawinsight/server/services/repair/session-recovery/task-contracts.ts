@@ -157,6 +157,7 @@ export type RecoveryEffectConfigCheck =
       recheck: { register: boolean; diagnosisVersion: number } };
 
 export interface RecoveryTaskStore {
+  listTasks?(query: import('./task-list.js').RecoveryTaskListQuery, ownerId: string): Promise<import('./task-list.js').RecoveryTaskListPage>;
   create(value: RecoveryStoredTask, stepId: string): Promise<void>;
   find(taskId: string, options?: { forBootstrap?: boolean }): Promise<RecoveryStoredTask | null>;
   listForEvent(eventId: string, ownerId: string, isAdmin: boolean): Promise<RecoveryStoredTask[]>;

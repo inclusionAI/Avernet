@@ -147,7 +147,7 @@ describe('directory, authorization and browser contracts', () => {
     await bot(a); await diagnosis(a);
     const ref = refs.encode(a, scope.tenant);
     expect((await browser().options(member, all)).items[0]).toMatchObject({ enrollmentState: 'NOT_ENROLLED', monitoring: null });
-    await expect(browser().diagnoses(member, ref, all)).rejects.toMatchObject({ code: 'NOT_ENROLLED' });
+    expect((await browser().diagnoses(member, ref, all)).total).toBe(1);
     const exec = vi.spyOn(db, 'exec');
     await expect(browser().enroll(member, { botRef: ref })).rejects.toMatchObject({ code: 'ENROLLMENT_NOT_IMPLEMENTED' });
     expect(exec).not.toHaveBeenCalled();

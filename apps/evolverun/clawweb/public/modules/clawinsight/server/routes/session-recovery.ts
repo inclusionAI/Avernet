@@ -53,6 +53,13 @@ export function createSessionRecoveryRouter(supplied?: SessionRecoveryRouterOpti
     try { res.set("Cache-Control", "no-store").status(202).json(await tasks().createSimulations(req.body, await actor(req))); }
     catch (error) { next(error); }
   });
+  router.get('/monitoring/session-recoveries/tasks', async (req, res, next) => {
+    try {
+      const service = tasks();
+      if (!service.listTasks) throw new SessionRecoveryError(503, 'recovery_not_ready', '自愈任务列表未配置');
+      res.set('Cache-Control', 'no-store').json(await service.listTasks(req.query, await actor(req)));
+    } catch (error) { next(error); }
+  });
   router.get("/monitoring/session-recoveries/:taskId", async (req, res, next) => {
     try { res.set("Cache-Control", "no-store").json(await tasks().detail(String(req.params.taskId), await actor(req))); }
     catch (error) { next(error); }

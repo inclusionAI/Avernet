@@ -157,6 +157,28 @@ export class SessionRecoveryTaskRepository implements RecoveryTaskStore {
     const row = await this.tasks.findTask(taskId);
     return row?.task_type === "session_recovery" ? this.hydrate(this.db, row.config_json, options.forBootstrap) : null;
   }
+  async listTasks(query: import('../../services/repair/session-recovery/task-list.js').RecoveryTaskListQuery, ownerId: string) {
+    const where = ["task_type = 'session_recovery'", 'user_id = ?'];
+    const params: unknown[] = [ownerId];
+    if (query.botId) { where.push('bot_id = ?'); params.push(query.botId); }
+    if (query.env) { where.push("JSON_EXTRACT(config_json, '$.request.target.env') = ?"); params.push(query.env); }
+    if (query.status) { where.push("JSON_EXTRACT(config_json, '$.status') = ?"); params.push(query.status); }
+    const clause = where.join(' AND ');
+    const [count] = await this.db.query<{ total: number }>(`SELECT COUNT(*) AS total FROM ce_tasks WHERE ${clause}`, params);
+    const rows = await this.db.query<{ config_json: string; gmt_create: number | string }>(
+      `SELECT config_json, gmt_create FROM ce_tasks WHERE ${clause} ORDER BY id DESC LIMIT ? OFFSET ?`,
+      [...params, query.pageSize, (query.page - 1) * query.pageSize]);
+    // Only the requested page's details are needed. Do not hydrate tool audits or timelines for a list.
+    const items = await Promise.all(rows.map(async row => {
+      const value = JSON.parse(row.config_json);
+      const details = value.artifactStorage === 2 ? await this.get(value.detailsRef) as { judgment?: RecoveryStoredTask['judgment'] } : value;
+      return { taskId: value.taskId as string, botId: value.request.target.bot_id as string, entityId: value.request.target.entity_id as string,
+        env: value.request.target.env as string, sessionKey: value.request.session_key as string,
+        status: value.status as RecoveryStoredTask['status'], phase: value.phase as RecoveryStoredTask['phase'],
+        effect: details.judgment?.effect ?? 'unknown' as const, createdAt: row.gmt_create };
+    }));
+    return { items, page: query.page, pageSize: query.pageSize, total: Number(count?.total ?? 0) };
+  }
   private eventRemark(eventId: string): string { return `session-recovery-event:${createHash("sha256").update(eventId).digest("hex")}`; }
   async listForEvent(eventId: string, ownerId: string, isAdmin: boolean): Promise<RecoveryStoredTask[]> {
     const rows = await this.db.query<{ task_id: string }>(

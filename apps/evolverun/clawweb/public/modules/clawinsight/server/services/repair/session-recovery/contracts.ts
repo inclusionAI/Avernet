@@ -31,6 +31,7 @@ export type RecoveryTaskView = RecoveryStoredTask & { shared: boolean; canOperat
 export interface SessionRecoveryApi { create(body: unknown, actor: RecoveryActor): Promise<RecoveryAcknowledgment> }
 /** Task Service API, independent of the HTTP delivery adapter and implementation. */
 export interface SessionRecoveryTaskApi extends SessionRecoveryApi {
+  listTasks?(query: Record<string, unknown>, actor: RecoveryActor): Promise<import('./task-list.js').RecoveryTaskListPage>;
   createSimulations(body: unknown, actor: RecoveryActor): Promise<{ batch_id: string; items: Array<RecoveryAcknowledgment & { task_id: string }> }>;
   assessSimulation(taskId: string, version: number, input: import("./simulation.js").RecoverySimulationAssessment, finalSummary?: unknown): Promise<void>;
   create(body: unknown, actor: RecoveryActor): Promise<RecoveryAcknowledgment & { task_id: string }>;

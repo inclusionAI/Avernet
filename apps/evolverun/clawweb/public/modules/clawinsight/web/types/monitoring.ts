@@ -26,6 +26,7 @@ export type MonitoringQuery = {
 };
 export type BotScope = 'mine' | 'monitored' | 'all';
 export type BotOption = {
+  configuration?: { diagnosisEnabled: boolean; recoveryEnabled: boolean; version: number };
   botRef: string; botName: string; botId: string; ownerId: string; env: string;
   enrollmentState: 'ENROLLED' | 'NOT_ENROLLED';
   monitoring: null | {

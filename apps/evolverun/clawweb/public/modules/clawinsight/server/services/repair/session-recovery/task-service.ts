@@ -48,6 +48,8 @@ export interface RecoveryTaskNotifier {
 }
 export interface RecoveryTaskReporter { report(result: RecoveryTaskResult): Promise<void> }
 
+import { parseRecoveryTaskListQuery } from './task-list.js';
+
 /** Owns the self-healing workflow; execution and controlled tools are injected. */
 export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
   private readonly now: () => number;
@@ -63,6 +65,7 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
     observationMs: number;
     now?: () => number;
     resolveTarget?: (request: RecoveryRequest) => Promise<AgentRuntimeTargetSnapshot>;
+    authorizeCreation?: (request: RecoveryRequest) => Promise<void>;
     handbookConfig?: RecoveryHandbookConfigStore;
     canReadAsBotCollaborator?: (userId: string, target: RecoveryRequest["target"]) => Promise<boolean>;
   }) { this.now = deps.now ?? Date.now; }
@@ -103,6 +106,7 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
       if (!sameRecoveryRequest(existing.request, request) || existing.simulation?.inputDigest !== simulation?.inputDigest) this.fail(409, "同一投递标识的请求内容不一致");
       return { event_id: request.event_id, delivery_key: request.delivery_key, status: "accepted", task_id: taskId };
     }
+    if (level !== 'debug' && !simulation) await this.deps.authorizeCreation?.(request);
     const handbook = this.deps.handbookConfig ? await resolveRecoveryHandbook(request, this.deps.handbookConfig)
       : recoveryHandbook(request.tc_fault_label);
     const runtimeTarget = simulation ? undefined : await this.deps.resolveTarget?.(request);
@@ -399,6 +403,11 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
     return tasks.filter(task => this.canOperate(task, actor) || task.shared === true)
       .map(task => ({ task_id: task.taskId, status: task.status, phase: task.phase, effect: task.judgment?.effect ?? "unknown",
         ...(task.completionReason ? { completion_reason: task.completionReason } : {}) }));
+  }
+  async listTasks(query: Record<string, unknown>, actor: RecoveryActor) {
+    if (!actor.userId) throw new SessionRecoveryError(401, 'recovery_login_required', '需要登录');
+    if (!this.deps.tasks.listTasks) throw new SessionRecoveryError(503, 'recovery_not_ready', '自愈任务列表未配置');
+    return this.deps.tasks.listTasks(parseRecoveryTaskListQuery(query), actor.userId);
   }
   async detail(taskId: string, actor: RecoveryActor): Promise<RecoveryTaskView> {
     const task = await this.required(taskId);

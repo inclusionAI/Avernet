@@ -1,0 +1,30 @@
+.insight-monitoring .page-heading { gap:24px; flex-wrap:wrap; }
+.insight-monitoring .settings-entry { padding:10px 16px; border:1px solid var(--line); border-radius:10px; background:var(--paper); color:var(--blue); }
+.insight-monitoring .monitoring-subtabs { display:flex; gap:28px; margin:0 0 24px; border-bottom:1px solid var(--line); }
+.insight-monitoring .monitoring-subtabs button { padding:12px 2px; border-bottom:2px solid transparent; }
+.insight-monitoring .monitoring-subtabs button[aria-selected=true] { color:var(--blue); border-bottom-color:var(--blue); }
+.insight-monitoring.monitoring-embedded { padding:0; }
+.insight-monitoring .monitoring-settings { width:min(760px, calc(100vw - 32px)); max-height:85vh; padding:28px; margin:auto; border:1px solid var(--line); border-radius:16px; color:var(--ink); background:var(--paper); box-shadow:0 24px 80px #20293826; }
+.insight-monitoring .monitoring-settings::backdrop { background:#20293866; }
+.insight-monitoring .settings-heading,.insight-monitoring .settings-toolbar { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+.insight-monitoring .settings-heading h2 { font-size:22px; margin:0; }
+.insight-monitoring .settings-toolbar { margin-top:18px; }
+.insight-monitoring .settings-toolbar input { flex:1; min-width:160px; padding:8px 12px; border:1px solid var(--line); border-radius:8px; }
+.insight-monitoring .settings-toolbar button,.insight-monitoring .recovery-list-toolbar>button,.insight-monitoring .recovery-list-toolbar>select { padding:8px 12px; border:1px solid var(--line); border-radius:8px; }
+.insight-monitoring .settings-hint { font-size:12px; color:var(--sub); }
+.insight-monitoring .settings-bots { margin:12px 0; padding:0; list-style:none; max-height:50vh; overflow-y:auto; }
+.insight-monitoring .settings-bots li { display:flex; align-items:center; gap:14px; padding:16px 0; border-bottom:1px solid var(--line); }
+.insight-monitoring .settings-bots li>div { flex:1; min-width:0; overflow-wrap:anywhere; }
+.insight-monitoring .settings-bots small,.insight-monitoring .recovery-list-table small { display:block; color:var(--sub); font-size:12px; }
+.insight-monitoring .monitoring-switch { padding:3px; width:40px; height:24px; flex:none; border-radius:20px; background:var(--muted); }
+.insight-monitoring .monitoring-switch span { display:block; width:18px; height:18px; border-radius:50%; background:var(--paper); }
+.insight-monitoring .monitoring-switch[aria-checked=true] { background:var(--blue); }
+.insight-monitoring .monitoring-switch[aria-checked=true] span { margin-left:16px; }
+.insight-monitoring .recovery-list-toolbar { padding:20px; display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
+.insight-monitoring .recovery-list-toolbar .bot-control { flex:1; min-width:220px; }
+.insight-monitoring .recovery-list-table { overflow-x:auto; }
+.insight-monitoring .recovery-list-table table { width:100%; border-collapse:collapse; text-align:left; }
+.insight-monitoring .recovery-list-table th,.insight-monitoring .recovery-list-table td { padding:16px 20px; border-top:1px solid var(--line); white-space:nowrap; }
+.insight-monitoring .recovery-list-table th { color:var(--sub); font-weight:500; }
+.insight-monitoring .recovery-list-table small { max-width:340px; overflow:hidden; text-overflow:ellipsis; }
+.insight-monitoring .recovery-list-table button { color:var(--blue); }
