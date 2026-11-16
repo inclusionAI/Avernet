@@ -2,8 +2,8 @@
 
 ``refresh_restart_authorization`` now owns both the opt-in decision and the
 AICoding-specific side effects:
-  * project MCP/CLI through the runtime projector;
-  * resync ~/.claude/skills symlinks via SkillSetService.project_skills().
+  * runs one full runtime projection for MCP/CLI/Skills;
+  * uses no duplicated legacy SkillSet projection when a shared reconciler exists.
 All side effects are best-effort/fire-and-forget.
 """
 
@@ -97,7 +97,7 @@ def test_aicoding_refresh_updates_mcp_and_skill_symlinks(flag) -> None:
     strategy = AicodingProvisioningStrategy("aicoding")
     factory = MagicMock()
     runtime_reconciler = MagicMock()
-    runtime_reconciler.project_mcp_and_cli = AsyncMock(return_value=None)
+    runtime_reconciler.project = AsyncMock(return_value=None)
     skill_set_service = MagicMock()
     skill_set_service.project_skills = AsyncMock(return_value=True)
     factory.create.return_value = skill_set_service
@@ -111,26 +111,63 @@ def test_aicoding_refresh_updates_mcp_and_skill_symlinks(flag) -> None:
             runtime_reconciler=runtime_reconciler,
         ) is True
 
-    runtime_reconciler.project_mcp_and_cli.assert_awaited_once_with(
+    runtime_reconciler.project.assert_awaited_once_with(
         bot_id="bot-1",
         owner_id="ent-9",
-        scope=ProjectionScope(mcp=True),
+        scope=ProjectionScope.everything(),
     )
-    factory.create.assert_called_once_with(
-        user_id="ent-9",
-        entity_id="ent-9",
+    factory.create.assert_not_called()
+    skill_set_service.project_skills.assert_not_called()
+
+
+def test_aicoding_refresh_uses_one_full_runtime_projection_not_double_projection() -> None:
+    """A modern restart reconciler owns the full projection; no legacy duplicate."""
+    strategy = AicodingProvisioningStrategy("aicoding")
+    factory = MagicMock()
+    runtime_reconciler = MagicMock()
+    runtime_reconciler.project = AsyncMock(return_value=None)
+    skill_set_service = MagicMock()
+    skill_set_service.project_skills = AsyncMock(return_value=True)
+    factory.create.return_value = skill_set_service
+
+    with patch(_AICODING_THREADING, SimpleNamespace(Thread=_InlineThread)):
+        assert strategy.refresh_restart_authorization(
+            _ctx(active_engine="aicoding"),
+            _bot(entity_id="ent-9", entity_type="staff"),
+            {"confirmed_template_update": True},
+            skill_set_factory=factory,
+            runtime_reconciler=runtime_reconciler,
+        ) is True
+
+    runtime_reconciler.project.assert_awaited_once_with(
         bot_id="bot-1",
-        entity_type="staff",
-        engine_type="aicoding",
+        owner_id="ent-9",
+        scope=ProjectionScope.everything(),
     )
-    skill_set_service.project_skills.assert_awaited_once_with()
+    runtime_reconciler.project_mcp_and_cli.assert_not_called()
+    factory.create.assert_not_called()
+    skill_set_service.project_skills.assert_not_awaited()
+
+
+def test_aicoding_refresh_unavailable_projections_fail_this_attempt_and_stay_best_effort() -> None:
+    """Without both runtime and legacy authority, no projection occurs for this restart."""
+    strategy = AicodingProvisioningStrategy("aicoding")
+
+    with patch(_AICODING_THREADING, SimpleNamespace(Thread=_InlineThread)):
+        assert strategy.refresh_restart_authorization(
+            _ctx(active_engine="aicoding"),
+            _bot(),
+            {"confirmed_template_update": True},
+            skill_set_factory=None,
+            runtime_reconciler=None,
+        ) is True
 
 
 def test_aicoding_refresh_is_best_effort_and_keeps_skill_sync_on_projection_error() -> None:
     strategy = AicodingProvisioningStrategy("aicoding")
     factory = MagicMock()
     runtime_reconciler = MagicMock()
-    runtime_reconciler.project_mcp_and_cli = AsyncMock(side_effect=RuntimeError("projection down"))
+    runtime_reconciler.project = AsyncMock(side_effect=RuntimeError("projection down"))
     skill_set_service = MagicMock()
     skill_set_service.project_skills = AsyncMock(return_value=True)
     factory.create.return_value = skill_set_service
@@ -143,13 +180,13 @@ def test_aicoding_refresh_is_best_effort_and_keeps_skill_sync_on_projection_erro
             skill_set_factory=factory,
             runtime_reconciler=runtime_reconciler,
         ) is True
-    runtime_reconciler.project_mcp_and_cli.assert_awaited_once_with(
+    runtime_reconciler.project.assert_awaited_once_with(
         bot_id="bot-1",
         owner_id="ent-1",
-        scope=ProjectionScope(mcp=True),
+        scope=ProjectionScope.everything(),
     )
-    factory.create.assert_called_once()
-    skill_set_service.project_skills.assert_awaited_once_with()
+    factory.create.assert_not_called()
+    skill_set_service.project_skills.assert_not_called()
 
 
 
@@ -175,7 +212,7 @@ def test_aicoding_refresh_logs_detail_and_skill_runtime_failures() -> None:
     factory = MagicMock()
     skill_set_service = MagicMock()
     runtime_reconciler = MagicMock()
-    runtime_reconciler.project_mcp_and_cli = AsyncMock(return_value=None)
+    runtime_reconciler.project = AsyncMock(return_value=None)
     skill_set_service.project_skills = AsyncMock(return_value=False)
     factory.create.return_value = skill_set_service
 
@@ -188,12 +225,12 @@ def test_aicoding_refresh_logs_detail_and_skill_runtime_failures() -> None:
             runtime_reconciler=runtime_reconciler,
         ) is True
 
-    runtime_reconciler.project_mcp_and_cli.assert_awaited_once_with(
+    runtime_reconciler.project.assert_awaited_once_with(
         bot_id="bot-1",
         owner_id="ent-1",
-        scope=ProjectionScope(mcp=True),
+        scope=ProjectionScope.everything(),
     )
-    skill_set_service.project_skills.assert_awaited_once_with()
+    skill_set_service.project_skills.assert_not_called()
 
 
 def test_aicoding_refresh_does_not_retry_mcp_projection_when_runtime_not_ready() -> None:
@@ -218,7 +255,7 @@ def test_aicoding_refresh_does_not_retry_mcp_projection_exception() -> None:
     strategy = AicodingProvisioningStrategy("aicoding")
     factory = MagicMock()
     runtime_reconciler = MagicMock()
-    runtime_reconciler.project_mcp_and_cli = AsyncMock(side_effect=RuntimeError("projection down"))
+    runtime_reconciler.project = AsyncMock(side_effect=RuntimeError("projection down"))
     skill_set_service = MagicMock()
     skill_set_service.project_skills = AsyncMock(return_value=True)
     factory.create.return_value = skill_set_service
@@ -232,12 +269,12 @@ def test_aicoding_refresh_does_not_retry_mcp_projection_exception() -> None:
             runtime_reconciler=runtime_reconciler,
         ) is True
 
-    runtime_reconciler.project_mcp_and_cli.assert_awaited_once_with(
+    runtime_reconciler.project.assert_awaited_once_with(
         bot_id="bot-1",
         owner_id="ent-1",
-        scope=ProjectionScope(mcp=True),
+        scope=ProjectionScope.everything(),
     )
-    skill_set_service.project_skills.assert_awaited_once_with()
+    skill_set_service.project_skills.assert_not_called()
 
 
 def test_aicoding_refresh_does_not_retry_skill_symlink_when_false() -> None:
@@ -282,7 +319,7 @@ def test_aicoding_refresh_swallows_non_transient_runtime_exceptions() -> None:
     strategy = AicodingProvisioningStrategy("aicoding")
     factory = MagicMock()
     runtime_reconciler = MagicMock()
-    runtime_reconciler.project_mcp_and_cli = AsyncMock(side_effect=RuntimeError("detail down"))
+    runtime_reconciler.project = AsyncMock(side_effect=RuntimeError("detail down"))
     skill_set_service = MagicMock()
     skill_set_service.project_skills = AsyncMock(side_effect=RuntimeError("skill down"))
     factory.create.return_value = skill_set_service
@@ -296,12 +333,12 @@ def test_aicoding_refresh_swallows_non_transient_runtime_exceptions() -> None:
             runtime_reconciler=runtime_reconciler,
         ) is True
 
-    runtime_reconciler.project_mcp_and_cli.assert_awaited_once_with(
+    runtime_reconciler.project.assert_awaited_once_with(
         bot_id="bot-1",
         owner_id="ent-1",
-        scope=ProjectionScope(mcp=True),
+        scope=ProjectionScope.everything(),
     )
-    skill_set_service.project_skills.assert_awaited_once_with()
+    skill_set_service.project_skills.assert_not_called()
 
 
 def test_aicoding_refresh_swallows_skill_sync_exception() -> None:
@@ -343,7 +380,7 @@ def test_aicoding_refresh_clears_persisted_marker_after_confirmed_extra_success(
         },
     }
     runtime_reconciler = MagicMock()
-    runtime_reconciler.project_mcp_and_cli = AsyncMock(return_value=None)
+    runtime_reconciler.project = AsyncMock(return_value=None)
     template_service = MagicMock()
     template_service.get_template_config.return_value = stored_template_config
 
@@ -358,10 +395,10 @@ def test_aicoding_refresh_clears_persisted_marker_after_confirmed_extra_success(
         ) is True
 
     template_service.update_template.assert_called_once()
-    runtime_reconciler.project_mcp_and_cli.assert_awaited_once_with(
+    runtime_reconciler.project.assert_awaited_once_with(
         bot_id="bot-1",
         owner_id="ent-1",
-        scope=ProjectionScope(mcp=True),
+        scope=ProjectionScope.everything(),
     )
     cleared = template_service.update_template.call_args.kwargs["template_config"]
     assert "_aicoding_restart" not in cleared
@@ -386,7 +423,7 @@ def test_aicoding_refresh_uses_persisted_template_marker_and_clears_after_succes
         template_config=template_config,
     )
     runtime_reconciler = MagicMock()
-    runtime_reconciler.project_mcp_and_cli = AsyncMock(return_value=None)
+    runtime_reconciler.project = AsyncMock(return_value=None)
     template_service = MagicMock()
     template_service.get_template_config.return_value = template_config
 
@@ -424,7 +461,7 @@ def test_aicoding_refresh_keeps_succeeded_refresh_when_marker_clear_fails() -> N
         template_config=template_config,
     )
     runtime_reconciler = MagicMock()
-    runtime_reconciler.project_mcp_and_cli = AsyncMock(return_value=None)
+    runtime_reconciler.project = AsyncMock(return_value=None)
     skill_set_service = MagicMock()
     skill_set_service.project_skills = AsyncMock(return_value=True)
     factory = MagicMock()
@@ -446,12 +483,12 @@ def test_aicoding_refresh_keeps_succeeded_refresh_when_marker_clear_fails() -> N
             template_service=template_service,
         ) is True
 
-    runtime_reconciler.project_mcp_and_cli.assert_awaited_once_with(
+    runtime_reconciler.project.assert_awaited_once_with(
         bot_id="bot-1",
         owner_id="ent-1",
-        scope=ProjectionScope(mcp=True),
+        scope=ProjectionScope.everything(),
     )
-    skill_set_service.project_skills.assert_awaited_once_with()
+    skill_set_service.project_skills.assert_not_called()
     template_service.update_template.assert_not_called()
 
 
