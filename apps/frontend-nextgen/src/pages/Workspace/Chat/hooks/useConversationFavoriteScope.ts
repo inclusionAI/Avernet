@@ -23,7 +23,7 @@ export function useConversationFavoriteScope(
         effectiveScopes[bot.botId] === 'favorite' ||
         (selectedBotId === bot.botId && selectedScope === 'favorite')
       ) {
-        store.setManagedBotScope(bot.botId, 'all');
+        store.setManagedBotScope(bot.botId, 'all', { preserveSelection: true });
       }
     }
     for (const { bot } of friendBots) {

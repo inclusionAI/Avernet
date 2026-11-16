@@ -1,12 +1,15 @@
 import type {
+  CodingBotSessionArchiveItem,
+  CodingBotSessionArchivePreviewResult,
   ConversationBotSection,
   ConversationOrigin,
+  ConversationSessionArchiveListState,
   ConversationSessionListState,
   ConversationSessionScope,
 } from '@/domain/conversation/types';
 import type { ChatBotView } from '@/services/workspace/botSessionService';
-import type { ConversationBotItemOthers } from './ConversationBotOthersArea';
 import type { ConversationSessionListActions } from '../hooks/useConversationSessionActions';
+import type { ConversationBotItemOthers } from './ConversationBotOthersArea';
 
 export type { ConversationBotItemOthers } from './ConversationBotOthersArea';
 
@@ -29,8 +32,16 @@ export interface ConversationBotItemProps {
   sessions?: ConversationSessionListState;
   /** 仅 managed 传入:others 好友分组区数据。 */
   others?: ConversationBotItemOthers;
-  /** Coding Bot 的 others 直接使用按 sessionId 分流后的扁平会话列表。 */
-  flatCodingOthers?: boolean;
+  /** Coding Bot scope=archived 时的列表态；普通 Bot 不传。 */
+  sessionArchives?: ConversationSessionArchiveListState;
+  sessionArchiveActions?: {
+    onLoadMore(): void;
+    onRetry(): void;
+    onRestore(input: { sessionKeys: string[]; focusRestored: boolean }): Promise<boolean>;
+    onPreview(item: CodingBotSessionArchiveItem): Promise<CodingBotSessionArchivePreviewResult>;
+  };
+  /** Coding Bot 的 others/collab 直接使用按 sessionId 分流后的扁平会话列表。 */
+  flatCodingSharedSessions?: boolean;
   onToggle(): void;
   onOriginChange(origin: ConversationOrigin): void;
   onScopeChange(scope: ConversationSessionScope): void;

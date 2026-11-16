@@ -4,6 +4,7 @@ import { Button } from '@/components/ui';
 import { PrimaryNavContext } from '@/components/Workspace/PrimaryNav';
 import type { ConversationBotView } from '@/domain/conversation';
 import { ConversationSessionPlaceholder } from '@/pages/Workspace/Chat/components/ConversationSessionPlaceholder';
+import { emptySessionArchives } from '@/pages/Workspace/Chat/hooks/conversationSessionArchiveState';
 import { firstPageOf, managedViewOf } from '@/pages/Workspace/Chat/hooks/conversationSessionCache';
 import { useConversationSelection } from '@/pages/Workspace/Chat/hooks/useConversationSelection';
 import { useConversationSessionPlaceholder } from '@/pages/Workspace/Chat/hooks/useConversationSessionPlaceholder';
@@ -101,6 +102,30 @@ function CodingFixture() {
       </Button>
       {placeholder && <ConversationSessionPlaceholder model={placeholder} onOpenSessionList={onOpenList} />}
     </>
+  );
+}
+
+function CodingArchiveFixture() {
+  const sessions = useConversationSessions(codingOptions);
+  const placeholder = useConversationSessionPlaceholder({ ...codingOptions, sessions });
+  return (
+    <>
+      {placeholder ? (
+        <ConversationSessionPlaceholder model={placeholder} onOpenSessionList={onOpenList} />
+      ) : (
+        <div data-testid="coding-archive-stage">Coding 归档筛选下的主会话</div>
+      )}
+    </>
+  );
+}
+
+function seedCodingArchiveCache() {
+  store.getState().setManagedBotCache(
+    codingBotView.bot.botId,
+    {
+      ...managedViewOf(codingBotView.bot.botId, 'archived', undefined, firstPageOf([], 0)),
+      sessionArchives: emptySessionArchives(),
+    },
   );
 }
 function FriendFixture() {
@@ -251,6 +276,55 @@ it('Coding Bot creation always delegates to AIXCoding and never falls back to th
     title: '新对话',
   });
   expect(botSessionService.createSession).not.toHaveBeenCalled();
+});
+
+it('Coding Bot 归档深链在详情快照就绪前保持 loading，不再误报暂无会话', () => {
+  const sessionId = 'user:100:session:mine:agent:coding';
+  store.getState().setManagedBotScope(codingBotView.bot.botId, 'archived');
+  store.getState().selectConversation({
+    botId: codingBotView.bot.botId,
+    section: 'managed',
+    origin: 'mine',
+    scope: 'archived',
+    friendUserId: null,
+    sessionId,
+  });
+  seedCodingArchiveCache();
+  render(<CodingArchiveFixture />);
+
+  expect(screen.getByRole('status', { name: '加载会话列表' })).toBeInTheDocument();
+  expect(screen.queryByText('Coding Bot 暂无会话')).not.toBeInTheDocument();
+
+  act(() => {
+    store.getState().setSelectedSessionSnapshot({
+      section: 'managed',
+      botId: codingBotView.bot.botId,
+      origin: 'mine',
+      scope: 'archived',
+      friendUserId: null,
+      session: s(sessionId, codingBotView.bot.botId),
+      friend: null,
+    });
+  });
+  expect(screen.getByTestId('coding-archive-stage')).toBeInTheDocument();
+});
+
+it('Coding Bot 归档空列表展示归档空态，而不是普通会话空态', () => {
+  store.getState().setManagedBotScope(codingBotView.bot.botId, 'archived');
+  store.getState().selectConversation({
+    botId: codingBotView.bot.botId,
+    section: 'managed',
+    origin: 'mine',
+    scope: 'archived',
+    friendUserId: null,
+    sessionId: null,
+  });
+  seedCodingArchiveCache();
+  render(<CodingArchiveFixture />);
+
+  expect(screen.getByText('暂无已归档会话')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '查看全部会话' })).toBeInTheDocument();
+  expect(screen.queryByText('Coding Bot 暂无会话')).not.toBeInTheDocument();
 });
 
 it('Coding Bot 新建在途时用鱼骨屏承接，不再短暂显示未选会话空态', async () => {
