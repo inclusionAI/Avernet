@@ -266,7 +266,7 @@ export function GroupManagePanel(props: GroupManagePanelProps) {
               viewerId={authenticatedUserId}
               names={new Map([
                 ...group.participants.map(({ actorId, name }) => [actorId, name] as const),
-                ...(authenticatedUserId && authenticatedUserName ? [[authenticatedUserId, authenticatedUserName] as const] : []),
+                ...(authenticatedUserId && authenticatedUserName ? [[authenticatedUserId.startsWith('human_') ? authenticatedUserId : `human_${authenticatedUserId}`, authenticatedUserName] as const] : []),
               ])}
             />
           </section>

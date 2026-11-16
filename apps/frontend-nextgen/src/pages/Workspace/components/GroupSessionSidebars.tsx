@@ -52,7 +52,7 @@ export function GroupSessionSidebars({
           names={new Map([
             ...(group?.participants ?? []).map(({ actorId, name }) => [actorId, name] as const),
             ...(session?.participants ?? []).map(({ actorId, name }) => [actorId, name] as const),
-            ...(userIdentityId && userIdentityName ? [[userIdentityId, userIdentityName] as const] : []),
+            ...(userIdentityId && userIdentityName ? [[userIdentityId.startsWith('human_') ? userIdentityId : `human_${userIdentityId}`, userIdentityName] as const] : []),
           ])}
           onClose={onClose}
         />

@@ -83,4 +83,4 @@
 - `list-preset` 返回 `presets`。Human 页面使用 `manage/list-preset` 获取 `can_manage`，据此显示写入入口。需要联调确认浏览器接口的路径、响应形态和该权限字段的提供方式。BCS 写接口继续校验群主 Bot 的 Owner 或 Manager 权限。
 
 
-直连本地 Gateway 的浏览器路径返回 HTTP 404。此前本地验收由前端代理直接转发到 BCS，仅覆盖 BCS 接口与页面。上线前需在目标 Gateway 配置浏览器路径，并验证登录用户的身份传递、受管成员 Bot 视角成功、未授权 Bot 视角被拒、Human 管理列表及写权限。BCS 根据已认证 Human 身份校验 `view_bot_id`，该参数只是选择读取视角。
+直连本地 Gateway 的浏览器路径返回 HTTP 404。此前本地验收由前端代理直接转发到 BCS，仅覆盖 BCS 接口与页面。BCS 已注册完整浏览器路径，匹配 Gateway 原样转发的 URL。上线前需在目标 Gateway 验证登录用户的身份传递、受管成员 Bot 视角成功、未授权 Bot 视角被拒、Human 管理列表及写权限。BCS 根据已认证 Human 身份校验 `view_bot_id`，该参数只是选择读取视角。
