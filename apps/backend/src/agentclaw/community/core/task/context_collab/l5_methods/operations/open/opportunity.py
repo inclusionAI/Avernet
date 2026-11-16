@@ -43,6 +43,9 @@ from agentclaw.community.core.task.context_collab.g4_contracts_consistency.metho
 from agentclaw.community.core.task.context_collab.g4_contracts_consistency.state_machine import (
     resolve_transition,
 )
+from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
+    BindingState,
+)
 from agentclaw.community.core.task.context_collab.l5_methods.open_profile import (
     ApplicationState,
     OpenOpportunity,
@@ -64,6 +67,7 @@ from agentclaw.community.core.task.context_collab.l5_methods.operations.open.bas
 )
 from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime import (
     _shape_of,
+    current_axes,
 )
 from agentclaw.community.core.task.context_collab.persistence.method_store import (
     StoreAxes,
@@ -118,40 +122,60 @@ class OpenOpportunityOpsMixin(OpenMethodServiceBase, OpenMethodOpsServiceProtoco
 
     def query_opportunities(
         self,
-        collab_context_id: str,
-        method_binding_id: str,
-        context: ActorContext,
+        actor_context: ActorContext,
     ) -> tuple[OpenOpportunity, ...]:
-        """只读可申请机会快照;不保留名额、不审核资格、不建立参与绑定。"""
-        axes = self._gate(
-            "query_opportunities", collab_context_id, method_binding_id, context
-        )
+        """跨 Collet 发现可申请机会;只读快照,不保留名额或审核产品资格。"""
+        self._authorizer.check_open_discovery(actor_context)
+        axes = current_axes()
         now = datetime.now(timezone.utc)
-        applications = self._store.list_applications(
-            axes, method_binding_id, collab_context_id
-        )
         available = []
-        for opportunity in self._store.list_opportunities(
-            axes, method_binding_id, collab_context_id
-        ):
-            if opportunity.state is not OpportunityState.OPEN:
-                continue
-            if now < _parse_timestamp(
-                opportunity.opens_at, "OpenOpportunity", "opens_at"
+        for binding in self._store.list_bindings_in_axes(axes):
+            if (
+                binding.state is not BindingState.ACTIVE
+                or "Open" not in binding.method_names
             ):
                 continue
-            if opportunity.closes_at is not None and now > _parse_timestamp(
-                opportunity.closes_at, "OpenOpportunity", "closes_at"
-            ):
-                continue
-            occupying = sum(
-                application.opportunity_ref == opportunity.opportunity_id
-                and application.state in _CAPACITY_OCCUPYING_STATES
-                for application in applications
+            collab_context_id = binding.collab_context_id
+            method_binding_id = binding.method_binding_id
+            principal_id, executor_id = self._authorization_identities(
+                binding, collab_context_id
             )
-            if opportunity.capacity is not None and occupying >= opportunity.capacity:
+            try:
+                self._authorizer.check_open_op(
+                    "query_opportunities",
+                    binding,
+                    actor_context,
+                    principal_id=principal_id,
+                    executor_id=executor_id,
+                )
+            except ContextCollabValidationError:
+                # Authorization denial hides only this candidate, not other
+                # available opportunities. Storage/parser failures still propagate.
                 continue
-            available.append(opportunity)
+            applications = self._store.list_applications(
+                axes, method_binding_id, collab_context_id
+            )
+            for opportunity in self._store.list_opportunities(
+                axes, method_binding_id, collab_context_id
+            ):
+                if opportunity.state is not OpportunityState.OPEN:
+                    continue
+                if now < _parse_timestamp(
+                    opportunity.opens_at, "OpenOpportunity", "opens_at"
+                ):
+                    continue
+                if opportunity.closes_at is not None and now > _parse_timestamp(
+                    opportunity.closes_at, "OpenOpportunity", "closes_at"
+                ):
+                    continue
+                occupying = sum(
+                    application.opportunity_ref == opportunity.opportunity_id
+                    and application.state in _CAPACITY_OCCUPYING_STATES
+                    for application in applications
+                )
+                if opportunity.capacity is not None and occupying >= opportunity.capacity:
+                    continue
+                available.append(opportunity)
         return tuple(available)
 
     def _transition_opportunity(

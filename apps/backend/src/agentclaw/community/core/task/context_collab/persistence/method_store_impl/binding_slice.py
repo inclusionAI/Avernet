@@ -87,6 +87,15 @@ class BindingEdgeSlice:
                 if self._key_in_context(key, axes, collab_context_id)
             ]
 
+    def list_bindings_in_axes(self, axes: "StoreAxes") -> list[MethodBinding]:
+        """按插入序跨 Collet 枚举绑定,严格隔离租户和环境。"""
+        with self._lock:
+            return [
+                binding
+                for key, binding in self._bindings.items()
+                if key[:2] == (axes.avernet_tenant, axes.env)
+            ]
+
     def insert_composition_edge(
         self, axes: "StoreAxes", edge: MethodCompositionEdge
     ) -> MethodCompositionEdge:

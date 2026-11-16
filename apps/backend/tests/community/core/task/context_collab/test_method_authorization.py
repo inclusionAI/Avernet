@@ -349,3 +349,13 @@ def test_falsy_actor_identity_denied_everywhere():
     for case in deny_cases:
         with pytest.raises(ContextCollabValidationError):
             case()
+
+
+@pytest.mark.parametrize("actor_id", [PRINCIPAL_ID, EXECUTOR_ID, STRANGER_ID])
+def test_open_discovery_allows_authenticated_actors_without_a_target(actor_id):
+    StructuralMethodOpsAuthorizer().check_open_discovery(make_actor(actor_id))
+
+
+def test_open_discovery_rejects_empty_identity_without_a_target():
+    with pytest.raises(ContextCollabValidationError, match="query_opportunities"):
+        StructuralMethodOpsAuthorizer().check_open_discovery(make_actor(""))

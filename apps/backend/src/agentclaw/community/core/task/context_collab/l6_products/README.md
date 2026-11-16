@@ -421,8 +421,9 @@ uses the actual `TaskModule` / `TaskPersistenceModule`, isolated SQLite and the
 real catalog seam to deploy both an explicit-domain/workflow `task_commission@1`
 and an autonomous `task_commission@2` with neither field supplied. Product
 staff define/deploy; business staff create/designate; the case directly invokes L5 Open's
-`query_opportunities` with the Bot actor and explicit context/binding, rather
-than a built-in working-Bot method. Product-wide signed HTTP Query is checked
+`query_opportunities(actor_context=bot_context)` to discover available opportunities
+in the current tenant/environment without Collet/binding parameters, rather than
+calling a built-in working-Bot method. Product-wide signed HTTP Query is checked
 separately against that result. The main journey explicitly calls L5
 SubmitApplication → Screen → Admit with the Bot/policy actors; separate
 regressions exercise signed HTTP Apply. Admission establishes the real
