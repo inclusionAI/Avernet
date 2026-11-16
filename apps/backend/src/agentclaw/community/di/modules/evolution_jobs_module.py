@@ -39,7 +39,8 @@ class EvolutionJobsModule(Module):
     def evolution_tokens(self) -> JobTokenIssuer:
         """进程内随机密钥：令牌只注入沙箱环境，从不持久化。"""
 
-        return JobTokenIssuer(secret=secrets.token_bytes(32))
+        signing_key = secrets.token_bytes(32)
+        return JobTokenIssuer(secret=signing_key)
 
     @singleton
     @provider

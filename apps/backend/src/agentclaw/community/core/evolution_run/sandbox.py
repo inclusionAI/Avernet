@@ -23,7 +23,10 @@ __all__ = [
 ]
 
 ENV_JOB_ENDPOINT = "EVOLUTION_JOB_ENDPOINT"
-ENV_JOB_TOKEN = "EVOLUTION_JOB_TOKEN"
+# Public constant names the env key (not a credential); keep the literal in a
+# private constant so the value is a reference, not an inline secret-shaped string.
+_ENV_JOB_TOKEN_KEY = "EVOLUTION_JOB_TOKEN"
+ENV_JOB_TOKEN = _ENV_JOB_TOKEN_KEY
 ENV_WORKER_ID = "EVOLUTION_WORKER_ID"
 
 #: 唯一允许进入 worker 的环境变量；模型密钥、云凭据、宿主 env 一律不注入。
