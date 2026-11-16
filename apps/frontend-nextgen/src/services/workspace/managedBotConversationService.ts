@@ -1,4 +1,4 @@
-// 管理 Bot 「查看他人对话」(origin=others)只读 Service(设计依据:2026-09-24 conversation navigation refactor)。
+// 管理/协作 Bot 「查看他人对话」(origin=others)只读 Service(设计依据:2026-09-24 conversation navigation refactor)。
 // 以 bot.botId = realBotId:ownerId 复合 id 拆出所有者,查询该 Bot 的好友 Human 用户与会话/消息历史。
 // 仅读:不提供任何 create/update/delete/favorite 方法,也不读取 Store / 路由。
 import type {
@@ -15,7 +15,8 @@ import {
   listFriendConnections,
   type FriendConnectionSummaryDto,
 } from '@/services/backendApi/collaboration/collaborationFriendConnectionController';
-import { BOT_FRIEND_PAGE_SIZE, normalizeFriendUserId } from './botFriendConversationService';
+import { queryCollaborationBots } from '@/services/backendApi/collaboration/collaborationBotController';
+import { BOT_FRIEND_PAGE_SIZE, normalizeFriendUserId, toFriendQueryId } from './botFriendConversationService';
 import { mapBotSessionMessages } from './botSessionMessageMapper';
 import {
   BOT_MESSAGE_PAGE_SIZE,
@@ -33,14 +34,7 @@ const INVALID_CONTEXT_ERROR: DomainError = {
   canRetry: false,
 };
 
-// 临时关闭团队空间 Bot 他人会话，避免历史 URL/缓存绕过禁用入口继续请求未就绪后端。
-const TEAM_OTHERS_UNAVAILABLE: DomainError = {
-  code: 'TEAM_OTHERS_UNAVAILABLE',
-  friendlyMessage: '他人发起的会话功能开发中',
-  canRetry: false,
-};
-
-/** 管理 Bot 上下文:复合 botId 拆出 realBotId/ownerId,所有者不可缺省。 */
+/** 管理/协作 Bot 上下文:复合 botId 拆出 realBotId/ownerId,所有者不可缺省。 */
 function resolveOwnerContext(bot: ChatBotView): { realBotId: string; ownerId: string } | null {
   const { realBotId, ownerId } = splitBotId(bot.botId);
   if (!realBotId.trim() || !ownerId?.trim()) return null;
@@ -97,14 +91,38 @@ async function loadAllFriendUsers(botIdentityId: string, signal: AbortSignal): P
   return users;
 }
 
+/** 批量补 Human 展示名；详情缺失/查询失败沿用关系名称，最终回退工号，不影响只读目录。 */
+async function resolveFriendUserNames(
+  users: ConversationUserView[],
+  signal: AbortSignal,
+): Promise<ConversationUserView[]> {
+  if (users.length === 0) return users;
+  try {
+    const response = await queryCollaborationBots(
+      { bot_ids: users.map((user) => toFriendQueryId('human', user.userId)) },
+      signal,
+    );
+    const namesById = new Map(
+      (response.data?.items ?? [])
+        .filter((item) => item.kind === 'human')
+        .map((item) => [item.bot_id, item.name?.trim()]),
+    );
+    return users.map((user) => ({
+      ...user,
+      displayName: namesById.get(toFriendQueryId('human', user.userId)) || user.displayName,
+    }));
+  } catch {
+    return users;
+  }
+}
+
 export const managedBotConversationService = {
-  /** 管理 Bot 的好友 Human 用户列表(bot actor 查询,signal 透传给 AbortController 取消)。 */
+  /** 管理/协作 Bot 的好友 Human 用户列表(bot actor 查询,signal 透传给 AbortController 取消)。 */
   async loadFriendUsers(bot: ChatBotView, signal?: AbortSignal): Promise<DomainResult<ConversationUserView[]>> {
-    if (bot.isTeamBot) return { ok: false, error: TEAM_OTHERS_UNAVAILABLE };
     const requestSignal = signal ?? new AbortController().signal;
     try {
       const users = await loadAllFriendUsers(bot.botId, requestSignal);
-      return { ok: true, data: users };
+      return { ok: true, data: await resolveFriendUserNames(users, requestSignal) };
     } catch {
       return {
         ok: false,
@@ -121,7 +139,6 @@ export const managedBotConversationService = {
     pageSize: number = BOT_SESSION_PAGE_SIZE,
     sessionKey: string = '',
   ): Promise<DomainResult<ConversationSessionListState>> {
-    if (bot.isTeamBot) return { ok: false, error: TEAM_OTHERS_UNAVAILABLE };
     const context = resolveOwnerContext(bot);
     const friendId = normalizeFriendUserId(friendUserId);
     if (!context || !friendId) {
@@ -169,7 +186,6 @@ export const managedBotConversationService = {
     page: number = 1,
     pageSize: number = BOT_MESSAGE_PAGE_SIZE,
   ): Promise<DomainResult<ConversationMessagePageView>> {
-    if (bot.isTeamBot) return { ok: false, error: TEAM_OTHERS_UNAVAILABLE };
     const context = resolveOwnerContext(bot);
     const friendId = normalizeFriendUserId(friendUserId);
     if (!context || !friendId || !sessionId.trim()) {

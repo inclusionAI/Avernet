@@ -6,9 +6,11 @@ import {
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 jest.mock('@/services/backendApi/bots/privateBotSessionController');
+jest.mock('@/services/backendApi/collaboration/collaborationBotController');
 jest.mock('@/services/backendApi/collaboration/collaborationFriendConnectionController');
 
 import * as ctrl from '@/services/backendApi/bots/privateBotSessionController';
+import { queryCollaborationBots } from '@/services/backendApi/collaboration/collaborationBotController';
 import { listFriendConnections } from '@/services/backendApi/collaboration/collaborationFriendConnectionController';
 
 const mocked = ctrl as unknown as Record<string, jest.Mock<any>>;
@@ -16,6 +18,8 @@ const relationsMocked = listFriendConnections as unknown as jest.Mock<any>;
 
 beforeEach(() => {
   jest.clearAllMocks();
+  jest.mocked(queryCollaborationBots).mockReset();
+  jest.mocked(queryCollaborationBots).mockResolvedValue({ code: 200000, data: { items: [] } });
 });
 
 const managedBot: ChatBotView = {
@@ -124,6 +128,121 @@ describe('managedBotConversationService.loadFriendUsers', () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.friendlyMessage.length).toBeGreaterThan(0);
+    expect(queryCollaborationBots).not.toHaveBeenCalled();
+  });
+});
+
+describe('managedBotConversationService Human display names', () => {
+  it.each([false, true])(
+    'resolves managed/team names (isTeamBot=%s) once after pagination and deduplication',
+    async (isTeamBot) => {
+      relationsMocked.mockImplementation(async (params: { page?: number }) =>
+        params.page === 1 ? relationsEnvelope(['human_447147'], 2) : relationsEnvelope(['447147', 'human_448148'], 2),
+      );
+      jest.mocked(queryCollaborationBots).mockResolvedValue({
+        code: 200000,
+        data: {
+          items: [
+            { bot_id: 'human_448148', kind: 'human', name: '雨太' },
+            { bot_id: 'human_unrelated', kind: 'human', name: '其他人' },
+            { bot_id: 'human_447147', kind: 'human', name: ' 风太 ' },
+          ],
+        },
+      });
+      const controller = new AbortController();
+      const result = await managedBotConversationService.loadFriendUsers(
+        { ...managedBot, isTeamBot },
+        controller.signal,
+      );
+
+      expect(result).toEqual({
+        ok: true,
+        data: [
+          { userId: '447147', displayName: '风太' },
+          { userId: '448148', displayName: '雨太' },
+        ],
+      });
+      expect(jest.mocked(queryCollaborationBots)).toHaveBeenCalledTimes(1);
+      expect(queryCollaborationBots).toHaveBeenCalledWith(
+        { bot_ids: ['human_447147', 'human_448148'] },
+        controller.signal,
+      );
+    },
+  );
+
+  it('falls back to user IDs for missing or blank names and ignores Bot details', async () => {
+    relationsMocked.mockResolvedValue(relationsEnvelope(['447147', '448148', '449149', '450150']));
+    jest.mocked(queryCollaborationBots).mockResolvedValue({
+      code: 200000,
+      data: {
+        items: [
+          { bot_id: 'human_447147', kind: 'human', name: '风太' },
+          { bot_id: 'human_448148', kind: 'human', name: '  ' },
+          { bot_id: 'human_449149', kind: 'bot', name: '非用户详情' },
+        ],
+      },
+    });
+
+    expect(await managedBotConversationService.loadFriendUsers(managedBot)).toEqual({
+      ok: true,
+      data: [
+        { userId: '447147', displayName: '风太' },
+        { userId: '448148', displayName: '448148' },
+        { userId: '449149', displayName: '449149' },
+        { userId: '450150', displayName: '450150' },
+      ],
+    });
+  });
+
+  it('prefers resolved names over relationship names', async () => {
+    relationsMocked.mockResolvedValue({
+      data: { items: [{ actor: { type: 'human', id: 'human_447147' }, name: '旧名称' }], total: 1 },
+    });
+    jest.mocked(queryCollaborationBots).mockResolvedValue({
+      code: 200000,
+      data: { items: [{ bot_id: 'human_447147', kind: 'human', name: '风太' }] },
+    });
+    expect(await managedBotConversationService.loadFriendUsers(managedBot)).toEqual({
+      ok: true,
+      data: [{ userId: '447147', displayName: '风太' }],
+    });
+  });
+
+  it('keeps the directory usable when name lookup fails', async () => {
+    relationsMocked.mockResolvedValue({
+      data: {
+        items: [
+          { actor: { type: 'human', id: 'human_447147' }, name: '已有名称' },
+          { actor: { type: 'human', id: 'human_448148' } },
+        ],
+        total: 2,
+      },
+    });
+    jest.mocked(queryCollaborationBots).mockRejectedValue(new Error('name lookup unavailable'));
+    expect(await managedBotConversationService.loadFriendUsers(managedBot)).toEqual({
+      ok: true,
+      data: [
+        { userId: '447147', displayName: '已有名称' },
+        { userId: '448148', displayName: '448148' },
+      ],
+    });
+    expect(queryCollaborationBots).toHaveBeenCalledTimes(1);
+  });
+
+  it('falls back when the lookup response has no details', async () => {
+    relationsMocked.mockResolvedValue(relationsEnvelope(['447147']));
+    jest.mocked(queryCollaborationBots).mockResolvedValue({ code: 200000 });
+    expect(await managedBotConversationService.loadFriendUsers(managedBot)).toEqual({
+      ok: true,
+      data: [{ userId: '447147', displayName: '447147' }],
+    });
+    expect(queryCollaborationBots).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not query names for an empty directory', async () => {
+    relationsMocked.mockResolvedValue(relationsEnvelope([]));
+    expect(await managedBotConversationService.loadFriendUsers(managedBot)).toEqual({ ok: true, data: [] });
+    expect(queryCollaborationBots).not.toHaveBeenCalled();
   });
 });
 
