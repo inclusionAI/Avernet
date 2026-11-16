@@ -29,6 +29,7 @@ import jwt
 from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_HEADER
 from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.api.bot_dormant_service import (
+    BotDormantRecycleOperationProtocol,
     BotDormantRecycleServiceProtocol,
 )
 from agentclaw.community.api.data_init_service import DataInitServiceProtocol
@@ -37,6 +38,7 @@ from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_dormant.types import BotLifecycleResult
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotInvalidLifecycleStateError,
+    BotNotFoundError,
 )
 from agentclaw.community.utils.gateway_principal_config import (
     init_principal_verifier_config,
@@ -573,4 +575,79 @@ def check_name_happy():
     expect=ExpectError(status=400, json_contains={"data": None}),
 )
 def check_name_invalid():
+    """The framework owns invocation."""
+
+
+def _seed_recycle_operation(world, *, missing: bool) -> None:
+    _seed_verifier(world)
+    make_bot(
+        world,
+        bot_id=_BOT_ID,
+        owner_id=_OWNER,
+        bot_type="personal",
+        status="ACTIVE",
+        active_engine="claude_code",
+    )
+
+    def get_operation(_self, *, bot_id, owner_id, operation_id):
+        if missing:
+            raise BotNotFoundError("Recycle operation not found")
+        return {
+            "bot_id": bot_id,
+            "owner_id": owner_id,
+            "operation_id": operation_id,
+            "bot_status": "ACTIVE",
+            "phase": "FAILED",
+            "error_code": "BACKUP_FAILED",
+            "message": "Backup failed",
+            "warning": None,
+        }
+
+    bind_overrides(
+        world, BotDormantRecycleOperationProtocol, {"get_operation": get_operation}
+    )
+
+
+@endpoint_test(
+    method="GET",
+    path=f"{_BASE_PATH}/{{bot_id}}/recycle-operations/{{operation_id}}",
+    scenario="failed_operation_read_successfully",
+    input=CaseInput(
+        path_params={**_PATH_PARAMS, "operation_id": "recycle-op"},
+        query_params=_QUERY,
+        headers=_HEADERS,
+    ),
+    seed=lambda world: _seed_recycle_operation(world, missing=False),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "code": 200000,
+            "data": {
+                "bot_id": _BOT_ID,
+                "owner_id": _OWNER,
+                "operation_id": "recycle-op",
+                "bot_status": "ACTIVE",
+                "phase": "FAILED",
+                "error_code": "BACKUP_FAILED",
+            },
+        },
+    ),
+)
+def recycle_operation_happy():
+    """A failed operation is still a successful read, as Swagger documents."""
+
+
+@endpoint_test(
+    method="GET",
+    path=f"{_BASE_PATH}/{{bot_id}}/recycle-operations/{{operation_id}}",
+    scenario="operation_not_found",
+    input=CaseInput(
+        path_params={**_PATH_PARAMS, "operation_id": "missing-op"},
+        query_params=_QUERY,
+        headers=_HEADERS,
+    ),
+    seed=lambda world: _seed_recycle_operation(world, missing=True),
+    expect=ExpectError(status=404, json_contains={"code": 404000, "data": None}),
+)
+def recycle_operation_missing():
     """The framework owns invocation."""

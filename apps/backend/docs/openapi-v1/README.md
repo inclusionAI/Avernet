@@ -1352,13 +1352,13 @@ the other six: this is what "done" looks like per category.
 | PUT | `/openapi/v1/bots/{bot_id}` | Update bot (engine immutable) | `Envelope[Bot]` |
 | PUT | `/openapi/v1/bots/{bot_id}/space` | Change the Bot's owning Business Space | `Envelope[BotSpaceAssignment]` |
 | DELETE | `/openapi/v1/bots/{bot_id}` | Delete bot | `Envelope[Deleted]` |
-| POST | `/openapi/v1/bots/{bot_id}/restart` | Restart (re-provision device) | `Envelope[Bot]` |
+| POST | `/openapi/v1/bots/{bot_id}/restart` | Restart (re-provision device); AICoding progress in `ext.aicoding.restart` | `200 Envelope[Bot]`, not completion |
 | POST | `/openapi/v1/bots/{bot_id}/recycle` | Recycle an ACTIVE personal managed-cloud Bot using its engine strategy | AICoding: `202 Envelope[BotRecycleResult]`; default engines/RECYCLED: `200` |
 | GET | `/openapi/v1/bots/{bot_id}/recycle-operations/{operation_id}` | Read the current/latest recycle operation without advancing it | `200 Envelope[BotRecycleOperation]` |
 | POST | `/openapi/v1/bots/{bot_id}/activate` | Start reactivation of a RECYCLED personal managed-cloud Bot | `202 Envelope[BotActivateResult]`, or `200` when already ACTIVE |
 | POST | `/openapi/v1/bots/{bot_id}/auth-status` | Poll Passport auth (attributes echoed in the body); completes creation when ISSUED — a write, hence a POST | `Envelope[BotAuthStatus]` |
 | GET | `/openapi/v1/bots/{bot_id}/auth-status` | Retiring spelling of the poll (attributes in the query string); deprecated — use the POST | `Envelope[BotAuthStatus]` |
-| GET | `/openapi/v1/bots/{bot_id}/status` | Runtime / device readiness | `Envelope[BotStatus]` |
+| GET | `/openapi/v1/bots/{bot_id}/status` | Runtime readiness and available `ext.aicoding.restart` progress | `200 Envelope[BotStatus]` |
 | GET | `/openapi/v1/bots/{bot_id}/passport` | Get the bot's Agent Passport | `Envelope[Passport]` |
 | GET | `/openapi/v1/bots/{bot_id}/engine/config` | Read engine config (free-form JSON) | `Envelope[dict]` |
 | PUT | `/openapi/v1/bots/{bot_id}/engine/config` | Write engine config (free-form JSON) | `Envelope[dict]` |
@@ -1398,6 +1398,33 @@ deprecated alias; conflicting values produce 422. They use addressed-Bot
 OWNER authorization: ADMIN/MEMBER collaborators cannot recycle, query its
 operation, or activate. Missing/inaccessible Bots and mismatched operation IDs
 are hidden as 404. Teclaw, desktop and service Bots are outside this lifecycle.
+
+#### Container restart and readiness
+
+`POST /openapi/v1/bots/{bot_id}/restart` has no body and still returns **HTTP
+200**, not 202. For supported bound AICoding (`aicoding` / `claude_code`) Bots,
+backup and container replacement normally run in a durable background operation;
+HTTP 200 is not a completion or readiness guarantee. Other engines and the
+no-old-binding / existing-start recovery paths retain their original behavior,
+so not every response carries an operation handle. Container restart applies
+changed startup scripts and is distinct from engine-process `/engine/restart`
+and desktop `/local/restart`.
+
+Read `data.ext.aicoding.restart` on the returned Bot or poll the existing
+`GET .../status`. It exposes `operation_id`, `status` (RUNNING / SUCCEEDED /
+FAILED), `phase`, `message`, and optional `warning`. Phases are QUEUED,
+BACKING_UP, RESTARTING, WAITING_READY, SUCCEEDED and FAILED; a failure may retain
+its failing phase. `warning.code=backup_failed_continue` means a confirmed
+backup failure was allowed through. Repeated active submissions reuse the
+operation. Bot `status` / `is_ready` and operation status answer different
+questions: ACTIVE does not prove restart completion.
+
+Restart uses the same confirmed-fastdisk backup policy described below:
+`aicoding/fastdisk_fail_block` must be enabled boolean true to block. A blocking
+backup failure stops before destruction and fails only the operation, not Bot
+runtime status. Non-fastdisk or an unsuccessful initial probe skips the helper;
+a validated `partial_success` receipt allows continuation. Desktop/Teclaw,
+incompatible states and unresolved recycling return 409.
 
 #### Asynchronous recycle and reactivation
 
@@ -1460,8 +1487,8 @@ RECYCLED -> REACTIVATING claim prevents duplicate activation; rollback cannot
 overwrite a new binding. Activation does not introduce a new queue or status
 endpoint. Backup data restoration still uses the existing provisioning path.
 
-Timing is deliberately separated: required fastdisk backup waits up to 300s;
-other applicable backup paths retain the restart strategy's 1500s budget;
+Timing is deliberately separated: confirmed fastdisk backup uses the shared
+restart strategy's 1500s worker budget;
 release/finalization observation is bounded to 600s, polling at 3s; the task
 queue deadline is 24h. These are worker budgets, **not HTTP timeouts or hard
 cancellation** of an in-flight SDK call/container backup script.

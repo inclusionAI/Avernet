@@ -42,13 +42,19 @@ class BotActivateResult(BaseModel):
 class BotRecycleResult(BotLifecycleResult):
     """Engine-selected result: coding admission or default synchronous completion."""
 
+    status: str = Field(
+        description="Current Bot lifecycle status; HTTP 202 may still report ACTIVE."
+    )
+    changed: bool = Field(
+        description="New asynchronous admission or synchronous state change; false for an idempotent result, not a completion indicator."
+    )
     operation_id: str | None = Field(
         default=None,
         description="Coding recycle handle; absent for synchronous or already-recycled results.",
     )
     phase: str | None = Field(
         default=None,
-        description="Current recycle operation phase, not Bot runtime status.",
+        description="QUEUED, BACKING_UP, RELEASING, SUCCEEDED, FAILED or NEEDS_CONFIRMATION; independent of Bot runtime status.",
     )
 
 
@@ -67,12 +73,13 @@ class BotRecycleOperation(BaseModel):
         description="QUEUED, BACKING_UP, RELEASING, SUCCEEDED, FAILED or NEEDS_CONFIRMATION."
     )
     error_code: str | None = Field(
-        default=None, description="Safe operation error code, if any."
+        default=None,
+        description="Safe error code, e.g. BACKUP_FAILED, BACKUP_TIMEOUT, RELEASE_UNCONFIRMED or FINALIZATION_UNCONFIRMED.",
     )
     message: str | None = Field(
         default=None, description="Sanitized operation error detail, if any."
     )
     warning: dict[str, str] | None = Field(
         default=None,
-        description="Safe code/message warning for best-effort backup or Passport failure.",
+        description="Safe code/message warning: BACKUP_FAILED_CONTINUE or PASSPORT_FREEZE_FAILED.",
     )

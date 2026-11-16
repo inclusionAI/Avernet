@@ -5,7 +5,12 @@ from __future__ import annotations
 from typing import Annotated
 
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
-from agentclaw.community.adapters.http.openapi_v1.contracts import BotIdPath, Envelope
+from agentclaw.community.adapters.http.openapi_v1.contracts import (
+    ERROR_RESPONSES,
+    EXAMPLE_TRACE_ID,
+    BotIdPath,
+    Envelope,
+)
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import (
     OwnerIdDep,
 )
@@ -38,7 +43,60 @@ router = APIRouter(
 @router.post(
     "/recycle",
     response_model=Envelope[BotRecycleResult],
-    responses={202: {"model": Envelope[BotRecycleResult]}},
+    summary="Recycle a personal managed-cloud Bot",
+    responses={
+        200: {
+            "description": "Synchronous completion or an already-recycled idempotent result.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "code": 200000,
+                        "message": "OK",
+                        "request_id": EXAMPLE_TRACE_ID,
+                        "data": {
+                            "bot_id": "b-example",
+                            "owner_id": "owner-example",
+                            "status": "RECYCLED",
+                            "changed": False,
+                        },
+                    }
+                }
+            },
+        },
+        202: {
+            "model": Envelope[BotRecycleResult],
+            "description": "Asynchronous admission, not completion; poll the operation handle.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "code": 202000,
+                        "message": "Accepted",
+                        "request_id": EXAMPLE_TRACE_ID,
+                        "data": {
+                            "bot_id": "b-example",
+                            "owner_id": "owner-example",
+                            "status": "ACTIVE",
+                            "changed": True,
+                            "operation_id": "0123456789abcdef0123456789abcdef",
+                            "phase": "QUEUED",
+                        },
+                    }
+                }
+            },
+        },
+        409: {
+            **ERROR_RESPONSES[409],
+            "description": "Incompatible Bot state or busy lifecycle.",
+        },
+        502: {
+            **ERROR_RESPONSES[502],
+            "description": "Synchronous resource release failed: Bot resource release failed.",
+        },
+        503: {
+            **ERROR_RESPONSES[503],
+            "description": "Worker unavailable or durable admission unconfirmed.",
+        },
+    },
 )
 @envelope_errors
 async def recycle_dormant_bot(
@@ -52,7 +110,37 @@ async def recycle_dormant_bot(
         BotDormantRecycleOperationProtocol
     ),
 ) -> Envelope[BotRecycleResult]:
-    """Recycle via engine policy: coding admits durable work; others complete synchronously."""
+    """Recycle an ACTIVE personal managed-cloud Bot; no request body.
+
+    OWNER only. Optional `entity_id` selects the Bot owner, defaulting to the
+    caller; deprecated `owner_id` is still accepted. Conflicting values return
+    422. Missing/inaccessible Bots return 404. Teclaw, desktop and service Bots
+    are unsupported; incompatible state or a busy lifecycle returns 409.
+
+    - `aicoding` / `claude_code`: HTTP 202 admits a background operation.
+      `data.status` is the current Bot state, not completion. `changed=true`
+      means new admission; a duplicate unresolved operation returns the same
+      `operation_id` with `changed=false`. Poll
+      `GET /openapi/v1/bots/{bot_id}/recycle-operations/{operation_id}`.
+    - Other engines complete synchronously with HTTP 200. An already RECYCLED
+      Bot without an unresolved operation returns `changed=false`, without
+      another backup, release or audit.
+
+    AICoding reuses the restart backup policy. Confirmed fastdisk backup has a
+    1500-second worker budget. Only enabled boolean `aicoding/fastdisk_fail_block=true`
+    blocks on failure; non-fastdisk or an unsuccessful initial probe skips the
+    helper. A validated `partial_success` receipt permits continuation. Blocking
+    failure sets the operation to FAILED, leaves the Bot ACTIVE and its old
+    binding/Passport unchanged, and does not release resources. Nonblocking
+    backup failure may continue with a warning.
+
+    The worker backs up, confirms resource release, best-effort freezes Passport,
+    then sets RECYCLED and writes one audit with `source=openapi`. No recycle
+    DingTalk notification is enqueued. Unconfirmed release/finalization becomes
+    NEEDS_CONFIRMATION and blocks conflicting lifecycle requests; do not blindly
+    resubmit destruction. HTTP 502 means synchronous resource release failed;
+    503 means the worker is unavailable or durable admission is unconfirmed.
+    """
     result = await run_in_threadpool(
         service.submit,
         bot_id=bot_id,
@@ -68,7 +156,33 @@ async def recycle_dormant_bot(
 
 
 @router.get(
-    "/recycle-operations/{operation_id}", response_model=Envelope[BotRecycleOperation]
+    "/recycle-operations/{operation_id}",
+    response_model=Envelope[BotRecycleOperation],
+    summary="Read a recycle operation",
+    responses={
+        200: {
+            "description": "Operation read successfully, including FAILED or NEEDS_CONFIRMATION.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "code": 200000,
+                        "message": "OK",
+                        "request_id": EXAMPLE_TRACE_ID,
+                        "data": {
+                            "bot_id": "b-example",
+                            "owner_id": "owner-example",
+                            "operation_id": "0123456789abcdef0123456789abcdef",
+                            "bot_status": "ACTIVE",
+                            "phase": "FAILED",
+                            "error_code": "BACKUP_FAILED",
+                            "message": "Backup failed; resources were not released.",
+                            "warning": None,
+                        },
+                    }
+                }
+            },
+        }
+    },
 )
 @envelope_errors
 async def get_recycle_operation(
@@ -83,7 +197,22 @@ async def get_recycle_operation(
         BotDormantRecycleOperationProtocol
     ),
 ) -> Envelope[BotRecycleOperation]:
-    """Read the matching current/latest operation; never advance or retry it."""
+    """Read-only query of the current/latest AICoding recycle operation.
+
+    HTTP 200 means the read succeeded, even for phase FAILED or
+    NEEDS_CONFIRMATION. `bot_status` is independent of the operation phase:
+    QUEUED, BACKING_UP, RELEASING, SUCCEEDED, FAILED or NEEDS_CONFIRMATION.
+    Blocking BACKUP_FAILED / BACKUP_TIMEOUT leaves the Bot ACTIVE and does not
+    release resources. RELEASE_UNCONFIRMED / FINALIZATION_UNCONFIRMED requires
+    operator verification, not an automatic destructive retry. `warning` may
+    contain BACKUP_FAILED_CONTINUE or PASSPORT_FREEZE_FAILED (code/message).
+
+    This GET never advances, retries or repairs work. Only the current/latest
+    handle is retained; an older replaced handle, mismatched scope, unsupported
+    engine or missing/inaccessible Bot returns 404. Uses the same OWNER check,
+    optional `entity_id` and deprecated `owner_id` alias as POST /recycle;
+    conflicting owner parameters return 422. This is separate from Bot /status.
+    """
     result = await run_in_threadpool(
         service.get_operation,
         bot_id=bot_id,
@@ -96,7 +225,50 @@ async def get_recycle_operation(
 @router.post(
     "/activate",
     response_model=Envelope[BotActivateResult],
-    responses={202: {"model": Envelope[BotActivateResult]}},
+    summary="Reactivate a recycled personal managed-cloud Bot",
+    responses={
+        200: {
+            "description": "Bot is already ACTIVE; no new activation was started.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "code": 200000,
+                        "message": "OK",
+                        "request_id": EXAMPLE_TRACE_ID,
+                        "data": {
+                            "bot_id": "b-example",
+                            "owner_id": "owner-example",
+                            "status": "ACTIVE",
+                            "changed": False,
+                        },
+                    }
+                }
+            },
+        },
+        202: {
+            "model": Envelope[BotActivateResult],
+            "description": "REACTIVATING; observe readiness through GET /openapi/v1/bots/{bot_id}/status.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "code": 202000,
+                        "message": "Accepted",
+                        "request_id": EXAMPLE_TRACE_ID,
+                        "data": {
+                            "bot_id": "b-example",
+                            "owner_id": "owner-example",
+                            "status": "REACTIVATING",
+                            "changed": True,
+                        },
+                    }
+                }
+            },
+        },
+        409: {
+            **ERROR_RESPONSES[409],
+            "description": "Recycle is unresolved or Bot lifecycle state conflicts.",
+        },
+    },
 )
 @envelope_errors
 async def activate_dormant_bot(
@@ -110,7 +282,23 @@ async def activate_dormant_bot(
         BotDormantActivateServiceProtocol
     ),
 ) -> Envelope[BotActivateResult]:
-    """Start or observe reactivation of a recycled personal managed-cloud Bot."""
+    """Start or observe reactivation of a recycled personal managed-cloud Bot.
+
+    No request body. OWNER only; `entity_id` is optional and defaults to the
+    caller. Deprecated `owner_id` remains accepted; conflicting values return
+    422. Missing/inaccessible Bots return 404. Teclaw, desktop and service Bots
+    are unsupported.
+
+    HTTP 202 / REACTIVATING means activation is pending: `changed=true` for a
+    new activation and `changed=false` for an already pending one. Already ACTIVE
+    returns HTTP 200 / `changed=false`. A running recycle or NEEDS_CONFIRMATION
+    returns 409 before the ACTIVE idempotency check; other incompatible states
+    also return 409.
+
+    Poll `GET /openapi/v1/bots/{bot_id}/status` for runtime readiness. Existing
+    provisioning restores backup data; no separate activation operation handle
+    is introduced, and the latest recycle result is retained.
+    """
     result = await run_in_threadpool(
         service.activate,
         bot_id=bot_id,

@@ -634,7 +634,14 @@ async def delete_bot(
 @router.post(
     "/{bot_id}/restart",
     response_model=Envelope[Bot],
-    responses=USER_SCOPED_403,
+    summary="Restart a Bot container and observe background progress",
+    responses={
+        **USER_SCOPED_403,
+        200: {
+            "description": "Restart accepted or existing recovery observed; not completion "
+            "or readiness. AICoding progress is in data.ext.aicoding.restart when available.",
+        },
+    },
     dependencies=_GRANT_CHECKED_ADDRESSED_BOT,
 )
 @envelope_errors
@@ -645,11 +652,34 @@ async def restart_bot(
     owner_id: OwnerIdDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
 ) -> Envelope[Bot]:
-    """Restart a bot's container.
+    """Restart/re-provision a Bot container and apply a changed startup script.
 
-    Also what applies a changed startup script. Refused (409) for desktop
-    bots, whose lifecycle is managed by the desktop service, and for bots in
-    a lifecycle state a restart cannot leave.
+    No request body. Returns HTTP 200 with Envelope[Bot], not HTTP 202; a
+    successful response does not mean backup, replacement or readiness finished.
+    For supported bound `aicoding` / `claude_code` Bots, work normally runs in
+    the background. Read `data.ext.aicoding.restart` in the returned Bot or poll
+    `GET /openapi/v1/bots/{bot_id}/status` for the same extension:
+
+    - `operation_id`: current restart handle; repeated active requests reuse it.
+    - `status`: RUNNING, SUCCEEDED or FAILED, separate from Bot runtime status.
+    - `phase`: QUEUED, BACKING_UP, RESTARTING, WAITING_READY, SUCCEEDED or FAILED.
+      A failed operation may retain its failing phase, such as BACKING_UP.
+    - `message` and optional `warning`: a nonblocking backup failure uses
+      `warning.code=backup_failed_continue`.
+
+    Confirmed fastdisk backup uses a 1500-second worker budget. Only enabled
+    boolean `aicoding/fastdisk_fail_block=true` blocks on backup failure. Blocking
+    failure stops the operation before destruction, preserving the old binding;
+    it does not set Bot runtime status to FAILED. With blocking disabled, a
+    confirmed backup failure can continue with a warning. Non-fastdisk or an
+    unsuccessful initial probe skips the helper. Validated `partial_success`
+    permits continuation. The worker budget is not an HTTP timeout.
+
+    No-old-binding and existing-start/recovery paths retain their original
+    behavior; an operation extension is not guaranteed on every response.
+    Desktop/Teclaw Bots, incompatible lifecycle states and unresolved recycle
+    operations are refused with 409. This is a container restart, not the
+    engine-process-only `/engine/restart` or desktop `/local/restart` action.
     """
     _reject_unowned_lifecycle(bot_service.get_bot(bot_id, owner_id))
 
@@ -866,7 +896,23 @@ async def get_bot_status(
     user_id: UserIdDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
 ) -> Envelope[BotStatus]:
-    """Get a bot's runtime / device readiness."""
+    """Get a Bot's runtime readiness and available restart progress.
+
+    HTTP 200 returns `status`, `is_ready`, `device_id` and `ext`. Runtime
+    readiness is distinct from operation completion: ACTIVE alone does not
+    mean the current restart finished. For supported AICoding restarts,
+    `data.ext.aicoding.restart` exposes `operation_id`, `status` (RUNNING,
+    SUCCEEDED or FAILED), `phase`, `message` and optional `warning`.
+    Phases include QUEUED, BACKING_UP, RESTARTING, WAITING_READY, SUCCEEDED
+    and FAILED; a failure may retain its failing phase. Nonblocking backup
+    failure uses `warning.code=backup_failed_continue`. A backup-blocked restart
+    can be FAILED while the old Bot remains ACTIVE. The extension is absent
+    when no applicable restart record exists.
+
+    Recycle operations use the separate
+    `GET /openapi/v1/bots/{bot_id}/recycle-operations/{operation_id}` endpoint;
+    do not use this readiness response to infer recycle completion.
+    """
     bot = bot_service.get_bot(bot_id, owner_id)
     binding = bot.get("device_binding") or {}
     return envelope(
