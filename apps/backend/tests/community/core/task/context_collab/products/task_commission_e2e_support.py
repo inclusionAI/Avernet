@@ -223,7 +223,7 @@ class SimulatedWorkingBot:
         def report_progress(percent: int, note: str) -> None:
             send("progress", {"percent": percent, "note": note})
 
-        # start_task 已由调用方通过任务产品的 Work 动作入口完成。
+        # 调用方已直接通过 L4 Work.start 启动任务。
         # Bot 只上报实际执行过程,不能把自身的运行器当成 L4 Work API。
         # 不是 finally:执行或进度上报失败时不能伪造成功并自动提交。
         _flow_log(_TEST_DIRECTORY, "模拟 Bot 开始执行任务业务函数")

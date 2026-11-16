@@ -1,7 +1,7 @@
 """Context collab 服务用例编排(G1 校验 + G4 状态机 + G3 投影 + 仓储)。
 
-本文件实现 ``create_collet``(spec §6.2)、``append_event``
-(spec §6.3,接入 G4 状态机与守卫)与 ``get_status``(spec §6.4,
+本文件实现 ``create_collet``(spec §6.2)、显式 L4 Work ``start``、
+``append_event``(spec §6.3,接入 G4 状态机与守卫)与 ``get_status``(spec §6.4,
 纯读路径:visibility 过滤 → G3 投影 → 进度统计,不写任何行)。
 ``get_events`` 返回 G1 可见的 L4 事件事实,供库调用方读取成果引用等 payload。
 服务层不感知 HTTP/Pydantic,仓储与授权都以协议注入。
@@ -83,6 +83,7 @@ from agentclaw.community.core.task.context_collab.service_api import (
     EventAcceptedResult,
     EventAppendCommand,
     TaskProgressProjectionDTO,
+    WorkStartCommand,
 )
 from agentclaw.community.core.task.context_collab.services.method_bootstrap import (
     project_created_context,
@@ -122,7 +123,7 @@ def _event_projection_dict(projection: EventProjection) -> dict:
 
 
 class ContextCollabService(ContextCollabServiceProtocol):
-    """北向创建、追加与只读查询实现;P1 默认注入结构授权器。"""
+    """L4 北向创建、Work.start、追加与只读查询;复用 G1/G4 与原子写入。"""
 
     @inject
     def __init__(
@@ -218,6 +219,30 @@ class ContextCollabService(ContextCollabServiceProtocol):
 
         return record.collet
 
+    def start(
+        self, collab_context_id: str, command: WorkStartCommand, context: ActorContext
+    ) -> EventAcceptedResult:
+        """L4 Work.start, not a product action or an arbitrary event append.
+
+        The root Task and pinned lifecycle are resolved by the shared northbound
+        pipeline. G1 (including admission), product contracts, G4 guards and both
+        Task/Collet revision fences remain authoritative. No delivery side effect.
+        """
+        return self._append_event(
+            collab_context_id,
+            EventAppendCommand(
+                expected_version=command.expected_version,
+                event_kind="task.started",
+                primitive_type="Task",
+                actor_ref=context.actor,
+                parent_event=None,
+                visibility="public",
+                payload={"note": command.note} if command.note else {},
+            ),
+            context,
+            require_transition=True,
+        )
+
     def append_event(
         self, collab_context_id: str, command: EventAppendCommand, context: ActorContext
     ) -> EventAcceptedResult:
@@ -231,6 +256,16 @@ class ContextCollabService(ContextCollabServiceProtocol):
         防重由调用方保证。G4 从 Task 求解状态,仓储以 TaskUpdate 同时
         围栏 Task/Collet 版本,拒绝读后并发变更造成的陈旧写。
         """
+        return self._append_event(collab_context_id, command, context)
+
+    def _append_event(
+        self,
+        collab_context_id: str,
+        command: EventAppendCommand,
+        context: ActorContext,
+        *,
+        require_transition: bool = False,
+    ) -> EventAcceptedResult:
         status = self._repository.get_current_status(collab_context_id)
         if status is None:
             raise ContextCollabNotFoundError(
@@ -290,6 +325,7 @@ class ContextCollabService(ContextCollabServiceProtocol):
             if machine_ref
             else creation_workflow_kind(status.creation_facts),
             workflow_version=machine_ref.version if machine_ref else None,
+            require_transition=require_transition,
         )
         record = prepared.commit(self._repository)
         return EventAcceptedResult(

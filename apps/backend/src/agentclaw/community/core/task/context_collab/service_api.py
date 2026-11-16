@@ -28,6 +28,7 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.event_en
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.contracts import (
     EventAppendCommand as EventAppendCommand,
+    WorkStartCommand as WorkStartCommand,
 )
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     VersionedProfileRef,
@@ -97,7 +98,7 @@ class ContextCollabStatusProjection:
 
 @runtime_checkable
 class ContextCollabServiceProtocol(Protocol):
-    """北向创建、追加与只读查询协议;delivery 依赖本协议,不依赖实现类。"""
+    """L4 北向创建、Work.start、事件追加与查询;不依赖产品服务。"""
 
     def create_collet(
         self, command: ColletCreateCommand, context: ActorContext
@@ -105,6 +106,19 @@ class ContextCollabServiceProtocol(Protocol):
         """创建并返回持久化的 Collet;成功前完成初始 Task/Event 与 L5 绑定。
 
         不返回 Task 或 HTTP 快照;创建不设幂等键,写入失败原样抛出。
+        """
+        ...
+
+    def start(
+        self, collab_context_id: str, command: WorkStartCommand, context: ActorContext
+    ) -> EventAcceptedResult:
+        """L4 Work.start: start this Collet's root Task through G1/G4 and CAS.
+
+        Requires an existing Task and a matching lifecycle transition. Product
+        role/admission constraints still apply. The event actor is context.actor;
+        the result reports persisted Task status and Collet revision. No Agent
+        dispatch, Activity creation, acceptance or Task completion is implied.
+        Repeated/stale requests are rejected, not treated as successful no-ops.
         """
         ...
 

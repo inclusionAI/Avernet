@@ -31,9 +31,9 @@ for ACCS semantic boundaries, not an ACCS-mandated Python directory tree.
 
 ```text
 l4_context_primitives/
-  context_collab_service.py  # northbound create/append/query orchestration
+  context_collab_service.py  # northbound create/Work.start/append/query orchestration
   operations/
-    contracts.py           # EventAppendCommand, storage ports and append intent
+    contracts.py           # WorkStartCommand, EventAppendCommand and storage ports
     collet_lifecycle.py     # create/activate/suspend/resume/complete/archive
     work.py                # G4 Task resolution, Task fence and atomic append
 l5_methods/operations/
@@ -135,6 +135,47 @@ not re-read a potentially advanced context or attach HTTP projections to Collet.
 Later state and authorized progress remain the separate `get_status` query.
 Creation is not idempotent; repository and MethodStore write failures propagate.
 The existing SQL/MethodStore transaction gap is not removed by this return change.
+
+## L4 Work.start contract
+
+`ContextCollabServiceProtocol.start(collab_context_id, WorkStartCommand, context)`
+is the explicit, transport-free L4 Work entrypoint for the **root Task** of an
+existing Collet. It does not call a product service or expose arbitrary event
+fields. The command requires the caller's positive integer Collet
+`expected_version` and optionally a string `note`; the event actor comes from
+`context.actor`.
+
+```python
+started = collab_service.start(
+    collet.collet_id,
+    WorkStartCommand(expected_version=collet.version, note="Start admitted work"),
+    bot_context,
+)
+assert started.accepted and started.current_status == "in_progress"
+# Use started.context_version for the next version-fenced operation.
+```
+
+The shared northbound pipeline preserves schema validation, G1 authorization
+(including scoped admission when required by the selected product), role/action
+contracts and the exact pinned G4 machine. Explicit Work requires an existing
+Task, an available machine and a matching permitted transition; it cannot report
+success by appending an unmatched `task.started` event without a transition.
+Task, Event and Collet revisions persist in the same repository transaction.
+The result is an `EventAcceptedResult` from that committed write; stale/repeated
+starts, guard failures and storage errors propagate without a success receipt.
+`append_event` retains its generic unmatched-event compatibility semantics.
+
+Starting does not create an Activity, dispatch an Agent, mark execution complete
+or accept a deliverable. This bounded root operation is not a Task-tree CRUD API.
+ACCS Work also names propose/assign/decompose/complete Task and record Activity;
+that vocabulary is not a claim that all of those APIs are implemented here.
+[Work.start contract tests](../../../../../../tests/community/core/task/context_collab/test_l4_work_start.py)
+exercise both standard Task and explicit Workflow contracts with SQLite,
+including distinct Task/Collet fences and SQL rollback. The
+[commission journey](../../../../../../tests/community/core/task/context_collab/products/test_task_commission_end_to_end.py)
+uses the injected L4 entrypoint after Open admission; no new HTTP route or wire
+operation is added. Existing product `start_task`/Bot-report adapters remain
+compatible and share the same L4 preparation/commit machinery.
 
 ## State ownership
 

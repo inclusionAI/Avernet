@@ -86,11 +86,11 @@ TASK_COMMISSION_PROFILE = ProductProfileCreateCommand(
     ),
     # 产品发布参与机会时使用的规则
     publication=OpenPublicationProfile(
-        admission=DesignatedOpenAdmission(
+        admission=DesignatedOpenAdmission(                               # 指定执行者、发布人代办录取的策略
             applicant_role="assignee",
             accountable_role="owner",
-            participation_type=ParticipationType.SINGLE_CONTRIBUTION,
-            capacity=1,
+            participation_type=ParticipationType.SINGLE_CONTRIBUTION,    # 参与者类型：单Agent
+            capacity=1,                                                  # 只需要一个Agent
         ),
     ),
 )

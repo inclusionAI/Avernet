@@ -105,11 +105,13 @@ those references without renegotiating or selecting latest.
    admitting application to remain ADMITTED and the Open MethodBinding ACTIVE.
    Revocation retains evidence but immediately removes execution eligibility.
    These records are not Space membership, resource grants or session access.
-5. After ADMITTED, the caller invokes the task product's `start_task` Work
-   action with the Bot's authenticated `ActorContext`; it maps to the L4
-   semantic `Work.start` operation and is not a Bot built-in method. The Bot
-   then reports progress and submission through the existing product/A2A
-   ingress, which reuses the same L4 Work machinery. The generic
+5. After ADMITTED, the journey calls the injected L4
+   `ContextCollabServiceProtocol.start` with `WorkStartCommand(expected_version,
+   note)` and the Bot's authenticated `ActorContext`, not product `start_task`.
+   This explicit root-Task Work operation shares G1/G4 and the atomic Task/Collet
+   fences; starting does not dispatch a Bot or create an Activity. The Bot then
+   reports progress and submission through the existing product/A2A ingress,
+   which reuses the same L4 Work machinery. The generic
    `ContextCollabService.append_event` is not a Work API; it is a generic event
    append entrypoint.
    The shared G1 adapter requires active scoped admission for these task_commission@1 events
@@ -223,10 +225,15 @@ The case shows the real L5 calls in sequence: Query → SubmitApplication →
 Screen → Admit. Submission returns SUBMITTED, not an admission receipt; it does
 not implicitly screen, admit or start Work. SCREENING still has no participant
 binding or decision and cannot authorize Work. Admission creates the scoped
-participant binding and decision; the case then explicitly invokes the
-task product's `start_task` Work action with the Bot actor. This action maps to
-L4 semantic `Work.start`; it is not a Bot method and is not implemented by
-calling generic `append_event` directly. Open itself does not start Work.
+participant binding and decision; the case then explicitly invokes
+`collab_service.start(task_id, WorkStartCommand(expected_version, note), bot_context)`.
+This is the L4 Work.start API, not product `start_task`, a Bot method or a caller
+constructing a generic event. Its actor/event fields are chosen by L4 and its
+receipt reports the committed Task status and Collet revision. Open itself does
+not start Work. The case declares `BotSelfApplicationAdmission` with
+`COLLET_PARTICIPANT` locally, matching its Bot self-application sequence and
+activating G1's admission prerequisite; it does not change the global publisher-
+mediated template. A pre-admission start is rejected without SQL writes.
 Screening/admission use the publisher-authorized `product_policy` actor,
 not the applicant Bot. This case makes those lifecycle steps visible; it does
 not exercise the product review wrapper for this admission.

@@ -49,10 +49,12 @@ def prepare_event_append(
     actor: PrincipalRef,
     workflow_kind: str | None,
     workflow_version: int | None = None,
+    require_transition: bool = False,
 ) -> PreparedEventAppend:
     """Adjudicate Work; ordinary events never acquire a TaskUpdate.
 
-    Unknown/unmatched machine events retain existing G4 semantics. Public entry
+    Explicit Work operations require a registered, matching G4 transition.
+    Generic/unmatched events retain existing G4 semantics. Public entry
     points are responsible for product-specific strict sequence checks and G1.
     """
     if request.task_update is not None:
@@ -64,6 +66,7 @@ def prepare_event_append(
         event_kind=request.event_kind,
         payload=request.payload,
         actor=actor,
+        require_transition=require_transition,
     )
     is_work = request.event_kind.startswith("task.") and request.primitive_type in {
         "Task",
