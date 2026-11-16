@@ -17,33 +17,36 @@ pub enum StoreError {
     UnsupportedFormat { format: u32 },
 }
 
+/// Opaque dispatch recheck version, not a shard or checkpoint revision.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Revision(pub String);
 
+/// Shard-assigned identity. A checkpoint stores the identity sealed into that
+/// session, which may lag the shard's current owner until session acquisition.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SessionOwner {
+pub struct ShardOwner {
     pub instance: Instance,
     pub epoch: WorkerEpoch,
 }
 
-/// Runtime capability issued by acquisition; providers validate its authority.
+/// Session processing identity returned after acquisition/sealing. Providers
+/// validate sid-to-shard membership and the exact owner sealed in the checkpoint;
+/// a caller-created value or a larger epoch alone cannot authorize a write.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionOwnership {
     pub sid: Sid,
     pub shard: ShardId,
-    pub owner: SessionOwner,
-    pub authority: String,
+    pub owner: ShardOwner,
 }
 
 /// Not serialized into checkpoint state. A string alone is not proof of commit.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommitReceipt {
     pub sid: Sid,
-    pub owner: SessionOwner,
+    pub owner: ShardOwner,
     pub commit_id: CommitId,
     pub content_digest: Digest,
     pub sequence: CommitSeq,
-    pub revision: Revision,
     pub consumed: Option<InboxPos>,
     pub proof: String,
 }

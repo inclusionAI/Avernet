@@ -28,6 +28,8 @@ mod dispatch_tests;
 mod inbox_tests;
 #[path = "distributed_harness/ports.rs"]
 mod ports;
+#[path = "distributed_harness/recovery.rs"]
+mod recovery_tests;
 #[path = "distributed_harness/services.rs"]
 mod service_tests;
 #[path = "distributed_harness/state.rs"]

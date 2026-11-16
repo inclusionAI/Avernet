@@ -19,11 +19,10 @@ pub fn owner() -> SessionOwnership {
     SessionOwnership {
         sid: Sid("session-a".into()),
         shard: ShardId(42),
-        owner: SessionOwner {
+        owner: ShardOwner {
             instance: instance(),
             epoch: WorkerEpoch(14),
         },
-        authority: "owner-proof".into(),
     }
 }
 
@@ -45,7 +44,6 @@ pub fn proof() -> CommitReceipt {
         commit_id: CommitId("commit-8".into()),
         content_digest: Digest("checkpoint-digest".into()),
         sequence: CommitSeq(8),
-        revision: Revision("revision-8".into()),
         consumed: Some(position()),
         proof: "commit-proof".into(),
     }

@@ -14,7 +14,8 @@ Crate version: `0.1.0`. This crate depends only on serde and serde_json.
 | [dispatch](src/dispatch.rs) | Immutable dispatch specification, separately owned control and execution state |
 | [runner](src/runner.rs) | Serializable reducer state and deadlines shared with checkpoint persistence |
 
-Checkpoint, commit receipts, repository revisions and owner capabilities live
+Checkpoint, commit receipts, dispatch recheck versions, `ShardOwner` identity
+and session-scoped `SessionOwnership` identities live
 beside their [repository contracts](../../service-api/bcs-service-api/src/port/repo/distributed/README.md).
 Workflow structure reuses `bcs_domain::collaboration::StateMachineDefinition`
 at the Service API boundary; this crate stores its immutable reference and digest.

@@ -124,3 +124,37 @@ cargo +1.94.1 llvm-cov --locked -p bcs-test-support --test distributed_harness \
   fixture's opaque cursor text as a credential literal. Its value is now the
   explicit `example` placeholder; backend/generation/scope assertions are
   unchanged. The five model persistence-shape tests were rerun and passed.
+
+## Ownership contract refinement — 2026-11-16
+
+Rebased onto authoritative dev `cf9c8c414b`. The unrelated HTTP test-method
+correction is already present on dev and is not part of the PR diff.
+
+The shared identity is now `ShardOwner`; `SessionOwnership` remains scoped to
+one session. Shard claims, checkpoint envelopes, commit receipts and recovery
+responses no longer expose a separate revision. Claim and commit preconditions
+are `expected_epoch` and `expected_commit_seq`, with atomic ownership checks.
+The authority placeholders were removed from `ShardClaim`, `MembershipLease`
+and `SessionOwnership`. Exact instance/epoch, session sealing and live-registration
+checks remain required; commit proofs and dispatch scheduling versions remain.
+
+Executed from the repository root with the installed Rust 1.94.1:
+
+```sh
+cargo +1.94.1 test --locked --manifest-path apps/bcs/Cargo.toml \
+  -p bcs-dist-model -p bcs-service-api -p bcs-test-support --quiet
+```
+
+- **337 tests/doc-tests passed, 0 failed, 1 existing ignored example**, including
+  **31 distributed harness self-tests**. Added scenarios reject competing stale
+  epochs/sequences, incorrect commit receipts, an unsealed higher owner epoch,
+  repeated recovery counts, recovery writes that discard outbox, and lost leases
+  that revive or affect replacement instances.
+- Port-purity and store-boundary checks passed from `apps/bcs`; changed Rust
+  formatting, whitespace, source-file size and local Markdown links passed.
+- The tests use scripted doubles to validate the reusable assertions; no actual
+  persistence provider, role loop, lease implementation or adapter was added.
+- The Rust 1.94.0 repository pin is unchanged. Full CI/coverage on the final
+  revision, native TBase conditional-write/sealing behavior, and independent
+  recovery-metadata persistence still require provider/CI validation. Earlier
+  coverage results above are not a coverage claim for this revision.

@@ -14,13 +14,25 @@ The baseline is Avernet `5a126bd84f` from the authoritative `dev` branch.
 Existing collaboration and direct A2A behavior is unchanged. The new contracts
 are opt-in, additive declarations with no bootstrap registration.
 
+The 2026-11-16 contract refinement names the shared shard-assigned identity
+`ShardOwner` while retaining session-scoped `SessionOwnership`. Shard claims use
+an expected epoch, business commits use an expected commit sequence, and their
+records/receipts expose no independent revision. Recovery metadata updates
+remain idempotent and cannot overwrite business state/outbox. Dispatch recheck
+versions are unchanged. `ShardClaim`, `MembershipLease` and `SessionOwnership` carry no
+authority strings: providers validate exact identities and current ownership or
+unexpired registration. Old incarnations cannot mutate replacement registrations
+or revive expired leases. Session scope and exact sealed owner are validated
+atomically with commit sequence checks and writes; commit proofs remain. This updates the
+same unpublished declarations, with no runtime implementation or migration.
+
 ## Invariants
 
 1. A successful admission means a durable logical input and durable activation.
 2. Input identity, output identity, replay cursor and delivery acknowledgement
    are different types. Backend positions are not ordered by business code.
 3. Checkpoint state, consumed position and fixed outbox commit atomically under
-   owner fencing and an expected revision. Unknown is not NotApplied.
+   sealed-owner fencing and an expected business commit sequence. Unknown is not NotApplied.
 4. A required effect blocks the next business commit until confirmed. Replay
    keeps the original effect identity, digest and source commit.
 5. Event replay succeeds only with identity/content or valid compaction evidence.

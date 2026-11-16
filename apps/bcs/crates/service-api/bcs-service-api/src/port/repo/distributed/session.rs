@@ -91,10 +91,11 @@ pub struct RecoveryMetadata {
     pub last_active_at: TimestampMillis,
 }
 
+/// Loaded view; recovery metadata has an independent control write path and is
+/// not part of CommitRequest::candidate. This does not prescribe one storage row.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CheckpointEnvelope {
-    pub owner: SessionOwner,
-    pub revision: Revision,
+    pub owner: ShardOwner,
     pub checkpoint: Checkpoint,
     pub recovery: RecoveryMetadata,
 }
@@ -116,7 +117,8 @@ pub enum AcquireOutcome {
 #[derive(Debug, Clone, PartialEq)]
 pub struct CommitRequest {
     pub owner: SessionOwnership,
-    pub expected_revision: Revision,
+    /// Exact current business sequence; candidate must advance it by one.
+    pub expected_commit_seq: CommitSeq,
     pub commit_id: CommitId,
     pub content_digest: Digest,
     pub candidate: Checkpoint,
@@ -126,7 +128,7 @@ pub struct CommitRequest {
 pub enum CommitOutcome {
     Committed(CommitReceipt),
     AlreadyCommitted(CommitReceipt),
-    RevisionConflict,
+    CommitSeqConflict,
     Fenced,
     ContentConflict,
 }
@@ -142,18 +144,18 @@ pub enum CommitResolution {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RecoveryUpdate {
-    Recorded {
-        revision: Revision,
-        metadata: RecoveryMetadata,
-    },
+    Recorded { metadata: RecoveryMetadata },
     Conflict,
     Fenced,
 }
 
 #[async_trait]
 pub trait SessionStorePort: Send + Sync {
-    /// Validate claim, create or seal owner, then load latest preserved business data.
-    /// Old pre-seal commits survive; old post-seal writes fail. No outbox clearing.
+    /// Validate shard/node/incarnation/epoch and current claim validity against
+    /// stored ownership, then create or seal its ShardOwner into this session,
+    /// then load latest preserved business data. Claiming a shard alone cannot
+    /// authorize session writes. Preserve commit_seq/outbox on takeover; new
+    /// checkpoints start at commit_seq=0. Old post-seal writes fail.
     async fn acquire(
         &self,
         sid: &Sid,
@@ -161,8 +163,14 @@ pub trait SessionStorePort: Send + Sync {
         initial: Checkpoint,
     ) -> Result<AcquireOutcome, StoreError>;
     async fn load(&self, sid: &Sid) -> Result<Option<CheckpointEnvelope>, StoreError>;
-    /// Atomic owner/revision check AND full candidate write. An equal version alone
-    /// is not idempotency evidence: check commit identity and content digest.
+    /// Atomically validate sid-to-shard membership, the sealed owner's exact
+    /// node/incarnation/epoch, and expected_commit_seq AND
+    /// write the full candidate with commit_seq=expected_commit_seq+1 (no overflow).
+    /// Same-owner competing commits at an advanced head return CommitSeqConflict;
+    /// a lost owner is Fenced. With valid ownership, an exact ID/content retry
+    /// returns its receipt despite its old expected sequence; equality alone is not
+    /// proof of success. Preserve independently updated recovery metadata, except
+    /// for an atomic failure-streak reset when this commit makes business progress.
     async fn commit(&self, request: CommitRequest) -> Result<CommitOutcome, StoreError>;
     async fn resolve_commit(
         &self,
@@ -170,12 +178,16 @@ pub trait SessionStorePort: Send + Sync {
         commit_id: &CommitId,
         digest: &Digest,
     ) -> Result<CommitResolution, StoreError>;
-    /// Before replay; updates metadata/revision, preserves batch. Only business
-    /// progress resets the streak; repeated metadata writes are not progress.
+    /// Before risky replay, atomically validate the sealed owner and business head
+    /// and record the attempt once. Repeated attempt IDs do not increment again;
+    /// an advanced business head returns Conflict, a lost owner Fenced.
+    /// Update only control metadata, never owner/commit_seq/checkpoint/outbox.
+    /// Providers serialize metadata updates without exposing another revision;
+    /// stale attempts cannot undo a progress reset. Metadata writes are not progress.
     async fn record_recovery_attempt(
         &self,
         owner: &SessionOwnership,
-        expected: Revision,
+        expected_commit_seq: CommitSeq,
         attempt: RequestId,
     ) -> Result<RecoveryUpdate, StoreError>;
 }

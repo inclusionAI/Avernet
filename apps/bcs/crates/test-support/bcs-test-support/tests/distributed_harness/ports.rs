@@ -124,12 +124,12 @@ impl SessionStorePort for Script {
     async fn record_recovery_attempt(
         &self,
         owner: &SessionOwnership,
-        expected: Revision,
+        expected_commit_seq: CommitSeq,
         attempt: RequestId,
     ) -> Result<RecoveryUpdate, StoreError> {
         self.call(
             "SessionStorePort::record_recovery_attempt",
-            (owner, expected, attempt),
+            (owner, expected_commit_seq, attempt),
         )
     }
 }
