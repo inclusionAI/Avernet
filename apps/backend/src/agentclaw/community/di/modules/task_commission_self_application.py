@@ -29,7 +29,6 @@ from agentclaw.community.core.task.context_collab.l5_methods.open_profile import
     ParticipationType,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime import (
-    _now,
     current_axes,
 )
 from agentclaw.community.core.task.context_collab.l6_products.binding import (
@@ -151,12 +150,10 @@ class TaskCommissionSelfApplicationAdapter(TaskCommissionOpenMethodAdapter):
         policy = profile.require_publication().admission
         return self._open_ops.publish_opportunity(
             OpenOpportunityCommand(
-                collab_context_id=command.collab_context_id,
-                context=context,
-                scope_ref=command.collab_context_id,
+                collet_id=command.collab_context_id,
+                actor_context=context,
                 participation_type=policy.participation_type,
                 capacity=policy.capacity,
-                opens_at=_now(),
                 admission_policy_refs=[_POLICY_REF],
                 reason="task_commission.owner_authorized_auto_admission",
             ),

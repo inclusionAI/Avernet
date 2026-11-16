@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from agentclaw.community.core.task.context_collab.l5_methods.open_profile import (
     ParticipationType,
@@ -393,9 +393,10 @@ class SwarmStageOutcomeRequest(BaseModel):
 
 
 class OpenOpportunityRequest(BaseModel):
-    """机会发布请求;解析参与类型枚举,窗口和作用域校验由服务层负责。"""
+    """机会发布请求;作用域取路径 Collet,开放起点由服务端生成。"""
 
-    scope_ref: str = Field(..., description="机会作用域引用")
+    model_config = ConfigDict(extra="forbid")
+
     participation_type: ParticipationType = Field(
         ...,
         description=(
@@ -403,7 +404,6 @@ class OpenOpportunityRequest(BaseModel):
             "SINGLE_CONTRIBUTION"
         ),
     )
-    opens_at: str = Field(..., description="开放起点(ISO)")
     opportunity_id: str | None = Field(
         None, description="机会幂等键(spec §8.3);缺省服务端生成"
     )
@@ -416,14 +416,12 @@ class OpenOpportunityRequest(BaseModel):
     reason: str = Field("", description="发布原因;落审计")
 
     def to_domain(
-        self, collab_context_id: str, context: ActorContext
+        self, collet_id: str, actor_context: ActorContext
     ) -> OpenOpportunityCommand:
         return OpenOpportunityCommand(
-            collab_context_id=collab_context_id,
-            context=context,
-            scope_ref=self.scope_ref,
+            collet_id=collet_id,
+            actor_context=actor_context,
             participation_type=self.participation_type,
-            opens_at=self.opens_at,
             opportunity_id=self.opportunity_id,
             requirement_refs=self.requirement_refs,
             admission_policy_refs=self.admission_policy_refs,

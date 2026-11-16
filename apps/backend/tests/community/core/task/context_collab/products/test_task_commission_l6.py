@@ -231,11 +231,10 @@ def test_adapter_executes_exact_selected_policy_and_declared_steps():
     assert tuple(call[0] for call in ops.mock_calls) == policy.steps
     args = ops.publish_opportunity.call_args.args
     assert len(args) == 1
-    assert args[0].collab_context_id == command.collab_context_id
-    assert args[0].context is actor
+    assert args[0].collet_id == command.collab_context_id
+    assert args[0].actor_context is actor
     assert args[0].capacity == policy.capacity == 2
-    assert args[0].participation_type == policy.participation_type.value
-    assert args[0].scope_ref == command.collab_context_id
+    assert args[0].participation_type is policy.participation_type
     application = ops.submit_application.call_args.args[3]
     assert application.applicant_agent_ref == ASSIGNEE
     assert application.accountable_principal_ref == actor.actor.principal_id

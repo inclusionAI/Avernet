@@ -202,11 +202,9 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
         # 4、调用L5的OPEN方法-创建机会
         published = l5_open_method.publish_opportunity(
             OpenOpportunityCommand(
-                collab_context_id=collect_id,
-                context=HUMAN, # actor context
-                scope_ref=collect_id,
+                collet_id=collect_id,
+                actor_context=HUMAN, # actor context
                 participation_type=ParticipationType.COLLET_PARTICIPANT,
-                opens_at=(datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat(),
                 admission_policy_refs=[
                     "task_commission.designated_bot_self_application/1" #录取策略：指定 Bot 自己申请，并由任务产品的策略自动审核
                 ],

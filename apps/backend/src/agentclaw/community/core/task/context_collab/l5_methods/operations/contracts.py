@@ -7,8 +7,9 @@ L5 方法族命令/结果对象与四个服务协议;模式沿用既有
 inspection)、``GroupMethodOpsServiceProtocol``(spec §5 裁决:Single
 四操作与 group 八操作共用一个协议,profile 操作族按 spec §4.1/§4.2
 落齐)、``SwarmMethodOpsServiceProtocol``(§4.3)、
-``OpenMethodOpsServiceProtocol``(§4.4)。方法签名统一以
-``(collab_context_id, method_binding_id, ...)`` 起头;创建类命令的
+``OpenMethodOpsServiceProtocol``(§4.4)。多数方法签名以
+``(collab_context_id, method_binding_id, ...)`` 起头;Open 发布只接收完整命令,
+机会发现只接收 actor_context。创建类命令的
 幂等键(同 ID 同形态返回已存在对象,spec §8.3)一律可空缺省,由
 服务端生成。实现落在本层 operations/(T8–T12),本模块只有契约。
 """
@@ -229,14 +230,13 @@ class SwarmStageOutcomeCommand:
 class OpenOpportunityCommand:
     """发布机会的完整输入;服务解析 Collet 内唯一 ACTIVE Open 绑定。
 
-    ``context`` 由可信调用边界提供;``opportunity_id`` 为幂等键。
+    ``actor_context`` 由可信调用边界提供;``opportunity_id`` 为幂等键。
+    机会作用域固定为 ``collet_id``,开放起点由服务端在首次发布时取当前时间。
     """
 
-    collab_context_id: str
-    scope_ref: str
+    collet_id: str
+    actor_context: ActorContext
     participation_type: ParticipationType  # 录取后的参与形式,不表示参与者数量。
-    opens_at: str
-    context: ActorContext
     opportunity_id: str | None = None
     requirement_refs: list[str] = field(default_factory=list)
     admission_policy_refs: list[str] = field(default_factory=list)

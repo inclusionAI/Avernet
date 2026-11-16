@@ -2,6 +2,7 @@
 
 import inspect
 from dataclasses import fields, replace
+from datetime import datetime, timedelta, timezone
 from typing import get_type_hints
 from unittest.mock import Mock
 
@@ -24,6 +25,11 @@ from agentclaw.community.core.task.context_collab.l5_methods.open_profile import
 from agentclaw.community.core.task.context_collab.l5_methods.operations.contracts import (
     OpenMethodOpsServiceProtocol,
     OpenOpportunityCommand,
+    OpenOpportunityOpCommand,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.operations.open import (
+    base as open_base,
+    opportunity as opportunity_ops,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.operations.open.service import (
     OpenMethodService,
@@ -55,9 +61,14 @@ def test_protocol_and_implementation_accept_only_a_complete_command():
             "self", "command",
         )
     command = opportunity_command()
-    names = {field.name for field in fields(OpenOpportunityCommand)}
-    assert not names & {"binding_id", "method_binding_id"}
-    for required in ("collab_context_id", "context"):
+    field_names = tuple(field.name for field in fields(OpenOpportunityCommand))
+    assert field_names[:2] == ("collet_id", "actor_context")
+    names = set(field_names)
+    assert not names & {
+        "binding_id", "method_binding_id", "collab_context_id", "context",
+        "scope_ref", "opens_at",
+    }
+    for required in ("collet_id", "actor_context", "participation_type"):
         kwargs = {name: getattr(command, name) for name in names - {required}}
         with pytest.raises(TypeError, match=required):
             OpenOpportunityCommand(**kwargs)
@@ -74,9 +85,7 @@ def test_publish_preserves_participation_enum_and_string_wire_shape(
     publication, participation_type
 ):
     store, _, binding, service = publication
-    command = opportunity_command(
-        scope_ref=COLLET_ID, participation_type=participation_type
-    )
+    command = opportunity_command(participation_type=participation_type)
     result = service.publish_opportunity(command)
     row = store.get_opportunity(AXES, result.object_id, binding.method_binding_id, COLLET_ID)
     assert row.participation_type is participation_type
@@ -104,10 +113,10 @@ def test_publish_resolves_unique_open_binding_and_preserves_audit(
     result = service.publish_opportunity(command)
     assert result.method_binding_id == binding.method_binding_id
     row = store.get_opportunity(AXES, result.object_id, result.method_binding_id, COLLET_ID)
-    assert row.transitioned_by == command.context.actor.principal_id
+    assert row.transitioned_by == command.actor_context.actor.principal_id
     assert row.transition_reason == command.reason
     # Participation scope is deliberately not the binding's parent scope.
-    assert row.scope_ref == command.scope_ref != binding.parent_scope_ref
+    assert row.scope_ref == command.collet_id != binding.parent_scope_ref
     assert service.publish_opportunity(command) == result
     assert len(store.list_opportunities(AXES, binding.method_binding_id, COLLET_ID)) == 1
 
@@ -176,7 +185,9 @@ def test_command_actor_is_authorized_even_for_an_idempotent_replay(publication):
         if published:
             service.publish_opportunity(command)
         with pytest.raises(ContextCollabValidationError, match="stranger"):
-            service.publish_opportunity(replace(command, context=make_actor("stranger")))
+            service.publish_opportunity(
+                replace(command, actor_context=make_actor("stranger"))
+            )
         rows = store.list_opportunities(AXES, binding.method_binding_id, COLLET_ID)
         assert len(rows) == int(published)
 
@@ -186,7 +197,7 @@ def test_missing_or_invalid_collet_does_not_fall_back_to_another_binding(publica
     store, _, binding, service = publication
     error = ContextCollabNotFoundError if collet.strip() else ContextCollabValidationError
     with pytest.raises(error):
-        service.publish_opportunity(opportunity_command(collab_context_id=collet))
+        service.publish_opportunity(opportunity_command(collet_id=collet))
     assert store.list_opportunities(AXES, binding.method_binding_id, COLLET_ID) == []
 
 
@@ -198,3 +209,58 @@ def test_publish_propagates_storage_write_failure(publication):
     with pytest.raises(RuntimeError, match="write failed"):
         service.publish_opportunity(opportunity_command())
     assert store.list_opportunities(AXES, binding.method_binding_id, COLLET_ID) == []
+
+
+@pytest.mark.parametrize("removed", [
+    "collab_context_id", "context", "scope_ref", "opens_at",
+    "binding_id", "method_binding_id",
+])
+def test_publish_command_rejects_removed_parameters(removed):
+    command = opportunity_command()
+    kwargs = {field.name: getattr(command, field.name) for field in fields(command)}
+    with pytest.raises(TypeError, match=removed):
+        OpenOpportunityCommand(**kwargs, **{removed: "caller_override"})
+
+
+def test_publish_opens_immediately_at_server_time_in_own_collet(publication):
+    store, _, binding, service = publication
+    before = datetime.now(timezone.utc)
+    result = service.publish_opportunity(opportunity_command())
+    after = datetime.now(timezone.utc)
+    row = store.get_opportunity(AXES, result.object_id, binding.method_binding_id, COLLET_ID)
+    opens_at = datetime.fromisoformat(row.opens_at)
+    assert before <= opens_at <= after
+    assert opens_at.utcoffset() == timedelta(0)
+    assert row.transitioned_at == row.opens_at
+    assert row.scope_ref == COLLET_ID
+    assert service.query_opportunities(actor_context=make_actor()) == (row,)
+
+
+@pytest.mark.parametrize("transition", [None, "pause_opportunity", "close_opportunity"])
+def test_publish_replay_keeps_first_timestamp_and_state_after_expiry(
+    publication, monkeypatch, transition
+):
+    store, _, binding, service = publication
+    clock = Mock(wraps=datetime)
+    first_time = datetime(2030, 1, 1, tzinfo=timezone.utc)
+    clock.now.return_value = first_time
+    monkeypatch.setattr(open_base, "datetime", clock)
+    monkeypatch.setattr(opportunity_ops, "datetime", clock)
+    command = opportunity_command(closes_at=(first_time + timedelta(hours=1)).isoformat())
+    first = service.publish_opportunity(command)
+    if transition is not None:
+        getattr(service, transition)(
+            COLLET_ID, binding.method_binding_id, first.object_id,
+            OpenOpportunityOpCommand(), make_actor(),
+        )
+    row = store.get_opportunity(AXES, first.object_id, binding.method_binding_id, COLLET_ID)
+    clock.now.return_value = first_time + timedelta(hours=2)
+    replay = service.publish_opportunity(command)
+    assert replay.object_id == first.object_id
+    assert replay.state == row.state.value
+    assert row.opens_at == first_time.isoformat()
+    assert store.get_opportunity(
+        AXES, first.object_id, binding.method_binding_id, COLLET_ID
+    ) is row
+    assert store.list_opportunities(AXES, binding.method_binding_id, COLLET_ID) == [row]
+    assert service.query_opportunities(actor_context=make_actor()) == ()

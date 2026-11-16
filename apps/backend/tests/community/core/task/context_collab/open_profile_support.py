@@ -206,13 +206,11 @@ def active_open_binding(
 
 
 def opportunity_command(**overrides) -> OpenOpportunityCommand:
-    """机会发布命令基型:未来开窗、无穷闭窗、GROUP_MEMBER 型。"""
+    """机会发布命令基型:立即开放、无穷闭窗、GROUP_MEMBER 型。"""
     fields = {
-        "collab_context_id": COLLET_ID,
-        "context": make_actor(),
-        "scope_ref": "task_scope_open_001",
+        "collet_id": COLLET_ID,
+        "actor_context": make_actor(),
         "participation_type": ParticipationType.GROUP_MEMBER,
-        "opens_at": _iso_offset(-1),
         "opportunity_id": "opp_alpha",
         "requirement_refs": ["req://search"],
         "admission_policy_refs": ["policy://review"],
