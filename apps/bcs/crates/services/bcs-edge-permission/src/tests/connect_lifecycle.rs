@@ -502,10 +502,10 @@ use super::*;
         let mut sorted = ids.clone();
         sorted.sort();
         assert_eq!(sorted, vec!["x:lf1".to_string(), "x:lf2".to_string()]);
-        // Entries carry the right kind and no enrichment (T13 leaves it None).
+        // Entries carry the right kind; bot names are resolved from bot config.
         for f in &friends {
             assert_eq!(f.kind, ActorKind::Bot);
-            assert!(f.name.is_none());
+            assert!(f.name.is_some(), "bot name should be populated from bot config");
         }
     }
     #[tokio::test]
