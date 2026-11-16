@@ -1,0 +1,56 @@
+apps/backend/src/agentclaw/community/core/task/context_collab/README.md
+  h_059e888e5e4e82 67-74,102
+apps/backend/src/agentclaw/community/core/task/context_collab/l4_context_primitives/participants.py
+  h_059e888e5e4e82 1,6-7,118-168
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/open_profile.py
+  h_059e888e5e4e82 23-25,91-92,408-409
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/operations/contracts.py
+  h_059e888e5e4e82 264-269,583-591
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/operations/initialization.py
+  h_059e888e5e4e82 116,139,177
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/operations/open/application.py
+  h_059e888e5e4e82 19-21,28,49-51,301-304,311-318,334-341,345-358,578-580
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/operations/open/opportunity.py
+  h_059e888e5e4e82 200-201,271-274,276
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/README.md
+  h_059e888e5e4e82 55,139-144
+apps/backend/src/agentclaw/community/core/task/context_collab/persistence/method_store.py
+  h_059e888e5e4e82 29-31,462-487
+apps/backend/src/agentclaw/community/core/task/context_collab/persistence/method_store_impl/base.py
+  h_059e888e5e4e82 42
+apps/backend/src/agentclaw/community/core/task/context_collab/persistence/method_store_impl/open_slice.py
+  h_059e888e5e4e82 31-33,279-326
+apps/backend/src/agentclaw/community/core/task/context_collab/products/task_commission/README.md
+  h_059e888e5e4e82 11,21-22,50-52,54-56,60-67,70-78,90-91,95-115,119-121,130-166,170-172,187-211,214-216,265,356,386-388,401-409,411-416
+apps/backend/src/agentclaw/community/core/task/context_collab/products/task_commission/profile.py
+  h_059e888e5e4e82 137,139,145
+apps/backend/src/agentclaw/community/core/task/context_collab/products/task_commission/publication.py
+  h_059e888e5e4e82 75,85
+apps/backend/src/agentclaw/community/core/task/context_collab/products/task_commission/service.py
+  h_059e888e5e4e82 4,216-217,293-311
+apps/backend/src/agentclaw/community/core/task/context_collab/products/task_commission/service_api.py
+  h_059e888e5e4e82 178,195-206,253-264
+apps/backend/src/agentclaw/community/di/modules/task_commission_method_ops_adapter.py
+  h_059e888e5e4e82 161-167
+apps/backend/src/agentclaw/community/di/modules/task_commission_self_application.py
+  h_059e888e5e4e82 3-5,94,180,235-285,294,302,320,334-338,340,348-352,354-358,374-375,380-384
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_end_to_end.py
+  h_059e888e5e4e82 4-7,17,31-33,52-53,58-60,62-64,87-88,96-99,173,186,479,484,513-519,532,542,560-577,579-629,631,638,641,643-650,652-658,664-682,771,786-973
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_l6.py
+  h_059e888e5e4e82 273,281,297-298
+apps/backend/tests/community/core/task/context_collab/test_open_collet_participation.py
+  h_059e888e5e4e82 1-204
+apps/backend/tests/community/core/task/context_collab/test_open_lifecycle.py
+  h_059e888e5e4e82 6,506-507,509,516
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "eca1cbcdc40a4a8035f203782d4d93da15d7fcce",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

@@ -1,0 +1,31 @@
+engine/adapter/src/engine/community/core/dws_hosting/tests/test_hosting_gateway.py
+  s_3b198be521bb7f::t_029e57e1e17efb 279-281,291-297
+engine/adapter/src/engine/community/core/dws_hosting/tests/test_llm_budgets.py
+  s_3b198be521bb7f::t_029e57e1e17efb 1-39
+engine/adapter/src/engine/community/core/dws_hosting/tests/test_scope.py
+  s_3b198be521bb7f::t_029e57e1e17efb 116-117,142
+engine/adapter/src/engine/community/core/dws_hosting/scope.py
+  s_3b198be521bb7f::t_029e57e1e17efb 45
+engine/adapter/src/engine/community/plugins/dws_hosting/llm_task.py
+  s_3b198be521bb7f::t_029e57e1e17efb 42,44,50
+engine/adapter/src/engine/community/core/dws_hosting/reply_review.py
+  s_3b198be521bb7f::t_029e57e1e17efb 170
+engine/adapter/src/engine/community/core/dws_hosting/decision_repair.py
+  s_3b198be521bb7f::t_029e57e1e17efb 58
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d4a456cf2a2a626e8ca2a6280e534aff1c802ad0",
+  "prompts": {},
+  "sessions": {
+    "s_3b198be521bb7f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a166c7-61d8-7221-aa2e-e6efde122735",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "evilcoda <yipu.hj@antgroup.com>"
+    }
+  }
+}
