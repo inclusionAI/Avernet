@@ -571,3 +571,6 @@ async fn group_context_openapi_routes_require_authentication_and_group_id() {
         assert_eq!(body["request_id"], "request-123");
     }
 }
+
+#[path = "group_routes/group_context.rs"]
+mod group_context;

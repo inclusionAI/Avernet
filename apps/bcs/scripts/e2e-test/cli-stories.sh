@@ -653,6 +653,56 @@ _cli_story_exercise_shared_info() {
     assert_json_eq "Group-only Human view excludes entries restricted to a managed Bot" "$RESPONSE" "items" "[]"
 }
 
+# Exercise the browser-facing contract against the same Group and Session.
+_cli_story_exercise_context_openapi() {
+    local group_id="$1" session_id="$2" round_id="$3" updated="$4"
+    local prefix="/openapi/v1/collaboration/groupcontext"
+    local query="groupId=$(urlencode "$group_id")"
+    local session_query="$query&sessionId=$(urlencode "$session_id")"
+    local signing_key="${AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE:-avernet-dev-signing-key-NOT-FOR-PROD}"
+    local principal
+    principal=$(python3 "${SCRIPT_DIR}/group_session_ws_probe.py" principal \
+        --user-id "$BCS_MOCK_USER_ID" --username "$BCS_MOCK_USER_NICK_NAME" \
+        --tenant bcs-e2e --signing-key "$signing_key")
+    assert_not_empty "Group Context OpenAPI fixture has a Gateway Principal" "$principal"
+    [[ -n "$principal" ]] || return 1
+    local principal_header="X-Avernet-Principal: $principal"
+
+    api_request_headers POST "$prefix/shared-info?$session_query&view_bot_id=$(urlencode "$BOT_PM_UUID")" '{}' "$principal_header"
+    require_status "Human reads OpenAPI shared info as the driver Bot" "200" || return
+    assert_eq "OpenAPI shared info includes the latest Group context" \
+        "$(_cli_json_array_has_object "$RESPONSE" data.items scope_level group content "$updated")" "1"
+    assert_eq "OpenAPI shared info includes the Session context" \
+        "$(_cli_json_array_has_object "$RESPONSE" data.items scope_level session scope "$session_id")" "1"
+    assert_eq "OpenAPI shared info includes the Round context" \
+        "$(_cli_json_array_has_object "$RESPONSE" data.items scope_level round scope "$round_id")" "1"
+
+    api_request_headers POST "$prefix/manage/add-preset?$query" '{"name":"BrowserTimeline","description":"Browser timeline"}' "$principal_header"
+    require_status "Human adds a preset through OpenAPI" "200" || return
+    api_request_headers POST "$prefix/manage/add-preset?$query" '{"name":"BrowserTimeline"}' "$principal_header"
+    require_status "OpenAPI rejects a duplicate preset" "409" || return
+
+    api_request_headers POST "$prefix/list-preset?$session_query" '{}' "$principal_header"
+    require_status "Human lists presets through OpenAPI" "200" || return
+    assert_eq "OpenAPI preset list includes the created preset" \
+        "$(_cli_json_array_has_object "$RESPONSE" data.presets name BrowserTimeline description "Browser timeline")" "1"
+
+    api_request_headers POST "$prefix/manage/update-preset?$query" \
+        '{"name":"BrowserTimeline","new_name":"BrowserPlan","description":"Updated browser timeline"}' "$principal_header"
+    require_status "Human updates a preset through OpenAPI" "200" || return
+    api_request_headers POST "$prefix/manage/list-preset?$query" '{}' "$principal_header"
+    require_status "Human lists managed presets through OpenAPI" "200" || return
+    assert_json_eq "OpenAPI management list confirms the Human can manage presets" "$RESPONSE" data.can_manage true
+    assert_eq "OpenAPI management list includes the renamed preset" \
+        "$(_cli_json_array_has_object "$RESPONSE" data.presets name BrowserPlan description "Updated browser timeline")" "1"
+
+    api_request_headers POST "$prefix/manage/delete-preset?$query" '{"name":"BrowserPlan"}' "$principal_header"
+    require_status "Human deletes a preset through OpenAPI" "200" || return
+    api_request_headers POST "$prefix/manage/list-preset?$query" '{}' "$principal_header"
+    require_status "Human lists managed presets after deletion" "200" || return
+    assert_json_eq "OpenAPI management list no longer returns the deleted preset" "$RESPONSE" data.presets '[]'
+}
+
 # User story: The driver Bot owner manages Preset definitions, and Bots
 # discover and use them from Group and Session membership.
 # The same workspace exercises ordinary Group Context at each scope.
@@ -764,6 +814,11 @@ story_cli_operator_manages_group_context() {
     }
 
     _cli_story_exercise_shared_info "$group_id" "$session_id" "$ctx_name" "$round_id" "$updated" || {
+        api_delete "/groups/${group_id}?bot_id=${BOT_PM_UUID}"
+        return
+    }
+
+    _cli_story_exercise_context_openapi "$group_id" "$session_id" "$round_id" "$updated" || {
         api_delete "/groups/${group_id}?bot_id=${BOT_PM_UUID}"
         return
     }
