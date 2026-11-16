@@ -2,6 +2,7 @@
 
 import inspect
 from dataclasses import fields, replace
+from typing import get_type_hints
 from unittest.mock import Mock
 
 import pytest
@@ -16,6 +17,9 @@ from agentclaw.community.core.task.context_collab.g1_secure_govern.method_author
 from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
     BindingState,
     top_level_binding_id,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.open_profile import (
+    ParticipationType,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.operations.contracts import (
     OpenMethodOpsServiceProtocol,
@@ -57,6 +61,29 @@ def test_protocol_and_implementation_accept_only_a_complete_command():
         kwargs = {name: getattr(command, name) for name in names - {required}}
         with pytest.raises(TypeError, match=required):
             OpenOpportunityCommand(**kwargs)
+
+
+def test_opportunity_command_requires_the_existing_participation_enum():
+    annotation = get_type_hints(OpenOpportunityCommand)["participation_type"]
+    assert annotation is ParticipationType
+    assert opportunity_command().participation_type is ParticipationType.GROUP_MEMBER
+
+
+@pytest.mark.parametrize("participation_type", list(ParticipationType))
+def test_publish_preserves_participation_enum_and_string_wire_shape(
+    publication, participation_type
+):
+    store, _, binding, service = publication
+    command = opportunity_command(
+        scope_ref=COLLET_ID, participation_type=participation_type
+    )
+    result = service.publish_opportunity(command)
+    row = store.get_opportunity(AXES, result.object_id, binding.method_binding_id, COLLET_ID)
+    assert row.participation_type is participation_type
+    wire_value = row.to_dict()["participation_type"]
+    assert type(wire_value) is str
+    assert wire_value == participation_type.value
+    assert service.publish_opportunity(command) == result
 
 
 @pytest.mark.parametrize("method_kind", ["Open", "Open + Group"])

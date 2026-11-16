@@ -225,7 +225,7 @@ class OpenOpportunityOpsMixin(OpenMethodServiceBase, OpenMethodOpsServiceProtoco
                 "opportunity_id": opportunity_id,
                 "method_binding_id": method_binding_id,
                 "scope_ref": command.scope_ref,
-                "participation_type": command.participation_type,
+                "participation_type": command.participation_type.value,
                 "requirement_refs": list(command.requirement_refs),
                 "admission_policy_refs": list(command.admission_policy_refs),
                 "capacity": command.capacity,

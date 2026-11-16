@@ -370,6 +370,24 @@ class TestMethodBindingsDelivery:
         assert application.status_code == 200, application.text
         assert application.json()["data"]["state"] == "SUBMITTED"
 
+    @pytest.mark.parametrize("value", ["unknown", "group_member", None])
+    def test_open_publication_rejects_invalid_participation_type(self, client_world, value):
+        created = client_world.post(
+            f"{PREFIX}/context_collab", json=create_body("Open + Group")
+        )
+        assert created.status_code == 200, created.text
+        collab_id = created.json()["data"]["collab_context_id"]
+        rejected = client_world.post(
+            f"{PREFIX}/context_collab/{collab_id}/open/opportunities",
+            json={
+                "scope_ref": collab_id,
+                "participation_type": value,
+                "opens_at": "2026-01-01T00:00:00+00:00",
+            },
+        )
+        assert rejected.status_code == 422, rejected.text
+        assert rejected.json()["detail"][0]["loc"] == ["body", "participation_type"]
+
     @pytest.mark.parametrize(
         "case,status", [("missing", 404), ("ambiguous", 422), ("stranger", 422)]
     )

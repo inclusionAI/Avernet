@@ -165,7 +165,7 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
                 admission=BotSelfApplicationAdmission(                # 指定执行者、发布人代办录取的策略
                     applicant_role="assignee",
                     accountable_role="owner",
-                    participation_type=ParticipationType.COLLET_PARTICIPANT,  # 当前 Collet 的参与者：单Agent
+                    participation_type=ParticipationType.COLLET_PARTICIPANT,  # 录取为当前 Collet 的参与者
                     capacity=1,    # 最多录取一个申请者
                 ),
             ),
@@ -205,7 +205,7 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
                 collab_context_id=collect_id,
                 context=HUMAN, # actor context
                 scope_ref=collect_id,
-                participation_type="COLLET_PARTICIPANT",       # TODO
+                participation_type=ParticipationType.COLLET_PARTICIPANT,
                 opens_at=(datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat(),
                 admission_policy_refs=[
                     "task_commission.designated_bot_self_application/1" #录取策略：指定 Bot 自己申请，并由任务产品的策略自动审核
