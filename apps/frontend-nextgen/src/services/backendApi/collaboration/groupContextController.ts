@@ -36,7 +36,7 @@ async function request<T>(operation: string, view: GroupContextView, data: objec
     signal,
     injectUserId: false,
   });
-  if (response.data == null) {
+  if (response.data === null || response.data === undefined) {
     throw new Error(response.message ?? '接口返回为空');
   }
   return response.data;
