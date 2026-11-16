@@ -173,7 +173,9 @@ async fn unresponsive_close_peer_does_not_hold_shutdown_indefinitely() {
 #[tokio::test]
 async fn bot_connect_timeout_closes_before_retry_and_stop_prevents_reconnect() {
     let mut peer = Peer::new().await;
-    peer.config.plugin.as_mut().unwrap().connect_timeout_ms = 100;
+    // Leave CI scheduling headroom for the loopback peer to receive bot.connect;
+    // this test targets the unanswered login timeout, not WebSocket setup latency.
+    peer.config.plugin.as_mut().unwrap().connect_timeout_ms = 1000;
     let (stop, task) = peer.start();
     let (mut socket, _) = peer.accept().await;
     expect_close(&mut socket).await;
