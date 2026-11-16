@@ -6,7 +6,7 @@ from injector import inject
 from agentclaw.community.core.bot_management.engines.registry import (
     resolve_restart_strategy,
 )
-from agentclaw.community.core.bot_management.engines.recycle_contract import (
+from agentclaw.community.core.bot_management.engines.restart_contract import (
     RecycleServices,
 )
 

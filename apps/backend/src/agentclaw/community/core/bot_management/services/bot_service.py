@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Callable, Optional, Dict, Any, List, Literal, Tuple, TYPE_CHECKING
 
 from agentclaw.community.core.bot_management.engines.registry import assert_lifecycle_mutable
-from .resource_mutation import held_resource_lock, serialize_resource_release
+from agentclaw.community.core.bot_management.engines.provisioning import held_resource_lock, serialize_resource_release
 from agentclaw.community.core.caller_identity.scheduled_refresh import ScheduledCallerRefreshProtocol
 from agentclaw.community.core.common_config.bot_config_protocol import BotStoragePolicyProtocol
 from agentclaw.community.core.bot_management.avatar import validate_avatar_storage

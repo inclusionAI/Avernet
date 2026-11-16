@@ -42,7 +42,7 @@ from agentclaw.community.core.aicoding.services.workspace_hosting_workitem_servi
 from agentclaw.community.core.aicoding.services.workspace_service import (
     WorkspaceService,
 )
-from agentclaw.community.core.bot_management.engines.aicoding.recycle_release import (
+from agentclaw.community.core.bot_management.engines.aicoding.recycle_runtime import (
     ArcaRecycleTransport,
 )
 from agentclaw.community.core.bot_management.engines.aicoding.recycle_runtime import (
@@ -59,7 +59,7 @@ from agentclaw.community.core.bot_management.engines.aicoding.recycle_task impor
 from agentclaw.community.core.bot_management.engines.aicoding.restart_dependencies import (
     RestartBackupDependencies,
 )
-from agentclaw.community.core.bot_management.engines.recycle_contract import (
+from agentclaw.community.core.bot_management.engines.restart_contract import (
     RecycleServices,
 )
 from agentclaw.community.core.bot_management.engines.registry import (

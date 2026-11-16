@@ -459,7 +459,7 @@ engines invoke the existing synchronous callback, while `AicodingRecycleMixin`
 admits durable work. `prepare_recycle` reuses `prepare_restart` inside AICoding,
 including its config reader, shared backup helper, receipts and timeout constants.
 The coding package owns `recycle_task`, `recycle_state`, `recycle_runtime` and
-`recycle_release`; it does not add methods to the shared DeviceService surface.
+`recycle_runtime`; it does not add methods to the shared DeviceService surface.
 ARCA SDK primitives are bound through `ArcaRecycleTransport` in composition roots,
 like `ArcaRestartTransport`; BaaS/local release uses existing BaaS capabilities.
 Generic lifecycle calls dispatch engine veto/release hooks and never interpret
