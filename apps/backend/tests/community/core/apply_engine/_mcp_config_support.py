@@ -9,7 +9,10 @@ from agentclaw.community.core.apply_engine.desired_state import DesiredState
 from agentclaw.community.core.apply_engine.constructs import Category
 from agentclaw.community.core.apply_engine.delivery import ArcaDelivery
 from agentclaw.community.core.apply_engine.capabilities import resolve_capabilities
-from agentclaw.community.core.apply_engine.materialisers.mcp import McpMaterialiser
+from agentclaw.community.core.apply_engine.materialisers.capabilities import CapabilitiesMaterialiser
+from agentclaw.community.core.apply_engine.skill_set_apply_delegates import DeviceSkillSetApply, PlatformSkillSetApply
+from agentclaw.community.core.skill_center.services.skill_set_management_service import SkillSetManagementService
+from types import SimpleNamespace
 from agentclaw.community.core.apply_engine.orchestrator import ApplyOrchestrator
 from agentclaw.community.core.bot_genome.models import BotRef
 from agentclaw.community.core.mcp.services.config_service import MCPConfigService
@@ -26,8 +29,9 @@ from agentclaw.community.core.skill_center.services.skill_version_resolver impor
 from agentclaw.community.di.config import McpRuntimeCredentialsConfig
 from tests.community.core.bot_genome.test_bot_state import _reader
 
-from ._fakes import FakeManifestContent, manifest_compiler
-from .test_capability_full_replace_contract import _Audit, _Authorization, _Center, _Database, _Runtime, _context
+from ._fakes import FakeManifestContent, manifest_compiler, real_validator, build_skill_zip, seeded_object_store, FakeObjectCredentials, oss_source
+from agentclaw.community.core.bot_config_manifest.sources.source_resolver import DeclaredSourceResolver
+from .test_capability_full_replace_contract import _Audit, _Authorization, _Center, _Database, _Runtime, _context, _PersistedSkillPackages, _PersistedSkillQuery
 
 
 class Center(_Center):
@@ -51,6 +55,7 @@ class Center(_Center):
 
 class McpWorld:
     def __init__(self, *, platform=False, bot_type="personal", runtime=None):
+        self.platform = platform
         self.db = _Database(shared=True)
         self.bots = BotRepository(self.db)
         engine_type = "teclaw" if platform else "moltis"
@@ -79,28 +84,65 @@ class McpWorld:
         )
         self.policy = PlatformDefaultMcpPolicy(lambda _bot_id: {})
         self.direct = DirectActivationService(
-            self.desired, self.bots, MagicMock(), runtime or _Runtime(), _Authorization(), _Audit(),
+            self.desired, self.bots, _PersistedSkillQuery(self.skills), runtime or _Runtime(), _Authorization(), _Audit(),
             self.center, self.capabilities, self.policy, MagicMock(),
         )
         self.activation = PlatformActivation(self.direct) if platform else DeviceActivation(self.direct)
+        management = SkillSetManagementService(
+            repository=self.desired, bot_repo=self.bots, runtime=runtime or _Runtime(),
+            legacy_factory=object(), passport=object(), authorization=_Authorization(),
+            audit_log_repo=_Audit(), mcp_center=self.center, mcp_auth=self.center,
+            mcp_config=self.config, ext_info_provider=lambda _: {}, recovery=MagicMock(),
+        )
+        self.sets = sets = PlatformSkillSetApply(management) if platform else DeviceSkillSetApply(management)
+        self.uploads = _PersistedSkillPackages(self.skills)
+        self.content = FakeManifestContent()
         self.orchestrator = ApplyOrchestrator({
-            Category.MCP: McpMaterialiser(self.activation, self.center, self.config, self.capabilities),
+            Category.CAPABILITIES: CapabilitiesMaterialiser(
+                self.uploads, self.activation, real_validator(), self.content,
+                SimpleNamespace(), SimpleNamespace(), sets, self.center, self.config,
+            ),
         }, steps=ArcaDelivery(lambda: None).steps_for)
-        self.compiler = manifest_compiler(content=FakeManifestContent(), resolver=MagicMock())
+        self.compiler = manifest_compiler(content=self.content, resolver=MagicMock())
         self.state_reader = _reader(activation=self.direct, mcp_config=self.config)
 
     def saved(self):
         return self.overrides.list_by_bot(bot_id="bot-1", owner_id="entity-1")
 
-    async def apply_manifest(self, entries, **kwargs):
-        compiled = await self.compiler.compile_document(
-            self.context,
-            {"schema_version": 1, "manifest": {"mcp": entries}},
+    async def apply_manifest(self, entries, *, retain_fixture_supplies=False, **kwargs):
+        manifest = {"mcp": entries}
+        if self.platform:
+            # These MCP-focused platform fixtures retain virtual platform defaults explicitly.
+            manifest['skill_sets'] = [{'name': 'default'}]
+        compiler = self.compiler
+        if retain_fixture_supplies:
+            # These artifact/config tests retain their explicitly seeded other supplies.
+            # The current Manifest requires that intent to be present in the document.
+            snapshot = self.sets.read_apply_snapshot(bot_id='bot-1', owner_id='entity-1', actor_id='owner')
+            manifest['skill_sets'] = [
+                ({'name': 'default'} if group.is_default else
+                 {'name': group.name, 'is_active': group.is_active, 'skills': [],
+                  'mcp': [{'server_code': code} for code in group.mcp_codes]})
+                for group in snapshot.sets
+            ]
+            supplied = {i for group in snapshot.sets for i in group.skill_ids}
+            local = [a for a in snapshot.skills if int(a['id']) in snapshot.installed_skill_ids - supplied]
+            packages = {a['name']: build_skill_zip(a['name']) for a in local}
+            import hashlib
+            manifest['skills'] = [
+                {'name': name, 'source': oss_source(name), 'unpack': 'zip',
+                 'digest': 'sha256:' + hashlib.sha256(body).hexdigest()}
+                for name, body in packages.items()
+            ]
+            compiler = manifest_compiler(content=self.content,
+                resolver=DeclaredSourceResolver(self.content, FakeObjectCredentials(), seeded_object_store(packages)))
+        compiled = await compiler.compile_document(
+            self.context, {"schema_version": 1, "manifest": manifest},
         )
         return await self.apply_state(compiled.state, **kwargs)
 
     async def apply_state(self, state: DesiredState, **kwargs):
         return await self.orchestrator.apply(
-            self.context, state.only({Category.MCP}),
+            self.context, state.only({Category.CAPABILITIES}),
             apply_id="apply", trigger="explicit", started_at=datetime.now(), **kwargs,
         )

@@ -77,7 +77,11 @@ from agentclaw.community.core.skill_center.policies.capability_ownership import 
 )
 
 
+from .apply_skill_set_commands import ApplySkillSetCommands
+
+
 class CapabilityDesiredStateRepository(
+    ApplySkillSetCommands,
     SkillBatchTransactions,
     BotSkillSetInstallations,
     DefaultExclusionCommands,
@@ -178,6 +182,8 @@ class CapabilityDesiredStateRepository(
         description: str | None,
         engine_type: str | None = None,
     ) -> dict:
+        if name == "default":
+            raise SkillSetControlPlaneConflictError("SKILL_SET_NAME_RESERVED")
         with self._db.transactional_orm_session() as session:
             duplicate = (
                 self._scope(session.query(SkillSet), SkillSet)
@@ -217,6 +223,8 @@ class CapabilityDesiredStateRepository(
         engine_type: str | None = None,
         default_engine_types: tuple[str, ...] | None = None,
     ) -> dict:
+        if name == "default":
+            raise SkillSetControlPlaneConflictError("SKILL_SET_NAME_RESERVED")
         with self._db.transactional_orm_session() as session:
             row = self._set(
                 session,
@@ -859,41 +867,6 @@ class CapabilityDesiredStateRepository(
     def _mcp_installations(session, bot_id: str, owner_id: str) -> set[str]:
         return mcp_installations.installed_codes(
             session, bot_id=bot_id, owner_id=owner_id, env=get_current_env()
-        )
-
-    def _require_unique_runtime_names(
-        self,
-        session,
-        *,
-        bot_id: str,
-        owner_id: str,
-        candidate_ids: set[int],
-        retired_ids: set[int] | None = None,
-        extra_ids: set[int] | None = None,
-        engine_type: str | None = None,
-        default_engine_types: tuple[str, ...] | None = None,
-    ) -> None:
-        from agentclaw.community.core.repository.implementations.skill_center.runtime_name_admission import (
-            require_unique_runtime_names,
-        )
-
-        effective: set[int] = set()
-        for row in self._bot_sets(
-            session, bot_id=bot_id, owner_id=owner_id,
-            engine_type=engine_type, default_engine_types=default_engine_types,
-        ):
-            if not (row.is_default or row.is_active):
-                continue
-            members = self._member_ids(session, {int(row.id)})
-            if row.is_default:
-                members -= default_exclusions.excluded_skill_ids(
-                    session, bot_id=bot_id, owner_id=owner_id, set_id=int(row.id)
-                )
-            effective.update(members)
-        others = ((self._installations(session, bot_id, owner_id) | effective)
-                  - (retired_ids or set())) | (extra_ids or set())
-        require_unique_runtime_names(
-            session, self._scope, candidates=candidate_ids, others=others
         )
 
     def _snapshot(

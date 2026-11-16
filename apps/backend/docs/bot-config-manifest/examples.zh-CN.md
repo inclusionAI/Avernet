@@ -19,6 +19,14 @@
 > 交给平台去 GET。`oss` 源用 `bucket` + `key` 定位对象，endpoint 与密钥对
 > 来自 `auth` 指向的凭证。
 
+## 升级时先核对完整目标
+
+旧写法仍可解析，但省略普通集/Default 不代表保留。希望保留集合时，应在完整清单中
+声明 `capabilities.skill_sets`（普通集给出名称、启停、Skills 和 MCP；Default 写
+`{name: default}`），并把原 Direct Skills/MCP 一起移入 capabilities，避免新旧位置混用。
+不需要任何集合时写空列表；这会清空普通集并排除适用 Default 成员。MCP 条目省略
+config 或写空对象均清除 Bot override。详见用户手册的升级兼容说明与 schema §1。
+
 ## 0. 场景设定
 
 某业务团队运营一批「商家客服」bot（openclaw 引擎为主，部分租户在

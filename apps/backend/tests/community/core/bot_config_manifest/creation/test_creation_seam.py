@@ -37,7 +37,7 @@ class _Applies:
             Section,
         )
 
-        return frozenset({Section.SCRIPT, Category.MCP})
+        return frozenset({Section.SCRIPT, Category.CAPABILITIES})
 
     def start_apply(self, **kwargs):
         self.calls.append(kwargs)

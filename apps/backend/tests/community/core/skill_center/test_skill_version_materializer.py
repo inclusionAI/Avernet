@@ -613,3 +613,43 @@ def test_materializing_a_new_version_never_reactivates_a_terminally_offline_skil
         assert recovered.offline_at is not None
         assert recovered.offline_by == "owner"
         assert session.query(SkillVersion).filter_by(id=101).one().status == "PUBLISHED"
+
+
+def test_exact_preview_validates_package_without_creating_a_version_or_canonical_content():
+    from agentclaw.community.plugin_api.skill_center_gateway import (
+        SkillCenterExactDownloadRequest,
+    )
+    from agentclaw.community.core.skill_center.canonical_center_store import (
+        CanonicalCenterVersionIdentity,
+        CanonicalCenterVersionRef,
+    )
+
+    versions = _Versions(_target())
+    store = LocalCanonicalCenterVersionStore()
+    package = _package()
+    materializer = SkillVersionMaterializer(
+        versions=versions,
+        gateway=_Gateway(package),
+        http=_Http(package),
+        validator=SkillPackageValidator(SkillParser()),
+        store=store,
+    )
+    preview = materializer.preview_exact(
+        SkillCenterExactDownloadRequest(
+            skill_code="public-weather",
+            version_number="1.0.0",
+            scope=SkillCenterReadScope.PUBLIC,
+        )
+    )
+
+    assert preview.package.name == "weather"
+    assert json.loads(preview.metadata_json)["mcp_dependencies"] == []
+    assert versions.published is None
+    assert not store.verify_version(
+        CanonicalCenterVersionRef(
+            CanonicalCenterVersionIdentity(
+                skill_uuid=_target().skill_uuid,
+                sc_version_number="1.0.0",
+            )
+        )
+    )

@@ -181,3 +181,22 @@ def test_manifest_apply_publishes_only_the_ordinary_apply_contract():
     assert "dry_run" in parameters
     assert "recover_creation" not in parameters
     assert "202" in operation["responses"]
+
+
+def test_manifest_discovery_documents_skill_references_separately_from_transport():
+    """Generated clients can read all four reference forms and a valid example."""
+    schemas = _schemas(_document())
+    capabilities = schemas["ConfigManifestCapabilities"]
+    references = capabilities["properties"]["skill_references"]
+    reference_schema = schemas[references["items"]["$ref"].rsplit("/", 1)[-1]]
+    assert reference_schema["properties"]["reference"]["enum"] == [
+        "package", "repo_path", "skill_uuid", "skill_code",
+    ]
+    assert set(reference_schema["required"]) == {"reference", "supported", "reason"}
+    example = capabilities["example"]
+    assert [row["reference"] for row in example["skill_references"]] == [
+        "package", "repo_path", "skill_uuid", "skill_code",
+    ]
+    assert "capabilities" in {row["name"] for row in example["constructs"]}
+    assert not {"skills", "mcp"} & {row["name"] for row in example["constructs"]}
+    assert not {"skills", "mcp"} & {row["category"] for row in example["source_matrix"]}
