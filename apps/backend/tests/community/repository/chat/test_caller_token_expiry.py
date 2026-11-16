@@ -369,3 +369,105 @@ def test_engine_lookup_failure_cannot_bypass_expiry_guard():
                                        caller_token=token, stage="online", publish_id=None, binding_id=7)
     delegate.update_caller_identity.assert_not_called()
     instances.caller_token_update.assert_not_called()
+
+
+def refresh_scope(repo):
+    return repo.caller_token_refresh(user_id="u1", bot_id="b1", owner_id="o1", binding_id=7)
+
+
+def test_refresh_scope_leaves_expiry_unchanged_without_install(repo, caplog):
+    seed(repo)
+    with caplog.at_level("INFO"), refresh_scope(repo) as state:
+        assert state.instance["caller_token_expires_at"] is None
+        assert state.instance["ext"]["binding_id"] == 7
+    assert expiry(repo) is None
+    assert "caller_token_refresh_locked" in caplog.text
+    assert "caller_token_expiry_recorded" not in caplog.text
+
+
+def test_refresh_scope_records_only_successful_install(repo):
+    seed(repo)
+    end = datetime.now(UTC) + timedelta(days=2)
+    with pytest.raises(RuntimeError), refresh_scope(repo) as state:
+        state.expires_at = end
+        raise RuntimeError("installation failed")
+    assert expiry(repo) is None
+    with refresh_scope(repo) as state:
+        state.expires_at = end
+    assert expiry(repo) == end.isoformat()
+
+
+@pytest.mark.parametrize("delta", [-1, 0])
+def test_refresh_scope_rejects_nonadvancing_expiry(repo, delta):
+    seed(repo)
+    end = datetime.now(UTC) + timedelta(days=2)
+    with scope(repo, end):
+        pass
+    with pytest.raises(ValueError, match="caller_token_expiry_not_advanced"):
+        with refresh_scope(repo) as state:
+            state.expires_at = end + timedelta(hours=delta)
+    assert expiry(repo) == end.isoformat()
+
+
+@pytest.mark.parametrize("end", [datetime(2000, 1, 1, tzinfo=UTC), datetime(2099, 1, 1)])
+def test_refresh_scope_rejects_invalid_expiry(repo, end):
+    seed(repo)
+    with pytest.raises(ValueError, match="caller_token_expiry_invalid"):
+        with refresh_scope(repo) as state:
+            state.expires_at = end
+    assert expiry(repo) is None
+
+
+def test_refresh_scope_waiter_observes_iam_committed_expiry(repo):
+    seed(repo)
+    end = datetime.now(UTC) + timedelta(days=3)
+    entered, release, competing = Event(), Event(), Event()
+    observed = []
+
+    def iam():
+        with scope(repo, end) as install:
+            assert install
+            entered.set()
+            assert release.wait(5)
+
+    def scheduled():
+        competing.set()
+        with refresh_scope(repo) as state:
+            observed.append(state.instance["caller_token_expires_at"])
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(iam)
+        assert entered.wait(5)
+        second = pool.submit(scheduled)
+        assert competing.wait(5)
+        release.set()
+        first.result(timeout=5)
+        second.result(timeout=5)
+    assert observed == [end.isoformat()]
+
+
+def test_refresh_and_iam_select_the_same_row_for_update(repo):
+    from sqlalchemy import event
+    from sqlalchemy.dialects import mysql
+    from sqlalchemy.orm import Session
+
+    seed(repo)
+    locked = []
+
+    def capture(execution):
+        statement = execution.statement
+        if getattr(statement, "_for_update_arg", None) is not None:
+            locked.append(statement.compile(dialect=mysql.dialect()))
+
+    event.listen(Session, "do_orm_execute", capture)
+    try:
+        with refresh_scope(repo):
+            pass
+        with scope(repo, datetime.now(UTC) + timedelta(days=2)):
+            pass
+    finally:
+        event.remove(Session, "do_orm_execute", capture)
+    assert len(locked) == 2
+    assert str(locked[0]) == str(locked[1])
+    assert str(locked[0]).endswith("FOR UPDATE")
+    assert locked[0].params == locked[1].params

@@ -14,6 +14,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Protocol, TYPE_CHECKING, runtime_checkable
 
 if TYPE_CHECKING:
+    from agentclaw.community.core.repository.caller_token_refresh_types import CallerTokenRefresh
     from agentclaw.community.core.bot_chat.query_support import QueryScope
     from agentclaw.community.core.bot_chat.schemas import (
         ConversationDetail,
@@ -235,6 +236,19 @@ class ExpertChatInstanceRepository(Protocol):
         ``expires_before`` is timezone-aware and inclusive; ids are ascending
         and strictly greater than ``after_id``. ``limit`` is between 1 and 1000.
         Bot, engine and physical-binding eligibility are checked by the caller.
+        """
+        ...
+
+    @abstractmethod
+    def caller_token_refresh(
+        self, *, user_id: str, bot_id: str, owner_id: str, binding_id: int,
+    ) -> AbstractContextManager[CallerTokenRefresh]:
+        """Lock the exact instance before signing, sharing IAM's row lock.
+
+        Yield its latest snapshot after locking. Set the transaction state's
+        ``expires_at`` only after successful installation; successful exit records
+        an aware, future, strictly increasing expiry. Unset expiry does not write.
+        Missing, replaced or released instances raise ValueError.
         """
         ...
 
