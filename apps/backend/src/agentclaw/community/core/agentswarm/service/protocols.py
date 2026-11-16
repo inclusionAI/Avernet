@@ -85,7 +85,7 @@ class IdentitySourceRefusal:
 #: belongs to someone else (the two are deliberately indistinguishable).
 IDENTITY_SOURCE_NOT_OWNED: Final = "not_owned"
 #: Neither the Bot's cached passport nor the provider establishes an issued
-#: AgentPass, so the Bot genuinely holds no usable identity.
+#: agent credential, so the Bot genuinely holds no usable identity.
 IDENTITY_SOURCE_NO_PASSPORT: Final = "no_passport"
 #: The passport could not be resolved (provider failure, no seam bound).
 #: Never means "has no passport" -- that is ``no_passport``.

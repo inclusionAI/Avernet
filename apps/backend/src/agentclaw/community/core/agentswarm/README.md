@@ -39,6 +39,7 @@ internal_dependencies:
   - agentclaw.community.core.base
   - agentclaw.community.plugin_api.database
   - agentclaw.community.plugin_api.agentswarm  # swarm SPI protocols + seam vocabulary (BotId/IdempotencyKey/BotCreateSpec)
+  - agentclaw.community.plugin_api.passport  # the passport SPI the identity-source rule resolves through
   - agentclaw.community.log
   - agentclaw.community.kernel
   - agentclaw.community.utils
