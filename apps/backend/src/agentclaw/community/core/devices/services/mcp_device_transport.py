@@ -55,6 +55,28 @@ _MCP_RETRY_DELAYS_SECONDS = (1, 2, 4)
 _RETRYABLE_MCP_STATUS_CODES = frozenset({500, 502, 503, 504})
 
 
+def _is_transport_error(exc: Exception) -> bool:
+    """Check whether *exc* or any exception in its ``__cause__`` chain is a
+    transport-level HTTP error (an :class:`HttpClientRequestError`).
+
+    The corp runtime monkey-patches httpx through
+    ``ant_baselib.tracer.patches.httpx_client``, which wraps real httpx
+    transport errors (e.g. ``httpx.ReadTimeout``) inside
+    ``HttpxCallingException`` — a class that is **not** a subclass of
+    ``HttpClientRequestError``.  Walking the ``__cause__`` chain lets the
+    retry machinery handle those wrapped errors without importing a
+    corp-only dependency into the community codebase.
+    """
+    if isinstance(exc, HttpClientRequestError):
+        return True
+    cause = exc.__cause__
+    while cause is not None:
+        if isinstance(cause, HttpClientRequestError):
+            return True
+        cause = cause.__cause__
+    return False
+
+
 def _request_with_transient_retry(
         request: Callable[[], Any],
         *,
@@ -74,12 +96,15 @@ def _request_with_transient_retry(
     ):
         try:
             response = request()
-        except HttpClientRequestError as error:
-            if delay_seconds is None:
-                raise Exception(
-                    f"{operation} MCP failed after {attempt} attempts: {error}"
-                ) from error
-            error_detail = f"request_error={error}"
+        except Exception as error:
+            if _is_transport_error(error):
+                if delay_seconds is None:
+                    raise Exception(
+                        f"{operation} MCP failed after {attempt} attempts: {error}"
+                    ) from error
+                error_detail = f"request_error={error}"
+            else:
+                raise
         else:
             response_error = Exception(
                 f"{operation} failed: {response.status_code}, {response.text}"
@@ -159,11 +184,11 @@ def filter_servers(
             logger.error("[mcp_transport] filter-servers error: %s, %s", response.status_code, response.text)
             return False
 
-    except HttpClientRequestError as e:
-        logger.exception("[mcp_transport] Failed to sync all MCPs: %s", e)
-        return False
     except Exception as e:
-        logger.exception("[mcp_transport] Unexpected error during sync all: %s", e)
+        if _is_transport_error(e):
+            logger.exception("[mcp_transport] Failed to sync all MCPs: %s", e)
+        else:
+            logger.exception("[mcp_transport] Unexpected error during sync all: %s", e)
         return False
 
 
@@ -200,11 +225,11 @@ def push_single_mcp(
 
         return True
 
-    except HttpClientRequestError as e:
-        logger.exception("[mcp_transport] Failed to sync single MCP: %s", e)
-        sc = mcp_data.get("server_code") or mcp_data.get("serverCode")
-        raise Exception(f"Network error syncing {sc}: {e}") from e
     except Exception as e:
+        if _is_transport_error(e):
+            logger.exception("[mcp_transport] Failed to sync single MCP: %s", e)
+            sc = mcp_data.get("server_code") or mcp_data.get("serverCode")
+            raise Exception(f"Network error syncing {sc}: {e}") from e
         logger.exception("[mcp_transport] Unexpected error during sync single: %s", e)
         raise
 

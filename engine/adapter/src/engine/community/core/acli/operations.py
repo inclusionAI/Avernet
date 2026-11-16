@@ -329,11 +329,22 @@ class AcliOperations:
                 ),
                 timeout=OPERATION_TIMEOUT_SECONDS,
             )
-            if op.action == INSTALL and not op.was_installed and current is not None:
-                await asyncio.wait_for(
-                    self._runner.remove(current.name, on_spawn=spawn),
-                    timeout=OPERATION_TIMEOUT_SECONDS,
-                )
+            if op.action == INSTALL and not op.was_installed:
+                if current is not None:
+                    await asyncio.wait_for(
+                        self._runner.remove(current.name, on_spawn=spawn),
+                        timeout=OPERATION_TIMEOUT_SECONDS,
+                    )
+                else:
+                    # The registry says absent, but the install may have written
+                    # files before being killed. Try a best-effort cleanup.
+                    try:
+                        await asyncio.wait_for(
+                            self._runner.remove(op.name, on_spawn=spawn),
+                            timeout=OPERATION_TIMEOUT_SECONDS,
+                        )
+                    except (AcliError, TimeoutError):
+                        pass
             elif op.action == UNINSTALL and op.was_installed and current is None:
                 await asyncio.wait_for(
                     self._runner.install(op.name, on_spawn=spawn),
