@@ -178,8 +178,6 @@ class CorsConfig(BaseModel):
         return patterns
 
 
-
-
 class ForwarderPluginConfig(BaseModel):
     """Forwarder HTTP timeout configuration (``user_config.plugins.forwarder_config``).
 
