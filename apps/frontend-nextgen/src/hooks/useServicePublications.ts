@@ -1,4 +1,5 @@
 import type { ServicePublication } from '@/domain/botEditor';
+import { getPublicationRetryTarget } from '@/domain/botEditor';
 import { botEditorService } from '@/services/botWorkshop/botEditorService';
 import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
@@ -55,7 +56,11 @@ export function useServicePublications(botId?: string, ownerId?: string) {
       act(() => botEditorService.restartLifecycle(botId!, stage, ownerId), '重启发布已提交'),
     cancel: () => act(() => botEditorService.cancelStaging(botId!, ownerId), '预发发布已取消'),
     offline: () => act(() => botEditorService.offlineLifecycle(botId!, ownerId), '下线请求已提交'),
-    retry: () => act(() => botEditorService.retryLifecycle(botId!, ownerId), '重试请求已提交'),
+    retry: async (targetCardId: string) => {
+      const target = getPublicationRetryTarget(items, targetCardId);
+      if (!target) return;
+      await act(() => botEditorService.retryLifecycle(botId!, ownerId), '重试请求已提交');
+    },
     upgrade: (publicationId: number) =>
       act(() => botEditorService.upgradeLifecycle(botId!, publicationId, ownerId), '升级草稿已创建'),
     deleteDraft: () => act(() => botEditorService.deleteLifecycleDraft(botId!, ownerId), '服务 Bot 草稿已删除'),

@@ -5,7 +5,7 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from '@/components/ui/Drawer';
 import { Empty } from '@/components/ui/Empty';
 import { Spin } from '@/components/ui/Spin';
-import type { ServicePublication, ServicePublicationAction } from '@/domain/botEditor';
+import { canRetryPublication, type ServicePublication, type ServicePublicationAction } from '@/domain/botEditor';
 import { useServicePublications } from '@/hooks/useServicePublications';
 import type { BotDomain } from '@/services/botWorkshop';
 import { ArrowRight, ExternalLink, RefreshCw, RotateCw } from 'lucide-react';
@@ -42,7 +42,7 @@ export function ServicePublicationDrawer({
     }
     if (action === 'cancel_staging') return publications.cancel();
     if (action === 'offline') return publications.offline();
-    if (action === 'retry') return publications.retry();
+    if (action === 'retry') return publications.retry(item.cardId);
     if (action === 'upgrade')
       return publications.upgrade(item.publicationId).then(async () => {
         await onChanged?.();
@@ -117,6 +117,7 @@ export function ServicePublicationDrawer({
                   <div className="flex flex-wrap gap-2">
                     {item.availableActions
                       .filter((action) => action !== 'restart_publish' && action !== 'delete')
+                      .filter((action) => action !== 'retry' || canRetryPublication(item))
                       .map((action) => (
                         <ConfirmDialog
                           key={action}

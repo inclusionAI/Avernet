@@ -93,3 +93,66 @@ test('发布与阶段推进不混入重启发布和删除', () => {
   expect(screen.queryByRole('button', { name: '重启发布' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: '删除草稿' })).not.toBeInTheDocument();
 });
+
+test('仅后端标记 failed 时展示重试', () => {
+  const retry = jest.fn().mockResolvedValue(undefined);
+  mockedPublications.mockReturnValue({
+    items: [
+      {
+        publicationId: 19,
+        cardId: 'bot-2:19',
+        version: 1,
+        status: 'deploying',
+        internalStatus: 'validating',
+        availableActions: ['retry'],
+        createdAt: '',
+        updatedAt: '',
+      },
+    ],
+    loading: false,
+    reload: jest.fn(),
+    advance: jest.fn(),
+    restart: jest.fn(),
+    cancel: jest.fn(),
+    offline: jest.fn(),
+    retry,
+    upgrade: jest.fn(),
+    deleteDraft: jest.fn(),
+  });
+  const bot = mapBotDto({ bot_id: 'bot-2', bot_name: 'Service Bot', engine: 'openclaw', bot_type: 'service' }).item;
+  render(<ServicePublicationDrawer bot={bot} onClose={jest.fn()} />);
+  expect(screen.queryByRole('button', { name: '重试' })).not.toBeInTheDocument();
+});
+
+test('failed publication renders and confirms retry', async () => {
+  const retry = jest.fn().mockResolvedValue(undefined);
+  mockedPublications.mockReturnValue({
+    items: [
+      {
+        publicationId: 20,
+        cardId: 'bot-2:20',
+        version: 2,
+        status: 'deploying',
+        internalStatus: 'failed',
+        availableActions: ['retry'],
+        createdAt: '',
+        updatedAt: '',
+      },
+    ],
+    loading: false,
+    reload: jest.fn(),
+    advance: jest.fn(),
+    restart: jest.fn(),
+    cancel: jest.fn(),
+    offline: jest.fn(),
+    retry,
+    upgrade: jest.fn(),
+    deleteDraft: jest.fn(),
+  });
+  const bot = mapBotDto({ bot_id: 'bot-2', bot_name: 'Service Bot', engine: 'openclaw', bot_type: 'service' }).item;
+  render(<ServicePublicationDrawer bot={bot} onClose={jest.fn()} />);
+  fireEvent.click(screen.getByRole('button', { name: '重试' }));
+  fireEvent.click(screen.getByRole('button', { name: '确定' }));
+
+  expect(retry).toHaveBeenCalledWith('bot-2:20');
+});
