@@ -1,0 +1,61 @@
+apps/frontend-nextgen/src/requestConfig.ts
+  s_853dc2328e6e01::t_d7ea41ea8f2aae 58-63
+apps/frontend-nextgen/test/services/workspace/sessionService.test.ts
+  s_853dc2328e6e01::t_9c6baca817f3be 373-394
+apps/frontend-nextgen/src/services/backendApi/httpClient.ts
+  s_853dc2328e6e01::t_877e8476963c31 225-229
+  s_853dc2328e6e01::t_b6239f33f79f38 288-289
+apps/frontend-nextgen/test/services/workspace/groupMemberService.test.ts
+  s_853dc2328e6e01::t_9c7522d11047b6 56-77
+apps/frontend-nextgen/test/services/backendApi/httpClient.aceLogin.test.ts
+  s_853dc2328e6e01::t_d561cd9f6e2205 154-157
+  s_853dc2328e6e01::t_871dba6eae83ee 252,257,260-261
+  s_853dc2328e6e01::t_21f7c95e373c88 74,78,81,83
+apps/frontend-nextgen/src/stores/loginRedirectStore.ts
+  s_853dc2328e6e01::t_ca55b32765e9ad 8-11
+  s_853dc2328e6e01::t_213e44968bcd8f 34-37
+  s_853dc2328e6e01::t_a8fe2a47dad8c0 67-72
+  s_853dc2328e6e01::t_c3db4c302405d1 42
+apps/frontend-nextgen/src/services/workspace/sessionService.ts
+  s_853dc2328e6e01::t_e9dc0318e73fb9 19
+  s_853dc2328e6e01::t_8e76ccca88c276 102-105
+  s_853dc2328e6e01::t_791fd3d10761be 222-228
+  s_853dc2328e6e01::t_d1f274b67cb398 262-268
+  s_853dc2328e6e01::t_fad76337cf8ae1 198-204
+  s_853dc2328e6e01::t_3383428f1b5ba8 242-248
+  s_853dc2328e6e01::t_aceeddca129b4f 86-89
+  s_853dc2328e6e01::t_e9218f06ae5fc3 118-121
+apps/frontend-nextgen/src/services/workspace/groupMemberService.ts
+  s_853dc2328e6e01::t_92531caeaefabb 6
+  s_853dc2328e6e01::t_f31be62812154a 29-34,51-54,68-71
+apps/frontend-nextgen/src/utils/requestErrorHandler.ts
+  s_853dc2328e6e01::t_9c73ca6c8dcf45 89-102
+  s_853dc2328e6e01::t_4dc5d04c4ee7d5 119
+apps/frontend-nextgen/test/services/backendApi/authFailurePolicy.test.ts
+  s_853dc2328e6e01::t_4461c10268ba2f 61,64-71,73-79,81
+  s_853dc2328e6e01::t_08bdb887d01895 9-12
+apps/frontend-nextgen/src/services/backendApi/authFailurePolicy.ts
+  s_853dc2328e6e01::t_d8d77c9d0e7ebf 8-12,14-15,25-27,37-41,44
+apps/frontend-nextgen/test/stores/loginRedirectStore.test.ts
+  s_853dc2328e6e01::t_d6a5fb629c65d7 25,27
+apps/frontend-nextgen/test/requestConfig.errorNotify.test.ts
+  s_853dc2328e6e01::t_5c621d08b4d2b5 181,189,191-192
+apps/frontend-nextgen/test/utils/requestErrorHandler.test.ts
+  s_853dc2328e6e01::t_655e80d8ee6cb8 14
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8936a79718324573e2d3d0312aeece055f627d92",
+  "prompts": {},
+  "sessions": {
+    "s_853dc2328e6e01": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "baf3979c-b7e9-4f49-8731-da28a1b45f70",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    }
+  }
+}
