@@ -75,6 +75,18 @@ paths:
     $ref: ./openapi/friendships.yaml#/FriendConnectionCancelPath
   /openapi/v1/collaboration/friend-connections:
     $ref: ./openapi/friendships.yaml#/FriendConnectionsPath
+  /openapi/v1/collaboration/groupcontext/shared-info:
+    $ref: ./openapi/group-context.yaml#/SharedInfoPath
+  /openapi/v1/collaboration/groupcontext/list-preset:
+    $ref: ./openapi/group-context.yaml#/ListPresetsPath
+  /openapi/v1/collaboration/groupcontext/manage/list-preset:
+    $ref: ./openapi/group-context.yaml#/ListManagedPresetsPath
+  /openapi/v1/collaboration/groupcontext/manage/add-preset:
+    $ref: ./openapi/group-context.yaml#/AddPresetPath
+  /openapi/v1/collaboration/groupcontext/manage/update-preset:
+    $ref: ./openapi/group-context.yaml#/UpdatePresetPath
+  /openapi/v1/collaboration/groupcontext/manage/delete-preset:
+    $ref: ./openapi/group-context.yaml#/DeletePresetPath
   /openapi/v1/collaboration/groups:
     $ref: ./openapi/groups.yaml#/GroupsPath
     parameters:

@@ -845,12 +845,6 @@ async fn assert_human_preset_management_routes(repo: Arc<dyn GroupContextRepo>) 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
     assert_eq!(response_json(response).await["status"], "not_found");
 
-    for operation in ["shared-info", "list-preset", "manage/list-preset"] {
-        let uri = format!("/api/v1/collaboration/groupcontext/{operation}?groupId=preset-group");
-        let response = post(&uri, json!({})).await.unwrap();
-        assert_eq!(response.status(), StatusCode::OK, "{uri}");
-    }
-
     let list = "/groupcontext/manage/list-preset?groupId=preset-group";
     let response = post(list, json!({})).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
@@ -866,11 +860,11 @@ async fn assert_human_preset_management_routes(repo: Arc<dyn GroupContextRepo>) 
         assert_eq!(response_json(response).await["status"], "invalid_param");
     }
 
-    let add = "/api/v1/collaboration/groupcontext/manage/add-preset?groupId=preset-group";
-    let update = "/api/v1/collaboration/groupcontext/manage/update-preset?groupId=preset-group";
-    let delete = "/api/v1/collaboration/groupcontext/manage/delete-preset?groupId=preset-group";
+    let add = "/groupcontext/manage/add-preset?groupId=preset-group";
+    let update = "/groupcontext/manage/update-preset?groupId=preset-group";
+    let delete = "/groupcontext/manage/delete-preset?groupId=preset-group";
     for (uri, body) in [
-        ("/api/v1/collaboration/groupcontext/manage/add-preset", json!({"name":"timeline"})),
+        ("/groupcontext/manage/add-preset", json!({"name":"timeline"})),
         (add, json!({})),
     ] {
         assert_eq!(post(uri, body).await.unwrap().status(), StatusCode::BAD_REQUEST);

@@ -319,6 +319,9 @@ user_config:
       app: optional
       bot: optional
 
+    "POST /openapi/v1/collaboration/groupcontext/**":
+      user: required
+
     # Bot registration. The token-issuance GET is Human-Principal only: the
     # caller IS the person receiving the token (bcs additionally 403s
     # non-Human principals). The anonymous POST's only credential is the

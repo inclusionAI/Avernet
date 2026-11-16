@@ -1,4 +1,5 @@
 import { backendRequest } from '../httpClient';
+import type { BackendApiEnvelope } from '../types';
 
 export type GroupContextScope = 'group' | 'session' | 'round';
 
@@ -25,16 +26,16 @@ export interface GroupContextView {
 // Browser-facing routes use Gateway session authentication. Gateway must
 // forward the authenticated Human identity. BCS checks view_bot_id against
 // that Human’s Bot authority and the requested Group or Session membership.
-const path = '/api/v1/collaboration/groupcontext';
+const path = '/openapi/v1/collaboration/groupcontext';
 
 function request<T>(operation: string, view: GroupContextView, data: object, signal?: AbortSignal) {
-  return backendRequest<T>(`${path}/${operation}`, {
+  return backendRequest<BackendApiEnvelope<T>>(`${path}/${operation}`, {
     method: 'POST',
     params: { ...view },
     data,
     signal,
     injectUserId: false,
-  });
+  }).then((response) => response.data);
 }
 
 export function listSharedInfo(view: GroupContextView, signal: AbortSignal) {

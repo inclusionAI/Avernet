@@ -544,3 +544,30 @@ mod driver_metadata;
 
 #[path = "group_routes/create_notify_mode.rs"]
 mod create_notify_mode;
+
+
+#[tokio::test]
+async fn group_context_openapi_routes_require_authentication_and_group_id() {
+    let app = test_router(Arc::new(FakeGroupService::default()));
+    for operation in [
+        "shared-info",
+        "list-preset",
+        "manage/list-preset",
+        "manage/add-preset",
+        "manage/update-preset",
+        "manage/delete-preset",
+    ] {
+        let uri = format!("/openapi/v1/collaboration/groupcontext/{operation}");
+        let anonymous = Request::post(&uri).body(Body::empty()).unwrap();
+        let response = app.clone().oneshot(anonymous).await.unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED, "{uri}");
+
+        let response = app.clone()
+            .oneshot(authenticated_request("POST", &uri, json!({})))
+            .await.unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{uri}");
+        let body = response_json(response).await;
+        assert_eq!(body["data"]["error_code"], "invalid_request", "{uri}");
+        assert_eq!(body["request_id"], "request-123");
+    }
+}

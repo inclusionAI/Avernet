@@ -530,6 +530,14 @@ those timestamps. This release does not expose a history API.
 
 ## Shared information
 
+The Nextgen web client uses the protected
+`POST /openapi/v1/collaboration/groupcontext/{operation}` routes for
+`shared-info`, `list-preset`, and `manage/{list,add,update,delete}-preset`.
+These routes use the V1 Human authentication boundary and return results in
+the standard `data` envelope. The `/groupcontext/*` contracts below apply to
+legacy BCS clients.
+
+
 `POST /groupcontext/shared-info?groupId=<group-id>&sessionId=<session-id>`
 returns an `items` array of readable active context versions. Each item
 contains `name`, `scope_level`, `scope`, `content`, `creator`, and

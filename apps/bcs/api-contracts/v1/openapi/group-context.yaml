@@ -1,0 +1,655 @@
+SharedItem:
+  type: object
+  additionalProperties: false
+  properties:
+    name: &id001
+      type: string
+    scope_level:
+      type: string
+      enum:
+      - group
+      - session
+      - round
+    scope: *id001
+    content: *id001
+    creator: *id001
+    gmt_modified: &id002
+      type: string
+      format: date-time
+  required:
+  - name
+  - scope_level
+  - scope
+  - content
+  - creator
+  - gmt_modified
+Preset:
+  type: object
+  additionalProperties: false
+  properties:
+    name: *id001
+    description: *id001
+    creator: *id001
+    modifier: *id001
+    gmtCreate: *id002
+    gmtModified: *id002
+  required:
+  - name
+  - description
+  - creator
+  - modifier
+  - gmtCreate
+  - gmtModified
+SharedInfoPath:
+  post:
+    operationId: shared_info_group_context
+    tags:
+    - Group Context
+    summary: Read visible Group Context information.
+    parameters:
+    - name: groupId
+      in: query
+      required: true
+      schema: *id001
+    - name: sessionId
+      in: query
+      schema: *id001
+    - name: view_bot_id
+      in: query
+      schema: *id001
+    x-avernet-security:
+      user: required
+    responses:
+      '200':
+        description: Successful Group Context operation.
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                code:
+                  type: integer
+                  const: 20000
+                message: *id001
+                data:
+                  type: object
+                  additionalProperties: false
+                  properties:
+                    items:
+                      type: array
+                      items:
+                        $ref: '#/SharedItem'
+                  required:
+                  - items
+                request_id: *id001
+              required:
+              - code
+              - message
+              - data
+              - request_id
+      '400':
+        description: Invalid request.
+        x-error-codes:
+        - invalid_request
+        - invalid_param
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      '401':
+        description: Authentication required.
+        x-error-codes:
+        - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      '403':
+        description: Caller is not permitted.
+        x-error-codes:
+        - permission_denied
+        - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      '404':
+        description: Group, Session, or preset was not found.
+        x-error-codes:
+        - group_not_found
+        - session_not_found
+        - not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      '500':
+        description: Unexpected BCN failure.
+        x-error-codes:
+        - internal_error
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      '503':
+        description: Authentication dependency unavailable.
+        x-error-codes:
+        - auth_dependency_unavailable
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+ListPresetsPath:
+  post:
+    operationId: list_preset_group_context
+    tags:
+    - Group Context
+    summary: List Group Context presets.
+    parameters:
+    - name: groupId
+      in: query
+      required: true
+      schema: *id001
+    - name: sessionId
+      in: query
+      schema: *id001
+    - name: view_bot_id
+      in: query
+      schema: *id001
+    x-avernet-security:
+      user: required
+    responses:
+      '200':
+        description: Successful Group Context operation.
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                code:
+                  type: integer
+                  const: 20000
+                message: *id001
+                data:
+                  type: object
+                  additionalProperties: false
+                  properties:
+                    presets:
+                      type: array
+                      items:
+                        $ref: '#/Preset'
+                  required:
+                  - presets
+                request_id: *id001
+              required:
+              - code
+              - message
+              - data
+              - request_id
+      '400':
+        description: Invalid request.
+        x-error-codes:
+        - invalid_request
+        - invalid_param
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      '401':
+        description: Authentication required.
+        x-error-codes:
+        - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      '403':
+        description: Caller is not permitted.
+        x-error-codes:
+        - permission_denied
+        - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      '404':
+        description: Group, Session, or preset was not found.
+        x-error-codes:
+        - group_not_found
+        - session_not_found
+        - not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      '500':
+        description: Unexpected BCN failure.
+        x-error-codes:
+        - internal_error
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      '503':
+        description: Authentication dependency unavailable.
+        x-error-codes:
+        - auth_dependency_unavailable
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+ListManagedPresetsPath:
+  post:
+    operationId: manage_list_preset_group_context
+    tags:
+    - Group Context
+    summary: List Group Context presets and management permission.
+    parameters:
+    - name: groupId
+      in: query
+      required: true
+      schema: *id001
+    x-avernet-security:
+      user: required
+    responses:
+      '200':
+        description: Successful Group Context operation.
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                code:
+                  type: integer
+                  const: 20000
+                message: *id001
+                data:
+                  type: object
+                  additionalProperties: false
+                  properties:
+                    presets:
+                      type: array
+                      items:
+                        $ref: '#/Preset'
+                    can_manage:
+                      type: boolean
+                  required:
+                  - presets
+                  - can_manage
+                request_id: *id001
+              required:
+              - code
+              - message
+              - data
+              - request_id
+      '400':
+        description: Invalid request.
+        x-error-codes:
+        - invalid_request
+        - invalid_param
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      '401':
+        description: Authentication required.
+        x-error-codes:
+        - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      '403':
+        description: Caller is not permitted.
+        x-error-codes:
+        - permission_denied
+        - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      '404':
+        description: Group, Session, or preset was not found.
+        x-error-codes:
+        - group_not_found
+        - session_not_found
+        - not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      '500':
+        description: Unexpected BCN failure.
+        x-error-codes:
+        - internal_error
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      '503':
+        description: Authentication dependency unavailable.
+        x-error-codes:
+        - auth_dependency_unavailable
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+AddPresetPath:
+  post:
+    operationId: manage_add_preset_group_context
+    tags:
+    - Group Context
+    summary: Create a Group Context preset.
+    parameters:
+    - name: groupId
+      in: query
+      required: true
+      schema: *id001
+    x-avernet-security:
+      user: required
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            properties:
+              name: *id001
+              description: *id001
+            required:
+            - name
+    responses:
+      '200':
+        description: Successful Group Context operation.
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                code:
+                  type: integer
+                  const: 20000
+                message: *id001
+                data:
+                  type: object
+                  additionalProperties: false
+                  properties: {}
+                request_id: *id001
+              required:
+              - code
+              - message
+              - data
+              - request_id
+      '400':
+        description: Invalid request.
+        x-error-codes:
+        - invalid_request
+        - invalid_param
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      '401':
+        description: Authentication required.
+        x-error-codes:
+        - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      '403':
+        description: Caller is not permitted.
+        x-error-codes:
+        - permission_denied
+        - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      '404':
+        description: Group, Session, or preset was not found.
+        x-error-codes:
+        - group_not_found
+        - session_not_found
+        - not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      '409':
+        description: Preset name conflicts.
+        x-error-codes:
+        - conflict
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      '500':
+        description: Unexpected BCN failure.
+        x-error-codes:
+        - internal_error
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      '503':
+        description: Authentication dependency unavailable.
+        x-error-codes:
+        - auth_dependency_unavailable
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+UpdatePresetPath:
+  post:
+    operationId: manage_update_preset_group_context
+    tags:
+    - Group Context
+    summary: Update a Group Context preset.
+    parameters:
+    - name: groupId
+      in: query
+      required: true
+      schema: *id001
+    x-avernet-security:
+      user: required
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            properties:
+              name: *id001
+              description: *id001
+              new_name: *id001
+            required:
+            - name
+    responses:
+      '200':
+        description: Successful Group Context operation.
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                code:
+                  type: integer
+                  const: 20000
+                message: *id001
+                data:
+                  type: object
+                  additionalProperties: false
+                  properties: {}
+                request_id: *id001
+              required:
+              - code
+              - message
+              - data
+              - request_id
+      '400':
+        description: Invalid request.
+        x-error-codes:
+        - invalid_request
+        - invalid_param
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      '401':
+        description: Authentication required.
+        x-error-codes:
+        - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      '403':
+        description: Caller is not permitted.
+        x-error-codes:
+        - permission_denied
+        - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      '404':
+        description: Group, Session, or preset was not found.
+        x-error-codes:
+        - group_not_found
+        - session_not_found
+        - not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      '409':
+        description: Preset name conflicts.
+        x-error-codes:
+        - conflict
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      '500':
+        description: Unexpected BCN failure.
+        x-error-codes:
+        - internal_error
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      '503':
+        description: Authentication dependency unavailable.
+        x-error-codes:
+        - auth_dependency_unavailable
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+DeletePresetPath:
+  post:
+    operationId: manage_delete_preset_group_context
+    tags:
+    - Group Context
+    summary: Delete a Group Context preset.
+    parameters:
+    - name: groupId
+      in: query
+      required: true
+      schema: *id001
+    x-avernet-security:
+      user: required
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            properties:
+              name: *id001
+            required:
+            - name
+    responses:
+      '200':
+        description: Successful Group Context operation.
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                code:
+                  type: integer
+                  const: 20000
+                message: *id001
+                data:
+                  type: object
+                  additionalProperties: false
+                  properties: {}
+                request_id: *id001
+              required:
+              - code
+              - message
+              - data
+              - request_id
+      '400':
+        description: Invalid request.
+        x-error-codes:
+        - invalid_request
+        - invalid_param
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      '401':
+        description: Authentication required.
+        x-error-codes:
+        - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      '403':
+        description: Caller is not permitted.
+        x-error-codes:
+        - permission_denied
+        - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      '404':
+        description: Group, Session, or preset was not found.
+        x-error-codes:
+        - group_not_found
+        - session_not_found
+        - not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      '500':
+        description: Unexpected BCN failure.
+        x-error-codes:
+        - internal_error
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      '503':
+        description: Authentication dependency unavailable.
+        x-error-codes:
+        - auth_dependency_unavailable
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
