@@ -1,0 +1,54 @@
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/task/context_collab.py
+  h_059e888e5e4e82 45,100-102
+apps/backend/src/agentclaw/community/adapters/http/task/context_collab.py
+  h_059e888e5e4e82 27,56-58
+apps/backend/src/agentclaw/community/adapters/http/task/schemas_context_collab.py
+  h_059e888e5e4e82 7-9,34-35,471-482,484-495,497-500
+apps/backend/src/agentclaw/community/core/task/context_collab/README.md
+  h_059e888e5e4e82 18-24,33-38,53,101-122,232-234
+apps/backend/src/agentclaw/community/core/task/context_collab/l4_context_primitives/context_collab_service.py
+  h_059e888e5e4e82 34,136,138,212
+apps/backend/src/agentclaw/community/core/task/context_collab/service_api.py
+  h_059e888e5e4e82 3-4,25,101-107
+apps/backend/src/agentclaw/community/di/modules/task_module.py
+  h_059e888e5e4e82 139
+apps/backend/tests/community/adapters/http/task/test_context_collab_creation.py
+  h_059e888e5e4e82 1-106
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_end_to_end.py
+  h_059e888e5e4e82 95,370,373-375,378-379,383,385-386,388,394,412,422,481,485
+apps/backend/tests/community/core/task/context_collab/test_context_collab_append.py
+  h_059e888e5e4e82 65,282,294,298,309,317,319,321,335,352,359,387,430,474,495,512,534,544,551,559,583-584,586,594-595,603
+apps/backend/tests/community/core/task/context_collab/test_context_collab_service.py
+  h_059e888e5e4e82 61,115,157,163-164,186-203,236-281,435,446-448,467
+apps/backend/tests/community/core/task/context_collab/test_context_collab_status.py
+  h_059e888e5e4e82 49
+apps/backend/tests/community/core/task/context_collab/test_l5_method_e2e.py
+  h_059e888e5e4e82 69,201,333
+apps/backend/tests/community/core/task/context_collab/test_l6_product_e2e.py
+  h_059e888e5e4e82 42,122-127,133,137,149,160,175,199-203,207-208,212,222,235,251,262,275,289,299,322
+apps/backend/tests/community/core/task/context_collab/test_l6_runtime_contract.py
+  h_059e888e5e4e82 66,228,231,239,256,267,274,277,279,307,312,348,363,375,402,407,418,450,569,573,577
+apps/backend/tests/community/core/task/context_collab/test_service_real_repository.py
+  h_059e888e5e4e82 76-77,200,203-204,210-211,217,220-227,231,238-239,247-248,256-257,270,273,275,283,288,297,303,311,314-315,324,349,352-353,359,378,388,392,394,397,404,416,428,431,451-452,461,464,466,476,479,481,487,492,511,514-515,522,525,537,615,618,628,631,634,636,649,663,665,678,695
+apps/backend/tests/community/core/task/context_collab/test_spec_acceptance.py
+  h_059e888e5e4e82 54,200,209,213,248-250,254,266,269-270,276-277,285-286,292,295,307,330-332,336,366-368,378,383,386,400,408
+apps/backend/tests/community/endpoints/test_context_collab_endpoints.py
+  h_059e888e5e4e82 39,50-53,103-105,239-260,504-511,517,522,528
+apps/backend/tests/community/endpoints/test_context_collab_methods_endpoints.py
+  h_059e888e5e4e82 70
+apps/backend/tests/community/endpoints/test_openapi_context_collab_endpoints.py
+  h_059e888e5e4e82 34-37,135,140-146,150,253-263
+apps/backend/tests/community/repository/task/context_collab/test_task_authority.py
+  h_059e888e5e4e82 46
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "96b8b53c9bd43c2e6fdffc5b5c2ed04e46aa7344",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}
