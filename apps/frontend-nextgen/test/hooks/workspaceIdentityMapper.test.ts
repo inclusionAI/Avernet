@@ -54,4 +54,32 @@ describe('mapIdentityViewsToDisplayIdentities', () => {
     );
     expect(identities[0]).toMatchObject({ name: 'mine占位名' });
   });
+
+  it('同一 IdentityView.id 改名后 ID 原样保留，有效头像 URL 原样透传', () => {
+    const before = mapIdentityViewsToDisplayIdentities(
+      [{ id: 'bot-1:900003', kind: 'bot', displayName: '旧名', online: true, avatarUrl: '/saved.png' }],
+      null,
+      false,
+    )[0];
+    const after = mapIdentityViewsToDisplayIdentities(
+      [{ id: 'bot-1:900003', kind: 'bot', displayName: '新名', online: true, avatarUrl: '/saved.png' }],
+      null,
+      false,
+    )[0];
+
+    expect(before.id).toBe('bot-1:900003');
+    expect(after.id).toBe('bot-1:900003');
+    expect(after.avatar).toBe('/saved.png');
+  });
+
+  it('缺失头像时 mapper 不写入生成的默认图', () => {
+    const identity = mapIdentityViewsToDisplayIdentities(
+      [{ id: 'bot-2:900003', kind: 'bot', displayName: '新名', online: true }],
+      null,
+      false,
+    )[0];
+
+    expect(identity.avatar).toBe('新');
+    expect(identity.avatar).not.toMatch(/^data:/);
+  });
 });

@@ -1,0 +1,325 @@
+[
+  {
+    "from": "apps/frontend-nextgen/test/assets/TaskPanel/DagViewInteractive.test.tsx",
+    "to": [
+      "apps/frontend-nextgen/assets/task-panel/test/panel/DagViewInteractive.test.tsx"
+    ],
+    "scope": "shared"
+  },
+  {
+    "from": "apps/frontend-nextgen/test/assets/TaskPanel/GroupDrillDown.coverage.test.tsx",
+    "to": [
+      "apps/frontend-nextgen/test/integration/taskPanel/GroupDrillDown.coverage.test.tsx"
+    ],
+    "scope": "host integration/SDK"
+  },
+  {
+    "from": "apps/frontend-nextgen/test/assets/TaskPanel/GroupDrillDown.test.tsx",
+    "to": [
+      "apps/frontend-nextgen/test/integration/taskPanel/GroupDrillDown.test.tsx"
+    ],
+    "scope": "host integration/SDK"
+  },
+  {
+    "from": "apps/frontend-nextgen/test/assets/TaskPanel/MarkdownCell.coverage.test.tsx",
+    "to": [
+      "apps/frontend-nextgen/assets/task-panel/test/panel/MarkdownCell.coverage.test.tsx"
+    ],
+    "scope": "shared"
+  },
+  {
+    "from": "apps/frontend-nextgen/test/assets/TaskPanel/SafeHtml.asset.test.tsx",
+    "to": [
+      "apps/frontend-nextgen/assets/task-panel/test/rich-content/SafeHtml.asset.test.tsx"
+    ],
+    "scope": "shared"
+  },
+  {
+    "from": "apps/frontend-nextgen/test/assets/TaskPanel/TaskInfoTab.coverage.test.tsx",
+    "to": [
+      "apps/frontend-nextgen/assets/task-panel/test/panel/TaskInfoTab.coverage.test.tsx"
+    ],
+    "scope": "shared"
+  },
+  {
+    "from": "apps/frontend-nextgen/test/assets/TaskPanel/TaskPanel.includeActionLog.test.tsx",
+    "to": [
+      "apps/frontend-nextgen/assets/task-panel/test/panel/TaskPanel.includeActionLog.test.tsx"
+    ],
+    "scope": "shared"
+  },
+  {
+    "from": "apps/frontend-nextgen/test/assets/TaskPanel/TaskPanelAdapter.test.tsx",
+    "to": [
+      "apps/frontend-nextgen/test/components/Workspace/TaskPanelAdapter.test.tsx"
+    ],
+    "scope": "host integration/SDK"
+  },
+  {
+    "from": "apps/frontend-nextgen/test/assets/TaskPanel/TaskPanelFetcher.aceLogin.test.tsx",
+    "to": [
+      "apps/frontend-nextgen/test/integration/taskPanel/TaskPanelFetcher.aceLogin.test.tsx"
+    ],
+    "scope": "host integration/SDK"
+  },
+  {
+    "from": "apps/frontend-nextgen/test/assets/TaskPanel/TaskPanelFetcher.coverage.test.tsx",
+    "to": [
+      "apps/frontend-nextgen/test/integration/taskPanel/TaskPanelFetcher.coverage.test.tsx"
+    ],
+    "scope": "host integration/SDK"
+  },
+  {
+    "from": "apps/frontend-nextgen/test/assets/TaskPanel/TaskProgress.test.tsx",
+    "to": [
+      "apps/frontend-nextgen/assets/task-panel/test/panel/TaskProgress.test.tsx"
+    ],
+    "scope": "shared"
+  },
+  {
+    "from": "apps/frontend-nextgen/test/assets/TaskPanel/TruncatedText.coverage.test.tsx",
+    "to": [
+      "apps/frontend-nextgen/assets/task-panel/test/panel/TruncatedText.coverage.test.tsx"
+    ],
+    "scope": "shared"
+  },
+  {
+    "from": "apps/frontend-nextgen/test/assets/TaskPanel/TruncatedText.test.tsx",
+    "to": [
+      "apps/frontend-nextgen/assets/task-panel/test/panel/TruncatedText.test.tsx"
+    ],
+    "scope": "shared"
+  },
+  {
+    "from": "apps/frontend-nextgen/test/assets/TaskPanel/artifactDescriptor.coverage.test.ts",
+    "to": [
+      "apps/frontend-nextgen/assets/task-panel/test/panel/artifactDescriptor.coverage.test.ts"
+    ],
+    "scope": "shared"
+  },
+  {
+    "from": "apps/frontend-nextgen/test/assets/TaskPanel/artifactDescriptor.test.ts",
+    "to": [
+      "apps/frontend-nextgen/assets/task-panel/test/panel/artifactDescriptor.test.ts"
+    ],
+    "scope": "shared"
+  },
+  {
+    "from": "apps/frontend-nextgen/test/assets/TaskPanel/artifactTime.test.ts",
+    "to": [
+      "apps/frontend-nextgen/assets/task-panel/test/panel/artifactTime.test.ts"
+    ],
+    "scope": "shared"
+  },
+  {
+    "from": "apps/frontend-nextgen/test/assets/TaskPanel/groupDisplay.coverage.test.ts",
+    "to": [
+      "apps/frontend-nextgen/assets/task-panel/test/panel/groupDisplay.coverage.test.ts"
+    ],
+    "scope": "shared"
+  },
+  {
+    "from": "apps/frontend-nextgen/test/assets/TaskPanel/hooks/useGroupMemberNames.coverage.test.tsx",
+    "to": [
+      "apps/frontend-nextgen/assets/task-panel/test/panel/hooks/useGroupMemberNames.coverage.test.tsx"
+    ],
+    "scope": "shared"
+  },
+  {
+    "from": "apps/frontend-nextgen/test/assets/TaskPanel/icons.test.tsx",
+    "to": [
+      "apps/frontend-nextgen/assets/task-panel/test/panel/icons.test.tsx"
+    ],
+    "scope": "shared"
+  },
+  {
+    "from": "apps/frontend-nextgen/test/assets/TaskPanel/messageWindowLocate.test.ts",
+    "to": [
+      "apps/frontend-nextgen/assets/task-panel/test/panel/messageWindowLocate.test.ts"
+    ],
+    "scope": "shared"
+  },
+  {
+    "from": "apps/frontend-nextgen/test/assets/TaskPanel/outputEnvelope.coverage.test.ts",
+    "to": [
+      "apps/frontend-nextgen/assets/task-panel/test/panel/outputEnvelope.coverage.test.ts"
+    ],
+    "scope": "shared"
+  },
+  {
+    "from": "apps/frontend-nextgen/test/assets/TaskPanel/registerTaskPanel.test.ts",
+    "to": [
+      "apps/frontend-nextgen/test/services/tasks/panel/registerTaskPanel.test.ts"
+    ],
+    "scope": "host integration/SDK"
+  },
+  {
+    "from": "apps/frontend-nextgen/test/assets/TaskPanel/sessionResolution.coverage.test.ts",
+    "to": [
+      "apps/frontend-nextgen/assets/task-panel/test/panel/sessionResolution.coverage.test.ts"
+    ],
+    "scope": "shared"
+  },
+  {
+    "from": "apps/frontend-nextgen/test/assets/TaskPanel/sessionResolution.test.ts",
+    "to": [
+      "apps/frontend-nextgen/assets/task-panel/test/panel/sessionResolution.test.ts"
+    ],
+    "scope": "shared"
+  },
+  {
+    "from": "apps/frontend-nextgen/test/assets/TaskPanel/statusDerivation.coverage.test.ts",
+    "to": [
+      "apps/frontend-nextgen/assets/task-panel/test/panel/statusDerivation.coverage.test.ts"
+    ],
+    "scope": "shared"
+  },
+  {
+    "from": "apps/frontend-nextgen/test/assets/TaskPanel/statusDerivation.test.ts",
+    "to": [
+      "apps/frontend-nextgen/assets/task-panel/test/panel/statusDerivation.test.ts"
+    ],
+    "scope": "shared"
+  },
+  {
+    "from": "apps/frontend-nextgen/test/assets/TaskPanel/taskArtifactStage.test.ts",
+    "to": [
+      "apps/frontend-nextgen/assets/task-panel/test/panel/taskArtifactStage.test.ts"
+    ],
+    "scope": "shared"
+  },
+  {
+    "from": "apps/frontend-nextgen/test/assets/TaskPanel/taskPanelMapper.coverage.test.ts",
+    "to": [
+      "apps/frontend-nextgen/assets/task-panel/test/panel/taskPanelMapper.coverage.test.ts"
+    ],
+    "scope": "shared"
+  },
+  {
+    "from": "apps/frontend-nextgen/test/assets/TaskPanel/taskPanelMapper.test.ts",
+    "to": [
+      "apps/frontend-nextgen/assets/task-panel/test/panel/taskPanelMapper.test.ts",
+      "apps/frontend-nextgen/assets/task-panel/test/panel/taskPanelMapper.execution.test.ts"
+    ],
+    "scope": "shared"
+  },
+  {
+    "from": "apps/frontend-nextgen/test/assets/TaskPanel/theme.test.tsx",
+    "to": [
+      "apps/frontend-nextgen/assets/task-panel/test/panel/theme.test.tsx"
+    ],
+    "scope": "shared"
+  },
+  {
+    "from": "apps/frontend-nextgen/test/assets/TaskPanel/useTaskArtifactPreview.coverage.test.tsx",
+    "to": [
+      "apps/frontend-nextgen/test/integration/taskPanel/useTaskArtifactPreview.coverage.test.tsx"
+    ],
+    "scope": "host integration/SDK"
+  },
+  {
+    "from": "apps/frontend-nextgen/test/assets/TaskPanel/useTaskArtifactPreview.objectFile.test.tsx",
+    "to": [
+      "apps/frontend-nextgen/test/integration/taskPanel/useTaskArtifactPreview.objectFile.test.tsx"
+    ],
+    "scope": "host integration/SDK"
+  },
+  {
+    "from": "apps/frontend-nextgen/test/assets/TaskPanel/v2/ArtifactsSection.coverage.test.tsx",
+    "to": [
+      "apps/frontend-nextgen/assets/task-panel/test/panel/v2/ArtifactsSection.coverage.test.tsx"
+    ],
+    "scope": "shared"
+  },
+  {
+    "from": "apps/frontend-nextgen/test/assets/TaskPanel/v2/ArtifactsSection.test.tsx",
+    "to": [
+      "apps/frontend-nextgen/assets/task-panel/test/panel/v2/ArtifactsSection.test.tsx"
+    ],
+    "scope": "shared"
+  },
+  {
+    "from": "apps/frontend-nextgen/test/assets/TaskPanel/v2/NodeListViewV2.coverage.test.tsx",
+    "to": [
+      "apps/frontend-nextgen/assets/task-panel/test/panel/v2/NodeListViewV2.coverage.test.tsx"
+    ],
+    "scope": "shared"
+  },
+  {
+    "from": "apps/frontend-nextgen/test/assets/TaskPanel/v2/TaskArtifactPreviewDrawer.coverage.test.tsx",
+    "to": [
+      "apps/frontend-nextgen/test/integration/taskPanel/v2/TaskArtifactPreviewDrawer.coverage.test.tsx"
+    ],
+    "scope": "host integration/SDK"
+  },
+  {
+    "from": "apps/frontend-nextgen/test/assets/TaskPanel/v2/TaskArtifactPreviewDrawer.test.tsx",
+    "to": [
+      "apps/frontend-nextgen/assets/task-panel/test/panel/v2/TaskArtifactPreviewDrawer.test.tsx"
+    ],
+    "scope": "shared"
+  },
+  {
+    "from": "apps/frontend-nextgen/test/assets/TaskPanel/v2/TaskInfoSection.coverage.test.tsx",
+    "to": [
+      "apps/frontend-nextgen/assets/task-panel/test/panel/v2/TaskInfoSection.coverage.test.tsx"
+    ],
+    "scope": "shared"
+  },
+  {
+    "from": "apps/frontend-nextgen/test/assets/TaskPanel/v2/TaskNodePanelV2.test.tsx",
+    "to": [
+      "apps/frontend-nextgen/test/integration/taskPanel/v2/TaskNodePanelV2.test.tsx"
+    ],
+    "scope": "host integration/SDK"
+  },
+  {
+    "from": "apps/frontend-nextgen/test/assets/TaskPanel/v2/TaskOutputSection.test.tsx",
+    "to": [
+      "apps/frontend-nextgen/assets/task-panel/test/panel/v2/TaskOutputSection.test.tsx"
+    ],
+    "scope": "shared"
+  },
+  {
+    "from": "apps/frontend-nextgen/test/assets/TaskPanel/v2/TaskOverviewV2.test.tsx",
+    "to": [
+      "apps/frontend-nextgen/test/integration/taskPanel/v2/TaskOverviewV2.test.tsx"
+    ],
+    "scope": "host integration/SDK"
+  },
+  {
+    "from": "apps/frontend-nextgen/test/assets/TaskPanel/v2/TaskPanelV2.coverage.test.tsx",
+    "to": [
+      "apps/frontend-nextgen/assets/task-panel/test/panel/v2/TaskPanelV2.coverage.test.tsx"
+    ],
+    "scope": "shared"
+  },
+  {
+    "from": "apps/frontend-nextgen/test/assets/TaskPanel/v2/TaskPanelV2.test.tsx",
+    "to": [
+      "apps/frontend-nextgen/test/integration/taskPanel/v2/TaskPanelV2.test.tsx"
+    ],
+    "scope": "host integration/SDK"
+  },
+  {
+    "from": "apps/frontend-nextgen/test/assets/TaskPanel/v2/TaskSwitcherBar.test.tsx",
+    "to": [
+      "apps/frontend-nextgen/assets/task-panel/test/panel/v2/TaskSwitcherBar.test.tsx"
+    ],
+    "scope": "shared"
+  },
+  {
+    "from": "apps/frontend-nextgen/test/assets/TaskPanel/v2/TaskSwitcherControl.coverage.test.tsx",
+    "to": [
+      "apps/frontend-nextgen/assets/task-panel/test/panel/v2/TaskSwitcherControl.coverage.test.tsx"
+    ],
+    "scope": "shared"
+  },
+  {
+    "from": "apps/frontend-nextgen/test/assets/TaskPanel/v2/taskPanelNav.coverage.test.ts",
+    "to": [
+      "apps/frontend-nextgen/assets/task-panel/test/panel/v2/taskPanelNav.coverage.test.ts"
+    ],
+    "scope": "shared"
+  }
+]

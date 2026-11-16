@@ -14,7 +14,7 @@ describe("run history keyword filtering", () => {
   raw.exec("CREATE TABLE workflow_repair_release_records (record_id TEXT, record_kind TEXT, workflow_id TEXT)");
     const db = new SqliteDatabase(raw);
     const repo = new FlowRunRepository(db);
-    raw.exec(`CREATE TABLE flow_runs (
+    raw.exec(`CREATE TABLE flow_runs (env VARCHAR(32) DEFAULT 'prod', tag VARCHAR(255) DEFAULT '',
       id INTEGER PRIMARY KEY, flow_id TEXT, workflow_id TEXT, status TEXT, triggered_by TEXT,
       origin_bot_id TEXT, started_at INTEGER, workflow_title TEXT, node_count INTEGER,
       succeeded_count INTEGER, failed_count INTEGER, total_duration_ms INTEGER, total_token_usage INTEGER,

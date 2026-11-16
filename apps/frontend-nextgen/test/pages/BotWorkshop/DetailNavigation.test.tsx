@@ -38,7 +38,7 @@ test('消息托管显示托管简称，保留完整提示和点击行为', async
 
   const hosting = screen.getByRole('button', { name: '消息托管' });
   expect(hosting).toHaveTextContent(/^托管$/);
-  expect(screen.getByRole('button', { name: '定时任务' })).toHaveTextContent(/^定时$/);
+  expect(screen.queryByRole('button', { name: '定时任务' })).not.toBeInTheDocument();
   fireEvent.click(hosting);
   expect(onTabChange).toHaveBeenCalledWith('hosting');
   fireEvent.focus(hosting);

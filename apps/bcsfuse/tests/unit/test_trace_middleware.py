@@ -18,12 +18,12 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from src.infra.trace_context import get_trace_id
+from app.infra.trace_context import get_trace_id
 
 # 直接加载 trace_middleware 模块，避免触发 __init__.py 中的 app 导入链
 _spec = importlib.util.spec_from_file_location(
     "trace_middleware",
-    Path(__file__).parent.parent.parent / "src" / "interfaces" / "api" / "trace_middleware.py",
+    Path(__file__).parent.parent.parent / "src" / "app" / "adapters" / "http" / "trace_middleware.py",
 )
 _mod = importlib.util.module_from_spec(_spec)
 sys.modules["trace_middleware"] = _mod

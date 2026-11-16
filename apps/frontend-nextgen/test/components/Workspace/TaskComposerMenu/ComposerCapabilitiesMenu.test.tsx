@@ -32,7 +32,7 @@ function execution(overrides: Partial<UseTaskExecutionResult> = {}): UseTaskExec
   };
 }
 
-/** 能力集装配桩（单聊 我的/团队 Bot 场景传入）。 */
+/** 能力集装配桩（单聊 我的/团队空间 Bot 场景传入）。 */
 function capabilitySets(overrides: Partial<ComposerCapabilitySetsState> = {}): ComposerCapabilitySetsState {
   return {
     sets: [{ id: 'set-1', name: '默认能力集', isDefault: true, mcps: [] }],
@@ -79,9 +79,29 @@ describe('ComposerCapabilitiesMenu（胶囊双区拆分）', () => {
     const attachTrigger = screen.getByRole('button', { name: '添加附件' });
     expect(attachTrigger).toHaveAttribute('aria-haspopup', 'menu');
     expect(attachTrigger).toHaveAttribute('aria-expanded', 'false');
-    const capabilityTrigger = screen.getByRole('button', { name: '通用协作能力' });
+    // 入口显示真实激活集名（2026-11-04 需求）：mock 单集 name 直出，非写死「通用协作能力」。
+    const capabilityTrigger = screen.getByRole('button', { name: '默认能力集' });
     expect(capabilityTrigger).toHaveAttribute('aria-haspopup', 'menu');
     expect(capabilityTrigger).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('多集时入口显示首个真实集名 + 个数徽标（2026-11-04 需求）', () => {
+    render(
+      <ComposerCapabilitiesMenu
+        execution={execution()}
+        selections={[]}
+        enableWorkflow
+        capabilitySets={capabilitySets({
+          sets: [
+            { id: 'set-1', name: '默认能力集', isDefault: true, mcps: [] },
+            { id: 'set-2', name: '数据分析集', isDefault: false, mcps: [] },
+          ],
+        })}
+      />,
+    );
+    // aria 语义含总数；可见文案为首集真实名，徽标标注个数。
+    expect(screen.getByRole('button', { name: '默认能力集 等 2 个能力集' })).toBeInTheDocument();
+    expect(screen.getByText('2')).toBeInTheDocument();
   });
 
   it('未安装 task-intent-recognition 时任务行仍可见但禁用', async () => {
@@ -122,8 +142,8 @@ describe('ComposerCapabilitiesMenu（胶囊双区拆分）', () => {
     expect(screen.queryByText('能力集')).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: '任务' }));
     expect(onDynamicSelected).toHaveBeenCalledTimes(1);
-    // 「通用协作能力」触发器仍常驻（未连带触发生效）。
-    expect(screen.getByRole('button', { name: '通用协作能力' })).toBeInTheDocument();
+    // 「通用协作能力」触发器仍常驻（未连带触发生效）；入口文案随真实集名（mock 单集）。
+    expect(screen.getByRole('button', { name: '默认能力集' })).toBeInTheDocument();
   });
 
   it('「通用协作能力」区打开能力集列表并触发 load（不牵连 ＋ 区气泡）', async () => {
@@ -137,9 +157,11 @@ describe('ComposerCapabilitiesMenu（胶囊双区拆分）', () => {
         capabilitySets={set}
       />,
     );
-    await user.click(screen.getByRole('button', { name: '通用协作能力' }));
-    expect(set.load).toHaveBeenCalledTimes(1);
-    expect(screen.getByText('默认能力集')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '默认能力集' }));
+    // 挂载预载 1 次 + 打开重拉 1 次（2026-11-04 入口真实名需求引入挂载预载）。
+    expect(set.load).toHaveBeenCalledTimes(2);
+    // 入口真实名与气泡列表集名同名共存（入口改造后两处可见同名文本）。
+    expect(screen.getAllByText('默认能力集')).toHaveLength(2);
     expect(screen.getByText('查看明细')).toBeInTheDocument();
     // ＋ 区气泡未被连带打开。
     expect(screen.queryByRole('button', { name: '上传文件' })).not.toBeInTheDocument();
@@ -159,9 +181,9 @@ describe('ComposerCapabilitiesMenu（胶囊双区拆分）', () => {
         capabilitySets={capabilitySets()}
       />,
     );
-    // 双触发器常驻：不因存在选中态而消失。
+    // 双触发器常驻：不因存在选中态而消失（入口文案为真实集名，mock 单集）。
     expect(screen.getByRole('button', { name: '添加附件' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '通用协作能力' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '默认能力集' })).toBeInTheDocument();
     // 两枚 chip 并列展示，各带 x 清除钮。
     const clears = screen.getAllByRole('button', { name: '取消选择' });
     expect(clears).toHaveLength(2);

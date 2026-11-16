@@ -435,7 +435,7 @@ async def test_rejection_statuses_are_permanent(snapshot: ManagerSnapshot, statu
         with pytest.raises(BcsManagersError) as caught:
             await plugin.replace_managers(snapshot, timeout_seconds=2)
     assert caught.value.kind == DeliveryFailure.REJECTED
-    assert caught.value.code == f"http_{status}"
+    assert caught.value.code == ("bot_not_found" if status == 404 else f"http_{status}")
 
 
 @pytest.mark.parametrize("status", [408, 425, 429, 500, 502, 503])

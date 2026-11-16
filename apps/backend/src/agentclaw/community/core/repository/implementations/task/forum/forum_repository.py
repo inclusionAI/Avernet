@@ -24,6 +24,7 @@ from agentclaw.community.core.task.forum.models import (
     ForumPollProjectionCalculator,
     ForumPollProjectionInput,
     ForumPollVoteRecord,
+    ForumPostLocationRecord,
     ForumPostPage,
     ForumPostRecord,
     ForumReplyCreateResult,
@@ -242,6 +243,82 @@ class ForumRepository(
                 for row in visible_rows
             )
             return ForumPostPage(total=total, items=items)
+
+    def get_post_location(
+        self,
+        *,
+        topic_id: str,
+        post_id: str,
+        page_size: int,
+    ) -> ForumPostLocationRecord | None:
+        """Resolve one Post's floor group and page from public display order."""
+
+        if (
+            not isinstance(page_size, int)
+            or isinstance(page_size, bool)
+            or page_size < 1
+        ):
+            raise ValidationError("page_size must be a positive integer")
+
+        with self._db.orm_session() as db:
+            topic = (
+                db.query(ForumTopicModel.id)
+                .filter(
+                    ForumTopicModel.topic_id == topic_id,
+                    ForumTopicModel.env == get_current_env(),
+                    ForumTopicModel.avernet_tenant == get_current_avernet_tenant(),
+                )
+                .one_or_none()
+            )
+            if topic is None:
+                return None
+
+            rows = (
+                db.query(ForumPostModel)
+                .filter(ForumPostModel.topic_id == topic_id)
+                .order_by(ForumPostModel.gmt_create.asc(), ForumPostModel.id.asc())
+                .all()
+            )
+            rows_by_id = {row.post_id: row for row in rows}
+            target = rows_by_id.get(post_id)
+            if target is None:
+                return None
+
+            root = target
+            visited = {root.post_id}
+            while root.reply_to_post_id is not None:
+                parent_id = root.reply_to_post_id
+                if parent_id in visited:
+                    return None
+                parent = rows_by_id.get(parent_id)
+                if parent is None:
+                    return None
+                root = parent
+                visited.add(root.post_id)
+
+            first_level_rows = tuple(
+                row for row in rows if row.reply_to_post_id is None
+            )
+            if root.post_id not in {row.post_id for row in first_level_rows}:
+                return None
+            display_rows = sorted(
+                first_level_rows,
+                key=lambda row: (
+                    0 if _helpful_from_post_config(row.post_config) else 1,
+                    row.gmt_create,
+                    row.id,
+                ),
+            )
+            root_display_index = next(
+                index
+                for index, row in enumerate(display_rows)
+                if row.post_id == root.post_id
+            )
+            return ForumPostLocationRecord(
+                post_id=target.post_id,
+                root_post_id=root.post_id,
+                page=root_display_index // page_size + 1,
+            )
 
     def get_post(
         self,

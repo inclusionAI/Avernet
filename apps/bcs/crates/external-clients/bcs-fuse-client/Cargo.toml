@@ -10,6 +10,7 @@ version.workspace = true
 workspace = true
 
 [dependencies]
+bcs-network-tracing.workspace = true
 bcs-observability = { workspace = true }
 bcs-config-api = { workspace = true }
 reqwest = { workspace = true }

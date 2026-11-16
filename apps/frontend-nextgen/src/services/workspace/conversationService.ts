@@ -2,6 +2,7 @@
 // 组合 botSessionService / collaborationCandidateService 的既有映射,不重复协议转换。
 // 由调用方(Hook)传入已鉴权的 Human ID,本 Service 不读取任何 Store / 路由。
 import { resolveBotRuntime } from '@/adapters/bot-runtime/resolveBotRuntime';
+import { getCapabilities } from '@/capabilities';
 import { supportsBotSessionFavorites } from '@/domain/botEngine';
 import { codingSessionOriginOf } from '@/domain/conversation/codingSessionOwnership';
 import type {
@@ -17,7 +18,6 @@ import {
   type ChatBotView,
 } from './botSessionService';
 import { collaborationCandidateService, type CollaborationBotView } from './collaborationCandidateService';
-import { conversationFavoriteService } from './conversationFavoriteService';
 import type { DomainResult } from './identityService';
 
 export interface ConversationDirectoryResult {
@@ -73,6 +73,7 @@ async function listCodingSessionsByOrigin(
 ): Promise<DomainResult<BotSessionPageView>> {
   const matching: BotSessionPageView['items'] = [];
   const targetEnd = page * pageSize;
+  const isSessionHidden = getCapabilities().getCodingBotConversationHost().value?.isSessionHidden;
   let rawPage = 1;
   let exhausted = false;
 
@@ -98,7 +99,9 @@ async function listCodingSessionsByOrigin(
     if (!result.ok) return result;
 
     matching.push(
-      ...result.data.items.filter((session) => codingSessionOriginOf(session.sessionId, userId) === origin),
+      ...result.data.items.filter(
+        (session) => !isSessionHidden?.(session) && codingSessionOriginOf(session.sessionId, userId) === origin,
+      ),
     );
     exhausted =
       result.data.items.length < CODING_SESSION_SCAN_PAGE_SIZE ||
@@ -111,9 +114,7 @@ async function listCodingSessionsByOrigin(
   // 未扫到尾时只暴露“至少还有一页”的有界 total；真正到尾后再给精确过滤总数。
   const total = exhausted ? matching.length : Math.max(targetEnd + 1, matching.length + 1);
   const data = { items, total };
-  return scope === 'favorite' || !supportsBotSessionFavorites(bot.engine)
-    ? { ok: true, data }
-    : { ok: true, data: await conversationFavoriteService.hydrate(bot, userId, data) };
+  return { ok: true, data };
 }
 
 export const conversationService = {
@@ -157,7 +158,7 @@ export const conversationService = {
       return botSessionService.listFavoriteSessionsPage(bot, userId, page, pageSize, ...rangeArgs);
     }
     const result = await botSessionService.listSessionsPage(bot, userId, page, pageSize, sessionKey, ...rangeArgs);
-    return result.ok ? { ok: true, data: await conversationFavoriteService.hydrate(bot, userId, result.data) } : result;
+    return result;
   },
 
   /** Human→Bot 好友 Bot 会话分页:鉴权 Human 既作 user_id 也作 f_user_id;
@@ -184,8 +185,6 @@ export const conversationService = {
       sessionKey,
       ...rangeArgs,
     );
-    return result.ok
-      ? { ok: true, data: await conversationFavoriteService.hydrate(friendBot, userId, result.data) }
-      : result;
+    return result;
   },
 };

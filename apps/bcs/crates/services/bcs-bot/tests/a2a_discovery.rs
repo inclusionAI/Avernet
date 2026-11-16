@@ -26,7 +26,7 @@ async fn fixture() -> Fixture {
         friend_ext JSON, friend_check_in_strategy TEXT DEFAULT 'APPROVAL',
         gmt_create TEXT DEFAULT CURRENT_TIMESTAMP,gmt_modified TEXT DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY(bot_uuid,env))")).await.unwrap();
-    for sql in bcs_db_api::split_sql_statements(include_str!("../../../../migrations/sqlite/039_bot_a2a.sql")).into_iter() {
+    for sql in bcs_db_api::split_sql_statements(&[include_str!("../../../../migrations/sqlite/039_bot_a2a.sql")].concat()).into_iter() {
         db.execute(DbStatement::new(sql)).await.unwrap();
     }
     let env=bcs_config::resolve_env_str();
@@ -38,18 +38,19 @@ async fn fixture() -> Fixture {
     let mut record=A2aBotRecord {bot_uuid:"card-1".into(),provider_id:"provider".into(),provider_bot_ref:"card-1".into(),
         agent_card_url:Some("https://example.org/card".into()),agent_card:raw,revision:1,};
     for (id,visibility) in [("card-1","public"),("card-2","public"),("card-private","private"),("legacy","public")] {
+        let provider=if id=="card-1" {"provider".to_owned()} else {format!("provider-{id}")};
         let caps=BotCapabilities {name:Some(format!("BCS {id}")),summary:Some("legacy-only".into()),visibility:visibility.into(),
             skills:vec![Skill::new("legacy-skill")],..Default::default()};
         registry.register(id.into(),caps.clone()).await.unwrap();
         authority.hook.seed_owner(id,"alice");
         db.execute(DbStatement::with_params("INSERT INTO bcs_bots (bot_uuid,env,name,bot_info,provider_id,provider_bot_ref,visibility) VALUES(?,?,?,?,?,?,?)",
-            vec![id.into(),env.clone().into(),format!("BCS {id}").into(),serde_json::to_string(&caps).unwrap().into(),"provider".into(),id.into(),visibility.into()])).await.unwrap();
+            vec![id.into(),env.clone().into(),format!("BCS {id}").into(),serde_json::to_string(&caps).unwrap().into(),provider.clone().into(),id.into(),visibility.into()])).await.unwrap();
         if id!="legacy" {
-            record.bot_uuid=id.into();record.provider_bot_ref=id.into();
+            record.bot_uuid=id.into();record.provider_bot_ref=id.into();record.provider_id=provider;
             assert!(cards.compare_and_set(&record,0).await.unwrap());
         }
     }
-    record.bot_uuid="card-1".into();record.provider_bot_ref="card-1".into();
+    record.bot_uuid="card-1".into();record.provider_bot_ref="card-1".into();record.provider_id="provider".into();
     let providers=Arc::new(MemoryProviderStore::new());
     let control=Arc::new(BotControlPlaneCore::new(Arc::new(PersistentBotRepo::with_sql_flavor(db.clone(),DbSqlFlavor::Sqlite)),providers.clone(),providers));
     let core=Arc::new(A2aBotCore::new(cards.clone(),Arc::new(DbProviderStore::sqlite(db.clone()))));
@@ -85,9 +86,9 @@ async fn search_counts_and_pages_use_card_text_before_pagination() {
 }
 
 #[tokio::test]
-async fn card_bcs_alias_search_preserves_pagination_visibility_and_card_skill_authority() {
+async fn synchronized_card_name_search_preserves_pagination_visibility_and_card_skill_authority() {
     let f=fixture().await;
-    let query="bcs card";
+    let query="Card payment";
     let discovered=f.app.discover_bots(BotDiscoveryCommand {q:Some(query.into()),..Default::default()}).await.unwrap();
     assert_eq!(discovered.count,2);
     assert!(discovered.bots.iter().all(|bot|bot.bot_uuid!="card-private" && bot.agent_card==Some(f.record.agent_card.clone())));
@@ -126,4 +127,22 @@ async fn malformed_stored_card_is_an_error_instead_of_legacy_fallback() {
     f.db.execute(DbStatement::new("UPDATE bcs_bots SET agent_card='invalid-json' WHERE bot_uuid='card-1'")).await.unwrap();
     assert!(f.app.get_bot(BotDetailCommand {caller_actor_id:Some("human_alice".into()),bot_id:"card-1".into()}).await.is_err());
     assert!(f.app.search_bots(SearchBotsCommand {q:Some("settlementneedle".into()),..Default::default()}).await.is_err());
+}
+
+#[tokio::test]
+async fn renaming_card_refreshes_discovery_search_and_detail_despite_stale_registry_caps() {
+    let mut f=fixture().await;
+    f.record.agent_card["name"]=json!("订单查询助手");
+    f.record.revision=2;
+    assert!(f.cards.compare_and_set(&f.record,1).await.unwrap());
+    let detail=f.app.get_bot(BotDetailCommand {caller_actor_id:Some("human_alice".into()),bot_id:"card-1".into()}).await.unwrap();
+    assert_eq!(detail.capabilities.name.as_deref(),Some("订单查询助手"));
+    let found=f.app.discover_bots(BotDiscoveryCommand {q:Some("订单查询助手".into()),..Default::default()}).await.unwrap();
+    assert_eq!(found.count,1);assert_eq!(found.bots[0].bot_uuid,"card-1");
+    let search=f.app.search_bots(SearchBotsCommand {q:Some("订单查询助手".into()),..Default::default()}).await.unwrap();
+    assert_eq!(search.total,1);assert_eq!(search.items[0].bot_uuid,"card-1");
+    let old=f.app.search_bots(SearchBotsCommand {q:Some("Card payment".into()),..Default::default()}).await.unwrap();
+    assert!(old.items.iter().all(|bot|bot.bot_uuid!="card-1"));
+    let old=f.app.discover_bots(BotDiscoveryCommand {q:Some("BCS card".into()),..Default::default()}).await.unwrap();
+    assert!(old.bots.is_empty(),"stale local display aliases are no longer current names");
 }

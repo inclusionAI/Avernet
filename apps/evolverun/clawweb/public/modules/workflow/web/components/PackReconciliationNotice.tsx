@@ -35,7 +35,7 @@ export default function PackReconciliationNotice({ reconciliation, busy, downloa
         <button type="button" className={actionClassName} disabled={reconciliation.checking || busy} onClick={onObserveHead}>{reconciliation.checking ? '正在读取远端 HEAD…' : '查看远端草稿 HEAD'}</button>
       </div>
       {downloadError && <p role="alert" className="rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2 text-destructive">下载失败；候选仍保留在当前页面会话中。</p>}
-      <p role="alert" className="rounded-lg border border-warning/20 bg-warning/10 px-3 py-2 text-warning-foreground">系统不保存操作日志，无法自动恢复或安全重试。请先人工核对 Git 的 saved 分支与候选，再重新打开页面。</p>
+      <p role="alert" className="rounded-lg border border-warning/20 bg-warning/10 px-3 py-2 text-warning-foreground">系统不保存操作日志，无法自动恢复或安全重试。请先人工核对 Git 的 草稿(wf)分支与候选，再重新打开页面。</p>
     </div>
   </section>
 }

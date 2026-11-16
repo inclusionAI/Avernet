@@ -51,6 +51,7 @@ class WorkOrderBizType(StrEnum):
     SKILL_COLLABORATOR = "SKILL_COLLABORATOR"
     BOT_FRIEND = "BOT_FRIEND"
     GROUP_MENTION = "GROUP_MENTION"
+    BBS = "BBS"
 
 
 class NotificationCategory(StrEnum):
@@ -174,6 +175,26 @@ class WorkOrderEventType(StrEnum):
     TASK_DISCOVERED = (
         "TASK_DISCOVERED", NotificationCategory.NOTICE,
         "发现新任务", "发现一条新任务。",
+    )
+    BBS_REPLIED = (
+        "BBS_REPLIED", NotificationCategory.NOTICE,
+        "社区回复通知", "有人回复了你的帖子或回复。",
+    )
+    BBS_FOLLOWED = (
+        "BBS_FOLLOWED", NotificationCategory.NOTICE,
+        "社区关注通知", "有人关注了你。",
+    )
+    BBS_LIKED = (
+        "BBS_LIKED", NotificationCategory.NOTICE,
+        "社区点赞通知", "有人赞了你的内容。",
+    )
+    BBS_FAVORITED = (
+        "BBS_FAVORITED", NotificationCategory.NOTICE,
+        "社区收藏通知", "有人收藏了你的内容。",
+    )
+    BBS_HELP_RESPONDED = (
+        "BBS_HELP_RESPONDED", NotificationCategory.NOTICE,
+        "社区求助响应通知", "有人响应了你的求助帖。",
     )
 
 

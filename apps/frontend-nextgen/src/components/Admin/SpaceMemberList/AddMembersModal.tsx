@@ -19,11 +19,11 @@ import {
 } from '@/components/ui';
 import { Card } from '@/components/ui/Card';
 import type { SpaceMember } from '@/domain/admin/models';
+import { Points } from '@/tracking/points';
+import { Tracert } from '@/utils/tracert';
 import { X } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { UserSearchDropdown } from './UserSearchDropdown';
-import { Points } from '@/tracking/points';
-import { Tracert } from '@/utils/tracert';
 
 export interface AddMembersModalProps {
   open: boolean;
@@ -86,13 +86,15 @@ export function AddMembersModal({
 
   return (
     <Modal open={open} onOpenChange={onOpenChange}>
-      <ModalContent size="sm" className="max-w-[420px]">
-        <ModalHeader>
-          <ModalTitle>添加成员</ModalTitle>
+      <ModalContent size="sm" className="max-w-[480px] gap-0 p-0" aria-describedby={undefined}>
+        <ModalHeader className="h-[57px] justify-center border-b border-border px-5">
+          <ModalTitle className="text-base font-medium">添加空间成员</ModalTitle>
         </ModalHeader>
-        <div className="space-y-4 py-2">
+        <div className="space-y-5 px-5 py-5">
           <div className="space-y-2">
-            <CaptionText as="label">搜索员工</CaptionText>
+            <CaptionText as="div" className="text-[13px] text-foreground">
+              <span className="mr-1 text-destructive">*</span>成员姓名
+            </CaptionText>
             {/* 多选：选中不清空，追加到 chip 集；下拉对 已成员/自己/本批次已选 三类置灰去重 */}
             <UserSearchDropdown
               disabledUserIds={disabledUserIds}
@@ -128,9 +130,11 @@ export function AddMembersModal({
             )}
           </div>
           <div className="space-y-2">
-            <CaptionText as="label">分配角色</CaptionText>
+            <CaptionText as="label" htmlFor="space-member-role" className="text-[13px] text-foreground">
+              <span className="mr-1 text-destructive">*</span>分配角色
+            </CaptionText>
             <Select value={newRole} onValueChange={(v) => setNewRole(v as 'ADMIN' | 'MEMBER')}>
-              <SelectTrigger className="h-9 w-full">
+              <SelectTrigger id="space-member-role" className="h-8 w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -140,8 +144,8 @@ export function AddMembersModal({
             </Select>
           </div>
         </div>
-        <ModalFooter>
-          <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)} disabled={addMembersLoading}>
+        <ModalFooter className="flex-row justify-end border-t border-border px-5 py-4">
+          <Button variant="secondary" size="sm" onClick={() => onOpenChange(false)} disabled={addMembersLoading}>
             取消
           </Button>
           <Button

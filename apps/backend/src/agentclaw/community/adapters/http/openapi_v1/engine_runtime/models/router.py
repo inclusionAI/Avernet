@@ -49,6 +49,7 @@ from agentclaw.community.api.human_bot_friendship_service import (
 )
 from agentclaw.community.core.engine_runtime.errors import EngineResourceNotFoundError
 from agentclaw.community.di import Injected
+from agentclaw.community.utils.runtime_list_timing import mark
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 
 router = APIRouter(
@@ -93,6 +94,7 @@ async def list_models(
     ),
 ) -> Envelope[Page[Model]]:
     """List the models this bot's engine can route to."""
+    mark("handler")
     if f_user_id is not None:
         if device_uuid is not None:
             raise EngineResourceNotFoundError("instance selection is unavailable for friend chat")

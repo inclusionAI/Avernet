@@ -189,9 +189,23 @@ class _Skills:
 class _Cron:
     def __init__(self) -> None:
         self.created: list[str] = []
+        self.targets: list[dict] = []
 
-    async def create_cron(self, *, bot_id: str, user_id: str, nick_name: str, body):
+    async def create_cron(
+        self, *, bot_id: str, user_id: str, nick_name: str, body,
+        runtime_stage: str | None = None,
+        device_uuid: str | None = None,
+        operator_id: str | None = None,
+        authenticated_user_id: str | None = None,
+    ):
         self.created.append(bot_id)
+        self.targets.append({
+            "user_id": user_id,
+            "runtime_stage": runtime_stage,
+            "device_uuid": device_uuid,
+            "operator_id": operator_id,
+            "authenticated_user_id": authenticated_user_id,
+        })
         return {"data": {"id": "r-1", "name": body["name"], "enabled": True}}
 
 
@@ -329,6 +343,13 @@ def test_creating_a_routine_on_the_granted_bot_works(client, cron):
 
     assert response.status_code == 201, response.json()
     assert cron.created == [GRANTED_BOT]
+    assert cron.targets == [{
+        "user_id": USER,
+        "runtime_stage": None,
+        "device_uuid": None,
+        "operator_id": None,
+        "authenticated_user_id": USER,
+    }], "the granted acting user remains the app-only Cron actor"
 
 
 # ── the two operations that address an owner of their own ────────────────────

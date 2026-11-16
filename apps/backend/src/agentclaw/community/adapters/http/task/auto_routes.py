@@ -19,7 +19,10 @@ from agentclaw.community.adapters.http.task.schemas import (
     task_info_request_from_dto,
 )
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
-from agentclaw.community.core.task.domain.identity import compose_bot_identity
+from agentclaw.community.core.task.domain.identity import (
+    compose_bot_identity,
+    resolve_scoped_entry_bot_identity as resolve_entry_bot_identity,
+)
 from agentclaw.community.core.task.domain.models import TaskOpResult
 from agentclaw.community.core.task.task_runner.client.ports import OpenApiBotPort
 from agentclaw.community.core.task.task_runner.client.prompt_formatter import (
@@ -154,7 +157,11 @@ async def auto_execute_task_internal(
         return envelope(op_result_to_dto(result), request)
 
     # ---- Step 2: 拼副屏卡片 + 隐藏 Relay 根指令 ----
-    bot_identity = compose_bot_identity(body.owner_bot_id, body.owner_user_id)
+    entry_bot_id, entry_bot_owner_id = resolve_entry_bot_identity(
+        body.owner_bot_id,
+        body.owner_user_id,
+    )
+    bot_identity = compose_bot_identity(entry_bot_id, entry_bot_owner_id)
     launch_message = build_benchmark_task_launch_message(
         task_id=result.task_id,
         owner_user_id=task_request.owner_user_id,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import asyncio
 
 from agentclaw.community.core.task.domain.models import (
@@ -23,6 +24,25 @@ from agentclaw.community.core.task.task_center.task_recovery import (
     TaskRecoveryCoordinator,
 )
 from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
+
+
+def _record_search_candidates(service, candidates=("bot-2", "bot-manager", "bot-worker")):
+    service.append_action_event(
+        "task-1",
+        "task-1",
+        NodeAction.DISPATCH,
+        {
+            "phase": "search",
+            "action_result": "search",
+            "query": "test relay candidates",
+            "relay_token_fingerprint": hashlib.sha256(b"attempt-1").hexdigest(),
+            "candidate_count": len(candidates),
+            "candidates": [
+                {"bot_id": candidate, "name": candidate, "score": 0.9}
+                for candidate in candidates
+            ],
+        },
+    )
 
 
 def _run(coro):
@@ -61,6 +81,7 @@ def _service() -> TaskGraphService:
     graph.tasks.append(root)
     service = TaskGraphService()
     service._graphs[graph.task_id] = graph
+    _record_search_candidates(service)
     return service
 
 

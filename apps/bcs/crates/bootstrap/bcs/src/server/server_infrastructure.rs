@@ -20,19 +20,11 @@ impl BcsServer {
         extensions: BcsServerExtensions,
     ) -> crate::Result<Self> {
         use bcs_service_api::BotRegistryCoreService;
-        let group_session_secret_access = crate::http_adapter::build_secret_access(&config).await?;
-        let invite_token_secret = resolve_invite_token_secret(&config);
-        let gateway_principal_verifier = build_gateway_principal_verifier_from_secret_access(
-            &config.gateway_principal,
-            group_session_secret_access.clone(),
-        )
-        .await?;
-        info!(
-            issuers = ?config.gateway_principal.issuers,
-            audience = %config.gateway_principal.audience,
-            key_id = %config.gateway_principal.key_id,
-            "Gateway Principal verifier initialized"
-        );
+        let GatewayPrincipalAuthResources {
+            group_session_secret_access,
+            invite_token_secret,
+            gateway_principal_verifier,
+        } = super::auth_resources::build_gateway_principal_auth_resources(&config).await?;
         let outbound_url_guard = outbound_url_guard_from_config(&config);
         let admin_invocation_runs = Arc::new(AdminInvocationStore::default());
         let user_directory = match extensions.user_directory_plugin.clone() {
@@ -83,14 +75,12 @@ impl BcsServer {
         ));
         let control_plane_repo: Arc<dyn BotControlPlaneRepoPort> = bot_repo.clone();
         let bot_metrics_snapshot: Arc<dyn BotMetricsSnapshotPort> = bot_repo.clone();
-        let bot_core_arc = Arc::new(BotCore::with_provider_repos(
-            bot_repo,
-            provider_repos.provider_repo.clone(),
-            provider_repos.provider_credentials.clone(),
-            provider_repos.provider_bindings.clone(),
-        ).with_bot_provider_repo(provider_repos.bot_providers.clone())
-            .with_a2a_route_policy(outbound_url_guard.clone(),config.a2a_grpc.as_ref().map(|mesh|mesh.routes.iter().map(|route|route.interface_url.clone()).collect()).unwrap_or_default())
-            .with_a2a_cards(Arc::new(bcs_bot_store::a2a::DbA2aBotStore::new(db_plugin.clone(), crate::env::resolve_env(), db_flavor))));
+        let card_changes = (config.bcsfuse.enabled
+            && config.bcsfuse.api_version == bcs_fuse_client::BcsFuseApiVersion::V2)
+            .then(|| Arc::new(bcs_fusion::CardChangeQueue::default()));
+        let bot_core_arc=super::a2a_wiring::build_bot_core(
+            bot_repo.clone(),&provider_repos,db_plugin.clone(),db_flavor,&config,outbound_url_guard.clone(),
+            card_changes.clone().map(|queue| queue as Arc<dyn bcs_service_api::port::CatalogChangePort>));
         let bot_registry: Arc<dyn BotRegistryCoreService> = bot_core_arc.clone();
 
         let leader_election_registration = if extensions.leader_election.is_some() {
@@ -124,7 +114,7 @@ impl BcsServer {
                 crate::eventing_wiring::event_record_factory(&config, event_repo.clone());
             (
                 Arc::new(
-                    GroupCore::with_repo(repo.clone()).with_collaboration_registry(bot_registry.clone()).with_event_record_factory(event_factory),
+                    GroupCore::with_repo(repo.clone()).with_catalog_changes(card_changes.clone().map(|queue| queue as Arc<dyn bcs_service_api::port::CatalogChangePort>)).with_collaboration_registry(bot_registry.clone()).with_event_record_factory(event_factory),
                 ),
                 repo.clone() as Arc<dyn GroupMetricsSnapshotPort>,
                 repo as Arc<dyn GroupRepoPort>,
@@ -135,7 +125,8 @@ impl BcsServer {
         let router = Arc::new(MessageRouter::new());
 
         let (fusion, fuse_client) = create_fusion_service(&config);
-        register_late_lifecycles(&lifecycle, fuse_client.as_ref());
+        register_late_lifecycles(&lifecycle, fuse_client.as_ref(), card_changes.clone(),
+            control_plane_repo.clone(), sessions.clone(), &config);
 
         // F.1/F.2 dual-write wiring: relation_svc MUST be constructed BEFORE
         // friend_svc so it can be injected via `with_relation(...)`.
@@ -158,10 +149,12 @@ impl BcsServer {
                 control_plane_repo.clone(),
                 provider_repos.provider_repo.clone(),
                 provider_repos.provider_bindings.clone(),
-            ).with_bot_provider_repo(provider_repos.bot_providers.clone()));
+            ).with_bot_provider_repo(provider_repos.bot_providers.clone()).with_catalog_changes(card_changes.clone().map(|queue| queue as Arc<dyn bcs_service_api::port::CatalogChangePort>)));
         let channel_binding_cleanup = Arc::new(DeferredChannelBindingCleanupPort::default());
+        let organization_repo = db_organization_repo(db_plugin.clone(), &db_kind);
         let (provider_core, provider_bot_core, provider_management) =
-            build_provider_services_with_webhook_url_guard(
+            build_provider_services_with_webhook_url_guard_and_organization(
+                config.a2a_allow_anonymous,
                 &provider_repos,
                 bot_registry.clone(),
                 relation_svc.clone(),
@@ -169,55 +162,28 @@ impl BcsServer {
                 outbound_url_guard.clone(),
                 provider_control_plane.clone(),
                 channel_binding_cleanup.clone(),
-                build_bot_catalog_cleanup(&config),
+                build_bot_catalog_cleanup(&config, card_changes.as_ref()),
+                Some(organization_repo.clone()),
             );
         let (a2a_bot_management, a2a_card_queries) = super::a2a_wiring::build_card_management(
             db_plugin.clone(), db_flavor, provider_repos.bot_providers.clone(),
-            provider_core.clone(), bot_registry.clone(), outbound_url_guard.clone(), config.a2a_grpc.as_ref(),
+            provider_core.clone(), bot_registry.clone(), bot_repo.clone(), outbound_url_guard.clone(), config.a2a_grpc.as_ref(),
         )?;
-        let (organization_core, organization_management) = db_organization_services(
-            db_plugin.clone(),
-            &db_kind,
+        let (organization_core, organization_management) = build_organization_services(
+            organization_repo,
             &provider_repos,
             provider_core.clone(),
             bot_registry.clone(),
         );
 
-        // Create DB-backed legacy friend repositories. The FriendCore service is
-        // built after edge-permission wiring so legacy friendship mutations can
-        // dual-write both coexistence paths.
-        let (friend_repo, friend_request_repo): (
-            Arc<dyn bcs_service_api::FriendRepoPort>,
-            Arc<dyn bcs_service_api::FriendRequestRepoPort>,
-        ) = {
-            info!(
-                db_plugin = %db_kind,
-                "Initializing DB-backed friend storage with relation and edge-permission dual-write"
-            );
-            let friend_repo: Arc<dyn bcs_service_api::FriendRepoPort> = match db_kind {
-                DbPluginKind::LocalSqlite => Arc::new(DbFriendStore::sqlite(db_plugin.clone())),
-                DbPluginKind::Mysql => Arc::new(DbFriendStore::mysql(db_plugin.clone())),
-                DbPluginKind::External(provider) => {
-                    panic!(
-                        "external database plugin '{}' has no friend store wiring",
-                        provider
-                    )
-                }
-            };
-            let friend_request_repo: Arc<dyn bcs_service_api::FriendRequestRepoPort> = match db_kind {
-                DbPluginKind::LocalSqlite => {
-                    Arc::new(DbFriendRequestStore::sqlite(db_plugin.clone()))
-                }
-                DbPluginKind::Mysql => Arc::new(DbFriendRequestStore::mysql(db_plugin.clone())),
-                DbPluginKind::External(provider) => {
-                    panic!(
-                        "external database plugin '{}' has no friend request store wiring",
-                        provider
-                    )
-                }
-            };
-
-            (friend_repo, friend_request_repo)
+        // Retain only the friendship mirror required by collaboration consumers.
+        // Friend requests are exclusively owned by permission_requests.
+        let friend_repo: Arc<dyn bcs_service_api::FriendRepoPort> = match db_kind {
+            DbPluginKind::LocalSqlite => Arc::new(DbFriendStore::sqlite(db_plugin.clone())),
+            DbPluginKind::Mysql => Arc::new(DbFriendStore::mysql(db_plugin.clone())),
+            DbPluginKind::External(provider) => {
+                panic!("external database plugin '{}' has no friend store wiring", provider)
+            }
         };
 
         // Edge-permission stores + services (T16): real DB-backed impls back
@@ -327,6 +293,14 @@ impl BcsServer {
                 friend_repo.clone(),
                 relation_svc.clone(),
             ));
+        // The SAME authority repo instance feeds the authority Core build
+        // below and the connect service's current-owner notification reads.
+        let bot_authority_repo = crate::bot_authority_wiring::db_authority_repo(
+            db_plugin.clone(),
+            &db_kind,
+            &bot_authority_env,
+            config.bot_authority.legacy_created_by_fallback,
+        );
         let connect_service_impl = Arc::new(
             bcs_edge_permission::DbConnectService::new(
                 edge_grant_store.clone(),
@@ -339,6 +313,9 @@ impl BcsServer {
                 edge_permission_env,
             )
             .with_friendship_writeback(Some(friendship_writeback))
+            // Friend-request notifications follow the CURRENT authority
+            // owner, not the historical `created_by` fact.
+            .with_bot_authority_port(Some(bot_authority_repo.clone()))
             .with_collaboration_registry(bot_registry.clone()),
         );
         let connect_service: Arc<dyn bcs_service_api::application::ConnectService> =
@@ -354,12 +331,6 @@ impl BcsServer {
                 .with_relation(relation_svc.clone())
                 .with_edge_permission_sync(edge_permission_friend_sync),
         );
-        let friend_request_svc: Arc<dyn bcs_service_api::FriendRequestCoreService> =
-            Arc::new(FriendRequestCore::with_repo(
-                friend_request_repo,
-                friend_svc.clone(),
-                bot_registry.clone(),
-            ));
         let admission_service: Arc<dyn bcs_service_api::application::AdmissionService> =
             Arc::new(bcs_edge_permission::DbAdmissionService::new(
                 edge_grant_store.clone(),
@@ -393,6 +364,7 @@ impl BcsServer {
         let ws_bot_delivery: Arc<dyn BotDeliveryPort> = bot_connections.clone();
         let provider_transport = Arc::new(
             bcs_provider_http::HttpProviderTransport::with_url_guard(outbound_url_guard.clone())
+                .with_caller_token_diagnostic_environment(&crate::env::resolve_env())
                 .with_chat_run_timeout_ms(config.provider_chat_run_timeout_ms),
         );
         let a2a_transport = super::a2a_wiring::build_delivery(db_plugin.clone(), db_flavor,
@@ -498,12 +470,7 @@ impl BcsServer {
             invite_token_secret.clone(),
         );
         let bot_authority = crate::bot_authority_wiring::build(
-            crate::bot_authority_wiring::db_authority_repo(
-                db_plugin.clone(),
-                &db_kind,
-                &bot_authority_env,
-                config.bot_authority.legacy_created_by_fallback,
-            ),
+            bot_authority_repo,
             &config,
             invite_code_service.clone(),
             config.invite.invite_code_gate_enabled,
@@ -628,7 +595,6 @@ impl BcsServer {
             bot_connections.clone() as Arc<dyn bcs_service_api::BotConnectionControlPort>,
             sessions.clone(),
             friend_svc.clone(),
-            friend_request_svc.clone(),
             relation_svc.clone(),
             provider_control_plane.clone(),
             Some(edge_grant_store.clone()),
@@ -645,6 +611,7 @@ impl BcsServer {
             Some(message_repo.clone()),
             provider_stream_gray_list.clone(),
             profile_store.clone(),
+            connect_service.clone(),
             bot_authority.hook.clone(),
             session_authorization_core.clone(),
         );
@@ -747,7 +714,7 @@ impl BcsServer {
         let session_management = Arc::new(SessionManagementWithRuntimeCleanup::new(
             session_management.clone(),
             collaboration_runtime.clone(),
-        ));
+        ).with_message_flow(message_flow.clone()));
         let session_launch = Arc::new(SessionLaunchApplication::new(
             bot_registry.clone(),
             sessions.clone(),
@@ -791,8 +758,21 @@ impl BcsServer {
             eventing_runtime.lifecycle.as_ref(),
             eventing_runtime.provisioning_lifecycle.as_ref(),
         );
+        // The FULL V1 authentication selection (legacy chain + explicit
+        // `[api.auth]` assembly or the compat Gateway verifier), built
+        // before the OpenAPI state pins its principal verifier.
+        let authentication = super::auth_resources::build_authentication_selection(
+            &config,
+            &infrastructure_plugins,
+            &extensions,
+            &bot_registry,
+            group_session_secret_access.clone(),
+            gateway_principal_verifier.clone(),
+        )
+        .await?;
         let (openapi_v1, internal_bot_attributes_service) = build_openapi_v1_state(
             &config,
+            card_changes.clone(),
             invite_token_secret.clone(),
             control_plane_repo,
             &provider_repos,
@@ -800,7 +780,7 @@ impl BcsServer {
             sessions.clone(),
             friend_svc.clone(),
             use_cases.candidate_search.clone(),
-            friend_request_svc,
+            use_cases.friend_use_cases.clone(),
             relation_svc.clone(),
             session_management.clone(),
             session_launch.clone(),
@@ -815,7 +795,7 @@ impl BcsServer {
             invite_code_service.clone(),
             config.invite.invite_code_gate_enabled,
             config.invite.public_claim_enabled,
-            gateway_principal_verifier.clone(),
+            authentication.principal_verifier.clone(),
             connect_service.clone(),
             frontend_connections.clone(),
             eventing_runtime.service,
@@ -867,6 +847,9 @@ impl BcsServer {
         } else {
             openapi_v1
         };
+        // Per-actual-source CSRF origins composed by the explicit-chain
+        // assembly attach to the SAME ApiState the verifier lives in.
+        let openapi_v1 = authentication.apply_origins(openapi_v1);
         register_channel_lifecycles(&lifecycle, &channel_runtime.lifecycles);
         let provider_bot_events_impl = Arc::new(
             ProviderBotEvents::new(
@@ -884,6 +867,7 @@ impl BcsServer {
         provider_transport.set_ingest(provider_event_ingest, bot_run_context.clone());
         let group_context_service = super::infrastructure_helpers::group_context_service(
             db_kind.clone(), db_plugin.clone(), sessions.clone(), session_repo.clone(),
+            bot_authority.hook.clone(),
         );
         let services = ServicesBuilder::default()
             .registry(bot_registry.clone())
@@ -936,26 +920,6 @@ impl BcsServer {
         // Start Pending-sweep for session-file workspace
         spawn_session_files_pending_sweep(services.session_files.clone());
 
-        let auth_config = crate::auth_wiring::resolve_auth_config(
-            &config.auth,
-            crate::config_loader::Environment::resolve().as_str(),
-        );
-        let user_identity_port = match infrastructure_plugins.db() {
-            Some(db) => Some(crate::identity_wiring::db_user_identity_port(
-                infrastructure_plugins.db_kind(),
-                db,
-            )),
-            None => Some(crate::identity_wiring::memory_user_identity_port()),
-        };
-        let auth_chain = Arc::new(
-            crate::auth_wiring::try_build_auth_chain_with_factories(
-                &auth_config,
-                bot_registry.clone(),
-                user_identity_port.clone(),
-                &extensions.auth_plugin_factories,
-            )
-            .map_err(crate::BcsError::InvalidConfig)?,
-        );
         let state = Arc::new(BcsServerState {
             config: config.clone(),
             services,
@@ -978,15 +942,17 @@ impl BcsServer {
             bot_metrics_snapshot,
             direct_chat_run_snapshot,
             metrics,
-            auth_chain,
-            auth_config,
+            auth_chain: authentication.auth_chain.clone(),
+            auth_config: authentication.auth_config.clone(),
+            explicit_api_auth: authentication.explicit_api_auth,
             bot_ws_admission: config.bot_ws_admission.build(),
             gateway_principal_verifier: openapi_v1.principal_verifier.clone(),
             invite_token_secret,
             openapi_v1,
             internal_bot_attributes_service,
             group_session_secret_access,
-            user_identity_port,
+            user_identity_port: authentication.user_identity_port.clone(),
+            auth_session_identity: authentication.auth_session_identity.clone(),
             outbound_url_guard,
             admin_invocation_runs,
             connect_service,

@@ -1,17 +1,18 @@
 /** useBotSessionFilesFeature — 装配单聊会话文件的上传/管理/引用 + /clear /skill 命令,
  *  返回 ChatPanel 所需的 fileChip / command / fileToolbar / senderRef / 副屏面板节点。 */
+import type { BotRuntimeStage } from '@/domain/botWorkshop';
 import type { ComposerCapabilitySetsState } from '@/components/Workspace/CapabilitySetViewer/types';
 import { BotSessionFileOverlays } from '@/pages/Workspace/components/BotSessionFiles/BotSessionFileOverlays';
-import { buildBotSessionCommandItems } from '@/pages/Workspace/hooks/botSessionCommandItems';
+import { useBotResourceJump } from '@/pages/Workspace/hooks/useBotResourceJump';
+import { useBotSessionCommands } from '@/pages/Workspace/hooks/useBotSessionCommands';
 import { useBotCapabilitySets } from '@/pages/Workspace/hooks/useBotCapabilitySets';
 import { useBotSessionFileUpload } from '@/pages/Workspace/hooks/useBotSessionFileUpload';
 import { useBotSessionFiles } from '@/pages/Workspace/hooks/useBotSessionFiles';
 import { useBotSkills } from '@/pages/Workspace/hooks/useBotSkills';
 import type { BotSessionFileView } from '@/services/workspace/botSessionFileService';
-import { useBotSessionFileStore } from '@/stores/botSessionFileStore';
 import { resolveChatRuntimeStage, type BotChatSessionView, type ChatBotView } from '@/services/workspace/botSessionService';
-import type { CommandConfig, CommandItem, FileChipConfig, PendingFileChip, SenderRef } from '@tc-chat/ui/es/Sender';
-import { FileIcon, Zap } from 'lucide-react';
+import type { CommandConfig, FileChipConfig, PendingFileChip, SenderRef } from '@tc-chat/ui/es/Sender';
+import { FileIcon } from 'lucide-react';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
@@ -29,7 +30,9 @@ export interface UseBotSessionFilesFeatureResult {
   fileDrawerOpen: boolean;
   /** 打开文件上传 Modal（供 ComposerCapabilitiesMenu onUpload 调用）。 */
   openUpload: () => void;
-  /** 「通用协作能力」能力集只读查看装配（我的/团队 Bot 非空；好友 Bot 为 null，
+  /** Cancel pending uploads when the owning debug input scope unmounts. */
+  cancelUploads: () => void;
+  /** 「通用协作能力」能力集只读查看装配（我的/团队空间 Bot 非空；好友 Bot 为 null，
    *  「通用协作能力」文案区随之不渲染，规格见 add-composer-capability-set-viewer）。 */
   capabilitySets: ComposerCapabilitySetsState | null;
 }
@@ -39,15 +42,16 @@ export function useBotSessionFilesFeature(
   session: BotChatSessionView | null,
   userId: string | null,
   onClear: () => Promise<void>,
+  stageOverride?: BotRuntimeStage,
 ): UseBotSessionFilesFeatureResult {
   const botId = bot?.botType === 'desktop' ? null : bot?.realBotId ?? null;
   const sessionId = session?.sessionId ?? null;
   const ownerId = bot?.ownerId;
-  // 在线服务 Bot 的文件与会话使用同一运行阶段；草稿调试及个人 Bot 保留既有请求形态。
-  const stage =
+  // Debug input supplies its exact stage; ordinary callers retain their existing request shape.
+  const stage = stageOverride ?? (
     bot?.botType === 'service' && (bot.isTeamBot || bot.isFriendBot || bot.runtimeStage === 'online')
       ? resolveChatRuntimeStage(bot)
-      : undefined;
+      : undefined);
 
   const files = useBotSessionFiles(
     botId,
@@ -58,7 +62,7 @@ export function useBotSessionFilesFeature(
     ...(stage ? ([stage] as const) : []),
   );
   const upload = useBotSessionFileUpload(botId, sessionId, userId, ownerId, ...(stage ? ([stage] as const) : []));
-  const skillsState = useBotSkills(bot, userId);
+  const skillsState = useBotSkills(bot, userId, false);
   // 「通用协作能力」能力集装配：好友 Bot / 不可会话 Bot 为 null（文案区随之隐藏）。
   const capabilitySets = useBotCapabilitySets(bot, userId);
   const senderRef = useRef<SenderRef | null>(null);
@@ -100,7 +104,11 @@ export function useBotSessionFilesFeature(
   }, [upload.removeTask, upload.tasks]);
 
   const handleSelectSkill = useCallback((skillName: string) => {
-    senderRef.current?.insert(`/${skillName} `, 'end');
+    // 选中后的文本插入由命令面板默认替换完成（subConfig.format 定制 `/${name}`，触发
+    // token 被整段替换为 `/task-loop `）。此处不再 insert('end')：它基于受控回流前的
+    // 旧 DOM 追加，会覆盖面板的替换结果，造成 '/s/task-loop' 残留（2026-11-04 实测
+    // 反馈修复）；签名保留供 buildBotSessionCommandItems 的 subConfig.onSelect 调用。
+    void skillName;
     senderRef.current?.focus?.();
   }, []);
 
@@ -120,70 +128,9 @@ export function useBotSessionFilesFeature(
     [enabled],
   );
 
-  // /file 子面板动态拉取(2026-10-21 懒加载):每次唤起都刷新最新清单(数据最新鲜);
-  // query 为 /file 后的过滤词(空串=刚唤起)。refresh 后从 store 读最新列表(闭包快照滞后)。
-  const onSearchFiles = useCallback(
-    async (query: string): Promise<CommandItem[]> => {
-      await files.refresh();
-      const { readyFiles } = useBotSessionFileStore.getState();
-      const keyword = query.trim().toLowerCase();
-      const matched = keyword
-        ? readyFiles.filter((f) => f.displayName.toLowerCase().includes(keyword))
-        : readyFiles;
-      return matched.map((f) => ({
-        id: `__file__${f.resourceId}`,
-        name: f.displayName,
-        description: '引用到输入框',
-        icon: <FileIcon className="h-3.5 w-3.5 text-muted-foreground" />,
-        data: { resource_id: f.resourceId, display_name: f.displayName },
-        preventInsert: true,
-        onSelect: () => handleReference(f),
-      }));
-    },
-    [files, handleReference],
-  );
-
-  const skillItems = useMemo<CommandItem[]>(
-    () =>
-      skillsState.skills.map((s) => ({
-        id: `__skill__${s.skillId}`,
-        name: s.name,
-        description: s.description || (s.active ? '已激活' : '未激活'),
-        icon: <Zap className="h-3.5 w-3.5 text-muted-foreground" />,
-        data: { skill_id: s.skillId },
-      })),
-    [skillsState.skills],
-  );
-
-  // /skill /file /clear 命令项装配抽取到 botSessionCommandItems.tsx（纯配置，行为不变）。
-  const commandItems = useMemo<CommandItem[]>(
-    () =>
-      buildBotSessionCommandItems({
-        canUseSkills,
-        skillItems,
-        onSearchFiles,
-        skillsLoading: skillsState.isLoading,
-        filesLoading: files.isLoadingList,
-        onClear,
-        onSelectSkill: handleSelectSkill,
-      }),
-    [canUseSkills, skillItems, onSearchFiles, skillsState.isLoading, files.isLoadingList, onClear, handleSelectSkill],
-  );
-
-  const command = useMemo<CommandConfig>(
-    () => ({
-      categories: [
-        {
-          key: '__bot_commands__',
-          label: '命令',
-          items: commandItems,
-        },
-      ],
-      onSelect: () => {},
-      format: () => '',
-    }),
-    [commandItems],
-  );
+  const command = useBotSessionCommands({
+    enabled, canUseSkills, files, skillsState, handleReference, handleSelectSkill, onClear,
+  });
 
   // 上传文件仍在 ComposerCapabilitiesMenu（onUpload）；文件管理入口已迁至单聊顶栏
   // （ChatPanel onManageFiles → openFileDrawer），fileToolbar 不渲染独立按钮。
@@ -192,6 +139,9 @@ export function useBotSessionFilesFeature(
   const openFileDrawer = useCallback(() => setDrawerOpen(true), []);
   const closeFileDrawer = useCallback(() => setDrawerOpen(false), []);
   const openUpload = useCallback(() => setUploadOpen(true), []);
+
+  // 资源管理面板 → Bot 完整资源目录：露出/置灰/跨空间切换由独立 Hook 承担。
+  const resourceJump = useBotResourceJump(bot, stage);
 
   const featureNode = (
     <BotSessionFileOverlays
@@ -209,6 +159,7 @@ export function useBotSessionFilesFeature(
       onOpenUpload={openUpload}
       onAddToSession={addReadyUploadsToSession}
       onReference={handleReference}
+      resourceJump={resourceJump}
     />
   );
 
@@ -222,6 +173,7 @@ export function useBotSessionFilesFeature(
     closeFileDrawer,
     fileDrawerOpen: drawerOpen,
     openUpload,
+    cancelUploads: upload.cancelAll,
     capabilitySets,
   };
 }

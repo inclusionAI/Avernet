@@ -142,6 +142,21 @@ def _document(category: Category, kind: SourceKind) -> str:
             "    ref: v1.2.0\n"
             "    subpath: pkg\n"
         )
+    elif kind is SourceKind.BOT:
+        # A bot source is bot copy's file-sync protocol: it names the source
+        # bot by ``bot_id`` (and disambiguates the row with ``owner_id`` — a
+        # ``bot_id`` is not globally unique, so the addressing is the pair)
+        # and converges that bot's workspace tree at apply time. The matrix
+        # cell alone governs which categories accept it, and the document need
+        # only name a source bot — the validator checks the cell before any
+        # bot is resolved, so a literal id is enough here.
+        source = (
+            "sources:\n"
+            "  src:\n"
+            "    protocol: bot\n"
+            f"    bot_id: src-bot\n"
+            "    owner_id: src-owner\n"
+        )
     else:
         source = (
             "sources:\n"

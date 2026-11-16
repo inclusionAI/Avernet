@@ -229,6 +229,7 @@ Avernet/
 - [架构文档](docs/arch/)
 - [BCS 开发指南](apps/bcs/README.md)
 - [AgentEvolve](docs/agent-evolve.zh-CN.md)
+- [JSON → A2A 1.0 转换工具](tools/a2a-json-tool/README.md)
 
 ## 安全
 

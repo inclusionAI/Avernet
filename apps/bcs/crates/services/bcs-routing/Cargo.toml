@@ -15,8 +15,6 @@ tokio = { workspace = true }
 async-trait = { workspace = true }
 
 # Serialization
-serde = { workspace = true }
-serde_json = { workspace = true }
 
 # Error handling
 thiserror = { workspace = true }
@@ -32,6 +30,8 @@ bcs-service-api = { workspace = true }
 bcs-security-gateway-api = { workspace = true }
 
 [dev-dependencies]
+tracing-subscriber = { workspace = true }
+tracing = { workspace = true, features = ["log"] }
 bcs-test-support = { workspace = true }
 bcs-security-gateway-local = { workspace = true }
 tokio-test = "0.4"

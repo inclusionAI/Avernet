@@ -9,6 +9,7 @@ pub mod caller_lineage;
 pub mod caller_relay;
 pub mod caller_relay_ledger;
 mod caller_delegation;
+mod native_task;
 pub mod observe_index;
 pub mod observe_sync;
 mod observe_guard;
@@ -33,6 +34,7 @@ mod delivery_failure_notice;
 mod delivery_control;
 pub use delivery_control::CallerExecutionControl;
 mod delivery_abort;
+mod session_delivery_cleanup;
 pub(crate) mod human_notify_hook;
 mod pending_message;
 pub(crate) mod protocol_context;
@@ -120,3 +122,7 @@ mod task_rejection;
 
 mod task_handle_application;
 pub use task_handle_application::TaskHandleApplicationService;
+
+#[cfg(test)]
+#[path = "message_log_tests/tests.rs"]
+mod message_log_tests;

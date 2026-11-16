@@ -11,11 +11,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
+from provider_sse_mock import write_reply
+
 
 class MockState:
     def __init__(self) -> None:
         self.lock = threading.Lock()
         self.provider_requests: list[dict[str, Any]] = []
+        self.provider_sse_replies: dict[str, dict[str, str]] = {}
         self.event_webhook_requests: list[dict[str, Any]] = []
         # Friend work-order surface: BCS re-addresses the forwarded principal
         # (iss=bcs) and posts TC friend grants to the bot-friend-auth endpoint;
@@ -29,6 +32,7 @@ class MockState:
     def reset(self) -> None:
         with self.lock:
             self.provider_requests.clear()
+            self.provider_sse_replies.clear()
             self.event_webhook_requests.clear()
             self.friend_auth_sync_requests.clear()
             self.work_order_event_requests.clear()
@@ -94,6 +98,20 @@ class Handler(BaseHTTPRequestHandler):
             STATE.reset()
             self.send_json(200, {"ok": True})
             return
+        if self.path == "/control/provider/sse":
+            config = self.read_json()
+            bot_ref, text = config.get("provider_bot_ref"), config.get("text")
+            if not isinstance(bot_ref, str) or not bot_ref or not isinstance(text, str) or not text:
+                self.send_json(400, {"error": "expected provider_bot_ref and reply text"})
+                return
+            mode = config.get("mode", "terminal")
+            if mode not in ("terminal", "eof", "read_error", "lag_recovery"):
+                self.send_json(400, {"error": "unsupported SSE reply mode"})
+                return
+            with STATE.lock:
+                STATE.provider_sse_replies[bot_ref] = {"text": text, "mode": mode}
+            self.send_json(200, {"ok": True})
+            return
         if self.path == "/control/provider/clear":
             with STATE.lock:
                 STATE.provider_requests.clear()
@@ -147,6 +165,15 @@ class Handler(BaseHTTPRequestHandler):
                         "expires_at_ms": far_future_ms,
                     },
                 })
+                return
+            bot_ref = (body.get("to_bot") or {}).get("provider_bot_ref")
+            with STATE.lock:
+                reply = STATE.provider_sse_replies.get(bot_ref)
+            if body.get("method") == "chat.send" and reply is not None:
+                if self.headers.get("x-bcn-transport") != "sse":
+                    self.send_json(400, {"error": "expected SSE negotiation"})
+                    return
+                write_reply(self, body["id"], reply)
                 return
             self.send_json(200, {"ok": True})
             return

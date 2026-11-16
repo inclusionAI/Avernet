@@ -1,4 +1,5 @@
 import { Button } from '@/components/ui/Button';
+import { RoutineRunConversation } from '@/components/ScheduledTasks/RoutineRunConversation';
 import { Card } from '@/components/ui/Card';
 import {
   Drawer,
@@ -35,6 +36,7 @@ function formatDateTime(value?: string | null): string {
 }
 
 export interface MyTaskRoutineHistoryDrawerProps {
+  botType?: string;
   selectedRoutineHistoryId: string | null;
   onCloseRoutineHistory: () => void;
   historyRuns: ScheduledRoutineRunRecord[];
@@ -44,6 +46,7 @@ export interface MyTaskRoutineHistoryDrawerProps {
 }
 
 export function MyTaskRoutineHistoryDrawer({
+  botType,
   selectedRoutineHistoryId,
   onCloseRoutineHistory,
   historyRuns,
@@ -92,8 +95,8 @@ export function MyTaskRoutineHistoryDrawer({
                     </td>
                   </tr>
                 ) : historyRuns.length > 0 ? (
-                  historyRuns.map((item) => (
-                    <tr key={item.id} className="border-b border-divider text-xs transition-colors hover:bg-muted/50">
+                  historyRuns.map((item, index) => (
+                    <tr key={`${item.botId}-${item.routineId}-${item.conversation?.runtime_stage}-${item.conversation?.device_uuid}-${item.conversation?.operator_id}-${item.id}-${index}`} className="border-b border-divider text-xs transition-colors hover:bg-muted/50">
                       <Td className="max-w-[18rem]">
                         <div className="space-y-1">
                           <div className="truncate font-medium text-foreground">{item.routineName}</div>
@@ -119,7 +122,8 @@ export function MyTaskRoutineHistoryDrawer({
                         <div className="text-xs text-foreground">{item.taskName ?? '—'}</div>
                       </Td>
                       <Td>
-                        <div className="flex justify-end">
+                        <div className="flex justify-end gap-2">
+                          {item.conversation && <RoutineRunConversation run={item.conversation} botType={botType} />}
                           <Button
                             variant="secondary"
                             size="sm"

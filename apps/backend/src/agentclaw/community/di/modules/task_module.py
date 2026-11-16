@@ -24,12 +24,14 @@ from agentclaw.community.api.bot_public_service import BotPublicServiceProtocol
 from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.api.cron_relay_service import CronRelayServiceProtocol
 from agentclaw.community.api.system_config_service import SystemConfigServiceProtocol
-from agentclaw.community.core.task.task_dispatch.claim_join_gate import (
+from agentclaw.community.core.task.task_panel.manifest import TaskPanelManifestService
+from agentclaw.community.core.task.task_panel.manifest_contract import (
+    TaskPanelManifestServiceProtocol,
+)
+from agentclaw.community.core.task.task_dispatch.task_settings import (
     HARNESS_POLLER,
     SEARCH_SKILL,
     SKILL_REPORT,
-    TaskClaimJoinGate,
-    TaskClaimJoinGateProtocol,
     TaskSettingsService,
     TaskSettingsServiceProtocol,
 )
@@ -99,6 +101,16 @@ from agentclaw.community.core.task.task_center.intake_target_resolver import (
 from agentclaw.community.core.task.repository.task_intake_repository import (
     TaskIntakeRepositoryProtocol,
 )
+from agentclaw.community.core.task.context_collab.g1_secure_govern.authorization import (
+    ContextCollabAuthorizerProtocol,
+    StructuralContextCollabAuthorizer,
+)
+from agentclaw.community.core.task.context_collab.service_api import (
+    ContextCollabServiceProtocol,
+)
+from agentclaw.community.core.task.context_collab.services.context_collab_service import (
+    ContextCollabService,
+)
 from agentclaw.community.core.task.task_dispatch.search import TaskSearch
 from agentclaw.community.core.task.task_center.recovery_lifecycle import (
     TaskRecoveryLifecycle,
@@ -108,6 +120,18 @@ from agentclaw.community.core.task.task_center.delivery_lifecycle import (
 )
 from agentclaw.community.core.task.feedback.services.feedback_service import (
     FeedbackService,
+)
+from agentclaw.community.core.task.forum.interaction.notifying_forum_interaction_service import (
+    NotifyingForumInteractionService,
+)
+from agentclaw.community.core.task.forum.notifications.forum_notification_publisher import (
+    ForumNotificationPublisher,
+)
+from agentclaw.community.core.task.forum.notifications.publisher_protocol import (
+    ForumNotificationPublisherProtocol,
+)
+from agentclaw.community.core.task.forum.services.notifying_forum_service import (
+    NotifyingForumService,
 )
 from agentclaw.community.core.task.forum.browsing import (
     BbsBrowseLoopRunner,
@@ -123,12 +147,8 @@ from agentclaw.community.core.task.forum.browsing.subscription_provisioner impor
 from agentclaw.community.core.task.forum.digest.report_service import (
     BbsDigestReportService,
 )
-from agentclaw.community.core.task.forum.services.forum_service import ForumService
 from agentclaw.community.core.task.forum.interaction.forum_author_stats_service import (
     ForumAuthorStatsService,
-)
-from agentclaw.community.core.task.forum.interaction.forum_interaction_service import (
-    ForumInteractionService,
 )
 from agentclaw.community.core.task.forum.interaction.personal_center_activity_service import (
     ForumPersonalCenterActivityService,
@@ -152,6 +172,10 @@ from agentclaw.community.core.task.task_context.task_artifact.artifact_publish i
 from agentclaw.community.core.task.task_runner.client.bcs_token_provider import (
     BcsTokenProvider,
 )
+from agentclaw.community.core.task.task_runner.client.bcs_bot_token_provider import (
+    BcsBotTokenProvider,
+    NullBcsBotTokenProvider,
+)
 from agentclaw.community.core.task.task_runner.client.callback_data_enricher import (
     CallbackDataEnricher,
 )
@@ -160,6 +184,10 @@ from agentclaw.community.core.task.task_runner.callback_correlation import (
     InMemoryCallbackCorrelationRegistry,
 )
 from agentclaw.community.core.bot_management.services.bcn_service import BcnService
+from agentclaw.community.plugins.community.context_collab_runtime import (
+    CommunityContextCollabRuntimePlugin,
+    UnavailableContextCollabRuntimePlugin,
+)
 from agentclaw.community.core.task.task_runner.client.ports import (
     BcsClientPort,
     OpenApiBotPort,
@@ -171,11 +199,15 @@ from agentclaw.community.plugin_api.notify_sender import (
     QUALIFIER_BBS_DIGEST,
     NotifySenderPlugin,
 )
+from agentclaw.community.plugin_api.context_collab_runtime import (
+    ContextCollabRuntimePlugin,
+)
 from agentclaw.community.plugin_api.staff_dept import StaffDeptPlugin
 from agentclaw.community.core.task.forum.interaction.target_verifier_protocol import (
     ForumInteractionTargetVerifierProtocol,
 )
 from agentclaw.community.di.config import TaskDispatchConfig
+from agentclaw.community.di.modules.task.todo_bindings import TaskTodoBindings
 
 logger = logging.getLogger("task.module")
 
@@ -220,6 +252,9 @@ class TaskModule(Module):
     """Production bindings for the task module(社区核心,所有 profile 装配)。"""
 
     def configure(self, binder: Binder) -> None:
+        # Todo is a Task subdomain, like BBS/forum. Keep its bindings behind
+        # the Task composition boundary instead of installing a peer module.
+        binder.install(TaskTodoBindings())
         # TaskGraphService remains directly constructible for lightweight test
         # injectors. The full composition root attaches the graph repository in
         # the task_service provider below.
@@ -232,7 +267,12 @@ class TaskModule(Module):
             TaskArtifactPublishService, to=TaskArtifactPublishService, scope=singleton
         )
         binder.bind(ForumRepositoryProtocol, to=ForumRepository, scope=singleton)
-        binder.bind(ForumServiceProtocol, to=ForumService, scope=singleton)
+        binder.bind(
+            ForumNotificationPublisherProtocol,
+            to=ForumNotificationPublisher,
+            scope=singleton,
+        )
+        binder.bind(ForumServiceProtocol, to=NotifyingForumService, scope=singleton)
         binder.bind(
             ForumInteractionRepositoryProtocol,
             to=ForumInteractionRepository,
@@ -253,8 +293,14 @@ class TaskModule(Module):
             to=DatabaseForumInteractionTargetVerifier,
             scope=singleton,
         )
-        binder.bind(ForumAuthorStatsServiceProtocol, to=ForumAuthorStatsService, scope=singleton)
-        binder.bind(ForumInteractionServiceProtocol, to=ForumInteractionService, scope=singleton)
+        binder.bind(
+            ForumAuthorStatsServiceProtocol, to=ForumAuthorStatsService, scope=singleton
+        )
+        binder.bind(
+            ForumInteractionServiceProtocol,
+            to=NotifyingForumInteractionService,
+            scope=singleton,
+        )
         binder.bind(
             ForumPersonalCenterActivityServiceProtocol,
             to=ForumPersonalCenterActivityService,
@@ -267,6 +313,20 @@ class TaskModule(Module):
         )
         binder.bind(FeedbackRepositoryProtocol, to=FeedbackRepository, scope=singleton)
         binder.bind(FeedbackServiceProtocol, to=FeedbackService, scope=singleton)
+        # Context collab(BBS context collaboration protocol):service 协议绑定到
+        # 实现,repo 协议由 TaskPersistenceModule 绑定(轻量 injector 未装时取
+        # 不到即报错,与其余 repo 依赖同语义)。authorizer 协议必须显式绑定:
+        # python-injector 对带默认值的注解参数同样注入,``ContextCollabService.
+        # __init__`` 的 StructuralContextCollabAuthorizer 默认实例在 DI 构造
+        # 路径不生效;P2 策略授权器经 profile 模块覆写同一协议键即可替换。
+        binder.bind(
+            ContextCollabAuthorizerProtocol,
+            to=StructuralContextCollabAuthorizer,
+            scope=singleton,
+        )
+        binder.bind(
+            ContextCollabServiceProtocol, to=ContextCollabService, scope=singleton
+        )
         # BBS Browse Loop — runner (push seam), scheduler (framework cron), and the
         # backend-owned Bot-side cron manager (openclaw mode). Singletons are also
         # discoverable by the application lifecycle auto-start path.
@@ -278,6 +338,42 @@ class TaskModule(Module):
         # 不在此直绑,否则无参构造会漏掉 repo 注入。
         binder.bind(
             NoopCallbackAuthenticator, to=NoopCallbackAuthenticator, scope=singleton
+        )
+
+    @singleton
+    @provider
+    @inject
+    def context_collab_runtime_plugin(
+        self,
+        injector: Injector,
+        task_dispatch: TaskDispatchConfig,
+    ) -> ContextCollabRuntimePlugin:
+        """Select the deployment BCS group runtime, failing closed when unbound."""
+        try:
+            bcs = injector.get(BcsClientPort)
+        except Exception as exc:  # noqa: BLE001 lightweight deployment
+            logger.info(
+                "[task][context-collab] BcsClientPort unavailable: %s",
+                exc,
+            )
+            return UnavailableContextCollabRuntimePlugin(str(exc))
+        if bcs is None:
+            return UnavailableContextCollabRuntimePlugin(
+                "BcsClientPort resolved to None"
+            )
+        try:
+            bot_tokens = injector.get(BcsBotTokenProvider)
+        except Exception as exc:  # noqa: BLE001 lightweight deployment
+            logger.info(
+                "[task][context-collab] BcsBotTokenProvider unavailable; "
+                "using empty provider: %s",
+                exc,
+            )
+            bot_tokens = NullBcsBotTokenProvider()
+        return CommunityContextCollabRuntimePlugin(
+            bcs,
+            bot_tokens=bot_tokens,
+            backend_url=task_dispatch.backend_url,
         )
 
     @singleton
@@ -453,11 +549,6 @@ class TaskModule(Module):
                 exc,
             )
             task_settings = None
-        from agentclaw.community.core.task.task_runner.client.bcs_bot_token_provider import (
-            BcsBotTokenProvider,
-            NullBcsBotTokenProvider,
-        )
-
         try:
             bot_token_provider = injector.get(BcsBotTokenProvider)
         except Exception as exc:  # noqa: BLE101 未绑定时降级为无 token provider
@@ -546,7 +637,7 @@ class TaskModule(Module):
         # INFO(非 WARNING):该 except 在每个轻量 DI 测试里也会触发(故意不绑 task_context_service),
         # WARNING 会在那里噪音化 + 触发 log-assertion 测试失败;INFO 让 prod 真实 misbinding
         # 对 grep 日志的运维可见(decision #14 "missing trajectory data is visible" 精神),
-        # 不与"测试有意不配置"的常态混淆 — 与下方 TaskClaimJoinGateProtocol 同款。
+        # 不与"测试有意不配置"的常态混淆。
         try:
             task_context_svc = injector.get(TaskContextServiceProtocol)
         except Exception as exc:  # noqa: BLE001 未绑定 → 轨迹旁路采集 no-op
@@ -581,18 +672,6 @@ class TaskModule(Module):
                     search=TaskSearch(discover_port),
                 ),
             )
-        # claim_on JOIN 灰度开关(默认关闭,HTTP 显式开启):经 task_claim_join_gate provider 解析
-        # (系统配置 KV,跨副本共享);未绑(纯内核/轻量测试)→ None → gate 关 → 派发不做 claim_on 交集(不回归)。
-        try:
-            task_auth_gate = injector.get(TaskClaimJoinGateProtocol)
-        except Exception as exc:  # noqa: BLE101 未绑 → gate None(fail-open 关)
-            logger.info(
-                "[task][task-module] TaskClaimJoinGateProtocol 未绑定 → claim_on JOIN 开关缺省(关):%s:"
-                " %s",
-                type(exc).__name__,
-                exc,
-            )
-            task_auth_gate = None
         from agentclaw.community.core.task.task_discovery.notify_messages_provider import (
             NotifyMessagesProvider,
             NullNotifyMessagesProvider,
@@ -622,7 +701,6 @@ class TaskModule(Module):
             task_node_run_info_repo=task_node_run_info_repo,
             bot_service=bot_service,
             staff_dept=staff_dept,
-            task_auth_gate=task_auth_gate,
             api_base_url=task_dispatch.backend_url,
             bot_token_provider=bot_token_provider,
             notify_messages_provider=notify_messages_provider,
@@ -668,6 +746,14 @@ class TaskModule(Module):
     @singleton
     @provider
     @inject
+    def task_panel_manifest_service(
+        self, config: SystemConfigServiceProtocol
+    ) -> TaskPanelManifestServiceProtocol:
+        return TaskPanelManifestService(config)
+
+    @singleton
+    @provider
+    @inject
     def task_settings_service(
         self,
         injector: Injector,
@@ -689,15 +775,6 @@ class TaskModule(Module):
                 SKILL_REPORT: task_dispatch.skill_report_enabled,
             },
         )
-
-    @singleton
-    @provider
-    @inject
-    def task_claim_join_gate(
-        self, settings: TaskSettingsServiceProtocol
-    ) -> TaskClaimJoinGateProtocol:
-        """Compatibility adapter for the claim_on JOIN dispatch filter."""
-        return TaskClaimJoinGate(settings=settings)
 
     @singleton
     @provider
@@ -798,13 +875,13 @@ class TaskModule(Module):
         bot_public: BotPublicServiceProtocol,
         semantic_discover: BotDiscoverServiceProtocol | None = None,
     ) -> BotDiscoverServiceProtocol:
-        """Resolve semantic-first hybrid retrieval, or the keyword-only fallback.
+        """Resolve BCSFuse task candidate retrieval, or keyword-only legacy mode.
 
         ``BotDiscoverServiceProtocol`` from bot_public is the optional BCSFuse
-        recommendation port. When it is absent in a lightweight injector, task
-        dispatch keeps the existing keyword-only adapter; when it is present,
-        the hybrid adapter tries the candidate query semantically first and only
-        falls back to the established tokenized catalog keyword search.
+        recommendation port. Task candidate-query retrieval is semantic-only: empty or
+        failed semantic results stay empty, and an absent semantic port also returns
+        empty candidates. The wrapped keyword adapter only preserves the existing
+        direct ``search_by_keyword`` compatibility port.
         """
         from agentclaw.community.core.task.task_runner.client.catalog_keyword_discover import (
             CatalogKeywordBotDiscover,
@@ -814,6 +891,4 @@ class TaskModule(Module):
         )
 
         keyword_discover = CatalogKeywordBotDiscover(bot_public)  # type: ignore[arg-type]
-        if semantic_discover is None:
-            return keyword_discover
         return SemanticKeywordBotDiscover(keyword_discover, semantic_discover)

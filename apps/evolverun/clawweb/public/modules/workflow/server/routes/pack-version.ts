@@ -8,6 +8,7 @@ type Dependencies = {
   resolvePrincipal(req: Request): Promise<{ actorId: string } | null>;
   botPermRepo: { hasEditPermission(workflowId: string, actorId: string): Promise<boolean>; hasExecutePermission?(workflowId: string, actorId: string): Promise<boolean> } | null;
   workflowSpecRepo: { findByWorkflowId(workflowId: string): Promise<{ workflow_id: string; pack_id: string | null } | null> } | null;
+  readActiveSnapshot?(workflowId: string, version: PackScriptVersion): Promise<PackScriptSnapshot>;
   readSnapshot(workflowId: string, packId: string, version: PackScriptVersion): Promise<PackScriptSnapshot>;
   saveCandidate?(input: { actorId: string; requestId?: string; workflowId: string; sourceVersion: PackScriptVersion; sourceCommit: string; expectedSavedHead: string | null; changes: PackVersionChange[] }): Promise<{ branch: string; commit: string; requestId?: string }>;
   readOperation?(requestId: string, workflowId: string, actorId: string): Promise<unknown>;
@@ -57,17 +58,25 @@ export function createPackVersionRouter(deps: Dependencies): Router {
       if (!deps.workflowSpecRepo) { res.status(503).json({ error: 'Service unavailable', code: 'SERVICE_UNAVAILABLE' }); return; }
       phase = 'workflow';
       const row = await deps.workflowSpecRepo.findByWorkflowId(workflowId);
-      if (!row) { res.status(404).json({ error: 'Workflow not found', code: 'WORKFLOW_NOT_FOUND' }); return; }
-      const packId = row.pack_id ?? row.workflow_id;
-      if (row.workflow_id !== workflowId || !validId(packId)) { res.status(503).json({ error: 'Service unavailable', code: 'SERVICE_UNAVAILABLE' }); return; }
+      if (!row && (req.method !== 'GET' || !deps.readActiveSnapshot)) { res.status(404).json({ error: 'Workflow not found', code: 'WORKFLOW_NOT_FOUND' }); return; }
+      const packId = row ? row.pack_id ?? row.workflow_id : undefined;
+      if (row && (row.workflow_id !== workflowId || !validId(packId))) { res.status(503).json({ error: 'Service unavailable', code: 'SERVICE_UNAVAILABLE' }); return; }
       if (req.method === 'GET') {
         const version = req.query.version;
         if ((version !== 'current' && version !== 'draft') || Object.keys(req.query).some(k => k !== 'version')) { res.status(400).json({ error: 'Invalid request', code: 'INVALID_REQUEST' }); return; }
         phase = 'snapshot';
-        const snapshot = await deps.readSnapshot(workflowId, packId, version);
-        if (!snapshot || snapshot.workflowId !== workflowId || !validId(snapshot.packId) || snapshot.baseRef !== `origin/${version === 'current' ? 'wf' : 'saved'}/${workflowId}`
+        const snapshot = row ? await deps.readSnapshot(workflowId, packId!, version) : await deps.readActiveSnapshot!(workflowId, version);
+        if (!snapshot || snapshot.workflowId !== workflowId || !validId(snapshot.packId) || !validSnapshotRef(snapshot.baseRef, workflowId, version)
           || !oid(snapshot.baseCommit) || !(snapshot.draftHead === null || oid(snapshot.draftHead)) || !Array.isArray(snapshot.versionFiles)) throw new Error('Invalid snapshot');
-        res.json({ ...snapshot, canWrite: !!deps.saveCandidate }); return;
+        // Never reflect active-history evidence from the ordinary draft-backed
+        // reader, even if a host accidentally returns an identically named field.
+        const { activeHistory, activeHistoryMismatch, ...response } = snapshot as PackScriptSnapshot & { activeHistory?: unknown };
+        const evidence = !row && version === 'current' && object(activeHistory)
+          && Object.keys(activeHistory).length === 2 && activeHistory.protocol === 'active-history-v1'
+          && typeof activeHistory.activeToken === 'string' && /^[a-f0-9]{64}$/.test(activeHistory.activeToken)
+          ? { activeHistory } : {};
+        const warning = version === 'current' && activeHistoryMismatch === true ? { activeHistoryMismatch: true } : {};
+        res.json({ ...response, ...evidence, ...warning, canWrite: !!deps.saveCandidate }); return;
       }
       if (!deps.saveCandidate) { res.status(503).json({ error: 'Version saving unavailable', code: 'SERVICE_UNAVAILABLE' }); return; }
       if (Object.keys(req.query).length) { res.status(400).json({ error: 'Invalid request', code: 'INVALID_REQUEST' }); return; }
@@ -128,4 +137,10 @@ export function createPackVersionRouter(deps: Dependencies): Router {
     }
   });
   return router;
+}
+
+function validSnapshotRef(ref: string, id: string, version: 'current' | 'draft'): boolean {
+  if (version === 'draft') return ref === `origin/wf/${id}`;
+  const prefix = `refs/tags/deploy/${id}/#`;
+  return typeof ref === 'string' && ref.startsWith(prefix) && /^[1-9][0-9]*$/.test(ref.slice(prefix.length));
 }

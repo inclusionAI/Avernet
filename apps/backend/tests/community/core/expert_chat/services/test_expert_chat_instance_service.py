@@ -27,6 +27,7 @@ from agentclaw.community.core.service_bot.services.baas_service import (
     BaasServiceError,
     BotWsConnectionInfoResponse,
 )
+from agentclaw.community.core.service_bot.baas_service_errors import BaasNoActiveDevicesError
 from agentclaw.community.core.service_bot.services.arca_image_pin import (
     ImagePolicyState,
 )
@@ -640,6 +641,28 @@ class TestUpgradeContainer:
 
 class TestBuildConnection:
     """Tests for _build_connection method."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("offline", [True, False])
+    async def test_caller_ws_failure_log_level_and_contract(self, offline):
+        svc, instance_repo, baas, publish_repo, *_ = _make_service()
+        _wire_publish(publish_repo, MockPublishRecord(version=1))
+        instance_repo.get_instance.return_value = {
+            "id": 1, "status": "success", "ext": {"bot_uuid": BOT_UUID, "version": 2},
+        }
+        original = BaasNoActiveDevicesError(status_code=404) if offline else BaasServiceError("provider failed")
+        baas.get_ws_info_by_bot_uuid.side_effect = original
+
+        with patch("agentclaw.community.core.expert_chat.services.expert_chat_instance_service.logger") as log:
+            with pytest.raises(ConnectionError) as caught:
+                await svc.get_caller_connection(USER_ID, BOT_ID, OWNER_ID)
+
+        assert caught.value.__cause__ is original
+        assert caught.value.error_code == "5001"
+        assert caught.value.original_error == str(original)
+        assert caught.value.caller_device_unavailable is offline
+        assert instance_repo.update_instance.call_args.kwargs["status"] == "failed"
+        assert (log.warning.call_count, log.error.call_count) == ((2, 0) if offline else (0, 2))
 
     def test_baas_service_error_wrapped_as_connection_error(self):
         """BaasServiceError wrapped as ConnectionError."""

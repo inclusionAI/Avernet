@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from agentclaw.community.core.caller_identity.credential import (
     CALLER_CREDENTIAL_REQUEST_INVALID,
+    CALLER_TARGET_NOT_FOUND,
     CallerCredentialError,
 )
 from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
@@ -56,4 +57,29 @@ class CallerSessionValidator:
         logger.info(
             "caller_session_key_validated bot_id=%s binding_id=%s session_key=%s",
             bot_id, binding_id, session_key,
+        )
+
+    def validate_owned_shared_session(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        caller_user_id: str,
+        binding_id: int,
+        stage: str,
+        session_key: str | None,
+    ) -> None:
+        fields = {
+            "bot_id": bot_id, "owner_id": owner_id, "caller_user_id": caller_user_id,
+            "binding_id": binding_id, "stage": stage, "session_key": session_key,
+        }
+        binding = self._bindings.get_by_id(binding_id)
+        if binding is None or binding.device_provider != "teclaw" or binding.status != "ACTIVE":
+            logger.warning("caller_shared_session_rejected fields=%s reason=target_unavailable", fields)
+            raise CallerCredentialError(CALLER_TARGET_NOT_FOUND)
+        if session_key is None or not session_key.strip():
+            logger.warning("caller_shared_session_rejected fields=%s reason=missing_session_key", fields)
+            raise CallerCredentialError(CALLER_CREDENTIAL_REQUEST_INVALID)
+        logger.info(
+            "caller_shared_session_validated fields=%s ownership_check=not_required", fields,
         )

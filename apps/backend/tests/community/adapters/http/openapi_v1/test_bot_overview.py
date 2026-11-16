@@ -11,7 +11,7 @@ fake overview service, so each case pins one rule:
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import Depends, FastAPI
@@ -57,7 +57,7 @@ def _overview(engine: str = "claude_code") -> BotOverview:
 @pytest.fixture
 def overview_client():
     service = MagicMock()
-    service.get_overview.return_value = _overview()
+    service.get_overview = AsyncMock(return_value=_overview())
     app = mount_public_error_handlers(FastAPI())
     app.include_router(router, dependencies=[Depends(require_principal)])
     injector = Injector()
@@ -76,7 +76,17 @@ def test_app_only_caller_is_admitted(overview_client):
     data = response.json()["data"]
     assert data["bot_id"] == "b1"
     assert data["engine"] == "claude_code"
-    assert data["payload"] == {"engine": "claude_code"}
+    assert data["payload"] == {
+        "engine": "claude_code",
+        "template_type": None,
+        "template_version": None,
+        "bot_type": None,
+        "template_factory": None,
+        "hosted_workspace_enabled": False,
+        "devflow_workflow": None,
+        "code_repos": [],
+        "yuque_kb_repos": [],
+    }
     assert data["skills"] == [] and data["mcps"] == []
     assert data["sessions"] == {"last_session_at": "2026-10-31T12:00:00Z"}
     service.get_overview.assert_called_once_with("b1")
@@ -116,3 +126,16 @@ def test_document_types_the_engine_payload_as_a_discriminated_union():
     assert union["discriminator"]["propertyName"] == "engine"
     assert set(union["discriminator"]["mapping"]) == {"aicoding", "claude_code"}
     assert "AICodingEnginePayload" in schema["components"]["schemas"]
+    aicoding = schema["components"]["schemas"]["AICodingEnginePayload"]
+    assert "AICodingTemplateFactoryIdentity" in schema["components"]["schemas"]
+    for field in (
+        "template_type",
+        "template_version",
+        "bot_type",
+        "template_factory",
+        "hosted_workspace_enabled",
+        "devflow_workflow",
+        "code_repos",
+        "yuque_kb_repos",
+    ):
+        assert field in aicoding["properties"]

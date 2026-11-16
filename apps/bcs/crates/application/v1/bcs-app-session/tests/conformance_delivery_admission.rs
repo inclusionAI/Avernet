@@ -110,6 +110,13 @@ impl BotAuthorityPort for RealHookState {
             Err(ServiceError::Forbidden("no owner/manager edge".into()))
         }
     }
+
+    async fn ownerships_for(
+        &self,
+        bot_ids: &[String],
+    ) -> ServiceResult<Vec<Option<bcs_service_api::types::bot_authority::BotOwnershipView>>> {
+        Ok(bot_ids.iter().map(|_| None).collect())
+    }
 }
 
 /// The real composed fixtures: real memory groups and

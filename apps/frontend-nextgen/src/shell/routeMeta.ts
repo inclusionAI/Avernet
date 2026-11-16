@@ -84,7 +84,7 @@ export const routeMetaList: RouteMeta[] = [
   },
   {
     path: '/collaboration-square/experts',
-    title: '专家市场',
+    title: '专家',
     section: 'collab',
     navKey: 'collaboration-square',
     openCore: true,
@@ -126,6 +126,14 @@ export const routeMetaList: RouteMeta[] = [
     openCore: true,
   },
   {
+    // 实验室「待办」工作台：当前空间待办、事件时序、互动和验收。
+    path: '/lab/todos',
+    title: '待办',
+    section: 'collab',
+    navKey: 'lab',
+    openCore: true,
+  },
+  {
     // 实验室「任务」体验页:跨Bot跨群协同任务列表(状态类别筛选 + V2 详情副屏)。
     path: '/lab/tasks',
     title: '任务',
@@ -142,7 +150,7 @@ export const routeMetaList: RouteMeta[] = [
   },
   {
     path: '/bot-workshop',
-    title: 'Bot管理',
+    title: 'Bot 管理',
     section: 'bot',
     navKey: 'bot-workshop',
     openCore: true,
@@ -165,11 +173,13 @@ export const routeMetaList: RouteMeta[] = [
   },
   {
     path: '/bot-workshop/task-instances',
-    title: '任务实例',
+    title: '定时任务',
     section: 'bot',
     navKey: 'bot-workshop',
     openCore: true,
   },
+  { path: '/bot-workshop/scheduled-tasks', title: '定时任务', section: 'bot', navKey: 'bot-workshop', openCore: true },
+  { path: '/bot-workshop/scheduled-tasks/detail', title: '定时任务详情', section: 'bot', navKey: 'bot-workshop', openCore: true },
   // split-admin-space-ticket-pages：管理后台单页拆分——两页面均不占导航位（故不设 navKey，
   // 侧栏不因路由高亮任何菜单项）；section 取 legacy 保持分段语义完备。原 /admin 系列 meta 随单页壳退役。
   {

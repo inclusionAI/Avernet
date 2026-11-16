@@ -13,7 +13,7 @@ def test_public_zdas_entrypoints_fail_closed(factory):
     # public-provider import-boundary checks in the parent pytest process.
     result = subprocess.run(
         [sys.executable, "-c", f"""
-from src.infra.vectorstores.qdrant_zdas_vector_store import (
+from app.infra.vectorstores.qdrant_zdas_vector_store import (
     {factory}, ZdasInternalOnlyProviderUnavailable,
 )
 try:

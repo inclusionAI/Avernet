@@ -16,6 +16,7 @@ async fn apply_sqlite_group_context_migration(db: &dyn DbPlugin) {
     for migration in [
         include_str!("../../../../migrations/sqlite/034_group_context.sql"),
         include_str!("../../../../migrations/sqlite/035_group_context_owners.sql"),
+        include_str!("../../../../migrations/sqlite/044_group_context_preset.sql"),
     ] {
         for sql in migration
             .split(';')
@@ -176,4 +177,36 @@ async fn memory_expired_business_validity_still_current() {
 async fn sqlite_expired_business_validity_still_current() {
     let repo = sqlite_repo().await;
     common::current_row_with_expired_business_validity_still_blocks_and_is_returned(&repo).await;
+}
+
+#[tokio::test]
+async fn sqlite_preset_mutations_are_scoped_and_preserve_creator() {
+    use bcs_domain::group_context::GroupContextItemPresetChange::{Add, Delete, Edit};
+
+    let repo = sqlite_repo().await;
+    let add = Add { name: "timeline".into(), description: String::new() };
+    repo.change_preset("one", "alice", add.clone()).await.unwrap();
+    repo.change_preset("two", "bob", add.clone()).await.unwrap();
+    assert!(repo.change_preset("one", "bob", add).await.is_err());
+    let rename = Edit { name: "timeline".into(), new_name: Some("events".into()), description: None };
+    repo.change_preset("one", "bob", rename).await.unwrap();
+    assert!(!repo.preset_exists("one", "timeline").await.unwrap());
+    assert!(repo.preset_exists("one", "events").await.unwrap());
+    assert!(repo.preset_exists("two", "timeline").await.unwrap());
+    let presets = repo.list_presets("one").await.unwrap();
+    assert_eq!(presets[0].creator, "alice");
+    assert_eq!(presets[0].modifier, "bob");
+    repo.change_preset("one", "bob", Delete { name: "events".into() }).await.unwrap();
+    assert!(repo.list_presets("one").await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn preset_names_are_case_sensitive_in_memory_and_sqlite() {
+    common::preset_names_are_case_sensitive(&MemoryGroupContextRepo::new()).await;
+    common::preset_names_are_case_sensitive(&sqlite_repo().await).await;
+}
+
+#[tokio::test]
+async fn sqlite_editing_missing_preset_returns_not_found() {
+    common::editing_missing_preset_returns_not_found(&sqlite_repo().await).await;
 }

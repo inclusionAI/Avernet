@@ -51,7 +51,9 @@ def test_name_sync_resolves_legacy_locator_before_addressing_bcn(locator):
     bot = {"id": 1, "bot_id": "bot", "entity_id": "old", "owner_id": "new", "bot_type": "service", "bot_name": "Name", "bot_desc": "Description"}
     svc._repository.list_matches_by_legacy_locator.return_value = [bot]
     svc._sync_bot_to_bcn(bot_id="bot", owner_id=locator)
-    svc._bcn_service.onboard_bot.assert_called_once_with(bot_id="bot:old", name="Name", summary="Description")
+    svc._bcn_service.onboard_bot.assert_called_once_with(
+        bot_id="bot:old", name="Name", summary="Description", avatar_url=""
+    )
     svc._repository.list_matches_by_legacy_locator.assert_called_once_with("bot", locator)
 
 

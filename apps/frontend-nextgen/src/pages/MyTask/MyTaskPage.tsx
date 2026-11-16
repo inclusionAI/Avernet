@@ -226,6 +226,7 @@ export default function MyTaskPage() {
         historyError={historyError}
         onOpenRoutineFromHistory={openRoutineFromHistory}
         botNameMap={botNameMap}
+        routineBotType={activeIdentity?.kind === 'bot' ? activeIdentity.botType : undefined}
       />
     </main>
   );

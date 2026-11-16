@@ -116,7 +116,7 @@ pub(super) async fn handle_task_dispatch(
 
     match state
         .message_flow
-        .handle_task_dispatch(TaskDispatchCommand {
+        .handle_native_task_dispatch(req_id, TaskDispatchCommand {
             driver_bot_id: driver_bot.clone(),
             group_id: real_group_id.clone(),
             target_bot_id: params.target_bot.clone(),

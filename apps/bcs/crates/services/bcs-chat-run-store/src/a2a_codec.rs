@@ -41,16 +41,16 @@ pub(super) fn run_values(record: &A2aRunRecord, env: &str, scope_key: String) ->
     let mut values=vec![env.into(),record.run_id.clone().into(),DbValue::Null,scope_key.into()];
     values.extend(scope_values(&record.scope));
     values.extend(vec![record.group_id.clone().into(),record.interface.protocol_version.clone().into(),
-        match record.interface.binding {A2aBinding::HttpJson=>"http_json",A2aBinding::Grpc=>"grpc"}.into(),
-        "stream".into(),record.credential_kind.clone().into(),serde_json::to_string(&record.extensions).map_err(error)?.into(),
+        match record.interface.binding {A2aBinding::HttpJson=>"http_json",A2aBinding::JsonRpc=>"json_rpc",A2aBinding::Grpc=>"grpc",A2aBinding::Custom=>"custom"}.into(),
+        match record.interface.update_mode {A2aUpdateMode::Stream=>"stream",A2aUpdateMode::Poll=>"poll"}.into(),record.credential_kind.clone().into(),serde_json::to_string(&record.extensions).map_err(error)?.into(),
         record.message_id.clone().into(),record.request_digest.clone().into(),opt(&record.context_id),state(record.state).into(),
         num(record.version)?,num(record.deadline_ms)?,num(record.updated_at_ms)?]);
     values.extend(budget_values(record)?);Ok(values)
 }
 pub(super) fn decode(row: &DbRow) -> ServiceResult<A2aRunRecord> {
     let scope=scope(row)?;
-    let binding=match text(row,"binding")?.as_str() {"http_json"=>A2aBinding::HttpJson,"grpc"=>A2aBinding::Grpc,_=>return Err(error("unknown binding"))};
-    if text(row,"update_mode")? != "stream" { return Err(error("unknown update mode")); }
+    let binding=match text(row,"binding")?.as_str() {"http_json"=>A2aBinding::HttpJson,"json_rpc"=>A2aBinding::JsonRpc,"grpc"=>A2aBinding::Grpc,"custom"=>A2aBinding::Custom,_=>return Err(error("unknown binding"))};
+    let update_mode=match text(row,"update_mode")?.as_str() {"stream"=>A2aUpdateMode::Stream,"poll"=>A2aUpdateMode::Poll,_=>return Err(error("unknown update mode"))};
     let budget=if row.get_i64("budget_remaining_ms").map_err(error)?.is_none() {None} else {
         let phase=match text(row,"budget_phase")?.as_str() {
             "executing"=>RunBudgetPhase::Executing {started_at_ms:unsigned(row,"budget_phase_started_ms")?},
@@ -62,7 +62,7 @@ pub(super) fn decode(row: &DbRow) -> ServiceResult<A2aRunRecord> {
     };
     let pending_input=row.get_string("pending_input_json").map_err(error)?.map(|s|serde_json::from_str(&s).map_err(error)).transpose()?;
     Ok(A2aRunRecord {run_id:text(row,"run_id")?,group_id:text(row,"group_id")?,
-        interface:A2aInterface {url:scope.interface_url.clone(),tenant:scope.tenant.clone(),protocol_version:text(row,"protocol_version")?,binding,update_mode:A2aUpdateMode::Stream},
+        interface:A2aInterface {url:scope.interface_url.clone(),tenant:scope.tenant.clone(),protocol_version:text(row,"protocol_version")?,binding,update_mode},
         scope,credential_kind:text(row,"credential_kind")?,extensions:serde_json::from_str(&text(row,"extensions_json")?).map_err(error)?,
         message_id:text(row,"message_id")?,request_digest:text(row,"request_digest")?,remote_task_id:row.get_string("remote_task_id").map_err(error)?,
         context_id:row.get_string("context_id").map_err(error)?,task_version:row.get_i64("task_version").map_err(error)?.map(|v|u64::try_from(v).map_err(error)).transpose()?,

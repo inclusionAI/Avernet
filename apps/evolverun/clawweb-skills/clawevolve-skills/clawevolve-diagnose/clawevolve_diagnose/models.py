@@ -172,6 +172,7 @@ class SessionRow:
     original_model: str = ""
     original_model_source: str = ""
     raw_session: dict[str, Any] = field(default_factory=dict)
+    session_key: str = ""
 
 
 @dataclass

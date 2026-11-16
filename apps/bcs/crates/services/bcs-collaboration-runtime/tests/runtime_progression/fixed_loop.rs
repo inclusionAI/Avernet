@@ -15,6 +15,9 @@ mod event_metadata_tests;
 #[path = "loop_observability.rs"]
 mod observability_tests;
 
+#[path = "legacy_lifecycle.rs"]
+mod legacy_lifecycle;
+
 #[path = "multi_loop_template.rs"]
 mod multi_loop_template_tests;
 

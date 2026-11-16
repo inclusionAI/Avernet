@@ -6,6 +6,16 @@ use super::provider_core::parse_downlink_config;
 
 impl BotCore {
     pub(super) async fn protect_provider_identity(&self, id: &str, mut caps: bcs_service_api::BotCapabilities) -> ServiceResult<bcs_service_api::BotCapabilities> {
+        if let Some(cards)=&self.a2a_cards {
+            if let Some(record)=cards.get(id).await? {
+                let name=bcs_service_api::types::a2a_names::card_bot_name(&record.agent_card)
+                    .map_err(|_|failure("Stored AgentCard has an invalid name"))?;
+                if caps.name.as_deref().is_some_and(|requested|requested!=name) {
+                    return Err(denied("A2A Bot name must be updated through AgentCard"));
+                }
+                caps.name=Some(name.into());
+            }
+        }
         let affiliated = if let Some(metadata) = &self.bot_providers {
             metadata.get_provider_bot(id).await?.is_some()
         } else { false };

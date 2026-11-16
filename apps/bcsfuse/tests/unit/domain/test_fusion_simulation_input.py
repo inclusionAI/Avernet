@@ -18,9 +18,9 @@ class TestFusionSimulationInput:
 
     def test_create_simulation_input_success(self):
         """测试创建模拟输入"""
-        from src.domain.models.fusion_simulation_input import FusionSimulationInput
-        from src.domain.models.retrieval_mode import RetrievalMode
-        from src.domain.models.worker_profile import WorkerProfile, ProfileType
+        from app.domain.models.fusion_simulation_input import FusionSimulationInput
+        from app.domain.models.retrieval_mode import RetrievalMode
+        from app.domain.models.worker_profile import WorkerProfile, ProfileType
 
         profile = WorkerProfile(
             staff_id="001",
@@ -42,10 +42,10 @@ class TestFusionSimulationInput:
 
     def test_create_simulation_input_with_all_fields(self):
         """测试创建包含所有字段的模拟输入"""
-        from src.domain.models.fusion_simulation_input import FusionSimulationInput
-        from src.domain.models.retrieval_mode import RetrievalMode
-        from src.domain.models.worker_profile import WorkerProfile, ProfileType
-        from src.domain.models.worker_context_digest import WorkerContextDigest
+        from app.domain.models.fusion_simulation_input import FusionSimulationInput
+        from app.domain.models.retrieval_mode import RetrievalMode
+        from app.domain.models.worker_profile import WorkerProfile, ProfileType
+        from app.domain.models.worker_context_digest import WorkerContextDigest
 
         profile = WorkerProfile(
             staff_id="001",
@@ -79,8 +79,8 @@ class TestFusionSimulationInput:
 
     def test_create_simulation_input_minimal(self):
         """测试创建最小字段模拟输入"""
-        from src.domain.models.fusion_simulation_input import FusionSimulationInput
-        from src.domain.models.retrieval_mode import RetrievalMode
+        from app.domain.models.fusion_simulation_input import FusionSimulationInput
+        from app.domain.models.retrieval_mode import RetrievalMode
 
         simulation_input = FusionSimulationInput(
             question="test",
@@ -95,8 +95,8 @@ class TestFusionSimulationInput:
 
     def test_max_perspectives_validation(self):
         """测试 max_perspectives 验证"""
-        from src.domain.models.fusion_simulation_input import FusionSimulationInput
-        from src.domain.models.retrieval_mode import RetrievalMode
+        from app.domain.models.fusion_simulation_input import FusionSimulationInput
+        from app.domain.models.retrieval_mode import RetrievalMode
 
         # 有效值
         for value in [1, 3, 5, 10]:
@@ -124,8 +124,8 @@ class TestFusionSimulationInput:
 
     def test_mode_different_values(self):
         """测试不同模式"""
-        from src.domain.models.fusion_simulation_input import FusionSimulationInput
-        from src.domain.models.retrieval_mode import RetrievalMode
+        from app.domain.models.fusion_simulation_input import FusionSimulationInput
+        from app.domain.models.retrieval_mode import RetrievalMode
 
         for mode in [RetrievalMode.AGENT, RetrievalMode.CONFLICT_ALIGNMENT,
                      RetrievalMode.EXPERT_DIAGNOSIS, RetrievalMode.GENERAL]:
@@ -137,7 +137,7 @@ class TestFusionSimulationInput:
 
     def test_missing_required_fields_raises_error(self):
         """测试缺少必填字段抛出错误"""
-        from src.domain.models.fusion_simulation_input import FusionSimulationInput
+        from app.domain.models.fusion_simulation_input import FusionSimulationInput
 
         with pytest.raises(ValidationError):
             FusionSimulationInput(
@@ -151,8 +151,8 @@ class TestFusionSimulationInput:
 
     def test_extra_fields_forbidden(self):
         """测试额外字段被禁止"""
-        from src.domain.models.fusion_simulation_input import FusionSimulationInput
-        from src.domain.models.retrieval_mode import RetrievalMode
+        from app.domain.models.fusion_simulation_input import FusionSimulationInput
+        from app.domain.models.retrieval_mode import RetrievalMode
 
         with pytest.raises(ValidationError):
             FusionSimulationInput(
@@ -163,9 +163,9 @@ class TestFusionSimulationInput:
 
     def test_profiles_list(self):
         """测试 profiles 列表"""
-        from src.domain.models.fusion_simulation_input import FusionSimulationInput
-        from src.domain.models.retrieval_mode import RetrievalMode
-        from src.domain.models.worker_profile import WorkerProfile, ProfileType
+        from app.domain.models.fusion_simulation_input import FusionSimulationInput
+        from app.domain.models.retrieval_mode import RetrievalMode
+        from app.domain.models.worker_profile import WorkerProfile, ProfileType
 
         profiles = [
             WorkerProfile(
@@ -188,8 +188,8 @@ class TestFusionSimulationInput:
 
     def test_options_dict(self):
         """测试 options 字典"""
-        from src.domain.models.fusion_simulation_input import FusionSimulationInput
-        from src.domain.models.retrieval_mode import RetrievalMode
+        from app.domain.models.fusion_simulation_input import FusionSimulationInput
+        from app.domain.models.retrieval_mode import RetrievalMode
 
         simulation_input = FusionSimulationInput(
             question="test",
@@ -212,9 +212,9 @@ class TestFusionSimulationInputCompatibility:
 
     def test_from_fusion_request(self):
         """测试从 FusionRequest 转换"""
-        from src.domain.models.fusion_simulation_input import FusionSimulationInput
-        from src.domain.models.fusion_request import FusionRequest
-        from src.domain.models.retrieval_mode import RetrievalMode
+        from app.domain.models.fusion_simulation_input import FusionSimulationInput
+        from app.domain.models.fusion_request import FusionRequest
+        from app.domain.models.retrieval_mode import RetrievalMode
 
         fusion_request = FusionRequest(
             question="How to optimize database performance?",
@@ -234,9 +234,9 @@ class TestFusionSimulationInputCompatibility:
 
     def test_from_fusion_request_all_modes(self):
         """测试从 FusionRequest 转换所有模式"""
-        from src.domain.models.fusion_simulation_input import FusionSimulationInput
-        from src.domain.models.fusion_request import FusionRequest
-        from src.domain.models.retrieval_mode import RetrievalMode
+        from app.domain.models.fusion_simulation_input import FusionSimulationInput
+        from app.domain.models.fusion_request import FusionRequest
+        from app.domain.models.retrieval_mode import RetrievalMode
 
         for fusion_mode in ["agent", "conflict_alignment", "expert_diagnosis"]:
             fusion_request = FusionRequest(
@@ -250,10 +250,10 @@ class TestFusionSimulationInputCompatibility:
 
     def test_from_fusion_request_with_profiles(self):
         """测试从 FusionRequest 转换并附带 profiles"""
-        from src.domain.models.fusion_simulation_input import FusionSimulationInput
-        from src.domain.models.fusion_request import FusionRequest
-        from src.domain.models.retrieval_mode import RetrievalMode
-        from src.domain.models.worker_profile import WorkerProfile, ProfileType
+        from app.domain.models.fusion_simulation_input import FusionSimulationInput
+        from app.domain.models.fusion_request import FusionRequest
+        from app.domain.models.retrieval_mode import RetrievalMode
+        from app.domain.models.worker_profile import WorkerProfile, ProfileType
 
         fusion_request = FusionRequest(
             question="test question",
@@ -280,8 +280,8 @@ class TestFusionSimulationInputCompatibility:
 
     def test_from_fusion_request_extracts_options(self):
         """测试从 FusionRequest 提取选项"""
-        from src.domain.models.fusion_simulation_input import FusionSimulationInput
-        from src.domain.models.fusion_request import FusionRequest, FuseOptions
+        from app.domain.models.fusion_simulation_input import FusionSimulationInput
+        from app.domain.models.fusion_request import FusionRequest, FuseOptions
 
         fusion_request = FusionRequest(
             question="test question",

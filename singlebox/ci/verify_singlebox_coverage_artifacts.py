@@ -31,6 +31,7 @@ REQUIRED_FILES = (
     "baas-coverage.txt",
     "html/baas/index.html",
     "bcs/e2e.log",
+    "bcs/oauth_e2e.json",
     "bcs/cobertura.xml",
     "bcs/coverage.txt",
     "bcs/summary.json",
@@ -54,8 +55,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--backend-router-min", type=int, default=10)
     parser.add_argument("--backend-plugin-min", type=int, default=0)
     parser.add_argument("--baas-router-min", type=int, default=10)
-    parser.add_argument("--bcs-line-min", type=float, default=41.0)
-    parser.add_argument("--bcs-method-min", type=float, default=36.0)
+    parser.add_argument("--bcs-line-min", type=float, default=54.0)
+    parser.add_argument("--bcs-method-min", type=float, default=48.0)
     parser.add_argument("--bcs-router-min", type=float, default=100.0)
     parser.add_argument("--bcs-cli-min", type=float, default=100.0)
     return parser.parse_args()
@@ -183,11 +184,36 @@ def ratio_percent(covered: int, total: int) -> float:
     return covered * 100.0 / total if total else 0.0
 
 
+def validate_oauth_e2e(reports_dir: Path, errors: list[str]) -> None:
+    report = load_json(reports_dir / "bcs/oauth_e2e.json", errors)
+    if report.get("status") != "passed":
+        errors.append("BCS OAuth E2E did not pass")
+    required = {
+        "mixed-sqlite", "mixed-memory", "compatibility-and-chain-selection",
+        "pending-capacity", "startup-validation",
+    }
+    scenarios = report.get("scenarios")
+    if not isinstance(scenarios, list) or not required.issubset(
+        item for item in scenarios if isinstance(item, str)
+    ):
+        errors.append("BCS OAuth E2E is missing required live-process scenarios")
+    checks = report.get("checks")
+    if not isinstance(checks, list) or not checks:
+        errors.append("BCS OAuth E2E contains no checks")
+    calls = report.get("provider_calls")
+    if not isinstance(calls, dict) or any(
+        not isinstance(calls.get(operation), int) or calls[operation] <= 0
+        for operation in ("authorize", "exchange", "userinfo")
+    ):
+        errors.append("BCS OAuth E2E did not exercise the external provider boundary")
+
+
 def validate_bcs_artifacts(
     reports_dir: Path,
     args: argparse.Namespace,
     errors: list[str],
 ) -> tuple[float, float, float, float]:
+    validate_oauth_e2e(reports_dir, errors)
     bcs_dir = reports_dir / "bcs"
     summary = load_json(bcs_dir / "summary.json", errors)
     totals = get_nested(summary, ("data",))

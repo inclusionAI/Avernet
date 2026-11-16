@@ -6,6 +6,7 @@ from .admission_genome_routes import GENOME_ADMISSION
 from .admission_task_routes import (
     TASK_BBS_ADMISSION,
     TASK_PUBLIC_ADMISSION,
+    TASK_TODO_ADMISSION,
 )
 
 _SPACE_SKILL_BASE = "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}"
@@ -32,6 +33,12 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
         "POST",
         "/openapi/v1/bots/{bot_id}/service-envs/{publication_id}/env-publish",
     ): AdmissionMode.OPEN,
+    ("GET", "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    ("POST", "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/simple-cert/precheck"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    ("POST", "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/simple-cert/submissions"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    ("GET", "/openapi/v1/bots/{bot_id}/eval/submissions/{submission_id}"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    ("GET", "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/history"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    ("POST", "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/simple-cert/sync"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     ("GET", "/openapi/v1/bots/{bot_id}/engine-version"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     # Minimal classification requires a verified human, but no Bot grant.
     ("GET", "/openapi/v1/bots/{bot_id}/classification"): AdmissionMode.REFUSED,
@@ -46,6 +53,10 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     (
         "DELETE",
         "/openapi/v1/bots/{bot_id}/links/{resource_id}",
+    ): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    (
+        "POST",
+        "/openapi/v1/bots/{bot_id}/collaboration/repair",
     ): AdmissionMode.GRANT_CHECKED_OWN_BOT,
     (
         "GET",
@@ -718,6 +729,7 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ("GET", "/openapi/v1/collaboration/bots/{bot_id}/public/risk-checks/{risk_check_id}"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     ("POST", "/openapi/v1/collaboration/bots/{bot_id}/public/risk-checks/{risk_check_id}/refresh"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     **TASK_PUBLIC_ADMISSION,
+    **TASK_TODO_ADMISSION,
     # Department directory search — a tenant-wide catalogue read, not a user's.
     # ── Source credentials (W3, #1471) — OPEN, application-operated ─────────
     # These are machine operations, and the *edge* is what makes them so:

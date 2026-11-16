@@ -40,6 +40,7 @@ impl A2aHttpTransport {
                         self.runtime()?.contexts.mark_provider_transport_terminal(&record.run_id).await;
                         finished = true;
                     }
+                    TaskState::InputRequired if record.interface.update_mode==bcs_service_api::types::a2a::A2aUpdateMode::Poll => return Err(invalid("input recovery is not supported for non-streaming tasks")),
                     TaskState::InputRequired => self.request_input(record,input_message.take().ok_or_else(||invalid("input schema status message required"))?).await?,
                     TaskState::AuthRequired => return Err(invalid("dynamic authorization not configured")),
                     TaskState::Submitted | TaskState::Working => {}

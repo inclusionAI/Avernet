@@ -2,13 +2,16 @@
 
 Every public route returns the same :class:`Envelope` shape — on success and on
 the known failure cases alike — so external callers parse one structure
-everywhere. This module owns:
+everywhere. This module owns the domain-error → envelope mapping and the
+:func:`envelope_errors` decorator that turns a raised domain error into an
+enveloped error response with the right HTTP status, leaving unmapped
+exceptions to the app's 500 handler.
 
-- the envelope/page builders that stamp the request's trace id into
-  ``request_id`` (mirroring the ``X-Trace-ID`` response header), and
-- the domain-error → envelope mapping plus the :func:`envelope_errors` decorator
-  that turns a raised domain error into an enveloped error response with the
-  right HTTP status, leaving unmapped exceptions to the app's 500 handler.
+The success builders (``envelope``, ``page``, ``created``, ``accepted``,
+``deleted``) now live in :mod:`~...openapi_v1.response_envelopes` — the plural
+name is the builders module; the singular ``response_envelope`` is the low-level
+envelope/error-response primitive — and are re-exported here so existing
+imports keep working.
 
 Handlers therefore never build an :class:`Envelope` by hand for errors; they call
 a builder on success and let the decorator handle the mapped failures.
@@ -29,13 +32,20 @@ from agentclaw.community.adapters.http.error_logging import (
     log_public_error,
     remember_call_params,
 )
+from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
     CODE_ACCEPTED,
     CODE_CREATED,
     CODE_OK,
     Deleted,
-    Envelope,
     Page,
+)
+from agentclaw.community.adapters.http.openapi_v1.response_envelopes import (
+    accepted,
+    created,
+    deleted,
+    envelope,
+    page,
 )
 from agentclaw.community.adapters.http.openapi_v1.response_envelope import (
     error_response,
@@ -45,6 +55,7 @@ from agentclaw.community.adapters.http.openapi_v1.response_envelope import (
     unmapped_error_response,
 )
 from agentclaw.community.adapters.http.openapi_v1.errors_payloads import error_data
+from agentclaw.community.core.bot_management.avatar import AvatarTooLargeError
 from agentclaw.community.core.bot_management.engine_version.errors import (
     EngineVersionStageUnsupportedError, EngineVersionInstanceSelectionError,
 )
@@ -66,6 +77,12 @@ from agentclaw.community.api.bot_config_manifest_service import (
 )
 from agentclaw.community.api.apply_run_service import (
     ApplyInProgressError,
+)
+from agentclaw.community.core.task.context_collab.errors import (
+    ContextCollabNotFoundError,
+    ContextCollabParentEventError,
+    ContextCollabValidationError,
+    ContextCollabVersionConflict,
 )
 from agentclaw.community.api.bot_cli_tool_service import (
     CliToolConflictError,
@@ -102,6 +119,9 @@ from agentclaw.community.adapters.http.openapi_v1.errors_source_credentials impo
 )
 from agentclaw.community.adapters.http.openapi_v1.errors_space import SpaceErrorCode, SpacePublicErrorMessage
 from agentclaw.community.adapters.http.openapi_v1.errors_space_skill import SPACE_SKILL_ERROR_CODES, SPACE_SKILL_HTTP_ERRORS
+from agentclaw.community.adapters.http.openapi_v1.task.errors_todo import (
+    TODO_HTTP_ERRORS,
+)
 from agentclaw.community.adapters.http.openapi_v1.errors_work_order import (
     WORK_ORDER_ERROR_STATUS, WORK_ORDER_ERROR_CODES,
 )
@@ -321,6 +341,8 @@ from agentclaw.community.core.service_bot.errors import (
     ServiceContainerNotFoundError,
     ServiceContainerUpstreamError,
     ServicePublicationConflictError,
+    ServicePublicationGateBlockedError,
+    ServicePublicationGatePendingError,
     ServicePublicationLockedError,
     ServicePublicationNotFoundError,
     ServicePublicationUnsupportedError,
@@ -332,50 +354,28 @@ from agentclaw.community.plugin_api.skill_center_client import (
 )
 
 __all__ = [
+    "accepted",
+    "created",
+    "deleted",
+    "envelope",
     "error_response",
     "error_response_for",
     "is_public_api",
+    "page",
     "trace_id",
     "unmapped_error_response",
 ]
+
+# The envelope-code constants the pre-split module carried in its own
+# namespace; existing importers (e.g. the task-callback orchestration tests)
+# keep importing them from here, so the split must not drop the re-export.
+__all__ += ["CODE_ACCEPTED", "CODE_CREATED", "CODE_OK", "Deleted", "Page"]
+
 T = TypeVar("T")
 
 
 class SkillCenterMarketplaceUnavailableError(RuntimeError):
     """A public Skill Center marketplace read could not be served."""
-
-
-def envelope(
-    data: T,
-    request: Request,
-    *,
-    code: int = CODE_OK,
-    message: str = "OK",
-) -> Envelope[T]:
-    """Wrap ``data`` in the standard success envelope."""
-    return Envelope(
-        code=code, message=message, data=data, request_id=trace_id(request)
-    )
-
-
-def page(total: int, items: list[T], request: Request) -> Envelope[Page[T]]:
-    """Wrap a page of ``items`` in the standard envelope."""
-    return envelope(Page(total=total, items=items), request)
-
-
-def created(data: T, request: Request) -> Envelope[T]:
-    """201 success envelope."""
-    return envelope(data, request, code=CODE_CREATED, message="Created")
-
-
-def accepted(data: T, request: Request) -> Envelope[T]:
-    """202 success envelope (e.g. bot creation pending user authorization)."""
-    return envelope(data, request, code=CODE_ACCEPTED, message="Accepted")
-
-
-def deleted(request: Request) -> Envelope[Deleted]:
-    """Standard delete-success envelope."""
-    return envelope(Deleted(), request)
 
 
 # Domain error → (HTTP status, fixed public message). Only the specific leaf
@@ -551,6 +551,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     LockNotHeldError: (404, "Not found"),
     LockReleaseDeniedError: (404, "Not found"),
     BotNameExistsError: (409, "Bot name already exists"),
+    AvatarTooLargeError: (400, "Avatar does not fit in Bot metadata"),
     BotNameInvalidError: (400, "Invalid bot name"),
     BotLimitExceededError: (409, "Bot creation limit reached"),
     BotQuotaExceededError: (409, "Bot quota exceeded for this Space"),
@@ -575,6 +576,14 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
         "Operation not supported for this bot",
     ),
     ServicePublicationLockedError: (423, "Edit lock required"),
+    ServicePublicationGateBlockedError: (
+        403,
+        "评测未通过，无法推进发布",
+    ),
+    ServicePublicationGatePendingError: (
+        409,
+        "评测认证处理中，请稍后再试",
+    ),
     ChannelEditLockedError: (423, "Edit lock required"),
     ClusterMismatchError: (400, "engine and cluster_name do not match"),
     UnsupportedEngineError: (400, "Unsupported engine"),
@@ -643,7 +652,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     LocalSkillLayoutRollbackError: (409, "Skill layout rollback is in progress"),
     LocalSkillEditLockUnavailableError: (503, "Skill update service is temporarily unavailable"),
     LocalSkillEditPausedError: (409, "Skill layout is being updated"),
-    SkillRuntimeNameConflictError: (409, "Skill runtime name conflicts with an active Skill"),
+    SkillRuntimeNameConflictError: (409, "Skill runtime name conflicts with another Skill"),
     SkillEngineNotSupportedError: (409, "Skill is not supported by this bot type and engine"),
     RepositoryCatalogNotFoundError: (404, "Not found"),
     RepositoryCatalogSyncInProgressError: (409, "Repository synchronization is already in progress"),
@@ -651,6 +660,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     **errors_skill_center.SKILL_CENTER_ENVELOPE_ERRORS,
     **SOURCE_CREDENTIALS_ENVELOPE_ERRORS,
     **GENOME_ENVELOPE_ERRORS,
+    **TODO_HTTP_ERRORS,
     FileTooLargeError: (413, "File too large for preview"),
     # download-dir: one fixed message for all three caps (per-file / count / total).
     DirectoryTooLargeError: (413, "Directory too large to download"),
@@ -765,7 +775,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     EngineResourceNotFoundError: (404, "Not found"),
     EngineUpstreamError: (502, "Engine service error"),
     # Base of the Engine* errors above — LAST of its group.
-    EngineRuntimeError: (502, "Engine service error"),
+    EngineRuntimeError: (500, "Internal error"),
     # Cron upstream fallback; mapped_error_response preserves the relay's
     # explicit business statuses. The timeout subclass keeps its own mapping.
     CronApiTimeoutError: (504, "Cron relay timed out"),
@@ -849,6 +859,17 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     TaskArtifactStorageNotConfiguredError: (503, "Task artifact object storage is not configured"),
     TaskArtifactStorageError: (502, "Task artifact object storage failed"),
     TaskError: (500, "Internal error"),
+    # BBS context collaboration protocol (spec 2026-11-09 §6). Leaf rows for
+    # every error the service/repository raises at the three delivery routes.
+    # The ENVELOPE_ERRORS table has no rows for the ``ValidationError`` /
+    # ``NotFound`` / ``Conflict`` bases these subclass, and the app-level
+    # ``_DOMAIN_ERROR_STATUS_MAP`` matches on exact type — a subclass would
+    # otherwise fall through to the 500 catch-all. Fixed messages per the
+    # table rule: no caller data, no internal ids.
+    ContextCollabNotFoundError: (404, "Not found"),
+    ContextCollabVersionConflict: (409, "Context version conflict"),
+    ContextCollabValidationError: (422, "Invalid context collab request"),
+    ContextCollabParentEventError: (422, "Parent event not found"),
 }
 # Most public categories retain the ordinary ``xxx000`` business code.  A
 # small, explicit override table lets a category expose a stable actionable
@@ -884,6 +905,8 @@ ENVELOPE_ERROR_CODES: dict[type[Exception], int] = {
     SkillSetAccessDeniedError: 403201,
     McpEndpointUnavailableError: 422211,
     McpPermissionDeniedError: 403202,
+    ServicePublicationGateBlockedError: 403210,
+    ServicePublicationGatePendingError: 409210,
 }
 
 _SKILL_SET_CONFLICT_CODES: dict[str, tuple[int, str]] = {
@@ -899,6 +922,7 @@ _SKILL_SET_CONFLICT_CODES: dict[str, tuple[int, str]] = {
     "SKILL_SET_NAME_CONFLICT": (409206, "SkillSet name already exists"),
     "IDEMPOTENCY_KEY_REUSED": (409207, "Idempotency key was reused with a different request"),
     "BOT_MUTATION_BUSY": (409208, "Another SkillSet mutation is in progress"),
+    "SKILL_SET_STATE_CHANGED_RETRY": (409211, "SkillSet state changed; retry the request"),
 }
 
 

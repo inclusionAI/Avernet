@@ -8,6 +8,15 @@ export interface BotSessionFileView {
   status: BotSessionFileStatus;
   sizeBytes: number | null;
   errorCode: string | null;
+  /**
+   * 创建者信息（2026-11-09 契约，OpenAPI 网关文件对象下发；旧引擎缺字段时
+   * 适配层归一 null）。可空非 optional——消费方判 null 即可，无需三态分支。
+   * 仅展示用：不参与预览/引用/下载/删除的任何门控。
+   */
+  creatorType: 'bot' | 'user' | null;
+  creatorName: string | null;
+  /** 资源首次登记时刻，UTC ISO 8601；缺失时为 null（行内不渲染时间段） */
+  createdAt: string | null;
 }
 
 /** 上传任务进程态(不等于后端 status)。 */

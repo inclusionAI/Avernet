@@ -18,7 +18,7 @@ SCHEMA_DIR = Path(__file__).resolve().parents[3] / "schemas"
 @pytest.fixture
 def schema_store():
     """加载所有 Schema 到 store"""
-    from src.infra.schema_loader import SchemaLoader
+    from app.infra.schema_loader import SchemaLoader
     loader = SchemaLoader(SCHEMA_DIR)
     return loader.store
 
@@ -34,7 +34,7 @@ class TestSchemaLoader:
 
     def test_schema_loader_importable(self):
         """验证 SchemaLoader 可导入"""
-        from src.infra.schema_loader import SchemaLoader
+        from app.infra.schema_loader import SchemaLoader
         assert SchemaLoader is not None
 
     def test_schema_loader_loads_schemas(self, schema_store):
@@ -77,7 +77,7 @@ class TestWorkerSchemaValidation:
 
     def test_sample_worker_matches_schema(self, fixtures_dir, schema_store):
         """验证 sample_worker.json 符合 Worker Schema"""
-        from src.infra.schema_loader import validate_with_store
+        from app.infra.schema_loader import validate_with_store
 
         sample_path = fixtures_dir / "sample_worker.json"
         if not sample_path.exists():
@@ -88,8 +88,8 @@ class TestWorkerSchemaValidation:
 
     def test_worker_pydantic_model_is_valid(self):
         """验证 Worker Pydantic 模型生成的对象符合 Schema"""
-        from src.infra.schema_loader import validate_with_store
-        from src.domain.models.worker import Worker
+        from app.infra.schema_loader import validate_with_store
+        from app.domain.models.worker import Worker
 
         worker = Worker(
             id="wrk_test",
@@ -131,7 +131,7 @@ class TestTaskSpecSchemaValidation:
 
     def test_sample_task_spec_matches_schema(self, fixtures_dir, schema_store):
         """验证 sample_task_spec.json 符合 TaskSpec Schema"""
-        from src.infra.schema_loader import validate_with_store
+        from app.infra.schema_loader import validate_with_store
 
         sample_path = fixtures_dir / "sample_task_spec.json"
         if not sample_path.exists():
@@ -146,7 +146,7 @@ class TestPlanDraftSchemaValidation:
 
     def test_sample_plan_draft_matches_schema(self, fixtures_dir, schema_store):
         """验证 sample_plan_draft.json 符合 PlanDraft Schema"""
-        from src.infra.schema_loader import validate_with_store
+        from app.infra.schema_loader import validate_with_store
 
         sample_path = fixtures_dir / "sample_plan_draft.json"
         if not sample_path.exists():

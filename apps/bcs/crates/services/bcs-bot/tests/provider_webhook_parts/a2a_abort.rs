@@ -9,15 +9,15 @@ use bcs_service_api::port::repo::a2a_bot::*;
 async fn retained_card_remains_usable_and_abort_preserves_provider_authority_checks() {
     let f=fixture().await;let bound=bot(&f,"stale-card").await;
     let db=Arc::new(LocalSqliteDbPlugin::new().unwrap());
-    db.execute(DbStatement::new("CREATE TABLE bcs_bots (bot_uuid TEXT,provider_id TEXT,provider_bot_ref TEXT,env TEXT,connection_mode TEXT,is_deleted INTEGER DEFAULT 0, gmt_modified TEXT DEFAULT CURRENT_TIMESTAMP)")).await.unwrap();
-    for sql in bcs_db_api::split_sql_statements(include_str!("../../../../../migrations/sqlite/039_bot_a2a.sql")).into_iter() {
+    db.execute(DbStatement::new("CREATE TABLE bcs_bots (name TEXT, bot_info TEXT DEFAULT '{}', bot_uuid TEXT,provider_id TEXT,provider_bot_ref TEXT,env TEXT,connection_mode TEXT,is_deleted INTEGER DEFAULT 0, gmt_modified TEXT DEFAULT CURRENT_TIMESTAMP)")).await.unwrap();
+    for sql in bcs_db_api::split_sql_statements(&[include_str!("../../../../../migrations/sqlite/039_bot_a2a.sql")].concat()).into_iter() {
         db.execute(DbStatement::new(sql)).await.unwrap();
     }
     db.execute(DbStatement::with_params("INSERT INTO bcs_bots (bot_uuid,provider_id,provider_bot_ref,env,connection_mode) VALUES (?,?,?,?,?)",
         vec![bound.bot_uuid.clone().into(),f.provider_id.clone().into(),bound.provider_bot_ref.clone().into(),"test".into(),"gateway".into()])).await.unwrap();
     let cards=Arc::new(DbA2aBotStore::sqlite(db.clone(),"test".into()));
     let card=A2aBotRecord {bot_uuid:bound.bot_uuid.clone(),provider_id:f.provider_id.clone(),provider_bot_ref:bound.provider_bot_ref.clone(),
-        agent_card_url:Some("https://example.org/card".into()),agent_card:json!({"name":"original Card","capabilities":{"extensions":[]},"supportedInterfaces":[{"url":"https://example.org/agent","protocolBinding":"HTTP+JSON","protocolVersion":"1.0"}]}),revision:1,};
+        agent_card_url:Some("https://example.org/card".into()),agent_card:json!({"name":"original Card","securitySchemes":{"auth":{"httpAuthSecurityScheme":{"scheme":"bearer"}}},"securityRequirements":[{"schemes":{"auth":{"list":[]}}}],"capabilities":{"extensions":[]},"supportedInterfaces":[{"url":"https://example.org/agent","protocolBinding":"HTTP+JSON","protocolVersion":"1.0"}]}),revision:1,};
     assert!(cards.compare_and_set(&card,0).await.unwrap());
     let registry=BotCore::with_provider_repos(f.bots.clone(),f.store.clone(),f.store.clone(),f.store.clone()).with_a2a_cards(cards.clone());
     assert!(matches!(registry.resolve_delivery_target(&bound.bot_uuid).await.unwrap(),BotDeliveryTarget::A2a {..}));
@@ -41,12 +41,12 @@ async fn retained_card_remains_usable_and_abort_preserves_provider_authority_che
 async fn interfaces_are_derived_from_card_and_current_grpc_policy_without_saved_route_columns() {
     let f=fixture().await;let bound=bot(&f,"derived-route").await;
     let db=Arc::new(LocalSqliteDbPlugin::new().unwrap());
-    db.execute(DbStatement::new("CREATE TABLE bcs_bots (bot_uuid TEXT,provider_id TEXT,provider_bot_ref TEXT,env TEXT,connection_mode TEXT,is_deleted INTEGER DEFAULT 0,gmt_modified TEXT DEFAULT CURRENT_TIMESTAMP)")).await.unwrap();
-    for sql in bcs_db_api::split_sql_statements(include_str!("../../../../../migrations/sqlite/039_bot_a2a.sql")).into_iter() {db.execute(DbStatement::new(sql)).await.unwrap();}
+    db.execute(DbStatement::new("CREATE TABLE bcs_bots (name TEXT, bot_info TEXT DEFAULT '{}', bot_uuid TEXT,provider_id TEXT,provider_bot_ref TEXT,env TEXT,connection_mode TEXT,is_deleted INTEGER DEFAULT 0,gmt_modified TEXT DEFAULT CURRENT_TIMESTAMP)")).await.unwrap();
+    for sql in bcs_db_api::split_sql_statements(&[include_str!("../../../../../migrations/sqlite/039_bot_a2a.sql")].concat()).into_iter() {db.execute(DbStatement::new(sql)).await.unwrap();}
     db.execute(DbStatement::with_params("INSERT INTO bcs_bots (bot_uuid,provider_id,provider_bot_ref,env,connection_mode) VALUES (?,?,?,?,?)",
         vec![bound.bot_uuid.clone().into(),f.provider_id.clone().into(),bound.provider_bot_ref.clone().into(),"test".into(),"gateway".into()])).await.unwrap();
     let cards=Arc::new(DbA2aBotStore::sqlite(db,"test".into()));
-    let raw=json!({"supportedInterfaces":[{"url":"https://example.org/grpc","protocolBinding":"GRPC","protocolVersion":"1.0"},
+    let raw=json!({"name":"Derived route","securitySchemes":{"auth":{"httpAuthSecurityScheme":{"scheme":"bearer"}}},"securityRequirements":[{"schemes":{"auth":{"list":[]}}}],"supportedInterfaces":[{"url":"https://example.org/grpc","protocolBinding":"GRPC","protocolVersion":"1.0"},
         {"url":"https://example.org/http","protocolBinding":"HTTP+JSON","protocolVersion":"1.0"}]});
     cards.compare_and_set(&A2aBotRecord {bot_uuid:bound.bot_uuid.clone(),provider_id:f.provider_id.clone(),provider_bot_ref:bound.provider_bot_ref.clone(),agent_card_url:None,agent_card:raw,revision:1},0).await.unwrap();
     let base=BotCore::with_provider_repos(f.bots.clone(),f.store.clone(),f.store.clone(),f.store.clone()).with_a2a_cards(cards);

@@ -11,12 +11,12 @@ transport stack into importers that only want to store).
 from __future__ import annotations
 
 from abc import abstractmethod
-from pathlib import Path
 from typing import TYPE_CHECKING, Optional, Protocol, runtime_checkable
 
 from agentclaw.community.core.content_store.reader import ContentReader
 
 if TYPE_CHECKING:
+    from agentclaw.community.core.content_store.blobs import BlobStore
     from agentclaw.community.core.content_store.models import (
         ContentScope,
         StoredContentRecord,
@@ -43,11 +43,11 @@ class ContentStoreProtocol(ContentReader, Protocol):
     def __init__(
         self,
         repository: ContentStoreRepositoryProtocol,
-        root: Path,
+        blobs: BlobStore,
     ) -> None:
-        """The blob tree root is a constructor value — a config-borne
-        deployment decision handed in by the composition root, never an
-        environment read inside core.
+        """Where the bytes live is a constructor value — the blob store the
+        deployment's profile wired, handed in by the composition root, never
+        an environment read inside core.
         """
         ...
 
@@ -107,6 +107,21 @@ class ContentStoreProtocol(ContentReader, Protocol):
         case the caller is in). Two concurrent stores of the same bytes can
         both file a row; the log has no unique key, and a second row changes
         no answer.
+        """
+        ...
+
+    @abstractmethod
+    def ensure_stored(self, data: bytes) -> str:
+        """Make ``data`` readable under its digest and return the digest; files no provenance row.
+
+        Transitional. Rows filed while the blobs lived on each backend
+        instance's own disk have no object behind them now that the bytes
+        live in object storage; a caller holding the bytes for such a row
+        (the Manifest compiler on a re-apply, the inline backfill) puts
+        them back through this. A no-op when the store already holds the
+        blob. Raises ``ContentStoreFault`` when the bytes could not be
+        stored. Remove once those rows have been backfilled: after that a
+        row implies its blob.
         """
         ...
 

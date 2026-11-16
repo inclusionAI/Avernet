@@ -435,9 +435,12 @@ entry that cannot safely be replaced is reported as `PENDING` / `DEGRADED`; it
 does not restore a committed Installation row.
 They do not acquire `SkillsPoolEditGuard`: Pool editing is a file-corpus and
 layout-migration concern, retained only by Local package upload/replacement/
-deletion and Pool cutover/rollback paths. Phase 1 intentionally has no
-cache-backed cross-command Bot mutation fence; durable serialization is
-deferred to the task-queue design.
+deletion and Pool cutover/rollback paths. Skill membership and activation,
+Direct Skill installation, Default Skill exclusions, Apply Skill claims and
+installation reconciliation serialize their database transactions on the
+scoped Bot row where row locks are supported. SQLite relies on its database
+write transaction. This fence does not cover every Set or MCP command, runtime
+projection, or global Default template changes.
 
 `desktop_skill_recovery.py` owns the durable event-triggered follow-up:
 `skill_center.desktop_skill_recovery`, one task type deduped by

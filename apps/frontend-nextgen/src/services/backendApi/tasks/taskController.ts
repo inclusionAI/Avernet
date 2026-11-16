@@ -8,9 +8,12 @@
  * 测试场景可通过 baseUrl 直连本地 singlebox（localhost:8888），绕过 proxy。
  */
 import { getCapabilities } from '@/capabilities';
+import { useErrorNotifyStore } from '@/stores/errorNotifyStore';
 import { TASK_READ_API_BASE } from '@/services/tasks/taskConfig';
+import type { DomainResult } from '@/services/workspace/identityService';
 import type { Envelope, ExecuteTaskRequest, ExecuteTaskResponse, TaskListItem } from '@/services/tasks/taskModel';
-import { backendRequest } from '../httpClient';
+import { BackendRequestError, backendRequest } from '../httpClient';
+import { isEnvelopeFailure } from '../types';
 import type { BackendApiPage } from '../types';
 const DEFAULT_BASE = ''; // 相对路径 → 走 dev 代理/gateway 统一出口
 
@@ -87,4 +90,50 @@ export function downloadTaskArtifactContent(artifactId: string, baseUrl: string 
     injectUserId: false,
     operation: 'download-task-artifact-content',
   });
+}
+
+export interface TaskBySessionRef {
+  task_id: string;
+  owner_user_id: string;
+  node_id: string;
+  updated_at?: string | null;
+}
+
+interface TaskBySessionData {
+  session_id: string;
+  items: TaskBySessionRef[];
+  total: number;
+}
+
+/**
+ * Resolve a chat session to every task node linked to it. This is used for
+ * automatic side-panel recovery, so an empty result returns [] and legacy 404
+ * or transport failures resolve to null without surfacing a toast or blocking
+ * the conversation.
+ */
+export async function getTaskBySession(
+  sessionId: string,
+  baseUrl: string = DEFAULT_BASE,
+): Promise<DomainResult<TaskBySessionRef[] | null>> {
+  const path = `${TASK_READ_API_BASE}/by_session`;
+  const url = baseUrl ? `${baseUrl.replace(/\/+$/, '')}${path}` : path;
+  try {
+    const result = await backendRequest<Envelope<TaskBySessionData>>(url, {
+      method: 'GET',
+      params: { session_id: sessionId },
+      injectUserId: false,
+      operation: 'get-task-by-session',
+    });
+    return {
+      ok: true,
+      data: isEnvelopeFailure(result) || !Array.isArray(result.data?.items)
+        ? null
+        : result.data.items,
+    };
+  } catch (error) {
+    if (error instanceof BackendRequestError && error.toastKey) {
+      useErrorNotifyStore.getState().cancel(error.toastKey);
+    }
+    return { ok: true, data: null };
+  }
 }

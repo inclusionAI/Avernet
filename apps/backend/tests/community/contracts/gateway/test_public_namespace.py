@@ -26,6 +26,9 @@ _DECLARED_PREFIXES = (
     # the user. Declared with its gateway domain + route_security entries.
     "/openapi/v1/org",
     "/openapi/v1/spaces",
+    # Human Todo workbench, routed by the gateway's existing `todos` domain
+    # and protected by the /openapi/v1/todos/** route_security rule.
+    "/openapi/v1/todos",
     "/openapi/v1/work-orders",
     "/openapi/v1/work-order-notifications",
     "/openapi/v1/org/user",
@@ -47,6 +50,13 @@ _DECLARED_PREFIXES = (
     # out of the broad collaboration→bcs namespace). Declared with its gateway
     # domain + route_security entry.
     "/openapi/v1/collaboration/tasks",
+    # BBS context collaboration protocol P1 (spec §6.1/§14.1): the Collet
+    # three-API surface under the singular `task` prefix, served by the
+    # backend via the `collaboration-task-context-collab` domain (carved out
+    # of the broad collaboration→bcs namespace, same as collaboration-tasks
+    # above). route_security inherits the /openapi/v1/collaboration/** rule;
+    # the backend enforces the gateway-signed principal itself.
+    "/openapi/v1/collaboration/task/context_collab",
     # Tenant source credentials (W3, #1471) ride the `bots` domain — a
     # literal group under /openapi/v1/bots, forward-verified by the same
     # entry, with its own app-required route_security rule (the group no

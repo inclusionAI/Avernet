@@ -19,9 +19,11 @@ from .schemas_metadata import (
 )
 
 from agentclaw.community.adapters.http.openapi_v1.clusters import ClusterName
-from .schemas_inventory import InventoryPublication
-from agentclaw.community.adapters.http.openapi_v1.service_publications.schemas import (
-    EditLock,
+from agentclaw.community.adapters.http.openapi_v1.contracts import ExtensibleResponse
+from .schemas_inventory import (
+    BotInventoryItem as BotInventoryItem,
+    BusinessSpace,
+    DeployMode as DeployMode,
 )
 from agentclaw.community.core.bot_copy.types import BotCopyStateSummary
 
@@ -76,7 +78,7 @@ _BOT_STATUS_DESC = (
 )
 
 
-class Bot(BaseModel):
+class Bot(ExtensibleResponse):
     """An agent (bot) record."""
 
     entity_id: str = Field(default="", description="Immutable Bot resource locator.")
@@ -441,7 +443,7 @@ class BotAuthStatus(BaseModel):
     )
 
 
-class BotStatus(BaseModel):
+class BotStatus(ExtensibleResponse):
     """Runtime / device readiness of a bot."""
 
     model_config = ConfigDict(
@@ -820,156 +822,4 @@ class DataInitResult(BaseModel):
     started_at: datetime | None = Field(
         default=None,
         description="Initialization start time, when a running attempt recorded one.",
-    )
-
-
-# ── Bot inventory card surface ─────────────────────────────────────────────
-# Card list returned by ``/openapi/v1/bots/all``. Action affordances are
-# embedded in each item; there is no rich-card detail or standalone actions route.
-# These Literals are trimmed siblings of the core enums in
-# ``core.bot_inventory.types`` (kept as strings so a pydantic schema carries
-# them as JSON enums without a circular import on the core module).
-
-DeployMode = Literal["cloud", "local"]
-BotInventoryKind = Literal["personal_cloud", "local", "service"]
-DisplayState = Literal[
-    "running",
-    "pending",
-    "failed",
-    "dormant",
-    "local_running",
-    "local_offline",
-    "local_pending",
-    "local_failed",
-    "service_draft",
-    "service_deploying",
-    "service_prestable",
-    "service_staging",
-    "service_online",
-    "service_offline",
-]
-BotAction = Literal[
-    "view",
-    "chat",
-    "edit",
-    "delete",
-    "restart",
-    "restart_publish",
-    "data_init",
-    "activate",
-    "open_folder",
-    "passport",
-    "engine_config",
-    "runtime_logs",
-    "engine_restart",
-    "publish_staging",
-    "publish_online",
-    "cancel_staging",
-    "upgrade",
-    "offline",
-    "retry",
-]
-
-
-class BusinessSpace(BaseModel):
-    """Business-space reference surfaced on an inventory card."""
-
-    space_id: str = Field(description="Unique identifier of the business space.")
-    name: str = Field(description="Display name of the business space.")
-    kind: str = Field(description="Space kind from the business-space owner.")
-
-
-class BotInventoryItem(BaseModel):
-    """Unified card for a personal cloud, local, or service bot."""
-
-    expert_name: str | None = Field(
-        default=None,
-        description="Read-only source expert name for a bot created from the expert market; null for ordinary bots.",
-        json_schema_extra={"readOnly": True},
-    )
-    bot_id: str = Field(description="Unique identifier of the bot.")
-    card_id: str = Field(
-        description="Stable card identity; service cards include the publication id."
-    )
-    bot_name: str = Field(description="Display name of the bot.")
-    bot_desc: str = Field(
-        description="Description of what the bot is for; may be empty."
-    )
-    engine: str = Field(description="Engine currently assigned to the bot.")
-    bot_type: str = Field(
-        description="Underlying bot type reported by the bot service."
-    )
-    kind: BotInventoryKind = Field(
-        description="Inventory category used to render the bot card."
-    )
-    deploy_mode: DeployMode = Field(
-        description="Whether the bot runs in the cloud or on a local device."
-    )
-    display_state: DisplayState = Field(
-        description="Normalized lifecycle state used by the inventory view."
-    )
-    status: str = Field(
-        description="Stored Bot status for every card kind, identical in meaning to /bots status. For service publication state use publish.status or display_state."
-    )
-    publish: InventoryPublication | None = Field(
-        default=None,
-        description="Publication represented by this service card; null for non-service Bots or when no publication exists.",
-    )
-    internal_status: str | None = Field(
-        default=None,
-        description="Stored service-publication status for diagnostics; null for non-service cards.",
-    )
-    publication_id: int | None = Field(
-        default=None,
-        description="Service publication id represented by this card; otherwise null.",
-    )
-    publication_version: int | None = Field(
-        default=None,
-        description="Service publication version represented by this card; otherwise null.",
-    )
-    live_version: int | None = Field(
-        default=None, description="Currently running service version, when one exists."
-    )
-    owner_entity_id: str = Field(description="User who owns the bot.")
-    space: BusinessSpace | None = Field(
-        default=None, description="Business space containing the bot, when resolved."
-    )
-    template_type: str | None = Field(
-        default=None,
-        description="Template type of the bot, e.g. 'applicationCoding'; null for "
-        "bots created without a template.",
-    )
-    template_config: dict | None = Field(
-        default=None,
-        description="Stored template snapshot, copied verbatim from the bot's "
-        "creation input (no field filtering). Null without a template. May "
-        "carry sensitive values the creator supplied (e.g. 'token', "
-        "'bot_template_config.ext_config.thetaKey') and the server-managed "
-        "'engine_form' marker — treat as sensitive.",
-    )
-    avatar_url: str | None = Field(
-        default=None, description="Avatar URL for the bot, when configured."
-    )
-    machine_id: str | None = Field(
-        default=None,
-        description="Host device identifier for a local bot; otherwise null.",
-    )
-    mount_path: str | None = Field(
-        default=None,
-        description="Mounted workspace path for a local bot; otherwise null.",
-    )
-    passport_id: str | None = Field(
-        default=None,
-        description="Platform identity credential identifier, when issued.",
-    )
-    actions: list[BotAction] = Field(
-        default_factory=list, description="Actions currently available for this bot."
-    )
-    disabled_actions: dict[str, str] | None = Field(
-        default=None,
-        description="Unavailable actions mapped to caller-facing reasons, when any.",
-    )
-    edit_lock: EditLock | None = Field(
-        default=None,
-        description="Current Bot-level collaborative edit lock for an operable service Bot; null for other cards.",
     )

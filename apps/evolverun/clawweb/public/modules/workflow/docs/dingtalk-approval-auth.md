@@ -12,10 +12,10 @@ from the ClawWeb login request and checks that server-verified user against the
 approval record. The browser does not send an `empId`, and this path does not
 require the DingTalk JSAPI or an H5 application-domain allowlist.
 
-The new person-centric workbench panel instead uses
-`POST /api/approval/workbench/:id/resolve`, with a verified principal and a
-same-origin check. Its router still requires host integration; it must not be
-assumed available merely because the panel exists. See
+The person-centric workbench also submits through that same
+session endpoint. It loads its detail from the workbench API so the server can
+revalidate the current viewer's `canAct` state, but the action uses the same
+authenticated session path as the run panel. See
 [approval-workbench.md](approval-workbench.md) for its query, authorization,
 and unfinished Skill delegation boundaries.
 

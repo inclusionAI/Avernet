@@ -1,14 +1,14 @@
 import { Button } from '@/components/ui/Button';
 import type { BotDomain } from '@/domain/botWorkshop';
 import { isDormantPersonalBot } from '@/services/botWorkshop/botDormantService';
-import { ArrowUpRight } from 'lucide-react';
+import { ArrowUpRight, ClipboardCheck, History } from 'lucide-react';
 import {
   canRestartFailedServiceBot,
-  failedServiceDeleteReason,
+  botDeleteDisabledReason,
   publicationManagementAvailability,
 } from './botManagementPolicy';
 import { actionIcon, actionLabel, type BotCardManagementAction } from './config';
-import { ActionHelp, MenuSection } from './menuPrimitives';
+import { ActionHelp, DisabledActionHint, MenuSection } from './menuPrimitives';
 
 interface BotManagementRuntimeItemsProps {
   bot: BotDomain;
@@ -16,6 +16,8 @@ interface BotManagementRuntimeItemsProps {
   onClose: () => void;
   onConfirm: (action: BotCardManagementAction) => void;
   onManagePublication?: (bot: BotDomain) => void;
+  onOpenEvaluation?: (bot: BotDomain) => void;
+  onOpenEvalHistory?: (bot: BotDomain) => void;
 }
 
 export function BotManagementRuntimeItems({
@@ -24,6 +26,8 @@ export function BotManagementRuntimeItems({
   onClose,
   onConfirm,
   onManagePublication,
+  onOpenEvaluation,
+  onOpenEvalHistory,
 }: BotManagementRuntimeItemsProps) {
   const isAgentCodingBot = bot.runtime.isAgentCodingBot;
   const isServiceBot = bot.serviceMode === 'service';
@@ -41,7 +45,7 @@ export function BotManagementRuntimeItems({
   const engineRestartDisabledReason = bot.disabledActions.engine_restart;
   const publication = publicationManagementAvailability(bot);
   const restartEnabled = bot.actions.includes('restart') || canRestartFailedServiceBot(bot);
-  const deleteReason = failedServiceDeleteReason(bot);
+  const deleteReason = botDeleteDisabledReason(bot, lockedByOther);
 
   return (
     <>
@@ -82,6 +86,42 @@ export function BotManagementRuntimeItems({
                 '发布与阶段推进'
               ) : (
                 <ActionHelp description={publication.disabledReason!}>发布与阶段推进</ActionHelp>
+              )}
+            </Button>
+          ) : null}
+          {isServiceBot && bot.lifecycle === 'draft' && bot.evalGateVisible === true && onOpenEvaluation ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-full justify-start"
+              leftIcon={<ClipboardCheck className="size-4" />}
+              onClick={() => {
+                onClose();
+                onOpenEvaluation(bot);
+              }}
+            >
+              发起评测
+            </Button>
+          ) : null}
+          {isServiceBot && !isAgentCodingBot && onOpenEvalHistory ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-full justify-start"
+              leftIcon={<History className="size-4" />}
+              disabled={bot.canOpenEvalHistory !== true}
+              onClick={() => {
+                if (bot.canOpenEvalHistory !== true) return;
+                onClose();
+                onOpenEvalHistory(bot);
+              }}
+            >
+              {bot.canOpenEvalHistory === true ? (
+                '历史评测记录'
+              ) : (
+                <ActionHelp description="仅具有当前服务 Bot 编辑权限的人可查看历史评测记录">
+                  历史评测记录
+                </ActionHelp>
               )}
             </Button>
           ) : null}
@@ -163,19 +203,21 @@ export function BotManagementRuntimeItems({
         </MenuSection>
       ) : null}
       <MenuSection>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="w-full justify-start text-destructive hover:bg-destructive/10 hover:text-destructive"
-          leftIcon={actionIcon.delete}
-          disabled={lockedByOther || !bot.actions.includes('delete')}
-          onClick={() => {
-            onClose();
-            onConfirm('delete');
-          }}
-        >
-          {deleteReason ? <ActionHelp description={deleteReason}>{actionLabel.delete}</ActionHelp> : actionLabel.delete}
-        </Button>
+        <DisabledActionHint description={deleteReason}>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="w-full justify-start text-destructive hover:bg-destructive/10 hover:text-destructive"
+            leftIcon={actionIcon.delete}
+            disabled={lockedByOther || !bot.actions.includes('delete')}
+            onClick={() => {
+              onClose();
+              onConfirm('delete');
+            }}
+          >
+            {actionLabel.delete}
+          </Button>
+        </DisabledActionHint>
       </MenuSection>
     </>
   );

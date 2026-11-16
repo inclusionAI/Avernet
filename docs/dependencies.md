@@ -23,9 +23,10 @@ directories, and ports. Except for initializing a few local runtime
 directories, it does not install dependencies, build code, start services, kill
 processes, or change global configuration. `check` does not preflight OpenClaw
 or `jq` for the 5-bot startup script; those are checked when the local bot
-stack actually starts. Cargo verifies the minimum Rust version during the build
-from the workspace `rust-version`. If `check` fails, install the missing items
-manually and run the same check again.
+stack actually starts. The repository's [`rust-toolchain.toml`](../rust-toolchain.toml)
+selects Rust 1.94.0. The workspace's `rust-version = "1.91"` declares the minimum
+supported Rust version (MSRV); it does not select the compiler. If `check` fails,
+install the missing items manually and run the same check again.
 
 If you want the script to help check and install missing tools, use:
 
@@ -67,7 +68,7 @@ installation for a one-off command.
 | Tool | Used for | Check command | Notes |
 | --- | --- | --- | --- |
 | macOS or Linux | Local quick start | `uname -a` | Linux needs build tools, `pkg-config`, and SQLite / OpenSSL development libraries. |
-| Rust 1.91+ | Building BCS | `rustc --version` | The BCS workspace declares `rust-version = "1.91"`. |
+| Rust 1.94.0 via rustup | Building BCS | `rustc --version` from the repository root | Pinned by `rust-toolchain.toml`; the BCS workspace MSRV remains 1.91. |
 | Cargo | Building BCS | `cargo --version` | Installed with the Rust toolchain. |
 | `protoc` | BCS protobuf codegen | `protoc --version` | Requires the Protocol Buffers compiler. |
 | SQLite development libraries | BCS local storage | `pkg-config --modversion sqlite3` | Usually present on macOS; Linux needs a dev package. |
@@ -105,14 +106,24 @@ PKG_CONFIG_PATH="$(brew --prefix openssl@3)/lib/pkgconfig" pkg-config --modversi
 If OpenSSL is visible to `pkg-config` only with `PKG_CONFIG_PATH`, export the
 same variable in the current shell before building BCS.
 
-If Rust 1.91+ is not installed locally, install it through `rustup`:
+Install Rust 1.94.0 and its coverage component through `rustup`. With an existing
+rustup installation, this adds the pinned toolchain without changing the global
+default. Run these commands from the repository root:
 
 ```bash
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
-  | sh -s -- -y --profile minimal --default-toolchain 1.91.0
-source ~/.cargo/env
-rustc --version
+if command -v rustup >/dev/null 2>&1; then
+  rustup toolchain install 1.94.0 --profile minimal --component llvm-tools
+else
+  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+    | sh -s -- -y --profile minimal --default-toolchain 1.94.0
+  source "${CARGO_HOME:-$HOME/.cargo}/env"
+  rustup component add --toolchain 1.94.0 llvm-tools
+fi
+rustc -Vv
 ```
+
+The compiler must report `release: 1.94.0`. If another version is active, check
+for a conflicting `RUSTUP_TOOLCHAIN` or a non-rustup compiler earlier in `PATH`.
 
 Use your preferred Node version manager to install or switch to Node.js 22+,
 then verify it:
@@ -143,7 +154,7 @@ pkg-config --modversion openssl
 jq --version
 ```
 
-Then install Rust 1.91+, Node.js 22+, npm, and OpenClaw as described above.
+Then install Rust 1.94.0, Node.js 22+, npm, and OpenClaw as described above.
 
 ### Fedora
 
@@ -158,7 +169,7 @@ pkg-config --modversion openssl
 jq --version
 ```
 
-Then install Rust 1.91+, Node.js 22+, npm, and OpenClaw as described above.
+Then install Rust 1.94.0, Node.js 22+, npm, and OpenClaw as described above.
 
 ## Verification
 

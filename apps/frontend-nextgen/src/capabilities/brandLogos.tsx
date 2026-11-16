@@ -10,9 +10,10 @@ import { cn } from '@/utils/cn';
  */
 
 /** 横版 wordmark（mark + "Avernet" 字标一张图），页头等横向场景使用。
- *  compact（左侧导航宽松态顶部紧凑位）渲染同一 mark 方版（426×338，宽 24px 时高约 19px）。 */
-export function AvernetWordmarkLogo({ className, compact }: { className?: string; compact?: boolean }) {
-  if (compact)
+ *  compact（左侧导航宽松态顶部紧凑位）渲染同一 mark 方版（426×338，宽 24px 时高约 19px）；
+ *  markOnly（收起态 rail 图标位）同样渲染 mark 方版（Open Core compact 本就无字标）。 */
+export function AvernetWordmarkLogo({ className, compact, markOnly }: { className?: string; compact?: boolean; markOnly?: boolean }) {
+  if (compact || markOnly)
     return <img src={AvernetClawMark} alt="Avernet" className={cn('w-6 shrink-0', className)} />;
   return <img src={AvernetWordmark} alt="Avernet" className={className} />;
 }

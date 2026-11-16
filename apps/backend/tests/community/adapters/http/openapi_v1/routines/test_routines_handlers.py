@@ -1,6 +1,6 @@
 """openapi_v1 routines handler unit tests."""
 
-from types import SimpleNamespace
+from starlette.requests import Request
 
 import pytest
 from fastapi import HTTPException
@@ -15,8 +15,6 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
 )
 from agentclaw.community.adapters.http.openapi_v1.admission import ActingCaller
 from agentclaw.community.adapters.http.openapi_v1.routines.router import (
-    _map_routine,
-    _map_run,
     create_routine,
     delete_routine,
     get_routine,
@@ -25,6 +23,7 @@ from agentclaw.community.adapters.http.openapi_v1.routines.router import (
     run_routine,
     update_routine,
 )
+from agentclaw.community.adapters.http.openapi_v1.routines.converter import _map_routine, _map_run
 from agentclaw.community.adapters.http.openapi_v1.routines.schemas import (
     Routine,
     RoutineSpec,
@@ -32,6 +31,10 @@ from agentclaw.community.adapters.http.openapi_v1.routines.schemas import (
     RoutineUpdate,
     ScheduleTrigger,
 )
+
+
+# Unit calls assert domain exceptions; HTTP envelope behavior is covered separately.
+run_routine = run_routine.__wrapped__
 
 
 def _human(user_id: str) -> ActingCaller:
@@ -43,18 +46,20 @@ def _human(user_id: str) -> ActingCaller:
     return ActingCaller(user_id=user_id, app_id=None)
 
 
-def _request_without_trace() -> SimpleNamespace:
+def _request_without_trace() -> Request:
     """A request whose tracer middleware did not run — ``state.trace_id`` unset.
 
     ``responses._trace_id`` reads ``request.state.trace_id`` and falls back to
     ``""`` when absent, so the envelope's ``request_id`` is empty.
     """
-    return SimpleNamespace(state=SimpleNamespace())
+    return Request({"type": "http", "method": "GET", "path": "/", "headers": []})
 
 
-def _request_with_trace(trace_id: str) -> SimpleNamespace:
+def _request_with_trace(trace_id: str) -> Request:
     """A request whose tracer middleware stamped ``trace_id`` on ``state``."""
-    return SimpleNamespace(state=SimpleNamespace(trace_id=trace_id))
+    request = _request_without_trace()
+    request.state.trace_id = trace_id
+    return request
 
 
 class _StubCronService:
@@ -105,8 +110,14 @@ def test_map_routine_flattens_adapter_dict():
     assert r.gmt_modified  # non-empty ISO str
 
 
+@pytest.mark.parametrize("state", [None, {}, "unknown", {"next_run_at_ms": "bad"}, {"next_run_at_ms": 10**30}])
+def test_map_routine_without_valid_next_run_returns_null(state):
+    assert _map_routine({"state": state}).next_run_at is None
+
+
 def test_map_routine_handles_missing_fields():
     r = _map_routine({})
+    assert r.next_run_at is None
     assert r.routine_id == ""
     assert r.bot_id == ""
     assert r.name == ""
@@ -259,14 +270,8 @@ async def test_list_routines_returns_envelope_page():
 
 
 @pytest.mark.asyncio
-async def test_list_routines_asks_for_the_draft_stage_only():
-    """The list is draft-only, like every other route in this group.
-
-    ``list_all_crons`` fans a service bot out over draft, verify and online
-    runtimes when no stage is given — but this public surface operates a bot's
-    pre-publication workspace, so listing here must neither show nor query the
-    published runtimes' crons.
-    """
+async def test_list_routines_aggregates_available_stages_by_default():
+    """Omitted stage uses legacy aggregation; explicit draft retains the old scope."""
     service = _StubCronService([_adapter_dict()])
 
     await list_routines(
@@ -279,7 +284,7 @@ async def test_list_routines_asks_for_the_draft_stage_only():
         request=_request_without_trace(),
     )
 
-    assert service.last_call_kwargs.get("runtime_stage") == "draft"
+    assert service.last_call_kwargs.get("runtime_stage") is None
 
 
 @pytest.mark.asyncio
@@ -382,7 +387,7 @@ class _StubCronCreateService:
         self._payload = payload
         self.last_call_kwargs: dict = {}
 
-    async def create_cron(self, *, bot_id, user_id, nick_name, body):
+    async def create_cron(self, *, bot_id, user_id, nick_name, body, **target):
         self.last_call_kwargs = {
             "bot_id": bot_id,
             "user_id": user_id,
@@ -635,7 +640,7 @@ class _StubCronDetailService:
         self.last_call_kwargs: dict = {}
 
     async def get_cron_detail(
-        self, *, bot_id, user_id, nick_name, task_id, runtime_stage="DRAFT"
+        self, *, bot_id, user_id, nick_name, task_id, runtime_stage="draft", **target
     ):
         self.last_call_kwargs = {
             "bot_id": bot_id,
@@ -726,7 +731,7 @@ class _StubCronUpdateService:
         self.last_call_kwargs: dict = {}
 
     async def update_cron(
-        self, *, bot_id, user_id, nick_name, task_id, body, runtime_stage="DRAFT"
+        self, *, bot_id, user_id, nick_name, task_id, body, runtime_stage="draft", **target
     ):
         self.last_call_kwargs = {
             "bot_id": bot_id,
@@ -977,7 +982,7 @@ class _StubCronDeleteService:
         self.last_call_kwargs: dict = {}
 
     async def delete_cron(
-        self, *, bot_id, user_id, nick_name, task_id, runtime_stage="DRAFT"
+        self, *, bot_id, user_id, nick_name, task_id, runtime_stage="draft", **target
     ):
         self.last_call_kwargs = {
             "bot_id": bot_id,
@@ -1070,7 +1075,7 @@ class _StubCronRunService:
         self.last_call_kwargs: dict = {}
 
     async def run_cron(
-        self, *, bot_id, user_id, nick_name, task_id, force=False, runtime_stage="DRAFT"
+        self, *, bot_id, user_id, nick_name, task_id, force=False, runtime_stage="draft", **target
     ):
         self.last_call_kwargs = {
             "bot_id": bot_id,
@@ -1167,7 +1172,7 @@ async def test_run_routine_returns_502_when_relay_reports_failure():
     # raw HTTPException; the app-level envelope handler maps it to the public
     # 502 envelope via ENVELOPE_ERRORS[CronRelayError] ("Cron relay service
     # error"). Internal adapter detail does not leak.
-    with pytest.raises(CronRelayError, match="routine trigger failed") as exc:
+    with pytest.raises(CronRelayError, match="Cron relay request failed") as exc:
         await run_routine(
             routine_id="t1",
             user_id="u1",
@@ -1255,6 +1260,7 @@ class _StubCronRunsService:
         limit=20,
         runtime_stage="DRAFT",
         device_uuid=None,
+        **target,
     ):
         self.last_call_kwargs = {
             "bot_id": bot_id,
@@ -1415,7 +1421,7 @@ async def test_run_routine_propagates_service_raised_cron_relay_error():
     service = _RaisingCronRunService(
         CronRelayError("Bot has no device binding", error_code=400)
     )
-    with pytest.raises(CronRelayError, match="Bot has no device binding") as exc:
+    with pytest.raises(CronRelayError, match="Cron relay request failed") as exc:
         await run_routine(
             routine_id="t1",
             user_id="u1",
@@ -1450,7 +1456,7 @@ async def test_run_routine_translates_unexpected_adapter_exception():
     # ValueError("Bot has no device binding") from the relay is translated to
     # CronRelayError(502) → ENVELOPE_ERRORS → "Cron relay service error".
     service = _RaisingCronRunService(ValueError("Bot has no device binding"))
-    with pytest.raises(CronRelayError, match="routine trigger failed") as exc:
+    with pytest.raises(CronRelayError, match="Cron relay request failed") as exc:
         await run_routine(
             routine_id="t1",
             user_id="u1",

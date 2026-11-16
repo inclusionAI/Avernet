@@ -43,13 +43,9 @@ modules:
       items:
         - POST /api/internal/tc-resource-context
     plugin_api:
-      status: applicable
-      reason: Singlebox selects the local Plugin API implementation while production selects authenticated HTTP delivery.
-      items:
-        - key: TcResourceReadyPublisherPlugin.publish
-          evidence:
-            path: src/agentclaw/community/plugins/local/tc_resource_ready.py
-            symbol: LocalTcResourceReadyPublisher.publish
+      status: not_applicable
+      reason: Automatic TC conversation-file resource-ready publication was retired; the publisher and protocol remain only for compatibility, and no production session-file path invokes them.
+      items: []
     thresholds:
       core_min_percent: 40.0
       router_min_percent: 100.0
@@ -223,6 +219,52 @@ modules:
       core_min_percent: 65.90
       router_min_percent: 100.0
       plugin_min_percent: 100.0
+
+  collaboration_repair:
+    system: backend
+    acceptance_targets:
+      - tests/community/acceptance/collaboration_repair
+    core_paths:
+      # The whole one-shot repair Core package (facts projection + Service API
+      # contract + orchestration) — avatar_from_record/outbound_avatar_from_record
+      # also run inside the real daily edit stories at stack runtime.
+      - src/agentclaw/community/core/bot_management/collaboration_repair/
+    router_api:
+      status: applicable
+      reason: The one owner-scoped repair POST this feature added; legacy queued repair operations are background workflows outside the user-story denominator.
+      items:
+        - POST /openapi/v1/bots/{bot_id}/collaboration/repair
+    plugin_api:
+      status: applicable
+      reason: The request-scoped metadata delivery implementations for the repair route; the shared coverage stack now provisions an ephemeral BCN provider, so the live stories exercise the production community plugin (plugins/community/bcs_collaboration_metadata.py) itself.
+      items:
+        - key: BcsCollaborationMetadataPlugin.exists
+          evidence:
+            path: src/agentclaw/community/plugins/community/bcs_collaboration_metadata.py
+            symbol: BcnCollaborationMetadataAdapter.exists
+        - key: BcsCollaborationMetadataPlugin.update_profile
+          evidence:
+            path: src/agentclaw/community/plugins/community/bcs_collaboration_metadata.py
+            symbol: BcnCollaborationMetadataAdapter.update_profile
+        - key: BcsCollaborationMetadataPlugin.aclose
+          evidence:
+            path: src/agentclaw/community/plugins/community/bcs_collaboration_metadata.py
+            symbol: BcnCollaborationMetadataAdapter.aclose
+    thresholds:
+      # Measured by `singlebox_coverage.sh --module collaboration_repair`
+      # Baseline evidence is recorded in PR #3569.
+      # router 1/1 live route hit by the repair stories. Since the shared
+      # coverage stack provisions an ephemeral BCN provider, the stories
+      # drive the route past the capability gate. The fresh focused run
+      # measured core 71.11% (threshold floored to 70.0 to absorb one-line
+      # run variance) and plugin 100%. The 2026-11-05 scope change removes
+      # caller repair; the complete current Plugin API denominator is
+      # exists/update_profile/aclose. Existing thresholds remain unchanged;
+      # a fresh live run must still satisfy them.
+      core_min_percent: 70.0
+      router_min_percent: 100.0
+      plugin_min_percent: 100.0
+
 
   cron:
     system: backend

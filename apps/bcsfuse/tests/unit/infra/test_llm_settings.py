@@ -8,9 +8,9 @@ import os
 import pytest
 from unittest.mock import patch
 
-from src.infra.llm.config.llm_settings import LLMSettings
-from src.domain.models.model_profile import ModelProfile, ModelTier, CostClass, LatencyClass
-from src.domain.models.llm_task_spec import TaskType
+from app.infra.llm.config.llm_settings import LLMSettings
+from app.domain.models.model_profile import ModelProfile, ModelTier, CostClass, LatencyClass
+from app.domain.models.llm_task_spec import TaskType
 
 
 class TestLLMSettings:
@@ -125,7 +125,7 @@ class TestLLMSettings:
     def test_no_real_token_in_code(self):
         """测试代码中没有硬编码的真实 token"""
         import inspect
-        from src.infra.llm.config.llm_settings import LLMSettings
+        from app.infra.llm.config.llm_settings import LLMSettings
 
         source = inspect.getsource(LLMSettings)
 

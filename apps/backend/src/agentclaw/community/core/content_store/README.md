@@ -18,15 +18,38 @@ still reading this store.
 
 ## Two halves, one mechanism
 
-- **Bytes** live in a content-addressed blob tree,
-  `<root>/blobs/<hex[:2]>/<hex64>`, under
-  `user_config.bot_config_manifest.content_store_dir` (parsed by
-  `settings.content_store_root_from_config`; the yaml key kept its name when
-  the component moved). The digest (`sha256:<hex64>`, `limits.DIGEST_RE`) IS
-  the address: identical bytes are written once, the write is durable before
-  it is visible (fsync, then `os.replace`), and `read` verifies the hash on
-  the same pass it reads — the store hands back bytes it can prove, or fails.
-  It never re-fetches.
+- **Bytes** live in a content-addressed blob store behind the `BlobStore`
+  contract (`blobs.py`). Which implementation runs is wired by the
+  deployment's profile, not by a setting:
+  - `ObjectStorageBlobStore` (the default, bound in
+    `di/modules/content_store_module.py`) — the deployment's
+    `ObjectStoragePlugin`, under the key
+    `content-store/blobs/<hex[:2]>/<hex64>`. Every backend instance reads what
+    any instance wrote, and the bytes outlive the instance. The bucket must
+    not expire that prefix.
+  - `testing.content_blob_store.LocalBlobStore` — a local tree
+    `<root>/blobs/<hex[:2]>/<hex64>` under `content_store_dir`, bound by the
+    test and singlebox columns
+    (`di/modules/infrastructure/test/content_blob_store.py`), whose object
+    storage is a test double that keeps nothing.
+
+  The digest (`sha256:<hex64>`, `limits.DIGEST_RE`) IS the address: identical
+  bytes are written once, and `read` verifies the hash on every medium — the
+  store hands back bytes it can prove, or fails. It never re-fetches.
+
+  `ensure_stored` writes bytes alone, for a caller holding bytes whose row
+  outlived its blob. It is **transitional**: rows filed while the blobs lived
+  on each instance's own disk have no object behind them, and the Manifest
+  compiler and the inline backfill
+  (`core/bot_config_manifest/services/inline_backfill.py`) use it to put
+  those bytes into the object storage. Remove it once that backfill is done.
+
+  One limit of the object-storage medium: a write is skipped whenever an
+  object already sits under the key, and the plugin contract exposes no object
+  size to compare. An object that is present but damaged is therefore not
+  repaired by a re-apply or a re-capture — `read` keeps failing its hash check
+  (`ContentIntegrityError`) until an operator deletes that object, after which
+  the next store of the same bytes writes it again.
 - **Provenance** lives in `ac_manifest_content`
   (`sql/2026_08_31_manifest_content.sql`, ORM in `models.py`, repository in
   `core/repository/{protocols,implementations}/bot/content_store.py`): an
@@ -62,7 +85,7 @@ longer identity rather than failing inside a write.
 ## Context Boundary
 
 ```yaml
-purpose: Own the platform's content-addressed copy of fetched and produced bytes — the blob tree, the append-only provenance log, the digest grammar, the acm-tree-v1 tree encoding and the audit identity width — behind one Service API the Bot Config Manifest and the Genome Registry both inject.
+purpose: Own the platform's content-addressed copy of fetched and produced bytes — the blob store, the append-only provenance log, the digest grammar, the acm-tree-v1 tree encoding and the audit identity width — behind one Service API the Bot Config Manifest and the Genome Registry both inject.
 provides:
   - ContentStoreProtocol  # the Service API both consumers inject
   - ContentStoreService
@@ -78,10 +101,13 @@ provides:
   - TREE_MAGIC
   - canonical_tree_bytes
   - decode_tree_bytes
+  - BlobStore  # where the bytes live; a profile wires the implementation
+  - ObjectStorageBlobStore  # the default implementation
   - DEFAULT_CONTENT_STORE_DIR
   - content_store_root_from_config
 consumes:
   - "ContentStoreRepositoryProtocol (core.repository) — persistence for the append-only provenance log"
+  - "ObjectStoragePlugin (plugin_api.object_storage) — the medium ObjectStorageBlobStore writes through"
   - "FetchedObject (core.bot_config_manifest.fetch.errors) — the receipt type `store` takes; a type-only import, so the store loads without the Manifest's transport stack"
 consumed_by:
   - "core.bot_config_manifest — the entry fetch funnel files receipts and reads the copy for delivery and keep_last; materialisers store git-delivered trees in acm-tree-v1"
@@ -93,6 +119,7 @@ internal_dependencies:
   - agentclaw.community.core.bot_config_manifest.fetch.errors  # FetchedObject, TYPE_CHECKING only
   - agentclaw.community.core.repository
   - agentclaw.community.log
+  - agentclaw.community.plugin_api.object_storage  # the ObjectStoragePlugin contract ObjectStorageBlobStore writes through
   - agentclaw.community.utils.avernet_tenant_guard
   - agentclaw.community.utils.env_utils
 ```

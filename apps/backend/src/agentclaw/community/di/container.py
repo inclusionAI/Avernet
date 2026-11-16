@@ -101,6 +101,9 @@ from agentclaw.community.di.modules.bot_manager_sync_module import (
 )
 from agentclaw.community.di.bot_manager_sync_config import ManagerSyncConfig
 from agentclaw.community.di.modules.bot_ownership_sync_module import BotOwnershipSyncModule
+from agentclaw.community.di.modules.collaboration_repair_module import (
+    CollaborationRepairModule,
+)
 from agentclaw.community.di.modules.owner_handoff_module import OwnerHandoffModule
 from agentclaw.community.di.modules.quality_module import QualityModule
 from agentclaw.community.di.modules.resources_module import ResourcesModule
@@ -131,6 +134,9 @@ from agentclaw.community.di.modules.task_queue_module import TaskQueueModule
 from agentclaw.community.di.modules.task_trajectory_config_module import (
     TaskTrajectoryConfigModule,
 )
+from agentclaw.community.di.modules.clawweb_config_module import (
+    ClawwebConfigModule,
+)
 from agentclaw.community.di.modules.tc_file_upload_integration_module import (
     TcFileUploadIntegrationModule,
 )
@@ -144,6 +150,7 @@ from agentclaw.community.di.openapi_user_id_bypass_config import (
 )
 from agentclaw.community.di.profile import DeployProfile
 from agentclaw.community.di.profile_modules import modules_for
+from agentclaw.community.di.todo_config import TodoSchedulerConfig
 from agentclaw.community.di.space_knowledge_capture_config import (
     SpaceKnowledgeCaptureConfig,
 )
@@ -198,6 +205,11 @@ def build_injector(
         # (bot_id + tc_bot timeout). Sits in its own module to keep
         # ConfigModule at zero headroom under the 1000-line cap.
         TaskTrajectoryConfigModule(),
+        # Clawweb host config (the ``task_nav`` clone target): read the
+        # ``clawweb`` user_config block → ClawwebConfig.base_url the
+        # clawweb-qualified HttpClient binds. Own module for the same headroom
+        # reason as TaskTrajectoryConfigModule (config_module at zero headroom).
+        ClawwebConfigModule(),
         # Task-artifact OBJECT_FILE object-store config (task module's own
         # ``task_artifact_storage`` block). Own module for the same headroom
         # reason as TaskTrajectoryConfigModule.
@@ -270,6 +282,10 @@ def build_injector(
         # its loop-owning lifecycle. Disabled binds zero resources.
         BotManagerSyncModule(),
         BotOwnershipSyncModule(),
+        # Request-scoped collaboration repair (same default-off config block):
+        # a factory that refuses before any write and builds its delivery
+        # plugins on each request's own loop. Disabled binds zero resources.
+        CollaborationRepairModule(),
         BotAppGrantModule(),
         BotChatOpenModule(),
         CallerIdentityModule(),
@@ -321,6 +337,9 @@ def build_injector(
 
     _app_injector.get(OwnerHandoffPolicy)
     _app_injector.get(TaskQueueConfig)
+    # Todo scheduler config is strict; resolve it outside lifecycle discovery,
+    # whose compatibility behavior intentionally skips raising providers.
+    _app_injector.get(TodoSchedulerConfig)
     _app_injector.get(SpaceKnowledgeCaptureConfig)
     _app_injector.get(CanonicalCenterStoreConfig)
     _app_injector.get(DraftContentStoreConfig)

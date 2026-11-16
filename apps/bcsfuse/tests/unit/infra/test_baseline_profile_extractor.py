@@ -29,14 +29,14 @@ class TestBaselineProfileExtractor:
 
     def test_extractor_importable(self):
         """测试 Extractor 可导入"""
-        from src.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
+        from app.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
 
         assert BaselineProfileExtractor is not None
 
     def test_extractor_implements_protocol(self):
         """测试 Extractor 实现 ProfileExtractor 协议"""
-        from src.domain.services.profile_extractor import ProfileExtractor
-        from src.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
+        from app.domain.services.profile_extractor import ProfileExtractor
+        from app.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
 
         extractor = BaselineProfileExtractor()
         assert isinstance(extractor, ProfileExtractor)
@@ -47,8 +47,8 @@ class TestSOULExtraction:
 
     def test_extract_capabilities_from_soul(self):
         """测试从 SOUL.md 抽取能力"""
-        from src.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
-        from src.domain.models.profiling_input import (
+        from app.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
+        from app.domain.models.profiling_input import (
             ProfilingInput,
             MarkdownDocument,
             DocType,
@@ -87,13 +87,13 @@ Role: Research Assistant
 
     def test_extract_capability_levels(self):
         """测试抽取能力级别"""
-        from src.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
-        from src.domain.models.profiling_input import (
+        from app.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
+        from app.domain.models.profiling_input import (
             ProfilingInput,
             MarkdownDocument,
             DocType,
         )
-        from src.domain.models.profiling_result import CapabilityLevel
+        from app.domain.models.profiling_result import CapabilityLevel
 
         soul_content = """
 # Capabilities
@@ -116,8 +116,8 @@ Role: Research Assistant
 
     def test_extract_domains_from_soul(self):
         """测试从 SOUL.md 抽取领域"""
-        from src.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
-        from src.domain.models.profiling_input import (
+        from app.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
+        from app.domain.models.profiling_input import (
             ProfilingInput,
             MarkdownDocument,
             DocType,
@@ -142,8 +142,8 @@ Role: Research Assistant
 
     def test_extract_responsibilities_from_soul(self):
         """测试从 SOUL.md 抽取职责"""
-        from src.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
-        from src.domain.models.profiling_input import (
+        from app.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
+        from app.domain.models.profiling_input import (
             ProfilingInput,
             MarkdownDocument,
             DocType,
@@ -166,8 +166,8 @@ Role: Research Assistant
 
     def test_extract_collaboration_style_from_soul(self):
         """测试从 SOUL.md 抽取协作风格"""
-        from src.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
-        from src.domain.models.profiling_input import (
+        from app.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
+        from app.domain.models.profiling_input import (
             ProfilingInput,
             MarkdownDocument,
             DocType,
@@ -189,8 +189,8 @@ Details: Prefer asynchronous communication with 24-hour response time.
 
     def test_extract_skills_from_soul(self):
         """测试从 SOUL.md 抽取技能"""
-        from src.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
-        from src.domain.models.profiling_input import (
+        from app.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
+        from app.domain.models.profiling_input import (
             ProfilingInput,
             MarkdownDocument,
             DocType,
@@ -214,8 +214,8 @@ Details: Prefer asynchronous communication with 24-hour response time.
 
     def test_extract_resources_from_soul(self):
         """测试从 SOUL.md 抽取资源"""
-        from src.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
-        from src.domain.models.profiling_input import (
+        from app.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
+        from app.domain.models.profiling_input import (
             ProfilingInput,
             MarkdownDocument,
             DocType,
@@ -241,13 +241,13 @@ class TestRULESExtraction:
 
     def test_extract_forbidden_constraints(self):
         """测试抽取禁止约束"""
-        from src.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
-        from src.domain.models.profiling_input import (
+        from app.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
+        from app.domain.models.profiling_input import (
             ProfilingInput,
             MarkdownDocument,
             DocType,
         )
-        from src.domain.models.profiling_result import ConstraintPolicy
+        from app.domain.models.profiling_result import ConstraintPolicy
 
         rules_content = """
 # Constraints
@@ -268,13 +268,13 @@ class TestRULESExtraction:
 
     def test_extract_approval_required_constraints(self):
         """测试抽取需审批约束"""
-        from src.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
-        from src.domain.models.profiling_input import (
+        from app.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
+        from app.domain.models.profiling_input import (
             ProfilingInput,
             MarkdownDocument,
             DocType,
         )
-        from src.domain.models.profiling_result import ConstraintPolicy
+        from app.domain.models.profiling_result import ConstraintPolicy
 
         rules_content = """
 # Constraints
@@ -293,8 +293,8 @@ class TestRULESExtraction:
 
     def test_extract_escalation_triggers(self):
         """测试抽取上报触发点"""
-        from src.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
-        from src.domain.models.profiling_input import (
+        from app.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
+        from app.domain.models.profiling_input import (
             ProfilingInput,
             MarkdownDocument,
             DocType,
@@ -321,8 +321,8 @@ class TestMEMORYExtraction:
 
     def test_extract_memory_episodes(self):
         """测试抽取记忆片段"""
-        from src.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
-        from src.domain.models.profiling_input import (
+        from app.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
+        from app.domain.models.profiling_input import (
             ProfilingInput,
             MarkdownDocument,
             DocType,
@@ -346,8 +346,8 @@ class TestMEMORYExtraction:
 
     def test_memory_episodes_have_timestamps(self):
         """测试记忆片段有时间戳"""
-        from src.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
-        from src.domain.models.profiling_input import (
+        from app.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
+        from app.domain.models.profiling_input import (
             ProfilingInput,
             MarkdownDocument,
             DocType,
@@ -372,8 +372,8 @@ class TestSourceReference:
 
     def test_capabilities_have_source_reference(self):
         """测试能力有来源引用"""
-        from src.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
-        from src.domain.models.profiling_input import (
+        from app.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
+        from app.domain.models.profiling_input import (
             ProfilingInput,
             MarkdownDocument,
             DocType,
@@ -404,8 +404,8 @@ class TestSourceReference:
 
     def test_constraints_have_source_reference(self):
         """测试约束有来源引用"""
-        from src.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
-        from src.domain.models.profiling_input import (
+        from app.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
+        from app.domain.models.profiling_input import (
             ProfilingInput,
             MarkdownDocument,
             DocType,
@@ -431,8 +431,8 @@ class TestEmptyAndNoisyDocuments:
 
     def test_empty_document_returns_warnings(self):
         """测试空文档产生警告"""
-        from src.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
-        from src.domain.models.profiling_input import (
+        from app.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
+        from app.domain.models.profiling_input import (
             ProfilingInput,
             MarkdownDocument,
             DocType,
@@ -454,8 +454,8 @@ class TestEmptyAndNoisyDocuments:
 
     def test_noisy_document_still_works(self):
         """测试噪音文档仍能工作"""
-        from src.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
-        from src.domain.models.profiling_input import (
+        from app.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
+        from app.domain.models.profiling_input import (
             ProfilingInput,
             MarkdownDocument,
             DocType,
@@ -492,8 +492,8 @@ class TestPartialSuccess:
 
     def test_partial_extraction_success(self):
         """测试部分抽取成功"""
-        from src.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
-        from src.domain.models.profiling_input import (
+        from app.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
+        from app.domain.models.profiling_input import (
             ProfilingInput,
             MarkdownDocument,
             DocType,
@@ -519,8 +519,8 @@ Here is some content without proper structure.
 
     def test_multiple_documents_merge(self):
         """测试多个文档合并抽取"""
-        from src.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
-        from src.domain.models.profiling_input import (
+        from app.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
+        from app.domain.models.profiling_input import (
             ProfilingInput,
             MarkdownDocument,
             DocType,
@@ -552,8 +552,8 @@ class TestSkillMetadataInput:
 
     def test_skill_metadata_converted_to_extracted_skill(self):
         """测试技能元数据转换为抽取技能"""
-        from src.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
-        from src.domain.models.profiling_input import (
+        from app.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
+        from app.domain.models.profiling_input import (
             ProfilingInput,
             MarkdownDocument,
             DocType,
@@ -591,8 +591,8 @@ class TestResourceMetadataInput:
 
     def test_resource_metadata_converted_to_extracted_resource(self):
         """测试资源元数据转换为抽取资源"""
-        from src.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
-        from src.domain.models.profiling_input import (
+        from app.infra.extractors.baseline_profile_extractor import BaselineProfileExtractor
+        from app.domain.models.profiling_input import (
             ProfilingInput,
             MarkdownDocument,
             DocType,

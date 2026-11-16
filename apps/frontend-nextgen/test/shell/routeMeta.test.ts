@@ -34,6 +34,15 @@ describe('routeMeta 路由归属契约', () => {
     expect(getRouteMeta('/workspace/collaboration/detail')?.navKey).toBe('collaboration');
   });
 
+  it('实验室待办和任务使用独立路由元信息，并共同归属实验室导航', () => {
+    expect(getRouteMeta('/lab/todos')).toEqual(
+      expect.objectContaining({ path: '/lab/todos', title: '待办', navKey: 'lab' }),
+    );
+    expect(getRouteMeta('/lab/tasks')).toEqual(
+      expect.objectContaining({ path: '/lab/tasks', title: '任务', navKey: 'lab' }),
+    );
+  });
+
   it('任务列表保留路由元信息，但不再占产品导航位', () => {
     expect(getRouteMeta('/work/my-task')).toEqual(
       expect.objectContaining({ path: '/work/my-task', title: '任务列表', section: 'legacy' }),
@@ -75,10 +84,10 @@ describe('getMergedNavigationItems（Open Core 默认 capabilities）', () => {
     expect(merged.some((item) => item.id === 'my-task')).toBe(false);
   });
 
-  it('同路由就地改名项归组正确（Bot管理 / 发现）', () => {
+  it('同路由就地改名项归组正确（Bot 管理 / 发现）', () => {
     const merged = getMergedNavigationItems();
     const bot = merged.find((item) => item.id === 'bot-workshop');
-    expect(bot?.label).toBe('Bot管理');
+    expect(bot?.label).toBe('Bot 管理');
     expect(bot?.section).toBe('bot');
 
     const found = merged.find((item) => item.id === 'collaboration-square');

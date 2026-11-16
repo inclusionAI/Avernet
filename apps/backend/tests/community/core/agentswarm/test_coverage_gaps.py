@@ -846,6 +846,7 @@ def _mk_agent(run: dm.Run, name: str) -> dm.Agent:
 
 def _req(idempotency_key: str | None = None) -> SubmitRunRequest:
     return SubmitRunRequest(
+        identity_bot_id=IDENTITY_SOURCE,
         tenant=TENANT,
         goal="coverage-gap goal",
         agents=(dm.AgentSpec(name="a1", role="research"),),
@@ -1018,13 +1019,30 @@ class TestSwarmHandlerEdges:
 
     def test_wait_any_mode_resumes_once_one_ref_satisfied(self, db):
         script = [
-            _spawn_decision("a1", "objective-a1"),
             _wait_decision("a1", "ghost", mode="any"),
             _finish_decision("done via any-wait"),
         ]
         handler, repos, _ = _handler_env(db, script)
         run = _mk_run()
         claim = _enqueue_claim(repos, run)
+
+        # Persist one satisfied ref and one real, permanently-unsatisfied ref.
+        # This exercises the ANY predicate itself without depending on an
+        # asynchronously scheduled test subagent finishing inside the slice
+        # wall-clock budget under a heavily loaded xdist worker.
+        satisfied = _mk_agent(run, "a1")
+        repos["agent"].create(satisfied)
+        repos["result"].create(dm.AgentResult(
+            id=dm.ResultId(uuid.uuid4().hex),
+            run_id=run.run_id,
+            tenant=TENANT,
+            source_agent_id=satisfied.agent_id,
+            payload={"answer": "a1"},
+            artifact_key=None,
+            routed_at=dm.EpochMillis(int(time.time() * 1000)),
+        ))
+        _spin_ref(repos, run)
+
         outcome = asyncio.run(handler.handle_slice(
             run.run_id, TENANT, claim["claim_epoch"], worker_id=WORKER,
         ))
@@ -1252,3 +1270,8 @@ def _envelope(name: str, schema: dict | None = None) -> dm.TaskEnvelope:
         name=name, objective=f"objective-{name}",
         output_schema=schema or {}, boundaries="", parent_goal="g",
     )
+#: The Bot every submit in this suite names as its identity source. The
+#: service refuses a submit without one, so the value is fixed here rather
+#: than repeated at each call site; the seam resolves it (or is unbound, in
+#: which case the service takes the id as given).
+IDENTITY_SOURCE = "identity-source-bot"

@@ -65,6 +65,21 @@ async fn query_bots(
         .into_response())
 }
 
+fn candidate_command(
+    caller: AuthenticatedCaller,
+    bot_id: String,
+    query: ListBotCandidatesQuery,
+) -> ListBotCandidates {
+    ListBotCandidates {
+        caller,
+        bot_id,
+        purpose: query.purpose.into(),
+        name: query.name,
+        offset: query.offset,
+        limit: query.limit,
+    }
+}
+
 pub(crate) async fn list_candidates(
     State(state): State<ApiState>,
     Extension(caller): Extension<AuthenticatedCaller>,
@@ -75,14 +90,7 @@ pub(crate) async fn list_candidates(
     let Path(bot_id) = path.map_err(|error| invalid_request(&request_id, error.body_text()))?;
     let Query(query) = query.map_err(|error| invalid_request(&request_id, error.body_text()))?;
     let result = service(&state, &request_id)?
-        .list_candidates(ListBotCandidates {
-            caller,
-            bot_id,
-            purpose: query.purpose.into(),
-            name: query.name,
-            offset: query.offset,
-            limit: query.limit,
-        })
+        .list_candidates(candidate_command(caller, bot_id, query))
         .await
         .map_err(|error| application_error_response(&request_id, error))?;
     Ok((
@@ -92,6 +100,9 @@ pub(crate) async fn list_candidates(
         .into_response())
 }
 
+/// Deprecated compatibility alias of [`list_candidates`]: same parameter
+/// parsing, authentication, and success envelope, with the candidate decision
+/// delegated to the application service.
 async fn list_eligible_candidates(
     State(state): State<ApiState>,
     Extension(caller): Extension<AuthenticatedCaller>,
@@ -102,14 +113,7 @@ async fn list_eligible_candidates(
     let Path(bot_id) = path.map_err(|error| invalid_request(&request_id, error.body_text()))?;
     let Query(query) = query.map_err(|error| invalid_request(&request_id, error.body_text()))?;
     let result = service(&state, &request_id)?
-        .list_eligible_candidates(ListBotCandidates {
-            caller,
-            bot_id,
-            purpose: query.purpose.into(),
-            name: query.name,
-            offset: query.offset,
-            limit: query.limit,
-        })
+        .list_eligible_candidates(candidate_command(caller, bot_id, query))
         .await
         .map_err(|error| application_error_response(&request_id, error))?;
     Ok((

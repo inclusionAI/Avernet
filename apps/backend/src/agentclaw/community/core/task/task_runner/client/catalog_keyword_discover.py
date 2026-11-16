@@ -64,11 +64,11 @@ def _runtime_ready(item: dict[str, Any]) -> bool:
         return False
     return True
 
-# 派发候选预查可见性判据:锁 ``visibility=public``(bot↔bot 协作走 agent 域,不用人类
+# 派发候选预查可见性判据:锁 ``visibility=public,protected``(bot↔bot 协作走 agent 域,不用人类
 # user_visibility);``user_visibility`` 三值全匹配以中和 BCS None/Human 分支对该字段的默认
 # {public,protected}(见 bcs-http search_bots viewer_kind / bcs-bot-store search_candidates)。
 _DISPATCH_CATALOG_FILTERS = BotCatalogSearchFilters(
-    visibility=("public",),
+    visibility=("public", "protected"),
     user_visibility=(
         "public",
         "protected",
@@ -93,8 +93,8 @@ class CatalogKeywordBotDiscover:
     - ``filters`` 的关键字意图由本地 runtime readiness post-filter 保护:只解释现有契约中的
       ``is_online``/``runtime_state``/Bot 生命周期 ``status`` 三类权威字段,且只有
       online/ACTIVE 才可派发;运行态字段缺失时不误伤;catalog 视野用
-      ``_DISPATCH_CATALOG_FILTERS`` 锁 ``visibility=public`` 且中和 ``user_visibility``
-      (BCS None/Human 分支默认 {public,protected}),只取公开可认领 bot,不含 protected;
+      ``_DISPATCH_CATALOG_FILTERS`` 锁 ``visibility=public,protected`` 且中和 ``user_visibility``
+      (BCS None/Human 分支默认 {public,protected}),取公开与受保护可认领 bot。
     - 身份参数:catalog ``caller`` 在 ``search_public_bot_metadata`` 顶部即 ``del caller``(废弃),
       占位 ``BotCatalogCaller(tenant_id="", user_id=None, app_id=None)`` 不影响检索结果;
       ``request_id`` 仅日志,生成 ``task-prefetch-<uuid12>``;
@@ -144,7 +144,7 @@ class CatalogKeywordBotDiscover:
         """调 ``search_catalog_public_bots_by_keyword``(BCS catalog)并收口异常→空列表(不阻断预查)。
 
         ``caller`` 占位(catalog service 顶部 ``del caller``)、``request_id`` 仅日志;
-        ``filters=_DISPATCH_CATALOG_FILTERS`` 锁 ``visibility=public`` 并中和 ``user_visibility``。
+        ``filters=_DISPATCH_CATALOG_FILTERS`` 锁 ``visibility=public,protected`` 并中和 ``user_visibility``。
         返回 item 自带 ``bot_uuid``(``{bot_id}:{entity_id}``)。"""
         request_id = f"task-prefetch-{uuid.uuid4().hex[:12]}"
         logger.debug(

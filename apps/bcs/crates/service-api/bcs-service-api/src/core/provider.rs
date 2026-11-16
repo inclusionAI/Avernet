@@ -55,6 +55,11 @@ pub struct RegisterProviderBotParams {
     pub webhook_url: Option<String>,
     pub bot_name: String,
     pub summary: Option<String>,
+    /// Ordinary ProviderBotCoreService identity registration accepts exactly one
+    /// owner; it does NOT initialize authority and rejects multi-user snapshots.
+    /// ProviderManagement splits its public snapshot before calling that Core.
+    /// A2aProviderRegistrationCoreService instead consumes the entire 1..=101
+    /// snapshot in its atomic identity/Card/authority composite.
     pub owners: Vec<String>,
     pub provider_bot_ref: String,
     pub domains: Vec<String>,
@@ -83,6 +88,13 @@ pub trait ProviderCoreService: Send + Sync {
         })
     }
 
+    /// Freeze a previously resolved Provider name before using it for A2A.
+    /// Fails if a concurrent rename invalidated the supplied identity/name pair.
+    async fn pin_a2a_provider_name(&self, provider_id: &str, name: &str) -> ServiceResult<()> {
+        let _ = (provider_id, name);
+        Err(ServiceError::InternalError("A2A Provider name reservation unavailable".into()))
+    }
+
     async fn register_provider_with_policy(
         &self, name: String, webhook_url: Option<String>, auth_mode: ProviderAuthMode,
         created_by: String, protocol_version: Option<String>, coordination: Option<ProviderCoordinationConfig>,
@@ -91,6 +103,17 @@ pub trait ProviderCoreService: Send + Sync {
     ) -> ServiceResult<RegisteredProvider> {
         if scope.is_some() { return Err(ServiceError::InternalError("Provider policy registration is not configured".into())); }
         self.register_provider_with_slug(name, webhook_url, auth_mode, created_by, protocol_version, coordination, slug, admin_callback_url, caller_capabilities).await
+    }
+
+    async fn register_provider_with_a2a(
+        &self, name: String, webhook_url: Option<String>, auth_mode: ProviderAuthMode,
+        created_by: String, protocol_version: Option<String>, coordination: Option<ProviderCoordinationConfig>,
+        slug: Option<String>, admin_callback_url: Option<String>, scope: Option<ProviderCollaborationScope>,
+        caller_capabilities: Option<bcs_domain::caller_identity::ProviderCallerCapabilities>,
+        a2a: Option<bcs_domain::provider_a2a::ProviderA2aPatch>,
+    ) -> ServiceResult<RegisteredProvider> {
+        if a2a.is_some() { return Err(ServiceError::InvalidOperation {message:"Provider A2A configuration is not supported".into(),request_id:None}); }
+        self.register_provider_with_policy(name, webhook_url, auth_mode, created_by, protocol_version, coordination, slug, admin_callback_url, scope, caller_capabilities).await
     }
 
     async fn update_provider_with_policy(
@@ -102,6 +125,18 @@ pub trait ProviderCoreService: Send + Sync {
     ) -> ServiceResult<ProviderRecord> {
         if scope.is_some() { return Err(ServiceError::InternalError("Provider policy update is not configured".into())); }
         self.update_provider_with_slug(provider_id, provider_admin_token, authenticated_staff_id, name, webhook_url, protocol_version, coordination, organization_management, slug, admin_callback_url, caller_capabilities).await
+    }
+
+    async fn update_provider_with_a2a(
+        &self, provider_id: &str, provider_admin_token: &str, authenticated_staff_id: &str,
+        name: Option<String>, webhook_url: Option<String>, protocol_version: Option<String>, coordination: Option<ProviderCoordinationConfig>,
+        organization_management: Option<ProviderOrganizationManagementConfig>, slug: Option<String>, admin_callback_url: Option<String>,
+        scope: Option<ProviderCollaborationScope>,
+        caller_capabilities: Option<bcs_domain::caller_identity::ProviderCallerCapabilities>,
+        a2a: Option<bcs_domain::provider_a2a::ProviderA2aPatch>,
+    ) -> ServiceResult<ProviderRecord> {
+        if a2a.is_some() { return Err(ServiceError::InvalidOperation {message:"Provider A2A configuration is not supported".into(),request_id:None}); }
+        self.update_provider_with_policy(provider_id, provider_admin_token, authenticated_staff_id, name, webhook_url, protocol_version, coordination, organization_management, slug, admin_callback_url, scope, caller_capabilities).await
     }
 
     /// Additive registration entry point preserving callers of register_provider.
@@ -151,6 +186,11 @@ pub trait ProviderCoreService: Send + Sync {
     ) -> ServiceResult<RegisteredProvider>;
 
     async fn authenticate_provider_admin(&self, token: &str) -> ServiceResult<ProviderRecord>;
+    /// Chooses a satisfiable Card requirement using deployment policy and current credentials.
+    async fn a2a_authentication(&self, _provider_id:&str, _card:&serde_json::Value)
+        ->ServiceResult<bcs_domain::a2a_auth::A2aAuthentication> {
+        Err(ServiceError::InvalidOperation {message:"A2A authentication policy is not configured".into(),request_id:None})
+    }
     async fn get_downlink_credential(&self, provider_id: &str)
     -> ServiceResult<ProviderCredential>;
     async fn get_provider(
@@ -314,12 +354,30 @@ pub trait ProviderBotCoreService: Send + Sync {
             request_id: None,
         })
     }
+    /// Create/replay identity and delivery metadata only. Requires exactly one
+    /// `params.owners` entry; use ProviderManagement for owner/manager initialization.
+    /// Multi-user input is InvalidOperation before any Bot writes, never ignored.
     async fn register_provider_bot_with_bot_uuid(
         &self,
         provider_id: &str,
         provider_admin_token: &str,
         params: RegisterProviderBotParams,
     ) -> ServiceResult<(ProviderBotBinding, Option<String>)>;
+
+    /// Create a fresh multi-user registration atomically with its initial authority.
+    /// Initialized replays never synchronize managers. An existing version-0 Bot
+    /// with a nonempty snapshot conflicts: its earlier admission needs explicit
+    /// reconciliation, not a race with legacy owner-only migration.
+    /// Empty snapshots retain the identity-only compatibility entry above.
+    async fn register_provider_bot_with_initial_managers(
+        &self, provider_id: &str, provider_admin_token: &str,
+        params: RegisterProviderBotParams, initial_managers: Vec<String>,
+    ) -> ServiceResult<(ProviderBotBinding, Option<String>)> {
+        if !initial_managers.is_empty() {
+            return Err(ServiceError::InternalError("atomic Provider authority registration is not configured".into()));
+        }
+        self.register_provider_bot_with_bot_uuid(provider_id, provider_admin_token, params).await
+    }
 
     async fn list_provider_bots(
         &self,

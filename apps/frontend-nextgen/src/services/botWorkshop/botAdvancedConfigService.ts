@@ -1,17 +1,18 @@
 import type { BotChannel, BotChannelInput, BotIdentityFile } from '@/domain/botAdvancedConfig';
+import type { BotRuntimeStage } from '@/domain/botWorkshop';
 import { botEditorController } from '@/services/backendApi/bots/botEditorController';
 
 export const botAdvancedConfigService = {
-  async listIdentityFiles(botId: string, ownerId?: string): Promise<BotIdentityFile[]> {
-    const response = await botEditorController.listIdentityFiles(botId, ownerId);
+  async listIdentityFiles(botId: string, ownerId?: string, stage?: BotRuntimeStage): Promise<BotIdentityFile[]> {
+    const response = await botEditorController.listIdentityFiles(botId, ownerId, stage);
     return (response.data?.files ?? []).map((file) => ({ type: file.type, exists: file.exists }));
   },
-  async getIdentityFile(botId: string, type: string): Promise<string> {
-    const response = await botEditorController.getIdentityFile(botId, type);
+  async getIdentityFile(botId: string, type: string, ownerId?: string, stage?: BotRuntimeStage): Promise<string> {
+    const response = await botEditorController.getIdentityFile(botId, type, ownerId, stage);
     return response.data?.content ?? '';
   },
-  saveIdentityFile: (botId: string, type: string, content: string) =>
-    botEditorController.updateIdentityFile(botId, type, content),
+  saveIdentityFile: (botId: string, type: string, content: string, ownerId?: string) =>
+    botEditorController.updateIdentityFile(botId, type, content, ownerId),
   async listChannels(botId: string, ownerId?: string): Promise<BotChannel[]> {
     const response = await botEditorController.listChannels(botId, ownerId);
     const items = Array.isArray(response.data) ? response.data : response.data?.items ?? [];
@@ -40,7 +41,7 @@ export const botAdvancedConfigService = {
       updatedAt: item.updated_at ?? undefined,
     }));
   },
-  createChannel: (botId: string, input: BotChannelInput) => {
+  createChannel: (botId: string, input: BotChannelInput, ownerId?: string) => {
     const common = {
       client_id: input.clientId,
       client_secret: input.clientSecret,
@@ -65,15 +66,19 @@ export const botAdvancedConfigService = {
             aix_enable: input.aixEnable,
             include_sender_name: input.includeSenderName,
           };
-    return botEditorController.createChannel(botId, {
-      type: 'dingding',
-      binding_mode: input.bindingMode,
-      ...(input.bindingMode === 'plugin' && input.stage ? { stage: input.stage } : {}),
-      description: input.description || null,
-      config,
-    });
+    return botEditorController.createChannel(
+      botId,
+      {
+        type: 'dingding',
+        binding_mode: input.bindingMode,
+        ...(input.bindingMode === 'plugin' && input.stage ? { stage: input.stage } : {}),
+        description: input.description || null,
+        config,
+      },
+      ownerId,
+    );
   },
-  updateChannel: (botId: string, channelId: number, input: BotChannelInput) => {
+  updateChannel: (botId: string, channelId: number, input: BotChannelInput, ownerId?: string) => {
     const common = {
       client_id: input.clientId,
       client_secret: input.clientSecret.trim() || null,
@@ -98,13 +103,24 @@ export const botAdvancedConfigService = {
             aix_enable: input.aixEnable,
             include_sender_name: input.includeSenderName,
           };
-    return botEditorController.updateChannel(botId, channelId, {
-      description: input.description || null,
-      binding_mode: input.bindingMode,
-      config,
-    });
+    return botEditorController.updateChannel(
+      botId,
+      channelId,
+      {
+        description: input.description || null,
+        binding_mode: input.bindingMode,
+        config,
+      },
+      ownerId,
+    );
   },
-  setChannelStatus: (botId: string, channel: BotChannel) =>
-    botEditorController.setChannelStatus(botId, channel.id, channel.status === 'active' ? 'inactive' : 'active'),
-  deleteChannel: (botId: string, channelId: number) => botEditorController.deleteChannel(botId, channelId),
+  setChannelStatus: (botId: string, channel: BotChannel, ownerId?: string) =>
+    botEditorController.setChannelStatus(
+      botId,
+      channel.id,
+      channel.status === 'active' ? 'inactive' : 'active',
+      ownerId,
+    ),
+  deleteChannel: (botId: string, channelId: number, ownerId?: string) =>
+    botEditorController.deleteChannel(botId, channelId, ownerId),
 };

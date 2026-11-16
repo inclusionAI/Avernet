@@ -595,6 +595,17 @@ impl bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoPort for 
             return Ok(sessions.get(session).into_iter().flat_map(|entry|&entry.deliveries)
                 .filter(|row|row.target_bot_id == *bot && row.run_id.as_ref() == Some(run)).take(2).cloned().collect());
         }
+        if let Q::SessionUnfinished { session, after, limit } = &scope {
+            use bcs_domain::message_delivery::MessageDeliveryStatus as S;
+            let mut rows: Vec<_> = self.list_deliveries(None).await?.into_iter()
+                .filter(|d| d.session_id == *session && d.state.kind == bcs_domain::DeliveryType::Send
+                    && matches!(d.state.status, S::Queued | S::Dispatching | S::Running | S::Unknown)
+                    && after.as_ref().is_none_or(|(m, id)| (&d.source_message_id, &d.delivery_id) > (m, id)))
+                .collect();
+            rows.sort_by(|a, b| (&a.source_message_id, &a.delivery_id).cmp(&(&b.source_message_id, &b.delivery_id)));
+            rows.truncate((*limit).min(500));
+            return Ok(rows);
+        }
         if let Q::Id(id) = &scope {
             return Ok(self.sessions.read().await.values().flat_map(|entry|&entry.deliveries)
                 .find(|row|row.delivery_id == *id).cloned().into_iter().collect());
@@ -614,6 +625,7 @@ impl bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoPort for 
             Q::LanePendingContexts { bot, session } => d.target_bot_id == *bot && d.session_id == *session && d.state.kind == bcs_domain::DeliveryType::Inject && d.state.status == bcs_domain::message_delivery::MessageDeliveryStatus::PendingContext,
             Q::LanePendingContextCarrier { bot, session, now_ms } => d.target_bot_id == *bot && d.session_id == *session && d.state.kind == bcs_domain::DeliveryType::Inject && d.state.status == bcs_domain::message_delivery::MessageDeliveryStatus::PendingContext && d.expire_at_ms.is_none_or(|at| at > *now_ms),
             Q::Message(id) => d.source_message_id == *id,
+            Q::SessionUnfinished { .. } => unreachable!(),
             Q::Successor { bot, session, after_seq, exclude, now_ms } => d.target_bot_id == *bot && d.session_id == *session && d.source_session_seq > *after_seq && d.delivery_id != *exclude && d.state.kind == bcs_domain::DeliveryType::Send && d.state.status == bcs_domain::message_delivery::MessageDeliveryStatus::Queued && !d.state.may_have_been_sent && d.expire_at_ms.is_none_or(|t| t > *now_ms),
         }).take(match scope { Q::BotPending(_) | Q::LanePending { .. } | Q::LanePendingContextCarrier { .. } | Q::Successor { .. } => 1, Q::BotPendingContexts(_) | Q::LanePendingContexts { .. } => 100, _ => usize::MAX }).collect())
     }

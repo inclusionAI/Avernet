@@ -8,9 +8,7 @@
 //! The bcs-admin full MySQL migration-chain gate mounts the same shared
 //! contract for the MySQL evidence.
 
-#[path = "../../../bootstrap/bcs/src/migrations.rs"]
-#[allow(dead_code)]
-mod bootstrap_migrations;
+use bcs_db_migrations as bootstrap_migrations;
 #[path = "support/bot_profile_fixture.rs"]
 mod fixture;
 #[path = "support/bot_profile_contract.rs"]
@@ -481,4 +479,28 @@ impl DbPlugin for FailingTransactionDb {
     async fn health_check(&self) -> DbResult<DbHealth> {
         self.db.health_check().await
     }
+}
+
+#[tokio::test]
+async fn sqlite_profile_write_preserves_name_from_concurrently_updated_card() {
+    let (db, repo) = fixture::sqlite_repo().await;
+    repo.create_registration_if_absent(
+        "card-profile".into(), BotCapabilities { name: Some("Old name".into()), ..Default::default() },
+        "owner", "test-token",
+    ).await.unwrap();
+    // Model a Card rename committed after the caller read the old capabilities.
+    db.execute(DbStatement::with_params(
+        "UPDATE bcs_bots SET name=?, agent_card=? WHERE bot_uuid=?",
+        vec!["New Card name".into(), r#"{"name":"New Card name"}"#.into(), "card-profile".into()],
+    )).await.unwrap();
+    let result = repo.update_profile_existing("card-profile", ExistingProfileUpdate {
+        capabilities: BotCapabilities { name: Some("Old name".into()), ..Default::default() },
+        avatar: AvatarChange::Set("https://example.test/avatar.png".into()),
+    }).await.unwrap();
+    assert_eq!(result, ProfileWrite::Updated);
+    let rows = db.query(DbStatement::new(
+        "SELECT name, avatar_url FROM bcs_bots WHERE bot_uuid='card-profile'",
+    )).await.unwrap();
+    assert_eq!(rows[0].get_string("name").unwrap().as_deref(), Some("New Card name"));
+    assert_eq!(rows[0].get_string("avatar_url").unwrap().as_deref(), Some("https://example.test/avatar.png"));
 }

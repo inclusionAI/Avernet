@@ -86,3 +86,19 @@ def test_duplicate_error_is_conflict_not_success(world):
     )
     assert response.status_code == 409
     assert response.json()["code"] != 200000
+
+
+def test_avatar_rejection_returns_400_without_payload_in_logs(world, monkeypatch):
+    from agentclaw.community.adapters.http import error_logging
+    from agentclaw.community.core.bot_management.avatar import AvatarTooLargeError
+
+    client, bots, _ = world
+    bots.update_bot.side_effect = AvatarTooLargeError('Avatar does not fit in Bot metadata')
+    log = Mock()
+    monkeypatch.setattr(error_logging.logger, 'warning', log)
+    value = 'data:image/jpeg;base64,unique-private-prefix-' + 'x' * 70000
+    response = client.put('/openapi/v1/bots/b/avatar', json={'avatar_url': value})
+    assert response.status_code == 400
+    assert 'unique-private-prefix' not in response.text
+    assert 'unique-private-prefix' not in str(log.call_args)
+    assert 'data:image/jpeg' not in str(log.call_args)

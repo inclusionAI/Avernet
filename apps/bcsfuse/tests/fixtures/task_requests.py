@@ -13,7 +13,7 @@ M3: Task Understanding Engine
 
 from __future__ import annotations
 
-from src.domain.models.task_understanding_input import TaskUnderstandingInput
+from app.domain.models.task_understanding_input import TaskUnderstandingInput
 
 
 # =============================================================================

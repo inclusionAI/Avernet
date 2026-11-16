@@ -662,7 +662,7 @@ def test_search_strategy_composes_owner_identity_for_openapi_call():
     )
 
     assert result.outcome == SearchOutcome.MISS
-    assert bot.calls[0]["bot_id"] == "default:146836"
+    assert bot.calls[0]["bot_id"] == "default:old-owner"
 
 class TestTokenize:
     """_tokenize 约束:≥2 字 + 停用词过滤(jieba/fallback 双路径统一)。"""
@@ -789,3 +789,39 @@ class TestDispatchExceptionCarrier:
         assert result is None
         assert sr.assembly_error is not None
         assert sr.assembly_error.startswith("rationale_assembly_failed")
+
+
+def test_dispatch_batch_splits_composite_hit_single_identity():
+    """Task state keeps split fields while the search strategy returns a UUID."""
+
+    class _Graph:
+        def query_task_dashboard(self, task_id):
+            from agentclaw.community.core.task.domain.models import TaskExecutionGraph
+
+            return TaskExecutionGraph(
+                run_id=1,
+                loop_round=0,
+                status=Status.PENDING,
+                extend_props={},
+            )
+
+    class _SingleStrategy:
+        rule_id = "single"
+        priority = 1
+
+        async def matches(self, node, graph):
+            return True
+
+        async def apply(self, node, graph):
+            return SearchResult(
+                outcome=SearchOutcome.HIT_SINGLE,
+                bot_id="rule-a:owner-a",
+                owner_id=None,
+            )
+
+    dispatcher = TaskDispatcher(_Graph(), pool=[_SingleStrategy()])
+    node = _node("split-identity")
+    result = _run(dispatcher._dispatch_batch([node]))[0]
+
+    assert result.run_info.assignee == "rule-a"
+    assert result.run_info.extend_props["assignee_owner_id"] == "owner-a"

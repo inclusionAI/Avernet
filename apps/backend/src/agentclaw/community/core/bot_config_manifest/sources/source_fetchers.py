@@ -745,7 +745,15 @@ FETCHER_TYPES: Mapping[SourceKind, type] = MappingProxyType(
     }
 )
 
-_UNSERVED = (set(SourceKind) - {SourceKind.CONTENT}) - set(FETCHER_TYPES)
+#: ``content`` is inline and never fetched; ``bot`` converges through a sync
+#: step (a per-engine ``BotFileSyncPort`` invoked by the bot-file-sync
+#: materialiser), not the fetch→store→write chain, so neither has a row in
+#: ``FETCHER_TYPES`` and neither is "unserved" — the rule this assert enforces
+#: is "the surface accepts only what something applies", and a sync materialiser
+#: is that something for ``bot``.
+_PROTOCOLS_OUTSIDE_THE_FETCH_CHAIN = frozenset({SourceKind.CONTENT, SourceKind.BOT})
+
+_UNSERVED = (set(SourceKind) - _PROTOCOLS_OUTSIDE_THE_FETCH_CHAIN) - set(FETCHER_TYPES)
 if _UNSERVED:
     # At import, never at apply. A protocol the schema will happily accept and
     # no fetcher can serve is "the surface accepts what it cannot apply" —

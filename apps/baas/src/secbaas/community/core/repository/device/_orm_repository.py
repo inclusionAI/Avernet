@@ -487,14 +487,16 @@ class OrmDeviceRepository(OrmConnectionMixin, DeviceRepository):
         env: str,
         status: str,
         modifier: str | None = None,
+        provider_device_id: str | None = None,
     ) -> int:
         log.info(
-            "update_status_by_device_uuid: device_uuid=%s, tenant=%s, env=%s, status=%s, modifier=%s",
+            "update_status_by_device_uuid: device_uuid=%s, tenant=%s, env=%s, status=%s, modifier=%s, provider_device_id=%s",
             device_uuid,
             tenant,
             env,
             status,
             modifier,
+            provider_device_id,
         )
         from sqlalchemy import func as sa_func
 
@@ -504,6 +506,8 @@ class OrmDeviceRepository(OrmConnectionMixin, DeviceRepository):
         }
         if modifier is not None:
             values["modifier"] = modifier
+        if provider_device_id is not None:
+            values["provider_device_id"] = provider_device_id
 
         result = (
             self._session.query(DeviceModel)

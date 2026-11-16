@@ -25,12 +25,14 @@
 mod admission;
 mod authority;
 mod connect;
+mod connect_friend_service;
 #[cfg(test)]
 mod tests;
 
 pub use admission::DbAdmissionService;
 pub use authority::BotAuthorityCoreServiceImpl;
 pub use connect::DbConnectService;
+pub use connect_friend_service::EdgeConnectFriendService;
 #[cfg(test)]
 pub(crate) use connect::{
     actor_kind_of, bot_friend_ext_no_check_scope_friend_deps,

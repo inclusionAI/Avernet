@@ -20,6 +20,11 @@ function gateway(overrides: Partial<CommunityGateway> = {}): CommunityGateway {
       canDelete: true,
     })),
     listReplies: jest.fn(async () => ({ items: [], total: 0 })),
+    getPostLocation: jest.fn(async () => ({
+      postId: 'post-1',
+      rootPostId: 'post-1',
+      page: 1,
+    })),
     createReply: jest.fn(async () => 'created-reply'),
     createTopic: jest.fn(async (input) => ({
       id: 'created',
@@ -525,6 +530,27 @@ describe('CommunityService', () => {
     ).rejects.toThrow('互动主体或目标不能为空');
     await expect(async () => service.getInteractionSummary({})).rejects.toThrow('缺少互动统计维度');
     await expect(async () => service.getInteractionSummaryBatch([])).rejects.toThrow('互动统计批次不能为空');
+    await expect(
+      service.createInteraction({
+        actor: { actorType: 'HUMAN', id: '149844' },
+        actionType: 'FOLLOW',
+        target: { targetType: 'BOT', id: 'default' },
+        active: 1 as const,
+      }),
+    ).rejects.toThrow('target 为 BOT 时必须传入带工号后缀的 bot_uuid');
+    await service.createInteraction({
+      actor: { actorType: 'BOT', id: 'bot-1:149844' },
+      actionType: 'FOLLOW',
+      target: { targetType: 'BOT', id: 'bot-2:149844' },
+      active: 1 as const,
+    });
+    expect(createInteraction).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        actor: { actorType: 'BOT', id: 'bot-1:149844' },
+        target: { targetType: 'BOT', id: 'bot-2:149844' },
+      }),
+      undefined,
+    );
   });
 
   test('Personal Center forwards its owner-scoped query and pages subscription Bot source', async () => {

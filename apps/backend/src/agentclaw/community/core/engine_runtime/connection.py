@@ -23,10 +23,12 @@ from urllib.parse import quote, urlsplit
 from agentclaw.community.core.bot_collaborator.protocols import (
     CollaboratorServiceProtocol,
 )
-from agentclaw.community.core.bot_management.services.bot_service import BotService
+from agentclaw.community.core.engine_runtime.bot_lookup import RuntimeBotLookup
+from agentclaw.community.utils.runtime_list_timing import mark
 from agentclaw.community.core.devices.errors import (
     DeviceDomainError,
     DeviceServiceError,
+    DeviceUnavailableError,
 )
 from agentclaw.community.core.devices.models import OperatorContext
 from agentclaw.community.core.devices.services.device_service import DeviceService
@@ -176,7 +178,7 @@ class EngineConnectionService(EngineConnectionServiceProtocol):
     @inject
     def __init__(
         self,
-        bot_service: BotService,
+        bot_service: RuntimeBotLookup,
         binding_repository: DeviceBindingRepository,
         device_service: DeviceService,
         gateway: GatewayEndpoint,
@@ -234,11 +236,13 @@ class EngineConnectionService(EngineConnectionServiceProtocol):
             owner_id=resolved_owner,
         )
         require_operable_bot(facts.bot_type, stage=stage, surface="connections")
+        mark("connection.authorized")
         engine = facts.active_engine
 
         binding_id = self._stage_binding_id(
             bot_pk=bot_pk, bot_id=resolved_id, owner_id=resolved_owner, stage=stage
         )
+        mark("connection.binding_resolved")
         if device_uuid is not None:
             binding = self._binding_repository.get_by_id(binding_id)
             if facts.bot_type == "desktop" or getattr(binding, "device_provider", None) not in {"baas", "teclaw"}:
@@ -312,6 +316,10 @@ class EngineConnectionService(EngineConnectionServiceProtocol):
                     caller_id=caller_id,
                 )
         except BaasNoActiveDevicesError as exc:
+            raise EngineDeviceNotReadyError(
+                f"device unavailable for bot={bot_id}"
+            ) from exc
+        except DeviceUnavailableError as exc:
             raise EngineDeviceNotReadyError(
                 f"device unavailable for bot={bot_id}"
             ) from exc

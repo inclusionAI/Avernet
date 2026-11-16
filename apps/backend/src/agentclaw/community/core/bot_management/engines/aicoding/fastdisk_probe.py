@@ -17,6 +17,16 @@ DETECTION = Path(__file__).parent / 'fastdisk_detection'
 
 
 def detection_command() -> str:
+    """Publication retains the existing mount and pending-state safeguards."""
+    return _detection_command(live_mounts_only=False)
+
+
+def restart_detection_command() -> str:
+    """Restart classification requires live mounts, not upgrade/ready markers."""
+    return _detection_command(live_mounts_only=True)
+
+
+def _detection_command(*, live_mounts_only: bool) -> str:
     gate = (DETECTION / 'persist_mount_gate.py').read_text()
     # Avoid the CLI entrypoint; run the same gate function with runtime paths.
     gate = gate.split("if __name__ == '__main__':", 1)[0]
@@ -24,7 +34,8 @@ def detection_command() -> str:
     source = gate + '\n' + layout + '\n' + (
         'layout = runtime_layout()\n'
         'status = check_mounts(layout["storage"], layout["home"], '
-        'layout["storage"] + "/.fastdisk.ready", "/proc/self/mountinfo")\n'
+        'layout["storage"] + "/.fastdisk.ready", "/proc/self/mountinfo", '
+        f'live_mounts_only={live_mounts_only!r})\n'
         'print(json.dumps(dict(status=status, **layout)))\n'
     )
     encoded = base64.b64encode(zlib.compress(source.encode())).decode()

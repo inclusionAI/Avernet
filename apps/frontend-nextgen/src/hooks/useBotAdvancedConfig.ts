@@ -1,4 +1,5 @@
 import type { BotChannel, BotChannelInput, BotIdentityFile } from '@/domain/botAdvancedConfig';
+import type { BotRuntimeStage } from '@/domain/botWorkshop';
 import { botAdvancedConfigService } from '@/services/botWorkshop/botAdvancedConfigService';
 import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
@@ -9,6 +10,7 @@ export function useBotAdvancedConfig(
   ownerId?: string,
   markdown = true,
   channelsEnabled = true,
+  runtimeStage: BotRuntimeStage = 'draft',
 ) {
   const [files, setFiles] = useState<BotIdentityFile[]>([]);
   const [channels, setChannels] = useState<BotChannel[]>([]);
@@ -17,13 +19,13 @@ export function useBotAdvancedConfig(
     if (!botId || !enabled) return;
     setLoading(true);
     const [fileResult, channelResult] = await Promise.allSettled([
-      markdown ? botAdvancedConfigService.listIdentityFiles(botId, ownerId) : Promise.resolve([]),
+      markdown ? botAdvancedConfigService.listIdentityFiles(botId, ownerId, runtimeStage) : Promise.resolve([]),
       channelsEnabled ? botAdvancedConfigService.listChannels(botId, ownerId) : Promise.resolve([]),
     ]);
     setFiles(fileResult.status === 'fulfilled' ? fileResult.value : []);
     setChannels(channelResult.status === 'fulfilled' ? channelResult.value : []);
     setLoading(false);
-  }, [botId, enabled, ownerId, markdown, channelsEnabled]);
+  }, [botId, enabled, ownerId, markdown, channelsEnabled, runtimeStage]);
   useEffect(() => {
     void load();
   }, [load]);
@@ -40,11 +42,17 @@ export function useBotAdvancedConfig(
     },
     [load],
   );
-  const getFile = useCallback((type: string) => botAdvancedConfigService.getIdentityFile(botId!, type), [botId]);
+  const getFile = useCallback(
+    (type: string) => botAdvancedConfigService.getIdentityFile(botId!, type, ownerId, runtimeStage),
+    [botId, ownerId, runtimeStage],
+  );
   const saveFile = useCallback(
     (type: string, content: string) =>
-      act(() => botAdvancedConfigService.saveIdentityFile(botId!, type, content), '文档已保存'),
-    [act, botId],
+      act(() => {
+        if (runtimeStage !== 'draft') return Promise.reject(new Error('运行态身份文档仅支持查看，请在草稿态编辑'));
+        return botAdvancedConfigService.saveIdentityFile(botId!, type, content, ownerId);
+      }, '文档已保存'),
+    [act, botId, ownerId, runtimeStage],
   );
   return {
     files,
@@ -53,11 +61,11 @@ export function useBotAdvancedConfig(
     getFile,
     saveFile,
     createChannel: (input: BotChannelInput) =>
-      act(() => botAdvancedConfigService.createChannel(botId!, input), '渠道已绑定'),
+      act(() => botAdvancedConfigService.createChannel(botId!, input, ownerId), '渠道已绑定'),
     updateChannel: (id: number, input: BotChannelInput) =>
-      act(() => botAdvancedConfigService.updateChannel(botId!, id, input), '渠道配置已更新'),
+      act(() => botAdvancedConfigService.updateChannel(botId!, id, input, ownerId), '渠道配置已更新'),
     toggleChannel: (channel: BotChannel) =>
-      act(() => botAdvancedConfigService.setChannelStatus(botId!, channel), '渠道状态已更新'),
-    deleteChannel: (id: number) => act(() => botAdvancedConfigService.deleteChannel(botId!, id), '渠道已删除'),
+      act(() => botAdvancedConfigService.setChannelStatus(botId!, channel, ownerId), '渠道状态已更新'),
+    deleteChannel: (id: number) => act(() => botAdvancedConfigService.deleteChannel(botId!, id, ownerId), '渠道已删除'),
   };
 }

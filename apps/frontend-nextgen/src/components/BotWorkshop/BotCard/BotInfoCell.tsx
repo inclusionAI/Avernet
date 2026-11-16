@@ -37,22 +37,29 @@ const BotInfoCell: React.FC<BotInfoCellProps> = ({
   const engineUpdatable =
     engineVersionState?.kind === 'ready' && engineVersionUiState(engineVersionState.observation) === 'updatable';
   return (
-    <div
-      ref={cell}
-      className={`flex min-w-0 items-center gap-3 ${highlighted ? 'rounded-md bg-primary/10 ring-2 ring-primary' : ''}`}
-      aria-label={highlighted ? `刚创建的 Bot：${bot.name}` : undefined}
-    >
-      <span
-        aria-hidden
-        className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-primary/10"
+    <TooltipProvider>
+      <div
+        ref={cell}
+        className={`flex min-w-0 items-center gap-3 ${
+          highlighted ? 'rounded-md bg-primary/10 ring-2 ring-primary' : ''
+        }`}
+        aria-label={highlighted ? `刚创建的 Bot：${bot.name}` : undefined}
       >
-        <img src={avatarUrl} alt="" className="size-10 rounded-full object-cover" />
-      </span>
-      <div className="flex min-w-0 flex-col">
-        <div className="flex min-w-0 items-center gap-1.5">
-          <span className="truncate text-sm font-semibold text-foreground">{bot.name}</span>
-          {onOpenEngineUpdate && engineUpdatable ? (
-            <TooltipProvider>
+        <span
+          aria-hidden
+          className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-primary/10"
+        >
+          <img src={avatarUrl} alt="" className="size-10 rounded-full object-cover" />
+        </span>
+        <div className="flex min-w-0 flex-1 flex-col">
+          <div className="flex min-w-0 items-center gap-1.5">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="truncate text-sm font-semibold text-foreground">{bot.name}</span>
+              </TooltipTrigger>
+              <TooltipContent>{bot.name}</TooltipContent>
+            </Tooltip>
+            {onOpenEngineUpdate && engineUpdatable ? (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
@@ -72,18 +79,25 @@ const BotInfoCell: React.FC<BotInfoCellProps> = ({
                 </TooltipTrigger>
                 <TooltipContent>{engineVersionTooltip(engineVersionState.observation)}</TooltipContent>
               </Tooltip>
-            </TooltipProvider>
-          ) : null}
-          <span className="inline-flex shrink-0">
-            <BotEditLockAction bot={bot} onClaimLock={onClaimLock} onReleaseLock={onReleaseLock} />
-          </span>
+            ) : null}
+          </div>
+          {bot.expertOriginName && (
+            <span className="truncate text-xs text-muted-foreground">来自专家市场 · {bot.expertOriginName}</span>
+          )}
+          <div className="flex min-w-0 items-center gap-1.5">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="min-w-0 truncate text-xs text-content-icon">{bot.entityKey}</span>
+              </TooltipTrigger>
+              <TooltipContent>{bot.entityKey}</TooltipContent>
+            </Tooltip>
+            <span className="inline-flex shrink-0">
+              <BotEditLockAction bot={bot} onClaimLock={onClaimLock} onReleaseLock={onReleaseLock} />
+            </span>
+          </div>
         </div>
-        {bot.expertOriginName && (
-          <span className="truncate text-xs text-muted-foreground">来自专家市场 · {bot.expertOriginName}</span>
-        )}
-        <span className="truncate text-xs text-content-icon">{bot.entityKey}</span>
       </div>
-    </div>
+    </TooltipProvider>
   );
 };
 

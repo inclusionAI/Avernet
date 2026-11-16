@@ -1,4 +1,5 @@
 import { Button } from '@/components/ui/Button';
+import { RoutineRunConversation } from '@/components/ScheduledTasks/RoutineRunConversation';
 import {
   Drawer,
   DrawerContent,
@@ -52,6 +53,7 @@ function InfoCell({
 }
 
 export interface MyTaskRoutineDrawerProps {
+  botType?: string;
   selectedRoutine: ScheduledRoutineRecord | null;
   selectedRoutineKey: string | null;
   onCloseRoutine: () => void;
@@ -62,6 +64,7 @@ export interface MyTaskRoutineDrawerProps {
 }
 
 export function MyTaskRoutineDrawer({
+  botType,
   selectedRoutine,
   selectedRoutineKey,
   onCloseRoutine,
@@ -136,9 +139,9 @@ export function MyTaskRoutineDrawer({
               ) : (
                 <div className="space-y-3">
                   {selectedRoutineRuns.length > 0 ? (
-                    selectedRoutineRuns.map((item) => (
+                    selectedRoutineRuns.map((item, index) => (
                       <div
-                        key={item.id}
+                        key={`${selectedRoutineKey}-${item.conversation?.runtime_stage}-${item.conversation?.device_uuid}-${item.conversation?.operator_id}-${item.id}-${index}`}
                         className="rounded-lg border border-border bg-card p-4 shadow-sm transition-shadow hover:shadow"
                       >
                         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -169,6 +172,7 @@ export function MyTaskRoutineDrawer({
                             {item.errorMessage}
                           </p>
                         ) : null}
+                        {item.conversation && <div className="mt-3 flex justify-end"><RoutineRunConversation run={item.conversation} botType={botType} /></div>}
                       </div>
                     ))
                   ) : (

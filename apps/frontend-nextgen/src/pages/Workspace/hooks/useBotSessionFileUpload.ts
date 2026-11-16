@@ -30,6 +30,7 @@ export function useBotSessionFileUpload(
 ): UseBotSessionFileUploadResult {
   const store = useBotSessionFileStore();
   const uploadingRef = useRef(false);
+  const generationRef = useRef(0);
 
   const stageFiles = useCallback(
     (files: File[]): string[] => {
@@ -65,6 +66,7 @@ export function useBotSessionFileUpload(
   const submit = useCallback(
     async (onFileReady?: (file: BotSessionFileView) => void) => {
       if (uploadingRef.current || !botId || !sessionId || !userId) return;
+      const generation = generationRef.current;
       uploadingRef.current = true;
       store.setIsUploading(true);
       try {
@@ -84,6 +86,8 @@ export function useBotSessionFileUpload(
             signal: abortController.signal,
             onProgress: updateProgress(currentTask.localId),
           });
+          // Aborting transport alone does not prevent an already completed response.
+          if (generation !== generationRef.current) return;
           if (res.ok) {
             store.updateTask(currentTask.localId, {
               phase: 'ready',
@@ -103,17 +107,23 @@ export function useBotSessionFileUpload(
           task = useBotSessionFileStore.getState().uploadTasks.find((item) => item.phase === 'staged');
         }
       } finally {
-        uploadingRef.current = false;
-        store.setIsUploading(false);
+        if (generation === generationRef.current) {
+          uploadingRef.current = false;
+          store.setIsUploading(false);
+        }
       }
     },
     [botId, sessionId, userId, ownerId, stage, store],
   );
 
   const cancelAll = useCallback(() => {
-    store.uploadTasks.forEach((t) => t.abortController?.abort());
-    store.clearTasks();
-  }, [store]);
+    generationRef.current++;
+    const current = useBotSessionFileStore.getState();
+    current.uploadTasks.forEach((t) => t.abortController?.abort());
+    current.clearTasks();
+    current.setIsUploading(false);
+    uploadingRef.current = false;
+  }, []);
 
   return {
     tasks: store.uploadTasks,

@@ -91,7 +91,8 @@ class BcsChangeDetectionTest(unittest.TestCase):
         self.assertEqual(output['skip-bcs'], 'true')
 
     def test_ci_only_changes_run_the_bcs_gate(self) -> None:
-        for path in ['.github/workflows/unit-tests.yml',
+        for path in ['rust-toolchain.toml',
+                     '.github/workflows/unit-tests.yml',
                      'singlebox/ci/tests/test_bcs_build_metadata.py',
                      'singlebox/ci/tests/test_unit_test_workflow_diff.py']:
             with self.subTest(path=path):
@@ -117,7 +118,7 @@ class BcsChangeDetectionTest(unittest.TestCase):
                 self.assertNotEqual(output.get('skip-bcs'), 'true')
 
     def test_workflow_caches_only_instrumented_dependencies_from_trusted_pushes(self) -> None:
-        job = (ROOT / '.github/workflows/unit-tests.yml').read_text().split('\n  backend:', 1)[0]
+        job = (ROOT / '.github/workflows/unit-tests.yml').read_text().split('\n  engine:', 1)[0]
         self.assertIn('uses: Swatinem/rust-cache@', job)
         self.assertIn('apps/bcs -> target/llvm-cov-target', job)
         self.assertIn('cache-workspace-crates: false', job)

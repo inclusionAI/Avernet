@@ -10,6 +10,10 @@ use bcs_service_api::types::authorization_snapshot::GroupAuthorizationSnapshot;
 
 #[async_trait]
 impl GroupRepoPort for MySqlGroupStore {
+    async fn read_card_snapshot(&self, id: &str) -> ServiceResult<Option<bcs_service_api::types::GroupCardSnapshot>> {
+        self.read_card_snapshot_sql(id).await
+    }
+
     async fn upsert(&self, group: Group) -> ServiceResult<()> {
         self.upsert_sql(group).await
     }

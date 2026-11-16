@@ -113,6 +113,17 @@ class SubmitRunDTO(BaseModel):
     provider: ProviderKind | None = None
     model: str | None = None
     idempotency_key: str | None = Field(default=None, max_length=190)
+    identity_bot_id: str | None = Field(
+        default=None,
+        max_length=64,
+        description=(
+            "Provision this run's Bot agents under this Bot's AgentPass "
+            "identity; omit for the ordinary approval flow. The Bot must be "
+            "owned by the caller and hold an issued passport. When set, the "
+            "run's Bot agents never enter AWAITING_AUTHORIZATION, so no "
+            "consent URL is ever reported for them."
+        ),
+    )
     options: RunOptionsDTO | None = None
 
 
@@ -128,6 +139,16 @@ class RunSummaryDTO(BaseModel):
     error: str | None = None
     started_at: int | None = None
     ended_at: int | None = None
+    goal_excerpt: str
+    """The goal's prefix, for telling one run from another in a list.
+
+    `goal` is up to 8000 characters; a full page of them would be the whole
+    prompt each. The full text stays on ``GET /runs/{id}/detail``.
+
+    Required rather than defaulted: it is derived here, never supplied by a
+    caller, so an omitted value would be a bug in this module rather than a
+    legitimate empty state.
+    """
 
 
 class RunListDTO(BaseModel):

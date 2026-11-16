@@ -39,6 +39,7 @@ from agentclaw.community.api.expert_chat_instance_service import (
     ExpertChatInstanceServiceProtocol,
 )
 from agentclaw.community.core.access.admin_scopes import super_admin
+from agentclaw.community.core.engine_runtime.errors import EngineStageNotLiveError
 from agentclaw.community.di import Injected
 from agentclaw.community.core.expert_chat.errors import (
     BotNotFoundError,
@@ -187,12 +188,20 @@ async def get_chat_session(
         logger.warning(f"[expert_chats.get_chat_session] Bot not published: {e}")
         return ApiResponse(success=False, message=str(e), error_code=4001)
 
+    except EngineStageNotLiveError:
+        logger.warning(
+            "[expert_chats.get_chat_session] Online publication unavailable: bot=%s owner=%s",
+            bot_id, owner_id,
+        )
+        return ApiResponse(success=False, message="Bot未发布或发布版本不可用", error_code=4001)
+
     except ChatPermissionError as e:
         logger.warning("[expert_chats.get_chat_session] Permission denied: %s", e)
         return ApiResponse(success=False, message=str(e), error_code=403)
 
     except ConnectionError as e:
-        logger.error(f"[expert_chats.get_chat_session] Connection error: {e.original_error}")
+        log_failure = logger.warning if e.caller_device_unavailable else logger.error
+        log_failure(f"[expert_chats.get_chat_session] Connection error: {e.original_error}")
         error_code = int(e.error_code) if e.error_code else 5001
         return ApiResponse(success=False, message=str(e), error_code=error_code)
 
@@ -400,6 +409,14 @@ async def connect_chat_session(
         return ApiResponse(
             success=False, message=str(error), error_code=4001
         )
+    except EngineStageNotLiveError:
+        logger.warning(
+            "[expert_chats.connect_chat_session] Online publication unavailable: bot=%s owner=%s",
+            bot_id, owner_id,
+        )
+        return ApiResponse(
+            success=False, message="Bot未发布或发布版本不可用", error_code=4001
+        )
     except ChatPermissionError as error:
         return ApiResponse(
             success=False, message=str(error), error_code=403
@@ -567,7 +584,12 @@ async def get_caller_connection_for_other(
         )
     except Exception as error:
         duration_ms = (time.perf_counter() - started_at) * 1000
-        logger.error(
+        log_failure = (
+            logger.warning
+            if isinstance(error, ConnectionError) and error.caller_device_unavailable
+            else logger.error
+        )
+        log_failure(
             "event=expert_chat.caller_connection.failed direction=inbound "
             "operation=caller_connection method=POST "
             "route=/api/v1/expert-chats/caller-connection operator_id=%s "

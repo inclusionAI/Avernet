@@ -8,6 +8,7 @@ from pathlib import Path
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from agentclaw.community.testing.content_blob_store import LocalBlobStore
 from agentclaw.community.core.content_store.service import ContentStoreService
 from agentclaw.community.core.bot_genome.models import BotRef, Provenance, ProvenanceKind
 from agentclaw.community.core.apply_engine.completion import ApplyOutcome
@@ -102,7 +103,7 @@ class World:
         self.refs = GenomeRefRepository(self.db)
         self.patches = GenomePatchRepository(self.db)
         self.promotions = GenomePromotionRepository(self.db)
-        self.content = ContentStoreService(ContentStoreRepository(self.db), tmp_path / "store")
+        self.content = ContentStoreService(ContentStoreRepository(self.db), LocalBlobStore(tmp_path / "store"))
         self.reader = FakeReader()
         self.auth, self.config = FakeAuth(), FakeConfig()
         self.validator = SkillPackageValidator(SkillParser())

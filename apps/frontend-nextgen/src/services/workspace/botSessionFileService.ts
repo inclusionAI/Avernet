@@ -55,6 +55,11 @@ function mapView(dto: BotSessionFileDto): BotSessionFileView {
     status: dto.status,
     sizeBytes: dto.size_bytes,
     errorCode: dto.error_code,
+    // 创建者信息原样透传（2026-11-09 契约）；旧引擎/网关缺字段归一 null。
+    // 适配层不做展示文案拼接/时间格式转换（change add-session-file-creator-fields D4）。
+    creatorType: dto.creator_type ?? null,
+    creatorName: dto.creator_name ?? null,
+    createdAt: dto.created_at ?? null,
   };
 }
 

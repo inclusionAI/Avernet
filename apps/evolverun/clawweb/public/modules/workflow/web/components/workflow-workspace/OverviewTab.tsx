@@ -9,6 +9,7 @@ import { SuccessTrendCard } from '../SuccessTrendCard'
 import { RunCountTrendCard } from '../RunCountTrendCard'
 import { NodeAnalysisPanel } from '../NodeAnalysisPanel'
 import StatusBadge from '../StatusBadge'
+import RunMarkers from '../RunMarkers'
 import EmptyState from '../EmptyState'
 import ErrorState from '../ErrorState'
 import { formatTimeShort, formatDuration } from '../../utils/time'
@@ -143,6 +144,7 @@ function RunRow({ run, onAnalyze, onAutoHeal, onApproval, dispatching, busy, onA
     >
       <td className="whitespace-nowrap px-4 py-2">
         <div className="font-mono text-xs text-gray-900">{run.flow_id}</div>
+        <RunMarkers run={run} />
       </td>
       <td className="whitespace-nowrap px-4 py-2">
         <StatusBadge status={run.status} />
@@ -625,7 +627,7 @@ function OverviewContent({ workflow }: OverviewTabProps) {
                   <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">节点</th>
                   <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">发起方</th>
                   <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">版本</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">环境</th>
+                  <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">运行引擎</th>
                   <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">开始时间</th>
                   <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">耗时</th>
                   <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">操作</th>

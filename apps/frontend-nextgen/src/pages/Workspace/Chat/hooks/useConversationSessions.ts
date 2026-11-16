@@ -1,4 +1,4 @@
-// 会话列表 Hook:管理/团队 Bot(origin=mine)与好友 Bot 会话；managedBots 参数包含管理和团队目录。
+// 会话列表 Hook:管理/团队空间 Bot(origin=mine)与好友 Bot 会话；managedBots 参数包含管理和团队目录。
 // origin=others 由 useManagedBotOthers 负责；列表首拉/分页与写操作互斥。
 // 缓存态拼装/写复用 ./conversationSessionCache;分页请求生命周期(代次/去重/写回校验)
 // 拆至 ./conversationSessionPageRequest(文件大小阈值,行为不变)。
@@ -46,7 +46,7 @@ export function useConversationSessions(options: {
     return map;
   }, [managedBots, friendBots]);
   const expandBot = useConversationBotExpansion(userId);
-  const createSession = useConversationSessionCreation(userId, botByBotId);
+  const sessionCreation = useConversationSessionCreation(userId, botByBotId);
   // 请求上下文(代次/在途去重)挂载一份;分页请求主体拆见 ./conversationSessionPageRequest。
   const requestCtxRef = useRef<ConversationSessionRequestContext | null>(null);
   if (!requestCtxRef.current) requestCtxRef.current = createSessionRequestContext(userId);
@@ -197,7 +197,8 @@ export function useConversationSessions(options: {
     selectMineSession: (botId, sessionId) =>
       selectSession(botByBotId.get(botId)?.section ?? 'managed', botId, sessionId),
     selectFriendBotSession: (botId, sessionId) => selectSession('friend', botId, sessionId),
-    createSession,
+    createSession: sessionCreation.createSession,
+    isCreatingSession: sessionCreation.isCreatingSession,
     retrySessions,
     loadMoreSessions,
   };

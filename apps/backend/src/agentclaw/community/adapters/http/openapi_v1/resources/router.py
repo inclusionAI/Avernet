@@ -73,6 +73,7 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope_errors,
     page as page_envelope,
 )
+from agentclaw.community.core.devices.errors import DeviceFileSystemReadOnlyError
 from agentclaw.community.core.devices.services.device_filesystem import (
     FileTooLargeError as DeviceFileTooLargeError,
 )
@@ -137,6 +138,14 @@ _READ_ONLY_RESPONSE: dict[int | str, dict[str, object]] = {
         "description": "The path is read-only — a dotfile, or a workspace-root "
         "identity file — or the user_id names a user the authenticated caller "
         "may not act for.",
+        **error_example(403, "Forbidden"),
+    },
+}
+_MKDIR_READ_ONLY_RESPONSE: dict[int | str, dict[str, object]] = {
+    403: {
+        "model": ErrorEnvelope,
+        "description": "The path is protected, the device filesystem is read-only, "
+        "or the caller may not act for the named user.",
         **error_example(403, "Forbidden"),
     },
 }
@@ -448,6 +457,8 @@ async def upload_resource(
             # basename and silently drop the caller's directories.
             preserve_structure=True,
         )
+    except DeviceFileSystemReadOnlyError:
+        raise HTTPException(status_code=403, detail="Cannot write to a read-only path")
     except ValueError as exc:
         # Extension allow-list and size cap, raised as bare ValueError by the
         # service. Unmapped by ENVELOPE_ERRORS, so without this it would surface
@@ -783,7 +794,7 @@ async def preview_file(
     "/mkdir",
     status_code=201,
     response_model=Envelope[FileEntry],
-    responses=_READ_ONLY_RESPONSE,
+    responses=_MKDIR_READ_ONLY_RESPONSE,
 )
 @envelope_errors
 async def create_directory(
@@ -810,14 +821,17 @@ async def create_directory(
     entity_type, entity_id, engine_type = (
         coords.entity_type, coords.entity_id, coords.engine_type
     )
-    await file_svc.create_directory(
-        **(target or {}),
-        entity_type=entity_type,
-        entity_id=entity_id,
-        bot_id=bot_id,
-        engine_type=engine_type,
-        path=safe,
-    )
+    try:
+        await file_svc.create_directory(
+            **(target or {}),
+            entity_type=entity_type,
+            entity_id=entity_id,
+            bot_id=bot_id,
+            engine_type=engine_type,
+            path=safe,
+        )
+    except DeviceFileSystemReadOnlyError:
+        raise HTTPException(status_code=403, detail="Cannot write to a read-only path")
     return created(
         FileEntry(
             path=safe,

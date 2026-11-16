@@ -349,6 +349,9 @@ export interface FlowRun {
   origin_bot_id: string | null
   plugin_version: string | null
   engine: string | null
+  /** Raw API values; older servers may omit these fields. Display defaults belong in the UI. */
+  env?: string | null
+  tag?: string | null
   evolution_analysis_status?: 'analyzing' | 'completed' | 'failed' | null
   evolution_analyzed_at?: number | null
   workflow_version: number | null
@@ -525,6 +528,10 @@ export interface WorkflowSpec {
 
 /** One row of workflow_deploy_history (list payload, no spec_json). */
 export interface DeployHistoryItem {
+  /** DB pack identity is included only on the separately returned active record. */
+  packId?: string
+  /** Opaque baseline token included only on the separately returned active record. */
+  activeToken?: string
   deployNumber: number
   version: number
   tagName: string | null

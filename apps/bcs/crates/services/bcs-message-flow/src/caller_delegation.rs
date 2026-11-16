@@ -85,6 +85,69 @@ pub(crate) async fn prepare_assignment(
     }))
 }
 
+/// Native requests have no invocation key on the wire. Once a start has been
+/// claimed, require exact runtime material; never use session-capture fallback.
+/// The actual Managed attempt (or workflow lineage) remains authoritative.
+pub(crate) async fn prepare_native_assignment(
+    flow: &crate::BcsMessageFlow, command: &BotEventCommand, invocation: &str,
+    target_bot: &str, observed_attempt: u32, managed_parent: bool,
+) -> ServiceResult<CallerDelegationAssignment> {
+    // The event boundary has already canonicalized aliases. Use the exact
+    // scoped lookup (LIMIT 2), not the legacy run/request/downstream UNION.
+    let rows = match flow.managed_deliveries.as_ref() {
+        Some(service) => service.lookup(bcs_service_api::port::repo::message_delivery::DeliveryLookup::CanonicalRun {
+            bot: command.bot_id.clone(), session: command.bcs_session_id.clone().unwrap_or_default(),
+            run: command.run_id.clone(),
+        }).await.map_err(|_| refused("parent delivery lookup failed"))?,
+        None => Vec::new(),
+    };
+    if rows.len() > 1 || (managed_parent && rows.is_empty()) {
+        return Err(refused("parent delivery disappeared or is ambiguous"));
+    }
+    let context = match &flow.bot_run_context {
+        Some(port) => port.get_context(&command.run_id).await,
+        None => None,
+    }.ok_or_else(|| refused("parent execution context unavailable"))?;
+    // Refresh material and time after external reads; never reserve a stale snapshot.
+    let now = chrono::Utc::now().timestamp_millis();
+    let index = flow.caller_root_lineage.as_ref().ok_or_else(|| refused("caller lineage unavailable"))?;
+    let lineage = index.current(&command.run_id, now).ok_or_else(|| refused("caller lineage unavailable"))?;
+    validate_parent(&context, &lineage, command, now)?;
+    if observed_attempt == 0 || lineage.attempt != observed_attempt
+        || lineage.environment != bcs_config::resolve_env_str()
+        || context.run_id != command.run_id {
+        return Err(refused("parent execution attempt or environment mismatch"));
+    }
+    if let Some(row) = rows.first() {
+        if row.group_id != command.group_id || row.attempt_no != observed_attempt
+            || row.run_id.as_deref() != Some(command.run_id.as_str())
+            || !matches!(row.state.status,
+                bcs_domain::message_delivery::MessageDeliveryStatus::Dispatching
+                | bcs_domain::message_delivery::MessageDeliveryStatus::Running) {
+            return Err(refused("parent delivery is not active or attempt changed"));
+        }
+        // A durable Caller classification must not be downgraded to Human
+        // origin merely because execution material was lost.
+        if row.semantic_projection_json["caller_required"] == true
+            && row.semantic_projection_json["caller_delegation"]["execution_purpose"] != "delegation_only"
+            && !lineage.parent_execution {
+            return Err(refused("parent execution material unavailable"));
+        }
+    }
+    if lineage.parent_execution && index.current_parent_execution(
+        &lineage.environment, Some(&lineage.group_id), &lineage.session_id,
+        &lineage.root_run_id, &lineage.message_turn_id, &command.bot_id,
+        &command.run_id, observed_attempt, now,
+    ).is_none() {
+        return Err(refused("parent execution material unavailable"));
+    }
+    index.reserve_invocation(&command.run_id, invocation, target_bot, now)?;
+    Ok(CallerDelegationAssignment {
+        parent_run_id: command.run_id.clone(), parent_attempt: observed_attempt,
+        parent_bot_id: command.bot_id.clone(), invocation_id: invocation.into(),
+    })
+}
+
 /// The per-target issuance purpose for a derived (delegated) mark (spec
 /// §8.3, review P1-2 — the SAME per-target control-plane read the web_send
 /// admission performs): Caller-enabled target → `execution`; absent or

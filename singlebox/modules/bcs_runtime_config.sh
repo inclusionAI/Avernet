@@ -235,6 +235,8 @@ prepare_bcs_runtime_config() {
         local escaped_e2e_judge_url
         escaped_e2e_judge_url="$(toml_sed_replacement "${BCS_E2E_MOCK_BASE_URL}/v1")"
         sed_args+=(
+            # Exercise production instrumentation during live E2E traffic.
+            "-e" "/^\[metrics\]/,/^\[/{s|^enabled = .*|enabled = true|;}"
             "-e" "/^\[llm\]/,/^\[/{s|^type = \".*\"$|type = \"openai_compatible\"|;s|^base_url = \".*\"$|base_url = \"${escaped_e2e_judge_url}\"|;s|^api_key_env = \".*\"$|api_key_env = \"BCS_E2E_JUDGE_API_KEY\"|;s|^model = \".*\"$|model = \"e2e-judge\"|;s|^timeout_ms = [0-9][0-9]*$|timeout_ms = 30000|;}"
             "-e" "/^\[security.outbound_url\]/,/^\[/{s|^block_private_networks = .*|block_private_networks = false|;s|^allow_loopback = .*|allow_loopback = true|;}"
         )
@@ -335,6 +337,22 @@ prepare_bcs_runtime_config() {
             "${QWENWORK_PYTHON:-python3}" "${SCRIPT_DIR}/qwenwork_provider.py" config \
                 --state "$SINGLEBOX_QWENWORK_PROVIDER_STATE" --config "$config_file" || return 1
         done
+    fi
+    if [ -n "${SINGLEBOX_ACCEPTANCE_REPAIR_PROVIDER_FILE:-}" ]; then
+        if [ "${SINGLEBOX_COVERAGE:-}" != "1" ]; then
+            log_error "Collaboration repair Provider fixtures require coverage mode"
+            return 1
+        fi
+        # The initial start precedes provisioning. On the BCS-only restart,
+        # authorize the newly registered Provider in generated copies only.
+        if [ -f "$SINGLEBOX_ACCEPTANCE_REPAIR_PROVIDER_FILE" ]; then
+            local fixture_python="${PROJECT_ROOT}/apps/backend/.venv/bin/python"
+            for config_file in "$base_config" "$local_config"; do
+                "$fixture_python" "${PROJECT_ROOT}/singlebox/ci/collaboration_repair_provider.py" authorize \
+                    --fixture "$SINGLEBOX_ACCEPTANCE_REPAIR_PROVIDER_FILE" \
+                    --config "$config_file" || return 1
+            done
+        fi
     fi
     prepare_bcs_runtime_config_resources "$config_dir" || return 1
 

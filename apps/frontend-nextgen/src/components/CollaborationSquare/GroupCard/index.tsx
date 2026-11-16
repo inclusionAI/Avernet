@@ -6,7 +6,7 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import type { PublicGroup } from '@/domain/collaborationSquare/types';
 import { cn } from '@/utils/cn';
-import { Bot, MessageCircleMore, Share, UserRound, Users } from 'lucide-react';
+import { Bot, MessageCircleMore, Share, Users } from 'lucide-react';
 import type { ReactElement } from 'react';
 
 export interface GroupCardProps {
@@ -43,7 +43,7 @@ function GroupTextTooltip({ text, children }: { text: string; children: ReactEle
 
 /**
  * 公开协作群卡片（dmore 协作群卡片 268×148）：白底、16px 圆角、1px #EEE 描边、无底阴影；
- * 头部为「群名称 + 右上类型胶囊」，其下为 12px 群主/Owner 灰字行与描述，底部为 0.5px 分割线
+ * 头部为「群名称 + 右上类型胶囊」，其下为 12px 群主 Bot 灰字行与描述，底部为 0.5px 分割线
  * 上方「成员」文字 chip 与右侧 32px 方角图标按钮（默认无底色，hover 才出灰底）。
  */
 export default function GroupCard({ group, busy, onOpenMembers, onShare, onCreateSession }: GroupCardProps) {
@@ -71,15 +71,8 @@ export default function GroupCard({ group, busy, onOpenMembers, onShare, onCreat
             <GroupTypeBadge typeLabel={group.typeLabel} />
           </span>
         </div>
-        {/* 群主/Owner 行（dmore Frame 3/4）：12px 灰字 + 12px 小图标，与 BotCard 元信息行同规格。 */}
+        {/* 群主 Bot 行（公开目录不提供 Owner 用户）：12px 灰字 + 12px 小图标，与 BotCard 元信息行同规格。 */}
         <div className="mt-1.5 flex min-w-0 items-center gap-3 text-xs text-muted-foreground">
-          <GroupTextTooltip text={group.ownerUserName || '未公开'}>
-            <span tabIndex={0} className="flex min-w-0 max-w-[45%] items-center gap-1">
-              <UserRound aria-hidden className="h-3 w-3 shrink-0" />
-              <span className="sr-only">Owner 用户：</span>
-              <span className="truncate">{group.ownerUserName || '未公开'}</span>
-            </span>
-          </GroupTextTooltip>
           <GroupTextTooltip text={ownerBotLabel}>
             <span tabIndex={0} className="flex min-w-0 flex-1 items-center gap-1">
               <Bot aria-hidden className="h-3 w-3 shrink-0" />
@@ -145,7 +138,7 @@ export default function GroupCard({ group, busy, onOpenMembers, onShare, onCreat
 
 /**
  * 群卡加载骨架：逐区镜像真实群卡（dmore artboard-004）——头部名称行 + 右上 65×20 类型胶囊位、
- * 群主/Owner 灰字行、两行描述、分割线底部行（左侧「成员」chip 位 + 右侧 32px 图标钮位），
+ * 群主 Bot 灰字行、两行描述、分割线底部行（左侧「成员」chip 位 + 右侧 32px 图标钮位），
  * loading→loaded 切换时零跳版。占位块统一走 ui/Skeleton（脉冲叠色），容器与真卡同描边规格。
  */
 export function GroupCardSkeleton() {
@@ -156,7 +149,6 @@ export function GroupCardSkeleton() {
         <Skeleton.Block className="h-5 w-[65px] shrink-0 rounded-full" />
       </div>
       <div className="mt-1.5 flex items-center gap-3">
-        <Skeleton.Line className="w-1/4" />
         <Skeleton.Line className="w-1/3" />
       </div>
       <div className="mt-3 space-y-1.5">

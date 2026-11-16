@@ -26,7 +26,14 @@ class DeviceStatus(StrEnum):
     - RELEASED: Container destroyed (PaaS DESTROYED)
     - STOPPED: Device stopped (provider destroyed, record preserved for restart)
     - FAILED: Container failed or error state
-    - OFFLINE: Device is reachable but its daemon/service is not running
+    - OFFLINE: Connection lost, not necessarily the daemon state — written when
+      the host mng daemon disconnects (``LocalPaasService.handle_mng_disconnect``
+      sets the machine and its ACTIVE devices OFFLINE) or when a container
+      heartbeat reports a status other than "ok"
+      (``LocalPaasService.handle_heartbeat_containers``). OFFLINE alone does not
+      imply the device is reachable or that commands/restarts can be delivered;
+      a later heartbeat with status "ok" (e.g. after the host reconnects)
+      reconciles the device back to ACTIVE.
     """
 
     PENDING = "PENDING"

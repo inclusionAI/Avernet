@@ -1,14 +1,8 @@
-"""Routines group — ``/openapi/v1/bots/{bot_id}/routines`` (definition only).
-
-Scheduled/triggered agent tasks (the former "cron"), with a stable
-gateway-owned schema and a nested trigger. Handlers are stubs; every route
-requires an authenticated user principal.
-"""
+"""Authenticated routines over the existing Cron runtime-targeting service."""
 
 from __future__ import annotations
 
-from datetime import datetime, timezone as _tz
-from typing import Annotated, Any
+from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Path, Query, Request
 
@@ -20,39 +14,35 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
     BotIdPath,
     Deleted,
     Envelope,
-    Page,
     PageParamsDep,
 )
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     created,
     envelope,
     envelope_errors,
-    page as page_envelope,
 )
 from agentclaw.community.api.cron_relay_service import CronRelayServiceProtocol
-from agentclaw.community.core.cron.errors import (
-    CronApiTimeoutError,
-    CronRelayError,
-)
-from agentclaw.community.core.cron.services.cron_runtime_targets import (
-    RUNTIME_STAGE_DRAFT,
-)
+from agentclaw.community.core.cron.errors import CronRelayError
 from agentclaw.community.di import Injected
-from agentclaw.community.log import get_logger
+
+from .params import (
+    RoutineActorDep, RuntimeStageQuery, DeviceUuidQuery, OperatorIdQuery, target_parameters,
+)
+from .converter import _map_routine, failed_targets, map_operation_batch, map_runs, map_trigger
+from .relay import call_cron
 
 from .schemas import (
     Routine,
-    RoutineSpec,
+    RoutineTargetSpec,
+    RoutinePage,
+    RoutineRunPage,
+    RoutineOperationBatch,
     RoutineRun,
     RoutineUpdate,
-    ScheduleTrigger,
-    _coerce_timeout_secs,
 )
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 
 router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/routines", tags=["routines"], route_class=PublicAPIRoute)
-
-logger = get_logger()
 
 #: The path parameter naming the routine an operation addresses.
 RoutineIdPath = Annotated[
@@ -70,73 +60,7 @@ RoutineIdPath = Annotated[
 #: included.
 
 
-def _ms_to_iso(ms: Any) -> str:
-    """Convert epoch milliseconds to an ISO 8601 string; ``""`` on falsy/invalid."""
-    if not ms:
-        return ""
-    try:
-        return datetime.fromtimestamp(int(ms) / 1000, tz=_tz.utc).isoformat()
-    except (TypeError, ValueError):
-        return ""
-
-
-def _map_routine(data: dict) -> Routine:
-    """Map an engine adapter cron dict → openapi Routine schema.
-
-    Field source: ``plugins/local/device_adapter_transport.py`` `_build_item`
-    (``id`` / ``name`` / ``enabled`` / ``schedule{expr,tz}`` /
-    ``payload.message`` / ``payload.timeout_secs`` / ``payload.model`` /
-    ``created_at_ms`` / ``updated_at_ms``) plus the top-level ``bot_id``
-    injected by ``_decorate_runtime_item`` in ``cron_runtime_targets.py``.
-    The environment settings live in the payload — nothing in the produce
-    chain ever reports them at the item top level.
-    """
-    sched = data.get("schedule") or {}
-    payload = data.get("payload") or {}
-    model = payload.get("model")
-    timeout_secs = _coerce_timeout_secs(payload.get("timeout_secs"))
-    return Routine(
-        routine_id=str(data.get("id", "")),
-        bot_id=str(data.get("bot_id", "")),
-        bot_name=str(data.get("bot_name", "")) or None,
-        owner_id=str(data.get("owner_id", "")) or None,
-        runtime_stage=str(data.get("runtime_stage", "")) or None,
-        name=str(data.get("name", "") or ""),
-        trigger=ScheduleTrigger(type="schedule", cron=str(sched.get("expr", ""))),
-        command=str(payload.get("message", "") or ""),
-        enabled=bool(data.get("enabled", False)),
-        timezone=sched.get("tz") or None,
-        model=str(model) if model else None,
-        timeout_secs=timeout_secs,
-        gmt_create=_ms_to_iso(data.get("created_at_ms")),
-        gmt_modified=_ms_to_iso(data.get("updated_at_ms")),
-    )
-
-
-def _map_run(data: dict, routine_id: str) -> RoutineRun:
-    """Map an engine adapter run dict → openapi RoutineRun.
-
-    Field source: adapter ``runs[]`` entries from
-    ``plugins/local/device_adapter_transport.py`` carry ``job_id`` +
-    ``started_at_ms`` / ``finished_at_ms`` / ``status`` / ``error`` /
-    ``duration_ms``. ``RoutineRun`` has no duration field, so we carry
-    status + timestamps and synthesize ``run_id`` from ``job_id`` (test
-    stubs sometimes use ``run_id`` — accept both). ``_ms_to_iso`` returns
-    ``""`` on falsy; coerce to ``None`` to match the ``str | None`` schema.
-    """
-    job_id = data.get("job_id") or data.get("run_id") or data.get("id") or ""
-    started = _ms_to_iso(data.get("started_at_ms")) or None
-    finished = _ms_to_iso(data.get("finished_at_ms")) or None
-    return RoutineRun(
-        run_id=str(job_id),
-        routine_id=routine_id,
-        status=str(data.get("status", "") or ""),
-        started_at=started,
-        finished_at=finished,
-    )
-
-
-@router.get("", response_model=Envelope[Page[Routine]])
+@router.get("", response_model=Envelope[RoutinePage])
 @envelope_errors
 async def list_routines(
     page: PageParamsDep,
@@ -152,21 +76,22 @@ async def list_routines(
         ),
     ] = None,
     factory: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
-) -> Envelope[Page[Routine]]:
+    runtime_stage: RuntimeStageQuery = None,
+    device_uuid: DeviceUuidQuery = None,
+    operator_id: OperatorIdQuery = None,
+    actor: RoutineActorDep = None,
+) -> Envelope[RoutinePage]:
     """List a bot's routines (paginated)."""
     # `status` is an openapi query hint with no direct field on `Routine`
     # (which only carries `enabled`). It is currently a no-op: the adapter
     # does not expose a status filter at the list seam, so we return the full
     # set and let the client filter on `enabled`. Wire a server-side filter
     # here only if/when the engine surfaces a status dimension.
-    # Draft only, like every other route in this group: the public surface
-    # operates a bot's pre-publication workspace, so a service bot's published
-    # verify/online runtimes are neither listed nor queried here.
-    result = await factory.list_all_crons(
+    result = await call_cron(factory.list_all_crons, request=request, actor=actor,
         user_id=owner_id,
         nick_name=owner_id,
         bot_id=bot_id,
-        runtime_stage=RUNTIME_STAGE_DRAFT,
+        **target_parameters(runtime_stage, device_uuid, operator_id, actor=actor, user_id=user_id),
     )
     data = result.get("data") if isinstance(result, dict) else None
     if isinstance(data, list):
@@ -179,18 +104,19 @@ async def list_routines(
     start = (page.page - 1) * page.page_size
     end = start + page.page_size
     page_items = mapped[start:end]
-    return page_envelope(len(mapped), page_items, request)
+    return envelope(RoutinePage(total=len(mapped), items=page_items, failed_targets=failed_targets(result)), request)
 
 
 @router.post("", status_code=201, response_model=Envelope[Routine])
 @envelope_errors
 async def create_routine(
     bot_id: BotIdPath,
-    body: RoutineSpec,
+    body: RoutineTargetSpec,
     user_id: UserIdDep,
     owner_id: OwnerIdDep,
     request: Request,
     factory: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
+    actor: RoutineActorDep = None,
 ) -> Envelope[Routine]:
     """Create a routine on a bot.
 
@@ -218,11 +144,13 @@ async def create_routine(
     }
     if body.model:
         adapter_body["model"] = body.model
-    result = await factory.create_cron(
+    result = await call_cron(factory.create_cron, request=request, actor=actor,
         bot_id=bot_id,
         user_id=owner_id,
         nick_name=owner_id,
         body=adapter_body,
+        **target_parameters(getattr(body, "runtime_stage", None), getattr(body, "device_uuid", None),
+                            getattr(body, "operator_id", None), actor=actor, user_id=user_id),
     )
     data = result.get("data") if isinstance(result, dict) else None
     if not isinstance(data, dict):
@@ -239,6 +167,10 @@ async def get_routine(
     bot_id: BotIdPath,
     request: Request,
     factory: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
+    runtime_stage: RuntimeStageQuery = "draft",
+    device_uuid: DeviceUuidQuery = None,
+    operator_id: OperatorIdQuery = None,
+    actor: RoutineActorDep = None,
 ) -> Envelope[Routine]:
     """Get a routine.
 
@@ -250,8 +182,9 @@ async def get_routine(
     # named. It is on the path now, ahead of the routine. The owner is the
     # addressed one (OwnerIdDep); the cron relay still attributes the job to
     # that owner's identity. Missing/non-dict data collapses to 404.
-    result = await factory.get_cron_detail(
-        bot_id=bot_id, user_id=owner_id, nick_name=owner_id, task_id=routine_id
+    result = await call_cron(factory.get_cron_detail, request=request, actor=actor,
+        bot_id=bot_id, user_id=owner_id, nick_name=owner_id, task_id=routine_id,
+        **target_parameters(runtime_stage, device_uuid, operator_id, actor=actor, user_id=user_id, default_stage="draft"),
     )
     data = result.get("data") if isinstance(result, dict) else None
     if not isinstance(data, dict):
@@ -259,7 +192,7 @@ async def get_routine(
     return envelope(_map_routine(data), request)
 
 
-@router.patch("/{routine_id}", response_model=Envelope[Routine])
+@router.patch("/{routine_id}", response_model=Envelope[Routine | RoutineOperationBatch])
 @envelope_errors
 async def update_routine(
     routine_id: RoutineIdPath,
@@ -269,6 +202,10 @@ async def update_routine(
     bot_id: BotIdPath,
     request: Request,
     factory: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
+    runtime_stage: RuntimeStageQuery = "draft",
+    device_uuid: DeviceUuidQuery = None,
+    operator_id: OperatorIdQuery = None,
+    actor: RoutineActorDep = None,
 ) -> Envelope[Routine]:
     """Update a routine. Omitted fields are left unchanged.
 
@@ -299,13 +236,16 @@ async def update_routine(
         update_body["timeout_secs"] = body.timeout_secs
     if body.trigger is not None:
         update_body["schedule"] = body.trigger.cron
-    result = await factory.update_cron(
+    result = await call_cron(factory.update_cron, request=request, actor=actor,
         bot_id=bot_id,
         user_id=owner_id,
         nick_name=owner_id,
         task_id=routine_id,
         body=update_body,
+        **target_parameters(runtime_stage, device_uuid, operator_id, actor=actor, user_id=user_id, default_stage="draft"),
     )
+    if isinstance(result.get("data"), dict) and "results" in result["data"]:
+        return envelope(map_operation_batch(result, routine_id, run=False), request)
     data = result.get("data") if isinstance(result, dict) else None
     if not isinstance(data, dict):
         raise HTTPException(status_code=404, detail="Routine not found")
@@ -321,6 +261,10 @@ async def delete_routine(
     bot_id: BotIdPath,
     request: Request,
     factory: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
+    runtime_stage: RuntimeStageQuery = "draft",
+    device_uuid: DeviceUuidQuery = None,
+    operator_id: OperatorIdQuery = None,
+    actor: RoutineActorDep = None,
 ) -> Envelope[Deleted]:
     """Delete a routine.
 
@@ -328,21 +272,22 @@ async def delete_routine(
     answers 404 and a timeout answers 502.
     """
     # C3: the bot is named on the path, ahead of the routine.
-    # delete_cron only operates on the draft stage; a published-stage delete
+    # Without explicit targeting, delete_cron only accepts draft; a published-stage delete
     # raises CronRelayError (error_code 403), mapped here (the code is dynamic
     # per-raise, so not in the static ENVELOPE_ERRORS map). The engine result
     # distinguishes timeout-vs-missing only via its error text today; a
     # structured engine error_code would make that precise (follow-up).
     try:
-        result = await factory.delete_cron(
-            bot_id=bot_id, user_id=owner_id, nick_name=owner_id, task_id=routine_id
+        result = await call_cron(factory.delete_cron, request=request, actor=actor, check_success=False,
+            bot_id=bot_id, user_id=owner_id, nick_name=owner_id, task_id=routine_id,
+        **target_parameters(runtime_stage, device_uuid, operator_id, actor=actor, user_id=user_id, default_stage="draft"),
         )
     except CronRelayError as e:
         # published-stage delete rejected — CronRelayError carries the engine's
         # error_code (dynamic, so not in the static ENVELOPE_ERRORS map).
         raise HTTPException(
-            status_code=getattr(e, "error_code", None) or 500, detail=str(e)
-        ) from e
+            status_code=getattr(e, "error_code", None) or 500, detail="Cron relay service error"
+        ) from None
     success = bool(result.get("success")) if isinstance(result, dict) else False
     if not success:
         error = str(result.get("error", "") or "") if isinstance(result, dict) else ""
@@ -354,7 +299,7 @@ async def delete_routine(
     return envelope(Deleted(deleted=True), request)
 
 
-@router.post("/{routine_id}/run", response_model=Envelope[RoutineRun])
+@router.post("/{routine_id}/run", response_model=Envelope[RoutineRun | RoutineOperationBatch])
 @envelope_errors
 async def run_routine(
     routine_id: RoutineIdPath,
@@ -363,6 +308,10 @@ async def run_routine(
     bot_id: BotIdPath,
     request: Request,
     factory: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
+    runtime_stage: RuntimeStageQuery = "draft",
+    device_uuid: DeviceUuidQuery = None,
+    operator_id: OperatorIdQuery = None,
+    actor: RoutineActorDep = None,
 ) -> Envelope[RoutineRun]:
     """Trigger a routine now.
 
@@ -377,25 +326,14 @@ async def run_routine(
     # ``ran=<routine id>, status=not_due`` and ``bool(ran)`` is true, so the old
     # mapping reported that no-op as ``completed``.  Force the trigger and read
     # the runtime status rather than treating its opaque routine id as a bool.
-    try:
-        result = await factory.run_cron(
-            bot_id=bot_id,
-            user_id=owner_id,
-            nick_name=owner_id,
-            task_id=routine_id,
-            force=True,
-        )
-    except (CronRelayError, CronApiTimeoutError):
-        # Let the ENVELOPE_ERRORS mapping handle these; the fixed public message
-        # is applied by the app-level envelope handler.
-        raise
-    except Exception as exc:
-        # ValueError ("Bot has no device binding") and other non-ENVELOPE_ERRORS
-        # exceptions are translated here so the public response is the fixed
-        # "Cron relay service error" envelope (502), not a vague 500 with an
-        # internal identifier like ``bot_id`` leaking into it.
-        logger.warning("[run_routine] routine trigger relay failed: %s", exc)
-        raise CronRelayError("routine trigger failed", error_code=502) from exc
+    result = await call_cron(factory.run_cron, request=request, actor=actor,
+        bot_id=bot_id,
+        user_id=owner_id,
+        nick_name=owner_id,
+        task_id=routine_id,
+        force=True,
+        **target_parameters(runtime_stage, device_uuid, operator_id, actor=actor, user_id=user_id, default_stage="draft"),
+    )
     if not isinstance(result, dict) or not result.get("success", False):
         # Routed via the ``@envelope_errors`` decorator to the ENVELOPE_ERRORS
         # entry for ``CronRelayError`` (502, fixed public "Cron relay service
@@ -407,45 +345,14 @@ async def run_routine(
     if not isinstance(data, dict):
         raise CronRelayError("routine trigger returned no data", error_code=502)
 
-    runtime_status = str(data.get("status", "") or "").lower()
-    reason = str(data.get("reason", "") or "")
-    ran = data.get("ran")
-    if runtime_status in {"dispatched", "started", "running", "success", "completed"}:
-        status = "completed"
-    elif runtime_status in {"already_running", "not_due", "skipped", "failed", "error"}:
-        status = "failed"
-    elif isinstance(ran, bool):
-        status = "completed" if ran else ("failed" if reason else "unknown")
-    elif ran:
-        # Claude Code currently acknowledges a successful trigger as
-        # ``{"ran": <routine id>}`` without a separate status.
-        status = "completed"
-    elif reason:
-        status = "failed"
-    else:
-        status = "unknown"
-
-    upstream_run_id = data.get("run_id") or data.get("runId")
-    run_id = (
-        str(upstream_run_id)
-        if upstream_run_id
-        else (f"{routine_id}-{datetime.now(_tz.utc).isoformat()}")
-    )
-    return envelope(
-        RoutineRun(
-            run_id=run_id,
-            routine_id=routine_id,
-            status=status,
-            started_at=None,
-            finished_at=None,
-        ),
-        request,
-    )
+    if "results" in data:
+        return envelope(map_operation_batch(result, routine_id, run=True), request)
+    return envelope(map_trigger(data, routine_id), request)
 
 
 @router.get(
     "/{routine_id}/runs",
-    response_model=Envelope[Page[RoutineRun]],
+    response_model=Envelope[RoutineRunPage],
 )
 @envelope_errors
 async def list_routine_runs(
@@ -456,7 +363,11 @@ async def list_routine_runs(
     bot_id: BotIdPath,
     request: Request,
     factory: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
-) -> Envelope[Page[RoutineRun]]:
+    runtime_stage: RuntimeStageQuery = None,
+    device_uuid: DeviceUuidQuery = None,
+    operator_id: OperatorIdQuery = None,
+    actor: RoutineActorDep = None,
+) -> Envelope[RoutineRunPage]:
     """List a routine's execution history, most recent first.
 
     The engine keeps a bounded history per routine, so deep pages come back
@@ -468,22 +379,11 @@ async def list_routine_runs(
     # passthrough; _decorate_single_result only adds bot_metadata fields to
     # data, leaving runs intact). Each entry maps via _map_run; pagination is
     # client-side over the fetched set.
-    result = await factory.get_cron_runs(
-        bot_id=bot_id, user_id=owner_id, nick_name=owner_id, task_id=routine_id
+    result = await call_cron(factory.get_cron_runs, request=request, actor=actor,
+        bot_id=bot_id, user_id=owner_id, nick_name=owner_id, task_id=routine_id,
+        **target_parameters(runtime_stage, device_uuid, operator_id, actor=actor, user_id=user_id, default_stage="draft"),
     )
-    runs: list[dict] = []
-    if isinstance(result, dict):
-        data = result.get("data")
-        if isinstance(data, dict):
-            raw_runs = data.get("runs") or []
-        elif isinstance(data, list):
-            # Defensive: engine ever returns data as a bare list of runs.
-            raw_runs = data
-        else:
-            raw_runs = result.get("runs") or []
-        runs = [r for r in raw_runs if isinstance(r, dict)]
-    mapped = [_map_run(r, routine_id) for r in runs]
+    mapped = map_runs(result, routine_id)
     start = (page.page - 1) * page.page_size
-    end = start + page.page_size
-    page_items = mapped[start:end]
-    return page_envelope(len(mapped), page_items, request)
+    return envelope(RoutineRunPage(total=len(mapped), items=mapped[start:start + page.page_size],
+                                   failed_targets=failed_targets(result)), request)

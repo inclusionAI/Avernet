@@ -170,7 +170,7 @@ impl PersistentBotRepo {
             let bot_info_params = columns.bot_info_params;
             if let Some(token) = session_token {
                 let sql = format!(
-                    "UPDATE bcs_bots SET name = ?, {bot_info_assignment}, session_token = ?, visibility = ?, agent_code = ?, updated_at = CURRENT_TIMESTAMP WHERE bot_uuid = ? AND env = ?"
+                    "UPDATE bcs_bots SET name = CASE WHEN agent_card IS NULL THEN ? ELSE name END, {bot_info_assignment}, session_token = ?, visibility = ?, agent_code = ?, updated_at = CURRENT_TIMESTAMP WHERE bot_uuid = ? AND env = ?"
                 );
                 let mut params = vec![Value::from(columns.name.as_str())];
                 params.extend(bot_info_params);
@@ -184,7 +184,7 @@ impl PersistentBotRepo {
                 self.db_execute_affected(&sql, params).await
             } else {
                 let sql = format!(
-                    "UPDATE bcs_bots SET name = ?, {bot_info_assignment}, visibility = ?, agent_code = ?, updated_at = CURRENT_TIMESTAMP WHERE bot_uuid = ? AND env = ?"
+                    "UPDATE bcs_bots SET name = CASE WHEN agent_card IS NULL THEN ? ELSE name END, {bot_info_assignment}, visibility = ?, agent_code = ?, updated_at = CURRENT_TIMESTAMP WHERE bot_uuid = ? AND env = ?"
                 );
                 let mut params = vec![Value::from(columns.name.as_str())];
                 params.extend(bot_info_params);
@@ -463,5 +463,46 @@ impl PersistentBotRepo {
             .await
             .ok()
             .flatten()
+    }
+}
+
+impl PersistentBotRepo {
+    /// Legacy discovery keeps healthy cached candidates fast, but never returns
+    /// metadata invalidated after a committed privacy change or Card update.
+    /// Only invalidated IDs use the existing 100-ID batched registry loader.
+    pub(super) async fn refresh_invalidated_metadata(
+        &self,
+        candidates: Vec<bcs_service_api::RegisteredBot>,
+    ) -> Vec<bcs_service_api::RegisteredBot> {
+        let env = resolve_env();
+        let stale: std::collections::HashSet<String> = {
+            let state = self
+                .registry_metadata
+                .lock()
+                .expect("registry metadata state poisoned");
+            if state.permanent.is_empty() && state.in_flight.is_empty() { return candidates; }
+            candidates.iter()
+                .filter(|bot| {
+                    let key = (env.clone(), bot.bot_uuid.clone());
+                    state.permanent.contains(&key) || state.in_flight.contains(&key)
+                })
+                .map(|bot| bot.bot_uuid.clone()).collect()
+        };
+        if stale.is_empty() { return candidates; }
+        let ids = stale.iter().cloned().collect::<Vec<_>>();
+        let refreshed = match bcs_service_api::BotRepoPort::try_get_many(self, &ids).await {
+            Ok(records) => records,
+            Err(error) => {
+                warn!(request_id = %bcs_observability::CurrentRequestId, %error,
+                    "discovery: invalidated metadata unavailable; omitting affected Bots");
+                Vec::new()
+            }
+        };
+        let mut refreshed = refreshed.into_iter()
+            .map(|bot| (bot.bot_uuid.clone(), bot)).collect::<std::collections::HashMap<_, _>>();
+        candidates.into_iter().filter_map(|bot| {
+            if stale.contains(&bot.bot_uuid) { refreshed.remove(&bot.bot_uuid) }
+            else { Some(bot) }
+        }).collect()
     }
 }

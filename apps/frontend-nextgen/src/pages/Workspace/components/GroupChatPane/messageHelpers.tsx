@@ -1,11 +1,14 @@
 import { Avatar } from '@/components/ui';
+import { BotDisplayAvatar } from '@/components/Workspace/BotDisplayAvatar';
 import { normalizeMessageHumanId } from '@/components/Workspace/messagePresentation';
-import type { GroupView, ParticipantView } from '@/domain/collaboration';
+import type { GroupView, ParticipantSummaryView } from '@/domain/collaboration';
+import { getDisplayParticipants } from '@/domain/collaboration/participantPresentation';
 import { buildMessageBlocks } from '@/services/workspace/messageBlockBuilder';
 import { sessionFileService } from '@/services/workspace/sessionFileService';
 import { formatChatTime } from '@/utils/format';
 import type { Block, ChatMessage } from '@tc-chat/core';
 import type { ReactNode } from 'react';
+import { resolveBotSenderPresentation } from './botSenderPresentation';
 
 /** 取消息渲染块：与单聊共用图片附件、失效图片和文本回退规则。 */
 export function getMessageBlocks(message: ChatMessage, sessionId?: string): Block[] {
@@ -91,7 +94,7 @@ function renderBotAvatar(name: string, avatarUrl?: string, fallbackAvatar?: stri
 }
 
 function participantSender(
-  participant: ParticipantView,
+  participant: ParticipantSummaryView,
   displayName?: string,
   fallbackAvatar?: string,
 ): { name: string; avatar: ReactNode } | undefined {
@@ -106,14 +109,15 @@ function participantSender(
 }
 
 /**
- * 解析消息发送者展示信息（头像 + 名称）。优先使用消息本地回显信息，其次按 senderId
- * 匹配会话成员/群成员；assistant 保留 WS senderName / botName / bot id 兜底，user 使用稳定的「未命名成员」兜底。
+ * 解析消息发送者展示信息（头像 + 名称）。user 使用稳定的「未命名成员」兜底；assistant 的名称仍优先
+ * 可读的 senderName / botName，头像则一律按 botUuid/senderId 匹配会话/群展示成员（见
+ * resolveBotSenderPresentation），名称不短路头像查找。
  * 该解析只消费现有消息 extra 与会话参与者，不改变后端消息或请求合同。
  */
 export function resolveSender(
   message: ChatMessage,
   group: GroupView | null,
-  sessionParticipants?: ParticipantView[],
+  sessionParticipants?: ParticipantSummaryView[],
   userAvatarUrl?: string,
   userIdentityId?: string | null,
   userIdentityName?: string | null,
@@ -122,10 +126,7 @@ export function resolveSender(
   const senderName = typeof message.extra?.senderName === 'string' ? message.extra.senderName : undefined;
   const senderAvatarUrl =
     typeof message.extra?.senderAvatarUrl === 'string' ? message.extra.senderAvatarUrl : undefined;
-  const botUuid = typeof message.extra?.botUuid === 'string' ? message.extra.botUuid : undefined;
-  const botName = typeof message.extra?.botName === 'string' ? message.extra.botName : undefined;
-  const senderDisplayName = senderName?.trim() || undefined;
-  const candidatePools: ParticipantView[][] = [sessionParticipants ?? [], group?.participants ?? []];
+  const candidatePools: ParticipantSummaryView[][] = [sessionParticipants ?? [], group?.participants ?? []];
 
   if (message.role === 'user') {
     const humanParticipant = senderId
@@ -158,27 +159,11 @@ export function resolveSender(
     return { name: fallbackName, avatar: renderBotAvatar(fallbackName) };
   }
 
-  const isPendingPlaceholder = message.status === 'pending' && !senderDisplayName && !botName && !botUuid && !senderId;
-  if (isPendingPlaceholder) return undefined;
-
-  const wsSenderName = senderDisplayName !== botUuid && senderDisplayName !== senderId ? senderDisplayName : undefined;
-  if (wsSenderName) {
-    return { name: wsSenderName, avatar: renderBotAvatar(wsSenderName, senderAvatarUrl) };
-  }
-
-  const knownBotName = botName !== botUuid && botName !== senderId ? botName : undefined;
-  if (knownBotName) {
-    return { name: knownBotName, avatar: renderBotAvatar(knownBotName, senderAvatarUrl) };
-  }
-
-  const lookupIds = [botUuid, senderId].filter((value): value is string => Boolean(value));
-  for (const id of lookupIds) {
-    for (const pool of candidatePools) {
-      const participant = pool.find((item) => item.actorId === id && item.kind === 'bot');
-      if (participant) return participantSender(participant);
-    }
-  }
-
-  const fallbackName = botName || botUuid || senderId || 'Bot';
-  return { name: fallbackName, avatar: renderBotAvatar(fallbackName) };
+  const sender = resolveBotSenderPresentation(
+    message, sessionParticipants ?? [], group ? getDisplayParticipants(group) : [],
+  );
+  return sender ? {
+    name: sender.name,
+    avatar: <BotDisplayAvatar botId={sender.botId} name={sender.name} avatarUrl={sender.avatarUrl} size={32} />,
+  } : undefined;
 }

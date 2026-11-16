@@ -3,8 +3,10 @@
  *
  *   POST /auto-heal/diagnose
  *   GET  /auto-heal/diagnoses/:diagnosisId
- *   POST /auto-heal/save      — save a fixed spec to the workflow database
+ *   POST /auto-heal/save      — save a fixed spec to the workflow database and Git Pack
+ *   POST /auto-heal/editor-save-first-draft — save an Editor draft with mandatory snapshot preconditions
  *   POST /auto-heal/deploy    — deploy a confirmed saved candidate with git tag + history
+ *   POST /auto-heal/editor-deploy — deploy with editor tree-preservation checks
  *   POST /auto-heal/apply     — DEPRECATED, returns 410 unless opt-in
  *   POST /auto-heal/run       — run on the source Bot and lifecycle stage
  */
@@ -19,13 +21,17 @@ import { createAutoHealRunRouter, type AutoHealRunSender } from "./auto-heal-run
 import { resolveAutoHealGitSettings } from "../config/auto-heal-git-config.js";
 import { WorkflowSpecRepository } from "../repositories/workflow-spec-repository.js";
 import { WorkflowDeployHistoryRepository } from "../repositories/workflow-deploy-history-repository.js";
-import { AutoHealDeployService } from "../services/auto-heal-deploy-service.js";
-import { AutoHealSaveService } from "../services/auto-heal-save-service.js";
+import { AutoHealDeployService, type AuthorizeSnapshotDeploy } from "../services/auto-heal-deploy-service.js";
+import { AutoHealSaveService, type AutoHealUnifiedSaveInput, type AutoHealUnifiedSaveResolver } from "../services/auto-heal-save-service.js";
 import type { ClawFlowsGitConfig, GitAuthor } from "../services/clawflows-git-client.js";
 
 export interface AutoHealRouteDependencies {
   /** Host-verified identity; absence fails closed for save and deploy. */
   resolvePrincipal?: (req: Request) => Promise<{ actorId: string } | null>;
+  /** Trusted exact Pack deployment ACL; absent means both Editor deploy routes are unavailable. */
+  authorizeSnapshotDeploy?: AuthorizeSnapshotDeploy;
+  /** Trusted opt-in composition; absent means the separate unified protocol is unavailable. */
+  resolveUnifiedSave?: AutoHealUnifiedSaveResolver;
   db: IDatabase;
   workflowSpecRepo: WorkflowSpecRepository;
   deployHistoryRepo: WorkflowDeployHistoryRepository;
@@ -53,13 +59,27 @@ export function createAutoHealRouter(deps: AutoHealRouteDependencies): Router {
     facadeRepo: deps.facadeRepo ?? null,
   }));
 
+  // Availability only, not a per-workflow authorization grant. Hosts opt in by
+  // providing the trusted resolver and must enforce unified-save's documented
+  // transport guards; the actual save reauthorizes the actor and workflow.
+  router.get("/capabilities", asyncHandler(async (req: Request, res: Response) => {
+    res.set("Cache-Control", "no-store");
+    try {
+      const actor = (await deps.resolvePrincipal?.(req))?.actorId?.trim();
+      if (!actor || actor === "unknown") { res.status(401).json({ code: "AUTHENTICATION_REQUIRED" }); return; }
+      res.json({ autoHealUnifiedSave: typeof deps.resolveUnifiedSave === "function" ? "v1" : false });
+    } catch {
+      res.status(500).json({ code: "CAPABILITIES_UNAVAILABLE" });
+    }
+  }));
+
   router.post(
     "/save",
     asyncHandler(async (req: Request, res: Response) => {
       try {
-        const { workflowId, spec, packId, diagnosisId, note, requestId, sourceCommit, expectedSavedHead, createOnly, expectedDraftAbsent, expectedActiveDeployNumber } = req.body as {
+        const { workflowId, spec, packId, diagnosisId, note, requestId, sourceCommit, expectedSavedHead, createOnly, expectedDraftAbsent, expectedActiveDeployNumber, expectedActiveToken } = req.body as {
           workflowId?: string;
-          createOnly?: boolean; expectedDraftAbsent?: true; expectedActiveDeployNumber?: number; requestId?: string; sourceCommit?: string; expectedSavedHead?: string | null;
+          createOnly?: boolean; expectedDraftAbsent?: true; expectedActiveDeployNumber?: number; expectedActiveToken?: string; requestId?: string; sourceCommit?: string; expectedSavedHead?: string | null;
           spec?: unknown;
           packId?: string | null;
           diagnosisId?: string | null;
@@ -81,23 +101,25 @@ export function createAutoHealRouter(deps: AutoHealRouteDependencies): Router {
           res.status(400).json({ error: "Bad Request", code: "INVALID_REQUEST", message: "expectedActiveDeployNumber is required" });
           return;
         }
+        if (expectedActiveToken !== undefined && (expectedDraftAbsent !== true || expectedActiveDeployNumber === undefined
+          || typeof expectedActiveToken !== "string" || !/^[0-9a-f]{64}$/i.test(expectedActiveToken))) {
+          res.status(400).json({ error: "Bad Request", code: "INVALID_REQUEST", message: "expectedActiveToken requires expectedDraftAbsent, expectedActiveDeployNumber and a 64-character hex token" });
+          return;
+        }
         const actor = (await deps.resolvePrincipal?.(req))?.actorId?.trim();
         if (!actor || actor === "unknown") {
           res.status(401).json({ error: "Unauthorized", message: "Actor is required" });
           return;
         }
-        // Existing documents save to the database even without Git settings.
-        // Creating a Pack initializes saved/<id>, so resolve Git only then.
-        const settings = createOnly === true
-          ? await resolveAutoHealGitSettings(deps.db, deps.gitConfig, deps.gitAuthor)
-          : undefined;
+        // Every save requires Git after the database commit.
+        const settings = await resolveAutoHealGitSettings(deps.db, deps.gitConfig, deps.gitAuthor);
         const saveService = new AutoHealSaveService(
           deps.db,
           deps.workflowSpecRepo,
           deps.deployHistoryRepo,
           deps.botPermRepo,
-          settings?.gitConfig,
-          settings?.gitAuthor,
+          settings.gitConfig,
+          settings.gitAuthor,
         );
         const result = await saveService.save({
           workflowId,
@@ -105,7 +127,7 @@ export function createAutoHealRouter(deps: AutoHealRouteDependencies): Router {
           packId: packId ?? null,
           diagnosisId: diagnosisId ?? null,
           note: note ?? null,
-          actorId: actor, requestId, sourceCommit, expectedSavedHead, createOnly, expectedDraftAbsent, expectedActiveDeployNumber,
+          actorId: actor, requestId, sourceCommit, expectedSavedHead, createOnly, expectedDraftAbsent, expectedActiveDeployNumber, expectedActiveToken,
         });
         res.status(200).json(result);
       } catch (err) {
@@ -116,16 +138,91 @@ export function createAutoHealRouter(deps: AutoHealRouteDependencies): Router {
     }),
   );
 
-  router.post("/deploy", asyncHandler(async (req: Request, res: Response) => {
+  // Deliberately separate from /save: older servers must not silently ignore
+  // the caller's baselines. Host must authenticate, enforce CSRF/origin,
+  // reject duplicate envelope keys before parsing, limit the body, suppress body
+  // logs, and apply timeouts/rate limits before enabling this protocol.
+  router.post("/unified-save", asyncHandler(async (req: Request, res: Response) => {
+    res.set("Cache-Control", "no-store");
     try {
-      const { workflowId, packId, candidateCommit, requestId, diagnosisId, sourceFlowId, note, autoRun } = req.body ?? {};
+      const actor = (await deps.resolvePrincipal?.(req))?.actorId?.trim();
+      if (!actor || actor === "unknown") { res.status(401).json({ code: "AUTHENTICATION_REQUIRED" }); return; }
+      const body = req.body;
+      const fields = ["requestId", "workflowId", "packId", "sourceVersion", "sourceCommit", "expectedSavedHead", "expectedDraftToken", "specJson"];
+      if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).length !== fields.length
+        || Object.keys(body).some(key => !fields.includes(key)) || typeof body.workflowId !== "string"
+        || typeof body.requestId !== "string" || typeof body.specJson !== "string") {
+        res.status(400).json({ code: "INVALID_REQUEST" }); return;
+      }
+      const service = new AutoHealSaveService(deps.db, deps.workflowSpecRepo, deps.deployHistoryRepo, deps.botPermRepo);
+      const result = await service.saveUnified({ ...body, actorId: actor } as AutoHealUnifiedSaveInput, deps.resolveUnifiedSave);
+      res.status(result.outcome === "confirmed" ? 200 : 409).json(result);
+    } catch (error) {
+      const failure = error as { status?: number; code?: string };
+      res.status(safeStatus(failure.status)).json({ code: failure.code ?? "UNIFIED_SAVE_FAILED" });
+    }
+  }));
+
+  // This endpoint is a separate protocol: older /save handlers may silently
+  // ignore snapshot preconditions, so Editor clients must not fall back to it.
+  router.post("/editor-save-first-draft", asyncHandler(async (req: Request, res: Response) => {
+    try {
+      const { workflowId, spec, packId, diagnosisId, note, requestId, sourceCommit, expectedSavedHead,
+        createOnly, expectedDraftAbsent, expectedActiveDeployNumber, expectedActiveToken } = req.body ?? {};
+      if (typeof workflowId !== "string" || !workflowId.trim() || !spec
+        || createOnly !== undefined || expectedDraftAbsent !== true
+        || !Number.isSafeInteger(expectedActiveDeployNumber) || expectedActiveDeployNumber <= 0
+        || typeof expectedActiveToken !== "string" || !/^[0-9a-f]{64}$/.test(expectedActiveToken)) {
+        res.status(400).json({ error: "Bad Request", code: "INVALID_REQUEST", message: "Valid first-draft snapshot preconditions are required" });
+        return;
+      }
+      const actor = (await deps.resolvePrincipal?.(req))?.actorId?.trim();
+      if (!actor || actor === "unknown") {
+        res.status(401).json({ error: "Unauthorized", message: "Actor is required" });
+        return;
+      }
+      const service = new AutoHealSaveService(deps.db, deps.workflowSpecRepo, deps.deployHistoryRepo, deps.botPermRepo);
+      const result = await service.saveEditorFirstDraft({ workflowId, spec, packId: packId ?? null, diagnosisId: diagnosisId ?? null,
+        note: note ?? null, actorId: actor, requestId, sourceCommit, expectedSavedHead,
+        expectedDraftAbsent, expectedActiveDeployNumber, expectedActiveToken });
+      res.status(200).json(result);
+    } catch (err) {
+      const failure = err as { status?: number; code?: string; requestId?: string; branch?: string; commit?: string };
+      res.status(safeStatus(failure.status)).json({ error: "Save could not be completed", code: failure.code ?? "SAVE_FAILED",
+        requestId: failure.requestId, branch: failure.branch, commit: failure.commit });
+    }
+  }));
+
+  // Errors (including 404/403) are never proof that a workflow ref is absent.
+  router.get("/editor-deploy/snapshot-v2/state", asyncHandler(async (req: Request, res: Response) => {
+    res.set("Cache-Control", "no-store");
+    try {
+      const actor = (await deps.resolvePrincipal?.(req))?.actorId?.trim();
+      if (!actor || actor === "unknown") { res.status(401).json({ code: "AUTHENTICATION_REQUIRED" }); return; }
+      if (typeof req.query.workflowId !== "string") { res.status(400).json({ code: "INVALID_REQUEST" }); return; }
+      const { gitConfig, gitAuthor } = await resolveAutoHealGitSettings(deps.db, deps.gitConfig, deps.gitAuthor);
+      const service = new AutoHealDeployService(deps.db, deps.workflowSpecRepo, deps.deployHistoryRepo, deps.botPermRepo, gitConfig, gitAuthor, undefined, deps.authorizeSnapshotDeploy);
+      res.json(await service.editorDeploymentState(req.query.workflowId, actor));
+    } catch (error) {
+      const failure = error as { status?: number; code?: string };
+      res.status(safeStatus(failure.status)).json({ code: failure.code ?? "DEPLOYMENT_STATE_UNAVAILABLE" });
+    }
+  }));
+
+  const deploy = (editor: boolean, snapshot = false) => asyncHandler(async (req: Request, res: Response) => {
+    try {
+      const { workflowId, packId, candidateCommit, requestId, diagnosisId, sourceFlowId, note, autoRun, expectedDraftToken, snapshotProtocol, expectedActiveCommit, confirmedFileDiff } = req.body ?? {};
       if (typeof workflowId !== "string" || !workflowId) { res.status(400).json({ error: "Bad Request", message: "workflowId is required" }); return; }
       const actor = (await deps.resolvePrincipal?.(req))?.actorId?.trim();
       if (!actor || actor === "unknown") { res.status(401).json({ error: "Unauthorized" }); return; }
+      if (editor && (snapshot ? snapshotProtocol !== 'saved-tree-v2' : snapshotProtocol !== undefined)) {
+        res.status(400).json({ code: 'INVALID_REQUEST' }); return;
+      }
       const { gitConfig, gitAuthor } = await resolveAutoHealGitSettings(deps.db, deps.gitConfig, deps.gitAuthor);
       const service = new AutoHealDeployService(deps.db, deps.workflowSpecRepo, deps.deployHistoryRepo,
-        deps.botPermRepo, gitConfig, gitAuthor, deps.triggerRun);
-      res.json(await service.deploy({ workflowId, packId, candidateCommit, requestId, diagnosisId, sourceFlowId, note, autoRun, actorId: actor }));
+        deps.botPermRepo, gitConfig, gitAuthor, deps.triggerRun, deps.authorizeSnapshotDeploy);
+      const input = { workflowId, packId, candidateCommit, requestId, diagnosisId, sourceFlowId, note, autoRun, actorId: actor };
+      res.json(await (editor ? service.editorDeploy({ ...input, expectedDraftToken, ...(snapshot ? { snapshotProtocol, expectedActiveCommit, confirmedFileDiff } : {}) }) : service.deploy(input)));
     } catch (error) {
       const e = error as { status?: number; code?: string; requestId?: string; branch?: string; commit?: string; tagName?: string };
       const branch = typeof e.branch === "string" && /^wf\/[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/.test(e.branch) && !e.branch.includes("..") ? e.branch : undefined;
@@ -133,7 +230,10 @@ export function createAutoHealRouter(deps: AutoHealRouteDependencies): Router {
       const tagName = typeof e.tagName === "string" && /^deploy\/[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}\/#\d+$/.test(e.tagName) && !e.tagName.includes("..") ? e.tagName : undefined;
       res.status(safeStatus(e.status)).json({ error: "Deployment could not be completed", code: e.code ?? "DEPLOYMENT_FAILED", requestId: e.requestId, branch, commit, tagName });
     }
-  }));
+  });
+  router.post("/deploy", deploy(false));
+  router.post("/editor-deploy", deploy(true));
+  router.post("/editor-deploy/snapshot-v2", deploy(true, true));
 
   /**
    * Deprecated direct-write apply path.

@@ -60,9 +60,7 @@ export function buildCreateGroupBody(input: CreateGroupInput): CreateGroupBody {
       definition: {
         content_yaml: input.definitionYaml ?? '',
       },
-      participant_bindings: input.participantBindings?.length
-        ? input.participantBindings
-        : [{ binding: 'role-1', actor_ids: actorIds }],
+      participant_bindings: input.participantBindings ?? [{ binding: 'role-1', actor_ids: actorIds }],
     },
   };
 }

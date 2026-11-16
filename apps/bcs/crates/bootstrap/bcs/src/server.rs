@@ -77,10 +77,10 @@ use bcs_collaboration_store::{
 use bcs_collaboration_store::MemoryCollaborationStore;
 use bcs_collaboration_template::{CollaborationTemplateServiceImpl, FileCollaborationTemplateRepo};
 use bcs_db_api::DbSqlFlavor;
-use bcs_friend::{FriendCore, FriendRequestCore};
-use bcs_friend_store::{
-    DbFriendRequestStore, DbFriendStore,
-};
+use bcs_friend::FriendCore;
+#[cfg(any(test, feature = "test-utils"))]
+use bcs_friend::FriendRequestCore;
+use bcs_friend_store::DbFriendStore;
 #[cfg(any(test, feature = "test-utils"))]
 use bcs_friend_store::{MemoryFriendRepo, MemoryFriendRequestRepo};
 use bcs_invite_code_store::{DbInviteCodeStore, MemoryInviteCodeRepo};
@@ -134,7 +134,7 @@ use bcs_service_api::{
     ChannelBindingCleanupPort, ChannelService, CollaborationRuntimeService,
     CollaborationTemplateService, CompositeBotTerminalObserver, DirectChatClientKind,
     DirectChatRunEvent, DirectChatRunLifecycleHook, DirectChatRunReason, DirectChatRunSnapshotPort,
-    FriendCoreService, FriendRequestCoreService, FrontendDeliveryPort, GroupCoreService,
+    FriendCoreService, FriendService, FrontendDeliveryPort, GroupCoreService,
     GroupHistoryBotRequestPort, GroupManagementService, GroupMessageHistoryService,
     GroupMetricsSnapshotPort, GroupRepoPort, GroupSessionMetricsSnapshotPort,
     HandleBotTerminalEventCommand, HumanInputReadyEvent, InteractionService, InviteService,
@@ -177,6 +177,7 @@ use secrecy::{ExposeSecret, Secret};
 
 mod channel_wiring;
 mod a2a_wiring;
+mod auth_resources;
 mod infrastructure_helpers;
 mod http_middleware;
 mod lifecycle_wiring;
@@ -186,11 +187,14 @@ mod server_construct;
 mod server_infrastructure;
 mod server_run;
 mod state;
+#[cfg(test)]
+mod state_default_tests;
 mod use_case_wiring;
 mod wiring_common;
 mod ws_dispatch;
 mod ws_handlers;
 
+use auth_resources::*;
 use channel_wiring::*;
 use http_middleware::*;
 use lifecycle_wiring::*;
@@ -304,7 +308,8 @@ mod tests {
                 provider_repos.provider_bindings.clone(),
             ).with_bot_provider_repo(provider_repos.bot_providers.clone()));
         let (_provider_core, _provider_bot_core, provider_management) =
-            build_provider_services_with_webhook_url_guard(
+            build_provider_services_with_webhook_url_guard_and_organization(
+                false,
                 &provider_repos,
                 bot_registry,
                 relation,
@@ -313,10 +318,11 @@ mod tests {
                 provider_control_plane.clone(),
                 cleanup.clone(),
                 Arc::new(NoopBotCatalogCleanupPort),
+                None,
             );
 
         let registered = provider_management
-            .register_provider(RegisterProviderCommand { caller_capabilities: None,
+            .register_provider(RegisterProviderCommand { a2a: None, caller_capabilities: None,
                 collaboration_scope: None,
                 slug: None,
                 name: "Provider".to_string(),
@@ -822,7 +828,7 @@ mod tests {
             .state
             .services
             .provider_management
-            .register_provider(RegisterProviderCommand { caller_capabilities: None,
+            .register_provider(RegisterProviderCommand { a2a: None, caller_capabilities: None,
                 collaboration_scope: None,
                 slug: None,
                 name: "Admin Provider".to_string(),

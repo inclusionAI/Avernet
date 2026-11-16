@@ -7,7 +7,7 @@ import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useChat, useChatBridge, type ProviderConnectionStatus } from '@tc-chat/adapters';
 import type { BridgeInputRef, ChatMessage, PanelHandle } from '@tc-chat/core';
 import type { SenderRef } from '@tc-chat/ui/es/Sender/types';
-import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
+import { useCallback, useRef, useState, type RefObject } from 'react';
 import { toast } from 'sonner';
 import { prependUniqueMessages } from './groupChatHistoryUtils';
 import {
@@ -20,6 +20,7 @@ import { useGroupBootstrapProcessing } from './useGroupBootstrapProcessing';
 import { useGroupChatDisplayStatus } from './useGroupChatDisplayStatus';
 import { useGroupChatHistorySync } from './useGroupChatHistorySync';
 import { useGroupChatInteractions } from './useGroupChatInteractions';
+import { useGroupChatPanelCleanup } from './useGroupChatPanelCleanup';
 import { useGroupChatProvider } from './useGroupChatProvider';
 import { useGroupChatRunControl } from './useGroupChatRunControl';
 import { useCancelledGroupChatMessages } from './useCancelledGroupChatMessages';
@@ -110,12 +111,8 @@ export function useGroupChat(session: SessionView | null, authenticatedUserId?: 
   // 问答及执行审批编排，随 Provider 重建自动隔离旧会话状态。
   const interactions = useGroupChatInteractions(provider);
 
-  // 切换会话时清理旧会话副屏；连接、history hydration 与 WS 暂存由
-  // useManifestHistoryLoader 作为同一个可取消初始化流程统一管理。
-  useEffect(() => {
-    if (!provider || !sessionId) return;
-    panelRef.current?.closePanelForce();
-  }, [provider, sessionId]);
+  // 连接、history hydration 与 WS 暂存由 useManifestHistoryLoader 统一管理。
+  useGroupChatPanelCleanup(sessionId, panelRef);
 
   // 历史装载同步（分页状态 + loader 串行流程，拆至 useGroupChatHistorySync 控制体积）。
   const { hasMoreHistory, isLoadingMoreHistory, setHasMoreHistory, setIsLoadingMoreHistory } = useGroupChatHistorySync({

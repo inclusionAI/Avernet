@@ -90,21 +90,36 @@ requires a usable Human identity and verifies that the selected physical Bot
 is managed by that Human, or that the Human Actor perspective represents the
 same Human. App and Bot identities do not replace the Human requirement.
 
-The legacy candidates operation accepts either a physical Bot managed by the
-current Human or that Human's own `human_{subject.id}` record (including Human
-Actor).
-Both perspectives use the same discovery and collaboration filters, and the
-response still contains physical Bot candidates only. `eligible-candidates`
-keeps the same request and response model while sourcing friendship eligibility
-from the edge-permission friend graph. The candidate-search operation is the
-versioned projection of legacy `/actors/search`: it uses
+The candidate read surface has one recommended entry:
+`GET /openapi/v1/collaboration/bots/{bot_id}/candidates` is the sole
+recommended candidate list entry point for new callers. It accepts either a
+physical Bot managed by the current Human or that Human's own
+`human_{subject.id}` record (including Human Actor). Discovery visibility is
+two-dimensional and applies before pagination: a Human viewer filters target
+`user_visibility`, while a Bot viewer filters target `visibility`.
+`purpose=collaboration` keeps the existing public-only or approved-friend
+branch on that same viewer dimension. `is_friend` is sourced only from
+approved Connect edges; the legacy friend store is not authoritative for it.
+Both perspectives return physical Bot candidates only.
+`GET /openapi/v1/collaboration/bots/{bot_id}/eligible-candidates` is a
+deprecated compatibility alias with the same request and response model and
+the same approved-connect-edge semantics; it remains callable with no removal
+date, and new callers should use `candidates`. The candidate-search operation
+is the versioned projection of legacy `/actors/search`: it uses
 semantic worker recommendation first, preserves its score/profile/tag
 enrichment, then falls back to a Bot-name substring search when no usable
-recommendation is available. An omitted `q`, `q=`, and a whitespace-only `q`
+recommendation is available. A semantic call performs at most one provider
+recall of up to 20 items; the result is the authorized subset of that recall
+in provider order and may contain fewer than 20 items because no top-up query
+fills the page. An omitted `q`, `q=`, and a whitespace-only `q`
 are equivalent: each returns `items: []` with `search_mode: empty_query` without
 invoking downstream search. Semantic and fallback results use
 `search_mode: semantic` and `search_mode: name_fallback`; fallback items omit
 `score`. Raw BCSFuse recommendation context is never part of the V1 response.
+An authenticated Human browser is an explicit read-only consumer of the
+internal candidate-search route through the BCS-only OAuth session chain; the
+route has no public `/openapi/v1` alias and no anonymous access, and BCS still
+requires a usable Human identity plus perspective authorization.
 The path `bot_id` replaces legacy `current_bot_uuid`; `purpose` replaces
 `cooperatable_only`; Gateway `ctoken` is not part of the BCN contract.
 

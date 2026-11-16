@@ -75,3 +75,13 @@ describe('workOrderStore.removeItem', () => {
     expect(total).toBe(1);
   });
 });
+
+describe('通知分类默认值', () => {
+  it('初始和重置默认选审批类，不再选已移除的全部', () => {
+    useWorkOrderStore.getState().reset();
+    expect(useWorkOrderStore.getState().category).toBe('APPROVAL');
+    useWorkOrderStore.getState().setCategory('NOTIFICATION');
+    useWorkOrderStore.getState().reset();
+    expect(useWorkOrderStore.getState().category).toBe('APPROVAL');
+  });
+});

@@ -186,6 +186,8 @@ pub async fn run_bot_authority_contract_with_scenarios(
     transfer_reads_are_strict(fixture, env).await;
     report("roles_for_batches_exactly");
     roles_for_batches_exactly(fixture, env).await;
+    report("ownerships_for_projects_per_item");
+    ownerships_for_projects_per_item(fixture, env, other_env).await;
     report("deleted_human_loses_all_authority");
     deleted_human_loses_all_authority(fixture, env).await;
     report("deleted_operator_cannot_edit_managers");
@@ -672,6 +674,7 @@ async fn roles_for_batches_exactly(
     );
 }
 
+use crate::contract::bot_authority_contract_ownerships::ownerships_for_projects_per_item;
 /// spec §3.1: only a LIVE Human actor authorizes through an
 /// edge — tombstoning the manager's actor row turns every
 /// strict role read into a deny, single and batch, while a

@@ -1,17 +1,19 @@
-// 对话页侧栏目录分组卡:标题行(含成员计数) + 分组体(loading / error / 空态 / 列表)。
+// 对话页侧栏目录分组卡:标题行(名称后随计数的「标题 (N)」格式 + 右缘动作插槽) + 分组体(loading / error / 空态 / 列表)。
 // 收起分组只留标题行（2026-10-22 需求变更:「Bot 泊位」头像预览删除,收起即净,
 // 成员数由标题右缘计数承载;原 2026-10-10「收起不留盲区」裁决作废）。
 // 与 ConversationSidebar 拆分自同文件(2026-10-10 收起需求 + TC-G005 文件体积门禁)。
 import { Button, Empty, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui';
 import type { ConversationBotView } from '@/domain/conversation/types';
 import { cn } from '@/utils/cn';
-import { ChevronDown, Info } from 'lucide-react';
+import { ChevronDown } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { ListErrorState } from '../../components/ListErrorState';
 import { ConversationBotRowsSkeleton } from './ConversationSkeletons';
 
 export interface ConversationSidebarSectionProps {
   title: string;
+  /** 产品引导打标语义标识（可选；好友分组消费方传 chat-friend-group，配置规范 §4）。纯静态标记零逻辑。 */
+  guideTarget?: string;
   loading: boolean;
   error: string | null;
   onRetry(): void;
@@ -21,8 +23,11 @@ export interface ConversationSidebarSectionProps {
   /** 空态提示,可含跳转链接(由调用方组装 ReactNode)。 */
   emptyHint?: ReactNode;
   isSearching: boolean;
-  /** 标题行来源提示(#2990 还原):标题旁 i 图标悬停说明;缺省不渲染。 */
+  /** 标题行来源提示(#2990 还原;2026-11-05 触发方式微调):悬停分组标题显示,缺省不渲染。 */
   infoHint?: string;
+  /** 标题行右缘动作插槽(2026-11-05 快捷入口需求:创建/发现常驻入口;收起态标题行仍渲染,入口常驻)。
+   *  缺省不渲染;置于成员计数右侧,保持计数与切换按钮既有可访问名契约。 */
+  headerAction?: ReactNode;
   renderItem(view: ConversationBotView): ReactNode;
   /** 可收起分组(我的/好友 Bot):缺省展开,标题行点击切换;搜索时强制展开以保证可检索。 */
   collapsible?: boolean;
@@ -31,12 +36,61 @@ export interface ConversationSidebarSectionProps {
 }
 
 export function ConversationSidebarSection(props: ConversationSidebarSectionProps) {
-  const { title, loading, error, onRetry, items } = props;
-  const { emptyTitle, emptyHint, isSearching, renderItem, collapsible, infoHint } = props;
+  const { title, loading, error, onRetry, items, guideTarget } = props;
+  const { emptyTitle, emptyHint, isSearching, renderItem, collapsible, infoHint, headerAction } = props;
   const { collapsed, onToggleCollapsed } = props;
   const bodyHidden = collapsible === true && collapsed;
+  // 标题(可收起=切换按钮/非收起=纯文本)+随行 (N) 计数:抽为 headerContent 变量,
+  // 供来源提示 Tooltip 以 asChild 包裹(2026-11-05 微调:悬停标题触发,替代独立 i 徽标)。
+  const headerContent = collapsible ? (
+    <Button
+      variant="ghost"
+      aria-expanded={!collapsed}
+      className={cn(
+        // hover pill(2026-10-22 体验精修二轮):-mx-1 + px-1 补偿保持标题文字 x 不动,
+        // 悬停给极轻 muted 底揭示「标题即开关」可点性;去掉了原 hover:bg-transparent 的零反馈。
+        'flex h-auto min-w-0 items-center justify-start gap-1 rounded-md py-1 pr-1.5 pl-1 text-xs font-normal text-content-soft',
+        '-mx-1 hover:bg-muted/50 transition-colors',
+      )}
+      onClick={onToggleCollapsed}
+    >
+      <span className="truncate">{title}</span>
+      {/* 成员计数随标题展示(2026-11-05 验收微调:「我管理的 Bot (2)」格式):置于按钮内容内
+          但 aria-hidden 纯视觉(行数由列表本身可达,读屏不重复报),不参与可访问名计算,
+          切换按钮可访问名保持纯标题——既有 name 契约不破。 */}
+      {items.length > 0 && (
+        <span
+          aria-hidden="true"
+          className="shrink-0 text-[11px] font-normal tabular-nums text-content-icon"
+        >
+          ({items.length})
+        </span>
+      )}
+      {/* chevron 旋转过渡:单 ChevronDown,收起 -rotate-90,与 Bot 行箭头同一动效语言。 */}
+      <ChevronDown
+        className={cn(
+          'h-3.5 w-3.5 shrink-0 text-content-icon transition-transform duration-150',
+          collapsed && '-rotate-90',
+        )}
+        aria-hidden="true"
+      />
+    </Button>
+  ) : (
+    <p className="text-xs font-normal text-content-soft">
+      {title}
+      {/* 非 collapsible 分组计数同款随标题格式;aria-hidden 纯视觉。 */}
+      {items.length > 0 && (
+        <span
+          aria-hidden="true"
+          className="text-[11px] font-normal tabular-nums text-content-icon"
+        >
+          ({items.length})
+        </span>
+      )}
+    </p>
+  );
   return (
-    <div className="pb-1 pt-0.5" role="group" aria-label={title}>
+    <div className="pb-1 pt-0.5" role="group" aria-label={title} data-guide-target={guideTarget}>
       {/* 分组标题行（dmore DOM 实测：h=32、与列表统一 36px 节奏）：12px 常规字重 #868686；
           x 与列表内容左缘对齐；标题行不再渲染「+」添加入口（2026-10-14 体验修复）。
           可收起分组标题即切换按钮（2026-10-10 需求：我的/好友 Bot 列表支持展开收起，
@@ -44,59 +98,24 @@ export function ConversationSidebarSection(props: ConversationSidebarSectionProp
           标题行右缘补成员计数（2026-10-22 体验精修）：aria-hidden 纯视觉数字（行数由列表
           本身可达，读屏不重复报），且置于切换按钮之外 → 按钮可访问名仍为纯标题。 */}
       <div className="flex min-h-8 items-center justify-between gap-1 px-4">
-        {/* 标题与来源提示(#2990 还原 infoHint)聚合:i 图标为切换按钮的同级兄弟
-            (非按钮内容),按钮可访问名保持纯标题;role=img 不进 Tab 序,infoHint 有值才渲染。 */}
+        {/* 来源提示触发方式(2026-11-05 验收微调):悬停分组标题即出 infoHint Tooltip,
+            独立 i 徽标退役(三分组标题行徽标视觉冗余);TooltipTrigger asChild 挂标题本身,
+            切换按钮可访问名保持纯标题,hover/focus 时 TooltipContent 供读屏朗读。 */}
         <div className="flex min-w-0 items-center gap-0.5">
-          {collapsible ? (
-            <Button
-              variant="ghost"
-              aria-expanded={!collapsed}
-              className={cn(
-                // hover pill(2026-10-22 体验精修二轮):-mx-1 + px-1 补偿保持标题文字 x 不动,
-                // 悬停给极轻 muted 底揭示「标题即开关」可点性;去掉了原 hover:bg-transparent 的零反馈。
-                'flex h-auto min-w-0 items-center justify-start gap-1 rounded-md py-1 pr-1.5 pl-1 text-xs font-normal text-content-soft',
-                '-mx-1 hover:bg-muted/50 transition-colors',
-              )}
-              onClick={onToggleCollapsed}
-            >
-              <span className="truncate">{title}</span>
-              {/* chevron 旋转过渡:单 ChevronDown,收起 -rotate-90,与 Bot 行箭头同一动效语言。 */}
-              <ChevronDown
-                className={cn(
-                  'h-3.5 w-3.5 shrink-0 text-content-icon transition-transform duration-150',
-                  collapsed && '-rotate-90',
-                )}
-                aria-hidden="true"
-              />
-            </Button>
-          ) : (
-            <p className="text-xs font-normal text-content-soft">{title}</p>
-          )}
-          {infoHint && (
+          {infoHint ? (
             <TooltipProvider>
               <Tooltip>
-                <TooltipTrigger asChild>
-                  <span
-                    role="img"
-                    aria-label={infoHint}
-                    className="inline-flex shrink-0 cursor-help items-center text-content-icon"
-                  >
-                    <Info className="h-3 w-3" aria-hidden="true" />
-                  </span>
-                </TooltipTrigger>
+                <TooltipTrigger asChild>{headerContent}</TooltipTrigger>
                 <TooltipContent>{infoHint}</TooltipContent>
               </Tooltip>
             </TooltipProvider>
+          ) : (
+            headerContent
           )}
         </div>
-        {items.length > 0 && (
-          <span
-            aria-hidden="true"
-            className="shrink-0 text-[11px] font-normal tabular-nums text-content-icon"
-          >
-            {items.length}
-          </span>
-        )}
+        {/* 右缘区(2026-11-05 快捷入口):动作插槽(计数已随标题展示,见上方 2026-11-05 验收微调);
+            整区置于切换按钮之外,动作按钮自带可访问名,不改变标题按钮契约。 */}
+        <div className="flex shrink-0 items-center gap-0.5">{headerAction}</div>
       </div>
       {bodyHidden ? (
         // 收起分组只留标题行(2026-10-22 需求变更):不再渲染任何 Bot 泊位/头像预览,

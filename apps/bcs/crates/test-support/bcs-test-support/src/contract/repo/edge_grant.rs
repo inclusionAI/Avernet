@@ -105,10 +105,11 @@ pub async fn run_edge_grant_repo_contract<T: EdgeGrantRepoPort + ?Sized>(
         "target appears once in friend list (D12 wrong-ref excluded)"
     );
 
-    // 8. Idempotent insert: duplicate (from,to,env,grant_ref) is a no-op
-    //    (SQLite ON CONFLICT DO NOTHING / MySQL INSERT IGNORE). A second insert
-    //    with the same key — even under a different `edge_id` — does NOT add a
-    //    new active grant.
+    // 8. Idempotent insert: duplicate (from,to,env,grant_ref) upserts in
+    //    place (SQLite ON CONFLICT DO UPDATE / MySQL ON DUPLICATE KEY
+    //    UPDATE). A second insert with the same key — even under a different
+    //    `edge_id` — does NOT add a new active grant and returns the
+    //    existing row id.
     let dup = EdgeGrant {
         edge_id: 1234,
         ..edge.clone()

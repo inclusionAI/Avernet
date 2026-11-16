@@ -77,12 +77,12 @@ def test_unavailable_inventory_continues_without_random_target(inventory, caplog
 @pytest.mark.parametrize('failure', [ConnectionError('secret'), response('failed'),
                                     response('committed'), response('not_mounted'), committed(boot_id=None),
                                     SimpleNamespace(exit_code=0, stdout='bad')])
-def test_receipt_recheck_failure_continues(failure, caplog):
+def test_completed_backup_is_not_queried_for_later_failures(failure, caplog):
     execute = Mock(side_effect=[committed(), failure])
     verify = backup._attempt_backup(execute=execute, operation_id=OPERATION, bot_id='b', target_id='p')
     verify()
-    assert 'phase=verify_receipt status=degraded' in caplog.text
-    assert execute.call_count == 2
+    assert 'phase=verify_receipt' not in caplog.text
+    assert execute.call_count == 1
 
 
 def test_backup_timeout_continues_without_restarting_backup(caplog):
@@ -98,14 +98,21 @@ def test_backup_timeout_continues_without_restarting_backup(caplog):
     assert 'reason=timeout' in caplog.text and 'action=continue_restart' in caplog.text
 
 
-@pytest.mark.parametrize('phase', ['prepare', 'verify'])
-def test_observed_instance_change_degrades(phase, caplog):
-    sequence = [response('running'), committed(boot_id='new')] if phase == 'prepare' else [committed(), committed(boot_id='new')]
+@pytest.mark.parametrize('phase', ['poll', 'after_success'])
+def test_instance_identity_is_checked_while_waiting_not_after_success(phase, caplog):
+    sequence = ([response('running'), committed(boot_id='new')]
+                if phase == 'poll' else [committed(), committed(boot_id='new')])
+    execute = Mock(side_effect=sequence)
     with patch.object(backup.time, 'sleep'):
-        backup._attempt_backup(execute=Mock(side_effect=sequence), operation_id=OPERATION, bot_id='b', target_id='p')()
-    reason = 'instance_changed' if phase == 'prepare' else 'receipt_stale'
-    assert f'reason={reason}' in caplog.text
-    assert 'action=continue_restart' in caplog.text
+        backup._attempt_backup(execute=execute, operation_id=OPERATION, bot_id='b', target_id='p')()
+    if phase == 'poll':
+        assert execute.call_count == 2
+        assert 'reason=instance_changed' in caplog.text
+        assert 'action=continue_restart' in caplog.text
+    else:
+        execute.assert_called_once()
+        assert 'phase=verify' not in caplog.text
+        assert 'action=continue_restart' not in caplog.text
 
 
 def test_inventory_change_continues_after_failed_backup(caplog):
@@ -131,7 +138,7 @@ def test_verification_inventory_unavailable_does_not_block():
         context(), device_id='target', restart_dependencies=RestartBackupDependencies.for_instance(runtime), operation_id=OPERATION,
     )
     verify()
-    assert runtime.post_bots_api.call_count == 2
+    assert runtime.post_bots_api.call_count == 1
 
 
 def test_each_replica_still_gets_backup_attempt_after_one_fails():
@@ -145,7 +152,7 @@ def test_each_replica_still_gets_backup_attempt_after_one_fails():
     )
     verify()
     assert [c.kwargs['path'] for c in runtime.post_bots_api.call_args_list] == [
-        '/api/v1/paas/devices/p1/commands', '/api/v1/paas/devices/p2/commands', '/api/v1/paas/devices/p2/commands',
+        '/api/v1/paas/devices/p1/commands', '/api/v1/paas/devices/p2/commands',
     ]
 
 
@@ -179,7 +186,8 @@ def test_durable_budget_is_shared_across_replicas_and_redelivery(caplog):
 
     now = [1498]
     context_reset_handle = current_restart.set(SimpleNamespace(
-        payload={'started_at': 0}, state=Mock(read=Mock(return_value={'ext': {}}))))
+        operation_id=OPERATION, payload={'started_at': 0},
+        state=Mock(read=Mock(return_value={'ext': {}}))))
     runtime = Mock()
     runtime.list_devices_by_bot_uuid.return_value = [
         {'provider_device_id': p, 'status': 'ACTIVE'} for p in ('p1', 'p2')]
@@ -217,7 +225,8 @@ def test_late_valid_inventory_becomes_baseline_without_starting_backup(caplog):
 
 
 @pytest.fixture(autouse=True)
-def nonfastdisk_compatibility_scope(monkeypatch):
-    """Legacy backup/fence tests; real detection and strict policy have their own suite."""
+def nonblocking_fastdisk_scope(monkeypatch):
+    """Exercise confirmed-fastdisk backup with blocking disabled; detection has its own suite."""
     from agentclaw.community.core.bot_management.engines.aicoding import restart_backup
-    monkeypatch.setattr(restart_backup, "_detect_fastdisk", lambda *args, **kwargs: False)
+    monkeypatch.setattr(restart_backup, "_detect_fastdisk", lambda *args, **kwargs: True)
+    monkeypatch.setattr(AicodingProvisioningStrategy, "_fastdisk_backup_blocking", lambda self: False)

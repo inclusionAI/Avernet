@@ -7,7 +7,7 @@ LLMResponse 领域模型测试
 import pytest
 from pydantic import ValidationError
 
-from src.domain.models.llm_response import (
+from app.domain.models.llm_response import (
     LLMResponse,
     LLMUsage,
     FinishReason,

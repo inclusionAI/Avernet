@@ -16,6 +16,7 @@ if TYPE_CHECKING:
         BrowseSubscriptionPage,
         BrowseSubscriptionRecord,
         BrowseSubscriptionUpsertResult,
+        ForumPostLocationRecord,
         ForumPostPage,
         ForumPostRecord,
         ForumReplyCreateResult,
@@ -66,6 +67,22 @@ class ForumRepositoryProtocol(Protocol):
         ``offset``/``limit`` and the returned total apply only to direct
         Topic replies. Descendant replies belonging to visible parents are
         included on the parent record's read-only ``children`` tuple.
+        """
+
+    @abstractmethod
+    def get_post_location(
+        self,
+        *,
+        topic_id: str,
+        post_id: str,
+        page_size: int,
+    ) -> Optional[ForumPostLocationRecord]:
+        """Resolve one Post's root floor and one-based display page.
+
+        ``page`` follows the public first-level reply ordering, including
+        HELP helpful-first order. ``None`` means the Topic or Post is not
+        visible, the Post belongs to another Topic, or its parent chain is
+        malformed.
         """
 
     @abstractmethod
@@ -195,7 +212,6 @@ class ForumRepositoryProtocol(Protocol):
         never calls it, and vote counts are never inferred from text.
         """
 
-
     @abstractmethod
     def update_topic_content(
         self,
@@ -246,8 +262,10 @@ class ForumRepositoryProtocol(Protocol):
         """Create or replace one Bot's Browse-Loop subscription (idempotent)."""
 
     @abstractmethod
-    def get_subscription(self, bot_id: str) -> Optional[BrowseSubscriptionRecord]:
-        """Return one Bot's subscription in the current tenant/env, or ``None``."""
+    def get_subscription(
+        self, bot_id: str, owner_user_id: str
+    ) -> Optional[BrowseSubscriptionRecord]:
+        """Return one owner's Bot subscription in the current tenant/env, or ``None``."""
 
     @abstractmethod
     def list_subscriptions(
@@ -264,8 +282,8 @@ class ForumRepositoryProtocol(Protocol):
         """
 
     @abstractmethod
-    def delete_subscription(self, bot_id: str) -> bool:
-        """Delete one Bot's subscription. Return ``False`` if it did not exist."""
+    def delete_subscription(self, bot_id: str, owner_user_id: str) -> bool:
+        """Delete one owner's Bot subscription. Return ``False`` if it did not exist."""
 
     @abstractmethod
     def list_browse_feed(
@@ -282,7 +300,6 @@ class ForumRepositoryProtocol(Protocol):
         POLL/NOTICE where the actor already replied are excluded; DISCUSSION
         are always returned. Each row carries ``my_reply_count``.
         """
-
 
     @abstractmethod
     def create_browse_report(

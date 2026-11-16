@@ -1,6 +1,6 @@
 ---
 name: bbs-topic-handler
-description: 【仅由 Topic 子 Session 触发】处理一个 BBS Topic。收到 [BBS-TOPIC-HANDLER] 且包含 backend、bot_id、browse_id、单个 topic_id 时使用；以详情接口的 topic_type 决定上下文、回复形态和作者管理：DISCUSSION 可读完整讨论并允许楼中楼，SHARE/HELP 参与者只基于主帖回复，POLL 提交结构化选择，HELP 原作者独立 Review 一级回复、标 helpful 并在解决后 close。历史回复只阻止重复回帖，不跳过作者管理。只调用内部 `/api/v1/**`，本地 API 必须通过 OpenClaw `exec` 执行 `curl`。不选择其它 Topic，不创建子 Session。
+description: 【仅由 Topic 子 Session 触发】处理一个 BBS Topic。收到 [BBS-TOPIC-HANDLER] 且包含 backend、bot_id、browse_id、单个 topic_id 时使用；以详情接口的 topic_type 决定上下文、回复形态和作者管理：DISCUSSION 可读完整讨论并允许楼中楼，SHARE/HELP 参与者只基于主帖回复，POLL 提交结构化选择，HELP 原作者独立 Review 一级回复、标 helpful 并在解决后 close。历史回复只阻止重复回帖，不跳过作者管理。只调用内部 `/api/v1/**`，本地 BBS API 必须通过 OpenClaw `exec` 执行 `curl`，禁止 `web_fetch` 或 `browser` 访问。不选择其它 Topic，不创建子 Session。
 metadata:
   version: 1.9.0
   author: avernet-bbs-browse-loop

@@ -84,6 +84,8 @@ pub struct ProviderOrganizationManagementConfigDto {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegisterProviderRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub a2a: Option<bcs_domain::provider_a2a::ProviderA2aPatch>,
     pub name: String,
     #[serde(default)]
     pub slug: Option<String>,
@@ -136,6 +138,8 @@ pub struct ProviderBasicInfoResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderInfoResponse {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub a2a: Option<Value>,
     pub provider_id: String,
     #[serde(default)]
     pub slug: Option<String>,
@@ -164,6 +168,8 @@ pub struct ProviderInfoResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PatchProviderRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub a2a: Option<bcs_domain::provider_a2a::ProviderA2aPatch>,
     #[serde(default)]
     pub name: Option<String>,
     /// Omitted or null preserves the current slug.
@@ -205,6 +211,8 @@ pub struct RegisterProviderBotRequest {
     #[serde(default)]
     pub summary: Option<String>,
     #[serde(default)]
+    /// Registration snapshot: first user is owner, remaining users are initial managers.
+    /// Requires 1..=101 raw user IDs; replay never synchronizes existing authority.
     pub owners: Vec<String>,
     pub provider_bot_ref: String,
     /// Domains this bot covers (same semantics as `POST /bots/onboard`).

@@ -47,6 +47,46 @@ use super::{
 };
 
 #[tokio::test]
+async fn coverage_definition_upgrade_fences_versions_and_preserves_occupied_patch_slots() {
+    use bcs_service_api::UpgradeGroupCollaborationDefinitionCommand;
+    let group = Arc::new(GroupStore::new()); group.upsert(test_group()).await.unwrap();
+    let store = Arc::new(MemoryCollaborationStore::new());
+    let runtime = test_runtime!(store.clone(), store.clone(), store.clone(), store.clone(), group,
+        test_sessions(), Arc::new(RecordingDelivery::default()), noop_judge());
+    let first: CollaborationDefinition = serde_yaml::from_str(&single_node_yaml()).unwrap();
+    let base = CollaborationDefinitionRef { id: first.id.clone(), version: first.version };
+    runtime.configure_group_runtime(ConfigureGroupRuntimeCommand {
+        group_id: "group-1".into(), definition_yaml: None, definition: Some(json!(first)), definition_ref: None,
+        participant_bindings: BTreeMap::new(), auto_start_on_service_invocation: false,
+    }).await.unwrap();
+    let mut second = first.clone(); second.version += 1; second.name = "Upgraded".into();
+    StateMachineDefinitionRepoPort::upsert(store.as_ref(), second.clone()).await.unwrap();
+    let next = CollaborationDefinitionRef { id: second.id.clone(), version: second.version };
+    let upgrade = UpgradeGroupCollaborationDefinitionCommand { group_id: "group-1".into(), base_definition: base.clone(),
+        target_definition: next.clone(), participant_bindings: None };
+    let upgraded = runtime.upgrade_group_collaboration_definition(upgrade.clone()).await.unwrap();
+    assert_eq!(upgraded.default_definition, Some(next.clone()));
+    assert_eq!(upgraded.definition.unwrap().name, "Upgraded");
+    assert!(matches!(runtime.upgrade_group_collaboration_definition(upgrade).await, Err(CollaborationRuntimeError::Conflict(_))), "stale base cannot change the binding");
+    for target in [next.clone(), CollaborationDefinitionRef { id: "other".into(), version: next.version + 1 }] {
+        assert!(matches!(runtime.upgrade_group_collaboration_definition(UpgradeGroupCollaborationDefinitionCommand {
+            group_id: "group-1".into(), base_definition: next.clone(), target_definition: target, participant_bindings: None,
+        }).await, Err(CollaborationRuntimeError::InvalidRequest(_))));
+    }
+    let mut occupied = second; occupied.version += 1; occupied.name = "Occupied".into();
+    let occupied_ref = CollaborationDefinitionRef { id: occupied.id.clone(), version: occupied.version };
+    assert!(matches!(runtime.upgrade_group_collaboration_definition(UpgradeGroupCollaborationDefinitionCommand {
+        group_id: "group-1".into(), base_definition: next.clone(), target_definition: occupied_ref.clone(), participant_bindings: None,
+    }).await, Err(CollaborationRuntimeError::DefinitionNotFound(_, _))));
+    StateMachineDefinitionRepoPort::upsert(store.as_ref(), occupied).await.unwrap();
+    assert!(matches!(runtime.patch_group_collaboration_definition(PatchGroupCollaborationDefinitionCommand {
+        group_id: "group-1".into(), base_definition: next.clone(), definition_yaml: single_node_authoring_yaml("Different content"), participant_bindings: None,
+    }).await, Err(CollaborationRuntimeError::Conflict(_))));
+    assert_eq!(StateMachineDefinitionRepoPort::get(store.as_ref(), &occupied_ref.id, occupied_ref.version).await.unwrap().unwrap().name, "Occupied");
+    assert_eq!(runtime.get_group_collaboration_definition("group-1").await.unwrap().default_definition, Some(next));
+}
+
+#[tokio::test]
 async fn fixed_loop_preview_honors_server_limits_and_cannot_start_or_configure_v2() {
     let group = Arc::new(GroupStore::new());
     group.upsert(test_group()).await.unwrap();

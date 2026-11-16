@@ -11,6 +11,15 @@ fn text_tool_text_and_final_snapshot_do_not_duplicate_prefix() {
 }
 
 #[test]
+fn resubscription_final_snapshot_does_not_repeat_queried_text() {
+    let mut artifact = ArtifactText::default();
+    assert_eq!(artifact.snapshot("A2A-ANSWER-4"), Ok("A2A-ANSWER-4".into()));
+    assert_eq!(artifact.update("A2A-ANSWER-4", false, true), Ok("".into()));
+    assert_eq!(artifact.snapshot("A2A-ANSWER-4"), Ok("".into()));
+    assert_eq!(artifact.text(), "A2A-ANSWER-4");
+}
+
+#[test]
 fn intermediate_replacements_are_rejected_even_if_equal_or_prefix_extensions() {
     for replacement in ["hello", "hello world", "changed", ""] {
         let mut artifact = ArtifactText::default();

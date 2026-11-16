@@ -60,11 +60,11 @@ describe('BotConfigApiGateway', () => {
 
   it('deleteSubscription 成功信封不抛错', async () => {
     deleteBrowseSubscription.mockResolvedValue({ code: 200000, data: { deleted: true } });
-    await expect(new BotConfigApiGateway().deleteSubscription('b1')).resolves.toBeUndefined();
+    await expect(new BotConfigApiGateway().deleteSubscription('b1', 'u1')).resolves.toBeUndefined();
   });
 
   it('deleteSubscription 失败信封抛错（用 message）', async () => {
     deleteBrowseSubscription.mockResolvedValue({ code: 500000, message: '取消失败', data: null });
-    await expect(new BotConfigApiGateway().deleteSubscription('b1')).rejects.toThrow('取消失败');
+    await expect(new BotConfigApiGateway().deleteSubscription('b1', 'u1')).rejects.toThrow('取消失败');
   });
 });

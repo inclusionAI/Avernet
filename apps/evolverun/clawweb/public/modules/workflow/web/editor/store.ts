@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { originalActiveDraftBaseline, originalDraftPackId, type ActiveDraftBaseline } from '../api/editorWorkflowSource'
 import type { WorkflowSpec, WorkflowNode } from '@avernet/clawweb-shared/web/types'
 import { getResultBranchIds, getResultBranches, withResultBranches } from './contracts'
 import { branchEditError, canConnect, computeDagLayout, dependencies, findNodeReferences, graphMutationError, validateSpec, type Position, type ValidationError } from './graph'
@@ -45,7 +46,7 @@ export interface EditorState extends Snapshot {
   endTransaction: () => void
   undo: () => void
   redo: () => void
-  completeSave: (savedSpec: WorkflowSpec, specAtRequest: WorkflowSpec, sessionId: number) => boolean
+  completeSave: (savedSpec: WorkflowSpec, specAtRequest: WorkflowSpec, sessionId: number, initialDatabaseSpec?: WorkflowSpec, expectedInitialActive?: ActiveDraftBaseline) => boolean
   markClean: (savedSpec?: WorkflowSpec) => void
   importYaml: (spec: WorkflowSpec) => void
   reset: (options?: { force?: boolean }) => void
@@ -56,6 +57,9 @@ interface HistoryState {
   _savedSpec: WorkflowSpec | null
   /** Confirmed DB draft; null means absent, separate from the canvas dirty baseline. */
   _databaseSpec: WorkflowSpec | null
+  /** Raw pack_id captured with the original draft; undefined means untrusted. */
+  _databasePackId: string | null | undefined
+  _activeBaseline: ActiveDraftBaseline | undefined
   /** Active publication seen when no draft exists; null once a draft exists. */
   _activeDeployNumber: number | null
   _baselinePositions: Positions
@@ -93,7 +97,7 @@ function identityChangedDuringSave(current: WorkflowSpec, source: WorkflowSpec, 
   return !equal(current[field], source[field])
 }
 function historyInitial(): HistoryState {
-  return { _past: [], _future: [], _savedSpec: null, _databaseSpec: null, _activeDeployNumber: null, _baselinePositions: {}, _transaction: null, _transactionDepth: 0 }
+  return { _past: [], _future: [], _savedSpec: null, _databaseSpec: null, _databasePackId: undefined, _activeBaseline: undefined, _activeDeployNumber: null, _baselinePositions: {}, _transaction: null, _transactionDepth: 0 }
 }
 
 const positiveDeployNumber = (value: number | null | undefined): value is number =>
@@ -121,7 +125,7 @@ export function prepareWorkflowSession(incoming: WorkflowSpec): { spec: Workflow
     const errors = validateSpec(spec)
     if (errors.some(error => error.type === 'invalid-structure') || typeof spec.id !== 'string' || !spec.id.trim()
       || typeof spec.title !== 'string' || !spec.title.trim()
-      || !(spec.version === undefined || typeof spec.version === 'string' && spec.version.trim() || typeof spec.version === 'number' && Number.isFinite(spec.version))) return null
+      || !(spec.version === undefined || spec.version === null || typeof spec.version === 'string' && spec.version.trim() || typeof spec.version === 'number' && Number.isFinite(spec.version))) return null
     return { spec, positions: positionsFor(spec), errors }
   } catch { return null }
 }
@@ -175,10 +179,11 @@ export const useEditorStore = create<StoreState>((set, get) => {
       // A same-ID refetch can still be a different source/version. Never overwrite
       // edits just because workflow identity is unchanged.
       if (state.isDirty || (state.isLayoutDirty && state.spec?.id !== incoming.id)) { fail('当前工作流有未保存修改，不能加载其他来源；请先保存或显式放弃'); return }
+      const activeBaseline = databaseSpec === null ? originalActiveDraftBaseline(incoming) : undefined
       const spec = clone(incoming)
       const positions = positionsFor(spec, state)
       const baseline = state.spec?.id === spec.id && state.isLayoutDirty ? state._baselinePositions : positions
-      set({ ...initial(state.sessionId + 1), spec, positions, _baselinePositions: clone(baseline), isLayoutDirty: !equal(positions, baseline), _savedSpec: clone(spec), _databaseSpec: clone(databaseSpec), _activeDeployNumber: databaseSpec === null ? activeDeployNumber : null, validationErrors: validateSpec(spec) })
+      set({ ...initial(state.sessionId + 1), spec, positions, _baselinePositions: clone(baseline), isLayoutDirty: !equal(positions, baseline), _savedSpec: clone(spec), _databaseSpec: clone(databaseSpec), _databasePackId: databaseSpec === null && activeBaseline?.deployNumber === activeDeployNumber ? activeBaseline.packId : originalDraftPackId(databaseSpec), _activeBaseline: activeBaseline?.deployNumber === activeDeployNumber ? activeBaseline : undefined, _activeDeployNumber: databaseSpec === null ? activeDeployNumber : null, validationErrors: validateSpec(spec) })
     },
     replaceSession: (incoming, expected, isNew, databaseSpec = incoming, activeDeployNumber) => {
       if (get() !== expected) return false
@@ -189,8 +194,9 @@ export const useEditorStore = create<StoreState>((set, get) => {
         || !isNew && databaseSpec === null && !positiveDeployNumber(activeDeployNumber)
         || get() !== expected) return false
       const { spec, positions, errors } = prepared
+      const activeBaseline = !isNew && databaseSpec === null ? originalActiveDraftBaseline(incoming) : undefined
       set({ ...initial(expected.sessionId + 1), spec, positions, _baselinePositions: clone(positions),
-        _savedSpec: isNew ? null : clone(spec), _databaseSpec: database ? clone(database.spec) : null, _activeDeployNumber: !isNew && databaseSpec === null ? activeDeployNumber : null, isDirty: isNew, validationErrors: errors })
+        _savedSpec: isNew ? null : clone(spec), _databaseSpec: database ? clone(database.spec) : null, _databasePackId: isNew ? undefined : databaseSpec === null && activeBaseline?.deployNumber === activeDeployNumber ? activeBaseline.packId : originalDraftPackId(databaseSpec), _activeBaseline: activeBaseline?.deployNumber === activeDeployNumber ? activeBaseline : undefined, _activeDeployNumber: !isNew && databaseSpec === null ? activeDeployNumber : null, isDirty: isNew, validationErrors: errors })
       return true
     },
     createNew: (id, title) => {
@@ -319,7 +325,7 @@ export const useEditorStore = create<StoreState>((set, get) => {
         canUndo: true, canRedo: future.length > 0, isDirty: !equal(next.spec, state._savedSpec), isLayoutDirty: !equal(next.positions, state._baselinePositions),
         validationErrors: next.spec ? validateSpec(next.spec) : [], actionError: null })
     },
-    completeSave: (savedSpec, specAtRequest, sessionId) => {
+    completeSave: (savedSpec, specAtRequest, sessionId, initialDatabaseSpec, expectedInitialActive) => {
       const state = get()
       const request = clone(specAtRequest), saved = clone(savedSpec)
       if (state.sessionId !== sessionId) { fail('保存结果已过期，未修改当前编辑器会话'); return false }
@@ -329,6 +335,24 @@ export const useEditorStore = create<StoreState>((set, get) => {
         return false
       }
       if (state.spec.id !== request.id) { fail('保存期间工作流标识发生变化，请重新确认后再保存'); return false }
+      let initialPackId: string | null | undefined
+      if (state._databaseSpec === null && state._activeBaseline && initialDatabaseSpec === undefined) {
+        fail('首次草稿缺少同一数据库行身份凭证，未标记为已保存'); return false
+      }
+      if (initialDatabaseSpec !== undefined) {
+        initialPackId = originalDraftPackId(initialDatabaseSpec)
+        // Only a newly-created session can acquire this evidence. Never adopt a
+        // new binding for an existing draft, even when its document is identical.
+        const newSession = state._savedSpec === null && state._databasePackId === undefined && state._activeDeployNumber === null && state._activeBaseline === undefined && expectedInitialActive === undefined
+        const firstDraft = state._savedSpec !== null && state._activeBaseline !== undefined
+          && state._databasePackId === initialPackId && state._activeDeployNumber === state._activeBaseline.deployNumber
+          && state._activeBaseline.packId === initialPackId && expectedInitialActive !== undefined
+          && equal(state._activeBaseline, expectedInitialActive)
+        if (initialPackId === undefined || state._databaseSpec !== null || !(newSession || firstDraft)
+          || !equal(initialDatabaseSpec, request) || !equal(initialDatabaseSpec, saved)) {
+          fail('创建后的数据库身份或文档基线无法确认，未标记为已保存'); return false
+        }
+      }
 
       const current = state.spec
       const spec = { ...current, id: saved.id, title: identityChangedDuringSave(current, request, 'title') ? current.title : saved.title }
@@ -337,7 +361,7 @@ export const useEditorStore = create<StoreState>((set, get) => {
       } else if (Object.hasOwn(saved, 'facade')) spec.facade = clone(saved.facade)
       else delete spec.facade
 
-      set({ spec: clone(spec), _savedSpec: saved, _databaseSpec: clone(saved), _activeDeployNumber: null, isDirty: !equal(spec, saved),
+      set({ spec: clone(spec), _savedSpec: saved, _databaseSpec: clone(saved), _databasePackId: initialDatabaseSpec === undefined ? state._databasePackId : initialPackId, _activeBaseline: undefined, _activeDeployNumber: null, isDirty: !equal(spec, saved),
         validationErrors: validateSpec(spec), actionError: null })
       return true
     },

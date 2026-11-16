@@ -193,7 +193,7 @@ use super::*;
 
         // The bot's inbox (to_id=x:nodupe) should contain exactly 1 request
         // for this connect (the original, now approved) — not 2.
-        let inbox = rq.list_inbox("x:nodupe", "dev", None).await;
+        let inbox = rq.list_inbox("x:nodupe", "dev", None).await.expect("request listing");
         let ours: Vec<&PermissionRequest> = inbox
             .iter()
             .filter(|r| r.from_id == "human_1")
@@ -418,6 +418,75 @@ use super::*;
         let active = eg.list_active_grants("human_1", "x:keep", "dev").await;
         assert_eq!(active.len(), 1, "writer edge survives");
         assert_eq!(active[0].grant_ref_id, 4002);
+    }
+    #[tokio::test]
+    async fn unfriend_then_refriend_reactivates_the_friend_edge() {
+        // Regression: a re-add after an unfriend must be visible again —
+        // the re-insert revives the revoked row in place (same edge id), so
+        // `has_friend_edge` / `list_friends` agree with the Approved result.
+        let (eg, pp, rq, bc, db) = assemble().await;
+        seed_bot(&db, "x:refriend", "protected", "protected", "OPEN", "online", Some("85020")).await;
+        let svc = service(&eg, &pp, &rq, &bc);
+        let first = svc
+            .create_connect("human_1", "x:refriend", None, None)
+            .await
+            .expect("initial auto connect");
+        assert_eq!(first.status, ConnectStatus::Approved);
+        assert_eq!(first.edge_ids.len(), 1);
+
+        let revoked = svc
+            .revoke_friend("human_1", "x:refriend", None)
+            .await
+            .expect("unfriend");
+        assert_eq!(revoked, first.edge_ids, "the friend edge is revoked");
+        assert!(!eg.has_friend_edge("human_1", "x:refriend", "dev").await);
+
+        let renewed = svc
+            .create_connect("human_1", "x:refriend", None, None)
+            .await
+            .expect("reconnect after unfriend");
+        assert_eq!(renewed.status, ConnectStatus::Approved);
+        assert_eq!(
+            renewed.edge_ids, first.edge_ids,
+            "the revoked row is reactivated in place instead of returning a stale id"
+        );
+        assert!(
+            eg.has_friend_edge("human_1", "x:refriend", "dev").await,
+            "refriend must be visible to has_friend_edge"
+        );
+        let friends = svc.list_friends("human_1").await.expect("human friends");
+        assert_eq!(friends.len(), 1);
+        assert_eq!(friends[0].actor_id, "x:refriend");
+    }
+    #[tokio::test]
+    async fn unfriend_then_refriend_reactivates_bot_to_bot_edges() {
+        // Bot↔Bot: both directional friend edges revive on the re-add.
+        let (eg, pp, rq, bc, db) = assemble().await;
+        seed_bot(&db, "x:rA", "protected", "protected", "OPEN", "online", Some("85020")).await;
+        seed_bot(&db, "x:rB", "protected", "protected", "OPEN", "online", Some("85020")).await;
+        let svc = service(&eg, &pp, &rq, &bc);
+        let first = svc
+            .create_connect("x:rA", "x:rB", None, None)
+            .await
+            .expect("initial auto connect");
+        assert_eq!(first.edge_ids.len(), 2);
+
+        let revoked = svc
+            .revoke_friend("x:rA", "x:rB", None)
+            .await
+            .expect("unfriend");
+        assert_eq!(revoked, first.edge_ids, "both friend edges are revoked");
+        assert!(!eg.has_friend_edge("x:rA", "x:rB", "dev").await);
+
+        let renewed = svc
+            .create_connect("x:rA", "x:rB", None, None)
+            .await
+            .expect("reconnect after unfriend");
+        assert_eq!(renewed.status, ConnectStatus::Approved);
+        assert_eq!(renewed.edge_ids, first.edge_ids, "both rows reactivate in place");
+        assert!(eg.has_friend_edge("x:rA", "x:rB", "dev").await);
+        assert_eq!(svc.list_friends("x:rA").await.expect("friends").len(), 1);
+        assert_eq!(svc.list_friends("x:rB").await.expect("friends").len(), 1);
     }
     #[tokio::test]
     async fn list_friends_after_connect() {

@@ -908,6 +908,10 @@ fn log_tx_ok(db: &str, duration_ms: u128, statements: u32) {
 }
 
 #[cfg(test)]
+#[path = "manager_regression_tests.rs"]
+mod regression_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

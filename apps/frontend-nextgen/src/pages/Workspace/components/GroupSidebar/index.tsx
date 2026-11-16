@@ -1,5 +1,11 @@
 import { Button, Empty, Input } from '@/components/ui';
-import type { GroupView, IdentityView, MessageViewScope, SessionView } from '@/domain/collaboration/types';
+import type {
+  GroupContextDelivery,
+  GroupView,
+  IdentityView,
+  MessageViewScope,
+  SessionView,
+} from '@/domain/collaboration/types';
 import type { DomainResult } from '@/services/workspace/identityService';
 import type { GroupSessionLocation } from '@/pages/Workspace/hooks/useGroupSessionLocation';
 import { useGroupSidebarLocation } from '@/pages/Workspace/hooks/useGroupSidebarLocation';
@@ -56,7 +62,7 @@ export interface GroupSidebarProps {
   selectedGroupId: string | null;
   selectedSessionId: string | null;
   onSelectSession: (groupId: string, sessionId: string) => void;
-  onCreateSession: (groupId: string, scope?: MessageViewScope) => void;
+  onCreateSession: (groupId: string, scope?: MessageViewScope, contextDelivery?: GroupContextDelivery) => void;
   onToggleFavorite: (sessionId: string) => void;
   onClearSessionFilter: () => void;
   onCreateGroup: () => void;

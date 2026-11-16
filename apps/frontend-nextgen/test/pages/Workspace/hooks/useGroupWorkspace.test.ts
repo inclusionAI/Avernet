@@ -1,4 +1,5 @@
 /** @jest-environment jsdom */
+import type { GroupView } from '@/domain/collaboration';
 import { useGroupWorkspace } from '@/pages/Workspace/hooks/useGroupWorkspace';
 import { groupService } from '@/services/workspace/groupService';
 import { useLoginStrategyStore } from '@/stores/loginStrategyStore';
@@ -23,6 +24,7 @@ beforeEach(() => {
   gs.getVisibleGroups.mockImplementation((xs: any[]) => xs);
   gs.canManageGroup.mockImplementation(() => ({ allowed: true }));
   gs.canDissolveGroup.mockImplementation(() => ({ allowed: true }));
+  gs.loadGroupDetailOrBcs.mockResolvedValue({ ok: false, error: { friendlyMessage: 'not found' } });
   gs.dissolveGroup.mockResolvedValue({ ok: true, data: null });
 });
 
@@ -70,6 +72,114 @@ describe('useGroupWorkspace', () => {
     expect(result.current.groups.find((g) => g.groupId === 'g-empty')?.participants).toHaveLength(3);
   });
 
+  it('new summary lists never hydrate avatars and discard the legacy cache', async () => {
+    const member = (i: number, extra: Record<string, unknown> = {}) => ({
+      actorId: `a${i}`,
+      kind: 'bot' as const,
+      name: `成员${i}`,
+      role: 'member' as const,
+      mode: 'auto' as const,
+      ...extra,
+    });
+    const base = {
+      kind: 'free_chat' as const,
+      status: 'active' as const,
+      sessions: [],
+      lastMessageAt: 1,
+      createdAt: 1,
+      isPublic: false,
+      deliveryPolicy: 'send_to_driver' as const,
+    };
+    // 1) 旧响应（无 participantSummaries）仍按详情补拉并写入缓存。
+    gs.loadGroups.mockResolvedValueOnce({
+      ok: true,
+      data: [{ ...base, groupId: 'g-sub', name: '摘要群', participantCount: 2, participants: [] }],
+    });
+    gs.loadGroupParticipants.mockResolvedValue([member(1), member(2)]);
+    const { result } = renderHook(() => useGroupWorkspace());
+    await waitFor(() => expect(result.current.groups[0]?.participants).toHaveLength(2));
+    expect(gs.loadGroupParticipants).toHaveBeenCalledWith('g-sub', 'bot-1');
+    gs.loadGroupParticipants.mockClear();
+
+    // 2) 新响应直接带摘要：零头像补拉，列表成员空（不展示旧 cache）。
+    const summaries = [{ actorId: 'x1', kind: 'bot' as const, name: '摘要成员', avatarUrl: '/summary.png' }];
+    gs.loadGroups.mockResolvedValueOnce({
+      ok: true,
+      data: [
+        {
+          ...base,
+          groupId: 'g-sub',
+          name: '摘要群',
+          participantCount: 2,
+          participants: [],
+          participantSummaries: summaries,
+        },
+      ],
+    });
+    await act(async () => {
+      await result.current.refreshGroups();
+    });
+    await waitFor(() => expect(result.current.groups[0]?.participantSummaries).toEqual(summaries));
+    expect(result.current.groups[0]?.participants).toEqual([]);
+    expect(gs.loadGroupParticipants).not.toHaveBeenCalled();
+
+    // 3) 显式空摘要：旧 cache 已在摘要列表下失效，不回填旧头像也不补拉。
+    gs.loadGroups.mockResolvedValueOnce({
+      ok: true,
+      data: [
+        {
+          ...base,
+          groupId: 'g-sub',
+          name: '摘要群',
+          participantCount: 2,
+          participants: [],
+          participantSummaries: [],
+        },
+      ],
+    });
+    await act(async () => {
+      await result.current.refreshGroups();
+    });
+    await waitFor(() => expect(result.current.groups[0]?.participantSummaries).toEqual([]));
+    expect(result.current.groups[0]?.participants).toEqual([]);
+    expect(gs.loadGroupParticipants).not.toHaveBeenCalled();
+  });
+
+  it('does not reuse another identity cache for the same groupId', async () => {
+    const bot2 = { id: 'bot-2', kind: 'bot' as const, displayName: 'B2', online: true };
+    useWorkspaceStore.setState({ identities: [botIdentity, bot2] });
+    const base = {
+      kind: 'free_chat' as const,
+      status: 'active' as const,
+      sessions: [],
+      lastMessageAt: 1,
+      createdAt: 1,
+      isPublic: false,
+      deliveryPolicy: 'send_to_driver' as const,
+    };
+    gs.loadGroups.mockResolvedValue({
+      ok: true,
+      data: [{ ...base, groupId: 'g-shared', name: '共享群', participantCount: 1, participants: [] }],
+    });
+    gs.loadGroupParticipants
+      .mockResolvedValueOnce([
+        { actorId: 'a1', kind: 'bot', name: '身份一成员', role: 'member', mode: 'auto', avatarUrl: '/one.png' },
+      ])
+      .mockResolvedValueOnce([
+        { actorId: 'a2', kind: 'bot', name: '身份二成员', role: 'member', mode: 'auto', avatarUrl: '/two.png' },
+      ]);
+    const { result } = renderHook(() => useGroupWorkspace());
+    await waitFor(() => expect(result.current.groups[0]?.participants[0]?.name).toBe('身份一成员'));
+    expect(gs.loadGroupParticipants).toHaveBeenLastCalledWith('g-shared', 'bot-1');
+
+    act(() => {
+      useWorkspaceStore.getState().setActiveIdentity('bot-2');
+    });
+    await waitFor(() => expect(gs.loadGroupParticipants).toHaveBeenLastCalledWith('g-shared', 'bot-2'));
+    await waitFor(() => expect(result.current.groups[0]?.participants[0]?.name).toBe('身份二成员'));
+    expect(gs.loadGroupParticipants).toHaveBeenCalledTimes(2);
+  });
+
   it('searches group list with 300ms debounce per identity', async () => {
     jest.useFakeTimers();
     gs.loadGroups.mockResolvedValue({
@@ -106,7 +216,7 @@ describe('useGroupWorkspace', () => {
     jest.useRealTimers();
   });
 
-  it('onSelectGroup selects group without loading detail', async () => {
+  it('onSelectGroup resolves a deep-linked group outside the current list', async () => {
     gs.loadGroups.mockResolvedValue({ ok: true, data: [] });
     gs.loadGroupDetailOrBcs.mockResolvedValue({
       ok: true,
@@ -126,7 +236,7 @@ describe('useGroupWorkspace', () => {
     await act(async () => {
       await result.current.onSelectGroup('g9');
     });
-    expect(gs.loadGroupDetailOrBcs).not.toHaveBeenCalled();
+    expect(gs.loadGroupDetailOrBcs).toHaveBeenCalledWith('g9', 'bot-1');
     expect(useWorkspaceStore.getState().selectedGroupId).toBe('g9');
   });
 
@@ -164,55 +274,21 @@ describe('useGroupWorkspace', () => {
     expect(useWorkspaceStore.getState().selectedGroupId).toBe('g9');
   });
 
-  it('missing selected group switches to session-only list without fetching group detail', async () => {
-    gs.loadGroups.mockResolvedValueOnce({ ok: true, data: [] }).mockResolvedValueOnce({
-      ok: true,
-      data: [
-        {
-          groupId: 'g9',
-          name: 'X',
-          kind: 'free_chat',
-          status: 'active',
-          participants: [],
-          sessions: [],
-          lastMessageAt: 1,
-          createdAt: 1,
-          isPublic: false,
-          deliveryPolicy: 'send_to_driver',
-        },
-      ],
-    });
-    const { result } = renderHook(() => useGroupWorkspace());
-    await waitFor(() => expect(gs.loadGroups).toHaveBeenCalledTimes(1));
-    act(() => {
-      useWorkspaceStore.getState().selectGroup('g9');
-    });
-    await waitFor(() => expect(useWorkspaceStore.getState().membership).toBe('session_only'));
-    await waitFor(() => expect(gs.loadGroups).toHaveBeenCalledTimes(2));
-    expect(gs.loadGroups.mock.calls[1][1]).toMatchObject({ membership: 'session_only' });
-    expect(gs.loadGroupDetailOrBcs).not.toHaveBeenCalled();
-    expect(result.current.selectedGroup?.groupId).toBe('g9');
-  });
-
-  it('missing group under direct filter auto switches role filter to session_only', async () => {
+  it('missing selected group loads an independent detail without switching membership', async () => {
     gs.loadGroups.mockResolvedValue({ ok: true, data: [] });
     gs.loadGroupDetailOrBcs.mockResolvedValue({
       ok: true,
       data: {
-        groupId: 'g9',
-        name: 'X',
-        kind: 'free_chat',
-        status: 'active',
-        participants: [],
-        sessions: [],
+        groupId: 'g9', name: 'X', kind: 'free_chat', status: 'active', participants: [], sessions: [],
+        lastMessageAt: 1, createdAt: 1, isPublic: false, deliveryPolicy: 'send_to_driver',
       } as any,
     });
-    renderHook(() => useGroupWorkspace());
+    const { result } = renderHook(() => useGroupWorkspace());
     await waitFor(() => expect(gs.loadGroups).toHaveBeenCalled());
-    act(() => {
-      useWorkspaceStore.getState().selectGroup('g9');
-    });
-    await waitFor(() => expect(useWorkspaceStore.getState().membership).toBe('session_only'));
+    act(() => useWorkspaceStore.getState().selectGroup('g9'));
+    await waitFor(() => expect(gs.loadGroupDetailOrBcs).toHaveBeenCalledWith('g9', 'bot-1'));
+    expect(useWorkspaceStore.getState().membership).toBe('direct');
+    expect(result.current.selectedGroup?.groupId).toBe('g9');
   });
 
   it('switch identity triggers loadGroups for new identity and clears selection', async () => {
@@ -319,4 +395,81 @@ it('a scoped group refresh cannot retain a dissolved or mismatched group', async
   expect(result.current.selectedGroup).toBeNull();
   expect(result.current.groupsError).toContain('协作群');
   expect(gs.loadGroups).not.toHaveBeenCalled();
+});
+
+it('fixed group reloads full detail without loading the directory', async () => {
+  const members = [
+    { actorId: 'a1', kind: 'bot' as const, name: '新成员', role: 'driver' as const, mode: 'muted' as const, avatarUrl: '/new.png' },
+  ];
+  gs.loadGroupDetailOrBcs.mockResolvedValue({
+    ok: true,
+    data: {
+      ...scopeGroup,
+      participants: members,
+      participantSummaries: members.map((p) => ({ actorId: p.actorId, kind: p.kind, name: p.name, avatarUrl: p.avatarUrl })),
+      participantDetailsLoaded: true,
+      participantCount: 1,
+      ownerUserId: 'u1',
+      driverBotUuid: 'b1',
+    },
+  });
+  const { result } = renderHook(() => useGroupWorkspace(scopeGroup));
+  await act(async () => {
+    await result.current.reloadSelectedGroup(scopeGroup.groupId);
+  });
+  expect(gs.loadGroups).not.toHaveBeenCalled();
+  expect(result.current.groups[0]?.participants).toEqual(members);
+  expect(result.current.groups[0]?.participants[0]?.avatarUrl).toBe('/new.png');
+  expect(result.current.groups[0]?.ownerUserId).toBe('u1');
+});
+
+it('fixed group refresh seeds members written by a detail reload from cache', async () => {
+  const members = [
+    { actorId: 'a1', kind: 'bot' as const, name: '已缓存成员', role: 'driver' as const, mode: 'auto' as const, avatarUrl: '/cached.png' },
+  ];
+  gs.loadGroupDetailOrBcs
+    .mockResolvedValueOnce({
+      ok: true,
+      data: { ...scopeGroup, participants: members, participantDetailsLoaded: true, participantCount: 1 },
+    })
+    // 刷新返回旧形态（无摘要、无成员）：应由本 Hook 实例的缓存播种头像。
+    .mockResolvedValueOnce({ ok: true, data: { ...scopeGroup, participants: [], participantCount: 1 } });
+  const { result } = renderHook(() => useGroupWorkspace(scopeGroup));
+  await act(async () => {
+    await result.current.reloadSelectedGroup(scopeGroup.groupId);
+  });
+  gs.loadGroupParticipants.mockClear();
+  await act(async () => {
+    await result.current.retryGroups();
+  });
+  expect(result.current.groups[0]?.participants).toEqual(members);
+  expect(gs.loadGroupParticipants).not.toHaveBeenCalled();
+});
+
+it('late fixed-group detail from an old identity cannot overwrite the new context', async () => {
+  const bot2 = { id: 'bot-2', kind: 'bot' as const, displayName: 'B2', online: true };
+  useWorkspaceStore.setState({ identities: [botIdentity, bot2] });
+  let finish!: (res: { ok: true; data: GroupView }) => void;
+  gs.loadGroupDetailOrBcs.mockImplementationOnce(
+    () => new Promise((resolve) => { finish = resolve; }),
+  );
+  const { result } = renderHook(() => useGroupWorkspace(scopeGroup));
+  const pending = result.current.reloadSelectedGroup(scopeGroup.groupId);
+  act(() => {
+    useWorkspaceStore.getState().setActiveIdentity('bot-2');
+  });
+  await act(async () => {
+    finish({
+      ok: true,
+      data: {
+        ...scopeGroup,
+        participants: [
+          { actorId: 'a9', kind: 'bot', name: '旧身份成员', role: 'worker', mode: 'auto', avatarUrl: '/old.png' },
+        ],
+        participantDetailsLoaded: true,
+      },
+    });
+    await pending;
+  });
+  expect(result.current.groups[0]?.participants).toEqual([]);
 });

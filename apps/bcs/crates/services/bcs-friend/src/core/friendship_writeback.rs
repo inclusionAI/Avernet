@@ -7,16 +7,14 @@
 //! whenever this runs, so calling back into it would be redundant.
 //!
 //! Error policy split:
-//! - repo failures propagate (`Err`) so the caller can log them;
-//! - relation-mirror failures are best-effort `warn!` — the repo row is what
-//!   the collaboration group gate reads, a missing relation mirror is
-//!   reconcilable later.
+//! - repo failures always propagate;
+//! - Human relation failures propagate because the legacy Human friend list
+//!   reads that relation graph; retries must repair partial writes;
+//! - Bot↔Bot relation failures retain best-effort `warn!` behavior.
 //!
-//! The `remove_friendship` relation cleanup is gated on `removed` (unlike
-//! `FriendCore`, which mirrors unconditionally to heal prior mirror
-//! failures): this store only owns relation edges it wrote itself, and the
-//! caller treats remove as idempotent, so nothing is lost by not clobbering
-//! edges this path never owned.
+//! Human removal always retries relation cleanup, even if an earlier attempt
+//! already removed the friendship repo row. Bot↔Bot cleanup remains gated on
+//! `removed`, preserving the existing coexistence policy.
 //!
 //! Env: the repo resolves its own env (`resolve_env()`), the same resolution
 //! the group gate (`bcs-group` `ensure_v1_reachable` → `DbFriendStore`) uses,
@@ -54,6 +52,9 @@ impl FriendshipWritebackPort for FriendshipWritebackService {
 
         let env = bcs_config::resolve_env_str();
         if let Err(err) = self.relation.add_friend_edges(caller, target, &env).await {
+            if caller.starts_with("human_") || target.starts_with("human_") {
+                return Err(err);
+            }
             warn!(
                 left_bot = %caller,
                 right_bot = %target,
@@ -69,9 +70,13 @@ impl FriendshipWritebackPort for FriendshipWritebackService {
     async fn remove_friendship(&self, caller: &str, target: &str) -> ServiceResult<bool> {
         let removed = self.repo.remove_friendship(caller, target).await?;
 
-        if removed {
+        let human_pair = caller.starts_with("human_") || target.starts_with("human_");
+        if removed || human_pair {
             let env = bcs_config::resolve_env_str();
             if let Err(err) = self.relation.remove_friend_edges(caller, target, &env).await {
+                if human_pair {
+                    return Err(err);
+                }
                 warn!(
                     left_bot = %caller,
                     right_bot = %target,

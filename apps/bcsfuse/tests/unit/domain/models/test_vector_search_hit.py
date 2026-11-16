@@ -3,7 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
-from src.domain.models.vector_search_hit import VectorSearchHit
+from app.domain.models.vector_search_hit import VectorSearchHit
 
 
 class TestVectorSearchHit:

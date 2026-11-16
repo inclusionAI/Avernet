@@ -1,6 +1,6 @@
 import { BotGeneralConfigDialog } from '@/components/CollaborationPrivacy/BotGeneralConfigDialog';
 import { BotRegistrationDialog } from '@/components/Workspace/IdentitySelector/BotRegistrationDialog';
-import { Avatar } from '@/components/ui/Avatar';
+import { BotDisplayAvatar } from '@/components/Workspace/BotDisplayAvatar';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { DataTable, type DataTableColumn } from '@/components/ui/DataTable';
@@ -45,7 +45,7 @@ export function ExternalBotPanel({ active }: { active: boolean }) {
         width: 'w-[260px]',
         cell: (bot) => (
           <div className="flex min-w-0 items-center gap-3">
-            <Avatar name={bot.name} src={bot.avatarUrl} size={32} />
+            <BotDisplayAvatar botId={bot.id} name={bot.name} avatarUrl={bot.avatarUrl} size={32} />
             <span className="truncate font-medium text-foreground">{bot.name}</span>
           </div>
         ),
@@ -80,7 +80,7 @@ export function ExternalBotPanel({ active }: { active: boolean }) {
             leftIcon={<Settings2 className="size-3.5 shrink-0" aria-hidden />}
             onClick={() => setConfigBot(bot)}
           >
-            通用配置
+            公开设置
           </Button>
         ),
       },

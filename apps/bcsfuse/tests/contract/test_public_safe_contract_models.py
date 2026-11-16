@@ -20,7 +20,7 @@ from pydantic import ValidationError
 @pytest.mark.parametrize("fusion_enable", [True, False])
 def test_worker_config_response_includes_success(fusion_enable):
     """GET/PUT config responses must satisfy the frontend Worker config contract."""
-    from src.interfaces.api.schemas.worker_management_schemas import WorkerConfigResponse
+    from app.adapters.http.schemas.worker_management_schemas import WorkerConfigResponse
 
     response = WorkerConfigResponse(
         worker_id="test-bot:test-owner",
@@ -41,7 +41,7 @@ class TestSchemaModuleImports:
 
     def test_recommend_schemas_import(self):
         """Test recommend schemas import."""
-        from src.interfaces.api.schemas.recommend_schemas import (
+        from app.adapters.http.schemas.recommend_schemas import (
             BotRecommendationRequest,
             BotRecommendation,
             BotRecommendationResponse,
@@ -52,7 +52,7 @@ class TestSchemaModuleImports:
 
     def test_fusion_schemas_import(self):
         """Test fusion schemas import."""
-        from src.interfaces.api.schemas.fusion_schemas import (
+        from app.adapters.http.schemas.fusion_schemas import (
             FuseOptions,
             FuseMetadata,
             FusionRequest,
@@ -67,7 +67,7 @@ class TestSchemaModuleImports:
 
     def test_verify_schemas_import(self):
         """Test verify schemas import."""
-        from src.interfaces.api.schemas.verify_schemas import (
+        from app.adapters.http.schemas.verify_schemas import (
             BatchVerifyRequest,
             BatchVerifyAllRequest,
             DimensionResult,
@@ -81,7 +81,7 @@ class TestSchemaModuleImports:
 
     def test_worker_management_schemas_import(self):
         """Test worker management schemas import."""
-        from src.interfaces.api.schemas.worker_management_schemas import (
+        from app.adapters.http.schemas.worker_management_schemas import (
             Availability,
             TrustLevel,
             WorkerBatchQueryRequest,
@@ -98,7 +98,7 @@ class TestSchemaModuleImports:
 
     def test_profile_management_schemas_import(self):
         """Test profile management schemas import."""
-        from src.interfaces.api.schemas.profile_management_schemas import (
+        from app.adapters.http.schemas.profile_management_schemas import (
             ProfileSearchRequest,
             ProfileSearchResult,
             ProfileQualityResponse,
@@ -114,7 +114,7 @@ class TestMinimalValidPayloads:
 
     def test_bot_recommendation_request_minimal(self):
         """Test minimal BotRecommendationRequest instantiation."""
-        from src.interfaces.api.schemas.recommend_schemas import BotRecommendationRequest
+        from app.adapters.http.schemas.recommend_schemas import BotRecommendationRequest
 
         req = BotRecommendationRequest(question="test question")
         assert req.question == "test question"
@@ -123,7 +123,7 @@ class TestMinimalValidPayloads:
 
     def test_fusion_request_minimal(self):
         """Test minimal FusionRequest instantiation."""
-        from src.interfaces.api.schemas.fusion_schemas import FusionRequest
+        from app.adapters.http.schemas.fusion_schemas import FusionRequest
 
         req = FusionRequest(question="test question", participants=["bot1"])
         assert req.question == "test question"
@@ -132,7 +132,7 @@ class TestMinimalValidPayloads:
 
     def test_batch_verify_request_minimal(self):
         """Test minimal BatchVerifyRequest instantiation."""
-        from src.interfaces.api.schemas.verify_schemas import BatchVerifyRequest
+        from app.adapters.http.schemas.verify_schemas import BatchVerifyRequest
 
         req = BatchVerifyRequest(worker_ids=["wrk_001"])
         assert req.worker_ids == ["wrk_001"]
@@ -140,7 +140,7 @@ class TestMinimalValidPayloads:
 
     def test_batch_verify_all_request_minimal(self):
         """Test minimal BatchVerifyAllRequest instantiation."""
-        from src.interfaces.api.schemas.verify_schemas import BatchVerifyAllRequest
+        from app.adapters.http.schemas.verify_schemas import BatchVerifyAllRequest
 
         req = BatchVerifyAllRequest()
         assert req.capabilities is None
@@ -148,14 +148,14 @@ class TestMinimalValidPayloads:
 
     def test_worker_batch_query_request_minimal(self):
         """Test minimal WorkerBatchQueryRequest instantiation."""
-        from src.interfaces.api.schemas.worker_management_schemas import WorkerBatchQueryRequest
+        from app.adapters.http.schemas.worker_management_schemas import WorkerBatchQueryRequest
 
         req = WorkerBatchQueryRequest(worker_ids=["wrk_001"])
         assert req.worker_ids == ["wrk_001"]
 
     def test_worker_sync_request_minimal(self):
         """Test minimal WorkerSyncRequest instantiation."""
-        from src.interfaces.api.schemas.worker_management_schemas import WorkerSyncRequest
+        from app.adapters.http.schemas.worker_management_schemas import WorkerSyncRequest
 
         req = WorkerSyncRequest(name="Test Worker", profile={"profile_id": "default"})
         assert req.name == "Test Worker"
@@ -163,7 +163,7 @@ class TestMinimalValidPayloads:
 
     def test_worker_availability_update_minimal(self):
         """Test minimal WorkerAvailabilityUpdate instantiation."""
-        from src.interfaces.api.schemas.worker_management_schemas import (
+        from app.adapters.http.schemas.worker_management_schemas import (
             WorkerAvailabilityUpdate,
             Availability,
         )
@@ -173,7 +173,7 @@ class TestMinimalValidPayloads:
 
     def test_worker_trust_level_update_minimal(self):
         """Test minimal WorkerTrustLevelUpdate instantiation."""
-        from src.interfaces.api.schemas.worker_management_schemas import (
+        from app.adapters.http.schemas.worker_management_schemas import (
             WorkerTrustLevelUpdate,
             TrustLevel,
         )
@@ -183,7 +183,7 @@ class TestMinimalValidPayloads:
 
     def test_worker_patch_request_minimal(self):
         """Test minimal WorkerPatchRequest instantiation."""
-        from src.interfaces.api.schemas.worker_management_schemas import WorkerPatchRequest
+        from app.adapters.http.schemas.worker_management_schemas import WorkerPatchRequest
 
         req = WorkerPatchRequest(name="Updated Name")
         assert req.name == "Updated Name"
@@ -191,14 +191,14 @@ class TestMinimalValidPayloads:
 
     def test_worker_config_update_minimal(self):
         """Test minimal WorkerConfigUpdate instantiation."""
-        from src.interfaces.api.schemas.worker_management_schemas import WorkerConfigUpdate
+        from app.adapters.http.schemas.worker_management_schemas import WorkerConfigUpdate
 
         req = WorkerConfigUpdate(fusion_enable=True)
         assert req.fusion_enable is True
 
     def test_profile_search_request_minimal(self):
         """Test minimal ProfileSearchRequest instantiation."""
-        from src.interfaces.api.schemas.profile_management_schemas import ProfileSearchRequest
+        from app.adapters.http.schemas.profile_management_schemas import ProfileSearchRequest
 
         req = ProfileSearchRequest(query="test query")
         assert req.query == "test query"
@@ -206,14 +206,14 @@ class TestMinimalValidPayloads:
 
     def test_profile_analyze_request_minimal(self):
         """Test minimal ProfileAnalyzeRequest instantiation."""
-        from src.interfaces.api.schemas.profile_management_schemas import ProfileAnalyzeRequest
+        from app.adapters.http.schemas.profile_management_schemas import ProfileAnalyzeRequest
 
         req = ProfileAnalyzeRequest()
         assert req.analyze_type == "quality"
 
     def test_profile_patch_request_minimal(self):
         """Test minimal ProfilePatchRequest instantiation."""
-        from src.interfaces.api.schemas.profile_management_schemas import ProfilePatchRequest
+        from app.adapters.http.schemas.profile_management_schemas import ProfilePatchRequest
 
         req = ProfilePatchRequest(display_name="New Name")
         assert req.display_name == "New Name"
@@ -224,7 +224,7 @@ class TestOptionalFieldsPayloads:
 
     def test_bot_recommendation_request_optional(self):
         """Test BotRecommendationRequest with optional fields."""
-        from src.interfaces.api.schemas.recommend_schemas import BotRecommendationRequest
+        from app.adapters.http.schemas.recommend_schemas import BotRecommendationRequest
 
         req = BotRecommendationRequest(
             question="test question",
@@ -244,7 +244,7 @@ class TestOptionalFieldsPayloads:
 
     def test_fusion_request_optional(self):
         """Test FusionRequest with optional fields."""
-        from src.interfaces.api.schemas.fusion_schemas import (
+        from app.adapters.http.schemas.fusion_schemas import (
             FusionRequest,
             FuseOptions,
             FuseMetadata,
@@ -271,7 +271,7 @@ class TestOptionalFieldsPayloads:
 
     def test_batch_verify_request_optional(self):
         """Test BatchVerifyRequest with optional fields."""
-        from src.interfaces.api.schemas.verify_schemas import BatchVerifyRequest
+        from app.adapters.http.schemas.verify_schemas import BatchVerifyRequest
 
         req = BatchVerifyRequest(
             worker_ids=["wrk_001", "wrk_002"],
@@ -283,7 +283,7 @@ class TestOptionalFieldsPayloads:
 
     def test_worker_sync_request_optional(self):
         """Test WorkerSyncRequest with optional fields."""
-        from src.interfaces.api.schemas.worker_management_schemas import WorkerSyncRequest
+        from app.adapters.http.schemas.worker_management_schemas import WorkerSyncRequest
 
         req = WorkerSyncRequest(
             name="Test Worker",
@@ -301,7 +301,7 @@ class TestOptionalFieldsPayloads:
 
     def test_profile_search_request_optional(self):
         """Test ProfileSearchRequest with optional fields."""
-        from src.interfaces.api.schemas.profile_management_schemas import ProfileSearchRequest
+        from app.adapters.http.schemas.profile_management_schemas import ProfileSearchRequest
 
         req = ProfileSearchRequest(
             query="test query",
@@ -319,7 +319,7 @@ class TestNoForbiddenImports:
 
     def test_recommend_schemas_no_forbidden_imports(self):
         """Test recommend schemas don't import forbidden dependencies."""
-        import src.interfaces.api.schemas.recommend_schemas as module
+        import app.adapters.http.schemas.recommend_schemas as module
         module_source = open(module.__file__, "r").read()
 
         forbidden = [
@@ -330,11 +330,11 @@ class TestNoForbiddenImports:
             "mist",
             "mist_client",
             "layotto",
-            "src.infra.config.zdas_settings",
-            "src.infra.adapters.zdas_",
-            "src.infra.vectorstores.qdrant_zdas_vector_store",
-            "src.infra.vectorstores.faiss_zdas_vector_store",
-            "src.infra.vectorstore_backends.zdas_vector_persistence_backend",
+            "app.infra.config.zdas_settings",
+            "app.infra.adapters.zdas_",
+            "app.infra.vectorstores.qdrant_zdas_vector_store",
+            "app.infra.vectorstores.faiss_zdas_vector_store",
+            "app.infra.vectorstore_backends.zdas_vector_persistence_backend",
         ]
 
         for pattern in forbidden:
@@ -342,7 +342,7 @@ class TestNoForbiddenImports:
 
     def test_fusion_schemas_no_forbidden_imports(self):
         """Test fusion schemas don't import forbidden dependencies."""
-        import src.interfaces.api.schemas.fusion_schemas as module
+        import app.adapters.http.schemas.fusion_schemas as module
         module_source = open(module.__file__, "r").read()
 
         forbidden = [
@@ -358,7 +358,7 @@ class TestNoForbiddenImports:
 
     def test_verify_schemas_no_forbidden_imports(self):
         """Test verify schemas don't import forbidden dependencies."""
-        import src.interfaces.api.schemas.verify_schemas as module
+        import app.adapters.http.schemas.verify_schemas as module
         module_source = open(module.__file__, "r").read()
 
         forbidden = [
@@ -374,7 +374,7 @@ class TestNoForbiddenImports:
 
     def test_worker_management_schemas_no_forbidden_imports(self):
         """Test worker management schemas don't import forbidden dependencies."""
-        import src.interfaces.api.schemas.worker_management_schemas as module
+        import app.adapters.http.schemas.worker_management_schemas as module
         module_source = open(module.__file__, "r").read()
 
         forbidden = [
@@ -390,7 +390,7 @@ class TestNoForbiddenImports:
 
     def test_profile_management_schemas_no_forbidden_imports(self):
         """Test profile management schemas don't import forbidden dependencies."""
-        import src.interfaces.api.schemas.profile_management_schemas as module
+        import app.adapters.http.schemas.profile_management_schemas as module
         module_source = open(module.__file__, "r").read()
 
         forbidden = [
@@ -410,7 +410,7 @@ class TestSchemaValidation:
 
     def test_bot_recommendation_request_validates_topk(self):
         """Test BotRecommendationRequest validates topK range."""
-        from src.interfaces.api.schemas.recommend_schemas import BotRecommendationRequest
+        from app.adapters.http.schemas.recommend_schemas import BotRecommendationRequest
 
         # Valid range
         req = BotRecommendationRequest(question="test", topK=10)
@@ -426,7 +426,7 @@ class TestSchemaValidation:
 
     def test_fusion_request_validates_participants(self):
         """Test FusionRequest validates participants length."""
-        from src.interfaces.api.schemas.fusion_schemas import FusionRequest
+        from app.adapters.http.schemas.fusion_schemas import FusionRequest
 
         # Valid
         req = FusionRequest(question="test", participants=["bot1"])
@@ -438,7 +438,7 @@ class TestSchemaValidation:
 
     def test_availability_enum_values(self):
         """Test Availability enum values."""
-        from src.interfaces.api.schemas.worker_management_schemas import Availability
+        from app.adapters.http.schemas.worker_management_schemas import Availability
 
         assert Availability.PRIVATE.value == "private"
         assert Availability.PROTECTED.value == "protected"
@@ -446,7 +446,7 @@ class TestSchemaValidation:
 
     def test_trust_level_enum_values(self):
         """Test TrustLevel enum values."""
-        from src.interfaces.api.schemas.worker_management_schemas import TrustLevel
+        from app.adapters.http.schemas.worker_management_schemas import TrustLevel
 
         assert TrustLevel.UNVERIFIED.value == "unverified"
         assert TrustLevel.VERIFYING.value == "verifying"

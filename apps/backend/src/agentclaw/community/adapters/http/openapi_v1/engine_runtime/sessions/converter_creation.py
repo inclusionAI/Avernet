@@ -1,4 +1,4 @@
-"""OpenClaw create-response conversion for the public sessions surface."""
+"""Prefer OpenClaw creation metadata, with bounded legacy reconciliation."""
 from __future__ import annotations
 
 import asyncio
@@ -13,14 +13,8 @@ from agentclaw.community.log import get_logger
 
 logger = get_logger()
 
-# Direct Engine consumers keep OpenClaw's historical relative id. Only the
-# public OpenAPI response is reconciled with its canonical list row.
 _LIMIT = 20
-# OpenClaw acknowledges ``sessions.patch`` before a newly-created empty
-# session is necessarily visible through ``sessions.list``.  Cloud runtimes
-# can take longer to publish that read model than an in-process/internal
-# deployment, so keep the same three-attempt bound but allow up to two seconds
-# for convergence.
+# Older Adapters may acknowledge creation before the list contains the session.
 _DELAYS = (0.0, 0.5, 1.5)
 _MANAGED_SESSION_KEY = re.compile(
     r"^(?:agent:([^:]+):)?(session:[^:]+:user:[^:]+)$",
@@ -50,9 +44,34 @@ async def reconcile_created_session(
     created_item: dict[str, Any], requested_title: str | None,
     device_uuid: str | None = None,
 ) -> dict[str, Any]:
-    """Recover OpenClaw's canonical list row after a successful create."""
+    """Use creation metadata, or best-effort list recovery for older Adapters.
+
+    Updated Adapters provide the canonical session ID and resolved model in
+    ext_info.openclaw_creation. Only missing or incomplete metadata requires
+    the legacy readback. A failed readback never retries the successful write.
+    """
     if facts.active_engine.lower() != "openclaw":
         return created_item
+
+    ext_info = created_item.get("ext_info")
+    creation = ext_info.get("openclaw_creation") if isinstance(ext_info, dict) else None
+    if isinstance(creation, dict):
+        session_id = creation.get("session_id")
+        model = creation.get("model")
+        if (
+            isinstance(session_id, str) and session_id.strip()
+            and isinstance(model, str) and model.strip()
+        ):
+            item = {**created_item, "id": session_id, "model": model}
+            if requested_title is not None:
+                item["title"] = requested_title
+            return item
+
+    if isinstance(ext_info, dict) and "openclaw_creation" in ext_info:
+        logger.warning(
+            "[openapi.sessions.create] invalid creation metadata; using legacy reconciliation"
+        )
+
     created_id = str(created_item.get("id") or "")
     if not created_id:
         return created_item
@@ -67,28 +86,24 @@ async def reconcile_created_session(
                 stage=stage.value, method="GET", path="/api/sessions",
                 params={"offset": 0, "limit": _LIMIT, "user_id": user_id},
             )
+            match = next((
+                item for item in _as_list(listed.data)
+                if _matches(str(item.get("id") or ""), created_id)
+            ), None)
         except Exception as error:
-            # The write already succeeded. Do not invite a retry that creates
-            # another empty session because this best-effort read failed. A
-            # transient list failure must not consume all remaining attempts.
+            # Creation already succeeded. A failed optional read must not
+            # invite a client retry that creates another empty session.
             logger.warning(
                 "[openapi.sessions.create] canonical reconciliation failed: %s",
                 type(error).__name__,
             )
             continue
-
-        match = next((
-            item for item in _as_list(listed.data)
-            if _matches(str(item.get("id") or ""), created_id)
-        ), None)
         if match is None:
             continue
 
         reconciled = {**created_item, **match}
         if not match.get("model") and created_item.get("model"):
             reconciled["model"] = created_item["model"]
-        # The create row describes this operation's timestamps. Older
-        # OpenClaw list adapters generated timestamps at read time.
         for field in ("gmt_created", "gmt_modified"):
             if created_item.get(field):
                 reconciled[field] = created_item[field]

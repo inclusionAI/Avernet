@@ -175,6 +175,41 @@ async def test_caller_runs_before_plugins_and_keeps_result_on_plugin_failure() -
 
     assert result.iam_token == "original"
     assert events[0] == "caller"
+    caller_kwargs = caller.get_iam_token.await_args.kwargs
+    assert "session_key" not in caller_kwargs
+    assert "friend_user_id" not in caller_kwargs
+
+
+@pytest.mark.asyncio
+async def test_friend_identity_context_is_forwarded_to_caller_service() -> None:
+    caller = MagicMock()
+    caller.get_iam_token = AsyncMock(
+        return_value=CallerIamTokenOutcome(iam_token="original")
+    )
+    orchestrator = TokenExchangeOrchestrator(
+        caller_service=caller,
+        token_pipeline=NoopTokenPluginPipeline(),
+        bot_repository=MagicMock(),
+    )
+
+    result = await orchestrator.get_iam_token(
+        iam_token="iam",
+        auth_request=AuthRequestContext(
+            cookies={}, headers={}, query_params={}, base_url="http://test"
+        ),
+        bot_id="bot-1",
+        stage=CallerIdentityStage.ONLINE,
+        publish_id=None,
+        entity_id="owner-1",
+        is_test_exchange=False,
+        session_key="friend-session",
+        friend_user_id="friend-1",
+    )
+
+    assert result.iam_token == "original"
+    caller_kwargs = caller.get_iam_token.await_args.kwargs
+    assert caller_kwargs["session_key"] == "friend-session"
+    assert caller_kwargs["friend_user_id"] == "friend-1"
 
 
 @pytest.mark.asyncio

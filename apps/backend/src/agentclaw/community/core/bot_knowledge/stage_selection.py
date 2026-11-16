@@ -6,13 +6,13 @@ from sqlalchemy import update
 
 from agentclaw.community.core.bot_knowledge.publication_selection import (
     SelectionRecord,
+    observation_space,
     selection_coordinates,
     selection_identity,
 )
 from agentclaw.community.core.bot_knowledge.repository.models import (
     BotKnowledgeBindingModel as Binding,
 )
-from agentclaw.community.core.bot_knowledge.repository.store import require_space
 from agentclaw.community.core.service_bot.repository.models import (
     BotPublishModel as Publication,
     PublishStatus,
@@ -213,7 +213,10 @@ class BotKnowledgeStageSelection:
                     rollback_token=_rollback_token(session, publication),
                 )
         except Exception:
-            logger.exception("Knowledge deployment identity unavailable: publication_id=%s", publication_id)
+            logger.exception(
+                "Knowledge deployment identity unavailable: publication_id=%s",
+                publication_id,
+            )
             return None
 
     def project_online(self, *, publication_id: int, observed: dict) -> bool:
@@ -243,9 +246,15 @@ class BotKnowledgeStageSelection:
                 )
                 if bot is None:
                     return False
-                identity = selection_identity(bot, publication) | {
-                    "space_id": require_space(session, bot)
-                }
+                space_id = observation_space(session, bot)
+                if space_id is None:
+                    logger.warning(
+                        "Knowledge online projection skipped: publication_id=%s, "
+                        "reason=SPACE_NOT_FOUND",
+                        publication_id,
+                    )
+                    return False
+                identity = selection_identity(bot, publication) | {"space_id": space_id}
                 marker = _config(session, identity, "projection:online", lock=True)
                 # The transactional session keeps only this auxiliary row lock;
                 # native publication rows are never locked or written here.

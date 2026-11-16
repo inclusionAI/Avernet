@@ -119,7 +119,7 @@ use super::*;
             response_mode: bcs_service_api::ChatResponseMode::Full,
             assignment_intent_id: None, summary: String::new(),
         };
-        let projection = QueuedGroupProjection::task_result(&row, task, Vec::new())
+        let projection = QueuedGroupProjection::task_result(&row, task, Vec::new(), None)
             .expect("a dispatch-committed row decodes for the result leg");
         let out = serde_json::to_value(&projection).unwrap();
         for key in [
@@ -164,7 +164,7 @@ use super::*;
             response_mode: bcs_service_api::ChatResponseMode::Full,
             assignment_intent_id: None, summary: String::new(),
         };
-        let projection = QueuedGroupProjection::task_result(&row, task, Vec::new()).unwrap();
+        let projection = QueuedGroupProjection::task_result(&row, task, Vec::new(), None).unwrap();
         let out = serde_json::to_value(&projection).unwrap();
         assert!(
             out.get("caller_required").is_none(),
@@ -191,4 +191,48 @@ use super::*;
         assert_eq!(again_out["caller_task"], "GROUP TASK BODY");
         assert!(again_out.get("caller_delegation").is_some());
         assert_eq!(again_out["caller_lineage"], "delegation_only");
+    }
+
+    #[test]
+    fn protected_task_result_carries_its_own_material_never_the_dispatch_facts() {
+        // A caller-enabled Manager cannot receive the result on the ordinary
+        // transport (the §15.4 gate refuses it), so the result projection
+        // carries the RESULT's own protected material: the canonical result
+        // text as the digest input and the WORKER as the trusted channel
+        // sender — never the dispatch's task text or purpose.
+        let mut row = worker_row();
+        row.semantic_projection_json = serialized_worker_projection();
+        row.semantic_projection_json["task"]["leg"] = serde_json::json!("result");
+        let task = crate::queued_task::TaskIntent {
+            timeout_s: None,
+            leg: crate::queued_task::TaskLeg::Result,
+            task_id: "t1".into(), manager: "bot-driver".into(), worker: "bot-worker".into(),
+            worker_name: "Worker".into(),
+            response_mode: bcs_service_api::ChatResponseMode::Full,
+            assignment_intent_id: None, summary: String::new(),
+        };
+        let projection = QueuedGroupProjection::task_result(&row, task, Vec::new(), Some("任务结果：已完成全部步骤"))
+            .unwrap();
+        let out = serde_json::to_value(&projection).unwrap();
+        assert_eq!(out["caller_required"], true, "the protected result routes to the protected branch");
+        assert_eq!(out["caller_task"], "任务结果：已完成全部步骤", "the protected text is the RESULT text");
+        assert_eq!(out["caller_channel"]["actor_id"], "bot-worker", "the envelope from-zone stays the worker");
+        assert_eq!(out["caller_channel"]["actor_name"], "Worker");
+        // P1.III.2 stays intact: no dispatch material rides along.
+        assert!(out.get("caller_delegation").is_none(), "no delegated purpose toward the Manager");
+        assert!(out.get("caller_lineage").is_none(), "no lineage association on the result leg");
+        assert!(out.get("caller_execution").is_none());
+        // An empty protected decision (no plain result body) degrades to the
+        // ordinary shape rather than fabricating material.
+        let task = crate::queued_task::TaskIntent {
+            timeout_s: None,
+            leg: crate::queued_task::TaskLeg::Result,
+            task_id: "t2".into(), manager: "bot-driver".into(), worker: "bot-worker".into(),
+            worker_name: "Worker".into(),
+            response_mode: bcs_service_api::ChatResponseMode::Full,
+            assignment_intent_id: None, summary: String::new(),
+        };
+        let projection = QueuedGroupProjection::task_result(&row, task, Vec::new(), Some("   ")).unwrap();
+        let out = serde_json::to_value(&projection).unwrap();
+        assert!(out.get("caller_required").is_none(), "an empty protected text stays ordinary");
     }

@@ -233,7 +233,11 @@ pub async fn patch_provider_bot_attributes(
         has_friend_check_in_strategy = body.friend_check_in_strategy.is_some(),
         "Provider Bot attributes patch accepted"
     );
-    let sync_visibility = body.visibility.is_some();
+    // Any privacy field can change normalized visibility, including whole-object
+    // friend_ext replacement. Sync the service result, never approval drafts.
+    let sync_visibility = body.visibility.is_some()
+        || body.friend_check_in_strategy.is_some()
+        || body.friend_ext.is_some();
     let attributes = internal_bot_attributes_service(&state)?
         .patch(body.into_command(bot_uuid.clone()))
         .await
@@ -587,6 +591,10 @@ fn internal_attributes_error(error: ApplicationError) -> ProviderRouteError {
             status: StatusCode::BAD_GATEWAY,
             message,
         },
+        ApplicationError::Unavailable { message, .. } => ProviderRouteError {
+            status: StatusCode::SERVICE_UNAVAILABLE,
+            message,
+        },
         ApplicationError::Internal(message) => ProviderRouteError {
             status: StatusCode::INTERNAL_SERVER_ERROR,
             message,
@@ -644,6 +652,7 @@ async fn require_staff_no(
 
 fn provider_error(error: ServiceError) -> ProviderRouteError {
     match error {
+        ServiceError::A2aManagement(error)=>ProviderRouteError {status:super::a2a_management::status(error.code),message:error.reason.into()},
         ServiceError::Unauthorized(message) => ProviderRouteError {
             status: StatusCode::UNAUTHORIZED,
             message,
@@ -717,6 +726,7 @@ fn provider_to_response(provider: ProviderRecord) -> Result<ProviderInfoResponse
 
     let scope = bcs_service_api::ProviderCollaborationScope::from_config(&provider.config)?;
     Ok(ProviderInfoResponse {
+        a2a: config.get("a2a").map(|v| json!({"default_owner":v.get("default_owner")})),
         collaboration_scope: Some(match scope { bcs_service_api::ProviderCollaborationScope::Standard => "standard", bcs_service_api::ProviderCollaborationScope::SameOwner => "same_owner" }.into()),
         provider_id: provider.provider_id,
         slug: provider.slug,

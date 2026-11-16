@@ -102,7 +102,7 @@ def _assert_no_user_data(response, _world) -> None:
                 "status": "ACTIVE",
                 "skills": [],
                 "mcps": [],
-                "payload": {"engine": "claude_code"},
+                "payload": {"engine": "claude_code", "bot_type": "personal"},
             }
         },
     ),

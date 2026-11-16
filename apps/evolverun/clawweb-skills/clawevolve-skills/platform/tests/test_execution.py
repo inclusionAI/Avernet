@@ -177,17 +177,19 @@ class ExecutionTest(unittest.TestCase):
                 hardening.run_handler(self.args)
         self.assertEqual(self.reports, [])
 
-    def test_extension_report_loss_does_not_send_a_second_report(self):
+    def test_extension_report_loss_retries_delivery_without_business_reexecution(self):
         original_http = self.http
         def lose_report(method, url, **kwargs):
             if method == "POST":
                 self.reports.append(json.loads(kwargs["body"]))
                 raise TimeoutError("lost response")
             return original_http(method, url, **kwargs)
-        with patch.object(runtime, "_http", lose_report):
-            with self.assertRaises(TimeoutError):
+        with patch.object(runtime, "_http", lose_report), patch.object(runtime.time, "sleep"):
+            with self.assertRaises(runtime.RuntimeFailure):
                 runner.execute_extension(self.args)
-        self.assertEqual(len(self.reports), 1)
+        self.assertEqual(len(self.reports), 5)
+        self.assertTrue(all(report == self.reports[0] for report in self.reports))
+        self.assertEqual(len(self.calls), 1)
 
     def test_output_correction_reports_once_without_restarting_extension(self):
         commands = []
@@ -219,11 +221,11 @@ class ExecutionTest(unittest.TestCase):
                         self.reports.append(json.loads(kwargs["body"]))
                         raise urllib.error.HTTPError(url, status, "Rejected", {}, io.BytesIO(b'{"error":"schema violation"}'))
                     return original_http(method, url, **kwargs)
-                with patch.object(runtime, "_http", reject_success):
+                with patch.object(runtime, "_http", reject_success), patch.object(runtime.time, "sleep"):
                     code = runner.main(["--action", "execute", "--task-id", "EV-1", "--step-id", "STEP-1",
                                         "--clawweb-url", "http://127.0.0.1:5196"])
                 self.assertEqual(code, 1)
-                expected = ["succeeded", "failed"] if status in (400, 422) else ["succeeded"]
+                expected = ["succeeded", "failed"] if status in (400, 422) else ["succeeded"] * (5 if status == 503 else 1)
                 self.assertEqual([r["status"] for r in self.reports], expected)
                 if status in (400, 422):
                     self.assertIn("schema violation", self.reports[-1]["error"]["message"])

@@ -9,6 +9,7 @@
  */
 
 import { parse as parseYaml } from "yaml";
+import { validateSubworkflowFanouts } from "./subworkflow-fanout.js";
 import {
   normalizeWorkflowSpec,
   type WorkflowSpec,
@@ -42,6 +43,7 @@ export function validateSpec(raw: unknown): ValidationResult {
 
   // L1: Structural validation (try normalize, which throws on first structural error)
   try {
+    validateSubworkflowFanouts(raw);
     normalizedSpec = normalizeWorkflowSpec(raw);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

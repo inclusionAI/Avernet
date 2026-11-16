@@ -6,6 +6,7 @@
 //! every mentioned human and posts it as the `x-avernet-principal` header;
 //! the internal endpoint verifies the signature and derives the acting user.
 
+use bcs_network_tracing::RequestBuilderExt;
 pub const WORK_ORDER_BACKEND_NAME: &str = "work_order";
 
 use async_trait::async_trait;
@@ -256,7 +257,7 @@ impl WorkOrderMentionNotifier {
             .post(url)
             .header("x-avernet-principal", principal)
             .json(&payload)
-            .send()
+            .send_traced()
             .await;
         match response {
             Ok(response) if response.status().is_success() => {

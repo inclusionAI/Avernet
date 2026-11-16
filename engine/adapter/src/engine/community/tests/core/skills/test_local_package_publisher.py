@@ -50,6 +50,29 @@ def test_publish_creates_complete_package(tmp_path: Path) -> None:
     ).read_bytes() == b"print('sunny')\n"
 
 
+def test_publish_preserves_nested_capability_documents(tmp_path: Path) -> None:
+    target = tmp_path / "skills-local" / "weather"
+    files = {
+        "SKILL.md": (
+            b"---\nname: weather\ndescription: forecast\n---\n"
+            b"[Query](capability/query/SKILL.md)\n"
+        ),
+        "capability/query/SKILL.md": b"# Query\nRead scripts/run.py\n",
+        "capability/query/scripts/run.py": b"raise RuntimeError('not executed')\n",
+    }
+
+    result = LocalSkillPackagePublisher().publish(
+        skill_name="weather", package=_package(files), target=target
+    )
+
+    assert result.action is LocalSkillPackageAction.CREATED
+    assert {
+        path.relative_to(target).as_posix(): path.read_bytes()
+        for path in target.rglob("*")
+        if path.is_file()
+    } == files
+
+
 def test_publish_accepts_backend_canonical_legacy_manifest(tmp_path: Path) -> None:
     package = _package(
         {"SKILL.md": b"name: weather\ndescription: legacy compatibility\n"}

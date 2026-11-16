@@ -132,6 +132,47 @@ With the Provider Admin Bearer token, register a Bot using
 }
 ```
 
+`owners` is an ordered initialization snapshot, not a multi-owner role or a
+manager synchronization API. The first entry becomes the sole owner and
+`created_by`; remaining distinct entries become managers. For example,
+`["alice", "bob", "carol"]` initializes owner Alice and managers Bob/Carol.
+Supply 1–101 raw user IDs (at most 100 initial managers); entries are trimmed,
+validated and deduplicated without changing the first owner. Blank IDs,
+`human_`-prefixed actor IDs, control characters and IDs over 128 UTF-8 bytes
+are rejected before Bot creation. The owner is excluded from managers.
+
+User IDs are case- and accent-sensitive: `Carol`/`carol` and `Jose`/`José`
+are separate principals, never aliases. MySQL deployments must apply migration
+`043_actor_identity_collation.sql` and `044_actor_identity_no_pad.sql` before accepting these snapshots.
+The target is NO PAD `utf8mb4_0900_bin`, preserving retained trailing-space
+identities as well as case/accent differences; compatible engines must support
+this collation (never substitute PAD SPACE `utf8mb4_bin`). It aligns
+`bcs_bots.bot_uuid` and active actor-reference keys/predicates (including grants,
+runtime profiles and group/session memberships) with the byte-exact SQLite/Memory
+and authority contract. Stop writers for the complete migration. Preserve this migration on application rollback once
+distinct IDs have been admitted; do not fold or merge stored identities.
+Original 043 bytes are archived under `migrations/legacy/mysql/`; the migration
+runner accepts only their exact pinned checksum without changing the stored
+history row. Migration 044 upgrades installations that already applied that
+original 043. See `specs/2026-11-06-provider-initial-managers/carolynli-followup.md`.
+
+Provider Admin Bearer authorizes this initial identity declaration. Manager
+Human actors are created when absent, but tombstoned/non-Human identities fail
+closed. Owner/version, manager actors/edges and the Provider-attributed
+initialization audit commit atomically. Fresh ordinary registrations with a
+nonempty initial-manager set now commit Bot/binding and authority together,
+so `/bots/mine` cannot take over a partially registered Bot's initialization.
+A failed transaction leaves no Bot for owner-only migration; retry can create it
+with the complete snapshot. Single-owner registration keeps its existing boundary.
+Multi-user attachment/retry against an existing version-0 Bot returns Conflict
+before mutation and requires explicit authority reconciliation. Bots already
+initialized by pre-fix software are not automatically repaired: the registration
+snapshot cannot distinguish a missing manager from a subsequently revoked one. Strict duplicate-conflict paths (including AgentPass subbots
+and A2A) retain their existing duplicate policy. An already initialized
+Bot never has managers synchronized or a transferred owner reset by registration;
+Gateway/Plugin replay preserves subsequent grants and revocations. Existing
+initialized Bots are not backfilled. Use the existing management APIs for changes.
+
 Without either `agent_card_url` or `agent_card`, gateway registration fails with HTTP 400 before Bot
 creation if neither webhook address is configured. Plugin/WebSocket Bots reject an explicit webhook URL. URLs use the
 existing outbound URL validation policy. Registration replay preserves the saved
@@ -437,12 +478,12 @@ differences:
 
 `POST /providers/{provider_id}/bots` accepts exactly one of `agent_card_url` or
 a complete `agent_card` JSON object, with the same Provider Admin Bearer.
-Supply exactly one owner and a stable provider_bot_ref. The A2A name defaults
+Supply an `owners` initialization snapshot as described above and a stable provider_bot_ref. The A2A name defaults
 to Card.name; an explicit name is a local alias. Summary defaults to the Card
 description when omitted. Legacy non-A2A requests still require their name.
 
 Both sources share declaration/egress validation and atomic Bot, binding,
-ownership, profile, audit and full Card creation. No webhook is needed; plugin
+ownership, initial manager actors/edges, profile, audit and full Card creation. No webhook is needed; plugin
 mode and mixed webhook/source inputs are rejected. Duplicate Provider/ref
 returns 409 without replaying credentials. Updates use expected_revision.
 Only URL-backed Cards refresh automatically; inline Cards require explicit

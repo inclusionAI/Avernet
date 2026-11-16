@@ -18,6 +18,7 @@ from agentclaw.community.core.task.forum.interaction.models import (
 )
 from agentclaw.community.core.task.forum.models import (
     ForumPollConfig,
+    ForumPostLocationRecord,
     ForumPollSelection,
     ForumTopicAnalysisRecord,
     ForumTopicConfig,
@@ -36,6 +37,9 @@ class FakeForumRepository:
         self.calls: list[dict[str, Any]] = []
         self.topic = topic
         self.post = post
+        self.location = ForumPostLocationRecord(
+            post_id="post-1", root_post_id="post-root", page=3
+        )
         self._default_topic = _topic_record()
         self._default_post = _post_record()
 
@@ -76,6 +80,17 @@ class FakeForumRepository:
     def get_topic(self, topic_id):
         self.calls.append({"operation": "get_topic", "topic_id": topic_id})
         return self._default_topic if self.topic is None else self.topic
+
+    def get_post_location(self, *, topic_id: str, post_id: str, page_size: int):
+        self.calls.append(
+            {
+                "operation": "get_post_location",
+                "topic_id": topic_id,
+                "post_id": post_id,
+                "page_size": page_size,
+            }
+        )
+        return self.location
 
     def get_post(self, *, topic_id: str, post_id: str):
         self.calls.append(
@@ -132,6 +147,37 @@ class FakeForumRepository:
             has_voted=True,
             vote_post_id="post-vote",
             poll_selection=ForumPollSelection(option_indices=(0,)),
+        )
+
+
+def test_get_post_location_normalizes_ids_and_maps_missing_post_to_not_found():
+    repo = FakeForumRepository()
+    repo.post = None
+
+    result = ForumService(repo).get_post_location(
+        topic_id=" topic-1 ",
+        post_id=" post-1 ",
+        page_size=10,
+    )
+
+    assert result == ForumPostLocationRecord(
+        post_id="post-1", root_post_id="post-root", page=3
+    )
+    assert repo.calls == [
+        {
+            "operation": "get_post_location",
+            "topic_id": "topic-1",
+            "post_id": "post-1",
+            "page_size": 10,
+        }
+    ]
+
+    repo.post = None
+    repo.location = None
+
+    with pytest.raises(NotFound, match="post not found in this topic"):
+        ForumService(repo).get_post_location(
+            topic_id="topic-1", post_id="missing", page_size=10
         )
 
 
@@ -537,8 +583,7 @@ def test_list_topics_resolves_followed_authors_before_topic_query():
 def test_list_topics_returns_empty_without_a_topic_query_when_no_follows():
     repo = FakeForumRepository()
     repo.list_followed_authors = lambda **kwargs: (
-        repo.calls.append({"operation": "list_followed_authors", **kwargs})
-        or ()
+        repo.calls.append({"operation": "list_followed_authors", **kwargs}) or ()
     )
     repo.list_topics = lambda **kwargs: (
         repo.calls.append({"operation": "list_topics", **kwargs})

@@ -23,6 +23,10 @@ mod controllable;
 // the SQL Store's suite.
 #[path = "memory_authority.rs"]
 pub mod authority;
+/// Batched owner projection mirror of the SQL
+/// `reads_ownerships.rs` spine (`ownerships_for`).
+#[path = "memory_ownerships_batch.rs"]
+pub(crate) mod ownerships_batch;
 /// Memory ownership sync command (2026-10-29 design §5.1).
 #[path = "memory_ownership_sync.rs"]
 pub mod ownership_sync;
@@ -33,6 +37,9 @@ pub mod permission_profile;
 /// Trusted memory registration composites (Task 4).
 #[path = "memory_registration_ownership.rs"]
 pub(super) mod registration_ownership;
+/// Provider tombstone reactivation with a fresh authority snapshot.
+#[path = "memory_provider_reactivation.rs"]
+mod provider_reactivation;
 /// Memory projection of the atomic retirement
 /// (Task 4, spec §7.1) on the SAME shared state.
 #[path = "memory_retirement.rs"]

@@ -24,7 +24,7 @@ const STATE_MACHINE_EXPORT_NAME = 'StateMachineRunView';
  * - 导出点路径末段为 `StateMachineRunView`（兼容声明式 / 命令式两种 entry 形态）。
  */
 export function isBcsStateMachinePanel(libraryName: string | undefined, exportName: string | undefined): boolean {
-  if (libraryName === BCS_PANEL_LIBRARY) return true;
+  if (libraryName === BCS_PANEL_LIBRARY || exportName?.startsWith(`${BCS_PANEL_LIBRARY}.`)) return true;
   if (!exportName) return false;
   return (
     exportName === STATE_MACHINE_EXPORT_NAME ||

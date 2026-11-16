@@ -14,7 +14,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING, Callable, Optional
 
-from src.domain.models.worker import (
+from app.domain.models.worker import (
     Worker,
     WorkerType,
     WorkerIdentity,
@@ -24,17 +24,17 @@ from src.domain.models.worker import (
     Capability,
     CapabilityLevel,
 )
-from src.domain.models.worker_lifecycle_state import WorkerLifecycleState
-from src.domain.models.worker_runtime_state import WorkerRuntimeState
-from src.domain.models.worker_source_info import WorkerSourceType
-from src.domain.models.worker_audit_log import WorkerAuditLog, WorkerAuditAction
-from src.domain.models.worker_profile_binding import WorkerProfileBinding
+from app.domain.models.worker_lifecycle_state import WorkerLifecycleState
+from app.domain.models.worker_runtime_state import WorkerRuntimeState
+from app.domain.models.worker_source_info import WorkerSourceType
+from app.domain.models.worker_audit_log import WorkerAuditLog, WorkerAuditAction
+from app.domain.models.worker_profile_binding import WorkerProfileBinding
 
 if TYPE_CHECKING:
-    from src.domain.services.adapters.worker_registry_store_adapter import WorkerRegistryStoreAdapter
-    from src.domain.services.adapters.worker_runtime_state_store_adapter import WorkerRuntimeStateStoreAdapter
-    from src.domain.services.adapters.worker_profile_binding_store_adapter import WorkerProfileBindingStoreAdapter
-    from src.domain.services.adapters.worker_audit_log_adapter import WorkerAuditLogAdapter
+    from app.domain.services.adapters.worker_registry_store_adapter import WorkerRegistryStoreAdapter
+    from app.domain.services.adapters.worker_runtime_state_store_adapter import WorkerRuntimeStateStoreAdapter
+    from app.domain.services.adapters.worker_profile_binding_store_adapter import WorkerProfileBindingStoreAdapter
+    from app.domain.services.adapters.worker_audit_log_adapter import WorkerAuditLogAdapter
 
 
 # ============================================================================
@@ -163,7 +163,7 @@ class WorkerRegistryStoreContractTests:
 
     def test_create_duplicate_raises_error(self) -> None:
         """测试创建重复 Worker 报错"""
-        from src.domain.exceptions import DuplicateWorkerException
+        from app.domain.exceptions import DuplicateWorkerException
 
         worker = make_sample_worker()
         self.store.create(worker)
@@ -309,7 +309,7 @@ class WorkerRegistryStoreContractTests:
 
     def test_delete_not_found(self) -> None:
         """测试删除不存在的 Worker"""
-        from src.domain.exceptions import WorkerNotFoundException
+        from app.domain.exceptions import WorkerNotFoundException
         import pytest
 
         with pytest.raises(WorkerNotFoundException):

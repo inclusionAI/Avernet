@@ -67,7 +67,7 @@ from typing import Any, Optional, Sequence
 from agentclaw.community.core.content_store import ContentReader
 from agentclaw.community.core.apply_engine.context import ApplyContext
 from agentclaw.community.core.apply_engine.desired_state import DesiredIdentityFile
-from agentclaw.community.core.content_store.errors import ContentStoreError
+from agentclaw.community.core.content_store.errors import ContentStoreError, ContentStoreFault
 from agentclaw.community.core.apply_engine.outcomes import (
     EntryOutcome,
     EntryResult,
@@ -165,7 +165,7 @@ class IdentityMaterialiser(Materialiser):
                 continue
             try:
                 body = await asyncio.to_thread(self._content.read, entry.content.digest)
-            except ContentStoreError as exc:
+            except (ContentStoreError, ContentStoreFault) as exc:
                 failures.append(ResolveFailure(file_type, f"the identity file's bytes are not in the store: {exc}"))
                 continue
             text = _decode_utf8(body)

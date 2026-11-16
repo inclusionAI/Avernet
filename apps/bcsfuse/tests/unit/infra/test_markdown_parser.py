@@ -22,13 +22,13 @@ class TestMarkdownParser:
 
     def test_parser_importable(self):
         """测试 Parser 可导入"""
-        from src.infra.parsers.markdown_parser import MarkdownParser
+        from app.infra.parsers.markdown_parser import MarkdownParser
 
         assert MarkdownParser is not None
 
     def test_parse_headings(self):
         """测试标题解析"""
-        from src.infra.parsers.markdown_parser import MarkdownParser
+        from app.infra.parsers.markdown_parser import MarkdownParser
 
         content = """
 # Main Title
@@ -52,7 +52,7 @@ class TestMarkdownParser:
 
     def test_parse_heading_with_line_number(self):
         """测试标题带行号"""
-        from src.infra.parsers.markdown_parser import MarkdownParser
+        from app.infra.parsers.markdown_parser import MarkdownParser
 
         content = """# Title 1
 
@@ -68,7 +68,7 @@ Some content
 
     def test_parse_lists(self):
         """测试列表解析"""
-        from src.infra.parsers.markdown_parser import MarkdownParser
+        from app.infra.parsers.markdown_parser import MarkdownParser
 
         content = """
 # Capabilities
@@ -102,7 +102,7 @@ Some content
 
     def test_parse_list_with_heading_context(self):
         """测试列表带标题上下文"""
-        from src.infra.parsers.markdown_parser import MarkdownParser
+        from app.infra.parsers.markdown_parser import MarkdownParser
 
         content = """
 # Capabilities
@@ -117,7 +117,7 @@ Some content
 
     def test_parse_paragraphs(self):
         """测试段落解析"""
-        from src.infra.parsers.markdown_parser import MarkdownParser
+        from app.infra.parsers.markdown_parser import MarkdownParser
 
         content = """
 # Section
@@ -142,7 +142,7 @@ This is paragraph 3.
 
     def test_get_section_content(self):
         """测试获取指定节内容"""
-        from src.infra.parsers.markdown_parser import MarkdownParser
+        from app.infra.parsers.markdown_parser import MarkdownParser
 
         content = """
 # Capabilities
@@ -168,7 +168,7 @@ This is paragraph 3.
 
     def test_get_section_not_found_returns_empty(self):
         """测试节不存在返回空字符串"""
-        from src.infra.parsers.markdown_parser import MarkdownParser
+        from app.infra.parsers.markdown_parser import MarkdownParser
 
         content = """
 # Capabilities
@@ -182,7 +182,7 @@ This is paragraph 3.
 
     def test_empty_document(self):
         """测试空文档处理"""
-        from src.infra.parsers.markdown_parser import MarkdownParser
+        from app.infra.parsers.markdown_parser import MarkdownParser
 
         parser = MarkdownParser("")
 
@@ -192,7 +192,7 @@ This is paragraph 3.
 
     def test_whitespace_only_document(self):
         """测试仅含空白的文档"""
-        from src.infra.parsers.markdown_parser import MarkdownParser
+        from app.infra.parsers.markdown_parser import MarkdownParser
 
         parser = MarkdownParser("   \n\t\n   ")
 
@@ -201,7 +201,7 @@ This is paragraph 3.
 
     def test_noisy_document_with_code_blocks(self):
         """测试包含代码块的噪音文档"""
-        from src.infra.parsers.markdown_parser import MarkdownParser
+        from app.infra.parsers.markdown_parser import MarkdownParser
 
         content = """
 # Code Example
@@ -228,7 +228,7 @@ def hello():
 
     def test_get_all_text_stripped(self):
         """测试获取纯文本"""
-        from src.infra.parsers.markdown_parser import MarkdownParser
+        from app.infra.parsers.markdown_parser import MarkdownParser
 
         content = """
 # Title
@@ -248,7 +248,7 @@ Paragraph here.
 
     def test_find_text_with_context(self):
         """测试查找文本并获取上下文"""
-        from src.infra.parsers.markdown_parser import MarkdownParser
+        from app.infra.parsers.markdown_parser import MarkdownParser
 
         content = """
 # Capabilities
@@ -271,7 +271,7 @@ This is a detail.
 
     def test_find_text_not_found(self):
         """测试查找不存在的文本"""
-        from src.infra.parsers.markdown_parser import MarkdownParser
+        from app.infra.parsers.markdown_parser import MarkdownParser
 
         content = "# Test"
         parser = MarkdownParser(content)
@@ -281,7 +281,7 @@ This is a detail.
 
     def test_parse_nested_list_indentation(self):
         """测试嵌套列表缩进解析"""
-        from src.infra.parsers.markdown_parser import MarkdownParser
+        from app.infra.parsers.markdown_parser import MarkdownParser
 
         content = """
 # List
@@ -306,7 +306,7 @@ class TestMarkdownParserLineTracking:
 
     def test_get_line_range_for_section(self):
         """测试获取节的行范围"""
-        from src.infra.parsers.markdown_parser import MarkdownParser
+        from app.infra.parsers.markdown_parser import MarkdownParser
 
         content = """# First
 
@@ -325,7 +325,7 @@ Content 2
 
     def test_get_line_range_for_last_section(self):
         """测试获取最后一节的行范围"""
-        from src.infra.parsers.markdown_parser import MarkdownParser
+        from app.infra.parsers.markdown_parser import MarkdownParser
 
         content = """# First
 
@@ -348,7 +348,7 @@ class TestMarkdownParserEdgeCases:
 
     def test_multiple_blank_lines(self):
         """测试多个空行"""
-        from src.infra.parsers.markdown_parser import MarkdownParser
+        from app.infra.parsers.markdown_parser import MarkdownParser
 
         content = """
 # Title
@@ -366,7 +366,7 @@ Content here.
 
     def test_mixed_list_markers(self):
         """测试混合列表标记"""
-        from src.infra.parsers.markdown_parser import MarkdownParser
+        from app.infra.parsers.markdown_parser import MarkdownParser
 
         content = """
 # Mixed
@@ -387,7 +387,7 @@ Content here.
 
     def test_inline_formatting_ignored(self):
         """测试内联格式被忽略"""
-        from src.infra.parsers.markdown_parser import MarkdownParser
+        from app.infra.parsers.markdown_parser import MarkdownParser
 
         content = """
 # Test
@@ -403,7 +403,7 @@ This has **bold** and *italic* text.
 
     def test_links_preserved_as_text(self):
         """测试链接作为文本保留"""
-        from src.infra.parsers.markdown_parser import MarkdownParser
+        from app.infra.parsers.markdown_parser import MarkdownParser
 
         content = """
 # Links

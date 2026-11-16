@@ -77,7 +77,8 @@ class _FakeService:
         self.initial = initial
         self.upserts: list[dict[str, str | None]] = []
 
-    def get_subscription(self, *, bot_id: str):
+    def get_subscription(self, *, bot_id: str, owner_user_id: str):
+        assert owner_user_id
         return self.initial
 
     def upsert_subscription(self, **kwargs):
@@ -138,7 +139,7 @@ async def test_new_subscription_installs_browse_loop_and_retires_digest_loop():
 
 
 @pytest.mark.asyncio
-async def test_digest_cron_cleanup_failure_leaves_no_subscription_row():
+async def test_digest_cron_cleanup_failure_still_persists_subscription_row():
     service = _FakeService(initial=None)
     provisioner = _provisioner(service, digest_fail=True)
 
@@ -149,9 +150,16 @@ async def test_digest_cron_cleanup_failure_leaves_no_subscription_row():
 
     await _drain_background()
 
-    assert service.upserts == []
-    assert service.initial is None
-    # The failed attempt is complete and can be retried with a new background task.
+    assert service.upserts == [
+        {
+            "bot_id": "bot-a",
+            "owner_user_id": "111111",
+            "mode": BROWSE_MODE_OPENCLAW,
+            "note": "will fail",
+        }
+    ]
+    # Historical digest cleanup is best-effort; the created attempt is complete
+    # and the persisted subscription remains retryable on the next toggle.
     assert provisioner._pending == {}  # type: ignore[attr-defined]
 
 
@@ -214,7 +222,9 @@ async def test_cancelling_pending_subscription_prevents_late_persistence():
         bot_id="bot-a", owner_user_id="111111", note="cancel me"
     )
     await asyncio.sleep(0)  # background enters the digest manager's wait()
-    await provisioner.cancel_pending(bot_id="bot-a")
+    await provisioner.cancel_pending(
+        bot_id="bot-a", owner_user_id="111111"
+    )
     block.set()
 
     await _drain_background()

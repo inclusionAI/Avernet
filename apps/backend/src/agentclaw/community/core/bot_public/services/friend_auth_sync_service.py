@@ -6,6 +6,20 @@ Router maps these exceptions to HTTP status; service stays HTTP-free.
 """
 from __future__ import annotations
 
+from typing import Any
+
+from injector import inject
+
+from agentclaw.community.core.bot_management.addressing import BotAddressResolver
+from agentclaw.community.core.bot_management.errors import (
+    BotAddressNotFoundError,
+    BotLookupAmbiguousError,
+)
+from agentclaw.community.core.bot_management.utils import resolve_agent_code
+from agentclaw.community.core.repository.protocols.bot.bot import BotRepository
+from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipPlugin
+from agentclaw.community.plugin_api.passport import PassportPlugin
+
 
 class FriendAuthSyncError(Exception):
     """Base class for friend-auth-sync service errors."""
@@ -25,16 +39,6 @@ class AgentCodeUnavailableError(FriendAuthSyncError):
 
 class AuthRelationshipSyncError(FriendAuthSyncError):
     """Authorization relationship call ultimately failed (after plugin-internal retries)."""
-
-
-from typing import Any
-
-from injector import inject
-
-from agentclaw.community.core.bot_management.utils import resolve_agent_code
-from agentclaw.community.core.repository.protocols.bot.bot import BotRepository
-from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipPlugin
-from agentclaw.community.plugin_api.passport import PassportPlugin
 
 _HUMAN_PREFIX = "human_"
 _GRANT_DESCRIPTION = "Human-bot friend authorized by BCS edge grant"
@@ -69,21 +73,29 @@ class FriendAuthSyncService:
         owner_work_no = _strip_human(owner_work_no)
         human_work_no = _strip_human(human_work_no)
 
-        bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_work_no)
-        if not bot:
-            raise BotNotFoundError(bot_id)
+        try:
+            context = BotAddressResolver(self._bot_repo).resolve(
+                bot_id=bot_id,
+                legacy_owner_id=owner_work_no,
+            )
+        except BotAddressNotFoundError as exc:
+            raise BotNotFoundError(bot_id) from exc
+        except BotLookupAmbiguousError as exc:
+            raise FriendAuthSyncError(str(exc)) from exc
+        bot = dict(context.bot)
+        current_owner_work_no = context.current_owner_id
 
         agent_code = resolve_agent_code(bot=bot, passport_plugin=self._passport_plugin)
         if not agent_code:
             raise AgentCodeUnavailableError(bot_id)
 
-        owner_name = bot.get("owner_name") or owner_work_no
+        owner_name = bot.get("owner_name") or current_owner_work_no
 
         if action == "grant":
             result = self._auth_rel.create_relationship(
                 work_no=human_work_no,
                 agent_code=agent_code,
-                operator_work_no=owner_work_no,
+                operator_work_no=current_owner_work_no,
                 operator_name=owner_name,
                 description=_GRANT_DESCRIPTION,
             )

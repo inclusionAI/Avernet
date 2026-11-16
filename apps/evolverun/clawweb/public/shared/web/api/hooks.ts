@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { api } from '@avernet/clawweb-shared/web/api/client'
+import { api } from './client'
 import type { BenchDomain } from '@avernet/clawweb-shared/web/types'
 import type { WorkflowSpec, KnowledgeBaseCreateInput, KnowledgeBaseUpdateInput, ValidationTemplateCreateInput, ValidationTemplateUpdateInput, ThetaTraceQueryParams, InterveneRequest, InterveneResult, SessionInfoUpdate, NodeStepTraceData, HallucinationCheckData, AutoHealDiagnosisResult, SmartOnboardingGenerateRequest, SmartOnboardingGenerationStatus, SmartOnboardingTestRunRequest, SmartOnboardingValidateRequest, SmartOnboardingValidateResult, TCLogQueryParams, TCLogTaskListParams, TCLogTaskSearchParams, YuQueBookInfo, AppConfigCreateInput, AppConfigUpdateInput, AdminUsersListResponse, AdminUserCreateInput } from '@avernet/clawweb-shared/web/types'
 
@@ -23,6 +23,39 @@ export function useFlowRuns(params?: {
     queryKey: ['runs', queryParams],
     queryFn: () => api.runs.list(queryParams),
     enabled: enabled !== false,
+  })
+}
+
+export function useWorkflowCloneCandidates(enabled = true) {
+  return useQuery({
+    queryKey: ['workflow-clone-candidates'],
+    queryFn: () => api.workflows.listCloneCandidates(),
+    enabled,
+  })
+}
+
+export function useWorkflowClonePreview(sourceWorkflowId: string, enabled = true) {
+  return useQuery({
+    queryKey: ['workflow-clone-preview', sourceWorkflowId],
+    queryFn: () => api.workflows.clonePreview(sourceWorkflowId),
+    enabled: enabled && !!sourceWorkflowId,
+    staleTime: 0,
+  })
+}
+
+export function useCloneWorkflow() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: api.workflows.clone,
+    retry: false,
+    onSuccess: (_data, variables) => {
+      void queryClient.invalidateQueries({ queryKey: ['workflow-types'] })
+      void queryClient.invalidateQueries({ queryKey: ['workflow-clone-candidates'] })
+      void queryClient.invalidateQueries({ queryKey: ['db-workflows'] })
+      void queryClient.invalidateQueries({ queryKey: ['db-workflow', variables.targetWorkflowId] })
+      void queryClient.invalidateQueries({ queryKey: ['editor-workflow-document', variables.targetWorkflowId] })
+      void queryClient.invalidateQueries({ queryKey: ['facade-bindings'] })
+    },
   })
 }
 
@@ -265,11 +298,28 @@ export function useAbortFlowRun() {
   })
 }
 
+const RUN_DETAIL_REFRESH_MS = 5_000
+const ACTIVE_FLOW_RUN_STATUSES = new Set<string>([
+  'pending',
+  'queued',
+  'running',
+  'postActionsRunning',
+  'waiting',
+  'blocked',
+])
+
 export function useFlowRun(flowId: string) {
   return useQuery({
     queryKey: ['run', flowId],
     queryFn: () => api.runs.get(flowId),
     enabled: !!flowId,
+    refetchInterval: (query) => {
+      const status = query.state.data?.run?.status
+      return status !== undefined && ACTIVE_FLOW_RUN_STATUSES.has(String(status))
+        ? RUN_DETAIL_REFRESH_MS
+        : false
+    },
+    refetchIntervalInBackground: false,
   })
 }
 

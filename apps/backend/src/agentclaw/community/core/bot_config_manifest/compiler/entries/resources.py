@@ -75,6 +75,15 @@ async def compile_resources(
             # The schema refuses the same at ``PUT``; re-asked here because the compiler is the last word.
             failures.append(EntryFailure(path, protected))
             continue
+        # A ``protocol: bot`` entry reclassifies to ``Section.BOT_FILE_SYNC``: it
+        # converges through a per-engine workspace sync, not the content-store
+        # fetch→write chain every DesiredResource rides, so it has no place in
+        # this declaration. ``compile_bot_file_sync`` collects these same entries
+        # into the BOT_FILE_SYNC declaration; here they are skipped whole — not
+        # compiled, not nested-checked, not reported — so the resources
+        # declaration holds only stored-content entries.
+        if declared_protocol(session, entry) is SourceKind.BOT:
+            continue
         usable.append((path, entry))
 
     # The nesting ban: a directory entry owns its whole subtree, so an entry

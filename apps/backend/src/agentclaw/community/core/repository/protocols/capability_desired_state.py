@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from abc import abstractmethod
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, ContextManager, Protocol
 
 if TYPE_CHECKING:
     from agentclaw.community.core.ports.mcp_config import McpConfigWriteIntent
@@ -24,6 +24,11 @@ class CapabilityDesiredStateRepositoryProtocol(Protocol):
     capability compensation preserve Bot MCP overrides. Explicit Direct MCP
     uninstall, configuration replacement and Bot deletion own their cleanup.
     """
+
+    @abstractmethod
+    def skill_batch(self, *, bot_id: str, owner_id: str) -> ContextManager[None]:
+        """Atomically commit a sequence of Skill membership mutations."""
+        ...
 
     @abstractmethod
     def purge_bot_installations(

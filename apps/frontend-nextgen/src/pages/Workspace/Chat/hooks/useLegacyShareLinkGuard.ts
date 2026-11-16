@@ -6,6 +6,7 @@
 // 反查无果或状态不可用 → 轻提示并清参回退对话页默认态。
 import type { HumanBotActionContext } from '@/domain/collaborationSquare/types';
 import type { PublicBot } from '@/domain/collaborationSquare/types';
+import { isPublicBotShareTargetAvailable } from '@/domain/collaborationSquare/types';
 import type { ConversationBotSection } from '@/domain/conversation/types';
 import { notifyError, notifySuccess } from '@/components/ui/notify';
 import { collaborationSquareBotService } from '@/services/collaborationSquare/collaborationSquareService';
@@ -44,6 +45,14 @@ export function useLegacyShareLinkGuard(input: {
   const [legacyBot, setLegacyBot] = useState<PublicBot | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const handledRef = useRef(false);
+  // 申请提交返回前组件可能已卸载（用户已切到新会话）：卸载后不得再弹提示或重置全局会话选择。
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
   // 目录 hook 初始空态三个 loading 均为 false，hydrated 首帧为假阳性（目录尚未发起加载、
   // knownBotIds 为空集）；必须等到"见过加载期之后的空闲"才可信，否则好友 Bot 会在目录
   // 就绪前被误判为无好友而弹出申请窗（V1 验收实测踩坑：弹窗与已开会话并存）。
@@ -81,7 +90,7 @@ export function useLegacyShareLinkGuard(input: {
         .resolvePublicBotById(legacyTargetId, context)
         .catch(() => null);
       if (cancelled) return;
-      if (bot && (!bot.status || bot.status === 'ACTIVE')) {
+      if (bot && isPublicBotShareTargetAvailable(bot)) {
         setLegacyBot(bot);
         return;
       }
@@ -122,14 +131,18 @@ export function useLegacyShareLinkGuard(input: {
           bot.friendRequestBotId,
           { type: 'human', id: userId },
         );
+        if (!mountedRef.current) return;
         if (result.status === 'applying') notifySuccess('好友申请已提交');
         else if (result.status === 'friend') notifySuccess('好友关系已建立');
         else notifyError('当前未建立好友关系，申请未提交');
       } catch (error) {
+        if (!mountedRef.current) return;
         notifyError(error instanceof Error ? error.message : '发送申请失败，请稍后重试');
       } finally {
-        setSubmitting(false);
-        resetToDefault();
+        if (mountedRef.current) {
+          setSubmitting(false);
+          resetToDefault();
+        }
       }
     })();
   }, [legacyBot, resetToDefault, submitting, userId]);

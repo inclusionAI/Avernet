@@ -1,37 +1,61 @@
-"""BCSFuse-first candidate retrieval with catalog keyword fallback.
+"""BCSFuse-only Relay candidate retrieval.
 
-The Relay ``/search`` HTTP contract stays unchanged. This adapter only changes
-the internal query/retrieval strategy: one candidate-query semantic recommendation
-is preferred, and the existing tokenized catalog keyword search remains the
-fallback when BCSFuse is unavailable, returns no ready candidate, or fails.
+Relay ``/search`` retains its required fields and candidate response; an optional
+viewer pair scopes discovery through existing product policies. BCSFuse semantic search is
+the sole candidate source for task candidate-query retrieval; empty or failed
+semantic results stay empty instead of falling back to low-accuracy tokenized
+catalog keyword search.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import replace
 from typing import Any
 import uuid
 
-from agentclaw.community.core.bot_public.catalog_metadata import BotCatalogCaller
+from agentclaw.community.core.bot_public.catalog_metadata import (
+    BotCatalogCaller,
+    BotCatalogSearchFilters,
+)
+from agentclaw.community.core.task.domain.search_viewer import (
+    SearchViewerType,
+    normalize_search_viewer,
+)
 from agentclaw.community.core.task.task_runner.client.candidate_search import (
     CandidateSearchResult,
     KeywordHit,
-    search_candidates,
 )
 from agentclaw.community.core.task.task_runner.client.catalog_keyword_discover import (
-    CatalogKeywordBotDiscover,
     _DISPATCH_CATALOG_FILTERS,
     _runtime_ready,
+    CatalogKeywordBotDiscover,
 )
 
 logger = logging.getLogger("task.semantic_keyword.search")
 
 SEMANTIC_TOP_K = 5
+SEMANTIC_MAX_ATTEMPTS = 3
+SEMANTIC_RETRY_BASE_DELAY_SECONDS = 1.0
+
+
+def _selected_visibility(visibility: str | None) -> tuple[str, ...]:
+    if not visibility:
+        return _DISPATCH_CATALOG_FILTERS.visibility
+    tokens = tuple(
+        token.strip().lower() for token in visibility.split(",") if token.strip()
+    )
+    unique_tokens = tuple(dict.fromkeys(tokens))
+    if not unique_tokens or any(
+        token not in {"public", "protected", "private"} for token in unique_tokens
+    ):
+        raise ValueError("visible scope must be public, protected or private")
+    return unique_tokens
 
 
 class SemanticKeywordBotDiscover:
-    """Query-only candidate retrieval: semantic first, keyword as fallback."""
+    """Query-only candidate retrieval backed by BCSFuse semantic search."""
 
     def __init__(
         self,
@@ -74,16 +98,22 @@ class SemanticKeywordBotDiscover:
         max_tokens: int = 5,
         min_score: float = 0.01,
         filters: dict[str, Any] | None = None,
+        viewer_actor_type: SearchViewerType | None = None,
+        viewer_actor_id: str | None = None,
+        visibility: str | None = None,
     ) -> CandidateSearchResult:
-        """Use BCSFuse on the passed candidate query before token fallback.
+        """Search BCSFuse with the full candidate query.
 
-        Semantic search is intentionally executed with the same system-view
-        catalog rules as the keyword adapter. Public visibility and runtime
-        readiness are post-filtered; Bot lifecycle credentials remain owned by
-        their own domains. The semantic backend is capped at the five most
-        similar, ready Bot candidates; token fallback retains the existing
-        keyword limits.
+        Keyword search no longer acts as a fallback: its tokenized results are
+        low-accuracy for this path and can select unusable executors. Semantic
+        search is intentionally executed with the same system-view catalog rules
+        as the keyword adapter. Public visibility and runtime readiness are
+        post-filtered; Bot lifecycle credentials remain owned by their own
+        domains. The semantic backend is capped at the five most similar, ready
+        Bot candidates. The keyword-port parameters remain accepted for the
+        existing candidate-search call shape.
         """
+        normalize_search_viewer(viewer_actor_type, viewer_actor_id)
         normalized = str(query or "").strip()
         if not normalized:
             return CandidateSearchResult([], [], 0, [])
@@ -93,25 +123,41 @@ class SemanticKeywordBotDiscover:
             semantic_top_k=SEMANTIC_TOP_K,
             min_score=min_score,
             filters=filters,
+            viewer_actor_type=viewer_actor_type,
+            viewer_actor_id=viewer_actor_id,
+            visibility=visibility,
         )
-        if result is not None and result.candidates:
-            return result
         if result is not None:
-            logger.info(
-                "semantic_search_empty query=%r semantic_raw_count=%d; "
-                "falling back to keyword search",
-                normalized[:500],
-                result.raw_item_count,
-            )
-        return await search_candidates(
-            self._keyword_discover,
-            normalized,
-            user_id=user_id,
-            per_keyword_limit=per_keyword_limit,
-            max_tokens=max_tokens,
-            min_score=min_score,
-            filters=filters,
+            return result
+        logger.warning(
+            "semantic_search_unavailable query=%r; returning empty candidates",
+            normalized[:500],
         )
+        return self._empty_result(normalized)
+
+    @staticmethod
+    def _empty_result(normalized: str) -> CandidateSearchResult:
+        return CandidateSearchResult(
+            candidates=[],
+            tokens=[normalized],
+            raw_item_count=0,
+            failed_keywords=[normalized],
+            keyword_hits=(KeywordHit(normalized, 0, (), True),),
+        )
+
+    @staticmethod
+    def _transport_failed(result: Any) -> bool:
+        """Recognize BCSFuse failures that BotDiscoverService reports as empty.
+
+        The真实 BCSFuse adapter intentionally swallows connection/HTTP/timeout
+        errors and returns an empty result with ``recommend_response=None``.
+        Treating that value like a successful empty search would make retries
+        ineffective; distinguish it from a valid empty recommendation payload.
+        """
+        if not isinstance(result, dict):
+            return result is None
+        context = result.get("context")
+        return isinstance(context, dict) and context.get("recommend_response") is None
 
     async def _semantic_search(
         self,
@@ -120,45 +166,91 @@ class SemanticKeywordBotDiscover:
         semantic_top_k: int,
         min_score: float = 0.01,
         filters: dict[str, Any] | None = None,
+        viewer_actor_type: SearchViewerType | None = None,
+        viewer_actor_id: str | None = None,
+        visibility: str | None = None,
     ) -> CandidateSearchResult | None:
-        request_id = f"task-semantic-{uuid.uuid4().hex[:12]}"
-        logger.debug(
-            "semantic_search_start request_id=%s query=%r top_k=%d",
-            request_id,
-            query[:500],
-            semantic_top_k,
-        )
-        try:
-            result = await asyncio.to_thread(
-                self._semantic_discover.search_by_keyword,
-                keyword=query,
-                user_id="",
-                top_k=semantic_top_k,
-                min_score=min_score,
-                filters=filters
-                if filters is not None
-                else {"runtime_state": ["online"]},
-                catalog_filters=_DISPATCH_CATALOG_FILTERS,
-                caller=BotCatalogCaller(tenant_id="", user_id=None, app_id=None),
-                request_id=request_id,
-            )
-        except Exception as exc:  # noqa: BLE001 - semantic availability cannot break dispatch
+        normalize_search_viewer(viewer_actor_type, viewer_actor_id)
+        if self._semantic_discover is None:
             logger.warning(
-                "semantic_search_failed request_id=%s query=%r error_type=%s error=%s",
-                request_id,
+                "semantic_search_not_configured query=%r; returning empty candidates",
                 query[:500],
-                type(exc).__name__,
-                str(exc)[:500],
-                exc_info=True,
             )
+            return None
+        selected_visibility = _selected_visibility(visibility)
+        recommend_filters = dict(filters or {})
+        recommend_filters["runtime_state"] = ["online"]
+        catalog_filters = BotCatalogSearchFilters(
+            visibility=_DISPATCH_CATALOG_FILTERS.visibility,
+            user_visibility=_DISPATCH_CATALOG_FILTERS.user_visibility,
+            status=_DISPATCH_CATALOG_FILTERS.status,
+            viewer_actor_type=viewer_actor_type,
+            viewer_actor_id=viewer_actor_id,
+        )
+        if visibility:
+            recommend_filters["availability"] = list(selected_visibility)
+            catalog_filters = replace(
+                catalog_filters,
+                visibility=selected_visibility,
+                user_visibility=selected_visibility,
+            )
+        result: Any = None
+        for attempt in range(1, SEMANTIC_MAX_ATTEMPTS + 1):
+            request_id = f"task-semantic-{uuid.uuid4().hex[:12]}-{attempt}"
+            logger.debug(
+                "semantic_search_start request_id=%s attempt=%d/%d query=%r top_k=%d",
+                request_id,
+                attempt,
+                SEMANTIC_MAX_ATTEMPTS,
+                query[:500],
+                semantic_top_k,
+            )
+            try:
+                result = await asyncio.to_thread(
+                    self._semantic_discover.search_by_keyword,
+                    keyword=query,
+                    user_id="",
+                    top_k=semantic_top_k,
+                    min_score=min_score,
+                    filters=recommend_filters,
+                    catalog_filters=catalog_filters,
+                    caller=BotCatalogCaller(tenant_id="", user_id=None, app_id=None),
+                    request_id=request_id,
+                )
+                if not self._transport_failed(result):
+                    break
+                logger.warning(
+                    "semantic_search_backend_failed request_id=%s attempt=%d/%d "
+                    "query=%r",
+                    request_id,
+                    attempt,
+                    SEMANTIC_MAX_ATTEMPTS,
+                    query[:500],
+                )
+            except Exception as exc:  # noqa: BLE001 - transient semantic failures are retried bounded
+                logger.warning(
+                    "semantic_search_failed request_id=%s attempt=%d/%d "
+                    "query=%r error_type=%s error=%s",
+                    request_id,
+                    attempt,
+                    SEMANTIC_MAX_ATTEMPTS,
+                    query[:500],
+                    type(exc).__name__,
+                    str(exc)[:500],
+                    exc_info=True,
+                )
+                if attempt < SEMANTIC_MAX_ATTEMPTS:
+                    await asyncio.sleep(
+                        SEMANTIC_RETRY_BASE_DELAY_SECONDS * (2 ** (attempt - 1))
+                    )
+        if self._transport_failed(result):
             return None
 
         raw_items = result.get("items") if isinstance(result, dict) else []
         valid_items = [
             item
             for item in (raw_items or [])
-            if isinstance(item, dict)
-            and _runtime_ready(item)
+            if isinstance(item, dict) and _runtime_ready(item)
         ]
         ready_items = _dedupe_candidates(valid_items)[:SEMANTIC_TOP_K]
         bot_ids = tuple(

@@ -7,6 +7,8 @@ jest.mock('@/services/backendApi/bots/botEditorController', () => ({
     updateChannel: jest.fn(),
     listChannels: jest.fn(),
     listIdentityFiles: jest.fn(),
+    getIdentityFile: jest.fn(),
+    updateIdentityFile: jest.fn(),
   },
 }));
 
@@ -19,8 +21,27 @@ test('配置初始请求透传 Bot Owner', async () => {
   await botAdvancedConfigService.listIdentityFiles('bot-1', 'owner-1');
   await botAdvancedConfigService.listChannels('bot-1', 'owner-1');
 
-  expect(listIdentityFiles).toHaveBeenCalledWith('bot-1', 'owner-1');
+  expect(listIdentityFiles).toHaveBeenCalledWith('bot-1', 'owner-1', undefined);
   expect(listChannels).toHaveBeenCalledWith('bot-1', 'owner-1');
+});
+
+test.each(['draft', 'verify', 'online'] as const)('MD 读取透传真实 owner 与 %s', async (stage) => {
+  jest.mocked(botEditorController.listIdentityFiles).mockResolvedValue({ code: 200000, data: { bot_id: 'shared', files: [] } });
+  jest.mocked(botEditorController.getIdentityFile).mockResolvedValue({
+    code: 200000, data: { bot_id: 'shared', type: 'RULES', file_path: '', content: '# rules' },
+  });
+  await botAdvancedConfigService.listIdentityFiles('shared', 'owner', stage);
+  await expect(botAdvancedConfigService.getIdentityFile('shared', 'RULES', 'owner', stage)).resolves.toBe('# rules');
+  expect(botEditorController.listIdentityFiles).toHaveBeenLastCalledWith('shared', 'owner', stage);
+  expect(botEditorController.getIdentityFile).toHaveBeenLastCalledWith('shared', 'RULES', 'owner', stage);
+});
+
+test('保存传 owner，后端拒绝 MEMBER 写入时保留错误，不重试或降级权限', async () => {
+  const refused = new Error('Not found');
+  jest.mocked(botEditorController.updateIdentityFile).mockReset().mockRejectedValue(refused);
+  await expect(botAdvancedConfigService.saveIdentityFile('shared', 'RULES', '# rules', 'owner')).rejects.toBe(refused);
+  expect(botEditorController.updateIdentityFile).toHaveBeenCalledTimes(1);
+  expect(botEditorController.updateIdentityFile).toHaveBeenCalledWith('shared', 'RULES', '# rules', 'owner');
 });
 
 test('创建钉钉渠道时透传流式卡片配置', async () => {
@@ -41,7 +62,7 @@ test('创建钉钉渠道时透传流式卡片配置', async () => {
     replyToMessage: true,
     aixEnable: true,
     includeSenderName: true,
-  });
+  }, 'owner-1');
 
   expect(createChannel).toHaveBeenCalledWith('bot-1', {
     type: 'dingding',
@@ -61,7 +82,7 @@ test('创建钉钉渠道时透传流式卡片配置', async () => {
       include_sender_name: true,
       robot_code: '',
     },
-  });
+  }, 'owner-1');
 });
 
 test('渠道列表兼容 OpenAPI 直接数组并保留完整配置', async () => {
@@ -132,7 +153,7 @@ test('创建 BCN 渠道时只提交 BCN 模式允许的配置', async () => {
     groupChatScope: 'per_sender',
     outboundVisibility: 'full_transcript',
     forwardSenderIdentity: true,
-  });
+  }, 'owner-1');
 
   expect(createChannel).toHaveBeenCalledWith('bot-1', {
     type: 'dingding',
@@ -148,5 +169,5 @@ test('创建 BCN 渠道时只提交 BCN 模式允许的配置', async () => {
       outbound_visibility: 'full_transcript',
       forward_sender_identity: true,
     },
-  });
+  }, 'owner-1');
 });

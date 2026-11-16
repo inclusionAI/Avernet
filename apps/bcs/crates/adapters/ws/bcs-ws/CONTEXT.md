@@ -193,3 +193,14 @@ fallback on misses), before refusing a non-participating Human sender. A scoped
 Session fallback can read the Session twice. These are existing authorization
 costs now incurred by lease commands; no batching/cache rewrite is included here.
 The focused tests use memory stores and do not establish database load capacity.
+
+## Native task dispatch entry
+
+The existing `task.dispatch` wire is unchanged. The adapter passes its registered
+Bot, canonical Group/Session, raw target and request ID to
+`MessageFlowService::handle_native_task_dispatch`; parent lineage/attempt policy
+stays in the application implementation. Unknown model parent/invocation fields
+are not copied into the command. No handler waits for a later tool-event frame:
+processing the WebSocket serially would deadlock such a wait. See
+`apps/bcs/docs/native-task-caller.md` for the bounded prior-start compatibility
+contract and SDK ordering requirement.

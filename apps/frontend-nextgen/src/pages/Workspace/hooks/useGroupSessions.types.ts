@@ -1,5 +1,5 @@
 import type { ParticipantMode, SessionView } from '@/domain/collaboration';
-import type { MessageViewScope } from '@/domain/collaboration/types';
+import type { GroupContextDelivery, MessageViewScope } from '@/domain/collaboration/types';
 
 export interface UseGroupSessionsResult {
   sessions: SessionView[];
@@ -31,6 +31,7 @@ export interface UseGroupSessionsResult {
     title?: string,
     contextQuery?: string,
     messageViewScope?: MessageViewScope,
+    contextDelivery?: GroupContextDelivery,
   ) => Promise<SessionView | null>;
   renameSession: (sessionId: string, title: string) => Promise<boolean>;
   deleteSession: (sessionId: string) => Promise<boolean>;

@@ -39,7 +39,7 @@ pub(crate) fn callback_body(cmd: &bcs_service_api::BotEventCommand, partial: boo
     failure_body(cmd.state == bcs_service_api::ChatEventState::Aborted, &callback_reason(cmd), partial)
 }
 
-fn failure_body(cancelled: bool, reason: &str, partial: bool) -> String {
+pub(crate) fn failure_body(cancelled: bool, reason: &str, partial: bool) -> String {
     let reason = if reason.trim().is_empty() || reason == "[no response]" {
         if cancelled { "本次执行已中断，原因未提供。" } else { "任务执行失败，未提供具体原因。" }
     } else { reason };
@@ -87,6 +87,8 @@ fn text_with_timeout(task: &TaskIntent, cancelled: bool, timed_out: bool, reason
 
 #[cfg(test)]
 mod tests {
+    use bcs_domain::message_delivery::PersistedMessageDelivery;
+
     #[test]
     fn historical_intent_without_new_fields_uses_task_reference_and_unknown_reason() {
         let task = serde_json::from_value(serde_json::json!({"leg":"dispatch", "task_id":"old-task", "manager":"m",
@@ -96,12 +98,168 @@ mod tests {
         assert!(text.contains("原因未提供") && text.contains("已返回部分内容"));
         assert!(!text.contains("用户中断"));
     }
+
+    fn failure_row(status: bcs_domain::message_delivery::MessageDeliveryStatus,
+        may_have_been_sent: bool,
+        mut row: PersistedMessageDelivery,
+    ) -> (PersistedMessageDelivery, bcs_domain::message_delivery::MessageDeliveryState) {
+        row.env = "local".into();
+        row.state.kind = bcs_domain::DeliveryType::Send;
+        row.state.status = status;
+        row.state.state_version = 1;
+        row.state.may_have_been_sent = may_have_been_sent;
+        let state = row.state.clone();
+        (row, state)
+    }
+
+    #[test]
+    fn failure_reason_reports_cancelled_and_failed_reasons() {
+        let row = PersistedMessageDelivery {
+            delivery_id: "d".into(),
+            env: "local".into(),
+            source_message_id: "m".into(),
+            target_bot_id: "bot".into(),
+            session_id: "group".into(),
+            group_id: "group".into(),
+            source_session_seq: 0,
+            flow_kind: bcs_domain::message_delivery::DeliveryFlowKind::Task,
+            state: bcs_domain::message_delivery::MessageDeliveryState {
+                kind: bcs_domain::DeliveryType::Send,
+                status: bcs_domain::message_delivery::MessageDeliveryStatus::Failed,
+                state_version: 1,
+                may_have_been_sent: true,
+            },
+            wait_reason: None,
+            available_at_ms: 0,
+            expire_at_ms: None,
+            created_at_ms: 0,
+            updated_at_ms: 0,
+            run_id: None,
+            idempotency_key: None,
+            attempt_no: 0,
+            request_id: None,
+            send_started_at_ms: None,
+            submitted_at_ms: None,
+            accepted_at_ms: None,
+            run_deadline_at_ms: None,
+            terminal_at_ms: None,
+            bound_to_delivery_id: None,
+            cancel_requested_at_ms: None,
+            cancel_requested_by: None,
+            cancel_reason: None,
+            abort_request_id: None,
+            abort_started_at_ms: None,
+            cancel_deadline_at_ms: None,
+            last_error_code: None,
+            semantic_projection_json: serde_json::Value::Null,
+            transport_context_json: None,
+            context_selection_json: None,
+        };
+
+        let (cancelled_row, cancelled_state) = failure_row(
+            bcs_domain::message_delivery::MessageDeliveryStatus::Cancelled,
+            false,
+            row.clone(),
+        );
+        let cancelled = super::failure_reason(&cancelled_row, cancelled_state, None, None).unwrap();
+        assert_eq!(cancelled.0, true);
+        assert_eq!(cancelled.1, "任务在开始执行前已取消。");
+
+        let (failed_row, failed_state) = failure_row(
+            bcs_domain::message_delivery::MessageDeliveryStatus::Failed,
+            false,
+            cancelled_row,
+        );
+        let failed = super::failure_reason(&failed_row, failed_state, None, None).unwrap();
+        assert_eq!(failed.0, false);
+        assert_eq!(failed.1, "任务未能发送给 Worker，尚未开始执行。");
+    }
+
+    #[test]
+    fn failure_reason_prefers_resolution_and_transport_reasons() {
+        let mut row = PersistedMessageDelivery {
+            delivery_id: "d".into(),
+            env: "local".into(),
+            source_message_id: "m".into(),
+            target_bot_id: "bot".into(),
+            session_id: "group".into(),
+            group_id: "group".into(),
+            source_session_seq: 0,
+            flow_kind: bcs_domain::message_delivery::DeliveryFlowKind::Task,
+            state: bcs_domain::message_delivery::MessageDeliveryState {
+                kind: bcs_domain::DeliveryType::Send,
+                status: bcs_domain::message_delivery::MessageDeliveryStatus::Failed,
+                state_version: 1,
+                may_have_been_sent: true,
+            },
+            wait_reason: None,
+            available_at_ms: 0,
+            expire_at_ms: None,
+            created_at_ms: 0,
+            updated_at_ms: 0,
+            run_id: None,
+            idempotency_key: None,
+            attempt_no: 0,
+            request_id: None,
+            send_started_at_ms: None,
+            submitted_at_ms: None,
+            accepted_at_ms: None,
+            run_deadline_at_ms: None,
+            terminal_at_ms: None,
+            bound_to_delivery_id: None,
+            cancel_requested_at_ms: None,
+            cancel_requested_by: None,
+            cancel_reason: None,
+            abort_request_id: None,
+            abort_started_at_ms: None,
+            cancel_deadline_at_ms: None,
+            last_error_code: None,
+            semantic_projection_json: serde_json::Value::Null,
+            transport_context_json: None,
+            context_selection_json: None,
+        };
+        row.state.status = bcs_domain::message_delivery::MessageDeliveryStatus::Failed;
+        row.state.may_have_been_sent = true;
+        row.transport_context_json = Some(serde_json::json!({"cancel_reason":"transport reason"}));
+
+        let reason = super::failure_reason(
+            &row, row.state.clone(), Some("human"), Some(&serde_json::json!({"reason":"resolution reason"})),
+        ).unwrap().1;
+        assert_eq!(reason, "resolution reason");
+
+        let reason = super::failure_reason(&row, row.state.clone(), None, None).unwrap().1;
+        assert_eq!(reason, "transport reason");
+    }
+}
+
+/// The failure notice's (cancelled, reason). Shared by the notice builder
+/// and the protected-routing decision (managed_delivery) so the protected
+/// result text never disagrees with the canonical failure body.
+pub(crate) fn failure_reason(row: &PersistedMessageDelivery, state: bcs_domain::message_delivery::MessageDeliveryState,
+    actor: Option<&str>, resolution: Option<&serde_json::Value>,
+) -> Option<(bool, String)> {
+    if !matches!(state.status, Status::Failed | Status::Cancelled) { return None; }
+    let cancelled = state.status == Status::Cancelled;
+    let reason = match (cancelled, state.may_have_been_sent) {
+        (true, false) => "任务在开始执行前已取消。",
+        (true, true) if actor.or(row.cancel_requested_by.as_deref()).is_some() => "已按停止请求中断本次执行。",
+        (true, true) => "本次执行已中断，原因未提供。",
+        (false, false) => "任务未能发送给 Worker，尚未开始执行。",
+        (false, true) => "任务执行失败，未提供具体原因。",
+    }.to_string();
+    let reason = resolution.and_then(|v| v.get("reason").or_else(|| v.get("cancel_reason"))).and_then(|v| v.as_str())
+        .or_else(|| row.transport_context_json.as_ref().and_then(|v| v.get("cancel_reason")).and_then(|v| v.as_str()))
+        .map(str::to_string)
+        .unwrap_or(reason);
+    Some((cancelled, reason))
 }
 
 /// Called before the same CAS that settles the Worker. The existing stable
 /// result identity and transaction prevent callback/control duplicate Sends.
+/// `protected` is the already-decided protected result text (caller-enabled
+/// Manager): None builds the ordinary failure notice.
 pub(crate) fn fallback(row: &PersistedMessageDelivery, state: bcs_domain::message_delivery::MessageDeliveryState, now: i64,
-    actor: Option<&str>, resolution: Option<&serde_json::Value>,
+    actor: Option<&str>, resolution: Option<&serde_json::Value>, protected: Option<&str>,
 ) -> ServiceResult<Option<AdmitMessageDeliveries>> {
     let status = state.status;
     if matches!(status, Status::Unknown | Status::CancelUnknown) {
@@ -119,20 +277,10 @@ pub(crate) fn fallback(row: &PersistedMessageDelivery, state: bcs_domain::messag
     let Some(mut task) = crate::queued_task::intent(row)? else { return Ok(None); };
     if task.leg != TaskLeg::Dispatch { return Ok(None); }
     task.leg = TaskLeg::Result;
-    let cancelled = status == Status::Cancelled;
+    let Some((cancelled, reason)) = failure_reason(row, state, actor, resolution) else { return Ok(None); };
     let timed_out = cancelled && is_task_timeout(row);
-    let reason = match (cancelled, state.may_have_been_sent) {
-        (true, false) => "任务在开始执行前已取消。",
-        (true, true) if actor.or(row.cancel_requested_by.as_deref()).is_some() => "已按停止请求中断本次执行。",
-        (true, true) => "本次执行已中断，原因未提供。",
-        (false, false) => "任务未能发送给 Worker，尚未开始执行。",
-        (false, true) => "任务执行失败，未提供具体原因。",
-    };
-    let reason = resolution.and_then(|v| v.get("reason").or_else(|| v.get("cancel_reason"))).and_then(|v| v.as_str())
-        .or_else(|| row.transport_context_json.as_ref().and_then(|v| v.get("cancel_reason")).and_then(|v| v.as_str()))
-        .unwrap_or(reason);
-    let text = failure_body(cancelled, reason, false);
-    let projection = crate::queued_group::QueuedGroupProjection::task_result(row, task.clone(), Vec::new())?;
+    let text = failure_body(cancelled, &reason, false);
+    let projection = crate::queued_group::QueuedGroupProjection::task_result(row, task.clone(), Vec::new(), protected)?;
     let (visibility_domain, audience) = crate::group_flow::persisted_message_visibility(
         None, &task.worker, bcs_domain::SenderType::Bot, "chat", None)?;
     Ok(Some(AdmitMessageDeliveries {

@@ -5,6 +5,8 @@ from __future__ import annotations
 from agentclaw.community.di.modules import config_module
 from agentclaw.community.di.modules.config_module import ConfigModule
 
+import pytest
+
 
 def test_task_dispatch_loads_backend_url_from_config(monkeypatch) -> None:
     monkeypatch.setattr(
@@ -45,3 +47,36 @@ def test_task_dispatch_reuses_standard_callback_origin_when_override_is_empty(
     )
 
     assert ConfigModule().task_dispatch().backend_url == "https://backend.example"
+
+
+def test_task_dispatch_loads_todo_collaboration_config(monkeypatch) -> None:
+    monkeypatch.setattr(
+        config_module,
+        "_user_config",
+        lambda: {
+            "task_dispatch": {
+                "todo_collab_base_url": "https://collaboration.example",
+                "todo_collab_timeout_seconds": 12,
+            }
+        },
+    )
+
+    config = ConfigModule().task_dispatch()
+    assert config.todo_collab_base_url == "https://collaboration.example"
+    assert config.todo_collab_timeout_seconds == 12.0
+
+
+def test_task_dispatch_rejects_non_positive_todo_collaboration_timeout(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        config_module,
+        "_user_config",
+        lambda: {
+            "task_dispatch": {"todo_collab_timeout_seconds": 0},
+        },
+    )
+
+    matcher = pytest.raises(ValueError, match="todo_collab_timeout_seconds")
+    with matcher:
+        ConfigModule().task_dispatch()

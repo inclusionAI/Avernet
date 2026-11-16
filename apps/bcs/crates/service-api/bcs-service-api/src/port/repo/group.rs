@@ -61,6 +61,14 @@ pub struct CommitGroupEventfulMutation {
 /// behavior and orchestration.
 #[async_trait]
 pub trait GroupRepoPort: Send + Sync {
+    /// Read Group metadata and its stored template from one current snapshot,
+    /// scoped to the repository environment. Never use the ordinary Group cache.
+    /// None means the Group is absent; missing templates remain explicit in the
+    /// snapshot. Query/JSON failures must propagate, never look like deletion.
+    async fn read_card_snapshot(&self, _id: &str) -> ServiceResult<Option<crate::types::GroupCardSnapshot>> {
+        Err(ServiceError::InternalError("Group Card snapshot reads are not configured".into()))
+    }
+
     /// Process-local membership projection for Provider policy tightening.
     /// Persistent Provider stores enforce the equivalent condition atomically
     /// in their metadata UPDATE instead of issuing a separate Group read.

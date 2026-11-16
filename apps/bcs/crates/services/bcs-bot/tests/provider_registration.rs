@@ -459,10 +459,19 @@ async fn agentpass_gateway_supports_existing_delivery_and_callback_authenticatio
 
 #[tokio::test]
 async fn upstream_persists_membership_without_delivery_binding_and_rejects_duplicate_ref() {
-    let f = fixture(None, false).await;
+    #[derive(Default)]
+    struct Changes(std::sync::Mutex<Vec<String>>);
+    impl bcs_service_api::port::CatalogChangePort for Changes {
+        fn agent_changed(&self, id: &str) { self.0.lock().unwrap().push(id.into()); }
+        fn group_changed(&self, _: &str) { panic!("registration must not publish a Group"); }
+    }
+    let changes = Arc::new(Changes::default());
+    let mut f = fixture(None, false).await;
+    f.core = f.core.with_catalog_changes(Some(changes.clone()));
     let command = request(&f, ProviderRegistrationMode::Plugin);
     let first = f.core.register(command.clone()).await.unwrap();
     assert!(matches!(f.core.register(command).await, Err(ServiceError::Conflict(_))));
+    assert_eq!(*changes.0.lock().unwrap(), vec![first.record.bot_uuid.clone()], "only committed registration publishes");
     assert!(!first.record.bot_token.starts_with("MOCK_"));
     assert!(
         f.membership
@@ -546,6 +555,7 @@ async fn gateway_inherits_or_overrides_endpoint_without_copying_default() {
     assert!(binding.webhook_url.is_none());
     let mut override_request = request(&f, ProviderRegistrationMode::Gateway);
     override_request.provider_bot_ref = "independent".into();
+    override_request.bot_name = "Independent bot".into();
     override_request.webhook_url = Some("https://independent.example.com/hook".into());
     let overridden = f.core.register(override_request).await.unwrap();
     assert_eq!(
@@ -660,6 +670,7 @@ async fn assert_self_service_can_register(auth_mode: ProviderAuthMode) {
         let mut command = request(&f, mode);
         command.owner = "bob".into();
         command.provider_bot_ref = reference.into();
+        command.bot_name = format!("Test bot {reference}");
         let result = f.core.register(command).await.unwrap();
         assert_eq!(result.record.owner, "bob");
         assert!(result.record.webhook_url.is_none());
@@ -746,7 +757,7 @@ async fn changed_mode_or_webhook_and_rotated_token_conflict_without_mutation() {
 
 
 #[tokio::test]
-async fn concurrent_duplicates_conflict_but_distinct_refs_can_register() {
+async fn concurrent_duplicates_conflict_but_distinct_refs_and_names_can_register() {
     let f = fixture(None, false).await;
     let command = request(&f, ProviderRegistrationMode::Plugin);
     let (a, b) = tokio::join!(f.core.register(command.clone()), f.core.register(command.clone()));
@@ -754,6 +765,9 @@ async fn concurrent_duplicates_conflict_but_distinct_refs_can_register() {
     assert!(matches!(a.err().or_else(|| b.err()), Some(ServiceError::Conflict(_))));
     let mut another = command;
     another.provider_bot_ref = "another-ref".into();
+    assert!(matches!(f.core.register(another.clone()).await, Err(ServiceError::Conflict(_))),
+        "a distinct ref must not bypass the active name uniqueness check");
+    another.bot_name = "Another bot".into();
     f.core.register(another).await.unwrap();
     assert_eq!(f.membership.list_provider_bot_metadata(Some(&f.provider)).await.unwrap().len(), 2);
 }

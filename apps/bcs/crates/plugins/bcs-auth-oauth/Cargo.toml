@@ -12,10 +12,12 @@ async-trait = { workspace = true }
 axum = { workspace = true }
 bcs-auth-api = { workspace = true }
 bcs-jwt = { workspace = true }
-tracing = { workspace = true }
+subtle = { workspace = true }
+uuid = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }
+bcs-test-support = { workspace = true }
 
 [lints]
 workspace = true

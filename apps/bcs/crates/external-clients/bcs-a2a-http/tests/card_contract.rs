@@ -41,12 +41,16 @@ fn bearer_requires_a_configured_credential_and_matching_declaration() {
 }
 
 #[test]
-fn protocol_binding_and_streaming_are_not_inferred_from_url() {
+fn protocol_binding_is_not_inferred_and_non_streaming_is_accepted() {
     let mut raw = card();
     raw["supportedInterfaces"][0]["protocolBinding"] = json!("JSONRPC");
     assert_eq!(select_card(raw.clone(), &[], false, |_| true).unwrap_err(), CardError::InterfaceUnsupported);
     raw["capabilities"]["streaming"] = json!(false);
-    assert_eq!(select_card(raw, &[], false, |_| true).unwrap_err(), CardError::StreamingRequired);
+    assert_eq!(select_card(raw.clone(), &[], false, |_| true).unwrap_err(), CardError::InterfaceUnsupported);
+    raw["supportedInterfaces"][0]["protocolBinding"]=json!("HTTP+JSON");
+    assert!(select_card(raw.clone(), &[], false, |_| true).is_ok());
+    raw["capabilities"]=json!({});
+    assert!(select_card(raw, &[], false, |_| true).is_ok());
 }
 
 #[test]
@@ -79,5 +83,17 @@ fn sdk_validated_declarations_keep_optional_required_and_profile_parameters() {
         let projected:A2aExtensionDeclaration=serde_json::from_value(selected.raw["capabilities"]["extensions"][0].clone()).unwrap();
         assert_eq!(projected.params["bcs_exec_profile"],PROFILE);
         assert_eq!(projected.params["future"],json!({"retained":true}));
+    }
+}
+
+#[test]
+fn polling_rejects_required_stream_only_extensions_but_preserves_optional_declarations() {
+    for uri in [bcs_a2a_http::tools::EXTENSION,bcs_a2a_http::structured_exec::EXTENSION] {
+        let mut raw=card();
+        raw["capabilities"]["streaming"]=json!(false);
+        raw["capabilities"]["extensions"]=json!([{"uri":uri,"required":true}]);
+        assert!(matches!(select_card(raw.clone(),&[uri],false,|_|true),Err(CardError::RequiredExtensionUnsupported(_))));
+        raw["capabilities"]["extensions"][0]["required"]=json!(false);
+        assert_eq!(select_card(raw.clone(),&[uri],false,|_|true).unwrap().raw,raw);
     }
 }

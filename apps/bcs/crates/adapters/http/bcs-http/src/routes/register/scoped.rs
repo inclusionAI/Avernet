@@ -106,6 +106,7 @@ pub(super) fn error_response(error: ApplicationError) -> Response {
         ApplicationError::PayloadTooLarge { message, .. } => (StatusCode::PAYLOAD_TOO_LARGE, message),
         ApplicationError::Unprocessable { message, .. } => (StatusCode::UNPROCESSABLE_ENTITY, message),
         ApplicationError::BadGateway { message, .. } => (StatusCode::BAD_GATEWAY, message),
+        ApplicationError::Unavailable { message, .. } => (StatusCode::SERVICE_UNAVAILABLE, message),
         ApplicationError::Internal(error) => {
             tracing::error!(request_id = %bcs_observability::CurrentRequestId, error = %error, "legacy scoped registration failed");
             (StatusCode::INTERNAL_SERVER_ERROR, "internal server error".into())

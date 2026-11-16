@@ -1,8 +1,5 @@
-import { TaskArtifactsList, TaskPanelFetcher } from '@/assets/TaskPanel';
-import { Button } from '@/components/ui/Button';
+import { TaskPanelAssetBoundary } from '@/components/Workspace/TaskPanelAssetBoundary';
 import { Drawer, DrawerContent, DrawerDescription, DrawerTitle } from '@/components/ui/Drawer';
-import { Empty } from '@/components/ui/Empty';
-import { Spin } from '@/components/ui/Spin';
 import { TASK_API_BASE, TASK_READ_API_BASE } from '@/services/tasks/taskConfig';
 import { useState } from 'react';
 
@@ -35,39 +32,15 @@ export function TaskArtifactsDrawer({ taskId, ownerUserId, onClose }: TaskArtifa
 
         <div className="min-h-0 flex-1 overflow-y-auto">
           {taskId ? (
-            <TaskPanelFetcher
-              apiBaseUrl={TASK_API_BASE}
-              taskApiBase={TASK_READ_API_BASE}
-              taskId={taskId}
-              userId={ownerUserId}
-              includeActionLog={false}
-            >
-              {({ task, loading, error, retry }) => {
-                if (loading && !task) return <Spin tip="加载任务产物中…" className="py-16" />;
-                if (error && !task) {
-                  return (
-                    <Empty
-                      title="任务产物加载失败"
-                      description={error}
-                      action={
-                        <Button variant="secondary" onClick={retry}>
-                          重试
-                        </Button>
-                      }
-                    />
-                  );
-                }
-                if (!task) return null;
-                return (
-                  <TaskArtifactsList
-                    task={task}
-                    apiBaseUrl={TASK_API_BASE}
-                    title="产物列表"
-                    previewPortalContainer={drawerElement}
-                  />
-                );
-              }}
-            </TaskPanelFetcher>
+            <TaskPanelAssetBoundary>{asset => (
+              <asset.TaskArtifactsView
+                apiBaseUrl={TASK_API_BASE}
+                taskApiBase={TASK_READ_API_BASE}
+                taskId={taskId}
+                ownerUserId={ownerUserId}
+                previewPortalContainer={drawerElement}
+              />
+            )}</TaskPanelAssetBoundary>
           ) : null}
         </div>
       </DrawerContent>

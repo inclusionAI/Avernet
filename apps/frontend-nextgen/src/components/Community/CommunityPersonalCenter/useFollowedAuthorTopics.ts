@@ -32,7 +32,7 @@ export function useFollowedAuthorTopics(
     requestRef.current = requestId;
     setLoading(true);
     communityService
-      .listTopics({ authorId: selectedItem.target.id, limit: 20 })
+      .listTopics({ authorId: selectedItem.target.idAlias ?? selectedItem.target.id, limit: 20 })
       .then((page) => {
         if (requestId !== requestRef.current) return;
         setTopics(page.items);

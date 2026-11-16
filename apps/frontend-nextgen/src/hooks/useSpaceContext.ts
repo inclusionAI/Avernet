@@ -9,6 +9,7 @@
 // 设计依据：docs/specs/2026-08-17-global-space-context-switcher/plan.md §2/§3。
 // Hook ≤ 150 行。localStorage key 用统一前缀风格（对齐 ocb storage.ts 范式）。
 import type { Space } from '@/domain/admin/models';
+import { getCapabilities } from '@/capabilities';
 import { pickDefaultSpace } from '@/domain/spaceContext';
 import { adminService } from '@/services/admin';
 import { useSpaceContextStore } from '@/stores/spaceContextStore';
@@ -175,6 +176,10 @@ let appEntryEnsurePromise: Promise<void> | null = null;
  *   身份解析复用 ensureUserId → identityService 单飞，与 AppShell 挂载的身份拉取共用 inflight，零重复请求。
  */
 export function ensurePersonalSpaceOnAppEntry(): Promise<void> {
+  // BCS-only（可选 Backend 增强，bcs-standalone-friend-discovery）：能力关闭时 App 入口不
+  // 初始化个人空间——在创建单飞 Promise、调用 ensureUserId 或任何 Admin 请求之前直接返回。
+  // workspace 身份加载（initWorkspace → bots/mine）不受本闸口影响，仍由 AppShell 正常触发。
+  if (!getCapabilities().getPublicBotBackendEnabled()) return Promise.resolve();
   if (appEntryEnsurePromise) return appEntryEnsurePromise;
   appEntryEnsurePromise = adminService.ensurePersonalSpace().then(
     () => undefined,

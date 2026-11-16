@@ -43,6 +43,13 @@ class BotMetadata(BaseModel):
 
     bot_id: str = Field(description="Unique Bot identifier.")
     owner_id: str = Field(description="Current personnel Owner; not the stable BCN address.")
+    owner_name: str | None = Field(
+        default=None,
+        description=(
+            "Owner display name snapshot, updated when ownership changes hands; "
+            "null when the record has none."
+        ),
+    )
     bcn_bot_id: str = Field(
         default="", description="Established BCN reference; unchanged by Owner handoff."
     )

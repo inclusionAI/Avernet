@@ -1,4 +1,4 @@
-import { parseWorkspaceRoute, serializeWorkspaceRoute } from '@/domain/workspaceRoute';
+import { parseWorkspaceRoute, serializeWorkspaceRoute, serializeWorkspaceRoutePreserving } from '@/domain/workspaceRoute';
 
 describe('workspaceRoute(协作群 URL 契约)', () => {
   it('parses current as identity and group/session/membership as selection', () => {
@@ -50,5 +50,28 @@ describe('workspaceRoute(协作群 URL 契约)', () => {
   it('serializes a group deep link without identity', () => {
     expect(serializeWorkspaceRoute({ groupId: 'g1', sessionId: 's1' })).toBe('group=g1&session=s1');
     expect(serializeWorkspaceRoute({})).toBe('');
+  });
+
+  it('preserves non-route params such as showReturn while projecting', () => {
+    expect(
+      serializeWorkspaceRoutePreserving('current=human-1&group=g1&session=s1&showReturn=false', {
+        currentIdentityId: 'human-1',
+        groupId: 'g1',
+        sessionId: 's1',
+      }),
+    ).toBe('current=human-1&group=g1&session=s1&showReturn=false');
+  });
+
+  it('drops route keys removed by projection but keeps extras', () => {
+    expect(
+      serializeWorkspaceRoutePreserving('group=g1&session=s1&showReturn=false&bot=legacy', {
+        groupId: 'g1',
+      }),
+    ).toBe('group=g1&showReturn=false');
+  });
+
+  it('serializes extras only when projection is empty and nothing otherwise', () => {
+    expect(serializeWorkspaceRoutePreserving('showReturn=false', {})).toBe('showReturn=false');
+    expect(serializeWorkspaceRoutePreserving('group=g1', { groupId: 'g1' })).toBe('group=g1');
   });
 });

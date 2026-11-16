@@ -27,6 +27,9 @@ from agentclaw.community.core.task.domain.models import (
     TaskExecutionGraph,
     TaskNode,
 )
+from agentclaw.community.core.task.domain.identity import (
+    resolve_scoped_entry_bot_identity as resolve_entry_bot_identity,
+)
 from agentclaw.community.core.task.task_plan.strategies import (
     GapBasedPlanningStrategy,
     PlanningStrategy,
@@ -43,7 +46,12 @@ class TaskPlanner:
     分层:TaskPlanner(编排壳,框架固定,零 case 知识)↔ PlanningStrategy(引擎内置策略,
     Avernet 默认实现 gap/workflow)。策略池构造期注入(``pool=``);``set_strategies`` 仅供测试覆写。"""
 
-    def __init__(self, graph, *, pool: list[PlanningStrategy] | None = None) -> None:
+    def __init__(
+        self,
+        graph,
+        *,
+        pool: list[PlanningStrategy] | None = None,
+    ) -> None:
         """graph: TaskGraphService(派生查询用;策略 apply 收显式 target 经 graph 快照);
         pool: 策略池(构造期注入;省略=内置默认 [WorkflowPlanning, GapBased])。"""
         self._graph = graph
@@ -502,15 +510,23 @@ class TaskPlanner:
             if not parent.run_info.run_mode:
                 _done_out = self._rollup_done_children_output(task_id, parent.node_id)
                 _parent_acc = self._build_parent_acceptance_result(parent, pr)
-                _owner = graph.extend_props.get("owner_bot_id") or ""
+                _entry_bot_id, _entry_owner_id = resolve_entry_bot_identity(
+                    graph.extend_props.get("owner_bot_id"),
+                    graph.extend_props.get("owner_user_id"),
+                )
                 self._report_node_patch(
                     TaskNodePatch(
                         task_id=task_id,
                         node_id=parent.node_id,
                         acceptance_result=_parent_acc,
                         output_patch=_done_out,
-                        run_mode="single_bot" if _owner else None,
-                        assignee=_owner or None,
+                        run_mode="single_bot" if _entry_bot_id else None,
+                        assignee=_entry_bot_id or None,
+                        extend_props_patch=(
+                            {"assignee_owner_id": _entry_owner_id}
+                            if _entry_owner_id
+                            else None
+                        ),
                     )
                 )
             else:
@@ -580,7 +596,10 @@ class TaskPlanner:
         if root is not None and root.status not in {Status.DONE, Status.SUCCESS}:
             _rprev = root.status
             graph = self._graph.query_task_dashboard(task_id)
-            _owner = graph.extend_props.get("owner_bot_id") or ""
+            _entry_bot_id, _entry_owner_id = resolve_entry_bot_identity(
+                graph.extend_props.get("owner_bot_id"),
+                graph.extend_props.get("owner_user_id"),
+            )
             _root_out = self._rollup_done_children_output(task_id, root.node_id)
             _root_acc = self._build_parent_acceptance_result(root, pr)
             self._report_node_patch(
@@ -589,8 +608,13 @@ class TaskPlanner:
                     node_id=root.node_id,
                     acceptance_result=_root_acc,
                     output_patch=_root_out,
-                    run_mode="single_bot" if _owner else None,
-                    assignee=_owner or None,
+                    run_mode="single_bot" if _entry_bot_id else None,
+                    assignee=_entry_bot_id or None,
+                    extend_props_patch=(
+                        {"assignee_owner_id": _entry_owner_id}
+                        if _entry_owner_id
+                        else None
+                    ),
                 )
             )
             # 动作历史:TRANSITION(根 gap 闭终验通过 → root SUCCESS)

@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { stringify } from 'yaml'
 import type { WorkflowSpec } from '@avernet/clawweb-shared/web/types'
@@ -60,7 +60,8 @@ describe('YAML draft lifecycle', () => {
     fireEvent.click(screen.getByRole('button', { name: '校验并应用' }))
     await screen.findByText(/服务端规范化将改变/)
     expect(onImport).not.toHaveBeenCalled()
-    expect(screen.getByText('custom')).toBeInTheDocument()
+    const review = screen.getByText(/服务端规范化将改变/).parentElement!
+    expect(within(review).getByText('custom')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /确认采用规范化结果/ }))
     expect(onImport).toHaveBeenCalledWith({ ...spec, title: '新标题' })
   })

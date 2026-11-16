@@ -61,6 +61,12 @@ export function createSessionRecoveryRouter(supplied?: SessionRecoveryRouterOpti
     try { res.set("Cache-Control", "no-store").json(await tasks().setTaskShared(String(req.params.taskId), req.body?.shared, await actor(req))); }
     catch (error) { next(error); }
   });
+  router.post("/monitoring/session-recoveries/:taskId/effect-recheck", json({ limit: "8kb", inflate: false }), async (req, res, next) => {
+    try {
+      const result = await tasks().startEffectRecheck(String(req.params.taskId), req.body?.request_id, await actor(req));
+      res.set("Cache-Control", "no-store").status(202).json(result);
+    } catch (error) { next(error); }
+  });
   router.post("/monitoring/session-recoveries/:taskId/terminate", json({ limit: "8kb", inflate: false }), async (req, res, next) => {
     try { res.set("Cache-Control", "no-store").json(await tasks().terminate(String(req.params.taskId), await actor(req), req.body?.reason)); }
     catch (error) { next(error); }
@@ -81,6 +87,12 @@ export function createSessionRecoveryRouter(supplied?: SessionRecoveryRouterOpti
       res.json({ ok: true });
     } catch (error) { next(error); }
   });
+  router.post("/monitoring/session-recoveries/:taskId/owner-requests/:requestId/confirm", json({ limit: "16kb", inflate: false }), async (req, res, next) => {
+    try {
+      await tasks().confirmOwner(String(req.params.taskId), String(req.params.requestId), await actor(req), req.body?.feedback ?? "");
+      res.set("Cache-Control", "no-store").json({ ok: true });
+    } catch (error) { next(error); }
+  });
   router.post("/monitoring/session-recoveries/:taskId/annotations", json({ limit: "64kb", inflate: false }), async (req, res, next) => {
     try { await tasks().annotate(String(req.params.taskId), await actor(req), req.body); res.json({ ok: true }); }
     catch (error) { next(error); }
@@ -92,9 +104,9 @@ export function createSessionRecoveryRouter(supplied?: SessionRecoveryRouterOpti
   });
   const workerPath = "/internal/monitoring/session-recoveries/:taskId/executions/:executionId";
   const worker = () => { if (!supplied?.agent) throw new SessionRecoveryError(503, "recovery_not_ready", "自愈执行服务未配置"); return supplied.agent; };
-  const verifyWorker = (req: Request, control = false) => worker().verify(String(req.params.taskId), String(req.params.executionId), parseAgentExecutionTicket(req.header("authorization")), control);
+  const verifyWorker = (req: Request, control = false, forBootstrap = false) => worker().verify(String(req.params.taskId), String(req.params.executionId), parseAgentExecutionTicket(req.header("authorization")), control, forBootstrap);
   router.get(`${workerPath}/bootstrap`, async (req, res, next) => {
-    try { res.set("Cache-Control", "no-store").json(await worker().bootstrap(await verifyWorker(req, true))); } catch (error) { next(error); }
+    try { res.set("Cache-Control", "no-store").json(await worker().bootstrap(await verifyWorker(req, true, true))); } catch (error) { next(error); }
   });
   router.post(`${workerPath}/heartbeat`, json({ limit: "8kb", inflate: false }), async (req, res, next) => {
     try { res.json(await worker().heartbeat(await verifyWorker(req, true), req.body?.ccSessionId)); } catch (error) { next(error); }

@@ -87,18 +87,22 @@ INTERACTION_TARGET_MATRIX: dict[
 
 @dataclass(frozen=True)
 class ForumActorRef:
-    """One actor dimension, always paired by type and stable id."""
+    """One actor dimension, always paired by type and a stable canonical id."""
 
     type: ForumActorType
     id: str
+    # Intentional read-side compatibility state. It is absent for HUMAN and
+    # for ``default:<owner>``, whose ambiguous bare id must never be matched.
+    id_alias: str | None = None
 
 
 @dataclass(frozen=True)
 class ForumTargetRef:
-    """One target dimension, always paired by type and stable id."""
+    """One target dimension, always paired by type and a stable canonical id."""
 
     type: ForumInteractionTargetType
     id: str
+    id_alias: str | None = None
 
 
 @dataclass(frozen=True)
@@ -160,8 +164,10 @@ class ForumInteractionSummaryQuery:
 
     actor_type: Optional[ForumActorType] = None
     actor_id: Optional[str] = None
+    actor_id_alias: Optional[str] = None
     target_type: Optional[ForumInteractionTargetType] = None
     target_id: Optional[str] = None
+    target_id_alias: Optional[str] = None
 
 
 class ForumInteractionSummaryItem(ForumInteractionSummaryQuery):

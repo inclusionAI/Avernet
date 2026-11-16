@@ -525,3 +525,39 @@ _沿革：这些组最初就比 `{bot_id}` 通配符深一段，2026-08-03 被�
    `/api/models` 这个返回扁平列表、没有 `total` 的路由。
 5. **超时** —— `DeviceAdapterTransport.invoke()` 支持逐调用超时；公共面需要为每组
    定一个写进文档的截止时间。
+
+## Routines 运行目标
+
+七个 `/openapi/v1/bots/{bot_id}/routines` 方法复用现有 Cron relay。
+`runtime_stage` 取 draft/verify/online，代表 Bot 运行态。创建的三个目标字段
+`runtime_stage`、`device_uuid`、`operator_id` 放 JSON body，其余六方法放 query；
+`user_id`、`entity_id`（旧别名 `owner_id`）继续放 query，正式认证、grant、角色及编辑锁保持原规则。
+
+```json
+{"name":"每日汇总","trigger":{"type":"schedule","cron":"0 9 * * *"},"command":"汇总昨日工作","runtime_stage":"online","device_uuid":"existing-device-uuid","operator_id":"authorized-caller"}
+```
+
+后续详情、编辑、删除、立即执行及历史查询通过 query 携带同一目标三元组，例如：
+`GET /openapi/v1/bots/<bot-id>/routines/<routine-id>?user_id=<acting-user>&entity_id=<owner>&runtime_stage=online&device_uuid=<device-uuid>&operator_id=<caller>`。
+PATCH body 仍为原内容字段，例如 `{"enabled":false}`；路由字段不会进入引擎任务 body。
+
+| 方法 | 省略 stage | 目标与发布态行为 |
+| --- | --- | --- |
+| 列表 | 聚合可用 stage，以及当前获授权用户已有 online Caller 实例 | 显式 draft 恢复原草稿范围；指定实例/Caller 必须显式 stage |
+| 创建 | 原草稿创建 | 显式 stage 选择一个已有运行目标，多副本需 UUID |
+| 详情/PATCH/DELETE/run | draft | UUID/Caller 定向一个容器；仅 stage 的发布态 PATCH 只允许 enabled 且可能广播，run 可能广播，DELETE 仍禁止 |
+| runs | 先校验目标组合，再采用 draft | 只有 operator 进入 Caller 定向；仅 UUID 的发布态保留设备筛选；draft+UUID 无 operator 仍拒绝 |
+
+operator 仅选择 Caller，不授予权限。选择他人 Caller 额外要求 Bot ADMIN；真实 human principal
+与 owner/acting user/operator 分开，app-only 沿现有 grant 的 acting user 语义。Caller 不存在时不自动创建、
+不回退父服务。POST 类型/枚举/长度 schema 错误保持422；query、跨字段和领域目标错误分别沿用400/403/404/409/504。
+
+Routine/Run 回包保留可信 stage/device/operator 元数据；旧路径未报告时为 null。
+按 `(owner_id,bot_id,runtime_stage,device_uuid,operator_id,routine_id)` 定位一行，同 ID 不同实例保留多行。
+列表/历史页增加 `failed_targets`；历史稳定按时间倒序，total 只代表本次已取回记录数。
+弃用地址保持原契约，不增加目标能力。
+
+stage-only PATCH/run 的广播成功响应新增局部 `RoutineOperationBatch` 分支，含 results/succeeded/failed/failed_targets。
+run 的 completed 表示触发已确认，时间戳仍为 null，实际执行结果查 runs。relay 明确失败时使用标准错误
+Envelope（data=null），部分已执行也不自动重试。读取 success=true 且空 data、failed_targets 非空时，
+保留成功 HTTP 状态及失败元数据，不能伪装为完全无任务。

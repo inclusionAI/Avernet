@@ -1,8 +1,11 @@
 /** @jest-environment jsdom */
 import Page from '@/pages/BotWorkshop/Detail';
+import { useBotAdvancedConfig } from '@/hooks/useBotAdvancedConfig';
 import { dwsHostingService } from '@/services/botWorkshop/dwsHostingService';
 import '@testing-library/jest-dom';
 import { act, fireEvent, render, screen } from '@testing-library/react';
+
+let mockDetailOwner = 'u';
 
 jest.mock('@umijs/max', () => ({ useLocation: () => ({ search: '?id=b&type=edit' }) }));
 jest.mock('@/hooks/useBotWorkshopEditorIdentity', () => ({
@@ -12,7 +15,7 @@ jest.mock('@/hooks/useBotWorkshopDetail', () => ({
   useBotWorkshopDetail: () => ({
     bot: {
       id: 'b',
-      ownerId: 'u',
+      ownerId: mockDetailOwner,
       serviceMode: 'non-service',
       deployment: 'cloud',
       runtime: { engine: 'openclaw' },
@@ -22,7 +25,7 @@ jest.mock('@/hooks/useBotWorkshopDetail', () => ({
 jest.mock('@/hooks/useBotEditor', () => ({
   useBotEditor: () => ({ skills: [], skillSets: [] }),
 }));
-jest.mock('@/hooks/useBotAdvancedConfig', () => ({ useBotAdvancedConfig: () => ({}) }));
+jest.mock('@/hooks/useBotAdvancedConfig', () => ({ useBotAdvancedConfig: jest.fn(() => ({})) }));
 jest.mock('@/hooks/useDesktopFolder', () => ({ useDesktopFolder: () => jest.fn() }));
 jest.mock('@/hooks/useSpaceContext', () => ({ useSpaceContext: () => undefined }));
 jest.mock('@/services/botWorkshop/dwsHostingService', () => ({
@@ -44,6 +47,7 @@ jest.mock('@/components/BotWorkshop/Editor/DwsHostingPanel', () => ({
 }));
 const eligibility = jest.mocked(dwsHostingService.eligibility);
 beforeEach(() => {
+  mockDetailOwner = 'u';
   jest.useFakeTimers();
   eligibility.mockReset();
   jest
@@ -71,6 +75,14 @@ test('gray user with unavailable engine never sees the entry', async () => {
   expect(screen.queryByRole('button', { name: '消息托管' })).not.toBeInTheDocument();
 });
 afterEach(() => jest.useRealTimers());
+
+test('路由没有 owner_id 时，MD 配置仍使用详情解析出的真实 owner', async () => {
+  mockDetailOwner = 'other-owner';
+  eligibility.mockResolvedValue(false);
+  render(<Page />);
+  await act(async () => { await Promise.resolve(); });
+  expect(useBotAdvancedConfig).toHaveBeenLastCalledWith('b', true, 'other-owner', true, true, 'draft');
+});
 
 test('non-gray users never see the entry or mount the hosting panel', async () => {
   eligibility.mockResolvedValue(false);

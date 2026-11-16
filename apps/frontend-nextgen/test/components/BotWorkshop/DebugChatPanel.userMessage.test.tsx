@@ -1,4 +1,5 @@
 /** @jest-environment jsdom */
+import { defaultCapabilities, extendCapabilities } from '@/capabilities';
 import { DebugChatPanel } from '@/components/BotWorkshop/Editor/DebugChatPanel';
 import type { BotDomain } from '@/domain/botWorkshop';
 import { useBotChat } from '@/pages/Workspace/hooks/useBotChat';
@@ -10,7 +11,9 @@ import { render, screen, waitFor } from '@testing-library/react';
 
 jest.mock('@/pages/Workspace/hooks/useBotChat');
 jest.mock('@/pages/Workspace/hooks/useBotCapabilitySets');
+jest.mock('@umijs/max', () => ({ history: { push: jest.fn(), replace: jest.fn() } }));
 jest.mock('@/services/workspace/botSessionService', () => ({
+  ...jest.requireActual('@/services/workspace/botSessionService'),
   botSessionService: { listSessions: jest.fn(), listModels: jest.fn(), createSession: jest.fn() },
 }));
 jest.mock('@/components/BotWorkshop/Editor/DebugChatComposer', () => ({
@@ -67,4 +70,17 @@ test('自身消息右置:整行 justify-end,内容列在前、头像殿后', asy
   // 内容列在前(含正文)、头像殿后
   expect(row.firstElementChild).toContainHTML('你好调试');
   expect(row.lastElementChild!.className).toContain('bg-brand/15');
+});
+
+test('调试用户消息调用部署侧展示投影，保留原消息供聊天使用', async () => {
+  const present = jest.fn(() => ({ content: '用户问题', header: <span>只读引用卡片</span> }));
+  extendCapabilities({ getUserMessagePresentation: () => ({ status: 'available', value: present }) });
+  try {
+    render(<DebugChatPanel bot={bot} authenticatedUserId="197262" />);
+    expect(await screen.findByText('只读引用卡片')).toBeVisible();
+    expect(screen.getByText('用户问题')).toBeVisible();
+    expect(present).toHaveBeenCalledWith('你好调试');
+  } finally {
+    extendCapabilities({ getUserMessagePresentation: defaultCapabilities.getUserMessagePresentation });
+  }
 });

@@ -40,8 +40,12 @@ export type InterventionParams = {
   message: string;
   /** Explicit Bot lifecycle target; ClawEvolve control messages use draft. */
   lifecycleStage?: "draft" | "verify" | "online";
+  /** Disable unsafe POST retries for callers with durable dispatch fencing. Defaults to true. */
+  retryTransientErrors?: boolean;
   /** Optional environment-specific transport selected by the owning workflow. */
   transportConfig?: { apiKey: string; iamtoken: string; baseUrl: string };
+  /** Caller-defined native message ID. Omit it to let BaaS allocate the ID. */
+  messageId?: string;
 };
 
 export type InterventionResult = {
@@ -50,6 +54,8 @@ export type InterventionResult = {
   sessionId?: string;
   error?: string;
   tokenExpired?: boolean;
+  /** Rejected means positively not accepted; uncertain must never be blindly reposted. */
+  failureKind?: "rejected" | "uncertain";
 };
 
 type BaasMessageResponse = {
@@ -79,6 +85,12 @@ const NON_JSON_SNIPPET_CHARS = 200;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function validCallerMessageId(value: string): boolean {
+  if (value.trim().length === 0 || value.length > 255) return false;
+  if (/[\u0000-\u001f\u007f-\u009f]/u.test(value)) return false;
+  return Buffer.from(value, "utf8").toString("utf8") === value;
 }
 
 function errorText(value: unknown): string | undefined {
@@ -149,7 +161,7 @@ function safeError(message: string, config: { apiKey: string; iamtoken: string }
  * On macOS (local dev): requires both apiKey + iamtoken from application.yaml.
  * On server (Linux etc.): apiKey only; iamtoken is not needed and ignored.
  */
-function buildBaasHeaders(config: { apiKey: string; iamtoken: string; baseUrl: string }): Record<string, string> {
+export function buildBaasHeaders(config: { apiKey: string; iamtoken: string; baseUrl: string }): Record<string, string> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     Authorization: `Bearer ${config.apiKey}`,
@@ -174,6 +186,7 @@ export async function sendIntervention(params: InterventionParams): Promise<Inte
       ok: false,
       error: "BaaS apiKey 未配置。请在 application.yaml 中设置 baas.apiKey",
       tokenExpired: false,
+      ...(params.retryTransientErrors === false ? { failureKind: "rejected" as const } : {}),
     };
   }
 
@@ -183,6 +196,7 @@ export async function sendIntervention(params: InterventionParams): Promise<Inte
       ok: false,
       error: "BaaS iamtoken 未配置。请在 application.yaml 中设置 baas.iamtoken (macOS 本地开发需要)",
       tokenExpired: false,
+      ...(params.retryTransientErrors === false ? { failureKind: "rejected" as const } : {}),
     };
   }
 
@@ -194,8 +208,20 @@ export async function sendIntervention(params: InterventionParams): Promise<Inte
       error: `BaaS bot_id 格式非法: "${botId}"。Open API 要求 "bot_id:owner_staff_no"（示例 default:151614），`
         + "且目标 Bot 必须处于 ACTIVE 且有有效绑定",
       tokenExpired: false,
+      ...(params.retryTransientErrors === false ? { failureKind: "rejected" as const } : {}),
     };
   }
+
+  if (params.messageId !== undefined && (typeof params.messageId !== "string" || !validCallerMessageId(params.messageId))) {
+    return {
+      ok: false,
+      error: "BaaS message_id invalid: must be a non-empty string of at most 255 characters, without control characters or invalid UTF-8",
+      tokenExpired: false,
+      ...(params.retryTransientErrors === false ? { failureKind: "rejected" as const } : {}),
+    };
+  }
+
+  const strictFixedId = params.messageId !== undefined && params.retryTransientErrors === false;
 
   const url = `${config.baseUrl}/openapi/v1/messages`;
 
@@ -203,6 +229,7 @@ export async function sendIntervention(params: InterventionParams): Promise<Inte
 
   const body = {
     bot_id: botId,
+    ...(params.messageId !== undefined ? { message_id: params.messageId } : {}),
     message,
     metadata: {
       // Only an existing session may be addressed. BaaS creates a new session
@@ -217,7 +244,7 @@ export async function sendIntervention(params: InterventionParams): Promise<Inte
   };
 
   // Retry up to 3 times on transient failures
-  const maxRetries = 3;
+  const maxRetries = params.retryTransientErrors === false ? 1 : 3;
   let lastError: string | undefined;
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -230,22 +257,29 @@ export async function sendIntervention(params: InterventionParams): Promise<Inte
         headers,
         body: JSON.stringify(body),
         signal: controller.signal,
+        ...(params.retryTransientErrors === false ? { redirect: "error" as const } : {}),
       });
 
       // Read once as text so a non-JSON body can still be described below.
       let rawBody = "";
+      let bodyReadSucceeded = true;
       try {
         rawBody = await res.text();
       } catch {
         rawBody = "";
+        bodyReadSucceeded = false;
       }
 
       let responseJson: BaasMessageResponse = {};
       let bodyWasJson = false;
+      let responseWasJsonObject = false;
       try {
         const parsed: unknown = JSON.parse(rawBody);
         bodyWasJson = true;
-        if (isRecord(parsed)) responseJson = parsed as BaasMessageResponse;
+        if (isRecord(parsed)) {
+          responseJson = parsed as BaasMessageResponse;
+          responseWasJsonObject = true;
+        }
       } catch {
         // Non-JSON body: an intermediary answered instead of BaaS.
       }
@@ -253,6 +287,46 @@ export async function sendIntervention(params: InterventionParams): Promise<Inte
       const details = errorDetails(responseJson)
         || nonJsonBodyDetails({ rawBody, bodyWasJson, contentType: res.headers.get("content-type") });
       const statusDetail = `${res.status}${details ? ` ${details}` : ""}`;
+      const hasBusinessError = [responseJson.code, responseJson.buserviceErrorCode]
+        .some(code => code != null && String(code).trim() !== "" && String(code) !== "0");
+
+      if (strictFixedId) {
+        if (res.ok && responseJson.data && !hasBusinessError) {
+          return {
+            ok: true,
+            messageId: responseJson.data.message_id,
+            sessionId: responseJson.data.session_id,
+          };
+        }
+
+        const baasErrorCode = responseJson.buserviceErrorCode;
+        if (typeof baasErrorCode === "string" && TOKEN_EXPIRED_CODES.includes(baasErrorCode)) {
+          return {
+            ok: false,
+            error: safeError(`IAM Token 已过期或无效 (HTTP ${statusDetail})`, config),
+            tokenExpired: true,
+            failureKind: "uncertain" as const,
+          };
+        }
+
+        const clearAuthRejection = (res.status === 401 || res.status === 403)
+          && bodyReadSucceeded
+          && responseWasJsonObject
+          && responseJson.data == null;
+        if (clearAuthRejection) {
+          return {
+            ok: false,
+            error: safeError(`BaaS API 错误: ${statusDetail}`, config),
+            failureKind: "rejected" as const,
+          };
+        }
+
+        return {
+          ok: false,
+          error: safeError(`BaaS API 错误: ${statusDetail}`, config),
+          failureKind: "uncertain" as const,
+        };
+      }
 
       // Check for token expiry in BaaS response
       const baasErrorCode = responseJson.buserviceErrorCode;
@@ -261,7 +335,14 @@ export async function sendIntervention(params: InterventionParams): Promise<Inte
           ok: false,
           error: safeError(`IAM Token 已过期或无效 (HTTP ${statusDetail})`, config),
           tokenExpired: true,
+          ...(params.retryTransientErrors === false ? { failureKind: "rejected" as const } : {}),
         };
+      }
+
+      // Single-attempt callers need a positive business acknowledgement, not
+      // merely HTTP 200 with a diagnostic envelope. Legacy behavior is unchanged.
+      if (params.retryTransientErrors === false && hasBusinessError) {
+        return { ok: false, error: safeError(`BaaS API 错误: ${statusDetail}`, config), failureKind: "rejected" };
       }
 
       if (res.ok && responseJson.data) {
@@ -277,6 +358,7 @@ export async function sendIntervention(params: InterventionParams): Promise<Inte
         return {
           ok: false,
           error: safeError(`BaaS API 错误: ${statusDetail}`, config),
+          ...(params.retryTransientErrors === false ? { failureKind: "rejected" as const } : {}),
         };
       }
 
@@ -306,5 +388,6 @@ export async function sendIntervention(params: InterventionParams): Promise<Inte
   return {
     ok: false,
     error: safeError(lastError ?? "BaaS 服务暂时不可用，请稍后重试", config),
+    ...(params.retryTransientErrors === false ? { failureKind: "uncertain" as const } : {}),
   };
 }

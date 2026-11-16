@@ -206,13 +206,16 @@ def build_restart_payload(
 
 def enqueue_restart(
     task_queue_service: TaskQueueService, *, publish_id: int, stage: str, operator: str,
-    in_place: bool = False,
+    in_place: bool = False, operation_id: str | None = None,
 ) -> None:
+    payload = build_restart_payload(
+        publish_id=publish_id, stage=stage, operator=operator, in_place=in_place,
+    )
+    if operation_id is not None:
+        payload['operation_id'] = operation_id
     task_queue_service.enqueue(
         RESTART_TASK,
-        build_restart_payload(
-            publish_id=publish_id, stage=stage, operator=operator, in_place=in_place
-        ),
+        payload,
         deadline_seconds=_STAGE_TASK_DEADLINE_SECONDS,
     )
 
@@ -433,11 +436,13 @@ class PublishRestartHandler(_PublishTaskBase):
         stage = _require_str(payload, "stage")
         operator = _require_str(payload, "operator")
         return asyncio.run(self._run(
-            publish_id, stage, operator, in_place=(payload or {}).get("in_place", False)
+            publish_id, stage, operator, in_place=(payload or {}).get("in_place", False),
+            operation_id=(payload or {}).get("operation_id"),
         ))
 
     async def _run(
-        self, publish_id: int, stage: str, operator: str, in_place: bool = False
+        self, publish_id: int, stage: str, operator: str, in_place: bool = False,
+        operation_id: str | None = None,
     ) -> TaskOutcome:
         # Redelivery guard. The queue is at-least-once and ``execute_restart``
         # COMPLETEs its ledger op before returning, so past that point a second
@@ -453,6 +458,7 @@ class PublishRestartHandler(_PublishTaskBase):
         result = await self._flow.execute_restart(
             publish_id=publish_id, stage=stage, operator=operator,
             **({"in_place": True} if in_place else {}),
+            **({"operation_id": operation_id} if operation_id else {}),
         )
         if not result or not result.get("success"):
             message = (result or {}).get("message", "unknown error")

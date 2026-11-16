@@ -8,9 +8,9 @@ from uuid import uuid4
 import mysql.connector
 import pytest
 
-from src.domain.models.worker import Worker, WorkerIdentity, WorkerType
-from src.infra.public.database.mysql_connection_pool import _TrackedConnection
-from src.infra.public.stores.mysql_worker_registry_store import MySQLWorkerRegistryStore
+from app.domain.models.worker import Worker, WorkerIdentity, WorkerType
+from app.infra.public.database.mysql_connection_pool import _TrackedConnection
+from app.infra.public.stores.mysql_worker_registry_store import MySQLWorkerRegistryStore
 
 
 pytestmark = pytest.mark.skipif(

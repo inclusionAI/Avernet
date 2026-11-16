@@ -38,7 +38,7 @@ def test_runtime_registry_build():
         mock_connect.return_value = MagicMock()
 
         start = time.time()
-        from src.bootstrap.opensource import build_opensource_provider_registry
+        from app.bootstrap.opensource import build_opensource_provider_registry
 
         registry = build_opensource_provider_registry(mode="runtime")
         elapsed = time.time() - start
@@ -71,7 +71,7 @@ def test_dev_registry_build():
             mock_connect.return_value = MagicMock()
 
             start = time.time()
-            from src.bootstrap.opensource import build_opensource_provider_registry
+            from app.bootstrap.opensource import build_opensource_provider_registry
 
             registry = build_opensource_provider_registry(mode="dev")
             elapsed = time.time() - start
@@ -88,7 +88,7 @@ def test_test_registry_build():
     print("\n[TEST] test_test_registry_build")
 
     start = time.time()
-    from src.bootstrap.opensource import build_opensource_provider_registry
+    from app.bootstrap.opensource import build_opensource_provider_registry
 
     registry = build_opensource_provider_registry(mode="test")
     elapsed = time.time() - start
@@ -103,7 +103,7 @@ def test_all_modes_register_13_provider_keys():
     """Test that all modes register exactly 13 provider keys."""
     print("\n[TEST] test_all_modes_register_13_provider_keys")
 
-    from src.bootstrap.opensource import build_opensource_provider_registry
+    from app.bootstrap.opensource import build_opensource_provider_registry
     from unittest.mock import patch, MagicMock
     import tempfile
 
@@ -168,7 +168,7 @@ def test_provider_build_does_not_connect_to_mysql():
         mock_connect.return_value = MagicMock()
 
         # Build runtime registry (which uses MySQL stores)
-        from src.bootstrap.opensource import build_opensource_provider_registry
+        from app.bootstrap.opensource import build_opensource_provider_registry
         registry = build_opensource_provider_registry(mode="runtime")
 
         # MySQL connect should not have been called during build
@@ -191,7 +191,7 @@ def test_provider_build_does_not_connect_to_qdrant():
         mock_qdrant.return_value = MagicMock()
 
         # Build runtime registry (which uses QdrantLocalVectorStore)
-        from src.bootstrap.opensource import build_opensource_provider_registry
+        from app.bootstrap.opensource import build_opensource_provider_registry
         registry = build_opensource_provider_registry(mode="runtime")
 
         # Qdrant client should not have been initialized during build
@@ -214,7 +214,7 @@ def test_provider_build_does_not_call_http_apis():
          patch('requests.Session') as mock_requests:
 
         # Build test registry (which uses fake providers, but also check dev/runtime)
-        from src.bootstrap.opensource import build_opensource_provider_registry
+        from app.bootstrap.opensource import build_opensource_provider_registry
 
         test_registry = build_opensource_provider_registry(mode="test")
 

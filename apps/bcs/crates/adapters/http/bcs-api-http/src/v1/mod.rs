@@ -1,3 +1,4 @@
+pub mod a2a;
 pub mod bot_authority;
 pub mod common;
 pub mod gateway_principal;
@@ -50,6 +51,7 @@ pub fn router(state: ApiState) -> Router {
         .merge(authority_protected)
         .merge(openapi::public_router())
         .merge(internal::public_router())
+        .merge(a2a::router())
         .with_state(state)
         .merge(drafts)
 }

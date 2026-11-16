@@ -6,7 +6,7 @@ StructuredOutputParser 测试
 
 import pytest
 
-from src.infra.llm.parsing.structured_output_parser import (
+from app.infra.llm.parsing.structured_output_parser import (
     StructuredOutputParser,
     ParseResult,
     ParseErrorType,

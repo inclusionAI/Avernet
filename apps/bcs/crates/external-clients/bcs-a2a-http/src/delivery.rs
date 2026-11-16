@@ -17,6 +17,8 @@ use crate::{client::bind_rest_client, binding_client::BindingClient, grpc_mesh::
 
 #[path = "delivery_driver.rs"]
 mod driver;
+#[path = "delivery_poll.rs"]
+mod poll;
 #[path = "delivery_interaction.rs"]
 mod interaction;
 #[path = "delivery_error.rs"]
@@ -87,34 +89,53 @@ impl A2aHttpTransport {
     }
 
     fn route_fingerprint(&self, interface:&bcs_service_api::types::a2a_bot::A2aInterface)->ServiceResult<Option<String>> {
+        if interface.binding==A2aBinding::Custom {
+            return bcs_a2a_binding_api::registry().fingerprint(&interface.url).map(Some)
+                .map_err(|_|invalid("custom route unavailable"));
+        }
         if interface.binding!=A2aBinding::Grpc {return Ok(None);}
         let mesh=self.inner.grpc.as_ref().ok_or_else(||invalid("gRPC mesh is not configured"))?;
         Ok(Some(mesh.fingerprint(&interface.url)?))
     }
 
     async fn client(&self, record: &A2aRunRecord) -> ServiceResult<BindingClient> {
-        let credential = self.inner.credentials.get_credential_by_kind(&record.scope.provider_id, &record.credential_kind).await?
-            .ok_or_else(||invalid("credential unavailable"))?;
-        if credential.disabled || credential.secret_value.trim().is_empty() { return Err(invalid("credential unavailable")); }
+        let bearer=if record.credential_kind==bcs_service_api::types::a2a_auth::ANONYMOUS {None} else {
+            let credential=self.inner.credentials.get_credential_by_kind(&record.scope.provider_id,&record.credential_kind).await?
+                .ok_or_else(||invalid("credential unavailable"))?;
+            if credential.disabled || credential.secret_value.trim().is_empty() {return Err(invalid("credential unavailable"));}
+            Some(credential.secret_value)
+        };
         let negotiated = record.extensions.iter().filter(|uri|matches!(uri.as_str(),crate::tools::EXTENSION | DEDUP_EXTENSION | crate::structured_exec::EXTENSION))
             .map(String::as_str).collect::<Vec<_>>().join(",");
+        if record.interface.binding == A2aBinding::Custom {
+            if record.scope.route_fingerprint != self.route_fingerprint(&record.interface)? {
+                return Err(invalid("frozen custom route changed; remote Task must not be retargeted"));
+            }
+            return bcs_a2a_binding_api::registry().client(&record.interface.url, record.interface.tenant.as_deref(),
+                bearer.as_deref(), &negotiated, Duration::from_millis(record.deadline_ms.saturating_sub(now_ms()).max(5_000)))
+                .map(BindingClient::Custom).map_err(|_|invalid("custom client unavailable"));
+        }
         if record.interface.binding == A2aBinding::Grpc {
             if record.scope.route_fingerprint!=self.route_fingerprint(&record.interface)? {
                 return Err(invalid("frozen gRPC route changed; remote Task must not be retargeted"));
             }
             let mesh=self.inner.grpc.as_ref().ok_or_else(||invalid("gRPC mesh is not configured"))?;
-            return Ok(BindingClient::Grpc(mesh.client(&record.interface,&credential.secret_value,&negotiated)?
+            return Ok(BindingClient::Grpc(mesh.client_with_optional_bearer(&record.interface,bearer.as_deref(),&negotiated)?
                 .with_timeout(Duration::from_millis(record.deadline_ms.saturating_sub(now_ms()).max(5_000)))));
         }
         let mut headers = reqwest::header::HeaderMap::new();
-        let mut value = reqwest::header::HeaderValue::from_str(&format!("Bearer {}", credential.secret_value))
-            .map_err(|_|invalid("credential header invalid"))?;
-        value.set_sensitive(true); headers.insert(reqwest::header::AUTHORIZATION, value);
+        if let Some(bearer)=bearer {
+            let mut value=reqwest::header::HeaderValue::from_str(&format!("Bearer {bearer}")).map_err(|_|invalid("credential header invalid"))?;
+            value.set_sensitive(true);headers.insert(reqwest::header::AUTHORIZATION,value);
+        }
         if !negotiated.is_empty() {
             headers.insert("a2a-extensions", reqwest::header::HeaderValue::from_str(&negotiated)
                 .map_err(|_|invalid("extension header invalid"))?);
         }
         let http = crate::card_fetch::guarded_client_with_headers(&self.inner.guard, &record.interface.url, headers).await?;
+        if record.interface.binding == A2aBinding::JsonRpc {
+            return Ok(BindingClient::JsonRpc(crate::jsonrpc::JsonRpcClient::new(http, record.interface.url.clone(), record.interface.tenant.clone())));
+        }
         Ok(BindingClient::Rest(bind_rest_client(http, record.interface.url.clone(), record.interface.tenant.clone())))
     }
 
@@ -184,6 +205,8 @@ impl A2aHttpTransport {
 impl BotDeliveryPort for A2aHttpTransport {
     async fn is_available(&self, target: &BotDeliveryTarget) -> bool {
         let binding_ready=match target {
+            BotDeliveryTarget::A2a {interface,..} if interface.binding==A2aBinding::Custom =>
+                bcs_a2a_binding_api::registry().fingerprint(&interface.url).is_ok(),
             BotDeliveryTarget::A2a {interface,..} if interface.binding==A2aBinding::Grpc =>
                 self.inner.grpc.as_ref().is_some_and(|mesh|mesh.supports(&interface.url)),
             BotDeliveryTarget::A2a {..}=>true,
@@ -233,9 +256,12 @@ impl BotDeliveryPort for A2aHttpTransport {
         let slot = self.inner.slots.clone().try_acquire_owned().map_err(|_|ServiceError::DeliveryNotSent { code: "a2a_capacity", retryable: true })?;
         let mut record = A2aRunRecord { run_id: cmd.run_id.clone(), scope, group_id: context.group_id,
             interface: interface.clone(), credential_kind: credential_kind.clone(), message_id: cmd.run_id.clone(), request_digest: digest,
-            extensions: extensions.iter().filter(|declaration|matches!(declaration.uri.as_str(),crate::tools::EXTENSION | DEDUP_EXTENSION)
-                || (declaration.uri==crate::structured_exec::EXTENSION && crate::structured_exec::compatible_params(&declaration.params)
-                    && self.input_runtime().is_ok()))
+            extensions: extensions.iter().filter(|declaration|declaration.uri==DEDUP_EXTENSION
+                || (interface.update_mode==bcs_service_api::types::a2a::A2aUpdateMode::Stream
+                    && (declaration.uri==crate::tools::EXTENSION
+                        || (declaration.uri==crate::structured_exec::EXTENSION
+                            && crate::structured_exec::compatible_params(&declaration.params)
+                            && self.input_runtime().is_ok()))))
                 .map(|declaration|declaration.uri.clone()).collect(),
             remote_task_id: None, context_id: None, task_version:None, state: A2aRunState::Submitting, deadline_ms: context.deadline_ms,
             budget:None,pending_input:None,updated_at_ms: now_ms(), version: 1 };
@@ -266,13 +292,23 @@ impl BotDeliveryPort for A2aHttpTransport {
         let lease = Lease { inner: self.inner.clone(), run_id: record.run_id.clone(), _slot: slot };
         let mut message = json!({"messageId":record.message_id,"role":"ROLE_USER","parts":parts});
         if let Some(context) = &record.context_id { message["contextId"] = json!(context); }
-        let request = serde_json::from_value(json!({"message":message,"configuration":{"acceptedOutputModes":["text/plain"]}}))?;
+        let mut configuration=json!({"acceptedOutputModes":["text/plain"]});
+        if record.interface.update_mode==bcs_service_api::types::a2a::A2aUpdateMode::Poll { configuration["returnImmediately"]=json!(true); }
+        let request = serde_json::from_value(json!({"message":message,"configuration":configuration}))?;
         let attempts = if record.extensions.iter().any(|uri|uri == DEDUP_EXTENSION) { 2 } else { 1 };
         let mut received = None;
         for _ in 0..attempts {
             let budget = record.deadline_ms.saturating_sub(now_ms()).min(15_000);
             if budget == 0 { break; }
             let first = async {
+                if record.interface.update_mode==bcs_service_api::types::a2a::A2aUpdateMode::Poll {
+                    let event=match client.send_message(&request).await? {
+                        a2a::SendMessageResponse::Task(task)=>StreamResponse::Task(task),
+                        a2a::SendMessageResponse::Message(message)=>StreamResponse::Message(message),
+                    };
+                    let stream:BoxStream<'static,Result<StreamResponse,a2a::A2AError>>=Box::pin(futures::stream::empty());
+                    return Ok((stream,event));
+                }
                 let mut stream = client.send_streaming_message(&request).await?;
                 let event = stream.next().await.ok_or_else(||a2a::A2AError::internal("submission ended before first Task"))??;
                 Ok::<_, a2a::A2AError>((stream, event))
@@ -298,12 +334,15 @@ impl BotDeliveryPort for A2aHttpTransport {
         };
         if !finished {
             let transport = self.clone();
-            tokio::spawn(async move {
+            tokio::spawn(bcs_network_tracing::in_current_context(async move {
                 let _lease = lease;
-                if transport.drive(&mut record, &mut projection, stream, receiver,resolution_receiver).await.is_err() {
+                let result=if record.interface.update_mode==bcs_service_api::types::a2a::A2aUpdateMode::Poll {
+                    transport.drive_poll(&mut record,&mut projection,receiver).await
+                } else {transport.drive(&mut record, &mut projection, stream, receiver,resolution_receiver).await};
+                if result.is_err() {
                     transport.tracking_failed(&mut record).await;
                 }
-            });
+            }));
         }
         Ok(BotDeliveryResult { target_bot_id: bot_id.clone(), delivered: true, error: None })
     }

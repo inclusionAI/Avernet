@@ -206,6 +206,30 @@ BCS 在发送前核对目标 Bot/Provider 与既有派发关联，网络 ACK 由
 需要此类强证据的 status/cancel 控制契约仍保留，不能用普通 final 伪造其水位。
 
 
+### 接收协商与流式结果
+
+协议 2.0 protected `chat.send` 与普通 Provider send 使用同一协商：
+`Accept: text/event-stream, application/json`、`X-BCN-Transport: sse`。
+HTTP 2xx + `Content-Type: text/event-stream` 在上下文及 SSE reader 就绪后表示 **已受理**，
+不是执行完成；不等待整个响应体关闭，也不尝试将 SSE 解码为 JSON ACK。
+JSON fallback 保留下节 ACK 规则，后续结果仍经认证 `/bot/events` 到达。
+
+发送前通过已装配的 Run-context port 登记可信 Bot/Group/Session、执行 deadline 和 abort
+路由，不保存 caller subject/proof。已有跨 scope、terminal 或占用的 transport 不得被覆盖；
+缺失 SSE ingest 装配或登记/绑定失败不能谎报受理。响应头前保持 Negotiating，选定后只允许
+一个事件源。JSON 响应头选择 Callback（不代表 ACK 成功），因此 ACK 丢失/unknown 后仍可
+由认证晚到事件收敛；明确拒绝清理 transport 登记，允许原 HISTORY_NOT_READY dispatch 重驱。
+
+SSE 复用普通 reader 的增量解析、seq 去重、interaction、终态及 EOF/error 处理；客户端
+无 total timeout。原 `callback_timeout_ms` / send stage 限制只负责受理等待，流的存活由
+执行 deadline 与 idle bound 控制。发送后结果不明仍为 Unknown，不能盲目重发。
+登记使用常数次 Run-context/cache 操作，不查询消息库、不扫描队列；没有新增表或迁移。
+按当前 Redis store 实现，首次登记并绑定约 17–18 次单 key/hash-field cache 操作（含写入读回
+及可选 TTL 延长），同 run 的明确拒绝重驱约 10 次，复用 context/active 登记；Memory store
+只有本地 map 操作。并发 N 个发送线性增加此成本，不持有 DB 事务跨网络等待；事件处理沿用
+原有成本。契约测试验证登记失败不发送、绑定丢失不报成功、重驱不重复登记；这不替代真实
+Redis 的吞吐/故障压测。
+
 ### 最小接收 ACK
 
 ```json
@@ -223,7 +247,8 @@ BCS 使用原命令的控制版本/摘要收敛 ACK，不信任 Provider 的旧 
 错误分界：请求开始前返回 NotSent，仅说明本次未发出；请求开始后异常统一
 OutcomeUnknown。明确 accepted 只是受理；Provider 执行结果仍须认证事件/状态链路。
 总预算包含 DNS/TLS client 准备与网络；发送前再读身份时钟；禁重定向/重试，
-响应最多 64 KiB。没有 DB 访问、后台任务或发送取消的原子保证。
+有限 JSON ACK 最多 64 KiB；SSE 使用已有逐帧上限与后台 reader，不适用整个流的 ACK 体积上限。
+没有新增 DB 访问，也不保证网络发送与取消原子化。
 
 `caller_send_contract` 本地测试覆盖真实 JWT→ensure→send、错误 ACK、调用前与准备中
 过期、ACK 丢失、重定向不传凭据、日志脱敏；非真实 Gateway 去重/取消账本验收。

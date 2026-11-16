@@ -60,7 +60,10 @@ class _FakeService:
     def __init__(self, sub: BrowseSubscriptionRecord | None) -> None:
         self._sub = sub
 
-    def get_subscription(self, *, bot_id: str) -> BrowseSubscriptionRecord | None:
+    def get_subscription(
+        self, *, bot_id: str, owner_user_id: str
+    ) -> BrowseSubscriptionRecord | None:
+        assert owner_user_id == "111111"
         return self._sub
 
 
@@ -96,7 +99,7 @@ async def test_push_browse_once_returns_bot_result_and_injects_runtime_context(
 ):
     monkeypatch.setenv("SERVER_ENV", "dev")
     runner = _runner(_FakeBot(), _FakeService(_sub(mode="framework", bot_id="bot-a")))
-    result = await runner.push_browse_once(bot_id="bot-a", expected_mode="framework")
+    result = await runner.push_browse_once(bot_id="bot-a", owner_user_id="111111", expected_mode="framework")
     bot = runner._bot  # type: ignore[attr-defined]
 
     assert result["run_id"] == "run_x"
@@ -122,7 +125,7 @@ async def test_push_browse_once_returns_bot_result_and_injects_runtime_context(
 async def test_push_browse_once_scopes_default_bbs_author_identity(monkeypatch):
     monkeypatch.setenv("SERVER_ENV", "dev")
     runner = _runner(_FakeBot(), _FakeService(_sub(mode="framework", bot_id="default")))
-    await runner.push_browse_once(bot_id="default", expected_mode="framework")
+    await runner.push_browse_once(bot_id="default", owner_user_id="111111", expected_mode="framework")
     sent = runner._bot.sent[0]  # type: ignore[attr-defined]
 
     assert '"bot_id": "default:111111"' in sent["message"]
@@ -133,7 +136,7 @@ async def test_push_browse_once_scopes_default_bbs_author_identity(monkeypatch):
 async def test_push_browse_once_prod_keeps_deployment_skill_name(monkeypatch):
     monkeypatch.setenv("SERVER_ENV", "prod")
     runner = _runner(_FakeBot(), _FakeService(_sub(mode="framework", bot_id="bot-a")))
-    await runner.push_browse_once(bot_id="bot-a", expected_mode="framework")
+    await runner.push_browse_once(bot_id="bot-a", owner_user_id="111111", expected_mode="framework")
     sent = runner._bot.sent[0]  # type: ignore[attr-defined]
 
     prod_skill = browse_skill_name("prod")
@@ -144,14 +147,14 @@ async def test_push_browse_once_prod_keeps_deployment_skill_name(monkeypatch):
 async def test_push_browse_once_mode_mismatch_raises_validation():
     runner = _runner(_FakeBot(), _FakeService(_sub(mode="openclaw")))
     with pytest.raises(ValidationError):
-        await runner.push_browse_once(bot_id="bot-a", expected_mode="framework")
+        await runner.push_browse_once(bot_id="bot-a", owner_user_id="111111", expected_mode="framework")
 
 
 @pytest.mark.asyncio
 async def test_push_browse_once_missing_subscription_raises_not_found():
     runner = _runner(_FakeBot(), _FakeService(None))
     with pytest.raises(NotFound):
-        await runner.push_browse_once(bot_id="bot-a", expected_mode="framework")
+        await runner.push_browse_once(bot_id="bot-a", owner_user_id="111111", expected_mode="framework")
 
 
 @pytest.mark.asyncio
@@ -160,10 +163,10 @@ async def test_push_cron_event_only_for_openclaw(monkeypatch):
     runner = _runner(_FakeBot(), _FakeService(_sub(mode="framework")))
     # framework-mode subscription cannot receive cron events
     with pytest.raises(ValidationError):
-        await runner.push_cron_event(bot_id="bot-a", action="register")
+        await runner.push_cron_event(bot_id="bot-a", owner_user_id="111111", action="register")
 
     runner = _runner(_FakeBot(), _FakeService(_sub(mode="openclaw", bot_id="bot-b")))
-    result = await runner.push_cron_event(bot_id="bot-b", action="register")
+    result = await runner.push_cron_event(bot_id="bot-b", owner_user_id="111111", action="register")
     bot = runner._bot  # type: ignore[attr-defined]
     assert len(bot.sent) == 1
     assert result["run_id"] == "run_x"
@@ -185,7 +188,7 @@ async def test_push_cron_event_only_for_openclaw(monkeypatch):
 @pytest.mark.asyncio
 async def test_push_cron_event_remove_message(monkeypatch):
     runner = _runner(_FakeBot(), _FakeService(_sub(mode="openclaw", bot_id="bot-b")))
-    result = await runner.push_cron_event(bot_id="bot-b", action="remove")
+    result = await runner.push_cron_event(bot_id="bot-b", owner_user_id="111111", action="remove")
     sent = runner._bot.sent[0]  # type: ignore[attr-defined]
     assert "[BBS-BROWSE-CRON]" in sent["message"]
     assert (
@@ -204,7 +207,7 @@ async def test_push_cron_event_remove_message(monkeypatch):
 async def test_push_cron_event_prod_register_keeps_deployment_skill_name(monkeypatch):
     monkeypatch.setenv("SERVER_ENV", "prod")
     runner = _runner(_FakeBot(), _FakeService(_sub(mode="openclaw", bot_id="bot-b")))
-    await runner.push_cron_event(bot_id="bot-b", action="register")
+    await runner.push_cron_event(bot_id="bot-b", owner_user_id="111111", action="register")
     sent = runner._bot.sent[0]  # type: ignore[attr-defined]
 
     prod_skill = browse_skill_name("prod")
@@ -220,11 +223,11 @@ async def test_push_cron_event_register_and_remove_share_fixed_name():
     `bbs-browse-30min`), and remove finds the task by that name.
     """
     runner_r = _runner(_FakeBot(), _FakeService(_sub(mode="openclaw", bot_id="bot-b")))
-    await runner_r.push_cron_event(bot_id="bot-b", action="register")
+    await runner_r.push_cron_event(bot_id="bot-b", owner_user_id="111111", action="register")
     register_msg = runner_r._bot.sent[0]["message"]  # type: ignore[attr-defined]
 
     runner_x = _runner(_FakeBot(), _FakeService(_sub(mode="openclaw", bot_id="bot-b")))
-    await runner_x.push_cron_event(bot_id="bot-b", action="remove")
+    await runner_x.push_cron_event(bot_id="bot-b", owner_user_id="111111", action="remove")
     remove_msg = runner_x._bot.sent[0]["message"]  # type: ignore[attr-defined]
 
     assert BBS_BROWSE_LOOP_CRON_NAME in register_msg
@@ -250,7 +253,7 @@ async def test_trigger_install_bbs_skills_sends_verified_wording_and_composite_i
 
     monkeypatch.setenv("SERVER_ENV", "dev")
     runner = _runner(_FakeBot(), _FakeService(_sub(mode="openclaw", bot_id="bot-a")))
-    result = await runner.trigger_install_bbs_skills(bot_id="bot-a")
+    result = await runner.trigger_install_bbs_skills(bot_id="bot-a", owner_user_id="111111")
     bot = runner._bot  # type: ignore[attr-defined]
 
     assert result["status"] == "submitted"
@@ -277,7 +280,7 @@ async def test_trigger_install_bbs_skills_sends_verified_wording_and_composite_i
 async def test_trigger_install_bbs_skills_missing_subscription_raises_not_found():
     runner = _runner(_FakeBot(), _FakeService(None))
     with pytest.raises(NotFound):
-        await runner.trigger_install_bbs_skills(bot_id="bot-a")
+        await runner.trigger_install_bbs_skills(bot_id="bot-a", owner_user_id="111111")
 
 
 @pytest.mark.asyncio
@@ -285,7 +288,7 @@ async def test_trigger_install_bbs_skills_rejects_legacy_framework_subscription(
     runner = _runner(_FakeBot(), _FakeService(_sub(mode="framework")))
 
     with pytest.raises(ValidationError):
-        await runner.trigger_install_bbs_skills(bot_id="bot-a")
+        await runner.trigger_install_bbs_skills(bot_id="bot-a", owner_user_id="111111")
 
 
 @pytest.mark.asyncio

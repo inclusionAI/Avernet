@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Annotated, Any
 
 from fastapi import Depends, Path, Query
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_serializer
 
 # The published startup-script size limit, imported rather than retyped so the
 # example in STARTUP_SCRIPT_WRITE_RESPONSES cannot drift from the enforced value.
@@ -102,6 +102,19 @@ class Envelope[T](BaseModel):
     request_id: str = Field(
         description="Trace id; mirrors the X-Trace-Id response header."
     )
+
+
+class ExtensibleResponse(BaseModel):
+    """Engine-owned response data; absent extensions preserve legacy JSON."""
+
+    ext: dict[str, Any] = Field(default_factory=dict, description="Engine-namespaced extensions.")
+
+    @model_serializer(mode="wrap")
+    def _serialize(self, handler):
+        data = handler(self)
+        if not self.ext:
+            data.pop("ext", None)
+        return data
 
 
 class ErrorEnvelope(BaseModel):

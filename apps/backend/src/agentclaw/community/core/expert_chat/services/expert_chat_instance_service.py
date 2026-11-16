@@ -62,6 +62,7 @@ from agentclaw.community.core.service_bot.services.baas_service import (
     BaasService,
     BaasServiceError,
 )
+from agentclaw.community.core.service_bot.baas_service_errors import BaasNoActiveDevicesError
 from agentclaw.community.core.service_bot.services.bot_build_service import BotBuildService
 from agentclaw.community.core.service_bot.services.deploy.service_publish_env import (
     service_publish_extra_envs,
@@ -475,7 +476,12 @@ class ExpertChatInstanceService(ExpertChatBotLookupMixin, ExpertChatInstanceServ
         except Exception as e:
             # Record exception traceback to ext and update instance
             error_traceback = traceback.format_exc()
-            logger.error(
+            log_failure = (
+                logger.warning
+                if isinstance(e, ConnectionError) and e.caller_device_unavailable
+                else logger.error
+            )
+            log_failure(
                 "[ExpertChatInstance] get_caller_connection failed: bot=%s owner=%s user=%s: %s\n%s",
                 bot_id, owner_id, user_id, e, error_traceback,
             )
@@ -726,7 +732,9 @@ class ExpertChatInstanceService(ExpertChatBotLookupMixin, ExpertChatInstanceServ
                 device_affinity=user_id,
             )
         except BaasServiceError as e:
-            logger.error(
+            device_unavailable = isinstance(e, BaasNoActiveDevicesError)
+            log_failure = logger.warning if device_unavailable else logger.error
+            log_failure(
                 "[ExpertChatInstance] get_ws_info_by_bot_uuid failed: bot=%s "
                 "bot_uuid=%s: %s",
                 bot_id, bot_uuid, e,
@@ -735,6 +743,7 @@ class ExpertChatInstanceService(ExpertChatBotLookupMixin, ExpertChatInstanceServ
                 f"Failed to get ws info: {e}",
                 error_code="5001",
                 original_error=str(e),
+                caller_device_unavailable=device_unavailable,
             ) from e
         except Exception as e:
             logger.error(

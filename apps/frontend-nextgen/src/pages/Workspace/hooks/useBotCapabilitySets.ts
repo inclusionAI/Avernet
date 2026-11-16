@@ -3,7 +3,7 @@
  * 数据链复用 BotWorkshop 同源只读接口（design D2）：listSkillSetResources 一次取全量
  * 集 + 内嵌 mcps，明细 skills 按需逐集拉取（失败以 failed 标记，不阻塞其他集）。
  * 接口调用与 DTO 映射经 botCapabilitySetService 下沉（分层：Hook → Service → API Controller）；
- * 团队 Bot 实体 owner 必须显式传 bot.ownerId。好友 Bot / 不可会话 Bot 不装配
+ * 团队空间 Bot 实体 owner 必须显式传 bot.ownerId。好友 Bot / 不可会话 Bot 不装配
  * （返回 null），好友/团队判定留在装配层，组件零业务分类判断（design D4）。 */
 import type {
   CapabilitySetDetailResult,
@@ -15,7 +15,7 @@ import type { ChatBotView } from '@/services/workspace/botSessionService';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
-/** 是否对该 Bot 装配能力集查看（我的/团队 Bot；好友 Bot 不展示，规格「能力集区展示资格」）。 */
+/** 是否对该 Bot 装配能力集查看（我的/团队空间 Bot；好友 Bot 不展示，规格「能力集区展示资格」）。 */
 export function isCapabilitySetBot(bot: ChatBotView | null): boolean {
   return !!bot && !bot.isFriendBot && !!bot.chatable;
 }

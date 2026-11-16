@@ -91,6 +91,7 @@ const sessionsModel = (over: Partial<ConversationSessionsModel> = {}): Conversat
   selectMineSession: jest.fn(),
   selectFriendBotSession: jest.fn(),
   createSession: jest.fn(),
+  isCreatingSession: jest.fn(() => false),
   retrySessions: jest.fn(),
   loadMoreSessions: jest.fn(),
   ...over,
@@ -116,6 +117,7 @@ function sidebarProps(over: Partial<ConversationSidebarProps> = {}): Conversatio
     onOpenSession: jest.fn(),
     onOpenPublicBots: jest.fn(),
     onOpenBotWorkshop: jest.fn(),
+    onCreateBotInSpace: jest.fn(),
     replyingSessionId: null,
     ...over,
   };

@@ -25,14 +25,14 @@ class TestProfileType:
 
     def test_profile_type_values(self):
         """测试枚举值定义"""
-        from src.domain.models.worker_profile import ProfileType
+        from app.domain.models.worker_profile import ProfileType
 
         assert ProfileType.DEFAULT == "default"
         assert ProfileType.BOT == "bot"
 
     def test_profile_type_from_string(self):
         """测试从字符串创建枚举"""
-        from src.domain.models.worker_profile import ProfileType
+        from app.domain.models.worker_profile import ProfileType
 
         assert ProfileType("default") == ProfileType.DEFAULT
         assert ProfileType("bot") == ProfileType.BOT
@@ -43,7 +43,7 @@ class TestSourceType:
 
     def test_source_type_values(self):
         """测试枚举值定义"""
-        from src.domain.models.worker_profile import SourceType
+        from app.domain.models.worker_profile import SourceType
 
         assert SourceType.FILE == "file"
         assert SourceType.API == "api"
@@ -51,7 +51,7 @@ class TestSourceType:
 
     def test_source_type_from_string(self):
         """测试从字符串创建枚举"""
-        from src.domain.models.worker_profile import SourceType
+        from app.domain.models.worker_profile import SourceType
 
         assert SourceType("file") == SourceType.FILE
 
@@ -61,7 +61,7 @@ class TestWorkerProfileWarning:
 
     def test_create_warning_success(self):
         """测试创建警告"""
-        from src.domain.models.worker_profile import WorkerProfileWarning
+        from app.domain.models.worker_profile import WorkerProfileWarning
 
         warning = WorkerProfileWarning(
             code="SKILL_FILE_NOT_FOUND",
@@ -77,7 +77,7 @@ class TestWorkerProfileWarning:
 
     def test_create_warning_minimal(self):
         """测试创建最小字段警告"""
-        from src.domain.models.worker_profile import WorkerProfileWarning
+        from app.domain.models.worker_profile import WorkerProfileWarning
 
         warning = WorkerProfileWarning(
             code="NO_ACTIVE_SKILL_SET",
@@ -91,7 +91,7 @@ class TestWorkerProfileWarning:
 
     def test_warning_missing_required_fields(self):
         """测试缺少必填字段"""
-        from src.domain.models.worker_profile import WorkerProfileWarning
+        from app.domain.models.worker_profile import WorkerProfileWarning
 
         with pytest.raises(ValidationError):
             WorkerProfileWarning(message="test")  # 缺少 code
@@ -101,7 +101,7 @@ class TestWorkerProfileWarning:
 
     def test_extra_fields_forbidden(self):
         """测试额外字段被禁止"""
-        from src.domain.models.worker_profile import WorkerProfileWarning
+        from app.domain.models.worker_profile import WorkerProfileWarning
 
         with pytest.raises(ValidationError):
             WorkerProfileWarning(
@@ -116,13 +116,13 @@ class TestWorkerProfile:
 
     def test_create_worker_profile_success(self):
         """测试创建 Worker Profile"""
-        from src.domain.models.worker_profile import (
+        from app.domain.models.worker_profile import (
             WorkerProfile,
             ProfileType,
             SourceType,
         )
-        from src.domain.models.context_fragment import ContextFragment, ContextKind
-        from src.domain.models.skill_profile import SkillProfile
+        from app.domain.models.context_fragment import ContextFragment, ContextKind
+        from app.domain.models.skill_profile import SkillProfile
 
         fragment = ContextFragment(
             kind=ContextKind.SOUL,
@@ -157,7 +157,7 @@ class TestWorkerProfile:
 
     def test_create_worker_profile_minimal(self):
         """测试创建最小字段 Worker Profile"""
-        from src.domain.models.worker_profile import (
+        from app.domain.models.worker_profile import (
             WorkerProfile,
             ProfileType,
             SourceType,
@@ -180,7 +180,7 @@ class TestWorkerProfile:
 
     def test_create_bot_profile(self):
         """测试创建 Bot 类型的 Profile"""
-        from src.domain.models.worker_profile import (
+        from app.domain.models.worker_profile import (
             WorkerProfile,
             ProfileType,
             SourceType,
@@ -198,7 +198,7 @@ class TestWorkerProfile:
 
     def test_profile_key_property(self):
         """测试 profile_key 属性"""
-        from src.domain.models.worker_profile import (
+        from app.domain.models.worker_profile import (
             WorkerProfile,
             ProfileType,
         )
@@ -223,7 +223,7 @@ class TestWorkerProfile:
 
     def test_missing_required_fields_raises_error(self):
         """测试缺少必填字段抛出错误"""
-        from src.domain.models.worker_profile import WorkerProfile, ProfileType
+        from app.domain.models.worker_profile import WorkerProfile, ProfileType
 
         # 缺少 staff_id
         with pytest.raises(ValidationError):
@@ -259,7 +259,7 @@ class TestWorkerProfile:
 
     def test_extra_fields_forbidden(self):
         """测试额外字段被禁止"""
-        from src.domain.models.worker_profile import WorkerProfile, ProfileType
+        from app.domain.models.worker_profile import WorkerProfile, ProfileType
 
         with pytest.raises(ValidationError):
             WorkerProfile(
@@ -272,7 +272,7 @@ class TestWorkerProfile:
 
     def test_empty_staff_id_raises_error(self):
         """测试空 staff_id 抛出错误"""
-        from src.domain.models.worker_profile import WorkerProfile, ProfileType
+        from app.domain.models.worker_profile import WorkerProfile, ProfileType
 
         with pytest.raises(ValidationError):
             WorkerProfile(
@@ -284,7 +284,7 @@ class TestWorkerProfile:
 
     def test_empty_profile_id_raises_error(self):
         """测试空 profile_id 抛出错误"""
-        from src.domain.models.worker_profile import WorkerProfile, ProfileType
+        from app.domain.models.worker_profile import WorkerProfile, ProfileType
 
         with pytest.raises(ValidationError):
             WorkerProfile(
@@ -296,7 +296,7 @@ class TestWorkerProfile:
 
     def test_empty_source_root_raises_error(self):
         """测试空 source_root 抛出错误"""
-        from src.domain.models.worker_profile import WorkerProfile, ProfileType
+        from app.domain.models.worker_profile import WorkerProfile, ProfileType
 
         with pytest.raises(ValidationError):
             WorkerProfile(
@@ -312,7 +312,7 @@ class TestWorkerProfileSearchableText:
 
     def test_generate_searchable_text_empty(self):
         """测试空内容的 searchable_text"""
-        from src.domain.models.worker_profile import WorkerProfile, ProfileType
+        from app.domain.models.worker_profile import WorkerProfile, ProfileType
 
         profile = WorkerProfile(
             staff_id="001",
@@ -326,8 +326,8 @@ class TestWorkerProfileSearchableText:
 
     def test_generate_searchable_text_with_context_only(self):
         """测试仅有 context 的 searchable_text"""
-        from src.domain.models.worker_profile import WorkerProfile, ProfileType
-        from src.domain.models.context_fragment import ContextFragment, ContextKind
+        from app.domain.models.worker_profile import WorkerProfile, ProfileType
+        from app.domain.models.context_fragment import ContextFragment, ContextKind
 
         fragment = ContextFragment(
             kind=ContextKind.SOUL,
@@ -351,8 +351,8 @@ class TestWorkerProfileSearchableText:
 
     def test_generate_searchable_text_with_skills_only(self):
         """测试仅有 skills 的 searchable_text"""
-        from src.domain.models.worker_profile import WorkerProfile, ProfileType
-        from src.domain.models.skill_profile import SkillProfile
+        from app.domain.models.worker_profile import WorkerProfile, ProfileType
+        from app.domain.models.skill_profile import SkillProfile
 
         skill = SkillProfile(
             name="web_search",
@@ -376,9 +376,9 @@ class TestWorkerProfileSearchableText:
 
     def test_generate_searchable_text_fixed_order(self):
         """测试 searchable_text 的固定顺序"""
-        from src.domain.models.worker_profile import WorkerProfile, ProfileType
-        from src.domain.models.context_fragment import ContextFragment, ContextKind
-        from src.domain.models.skill_profile import SkillProfile
+        from app.domain.models.worker_profile import WorkerProfile, ProfileType
+        from app.domain.models.context_fragment import ContextFragment, ContextKind
+        from app.domain.models.skill_profile import SkillProfile
 
         # 多个 context fragments（不同 kind）
         fragment1 = ContextFragment(
@@ -432,8 +432,8 @@ class TestWorkerProfileSearchableText:
 
     def test_generate_searchable_text_content_truncation(self):
         """测试 searchable_text 内容截断"""
-        from src.domain.models.worker_profile import WorkerProfile, ProfileType
-        from src.domain.models.context_fragment import ContextFragment, ContextKind
+        from app.domain.models.worker_profile import WorkerProfile, ProfileType
+        from app.domain.models.context_fragment import ContextFragment, ContextKind
 
         # 创建超长内容
         long_content = "x" * 1000
@@ -465,8 +465,8 @@ class TestWorkerProfileSearchableText:
 
     def test_generate_searchable_text_skill_no_description(self):
         """测试无描述 skill 的 searchable_text"""
-        from src.domain.models.worker_profile import WorkerProfile, ProfileType
-        from src.domain.models.skill_profile import SkillProfile
+        from app.domain.models.worker_profile import WorkerProfile, ProfileType
+        from app.domain.models.skill_profile import SkillProfile
 
         skill = SkillProfile(
             name="no_desc_skill",
@@ -494,7 +494,7 @@ class TestWorkerProfileScanResult:
 
     def test_create_scan_result_success(self):
         """测试创建扫描结果"""
-        from src.domain.models.worker_profile import (
+        from app.domain.models.worker_profile import (
             WorkerProfileScanResult,
             WorkerProfile,
             ProfileType,
@@ -525,7 +525,7 @@ class TestWorkerProfileScanResult:
 
     def test_total_warnings_property(self):
         """测试 total_warnings 属性"""
-        from src.domain.models.worker_profile import (
+        from app.domain.models.worker_profile import (
             WorkerProfileScanResult,
             WorkerProfile,
             ProfileType,
@@ -566,7 +566,7 @@ class TestWorkerProfileScanResult:
 
     def test_empty_scan_result(self):
         """测试空扫描结果"""
-        from src.domain.models.worker_profile import WorkerProfileScanResult
+        from app.domain.models.worker_profile import WorkerProfileScanResult
 
         result = WorkerProfileScanResult(
             profiles=[],
@@ -583,7 +583,7 @@ class TestProfileMatchResult:
 
     def test_create_match_result_success(self):
         """测试创建匹配结果"""
-        from src.domain.models.worker_profile import (
+        from app.domain.models.worker_profile import (
             ProfileMatchResult,
             WorkerProfile,
             ProfileType,
@@ -610,7 +610,7 @@ class TestProfileMatchResult:
 
     def test_match_result_score_range(self):
         """测试匹配分数范围"""
-        from src.domain.models.worker_profile import (
+        from app.domain.models.worker_profile import (
             ProfileMatchResult,
             WorkerProfile,
             ProfileType,
@@ -635,7 +635,7 @@ class TestProfileMatchResult:
 
     def test_match_result_score_out_of_range(self):
         """测试分数超出范围"""
-        from src.domain.models.worker_profile import (
+        from app.domain.models.worker_profile import (
             ProfileMatchResult,
             WorkerProfile,
             ProfileType,
@@ -672,7 +672,7 @@ class TestProfileSearchResult:
 
     def test_create_search_result_success(self):
         """测试创建搜索结果"""
-        from src.domain.models.worker_profile import (
+        from app.domain.models.worker_profile import (
             ProfileSearchResult,
             ProfileMatchResult,
             WorkerProfile,
@@ -705,7 +705,7 @@ class TestProfileSearchResult:
 
     def test_search_result_empty(self):
         """测试空搜索结果"""
-        from src.domain.models.worker_profile import ProfileSearchResult
+        from app.domain.models.worker_profile import ProfileSearchResult
 
         result = ProfileSearchResult(
             matches=[],
@@ -722,7 +722,7 @@ class TestProfileRecommendResult:
 
     def test_create_recommend_result_success(self):
         """测试创建推荐结果"""
-        from src.domain.models.worker_profile import (
+        from app.domain.models.worker_profile import (
             ProfileRecommendResult,
             ProfileMatchResult,
             WorkerProfile,
@@ -755,7 +755,7 @@ class TestProfileRecommendResult:
 
     def test_recommend_result_empty(self):
         """测试空推荐结果"""
-        from src.domain.models.worker_profile import ProfileRecommendResult
+        from app.domain.models.worker_profile import ProfileRecommendResult
 
         result = ProfileRecommendResult(
             recommendations=[],

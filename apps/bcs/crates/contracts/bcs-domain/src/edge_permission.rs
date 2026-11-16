@@ -234,6 +234,10 @@ pub struct PermissionRequest {
     pub decided_by: Option<String>,
     #[serde(default)]
     pub decided_at: Option<u64>,
+    /// DB-managed row creation time (`gmt_create`, epoch ms, UTC).
+    pub created_at: u64,
+    /// DB-managed last-write time (`gmt_modified`, epoch ms, UTC).
+    pub updated_at: u64,
 }
 
 /// Provenance of an active grant at runtime.
@@ -390,7 +394,7 @@ mod tests {
             request_kind: RequestKind::Connect, requested_ref_id: None,
             requested_rules: None, message: None, status: RequestStatus::Pending,
             decision_reason: None, created_by: "human_88001".into(), decided_by: None,
-            decided_at: None,
+            decided_at: None, created_at: 0, updated_at: 0,
         };
         let s = serde_json::to_string(&r).unwrap();
         let back: PermissionRequest = serde_json::from_str(&s).unwrap();

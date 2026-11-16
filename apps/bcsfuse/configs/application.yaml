@@ -12,8 +12,8 @@
 # - Optional env keys have default values
 # - Missing env keys will use sensible defaults for dev/test modes
 # - Runtime mode requires external services (MySQL, Qdrant, HTTP providers)
-# - Dev mode uses SQLite + Faiss + HTTP providers
-# - Dev_smoke mode uses SQLite + Faiss + Fake/Noop providers (offline)
+# - Dev mode uses SQLite + Qdrant Local + HTTP providers
+# - Dev_smoke mode uses SQLite + Qdrant Local + Fake/Noop providers (offline)
 # - Test mode uses InMemory + Fake/Noop providers
 #
 # AUTHENTICATION CONTRACT:
@@ -30,8 +30,8 @@ provider:
   default_mode: dev
   modes:
     runtime: mysql + qdrant_local + real_http
-    dev: sqlite + faiss_sqlite + real_http
-    dev_smoke: sqlite + faiss_sqlite + fake_noop
+    dev: sqlite + qdrant_local + real_http
+    dev_smoke: sqlite + qdrant_local + fake_noop
     test: in_memory + fake_noop
 
 server:
@@ -93,14 +93,13 @@ audit_log:
 vector:
   backend_env: VECTOR_BACKEND
   runtime_default: qdrant_local
-  dev_fallback: faiss_sqlite
+  dev_fallback: qdrant_local
   test_fallback: in_memory
   qdrant:
     local_path_env: QDRANT_LOCAL_PATH
     collection_name_env: QDRANT_COLLECTION_NAME
-  faiss_sqlite:
-    index_path_env: BCSFUSE_FAISS_INDEX_PATH
-    sqlite_path_env: BCSFUSE_FAISS_SQLITE_PATH
+  sqlite:
+    sqlite_path_env: BCSFUSE_VECTOR_SQLITE_PATH
 
 embedding:
   runtime_default: http

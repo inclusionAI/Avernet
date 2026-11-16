@@ -7,6 +7,10 @@ would make a SkillSet only *eventually* atomic.
 
 from __future__ import annotations
 
+from contextvars import ContextVar
+
+from agentclaw.community.core.repository.implementations.skill_center.bot_mutation_fence import SkillBatchTransactions, lock_bot_capabilities
+
 from injector import inject
 from sqlalchemy import and_, or_
 from agentclaw.community.core.models.skill import (
@@ -64,7 +68,6 @@ from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.core.models.skill_installation_source import SkillInstallationSourceKind
 
 from agentclaw.community.core.skill_center.errors import (
-    SkillRuntimeNameConflictError,
     SkillSetControlPlaneConflictError,
     SkillSetControlPlaneNotFoundError,
 )
@@ -75,6 +78,7 @@ from agentclaw.community.core.skill_center.policies.capability_ownership import 
 
 
 class CapabilityDesiredStateRepository(
+    SkillBatchTransactions,
     BotSkillSetInstallations,
     DefaultExclusionCommands,
     DirectInstallationCommands,
@@ -88,6 +92,7 @@ class CapabilityDesiredStateRepository(
     @inject
     def __init__(self, db: DatabasePlugin) -> None:
         self._db = db
+        self._batch_session = ContextVar("skill_batch_session", default=None)
 
     @staticmethod
     def normalize_mcp_config_address(session, *, bot_id: str, owner_id: str, env: str) -> None:
@@ -339,7 +344,8 @@ class CapabilityDesiredStateRepository(
         engine_type: str | None = None,
         default_engine_types: tuple[str, ...] | None = None,
     ) -> DesiredStateMutation:
-        with self._db.transactional_orm_session() as session:
+        with self._skill_mutation_session() as session:
+            lock_bot_capabilities(session, bot_id=bot_id, entity_id=owner_id)
             excluded_default_ids = default_exclusions.lock_skill_exclusions(
                 session, bot_id=bot_id, owner_id=owner_id,
                 skill_id=int(skill_id),
@@ -438,13 +444,15 @@ class CapabilityDesiredStateRepository(
                 ),
                 is_in_another_set=bool(conflicting_memberships),
             )
-            if row.is_active:
-                self._require_unique_runtime_names(
-                    session,
-                    bot_id=bot_id,
-                    owner_id=owner_id,
-                    candidate_ids={int(skill.id)},
-                )
+            self._require_unique_runtime_names(
+                session,
+                bot_id=bot_id,
+                owner_id=owner_id,
+                candidate_ids={int(skill.id)},
+                extra_ids=self._member_ids(session, {int(row.id)}),
+                engine_type=engine_type,
+                default_engine_types=default_engine_types,
+            )
             session.add(
                 SkillSetSkill(
                     skill_set_id=row.id,
@@ -491,7 +499,8 @@ class CapabilityDesiredStateRepository(
         engine_type: str | None = None,
         default_engine_types: tuple[str, ...] | None = None,
     ) -> DesiredStateMutation:
-        with self._db.transactional_orm_session() as session:
+        with self._skill_mutation_session() as session:
+            lock_bot_capabilities(session, bot_id=bot_id, entity_id=owner_id)
             row = self._set(
                 session,
                 bot_id=bot_id,
@@ -560,6 +569,7 @@ class CapabilityDesiredStateRepository(
         default_engine_types: tuple[str, ...] | None = None,
     ) -> DesiredStateMutation:
         with self._db.transactional_orm_session() as session:
+            lock_bot_capabilities(session, bot_id=bot_id, entity_id=owner_id)
             row = self._set(
                 session,
                 bot_id=bot_id,
@@ -613,7 +623,8 @@ class CapabilityDesiredStateRepository(
             row.is_active = active
             if active:
                 self._require_unique_runtime_names(
-                    session, bot_id=bot_id, owner_id=owner_id, candidate_ids=ids
+                    session, bot_id=bot_id, owner_id=owner_id, candidate_ids=ids,
+                    engine_type=engine_type, default_engine_types=default_engine_types,
                 )
                 for skill_id in sorted(ids):
                     skill_installations.install(
@@ -669,6 +680,7 @@ class CapabilityDesiredStateRepository(
     ) -> None:
         """Atomically restore Membership, set-state and Installation facts."""
         with self._db.transactional_orm_session() as session:
+            lock_bot_capabilities(session, bot_id=bot_id, entity_id=owner_id)
             query = self._scope(session.query(SkillSet), SkillSet).filter(
                 SkillSet.bolt_id == bot_id,
                 SkillSet.user_id == owner_id,
@@ -857,25 +869,32 @@ class CapabilityDesiredStateRepository(
         owner_id: str,
         candidate_ids: set[int],
         retired_ids: set[int] | None = None,
+        extra_ids: set[int] | None = None,
+        engine_type: str | None = None,
+        default_engine_types: tuple[str, ...] | None = None,
     ) -> None:
-        """Validate the complete post-command projection before any write."""
-        selected_ids = (
-            self._installations(session, bot_id, owner_id) - (retired_ids or set())
-        ) | candidate_ids
-        if not selected_ids:
-            return
-        rows = (
-            self._scope(session.query(Skill.id, Skill.name), Skill)
-            .filter(Skill.id.in_(selected_ids))
-            .all()
+        from agentclaw.community.core.repository.implementations.skill_center.runtime_name_admission import (
+            require_unique_runtime_names,
         )
-        owner_by_name: dict[str, int] = {}
-        for skill_id, name in rows:
-            runtime_name = str(name or "")
-            existing = owner_by_name.get(runtime_name)
-            if existing is not None and existing != int(skill_id):
-                raise SkillRuntimeNameConflictError()
-            owner_by_name[runtime_name] = int(skill_id)
+
+        effective: set[int] = set()
+        for row in self._bot_sets(
+            session, bot_id=bot_id, owner_id=owner_id,
+            engine_type=engine_type, default_engine_types=default_engine_types,
+        ):
+            if not (row.is_default or row.is_active):
+                continue
+            members = self._member_ids(session, {int(row.id)})
+            if row.is_default:
+                members -= default_exclusions.excluded_skill_ids(
+                    session, bot_id=bot_id, owner_id=owner_id, set_id=int(row.id)
+                )
+            effective.update(members)
+        others = ((self._installations(session, bot_id, owner_id) | effective)
+                  - (retired_ids or set())) | (extra_ids or set())
+        require_unique_runtime_names(
+            session, self._scope, candidates=candidate_ids, others=others
+        )
 
     def _snapshot(
         self,

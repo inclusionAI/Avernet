@@ -106,7 +106,7 @@ export function useBotBrowseConfig(): UseBotBrowseConfigResult {
           const created = await botConfigService.enableSubscription(botId, ownerUserId, existing?.note ?? '');
           setSubs((prev) => [...prev.filter((sub) => sub.botId !== botId), created]);
         } else {
-          await botConfigService.disableSubscription(botId);
+          await botConfigService.disableSubscription(botId, ownerUserId);
           setSubs((prev) => prev.filter((sub) => sub.botId !== botId));
         }
       } catch (err) {

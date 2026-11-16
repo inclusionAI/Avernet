@@ -339,6 +339,9 @@ def _render_case_markdown(
         if replay.get("replayable") is not False:
             raise ValueError(f"template {cid} has no replayable user prompt")
         query = "请基于当前任务上下文完成用户请求；若上下文不足，先明确说明缺失信息并请求补充。"
+    # The Bench runtime treats every line starting with "## " as a section.
+    # Keep query headings inside Prompt without changing the source Case.
+    query = re.sub(r"(?m)^##(?=[ \t]+\S)", "###", query)
     mode = str(
         case.get("evolution_failure_mode")
         or case.get("failure_mode")

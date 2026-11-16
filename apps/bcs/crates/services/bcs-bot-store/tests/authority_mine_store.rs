@@ -41,7 +41,7 @@ fn resolve_env() -> String {
 // ---------------------------------------------------------------------------
 
 const SCHEMA: &[&str] = &[
-    "CREATE TABLE bcs_bots (\
+    "CREATE TABLE bcs_bots (agent_card TEXT,\
         bot_uuid TEXT NOT NULL, \
         env TEXT NOT NULL, \
         name TEXT NOT NULL DEFAULT '', \
@@ -449,6 +449,7 @@ async fn memory_controllable_legacy_window() {
         "alice",
         "initialized-token",
         bcs_service_api::types::bot_authority::OwnershipInitialization {
+            initial_manager_user_ids: Vec::new(),
             owner_user_id: "alice".to_string(),
             mutation: bcs_service_api::types::bot_authority::AuthorityMutation {
                 mutation_id: "window-init".to_string(),

@@ -212,7 +212,7 @@ class TestDispatcherWritesRationale:
         assert c0["short_profile"] == "pA"
         # prefetch_tokens populated from jieba-tokenized goal.objective
         assert isinstance(rat["prefetch_tokens"], list) and rat["prefetch_tokens"]
-        # claim-join post-filter is no longer part of dispatch.
+        # Rationale keeps legacy trajectory fields for compatibility, but does not filter candidates.
         assert rat["join_filter_applied"] is False
         assert rat["join_dropped"] == []
         # skill-mode prompt/response digests are SHA-256 hex strings
@@ -574,7 +574,7 @@ def _apply_skill_strategy(
     bot_outcome: str = "HIT_SINGLE",
     bot_kwargs: dict | None = None,
 ) -> "SearchResult":
-    """Run the search strategy in skill mode without the removed claim-join gate."""
+    """Run the search strategy in skill mode."""
     from agentclaw.community.core.task.domain.models import TaskExecutionGraph
 
     discover = _Discover(discover_items)

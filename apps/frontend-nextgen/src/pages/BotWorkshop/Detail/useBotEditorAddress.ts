@@ -12,5 +12,7 @@ export function useBotEditorAddress() {
     ownerId: params.get('owner_id')?.trim() || undefined,
     requestedEditable: params.get('type') === 'edit',
     runtimeStage,
+    /** 深链指定的初始 tab（如资源管理跳转带 ?tab=resource）；合法性由 useHostingTabs 校验。 */
+    requestedTab: params.get('tab')?.trim() || undefined,
   };
 }

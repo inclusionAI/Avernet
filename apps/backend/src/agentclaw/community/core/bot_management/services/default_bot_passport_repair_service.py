@@ -157,6 +157,7 @@ class DefaultBotPassportRepairService(DefaultBotPassportRepairServiceProtocol):
                     bot_name=bot.get("bot_name"),
                     bot_desc=bot.get("bot_desc"),
                     engine_type=bot.get("active_engine"),
+                    bot_type=str(bot.get("bot_type") or "personal"),
                     access_mode="RESTRICTED",
                     workspace_path="/home/admin/.openclaw",
                     target_env=target_env,

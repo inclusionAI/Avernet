@@ -9,6 +9,13 @@ export interface IamTokenResponse {
 
 export type BotIamTokenStage = BotRuntimeStage;
 
+export interface BotIamTokenChatContext {
+  sessionKey: string;
+  /** 好友会话由 OpenAPI 校验归属后再把 session_id 转成内部 session_key。 */
+  friendUserId?: string;
+  ownerId?: string;
+}
+
 /** 获取当前登录用户的 IAM Token，用于 OpenClaw WebSocket 请求身份鉴权。 */
 export async function getIamToken(userId?: string): Promise<string> {
   const response = await backendRequest<BackendApiEnvelope<IamTokenResponse>>('/openapi/v1/org/user/iam-token', {
@@ -28,6 +35,7 @@ export async function getBotIamToken(
   userId?: string,
   entityId?: string,
   stage?: BotIamTokenStage,
+  chatContext?: BotIamTokenChatContext,
 ): Promise<string> {
   const response = await backendRequest<BackendApiEnvelope<IamTokenResponse>>(
     `/openapi/v1/bots/${encodeURIComponent(botId)}/iam-token`,
@@ -37,6 +45,15 @@ export async function getBotIamToken(
         ...(userId ? { user_id: userId } : {}),
         ...(entityId ? { entity_id: entityId } : {}),
         ...(stage ? { stage } : {}),
+        ...(chatContext?.friendUserId
+          ? {
+              owner_id: chatContext.ownerId ?? entityId,
+              f_user_id: chatContext.friendUserId,
+              session_id: chatContext.sessionKey,
+            }
+          : chatContext?.sessionKey
+          ? { session_key: chatContext.sessionKey }
+          : {}),
       }),
     },
   );

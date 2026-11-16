@@ -23,6 +23,7 @@ import ApprovalPanel from '../components/ApprovalPanel'
 import ApprovalSlidePanel from '../components/ApprovalSlidePanel'
 import { useFlowApprovals } from '@avernet/clawweb-shared/web/api/hooks'
 import type { ApprovalCardSummary } from '@avernet/clawweb-shared/web/api/client'
+import type { SubworkflowGroupRef } from '../api/run-subworkflows'
 
 type TabId = 'nodes' | 'logs' | 'dag' | 'archive'
 
@@ -303,6 +304,8 @@ function RunDetailContent({ flowId, searchParams, ancestors, readOnly = false, h
                 <SubworkflowProvider flowId={flowId}>
                 <NodeExecutionList
                   readOnly={readOnly}
+                  flowId={flowId}
+                  subworkflowGroups={(run as FlowRun & { subworkflowGroups?: SubworkflowGroupRef[] }).subworkflowGroups}
                   nodes={nodes}
                   onSelectNode={handleNodeSelect}
                   selectedNodeId={selectedNodeId ?? undefined}

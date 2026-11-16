@@ -71,6 +71,9 @@ export function PublicBotCatalogPanel({ vm, scrollRootRef, smartEmptyHint }: Pub
   const requestTarget = pendingBot && canRequest(pendingBot) ? pendingBot : null;
   // 申请弹窗详情（引擎 chip 与已公开能力）与画像弹窗共用 store 状态；按 selectedBotId 对齐后才可用。
   const requestProfile = requestTarget && vm.selectedBotId === requestTarget.id ? vm.botProfile : null;
+  // 画像拉取中（弹窗内 shimmer 占位）；失败原因改在弹窗内提示（不 toast），同口径按 selectedBotId 归口。
+  const requestProfileLoading = requestTarget && vm.selectedBotId === requestTarget.id ? vm.detailLoading : false;
+  const requestProfileError = requestTarget && vm.selectedBotId === requestTarget.id ? vm.botProfileError : null;
   const closeRequestDialog = () => {
     setPending(null);
     vm.closeProfile();
@@ -86,6 +89,8 @@ export function PublicBotCatalogPanel({ vm, scrollRootRef, smartEmptyHint }: Pub
   };
   const smartEmpty = Boolean(smartEmptyHint) && vm.mode === 'smart' && !vm.query.trim();
   const showGrid = Boolean(activeActor) && !loading && !error && !smartEmpty && vm.bots.length > 0;
+  // 智能搜索降级为名称匹配：结果上方明示回退来源（BCS search_mode=name_fallback）。
+  const showNameFallbackHint = showGrid && vm.searchResultMode === 'name_fallback';
 
   useEffect(() => {
     if (smartEmpty || !hasMore || loading || loadingMore || error) return;
@@ -136,9 +141,12 @@ export function PublicBotCatalogPanel({ vm, scrollRootRef, smartEmptyHint }: Pub
           />
         </Card>
       )}
+      {showGrid && showNameFallbackHint && (
+        <p className="m-0 text-xs text-muted-foreground">未命中语义匹配，已按名称匹配展示结果</p>
+      )}
       {showGrid && activeActor && (
         // dmore：3 列卡片网格，16px 间距（页头下 16px 起）。
-        <div ref={gridRef} className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <div ref={gridRef} data-guide-target="discover-public-bot-list" className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {vm.bots.map((bot) => (
             <SquareBotCard
               key={getPublicBotTargetId(bot)}
@@ -175,7 +183,8 @@ export function PublicBotCatalogPanel({ vm, scrollRootRef, smartEmptyHint }: Pub
         <FriendRequestDialog
           bot={requestTarget}
           profile={requestProfile}
-          loading={vm.detailLoading}
+          profileLoading={requestProfileLoading}
+          profileError={requestProfileError}
           onClose={closeRequestDialog}
           onSendRequest={() => {
             closeRequestDialog();
@@ -187,6 +196,7 @@ export function PublicBotCatalogPanel({ vm, scrollRootRef, smartEmptyHint }: Pub
         open={Boolean(vm.selectedBotId) && !requestTarget}
         profile={vm.botProfile}
         loading={vm.detailLoading}
+        error={vm.botProfileError}
         onClose={vm.closeProfile}
         onCopyId={(id) => vm.copyBotId(id)}
       />

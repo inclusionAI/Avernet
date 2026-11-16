@@ -106,6 +106,15 @@ impl BotAuthorityCoreService for BotAuthorityCoreServiceImpl {
         self.repo.ownership(bot_id).await
     }
 
+    async fn ownerships_for(
+        &self,
+        bot_ids: &[String],
+    ) -> bcs_service_api::ServiceResult<Vec<Option<BotOwnershipView>>> {
+        // No identity mapping here: owner facts are the store's own
+        // persisted actor ids; chunking stays the Repo's job.
+        self.repo.ownerships_for(bot_ids).await
+    }
+
     async fn managers(
         &self,
         query: ManagerListQuery,
@@ -343,6 +352,16 @@ impl bcs_service_api::port::bot_authority::BotAuthorityPort
         )
         .await
     }
+
+    async fn ownerships_for(
+        &self,
+        bot_ids: &[String],
+    ) -> bcs_service_api::ServiceResult<Vec<Option<BotOwnershipView>>> {
+        BotAuthorityCoreService::ownerships_for(
+            self, bot_ids,
+        )
+        .await
+    }
 }
 
 #[cfg(test)]
@@ -417,6 +436,22 @@ mod tests {
             _bot_id: &str,
         ) -> bcs_service_api::ServiceResult<BotOwnershipView> {
             unimplemented!("not needed for Core policy tests")
+        }
+
+        async fn ownerships_for(
+            &self,
+            bot_ids: &[String],
+        ) -> bcs_service_api::ServiceResult<Vec<Option<BotOwnershipView>>> {
+            Ok(bot_ids
+                .iter()
+                .map(|bot_id| {
+                    Some(BotOwnershipView {
+                        bot_id: bot_id.clone(),
+                        owner_user_id: "owner-x".to_string(),
+                        owner_actor_id: human_actor_id("owner-x"),
+                    })
+                })
+                .collect())
         }
 
         async fn managers(
@@ -535,6 +570,27 @@ mod tests {
         );
         assert_eq!(core.role("Alice", "bot1").await.unwrap(), None);
         assert_eq!(core.role("alice", "bot2").await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn core_ownerships_for_forwards_verbatim() {
+        // Owner facts are the store's own persisted actor ids: the
+        // Core composes no identity mapping, only forward + order.
+        let core = core_with(vec![]);
+        let ids = vec!["bot1".to_string(), "bot2".to_string()];
+        let views = BotAuthorityCoreService::ownerships_for(&core, &ids)
+            .await
+            .unwrap();
+        assert_eq!(views.len(), 2, "same length/order as the input");
+        assert_eq!(views[0].as_ref().unwrap().bot_id, "bot1");
+        assert_eq!(views[1].as_ref().unwrap().bot_id, "bot2");
+        assert_eq!(views[0].as_ref().unwrap().owner_actor_id, "human_owner-x");
+        // The narrow hook view of the same Core instance reads the
+        // same authoritative batch (composition wires ONE Core).
+        let hook_views = bcs_service_api::port::bot_authority::BotAuthorityPort::ownerships_for(&core, &ids)
+            .await
+            .unwrap();
+        assert_eq!(hook_views, views);
     }
 
     #[tokio::test]

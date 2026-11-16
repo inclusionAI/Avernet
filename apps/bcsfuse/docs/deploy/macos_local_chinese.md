@@ -602,6 +602,6 @@ BCSFuse Open-Core macOS 本地部署提供：
 ✅ **全面的故障排查指南**
 ✅ **隔离的危险数据重置脚本**
 
-Docker 部署请参考：[docker.md](docker.md)
+Docker 部署请参考：[Docker image definition](../../../../docker/services/bcsfuse.dockerfile)
 
-故障排查请参考：[troubleshooting.md](troubleshooting.md)
+故障排查请参考：[Troubleshooting](open-source-deployment-guide-chinese.md#故障排查)

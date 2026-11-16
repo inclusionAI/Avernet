@@ -25,4 +25,5 @@ class CallerIamTokenServiceProtocol(Protocol):
         is_test_exchange: bool,
         session_key: str | None = None,
         friend_user_id: str | None = None,
+        token_type: str = "iam",
     ) -> CallerIamTokenOutcome: ...

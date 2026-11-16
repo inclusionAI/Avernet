@@ -44,6 +44,7 @@ impl BotQueryService for Bot {
 
         let mut detail = self.bot_to_detail(bot).await;
         detail.agent_card = self.cards_for_ids(&[detail.bot_uuid.clone()]).await?.remove(&detail.bot_uuid);
+        if let Some(name)=detail.agent_card.as_ref().and_then(|card|card.get("name")).and_then(serde_json::Value::as_str) {detail.capabilities.name=Some(name.into());}
         Ok(detail)
     }
 
@@ -306,6 +307,9 @@ impl Bot {
             acting_bot_id: command.requester_actor_id.clone().unwrap_or_default(),
             env: bcs_config::resolve_env_str(),
             visibility: bcs_service_api::BotCandidateVisibility::Discovery,
+            // Legacy control-plane search keeps its Bot-oriented filter and
+            // the broader name/summary/Bot-ID matching semantics.
+            viewer_kind: None,
             friend_ids,
             bot_uuids: command.bot_uuids.clone(),
             name: command.q.clone(),
@@ -315,6 +319,7 @@ impl Bot {
             status: command.status,
             friendship: Some(friendship),
             tc_bot: command.tc_bot,
+            name_only: false,
             offset: command.offset,
             limit: command.limit,
         };

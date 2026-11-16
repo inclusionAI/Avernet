@@ -1,6 +1,8 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
+import { once } from 'node:events';
+import express from 'express';
 import { randomBytes } from 'node:crypto';
 import { mkdtempSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -8,6 +10,10 @@ import path from 'node:path';
 import * as gitExecution from '@avernet/clawweb-shared/server/services/git-execution';
 import { createLocalRemote, runGit } from './clawflows-git-client-fixture.js';
 import { cloneClawflows } from '../clawflows-git-client.js';
+import { withPreparedWorkflowSpec } from '../pack-spec-save.js';
+import { createAutoHealConfigTestDb } from '../../config/__tests__/auto-heal-git-fixtures.js';
+import { createPackVersionRouter } from '../../routes/pack-version.js';
+import { savePackVersionToRemote } from '../pack-version-remote.js';
 import {
   withPreparedPackCandidate, pushPreparedPackCandidate, resumePreparedPackCandidate, PackCandidateOutcomeUnknownError, PackCandidateConflictError,
   type SavePackCandidateInput, type PreparedPackCandidate,
@@ -15,7 +21,7 @@ import {
 import {
   inspectDeployCandidate, prepareDeployCandidate, pushPreparedDeployment, resumePreparedDeployment, DeploymentOutcomeUnknownError, DeploymentConflictError,
 } from '../auto-heal-deploy-git.js';
-import { restorePreparedGitBundle, createPreparedGitBundle, MAX_PREPARED_BUNDLE_BYTES } from '../pack-git-prepared.js';
+import { restorePreparedGitBundle, createPreparedGitBundle, readPreparedPackMetadata, MAX_PREPARED_BUNDLE_BYTES } from '../pack-git-prepared.js';
 
 vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
 let root: string, remote: string, seed: string, current: string;
@@ -28,7 +34,7 @@ const remoteGit = (...args: string[]) => git(root, '--git-dir', remote, ...args)
 const ref = (name: string) => remoteGit('rev-parse', name);
 const refs = () => remoteGit('show-ref');
 const input = (): SavePackCandidateInput => ({ workflowId: 'flow', sourceVersion: 'current', sourceCommit: current,
-  expectedSavedHead: null, config: { remoteUrl: remote, username: author.name, email: author.email }, changes: [
+  expectedSavedHead: current, config: { remoteUrl: remote, username: author.name, email: author.email }, changes: [
     { path: 'workflows/flow.yaml', operation: 'replace', contentBase64: b64(content), mode: '100644' },
     { path: 'scripts/run.sh', operation: 'create', contentBase64: b64('#!/bin/sh\nprintf saved\n'), mode: '100755' },
     { path: 'asset.bin', operation: 'create', contentBase64: b64(binary), mode: '100644' },
@@ -41,11 +47,13 @@ async function clone(name = 'clone') {
 async function save() {
   return withPreparedPackCandidate(input(), async (prepared, push) => { await push(); return prepared; });
 }
-function newerSaved() {
+function newerWf() {
+  git(seed, 'fetch', remote, 'refs/heads/wf/flow');
+  git(seed, 'checkout', '--detach', 'FETCH_HEAD');
   writeFileSync(path.join(seed, 'workflows/flow.yaml'), 'id: flow\ntitle: S2\n');
   git(seed, 'add', '.'); git(seed, 'commit', '-m', 'S2');
   const next = git(seed, 'rev-parse', 'HEAD');
-  git(seed, 'push', '--force', remote, `${next}:refs/heads/saved/flow`);
+  git(seed, 'push', '--force', remote, `${next}:refs/heads/wf/flow`);
   return next;
 }
 beforeEach(() => {
@@ -60,14 +68,26 @@ beforeEach(() => {
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); rmSync(root, { recursive: true, force: true }); });
 
 describe('prepared save primitives with a real bare remote', () => {
-  it('exposes exact serializable metadata before push and touches saved only', async () => {
+  it('reads the root Pack and preserves nested packs manifests as ordinary files', async () => {
+    mkdirSync(path.join(seed, 'packs/pack/workflows'), { recursive: true });
+    writeFileSync(path.join(seed, 'packs/pack/workflow.pack.yaml'), 'id: pack\nworkflows: [flow]\n');
+    writeFileSync(path.join(seed, 'packs/pack/workflows/flow.yaml'), 'id: flow\ntitle: Historical\n');
+    git(seed, 'add', '.'); git(seed, 'commit', '-m', 'nested resource');
+    const commit = git(seed, 'rev-parse', 'HEAD');
+    const metadata = await readPreparedPackMetadata(seed, 'flow', commit);
+    expect(metadata).toMatchObject({ packId: 'pack', packPath: '', workflowFile: 'workflows/flow.yaml' });
+    expect(metadata.content).toBe('id: flow\ntitle: Current\n');
+    expect(git(seed, 'ls-tree', '-r', '--name-only', commit).split('\n')).toContain('packs/pack/workflow.pack.yaml');
+  });
+
+  it('exposes exact serializable metadata before push and touches wf only', async () => {
     const before = refs();
     let registered: PreparedPackCandidate | undefined;
     const pushSpy = vi.spyOn(gitExecution, 'executeGit');
     const result = await withPreparedPackCandidate(input(), async (prepared, push) => {
       expect(refs()).toBe(before);
-      expect(prepared).toMatchObject({ workflowId: 'flow', packId: 'pack', branch: 'saved/flow', content,
-        sourceVersion: 'current', sourceCommit: current, expectedSavedHead: null,
+      expect(prepared).toMatchObject({ workflowId: 'flow', packId: 'pack', branch: 'wf/flow', content,
+        sourceVersion: 'current', sourceCommit: current, expectedSavedHead: current,
         manifestContent: 'id: pack\nworkflows: [flow]\n', workflowFile: 'workflows/flow.yaml', packPath: '' });
       expect(prepared.commit).toMatch(/^[a-f0-9]{40}$/);
       expect(push.length).toBe(0);
@@ -77,8 +97,8 @@ describe('prepared save primitives with a real bare remote', () => {
       return push();
     });
     expect(result.commit).toBe(registered!.commit);
-    expect(ref('refs/heads/saved/flow')).toBe(result.commit);
-    expect(ref('refs/heads/wf/flow')).toBe(current);
+    expect(remoteGit('branch', '--list', 'saved/flow')).toBe('');
+    expect(ref('refs/heads/wf/flow')).toBe(result.commit);
     expect(remoteGit('tag', '-l')).toBe('');
     expect(execFileSync('git', ['--git-dir', remote, 'show', `${result.commit}:asset.bin`])).toEqual(binary);
     expect(remoteGit('ls-tree', result.commit, 'scripts/run.sh')).toMatch(/^100755 blob/);
@@ -105,8 +125,8 @@ describe('prepared save primitives with a real bare remote', () => {
     });
     await expect(withPreparedPackCandidate(input(), async (p, push) => {
       prepared = p; void push().catch(() => {}); throw new Error('callback post-registration failure');
-    })).rejects.toMatchObject({ name: 'PackCandidateOutcomeUnknownError', branch: 'saved/flow' });
-    expect(ref('refs/heads/saved/flow')).toBe(prepared.commit);
+    })).rejects.toMatchObject({ name: 'PackCandidateOutcomeUnknownError', branch: 'wf/flow' });
+    expect(ref('refs/heads/wf/flow')).toBe(prepared.commit);
   });
 
   it('does not push when durable registration fails or the callback returns without push', async () => {
@@ -128,39 +148,129 @@ describe('prepared save primitives with a real bare remote', () => {
     });
   });
 
-  it('CAS rejects a competing saved writer but does not CAS wf', async () => {
-    let next = '';
+  it('rejects a competing wf writer without overwriting it', async () => {
     await expect(withPreparedPackCandidate(input(), async (_prepared, push) => {
-      next = newerSaved();
-      return push();
+      newerWf(); return push();
     })).rejects.toBeInstanceOf(PackCandidateOutcomeUnknownError);
-    expect(ref('refs/heads/saved/flow')).toBe(next);
-    expect(ref('refs/heads/wf/flow')).toBe(current);
-    git(seed, 'push', remote, ':refs/heads/saved/flow');
-    const result = await withPreparedPackCandidate(input(), async (_prepared, push) => {
-      git(seed, 'push', remote, `${next}:refs/heads/wf/flow`);
-      return push();
-    });
-    expect(ref('refs/heads/saved/flow')).toBe(result.commit);
-    expect(ref('refs/heads/wf/flow')).toBe(next);
+    expect(ref('refs/heads/wf/flow')).not.toBe(current);
   });
 
-  it('saves S, deploys release R with the same tree, then edits current R over observed saved S', async () => {
-    const saved = await save(); const dir = await clone();
-    const release = await prepareDeployCandidate(dir, 'flow', saved.commit, current, 1, 1, author);
-    await pushPreparedDeployment(dir, release);
-    expect(release.releaseCommit).not.toBe(saved.commit);
-    expect(ref(`${release.releaseCommit}^{tree}`)).toBe(ref(`${saved.commit}^{tree}`));
-    const edited = await withPreparedPackCandidate({ ...input(), sourceCommit: release.releaseCommit,
-      expectedSavedHead: saved.commit, changes: [{ path: 'workflows/flow.yaml', operation: 'replace',
-        contentBase64: b64('id: flow\ntitle: Current edited after deploy\n'), mode: '100644' }] }, async (p, push) => {
-      expect(p.sourceCommit).toBe(release.releaseCommit); expect(p.expectedSavedHead).toBe(saved.commit);
-      await push(); return p;
+  it('ignores a divergent saved ref and never reads or changes it', async () => {
+    writeFileSync(path.join(seed, 'workflows/flow.yaml'), 'id: flow\ntitle: old saved\n');
+    git(seed, 'add', '.'); git(seed, 'commit', '-m', 'unrelated old saved');
+    const legacy = git(seed, 'rev-parse', 'HEAD');
+    git(seed, 'push', remote, `${legacy}:refs/heads/saved/flow`);
+    const execute = vi.spyOn(gitExecution, 'executeGit');
+    const result = await withPreparedPackCandidate(input(), async (prepared, push) => { await push(); return prepared; });
+    expect(result).toMatchObject({ sourceCommit: current, expectedSavedHead: current, branch: 'wf/flow' });
+    expect(result).not.toHaveProperty('legacySavedHead');
+    expect(ref('refs/heads/wf/flow')).toBe(result.commit);
+    expect(ref('refs/heads/saved/flow')).toBe(legacy);
+    expect(execute.mock.calls.some(([args]) => args.some(arg => arg.includes('saved/flow')))).toBe(false);
+  });
+
+  it('does not use a saved-only ref as the source of a Pack edit', async () => {
+    git(seed, 'push', remote, `${current}:refs/heads/saved/flow`, ':refs/heads/wf/flow');
+    const before = refs(), callback = vi.fn();
+    await expect(withPreparedPackCandidate({ ...input(), sourceVersion: 'draft', expectedSavedHead: null }, callback))
+      .rejects.toBeInstanceOf(PackCandidateConflictError);
+    expect(callback).not.toHaveBeenCalled(); expect(refs()).toBe(before);
+  });
+
+  it('creates an empty new Pack when only saved and default HEAD exist', async () => {
+    git(seed, 'push', remote, `${current}:refs/heads/saved/flow`, ':refs/heads/wf/flow');
+    const execute = vi.spyOn(gitExecution, 'executeGit');
+    const spec = { id: 'flow', title: 'First wf', nodes: [] };
+    const prepared = await withPreparedWorkflowSpec({ workflowId: 'flow', packId: 'pack', spec,
+      config: input().config, author, createOnly: true, expectedSavedHead: null }, async (candidate, push) => {
+      await push(); return candidate;
     });
-    expect(ref('refs/heads/saved/flow')).toBe(edited.commit);
-    expect(ref('refs/heads/wf/flow')).toBe(release.releaseCommit);
-    expect(ref('refs/tags/deploy/flow/#1')).toBe(release.tagObject);
-    expect(remoteGit('show', '-s', '--format=%P', edited.commit)).toBe(release.releaseCommit);
+    expect(prepared.sourceCommit).toBeNull();
+    expect(ref('refs/heads/wf/flow')).toBe(prepared.commit);
+    expect(ref('refs/heads/saved/flow')).toBe(current);
+    expect(remoteGit('show', '-s', '--format=%P', prepared.commit)).toBe('');
+    expect(remoteGit('ls-tree', '-r', '--name-only', prepared.commit).split('\n').sort())
+      .toEqual(['packs/pack/workflow.pack.yaml', 'packs/pack/workflows/flow.yaml']);
+    expect(execute.mock.calls.some(([args]) => args.some(arg => arg.includes('saved/flow')))).toBe(false);
+  });
+
+  it('saves a nested wf Pack even when a different saved ref exists', async () => {
+    mkdirSync(path.join(seed, 'packs/pack'), { recursive: true });
+    git(seed, 'mv', 'workflow.pack.yaml', 'workflows', 'packs/pack/');
+    git(seed, 'add', '.'); git(seed, 'commit', '-m', 'nested');
+    const nested = git(seed, 'rev-parse', 'HEAD');
+    git(seed, 'push', remote, `${nested}:refs/heads/wf/flow`, `${current}:refs/heads/saved/flow`);
+    current = nested;
+    const result = await withPreparedPackCandidate(input(), async (prepared, push) => { await push(); return prepared; });
+    expect(result.packPath).toBe('packs/pack/');
+    expect(ref('refs/heads/wf/flow')).toBe(result.commit);
+    expect(ref('refs/heads/saved/flow')).not.toBe(result.commit);
+  });
+
+  it('does not push when the real save service cannot recheck its DB row', async () => {
+    const db = createAutoHealConfigTestDb();
+    await db.exec('CREATE TABLE workflow_deploy_history (workflow_id TEXT, version INTEGER)');
+    const execute = vi.spyOn(gitExecution, 'executeGit'); const before = refs();
+    try {
+      await expect(savePackVersionToRemote({ ...input(), db, gitConfig: input().config, gitAuthor: author,
+        actorId: 'editor', requestId: 'db-failure-001', changes: [
+          { path: 'asset.bin', operation: 'create', contentBase64: b64(binary), mode: '100644' },
+        ] })).rejects.toThrow(/workflow_specs/);
+      expect(execute.mock.calls.some(([args]) => args[0] === 'commit-tree')).toBe(true);
+      expect(execute.mock.calls.some(([args]) => args[0] === 'push')).toBe(false);
+      expect(refs()).toBe(before);
+    } finally { await db.close(); }
+  });
+
+  it('tags the exact saved candidate and rejects stale source before editing wf', async () => {
+    const saved = await save(); const dir = await clone();
+    const release = await prepareDeployCandidate(dir, 'flow', saved.commit, '', 1, 1, author);
+    await pushPreparedDeployment(dir, release);
+    expect(release.releaseCommit).toBe(saved.commit);
+    expect(ref('refs/heads/wf/flow')).toBe(saved.commit);
+    const changes: SavePackCandidateInput['changes'] = [{ path: 'workflows/flow.yaml', operation: 'replace',
+      contentBase64: b64('id: flow\ntitle: Edited after deploy\n'), mode: '100644' }];
+    await expect(withPreparedPackCandidate({ ...input(), sourceCommit: current,
+      expectedSavedHead: saved.commit, changes }, async (_p, push) => push())).rejects.toBeInstanceOf(PackCandidateConflictError);
+    const edited = await withPreparedPackCandidate({ ...input(), sourceVersion: 'draft', sourceCommit: saved.commit,
+      expectedSavedHead: saved.commit, changes }, async (p, push) => { await push(); return p; });
+    expect(ref('refs/heads/wf/flow')).toBe(edited.commit);
+    expect(ref('refs/tags/deploy/flow/#1^{commit}')).toBe(saved.commit);
+    expect(remoteGit('show', '-s', '--format=%P', edited.commit)).toBe(saved.commit);
+    expect(remoteGit('show', `${edited.commit}:workflows/flow.yaml`)).toBe('id: flow\ntitle: Edited after deploy');
+    expect(execFileSync('git', ['--git-dir', remote, 'show', `${edited.commit}:asset.bin`])).toEqual(binary);
+  });
+
+  it('returns VERSION_CONFLICT through the real save service and HTTP route without replacing wf', async () => {
+    const saved = await save();
+    const db = createAutoHealConfigTestDb();
+    await db.exec('CREATE TABLE workflow_deploy_history (workflow_id TEXT, version INTEGER)');
+    const app = express(); app.use(express.json()); app.use(createPackVersionRouter({
+      resolvePrincipal: async () => ({ actorId: 'trusted' }),
+      botPermRepo: { hasEditPermission: async () => true },
+      workflowSpecRepo: { findByWorkflowId: async () => ({ workflow_id: 'flow', pack_id: 'pack' }) },
+      readSnapshot: async () => { throw new Error('Unexpected read'); },
+      saveCandidate: candidate => savePackVersionToRemote({ ...candidate, db, gitConfig: input().config, gitAuthor: author }),
+    }));
+    const server = app.listen(0, '127.0.0.1');
+    try {
+      await once(server, 'listening');
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('Missing local address');
+      const response = await fetch(`http://127.0.0.1:${address.port}/flow/pack-version`, {
+        method: 'PUT', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ sourceVersion: 'current', sourceCommit: current, expectedSavedHead: saved.commit,
+          requestId: 'conflict-request-01', changes: [{ path: 'asset.bin', operation: 'replace', contentBase64: b64('changed'), mode: '100644' }] }),
+      });
+      expect(response.status).toBe(409);
+      expect(response.headers.get('cache-control')).toBe('no-store');
+      expect(await response.json()).toEqual({ error: 'Workflow operation could not be completed', code: 'VERSION_CONFLICT', requestId: 'conflict-request-01' });
+      expect(ref('refs/heads/wf/flow')).toBe(saved.commit);
+      expect(execFileSync('git', ['--git-dir', remote, 'show', `${saved.commit}:asset.bin`])).toEqual(binary);
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+      await db.close();
+    }
   });
 
   it('recovers the exact unpublished commit from JSON plus a self-contained bundle', async () => {
@@ -171,8 +281,8 @@ describe('prepared save primitives with a real bare remote', () => {
     expect(git(recovered, 'show', `${prepared.commit}:workflows/flow.yaml`)).toBe(content.trim());
     const result = await pushPreparedPackCandidate(recovered, prepared);
     expect(result.commit).toBe(prepared.commit);
-    expect(ref('refs/heads/saved/flow')).toBe(prepared.commit);
-    expect(ref('refs/heads/wf/flow')).toBe(current);
+    expect(ref('refs/heads/wf/flow')).toBe(prepared.commit);
+    expect(remoteGit('branch', '--list', 'saved/flow')).toBe('');
   });
 
   it('reports lost acknowledgement as unknown, never queries refs or retries after the push', async () => {
@@ -186,21 +296,21 @@ describe('prepared save primitives with a real bare remote', () => {
     });
     let recorded!: PreparedPackCandidate;
     await expect(withPreparedPackCandidate(input(), async (prepared, push) => { recorded = prepared; return push(); }))
-      .rejects.toMatchObject({ name: 'PackCandidateOutcomeUnknownError', branch: 'saved/flow' });
+      .rejects.toMatchObject({ name: 'PackCandidateOutcomeUnknownError', branch: 'wf/flow' });
     expect(pushes).toBe(1);
-    expect(ref('refs/heads/saved/flow')).toBe(recorded.commit);
-    expect(ref('refs/heads/wf/flow')).toBe(current);
+    expect(ref('refs/heads/wf/flow')).toBe(recorded.commit);
+    expect(remoteGit('branch', '--list', 'saved/flow')).toBe('');
   });
 });
 
 describe('prepared deployment primitives with a real bare remote', () => {
-  it('reads S by commit after saved advances, prepares without push, then deploys precisely S', async () => {
+  it('reads S by commit after wf advances, prepares without push, then tags precisely S', async () => {
     const saved = await save();
-    const next = newerSaved();
+    const next = newerWf();
     const dir = await clone();
     const inspected = await inspectDeployCandidate(dir, 'flow', 'pack', saved.commit);
     expect(inspected.content).toBe(content);
-    expect(inspected.previousCommit).toBe(current);
+    expect(inspected.previousCommit).toBe('');
     const before = refs();
     const prepared = await prepareDeployCandidate(dir, 'flow', saved.commit, current, 1, 3, author);
     expect(refs()).toBe(before);
@@ -211,9 +321,9 @@ describe('prepared deployment primitives with a real bare remote', () => {
     expect(git(dir, 'cat-file', '-p', prepared.tagObject)).toContain(`candidateCommit=${saved.commit}`);
     const result = await pushPreparedDeployment(dir, prepared);
     expect(result.commit).toBe(prepared.releaseCommit);
-    expect(ref('refs/heads/wf/flow')).toBe(prepared.releaseCommit);
     expect(ref('refs/tags/deploy/flow/#1')).toBe(prepared.tagObject);
-    expect(ref('refs/heads/saved/flow')).toBe(next);
+    expect(ref('refs/heads/wf/flow')).toBe(next);
+    expect(prepared.releaseCommit).toBe(saved.commit);
     expect(execFileSync('git', ['--git-dir', remote, 'show', `${result.commit}:asset.bin`])).toEqual(binary);
     expect(remoteGit('ls-tree', result.commit, 'scripts/run.sh')).toMatch(/^100755 blob/);
   });
@@ -221,31 +331,34 @@ describe('prepared deployment primitives with a real bare remote', () => {
   it('does not consult saved at push time even after force replacement or deletion', async () => {
     const saved = await save(); const dir = await clone();
     const prepared = await prepareDeployCandidate(dir, 'flow', saved.commit, current, 1, 1, author);
+    git(seed, 'push', remote, `${current}:refs/heads/saved/flow`);
     git(seed, 'push', remote, ':refs/heads/saved/flow');
     const spy = vi.spyOn(gitExecution, 'executeGit');
     await pushPreparedDeployment(dir, prepared);
     expect(spy.mock.calls.some(([args]) => args.join(' ').includes('saved/flow'))).toBe(false);
-    expect(ref('refs/heads/wf/flow')).toBe(prepared.releaseCommit);
+    expect(ref('refs/heads/wf/flow')).toBe(saved.commit);
   });
 
-  it.each(['advanced', 'deleted', 'created'])('keeps atomic wf CAS when wf was %s after prepare', async state => {
+  it.each(['advanced', 'deleted', 'created'])('publishes only a tag when wf was %s after prepare', async state => {
     const saved = await save(); const dir = await clone();
-    const expected = state === 'created' ? '' : current;
     if (state === 'created') git(seed, 'push', remote, ':refs/heads/wf/flow');
-    const prepared = await prepareDeployCandidate(dir, 'flow', saved.commit, expected, 1, 1, author);
+    const prepared = await prepareDeployCandidate(dir, 'flow', saved.commit, current, 1, 1, author);
     if (state === 'deleted') git(seed, 'push', remote, ':refs/heads/wf/flow');
-    else git(dir, 'push', '--force', 'origin', `${saved.commit}:refs/heads/wf/flow`);
-    const before = refs();
-    await expect(pushPreparedDeployment(dir, prepared)).rejects.toBeInstanceOf(DeploymentOutcomeUnknownError);
-    expect(refs()).toBe(before);
-    expect(remoteGit('tag', '-l')).toBe('');
+    else if (state === 'created') git(dir, 'push', 'origin', `${saved.commit}:refs/heads/wf/flow`);
+    else newerWf();
+    const wfBefore = remoteGit('branch', '--list', 'wf/flow') ? ref('refs/heads/wf/flow') : null;
+    await pushPreparedDeployment(dir, prepared);
+    const wfAfter = remoteGit('branch', '--list', 'wf/flow') ? ref('refs/heads/wf/flow') : null;
+    expect(wfAfter).toBe(wfBefore);
+    expect(ref(`refs/tags/${prepared.tagName}^{commit}`)).toBe(saved.commit);
   });
 
-  it('creates wf using an empty lease and never overwrites a concurrently created tag', async () => {
+  it('does not create wf and never overwrites a concurrently created tag', async () => {
     const saved = await save(); const dir = await clone();
     git(seed, 'push', remote, ':refs/heads/wf/flow');
     const first = await prepareDeployCandidate(dir, 'flow', saved.commit, '', 1, 1, author);
     await pushPreparedDeployment(dir, first);
+    expect(remoteGit('branch', '--list', 'wf/flow')).toBe('');
     const second = await prepareDeployCandidate(dir, 'flow', saved.commit, first.releaseCommit, 2, 2, author);
     git(seed, 'tag', '-a', second.tagName, '-m', 'another writer', current);
     git(seed, 'push', remote, `refs/tags/${second.tagName}`);
@@ -272,10 +385,10 @@ describe('prepared deployment primitives with a real bare remote', () => {
     await restorePreparedGitBundle(recovered, prepared.bundleBase64);
     await pushPreparedDeployment(recovered, prepared);
     expect(ref(`refs/tags/${prepared.tagName}`)).toBe(prepared.tagObject);
-    expect(ref('refs/heads/wf/flow')).toBe(prepared.releaseCommit);
+    expect(ref('refs/heads/wf/flow')).toBe(saved.commit);
   });
 
-  it('retains the exact reconciliation identities after a successful atomic push loses its acknowledgement', async () => {
+  it('retains the exact reconciliation identities after a successful tag push loses its acknowledgement', async () => {
     const saved = await save(); const dir = await clone();
     const prepared = await prepareDeployCandidate(dir, 'flow', saved.commit, current, 1, 1, author);
     const execute = gitExecution.executeGit; let pushes = 0;
@@ -288,7 +401,7 @@ describe('prepared deployment primitives with a real bare remote', () => {
     await expect(pushPreparedDeployment(dir, prepared)).rejects.toMatchObject({ name: 'DeploymentOutcomeUnknownError',
       branch: prepared.branch, tagName: prepared.tagName, commit: prepared.releaseCommit, tagObject: prepared.tagObject });
     expect(pushes).toBe(1);
-    expect(ref('refs/heads/wf/flow')).toBe(prepared.releaseCommit);
+    expect(ref('refs/heads/wf/flow')).toBe(saved.commit);
     expect(ref(`refs/tags/${prepared.tagName}`)).toBe(prepared.tagObject);
   });
 });
@@ -301,45 +414,48 @@ describe('exact prepared replay and recovery', () => {
     expect(await resumePreparedPackCandidate(prepared, input().config)).toEqual({ branch: prepared.branch, commit: prepared.commit });
     expect(await resumePreparedPackCandidate(prepared, input().config)).toEqual({ branch: prepared.branch, commit: prepared.commit });
     expect(execute.mock.calls.filter(([args]) => args[0] === 'push')).toHaveLength(1);
-    expect(ref('refs/heads/wf/flow')).toBe(current);
+    expect(ref('refs/heads/wf/flow')).toBe(prepared.commit);
   });
 
-  it('never overwrites a newer saved head when resuming an old request', async () => {
+  it('never overwrites a newer wf head when resuming an old request', async () => {
     const prepared = await withPreparedPackCandidate(input(), async p => p);
-    const next = newerSaved();
+    const next = newerWf();
     const execute = vi.spyOn(gitExecution, 'executeGit');
     await expect(resumePreparedPackCandidate(prepared, input().config)).rejects.toBeInstanceOf(PackCandidateConflictError);
-    expect(ref('refs/heads/saved/flow')).toBe(next);
+    expect(ref('refs/heads/wf/flow')).toBe(next);
     expect(execute.mock.calls.filter(([args]) => args[0] === 'push')).toHaveLength(0);
   });
 
-  it('resumes exactly the original release/tag, retaining version/deploy number and ignoring newer saved', async () => {
+  it('resumes exactly the original release/tag, retaining version/deploy number and ignoring newer wf', async () => {
     const saved = await save(); const dir = await clone();
     const prepared = JSON.parse(JSON.stringify(await prepareDeployCandidate(dir, 'flow', saved.commit, current, 7, 4, author)));
     rmSync(dir, { recursive: true, force: true });
-    const next = newerSaved();
+    const next = newerWf();
     const execute = vi.spyOn(gitExecution, 'executeGit');
     expect(await resumePreparedDeployment(prepared, input().config)).toMatchObject({ commit: prepared.releaseCommit, deployNumber: 7 });
     expect(await resumePreparedDeployment(prepared, input().config)).toMatchObject({ commit: prepared.releaseCommit, tagName: 'deploy/flow/#7' });
     expect(execute.mock.calls.filter(([args]) => args[0] === 'push')).toHaveLength(1);
-    expect(ref('refs/heads/saved/flow')).toBe(next);
+    expect(ref('refs/heads/wf/flow')).toBe(next);
     expect(ref('refs/tags/deploy/flow/#7')).toBe(prepared.tagObject);
     expect(remoteGit('tag', '-l')).toBe('deploy/flow/#7');
   });
 
-  it.each(['branch only', 'tag only', 'different tag', 'newer branch'])('conflicts on mixed deployment state: %s', async state => {
+  it.each(['tag only', 'different tag', 'newer branch'])('reconciles deployment tag state: %s', async state => {
     const saved = await save(); const dir = await clone();
     const prepared = await prepareDeployCandidate(dir, 'flow', saved.commit, current, 1, 1, author);
-    if (state === 'branch only' || state === 'different tag') {
-      git(dir, 'push', '--force', 'origin', `${prepared.releaseCommit}:refs/heads/wf/flow`);
-    }
     if (state === 'tag only') git(dir, 'push', 'origin', `${prepared.tagObject}:refs/tags/${prepared.tagName}`);
     if (state === 'different tag') git(dir, 'push', 'origin', `${current}:refs/tags/${prepared.tagName}`);
-    if (state === 'newer branch') git(dir, 'push', '--force', 'origin', `${saved.commit}:refs/heads/wf/flow`);
+    if (state === 'newer branch') newerWf();
     const before = refs(); const execute = vi.spyOn(gitExecution, 'executeGit');
-    await expect(resumePreparedDeployment(prepared, input().config)).rejects.toBeInstanceOf(DeploymentConflictError);
-    expect(refs()).toBe(before);
-    expect(execute.mock.calls.filter(([args]) => args[0] === 'push')).toHaveLength(0);
+    if (state === 'different tag') {
+      await expect(resumePreparedDeployment(prepared, input().config)).rejects.toBeInstanceOf(DeploymentConflictError);
+      expect(refs()).toBe(before);
+    } else {
+      await expect(resumePreparedDeployment(prepared, input().config)).resolves.toMatchObject({ commit: saved.commit });
+      expect(ref(`refs/tags/${prepared.tagName}^{commit}`)).toBe(saved.commit);
+      if (state === 'tag only') expect(refs()).toBe(before);
+    }
+    expect(execute.mock.calls.filter(([args]) => args[0] === 'push')).toHaveLength(state === 'newer branch' ? 1 : 0);
   });
 
   it('allows two concurrent resumptions of the same save to converge without new objects', async () => {
@@ -347,10 +463,14 @@ describe('exact prepared replay and recovery', () => {
     const outcomes = await Promise.allSettled([resumePreparedPackCandidate(prepared, input().config),
       resumePreparedPackCandidate(prepared, input().config)]);
     expect(outcomes.some(value => value.status === 'fulfilled')).toBe(true);
-    // A losing receive-pack may report an ambiguous lock rejection; reconciliation
-    // still converges, and no caller can publish a different candidate identity.
-    for (const value of outcomes) if (value.status === 'rejected') expect(value.reason).toBeInstanceOf(PackCandidateOutcomeUnknownError);
-    expect(ref('refs/heads/saved/flow')).toBe(prepared.commit);
+    // A losing receive-pack may report either an ambiguous lock rejection or a
+    // pre-push lease conflict; reconciliation still converges, and no caller can
+    // publish a different candidate identity.
+    for (const value of outcomes) if (value.status === 'rejected') {
+      expect([PackCandidateOutcomeUnknownError, PackCandidateConflictError]
+        .some(errorType => value.reason instanceof errorType)).toBe(true);
+    }
+    expect(ref('refs/heads/wf/flow')).toBe(prepared.commit);
     expect((await resumePreparedPackCandidate(prepared, input().config)).commit).toBe(prepared.commit);
   });
 
@@ -391,13 +511,13 @@ describe('prepared object validation boundaries', () => {
 
   it('validates prepared identities and object relationships before any push', async () => {
     const saved = await save(); const dir = await clone();
-    await expect(pushPreparedPackCandidate(dir, { ...saved, branch: 'wf/flow' })).rejects.toThrow('Invalid prepared candidate');
+    await expect(pushPreparedPackCandidate(dir, { ...saved, branch: 'saved/flow' })).rejects.toThrow(/invalid|read.only/i);
     await expect(pushPreparedPackCandidate(dir, { ...saved, sourceCommit: saved.commit, sourceVersion: 'draft', expectedSavedHead: saved.commit }))
       .rejects.toThrow('Invalid prepared candidate commit');
     const prepared = await prepareDeployCandidate(dir, 'flow', saved.commit, current, 1, 1, author);
     const before = refs();
     await expect(pushPreparedDeployment(dir, { ...prepared, version: 2 })).rejects.toThrow('annotation');
-    await expect(pushPreparedDeployment(dir, { ...prepared, candidateCommit: current })).rejects.toThrow('objects');
+    await expect(pushPreparedDeployment(dir, { ...prepared, candidateCommit: current })).rejects.toThrow('Invalid prepared deployment');
     await expect(pushPreparedDeployment(dir, { ...prepared, tagObject: saved.commit })).rejects.toThrow('objects');
     await expect(pushPreparedDeployment(dir, { ...prepared, commit: current })).rejects.toThrow('Invalid prepared deployment');
     await expect(prepareDeployCandidate(dir, 'flow', saved.commit, current, 0, 1, author)).rejects.toThrow('identity');
@@ -442,6 +562,8 @@ describe('prepared object validation boundaries', () => {
     const saved = await save(); const dir = await clone();
     await expect(pushPreparedPackCandidate(dir, { ...saved, content: 'id: flow\ntitle: forged\n' })).rejects.toThrow('metadata');
     await expect(resumePreparedPackCandidate({ ...saved, packId: 'different' }, input().config)).rejects.toThrow('metadata');
+    await expect(resumePreparedPackCandidate({ ...saved, sourceVersion: 'draft', sourceCommit: saved.commit }, input().config))
+      .rejects.toThrow(/commit|parent/i);
     const prepared = await prepareDeployCandidate(dir, 'flow', saved.commit, current, 1, 1, author);
     await expect(pushPreparedDeployment(dir, { ...prepared, workflowFile: 'different.yaml' })).rejects.toThrow('metadata');
     await pushPreparedDeployment(dir, prepared);

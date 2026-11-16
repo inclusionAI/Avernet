@@ -238,7 +238,7 @@ class PerspectiveProvider(Protocol):
 
 ### 4.2 LLMPerspectiveProvider（生产环境）
 
-**文件**: `src/infra/providers/llm_perspective_provider.py`
+**文件**: `src/app/infra/providers/llm_perspective_provider.py`
 
 **执行流程**:
 ```python
@@ -288,7 +288,7 @@ def collect(self, context):
 
 ### 5.1 来源层级
 
-**文件**: `src/infra/worker_profiles/sources/composite_worker_profile_source.py`
+**文件**: `src/app/infra/worker_profiles/sources/composite_worker_profile_source.py`
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -339,7 +339,7 @@ def _merge_profiles(registry_profile, api_profile):
 
 ### 5.3 Profile 来源配置
 
-**文件**: `src/interfaces/api/dependencies/fusion_dependencies.py`
+**文件**: `src/app/adapters/http/dependencies/fusion_dependencies.py`
 
 ```python
 def _get_profile_source():
@@ -561,14 +561,14 @@ HTTP Response (JSON)
 
 | 文件 | 职责 |
 |------|------|
-| `src/interfaces/api/fusion_routes.py` | HTTP 路由、参数校验、响应转换 |
-| `src/application/services/group_fusion_service.py` | 融合服务主逻辑、三种模式分发 |
-| `src/infra/providers/llm_perspective_provider.py` | LLM 视角生成实现 |
-| `src/infra/providers/stub_perspective_provider.py` | 测试用 Stub 实现 |
-| `src/infra/worker_profiles/sources/composite_worker_profile_source.py` | Profile 三层合并来源 |
-| `src/interfaces/api/dependencies/fusion_dependencies.py` | 依赖注入配置 |
-| `src/application/services/conflict_alignment_service.py` | G2 冲突对齐逻辑 |
-| `src/application/services/expert_diagnosis_service.py` | G5 专家诊断逻辑 |
+| `src/app/adapters/http/fusion_routes.py` | HTTP 路由、参数校验、响应转换 |
+| `src/app/application/services/group_fusion_service.py` | 融合服务主逻辑、三种模式分发 |
+| `src/app/infra/providers/llm_perspective_provider.py` | LLM 视角生成实现 |
+| `src/app/infra/providers/stub_perspective_provider.py` | 测试用 Stub 实现 |
+| `src/app/infra/worker_profiles/sources/composite_worker_profile_source.py` | Profile 三层合并来源 |
+| `src/app/adapters/http/dependencies/fusion_dependencies.py` | 依赖注入配置 |
+| `src/app/application/services/conflict_alignment_service.py` | G2 冲突对齐逻辑 |
+| `src/app/application/services/expert_diagnosis_service.py` | G5 专家诊断逻辑 |
 
 ---
 

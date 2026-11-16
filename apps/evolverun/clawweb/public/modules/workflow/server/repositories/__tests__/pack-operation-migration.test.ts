@@ -43,12 +43,37 @@ describe('retired ClawWeb operation migration 149', () => {
           const query = vi.fn<IDatabase['query']>(async sql => {
             if (sql.includes('clawweb_pack_operations')) throw new Error('table does not exist');
             if (sql.includes('MAX(version)')) return [{ v: current }];
+            if (sql === "SELECT type, name, tbl_name, sql FROM sqlite_master WHERE type IN ('table', 'trigger')") return [];
+            const required = [
+              ['request_key_hash', 64], ['parent_flow_id', 128], ['child_flow_id', 128],
+              ['child_workflow_id', 128], ['request_fingerprint', 64],
+            ] as const;
+            if (sql === 'PRAGMA table_xinfo(ordinary_run_requests)') return [
+              ...required.map(([name]) => ({ name, type: 'TEXT', notnull: 1, pk: Number(name === 'request_key_hash'), dflt_value: null, hidden: 0 })),
+              ...['parent_run_marker', 'child_run_marker'].map(name => ({ name, type: 'TEXT', notnull: 0, pk: 0, dflt_value: null, hidden: 0 })),
+            ];
+            if (sql === 'PRAGMA table_xinfo(flow_runs)') return [
+              { name: 'ordinary_run_marker', type: 'TEXT', notnull: 0, pk: 0, dflt_value: null, hidden: 0 },
+            ];
+            if (sql === 'PRAGMA index_list(ordinary_run_requests)') return [{ name: 'child_unique', unique: 1, partial: 0 }];
+            if (sql === 'SELECT name FROM pragma_index_info(?)') return [{ name: 'child_flow_id' }];
+            if (sql.includes('information_schema.TABLES') && sql.includes("'ordinary_run_requests'")) return [{ engine: 'InnoDB' }];
+            if (sql.includes('information_schema.COLUMNS') && sql.includes("'ordinary_run_requests'")) return required.map(([column_name, max_length]) => ({
+              column_name, max_length, data_type: 'varchar', is_nullable: 'NO', column_default: null, extra: '', generation_expression: null,
+            }));
+            if (sql.includes('information_schema.STATISTICS') && sql.includes("'ordinary_run_requests'")) return [
+              { index_name: 'PRIMARY', column_name: 'request_key_hash', non_unique: 0, sub_part: null, seq: 1 },
+              { index_name: 'child_unique', column_name: 'child_flow_id', non_unique: 0, sub_part: null, seq: 1 },
+            ];
+            if (sql.includes('information_schema.COLUMNS') && sql.includes('COLUMN_NAME AS name') && sql.includes('TABLE_NAME = ?')) return [];
             throw new Error(`Unexpected query: ${sql}`);
           });
           const db: IDatabase = { dbType, dialect: dialectFor(dbType), exec, query, transaction: fn => fn(db), close: async () => {} };
           await expect(runMigrations(db, dbType)).resolves.toBeUndefined();
           expect([...exec.mock.calls, ...query.mock.calls].some(([sql]) => sql.includes('clawweb_pack_operations'))).toBe(false);
           expect(exec.mock.calls.some(([sql, params]) => sql.includes('INSERT INTO schema_version') && params?.[0] === 149)).toBe(false);
+          const recorded = exec.mock.calls.filter(([sql]) => sql.includes('INSERT INTO schema_version')).map(([, params]) => params?.[0]);
+          expect(recorded).toEqual(canDdl && current < 150 && dbType !== 'zdas' ? [150, 151] : []);
         }
       }
     },

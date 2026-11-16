@@ -1,7 +1,7 @@
 """TaskHarness 旁路常驻:周期巡检 SLA 超时/崩溃 → 复位 PENDING 重投。对齐 plan §3.6。
 
 harness 三路巡检——① RUNNING 真执行叶子超 SLA → 复位重投(bbs 走 lease-expire 终态不重派);② status=FAILED(执行层失败)真执行叶子 → re-dispatch 重试;③ PENDING 未派发超时 → 重搜推。acceptance-FAIL 不入 harness:验收 verdict FAILED 经 on_report 记录为节点 DONE(内容未通过验收,不重派),故 Scan② 扫到的 FAILED 仅执行层失败、不含验收不通过。经编排核 on_harness 计 harness_retries:<MAX 重派 / >=MAX HUNG→升 BBS。不抢正向驱动。
-不直接写 HUNG(HUNG 由编排核 _hung_and_escalate 落:on_miss 深度闸门 / on_harness 重试达 MAX_HARNESS → 节点 HUNG + 升 BBS)。复位阈值从 execution_config/extend_props 读(SLA 不在 TaskSpec)。
+不直接写 HUNG(HUNG 由编排核 _hung_and_escalate 落:on_miss 深度闸门 / on_harness 重试达 MAX_HARNESS → 节点 HUNG + 升 BBS)。复位阈值从 execution_config/extend_props 读(SLA 不在 TaskSpec)。Relay 早退只做“6 小时未进终态”的硬兜底,不属于这条重试链路。
 Avernet:in-memory 巡检(注入 clock);prod 接真实定时器/崩溃探针不变编排口。
 """
 
@@ -29,7 +29,6 @@ from agentclaw.community.core.task.domain.models import (
 )
 from agentclaw.community.core.task.task_harness import relay_recovery_policy as recovery_policy
 from agentclaw.community.core.task.task_harness.relay_runtime_policy import (
-    active_no_progress_cycle,
     resolve_relay_resume_step,
     relay_resume_attempts,
     terminal_success_unreported_seconds,
@@ -49,12 +48,11 @@ from agentclaw.community.core.task.task_harness.runtime_probe import (
 
 logger = logging.getLogger("task.harness")
 
-_DEFAULT_SLA_TIMEOUT = (
-    900.0  # single_bot/BBS RUNNING:统一给 15 分钟窗口
-)
+_DEFAULT_SLA_TIMEOUT = 900.0  # single_bot/BBS RUNNING:统一给 15 分钟窗口
 _DEFAULT_COOP_GROUP_SLA_TIMEOUT = 900.0  # coop_group RUNNING:15 分钟
 _DEFAULT_PENDING_TIMEOUT = 180.0  # PENDING 派发异常/未派发→重搜推(短阈值尽快重试)
 _DEFAULT_INTERVAL = 120.0  # 巡检间隔 2min(RUNNING/PENDING/FAILED 三扫一次;FAILED 仅执行层失败:验收 FAIL 已记录 DONE 不在此,external FAILED 由 on_harness 入口跳过)
+_RELAY_STALE_CUTOFF_MS = 6 * 3600 * 1000  # 正常任务约 10 分钟;6 小时未收敛视为不可恢复
 
 class TaskHarness:
     """旁路常驻巡检器。
@@ -80,6 +78,7 @@ class TaskHarness:
         runtime_probe_threshold: float = 120.0,
         runtime_retry_threshold: int = 3,
         probe_unavailable_max_cycles: int = 30,
+        active_no_progress_max_cycles: int = 15,
         relay_recovery: RelaySessionRecovery | None = None,
         relay_resume_max_attempts: int = 2,
         relay_resume_max_send_failures: int = 10,
@@ -103,14 +102,11 @@ class TaskHarness:
         self._runtime_probe = runtime_probe
         self._runtime_probe_threshold = runtime_probe_threshold
         self._runtime_retry_threshold = runtime_retry_threshold
-        self._probe_unavailable_max_cycles = max(
-            1, int(probe_unavailable_max_cycles)
-        )
+        self._probe_unavailable_max_cycles = max(1, int(probe_unavailable_max_cycles))
+        self._active_no_progress_max_cycles = max(1, int(active_no_progress_max_cycles))
         self._relay_recovery = relay_recovery
         self._relay_resume_max_attempts = max(1, int(relay_resume_max_attempts))
-        self._relay_resume_max_send_failures = max(
-            1, int(relay_resume_max_send_failures)
-        )
+        self._relay_resume_max_send_failures = max(1, int(relay_resume_max_send_failures))
         self._task_context_service = task_context_service
         self._runtime_seen: dict[tuple[str, str], dict[str, Any]] = {}
         self._pending_seen_at: dict[
@@ -195,6 +191,40 @@ class TaskHarness:
         """Return True for a Relay-mode task graph."""
         return bool(graph.is_relay)
 
+    def _is_stale_for_early_exit(self, graph, node) -> bool:
+        """Relay execution nodes have one hard stale cutoff.
+
+        This rule is intentionally narrower than the ordinary timer/reset path:
+        it only governs *Relay* execution leaves (``single_bot``/``coop_group``),
+        and a node is considered stale only when its persisted ``start_time`` is
+        already older than the 6h cutoff. Centralized tasks are untouched.
+        """
+        if not graph.is_relay:
+            return False
+        if effective_run_mode(node) not in {"single_bot", "coop_group"}:
+            return False
+        start_time = node.run_info.start_time
+        if not start_time:
+            return False
+        return self._wall_clock_ms() - int(start_time) >= _RELAY_STALE_CUTOFF_MS
+
+    def _stale_early_exit_patch(self, task_id: str, node: TaskNode) -> TaskNodePatch:
+        """Build the terminal patch for an over-stale Relay execution node."""
+        elapsed_ms = max(0, self._wall_clock_ms() - int(node.run_info.start_time or 0))
+        return TaskNodePatch(
+            task_id=task_id,
+            node_id=node.node_id,
+            status=Status.HUNG,
+            failure_reason="harness_early_exit: stale_6h",
+            extend_props_patch={
+                "harness_early_exit": {
+                    "reason": "stale_6h",
+                    "stale_seconds": elapsed_ms // 1000,
+                    "cutoff_seconds": _RELAY_STALE_CUTOFF_MS // 1000,
+                }
+            },
+        )
+
     async def _relay_runtime_harness(
         self,
         task_id: str,
@@ -225,7 +255,7 @@ class TaskHarness:
                 "resume_send_failures": 0,
                 "resume_precondition_failures": 0,
                 "probe_unavailable": 0,
-                "recovery_epoch_started_at": self._clock(),
+                "terminal_success_observed_at": None,
             },
         )
         try:
@@ -249,41 +279,46 @@ class TaskHarness:
             current["cursor"] = result.heartbeat_cursor
         resume_step = resolve_relay_resume_step(task_id, node, self._graph)
         attempts = relay_resume_attempts(node, current)
-        recovery_epoch_elapsed = max(
-            0.0,
-            self._clock() - float(current.get("recovery_epoch_started_at", 0.0)),
-        )
+        now = self._clock()
+        terminal_success_elapsed = 0.0
+        if current.get("terminal_success_observed_at") is not None:
+            terminal_success_elapsed = max(0.0, now - float(current["terminal_success_observed_at"]))
         detail = {
             "runtime_state": result.state,
             "runtime_status": result.status,
             "runtime_source": result.source,
             "runtime_error": result.error,
             "resume_step": resume_step,
-            "recovery_epoch_seconds": recovery_epoch_elapsed,
+            "terminal_success_elapsed_seconds": terminal_success_elapsed,
         }
         reason: str | None = None
 
         if result.state == "terminal_failed":
+            current["terminal_success_observed_at"] = None
             reason = "runtime_failed"
         elif result.state == "terminal_success":
+            if current.get("terminal_success_observed_at") is None:
+                # Start the observation clock from the first runtime success
+                # observation. Time spent earlier in the engine's active state
+                # must not silently consume the silent-success recovery window.
+                current["terminal_success_observed_at"] = now
+            terminal_success_elapsed = max(0.0, now - float(current["terminal_success_observed_at"]))
             current["success_unreported"] += 1
             current["unknown"] = 0
             current["no_progress"] = 0
-            if recovery_epoch_elapsed >= terminal_success_unreported_seconds(
-                attempts
-            ):
+            if terminal_success_elapsed >= terminal_success_unreported_seconds(attempts):
                 reason = "terminal_success_unreported"
         elif result.state == "active":
             current["success_unreported"] = 0
+            current["terminal_success_observed_at"] = None
             current["unknown"] = 0
             if result.progressed:
                 current["no_progress"] = 0
             else:
+                # Repeated silence means the runtime turn cannot self-advance.
                 current["no_progress"] += 1
-            if current["no_progress"] >= active_no_progress_cycle(
-                attempts
-            ):
-                reason = "runtime_no_progress"
+                if current["no_progress"] >= self._active_no_progress_max_cycles:
+                    reason = "runtime_no_progress"
         elif result.state == "probe_unavailable":
             # Transport/app request failure is not Bot unresponsiveness. Predeploy
             # and single-server deployments can make the probe read path itself
@@ -291,6 +326,7 @@ class TaskHarness:
             # recovery attempts or advance the task's failure state.
             current["unknown"] = 0
             current["no_progress"] = 0
+            current["terminal_success_observed_at"] = None
             current["probe_unavailable"] = (
                 current.get("probe_unavailable", 0) + 1
             )
@@ -306,6 +342,7 @@ class TaskHarness:
         elif result.state == "unknown":
             current["unknown"] += 1
             current["no_progress"] = 0
+            current["terminal_success_observed_at"] = None
             current["probe_unavailable"] = 0
             if current["unknown"] >= self._runtime_retry_threshold:
                 reason = "runtime_unresponsive"
@@ -352,10 +389,10 @@ class TaskHarness:
             current["resume_attempts"] = attempts + 1
             current["resume_send_failures"] = 0
             current["resume_precondition_failures"] = 0
-            # Open a new recovery epoch after a delivered resume.  The same-node
-            # resume budget is cumulative, and the heartbeat baseline is cleared
-            # so this prompt itself cannot be counted as fresh progress.
-            current["recovery_epoch_started_at"] = self._clock()
+            # Clear the state-specific observation clock after a delivered resume.
+            # The heartbeat baseline is also cleared so the prompt itself cannot
+            # be counted as fresh progress; attempts remain cumulative.
+            current["terminal_success_observed_at"] = None
             current["cursor"] = None
             current["unknown"] = 0
             current["no_progress"] = 0
@@ -465,6 +502,11 @@ class TaskHarness:
             ]
             now = self._clock()
             for n in nodes:
+                if self._is_stale_for_early_exit(task_graph, n):
+                    patch = self._stale_early_exit_patch(task_id, n)
+                    self._report_node_patch(patch)
+                    relay_patches.append(patch)
+                    continue
                 sla = self._sla_timeout(task_id, n)
                 key = (task_id, n.node_id)
                 seen.add(key)
@@ -899,58 +941,13 @@ class TaskHarness:
         _bbs_t.add_done_callback(self._on_auto_report_done)
 
 
-# ---------------------------------------------------------------------------
-# SLA threshold helpers for the trajectory RESET gate (REQ-4)
-# ---------------------------------------------------------------------------
-#
-# The engine RESET gate (``task_center/execution_adapters.py::_on_harness_collect``) needs
-# the effective SLA threshold **in ms** for ``action_result=sla_timeout`` and
-# ``pending_dispatch_stuck`` rows. The engine does NOT hold a ``self._harness``
-# reference (the harness is owned by ``TaskService`` and bound back via
-# ``set_on_harness`` — a chicken-and-egg that makes wiring ``self._harness``
-# into the engine constructor intrusive). These **pure module-level** helpers
-# read ``execution_config`` + ``run_mode`` and reuse the harness's own default
-# constants, giving the engine a clean public seam without duplicating the
-# numbers. They mirror ``TaskHarness._sla_timeout`` / ``_pending_timeout`` for
-# the **default-constructed** harness (prod wiring: 900 / 900 / 180 s); a
-# harness instance constructed with custom defaults (test-only) is out of
-# scope for the trajectory gate — the spec (REQ-4) records the 900 / 900 / 180
-# baseline. If ``_sla_timeout`` / ``_pending_timeout`` selection logic changes,
-# update these mirrors in lockstep.
-
-
-def effective_sla_threshold_ms(
-    execution_config: dict | None,
-    run_mode: str | None,
-) -> int:
-    """Effective RUNNING-SLA threshold in **ms** for the trajectory RESET gate.
-
-    Honors the per-node ``execution_config["SLA_TIMEOUT"]`` override; otherwise
-    all execution modes default to 900 s. Mirrors
-    ``TaskHarness._sla_timeout`` (default-constructed).
-    """
-    cfg = execution_config or {}
-    t = cfg.get("SLA_TIMEOUT")
-    if t is not None:
-        return int(float(t) * 1000)
-    if run_mode == "coop_group":
-        return int(_DEFAULT_COOP_GROUP_SLA_TIMEOUT * 1000)
-    return int(_DEFAULT_SLA_TIMEOUT * 1000)
-
-
-def effective_pending_timeout_ms(execution_config: dict | None) -> int:
-    """Effective pending-dispatch timeout in **ms** for the trajectory RESET gate.
-
-    Honors ``execution_config["PENDING_TIMEOUT"]``; falls back to 180 s.
-    Mirrors ``TaskHarness._pending_timeout`` (default-constructed).
-    """
-    cfg = execution_config or {}
-    t = cfg.get("PENDING_TIMEOUT")
-    return (
-        int(float(t) * 1000) if t is not None else int(_DEFAULT_PENDING_TIMEOUT * 1000)
-    )
-
-
+from agentclaw.community.core.task.task_harness.timeout_policy import (
+    DEFAULT_PENDING_TIMEOUT as _DEFAULT_PENDING_TIMEOUT,
+    DEFAULT_SLA_TIMEOUT as _DEFAULT_SLA_TIMEOUT,
+    DEFAULT_COOP_GROUP_SLA_TIMEOUT as _DEFAULT_COOP_GROUP_SLA_TIMEOUT,
+    effective_sla_threshold_ms,
+    effective_pending_timeout_ms,
+)
 from agentclaw.community.core.task.task_harness.centralized_recovery import (  # noqa: E402
     redrive as _redrive,
     _reset_action_result as __reset_action_result,

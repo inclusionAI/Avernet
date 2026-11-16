@@ -346,12 +346,15 @@ impl MySqlSessionStore {
             ServiceError::InternalError(format!("prepare Session completion Event: {error}"))
         })?;
         steps.extend(event_plan.steps);
-        self.db.transaction(steps).await.map_err(|error| {
-            ServiceError::Conflict(format!(
+        if let Err(error) = self.db.transaction(steps).await {
+            if transaction_lock_row_is_missing(&error) {
+                return Ok(None);
+            }
+            return Err(ServiceError::Conflict(format!(
                 "Session '{}' changed during completion: {error}",
                 command.session_id
-            ))
-        })?;
+            )));
+        }
         Ok(Some(candidate))
     }
 }

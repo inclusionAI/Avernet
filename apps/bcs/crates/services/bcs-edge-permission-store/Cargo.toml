@@ -18,6 +18,7 @@ tokio = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
+bcs-bot         = { workspace = true }
 bcs-config-api  = { workspace = true }
 bcs-db-mysql    = { workspace = true }
 mysql_async     = { workspace = true }

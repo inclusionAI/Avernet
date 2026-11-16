@@ -15,6 +15,7 @@ from agentclaw.community.core.apply_engine.desired_state import (
     Declaration,
     DesiredCliTool,
     DesiredEngineConfig,
+    DesiredBotConfig,
     DesiredIdentityFile,
     DesiredMcpServer,
     DesiredResourceFile,
@@ -203,6 +204,45 @@ def test_engine_config_is_a_read_only_copy() -> None:
     assert entry.config["model"] == "x"
     with pytest.raises(TypeError):
         entry.config["model"] = "z"  # type: ignore[index]
+
+
+def test_bot_config_is_a_read_only_kind_to_entries_mapping() -> None:
+    """A mapping-valued Category like ``engine_config``, but the values are per-kind
+    entry lists. The frozen promise holds for the outer mapping (a MappingProxyType
+    that refuses key reassignment) and each inner list is converted to a tuple —
+    the same shape ``DesiredEngineConfig``'s post-init copy takes, carried over
+    to the per-kind lists so the materialiser holds a stable dispatch surface."""
+    raw = {"render_screen": [{"name": "a", "cdn_url": "u"}], "task_nav": [{"k": "v"}]}
+    entry = DesiredBotConfig(raw)
+    raw["render_screen"].append({"name": "b", "cdn_url": "u2"})
+    # The outer mapping is read-only: the caller's later append does not add a key,
+    # and assigning a value under a key raises (everything a MappingProxyType forbids).
+    assert set(entry.config) == {"render_screen", "task_nav"}
+    assert len(entry.config["render_screen"]) == 1  # the post-init tuple copy, not raw
+    with pytest.raises(TypeError):
+        entry.config["render_screen"] = ()  # type: ignore[index]
+    # The kind set is the keys the copy captured — the dispatch surface the
+    # materialiser iterates; identity is the construct's own name like every entry.
+    assert entry.identity == "bot_config"
+
+
+def test_a_bot_config_declaration_is_declared_or_untouched_like_every_construct() -> None:
+    """``None`` means not declared (untouched), a ``Declaration`` means declared — the
+    same load-bearing distinction every construct rests on. The construct field is
+    wired so ``declaration``/``declared``/``only`` read it off by ``Category.BOT_CONFIG``."""
+    assert DesiredState.EMPTY.bot_config is None
+    assert Category.BOT_CONFIG not in DesiredState.EMPTY.declared
+
+    declared = DesiredState(
+        bot_config=Declaration((DesiredBotConfig({"render_screen": []}),)),
+    )
+    assert declared.declaration(Category.BOT_CONFIG).entries[0].identity == "bot_config"
+    assert Category.BOT_CONFIG in declared.declared
+
+    # ``only`` narrows to BOT_CONFIG and undeclares the rest, symmetric with every
+    # other construct — so a pre_container half keeps BOT_CONFIG and drops engine_config.
+    half = declared.only({Category.BOT_CONFIG})
+    assert half.bot_config == declared.bot_config and half.engine_config is None
 
 
 def test_only_keeps_the_named_constructs_declared_and_undeclares_the_rest() -> None:

@@ -5,6 +5,9 @@ from __future__ import annotations
 import pytest
 
 from agentclaw.community.core.apply_engine.desired_state import McpEndpointEnv, McpHeader, ContentRef
+from agentclaw.community.core.bot_config_manifest.compiler.entries.bot_config import (
+    compile_bot_config,
+)
 from agentclaw.community.core.bot_config_manifest.compiler.entries.engine_config import compile_engine_config
 from agentclaw.community.core.bot_config_manifest.compiler.entries.identity import compile_identity
 from agentclaw.community.core.bot_config_manifest.compiler.entries.mcp import compile_mcp
@@ -77,4 +80,17 @@ def test_engine_config_carries_a_mapping_and_refuses_the_rest() -> None:
     assert carried.entries[0].config["model"] == "x"
     assert compile_engine_config({"nope": 1}).failures[0].identity == "engine_config"
     listed = compile_engine_config([{"name": "jq"}, "junk"])
+    assert [f.identity for f in listed.failures] == ["jq", "[1]"]
+
+
+def test_bot_config_carries_the_kind_mapping_and_refuses_the_rest() -> None:
+    """A mapping-valued Category like ``engine_config``: ``None`` is undeclared,
+    a mapping is carried whole (kind → entry list, frozen), a non-mapping is a
+    document that skipped the validator — refused under each element's identity.
+    """
+    assert compile_bot_config(None).entries == ()
+    carried = compile_bot_config({"render_screen": [{"name": "lib", "cdn_url": "u"}]})
+    assert carried.entries[0].identity == "bot_config"
+    assert dict(carried.entries[0].config) == {"render_screen": ({"name": "lib", "cdn_url": "u"},)}
+    listed = compile_bot_config([{"name": "jq"}, "junk"])
     assert [f.identity for f in listed.failures] == ["jq", "[1]"]

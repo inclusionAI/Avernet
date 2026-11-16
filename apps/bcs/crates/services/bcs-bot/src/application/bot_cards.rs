@@ -14,7 +14,10 @@ impl Bot {
     pub(super) async fn attach_query_cards(&self, entries: &mut [BotQueryEntry]) -> Result<(), BotUseCaseError> {
         let ids = entries.iter().map(|entry|entry.bot_uuid.clone()).collect::<Vec<_>>();
         let mut cards = self.cards_for_ids(&ids).await?;
-        for entry in entries { entry.agent_card = cards.remove(&entry.bot_uuid); }
+        for entry in entries {
+            entry.agent_card=cards.remove(&entry.bot_uuid);
+            if let Some(name)=entry.agent_card.as_ref().and_then(|card|card.get("name")).and_then(Value::as_str) {entry.capabilities.name=Some(name.into());}
+        }
         Ok(())
     }
 
@@ -27,7 +30,7 @@ impl Bot {
         };
         entries.retain_mut(|entry| {
             match cards.remove(&entry.bot_uuid) {
-                Some(Some(card)) => { entry.agent_card=Some(card);true }
+                Some(Some(card)) => { entry.capabilities.name=card.get("name").and_then(Value::as_str).map(str::to_owned);entry.agent_card=Some(card);true }
                 Some(None) => false,
                 None => {
                 let bot = RegisteredBot { bot_uuid:entry.bot_uuid.clone(),capabilities:entry.capabilities.clone(),

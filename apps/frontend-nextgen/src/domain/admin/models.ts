@@ -14,6 +14,12 @@ export type WorkOrderView = 'pending_mine' | 'initiated_mine' | 'processed';
 /** 通知中心分类筛选（Segmented 全部/审批类/通知类） */
 export type WorkOrderCategory = 'ALL' | 'APPROVAL' | 'NOTIFICATION';
 
+/** BBS 通知携带的站内跳转目标。 */
+export interface BbsNotificationTarget {
+  topicId: string;
+  postId?: string;
+}
+
 /** 空间加入态（后端 join_status：JOINED/APPLYING/NOT_JOINED） */
 export type SpaceJoinStatus = 'JOINED' | 'APPLYING' | 'NOT_JOINED' | 'UNKNOWN';
 
@@ -27,13 +33,14 @@ export interface Space {
   isCreator?: boolean;
   /** 创建者用户 id（后端 creator_user_id，与 creator_user_name 同级） */
   creatorUserId?: string;
-  /** 创建者展示名/花名（后端 creator_user_name；空间卡片「创建者」列直接展示，替换原管理员计数） */
+  /** 创建者展示名/花名（后端 creator_user_name；可用于个人空间标识） */
   creatorUserName?: string;
   joinStatus?: SpaceJoinStatus;
   memberCount: number;
-  ownerCount: number;
+  /** 未返回计数时保留 undefined，展示为未知而非真实的 0。 */
+  ownerCount?: number;
   /** 空间内 Bot 数量 */
-  botCount: number;
+  botCount?: number;
   gmtCreate?: string;
   gmtModified: string;
 }
@@ -44,7 +51,7 @@ export interface SpaceMember {
   displayName?: string;
   role: SpaceRole;
   /** 该成员拥有管理员权限的 Bot 数量（成员表「权限」列）。 */
-  botPermissionCount: number;
+  botPermissionCount?: number;
   isCreator: boolean;
   gmtModified: string;
 }
@@ -78,6 +85,8 @@ export interface WorkOrder {
   eventType: string;
   title: string;
   content: string;
+  /** BBS 通知的站内跳转目标（由 content.target 解析）。 */
+  bbsTarget?: BbsNotificationTarget;
   /** 详情抽屉用的原始 JSON 文本（非文本型对象 content 经 JSON.stringify，列表/通知文本不填充）。 */
   contentRaw?: string;
   /** 通知 content 对象内的外部详情链接（如 Bot 公开风险检测的安全工单）；用于列表内联链接与详情外链按钮。 */
@@ -104,7 +113,16 @@ export interface WorkOrder {
 /** 铃铛 tooltip 最近 N 条的精简视图 */
 export type NotificationSummary = Pick<
   WorkOrder,
-  'itemId' | 'title' | 'content' | 'gmtModified' | 'itemType' | 'notificationId' | 'isRead'
+  | 'itemId'
+  | 'title'
+  | 'content'
+  | 'gmtModified'
+  | 'itemType'
+  | 'notificationId'
+  | 'isRead'
+  | 'bizType'
+  | 'eventType'
+  | 'bbsTarget'
 >;
 
 /** 工单列表查询参数（Hook/Service 层用） */

@@ -14,6 +14,9 @@ export const sessionRecoveryApi = {
   annotate: (id: string, input: { layer: 'delivery' | 'response' | 'effect'; correct: boolean | null; reason: string; evidence_ids: string[] }) => fetchJson<{ ok: true }>(`${BASE}/${encodeURIComponent(id)}/annotations`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
   }),
+  confirmOwnerRequest: (id: string, requestId: string, feedback = '') => fetchJson<{ ok: true }>(`${BASE}/${encodeURIComponent(id)}/owner-requests/${encodeURIComponent(requestId)}/confirm`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ feedback }),
+  }),
   decide: (id: string, digest: string, approved: boolean, cooperationDone = false, feedback = "") => fetchJson<{ ok: true }>(`${BASE}/${encodeURIComponent(id)}/decision`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ plan_digest: digest, approved, cooperation_done: cooperationDone, feedback }),
   }),

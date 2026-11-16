@@ -542,7 +542,7 @@ fn config_for(dir: &TempDir, addr: std::net::SocketAddr, bots: &[&str]) -> Provi
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/mock_cc_upstream.py");
     ProviderConfig {
         provider_auth: None,
-        api_url: None,
+        cli_api_base_url: None,
         provider_id: "upstream-test".into(),
         mode: ConnectionMode::Plugin,
         listen: None,

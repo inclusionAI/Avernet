@@ -7,6 +7,10 @@ import json
 import logging
 from typing import Any
 
+from agentclaw.community.core.task.domain.identity import (
+    parse_scoped_bot_identity,
+    resolve_scoped_entry_bot_identity as resolve_entry_bot_identity,
+)
 from agentclaw.community.core.task.domain.models import Status, TaskInfo
 from agentclaw.community.core.task.domain.requests import TaskInfoRequest
 
@@ -14,26 +18,41 @@ logger = logging.getLogger("task.service")
 
 
 def normalize_owner_bot_id(request: TaskInfoRequest) -> TaskInfoRequest:
-    """Normalize legacy ``bot_id:owner_id`` while preserving cross-owner bots."""
+    """Canonicalize ``owner_bot_id`` while preserving the task initiator.
+
+    New rows use ``owner_bot_id=bot_id:bot_owner_id`` and keep
+    ``owner_user_id`` as the task initiator. Legacy bare ids uniformly treat
+    the stored ``owner_user_id`` as the Bot owner-compatible value; no Bot
+    reverse lookup is performed.
+    """
     from dataclasses import replace
 
-    bot_id, separator, embedded_owner_id = str(request.owner_bot_id or "").partition(":")
-    if not separator:
+    entry_bot_id, entry_owner_id = resolve_entry_bot_identity(
+        request.owner_bot_id, request.owner_user_id
+    )
+    owner_user_id = str(request.owner_user_id or "").strip() or entry_owner_id
+    if not entry_bot_id and not entry_owner_id:
         return request
-    owner_user_id = request.owner_user_id or embedded_owner_id
+    canonical_owner_bot_id = (
+        f"{entry_bot_id}:{entry_owner_id}" if entry_owner_id else entry_bot_id
+    )
     if (
-        request.owner_user_id
-        and embedded_owner_id
-        and request.owner_user_id != embedded_owner_id
+        canonical_owner_bot_id == request.owner_bot_id
+        and owner_user_id == request.owner_user_id
     ):
-        logger.warning(
-            "[task][execute] owner identity mismatch: owner_bot_id=%s owner_user_id=%s; "
-            "keep owner_bot's real owner (embedded), owner_user_id is the executing observer",
-            request.owner_bot_id,
+        return request
+    if request.owner_user_id and entry_owner_id and request.owner_user_id != entry_owner_id:
+        logger.info(
+            "[task][execute] initiator differs from entry Bot owner: owner_bot_id=%s "
+            "owner_user_id=%s; preserving both identities",
+            canonical_owner_bot_id,
             request.owner_user_id,
         )
-        return replace(request, owner_user_id=owner_user_id)
-    return replace(request, owner_bot_id=bot_id, owner_user_id=owner_user_id)
+    return replace(
+        request,
+        owner_bot_id=canonical_owner_bot_id,
+        owner_user_id=owner_user_id,
+    )
 
 
 def parse_status_filter(status: str | None) -> list[Status] | None:
@@ -101,11 +120,10 @@ def split_owner_bot_id(owner_bot_id: str, owner_user_id: str) -> tuple[str, str]
     identical. ``TaskService`` and its only internal call sites now call this
     module-level function directly.
     """
-    bot_id, separator, embedded_owner_id = str(owner_bot_id or "").partition(":")
-    effective_owner_id = (
-        embedded_owner_id if separator and embedded_owner_id else owner_user_id
-    )
-    return bot_id, effective_owner_id
+    scoped_parts = parse_scoped_bot_identity(str(owner_bot_id or ""))
+    if scoped_parts is not None:
+        return scoped_parts
+    return str(owner_bot_id or "").partition(":")[0], owner_user_id
 
 
 # Content routing is internal to execute. There is no public template endpoint.

@@ -16,7 +16,7 @@ function buildVm(actor: FriendRequestActor, overrides: Partial<BotCatalogViewMod
     hasMore: false, loadingMore: false, loadMoreError: null,
     setQuery: jest.fn(), setMode: jest.fn(), reload: jest.fn(), loadMore: jest.fn(),
     primaryAction: jest.fn(), share: jest.fn(), openProfile: jest.fn(), closeProfile: jest.fn(),
-    selectedBotId: null, botProfile: null, detailLoading: false, copyBotId: jest.fn(),
+    selectedBotId: null, botProfile: null, botProfileError: null, detailLoading: false, copyBotId: jest.fn(),
     ...overrides,
   };
 }
@@ -66,6 +66,7 @@ describe('公开 Bot 申请好友流程（dmore artboard-003/007 弹窗）', () 
         id: 'target', name: '自我鼓励师', ownerName: '常至', description: '鼓励伙伴',
         engine: 'OpenClaw',
         capabilities: [{ id: 'c1', name: 'AntV 可视化图表' }, { id: 'c2', name: 'Dima MCP' }],
+        skills: [],
       },
     });
     render(show(vm)); open();

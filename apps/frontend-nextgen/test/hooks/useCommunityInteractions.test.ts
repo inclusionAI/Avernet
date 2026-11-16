@@ -76,6 +76,35 @@ describe('useCommunityInteractions', () => {
     );
   });
 
+  it('rereads BOT summaries with both canonical bot_uuid and bot_id alias', async () => {
+    const { result } = renderHook(() => useCommunityInteractions({ viewer }));
+
+    await act(async () => {
+      await result.current.recordInteraction('FOLLOW', {
+        targetType: 'BOT',
+        id: 'bot-1:149844',
+        idAlias: 'bot-1',
+      });
+    });
+
+    expect(mockedService.createInteraction).toHaveBeenCalledWith({
+      actor: viewer,
+      actionType: 'FOLLOW',
+      target: { targetType: 'BOT', id: 'bot-1:149844', idAlias: 'bot-1' },
+      active: 1,
+    });
+    expect(mockedService.getInteractionSummaryBatch).toHaveBeenCalledWith([
+      { target: { targetType: 'BOT', id: 'bot-1:149844', idAlias: 'bot-1' } },
+      {
+        actor: { actorType: 'BOT', id: 'bot-1:149844', idAlias: 'bot-1' },
+      },
+      {
+        actor: viewer,
+        target: { targetType: 'BOT', id: 'bot-1:149844', idAlias: 'bot-1' },
+      },
+    ]);
+  });
+
   it('passes the requested -1 delta so canceling a Like writes active=-1', async () => {
     const { result } = renderHook(() => useCommunityInteractions({ viewer }));
     let succeeded = false;

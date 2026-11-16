@@ -6,6 +6,7 @@
  * 面板互斥由 useChatHeaderPanels 编排，本组件只呈现状态与转发回调。
  */
 import { IconButton } from '@/components/ui';
+import { HISTORY_SEARCH_ENABLED } from '@/domain/conversation/featureFlags';
 import { cn } from '@/utils/cn';
 import { FolderOpen, History, Monitor, SlidersHorizontal, Star } from 'lucide-react';
 import type { ReactNode } from 'react';
@@ -85,12 +86,14 @@ export function ChatHeaderActions({
         active={openPanel === 'detail'}
         onClick={() => onTogglePanel('detail')}
       />
-      <HeaderIcon
-        label="历史消息"
-        icon={<History className="size-4" />}
-        active={openPanel === 'history'}
-        onClick={() => onTogglePanel('history')}
-      />
+      {HISTORY_SEARCH_ENABLED ? (
+        <HeaderIcon
+          label="历史消息"
+          icon={<History className="size-4" />}
+          active={openPanel === 'history'}
+          onClick={() => onTogglePanel('history')}
+        />
+      ) : null}
       {showResourceManager ? (
         <HeaderIcon
           label="资源管理"

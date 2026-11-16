@@ -47,9 +47,13 @@ def _stats_from_action_counts(
     rows: list[tuple[str, int]], *, actor_scope: bool = False
 ) -> ForumStatsRecord:
     stats = ForumStatsRecord()
-    for action, count in rows:
-        field = _ACTION_TO_FIELD[ForumInteractionActionType(action)]
-        stats = replace(stats, **{field: int(count)})
+    counts: dict[ForumInteractionActionType, int] = {}
+    for action_value, count in rows:
+        action = ForumInteractionActionType(action_value)
+        counts[action] = counts.get(action, 0) + int(count)
+    for action, count in counts.items():
+        field = _ACTION_TO_FIELD[action]
+        stats = replace(stats, **{field: count})
     return (
         stats
         if not actor_scope
@@ -69,6 +73,14 @@ def _actor_ref(actor_type: str, actor_id: str) -> ForumActorRef:
 
 def _target_ref(target_type: str, target_id: str) -> ForumTargetRef:
     return ForumTargetRef(type=ForumInteractionTargetType(target_type), id=target_id)
+
+
+def _identity_ids(identity: ForumActorRef | ForumTargetRef) -> tuple[str, ...]:
+    """Return the canonical identity id and its deduplicated read-side alias."""
+    ids = [identity.id]
+    if identity.id_alias is not None and identity.id_alias != identity.id:
+        ids.append(identity.id_alias)
+    return tuple(dict.fromkeys(ids))
 
 
 def _latest_interaction_ids(db, *filters):
@@ -219,10 +231,15 @@ class ForumInteractionRepository(ForumInteractionRepositoryProtocol):
             latest_ids = _latest_interaction_ids(
                 db,
                 ForumInteractionModel.env == get_current_env(),
-                tuple_(
-                    ForumInteractionModel.target_type,
-                    ForumInteractionModel.target_id,
-                ).in_((ref.type.value, ref.id) for ref in unique_refs),
+                or_(
+                    *(
+                        tuple_(
+                            ForumInteractionModel.target_type,
+                            ForumInteractionModel.target_id,
+                        ).in_((ref.type.value, identity_id) for identity_id in _identity_ids(ref))
+                        for ref in unique_refs
+                    )
+                ),
             )
             rows = (
                 db.query(
@@ -247,13 +264,15 @@ class ForumInteractionRepository(ForumInteractionRepositoryProtocol):
                 )
                 .all()
             )
+
         for target_type, target_id, _action, count in rows:
-            ref = _actor_ref(target_type, target_id)
-            if ref not in result:
-                continue
-            result[ref] = _stats_from_action_counts(
-                [(ForumInteractionActionType.FOLLOW, count)], actor_scope=True
-            )
+            for ref in unique_refs:
+                if target_type != ref.type.value or target_id not in _identity_ids(ref):
+                    continue
+                stats = result[ref]
+                result[ref] = replace(
+                    stats, follow_count=stats.follow_count + int(count)
+                )
         return result
 
     def batch_get_target_summaries(
@@ -267,10 +286,18 @@ class ForumInteractionRepository(ForumInteractionRepositoryProtocol):
             latest_ids = _latest_interaction_ids(
                 db,
                 ForumInteractionModel.env == get_current_env(),
-                tuple_(
-                    ForumInteractionModel.target_type,
-                    ForumInteractionModel.target_id,
-                ).in_((ref.type.value, ref.id) for ref in unique_refs),
+                or_(
+                    *(
+                        tuple_(
+                            ForumInteractionModel.target_type,
+                            ForumInteractionModel.target_id,
+                        ).in_(
+                            (ref.type.value, identity_id)
+                            for identity_id in _identity_ids(ref)
+                        )
+                        for ref in unique_refs
+                    )
+                ),
             )
             rows = (
                 db.query(
@@ -300,14 +327,15 @@ class ForumInteractionRepository(ForumInteractionRepositoryProtocol):
                 db, tuple(ref.id for ref in topic_refs)
             )
 
-        grouped_counts: dict[ForumTargetRef, list[tuple[str, int]]] = {
-            ref: [] for ref in unique_refs
-        }
+        grouped_counts: dict[tuple[str, str], list[tuple[str, int]]] = {}
         for target_type, target_id, action, count in rows:
-            grouped_counts[_target_ref(target_type, target_id)].append(
+            grouped_counts.setdefault((target_type, target_id), []).append(
                 (action, int(count))
             )
-        for ref, action_rows in grouped_counts.items():
+        for ref in unique_refs:
+            action_rows: list[tuple[str, int]] = []
+            for identity_id in _identity_ids(ref):
+                action_rows.extend(grouped_counts.get((ref.type.value, identity_id), []))
             stats = _stats_from_action_counts(action_rows)
             if ref.type is ForumInteractionTargetType.TOPIC:
                 participant_count, helpful_count = projections.get(ref.id, (0, 0))
@@ -333,14 +361,14 @@ class ForumInteractionRepository(ForumInteractionRepositoryProtocol):
                 or_(
                     *(
                         and_(
-                            ForumInteractionModel.actor_type
-                            == pair.actor.type.value,
-                            ForumInteractionModel.actor_id == pair.actor.id,
-                            ForumInteractionModel.target_type
-                            == pair.target.type.value,
-                            ForumInteractionModel.target_id == pair.target.id,
+                            ForumInteractionModel.actor_type == pair.actor.type.value,
+                            ForumInteractionModel.actor_id == actor_id,
+                            ForumInteractionModel.target_type == pair.target.type.value,
+                            ForumInteractionModel.target_id == target_id,
                         )
                         for pair in unique_pairs
+                        for actor_id in _identity_ids(pair.actor)
+                        for target_id in _identity_ids(pair.target)
                     )
                 ),
             )
@@ -370,11 +398,14 @@ class ForumInteractionRepository(ForumInteractionRepositoryProtocol):
 
         grouped_rows = {pair: [] for pair in unique_pairs}
         for actor_type, actor_id, target_type, target_id, action, count in rows:
-            pair = ForumActorTargetRef(
-                actor=_actor_ref(actor_type, actor_id),
-                target=_target_ref(target_type, target_id),
-            )
-            if pair in grouped_rows:
+            for pair in unique_pairs:
+                if (
+                    actor_type != pair.actor.type.value
+                    or actor_id not in _identity_ids(pair.actor)
+                    or target_type != pair.target.type.value
+                    or target_id not in _identity_ids(pair.target)
+                ):
+                    continue
                 grouped_rows[pair].append((action, int(count)))
         for pair, action_rows in grouped_rows.items():
             result[pair] = _stats_from_action_counts(action_rows)

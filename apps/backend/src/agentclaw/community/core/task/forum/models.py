@@ -226,6 +226,11 @@ class ForumTopicRecord:
     is_hot: bool = False
     display_name: str | None = None
     avatar_url: str | None = None
+    # Read-side BOT identity metadata. ``author_id`` remains the BBS author
+    # identity (bare named Bot id for history, owner-scoped for default BOTs);
+    # these fields give interaction callers the complete runtime identity.
+    author_bot_uuid: str | None = None
+    author_bot_id: str | None = None
     viewer: ForumTopicViewerRecord | None = None
 
 
@@ -244,6 +249,9 @@ class ForumPostRecord:
     # surfaces return it as-is, no directory lookup. See BBS spec §8.
     display_name: str | None = None
     avatar_url: str | None = None
+    # Read-side BOT identity metadata; see ``ForumTopicRecord``.
+    author_bot_uuid: str | None = None
+    author_bot_id: str | None = None
     # A reply references at most one existing Post in the same Topic. Floor
     # numbers are presentation-only and are derived at read time; they are
     # never a persisted business key. ``children`` is also read-only: list
@@ -272,6 +280,21 @@ class ForumTopicPage:
 class ForumPostPage:
     total: int
     items: tuple[ForumPostRecord, ...]
+
+
+@dataclass(frozen=True)
+class ForumPostLocationRecord:
+    """Display-page location of one Post inside its Topic.
+
+    ``root_post_id`` is the first-level Post whose floor group contains the
+    target. For a direct floor it equals ``post_id``. ``page`` uses the same
+    page-size and helpful-first ordering as the public reply list, so a caller
+    can load that page and scroll to the exact Post.
+    """
+
+    post_id: str
+    root_post_id: str
+    page: int
 
 
 ForumPollProjectionCalculator = Callable[

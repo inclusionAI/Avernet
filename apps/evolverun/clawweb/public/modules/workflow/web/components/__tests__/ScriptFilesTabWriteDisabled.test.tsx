@@ -5,7 +5,7 @@ import ScriptFilesTab from '../ScriptFilesTab'
 vi.mock('@avernet/clawweb-shared/web/api/client', () => ({ fetchJson: vi.fn() }))
 afterEach(() => { cleanup(); vi.resetAllMocks() })
 it('clearly disables the public write path and never issues PUT, retaining local edits', async () => {
-  vi.mocked(fetchJson).mockResolvedValueOnce({ workflowId: 'disabled-workflow', packId: 'pack', baseRef: 'origin/wf/disabled-workflow', baseCommit: 'a'.repeat(40), draftHead: null, versionFiles: [{ path: 'workflow.yaml', contentBase64: 'b2xk', mode: '100644' }] })
+  vi.mocked(fetchJson).mockResolvedValueOnce({ workflowId: 'disabled-workflow', packId: 'pack', baseRef: 'origin/wf/disabled-workflow', baseCommit: 'a'.repeat(40), draftHead: 'a'.repeat(40), versionFiles: [{ path: 'workflow.yaml', contentBase64: 'b2xk', mode: '100644' }] })
   render(<ScriptFilesTab workflowId="disabled-workflow" />)
   fireEvent.click(await screen.findByRole('button', { name: 'workflow.yaml' }))
   fireEvent.change(screen.getByLabelText('文件内容'), { target: { value: 'unsaved candidate' } })

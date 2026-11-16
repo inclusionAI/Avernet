@@ -55,3 +55,16 @@ export function serializeWorkspaceRoute(route: WorkspaceRouteProjection): string
   if (route.membership) params.set('membership', route.membership);
   return params.toString();
 }
+
+// 路由契约 owned 参数;Store → URL 投影不得吞掉契约外参数(如聚焦页 showReturn=false)。
+const ROUTE_PARAM_KEYS = ['current', 'bot', 'group', 'session', 'membership'];
+
+/** 序列化投影并保留 search 中不属于路由契约的参数。 */
+export function serializeWorkspaceRoutePreserving(search: string, route: WorkspaceRouteProjection): string {
+  const extras = new URLSearchParams(search);
+  for (const key of ROUTE_PARAM_KEYS) extras.delete(key);
+  const projected = serializeWorkspaceRoute(route);
+  const extra = extras.toString();
+  if (!extra) return projected;
+  return projected ? `${projected}&${extra}` : extra;
+}

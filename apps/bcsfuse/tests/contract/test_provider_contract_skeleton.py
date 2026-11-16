@@ -10,7 +10,7 @@ import os
 
 def test_provider_protocols_can_import():
     """Test that all provider protocols can be imported."""
-    from src.application.ports import (
+    from app.application.ports import (
         StartupProvider,
         SecretProvider,
         ContextProvider,
@@ -19,7 +19,7 @@ def test_provider_protocols_can_import():
         AuthProvider,
         ObjectStorageProvider,
     )
-    from src.application.ports import (
+    from app.application.ports import (
         EmbeddingProvider,
         LLMProvider,
         RerankerProvider,
@@ -45,7 +45,7 @@ def test_provider_protocols_can_import():
 
 def test_public_providers_can_import():
     """Test that public-safe providers can be imported."""
-    from src.providers.public import (
+    from app.providers.public import (
         NoopStartupProvider,
         EnvSecretProvider,
         NoopContextProvider,
@@ -64,7 +64,7 @@ def test_public_providers_can_import():
 @pytest.mark.asyncio
 async def test_noop_startup_provider_callable():
     """Test that NoopStartupProvider can initialize and shutdown."""
-    from src.providers.public import NoopStartupProvider
+    from app.providers.public import NoopStartupProvider
 
     provider = NoopStartupProvider()
 
@@ -75,7 +75,7 @@ async def test_noop_startup_provider_callable():
 
 def test_env_secret_provider_reads_env():
     """Test that EnvSecretProvider can read environment variables."""
-    from src.providers.public import EnvSecretProvider
+    from app.providers.public import EnvSecretProvider
 
     # Set test secret
     os.environ["TEST_SECRET_KEY"] = "test_secret_value"
@@ -100,7 +100,7 @@ def test_env_secret_provider_reads_env():
 
 def test_env_secret_provider_with_prefix():
     """Test that EnvSecretProvider works with prefix."""
-    from src.providers.public import EnvSecretProvider
+    from app.providers.public import EnvSecretProvider
 
     # Set test secret with prefix
     os.environ["MYAPP_TEST_SECRET"] = "secret_with_prefix"
@@ -118,7 +118,7 @@ def test_env_secret_provider_with_prefix():
 @pytest.mark.asyncio
 async def test_noop_context_provider_returns_empty_dict():
     """Test that NoopContextProvider returns empty context."""
-    from src.providers.public import NoopContextProvider
+    from app.providers.public import NoopContextProvider
 
     provider = NoopContextProvider()
 
@@ -161,7 +161,7 @@ def test_no_internal_infra_imports_in_public_providers():
     import sys
 
     # Import public providers
-    from src.providers.public import (
+    from app.providers.public import (
         NoopStartupProvider,
         EnvSecretProvider,
         NoopContextProvider,

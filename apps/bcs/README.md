@@ -1,5 +1,27 @@
 # BCS — Bot Coordination Service
 
+### App knowledge framework
+
+- [App knowledge standard](docs/agents/knowledge-standard.md) and [templates](docs/agents/templates/README.md).
+- [App architecture](docs/arch/README.md) and [app decisions](docs/adr/README.md).
+- [Existing knowledge catalog](docs/agents/existing-knowledge.md): existing docs, domain context and historical designs.
+- [Flows](docs/flows/README.md), [diagnostics](docs/diagnostics/README.md), and [change specs](specs/README.md).
+
+
+## Knowledge navigation
+
+Public BCS owns coordination contracts, services, adapters and reusable plugins; OCB supplies the enterprise composition and internal providers.
+
+- [Local rules](AGENTS.md)
+- [API contracts](api-contracts/README.md)
+- [Session deletion protocol](docs/session-delete-protocol.md)
+- [Flow navigation](docs/flows/README.md)
+- [Diagnostic navigation](docs/diagnostics/README.md)
+
+- [Change specs](specs/README.md)
+
+Existing documents remain at their current paths. Check each document's status, target revision and source before treating it as a current contract.
+
 BCS is the **collaboration plane** of the Avernet workbench. It enables bots
 from any source to register, discover each other, form group chats, and
 coordinate through structured routing and context fusion.
@@ -108,7 +130,6 @@ crates/
 │   ├── bcs-proposal/       # Group proposal generation
 │   ├── bcs-proposal-store/ # Proposal persistence
 │   ├── bcs-judge/          # LLM-based coordination decisions
-│   ├── bcs-callback/       # Bot callback management
 │   ├── bcs-jwt/            # JWT token generation
 │   ├── bcs-secret/         # Secret/token management
 │   ├── bcs-user-identity/  # User identity and auth
@@ -150,8 +171,17 @@ crates/
 
 ### Prerequisites
 
-- **Rust** 1.80+ (`rustup` recommended)
+- **Rust** 1.94.0, selected by the repository's [`rust-toolchain.toml`](../../rust-toolchain.toml) (`rustup` required)
 - **cargo-nextest** for running tests: `cargo install cargo-nextest`
+
+Run `bash scripts/setup_dev_env.sh` from this directory to install the pinned
+toolchain and test tools without changing your global Rust default. Public CI,
+Singlebox, Bridge releases, and Rust builder images use the same compiler
+version. Verify the active compiler with `rustc -Vv`: it must report
+`release: 1.94.0` and commit `4a4ef493e3a1488c6e321570238084b38948f6db`.
+The workspace's `rust-version` remains its minimum supported Rust version;
+it does not select the compiler. Compiler upgrades must update these build
+entries together and rerun coverage gates with the new toolchain.
 
 ### Build and Run
 
@@ -200,6 +230,9 @@ cargo test --workspace
 ```
 
 ### Run a Single Integration Test
+
+For live Singlebox coverage scenarios and companion fixtures, see the
+[E2E story guide](scripts/e2e-test/README.md).
 
 ```bash
 # Run only group-related contract tests

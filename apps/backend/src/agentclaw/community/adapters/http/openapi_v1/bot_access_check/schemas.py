@@ -41,7 +41,9 @@ class BotAccess(BaseModel):
     """Whether one user reaches one Bot, and at what level."""
 
     bot_id: str = Field(description="The addressed Bot id.")
-    entity_id: str = Field(description="The addressed entity id.")
+    entity_id: str | None = Field(
+        description="The addressed entity id; null when addressed by bot_id alone."
+    )
     user_id: str = Field(description="The user whose access was checked.")
     has_access: bool = Field(description="Whether level meets required_level.")
     level: AccessLevel = Field(description="The user's level on the Bot.")

@@ -13,6 +13,7 @@ pub mod bot_runtime_use_cases;
 pub mod bot_use_cases;
 pub mod core;
 pub use bcs_domain::provider::ProviderCollaborationScope;
+pub use bcs_domain::provider_a2a::{ProviderA2aPatch, valid_default_owner};
 pub mod friends;
 pub mod group_use_cases;
 pub mod human_actors;
@@ -287,6 +288,7 @@ pub use types::{
 
 pub use core::{
     ActorKind, ActorStatus, AgentCredentials, BindingChannel, BindingChannels,
+    AuthorizedCandidateSearchQuery,
     BotCandidateSearchCoreResult, BotCandidateSearchCoreService, BotCandidateSearchHit,
     BotCandidateSearchMode, BotCandidateSearchQuery, BotCapabilities, BotConnectParams,
     BotConnectResult, BotControlPlaneCandidate, RuntimeActivitySnapshot,
@@ -319,6 +321,7 @@ pub use core::{
     SystemMessageEvent, SystemMessageEventKind, SystemMessageProducerService,
     SystemMessageRecipientResult, backfill_bot_names,
     backfill_participant_names, deserialize_skills, validate_sender_routes,
+    WorkerRecommendationScope,
 };
 
 pub use core::interaction::{

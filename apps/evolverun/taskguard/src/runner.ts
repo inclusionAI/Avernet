@@ -614,6 +614,14 @@ export function buildTemplateContext(
       context[currentMeta.iterationVar] = dtItem;
     }
   }
+  // Reserved fanout context is assigned last so business params and dynamic
+  // template aliases cannot impersonate the trusted initiator/runtime identity.
+  if (flowState.runInitiator || flowState.subworkflowMeta?.fanout) {
+    context.initiator = structuredClone(flowState.runInitiator ?? {});
+  }
+  if (flowState.fanoutRuntimeContext || flowState.subworkflowMeta?.fanout) {
+    context.runtime = structuredClone(flowState.fanoutRuntimeContext ?? {});
+  }
   return context;
 }
 

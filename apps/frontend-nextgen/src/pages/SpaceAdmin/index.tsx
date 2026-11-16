@@ -19,7 +19,7 @@ function SpaceAdminPage() {
   return (
     <div className="flex h-full flex-col">
       {/* 内容区容器与原 /admin 单页一致：白底继承 AppShell，灰底内边距滚动区 */}
-      <div className="min-h-0 flex-1 overflow-y-auto p-6 pb-10">
+      <div className="min-h-0 flex-1 overflow-y-auto bg-muted/30 p-3 sm:p-5">
         <AdminSpacesView />
       </div>
     </div>

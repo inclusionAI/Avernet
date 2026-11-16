@@ -85,12 +85,18 @@ from agentclaw.community.api.work_order_service import (
     WorkOrderServiceProtocol,
 )
 from agentclaw.community.core.bot_app_grant.models import BotAppGrantRecord
+from agentclaw.community.core.bot_copy.repository.protocol import (
+    BotCopyRepositoryProtocol,
+)
 from agentclaw.community.core.bot_inventory.adapters.noop_business_space import (
     NoopBusinessSpaceContext,
 )
 from agentclaw.community.core.bot_inventory.protocols import (
     BotInventoryTemplatePort,
     BusinessSpaceContextProtocol,
+)
+from agentclaw.community.core.repository.protocols.bot.config_manifest_apply import (
+    BotConfigManifestApplyRepositoryProtocol,
 )
 from agentclaw.community.core.bot_inventory.types import (
     BotInventoryItem,
@@ -298,6 +304,17 @@ def make_client(bots):
                 binder.bind(
                     BusinessSpaceContextProtocol,
                     to=space_context or unexpected,
+                )
+                # list_inventory derives copy_state per card (Route B); bind a
+                # stub whose get_by_dst_bot_id returns None so the derive returns
+                # null at the first guard and apply_repo is never reached. Not
+                # bound to ``unexpected`` because the derive runs for every card
+                # even when the rest of the route short-circuits on no grant.
+                _copy_repo = MagicMock()
+                _copy_repo.get_by_dst_bot_id.return_value = None
+                binder.bind(BotCopyRepositoryProtocol, to=_copy_repo)
+                binder.bind(
+                    BotConfigManifestApplyRepositoryProtocol, to=unexpected
                 )
 
         app = FastAPI()
@@ -592,6 +609,14 @@ def cross_owner_client(bots):
                 binder.bind(
                     BusinessSpaceContextProtocol,
                     to=NoopBusinessSpaceContext(),
+                )
+                # list_inventory derives copy_state per card (Route B); stub so
+                # the derive returns None at the first guard.
+                _copy_repo = MagicMock()
+                _copy_repo.get_by_dst_bot_id.return_value = None
+                binder.bind(BotCopyRepositoryProtocol, to=_copy_repo)
+                binder.bind(
+                    BotConfigManifestApplyRepositoryProtocol, to=MagicMock()
                 )
 
         app = FastAPI()

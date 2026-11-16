@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import pytest
 
-from src.domain.models.stance_signal import StanceSignal
-from src.domain.models.structured_conflict_analysis import (
+from app.domain.models.stance_signal import StanceSignal
+from app.domain.models.structured_conflict_analysis import (
     PairwiseConflict,
     DimensionSummary,
     StructuredConflictAnalysis,

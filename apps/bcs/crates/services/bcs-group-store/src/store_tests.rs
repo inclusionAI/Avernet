@@ -112,9 +112,6 @@ impl DbPlugin for RecordingDbPlugin {
 
         for step in steps {
             match step {
-                DbTransactionStep::ExecuteChecked { .. } => {
-                    return Err(DbError::Unsupported("group SQL recorder does not execute conditional transactions".into()));
-                }
                 DbTransactionStep::Query(statement) => {
                     self.transaction_statements
                         .lock()
@@ -123,7 +120,8 @@ impl DbPlugin for RecordingDbPlugin {
                     sql.push(statement.sql().to_string());
                     results.push(DbTransactionStepResult::Rows(Vec::new()));
                 }
-                DbTransactionStep::Execute(statement) => {
+                DbTransactionStep::Execute(statement)
+                | DbTransactionStep::ExecuteChecked { statement, .. } => {
                     self.transaction_statements
                         .lock()
                         .expect("transaction statements")
@@ -575,8 +573,9 @@ async fn mutable_patch_serializes_routing_policy_before_sql() {
     .await
     .expect("patch mutable fields");
 
-    let statements = db.execute_statements.lock().expect("execute statements");
-    assert_eq!(statements.len(), 1);
+    let statements = db.transaction_statements.lock().expect("transaction statements");
+    assert_eq!(statements.len(), 2);
+    assert!(statements[1].sql().contains("bcs_group_agent_cards"));
     let sql = statements[0].sql();
     assert!(sql.contains("label = ?"));
     assert!(sql.contains("routing_policy_json = ?"));

@@ -1,4 +1,5 @@
 from __future__ import annotations
+from dataclasses import replace
 import pytest
 from agentclaw.community.core.repository.implementations.skill_center.capability_desired_state import (
     DesiredStateMutation,
@@ -8,6 +9,7 @@ from agentclaw.community.core.skill_center.runtime_projection_contract import (
 )
 from agentclaw.community.core.skill_center.errors import (
     SkillSetControlPlaneConflictError,
+    SkillRuntimeNameConflictError,
     SkillSetControlPlaneNotFoundError,
 )
 from agentclaw.community.core.skill_center.skill_set_batch import (
@@ -206,7 +208,7 @@ async def test_batch_add_runtime_failure_keeps_the_whole_committed_batch_once():
 
 
 @pytest.mark.asyncio
-async def test_batch_add_restores_prior_members_when_a_later_write_fails():
+async def test_batch_add_does_not_project_when_a_later_write_fails():
     class _FailingSecondWriteRepository(_SkillRepository):
         def add_skill(self, **kwargs) -> DesiredStateMutation:
             if kwargs["skill_id"] == "8":
@@ -225,7 +227,23 @@ async def test_batch_add_restores_prior_members_when_a_later_write_fails():
             skill_ids=["7", "8"],
         )
 
-    assert len(repository.restore_calls) == 1
+    assert repository.restore_calls == []
+    assert runtime.projections == 0
+
+
+@pytest.mark.asyncio
+async def test_batch_retries_if_set_activation_changed_before_mutation():
+    class ChangedStateRepository(_SkillRepository):
+        def add_skill(self, **kwargs):
+            return replace(super().add_skill(**kwargs), item={"is_active": False})
+
+    repository = ChangedStateRepository()
+    runtime = _ProjectionCountingRuntime()
+    with pytest.raises(SkillSetControlPlaneConflictError, match="SKILL_SET_STATE_CHANGED_RETRY"):
+        await _skill_service(repository, runtime).add_skills(
+            bot_id="bot-1", owner_id="true-owner", user_id="true-owner",
+            set_id="set-1", skill_ids=["7"],
+        )
     assert runtime.projections == 0
 
 
@@ -705,3 +723,26 @@ async def test_adding_a_new_member_to_the_default_stays_immutable():
             skill_ids=["7"],
         )
     assert repository.exclusion_calls == []
+
+
+@pytest.mark.asyncio
+async def test_name_conflict_is_a_batch_item_failure_without_restore():
+    class ConflictingRepository(_SkillRepository):
+        def add_skill(self, **kwargs):
+            if kwargs["skill_id"] == "duplicate":
+                raise SkillRuntimeNameConflictError()
+            return super().add_skill(**kwargs)
+
+        def restore_desired_state(self, **kwargs):
+            raise AssertionError("a per-item conflict must not restore the batch")
+
+    repository = ConflictingRepository()
+    runtime = _ProjectionCountingRuntime()
+    outcomes = await _skill_service(repository, runtime).add_skills(
+        bot_id="bot-1", owner_id="true-owner", user_id="true-owner",
+        set_id="set-1", skill_ids=["7", "duplicate"],
+    )
+    assert outcomes[0].changed
+    assert isinstance(outcomes[1].error, SkillRuntimeNameConflictError)
+    assert str(outcomes[1].error) == "SKILL_RUNTIME_NAME_CONFLICT"
+    assert runtime.projections == 1

@@ -176,6 +176,7 @@ class ExecutionIdentityService(ExecutionIdentityServiceProtocol):
             bot_name=bot.get("bot_name"),
             bot_desc=bot.get("bot_desc"),
             engine_type=bot.get("active_engine"),
+            bot_type=str(bot.get("bot_type") or "personal"),
         )
         if not result:
             # A transport timeout can be an unknown remote outcome. Keep the

@@ -2,7 +2,7 @@ import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
 import { Pagination } from '@/components/ui/Pagination';
 import { Segmented } from '@/components/ui/Segmented';
-import type { CommunityAuthor, InteractionSummary, PersonalCenterActivityType } from '@/domain/community/types';
+import type { CommunityAuthor, CommunityTopicOpenTarget, InteractionSummary, PersonalCenterActivityType } from '@/domain/community/types';
 import { usePersonalCenter } from '@/hooks/usePersonalCenter';
 import { ArrowLeft, FileText, Heart, History, MessageSquare, Star, UserRoundPlus } from 'lucide-react';
 import type { ReactNode } from 'react';
@@ -39,7 +39,7 @@ export function CommunityPersonalCenter({
   authorFollowed,
 }: {
   onBack: () => void;
-  onOpenTopic: (topicId: string) => void;
+  onOpenTopic: (target: CommunityTopicOpenTarget) => void;
   currentUserId?: string;
   getAuthorSummary?: (author: CommunityAuthor) => InteractionSummary | undefined;
   loadAuthorSummary?: (author: CommunityAuthor) => void;

@@ -105,6 +105,16 @@ pub(super) fn validate_loaded_config(config: &BcsConfig) -> Result<(), Box<dyn s
                 as Box<dyn std::error::Error>
         })?;
     }
+    // Common-layer [api.auth] chain-shape check (registry-independent). The
+    // registry phase (source registration, plugin schema validation, public
+    // format normalization) runs in the api.auth registry after the final
+    // deep-merge and env expansion.
+    if let Some(api_auth) = config.api.auth.as_ref() {
+        api_auth.validate_chain_shape().map_err(|e| {
+            Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, e))
+                as Box<dyn std::error::Error>
+        })?;
+    }
     Ok(())
 }
 

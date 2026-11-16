@@ -4,6 +4,7 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/Popover';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import type { BotEditorCli, BotEditorMcp, BotEditorSkill } from '@/domain/botEditor';
+import { cn } from '@/utils/cn';
 import { Eye, FileCode2, FileText, Loader2, Plus, SquareTerminal, Trash2, UserRound } from 'lucide-react';
 import { useState } from 'react';
 
@@ -11,6 +12,8 @@ interface CapabilityMembersProps {
   kind: 'skill' | 'mcp' | 'cli';
   items: Array<BotEditorSkill | BotEditorMcp | BotEditorCli>;
   editable: boolean;
+  /** 调试对话同屏时为 true：成员卡片退回单列；调试区收起后恢复多列断点 */
+  compact?: boolean;
   identities?: Record<string, 'caller' | 'owner'>;
   identityEditable?: boolean;
   identityDisabledReason?: string;
@@ -37,6 +40,7 @@ export function CapabilityMembers({
   kind,
   items,
   editable,
+  compact,
   identities = {},
   onIdentity,
   identityEditable = false,
@@ -67,8 +71,9 @@ export function CapabilityMembers({
         ) : null}
       </div>
       {items.length ? (
-        // 稿面(artboard-047):成员卡片为通栏单列 40px 行、1px #EEEEEE(=--divider) 发丝描边、r8、无阴影。
-        <div className="grid grid-cols-1 gap-2">
+        // 稿面(artboard-047):成员卡片为 40px 行、1px #EEEEEE(=--divider) 发丝描边、r8、无阴影。
+        // 调试对话同屏(compact)时通栏单列;调试区收起后恢复 md 2 列 / xl 3 列(对齐 RoutinePanel)。
+        <div className={cn('grid grid-cols-1 gap-2', !compact && 'md:grid-cols-2 xl:grid-cols-3')}>
           {items.map((item) => {
           const id = 'serverCode' in item ? item.serverCode : 'code' in item ? item.code : item.id;
           const identity = identities[id] ?? 'owner';

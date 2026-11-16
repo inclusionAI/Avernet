@@ -341,6 +341,51 @@ def test_batch_actor_summaries_count_follows_received_by_identity(db):
     assert stats[user_a].follow_count == 2
 
 
+def test_identity_aliases_aggregate_legacy_and_canonical_bot_rows(db):
+    repo = ForumInteractionRepository(db)
+    canonical = ForumTargetRef(
+        type=ForumInteractionTargetType.BOT, id="bot-a:149844", id_alias="bot-a"
+    )
+    canonical_actor = ForumActorRef(
+        type=ForumActorType.BOT, id="bot-a:149844", id_alias="bot-a"
+    )
+    human_actor = ForumActorRef(type=ForumActorType.HUMAN, id="user-a")
+
+    for target_id in ("bot-a", "bot-a:149844"):
+        repo.insert_interaction(
+            actor_type="HUMAN",
+            actor_id="user-a",
+            action_type="FOLLOW",
+            target_type="BOT",
+            target_id=target_id,
+            active=1,
+        )
+    repo.insert_interaction(
+        actor_type="HUMAN",
+        actor_id="user-b",
+        action_type="FOLLOW",
+        target_type="BOT",
+        target_id="bot-a",
+        active=1,
+    )
+    repo.insert_interaction(
+        actor_type="HUMAN",
+        actor_id="user-c",
+        action_type="FOLLOW",
+        target_type="BOT",
+        target_id="bot-a:149844",
+        active=1,
+    )
+
+    assert repo.batch_get_target_summaries((canonical,))[canonical].follow_count == 4
+    assert (
+        repo.batch_get_actor_summaries((canonical_actor,))[canonical_actor].follow_count
+        == 4
+    )
+    pair = ForumActorTargetRef(actor=human_actor, target=canonical)
+    assert repo.batch_get_actor_target_summaries((pair,))[pair].follow_count == 2
+
+
 def test_interaction_summaries_are_isolated_by_environment(db, monkeypatch):
     repo = ForumInteractionRepository(db)
     _events(repo)("VIEW", "TOPIC", "topic-1")

@@ -5,14 +5,20 @@
 > 权威源(冲突时以此为准):
 > - 设计三件套:`apps/backend/specs/2026-08-09-task-goal-driven-execution-framework/{plan,spec,tasks}.md`
 
+## 任务副屏资产
+
+展示、声明恢复与导航编排由独立的 [task-panel 资产](../../../../../../frontend-nextgen/assets/task-panel/README.md) 持有；
+frontend-nextgen 和旧产品仅适配宿主能力。资产构建不进入 Python 运行时，
+不改变本域的任务执行或 Relay 协议。
+
 ## 四层目录结构(对齐 `docs/arch/arch.rules.md §8`)
 
 | 层 | 路径 | 职责 |
 |---|---|---|
 | api/ | `community/api/task/` | 对外 Service API Protocols(transport-agnostic) |
 | core/ | `community/core/task/` | 业务实现(transport-agnostic,禁 transport import) |
-| adapters/http/ | `community/adapters/http/task/`(内部:execute/dashboard/list 公开面镜像 + callback-report/bbs/feedback,前缀 `/api/v1/collaboration/tasks`,不经 spanner)+ `community/adapters/http/openapi_v1/task/`(前端公开面:execute/dashboard/list + bbs/feedback,前缀 `/openapi/v1/collaboration/tasks`,经 gateway spanner) | HTTP transport(thin:router+schema,不持 domain policy) |
-| di/modules/ | `community/di/modules/task_module.py` | composition root(DI 接线) |
+| adapters/http/ | `community/adapters/http/task/`(内部:execute/dashboard/list 公开面镜像 + callback-report/bbs/feedback/todos,不经 spanner)+ `community/adapters/http/openapi_v1/task/`(前端公开面:execute/dashboard/list + bbs/feedback/todos,经 gateway spanner) | HTTP transport(thin:router+schema,不持 domain policy) |
+| di/modules/ | `community/di/modules/task_module.py` + `community/di/modules/task/` | Task composition root；BBS/Todo 等子域绑定不得恢复为与 Task 并列的业务模块 |
 
 ## core/task/ 目录树
 
@@ -22,13 +28,15 @@ core/task/
 ├── domain/                        # TaskSpec/TaskNode/Graph 等共享领域模型
 ├── feedback/                       # task 域反馈通道(models/service/DDL)
 ├── forum/                          # BBS Topic/Post、Browse Loop 订阅/feed/报告
-├── task_center/                   # TaskService facade 与双模式入口
+├── todos/                          # Todo 生命周期、自动调度、验收与事件/互动投影
+├── task_center/                   # TaskService facade、intake/delivery/relay/control Mixin 与双模式入口
 ├── task_plan/                     # TaskPlanner + static_plan.py 统一领域定义/Runtime
 ├── task_dispatch/                 # TaskDispatcher + query-only TaskSearch
 ├── task_runner/                   # TaskRunner、模式 Adapter、语义事件分发与回投适配
 ├── task_context/                  # 统一 TaskGraphService + TaskContext 投影 + TaskTrajectoryService
 │   ├── task_graph_service.py      # 唯一公开图谱领域服务与事实入口
-│   └── task_graph_support.py      # 私有 report/状态策略/查询/TaskContext 投影函数
+│   ├── task_graph_support.py      # 私有 report/状态策略/查询/TaskContext 投影函数
+│   └── relay_report.py            # Relay 两事件回投的原子图谱写入与重放回执
 ├── task_harness/                  # TaskHarness 重试、超时、恢复与 redrive
 └── task_discovery/                # Bot 候选发现与会话创建
 ```
@@ -178,6 +186,7 @@ stateDiagram-v2
 - 空内容、非法 JSON、缺 `success`、`success` 非 bool、FAIL 无 gaps 均转 `exec_error=terminal_result_invalid`,进入 Harness;不得默认 PASS。
 - `TaskExecutorResultPoller` 是 worker fire-and-poll 业务 SLA 的唯一所有者。SLA 超时/连续轮询失败属于执行异常(`exec_error`),不是验收 FAIL。
 - Poller 超时后 best-effort `cancel_run`;Singlebox 真实取消后台 WebSocket collector。Singlebox Adapter 仅保留连接/握手/send ACK 等传输超时,不再用更短业务超时提前截断 Bot。
+- `OpenApiBotPort.send_message` 的已知 transport/protocol/business 投递失败统一使用 transport-neutral 的 `OpenApiBotError`；具体 Adapter 可以提供子类，但上层消费者不得依赖具体 HTTP 实现异常。未声明的编程错误不应被宽泛包装。
 
 ### graph 与 harness
 
@@ -200,10 +209,22 @@ stateDiagram-v2
 - `TaskGraphService` 是唯一图谱领域服务；中心化与 Relay 不再通过 Mixin、monkey patch 或模式专用 Graph 类扩展它。
 - `task_graph_support.py` 仅承载私有 report、状态策略、查询和 TaskContext 投影函数，不构成第二套领域对象。
 - `TaskSpec` 只保存 `context + goal`；`task_id` 属于任务/节点实体，执行指令由业务事实按需投影。
-- `TaskGraphService.report(...)` 是 Planner、Dispatcher、Runner、Harness、BBS 和 Relay 写入图谱事实的统一入口。
+- `TaskGraphService.report(...)` 仍是 Planner、Dispatcher、Runner、Harness、BBS 以及 Relay
+  节点事实（`NODE_PATCH` 等）的统一入口；Relay 的 `EXECUTION_RESULT` / `PLAN_RESULT`
+  两事件回投另经 `TaskServiceRelayMixin.report` → `TaskGraphService.apply_relay_report`
+  原子写入图谱与回执（`_relay_report_event_ids` / `_relay_report_receipts`）。同一
+  `event_id` 重放返回既有结果，指纹冲突报错。事件指纹不含未持久化的图引用，终态产物仅在
+  携带时纳入以兼容旧报文。
+- `task_service_control.py` 承载 TaskService 的控制面 Mixin（手动停止、节点更新），不拥有
+  intake、执行或投递恢复；公开签名与执行适配路由保持不变。人工停止经
+  `POST /api/v1/collaboration/tasks/{task_id}/stop` → `stop_task`：只把非终态节点收敛为
+  `CANCELLED` 并结算 Relay 投递意图，不重跑候选、不把节点复位为 `PENDING`；已终态任务报冲突。
 - `GET /api/v1/collaboration/tasks/{task_id}/nodes/{node_id}/context` 返回当前棒的只读
   `TaskContext`；`all_done_output` 只包含已接纳的前序节点事实。
-- Relay Skill 在本地完成 GAP 推理、下一棒规划和执行者决策；`/search` 只检索候选，
+- Relay Skill 在本地完成 GAP 推理、下一棒规划和执行者决策；`/search` 只检索候选
+  （请求携带 `relay_token`，用于校验当前节点执行代次）。后继 `PLAN_RESULT` 的单 Bot
+  assignee 或协作群成员必须来自该次候选响应；单 Bot 使用外部权威身份形态，由 Backend
+  落图时拆分为产品 `bot_id` 与 `assignee_owner_id`；
   `PLAN_RESULT` 原子地持久化唯一后继节点，`/dispatch` 执行实际投递。
 - Relay 报告仅有 `EXECUTION_RESULT` 与 `PLAN_RESULT`。`event_id` 用于同一请求重试的幂等回放；
   `relay_token` 是当前节点执行代次的服务端围栏，不写入任务轨迹。

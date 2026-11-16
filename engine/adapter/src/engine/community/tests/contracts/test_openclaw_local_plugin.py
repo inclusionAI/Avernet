@@ -15,7 +15,11 @@ async def test_local_openclaw_plugin_contract_smoke():
 
     session = await plugin.session_create("s1", label="Local", model="local-model")
     assert session["key"] == "s1"
-    assert await plugin.sessions_list() == [session]
+    assert session["canonical_session_id"] == "s1"
+    assert session["resolved_model"] == "local-model"
+    assert await plugin.sessions_list() == [{
+        "id": "s1", "key": "s1", "label": "Local", "model": "local-model",
+    }]
 
     await plugin.upload("/tmp/a.txt", b"hello")
     assert await plugin.read("/tmp/a.txt") == b"hello"

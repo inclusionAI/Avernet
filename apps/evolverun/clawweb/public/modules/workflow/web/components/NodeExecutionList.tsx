@@ -10,6 +10,8 @@ import NodeInputPanel from './NodeInputPanel'
 import RenderedNodeHero from './RenderedNodeHero'
 import NodeStepTracePanel from './NodeStepTracePanel'
 import AnalysisModal from './AnalysisModal'
+import type { SubworkflowGroupRef } from '../api/run-subworkflows'
+import SubworkflowPanel from './subworkflows/SubworkflowPanel'
 
 const EXECUTOR_LABELS: Record<string, string> = {
   'embedded-agent': '代理',
@@ -67,6 +69,8 @@ interface BaasPollResult {
 }
 
 interface NodeExecutionListProps {
+  flowId?: string
+  subworkflowGroups?: SubworkflowGroupRef[]
   nodes: NodeExecution[]
   onSelectNode: (nodeId: string) => void
   selectedNodeId?: string
@@ -78,7 +82,7 @@ interface NodeExecutionListProps {
   readOnly?: boolean
 }
 
-export default function NodeExecutionList({ nodes, onSelectNode, selectedNodeId, workflowSpec, onAnalyze, onApproval, approvalNodeIds, renderSubworkflowLinks, readOnly = false }: NodeExecutionListProps) {
+export default function NodeExecutionList({ nodes, onSelectNode, selectedNodeId, workflowSpec, onAnalyze, onApproval, approvalNodeIds, flowId, subworkflowGroups, renderSubworkflowLinks, readOnly = false }: NodeExecutionListProps) {
   if (nodes.length === 0) {
     return <p className="py-8 text-center text-gray-400 text-sm">暂无节点执行记录</p>
   }
@@ -129,7 +133,8 @@ export default function NodeExecutionList({ nodes, onSelectNode, selectedNodeId,
               onApproval={onApproval}
               hasApproval={approvalNodeIds?.has(node.node_id) ?? false}
               nodes={nodes}
-              flowId={node.flow_id}
+              flowId={flowId || node.flow_id}
+              groupExecutionId={subworkflowGroups?.find(group => group.nodeId === node.node_id)?.groupExecutionId}
               readOnly={readOnly}
               subworkflowLinks={node.executor_type === 'subworkflow' ? renderSubworkflowLinks?.(node) : null}
             />
@@ -150,6 +155,7 @@ function NodeRow({
   hasApproval,
   nodes,
   flowId,
+  groupExecutionId,
   subworkflowLinks,
   readOnly,
 }: {
@@ -162,6 +168,7 @@ function NodeRow({
   hasApproval: boolean
   nodes: NodeExecution[]
   flowId: string
+  groupExecutionId?: string
   subworkflowLinks?: ReactNode
   readOnly: boolean
 }) {
@@ -296,6 +303,7 @@ function NodeRow({
               nodes={nodes}
               workflowSpec={workflowSpec}
               flowId={flowId}
+              groupExecutionId={groupExecutionId}
               onAnalyze={onAnalyze}
               readOnly={readOnly}
             />
@@ -406,6 +414,7 @@ function NodeDetailPanel({
   nodes,
   workflowSpec,
   flowId,
+  groupExecutionId,
   onAnalyze,
   readOnly,
 }: {
@@ -413,9 +422,11 @@ function NodeDetailPanel({
   nodes: NodeExecution[]
   workflowSpec?: WorkflowSpec
   flowId: string
+  groupExecutionId?: string
   onAnalyze: (node: NodeExecution) => void
   readOnly: boolean
 }) {
+  const hasFanoutSpec = Boolean((workflowSpec?.nodes.find(item => item.id === node.node_id)?.executor as Record<string, unknown> | undefined)?.fanout)
   const [analyzing, setAnalyzing] = useState(false)
   const isWarning = node.error_text ? isWarningsErrorText(node.error_text) : false
   const warnings = isWarning ? parseWarningsErrorText(node.error_text) : []
@@ -449,6 +460,12 @@ function NodeDetailPanel({
         </div>
       </div>
 
+      {groupExecutionId && <SubworkflowPanel key={`${flowId}:${node.node_id}:${groupExecutionId}`}
+        flowId={flowId} nodeId={node.node_id} groupExecutionId={groupExecutionId} />}
+      {!groupExecutionId && hasFanoutSpec && <section aria-label="子工作流组" className="rounded-lg border border-input bg-card p-4 text-sm text-muted-foreground">
+        <h3 className="font-semibold text-foreground">子工作流组</h3>
+        <p>暂无持久化数据，等待父运行快照；此入口不会启动子运行。</p>
+      </section>}
       <RenderedNodeHero node={node} workflowSpec={workflowSpec} nodes={nodes} />
       <NodeInputPanel nodeId={node.node_id} inputJson={node.input_json} nodes={nodes} />
       <NodeOutputViewer

@@ -63,10 +63,10 @@ function parseConfig(raw: string): HandbookConfig {
 
 /** Content is owned by the AIS Agent Skill; this catalog contains references only. */
 const CHAPTERS: Record<string, readonly string[]> = {
-  "TC.MCP": ["common/mcp/handbook.md", "common/file-download/handbook.md"],
-  "TC.MODEL": ["common/file-download/handbook.md"],
-  "TC.TOOL": ["common/file-download/handbook.md"],
-  "TC.SKILL": ["common/skill/handbook.md", "common/file-download/handbook.md"],
+  "TC.MCP": ["common/mcp/handbook.md", "common/file-download/handbook.md", "common/network/handbook.md"],
+  "TC.MODEL": ["common/file-download/handbook.md", "common/network/handbook.md"],
+  "TC.TOOL": ["common/file-download/handbook.md", "common/network/handbook.md"],
+  "TC.SKILL": ["common/skill/handbook.md", "common/file-download/handbook.md", "common/network/handbook.md"],
   "TC.SESSION_CONTEXT": ["common/file-download/handbook.md"],
 };
 export function recoveryHandbook(code: string | null) {

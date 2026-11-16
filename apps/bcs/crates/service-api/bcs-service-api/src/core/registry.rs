@@ -166,6 +166,17 @@ pub trait BotRegistryCoreService: Send + Sync {
         ))
     }
 
+    /// Provider-authenticated, create-only authority initialization. The application
+    /// verifies Provider ownership of the Bot. Atomically initialize owner/version,
+    /// initial managers and their Human actors/audit; version > 0 is never rewritten.
+    /// This is not a replacement for Human edits or trusted-Service manager sync.
+    async fn initialize_provider_authority(
+        &self, _bot_id: &str,
+        _initialization: crate::types::bot_authority::OwnershipInitialization,
+    ) -> ServiceResult<BotOwnershipView> {
+        Err(ServiceError::InternalError("Provider authority initialization is not configured".into()))
+    }
+
     /// Governance facts of ONE Bot for the bcs-admin
     /// ownership-backfill dry-run (spec §10.4/§10.5) —
     /// the SAME facts the `initialize_ownership` guard

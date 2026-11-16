@@ -4,6 +4,13 @@
 - Bot 入网注册 (onboard, 上行)
 - Bot 信息同步 (name, summary)
 - Bot create/start 时的 Provider Bot 注册 (下行, 见 register_provider_bot)
+
+Mechanical split note: the task-mode roster cache/list members moved verbatim
+to ``bcn_roster.BcnRosterMixin`` (composed below), and the typed transport
+errors plus the shared provider-config seam moved to
+``bcn_transport_types``. This module stays the single public import path and
+re-exports those names so every historical
+``from ...bcn_service import X`` keeps working.
 """
 
 import threading
@@ -12,9 +19,23 @@ from typing import TYPE_CHECKING, Any, Dict, List, Literal, Mapping, Optional
 
 import httpx
 
+from agentclaw.community.kernel.bot_manager_sync import DeliveryFailure
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.http_client import HttpClient
 from agentclaw.community.utils.env_utils import get_current_env
+
+from agentclaw.community.core.bot_management.services.bcn_roster import BcnRosterMixin
+# Typed transport definitions (moved out of this module and re-exported from
+# here so historical ``from ...bcn_service import BcnServiceError`` keeps
+# working).
+from agentclaw.community.core.bot_management.services.bcn_transport_types import (
+    BcnBotMissingError,
+    BcnRequestError,
+    BcnServiceError,
+    BcnUnavailableError,
+    _get_provider_config,
+    bcn_http_error,
+)
 
 if TYPE_CHECKING:
     from agentclaw.community.di.config import BcnConfig
@@ -52,69 +73,12 @@ def _build_auth_headers(request_headers: Optional[Mapping[str, str]]) -> Dict[st
     return auth_headers
 
 
-class BcnServiceError(Exception):
-    """BCN service error."""
-
-    pass
-
-
-def _get_provider_config(
-    env: str,
-    config: "BcnConfig",
-) -> Optional[Dict[str, str]]:
-    """Return the BCN provider config for ``env``, or None when there is none.
-
-    claude_code 下行链路默认仅 prod / pre 注册到真实 BCN。local-k8s/simulator
-    可用 ``user_config.bcn.provider_registration_enabled`` 显式打开 dev 注册，
-    但仍复用同一标准 ``POST /providers/{provider_id}/bots`` 链路和同一
-    ``provider_id`` / ``provider_admin_token`` 凭据，不引入备用接口。任一凭据
-    为空视作未配置（返回 None），``register_provider_bot`` 据此跳过。
-    """
-    registration_allowed = env in ("prod", "pre") or (
-        env == "dev" and config.provider_registration_enabled
-    )
-    if not registration_allowed:
-        logger.info(
-            "[BcnService._get_provider_config] env=%s provider registration "
-            "disabled",
-            env,
-        )
-        return None
-    provider_id = config.provider_id
-    provider_admin_token = (config.provider_admin_token or "").strip()
-    if not provider_id or not provider_admin_token:
-        logger.info(
-            "[BcnService._get_provider_config] env=%s missing provider config "
-            "provider_id_present=%s provider_admin_token_present=%s",
-            env,
-            bool(provider_id),
-            bool(provider_admin_token),
-        )
-        return None
-
-    logger.info(
-        "[BcnService._get_provider_config] env=%s provider config resolved "
-        "provider_id=%s provider_admin_token_present=True",
-        env,
-        provider_id,
-    )
-    return {
-        "provider_id": provider_id,
-        "provider_admin_token": provider_admin_token,
-    }
-
-
-class BcnService:
+class BcnService(BcnRosterMixin):
     """BCN 服务 - 与 Bot Coordination Network 交互。
 
     负责调用 BCN 的 HTTP API，包括：
     - POST /admin/bots/onboard - Bot 入网/更新信息
     """
-
-    # list_bots_by_task_modes 命中 BCS 出网查询的进程内 TTL 缓存(roster 静态、变更罕见)。
-    # 仅缓存成功结果;异常不缓存(交调用方 fail-open)。BcnService 为 DI 单例,缓存随实例存活。
-    # 跨 worker 不共享(各进程各一份),roster 短窗口内可接受 ≤TTL 的旧值。参考 MarketCache 内存层。
-    TASK_MODE_ROSTER_CACHE_TTL: float = 60.0
 
     def __init__(
         self,
@@ -140,27 +104,10 @@ class BcnService:
         self._roster_cache_lock = threading.Lock()
         logger.info("[BcnService] Initialized")
 
-    def _roster_cache_get(self, key: tuple) -> Optional[List[Dict[str, Any]]]:
-        """读进程内 TTL 缓存;未命中/过期返回 None(后续走真实 HTTP,不缓存错误)。"""
-        now = time.time()
-        with self._roster_cache_lock:
-            entry = self._roster_cache.get(key)
-            if entry is None:
-                return None
-            items, ts = entry
-            if now - ts > self.TASK_MODE_ROSTER_CACHE_TTL:
-                return None
-            return list(items)  # 浅拷贝,上层 append/pop 不污染缓存
-
-    def _roster_cache_set(self, key: tuple, items: List[Dict[str, Any]]) -> None:
-        """写进程内 TTL 缓存(仅成功结果);存浅拷贝以防外部引用被改。"""
-        with self._roster_cache_lock:
-            self._roster_cache[key] = (list(items), time.time())
-
-    def invalidate_task_mode_roster_cache(self) -> None:
-        """清空 task-mode roster 进程内缓存。dream_mode 开关变更后可调用以立即生效。"""
-        with self._roster_cache_lock:
-            self._roster_cache.clear()
+    def _resolve_send_timeout(self, override: float | None) -> float:
+        """单次发送超时：显式传入剩余预算(remaining)时本次请求使用之，``None``
+        沿用服务级 ``self._timeout`` 既有行为。"""
+        return override if override is not None else self._timeout
 
     def onboard_bot(
         self,
@@ -169,6 +116,9 @@ class BcnService:
         summary: str,
         hidden: bool = False,
         request_headers: Optional[Mapping[str, str]] = None,
+        *,
+        avatar_url: str | None = None,
+        timeout_seconds: float | None = None,
     ) -> Dict[str, Any]:
         """Bot 入网注册或更新信息。
 
@@ -183,15 +133,22 @@ class BcnService:
             summary: Bot 简介
             hidden: 是否隐藏（默认 False）
             request_headers: 原始 HTTP 请求头；BCN 层仅透传 Cookie / Authorization
+            avatar_url: 头像 URL；``None`` 在这个既有可省略输入边界表示"不发送
+                该字段"（payload 与旧调用完全一致），空字符串 ``""`` 显式发送以
+                清空远端头像，非空值原样发送。
+            timeout_seconds: 单次发送的剩余超时预算（秒）；``None`` 沿用服务级
+                ``self._timeout``。
 
         Returns:
             BCN 返回的结果，包含：
             - bot_uuid: Bot UUID
-            - onboarded: 是否已入网
+            - onboarded: 是否已入网 (``onboarded=false`` 原样返回，由调用方解释)
             - name: Bot 名称
 
         Raises:
-            BcnServiceError: 调用 BCN 接口失败
+            BcnServiceError: 调用 BCN 接口失败 (404/503/4xx/5xx/超时会进一步
+                细分为 :class:`BcnBotMissingError` / :class:`BcnUnavailableError`
+                / :class:`BcnRequestError`)
         """
         logger.info(
             f"[BcnService.onboard_bot] Calling BCN onboard: "
@@ -207,6 +164,8 @@ class BcnService:
         }
         if hidden:
             payload["hidden"] = True
+        if avatar_url is not None:
+            payload["avatar_url"] = avatar_url
 
         try:
             auth_headers = _build_auth_headers(request_headers)
@@ -214,7 +173,7 @@ class BcnService:
                 "/admin/bots/onboard",
                 json=payload,
                 headers=auth_headers or None,
-                timeout=self._timeout,
+                timeout=self._resolve_send_timeout(timeout_seconds),
             )
             response.raise_for_status()
 
@@ -242,15 +201,22 @@ class BcnService:
                 f"status={e.response.status_code if e.response else 'N/A'}, "
                 f"body={error_body}"
             )
-            raise BcnServiceError(
-                f"BCN API HTTP error: {e.response.status_code if e.response else 'N/A'} - {error_body}"
+            raise bcn_http_error(
+                "BCN API HTTP error",
+                e.response.status_code if e.response else None,
             )
         except httpx.TimeoutException as e:
             logger.error(f"[BcnService.onboard_bot] Timeout error: {e}")
-            raise BcnServiceError(f"BCN API timeout: {e}")
+            raise BcnRequestError(
+                DeliveryFailure.UNKNOWN, "timeout", f"BCN API timeout: {e}"
+            )
+        except BcnServiceError:
+            raise
         except Exception as e:
             logger.error(f"[BcnService.onboard_bot] Unexpected error: {e}")
-            raise BcnServiceError(f"BCN API error: {e}")
+            raise BcnRequestError(
+                DeliveryFailure.UNKNOWN, "unknown", f"BCN API error: {e}"
+            )
 
     def register_provider_bot(
         self,
@@ -261,6 +227,7 @@ class BcnService:
         summary: str,
         connection_mode: Literal["plugin"] | None = None,
         provider_bot_ref: str | None = None,
+        avatar_url: str | None = None,
     ) -> Dict[str, Any]:
         """将 bot 注册为 Provider bot (下行链路)。
 
@@ -275,6 +242,9 @@ class BcnService:
             summary: bot 简介 (空字符串也可)
             connection_mode: 仅 OpenClaw personal 使用 ``plugin``；未传时由 BCN
                 按既有 ``gateway`` 默认处理。
+            avatar_url: 头像 URL；``None`` 在这个既有可省略输入边界表示"不发送
+                该字段"（payload 与旧调用完全一致），空字符串 ``""`` 显式发送以
+                清空远端头像，非空值原样发送。
 
         Returns:
             BCN 返回的 dict, 关键字段:
@@ -323,6 +293,8 @@ class BcnService:
         }
         if connection_mode is not None:
             payload["connection_mode"] = connection_mode
+        if avatar_url is not None:
+            payload["avatar_url"] = avatar_url
         path = f"/providers/{provider_id}/bots"
         headers = {
             "Content-Type": "application/json",
@@ -371,7 +343,6 @@ class BcnService:
             return body
 
         except httpx.HTTPStatusError as e:
-            error_body = e.response.text[:500] if e.response else "No response"
             status = e.response.status_code if e.response else "N/A"
             logger.error(
                 "[BcnService.register_provider_bot] event=failure %s "
@@ -379,8 +350,9 @@ class BcnService:
                 context, status, (time.monotonic() - started) * 1000,
                 type(e).__name__,
             )
-            raise BcnServiceError(
-                f"BCN register_provider_bot HTTP error: {status} - {error_body}"
+            raise bcn_http_error(
+                "BCN register_provider_bot HTTP error",
+                e.response.status_code if e.response else None,
             )
         except httpx.TimeoutException as e:
             logger.error(
@@ -388,7 +360,13 @@ class BcnService:
                 "status=timeout elapsed_ms=%.2f error_type=%s reason=request_timeout",
                 context, (time.monotonic() - started) * 1000, type(e).__name__,
             )
-            raise BcnServiceError(f"BCN register_provider_bot timeout: {e}")
+            raise BcnRequestError(
+                DeliveryFailure.UNKNOWN,
+                "timeout",
+                f"BCN register_provider_bot timeout: {e}",
+            )
+        except BcnServiceError:
+            raise
         except Exception as e:
             logger.error(
                 "[BcnService.register_provider_bot] event=failure %s "
@@ -396,7 +374,11 @@ class BcnService:
                 context, response.status_code if response is not None else "unavailable",
                 (time.monotonic() - started) * 1000, type(e).__name__,
             )
-            raise BcnServiceError(f"BCN register_provider_bot error: {e}")
+            raise BcnRequestError(
+                DeliveryFailure.UNKNOWN,
+                "unknown",
+                f"BCN register_provider_bot error: {e}",
+            )
 
     def switch_bot(
         self,
@@ -506,19 +488,32 @@ class BcnService:
                 f"status={status} body={error_body} "
                 f"provider_bot_ref={provider_bot_ref}"
             )
-            raise BcnServiceError(f"BCN switch_bot HTTP error: {status} - {error_body}")
+            raise bcn_http_error(
+                "BCN switch_bot HTTP error",
+                e.response.status_code if e.response else None,
+            )
         except httpx.TimeoutException as e:
             logger.error(
                 f"[BcnService.switch_bot] Timeout: {e} "
                 f"provider_bot_ref={provider_bot_ref}"
             )
-            raise BcnServiceError(f"BCN switch_bot timeout: {e}")
+            raise BcnRequestError(
+                DeliveryFailure.UNKNOWN,
+                "timeout",
+                f"BCN switch_bot timeout: {e}",
+            )
+        except BcnServiceError:
+            raise
         except Exception as e:
             logger.error(
                 f"[BcnService.switch_bot] Unexpected error: {e} "
                 f"provider_bot_ref={provider_bot_ref}"
             )
-            raise BcnServiceError(f"BCN switch_bot error: {e}")
+            raise BcnRequestError(
+                DeliveryFailure.UNKNOWN,
+                "unknown",
+                f"BCN switch_bot error: {e}",
+            )
 
     def delete_provider_bot(
         self,
@@ -594,21 +589,32 @@ class BcnService:
                 f"status={status} body={error_body} "
                 f"provider_bot_ref={provider_bot_ref}"
             )
-            raise BcnServiceError(
-                f"BCN delete_provider_bot HTTP error: {status} - {error_body}"
+            raise bcn_http_error(
+                "BCN delete_provider_bot HTTP error",
+                e.response.status_code if e.response else None,
             )
         except httpx.TimeoutException as e:
             logger.error(
                 f"[BcnService.delete_provider_bot] Timeout: {e} "
                 f"provider_bot_ref={provider_bot_ref}"
             )
-            raise BcnServiceError(f"BCN delete_provider_bot timeout: {e}")
+            raise BcnRequestError(
+                DeliveryFailure.UNKNOWN,
+                "timeout",
+                f"BCN delete_provider_bot timeout: {e}",
+            )
+        except BcnServiceError:
+            raise
         except Exception as e:
             logger.error(
                 f"[BcnService.delete_provider_bot] Unexpected error: {e} "
                 f"provider_bot_ref={provider_bot_ref}"
             )
-            raise BcnServiceError(f"BCN delete_provider_bot error: {e}")
+            raise BcnRequestError(
+                DeliveryFailure.UNKNOWN,
+                "unknown",
+                f"BCN delete_provider_bot error: {e}",
+            )
 
     def sync_bot_caller_config(
         self,
@@ -617,6 +623,8 @@ class BcnService:
         owner_workno: str,
         enabled: bool,
         source_revision: int,
+        provider_bot_ref: str | None = None,
+        timeout_seconds: float | None = None,
     ) -> Dict[str, Any]:
         """同步 Bot caller 配置快照到 BCS 权威端点。
 
@@ -634,6 +642,12 @@ class BcnService:
             owner_workno: bot 所有者工号
             enabled: bot 级 caller 开关(bot_call_type == CALLER)
             source_revision: ac_bots.caller_config_revision(本次 bump 后的值)
+            provider_bot_ref: 已解析的稳定服务地址(Ownership handoff 后当前
+                owner 不再适用于寻址);显式传入时原样作为 URL 稳定后缀,绝不重拼
+                当前 owner。省略保持旧调用既有行为(Owner-qualified 默认)。
+                本调用不改写 ``source_revision``。
+            timeout_seconds: 单次发送的剩余超时预算（秒）；``None`` 沿用服务级
+                ``self._timeout``。
 
         Returns:
             dict: skipped=True(env 无凭据跳过)/ sync_status + provider_bot_ref
@@ -641,7 +655,13 @@ class BcnService:
         Raises:
             BcnServiceError: stale / 4xx / 5xx / 超时 / 其他网络异常
         """
-        provider_bot_ref = f"{teamclaw_bot_uuid}:{owner_workno}"
+        if provider_bot_ref is None:
+            provider_bot_ref = f"{teamclaw_bot_uuid}:{owner_workno}"
+        elif (
+            not provider_bot_ref.strip()
+            or not provider_bot_ref.startswith(f"{teamclaw_bot_uuid}:")
+        ):
+            raise BcnServiceError("Invalid provider_bot_ref")
         env = get_current_env()
 
         provider_cfg = _get_provider_config(env, self._config)
@@ -678,7 +698,10 @@ class BcnService:
 
         try:
             response = self._http.patch(
-                path, json=payload, headers=headers, timeout=self._timeout
+                path,
+                json=payload,
+                headers=headers,
+                timeout=self._resolve_send_timeout(timeout_seconds),
             )
             response.raise_for_status()
             body = response.json()
@@ -704,11 +727,18 @@ class BcnService:
                     if sync_status == "stale"
                     else "unexpected response body"
                 )
-                raise BcnServiceError(
+                message = (
                     f"BCN caller config sync rejected: sync_status={sync_status!r} "
                     f"({hint}) provider_bot_ref={provider_bot_ref} "
                     f"source_revision={source_revision}"
                 )
+                if sync_status == "stale":
+                    # stale = 两侧 revision 计数器分叉的 CAS 冲突;调用方按
+                    # kind/code 分类,不解析错误字符串。
+                    raise BcnRequestError(
+                        DeliveryFailure.REJECTED, "caller_conflict", message
+                    )
+                raise BcnServiceError(message)
             logger.info(
                 f"[BcnService.sync_bot_caller_config] OK "
                 f"provider_bot_ref={provider_bot_ref} sync_status={sync_status} "
@@ -727,15 +757,20 @@ class BcnService:
                 f"status={status} body={error_body} "
                 f"provider_bot_ref={provider_bot_ref}"
             )
-            raise BcnServiceError(
-                f"BCN caller config sync HTTP error: {status} - {error_body}"
+            raise bcn_http_error(
+                "BCN caller config sync HTTP error",
+                e.response.status_code if e.response else None,
             )
         except httpx.TimeoutException as e:
             logger.error(
                 f"[BcnService.sync_bot_caller_config] Timeout: {e} "
                 f"provider_bot_ref={provider_bot_ref}"
             )
-            raise BcnServiceError(f"BCN caller config sync timeout: {e}")
+            raise BcnRequestError(
+                DeliveryFailure.UNKNOWN,
+                "timeout",
+                f"BCN caller config sync timeout: {e}",
+            )
         except BcnServiceError:
             raise
         except Exception as e:  # pragma: no cover - 传输层安全网
@@ -743,9 +778,15 @@ class BcnService:
                 f"[BcnService.sync_bot_caller_config] Unexpected error: {e} "
                 f"provider_bot_ref={provider_bot_ref}"
             )
-            raise BcnServiceError(f"BCN caller config sync error: {e}")
+            raise BcnRequestError(
+                DeliveryFailure.UNKNOWN,
+                "unknown",
+                f"BCN caller config sync error: {e}",
+            )
 
-    def get_attributes(self, *, bot_uuid: str) -> Dict[str, Any]:
+    def get_attributes(
+        self, *, bot_uuid: str, timeout_seconds: float | None = None
+    ) -> Dict[str, Any]:
         """读取已注册 Bot 的协作属性 (Provider 管理 API GET)。
 
         GET /providers/{provider_id}/bots/{bot_uuid}/attributes — 与
@@ -754,6 +795,16 @@ class BcnService:
         ``X-BCN-Provider-Id``。响应直接是属性对象 (``user_visibility`` /
         ``friend_ext`` / ``friend_check_in_strategy``)。非 prod/pre 或凭据
         空时跳过 (返 ``{"skipped": True}``)。
+
+        Args:
+            bot_uuid: 已注册的 provider bot 标识。
+            timeout_seconds: 单次发送的剩余超时预算（秒）；``None`` 沿用服务级
+                ``self._timeout``。
+
+        Raises:
+            BcnBotMissingError: 404 —— bot 不存在(与失败严格区分);
+            BcnServiceError: 其他 4xx/5xx/超时/网络异常
+                (:class:`BcnRequestError` / :class:`BcnUnavailableError`)。
         """
         env = get_current_env()
         provider_cfg = _get_provider_config(env, self._config)
@@ -766,119 +817,28 @@ class BcnService:
             response = self._http.get(
                 path,
                 headers={"Authorization": f"Bearer {token}"},
-                timeout=self._timeout,
+                timeout=self._resolve_send_timeout(timeout_seconds),
             )
             response.raise_for_status()
             data = response.json()
             return data if isinstance(data, dict) else {}
         except httpx.HTTPStatusError as e:
-            error_body = e.response.text[:500] if e.response else "No response"
-            status = e.response.status_code if e.response else "N/A"
-            raise BcnServiceError(
-                f"BCS attributes get HTTP error: {status} - {error_body}"
+            raise bcn_http_error(
+                "BCS attributes get HTTP error",
+                e.response.status_code if e.response else None,
             )
         except httpx.TimeoutException as e:
-            raise BcnServiceError(f"BCS attributes get timeout: {e}")
-        except Exception as e:
-            raise BcnServiceError(f"BCS attributes get error: {e}")
-
-    def list_bots_by_task_modes(
-        self,
-        *,
-        claim: bool | None = None,
-        dream: bool | None = None,
-        match: str = "any",
-        visibility: str | None = None,
-        status: str | None = None,
-        user_visibility: str | None = None,
-    ) -> List[Dict[str, Any]]:
-        """查询满足任务模式开关的 provider bot roster(BCS provider 路由,Bearer)。
-
-        ``GET /providers/{provider_id}/bots/by-task-modes`` ——与 register/switch/attributes
-        provider-bot 同套鉴权:仅 ``Authorization: Bearer {provider_admin_token}``，``provider_id``
-        在 path，复用 ``_get_provider_config`` 解析的统一 provider 身份(BcnConfig)。与其它
-        BcnService 方法一致直接返回 BCN 响应原结构(``{"items": [...]}`` 取 ``items``)。
-
-        ``claim``/``dream`` 为 ``None`` 表示该开关不过滤(不下发 query)；``match`` 为 any|all。
-        ``visibility``、``status``、``user_visibility`` 为 ``None`` 表示不按对应
-        返回字段过滤；provider 身份直接读 ``BcnConfig``(部署 overlay 已给定)。
-        非 prod/pre 或凭据空时抛 :class:`BcnServiceError`(BBS 调用方按 fail-open 处理)。
-        """
-        env = get_current_env()
-        visibility = visibility.strip() if visibility is not None else None
-        status = status.strip() if status is not None else None
-        user_visibility = (
-            user_visibility.strip() if user_visibility is not None else None
-        )
-        # 进程内 TTL 缓存命中优先(同 env/任务模式/元数据过滤条件的重复请求
-        # 收敛为秒级命中);
-        # 命中外网成功后再回填,异常不缓存。
-        cache_key = (env, claim, dream, match, visibility, status, user_visibility)
-        cached = self._roster_cache_get(cache_key)
-        if cached is not None:
-            logger.info(
-                "[BcnService.list_bots_by_task_modes] HIT env=%s claim=%s dream=%s match=%s",
-                env,
-                claim,
-                dream,
-                match,
+            raise BcnRequestError(
+                DeliveryFailure.UNKNOWN,
+                "timeout",
+                f"BCS attributes get timeout: {e}",
             )
-            return cached
-        provider_cfg = _get_provider_config(env, self._config)
-        if not provider_cfg:
-            raise BcnServiceError(
-                f"task-mode roster provider credentials not configured for env={env}"
-            )
-        provider_id = provider_cfg["provider_id"]
-        token = provider_cfg["provider_admin_token"]
-        path = f"/providers/{provider_id}/bots/by-task-modes"
-        params: Dict[str, str] = {"match": match}
-        if claim is not None:
-            params["task_claim_mode"] = "true" if claim else "false"
-        if dream is not None:
-            params["task_dream_mode"] = "true" if dream else "false"
-        for name, value in ((
-            ("visibility", visibility),
-            ("status", status),
-            ("user_visibility", user_visibility),
-        )):
-            if value:
-                params[name] = value
-        logger.info(
-            "[BcnService.list_bots_by_task_modes] GET %s claim=%s dream=%s match=%s "
-            "visibility=%s status=%s user_visibility=%s",
-            path,
-            claim,
-            dream,
-            match,
-            visibility,
-            status,
-            user_visibility,
-        )
-        try:
-            response = self._http.get(
-                path,
-                params=params,
-                headers={"Authorization": f"Bearer {token}"},
-                timeout=self._timeout,
-            )
-            response.raise_for_status()
-            items = response.json().get("items", [])
-            items = items if isinstance(items, list) else []
-            self._roster_cache_set(cache_key, items)
-            return items
-        except httpx.HTTPStatusError as e:
-            error_body = e.response.text[:500] if e.response else "No response"
-            status = e.response.status_code if e.response else "N/A"
-            raise BcnServiceError(
-                f"BCN list_bots_by_task_modes HTTP error: {status} - {error_body}"
-            )
-        except httpx.TimeoutException as e:
-            raise BcnServiceError(f"BCN list_bots_by_task_modes timeout: {e}")
         except BcnServiceError:
             raise
         except Exception as e:
-            raise BcnServiceError(f"BCN list_bots_by_task_modes error: {e}")
+            raise BcnRequestError(
+                DeliveryFailure.UNKNOWN, "unknown", f"BCS attributes get error: {e}"
+            )
 
     def patch_attributes(
         self, *, bot_uuid: str, body: Dict[str, Any]
@@ -909,15 +869,24 @@ class BcnService:
             data = response.json()
             return data if isinstance(data, dict) else {}
         except httpx.HTTPStatusError as e:
-            error_body = e.response.text[:500] if e.response else "No response"
-            status = e.response.status_code if e.response else "N/A"
-            raise BcnServiceError(
-                f"BCS attributes patch HTTP error: {status} - {error_body}"
+            raise bcn_http_error(
+                "BCS attributes patch HTTP error",
+                e.response.status_code if e.response else None,
             )
         except httpx.TimeoutException as e:
-            raise BcnServiceError(f"BCS attributes patch timeout: {e}")
+            raise BcnRequestError(
+                DeliveryFailure.UNKNOWN,
+                "timeout",
+                f"BCS attributes patch timeout: {e}",
+            )
+        except BcnServiceError:
+            raise
         except Exception as e:
-            raise BcnServiceError(f"BCS attributes patch error: {e}")
+            raise BcnRequestError(
+                DeliveryFailure.UNKNOWN,
+                "unknown",
+                f"BCS attributes patch error: {e}",
+            )
 
     def check_admission(
         self,
@@ -964,17 +933,30 @@ class BcnService:
                 f"[BcnService.check_admission] HTTP error: "
                 f"status={status} body={error_body} bot_uuid={bot_uuid}"
             )
-            raise BcnServiceError(f"BCS admission HTTP error: {status} - {error_body}")
+            raise bcn_http_error(
+                "BCS admission HTTP error",
+                e.response.status_code if e.response else None,
+            )
         except httpx.TimeoutException as e:
             logger.error(
                 f"[BcnService.check_admission] Timeout: {e} bot_uuid={bot_uuid}"
             )
-            raise BcnServiceError(f"BCS admission timeout: {e}")
+            raise BcnRequestError(
+                DeliveryFailure.UNKNOWN,
+                "timeout",
+                f"BCS admission timeout: {e}",
+            )
+        except BcnServiceError:
+            raise
         except Exception as e:
             logger.error(
                 f"[BcnService.check_admission] Unexpected error: {e} bot_uuid={bot_uuid}"
             )
-            raise BcnServiceError(f"BCS admission error: {e}")
+            raise BcnRequestError(
+                DeliveryFailure.UNKNOWN,
+                "unknown",
+                f"BCS admission error: {e}",
+            )
 
 
 # ``BcnService`` is wired as a @singleton via the injector

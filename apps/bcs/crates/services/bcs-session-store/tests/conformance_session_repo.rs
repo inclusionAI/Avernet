@@ -20,9 +20,7 @@ use bcs_service_api::types::{
 use bcs_service_api::{Participant, ParticipantMode, ParticipantRole, ServiceError, SessionKind};
 use bcs_session_store::{MemorySessionRepo, MySqlSessionStore};
 
-#[path = "../../../bootstrap/bcs/src/migrations.rs"]
-#[allow(dead_code)]
-mod bootstrap_migrations;
+use bcs_db_migrations as bootstrap_migrations;
 
 #[path = "support/session_completion_recovery.rs"]
 mod session_completion_recovery;

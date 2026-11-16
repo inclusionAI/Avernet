@@ -1,6 +1,6 @@
 /** @jest-environment jsdom */
 // 会话行契约测试（restore-design-chat-page-b2-b3 Batch 1，dmore「会话目录二级*」帧 1:1）：
-// 平齐化（无 rail/前置图标/条数列）、点击热区分级、hover/选中胶囊同长全宽同构、收藏星标槽位;
+// 平齐化二级行、固定 14px 状态槽、无条数列；点击热区分级、hover/选中胶囊同长全宽同构、收藏星标槽位;
 // 合并 PR 454 恢复的会话操作菜单（hover「…」:编辑标题/清除上下文/删除会话;收藏只走行内星标）。
 import { ConversationSessionRow } from '@/pages/Workspace/Chat/components/ConversationSessionRow';
 import type { ConversationSessionAction } from '@/services/workspace/conversationSessionActionService';
@@ -23,17 +23,15 @@ const createActions = () => ({
 });
 
 describe('ConversationSessionRow 平齐化与热区分级（dmore 1:1）', () => {
-  it.each([false, true])('无树形 rail/前置消息图标、无条数列，文字 13px 平齐排版（selected=%s）', (selected) => {
+  it.each([false, true])('无树形 rail、无默认状态图标、无条数列，文字 13px 平齐排版（selected=%s）', (selected) => {
     const { container } = render(<ConversationSessionRow session={session} selected={selected} onSelect={jest.fn()} />);
     const row = container.firstElementChild as HTMLElement;
     // 平齐化裁决（B1 tasks 6.1 + 本批 spec）：不出现树形竖线/折线指示元素。
     expect(row.querySelector('[data-session-tree-rail]')).toBeNull();
     expect(row.querySelector('[data-session-tree-elbow]')).toBeNull();
-    // 稿二级行:无前置消息图标、右余部无「N 条」列。
+    // 无有效状态时不展示兜底对话图标；标题仍由会话行固定缩进保持对齐。
     expect(container.querySelector('svg.lucide-message-square')).toBeNull();
-    expect(screen.queryByText('21 条')).not.toBeInTheDocument();
-    // 稿二级行:无前置消息图标、右余部无「N 条」列。
-    expect(container.querySelector('svg.lucide-message-square')).toBeNull();
+    // 稿二级行右余部无「N 条」列。
     expect(screen.queryByText('21 条')).not.toBeInTheDocument();
     // 文字 13px/18px；未选中与一级名称同色,选中点亮 #09090B(2026-11-02 稿=text-foreground)但不加黑加粗。
     const title = screen.getByText('对话会话');
@@ -187,6 +185,20 @@ describe('ConversationSessionRow 相对时间（2026-10-22 体验精修）', () 
       'group-focus-within/row:opacity-0',
       'group-has-[[data-state=open]]/row:opacity-0',
     );
+  });
+
+  it('Browse-only 行无操作入口时，hover 不改标题右界且时间常驻原位显示', () => {
+    const gmtModified = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
+    render(<ConversationSessionRow session={{ ...session, gmtModified }} selected={false} onSelect={jest.fn()} />);
+    const button = screen.getByRole('button', { name: '对话会话' });
+    // 无 actions / 收藏回调 => hover 没有右侧图标区，不应触发标题右内边距让位。
+    expect(button).toHaveClass('pr-2');
+    expect(button).not.toHaveClass('group-hover/row:pr-[80px]');
+    expect(button).not.toHaveClass('group-hover/row:pr-[88px]');
+    // 时间没有 hover 退场档，位置和可见性保持不变。
+    const time = screen.getByText('3 小时前');
+    expect(time).not.toHaveClass('group-hover/row:opacity-0');
+    expect(time).not.toHaveClass('group-focus-within/row:opacity-0');
   });
 
   it('gmtModified 缺失不渲染时间节点；只读行时间常驻不参与让位', () => {

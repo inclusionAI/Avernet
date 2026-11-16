@@ -18,7 +18,7 @@ class TestSkillProfile:
 
     def test_create_skill_profile_success(self):
         """测试创建技能档案"""
-        from src.domain.models.skill_profile import SkillProfile
+        from app.domain.models.skill_profile import SkillProfile
 
         skill = SkillProfile(
             name="web_search",
@@ -38,7 +38,7 @@ class TestSkillProfile:
 
     def test_create_skill_profile_minimal(self):
         """测试创建最小字段的技能档案"""
-        from src.domain.models.skill_profile import SkillProfile
+        from app.domain.models.skill_profile import SkillProfile
 
         skill = SkillProfile(
             name="test_skill",
@@ -56,7 +56,7 @@ class TestSkillProfile:
 
     def test_create_skill_profile_with_metadata(self):
         """测试创建包含元数据的技能档案"""
-        from src.domain.models.skill_profile import SkillProfile
+        from app.domain.models.skill_profile import SkillProfile
 
         skill = SkillProfile(
             name="code_review",
@@ -75,7 +75,7 @@ class TestSkillProfile:
 
     def test_skill_profile_inactive(self):
         """测试非激活状态技能"""
-        from src.domain.models.skill_profile import SkillProfile
+        from app.domain.models.skill_profile import SkillProfile
 
         skill = SkillProfile(
             name="deprecated_skill",
@@ -88,7 +88,7 @@ class TestSkillProfile:
 
     def test_missing_required_fields_raises_error(self):
         """测试缺少必填字段抛出错误"""
-        from src.domain.models.skill_profile import SkillProfile
+        from app.domain.models.skill_profile import SkillProfile
 
         # 缺少 name
         with pytest.raises(ValidationError):
@@ -113,7 +113,7 @@ class TestSkillProfile:
 
     def test_empty_name_raises_error(self):
         """测试空名称抛出错误"""
-        from src.domain.models.skill_profile import SkillProfile
+        from app.domain.models.skill_profile import SkillProfile
 
         with pytest.raises(ValidationError):
             SkillProfile(
@@ -124,7 +124,7 @@ class TestSkillProfile:
 
     def test_empty_skill_id_raises_error(self):
         """测试空 skill_id 抛出错误"""
-        from src.domain.models.skill_profile import SkillProfile
+        from app.domain.models.skill_profile import SkillProfile
 
         with pytest.raises(ValidationError):
             SkillProfile(
@@ -135,7 +135,7 @@ class TestSkillProfile:
 
     def test_empty_skill_set_name_raises_error(self):
         """测试空 skill_set_name 抛出错误"""
-        from src.domain.models.skill_profile import SkillProfile
+        from app.domain.models.skill_profile import SkillProfile
 
         with pytest.raises(ValidationError):
             SkillProfile(
@@ -146,7 +146,7 @@ class TestSkillProfile:
 
     def test_extra_fields_forbidden(self):
         """测试额外字段被禁止"""
-        from src.domain.models.skill_profile import SkillProfile
+        from app.domain.models.skill_profile import SkillProfile
 
         with pytest.raises(ValidationError) as exc_info:
             SkillProfile(
@@ -164,7 +164,7 @@ class TestSkillProfileProperty:
 
     def test_display_name_with_description(self):
         """测试带描述的显示名称"""
-        from src.domain.models.skill_profile import SkillProfile
+        from app.domain.models.skill_profile import SkillProfile
 
         skill = SkillProfile(
             name="web_search",
@@ -177,7 +177,7 @@ class TestSkillProfileProperty:
 
     def test_display_name_without_description(self):
         """测试不带描述的显示名称"""
-        from src.domain.models.skill_profile import SkillProfile
+        from app.domain.models.skill_profile import SkillProfile
 
         skill = SkillProfile(
             name="web_search",
@@ -189,7 +189,7 @@ class TestSkillProfileProperty:
 
     def test_searchable_text(self):
         """测试可检索文本"""
-        from src.domain.models.skill_profile import SkillProfile
+        from app.domain.models.skill_profile import SkillProfile
 
         skill = SkillProfile(
             name="web_search",
@@ -205,7 +205,7 @@ class TestSkillProfileProperty:
 
     def test_searchable_text_no_description(self):
         """测试无描述时可检索文本"""
-        from src.domain.models.skill_profile import SkillProfile
+        from app.domain.models.skill_profile import SkillProfile
 
         skill = SkillProfile(
             name="simple_skill",
@@ -225,7 +225,7 @@ class TestSkillProfileDocstring:
         SkillProfile 表示归一化后的当前技能条目，
         不是完整的 SkillDefinition/SkillActivation 双层模型。
         """
-        from src.domain.models.skill_profile import SkillProfile
+        from app.domain.models.skill_profile import SkillProfile
 
         # 这是一个从 skill_sets.json 中 is_current=true 的技能组
         # 提取的已激活技能条目

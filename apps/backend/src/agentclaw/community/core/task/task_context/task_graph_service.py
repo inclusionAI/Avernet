@@ -31,7 +31,6 @@ from agentclaw.community.core.task.domain.models import (
     NodeOpResult,
     Relation,
     RelationType,
-    RuntimeInfo,
     Status,
     TaskCallbackData,
     TaskContext,
@@ -68,16 +67,19 @@ _DIRECT_TRANSITIONS: dict[Status, set[Status]] = {
     Status.PENDING: {
         Status.PLANNING,
         Status.RUNNING,
+        Status.CANCELLED,
+        Status.FAILED,
         Status.HUNG,
         Status.DONE,
         Status.SUCCESS,
     },
-    Status.PLANNING: {Status.DONE, Status.SUCCESS, Status.HUNG},
+    Status.PLANNING: {Status.DONE, Status.SUCCESS, Status.CANCELLED, Status.FAILED, Status.HUNG},
     Status.RUNNING: {
         Status.PENDING,
         Status.PLANNING,
         Status.DONE,
         Status.SUCCESS,
+        Status.CANCELLED,
         Status.HUNG,
     },
     Status.FAILED: {Status.PENDING, Status.HUNG},
@@ -866,60 +868,9 @@ class TaskGraphService:
     def attach_bbs_node(
         self, task_id: str, parent_node_id: str, task_spec: TaskSpec, bot_id: str
     ) -> TaskNode:
-        """BBS 接力步④:在 parent 下新建 run_mode=bbs scoped 子节点 + 翻 PENDING→RUNNING(create+start 合一)。
-
-        前置:调用者须为当前 ``bbs_owner``(root.run_info.extend_props['bbs_owner'] == bot_id,否则 TaskStateError);
-        parent 须满足 add 触发条件(根 PLANNING 等);深度闸 ``bbs_relay_count >= BBS_MAX_DEPTH`` →
-        图级 HUNG(``hung_reason=bbs_relay_exhausted``)+ TaskStateError。
-        实现:add_task_nodes(挂 parent 下,parent→PLANNING)→ update_task_node_info(PENDING→RUNNING)
-        → update_task_graph_info(bbs_relay_count++);返回新建节点(add_task_nodes 挂入为同一引用,
-        update_task_node_info 原地翻 RUNNING,故返回节点 status=RUNNING)。
-        """
-        with self._lock_for(task_id):
-            graph = self._require_graph(task_id)
-            root = next((n for n in graph.tasks if n.node_id == task_id), None)
-            if root is None or root.run_info.extend_props.get("bbs_owner") != bot_id:
-                raise TaskStateError(f"attach_bbs_node: 非claim持有者 task={task_id}")
-            relay_count = int(graph.extend_props.get("bbs_relay_count", 0))
-            if relay_count >= self._execution_config(task_id)["BBS_MAX_DEPTH"]:
-                self.update_task_graph_info(
-                    task_id,
-                    TaskGraphPatch(
-                        status=Status.HUNG,
-                        extend_props_patch={"hung_reason": "bbs_relay_exhausted"},
-                    ),
-                )
-                raise TaskStateError(
-                    f"attach_bbs_node: BBS relay 深度达上限 task={task_id}"
-                )
-            node_id = f"bbs-{uuid.uuid4().hex[:8]}"
-            claim_at = root.run_info.extend_props.get("bbs_claim_at") or int(
-                time.time() * 1000
-            )
-            node = TaskNode(
-                node_id=node_id,
-                task_id=task_id,
-                status=Status.PENDING,
-                task_spec=task_spec,
-                run_info=RuntimeInfo(
-                    run_mode="bbs",
-                    assignee=bot_id,
-                    start_time=int(claim_at),
-                    extend_props={"bbs_claim_at": int(claim_at)},
-                ),
-                node_run_graph=graph,
-            )
-            self.add_task_nodes(
-                [node], parent_node_id=parent_node_id, mark_parent_planning=False
-            )  # BBS 挂载只建 scoped 节点,根在 SUCCESS 回投后再→PLANNING
-            self.update_task_node_info(
-                TaskNodePatch(task_id=task_id, node_id=node_id, status=Status.RUNNING)
-            )  # create+start:PENDING→RUNNING 是 _DIRECT_TRANSITIONS 合法翻
-            self.update_task_graph_info(
-                task_id,
-                TaskGraphPatch(extend_props_patch={"bbs_relay_count": relay_count + 1}),
-            )
-            return node
+        return task_graph_support.attach_bbs_node(
+            self, task_id, parent_node_id, task_spec, bot_id
+        )
 
     def claim_bbs_owner(
         self,

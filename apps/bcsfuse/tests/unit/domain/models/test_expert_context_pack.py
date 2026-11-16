@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.domain.models.expert_context_pack import ExpertContextPack
+from app.domain.models.expert_context_pack import ExpertContextPack
 
 
 class TestExpertContextPackModel:

@@ -20,6 +20,13 @@ const group: PublicGroup = {
 };
 const actions = { busy: false, onOpenMembers: jest.fn(), onShare: jest.fn(), onCreateSession: jest.fn() };
 
+test.each(['未公开', '列表中的 Owner'])('群卡不显示 Owner 用户字段（%s）', (ownerUserName) => {
+  render(<GroupCard group={{ ...group, ownerUserName }} {...actions} />);
+  expect(screen.queryByText('Owner 用户：')).not.toBeInTheDocument();
+  expect(screen.queryByText(ownerUserName)).not.toBeInTheDocument();
+  expect(screen.getByText('服务助手 (bot-1:owner)')).toBeInTheDocument();
+});
+
 test('群主行展示名称 (UUID)，无 title 属性，悬停可查看完整文本', async () => {
   render(<GroupCard group={group} {...actions} />);
   const label = screen.getByText('服务助手 (bot-1:owner)');

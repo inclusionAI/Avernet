@@ -64,7 +64,9 @@ const task: Task = {
       roundNo: 1,
       status: 'succeeded',
       summary: '首轮优化',
-      output: { scoreComparison: { name: 'test_score', baseline: 0.73, candidate: 0.94, delta: 0.94 - 0.73 } },
+      output: {
+        scoreComparison: { name: 'test_score', baseline: 0.73, candidate: 0.94, delta: 0.94 - 0.73 },
+      },
     },
   ],
 };
@@ -72,12 +74,19 @@ beforeEach(() => {
   jest.clearAllMocks();
   jest.mocked(useLocation).mockReturnValue({ search: '' } as ReturnType<typeof useLocation>);
   api.task.mockResolvedValue(task);
-  api.tasks.mockResolvedValue({ tasks: [], page: 1, pageSize: 1, total: 0, totalPages: 1, canViewAll: false });
+  api.tasks.mockResolvedValue({
+    tasks: [],
+    page: 1,
+    pageSize: 1,
+    total: 0,
+    totalPages: 1,
+    canViewAll: false,
+  });
 });
 it('hides list Tabs while retaining distinct detail sections and real-step progress', async () => {
   render(<TaskDetail />);
   await screen.findByRole('heading', { name: '目标进化演示' });
-  expect(screen.getByRole('heading', { name: '智能进化' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '返回任务列表' })).toBeInTheDocument();
   expect(screen.queryByRole('tablist', { name: '智能进化' })).not.toBeInTheDocument();
   for (const name of ['基本信息', '执行进度', '执行时间线', '产出物', '执行日志 · 优化'])
     expect(screen.getByRole('heading', { name })).toBeInTheDocument();
@@ -119,11 +128,10 @@ it('preserves the existing failed-step retry operation and does not label it a n
 });
 
 it('consumes the creation response for success feedback and never creates again', async () => {
-  jest
-    .mocked(useLocation)
-    .mockReturnValue({ search: '?created=1', state: { createdTask: task, spaceKey: 'owner:42' } } as ReturnType<
-      typeof useLocation
-    >);
+  jest.mocked(useLocation).mockReturnValue({
+    search: '?created=1',
+    state: { createdTask: task, spaceKey: 'owner:42' },
+  } as ReturnType<typeof useLocation>);
   render(<TaskDetail />);
   expect(screen.getByRole('heading', { name: '任务创建成功' })).toBeInTheDocument();
   expect(screen.getByText(/以下为任务类型的流程说明/)).toBeInTheDocument();
@@ -136,7 +144,12 @@ it('displays historical diagnosis-driven full tasks without losing diagnosis ste
     ...task,
     config: { inputMode: 'diagnose_goal' },
     steps: [
-      { stepId: 'd', stepType: 'diagnose', status: 'succeeded', output: { diagnosis: { summary: '历史诊断' } } },
+      {
+        stepId: 'd',
+        stepType: 'diagnose',
+        status: 'succeeded',
+        output: { diagnosis: { summary: '历史诊断' } },
+      },
       ...task.steps!,
     ],
   });
@@ -152,7 +165,10 @@ it('keeps Diff reading in the artifact dialog on the existing API', async () => 
       {
         ...task.steps![1],
         output: {
-          diff: { summary: '更新问候 Skill', files: [{ path: 'skills/greeting/SKILL.md', change: '更新回复规则' }] },
+          diff: {
+            summary: '更新问候 Skill',
+            files: [{ path: 'skills/greeting/SKILL.md', change: '更新回复规则' }],
+          },
         },
       },
     ],
@@ -164,4 +180,18 @@ it('keeps Diff reading in the artifact dialog on the existing API', async () => 
   await waitFor(() => expect(api.diff).toHaveBeenCalledWith('task-1', 'opt-1'));
   expect(await screen.findAllByText('diff --git a/SKILL.md b/SKILL.md')).not.toHaveLength(0);
   expect(api.stepAction).not.toHaveBeenCalled();
+});
+
+it('uses a centered detail canvas and keeps versions available below without a side rail', async () => {
+  render(<TaskDetail />);
+  const title = await screen.findByRole('heading', { name: '目标进化演示' });
+  expect(title).toHaveClass('text-2xl');
+  const content = document.querySelector('[data-task-detail-content]')!;
+  expect(content.parentElement).toHaveClass('max-w-[1040px]', 'mx-auto');
+  expect(content).not.toHaveClass('xl:grid-cols-[minmax(0,1fr)_300px]');
+  const disclosure = screen.getByText('查看进化版本').closest('details')!;
+  expect(disclosure).not.toHaveAttribute('open');
+  fireEvent.click(screen.getByText('查看进化版本'));
+  expect(disclosure).toHaveAttribute('open');
+  expect(await screen.findByRole('complementary', { name: '当前任务进化版本' })).toBeInTheDocument();
 });

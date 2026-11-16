@@ -88,20 +88,37 @@ async def test_multi_instance_bounded_and_partial_results(world):
         data=[{"items": [{"uuid": "a"}, {"uuid": "b"}, {"uuid": "c"}]}]))
     active = 0
     maximum = 0
+    overlapping = asyncio.Event()
+    release = asyncio.Event()
 
     async def invoke(conn, method, path, **kwargs):
         nonlocal active, maximum
         active += 1
         maximum = max(maximum, active)
-        await asyncio.sleep(0.01)
-        active -= 1
+        if active == 2:
+            overlapping.set()
+        # Connection resolution runs in worker threads; hold requests open
+        # until overlap is observed instead of assuming it happens within 10ms.
+        try:
+            await release.wait()
+        finally:
+            active -= 1
         if conn["device_uuid"] == "b":
             raise TimeoutError("secret-value")
         return {"success": True, "data": {"path": ".", "file_count": 0, "elapsed_ms": 1}}
 
     world.get(DeviceAdapterTransport).set_override("invoke", invoke)
-    result = await world.get(FileCountServiceProtocol).query(
-        FileCountQuery("ignore-bot", "ignore_owner", "online", ".", "r"), "ignore_owner", is_admin=False)
+    pending = asyncio.create_task(world.get(FileCountServiceProtocol).query(
+        FileCountQuery("ignore-bot", "ignore_owner", "online", ".", "r"), "ignore_owner", is_admin=False))
+    try:
+        await asyncio.wait_for(overlapping.wait(), timeout=15)
+        assert active == 2
+        release.set()
+        result = await asyncio.wait_for(pending, timeout=15)
+    finally:
+        release.set()
+        pending.cancel()
+        await asyncio.gather(pending, return_exceptions=True)
     assert maximum == 2
     assert result["success"] is False
     assert [r["file_count"] for r in result["results"]] == [0, None, 0]

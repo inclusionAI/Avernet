@@ -1,3 +1,4 @@
+import { carryActiveDraftBaseline, editorWorkflowSourceIsCurrent } from '../api/editorWorkflowSource'
 import type { WorkflowSpec } from '@avernet/clawweb-shared/web/types'
 import { prepareWorkflowSession, useEditorStore, type EditorState } from './store'
 import { hasAnyPackVersionRisk, hasAnyPackVersionUpload, packVersionsRevision } from './packVersionSession'
@@ -21,11 +22,13 @@ export function workflowTransitionIsCurrent(approval: WorkflowTransition): boole
 
 export function prepareWorkflowTransition(approval: WorkflowTransition, target: WorkflowSpec, expectedId: string): WorkflowSpec | null {
   if (!target || target.id !== expectedId || !workflowTransitionIsCurrent(approval)) return null
-  return prepareWorkflowSession(target)?.spec ?? null
+  const prepared = prepareWorkflowSession(target)?.spec ?? null
+  if (prepared) carryActiveDraftBaseline(target, prepared)
+  return prepared
 }
 
 /** Reject stale approvals, malformed or mismatched targets before changing the session. */
 export function commitWorkflowTransition(approval: WorkflowTransition, target: WorkflowSpec, expectedId: string, isNew = false, databaseSpec: WorkflowSpec | null = target, activeDeployNumber?: number | null): boolean {
-  if (!target || target.id !== expectedId || !workflowTransitionIsCurrent(approval)) return false
+  if (!target || target.id !== expectedId || !workflowTransitionIsCurrent(approval) || !isNew && !editorWorkflowSourceIsCurrent(target, expectedId)) return false
   return useEditorStore.getState().replaceSession(target, approval.state, isNew, isNew ? null : databaseSpec, activeDeployNumber)
 }

@@ -54,7 +54,8 @@ export class WorkflowSnapshotRepository {
   private async hasAssociationColumn(): Promise<boolean> {
     try { await this.db.query('SELECT workflow_snapshot_json FROM flow_runs WHERE 1 = 0'); return true; }
     catch (error) {
-      if (/no such column: workflow_snapshot_json|unknown column ['`]?workflow_snapshot_json/i.test(String(error))) return false;
+      const message = String(error).toLowerCase();
+      if (message.includes('workflow_snapshot_json') && (message.includes('no such column') || message.includes('unknown column'))) return false;
       throw error;
     }
   }

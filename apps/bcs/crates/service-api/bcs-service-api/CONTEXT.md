@@ -1,5 +1,120 @@
 # bcs-service-api Context
 
+## Version 5.1.0: Group Card snapshots
+
+`GroupCoreService` and `GroupRepoPort` add `read_card_snapshot`, returning
+`GroupCardSnapshot` with current Group publication metadata and an optional
+stored template from one consistent read. Defaults fail explicitly, preserving
+source compatibility for existing implementations without silently treating
+unsupported reads as deletion. SQL and Memory implement the contract; GroupCore
+forwards it, and Fuse V2 consumes it instead of building Cards from `Group`.
+All workspace consumers rebuild together; no HTTP or Plugin API changes apply.
+
+The store projects template names from label/ID and both Card/skill descriptions
+from context (empty when unset), preserving interfaces and opaque extensions.
+Legacy stored display fields are refreshed only in the read result until a
+normal upsert/name/context write persists them. Missing templates remain missing,
+and query/decode failures propagate. Shared Memory/SQLite conformance and catalog
+integration cover the boundary. No schema migration or startup backfill is added.
+See [Group template ownership](../../../docs/bcsfuse-catalog.md#group-template-ownership).
+
+## Version 4.0.0: Provider initial authority
+
+`OwnershipInitialization` adds required `initial_manager_user_ids`; existing Rust
+constructors must supply it (empty for Human-token registrations). Provider Core
+and the Bot Provider repo add separate fail-closed atomic multi-user admission
+methods. Fresh ordinary identity/binding/authority commits together; initialized
+replays preserve changes, and existing uninitialized multi-user targets conflict.
+Empty snapshots preserve the legacy path. Workspace consumers rebuild together;
+HTTP fields and Plugin APIs are unchanged. Shared registration/rollback tests
+cover Memory and SQLite, with native MySQL migration-chain conformance.
+
+## Version 5.0.0: Candidate viewer perspective and bound friend set
+
+`BotCandidateReadQuery` adds required `viewer_kind: ActorKind`, and
+`BotSearchCandidateQuery` adds `viewer_kind: Option<ActorKind>` plus
+`name_only: bool`. Existing external struct literals must supply the new
+fields, so this is a major Rust Service API version change even though no JSON
+wire field changes. All workspace consumers use path dependencies and rebuild
+together; there is no Plugin API or database migration change.
+
+A Human viewer filters candidates on the target's `user_visibility`, while a
+Bot viewer filters on the Bot-facing `visibility`. Collaboration adds the
+approved friend set to that same dimension. The store applies the filter
+before COUNT and before `offset`/`limit`, so `total` is the post-filter
+pre-pagination value. The V1 candidate list and V1 candidate search now pass
+the authorized perspective `acting.kind`, so a Human viewer filters on
+`user_visibility` and a Bot viewer on `visibility`, with the approved
+Connect/edge friend set. The legacy control-plane search keeps `viewer_kind:
+None` and `name_only: false` (Bot-oriented filtering and the broader
+name/summary/Bot-ID search), while the store's `Some(..)` viewer and
+`name_only: true` (name-only matching for the V1 name fallback) are consumed by
+the authorized Core search entry wired at the composition root.
+
+Candidate stores bind the sorted, de-duplicated friend IDs as one JSON array
+expanded with SQLite `json_each` or MySQL `JSON_TABLE`; page and COUNT share
+the same CTE, conditions and bindings. This removes the per-friend
+`UNION ALL` statement chain (which failed at 501 friends on SQLite) without
+claiming constant set-construction or scan cost.
+
+Measured SQLite shape evidence over 0, 100, 500, 501 and 1,000 friends:
+1,000 friend IDs serialize to about 30,001 bytes of JSON; the candidate page
+SQL is about 811–826 bytes and its COUNT about 357–372 bytes depending on the
+viewer/purpose branch; the page statement binds 6 parameters (one friend JSON
+array plus the fixed filters and page bounds), and COUNT binds the same shared
+4 conditions. Each candidate query remains
+exactly two statements (page + COUNT) and contains no per-friend `UNION ALL`
+chain; the friend-set binding count does not grow with the set size.
+
+The control-plane Core contract also exposes `search_candidate_records`, a
+Provider-hydration-free search path for authorization. The production
+`BotControlPlaneCore` delegates it directly to the repository's candidate
+record query; authorized candidate search must use it for visibility/edge
+filtering and hydrate Provider metadata only for the final displayed IDs.
+The existing `search_candidates` path remains the hydrated projection for
+callers that need Provider information.
+
+The same 5.0.0 change adds the authorized shared-search contract.
+`BotCandidateSearchCoreService::search_authorized_candidates` takes
+`AuthorizedCandidateSearchQuery` (query text, acting actor, env, `ActorKind`
+viewer, purpose visibility, approved `friend_ids`, display limit) and returns
+`ServiceResult<BotCandidateSearchCoreResult>`. Its default explicitly fails, so
+test doubles and legacy implementations keep compiling while an unwired
+composition never returns an unauthorized success. `WorkerRecommendCommand`
+gains the required `WorkerRecommendationScope` (`LegacyDefault` /
+`AllVisibilities`), making the provider recall range an explicit choice at every
+construction site. Recall scope is not authorization: the production Core
+re-checks the bounded provider recall against the control plane before
+hydration. This contract adds no JSON wire field of its own, no Plugin API
+change, and no database migration; the same 5.0.0 delivery also adds the
+BCSFuse request `filters` field in `bcs-fuse-client` to carry that recall
+scope.
+
+## Version 6.0.0: Candidate current-owner display projection
+
+`BotCandidate` adds `owner_user_id: Option<String>`. Existing Rust struct literals
+must supply the new field, and `BotAuthorityRepoPort`, `BotAuthorityCoreService`,
+and `BotAuthorityPort` add required `ownerships_for` methods without defaults.
+External constructors and trait implementors must therefore migrate together;
+this is a major Rust Service API version change. Workspace consumers use path
+dependencies and rebuild together.
+
+The HTTP JSON field is optional and omitted when no owner projects, so existing
+clients can ignore it. Owner display metadata comes from the current authority
+owner edge rather than the historical `created_by` column. There is no Plugin
+API, route, configuration, database schema, or migration change.
+
+## Version 3.0.0: Bot response avatars
+
+`PhysicalBot` and `HumanBot` add `avatar_url: Option<String>`. Existing Rust
+struct literals must supply this field, requiring a major Service API version
+change. Workspace consumers rebuild together; external constructors should use
+`None` for an unset avatar and for Humans. JSON responses always include the
+nullable key, while serde still accepts older payloads without it. All V1 Bot
+projections share this shape, including mine, get, query, update and candidates.
+The application reuses `BotRegistryCoreService::avatar_urls`; no Plugin API,
+storage schema, HTTP route version, or configuration changes are needed.
+
 ## Version 2.0.0: avatar source compatibility
 
 The avatar extension adds fields to public Rust structs, including
@@ -702,3 +817,90 @@ within a trusted scope. Repository CAS returns the committed projection and
 fences both run and shared Task revisions. Pending input is Task-owned; budgets
 and local states remain run-owned. Run-scoped cancellation rejects a shared Task
 with another active binding. See docs/specs/a2a/task-bindings-v1.md.
+
+## Strict atomic auth session repository
+
+`AuthSessionRepoPort` is the strict, environment-scoped login-session
+persistence contract for the V1 API auth plugin chain. `AuthSessionScope`
+includes `env`, and scope values come from trusted configuration plus an
+already-verified identity, never from unverified JWT claims. Session versions
+CAS on a revision that advances by `checked_add(1)` within SQL signed BIGINT
+bounds. Install and rotate are compare-and-swap writes returning
+`Applied`/`Conflict`; a conflict is a lost race, never a persistence error,
+and callers restart the login batch or fail authentication instead of writing
+unconditionally. Revoking bumps the revision and clears the token hash, so a
+revoked or rotated-out hash no longer resolves; repeating a revoke reports
+`NotCurrent`. Reads separate absence (`None` for a missing session), the
+current revision, and persistence failure through the closed two-category
+`AuthSessionStoreError` whose display text never carries SQL, endpoint, or
+credential material. The port is independent of `UserIdentityRepoPort`: an
+implementation may implement both, but the strict trait has no default
+methods delegating to the legacy Option-returning lookups, and a session
+write never auto-creates a missing identity row. Snapshot display fields are
+joined from the identity row. Concrete implementations prove conformance
+against the shared `bcs-test-support` harness
+(`auth_session_repo_port_contract_tests`), which takes any
+`AuthSessionRepoPort` trait object and a scope.
+
+## V1 auth application ports and AuthService
+
+`port::oauth` is the ONLY surface the auth application layer consumes for
+login, transport-neutral by construction: `OAuthProviderPort` (chain-ordered
+provider names, authorize-URL build with the exact per-provider callback,
+one-time code exchange whose third-party errors are lowered to stable
+`ApplicationError` categories, never raw provider text), `OAuthSessionPort`
+(atomic install for a completed browser-bound login, rotation, and
+idempotent session-instance revoke), and `PendingOAuthLoginPort` (the
+issue/consume mirror of plugin-api's `PendingOAuthLoginStore`, with the
+byte-identical `{callback_base}/{provider}` join on both sides). `application::v1::AuthService`
+orchestrates them for the OpenAPI V1 facade (`login_urls`, `complete_login`,
+`current_user`, `refresh_session`, `logout`): its `AuthFlowReply` carries
+transport-neutral cookie instructions — one `SetLoginChallenge` on URL
+discovery, session-install plus challenge-clear on callback success — plus
+the failure classes the API chain pins (lost login race → 409, lost rotation
+race → 401, dependency outage → 503 `auth_dependency_unavailable`, and
+logout never reports success after a failed revoke). No delivery type crosses
+into this contract; the HTTP adapter encodes `BrowserCookieChange` into
+separate `Set-Cookie` headers and the rest of BCS keeps consuming
+`AuthenticatedCaller` unchanged. Wire contract:
+`api-contracts/v1/authentication/contract.md`.
+
+## Invite-code issuance caller
+
+`InitInviteCodes` requires the verified `AuthenticatedCaller`; application
+implementations must authorize issuance before repository access. The bootstrap
+allowlist uses exact user IDs and defaults to denying all callers. Gateway or
+OAuth authentication, a binding and non-user identities do not implicitly grant
+issuance. HTTP request bodies remain count-only; Rust callers must provide the
+caller when rebuilding. No persistence schema changes are required.
+
+### A2A Provider name reservation
+
+`pin_a2a_slug` atomically reserves the previously resolved Provider slug before
+name-based A2A access. SQL stores the internal reservation in Provider config;
+ordinary metadata writes preserve it even when based on a stale config, and
+slug changes then fail. Concurrent rename-before-pin fails the pin instead of
+silently addressing another identity. Legacy unpinned Providers retain their
+existing rename behavior. Memory uses the same Provider write lock for both.
+
+Name access adds one conditional indexed UPDATE and one indexed SELECT (one
+Provider row); only the first pin changes data. It invalidates the Provider cache,
+propagates errors, and never runs per output event. No network request is made
+while holding a DB transaction. Store conformance covers Memory and SQLite.
+
+## Native task Service API compatibility
+
+`MessageFlowService::handle_native_task_dispatch(request_id, command)` is the
+inbound entry for authenticated native task requests without a wire parent key.
+The production Caller-aware implementation correlates accepted starts and checks
+BCS-owned parent identity; request IDs and model arguments never grant authority.
+The additive entry is versioned as bcs-service-api 3.1.0 on top of the 3.0.0 API.
+Workspace consumers rebuild together; existing implementations retain source
+compatibility with the 3.0.0 API.
+The additive default strips delegation and retains ordinary task dispatch only,
+not Caller inheritance. There is no identity Plugin API or task wire change.
+Bounded replay and composition semantics are specified in
+`apps/bcs/docs/native-task-caller.md` and exercised through the real task and
+protected-delivery application seams.
+
+Public Agent registration accepts BCN visibility (protected by default, or public). The typed policy is passed into atomic ownership/Card admission; Card updates preserve it unless explicitly supplied; refreshes never modify it. Card and visibility updates share one CAS-fenced transaction. Legacy registration retains protected visibility.

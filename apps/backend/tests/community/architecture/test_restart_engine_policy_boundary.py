@@ -10,8 +10,10 @@ _CORE = Path(__file__).resolve().parents[3] / 'src/agentclaw/community/core'
 _FLOW = 'service_bot/services/publish_flow/'
 _SHARED_PATHS = (
     _FLOW + 'restart_mixin.py',
+    _FLOW + 'progress_sync_mixin.py',
     _FLOW + 'operation_runner.py',
     _FLOW + 'tasks.py',
+    'service_bot/services/service_publication_facade.py',
     'bot_management/engines/provisioning.py',
     'bot_management/engines/restart_contract.py',
 )
@@ -56,3 +58,47 @@ def test_published_restart_keeps_common_workflow_in_its_original_entrypoint():
         and isinstance(item.context_expr.func, ast.Attribute)
         and item.context_expr.func.attr == 'published_restart_scope'
         for item in node.items) for node in ast.walk(entry))
+
+
+@pytest.mark.parametrize('relative, function', [
+    ('adapters/http/bot_management/router.py', 'get_bot_status'),
+    ('adapters/http/openapi_v1/bots/router.py', 'get_bot_status'),
+    ('adapters/http/service_bot/router_publish.py', 'restart_status'),
+    ('core/service_bot/services/publish_flow/progress_sync_mixin.py', 'sync_restart_progress'),
+])
+def test_status_consumers_do_not_interpret_engine_restart_fields(relative, function):
+    source = _CORE.parent / relative
+    tree = ast.parse(source.read_text())
+    method = next(node for node in ast.walk(tree)
+                  if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == function)
+    for node in ast.walk(method):
+        if isinstance(node, ast.Attribute):
+            assert node.attr != 'restart', (relative, node.lineno)
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            assert node.value not in {'aicoding', 'coding_restart', 'BACKING_UP', 'QUEUED', 'RUNNING', 'SUCCEEDED'}, (relative, node.lineno)
+
+
+def test_status_extensions_are_open_to_another_engine_strategy(monkeypatch):
+    from agentclaw.community.core.bot_management.engines import registry
+    from agentclaw.community.core.bot_management.engines.default import DefaultProvisioningStrategy
+    from types import SimpleNamespace
+
+    class OtherEngineStrategy(DefaultProvisioningStrategy):
+        def project_status_ext(self, *, ext, response_ext, **kwargs):
+            return {**response_ext, 'another_engine': {'progress': ext['custom_progress']}}
+
+    strategies = registry.EngineProvisioningRegistry()
+    strategies.register(OtherEngineStrategy('another_engine'))
+    monkeypatch.setattr(registry, '_REGISTRY', strategies)
+    ext = {'custom_progress': {'done': True}}
+    result = registry.resolve_status_ext(
+        {'active_engine': 'another_engine', 'ext': ext}, response_ext={'keep': 1},
+    )
+    assert result == {'keep': 1, 'another_engine': {'progress': {'done': True}}}
+    record = SimpleNamespace(ext={**ext, 'restart': {'engine': 'another_engine'}})
+    assert registry.resolve_published_status_ext(record) == {
+        'another_engine': {'progress': {'done': True}},
+    }
+    assert strategies.resolve('another_engine').published_restart_result(record=record) is None
+    assert 'aicoding' not in result
+    assert ext == {'custom_progress': {'done': True}}

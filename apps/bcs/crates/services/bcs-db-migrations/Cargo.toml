@@ -1,0 +1,21 @@
+[package]
+name = "bcs-db-migrations"
+description = "BCS SQLite schema initialization and versioned migrations"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+bcs-db-api = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+
+[dev-dependencies]
+bcs-db-local = { workspace = true }
+tokio = { workspace = true }
+serde_json = { workspace = true }

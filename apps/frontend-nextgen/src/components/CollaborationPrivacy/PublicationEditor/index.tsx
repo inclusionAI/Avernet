@@ -57,8 +57,9 @@ interface PublicationEditorProps {
   onSubmit: (config: PublicConfig, deptEntries?: Array<{ deptNo: string; deptName: string }>) => void;
   /**
    * 公开风险前置检测状态（bot-public-risk-check；仅 audience==='user' 且非外部 Bot 时由宿主传入）。
-   * checking/advancing/approving → 已发起终态锁定；failed/attention → 失败提示 + 可编辑重发，
-   * 并提供「刷新状态」入口（§2.2 手动刷新）：立即查询原安全单同步最新结论，不重新建单。
+   * checking/advancing/approving → 已发起终态锁定，并提供「刷新状态」入口（§2.2 手动刷新：
+   * 检测超时后端暂停自动轮询时可主动同步最新结论）；failed/attention → 失败提示 + 可编辑重发，
+   * 同样提供「刷新状态」入口：立即查询原安全单同步最新结论，不重新建单。
    */
   risk?: {
     uiState: BotPublicRiskUiState;
@@ -181,6 +182,8 @@ export function PublicationEditor({
               currentScopeNote={`${visibilityScopeLabels[initialConfig.scope]}${
                 initialConfig.scope === 'restricted' ? `（${initialConfig.organizationPaths.length} 个组织范围）` : ''
               }`}
+              onRefreshState={riskActive.refreshCurrent}
+              refreshing={riskActive.isRefreshing}
             />
           ) : (
             <>

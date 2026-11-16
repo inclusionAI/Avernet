@@ -112,6 +112,7 @@ def run_repo(db) -> RunRepository:
 
 def _req(tenant: str, idempotency_key: str | None = None) -> SubmitRunRequest:
     return SubmitRunRequest(
+        identity_bot_id=IDENTITY_SOURCE,
         tenant=tenant,
         goal="test goal",
         agents=(dm.AgentSpec(name="r1", role="research"),),
@@ -708,3 +709,9 @@ class TestRunDetail:
 
         assert len(detail.guards) == 1
         assert detail.guards[0].kind == "width_exceeded"
+
+#: The Bot every submit in this suite names as its identity source. The
+#: service refuses a submit without one, so the value is fixed here rather
+#: than repeated at each call site; the seam resolves it (or is unbound, in
+#: which case the service takes the id as given).
+IDENTITY_SOURCE = "identity-source-bot"

@@ -90,6 +90,44 @@ async fn inbound_group_target_injects_driver_context_when_binding_configures_inj
 }
 
 #[tokio::test]
+async fn manager_worker_binding_delivery_applies_only_to_new_sessions_and_keeps_user_messages() -> TestResult {
+    let harness = TestHarness::new(manager_group("group_1")).await?;
+    let mut config = dingtalk_config("robot_1");
+    config[GROUP_CONTEXT_DELIVERY_CONFIG] = serde_json::json!("inject");
+    let binding = harness.service.create_binding(CreateBindingCommand {
+        channel_type: channel_type(), account_ref: "robot_1".to_string(),
+        target: BindingTarget::Group { group_id: "group_1".to_string() },
+        group_chat_scope: Some(GroupChatScope::ConversationShared),
+        outbound_visibility: Visibility::FullTranscript, env: "dev".to_string(),
+        created_by: Some("creator".to_string()), config: config.clone(),
+    }).await?;
+
+    harness.service.handle_inbound(group_inbound("conv_1", "u1", Some("张三"), "msg_1", true)).await?;
+    config[GROUP_CONTEXT_DELIVERY_CONFIG] = serde_json::json!("send");
+    harness.service.update_binding_config(&binding.id, config).await?;
+    harness.service.handle_inbound(group_inbound("conv_1", "u1", Some("张三"), "msg_2", true)).await?;
+    harness.service.handle_inbound(group_inbound("conv_2", "u1", Some("张三"), "msg_3", true)).await?;
+
+    let notifications = harness.system_message.notifications.lock().await;
+    assert_eq!(notifications.len(), 2, "reused sessions do not receive context again");
+    for (notification, expected) in notifications.iter().zip([
+        bcs_domain::DeliveryType::Inject, bcs_domain::DeliveryType::Send,
+    ]) {
+        let SystemMessageEvent::SessionContext { driver_delivery, .. } = &notification.event else {
+            return Err("expected session context notification".into());
+        };
+        assert_eq!(*driver_delivery, Some(expected));
+    }
+    let sends = harness.message_flow.web_sends.lock().await;
+    assert_eq!(sends.len(), 3, "context delivery does not suppress or duplicate user messages");
+    assert_eq!(sends[0].session_id, sends[1].session_id);
+    assert_ne!(sends[0].session_id, sends[2].session_id);
+    assert_eq!(sends[0].session_id.as_deref(), Some(notifications[0].session_id.as_str()));
+    assert_eq!(sends[2].session_id.as_deref(), Some(notifications[1].session_id.as_str()));
+    Ok(())
+}
+
+#[tokio::test]
 async fn group_context_delivery_config_validates_create_and_update() -> TestResult {
     let harness = TestHarness::new(manager_group("group_1")).await?;
     let mut config = dingtalk_config("robot_1");

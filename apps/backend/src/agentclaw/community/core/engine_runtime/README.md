@@ -17,7 +17,7 @@ provides:
   - "Engine-runtime domain errors (no HTTP status; the adapter maps them)"
   - "DesktopConnectionServiceProtocol — owner-affined desktop WebSocket discovery"
 consumes:
-  - "BotService — scoped legacy/entity address resolution followed by operator authorization"
+  - "RuntimeBotLookup — lightweight scoped legacy/entity address resolution; operator authorization remains in gate"
   - "DeviceContextResolver — bot -> DeviceContext (the repo's single provider-resolution point)"
   - "DeviceAdapterTransport — the one system boundary (HTTP to the bot's engine adapter)"
   - "DeviceService — connection info for the socket-composing endpoint"
@@ -47,6 +47,7 @@ internal_dependencies:
   - agentclaw.community.di.config
   - agentclaw.community.plugin_api.device_adapter_transport
   - agentclaw.community.utils.env_utils
+  - agentclaw.community.utils.runtime_list_timing
 ```
 
 ### Change impact
@@ -75,6 +76,17 @@ are load-bearing and must survive any refactor:
 
 Adding a group means adding a router, not a relay method: `call()` is a generic
 forward on purpose.
+
+### Runtime read budget
+
+The relay and connection composer are injected with `RuntimeBotLookup`, not
+the management-page `BotService`. It uses the same `BotAddressResolver` and
+repository scope/ambiguity rules, but returns a copy of the already-resolved
+row without a second owner lookup, draft binding enrichment or template read.
+It does not cache rows or permission results across requests. The existing
+operator check, published-stage binding selection, device provider and public
+response contracts remain unchanged. IAM and management-page queries retain
+their existing services. See `specs/2026-11-06-runtime-read-budget/spec.md`.
 
 ### Desktop connection contract
 

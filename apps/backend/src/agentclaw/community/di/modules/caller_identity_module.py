@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from injector import Binder, Module, inject, provider, singleton
 
+from agentclaw.community.core.caller_identity.scheduled_refresh import (
+    NoopScheduledCallerRefresh, ScheduledCallerRefreshProtocol,
+)
+
 from agentclaw.community.api.caller_identity_service import (
     CallerIdentityServiceProtocol,
 )
@@ -38,6 +42,8 @@ from agentclaw.community.core.repository.protocols.identity import CallerIdentit
 from agentclaw.community.core.caller_identity.session_validator import CallerSessionValidator
 from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.caller_identity.service import CallerIdentityService
+from agentclaw.community.core.caller_identity.expiry_runtime_updater import ExpiryAwareCallerRuntimeUpdater
+from agentclaw.community.core.repository.protocols.chat import ExpertChatInstanceRepository
 from agentclaw.community.core.caller_identity.iam_token_service import (
     CallerIamTokenService,
 )
@@ -125,12 +131,20 @@ class CallerIdentityModule(Module):
 
     @singleton
     @provider
+    def scheduled_caller_refresh(self) -> ScheduledCallerRefreshProtocol:
+        """Community-safe no-op; enterprise composition supplies ASC support."""
+        return NoopScheduledCallerRefresh()
+
+    @singleton
+    @provider
     @inject
     def caller_session_validator(
         self, binding_repository: DeviceBindingRepository,
         runtime_bindings: RuntimeBindingResolutionService,
     ) -> CallerSessionValidator:
-        return CallerSessionValidator(binding_repository=binding_repository, runtime_bindings=runtime_bindings)
+        return CallerSessionValidator(
+            binding_repository=binding_repository, runtime_bindings=runtime_bindings,
+        )
 
     @singleton
     @provider
@@ -207,19 +221,20 @@ class CallerIdentityModule(Module):
     def caller_runtime_updater(
         self,
         baas_service: BaasService,
+        instances: ExpertChatInstanceRepository,
+        bindings: DeviceBindingRepository,
+        bots: BotRepository,
     ) -> CallerRuntimeUpdater:
-        """Use the existing BaaS singleton for the Caller outbound PUT."""
-        return baas_service
+        return ExpiryAwareCallerRuntimeUpdater(instances=instances, delegate=baas_service, bindings=bindings, bots=bots)
 
     @singleton
     @provider
     @inject
     def caller_runtime_updater_protocol(
         self,
-        baas_service: BaasService,
+        updater: CallerRuntimeUpdater,
     ) -> CallerRuntimeUpdaterProtocol:
-        """Bind BaasService to core layer protocol."""
-        return baas_service
+        return updater
 
     @singleton
     @provider

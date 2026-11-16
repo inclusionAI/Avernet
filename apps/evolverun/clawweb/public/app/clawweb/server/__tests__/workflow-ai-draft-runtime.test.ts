@@ -1,0 +1,52 @@
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import express from 'express';
+import { once } from 'node:events';
+import type { Server } from 'node:http';
+import { aiDraftFixture, draftRequest } from './workflow-ai-draft-db-fixture.js';
+import { createWorkflowAiDraftRuntime } from '../workflow-ai-draft-runtime.js';
+const closing: Array<() => Promise<void>> = [];
+afterEach(async () => { for (const close of closing.splice(0).reverse()) await close(); });
+describe('Stateless workflow AI runtime assembly', () => {
+  it('mounts receipt routes without a draft table and enforces verified principal, live ACL and owner binding', async () => {
+    const f = await aiDraftFixture(); closing.push(() => f.db.close());
+    let principal: { actorId: string } | null = { actorId: 'owner' };
+    const runtime = createWorkflowAiDraftRuntime(f.db, { principal: async () => principal, execution: f.execution, receipts: f.receipts });
+    const app = express(); app.use(express.json()); app.use('/api/workflows', runtime.router);
+    const server: Server = app.listen(0, '127.0.0.1'); await once(server, 'listening');
+    closing.push(() => new Promise((resolve, reject) => server.close(e => e ? reject(e) : resolve())));
+    const url = `http://127.0.0.1:${(server.address() as { port: number }).port}/api/workflows/flow/ai-drafts`;
+    const post = (path: string, body: unknown) => fetch(url + path, { method: 'POST', headers: { 'content-type': 'application/json', 'x-pack-version-csrf': '1' }, body: JSON.stringify(body) });
+    expect(await (await fetch(url + '/capabilities')).json()).toEqual({ available: true });
+    const input = draftRequest(), prepared = await (await post('/prepare', input)).json() as { draftId: string; receipt: string };
+    expect(f.execution.dispatch).not.toHaveBeenCalled();
+    expect((await post('', { ...input, receipt: prepared.receipt })).status).toBe(202);
+    const context = { receipt: prepared.receipt, currentYaml: input.currentYaml };
+    principal = { actorId: 'viewer' };
+    expect((await post('/' + prepared.draftId + '/poll', context)).status).toBe(403);
+    f.raw.exec("UPDATE bot_workflow_permissions SET bot_owner_id = '*' WHERE workflow_id = 'flow'");
+    expect((await post('/' + prepared.draftId + '/poll', context)).status).toBeGreaterThanOrEqual(400);
+    principal = null;
+    expect((await fetch(url + '/capabilities', { headers: { 'x-user-id': 'owner', 'x-admin': 'true' } })).status).toBe(401);
+    expect(f.raw.prepare("SELECT name FROM sqlite_master WHERE name = 'workflow_ai_drafts'").all()).toEqual([]);
+  });
+  it('honors host-owned verified-admin policy on every receipt-based poll without background DB work', async () => {
+    const f = await aiDraftFixture(); closing.push(() => f.db.close());
+    let allowed = true;
+    const policy = vi.fn(async (_workflowId: string, actorId: string) => actorId === 'verified-admin' && allowed);
+    const runtime = createWorkflowAiDraftRuntime(f.db, { principal: async () => ({ actorId: 'verified-admin' }), canEdit: policy, execution: f.execution, receipts: f.receipts });
+    const query = vi.spyOn(f.db, 'query'), exec = vi.spyOn(f.db, 'exec');
+    expect(await runtime.service.capabilities('verified-admin', 'flow')).toEqual({ available: true });
+    const input = draftRequest(), prepared = await runtime.service.prepare('verified-admin', 'flow', input);
+    const task = await runtime.service.create('verified-admin', 'flow', { ...input, receipt: prepared.receipt });
+    allowed = false;
+    await expect(runtime.service.get('verified-admin', 'flow', task.draftId, { receipt: prepared.receipt, currentYaml: input.currentYaml })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    expect(await runtime.monitor.reconcile()).toBe(0);
+    expect(query).not.toHaveBeenCalled(); expect(exec).not.toHaveBeenCalled();
+  });
+  it('keeps missing AutoHeal/BaaS configuration unavailable with no fallback execution', async () => {
+    const f = await aiDraftFixture(); closing.push(() => f.db.close());
+    const runtime = createWorkflowAiDraftRuntime(f.db, { principal: async () => ({ actorId: 'owner' }), receipts: f.receipts, unavailableReason: 'AUTO_HEAL_BAAS_NOT_CONFIGURED' });
+    expect(await runtime.service.capabilities('owner', 'flow')).toEqual({ available: false, reason: 'AUTO_HEAL_BAAS_NOT_CONFIGURED' });
+    expect(await runtime.monitor.reconcile()).toBe(0);
+  });
+});

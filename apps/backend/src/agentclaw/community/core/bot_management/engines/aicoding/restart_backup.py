@@ -1,9 +1,9 @@
 """Coding restart backup: confirmed fastdisk is strict only when explicitly enabled.
 
-Backend sends the same read-only detector as publication. Detection failures keep
-legacy behavior. When enabled, a confirmed fastdisk target cannot downgrade
-after backup failure. Valid partial receipts allow restart with a warning.
-Binding checks and durable mutation fences always remain mandatory.
+Backend detects live fastdisk mounts with a self-contained command. Non-fastdisk
+and failed detections skip the backup helper. When enabled, a confirmed fastdisk
+target cannot downgrade after backup failure. Valid partial receipts allow restart
+with a warning. Binding checks and durable mutation fences remain mandatory.
 """
 from __future__ import annotations
 
@@ -27,7 +27,9 @@ from agentclaw.community.utils.env_utils import get_current_env
 
 from .restart_arca import BoundArcaRestartExecutor, RestartBackupTargetChanged
 from .restart_dependencies import RestartBackupDependencies
-from .fastdisk_probe import detection_command, parse_detection_result
+from .fastdisk_probe import (
+    FastdiskDetectionError, parse_detection_result, restart_detection_command as detection_command,
+)
 from .restart_state import ENGINES, RestartSuperseded
 from ..restart_contract import PublishedRestartServices
 
@@ -110,7 +112,7 @@ def log_restart_failure(
                if details['arca_id'] == "-" and details['physical_targets']
                else [(details['target_id'], details['arca_id'])])
     for target_id, arca_id in targets:
-        logger.error(
+        logger.warning(
             "[%s] event=aicoding_restart_failed status=failed "
             "bot_id=%s arca_id=%s target_id=%s operation_id=%s "
             "phase=%s reason=%s error_type=%s cause_types=%s "
@@ -130,8 +132,8 @@ ENTRY = '/opt/agentclaw/bin/restart_backup'
 POLL_SECONDS = 2
 # Covers runtime termination (330s) plus archive budget (900s) and exec overhead.
 DEADLINE_SECONDS = 1500
-# Confirmed fastdisk: stop waiting after five minutes, never turn timeout into permission.
-FASTDISK_TIMEOUT = 300
+# Confirmed fastdisk shares the 25-minute budget; timeout never permits replacement.
+FASTDISK_TIMEOUT = 1500
 
 
 class RestartBackupError(RuntimeError):
@@ -150,6 +152,7 @@ class RestartBackupBlocked(RestartBackupError):
             'helper_missing': '快盘容器缺少重启备份能力',
             'mount_changed': '快盘挂载状态发生变化',
             'target_changed': '快盘备份目标容器发生变化',
+            'warning_unavailable': '快盘备份风险提示保存失败',
         }.get(reason, '快盘备份结果无法确认')
         super().__init__(reason, f'{detail}，本次重启已终止，旧容器未执行销毁或替换')
 
@@ -164,7 +167,8 @@ class _PreparedBackup:
 
 
 def error_reason(error):
-    return getattr(error, 'reason', 'timeout' if isinstance(error, TimeoutError) else 'transport_error')
+    return getattr(error, 'reason', 'detection_failed' if isinstance(error, FastdiskDetectionError) else
+                   'timeout' if isinstance(error, TimeoutError) else 'transport_error')
 
 
 def command(action: str, operation: str) -> str:
@@ -216,7 +220,7 @@ def prepare_backup(*, execute: Callable[[str], Any], operation_id: str,
                    bot_id: str, target_id: str, require_backup: bool = False,
                    sandbox_id: str | None = None, owner_id: str | None = None,
                    strict_deadline: float | None = None, block_on_failure: bool = True) -> Callable[[], None]:
-    """Wait outside the legacy restart lock; return a short receipt verifier."""
+    """Wait and validate the final receipt once; preserve the caller hook contract."""
     started = time.monotonic()
     # Ordinary durable operations share one budget across task redeliveries and
     # all physical targets. Published/Caller paths retain their existing budget.
@@ -236,10 +240,12 @@ def prepare_backup(*, execute: Callable[[str], Any], operation_id: str,
 
     def log(phase, status, *, level='info', error_type='-', generation='-', reason='-'):
         partial = status == 'partial_success'
+        event = 'aicoding_restart_backup' if require_backup or observed_status in {
+            'running', 'committed', 'partial_success', 'failed'} else 'aicoding_restart_probe'
         getattr(logger, 'warning' if partial else level)(
-            "event=aicoding_restart_backup phase=%s status=%s bot_id=%s "
+            "event=%s phase=%s status=%s bot_id=%s "
             "target_id=%s operation_id=%s elapsed_ms=%s generation_id=%s error_type=%s reason=%s arca_id=%s env=%s owner_id=%s%s",
-            phase, status, safe_log_field(bot_id), safe_log_field(target_id), operation_id,
+            event, phase, status, safe_log_field(bot_id), safe_log_field(target_id), operation_id,
             int((time.monotonic() - started) * 1000), safe_log_field(generation), error_type, reason,
             arca_identity(target_id, sandbox_id), get_current_env(), safe_log_field(owner_id),
             " action=continue_restart data_loss_risk=true" if partial else "",
@@ -315,43 +321,14 @@ def prepare_backup(*, execute: Callable[[str], Any], operation_id: str,
                                 helper_status=observed_status)
         raise
 
-    def verify():
-        observed_status = 'unknown'
-        try:
-            if (require_backup or execution is not None) and time.monotonic() >= deadline:
-                raise TimeoutError("重启备份超过等待预算")
-            # An absent helper is re-probed read-only; never start work on a
-            # replacement container while holding the legacy short-lived lock.
-            check_action = 'start' if status == 'not_mounted' else 'status'
-            current = parse_result(execute(command(check_action, operation_id)), operation_id)
-            observed_status = current['status']
-            if (require_backup or execution is not None) and time.monotonic() >= deadline:
-                raise TimeoutError("重启备份超过等待预算")
-            if require_backup and current['status'] == 'failed':
-                raise RestartBackupError('backup_failed', '最终快盘备份未成功')
-            if current['status'] != status or (boot and current.get('boot_id') != boot):
-                raise RestartBackupError('receipt_stale', '备份后实例或挂载状态变化')
-            if status in {'committed', 'partial_success'}:
-                current_generation, current_partial = receipt(current)
-                if current_generation != generation:
-                    raise RestartBackupError('generation_changed', '备份凭据变化')
-                if current_partial != partial:
-                    raise RestartBackupError('receipt_stale', '备份完整性结果变化')
-            log('verify', 'partial_success' if partial else 'allowed', generation=generation,
-                reason='partial_receipt_valid' if partial else '-')
-        except Exception as error:
-            log('verify', 'failed', level='warning', error_type=type(error).__name__, reason=error_reason(error))
-            if require_backup and block_on_failure:
-                log_restart_failure(error, bot_id=bot_id, target_id=target_id, owner_id=owner_id,
-                                    sandbox_id=sandbox_id, operation_id=operation_id, phase='verify',
-                                    elapsed_ms=int((time.monotonic() - started) * 1000),
-                                    helper_status=observed_status)
-            raise
-
-    return verify
+    # The successful terminal receipt has already been validated above. Do not
+    # query it again under the restart lock or before submission. The outer
+    # strategy verifier still checks the target/binding and fences mutation.
+    return lambda: None
 
 
-def _best_effort(callback, *, phase, bot_id, target_id, operation_id, sandbox_id=None, owner_id=None):
+def _best_effort(callback, *, phase, bot_id, target_id, operation_id, sandbox_id=None, owner_id=None,
+                 on_degraded=None, event='aicoding_restart_backup'):
     """Downgrade only backup I/O/result failures, never lifecycle writes/fences.
 
     No raw exception/output is logged: platform errors can contain credentials.
@@ -364,18 +341,20 @@ def _best_effort(callback, *, phase, bot_id, target_id, operation_id, sandbox_id
     except Exception as error:
         failure = error
     logger.warning(
-        "event=aicoding_restart_backup phase=%s status=degraded action=continue_restart "
+        "event=%s phase=%s status=degraded action=continue_restart "
         "bot_id=%s target_id=%s operation_id=%s error_type=%s reason=%s "
         "data_loss_risk=true arca_id=%s env=%s owner_id=%s",
-        phase, bot_id, target_id, operation_id, type(failure).__name__, error_reason(failure),
+        event, phase, bot_id, target_id, operation_id, type(failure).__name__, error_reason(failure),
         arca_identity(target_id, sandbox_id), get_current_env(), safe_log_field(owner_id),
     )
+    if on_degraded is not None:
+        on_degraded()  # Persistence failures must escape the best-effort catch.
     return None
 
 
-def _backup_policy(callback, *, required, physical_targets=(), **identity):
+def _backup_policy(callback, *, required, physical_targets=(), on_degraded=None, event='aicoding_restart_backup', **identity):
     if not required:
-        return _best_effort(callback, **identity)
+        return _best_effort(callback, on_degraded=on_degraded, event=event, **identity)
     try:
         return callback()
     except (RestartBackupTargetChanged, RestartBackupBlocked, RestartSuperseded):
@@ -395,7 +374,7 @@ def _detect_fastdisk(execute, **identity):
             raise TimeoutError('detection budget exhausted')
         return parse_detection_result(execute(detection_command()))['status'] == 'run'
 
-    return _best_effort(detect, phase='detect', **identity) is True
+    return _best_effort(detect, phase='detect', event='aicoding_restart_fastdisk_detect', **identity) is True
 
 
 def _confirmed_targets():
@@ -423,7 +402,18 @@ def _attempt_backup(*, blocking_enabled: Callable[[], bool] = lambda: False, **k
     # errors must escape even the outer BaaS compatibility catch.
     known = _confirmed_targets()
     fastdisk = identity['target_id'] in known or _detect_fastdisk(kwargs['execute'], **identity)
-    required = fastdisk and blocking_enabled()
+    if not fastdisk:
+        return _PreparedBackup(required=False, verify=lambda: None)
+    required = blocking_enabled()
+    def warn():
+        from .restart_state import record_nonblocking_backup_warning
+        try:
+            record_nonblocking_backup_warning(identity['operation_id'])
+        except RestartSuperseded:
+            raise
+        except Exception as error:
+            raise RestartBackupBlocked('warning_unavailable') from error
+    on_degraded = warn if not required else None
     if required and execution is not None and identity['target_id'] not in known:
         try:
             execution.state.update({'BACKING_UP'}, fastdisk_targets=[identity['target_id']])
@@ -433,12 +423,12 @@ def _attempt_backup(*, blocking_enabled: Callable[[], bool] = lambda: False, **k
             raise RestartBackupBlocked('confirmation_unavailable') from error
     verify = _backup_policy(
         lambda: prepare_backup(**kwargs, require_backup=fastdisk, block_on_failure=required),
-        required=required, phase='prepare', **identity,
+        required=required, phase='prepare', on_degraded=on_degraded, **identity,
     )
 
     def check():
         if verify is not None:
-            _backup_policy(verify, required=required, phase='verify_receipt', **identity)
+            _backup_policy(verify, required=required, phase='verify_receipt', on_degraded=on_degraded, **identity)
     return _PreparedBackup(required=required, verify=check)
 
 
@@ -460,7 +450,7 @@ def _log_inventory(*, bot_id, target_id, state, phase, operation_id="-", elapsed
                 status = str(status) if status is not None else '<missing>'
                 status_counts[status] = status_counts.get(status, 0) + 1
     logger.info(
-        "event=aicoding_restart_backup phase=%s inventory=observed "
+        "event=aicoding_restart_probe phase=%s inventory=observed "
         "bot_id=%s target_id=%s raw_device_count=%s raw_status_counts=%s "
         "operation_id=%s source=baas_devices elapsed_ms=%s",
         phase, bot_id, target_id, raw_count, status_counts, operation_id, elapsed_ms,
@@ -499,7 +489,7 @@ def _query_inventory(runtime, *, bot_id, target_id, operation_id, phase):
     """Coding-only inventory lookup; keep shared BaaS lifecycle untouched."""
     started = time.monotonic()
     logger.info(
-        "event=aicoding_restart_backup phase=%s inventory=query_started "
+        "event=aicoding_restart_probe phase=%s inventory=query_started "
         "bot_id=%s target_id=%s operation_id=%s source=baas_devices",
         phase, bot_id, target_id, operation_id,
     )
@@ -526,7 +516,7 @@ def _query_inventory(runtime, *, bot_id, target_id, operation_id, phase):
                         elapsed_ms=int((time.monotonic() - started) * 1000),
                     )
                     logger.info(
-                        "event=aicoding_restart_backup phase=%s inventory=resolved "
+                        "event=aicoding_restart_probe phase=%s inventory=resolved "
                         "reason=confirmed_empty_terminal_bot bot_id=%s target_id=%s "
                         "operation_id=%s baas_status=%s target_count=0",
                         phase, bot_id, target_id, operation_id, detail['status'],
@@ -542,7 +532,7 @@ def _query_inventory(runtime, *, bot_id, target_id, operation_id, phase):
     except Exception as error:
         # Shared transport exceptions may contain response bodies/credentials.
         logger.warning(
-            "event=aicoding_restart_backup phase=%s inventory=query_failed "
+            "event=aicoding_restart_probe phase=%s inventory=query_failed "
             "bot_id=%s target_id=%s operation_id=%s source=baas_devices "
             "elapsed_ms=%s error_type=%s reason=inventory_query_failed",
             phase, bot_id, target_id, operation_id,
@@ -557,7 +547,7 @@ def _query_inventory(runtime, *, bot_id, target_id, operation_id, phase):
         targets = _live_targets(state)
     except Exception as error:
         logger.warning(
-            "event=aicoding_restart_backup phase=%s inventory=unavailable "
+            "event=aicoding_restart_probe phase=%s inventory=unavailable "
             "bot_id=%s target_id=%s operation_id=%s source=baas_devices "
             "error_type=%s reason=%s",
             phase, bot_id, target_id, operation_id, type(error).__name__,
@@ -565,7 +555,7 @@ def _query_inventory(runtime, *, bot_id, target_id, operation_id, phase):
         )
         raise
     logger.info(
-        "event=aicoding_restart_backup phase=%s inventory=resolved "
+        "event=aicoding_restart_probe phase=%s inventory=resolved "
         "bot_id=%s target_id=%s operation_id=%s target_count=%s",
         phase, bot_id, target_id, operation_id, len(targets),
     )
@@ -582,39 +572,99 @@ def _operation_id(value, restart_key=None):
 
 
 class AicodingRestartBackupMixin:
+    def get_restart_status(self, *, ext, published=False, progress=None, public=False):
+        from .restart_state import restart_status
+        return restart_status(ext, published=published, progress=progress, public=public)
+
+    def project_status_ext(self, *, ext, response_ext, published=False, progress=None, public=False):
+        from .restart_state import project_status_ext
+        return project_status_ext(ext, response_ext=response_ext, published=published,
+                                  progress=progress, public=public)
+
+    def published_restart_result(self, *, record):
+        from .restart_state import published_restart_result
+        return published_restart_result(record)
+
+    def observe_published_restart(self, *, record, progress, mutate_ext):
+        result = self.get_restart_status(ext=record.ext or {}, published=True, progress=progress)
+        if result is None or result['status'] not in {'SUCCEEDED', 'FAILED'}:
+            return
+        def complete(ext):
+            state = ext.get('restart') or {}
+            if (state.get('operation_id') == result['operation_id']
+                    and state.get('phase') == 'WAITING_READY'):
+                state.update(status=result['status'], message=result['message'])
+        mutate_ext(publish_id=record.id, mutator=complete)
+
+    def accept_published_restart(self, ctx, *, services, publish_id, stage):
+        from ..restart_contract import RestartAdmission
+        operation_id = uuid.uuid4().hex
+        def accept(ext):
+            restart = ext.setdefault('restart', {})
+            restart.update(engine=ctx.active_engine, operation_id=operation_id,
+                           stage=stage, status='RUNNING', phase='QUEUED', message=None)
+            restart.pop('backup_warning', None)
+            restart.pop('precondition_error', None)
+            restart.pop('restarting', None)
+            restart.pop('guard', None)
+        ext = services.mutate_ext(publish_id=publish_id, mutator=accept)
+        return RestartAdmission(
+            operation_id=operation_id,
+            ext=self.project_status_ext(ext=ext, response_ext={}, published=True, public=True),
+        )
+
     @contextmanager
     def published_restart_scope(
         self, ctx, *, services: PublishedRestartServices,
         publish_id: int, stage: str, binding_id: int, source_status: str,
+        operation_id: str | None = None,
     ) -> Iterator[dict]:
         if str(ctx.active_engine or "").strip().lower() not in ENGINES:
             yield {}
             return
 
-        from agentclaw.community.core.service_bot.repository.models import PublishStatus
-
         record = services.get_record(publish_id)
         if record is None:
             raise RuntimeError(f"Publish record not found: {publish_id}")
         blocked = ((record.ext or {}).get("restart") or {}).get("precondition_error") or {}
-        if record.status == PublishStatus.FAILED.value and blocked.get("stage") == stage:
+        previous = (record.ext or {}).get('restart') or {}
+        if (operation_id and previous.get('operation_id') != operation_id
+                and previous.get('phase') == 'QUEUED'):
+            yield {'success': False, 'message': '本次重启已被更新的请求替代'}
+            return
+        if (blocked.get('stage') == stage and (
+                operation_id is None or previous.get('operation_id') == operation_id)):
             # A queue redelivery must not forget a terminal backup veto.
             yield {"success": False, "message": blocked["message"]}
             return
 
+        from .restart_state import published_backup_warning, published_warning_reporter
         guard_id = uuid.uuid4().hex
 
         def claim(ext: dict) -> None:
             state = ext.setdefault("restart", {})
+            if state.get('operation_id') != (operation_id or guard_id):
+                state.pop('backup_warning', None)
             state["guard"] = {
                 "id": guard_id, "binding_id": binding_id, "status": source_status,
             }
+            state.update(engine=ctx.active_engine, operation_id=operation_id or guard_id,
+                         stage=stage, status='RUNNING', phase='BACKING_UP', message=None)
+            state.pop('failure_phase', None)
             state.pop("precondition_error", None)
 
         services.mutate_ext(publish_id=publish_id, mutator=claim)
+        warning_scope = published_backup_warning.set(published_warning_reporter(
+            services, publish_id=publish_id, guard_id=guard_id,
+        ))
         outcome = {}
         try:
             yield outcome
+            def submitted(ext):
+                state = ext.get('restart') or {}
+                if (state.get('guard') or {}).get('id') == guard_id:
+                    state['phase'] = 'WAITING_READY'
+            services.mutate_ext(publish_id=publish_id, mutator=submitted)
         except RestartBackupBlocked as error:
             log_restart_failure(error, bot_id=ctx.bot_id, phase="published_restart", owner_id=ctx.owner_id,
                                 publish_id=publish_id, binding_id=binding_id)
@@ -623,6 +673,8 @@ class AicodingRestartBackupMixin:
                 guard_id=guard_id, message=str(error),
             )
             outcome.update(success=False, message=str(error))
+        finally:
+            published_backup_warning.reset(warning_scope)
 
     @staticmethod
     def _persist_published_restart_veto(
@@ -646,12 +698,11 @@ class AicodingRestartBackupMixin:
         restart.pop("restarting", None)
         restart.pop("guard", None)
         restart["precondition_error"] = {"stage": stage, "message": message}
+        restart.update(status='FAILED', phase='BACKING_UP', message=message)
         ext.pop("retry", None)
-        ext["error_message"] = message
-        ext["source_status"] = record.status
         # Persistence/CAS errors propagate: never claim the failure was saved.
         services.update_status(
-            publish_id=publish_id, target_status=PublishStatus.FAILED,
+            publish_id=publish_id, target_status=PublishStatus(record.status),
             source_status=PublishStatus(record.status), ext=ext,
             expected_ext=expected_ext,
         )
@@ -693,7 +744,7 @@ class AicodingRestartBackupMixin:
     def prepare_restart(self, ctx, *, device_service_provider=None, **kwargs):
         """Back up outside the caller's lock; return the under-lock verifier.
 
-        Non-fastdisk, unknown detection and explicitly disabled guards warn and continue.
+        Non-fastdisk/unknown detection skips backup; disabled guards warn and continue.
         Enabled fastdisk vetoes, binding reads and the durable CAS fence always
         propagate through the original lifecycle.
         """
@@ -764,7 +815,7 @@ class AicodingRestartBackupMixin:
                 log_targets = tuple(targets or confirmed)
                 if targets == {}:
                     logger.info(
-                        "event=aicoding_restart_backup phase=resolve status=skipped "
+                        "event=aicoding_restart_probe phase=resolve status=skipped "
                         "reason=no_live_targets bot_id=%s target_id=%s operation_id=%s",
                         ctx.bot_id, device_id, operation_id,
                     )
@@ -800,7 +851,7 @@ class AicodingRestartBackupMixin:
                         check()
                 return verify
             if binding_id is None:
-                logger.info("event=aicoding_restart_backup phase=skip reason=no_binding bot_id=%s", ctx.bot_id)
+                logger.info("event=aicoding_restart_probe phase=skip reason=no_binding bot_id=%s", ctx.bot_id)
                 return lambda: None
             binding = device_service.get_device(binding_id=binding_id)
             target = binding.get('device_id') if isinstance(binding, dict) else getattr(binding, 'device_id', None)
@@ -880,7 +931,7 @@ class AicodingRestartBackupMixin:
             def verify():
                 current = bot_repository.get_by_id_and_owner(ctx.bot_id, ctx.owner_id)
                 if not isinstance(current, dict) or current.get('binding_id') != binding_id:
-                    logger.error("event=aicoding_restart_backup phase=verify status=blocked "
+                    logger.warning("event=aicoding_restart_probe phase=verify status=blocked "
                                  "reason=binding_changed bot_id=%s binding_id=%s", ctx.bot_id, binding_id)
                     raise RestartBackupError('binding_changed', '备份后绑定已变化，禁止替换其他容器')
                 if provider == 'arca' and check is None:
@@ -900,7 +951,7 @@ class AicodingRestartBackupMixin:
                                 physical_targets=log_targets,
                                 sandbox_id=log_sandbox, operation_id=operation_id,
                                 binding_id=binding_id, phase="precondition")
-            logger.error("event=aicoding_restart_backup phase=precondition status=blocked "
+            logger.warning("event=aicoding_restart_probe phase=precondition status=blocked "
                          "bot_id=%s binding_id=%s target_id=%s error_type=%s reason=%s",
                          ctx.bot_id, binding_id, device_id, type(error).__name__, error_reason(error))
             raise

@@ -35,6 +35,7 @@ from agentclaw.community.core.task.forum.interaction.models import (
 )
 from agentclaw.community.core.task.forum.models import (
     MAX_AUTHOR_ID_LENGTH,
+    MAX_ID_LENGTH,
     MAX_AUTHOR_TYPE_LENGTH,
     MAX_SEARCH_KEYWORD_LENGTH,
 )
@@ -74,6 +75,7 @@ from .schemas import (
     CreateTopicRequestUnified,
     PostHelpfulUpdated,
     PostItem,
+    PostLocation,
     SetPostHelpfulRequest,
     domain_topic_config,
     ReplyCreated,
@@ -220,6 +222,37 @@ async def list_posts(
         [PostItem.from_record(post) for post in items],
         request,
     )
+
+
+@read_router.get(
+    "/topics/{topic_id}/posts/{post_id}/location",
+    response_model=Envelope[PostLocation],
+    dependencies=[Depends(require_principal)],
+)
+@envelope_errors
+async def get_post_location(
+    topic_id: TopicIdPath,
+    request: Request,
+    post_id: str = Path(
+        min_length=1,
+        max_length=MAX_ID_LENGTH,
+        description="Stable Post id exactly as returned by BBS APIs.",
+    ),
+    page_size: int = Query(
+        default=20,
+        ge=1,
+        le=100,
+        description="Page size used by the caller to render first-level replies.",
+    ),
+    service: ForumServiceProtocol = Injected(ForumServiceProtocol),
+) -> Envelope[PostLocation]:
+    """Resolve a direct or nested reply to its exact public reply page."""
+    location = service.get_post_location(
+        topic_id=topic_id,
+        post_id=post_id,
+        page_size=page_size,
+    )
+    return envelope(PostLocation.from_record(location), request)
 
 
 @read_router.post(
@@ -486,8 +519,10 @@ _SUMMARY_QUERY_KEYS = frozenset(
     {
         "actor_type",
         "actor_id",
+        "actor_id_alias",
         "target_type",
         "target_id",
+        "target_id_alias",
     }
 )
 
@@ -508,7 +543,18 @@ async def get_interaction_summary(
     actor_id: str | None = Query(
         default=None,
         max_length=256,
-        description="Optional stable HUMAN work-no or BOT id used as the actor dimension.",
+        description=(
+            "Optional stable identity id used as the actor dimension. A BOT id "
+            "must be the owner-scoped bot_uuid, e.g. 'default:<work_no>'."
+        ),
+    ),
+    actor_id_alias: str | None = Query(
+        default=None,
+        max_length=256,
+        description=(
+            "Optional legacy BOT bot_id alias for a non-default BOT. It must "
+            "match the bot_id prefix of actor_id; omit it for HUMAN and default BOT queries."
+        ),
     ),
     target_type: str | None = Query(
         default=None,
@@ -518,7 +564,18 @@ async def get_interaction_summary(
     target_id: str | None = Query(
         default=None,
         max_length=256,
-        description="Optional stable target id used as the target dimension.",
+        description=(
+            "Optional stable target id. A BOT target_id must be the "
+            "owner-scoped bot_uuid, e.g. 'default:<work_no>'."
+        ),
+    ),
+    target_id_alias: str | None = Query(
+        default=None,
+        max_length=256,
+        description=(
+            "Optional legacy BOT bot_id alias for a non-default BOT target. It must "
+            "match the bot_id prefix of target_id; omit it for HUMAN and default BOT queries."
+        ),
     ),
     service: ForumInteractionServiceProtocol = Injected(
         ForumInteractionServiceProtocol
@@ -531,8 +588,10 @@ async def get_interaction_summary(
             InteractionSummaryItemRequest(
                 actor_type=actor_type,  # type: ignore[arg-type]
                 actor_id=actor_id,
+                actor_id_alias=actor_id_alias,
                 target_type=target_type,  # type: ignore[arg-type]
                 target_id=target_id,
+                target_id_alias=target_id_alias,
             )
         )
     )

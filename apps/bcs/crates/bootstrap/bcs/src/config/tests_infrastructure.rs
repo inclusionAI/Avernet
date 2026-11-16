@@ -583,6 +583,7 @@ base_url = "https://directory.example.com"
 fn invite_public_claim_is_nested_and_disabled_by_default() {
     let default_config = BcsConfig::default();
     assert!(!default_config.invite.public_claim_enabled);
+    assert!(default_config.invite.issuer_user_ids.is_empty());
     assert_eq!(default_config.invite.public_claim_max_count, 1_000);
 
     let config: BcsConfig = toml::from_str(
@@ -592,12 +593,14 @@ fn invite_public_claim_is_nested_and_disabled_by_default() {
         [invite]
         public_claim_enabled = true
         public_claim_max_count = 200
+        issuer_user_ids = ["issuer-1"]
         "#,
     )
     .expect("parse invite public claim config");
 
     assert!(config.invite.public_claim_enabled);
     assert_eq!(config.invite.public_claim_max_count, 200);
+    assert_eq!(config.invite.issuer_user_ids, ["issuer-1"]);
 }
 
 #[test]

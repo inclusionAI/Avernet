@@ -198,3 +198,18 @@ describe('configured temporary parent for pack script writes', () => {
     expect(readdirSync(parent)).toEqual([]);
   });
 });
+
+it('ignores an independent saved ref appearing during the wf push', async () => {
+  const execute = gitExecution.executeGit;
+  const spy = vi.spyOn(gitExecution, 'executeGit').mockImplementation(async (args, options) => {
+    const result = await execute(args, options);
+    if (args.includes('push')) git(repo, 'push', 'origin', `${base}:refs/heads/saved/flow`);
+    return result;
+  });
+  try {
+    await expect(writePackScripts({ ...input(), changes: [{ path: 'scripts/edit.sh', content: 'changed' }] })).resolves.toMatchObject({ commit: expect.any(String) });
+    expect(git(remote, 'rev-parse', 'refs/heads/saved/flow')).toBe(base);
+    // Never undo a possibly successful wf push to disguise a cross-ref race.
+    expect(git(remote, 'rev-parse', 'refs/heads/wf/flow')).not.toBe(base);
+  } finally { spy.mockRestore(); }
+});

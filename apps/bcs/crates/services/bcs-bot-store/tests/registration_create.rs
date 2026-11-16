@@ -29,7 +29,7 @@ async fn create(repo: &dyn BotRepoPort, name: &str, token: &str) -> Result<bool,
 
 async fn schema(db: &dyn DbPlugin) {
     db.execute(DbStatement::new(
-        "CREATE TABLE bcs_bots (
+        "CREATE TABLE bcs_bots (agent_card TEXT,
                 connection_mode TEXT DEFAULT 'plugin',
         bot_uuid TEXT NOT NULL, env TEXT NOT NULL, name TEXT NOT NULL,
         bot_info TEXT, session_token TEXT UNIQUE, created_by TEXT, visibility TEXT,

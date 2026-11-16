@@ -10,8 +10,11 @@ import { WorkflowSpecRepository } from '../../repositories/workflow-spec-reposit
 import { WorkflowDeployHistoryRepository } from '../../repositories/workflow-deploy-history-repository.js';
 import type { WorkflowSpec } from '../../workflow.js';
 import { AutoHealSaveService } from '../auto-heal-save-service.js';
+import { editorActiveDeploymentToken, InvalidEditorActiveDeploymentTokenInputError } from '../editor-active-deployment-token.js';
+import * as activeTokenHelper from '../editor-active-deployment-token.js';
 import * as git from '../clawflows-git-client.js';
-import * as specGit from '../pack-spec-save.js';
+import * as packSpec from '../pack-spec-save.js';
+import { mockPreparedSpecSave, preparedSaveIdentity, preparedSaveConfig, preparedSaveAuthor } from './auto-heal-prepared-save-fixture.js';
 
 const published: WorkflowSpec = { id: 'flow', version: '7', title: 'Published', nodes: [
   { id: 'start', title: 'Start', executor: { type: 'start' }, dependsOn: [] },
@@ -23,10 +26,10 @@ const notFound = { status: 404, code: 'WORKFLOW_NOT_FOUND' };
 const forbidden = { status: 403, code: 'FORBIDDEN' };
 const conflict = { status: 409, code: 'WORKFLOW_ALREADY_EXISTS' };
 
-describe('AutoHeal first database-only draft from active history', () => {
+describe('AutoHeal first-draft DB and policy checks inside prepared publication', () => {
   let raw: Database.Database, db: SqliteDatabase;
   let specs: WorkflowSpecRepository, history: WorkflowDeployHistoryRepository, permissions: BotWorkflowPermissionRepository;
-  const service = () => new AutoHealSaveService(db, specs, history, permissions);
+  const service = () => new AutoHealSaveService(db, specs, history, permissions, preparedSaveConfig, preparedSaveAuthor);
   const drafts = () => raw.prepare('SELECT * FROM workflow_specs ORDER BY id').all();
   // Compare every persisted value, including the original spec_json bytes and timestamps.
   const historyBytes = () => JSON.stringify(raw.prepare('SELECT * FROM workflow_deploy_history ORDER BY id').all());
@@ -50,17 +53,20 @@ describe('AutoHeal first database-only draft from active history', () => {
     await history.insert({ workflowId: 'flow', packId: 'older-pack', deployNumber: 8, version: 6,
       action: 'deploy', tagName: 'deploy/flow/#8', specJson: '{ "title": "older" }', ownerId: 'publisher' });
     await permissions.upsert({ bot_id: null, bot_owner_id: 'editor', workflow_id: 'flow', can_view: 1, can_execute: 0, can_edit: 1 });
-    // Even an unavailable Git installation / remote must be irrelevant to this path.
+    // Isolate transport, not the real DB transaction, active token or permission policy.
     vi.spyOn(git, 'createTempRepo').mockRejectedValue(new Error('Git unavailable'));
     vi.spyOn(git, 'cloneClawflows').mockRejectedValue(new Error('Git unavailable'));
     vi.spyOn(gitExecution, 'executeGit').mockRejectedValue(new Error('Git unavailable'));
     vi.spyOn(gitExecution, 'withGitOperation').mockRejectedValue(new Error('Git unavailable'));
-    vi.spyOn(specGit, 'withPreparedWorkflowSpec').mockRejectedValue(new Error('Git unavailable'));
+    mockPreparedSpecSave(input => {
+      expect(raw.inTransaction).toBe(false);
+      expect(raw.prepare('SELECT spec_json FROM workflow_specs WHERE workflow_id = ?').get(input.workflowId)).toEqual({ spec_json: JSON.stringify(input.spec) });
+    });
   });
   afterEach(async () => {
     try {
       for (const spy of [git.createTempRepo, git.cloneClawflows, gitExecution.executeGit,
-        gitExecution.withGitOperation, specGit.withPreparedWorkflowSpec]) expect(spy).not.toHaveBeenCalled();
+        gitExecution.withGitOperation]) expect(spy).not.toHaveBeenCalled();
     } finally { vi.restoreAllMocks(); await db.close(); }
   });
   function beforeTransaction(change: () => void) {
@@ -72,10 +78,48 @@ describe('AutoHeal first database-only draft from active history', () => {
       INSERT INTO clawweb_pack_operations VALUES ('legacy-save', 'flow', 'unknown', 'flow');`);
   }
 
+  async function editorInput() {
+    const active = (await history.findActiveByWorkflowId('flow'))!;
+    return { ...input(), packId: active.pack_id, expectedDraftAbsent: true as const,
+      expectedActiveDeployNumber: active.deploy_number, expectedActiveToken: editorActiveDeploymentToken('flow', active) };
+  }
+
+  it('creates the explicit Editor first draft without preparing or pushing Git', async () => {
+    const beforeHistory = historyBytes(), beforePermissions = permissionBytes();
+    expect(await service().saveEditorFirstDraft(await editorInput())).toEqual({ ok: true, saved: true, workflowId: 'flow', packId: 'published-pack' });
+    expect(await specs.findByWorkflowId('flow')).toMatchObject({ spec_json: JSON.stringify(applied), owner_id: 'editor', pack_id: 'published-pack' });
+    expect(packSpec.withPreparedWorkflowSpec).not.toHaveBeenCalled();
+    expect(historyBytes()).toBe(beforeHistory); expect(permissionBytes()).toBe(beforePermissions);
+  });
+
+  it.each(['revoked edit', 'active changed', 'competing draft'] as const)('rejects %s under the first-draft transaction without Git', async mode => {
+    const request = await editorInput();
+    beforeTransaction(() => {
+      if (mode === 'revoked edit') raw.exec('UPDATE bot_workflow_permissions SET can_edit = 0');
+      if (mode === 'active changed') raw.exec("UPDATE workflow_deploy_history SET spec_json = 'changed' WHERE is_active = 1");
+      if (mode === 'competing draft') raw.prepare('INSERT INTO workflow_specs (workflow_id,pack_id,spec_json,title,owner_id,gmt_create,gmt_modified) VALUES (?,?,?,?,?,?,?)')
+        .run('flow', 'published-pack', '{"winner":true}', 'winner', 'other', 1, 1);
+    });
+    await expect(service().saveEditorFirstDraft(request)).rejects.toMatchObject({ status: mode === 'revoked edit' ? 403 : 409,
+      code: mode === 'revoked edit' ? 'FORBIDDEN' : mode === 'active changed' ? 'BASELINE_STALE' : 'DRAFT_ALREADY_EXISTS' });
+    expect(packSpec.withPreparedWorkflowSpec).not.toHaveBeenCalled();
+    expect(drafts()).toHaveLength(mode === 'competing draft' ? 1 : 0);
+    if (mode === 'competing draft') expect((await specs.findByWorkflowId('flow'))?.spec_json).toBe('{"winner":true}');
+  });
+
+  it('requires complete explicit Editor preconditions and forbids create-only', async () => {
+    const request = await editorInput();
+    for (const change of [{ expectedDraftAbsent: undefined }, { expectedActiveDeployNumber: undefined },
+      { expectedActiveToken: undefined }, { createOnly: true }]) {
+      await expect(service().saveEditorFirstDraft({ ...request, ...change } as never)).rejects.toMatchObject({ status: 400, code: 'INVALID_REQUEST' });
+    }
+    expect(drafts()).toEqual([]); expect(packSpec.withPreparedWorkflowSpec).not.toHaveBeenCalled();
+  });
+
   it.each([undefined, null, 'published-pack'])('inserts the applied document with DB pack identity (packId=%s)', async packId => {
     const beforeHistory = historyBytes(), beforePermissions = permissionBytes();
     const lookup = vi.spyOn(history, 'findActiveByWorkflowId');
-    expect(await service().save({ ...input(), packId })).toEqual({ ok: true, saved: true, workflowId: 'flow', packId: 'published-pack' });
+    expect(await service().save({ ...input(), packId })).toEqual({ ok: true, saved: true, workflowId: 'flow', packId: 'published-pack', ...preparedSaveIdentity });
     expect(lookup).toHaveBeenCalledWith('flow');
     expect(drafts()).toHaveLength(1);
     expect(await specs.findByWorkflowId('flow')).toMatchObject({ pack_id: 'published-pack', owner_id: 'editor',
@@ -220,7 +264,7 @@ describe('AutoHeal first database-only draft from active history', () => {
     expect(drafts()).toEqual([]);
   });
 
-  it('still updates an existing draft without consulting history or Git', async () => {
+  it('updates an existing draft through prepared publication without consulting history', async () => {
     await specs.upsert('flow', 'draft-pack', JSON.stringify(published), 'editor');
     await specs.updateVersion('flow', 7);
     const beforeHistory = historyBytes();
@@ -228,7 +272,7 @@ describe('AutoHeal first database-only draft from active history', () => {
     const configured = new AutoHealSaveService(db, specs, history, permissions,
       { remoteUrl: 'https://invalid.example/repo', username: 'test', email: 'test@example.invalid', token: '' },
       { name: 'Test', email: 'test@example.invalid' });
-    expect(await configured.save(input())).toEqual({ ok: true, saved: true, workflowId: 'flow', packId: 'draft-pack' });
+    expect(await configured.save(input())).toEqual({ ok: true, saved: true, workflowId: 'flow', packId: 'draft-pack', ...preparedSaveIdentity });
     expect(await specs.findByWorkflowId('flow')).toMatchObject({ spec_json: JSON.stringify(applied), version: 7 });
     expect(lookup).not.toHaveBeenCalled(); expect(historyBytes()).toBe(beforeHistory);
   });
@@ -252,6 +296,20 @@ describe('AutoHeal first database-only draft from active history', () => {
     await expect(service().save({ ...input(), expectedDraftAbsent: true, createOnly })).rejects.toMatchObject({ status: 400, code: 'INVALID_REQUEST' });
     expect(drafts()).toEqual([]);
   });
+  it.each([null, '', 'a'.repeat(63), 'g'.repeat(64), 42, {}, []])('rejects invalid active token %j', async expectedActiveToken => {
+    await expect(service().save({ ...input(), expectedDraftAbsent: true, expectedActiveDeployNumber: 9, expectedActiveToken } as never))
+      .rejects.toMatchObject({ status: 400, code: 'INVALID_REQUEST' });
+    expect(drafts()).toEqual([]);
+  });
+  it('requires the draft-absence and deploy-number preconditions for an active token', async () => {
+    for (const options of [{ expectedActiveToken: 'a'.repeat(64) },
+      { expectedDraftAbsent: true, expectedActiveToken: 'a'.repeat(64) },
+      { expectedActiveDeployNumber: 9, expectedActiveToken: 'a'.repeat(64) }]) {
+      await expect(service().save({ ...input(), ...options } as never)).rejects.toMatchObject({ status: 400, code: 'INVALID_REQUEST' });
+    }
+    expect(drafts()).toEqual([]);
+  });
+
   it('requires an explicit active-deployment number when expectedDraftAbsent is used', async () => {
     await expect(service().save({ ...input(), expectedDraftAbsent: true })).rejects.toMatchObject({ status: 400, code: 'INVALID_REQUEST' });
     expect(drafts()).toEqual([]);
@@ -261,6 +319,142 @@ describe('AutoHeal first database-only draft from active history', () => {
     await expect(service().save({ ...input(), expectedDraftAbsent: true, expectedActiveDeployNumber } as never))
       .rejects.toMatchObject({ status: 400, code: 'INVALID_REQUEST' });
     expect(drafts()).toEqual([]);
+  });
+
+  it('accepts an exact active token and preserves the unchanged legacy payload', async () => {
+    const active = (await history.findActiveByWorkflowId('flow'))!;
+    const expectedActiveToken = editorActiveDeploymentToken('flow', active).toUpperCase();
+    expect(await service().save({ ...input(), packId: active.pack_id, expectedDraftAbsent: true,
+      expectedActiveDeployNumber: 9, expectedActiveToken })).toMatchObject({ saved: true, packId: active.pack_id });
+    raw.exec('DELETE FROM workflow_specs');
+    expect(await service().save(input())).toMatchObject({ saved: true, packId: active.pack_id });
+  });
+
+  it.each([
+    ['spec_json', "UPDATE workflow_deploy_history SET spec_json = '{ \"title\": \"changed\" }' WHERE is_active = 1"],
+    ['pack_id', "UPDATE workflow_deploy_history SET pack_id = 'changed-pack' WHERE is_active = 1"],
+  ])('rejects stale %s when the deployment number is unchanged at the initial read', async (_field, sql) => {
+    const active = (await history.findActiveByWorkflowId('flow'))!;
+    const expectedActiveToken = editorActiveDeploymentToken('flow', active);
+    raw.exec(sql); const before = historyBytes();
+    await expect(service().save({ ...input(), packId: active.pack_id, expectedDraftAbsent: true,
+      expectedActiveDeployNumber: 9, expectedActiveToken })).rejects.toMatchObject({ status: 409, code: 'BASELINE_STALE' });
+    expect(drafts()).toEqual([]); expect(historyBytes()).toBe(before);
+  });
+
+  it.each(['first read', 'locked read'])('rejects U+FFFD in the %s active row without writing', async stage => {
+    const active = (await history.findActiveByWorkflowId('flow'))!;
+    const expectedActiveToken = editorActiveDeploymentToken('flow', active);
+    const mutate = () => raw.prepare('UPDATE workflow_deploy_history SET spec_json = ? WHERE is_active = 1').run('published \uFFFD text');
+    if (stage === 'first read') mutate(); else beforeTransaction(mutate);
+    await expect(service().save({ ...input(), packId: active.pack_id, expectedDraftAbsent: true,
+      expectedActiveDeployNumber: 9, expectedActiveToken })).rejects.toMatchObject({ status: 409, code: 'BASELINE_STALE' });
+    expect(drafts()).toEqual([]);
+    expect((await history.findActiveByWorkflowId('flow'))?.spec_json).toBe('published \uFFFD text');
+  });
+
+  it('maps invalid token integer input to a conflict without changing legacy behavior', async () => {
+    const active = (await history.findActiveByWorkflowId('flow'))!;
+    const expectedActiveToken = editorActiveDeploymentToken('flow', active);
+    raw.exec('UPDATE workflow_deploy_history SET version = -1 WHERE is_active = 1');
+    const before = historyBytes();
+    await expect(service().save({ ...input(), expectedDraftAbsent: true, expectedActiveDeployNumber: 9, expectedActiveToken }))
+      .rejects.toMatchObject({ status: 409, code: 'BASELINE_STALE' });
+    expect(drafts()).toEqual([]); expect(historyBytes()).toBe(before);
+    await expect(service().save({ ...input(), expectedDraftAbsent: true, expectedActiveDeployNumber: 9 })).resolves.toMatchObject({ saved: true });
+    expect(historyBytes()).toBe(before);
+  });
+
+  it('propagates a database read error when a token precondition is present', async () => {
+    const active = (await history.findActiveByWorkflowId('flow'))!;
+    const failure = new Error('private database failure');
+    vi.spyOn(history, 'findActiveByWorkflowId').mockRejectedValueOnce(failure);
+    await expect(service().save({ ...input(), expectedDraftAbsent: true, expectedActiveDeployNumber: 9,
+      expectedActiveToken: editorActiveDeploymentToken('flow', active) })).rejects.toBe(failure);
+    expect(drafts()).toEqual([]);
+  });
+
+  it.each(['first read', 'locked read'])('maps the dedicated token error independent of its message at %s', async stage => {
+    const active = (await history.findActiveByWorkflowId('flow'))!;
+    const activeHash = editorActiveDeploymentToken('flow', active);
+    const original = activeTokenHelper.editorActiveDeploymentToken;
+    const compute = vi.spyOn(activeTokenHelper, 'editorActiveDeploymentToken');
+    if (stage === 'locked read') compute.mockImplementationOnce(original);
+    compute.mockImplementationOnce(() => { throw new InvalidEditorActiveDeploymentTokenInputError('a new diagnostic message'); });
+    const before = historyBytes();
+    await expect(service().save({ ...input(), expectedDraftAbsent: true, expectedActiveDeployNumber: 9, expectedActiveToken: activeHash }))
+      .rejects.toMatchObject({ status: 409, code: 'BASELINE_STALE' });
+    expect(drafts()).toEqual([]); expect(historyBytes()).toBe(before);
+  });
+
+  it.each([new Error('crypto unavailable'), new Error('Invalid active workflow token row'),
+    new Error('Invalid active workflow token integer'), new Error('Ambiguous active workflow token text'),
+    new TypeError('Ambiguous active workflow token text')])
+    ('does not translate unrelated token computation failures: %s', async failure => {
+      const active = (await history.findActiveByWorkflowId('flow'))!;
+      const activeHash = editorActiveDeploymentToken('flow', active);
+      vi.spyOn(activeTokenHelper, 'editorActiveDeploymentToken').mockImplementationOnce(() => { throw failure; });
+      await expect(service().save({ ...input(), expectedDraftAbsent: true, expectedActiveDeployNumber: 9, expectedActiveToken: activeHash }))
+        .rejects.toBe(failure);
+      expect(drafts()).toEqual([]);
+    });
+
+  it('propagates a locked database read failure with the token precondition', async () => {
+    const active = (await history.findActiveByWorkflowId('flow'))!;
+    const activeHash = editorActiveDeploymentToken('flow', active);
+    const failure = new Error('private database lock failure');
+    const transaction = db.transaction.bind(db);
+    vi.spyOn(db, 'transaction').mockImplementationOnce(fn => transaction(tx => {
+      const failing: IDatabase = { dbType: tx.dbType, dialect: tx.dialect,
+        query: <T>(sql: string, params?: unknown[]) => sql.includes('FROM workflow_deploy_history')
+          ? Promise.reject(failure) : tx.query<T>(sql, params),
+        exec: tx.exec.bind(tx), transaction: tx.transaction.bind(tx), close: tx.close.bind(tx) };
+      return fn(failing);
+    }));
+    await expect(service().save({ ...input(), expectedDraftAbsent: true, expectedActiveDeployNumber: 9, expectedActiveToken: activeHash }))
+      .rejects.toBe(failure);
+    expect(drafts()).toEqual([]);
+  });
+
+  it('keeps legacy number-only behavior when an active spec changed before the request', async () => {
+    raw.prepare('UPDATE workflow_deploy_history SET spec_json = ? WHERE is_active = 1').run('earlier change');
+    expect(await service().save({ ...input(), expectedDraftAbsent: true, expectedActiveDeployNumber: 9 }))
+      .toMatchObject({ saved: true, packId: 'published-pack' });
+    expect(drafts()).toHaveLength(1);
+  });
+
+  it('still checks request pack identity even with a valid active token', async () => {
+    const active = (await history.findActiveByWorkflowId('flow'))!;
+    await expect(service().save({ ...input(), packId: 'other-pack', expectedDraftAbsent: true,
+      expectedActiveDeployNumber: 9, expectedActiveToken: editorActiveDeploymentToken('flow', active) }))
+      .rejects.toMatchObject({ status: 409, code: 'PACK_ID_MISMATCH' });
+    expect(drafts()).toEqual([]);
+  });
+
+  it('computes the token from the locked current row, not the earlier object', async () => {
+    const real = history.findActiveByWorkflowId.bind(history);
+    const initial = (await real('flow'))!;
+    const expectedActiveToken = editorActiveDeploymentToken('flow', initial);
+    const updatedJson = '{ "title": "concurrent" }';
+    // Make the old JSON.stringify snapshot comparison pass despite the changed
+    // DB row. Only hashing the actual locked current row detects the mismatch.
+    let captured: NonNullable<typeof initial>;
+    vi.spyOn(history, 'findActiveByWorkflowId').mockImplementationOnce(async id => {
+      const row = (await real(id))!;
+      Object.setPrototypeOf(row, { toJSON() { return { ...this, spec_json: updatedJson }; } });
+      captured = row;
+      return row;
+    });
+    beforeTransaction(() => {
+      raw.prepare('UPDATE workflow_deploy_history SET spec_json = ? WHERE is_active = 1').run(updatedJson);
+      const current = raw.prepare(`SELECT pack_id, deploy_number, version, tag_name, action, spec_json, bot_id,
+        owner_id, gmt_create, gmt_modified FROM workflow_deploy_history WHERE is_active = 1`).get();
+      expect(JSON.stringify(captured)).toBe(JSON.stringify(current));
+    });
+    await expect(service().save({ ...input(), packId: initial.pack_id, expectedDraftAbsent: true,
+      expectedActiveDeployNumber: 9, expectedActiveToken })).rejects.toMatchObject({ status: 409, code: 'BASELINE_STALE' });
+    expect(drafts()).toEqual([]);
+    expect((await real('flow'))?.spec_json).toBe(updatedJson);
   });
 
   it('rejects an old active snapshot before inserting its workflow document', async () => {
@@ -286,9 +480,10 @@ describe('AutoHeal first database-only draft from active history', () => {
     listBots.mockClear();
     const beforeHistory = historyBytes(), beforePermissions = permissionBytes();
     expect(await service().save({ ...input(), expectedDraftAbsent: true, expectedActiveDeployNumber: 9 })).toMatchObject({ saved: true });
-    expect(listBots).toHaveBeenCalledTimes(2);
+    expect(listBots).toHaveBeenCalledTimes(3); // preflight, transaction and post-commit/pre-push
     expect(listBots).toHaveBeenNthCalledWith(1, 'editor', 'all');
     expect(listBots).toHaveBeenNthCalledWith(2, 'editor', 'all');
+    expect(listBots).toHaveBeenNthCalledWith(3, 'editor', 'all');
     expect((await specs.findByWorkflowId('flow'))?.owner_id).toBe('editor');
     expect(historyBytes()).toBe(beforeHistory); expect(permissionBytes()).toBe(beforePermissions);
   });
@@ -302,7 +497,7 @@ describe('AutoHeal first database-only draft from active history', () => {
     });
     const before = historyBytes();
     await expect(service().save({ ...input(), expectedDraftAbsent: true, expectedActiveDeployNumber: 9 })).rejects.toMatchObject(forbidden);
-    expect(listBots).toHaveBeenCalledTimes(2);
+    expect(listBots).toHaveBeenCalledTimes(2); // rejected in the transaction; no post-commit push check
     expect(drafts()).toEqual([]); expect(historyBytes()).toBe(before);
   });
 
@@ -353,7 +548,7 @@ describe('AutoHeal first database-only draft from active history', () => {
   });
 
   it('does not change the explicit createOnly Git protocol', async () => {
-    await expect(service().save({ ...input(), createOnly: true })).rejects.toMatchObject({
+    await expect(new AutoHealSaveService(db, specs, history, permissions).save({ ...input(), createOnly: true })).rejects.toMatchObject({
       status: 503, code: 'CREATE_ONLY_UNAVAILABLE_GIT_OWNERSHIP_UNVERIFIED',
     });
     const configured = new AutoHealSaveService(db, specs, history, permissions,

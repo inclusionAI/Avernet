@@ -353,3 +353,21 @@ def test_caller_rejects_missing_or_malformed_binding_metadata(ext):
     )
     with pytest.raises(CallerInstanceNotReadyError, match="binding is unavailable"):
         service.resolve(RuntimeBindingRequest(BOT, OWNER, CALLER))
+
+
+@pytest.mark.parametrize("stage,binding_id,source", [
+    ("draft", 12, RuntimeBindingSource.SERVICE_DRAFT),
+    ("verify", 31, RuntimeBindingSource.SERVICE_VERIFY),
+    ("online", 31, RuntimeBindingSource.SERVICE_ONLINE),
+])
+def test_teclaw_caller_uses_service_stage_without_caller_instance(stage, binding_id, source):
+    service, caller_repository = _service(
+        {"id": 2, "bot_type": "service", "call_type": "caller",
+         "active_engine": "teclaw", "binding_id": 12},
+        bindings={12: _Binding(12, device_provider="teclaw"),
+                  31: _Binding(31, device_provider="teclaw")},
+        records=[_PublishRecord(31)],
+    )
+    resolved = service.resolve(RuntimeBindingRequest(BOT, OWNER, CALLER, stage))
+    assert (resolved.binding_id, resolved.source) == (binding_id, source)
+    assert caller_repository.calls == []

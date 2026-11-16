@@ -68,6 +68,7 @@ from agentclaw.community.core.bot_management.create_flow import (
     complete_bot_authorization,
     create_bot_with_authorization,
 )
+from agentclaw.community.core.bot_management.engines.registry import resolve_status_ext
 from agentclaw.community.core.bot_management.readiness import is_bot_ready
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.bot.config_manifest_apply import (
@@ -225,6 +226,7 @@ def _sync_passport_identity(
     bot_name: str | None,
     bot_desc: str | None,
     engine_type: str | None,
+    bot_type: str,
 ) -> None:
     """Push renamed identity metadata or fail the completed-update contract."""
     try:
@@ -234,6 +236,7 @@ def _sync_passport_identity(
             bot_name=bot_name,
             bot_desc=bot_desc,
             engine_type=engine_type or DEFAULT_ENGINE_TYPE,
+            bot_type=bot_type,
         )
     except PassportError:
         raise
@@ -503,6 +506,7 @@ async def update_bot(
             bot_name=bot_name,
             bot_desc=body.bot_desc,
             engine_type=bot.get("active_engine"),
+            bot_type=str(bot.get("bot_type") or "personal"),
         )
     return envelope(_to_bot(bot), request)
 
@@ -808,6 +812,7 @@ async def get_bot_status(
     binding = bot.get("device_binding") or {}
     return envelope(
         BotStatus(
+            ext=resolve_status_ext(bot, response_ext={}),
             status=bot.get("status") or "",
             # Shared policy: an application bot is not ready until its repo
             # checkout reports SUCCEEDED, so ACTIVE alone is not enough.

@@ -14,7 +14,7 @@ from agentclaw.community.plugins.community.space_skill_source import (
 )
 
 
-def test_git_root_selection_excludes_nested_skill_packages(monkeypatch) -> None:
+def test_git_root_selection_preserves_nested_skill_documents(monkeypatch) -> None:
     source = CommunitySpaceSkillSource()
     monkeypatch.setattr(source, "_resolved_addresses", lambda _host: ("8.8.8.8",))
 
@@ -41,7 +41,7 @@ def test_git_root_selection_excludes_nested_skill_packages(monkeypatch) -> None:
             (nested / "SKILL.md").write_text(
                 "---\nname: nested-skill\ndescription: nested\n---\n"
             )
-            (nested / "secret.txt").write_text("not part of root package")
+            (nested / "reference.txt").write_text("part of root package")
             return ""
         if command[-2:] == ["branch", "--show-current"]:
             return "main\n"
@@ -54,7 +54,11 @@ def test_git_root_selection_excludes_nested_skill_packages(monkeypatch) -> None:
     )
 
     assert snapshot.source_subdir == ""
-    assert [path for path, _content in snapshot.files] == ["SKILL.md"]
+    assert [path for path, _content in snapshot.files] == [
+        "SKILL.md",
+        "nested/SKILL.md",
+        "nested/reference.txt",
+    ]
 
 
 @pytest.mark.parametrize(

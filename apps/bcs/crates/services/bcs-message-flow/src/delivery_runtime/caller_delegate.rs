@@ -265,6 +265,19 @@ impl DeliveryRuntime {
                         );
                         self.transition_ok(event(&current, Event::Failed)).await;
                     }
+                    // Stage liveness lapse (spec 2026-11-03): the stage's
+                    // outcome is unprovable — same conservative Failed
+                    // convergence as the other network-touched refusals; the
+                    // stage_bound WARN already named the stage.
+                    E::StageTimeout { stage } => {
+                        tracing::warn!(
+                            delivery_id = %current.delivery_id,
+                            bot_id = %current.target_bot_id,
+                            stage,
+                            "caller delegate dispatch: stage timed out, converging failed"
+                        );
+                        self.transition_ok(event(&current, Event::Failed)).await;
+                    }
                 }
             }
         }

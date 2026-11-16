@@ -23,6 +23,7 @@ export function ConversationComposerHost({ bot, session, children, ...value }: P
     sessionId: session.sessionId,
     spaceId: bot.spaceId,
     botType: bot.botType,
+    isFriendBot: bot.isFriendBot,
     runtimeStage: resolveChatRuntimeStage(bot),
   };
   return (

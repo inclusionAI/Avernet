@@ -394,6 +394,10 @@ async fn bot_is_active(registry: &dyn BotRegistryCoreService, bot_id: &str) -> b
 #[async_trait]
 impl VisibilitySyncPort for BootstrapVisibilitySyncPort {
     async fn sync_visibility(&self, request: VisibilitySyncRequest) {
+        if self.bcsfuse_config.api_version == bcs_fuse_client::BcsFuseApiVersion::V2 {
+            // V2 publication is driven by committed core mutations and the Card lifecycle.
+            return;
+        }
         if request.actor_kind == bcs_service_api::ActorKind::Human {
             return;
         }
@@ -783,6 +787,7 @@ mod tests {
             metrics: None,
             auth_chain: Arc::new(bcs_auth_api::AuthPluginChain::new(Vec::new())),
             auth_config: bcs_auth_api::AuthConfig::default(),
+            explicit_api_auth: None,
             bot_ws_admission,
             gateway_principal_verifier: crate::server::gateway_principal_verifier_for_tests(),
             invite_token_secret: v1_state.invite_token_secret.clone(),
@@ -790,6 +795,7 @@ mod tests {
             internal_bot_attributes_service: v1_state.internal_bot_attributes_service.clone(),
             openapi_v1: v1_state.openapi_v1,
             user_identity_port: None,
+            auth_session_identity: None,
             outbound_url_guard: OutboundUrlGuard::allowing_private_networks_for_tests(),
             admin_invocation_runs: Arc::new(bcs_http::state::AdminInvocationStore::default()),
             connect_service: Arc::new(bcs_test_support::NoopConnectService),

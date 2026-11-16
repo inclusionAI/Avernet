@@ -205,9 +205,10 @@ through `ContentStoreProtocol` and reads the copy back for delivery and
 git-delivered tree as `canonical_tree_bytes`; `fetch/limits.py` re-exports
 the store's `DIGEST_RE` as the fetch vocabulary. The store itself is
 constructed by `di/modules/content_store_module.py` from the
+blob store the deployment's profile wired (object storage by default; the
+test and singlebox columns bind a local tree rooted at the
 `user_config.bot_config_manifest.content_store_dir` this package's config
-cluster still parses (`cfg.BotConfigManifestConfig`), so the yaml key kept its
-name.
+cluster still parses).
 
 ## Tenancy is load-bearing here
 
@@ -609,6 +610,7 @@ internal_dependencies:
   - agentclaw.community.core.skill_center.skill_package  # the manual-upload package gate, reused per fetched skill (W5)
   - agentclaw.community.core.task_queue  # applying runs as a queue task, not a daemon thread (W13) — the queue module imports the DI container at module scope, so TaskQueueService is a TYPE_CHECKING-only annotation behind a lazy provider
   - agentclaw.community.kernel.lifecycle  # the apply handler registers itself at boot
+  - agentclaw.community.kernel.build_ignore  # normalize_build_ignore_path governs a copy's excludes — literal relative paths, not a gitignore
   - agentclaw.community.log
   - agentclaw.community.plugin_api.passport  # the creation job reads its own authorization status; the Plugin API type, not the service graph behind it
   - agentclaw.community.utils.avernet_tenant

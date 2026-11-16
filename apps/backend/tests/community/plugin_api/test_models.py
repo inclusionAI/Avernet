@@ -198,6 +198,11 @@ class TestBotModelToDict:
             "call_type",
             "caller_config_revision",
             "space_id",
+            # Public since identity inheritance: a Bot created with
+            # identity_bot_id exposes which Bot it inherits from, and this key
+            # set is what pins that contract (the gateway response snapshots
+            # assert the same field).
+            "identity_bot_id",
         }
 
         bot = BotModel(

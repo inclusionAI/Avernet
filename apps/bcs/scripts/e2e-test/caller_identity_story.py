@@ -438,6 +438,7 @@ class CallerStory:
                                 lambda messages: any("route this caller turn" in json.dumps(message)
                                                      for message in messages))
             assert history, history
+            self.caller_sse_reply(socket_client, plain_group_id, plain_session_id, lease)
             socket_client.send({"type": "req", "id": "lease-plain-release", "method": "lease.release",
                                 "params": {"groupId": plain_group_id,
                                            "leaseId": lease["leaseId"],
@@ -451,6 +452,11 @@ class CallerStory:
             socket_client.close()
             self.restore_delivery_policy()
         print("  plain caller group: lease fence, admission and the protected ride verified", flush=True)
+
+    def caller_sse_reply(self, socket_client, group_id, session_id, lease) -> None:
+        """Verify protected results and failure recovery use the HTTP stream."""
+        from provider_sse_cases import exercise
+        exercise(self, socket_client, group_id, session_id, lease)
 
     def enable_group_queue_policy(self) -> None:
         """Queue admission (and the caller seam mounted on it) only runs for

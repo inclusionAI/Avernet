@@ -2,7 +2,7 @@
 
 import pytest
 
-from src.domain.models.hybrid_score import (
+from app.domain.models.hybrid_score import (
     DenseScore,
     HybridScore,
     ScoreSource,

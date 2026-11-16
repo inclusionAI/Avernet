@@ -38,12 +38,10 @@ async fn public_card_is_fetched_without_credentials_and_preserved() {
 }
 
 #[tokio::test]
-async fn rejects_redirects_media_type_cache_and_oversized_body() {
+async fn rejects_redirects_media_type_and_oversized_body() {
     for (status, headers, body) in [
         ("302 Found", "Location: http://127.0.0.1:1/secret\r\n", String::new()),
         ("200 OK", "Content-Type: text/html\r\n", card()),
-        ("200 OK", "Content-Type: application/json\r\nCache-Control: max-age=300\r\nCache-Control: No-Cache=\"field\"\r\n", card()),
-        ("200 OK", "Content-Type: application/json\r\nCache-Control: no-store\r\n", card()),
         ("200 OK", "Content-Type: application/json\r\n", " ".repeat(1_048_577)),
     ] {
         let (url, request) = server(status, headers, body).await;
@@ -89,4 +87,51 @@ async fn inline_card_uses_the_same_validation_without_fetching_or_executing() {
     raw["capabilities"]["extensions"]=json!([{"uri":"https://example.org/unknown","required":true}]);
     assert!(fetcher.validate(raw,true).await.is_err());
     assert!(fetcher.validate(json!(["not a Card"]),true).await.is_err());
+}
+
+#[tokio::test]
+async fn non_loopback_http_interfaces_follow_outbound_network_policy() {
+    use bcs_a2a_http::card_fetch::guarded_client;
+    use bcs_service_api::types::a2a_bot::{http_interface_address_allowed, select_a2a_interface};
+    for binding in ["HTTP+JSON", "JSONRPC"] {
+        for scheme in ["http", "https"] {
+            for (address, private) in [("1.1.1.1", false), ("10.0.0.1", true)] {
+                let url = format!("{scheme}://{address}:9000/a2a");
+                let mut raw: serde_json::Value = serde_json::from_str(&card()).unwrap();
+                raw["supportedInterfaces"][0]["url"] = json!(url);
+                raw["supportedInterfaces"][0]["protocolBinding"] = json!(binding);
+                for block_private in [false, true] {
+                    let guard = OutboundUrlGuard::new(block_private, false);
+                    let fetcher = HttpA2aCardFetcher::new(guard.clone(), vec![]);
+                    let admitted = fetcher.validate(raw.clone(), false).await;
+                    let derived = select_a2a_interface(&raw, |_, url|
+                        http_interface_address_allowed(url) && guard.validate_configured_http_url(url).is_ok());
+                    // Client construction checks addresses but makes no request.
+                    let client = guarded_client(&guard, &url).await;
+                    let allowed = !(private && block_private);
+                    assert_eq!(admitted.is_ok(), allowed, "{url}, block_private={block_private}");
+                    assert_eq!(derived.is_ok(), allowed);
+                    assert_eq!(client.is_ok(), allowed);
+                    if allowed {
+                        let admitted = admitted.unwrap();
+                        assert_eq!(admitted.interface, derived.unwrap());
+                        assert_eq!(admitted.raw, raw);
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn explicit_registration_accepts_cache_control_and_jsonrpc_interfaces() {
+    let mut raw:serde_json::Value=serde_json::from_str(&card()).unwrap();
+    raw["supportedInterfaces"][0]["protocolBinding"]=json!("JSONRPC");
+    for directive in ["no-store","no-cache"] {
+        let (url,request)=server("200 OK",&format!("Content-Type: application/json\r\nCache-Control: {directive}\r\n"),raw.to_string()).await;
+        let fetcher=HttpA2aCardFetcher::new(OutboundUrlGuard::new(true,true),vec![]);
+        let selected=fetcher.fetch(&url,false).await.unwrap();
+        assert_eq!(selected.interface.binding,bcs_service_api::types::a2a_bot::A2aBinding::JsonRpc);
+        assert_eq!(selected.raw,raw);request.await.unwrap();
+    }
 }

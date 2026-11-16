@@ -74,6 +74,157 @@ def _patch(task_id: str, node_id: str, **kw) -> TaskNodePatch:
     return TaskNodePatch(task_id=task_id, node_id=node_id, **kw)
 
 
+class _StubRunInfo:
+    def __init__(self, records=None, expected_session="sess-relay"):
+        self.records = records or []
+        self.expected_session = expected_session
+
+    def get_by_session_id(self, session_id):
+        # Callback convergence intentionally keeps its retry-first contract.
+        raise AssertionError(f"unexpected get_by_session_id call: {session_id}")
+
+    def list_by_session_id(self, session_id):
+        assert session_id == self.expected_session
+        return list(self.records)
+
+
+def _session_run_record(
+    task_id="task-relay",
+    node_id="node-relay",
+    *,
+    row_id=1,
+    retry=0,
+    updated_at=None,
+):
+    from datetime import datetime
+
+    from agentclaw.community.core.task.repository.types import TaskNodeRunInfoRecord
+
+    return TaskNodeRunInfoRecord(
+        id=row_id,
+        node_id=node_id,
+        task_id=task_id,
+        run_mode="relay",
+        assignee="bot-relay",
+        output=None,
+        acceptance_result=None,
+        retry=retry,
+        session_id="sess-relay",
+        extend_props=None,
+        start_time=None,
+        update_time=None,
+        end_time=None,
+        gmt_modified=updated_at or datetime(2026, 11, 5, 12),
+    )
+
+
+def _scoped_task(task_id: str, owner_user_id: str):
+    from agentclaw.community.core.task.domain.models import Status as DomainStatus
+    from agentclaw.community.core.task.repository.types import TaskInfoRecord
+
+    return TaskInfoRecord(
+        id=1,
+        task_id=task_id,
+        source_type="bot",
+        owner_user_id=owner_user_id,
+        owner_bot_id=f"bot-{task_id}",
+        execution_config={},
+        task_spec={},
+        status=DomainStatus.RUNNING,
+    )
+
+
+class ScopedTaskRepo:
+    def __init__(self, by_task_id):
+        self.by_task_id = by_task_id
+
+    def get(self, task_id):
+        owner_user_id = self.by_task_id.get(task_id)
+        return _scoped_task(task_id, owner_user_id) if owner_user_id else None
+
+
+def test_get_task_nodes_by_session_returns_visible_tasks_newest_first():
+    from datetime import datetime
+
+    from agentclaw.community.core.task.repository.types import TaskNodeSessionRef
+    from agentclaw.community.core.task.task_center import task_service_queries
+
+    updated_at = datetime(2026, 11, 5, 12)
+    service = object.__new__(TaskService)
+    service._run_info_repo = _StubRunInfo([
+        _session_run_record(task_id="task-new", node_id="node-new", row_id=3),
+        _session_run_record(task_id="task-old", node_id="node-old", row_id=2),
+        _session_run_record(task_id="task-old", node_id="node-old", row_id=1, retry=1),
+        _session_run_record(task_id="task-hidden", node_id="node-hidden", row_id=4),
+    ])
+    service._task_info_repo = ScopedTaskRepo({
+        "task-new": "owner-1",
+        "task-old": "owner-2",
+    })
+
+    refs = task_service_queries.get_task_nodes_by_session(service, "sess-relay")
+
+    assert refs == [
+        TaskNodeSessionRef(
+            task_id="task-new",
+            node_id="node-new",
+            owner_user_id="owner-1",
+            updated_at=updated_at,
+        ),
+        TaskNodeSessionRef(
+            task_id="task-old",
+            node_id="node-old",
+            owner_user_id="owner-2",
+            updated_at=updated_at,
+        ),
+    ]
+
+
+def test_get_task_nodes_by_session_uses_create_time_for_legacy_run_rows():
+    from datetime import datetime
+
+    from agentclaw.community.core.task.repository.types import TaskNodeSessionRef
+    from agentclaw.community.core.task.task_center import task_service_queries
+
+    created_at = datetime(2026, 11, 4, 9, 30)
+    run = replace(
+        _session_run_record(task_id="task-legacy", node_id="node-legacy", row_id=2),
+        gmt_create=created_at,
+        gmt_modified=None,
+    )
+    service = object.__new__(TaskService)
+    service._run_info_repo = _StubRunInfo([run])
+    service._task_info_repo = ScopedTaskRepo({"task-legacy": "owner-legacy"})
+
+    refs = task_service_queries.get_task_nodes_by_session(service, "sess-relay")
+
+    assert refs == [
+        TaskNodeSessionRef(
+            task_id="task-legacy",
+            node_id="node-legacy",
+            owner_user_id="owner-legacy",
+            updated_at=created_at,
+        )
+    ]
+
+
+def test_get_task_nodes_by_session_hides_tasks_outside_read_scope():
+    from agentclaw.community.core.task.task_center import task_service_queries
+
+    service = object.__new__(TaskService)
+    service._run_info_repo = _StubRunInfo([
+        _session_run_record(task_id="task-hidden"),
+    ])
+
+    class OutOfScopeTaskRepo:
+        def get(self, _task_id):
+            return None
+
+    service._task_info_repo = OutOfScopeTaskRepo()
+
+    assert task_service_queries.get_task_nodes_by_session(service, "sess-relay") == []
+
+
 # ===== adapter:包旧 stub 成 PlanningStrategy / DispatchStrategy =====
 class _StubPlanningStrategy:
     rule_id = "stub"
@@ -411,6 +562,56 @@ class TestBbsEscalationNoMarket:
         assert _c1.status == Status.HUNG
         assert _c1.run_info.acceptance_result is not None
         assert _c1.run_info.acceptance_result.verdict == AcceptanceVerdict.FAILED  # verdict 不改
+
+
+class TestLegacyIdentityCompatibility:
+    def test_dashboard_uses_initiator_for_legacy_bare_bot_owner(self):
+        from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
+
+        class BotService:
+            def get_bot_by_id(self, bot_id):
+                raise AssertionError("legacy bare identity must not trigger Bot lookup")
+
+        graph_service = TaskGraphService()
+        facade = TaskService(graph_service, bot_service=BotService())
+        info = _task_info("legacy-dashboard")
+        info.owner_bot_id = "legacy-bot"
+        info.owner_user_id = "146836"
+        info.execution_config["orchestration_mode"] = "relay"
+        graph_service.initialize_graph(info)
+        graph_service._graphs["legacy-dashboard"].tasks[0].run_info.extend_props.pop(
+            "assignee_owner_id"
+        )
+
+        dashboard = facade.get_task_dashboard("legacy-dashboard")
+        root = dashboard.tasks[0]
+        assert root.run_info.assignee == "legacy-bot"
+        assert root.run_info.extend_props["assignee_owner_id"] == "146836"
+
+    def test_task_list_uses_initiator_for_legacy_bare_bot_owner(self):
+        from agentclaw.community.core.task.repository.types import TaskInfoRecord
+
+        class BotService:
+            def get_bot_by_id(self, bot_id):
+                raise AssertionError("legacy bare identity must not trigger Bot lookup")
+
+        facade = TaskService(None, bot_service=BotService())
+        record = TaskInfoRecord(
+            id=1,
+            task_id="legacy-list",
+            source_type="bot",
+            owner_user_id="146836",
+            owner_bot_id="legacy-bot",
+            execution_config={},
+            task_spec={},
+            status=Status.PENDING,
+        )
+
+        record = replace(record, owner_user_name=None)
+        result = facade._enrich_task_owner_display([record])[0]
+
+        assert result.owner_bot_id == "legacy-bot"
+        assert result.owner_user_id == "146836"
 
 
 class TestZeroCase:

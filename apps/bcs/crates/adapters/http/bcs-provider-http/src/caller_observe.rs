@@ -1,11 +1,12 @@
 //! Observe-only delivery through the existing Provider envelope.
+use bcs_network_tracing::RequestBuilderExt;
 use std::time::Duration;
 use async_trait::async_trait;
 use bcs_domain::BotDeliveryTarget;
-use bcs_protocol::{BcsFrame, RequestFrame, BCN_PROTOCOL_VERSION_HEADER, BCN_TIMESTAMP_HEADER};
+use bcs_protocol::{BcsFrame, RequestFrame};
 use bcs_route_security::OutboundUrlGuard;
 use tracing::info;
-use super::provider_request_from_frame;
+use super::{provider_request_from_frame, with_bcn_headers};
 
 // ---------------------------------------------------------------------------
 // Observe-only chat.inject v1 (spec §10.10): shared-context sync toward a
@@ -121,15 +122,18 @@ impl bcs_service_api::port::ObserveInjectPort for HttpObserveInjector {
             Ok(client) => client,
             Err(_) => return Err(Error::Unavailable { retryable: false }),
         };
-        let request_fut = request_client
+        let http_request = request_client
             .post(guarded_url.as_str())
             .bearer_auth(service_credential.expose_secret())
             .header("Accept", "application/json")
-            .header("Content-Type", "application/json; charset=utf-8")
-            .header(BCN_PROTOCOL_VERSION_HEADER, protocol_version.as_str())
-            .header(BCN_TIMESTAMP_HEADER, bcs_protocol::now_ms().to_string())
-            .json(&body)
-            .send();
+            .header("Content-Type", "application/json; charset=utf-8");
+        let request_fut = with_bcn_headers(
+            http_request,
+            protocol_version,
+            &uuid::Uuid::new_v4().to_string(),
+        )
+        .json(&body)
+        .send_traced();
         let deadline = tokio::time::Instant::now() + Duration::from_millis(OBSERVE_INJECT_TOTAL_TIMEOUT_MS);
         let mut response = tokio::time::timeout_at(
             deadline,

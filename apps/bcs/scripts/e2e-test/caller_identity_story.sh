@@ -39,3 +39,45 @@ story_owner_mode_master_relay() {
 if [[ -n "${BCS_E2E_MOCK_BASE_URL:-}" ]]; then
     E2E_TESTS_STORIES+=("story_owner_mode_master_relay")
 fi
+
+run_caller_delegation_chain() {
+    local mode="$1" result=0
+    info "Story: leased Owner Manager delegates to a Caller Worker (context=$mode)"
+    python3 "$SCRIPT_DIR/caller_delegation_chain_story.py" \
+        --base-url "$BCS_API_BASE_URL" --mock-url "$BCS_E2E_MOCK_BASE_URL" \
+        --human "$BCS_MOCK_USER_ID" --context-delivery "$mode" || result=$?
+    assert_eq "Owner lineage and protected Worker delivery with $mode initialization" "$result" "0"
+}
+
+story_caller_delegation_chain_send() { run_caller_delegation_chain send; }
+story_caller_delegation_chain_inject() { run_caller_delegation_chain inject; }
+
+if [[ -n "${BCS_E2E_MOCK_BASE_URL:-}" ]]; then
+    E2E_TESTS_STORIES+=("story_caller_delegation_chain_send" "story_caller_delegation_chain_inject")
+fi
+
+story_native_task_caller_delegation() {
+    info "Story: native WS task dispatch inherits Caller identity and rejects unsafe replay"
+    local result=0
+    python3 "$SCRIPT_DIR/native_task_caller_story.py" \
+        --base-url "$BCS_API_BASE_URL" --mock-url "$BCS_E2E_MOCK_BASE_URL" \
+        --human "$BCS_MOCK_USER_ID" || result=$?
+    assert_eq "Native Caller task parent binding, replay fences and result delivery" "$result" "0"
+}
+
+if [[ -n "${BCS_E2E_MOCK_BASE_URL:-}" ]]; then
+    E2E_TESTS_STORIES+=("story_native_task_caller_delegation")
+fi
+
+story_late_caller_manager_protected_result() {
+    info "Story: late enabled Manager receives Worker results over the protected transport"
+    local result=0
+    python3 "$SCRIPT_DIR/protected_result_leg_story.py" \
+        --base-url "$BCS_API_BASE_URL" --mock-url "$BCS_E2E_MOCK_BASE_URL" \
+        --human "$BCS_MOCK_USER_ID" || result=$?
+    assert_eq "Late-enabled Manager parks identity and rides protected result and failure legs" "$result" "0"
+}
+
+if [[ -n "${BCS_E2E_MOCK_BASE_URL:-}" ]]; then
+    E2E_TESTS_STORIES+=("story_late_caller_manager_protected_result")
+fi

@@ -8,12 +8,14 @@ Local-mode plugin implementations — in-memory / fixture-backed / noop variants
 purpose: "Local-mode plugin implementations — in-memory / fixture-backed / noop variants for offline dev and tests."
 provides:
   - RecordingBcsOwnershipPlugin
+  - RecordingBcsCollaborationMetadataPlugin
   - "Local* and Noop* implementations, including LocalSkillCenterGateway"
   - "Shared SQLite ORM models for local persistence"
 consumes:
   - "Every plugin Protocol (agentclaw.community.plugin_api.*)"
   - "Some core domain repository protocols (injected for sandbox-resolution etc.)"
 internal_dependencies:
+  - agentclaw.community.plugin_api.bcs_collaboration_metadata   # recording fake for the one-shot collaboration repair
   - agentclaw.community.plugin_api.bcs_ownership
   - agentclaw.community.plugins.community.knowledge_catalog
   - agentclaw.community.core.economy.governance.orm    # repository contracts consumed by this module
@@ -75,6 +77,7 @@ internal_dependencies:
   - agentclaw.community.plugin_api.bcs_managers
   - agentclaw.community.plugin_api.bot_publish_approval
   - agentclaw.community.plugin_api.cache
+  - agentclaw.community.plugin_api.context_collab_runtime
   - agentclaw.community.plugin_api.database
   - agentclaw.community.plugin_api.device_adapter_transport
   - agentclaw.community.plugin_api.device_connection_manager
@@ -100,6 +103,7 @@ internal_dependencies:
   - agentclaw.community.plugin_api.outbound_rules
   - agentclaw.community.plugin_api.passport
   - agentclaw.community.plugin_api.sandbox_runtime
+  - agentclaw.community.plugin_api.service_bot_eval  # local no-op unified evaluation gate implementation
   - agentclaw.community.plugin_api.secret_resolver
   - agentclaw.community.plugin_api.skill_center_client
   - agentclaw.community.plugin_api.skill_center_gateway

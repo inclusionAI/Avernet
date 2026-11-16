@@ -116,3 +116,9 @@ Avernet 负责配置解析、身份匹配、候选路由及冻结引用。OCB �
 - 真实文件验证 common 与本团队 custom 可读，其他团队在所有安装副本中不存在；无团队、历史引用、重复准备、错误路径和缺文件均覆盖。
 - runner 验证 bootstrap 和文件筛选先于 Agent 启动；真实打包测试验证发布物包含 common 与团队手册，并能导入运行。
 - 原有自愈流程、用户续聊、授权和输出协议的相关回归通过。模型是否正确采纳业务排除规则需部署后的受控案例另行验收，不能用单元测试声称已经验证。
+
+## 2026-11-04 候选扩展
+
+新增 `common/network/handbook.md` 优先候选到 TC.MCP、TC.TOOL、TC.SKILL、TC.MODEL，保留原 MCP／文件／Skill 映射。团队97的当前配置扩展到 TC.SKILL、TC.MCP、TC.MODEL、TC.TOOL、TC.WORKFLOW_PLANNER，均优先引用 `skill/handbook.md`；身份映射不扩大，配置不修改白名单。OCB提供待审配置patch，不直接写生产。
+
+`chapters` 仅是优先候选；候选不足或类别未映射时，Agent可主动补读所有common和已匹配团队其他custom，不能读其他团队。新增文件必须先随包发布，再启用后端／配置候选；旧任务保持冻结路由。

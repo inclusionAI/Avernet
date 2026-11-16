@@ -5,6 +5,7 @@ import express from 'express';
 import type { Server } from 'node:http';
 import { SqliteDatabase, runMigrations, type IDatabase } from '@avernet/clawweb-shared/server/db';
 import { FlowRunRepository } from '../../../repositories/flow-run-repository.js';
+import { RepairReleaseRepository } from '../../../repositories/repair-release-repository.js';
 import { createInternalRunsRouter } from '../runs.js';
 
 const cleanup: Array<() => Promise<void>> = [];
@@ -25,7 +26,7 @@ async function fixture() {
   cleanup.push(() => new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())));
   const url = `http://127.0.0.1:${(server.address() as { port: number }).port}/runs`;
   const register = () => fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-  return { db, register };
+  return { db, register, url };
 }
 
 it.each(['lookup', 'update'] as const)('rolls back ordinary registration on snapshot %s failure and allows the same flow ID to retry', async failure => {
@@ -77,4 +78,25 @@ it('preserves the outer registration transaction when purpose metadata and the r
   await transaction();
   expect(await db.query('SELECT * FROM registration_marker')).toEqual([{ id: 'request' }]);
   expect(await db.query('SELECT flow_id FROM flow_runs')).toEqual([{ flow_id: body.flow_id }]);
+});
+
+it('rejects claimed children for a real trial request while allowing the same token-free trial to register', async () => {
+  const { db, url } = await fixture();
+  await db.exec("INSERT INTO workflow_specs (workflow_id, spec_json) VALUES ('wf', '{}')");
+  const trial = { id: 'trial-1', workflowId: 'wf', taskId: 'task', revision: 1, stateVersion: 1, createdAtMs: 1,
+    status: 'awaiting_run', flowId: null, candidateCommit: 'candidate', packDigest: 'pack', inputDigest: 'input',
+    target: { botId: 'bot', ownerId: 'owner' }, options: { workflowIds: ['wf'] } };
+  await new RepairReleaseRepository(db).insert('trial', { requestId: 'trial' }, trial);
+  const request = { flow_id: 'trial-flow', workflow_id: 'wf', status: 'running', workflow_version: -1,
+    origin_bot_id: 'bot:owner', run_request_id: trial.id, run_request_bot_id: 'bot', run_request_owner_id: 'owner',
+    candidate_commit: trial.candidateCommit, pack_digest: trial.packDigest, input_digest: trial.inputDigest };
+  const post = (state: unknown) => fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...request, state_json: JSON.stringify(state) }) });
+  expect((await post({ subworkflowFanouts: { n: { children: [{ dispatchClaimToken: 'forged' }] } } })).status).toBe(400);
+  expect(await db.query("SELECT record_id FROM workflow_repair_release_records WHERE record_kind='trial_run'")).toEqual([]);
+  expect(await db.query("SELECT flow_id FROM flow_runs WHERE flow_id='trial-flow'")).toEqual([]);
+  const state = { workflowId: 'wf', nodeStates: {}, workflowData: { dispatchClaimToken: 'business' } };
+  expect((await post(state)).status).toBe(201);
+  expect(await db.query("SELECT state_json FROM flow_runs WHERE flow_id='trial-flow'")).toEqual([{ state_json: JSON.stringify(state) }]);
+  expect(await db.query("SELECT record_id FROM workflow_repair_release_records WHERE record_kind='trial_run'")).toEqual([{ record_id: 'trial-flow' }]);
 });

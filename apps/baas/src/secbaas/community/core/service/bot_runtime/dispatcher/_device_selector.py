@@ -134,9 +134,11 @@ def select_available_device(
 
     Rationale: RELEASED and FAILED are terminal states with no in-progress
     startup. STOPPED means the container has already been destroyed and the
-    mng daemon is unreachable. OFFLINE is included because it represents a
-    transient state where the device is reachable but its daemon/service is
-    temporarily unavailable (e.g., during mng daemon reconnection).
+    mng daemon is unreachable. OFFLINE is written when the host mng daemon
+    disconnects or a container heartbeat reports a status other than "ok"; it
+    does not imply the device is reachable or that commands/restarts can be
+    delivered. It is included only as a transient startup window; a later
+    "ok" heartbeat can return the device to ACTIVE.
 
     Selection strategy mirrors :func:`select_active_device` exactly:
 

@@ -13,12 +13,12 @@ class TestWorkerModelConstruction:
 
     def test_worker_model_importable(self):
         """验证 Worker 模型可导入"""
-        from src.domain.models.worker import Worker
+        from app.domain.models.worker import Worker
         assert Worker is not None
 
     def test_worker_model_constructs_with_minimal_fields(self):
         """验证 Worker 可以用最小必填字段构造"""
-        from src.domain.models.worker import Worker
+        from app.domain.models.worker import Worker
 
         worker = Worker(
             id="wrk_test_001",
@@ -44,7 +44,7 @@ class TestWorkerModelConstruction:
 
     def test_worker_model_supports_human_type(self):
         """验证 Worker 支持 human 类型"""
-        from src.domain.models.worker import Worker
+        from app.domain.models.worker import Worker
 
         worker = Worker(
             id="wrk_human_001",
@@ -68,7 +68,7 @@ class TestWorkerModelConstruction:
 
     def test_worker_model_supports_bot_type(self):
         """验证 Worker 支持 bot 类型"""
-        from src.domain.models.worker import Worker
+        from app.domain.models.worker import Worker
 
         worker = Worker(
             id="wrk_bot_001",
@@ -96,7 +96,7 @@ class TestWorkerModelValidation:
 
     def test_worker_id_must_not_be_empty(self):
         """Worker IDs need not have a wrk_ prefix, but must not be empty."""
-        from src.domain.models.worker import Worker
+        from app.domain.models.worker import Worker
 
         with pytest.raises(ValidationError):
             Worker(
@@ -113,7 +113,7 @@ class TestWorkerModelValidation:
 
     def test_worker_type_must_be_human_or_bot(self):
         """验证 worker_type 必须是 human 或 bot"""
-        from src.domain.models.worker import Worker
+        from app.domain.models.worker import Worker
 
         with pytest.raises(ValidationError):
             Worker(
@@ -130,7 +130,7 @@ class TestWorkerModelValidation:
 
     def test_worker_identity_name_required(self):
         """验证 identity.name 是必填字段"""
-        from src.domain.models.worker import Worker
+        from app.domain.models.worker import Worker
 
         with pytest.raises(ValidationError):
             Worker(
@@ -147,7 +147,7 @@ class TestWorkerModelValidation:
 
     def test_worker_state_availability_must_be_valid(self):
         """验证 state.availability 必须是有效枚举值"""
-        from src.domain.models.worker import Worker
+        from app.domain.models.worker import Worker
 
         with pytest.raises(ValidationError):
             Worker(
@@ -164,7 +164,7 @@ class TestWorkerModelValidation:
 
     def test_worker_capability_level_must_be_valid(self):
         """验证 capability.level 必须是有效枚举值"""
-        from src.domain.models.worker import Worker
+        from app.domain.models.worker import Worker
 
         with pytest.raises(ValidationError):
             Worker(
@@ -185,7 +185,7 @@ class TestWorkerModelSerialization:
 
     def test_worker_serializes_to_json(self):
         """验证 Worker 可以序列化为 JSON"""
-        from src.domain.models.worker import Worker
+        from app.domain.models.worker import Worker
         import json
 
         worker = Worker(
@@ -209,7 +209,7 @@ class TestWorkerModelSerialization:
 
     def test_worker_deserializes_from_dict(self):
         """验证 Worker 可以从 dict 反序列化"""
-        from src.domain.models.worker import Worker
+        from app.domain.models.worker import Worker
 
         data = {
             "id": "wrk_test",

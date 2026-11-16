@@ -19,12 +19,12 @@ class TestFusionResultModule:
         """测试 fusion_result 模块存在"""
         import importlib
 
-        module = importlib.import_module("src.domain.models.fusion_result")
+        module = importlib.import_module("app.domain.models.fusion_result")
         assert module is not None
 
     def test_fusion_result_class_exists(self):
         """测试 FusionResult 类存在"""
-        from src.domain.models.fusion_result import FusionResult
+        from app.domain.models.fusion_result import FusionResult
 
         assert FusionResult is not None
 
@@ -34,7 +34,7 @@ class TestPerspective:
 
     def test_create_minimal_perspective(self):
         """测试创建最小 Perspective"""
-        from src.domain.models.fusion_result import Perspective
+        from app.domain.models.fusion_result import Perspective
 
         perspective = Perspective(
             participant_id="dba",
@@ -54,7 +54,7 @@ class TestPerspective:
 
     def test_create_full_perspective(self):
         """测试创建完整 Perspective"""
-        from src.domain.models.fusion_result import Perspective
+        from app.domain.models.fusion_result import Perspective
 
         perspective = Perspective(
             participant_id="dba",
@@ -71,7 +71,7 @@ class TestPerspective:
 
     def test_perspective_status_values(self):
         """测试 Perspective status 有效值"""
-        from src.domain.models.fusion_result import Perspective
+        from app.domain.models.fusion_result import Perspective
 
         valid_statuses = ["completed", "timed_out", "failed", "skipped"]
 
@@ -87,7 +87,7 @@ class TestPerspective:
 
     def test_perspective_invalid_status(self):
         """测试无效 status 被拒绝"""
-        from src.domain.models.fusion_result import Perspective
+        from app.domain.models.fusion_result import Perspective
 
         with pytest.raises(ValidationError):
             Perspective(
@@ -100,7 +100,7 @@ class TestPerspective:
 
     def test_perspective_participant_type_values(self):
         """测试 participant_type 有效值"""
-        from src.domain.models.fusion_result import Perspective
+        from app.domain.models.fusion_result import Perspective
 
         for p_type in ["bot", "human", "system"]:
             perspective = Perspective(
@@ -114,7 +114,7 @@ class TestPerspective:
 
     def test_perspective_role_values(self):
         """测试 role 有效值"""
-        from src.domain.models.fusion_result import Perspective
+        from app.domain.models.fusion_result import Perspective
 
         for role in ["driver", "consultant", "observer"]:
             perspective = Perspective(
@@ -128,7 +128,7 @@ class TestPerspective:
 
     def test_perspective_confidence_range(self):
         """测试 confidence 范围"""
-        from src.domain.models.fusion_result import Perspective
+        from app.domain.models.fusion_result import Perspective
 
         # 有效范围
         for confidence in [0, 0.5, 1.0]:
@@ -159,7 +159,7 @@ class TestRecommendation:
 
     def test_create_recommendation(self):
         """测试创建 Recommendation"""
-        from src.domain.models.fusion_result import Recommendation
+        from app.domain.models.fusion_result import Recommendation
 
         recommendation = Recommendation(
             summary="方案总体可行，但需要补充安全评估。",
@@ -175,7 +175,7 @@ class TestRecommendation:
 
     def test_recommendation_decision_values(self):
         """测试 decision 有效值"""
-        from src.domain.models.fusion_result import Recommendation
+        from app.domain.models.fusion_result import Recommendation
 
         for decision in ["yes", "no", "conditional_yes", "needs_more_information"]:
             rec = Recommendation(
@@ -188,7 +188,7 @@ class TestRecommendation:
 
     def test_recommendation_invalid_decision(self):
         """测试无效 decision 被拒绝"""
-        from src.domain.models.fusion_result import Recommendation
+        from app.domain.models.fusion_result import Recommendation
 
         with pytest.raises(ValidationError):
             Recommendation(
@@ -204,7 +204,7 @@ class TestFusionTiming:
 
     def test_create_timing(self):
         """测试创建 FusionTiming"""
-        from src.domain.models.fusion_result import FusionTiming
+        from app.domain.models.fusion_result import FusionTiming
         from datetime import datetime
 
         started = datetime(2026, 3, 21, 10, 0, 0)
@@ -222,7 +222,7 @@ class TestFusionTiming:
 
     def test_timing_duration_non_negative(self):
         """测试 duration_ms 非负"""
-        from src.domain.models.fusion_result import FusionTiming
+        from app.domain.models.fusion_result import FusionTiming
 
         with pytest.raises(ValidationError):
             FusionTiming(
@@ -237,7 +237,7 @@ class TestFusionResult:
 
     def test_create_minimal_result(self):
         """测试创建最小 FusionResult"""
-        from src.domain.models.fusion_result import FusionResult, FusionTiming
+        from app.domain.models.fusion_result import FusionResult, FusionTiming
 
         timing = FusionTiming(
             started_at="2026-03-21T10:00:00Z",
@@ -266,7 +266,7 @@ class TestFusionResult:
 
     def test_create_full_result(self):
         """测试创建完整 FusionResult"""
-        from src.domain.models.fusion_result import (
+        from app.domain.models.fusion_result import (
             FusionResult,
             Perspective,
             Recommendation,
@@ -314,7 +314,7 @@ class TestFusionResult:
 
     def test_result_partial_success_true(self):
         """测试 partial_success 为 True"""
-        from src.domain.models.fusion_result import FusionResult, FusionTiming
+        from app.domain.models.fusion_result import FusionResult, FusionTiming
 
         timing = FusionTiming(
             started_at="2026-03-21T10:00:00Z",
@@ -338,7 +338,7 @@ class TestFusionResult:
 
     def test_result_with_errors(self):
         """测试包含 errors 的结果"""
-        from src.domain.models.fusion_result import FusionResult, FusionTiming
+        from app.domain.models.fusion_result import FusionResult, FusionTiming
 
         timing = FusionTiming(
             started_at="2026-03-21T10:00:00Z",
@@ -361,7 +361,7 @@ class TestFusionResult:
 
     def test_result_extra_fields_forbidden(self):
         """测试额外字段被禁止"""
-        from src.domain.models.fusion_result import FusionResult, FusionTiming
+        from app.domain.models.fusion_result import FusionResult, FusionTiming
 
         timing = FusionTiming(
             started_at="2026-03-21T10:00:00Z",
@@ -384,7 +384,7 @@ class TestFusionResult:
 
     def test_result_is_success_property(self):
         """测试 is_success 属性"""
-        from src.domain.models.fusion_result import FusionResult, FusionTiming
+        from app.domain.models.fusion_result import FusionResult, FusionTiming
 
         timing = FusionTiming(
             started_at="2026-03-21T10:00:00Z",
@@ -442,7 +442,7 @@ class TestPerspectiveG2:
 
     def test_perspective_key_points(self):
         """测试 Perspective 的 key_points 字段"""
-        from src.domain.models.fusion_result import Perspective
+        from app.domain.models.fusion_result import Perspective
 
         perspective = Perspective(
             participant_id="zhangsan",
@@ -457,7 +457,7 @@ class TestPerspectiveG2:
 
     def test_perspective_concerns(self):
         """测试 Perspective 的 concerns 字段"""
-        from src.domain.models.fusion_result import Perspective
+        from app.domain.models.fusion_result import Perspective
 
         perspective = Perspective(
             participant_id="lisi",
@@ -472,7 +472,7 @@ class TestPerspectiveG2:
 
     def test_perspective_flexibility(self):
         """测试 Perspective 的 flexibility 字段"""
-        from src.domain.models.fusion_result import Perspective
+        from app.domain.models.fusion_result import Perspective
 
         perspective = Perspective(
             participant_id="anquan",
@@ -487,7 +487,7 @@ class TestPerspectiveG2:
 
     def test_perspective_g2_fields_defaults(self):
         """测试 G2 字段默认值"""
-        from src.domain.models.fusion_result import Perspective
+        from app.domain.models.fusion_result import Perspective
 
         perspective = Perspective(
             participant_id="test",
@@ -504,7 +504,7 @@ class TestPerspectiveG2:
 
     def test_perspective_full_g2_data(self):
         """测试完整的 G2 Perspective"""
-        from src.domain.models.fusion_result import Perspective
+        from app.domain.models.fusion_result import Perspective
 
         perspective = Perspective(
             participant_id="zhangsan",
@@ -529,7 +529,7 @@ class TestFusionResultG2:
 
     def test_result_fusion_mode_default(self):
         """测试 fusion_mode 默认值"""
-        from src.domain.models.fusion_result import FusionResult, FusionTiming
+        from app.domain.models.fusion_result import FusionResult, FusionTiming
 
         timing = FusionTiming(
             started_at="2026-03-21T10:00:00Z",
@@ -553,7 +553,7 @@ class TestFusionResultG2:
 
     def test_result_fusion_mode_conflict_alignment(self):
         """测试 fusion_mode 为 conflict_alignment（G2）"""
-        from src.domain.models.fusion_result import FusionResult, FusionTiming
+        from app.domain.models.fusion_result import FusionResult, FusionTiming
 
         timing = FusionTiming(
             started_at="2026-03-21T10:00:00Z",
@@ -577,8 +577,8 @@ class TestFusionResultG2:
 
     def test_result_conflicts_field(self):
         """测试 conflicts 字段"""
-        from src.domain.models.fusion_result import FusionResult, FusionTiming
-        from src.domain.models.fusion_conflict import FusionConflict
+        from app.domain.models.fusion_result import FusionResult, FusionTiming
+        from app.domain.models.fusion_conflict import FusionConflict
 
         timing = FusionTiming(
             started_at="2026-03-21T10:00:00Z",
@@ -611,8 +611,8 @@ class TestFusionResultG2:
 
     def test_result_alignment_points_field(self):
         """测试 alignment_points 字段"""
-        from src.domain.models.fusion_result import FusionResult, FusionTiming
-        from src.domain.models.fusion_alignment import FusionAlignmentPoint
+        from app.domain.models.fusion_result import FusionResult, FusionTiming
+        from app.domain.models.fusion_alignment import FusionAlignmentPoint
 
         timing = FusionTiming(
             started_at="2026-03-21T10:00:00Z",
@@ -642,7 +642,7 @@ class TestFusionResultG2:
 
     def test_result_key_insights_field(self):
         """测试 key_insights 字段"""
-        from src.domain.models.fusion_result import FusionResult, FusionTiming
+        from app.domain.models.fusion_result import FusionResult, FusionTiming
 
         timing = FusionTiming(
             started_at="2026-03-21T10:00:00Z",
@@ -667,7 +667,7 @@ class TestFusionResultG2:
 
     def test_result_g1_mode_has_empty_g2_fields(self):
         """测试 G1 模式下 G2 字段为空"""
-        from src.domain.models.fusion_result import FusionResult, FusionTiming
+        from app.domain.models.fusion_result import FusionResult, FusionTiming
 
         timing = FusionTiming(
             started_at="2026-03-21T10:00:00Z",
@@ -694,14 +694,14 @@ class TestFusionResultG2:
 
     def test_result_full_g2_response(self):
         """测试完整的 G2 响应"""
-        from src.domain.models.fusion_result import (
+        from app.domain.models.fusion_result import (
             FusionResult,
             Perspective,
             Recommendation,
             FusionTiming,
         )
-        from src.domain.models.fusion_conflict import FusionConflict
-        from src.domain.models.fusion_alignment import FusionAlignmentPoint
+        from app.domain.models.fusion_conflict import FusionConflict
+        from app.domain.models.fusion_alignment import FusionAlignmentPoint
 
         timing = FusionTiming(
             started_at="2026-03-21T10:00:00Z",
@@ -778,7 +778,7 @@ class TestPerspectiveG5:
 
     def test_perspective_role_expert(self):
         """测试 Perspective 的 role 支持 expert"""
-        from src.domain.models.fusion_result import Perspective
+        from app.domain.models.fusion_result import Perspective
 
         perspective = Perspective(
             participant_id="anquan",
@@ -792,7 +792,7 @@ class TestPerspectiveG5:
 
     def test_perspective_role_expert_with_confidence(self):
         """测试 expert 角色包含置信度"""
-        from src.domain.models.fusion_result import Perspective
+        from app.domain.models.fusion_result import Perspective
 
         perspective = Perspective(
             participant_id="fawu",
@@ -808,7 +808,7 @@ class TestPerspectiveG5:
 
     def test_perspective_all_roles_including_expert(self):
         """测试所有角色包括 expert"""
-        from src.domain.models.fusion_result import Perspective
+        from app.domain.models.fusion_result import Perspective
 
         for role in ["driver", "consultant", "observer", "expert"]:
             perspective = Perspective(
@@ -822,7 +822,7 @@ class TestPerspectiveG5:
 
     def test_perspective_invalid_role_still_rejected(self):
         """测试无效 role 仍被拒绝"""
-        from src.domain.models.fusion_result import Perspective
+        from app.domain.models.fusion_result import Perspective
 
         with pytest.raises(ValidationError):
             Perspective(
@@ -839,7 +839,7 @@ class TestFusionResultG5:
 
     def test_result_fusion_mode_expert_diagnosis(self):
         """测试 fusion_mode 为 expert_diagnosis（G5）"""
-        from src.domain.models.fusion_result import FusionResult, FusionTiming
+        from app.domain.models.fusion_result import FusionResult, FusionTiming
 
         timing = FusionTiming(
             started_at="2026-03-21T10:00:00Z",
@@ -863,8 +863,8 @@ class TestFusionResultG5:
 
     def test_result_risk_assessment_field(self):
         """测试 risk_assessment 字段"""
-        from src.domain.models.fusion_result import FusionResult, FusionTiming
-        from src.domain.models.expert_risk_assessment import RiskAssessment, RiskLevel
+        from app.domain.models.fusion_result import FusionResult, FusionTiming
+        from app.domain.models.expert_risk_assessment import RiskAssessment, RiskLevel
 
         timing = FusionTiming(
             started_at="2026-03-21T10:00:00Z",
@@ -898,9 +898,9 @@ class TestFusionResultG5:
 
     def test_result_critical_issues_field(self):
         """测试 critical_issues 字段"""
-        from src.domain.models.fusion_result import FusionResult, FusionTiming
-        from src.domain.models.expert_diagnosis import CriticalIssue
-        from src.domain.models.expert_risk_assessment import RiskLevel
+        from app.domain.models.fusion_result import FusionResult, FusionTiming
+        from app.domain.models.expert_diagnosis import CriticalIssue
+        from app.domain.models.expert_risk_assessment import RiskLevel
 
         timing = FusionTiming(
             started_at="2026-03-21T10:00:00Z",
@@ -935,8 +935,8 @@ class TestFusionResultG5:
 
     def test_result_recommendations_field(self):
         """测试 recommendations 字段（G5 专家建议列表）"""
-        from src.domain.models.fusion_result import FusionResult, FusionTiming
-        from src.domain.models.expert_diagnosis import ExpertRecommendation, Priority
+        from app.domain.models.fusion_result import FusionResult, FusionTiming
+        from app.domain.models.expert_diagnosis import ExpertRecommendation, Priority
 
         timing = FusionTiming(
             started_at="2026-03-21T10:00:00Z",
@@ -977,7 +977,7 @@ class TestFusionResultG5:
 
     def test_result_go_live_conditions_field(self):
         """测试 go_live_conditions 字段"""
-        from src.domain.models.fusion_result import FusionResult, FusionTiming
+        from app.domain.models.fusion_result import FusionResult, FusionTiming
 
         timing = FusionTiming(
             started_at="2026-03-21T10:00:00Z",
@@ -1009,7 +1009,7 @@ class TestFusionResultG5:
 
     def test_result_summary_field(self):
         """测试 summary 字段（G5 诊断摘要）"""
-        from src.domain.models.fusion_result import FusionResult, FusionTiming
+        from app.domain.models.fusion_result import FusionResult, FusionTiming
 
         timing = FusionTiming(
             started_at="2026-03-21T10:00:00Z",
@@ -1034,7 +1034,7 @@ class TestFusionResultG5:
 
     def test_result_g1_mode_has_empty_g5_fields(self):
         """测试 G1 模式下 G5 字段为空"""
-        from src.domain.models.fusion_result import FusionResult, FusionTiming
+        from app.domain.models.fusion_result import FusionResult, FusionTiming
 
         timing = FusionTiming(
             started_at="2026-03-21T10:00:00Z",
@@ -1063,14 +1063,14 @@ class TestFusionResultG5:
 
     def test_result_full_g5_response(self):
         """测试完整的 G5 响应"""
-        from src.domain.models.fusion_result import (
+        from app.domain.models.fusion_result import (
             FusionResult,
             Perspective,
             Recommendation,
             FusionTiming,
         )
-        from src.domain.models.expert_risk_assessment import RiskAssessment, RiskLevel
-        from src.domain.models.expert_diagnosis import (
+        from app.domain.models.expert_risk_assessment import RiskAssessment, RiskLevel
+        from app.domain.models.expert_diagnosis import (
             CriticalIssue,
             ExpertRecommendation,
             Priority,

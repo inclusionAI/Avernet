@@ -17,14 +17,15 @@ import type { AgentRuntimeTool } from "../common/agent-tools/runtime-tool.js";
 import { SessionRecoveryError } from "./errors.js";
 import { logRepairEvent } from "../common/logging.js";
 import type { AgentLogTool } from "../common/agent-tools/log-tool.js";
-import type { DingTalkNotificationSender } from "../../notifications/dingtalk-sender.js";
+import type { RecoveryNotificationSender } from "./notification.js";
 
 export function createSessionRecoveryRuntime(options: {
   db: IDatabase; repo: EvolveRepository; runtime: BotRuntime; targets: BotTargetResolver; ais: AisExecutor;
   publicBaseUrl: string; snapshotId: number; artifactStore: RecoveryArtifactStore;
-  notificationSender?: Pick<DingTalkNotificationSender, "sendNotification"> | null; logs?: AgentLogTool; runtimeTool?: AgentRuntimeTool;
+  notificationSender?: RecoveryNotificationSender | null; logs?: AgentLogTool; runtimeTool?: AgentRuntimeTool;
   trajectory?: BotSessionTrajectoryReader; nasRoots: string[];
   observationMs?: number; leaseSeconds?: number; launchGraceSeconds?: number;
+  canReadAsBotCollaborator?: ConstructorParameters<typeof SessionRecoveryTaskService>[0]["canReadAsBotCollaborator"];
 }): SessionRecoveryRuntime | undefined {
   if (options.db.dbType === "noop") {
     logRepairEvent("session-recovery", "session_recovery_runtime", "unavailable", { reason: "task database is not configured" });
@@ -43,14 +44,14 @@ export function createSessionRecoveryRuntime(options: {
     config: notificationConfig, sender: new DingTalkWebhookSender(), publicBaseUrl: options.publicBaseUrl });
   const reporter = new HttpRecoveryResultReporter({ baseUrl: options.publicBaseUrl });
   let tasks: SessionRecoveryTaskService;
-  const notifier = new SessionRecoveryNotifier(options.notificationSender, options.publicBaseUrl, notificationConfig);
+  const notifier = new SessionRecoveryNotifier(options.notificationSender, options.publicBaseUrl, notificationConfig, controlPlaneEnvironment);
   const agent = new SessionRecoveryAgentService({ controlPlaneEnvironment, tasks: store, repo: options.repo,
     audit: new AgentToolCallRepository(options.db, "session_recovery"), ais: options.ais, runtime: options.runtime,
     targets: options.targets, trajectory: options.trajectory, logs: options.logs, runtimeTool: options.runtimeTool, business: () => tasks, publicBaseUrl: options.publicBaseUrl,
     snapshotId: options.snapshotId, nasRoots: options.nasRoots, leaseSeconds: options.leaseSeconds ?? 120,
     launchGraceSeconds: options.launchGraceSeconds ?? 1800, observationMs, actionNotifier });
   tasks = new SessionRecoveryTaskService({ controlPlaneEnvironment, tasks: store, agent, notifier, reporter, observationMs, actionNotifier,
-    handbookConfig: notificationConfig,
+    handbookConfig: notificationConfig, canReadAsBotCollaborator: options.canReadAsBotCollaborator,
     resolveTarget: async request => {
       const expected = { OC: "openclaw", CC: "claude_code", TE: "teclaw" }[request.target.engine];
       const target = await options.targets.resolve({ environment: request.target.env, ownerId: request.target.entity_id, botId: request.target.bot_id, ...(request.target.runtime_identity ? { runtimeIdentity: request.target.runtime_identity } : {}) });

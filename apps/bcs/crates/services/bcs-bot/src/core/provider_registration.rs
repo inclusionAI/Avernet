@@ -30,6 +30,8 @@ pub struct ProviderRegistrationCore {
     env: String,
     self_service_providers: Vec<String>,
     url_guard: OutboundUrlGuard,
+    a2a_allow_anonymous:bool,
+    catalog_changes: Option<Arc<dyn bcs_service_api::port::CatalogChangePort>>,
 }
 
 impl ProviderRegistrationCore {
@@ -55,7 +57,16 @@ impl ProviderRegistrationCore {
             env,
             self_service_providers,
             url_guard,
+            a2a_allow_anonymous:false,
+            catalog_changes: None,
         }
+    }
+
+    pub fn with_a2a_anonymous(mut self,allow:bool)->Self {self.a2a_allow_anonymous=allow;self}
+
+    pub fn with_catalog_changes(mut self, port: Option<Arc<dyn bcs_service_api::port::CatalogChangePort>>) -> Self {
+        self.catalog_changes = port;
+        self
     }
 
     async fn authorized_provider(
@@ -158,6 +169,7 @@ impl ProviderRegistrationCoreService for ProviderRegistrationCore {
         self.register_with_ownership(
             command,
             bcs_service_api::types::bot_authority::OwnershipInitialization {
+                initial_manager_user_ids: Vec::new(),
                 // The Provider token's verified Human IS the
                 // initiator of the legacy surface too.
                 owner_user_id: owner.clone(),
@@ -186,11 +198,7 @@ impl ProviderRegistrationCoreService for ProviderRegistrationCore {
             return Err(ServiceError::Forbidden("A2A remote binding requires Provider management authority".into()));
         }
         let downlink = parse_downlink_config(&provider.config)?;
-        let credential = self.credentials
-                .get_credential_by_kind(provider_id, "downlink_bcs_to_provider").await?;
-        if !downlink.enabled || !credential.is_some_and(|value| !value.disabled && !value.secret_value.trim().is_empty()) {
-            return Err(invalid("A2A requires enabled downlink and credential"));
-        }
+        if !downlink.enabled {return Err(invalid("A2A requires enabled downlink"));}
         Ok(())
     }
 
@@ -238,8 +246,11 @@ impl ProviderRegistrationCore {
                 .map_err(|_|invalid("A2A interface is not an allowed HTTP(S) endpoint"))?;
             let credential = self.credentials
                 .get_credential_by_kind(&provider.provider_id, "downlink_bcs_to_provider").await?;
-            if !credential.is_some_and(|value| !value.disabled && !value.secret_value.trim().is_empty()) {
-                return Err(invalid("A2A requires an enabled downlink credential"));
+            let ready=credential.is_some_and(|value|!value.disabled && !value.secret_value.trim().is_empty());
+            bcs_service_api::types::a2a_auth::select_authentication(&card.agent_card,self.a2a_allow_anonymous,ready)
+                .map_err(invalid)?;
+            if bcs_service_api::types::a2a_names::card_bot_name(&card.agent_card).map_err(invalid)?!=command.bot_name {
+                return Err(invalid("Bot name must match AgentCard.name"));
             }
             None
         } else { self.endpoint(&provider, &downlink, &command).await? };
@@ -282,6 +293,7 @@ impl ProviderRegistrationCore {
             self.registrations.create_provider_bot_with_ownership(provider_bot, capabilities,
                 &record.owner, &record.bot_token, initialization).await?;
         }
+        if let Some(port) = &self.catalog_changes { port.agent_changed(&record.bot_uuid); }
         Ok(ProviderRegistrationResult {
             record,
             effective_webhook_url,

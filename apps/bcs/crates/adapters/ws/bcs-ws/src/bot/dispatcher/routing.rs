@@ -319,3 +319,7 @@ pub(super) async fn handle_route_resolve(
     )
     .await
 }
+
+#[cfg(test)]
+#[path = "routing_tests.rs"]
+mod regression_tests;

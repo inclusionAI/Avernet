@@ -302,8 +302,9 @@ _CREATE_BODY = {
 _BATCH_BODY = {
     "items": [
         {
-            "actor_type": "HUMAN",
-            "actor_id": _CALLER,
+            "actor_type": "BOT",
+            "actor_id": "bot-a:149844",
+            "actor_id_alias": "bot-a",
             "target_type": "TOPIC",
             "target_id": "topic_endpoint_1",
         }

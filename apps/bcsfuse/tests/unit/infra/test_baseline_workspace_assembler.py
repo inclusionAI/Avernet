@@ -10,19 +10,19 @@ from __future__ import annotations
 
 import pytest
 
-from src.infra.assemblers.baseline_workspace_assembler import BaselineWorkspaceAssembler
-from src.domain.models.workspace_assembly_input import WorkspaceAssemblyInput, AssemblyHints
-from src.domain.models.workspace_assembly_result import WorkspaceAssemblyResult
-from src.domain.models.task_spec import TaskSpec, RiskLevel
-from src.domain.models.plan_draft import PlanDraft, PlanStep
-from src.domain.models.team_spec import TeamSpec, RoleAssignment
-from src.domain.models.candidate_bundle import CandidateBundle, KnowledgeItem
-from src.domain.models.worker import (
+from app.infra.assemblers.baseline_workspace_assembler import BaselineWorkspaceAssembler
+from app.domain.models.workspace_assembly_input import WorkspaceAssemblyInput, AssemblyHints
+from app.domain.models.workspace_assembly_result import WorkspaceAssemblyResult
+from app.domain.models.task_spec import TaskSpec, RiskLevel
+from app.domain.models.plan_draft import PlanDraft, PlanStep
+from app.domain.models.team_spec import TeamSpec, RoleAssignment
+from app.domain.models.candidate_bundle import CandidateBundle, KnowledgeItem
+from app.domain.models.worker import (
     Worker, WorkerState, WorkerType, WorkerIdentity,
     Capability, CapabilityLevel, SkillRef, ResourceRef,
     SkillSource, TrustLevel, ResourceKind, ResourceAccess, Availability,
 )
-from src.domain.models.workspace import WorkspaceStatus
+from app.domain.models.workspace import WorkspaceStatus
 
 
 # =============================================================================

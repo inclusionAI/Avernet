@@ -26,6 +26,7 @@ pub struct InviteCodeServiceImpl {
     repo: Arc<dyn InviteCodeRepoPort>,
     secret: Vec<u8>,
     public_claim_max_count: u64,
+    issuer_user_ids: std::collections::BTreeSet<String>,
     gate_enabled: bool,
     public_claim_lock: tokio::sync::Mutex<()>,
 }
@@ -40,6 +41,7 @@ impl InviteCodeServiceImpl {
             repo,
             secret,
             public_claim_max_count,
+            issuer_user_ids: Default::default(),
             gate_enabled: true,
             public_claim_lock: tokio::sync::Mutex::new(()),
         }
@@ -51,6 +53,13 @@ impl InviteCodeServiceImpl {
     /// alone controls whether clients prompt for a binding.
     pub fn with_gate_enabled(mut self, gate_enabled: bool) -> Self {
         self.gate_enabled = gate_enabled;
+        self
+    }
+
+    /// Only explicitly configured verified user IDs may issue codes. An empty
+    /// allowlist denies all issuance, independently of the binding gate switch.
+    pub fn with_issuer_user_ids(mut self, ids: Vec<String>) -> Self {
+        self.issuer_user_ids = ids.into_iter().filter(|id| !id.trim().is_empty()).collect();
         self
     }
 
@@ -152,9 +161,14 @@ impl InviteCodeService for InviteCodeServiceImpl {
         &self,
         command: InitInviteCodes,
     ) -> Result<InitInviteCodesResult, ApplicationError> {
+        let issuer = command.caller.user.as_ref()
+            .filter(|user| self.issuer_user_ids.contains(&user.id))
+            .ok_or_else(|| ApplicationError::forbidden(
+                "Invite-code issuance requires an explicitly authorized user",
+            ))?;
         let mut codes = Vec::with_capacity(command.count as usize);
         while codes.len() < command.count as usize {
-            codes.push(self.generate_and_store_code(None).await?);
+            codes.push(self.generate_and_store_code(Some(format!("human_{}", issuer.id))).await?);
         }
         Ok(InitInviteCodesResult { codes })
     }
@@ -486,13 +500,77 @@ mod tests {
     #[tokio::test]
     async fn init_codes_generates_requested_count() {
         let (svc, repo) = service();
-        let result = svc
-            .init_invite_codes(InitInviteCodes { count: 3 })
+        let result = svc.with_issuer_user_ids(vec!["issuer-1".into()])
+            .init_invite_codes(InitInviteCodes { caller: human_caller("issuer-1"), count: 3 })
             .await
             .expect("init codes");
         assert_eq!(result.codes.len(), 3);
         assert!(result.codes.iter().all(|code| code.len() == 6));
         assert_eq!(repo.records.read().await.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn issuance_fails_closed_independently_of_binding_gate() {
+        for gate_enabled in [false, true] {
+            let (svc, repo) = service();
+            let svc = svc.with_gate_enabled(gate_enabled);
+            let error = svc.init_invite_codes(InitInviteCodes {
+                caller: human_caller("issuer-1"), count: 1,
+            }).await.expect_err("default empty allowlist must deny issuance");
+            assert_eq!(error.code(), "forbidden");
+            assert!(repo.records.read().await.is_empty());
+
+            let svc = svc.with_issuer_user_ids(vec!["issuer-1".into(), " ".into()]);
+            let mut spoofed = human_caller("ordinary-user");
+            spoofed.user.as_mut().unwrap().username = "issuer-1".into();
+            let mut non_user = human_caller("issuer-1");
+            non_user.user = None;
+            non_user.app = Some(bcs_service_api::application::v1::AuthenticatedAppIdentity {
+                app_id: 1, app_name: "issuer-1".into(),
+                owners: "issuer-1".into(), app_type: "service".into(),
+            });
+            non_user.bot = Some(bcs_service_api::application::v1::AuthenticatedBotIdentity {
+                bot_uuid: "issuer-1".into(), owner_id: "issuer-1".into(),
+                app_id: 1, agent_code: "issuer-1".into(),
+            });
+            for caller in [spoofed, non_user, human_caller(""), human_caller(" ")] {
+                let error = svc.init_invite_codes(InitInviteCodes {
+                    caller, count: 1,
+                }).await.expect_err("only exact verified user ID is authorized");
+                assert_eq!(error.code(), "forbidden");
+                assert!(repo.records.read().await.is_empty());
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn exhausted_public_quota_does_not_grant_issuance_to_ordinary_users() {
+        let repo = Arc::new(FakeInviteCodeRepo::new());
+        let svc = InviteCodeServiceImpl::new(repo.clone(), b"secret".to_vec(), 0)
+            .with_issuer_user_ids(vec!["issuer-1".into()]);
+        assert_eq!(svc.claim_public_invite_code(ClaimPublicInviteCode)
+            .await.unwrap_err().code(), "invite_code_claim_limit_reached");
+        assert_eq!(svc.init_invite_codes(InitInviteCodes {
+            caller: human_caller("ordinary-user"), count: 1,
+        }).await.unwrap_err().code(), "forbidden");
+        assert!(repo.records.read().await.is_empty());
+        assert!(!svc.get_my_invite_code_binding(GetMyInviteCodeBinding {
+            caller: human_caller("ordinary-user"),
+        }).await.unwrap().bound);
+
+        let result = svc.init_invite_codes(InitInviteCodes {
+            caller: human_caller("issuer-1"), count: 1,
+        }).await.expect("explicit issuer can issue despite public quota");
+        assert_eq!(result.codes.len(), 1);
+        let record = repo.find_by_code_hash(&svc.code_hash(&result.codes[0]))
+            .await.unwrap().unwrap();
+        assert_eq!(record.created_by.as_deref(), Some("human_issuer-1"));
+        svc.bind_invite_code(BindInviteCode {
+            caller: human_caller("ordinary-user"), code: result.codes[0].clone(),
+        }).await.expect("authorized code remains bindable");
+        assert!(svc.get_my_invite_code_binding(GetMyInviteCodeBinding {
+            caller: human_caller("ordinary-user"),
+        }).await.unwrap().bound);
     }
 
     #[tokio::test]

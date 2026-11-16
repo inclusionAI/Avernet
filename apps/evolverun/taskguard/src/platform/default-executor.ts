@@ -31,6 +31,7 @@ import { executeMcpCall } from "../executors/mcp-call.js";
 import { executeBaasCall } from "../executors/baas-call.js";
 import { executeBcsRoute } from "../executors/bcs-route.js";
 import { executeSubworkflow } from "../executors/subworkflow.js";
+import { executeCliScript } from "../executors/cli-script.js";
 import { buildSkipResult, evaluateSkipWhenConditions, readNodeSkipWhen } from "../skip-when.js";
 
 export interface DefaultExecutorOptions {
@@ -44,6 +45,7 @@ export interface DefaultExecutorOptions {
   workflow?: WorkflowSpec;
   /** Subworkflow support — if absent, subworkflow nodes return an error */
   subworkflowDeps?: SubworkflowDeps;
+  subworkflowDepsGetter?: () => SubworkflowDeps | undefined;
   /** Callback for reporting node progress (e.g. baas-call polling status) */
   onNodeProgress?: (flowId: string, workflowId: string, nodeId: string, executorType: string, attempt: number, message: string) => void;
 }
@@ -200,6 +202,9 @@ export function createDefaultExecutorDispatch(
 
     if (nodeType === "cli-script") {
       const runner = commandRunnerFn ?? defaultSpawnRunner;
+      if (flowState.subworkflowMeta?.fanout) {
+        return executeCliScript(node, templateCtx, opts => runner({ ...opts, signal: abortSignal }));
+      }
       const cliExecutor = node.executor as { command?: string; timeoutMs?: number };
       const argv = cliExecutor.command ? cliExecutor.command.split(/\s+/) : [];
       if (argv.length === 0) {
@@ -332,13 +337,14 @@ export function createDefaultExecutorDispatch(
     // ── subworkflow: Delegate to executeSubworkflow with injected deps ──
 
     if (nodeType === "subworkflow") {
-      if (!subworkflowDeps) {
+      const currentSubworkflowDeps = options.subworkflowDepsGetter?.() ?? subworkflowDeps;
+      if (!currentSubworkflowDeps) {
         return {
           status: "failed",
           error: `subworkflow node ${node.id}: subworkflow execution is not available in MCP Server mode (no SubworkflowDeps provided)`,
         };
       }
-      return executeSubworkflow(node, templateCtx, flowState, flowId, subworkflowDeps);
+      return executeSubworkflow(node, templateCtx, flowState, flowId, currentSubworkflowDeps);
     }
 
     // ── loop-group: Must be materialized by controller before execution ──
@@ -509,6 +515,7 @@ const defaultSpawnRunner: CommandRunner = async (options) => {
       cwd: options.cwd,
       env: options.env ?? process.env,
       timeout: options.timeoutMs,
+      signal: options.signal,
     });
     let stdout = "";
     let stderr = "";

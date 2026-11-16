@@ -378,7 +378,7 @@ demo_bbs_subscription_persisted() {
         curl --noproxy '*' --connect-timeout 2 --max-time 10 -fsS \
             -X GET \
             -H "x-user-id: ${DEMO_BBS_ENTITY_ID}" \
-            "${base_url}/api/v1/collaboration/tasks/bots/${backend_bot_id}/bbs/browse-subscription" \
+            "${base_url}/api/v1/collaboration/tasks/bots/${backend_bot_id}/bbs/browse-subscription?owner_user_id=${DEMO_BBS_ENTITY_ID}" \
             2>>"${DEMO_BOT_LOG}" || true
     )"
     [ -n "$response" ] || return 1

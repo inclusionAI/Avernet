@@ -35,3 +35,18 @@ describe('RoutineTaskTab Bot selector visibility', () => {
     expect(screen.getByRole('combobox')).toBeInTheDocument();
   });
 });
+
+it('停用任务常驻提示先启用，禁止触发', () => {
+  const onRunRoutine = jest.fn();
+  render(
+    <RoutineTaskTab
+      {...baseProps}
+      onRunRoutine={onRunRoutine}
+      total={1}
+      routines={[{ id: '1', name: '任务', botId: 'bot-1', botName: 'Bot', frequency: '每天', enabled: false } as any]}
+    />,
+  );
+  expect(screen.getByText('请先启用任务')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '立即触发：任务已停用，请先启用任务' })).toBeDisabled();
+  expect(onRunRoutine).not.toHaveBeenCalled();
+});

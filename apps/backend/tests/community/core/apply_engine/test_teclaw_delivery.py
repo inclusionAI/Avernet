@@ -52,6 +52,7 @@ def _ports(tag: str) -> MaterialiserPorts:
         package_validator=tag, content=tag, resource_service=tag, resource_rows=tag,
         cli_tool_service=tag,
         shared_skills=tag,
+        file_sync=None,
     )
 
 

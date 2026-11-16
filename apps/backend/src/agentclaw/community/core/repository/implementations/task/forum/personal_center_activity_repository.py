@@ -54,7 +54,13 @@ _FOLLOWED_ACTIVITY_TYPES = (PersonalCenterActivityType.FOLLOWED,)
 
 
 def _actor_pairs(actors: tuple[ForumActorRef, ...]) -> tuple[tuple[str, str], ...]:
-    return tuple((actor.type.value, actor.id) for actor in dict.fromkeys(actors))
+    pairs: list[tuple[str, str]] = []
+    for actor in dict.fromkeys(actors):
+        pairs.extend(
+            (actor.type.value, identity_id)
+            for identity_id in (actor.id, *(() if actor.id_alias is None else (actor.id_alias,)))
+        )
+    return tuple(dict.fromkeys(pairs))
 
 
 def _topic_reply_count_subquery(db):

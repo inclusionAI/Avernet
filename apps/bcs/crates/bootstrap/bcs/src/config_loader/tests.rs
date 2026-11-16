@@ -593,3 +593,244 @@ fn test_redact_caller_plugin_credentials_without_mutating_source() {
     assert_eq!(redacted["other_plugin"]["timeout_ms"], 500);
     assert_eq!(source["caller_identity"]["options"]["app_key"], "test-key");
 }
+
+// =========================================================================
+// api.auth value-domain guard tests (through the real parse entry)
+// =========================================================================
+
+#[test]
+fn toml_datetime_in_api_auth_is_rejected_before_conversion() {
+    let content = r#"
+[api.auth]
+chain = ["gateway"]
+issued = 1979-05-27T07:32:00Z
+"#;
+    let err = parse_config_content("toml", content, "value-domain.toml")
+        .unwrap_err()
+        .to_string();
+    assert!(
+        err.contains("api.auth.issued"),
+        "error should carry the field path: {err}"
+    );
+    assert!(
+        err.contains("datetime"),
+        "error should carry the value category: {err}"
+    );
+    // C3 redaction: the raw value must not be echoed.
+    assert!(
+        !err.contains("1979-05-27"),
+        "error must not echo raw config values: {err}"
+    );
+}
+
+#[test]
+fn toml_floats_including_nan_and_inf_in_api_auth_are_rejected() {
+    for (field, raw) in [
+        ("weight", "1.5"),
+        ("nan_value", "nan"),
+        ("inf_value", "inf"),
+        ("neg_inf_value", "-inf"),
+    ] {
+        let content = format!(
+            "[api.auth]\nchain = [\"gateway\"]\n{field} = {raw}\n"
+        );
+        let err = parse_config_content("toml", &content, "value-domain.toml")
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains(&format!("api.auth.{field}")),
+            "expected path api.auth.{field} in error: {err}"
+        );
+        assert!(
+            err.contains("floating-point"),
+            "error should carry the value category: {err}"
+        );
+    }
+}
+
+#[test]
+fn toml_api_auth_float_error_does_not_echo_raw_values() {
+    let content = "[api.auth]\nchain = [\"gateway\"]\nodd_float = 9.75\n";
+    let err = parse_config_content("toml", content, "value-domain.toml")
+        .unwrap_err()
+        .to_string();
+    // C3 redaction: distinctive value material must not appear in the error.
+    assert!(
+        !err.contains("9.75"),
+        "error must not echo raw config values: {err}"
+    );
+}
+
+#[test]
+fn api_auth_floats_in_nested_structures_and_not_enabled_tables_are_rejected() {
+    let content = r#"
+[api.auth]
+chain = ["gateway"]
+
+[api.auth.gateway]
+audience = "bcs"
+
+[api.auth.gateway.matrix]
+rows = [[1.0, 2.0]]
+"#;
+    let err = parse_config_content("toml", content, "value-domain.toml")
+        .unwrap_err()
+        .to_string();
+    assert!(
+        err.contains("api.auth.gateway.matrix.rows[0][0]"),
+        "nested array element path expected: {err}"
+    );
+    assert!(err.contains("floating-point"), "unexpected error: {err}");
+}
+
+#[test]
+fn json_null_float_and_beyond_i64_integers_in_api_auth_are_rejected() {
+    for (case, json) in [
+        (
+            "null",
+            r#"{"api": {"auth": {"chain": ["gateway"], "value": null}}}"#,
+        ),
+        (
+            "float",
+            r#"{"api": {"auth": {"chain": ["gateway"], "value": 1.5}}}"#,
+        ),
+        (
+            "beyond i64",
+            r#"{"api": {"auth": {"chain": ["gateway"], "value": 9223372036854775808}}}"#,
+        ),
+        (
+            "explicit null auth section",
+            r#"{"api": {"auth": null}}"#,
+        ),
+    ] {
+        let err = parse_config_content("json", json, "value-domain.json")
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("api.auth"),
+            "error should carry the api.auth path ({case}): {err}"
+        );
+    }
+}
+
+#[test]
+fn default_config_print_round_trips_without_an_explicit_null_api_auth() {
+    // The `bcs-caller-e2e` runner prints `BcsConfig::default()` as JSON;
+    // stories overlay fields and load the result back through the strict
+    // loader. An unconfigured `[api.auth]` must therefore stay ABSENT in the
+    // printed config — an explicit `"auth": null` is rejected by the
+    // value-domain validation above ("absent and null are not equivalent").
+    let printed = serde_json::to_string(&bcs::BcsConfig::default()).unwrap();
+    assert!(
+        !printed.contains(r#""auth":null"#),
+        "printed default must not contain an explicit null api.auth section: {printed}"
+    );
+    parse_config_content("json", &printed, "print-config-round-trip.json").unwrap();
+}
+
+#[test]
+fn api_auth_integer_boundary_values_are_preserved_exactly() {
+    // TOML side: the values must survive the TOML->JSON conversion as exact
+    // integers, including above the f64-exact integer range and at the i64
+    // endpoints.
+    let content = r#"
+[api.auth]
+chain = ["gateway"]
+big = 9007199254740993
+min_edge = -9223372036854775808
+max_edge = 9223372036854775807
+"#;
+    let value = parse_config_content("toml", content, "value-domain.toml").unwrap();
+    assert_eq!(
+        value["api"]["auth"]["big"].as_i64(),
+        Some(9007199254740993),
+        "big integer must not round through f64"
+    );
+    assert_eq!(
+        value["api"]["auth"]["min_edge"].as_i64(),
+        Some(i64::MIN)
+    );
+    assert_eq!(
+        value["api"]["auth"]["max_edge"].as_i64(),
+        Some(i64::MAX)
+    );
+
+    // JSON side: same boundary values must survive parsing unmodified.
+    let json = r#"{"api": {"auth": {
+        "chain": ["gateway"],
+        "big": 9007199254740993,
+        "min_edge": -9223372036854775808,
+        "max_edge": 9223372036854775807
+    }}}"#;
+    let value = parse_config_content("json", json, "value-domain.json").unwrap();
+    assert_eq!(value["api"]["auth"]["big"].as_i64(), Some(9007199254740993));
+    assert_eq!(value["api"]["auth"]["min_edge"].as_i64(), Some(i64::MIN));
+    assert_eq!(value["api"]["auth"]["max_edge"].as_i64(), Some(i64::MAX));
+}
+
+#[test]
+fn api_auth_quoted_date_strings_stay_strings() {
+    let content = r#"
+[api.auth]
+chain = ["gateway"]
+issued = "1979-05-27T07:32:00Z"
+"#;
+    let value = parse_config_content("toml", content, "value-domain.toml").unwrap();
+    assert_eq!(
+        value["api"]["auth"]["issued"],
+        serde_json::Value::String("1979-05-27T07:32:00Z".to_string()),
+        "quoted date strings stay strings; the descriptor schema decides acceptance"
+    );
+}
+
+#[test]
+fn value_domain_guards_do_not_touch_legacy_subtrees() {
+    // Floats in legacy sections keep their existing (unrestricted) domain.
+    let content = r#"
+[llm]
+temperature = 0.5
+"#;
+    let value = parse_config_content("toml", content, "legacy.toml").unwrap();
+    assert_eq!(value["llm"]["temperature"].as_f64(), Some(0.5));
+    assert!(
+        parse_config_content("json", r#"{"llm": {"temperature": 0.5}}"#, "legacy.json")
+            .is_ok()
+    );
+    assert!(parse_config_content("toml", "bind = \"0.0.0.0\"", "api-absent.toml").is_ok());
+}
+
+#[test]
+fn overlay_loader_rejects_api_auth_floats_even_when_overlay_replaces_them() {
+    let dir = tempfile::tempdir().unwrap();
+    // The base file carries an out-of-domain value under a not-enabled
+    // plugin table; the dev overlay would replace it with a valid value —
+    // the parse of the base file must still fail.
+    std::fs::write(
+        dir.path().join("bcs-config.toml"),
+        r#"
+[api.auth]
+chain = ["gateway"]
+
+[api.auth.gateway]
+weight = 1.5
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("bcs-config-dev.toml"),
+        r#"
+[api.auth.gateway]
+weight = 2
+"#,
+    )
+    .unwrap();
+
+    let loader = ConfigLoader::new(dir.path().to_path_buf()).with_environment(Environment::Dev);
+    let result: Result<serde_json::Value, _> = loader.load();
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("api.auth.gateway.weight"),
+        "overlay path must surface the base value-domain failure: {err}"
+    );
+    assert!(err.contains("floating-point"), "unexpected error: {err}");
+}

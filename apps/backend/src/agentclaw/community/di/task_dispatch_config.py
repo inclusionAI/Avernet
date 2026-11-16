@@ -10,3 +10,7 @@ class TaskDispatchConfig:
     backend_url: str = ""
     task_search_skill_enabled: bool = False
     skill_report_enabled: bool = True
+    # Legacy deployment keys retained for configuration compatibility. Todo now
+    # reaches ContextCollab in-process, so production wiring does not consume them.
+    todo_collab_base_url: str = ""
+    todo_collab_timeout_seconds: float = 10.0

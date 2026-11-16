@@ -30,6 +30,10 @@ async fn candidates_require_a_human_owner_and_allow_the_current_human_actor() {
         .await
         .expect_err("non-owner must fail");
     assert_eq!(error.code(), "forbidden");
+    assert!(
+        fixture.connect.queries().is_empty(),
+        "an unauthorized Bot perspective must not start a friend read"
+    );
 
     let page = fixture
         .service
@@ -43,7 +47,12 @@ async fn candidates_require_a_human_owner_and_allow_the_current_human_actor() {
         })
         .await
         .expect("current human actor may select candidates");
-    assert_eq!(page.total, 0);
+    // The Connect/edge friend-read change flipped the list to the authorized
+    // Human perspective (`viewer_kind: acting.kind`):
+    // acting Bot's Bot-facing `private` visibility no longer hides it, and
+    // its default `user_visibility=protected` makes it discoverable.
+    assert_eq!(page.total, 1);
+    assert_eq!(page.items[0].bot.bot_id, "acting");
 
     let error = fixture
         .service
@@ -58,6 +67,11 @@ async fn candidates_require_a_human_owner_and_allow_the_current_human_actor() {
         .await
         .expect_err("another human actor must fail");
     assert_eq!(error.code(), "forbidden");
+    assert_eq!(
+        fixture.connect.queries().len(),
+        1,
+        "only the authorized Human self listing may read friends"
+    );
 }
 #[tokio::test]
 async fn human_actor_collaboration_candidates_include_only_private_friends() {
@@ -79,10 +93,16 @@ async fn human_actor_collaboration_candidates_include_only_private_friends() {
         )
         .await;
     fixture
+        .add_bot("legacy-only", "staff-4", "private", ActorStatus::Online)
+        .await;
+    fixture
         .friends
-        .add_friendship("human_staff-1", "private-friend")
+        .add_friendship("human_staff-1", "legacy-only")
         .await
-        .expect("add human friendship");
+        .expect("add legacy-only friendship");
+    fixture
+        .connect
+        .add_friend("private-friend", ActorKind::Bot);
 
     let page = fixture
         .service
@@ -100,6 +120,14 @@ async fn human_actor_collaboration_candidates_include_only_private_friends() {
     assert_eq!(page.total, 1);
     assert_eq!(page.items[0].bot.bot_id, "private-friend");
     assert!(page.items[0].is_friend);
+    assert_eq!(
+        fixture.connect.queries(),
+        vec![FriendListQuery {
+            target_type: Some(ActorKind::Bot),
+            offset: 0,
+            limit: 100,
+        }]
+    );
 }
 #[tokio::test]
 async fn collaboration_candidates_include_private_friends_without_status_filtering() {
@@ -111,10 +139,8 @@ async fn collaboration_candidates_include_private_friends_without_status_filteri
         .add_bot("private-friend", "staff-2", "private", ActorStatus::Hidden)
         .await;
     fixture
-        .friends
-        .add_friendship("acting", "private-friend")
-        .await
-        .expect("add friendship");
+        .connect
+        .add_friend("private-friend", ActorKind::Bot);
 
     let page = fixture
         .service
@@ -183,7 +209,7 @@ let service = BotServiceImpl::new(
         control_plane.clone(),
         Arc::new(NoopBotRegistryCoreService),
         Arc::new(NoopFriendCoreService),
-        connect,
+        connect.clone(),
         Arc::new(RecordingCandidateSearch::empty()),
         BotServiceConfig { env: env.clone() },
     )
@@ -207,11 +233,34 @@ let service = BotServiceImpl::new(
         .expect("eligible candidates");
 
     assert_eq!(page.total, 0);
+    assert_eq!(
+        connect.queries(),
+        vec![FriendListQuery {
+            target_type: Some(ActorKind::Bot),
+            offset: 0,
+            limit: 100,
+        }]
+    );
+    let aliased = service
+        .list_candidates(ListBotCandidates {
+            caller: human_caller("staff-1"),
+            bot_id: "acting".to_string(),
+            purpose: BotCandidatePurpose::Collaboration,
+            name: Some(" FRIEND ".to_string()),
+            offset: 0,
+            limit: 20,
+        })
+        .await
+        .expect("canonical candidates");
+    assert_eq!(aliased, page, "the deprecated alias must share the list DTO");
     let queries = control_plane.queries.lock().expect("queries lock");
-    let query = queries.first().expect("recorded query");
-    assert!(query.friend_ids.contains("bot-friend"));
-    assert!(!query.friend_ids.contains("human-friend"));
-    assert_eq!(query.name.as_deref(), Some("FRIEND"));
+    assert_eq!(queries.len(), 2, "both entries share the same application read");
+    for query in queries.iter() {
+        assert!(query.friend_ids.contains("bot-friend"));
+        assert!(!query.friend_ids.contains("human-friend"));
+        assert_eq!(query.viewer_kind, ActorKind::Bot);
+        assert_eq!(query.name.as_deref(), Some("FRIEND"));
+    }
 }
 #[tokio::test]
 async fn query_preserves_first_occurrence_and_projects_both_kinds_provider_and_reachability() {

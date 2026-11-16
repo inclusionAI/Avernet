@@ -39,6 +39,11 @@ pub(crate) fn group_application_error_response(error: ApplicationError) -> Respo
         ApplicationError::BadGateway { code, message } => {
             legacy_group_error_response(StatusCode::BAD_GATEWAY, &code, message)
         }
+        // Auth-flow dependency outage: same stable code family as the V1
+        // envelope, on the legacy response shape.
+        ApplicationError::Unavailable { code, message } => {
+            legacy_group_error_response(StatusCode::SERVICE_UNAVAILABLE, &code, message)
+        }
         // COSEC: keep persistence and infrastructure details out of the legacy response.
         ApplicationError::Internal(error) => {
             tracing::error!(request_id = %bcs_observability::CurrentRequestId, error = %error, "legacy Group application request failed");
@@ -418,3 +423,7 @@ pub(crate) fn group_kind_filter(filter: GroupKindFilter) -> Option<GroupKind> {
 // ---------------------------------------------------------------
 // PATCH /groups/{id}/settings
 // ---------------------------------------------------------------
+
+#[cfg(test)]
+#[path = "translation_tests.rs"]
+mod regression_tests;

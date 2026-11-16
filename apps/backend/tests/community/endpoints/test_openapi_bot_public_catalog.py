@@ -183,6 +183,7 @@ def _seed_profile(world) -> None:
             "capabilities": [
                 {"capability_id": "antv", "display_name": "AntV 可视化图表"}
             ],
+            "skills": [{"skill_id": "weekly-report", "display_name": "风太周报"}],
         }
 
     bind_overrides(
@@ -212,6 +213,9 @@ def _seed_profile(world) -> None:
                 "engine_name": "openclaw",
                 "capabilities": [
                     {"capability_id": "antv", "display_name": "AntV 可视化图表"}
+                ],
+                "skills": [
+                    {"skill_id": "weekly-report", "display_name": "风太周报"}
                 ],
             },
         },

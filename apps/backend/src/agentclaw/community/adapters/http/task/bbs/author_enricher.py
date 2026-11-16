@@ -63,28 +63,34 @@ def _bot_service(injector: Any) -> Any:
         return None
 
 
-def _bot_display_name(bot_service: Any, bot_id: str) -> str | None:
+def _bot_account(bot_service: Any, author_id: str) -> tuple[str | None, str | None, str | None]:
+    """Return ``bot_uuid``, bare ``bot_id``, and display name when discoverable."""
+    scoped = parse_scoped_bot_identity(author_id)
+    if scoped is None:
+        if author_id == "default":
+            return None, None, None
+        if bot_service is None:
+            return None, author_id, None
+        try:
+            row = bot_service.get_bot_by_id(author_id)
+        except Exception:  # noqa: BLE001 — lookup failure ⇒ metadata stays null
+            return None, author_id, None
+        if not row:
+            return None, author_id, None
+        owner_id = str(row.get("owner_id") or "").strip() if hasattr(row, "get") else ""
+        name = row.get("bot_name") if hasattr(row, "get") else None
+        bot_uuid = f"{author_id}:{owner_id}" if owner_id else None
+        return bot_uuid, author_id, str(name or "").strip() or None
+
+    bare_bot_id, owner_id = scoped
     if bot_service is None:
-        return None
-    # Legacy BBS rows may still contain the bare product id ``default``. Every
-    # owner has such a Bot, and the record no longer carries enough context to
-    # recover which owner wrote it; returning a random inventory name would
-    # silently relabel history.
-    if bot_id == "default":
-        return None
+        return author_id, bare_bot_id, None
     try:
-        scoped = parse_scoped_bot_identity(bot_id)
-        if scoped is None:
-            row = bot_service.get_bot_by_id(bot_id)
-        else:
-            bare_bot_id, owner_id = scoped
-            row = bot_service.get_bot_by_address(bare_bot_id, owner_id)
-    except Exception:  # noqa: BLE001 — lookup failure ⇒ null, not a 5xx
-        return None
-    if not row:
-        return None
-    name = row.get("bot_name") if hasattr(row, "get") else None
-    return str(name or "").strip() or None
+        row = bot_service.get_bot_by_address(bare_bot_id, owner_id)
+    except Exception:  # noqa: BLE001 — lookup failure ⇒ identity is still derivable
+        row = None
+    name = row.get("bot_name") if row and hasattr(row, "get") else None
+    return author_id, bare_bot_id, str(name or "").strip() or None
 
 
 def enrich_bot_display_names(records: Sequence[Any], *, request: Any) -> list[Any]:
@@ -109,24 +115,24 @@ def enrich_bot_display_names(records: Sequence[Any], *, request: Any) -> list[An
                 candidates.extend(_flat_candidates(tuple(children)))
         return candidates
 
-    needs_lookup = {
+    author_ids = {
         record.author_id
         for record in _flat_candidates(records)
         if getattr(record, "author_type", None) == AUTHOR_TYPE_BOT
-        and record.display_name is None
         and record.author_id
     }
-    lookup = {bid: _bot_display_name(bot_service, bid) for bid in needs_lookup}
+    lookup = {bid: _bot_account(bot_service, bid) for bid in author_ids}
 
     def _enrich_record(record: Any) -> Any:
-        if (
-            getattr(record, "author_type", None) == AUTHOR_TYPE_BOT
-            and record.display_name is None
-            and record.author_id in lookup
-        ):
-            name = lookup.get(record.author_id)
-            if name:
-                record = replace(record, display_name=name)
+        if getattr(record, "author_type", None) == AUTHOR_TYPE_BOT and record.author_id in lookup:
+            bot_uuid, bot_id, name = lookup.get(record.author_id, (None, None, None))
+            enriched_fields = {
+                "author_bot_uuid": bot_uuid,
+                "author_bot_id": bot_id,
+            }
+            if record.display_name is None and name:
+                enriched_fields["display_name"] = name
+            record = replace(record, **enriched_fields)
         children = getattr(record, "children", ())
         if children:
             enriched_children = tuple(_enrich_record(child) for child in children)
@@ -201,7 +207,7 @@ def enrich_personal_center_bot_display_names(page: Any, *, request: Any) -> Any:
         return page
     bot_service = _bot_service(_request_injector(request))
     lookup = {
-        bot_id: _bot_display_name(bot_service, bot_id) for bot_id in sorted(bot_ids)
+        bot_id: _bot_account(bot_service, bot_id)[2] for bot_id in sorted(bot_ids)
     }
     if not any(lookup.values()):
         return page

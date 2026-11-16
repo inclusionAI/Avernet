@@ -16,6 +16,7 @@ import json
 from typing import Any, List, Literal, Optional
 
 from fastapi import APIRouter, Query, Request, Response, Depends, Path
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
 from agentclaw.community.adapters.http.auth.dependencies import require_operator, get_current_user
@@ -42,6 +43,7 @@ from agentclaw.community.core.bot_collaborator.interceptor import (
 )
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.bot_management.avatar import AvatarTooLargeError
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotServiceError,
     BotInvalidLifecycleStateError,
@@ -110,6 +112,9 @@ from agentclaw.community.plugin_api.bot_create_extension import (
     ExtensionBlocked,
     ExtensionConflict,
     ExtensionInvalidInput,
+)
+from agentclaw.community.plugin_api.bot_template_write_extension import (
+    TemplateWriteInvalidInput,
 )
 from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.plugin_api.passport import PassportError
@@ -468,6 +473,14 @@ async def restart_bot_for_others(
         return ApiResponse(
             success=False,
             message=str(e),
+            error_code=400,
+            data=None,
+        )
+    except TemplateWriteInvalidInput as e:
+        logger.warning(f"[bot_router.restart_bot_for_others] Template write rejected: {e}")
+        return ApiResponse(
+            success=False,
+            message=f"{str(e)}",
             error_code=400,
             data=None,
         )
@@ -1289,6 +1302,8 @@ async def create_bot(
             error_code=400,
             data=None,
         )
+    except AvatarTooLargeError as e:
+        return JSONResponse(status_code=400, content={"success": False, "message": str(e), "error_code": 400, "data": None})
     except BotNameInvalidError as e:
         logger.warning(f"[bot_router.create_bot] Invalid bot_name: {e}")
         return ApiResponse(
@@ -1507,6 +1522,8 @@ async def get_auth_status(
             error_code=400,
             data=None,
         )
+    except AvatarTooLargeError as e:
+        return JSONResponse(status_code=400, content={"success": False, "message": str(e), "error_code": 400, "data": None})
     except BotNameInvalidError as e:
         logger.warning(f"[bot_router.get_auth_status] Invalid bot_name: {e}")
         return ApiResponse(
@@ -2561,6 +2578,14 @@ async def admin_update_bot(
             error_code=409,
             data=None,
         )
+    except TemplateWriteInvalidInput as e:
+        logger.warning(f"[bot_router.admin_update_bot] Template write rejected: {e}")
+        return ApiResponse(
+            success=False,
+            message=f"{str(e)}",
+            error_code=400,
+            data=None,
+        )
     except BotServiceError as e:
         error_msg = str(e)
         error_code = 400 if "校验失败" in error_msg else 500
@@ -2605,7 +2630,16 @@ async def update_bot(
     }
     """
     try:
-        data = await request.json()
+        try:
+            data = await request.json()
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return ApiResponse(
+                success=False, message="请求体不是有效的 JSON", error_code=400, data=None
+            )
+        if not isinstance(data, dict):
+            return ApiResponse(
+                success=False, message="请求体必须是 JSON 对象", error_code=400, data=None
+            )
 
         # Get operator from request context; resource lookup uses resolved owner_id
         operator_id = ctx.user_id
@@ -2708,6 +2742,7 @@ async def update_bot(
                     bot_name=bot_name,
                     bot_desc=bot_desc,
                     engine_type=passport_engine_type,
+                    bot_type=str(result.get("bot_type") or "personal"),
                 )
                 logger.info(f"[bot_router.update_bot] Updated passport for bot {bot_id}, engine_type={passport_engine_type}")
             except Exception as e:
@@ -2719,6 +2754,8 @@ async def update_bot(
             data=result,
         )
 
+    except AvatarTooLargeError as exc:
+        return JSONResponse(status_code=400, content={"success": False, "message": str(exc), "error_code": 400, "data": None})
     except ExpertOriginReadOnlyError as exc:
         return ApiResponse(success=False, message=str(exc), error_code=400, data=None)
     except BotNotFoundError:
@@ -2734,6 +2771,14 @@ async def update_bot(
             success=False,
             message=f"{str(e)}",
             error_code=409,
+            data=None,
+        )
+    except TemplateWriteInvalidInput as e:
+        logger.warning(f"[bot_router.update_bot] Template write rejected: {e}")
+        return ApiResponse(
+            success=False,
+            message=f"{str(e)}",
+            error_code=400,
             data=None,
         )
     except BotServiceError as e:
@@ -3001,6 +3046,8 @@ async def get_bot_status(
             "ext": response_ext,  # 添加扩展字段
         }
 
+        from agentclaw.community.core.bot_management.engines.registry import resolve_status_ext
+        result['ext'] = resolve_status_ext(bot, response_ext=response_ext)
         return ApiResponse(
             success=True,
             data=result,
@@ -3271,6 +3318,14 @@ async def restart_bot(
         return ApiResponse(
             success=False,
             message=str(e),
+            error_code=400,
+            data=None,
+        )
+    except TemplateWriteInvalidInput as e:
+        logger.warning(f"[bot_router.restart_bot] Template write rejected: {e}")
+        return ApiResponse(
+            success=False,
+            message=f"{str(e)}",
             error_code=400,
             data=None,
         )

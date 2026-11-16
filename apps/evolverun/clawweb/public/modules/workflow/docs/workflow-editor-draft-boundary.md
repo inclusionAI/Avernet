@@ -116,3 +116,15 @@ workflow.
   database saving remain available, without erasing file state.
 - Save failures, concurrent draft creation, and late responses preserve local
   work and do not falsely report success or mark later edits clean.
+
+## AI-generated candidates
+
+The [Workflow AI draft contract](workflow-ai-drafts.md) adds isolated candidate
+generation against the current applied document. Generation and preview do not
+write the database draft, deployment history, Pack workflow refs, or runtime.
+AI Apply has the same memory-only boundary as ordinary YAML Apply; a failed
+store import is not successful application. Generation uses the server's effective
+`autoHeal.botId` verbatim through existing BaaS, not an onboarding/browser Bot or
+an AIStudio/Snapshot/Git/Pack baseline. Missing AutoHeal/BaaS capability must not
+block ordinary DB-only editing or saving. Cancellation records a local task
+state and fences late results; it does not guarantee the remote Bot has stopped.

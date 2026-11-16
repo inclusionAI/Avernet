@@ -75,6 +75,7 @@ docker/agent/avernet-sidecar/mitm-ca.key
 .night-kit/
 # Regenerated on every test run (test_module_boundaries dependents view)
 docs/arch/generated/
+apps/backend/docs/arch/generated/
 
 # Local/private agent and tooling state
 .claude/

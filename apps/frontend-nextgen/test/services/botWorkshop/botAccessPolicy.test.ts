@@ -3,8 +3,9 @@ import { canEnterBotDetail } from '@/services/botWorkshop/botPolicy';
 
 const bot = (ownerId: string, actions: string[]) => ({ ownerId, actions } as BotDomain);
 
-test('Owner 和明确具有 edit action 的协作者可进入详情', () => {
+test('Owner、只读配置协作者和具有 edit action 的协作者可进入详情', () => {
   expect(canEnterBotDetail(bot('1001', ['view']), '1001')).toBe(true);
+  expect(canEnterBotDetail(bot('1001', ['view', 'view_config']), '2002')).toBe(true);
   expect(canEnterBotDetail(bot('1001', ['view', 'edit']), '2002')).toBe(true);
 });
 

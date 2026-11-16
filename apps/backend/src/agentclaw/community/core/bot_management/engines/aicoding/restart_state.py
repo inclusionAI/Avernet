@@ -1,7 +1,7 @@
 """Coding-only restart journal, CAS transitions and per-invocation backup fence.
 
-The journal is stored in Bot.ext; terminal failures also use the existing
-Bot status and start_status/start_message fields consumed by status polling. A ContextVar
+The journal is stored in Bot.ext. Pre-mutation failures never change runtime
+status/startup markers; post-mutation failures keep the existing lifecycle fields. A ContextVar
 carries the durable operation through the *synchronous* legacy restart callback;
 it never changes that callback's public signature or affects instance restarts.
 """
@@ -24,6 +24,11 @@ TERMINAL = frozenset({"SUCCEEDED", "FAILED"})
 BACKUP_TIMEOUT = 1500
 BUSINESS_TIMEOUT = BACKUP_TIMEOUT + 600
 TASK_DEADLINE = 86400
+BACKUP_WARNING = 'backup_failed_continue'
+BACKUP_WARNING_MESSAGE = '快盘备份失败，当前配置不阻断重启，存在数据丢失风险。'
+published_backup_warning: ContextVar[Callable[[], None] | None] = ContextVar(
+    'coding_published_backup_warning', default=None,
+)
 
 
 def supports(bot: dict) -> bool:
@@ -43,6 +48,87 @@ def task_key(bot_id: str, owner_id: str) -> str:
 def journal(bot: dict) -> dict:
     value = (bot.get("ext") or {}).get(KEY)
     return value if isinstance(value, dict) else {}
+
+
+def restart_status(ext: dict, *, published=False, progress=None, public=False):
+    record = ext.get('restart' if published else KEY)
+    if not isinstance(record, dict) or not isinstance(record.get('operation_id'), str):
+        return None
+    phase = record.get('phase')
+    status = record.get('status') if published else (
+        phase if phase in TERMINAL else 'RUNNING' if phase in IN_PROGRESS else None
+    )
+    if status not in {'RUNNING', 'FAILED', 'SUCCEEDED'}:
+        return None
+    if published and status == 'RUNNING' and phase == 'WAITING_READY' and progress:
+        status = {'SUCCESS': 'SUCCEEDED', 'FAILED': 'FAILED'}.get(progress.get('status'), 'RUNNING')
+    result = {
+        'operation_id': record['operation_id'], 'status': status,
+        'phase': record.get('failure_phase', phase),
+        'message': record.get('error_message') or record.get('message') or (
+            '容器重启失败，请检查部署日志' if status == 'FAILED' else None
+        ),
+    }
+    if record.get('backup_warning') == BACKUP_WARNING:
+        result['warning'] = {'code': BACKUP_WARNING, 'message': BACKUP_WARNING_MESSAGE}
+    if public:
+        result['message'] = None
+        if status == 'FAILED':
+            result['message'] = (
+                '快盘备份失败，本次重启已终止，旧容器未销毁；请查看 Bot 日志。'
+                if result['phase'] == 'BACKING_UP'
+                else '本次重启失败，请查看 Bot 日志。'
+            )
+    return result
+
+
+def project_status_ext(ext, *, response_ext, published=False, progress=None, public=False):
+    """Merge the response namespace without mutating persisted JSON or exposing it."""
+    result = deepcopy(response_ext)
+    restart = restart_status(ext, published=published, progress=progress, public=public)
+    if restart is not None:
+        namespace = result.setdefault('aicoding', {})
+        namespace['restart'] = restart
+    return result
+
+
+def published_restart_result(record):
+    """Backup/precondition outcomes must not read an older BaaS workflow."""
+    from agentclaw.community.core.service_bot.schemas.publish_schemas import PublishFlowResult
+
+    restart = restart_status(record.ext or {}, published=True)
+    if restart is None or restart['phase'] not in {'QUEUED', 'BACKING_UP'}:
+        return None
+    return PublishFlowResult(
+        publish_id=record.id, status=record.status, action='sync_restart',
+        success=restart['status'] != 'FAILED',
+        message=restart['message'] or '重启前置检查进行中',
+        ext=project_status_ext(record.ext or {}, response_ext={}, published=True),
+    )
+
+
+def record_nonblocking_backup_warning(operation_id):
+    """Persist only a confirmed fastdisk backup failure that was allowed through."""
+    execution = current_restart.get()
+    if execution is not None:
+        if execution.operation_id != operation_id:
+            raise RestartSuperseded('Backup warning belongs to another restart')
+        if journal(execution.state.read()).get('backup_warning') != BACKUP_WARNING:
+            execution.state.update(IN_PROGRESS, backup_warning=BACKUP_WARNING)
+    else:
+        report = published_backup_warning.get()
+        if report is not None:
+            report()
+
+
+def published_warning_reporter(services, *, publish_id, guard_id):
+    def report():
+        def warn(ext):
+            state = ext.get('restart') or {}
+            if (state.get('guard') or {}).get('id') == guard_id:
+                state['backup_warning'] = BACKUP_WARNING
+        services.mutate_ext(publish_id=publish_id, mutator=warn)
+    return report
 
 
 class RestartSuperseded(RuntimeError):
@@ -77,10 +163,18 @@ class RestartState:
                 # Monotone across concurrent deliveries and CAS retries.
                 ext[KEY]['fastdisk_targets'] = sorted(set(old.get('fastdisk_targets', []))
                                                     | set(changes['fastdisk_targets']))
+            if changes.get('phase') == 'RESTARTING':
+                # Startup markers belong to the replacement only after mutation
+                # is authorized; backup-only failures preserve the old markers.
+                ext.pop('start_status', None)
+                ext.pop('start_message', None)
             failed = changes.get("phase") == "FAILED"
-            # Reuse the existing public startup-error contract. The journal's
-            # copy remains an operation-scoped audit/recovery record, not a new
-            # status response field. Never mark a replacement instance failed.
+            if failed:
+                ext[KEY]['failure_phase'] = old.get('phase')
+                ext[KEY]['runtime_preserved'] = old.get('phase') in {'QUEUED', 'BACKING_UP'}
+            # Only post-submission failures use the runtime startup-error
+            # contract. The journal independently exposes operation progress.
+            # Never mark a concurrently replaced instance failed.
             target_binding = old.get("handoff", {}).get(
                 "binding_id", old.get("binding_id")
             )
@@ -91,7 +185,7 @@ class RestartState:
                 and bot.get("active_engine") == old.get("engine", bot.get("active_engine"))
                 and bot.get("binding_id") == target_binding
             )
-            if failed and owns_target:
+            if failed and owns_target and not ext[KEY]['runtime_preserved']:
                 ext["start_status"] = "FAILED"
                 ext["start_message"] = changes["error_message"]
             updated = self.repository.compare_and_set_ext(
@@ -109,8 +203,8 @@ class RestartState:
 
         Queue dedup is the admission authority. The monotonic task row ID prevents
         a delayed submitter overwriting a subsequent operation or its outcome.
-        Admission writes PENDING before enqueue; ensure only repairs the journal
-        and terminal FAILED status, never initializes PENDING.
+        Admission preserves the serving state; ensure repairs only the journal
+        and post-mutation failure status.
         """
         for _ in range(12):
             bot = self.read()
@@ -138,10 +232,6 @@ class RestartState:
             }
             ext = deepcopy(bot.get("ext") or {})
             ext[KEY] = record
-            if matches:
-                # A previous startup/restart error must not stop the new poll.
-                ext.pop("start_status", None)
-                ext.pop("start_message", None)
             result = self.repository.compare_and_set_ext(
                 bot_id=self.bot_id,
                 owner_id=self.owner_id,
@@ -162,7 +252,7 @@ class RestartState:
         """
         record = journal(bot)
         phase = record.get("phase")
-        if phase != "FAILED":
+        if phase != "FAILED" or record.get("runtime_preserved") is True:
             return bot
         target = record.get("failed_binding_id", record.get("binding_id"))
         current = self.read()
@@ -246,6 +336,12 @@ class RestartExecution:
             raise RuntimeError("重启目标已变化，禁止替换")
         self.state.update({"BACKING_UP"}, phase="RESTARTING")
         self.fenced = True
+        # The old runtime is retained through backup. Only the mutation owner
+        # enters the existing deployment state, immediately before provider I/O.
+        if self.state.repository.update_by_owner(
+            self.state.bot_id, self.state.owner_id, {'status': 'PENDING'}
+        ) is None:
+            raise RestartSuperseded('Bot disappeared before restart submission')
 
 
 current_restart: ContextVar[RestartExecution | None] = ContextVar(

@@ -71,11 +71,12 @@ export function useAdmin() {
   const onKeywordChange = useCallback(
     (kw: string) => {
       setKeyword(kw);
+      setPageNo(1);
       keywordRef.current = kw;
       if (debounceRef.current) clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(() => void fetchList({ keyword: kw, pageNo: 1 }), SEARCH_DEBOUNCE_MS);
     },
-    [fetchList, setKeyword],
+    [fetchList, setKeyword, setPageNo],
   );
 
   // 防抖清理
@@ -161,10 +162,11 @@ export function useAdmin() {
       const r = await adminService.requestJoin(spaceId, reason);
       if (r.error) {
         notifyError(r.error.message, { title: '申请加入失败', requestId: r.error.requestId });
-        return;
+        return false;
       }
       notifySuccess('已提交申请，等待审批');
       void fetchList({ pageNo: 1 });
+      return true;
     },
     [fetchList],
   );

@@ -73,6 +73,13 @@ pub enum DelegateDispatchError {
     IssueFailed,
     #[error("delegate dispatch commit refused")]
     CommitFailed,
+    /// A stage exceeded its per-stage liveness budget (spec
+    /// 2026-11-03, delegate counterpart of
+    /// `CallerDispatchError::StageTimeout`): the collaborator may hold
+    /// partial state, so the caller converges conservatively (Failed),
+    /// never as a provable not-sent.
+    #[error("delegate dispatch stage timed out at {stage}")]
+    StageTimeout { stage: &'static str },
 }
 
 impl CallerDispatchPipeline {
@@ -205,13 +212,14 @@ impl CallerDispatchPipeline {
             now_ms,
         };
         let (descriptor, effective_deadline) = if caller_container {
-            match self.preparation.prepare(target, service_credential, ensure, now_ms).await {
-                Ok(PrepareOutcome::Prepared { descriptor, effective_deadline_ms: _ }) => {
+            match stage_bound(self.stage_timeout, "container_ensure", self.preparation.prepare(target, service_credential, ensure, now_ms)).await {
+                Some(Ok(PrepareOutcome::Prepared { descriptor, effective_deadline_ms: _ })) => {
                     // Container deadlines are container housekeeping; the
                     // run-budget bound above is the only advisory carried on.
                     (Some(descriptor), effective_not_after)
                 }
-                Err(_) => return Err(DelegateDispatchError::PreparationFailed),
+                None => return Err(DelegateDispatchError::StageTimeout { stage: "container_ensure" }),
+                Some(Err(_)) => return Err(DelegateDispatchError::PreparationFailed),
             }
         } else {
             // No Caller container existed for this hop and none was ensured:
@@ -312,9 +320,9 @@ impl CallerDispatchPipeline {
             source,
             now_ms,
         };
-        let proof: ProofToken = match self.identity.issue_execution(issue_input).await {
-            Ok(token) => token,
-            Err(error) => {
+        let proof: ProofToken = match stage_bound(self.stage_timeout, "issue_execution", self.identity.issue_execution(issue_input)).await {
+            Some(Ok(token)) => token,
+            Some(Err(error)) => {
                 tracing::warn!(
                     request_id = %bcs_observability::CurrentRequestId,
                     dispatch_id = %facts.dispatch_id,
@@ -323,6 +331,7 @@ impl CallerDispatchPipeline {
                 );
                 return Err(DelegateDispatchError::IssueFailed);
             }
+            None => return Err(DelegateDispatchError::StageTimeout { stage: "issue_execution" }),
         };
 
         // ---- Canonical digest + typed commit CAS (same wire contract). ----
@@ -366,10 +375,11 @@ impl CallerDispatchPipeline {
                         control_revision: facts.control_revision,
                     },
                 };
-            managed
-                .commit_caller_dispatch(commit_command)
-                .await
-                .map_err(|_| DelegateDispatchError::CommitFailed)?;
+            match stage_bound(self.stage_timeout, "digest_commit", managed.commit_caller_dispatch(commit_command)).await {
+                Some(Ok(_)) => {}
+                Some(Err(_)) => return Err(DelegateDispatchError::CommitFailed),
+                None => return Err(DelegateDispatchError::StageTimeout { stage: "digest_commit" }),
+            }
         }
 
         // History-ceiling reconciliation (spec §6.8/§15.41, review-V P1-2):
@@ -387,10 +397,14 @@ impl CallerDispatchPipeline {
         let history = if let (Some(managed), Some(origin)) =
             (self.managed_commit.as_ref(), facts.delivery_commit.as_ref())
         {
-            let contexts = managed
-                .bounded_contexts(&origin.delivery_id, 25)
+            let contexts = match stage_bound(self.stage_timeout, "history_read", managed
+                .bounded_contexts(&origin.delivery_id, 25))
                 .await
-                .map_err(|_| DelegateDispatchError::PreparationFailed)?;
+            {
+                Some(Ok(contexts)) => contexts,
+                Some(Err(_)) => return Err(DelegateDispatchError::PreparationFailed),
+                None => return Err(DelegateDispatchError::StageTimeout { stage: "history_read" }),
+            };
             let lineage_ceiling = lineage.history_cutoff_seq;
             let in_scope: Vec<String> = contexts
                 .rows
@@ -497,7 +511,13 @@ impl CallerDispatchPipeline {
         let accepted = self.accepted_effect(target, service_credential, &command, Some(child_lineage),
             facts.shared_content_kind.clone(), proof, at_term);
         if !self.delivery_term_is_current(at_term) { return Err(DelegateDispatchError::CommitFailed); }
-        let send_ack = self.sender.send_caller_execution(target, service_credential, command.clone()).await;
+        // Stage liveness (spec 2026-11-03): a wedged send port converges
+        // OutcomeUnknown — the identical evidence the adapter's own
+        // callback_timeout_ms limit produces (root branch same rule).
+        let send_ack = match stage_bound(self.stage_timeout, "send", self.sender.send_caller_execution(target, service_credential, command.clone())).await {
+            Some(ack) => ack,
+            None => return Ok(CallerDispatchOutcome::OutcomeUnknown),
+        };
         match send_ack {
             Ok(CallerDispatchAck::Accepted { .. }) => {
                 accepted(now_ms);

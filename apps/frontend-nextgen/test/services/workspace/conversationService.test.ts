@@ -1,6 +1,7 @@
+import { defaultCapabilities, extendCapabilities } from '@/capabilities';
 import type { ChatBotView } from '@/services/workspace/botSessionService';
 import { conversationService } from '@/services/workspace/conversationService';
-import { beforeEach, describe, expect, it, jest } from '@jest/globals';
+import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 jest.mock('@/services/backendApi/bots/botController');
 jest.mock('@/services/backendApi/bots/privateBotSessionController');
@@ -52,7 +53,12 @@ const sessionsEnvelope = (items: unknown[], total = items.length) => ({
 
 beforeEach(() => {
   jest.clearAllMocks();
+  extendCapabilities(defaultCapabilities);
   mocked.listFavoriteSessions.mockResolvedValue(sessionsEnvelope([]));
+});
+
+afterEach(() => {
+  extendCapabilities(defaultCapabilities);
 });
 
 describe('conversationService.listDirectory', () => {
@@ -238,7 +244,7 @@ describe('conversationService.listManagedSessions', () => {
       'bot-a',
       expect.objectContaining({ user_id: '900003', owner_id: '2088', page: 2, page_size: 20 }),
     );
-    expect(mocked.listFavoriteSessions).toHaveBeenCalled();
+    expect(mocked.listFavoriteSessions).not.toHaveBeenCalled();
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.data.items[0]).toMatchObject({
@@ -337,6 +343,51 @@ describe('conversationService.listManagedSessions', () => {
       expect(result).toMatchObject({
         ok: true,
         data: { items: [{ sessionId: 'user:000100:session:mine:agent:bot-a' }] },
+      });
+    });
+
+    it('filters internal sessions injected through the Coding Bot visibility policy', async () => {
+      extendCapabilities({
+        getCodingBotConversationHost: () => ({
+          status: 'available',
+          value: {
+            Stage: () => null,
+            isSessionHidden: (session: { title?: unknown }) => session.title === 'cron: MemoryOS任务',
+          },
+        }),
+      });
+      const normal = sessionDto('user:100:session:normal:agent:bot-a');
+      const hidden = {
+        ...sessionDto('user:100:session:hidden:agent:bot-a'),
+        title: 'cron: MemoryOS任务_user:100:session:hidden:agent:bot-a',
+      };
+      mocked.listBotSessions.mockResolvedValue(sessionsEnvelope([hidden, normal], 2));
+
+      const result = await conversationService.listManagedSessions(codingBot, '100', 'all', 1, 10);
+
+      expect(result).toMatchObject({
+        ok: true,
+        data: { items: [{ sessionId: 'user:100:session:normal:agent:bot-a' }] },
+      });
+    });
+
+    it('keeps ordinary Bot sessions unaffected by the Coding Bot visibility policy', async () => {
+      extendCapabilities({
+        getCodingBotConversationHost: () => ({
+          status: 'available',
+          value: {
+            Stage: () => null,
+            isSessionHidden: () => true,
+          },
+        }),
+      });
+      mocked.listBotSessions.mockResolvedValue(sessionsEnvelope([sessionItem]));
+
+      const result = await conversationService.listManagedSessions(managedBot, 'human_900003', 'all');
+
+      expect(result).toMatchObject({
+        ok: true,
+        data: { items: [{ sessionId: 'session-1', title: '历史会话' }] },
       });
     });
 

@@ -19,7 +19,7 @@ bot creation (W13) when neither is available.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
 import yaml
 
@@ -43,6 +43,9 @@ from agentclaw.community.core.bot_config_manifest.schema.entries import (
     validate_named_source,
     validate_resource_entry,
     validate_skill_entry,
+)
+from agentclaw.community.core.bot_config_manifest.schema.bot_config_kinds import (
+    BOT_CONFIG_KIND_VALIDATORS,
 )
 from agentclaw.community.core.bot_config_manifest.schema.limits import (
     MAX_DOCUMENT_BYTES,
@@ -298,6 +301,9 @@ def _validate_manifest(ctx: Context, manifest: Any) -> None:
         if category is Category.ENGINE_CONFIG:
             _validate_engine_config(ctx, location, value)
             continue
+        if category is Category.BOT_CONFIG:
+            _validate_bot_config(ctx, location, value)
+            continue
         _validate_category_list(ctx, location, category, value)
 
 
@@ -329,6 +335,72 @@ def _validate_engine_config(ctx: Context, location: str, value: Any) -> None:
             "'engine_ext' is engine-owned opaque data and can never be written "
             "through a manifest",
         )
+
+
+def _validate_bot_config(ctx: Context, location: str, value: Any) -> None:
+    """A mapping-valued Category like ``engine_config``: one object whose keys
+    are sync kinds (``render_screen`` in v1), each value that kind's entry list.
+
+    Unlike ``engine_config``'s single ``config`` field, the kind set is open at
+    the surface and closed by the handler registry — a kind the apply engine
+    has no handler for would fail the whole category mid-write on the bot's
+    apply lock, so a name no handler resolves is refused here at ``PUT``,
+    from :data:`BOT_CONFIG_KIND_VALIDATORS`. The per-kind entry shape is the
+    handler's own, and its validator lives beside the kind in that table, so
+    what this pass accepts and what apply can act on are the same surface.
+    """
+    if not isinstance(value, dict):
+        ctx.add(location, "invalid_category", "'bot_config' must be a mapping")
+        return
+    for kind, kind_value in value.items():
+        if not isinstance(kind, str) or not kind:
+            ctx.add(
+                location,
+                "invalid_bot_config_kind",
+                "a bot_config kind key must be a non-empty string",
+            )
+            continue
+        kind_location = f"{location}.{kind}"
+        entry_validator = BOT_CONFIG_KIND_VALIDATORS.get(kind)
+        if entry_validator is None:
+            ctx.add(
+                kind_location,
+                "unknown_bot_config_kind",
+                f"unknown bot_config kind '{kind}'; supported: "
+                + ", ".join(sorted(BOT_CONFIG_KIND_VALIDATORS)),
+            )
+            continue
+        _validate_bot_config_kind_list(ctx, kind_location, kind, kind_value, entry_validator)
+
+
+def _validate_bot_config_kind_list(
+    ctx: Context,
+    kind_location: str,
+    kind: str,
+    value: Any,
+    entry_validator: Callable[[Context, str, dict[str, Any]], None],
+) -> None:
+    """One kind's entry list: a list, capped, each entry a mapping the kind owns."""
+    if not isinstance(value, list):
+        ctx.add(
+            kind_location,
+            "invalid_bot_config_kind",
+            f"bot_config kind '{kind}' must be a list of entries",
+        )
+        return
+    if len(value) > MAX_ENTRIES_PER_CATEGORY:
+        ctx.add(
+            kind_location,
+            "too_many_entries",
+            f"{len(value)} entries, over the {MAX_ENTRIES_PER_CATEGORY}-entry "
+            f"limit for one bot_config kind",
+        )
+    for index, entry in enumerate(value):
+        at = f"{kind_location}[{index}]"
+        if not isinstance(entry, dict):
+            ctx.add(at, "invalid_entry", "an entry must be a mapping")
+            continue
+        entry_validator(ctx, at, entry)
 
 
 def _validate_category_list(

@@ -38,6 +38,7 @@ from agentclaw.community.core.bot_config_manifest.create_job import (
 from agentclaw.community.core.bot_management.manifest_seam import (
     ManifestCreationSeam,
 )
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.plugin_api.passport import PassportPlugin
 
 logger = get_logger()
@@ -61,9 +62,35 @@ class ManifestBotAuthorizationSource:
     def __init__(
         self, *, manifest_seam: ManifestCreationSeam,
         passport_plugin: PassportPlugin,
+        bot_repo: BotRepository | None = None,
     ) -> None:
         self._manifest_seam = manifest_seam
         self._passport = passport_plugin
+        self._bot_repo = bot_repo
+
+    def identity_source(self, *, owner_id: str, bot_id: str) -> str | None:
+        """The agent code of a Bot the run's owner may inherit from.
+
+        Same rule create-with-manifest enforces: the Bot must exist for this
+        owner and carry an issued passport with a non-empty agent code.
+        """
+        if self._bot_repo is None:
+            logger.warning("[agentswarm] identity_source: no bot repository bound")
+            return None
+        bot = self._bot_repo.get_by_id_and_owner(
+            (bot_id or "").strip(), (owner_id or "").strip()
+        )
+        if bot is None:
+            logger.warning(
+                "[agentswarm] identity_source: no Bot %r for owner %r",
+                bot_id, owner_id,
+            )
+            return None
+        passport = (bot.get("ext") or {}).get("passport") or {}
+        code = str(passport.get("agent_code") or "").strip()
+        if not code or passport.get("status") == "PENDING":
+            return None
+        return code
 
     def authorization(
         self, *, owner_id: str, bot_id: str,

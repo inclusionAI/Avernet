@@ -55,6 +55,7 @@ from agentclaw.community.core.service_bot.services.deploy.provider_resolver impo
 )
 from agentclaw.community.core.service_bot.types import PublishStage
 from agentclaw.community.log import get_logger
+from agentclaw.community.utils.runtime_list_timing import mark
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
 from agentclaw.community.core.workspace.engine_sandbox import EngineSandboxRegistry
 
@@ -1966,6 +1967,7 @@ class BaasService:  # pragma: no cover
         if binding is None:
             raise BaasServiceError(f"Device binding not found: bind_id={bind_id}")
 
+        mark("baas.ws_info")
         return self.get_ws_info_by_bot_uuid(
             bot_uuid=binding.device_id,
             port=port,
@@ -3843,6 +3845,7 @@ class BaasService:  # pragma: no cover
             http_info_timeout_kwargs = (
                 {"timeout": min(timeout, 5.0)} if timeout is not None else {}
             )
+            mark("baas.http_info")
             info = self.get_http_info(
                 bind_id=bind_id,
                 port=port,
@@ -3866,6 +3869,7 @@ class BaasService:  # pragma: no cover
 
         m = method.upper()
         if m == "GET":
+            mark("adapter.get")
             return self._general_http.get(
                 info.http_url, params=params, headers=headers, **request_timeout_kwargs
             )

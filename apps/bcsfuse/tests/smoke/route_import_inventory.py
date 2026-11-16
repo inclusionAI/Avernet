@@ -55,7 +55,7 @@ FORBIDDEN_PATTERNS = [
     "config-prod",
 ]
 
-# Route modules to scan (relative to src/interfaces/api/)
+# Route modules to scan (relative to src/app/adapters/http/)
 ROUTE_MODULES = [
     "worker_routes.py",
     "profile_routes.py",

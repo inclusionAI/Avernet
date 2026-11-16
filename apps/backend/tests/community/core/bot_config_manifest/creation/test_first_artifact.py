@@ -224,6 +224,7 @@ def _build(db, document: str = _DOCUMENT):
             resource_rows=resource_rows_for()[0],
             cli_tool_service=EmptyCliTools(),
             shared_skills=object(),
+            file_sync=None,
         )
 
     queue = _InlineQueue()

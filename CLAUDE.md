@@ -19,7 +19,8 @@ The two Git remotes are **not interchangeable**:
 
 Integration branch is **`dev`** (rebase, never merge). Some CI gates
 (`architecture-checks.yml`) only run on `main`; `unit-tests.yml` /
-`frontend-nextgen.yml` run on `dev`, `main`, and `REL*`. Spawn fix/feature
+`backend-unit-tests.yml` / `frontend-nextgen.yml` run on `dev`, `main`, and
+`REL*`. Spawn fix/feature
 branches from `dev`, not from a `REL` tip — a `REL`-based PR diff swallows the
 full release history.
 

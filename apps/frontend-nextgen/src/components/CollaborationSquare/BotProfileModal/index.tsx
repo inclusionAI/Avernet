@@ -7,12 +7,14 @@ import { Copy } from 'lucide-react';
 interface BotProfileModalProps {
   open: boolean;
   profile: PublicBotProfile | null;
+  /** 画像接口拉取失败的原因文案；非空时在弹窗内提示，不弹 sonner toast。 */
+  error?: string | null;
   loading: boolean;
   onClose: () => void;
   onCopyId: (id: string) => void;
 }
 
-export function BotProfileModal({ open, profile, loading, onClose, onCopyId }: BotProfileModalProps) {
+export function BotProfileModal({ open, profile, error, loading, onClose, onCopyId }: BotProfileModalProps) {
   return (
     <Modal open={open} onOpenChange={(next) => !next && onClose()}>
       <ModalContent>
@@ -26,6 +28,13 @@ export function BotProfileModal({ open, profile, loading, onClose, onCopyId }: B
             <Skeleton.Line className="w-2/3" />
             <Skeleton.Card />
           </div>
+        )}
+        {!loading && !profile && error && (
+          // 画像拉取失败（404＝已取消公开等）改在弹窗内提示，画像失败不再走 sonner toast。
+          // 提示而非错误：用 muted 中性色，不用红色 destructive。
+          <p role="alert" className="m-0 text-xs leading-4 text-muted-foreground">
+            {`无法获取公开画像：${error}`}
+          </p>
         )}
         {!loading && profile && (
           <div className="space-y-5 text-sm">

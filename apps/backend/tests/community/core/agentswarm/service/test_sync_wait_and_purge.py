@@ -93,6 +93,7 @@ def _service(db, *, slice_max_seconds: float = 300.0) -> AgentSwarmService:
 
 def _req(idempotency_key: str | None = None) -> SubmitRunRequest:
     return SubmitRunRequest(
+        identity_bot_id=IDENTITY_SOURCE,
         tenant=TENANT,
         goal="sync-wait goal",
         agents=(dm.AgentSpec(name="r1", role="research"),),
@@ -214,3 +215,8 @@ class TestPurgeRunGuard:
 
     def test_missing_run_purge_stays_none(self, db):
         assert _service(db).purge_run("nope", TENANT) is None
+#: The Bot every submit in this suite names as its identity source. The
+#: service refuses a submit without one, so the value is fixed here rather
+#: than repeated at each call site; the seam resolves it (or is unbound, in
+#: which case the service takes the id as given).
+IDENTITY_SOURCE = "identity-source-bot"

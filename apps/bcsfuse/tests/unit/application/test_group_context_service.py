@@ -9,11 +9,11 @@ from __future__ import annotations
 import pytest
 from unittest.mock import AsyncMock
 
-from src.application.services.bot_fuse.group_context_service import (
+from app.application.services.bot_fuse.group_context_service import (
     GroupContextService,
     GroupMessage,
 )
-from src.domain.models.llm_response import LLMResponse, FinishReason
+from app.domain.models.llm_response import LLMResponse, FinishReason
 
 
 class FakeLLMGateway:

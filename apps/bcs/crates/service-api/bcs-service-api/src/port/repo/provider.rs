@@ -36,6 +36,12 @@ pub trait ProviderRepoPort: Send + Sync {
     async fn get_provider(&self, provider_id: &str) -> ServiceResult<Option<ProviderRecord>>;
     /// One environment-scoped lookup; disabled rows remain discoverable.
     async fn get_provider_by_slug(&self, slug: &str) -> ServiceResult<Option<ProviderRecord>>;
+    /// Atomically pin the current slug for A2A name addressing. Metadata writes
+    /// must preserve this reservation and reject subsequent slug changes.
+    async fn pin_a2a_slug(&self, provider_id: &str, slug: &str) -> ServiceResult<()> {
+        let _ = (provider_id, slug);
+        Err(crate::types::ServiceError::InternalError("A2A Provider name reservation unavailable".into()))
+    }
     async fn list_providers_by_ids(
         &self,
         provider_ids: &[String],

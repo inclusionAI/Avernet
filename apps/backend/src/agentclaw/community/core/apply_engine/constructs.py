@@ -54,6 +54,13 @@ class Category(StrEnum):
     SKILLS = "skills"
     #: The engine's own configuration mapping (validated, not yet materialised: #2858).
     ENGINE_CONFIG = "engine_config"
+    #: A mapping of per-kind configuration the bot carries — the destination a
+    #: copy converges render-screen rows (and later task-nav rows, …) onto. Each
+    #: key is one sync kind, its value that kind's entry list; one
+    #: ``BotConfigMaterialiser`` dispatches by kind to a registered handler. A
+    #: mapping-valued Category like ``ENGINE_CONFIG``, not a list Category like
+    #: ``RESOURCES``. Materialised in ``PRE_CONTAINER`` (a plain DB-row write).
+    BOT_CONFIG = "bot_config"
     #: Identity (persona) files such as ``SOUL.md`` or ``CLAUDE.md``, each by type.
     IDENTITY = "identity"
     #: Command-line tools placed in the bot's ``~/.local/bin``, each by name.
@@ -65,6 +72,13 @@ class Section(StrEnum):
 
     #: The startup script's body, run when the bot's container starts.
     SCRIPT = "script"
+    #: A bot-to-bot workspace file sync. Single-valued because a copy moves one
+    #: source bot's workspace: the entry written under ``manifest.resources`` as
+    #: ``protocol: bot`` is reclassified here by the compiler, which is why this
+    #: section has no own key in the document grammar (a caller writes it as a
+    #: resources entry, not as ``manifest.bot_file_sync``). Converges through a
+    #: per-engine sync strategy, never through the content store.
+    BOT_FILE_SYNC = "bot_file_sync"
 
 
 #: Either of the two. A value's own type says which kind it is.

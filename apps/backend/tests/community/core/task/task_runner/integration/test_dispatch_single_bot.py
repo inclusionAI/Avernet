@@ -1,4 +1,5 @@
 import asyncio
+import uuid
 
 import pytest
 
@@ -27,8 +28,11 @@ from agentclaw.community.core.task.task_runner.modal_executor.task_executor impo
     TaskExecutor,
 )
 from agentclaw.community.core.task.task_runner.client.bcs_http_adapter import (
+    BcsClientRequestError,
     BcsCreateGroupResult,
+    BcsServerError,
 )
+from agentclaw.community.core.task.task_runner.modal_executor import task_executor as task_executor_module
 from tests.community.core.task.support.double.double_bcs_bot_identity_resolver import (
     _DoubleBcsBotIdentityResolver,
 )
@@ -232,7 +236,7 @@ def test_dispatch_single_bot_uses_explicit_owner_for_composite_assignee():
 
 
 def test_dispatch_single_bot_sends_assignee_verbatim():
-    """single_bot 直接按 assignee 原样派发(claim_on JOIN 在派发策略层完成,执行器不做表级授权 JOIN)。"""
+    """single_bot 直接按 assignee 原样派发。"""
     bot = _Bot()
     poller = _Poller()
     exe = TaskExecutor(
@@ -570,6 +574,33 @@ class _Bcs2:
         return ""
 
 
+class _FailingBcs2(_Bcs2):
+    async def create_group(self, req):
+        raise RuntimeError("group creation failed")
+
+
+class _TransientGroupFailureBcs2(_Bcs2):
+    def __init__(self):
+        super().__init__()
+        self.create_calls = 0
+
+    async def create_group(self, req):
+        self.create_calls += 1
+        if self.create_calls == 1:
+            raise BcsServerError("503 temporary unavailable")
+        return await super().create_group(req)
+
+
+class _ForbiddenGroupBcs2(_Bcs2):
+    def __init__(self):
+        super().__init__()
+        self.create_calls = 0
+
+    async def create_group(self, req):
+        self.create_calls += 1
+        raise BcsClientRequestError("403 forbidden")
+
+
 class _Dash:
     def __init__(self, execution_config, owner_user_id="35983"):
         self.extend_props = {"execution_config": execution_config}
@@ -670,6 +701,76 @@ def test_dispatch_single_bot_2_group_disabled_falls_back_to_send():
     assert bot.sent and bot.sent[0][0] == "drv:35983"  # 老链路直发
     assert bcs.created == []
     assert poller.registered == []  # 默认 Push，不注册 poller
+
+
+def test_dispatch_single_bot_2_group_failure_does_not_fallback_to_send():
+    """singlebot_2_group 建群失败必须暴露原错误，不得改走 API Key 单 bot 直发。"""
+    bot = _Bot()
+    bcs = _FailingBcs2()
+    exe = TaskExecutor(
+        bot=bot, bcs=bcs, formatter=PromptFormatterImpl(), context=_Ctx(), sink=None,
+        poller=_Poller(), graph=_Graph2(),
+        identity_resolver=_DoubleBcsBotIdentityResolver(),
+        api_base_url="https://backend.example",
+    )
+
+    with pytest.raises(RuntimeError, match="group creation failed"):
+        _run(exe.dispatch([_node("drv", {"assignee_owner_id": "35983"})]))
+
+    assert bot.sent == []
+
+
+def test_dispatch_single_bot_2_group_retries_transient_create_group_failure(monkeypatch):
+    """BCS 建群返回 5xx 等瞬时错误时，使用稳定幂等键做有界重试。"""
+
+    async def _no_sleep(_delay):
+        return None
+
+    monkeypatch.setattr(task_executor_module.asyncio, "sleep", _no_sleep)
+    bot = _Bot()
+    bcs = _TransientGroupFailureBcs2()
+    graph = _Graph2()
+    exe = TaskExecutor(
+        bot=bot, bcs=bcs, formatter=PromptFormatterImpl(), context=_Ctx(), sink=None,
+        poller=_Poller(), graph=graph,
+        identity_resolver=_DoubleBcsBotIdentityResolver(),
+        api_base_url="https://backend.example",
+    )
+
+    ok = _run(exe.dispatch([_node("drv", {"assignee_owner_id": "35983"})]))
+
+    assert ok == [True]
+    assert bot.sent == []
+    assert bcs.create_calls == 2
+    expected_key = str(uuid.uuid5(
+        uuid.NAMESPACE_URL, "avernet-task-node-group:t1::c1"
+    ))
+    assert bcs.created[0].idempotency_key == expected_key
+
+
+def test_dispatch_single_bot_2_group_does_not_retry_create_group_4xx(monkeypatch):
+    """BCS 建群 4xx 属于请求/权限错误，必须一次失败并暴露真实原因。"""
+
+    async def _no_sleep(_delay):
+        return None
+
+    monkeypatch.setattr(task_executor_module.asyncio, "sleep", _no_sleep)
+    bot = _Bot()
+    bcs = _ForbiddenGroupBcs2()
+    exe = TaskExecutor(
+        bot=bot, bcs=bcs, formatter=PromptFormatterImpl(), context=_Ctx(), sink=None,
+        poller=_Poller(), graph=_Graph2(),
+        identity_resolver=_DoubleBcsBotIdentityResolver(),
+        api_base_url="https://backend.example",
+    )
+
+    with pytest.raises(BcsClientRequestError, match="403 forbidden"):
+        _run(exe.dispatch([_node("drv", {"assignee_owner_id": "35983"})]))
+
+    assert bcs.create_calls == 1
+    assert bot.sent == []
+
+
 def test_dispatch_single_bot_2_group_uses_task_human_owner_without_assignee_owner():
     """Relay 只有纯 assignee bot_id 时,仍按任务图谱 Human owner 建群并追加 observer。"""
     exe, bot, bcs, poller, graph = _exe2()  # 默认 true, graph owner_user_id=35983
