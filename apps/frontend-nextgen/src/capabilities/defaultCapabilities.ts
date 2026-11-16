@@ -280,6 +280,9 @@ export const defaultCapabilities: AppCapabilities = {
   getConversationComposer: () => ({ status: 'available', value: null }),
   getUserMessagePresentation: () => ({ status: 'available', value: null }),
   getBotMcpPickerEnabled: () => ({ status: 'available', value: false }),
+  // Open Core 默认全量来源（与既有硬编码 Segmented 行为一致，零变化）；
+  // 部署 overlay 可收窄（见 types.getBotMcpPickerSources 契约）。
+  getBotMcpPickerSources: () => ({ status: 'available', value: ['internal', 'open-platform'] }),
   // Open Core 品牌：Avernet（横版 wordmark 用于页头；方版 mark 备用于登录/空态方形场景）。
   getProductBrand: (): CapabilityResult<ProductBrand> => ({
     status: 'available',
