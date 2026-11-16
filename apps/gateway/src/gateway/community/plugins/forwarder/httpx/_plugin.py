@@ -13,6 +13,7 @@ from contextlib import asynccontextmanager
 
 import httpx
 
+from gateway.community.config._models import ForwarderPluginConfig
 from gateway.community.logger import get_logger
 from gateway.community.spi.forwarder import (
     Forwarder,
@@ -33,14 +34,25 @@ class HttpxForwarder(Forwarder):
     :meth:`aclose` on shutdown. Tests inject a client wired to a mock transport.
     """
 
-    def __init__(self, client: httpx.AsyncClient | None = None) -> None:
+    def __init__(
+        self,
+        client: httpx.AsyncClient | None = None,
+        config: ForwarderPluginConfig | None = None,
+    ) -> None:
         self._client = client
         self._owns_client = client is None
+        self._config = config or ForwarderPluginConfig()
 
     def _get_client(self) -> httpx.AsyncClient:
         if self._client is None:
+            cfg = self._config
             self._client = httpx.AsyncClient(
-                timeout=httpx.Timeout(connect=5.0, read=120.0, write=5.0, pool=5.0),
+                timeout=httpx.Timeout(
+                    connect=cfg.connect_timeout,
+                    read=cfg.read_timeout,
+                    write=cfg.write_timeout,
+                    pool=cfg.pool_timeout,
+                ),
             )
         return self._client
 
