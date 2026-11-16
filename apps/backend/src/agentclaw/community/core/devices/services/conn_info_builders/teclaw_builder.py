@@ -10,6 +10,7 @@ from typing import Any
 from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
 from agentclaw.community.core.devices.services.device_context import ConnInfoBuildError
 from agentclaw.community.core.devices.services.baas_conn_info import (
+    _to_http_base,
     build_baas_conn_info_for_http,
 )
 
@@ -45,14 +46,20 @@ class TeclawConnInfoBuilder:
                 f"TeclawConnInfoBuilder: get_ws_info failed for binding={binding.id}: {e}"
             ) from e
 
-        # Use the *_for_http producer so conn_info carries ``bind_id``
+        # Use the *_for_http producer so conn_info still carries ``bind_id``
         # (== binding.id). TeclawDeviceFileSystem reads route through
         # BaasService.invoke_http, which needs ``conn_info["bind_id"]`` exactly
-        # like BaasDeviceFileSystem. Purely additive over build_baas_conn_info.
-        return build_baas_conn_info_for_http(
+        # like BaasDeviceFileSystem.
+        info = build_baas_conn_info_for_http(
             bind_id=binding.id,
             ws_info=ws_info,
             engine_type=TECLAW_DEVICE_PROVIDER,
             bot_type=getattr(binding, "bot_type", "") or "",
             device_provider=TECLAW_DEVICE_PROVIDER,
         )
+        # TeClaw's generic /invoke-http contract is intentionally unsupported
+        # by TeClawPaasService. Keep every *_for_http field, then replace only
+        # the direct URL base with the same proxypass base that BaaS already
+        # returns for the engine WebSocket.
+        info["url"] = _to_http_base(ws_info.ws_url)
+        return info
