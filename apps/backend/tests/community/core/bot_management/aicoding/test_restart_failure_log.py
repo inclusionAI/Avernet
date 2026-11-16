@@ -170,7 +170,7 @@ def test_env_uses_existing_data_environment_and_owner_is_sanitized(server_env, e
 def test_backup_failure_logs_identify_operation_and_warn_even_when_blocking(
     operation_type, blocking, stage, reason, caplog,
 ):
-    from agentclaw.community.core.bot_management.engines.aicoding.backup_operation import current_backup
+    from agentclaw.community.core.bot_management.engines.aicoding.restart_state import current_backup
     from agentclaw.community.core.bot_management.engines.aicoding.restart_dependencies import RestartBackupDependencies
     from agentclaw.community.core.bot_management.engines.provisioning import BotProvisioningContext
 
@@ -227,7 +227,7 @@ def test_backup_failure_logs_identify_operation_and_warn_even_when_blocking(
 
 
 def test_recycle_config_warning_is_tagged_and_context_does_not_leak(caplog):
-    from agentclaw.community.core.bot_management.engines.aicoding.backup_operation import current_backup
+    from agentclaw.community.core.bot_management.engines.aicoding.restart_state import current_backup
     from agentclaw.community.core.bot_management.engines.provisioning import BotProvisioningContext
 
     caplog.set_level(logging.INFO, logger=backup.logger.name)

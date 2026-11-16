@@ -53,7 +53,7 @@ def test_recycle_operation_and_lifecycle_are_bound_to_the_same_service(test_inje
 
     service = test_injector.get(AicodingRecycleOperations)
     from agentclaw.community.core.bot_dormant.recycle_service import RecycleBotService
-    from agentclaw.community.core.bot_management.engines.recycle_contract import RecycleServices
+    from agentclaw.community.core.bot_management.engines.restart_contract import RecycleServices
     assert test_injector.get(BotDormantRecycleOperationProtocol) is test_injector.get(RecycleBotService)
     assert test_injector.get(RecycleServices).operations() is service
     assert isinstance(

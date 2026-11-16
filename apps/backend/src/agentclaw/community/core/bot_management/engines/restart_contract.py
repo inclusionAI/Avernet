@@ -1,4 +1,4 @@
-"""Core-internal collaborators supplied to engine-owned restart execution."""
+"""Core-internal collaborators supplied to engine-owned lifecycle execution."""
 
 from __future__ import annotations
 
@@ -6,6 +6,9 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable
 
 if TYPE_CHECKING:
+    from agentclaw.community.core.bot_dormant.bot_dormant_service_protocol import (
+        BotDormantRecycleOperationProtocol,
+    )
     from agentclaw.community.core.bot_management.services.bot_service import BotService
     from agentclaw.community.core.service_bot.repository.models import BotPublishRecord
 
@@ -39,3 +42,9 @@ class RestartAdmission:
 
     operation_id: str | None = None
     ext: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class RecycleServices:
+    # A factory so default engines never resolve a queue, backup runtime or provider.
+    operations: Callable[[], BotDormantRecycleOperationProtocol]

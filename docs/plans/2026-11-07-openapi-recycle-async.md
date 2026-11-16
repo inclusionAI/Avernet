@@ -14,7 +14,7 @@
 | HTTP / `bot_dormant` | 提交与查询入口、权限、响应封装、选择策略；默认同步路径继续原审计 |
 | `engines/provisioning.py` | 中立的 `execute_recycle`、查询与生命周期钩子；默认不创建异步资源 |
 | `engines/aicoding/recycle_strategy.py` | `AicodingRecycleMixin`：异步准入、备份、冲突策略 |
-| `engines/aicoding/recycle_task/state/runtime/release.py` | durable handler、operation 阶段、目标验证和窄 provider 适配 |
+| `engines/aicoding/recycle_task.py` / `recycle_state.py` / `recycle_runtime.py` | durable handler、operation 阶段、目标验证和窄 provider 适配 |
 | repository / composition roots | 事务落库；`AICodingModule` 组装 worker，宿主绑定 ARCA 原始能力 |
 
 没有新增通用生命周期平台、表/DDL、MQ、历史任务列表、取消/人工确认 API，恢复也没有迁移到新队列。
@@ -115,3 +115,12 @@ RECYCLED -> REACTIVATING 由事务领取执行权；线程启动失败撤回尚�
 发布时先保证所有 worker 都认识 `bot.recycle`，再打开 AICoding 异步提交；必要时滚动升级期间在入口暂时关闭 recycle POST。
 客户端按引擎返回的 200/202 处理；只有拿到 operation handle 才轮询。
 预发仍需验证真实容器的备份、销毁与正常启动链路的数据恢复。本地自动化通过不能替代该验收。
+
+## 7. 2026-11-16 文件收敛
+
+保持行为和测试断言不变，删除仅为本需求拆出的 4 个小源码模块与 3 个测试模块：
+备份上下文并入既有 AICoding `restart_state.py`；释放适配并入 `recycle_runtime.py`；
+中立依赖类型并入既有 `restart_contract.py`；中立策略分发装饰器并入既有 `provisioning.py`。
+对应测试并入已有 schema、回收 runtime 和回收策略测试，不删除覆盖。
+快盘探测、配置读取、备份预算、阻断及 warning 仍全部由 AICoding 策略拥有；
+默认引擎不创建队列、探测快盘或新增锁。接口、持久化和并发保护不变。

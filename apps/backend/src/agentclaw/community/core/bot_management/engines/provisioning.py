@@ -13,9 +13,11 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
+from contextvars import ContextVar
 from copy import deepcopy
 from dataclasses import dataclass
 from enum import StrEnum
+from functools import wraps
 from typing import Any, Callable, Dict, Iterator, Optional
 
 from agentclaw.community.core.bot_management.errors import BotTemplateInvalidError
@@ -409,3 +411,29 @@ class EngineProvisioningStrategy(ABC):
         service layer translates it uniformly (coding engines override).
         """
         raise hosted_workspace_not_eligible_error(ctx)
+
+
+held_resource_lock: ContextVar[tuple | None] = ContextVar(
+    "held_resource_lock", default=None
+)
+
+
+def serialize_resource_release(method):
+    @wraps(method)
+    def guarded(self, bot_id, user_id, *args, **kwargs):
+        from agentclaw.community.core.bot_management.engines.registry import (
+            resolve_restart_strategy,
+        )
+
+        bot = self._repository.get_by_id_and_owner(bot_id, user_id)
+        if not bot:
+            return method(self, bot_id, user_id, *args, **kwargs)
+        ctx, strategy = resolve_restart_strategy(bot)
+        return strategy.execute_resource_release(
+            ctx,
+            bot,
+            lambda: method(self, bot_id, user_id, *args, **kwargs),
+            lifecycle=self,
+        )
+
+    return guarded

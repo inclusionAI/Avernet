@@ -7,7 +7,7 @@ handoff; this strategy must not unlock a successfully spawned allocation.
 from __future__ import annotations
 
 from agentclaw.community.utils.env_utils import get_current_env
-from agentclaw.community.core.bot_management.services.resource_mutation import held_resource_lock
+from agentclaw.community.core.bot_management.engines.provisioning import held_resource_lock
 
 from .restart_arca import RestartBackupTargetChanged
 

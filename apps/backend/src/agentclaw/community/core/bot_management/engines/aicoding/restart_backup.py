@@ -25,7 +25,7 @@ from urllib.parse import quote
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils.env_utils import get_current_env
 
-from .backup_operation import BackupPersistenceError, current_backup, backup_deadline, backup_operation_type
+from .restart_state import BackupPersistenceError, current_backup, backup_deadline, backup_operation_type
 from .restart_arca import BoundArcaRestartExecutor, RestartBackupTargetChanged
 from .restart_dependencies import RestartBackupDependencies
 from .fastdisk_probe import (

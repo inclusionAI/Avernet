@@ -7,7 +7,7 @@ import json
 import time
 import uuid
 
-from agentclaw.community.core.bot_management.engines.aicoding.backup_operation import (
+from agentclaw.community.core.bot_management.engines.aicoding.restart_state import (
     BackupPersistenceError,
 )
 from agentclaw.community.core.bot_management.engines.aicoding.recycle_state import (

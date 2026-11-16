@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import time
 
-from agentclaw.community.core.bot_management.services.resource_mutation import (
+from agentclaw.community.core.bot_management.engines.provisioning import (
     held_resource_lock,
 )
 from agentclaw.community.utils.env_utils import get_current_env
 
-from .backup_operation import BackupOperation, current_backup
+from .restart_state import BackupOperation, current_backup
 from .recycle_state import assert_not_recycling
 from .restart_backup import FASTDISK_TIMEOUT
 

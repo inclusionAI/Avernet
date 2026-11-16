@@ -41,7 +41,7 @@ from agentclaw.community.core.bot_dormant.recycle_service import RecycleBotServi
 from agentclaw.community.core.bot_dormant.scan_policy import DormantScanPolicyService
 from agentclaw.community.core.bot_dormant.service import DormantBotService
 from agentclaw.community.core.bot_dormant.whitelist_service import WhitelistService
-from agentclaw.community.core.bot_management.engines.recycle_contract import (
+from agentclaw.community.core.bot_management.engines.restart_contract import (
     RecycleServices,
 )
 from agentclaw.community.core.bot_management.services.bot_service import (

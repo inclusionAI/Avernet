@@ -373,7 +373,7 @@ def test_query_owner_alias_conflict_is_422(client, recycle_service):
 @pytest.mark.parametrize("engine,http_status", [("openclaw", 200), ("claude_code", 202)])
 def test_real_recycle_facade_selects_engine_execution_policy(engine, http_status):
     from agentclaw.community.core.bot_dormant.recycle_service import RecycleBotService
-    from agentclaw.community.core.bot_management.engines.recycle_contract import RecycleServices
+    from agentclaw.community.core.bot_management.engines.restart_contract import RecycleServices
 
     bots, passport, audit, operations = (MagicMock() for _ in range(4))
     bots.get_bot.return_value = {"bot_id": "b1", "owner_id": "u1", "bot_type": "personal",
