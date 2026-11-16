@@ -410,8 +410,8 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path, orchestrati
                 admission=BotSelfApplicationAdmission(                # 指定执行者、发布人代办录取的策略
                     applicant_role="assignee",
                     accountable_role="owner",
-                    participation_type=ParticipationType.COLLET_PARTICIPANT,  # 录取为当前 Collet 的参与者
-                    capacity=1,  # 最多一个未终态申请占用名额
+                    participation_type=ParticipationType.COLLET_PARTICIPANT,  # 当前 Collet 的参与者：单Agent
+                    capacity=1,    # 最多录取一个申请者
                 ),
             ),
         )
