@@ -402,27 +402,27 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path, orchestrati
     with commission_deployment(profile) as (service, working_bot, injector):
         collab_service = injector.get(ContextCollabServiceProtocol)
         executor_ref = AgentRef(agent_type="bot", agent_id=BOT_ASSIGNEE)
+        store, axes = injector.get(MethodStoreProtocol), current_axes()
+        open_method = injector.get(OpenMethodOpsServiceProtocol)
 
         # 2、通过 L4 北向用例创建 Collet（同时创建 Task、初始事件并投影 L5 MethodBinding）
         collet = collab_service.create_collet(
             ColletCreateCommand(
-                to_space=SPACE,
-                principal_ref=HUMAN.actor,
-                product_kind=profile.ref.profile_id,
+                to_space=SPACE,                                # Task所属的空间（长期持续管理的空间，比如小队、团队空间）
+                principal_ref=HUMAN.actor,                     # 代办任务负责人（提交人）
+                product_kind=profile.ref.profile_id,           # profile id
                 workflow_kind=profile.workflow.ref.profile_id if profile.workflow else None,
-                method_kind=profile.composition.method_kind,
-                executor_ref=executor_ref,
-                objective=TITLE,
-                resource_refs=[],
-                product_profile_ref=profile.ref,
+                method_kind=profile.composition.method_kind,   # 绑定的方法
+                executor_ref=executor_ref,                     # 指定的执行bot
+                objective=TITLE,                               # 代办任务目标
+                resource_refs=[],                              # 输入引用的资源
+                product_profile_ref=profile.ref,               # profile id and version
             ),
-            HUMAN,
+            HUMAN,                                             # 代办任务创建人
         )
-        task_id = collet.collet_id
 
-        store, axes = injector.get(MethodStoreProtocol), current_axes()
+        task_id = collet.collet_id
         binding_id = top_level_binding_id(task_id)
-        open_method = injector.get(OpenMethodOpsServiceProtocol)
 
         # 4、调用L5的OPEN方法-创建机会
         published = open_method.publish_opportunity(
