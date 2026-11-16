@@ -8,6 +8,7 @@ refuses a published stage without touching a device.
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -116,9 +117,7 @@ async def test_listing_resolves_the_runtime_once_for_all_sixteen_files():
     """
     svc, resolver, dispatcher, device_fs = _service()
 
-    presence = await svc.list_bot_files(
-        "staff", OWNER, BOT, OWNER, stage=STAGE_ONLINE
-    )
+    presence = await svc.list_bot_files("staff", OWNER, BOT, OWNER, stage=STAGE_ONLINE)
 
     assert len(presence) == 16
     assert resolver.resolve_for_binding.call_count == 1
@@ -146,12 +145,42 @@ async def test_listing_reports_every_file_from_the_one_addressed_runtime():
     dispatcher.dispatch_addressed.side_effect = _dispatch
     resolver.resolve_for_binding.side_effect = lambda *a, **k: MagicMock()
 
-    presence = await svc.list_bot_files(
-        "staff", OWNER, BOT, OWNER, stage=STAGE_ONLINE
-    )
+    presence = await svc.list_bot_files("staff", OWNER, BOT, OWNER, stage=STAGE_ONLINE)
 
     assert {exists for _ft, exists in presence} == {False}
     assert len(per_binding) == 1, "the sixteen reads spanned more than one runtime"
+
+
+@pytest.mark.asyncio
+async def test_list_bot_files_probe_all_sixteen_files_without_overloading():
+    """16 files, but not 16 simultaneous device round trips.
+
+    Each read yields control before releasing its slot. This is not a filing-order
+    test; it is a probe-pressure test. The exact filing order is not interesting
+    here; what matters is that a single request cannot fan all probes out at once.
+    """
+    svc, _, _, device_fs = _service()
+    active = 0
+    max_active = 0
+
+    async def _read_file(_path):
+        """Simulate one read through the transport. Keep this deterministic."""
+        nonlocal active, max_active
+        active += 1
+        max_active = max(max_active, active)
+        try:
+            await asyncio.sleep(0)
+            return b"content"
+        finally:
+            active -= 1
+
+    device_fs.read_file = AsyncMock(side_effect=_read_file)
+
+    presence = await svc.list_bot_files("staff", OWNER, BOT, OWNER, stage=STAGE_ONLINE)
+
+    assert len(presence) == 16
+    assert device_fs.read_file.await_count == 16
+    assert max_active <= IdentityService._LIST_PROBE_CONCURRENCY
 
 
 @pytest.mark.asyncio
