@@ -1,0 +1,28 @@
+apps/backend/src/agentclaw/community/api/space_service.py
+  h_9d7cfd405752f5 13,20
+apps/backend/src/agentclaw/community/core/repository/implementations/spaces/space.py
+  h_9d7cfd405752f5 12-13,19-20,23,26,581-635
+apps/backend/src/agentclaw/community/core/repository/protocols/spaces.py
+  h_9d7cfd405752f5 65-75
+apps/backend/src/agentclaw/community/core/spaces/services/__init__.py
+  h_9d7cfd405752f5 2,6-11
+apps/backend/src/agentclaw/community/core/spaces/services/space_deletion_service.py
+  h_9d7cfd405752f5 1-62
+apps/backend/src/agentclaw/community/core/spaces/space_service_protocol.py
+  h_9d7cfd405752f5 93-98
+apps/backend/src/agentclaw/community/di/modules/spaces_module.py
+  h_9d7cfd405752f5 18,87,350-363
+rstdw-specs/2026-11-15-space-delete-team-space/tasks.md
+  h_9d7cfd405752f5 14
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2d40c1aebb4895eabc37f9a40d816c02d0721cb4",
+  "prompts": {},
+  "humans": {
+    "h_9d7cfd405752f5": {
+      "author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}
