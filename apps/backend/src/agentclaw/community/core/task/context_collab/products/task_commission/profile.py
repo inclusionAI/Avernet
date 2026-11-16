@@ -41,12 +41,15 @@ from agentclaw.community.core.task.context_collab.products.task_commission.publi
 TASK_COMMISSION_PROFILE_REF = VersionedProfileRef("task_commission", 1)
 
 TASK_COMMISSION_PROFILE = ProductProfileCreateCommand(
+    # 版本
     ref=TASK_COMMISSION_PROFILE_REF,
+    # 绑定L5的method，这里是OPEN方法
     composition=MethodCompositionTemplate(
         method_kind="Open",
         scope="collet",
         required_methods=(MethodRequirement("Open", "0.2"),),
     ),
+    # 角色信息
     scenario_roles=(
         ScenarioRole(
             "owner",
