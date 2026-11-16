@@ -7,7 +7,7 @@ from typing import Annotated
 from fastapi import Depends, Path, Request
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
-from agentclaw.community.adapters.http.openapi_v1.contracts import BotIdPath, Envelope
+from agentclaw.community.adapters.http.openapi_v1.contracts import BotIdPath, Envelope, USER_SCOPED_403
 from agentclaw.community.adapters.http.openapi_v1.dependencies import Principal, require_principal
 from agentclaw.community.adapters.http.openapi_v1.principal import (
     UserIdDep, caller_owner_id, refuse_app_only_caller,
@@ -47,6 +47,7 @@ class CallerExpiryCorrectionResponse(BaseModel):
 @router.patch(
     "/{bot_id}/caller-instances/{caller_user_id}/token-expiry",
     response_model=Envelope[CallerExpiryCorrectionResponse],
+    responses=USER_SCOPED_403,
     dependencies=[Depends(refuse_app_only_caller)],
 )
 @envelope_errors
