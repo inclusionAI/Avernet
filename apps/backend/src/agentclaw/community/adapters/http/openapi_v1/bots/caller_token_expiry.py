@@ -26,22 +26,26 @@ logger = get_logger()
 
 
 class CallerExpiryCorrectionRequest(BaseModel):
+    """Correct one Caller instance expiry using the expected current value."""
+
     model_config = ConfigDict(extra="forbid")
-    entity_id: str = Field(min_length=1, max_length=128)
-    binding_id: int = Field(gt=0)
-    expires_at: AwareDatetime
-    expected_expires_at: AwareDatetime | None = Field(...)
-    reason: str = Field(min_length=1, max_length=256)
+    entity_id: str = Field(min_length=1, max_length=128, description="Entity that owns the addressed Bot instance.")
+    binding_id: int = Field(gt=0, description="Current dedicated Caller instance binding identifier.")
+    expires_at: AwareDatetime = Field(description="Corrected expiry with an explicit timezone; past values are allowed.")
+    expected_expires_at: AwareDatetime | None = Field(..., description="Expected current expiry with timezone, or null if no expiry is recorded.")
+    reason: str = Field(min_length=1, max_length=256, description="Administrative reason for this correction.")
 
 
 class CallerExpiryCorrectionResponse(BaseModel):
-    instance_id: int
-    bot_id: str
-    entity_id: str
-    caller_user_id: str
-    binding_id: int
-    previous_expires_at: AwareDatetime | None
-    expires_at: AwareDatetime
+    """Confirmed Caller instance expiry correction."""
+
+    instance_id: int = Field(description="Corrected Caller instance identifier.")
+    bot_id: str = Field(description="Addressed Bot identifier.")
+    entity_id: str = Field(description="Entity that owns the addressed Bot instance.")
+    caller_user_id: str = Field(description="User identity of the target Caller.")
+    binding_id: int = Field(description="Dedicated Caller instance binding identifier.")
+    previous_expires_at: AwareDatetime | None = Field(description="Previously recorded expiry in UTC, or null if absent.")
+    expires_at: AwareDatetime = Field(description="Corrected expiry in UTC.")
 
 
 @router.patch(
@@ -52,7 +56,7 @@ class CallerExpiryCorrectionResponse(BaseModel):
 )
 @envelope_errors
 async def correct_caller_token_expiry(
-    bot_id: BotIdPath, caller_user_id: Annotated[str, Path(min_length=1, max_length=128)],
+    bot_id: BotIdPath, caller_user_id: Annotated[str, Path(min_length=1, max_length=128, description="User identity of the Caller whose instance expiry is corrected.")],
     body: CallerExpiryCorrectionRequest,
     request: Request, user_id: UserIdDep,
     principal: Annotated[Principal, Depends(require_principal)],
