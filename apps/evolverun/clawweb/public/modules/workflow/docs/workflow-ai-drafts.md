@@ -11,7 +11,8 @@ tasks in configuration/workflow tables, or substitute an instance-local Map.
 **Editor uses the effective server `autoHeal.botId`, verbatim, including its
 configured owner suffix.** The submitting actor authorizes the request; it does
 not select a different Bot or replace the configured owner. Existing AutoHeal
-configuration precedence and BaaS credentials/transport are retained.
+configuration precedence is retained. The configured Bot runtime environment, not
+the browser or ClawWeb deployment environment, selects its BaaS transport.
 
 No AIStudio experiment, Snapshot, taskguard release, Pack baseline, Git branch,
 intelligent-onboarding default Bot, or local template participates in generation.
@@ -25,6 +26,37 @@ There is no generation fallback to another execution chain.
 The [ordinary Editor document boundary](workflow-editor-draft-boundary.md) still
 governs Apply, Save and Deploy. Preparing, generating, polling, cancelling and
 applying a preview neither saves nor deploys nor runs a workflow.
+
+## Configured Bot runtime environment
+
+`autoHeal.baasEnvironment` selects `dev`, `pre` or `prod` for the configured
+AutoHeal Bot. `AUTO_HEAL_BAAS_ENVIRONMENT` overrides that YAML field. An absent
+field retains the legacy `prod` selection; an explicitly invalid or empty
+selection fails closed. Administrators must configure the actual environment
+that owns the Bot and binding, not infer it from the environment of the Editor.
+
+The adapter and receipt signer resolve the **same complete endpoint and API-key
+pair** from `baas.environments[autoHeal.baasEnvironment]`. They do not combine a
+non-production endpoint with production credentials, use an incomplete target,
+or fall back to another environment. The existing shared IAM transport remains
+server-only. Each environment entry must point to the provider deployment whose
+Backend can resolve that Bot's environment-scoped identity and binding; naming a
+configuration slot `pre` while pointing it to production does not establish that
+property.
+
+The provider's Bot lifecycle stage is a separate concept. In particular, an
+ACTIVE personal Bot in a non-production environment does not become reachable
+by adding `bot_options.lifecycle_stage`. Editor drafting does not add that field,
+rewrite the Bot owner, publish the Bot or edit a provider binding.
+
+The signing namespace and execution drift fence include both the ClawWeb control
+environment and the selected Bot runtime environment, endpoint and credential.
+Changing the target invalidates old receipts before provider access. This
+namespace upgrade also invalidates receipts issued by versions that did not bind
+the selected Bot environment. It never converts an old request into a new
+submission; coordinated rollout must not recreate an uncertain legacy request. Previously failed provider
+messages remain failed; after an administrator corrects configuration, a new
+explicit user attempt is required for generation.
 
 ## Prepare before dispatch
 
@@ -100,6 +132,23 @@ The receipt uses a bounded, versioned metadata payload and constant-time HMAC
 verification. Exact source digest, workflow and draft binding are checked at the
 server. Expiry is bounded to 30 minutes. Authorization and deadlines are checked
 again after asynchronous provider work, before returning a result.
+
+## Diagnosing provider failure without disclosing diagnostics
+
+A verified provider message in a terminal failure state is not a transport or
+YAML validation failure. A recognized `BotBindingNotFoundError` in its `error`
+field is mapped to the existing safe code `AUTO_HEAL_BOT_UNAVAILABLE`; unknown
+provider failures retain `BAAS_GENERATION_FAILED`. Raw errors, credentials,
+URLs, stack traces and failed-message content are not returned as draft YAML or
+copied into browser error text. Completed assistant content and outer API-error
+envelopes are not used to infer this terminal binding error.
+
+For `AUTO_HEAL_BOT_UNAVAILABLE`, check the configured full Bot identity and owner,
+the selected endpoint/key pair, and the Bot and binding in the provider's actual
+Backend environment. A Bot marked ACTIVE in one environment does not prove that
+another environment can find it. A failed run row with no provider session can
+also exist: the provider may persist the message before resolving its binding.
+The error is not evidence that ClawWeb needs a new task table.
 
 ## Uncertainty, recovery and cancellation
 
