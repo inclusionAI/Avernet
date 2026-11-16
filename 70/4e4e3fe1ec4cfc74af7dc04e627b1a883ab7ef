@@ -1,0 +1,158 @@
+apps/bcs/crates/adapters/http/bcs-provider-http/Cargo.toml
+  s_ccca9d535b6e9a::t_c610e626b834e2 37
+apps/bcs/crates/adapters/http/bcs-http/src/routes/templates_tests.rs
+  s_ccca9d535b6e9a::t_1e81b3fbaf161f 1-93
+apps/bcs/crates/adapters/http/bcs-http/src/routes/groups/translation.rs
+  s_ccca9d535b6e9a::t_0d85a926969672 426-429
+apps/bcs/crates/services/bcs-message-flow/src/message_log_tests/bot_event_tests.rs
+  s_ccca9d535b6e9a::t_2fbc8596330d7a 4
+  s_ccca9d535b6e9a::t_c644d82c640eec 5-41
+apps/bcs/crates/auxiliary/ding-logger/src/handler_tests.rs
+  s_ccca9d535b6e9a::t_c45744aea18a6d 1-52
+apps/bcs/crates/services/bcs-event-store/tests/memory_delivery_regressions.rs
+  s_ccca9d535b6e9a::t_a2c1ebe0bb2f98 38
+  s_ccca9d535b6e9a::t_4b944eccf1e63c 23-37,39-112
+  s_ccca9d535b6e9a::t_2f08171ac06124 145
+  s_ccca9d535b6e9a::t_efcb585b4c5398 1-22,113-144,146-160
+apps/bcs/crates/adapters/ws/bcs-ws/src/bot/dispatcher/routing.rs
+  s_ccca9d535b6e9a::t_7af8ba5b26b106 322-325
+apps/bcs/crates/services/bcs-message-flow/src/message_log_tests/group_tests.rs
+  s_ccca9d535b6e9a::t_c644d82c640eec 5-37
+  s_ccca9d535b6e9a::t_2e29a8ba7cec76 4
+apps/bcs/crates/auxiliary/bcs-observability/tests/legacy_operations.rs
+  s_ccca9d535b6e9a::t_e83c070eff80d9 1-37
+apps/bcs/crates/auxiliary/ding-logger/src/handler.rs
+  s_ccca9d535b6e9a::t_c45744aea18a6d 167-170
+apps/bcs/crates/services/bcs-collaboration-runtime/tests/runtime_progression/legacy_lifecycle.rs
+  s_ccca9d535b6e9a::t_1648966b8ab7f3 1-62
+apps/bcs/crates/services/bcs-collaboration-runtime/Cargo.toml
+  s_ccca9d535b6e9a::t_e83c070eff80d9 47
+apps/bcs/crates/plugins/bcs-db-mysql/tests/protocol_regressions.rs
+  s_ccca9d535b6e9a::t_4482056bc62456 1-72,93-106
+  s_ccca9d535b6e9a::t_f16efa6c6b149a 73-92
+apps/bcs/crates/services/bcs-message-flow/tests/cases/contract_message_flow.rs
+  s_ccca9d535b6e9a::t_e2fd3fe9009814 66-67
+apps/bcs/crates/adapters/http/bcs-provider-http/src/sse_loop_tests.rs
+  s_ccca9d535b6e9a::t_c610e626b834e2 2-4
+apps/bcs/crates/adapters/ws/bcs-ws/src/bot/dispatcher/routing_tests.rs
+  s_ccca9d535b6e9a::t_7af8ba5b26b106 1-18,72-104
+  s_ccca9d535b6e9a::t_8b20b0d7a93880 19-71
+apps/bcs/crates/services/bcs-bot-store/tests/conformance_bot_repo.rs
+  s_ccca9d535b6e9a::t_6b90ddcae206da 17-19
+apps/bcs/crates/adapters/http/bcs-http/Cargo.toml
+  s_ccca9d535b6e9a::t_c610e626b834e2 88
+apps/bcs/crates/services/bcs-message-flow/Cargo.toml
+  s_ccca9d535b6e9a::t_c644d82c640eec 58
+apps/bcs/crates/plugins/bcs-db-mysql/src/manager_regression_tests.rs
+  s_ccca9d535b6e9a::t_a59475d8915c43 1-2,17-46,48-54
+  s_ccca9d535b6e9a::t_793f828649c89b 3-16
+  s_ccca9d535b6e9a::t_c294250c8b7725 47
+apps/bcs/crates/tools/bcs-admin/src/migrate_regression_tests.rs
+  s_ccca9d535b6e9a::t_f70c49e7f34e57 4-83
+  s_ccca9d535b6e9a::t_78d6f9fb30d271 100-104,108-109,111,126,130,138
+  s_ccca9d535b6e9a::t_a26414b8d8b991 1-3,84-99,105-107,110,112-125,127-129,131-137,139-141
+apps/bcs/crates/services/bcs-invite-code-store/tests/memory_persistence.rs
+  s_ccca9d535b6e9a::t_c45744aea18a6d 1-52
+apps/bcs/crates/adapters/http/bcs-http/src/routes/templates.rs
+  s_ccca9d535b6e9a::t_1e81b3fbaf161f 182-185
+apps/bcs/crates/services/bcs-invite-code-store/Cargo.toml
+  s_ccca9d535b6e9a::t_c45744aea18a6d 20
+apps/bcs/crates/plugins/bcs-db-mysql/Cargo.toml
+  s_ccca9d535b6e9a::t_4482056bc62456 21
+apps/bcs/crates/services/bcs-routing/Cargo.toml
+  s_ccca9d535b6e9a::t_c22340e3994541 34
+apps/bcs/crates/services/bcs-collaboration-runtime/tests/runtime_progression/definition_binding.rs
+  s_ccca9d535b6e9a::t_3682f272aaf2a0 49
+  s_ccca9d535b6e9a::t_da878da3cd27ce 50-88
+apps/bcs/crates/services/bcs-collaboration-runtime/src/runtime/logging_tests.rs
+  s_ccca9d535b6e9a::t_e83c070eff80d9 5-7,43-89
+  s_ccca9d535b6e9a::t_e0df18f8f084fc 90-91
+apps/bcs/crates/services/bcs-session-store/tests/session_registry_events.rs
+  s_ccca9d535b6e9a::t_759895ce0e54fe 17-18,148
+  s_ccca9d535b6e9a::t_bbe2382373c6b6 15-16,19,49-56,122-147,149-207
+  s_ccca9d535b6e9a::t_2cc559aac8dc23 57-121
+  s_ccca9d535b6e9a::t_adad297454d944 208
+apps/bcs/crates/test-support/legacy_log_capture.rs
+  s_ccca9d535b6e9a::t_e83c070eff80d9 1-54
+apps/bcs/crates/auxiliary/ding-logger/Cargo.toml
+  s_ccca9d535b6e9a::t_c45744aea18a6d 21-23
+apps/bcs/crates/services/bcs-collaboration-runtime/tests/runtime_progression/fixed_loop.rs
+  s_ccca9d535b6e9a::t_1648966b8ab7f3 18-20
+apps/bcs/crates/adapters/http/bcs-http/src/gateway_trace_tests.rs
+  s_ccca9d535b6e9a::t_bdb7c4b9c45b4d 7
+  s_ccca9d535b6e9a::t_c610e626b834e2 8-52
+apps/bcs/crates/services/bcs-bot-store/tests/support/streaming_regressions.rs
+  s_ccca9d535b6e9a::t_4edc37aec548dc 48-103,105-122,124-139
+  s_ccca9d535b6e9a::t_af010f67cab8df 140-141
+  s_ccca9d535b6e9a::t_6c7ee9d2e11bcc 21-25,28
+  s_ccca9d535b6e9a::t_2ae50280186caf 5
+  s_ccca9d535b6e9a::t_6b90ddcae206da 1-2,4,142-167,169-177,181-183,187-188,190-196,199
+  s_ccca9d535b6e9a::t_10494909c72dda 178-180
+  s_ccca9d535b6e9a::t_6324482ab423e3 184-186
+  s_ccca9d535b6e9a::t_91270a3afa6b00 3
+  s_ccca9d535b6e9a::t_02c16dfd7253e0 197-198
+  s_ccca9d535b6e9a::t_87d42350589c29 6-20,26-27,29-47
+  s_ccca9d535b6e9a::t_8aeda4699e4518 123
+  s_ccca9d535b6e9a::t_c294250c8b7725 168,189
+  s_ccca9d535b6e9a::t_e3bbf1051a722d 104
+apps/bcs/crates/services/bcs-message-flow/src/message_log_tests/task_tests.rs
+  s_ccca9d535b6e9a::t_c644d82c640eec 5-30
+  s_ccca9d535b6e9a::t_13bd263fb091f9 4
+apps/bcs/crates/tools/bcs-admin/src/migrate.rs
+  s_ccca9d535b6e9a::t_9065ec46af5659 970
+  s_ccca9d535b6e9a::t_a26414b8d8b991 971-973
+apps/bcs/crates/services/bcs-friend/tests/conformance_friend_services.rs
+  s_ccca9d535b6e9a::t_c5c101a59a6e78 20-22
+apps/bcs/crates/services/bcs-collaboration-template/src/tests.rs
+  s_ccca9d535b6e9a::t_ff56f4390951db 46-99
+apps/bcs/crates/bootstrap/bcs/src/server/state_default_tests.rs
+  s_ccca9d535b6e9a::t_9706bd65d0f944 20-22
+  s_ccca9d535b6e9a::t_2f08171ac06124 15
+  s_ccca9d535b6e9a::t_7af8ba5b26b106 4-14,16-19,23-30,32-56
+  s_ccca9d535b6e9a::t_7b61cdcb5af952 31
+apps/bcs/crates/services/bcs-event-store/tests/memory_atomicity.rs
+  s_ccca9d535b6e9a::t_c76c6e1f935b7b 50
+  s_ccca9d535b6e9a::t_0c5fed5d20ac66 52
+  s_ccca9d535b6e9a::t_0d18b079559cde 1-5,9-20,22-27,29-49,51,53-57
+  s_ccca9d535b6e9a::t_efcb585b4c5398 6-8
+  s_ccca9d535b6e9a::t_e54ecdcf3a9cf5 21
+  s_ccca9d535b6e9a::t_3a7a8360511082 28
+apps/bcs/crates/services/bcs-routing/tests/security_key_logs.rs
+  s_ccca9d535b6e9a::t_c22340e3994541 8-49
+apps/bcs/crates/plugins/bcs-db-mysql/src/manager.rs
+  s_ccca9d535b6e9a::t_a59475d8915c43 911-913
+  s_ccca9d535b6e9a::t_56a739eb604e4d 910
+apps/bcs/crates/services/bcs-friend/tests/friend_application_regressions.rs
+  s_ccca9d535b6e9a::t_c5c101a59a6e78 1-52
+apps/bcs/crates/services/bcs-message-flow/tests/cases/contract_message_flow/legacy_flow.rs
+  s_ccca9d535b6e9a::t_e2fd3fe9009814 1-63
+apps/bcs/crates/auxiliary/bcs-observability/Cargo.toml
+  s_ccca9d535b6e9a::t_e83c070eff80d9 23
+apps/bcs/docs/diagnostics/unit-test-ci.md
+  s_ccca9d535b6e9a::t_fd9258f46b04ef 51-84,102-106
+apps/bcs/crates/services/bcs-message-flow/src/message_log_tests/tests.rs
+  s_ccca9d535b6e9a::t_c644d82c640eec 4-6
+apps/bcs/crates/adapters/http/bcs-http/src/routes/groups/translation_tests.rs
+  s_ccca9d535b6e9a::t_23e8a54583f252 51
+  s_ccca9d535b6e9a::t_0d85a926969672 1-50,52-89
+apps/bcs/crates/adapters/http/bcs-provider-http/src/sse_legacy_tests.rs
+  s_ccca9d535b6e9a::t_bdb7c4b9c45b4d 3
+  s_ccca9d535b6e9a::t_c610e626b834e2 1-2,4-43,45-55
+  s_ccca9d535b6e9a::t_5f1f479c29b0f4 44
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "704e4e3fe1ec4cfc74af7dc04e627b1a883ab7ef",
+  "prompts": {},
+  "sessions": {
+    "s_ccca9d535b6e9a": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d46b-3825-7a11-9b62-ea0dcc4a42fc",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": null
+    }
+  }
+}
