@@ -887,7 +887,7 @@ async def diagnose(
     ):
         raise HTTPException(
             status_code=409,
-            detail=f"当前 bot 正在诊断中，请等待",
+            detail="当前 bot 正在诊断中，请等待",
         )
 
     # Derive file types from diagnostics for initial progress items
@@ -997,7 +997,7 @@ async def admin_diagnose(
     ):
         raise HTTPException(
             status_code=409,
-            detail=f"当前 bot 正在诊断中，请等待",
+            detail="当前 bot 正在诊断中，请等待",
         )
 
     # Derive file types from diagnostics for initial progress items

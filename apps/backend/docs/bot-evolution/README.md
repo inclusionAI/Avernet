@@ -2,9 +2,13 @@
 
 > 中文版：[README.zh-CN.md](README.zh-CN.md)
 
-> Status: **DRAFT — design, for review.** No code has been written against
-> this design. Decisions marked *proposed* need an owner's sign-off before the
-> work items that depend on them start.
+> Status: **Implemented core 01–06 components, partial verification.** The
+> backend implementation now contains the Genome, Experience-facing strategy
+> runtime, experiment ledger, evolution-run service and the core promotion/
+> verification modules. The 01–06 path has focused unit coverage and a limited
+> real-bot smoke test; it has not been proven as a complete live platform flow.
+> 07–09 remain outside the implemented end-to-end scope. Decisions marked
+> *proposed* still need an owner's sign-off before dependent work starts.
 
 ## What this is
 

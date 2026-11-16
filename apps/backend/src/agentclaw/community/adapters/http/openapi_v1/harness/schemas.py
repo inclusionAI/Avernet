@@ -51,10 +51,3 @@ class HarnessRollbackRequest(BaseModel):
     bot_publish_id: str | None = Field(default=None, description="Bot publish ID")
 
 
-from agentclaw.community.adapters.http.harness.schemas import (
-    DiagnoseStartResponse,
-    PreviewResponse,
-    ApplyResponse,
-    DimReportResponse,
-    DimHistoryResponse,
-)

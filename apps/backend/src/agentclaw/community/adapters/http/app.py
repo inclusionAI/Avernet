@@ -1,26 +1,12 @@
 """FastAPI composition root.
 
-Two phases, because importing this module and *initializing a worker* are
-different jobs and only the second has to happen after a ``fork``.
-``AGENTCLAW_HTTP_BOOT_MODE`` decides which an import performs;
-:mod:`agentclaw.community.adapters.http.boot` owns that switch and documents the
-split, its guards and the fork reasoning in full.
-
-Phase 1, always at import: read the deploy profile, run the pre-DI
-registrations, construct ``app``, and register the exception handlers, the
-health endpoint and every router. Nothing here builds an injector, opens a
-connection, reads a secret or starts a thread — that is what makes the result
-safe to ``fork``.
-
-Phase 2, :func:`finalize_worker_runtime`: everything a worker owns. Inline at
-the bottom of this module under ``eager`` (the default); once per worker after
-the fork under ``preload``.
-
-Otherwise unchanged: ``_app_lifespan`` drives every ``Lifecycle`` participant in
-the worker's injector (``bootstrap`` → ``startup`` → yield → ``shutdown`` →
-``teardown``), middleware bodies live in
-:mod:`agentclaw.community.adapters.http.middleware`, startup work lives on the
-components that own it, and ``app.state.injector`` is the single injector handle.
+Two phases because importing this module and *initializing a worker* are
+different jobs: only the second happens after a ``fork``. Phase 1 builds the
+app, exception handlers, health endpoint and every router; no injector,
+connections, secrets or threads here, so import is safe to ``fork``. Phase 2
+(finalize_worker_runtime) owns worker lifecycle; each ``Lifecycle`` participant
+runs through ``bootstrap`` → ``startup`` → yield → ``shutdown`` → ``teardown``.
+Middleware bodies live in ``agentclaw.community.adapters.http.middleware``.
 """
 import asyncio
 from contextlib import asynccontextmanager
@@ -92,6 +78,7 @@ from agentclaw.community.adapters.http.common_config.router import router as com
 from agentclaw.community.adapters.http.bot_common_config.router import router as bot_common_config_router  # noqa: E402
 from agentclaw.community.adapters.http.skills_pool import router as skills_pool_ops_router  # noqa: E402
 from agentclaw.community.adapters.http.beta_quota.router import router as beta_quota_router  # noqa: E402
+from agentclaw.community.adapters.http.evolution_jobs.router import router as evolution_jobs_router  # noqa: E402
 from agentclaw.community.adapters.http.task.bbs import digest_router as bbs_digest_internal_router  # noqa: E402
 from agentclaw.community.adapters.http.task.bbs import read_router as bbs_internal_read_router, router as bbs_internal_router  # noqa: E402
 from agentclaw.community.adapters.http.task.feedback import read_router as feedback_internal_read_router  # noqa: E402
@@ -904,6 +891,7 @@ app.include_router(common_config_router)
 app.include_router(bot_common_config_router)
 app.include_router(skills_pool_ops_router)
 app.include_router(beta_quota_router)
+app.include_router(evolution_jobs_router)  # 06 §7：沙箱内 worker 的作业协议
 app.include_router(bbs_internal_read_router)
 app.include_router(bbs_digest_internal_router)
 app.include_router(bbs_internal_router)

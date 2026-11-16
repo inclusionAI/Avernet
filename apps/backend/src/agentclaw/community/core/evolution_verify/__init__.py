@@ -1,0 +1,95 @@
+"""验证服务（07-verification.zh-CN）：`verify(candidate, profile) → Verdict`。
+
+判定只由 validation 的聚合值决定；regression 与 safety 只能阻断；holdout 封存。
+策略永远看不到逐用例细节（只经 `strategy_view` 拿到 validation 聚合）。
+"""
+
+from __future__ import annotations
+
+from .compare import compare_split, newly_failing, paired_delta
+from .enums import (
+    CallerView,
+    CaseCategory,
+    CaseFormat,
+    CaseOriginKind,
+    EvaluationPurpose,
+    EvaluationStatus,
+    ExecutorKind,
+    HoldoutAuditReason,
+    MUST_PASS_SPLITS,
+    OverfitFlag,
+    SanityResult,
+    ScopeKind,
+    Split,
+    VerdictReasonCategory,
+    VerdictStatus,
+)
+from .models import (
+    AggregateScores,
+    Case,
+    CaseOrigin,
+    Cost,
+    CostComparison,
+    FloorRef,
+    Grade,
+    GraderRef,
+    JudgingSpec,
+    OverfitRule,
+    RolloutRecord,
+    SeedPolicy,
+    SplitResult,
+    StrategyVerdictView,
+    Suite,
+    SuiteScope,
+    ValidationRule,
+    Verdict,
+    VerificationProfile,
+)
+from .policy import assess_overfit, decide, needs_more_seeds
+from .service import CandidateRef, Evaluation, LocalVerificationService
+
+__all__ = [
+    "AggregateScores",
+    "CallerView",
+    "CandidateRef",
+    "Case",
+    "CaseCategory",
+    "CaseFormat",
+    "CaseOrigin",
+    "CaseOriginKind",
+    "Cost",
+    "CostComparison",
+    "Evaluation",
+    "EvaluationPurpose",
+    "EvaluationStatus",
+    "ExecutorKind",
+    "FloorRef",
+    "Grade",
+    "GraderRef",
+    "HoldoutAuditReason",
+    "JudgingSpec",
+    "LocalVerificationService",
+    "MUST_PASS_SPLITS",
+    "OverfitFlag",
+    "OverfitRule",
+    "RolloutRecord",
+    "SanityResult",
+    "ScopeKind",
+    "SeedPolicy",
+    "Split",
+    "SplitResult",
+    "StrategyVerdictView",
+    "Suite",
+    "SuiteScope",
+    "ValidationRule",
+    "Verdict",
+    "VerdictReasonCategory",
+    "VerdictStatus",
+    "VerificationProfile",
+    "assess_overfit",
+    "compare_split",
+    "decide",
+    "needs_more_seeds",
+    "newly_failing",
+    "paired_delta",
+]

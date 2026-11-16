@@ -235,6 +235,31 @@ SINGLEBOX_E2E_EXEMPT: dict[str, str] = {
         "flow exercises POST /copy → manifest-creation → /bots/{dst}.copy_state "
         "end-to-end (needs provision/DaaS stand-in)."
     ),
+    "evolution_strategy": (
+        "Plugin-contract SDK for bot evolution (03-strategy.zh-CN.md): "
+        "EvolutionStrategy / StrategyContext / capability contracts plus an in-"
+        "process local platform for strategy tests. No e2e runtime yet; drain "
+        "when apps/evolution ships a real singlebox run service."
+    ),
+    "evolution_run": (
+        "Run service of bot evolution (06-evolution-run.zh-CN): bindings, runs, "
+        "lease jobs, operations, workspace and budget, with an in-process host. "
+        "Covered by unit and integration tests; drain when the 09 HTTP edge and a "
+        "singlebox trigger scheduler drive a run end to end."
+    ),
+    "evolution_verify": (
+        "Verification service (07-verification.zh-CN): grader/suite/verdict core. "
+        "Covered by unit tests now; drain when the 09 HTTP edge exposes verify()."
+    ),
+    "evolution_promote": (
+        "Promotion service (08-promotion.zh-CN): static floor, gate and ref move. "
+        "Covered by unit tests now; drain when the 09 HTTP edge exposes promote()."
+    ),
+    "evolution_ledger": (
+        "Experiment ledger H (05-experiment-ledger.zh-CN): append-only entries and "
+        "events. Covered by unit tests now; drain when the 09 HTTP edge exposes the "
+        "ledger export."
+    ),
     "approval": _EXEMPT_REASON,
     "apply_engine": (
         "The engine the Manifest's and the genome's compilers feed: the "

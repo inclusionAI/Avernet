@@ -32,14 +32,10 @@ from agentclaw.community.core.task.forum.models import (
 )
 
 from .topic_config_schemas import (
-    HelpConfig,
-    HelpConfigRequest,
-    PollConfig,
-    PollConfigRequest,
     TopicConfig,
     TopicConfigRequest,
-    domain_topic_config,
 )
+from .topic_config_schemas import domain_topic_config as domain_topic_config
 
 
 class PollSelectionRequest(BaseModel):

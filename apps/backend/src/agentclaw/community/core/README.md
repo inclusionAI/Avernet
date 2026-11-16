@@ -35,6 +35,7 @@ common starting points, not an exhaustive ownership list:
 | Conversations and collaboration | [bot chat](bot_chat/README.md), [group chat](group_chat/README.md), [expert chat](expert_chat/README.md), [agentswarm](agentswarm/README.md) |
 | Spaces and shared content | [spaces](spaces/README.md), [resources](resources/README.md), [content store](content_store/README.md), [workspace](workspace/README.md) |
 | Platform state | [config](config/README.md), [system config](system_config/README.md), [events](events/README.md), [repositories](repository/README.md) |
+| Bot evolution (RSI) | [Genome](bot_genome/README.md), [strategy](evolution_strategy/README.md), [run](evolution_run/README.md), [ledger](evolution_ledger/README.md), [verification](evolution_verify/README.md), [promotion](evolution_promote/README.md) |
 
 ## Context Boundary maintenance
 
