@@ -12,6 +12,9 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from agentclaw.community.core.task.context_collab.l5_methods.open_profile import (
+    ParticipationType,
+)
 from agentclaw.community.core.task.context_collab.method_service_api import (
     BindMethodCommand,
     ComposeMethodCommand,
@@ -390,14 +393,13 @@ class SwarmStageOutcomeRequest(BaseModel):
 
 
 class OpenOpportunityRequest(BaseModel):
-    """机会发布请求;窗口形态校验与 COLLET_PARTICIPANT 的 P1 拒绝在
-    服务层。"""
+    """机会发布请求;解析参与类型枚举,窗口和作用域校验由服务层负责。"""
 
     scope_ref: str = Field(..., description="机会作用域引用")
-    participation_type: str = Field(
+    participation_type: ParticipationType = Field(
         ...,
         description=(
-            "COLLET_PARTICIPANT | GROUP_MEMBER | SWARM_ALLOCATION | "
+            "录取后的参与形式:COLLET_PARTICIPANT | GROUP_MEMBER | SWARM_ALLOCATION | "
             "SINGLE_CONTRIBUTION"
         ),
     )

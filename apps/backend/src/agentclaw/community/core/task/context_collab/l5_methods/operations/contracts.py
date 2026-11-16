@@ -23,6 +23,7 @@ from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context
 )
 from agentclaw.community.core.task.context_collab.l5_methods.open_profile import (
     OpenOpportunity,
+    ParticipationType,
 )
 
 __all__ = [
@@ -233,7 +234,7 @@ class OpenOpportunityCommand:
 
     collab_context_id: str
     scope_ref: str
-    participation_type: str  # "COLLET_PARTICIPANT" | "GROUP_MEMBER" | "SWARM_ALLOCATION" | "SINGLE_CONTRIBUTION"
+    participation_type: ParticipationType  # 录取后的参与形式,不表示参与者数量。
     opens_at: str
     context: ActorContext
     opportunity_id: str | None = None

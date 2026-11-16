@@ -399,7 +399,7 @@ class TestOpenApplicationLifecycle:
             service,
             lifecycle,
             binding,
-            participation_type="SWARM_ALLOCATION",
+            participation_type=ParticipationType.SWARM_ALLOCATION,
         )
         # 缺省 target_stage_ref 拒。
         with pytest.raises(ContextCollabValidationError, match="target_stage_ref"):
@@ -454,7 +454,7 @@ class TestOpenApplicationLifecycle:
     def test_admit_single_contribution_records_refs_only(self):
         store, _, lifecycle, service = make_open_service()
         opp, app = screening_application(
-            service, lifecycle, participation_type="SINGLE_CONTRIBUTION"
+            service, lifecycle, participation_type=ParticipationType.SINGLE_CONTRIBUTION
         )
         admitted = service.admit(
             COLLET_ID,
@@ -476,7 +476,9 @@ class TestOpenApplicationLifecycle:
         binding = active_open_binding(lifecycle)
         with pytest.raises(ContextCollabValidationError, match="scope must match"):
             service.publish_opportunity(
-                opportunity_command(participation_type="COLLET_PARTICIPANT")
+                opportunity_command(
+                    participation_type=ParticipationType.COLLET_PARTICIPANT
+                )
             )
         assert store.list_opportunities(AXES, binding, COLLET_ID) == []
 
@@ -486,7 +488,7 @@ class TestOpenApplicationLifecycle:
         store, _, lifecycle, service = make_open_service()
         binding = active_open_binding(lifecycle)
         service.publish_opportunity(
-            opportunity_command(participation_type="GROUP_MEMBER")
+            opportunity_command(participation_type=ParticipationType.GROUP_MEMBER)
         )
         submitted_application(service, "opp_alpha", binding)
         with pytest.raises(ContextCollabValidationError, match="does not accept event"):
@@ -530,7 +532,7 @@ class TestOpenApplicationLifecycle:
         # GROUP_MEMBER 产物终结。
         store, _, lifecycle, service = make_open_service()
         opp, app = screening_application(
-            service, lifecycle, participation_type="GROUP_MEMBER"
+            service, lifecycle, participation_type=ParticipationType.GROUP_MEMBER
         )
         binding = "mb_open_alpha"
         service.admit(COLLET_ID, binding, app, OpenAdmitCommand(), make_actor())
@@ -556,7 +558,7 @@ class TestOpenApplicationLifecycle:
             service2,
             lifecycle2,
             binding2,
-            participation_type="SWARM_ALLOCATION",
+            participation_type=ParticipationType.SWARM_ALLOCATION,
         )
         store2.insert_stage(
             AXES,

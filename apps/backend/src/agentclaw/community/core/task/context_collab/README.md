@@ -126,9 +126,13 @@ products/
   products retain their structural behavior.
 - L5 Open publication is `publish_opportunity(OpenOpportunityCommand(...))`.
   The command requires `collab_context_id`, participation fields and a trusted
-  caller `context`; neither the method arguments nor the command contain a
-  binding ID. The service resolves exactly one ACTIVE binding declaring Open
-  within that Collet and the current tenant/environment, then applies the
+  caller `context`; `participation_type` uses the existing `ParticipationType`
+  enum to declare the admission outcome, not participant count. HTTP accepts
+  the same four string values, validates them into the enum before building
+  the command, and rejects unknown values with 422. Neither the method
+  arguments nor the command contain a binding ID. The service resolves exactly
+  one ACTIVE binding declaring Open within that Collet and the current
+  tenant/environment, then applies the
   existing G1 authorization, G4 transition, audit and binding-scoped idempotency
   checks. No Open binding is NotFound; no ACTIVE candidate or multiple ACTIVE
   candidates is ValidationError, with no opportunity write. It never picks the

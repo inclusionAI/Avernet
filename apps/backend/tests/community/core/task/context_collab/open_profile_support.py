@@ -23,6 +23,9 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.task imp
 from agentclaw.community.core.task.context_collab.l4_context_primitives.task import (
     TaskStatus,
 )
+from agentclaw.community.core.task.context_collab.l5_methods.open_profile import (
+    ParticipationType,
+)
 from agentclaw.community.core.task.context_collab.l5_methods.swarm_profile import (
     Stage,
 )
@@ -208,7 +211,7 @@ def opportunity_command(**overrides) -> OpenOpportunityCommand:
         "collab_context_id": COLLET_ID,
         "context": make_actor(),
         "scope_ref": "task_scope_open_001",
-        "participation_type": "GROUP_MEMBER",
+        "participation_type": ParticipationType.GROUP_MEMBER,
         "opens_at": _iso_offset(-1),
         "opportunity_id": "opp_alpha",
         "requirement_refs": ["req://search"],

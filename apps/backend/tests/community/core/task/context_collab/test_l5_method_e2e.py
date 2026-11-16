@@ -35,6 +35,7 @@ from agentclaw.community.core.task.context_collab.l5_methods.group_profile impor
 )
 from agentclaw.community.core.task.context_collab.l5_methods.open_profile import (
     ApplicationState,
+    ParticipationType,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.swarm_profile import (
     AllocationState,
@@ -226,7 +227,7 @@ class TestL5MethodObjectsE2E:
                 collab_context_id=collab_id,
                 context=_actor(OWNER),
                 scope_ref="task_scope_open_e2e",
-                participation_type="GROUP_MEMBER",
+                participation_type=ParticipationType.GROUP_MEMBER,
                 opens_at=_future_iso(-1),
                 opportunity_id="opp_e2e",
             ),

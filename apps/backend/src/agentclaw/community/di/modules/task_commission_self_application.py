@@ -154,7 +154,7 @@ class TaskCommissionSelfApplicationAdapter(TaskCommissionOpenMethodAdapter):
                 collab_context_id=command.collab_context_id,
                 context=context,
                 scope_ref=command.collab_context_id,
-                participation_type=policy.participation_type.value,
+                participation_type=policy.participation_type,
                 capacity=policy.capacity,
                 opens_at=_now(),
                 admission_policy_refs=[_POLICY_REF],

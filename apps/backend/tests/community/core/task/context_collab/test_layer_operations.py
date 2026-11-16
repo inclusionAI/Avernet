@@ -39,6 +39,9 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.task imp
 from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
     top_level_binding_id,
 )
+from agentclaw.community.core.task.context_collab.l5_methods.open_profile import (
+    ParticipationType,
+)
 from agentclaw.community.core.task.context_collab.l5_methods.operations.contracts import (
     OpenOpportunityCommand,
     SingleSelectCommand,
@@ -160,7 +163,7 @@ def test_method_operations_use_lower_reader_and_resolved_facts(kind):
             OpenOpportunityCommand(
                 collab_context_id=COLLET_ID,
                 scope_ref="scope",
-                participation_type="SINGLE_CONTRIBUTION",
+                participation_type=ParticipationType.SINGLE_CONTRIBUTION,
                 opens_at=NOW,
                 context=OWNER,
             ),

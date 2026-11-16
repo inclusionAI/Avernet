@@ -12,6 +12,7 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.particip
 )
 from agentclaw.community.core.task.context_collab.l5_methods.open_profile import (
     ApplicationState,
+    ParticipationType,
 )
 from agentclaw.community.core.task.context_collab.method_service_api import (
     OpenAdmitCommand,
@@ -37,7 +38,7 @@ def _pure_open():
     binding = active_open_binding(lifecycle)
     service.publish_opportunity(
         opportunity_command(
-            scope_ref=COLLET_ID, participation_type="COLLET_PARTICIPANT"
+            scope_ref=COLLET_ID, participation_type=ParticipationType.COLLET_PARTICIPANT
         ),
     )
     return store, service, binding

@@ -92,7 +92,7 @@ class TaskCommissionOpenMethodAdapter(TaskMethodOpsPort):
                 collab_context_id=command.collab_context_id,
                 context=context,
                 scope_ref=command.collab_context_id,
-                participation_type=policy.participation_type.value,
+                participation_type=policy.participation_type,
                 opens_at=_now(),
                 capacity=policy.capacity,
                 reason="task_commission.publish",
