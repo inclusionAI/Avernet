@@ -1,3 +1,4 @@
+import type { BotDiagnosisRecoveryConfig } from './bot-config-contracts.js';
 import type { Engine, DiagnosisPage, MonitoringSummary, MonitoringTarget, MonitoringWindow } from './contracts.js';
 
 /** Plugin API: host-verified identity. No request fields are trusted by the domain service. */
@@ -41,11 +42,13 @@ export type BotOption = {
   capabilities: { canView: true; canRequestEnrollment: boolean };
 };
 export type BotOptionsPage = { items: BotOption[]; nextCursor: string | null; window: MonitoringWindow };
-/** Service API: authenticated UI reads and non-mutating enrollment placeholder. */
+/** Service API: authenticated monitoring reads and Bot configuration writes. */
 export interface MonitoringBrowserApi {
   options(principal: MonitoringPrincipal, query: Record<string, unknown>): Promise<BotOptionsPage>;
   status(principal: MonitoringPrincipal, ref: string, query: Record<string, unknown>): Promise<BotOption>;
   diagnoses(principal: MonitoringPrincipal, ref: string, query: Record<string, unknown>): Promise<DiagnosisPage>;
   enroll(principal: MonitoringPrincipal, input: unknown): Promise<never>;
   configure?(principal: MonitoringPrincipal, input: unknown): Promise<{ updated: number; failed: string[] }>;
+  readConfiguration?(principal: MonitoringPrincipal, ref: string): Promise<BotDiagnosisRecoveryConfig | null>;
+  replaceConfiguration?(principal: MonitoringPrincipal, ref: string, input: unknown): Promise<BotDiagnosisRecoveryConfig>;
 }

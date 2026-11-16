@@ -365,6 +365,48 @@ describe('monitoring browser HTTP identity and enrollment boundary', () => {
     principal.isAuthenticated = false;
     expect((await configure(1)).status).toBe(401);
   });
+  it('lets dedicated administrators replace and read only the specified Bot configuration', async () => {
+    const { createMonitoringReferences } = await import('../../services/monitoring/target-ref.js');
+    const refs = createMonitoringReferences();
+    const configPath = (botId: string) => '/monitoring/configurations/'
+      + refs.encode({ botId, entityId: '001234', env: 'test' }, 'test');
+    const path = configPath('mock-bot-te');
+    const configJson = JSON.stringify({ notifications: {
+      owner: { enabled: true }, group: { enabled: true, route_id: 'private-group' },
+    } });
+    const input = { diagnosisEnabled: false, recoveryEnabled: true, version: 0, configJson };
+    const put = (body: unknown) => call(path, { method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'X-User-Id': 'claimed-admin' }, body: JSON.stringify(body) });
+
+    // The existing host flag and caller-supplied identity do not authorize this API.
+    expect((await put(input)).status).toBe(403);
+    expect((await call(path)).status).toBe(403);
+    principal.isAuthenticated = false;
+    expect((await put(input)).status).toBe(401);
+    principal = { ...principal, isAuthenticated: true, isClawInsightAdmin: true, staffId: 'admin' };
+    expect(await call(path)).toMatchObject({ status: 200, body: { configuration: null } });
+
+    const written = { ...input, version: 1 };
+    expect(await put(input)).toMatchObject({ status: 200, body: { configuration: written }, cache: 'no-store' });
+    expect(await call(path)).toMatchObject({ status: 200, body: { configuration: written } });
+    expect(await call(configPath('mock-bot-oc'))).toMatchObject({ status: 200, body: { configuration: null } });
+    expect((await put({ ...input, all: true })).status).toBe(400);
+    expect((await put({ ...input, configJson: '{' })).status).toBe(400);
+    expect((await put({ ...written, configJson: '{"notifications":{"group":{"enabled":true,"webhook":"https://example.invalid"}}}' })).status).toBe(400);
+    expect((await put(input)).status).toBe(409);
+
+    // A normal owner can still operate the page switch without erasing notification policy.
+    principal = { ...principal, isClawInsightAdmin: false, staffId: '001234' };
+    expect(await call('/monitoring/configurations', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ botRef: path.split('/').at(-1), enabled: false, version: 1 }) })).toMatchObject({ status: 200 });
+    principal = { ...principal, isClawInsightAdmin: true, staffId: 'admin' };
+    expect(await call(path)).toMatchObject({ status: 200,
+      body: { configuration: { diagnosisEnabled: false, recoveryEnabled: false, version: 2, configJson } } });
+    expect(await put({ ...input, version: 2, configJson: '{}' })).toMatchObject({ status: 200,
+      body: { configuration: { diagnosisEnabled: false, recoveryEnabled: true, version: 3, configJson: '{}' } } });
+    principal.tenant = 'another-tenant';
+    expect((await put(input)).status).toBe(403);
+  });
   it('does not grant legacy reads from a forged host role flag', async () => {
     clawInsightAdmin = true;
     expect((await call('/monitoring/bots')).status).toBe(403);
