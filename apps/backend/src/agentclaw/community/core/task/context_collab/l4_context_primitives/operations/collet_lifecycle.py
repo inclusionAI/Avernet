@@ -1,7 +1,8 @@
-"""Collet 生命周期五操作服务(spec §5.3;ACCS-104 §3 Context 操作族)。
+"""Collet 生命周期操作服务(spec §5.3;ACCS-104 §3 Context 操作族)。
 
-五个操作(``activate`` / ``suspend`` / ``resume`` / ``complete`` /
-``archive``)输入 ``collet_id`` + ``ActorContext``(+可选 ``reason``),经
+创建注册和五个迁移操作(``activate`` / ``suspend`` / ``resume`` /
+``complete`` / ``archive``)输入 ``collet_id`` + ``ActorContext``(+可选
+``reason``),经
 G4 ``collet_lifecycle`` 机器 ``resolve_transition`` 裁决后替换进程内
 store 状态;不落事件、不写库(仓储仅做存在性与守卫读用)。P1 纯内部
 API,不上 HTTP wire。
@@ -55,8 +56,18 @@ class ColletLifecycleResult:
     reason: str | None
 
 
+@dataclass(frozen=True)
+class ColletCreatedResult:
+    """L4 Context.create 注册结果;创建本身不是机器迁移。"""
+
+    collet_id: str
+    state: ColletState
+    initiator_id: str
+    reason: str | None
+
+
 class ColletLifecycleService:
-    """Collet 顶层生命周期操作编排:存在性 → 守卫 → 机器裁决 → store 替换。"""
+    """Collet 顶层生命周期操作编排:存在性 → 守卫 → G4 裁决 → store 替换。"""
 
     @inject
     def __init__(
@@ -66,6 +77,35 @@ class ColletLifecycleService:
     ) -> None:
         self._store = collet_lifecycle_store
         self._repository = collab_repo
+
+    def create(
+        self,
+        collet_id: str,
+        context: ActorContext,
+        reason: str | None = None,
+    ) -> ColletCreatedResult:
+        """注册 Context.create 的 CREATED 初态,不伪造 ``collet.created`` 迁移。
+
+        Collet/Task/Event 的持久化创建仍由 L4 ``ContextCollabService`` 完成;
+        这里只把同一个 Collet 注册到 P1 生命周期 store,使后续
+        ``activate`` 能严格按 ``CREATED → ACTIVE`` 裁决。重启后未注册的
+        历史 Collet 继续沿兼容语义由 ``get_or_seed`` 取 ACTIVE。
+        """
+        record = self._repository.get_current_status(collet_id)
+        if record is None:
+            raise ContextCollabNotFoundError(f"context {collet_id!r} not found")
+        self._assert_guard(record.collet, record.designated_executor_id, context)
+        if self._store.get(collet_id) is not None:
+            raise ContextCollabValidationError(
+                f"context {collet_id!r} has already been created"
+            )
+        self._store.set(collet_id, ColletState.CREATED)
+        return ColletCreatedResult(
+            collet_id=collet_id,
+            state=ColletState.CREATED,
+            initiator_id=record.collet.initiator_ref.principal_id,
+            reason=reason,
+        )
 
     def activate(
         self,

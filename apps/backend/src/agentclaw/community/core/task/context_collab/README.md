@@ -28,7 +28,7 @@ for ACCS semantic boundaries, not an ACCS-mandated Python directory tree.
 ```text
 l4_context_primitives/operations/
   contracts.py           # EventAppendCommand, storage ports and append intent
-  collet_lifecycle.py    # activate/suspend/resume/complete/archive
+  collet_lifecycle.py    # create/activate/suspend/resume/complete/archive
   work.py                # G4 Task resolution, Task fence and atomic append
 l5_methods/operations/
   contracts.py           # Method commands, results and public protocols
