@@ -193,3 +193,9 @@ CallerToken, and resolves and rechecks the exact Caller-instance binding before
 installation. Missing source credentials or failed exchange/target checks still
 reject the request. The BaaS app-caller-connection endpoint retains its separate
 service-principal authentication contract.
+
+The token exchange orchestrator accepts the optional `token_type` selector
+and forwards non-default sources to the Caller service. The default `iam`
+path omits that optional keyword when calling older IAM-only implementations.
+HTTP regression coverage must include the real orchestrator and Caller service;
+replacing the entire injected boundary can hide missing selector propagation.
