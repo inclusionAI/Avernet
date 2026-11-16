@@ -764,6 +764,9 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ("POST", "/openapi/v1/bots/spaces/personal/initialize"): AdmissionMode.REFUSED,
     ("POST", "/openapi/v1/bots/spaces/create"): AdmissionMode.REFUSED,
     ("GET", "/openapi/v1/bots/spaces/{space_id}/members"): AdmissionMode.USER_GATED,
+    # Space deletion is a human-only write; the route's _REFUSES_APP_ONLY
+    # dependency enforces REFUSED, and the Space service owns the policy.
+    ("DELETE", "/openapi/v1/bots/spaces/{space_id}"): AdmissionMode.REFUSED,
     # The caller must arrive on behalf of a real user.  The handler then
     # resolves that user as the actor and SpaceAccessService enforces the
     # concrete space membership; this is deliberately not OPEN or

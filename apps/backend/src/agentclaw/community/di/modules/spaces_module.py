@@ -15,6 +15,7 @@ from agentclaw.community.api.market_favorite_service import (
 )
 from agentclaw.community.api.space_service import (
     SpaceAccessServiceProtocol as SpaceAccessServiceApiProtocol,
+    SpaceDeletionServiceProtocol,
     SpaceMemberServiceProtocol,
     SpaceServiceProtocol,
 )
@@ -83,6 +84,7 @@ from agentclaw.community.core.service_bot.service_artifact_lineage_reader_protoc
 )
 from agentclaw.community.core.spaces.services import (
     SpaceAccessService,
+    SpaceDeletionService,
     SpaceMemberService,
     SpaceService,
 )
@@ -344,4 +346,18 @@ class SpacesModule(Module):
         provides the real admission entry point."""
         return SpaceManagementService(
             repository, spaces, skill_center, staff, get_current_env, manager_sync
+        )
+
+    @singleton
+    @provider
+    @inject
+    def space_deletion_service(
+        self,
+        repository: SpaceRepositoryProtocol,
+        access: CoreSpaceAccessServiceProtocol,
+        manager_sync: BotManagerSyncProtocol,
+    ) -> SpaceDeletionServiceProtocol:
+        """Assemble Team Space deletion policy; env resolves at the boundary."""
+        return SpaceDeletionService(
+            repository, access, manager_sync, get_current_env
         )

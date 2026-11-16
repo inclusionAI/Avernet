@@ -90,3 +90,9 @@ class SpaceMemberServiceProtocol(Protocol):
     def update_role(
         self, *, space_id: int, actor_id: str, user_id: str, role: SpaceRole
     ) -> SpaceMemberSummaryRecord: ...
+
+
+@runtime_checkable
+class SpaceDeletionServiceProtocol(Protocol):
+    @abstractmethod
+    def delete_team_space(self, *, space_id: int, actor_id: str) -> None: ...

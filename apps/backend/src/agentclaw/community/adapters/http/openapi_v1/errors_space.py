@@ -38,6 +38,8 @@ class SpaceErrorCode(IntEnum):
     SKILL_OFFLINE = 409312
     SKILL_OFFLINE_BLOCKED = 409313
     SKILL_NOT_OFFLINE = 409316
+    PERSONAL_SPACE_NOT_DELETABLE = 409317
+    SPACE_NOT_EMPTY = 409318
 
 
 class SpacePublicErrorMessage(StrEnum):
@@ -75,3 +77,5 @@ class SpacePublicErrorMessage(StrEnum):
     SKILL_OFFLINE = "Skill is offline"
     SKILL_OFFLINE_BLOCKED = "Skill Offline is blocked"
     SKILL_NOT_OFFLINE = "Skill must be offline before it can be copied"
+    PERSONAL_SPACE_NOT_DELETABLE = "Personal space cannot be deleted"
+    SPACE_NOT_EMPTY = "Space still owns bots or skills"
