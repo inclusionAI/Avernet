@@ -16,6 +16,14 @@ export CARGO_TARGET_DIR="${CARGO_LLVM_COV_TARGET_DIR:-$cargo_target/llvm-cov-tar
 coverage_env="$(cargo llvm-cov show-env --sh)"
 eval "$coverage_env"
 cargo llvm-cov clean --workspace
+# Process-spawning tests (bcs::e2e_bot_authority, integration_http_api) exec
+# the server binary from the isolated coverage target dir. Build it under the
+# coverage environment so those tests run against an instrumented binary.
+# Reuse-contract fixtures have no bcs package; keep their fixture inventory.
+if python3 -c 'import json,sys; sys.exit(0 if any(p["name"] == "bcs" for p in json.load(open("testresult/cargo-metadata.json"))["packages"]) else 1)'; then
+  cargo build --locked -p bcs --bin bcs
+  test -x "${CARGO_TARGET_DIR:?}/debug/bcs"
+fi
 cargo metadata --locked --format-version 1 > testresult/cargo-metadata.json
 # Process-level test helpers spawn `<target>/<profile>/bcs` and `bcs-cli` next to
 # the instrumented test binaries. Depending on the restored cache contents those
