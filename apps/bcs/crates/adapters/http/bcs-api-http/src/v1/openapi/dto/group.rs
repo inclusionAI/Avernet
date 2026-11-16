@@ -1,7 +1,7 @@
 use bcs_service_api::application::v1::{
     ApplicationError, BotFinalDelivery, ChatConfiguration, CollaborationConfiguration,
     CreateCollaborationGroup, CreateDirectMessageGroup, CreateGroupSpec, CreateParticipant,
-    GroupDeliveryPolicy, GroupKindFilter, GroupPatch, GroupStrategy, GroupVisibility,
+    GroupDeliveryPolicy, GroupKindFilter, GroupListSort, GroupPatch, GroupStrategy, GroupVisibility,
     HumanMentionNotifyMode, InlineGroupEventSubscriptionRequest, ManagerWorkerConfiguration,
     MembershipFilter, OpeningMessage, ParticipantMode, ParticipantRole, StateMachineConfiguration,
     StateMachineDefinition, StateMachineDefinitionContent, StateMachineParticipantBinding,
@@ -40,6 +40,23 @@ impl Default for KindQuery {
     }
 }
 
+/// Ordering selector shared by both V1 list endpoints (design D3).
+///
+/// Both endpoints expose the same two-value vocabulary; a single enum keeps
+/// the accepted spellings and the rejection of unknown values identical.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SortQuery {
+    CreatedAt,
+    LastActivity,
+}
+
+impl Default for SortQuery {
+    fn default() -> Self {
+        Self::CreatedAt
+    }
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ListGroupsQuery {
@@ -55,6 +72,8 @@ pub struct ListGroupsQuery {
     #[serde(default)]
     pub kind: KindQuery,
     pub strategy: Option<GroupStrategy>,
+    #[serde(default)]
+    pub sort: SortQuery,
 }
 
 #[derive(Debug, Deserialize)]
@@ -88,6 +107,13 @@ impl ListGroupsQuery {
             KindQuery::Normal => GroupKindFilter::Normal,
             KindQuery::Dm => GroupKindFilter::Dm,
             KindQuery::All => GroupKindFilter::All,
+        }
+    }
+
+    pub fn sort_filter(&self) -> GroupListSort {
+        match self.sort {
+            SortQuery::CreatedAt => GroupListSort::CreatedAt,
+            SortQuery::LastActivity => GroupListSort::LastActivity,
         }
     }
 }

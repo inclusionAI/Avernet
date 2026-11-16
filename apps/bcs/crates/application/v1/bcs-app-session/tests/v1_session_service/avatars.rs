@@ -101,6 +101,7 @@ fn list_viewing(viewer: &str) -> ListSessions {
         offset: 0,
         limit: 10,
         status: None,
+        sort: SessionListSort::CreatedAt,
     }
 }
 

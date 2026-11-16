@@ -56,6 +56,7 @@ fn list_viewing(viewer: &str) -> ListSessions {
         offset: 0,
         limit: 10,
         status: None,
+        sort: SessionListSort::CreatedAt,
     }
 }
 
@@ -704,6 +705,7 @@ async fn unauthorized_caller_gets_no_avatar_batch() {
             offset: 0,
             limit: 10,
             status: None,
+            sort: SessionListSort::CreatedAt,
         },
     )
     .await

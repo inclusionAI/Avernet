@@ -26,7 +26,7 @@ use bcs_relation::RelationCore;
 use bcs_service_api::application::v1::{
     ApplicationError, AuthenticatedBotIdentity, AuthenticatedCaller,
     AuthenticatedUserIdentity, BotFinalDelivery, CreateCollaborationGroup, CreateGroup,
-    CreateGroupSpec, GetGroup, GroupKindFilter, GroupService,
+    CreateGroupSpec, GetGroup, GroupKindFilter, GroupListSort, GroupService,
     GroupVisibility, ListGroups, MembershipFilter,
 };
 use bcs_service_api::application::v1 as application_v1;
@@ -241,6 +241,7 @@ async fn fx_group_service_list(
         membership: MembershipFilter::All,
         kind: GroupKindFilter::All,
         strategy: None,
+        sort: GroupListSort::CreatedAt,
     })
     .await
 }

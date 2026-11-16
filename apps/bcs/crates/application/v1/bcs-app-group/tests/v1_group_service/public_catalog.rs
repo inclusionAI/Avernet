@@ -100,6 +100,7 @@ async fn list_summaries_include_group_context() {
             membership: MembershipFilter::Direct,
             kind: GroupKindFilter::All,
             strategy: None,
+            sort: GroupListSort::CreatedAt,
         })
         .await
         .expect("list groups");

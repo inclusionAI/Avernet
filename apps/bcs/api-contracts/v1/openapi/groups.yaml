@@ -54,13 +54,36 @@ GroupsPath:
             - chat
             - manager_worker
             - state_machine
+      - name: sort
+        in: query
+        description: >-
+          Result ordering. `created_at` (the default) keeps the historical
+          `created_at` descending order with the `group_id` ascending
+          tie-breaker. `last_activity` orders by the Group's conversation
+          activity key (`last_activity_at`, epoch milliseconds: the newest
+          persisted message or Session creation across the Group's Sessions)
+          descending, with the same `group_id` ascending tie-breaker, falling
+          back to `created_at` for a Group without activity rows.
+          The alternative ordering covers the full filtered result set before
+          pagination. Under `last_activity` the sort key changes on every
+          message and on Session creation, so an entry can shift between two
+          page requests and an offset page boundary can repeat or skip an
+          entry: the order is a live feed, not a stable snapshot. Any other
+          value is rejected with `invalid_request`.
+        schema:
+          type: string
+          enum:
+            - created_at
+            - last_activity
+          default: created_at
     responses:
       "200":
         description: >-
           Groups ordered by created_at descending (group_id ascending
-          tie-breaker) after selected View Actor membership, visibility,
-          strategy, kind, and search filtering and deduplication, then
-          paginated with offset/limit.
+          tie-breaker), or by last_activity_at descending with the same
+          group_id ascending tie-breaker when `sort=last_activity`, after
+          selected View Actor membership, visibility, strategy, kind, and
+          search filtering and deduplication, then paginated with offset/limit.
           Omitting view_bot_id selects the authenticated Human Actor. An explicit
           Human Actor must be that same User; an explicit Bot must be owned by
           the authenticated User. Both items and total are scoped before

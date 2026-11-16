@@ -68,6 +68,7 @@ def test_group_contract_keeps_the_approved_compatibility_surface() -> None:
         "membership",
         "kind",
         "strategy",
+        "sort",
     }
     query_parameters = {
         parameter["name"]: parameter
@@ -82,6 +83,11 @@ def test_group_contract_keeps_the_approved_compatibility_surface() -> None:
     assert query_parameters["visibility"]["schema"] == {
         "type": "string",
         "enum": ["private", "public"],
+    }
+    assert query_parameters["sort"]["schema"] == {
+        "type": "string",
+        "enum": ["created_at", "last_activity"],
+        "default": "created_at",
     }
     path_names = {
         parameter["name"]
@@ -367,6 +373,7 @@ def test_list_groups_uses_the_shared_view_actor_query() -> None:
         "membership",
         "kind",
         "strategy",
+        "sort",
     }
     assert "post" in contract["paths"][path]
 

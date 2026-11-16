@@ -224,6 +224,7 @@ fn normal_summary(group_id: &str) -> GroupSummary {
         human_mention_notify_mode: HumanMentionNotifyMode::All,
         created_at: 1,
         updated_at: 2,
+        last_activity_at: None,
     })
 }
 
@@ -251,6 +252,7 @@ fn dm_summary() -> GroupSummary {
         human_mention_notify_mode: HumanMentionNotifyMode::All,
         created_at: 1,
         updated_at: 2,
+        last_activity_at: None,
     })
 }
 
@@ -370,6 +372,7 @@ fn session_summary() -> SessionSummary {
             v1_summary_row("driver-bot", Some(AVATAR)),
             v1_summary_row("plain-bot", None),
         ],
+        last_activity_at: None,
     }
 }
 

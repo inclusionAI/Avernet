@@ -4,8 +4,8 @@ use bcs_service_api::application::v1::{
     AuthenticatedUserIdentity, CollectSession, CompleteSession, CreateSession,
     CreateSessionOutcome, DeleteResult, DeleteSession, DeleteSessionParticipant, GetSession,
     ListSessionMessages, ListSessions, MessageViewScope, Page, ParticipantMode,
-    SessionCollectionResult, SessionCompletionResult, SessionDetail, SessionMessageService,
-    SessionParticipant, SessionService, SessionStatus, UncollectSession,
+    SessionCollectionResult, SessionCompletionResult, SessionDetail, SessionListSort,
+    SessionMessageService, SessionParticipant, SessionService, SessionStatus, UncollectSession,
     UpdateSession, UpdateSessionParticipant,
 };
 use bcs_service_api::types::{AttachmentType, MessageAttachment};
@@ -145,6 +145,7 @@ fn session_commands_carry_caller_and_no_raw_credentials() {
         offset: 0,
         limit: 25,
         status: Some(SessionStatus::Running),
+        sort: SessionListSort::CreatedAt,
     };
     let get = GetSession {
         caller: caller.clone(),

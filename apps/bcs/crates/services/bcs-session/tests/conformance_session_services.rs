@@ -656,3 +656,173 @@ impl BotRuntimeConnectionService for FakeBotRuntimeConnectionService {
         })
     }
 }
+
+/// Stub repo for the batched group activity key: it answers only
+/// `max_created_at_by_group_ids`, so the delegation tests assert the service
+/// passes the store's map (or its failure) through unchanged.
+struct GroupActivitySessionRepo {
+    activity: GroupActivityAnswer,
+}
+
+enum GroupActivityAnswer {
+    Map(std::collections::HashMap<String, u64>),
+    Unavailable(&'static str),
+}
+
+impl GroupActivitySessionRepo {
+    fn returning(pairs: &[(&str, u64)]) -> Self {
+        Self {
+            activity: GroupActivityAnswer::Map(
+                pairs
+                    .iter()
+                    .map(|(group_id, created_at)| (group_id.to_string(), *created_at))
+                    .collect(),
+            ),
+        }
+    }
+
+    fn unavailable(message: &'static str) -> Self {
+        Self {
+            activity: GroupActivityAnswer::Unavailable(message),
+        }
+    }
+}
+
+#[async_trait]
+impl SessionRepoPort for GroupActivitySessionRepo {
+    async fn create(&self, _group_id: &str, _params: NewSessionParams) -> ServiceResult<Session> {
+        unimplemented!("not used by group activity delegation test")
+    }
+
+    async fn get(&self, _session_id: &str) -> Option<Session> {
+        unimplemented!("not used by group activity delegation test")
+    }
+
+    async fn belongs_to_group(&self, _session_id: &str, _group_id: &str) -> bool {
+        unimplemented!("not used by group activity delegation test")
+    }
+
+    async fn list_by_group(
+        &self,
+        _group_id: &str,
+        _status: Option<SessionStatus>,
+        _offset: u64,
+        _limit: u64,
+        _title_contains: Option<&str>,
+        _participant_id: Option<&str>,
+    ) -> Vec<Session> {
+        unimplemented!("not used by group activity delegation test")
+    }
+
+    async fn latest_running(&self, _group_id: &str) -> Option<Session> {
+        unimplemented!("not used by group activity delegation test")
+    }
+
+    async fn complete_if_running(
+        &self,
+        _session_id: &str,
+        _output: Option<serde_json::Value>,
+        _error: Option<String>,
+    ) -> ServiceResult<Option<Session>> {
+        unimplemented!("not used by group activity delegation test")
+    }
+
+    async fn reactivate(
+        &self,
+        _session_id: &str,
+        _new_input: Option<serde_json::Value>,
+    ) -> ServiceResult<Session> {
+        unimplemented!("not used by group activity delegation test")
+    }
+
+    async fn add_participant(
+        &self,
+        _session_id: &str,
+        _participant: Participant,
+    ) -> ServiceResult<Session> {
+        unimplemented!("not used by group activity delegation test")
+    }
+
+    async fn remove_participant(
+        &self,
+        _session_id: &str,
+        _bot_uuid: &str,
+    ) -> ServiceResult<Session> {
+        unimplemented!("not used by group activity delegation test")
+    }
+
+    async fn update_participant_mode(
+        &self,
+        _session_id: &str,
+        _bot_uuid: &str,
+        _mode: ParticipantMode,
+    ) -> ServiceResult<Session> {
+        unimplemented!("not used by group activity delegation test")
+    }
+
+    async fn update_title(
+        &self,
+        _session_id: &str,
+        _title: Option<String>,
+    ) -> ServiceResult<Session> {
+        unimplemented!("not used by group activity delegation test")
+    }
+
+    async fn list_group_ids_by_session_participant(&self, _bot_uuid: &str) -> Vec<String> {
+        unimplemented!("not used by group activity delegation test")
+    }
+
+    async fn delete(&self, _session_id: &str) -> ServiceResult<bool> {
+        unimplemented!("not used by group activity delegation test")
+    }
+
+    async fn max_created_at_by_group_ids(
+        &self,
+        _group_ids: &[String],
+    ) -> ServiceResult<std::collections::HashMap<String, u64>> {
+        match &self.activity {
+            GroupActivityAnswer::Map(activity) => Ok(activity.clone()),
+            GroupActivityAnswer::Unavailable(message) => {
+                Err(ServiceError::InternalError((*message).to_string()))
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn impl_forwards_group_activity_key_from_the_session_store() {
+    let repo = Arc::new(GroupActivitySessionRepo::returning(&[
+        ("g-a", 5_000),
+        ("g-b", 7_000),
+    ]));
+    let group_repo = Arc::new(MemoryGroupRepo::new());
+    let svc = SessionManagementServiceImpl::new(repo, group_repo);
+
+    let activity = svc
+        .max_created_at_by_group_ids(&["g-a".to_string(), "g-b".to_string()])
+        .await
+        .expect("group activity key");
+
+    assert_eq!(activity.len(), 2);
+    assert_eq!(activity.get("g-a"), Some(&5_000));
+    assert_eq!(activity.get("g-b"), Some(&7_000));
+}
+
+#[tokio::test]
+async fn impl_maps_group_activity_store_failure_to_use_case_error() {
+    let repo = Arc::new(GroupActivitySessionRepo::unavailable(
+        "group activity store unavailable",
+    ));
+    let group_repo = Arc::new(MemoryGroupRepo::new());
+    let svc = SessionManagementServiceImpl::new(repo, group_repo);
+
+    let result = svc
+        .max_created_at_by_group_ids(&["g-a".to_string()])
+        .await;
+
+    assert!(matches!(
+        result,
+        Err(SessionUseCaseError::Internal(ServiceError::InternalError(message)))
+            if message == "group activity store unavailable"
+    ));
+}

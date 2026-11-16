@@ -20,7 +20,8 @@ use bcs_service_api::application::v1::{
     DeleteGroupParticipant, DeleteResult, DeleteSession, DeleteSessionParticipant, GetGroup,
     GetSession, GroupDetail, GroupService, GroupSummary, ListGroups, ListSessionMessages,
     ListSessions, Page, SessionCollectionResult, SessionCompletionResult, SessionDetail,
-    SessionMessageService, SessionParticipant, SessionService, SessionStatus, SessionSummary,
+    SessionListSort, SessionMessageService, SessionParticipant, SessionService, SessionStatus,
+    SessionSummary,
     UncollectSession, UpdateGroup, UpdateGroupParticipant, UpdateSession, UpdateSessionParticipant,
 };
 use bcs_service_api::types::{AttachmentType, MessageAttachment};
@@ -651,6 +652,7 @@ fn session_summary() -> SessionSummary {
         updated_at: 2,
         collected: None,
         participants: Vec::new(),
+        last_activity_at: Some(1_700_000_000_300),
     }
 }
 
@@ -710,3 +712,6 @@ mod lifecycle;
 
 #[path = "session_routes/messages_and_participants.rs"]
 mod messages_and_participants;
+
+#[path = "session_routes/activity_sort.rs"]
+mod activity_sort;

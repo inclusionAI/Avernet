@@ -184,6 +184,7 @@ impl GroupServiceImpl {
         mut group: DomainGroup,
         target_bot_uuid: &str,
         membership: Membership,
+        last_activity_at: Option<u64>,
     ) -> Result<GroupSummary, ApplicationError> {
         // Design §5.2/§5.3: the lightweight rows' names are the stored
         // membership snapshots (null allowed), so they must be extracted
@@ -238,6 +239,7 @@ impl GroupServiceImpl {
                 human_mention_notify_mode: group.human_mention_notify_mode,
                 created_at: group.created_at,
                 updated_at: group.updated_at,
+                last_activity_at,
             }));
         }
 
@@ -265,6 +267,7 @@ impl GroupServiceImpl {
             human_mention_notify_mode: group.human_mention_notify_mode,
             created_at: group.created_at,
             updated_at: group.updated_at,
+            last_activity_at,
         }))
     }
 }

@@ -1,12 +1,12 @@
 use bcs_service_api::application::v1::{
     ApplicationError, AuthenticatedCaller, CreateSession, DeliveryType,
     MessageViewScope, ParticipantMode, ParticipantRole, SessionKind,
-    SessionStatus, UpdateSession,
+    SessionListSort, SessionStatus, UpdateSession,
 };
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
-use super::group::deserialize_present_non_null;
+use super::group::{SortQuery, deserialize_present_non_null};
 
 fn default_limit() -> u64 {
     20
@@ -260,6 +260,17 @@ pub struct ListSessionsQuery {
     pub limit: u64,
     #[serde(default)]
     pub status: Option<SessionStatus>,
+    #[serde(default)]
+    pub sort: SortQuery,
+}
+
+impl ListSessionsQuery {
+    pub fn sort_filter(&self) -> SessionListSort {
+        match self.sort {
+            SortQuery::CreatedAt => SessionListSort::CreatedAt,
+            SortQuery::LastActivity => SessionListSort::LastActivity,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]

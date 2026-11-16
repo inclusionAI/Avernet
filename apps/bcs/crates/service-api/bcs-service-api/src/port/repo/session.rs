@@ -56,6 +56,20 @@ pub struct CreateSessionWithEvent {
     pub event: AppendEventRecord,
 }
 
+/// Lightweight candidate row for the recent-activity session-list sort
+/// (design D5 revised): only the sort inputs are read — the Session id and
+/// its own `created_at` in epoch milliseconds — never the full Session row
+/// (`input` / `output` / `participants` / `meta`). The full rows load
+/// separately, and only for the final page ids, via
+/// [`SessionRepoPort::try_get_many`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionActivityCandidate {
+    pub session_id: String,
+    /// The Session's own creation time in epoch milliseconds (the D1
+    /// fallback activity key).
+    pub created_at: u64,
+}
+
 #[derive(Debug, Clone)]
 pub struct CompleteSessionWithEvent {
     pub session_id: String,
@@ -202,6 +216,53 @@ pub trait SessionRepoPort: Send + Sync {
     ) -> ServiceResult<u64> {
         let _ = (group_id, status, title_contains, participant_id);
         Ok(0)
+    }
+
+    /// Lightweight projection of [`SessionRepoPort::try_list_by_group`]
+    /// WITHOUT pagination, for the recent-activity list sort (design D5
+    /// revised): the SAME filter semantics (`group_id` / `status` /
+    /// `title_contains` / `participant_id`, in the store's own env), but each
+    /// entry carries only the sort inputs (`session_id` + the Session's own
+    /// `created_at`) — never the full row. This is the ONLY candidate-truncation
+    /// input the activity sort may use: unlike the old design it deliberately
+    /// has no `limit` parameter, so a stale
+    /// [`SessionRepoPort::count_by_group`] result can never evict a
+    /// genuinely-active Session from the sorted set. Row order is
+    /// unspecified; callers own the authoritative activity ordering.
+    ///
+    /// Read shape: ONE bounded query/select-2-columns pass (no `PARTICIPANTS`
+    /// / `INPUT` / `OUTPUT` / `META` hydration). Default returns an empty
+    /// vector so noop/test impls keep compiling; real impls (memory + mysql)
+    /// override this.
+    async fn list_activity_candidates_by_group(
+        &self,
+        group_id: &str,
+        status: Option<SessionStatus>,
+        title_contains: Option<&str>,
+        participant_id: Option<&str>,
+    ) -> ServiceResult<Vec<SessionActivityCandidate>> {
+        let _ = (group_id, status, title_contains, participant_id);
+        Ok(Vec::new())
+    }
+
+    /// Batched full-row load by Session ids (design D5 revised — the page-row
+    /// fetch): one chunked read, at most 200 ids per round trip, in the
+    /// store's own env. Ids with no persisted session are ABSENT from the
+    /// result rather than failing the batch (a Session may be deleted between
+    /// the candidate and the row reads); row order is unspecified, callers
+    /// reconcile the authoritative order from their own id list.
+    ///
+    /// The default loops [`SessionRepoPort::try_get`] so noop/test impls keep
+    /// compiling; real impls (memory + mysql) override this with a single
+    /// lock/IN-list query.
+    async fn try_get_many(&self, session_ids: &[String]) -> ServiceResult<Vec<Session>> {
+        let mut sessions = Vec::new();
+        for session_id in session_ids {
+            if let Some(session) = self.try_get(session_id).await? {
+                sessions.push(session);
+            }
+        }
+        Ok(sessions)
     }
 
     /// **CAS 完成**：仅当当前 status=Running 时落 Completed 并返回新 session；
@@ -414,5 +475,23 @@ pub trait SessionRepoPort: Send + Sync {
     /// state for a given participant without a per-row query.
     async fn collected_at_map(&self, _session_ids: &[&str], _bot_uuid: &str) -> Vec<(String, u64)> {
         Vec::new()
+    }
+
+    /// Batched group activity key from session creation (design D1/D4): the max
+    /// `gmt_create` per group id, in epoch milliseconds, over the sessions
+    /// currently persisted for that group.
+    ///
+    /// Only existing rows count: a hard-deleted session contributes nothing
+    /// here (its `gmt_create` is gone); messages it left behind still count
+    /// through the message-side lookup. Group ids with no persisted sessions
+    /// are absent from the map, so callers fall back to the group's own
+    /// `created_at`. Default returns an empty map so noop/test impls keep
+    /// compiling; real impls (memory + mysql) override it.
+    async fn max_created_at_by_group_ids(
+        &self,
+        group_ids: &[String],
+    ) -> ServiceResult<std::collections::HashMap<String, u64>> {
+        let _ = group_ids;
+        Ok(Default::default())
     }
 }

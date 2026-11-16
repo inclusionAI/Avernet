@@ -105,6 +105,7 @@ async fn session_only_participant_can_list_sessions() {
             offset: 0,
             limit: 10,
             status: None,
+            sort: SessionListSort::CreatedAt,
         },
     )
     .await
@@ -193,6 +194,7 @@ async fn session_only_participant_list_sessions_scoped() {
             offset: 0,
             limit: 10,
             status: None,
+            sort: SessionListSort::CreatedAt,
         },
     )
     .await

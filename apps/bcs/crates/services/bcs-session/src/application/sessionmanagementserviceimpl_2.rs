@@ -533,6 +533,13 @@ impl SessionManagementService for SessionManagementServiceImpl {
     ) -> Result<Vec<(String, u64)>, SessionUseCaseError> {
         Ok(self.repo.collected_at_map(session_ids, bot_uuid).await)
     }
+
+    async fn max_created_at_by_group_ids(
+        &self,
+        group_ids: &[String],
+    ) -> Result<std::collections::HashMap<String, u64>, SessionUseCaseError> {
+        Ok(self.repo.max_created_at_by_group_ids(group_ids).await?)
+    }
 }
 
 
