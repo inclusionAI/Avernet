@@ -8,12 +8,13 @@ import { useTaskSidePanelStore } from '@/stores/taskSidePanelStore';
 /** Adapter lifecycle only; source selection, paging and arbitration belong to the shared controller. */
 export function useSharedTaskPanelRecovery(options: {
   conversation: ConversationRef | null; userId: string | null; history: HistoryReader | null;
-  panelRef: React.RefObject<PanelHandle | null>; enabled?: boolean;
+  panelRef: React.RefObject<PanelHandle | null>; enabled?: boolean; historyScope?: string | null;
 }) {
   const id = options.conversation?.sessionId;
   const hasSession = Boolean(id && options.userId);
   const subscribeLifecycle = useCallback((listener: () => void) => hasSession ? subscribeTaskPanelRuntime(listener) : () => {}, [hasSession]);
   const runtimeGeneration = useSyncExternalStore(subscribeLifecycle, getTaskPanelRuntimeGeneration, getTaskPanelRuntimeGeneration);
+  const historyScope = useRef(options.historyScope);
   const retry = useRef<() => Promise<void>>(async () => {});
   const continueRecovery = useCallback(() => retry.current(), []);
   const [recovery, setRecovery] = useState<RecoveryState>({ status: 'idle' });
@@ -21,8 +22,15 @@ export function useSharedTaskPanelRecovery(options: {
   useEffect(() => {
     if (!id || !options.userId) return;
     return () => releaseTaskPanelSession(id, runtimeGeneration);
-  }, [id, options.userId, runtimeGeneration]);
+  }, [id, options.userId, runtimeGeneration, options.historyScope]);
   useEffect(() => {
+    // A view switch is not a task navigation handoff, even within the same session.
+    if (historyScope.current !== options.historyScope) {
+      const controller = peekTaskPanelController();
+      if (controller && controller.getSnapshot().conversation?.sessionId === id) controller.leaveConversation();
+      historyScope.current = options.historyScope;
+      setRecovery({ status: 'idle' });
+    }
     if (!options.conversation || !options.userId || !options.history) return;
     // Bind an existing task handoff even while visible history is still loading.
     if (options.enabled === false && !peekTaskPanelController()) return;
@@ -89,6 +97,6 @@ export function useSharedTaskPanelRecovery(options: {
     };
     void initialize().catch(report);
     return () => { live = false; retry.current = async () => {}; unsubscribe?.(); };
-  }, [id, options.userId, options.enabled, options.history, options.panelRef, runtimeGeneration]);
+  }, [id, options.userId, options.enabled, options.history, options.panelRef, runtimeGeneration, options.historyScope]);
   return { ...recovery, continueRecovery };
 }

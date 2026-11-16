@@ -14,6 +14,7 @@ jest.mock('@/hooks/useWorkflowList', () => ({ useWorkflowList: () => ({ workflow
 jest.mock('@/services/workspace/botSkillService', () => ({ botSkillService: { hasTaskIntentSkillForBot: async () => ({ ok: true, data: true }) } }));
 jest.mock('@/capabilities', () => ({ getCapabilities: () => ({ getHumanIdentity: () => ({ status: 'available', value: { userId: 'viewer' } }) }) }));
 jest.mock('@/services/tasks/panel/taskPanelAssetLoader', () => ({ loadTaskPanelAsset: async () => require('../../../assets/task-panel/src') }));
+jest.mock('@/services/tasks/panel/taskPanelRecoveryLoader', () => ({ loadTaskPanelRecoveryAsset: async () => require('../../../assets/task-panel/src') }));
 jest.mock('@/services/tasks/panel/taskPanelArtifactAdapter', () => ({ taskPanelArtifacts: {} }));
 jest.mock('@/services/workspace/chatBridge', () => ({ chatBridge: { openPanelTab: jest.fn() } }));
 

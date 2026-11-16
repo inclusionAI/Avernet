@@ -4,7 +4,7 @@ const server = createAssetServer();
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const base = `http://127.0.0.1:${server.address().port}`;
 try {
-  for (const file of ['index.umd.js', 'task-panel.css']) {
+  for (const file of ['index.umd.js', 'recovery.umd.js', 'task-panel.css']) {
     const response = await fetch(`${base}/task-panel/${file}`);
     assert.equal(response.status, 200);
     assert.equal(response.headers.get('cache-control'), 'no-store');
@@ -12,6 +12,9 @@ try {
   const js = await fetch(`${base}${assetPath}/index.umd.js`);
   assert.equal(js.status, 200); assert.match(js.headers.get('content-type'), /javascript/);
   assert.match(await js.text(), /taskPanel/);
+  const recovery = await fetch(`${base}${assetPath}/recovery.umd.js`);
+  assert.equal(recovery.status, 200); assert.match(recovery.headers.get('content-type'), /javascript/);
+  assert.match(await recovery.text(), /taskPanelRecovery/);
   const css = await fetch(`${base}${assetPath}/task-panel.css`);
   assert.equal(css.status, 200); assert.match(css.headers.get('content-type'), /text\/css/);
   for (const forbidden of ['/api/v1/collaboration/tasks/manifest', '/openapi/v1/collaboration/tasks/manifest', '/src/index.ts', '/package.json', '/node_modules/react/index.js', '/task-panel/latest/index.umd.js', `${assetPath}/helpers.js`]) {
