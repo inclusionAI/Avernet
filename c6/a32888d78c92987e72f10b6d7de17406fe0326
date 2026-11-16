@@ -1,0 +1,21 @@
+apps/backend/tests/community/core/task/test_task_discovery_coverage.py
+  s_bcc2d0974a665d::t_de354fae1f2613 56-69
+apps/backend/tests/community/di/test_manifest_capability_registry.py
+  s_bcc2d0974a665d::t_2c4cbb6c087d53 31-32
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c6a32888d78c92987e72f10b6d7de17406fe0326",
+  "prompts": {},
+  "sessions": {
+    "s_bcc2d0974a665d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a9d9-072f-7481-adc1-c3e3d78b7fd1",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}
