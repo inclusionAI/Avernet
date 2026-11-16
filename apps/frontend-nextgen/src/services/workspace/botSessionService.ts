@@ -122,6 +122,23 @@ export function resolveChatRuntimeStage(bot: ChatBotView): BotIamTokenStage {
   return bot.runtimeStage ?? (bot.botType === 'service' ? 'online' : 'draft');
 }
 
+/** 支持“按实例取数”的 Bot：服务 Bot、非好友、非 TEClaw。 */
+export function supportsConversationInstanceScope(bot: ChatBotView): boolean {
+  return (
+    bot.botType?.toLowerCase() === 'service' &&
+    !bot.isFriendBot &&
+    bot.engine?.toLowerCase() !== 'teclaw'
+  );
+}
+
+/** 由已选实例构造会话请求范围（device_uuid + 对应 runtime stage）。 */
+export function buildConversationSessionRequestRange(
+  bot: ChatBotView,
+  deviceUuid: string,
+): ConversationSessionRequestRange {
+  return { deviceUuid, stage: resolveChatRuntimeStage(bot) };
+}
+
 /** 服务 Bot 请求才显式指定阶段；非服务 Bot 依赖后端默认环境，并移除旧筛选条件中的 stage。 */
 export function withFriendBotRequestParams<T extends { user_id: string; owner_id?: string; stage?: BotIamTokenStage }>(
   bot: ChatBotView,
@@ -384,11 +401,16 @@ export const botSessionService = {
     bot: ChatBotView,
     userId: string,
     sessionId: string,
+    range?: ConversationSessionRequestRange,
   ): Promise<DomainResult<BotChatSessionView>> {
     try {
       const params = withFriendBotRequestParams(bot, userId, {
         user_id: resolveUserId(userId),
         owner_id: bot.ownerId,
+        ...(range ? {
+          device_uuid: range.deviceUuid,
+          ...(range.stage ? { stage: range.stage } : {}),
+        } : {}),
       });
       const resp = await getBotSession(bot.realBotId, sessionId, params);
       const s = resp.data;
@@ -488,6 +510,7 @@ export const botSessionService = {
     sessionId: string,
     page = 1,
     pageSize = BOT_MESSAGE_PAGE_SIZE,
+    range?: ConversationSessionRequestRange,
   ): Promise<BotMessagePageView> {
     const resp = await listBotSessionMessages(
       bot.realBotId,
@@ -497,6 +520,10 @@ export const botSessionService = {
         owner_id: bot.ownerId,
         page,
         page_size: pageSize,
+        ...(range ? {
+          device_uuid: range.deviceUuid,
+          ...(range.stage ? { stage: range.stage } : {}),
+        } : {}),
       }),
     );
     const items = (resp.data?.items ?? []) as BotMessageDto[];
