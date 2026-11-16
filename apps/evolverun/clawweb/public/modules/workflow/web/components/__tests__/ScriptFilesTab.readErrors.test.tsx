@@ -113,7 +113,7 @@ describe('ScriptFilesTab read failures and capabilities', () => {
   })
 
   it.each([
-    [false, disabledCopy],
+    [false, '当前仅可查看 Pack 版本文件'],
     [undefined, disabledCopy],
     [true, enabledCopy],
   ])('retains the existing %s capability behavior after a successful read', async (canWrite, expectedCopy) => {
@@ -125,11 +125,11 @@ describe('ScriptFilesTab read failures and capabilities', () => {
     fireEvent.change(screen.getByLabelText('文件内容'), { target: { value: 'local edit' } })
     if (canWrite === true) expect(screen.getByRole('button', { name: '保存到草稿' })).toBeEnabled()
     else expect(screen.getByRole('button', { name: '保存到草稿' })).toBeDisabled()
-    expect(screen.getByLabelText('文件内容')).toHaveValue('local edit')
+    expect(screen.getByLabelText('文件内容')).toHaveValue(canWrite === false ? 'old' : 'local edit')
   })
 
   it.each([
-    [true, false, disabledCopy],
+    [true, false, '当前仅可查看 Pack 版本文件'],
     [false, true, enabledCopy],
   ])('retains local edits and hides capability during failed reload, then restores the retry capability', async (initialCanWrite, retryCanWrite, retryCopy) => {
     const id = workflowId()
@@ -146,7 +146,7 @@ describe('ScriptFilesTab read failures and capabilities', () => {
 
     const alert = await screen.findByRole('alert')
     expect(alert).toHaveTextContent('版本服务暂不可用')
-    expect(screen.getByLabelText('文件内容')).toHaveValue('local edit')
+    expect(screen.getByLabelText('文件内容')).toHaveValue(initialCanWrite ? 'local edit' : 'old')
     expect(screen.getByRole('button', { name: '保存到草稿' })).toBeDisabled()
     expect(screen.queryByText(new RegExp(disabledCopy))).not.toBeInTheDocument()
     expect(screen.queryByText(new RegExp(enabledCopy))).not.toBeInTheDocument()

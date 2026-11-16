@@ -35,7 +35,7 @@ function Navigation() {
     <NavLink to="/outside">Top-level outside</NavLink><NavLink to="/editor">Top-level editor</NavLink>
     <button onClick={() => navigate(-1)}>Back</button><button onClick={() => navigate(1)}>Forward</button>
     <Routes>
-      <Route path="/editor" element={<Editor embedded initialWorkflowId={original.id} />} />
+      <Route path="/editor" element={<Editor access={{ canView: true, canEdit: true, canDeploy: true }} embedded initialWorkflowId={original.id} />} />
       <Route path="/outside" element={<h1>Outside editor</h1>} />
     </Routes>
   </>

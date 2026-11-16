@@ -1,5 +1,5 @@
 import type { WorkflowNode } from '@avernet/clawweb-shared/web/types'
-import { useEditorStore } from '../editor/store'
+import { editorIsReadOnly, useEditorStore } from '../editor/store'
 import { getEffectiveTriggerRule } from '../editor/contracts'
 import { getNodeMeta } from '../editor/nodeCatalog'
 import NodeFields, { TextField, SelectField, configSummary } from './editor/NodeFields'
@@ -20,6 +20,7 @@ export default function NodePropertyPanel() {
 }
 
 function NodePanel({ node }: { node: WorkflowNode }) {
+  const readOnly = useEditorStore(editorIsReadOnly)
   const { pendingEdits, actionError, selectNode, duplicateNode, removeNode, spec } = useEditorStore()
   const pending = Object.keys(pendingEdits).length > 0
   const executor = isRecord(node.executor) ? node.executor : null
@@ -83,7 +84,7 @@ function NodePanel({ node }: { node: WorkflowNode }) {
       <div className="min-w-0 flex-1"><h2 className="truncate text-sm font-semibold">{meta.label}</h2><p className="mt-1 truncate font-mono text-xs text-muted-foreground">{meta.type}</p></div>
       <button type="button" aria-label="关闭节点面板" disabled={pending} className={buttonClass} onClick={() => selectNode(null)}>关闭</button>
     </header>
-    <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4">
+    <div className="min-h-0 min-w-0 flex-1 space-y-5 overflow-y-auto p-4">
       {actionError && <div role="alert" className="break-words rounded-md bg-destructive/10 p-3 text-xs text-destructive">{actionError}</div>}
       {pending && <div role="status" className="rounded-md bg-muted p-3 text-xs text-muted-foreground">
         有未应用草稿。请先应用或放弃，再切换、复制、删除或关闭节点。
@@ -131,8 +132,9 @@ function NodePanel({ node }: { node: WorkflowNode }) {
       </details>
     </div>
     <footer className="flex gap-2 border-t border-input p-4">
-      <button type="button" className={`${buttonClass} flex-1`} disabled={pending} onClick={() => duplicateNode(node.id)}>复制节点</button>
-      <button type="button" className={`${buttonClass} text-destructive`} disabled={pending} onClick={() => {
+      <button type="button" className={`${buttonClass} flex-1`} disabled={readOnly || pending} onClick={() => duplicateNode(node.id)}>复制节点</button>
+      <button type="button" className={`${buttonClass} text-destructive`} disabled={readOnly || pending} onClick={() => {
+        if (editorIsReadOnly(useEditorStore.getState())) return
         if (window.confirm(`确认删除节点「${node.title || node.id}」？已有引用将由编辑器检查，无法安全删除时会拒绝。`)) removeNode(node.id)
       }}>删除节点</button>
     </footer>

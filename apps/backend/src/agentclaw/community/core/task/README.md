@@ -11,7 +11,7 @@
 frontend-nextgen 和旧产品仅适配宿主能力。资产构建不进入 Python 运行时，
 不改变本域的任务执行或 Relay 协议。
 
-## 四层目录结构(对齐 `docs/arch/arch.rules.md §8`)
+## Task 所有权目录结构(对齐 `docs/arch/arch.rules.md §8`)
 
 | 层 | 路径 | 职责 |
 |---|---|---|
@@ -19,6 +19,8 @@ frontend-nextgen 和旧产品仅适配宿主能力。资产构建不进入 Pytho
 | core/ | `community/core/task/` | 业务实现(transport-agnostic,禁 transport import) |
 | adapters/http/ | `community/adapters/http/task/`(内部:execute/dashboard/list 公开面镜像 + callback-report/bbs/feedback/todos,不经 spanner)+ `community/adapters/http/openapi_v1/task/`(前端公开面:execute/dashboard/list + bbs/feedback/todos,经 gateway spanner) | HTTP transport(thin:router+schema,不持 domain policy) |
 | di/modules/ | `community/di/modules/task_module.py` + `community/di/modules/task/` | Task composition root；BBS/Todo 等子域绑定不得恢复为与 Task 并列的业务模块 |
+| plugin_api/task/ | `community/plugin_api/task/` | Task 拥有、可替换的出站能力契约；core 只依赖协议，不依赖具体插件 |
+| plugins/{community,local}/task/ | `community/plugins/community/task/` + `community/plugins/local/task/` | Task 出站能力的生产适配器与本地模拟器；保留插件分层，但不得漂移回通用顶层 |
 
 ## core/task/ 目录树
 
@@ -28,6 +30,7 @@ core/task/
 ├── domain/                        # TaskSpec/TaskNode/Graph 等共享领域模型
 ├── feedback/                       # task 域反馈通道(models/service/DDL)
 ├── forum/                          # BBS Topic/Post、Browse Loop 订阅/feed/报告
+├── context_collab/                 # Context 生命周期与 Todo BCS 执行器
 ├── todos/                          # Todo 生命周期、自动调度、验收与事件/互动投影
 ├── task_center/                   # TaskService facade、intake/delivery/relay/control Mixin 与双模式入口
 ├── task_plan/                     # TaskPlanner + static_plan.py 统一领域定义/Runtime
@@ -172,6 +175,13 @@ stateDiagram-v2
 
 - 多节点投递并发:`asyncio.gather` + `asyncio.Semaphore(_DELIVER_CONCURRENCY=8)` **下沉 `TaskRunner.start_run` 内部**(投递是 runner 职责;engine 批量调 `start_run`,不持锁内拆单节点)。
 - 对齐 backend `desktop_bot/lifecycle.py` 的 `_check_one_bot` Semaphore 限流模式,防多节点投递雪崩。
+
+### Todo ContextCollab 执行边界
+
+Todo ContextCollab 不注册独立 Plugin。`core/task/context_collab/executor.py`
+直接复用 Task 已有的 `BcsClientPort`、`BcsCreateGroupRequest`、
+`BcsBotTokenProvider` 及其 DI adapter/binding，复制 Todo 所需的群创建、恢复和
+状态查询编排；本轮不修改 `TaskExecutor`，也不抽取 Task/Todo 公共执行层。
 
 ### BCS Bot 身份边界
 

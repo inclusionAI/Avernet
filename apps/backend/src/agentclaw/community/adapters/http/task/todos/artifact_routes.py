@@ -23,7 +23,7 @@ from agentclaw.community.core.task.todos.artifact_models import TodoArtifactReco
 from agentclaw.community.di import Injected
 
 router = APIRouter(
-    prefix="/api/v1/collaboration/todos",
+    prefix="/api/v1/collaboration/tasks/todos",
     tags=["todo-artifacts"],
 )
 

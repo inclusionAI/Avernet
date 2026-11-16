@@ -266,18 +266,13 @@ class TestSlowLegsLoopLiveness:
                 return "bot-42"
 
         platform = _WedgedCreatePlatform()
-        ticks = 0
 
         async def main():
-            nonlocal ticks
-
-            async def _ticker():
-                nonlocal ticks
-                for _ in range(100):
-                    await asyncio.sleep(0.01)
-                    ticks += 1
-
-            ticker = asyncio.create_task(_ticker())
+            # One ready-queue turn proves setup yielded while the offloaded
+            # create was pending. Counting 10ms timer ticks made the same
+            # assertion depend on CI scheduling precision.
+            loop_progressed = asyncio.Event()
+            asyncio.get_running_loop().call_soon(loop_progressed.set)
             sub = AvernetSubagent(
                 _mk_spec(), _mk_run(), platform, _AGENT_ID,
                 create_call_timeout=0.05)
@@ -285,13 +280,10 @@ class TestSlowLegsLoopLiveness:
                 await sub.setup()
                 raise AssertionError("wedged create did not time out")
             except asyncio.TimeoutError:
-                pass
-            finally:
-                ticker.cancel()
-                await asyncio.gather(ticker, return_exceptions=True)
+                assert loop_progressed.is_set(), (
+                    "the loop stalled while the bounded create waited")
 
         asyncio.run(main())
-        assert ticks > 3, "the loop stalled while the bounded create waited"
 
 
 class _SessionModelPlatform:

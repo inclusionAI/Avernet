@@ -9,6 +9,9 @@ from typing import Any
 from agentclaw.community.core.skills_pool.repository.models import (
     BotSkillLayoutStateModel,
 )
+from agentclaw.community.core.spaces.errors import SpaceNotFoundError
+from agentclaw.community.core.spaces.repository.models import SpaceModel
+from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.core.skills_pool.types import (
     InitialSkillLayoutSelection,
     SkillLayout,
@@ -38,6 +41,25 @@ class BotInitialLayoutRepositoryMixin:
         layout: InitialSkillLayoutSelection | None,
     ) -> dict[str, Any]:
         with self._db.transactional_orm_session() as db:
+            # Serialize with delete_team_space's row lock when the Bot is
+            # created into a Space: without FOR UPDATE a concurrent soft-delete
+            # can commit between the service-level quota/membership checks and
+            # this insert, leaving a live Bot assigned to a soft-deleted Space
+            # even though the deletion's emptiness recheck passed.
+            space_id = bot_data.get("space_id")
+            if space_id is not None:
+                target_space = (
+                    db.query(SpaceModel)
+                    .filter(
+                        SpaceModel.id == space_id,
+                        SpaceModel.env == (bot_data.get("env") or get_current_env()),
+                        SpaceModel.deleted_at.is_(None),
+                    )
+                    .with_for_update()
+                    .one_or_none()
+                )
+                if target_space is None:
+                    raise SpaceNotFoundError(f"space {space_id} not found")
             bot = self._new_bot_model(bot_data)
             db.add(bot)
             db.flush()

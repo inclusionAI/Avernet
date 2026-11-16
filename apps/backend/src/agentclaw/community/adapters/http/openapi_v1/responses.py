@@ -244,6 +244,7 @@ from agentclaw.community.core.market_favorites.errors import (
     FavoriteTargetInvalidError,
 )
 from agentclaw.community.core.spaces.errors import (
+    PersonalSpaceDeletionError,
     PersonalSpaceInvariantError,
     SpaceAccessDeniedError,
     SpaceAlreadyExistsError,
@@ -252,6 +253,7 @@ from agentclaw.community.core.spaces.errors import (
     SpaceMemberInvalidError,
     SpaceMemberNotFoundError,
     SpaceNameInvalidError,
+    SpaceNotEmptyError,
     SpaceNotFoundError,
 )
 
@@ -450,6 +452,11 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     **SPACE_SKILL_HTTP_ERRORS,
     SpaceCreatorInvariantError: (409, "Space creator cannot be removed or demoted"),
     PersonalSpaceInvariantError: (409, "Personal space membership is immutable"),
+    PersonalSpaceDeletionError: (
+        409,
+        SpacePublicErrorMessage.PERSONAL_SPACE_NOT_DELETABLE,
+    ),
+    SpaceNotEmptyError: (409, SpacePublicErrorMessage.SPACE_NOT_EMPTY),
     SkillCenterTeamCreateError: (
         502,
         SpacePublicErrorMessage.SKILL_CENTER_TEAM_CREATE_FAILED,
@@ -875,6 +882,8 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
 # small, explicit override table lets a category expose a stable actionable
 # subcode without changing any existing public response.
 ENVELOPE_ERROR_CODES: dict[type[Exception], int] = {
+    PersonalSpaceDeletionError: SpaceErrorCode.PERSONAL_SPACE_NOT_DELETABLE,
+    SpaceNotEmptyError: SpaceErrorCode.SPACE_NOT_EMPTY,
     SkillCenterTeamCreateError: SpaceErrorCode.SKILL_CENTER_TEAM_CREATE_FAILED,
     **SPACE_SKILL_ERROR_CODES,
     **WORK_ORDER_ERROR_CODES,

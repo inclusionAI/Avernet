@@ -55,7 +55,7 @@ beforeEach(() => {
 })
 afterEach(() => { cleanup(); vi.useRealTimers(); useEditorStore.getState().reset({ force: true }); vi.restoreAllMocks() })
 async function showConflict() {
-  const view = render(<Editor embedded initialWorkflowId="review-wf" />)
+  const view = render(<Editor access={{ canView: true, canEdit: true, canDeploy: true }} embedded initialWorkflowId="review-wf" />)
   await waitFor(() => expect(useEditorStore.getState().spec?.id).toBe('review-wf'))
   click('保存'); await screen.findByText(/Git 工作流 YAML 与数据库基线不一致或不可比较/)
   return view
@@ -67,7 +67,7 @@ async function openReview() {
 }
 it('does not offer or fake reconciliation while the hook contract is unavailable', async () => {
   delete mocks.adapter.prepareReconciliation
-  render(<Editor embedded initialWorkflowId="review-wf" />)
+  render(<Editor access={{ canView: true, canEdit: true, canDeploy: true }} embedded initialWorkflowId="review-wf" />)
   await waitFor(() => expect(useEditorStore.getState().spec?.id).toBe('review-wf'))
   click('保存'); expect(await screen.findByText(/差异审阅保存能力尚不可用/)).toBeVisible()
   expect(screen.queryByRole('button', { name: '核对数据库和 Git 差异…' })).not.toBeInTheDocument()
@@ -173,7 +173,7 @@ it('clears the retained review intent after a later successful ordinary save', a
 it('shows a safe unavailable fallback if the optional adapter disappears after opening a review', async () => {
   const view = await openReview()
   delete mocks.adapter.saveReconciled
-  view.rerender(<Editor embedded initialWorkflowId="review-wf" />)
+  view.rerender(<Editor access={{ canView: true, canEdit: true, canDeploy: true }} embedded initialWorkflowId="review-wf" />)
   expect(await screen.findByText(/差异审阅保存能力尚不可用/)).toBeVisible()
   expect(screen.queryByRole('region', { name: '工作流快照审阅' })).not.toBeInTheDocument()
   expect(screen.queryByRole('button', { name: '确认最终文档' })).not.toBeInTheDocument()

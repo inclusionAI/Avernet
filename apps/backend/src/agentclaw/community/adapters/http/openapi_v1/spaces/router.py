@@ -61,6 +61,9 @@ from agentclaw.community.adapters.http.openapi_v1.spaces.schemas import (
     DraftEditLeaseResource,
     UpdateSpaceMemberRoleRequest,
 )
+from agentclaw.community.adapters.http.openapi_v1.spaces.schemas_deletion import (
+    SpaceDeletedResult,
+)
 from agentclaw.community.adapters.http.openapi_v1.spaces.schemas_editor_approval import (
     CreateSkillEditorRequest,
     SkillEditorApprovalPolicy,
@@ -70,6 +73,7 @@ from agentclaw.community.api.market_favorite_service import (
     MarketFavoriteServiceProtocol,
 )
 from agentclaw.community.api.space_service import (
+    SpaceDeletionServiceProtocol,
     SpaceMemberServiceProtocol,
     SpaceServiceProtocol,
 )
@@ -795,6 +799,22 @@ async def delete_space_member(
     return envelope(
         SpaceMemberDeletedResult(space_id=space_id, user_id=member_user_id), request
     )
+
+
+@router.delete(
+    "/{space_id}",
+    response_model=Envelope[SpaceDeletedResult],
+    dependencies=_REFUSES_APP_ONLY,
+)
+@envelope_errors
+async def delete_space(
+    space_id: SpaceIdPath,
+    request: Request,
+    user_id: UserIdDep,
+    service: SpaceDeletionServiceProtocol = Injected(SpaceDeletionServiceProtocol),
+) -> Envelope[SpaceDeletedResult]:
+    service.delete_team_space(space_id=space_id, actor_id=user_id)
+    return envelope(SpaceDeletedResult(space_id=space_id), request)
 
 
 @router.put(

@@ -1,4 +1,5 @@
 """BaaS-backed community engine adapter transport tests."""
+
 from __future__ import annotations
 
 import asyncio
@@ -150,9 +151,7 @@ def test_invoke_maps_http_statuses(status, expected):
         ({"detail": "skill source not found"}, False),
     ],
 )
-def test_404_retains_structured_route_missing_evidence(
-    payload, standard_route_missing
-):
+def test_404_retains_structured_route_missing_evidence(payload, standard_route_missing):
     transport, _ = _transport(_response(404, payload))
 
     with pytest.raises(DeviceAdapterEndpointNotFoundError) as caught:
@@ -182,6 +181,23 @@ def test_invoke_maps_explicit_timeout():
         )
 
 
+def test_invoke_maps_default_timeout():
+    """httpx.TimeoutException must raise DeviceAdapterTimeoutError even when no explicit timeout is passed."""
+    transport, baas = _transport()
+    baas.invoke_http.side_effect = httpx.ReadTimeout(
+        "slow", request=httpx.Request("GET", "https://proxy.example/api/test")
+    )
+
+    with pytest.raises(DeviceAdapterTimeoutError):
+        asyncio.run(
+            transport.invoke(
+                conn_info={"binding_id": 1},
+                method="GET",
+                path="/api/test",
+            )
+        )
+
+
 def test_invoke_maps_baas_resolution_error():
     transport, baas = _transport()
     baas.invoke_http.side_effect = BaasServiceError("no active device")
@@ -192,6 +208,49 @@ def test_invoke_maps_baas_resolution_error():
                 conn_info={"binding_id": 1}, method="GET", path="/api/test"
             )
         )
+
+
+@pytest.mark.parametrize("timeout", [None, 1.0])
+def test_invoke_multipart_maps_timeout(timeout):
+    transport, baas = _transport()
+    baas.get_http_info.return_value = HttpConnectionInfo(
+        http_url="https://proxy.example/upload", token="token-1", target="device"
+    )
+    client = MagicMock()
+    client.__enter__.return_value = client
+    client.post.side_effect = httpx.ReadTimeout("slow")
+
+    with (
+        patch("httpx.Client", return_value=client),
+        pytest.raises(DeviceAdapterTimeoutError, match="POST /upload") as caught,
+    ):
+        asyncio.run(
+            transport.invoke_multipart(
+                {"binding_id": 1}, "/upload", files={}, data={}, timeout=timeout
+            )
+        )
+    assert isinstance(caught.value.__cause__, httpx.ReadTimeout)
+
+
+@pytest.mark.parametrize("timeout", [None, 1.0])
+def test_stream_maps_timeout_and_closes_client(timeout):
+    transport, baas = _transport()
+    baas.get_http_info.return_value = HttpConnectionInfo(
+        http_url="https://proxy.example/stream", token="token-1", target="device"
+    )
+    client = MagicMock()
+    client.send = AsyncMock(side_effect=httpx.ReadTimeout("slow"))
+    client.aclose = AsyncMock()
+
+    with (
+        patch("httpx.AsyncClient", return_value=client),
+        pytest.raises(DeviceAdapterTimeoutError, match="POST /stream") as caught,
+    ):
+        asyncio.run(
+            transport.stream({"binding_id": 1}, "POST", "/stream", timeout=timeout)
+        )
+    assert isinstance(caught.value.__cause__, httpx.ReadTimeout)
+    client.aclose.assert_awaited_once()
 
 
 def test_stream_uses_baas_http_info_and_closes():

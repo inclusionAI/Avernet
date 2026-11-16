@@ -409,7 +409,7 @@ QUERY = {
 
 @endpoint_test(
     method="GET",
-    path="/openapi/v1/todos",
+    path="/openapi/v1/collaboration/tasks/todos",
     scenario="list_space_todos",
     input=CaseInput(
         query_params={"space_id": _SPACE_ID, "user_id": _USER_ID},
@@ -430,7 +430,7 @@ def list_todos_ok():
 
 @endpoint_test(
     method="GET",
-    path="/openapi/v1/todos",
+    path="/openapi/v1/collaboration/tasks/todos",
     scenario="wrong_user",
     input=CaseInput(
         query_params={"space_id": _SPACE_ID, "user_id": "someone-else"},
@@ -445,7 +445,7 @@ def list_todos_forbidden():
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/todos",
+    path="/openapi/v1/collaboration/tasks/todos",
     scenario="create_pending",
     input=CaseInput(
         query_params={"user_id": _USER_ID},
@@ -468,7 +468,7 @@ def create_todo_ok():
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/todos",
+    path="/openapi/v1/collaboration/tasks/todos",
     scenario="invalid_title",
     input=CaseInput(
         query_params={"user_id": _USER_ID},
@@ -489,7 +489,7 @@ def create_todo_validation_failed():
 
 @endpoint_test(
     method="GET",
-    path="/openapi/v1/todos/{todo_id}",
+    path="/openapi/v1/collaboration/tasks/todos/{todo_id}",
     scenario="get_pending",
     input=CaseInput(
         path_params={"todo_id": "todo_1"},
@@ -508,7 +508,7 @@ def get_todo_ok():
 
 @endpoint_test(
     method="GET",
-    path="/openapi/v1/todos/{todo_id}",
+    path="/openapi/v1/collaboration/tasks/todos/{todo_id}",
     scenario="not_found",
     input=CaseInput(
         path_params={"todo_id": "todo_missing"},
@@ -524,7 +524,7 @@ def get_todo_not_found():
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/todos/{todo_id}/run",
+    path="/openapi/v1/collaboration/tasks/todos/{todo_id}/run",
     scenario="dispatch_pending",
     input=CaseInput(
         path_params={"todo_id": "todo_1"},
@@ -548,7 +548,7 @@ def run_todo_ok():
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/todos/{todo_id}/run",
+    path="/openapi/v1/collaboration/tasks/todos/{todo_id}/run",
     scenario="running_todo",
     input=CaseInput(
         path_params={"todo_id": "todo_1"},
@@ -569,7 +569,7 @@ def run_todo_conflict():
 
 @endpoint_test(
     method="GET",
-    path="/openapi/v1/todos/{todo_id}/events",
+    path="/openapi/v1/collaboration/tasks/todos/{todo_id}/events",
     scenario="project_b_events",
     input=CaseInput(
         path_params={"todo_id": "todo_1"},
@@ -599,7 +599,7 @@ def list_todo_events_ok():
 
 @endpoint_test(
     method="GET",
-    path="/openapi/v1/todos/{todo_id}/events",
+    path="/openapi/v1/collaboration/tasks/todos/{todo_id}/events",
     scenario="not_found",
     input=CaseInput(
         path_params={"todo_id": "todo_missing"},
@@ -615,7 +615,7 @@ def list_todo_events_not_found():
 
 @endpoint_test(
     method="GET",
-    path="/openapi/v1/todos/{todo_id}/interactions",
+    path="/openapi/v1/collaboration/tasks/todos/{todo_id}/interactions",
     scenario="projection_ok",
     input=CaseInput(
         path_params={"todo_id": "todo_1"},
@@ -643,7 +643,7 @@ def list_todo_interactions_ok():
 
 @endpoint_test(
     method="GET",
-    path="/openapi/v1/todos/{todo_id}/interactions",
+    path="/openapi/v1/collaboration/tasks/todos/{todo_id}/interactions",
     scenario="not_found",
     input=CaseInput(
         path_params={"todo_id": "todo_missing"},
@@ -659,7 +659,7 @@ def list_todo_interactions_not_found():
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/todos/{todo_id}/interactions",
+    path="/openapi/v1/collaboration/tasks/todos/{todo_id}/interactions",
     scenario="pending_acceptance",
     input=CaseInput(
         path_params={"todo_id": "todo_1"},
@@ -687,7 +687,7 @@ def create_todo_interaction_ok():
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/todos/{todo_id}/interactions",
+    path="/openapi/v1/collaboration/tasks/todos/{todo_id}/interactions",
     scenario="pending_conflict",
     input=CaseInput(
         path_params={"todo_id": "todo_1"},
@@ -706,7 +706,7 @@ def create_todo_interaction_conflict():
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/todos/{todo_id}/acceptance",
+    path="/openapi/v1/collaboration/tasks/todos/{todo_id}/acceptance",
     scenario="approve_pending",
     input=CaseInput(
         path_params={"todo_id": "todo_1"},
@@ -738,7 +738,7 @@ def accept_todo_ok():
 
 @endpoint_test(
     method="POST",
-    path="/openapi/v1/todos/{todo_id}/acceptance",
+    path="/openapi/v1/collaboration/tasks/todos/{todo_id}/acceptance",
     scenario="pending_conflict",
     input=CaseInput(
         path_params={"todo_id": "todo_1"},
@@ -757,7 +757,7 @@ def accept_todo_conflict():
 
 @endpoint_test(
     method="GET",
-    path="/openapi/v1/todos/{todo_id}/artifacts",
+    path="/openapi/v1/collaboration/tasks/todos/{todo_id}/artifacts",
     scenario="list_persisted_artifacts",
     input=CaseInput(
         path_params={"todo_id": "todo_1"},
@@ -785,7 +785,7 @@ def list_todo_artifacts_ok():
 
 @endpoint_test(
     method="GET",
-    path="/openapi/v1/todos/{todo_id}/artifacts",
+    path="/openapi/v1/collaboration/tasks/todos/{todo_id}/artifacts",
     scenario="wrong_user",
     input=CaseInput(
         path_params={"todo_id": "todo_1"},
@@ -801,7 +801,7 @@ def list_todo_artifacts_forbidden():
 
 @endpoint_test(
     method="GET",
-    path="/openapi/v1/todos/{todo_id}/artifacts/{artifact_id}/content",
+    path="/openapi/v1/collaboration/tasks/todos/{todo_id}/artifacts/{artifact_id}/content",
     scenario="download_file",
     input=CaseInput(
         path_params={"todo_id": "todo_1", "artifact_id": "todoartifact_1"},
@@ -817,7 +817,7 @@ def read_todo_artifact_content_ok():
 
 @endpoint_test(
     method="GET",
-    path="/openapi/v1/todos/{todo_id}/artifacts/{artifact_id}/content",
+    path="/openapi/v1/collaboration/tasks/todos/{todo_id}/artifacts/{artifact_id}/content",
     scenario="wrong_user",
     input=CaseInput(
         path_params={"todo_id": "todo_1", "artifact_id": "todoartifact_1"},
@@ -833,7 +833,7 @@ def read_todo_artifact_content_forbidden():
 
 @endpoint_test(
     method="POST",
-    path="/api/v1/collaboration/todos/{todo_id}/report",
+    path="/api/v1/collaboration/tasks/todos/{todo_id}/report",
     scenario="report_text_artifact",
     input=CaseInput(
         path_params={"todo_id": "todo_1"},
@@ -864,7 +864,7 @@ def report_todo_artifact_ok():
 
 @endpoint_test(
     method="POST",
-    path="/api/v1/collaboration/todos/{todo_id}/report",
+    path="/api/v1/collaboration/tasks/todos/{todo_id}/report",
     scenario="conflicting_execution_ids",
     input=CaseInput(
         path_params={"todo_id": "todo_1"},
@@ -886,7 +886,7 @@ def report_todo_artifact_rejects_conflicting_ids():
 
 @endpoint_test(
     method="POST",
-    path="/api/v1/collaboration/todos/{todo_id}/artifacts/object-file",
+    path="/api/v1/collaboration/tasks/todos/{todo_id}/artifacts/object-file",
     scenario="upload_file_artifact",
     input=CaseInput(
         path_params={"todo_id": "todo_1"},
@@ -917,7 +917,7 @@ def upload_todo_artifact_file_ok():
 
 @endpoint_test(
     method="POST",
-    path="/api/v1/collaboration/todos/{todo_id}/artifacts/object-file",
+    path="/api/v1/collaboration/tasks/todos/{todo_id}/artifacts/object-file",
     scenario="missing_execution_id",
     input=CaseInput(
         path_params={"todo_id": "todo_1"},

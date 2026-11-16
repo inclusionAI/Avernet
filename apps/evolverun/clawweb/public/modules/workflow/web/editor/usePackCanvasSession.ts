@@ -7,7 +7,7 @@ import { assertWorkflowReconciliation, createWorkflowReconciliationOwner } from 
 import type { ReconciliationApproval, ReconciliationContext, ReconciliationReview } from '../api/workflowSnapshotReconciliation'
 import { workflowUnifiedSave, readUnifiedSaveCapability, serializeUnifiedSpec, UNIFIED_SAVE_TIMEOUT_MS } from '../api/workflowUnifiedSave'
 import { validateWorkflowSnapshotRequest } from '../api/validateWorkflowSnapshotRequest'
-import { useEditorStore, validateSpec, prepareWorkflowSession } from './store'
+import { editorIsReadOnly, useEditorStore, validateSpec, prepareWorkflowSession } from './store'
 import { sessionFor, load, releaseCleanSession, publish, updateVersion, dirty, diff, validateSnapshot, type Snapshot, type Version } from './packVersionSession'
 import { currentVersionSaveConflict, legacyPackCandidate, savePackVersion } from './packVersionSave'
 import { packVersionWritesEnabled } from './packVersionWritePolicy'
@@ -76,7 +76,7 @@ export function usePackCanvasSession(id: string | null, _databaseSpec?: Workflow
   function reconciliationContext(row: EditorDraftCas, revision: number): ReconciliationContext {
     if (!id || !session) throw new Error('缺少工作流会话；未发送保存。')
     const live = useEditorStore.getState(), selected = session.state.version, source = session.state.versions[selected], base = source.snapshot
-    if (!live.spec || live.spec.id !== id || !live._savedSpec || live._databaseSpec == null || live._databasePackId === undefined
+    if (editorIsReadOnly(live) || base?.canWrite === false || !live.spec || live.spec.id !== id || !live._savedSpec || live._databaseSpec == null || live._databasePackId === undefined
       || live._databasePackId !== row.packId || row.workflowId !== id || sessionFor(id) !== session
       || !base || base.packId !== (row.packId ?? id) || source.loading || source.readFailure || source.blocked
       || session.state.uploading || session.state.reconciliation || session.state.deployment || session.state.uncertainRename || session.state.postSaveVerificationError) throw new Error('审阅基线或编辑状态不可用；未发送保存。')
@@ -137,6 +137,8 @@ export function usePackCanvasSession(id: string | null, _databaseSpec?: Workflow
 
   async function performSave(first?: { version: Version; base: Snapshot; files: Snapshot['versionFiles']; activeSpec: WorkflowSpec; sessionId: number }, approval?: ReconciliationApproval): Promise<PackCanvasSaveResult> {
     const live = useEditorStore.getState()
+    if (editorIsReadOnly(live)) throw new Error('当前工作流为只读，未发送保存。')
+    if (session?.state.versions[session.state.version].snapshot?.canWrite === false) throw new Error('Pack 版本文件为只读，未发送保存。')
     if (!approval) closeReconciliation()
     if (!id || !session) throw new Error('首次新建尚无法安全初始化 Git 草稿(wf)分支；本地草稿仍保留。')
     assertEditorWorkflowReadable(id)
@@ -155,6 +157,7 @@ export function usePackCanvasSession(id: string | null, _databaseSpec?: Workflow
     try { capability = databaseBaseline === null ? 'unavailable' : first ? 'available' : await readUnifiedSaveCapability(id) }
     finally { busy.current = false; publish(session, { ...session.state, saving: false }) }
     if (useEditorStore.getState() !== live) throw new Error('读取能力期间编辑会话已变化；未发送保存。')
+    if (session.state.versions[session.state.version].snapshot?.canWrite === false) throw new Error('Pack 版本文件为只读，未发送保存。')
     // Editor save must publish the YAML too. Legacy DB-only or script-only
     // compatibility cannot satisfy that contract; leave both stores untouched.
     // The separate AutoHeal legacy API is unaffected.
@@ -221,7 +224,7 @@ export function usePackCanvasSession(id: string | null, _databaseSpec?: Workflow
       const isCurrent = () => {
         const now = useEditorStore.getState(), nowSource = session.state.versions[selected]
         const nowDatabase = now._databaseSpec === undefined ? now._savedSpec : now._databaseSpec
-        return now.sessionId === live.sessionId && now.spec?.id === id && now._databasePackId === live._databasePackId
+        return !editorIsReadOnly(now) && now.sessionId === live.sessionId && now.spec?.id === id && now._databasePackId === live._databasePackId
           && !normalizationChanges(requestSpec, now.spec).length && !normalizationChanges(databaseBaseline, nowDatabase).length
           && !normalizationChanges(activeBaseline, now._activeBaseline).length && !Object.keys(now.pendingEdits ?? {}).length && !now.validationErrors.length
           && session.state.version === selected && nowSource.snapshot === base && !diff(files, nowSource.files).length && !otherDirty()
@@ -246,7 +249,7 @@ export function usePackCanvasSession(id: string | null, _databaseSpec?: Workflow
           }
         }
         const afterDb = useEditorStore.getState(), latestSource = session.state.versions[selected]
-        const stable = afterDb.sessionId === live.sessionId && afterDb.spec?.id === id && afterDb._databasePackId === live._databasePackId
+        const stable = !editorIsReadOnly(afterDb) && afterDb.sessionId === live.sessionId && afterDb.spec?.id === id && afterDb._databasePackId === live._databasePackId
           && !normalizationChanges(requestSpec, afterDb.spec).length && !Object.keys(afterDb.pendingEdits ?? {}).length && !afterDb.validationErrors.length
           && session.state.version === selected && latestSource.snapshot === base && !diff(files, latestSource.files).length && !otherDirty()
         if (!stable) throw new PackCanvasPartialSaveError(id, `数据库${dbSaved ? '已保存' : '已核对'}，但保存期间草稿变化；Git 未写入，后续修改仍保留。`, { db: dbSaved ? 'confirmed' : 'unchanged', git: 'not-started' })
@@ -263,7 +266,7 @@ export function usePackCanvasSession(id: string | null, _databaseSpec?: Workflow
           catch { throw firstPartial('首次数据库草稿已保存，但无法确认统一保存能力；Git 未写入，请核对后处理。') }
           if (available === 'unavailable') throw firstPartial('首次数据库草稿已保存，但统一保存不可用；Git YAML 和文件均未写入，请核对后处理。')
           const now = useEditorStore.getState(), nowSource = session.state.versions[selected]
-          if (now.sessionId !== live.sessionId || now.spec?.id !== id || now._databasePackId !== live._databasePackId
+          if (editorIsReadOnly(now) || now.sessionId !== live.sessionId || now.spec?.id !== id || now._databasePackId !== live._databasePackId
             || normalizationChanges(requestSpec, now.spec).length || normalizationChanges(stored, now._databaseSpec).length
             || Object.keys(now.pendingEdits ?? {}).length || now.validationErrors.length
             || session.state.version !== selected || nowSource.snapshot !== base || diff(files, nowSource.files).length || otherDirty()) {
@@ -301,7 +304,7 @@ export function usePackCanvasSession(id: string | null, _databaseSpec?: Workflow
           result = await savePackVersion(session, id, selected, gitFiles, undefined, async () => {
             await verifyDatabaseBaseline(id, stored, () => {
               const now = useEditorStore.getState()
-              return now.sessionId === live.sessionId && now.spec?.id === id && now._databasePackId === live._databasePackId
+              return !editorIsReadOnly(now) && now.sessionId === live.sessionId && now.spec?.id === id && now._databasePackId === live._databasePackId
                 && !normalizationChanges(stored, now._databaseSpec === undefined ? now._savedSpec : now._databaseSpec).length && !otherDirty()
             }, live._databasePackId)
           }, files, true)
@@ -361,13 +364,13 @@ export function usePackCanvasSession(id: string | null, _databaseSpec?: Workflow
     const isCurrent = () => {
       const now = useEditorStore.getState(), currentSource = session.state.versions[selected]
       const nowDatabase = now._databaseSpec === undefined ? now._savedSpec : now._databaseSpec
-      return now.sessionId === live.sessionId && now._databasePackId === live._databasePackId
+      return !editorIsReadOnly(now) && now.sessionId === live.sessionId && now._databasePackId === live._databasePackId
         && !!now.spec && !!now._savedSpec && !!nowDatabase
         && !normalizationChanges(live.spec, now.spec).length && (!(yamlOnly || reconciliationAdopt) || !normalizationChanges(live.positions, now.positions).length)
         && !normalizationChanges(live._savedSpec, now._savedSpec).length
         && !normalizationChanges(databaseBaseline, nowDatabase).length && !normalizationChanges(live._activeBaseline, now._activeBaseline).length
         && !Object.keys(now.pendingEdits ?? {}).length && !now.validationErrors.length && !session.state.uploading
-        && session.state.version === selected && currentSource.snapshot === base && !diff(submitted, currentSource.files).length && !otherDirty()
+        && currentSource.snapshot?.canWrite !== false && session.state.version === selected && currentSource.snapshot === base && !diff(submitted, currentSource.files).length && !otherDirty()
     }
     // Once dispatched, user edits are allowed; only identity and baseline changes
     // invalidate applying a verified receipt. Do not confuse dirty content with
@@ -464,7 +467,7 @@ export function usePackCanvasSession(id: string | null, _databaseSpec?: Workflow
       }
       protectYamlCanvas()
       // Adopt a file-only candidate only after both stores have been verified.
-      // importYaml preserves the editor's layout/history behavior. A later canvas
+      // Receipt adoption preserves layout/history without granting edit rights. A later canvas
       // edit or pending form draft must never be replaced by the earlier file.
       if (yamlOnly || reconciliationAdopt) {
         const now = useEditorStore.getState()
@@ -474,7 +477,10 @@ export function usePackCanvasSession(id: string | null, _databaseSpec?: Workflow
           if (!prepared) { owner = beginEditorWorkflowWrite(id); throw new Error('保存后文件 YAML 无法安全应用到画布；请人工核对。') }
           const expectedPositions = Object.fromEntries(stored.nodes.map(node => [node.id,
             Object.hasOwn(live.positions, node.id) ? structuredClone(live.positions[node.id]) : structuredClone(prepared.positions[node.id])]))
-          now.importYaml(stored)
+          if (!now.adoptConfirmedSave(stored, now)) {
+            owner = beginEditorWorkflowWrite(id)
+            throw new Error('已确认的保存文档无法安全载入画布；请人工核对。')
+          }
           const imported = useEditorStore.getState()
           if (imported.sessionId !== live.sessionId || normalizationChanges(imported.spec, stored).length
             || normalizationChanges(imported.positions, expectedPositions).length || Object.keys(imported.pendingEdits ?? {}).length) {

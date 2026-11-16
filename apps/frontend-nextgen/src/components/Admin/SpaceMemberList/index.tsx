@@ -26,8 +26,8 @@ import { SpaceJoinForm } from '../SpaceJoinForm';
 import { AddMembersModal } from './AddMembersModal';
 import { SpaceMemberRow } from './SpaceMemberRow';
 
-// clawweb=Avernet 暂无 DELETE /openapi/v1/bots/spaces/{id} 接口；UI 入口隐藏，后端补接口时翻 true。
-const DELETE_SPACE_SUPPORTED = false;
+// Avernet 已提供 DELETE /openapi/v1/bots/spaces/{id}，删除入口对可管理团队空间开放。
+const DELETE_SPACE_SUPPORTED = true;
 
 export interface SpaceMemberListProps {
   space: Space;

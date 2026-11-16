@@ -45,10 +45,20 @@ _ALLOWLIST: dict[str, str] = {
 
 
 def _iter_local_modules():
+    root = Path(local_pkg.__path__[0])
     for mi in pkgutil.iter_modules(local_pkg.__path__):
         if mi.name.startswith("_"):
             continue
-        yield mi.name
+        path = root / f"{mi.name}.py"
+        if path.is_file():
+            yield mi.name, path
+    # Task-owned local plugins are nested to preserve domain ownership while
+    # remaining subject to the same offline dependency guard.
+    task_root = root / "task"
+    for path in sorted(task_root.glob("*.py")):
+        if path.name == "__init__.py" or path.name.startswith("_"):
+            continue
+        yield f"task.{path.stem}", path
 
 
 def _imported_roots(tree: ast.AST) -> set[str]:
@@ -68,10 +78,7 @@ def _imported_roots(tree: ast.AST) -> set[str]:
 def test_local_plugins_have_no_external_deps():
     failures: list[str] = []
 
-    for mod_name in _iter_local_modules():
-        src_path = Path(local_pkg.__path__[0]) / f"{mod_name}.py"
-        if not src_path.exists():
-            continue
+    for mod_name, src_path in _iter_local_modules():
         src = src_path.read_text(encoding="utf-8")
         tree = ast.parse(src)
         for root in _imported_roots(tree):

@@ -49,7 +49,7 @@ async function mount(version: 'current' | 'draft' = 'current') {
   const session = sessionFor(mocks.db!.id)
   publish(session, { ...session.state, version })
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
-  render(<QueryClientProvider client={client}><Editor embedded initialWorkflowId={mocks.db!.id} /></QueryClientProvider>)
+  render(<QueryClientProvider client={client}><Editor access={{ canView: true, canEdit: true, canExecute: true, canDeploy: true }} embedded initialWorkflowId={mocks.db!.id} /></QueryClientProvider>)
   await waitFor(() => expect(session.state.versions[version].loading).toBe(false))
 }
 const click = (name: string) => fireEvent.click(screen.getByRole('button', { name, exact: true }))

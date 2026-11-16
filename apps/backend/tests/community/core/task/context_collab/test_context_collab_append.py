@@ -61,8 +61,8 @@ from agentclaw.community.core.task.context_collab.service_api import (
 from agentclaw.community.core.task.context_collab.services.context_collab_service import (
     ContextCollabService,
 )
-from agentclaw.community.plugins.local.context_collab_runtime import (
-    LocalContextCollabRuntimePlugin,
+from tests.community.core.task.context_collab.executor_fakes import (
+    RecordingContextCollabExecutor,
 )
 
 OBJECTIVE = "整理 Context 协作协议评审结论并提交可评审 PR"
@@ -219,7 +219,7 @@ def _make_service(**command_overrides):
     repo = _FakeContextCollabRepository()
     assert isinstance(repo, ContextCollabRepositoryProtocol)
     service = ContextCollabService(
-        repository=repo, runtime=LocalContextCollabRuntimePlugin()
+        repository=repo, executor=RecordingContextCollabExecutor()
     )
     assert isinstance(service, ContextCollabServiceProtocol)
     created = service.create_context(

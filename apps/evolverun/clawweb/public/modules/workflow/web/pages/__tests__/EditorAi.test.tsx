@@ -59,7 +59,7 @@ beforeEach(() => {
 })
 
 it('applies a reviewed draft only to current editor memory', async () => {
-  render(<Editor embedded initialWorkflowId={source.id} />)
+  render(<Editor access={{ canView: true, canEdit: true, canDeploy: true }} embedded initialWorkflowId={source.id} />)
   fireEvent.click(await screen.findByRole('button', { name: /AI 生成/ }))
   fireEvent.click(screen.getByText('应用测试草稿'))
   expect(useEditorStore.getState().spec?.title).toBe('AI 修改标题')
@@ -67,7 +67,7 @@ it('applies a reviewed draft only to current editor memory', async () => {
 })
 
 it.each(['应用过期草稿', '应用跨工作流草稿'])('rejects unsafe drafts: %s', async (button) => {
-  render(<Editor embedded initialWorkflowId={source.id} />)
+  render(<Editor access={{ canView: true, canEdit: true, canDeploy: true }} embedded initialWorkflowId={source.id} />)
   fireEvent.click(await screen.findByRole('button', { name: /AI 修改/ }))
   fireEvent.click(screen.getByText(button))
   expect(useEditorStore.getState().spec?.id).toBe(source.id)
@@ -76,7 +76,7 @@ it.each(['应用过期草稿', '应用跨工作流草稿'])('rejects unsafe draf
 })
 
 it('disables AI entry while an unapplied editor draft exists', async () => {
-  render(<Editor embedded initialWorkflowId={source.id} />)
+  render(<Editor access={{ canView: true, canEdit: true, canDeploy: true }} embedded initialWorkflowId={source.id} />)
   await screen.findByRole('button', { name: /AI 生成/ })
   act(() => useEditorStore.getState().setPendingEdit('yaml', 'synthetic unapplied YAML'))
   expect(screen.getByRole('button', { name: /AI 生成/ })).toBeDisabled()
@@ -89,7 +89,7 @@ function reviewedDraft(base: WorkflowSpec = useEditorStore.getState().spec!) {
 }
 
 it('bases AI drafting on the applied-but-unsaved Editor document, not a fresh database source', async () => {
-  render(<Editor embedded initialWorkflowId={source.id} />)
+  render(<Editor access={{ canView: true, canEdit: true, canDeploy: true }} embedded initialWorkflowId={source.id} />)
   await screen.findByRole('button', { name: /AI 修改/ })
   act(() => useEditorStore.getState().updateSpecField('title', 'Applied local title'))
   fireEvent.click(screen.getByRole('button', { name: /AI 修改/ }))
@@ -101,7 +101,7 @@ it('bases AI drafting on the applied-but-unsaved Editor document, not a fresh da
 })
 
 it.each(['yaml', 'node:analysis', 'workflow:config'])('rejects apply when a pending %s draft appears after preview', async key => {
-  render(<Editor embedded initialWorkflowId={source.id} />)
+  render(<Editor access={{ canView: true, canEdit: true, canDeploy: true }} embedded initialWorkflowId={source.id} />)
   fireEvent.click(await screen.findByRole('button', { name: /AI 修改/ }))
   const apply = mocks.drawer.mock.lastCall![0].onApply
   const draft = reviewedDraft()
@@ -114,7 +114,7 @@ it.each(['yaml', 'node:analysis', 'workflow:config'])('rejects apply when a pend
 })
 
 it('rejects a late apply after layout changes in the sidecar even when the YAML is identical', async () => {
-  render(<Editor embedded initialWorkflowId={source.id} />)
+  render(<Editor access={{ canView: true, canEdit: true, canDeploy: true }} embedded initialWorkflowId={source.id} />)
   fireEvent.click(await screen.findByRole('button', { name: /AI 修改/ }))
   const apply = mocks.drawer.mock.lastCall![0].onApply
   const draft = reviewedDraft()
@@ -127,7 +127,7 @@ it('rejects a late apply after layout changes in the sidecar even when the YAML 
 })
 
 it('rejects a late apply from an older drawer session, including the same toolbar mode', async () => {
-  render(<Editor embedded initialWorkflowId={source.id} />)
+  render(<Editor access={{ canView: true, canEdit: true, canDeploy: true }} embedded initialWorkflowId={source.id} />)
   const toolbar = await screen.findByRole('button', { name: /AI 修改/ })
   fireEvent.click(toolbar)
   const apply = mocks.drawer.mock.lastCall![0].onApply
@@ -138,7 +138,7 @@ it('rejects a late apply from an older drawer session, including the same toolba
 })
 
 it('rejects a late apply from an older Editor session reloaded with identical YAML', async () => {
-  render(<Editor embedded initialWorkflowId={source.id} />)
+  render(<Editor access={{ canView: true, canEdit: true, canDeploy: true }} embedded initialWorkflowId={source.id} />)
   fireEvent.click(await screen.findByRole('button', { name: /AI 修改/ }))
   const apply = mocks.drawer.mock.lastCall![0].onApply
   const draft = reviewedDraft()
@@ -151,18 +151,18 @@ it('rejects a late apply from an older Editor session reloaded with identical YA
 })
 
 it('blocks application during Pack saving even with an older callback', async () => {
-  const view = render(<Editor embedded initialWorkflowId={source.id} />)
+  const view = render(<Editor access={{ canView: true, canEdit: true, canDeploy: true }} embedded initialWorkflowId={source.id} />)
   fireEvent.click(await screen.findByRole('button', { name: /AI 修改/ }))
   const apply = mocks.drawer.mock.lastCall![0].onApply
   const draft = reviewedDraft()
   mocks.packSaving = true
-  view.rerender(<Editor embedded initialWorkflowId={source.id} />)
+  view.rerender(<Editor access={{ canView: true, canEdit: true, canDeploy: true }} embedded initialWorkflowId={source.id} />)
   act(() => apply(draft))
   expect(useEditorStore.getState().spec!.title).toBe(source.title)
 })
 
 it('never labels an import rejected through store.actionError as applied success', async () => {
-  render(<Editor embedded initialWorkflowId={source.id} />)
+  render(<Editor access={{ canView: true, canEdit: true, canDeploy: true }} embedded initialWorkflowId={source.id} />)
   fireEvent.click(await screen.findByRole('button', { name: /AI 修改/ }))
   const originalImport = useEditorStore.getState().importYaml
   act(() => useEditorStore.setState({ importYaml: () => useEditorStore.getState().setActionError('拒绝导入：保留原文档') }))
@@ -177,7 +177,7 @@ it('never labels an import rejected through store.actionError as applied success
 })
 
 it('preserves the workflow version and refuses changed identity on final apply', async () => {
-  render(<Editor embedded initialWorkflowId={source.id} />)
+  render(<Editor access={{ canView: true, canEdit: true, canDeploy: true }} embedded initialWorkflowId={source.id} />)
   fireEvent.click(await screen.findByRole('button', { name: /AI 修改/ }))
   const apply = mocks.drawer.mock.lastCall![0].onApply
   const draft = reviewedDraft()

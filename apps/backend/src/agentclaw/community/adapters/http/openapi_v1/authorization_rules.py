@@ -786,6 +786,7 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("DELETE", "/openapi/v1/bots/spaces/{space_id}/members/{member_user_id}"): NoCheck(
         "Space membership, adjudicated by the Space service"
     ),
+    ("DELETE", "/openapi/v1/bots/spaces/{space_id}"): NoCheck("Space deletion, adjudicated by the Space service"),
     (
         "PUT",
         "/openapi/v1/bots/spaces/{space_id}/members/{member_user_id}/role",

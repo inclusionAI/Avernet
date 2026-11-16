@@ -130,7 +130,7 @@ describe.each(['modify', 'create'] as const)('Editor AI toolbar sessions in %s m
     const previousDraft = makeDraft('旧会话已完成的修改')
     const nextDraft = makeDraft('新会话的修改')
     generate.mockResolvedValueOnce(previousDraft).mockResolvedValueOnce(nextDraft)
-    render(<Editor embedded initialWorkflowId={source.id} />)
+    render(<Editor access={{ canView: true, canEdit: true, canExecute: true, canDeploy: true }} embedded initialWorkflowId={source.id} />)
     const toolbar = await screen.findByRole('button', { name: modeUi[mode].toolbar })
 
     fireEvent.click(toolbar)
@@ -161,7 +161,7 @@ describe.each(['modify', 'create'] as const)('Editor AI toolbar sessions in %s m
     // Deliberately resolve despite abort to model a non-cooperative transport.
     generate.mockReturnValueOnce(new Promise((resolve) => { resolvePrevious = resolve }))
       .mockResolvedValueOnce(nextDraft)
-    render(<Editor embedded initialWorkflowId={source.id} />)
+    render(<Editor access={{ canView: true, canEdit: true, canExecute: true, canDeploy: true }} embedded initialWorkflowId={source.id} />)
     const toolbar = await screen.findByRole('button', { name: modeUi[mode].toolbar })
 
     fireEvent.click(toolbar)
@@ -187,6 +187,29 @@ describe.each(['modify', 'create'] as const)('Editor AI toolbar sessions in %s m
     expect(expectMode(mode)).toHaveValue('新会话的独立需求')
     expect(generate).toHaveBeenCalledTimes(2)
     expect(generate).toHaveBeenNthCalledWith(2, mode, '新会话的独立需求', source, expect.any(AbortSignal), expect.objectContaining({ requestId: expect.any(String) }))
+    expect(useEditorStore.getState().spec).toEqual(source)
+    expect(useEditorStore.getState().isDirty).toBe(false)
+  })
+})
+
+
+describe.each(['create', 'modify'] as const)('AI read-only revocation during %s generation', mode => {
+  it('aborts local waiting and ignores the late result without restoring the session on regrant', async () => {
+    let resolveDraft!: (draft: WorkflowAiDraft) => void
+    generate.mockReturnValueOnce(new Promise(resolve => { resolveDraft = resolve }))
+    const view = render(<Editor access={{ canView: true, canEdit: true, canDeploy: true }} embedded initialWorkflowId={source.id} />)
+    fireEvent.click(await screen.findByRole('button', { name: modeUi[mode].toolbar }))
+    submitRequirement(mode, 'Do not apply after revocation')
+    const signal = generate.mock.calls[0][3]!
+    expect(signal.aborted).toBe(false)
+    view.rerender(<Editor access={{ canView: true, canEdit: false, canDeploy: false }} embedded initialWorkflowId={source.id} />)
+    expect(signal.aborted).toBe(true)
+    expect(screen.queryByRole('region', { name: 'AI 工作流助手' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: modeUi[mode].toolbar })).toBeDisabled()
+    await act(async () => resolveDraft(makeDraft('Late result')))
+    view.rerender(<Editor access={{ canView: true, canEdit: true, canDeploy: true }} embedded initialWorkflowId={source.id} />)
+    expect(screen.queryByRole('region', { name: 'AI 工作流助手' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: 'AI 草稿预览' })).not.toBeInTheDocument()
     expect(useEditorStore.getState().spec).toEqual(source)
     expect(useEditorStore.getState().isDirty).toBe(false)
   })

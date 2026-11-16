@@ -280,6 +280,7 @@ impl BcsServer {
                 management,
             )));
         }
+        openapi_v1.group_context = Some(self.state.services.group_context.clone());
         openapi_v1.collaboration_drafts = self.state.services.collaboration_drafts.clone();
         openapi_v1.worker_task_service = Some(Arc::new(
             bcs_message_flow::TaskHandleApplicationService::new(self.state.services.message_flow.clone()),

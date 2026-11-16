@@ -41,6 +41,24 @@ jest.mock('@/hooks/useHumanIdentity', () => ({
   })),
 }));
 
+jest.mock('@/services/backendApi/collaboration/collaborationBotController', () => ({
+  queryCollaborationBots: jest.fn(async () => ({
+    code: 200000,
+    message: 'success',
+    data: {
+      total: 1,
+      items: [
+        {
+          kind: 'bot',
+          bot_id: 'bot-owned',
+          created_by: 'u-1',
+          visibility: 'public',
+        },
+      ],
+    },
+  })),
+}));
+
 jest.mock('@/services/botWorkshop', () => ({
   botWorkshopService: {
     list: jest.fn(async () => ({

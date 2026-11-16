@@ -2,9 +2,7 @@ import { CANCEL_UI_TEXT, SEND_BAN_UI_TEXT } from '@/adapters/a2a/bootstrap';
 import { clearBotCdnConfig, queryAndRegisterBotLibraryCdn } from '@/services/bcs/libraryCdnInjector';
 import { listTaskPreflightMessages, mergeTaskPreflightMessages } from '@/services/tasks/taskPreflightMessageStore';
 import { createBotChatProvider, isAicodingConnectionEngine, type BotChatState } from '@/services/workspace/botChatProvider';
-import { buildConversationSessionRequestRange, supportsConversationInstanceScope } from '@/services/workspace/botSessionService';
 import type { BotChatSessionView, ChatBotView } from '@/services/workspace/botSessionService';
-import { useConversationStore } from '@/stores/conversationStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useChat, type ProviderConnectionStatus } from '@tc-chat/adapters';
 import type { ChatMessage, PanelHandle, PromptFileRef, ResourceReference } from '@tc-chat/core';
@@ -13,6 +11,7 @@ import { toast } from 'sonner';
 import { enrichFileRefContent } from './botChatMessagePrefill';
 import { prependUniqueMessages } from './groupChatHistoryUtils';
 import { useBotConnectionRuntime } from './useBotConnectionRuntime';
+import { useBotSessionRange } from './useBotSessionRange';
 import { useSessionDisplayStatus, type SessionEnterOutcome } from './useSessionDisplayStatus';
 
 export interface SendFileRefs {
@@ -33,13 +32,7 @@ export function useBotChat(
   const identityId = authenticatedUserId === undefined ? workspaceIdentityId : authenticatedUserId;
   const historyRefreshNonce = useWorkspaceStore((s) => s.historyRefreshNonce);
   const sessionId = session?.sessionId ?? null;
-  const instanceSelection = useConversationStore((state) =>
-    bot ? state.instanceSelectionByBotId[bot.botId] : undefined,
-  );
-  const sessionRange = useMemo(() => {
-    if (!bot || !instanceSelection || !supportsConversationInstanceScope(bot)) return undefined;
-    return buildConversationSessionRequestRange(bot, instanceSelection);
-  }, [bot, instanceSelection]);
+  const sessionRange = useBotSessionRange(bot);
   const [supportState, setSupportState] = useState<BotChatState>({ phase: 'idle', error: null });
   const [connectionStatus, setConnectionStatus] = useState<ProviderConnectionStatus>('disconnected');
   // 连接状态仍等待双完成，但 HTTP 历史独立就绪，先供阅读，不等待 IAM/握手。
@@ -49,12 +42,10 @@ export function useBotChat(
   const [historyEmpty, setHistoryEmpty] = useState(false);
   const [hasMoreHistory, setHasMoreHistory] = useState(false);
   const [isLoadingMoreHistory, setIsLoadingMoreHistory] = useState(false);
-
   const provider = useMemo(() => {
     if (!bot || !sessionId || !identityId) return null;
     return createBotChatProvider({ bot, userId: identityId, sessionId, range: sessionRange });
   }, [bot, sessionId, identityId, sessionRange]);
-
   const connectionRuntime = useBotConnectionRuntime(provider);
   const historyDone = provider !== null && historyProvider === provider;
   const currentProvider = useRef(provider);

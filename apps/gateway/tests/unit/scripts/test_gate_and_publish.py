@@ -87,9 +87,9 @@ def test_checked_in_bcn_artifacts_split_public_and_internal_operations() -> None
 
     assert public_document["openapi"] == "3.1.0"
     assert internal_document["openapi"] == "3.1.0"
-    assert public_operations == 73
+    assert public_operations == 79
     assert internal_operations == 25
-    assert public_operations + internal_operations == 98
+    assert public_operations + internal_operations == 104
     agent_self_path = "/api/v1/collaboration/agents/me"
     assert set(internal_document["paths"][agent_self_path]) == {"get"}
     assert agent_self_path.replace("/api/", "/openapi/") not in public_document["paths"]

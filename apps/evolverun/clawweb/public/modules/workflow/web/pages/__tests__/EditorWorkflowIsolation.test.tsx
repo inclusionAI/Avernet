@@ -51,7 +51,7 @@ function snapshot(version: 'draft' | 'current' = 'current'): Snapshot {
 let queryClient: QueryClient | null = null
 function mount(): RenderResult {
   queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
-  return render(<QueryClientProvider client={queryClient}><Editor embedded initialWorkflowId={mocks.spec!.id} /></QueryClientProvider>)
+  return render(<QueryClientProvider client={queryClient}><Editor access={{ canView: true, canEdit: true, canExecute: true, canDeploy: true }} embedded initialWorkflowId={mocks.spec!.id} /></QueryClientProvider>)
 }
 beforeEach(async () => {
   vi.resetAllMocks(); localStorage.clear(); state().reset({ force: true })
@@ -203,6 +203,17 @@ describe('workflow and script persistence safety', () => {
     ])
     expect(writes()).toHaveLength(1); expect(writes()[0][0]).toBe(`/api/workflows/${mocks.spec!.id}/unified-save`)
   })
+  it('keeps an imported new workflow ID locally editable before creation', async () => {
+    mount(); await waitForPack(); click('YAML')
+    const imported = { ...mocks.spec!, id: 'new-imported-workflow', title: 'Imported local workflow' }
+    fireEvent.change(screen.getByLabelText('工作流 YAML'), { target: { value: stringify(imported) } })
+    click('校验并应用'); await screen.findByText(/尚未保存到服务器/)
+    act(() => state().updateSpecField('title', 'Still editable'))
+    expect(state().spec?.title).toBe('Still editable')
+    expect(screen.getByRole('button', { name: '保存', exact: true })).toBeEnabled()
+    expect(writes()).toEqual([])
+  })
+
   it('only persists applied YAML on top-level save; typing and Apply do not save', async () => {
     mount(); await waitForPack(); click('YAML')
     const edited = { ...mocks.spec!, title: 'Applied draft' }
@@ -241,7 +252,7 @@ describe('workflow and script persistence safety', () => {
     if (risk === 'dirty') unifiedAvailable = false
     const id = mocks.spec!.id, session = sessionFor(id), base = snapshot()
     const files = base.versionFiles.map(f => f.path === 'scripts/run' ? { ...f, contentBase64: btoa('keep local') } : f)
-    updateVersion(session, 'current', { snapshot: { ...base, canWrite: false }, files,
+    updateVersion(session, 'current', { snapshot: { ...base, canWrite: true }, files,
       blocked: risk === 'blocked', loading: risk === 'loading', error: risk === 'blocked' ? 'Git blocked' : null })
     const reconciliation = risk === 'unknown' ? { token: {}, reason: 'no-response' } as NonNullable<typeof session.state.reconciliation> : null
     publish(session, { ...session.state, version: 'current', saving: risk === 'saving', uploading: risk === 'uploading', reconciliation })
@@ -275,10 +286,10 @@ describe('workflow and script persistence safety', () => {
     const pendingSnapshot = snapshot('draft')
     mocks.fetchJson.mockReturnValueOnce(pending.promise)
     mocks.spec = undefined; mocks.baseline = undefined
-    const view = render(<Editor embedded initialWorkflowId={original.id} />)
+    const view = render(<Editor access={{ canView: true, canEdit: true, canExecute: true, canDeploy: true }} embedded initialWorkflowId={original.id} />)
     act(() => { state().loadSpec(original); state().updateSpecField('title', 'Local edit') })
     mocks.spec = { ...original, title: 'Late data' }; mocks.baseline = draft
-    view.rerender(<Editor embedded initialWorkflowId={original.id} />)
+    view.rerender(<Editor access={{ canView: true, canEdit: true, canExecute: true, canDeploy: true }} embedded initialWorkflowId={original.id} />)
     expect(state().spec?.title).toBe('Local edit'); expect(state().isDirty).toBe(true)
     await act(async () => { pending.resolve(pendingSnapshot); await pending.promise })
     expect(state().spec?.title).toBe('Local edit'); expect(state().isDirty).toBe(true)

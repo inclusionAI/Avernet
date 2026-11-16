@@ -8,6 +8,7 @@ from agentclaw.community.di.modules.config_module import ConfigModule
 import pytest
 
 
+
 def test_task_dispatch_loads_backend_url_from_config(monkeypatch) -> None:
     monkeypatch.setattr(
         config_module,

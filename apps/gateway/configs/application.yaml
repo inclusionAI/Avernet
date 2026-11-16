@@ -239,7 +239,7 @@ user_config:
       app: optional
       bot: optional
 
-    "/openapi/v1/todos/**":
+    "/openapi/v1/collaboration/tasks/todos/**":
       user: required
 
     "/openapi/v1/bots/**":
@@ -321,6 +321,9 @@ user_config:
       user: optional
       app: optional
       bot: optional
+
+    "POST /openapi/v1/collaboration/groupcontext/**":
+      user: required
 
     # Bot registration. The token-issuance GET is Human-Principal only: the
     # caller IS the person receiving the token (bcs additionally 403s
@@ -477,14 +480,9 @@ user_config:
           source: file
           path: schemas/bots.openapi.json
           refresh_seconds: 300
-      # Human Todo workbench: roots at /openapi/v1/todos and forwards verbatim
-      # to the backend's public OpenAPI artifact.
-      todos:
-        server: backend
-        schema:
-          source: file
-          path: schemas/bots.openapi.json
-          refresh_seconds: 300
+      # Human Todo workbench: rides collaboration-tasks under
+      # /openapi/v1/collaboration/tasks/todos and forwards verbatim to the
+      # backend's public OpenAPI artifact.
       # The backend's agent-swarm surface: submit/poll/cancel SSE runs under
       # /openapi/v1/agentswarm (additive-only within v1; a breaking change
       # ships as /openapi/v2/agentswarm). Forwards verbatim — the gateway only

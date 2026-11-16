@@ -41,6 +41,14 @@ class PersonalSpaceInvariantError(SpaceError):
     pass
 
 
+class PersonalSpaceDeletionError(SpaceError):
+    """Raised when a deletion request targets a Personal Space."""
+
+
+class SpaceNotEmptyError(SpaceError):
+    """Raised when a Team Space still owns Bots or Skills and cannot be deleted."""
+
+
 class SpaceScTeamRepairNotApplicableError(SpaceError):
     """Raised when repair is requested for a non-team Space."""
 

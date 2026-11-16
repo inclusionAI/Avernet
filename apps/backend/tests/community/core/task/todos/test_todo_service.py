@@ -351,6 +351,8 @@ def test_create_todo_persists_pending_without_creating_or_running_context():
     assert bots.calls == ["bot_1"]
     assert catalog.calls[0]["bot_uuids"] == ("bot_1:another_user",)
     assert catalog.calls[0]["filters"].visibility == ("public",)
+    assert catalog.calls[0]["filters"].viewer_actor_type == "bot"
+    assert catalog.calls[0]["filters"].viewer_actor_id == "bot_1:another_user"
     assert collaboration.create_calls == []
     assert collaboration.run_calls == []
     assert repository.calls == [

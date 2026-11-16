@@ -187,35 +187,35 @@ TASK_BBS_AUTHORIZATION: dict[tuple[str, str], Authorization] = {
 
 #: Human self-service Todo workbench; Space and Bot scope are service-enforced.
 TASK_TODO_AUTHORIZATION: dict[tuple[str, str], Authorization] = {
-    ("GET", "/openapi/v1/todos"): NoCheck(
+    ("GET", "/openapi/v1/collaboration/tasks/todos"): NoCheck(
         "Todo list is Space-scoped and service-enforced; no addressed bot"
     ),
-    ("POST", "/openapi/v1/todos"): NoCheck(
+    ("POST", "/openapi/v1/collaboration/tasks/todos"): NoCheck(
         "Todo creation validates Space membership and Bot eligibility in the service"
     ),
-    ("GET", "/openapi/v1/todos/{todo_id}"): NoCheck(
+    ("GET", "/openapi/v1/collaboration/tasks/todos/{todo_id}"): NoCheck(
         "Todo detail derives the human actor and verifies the Todo Space in the service"
     ),
-    ("POST", "/openapi/v1/todos/{todo_id}/run"): NoCheck(
+    ("POST", "/openapi/v1/collaboration/tasks/todos/{todo_id}/run"): NoCheck(
         "Todo start inherits Todo Space membership; B collaboration state is service-enforced"
     ),
-    ("GET", "/openapi/v1/todos/{todo_id}/events"): NoCheck(
+    ("GET", "/openapi/v1/collaboration/tasks/todos/{todo_id}/events"): NoCheck(
         "event projection inherits the Todo Space membership check"
     ),
-    ("GET", "/openapi/v1/todos/{todo_id}/interactions"): NoCheck(
+    ("GET", "/openapi/v1/collaboration/tasks/todos/{todo_id}/interactions"): NoCheck(
         "interaction history inherits the Todo Space membership check"
     ),
-    ("GET", "/openapi/v1/todos/{todo_id}/artifacts"): NoCheck(
+    ("GET", "/openapi/v1/collaboration/tasks/todos/{todo_id}/artifacts"): NoCheck(
         "artifact list inherits the Todo Space membership check"
     ),
     (
         "GET",
-        "/openapi/v1/todos/{todo_id}/artifacts/{artifact_id}/content",
+        "/openapi/v1/collaboration/tasks/todos/{todo_id}/artifacts/{artifact_id}/content",
     ): NoCheck("artifact content inherits the Todo Space membership check"),
-    ("POST", "/openapi/v1/todos/{todo_id}/interactions"): NoCheck(
+    ("POST", "/openapi/v1/collaboration/tasks/todos/{todo_id}/interactions"): NoCheck(
         "human interaction inherits Todo Space and pending-acceptance checks"
     ),
-    ("POST", "/openapi/v1/todos/{todo_id}/acceptance"): NoCheck(
+    ("POST", "/openapi/v1/collaboration/tasks/todos/{todo_id}/acceptance"): NoCheck(
         "human acceptance inherits Todo Space and pending-acceptance checks"
     ),
 }

@@ -35,7 +35,7 @@ describe('todoController', () => {
       pageSize: 10,
     });
 
-    expect(request).toHaveBeenCalledWith('/openapi/v1/todos', {
+    expect(request).toHaveBeenCalledWith('/openapi/v1/collaboration/tasks/todos', {
       method: 'GET',
       params: {
         space_id: 10,
@@ -58,7 +58,7 @@ describe('todoController', () => {
       pageSize: 20,
     });
 
-    expect(request).toHaveBeenCalledWith('/openapi/v1/todos', {
+    expect(request).toHaveBeenCalledWith('/openapi/v1/collaboration/tasks/todos', {
       method: 'GET',
       params: {
         space_id: 10,
@@ -77,7 +77,7 @@ describe('todoController', () => {
   it('查询待办详情时下发当前用户', async () => {
     await getTodo('todo/1');
 
-    expect(request).toHaveBeenCalledWith('/openapi/v1/todos/todo%2F1', {
+    expect(request).toHaveBeenCalledWith('/openapi/v1/collaboration/tasks/todos/todo%2F1', {
       method: 'GET',
       params: userParams,
       operation: 'get-todo',
@@ -93,7 +93,7 @@ describe('todoController', () => {
       botId: 'bot-1',
     });
 
-    expect(request).toHaveBeenCalledWith('/openapi/v1/todos', {
+    expect(request).toHaveBeenCalledWith('/openapi/v1/collaboration/tasks/todos', {
       method: 'POST',
       params: userParams,
       data: {
@@ -114,7 +114,7 @@ describe('todoController', () => {
       targets: [],
     });
 
-    expect(request).toHaveBeenCalledWith('/openapi/v1/todos/todo%2F1/acceptance', {
+    expect(request).toHaveBeenCalledWith('/openapi/v1/collaboration/tasks/todos/todo%2F1/acceptance', {
       method: 'POST',
       params: userParams,
       data: {
@@ -130,7 +130,7 @@ describe('todoController', () => {
   it('查询互动时下发当前用户', async () => {
     await listTodoInteractions('todo/1');
 
-    expect(request).toHaveBeenCalledWith('/openapi/v1/todos/todo%2F1/interactions', {
+    expect(request).toHaveBeenCalledWith('/openapi/v1/collaboration/tasks/todos/todo%2F1/interactions', {
       method: 'GET',
       params: userParams,
       operation: 'list-todo-interactions',
@@ -141,7 +141,7 @@ describe('todoController', () => {
   it('创建互动时下发当前用户', async () => {
     await createTodoInteraction('todo/1', { message: '补充信息' });
 
-    expect(request).toHaveBeenCalledWith('/openapi/v1/todos/todo%2F1/interactions', {
+    expect(request).toHaveBeenCalledWith('/openapi/v1/collaboration/tasks/todos/todo%2F1/interactions', {
       method: 'POST',
       params: userParams,
       data: { message: '补充信息' },
@@ -152,7 +152,7 @@ describe('todoController', () => {
   it('查询事件时下发当前用户', async () => {
     await listTodoEvents('todo/1');
 
-    expect(request).toHaveBeenCalledWith('/openapi/v1/todos/todo%2F1/events', {
+    expect(request).toHaveBeenCalledWith('/openapi/v1/collaboration/tasks/todos/todo%2F1/events', {
       method: 'GET',
       params: userParams,
       operation: 'list-todo-events',
@@ -163,7 +163,7 @@ describe('todoController', () => {
   it('运行待办时下发当前用户', async () => {
     await runTodo('todo/1');
 
-    expect(request).toHaveBeenCalledWith('/openapi/v1/todos/todo%2F1/run', {
+    expect(request).toHaveBeenCalledWith('/openapi/v1/collaboration/tasks/todos/todo%2F1/run', {
       method: 'POST',
       params: userParams,
       operation: 'run-todo',

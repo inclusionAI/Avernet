@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useEditorStore } from '../editor/store'
+import { editorIsReadOnly, useEditorStore } from '../editor/store'
 import { NODE_CATALOG, createEditorNode } from '../editor/nodeCatalog'
 import { NODE_DRAG_TYPE } from './editor/CanvasPresentation'
 import FlowNodeIcon from './editor/FlowNodeIcon'
@@ -9,6 +9,7 @@ export interface NodePaletteProps {
 }
 
 export default function NodePalette({ onAdd }: NodePaletteProps) {
+  const readOnly = useEditorStore(editorIsReadOnly)
   const [query, setQuery] = useState('')
   const [expanded, setExpanded] = useState(false)
   const { spec, addNode, selectNode } = useEditorStore()
@@ -16,9 +17,10 @@ export default function NodePalette({ onAdd }: NodePaletteProps) {
   const matches = NODE_CATALOG.filter((item) => `${item.label} ${item.type} ${item.description}`.toLocaleLowerCase().includes(search))
   const common = matches.filter((item) => item.group === 'common')
   const advanced = matches.filter((item) => item.group === 'advanced')
-  const disabled = !onAdd && !spec
+  const disabled = readOnly || !onAdd && !spec
 
   const add = (type: string) => {
+    if (editorIsReadOnly(useEditorStore.getState())) return
     if (onAdd) { onAdd(type); return }
     const node = createEditorNode(type)
     addNode(node)
@@ -27,7 +29,7 @@ export default function NodePalette({ onAdd }: NodePaletteProps) {
   }
   const renderCards = (items: typeof matches) => items.map((item) => (
     <button key={item.type} type="button" draggable={!disabled} disabled={disabled} onClick={() => add(item.type)}
-      onDragStart={(event) => { event.dataTransfer.setData(NODE_DRAG_TYPE, item.type); event.dataTransfer.effectAllowed = 'copy' }}
+      onDragStart={(event) => { if (readOnly) { event.preventDefault(); return }; event.dataTransfer.setData(NODE_DRAG_TYPE, item.type); event.dataTransfer.effectAllowed = 'copy' }}
       aria-label={`添加${item.label}`} title={`${item.label} · ${item.type}`}
       className="group flex w-full cursor-grab items-center gap-2.5 rounded-lg border border-input bg-card p-2.5 text-left transition hover:border-primary/50 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:cursor-grabbing disabled:cursor-not-allowed disabled:opacity-50">
       <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary"><FlowNodeIcon type={item.type} /></span>
