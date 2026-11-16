@@ -85,6 +85,12 @@ export function useBotSessionFileUpload(
             ...(stage ? { stage } : {}),
             signal: abortController.signal,
             onProgress: updateProgress(currentTask.localId),
+            // 字节直传后的编排阶段回写任务态:组装中/物化中(转圈),避免 100% 进度条停滞无反馈。
+            onPhase: (phase) =>
+              store.updateTask(
+                currentTask.localId,
+                phase === 'completing' ? { phase, progress: 100 } : { phase },
+              ),
           });
           // Aborting transport alone does not prevent an already completed response.
           if (generation !== generationRef.current) return;

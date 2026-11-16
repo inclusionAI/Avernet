@@ -218,6 +218,41 @@ describe('botSessionFileService.uploadOne', () => {
     expect(res.ok).toBe(false);
     expect((res as { error: { friendlyMessage: string } }).error.friendlyMessage).toContain('物化失败');
   });
+
+  it('onPhase 依序上报 completing → materializing,供 UI 展示物化中转圈', async () => {
+    const onPhase = jest.fn();
+    const pending = botSessionFileService.uploadOne('bot-1', 'sess-1', 'user-1', file('a.pdf'), { onPhase });
+    await jest.advanceTimersByTimeAsync(2000);
+    const res = await pending;
+    expect(res.ok).toBe(true);
+    expect(onPhase.mock.calls.map((c: [('completing' | 'materializing')]) => c[0])).toEqual([
+      'completing',
+      'materializing',
+    ]);
+  });
+
+  it('物化轮询遇 5xx 容忍继续,后续 ready 仍成功', async () => {
+    mocked.getMaterializeStatus.mockRejectedValueOnce(
+      Object.assign(new Error('bad gateway'), { status: 502 }),
+    );
+    const pending = botSessionFileService.uploadOne('bot-1', 'sess-1', 'user-1', file('a.pdf'), {});
+    await jest.advanceTimersByTimeAsync(5000);
+    const res = await pending;
+    expect(res.ok).toBe(true);
+    expect(mocked.getMaterializeStatus).toHaveBeenCalledTimes(2);
+  });
+
+  it('物化轮询遇 4xx 致命,立即失败不再重试', async () => {
+    mocked.getMaterializeStatus.mockRejectedValueOnce(
+      Object.assign(new Error('resource gone'), { status: 404 }),
+    );
+    const pending = botSessionFileService.uploadOne('bot-1', 'sess-1', 'user-1', file('a.pdf'), {});
+    await jest.advanceTimersByTimeAsync(5000);
+    const res = await pending;
+    expect(res.ok).toBe(false);
+    expect((res as { error: { friendlyMessage: string } }).error.friendlyMessage).toBe('resource gone');
+    expect(mocked.getMaterializeStatus).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('botSessionFileService 列表/删除/下载', () => {

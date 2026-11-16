@@ -226,10 +226,11 @@ async function executeBackendRequest<T>(url: string, options: BackendRequestOpti
   }
 
   if (!response.ok) {
-    // 未登录处置决策(见 authFailurePolicy):外部 oauth 策略下,未登录失败(HTTP 401 / 信封未登录体)
-    // 已在策略内单飞登记弹窗信号 → 静默上抛 AceLoginRedirectError 阻止 stale 渲染,不逐条报错
-    // (spec: 会话过期/未登录场景统一导向登录弹窗);已确认未登录后的其余失败也静默,登录前的接口
-    // 错误提示是噪音。两者均仍抛错,调用方可感知失败。ace-gateway 维持既有 BackendRequestError 路径。
+    // 未登录处置决策(见 authFailurePolicy):两登录策略下,未登录失败(HTTP 401 / 信封未登录体)
+    // 已在策略内按策略单飞登记登录信号 → 静默上抛 AceLoginRedirectError 阻止 stale 渲染,不逐条报错
+    // (spec: 会话过期/未登录场景统一导向登录引导——oauth 弹 ExternalLoginPromptModal、ace 弹
+    // GatewayReauthModal 等待重登);oauth 已确认未登录后的其余失败也静默,登录前的接口错误提示是噪音。
+    // 两者均仍抛错,调用方可感知失败。
     const authDisposition = resolveAuthFailureDisposition({
       status: response.status,
       data: inspectData,
@@ -290,7 +291,8 @@ async function executeBackendRequest<T>(url: string, options: BackendRequestOpti
   }
 
   // 网关误包形态(HTTP 2xx 但信封 code 落未登录段,如 40100/401000):与 !response.ok 的未登录路径
-  // 同处置——登记弹窗信号(单飞)+ 静默上抛,避免误包体被无校验调用方当成功数据渲染或逐条报错。
+  // 同处置——登记单飞登录信号(策略分/oauth 弹窗或 ace 等待重登)+ 静默上抛,避免误包体被无校验
+  // 调用方当成功数据渲染或逐条报错。
   if (resolveAuthFailureDisposition({ data: inspectData, fromEpoch: requestAuthEpoch }) === 'login-prompt-silent') {
     throw new AceLoginRedirectError();
   }

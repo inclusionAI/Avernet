@@ -3,6 +3,7 @@ import {
   addGroupParticipant,
   deleteGroupParticipant,
 } from '@/services/backendApi/collaboration/collaborationGroupController';
+import { friendlyStatusFallback } from '@/utils/requestErrorHandler';
 import { groupService } from './groupService';
 import type { DomainError, DomainResult } from './identityService';
 
@@ -25,7 +26,12 @@ export const groupMemberService = {
       return {
         ok: false,
         error:
-          status === 409 ? conflictError() : toDomainError('GROUP_MEMBER_ADD_FAILED', '添加群成员失败，请稍后重试。'),
+          status === 409
+            ? conflictError()
+            : toDomainError(
+                'GROUP_MEMBER_ADD_FAILED',
+                friendlyStatusFallback(status, '添加群成员失败，请稍后重试。'),
+              ),
       };
     }
   },
@@ -42,7 +48,10 @@ export const groupMemberService = {
         error:
           status === 409
             ? conflictError()
-            : toDomainError('GROUP_MEMBER_REMOVE_FAILED', '移除群成员失败，请稍后重试。'),
+            : toDomainError(
+                'GROUP_MEMBER_REMOVE_FAILED',
+                friendlyStatusFallback(status, '移除群成员失败，请稍后重试。'),
+              ),
       };
     }
   },
@@ -56,7 +65,10 @@ export const groupMemberService = {
       const status = (err as { status?: number })?.status;
       return {
         ok: false,
-        error: status === 409 ? conflictError() : toDomainError('GROUP_LEAVE_FAILED', '退出协作群失败，请稍后重试。'),
+        error:
+          status === 409
+            ? conflictError()
+            : toDomainError('GROUP_LEAVE_FAILED', friendlyStatusFallback(status, '退出协作群失败，请稍后重试。')),
       };
     }
   },

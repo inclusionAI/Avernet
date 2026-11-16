@@ -5,9 +5,10 @@ import { create } from 'zustand';
  * 网关登录处置的统一状态载体（Store 只做同步 setter，守分层）。
  *
  * `pendingLogin` 是统一信号（单飞：首个胜出，避免并发命中重复处置）：
- * - `{ mode:'redirect', url }`：内部 `ace-gateway` 策略——「等待重登」信号。url 为 ACE 下发的
- *   pubLogin 链接（含 go 回跳与 aceToken）。处置由全局 `GatewayReauthModal` 消费：新标签页打开
- *   登录链接完成重登，原页面不刷新，凭探活/广播感知恢复（ace-gateway-popup-reauth；替代
+ * - `{ mode:'redirect', url? }`：内部 `ace-gateway` 策略——「等待重登」信号。url 为 ACE 下发的
+ *   pubLogin 链接（含 go 回跳与 aceToken）；裸 HTTP 401/未登录信封触发时无链接可取，允许缺省登记，
+ *   由探活分支补链。处置由全局 `GatewayReauthModal` 消费：新标签页打开登录链接完成重登，
+ *   原页面不刷新，凭探活/广播感知恢复（ace-gateway-popup-reauth；替代
  *   `redirect-not-login-to-gateway-login` 的「toast + 当前页 replace」硬跳语义）。
  * - `{ mode:'prompt' }`：外部 `oauth-provider` 策略——弹 `ExternalLoginPromptModal`（不携带 ACE pubLogin url），
  *   登录入口经 `/auth/url` provider 取得。
@@ -30,12 +31,15 @@ interface LoginRedirectState {
   /** 向后兼容：等于 `pendingLogin?.mode==='redirect' ? pendingLogin.url : undefined`。 */
   pendingLoginUrl: string | undefined;
   /**
-   * 内部(ace-gateway)：登记「等待重登」。已 pending 或 url 非法时 no-op（单飞）。
+   * 内部(ace-gateway)：登记「等待重登」。已 pending 时 no-op（单飞）。
+   * `url` 可缺省——裸 HTTP 401/未登录信封触发时（`resolveAuthFailureDisposition`）无 ACE 登录体
+   * 可取登录链接，先弹 Modal 占位，链接由探活分支（`useGatewayLoginRedirect` → `refreshRedirectUrl`）
+   * 以网关下发的新鲜 pubLogin 链接补齐。
    * `fromEpoch`：请求发出时捕获的认证代次——与当前代次不一致的晚到拦截体（上一代认证期间发出的
    * 请求、其响应晚到于重登成功之后）不再登记，避免恢复后 Modal 被旧信号闪回
    * （与 `requestPrompt` 的代次防线同构，见 ace-gateway-popup-reauth D5）。
    */
-  requestRedirect: (url: string, fromEpoch?: number) => void;
+  requestRedirect: (url?: string, fromEpoch?: number) => void;
   /**
    * 外部(oauth-provider)：登记弹窗提示。已 pending 时 no-op（单飞）。
    * `fromEpoch`：同 `requestRedirect` 的晚到信号防线。
@@ -60,8 +64,12 @@ export const useLoginRedirectStore = create<LoginRedirectState>((set, get) => ({
     // 晚到信号防线：发起时属于上一代认证的请求，其 ACE 拦截体晚到于重登成功之后，忽略。
     if (fromEpoch !== undefined && useExternalAuthStore.getState().authEpoch !== fromEpoch) return;
     if (get().pendingLogin !== undefined) return; // 单飞：首个信号胜出。
-    if (typeof url !== 'string' || url.trim() === '') return; // 非法 url 不登记。
-    set({ pendingLogin: { mode: 'redirect', url }, pendingLoginUrl: url });
+    // url 缺省/空白串均按「无链接占位」登记：裸 401 无登录体可取链，链接由探活补齐后经
+    // refreshRedirectUrl 更新。既有带 URL 的登记路径行为不变。
+    const normalized = typeof url === 'string' ? url.trim() : '';
+    const pendingLogin: PendingLogin =
+      normalized !== '' ? { mode: 'redirect', url: normalized } : { mode: 'redirect' };
+    set({ pendingLogin, pendingLoginUrl: normalized !== '' ? normalized : undefined });
   },
   requestPrompt: (fromEpoch) => {
     // 旧请求防线：发起时属于上一代认证的请求，其未登录响应晚到于新一轮成功登录，忽略。
