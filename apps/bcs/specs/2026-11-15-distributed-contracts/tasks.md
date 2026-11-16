@@ -48,7 +48,7 @@ run the same suite. Backend guarantees must be verified before rollout.
 
 | ID | Files / deliverable | Depends on | Acceptance |
 | --- | --- | --- | --- |
-| G1 | `crates/application/bcs-app-dist-gateway/src/{identity,routing}.rs` | D0 | Deterministic sid/tid/input identity; tenant/principal authorization; target and interaction checks; repeat request selects same task |
+| G1 | `crates/application/bcs-app-dist-gateway/src/{identity,routing}.rs` | D0 | Deterministic sid/tid/input identity; frozen spec read through SessionStorePort; tenant/principal authorization; target and interaction checks; repeat request selects same task |
 | G2 | Gateway `src/admission.rs` plus `crates/services/bcs-dist-kernel/src/gateway/admission.rs`; `tests/admission.rs` | G1, S2 | Application calls core, core calls repo; new task creation and inbox admission; same content duplicates, changed content conflicts; no success before durable activation |
 | G3 | Gateway `src/query.rs` plus kernel `src/gateway/query.rs`; `tests/query.rs` | S2 | Full query reconstructs one cut; queued and archived tasks supported; task listing includes running tasks and authorization scope |
 | G4 | `src/subscription.rs`; `tests/subscription.rs` | G3, W4 | Snapshot@H then follow H; valid resume C without double-folding; Gap rebuild; no per-event task read |

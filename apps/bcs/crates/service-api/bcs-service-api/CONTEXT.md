@@ -14,6 +14,11 @@ The [change record](../../../specs/2026-11-15-distributed-contracts/spec.md) lin
 ordered implementation tasks and actual validation; concrete providers and
 runtime implementations remain pending.
 
+`SessionStorePort::get_spec` owns frozen-session specification reads, even before
+the first checkpoint. Inbox producer/consumer ports and the stateful shard feed
+remain separate. Initial spec/task creation remains inside reliable admission;
+the read-method move adds no trait, storage layout or required database call.
+
 Distributed ownership uses `ShardOwner` for the shard-assigned identity and
 `SessionOwnership` for the processing identity obtained by sealing a specific session.
 Shard claims compare `expected_epoch`; business commits compare

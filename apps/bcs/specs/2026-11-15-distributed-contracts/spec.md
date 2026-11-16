@@ -26,6 +26,12 @@ or revive expired leases. Session scope and exact sealed owner are validated
 atomically with commit sequence checks and writes; commit proofs remain. This updates the
 same unpublished declarations, with no runtime implementation or migration.
 
+Specification reads belong to `SessionStorePort::get_spec`, while initial
+spec/task creation remains part of `InboxProducerPort::admit` and its reliable
+input/activation guarantee. `InboxProducerPort`, `InboxConsumerPort` and
+`ShardFeedPort` remain separate; there are still 23 service/port traits. This
+changes read ownership only, not storage layout or runtime access counts.
+
 ## Invariants
 
 1. A successful admission means a durable logical input and durable activation.

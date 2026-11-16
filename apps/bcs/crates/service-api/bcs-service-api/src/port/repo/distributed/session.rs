@@ -151,6 +151,11 @@ pub enum RecoveryUpdate {
 
 #[async_trait]
 pub trait SessionStorePort: Send + Sync {
+    /// Read the immutable specification established by InboxProducerPort::admit,
+    /// including before the first checkpoint exists. Does not acquire ownership,
+    /// create a session, or refresh its frozen definition. None means absent;
+    /// storage failures remain errors, never a missing-spec result.
+    async fn get_spec(&self, sid: &Sid) -> Result<Option<SessionSpec>, StoreError>;
     /// Validate shard/node/incarnation/epoch and current claim validity against
     /// stored ownership, then create or seal its ShardOwner into this session,
     /// then load latest preserved business data. Claiming a shard alone cannot
