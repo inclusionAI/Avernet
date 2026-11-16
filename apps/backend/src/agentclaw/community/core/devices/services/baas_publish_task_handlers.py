@@ -273,7 +273,7 @@ class BaasCreatePublishPollHandler:
             self._baas_device_service._mark_service_start_failed(
                 binding_id=binding_id,
                 error=(
-                    "BaaS publish polling timeout after "
+                    "BaaS publish 超时，请刷新页面后重新创建 Bot。publish polling timeout after "
                     f"{_CREATE_PUBLISH_TIMEOUT_SECONDS}s (publish_id={publish_id})"
                 ),
             )
@@ -287,7 +287,7 @@ class BaasCreatePublishPollHandler:
         if status == "FAILED":
             self._baas_device_service._mark_service_start_failed(
                 binding_id=binding_id,
-                error=f"BaaS publish FAILED: publish_id={publish_id}",
+                error=f"BaaS publish 发布失败，请刷新页面后重新创建 Bot。FAILED: publish_id={publish_id}",
             )
             return Complete()
         if status == "ACTIVE":
