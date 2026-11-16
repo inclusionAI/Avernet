@@ -5,9 +5,13 @@ import '@testing-library/jest-dom';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
+// MCP 一级来源可清单（`mock` 前缀让 jest.mock 工厂可引用；默认全量 = Open Core 默认行为）
+let mockMcpSources: string[] = ['internal', 'open-platform'];
+
 jest.mock('@/capabilities', () => ({
   getCapabilities: () => ({
     getBotSkillPickerSources: () => ({ status: 'available', value: ['market', 'workshop', 'mine'] }),
+    getBotMcpPickerSources: () => ({ status: 'available', value: mockMcpSources }),
   }),
 }));
 
@@ -88,7 +92,9 @@ test('桌面本地 Skill 的上传、启停和删除管理收敛到添加 Skill 
   expect(onLocalToggle).toHaveBeenCalledWith(expect.objectContaining({ id: 'local-1' }));
 });
 
-test('添加 MCP 只展示引用市场 MCP，不展示引用工坊 MCP', () => {
+// MCP 来源恒为市场（sources=['market']）：单来源时来源切换器整体隐藏
+// （孤悬「引用市场 MCP」选中项无切换意义；弹窗描述与搜索 placeholder 已交代范围）。
+test('添加 MCP 单来源时隐藏来源切换器，不渲染任何来源选项', () => {
   render(
     <CapabilityPickerModal
       kind="mcp"
@@ -103,7 +109,7 @@ test('添加 MCP 只展示引用市场 MCP，不展示引用工坊 MCP', () => {
     />,
   );
 
-  expect(screen.getByRole('button', { name: '引用市场 MCP' })).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '引用市场 MCP' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: '引用工坊 MCP' })).not.toBeInTheDocument();
 });
 
@@ -157,6 +163,36 @@ test('MCP 按内部和开放平台分 Tab，并将搜索交给服务端查询', 
   await userEvent.click(screen.getByRole('button', { name: '开放平台' }));
   await userEvent.type(screen.getByPlaceholderText('搜索市场中的 MCP'), '天气');
   await waitFor(() => expect(searchMcp).toHaveBeenLastCalledWith('open-platform', '天气'));
+});
+
+// 插槽收窄守护（getBotMcpPickerSources 契约）：overlay 收窄清单后，被剔除来源的 Tab 不渲染、
+// 搜索回落首个允许来源——部署形态依赖此契约隐藏特定来源（如内部形态仅内部 MCP）。
+test('getBotMcpPickerSources 收窄后仅渲染允许来源，搜索回落首个允许项', async () => {
+  mockMcpSources = ['internal'];
+  try {
+    const searchMcp = jest.fn().mockResolvedValue(undefined);
+    render(
+      <CapabilityPickerModal
+        kind="mcp"
+        open
+        marketItems={[]}
+        skillCenterItems={[]}
+        workshopItems={[]}
+        myItems={[]}
+        existingIds={[]}
+        onOpenChange={jest.fn()}
+        onConfirm={jest.fn()}
+        onSearchMcp={searchMcp}
+      />,
+    );
+
+    expect(screen.queryByRole('button', { name: '内部 MCP' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '开放平台' })).not.toBeInTheDocument();
+    await waitFor(() => expect(searchMcp).toHaveBeenCalledWith('internal', ''));
+    expect(searchMcp.mock.calls.every((call) => call[0] === 'internal')).toBe(true);
+  } finally {
+    mockMcpSources = ['internal', 'open-platform'];
+  }
 });
 
 test('父组件重渲染并更换回调引用时不会重复查询 MCP', async () => {
