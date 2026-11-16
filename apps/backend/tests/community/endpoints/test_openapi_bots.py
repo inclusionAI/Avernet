@@ -490,6 +490,7 @@ def _seed_recycle_result(world, *, error: bool) -> None:
         world,
         BotDormantRecycleServiceProtocol,
         {"recycle": recycle},
+        also_bind=(BotDormantRecycleOperationProtocol,),
     )
 
 
