@@ -106,6 +106,7 @@ def test_signed_executor_reports_through_http_and_owner_accepts(ingress):
         detail = service.detail_task(created.collet_id)
         assert detail.status == status
         assert detail.events[-1]["actor_id"] == BOT_ID
+        assert detail.events[-1]["payload"] == payload
     assert detail.events[-1]["payload"]["artifacts"] == ["artifact://report"]
     accepted = service.accept_task(TaskAdvanceCommand(created.collet_id), HUMAN)
     assert accepted.status == "done"
@@ -255,3 +256,117 @@ def test_persistence_failure_is_not_a_success_receipt(ingress, engine):
     assert result["error"]["category"] == "INTERNAL"
     assert "storage unavailable" not in str(result)
     assert _version(ingress) == 2
+
+
+_PROGRESS_FIELDS = ("progress", "error_msg", "reason", "task_id")
+
+
+def _report_progress(ingress, entrypoint, payload):
+    """Exercise each real entrypoint; inspect committed state through L4 Query."""
+    _, service, generic, created, _ = ingress
+    revision = _version(ingress)
+    if entrypoint == "http":
+        return _send(ingress, _request(created, "progress", revision, payload))
+    if entrypoint == "product":
+        return service.report_progress(TaskAdvanceCommand(created.collet_id, **payload), BOT)
+    return generic.append_event(
+        created.collet_id,
+        EventAppendCommand(revision, "task.progress.updated", "Task", BOT.actor,
+                           None, "public", payload),
+        BOT,
+    )
+
+
+@pytest.mark.parametrize("entrypoint", ["http", "product", "generic"])
+def test_progress_details_persist_without_changing_lifecycle(ingress, entrypoint):
+    _, service, generic, created, _ = ingress
+    service.start_task(TaskAdvanceCommand(created.collet_id), BOT)
+    task_id = generic.get_events(created.collet_id, context=HUMAN)[0].task_ref
+    assert task_id and task_id != created.collet_id
+    payload = {
+        "percent": 50,
+        "note": "测试遇到错误，等待修复",
+        "progress": "方案和编码完成，正在修复测试",
+        "error_msg": "test_add_negative 断言失败",
+        "reason": "artifact://test-log#test_add_negative",
+        "task_id": task_id,
+    }
+    result = _report_progress(ingress, entrypoint, payload)
+    if entrypoint == "http":
+        assert result["status"] == "SUCCEEDED", result
+    event = generic.get_events(created.collet_id, context=HUMAN)[-1]
+    assert event.payload == payload
+    assert event.task_ref == task_id
+    assert event.event_kind == "task.progress.updated"
+    assert event.actor_ref == BOT.actor
+    assert service.detail_task(created.collet_id).status == "in_progress"
+    assert _version(ingress) == 4
+
+
+@pytest.mark.parametrize("entrypoint", ["http", "product", "generic"])
+@pytest.mark.parametrize("field", _PROGRESS_FIELDS)
+def test_non_string_progress_details_never_write(ingress, entrypoint, field):
+    _, service, generic, created, _ = ingress
+    service.start_task(TaskAdvanceCommand(created.collet_id), BOT)
+    before = generic.get_events(created.collet_id, context=HUMAN)
+    if entrypoint == "http":
+        result = _report_progress(ingress, entrypoint, {field: 123})
+        assert result["status"] == "REJECTED", result
+        assert result["error"]["category"] == "VALIDATION"
+    else:
+        with pytest.raises(ContextCollabValidationError, match=field):
+            _report_progress(ingress, entrypoint, {field: 123})
+    assert generic.get_events(created.collet_id, context=HUMAN) == before
+    assert _version(ingress) == 3
+
+
+@pytest.mark.parametrize("entrypoint", ["http", "product", "generic"])
+@pytest.mark.parametrize("wrong_id", ["another-task", "collet-id"])
+def test_progress_task_id_must_match_actual_task(ingress, entrypoint, wrong_id):
+    _, service, generic, created, _ = ingress
+    service.start_task(TaskAdvanceCommand(created.collet_id), BOT)
+    payload = {"task_id": created.collet_id if wrong_id == "collet-id" else wrong_id}
+    before = generic.get_events(created.collet_id, context=HUMAN)
+    if entrypoint == "http":
+        result = _report_progress(ingress, entrypoint, payload)
+        assert result["status"] == "REJECTED", result
+        assert result["error"]["category"] == "VALIDATION"
+    else:
+        with pytest.raises(ContextCollabValidationError, match="task_id"):
+            _report_progress(ingress, entrypoint, payload)
+    assert generic.get_events(created.collet_id, context=HUMAN) == before
+    assert _version(ingress) == 3
+
+
+@pytest.mark.parametrize("action", ["start", "submit"])
+@pytest.mark.parametrize("field", _PROGRESS_FIELDS)
+def test_progress_details_refused_on_other_wire_actions(ingress, action, field):
+    _, service, _, created, _ = ingress
+    if action == "submit":
+        service.start_task(TaskAdvanceCommand(created.collet_id), BOT)
+    revision = _version(ingress)
+    result = _send(ingress, _request(created, action, revision, {field: "detail"}))
+    assert result["status"] == "REJECTED", result
+    assert result["error"]["category"] == "VALIDATION"
+    assert _version(ingress) == revision
+
+
+def test_null_progress_details_preserve_legacy_payload(ingress):
+    _, service, generic, created, _ = ingress
+    service.start_task(TaskAdvanceCommand(created.collet_id), BOT)
+    legacy_payload = {"percent": 50, "note": "初稿完成"}
+    result = _report_progress(
+        ingress, "http", {**legacy_payload, **dict.fromkeys(_PROGRESS_FIELDS)}
+    )
+    assert result["status"] == "SUCCEEDED", result
+    assert generic.get_events(created.collet_id, context=HUMAN)[-1].payload == legacy_payload
+
+
+@pytest.mark.parametrize("field", ["progress", "error_msg", "reason"])
+def test_oversized_progress_details_never_write(ingress, field):
+    _, service, _, created, _ = ingress
+    service.start_task(TaskAdvanceCommand(created.collet_id), BOT)
+    result = _report_progress(ingress, "http", {field: "x" * 16001})
+    assert result["status"] == "REJECTED", result
+    assert result["error"]["category"] == "VALIDATION"
+    assert _version(ingress) == 3

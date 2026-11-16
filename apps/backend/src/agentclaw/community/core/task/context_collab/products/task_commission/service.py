@@ -68,6 +68,7 @@ from agentclaw.community.core.task.context_collab.l6_products.creation_facts imp
     creation_workflow_kind,
 )
 from agentclaw.community.core.task.context_collab.l6_products.task_contracts import (
+    TASK_PROGRESS_DETAIL_FIELDS,
     resolve_event_contract,
 )
 from agentclaw.community.core.task.context_collab.l6_products.profiles import (
@@ -460,6 +461,14 @@ class TaskCommissionService:
                     "task percent is only reportable by report_progress"
                 )
             payload["percent"] = command.percent
+        for field_name in TASK_PROGRESS_DETAIL_FIELDS:
+            value = getattr(command, field_name)
+            if value is not None:
+                if field_name not in operation.payload_fields:
+                    raise ContextCollabValidationError(
+                        f"task {field_name} is only reportable by report_progress"
+                    )
+                payload[field_name] = value
         if "artifacts" in operation.payload_fields:
             payload["artifacts"] = list(command.artifacts)
 
@@ -664,7 +673,7 @@ class TaskCommissionService:
                 else "",
                 "actor_id": self._principal_id(event.actor_ref),
                 "occurred_at": event.occurred_at,
-                # 公开事件的 payload 随投影可查(percent/note/artifacts)。
+                # 公开事件的 payload 随投影可查(进度明细及 artifacts)。
                 "payload": event.payload if isinstance(event.payload, dict) else {},
             }
             for event in record.events

@@ -26,6 +26,9 @@ from agentclaw.community.core.task.context_collab.l1_interoperate_deliver.envelo
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     VersionedProfileRef,
 )
+from agentclaw.community.core.task.context_collab.l6_products.task_contracts import (
+    TASK_PROGRESS_DETAIL_FIELDS,
+)
 from agentclaw.community.core.task.context_collab.products.task_commission.service_api import (
     TaskAdvanceCommand,
     TaskExecutionReportCommand,
@@ -72,6 +75,10 @@ class ReportPayload(_StrictModel):
     note: str | None = Field(default=None, max_length=16000)
     percent: int | None = Field(default=None, ge=0, le=100)
     artifacts: list[str] = Field(default_factory=list, max_length=100)
+    progress: str | None = Field(default=None, max_length=16000)
+    error_msg: str | None = Field(default=None, max_length=16000)
+    reason: str | None = Field(default=None, max_length=16000)
+    task_id: str | None = Field(default=None, min_length=1, max_length=256)
 
 
 def _timestamp(value: str) -> datetime:
@@ -167,7 +174,7 @@ def report_command(
     fields = payload.model_fields_set
     allowed = {
         "start": {"note"},
-        "progress": {"note", "percent"},
+        "progress": {"note", "percent", *TASK_PROGRESS_DETAIL_FIELDS},
         "submit": {"note", "artifacts"},
     }[operation.action]
     if not fields <= allowed or any(not item.strip() for item in payload.artifacts):
@@ -179,6 +186,10 @@ def report_command(
             note=payload.note,
             percent=payload.percent,
             artifacts=payload.artifacts,
+            progress=payload.progress,
+            error_msg=payload.error_msg,
+            reason=payload.reason,
+            task_id=payload.task_id,
         ),
         expected_version=operation.expected_revision,
         product_profile_ref=VersionedProfileRef(profile.object_id, profile_version),
