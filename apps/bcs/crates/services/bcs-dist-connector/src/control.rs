@@ -9,6 +9,7 @@
 use crate::call::{Call, Flow, Stop, held_write};
 use crate::delayed::UnresolvedKind;
 use crate::report::Admitted;
+use crate::send::RemoteRead;
 use bcs_dist_model::*;
 use bcs_service_api::core::dist_connector::{INPUT_MAYBE_SENT, UncertainSend};
 use bcs_service_api::port::dist_agent::{CancelOutcome, SendOutcome, StableSendRequest};
@@ -189,15 +190,39 @@ impl Call {
 
     /// The agent had already finished: report its own terminal state.
     async fn end_already_finished(&mut self, finished: FinalDispatchOutcome) -> Flow {
-        if self.spec().capabilities.query_by_task {
-            self.last_polled = None;
-            self.poll_remote().await?;
-            // The task could not be read right now. Its real result (message,
-            // artifacts) must not be replaced by an empty one under the same
-            // identity: stay supervised, the next tick reads it again.
-            return Ok(());
+        if self.spec().capabilities.query_by_task && self.finished_reads <= self.config.not_sent_retries {
+            // The task's real result (message, artifacts) is preferred over
+            // an empty one under the same identity, so the task is read: a
+            // bounded number of times, spaced by the per-call backoff.
+            if self.backing_off() {
+                return Ok(());
+            }
+            // A terminal state reported earlier is reported again (same
+            // identity); a non-terminal one is not repeated on every read.
+            if self.last_polled.as_ref().is_some_and(|(status, _)| {
+                !matches!(status, TaskStatus::Submitted | TaskStatus::Working)
+            }) {
+                self.last_polled = None;
+            }
+            let read = self.read_remote().await?;
+            if self.ended || self.conflicted {
+                return Ok(());
+            }
+            // Read but not terminal yet (the read lags the cancel answer), or
+            // not readable this time: try again later, up to the bound. A
+            // definite "no such task" is not asked again.
+            if read != RemoteRead::Gone {
+                self.finished_reads += 1;
+                if self.finished_reads <= self.config.not_sent_retries {
+                    self.back_off();
+                    return Ok(());
+                }
+            }
+            self.finished_reads = u32::MAX;
+            self.reset_backoff();
         }
-        // The agent offers no task read: report what the cancel answer said.
+        // No task read, or it did not give the result: the cancel answer
+        // said definitely how the call ended, so report that.
         match finished {
             FinalDispatchOutcome::Completed => {
                 let payload = Payload::Inline(serde_json::json!({ "state": "completed" }));

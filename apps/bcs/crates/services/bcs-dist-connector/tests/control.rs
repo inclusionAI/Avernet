@@ -248,6 +248,54 @@ async fn a_cancel_of_a_finished_task_reports_the_agents_own_result() {
 }
 
 #[tokio::test]
+async fn a_finished_task_that_is_gone_ends_on_the_cancel_answer() {
+    let rig = Rig::new();
+    let (_running, _events) = accepted_call(&rig).await;
+    rig.agent.on_cancel(CancelOutcome::AlreadyFinished(FinalDispatchOutcome::Completed));
+    // The agent dropped the finished task: asking again cannot help.
+    rig.agent.on_task(bcs_service_api::port::dist_agent::QueryOutcome::NotFound);
+    rig.worker.cancel().await;
+    until("the call ends", || async { rig.phase().await == "ended" }).await;
+    assert_eq!(rig.doc().await["execution"]["outcome"], "completed");
+    assert_eq!(rig.kinds().await, vec!["final"]);
+    assert_eq!(rig.inbox_events().await[0].1.payload, Payload::Inline(json!({"state": "completed"})));
+    assert_eq!(rig.agent.count("query_task"), 1, "a definite answer is not asked for again");
+}
+
+#[tokio::test]
+async fn a_finished_task_whose_read_lags_is_read_a_bounded_number_of_times() {
+    let rig = Rig::new();
+    let (_running, _events) = accepted_call(&rig).await;
+    rig.agent.on_cancel(CancelOutcome::AlreadyFinished(FinalDispatchOutcome::Failed));
+    // The task read never catches up with the cancel answer.
+    rig.agent.on_task(found(TaskStatus::Working, json!({"task": {"id": "rt-77c2"}})));
+    rig.worker.cancel().await;
+    until("the call ends", || async { rig.phase().await == "ended" }).await;
+    assert_eq!(rig.doc().await["execution"]["outcome"], "failed");
+    assert_eq!(rig.kinds().await, vec!["snapshot", "error"], "the lagging state is reported once");
+    let reads = rig.agent.count("query_task");
+    assert_eq!(reads, rig.config.not_sent_retries as usize + 1, "bounded");
+    assert_eq!(rig.agent.count("cancel"), 1);
+}
+
+#[tokio::test]
+async fn a_canceled_task_read_with_a_stored_snapshot_ends_as_canceled() {
+    let rig = Rig::new();
+    let (_running, _events) = accepted_call(&rig).await;
+    rig.agent.on_cancel(CancelOutcome::AlreadyFinished(FinalDispatchOutcome::Canceled));
+    // The snapshot is stored by reference: it carries no state word.
+    rig.agent.on_task(bcs_service_api::port::dist_agent::QueryOutcome::Found {
+        remote: remote(),
+        status: TaskStatus::Canceled,
+        snapshot: Payload::Ref(BlobRef { key: "bcn/snapshot/rt-77c2".into(), digest: Digest("sha256:00".into()) }),
+    });
+    rig.worker.cancel().await;
+    until("the call ends", || async { rig.phase().await == "ended" }).await;
+    assert_eq!(rig.doc().await["execution"]["outcome"], "canceled", "the status decides, not the payload shape");
+    assert_eq!(rig.kinds().await, vec!["error"]);
+}
+
+#[tokio::test]
 async fn a_cancel_before_anything_was_sent_ends_the_call_without_the_agent() {
     let rig = Rig::new();
     rig.worker.create().await;
