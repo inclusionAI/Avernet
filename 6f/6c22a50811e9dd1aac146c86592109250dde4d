@@ -1,0 +1,53 @@
+apps/bcs/crates/test-support/bcs-test-support/tests/conformance_store.rs
+  s_2a51cb4a02f4d1::t_5623fcc8b7df21 8-11,202-205
+  s_2a51cb4a02f4d1::t_3de97ecd14edb1 184-187,196-198,218-220,227-229,235-238,245-247
+  s_2a51cb4a02f4d1::t_a8f892b7fcc76e 181-183,188-195,199-201,206-217,221-226,230-234,239-244,248
+  s_2a51cb4a02f4d1::t_43cf4f12cf4101 249-273
+apps/bcs/crates/plugin-api/bcs-store-api/README.md
+  s_2a51cb4a02f4d1::t_43cf4f12cf4101 34,41-44,52-53,64-88,99-103,228-230,232-233,240-241,270-278
+apps/bcs/crates/plugin-api/bcs-store-api/src/kv.rs
+  s_2a51cb4a02f4d1::t_6584500c725ee1 7-9,19-29,32-53,56-57,63,73-75,77-90
+  s_2a51cb4a02f4d1::t_96de7899ce7367 30-31
+apps/bcs/crates/test-support/bcs-test-support/src/contract/plugin/store/kv.rs
+  s_2a51cb4a02f4d1::t_77a4bd86ca81b4 52,57,59-60,73-74,77-78,80,90,110,116-119,131-133,138-139,145-146,161-162,169-170,176-177,185-187,192-193,221-222,227-228,233-234,267,313-314,336-342,351,358,364,377,385-387,394,397-398,401,405,413,435,437,443,461
+  s_2a51cb4a02f4d1::t_5623fcc8b7df21 2-5,53-56,61-62,66-71,100-102,105-109,111-115,121,126-130,134-137,140-144,147-160,163-168,171-175,178-184,188-191,194-203,205-220,223-226,229-232,235-236,238-243,246,249-266,268-312,315-319,321-332,334-335,343-350,352-357,359-363,365-376,379,383,388-393,407-410,416,419,421-431,433,436,449,456
+apps/bcs/crates/test-support/bcs-test-support/src/contract/plugin/store/mod.rs
+  s_2a51cb4a02f4d1::t_5623fcc8b7df21 19-26
+apps/bcs/docs/plans/2026-11-16-bcs-store-api.md
+  s_2a51cb4a02f4d1::t_96de7899ce7367 134-139
+  s_2a51cb4a02f4d1::t_43cf4f12cf4101 9,113-133
+apps/bcs/crates/plugin-api/bcs-store-api/CONTEXT.md
+  s_2a51cb4a02f4d1::t_43cf4f12cf4101 5,26-29
+apps/bcs/crates/test-support/bcs-test-support/tests/support/store/kv.rs
+  s_2a51cb4a02f4d1::t_5623fcc8b7df21 80-82,99-103,122-127,147,174-176,180-188,191-195,198-203,216-218,229-231
+  s_2a51cb4a02f4d1::t_43cf4f12cf4101 40,47,55,60,67,71,75
+  s_2a51cb4a02f4d1::t_a8f892b7fcc76e 3,66,68-70,72-74,76,84-98,104-121,129-130,150-151,161,165-173,196,204-205,215,219,224,226-228,232
+  s_2a51cb4a02f4d1::t_58a10b480b283e 77-79,83
+apps/bcs/crates/plugin-api/bcs-store-api/src/common.rs
+  s_2a51cb4a02f4d1::t_6584500c725ee1 22,24-29,41-44
+apps/bcs/crates/test-support/bcs-test-support/tests/support/store/mod.rs
+  s_2a51cb4a02f4d1::t_43cf4f12cf4101 30-31,88-90
+  s_2a51cb4a02f4d1::t_5623fcc8b7df21 75-78,82-85
+  s_2a51cb4a02f4d1::t_a8f892b7fcc76e 26-29,32,86-87
+apps/bcs/scripts/ci/tests/store_api_boundary.sh
+  s_2a51cb4a02f4d1::t_96de7899ce7367 15
+apps/bcs/crates/plugin-api/bcs-store-api/tests/types.rs
+  s_2a51cb4a02f4d1::t_6584500c725ee1 14
+  s_2a51cb4a02f4d1::t_5623fcc8b7df21 2-6
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6f6c22a50811e9dd1aac146c86592109250dde4d",
+  "prompts": {},
+  "sessions": {
+    "s_2a51cb4a02f4d1": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e770-4d8b-74b0-ab62-f3442a6c7bd2",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "yuange.zjy <yuange.zjy@antgroup.com>"
+    }
+  }
+}
