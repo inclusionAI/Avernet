@@ -1,0 +1,26 @@
+apps/bcs-internal/bcn-configs/sofa-rpc-dev.toml
+  h_fa66fe7c023b4b 1-5,10,13,16,20-22
+apps/bcs-internal/bcn-configs/sofa-rpc-gray.toml
+  h_fa66fe7c023b4b 1-9,11,14,17,20,24-29
+apps/bcs-internal/bcn-configs/sofa-rpc-pre.toml
+  h_fa66fe7c023b4b 1-8,10,13,16,19,23-28
+apps/bcs-internal/bcn-configs/sofa-rpc-prod.toml
+  h_fa66fe7c023b4b 1-9,11,14,17,20,24-29
+apps/bcs-internal/bcn-configs/sofa-rpc.toml
+  h_fa66fe7c023b4b 10-13,33,45,50-51,53-54,57,64-72
+apps/bcs-internal/docs/sofa-rpc/operations.md
+  h_fa66fe7c023b4b 95-99,125-135
+apps/bcs-internal/tests/test_sofa_rpc_packaging.py
+  h_fa66fe7c023b4b 77-89,94-96,98,103-105,137-140,153-155,182-184
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "688ed12f64d6b635a6e10cb30cc2467c9cfbd77b",
+  "prompts": {},
+  "humans": {
+    "h_fa66fe7c023b4b": {
+      "author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}

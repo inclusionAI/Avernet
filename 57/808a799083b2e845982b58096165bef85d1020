@@ -1,0 +1,18 @@
+apps/bcs-internal/README.md
+  h_fa66fe7c023b4b 65-66
+apps/bcs-internal/crates/external-clients/bcs-agentbase-sofarpc/README.md
+  h_fa66fe7c023b4b 1-86
+apps/bcs-internal/docs/sofa-rpc/operations.md
+  h_fa66fe7c023b4b 154-176
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "57808a799083b2e845982b58096165bef85d1020",
+  "prompts": {},
+  "humans": {
+    "h_fa66fe7c023b4b": {
+      "author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}

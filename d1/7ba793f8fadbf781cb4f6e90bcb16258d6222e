@@ -1,0 +1,37 @@
+simulator/modules/bcs/docker/Dockerfile
+  s_460ca40e7dae23::t_4a0517a8c7858a 31-43,45-46,55,61-66,74-76,90,119-120,134-138,142-152
+simulator/modules/infra/manifest/coredns-custom.yaml
+  s_460ca40e7dae23::t_2739685cebf1d7 37
+simulator/scripts/build.sh
+  s_460ca40e7dae23::t_5c5f7be8dabd2a 431-452
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/host_sofa.rs
+  s_19c0e6699afcd7::t_1a90ecfa8842fd 64-68,160-161,186-190,202,204-207
+apps/bcs-internal/vendor/sofa-rpc-services-0.0.7/src/server/h2_adapter.rs
+  s_19c0e6699afcd7::t_3a6489cc082b43 17-26,74-138,159,235-269,329,452-487
+apps/bcs-internal/vendor/sofa-rpc-services-0.0.7/src/server/h2_handler.rs
+  s_19c0e6699afcd7::t_04baa8b4f061a4 10-13,198,200-234,415-418,430,443-446,448,501-503,512,601-603,605,619,1342-1500
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d17ba793f8fadbf781cb4f6e90bcb16258d6222e",
+  "prompts": {},
+  "sessions": {
+    "s_19c0e6699afcd7": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d3be-3a1a-7b13-9090-e1745ea29304",
+        "model": "GLM-5.3"
+      },
+      "human_author": "仰望 <lifang.shen@antgroup.com>"
+    },
+    "s_460ca40e7dae23": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c086-a457-71b0-8466-0c9920e816e0",
+        "model": "GLM-5.3"
+      },
+      "human_author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}

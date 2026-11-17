@@ -1,0 +1,16 @@
+apps/bcs-internal/.aci.yml
+  h_fa66fe7c023b4b 29-34,91-96
+apps/bcs-internal/tests/test_sofa_rpc_packaging.py
+  h_fa66fe7c023b4b 89-95
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e33793999b944fc5195515a9eaf9dc2994cfe934",
+  "prompts": {},
+  "humans": {
+    "h_fa66fe7c023b4b": {
+      "author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}
