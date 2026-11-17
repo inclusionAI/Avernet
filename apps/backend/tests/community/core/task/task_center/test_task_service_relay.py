@@ -77,7 +77,10 @@ async def test_search_bots_records_relay_search_trace() -> None:
 
 
 @pytest.mark.asyncio
-async def test_search_bots_uses_configured_temporary_duty_fallback_without_overlap() -> None:
+async def test_search_bots_uses_configured_temporary_duty_fallback_without_overlap(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("SERVER_ENV", "prod")
     service = _Service()
     service._temporary_duty_candidates = (
         BotCandidate(bot_id="bot-2", name="Fallback", description="duty", score=None),
@@ -99,10 +102,34 @@ async def test_search_bots_uses_configured_temporary_duty_fallback_without_overl
 
 
 @pytest.mark.asyncio
-async def test_search_bots_does_not_add_fallback_candidates_when_search_overlaps() -> None:
+async def test_search_bots_does_not_add_fallback_candidates_when_search_overlaps(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("SERVER_ENV", "prod")
     service = _Service()
     service._temporary_duty_candidates = (
         BotCandidate(bot_id="bot-1", name="Risk Bot", description="duty", score=None),
+    )
+
+    candidates = await service.search_bots(
+        query="payment risk",
+        task_id="task-1",
+        node_id="node-1",
+        relay_token="generation-1",
+    )
+
+    assert [candidate.bot_id for candidate in candidates] == ["bot-1"]
+    _, _, _, payload, _ = service._graph.events[-1]
+    assert payload["candidate_source"] == "search"
+    assert payload["fallback_candidate_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_search_bots_skips_temporary_duty_fallback_in_pre(monkeypatch) -> None:
+    monkeypatch.setenv("SERVER_ENV", "pre")
+    service = _Service()
+    service._temporary_duty_candidates = (
+        BotCandidate(bot_id="bot-2", name="Fallback", description="duty", score=None),
     )
 
     candidates = await service.search_bots(
