@@ -100,7 +100,7 @@ def runtime(db, request):
             TASK_COMMISSION_PROFILE,
             ref=VersionedProfileRef("test_work_start", 1),
             workflow=workflow,
-            publication=None,
+            composition=replace(TASK_COMMISSION_PROFILE.composition, policies=()),
         )
     )
     catalog = ProductCatalog((profile,))

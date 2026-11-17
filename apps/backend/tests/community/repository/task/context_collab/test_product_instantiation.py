@@ -63,7 +63,12 @@ BOT = AgentRef("bot", "worker")
 @pytest.fixture
 def runtime(db):
     # No publication/admission is needed to test definition selection itself.
-    profile = create_product_profile(replace(TASK_COMMISSION_PROFILE, publication=None))
+    profile = create_product_profile(
+        replace(
+            TASK_COMMISSION_PROFILE,
+            composition=replace(TASK_COMMISSION_PROFILE.composition, policies=()),
+        )
+    )
     catalog = ProductCatalog((profile,))
     repo = ContextCollabRepository(db, product_catalog=catalog)
     store = InMemoryMethodStore()

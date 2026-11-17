@@ -84,7 +84,10 @@ products/
 ```
 
 - L6 [profile creation](l6_products/README.md#create-a-product-profile) is a pure
-  `create_product_profile` operation returning `ProductProfileDefinition`. Creation
+  `create_product_profile` operation returning `ProductProfileDefinition`.
+  Method-specific product policies live in `composition.policies` (for example,
+  `OpenMethodPolicy(publication=...)`), not top-level Profile fields; see the
+  [L6 authoring contract](l6_products/README.md#create-a-product-profile). Creation
   and catalog installation share validation but remain separate; neither profile
   authoring nor role declarations grant runtime participation or create a Collet.
   `domain` is optional vocabulary mapping; omitting `workflow` selects the fixed

@@ -60,7 +60,7 @@ def require_designated_admission(
     profile: ProductProfileDefinition,
 ) -> DesignatedOpenAdmission:
     """The bounded executor must not silently interpret another product's strategy."""
-    policy = profile.require_publication().admission
+    policy = profile.composition.require_policy("Open").publication.admission
     if not isinstance(policy, DesignatedOpenAdmission):
         raise ContextCollabValidationError("unsupported designated admission policy")
     return policy

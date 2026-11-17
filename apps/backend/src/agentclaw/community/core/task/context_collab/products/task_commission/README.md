@@ -45,6 +45,19 @@ stored events are not rewritten. Owner review/cancellation remains governed by
 G1 and machine guards; start/progress/submit require the executor. The Bot ingress
 permits only those three executor actions.
 
+## Method-specific product policy
+
+Commission's Open publication/admission policy is declared in
+`profile.composition.policies` as `OpenMethodPolicy(publication=OpenPublicationProfile(...))`.
+It is L6 product configuration scoped to the required Open Method, not a universal
+`ProductProfile.publication` field or a new L5 contract. The product service and
+DI adapters resolve `composition.require_policy("Open").publication`; creation
+and catalog installation reject duplicate, untyped or unbound Method policies.
+Other Methods do not need an Open policy or a null placeholder. See the
+[L6 authoring example and migration](../../l6_products/README.md#create-a-product-profile).
+This is a Python configuration relocation only: existing participation strategy,
+profile versions, runtime storage and HTTP/ACCS operations are not changed.
+
 ## Autonomous products without domain/workflow boilerplate
 
 New authored definitions may omit both `domain` and `workflow`. `domain=None`

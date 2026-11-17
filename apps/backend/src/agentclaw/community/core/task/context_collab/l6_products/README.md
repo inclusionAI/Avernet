@@ -15,11 +15,12 @@ Service APIs, not a new HTTP/ACCS operation family or product-specific wire prot
 | ProductCollaborationPolicy | [operations/collaboration_policy.py](operations/collaboration_policy.py) | Product-aware adapter to L4-owned policy ports; interprets selected L6 evidence without owning Work or query execution. |
 | ProductMethodBindingRecovery | [operations/method_bootstrap.py](operations/method_bootstrap.py) | Translates pinned product/identity facts into L5 initialization/recovery inputs through L5-owned operations and ports. |
 | ProductProfileDefinition | [contracts.py](contracts.py) | Versioned composition, scenario roles, optional domain/workflow mappings, Task contract selection, compatibility and G1–G4 implementation requirements. |
-| MethodCompositionTemplate | [contracts.py](contracts.py) | Required/optional Method versions and instantiation scope. Current runtime supports one explicit Collet-scoped top-level binding, including the existing composite binding representation. |
+| MethodCompositionTemplate | [contracts.py](contracts.py) | Required/optional Method versions, instantiation scope and typed method-specific product policies. Current runtime supports one explicit Collet-scoped top-level binding, including the existing composite binding representation. |
 | ScenarioRole | [binding.py](binding.py) | Maps owner/assignee to actual L4 Participant and RoleBinding facts. No L3 grant is created. |
 | DomainProfile | [contracts.py](contracts.py) | Maps product vocabulary to L3 Resource and L4 Collet/Task/Message/Artifact authority, not duplicate product-owned entities. |
 | TaskLifecycleContract / TaskAction | [task_contracts.py](task_contracts.py), [contracts.py](contracts.py) | Reusable, exactly versioned Task lifecycle/action contract, independent of product orchestration. References the existing G4 machine; never executes a Bot plan. |
 | WorkflowProfile | [contracts.py](contracts.py) | Optional product orchestration contract. Existing profiles own their action mappings and reference a versioned G4 machine over L4 Task, or explicitly declare a nontransition event stream. Not required merely to run an autonomous Bot. |
+| MethodPolicy / OpenMethodPolicy | [method_policies.py](method_policies.py) | Typed L6 product policy variants, scoped to a required Method in `composition.policies`. Currently only Open declares one; other Methods need no placeholder policy. |
 | OpenAdmissionPolicy / OpenPublicationProfile | [publication.py](publication.py) | Shared participation/role/capacity constraints, ADMITTED delivery gate and partial-failure behavior. Concrete products own specialized admission strategies and step order; L6 does not execute them. |
 | ProductInstance | [instance.py](instance.py) | Durable selection/evidence references: product and selected Task/workflow/domain versions, actual top-level MethodBinding ID, selected Method versions, RoleBinding references, governance requirements and negotiation result. No independent lifecycle state. |
 | Compatibility selection | `negotiate(profile, offer)` | Exact required profile/Method/ACCS/layer/extension/governance match. Reports missing required and omitted optional capabilities separately. Never silently chooses a newer version or weaker policy. |
@@ -49,11 +50,20 @@ runtime registry, catalog database or registration API.
 library operation for authoring a `ProductProfileDefinition`. Its typed input is
 [`ProductProfileCreateCommand`](operations/contracts.py): exact `ref`, Method
 composition, scenario roles, governance and compatibility requirements, plus
-optional domain, workflow, Task contract selection and Open publication.
-`publication=None` intentionally
-means there is no automatic Open publication use case.
+optional domain, workflow and Task contract selection. Method-specific product
+policies belong to `composition.policies`, not the universal ProductProfile.
+The default `policies=()` declares no method-specific product policy, including
+no automatic Open publication use case. It is valid for Open as well as other
+Methods; an Open binding alone does not imply a publication policy.
 
 ```python
+from agentclaw.community.core.task.context_collab.l6_products.contracts import (
+    MethodCompositionTemplate,
+    MethodRequirement,
+)
+from agentclaw.community.core.task.context_collab.l6_products.method_policies import (
+    OpenMethodPolicy,
+)
 from agentclaw.community.core.task.context_collab.l6_products.operations import (
     ProductProfileCreateCommand,
     create_product_profile,
@@ -62,13 +72,17 @@ from agentclaw.community.core.task.context_collab.l6_products.operations import 
 profile = create_product_profile(
     ProductProfileCreateCommand(
         ref=profile_ref,
-        composition=composition,
+        composition=MethodCompositionTemplate(
+            method_kind="Open",
+            scope="collet",
+            required_methods=(MethodRequirement("Open", "0.2"),),
+            policies=(OpenMethodPolicy(publication=publication),),
+        ),
         scenario_roles=scenario_roles,
         # Autonomous Bot: no domain/workflow boilerplate.
         # Fixed standard_task@1 still governs Task actions and completion.
         governance=governance,
         compatibility=compatibility,
-        publication=publication,
     )
 )
 # Installation is a separate, explicit composition-root step:
@@ -80,11 +94,31 @@ all supplied IDs, versions and product-specific admission strategies; it does no
 allocate versions, select latest, switch participation types or execute admission.
 [`validation.py`](validation.py) owns the shared structural checks used by both
 creation and catalog installation (Method composition/scope, role mappings,
-Task/workflow role requirements and publication contracts). Invalid definitions
-raise
+Task/workflow role requirements and method-specific policies). Policy entries
+must be typed, held in an immutable tuple, unique per Method and matched to a
+required/bound Method. Merely listing Open in `optional_methods` does not allow
+an Open policy. `OpenMethodPolicy` validates publication role/action requirements
+without imposing Open configuration on Single, Group or Swarm. Composite
+`Open + Group` can declare an Open policy without a Group policy.
+Invalid definitions raise
 `ContextCollabValidationError`. Direct dataclass construction remains compatible;
 installation still validates it. Reference uniqueness is enforced within each
 catalog, not by this stateless creation operation.
+
+Consumers of Open product policy use
+`profile.composition.require_policy("Open").publication`; missing or duplicate
+policies fail explicitly rather than selecting a default. Policy declarations
+remain L6 values; L5 operations still receive their existing L5 commands and do
+not depend on L6 or product strategy classes.
+
+**Python compatibility:** the former top-level `publication` field on both
+`ProductProfileCreateCommand` and `ProductProfileDefinition`, and
+`profile.require_publication()`, are removed. Migrate authoring/copying code to
+`composition.policies=(OpenMethodPolicy(publication=...),)` and consumers to the
+accessor above. Product definitions, DI adapters and test catalogs are migrated
+together. This relocates the same policy, not its semantics or installed version;
+ProductInstance storage, pinned references and HTTP/ACCS wire shapes are
+unchanged. No runtime state migration or new capability negotiation is needed.
 
 Creating a definition performs no I/O, runtime authorization, capability
 negotiation, global registration, catalog mutation or Collet/Task/Method creation.

@@ -13,13 +13,16 @@ from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     ProductProfileDefinition,
     TaskLifecycleContract,
 )
+from agentclaw.community.core.task.context_collab.l6_products.method_policies import (
+    OpenMethodPolicy,
+)
 from agentclaw.community.core.task.context_collab.l6_products.task_contracts import (
     resolve_event_contract,
 )
 
 
 def validate_product_profile(definition: ProductProfileDefinition) -> None:
-    """Reject unsupported composition/role/publication contracts without installing."""
+    """Reject unsupported composition/role/method-policy contracts without installing."""
     methods = definition.composition.required_methods
     if tuple(item.method for item in methods) != tuple(
         item.value for item in parse_method_kinds(definition.composition.method_kind)
@@ -60,10 +63,20 @@ def validate_product_profile(definition: ProductProfileDefinition) -> None:
             raise ContextCollabValidationError(
                 "workflow action requires an undeclared scenario role"
             )
-    if definition.publication is not None:
-        policy = definition.publication.admission
-        policy.validate_roles(definition.scenario_roles)
-        if "Open" not in {method.method for method in methods}:
-            raise ContextCollabValidationError("Open publication requires Open Method")
+    policies = definition.composition.policies
+    if not isinstance(policies, tuple):
+        raise ContextCollabValidationError("Method policies must be an immutable tuple")
+    seen: set[str] = set()
+    for policy in policies:
+        if not isinstance(policy, OpenMethodPolicy):
+            raise ContextCollabValidationError("unsupported Method policy type")
+        if policy.method in seen:
+            raise ContextCollabValidationError("duplicate Method policy")
+        seen.add(policy.method)
+        if policy.method not in {method.method for method in methods}:
+            raise ContextCollabValidationError(
+                "Open publication requires Open Method in required_methods"
+            )
+        policy.publication.admission.validate_roles(definition.scenario_roles)
         if not contract.actions:
             raise ContextCollabValidationError("publication requires Task/workflow actions")

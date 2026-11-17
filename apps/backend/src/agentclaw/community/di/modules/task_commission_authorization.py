@@ -30,6 +30,9 @@ from agentclaw.community.core.task.context_collab.l6_products.creation_facts imp
     creation_product_kind,
     creation_workflow_kind,
 )
+from agentclaw.community.core.task.context_collab.l6_products.method_policies import (
+    OpenMethodPolicy,
+)
 from agentclaw.community.core.task.context_collab.l6_products.instance import (
     ProductInstance,
 )
@@ -68,8 +71,11 @@ class CommissionAdmissionAuthorizer(StructuralContextCollabAuthorizer):
         )
         if (
             profile is not None
-            and profile.publication is not None
-            and isinstance(profile.publication.admission, BotSelfApplicationAdmission)
+            and any(
+                isinstance(policy, OpenMethodPolicy)
+                and isinstance(policy.publication.admission, BotSelfApplicationAdmission)
+                for policy in profile.composition.policies
+            )
             and command.event_kind
             in {"task.started", "task.progress.updated", "task.submitted"}
         ):

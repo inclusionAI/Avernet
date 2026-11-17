@@ -31,7 +31,6 @@ def create_product_profile(
         task_contract_ref=command.task_contract_ref,
         governance=command.governance,
         compatibility=command.compatibility,
-        publication=command.publication,
     )
     validate_product_profile(definition)
     return definition

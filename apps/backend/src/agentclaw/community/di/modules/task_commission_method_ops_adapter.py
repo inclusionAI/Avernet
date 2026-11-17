@@ -118,7 +118,8 @@ class TaskCommissionOpenMethodAdapter(TaskMethodOpsPort):
                 reason="task_commission.assigned_admission",
             ),
         )
-        profile.require_publication().require_dispatch_ready(admitted.state)
+        publication = profile.composition.require_policy("Open").publication
+        publication.require_dispatch_ready(admitted.state)
         return AssigneeAdmissionReceipt(
             opportunity_id=published.object_id,
             application_id=submitted.object_id,

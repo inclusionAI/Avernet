@@ -31,6 +31,9 @@ from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     WorkflowProfile,
     negotiate,
 )
+from agentclaw.community.core.task.context_collab.l6_products.method_policies import (
+    OpenMethodPolicy,
+)
 from agentclaw.community.core.task.context_collab.l6_products.operations import (
     ProductProfileCreateCommand,
     create_product_profile,
@@ -113,12 +116,23 @@ def _publication():
     )
 
 
+def _with_publication(command, publication):
+    return replace(
+        command,
+        composition=replace(
+            command.composition, policies=(OpenMethodPolicy(publication),)
+        ),
+    )
+
+
 def test_create_returns_the_exact_immutable_definition(command):
     profile = create_product_profile(command)
     assert isinstance(profile, ProductProfileDefinition)
     for field in fields(command):
         assert getattr(profile, field.name) == getattr(command, field.name)
-    assert profile.publication is None
+    assert profile.composition.policies == ()
+    assert "publication" not in {field.name for field in fields(command)}
+    assert "publication" not in {field.name for field in fields(profile)}
     with pytest.raises(FrozenInstanceError):
         profile.ref = VersionedProfileRef("changed", 1)
     with pytest.raises(FrozenInstanceError):
@@ -168,9 +182,9 @@ def test_creation_preserves_versions_without_local_capability_negotiation(comman
 )
 def test_creation_keeps_the_authored_product_admission_strategy(command, policy):
     publication = OpenPublicationProfile(admission=policy)
-    profile = create_product_profile(replace(command, publication=publication))
-    assert profile.publication is publication
-    assert profile.require_publication().admission is policy
+    profile = create_product_profile(_with_publication(command, publication))
+    assert profile.composition.require_policy("Open").publication is publication
+    assert profile.composition.require_policy("Open").publication.admission is policy
 
 
 @pytest.mark.parametrize(
@@ -231,8 +245,7 @@ def test_creation_keeps_the_authored_product_admission_strategy(command, policy)
         ),
         (
             lambda c: replace(
-                c,
-                publication=_publication(),
+                _with_publication(c, _publication()),
                 scenario_roles=(
                     c.scenario_roles[0],
                     replace(c.scenario_roles[1], required=False),
@@ -243,18 +256,19 @@ def test_creation_keeps_the_authored_product_admission_strategy(command, policy)
         (
             lambda c: replace(
                 c,
-                publication=_publication(),
                 composition=MethodCompositionTemplate(
                     "Single",
                     "collet",
                     (MethodRequirement("Single", "0.2"),),
+                    policies=(OpenMethodPolicy(_publication()),),
                 ),
             ),
             "requires Open Method",
         ),
         (
             lambda c: replace(
-                c, publication=_publication(), workflow=replace(c.workflow, actions=())
+                _with_publication(c, _publication()),
+                workflow=replace(c.workflow, actions=()),
             ),
             "requires Task/workflow actions",
         ),
@@ -279,7 +293,7 @@ def test_commission_initialization_uses_l6_without_changing_its_authored_policy(
     profile = init_product_profile()
     assert profile == create_product_profile(TASK_COMMISSION_PROFILE)
     assert profile is not TASK_COMMISSION_PROFILE
-    assert profile.publication is TASK_COMMISSION_PROFILE.publication
+    assert profile.composition.policies is TASK_COMMISSION_PROFILE.composition.policies
 
 
 @pytest.mark.parametrize(
@@ -370,3 +384,108 @@ def test_explicit_standard_task_contract_matches_the_fixed_default(command):
     )
     assert resolve_event_contract(explicit) is resolve_event_contract(implicit)
     assert ProductCatalog((explicit,)).get("custom_product", 3) is explicit
+
+
+@pytest.mark.parametrize("method", ["Single", "Group", "Swarm", "Open"])
+def test_method_composition_does_not_require_open_product_policy(command, method):
+    composition = MethodCompositionTemplate(
+        method_kind=method,
+        scope="collet",
+        required_methods=(MethodRequirement(method, "0.2"),),
+    )
+    profile = create_product_profile(replace(command, composition=composition))
+    assert profile.composition.policies == ()
+    assert ProductCatalog((profile,)).get("custom_product", 3) is profile
+    with pytest.raises(ContextCollabValidationError, match="exactly one Open"):
+        profile.composition.require_policy("Open")
+
+
+def test_composite_method_keeps_open_policy_scoped_to_open(command):
+    policy = OpenMethodPolicy(_publication())
+    composition = MethodCompositionTemplate(
+        method_kind="Open + Group",
+        scope="collet",
+        required_methods=(
+            MethodRequirement("Open", "0.2"),
+            MethodRequirement("Group", "0.2"),
+        ),
+        policies=(policy,),
+    )
+    profile = create_product_profile(replace(command, composition=composition))
+    assert ProductCatalog((profile,)).get("custom_product", 3) is profile
+    assert profile.composition.require_policy("Open") is policy
+    with pytest.raises(ContextCollabValidationError, match="exactly one Group"):
+        profile.composition.require_policy("Group")
+    with pytest.raises(FrozenInstanceError):
+        policy.method = "Group"
+    with pytest.raises(FrozenInstanceError):
+        profile.composition.policies = ()
+
+
+@pytest.mark.parametrize(
+    "invalid, message",
+    [
+        (
+            lambda c: replace(
+                c.composition, policies=(OpenMethodPolicy(_publication()),) * 2
+            ),
+            "duplicate Method policy",
+        ),
+        (
+            lambda c: replace(c.composition, policies=(_publication(),)),
+            "unsupported Method policy type",
+        ),
+        (
+            lambda c: replace(
+                c.composition,
+                policies=({"method": "Open", "publication": _publication()},),
+            ),
+            "unsupported Method policy type",
+        ),
+        (
+            lambda c: replace(c.composition, policies=[OpenMethodPolicy(_publication())]),
+            "immutable tuple",
+        ),
+        (
+            lambda c: replace(c.composition, policies=None),
+            "immutable tuple",
+        ),
+        (
+            lambda c: MethodCompositionTemplate(
+                method_kind="Single",
+                scope="collet",
+                required_methods=(MethodRequirement("Single", "0.2"),),
+                optional_methods=(MethodRequirement("Open", "0.2"),),
+                policies=(OpenMethodPolicy(_publication()),),
+            ),
+            "requires Open Method in required_methods",
+        ),
+    ],
+)
+def test_method_policy_validation_is_shared_by_creation_and_installation(
+    command, invalid, message
+):
+    command = replace(command, composition=invalid(command))
+    with pytest.raises(ContextCollabValidationError, match=message):
+        create_product_profile(command)
+    unchecked = ProductProfileDefinition(
+        **{f.name: getattr(command, f.name) for f in fields(command)}
+    )
+    with pytest.raises(ContextCollabValidationError, match=message):
+        ProductCatalog((unchecked,))
+
+
+@pytest.mark.parametrize("publication", [None, {}, "Open"])
+def test_open_method_policy_requires_a_typed_publication_contract(publication):
+    with pytest.raises(
+        ContextCollabValidationError, match="requires an OpenPublicationProfile"
+    ):
+        OpenMethodPolicy(publication)
+
+
+def test_policy_lookup_does_not_choose_arbitrarily_between_duplicates(command):
+    composition = replace(
+        command.composition, policies=(OpenMethodPolicy(_publication()),) * 2
+    )
+    with pytest.raises(ContextCollabValidationError, match="exactly one Open"):
+        composition.require_policy("Open")

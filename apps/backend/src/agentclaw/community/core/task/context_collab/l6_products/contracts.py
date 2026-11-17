@@ -8,8 +8,8 @@ from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabValidationError,
 )
 
-from agentclaw.community.core.task.context_collab.l6_products.publication import (
-    OpenPublicationProfile,
+from agentclaw.community.core.task.context_collab.l6_products.method_policies import (
+    MethodPolicy,
 )
 
 
@@ -50,6 +50,17 @@ class MethodCompositionTemplate:
     scope: str
     required_methods: tuple[MethodRequirement, ...]
     optional_methods: tuple[MethodRequirement, ...] = ()
+    # Empty means no method-specific product policy, not a default Open policy.
+    policies: tuple[MethodPolicy, ...] = ()
+
+    def require_policy(self, method: str) -> MethodPolicy:
+        """Return the exact declared policy; never infer one from Method kind."""
+        policies = [policy for policy in self.policies if policy.method == method]
+        if len(policies) != 1:
+            raise ContextCollabValidationError(
+                f"composition requires exactly one {method} Method policy"
+            )
+        return policies[0]
 
 
 @dataclass(frozen=True)
@@ -195,15 +206,6 @@ class ProductProfileDefinition:
     # With no workflow, omission selects the fixed standard Task contract @1.
     # With a legacy workflow, None preserves its existing Task/action contract.
     task_contract_ref: VersionedProfileRef | None = None
-    # None means this product declares no automatic Open publication use case.
-    publication: OpenPublicationProfile | None = None
-
-    def require_publication(self) -> OpenPublicationProfile:
-        if self.publication is None:
-            raise ContextCollabValidationError(
-                "product has no Open publication contract"
-            )
-        return self.publication
 
 
 @dataclass(frozen=True)
