@@ -49,20 +49,20 @@ the code of each task; each group ends with its crate's tests green.
 
 ## Group 4 — Engine (C1 actor, C3, C4, C5)
 
-- [ ] 4.1 Port fakes for tests (queue/held, feed, inbox, agent client, blob, membership).
-- [ ] 4.2 Main loop: receive → claim → ack order; one actor per generation;
+- [x] 4.1 Port fakes for tests (queue/held, feed, inbox, agent client, blob, membership).
+- [x] 4.2 Main loop: receive → claim → ack order; one actor per generation;
   `OwnedByMe` with a missing actor → `resume_owned`; backpressure.
-- [ ] 4.3 Actor send path: begin_send before the call; each `SendOutcome`.
-- [ ] 4.4 Recovery by capability; unresolved call (D2 stub, logged, still polled).
-- [ ] 4.5 Receiver + report: seq, admit/append, any non-conflict `Ok(_)` is
+- [x] 4.3 Actor send path: begin_send before the call; each `SendOutcome`.
+- [x] 4.4 Recovery by capability; unresolved call (D2 stub, logged, still polled).
+- [x] 4.5 Receiver + report: seq, admit/append, any non-conflict `Ok(_)` is
   success (the duplicate variant is never named, also in fakes),
   conflict surfaced, retries with the same seq, blob offload,
   final before finish, crash-between then takeover.
-- [ ] 4.6 Continue-input: same call, confirm only on definite acceptance,
+- [x] 4.6 Continue-input: same call, confirm only on definite acceptance,
   prefix rule, ambiguous send retains the input.
-- [ ] 4.7 Cancel: before send, after acceptance, unsupported, accepted vs
+- [x] 4.7 Cancel: before send, after acceptance, unsupported, accepted vs
   confirmed vs unknown.
-- [ ] 4.8 Lost holder stops without writes.
+- [x] 4.8 Lost holder stops without writes.
 
 ## Group 5 — A2A adapter (C2)
 
@@ -77,13 +77,13 @@ the code of each task; each group ends with its crate's tests green.
 
 ## Group 6 — Admin (C6)
 
-- [ ] 6.1 `DistRuntimeControlPort` on the engine: snapshot, drain (stop
+- [x] 6.1 `DistRuntimeControlPort` on the engine: snapshot, drain (stop
   claiming, wait, D8 stub for leftovers); `conformance_runtime_control.rs`.
 - [ ] 6.2 `ConnectorRuntimeFacade` in `bcs-app-dist-runtime`; service harness.
 
 ## Group 7 — End to end and finish
 
-- [ ] 7.1 `store_e2e`: engine + providers + `StoreInboxProducer` on `Model`.
+- [x] 7.1 `store_e2e`: engine + providers + `StoreInboxProducer` on `Model`.
 - [ ] 7.2 File-size check, `BCS_BASE_REF=origin/dev scripts/ci/arch-check.sh`
   (pre-existing failures listed, not fixed), changed-line coverage, `cargo check --workspace
   --all-targets`, nextest for the affected crates.
