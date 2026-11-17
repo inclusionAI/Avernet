@@ -53,16 +53,14 @@ export const ArtifactsSection: React.FC<ArtifactsSectionProps> = ({
   const host = useTaskPanelHost();
   const [selectedArtifactId, setSelectedArtifactId] = useState<string | null>(null);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
-  const [downloadError, setDownloadError] = useState<string | null>(null);
   const selectedArtifact = artifacts.find((artifact) => artifact.id === selectedArtifactId) ?? null;
 
   const download = async (artifact: TaskArtifactView) => {
     setDownloadingId(artifact.id);
-    setDownloadError(null);
     try {
       await downloadTaskArtifact(artifact, { ...context, host });
     } catch (error) {
-      setDownloadError(error instanceof Error ? error.message : '产物下载失败，请稍后重试。');
+      console.warn('[TaskPanel] Artifact download failed', error);
     } finally {
       setDownloadingId(null);
     }
@@ -84,11 +82,6 @@ export const ArtifactsSection: React.FC<ArtifactsSectionProps> = ({
             {artifacts.length} 项
           </span>
         </div>
-        {downloadError && (
-          <div role="alert" style={{ padding: '8px 16px 0', color: C.danger, fontSize: 11 }}>
-            {downloadError}
-          </div>
-        )}
         {artifacts.length === 0 ? (
           <StateEmpty description="暂无产物" minHeight={120} />
         ) : (

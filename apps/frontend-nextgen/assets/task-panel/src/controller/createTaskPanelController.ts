@@ -97,11 +97,14 @@ export function createTaskPanelController(host: TaskPanelHost) {
   const enterConversation = async (conversation: ConversationRef, presentedTask?: TaskPanelDeclaration | null, options: { recover?: boolean } = {}) => {
     if (disposed) return;
     const sameConversation = snapshot.conversation?.sessionId === conversation.sessionId && viewerId === host.getViewer()?.userId;
-    if (sameConversation && (options.recover === false || recoveryStarted)) return;
+    if (sameConversation && (options.recover === false || recoveryStarted)) {
+      if (snapshot.navigationError) update({ navigationError: null });
+      return;
+    }
     const taskHandoff = navigationTargetSession === conversation.sessionId && !navigationAbort.signal.aborted;
     if (taskHandoff) {
       navigationTargetSession = null; recoveryStarted = true;
-      update({ conversation }); return;
+      update({ conversation, navigationError: null }); return;
     }
     if (!sameConversation) {
       navigationAbort.abort(); navigationTargetSession = null; host.preservePanel(false);
@@ -110,9 +113,10 @@ export function createTaskPanelController(host: TaskPanelHost) {
       cursor = null; pagesRead = 0; historyDone = false; scanning = false; cursors.clear(); recoveryStarted = false; recoveryPhase = 'association';
       const nextViewer = host.getViewer()?.userId ?? null;
       tabs.clear();
-      if (viewerId !== nextViewer) { origins.clear(); update({ navByTask: {} }); }
+      if (viewerId !== nextViewer) origins.clear();
       viewerId = nextViewer;
-      update({ conversation, activeTaskId: null, associatedTaskIds: [], orderedTaskIds: [], records: [], recovery: { status: 'idle' } });
+      // External conversation changes get a fresh default selection; task handoffs above preserve explicit navigation.
+      update({ conversation, navigationError: null, activeTaskId: null, associatedTaskIds: [], orderedTaskIds: [], navByTask: {}, records: [], recovery: { status: 'idle' } });
     }
     if (!viewerId) return;
     // Scoped SDK presentation is adopted before any lookup, without opening a duplicate tab.
@@ -170,9 +174,9 @@ export function createTaskPanelController(host: TaskPanelHost) {
     try {
       const outcome = restore ? await host.restoreOrigin(origins.get(taskId)?.handle, ctrl.signal) : await host.navigate(target!, ctrl.signal);
       ready = outcome.status === 'ready';
-      if (!ctrl.signal.aborted && generation === epoch && outcome.status !== 'ready') update({ navigationError: outcome.reason });
+      if (!ctrl.signal.aborted && generation === epoch && outcome.status !== 'ready' && outcome.status !== 'cancelled') update({ navigationError: outcome.reason });
     } catch (error) {
-      if (!ctrl.signal.aborted && generation === epoch) update({ navigationError: error instanceof Error ? error.message : '会话跳转失败' });
+      if (!ctrl.signal.aborted && generation === epoch && !(error instanceof Error && error.name === 'AbortError')) update({ navigationError: error instanceof Error ? error.message : '会话跳转失败' });
     } finally { if (!disposed && navigationAbort === ctrl) {
       if (!ready || snapshot.conversation?.sessionId === navigationTargetSession) navigationTargetSession = null;
       host.preservePanel(false);
@@ -204,7 +208,7 @@ export function createTaskPanelController(host: TaskPanelHost) {
       const associatedTaskIds = snapshot.associatedTaskIds.filter((value) => value !== id);
       const navByTask = { ...snapshot.navByTask };
       if (id) delete navByTask[id];
-      update({ activeTaskId: null, associatedTaskIds, orderedTaskIds: snapshot.orderedTaskIds.filter(value => value !== id), navByTask, recovery: { status: 'idle' } });
+      update({ navigationError: null, activeTaskId: null, associatedTaskIds, orderedTaskIds: snapshot.orderedTaskIds.filter(value => value !== id), navByTask, recovery: { status: 'idle' } });
     },
     continueRecovery: async () => {
       if (disposed) return;
@@ -234,7 +238,7 @@ export function createTaskPanelController(host: TaskPanelHost) {
     leaveConversation() {
       if (disposed) return;
       recoveryStarted = false; epoch++; focus++; associationAbort.abort(); recoveryAbort.abort(); navigationAbort.abort(); navigationTargetSession = null; host.preservePanel(false);
-      update({ conversation: null, activeTaskId: null, associatedTaskIds: [], orderedTaskIds: [], records: [], recovery: { status: 'idle' } });
+      update({ conversation: null, navigationError: null, activeTaskId: null, associatedTaskIds: [], orderedTaskIds: [], records: [], recovery: { status: 'idle' } });
     },
     dispose() { if (disposed) return; controller.leaveConversation(); disposed = true; listeners.clear(); tabs.clear(); origins.clear(); },
   };

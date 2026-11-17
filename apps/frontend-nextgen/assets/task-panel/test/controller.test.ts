@@ -277,3 +277,35 @@ it('retries an association permission error at the same boundary, never as empty
   expect(c.getSnapshot().recovery.status).toBe('error');
   c.dispose();
 });
+
+describe('navigation error ownership', () => {
+  it.each(['switch', 'rebind', 'leave', 'close'] as const)('clears a completed navigation failure on %s', async (action) => {
+    const h = host({ navigate: vi.fn(async () => ({ status: 'unavailable' as const, reason: 'old timeout' })) });
+    const c = createTaskPanelController(h);
+    await c.enterConversation({ sessionId: 's1', kind: 'bot' });
+    c.openTask({ id: 'task-t1', type: 'taskPanel.TaskLoopView', title: 'Task', closable: true, params: { taskId: 't1' } }, 'explicit');
+    c.nav('t1').selectNode('node', { sessionId: 'target', kind: 'bot' });
+    await vi.waitFor(() => expect(c.getSnapshot().navigationError).toBe('old timeout'));
+    if (action === 'switch') await c.enterConversation({ sessionId: 's2', kind: 'bot' });
+    if (action === 'rebind') await c.enterConversation({ sessionId: 's1', kind: 'bot' });
+    if (action === 'leave') c.leaveConversation();
+    if (action === 'close') c.closeTask();
+    expect(c.getSnapshot().navigationError).toBeNull();
+    c.dispose();
+  });
+});
+
+it.each(['abort', 'cancelled'] as const)('does not retain a host %s as a navigation failure', async (outcome) => {
+  const h = host({ navigate: async () => {
+    if (outcome === 'abort') throw Object.assign(new Error('cancelled'), { name: 'AbortError' });
+    return { status: 'cancelled', reason: 'destination changed' };
+  } });
+  const c = createTaskPanelController(h);
+  await c.enterConversation({ sessionId: 's1', kind: 'bot' });
+  c.nav('t1').selectNode('node', { sessionId: 'target', kind: 'bot' });
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(c.getSnapshot().navigationError).toBeNull();
+  expect(h.preservePanel).toHaveBeenLastCalledWith(false);
+  c.dispose();
+});

@@ -36,19 +36,16 @@ describe('complete shared TaskArtifactsView', () => {
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
 
-  it('owns error and retry without a host UI wrapper', async () => {
-    let failed = true;
+  it('keeps failed reads silent without adding an error or retry interface', async () => {
     const host = makeHost(vi.fn(async path => {
       if (path.includes('/list?')) return { data: [] };
-      if (failed) throw new Error('Read unavailable');
-      return dashboard();
+      throw new Error('Read unavailable');
     }));
     render(<TaskPanelHostContext.Provider value={host}><TaskArtifactsView taskId="task-1" ownerUserId="list-owner" apiBaseUrl="" /></TaskPanelHostContext.Provider>);
-    expect(await screen.findByRole('alert')).toHaveTextContent('任务产物加载失败');
-    expect(screen.getByRole('alert')).toHaveTextContent('Read unavailable');
-    failed = false; fireEvent.click(screen.getByRole('button', { name: '重试' }));
-    expect(await screen.findByText('report.md')).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.queryByText('Read unavailable')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '重试' })).not.toBeInTheDocument();
   });
 
   it('preserves owner access, preview portal, download and shared scope', async () => {

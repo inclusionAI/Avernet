@@ -11,6 +11,8 @@ import './TaskPanelV2.css';
 import { ChevronRight, PanelToggle } from '../icons';
 import { collectTaskGroupIds, enrichTaskGroupDisplay } from '../groupDisplay';
 import { useGroupMemberNames } from '../hooks/useGroupMemberNames';
+import { useTaskPanelHost } from '../hostContext';
+import { resolveNodeSessionTarget } from '../sessionResolution';
 import { truncateText } from '../text';
 import { C, TASK_STATUS_TONES } from '../tokens';
 import type { TaskView } from '../types';
@@ -49,7 +51,14 @@ export const TaskPanelV2: React.FC<TaskPanelV2Props> = ({
   const groupMemberNames = useGroupMemberNames(groupIds, bcsBaseUrl);
   const displayTask = useMemo(() => enrichTaskGroupDisplay(task, groupMemberNames), [task, groupMemberNames]);
 
-  const defaultNodeId = displayTask.nodes[0]?.id ?? null;
+  const host = useTaskPanelHost();
+  const sessionId = host?.getConversation()?.sessionId;
+  // Prefer explicit execution sessions over legacy main-session fallbacks.
+  const conversationNode = sessionId
+    ? displayTask.nodes.find(node => node.sessionId === sessionId)
+      ?? displayTask.nodes.find(node => resolveNodeSessionTarget(node, displayTask)?.sessionId === sessionId)
+    : null;
+  const defaultNodeId = conversationNode?.id ?? displayTask.nodes[0]?.id ?? null;
 
   useEffect(() => {
     if (!defaultNodeId || nav.selectedNodeId !== null) return;
