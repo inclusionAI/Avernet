@@ -62,12 +62,12 @@ async def test_diagnose_rejects_nonexistent_bot_without_creating_scan(
             id="empty-draft",
         ),
         pytest.param(
-            False, None, "请耐心等待配置文件同步完成后，再执行诊断",
+            False, None, "Bot 配置文件读取失败。请确认 Bot 可访问后重试。",
             id="draft-read-failed",
         ),
         pytest.param(
-            True, "missing-release", "请耐心等待配置文件同步完成后，再执行诊断",
-            id="published-target",
+            True, "999999", "未读取到健康检测所需的 Bot 配置内容。请检查配置后重试。",
+            id="unavailable-published-target",
         ),
     ],
 )
@@ -115,6 +115,10 @@ async def test_diagnose_starts_scan_for_existing_bot(
     record = repo.get_by_id(scan_id)
     assert record["status"] == "failed"
     assert record["failed_reason"] == failed_reason
+    assert record["check_items"]
+    assert {item["result_detail"] for item in record["check_items"]} == {
+        "未读到配置内容" if device_bound else "配置文件读取失败"
+    }
 
     report = await async_client.get(
         "/api/harness/diagnose/dim-report",
