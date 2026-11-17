@@ -82,6 +82,11 @@ impl KeyLayout {
     pub fn task(&self, tid: &Tid) -> Result<String, StoreError> {
         self.by_prefixed_id("task", &tid.0)
     }
+    /// Per-session task index (sorted set: member = task id, score = creation
+    /// time in ms), written only by Gateway admission: `…:tasks:<sid>`.
+    pub fn tasks(&self, sid: &Sid) -> Result<String, StoreError> {
+        self.by_session("tasks", sid)
+    }
     /// A dispatch id starts with its task id, so it also names the shard.
     pub fn disp(&self, did: &Did) -> Result<String, StoreError> {
         self.by_prefixed_id("disp", &did.0)

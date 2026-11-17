@@ -7,16 +7,19 @@
 //! | `wake` entry | field `sid` |
 //! | `spec` | JSON of `SessionSpec` |
 //! | `task` | JSON of `TaskSnapshot` |
+//! | `ev` entry | id `<commit_seq>-<index>`; fields `v`, `tid`, `kind`, `body` (JSON of `OutputBody`) |
 //!
 //! `kind`, `input_id` and `tid` are flat fields so entries can be inspected; the
 //! decoder rebuilds the envelope from `body`, `digest`, the flat ids and the
 //! session the key belongs to.
 
 mod admit;
+mod ev;
 mod inbox;
 mod json;
 
 pub use admit::AdmitRecord;
+pub use ev::{decode_ev_entry, encode_ev_entry, ev_entry_tid, event_id, stream_id};
 pub use inbox::{decode_inbox_entry, encode_inbox_entry, encode_wake_entry};
 pub use json::{decode_json, encode_json};
 

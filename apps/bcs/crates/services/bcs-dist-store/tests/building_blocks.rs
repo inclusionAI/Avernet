@@ -4,7 +4,12 @@
 mod common;
 
 use bcs_dist_model::*;
-use bcs_dist_store::codec::{AdmitRecord, decode_inbox_entry, encode_inbox_entry, encode_wake_entry};
+use bcs_dist_store::codec::{
+    AdmitRecord, decode_ev_entry, decode_inbox_entry, encode_ev_entry, encode_inbox_entry,
+    encode_wake_entry, ev_entry_tid, event_id, stream_id,
+};
+use bcs_store_api::stream::{StreamEntry, StreamId};
+use std::num::NonZeroU32;
 use bcs_dist_store::error::{NEED_CONTRACT, from_read, from_write, need_contract};
 use bcs_dist_store::identity::{digest_fields, digest_json};
 use bcs_dist_store::layout::{HeartbeatCopy, KeyLayout};
@@ -27,6 +32,7 @@ fn key_names_match_the_catalogue() {
     assert_eq!(l.ckpt(&sid).unwrap(), "bcn:v1:c01:main:s0042:ckpt:s0042.7f3a9c");
     assert_eq!(l.spec(&sid).unwrap(), "bcn:v1:c01:main:s0042:spec:s0042.7f3a9c");
     assert_eq!(l.ev(&sid).unwrap(), "bcn:v1:c01:main:s0042:ev:s0042.7f3a9c");
+    assert_eq!(l.tasks(&sid).unwrap(), "bcn:v1:c01:main:s0042:tasks:s0042.7f3a9c");
     assert_eq!(
         l.task(&Tid("s0042.7f3a9c.b21e".into())).unwrap(),
         "bcn:v1:c01:main:s0042:task:s0042.7f3a9c.b21e"
@@ -182,4 +188,59 @@ fn unsupported_schema_versions_are_rejected() {
     );
     let current = serde_json::to_value(common::task()).unwrap();
     assert!(decode_json::<TaskSnapshot>(current).is_ok());
+}
+
+fn status_event() -> OutputEvent {
+    OutputEvent {
+        id: EventId {
+            commit: CommitSeq(12),
+            index: NonZeroU32::new(1).unwrap(),
+        },
+        tid: Tid(common::TID.into()),
+        body: OutputBody::Status {
+            status: TaskStatus::Working,
+            interactions: vec![],
+        },
+    }
+}
+
+#[test]
+fn ev_entry_round_trips_and_pins_its_fields() {
+    let event = status_event();
+    let (id, fields) = encode_ev_entry(&event).unwrap();
+    assert_eq!(id, StreamId { major: 12, minor: 1 });
+    assert_eq!(fields.keys().map(String::as_str).collect::<Vec<_>>(), ["body", "kind", "tid", "v"]);
+    assert_eq!(fields["v"], b"1");
+    assert_eq!(fields["tid"], common::TID.as_bytes());
+    assert_eq!(fields["kind"], b"status");
+    assert_eq!(
+        String::from_utf8(fields["body"].clone()).unwrap(),
+        r#"{"kind":"status","status":"working","interactions":[]}"#
+    );
+    let entry = StreamEntry { id, fields };
+    assert_eq!(ev_entry_tid(&entry), Some(Tid(common::TID.into())));
+    assert_eq!(decode_ev_entry(&entry).unwrap(), event);
+    assert_eq!(event_id(id), Some(event.id));
+    assert_eq!(stream_id(event.id), id);
+}
+
+#[test]
+fn ev_entries_a_reader_must_skip_are_errors() {
+    let (id, fields) = encode_ev_entry(&status_event()).unwrap();
+    let mut newer = fields.clone();
+    newer.insert("v".into(), b"2".to_vec());
+    assert_eq!(
+        decode_ev_entry(&StreamEntry { id, fields: newer }),
+        Err(StoreError::UnsupportedFormat { format: 2 })
+    );
+    let mut broken = fields.clone();
+    broken.insert("body".into(), b"{".to_vec());
+    assert!(matches!(
+        decode_ev_entry(&StreamEntry { id, fields: broken }),
+        Err(StoreError::Invalid { .. })
+    ));
+    // An index of 0 is not a valid event id.
+    let zero = StreamId { major: 12, minor: 0 };
+    assert_eq!(event_id(zero), None);
+    assert!(decode_ev_entry(&StreamEntry { id: zero, fields }).is_err());
 }

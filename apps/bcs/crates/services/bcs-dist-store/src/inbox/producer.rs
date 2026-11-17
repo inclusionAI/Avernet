@@ -1,7 +1,8 @@
 //! Admission in the fixed write order of the design:
 //!
 //! 1. read `admit`: same digest → accepted; different → conflict;
-//! 2. create `spec` (new session) and `task` (new task) only when absent;
+//! 2. create `spec` (new session) and `task` (new task) only when absent, and
+//!    list a new task in the session's task index (`tasks`, insert-only);
 //! 3. append the input to `inbox`;
 //! 4. read the listener (delayed contract D1, see [`read_listener`]);
 //! 5. register the session in `active` with the lower score;
@@ -125,7 +126,11 @@ impl StoreInboxProducer {
         encode_inbox_entry(input)?;
         let spec_doc = request.create_session.as_ref().map(encode_json).transpose()?;
         let task = match &request.create_task {
-            Some(task) => Some((self.layout.task(&task.tid)?, encode_json(task)?)),
+            Some(task) => Some(PreparedTask {
+                key: self.layout.task(&task.tid)?,
+                doc: encode_json(task)?,
+                index_key: self.layout.tasks(&task.sid)?,
+            }),
             None => None,
         };
         Ok(Prepared {
@@ -241,8 +246,14 @@ impl StoreInboxProducer {
 struct Prepared {
     spec_key: String,
     spec_doc: Option<serde_json::Value>,
-    task: Option<(String, serde_json::Value)>,
+    task: Option<PreparedTask>,
     admit_key: String,
+}
+
+struct PreparedTask {
+    key: String,
+    doc: serde_json::Value,
+    index_key: String,
 }
 
 enum Delivered {
@@ -296,17 +307,28 @@ impl InboxProducerPort for StoreInboxProducer {
                 Err(e) => return Err(from_write(&e, op)),
             }
         }
-        if let (Some(task), Some((key, doc))) = (&request.create_task, prepared.task) {
+        if let (Some(task), Some(prepared)) = (&request.create_task, prepared.task) {
             // "Already exists" is fine: never replace a task the Worker advanced.
-            match self.create_once(&key, doc).await {
+            match self.create_once(&prepared.key, prepared.doc).await {
                 Ok(true) => wrote = true,
-                Ok(false) if !wrote => match self.stored::<TaskSnapshot>(&key).await? {
+                Ok(false) if !wrote => match self.stored::<TaskSnapshot>(&prepared.key).await? {
                     Some(stored) if stored.scope != task.scope || stored.sid != task.sid => {
                         return Ok(AdmitOutcome::ContentConflict);
                     }
                     _ => {}
                 },
                 Ok(false) => {}
+                Err(_) if wrote => return Err(unknown()),
+                Err(e) => return Err(from_write(&e, op)),
+            }
+            // Listed even when the task already existed: insert-only keeps the
+            // first score, so a retry repairs a missing index entry.
+            let entry = ZSetEntry {
+                member: task.tid.0.clone(),
+                score: task.created_at.0 as f64,
+            };
+            match self.zset.add(&prepared.index_key, &[entry], ZAddMode::InsertOnly).await {
+                Ok(_) => {}
                 Err(_) if wrote => return Err(unknown()),
                 Err(e) => return Err(from_write(&e, op)),
             }

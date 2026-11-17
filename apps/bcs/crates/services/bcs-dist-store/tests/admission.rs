@@ -75,6 +75,7 @@ async fn writes_happen_in_the_fixed_order() {
             "kv.get bcn:v1:c01:main:s0042:admit:adm-9c41e7",
             "document.create bcn:v1:c01:main:s0042:spec:s0042.7f3a9c",
             "document.create bcn:v1:c01:main:s0042:task:s0042.7f3a9c.b21e",
+            "zset.add bcn:v1:c01:main:s0042:tasks:s0042.7f3a9c",
             "stream.append bcn:v1:c01:main:s0042:inbox:s0042.7f3a9c",
             "zset.add bcn:v1:c01:main:s0042:active",
             "stream.append bcn:v1:c01:main:s0042:wake",
@@ -133,13 +134,14 @@ async fn same_id_with_other_content_is_a_conflict() {
 
 #[tokio::test]
 async fn a_lost_response_at_any_step_is_unknown_and_a_retry_completes() {
-    // Writes of a new-session admission: spec, task, inbox, active, wake, trim, admit.
-    for step in 1..=7 {
+    // Writes of a new-session admission: spec, task, task index, inbox, active,
+    // wake, trim, admit.
+    for step in 1..=8 {
         let store = Arc::new(Recorder::default());
         let p = producer(&store);
         store.lose_write(step);
         let first = p.admit(new_task_request("adm-9c41e7", "hello")).await;
-        if step == 6 {
+        if step == 7 {
             // The wake trim is best effort; its loss doesn't fail admission.
             assert!(matches!(first, Ok(AdmitOutcome::Accepted(_))), "step {step}");
             continue;
@@ -484,4 +486,68 @@ async fn documents_of_an_unsupported_version_are_never_written() {
         );
         assert!(store.calls().is_empty(), "{which}: nothing read or written");
     }
+}
+
+async fn task_index(store: &Recorder) -> Vec<bcs_store_api::zset::ZSetEntry> {
+    ZSetStorePlugin::range(
+        &store.model,
+        "bcn:v1:c01:main:s0042:tasks:s0042.7f3a9c",
+        &ZSetRange {
+            min: Bound::Unbounded,
+            max: Bound::Unbounded,
+            after: None,
+            limit: NonZeroU32::new(10).unwrap(),
+        },
+    )
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn new_task_is_listed_in_the_session_index_once() {
+    let store = Arc::new(Recorder::default());
+    let p = producer(&store);
+    p.admit(new_task_request("adm-9c41e7", "hello")).await.unwrap();
+    // A second input for the same task (other id) lists nothing new and keeps the score.
+    let mut later = new_task_request("adm-51d0b2", "again");
+    later.create_task.as_mut().unwrap().created_at = TimestampMillis(1_794_371_299_000);
+    p.admit(later).await.unwrap();
+    let index = task_index(&store).await;
+    assert_eq!(index.len(), 1);
+    assert_eq!(index[0].member, TID);
+    assert_eq!(index[0].score, 1_794_371_200_000_f64);
+}
+
+#[tokio::test]
+async fn retry_after_a_failed_index_write_repairs_the_index() {
+    let store = Arc::new(Recorder::default());
+    let p = producer(&store);
+    // Writes: 1 spec, 2 task, 3 task index.
+    store.fail_write(3);
+    let first = p.admit(new_task_request("adm-9c41e7", "hello")).await;
+    assert_eq!(
+        first,
+        Err(StoreError::OutcomeUnknown {
+            operation_id: "adm-9c41e7".into()
+        })
+    );
+    assert!(task_index(&store).await.is_empty());
+    let retry = p.admit(new_task_request("adm-9c41e7", "hello")).await.unwrap();
+    assert!(matches!(retry, AdmitOutcome::Accepted(_)));
+    assert_eq!(task_index(&store).await.len(), 1);
+}
+
+#[tokio::test]
+async fn an_input_without_a_new_task_does_not_touch_the_index() {
+    let store = Arc::new(Recorder::default());
+    let p = producer(&store);
+    p.admit(new_task_request("adm-9c41e7", "hello")).await.unwrap();
+    store.clear();
+    let reply = AdmitRequest {
+        input: user_input("adm-77d2", "more"),
+        create_session: None,
+        create_task: None,
+    };
+    p.admit(reply).await.unwrap();
+    assert!(!store.calls().iter().any(|c| c.contains(":tasks:")));
 }

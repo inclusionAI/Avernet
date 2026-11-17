@@ -14,8 +14,8 @@
 - **Goal:** the four shared changes of research §4.
 - **Files:** `crates/services/bcs-dist-store/src/{layout.rs,codec/ev.rs,codec/mod.rs,inbox/producer.rs}`, `tests/{admission.rs,building_blocks.rs}`
 - **Done when:**
-  - [ ] a new task is listed once in `…:tasks:<sid>`; a retry repairs a lost index write
-  - [ ] an `ev` entry round-trips and its stored fields are pinned by a test
+  - [x] a new task is listed once in `…:tasks:<sid>`; a retry repairs a lost index write
+  - [x] an `ev` entry round-trips and its stored fields are pinned by a test
 - **Depends on:** Task 1
 
 ## Task 3: Gateway store crate: task reader, session readers, spec read
