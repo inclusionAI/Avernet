@@ -128,7 +128,7 @@ counts:
   requested: 5
   attempted: 12
   retained: 3
-  rejected: 6
+  rejected: 7
   review_required: 2
   unfilled: 2
 artifacts:
