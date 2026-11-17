@@ -118,6 +118,12 @@ whose snapshot is stored by reference is reported as
 state the rules and the Worker read (this replaces the round-3 "end by status"
 shortcut beside the rules).
 
+## Review round 5 (2026-11-17)
+
+Fixed with a test: a rejection of a resend, after a start whose outcome was
+unknown, leaves the call unresolved instead of failing it; the rejection says
+nothing about the earlier send.
+
 ## Not run, and why
 
 - `cargo nextest` and the coverage gates (changed-line > 85 %, singlebox E2E):

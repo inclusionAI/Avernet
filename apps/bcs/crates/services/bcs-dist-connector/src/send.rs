@@ -89,6 +89,13 @@ impl Call {
                     }
                     return Ok(());
                 }
+                // Only the resend was refused (an expired credential, say):
+                // that proves nothing about the earlier send, whose task may
+                // be running.
+                SendOutcome::Rejected { code } if uncertain => {
+                    self.mark_unresolved(UnresolvedKind::Uncertain, &code).await;
+                    return Ok(());
+                }
                 SendOutcome::Rejected { code } => {
                     let evidence = format!("rejected:{code}");
                     return self
