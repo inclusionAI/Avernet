@@ -3,6 +3,8 @@ import type { IdentityView } from '@/domain/collaboration';
 import * as botCtrl from '@/services/backendApi/bots/botController';
 import * as ctrl from '@/services/backendApi/bots/privateBotSessionController';
 import { botSessionService, listChatBots, splitBotId } from '@/services/workspace/botSessionService';
+import { BackendRequestError } from '@/services/backendApi/httpClient';
+import { useErrorNotifyStore } from '@/stores/errorNotifyStore';
 import { describe, expect, it, jest } from '@jest/globals';
 
 jest.mock('@/services/backendApi/bots/privateBotSessionController');
@@ -590,4 +592,50 @@ it('managed handoff Bot separates BCN address, resource entity and personnel Own
     botId: 'service:original', realBotId: 'service', ownerId: 'staff_original',
     engineOwnerId: 'new-owner',
   }] });
+});
+
+describe('instance session lookup error notifications', () => {
+  const bot = { botId: 'bot:1', realBotId: 'bot', ownerId: '1', displayName: 'Bot', online: true, chatable: true };
+  it.each([404, 401, 403, 500])('only cancels expected probe misses: HTTP %s', async (status) => {
+    useErrorNotifyStore.getState().reset();
+    useErrorNotifyStore.getState().enqueue({ toastKey: 'probe', message: 'failure' });
+    mocked.getBotSession.mockRejectedValueOnce(new BackendRequestError('failure', {
+      status, apiPath: '/sessions/s', toastKey: 'probe',
+    }));
+    const result = await botSessionService.getSessionDetail(bot, '1', 's',
+      { deviceUuid: 'device-a', stage: 'online' }, { silentNotFound: true });
+    expect(result.ok).toBe(false);
+    expect(useErrorNotifyStore.getState().queue[0].cancelled === true).toBe(status === 404);
+    expect(result).toMatchObject({ error: { code: status === 404 ? 'NOT_FOUND' : 'BOT_SESSION_FAILED' } });
+  });
+  it('cancels the notification produced by the real HTTP request chain', async () => {
+    const originalFetch = global.fetch;
+    const actual = jest.requireActual<typeof ctrl>('@/services/backendApi/bots/privateBotSessionController');
+    useErrorNotifyStore.getState().reset();
+    mocked.getBotSession.mockImplementationOnce(actual.getBotSession);
+    global.fetch = jest.fn<typeof fetch>().mockResolvedValue({
+      ok: false, status: 404,
+      headers: { get: () => 'application/json' },
+      json: async () => ({ code: 404000, message: 'Not Found' }),
+    } as unknown as Response);
+    try {
+      const result = await botSessionService.getSessionDetail(bot, '1', 's',
+        { deviceUuid: 'device-a', stage: 'online' }, { silentNotFound: true });
+      expect(result).toMatchObject({ ok: false, error: { code: 'NOT_FOUND' } });
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+      expect(useErrorNotifyStore.getState().queue).toHaveLength(1);
+      expect(useErrorNotifyStore.getState().queue[0].cancelled).toBe(true);
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+  it('keeps ordinary session detail 404 notifications', async () => {
+    useErrorNotifyStore.getState().reset();
+    useErrorNotifyStore.getState().enqueue({ toastKey: 'detail', message: 'not found' });
+    mocked.getBotSession.mockRejectedValueOnce(new BackendRequestError('not found', {
+      status: 404, apiPath: '/sessions/s', toastKey: 'detail',
+    }));
+    await botSessionService.getSessionDetail(bot, '1', 's');
+    expect(useErrorNotifyStore.getState().queue[0].cancelled).not.toBe(true);
+  });
 });

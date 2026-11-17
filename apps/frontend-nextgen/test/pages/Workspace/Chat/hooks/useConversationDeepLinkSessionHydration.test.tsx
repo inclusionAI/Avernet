@@ -1,9 +1,11 @@
 /** @jest-environment jsdom */
+import { extendCapabilities, type ConversationInstanceScopeState } from '@/capabilities';
 import type { ConversationBotView } from '@/domain/conversation/types';
-import { useConversationDeepLinkSessionHydration } from '@/pages/Workspace/Chat/hooks/useConversationDeepLinkSessionHydration';
+import { resolveSessionFromContainer, useConversationDeepLinkSessionHydration } from '@/pages/Workspace/Chat/hooks/useConversationDeepLinkSessionHydration';
 import type { ChatBotView } from '@/services/workspace/botSessionService';
 import { botContainerService } from '@/services/botWorkshop/botContainerService';
 import { botSessionService } from '@/services/workspace/botSessionService';
+import { useErrorNotifyStore } from '@/stores/errorNotifyStore';
 import { conversationInitialState, useConversationStore } from '@/stores/conversationStore';
 import { beforeEach, describe, expect, it } from '@jest/globals';
 import { act, renderHook, waitFor } from '@testing-library/react';
@@ -135,7 +137,20 @@ function renderDeepLinkHydration(
   );
 }
 
+let instanceState: ConversationInstanceScopeState;
+let instanceListener: (() => void) | undefined;
+
 beforeEach(() => {
+  instanceState = { service: true, multiInstance: true, ready: true };
+  instanceListener = undefined;
+  extendCapabilities({ getConversationInstanceScope: () => ({ status: 'available', value: {
+    InstancePicker: () => null,
+    getState: () => instanceState,
+    subscribe: (_botId, listener) => { instanceListener = listener; return () => { instanceListener = undefined; }; },
+    ensureInstancesLoaded: () => {},
+    getSessionRange: () => null,
+  } }) });
+  useErrorNotifyStore.getState().reset();
   getSessionDetail.mockReset();
   listBotContainers.mockReset();
   useConversationStore.setState({ ...conversationInitialState });
@@ -364,6 +379,7 @@ describe('useConversationDeepLinkSessionHydration', () => {
       '1',
       's-service',
       { deviceUuid: 'device-a', stage: 'online' },
+      { silentNotFound: true },
     );
     expect(getSessionDetail).toHaveBeenNthCalledWith(
       2,
@@ -371,10 +387,104 @@ describe('useConversationDeepLinkSessionHydration', () => {
       '1',
       's-service',
       { deviceUuid: 'device-b', stage: 'online' },
+      { silentNotFound: true },
     );
 
     const state = useConversationStore.getState();
     expect(state.instanceSelectionByBotId[serviceBot.botId]).toBe('device-b');
     expect(state.selectedSessionSnapshot?.session.sessionId).toBe('s-service');
   });
+});
+
+
+it('reports one result after all instances miss', async () => {
+  useConversationStore.setState({ ...conversationInitialState,
+    selectedBotId: serviceBot.botId, selectedSection: 'managed', selectedOrigin: 'mine',
+    selectedScope: 'all', selectedSessionId: 'missing',
+  });
+  listBotContainers.mockResolvedValue({ instances: [{ id: 'a' }, { id: 'b' }] });
+  getSessionDetail.mockResolvedValue({ ok: false, error: { code: 'NOT_FOUND', friendlyMessage: 'not found', canRetry: true } });
+  renderDeepLinkHydration('1', [serviceView]);
+  await waitFor(() => expect(useErrorNotifyStore.getState().queue).toHaveLength(1));
+  expect(getSessionDetail).toHaveBeenCalledTimes(2);
+  expect(useErrorNotifyStore.getState().queue[0].message).toContain('未找到目标会话');
+});
+
+it('does not continue probing on non-missing failures', async () => {
+  listBotContainers.mockResolvedValue({ instances: [{ id: 'a' }, { id: 'b' }] });
+  const result = { ok: false, error: { code: 'BOT_SESSION_FAILED', friendlyMessage: 'forbidden', canRetry: true } };
+  getSessionDetail.mockResolvedValue(result);
+  expect(await resolveSessionFromContainer(serviceBot, '1', 's')).toEqual({ result });
+  expect(getSessionDetail).toHaveBeenCalledTimes(1);
+});
+
+
+it('does not notify for a lookup that finishes after switching sessions', async () => {
+  useConversationStore.setState({ ...conversationInitialState,
+    selectedBotId: serviceBot.botId, selectedSection: 'managed', selectedOrigin: 'mine',
+    selectedScope: 'all', selectedSessionId: 'old',
+  });
+  let finish!: (value: unknown) => void;
+  listBotContainers.mockResolvedValue({ instances: [{ id: 'a' }] });
+  getSessionDetail.mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+  const { unmount } = renderDeepLinkHydration('1', [serviceView]);
+  await waitFor(() => expect(getSessionDetail).toHaveBeenCalledTimes(1));
+  act(() => useConversationStore.setState({ selectedSessionId: null }));
+  await act(async () => {
+    finish({ ok: false, error: { code: 'NOT_FOUND', friendlyMessage: 'not found', canRetry: true } });
+  });
+  expect(useErrorNotifyStore.getState().queue).toHaveLength(0);
+  unmount();
+});
+
+
+it.each([undefined, 'old-device'])('single-instance service bots use direct requests (selection=%s)', async (selection) => {
+  instanceState = { service: true, multiInstance: false, ready: true };
+  const result = { ok: true, data: { ...sessionOfSessionId('s'), botId: serviceBot.botId } };
+  getSessionDetail.mockResolvedValue(result);
+  expect(await resolveSessionFromContainer(serviceBot, '1', 's', selection)).toEqual({ result });
+  expect(getSessionDetail).toHaveBeenCalledTimes(1);
+  expect(getSessionDetail).toHaveBeenCalledWith(serviceBot, '1', 's');
+  expect(listBotContainers).not.toHaveBeenCalled();
+});
+
+it('does not probe instances when the host has no instance capability', async () => {
+  extendCapabilities({ getConversationInstanceScope: () => ({ status: 'unsupported', value: null }) });
+  getSessionDetail.mockResolvedValue({ ok: false, error: { code: 'BOT_SESSION_FAILED' } });
+  await resolveSessionFromContainer(serviceBot, '1', 's');
+  expect(getSessionDetail).toHaveBeenCalledWith(serviceBot, '1', 's');
+  expect(listBotContainers).not.toHaveBeenCalled();
+});
+
+it('waits for existing instance discovery and then directly queries a single-instance service bot', async () => {
+  instanceState = { service: true, multiInstance: false, ready: false };
+  useConversationStore.setState({ ...conversationInitialState,
+    selectedBotId: serviceBot.botId, selectedSection: 'managed', selectedOrigin: 'mine',
+    selectedScope: 'all', selectedSessionId: 's',
+  });
+  getSessionDetail.mockResolvedValue({ ok: true, data: { ...sessionOfSessionId('s'), botId: serviceBot.botId } });
+  renderDeepLinkHydration('1', [serviceView]);
+  expect(getSessionDetail).not.toHaveBeenCalled();
+  expect(listBotContainers).not.toHaveBeenCalled();
+  act(() => {
+    instanceState = { service: true, multiInstance: false, ready: true };
+    instanceListener?.();
+  });
+  await waitFor(() => expect(getSessionDetail).toHaveBeenCalledTimes(1));
+  expect(getSessionDetail).toHaveBeenCalledWith(serviceBot, '1', 's');
+  expect(listBotContainers).not.toHaveBeenCalled();
+});
+
+
+it.each([
+  { ...serviceBot, botType: 'personal' },
+  { ...serviceBot, isFriendBot: true },
+  { ...serviceBot, engine: 'teclaw' },
+  { ...serviceBot, isAgentCodingBot: true },
+])('keeps ordinary bot lookup unchanged: %j', async (bot) => {
+  getSessionDetail.mockResolvedValue({ ok: false, error: { code: 'BOT_SESSION_FAILED' } });
+  await resolveSessionFromContainer(bot, '1', 's', 'device-a');
+  expect(getSessionDetail).toHaveBeenCalledTimes(1);
+  expect(getSessionDetail).toHaveBeenCalledWith(bot, '1', 's');
+  expect(listBotContainers).not.toHaveBeenCalled();
 });
