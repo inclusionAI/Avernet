@@ -28,7 +28,7 @@ export function createMonitoringBrowserService(store: MonitoringStore, directory
   }
   async function configurationTarget(p: MonitoringPrincipal, ref: string) {
     authorize(p);
-    if (!p.isClawInsightAdmin) throw new MonitoringError('FORBIDDEN', '需要监控管理员权限。');
+    if (!p.isClawInsightAdmin && !p.isGlobalAdmin) throw new MonitoringError('FORBIDDEN', '需要监控或全局管理员权限。');
     if (!configurations) throw new MonitoringError('NOT_READY', '诊断监控配置尚未就绪。');
     const bot = await directory.get(references.decode(ref, p.tenant), p);
     if (!bot) throw new MonitoringError('BOT_NOT_FOUND', 'Bot 不存在或无权访问。');
@@ -73,7 +73,7 @@ export function createMonitoringBrowserService(store: MonitoringStore, directory
     },
     async replaceConfiguration(p, ref, input) {
       const { bot, store } = await configurationTarget(p, ref);
-      return replaceBotConfiguration(store, bot, p.staffId, input);
+      return replaceBotConfiguration(store, bot, p.staffId, input, legacyConfig);
     },
     async options(p, query) {
       authorize(p);

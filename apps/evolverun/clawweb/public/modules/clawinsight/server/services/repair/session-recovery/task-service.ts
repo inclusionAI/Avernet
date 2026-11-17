@@ -12,7 +12,9 @@ import { recoveryMessagePending } from "./result.js";
 import { parseOwnerHandoffContent, parseRequest } from "./validation.js";
 import { confirmOwnerRequest, hasAssessmentDelivery, requestOwnerCooperation, validateOwnerHandoffEvidence } from "./owner-cooperation.js";
 import { DingTalkCardNotDispatchedError } from "../../notifications/dingtalk-sender.js";
-import { recoveryHandbook, resolveRecoveryHandbook, type RecoveryHandbookConfigStore } from "./handbook.js";
+import type { RecoveryHandbookConfigStore } from "./handbook.js";
+import { recoveryExecutionConfiguration } from "./bot-configuration.js";
+import type { BotDiagnosisRecoveryConfigStore } from "../../monitoring/bot-config-contracts.js";
 import { parseRecoverySimulationBatch, simulationReadTools, validateSimulationKnowledge, type RecoverySimulation, type RecoverySimulationAssessment } from "./simulation.js";
 import { decideRecoveryPlan, validateRecoveryEvidenceReferences, observeRecovery, recoveryTaskResult, resumeRecoveryObservation, submitRecoveryPlan, terminateRecoveryTask } from "./task-state.js";
 import type { RecoveryActionNotifier, RecoveryActor, RecoveryAcknowledgment, RecoveryExecutionView, RecoveryRequest, RecoveryResult, RecoveryTaskView, RecoveryTermination, SessionRecoveryTaskApi } from "./contracts.js";
@@ -67,6 +69,7 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
     resolveTarget?: (request: RecoveryRequest) => Promise<AgentRuntimeTargetSnapshot>;
     authorizeCreation?: (request: RecoveryRequest) => Promise<void>;
     handbookConfig?: RecoveryHandbookConfigStore;
+    botConfigurations?: BotDiagnosisRecoveryConfigStore;
     canReadAsBotCollaborator?: (userId: string, target: RecoveryRequest["target"]) => Promise<boolean>;
   }) { this.now = deps.now ?? Date.now; }
 
@@ -107,10 +110,9 @@ export class SessionRecoveryTaskService implements SessionRecoveryTaskApi {
       return { event_id: request.event_id, delivery_key: request.delivery_key, status: "accepted", task_id: taskId };
     }
     if (level !== 'debug' && !simulation) await this.deps.authorizeCreation?.(request);
-    const handbook = this.deps.handbookConfig ? await resolveRecoveryHandbook(request, this.deps.handbookConfig)
-      : recoveryHandbook(request.tc_fault_label);
+    const { handbook, modelApiKeyRef } = await recoveryExecutionConfiguration(request, this.deps.handbookConfig, this.deps.botConfigurations);
     const runtimeTarget = simulation ? undefined : await this.deps.resolveTarget?.(request);
-    const task: RecoveryStoredTask = { schemaVersion: "session-recovery-task/v1", taskId, request, level, controlPlaneEnvironment: this.deps.controlPlaneEnvironment,
+    const task: RecoveryStoredTask = { schemaVersion: "session-recovery-task/v1", taskId, request, level, modelApiKeyRef, controlPlaneEnvironment: this.deps.controlPlaneEnvironment,
       status: "running", phase: "assess", version: 1, shared: false, observationDeadlineAt: null, ownerDeadlineAt: null,
       ...(simulation ? { simulation, authorizationScopeDigest: createHash("sha256").update(JSON.stringify({ simulation: simulation.inputDigest, taskId })).digest("hex"), current: { stepId: `${taskId}-1` } } : {}),
       ...(runtimeTarget ? { runtimeTarget, authorizationScopeDigest: createHash("sha256").update(JSON.stringify({ target: request.target, level })).digest("hex"), current: { stepId: `${taskId}-1` } } : {}),

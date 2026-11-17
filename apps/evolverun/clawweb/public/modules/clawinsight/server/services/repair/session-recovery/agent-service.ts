@@ -1,3 +1,4 @@
+import { recoveryModelCredentials } from "./bot-configuration.js";
 import { definitiveEffect, effectRecheckPhase, effectRecheckReadTools, recheckError, recheckUnavailable } from "./effect-recheck.js";
 import { effectResumeDispatchExpired } from "./effect-resume.js";
 import { resolveTaskControlPlaneEnvironment, type AgentControlPlaneEnvironment } from "../common/task-control-plane.js";
@@ -84,6 +85,7 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     business: () => SessionRecoveryTaskApi; publicBaseUrl: string; snapshotId: number;
     packageId?: string; nasRoots?: readonly string[]; leaseSeconds: number; launchGraceSeconds: number; observationMs: number;
     actionNotifier?: RecoveryActionNotifier;
+    resolveModelApiKey?: (reference: string) => Promise<string>;
     now?: () => number;
   }) {
     this.now = deps.now ?? Date.now;
@@ -224,9 +226,12 @@ export class SessionRecoveryAgentService implements RecoveryAgentExecutor, Sessi
     logRepairEvent("session-recovery", "session_recovery_execution", "dispatching", { environment: this.deps.controlPlaneEnvironment,
       taskId: task.taskId, eventId: task.request.event_id, executionId: issued.execution.executionId,
       stepId: contract.stepId, attempt: executionNo, phase: task.phase });
-    try { jobId = await this.deps.ais.execute(task.request.target.entity_id, { "${clawevolve_params}": JSON.stringify(envelope) }, this.deps.snapshotId); }
+    try {
+      Object.assign(envelope.input.credentials, await recoveryModelCredentials(task, this.deps.resolveModelApiKey));
+      jobId = await this.deps.ais.execute(task.request.target.entity_id, { "${clawevolve_params}": JSON.stringify(envelope) }, this.deps.snapshotId); }
     catch (error) {
-      const reason = redactPersistableText(error instanceof Error ? error.message : "未取得 AIS 派发回执", 1500);
+      const reason = task.modelApiKeyRef ? "模型凭据读取或 AIS 派发失败"
+        : redactPersistableText(error instanceof Error ? error.message : "未取得 AIS 派发回执", 1500);
       // Provider exceptions can contain complete response bodies; retain classification here, not the message.
       logRepairEvent("session-recovery", "session_recovery_execution", "dispatch_failed", { environment: this.deps.controlPlaneEnvironment,
         taskId: task.taskId, executionId: issued.execution.executionId, stepId: contract.stepId, attempt: executionNo,

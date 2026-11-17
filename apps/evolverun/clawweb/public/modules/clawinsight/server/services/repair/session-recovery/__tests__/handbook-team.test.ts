@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveRecoveryHandbook } from "../handbook.js";
+import { resolveRecoveryHandbook } from "../bot-configuration.js";
 import type { RecoveryRequest } from "../contracts.js";
 
 const request = { tc_fault_label: "TC.SKILL.INSTRUCTION", target: { env: "prod", bot_id: "default", entity_id: "owner-a" } } as RecoveryRequest;

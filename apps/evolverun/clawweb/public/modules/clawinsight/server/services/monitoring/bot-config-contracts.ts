@@ -25,7 +25,7 @@ export interface BotDiagnosisRecoveryConfigStore {
 
 export type BotNotificationConfig = {
   owner: boolean;
-  group: { routeId: string } | null;
+  group: { routeId?: string } | null;
 };
 
 const object = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -34,6 +34,7 @@ const disabledNotifications: BotNotificationConfig = { owner: false, group: null
 
 function readBotNotifications(value: unknown): BotNotificationConfig | null {
   if (!object(value)) return null;
+  if (value.team_key !== undefined && (typeof value.team_key !== 'string' || !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(value.team_key))) return null;
   const n = value.notifications;
   if (n === undefined) return { ...disabledNotifications };
   if (!object(n) || Object.keys(n).some(key => !['owner', 'group'].includes(key))) return null;
@@ -41,11 +42,11 @@ function readBotNotifications(value: unknown): BotNotificationConfig | null {
     if (!object(config) || Object.keys(config).some(key => !(channel === 'group' ? ['enabled', 'route_id'] : ['enabled']).includes(key))
       || config.enabled !== undefined && typeof config.enabled !== 'boolean'
       || config.route_id !== undefined && (typeof config.route_id !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(config.route_id))) return null;
-    if (channel === 'group' && config.enabled === true && typeof config.route_id !== 'string') return null;
+    if (channel === 'group' && config.enabled === true && typeof config.route_id !== 'string' && value.team_key === undefined) return null;
   }
   const owner = object(n.owner) && n.owner.enabled === true;
-  const group = object(n.group) && n.group.enabled === true && typeof n.group.route_id === 'string'
-    ? { routeId: n.group.route_id } : null;
+  const group = object(n.group) && n.group.enabled === true
+    ? { ...(typeof n.group.route_id === 'string' ? { routeId: n.group.route_id } : {}) } : null;
   return { owner, group };
 }
 

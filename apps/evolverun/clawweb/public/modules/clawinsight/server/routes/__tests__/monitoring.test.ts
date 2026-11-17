@@ -39,7 +39,7 @@ const check = { schemaVersion: "claw-monitoring/bot-check/v2", entityId: "001234
 let db: IDatabase, dir: string, url: string;
 let server: ReturnType<express.Application["listen"]> | undefined;
 let clock: number;
-let principal = { staffId: '001234', isAuthenticated: true, isClawInsightAdmin: true, tenant: 'test', allowedTargetEnvs: ['test'] };
+let principal: import('../../services/monitoring/directory-contracts.js').MonitoringPrincipal = { staffId: '001234', isAuthenticated: true, isClawInsightAdmin: true, tenant: 'test', allowedTargetEnvs: ['test'] };
 let env: Record<string, string | undefined>;
 let clawInsightAdmin: boolean | undefined = true;
 let recovery: MonitoringRecoveryTrigger | undefined;
@@ -365,7 +365,7 @@ describe('monitoring browser HTTP identity and enrollment boundary', () => {
     principal.isAuthenticated = false;
     expect((await configure(1)).status).toBe(401);
   });
-  it('lets dedicated administrators replace and read only the specified Bot configuration', async () => {
+  it.each(['insight', 'global'])('lets %s administrators replace and read only the specified Bot configuration', async role => {
     const { createMonitoringReferences } = await import('../../services/monitoring/target-ref.js');
     const refs = createMonitoringReferences();
     const configPath = (botId: string) => '/monitoring/configurations/'
@@ -383,9 +383,19 @@ describe('monitoring browser HTTP identity and enrollment boundary', () => {
     expect((await call(path)).status).toBe(403);
     principal.isAuthenticated = false;
     expect((await put(input)).status).toBe(401);
-    principal = { ...principal, isAuthenticated: true, isClawInsightAdmin: true, staffId: 'admin' };
+    principal = { ...principal, isAuthenticated: true, isClawInsightAdmin: role === 'insight', isGlobalAdmin: role === 'global', staffId: 'admin' };
     expect(await call(path)).toMatchObject({ status: 200, body: { configuration: null } });
 
+    // New-team validation occurs before persistence. Global role does not grant broad monitoring reads.
+    if (role === 'global') expect((await call('/monitoring/bot-options?scope=all')).status).toBe(403);
+    expect((await put({ ...input, configJson: '{"team_key":"missing"}' })).status).toBe(503);
+    expect(await call(path)).toMatchObject({ body: { configuration: null } });
+    const teams = new AppConfigRepository(db);
+    await teams.create({ config_key: 'session_recovery_teams', config_json: '{"teams":{"97":{}}}' });
+    input.configJson = JSON.stringify({ team_key: '97', notifications: {
+      owner: { enabled: true }, group: { enabled: true },
+    } });
+    const expectedJson = input.configJson;
     const written = { ...input, version: 1 };
     expect(await put(input)).toMatchObject({ status: 200, body: { configuration: written }, cache: 'no-store' });
     expect(await call(path)).toMatchObject({ status: 200, body: { configuration: written } });
@@ -396,12 +406,12 @@ describe('monitoring browser HTTP identity and enrollment boundary', () => {
     expect((await put(input)).status).toBe(409);
 
     // A normal owner can still operate the page switch without erasing notification policy.
-    principal = { ...principal, isClawInsightAdmin: false, staffId: '001234' };
+    principal = { ...principal, isClawInsightAdmin: false, isGlobalAdmin: false, staffId: '001234' };
     expect(await call('/monitoring/configurations', { method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ botRef: path.split('/').at(-1), enabled: false, version: 1 }) })).toMatchObject({ status: 200 });
     principal = { ...principal, isClawInsightAdmin: true, staffId: 'admin' };
     expect(await call(path)).toMatchObject({ status: 200,
-      body: { configuration: { diagnosisEnabled: false, recoveryEnabled: false, version: 2, configJson } } });
+      body: { configuration: { diagnosisEnabled: false, recoveryEnabled: false, version: 2, configJson: expectedJson } } });
     expect(await put({ ...input, version: 2, configJson: '{}' })).toMatchObject({ status: 200,
       body: { configuration: { diagnosisEnabled: false, recoveryEnabled: true, version: 3, configJson: '{}' } } });
     principal.tenant = 'another-tenant';

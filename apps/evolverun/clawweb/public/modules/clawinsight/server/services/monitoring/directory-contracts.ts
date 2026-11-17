@@ -4,6 +4,7 @@ import type { Engine, DiagnosisPage, MonitoringSummary, MonitoringTarget, Monito
 /** Plugin API: host-verified identity. No request fields are trusted by the domain service. */
 export type MonitoringPrincipal = {
   staffId: string; isAuthenticated: boolean; isClawInsightAdmin: boolean;
+  isGlobalAdmin?: boolean;
   tenant: string; allowedTargetEnvs: readonly string[];
 };
 export type DirectoryScope = { tenant: string; allowedTargetEnvs: readonly string[] };

@@ -1,3 +1,5 @@
+import { parseRecoveryHandbookRoutes } from "./handbook.js";
+import { SessionRecoveryError } from "./errors.js";
 // Read-only compatibility for existing recovery configuration. Never write these policies here.
 import type { AgentControlPlaneEnvironment } from '../common/task-control-plane.js';
 import type { MonitoringTarget } from '../../monitoring/contracts.js';
@@ -102,3 +104,48 @@ export function legacyWebhookConfig(raw: string): WebhookConfig {
   return value;
 }
 
+type BotTeam = { env: "pre" | "prod"; bot_id: string; owner_id: string; team_key: string };
+type HandbookConfig = { bot_teams: BotTeam[]; team_routes: Record<string, Record<string, string[]>> };
+
+function handbookRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+function invalidHandbook(): never {
+  throw new SessionRecoveryError(503, "handbook_configuration_invalid", "团队手册配置无效，未创建自愈任务");
+}
+export function parseLegacyRecoveryHandbooks(raw: string): HandbookConfig {
+  let value: unknown;
+  try { value = JSON.parse(raw); } catch { invalidHandbook(); }
+  if (!handbookRecord(value) || Object.keys(value).some(key => !["bot_teams", "team_routes"].includes(key))
+    || !handbookRecord(value.team_routes)) invalidHandbook();
+  const teamKey = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+  const botTeams: unknown[] = [];
+  if (Array.isArray(value.bot_teams)) botTeams.push(...value.bot_teams);
+  else {
+    if (!handbookRecord(value.bot_teams)) invalidHandbook();
+    for (const [team, identities] of Object.entries(value.bot_teams)) {
+      if (!teamKey.test(team) || !Object.hasOwn(value.team_routes, team) || !Array.isArray(identities)) invalidHandbook();
+      for (const identity of identities) {
+        if (typeof identity !== "string") invalidHandbook();
+        const parts = identity.split("|");
+        if (parts.length !== 3) invalidHandbook();
+        const [env, bot_id, owner_id] = parts;
+        botTeams.push({ env, bot_id, owner_id, team_key: team });
+      }
+    }
+  }
+  const targets = new Set<string>();
+  for (const item of botTeams) {
+    if (!handbookRecord(item) || Object.keys(item).length !== 4
+      || Object.keys(item).some(key => !["env", "bot_id", "owner_id", "team_key"].includes(key))
+      || item.env !== "pre" && item.env !== "prod"
+      || typeof item.bot_id !== "string" || !/^[A-Za-z0-9_-]+$/.test(item.bot_id)
+      || typeof item.owner_id !== "string" || !/^[A-Za-z0-9_.@+-]+$/.test(item.owner_id) || item.owner_id.includes("..")
+      || typeof item.team_key !== "string" || !teamKey.test(item.team_key)
+      || !Object.hasOwn(value.team_routes, item.team_key)) invalidHandbook();
+    const target = JSON.stringify([item.env, item.bot_id, item.owner_id]);
+    if (targets.has(target)) invalidHandbook();
+    targets.add(target);
+  }
+  return { bot_teams: botTeams as BotTeam[], team_routes: parseRecoveryHandbookRoutes(value.team_routes) };
+}

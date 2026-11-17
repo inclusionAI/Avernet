@@ -140,6 +140,8 @@ export type RecoveryTaskResult = {
 };
 
 export type RecoveryStoredTask = RecoveryTaskState & {
+  /** Frozen credential reference; historical tasks use the Base deployment default. Never stores a secret value. */
+  modelApiKeyRef?: string | null;
   /** Opt-in bootstrap-only audit references; absent from maintenance and mutation reads. */
   trajectoryIndexReads?: import("./bootstrap-evidence.js").TrajectoryIndexRead[];
   /** Transient facts from the existing read audit; never a claim of full session coverage. */
