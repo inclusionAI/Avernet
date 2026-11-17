@@ -1,0 +1,19 @@
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/src/journal.rs
+  s_19c0e6699afcd7::t_bd9f21b5202f43 110,120-128,130,137,195-206,220,314,532-536,544-546,548-554,785-832
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "043baa3be17f2f259c39a34a2a081815956cdee1",
+  "prompts": {},
+  "sessions": {
+    "s_19c0e6699afcd7": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d3be-3a1a-7b13-9090-e1745ea29304",
+        "model": "Ling-3.1-flash"
+      },
+      "human_author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}
