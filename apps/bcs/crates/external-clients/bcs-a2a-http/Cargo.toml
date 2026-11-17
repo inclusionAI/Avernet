@@ -40,6 +40,9 @@ hex = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
+# Its own tests always include the distributed agent client.
+bcs-a2a-http = { path = ".", features = ["dist-agent"] }
+bcs-dist-model = { workspace = true }
 bcs-domain = { workspace = true }
 bcs-interaction = { workspace = true }
 bcs-message-store = { workspace = true }

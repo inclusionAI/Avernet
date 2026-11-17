@@ -498,6 +498,7 @@ dependencies = [
  "async-trait",
  "axum",
  "bcs-a2a-binding-api",
+ "bcs-a2a-http",
  "bcs-app-identity-api",
  "bcs-bot-store",
  "bcs-chat-run-store",
