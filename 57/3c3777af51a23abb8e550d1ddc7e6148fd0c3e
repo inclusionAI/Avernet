@@ -1,0 +1,16 @@
+apps/frontend-nextgen/assets/task-panel/src/controller/createTaskPanelController.ts
+  h_5b2ec9c12c4d18 100-103,107,119,177,179,211,241
+apps/frontend-nextgen/assets/task-panel/test/controller.test.ts
+  h_5b2ec9c12c4d18 280-311
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "573c3777af51a23abb8e550d1ddc7e6148fd0c3e",
+  "prompts": {},
+  "humans": {
+    "h_5b2ec9c12c4d18": {
+      "author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}
