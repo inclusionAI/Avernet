@@ -25,6 +25,7 @@ members = [
     "crates/services/bcs-dist-store",
     "crates/services/bcs-dist-worker",
     "crates/application/bcs-app-dist-runtime",
+    "crates/services/bcs-dist-gateway-store",
     "crates/services/bcs-config",
     "crates/services/bcs-db-migrations",
     "crates/services/bcs-eventing",
@@ -157,6 +158,7 @@ bcs-dist-store = { path = "crates/services/bcs-dist-store" }
 bcs-dist-worker = { path = "crates/services/bcs-dist-worker" }
 bcs-dist-worker-client = { path = "crates/external-clients/bcs-dist-worker-client" }
 bcs-app-dist-runtime = { path = "crates/application/bcs-app-dist-runtime" }
+bcs-dist-gateway-store = { path = "crates/services/bcs-dist-gateway-store" }
 bcs-a2a-binding-api = { path = "crates/plugin-api/bcs-a2a-binding-api" }
 bcs-app-identity-api = { path = "crates/plugin-api/bcs-app-identity-api" }
 bcs-tracing-api = { path = "crates/plugin-api/bcs-tracing-api" }

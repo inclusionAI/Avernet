@@ -22,9 +22,9 @@
 - **Goal:** `TaskReaderPort` and the read-only `SessionStorePort` over `bcs-store-api`.
 - **Files:** `crates/services/bcs-dist-gateway-store/` (new), `apps/bcs/Cargo.toml`
 - **Done when:**
-  - [ ] restore / validate_resume / follow / list tests pass over the store model
-  - [ ] subscribers of one session share one blocking read; a slow one is closed alone
-  - [ ] Worker operations on the Gateway's session store are refused
+  - [x] restore / validate_resume / follow / list tests pass over the store model
+  - [x] subscribers of one session share one blocking read; a slow one is closed alone
+  - [x] Worker operations on the Gateway's session store are refused
 - **Depends on:** Task 2
 
 ## Task 4: Core service

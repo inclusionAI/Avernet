@@ -1463,6 +1463,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "bcs-dist-gateway-store"
+version = "0.1.4-beta.3"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "bcs-dist-model",
+ "bcs-dist-store",
+ "bcs-service-api",
+ "bcs-store-api",
+ "bcs-test-support",
+ "futures",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "bcs-dist-model"
 version = "0.1.0"
 dependencies = [
