@@ -52,3 +52,7 @@ parallel Genome, promotion path, or experiment ledger.
 - [`benchmark/difficulty-calibration.md`](benchmark/difficulty-calibration.md):
   four-dimensional difficulty assessment, initial bands and proposals for
   representative-question calibration.
+
+- [`benchmark/candidate-admission.md`](benchmark/candidate-admission.md): evidence
+  separating structural candidate validation from semantic review, controlled
+  Actor/Judge trials, data-use assignment and benchmark admission.
