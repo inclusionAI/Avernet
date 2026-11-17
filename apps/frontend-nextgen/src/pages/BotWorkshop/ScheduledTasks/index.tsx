@@ -2,6 +2,7 @@ import { BotSubpageShell } from '@/components/BotWorkshop/BotSubpageShell';
 import { Button } from '@/components/ui/Button';
 import { Empty } from '@/components/ui/Empty';
 import { addressFromKey, isStage, type OperationResult, type ManagedRoutine } from '@/services/botScheduledTasks/types';
+import { LockKeyhole } from 'lucide-react';
 import { history, useLocation } from '@umijs/max';
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
@@ -97,7 +98,11 @@ const ScheduledTasksPage = () => {
         )}
         {state.identity.error && <Empty title="身份加载失败" description={state.identity.error} />}
         {context?.can_manage && (
-          <section role="status" className="rounded-xl border border-border bg-card px-5 py-4">
+          <section
+            role="status"
+            className="flex items-center gap-2.5 rounded-xl border border-border bg-card px-4 py-3"
+          >
+            <LockKeyhole aria-hidden className="size-4 shrink-0 text-muted-foreground" />
             <p className="m-0 text-sm text-muted-foreground">
               {state.editable
                 ? lock?.need_lock === false
