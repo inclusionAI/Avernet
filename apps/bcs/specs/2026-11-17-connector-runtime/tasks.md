@@ -22,11 +22,11 @@ the code of each task; each group ends with its crate's tests green.
 
 ## Group 2 — Rules (C3 normalizer, C5 identities)
 
-- [ ] 2.1 `identity.rs` (fixed-vector test against `bcs_dist_store::identity`) and `DistConnectorRules::{start_request_id, input_request_id, report, next_input}`;
+- [x] 2.1 `identity.rs` (fixed-vector test against `bcs_dist_store::identity`) and `DistConnectorRules::{start_request_id, input_request_id, report, next_input}`;
   tests: identity equal across holder epochs and with/without remote event ids;
   n = confirmed + 1; digest ignores holder epoch, seq, event id and payload;
   seq from the cursor.
-- [ ] 2.2 `resume_step`, `uncertain_start`, `uncertain_input`, `reattach`,
+- [x] 2.2 `resume_step`, `uncertain_start`, `uncertain_input`, `reattach`,
   `end_of`; table tests for every phase and capability row and the
   canceled/rejected mapping; `conformance_rules.rs`.
 
