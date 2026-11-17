@@ -106,6 +106,7 @@ class ProductInstantiationService(ProductInstantiationServiceProtocol):
         instance = instantiate_product(
             facts=facts,
             collet_id=command.collet_id,
+            root_task_id=task.task_id,
             event_id=task.created_event_ref,
             principal_ref=task.principal_ref,
             executor_ref=task.executor_ref,

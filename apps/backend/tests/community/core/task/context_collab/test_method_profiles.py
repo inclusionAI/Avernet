@@ -5,6 +5,8 @@
 (profile_version / composable_relations / primitives_used)与
 ``get_profile`` 查询/拒绝。
 """
+from dataclasses import FrozenInstanceError, replace
+
 import pytest
 
 from agentclaw.community.core.task.context_collab.errors import (
@@ -16,12 +18,15 @@ from agentclaw.community.core.task.context_collab.l5_methods.method_binding impo
 )
 from agentclaw.community.core.task.context_collab.l5_methods.method_profile import (
     METHOD_PROFILE_REGISTRY,
+    MethodProfile,
+    MethodProfileRef,
     get_profile,
 )
 
 
 def test_parse_method_kinds_composite_and_single():
     assert parse_method_kinds("Open + Group") == (MethodKind.OPEN, MethodKind.GROUP)
+    assert parse_method_kinds("Open + Single") == (MethodKind.OPEN, MethodKind.SINGLE)
     assert parse_method_kinds("Single") == (MethodKind.SINGLE,)
 
 
@@ -68,3 +73,38 @@ def test_get_profile_returns_registry_entry():
 def test_get_profile_rejects_unknown_method():
     with pytest.raises(ContextCollabValidationError):
         get_profile("Unknown")
+
+
+def test_method_profile_is_the_l5_contract_and_exposes_only_identity_in_its_ref():
+    profile = get_profile("Open", "0.2")
+    assert isinstance(profile, MethodProfile)
+    assert profile.ref == MethodProfileRef("Open", "0.2")
+    assert profile.capabilities and profile.primitives_used
+    assert not hasattr(profile.ref, "capabilities")
+    with pytest.raises(FrozenInstanceError):
+        profile.profile_version = "0.3"
+    with pytest.raises(FrozenInstanceError):
+        profile.ref.version = "0.3"
+
+
+def test_get_profile_resolves_an_exact_version_not_latest(monkeypatch):
+    profile = get_profile("Open", "0.2")
+    newer = replace(profile, profile_version="0.3")
+    monkeypatch.setitem(METHOD_PROFILE_REGISTRY, "Open", newer)
+    assert get_profile("Open", "0.3") is newer
+    # A newer installed definition cannot silently change a pinned or default contract.
+    for args in (("Open", "0.2"), ("Open",)):
+        with pytest.raises(
+            ContextCollabValidationError, match="unknown method profile version"
+        ):
+            get_profile(*args)
+
+
+@pytest.mark.parametrize(
+    "method, version", [("", "0.2"), (None, "0.2"), ("Open", ""), ("Open", None)]
+)
+def test_method_profile_and_reference_require_non_empty_exact_identity(method, version):
+    with pytest.raises(ContextCollabValidationError, match="non-empty"):
+        MethodProfile(method_kind=method, profile_version=version)
+    with pytest.raises(ContextCollabValidationError, match="non-empty"):
+        MethodProfileRef(method, version)

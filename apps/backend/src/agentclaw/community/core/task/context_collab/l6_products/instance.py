@@ -8,8 +8,11 @@ import json
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabValidationError,
 )
-from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
-    top_level_binding_id,
+from agentclaw.community.core.task.context_collab.l6_products.topology import (
+    product_binding_refs,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.method_profile import (
+    MethodProfileRef,
 )
 from agentclaw.community.core.task.context_collab.l6_products.binding import (
     product_definition,
@@ -21,7 +24,6 @@ from agentclaw.community.core.task.context_collab.l6_products.catalog import (
 )
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     GovernanceRequirements,
-    MethodRequirement,
     NegotiationResult,
     ProductProfileDefinition,
     VersionedProfileRef,
@@ -46,11 +48,12 @@ class ProductInstance:
 
     instance_id: str
     collet_ref: str
+    root_task_ref: str
     profile_ref: VersionedProfileRef
     workflow_ref: VersionedProfileRef | None
     domain_ref: VersionedProfileRef | None
     method_binding_refs: tuple[str, ...]
-    method_profiles: tuple[MethodRequirement, ...]
+    method_profiles: tuple[MethodProfileRef, ...]
     role_binding_refs: tuple[str, ...]
     governance: GovernanceRequirements
     negotiation: NegotiationResult
@@ -67,12 +70,16 @@ class ProductInstance:
     @classmethod
     def from_dict(cls, data: dict) -> "ProductInstance":
         try:
+            root_ref = data["root_task_ref"]
+            if not isinstance(root_ref, str) or not root_ref.strip():
+                raise ValueError("root_task_ref must be a non-empty Task reference")
             result = data["negotiation"]
             if type(result["accepted"]) is not bool:
                 raise ValueError("negotiation.accepted must be a boolean")
             instance = cls(
                 instance_id=data["instance_id"],
                 collet_ref=data["collet_ref"],
+                root_task_ref=data["root_task_ref"],
                 profile_ref=VersionedProfileRef(**data["profile_ref"]),
                 workflow_ref=(
                     VersionedProfileRef(**data["workflow_ref"])
@@ -86,7 +93,7 @@ class ProductInstance:
                 ),
                 method_binding_refs=tuple(data["method_binding_refs"]),
                 method_profiles=tuple(
-                    MethodRequirement(**item) for item in data["method_profiles"]
+                    MethodProfileRef(**item) for item in data["method_profiles"]
                 ),
                 role_binding_refs=tuple(data["role_binding_refs"]),
                 governance=GovernanceRequirements(**data["governance"]),
@@ -141,23 +148,27 @@ def _instance(
     *,
     facts: dict,
     collet_id: str,
+    root_task_id: str,
     event_id: str,
     principal_ref: PrincipalRef,
     executor_ref: AgentRef | None,
     profile: ProductProfileDefinition,
     selection: NegotiationResult,
 ) -> ProductInstance:
+    if not root_task_id or root_task_id == collet_id:
+        raise ContextCollabValidationError("ProductInstance requires an independent root Task")
     return ProductInstance(
         instance_id=f"pi_{collet_id}",
         collet_ref=collet_id,
+        root_task_ref=root_task_id,
         profile_ref=profile.ref,
         workflow_ref=profile.workflow.ref if profile.workflow else None,
         domain_ref=profile.domain.ref if profile.domain else None,
         task_contract_ref=(
             resolve_event_contract(profile).ref if profile.workflow is None else None
         ),
-        method_binding_refs=(top_level_binding_id(collet_id),),
-        method_profiles=profile.composition.required_methods,
+        method_binding_refs=product_binding_refs(collet_id, profile),
+        method_profiles=tuple(item.ref for item in profile.composition.required_methods),
         role_binding_refs=role_binding_refs(collet_id, profile=profile),
         governance=profile.governance,
         negotiation=selection,
@@ -169,6 +180,7 @@ def instantiate_product(
     *,
     facts: dict,
     collet_id: str,
+    root_task_id: str,
     event_id: str,
     principal_ref: PrincipalRef,
     executor_ref: AgentRef | None,
@@ -191,6 +203,7 @@ def instantiate_product(
     return _instance(
         facts=normalized,
         collet_id=collet_id,
+        root_task_id=root_task_id,
         event_id=event_id,
         principal_ref=principal_ref,
         executor_ref=executor_ref,
@@ -203,6 +216,7 @@ def decode_product_instance(
     facts: dict,
     *,
     collet_id: str,
+    root_task_id: str,
     event_id: str,
     principal_ref: PrincipalRef,
     executor_ref: AgentRef | None,
@@ -216,7 +230,11 @@ def decode_product_instance(
         if profile_ref is not None:
             raise ContextCollabValidationError("pinned product is missing ProductInstance")
         return None
-    instance = ProductInstance.from_dict(raw)
+    if not isinstance(raw, dict):
+        raise ContextCollabValidationError("invalid ProductInstance: expected an object")
+    # Historical JSON predates the explicit root reference. Resolve it only
+    # from the authoritative L4 snapshot; do not rewrite the stored record.
+    instance = ProductInstance.from_dict({"root_task_ref": root_task_id, **raw})
     profile = _resolve_profile(
         normalized,
         principal_ref=principal_ref,
@@ -233,7 +251,7 @@ def decode_product_instance(
     ):
         raise ContextCollabValidationError("invalid persisted product negotiation")
     optional = {
-        f"method:{item.method}@{item.version}"
+        f"method:{item.method_kind}@{item.profile_version}"
         for item in profile.composition.optional_methods
     }
     optional.update(f"extension:{item}" for item in profile.compatibility.optional_extensions)
@@ -244,6 +262,7 @@ def decode_product_instance(
     expected = _instance(
         facts=normalized,
         collet_id=collet_id,
+        root_task_id=root_task_id,
         event_id=event_id,
         principal_ref=principal_ref,
         executor_ref=executor_ref,

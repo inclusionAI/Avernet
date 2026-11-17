@@ -38,8 +38,8 @@ class PublishTaskCommand:
     """发布命令:标题进聚合 objective,正文进首帖 Message 事件。
 
     ``assignee_agent_id`` 是被委托执行 bot 的 agent_id(P1 仅 bot 型);
-    它落 ``ContextSpec.executor_ref``——辅助执行者,不承担验收权
-    (沿 L6 先例"不把代办伪装成 Single")。
+    它落 ``ContextSpec.executor_ref``——指定候选执行者,不承担验收权。
+    指定不等于方法选择:@2 还需 Open 录取和显式 Single.select 才可执行。
     """
 
     title: str
@@ -47,8 +47,8 @@ class PublishTaskCommand:
     space: SpaceRef
     assignee_agent_id: str
     resource_refs: list[ResourceRef] = field(default_factory=list)
-    # Creation-only exact selection; omission selects the installed task_commission@1
-    # self-application profile.
+    # Creation-only exact selection; omission preserves the installed @1 profile.
+    # Open + Single requires an explicit task_commission@2 selection.
     product_profile_ref: VersionedProfileRef = VersionedProfileRef("task_commission", 1)
 
 

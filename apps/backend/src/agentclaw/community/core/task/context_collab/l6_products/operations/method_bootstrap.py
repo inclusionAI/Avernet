@@ -20,6 +20,7 @@ from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs 
 from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
     MethodBinding,
     parse_method_kinds,
+    top_level_binding_id,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.method_profile import (
     METHOD_PROFILE_REGISTRY,
@@ -57,6 +58,10 @@ from agentclaw.community.core.task.context_collab.persistence.method_store impor
 from agentclaw.community.core.task.context_collab.l6_products.persistence.repository import (
     ContextCollabRepositoryProtocol,
 )
+from agentclaw.community.core.task.context_collab.l6_products.topology import product_binding_refs
+from agentclaw.community.core.task.context_collab.l6_products.operations.topology_projection import (
+    project_method_topology,
+)
 from injector import inject
 
 
@@ -69,7 +74,10 @@ def _resolve_method_spec(
     profile: ProductProfileDefinition | None,
 ) -> ResolvedMethodSpec:
     versions = (
-        {item.method: item.version for item in profile.composition.required_methods}
+        {
+            item.method_kind: item.profile_version
+            for item in profile.composition.required_methods
+        }
         if profile is not None
         else {
             kind.value: METHOD_PROFILE_REGISTRY[kind.value].profile_version
@@ -99,6 +107,15 @@ def project_created_context(
     context: ActorContext,
     now: str,
 ) -> MethodBinding:
+    if profile is not None and profile.composition.relations:
+        return project_method_topology(
+            store, axes, collab_context_id, profile,
+            _resolve_method_spec(
+                collab_context_id, method_kind=method_kind,
+                principal_ref=principal_ref, executor_ref=executor_ref, profile=profile,
+            ),
+            context, now=now, healing=False,
+        )
     existing = find_top_level_binding(store, axes, collab_context_id)
     if existing is not None:
         return existing
@@ -127,11 +144,9 @@ def ensure_top_level_binding(
     *,
     now: str,
     catalog: ProductCatalog,
+    method_binding_id: str | None = None,
 ) -> MethodBinding:
     """Read-path recovery of the L5 top-level binding from persisted facts."""
-    existing = find_top_level_binding(store, axes, collab_context_id)
-    if existing is not None:
-        return existing
     record = collab_repo.get_current_status(collab_context_id)
     if record is None:
         raise ContextCollabNotFoundError(
@@ -148,6 +163,33 @@ def ensure_top_level_binding(
             if creation_profile_ref(facts) is not None
             else 1,
         )
+    allowed_refs = (
+        product_binding_refs(collab_context_id, profile)
+        if profile is not None else (top_level_binding_id(collab_context_id),)
+    )
+    requested_ref = allowed_refs[0] if method_binding_id is None else method_binding_id
+    if requested_ref not in allowed_refs:
+        raise ContextCollabNotFoundError(
+            f"method binding {requested_ref!r} is not part of the pinned product topology"
+        )
+    if profile is not None and profile.composition.relations:
+        project_method_topology(
+            store, axes, collab_context_id, profile,
+            _resolve_method_spec(
+                collab_context_id, method_kind=creation_method_kind(facts),
+                principal_ref=record.collet.initiator_ref,
+                executor_ref=record.task.executor_ref if record.task is not None else None,
+                profile=profile,
+            ),
+            actor, now=now, healing=True,
+        )
+        binding = store.get_binding(axes, requested_ref, collab_context_id)
+        if binding is None:
+            raise ContextCollabNotFoundError(f"method binding {requested_ref!r} not recovered")
+        return binding
+    existing = find_top_level_binding(store, axes, collab_context_id)
+    if existing is not None:
+        return existing
     return store.upsert_binding(
         axes,
         build_top_level_binding(
@@ -184,7 +226,7 @@ class ProductMethodBindingRecovery:
         self._catalog = catalog
 
     def recover(
-        self, collab_context_id: str, actor: ActorContext, *, now: str
+        self, collab_context_id: str, actor: ActorContext, *, method_binding_id: str, now: str
     ) -> MethodBinding:
         return ensure_top_level_binding(
             self._store,
@@ -194,4 +236,5 @@ class ProductMethodBindingRecovery:
             actor,
             now=now,
             catalog=self._catalog,
+            method_binding_id=method_binding_id,
         )

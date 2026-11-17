@@ -11,6 +11,11 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.particip
     ROLE_RESPONSIBLE_USER,
     ROLE_SELECTED_AGENT,
 )
+from agentclaw.community.core.task.context_collab.l5_methods.method_profile import (
+    MethodProfile,
+    MethodProfileRef,
+    get_profile,
+)
 from agentclaw.community.core.task.context_collab.l5_methods.open_profile import (
     ParticipationType,
 )
@@ -23,7 +28,6 @@ from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     DomainProfile,
     GovernanceRequirements,
     MethodCompositionTemplate,
-    MethodRequirement,
     ProductProfileDefinition,
     ScenarioRole,
     VersionedProfileRef,
@@ -59,7 +63,7 @@ def command():
         composition=MethodCompositionTemplate(
             method_kind="Open",
             scope="collet",
-            required_methods=(MethodRequirement("Open", "0.2"),),
+            required_methods=(get_profile("Open", "0.2"),),
         ),
         scenario_roles=(
             ScenarioRole(
@@ -158,7 +162,10 @@ def test_creation_preserves_versions_without_local_capability_negotiation(comman
     command = replace(
         command,
         composition=replace(
-            command.composition, required_methods=(MethodRequirement("Open", "999"),)
+            command.composition,
+            required_methods=(
+                replace(get_profile("Open", "0.2"), profile_version="999"),
+            ),
         ),
     )
     profile = create_product_profile(command)
@@ -259,7 +266,7 @@ def test_creation_keeps_the_authored_product_admission_strategy(command, policy)
                 composition=MethodCompositionTemplate(
                     "Single",
                     "collet",
-                    (MethodRequirement("Single", "0.2"),),
+                    (get_profile("Single", "0.2"),),
                     policies=(OpenMethodPolicy(_publication()),),
                 ),
             ),
@@ -391,7 +398,7 @@ def test_method_composition_does_not_require_open_product_policy(command, method
     composition = MethodCompositionTemplate(
         method_kind=method,
         scope="collet",
-        required_methods=(MethodRequirement(method, "0.2"),),
+        required_methods=(get_profile(method, "0.2"),),
     )
     profile = create_product_profile(replace(command, composition=composition))
     assert profile.composition.policies == ()
@@ -406,8 +413,8 @@ def test_composite_method_keeps_open_policy_scoped_to_open(command):
         method_kind="Open + Group",
         scope="collet",
         required_methods=(
-            MethodRequirement("Open", "0.2"),
-            MethodRequirement("Group", "0.2"),
+            get_profile("Open", "0.2"),
+            get_profile("Group", "0.2"),
         ),
         policies=(policy,),
     )
@@ -454,8 +461,8 @@ def test_composite_method_keeps_open_policy_scoped_to_open(command):
             lambda c: MethodCompositionTemplate(
                 method_kind="Single",
                 scope="collet",
-                required_methods=(MethodRequirement("Single", "0.2"),),
-                optional_methods=(MethodRequirement("Open", "0.2"),),
+                required_methods=(get_profile("Single", "0.2"),),
+                optional_methods=(get_profile("Open", "0.2"),),
                 policies=(OpenMethodPolicy(_publication()),),
             ),
             "requires Open Method in required_methods",
@@ -489,3 +496,38 @@ def test_policy_lookup_does_not_choose_arbitrarily_between_duplicates(command):
     )
     with pytest.raises(ContextCollabValidationError, match="exactly one Open"):
         composition.require_policy("Open")
+
+
+def test_composition_uses_the_actual_l5_method_profile_contract(command):
+    required = get_profile("Open", "0.2")
+    optional = get_profile("Swarm", "0.2")
+    profile = create_product_profile(
+        replace(
+            command,
+            composition=replace(command.composition, optional_methods=(optional,)),
+        )
+    )
+    assert isinstance(profile.composition.required_methods[0], MethodProfile)
+    assert profile.composition.required_methods[0] is required
+    assert profile.composition.optional_methods[0] is optional
+    assert required.capabilities and required.primitives_used
+    assert required.participation_model == "admission"
+    assert required.composable_relations
+    assert required.ref in ProductCatalog((profile,)).capabilities().methods
+
+
+@pytest.mark.parametrize("field", ["required_methods", "optional_methods"])
+@pytest.mark.parametrize("entries", [(MethodProfileRef("Open", "0.2"),), ("Open",), []])
+def test_composition_does_not_accept_references_or_untyped_contracts(
+    command, field, entries
+):
+    invalid = replace(
+        command, composition=replace(command.composition, **{field: entries})
+    )
+    with pytest.raises(ContextCollabValidationError, match="tuple of L5 MethodProfile"):
+        create_product_profile(invalid)
+    unchecked = ProductProfileDefinition(
+        **{item.name: getattr(invalid, item.name) for item in fields(invalid)}
+    )
+    with pytest.raises(ContextCollabValidationError, match="tuple of L5 MethodProfile"):
+        ProductCatalog((unchecked,))

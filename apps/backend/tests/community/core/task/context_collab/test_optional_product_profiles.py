@@ -76,6 +76,8 @@ from agentclaw.community.core.task.context_collab.service_api import (
 from agentclaw.community.core.task.context_collab.l6_products.operations.method_bootstrap import (
     ensure_top_level_binding,
 )
+from tests.community.core.task.context_collab.product_catalog import standard_task_workflow
+
 from agentclaw.community.di.modules.task_commission_method_ops_adapter import (
     TaskCommissionOpenMethodAdapter,
 )
@@ -88,7 +90,7 @@ SPACE = SpaceRef("space", "test")
 def _profile(*, workflow=False, version=2):
     extra = (
         {
-            "workflow": TASK_COMMISSION_PROFILE.workflow,
+            "workflow": standard_task_workflow(),
             "domain": TASK_COMMISSION_PROFILE.domain,
         }
         if workflow
@@ -113,6 +115,7 @@ def _profile(*, workflow=False, version=2):
 @pytest.fixture(params=[False, True], ids=["standard_task", "explicit_workflow"])
 def runtime(db, request):
     profile = _profile(workflow=request.param)
+    assert (profile.workflow is not None) is request.param
     catalog = ProductCatalog((profile,))
     repo = ContextCollabRepository(db, product_catalog=catalog)
     store = InMemoryMethodStore()
@@ -361,7 +364,15 @@ def test_omitted_profile_metadata_is_validated_not_guessed(db, corruption):
 
 
 def test_l1_requirement_is_not_silently_downgraded():
-    profile = create_product_profile(TASK_COMMISSION_PROFILE)
+    profile = create_product_profile(
+        replace(
+            TASK_COMMISSION_PROFILE,
+            compatibility=replace(
+                TASK_COMMISSION_PROFILE.compatibility,
+                required_layers=("L1", "L2", "L3", "L4", "L5"),
+            ),
+        )
+    )
     result = negotiate(profile, ProductCatalog((profile,)).capabilities())
     assert not result.accepted and "layer:L1" in result.missing_capabilities
 

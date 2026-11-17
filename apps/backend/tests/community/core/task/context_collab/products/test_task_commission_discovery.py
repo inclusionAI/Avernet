@@ -195,7 +195,7 @@ def test_product_filters_global_l5_results_and_discovers_only_once():
     open_ops = Mock(spec=OpenMethodOpsServiceProtocol)
     open_ops.query_opportunities.return_value = tuple(opportunities + unrelated)
     adapter = TaskCommissionSelfApplicationAdapter(
-        open_ops, PRODUCT_CATALOG, store, repo
+        open_ops, PRODUCT_CATALOG, store, repo, group_ops=Mock()
     )
     actor_context = ActorContext(PrincipalRef("bot", BOT_ID), "a2a")
 

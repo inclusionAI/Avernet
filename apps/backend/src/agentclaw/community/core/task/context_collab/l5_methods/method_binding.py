@@ -1,6 +1,7 @@
 """L5 Methods:ACCS-105 wire 权威的协作方法枚举、投影与 MethodBinding 值对象。
 
-BBS 公开讨论使用 ``Open + Group``,团队代办使用 ``Single``;
+BBS 公开讨论使用 ``Open + Group``,团队代办使用 ``Single``,
+公开申请代办使用 ``Open + Single``;
 ``Group`` / ``Open`` / ``Swarm`` 为核心方法单值,按 spec §12.4 仅经嵌套
 bind 进入(顶层 wire 拒绝在 G1 接缝裁决),G3 演进对象暂不引入,
 未知 wire 值抛 ``ContextCollabValidationError``。
@@ -30,8 +31,9 @@ class MethodKind(str, Enum):
     """L5 方法取值;wire 值与三个北向 API 的 ``method_kind`` 字段逐字一致。"""
 
     SINGLE = "Single"
-    # 产品唯一声明的复合 wire 值:BBS 公开讨论 = Open + Group。
+    # 产品声明的复合 wire 值;按现有复合顶层绑定表达。
     OPEN_GROUP = "Open + Group"
+    OPEN_SINGLE = "Open + Single"
     # 核心方法单值(ACCS-301–304),嵌套绑定使用。
     GROUP = "Group"
     OPEN = "Open"
@@ -52,7 +54,7 @@ def parse_method_kinds(wire: str) -> tuple[MethodKind, ...]:
     """把 ``method_kind`` wire 值投影为核心方法元组(spec §3.1)。
 
     单值直接映射 ``MethodKind``;复合值必须是产品声明的 wire 组合
-    (即枚举中带 ``" + "`` 的取值,当前仅 ``Open + Group``),按分隔符
+    (即枚举中带 ``" + "`` 的取值,包括 ``Open + Group`` / ``Open + Single``),按分隔符
     拆分后逐项映射;未声明的组合或未知片段抛
     ``ContextCollabValidationError``。
     """
@@ -353,3 +355,11 @@ class MethodBinding:
 def top_level_binding_id(collab_context_id: str) -> str:
     """Stable top-level MethodBinding reference; also used by L6 instance records."""
     return f"mb_top_{collab_context_id}"
+
+
+def profile_binding_id(collab_context_id: str, method: str) -> str:
+    """Stable identity for an independently bound core Method Profile."""
+    kinds = parse_method_kinds(method)
+    if len(kinds) != 1:
+        raise ContextCollabValidationError("profile binding requires one core Method")
+    return f"mb_{kinds[0].value.lower()}_{collab_context_id}"

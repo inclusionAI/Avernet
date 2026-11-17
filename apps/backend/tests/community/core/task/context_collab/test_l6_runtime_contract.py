@@ -23,12 +23,10 @@ from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs 
 from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_resource_refs import (
     SpaceRef,
 )
-from tests.community.core.task.context_collab.creation_facts import creation_facts
-from agentclaw.community.core.task.context_collab.l6_products.binding import (
-    prepare_product_profile,
-)
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     VersionedProfileRef,
+    DomainProfile,
+    DomainMapping,
 )
 from agentclaw.community.core.task.context_collab.products.legacy_profiles import (
     LEGACY_PRODUCT_PROFILES,
@@ -78,6 +76,20 @@ from agentclaw.community.core.task.context_collab.l5_methods.operations.open.ser
 from agentclaw.community.di.modules.task_commission_method_ops_adapter import (
     TaskCommissionOpenMethodAdapter,
 )
+from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.contracts import (
+    ColletCreateCommand,
+)
+from agentclaw.community.core.task.context_collab.l6_products.operations.contracts import (
+    ProductInstantiateCommand,
+)
+from agentclaw.community.core.task.context_collab.l6_products.operations.product_instantiation import (
+    ProductInstantiationService,
+)
+from agentclaw.community.core.task.context_collab.l6_products.task_contracts import (
+    STANDARD_TASK_CONTRACT_REF,
+)
+from tests.community.core.task.context_collab.product_catalog import standard_task_workflow
+
 LEGACY_PRODUCT_CATALOG = ProductCatalog((*LEGACY_PRODUCT_PROFILES, TASK_COMMISSION_PROFILE))
 
 OWNER = PrincipalRef("human", "owner")
@@ -91,14 +103,15 @@ def _actor(principal=OWNER):
 
 def _command(**overrides):
     fields = dict(
-        space=SPACE,
+        to_space=SPACE,
         principal_ref=OWNER,
         method_kind="Open",
         executor_ref=AgentRef("bot", "worker"),
         objective="deliver",
         resource_refs=[],
         product_kind="task_commission",
-        workflow_kind="task_commission_goal",
+        workflow_kind=None,
+        product_profile_ref=VersionedProfileRef("task_commission", 1),
     )
     return CollaborationCreateCommand(**(fields | overrides))
 
@@ -128,6 +141,34 @@ def _services(db, dispatch_port=None, *, catalog=LEGACY_PRODUCT_CATALOG):
         product_catalog=catalog,
     )
     return repo, store, generic, product
+
+
+def _create_collet(repo):
+    return repo.create_l4_collet(
+        ColletCreateCommand(
+            to_space=SPACE,
+            initiator_ref=OWNER,
+            objective="deliver",
+            executor_refs=(AgentRef("bot", "worker"),),
+        ),
+        OWNER,
+    ).collet
+
+
+def _instantiate(
+    repo, store, collet, *, catalog=LEGACY_PRODUCT_CATALOG,
+    profile_ref=VersionedProfileRef("task_commission", 1),
+):
+    return ProductInstantiationService(
+        repo, store, catalog, StructuralContextCollabAuthorizer()
+    ).instantiate(
+        ProductInstantiateCommand(
+            collet_id=collet.collet_id,
+            expected_version=collet.version,
+            profile_ref=profile_ref,
+        ),
+        _actor(),
+    )
 
 
 def _append(
@@ -223,9 +264,10 @@ def test_both_entrypoints_use_same_executor_and_sequence_contract(db):
 
 
 def test_generic_message_is_nontransition_but_stale_control_is_conflict(db):
-    _, _, service, _ = _services(db)
-    created = service.create_collaboration(_command(), _actor())
-    started = _append(service, created.collet_id, 1)
+    repo, store, service, _ = _services(db)
+    created = _create_collet(repo)
+    _instantiate(repo, store, created)
+    started = _append(service, created.collet_id, 1, actor=BOT)
     message = _append(
         service,
         created.collet_id,
@@ -250,10 +292,11 @@ def test_generic_message_is_nontransition_but_stale_control_is_conflict(db):
     ],
 )
 def test_generic_control_cannot_bypass_product_shape(db, overrides):
-    _, _, service, _ = _services(db)
-    created = service.create_collaboration(_command(), _actor())
+    repo, store, service, _ = _services(db)
+    created = _create_collet(repo)
+    _instantiate(repo, store, created)
     with pytest.raises(ContextCollabValidationError):
-        _append(service, created.collet_id, 1, **overrides)
+        _append(service, created.collet_id, 1, actor=BOT, **overrides)
     assert _counts(db) == (1, 1)
 
 
@@ -261,8 +304,9 @@ def test_generic_control_cannot_bypass_product_shape(db, overrides):
     "impostor", [PrincipalRef("human", "worker"), PrincipalRef("bot", "owner")]
 )
 def test_pinned_l4_roles_use_typed_identity_not_just_same_id(db, impostor):
-    _, _, service, _ = _services(db)
-    created = service.create_collaboration(_command(), _actor())
+    repo, store, service, _ = _services(db)
+    created = _create_collet(repo)
+    _instantiate(repo, store, created)
     with pytest.raises(ContextCollabValidationError, match="only the principal"):
         _append(service, created.collet_id, 1, actor=impostor)
     assert _counts(db) == (1, 1)
@@ -270,10 +314,13 @@ def test_pinned_l4_roles_use_typed_identity_not_just_same_id(db, impostor):
 
 def test_pinned_instance_round_trip_and_heal_do_not_renegotiate(db, monkeypatch):
     repo, store, service, _ = _services(db)
-    created = service.create_collaboration(_command(), _actor())
+    created = _create_collet(repo)
+    _instantiate(repo, store, created)
     record = repo.get_current_status(created.collet_id)
     instance = record.product_instance
-    assert instance.profile_ref.version == instance.workflow_ref.version == 1
+    assert instance.profile_ref.version == 1
+    assert instance.workflow_ref is None
+    assert instance.task_contract_ref == STANDARD_TASK_CONTRACT_REF
     assert instance.creation_event_ref == created.current_event_id
     binding = store.get_binding(
         current_axes(), instance.method_binding_refs[0], created.collet_id
@@ -324,8 +371,9 @@ def test_pinned_instance_round_trip_and_heal_do_not_renegotiate(db, monkeypatch)
     ["missing_instance", "role", "version", "evidence", "method", "negotiation"],
 )
 def test_corrupt_pinned_metadata_fails_closed(db, corruption):
-    repo, _, service, _ = _services(db)
-    created = service.create_collaboration(_command(), _actor())
+    repo, store, service, _ = _services(db)
+    created = _create_collet(repo)
+    _instantiate(repo, store, created)
     with db.orm_session() as session:
         row = session.query(ContextCollabColletModel).one()
         data = json.loads(row.creation_facts)
@@ -349,8 +397,9 @@ def test_corrupt_pinned_metadata_fails_closed(db, corruption):
 
 
 def test_legacy_rows_remain_readable_without_fabricated_negotiation(db):
-    repo, _, service, _ = _services(db)
-    created = service.create_collaboration(_command(), _actor())
+    repo, store, service, _ = _services(db)
+    created = _create_collet(repo)
+    _instantiate(repo, store, created)
     with db.orm_session() as session:
         row = session.query(ContextCollabColletModel).one()
         data = json.loads(row.creation_facts)
@@ -363,14 +412,14 @@ def test_legacy_rows_remain_readable_without_fabricated_negotiation(db):
     record = repo.get_current_status(created.collet_id)
     assert record.product_instance is None
     assert record.creation_facts["product_profile_ref"] is None
-    assert record.creation_facts == data
+    assert record.creation_facts == {**data, "product_profile_ref": None}
     assert _counts(db) == (1, 1)
 
 
 def test_unprofiled_generic_context_keeps_legacy_wire_contract(db):
     repo, _, service, _ = _services(db)
     created = service.create_collaboration(
-        _command(product_kind=None, workflow_kind=None), _actor()
+        _command(product_kind=None, workflow_kind=None, product_profile_ref=None), _actor()
     )
     record = repo.get_current_status(created.collet_id)
     assert record.product_instance is None
@@ -382,6 +431,7 @@ def test_unprofiled_generic_context_keeps_legacy_wire_contract(db):
         "executor_ref",
         "product_kind",
         "workflow_kind",
+        "product_profile_ref",
     }
 
 
@@ -392,6 +442,7 @@ def test_bbs_generic_cannot_reply_to_task_skeleton(db):
             product_kind="bbs_public_discussion",
             workflow_kind="bbs_public_discussion",
             method_kind="Open + Group",
+            product_profile_ref=VersionedProfileRef("bbs_public_discussion", 1),
             executor_ref=None,
         ),
         _actor(),
@@ -410,8 +461,9 @@ def test_bbs_generic_cannot_reply_to_task_skeleton(db):
 
 
 def test_message_cannot_smuggle_commission_progress_evidence(db):
-    _, _, service, _ = _services(db)
-    created = service.create_collaboration(_command(), _actor())
+    repo, store, service, _ = _services(db)
+    created = _create_collet(repo)
+    _instantiate(repo, store, created)
     with pytest.raises(ContextCollabValidationError, match="only reportable"):
         _append(
             service,
@@ -430,17 +482,15 @@ def test_product_work_uses_exact_machine_even_for_legacy_v1(db, monkeypatch, leg
         state_machine,
     )
 
-    _, _, generic, product = _services(db)
-    created = generic.create_collaboration(_command(), _actor())
+    repo, store, generic, product = _services(db)
+    created = _create_collet(repo)
+    _instantiate(repo, store, created)
     if legacy:
         with db.orm_session() as session:
             row = session.query(ContextCollabColletModel).one()
             data = json.loads(row.creation_facts)
             for key in (
-                "product_profile_version",
-                "workflow_profile_version",
-                "participants",
-                "role_bindings",
+                "product_profile_ref",
                 "product_instance",
             ):
                 del data[key]
@@ -481,18 +531,23 @@ def test_commission_dispatch_correlates_persisted_selection_and_actual_l5_bindin
     assert record.current_snapshot.status == "created"  # Delivery != completion.
 
 
-def test_uninstalled_catalog_rejects_both_creators_before_any_write(db):
-    _, store, generic, product = _services(db, catalog=ProductCatalog(()))
-    for create in (
-        lambda: generic.create_collaboration(_command(), _actor()),
-        lambda: product.publish_task(
+def test_uninstalled_catalog_rejects_selection_without_work_or_method_writes(db):
+    catalog = ProductCatalog(())
+    repo, store, _, product = _services(db, catalog=catalog)
+    with pytest.raises(ContextCollabValidationError, match="unknown product"):
+        product.publish_task(
             PublishTaskCommand("deliver", "details", SPACE, "worker"), _actor()
-        ),
-    ):
-        with pytest.raises(ContextCollabValidationError, match="unknown product"):
-            create()
+        )
     assert _counts(db) == (0, 0)
-    assert store.list_bindings(current_axes(), "missing") == []
+    created = _create_collet(repo)
+    with pytest.raises(ContextCollabValidationError, match="unknown product"):
+        _instantiate(repo, store, created, catalog=catalog)
+    # L4 creation is a separate committed operation, not rolled back by L6.
+    record = repo.get_current_status(created.collet_id)
+    assert record.product_instance is None
+    assert record.task.status == "created" and record.task.version == 1
+    assert _counts(db) == (1, 1)
+    assert store.list_bindings(current_axes(), created.collet_id) == []
 
 
 def test_injected_exact_profile_survives_storage_recovery_and_shared_g4(db, monkeypatch):
@@ -501,19 +556,17 @@ def test_injected_exact_profile_survives_storage_recovery_and_shared_g4(db, monk
     v2 = replace(
         TASK_COMMISSION_PROFILE,
         ref=VersionedProfileRef("task_commission", 2),
-        domain=replace(
-            TASK_COMMISSION_PROFILE.domain,
+        domain=DomainProfile(
             ref=VersionedProfileRef("custom.commission.domain", 2),
+            mappings=(DomainMapping("assignment", "L4.Task"),),
         ),
-        workflow=replace(TASK_COMMISSION_PROFILE.workflow, public_events_only=False),
+        workflow=replace(standard_task_workflow(), public_events_only=False),
     )
     catalog = ProductCatalog((v2,))
-    repo, _, _, _ = _services(db, catalog=catalog)
-    _, _, generic, _ = _services(db, catalog=catalog)
-    created = generic.create_collaboration(
-        _command(product_profile_ref=v2.ref), _actor()
-    )
-    collet_id = created.collet.collet_id
+    repo, store, _, _ = _services(db, catalog=catalog)
+    created = _create_collet(repo)
+    _instantiate(repo, store, created, catalog=catalog, profile_ref=v2.ref)
+    collet_id = created.collet_id
     instance = repo.get_current_status(collet_id).product_instance
     assert instance.profile_ref == v2.ref
     assert instance.domain_ref == v2.domain.ref
@@ -555,8 +608,9 @@ def test_injected_exact_profile_survives_storage_recovery_and_shared_g4(db, monk
 
 
 def test_legacy_commission_progress_requires_typed_executor(db):
-    _, _, generic, product = _services(db)
-    created = generic.create_collaboration(_command(), _actor())
+    repo, store, generic, product = _services(db)
+    created = _create_collet(repo)
+    _instantiate(repo, store, created)
     with db.orm_session() as session:
         row = session.query(ContextCollabColletModel).one()
         data = json.loads(row.creation_facts)
@@ -567,8 +621,11 @@ def test_legacy_commission_progress_requires_typed_executor(db):
             del data[key]
         row.creation_facts = json.dumps(data)
     product.start_task(TaskAdvanceCommand(created.collet_id), _actor(BOT))
-    for principal in (OWNER, PrincipalRef("human", BOT.principal_id)):
-        with pytest.raises(ContextCollabValidationError, match="designated executor"):
+    for principal, message in (
+        (OWNER, "designated executor"),
+        (PrincipalRef("human", BOT.principal_id), "only the principal"),
+    ):
+        with pytest.raises(ContextCollabValidationError, match=message):
             product.report_progress(
                 TaskAdvanceCommand(created.collet_id, percent=20),
                 _actor(principal),

@@ -337,11 +337,9 @@ class TestBoundary:
 
 
 def _bbs_spec():
-    from agentclaw.community.core.task.context_collab.l6_products.context_spec import (
-        ContextSpec,
-    )
+    from tests.community.core.task.context_collab.creation_facts import creation_facts
 
-    return ContextSpec(
+    return creation_facts(
         space=SPACE,
         principal_ref=PRINCIPAL,
         method_kind="Open + Group",

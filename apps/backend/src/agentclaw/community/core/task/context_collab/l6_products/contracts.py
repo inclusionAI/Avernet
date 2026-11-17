@@ -8,6 +8,13 @@ from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabValidationError,
 )
 
+from agentclaw.community.core.task.context_collab.l5_methods.method_composition import (
+    CompositionRelation,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.method_profile import (
+    MethodProfile,
+    MethodProfileRef,
+)
 from agentclaw.community.core.task.context_collab.l6_products.method_policies import (
     MethodPolicy,
 )
@@ -28,30 +35,29 @@ class VersionedProfileRef:
 
 
 @dataclass(frozen=True)
-class MethodRequirement:
-    method: str
-    version: str
+class MethodRelationTemplate:
+    """An explicit L5 relation between two required Method Profiles."""
 
-    def __post_init__(self) -> None:
-        if any(
-            not isinstance(item, str) or not item.strip()
-            for item in (self.method, self.version)
-        ):
-            raise ContextCollabValidationError(
-                "Method requirement needs non-empty method and version"
-            )
+    parent_method: str
+    child_method: str
+    relation: CompositionRelation
 
 
 @dataclass(frozen=True)
 class MethodCompositionTemplate:
-    """Current implementation supports one explicit top-level binding, no inferred children."""
+    """Compose L5 MethodProfiles, not a second L6 Method requirement model.
+
+    Relations instantiate one binding per required Profile and explicit L5 edges.
+    Empty relations retain the historical single-binding topology.
+    """
 
     method_kind: str
     scope: str
-    required_methods: tuple[MethodRequirement, ...]
-    optional_methods: tuple[MethodRequirement, ...] = ()
+    required_methods: tuple[MethodProfile, ...]
+    optional_methods: tuple[MethodProfile, ...] = ()
     # Empty means no method-specific product policy, not a default Open policy.
     policies: tuple[MethodPolicy, ...] = ()
+    relations: tuple[MethodRelationTemplate, ...] = ()
 
     def require_policy(self, method: str) -> MethodPolicy:
         """Return the exact declared policy; never infer one from Method kind."""
@@ -213,7 +219,7 @@ class ProductCapabilities:
     """Explicit capability offer, usable for local selection or a future L1 peer exchange."""
 
     profiles: tuple[VersionedProfileRef, ...]
-    methods: tuple[MethodRequirement, ...]
+    methods: tuple[MethodProfileRef, ...]
     accs_revisions: tuple[str, ...]
     layers: tuple[str, ...]
     extensions: tuple[str, ...]
@@ -244,11 +250,11 @@ def negotiate(
         if layer not in offer.layers:
             missing.append(f"layer:{layer}")
     for method in profile.composition.required_methods:
-        if method not in offer.methods:
-            missing.append(f"method:{method.method}@{method.version}")
+        if method.ref not in offer.methods:
+            missing.append(f"method:{method.method_kind}@{method.profile_version}")
     for method in profile.composition.optional_methods:
-        if method not in offer.methods:
-            optional.append(f"method:{method.method}@{method.version}")
+        if method.ref not in offer.methods:
+            optional.append(f"method:{method.method_kind}@{method.profile_version}")
     for extension in profile.compatibility.required_extensions:
         if extension not in offer.extensions:
             missing.append(f"extension:{extension}")

@@ -38,6 +38,7 @@ from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_reso
     SpaceRef,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.participants import (
+    RoleBinding,
     role_binding_ref,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
@@ -49,6 +50,10 @@ from agentclaw.community.core.task.context_collab.l5_methods.open_profile import
     OpportunityState,
     ParticipationApplication,
     ParticipationType,
+)
+from agentclaw.community.core.task.context_collab.l6_products.binding import actor_has_role
+from agentclaw.community.core.task.context_collab.l6_products.task_contracts import (
+    STANDARD_TASK_CONTRACT_REF,
 )
 from agentclaw.community.core.task.context_collab.l6_products.catalog import (
     ProductCatalog,
@@ -176,32 +181,38 @@ def test_commission_protocol_and_persistence_integration(product_app, db, engine
     assert instance is not None
     assert instance.collet_ref == collet_id
     assert instance.profile_ref == profile.ref
-    assert instance.workflow_ref == profile.workflow.ref
-    assert instance.domain_ref == profile.domain.ref
-    assert instance.method_profiles == profile.composition.required_methods
+    assert instance.workflow_ref is profile.workflow is None
+    assert instance.domain_ref is profile.domain is None
+    assert instance.task_contract_ref == STANDARD_TASK_CONTRACT_REF
+    assert instance.method_profiles == tuple(
+        item.ref for item in profile.composition.required_methods
+    )
     assert instance.governance == profile.governance
     assert instance.creation_event_ref == record.events[0].event_id
     assert instance.negotiation.accepted is True
     assert instance.negotiation.selected_profile == profile.ref
     assert instance.negotiation.mode == "local_exact_match"  # 非远端协商。
     assert instance.negotiation.missing_capabilities == ()
-    assert spec.product_profile_version == profile.ref.version
-    assert spec.workflow_profile_version == profile.workflow.ref.version
-    assert spec.method_kind == profile.composition.method_kind
-    assert spec.workflow_kind == profile.workflow.ref.profile_id
-
-    participants = {item.participant_id: item for item in spec.participants}
-    roles = {
-        item.role: participants[item.participant_id] for item in spec.role_bindings
+    assert spec["product_profile_ref"] == {
+        "profile_id": profile.ref.profile_id, "version": profile.ref.version
     }
+    assert spec["method_kind"] == profile.composition.method_kind
+    assert spec["workflow_kind"] is None
+
+    # Role references are L6 selection evidence. Subjects are resolved from
+    # the actual L4 Task, not an obsolete aggregate inside creation facts.
     declared_roles = {role.name: role for role in profile.scenario_roles}
-    assert len(participants) == len(roles) == 2
-    assert roles[declared_roles["owner"].l4_role].principal_ref == HUMAN.actor
-    assert roles[declared_roles["assignee"].l4_role].agent_ref == AgentRef(
-        "bot", BOT_ASSIGNEE
-    )
+    assert record.task.principal_ref == HUMAN.actor
+    assert record.task.executor_ref == AgentRef("bot", BOT_ASSIGNEE)
+    assert actor_has_role(record.task, HUMAN.actor, declared_roles["owner"].l4_role, profile)
+    assert actor_has_role(record.task, BOT.actor, declared_roles["assignee"].l4_role, profile)
+    assert not actor_has_role(record.task, HUMAN.actor, declared_roles["assignee"].l4_role, profile)
     assert instance.role_binding_refs == tuple(
-        role_binding_ref(collet_id, item) for item in spec.role_bindings
+        role_binding_ref(
+            collet_id,
+            RoleBinding(role.l4_role, f"participant_{role.participant_source}"),
+        )
+        for role in profile.scenario_roles
     )
 
     # 2. 真实 Open 服务完成发布人代投/审核/录取,没有伪造 Bot 主动申请。
@@ -345,12 +356,12 @@ def test_commission_protocol_and_persistence_integration(product_app, db, engine
         event["event_id"] for event in final_detail.events
     ]
     with engine.connect() as connection:
-        raw_spec = connection.scalar(
-            select(ContextCollabColletModel.context_spec).where(
+        raw_facts = connection.scalar(
+            select(ContextCollabColletModel.creation_facts).where(
                 ContextCollabColletModel.collab_context_id == collet_id
             )
         )
-    assert json.loads(raw_spec)["product_instance"] == instance.to_dict()
+    assert json.loads(raw_facts)["product_instance"] == instance.to_dict()
     assert len(delivery.sent) == 1  # Work 推进没有重新发布/录取/送达。
     assert store.list_bindings(axes, collet_id) == [binding]
     assert store.list_opportunities(axes, binding_id, collet_id) == [opportunity]

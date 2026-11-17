@@ -5,6 +5,7 @@ evidence. They are not atomic or restart-durable together. No Space membership/g
 is written.
 """
 
+from datetime import datetime, timezone
 from uuid import uuid4
 
 from injector import inject
@@ -22,11 +23,15 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.particip
 )
 from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
     BindingState,
-    top_level_binding_id,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.open_profile import (
     ApplicationState,
     ParticipationType,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.single_profile import SingleSelection
+from agentclaw.community.core.task.context_collab.l5_methods.operations.contracts import (
+    GroupMethodOpsServiceProtocol,
+    SingleSelectCommand,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime import (
     current_axes,
@@ -74,11 +79,17 @@ from agentclaw.community.di.modules.task_commission_method_ops_adapter import (
     TaskCommissionOpenMethodAdapter,
 )
 
+from agentclaw.community.core.task.context_collab.l5_methods.method_composition import CompositionEdgeState
+from agentclaw.community.core.task.context_collab.l6_products.topology import (
+    product_method_binding_ref,
+    product_relation_id,
+)
+
 _POLICY_REF = "task_commission.designated_bot_self_application/1"
 
 
 class TaskCommissionSelfApplicationAdapter(TaskCommissionOpenMethodAdapter):
-    """Implements the installed task_commission@1 self-application path."""
+    """Bounded self-application, with explicit Single selection for composite profiles."""
 
     @inject
     def __init__(
@@ -87,10 +98,12 @@ class TaskCommissionSelfApplicationAdapter(TaskCommissionOpenMethodAdapter):
         product_catalog: ProductCatalog,
         store: MethodStoreProtocol,
         repository: ContextCollabRepositoryProtocol,
+        group_ops: GroupMethodOpsServiceProtocol,
     ) -> None:
         super().__init__(open_ops, product_catalog)
         self._store = store
         self._repo = repository
+        self._single_ops = group_ops
 
     def _self_service_profile(
         self, ref: VersionedProfileRef
@@ -98,7 +111,7 @@ class TaskCommissionSelfApplicationAdapter(TaskCommissionOpenMethodAdapter):
         profile = self._product_catalog.get(ref.profile_id, ref.version)
         if (
             profile.ref.profile_id != "task_commission"
-            or profile.composition.method_kind != "Open"
+            or profile.composition.method_kind not in {"Open", "Open + Single"}
             or not isinstance(
                 profile.composition.require_policy("Open").publication.admission,
                 BotSelfApplicationAdmission,
@@ -143,7 +156,7 @@ class TaskCommissionSelfApplicationAdapter(TaskCommissionOpenMethodAdapter):
                 catalog=self._product_catalog,
             ) != profile
             or command.method_binding_ref
-            != top_level_binding_id(command.collab_context_id)
+            != product_method_binding_ref(command.collab_context_id, profile, "Open")
         ):
             raise ContextCollabValidationError(
                 "opportunity does not match owner/task selection"
@@ -195,7 +208,7 @@ class TaskCommissionSelfApplicationAdapter(TaskCommissionOpenMethodAdapter):
                 or record.task.status != "created"
             ):
                 continue
-            binding_id = top_level_binding_id(collet.collet_id)
+            binding_id = product_method_binding_ref(collet.collet_id, profile, "Open")
             binding = self._store.get_binding(axes, binding_id, collet.collet_id)
             if binding is None or binding.state is not BindingState.ACTIVE:
                 continue
@@ -296,7 +309,7 @@ class TaskCommissionSelfApplicationAdapter(TaskCommissionOpenMethodAdapter):
                 profile_ref=creation_profile_ref(record.creation_facts),
                 catalog=self._product_catalog,
             ) != profile
-            or binding_id != top_level_binding_id(command.collab_context_id)
+            or binding_id != product_method_binding_ref(command.collab_context_id, profile, "Open")
             or binding is None
             or binding.state is not BindingState.ACTIVE
             or binding.method_names != ("Open",)
@@ -313,6 +326,7 @@ class TaskCommissionSelfApplicationAdapter(TaskCommissionOpenMethodAdapter):
             or opportunity.capacity != policy.capacity
         ):
             raise ContextCollabValidationError("application unavailable for task review")
+        method_refs = self._require_active_methods(command.collab_context_id, profile)
         expected_roles = self._selected_agent_role_refs(
             command.collab_context_id, profile
         )
@@ -344,9 +358,24 @@ class TaskCommissionSelfApplicationAdapter(TaskCommissionOpenMethodAdapter):
         decision = self._store.get_decision(
             current_axes(), decision_id, binding_id, command.collab_context_id
         )
-        if decision is None or not decision.resulting_binding_refs:
+        if decision is None or len(decision.resulting_binding_refs) != 1:
             raise ContextCollabValidationError(
                 "admission did not establish a scoped binding"
+            )
+        if "Single" in method_refs:
+            # Admission establishes a scoped participant, not an executor selection.
+            # Keep this product composition outside the reusable L5 Open service.
+            self._single_ops.select(
+                command.collab_context_id,
+                method_refs["Single"],
+                SingleSelectCommand(
+                    agent_participant_ref=decision.resulting_binding_refs[0],
+                    scope_ref=command.collab_context_id,
+                    selection_evidence_refs=[application_id, decision_id],
+                    selection_id=f"sel_{application_id}",
+                    reason="task_commission.select_admitted_assignee",
+                ),
+                policy_context,
             )
         self.require_admitted(command.collab_context_id, context)
         return AssigneeAdmissionReceipt(
@@ -358,33 +387,56 @@ class TaskCommissionSelfApplicationAdapter(TaskCommissionOpenMethodAdapter):
             decision.resulting_binding_refs,
         )
 
+    def _require_active_methods(
+        self, collet_id: str, profile: ProductProfileDefinition
+    ) -> dict[str, str]:
+        axes, refs = current_axes(), {}
+        for method in profile.composition.required_methods:
+            name = method.method_kind
+            binding_id = product_method_binding_ref(collet_id, profile, name)
+            binding = self._store.get_binding(axes, binding_id, collet_id)
+            if (
+                binding is None
+                or binding.state is not BindingState.ACTIVE
+                or binding.method_names != (name,)
+                or binding.profile_versions != {name: method.profile_version}
+            ):
+                raise ContextCollabValidationError(
+                    f"execution requires an active {name} Method binding matching the pinned product"
+                )
+            refs[name] = binding_id
+        for relation in profile.composition.relations:
+            edge = self._store.get_composition_edge(
+                axes, product_relation_id(collet_id, relation), collet_id
+            )
+            if (
+                edge is None or edge.state is not CompositionEdgeState.ACTIVE
+                or edge.parent_binding != refs[relation.parent_method]
+                or edge.child_binding != refs[relation.child_method]
+                or edge.relation_kind != relation.relation
+            ):
+                raise ContextCollabValidationError("execution requires the active product Method composition")
+        return refs
+
+    @staticmethod
+    def _selection_is_current(selection: SingleSelection) -> bool:
+        try:
+            starts = datetime.fromisoformat(selection.valid_from)
+            ends = (
+                datetime.fromisoformat(selection.valid_until)
+                if selection.valid_until is not None
+                else None
+            )
+            now = datetime.now(timezone.utc)
+            return starts <= now and (ends is None or now < ends)
+        except (ValueError, TypeError):
+            # Invalid or timezone-naive evidence never authorizes Work.
+            return False
+
     def require_admitted(self, collab_context_id: str, context: ActorContext) -> None:
         record = self._repo.get_current_status(collab_context_id)
         if record is None or not self._designated(record, context):
             raise ContextCollabValidationError("execution requires the designated Bot")
-        axes = current_axes()
-        binding_id = top_level_binding_id(collab_context_id)
-        binding = self._store.get_binding(axes, binding_id, collab_context_id)
-        if (
-            binding is None
-            or binding.state is not BindingState.ACTIVE
-            or binding.method_names != ("Open",)
-        ):
-            raise ContextCollabValidationError(
-                "execution requires an active Open Method binding"
-            )
-        applications = {
-            app.application_id: app
-            for app in self._store.list_applications(
-                axes, binding_id, collab_context_id
-            )
-        }
-        participants = {
-            participant.participant_binding_id: participant
-            for participant in self._store.list_participant_bindings(
-                axes, binding_id, collab_context_id
-            )
-        }
         profile = product_definition(
             product_kind=creation_product_kind(record.creation_facts),
             workflow_kind=creation_workflow_kind(record.creation_facts),
@@ -394,6 +446,16 @@ class TaskCommissionSelfApplicationAdapter(TaskCommissionOpenMethodAdapter):
         )
         if profile is None:
             raise ContextCollabValidationError("task has no product profile")
+        method_refs = self._require_active_methods(collab_context_id, profile)
+        axes, binding_id = current_axes(), method_refs["Open"]
+        applications = {
+            app.application_id: app
+            for app in self._store.list_applications(axes, binding_id, collab_context_id)
+        }
+        participants = {
+            participant.participant_binding_id: participant
+            for participant in self._store.list_participant_bindings(axes, binding_id, collab_context_id)
+        }
         expected_roles = self._selected_agent_role_refs(collab_context_id, profile)
         for decision in self._store.list_decisions(axes, binding_id, collab_context_id):
             app = applications.get(decision.application_ref)
@@ -415,14 +477,32 @@ class TaskCommissionSelfApplicationAdapter(TaskCommissionOpenMethodAdapter):
                 or opportunity.admission_policy_refs != (_POLICY_REF,)
             ):
                 continue
-            if any(
-                ref in participants
+            admitted_participants = {
+                ref for ref in decision.resulting_binding_refs
+                if ref in participants
                 and participants[ref].scope_ref == collab_context_id
                 and participants[ref].participant_ref == context.actor.principal_id
                 and participants[ref].role_binding_refs == expected_roles
                 and app.requested_role_refs == expected_roles
-                for ref in decision.resulting_binding_refs
-            ):
+            }
+            if admitted_participants:
+                if "Single" in method_refs:
+                    selection = self._store.active_selection(
+                        axes, method_refs["Single"], collab_context_id, collab_context_id
+                    )
+                    if (
+                        selection is None
+                        or selection.selected_agent_participant_ref
+                        not in admitted_participants
+                        or not {app.application_id, decision.admission_decision_id}
+                        <= set(selection.selection_evidence_refs)
+                        or selection.selected_by_ref != record.owner_principal_id
+                        or not self._selection_is_current(selection)
+                    ):
+                        raise ContextCollabValidationError(
+                            "execution requires an active Single selection "
+                            "for the admitted participant"
+                        )
                 return
         raise ContextCollabValidationError(
             "execution requires an admitted task-scoped participation binding"

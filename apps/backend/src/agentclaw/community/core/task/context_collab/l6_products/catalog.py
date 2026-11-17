@@ -11,7 +11,6 @@ from agentclaw.community.core.task.context_collab.l5_methods.method_profile impo
     METHOD_PROFILE_REGISTRY,
 )
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
-    MethodRequirement,
     ProductCapabilities,
     ProductProfileDefinition,
     VersionedProfileRef,
@@ -48,10 +47,7 @@ class ProductCatalog:
         """Installed local capabilities, not a fabricated remote Agent offer."""
         return ProductCapabilities(
             profiles=tuple(self._definitions),
-            methods=tuple(
-                MethodRequirement(name, item.profile_version)
-                for name, item in METHOD_PROFILE_REGISTRY.items()
-            ),
+            methods=tuple(item.ref for item in METHOD_PROFILE_REGISTRY.values()),
             accs_revisions=("0.2",),
             layers=("L2", "L3", "L4", "L5"),
             extensions=(),

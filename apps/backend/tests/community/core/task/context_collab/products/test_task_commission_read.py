@@ -222,6 +222,19 @@ def _open_group_spec(objective: str) -> dict:
 
 
 def _status_record(collab_context_id: str, spec: dict):
+    task = Task(
+        objective=spec["objective"],
+        status="created",
+        principal_ref=PRINCIPAL,
+        executor_refs=(),
+        task_id="task_" + collab_context_id,
+        collet_ref=collab_context_id,
+        version=1,
+        parent_task_ref=None,
+        completion_conditions=(),
+        created_event_ref="evt_fixture",
+        last_event_ref="evt_fixture",
+    )
     return ContextStatusRecord(
         collet=Collet(
             collet_id=collab_context_id,
@@ -232,49 +245,8 @@ def _status_record(collab_context_id: str, spec: dict):
             version=1,
         ),
         creation_facts=spec,
-        tasks=(
-            Task(
-                objective=spec.objective,
-                status="created",
-                principal_ref=PRINCIPAL,
-                executor_refs=(),
-                task_id="task_" + "collet_other",
-                collet_ref="collet_other",
-                version=1,
-                parent_task_ref=None,
-                completion_conditions=(),
-                created_event_ref="evt_fixture",
-                last_event_ref="evt_fixture",
-            ),
-        )
-        if Task(
-            objective=spec.objective,
-            status="created",
-            principal_ref=PRINCIPAL,
-            executor_refs=(),
-            task_id="task_" + "collet_other",
-            collet_ref="collet_other",
-            version=1,
-            parent_task_ref=None,
-            completion_conditions=(),
-            created_event_ref="evt_fixture",
-            last_event_ref="evt_fixture",
-        )
-        is not None
-        else (),
-        task=Task(
-            objective=spec.objective,
-            status="created",
-            principal_ref=PRINCIPAL,
-            executor_refs=(),
-            task_id="task_" + "collet_other",
-            collet_ref="collet_other",
-            version=1,
-            parent_task_ref=None,
-            completion_conditions=(),
-            created_event_ref="evt_fixture",
-            last_event_ref="evt_fixture",
-        ),
+        tasks=(task,),
+        task=task,
         events=[],
     )
 
@@ -318,7 +290,7 @@ class _WriteRepoShim(_FakeRepo):
             collet_id=collab_context_id,
             initiator_ref=request.initial_event.actor_ref,
             state=_ColletState.ACTIVE,
-            scope=request.to_space,
+            scope=request.space,
             current_event_id=event_id,
             version=1,
         )

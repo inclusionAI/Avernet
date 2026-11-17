@@ -44,13 +44,21 @@ from agentclaw.community.core.task.context_collab.method_service_api import (
 )
 from agentclaw.community.core.task.context_collab.products.task_commission.profile import (
     TASK_COMMISSION_PROFILE,
+    OPEN_SINGLE_COMMISSION_PROFILE,
     init_product_profile,
 )
 from agentclaw.community.core.task.context_collab.products.task_commission.service_api import (
     AssigneeAdmissionCommand,
 )
 from agentclaw.community.di.modules import task_commission_method_ops_adapter as adapter
-from tests.community.core.task.context_collab.product_catalog import PRODUCT_CATALOG
+from tests.community.core.task.context_collab.product_catalog import (
+    PRODUCT_CATALOG,
+    standard_task_workflow,
+)
+from agentclaw.community.core.task.context_collab.l6_products.task_contracts import (
+    STANDARD_TASK_CONTRACT_REF,
+    resolve_event_contract,
+)
 from tests.community.core.task.context_collab.products.test_task_commission_publish import (
     ASSIGNEE,
     _actor,
@@ -68,33 +76,40 @@ def test_commission_has_a_complete_declarative_publication_and_work_contract():
     publication = profile.composition.require_policy("Open").publication
     assert publication.admission.applicant_role == "assignee"
     assert publication.admission.accountable_role == "owner"
-    assert publication.admission.strategy == "designated_bot_self_application"
+    assert publication.admission.strategy == "publisher_mediated"
     assert publication.admission.capacity == 1
     assert (
         publication.admission.participation_type
-        is ParticipationType.COLLET_PARTICIPANT
+        is ParticipationType.SINGLE_CONTRIBUTION
     )
     assert publication.dispatch_after is ApplicationState.ADMITTED
     assert publication.partial_failure == "propagate_without_rollback"
     assert profile.composition.method_kind == "Open"  # No inferred Single binding.
 
-    machine_ref = profile.workflow.state_machine_ref
+    assert profile.workflow is None
+    contract = resolve_event_contract(profile)
+    assert contract.ref == STANDARD_TASK_CONTRACT_REF
+    machine_ref = contract.state_machine_ref
     machine = VERSIONED_MACHINE_REGISTRY[(machine_ref.profile_id, machine_ref.version)]
-    assert {action.event_kind for action in profile.workflow.actions} == {
+    assert {action.event_kind for action in contract.actions} == {
         transition.event_name for transition in machine.transitions
     }
-    assert profile.workflow.action("submit_task").payload_fields == (
+    assert contract.action("submit_task").payload_fields == (
         "note",
         "artifacts",
     )
-    assert profile.workflow.action("report_progress").payload_fields == (
+    assert contract.action("report_progress").payload_fields == (
         "note",
         "percent",
+        "progress",
+        "error_msg",
+        "reason",
+        "task_id",
     )
     with pytest.raises(ContextCollabValidationError, match="no declared action"):
-        profile.workflow.action("invented_action")
-    with pytest.raises(ContextCollabValidationError, match="duplicate workflow"):
-        replace(profile.workflow, actions=profile.workflow.actions * 2)
+        contract.action("invented_action")
+    with pytest.raises(ContextCollabValidationError, match="duplicate Task"):
+        replace(contract, actions=contract.actions * 2)
 
 
 def test_publish_uses_selected_profile_and_passes_actual_binding_to_method_adapter():
@@ -108,7 +123,7 @@ def test_publish_uses_selected_profile_and_passes_actual_binding_to_method_adapt
         "version": profile.ref.version,
     }
     assert facts["method_kind"] == profile.composition.method_kind
-    assert facts["workflow_kind"] == profile.workflow.ref.profile_id
+    assert facts["workflow_kind"] is None
     from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime import (
         current_axes,
     )
@@ -135,7 +150,8 @@ def test_explicit_profile_selection_pins_exact_version_and_never_migrates():
         catalog=catalog,
     )
     assert selected.ref.version == 2
-    assert selected.workflow.ref.version == 1
+    assert selected.workflow is None
+    assert resolve_event_contract(selected).ref == STANDARD_TASK_CONTRACT_REF
     default = prepare_product_profile(
         product_kind=facts["product_kind"],
         workflow_kind=facts["workflow_kind"],
@@ -196,7 +212,7 @@ def test_catalog_rejects_publication_without_required_typed_roles_or_method():
                 policies=profile.composition.policies,
             ),
         ),
-        replace(profile, workflow=replace(profile.workflow, actions=())),
+        replace(profile, workflow=replace(standard_task_workflow(), actions=())),
     ):
         with pytest.raises(ContextCollabValidationError):
             ProductCatalog((bad,))
@@ -258,7 +274,7 @@ def test_adapter_executes_exact_selected_policy_and_declared_steps():
     assert application.applicant_agent_ref == ASSIGNEE
     assert application.actor_context is actor
     assert application.opportunity_ref == "opp"
-    assert all(call.args[-1] is actor for call in ops.mock_calls[2:])
+    assert all(call.kwargs["command"].context is actor for call in ops.mock_calls[2:])
     assert receipt.application_id == "app"
     assert receipt.state == "ADMITTED"
 
@@ -291,6 +307,7 @@ def test_generic_open_policy_does_not_encode_commission_role_sources():
     owner, assignee = profile.scenario_roles
     generic = replace(
         profile,
+        workflow=standard_task_workflow(),
         scenario_roles=(
             replace(owner, participant_source="executor_ref"),
             replace(assignee, participant_source="principal_ref"),
@@ -318,27 +335,30 @@ def test_generic_open_policy_does_not_encode_commission_role_sources():
     assert ops.mock_calls == []
 
 
-def test_initial_profile_uses_self_application_without_version_bump():
-    legacy = TASK_COMMISSION_PROFILE
-    profile = init_product_profile()
-    assert PRODUCT_CATALOG.get("task_commission", 1) == profile
-    assert profile.ref == VersionedProfileRef("task_commission", 1)
-    assert profile.composition.method_kind == "Open"
+def test_open_single_is_an_explicit_successor_without_changing_v1():
+    legacy = init_product_profile()
+    profile = OPEN_SINGLE_COMMISSION_PROFILE
+    assert PRODUCT_CATALOG.get("task_commission", 1) == legacy
+    assert PRODUCT_CATALOG.get("task_commission", 2) == profile
+    assert profile.ref == VersionedProfileRef("task_commission", 2)
+    assert profile.composition.method_kind == "Open + Single"
     assert {
-        item.method: item.version for item in profile.composition.required_methods
-    } == {
-        "Open": "0.2",
-    }
+        item.method_kind: item.profile_version
+        for item in profile.composition.required_methods
+    } == {"Open": "0.2", "Single": "0.2"}
+    [relation] = profile.composition.relations
+    assert (relation.parent_method, relation.child_method, relation.relation.value) == (
+        "Single", "Open", "support"
+    )
     policy = profile.composition.require_policy("Open").publication.admission
     assert policy.strategy == "designated_bot_self_application"
     assert policy.participation_type is ParticipationType.COLLET_PARTICIPANT
     assert policy.capacity == 1
-    assert profile.workflow == legacy.workflow
+    assert profile.workflow is legacy.workflow is None
     assert legacy.composition.method_kind == "Open"
-    assert (
-        legacy.composition.require_policy("Open").publication.admission.participation_type
-        is ParticipationType.SINGLE_CONTRIBUTION
-    )
+    legacy_policy = legacy.composition.require_policy("Open").publication.admission
+    assert legacy_policy.strategy == "publisher_mediated"
+    assert legacy_policy.participation_type is ParticipationType.SINGLE_CONTRIBUTION
 
 
 @pytest.mark.parametrize(
@@ -352,6 +372,6 @@ def test_initial_profile_uses_self_application_without_version_bump():
     ],
 )
 def test_self_application_policy_rejects_incompatible_semantics(overrides):
-    policy = init_product_profile().composition.require_policy("Open").publication.admission
+    policy = OPEN_SINGLE_COMMISSION_PROFILE.composition.require_policy("Open").publication.admission
     with pytest.raises(ContextCollabValidationError):
         replace(policy, **overrides)

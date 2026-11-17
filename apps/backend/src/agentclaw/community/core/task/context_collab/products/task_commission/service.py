@@ -43,8 +43,8 @@ from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs 
 from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.work import (
     prepare_event_append,
 )
-from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
-    top_level_binding_id,
+from agentclaw.community.core.task.context_collab.l6_products.topology import (
+    product_execution_binding_ref,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime import (
     _now,
@@ -249,9 +249,9 @@ class TaskCommissionService:
             context=context,
             now=_now(),
         )
-        # The installed self-application profile only publishes an owner-authorized
-        # opportunity; the designated Bot must query/apply itself. A separately
-        # assembled publisher-mediated profile remains a compatibility path.
+        # The @2 self-application profile only publishes an owner-authorized
+        # opportunity; the designated Bot must query/apply itself. The installed
+        # @1 profile retains publisher-mediated admission.
         # Cross-store failures propagate without rolling back the SQL Collet.
         admission_command = AssigneeAdmissionCommand(
             collab_context_id=record.collet.collet_id,
@@ -290,8 +290,9 @@ class TaskCommissionService:
             context_version=appended.collet.version,
         )
         # The self-application profile defers dispatch until the Bot application is
-        # ADMITTED; publisher-mediated compatibility profiles dispatch after
-        # publication/admission. Delivery never changes Work state.
+        # admitted and (for Open + Single) explicitly selected by the adapter.
+        # Publisher-mediated @1 dispatches after publication/admission.
+        # Delivery never changes Work state.
         if not self_application:
             self._dispatch_port.dispatch_task_info(
                 DispatchedTaskInfo(
@@ -316,7 +317,7 @@ class TaskCommissionService:
     def apply_for_task(
         self, command: ApplyForTaskCommand, context: ActorContext
     ) -> AssigneeAdmissionReceipt:
-        """Bot applies; the declared owner policy screens/admit, then dispatches."""
+        """Apply, admit and select as declared by the product; only then dispatch."""
         receipt = self._method_ops_port.apply_for_task(command, context)
         self._dispatch_admitted_task(command, receipt, context)
         return receipt
@@ -354,7 +355,7 @@ class TaskCommissionService:
                 assignee_agent_id=context.actor.principal_id,
                 publisher_principal_id=record.owner_principal_id,
                 product_profile_ref=profile.ref,
-                method_binding_ref=command.method_binding_ref,
+                method_binding_ref=product_execution_binding_ref(command.collab_context_id, profile),
                 context_version=record.collet.version,
             )
         )
@@ -506,7 +507,7 @@ class TaskCommissionService:
             if (
                 report.product_profile_ref != profile.ref
                 or report.method_binding_ref
-                != top_level_binding_id(command.collab_context_id)
+                != product_execution_binding_ref(command.collab_context_id, profile)
             ):
                 raise ContextCollabValidationError(
                     "report context does not match task binding/profile"

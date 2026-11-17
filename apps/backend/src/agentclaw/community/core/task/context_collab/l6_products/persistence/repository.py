@@ -200,6 +200,7 @@ class ContextCollabRepository:
             instantiate_product(
                 facts=facts,
                 collet_id=record.collet.collet_id,
+                root_task_id=record.task.task_id,
                 event_id=record.initial_event.event_id,
                 principal_ref=request.principal_ref,
                 executor_ref=request.executor_ref,
@@ -274,6 +275,7 @@ class ContextCollabRepository:
             decoded = decode_product_instance(
                 stored,
                 collet_id=collab_context_id,
+                root_task_id=task.task_id,
                 event_id=task.created_event_ref,
                 principal_ref=task.principal_ref,
                 executor_ref=task.executor_ref,
