@@ -19,6 +19,7 @@ consumes:
 internal_dependencies:
   - agentclaw.community.core.engine_runtime.stage
   - agentclaw.community.core.engine_runtime.errors
+  - agentclaw.community.core.engine_runtime.session_key
   - agentclaw.community.core.repository.protocols.bot    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.chat    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.devices    # repository contracts consumed by this module
@@ -92,6 +93,11 @@ Authorization precedes runtime selection. Backend-owned session indexes remain
 scoped to the session user, while adapter session creation and subsequent
 connection preparation use the same published runtime. No draft fallback or new
 container is introduced by creating a session.
+
+Deletion and its best-effort favorite cleanup use the engine's registered
+session-key wire codec; the original key remains the ownership key. Engine
+selection follows authoritative Bot metadata, including when a relay-managed
+engine skips adapter deletion.
 
 
 ### Caller credential expiry ledger

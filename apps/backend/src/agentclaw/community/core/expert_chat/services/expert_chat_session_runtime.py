@@ -32,6 +32,13 @@ DEFAULT_EXPERT_CHAT_SESSION_TITLE = "新会话"
 class ExpertChatSessionRuntimeMixin:
     """Connection authorization and Adapter session lifecycle operations."""
 
+    def _session_path_key(
+        self, bot: Dict[str, Any], connection: Dict[str, Any], session_key: str
+    ) -> str:
+        """Encode for the authoritative engine without changing the stored key."""
+        engine = self._resolve_chat_engine_type(bot, connection)
+        return quote(self._session_key_codecs.resolve(engine).encode(session_key), safe="")
+
     @staticmethod
     def _session_read_actor(
         bot: Dict[str, Any], session_user_id: str, actor_user_id: str | None,
@@ -519,7 +526,7 @@ class ExpertChatSessionRuntimeMixin:
             session_key,
         )
         try:
-            encoded_session_key = quote(session_key, safe="")
+            encoded_session_key = self._session_path_key(bot, conn, session_key)
             await self._transport.invoke(
                 conn, "DELETE", f"/api/sessions/{encoded_session_key}"
             )

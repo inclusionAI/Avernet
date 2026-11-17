@@ -9,6 +9,8 @@
 """
 from __future__ import annotations
 
+from agentclaw.community.di.modules.engine_runtime_module import EngineRuntimeModule
+
 from unittest.mock import AsyncMock, MagicMock
 
 from agentclaw.community.core.expert_chat.services.expert_chat_service import ExpertChatService
@@ -25,6 +27,7 @@ def _make_service(*, resolver, collaborator_service=None, device_provider=None, 
         transport=MagicMock(invoke=AsyncMock()),
         instance_service=instance_service or MagicMock(),
         publish_repository=MagicMock(),
+        session_key_codecs=EngineRuntimeModule().session_key_codec_registry(),
     )
 
 

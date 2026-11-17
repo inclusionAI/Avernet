@@ -1,4 +1,6 @@
 """Tests for ExpertChatService."""
+
+from agentclaw.community.di.modules.engine_runtime_module import EngineRuntimeModule
 import pytest
 from unittest.mock import AsyncMock, MagicMock, call, patch
 from types import SimpleNamespace
@@ -78,6 +80,7 @@ def _make_service(
         transport=mock_transport,
         instance_service=mock_instance_service,
         publish_repository=MagicMock(),
+        session_key_codecs=EngineRuntimeModule().session_key_codec_registry(),
     )
 
 
@@ -390,6 +393,47 @@ class TestRemoveChatBot:
         )
 
     @pytest.mark.asyncio
+    async def test_remove_bot_encodes_each_teclaw_session(
+        self, mock_repository, mock_bot_repo, mock_device_provider
+    ):
+        import base64
+
+        keys = ["agent:bot1:first:user1", "agent:bot1:second:user1"]
+        mock_bot_repo.get_by_id_and_owner.return_value = dict(ACTIVE_BOT, active_engine="teclaw")
+        mock_repository.get_session.return_value = None
+        mock_repository.list_owned_sessions.return_value = [{"session_key": k} for k in keys]
+        transport = MagicMock(invoke=AsyncMock(return_value={"data": {}}))
+        svc = _make_service(mock_repository, mock_bot_repo, mock_device_provider, mock_transport=transport)
+        with patch.object(svc, "_prepare_chat_connection", new=AsyncMock(
+            return_value=(dict(DEVICE_CONN, engine_type="openclaw"), False)
+        )):
+            assert await svc.remove_chat_bot("user1", "bot1", "owner1")
+        encoded = [base64.urlsafe_b64encode(k.encode()).decode().rstrip("=") for k in keys]
+        assert [c.args[2] for c in transport.invoke.await_args_list] == [
+            path for key in encoded for path in (f"/api/sessions/{key}", f"/api/session-favorites/{key}")
+        ]
+        assert [c.args[3] for c in mock_repository.delete_owned_session.call_args_list] == keys
+
+    @pytest.mark.asyncio
+    async def test_remove_relay_bot_ignores_stale_teclaw_connection(
+        self, mock_repository, mock_bot_repo, mock_device_provider
+    ):
+        key = "agent:bot1:first:user1"
+        mock_bot_repo.get_by_id_and_owner.return_value = dict(ACTIVE_BOT, active_engine="aicoding")
+        mock_repository.get_session.return_value = None
+        mock_repository.list_owned_sessions.return_value = [{"session_key": key}]
+        transport = MagicMock(invoke=AsyncMock(return_value={"data": {}}))
+        svc = _make_service(mock_repository, mock_bot_repo, mock_device_provider, mock_transport=transport)
+        with patch.object(svc, "_prepare_chat_connection", new=AsyncMock(
+            return_value=(dict(DEVICE_CONN, engine_type="teclaw"), False)
+        )):
+            assert await svc.remove_chat_bot("user1", "bot1", "owner1")
+        transport.invoke.assert_awaited_once()
+        assert transport.invoke.await_args.args[1:3] == (
+            "DELETE", "/api/session-favorites/agent%3Abot1%3Afirst%3Auser1"
+        )
+
+    @pytest.mark.asyncio
     async def test_all_owned_sessions_are_deleted_before_bot_is_removed(
         self, mock_repository, mock_bot_repo, mock_device_provider
     ):
@@ -413,7 +457,7 @@ class TestRemoveChatBot:
             "session:default",
             "session:second",
         ]
-        assert [call.args[1] for call in remove_favorite.await_args_list] == [
+        assert [call.args[2] for call in remove_favorite.await_args_list] == [
             "session:default",
             "session:second",
         ]
@@ -626,6 +670,54 @@ class TestExpertChatMultiSession:
             mock_bot_repo,
             mock_device_provider,
             mock_transport=mock_transport,
+        )
+
+    @pytest.mark.asyncio
+    async def test_teclaw_delete_and_favorite_use_encoded_owned_key(
+        self, mock_repository, mock_bot_repo, mock_device_provider
+    ):
+        import base64
+
+        key = "agent:bot1:default:c_123:user:user1"
+        wire_key = base64.urlsafe_b64encode(key.encode()).decode().rstrip("=")
+        mock_repository.get_owned_session.return_value = {"session_key": key}
+        mock_repository.get_session.return_value = None
+        transport = MagicMock(invoke=AsyncMock(return_value={"data": {}}))
+        svc = self._authorized_service(
+            mock_repository, mock_bot_repo, mock_device_provider, mock_transport=transport
+        )
+        bot = dict(ACTIVE_BOT, active_engine="teclaw")
+        conn = dict(DEVICE_CONN, engine_type="openclaw")
+        with patch.object(svc, "_get_authorized_chat_bot", return_value=bot), patch.object(
+            svc, "_prepare_chat_connection", new=AsyncMock(return_value=(conn, False))
+        ):
+            assert await svc.delete_owned_chat_session("user1", "bot1", "owner1", key)
+        assert [c.args[1:3] for c in transport.invoke.await_args_list] == [
+            ("DELETE", f"/api/sessions/{wire_key}"),
+            ("DELETE", f"/api/session-favorites/{wire_key}"),
+        ]
+        mock_repository.delete_owned_session.assert_called_once_with("user1", "bot1", "owner1", key)
+
+    @pytest.mark.asyncio
+    async def test_relay_favorite_uses_bot_engine_not_stale_connection(
+        self, mock_repository, mock_bot_repo, mock_device_provider
+    ):
+        key = "agent:bot1:session:user1"
+        mock_repository.get_owned_session.return_value = {"session_key": key}
+        mock_repository.get_session.return_value = None
+        transport = MagicMock(invoke=AsyncMock(return_value={"data": {}}))
+        svc = self._authorized_service(
+            mock_repository, mock_bot_repo, mock_device_provider, mock_transport=transport
+        )
+        bot = dict(ACTIVE_BOT, active_engine="aicoding")
+        conn = dict(DEVICE_CONN, engine_type="teclaw")
+        with patch.object(svc, "_get_authorized_chat_bot", return_value=bot), patch.object(
+            svc, "_prepare_chat_connection", new=AsyncMock(return_value=(conn, False))
+        ):
+            assert await svc.delete_owned_chat_session("user1", "bot1", "owner1", key)
+        transport.invoke.assert_awaited_once()
+        assert transport.invoke.await_args.args[1:3] == (
+            "DELETE", "/api/session-favorites/agent%3Abot1%3Asession%3Auser1"
         )
 
     @pytest.mark.asyncio
@@ -1264,7 +1356,7 @@ class TestExpertChatMultiSession:
             mock_transport=transport,
         )
 
-        await svc._remove_session_favorite(DEVICE_CONN, "session:test", "user1")
+        await svc._remove_session_favorite(ACTIVE_BOT, DEVICE_CONN, "session:test", "user1")
         favorites = await svc._list_favorite_sessions(DEVICE_CONN, "user1", "bot1")
 
         assert favorites == []
