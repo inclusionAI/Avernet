@@ -44,7 +44,7 @@ class Provider(BaseHTTPRequestHandler):
         # Group setup may emit unrelated welcome/inject messages. Track only
         # this story's user sends, including any invalid sends that leak through.
         if 'caller-e2e-message' in json.dumps(body.get('message', {})):
-            self.server.received.put((body, self.headers.get('Authorization')))
+            self.server.received.put((body, self.headers.get('Authorization'), self.headers.get('X-E2E-Caller')))
         if self.path == '/sse':
             payload = ('event: chat\ndata: ' + json.dumps({'runId': body['id'], 'seq': 1,
                 'state': 'final', 'message': {'role': 'assistant',
@@ -112,8 +112,11 @@ class Story:
             {'expected_version': current['version'], 'policy': policy})
 
     def receive(self):
-        body, auth = self.provider.received.get(timeout=30)
+        body, auth, caller_header = self.provider.received.get(timeout=30)
         assert auth == 'Bearer ' + self.registration['bcs_to_provider_token'], 'provider auth changed'
+        credential = (body.get('extensions') or {}).get('caller_execution_token')
+        expected_header = credential['token'] if self.environment == 'pre' and credential else None
+        assert caller_header == expected_header, 'deployment caller header differs from JSON token or leaked into default mode'
         self.delivered.append(body)
         return body
 
@@ -344,10 +347,13 @@ def run_story(binary, environment):
         config_path.write_text(json.dumps(config))
         env = dict(os.environ, SERVER_ENV=environment, CALLER_E2E_SIGNING_KEY=uuid.uuid4().hex,
                    BCS_SECRET_BCN_GROUP_SESSION_WS_JWT=uuid.uuid4().hex)
+        # Public/default composition remains policy-free. The preproduction run
+        # hosts a synthetic deployment policy, never the enterprise mapping.
+        policy_args = ['--provider-request-headers'] if environment == 'pre' else []
         # Keep instrumented LLVM_PROFILE_FILE from the runner for real server coverage.
         with (root / 'server.log').open('w') as log:
             traces = root / 'network-traces.json'
-            process = subprocess.Popen([binary, '-c', str(config_path), '--trace-output', str(traces)],
+            process = subprocess.Popen([binary, '-c', str(config_path), '--trace-output', str(traces), *policy_args],
                 cwd=root, env=env, stdout=log, stderr=log)
             try:
                 story = Story(f'http://127.0.0.1:{port}', key, provider, environment)
@@ -379,7 +385,7 @@ def run_story(binary, environment):
                 verify_network_traces(traces, provider)
                 verify_business_logs(root, traces, story.streamed_run)
                 traced_lines = len((root / 'business.json.log').read_text().splitlines())
-                process = subprocess.Popen([binary, '-c', str(config_path)], cwd=root, env=env, stdout=log, stderr=log)
+                process = subprocess.Popen([binary, '-c', str(config_path), *policy_args], cwd=root, env=env, stdout=log, stderr=log)
                 for _ in range(150):
                     if process.poll() is not None:
                         raise RuntimeError('test BCS exited during cache-loss restart')
