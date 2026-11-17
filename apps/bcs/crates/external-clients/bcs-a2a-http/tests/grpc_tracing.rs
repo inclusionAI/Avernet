@@ -40,7 +40,7 @@ impl NetworkTracer for Provider {
     }
 }
 
-struct Peer { fail: bool, methods: Arc<Mutex<Vec<String>>> }
+struct Peer { fail: bool, stream_error: bool, methods: Arc<Mutex<Vec<String>>> }
 impl Peer {
     fn receive<T>(&self, request: &Request<T>, tenant: &str, method: &str) -> Result<(), Status> {
         let metadata = request.metadata();
@@ -61,10 +61,12 @@ fn task() -> pb::Task {
         state: pb::TaskState::Completed as i32, ..Default::default()
     }), ..Default::default() }
 }
-fn events() -> BoxStream<'static, Result<pb::StreamResponse, Status>> {
-    futures::stream::iter([Ok(pb::StreamResponse {
+fn events(fail: bool) -> BoxStream<'static, Result<pb::StreamResponse, Status>> {
+    let mut events = vec![Ok(pb::StreamResponse {
         payload: Some(pb::stream_response::Payload::Task(task())),
-    })]).boxed()
+    })];
+    if fail { events.push(Err(Status::unavailable("private stream diagnostic"))); }
+    futures::stream::iter(events).boxed()
 }
 #[tonic::async_trait]
 impl A2aService for Peer {
@@ -75,7 +77,7 @@ impl A2aService for Peer {
     type SendStreamingMessageStream = BoxStream<'static, Result<pb::StreamResponse, Status>>;
     async fn send_streaming_message(&self, request: Request<pb::SendMessageRequest>) -> Result<Response<Self::SendStreamingMessageStream>, Status> {
         self.receive(&request, &request.get_ref().tenant, METHODS[1])?;
-        Ok(Response::new(events()))
+        Ok(Response::new(events(self.stream_error)))
     }
     async fn get_task(&self, request: Request<pb::GetTaskRequest>) -> Result<Response<pb::Task>, Status> {
         self.receive(&request, &request.get_ref().tenant, METHODS[2])?;
@@ -88,7 +90,7 @@ impl A2aService for Peer {
     type SubscribeToTaskStream = BoxStream<'static, Result<pb::StreamResponse, Status>>;
     async fn subscribe_to_task(&self, request: Request<pb::SubscribeToTaskRequest>) -> Result<Response<Self::SubscribeToTaskStream>, Status> {
         self.receive(&request, &request.get_ref().tenant, METHODS[4])?;
-        Ok(Response::new(events()))
+        Ok(Response::new(events(self.stream_error)))
     }
     async fn list_tasks(&self, _: Request<pb::ListTasksRequest>) -> Result<Response<pb::ListTasksResponse>, Status> {
         Err(Status::unimplemented("unused fixture method"))
@@ -115,7 +117,7 @@ impl Drop for Server { fn drop(&mut self) { self.0.abort(); } }
 
 async fn exercise(fail: bool) {
     let methods = Arc::new(Mutex::new(Vec::new()));
-    let peer = Peer { fail, methods: methods.clone() };
+    let peer = Peer { fail, stream_error: false, methods: methods.clone() };
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let endpoint = format!("http://{}", listener.local_addr().unwrap());
     let incoming = futures::stream::unfold(listener, |listener| async move {
@@ -153,8 +155,8 @@ async fn exercise(fail: bool) {
                 .map(|task| assert_eq!(task.id, "task"));
             let subscription = client.subscribe_to_task(&serde_json::from_value(query).unwrap()).await;
             assert_eq!(bcs_tracing_api::current_context().unwrap().downcast_ref::<String>().unwrap(), "parent");
-            // Traces finish at response readiness; reading streams adds no records.
-            assert_eq!(spy.finishes.lock().unwrap().len(), 5);
+            // Unary/header errors finish now; successful streams finish at their terminal.
+            assert_eq!(spy.finishes.lock().unwrap().len(), if fail { 5 } else { 3 });
             let mut results = vec![send, get, cancel];
             for result in [stream, subscription] {
                 results.push(match result {
@@ -189,3 +191,48 @@ async fn all_operations_preserve_wire_metadata_models_and_trace_shape() { exerci
 
 #[tokio::test]
 async fn all_operations_preserve_raw_grpc_failure_status_and_redact_peer_details() { exercise(true).await; }
+
+#[tokio::test]
+async fn stream_terminal_errors_and_drop_are_recorded_after_headers_exactly_once() {
+    for (late_error, drop_early, expected) in [(false, false, Outcome::Rpc(0)),
+        (true, false, Outcome::Rpc(14)), (false, true, Outcome::Cancelled)] {
+        let peer = Peer { fail: false, stream_error: late_error, methods: Arc::new(Mutex::new(Vec::new())) };
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("http://{}", listener.local_addr().unwrap());
+        let incoming = futures::stream::unfold(listener, |listener| async move {
+            let result = listener.accept().await.map(|(stream, _)| stream);
+            Some((result, listener))
+        });
+        let _server = Server(tokio::spawn(async move {
+            tonic::transport::Server::builder().add_service(A2aServiceServer::new(peer))
+                .serve_with_incoming(incoming).await.unwrap();
+        }));
+        let channel = tonic::transport::Endpoint::from_shared(endpoint).unwrap().connect().await.unwrap();
+        let mut headers = tonic::metadata::MetadataMap::new();
+        for (key, value) in [("authorization", "Bearer fixture"), ("sofa_head_target_app", "fixture-agent"),
+            ("sofa_head_target_service", "fixture.A2AService"), ("x-trace", "stale")] {
+            headers.insert(key, value.parse().unwrap());
+        }
+        headers.insert_bin("binary-bin", tonic::metadata::MetadataValue::from_bytes(b"opaque"));
+        let client = GrpcClient::new(channel, headers, Some("fixture-tenant".into()));
+        let spy = Arc::new(Spy::default());
+        let request = serde_json::from_value(serde_json::json!({"id":"task"})).unwrap();
+        // Poll outside the installation scope: stream owns the captured provider.
+        let mut stream = bcs_tracing_api::with_provider(Some(Arc::new(Provider(spy.clone()))),
+            bcs_tracing_api::with_context(Some(Arc::new(String::from("parent"))),
+                client.subscribe_to_task(&request))).await.unwrap();
+        assert!(spy.finishes.lock().unwrap().is_empty());
+        assert!(stream.next().await.unwrap().is_ok());
+        assert!(spy.finishes.lock().unwrap().is_empty());
+        if !drop_early {
+            if late_error {
+                let error = stream.next().await.unwrap().unwrap_err();
+                assert_eq!(error.message, "A2A gRPC 14");
+                assert!(!error.message.contains("private"));
+            } else { assert!(stream.next().await.is_none()); }
+        }
+        drop(stream);
+        assert_eq!(*spy.finishes.lock().unwrap(), vec![expected]);
+        assert!(bcs_tracing_api::current_context().is_none());
+    }
+}

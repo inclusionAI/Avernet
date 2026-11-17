@@ -34,12 +34,12 @@ impl GrpcClient {
     }
 
     async fn invoke<T, R, F, Fut>(&self, body: T, method: &'static str, server_streaming: bool, invoke: F)
-        -> Result<tonic::Response<R>, Status>
+        -> Result<(tonic::Response<R>, Option<bcs_tracing_api::Call>), Status>
     where
         F: FnOnce(A2aServiceClient<Channel>, Request<T>) -> Fut,
         Fut: Future<Output = Result<tonic::Response<R>, Status>>,
     {
-        use bcs_tracing_api::{Call, Kind, Outcome, RequestInfo, with_context};
+        use bcs_tracing_api::{Call, Kind, Outcome, RequestInfo};
         let mut request = self.request(body, method);
         let target = self.headers.get("sofa_head_target_app").and_then(|v| v.to_str().ok()).unwrap_or("");
         let service = self.headers.get("sofa_head_target_service").and_then(|v| v.to_str().ok()).unwrap_or("lf.a2a.v1.A2AService");
@@ -58,16 +58,19 @@ impl GrpcClient {
                 request.metadata_mut().insert(name, value);
             }
         }
-        let result = with_context(call.context(), invoke(self.sdk.clone(), request)).await;
-        call.finish(Outcome::Rpc(result.as_ref().err().map(|s| s.code() as u32).unwrap_or(0)), None);
-        result
+        let result = call.scope().scope(invoke(self.sdk.clone(), request)).await;
+        match result {
+            Ok(response) if server_streaming => Ok((response, Some(call))),
+            Ok(response) => { call.finish(Outcome::Rpc(0), None); Ok((response, None)) }
+            Err(error) => { call.finish(Outcome::Rpc(error.code() as u32), None); Err(error) }
+        }
     }
 
     pub async fn send_message(&self, request: &a2a::SendMessageRequest)
         -> Result<a2a::SendMessageResponse, A2AError> {
         let mut body = pbconv::to_proto_send_message_request(request);
         if let Some(tenant) = &self.tenant { body.tenant = tenant.clone(); }
-        let response = self.invoke(body, "SendMessage", false, |mut sdk, request| async move { sdk.send_message(request).await }).await.map_err(grpc_error)?.into_inner();
+        let response = self.invoke(body, "SendMessage", false, |mut sdk, request| async move { sdk.send_message(request).await }).await.map_err(grpc_error)?.0.into_inner();
         pbconv::from_proto_send_message_response(&response)
             .ok_or_else(|| A2AError::parse_error("empty A2A gRPC submission response"))
     }
@@ -77,20 +80,20 @@ impl GrpcClient {
         let mut body = pbconv::to_proto_send_message_request(request);
         if let Some(tenant) = &self.tenant { body.tenant = tenant.clone(); }
         let response = self.invoke(body, "SendStreamingMessage", true, |mut sdk, request| async move { sdk.send_streaming_message(request).await }).await.map_err(grpc_error)?;
-        Ok(events(response.into_inner()))
+        Ok(events(response.0.into_inner(), response.1))
     }
 
     pub async fn get_task(&self, request: &a2a::GetTaskRequest) -> Result<a2a::Task, A2AError> {
         let mut body = pbconv::to_proto_get_task_request(request);
         if let Some(tenant) = &self.tenant { body.tenant = tenant.clone(); }
-        let response = self.invoke(body, "GetTask", false, |mut sdk, request| async move { sdk.get_task(request).await }).await.map_err(grpc_error)?.into_inner();
+        let response = self.invoke(body, "GetTask", false, |mut sdk, request| async move { sdk.get_task(request).await }).await.map_err(grpc_error)?.0.into_inner();
         Ok(pbconv::from_proto_task(&response))
     }
 
     pub async fn cancel_task(&self, request: &a2a::CancelTaskRequest) -> Result<a2a::Task, A2AError> {
         let mut body = pbconv::to_proto_cancel_task_request(request);
         if let Some(tenant) = &self.tenant { body.tenant = tenant.clone(); }
-        let response = self.invoke(body, "CancelTask", false, |mut sdk, request| async move { sdk.cancel_task(request).await }).await.map_err(grpc_error)?.into_inner();
+        let response = self.invoke(body, "CancelTask", false, |mut sdk, request| async move { sdk.cancel_task(request).await }).await.map_err(grpc_error)?.0.into_inner();
         Ok(pbconv::from_proto_task(&response))
     }
 
@@ -99,17 +102,43 @@ impl GrpcClient {
         let mut body = pbconv::to_proto_subscribe_to_task_request(request);
         if let Some(tenant) = &self.tenant { body.tenant = tenant.clone(); }
         let response = self.invoke(body, "SubscribeToTask", true, |mut sdk, request| async move { sdk.subscribe_to_task(request).await }).await.map_err(grpc_error)?;
-        Ok(events(response.into_inner()))
+        Ok(events(response.0.into_inner(), response.1))
     }
 }
 
-fn events(stream: tonic::Streaming<a2a_pb::proto::StreamResponse>)
+fn events(stream: tonic::Streaming<a2a_pb::proto::StreamResponse>, call: Option<bcs_tracing_api::Call>)
     -> BoxStream<'static, Result<a2a::StreamResponse, A2AError>> {
-    stream.map(|event| {
-        let event = event.map_err(grpc_error)?;
-        pbconv::from_proto_stream_response(&event)
-            .ok_or_else(|| A2AError::parse_error("empty A2A gRPC stream event"))
-    }).boxed()
+    let scope = call.as_ref().map(bcs_tracing_api::Call::scope)
+        .unwrap_or_else(bcs_tracing_api::CapturedContext::capture);
+    ObservedEvents { stream, call, scope }.boxed()
+}
+
+struct ObservedEvents {
+    stream: tonic::Streaming<a2a_pb::proto::StreamResponse>,
+    call: Option<bcs_tracing_api::Call>,
+    scope: bcs_tracing_api::CapturedContext,
+}
+
+impl futures::Stream for ObservedEvents {
+    type Item = Result<a2a::StreamResponse, A2AError>;
+    fn poll_next(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Option<Self::Item>> {
+        use std::{pin::Pin, task::Poll};
+        let this = self.get_mut();
+        let polled = this.scope.scope_sync(|| Pin::new(&mut this.stream).poll_next(cx));
+        match polled {
+            Poll::Ready(None) => {
+                if let Some(call) = this.call.take() { call.finish(bcs_tracing_api::Outcome::Rpc(0), None); }
+                Poll::Ready(None)
+            }
+            Poll::Ready(Some(Err(status))) => {
+                if let Some(call) = this.call.take() { call.finish(bcs_tracing_api::Outcome::Rpc(status.code() as u32), None); }
+                Poll::Ready(Some(Err(grpc_error(status))))
+            }
+            Poll::Ready(Some(Ok(event))) => Poll::Ready(Some(pbconv::from_proto_stream_response(&event)
+                .ok_or_else(|| A2AError::parse_error("empty A2A gRPC stream event")))),
+            Poll::Pending => Poll::Pending,
+        }
+    }
 }
 
 // Wire-compatible google.rpc.Status/ErrorInfo subset. Do not forward peer

@@ -1,6 +1,6 @@
 # Network tracing plugin contract
 
-Contract revision: 2026-11-12 (explicit gRPC invocation metadata and optional log identity).
+Contract revision: 2026-11-16 (RPC server scopes and transport-terminal streams).
 
 ## Provides
 
@@ -20,8 +20,10 @@ SDK, HTTP/gRPC framework, exporter, configuration loader or business services.
 
 `Kind::GrpcClient { server_streaming }` identifies gRPC independently of mesh
 routing. `Outcome::Rpc` carries its original gRPC status code (0 is success).
-The flag describes the invocation, not completion of a stream: adapters finish
-at initial response readiness; messages and final trailers remain out of scope.
+For server streams, the completion owner follows the stream until terminal status
+or cancellation/drop, not merely initial response readiness. Individual messages
+are not separate spans. Local model conversion failures do not rewrite an observed
+wire status.
 For failures without a received status, providers map Timeout, TransportError
 and Cancelled to protocol-appropriate codes. Existing `RpcClient` semantics are
 unchanged for non-gRPC transports.
@@ -40,7 +42,7 @@ used as a substitute for a stable route label. Adding `route` and replacing the
 old `Option<&Context>` argument with `ParentContext` are source-level changes:
 provider implementations and request-info literals must migrate together.
 
-For HTTP servers, extract the remote parent from `incoming`; an unrelated
+For HTTP and gRPC servers, extract the remote parent from `incoming`; an unrelated
 ambient task is not the caller. For clients, resolve valid context for the
 provider's protocol in this order: `parent.ambient`, `parent.local`, existing
 transport propagation in `incoming`, then a new root. Ambient data is separate
@@ -158,3 +160,25 @@ The public network adapter conformance suite checks no-op and completion
 semantics. Each exporter must also test propagation, concurrent allocation,
 cancellation, and output. This optional Plugin API does not change business
 protocols, database schemas, or the existing OpenTelemetry API surface.
+
+## RPC server and explicit operation scopes
+
+`GrpcServer { server_streaming }` is a neutral server kind, not an HTTP alias.
+Providers opt in through `supports`; the default declines this new kind without
+calling `start`. Existing kinds remain supported by default. Source exhaustive
+matches must migrate with this enum change. No private routing fields are added.
+
+`CapturedContext` retains the opaque context, owning provider and ambient snapshot.
+It is in-process only, Debug-redacted, and never reconstructed from log IDs or
+persisted to a durable queue. `scope` restores these values on future polling;
+`scope_sync` scopes one synchronous operation such as `poll_next` or a blocking
+callback. Neither retains a native SDK/thread-local guard across an await.
+`Call::scope` provides the call's own captured scope for deferred polling and
+terminal records, including Drop on another task.
+
+`Call::start_with_parent` selects an explicit operation snapshot ahead of the
+current task snapshot. Active `with_provider(None, ...)` suppression still wins.
+Without an explicit snapshot, the usual provider ambient capture remains current.
+Within the selected snapshot, protocol-specific parent selection remains owned
+by the provider; servers must use the remote carrier rather than local ancestry.
+A no-op or unsupported server call creates no propagation or records.
