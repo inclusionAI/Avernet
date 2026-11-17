@@ -29,7 +29,7 @@ class DemoAgentsTest {
 
     @Test
     void messageAgentRepliesWithOneMessage() {
-        assertEquals("匿名用户，订单 1001 已发货", tester.send("order-agent", "查一下订单 1001").text());
+        assertEquals("默认渠道：订单 1001 已发货", tester.send("order-agent", "查一下订单 1001").text());
     }
 
     @Test

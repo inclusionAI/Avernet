@@ -42,5 +42,10 @@
             <scope>provided</scope>
         </dependency>
         <!-- TODO(SOFA)：SOFA Triple 为 a2a.proto 生成的代码放在这里（provided 或单独的共享 jar），见 bcn.a2a.sofa 包说明 -->
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 </project>

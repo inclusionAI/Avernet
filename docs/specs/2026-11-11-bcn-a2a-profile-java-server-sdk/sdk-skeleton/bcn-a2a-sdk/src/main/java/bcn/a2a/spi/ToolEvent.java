@@ -5,7 +5,7 @@ import java.util.Map;
 /**
  * 一条工具观察记录（tools/v2）。只用于展示，不表示审批，也不改变 Task 状态（P-185）。
  *
- * @param toolCallId 工具调用 ID，必填；与 hitl/v1 中 exec 交互的 toolCallId 相同
+ * @param toolCallId 工具调用 ID，必填；同一次工具调用的 start 和 end 使用相同的 ID
  * @param name       工具名，必填
  * @param phase      阶段，必填
  * @param args       参数，可为 null；不得包含凭据和 userId

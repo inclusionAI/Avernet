@@ -32,7 +32,7 @@ import org.a2aproject.sdk.spec.TextPart;
  * <ul>
  *   <li>改为 in-process gRPC 通道，覆盖请求头（A2A-Extensions / A2A-Version）和协商结果，
  *       目前直接调用服务对象，不经过拦截器，因此所有扩展都视为未请求；</li>
- *   <li>提供请求构造器：带 contextId、taskId、metadata（例如 bcn.caller）、扩展请求；</li>
+ *   <li>提供请求构造器：带 contextId、taskId、业务 metadata、扩展请求（工具观察）；</li>
  *   <li>TCK：在业务测试类上加一个注解，就在进程内对自己的 Agent 跑一遍一致性用例。</li>
  * </ul>
  */

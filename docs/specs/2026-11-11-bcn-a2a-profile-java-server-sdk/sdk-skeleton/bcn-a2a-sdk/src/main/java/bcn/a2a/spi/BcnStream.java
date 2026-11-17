@@ -48,8 +48,8 @@ public interface BcnStream {
     void progress(String text);
 
     /**
-     * 仅引擎模式：发出任意状态，例如 INPUT_REQUIRED（人机交互，需要 hitl/v1 激活）。第二档调用会抛异常。
-     * TODO(hitl)：hitl/v1 交付时改为专门的方法，由 SDK 生成交互批次，避免业务手写状态消息。
+     * 仅引擎模式：发出引擎自己的状态，例如订阅过程中 Task 被取消（CANCELED）。第二档调用会抛异常。
+     * 本期不支持人机交互：INPUT_REQUIRED、AUTH_REQUIRED、UNSPECIFIED 会被拒绝（P-62、P-63）。
      */
     void status(TaskStatus status);
 

@@ -3,6 +3,7 @@ package bcn.a2a.server;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
@@ -11,9 +12,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.UnaryOperator;
 
 import bcn.a2a.ext.BcnKeys;
-import bcn.a2a.ext.CallerContextCodec;
 import bcn.a2a.spi.A2aListener;
-import bcn.a2a.spi.CallerContext;
 import bcn.a2a.spi.TaskEngine;
 import io.grpc.Context;
 import io.grpc.Deadline;
@@ -28,7 +27,6 @@ import org.a2aproject.sdk.grpc.SubscribeToTaskRequest;
 import org.a2aproject.sdk.grpc.utils.ProtoUtils;
 import org.a2aproject.sdk.spec.A2AError;
 import org.a2aproject.sdk.spec.CancelTaskParams;
-import org.a2aproject.sdk.spec.ExtensionSupportRequiredError;
 import org.a2aproject.sdk.spec.Message;
 import org.a2aproject.sdk.spec.MessageSendParams;
 import org.a2aproject.sdk.spec.Task;
@@ -43,7 +41,7 @@ import org.a2aproject.sdk.spec.VersionNotSupportedError;
  * <ol>
  *   <li><b>开始</b>：计算截止时间，挂上取消回调，通知监听器（{@link #begin}）。</li>
  *   <li><b>准备</b>（在 RPC 线程上同步完成，失败直接返回错误）：大小、协议版本、转换为 a2a-java 模型、
- *       按 tenant 分发、扩展协商、入站校验、续交检查、contextId、调用上下文、回写激活结果（{@link #prepare}）。</li>
+ *       按 tenant 分发、扩展协商、入站校验、续交检查、contextId、回写激活结果（{@link #prepare}）。</li>
  *   <li><b>派发</b>：在业务线程池中执行业务代码，每个请求只提交一次，不在池内再次提交（避免线程池自锁）；
  *       并发已满或线程池拒绝时返回 UNAVAILABLE（{@link #dispatch}）。</li>
  *   <li><b>执行与出站检查</b>：调用业务方法；第一档检查回复，流式档位由 {@link TaskStreamWriter} 维护状态机。</li>
@@ -167,20 +165,20 @@ final class RequestPipeline {
         CallScope scope = begin("SubscribeToTask", request.getTenant(), out, options.streamTimeout());
         final TaskIdParams params;
         final TaskEngine engine;
-        final ExtensionNegotiator.Negotiation negotiation;
+        final Set<String> activated;
         try {
             params = ProtoUtils.FromProto.taskIdParams(request);
             AgentEntry entry = registry.resolve(params.tenant());
             engine = entry.taskEngine().orElseThrow(TaskNotFoundError::new);
-            negotiation = ExtensionNegotiator.negotiate(CallHeaders.requested(), entry);
-            CallHeaders.confirm(negotiation.activated());
+            activated = ExtensionNegotiator.negotiate(CallHeaders.requested(), entry);
+            CallHeaders.confirm(activated);
         } catch (Throwable e) {
             scope.fail(out, e);
             return;
         }
         dispatch(scope, out, () -> {
             // contextId 由引擎在 begin 中给出。
-            StreamBridge bridge = new StreamBridge(null, negotiation.activated(), scope.cancel, true, out);
+            StreamBridge bridge = new StreamBridge(null, activated, scope.cancel, true, out);
             try {
                 engine.subscribe(params, bridge);
                 bridge.closeIfOpen();
@@ -251,14 +249,10 @@ final class RequestPipeline {
         MessageSendParams params = ProtoUtils.FromProto.messageSendParams(request);
         // 4. 按 tenant 分发
         AgentEntry entry = registry.resolve(params.tenant());
-        // 5. 扩展协商
-        ExtensionNegotiator.Negotiation negotiation = ExtensionNegotiator.negotiate(CallHeaders.requested(), entry);
-        if (!negotiation.missingRequired().isEmpty()) {
-            throw new ExtensionSupportRequiredError(null, "required extensions not requested: "
-                    + String.join(",", negotiation.missingRequired()), null);
-        }
+        // 5. 扩展协商（本期只有工具观察，且是可选的）
+        Set<String> activated = ExtensionNegotiator.negotiate(CallHeaders.requested(), entry);
         // 6. 入站校验
-        InboundValidator.validate(params, negotiation);
+        InboundValidator.validate(params, activated);
         // 7. 续交：只有引擎模式能识别 taskId，其他档位的 Task 只存在于原来那条流内
         String taskId = params.message().taskId();
         if (taskId != null && !taskId.isEmpty() && entry.taskEngine().isEmpty()) {
@@ -269,14 +263,11 @@ final class RequestPipeline {
         if (contextId == null || contextId.isEmpty()) {
             contextId = UUID.randomUUID().toString();
         }
-        // 9. 调用上下文：只在激活时解码
-        CallerContext caller = negotiation.activated().contains(BcnKeys.EXT_CALLER)
-                ? CallerContextCodec.decode(params.metadata()) : null;
-        // 10. 回写激活结果（随第一条响应的响应头发出）
-        CallHeaders.confirm(negotiation.activated());
+        // 9. 回写激活结果（随第一条响应的响应头发出）
+        CallHeaders.confirm(activated);
         DefaultBcnCall call = new DefaultBcnCall(entry.id(), params, contextId,
-                taskId == null || taskId.isEmpty() ? null : taskId, caller,
-                BcnKeys.businessView(params.metadata()), negotiation.activated(), scope.cancel);
+                taskId == null || taskId.isEmpty() ? null : taskId,
+                BcnKeys.businessView(params.metadata()), activated, scope.cancel);
         return new Prepared(entry, call);
     }
 

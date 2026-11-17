@@ -137,9 +137,13 @@ abstract class TaskStreamWriter implements BcnStream {
         if (!engineMode) {
             throw new IllegalStateException("status() is only available to TaskEngine agents");
         }
+        switch (status.state()) {
+            case TASK_STATE_INPUT_REQUIRED, TASK_STATE_AUTH_REQUIRED, TASK_STATE_UNSPECIFIED ->
+                    throw new IllegalStateException("state not allowed in this phase: " + status.state());
+            default -> {
+            }
+        }
         ensureStarted();
-        // TODO(hitl)：INPUT_REQUIRED 只能在 hitl/v1 已激活时出现，且状态消息必须是合规的交互批次；
-        //   不得出现 AUTH_REQUIRED、UNSPECIFIED（P-63）。
         lastState = status.state();
         emit(TaskStatusUpdateEvent.builder().taskId(taskId).contextId(contextId).status(status).build());
         if (endsStream(lastState)) {

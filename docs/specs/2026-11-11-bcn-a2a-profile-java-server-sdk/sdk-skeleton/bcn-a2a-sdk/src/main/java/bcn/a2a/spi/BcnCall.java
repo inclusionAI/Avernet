@@ -34,21 +34,18 @@ public interface BcnCall {
     Optional<String> taskId();
 
     /**
-     * 调用上下文（metadata 键 {@code bcn.caller}）。调用方激活了调用上下文扩展、且请求中带了数据时才有值。
-     * 字段是调用方的自述信息，不等于经过验证的身份（D1、P-101）。
-     */
-    Optional<CallerContext> caller();
-
-    /**
-     * 请求级 metadata 中的业务字段：已经去掉平台保留键（{@code bcn.*}）和 URI 形式的扩展键。只读。
+     * 请求级 metadata 中的业务字段：已经去掉平台保留键（{@code bcn}、{@code bcn_*}）和 URI 形式的扩展键。只读。
      * 消息级、Part 级的 metadata 仍在 {@link #message()} 中，SDK 不做处理。
      */
     Map<String, Object> metadata();
 
-    /** 本次调用实际激活的扩展 URI（协商结果）。某个扩展的数据能不能输出，以这里为准。 */
+    /**
+     * 本次调用实际激活的扩展 URI（协商结果）。本期只可能包含工具观察扩展；
+     * 业务一般不需要关心，{@link BcnStream#tool} 在未激活时会自动丢弃。
+     */
     Set<String> activatedExtensions();
 
-    /** 指定扩展是否已激活。 */
+    /** 指定扩展是否已激活。可用于在未激活时跳过构造工具记录的开销。 */
     default boolean isActivated(String extensionUri) {
         return activatedExtensions().contains(extensionUri);
     }

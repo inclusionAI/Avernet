@@ -5,7 +5,6 @@ import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.regex.Pattern;
 
 import bcn.a2a.spi.A2aAgent;
@@ -80,9 +79,6 @@ final class AgentRegistry {
         if (!ID.matcher(meta.id()).matches()) {
             throw new IllegalStateException("@A2aAgent id must match " + ID.pattern() + ": " + meta.id());
         }
-        if (!Set.of(meta.extensions()).containsAll(Set.of(meta.requiredExtensions()))) {
-            throw new IllegalStateException("requiredExtensions must be a subset of extensions: " + meta.id());
-        }
         boolean message = overrides(type, "onMessage", BcnCall.class);
         boolean stream = overrides(type, "onStream", BcnCall.class, BcnStream.class);
         if (message == stream) {
@@ -92,7 +88,6 @@ final class AgentRegistry {
         if (engine != null && !stream) {
             throw new IllegalStateException("TaskEngine requires onStream: " + meta.id());
         }
-        // TODO(实现)：业务扩展 URI 的格式校验，且不得使用平台扩展的 URI。
         return new AgentEntry(meta.id(), meta, agent, stream ? AgentEntry.Mode.STREAM : AgentEntry.Mode.MESSAGE, engine);
     }
 

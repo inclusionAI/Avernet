@@ -59,7 +59,7 @@ final class CallScope {
 
     /** 流式档位按最后状态归类。 */
     A2aListener.Outcome outcomeOf(TaskState lastState) {
-        if (lastState == TaskState.TASK_STATE_COMPLETED || lastState == TaskState.TASK_STATE_INPUT_REQUIRED) {
+        if (lastState == TaskState.TASK_STATE_COMPLETED) {
             return A2aListener.Outcome.OK;
         }
         if (cancel.isTimedOut()) {

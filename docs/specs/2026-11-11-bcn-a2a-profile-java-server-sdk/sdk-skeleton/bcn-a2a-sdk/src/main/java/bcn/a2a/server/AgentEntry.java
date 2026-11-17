@@ -1,6 +1,5 @@
 package bcn.a2a.server;
 
-import java.util.LinkedHashSet;
 import java.util.Optional;
 import java.util.Set;
 
@@ -27,33 +26,11 @@ record AgentEntry(String id, A2aAgent meta, BcnAgent agent, Mode mode, TaskEngin
         return Optional.ofNullable(engine);
     }
 
-    boolean streaming() {
-        return mode == Mode.STREAM;
-    }
-
     /**
-     * SDK 为这个 Agent 支持的平台扩展：
-     * 调用上下文总是支持；工具观察需要 Task，只有流式档位支持。
-     * TODO(hitl)：引擎模式支持 hitl/v1 后在这里加入。
+     * 参与协商的扩展。本期只有工具观察：它的数据放在 Task 的状态消息中，所以只有流式档位支持。
+     * 所有扩展都是可选的（required:false），未激活时 Agent 照常工作。
      */
-    Set<String> platformExtensions() {
-        Set<String> uris = new LinkedHashSet<>();
-        uris.add(BcnKeys.EXT_CALLER);
-        if (streaming()) {
-            uris.add(BcnKeys.EXT_TOOLS_V2);
-        }
-        return uris;
-    }
-
-    /** 参与协商的全部扩展：平台扩展 + 注解中声明的业务扩展。 */
     Set<String> supportedExtensions() {
-        Set<String> uris = new LinkedHashSet<>(platformExtensions());
-        uris.addAll(Set.of(meta.extensions()));
-        return uris;
-    }
-
-    /** 调用方必须激活的扩展（只可能是业务扩展；平台扩展一律 required:false）。 */
-    Set<String> requiredExtensions() {
-        return Set.of(meta.requiredExtensions());
+        return mode == Mode.STREAM ? Set.of(BcnKeys.EXT_TOOLS_V2) : Set.of();
     }
 }

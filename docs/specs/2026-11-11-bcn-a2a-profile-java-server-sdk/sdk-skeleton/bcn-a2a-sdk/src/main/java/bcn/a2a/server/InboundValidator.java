@@ -1,5 +1,7 @@
 package bcn.a2a.server;
 
+import java.util.Set;
+
 import org.a2aproject.sdk.spec.ContentTypeNotSupportedError;
 import org.a2aproject.sdk.spec.Message;
 import org.a2aproject.sdk.spec.MessageSendParams;
@@ -15,7 +17,8 @@ final class InboundValidator {
     private InboundValidator() {
     }
 
-    static void validate(MessageSendParams params, ExtensionNegotiator.Negotiation negotiation) {
+    /** @param activated 本次调用激活的扩展（用于第 3 条 TODO） */
+    static void validate(MessageSendParams params, Set<String> activated) {
         Message message = params.message();
         if (message == null) {
             throw ProtocolErrors.invalid("MESSAGE_REQUIRED", "message is required");
@@ -38,9 +41,8 @@ final class InboundValidator {
         // TODO(实现)：
         //  1. 文本总长度上限；
         //  2. configuration.acceptedOutputModes 不为空且不包含 text/plain 时，返回 ContentTypeNotSupportedError；
-        //  3. message.extensions 标记了某个平台扩展、但该扩展未激活（negotiation.activated() 中没有）时：
-        //     带了该扩展的数据就拒绝（不能靠消息标记绕过协商），只有标记没有数据就忽略；
-        //  4. metadata 中未激活扩展的保留键：保留并忽略，不报错；
+        //  3. message.extensions 中标记了未激活的扩展（activated 中没有）：只忽略标记，不能因此认为扩展已激活；
+        //  4. metadata 中的保留键（bcn、bcn_*、URI 键）：本期没有任何入站保留键，保留并忽略，不报错；
         //  5. referenceTaskIds 只透传，不解析，不做存在性检查。
     }
 }

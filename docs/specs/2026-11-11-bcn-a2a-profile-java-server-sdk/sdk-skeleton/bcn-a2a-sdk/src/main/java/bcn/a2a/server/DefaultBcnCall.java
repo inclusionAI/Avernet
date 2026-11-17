@@ -6,14 +6,13 @@ import java.util.Optional;
 import java.util.Set;
 
 import bcn.a2a.spi.BcnCall;
-import bcn.a2a.spi.CallerContext;
 import bcn.a2a.spi.Messages;
 import org.a2aproject.sdk.spec.Message;
 import org.a2aproject.sdk.spec.MessageSendParams;
 
 /** {@link BcnCall} 的实现。所有字段在 RequestPipeline.prepare 中一次算好，之后只读。 */
 record DefaultBcnCall(String agentId, MessageSendParams request, String contextId, String taskIdOrNull,
-                      CallerContext callerOrNull, Map<String, Object> metadata, Set<String> activatedExtensions,
+                      Map<String, Object> metadata, Set<String> activatedExtensions,
                       CancelSignal cancel) implements BcnCall {
 
     @Override
@@ -29,11 +28,6 @@ record DefaultBcnCall(String agentId, MessageSendParams request, String contextI
     @Override
     public Optional<String> taskId() {
         return Optional.ofNullable(taskIdOrNull);
-    }
-
-    @Override
-    public Optional<CallerContext> caller() {
-        return Optional.ofNullable(callerOrNull);
     }
 
     @Override
