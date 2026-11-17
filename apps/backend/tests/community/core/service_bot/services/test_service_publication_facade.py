@@ -165,9 +165,16 @@ def _container(health_status: str = "ABNORMAL") -> dict:
     }
 
 
+def _live_record(*, ext: dict | None = None) -> BotPublishRecord:
+    payload = {"binding": {"online": 42}}
+    payload.update(ext or {})
+    return record(1, PublishStatus.SUCCESS, ext=payload)
+
+
 def test_list_containers_authorizes_and_requests_realtime_health(deps):
     deps.collaborator_service.get_permission_level.return_value = PermissionLevel.MEMBER
-    deps.device_service.get_instances_by_bot.return_value = {
+    deps.publish_repo.list_by_source_bot.return_value = [_live_record()]
+    deps.device_service.get_instances.return_value = {
         "bot_uuid": "runtime-1",
         "devices": [_container()],
     }
@@ -175,20 +182,22 @@ def test_list_containers_authorizes_and_requests_realtime_health(deps):
     result = deps.facade.list_containers("bot-1", actor_id="member", owner_id="owner")
 
     assert result == {"bot_id": "bot-1", "instances": [_container()]}
-    deps.device_service.get_instances_by_bot.assert_called_once_with(
-        bot_id="bot-1", health_check=True
+    deps.device_service.get_instances.assert_called_once_with(
+        binding_id=42, health_check=True
     )
 
 
 def test_list_containers_masks_provider_failure(deps):
-    deps.device_service.get_instances_by_bot.side_effect = DeviceServiceError("secret")
+    deps.publish_repo.list_by_source_bot.return_value = [_live_record()]
+    deps.device_service.get_instances.side_effect = DeviceServiceError("secret")
 
     with pytest.raises(ServiceContainerUpstreamError):
         deps.facade.list_containers("bot-1", actor_id="owner", owner_id="owner")
 
 
 def test_list_containers_reports_missing_live_runtime_as_conflict(deps):
-    deps.device_service.get_instances_by_bot.side_effect = BotPublishNotFoundError(
+    deps.publish_repo.list_by_source_bot.return_value = [_live_record()]
+    deps.device_service.get_instances.side_effect = BotPublishNotFoundError(
         "missing"
     )
 
@@ -197,7 +206,8 @@ def test_list_containers_reports_missing_live_runtime_as_conflict(deps):
 
 
 def test_restart_container_accepts_owned_abnormal_instance(deps):
-    deps.device_service.get_instances_by_bot.return_value = {
+    deps.publish_repo.list_by_source_bot.return_value = [_live_record()]
+    deps.device_service.get_instances.return_value = {
         "devices": [_container()]
     }
     deps.device_service.restart_device_by_bot.return_value = {"publish_id": 42}
@@ -222,7 +232,8 @@ def test_restart_container_accepts_owned_abnormal_instance(deps):
 
 
 def test_restart_container_refuses_instance_from_another_bot(deps):
-    deps.device_service.get_instances_by_bot.return_value = {"devices": [_container()]}
+    deps.publish_repo.list_by_source_bot.return_value = [_live_record()]
+    deps.device_service.get_instances.return_value = {"devices": [_container()]}
 
     with pytest.raises(ServiceContainerNotFoundError):
         deps.facade.restart_container(
@@ -236,7 +247,8 @@ def test_restart_container_refuses_instance_from_another_bot(deps):
 
 
 def test_restart_container_refuses_healthy_instance(deps):
-    deps.device_service.get_instances_by_bot.return_value = {
+    deps.publish_repo.list_by_source_bot.return_value = [_live_record()]
+    deps.device_service.get_instances.return_value = {
         "devices": [_container("ACTIVE")]
     }
 
@@ -282,7 +294,8 @@ def test_restart_container_still_carries_the_owner_bar():
     ],
 )
 def test_restart_container_normalizes_runtime_failures(deps, failure, expected):
-    deps.device_service.get_instances_by_bot.return_value = {"devices": [_container()]}
+    deps.publish_repo.list_by_source_bot.return_value = [_live_record()]
+    deps.device_service.get_instances.return_value = {"devices": [_container()]}
     deps.device_service.restart_device_by_bot.side_effect = failure
 
     with pytest.raises(expected):
@@ -1195,3 +1208,154 @@ def test_upgrade_publication_maps_retained_draft_failure_to_upstream(deps, monke
     deps.publish_service.upgrade_publish.side_effect = UpgradeDraftRestartError(draft)
     with pytest.raises(ServiceContainerUpstreamError, match="draft"):
         deps.facade.upgrade_publication("bot-1", 1, actor_id="admin", owner_id="owner")
+
+
+@pytest.mark.asyncio
+async def test_scale_containers_reads_live_count_and_freezes_target(deps, monkeypatch):
+    monkeypatch.setattr(
+        "agentclaw.community.core.service_bot.services.service_publication_facade.get_current_env",
+        lambda: "dev",
+    )
+    live = _live_record()
+    deps.publish_repo.list_by_source_bot.return_value = [live]
+    deps.device_service.get_instances.return_value = {
+        "devices": [_container(), {**_container(), "device_uuid": "DEVICE-002"}]
+    }
+    deps.approval_service.request_scale_approval = AsyncMock(return_value=ApprovalResult(
+        should_approval=True,
+        status="PROCESSING",
+        approval={
+            "puid": "scale-1",
+            "action": "scale",
+            "status": "PROCESSING",
+            "approval_url": "https://approval.example/scale-1",
+            "current_count": 2,
+            "delta": -1,
+            "target_count": 1,
+        },
+        message="审批中",
+    ))
+
+    result = await deps.facade.scale_containers(
+        "bot-1", delta=-1, actor_id="owner", owner_id="owner"
+    )
+
+    assert result["accepted"] is True
+    assert result["current_count"] == 2
+    assert result["target_count"] == 1
+    assert result["approval"]["approval_url"] == "https://approval.example/scale-1"
+    deps.approval_service.request_scale_approval.assert_awaited_once_with(
+        live,
+        operator="owner",
+        current_count=2,
+        delta=-1,
+        target_count=1,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("delta", [0, -3])
+async def test_scale_containers_rejects_invalid_delta_before_approval(
+    deps, monkeypatch, delta
+):
+    monkeypatch.setattr(
+        "agentclaw.community.core.service_bot.services.service_publication_facade.get_current_env",
+        lambda: "dev",
+    )
+    deps.publish_repo.list_by_source_bot.return_value = [_live_record()]
+    deps.device_service.get_instances.return_value = {
+        "devices": [_container(), {**_container(), "device_uuid": "DEVICE-002"}]
+    }
+
+    with pytest.raises(ServiceContainerConflictError):
+        await deps.facade.scale_containers(
+            "bot-1", delta=delta, actor_id="owner", owner_id="owner"
+        )
+
+    deps.approval_service.request_scale_approval.assert_not_called()
+
+
+def test_list_containers_projects_active_scale_approval(deps, monkeypatch):
+    monkeypatch.setattr(
+        "agentclaw.community.core.service_bot.services.service_publication_facade.get_current_env",
+        lambda: "dev",
+    )
+    live = _live_record(ext={"approval": {
+        "puid": "scale-1",
+        "action": "scale",
+        "status": "PROCESSING",
+        "approval_url": "https://approval.example/scale-1",
+        "current_count": 2,
+        "delta": 1,
+        "target_count": 3,
+    }})
+    deps.publish_repo.list_by_source_bot.return_value = [live]
+    deps.device_service.get_instances.return_value = {"devices": [_container()]}
+
+    deps.collaborator_service.get_permission_level.return_value = PermissionLevel.MEMBER
+    member_result = deps.facade.list_containers(
+        "bot-1", actor_id="member", owner_id="owner"
+    )
+    deps.collaborator_service.get_permission_level.return_value = PermissionLevel.OWNER
+    owner_result = deps.facade.list_containers(
+        "bot-1", actor_id="owner", owner_id="owner"
+    )
+
+    assert "scale_approval" not in member_result
+    assert owner_result["scale_approval"] == {
+        "status": "PROCESSING",
+        "approval_url": "https://approval.example/scale-1",
+        "current_count": 2,
+        "delta": 1,
+        "target_count": 3,
+    }
+
+
+@pytest.mark.asyncio
+async def test_scale_containers_rejects_different_target_while_existing_approval(
+    deps, monkeypatch
+):
+    monkeypatch.setattr(
+        "agentclaw.community.core.service_bot.services.service_publication_facade.get_current_env",
+        lambda: "dev",
+    )
+    live = _live_record(ext={"approval": {
+        "puid": "scale-1",
+        "action": "scale",
+        "status": "PROCESSING",
+        "current_count": 2,
+        "delta": 1,
+        "target_count": 3,
+    }})
+    deps.publish_repo.list_by_source_bot.return_value = [live]
+    deps.device_service.get_instances.return_value = {
+        "devices": [_container(), {**_container(), "device_uuid": "DEVICE-002"}]
+    }
+
+    with pytest.raises(ServiceContainerConflictError, match="targets 3"):
+        await deps.facade.scale_containers(
+            "bot-1", delta=2, actor_id="owner", owner_id="owner"
+        )
+
+
+def test_lifecycle_does_not_expose_scale_approval_puid_to_member(deps, monkeypatch):
+    monkeypatch.setattr(
+        "agentclaw.community.core.service_bot.services.service_publication_facade.get_current_env",
+        lambda: "dev",
+    )
+    live = _live_record(ext={"approval": {
+        "puid": "scale-secret",
+        "action": "scale",
+        "status": "PROCESSING",
+        "approval_url": "https://approval.example/scale-secret",
+    }})
+    deps.publish_repo.get_by_id.return_value = live
+    deps.publish_repo.list_by_source_bot.return_value = [live]
+    deps.collaborator_service.get_permission_level.return_value = PermissionLevel.MEMBER
+
+    result = deps.facade.get_publication(
+        "bot-1", live.id, actor_id="member", owner_id="owner"
+    )
+
+    assert result["approval"]["approval_id"] is None
+    assert "scale-secret" not in str(result)

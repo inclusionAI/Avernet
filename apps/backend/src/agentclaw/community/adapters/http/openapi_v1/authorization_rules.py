@@ -185,6 +185,7 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         PermissionLevel.MEMBER, "…core.engine_runtime.connection"
     ),
     ("GET", "/openapi/v1/bots/{bot_id}/containers"): Check(PermissionLevel.MEMBER),
+    ("POST", "/openapi/v1/bots/{bot_id}/containers/scale"): Check(PermissionLevel.OWNER),
     # The instance-level restart stays OWNER beside this migration, for the
     # opposite of the bot-level one: it is the milder operation, but the
     # hosted-runtime facade enforces the same owner bar a second time behind
@@ -192,9 +193,7 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     # and moving this row while that enforcement stands would only make the
     # seam claim a share the facade then refuses. The bot-level restart
     # beside it carries no second gate, so it is genuinely the member's.
-    ("POST", "/openapi/v1/bots/{bot_id}/containers/{instance_id}/restart"): Check(
-        PermissionLevel.OWNER
-    ),
+    ("POST", "/openapi/v1/bots/{bot_id}/containers/{instance_id}/restart"): Check(PermissionLevel.OWNER),
     # Data-init state is bot workspace state: reading where a cold-start got to
     # is part of working on the bot, so that read takes MEMBER. The trigger
     # stays with the owner alone, and for a reason the share bars usually do

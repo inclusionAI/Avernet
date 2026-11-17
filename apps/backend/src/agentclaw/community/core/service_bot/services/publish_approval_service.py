@@ -12,6 +12,10 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, Literal, Optional
 
 from agentclaw.community.api.publish_approval import ApprovalResult, PublishApprovalServiceProtocol
 from agentclaw.community.core.service_bot.repository.models import BotPublishRecord, PublishStatus
+from agentclaw.community.core.service_bot.services.scale_approval_mixin import (
+    SERVICE_BOT_SCALE_APPROVER_STAFF_IDS,
+    ScaleApprovalMixin,
+)
 from agentclaw.community.log import get_logger
 
 if TYPE_CHECKING:
@@ -26,9 +30,7 @@ logger = get_logger()
 
 # approval process code for service bot publish approval
 SERVICE_BOT_PUBLISH_PROCESS_CODE = "teamclaw_service_bot_publish"
-
-
-class PublishApprovalService(PublishApprovalServiceProtocol):
+class PublishApprovalService(ScaleApprovalMixin, PublishApprovalServiceProtocol):
     """Service bot publish approval service.
 
     Manages the approval workflow for publishing/unpublishing service bots
@@ -142,8 +144,12 @@ class PublishApprovalService(PublishApprovalServiceProtocol):
     async def _create_new_approval(
         self,
         publish_record: BotPublishRecord,
-        action: Literal["online", "offline"],
+        action: Literal["online", "offline", "scale"],
         operator: str,
+        *,
+        current_count: int | None = None,
+        delta: int | None = None,
+        target_count: int | None = None,
     ) -> ApprovalResult:
         """Create a new approval request.
 
@@ -197,7 +203,13 @@ class PublishApprovalService(PublishApprovalServiceProtocol):
         # instance); a ledger row would only observe it, not prevent it.
         biz_id = f"{publish_record.id}{action}{timestamp}"
         approval_result = self._start_approval_workflow(
-            publish_record, action=action, operator=operator, biz_id=biz_id
+            publish_record,
+            action=action,
+            operator=operator,
+            biz_id=biz_id,
+            current_count=current_count,
+            delta=delta,
+            target_count=target_count,
         )
 
         if not approval_result.get("success"):
@@ -219,6 +231,9 @@ class PublishApprovalService(PublishApprovalServiceProtocol):
             approval_result=approval_result,
             action=action,
             operator=operator,
+            current_count=current_count,
+            delta=delta,
+            target_count=target_count,
         )
 
     def _finalize_new_approval(
@@ -228,6 +243,9 @@ class PublishApprovalService(PublishApprovalServiceProtocol):
         approval_result: Dict[str, Any],
         action: str,
         operator: str,
+        current_count: int | None = None,
+        delta: int | None = None,
+        target_count: int | None = None,
     ) -> ApprovalResult:
         """Write ``ext.approval`` (with the puid) and return the PROCESSING result."""
         puid = approval_result.get("puid")
@@ -244,6 +262,12 @@ class PublishApprovalService(PublishApprovalServiceProtocol):
             "approval_url": approval_result.get("approval_url"),
             "created_at": datetime.now().isoformat(),
         }
+        if action == "scale":
+            new_approval.update({
+                "current_count": current_count,
+                "delta": delta,
+                "target_count": target_count,
+            })
         expected_ext = copy.deepcopy(publish_record.ext)
         ext = copy.deepcopy(publish_record.ext or {})
         ext["approval"] = new_approval
@@ -281,9 +305,12 @@ class PublishApprovalService(PublishApprovalServiceProtocol):
         self,
         publish_record: BotPublishRecord,
         *,
-        action: Literal["online", "offline"],
+        action: Literal["online", "offline", "scale"],
         operator: str,
         biz_id: str,
+        current_count: int | None = None,
+        delta: int | None = None,
+        target_count: int | None = None,
     ) -> Dict[str, Any]:
         """Call the approval-workflow plugin to open the approval instance,
         assembling the auditor context. Returns the plugin's raw result dict
@@ -295,20 +322,86 @@ class PublishApprovalService(PublishApprovalServiceProtocol):
         owner_id = str(bot["owner_id"])
         owner_name = bot.get("owner_name") or owner_id
         publish_name = publish_record.name or publish_record.source_bot_id
+        context: Dict[str, str] = {
+            "publish_id": str(publish_record.id),
+            "action": action,
+            "applicant": operator,
+            "publish_owner_audit": f"w[{owner_id}]",  # approval format for auditor
+            "owner_name": owner_name,
+            "publish_name": publish_name,
+            "content": f"{publish_name} 线上发布审批" if action == "online" else f"{publish_name} 下线审批",
+        }
+        if action == "scale":
+            approver_audit = ",".join(
+                f"w[{staff_id}]" for staff_id in SERVICE_BOT_SCALE_APPROVER_STAFF_IDS
+            )
+            context.update({
+                "publish_owner_audit": approver_audit,
+                "scale_approvers": approver_audit,
+                "scale_approver_staff_ids": ",".join(SERVICE_BOT_SCALE_APPROVER_STAFF_IDS),
+                "current_count": str(current_count),
+                "delta": str(delta),
+                "target_count": str(target_count),
+                "content": (
+                    f"{publish_name} 实例扩缩容审批"
+                    f"（当前 {current_count}，变更 {delta:+d}，目标 {target_count}）"
+                ),
+            })
         return self._process_service.start_approval(
             applicant=operator,
             biz_id=biz_id,
             process_code=SERVICE_BOT_PUBLISH_PROCESS_CODE,
             biz_type=f"botpublish4{action}",
-            context={
-                "publish_id": str(publish_record.id),
-                "action": action,
-                "applicant": operator,
-                "publish_owner_audit": f"w[{owner_id}]",  # approval format for auditor
-                "owner_name": owner_name,
-                "publish_name": publish_name,
-                "content": f"{publish_name} 线上发布审批" if action == "online" else f"{publish_name} 下线审批",
-            },
+            context=context,
+        )
+
+    async def request_scale_approval(
+        self,
+        publish_record: BotPublishRecord,
+        *,
+        operator: str,
+        current_count: int,
+        delta: int,
+        target_count: int,
+    ) -> ApprovalResult:
+        """Create (or reuse) the approval that gates one scale operation."""
+        ext = copy.deepcopy(publish_record.ext or {})
+        existing = ext.get("approval")
+        if isinstance(existing, dict) and existing.get("status") in {
+            "PROCESSING", "AGREED", "EXECUTING",
+        }:
+            if existing.get("action") == "scale":
+                if existing.get("target_count") != target_count:
+                    return ApprovalResult(
+                        should_approval=True,
+                        status="ERROR",
+                        approval=existing,
+                        message=(
+                            "已有目标实例数为 "
+                            f"{existing.get('target_count')} 的扩缩容审批在处理"
+                        ),
+                    )
+                return ApprovalResult(
+                    should_approval=True,
+                    status=existing.get("status"),
+                    approval=existing,
+                    message="审批中，请等待审批结果",
+                )
+            return ApprovalResult(
+                should_approval=True,
+                status="ERROR",
+                approval=existing,
+                message="已有其他发布审批正在处理，请完成后再提交扩缩容",
+            )
+        publish_record = self._archive_if_terminal(publish_record)
+        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+        return await self._create_new_approval(
+            publish_record=publish_record,
+            action="scale",
+            operator=operator,
+            current_count=current_count,
+            delta=delta,
+            target_count=target_count,
         )
 
     async def check_and_process_should_approval(
@@ -529,7 +622,37 @@ class PublishApprovalService(PublishApprovalServiceProtocol):
             )
             return {"success": False, "message": "PUID mismatch"}
 
-        # 3. Update status
+        approval_action = approval.get("action")
+        if action == "scale" and approval_action != "scale":
+            return {"success": False, "message": "Approval action mismatch"}
+        if action != "scale" and approval_action == "scale":
+            return {"success": False, "message": "Approval action mismatch"}
+
+        # The callback body is not a credential. For scale it must agree with
+        # the authoritative AntProcess status before it can advance the record.
+        if action == "scale":
+            checked = self._process_service.query_approval_status(puid)
+            if not checked.get("success"):
+                return {
+                    "success": False,
+                    "message": f"Approval status unavailable: {checked.get('error_msg')}",
+                }
+            actual_operate = str(checked.get("last_operate") or "").upper()
+            actual_state = str(checked.get("status") or "").upper()
+            requested_operate = last_operate.upper()
+            if requested_operate == "AGREE" and not (
+                actual_operate == "AGREE"
+                and actual_state in {"COMPLETED", "AGREED", "APPROVED"}
+            ):
+                return {"success": False, "message": "Approval not agreed upstream"}
+            if requested_operate == "DISAGREE" and actual_operate != "DISAGREE":
+                return {"success": False, "message": "Approval not disagreed upstream"}
+            if requested_operate == "CANCEL" and actual_operate != "CANCEL":
+                return {"success": False, "message": "Approval not cancelled upstream"}
+
+        # 3. Update status with a monotonic transition table. Terminal states are
+        # immutable; an approved-but-not-executed record cannot be archived by a
+        # newer request, and a late callback cannot flip a terminal result.
         status_map = {"AGREE": "AGREED", "DISAGREE": "DISAGREED", "CANCEL": "CANCEL"}
         new_status = status_map.get(last_operate.upper())
         if not new_status:
@@ -538,6 +661,35 @@ class PublishApprovalService(PublishApprovalServiceProtocol):
                 last_operate,
             )
             return {"success": False, "message": f"Unknown last_operate: {last_operate}"}
+
+        current_status = approval.get("status")
+        if current_status in {"EXECUTED", "DISAGREED", "CANCEL"}:
+            return {
+                "success": True,
+                "message": f"Approval already terminal: {current_status}",
+            }
+        if current_status in {"AGREED", "EXECUTING"} and new_status != "AGREED":
+            return {
+                "success": True,
+                "message": f"Approval already {current_status}; ignoring {new_status}",
+            }
+        if current_status == "AGREED" and new_status == "AGREED":
+            if approval.get("trigger_enqueued_at"):
+                return {"success": True, "message": "Approval already AGREED"}
+            early = self._enqueue_agreed_trigger(
+                publish_record, action=action, applicant=applicant, approval=approval
+            )
+            if early is not None:
+                return early
+            self._mark_trigger_enqueued(
+                publish_id, puid=str(approval.get("puid") or "")
+            )
+            return {"success": True, "message": "Approval AGREED; trigger re-enqueued"}
+        if current_status not in {"PROCESSING"}:
+            return {
+                "success": True,
+                "message": f"Approval state {current_status} cannot accept {new_status}",
+            }
 
         approval["status"] = new_status
         approval["processed_at"] = datetime.now().isoformat()
@@ -559,8 +711,26 @@ class PublishApprovalService(PublishApprovalServiceProtocol):
             )
             if early is not None:
                 return early
+            self._mark_trigger_enqueued(
+                publish_id, puid=str(approval.get("puid") or "")
+            )
 
         return {"success": True, "message": f"Approval {new_status}"}
+
+    def _mark_trigger_enqueued(self, publish_id: int, *, puid: str) -> None:
+        """Record that this exact approval's idempotent trigger was enqueued."""
+        record = self._publish_service.get_publish_by_id(publish_id)
+        if not record:
+            return
+        expected_ext = copy.deepcopy(record.ext)
+        ext = copy.deepcopy(record.ext or {})
+        approval = ext.get("approval")
+        if isinstance(approval, dict) and approval.get("puid") == puid:
+            approval["trigger_enqueued_at"] = datetime.now().isoformat()
+            ext["approval"] = approval
+            self._publish_service.update_publish_ext(
+                publish_id, ext, expected_ext=expected_ext
+            )
 
     def _enqueue_agreed_trigger(
         self,
@@ -588,6 +758,7 @@ class PublishApprovalService(PublishApprovalServiceProtocol):
         expected = {
             "online": PublishStatus.VALIDATING,
             "offline": PublishStatus.SUCCESS,
+            "scale": PublishStatus.SUCCESS,
         }.get(action)
         if expected is not None and publish_record.status != expected:
             logger.warning(
@@ -605,6 +776,7 @@ class PublishApprovalService(PublishApprovalServiceProtocol):
             publish_id=publish_id,
             action=action,
             operator=operator_id,
+            puid=approval.get("puid") if action == "scale" else None,
         )
         return None
 
@@ -613,6 +785,7 @@ class PublishApprovalService(PublishApprovalServiceProtocol):
         publish_id: int,
         action: str,
         operator: str,
+        puid: str | None = None,
     ) -> dict:
         """Durable AGREED-trigger work (#197): dispatch to the online-release or
         offline trigger. Both re-validate the approval is AGREED and drive the
@@ -622,6 +795,8 @@ class PublishApprovalService(PublishApprovalServiceProtocol):
             await self._trigger_online_release(publish_id, operator)
         elif action == "offline":
             await self._trigger_offline(publish_id, operator)
+        elif action == "scale":
+            await self._trigger_scale(publish_id, operator, puid=puid)
         else:
             return {"success": False, "message": f"Unknown approval action: {action}"}
         return {"success": True, "message": f"Approval trigger {action} executed"}

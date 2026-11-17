@@ -231,9 +231,12 @@ def enqueue_destroy(
 
 
 def build_approval_trigger_payload(
-    *, publish_id: int, action: str, operator: str
+    *, publish_id: int, action: str, operator: str, puid: str | None = None
 ) -> dict:
-    return {"publish_id": publish_id, "action": action, "operator": operator}
+    payload = {"publish_id": publish_id, "action": action, "operator": operator}
+    if puid:
+        payload["puid"] = puid
+    return payload
 
 
 def enqueue_approval_trigger(
@@ -242,14 +245,18 @@ def enqueue_approval_trigger(
     publish_id: int,
     action: str,
     operator: str,
+    puid: str | None = None,
 ) -> None:
-    """Enqueue the durable AGREED-trigger (online release / offline)."""
+    """Enqueue the durable AGREED-trigger (online release / offline / scale)."""
     task_queue_service.enqueue(
         APPROVAL_TRIGGER_TASK,
         build_approval_trigger_payload(
-            publish_id=publish_id, action=action, operator=operator
+            publish_id=publish_id, action=action, operator=operator, puid=puid
         ),
         deadline_seconds=_STAGE_TASK_DEADLINE_SECONDS,
+        idempotency_key=(
+            f"approval_trigger:{publish_id}:{puid}" if puid else None
+        ),
     )
 
 
@@ -580,13 +587,17 @@ class PublishApprovalTriggerHandler:
         publish_id = _require_int(payload, "publish_id")
         action = _require_str(payload, "action")
         operator = _require_str(payload, "operator")
-        return asyncio.run(self._run(publish_id, action, operator))
+        puid = str(payload.get("puid") or "") or None
+        return asyncio.run(self._run(publish_id, action, operator, puid))
 
-    async def _run(self, publish_id: int, action: str, operator: str) -> TaskOutcome:
+    async def _run(
+        self, publish_id: int, action: str, operator: str, puid: str | None = None
+    ) -> TaskOutcome:
         approval_service = self._approval_service_provider()
-        result = await approval_service.execute_approval_trigger(
-            publish_id=publish_id, action=action, operator=operator
-        )
+        kwargs = {"publish_id": publish_id, "action": action, "operator": operator}
+        if puid:
+            kwargs["puid"] = puid
+        result = await approval_service.execute_approval_trigger(**kwargs)
         if not result or not result.get("success"):
             message = (result or {}).get("message", "unknown error")
             return Fail(f"approval trigger failed: publish_id={publish_id}, {message}")

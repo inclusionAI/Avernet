@@ -10,6 +10,13 @@ from agentclaw.community.core.devices.models import OperatorContext
 class ServiceRuntimeDevicePort(Protocol):
     """Device operations needed by the service publication facade."""
 
+    def get_instances(
+        self,
+        *,
+        binding_id: int,
+        health_check: bool = False,
+    ) -> dict[str, Any]: ...
+
     def get_instances_by_bot(
         self,
         *,

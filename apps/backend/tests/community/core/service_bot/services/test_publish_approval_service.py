@@ -1022,3 +1022,447 @@ class TestHandleApprovalCallbackTriggers:
         call = task_queue_service.enqueue.call_args
         assert call.args[1]["action"] == "offline"
         assert call.args[1]["operator"] == "operator_offline"
+
+class TestScaleApproval:
+    """Scale approval is always gated, persists target_count, and is idempotent."""
+
+    @pytest.mark.asyncio
+    async def test_request_scale_approval_persists_counts_and_six_approvers(self):
+        bot_service = MagicMock()
+        bot_service.get_bot_by_address.return_value = {
+            "owner_id": "owner_001",
+            "owner_name": "Owner",
+        }
+        process_service = MagicMock()
+        process_service.start_approval.return_value = {
+            "success": True,
+            "puid": "scale_puid_1",
+            "approval_url": "https://approval.example/scale_1",
+        }
+        publish_service = MagicMock()
+        service = _make_publish_approval_service(
+            bot_service=bot_service,
+            process_service=process_service,
+            publish_service=publish_service,
+        )
+        record = _make_publish_record(ext={})
+
+        result = await service.request_scale_approval(
+            record,
+            operator="owner_001",
+            current_count=3,
+            delta=-1,
+            target_count=2,
+        )
+
+        assert result.should_approval is True
+        assert result.status == "PROCESSING"
+        assert result.approval["action"] == "scale"
+        assert result.approval["current_count"] == 3
+        assert result.approval["delta"] == -1
+        assert result.approval["target_count"] == 2
+        context = process_service.start_approval.call_args.kwargs["context"]
+        assert context["publish_owner_audit"] == (
+            "w[342011],w[113488],w[330429],w[074488],w[165137],w[382716]"
+        )
+        assert context["scale_approver_staff_ids"].split(",") == [
+            "342011", "113488", "330429", "074488", "165137", "382716",
+        ]
+        assert context["target_count"] == "2"
+        stored = publish_service.update_publish_ext.call_args.args[1]["approval"]
+        assert stored["target_count"] == 2
+
+    @pytest.mark.asyncio
+    async def test_request_scale_approval_reuses_processing_scale_without_new_workflow(self):
+        bot_service = MagicMock()
+        bot_service.get_bot_by_address.return_value = {
+            "owner_id": "owner_001",
+            "owner_name": "Owner",
+        }
+        process_service = MagicMock()
+        existing = {
+            "puid": "scale_puid_1",
+            "action": "scale",
+            "status": "PROCESSING",
+            "current_count": 2,
+            "delta": 1,
+            "target_count": 3,
+        }
+        service = _make_publish_approval_service(
+            bot_service=bot_service,
+            process_service=process_service,
+        )
+
+        result = await service.request_scale_approval(
+            _make_publish_record(ext={"approval": existing}),
+            operator="owner_001",
+            current_count=2,
+            delta=1,
+            target_count=3,
+        )
+
+        assert result.status == "PROCESSING"
+        assert result.approval == existing
+        process_service.start_approval.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_scale_callback_agree_enqueues_once_and_repeat_is_noop(self):
+        from agentclaw.community.core.service_bot.services.publish_flow.tasks import (
+            APPROVAL_TRIGGER_TASK,
+        )
+
+        processing = {
+            "puid": "scale_puid_1",
+            "action": "scale",
+            "status": "PROCESSING",
+            "operator_id": "owner_001",
+            "current_count": 2,
+            "delta": 1,
+            "target_count": 3,
+        }
+        agreed = {**processing, "status": "AGREED"}
+        publish_service = MagicMock()
+        publish_service.get_publish_by_id.side_effect = [
+            _make_publish_record(ext={"approval": processing}, status=PublishStatus.SUCCESS.value),
+            _make_publish_record(ext={"approval": agreed}, status=PublishStatus.SUCCESS.value),
+            _make_publish_record(
+                ext={"approval": {**agreed, "trigger_enqueued_at": "now"}},
+                status=PublishStatus.SUCCESS.value,
+            ),
+        ]
+        task_queue_service = MagicMock()
+        process_service = MagicMock()
+        process_service.query_approval_status.return_value = {
+            "success": True, "status": "COMPLETED", "last_operate": "agree",
+        }
+        service = _make_publish_approval_service(
+            publish_service=publish_service,
+            task_queue_service=task_queue_service,
+            process_service=process_service,
+        )
+
+        first = await service.handle_approval_callback(
+            publish_id=1, action="scale", applicant="owner_001",
+            puid="scale_puid_1", last_operate="AGREE",
+        )
+        second = await service.handle_approval_callback(
+            publish_id=1, action="scale", applicant="owner_001",
+            puid="scale_puid_1", last_operate="AGREE",
+        )
+
+        assert first["success"] is True
+        assert second["success"] is True
+        task_queue_service.enqueue.assert_called_once()
+        call = task_queue_service.enqueue.call_args
+        assert call.args[0] == APPROVAL_TRIGGER_TASK
+        assert call.args[1] == {
+            "publish_id": 1,
+            "action": "scale",
+            "operator": "owner_001",
+            "puid": "scale_puid_1",
+        }
+        assert call.kwargs["idempotency_key"] == "approval_trigger:1:scale_puid_1"
+
+    @pytest.mark.asyncio
+    async def test_scale_disagree_does_not_enqueue_or_scale(self):
+        processing = {
+            "puid": "scale_puid_1",
+            "action": "scale",
+            "status": "PROCESSING",
+            "operator_id": "owner_001",
+            "target_count": 3,
+        }
+        publish_service = MagicMock()
+        publish_service.get_publish_by_id.return_value = _make_publish_record(
+            ext={"approval": processing}, status=PublishStatus.SUCCESS.value
+        )
+        task_queue_service = MagicMock()
+        process_service = MagicMock()
+        process_service.query_approval_status.return_value = {
+            "success": True, "status": "COMPLETED", "last_operate": "disagree",
+        }
+        flow = MagicMock()
+        flow.scale_bot = AsyncMock()
+        service = _make_publish_approval_service(
+            publish_service=publish_service,
+            task_queue_service=task_queue_service,
+            process_service=process_service,
+            publish_flow_service_provider=lambda: flow,
+        )
+
+        result = await service.handle_approval_callback(
+            publish_id=1, action="scale", applicant="owner_001",
+            puid="scale_puid_1", last_operate="DISAGREE",
+        )
+
+        assert result["success"] is True
+        task_queue_service.enqueue.assert_not_called()
+        flow.scale_bot.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_trigger_scale_uses_persisted_target_and_marks_executed(self):
+        agreed = {
+            "puid": "scale_puid_1",
+            "action": "scale",
+            "status": "AGREED",
+            "operator_id": "owner_001",
+            "target_count": 3,
+        }
+        executing = {**agreed, "status": "EXECUTING"}
+        publish_service = MagicMock()
+        publish_service.get_publish_by_id.side_effect = [
+            _make_publish_record(ext={"approval": agreed}, status=PublishStatus.SUCCESS.value),
+            _make_publish_record(ext={"approval": executing}, status=PublishStatus.SUCCESS.value),
+        ]
+        flow = MagicMock()
+        flow.scale_bot = AsyncMock(return_value={"success": True, "target_count": 3})
+        service = _make_publish_approval_service(
+            publish_service=publish_service,
+            publish_flow_service_provider=lambda: flow,
+        )
+
+        await service._trigger_scale(
+            publish_id=1, applicant="owner_001", puid="scale_puid_1"
+        )
+
+        flow.scale_bot.assert_awaited_once_with(
+            publish_id=1,
+            target_count=3,
+            operator="owner_001",
+            approval_puid="scale_puid_1",
+        )
+        final_ext = publish_service.update_publish_ext.call_args.args[1]
+        assert final_ext["approval"]["status"] == "EXECUTED"
+
+    @pytest.mark.asyncio
+    async def test_scale_callback_rejects_forged_agree_when_upstream_disagrees(self):
+        processing = {
+            "puid": "scale_puid_1",
+            "action": "scale",
+            "status": "PROCESSING",
+            "operator_id": "owner_001",
+            "target_count": 3,
+        }
+        publish_service = MagicMock()
+        publish_service.get_publish_by_id.return_value = _make_publish_record(
+            ext={"approval": processing}, status=PublishStatus.SUCCESS.value
+        )
+        process_service = MagicMock()
+        process_service.query_approval_status.return_value = {
+            "success": True, "status": "COMPLETED", "last_operate": "disagree",
+        }
+        task_queue_service = MagicMock()
+        service = _make_publish_approval_service(
+            publish_service=publish_service,
+            process_service=process_service,
+            task_queue_service=task_queue_service,
+        )
+
+        result = await service.handle_approval_callback(
+            publish_id=1, action="scale", applicant="owner_001",
+            puid="scale_puid_1", last_operate="AGREE",
+        )
+
+        assert result["success"] is False
+        task_queue_service.enqueue.assert_not_called()
+        publish_service.update_publish_ext.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_scale_callback_ignores_late_agree_after_disagree(self):
+        disagreed = {
+            "puid": "scale_puid_1",
+            "action": "scale",
+            "status": "DISAGREED",
+            "operator_id": "owner_001",
+            "target_count": 3,
+        }
+        publish_service = MagicMock()
+        publish_service.get_publish_by_id.return_value = _make_publish_record(
+            ext={"approval": disagreed}, status=PublishStatus.SUCCESS.value
+        )
+        process_service = MagicMock()
+        process_service.query_approval_status.return_value = {
+            "success": True, "status": "COMPLETED", "last_operate": "agree",
+        }
+        task_queue_service = MagicMock()
+        service = _make_publish_approval_service(
+            publish_service=publish_service,
+            process_service=process_service,
+            task_queue_service=task_queue_service,
+        )
+
+        result = await service.handle_approval_callback(
+            publish_id=1, action="scale", applicant="owner_001",
+            puid="scale_puid_1", last_operate="AGREE",
+        )
+
+        assert result["success"] is True
+        task_queue_service.enqueue.assert_not_called()
+        publish_service.update_publish_ext.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_trigger_scale_redelivery_does_not_issue_second_scale(self):
+        executing = {
+            "puid": "scale_puid_1",
+            "action": "scale",
+            "status": "EXECUTING",
+            "operator_id": "owner_001",
+            "target_count": 3,
+        }
+        publish_service = MagicMock()
+        publish_service.get_publish_by_id.side_effect = [
+            _make_publish_record(
+                ext={
+                    "approval": executing,
+                    "scale": {"publish_id": 99, "approval_puid": "scale_puid_1"},
+                },
+                status=PublishStatus.SUCCESS.value,
+            ),
+            _make_publish_record(
+                ext={
+                    "approval": executing,
+                    "scale": {"publish_id": 99, "approval_puid": "scale_puid_1"},
+                },
+                status=PublishStatus.SUCCESS.value,
+            ),
+        ]
+        flow = MagicMock()
+        flow.scale_bot = AsyncMock()
+        service = _make_publish_approval_service(
+            publish_service=publish_service,
+            publish_flow_service_provider=lambda: flow,
+        )
+
+        await service._trigger_scale(
+            publish_id=1, applicant="owner_001", puid="scale_puid_1"
+        )
+
+        flow.scale_bot.assert_not_called()
+        final_ext = publish_service.update_publish_ext.call_args.args[1]
+        assert final_ext["approval"]["status"] == "EXECUTED"
+
+    @pytest.mark.asyncio
+    async def test_request_scale_approval_rejects_different_target_while_processing(self):
+        existing = {
+            "puid": "scale_puid_1",
+            "action": "scale",
+            "status": "PROCESSING",
+            "current_count": 2,
+            "delta": 1,
+            "target_count": 3,
+        }
+        process_service = MagicMock()
+        service = _make_publish_approval_service(process_service=process_service)
+
+        result = await service.request_scale_approval(
+            _make_publish_record(ext={"approval": existing}),
+            operator="owner_001",
+            current_count=2,
+            delta=2,
+            target_count=4,
+        )
+
+        assert result.status == "ERROR"
+        assert "3" in result.message
+        process_service.start_approval.assert_not_called()
+
+
+    @pytest.mark.asyncio
+    async def test_scale_callback_reenqueues_after_enqueue_failure(self):
+        import copy
+
+        processing = {
+            "puid": "scale_puid_1",
+            "action": "scale",
+            "status": "PROCESSING",
+            "operator_id": "owner_001",
+            "current_count": 2,
+            "delta": 1,
+            "target_count": 3,
+        }
+        state = {"ext": {"approval": copy.deepcopy(processing)}}
+        publish_service = MagicMock()
+        publish_service.get_publish_by_id.side_effect = (
+            lambda _publish_id: _make_publish_record(
+                ext=copy.deepcopy(state["ext"]), status=PublishStatus.SUCCESS.value
+            )
+        )
+
+        def update_ext(_publish_id, ext, expected_ext=None):
+            state["ext"] = copy.deepcopy(ext)
+
+        publish_service.update_publish_ext.side_effect = update_ext
+        process_service = MagicMock()
+        process_service.query_approval_status.return_value = {
+            "success": True, "status": "COMPLETED", "last_operate": "agree",
+        }
+        task_queue_service = MagicMock()
+        task_queue_service.enqueue.side_effect = [RuntimeError("queue down"), None]
+        service = _make_publish_approval_service(
+            publish_service=publish_service,
+            process_service=process_service,
+            task_queue_service=task_queue_service,
+        )
+
+        with pytest.raises(RuntimeError, match="queue down"):
+            await service.handle_approval_callback(
+                publish_id=1, action="scale", applicant="owner_001",
+                puid="scale_puid_1", last_operate="AGREE",
+            )
+
+        assert state["ext"]["approval"]["status"] == "AGREED"
+        assert "trigger_enqueued_at" not in state["ext"]["approval"]
+
+        result = await service.handle_approval_callback(
+            publish_id=1, action="scale", applicant="owner_001",
+            puid="scale_puid_1", last_operate="AGREE",
+        )
+
+        assert result["success"] is True
+        assert task_queue_service.enqueue.call_count == 2
+        assert state["ext"]["approval"]["trigger_enqueued_at"]
+
+
+    @pytest.mark.asyncio
+    async def test_trigger_scale_ignores_stale_marker_from_earlier_approval(self):
+        executing = {
+            "puid": "scale_puid_2",
+            "action": "scale",
+            "status": "EXECUTING",
+            "operator_id": "owner_001",
+            "target_count": 4,
+        }
+        publish_service = MagicMock()
+        publish_service.get_publish_by_id.side_effect = [
+            _make_publish_record(
+                ext={
+                    "approval": executing,
+                    "scale": {"publish_id": 99, "approval_puid": "scale_puid_1"},
+                },
+                status=PublishStatus.SUCCESS.value,
+            ),
+            _make_publish_record(
+                ext={
+                    "approval": {**executing, "status": "EXECUTED"},
+                    "scale": {"publish_id": 100, "approval_puid": "scale_puid_2"},
+                },
+                status=PublishStatus.SUCCESS.value,
+            ),
+        ]
+        flow = MagicMock()
+        flow.scale_bot = AsyncMock(return_value={"success": True, "baas_publish_id": 100})
+        service = _make_publish_approval_service(
+            publish_service=publish_service,
+            publish_flow_service_provider=lambda: flow,
+        )
+
+        await service._trigger_scale(
+            publish_id=1, applicant="owner_001", puid="scale_puid_2"
+        )
+
+        flow.scale_bot.assert_awaited_once_with(
+            publish_id=1,
+            target_count=4,
+            operator="owner_001",
+            approval_puid="scale_puid_2",
+        )

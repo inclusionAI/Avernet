@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Annotated, Literal
 
 from fastapi import Path
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 ContainerStatus = Literal["healthy", "restarting", "abnormal", "unknown"]
@@ -61,6 +61,24 @@ class ContainerInstance(BaseModel):
     )
 
 
+class ContainerScaleApproval(BaseModel):
+    """The approval currently attached to a service-Bot scale request."""
+
+    status: str = Field(description="Current approval state.")
+    approval_url: str | None = Field(
+        default=None, description="Approval page URL, when available."
+    )
+    current_count: int | None = Field(
+        default=None, description="Live instance count captured at request time."
+    )
+    delta: int | None = Field(
+        default=None, description="Requested signed instance-count change."
+    )
+    target_count: int | None = Field(
+        default=None, description="Target instance count frozen for execution."
+    )
+
+
 class ContainerList(BaseModel):
     """Current service-Bot instance snapshot and derived summary."""
 
@@ -70,6 +88,38 @@ class ContainerList(BaseModel):
     )
     instances: list[ContainerInstance] = Field(
         description="Current runtime instances backing the service Bot."
+    )
+    scale_approval: ContainerScaleApproval | None = Field(
+        default=None,
+        description="Latest scale approval, when one exists for this Bot.",
+    )
+
+
+class ContainerScaleRequest(BaseModel):
+    """Request a signed instance-count change relative to the live fleet."""
+
+    delta: int = Field(
+        description="Non-zero signed instance-count change; negative values scale down."
+    )
+
+    @field_validator("delta")
+    @classmethod
+    def _delta_must_be_non_zero(cls, value: int) -> int:
+        if value == 0:
+            raise ValueError("delta must not be zero")
+        return value
+
+
+class ContainerScale(BaseModel):
+    """Acknowledgement for a scale request that is waiting for approval."""
+
+    bot_id: str = Field(description="Stable Bot identifier.")
+    accepted: bool = Field(description="Whether the request was accepted.")
+    current_count: int = Field(description="Live instance count at request time.")
+    delta: int = Field(description="Requested signed instance-count change.")
+    target_count: int = Field(description="Target instance count frozen for execution.")
+    approval: ContainerScaleApproval = Field(
+        description="Approval that must be agreed before scaling."
     )
 
 

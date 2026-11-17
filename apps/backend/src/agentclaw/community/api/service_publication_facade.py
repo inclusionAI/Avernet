@@ -114,3 +114,12 @@ class ServicePublicationFacadeProtocol(Protocol):
         actor_id: str,
         owner_id: str,
     ) -> dict[str, Any]: ...
+
+    async def scale_containers(
+        self,
+        bot_id: str,
+        *,
+        delta: int,
+        actor_id: str,
+        owner_id: str,
+    ) -> dict[str, Any]: ...
