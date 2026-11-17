@@ -1,4 +1,4 @@
-import { migrations as currentMigrations } from '../schema.js';
+import { allMigrations as currentMigrations } from '../db.js';
 import Database from 'better-sqlite3';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';

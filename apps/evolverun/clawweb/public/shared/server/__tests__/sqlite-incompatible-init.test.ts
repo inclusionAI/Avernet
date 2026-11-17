@@ -1,4 +1,4 @@
-import { migrations as currentMigrations } from '../schema.js';
+import { allMigrations as currentMigrations } from '../db.js';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';

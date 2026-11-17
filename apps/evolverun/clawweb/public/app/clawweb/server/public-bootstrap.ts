@@ -71,6 +71,7 @@ import { createWorkflowAiDraftRuntime } from "./workflow-ai-draft-runtime.js";
 import { createWorkflowAiDraftBaasExecution } from "./workflow-ai-draft-baas-execution.js";
 import { createInternalEngineAuth } from "./internal-engine-auth.js";
 import { createAutoHealTriggerRun } from "./auto-heal-trigger-run.js";
+import { createAIStudioTrainRuntime, captureAIStudioRawBody, type AIStudioTrainPublicAuth } from "./aistudio-train-runtime.js";
 
 /** Non-browser clients may omit Origin, but must still send the CSRF header. */
 const packWriteGuard: RequestHandler = (req, res, next) => {
@@ -106,7 +107,7 @@ export type UnifiedSaveHost = Readonly<{
 
 /** Server-only ACL for complete Editor deployment candidates; omission denies
  * Editor deployment. It never supplies identity or grants Pack file writes. */
-export function createClawWebBootstrap(options: { sessionRecovery?: SessionRecoveryRuntime; unifiedSave?: UnifiedSaveHost; authorizeSnapshotDeploy?: AuthorizeSnapshotDeploy } = {}): ClawWebBootstrap {
+export function createClawWebBootstrap(options: { sessionRecovery?: SessionRecoveryRuntime; unifiedSave?: UnifiedSaveHost; authorizeSnapshotDeploy?: AuthorizeSnapshotDeploy; aistudioTrain?: AIStudioTrainPublicAuth } = {}): ClawWebBootstrap {
   return {
     async start(context) {
       const port = Number.parseInt(process.env.PORT ?? "3001", 10);
@@ -162,7 +163,7 @@ export function createClawWebBootstrap(options: { sessionRecovery?: SessionRecov
           return { packId: draft.packId ?? workflowId, repositoryId: repository.repositoryId, service };
         },
       }));
-      app.use(express.json({ limit: "10mb" }));
+      app.use(express.json({ limit: "10mb", verify: captureAIStudioRawBody }));
       app.use(cookieParser());
       app.use(adminAuthMiddleware({ config: fallbackAdminConfig, repository: adminUserRepo }));
       app.get("/api/auth/me", createAuthMeHandler({ environment: context.environment }));
@@ -183,6 +184,13 @@ export function createClawWebBootstrap(options: { sessionRecovery?: SessionRecov
       const deployHistoryRepo = new WorkflowDeployHistoryRepository(db);
       const workflowSpecRepo = new WorkflowSpecRepository(db, deployHistoryRepo);
       const publicBaseUrl = getClawWebPublicBaseUrl();
+      const aistudioTrain = createAIStudioTrainRuntime(db, {
+        ...options.aistudioTrain, publicOrigin: publicBaseUrl,
+        publicKeyB64: resolveSignatureConfig().publicKeyB64,
+      });
+      app.use("/api/internal/aistudio-train-watches", aistudioTrain.internalRouter);
+      app.use("/api/internal/events", aistudioTrain.auditRouter);
+      app.use("/api/runs", aistudioTrain.publicRouter);
       console.info('[workflow-notification] ' + JSON.stringify({ event: 'provider_configured', environment: context.environment,
         senderConfigured: !!insight.notificationSender, publicBaseUrlConfigured: !!publicBaseUrl }));
       const repairRuntime = createWorkflowRepairRuntime(db, {

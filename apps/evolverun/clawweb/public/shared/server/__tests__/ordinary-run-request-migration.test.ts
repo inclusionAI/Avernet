@@ -1,4 +1,4 @@
-import { migrations as currentMigrations } from '../schema.js';
+import { allMigrations as currentMigrations } from '../db.js';
 import { expect, it, vi } from 'vitest';
 import { ordinaryRunRequestMigrations } from '../schema-ordinary-run-request.js';
 import type { IDatabase } from '../db.js';

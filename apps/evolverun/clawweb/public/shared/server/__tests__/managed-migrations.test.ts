@@ -1,10 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { runMigrations, type IDatabase } from '../db.js';
+import { runMigrations, allMigrations, type IDatabase } from '../db.js';
 import { dialectFor } from '../db/dialect.js';
 import { migrations } from '../schema.js';
 import { workflowSnapshotMigrations } from '../schema-workflow-snapshot.js';
 import { flowRunLinkMysqlUpgradeDdl } from '../schema-flow-run-links.js';
-import { ordinaryRunRequestDdl, ordinaryRunRequestMigrations } from '../schema-ordinary-run-request.js';
+import { ordinaryRunRequestDdl } from '../schema-ordinary-run-request.js';
+import { aistudioTrainDdl } from '../schema-aistudio-train.js';
+import { aistudioTrainManualAuditDdl } from '../schema-aistudio-train-manual-audit.js';
 
 type Migration = (typeof migrations)[number];
 
@@ -41,6 +43,7 @@ vi.mock('../schema.js', async importOriginal => {
   };
 });
 
+const mutableMigrations = migrations as Migration[];
 const ordinary = migrations[1];
 const healing = migrations[3];
 const ledgerInsert = 'INSERT INTO schema_version (version, description) VALUES (?, ?)';
@@ -60,6 +63,7 @@ function createDb(dbType: 'mysql' | 'zdas', options: {
       throw options.failure.error;
     }
     const allowed = [
+      ...aistudioTrainDdl(dbType), ...aistudioTrainManualAuditDdl(dbType),
       ...migrations.flatMap(m => m.sql.map(ddl => dialectFor(dbType).renderDdl(ddl))),
       ...workflowSnapshotMigrations.flatMap(m => m.sql.map(ddl => dialectFor(dbType).renderDdl(ddl))),
       probes.ordinaryCallback, probes.healingCallback, tagAlter, flowRunLinkMysqlUpgradeDdl,
@@ -153,14 +157,14 @@ describe.each(['mysql', 'zdas'] as const)('runMigrations on %s', dbType => {
     expect(query.mock.calls.some(([sql]) => sql.includes('schema_version'))).toBe(false);
   });
 
-  it.each([0, 1, 2, 145, 146, 147, 148, 149, 150, 200])('preserves version gating at %i when DDL is available', async current => {
+  it.each([0, 1, 2, 145, 146, 147, 148, 149, 150, 154, 155, 156, 200])('preserves version gating at %i when DDL is available', async current => {
     const { db, exec, query } = createDb(dbType, { canDdl: true, current });
 
     await runMigrations(db, dbType);
 
     expect(query).toHaveBeenCalledWith('SELECT MAX(version) as v FROM schema_version');
     expect(exec.mock.calls.filter(([sql]) => sql === ledgerInsert).map(([, params]) => params)).toEqual(
-      [...migrations, ...workflowSnapshotMigrations, ...ordinaryRunRequestMigrations]
+      allMigrations
         .filter(m => (m.selfHealing || m.version > current) && (!('supportedDbTypes' in m) || (m.supportedDbTypes as readonly string[]).includes(dbType)))
         .map(m => [m.version, m.description]),
     );
@@ -227,7 +231,7 @@ it('does not record v151 when MySQL marker DDL fails', async () => {
 
 it('defers v151 on an explicit ALTER permission denial without applying or recording later migrations, and retries after provisioning', async () => {
   const later: Migration = { version: 152, description: 'future migration', sql: ['UPDATE migration_probe SET future = 1'] };
-  migrations.push(later);
+  mutableMigrations.push(later);
   try {
     const denied = Object.assign(new Error("ALTER command denied to user for table 'flow_runs'"), { code: 'ER_TABLEACCESS_DENIED_ERROR', errno: 1142 });
     const first = createDb('mysql', { canDdl: true, current: 150, failure: { sqlPrefix: 'ALTER TABLE flow_runs', error: denied } });
@@ -246,13 +250,13 @@ it('defers v151 on an explicit ALTER permission denial without applying or recor
     const originalExec = second.db.exec;
     second.db.exec = async (sql, params) => sql === later.sql[0] ? { affectedRows: 1 } : originalExec(sql, params);
     await runMigrations(second.db, 'mysql');
-    expect(second.exec.mock.calls.filter(([sql]) => sql === ledgerInsert).map(([, params]) => params?.[0]).filter(version => Number(version) >= 151)).toEqual([151, 152]);
-  } finally { migrations.pop(); }
+    expect(second.exec.mock.calls.filter(([sql]) => sql === ledgerInsert).map(([, params]) => params?.[0]).filter(version => Number(version) >= 151)).toEqual([151, 152, 155, 156]);
+  } finally { mutableMigrations.pop(); }
 });
 
 it('defers v150 on explicit table CREATE denial, blocks higher versions, and resumes after provisioning', async () => {
   const later: Migration = { version: 152, description: 'future migration', sql: ['UPDATE migration_probe SET future = 1'] };
-  migrations.push(later);
+  mutableMigrations.push(later);
   try {
     const denied = Object.assign(new Error("CREATE command denied to user for table 'ordinary_run_requests'"), { code: 'ER_TABLEACCESS_DENIED_ERROR', errno: 1142 });
     const first = createDb('mysql', { canDdl: true, current: 149, failure: { sqlPrefix: 'CREATE TABLE IF NOT EXISTS ordinary_run_requests', error: denied } });
@@ -264,13 +268,13 @@ it('defers v150 on explicit table CREATE denial, blocks higher versions, and res
     second.db.exec = async (sql, params) => sql === later.sql[0] ? { affectedRows: 1 } : exec(sql, params);
     await runMigrations(second.db, 'mysql');
     expect(second.exec.mock.calls.filter(([sql]) => sql === ledgerInsert).map(([, params]) => params?.[0])
-      .filter(version => Number(version) >= 150)).toEqual([150, 151, 152]);
-  } finally { migrations.pop(); }
+      .filter(version => Number(version) >= 150)).toEqual([150, 151, 152, 155, 156]);
+  } finally { mutableMigrations.pop(); }
 });
 
 it('defers an incompatible v151 column and never records or executes later migrations', async () => {
   const later: Migration = { version: 152, description: 'future migration', sql: ['UPDATE migration_probe SET future = 1'] };
-  migrations.push(later);
+  mutableMigrations.push(later);
   try {
     const { db, exec } = createDb('mysql', { canDdl: true, current: 150 });
     const originalQuery = db.query;
@@ -283,7 +287,7 @@ it('defers an incompatible v151 column and never records or executes later migra
     expect(exec).not.toHaveBeenCalledWith(ledgerInsert, [151, expect.any(String)]);
     expect(exec).not.toHaveBeenCalledWith(ledgerInsert, [152, expect.any(String)]);
     expect(exec).not.toHaveBeenCalledWith(later.sql[0]);
-  } finally { migrations.pop(); }
+  } finally { mutableMigrations.pop(); }
 });
 
 it('propagates a v151 ledger write failure rather than treating it as schema incompatibility', async () => {
@@ -299,7 +303,7 @@ it('propagates a v151 ledger write failure rather than treating it as schema inc
 
 it('does not record v150 or execute later migrations when existing MySQL storage is incompatible', async () => {
   const later: Migration = { version: 152, description: 'future migration', sql: ['UPDATE migration_probe SET future = 1'] };
-  migrations.push(later);
+  mutableMigrations.push(later);
   try {
     const { db, exec } = createDb('mysql', { canDdl: true, current: 149 });
     const original = db.query;
@@ -312,7 +316,7 @@ it('does not record v150 or execute later migrations when existing MySQL storage
     expect(onSqliteDeferred).not.toHaveBeenCalled();
     for (const version of [150, 151, 152]) expect(exec).not.toHaveBeenCalledWith(ledgerInsert, [version, expect.any(String)]);
     expect(exec).not.toHaveBeenCalledWith(later.sql[0]);
-  } finally { migrations.pop(); }
+  } finally { mutableMigrations.pop(); }
 });
 
 it.each(['TABLES', 'COLUMNS', 'STATISTICS'])('propagates MySQL v150 %s metadata failures, without recording progress', async metadata => {
@@ -343,7 +347,7 @@ it('propagates v150 ledger write failure and does not run v151', async () => {
 it.each(['missing', 'nullable', 'narrow', 'engine', 'prefix'])
   ('defers MySQL v150 on %s metadata, stops later migrations, and retries after repair', async defect => {
     const later: Migration = { version: 152, description: 'future migration', sql: ['UPDATE migration_probe SET future = 1'] };
-    migrations.push(later);
+    mutableMigrations.push(later);
     try {
       const first = createDb('mysql', { canDdl: true, current: 149 });
       const original = first.db.query;
@@ -369,8 +373,8 @@ it.each(['missing', 'nullable', 'narrow', 'engine', 'prefix'])
       repaired.db.exec = async (sql, params) => sql === later.sql[0] ? { affectedRows: 1 } : execute(sql, params);
       await runMigrations(repaired.db, 'mysql');
       expect(repaired.exec.mock.calls.filter(([sql]) => sql === ledgerInsert).map(([, params]) => params?.[0])
-        .filter(version => Number(version) >= 150)).toEqual([150, 151, 152]);
-    } finally { migrations.pop(); }
+        .filter(version => Number(version) >= 150)).toEqual([150, 151, 152, 155, 156]);
+    } finally { mutableMigrations.pop(); }
   });
 
 it('defers v150 for an extra required MySQL column without a default', async () => {

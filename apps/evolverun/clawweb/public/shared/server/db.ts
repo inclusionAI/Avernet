@@ -11,10 +11,11 @@ import mysql from "mysql2/promise";
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { getCurrentEnv } from "./env.js";
-import { migrations, type DbType } from "./schema.js";
+import type { DbType } from "./schema.js";
 import { ensureSqliteTriggers } from "./db/sqlite-triggers.js";
-import { workflowSnapshotMigrations } from "./schema-workflow-snapshot.js";
-import { OrdinaryMarkerSchemaIncompatible, OrdinaryRequestSchemaIncompatible, OrdinarySchemaDdlDenied, ordinaryRunRequestMigrations, confirmConcurrentOrdinarySqlite } from "./schema-ordinary-run-request.js";
+import { collectMigrations } from "./db/migrations-registry.js";
+export { allMigrations } from "./db/migrations-registry.js";
+import { OrdinaryMarkerSchemaIncompatible, OrdinaryRequestSchemaIncompatible, OrdinarySchemaDdlDenied, confirmConcurrentOrdinarySqlite } from "./schema-ordinary-run-request.js";
 import { dialectFor, sqliteDialect, type Dialect } from "./db/dialect.js";
 import { readYamlConfig, getEnv, envInt, repairEnvInteger, resolveDbConfig,
   type ResolvedDbConfig, type YamlAntLogsConfig } from "./db/config.js";
@@ -229,7 +230,7 @@ async function runMigrations(db: IDatabase, dbType: DbType, onSqliteDeferred?: (
   let sqliteDdlDeferred = false;
 
   // v146 and v149 are retired; reserve these versions and leave existing tables untouched.
-  for (const migration of [...migrations, ...workflowSnapshotMigrations, ...ordinaryRunRequestMigrations].sort((a, b) => a.version - b.version)) {
+  for (const migration of collectMigrations()) {
     if (!canDdl && !migration.selfHealing) continue;
     // Self-healing repairs also run when the ledger reports them as applied.
     if (!migration.selfHealing && migration.version <= current) continue;

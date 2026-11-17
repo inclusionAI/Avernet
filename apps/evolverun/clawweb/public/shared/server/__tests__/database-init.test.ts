@@ -24,8 +24,14 @@ vi.mock("../schema.js", () => ({
   ],
   sqliteTriggers: [],
 }));
+// Strategy tests register only the ordinary and repair probes above.
 vi.mock("../schema-workflow-snapshot.js", () => ({ workflowSnapshotMigrations: [] }));
-vi.mock("../schema-ordinary-run-request.js", () => ({ ordinaryRunRequestMigrations: [] }));
+vi.mock("../schema-ordinary-run-request.js", async original => ({
+  ...await original<typeof import("../schema-ordinary-run-request.js")>(),
+  ordinaryRunRequestMigrations: [],
+}));
+
+vi.mock("../schema-aistudio-train.js", () => ({ aistudioTrainMigrations: [] }));
 
 import { closeDatabase, initDatabase } from "../db.js";
 const ledgerInsert = "INSERT INTO schema_version (version, description) VALUES (?, ?)";
