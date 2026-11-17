@@ -86,6 +86,32 @@ def test_cross_tenant_get_is_not_found(seeded):
         assert seeded.get_by_id_and_owner("bot-A", "u1") is None
 
 
+def test_forum_recipient_snapshot_respects_tenant_and_ambiguity(repo):
+    with avernet_tenant_scope(TENANT_A):
+        repo.insert(_bot(is_delete=1))
+        assert repo.classify_forum_recipient("bot-A") == ("deleted", None)
+    with avernet_tenant_scope(TENANT_B):
+        assert repo.classify_forum_recipient("bot-A") == ("missing", None)
+        repo.insert(_bot(entity_id="other", owner_id="u2"))
+        assert repo.classify_forum_recipient("bot-A") == ("live", "u2")
+    with avernet_tenant_scope(TENANT_A):
+        repo.insert(_bot(entity_id="other", owner_id="u2"))
+        assert repo.classify_forum_recipient("bot-A") == ("ambiguous", None)
+
+
+def test_forum_recipient_snapshot_respects_environment(repo, monkeypatch):
+    target = "agentclaw.community.core.repository.implementations.bot.bot.get_current_env"
+    with avernet_tenant_scope(TENANT_A):
+        monkeypatch.setattr(target, lambda: "prod")
+        repo.insert(_bot(is_delete=1))
+        monkeypatch.setattr(target, lambda: "pre")
+        assert repo.classify_forum_recipient("bot-A") == ("missing", None)
+        repo.insert(_bot(owner_id="pre-owner"))
+        assert repo.classify_forum_recipient("bot-A") == ("live", "pre-owner")
+        monkeypatch.setattr(target, lambda: "prod")
+        assert repo.classify_forum_recipient("bot-A") == ("deleted", None)
+
+
 def test_cross_tenant_list_is_empty(seeded):
     with avernet_tenant_scope(TENANT_B):
         total, items = seeded.list_by_conditions(owner_id="u1")

@@ -18,12 +18,14 @@ from agentclaw.community.core.task.domain.identity import (
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from .publisher_protocol import ForumNotificationPublisherProtocol
 
+from agentclaw.community.log import get_logger
 from agentclaw.community.utils.env_utils import get_current_env
-
 from agentclaw.community.core.work_orders.models import (
     WorkOrderBizType,
     WorkOrderEventType,
 )
+
+logger = get_logger()
 
 
 @dataclass(frozen=True)
@@ -67,8 +69,11 @@ class ForumNotificationPublisher(ForumNotificationPublisherProtocol):
         topic_id: str | None,
         post_id: str | None,
         topic_title: str | None = None,
+        skip_deleted_reply_recipient: bool = False,
     ) -> None:
-        recipient_user_id = self._recipient_user_id(recipient_type, recipient_id)
+        recipient_user_id = self._recipient_user_id(
+            recipient_type, recipient_id, skip_deleted_reply_recipient
+        )
         if recipient_user_id is None:
             return
         if actor_type == recipient_type and actor_id == recipient_id:
@@ -183,11 +188,28 @@ class ForumNotificationPublisher(ForumNotificationPublisherProtocol):
         self,
         recipient_type: str,
         recipient_id: str,
+        skip_deleted_reply_recipient: bool = False,
     ) -> str | None:
         if recipient_type == "HUMAN":
             return recipient_id
         if recipient_type == "BOT":
             scoped = parse_scoped_bot_identity(recipient_id)
+            if (
+                skip_deleted_reply_recipient
+                and scoped is None
+                and not is_bare_default_bot_identity(recipient_id)
+            ):
+                state, owner_id = self._bot_repository.classify_forum_recipient(
+                    recipient_id
+                )
+                if state == "deleted":
+                    logger.info("[forum-notification] skipped deleted reply recipient")
+                    return None
+                if state != "live":
+                    raise LookupError("notification recipient bot not found or ambiguous")
+                if not isinstance(owner_id, str) or not owner_id.strip():
+                    raise LookupError("notification recipient bot has no owner")
+                return owner_id.strip()
             if scoped is None:
                 if is_bare_default_bot_identity(recipient_id):
                     raise LookupError(

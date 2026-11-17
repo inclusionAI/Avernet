@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Callable
 
+import pytest
+
 from agentclaw.community.core.task.forum.notifications.forum_notification_publisher import (
     ForumNotificationPublisher,
     _decode_aggregate,
@@ -45,6 +47,43 @@ class FakeBotRepository:
     def get_by_id_and_owner(self, bot_id: str, owner_id: str):
         bot = self.id_to_bot.get(f"{bot_id}:{owner_id}")
         return bot or (None if bot_id == "default" else self.id_to_bot.get(bot_id))
+
+    def classify_forum_recipient(self, bot_id: str):
+        return self.id_to_bot.get(bot_id, ("missing", None))
+
+
+@pytest.mark.parametrize("state,owner,expected", [
+    ("deleted", None, 0),
+    ("live", "900003", 1),
+])
+def test_reply_recipient_snapshot_skips_only_deleted(state, owner, expected):
+    bots = FakeBotRepository()
+    bots.id_to_bot["bot-b"] = (state, owner)
+    notices = FakeWorkOrderRepository()
+    publisher = ForumNotificationPublisher(notices, bots)
+    publisher.notify(
+        event_type=WorkOrderEventType.BBS_REPLIED,
+        recipient_type="BOT", recipient_id="bot-b", actor_type="HUMAN",
+        actor_id="900001", actor_display_name=None, target_type="POST",
+        target_id="post-1", text="回复了你的回复", topic_id="topic-1",
+        post_id="post-1", skip_deleted_reply_recipient=True,
+    )
+    assert notices.calls == expected
+
+
+@pytest.mark.parametrize("state", ["missing", "ambiguous"])
+def test_reply_recipient_snapshot_keeps_unresolved_failure(state):
+    bots = FakeBotRepository()
+    bots.id_to_bot["bot-b"] = (state, None)
+    publisher = ForumNotificationPublisher(FakeWorkOrderRepository(), bots)
+    with pytest.raises(LookupError):
+        publisher.notify(
+            event_type=WorkOrderEventType.BBS_REPLIED,
+            recipient_type="BOT", recipient_id="bot-b", actor_type="HUMAN",
+            actor_id="900001", actor_display_name=None, target_type="POST",
+            target_id="post-1", text="回复了你的回复", topic_id="topic-1",
+            post_id="post-1", skip_deleted_reply_recipient=True,
+        )
 
 
 def _notify(
