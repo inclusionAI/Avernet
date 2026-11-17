@@ -112,8 +112,10 @@ and [`GroupOwnerDisplay.test.tsx`](test/components/CollaborationSquare/GroupOwne
 
 ## Collaborating Bot conversations
 
-In “对话 → 我协作的 Bot”, the origin filter supports both “我发起” and
-“他人发起”. Other-user conversations reuse the managed Bot friend-group flow:
+In “对话 → 我协作的 Bot”, “我发起” remains available; the visible “他人发起”
+filter button is temporarily disabled pending a bug fix. Managed Bot filters are
+unchanged, and an existing other-user selection can still switch back to “我发起”.
+The underlying other-user conversations reuse the managed Bot friend-group flow:
 friend users load under the Bot's composite actor ID, and session/message reads
 retain the owner context, normalized friend ID, pagination and runtime stage.
 Other-user browsing is read-only; it does not enable session writes, a composer
