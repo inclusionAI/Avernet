@@ -27,6 +27,7 @@ seam rather than changes of behavior:
 from __future__ import annotations
 
 import json
+import shlex
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from agentclaw.community.core.bot_management.services.engine_resolver import (
@@ -113,6 +114,7 @@ class ManagedDeployConfigComposer(DeployConfigComposer):
             ctx.mount_home_dir_storage,
             ctx.ext_info,
             ctx.in_place,
+            ctx.default_tag,
         )
 
         # 4、 Start watchdog
@@ -196,6 +198,7 @@ class ManagedDeployConfigComposer(DeployConfigComposer):
         mount_home_dir_storage: bool = False,
         ext_info: Optional[Dict[str, Any]] = None,
         in_place: bool = False,
+        default_tag: Optional[str] = None,
     ):
         """启动沙箱服务。"""
         # 保留 {token} 和 {client_id} 占位符，供后续替换
@@ -222,6 +225,11 @@ class ManagedDeployConfigComposer(DeployConfigComposer):
             if ext_info.get("biz_id"):
                 stage_str += f"-{ext_info.get('biz_id')}"
             start_service_cmd += f" --stage {stage_str}"
+
+        if default_tag:
+            # 评测环境的子维度：default / eval。不得改动 lifecycle stage 本身，
+            # 但必须显式传给启动链路，供 runtime 按区域登记和路由。
+            start_service_cmd += f" --default_tag {shlex.quote(str(default_tag))}"
 
         if version:
             start_service_cmd += f" --version V{version}"
