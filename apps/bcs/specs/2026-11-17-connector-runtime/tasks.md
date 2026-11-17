@@ -22,7 +22,7 @@ the code of each task; each group ends with its crate's tests green.
 
 ## Group 2 — Rules (C3 normalizer, C5 identities)
 
-- [ ] 2.1 `identity.rs` and `DistConnectorRules::{start_request_id, input_request_id, report, next_input}`;
+- [ ] 2.1 `identity.rs` (fixed-vector test against `bcs_dist_store::identity`) and `DistConnectorRules::{start_request_id, input_request_id, report, next_input}`;
   tests: identity equal across holder epochs and with/without remote event ids;
   n = confirmed + 1; digest ignores holder epoch, seq, event id and payload;
   seq from the cursor.
@@ -54,7 +54,8 @@ the code of each task; each group ends with its crate's tests green.
   `OwnedByMe` with a missing actor → `resume_owned`; backpressure.
 - [ ] 4.3 Actor send path: begin_send before the call; each `SendOutcome`.
 - [ ] 4.4 Recovery by capability; unresolved call (D2 stub, logged, still polled).
-- [ ] 4.5 Receiver + ingress: seq, admit/append, `Accepted` = `Duplicate`,
+- [ ] 4.5 Receiver + report: seq, admit/append, any non-conflict `Ok(_)` is
+  success (the duplicate variant is never named, also in fakes),
   conflict surfaced, retries with the same seq, blob offload,
   final before finish, crash-between then takeover.
 - [ ] 4.6 Continue-input: same call, confirm only on definite acceptance,
@@ -65,8 +66,12 @@ the code of each task; each group ends with its crate's tests green.
 
 ## Group 5 — A2A adapter (C2)
 
+- [ ] 5.0 Low-level clients keep the connect-phase signal (REST, JSON-RPC,
+  SSE open, gRPC) as a fixed marker; unit tests per binding; existing delivery
+  suites unchanged and green.
 - [ ] 5.1 `DistAgentResolver`, `A2aDistAgentClient::start` / `send_input`
-  with the classification table; fake-agent tests.
+  with the classification table; fake-agent tests incl. refused port →
+  `NotSent`, close-after-read → `OutcomeUnknown`.
 - [ ] 5.2 `query`, `subscribe`, `cancel`; event mapping;
   `conformance_dist_agent_client.rs`.
 

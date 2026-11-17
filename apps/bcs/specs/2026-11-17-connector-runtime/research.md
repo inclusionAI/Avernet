@@ -115,7 +115,7 @@ objects built from what it just read.
 | capability check | `capability::require` | unchanged |
 | digests | `identity::{digest_fields, digest_json, hex_of}` | unchanged |
 | JSON codec + version check | `codec::{encode_json, decode_json}` | unchanged |
-| reporting | `inbox::StoreInboxProducer` | unchanged; `Accepted` and `Duplicate` both success |
+| reporting | `inbox::StoreInboxProducer` | unchanged; every non-conflict success is treated alike |
 | in-memory store | `bcs_test_support::store_model::Model` | S2 (a `memory/` port model) does not exist in `dev`; tests use `Model` behind the providers and hand-written port fakes for the engine |
 | failure injection | recording wrapper in `bcs-dist-store/tests/common/mod.rs` | copied pattern (test code), not moved |
 | port harnesses | `bcs_test_support::contract::distributed::{dispatch, services}` | queue, feed, held, agent client, runtime control |
@@ -138,9 +138,9 @@ existing module is edited.
   the crate-private `guarded_client_with_headers` (URL guard, pinned DNS, no
   redirects). The adapter therefore lives inside this crate.
 - A connect failure and a mid-request failure both become
-  `A2AError::internal(...)`; nothing proves "no byte was written". Only
-  failures before the client call (resolver, guard, credential, client
-  construction) are provably not sent.
+  `A2AError::internal(...)` through `map_err(|_| …)`, which drops reqwest's
+  `is_connect()`. The plan keeps that signal as a fixed marker so a connection
+  that was never established maps to `NotSent` (plan §6).
 - `delivery_error::initial_rejection` already lists the definite rejections
   (HTTP 400/401/403/404/405/406/415/422, gRPC 3/5/7/12/16); the adapter reuses
   that table.
