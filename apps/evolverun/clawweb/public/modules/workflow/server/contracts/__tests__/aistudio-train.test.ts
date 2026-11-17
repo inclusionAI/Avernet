@@ -1,16 +1,22 @@
 import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
-import { aistudioTrainDdl } from '@avernet/clawweb-shared/server/schema-aistudio-train';
+import { createAIStudioStateFixture } from '../../repositories/__tests__/aistudio-train-state.fixture.js';
+import { AIStudioTrainWatchRepository } from '../../repositories/aistudio-train-watch-repository.js';
+import { SqliteDatabase } from '@avernet/clawweb-shared/server/db/sqlite-database';
 import { WATCH_FIELDS, assertWatchRecord, assertWatchCas, toWatchDto } from '../aistudio-train.js';
 
 import { watchFixture } from './aistudio-train.fixture.js';
 describe('AIStudio wire and safe user projection', () => {
-  it('creates every snake-case business column from the wire contract plus mandatory gmt metadata', () => {
+  it('persists every wire field in existing v71 JSON with mandatory config metadata and matching version', async () => {
     const raw = new Database(':memory:');
     try {
-      for (const ddl of aistudioTrainDdl('sqlite')) raw.exec(ddl);
-      const columns = raw.prepare('PRAGMA table_info(aistudio_train_watches)').all() as {name:string}[];
-      expect(columns.map(c => c.name)).toEqual(expect.arrayContaining([...WATCH_FIELDS.map(k => k.replace(/[A-Z]/g,c => `_${c.toLowerCase()}`)),'id','gmt_create','gmt_modified']));
+      createAIStudioStateFixture(raw);
+      await new AIStudioTrainWatchRepository(new SqliteDatabase(raw)).create(watchFixture());
+      const row=raw.prepare('SELECT * FROM cm_app_config').get() as any;
+      expect(Object.keys(JSON.parse(row.config_yaml))).toEqual(expect.arrayContaining([...WATCH_FIELDS]));
+      expect(JSON.parse(row.config_yaml)).toEqual(watchFixture());
+      expect(row).toMatchObject({version:1,enabled:0,gmt_create:expect.any(Number),gmt_modified:expect.any(Number)});
+
     } finally { raw.close(); }
   });
   it('accepts the exact worker wire contract and fences version increments', () => {

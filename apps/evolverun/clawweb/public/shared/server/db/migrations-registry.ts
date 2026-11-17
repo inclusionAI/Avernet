@@ -5,6 +5,7 @@ import { aistudioTrainMigrations } from '../schema-aistudio-train.js';
 
 /** Unified registrations, freshly collected per run to preserve upstream registry behavior. */
 export function collectMigrations() {
+  // v155/v156 are retired no-DDL tombstones, retained for ledger compatibility.
   const registry = [...migrations, ...workflowSnapshotMigrations, ...ordinaryRunRequestMigrations, ...aistudioTrainMigrations]
     .sort((left, right) => left.version - right.version);
   for (const { version } of aistudioTrainMigrations) {

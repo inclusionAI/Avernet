@@ -3,14 +3,14 @@ import express from 'express';
 import { once } from 'node:events';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SqliteDatabase } from '@avernet/clawweb-shared/server/db/sqlite-database';
-import { aistudioTrainDdl } from '@avernet/clawweb-shared/server/schema-aistudio-train';
+import { createAIStudioStateFixture, patchWatchFixture } from '../../repositories/__tests__/aistudio-train-state.fixture.js';
 import { AIStudioTrainWatchRepository } from '../../repositories/aistudio-train-watch-repository.js';
 import { createAIStudioTrainRouter, type AIStudioTrainPublicAuth } from '../aistudio-train.js';
 import { watchFixture } from '../../contracts/__tests__/aistudio-train.fixture.js';
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const fn of cleanups.splice(0)) await fn(); });
 async function fixture(authConfigured = true, originConfigured = true) {
-  const raw = new Database(':memory:'); for(const ddl of aistudioTrainDdl('sqlite')) raw.exec(ddl);
+  const raw = new Database(':memory:'); createAIStudioStateFixture(raw);
   raw.exec(`CREATE TABLE flow_runs(flow_id TEXT,workflow_id TEXT,origin_bot_id TEXT,status TEXT);
     INSERT INTO flow_runs VALUES('flow-1','wf-1','bot:owner','waiting');
     CREATE TABLE node_executions(id INTEGER PRIMARY KEY,flow_id TEXT,node_id TEXT,attempt INTEGER,executor_type TEXT,status TEXT);
@@ -68,7 +68,7 @@ describe('verified public AIStudio watch and mailbox', () => {
     f.raw.exec('UPDATE flow_runs SET origin_bot_id=NULL'); expect((await f.get()).status).toBe(503);
     f.raw.exec("UPDATE flow_runs SET origin_bot_id='bot:owner'; UPDATE node_executions SET executor_type='script'"); expect((await f.get()).status).toBe(409);
     f.raw.exec("UPDATE node_executions SET executor_type='aistudio-train',attempt=2"); expect((await f.post()).status).toBe(409);
-    f.raw.exec('DELETE FROM aistudio_train_watches'); expect((await f.get('?attempt=2')).status).toBe(404);
+    f.raw.exec("DELETE FROM cm_app_config WHERE config_key LIKE 'aisw:%'"); expect((await f.get('?attempt=2')).status).toBe(404);
   });
   it.each([0,-1,1.5,'1',null])('requires positive integer body attempt %j', async attempt => {
     const f=await fixture(); expect((await f.post({attempt})).status).toBe(400);
@@ -86,25 +86,25 @@ describe('verified public AIStudio watch and mailbox', () => {
     expect(await f.repo.find('flow-1','train',1)).toEqual({...before,manualRequestedAt:200,manualRequestedBy:'owner',lastManualRequestedAt:200,version:2});
   });
   it('enforces durable 60 second cooldown after pending was consumed, with Retry-After', async () => {
-    const f=await fixture(); f.raw.exec('UPDATE aistudio_train_watches SET last_manual_requested_at=199');
+    const f=await fixture(); patchWatchFixture(f.raw,{lastManualRequestedAt:199});
     const res=await f.post(); expect(res.status).toBe(429); expect(res.headers.get('retry-after')).toBe('59');
     expect((await res.json()).manualPollRetryAt).toBe(new Date(259000).toISOString());
   });
   it('does not permit terminal/resolving/canceled/time-expired watches or terminal node/run operations', async () => {
     const f=await fixture();
-    for (const update of ["phase='resolved'","phase='resolving'",'canceled=1','timeout_at=199']) {
-      f.raw.exec("UPDATE aistudio_train_watches SET phase='waiting',canceled=0,timeout_at=3700,"+update);
+    for (const update of [{phase:'resolved'},{phase:'resolving'},{canceled:true},{timeoutAt:199}]) {
+      patchWatchFixture(f.raw,{phase:'waiting',canceled:false,timeoutAt:3700,...update});
       expect((await f.post()).status).toBe(409);
     }
-    f.raw.exec("UPDATE aistudio_train_watches SET phase='resolved'");
+    patchWatchFixture(f.raw,{phase:'resolved'});
     expect((await f.get()).status).toBe(200); expect((await (await f.get()).json()).watch.nextPollAt).toBeNull();
-    f.raw.exec("UPDATE aistudio_train_watches SET phase='waiting',canceled=0,timeout_at=3700; UPDATE node_executions SET status='success'");
+    patchWatchFixture(f.raw,{phase:'waiting',canceled:false,timeoutAt:3700}); f.raw.exec("UPDATE node_executions SET status='success'");
     expect((await f.post()).status).toBe(409);
   });
   it('propagates writes/readiness failure as 503, not 202, and redacts SQL details', async () => {
     const f=await fixture(); vi.spyOn(f.repo,'requestManualPoll').mockRejectedValue(new Error('secret SQL token'));
     const res=await f.post(); expect(res.status).toBe(503); expect(await res.text()).not.toContain('secret');
-    f.raw.exec('DROP TABLE aistudio_train_watches'); expect((await f.get()).status).toBe(503);
+    f.raw.exec('DROP TABLE cm_app_config'); expect((await f.get()).status).toBe(503);
   });
   it('fences a concurrent newer node attempt at the atomic mailbox update', async () => {
     const f=await fixture(); const before=(await f.repo.find('flow-1','train',1))!;

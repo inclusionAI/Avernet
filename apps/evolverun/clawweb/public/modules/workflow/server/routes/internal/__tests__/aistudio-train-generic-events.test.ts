@@ -4,8 +4,7 @@ import { once } from 'node:events';
 import { generateKeyPairSync, sign } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SqliteDatabase } from '@avernet/clawweb-shared/server/db/sqlite-database';
-import { aistudioTrainDdl } from '@avernet/clawweb-shared/server/schema-aistudio-train';
-import { aistudioTrainManualAuditDdl } from '@avernet/clawweb-shared/server/schema-aistudio-train-manual-audit';
+import { createAIStudioStateFixture } from '../../../repositories/__tests__/aistudio-train-state.fixture.js';
 import { captureAIStudioRawBody, createAIStudioServiceAuthenticator } from '@avernet/clawweb-shared/server/middleware/aistudio-train-signature';
 import { FlowEventRepository, type FlowEventInsert } from '../../../repositories/event-repository.js';
 import { AIStudioTrainWatchRepository } from '../../../repositories/aistudio-train-watch-repository.js';
@@ -19,7 +18,7 @@ const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0)) await cleanup(); });
 async function fixture() {
   const raw = new Database(':memory:');
-  for (const ddl of [...aistudioTrainDdl('sqlite'), ...aistudioTrainManualAuditDdl('sqlite')]) raw.exec(ddl);
+  createAIStudioStateFixture(raw);
   // Deliberately NO event_id uniqueness: this is the real legacy table contract.
   raw.exec(`CREATE TABLE flow_events(id INTEGER PRIMARY KEY AUTOINCREMENT,event_id TEXT,flow_id TEXT,workflow_id TEXT,
     node_id TEXT,event_type TEXT,attempt INTEGER,time BIGINT,data_json TEXT,error_text TEXT,gmt_create INTEGER,gmt_modified INTEGER);
@@ -58,7 +57,7 @@ describe('generic events cannot bypass the dedicated manual audit namespace', ()
       expect((await response.json()).success).toBe(index%2===0);
     }
     expect(f.count(event.id)).toEqual({n:1});
-    expect(f.raw.prepare('SELECT COUNT(*) AS n FROM aistudio_train_manual_audits').get()).toEqual({n:1});
+    expect(f.raw.prepare("SELECT COUNT(*) AS n FROM cm_app_config WHERE config_key LIKE 'aisa:%'").get()).toEqual({n:1});
   });
   it('rejects delayed generic duplicates after dedicated commit and leaves dedicated retries idempotent', async () => {
     const f = await fixture(); const event = manualAuditEvent();

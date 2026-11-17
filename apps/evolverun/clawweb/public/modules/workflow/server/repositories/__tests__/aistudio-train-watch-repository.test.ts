@@ -1,15 +1,18 @@
 import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mysqlDialect } from '@avernet/clawweb-shared/server/db/dialect';
+import { dialectFor, mysqlDialect } from '@avernet/clawweb-shared/server/db/dialect';
 import { SqliteDatabase } from '@avernet/clawweb-shared/server/db/sqlite-database';
-import { aistudioTrainDdl } from '@avernet/clawweb-shared/server/schema-aistudio-train';
+import { createAIStudioStateFixture, patchWatchFixture } from './aistudio-train-state.fixture.js';
 import { AIStudioTrainWatchRepository } from '../aistudio-train-watch-repository.js';
 import { watchFixture } from '../../contracts/__tests__/aistudio-train.fixture.js';
 
+function stateRow(w:ReturnType<typeof watchFixture>) {
+  return {config_key:'aisw:oxltucqye7ieocpvlq3grsnfqlc5dlsle2dtkzaprqmrftqgywqa',config_yaml:JSON.stringify(w),version:w.version,enabled:0,description:'aistudio-train-watch:v1:active:bot:owner'};
+}
 const connections: Database.Database[] = [];
 export function fixture() {
   const raw = new Database(':memory:'); connections.push(raw);
-  for (const ddl of aistudioTrainDdl('sqlite')) raw.exec(ddl);
+  createAIStudioStateFixture(raw);
   raw.exec("CREATE TABLE flow_runs(flow_id TEXT,workflow_id TEXT,origin_bot_id TEXT,status TEXT); INSERT INTO flow_runs VALUES('flow-1','wf-1','bot:owner','waiting')");
   const db = new SqliteDatabase(raw); const repo = new AIStudioTrainWatchRepository(db);
   return { raw, db, repo };
@@ -29,7 +32,10 @@ describe('durable watch SQL contract', () => {
     await expect(repo.create({ ...w, watchId:'other', recordId:'other' })).rejects.toThrow();
     await expect(repo.create({ ...w, ownerBotId:'bot:other' })).rejects.toThrow();
     await expect(repo.create({ ...w, nodeId:'other' })).rejects.toThrow();
-    vi.spyOn(db, 'exec').mockRejectedValue(new Error('disk write failed'));
+    const transaction=db.transaction.bind(db);
+    vi.spyOn(db,'transaction').mockImplementation(fn => transaction(tx => {
+      vi.spyOn(tx,'exec').mockRejectedValue(new Error('disk write failed')); return fn(tx);
+    }));
     await expect(repo.create(w)).rejects.toThrow('disk write failed');
   });
   it('only one CAS wins; immutable identity and stale lease-holder writes are fenced', async () => {
@@ -61,23 +67,30 @@ describe('durable watch SQL contract', () => {
     expect(await repo.compareAndSwap(1,{...w,version:2,lastStatus:'running'},'worker-a')).toBe(false);
     expect(await repo.compareAndSwap(1,{...w,version:2,lastStatus:'running'},'worker-A')).toBe(true);
     const current=(await repo.find(w.flowId,w.nodeId,1))!;
-    const exec=db.exec.bind(db);
-    vi.spyOn(db,'exec').mockImplementation(async (sql,params) => {
-      raw.exec('UPDATE aistudio_train_watches SET lease_expires_at=unixepoch()-1');
-      return exec(sql,params);
-    });
+    const transaction=db.transaction.bind(db);
+    vi.spyOn(db,'transaction').mockImplementation(fn => transaction(tx => {
+      const exec=tx.exec.bind(tx);
+      vi.spyOn(tx,'exec').mockImplementation(async (sql,params) => {
+        patchWatchFixture(raw,{leaseExpiresAt:Math.floor(Date.now()/1000)-1}); return exec(sql,params);
+      });
+      return fn(tx);
+    }));
     expect(await repo.compareAndSwap(2,{...current,version:3,phase:'resolving'},'worker-A')).toBe(false);
     expect((await repo.find(w.flowId,w.nodeId,1))!.version).toBe(2);
     // Normal release/claim CAS remains backward compatible and does not require a live lease.
     expect(await repo.compareAndSwap(2,{...current,version:3,leaseOwner:null,leaseExpiresAt:null})).toBe(true);
   });
-  it('renders MySQL lease fencing with database time and binary expected owner; rejects malformed guards', async () => {
+  it.each(['mysql','zdas'] as const)('renders %s lease fencing with database time and binary expected owner; rejects malformed guards', async dbType => {
     const exec=vi.fn(async (_sql:string,_params?:unknown[]) => ({affectedRows:1}));
-    const repo=new AIStudioTrainWatchRepository({dbType:'mysql',dialect:mysqlDialect,exec} as any);
+    const old=watchFixture({leaseOwner:'worker',leaseExpiresAt:Math.floor(Date.now()/1000)+3600});
+    const fake:any={dbType,dialect:dialectFor(dbType),exec,query:vi.fn(async (sql:string) => sql.includes("information_schema.STATISTICS")
+        ? [{index_name:"config_key",column_name:"config_key",prefix_length:null}] : [stateRow(old)]),transaction:async (fn:any) => fn(fake)};
+    const repo=new AIStudioTrainWatchRepository(fake);
     const w=watchFixture({version:2});
     expect(await repo.compareAndSwap(1,w,'worker')).toBe(true);
-    expect(exec.mock.calls[0][0]).toContain('AND BINARY lease_owner = BINARY ? AND lease_expires_at > UNIX_TIMESTAMP()');
-    expect(exec.mock.calls[0][1]!.at(-1)).toBe('worker');
+    expect(exec.mock.calls[0][0]).toContain('> UNIX_TIMESTAMP()');
+    expect(fake.query.mock.calls.some(([sql]:[string]) => sql.includes('FOR UPDATE'))).toBe(true);
+    expect(exec.mock.calls[0][1]).toContain(old.leaseExpiresAt);
     for(const owner of ['', '   ', 'a'.repeat(256), 1, null]) await expect(repo.compareAndSwap(1,w,owner as any)).rejects.toThrow();
   });
   it('paginates due watches by strict stable keyset without losing manual-priority or equal-time rows', async () => {
@@ -106,22 +119,111 @@ describe('durable watch SQL contract', () => {
     const query=vi.fn(async (_sql:string,_params?:unknown[]) => []);
     const repo=new AIStudioTrainWatchRepository({dbType:'mysql',dialect:mysqlDialect,query} as any);
     expect(await repo.findDue('bot:owner',700,1)).toEqual([]);
-    expect(query.mock.calls[0][0]).toContain('BINARY r.flow_id = BINARY aistudio_train_watches.flow_id');
+    expect(query.mock.calls[0][0]).toContain("LIKE 'aisw:%'");
+    expect(query.mock.calls[0][0]).not.toMatch(/LIMIT/i);
   });
   it('uses case-sensitive atomic target ownership checks even when legacy MySQL run tables use CI collations', async () => {
     const exec=vi.fn(async (_sql:string,_params?:unknown[]) => ({affectedRows:1}));
-    const repo=new AIStudioTrainWatchRepository({dbType:'mysql',dialect:mysqlDialect,exec} as any);
+    const old=watchFixture(); const fake:any={dbType:'mysql',dialect:mysqlDialect,exec,
+      query:vi.fn(async (sql:string) => sql.includes("information_schema.STATISTICS")
+        ? [{index_name:"config_key",column_name:"config_key",prefix_length:null}] : [stateRow(old)]),transaction:async (fn:any) => fn(fake)};
+    const repo=new AIStudioTrainWatchRepository(fake);
     const w=watchFixture({manualRequestedAt:200,manualRequestedBy:'owner',lastManualRequestedAt:200,version:2});
     expect(await repo.requestManualPoll(1,w)).toBe(true);
-    expect(exec.mock.calls[0][0]).toContain('BINARY r.origin_bot_id = BINARY aistudio_train_watches.owner_bot_id');
+    expect(exec.mock.calls[0][0]).toContain('BINARY r.origin_bot_id = BINARY ?');
   });
   it('refuses a partial managed schema that is missing required audit columns', async () => {
-    const {repo,raw}=fixture(); raw.exec('ALTER TABLE aistudio_train_watches DROP COLUMN gmt_modified');
+    const {repo,raw}=fixture(); raw.exec('ALTER TABLE cm_app_config DROP COLUMN gmt_modified');
     expect(await repo.isReady()).toBe(false);
   });
   it('reports readiness from actual columns and propagates failures', async () => {
     const { repo, raw } = fixture(); expect(await repo.isReady()).toBe(true);
-    raw.exec('DROP TABLE aistudio_train_watches'); expect(await repo.isReady()).toBe(false);
+    raw.exec('DROP TABLE cm_app_config'); expect(await repo.isReady()).toBe(false);
     await expect(repo.create(watchFixture())).rejects.toThrow(/no such table/);
   });
+  it('stores full-hash 57-character keys in disabled v71 rows and survives repository restart', async () => {
+    const {repo,raw,db}=fixture(); const w=await repo.create(watchFixture());
+    const row=raw.prepare('SELECT * FROM cm_app_config').get() as any;
+    expect(row.config_key).toBe('aisw:oxltucqye7ieocpvlq3grsnfqlc5dlsle2dtkzaprqmrftqgywqa');
+    expect(row.config_key).toHaveLength(57); expect(row.enabled).toBe(0);
+    expect(row.description).toBe('aistudio-train-watch:v1:active:bot:owner'); expect(JSON.parse(row.config_yaml)).toEqual(w);
+    expect(await new AIStudioTrainWatchRepository(db).find(w.flowId,w.nodeId,w.attempt)).toEqual(w);
+    expect(raw.prepare("SELECT name FROM sqlite_master WHERE name LIKE 'aistudio_train_%'").all()).toEqual([]);
+  });
+  it('fails closed on malformed JSON, wrong discriminator, key identity or row/payload version mismatch', async () => {
+    for(const patch of [{config_yaml:'{'},{description:'other-owner'}, {enabled:1}, {version:2},
+      {config_yaml:JSON.stringify(watchFixture({flowId:'other'}))}]) {
+      const {repo,raw}=fixture(); await repo.create(watchFixture());
+      for(const [key,value] of Object.entries(patch)) raw.prepare(`UPDATE cm_app_config SET ${key}=?`).run(value);
+      await expect(repo.find('flow-1','train',1)).rejects.toThrow();
+      await expect(repo.findDue('bot:owner',700,1)).rejects.toThrow();
+      await expect(repo.compareAndSwap(1,watchFixture({version:2}))).rejects.toThrow();
+    }
+  });
+  it('filters other owners before page limit, even with more than 1000 earlier mailbox rows', async () => {
+    const {repo,raw}=fixture(); const live=watchFixture(); await repo.create(live);
+    // Insert real valid other-owner records without O(n²) repository collision scans.
+    const {createHash}=await import('node:crypto');
+    const alphabet='abcdefghijklmnopqrstuvwxyz234567';
+    for(let i=0;i<1001;i++) {
+      const w=watchFixture({watchId:`other-${i}`,nodeId:`other-${i}`,ownerBotId:'bot:other',manualRequestedAt:1});
+      let bits=0,value=0,hash='';
+      for(const byte of createHash('sha256').update(JSON.stringify([w.flowId,w.nodeId,w.attempt])).digest()) {
+        value=(value<<8)|byte; bits+=8; while(bits>=5) {bits-=5;hash+=alphabet[(value>>>bits)&31];}
+      }
+      if(bits) hash+=alphabet[(value<<(5-bits))&31];
+      raw.prepare('INSERT INTO cm_app_config(config_key,config_yaml,version,enabled,description) VALUES(?,?,1,0,?)')
+        .run('aisw:'+hash,JSON.stringify(w),'aistudio-train-watch:v1:active:bot:other');
+    }
+    expect(await repo.findDue('bot:owner',700,1)).toEqual([live]);
+  });
+  it('manual requests preserve all non-mailbox fields and fence cooldown, exact owner and latest attempt/type/status', async () => {
+    const {repo,raw}=fixture(); raw.exec(`CREATE TABLE node_executions(id INTEGER PRIMARY KEY,flow_id TEXT,node_id TEXT,attempt INTEGER,executor_type TEXT,status TEXT);
+      INSERT INTO node_executions VALUES(1,'flow-1','train',1,'aistudio-train','waiting')`);
+    const old=await repo.create(watchFixture());
+    const next={...old,version:2,manualRequestedAt:200,lastManualRequestedAt:200,manualRequestedBy:'owner',lastStatus:'forged'};
+    raw.exec("UPDATE flow_runs SET origin_bot_id='bot:Owner'"); expect(await repo.requestManualPoll(1,next)).toBe(false);
+    raw.exec("UPDATE flow_runs SET origin_bot_id='bot:owner'; INSERT INTO node_executions VALUES(2,'flow-1','train',1,'script','waiting')");
+    expect(await repo.requestManualPoll(1,next)).toBe(false);
+    raw.exec('DELETE FROM node_executions WHERE id=2'); expect(await repo.requestManualPoll(1,next)).toBe(true);
+    const stored=(await repo.find('flow-1','train',1))!;
+    expect(stored).toEqual({...old,version:2,manualRequestedAt:200,lastManualRequestedAt:200,manualRequestedBy:'owner'});
+    expect(await repo.compareAndSwap(2,{...stored,version:3,manualRequestedAt:null,manualRequestedBy:null})).toBe(true);
+    expect(await repo.requestManualPoll(3,{...next,version:4,manualRequestedAt:259,lastManualRequestedAt:259})).toBe(false);
+    expect(await repo.requestManualPoll(3,{...next,version:4,manualRequestedAt:260,lastManualRequestedAt:260})).toBe(true);
+  });
+
+  it('hydrates only this owner active JSON during due scans and atomically retires terminal metadata', async () => {
+    const {repo,raw,db}=fixture(); const live=await repo.create(watchFixture());
+    const terminal=await repo.create(watchFixture({watchId:'terminal',nodeId:'terminal',phase:'resolved'}));
+    await repo.create(watchFixture({watchId:'foreign',nodeId:'foreign',ownerBotId:'bot:other'}));
+    const terminalKey=raw.prepare("SELECT config_key FROM cm_app_config WHERE description LIKE '%:inactive:%'").get() as any;
+    expect(terminalKey).toBeTruthy();
+    // Cold rows are not hydrated/parsed on the hot polling path. Direct reads still fail closed.
+    raw.prepare('UPDATE cm_app_config SET config_yaml=? WHERE config_key=?').run('{',terminalKey.config_key);
+    const query=vi.spyOn(db,'query'); expect(await repo.findDue('bot:owner',700,1)).toEqual([live]);
+    const payloadQueries=query.mock.calls.filter(([sql]) => sql.includes('config_yaml'));
+    expect(payloadQueries).toHaveLength(1); expect(payloadQueries[0][0]).toContain('description');
+    expect(payloadQueries[0][1]).toEqual(['aistudio-train-watch:v1:active:bot:owner']);
+    await expect(repo.find(terminal.flowId,terminal.nodeId,terminal.attempt)).rejects.toThrow();
+    raw.prepare('DELETE FROM cm_app_config WHERE config_key=?').run(terminalKey.config_key);
+    expect(await repo.compareAndSwap(1,{...live,phase:'resolved',version:2})).toBe(true);
+    expect(await repo.findDue('bot:owner',700,1)).toEqual([]);
+    const retired=raw.prepare("SELECT version,description FROM cm_app_config WHERE description LIKE '%:inactive:%'").get();
+    expect(retired).toEqual({version:2,description:'aistudio-train-watch:v1:inactive:bot:owner'});
+  });
+
+  it('uses the old lease expiry at SQL execution time, never a renewed next-payload lease or JS clock', async () => {
+    const {repo,raw,db}=fixture(); let databaseNow=1000; raw.function('unixepoch',() => databaseNow);
+    const w=await repo.create(watchFixture({leaseOwner:'worker',leaseExpiresAt:1001}));
+    const transaction=db.transaction.bind(db);
+    vi.spyOn(db,'transaction').mockImplementation(fn => transaction(tx => {
+      const exec=tx.exec.bind(tx);
+      vi.spyOn(tx,'exec').mockImplementation((sql,params) => {databaseNow=1001;return exec(sql,params);});
+      return fn(tx);
+    }));
+    expect(await repo.compareAndSwap(1,{...w,version:2,leaseExpiresAt:9999},'worker')).toBe(false);
+    expect(await repo.find(w.flowId,w.nodeId,1)).toEqual(w);
+  });
+
 });

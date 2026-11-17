@@ -4,8 +4,7 @@ import { once } from 'node:events';
 import { generateKeyPairSync,sign } from 'node:crypto';
 import { afterEach,describe,expect,it } from 'vitest';
 import { SqliteDatabase } from '@avernet/clawweb-shared/server/db/sqlite-database';
-import { aistudioTrainDdl } from '@avernet/clawweb-shared/server/schema-aistudio-train';
-import { aistudioTrainManualAuditDdl } from '@avernet/clawweb-shared/server/schema-aistudio-train-manual-audit';
+import { createAIStudioStateFixture } from '../../../repositories/__tests__/aistudio-train-state.fixture.js';
 import { captureAIStudioRawBody,createAIStudioServiceAuthenticator } from '@avernet/clawweb-shared/server/middleware/aistudio-train-signature';
 import { AIStudioTrainWatchRepository } from '../../../repositories/aistudio-train-watch-repository.js';
 import { AIStudioTrainManualAuditRepository } from '../../../repositories/aistudio-train-manual-audit-repository.js';
@@ -20,7 +19,7 @@ function wireEvent() {
     attempt:e.attempt,time:e.time,data_json:JSON.stringify(e.data),error_text:null};
 }
 async function fixture(configured=true) {
-  const raw=new Database(':memory:'); for(const ddl of [...aistudioTrainDdl('sqlite'),...aistudioTrainManualAuditDdl('sqlite')]) raw.exec(ddl);
+  const raw=new Database(':memory:'); createAIStudioStateFixture(raw);
   raw.exec(`CREATE TABLE flow_runs(flow_id TEXT,workflow_id TEXT,origin_bot_id TEXT,status TEXT);
     INSERT INTO flow_runs VALUES('flow-1','wf-1','bot:owner','waiting');
     CREATE TABLE flow_events(id INTEGER PRIMARY KEY AUTOINCREMENT,event_id TEXT,flow_id TEXT,workflow_id TEXT,node_id TEXT,event_type TEXT,
@@ -72,9 +71,9 @@ describe('signed atomic manual audit endpoint', () => {
     const f=await fixture();
     f.raw.exec("CREATE TRIGGER fail_event BEFORE INSERT ON flow_events BEGIN SELECT RAISE(FAIL,'private failure');END");
     const failed=await f.request();expect(failed.status).toBe(503);expect(await failed.text()).not.toContain('private failure');
-    expect(f.raw.prepare('SELECT COUNT(*) AS n FROM aistudio_train_manual_audits').get()).toEqual({n:0});
+    expect(f.raw.prepare("SELECT COUNT(*) AS n FROM cm_app_config WHERE config_key LIKE 'aisa:%'").get()).toEqual({n:0});
     f.raw.exec('DROP TRIGGER fail_event');expect((await f.request()).status).toBe(201);
     f.raw.exec('DELETE FROM flow_events');expect((await f.request()).status).toBe(503);
-    f.raw.exec('DROP TABLE aistudio_train_manual_audits');expect((await f.request()).status).toBe(503);
+    f.raw.exec('DROP TABLE cm_app_config');expect((await f.request()).status).toBe(503);
   });
 });

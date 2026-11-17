@@ -4,7 +4,7 @@ import { once } from 'node:events';
 import { generateKeyPairSync, sign } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SqliteDatabase } from '@avernet/clawweb-shared/server/db/sqlite-database';
-import { aistudioTrainDdl } from '@avernet/clawweb-shared/server/schema-aistudio-train';
+import { createAIStudioStateFixture, patchWatchFixture } from '../../../repositories/__tests__/aistudio-train-state.fixture.js';
 import { captureAIStudioRawBody, createAIStudioServiceAuthenticator } from '@avernet/clawweb-shared/server/middleware/aistudio-train-signature';
 import { AIStudioTrainWatchRepository } from '../../../repositories/aistudio-train-watch-repository.js';
 import { createInternalAIStudioTrainWatchesRouter } from '../aistudio-train-watches.js';
@@ -14,7 +14,7 @@ const publicKeyB64 = key.publicKey.export({format:'der',type:'spki'}).toString('
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const fn of cleanup.splice(0)) await fn(); });
 async function fixture(auth = true) {
-  const raw = new Database(':memory:'); for(const ddl of aistudioTrainDdl('sqlite')) raw.exec(ddl);
+  const raw = new Database(':memory:'); createAIStudioStateFixture(raw);
   raw.exec(`CREATE TABLE flow_runs(flow_id TEXT,workflow_id TEXT,origin_bot_id TEXT,status TEXT);
     INSERT INTO flow_runs VALUES('flow-1','wf-1','bot:owner','running')`);
   const repo = new AIStudioTrainWatchRepository(new SqliteDatabase(raw));
@@ -63,7 +63,7 @@ describe('internal watch service API conformance', () => {
     const f=await fixture(); const w=watchFixture({leaseOwner:'worker',leaseExpiresAt:Math.floor(Date.now()/1000)+3600}); await f.repo.create(w);
     expect(await (await f.request('/cas',{expectedVersion:1,watch:{...w,version:2},leaseOwner:'other'})).json()).toEqual({success:true,data:{updated:false}});
     expect(await (await f.request('/cas',{expectedVersion:1,watch:{...w,version:2},leaseOwner:'worker'})).json()).toEqual({success:true,data:{updated:true}});
-    f.raw.exec('UPDATE aistudio_train_watches SET lease_expires_at=unixepoch()');
+    patchWatchFixture(f.raw,{leaseExpiresAt:Math.floor(Date.now()/1000)});
     expect(await (await f.request('/cas',{expectedVersion:2,watch:{...w,version:3,phase:'resolved'},leaseOwner:'worker'})).json()).toEqual({success:true,data:{updated:false}});
     for(const extra of [{leaseOwner:''},{leaseOwner:'  '},{leaseOwner:null},{leaseOwner:1},{leaseOwner:'a'.repeat(256)},{leaseOwner:'worker',now:0}]) {
       expect((await f.request('/cas',{expectedVersion:2,watch:{...w,version:3},...extra})).status).toBe(400);
@@ -122,6 +122,6 @@ describe('internal watch service API conformance', () => {
     expect((await f.request('/cas',{expectedVersion:1,watch:watchFixture({version:3})})).status).toBe(400);
     vi.spyOn(f.repo,'create').mockRejectedValue(new Error('private SQL secret'));
     const failed=await f.request('/create',{watch:watchFixture()}); expect(failed.status).toBe(503); expect(await failed.text()).not.toContain('private');
-    f.raw.exec('DROP TABLE aistudio_train_watches'); expect((await f.request('/find?flowId=flow-1&nodeId=train')).status).toBe(503);
+    f.raw.exec('DROP TABLE cm_app_config'); expect((await f.request('/find?flowId=flow-1&nodeId=train')).status).toBe(503);
   });
 });
