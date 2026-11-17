@@ -1,0 +1,593 @@
+<title>BCN hitl/v1 扩展</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* Layout: sticky section index on the left, one reading column on the right; stacks to one column on phones. */
+:root{
+  --bg:#f7f8fb; --surface:#ffffff; --sunk:#eef1f6; --line:#d9dee8; --fg:#1b2333; --muted:#5b667a;
+  --accent:#2563eb; --accent-soft:#e3ecfd; --ok:#17794a; --ok-soft:#dff3e8; --warn:#9a5b00; --warn-soft:#fbefd5; --bad:#b3261e; --bad-soft:#fbe4e2;
+  --sans:"PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK SC",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"SF Mono","JetBrains Mono",Menlo,Consolas,"Liberation Mono",monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#11151d; --surface:#181d28; --sunk:#202736; --line:#2f3849; --fg:#e4e8f0; --muted:#98a3b8;
+  --accent:#7aa5ff; --accent-soft:#1d2c4d; --ok:#6fd19c; --ok-soft:#173326; --warn:#e9b860; --warn-soft:#3a2d12; --bad:#ff8f86; --bad-soft:#3d1c1a; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#11151d; --surface:#181d28; --sunk:#202736; --line:#2f3849; --fg:#e4e8f0; --muted:#98a3b8;
+  --accent:#7aa5ff; --accent-soft:#1d2c4d; --ok:#6fd19c; --ok-soft:#173326; --warn:#e9b860; --warn-soft:#3a2d12; --bad:#ff8f86; --bad-soft:#3d1c1a; color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.75 var(--sans)}
+.page{display:grid;grid-template-columns:250px minmax(0,1fr);gap:40px;max-width:1240px;margin:0 auto;padding-block:32px 80px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+nav.toc{position:sticky;top:calc(env(safe-area-inset-top,0px) + 16px);align-self:start;max-height:calc(100vh - 32px);overflow:auto;font-size:13px;line-height:1.5}
+nav.toc b{display:block;color:var(--muted);font-weight:600;letter-spacing:.08em;margin-bottom:8px}
+nav.toc a{display:block;padding:3px 0 3px 10px;color:var(--muted);text-decoration:none;border-left:2px solid var(--line)}
+nav.toc a:hover,nav.toc a:focus-visible{color:var(--accent);border-left-color:var(--accent);outline:none}
+nav.toc a.sub{padding-left:22px;font-size:12px}
+main{min-width:0;max-width:900px}
+header.doc h1{font-size:30px;line-height:1.3;margin:0 0 8px;text-wrap:balance}
+header.doc p.lead{color:var(--muted);margin:0 0 16px;max-width:68ch}
+.meta{display:flex;flex-wrap:wrap;gap:8px 20px;font-size:13px;color:var(--muted);padding:12px 0;border-block:1px solid var(--line)}
+.meta span b{color:var(--fg);font-weight:600}
+h2{font-size:22px;margin:56px 0 12px;padding-top:8px;line-height:1.35;text-wrap:balance}
+h2 .n,h3 .n{color:var(--accent);font-variant-numeric:tabular-nums;margin-right:10px}
+h3{font-size:17px;margin:32px 0 8px}
+h4{font-size:15px;margin:22px 0 6px}
+p{margin:8px 0;max-width:72ch}
+ul,ol{margin:8px 0;padding-left:22px;max-width:72ch}
+li{margin:3px 0}
+a{color:var(--accent)}
+code{font-family:var(--mono);font-size:.88em;background:var(--sunk);padding:1px 5px;border-radius:4px;word-break:break-word}
+pre{font:12.5px/1.6 var(--mono);background:var(--sunk);border:1px solid var(--line);border-radius:8px;padding:14px 16px;overflow-x:auto;margin:12px 0}
+pre code{background:none;padding:0;font-size:inherit;word-break:normal}
+.tw{overflow-x:auto;margin:12px 0;border:1px solid var(--line);border-radius:8px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:13.5px;line-height:1.6}
+th,td{text-align:left;vertical-align:top;padding:8px 12px;border-bottom:1px solid var(--line)}
+th{background:var(--sunk);font-weight:600;white-space:nowrap}
+tr:last-child td{border-bottom:0}
+td.nw{white-space:nowrap}
+.tag{display:inline-block;font:600 11.5px/1.5 var(--mono);padding:1px 7px;border-radius:999px;white-space:nowrap;vertical-align:1px}
+.tag.d{background:var(--accent-soft);color:var(--accent)}
+.tag.q{background:var(--warn-soft);color:var(--warn)}
+.tag.p{background:var(--sunk);color:var(--muted)}
+.tag.ok{background:var(--ok-soft);color:var(--ok)}
+.tag.bad{background:var(--bad-soft);color:var(--bad)}
+.box{border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:12px 16px;margin:14px 0}
+.box.q{border-color:var(--warn);background:var(--warn-soft)}
+.box.d{border-color:var(--accent);background:var(--accent-soft)}
+.box>p:first-child{margin-top:0}.box>p:last-child,.box>ul:last-child{margin-bottom:0}
+ol.seq{list-style:none;padding:0;counter-reset:s;max-width:none}
+ol.seq li{counter-increment:s;display:grid;grid-template-columns:28px minmax(0,1fr);gap:8px;padding:7px 0;border-bottom:1px dashed var(--line)}
+ol.seq li::before{content:counter(s);font:600 12px/22px var(--mono);color:var(--accent);text-align:right}
+.who{display:inline-block;font-size:12px;font-weight:600;padding:0 7px;border-radius:4px;background:var(--sunk);border:1px solid var(--line);margin-right:4px;white-space:nowrap}
+.fig{overflow-x:auto;margin:14px 0;border:1px solid var(--line);border-radius:8px;background:var(--surface);padding:12px}
+.fig svg{display:block;min-width:720px;width:100%;height:auto;font-family:var(--sans)}
+.fig figcaption,.cap{font-size:12.5px;color:var(--muted);margin-top:8px}
+svg .b{fill:var(--sunk);stroke:var(--line)} svg .a{fill:var(--accent-soft);stroke:var(--accent)} svg .s{fill:var(--ok-soft);stroke:var(--ok)}
+svg .w{fill:var(--warn-soft);stroke:var(--warn)} svg .x{fill:var(--bad-soft);stroke:var(--bad)}
+svg text{fill:var(--fg);font-size:13px} svg text.m{fill:var(--muted);font-size:11.5px} svg .ln{stroke:var(--muted);stroke-width:1.4;fill:none} svg .ah{fill:var(--muted)}
+@media (max-width:900px){.page{grid-template-columns:minmax(0,1fr);gap:16px}nav.toc{position:static;max-height:none;border:1px solid var(--line);border-radius:8px;padding:12px;background:var(--surface)}header.doc h1{font-size:24px}}
+</style>
+
+<div class="page">
+<nav class="toc" aria-label="目录">
+<b>目录</b>
+<a href="#s1">1 背景</a><a href="#s2">2 目标与非目标</a><a href="#s3">3 术语</a><a href="#s4">4 关键决策</a><a href="#s5">5 总体流程</a><a href="#s6">6 声明与协商</a><a href="#s7">7 数据格式</a><a href="#s8">8 交互类型</a><a href="#s9">9 处理规则</a><a href="#s10">10 错误</a><a href="#s11">11 安全</a><a href="#s12">12 多实例与重启</a><a href="#s13">13 Java SDK</a><a href="#s14">14 BCS 改造</a><a href="#s15">15 与 v1 的关系和迁移</a><a href="#s16">16 上位稿需同步的修改</a><a href="#s17">17 测试用例</a><a href="#s18">18 待决问题</a><a href="#s19">19 参考</a>
+</nav>
+<main>
+<header class="doc">
+<h1>hitl/v1：A2A 人机交互扩展</h1>
+<p class="lead">让 A2A Agent 在执行过程中请求人来审批、回答问题或确认切换模式，并在 BCS 工作台中用现有的交互卡片完成处理。本文是 hitl/v1 扩展的独立设计稿，供单独评审。</p>
+<div class="meta"><span><b>状态</b> 设计稿 v0.1，待评审</span><span><b>日期</b> 2026-11-17</span><span><b>上位文档</b> 《BCN A2A Profile 与 Java Server SDK 详细设计》v0.29</span><span><b>替代</b> structured-input-exec/v1（兼容期内并存）</span></div>
+<div class="box"><p>本文新增的条款编号为 H-xx，对引擎的要求为 HR-xx，待决问题为 HQ-xx。引用的 P-xx、Dx、Rx 来自上位设计稿。扩展 URI 尚未确定，文中用 <code>&lt;hitl/v1 URI&gt;</code> 占位。</p></div>
+</header>
+<h2 id="s1"><span class="n">1</span>背景</h2>
+<h3><span class="n">1.1</span>BCS 现有的人机交互</h3>
+<p>BCS 内部已经有一套人机交互（HITL）机制，Provider 通过交互事件发起，BCS 负责路由、展示卡片、校验回复、暂停运行预算，再把结果交回 Provider。交互事件有两个阶段：<code>requested</code>（发起）和 <code>resolved</code>（结束）。共有三种类型：</p><div class="tw"><table>
+<tr><th>类型</th><th>请求内容</th><th>回复</th><th>BCS 的校验</th></tr>
+<tr><td><code>exec</code></td><td>要执行的操作（命令或工具）和若干选项 <code>{decision, label}</code></td><td>一个 <code>decision</code></td><td>选项非空、<code>decision</code> 不重复；回复必须是提供过的选项之一</td></tr>
+<tr><td><code>ask_user</code></td><td>1–4 个问题，每题可以有 1–4 个选项，支持多选和“其他”</td><td><code>submit</code> 加全部答案，或 <code>cancel</code></td><td>submit 必须每题回答一次；单选最多一个值；不允许自定义值时只能选提供的选项；不支持密码类问题</td></tr>
+<tr><td><code>mode_switch</code></td><td>当前模式、目标模式和若干选项，选项可以带目标模式和推荐标记</td><td>一个 <code>decision</code></td><td>与 exec 相同</td></tr>
+</table></div>
+<h3><span class="n">1.2</span>A2A 侧的现状</h3>
+<p>A2A Agent 目前只能发起 exec 审批，走 <code>structured-input-exec/v1</code>：Task 进入 <code>INPUT_REQUIRED</code>，状态消息里放一个用 JSON Schema 表达的审批请求（基于上游实验性的 Structured Input 草案，固定在某个提交），业务语义放在 <code>x-bcs-exec</code> 注解里。BCS 的处理方式是：</p><ul><li>把一个审批批次拆成<b>每个工具一张审批卡</b>，每张卡独立回答；</li><li>每回答一张卡，就发一次带 <code>taskId</code> 的 SendMessage（<code>returnImmediately=true</code>），再从 <code>Task.metadata</code> 中的回执确认 Agent 已经接受；</li><li>等待期间暂停运行预算，整批回答完后恢复预算，继续订阅 Task 的后续输出。</li></ul><h3><span class="n">1.3</span>问题</h3>
+<ul><li><b>只覆盖 exec。</b>ask_user 和 mode_switch 在 A2A 里没有对应，A2A Agent 无法向人提问或请求切换模式。</li><li><b>表达方式过重。</b>审批用 JSON Schema 表达，BCS 只接受其中一个很窄的子集（超出就报错），等于又定义了一套规则。业务方需要同时理解 JSON Schema 和注解。</li><li><b>依赖外部草案。</b>上游草案仍在变化，我们只能固定在某个提交上。</li><li><b>选项含义无法识别。</b>决策值是字符串，现有实现里同时存在 <code>allow_once</code> 和 <code>allow-once</code> 两种写法。调用方无法从协议上知道哪个选项是“允许”、哪个是“拒绝”。</li></ul><h2 id="s2"><span class="n">2</span>目标与非目标</h2>
+<div class="tw"><table>
+<tr><th>目标</th><th>说明</th></tr>
+<tr><td>G1 一个扩展覆盖三种交互</td><td>exec、ask_user、mode_switch，数据结构与 BCS 交互模型一一对应，BCS 只需要搬运字段，不需要转换</td></tr>
+<tr><td>G2 只用 A2A 标准机制</td><td><code>INPUT_REQUIRED</code> 加带 <code>taskId</code> 的续交消息。不新增方法，不新增状态值（A2A 扩展规则不允许新增枚举值）</td></tr>
+<tr><td>G3 多实例和重启下正确</td><td>回复可以落到任何实例；接受前先持久化；回复的响应丢失时可以用 GetTask 核对</td></tr>
+<tr><td>G4 能扩展新的交互类型</td><td>新增类型不需要升级扩展版本，不影响不认识它的调用方</td></tr>
+<tr><td>G5 平滑迁移</td><td>与 structured-input-exec/v1 并存，已接入的 Agent 不需要立即修改</td></tr>
+</table></div>
+<div class="tw"><table>
+<tr><th>非目标</th><th>归属</th></tr>
+<tr><td>群里由谁来审批、谁可以回答</td><td>BCS 的策略，不进协议</td></tr>
+<tr><td>“本会话内一直允许”这类授权范围的含义和持久化</td><td>Agent 自己负责（HQ-2）</td></tr>
+<tr><td>密码等敏感输入</td><td>不支持。凭据不应该经过对话传递</td></tr>
+<tr><td>文件上传、任意结构的表单</td><td>不在 v1 范围</td></tr>
+<tr><td>非流式 Agent（L1）发起交互</td><td>不在 v1 范围（HQ-7）</td></tr>
+<tr><td>推送通知下的交互</td><td>随推送一起设计；<code>INPUT_REQUIRED</code> 本来就是推送的触发点（P-152）</td></tr>
+<tr><td>托管模式</td><td>不支持（D9）：等待期间的状态必须能跨实例、跨重启恢复</td></tr>
+</table></div>
+<h2 id="s3"><span class="n">3</span>术语</h2>
+<div class="tw"><table>
+<tr><th>术语</th><th>含义</th></tr>
+<tr><td>交互（interaction）</td><td>Agent 请人做的一次决定或回答。有 Task 内唯一的 <code>id</code>。一个工具调用的审批是一个交互</td></tr>
+<tr><td>交互批次（batch）</td><td>Task 一次进入 <code>INPUT_REQUIRED</code> 时同时待处理的一组交互，有 Task 内唯一的 <code>batchId</code></td></tr>
+<tr><td>类型（kind）</td><td>交互的业务类型：<code>exec</code>、<code>ask_user</code>、<code>mode_switch</code> 或扩展类型。决定展示方式和附加字段</td></tr>
+<tr><td>形态（shape）</td><td>决策型（<code>options</code>，回复一个 <code>decision</code>）或问答型（<code>questions</code>，回复答案）。决定回复格式和校验规则</td></tr>
+<tr><td>续交</td><td>调用方带 <code>taskId</code> 和 <code>contextId</code> 发送的消息，用于提交回复（A2A 标准做法）</td></tr>
+<tr><td>接受</td><td>Agent 校验回复并把结果持久化</td></tr>
+<tr><td>回执</td><td>写在 <code>Task.metadata</code> 中的已结束交互记录，是“回复是否已被接受”的唯一依据</td></tr>
+<tr><td>结束原因（outcome）</td><td><code>answered</code>（已回答）、<code>expired</code>（过期）、<code>canceled</code>（Task 被取消）、<code>superseded</code>（批次被替换）</td></tr>
+</table></div>
+<h2 id="s4"><span class="n">4</span>关键决策</h2>
+<div class="tw"><table>
+<tr><th>编号</th><th>决策</th><th>理由</th></tr>
+<tr><td><span class="tag d">HD1</span></td><td>载体完全使用 A2A 标准：<code>INPUT_REQUIRED</code> 的状态消息发起，带 <code>taskId</code> 的续交消息回复</td><td>A2A 规范的输入请求就是这样定义的；属于 A2A 所说的 Profile 类扩展，只约束标准结构，不新增方法和状态</td></tr>
+<tr><td><span class="tag d">HD2</span></td><td>不用 JSON Schema，用强类型字段</td><td>卡片和表单需要稳定的结构才能渲染；BCS 已有一套在线上运行的强类型模型，直接复用可以省掉转换层；业务方理解成本低</td></tr>
+<tr><td><span class="tag d">HD3</span></td><td>一次 <code>INPUT_REQUIRED</code> 是一个批次，批次内的交互逐个回答；exec 一个工具调用一个交互</td><td>与 BCS 现状一致：现在的 A2A 路径已经是每个工具一张卡、逐张续交</td></tr>
+<tr><td><span class="tag d">HD4</span></td><td>两种形态（决策型、问答型）决定回复格式；类型只决定展示和附加字段</td><td>新增类型时，回复和校验规则不变；调用方遇到新类型也能按形态处理</td></tr>
+<tr><td><span class="tag d">HD5</span></td><td>选项带 <code>effect</code>（<code>allow</code> 或 <code>deny</code>），调用方不解释 <code>decision</code> 字符串</td><td>决策值由 Agent 自己定义；需要语义的地方（审计、群里谁能批准）读 <code>effect</code></td></tr>
+<tr><td><span class="tag d">HD6</span></td><td>回执写在 <code>Task.metadata</code>，是是否已接受的唯一依据</td><td>续交的响应可能丢失；调用方用 GetTask 读回执即可确认，不依赖响应</td></tr>
+<tr><td><span class="tag d">HD7</span></td><td>过期时间由 Agent 决定，过期后由 Agent 兜底；exec 的兜底必须等同拒绝</td><td>只有 Agent 知道等待多久是安全的；审批类操作必须在失败时保持关闭</td></tr>
+<tr><td><span class="tag d">HD8</span></td><td>只在引擎模式下支持，要求 Agent 支持 Task、流式、GetTask、SubscribeToTask 和 CancelTask</td><td>等待可能跨实例、跨重启（D3、D4）；调用方需要查询和订阅才能完成续交流程</td></tr>
+</table></div>
+<h2 id="s5"><span class="n">5</span>总体流程</h2>
+<figure class="fig"><svg viewBox="0 0 880 600" role="img" aria-label="hitl/v1 时序图"><defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah" d="M0 0L10 5L0 10z"/></marker></defs><rect class="a" x="15" y="10" width="170" height="36" rx="6"/><text x="100" y="33" text-anchor="middle">人（BCS 工作台）</text><line class="ln" x1="100" y1="46" x2="100" y2="590" stroke-dasharray="4 4"/><rect class="a" x="275" y="10" width="170" height="36" rx="6"/><text x="360" y="33" text-anchor="middle">BCS</text><line class="ln" x1="360" y1="46" x2="360" y2="590" stroke-dasharray="4 4"/><rect class="a" x="685" y="10" width="170" height="36" rx="6"/><text x="770" y="33" text-anchor="middle">Agent（SDK + 引擎）</text><line class="ln" x1="770" y1="46" x2="770" y2="590" stroke-dasharray="4 4"/><line class="ln" x1="360" y1="82" x2="768" y2="82" marker-end="url(#ar)"/><text x="565.0" y="75" text-anchor="middle">SendStreamingMessage</text><text class="m" x="565.0" y="98" text-anchor="middle">A2A-Extensions: hitl/v1</text><line class="ln" x1="770" y1="140" x2="362" y2="140" marker-end="url(#ar)"/><text x="565.0" y="133" text-anchor="middle">INPUT_REQUIRED + 批次 batch-1（itx-1、itx-2）</text><text class="m" x="565.0" y="156" text-anchor="middle">状态消息发出后流结束</text><rect class="w" x="235.0" y="171" width="250" height="26" rx="5"/><text x="360" y="189" text-anchor="middle" style="font-size:12px">每个交互一张卡，暂停运行预算</text><line class="ln" x1="360" y1="226" x2="102" y2="226" marker-end="url(#ar)"/><text x="230.0" y="219" text-anchor="middle">两张审批卡</text><line class="ln" x1="100" y1="266" x2="358" y2="266" marker-end="url(#ar)"/><text x="230.0" y="259" text-anchor="middle">批准 itx-1</text><line class="ln" x1="360" y1="306" x2="768" y2="306" marker-end="url(#ar)"/><text x="565.0" y="299" text-anchor="middle">SendMessage（taskId）回复 itx-1</text><rect class="s" x="670.0" y="331" width="200" height="26" rx="5"/><text x="770" y="349" text-anchor="middle" style="font-size:12px">校验 → 条件写入回执</text><line class="ln" x1="770" y1="390" x2="362" y2="390" marker-end="url(#ar)"/><text x="565.0" y="383" text-anchor="middle">Task：仍是 INPUT_REQUIRED，回执含 itx-1</text><text class="m" x="565.0" y="406" text-anchor="middle">BCS 核对回执后关闭第一张卡</text><line class="ln" x1="100" y1="450" x2="358" y2="450" marker-end="url(#ar)"/><text x="230.0" y="443" text-anchor="middle">拒绝 itx-2</text><line class="ln" x1="360" y1="450" x2="768" y2="450" marker-end="url(#ar)"/><text x="565.0" y="443" text-anchor="middle">回复 itx-2（同上）</text><line class="ln" x1="770" y1="500" x2="362" y2="500" marker-end="url(#ar)"/><text x="565.0" y="493" text-anchor="middle">Task：WORKING（批次结束，只恢复一次）</text><line class="ln" x1="360" y1="546" x2="768" y2="546" marker-end="url(#ar)"/><text x="565.0" y="539" text-anchor="middle">SubscribeToTask</text><line class="ln" x1="770" y1="586" x2="362" y2="586" marker-end="url(#ar)"/><text x="565.0" y="579" text-anchor="middle">后续输出 …… 终态</text></svg><figcaption>一个两项审批的完整过程。第 5–8 步对每个交互各走一次；回复可以落到 Agent 的任何实例上。</figcaption></figure><ol class="seq"><li><span><span class="who">BCS</span>向声明了 hitl/v1 的 Agent 发送消息时，在 <code>A2A-Extensions</code> 中请求 hitl/v1；Agent 在响应中确认激活。</span></li><li><span><span class="who">Agent</span>需要人参与时，先把批次写入引擎的运行记录，再发出 <code>INPUT_REQUIRED</code> 的状态更新，状态消息中放交互批次。按 A2A 规定，Task 进入中断态后这条流结束。</span></li><li><span><span class="who">BCS</span>解析批次，为每个交互创建一张卡片（复用现有交互服务），暂停运行预算。</span></li><li><span><span class="who">人</span>在工作台回答其中一张卡。</span></li><li><span><span class="who">BCS</span>发送续交消息，回复这一个交互。</span></li><li><span><span class="who">Agent</span>任何实例收到后：校验、条件写入回执、返回 Task 快照。批次中还有未回答的交互时，Task 仍是 <code>INPUT_REQUIRED</code>。</span></li><li><span><span class="who">BCS</span>从快照的回执中确认已被接受，关闭对应卡片。响应丢失时用 GetTask 核对。</span></li><li><span><span class="who">Agent</span>批次中的交互全部结束后恢复执行，状态回到 <code>WORKING</code>；BCS 恢复预算，订阅 Task 接收后续输出。</span></li></ol><h2 id="s6"><span class="n">6</span>声明与协商</h2>
+<h3><span class="n">6.1</span>Card 声明</h3>
+<pre><code>{
+  "capabilities": {
+    "streaming": true,
+    "extensions": [
+      {
+        "uri": "&lt;hitl/v1 URI&gt;",
+        "required": false,
+        "params": {"kinds": ["exec", "ask_user", "mode_switch"]}
+      }
+    ]
+  }
+}</code></pre><div class="tw"><table>
+<tr><th>条款</th><th>内容</th></tr>
+<tr><td><span class="tag p">H-01</span></td><td>声明 hitl/v1 的 Agent 必须同时声明 <code>capabilities.streaming: true</code>，并实现 GetTask、SubscribeToTask、CancelTask（HD8）。</td></tr>
+<tr><td><span class="tag p">H-02</span></td><td><code>params.kinds</code> 列出 Agent 可能发起的交互类型，只用于展示和注册时的自洽校验，不参与协商。</td></tr>
+<tr><td><span class="tag p">H-03</span></td><td><code>required</code> 应为 <code>false</code>，Agent 在未激活时按 6.3 兜底。只有没有人参与就无法安全提供服务的 Agent 才设为 <code>true</code>，此时未激活的请求返回 <code>ExtensionSupportRequiredError</code>。</td></tr>
+</table></div>
+<h3><span class="n">6.2</span>调用方的承诺和类型声明</h3>
+<div class="tw"><table>
+<tr><th>条款</th><th>内容</th></tr>
+<tr><td><span class="tag p">H-04</span></td><td>调用方激活 hitl/v1，即承诺能处理三种基础类型（<code>exec</code>、<code>ask_user</code>、<code>mode_switch</code>）的全部字段和两种回复形态。</td></tr>
+<tr><td><span class="tag p">H-05</span></td><td>调用方可以在请求 metadata 的 <code>bcn.hitl.kinds</code> 中列出额外支持的类型。没有这个字段时只支持三种基础类型。Agent 不得发起调用方没有声明的类型。</td></tr>
+<tr><td><span class="tag p">H-06</span></td><td>续交消息也必须激活 hitl/v1，否则 Agent 拒绝（第 10 节）。</td></tr>
+</table></div>
+<pre><code>// SendMessageRequest.metadata（仅在需要额外类型时出现）
+{
+  "bcn.hitl": {"kinds": ["exec", "ask_user", "mode_switch", "order.refund_confirm"]}
+}</code></pre><p>新增标准类型或业务自定义类型时，扩展版本不变：只有声明支持的调用方才会收到新类型，旧调用方不受影响。</p><h3><span class="n">6.3</span>未激活时的兜底</h3>
+<div class="tw"><table>
+<tr><th>条款</th><th>内容</th></tr>
+<tr><td><span class="tag p">H-07</span></td><td>本次调用没有激活 hitl/v1 时，Agent 不得进入 <code>INPUT_REQUIRED</code>（替代上位稿 P-62），只能按下表处理。</td></tr>
+</table></div>
+<div class="tw"><table>
+<tr><th>需要的交互</th><th>Agent 的处理</th></tr>
+<tr><td><code>exec</code></td><td>按 Agent 自己的安全策略处理：不执行该操作（等同拒绝），或以 <code>REJECTED</code> / <code>FAILED</code> 结束 Task。需要人工批准的操作不得因为未激活而放行</td></tr>
+<tr><td><code>ask_user</code></td><td>不提问。用默认值继续，或以 <code>FAILED</code> 结束，并在状态消息中说明缺少的信息</td></tr>
+<tr><td><code>mode_switch</code></td><td>保持当前模式继续</td></tr>
+</table></div>
+<h2 id="s7"><span class="n">7</span>数据格式</h2>
+<p>遵循 payload 设计的通用规则：扩展数据放在 <code>DataPart.data</code>；<code>message.extensions</code> 只标记这条消息使用了 hitl/v1；来源等附加信息放在 <code>Part.metadata.biz</code>。示例使用 ProtoJSON 表示，线上为 protobuf。</p><h3><span class="n">7.1</span>载体位置</h3>
+<div class="tw"><table>
+<tr><th>数据</th><th>位置</th><th>要求</th></tr>
+<tr><td>交互批次</td><td>Task 进入 <code>INPUT_REQUIRED</code> 时的 <code>status.message</code></td><td><code>role</code> 为 Agent；<code>extensions</code> 包含 hitl URI；恰好一个承载批次的 DataPart，可以再有一个 TextPart 摘要</td></tr>
+<tr><td>回复</td><td>续交消息</td><td><code>role</code> 为 User；带 <code>taskId</code> 和 <code>contextId</code>；<code>extensions</code> 包含 hitl URI；恰好一个承载回复的 DataPart</td></tr>
+<tr><td>回执</td><td><code>Task.metadata["bcn.hitl"]</code></td><td>已结束交互的结果，GetTask 和每个 Task 快照中都可以读到</td></tr>
+<tr><td>额外类型声明</td><td><code>SendMessageRequest.metadata["bcn.hitl"]</code></td><td>可选（H-05）</td></tr>
+</table></div>
+<p><code>bcn.hitl</code> 这个键的位置随 payload 设计定稿；如果最终采用 <code>bcn.extensions</code> 容器，则改为 <code>bcn.extensions.hitl</code>（HQ-5）。</p><h3><span class="n">7.2</span>交互批次</h3>
+<pre><code>{
+  "statusUpdate": {
+    "taskId": "task-001",
+    "contextId": "ctx-001",
+    "status": {
+      "state": "TASK_STATE_INPUT_REQUIRED",
+      "message": {
+        "messageId": "msg-input-001",
+        "role": "ROLE_AGENT",
+        "taskId": "task-001",
+        "contextId": "ctx-001",
+        "extensions": ["&lt;hitl/v1 URI&gt;"],
+        "parts": [
+          {"text": "需要你确认 2 个操作：转账 100.00 元、发送通知短信。"},
+          {"data": {
+            "batchId": "batch-001",
+            "expiresAtMs": 1794909600000,
+            "interactions": [
+              {
+                "id": "itx-001",
+                "kind": "exec",
+                "title": "转账",
+                "options": [
+                  {"decision": "allow_once", "label": "允许本次", "effect": "allow"},
+                  {"decision": "deny", "label": "拒绝", "effect": "deny"}
+                ],
+                "exec": {
+                  "toolCallId": "call-001",
+                  "name": "transfer",
+                  "args": {"to": "acct-0042", "amount": "100.00"},
+                  "argsSha256": "9f2c…"
+                }
+              },
+              {
+                "id": "itx-002",
+                "kind": "exec",
+                "title": "发送通知短信",
+                "options": [
+                  {"decision": "allow_once", "label": "允许本次", "effect": "allow"},
+                  {"decision": "deny", "label": "拒绝", "effect": "deny"}
+                ],
+                "exec": {
+                  "toolCallId": "call-002",
+                  "name": "send_sms",
+                  "args": {"template": "transfer_notice"},
+                  "argsSha256": "51ab…"
+                }
+              }
+            ]
+          }}
+        ]
+      }
+    }
+  }
+}</code></pre><div class="tw"><table>
+<tr><th>批次字段</th><th>必填</th><th>说明</th></tr>
+<tr><td><code>batchId</code></td><td>是</td><td>Task 内唯一的不透明字符串</td></tr>
+<tr><td><code>expiresAtMs</code></td><td>是</td><td>过期的绝对时间，Unix 毫秒。整个批次共用一个过期时间</td></tr>
+<tr><td><code>interactions</code></td><td>是</td><td>1–64 个交互</td></tr>
+</table></div>
+<h3><span class="n">7.3</span>交互的公共字段</h3>
+<div class="tw"><table>
+<tr><th>字段</th><th>必填</th><th>说明</th></tr>
+<tr><td><code>id</code></td><td>是</td><td>Task 内唯一的不透明字符串，跨批次也不重复</td></tr>
+<tr><td><code>kind</code></td><td>是</td><td>交互类型（第 8 节）</td></tr>
+<tr><td><code>title</code></td><td>否</td><td>一行标题，纯文本</td></tr>
+<tr><td><code>description</code></td><td>否</td><td>说明文字，纯文本</td></tr>
+<tr><td><code>options</code></td><td>二选一</td><td>有这个字段即为决策型（7.4）</td></tr>
+<tr><td><code>questions</code></td><td>二选一</td><td>有这个字段即为问答型（7.5）</td></tr>
+<tr><td>类型字段对象</td><td>视类型</td><td>键为类型名的驼峰形式，例如 <code>exec</code>、<code>modeSwitch</code>。只增加展示信息，不改变回复规则</td></tr>
+</table></div>
+<div class="tw"><table>
+<tr><th>条款</th><th>内容</th></tr>
+<tr><td><span class="tag p">H-08</span></td><td>每个交互必须恰好有 <code>options</code> 或 <code>questions</code> 之一。</td></tr>
+<tr><td><span class="tag p">H-09</span></td><td>消费方必须忽略不认识的字段。同一版本内只能增加可选字段。</td></tr>
+</table></div>
+<h3><span class="n">7.4</span>决策型</h3>
+<div class="tw"><table>
+<tr><th>选项字段</th><th>必填</th><th>说明</th></tr>
+<tr><td><code>decision</code></td><td>是</td><td>决策值，不透明字符串，交互内唯一，由 Agent 定义</td></tr>
+<tr><td><code>label</code></td><td>是</td><td>按钮文字</td></tr>
+<tr><td><code>description</code></td><td>否</td><td>选项说明</td></tr>
+<tr><td><code>effect</code></td><td>视类型</td><td><code>allow</code> 或 <code>deny</code>。exec 必填；其他类型可选</td></tr>
+<tr><td><code>recommended</code></td><td>否</td><td>布尔值，每个交互最多一个选项为 <code>true</code></td></tr>
+</table></div>
+<div class="tw"><table>
+<tr><th>条款</th><th>内容</th></tr>
+<tr><td><span class="tag p">H-10</span></td><td>决策型交互有 1–8 个选项。</td></tr>
+<tr><td><span class="tag p">H-11</span></td><td>调用方不得根据 <code>decision</code> 字符串推断含义；需要语义时（审计、群里谁能批准）读 <code>effect</code>。</td></tr>
+</table></div>
+<h3><span class="n">7.5</span>问答型</h3>
+<div class="tw"><table>
+<tr><th>问题字段</th><th>必填</th><th>说明</th></tr>
+<tr><td><code>questionId</code></td><td>是</td><td>交互内唯一</td></tr>
+<tr><td><code>question</code></td><td>是</td><td>问题文字</td></tr>
+<tr><td><code>header</code></td><td>否</td><td>简短标签</td></tr>
+<tr><td><code>options</code></td><td>否</td><td>1–4 个 <code>{value, label, description?}</code>；没有时为自由回答题</td></tr>
+<tr><td><code>multiSelect</code></td><td>否</td><td>默认 <code>false</code></td></tr>
+<tr><td><code>allowOther</code></td><td>否</td><td>是否允许填写选项以外的值，只在有 <code>options</code> 时有意义；默认 <code>true</code>（与 BCS 现状一致）</td></tr>
+</table></div>
+<div class="tw"><table>
+<tr><th>条款</th><th>内容</th></tr>
+<tr><td><span class="tag p">H-12</span></td><td>问答型交互有 1–4 个问题。不支持密码类问题，不得出现 <code>secret</code> 之类的字段。</td></tr>
+</table></div>
+<h3><span class="n">7.6</span>回复</h3>
+<pre><code>{
+  "message": {
+    "messageId": "msg-reply-001",
+    "role": "ROLE_USER",
+    "taskId": "task-001",
+    "contextId": "ctx-001",
+    "extensions": ["&lt;hitl/v1 URI&gt;"],
+    "parts": [
+      {"data": {
+        "batchId": "batch-001",
+        "replies": [
+          {"id": "itx-001", "decision": "allow_once"}
+        ]
+      }}
+    ]
+  },
+  "configuration": {"returnImmediately": true}
+}</code></pre><div class="tw"><table>
+<tr><th>形态</th><th>回复格式</th><th>规则</th></tr>
+<tr><td>决策型</td><td><code>{"id", "decision"}</code></td><td><code>decision</code> 必须是该交互提供过的选项之一</td></tr>
+<tr><td>问答型</td><td><code>{"id", "action": "submit", "answers": {questionId: {"values": [...]}}}</code></td><td>每个问题恰好回答一次；<code>values</code> 是非空字符串数组，空数组表示跳过该题；单选和自由回答题最多一个值；不允许自定义值时只能选提供的选项</td></tr>
+<tr><td>问答型</td><td><code>{"id", "action": "cancel"}</code></td><td>用户拒绝回答</td></tr>
+</table></div>
+<div class="tw"><table>
+<tr><th>条款</th><th>内容</th></tr>
+<tr><td><span class="tag p">H-13</span></td><td>一条续交消息可以回复同一批次中的 1 到全部交互，<code>replies</code> 中同一 <code>id</code> 只能出现一次。</td></tr>
+<tr><td><span class="tag p">H-14</span></td><td>普通文本 Part 不是回复。Agent 不得从文本、工具事件或摘要中推断回复。</td></tr>
+</table></div>
+<h3><span class="n">7.7</span>回执</h3>
+<pre><code>// Task.metadata
+{
+  "bcn.hitl": {
+    "batches": {
+      "batch-001": {
+        "itx-001": {"outcome": "answered", "reply": {"decision": "allow_once"}},
+        "itx-002": {"outcome": "expired"}
+      }
+    }
+  }
+}</code></pre><div class="tw"><table>
+<tr><th>条款</th><th>内容</th></tr>
+<tr><td><span class="tag p">H-15</span></td><td>交互结束时，Agent 必须先写入回执，再发出后续事件或恢复执行。回执只有结束的交互，待处理的交互不出现。</td></tr>
+<tr><td><span class="tag p">H-16</span></td><td>回执写入后不可修改。批次结束后回执继续保留，Task 进入终态后也保留。</td></tr>
+<tr><td><span class="tag p">H-17</span></td><td>每个 Task 最多 64 个批次，回执编码后总大小不超过 240,000 字节（沿用 v1）。超出时在恢复执行前以 <code>FAILED</code> 结束 Task。</td></tr>
+</table></div>
+<h2 id="s8"><span class="n">8</span>交互类型</h2>
+<h3><span class="n">8.1</span>exec：操作审批</h3>
+<p>决策型。一个交互对应一个工具调用；同时需要审批的多个工具调用放在同一个批次中。</p><div class="tw"><table>
+<tr><th>exec 字段</th><th>必填</th><th>说明</th></tr>
+<tr><td><code>toolCallId</code></td><td>是</td><td>工具调用 ID，与工具观察（tools/v2）记录中的 <code>toolCallId</code> 相同，界面可以据此把工具卡片标为“待审批”</td></tr>
+<tr><td><code>name</code></td><td>是</td><td>工具名</td></tr>
+<tr><td><code>args</code></td><td>是</td><td>参数快照（对象）。长整数和金额用字符串</td></tr>
+<tr><td><code>argsSha256</code></td><td>是</td><td>参数快照的摘要：键排序后的 UTF-8 JSON 的 SHA-256。调用方当作不透明的绑定值，不自己重新计算</td></tr>
+<tr><td><code>command</code></td><td>否</td><td>命令类工具的命令文本，便于展示</td></tr>
+</table></div>
+<div class="tw"><table>
+<tr><th>条款</th><th>内容</th></tr>
+<tr><td><span class="tag p">H-18</span></td><td>exec 的选项中至少有一个 <code>effect: allow</code>、至少一个 <code>effect: deny</code>，保证人始终可以拒绝。</td></tr>
+<tr><td><span class="tag p">H-19</span></td><td>Agent 只能按被批准的参数快照执行。参数发生变化时必须发起新的交互，不能沿用旧的批准。</td></tr>
+<tr><td><span class="tag p">H-20</span></td><td>过期的 exec 一律按拒绝处理。</td></tr>
+<tr><td><span class="tag p">H-21</span></td><td>工具记录和审批互不推断：工具开始记录不表示已批准（同 P-185），审批通过也不表示工具执行成功。</td></tr>
+<tr><td><span class="tag p">H-22</span></td><td>“本会话内一直允许”这类选项可以作为 Agent 自定义的选项（<code>effect: allow</code>）出现，授权范围的含义和持久化由 Agent 负责（HQ-2）。</td></tr>
+</table></div>
+<h3><span class="n">8.2</span>ask_user：向人提问</h3>
+<p>问答型，没有类型字段对象。</p><pre><code>{
+  "id": "itx-010",
+  "kind": "ask_user",
+  "title": "补充出行信息",
+  "questions": [
+    {"questionId": "city", "question": "去哪个城市？", "header": "城市",
+     "options": [{"value": "hz", "label": "杭州"}, {"value": "sh", "label": "上海"}]},
+    {"questionId": "days", "question": "玩几天？"}
+  ]
+}</code></pre><pre><code>{"id": "itx-010", "action": "submit",
+ "answers": {"city": {"values": ["hz"]}, "days": {"values": ["2"]}}}</code></pre><div class="tw"><table>
+<tr><th>条款</th><th>内容</th></tr>
+<tr><td><span class="tag p">H-23</span></td><td>过期的 ask_user 按 <code>cancel</code> 处理。收到 <code>cancel</code> 后由 Agent 决定继续还是结束 Task。</td></tr>
+<tr><td><span class="tag p">H-24</span></td><td>答案中选项以外的值由 Agent 自己区分（不在 <code>options</code> 中的就是自定义值）。BCS 内部为展示拆出的 <code>customValues</code> 不出现在线上。</td></tr>
+</table></div>
+<h3><span class="n">8.3</span>mode_switch：确认切换模式</h3>
+<p>决策型。用于 Agent 从一种工作模式进入另一种之前请人确认，例如从只读的规划模式进入会产生副作用的执行模式。</p><pre><code>{
+  "id": "itx-020",
+  "kind": "mode_switch",
+  "title": "进入执行模式",
+  "options": [
+    {"decision": "proceed", "label": "开始执行", "effect": "allow",
+     "targetMode": "execute", "recommended": true},
+    {"decision": "stay", "label": "继续规划", "effect": "deny"}
+  ],
+  "modeSwitch": {
+    "fromMode": "plan",
+    "targetMode": "execute",
+    "plan": "1. 查询库存 2. 生成订单 3. 通知仓库"
+  }
+}</code></pre><div class="tw"><table>
+<tr><th>字段</th><th>必填</th><th>说明</th></tr>
+<tr><td><code>modeSwitch.fromMode</code></td><td>否</td><td>当前模式，Agent 自定义的不透明字符串</td></tr>
+<tr><td><code>modeSwitch.targetMode</code></td><td>是</td><td>目标模式</td></tr>
+<tr><td><code>modeSwitch.plan</code></td><td>否</td><td>切换理由或计划文本，纯文本</td></tr>
+<tr><td>选项上的 <code>targetMode</code></td><td>否</td><td>不同选项进入不同模式时使用</td></tr>
+</table></div>
+<div class="tw"><table>
+<tr><th>条款</th><th>内容</th></tr>
+<tr><td><span class="tag p">H-25</span></td><td>过期的 mode_switch 按保持当前模式处理。</td></tr>
+</table></div>
+<p>BCS 现有的 Claude Code 桥接把退出规划模式表示成一个 exec 审批；按 hitl/v1，这种场景应使用 mode_switch。</p><h3><span class="n">8.4</span>新增类型</h3>
+<div class="tw"><table>
+<tr><th>条款</th><th>内容</th></tr>
+<tr><td><span class="tag p">H-26</span></td><td>不带点的类型名保留给本规范。新增标准类型通过修订本规范完成，不改变扩展 URI。</td></tr>
+<tr><td><span class="tag p">H-27</span></td><td>业务自定义类型使用带命名空间的名字，例如 <code>order.refund_confirm</code>。</td></tr>
+<tr><td><span class="tag p">H-28</span></td><td>新类型（标准或自定义）必须是两种形态之一，回复格式和校验规则与形态相同；只有调用方在 <code>bcn.hitl.kinds</code> 中声明后，Agent 才能发起（H-05）。</td></tr>
+</table></div>
+<h2 id="s9"><span class="n">9</span>处理规则</h2>
+<h3><span class="n">9.1</span>发起</h3>
+<div class="tw"><table>
+<tr><th>条款</th><th>内容</th></tr>
+<tr><td><span class="tag p">H-29</span></td><td>同一个 Task 同时最多一个待处理批次。批次发出后内容不可修改，只能整体替换（9.4）。</td></tr>
+<tr><td><span class="tag p">H-30</span></td><td>Agent 必须先把批次写入引擎的运行记录，再发出 <code>INPUT_REQUIRED</code>。</td></tr>
+<tr><td><span class="tag p">H-31</span></td><td><code>expiresAtMs</code> 必须晚于发出时间。</td></tr>
+<tr><td><span class="tag p">H-32</span></td><td>摘要 TextPart 是纯文本，不含凭据，写清楚需要人做什么。调用方处理交互时忽略它；不认识本扩展的调用方至少能把它展示给人。</td></tr>
+</table></div>
+<h3><span class="n">9.2</span>续交的校验顺序</h3>
+<ol class="seq"><li><span>续交请求是否激活了 hitl/v1（H-06）。</span></li><li><span>Task 是否存在；<code>contextId</code> 是否与 Task 一致（A2A 规范要求拒绝不一致的消息）；协商了调用上下文时，用户是否与创建 Task 时一致（P-103）。</span></li><li><span>消息中是否恰好有一个回复 DataPart。</span></li><li><span><b>幂等重放</b>：如果每条回复都与回执中已接受的结果完全相同，直接返回当前 Task 快照，不做任何修改。不论 Task 处于什么状态，包括终态。</span></li><li><span>Task 是否处于 <code>INPUT_REQUIRED</code>，<code>batchId</code> 是否为当前批次。</span></li><li><span>每条回复：<code>id</code> 是否属于当前批次；已结束的交互，回复相同则跳过，不同则冲突。</span></li><li><span>按形态校验每条回复的内容（7.6）。</span></li><li><span>全部通过后，条件写入回执（HR-2）。任何一条不通过则整条消息都不生效。</span></li><li><span>批次中的交互全部结束时，恢复执行，且只恢复一次（HR-3）。</span></li><li><span>返回：<code>returnImmediately=true</code> 时写入后立即返回 Task 快照；否则按 A2A 的阻塞语义等到下一个终态或中断态；流式续交时首帧为 Task 快照。</span></li></ol><div class="tw"><table>
+<tr><th>条款</th><th>内容</th></tr>
+<tr><td><span class="tag p">H-33</span></td><td>一条续交消息中的回复全部有效才生效，不得只应用其中一部分。</td></tr>
+<tr><td><span class="tag p">H-34</span></td><td>相同的回复重复提交视为成功（第 4 步和第 6 步）。调用方在响应丢失、超时后可以安全地重发同一条回复。</td></tr>
+</table></div>
+<h3><span class="n">9.3</span>交互的结束</h3>
+<div class="tw"><table>
+<tr><th>结束原因</th><th>触发</th><th>Agent 的处理</th></tr>
+<tr><td><code>answered</code></td><td>收到有效回复</td><td>写入回执，记录回复内容</td></tr>
+<tr><td><code>expired</code></td><td>到达 <code>expiresAtMs</code></td><td>按类型兜底（H-20、H-23、H-25），写入回执</td></tr>
+<tr><td><code>canceled</code></td><td>CancelTask</td><td>所有待处理交互写入 <code>canceled</code>，Task 进入 <code>CANCELED</code></td></tr>
+<tr><td><code>superseded</code></td><td>Agent 需要替换当前批次（例如情况变化，原来的审批已没有意义）</td><td>未回答的交互写入 <code>superseded</code>，已回答的保持不变；再发出新的 <code>INPUT_REQUIRED</code>，使用新的 <code>batchId</code> 和新的交互 ID</td></tr>
+</table></div>
+<div class="tw"><table>
+<tr><th>条款</th><th>内容</th></tr>
+<tr><td><span class="tag p">H-35</span></td><td>过期与回复同时到达时，只有先完成条件写入的一方生效（HR-4）。</td></tr>
+<tr><td><span class="tag p">H-36</span></td><td>调用方放弃等待时（例如自己的运行预算耗尽）应调用 CancelTask，不要让 Agent 一直等到过期。</td></tr>
+</table></div>
+<h3><span class="n">9.4</span>Task 状态与流</h3>
+<div class="tw"><table>
+<tr><th>条款</th><th>内容</th></tr>
+<tr><td><span class="tag p">H-37</span></td><td><code>INPUT_REQUIRED</code> 是中断态，按 A2A 规定，发出后当前的流结束。Agent 不得为了等待回复而保持流。</td></tr>
+<tr><td><span class="tag p">H-38</span></td><td>部分回复后 Task 保持 <code>INPUT_REQUIRED</code>。批次全部结束后，Agent 把状态置为 <code>WORKING</code> 再继续执行，也可以直接进入终态（例如因为拒绝而以 <code>REJECTED</code> 结束）。</td></tr>
+<tr><td><span class="tag p">H-39</span></td><td>调用方获取后续输出有两种方式：用 SendStreamingMessage 续交；或用 SendMessage（<code>returnImmediately=true</code>）续交后调用 SubscribeToTask。Agent 两种都必须支持。BCS 目前使用第二种。</td></tr>
+</table></div>
+<h2 id="s10"><span class="n">10</span>错误</h2>
+<div class="tw"><table>
+<tr><th>情况</th><th>A2A 错误</th><th>gRPC</th><th>JSON-RPC</th><th>HTTP</th><th>reason</th></tr>
+<tr><td>Card 中 <code>required: true</code>，调用未激活</td><td><code>ExtensionSupportRequiredError</code></td><td><code>FAILED_PRECONDITION</code></td><td><code>-32008</code></td><td>400</td><td><code>EXTENSION_SUPPORT_REQUIRED</code></td></tr>
+<tr><td>Task 不存在</td><td><code>TaskNotFoundError</code></td><td><code>NOT_FOUND</code></td><td><code>-32001</code></td><td>404</td><td><code>TASK_NOT_FOUND</code></td></tr>
+<tr><td>续交未激活 hitl/v1</td><td><code>InvalidParamsError</code></td><td><code>INVALID_ARGUMENT</code></td><td><code>-32602</code></td><td>400</td><td><code>HITL_NOT_ACTIVATED</code></td></tr>
+<tr><td><code>contextId</code> 或调用用户与 Task 不一致</td><td>同上</td><td>同上</td><td>同上</td><td>400</td><td><code>HITL_IDENTITY_MISMATCH</code></td></tr>
+<tr><td>Task 不在等待输入、<code>batchId</code> 不是当前批次、<code>id</code> 不属于当前批次</td><td>同上</td><td>同上</td><td>同上</td><td>400</td><td><code>HITL_BATCH_MISMATCH</code></td></tr>
+<tr><td>交互已过期、已取消或已被替换</td><td>同上</td><td>同上</td><td>同上</td><td>400</td><td><code>HITL_INTERACTION_ENDED</code></td></tr>
+<tr><td>与已接受的回复不同</td><td>同上</td><td>同上</td><td>同上</td><td>400</td><td><code>HITL_REPLY_CONFLICT</code></td></tr>
+<tr><td>回复格式或内容不合法</td><td>同上</td><td>同上</td><td>同上</td><td>400</td><td><code>HITL_INVALID_REPLY</code></td></tr>
+</table></div>
+<div class="tw"><table>
+<tr><th>条款</th><th>内容</th></tr>
+<tr><td><span class="tag p">H-40</span></td><td><code>HITL_</code> 开头的原因放在 <code>google.rpc.ErrorInfo</code> 中，<code>domain</code> 使用 BCN 的错误域（HQ-6）；标准错误仍使用 <code>a2a-protocol.org</code>。</td></tr>
+<tr><td><span class="tag p">H-41</span></td><td>上表中的错误都表示这条消息完全没有生效。调用方应调用 GetTask，按回执关闭或保留卡片。</td></tr>
+<tr><td><span class="tag p">H-42</span></td><td>超时、<code>UNAVAILABLE</code> 等结果不确定的错误，调用方先用 GetTask 查看回执；没有对应回执时，可以重发同一条回复（H-34）。</td></tr>
+</table></div>
+<h2 id="s11"><span class="n">11</span>安全</h2>
+<div class="tw"><table>
+<tr><th>风险</th><th>措施</th></tr>
+<tr><td>从文本或事件中误判为批准</td><td>只认结构化回复（H-14）；工具记录不表示批准（H-21）</td></tr>
+<tr><td>批准后参数被替换</td><td>回执绑定交互，交互绑定 <code>argsSha256</code>；参数变化必须重新审批（H-19）</td></tr>
+<tr><td>等待超时后默认放行</td><td>exec 过期一律拒绝（H-20）；未激活时不得放行（H-07）</td></tr>
+<tr><td>人无法拒绝</td><td>exec 必须提供拒绝选项（H-18）</td></tr>
+<tr><td>别的用户替原用户回答</td><td>续交时核对调用用户与创建 Task 时一致（P-103）；群里谁能回答由 BCS 决定</td></tr>
+<tr><td>回复被并发篡改或重复执行</td><td>条件写入，只有一方生效；恢复执行只发生一次（HR-2、HR-3）</td></tr>
+<tr><td>展示内容注入</td><td><code>title</code>、<code>description</code>、<code>label</code>、<code>plan</code> 都是纯文本，调用方不得当作 HTML 或脚本执行</td></tr>
+<tr><td>凭据泄露</td><td>不支持密码类问题（H-12）；参数快照和摘要中不得包含凭据和 userId（P-105）</td></tr>
+<tr><td>超大请求</td><td>批次 1–64 个交互；单个 <code>args</code> 编码后不超过 128 KiB；承载批次的 DataPart 不超过 240,000 字节（沿用 v1）</td></tr>
+</table></div>
+<h2 id="s12"><span class="n">12</span>多实例与重启（对引擎的要求）</h2>
+<p>沿用上位稿的结论：Task 状态的唯一来源是引擎的运行记录（D3），停机恢复由引擎保证（D4）。hitl/v1 在此基础上增加以下要求，它们是上位稿 R-01–R-09 的补充。</p><div class="tw"><table>
+<tr><th>编号</th><th>要求</th></tr>
+<tr><td><span class="tag p">HR-1</span></td><td>批次和回执保存在引擎的运行记录中，任何实例都能读出；GetTask 返回的 <code>Task.metadata</code> 包含回执。</td></tr>
+<tr><td><span class="tag p">HR-2</span></td><td>回执按交互条件写入：只有交互仍待处理时才写入成功。两个实例同时接受不同回复时，只有一个成功，另一个按冲突处理。</td></tr>
+<tr><td><span class="tag p">HR-3</span></td><td>恢复执行只发生一次：写入批次最后一个回执的那次条件写入，同时把批次标为已结束并取得恢复权；其他实例不得恢复。</td></tr>
+<tr><td><span class="tag p">HR-4</span></td><td>过期按绝对时间处理，可以由任何实例执行，同样使用条件写入，与回复竞争时只有一方生效。</td></tr>
+<tr><td><span class="tag p">HR-5</span></td><td>重启后待处理批次保持不变，过期时间不因重启而延长。</td></tr>
+</table></div>
+<h2 id="s13"><span class="n">13</span>Java SDK 支持</h2>
+<p>hitl/v1 依赖 Task，放在 SDK 支持引擎模式的阶段交付，第一期（消息模式）不包含。托管模式不支持。SDK 提供编解码和校验，状态保存与恢复由引擎负责。</p><div class="tw"><table>
+<tr><th></th><th>SDK</th><th>引擎（业务实现）</th></tr>
+<tr><td>发起</td><td>构造批次并校验 H-08–H-12、H-18、H-28–H-32；生成 <code>INPUT_REQUIRED</code> 状态更新和摘要；计算 <code>argsSha256</code></td><td>决定何时需要人参与；先持久化批次（H-30）</td></tr>
+<tr><td>输出检查</td><td>没有激活 hitl/v1 时拒绝输出 <code>INPUT_REQUIRED</code>；类型超出调用方声明时拒绝</td><td>—</td></tr>
+<tr><td>续交</td><td>解析回复，按 9.2 的第 1、3–7 步校验，区分幂等重放和新回复</td><td>提供当前批次和回执；条件写入（HR-2）；恢复执行（HR-3）</td></tr>
+<tr><td>回执</td><td>编码和解码 <code>Task.metadata["bcn.hitl"]</code>，检查上限（H-17）</td><td>保存回执</td></tr>
+<tr><td>过期</td><td>提供各类型的兜底结果（H-20、H-23、H-25）</td><td>按时触发过期并条件写入（HR-4）</td></tr>
+<tr><td>错误</td><td>按第 10 节映射三种绑定的错误</td><td>—</td></tr>
+</table></div>
+<pre><code>// 发起：引擎判断需要审批，构造批次（SDK 在 build() 中校验）
+HitlBatch batch = HitlBatch.builder("batch-001", expiresAt)
+    .add(HitlInteraction.exec("itx-001", toolCall)          // toolCallId、name、args；SDK 计算 argsSha256
+        .option("allow_once", "允许本次", Effect.ALLOW)
+        .option("deny", "拒绝", Effect.DENY))
+    .summary("需要你确认转账 100.00 元")
+    .build();
+engine.savePending(taskId, batch);                            // 先持久化（H-30）
+emitter.emit(Hitl.inputRequired(taskId, contextId, batch));   // INPUT_REQUIRED 状态更新
+
+// 续交：在 sendMessage / sendStreamingMessage 中
+Optional&lt;HitlReply&gt; reply = Hitl.reply(call);                 // 带 taskId 且有回复 DataPart 时才有值
+if (reply.isPresent()) {
+    HitlPending pending = engine.pending(taskId);             // 当前批次和回执
+    HitlCheck check = Hitl.check(pending, reply.get());       // 9.2 的第 3–7 步，不合法时抛出对应错误
+    if (!check.isReplay()) {
+        engine.accept(taskId, check.accepted());              // 条件写入；批次结束时恢复执行（HR-2、HR-3）
+    }
+    return engine.snapshot(taskId);                           // 快照的 metadata 中带回执
+}</code></pre><h2 id="s14"><span class="n">14</span>BCS 改造</h2>
+<div class="tw"><table>
+<tr><th>环节</th><th>改造内容</th></tr>
+<tr><td>注册</td><td>识别 hitl/v1 的 URI；声明了 hitl/v1 的 Card 必须声明 <code>streaming: true</code>（H-01）</td></tr>
+<tr><td>发送</td><td>对声明了 hitl/v1 的 Agent，在 <code>A2A-Extensions</code> 中请求 hitl/v1。BCS 只支持三种基础类型，不写 <code>bcn.hitl.kinds</code></td></tr>
+<tr><td>发起</td><td>解析批次，为每个交互调用现有的交互服务创建卡片，按下表映射字段；暂停运行预算，等待截止时间取 <code>expiresAtMs</code> 与 BCS 等待预算中较早的一个</td></tr>
+<tr><td>回复</td><td>每张卡单独续交（部分回复）。ask_user 的 <code>customValues</code> 只在 BCS 内部使用，线上只发 <code>values</code></td></tr>
+<tr><td>确认</td><td>从响应快照或 GetTask 的回执中确认已被接受，然后关闭卡片。现有的 exec 回执确认逻辑推广到三种类型</td></tr>
+<tr><td>结束</td><td>核对时发现 <code>expired</code>、<code>canceled</code>、<code>superseded</code> 的交互，关闭对应卡片；放弃等待时调用 CancelTask（H-36）</td></tr>
+<tr><td>恢复</td><td>批次结束后恢复预算，SubscribeToTask 继续接收输出（与现状相同）</td></tr>
+<tr><td>兼容</td><td>迁移期同时请求 structured-input-exec/v1 和 hitl/v1，按 Agent 响应中确认激活的那个处理</td></tr>
+</table></div>
+<h3><span class="n">14.1</span>字段映射</h3>
+<div class="tw"><table>
+<tr><th>hitl/v1</th><th>BCS 交互事件</th><th>说明</th></tr>
+<tr><td><code>batchId</code> + <code>id</code></td><td><code>interactionId</code></td><td>沿用现有做法：对两者做摘要生成 BCS 的交互 ID</td></tr>
+<tr><td><code>batchId</code></td><td><code>inputRequestId</code></td><td></td></tr>
+<tr><td><code>kind</code></td><td><code>kind</code></td><td>三种基础类型一一对应</td></tr>
+<tr><td><code>expiresAtMs</code></td><td><code>expiresAtMs</code></td><td></td></tr>
+<tr><td><code>title</code>、<code>description</code></td><td><code>title</code>、<code>description</code></td><td></td></tr>
+<tr><td><code>options[]</code></td><td><code>options[]</code></td><td><code>decision</code>、<code>label</code> 原样；<code>effect</code>、<code>recommended</code>、<code>targetMode</code> 保留在原始数据中</td></tr>
+<tr><td><code>exec.name</code>、<code>exec.command</code></td><td><code>command</code></td><td>有 <code>command</code> 时用它，否则用工具名</td></tr>
+<tr><td><code>exec.toolCallId</code>、<code>args</code>、<code>argsSha256</code></td><td>同名字段</td><td>与现有 A2A 审批卡相同</td></tr>
+<tr><td><code>questions[]</code></td><td><code>questions[]</code></td><td>字段名相同</td></tr>
+<tr><td><code>modeSwitch.fromMode</code>、<code>targetMode</code></td><td><code>fromMode</code>、<code>targetMode</code></td><td><code>plan</code> 映射为 <code>description</code></td></tr>
+</table></div>
+<h2 id="s15"><span class="n">15</span>与 structured-input-exec/v1 的关系和迁移</h2>
+<div class="tw"><table>
+<tr><th>方面</th><th>structured-input-exec/v1</th><th>hitl/v1</th></tr>
+<tr><td>覆盖</td><td>只有 exec</td><td>exec、ask_user、mode_switch，可以扩展</td></tr>
+<tr><td>表达方式</td><td>JSON Schema 加 <code>x-bcs-exec</code> 注解</td><td>强类型字段</td></tr>
+<tr><td>外部依赖</td><td>上游实验草案（固定提交）</td><td>无</td></tr>
+<tr><td>一次请求</td><td>一批工具，逐个工具回答</td><td>一批交互，逐个交互回答</td></tr>
+<tr><td>决策值</td><td>固定为 <code>allow_once</code> / <code>deny</code></td><td>Agent 定义，语义看 <code>effect</code></td></tr>
+<tr><td>回执位置</td><td><code>Task.metadata</code> 中以 profile URI 为键</td><td><code>Task.metadata["bcn.hitl"]</code></td></tr>
+<tr><td>过期、取消、替换</td><td>只有过期</td><td>四种结束原因</td></tr>
+</table></div>
+<ol class="seq"><li><span>评审通过本设计，确定 URI 和错误域。</span></li><li><span>BCS 同时支持两个扩展；对两个都声明的 Agent 两个都请求。</span></li><li><span>Java SDK 在引擎模式阶段只实现 hitl/v1。</span></li><li><span>Harness adapter 迁移到 hitl/v1，Card 中同时声明两个扩展一段时间。同时收到两个扩展的请求时，Agent 只激活 hitl/v1；A2A 不允许在版本之间自动回退，这里两个是不同的扩展，各自独立协商。</span></li><li><span>所有 Agent 迁移完成后，BCS 下线 v1 支持。</span></li></ol><h2 id="s16"><span class="n">16</span>上位稿需要同步的修改</h2>
+<p>评审通过后，再修改上位设计稿的以下位置：</p><div class="tw"><table>
+<tr><th>位置</th><th>修改</th></tr>
+<tr><td>6.3 等级</td><td>L3 的含义从“exec 审批”改为“人机交互（hitl/v1）”，要求不变：必须是 L2</td></tr>
+<tr><td>6.4 Card 示例</td><td>L3 示例改为声明 hitl/v1</td></tr>
+<tr><td>P-62</td><td>改为：<code>INPUT_REQUIRED</code> 只用于已激活的 hitl/v1（兼容期内也包括 structured-input-exec/v1）</td></tr>
+<tr><td>7.4 扩展点、7.6 透传</td><td>exec 审批的条目改为 hitl/v1；BCS 需要理解 hitl/v1，它属于平台扩展，不能透传</td></tr>
+<tr><td>8.7 编解码工具库</td><td>审批编解码改为 hitl/v1 编解码</td></tr>
+<tr><td>9.2 对引擎的要求</td><td>增加 HR-1–HR-5</td></tr>
+<tr><td>15 分期</td><td>hitl/v1 与引擎模式同一阶段交付</td></tr>
+</table></div>
+<h2 id="s17"><span class="n">17</span>测试用例</h2>
+<p>以下用例进入 TCK 的 hitl 分组，Java SDK 和 BCS 都要通过。</p><div class="tw"><table>
+<tr><th>编号</th><th>场景</th><th>期望</th></tr>
+<tr><td>T-01</td><td>未激活 hitl/v1，Agent 需要审批</td><td>不进入 <code>INPUT_REQUIRED</code>；按 6.3 兜底</td></tr>
+<tr><td>T-02</td><td>批次缺少 <code>options</code> 和 <code>questions</code>、exec 缺少拒绝选项、问题超过 4 个</td><td>SDK 在输出前拒绝</td></tr>
+<tr><td>T-03</td><td>Agent 发起调用方未声明的类型</td><td>SDK 在输出前拒绝</td></tr>
+<tr><td>T-04</td><td>发出 <code>INPUT_REQUIRED</code> 后</td><td>流结束；GetTask 能读到批次</td></tr>
+<tr><td>T-05</td><td>两项批次只回复一项</td><td>Task 仍为 <code>INPUT_REQUIRED</code>；回执中有这一项</td></tr>
+<tr><td>T-06</td><td>同一回复提交两次</td><td>第二次成功且无变化</td></tr>
+<tr><td>T-07</td><td>已接受后提交不同回复</td><td><code>HITL_REPLY_CONFLICT</code>，回执不变</td></tr>
+<tr><td>T-08</td><td>回复中一项合法、一项不合法</td><td>整条消息被拒绝，两项都不生效</td></tr>
+<tr><td>T-09</td><td>旧批次的回复、不存在的交互 ID</td><td><code>HITL_BATCH_MISMATCH</code></td></tr>
+<tr><td>T-10</td><td>过期后回复</td><td><code>HITL_INTERACTION_ENDED</code>；exec 按拒绝处理</td></tr>
+<tr><td>T-11</td><td>等待期间 CancelTask</td><td>待处理交互标为 <code>canceled</code>；Task 为 <code>CANCELED</code></td></tr>
+<tr><td>T-12</td><td>两个实例同时收到同一交互的不同回复</td><td>只有一个成功；只恢复执行一次</td></tr>
+<tr><td>T-13</td><td>等待期间重启实例</td><td>批次保持，回复仍能被接受，过期时间不变</td></tr>
+<tr><td>T-14</td><td>最后一项回复后 Task 很快完成</td><td>GetTask 仍能读到全部回执</td></tr>
+<tr><td>T-15</td><td>续交未激活 hitl/v1、<code>contextId</code> 不一致、调用用户不一致</td><td>分别返回对应错误</td></tr>
+<tr><td>T-16</td><td>问答型：单选给两个值、不允许自定义时给自定义值、漏答</td><td><code>HITL_INVALID_REPLY</code></td></tr>
+<tr><td>T-17</td><td>用 SendStreamingMessage 续交，以及用 SendMessage 续交后 SubscribeToTask</td><td>两种方式都能收到后续输出直到终态</td></tr>
+</table></div>
+<h2 id="s18"><span class="n">18</span>待决问题</h2>
+<div class="tw"><table>
+<tr><th>编号</th><th>问题</th><th>建议</th></tr>
+<tr><td><span class="tag q">HQ-1</span></td><td><code>effect</code> 是否对所有决策型交互都必填</td><td>exec 必填，其他可选。mode_switch 的“切换 / 不切换”也有明确的允许和拒绝含义，可以考虑一起改为必填</td></tr>
+<tr><td><span class="tag q">HQ-2</span></td><td>“本会话内一直允许”等授权范围是否需要标准字段，供 BCS 展示和审计</td><td>v1 不标准化，由 Agent 用选项表达；BCS 有明确需求时再增加可选字段</td></tr>
+<tr><td><span class="tag q">HQ-3</span></td><td>ask_user 是否接受纯文本回复（方便不认识本扩展的客户端）</td><td>不接受，避免从文本推断答案（H-14）</td></tr>
+<tr><td><span class="tag q">HQ-4</span></td><td>BCS 何时支持自定义类型的通用渲染（按形态渲染按钮和表单）</td><td>v1 不支持，BCS 只处理三种基础类型；有业务需要时再做</td></tr>
+<tr><td><span class="tag q">HQ-5</span></td><td><code>bcn.hitl</code> 的位置</td><td>随 payload 设计中 metadata 键的定稿</td></tr>
+<tr><td><span class="tag q">HQ-6</span></td><td><code>HITL_</code> 错误原因使用的 <code>ErrorInfo.domain</code></td><td>与其他 BCN 扩展统一确定</td></tr>
+<tr><td><span class="tag q">HQ-7</span></td><td>非流式 Agent（L1）是否支持人机交互</td><td>v1 不支持。BCS 的轮询路径目前也不处理 <code>INPUT_REQUIRED</code></td></tr>
+<tr><td><span class="tag q">HQ-8</span></td><td>上游 Structured Input 稳定后是否回到上游</td><td>届时再评估。ask_user 可以映射为它的一种表达，不影响 exec 和 mode_switch</td></tr>
+<tr><td><span class="tag q">HQ-9</span></td><td>扩展 URI</td><td>与 tools/v2 统一，使用 SDK 管理的命名方式</td></tr>
+<tr><td><span class="tag q">HQ-10</span></td><td>上限：每批 64 个交互、单个参数 128 KiB、批次 240,000 字节、回执 64 批</td><td>沿用 v1 的数值，按实际业务调整</td></tr>
+</table></div>
+<h2 id="s19"><span class="n">19</span>参考</h2>
+<ul><li>A2A 规范 1.0：3.4 节（<code>input-required</code> 与续交）、流式响应在终态或中断态关闭的规定、错误映射表</li><li>A2A 扩展文档：Profile 类扩展、版本与不得跨版本回退、扩展数据的校验要求</li><li>BCS 交互模型：<code>apps/bcs/crates/contracts/bcs-protocol/src/stream/event.rs</code>、<code>apps/bcs/crates/services/bcs-interaction/src/management.rs</code></li><li>BCS 的 A2A 审批处理：<code>apps/bcs/crates/external-clients/bcs-a2a-http/src/delivery_interaction.rs</code>、<code>structured_exec.rs</code></li><li><code>docs/specs/a2a/structured-input-exec/v1.md</code></li><li>上位文档：<code>design.html</code>（BCN A2A Profile 与 Java Server SDK 详细设计）、<code>phase1-basic-spi.html</code>（第一期实现文档）</li></ul>
+</main></div>
