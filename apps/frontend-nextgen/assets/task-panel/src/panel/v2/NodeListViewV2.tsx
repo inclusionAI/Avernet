@@ -1,13 +1,13 @@
 // @asset-migrated: teamclaw 自研资产
 /**
  * NodeListViewV2 —— L1 节点卡片列表(PRD 方案A):
- * 节点有明确执行会话时按节点目标联动；目标缺失时，第一棒保留宿主原会话恢复兜底；
- * 节点点击仅做会话联动；下钻入口当前先隐藏，不提供节点副屏下钻展示。
+ * 点根节点 = 选中并恢复宿主会话；点其他节点 = 选中并联动会话；
+ * 节点本体仅做会话联动；独立图标下钻到节点副屏，不联动会话。
  * 卡片信息:present 状态点/标题(完成划线)/执行体 pill(群/单聊 icon)/返工次数/HITL 徽章/子任务入口。
  */
 import React from 'react';
 
-import { Info, Users } from '../icons';
+import { ChevronRight, Info, Users } from '../icons';
 import { resolveNodeSessionTarget } from '../sessionResolution';
 import { Empty as StateEmpty } from '../theme';
 import { C, PRESENT_TONES } from '../tokens';
@@ -49,9 +49,13 @@ export const NodeListViewV2: React.FC<NodeListViewV2Props> = ({ task, nav, onOpe
           node.executorLabel || node.assigneeName || (isGroup ? node.groupName : null) || node.executor || '—';
         const selected = nav.selectedNodeId === node.id;
         const target = resolveNodeSessionTarget(node, task);
+        // 下钻必须有节点自身的会话与映射身份，不能借用会话导航的任务级 fallback。
+        const canDrill = Boolean(node.sessionId?.trim() && (node.drillable === true || node.assignee?.trim()));
+        const drillReason = '节点缺少会话或执行者信息，无法下钻';
+        const isRootNode = node.id === rootNodeId;
         const stageName = `第${stageIndex + 1}棒 ${node.name}`;
         const selectForConversation = () => {
-          if (node.id === rootNodeId && !target) nav.selectRootNode(node.id);
+          if (isRootNode) nav.selectRootNode(node.id);
           else nav.selectNode(node.id, target);
         };
         return (
@@ -62,6 +66,7 @@ export const NodeListViewV2: React.FC<NodeListViewV2Props> = ({ task, nav, onOpe
             aria-label={`选中节点 ${stageName}`}
             onClick={selectForConversation}
             onKeyDown={(e) => {
+              if (e.target !== e.currentTarget) return;
               if (e.key === 'Enter' || e.key === ' ') {
                 e.preventDefault();
                 selectForConversation();
@@ -131,6 +136,34 @@ export const NodeListViewV2: React.FC<NodeListViewV2Props> = ({ task, nav, onOpe
                 {node.needsHitl && present === 'running' && <span style={badgeStyle(C.warning)}>人工处理</span>}
               </div>
             </div>
+            <button
+              type="button"
+              aria-label={`下钻 ${node.name}${canDrill ? '' : `：${drillReason}`}`}
+              aria-disabled={!canDrill}
+              title={canDrill ? '下钻节点副屏' : drillReason}
+              onClick={(e) => {
+                e.stopPropagation();
+                // null 只更新下钻栈；传入会话目标会同时触发宿主导航。
+                if (canDrill) nav.drillInto(node.id, null);
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = C.surfaceAlt)}
+              onMouseLeave={(e) => (e.currentTarget.style.background = C.surface)}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: 28,
+                height: 28,
+                border: `1px solid ${C.border}`,
+                borderRadius: 6,
+                background: C.surface,
+                color: canDrill ? C.primary : C.textMuted,
+                cursor: canDrill ? 'pointer' : 'not-allowed',
+                flexShrink: 0,
+              }}
+            >
+              <ChevronRight size={16} color={canDrill ? C.primary : C.textMuted} aria-hidden="true" />
+            </button>
             {node.hasSubTask && node.subTaskId && onOpenSubTask && (
               <button
                 type="button"

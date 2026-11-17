@@ -1,11 +1,11 @@
 /** @vitest-environment jsdom */
 // NodeListViewV2 覆盖补齐:空态/键盘选择/执行体与返工徽章/HITL 徽章/子任务入口/未知态兜底。
-import type { TaskView } from '../../../src/panel/types';
-import { NodeListViewV2 } from '../../../src/panel/v2/NodeListViewV2';
-import type { TaskPanelNav } from '../../../src/panel/v2/taskPanelNav';
 import '@testing-library/jest-dom/vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { TaskView } from '../../../src/panel/types';
+import { NodeListViewV2 } from '../../../src/panel/v2/NodeListViewV2';
+import type { TaskPanelNav } from '../../../src/panel/v2/taskPanelNav';
 
 interface RecordedNav {
   nav: TaskPanelNav;
@@ -13,13 +13,19 @@ interface RecordedNav {
     root: string[];
     select: Array<[string, unknown]>;
     default: string[];
-    drill: string[];
+    drill: Array<[string, unknown]>;
     back: number[];
   };
 }
 
 function makeNav(selectedNodeId: string | null = null): RecordedNav {
-  const calls = { root: [] as string[], select: [] as Array<[string, unknown]>, default: [] as string[], drill: [] as string[], back: [] as number[] };
+  const calls = {
+    root: [] as string[],
+    select: [] as Array<[string, unknown]>,
+    default: [] as string[],
+    drill: [] as Array<[string, unknown]>,
+    back: [] as number[],
+  };
   const nav = {
     selectedNodeId,
     drillStack: [] as string[],
@@ -32,8 +38,8 @@ function makeNav(selectedNodeId: string | null = null): RecordedNav {
     selectDefaultNode: (id: string) => {
       calls.default.push(id);
     },
-    drillInto: (id: string) => {
-      calls.drill.push(id);
+    drillInto: (id: string, target: unknown) => {
+      calls.drill.push([id, target]);
     },
     backToOverview: () => {
       calls.back.push(1);
@@ -186,5 +192,76 @@ describe('NodeListViewV2 覆盖补齐', () => {
     expect(onOpenSubTask).toHaveBeenCalledWith('sub-1');
     expect(recorded.calls.root).toHaveLength(0);
     expect(recorded.calls.select).toHaveLength(0);
+  });
+
+  it.each([
+    ['Bot', { sessionId: 'sess-bot', assignee: 'bot-2', runMode: 'single_bot' }],
+    ['group', { sessionId: 'bcs_grp_2', groupId: 'g-2', drillable: true, runMode: 'coop_group' }],
+  ])('有效 %s 图标只下钻，始终传 null，不选择或联动会话', (_label, fields) => {
+    const node = { ...task.nodes[1], ...fields };
+    render(<NodeListViewV2 task={{ ...task, nodes: [task.nodes[0], node] }} nav={recorded.nav} />);
+    const icon = screen.getByRole('button', { name: `下钻 ${node.name}` });
+    expect(icon).toHaveAttribute('aria-disabled', 'false');
+    fireEvent.click(icon);
+    expect(recorded.calls.drill).toEqual([[node.id, null]]);
+    expect(recorded.calls.root).toEqual([]);
+    expect(recorded.calls.select).toEqual([]);
+  });
+
+  it.each([
+    ['Bot 缺 session（有主会话 fallback）', { assignee: 'bot-2', runMode: 'single_bot' }],
+    ['群缺 session（派生会话不唯一）', { drillable: true, runMode: 'coop_group' }],
+    ['群缺 session（派生会话唯一）', { drillable: true, runMode: 'bbs' }],
+    ['session 空白', { sessionId: '  ', assignee: 'bot-2' }],
+    ['未知执行者', { sessionId: 'sess-unknown', executor: '显示名称不是身份' }],
+    ['Bot 身份空白', { sessionId: 'sess-bot', assignee: '  ' }],
+    ['群未被 mapper 确认', { sessionId: 'bcs_grp_2', runMode: 'coop_group', groupName: '群名称' }],
+  ])('%s：图标可聚焦并解释不可用，不借用任务级会话', (label, fields) => {
+    const node = { ...task.nodes[1], ...fields };
+    const derivedSessionIds = label.includes('不唯一') ? ['bcs_grp_a', 'bcs_grp_b'] : task.derivedSessionIds;
+    render(<NodeListViewV2 task={{ ...task, derivedSessionIds, nodes: [node] }} nav={recorded.nav} />);
+    const icon = screen.getByRole('button', { name: `下钻 ${node.name}：节点缺少会话或执行者信息，无法下钻` });
+    expect(icon).toHaveAttribute('aria-disabled', 'true');
+    expect(icon).toHaveAttribute('title', '节点缺少会话或执行者信息，无法下钻');
+    icon.focus();
+    expect(icon).toHaveFocus();
+    fireEvent.click(icon);
+    for (const key of ['Enter', ' ']) {
+      // 原生 button 的键盘默认行为生成 click；keydown 不应被父卡片处理。
+      fireEvent.keyDown(icon, { key });
+      fireEvent.keyUp(icon, { key });
+      fireEvent.click(icon, { detail: 0 });
+    }
+    expect(recorded.calls.drill).toEqual([]);
+    expect(recorded.calls.root).toEqual([]);
+    expect(recorded.calls.select).toEqual([]);
+  });
+
+  it.each(['Enter', ' '])('%s：图标和子任务按钮不冒泡选择，卡片本体仍可激活', (key) => {
+    const node = { ...task.nodes[3], sessionId: 'sess-sub', assignee: 'bot-2' };
+    const onOpenSubTask = vi.fn();
+    render(
+      <NodeListViewV2
+        task={{ ...task, nodes: [task.nodes[0], node] }}
+        nav={recorded.nav}
+        onOpenSubTask={onOpenSubTask}
+      />,
+    );
+    const icon = screen.getByRole('button', { name: `下钻 ${node.name}` });
+    const child = screen.getByRole('button', { name: '子任务' });
+    for (const control of [icon, child]) {
+      fireEvent.keyDown(control, { key });
+      expect(recorded.calls.select).toEqual([]);
+      expect(recorded.calls.root).toEqual([]);
+      fireEvent.keyUp(control, { key });
+      fireEvent.click(control, { detail: 0 });
+    }
+    expect(recorded.calls.drill).toEqual([[node.id, null]]);
+    expect(onOpenSubTask).toHaveBeenCalledTimes(1);
+    expect(onOpenSubTask).toHaveBeenCalledWith('sub-1');
+    expect(recorded.calls.select).toEqual([]);
+    fireEvent.keyDown(screen.getByRole('button', { name: `选中节点 第2棒 ${node.name}` }), { key });
+    expect(recorded.calls.select).toEqual([[node.id, expect.objectContaining({ sessionId: 'sess-sub' })]]);
+    expect(recorded.calls.drill).toHaveLength(1);
   });
 });
