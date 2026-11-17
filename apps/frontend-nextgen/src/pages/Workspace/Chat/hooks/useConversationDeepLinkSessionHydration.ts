@@ -1,6 +1,7 @@
 // URL 深链会话冷启动兜底：选中态只记录 bot/sessionId，不负责按 sessionId 精确加载会话。
 // 当列表页没有覆盖该会话时，这里主动拉取详情并写入选择快照，避免深链页面由于
 // 列表缓存不可见而无法解析会话。
+import { getCapabilities } from '@/capabilities';
 import { resolveCodingSessionOrigin, type ConversationBotView } from '@/domain/conversation';
 import { isManagedConversationSection } from '@/domain/conversation/types';
 import { botContainerService } from '@/services/botWorkshop/botContainerService';
@@ -13,9 +14,10 @@ import {
 } from '@/services/workspace/botSessionService';
 import { botSessionService } from '@/services/workspace/botSessionService';
 import type { DomainResult } from '@/services/workspace/identityService';
+import { useErrorNotifyStore } from '@/stores/errorNotifyStore';
 import { useConversationStore } from '@/stores/conversationStore';
 import { selectedSnapshotMatches } from '@/stores/conversationStoreSnapshot';
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useReducer, useRef } from 'react';
 
 export interface UseConversationDeepLinkSessionHydrationOptions {
   userId: string | null;
@@ -27,7 +29,9 @@ export interface UseConversationDeepLinkSessionHydrationOptions {
 type SessionDetailResult = DomainResult<BotChatSessionView>;
 
 function canProbeByInstance(bot: ChatBotView): boolean {
-  return supportsConversationInstanceScope(bot) && !bot.isAgentCodingBot;
+  if (!supportsConversationInstanceScope(bot) || bot.isAgentCodingBot) return false;
+  const state = getCapabilities().getConversationInstanceScope().value?.getState(bot);
+  return Boolean(state?.ready && state.service && state.multiInstance);
 }
 
 async function resolveSessionFromContainer(
@@ -44,7 +48,8 @@ async function resolveSessionFromContainer(
   if (preferredDeviceUuid) {
     tried.add(preferredDeviceUuid);
     const range = buildConversationSessionRequestRange(bot, preferredDeviceUuid);
-    const result = await botSessionService.getSessionDetail(bot, userId, sessionId, range);
+    const result = await botSessionService.getSessionDetail(bot, userId, sessionId, range, { silentNotFound: true });
+    if (!result.ok && result.error.code !== 'NOT_FOUND') return { result };
     if (result.ok && result.data?.sessionId === sessionId && result.data.botId === bot.botId) {
       return { result, deviceUuid: preferredDeviceUuid };
     }
@@ -60,13 +65,15 @@ async function resolveSessionFromContainer(
       if (!instance.id || tried.has(instance.id)) continue;
       tried.add(instance.id);
       const range = buildConversationSessionRequestRange(bot, instance.id);
-      const result = await botSessionService.getSessionDetail(bot, userId, sessionId, range);
+      const result = await botSessionService.getSessionDetail(bot, userId, sessionId, range, { silentNotFound: true });
+      if (!result.ok && result.error.code !== 'NOT_FOUND') return { result };
       if (result.ok && result.data?.sessionId === sessionId && result.data.botId === bot.botId) {
         return { result, deviceUuid: instance.id };
       }
     }
   } catch {
-    // fall through to no-deviceUuid query below on multi-instance lookup failure
+    // The request layer retains the original instance-list error notification.
+    return { result: { ok: false, error: { code: 'INSTANCE_LOOKUP_FAILED', friendlyMessage: '实例查询失败', canRetry: true } } };
   }
 
   return {
@@ -104,6 +111,14 @@ export function useConversationDeepLinkSessionHydration(options: UseConversation
     return map;
   }, [managedBots, friendBots]);
 
+  const instanceScope = getCapabilities().getConversationInstanceScope().value;
+  const [instanceScopeRevision, refreshInstanceScope] = useReducer((revision: number) => revision + 1, 0);
+  useEffect(() => {
+    if (!instanceScope || !selectedBotId) return;
+    // Reuse discovery owned by the session list; deep-link hydration must not load it again.
+    return instanceScope.subscribe(selectedBotId, refreshInstanceScope);
+  }, [instanceScope, selectedBotId]);
+
   const completedRef = useRef<Set<string>>(new Set());
   const inflightRef = useRef<Set<string>>(new Set());
 
@@ -115,6 +130,9 @@ export function useConversationDeepLinkSessionHydration(options: UseConversation
 
     const bot = botById.get(selectedBotId);
     if (!bot || (selectedOrigin === 'others' && !bot.isAgentCodingBot)) return;
+    if (supportsConversationInstanceScope(bot) && !bot.isAgentCodingBot &&
+        instanceScope && !instanceScope.getState(bot).ready) return;
+
 
     const identity = {
       botId: selectedBotId,
@@ -161,6 +179,18 @@ export function useConversationDeepLinkSessionHydration(options: UseConversation
         friendUserId: selectedOrigin === 'others' ? selectedFriendUserId : null,
         sessionId: selectedSessionId,
       };
+
+      if (!result.ok && result.error.code === 'NOT_FOUND' && canProbeByInstance(bot) &&
+          store.selectedBotId === selectedBotId && store.selectedSection === selectedSection &&
+          store.selectedOrigin === selectedOrigin && store.selectedScope === selectedScope &&
+          store.selectedFriendUserId === currentIdentity.friendUserId && store.selectedSessionId === selectedSessionId &&
+          !selectedSnapshotMatches(store.selectedSessionSnapshot, currentIdentity)) {
+        useErrorNotifyStore.getState().enqueue({
+          toastKey: `session-instance-not-found:${requestKey}`,
+          message: '在该 Bot 的可查询实例中未找到目标会话，请确认会话链接或稍后重试。',
+          operation: 'session-instance-lookup',
+        });
+      }
 
       if (
         !result.ok ||
@@ -210,6 +240,8 @@ export function useConversationDeepLinkSessionHydration(options: UseConversation
     botById,
     hydrated,
     sessionList,
+    instanceScope,
+    instanceScopeRevision,
   ]);
 }
 
