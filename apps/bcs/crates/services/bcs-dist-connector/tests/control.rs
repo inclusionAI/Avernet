@@ -228,13 +228,23 @@ async fn a_cancel_of_a_finished_task_reports_the_agents_own_result() {
     let rig = Rig::new();
     let (_running, _events) = accepted_call(&rig).await;
     rig.agent.on_cancel(CancelOutcome::AlreadyFinished(FinalDispatchOutcome::Completed));
-    rig.agent.on_task(found(TaskStatus::Completed, json!({"state": "completed", "artifacts": []})));
+    // The first read of the finished task fails; the call must wait for its
+    // real result, not end on an empty one.
+    rig.agent.on_task(bcs_service_api::port::dist_agent::QueryOutcome::Unavailable { code: "http_503".into() });
+    rig.agent.on_task(found(TaskStatus::Completed, json!({"artifacts": [{"artifactId": "a-1"}]})));
     rig.worker.cancel().await;
     until("the call ends", || async { rig.phase().await == "ended" }).await;
     let doc = rig.doc().await;
     assert_eq!(doc["execution"]["outcome"], "completed", "the agent finished before the cancel");
     assert_eq!(doc["execution"]["cancellation"], json!({"kind": "already_finished", "outcome": "completed"}));
     assert_eq!(rig.kinds().await, vec!["final"]);
+    let reported = rig.inbox_events().await;
+    assert_eq!(
+        reported[0].1.payload,
+        Payload::Inline(json!({"state": "completed", "artifacts": [{"artifactId": "a-1"}]})),
+        "the agent's own result, read on a later tick"
+    );
+    assert_eq!(rig.agent.count("cancel"), 1, "the cancel is not sent again while the result is read");
 }
 
 #[tokio::test]
@@ -380,25 +390,60 @@ async fn a_recorded_cancel_result_is_completed_by_the_next_holder() {
     assert_eq!(reported.last().unwrap().1.payload, Payload::Inline(json!({"state": "canceled", "code": "agent_canceled"})));
 }
 
-#[tokio::test]
-async fn the_same_question_after_a_reply_is_a_new_interaction() {
-    // A query-only agent: after the reply it asks the very same question again.
-    let rig = Rig::new();
+fn polled_call(rig: &Rig) -> DispatchSpec {
     let mut spec = dispatch_spec(&did());
     spec.capabilities.subscribe = false;
-    rig.worker.create_spec(spec).await;
-    rig.worker.notify().await;
     rig.agent.on_start(Reply::Accepted);
-    rig.agent.on_task(found(TaskStatus::InputRequired, json!({"message": {"parts": [{"text": "A or B?"}]}})));
     rig.agent.on_input(Reply::Accepted);
+    spec
+}
+
+#[tokio::test]
+async fn a_stale_read_of_the_answered_question_is_not_a_new_question() {
+    // A query-only agent that has not processed the reply yet keeps showing
+    // the question that was just answered.
+    let rig = Rig::new();
+    rig.worker.create_spec(polled_call(&rig)).await;
+    rig.worker.notify().await;
+    rig.agent.on_task(found(TaskStatus::InputRequired, json!({"message": {"messageId": "m-1", "parts": [{"text": "A or B?"}]}})));
+    let _running = rig.start();
+    until("the question", || async { rig.kinds().await == vec!["input_required"] }).await;
+    rig.worker.push(pending(1)).await;
+    until("the reply is confirmed", || async { rig.doc().await["execution"]["confirmed_input_through"] == 1 }).await;
+    let polls = rig.agent.count("query_task");
+    until("polled again after the reply", || async { rig.agent.count("query_task") >= polls + 3 }).await;
+    assert_eq!(rig.kinds().await, vec!["input_required"], "the agent asked nothing new");
+}
+
+#[tokio::test]
+async fn a_question_asked_again_after_a_reply_is_a_new_interaction() {
+    let rig = Rig::new();
+    rig.worker.create_spec(polled_call(&rig)).await;
+    rig.worker.notify().await;
+    let question = |id: &str| found(TaskStatus::InputRequired, json!({"message": {"messageId": id, "parts": [{"text": "A or B?"}]}}));
+    rig.agent.on_task(question("m-1"));
     let _running = rig.start();
     until("the first question", || async { rig.kinds().await == vec!["input_required"] }).await;
     rig.worker.push(pending(1)).await;
-    until("the same question again, as round two", || async { rig.kinds().await.len() == 2 }).await;
-    let reported = rig.inbox_events().await;
-    assert_eq!(kind_name(&reported[1].1.kind), "input_required");
-    assert_eq!(reported[0].1.payload, reported[1].1.payload, "identical question");
-    assert_ne!(reported[0].0.input_id, reported[1].0.input_id, "but a new interaction");
+    until("the reply is confirmed", || async { rig.doc().await["execution"]["confirmed_input_through"] == 1 }).await;
+    // The agent works on the reply, then asks the same thing again: a new
+    // message of its own, so not a repeat of what was reported.
+    rig.agent.tasks.lock().unwrap().clear();
+    rig.agent.on_task(found(TaskStatus::Working, json!({"task": {"id": "rt-77c2"}})));
+    until("working is seen", || async { rig.kinds().await.contains(&"snapshot".to_owned()) }).await;
+    rig.agent.tasks.lock().unwrap().clear();
+    rig.agent.on_task(question("m-2"));
+    until("the second question", || async {
+        rig.kinds().await.iter().filter(|k| *k == "input_required").count() == 2
+    })
+    .await;
+    let questions: Vec<_> = rig
+        .inbox_events()
+        .await
+        .into_iter()
+        .filter(|(_, event)| kind_name(&event.kind) == "input_required")
+        .collect();
+    assert_ne!(questions[0].0.input_id, questions[1].0.input_id, "round two has its own identity");
 }
 
 #[tokio::test]

@@ -108,9 +108,11 @@ impl Call {
         self.input_not_sent = 0;
         self.input_resends = 0;
         self.reset_backoff();
-        // A new question round begins: the same question asked again after
-        // this reply is a new interaction, not a repeat of the polled state.
-        self.last_polled = None;
+        // The polled state is deliberately kept: until a poll observes
+        // something else, an identical read is the question just answered
+        // (the agent has not processed the reply yet), not a new one. A
+        // question the agent really asks again differs, because the adapter
+        // passes the agent's message on whole, with its message id.
         Ok(())
     }
 
@@ -190,11 +192,12 @@ impl Call {
         if self.spec().capabilities.query_by_task {
             self.last_polled = None;
             self.poll_remote().await?;
-        }
-        if self.ended {
+            // The task could not be read right now. Its real result (message,
+            // artifacts) must not be replaced by an empty one under the same
+            // identity: stay supervised, the next tick reads it again.
             return Ok(());
         }
-        // The task could not be read: report what the cancel answer said.
+        // The agent offers no task read: report what the cancel answer said.
         match finished {
             FinalDispatchOutcome::Completed => {
                 let payload = Payload::Inline(serde_json::json!({ "state": "completed" }));
