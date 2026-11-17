@@ -59,7 +59,12 @@ fn caller_command(id: &str, user: &str, token: &str) -> WebSendCommand {
 async fn caller_queue_is_scoped_secret_free_and_survives_another_consumer() {
     let (support, mut flow, service) = fixture().await;
     for (id, user, token) in [("im-a", "user-a", "credential-a"), ("im-b", "user-b", "credential-b")] {
-        let cmd = caller_command(id, user, token);
+        let mut cmd = caller_command(id, user, token);
+        if user == "user-b" {
+            let caller = cmd.caller_execution.as_mut().unwrap();
+            caller.token = ExecutionToken::new(token.into(), "test-proof".into());
+            caller.token_type = "test-proof".into();
+        }
         assert!(!format!("{cmd:?}").contains(token));
         flow.handle_web_send(cmd).await.unwrap();
     }
@@ -81,7 +86,7 @@ async fn caller_queue_is_scoped_secret_free_and_survives_another_consumer() {
         let user = ext["caller_context"]["subject"]["ref"].as_str().unwrap();
         let token = ext["caller_execution_token"]["token"].as_str().unwrap();
         assert_eq!(token, if user == "user-a" { "credential-a" } else { "credential-b" });
-        assert_eq!(ext["caller_execution_token"]["type"], "iam-token");
+        assert_eq!(ext["caller_execution_token"]["type"], if user == "user-a" { "iam-token" } else { "test-proof" });
         assert!(!format!("{:?}", prepared.command).contains(token));
         assert!(!prepared.transport_context_json.to_string().contains(token));
         assert_eq!(prepared.command.provider_bypass_headers, vec![("x-routing-zone".into(), "blue".into())]);
@@ -115,6 +120,12 @@ async fn caller_missing_expired_or_mismatched_credentials_fail_closed() {
         assert!(preparer.prepare(&bad).await.is_err(), "{field}");
     }
     let mut record: serde_json::Value = serde_json::from_slice(&original).unwrap();
+    for label in ["", "  "] {
+        record["token_type"] = json!(label);
+        cache.set_value(&key, serde_json::to_vec(&record).unwrap(), Some(std::time::Duration::from_secs(60)), CacheSetMode::Upsert).await.unwrap();
+        assert!(preparer.prepare(&row).await.is_err());
+    }
+    record["token_type"] = json!("iam-token");
     record["expires_at_ms"] = json!(0);
     cache.set_value(&key, serde_json::to_vec(&record).unwrap(), Some(std::time::Duration::from_secs(60)), CacheSetMode::Upsert).await.unwrap();
     assert!(preparer.prepare(&row).await.is_err());
@@ -251,4 +262,17 @@ async fn caller_legacy_cache_failure_releases_unsent_output_runs() {
     assert_eq!(*output.released_runs.lock().unwrap(), *registered);
     assert_eq!(cache.writes.load(SeqCst), 1);
     assert_eq!(cache.reads.load(SeqCst), 1);
+}
+
+#[tokio::test]
+async fn caller_rejects_blank_and_inconsistent_type_labels_before_queueing() {
+    let (_, flow, service) = fixture().await;
+    for (declared, embedded) in [("", ""), ("  ", "  "), ("test-proof", "iam-token")] {
+        let mut cmd = caller_command("invalid-type", "user", "test-value");
+        let caller = cmd.caller_execution.as_mut().unwrap();
+        caller.token_type = declared.into();
+        caller.token = ExecutionToken::new("test-value".into(), embedded.into());
+        assert!(flow.handle_web_send(cmd).await.is_err());
+    }
+    assert!(service.snapshot(None).await.unwrap().is_empty());
 }

@@ -83,3 +83,8 @@ Provider Authorization remains unchanged, and that default-mode sends carry
 no caller header. The ordinary BCS executable never installs this test policy.
 These live-process profiles exercise the generic header adapter in Singlebox
 coverage without importing enterprise names or merging unit-test coverage.
+
+The default runner also repeats the local queue journey with the synthetic
+`test-proof` credential type. Provider receipt must preserve both its exact
+type and token across two callers, callback/SSE sends and cache-loss restart.
+This verifies deployment-owned labels without a vendor-specific core branch.

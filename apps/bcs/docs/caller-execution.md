@@ -33,3 +33,14 @@ closed before sending; generated values are marked sensitive. Policies also
 receive non-chat methods and must explicitly select their supported requests.
 The protected caller send port uses its separate wire contract and does not
 invoke this ordinary Provider policy.
+
+## Credential type ownership
+
+The credential type is an opaque nonempty label supplied by the trusted channel
+plugin. Admission requires its declared label to match `ExecutionToken`'s label;
+the cache and HTTP projection preserve it exactly. Public coordination does not
+interpret a label as an authentication scheme. The receiving Provider validates
+its supported types and owns credential exchange. Deploy compatible consumers
+before a channel starts emitting a new label; older queue consumers may reject
+that label, so drain its jobs before rolling back. Cache TTL, scope validation
+and credential non-persistence are unchanged.
