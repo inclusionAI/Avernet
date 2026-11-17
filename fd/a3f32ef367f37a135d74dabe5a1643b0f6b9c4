@@ -1,0 +1,14 @@
+apps/bcs/crates/service-api/bcn-runtime-api/tests/connector_contract.rs
+  h_f4a73db4ad12be 42
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "fda3f32ef367f37a135d74dabe5a1643b0f6b9c4",
+  "prompts": {},
+  "humans": {
+    "h_f4a73db4ad12be": {
+      "author": "元歌 <yuange.zjy@antgroup.com>"
+    }
+  }
+}

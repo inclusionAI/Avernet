@@ -1,0 +1,26 @@
+apps/bcs/crates/services/bcs-message-flow/tests/relay_capture_diagnostics_contract.rs
+  s_8da14e79ec2145::t_af2edafacf3459 1-378
+apps/bcs/crates/adapters/http/bcs-http/tests/caller_e2e_route_contract.rs
+  s_8da14e79ec2145::t_2fc3558e45fb22 272
+  s_8da14e79ec2145::t_0db95ffec21bab 89-109
+  s_8da14e79ec2145::t_20dfb025da4057 286
+  s_8da14e79ec2145::t_56d6a7451583c1 420-458
+  s_8da14e79ec2145::t_47e93f0fd271cf 250-255
+  s_8da14e79ec2145::t_fe1fe70bab2736 303-309,311-316,322
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2942e4b5795e1b36e708927938e36fd1f73e67a4",
+  "prompts": {},
+  "sessions": {
+    "s_8da14e79ec2145": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "94ef1779-0264-4769-bab1-07f0c72659b9",
+        "model": "glink/GLM-5.3:glink_domestic"
+      },
+      "human_author": "shengping <jeremy.lsp@antgroup.com>"
+    }
+  }
+}

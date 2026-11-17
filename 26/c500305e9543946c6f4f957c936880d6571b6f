@@ -1,0 +1,21 @@
+apps/frontend-nextgen/src/stores/taskSidePanelStoreTypes.ts
+  s_d5f9b24b65380b::t_f4de83e58d4ee1 1-47
+apps/frontend-nextgen/src/stores/taskSidePanelStore.ts
+  s_d5f9b24b65380b::t_10df923e253f82 3,10,13
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "26c500305e9543946c6f4f957c936880d6571b6f",
+  "prompts": {},
+  "sessions": {
+    "s_d5f9b24b65380b": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "54b0f0fd-ba4c-4713-b0b2-cbdfcbc71626",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

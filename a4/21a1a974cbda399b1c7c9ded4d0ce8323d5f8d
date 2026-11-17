@@ -1,0 +1,29 @@
+apps/evolverun/clawweb/public/modules/clawinsight/docs/session-recovery-api.md
+  s_0e0389a35f491c::t_6a3aa7320c23a8 277,283,288,294,302,304,308,324,326,328
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/notifications/__tests__/dingtalk-card.test.ts
+  s_0e0389a35f491c::t_274810c162b70b 1,25-31
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/notifications/dingtalk-sender.ts
+  s_0e0389a35f491c::t_6007d33caad085 78-80,83
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/notification.test.ts
+  s_0e0389a35f491c::t_db9529e901725b 343-344,346,373-375,377,379-380,389,393-394,399,401-402,404,410-411,428,430,433,443,447-448,467-476,480-488
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/task-service.test.ts
+  s_0e0389a35f491c::t_f38d8ec1bf330d 65,70,74,82-83,151
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/user-handoff.test.ts
+  s_0e0389a35f491c::t_34cbb3b40ef9fe 247,277
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a421a1a974cbda399b1c7c9ded4d0ce8323d5f8d",
+  "prompts": {},
+  "sessions": {
+    "s_0e0389a35f491c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a56a-2741-7ad2-b03c-29b728d6311b",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}

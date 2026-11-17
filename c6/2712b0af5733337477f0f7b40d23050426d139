@@ -1,0 +1,19 @@
+apps/bcs/specs/2026-11-13-agentcard-fuse-sync/delivery.md
+  s_3390a382ab8b6f::t_89b8bc09dafef4 5,7-11,13-16,20,50-52,55-56,64-65,69-71
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c62712b0af5733337477f0f7b40d23050426d139",
+  "prompts": {},
+  "sessions": {
+    "s_3390a382ab8b6f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ce64-b71e-7ab0-af3f-e8a007f31b16",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

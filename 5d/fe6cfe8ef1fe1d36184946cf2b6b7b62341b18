@@ -1,0 +1,452 @@
+engine/adapter/src/engine/community/plugins/dws_hosting/llm_task.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 42,44,50
+apps/backend/src/agentclaw/community/core/bot_overview/models.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-143
+apps/backend/src/agentclaw/community/core/bot_overview/README.md
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-42
+apps/backend/tests/community/di/test_openapi_bot_access_check_config.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-115
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/bot_access_check/__init__.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-5
+apps/bcs/crates/services/bcs-collaboration-runtime/src/runtime/rerun.rs
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-261
+apps/backend/src/agentclaw/community/di/container.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 44,51,93-95,138-140,209-211,222,238,335
+apps/bcs/crates/services/bcs-coordination-store/tests/conformance_coordination_intent.rs
+  s_875e3f9d4d0db3::t_f522c796dd65be 18,23,36,125-142
+  s_875e3f9d4d0db3::t_6c224e4f2eda66 143
+apps/bcs/crates/services/bcs-message-flow/src/caller_dispatch_pipeline.rs
+  s_875e3f9d4d0db3::t_f522c796dd65be 207-211,256,329-336,535-541,545-548,588-593,599-603,608,646,651,653-655,662-665,672-678,681,711-713,722,774-783,857-866,978-979,982-983
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/insight/management/service.ts
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-66
+apps/evolverun/clawweb/public/modules/workflow/vitest.config.ts
+  s_875e3f9d4d0db3::t_f522c796dd65be 16-18
+apps/bcs/crates/services/bcs-message-flow/src/caller_dispatch_pipeline/delegate.rs
+  s_875e3f9d4d0db3::t_f522c796dd65be 76-82,215-216,221-222,323-325,334,378-382,400-401,403-407,514-520
+apps/backend/src/agentclaw/community/di/modules/bot_copy_module.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-37
+apps/bcs/crates/services/bcs-collaboration-runtime/src/runtime/definition.rs
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-478
+apps/evolverun/clawweb/public/modules/clawinsight/server/repositories/insight-improvement-repository.ts
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-2,4,6-7,9,237-240,242-247,249-252
+apps/backend/tests/community/endpoints/test_public_bots_overview.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-138
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/insight/governance-item.ts
+  s_875e3f9d4d0db3::t_f522c796dd65be 1,176
+apps/bcs/crates/services/bcs-message-flow/src/caller_dispatch_pipeline/errors.rs
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-46
+apps/frontend-nextgen/src/domain/collaboration/types.ts
+  s_875e3f9d4d0db3::t_f522c796dd65be 158-173,176
+apps/baas/src/secbaas/community/adapters/web/routers/open_api/message_router.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 35,484-486
+apps/bcs/crates/services/bcs-message-flow/src/delivery_runtime.rs
+  s_875e3f9d4d0db3::t_f522c796dd65be 61,505-513,516,537
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/approval-card-repository.ts
+  s_875e3f9d4d0db3::t_f522c796dd65be 177,236,240,248-250,257-260
+apps/backend/tests/community/framework/flow_coverage.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 218-224,230-237
+apps/backend/tests/community/config/golden/singlebox.json
+  s_875e3f9d4d0db3::t_f522c796dd65be 209-211
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/insight/management/runtime.ts
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-12
+apps/evolverun/clawweb/scripts/ci/README.md
+  s_875e3f9d4d0db3::t_f522c796dd65be 20-24
+apps/frontend-nextgen/src/domain/groupTasks/statusProjection.ts
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-41
+apps/backend/src/agentclaw/community/core/config_compose/services/mcporter_composer.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 162-171,286
+apps/bcs/scripts/e2e-test/task_cache_story.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-66
+apps/baas/tests/unit/core/service/bot_run/test_baas_service.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 3320-3364
+apps/bcs/scripts/task_cache_scenarios.cjs
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-67
+apps/backend/src/agentclaw/community/core/bot_overview/payloads.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-47
+apps/evolverun/clawweb/public/modules/workflow/server/routes/approval.ts
+  s_875e3f9d4d0db3::t_f522c796dd65be 83
+apps/frontend-nextgen/test/pages/Workspace/components/GroupChatPane/ManagerWorkerTasks.test.tsx
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-419
+apps/backend/specs/2026-11-02-openapi-bot-access-check/tasks.md
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-75
+apps/backend/tests/community/core/bot_overview/test_bot_overview_service.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-127
+apps/bcs/crates/adapters/http/bcs-api-http/src/v1/openapi/routes/worker_task.rs
+  s_875e3f9d4d0db3::t_f522c796dd65be 19,25
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/approval-workbench-store.test.ts
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-89
+apps/baas/tests/unit/core/service/bot_manage/test_bot_management_service.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 5718,5720-5721,5723-5790,5794-5867
+apps/backend/docs/openapi-v1/README.md
+  s_875e3f9d4d0db3::t_f522c796dd65be 1225
+apps/bcs/crates/services/bcs-collaboration-runtime/src/runtime/bindings.rs
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-223
+apps/backend/tests/community/bot_copy/test_repository.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-133
+apps/frontend-nextgen/test/domain/groupTasks/projection.test.ts
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-169
+apps/bcs/crates/services/bcs-collaboration-runtime/src/runtime/start.rs
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-631
+apps/backend/tests/community/adapters/http/openapi_v1/test_bot_access_check.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-266
+apps/evolverun/clawweb/public/modules/clawinsight/server/index.ts
+  s_875e3f9d4d0db3::t_f522c796dd65be 21-23
+apps/frontend-nextgen/src/services/workspace/messageDeliveryService.ts
+  s_875e3f9d4d0db3::t_f522c796dd65be 1,4,44-66
+apps/evolverun/clawweb/public/modules/clawinsight/server/repositories/insight-improvement-core-repository.ts
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-642
+apps/backend/src/agentclaw/community/di/openapi_bot_access_check_config.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-27
+apps/frontend-nextgen/src/stores/messageDeliveryStore.ts
+  s_875e3f9d4d0db3::t_f522c796dd65be 3,35-39,43
+apps/bcs/scripts/caller_e2e_coverage.sh
+  s_875e3f9d4d0db3::t_f522c796dd65be 21-23
+apps/evolverun/clawweb/public/modules/workflow/docs/approval-workbench.md
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-99
+apps/backend/src/agentclaw/community/core/devices/services/mcp_device_payload.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 134-145
+apps/bcs/crates/services/bcs-message-flow/src/task_flow/dispatch.rs
+  s_875e3f9d4d0db3::t_f522c796dd65be 200-208
+apps/frontend-nextgen/test/services/workspace/groupChatProviderHelpers.test.ts
+  s_875e3f9d4d0db3::t_f522c796dd65be 153-169
+engine/adapter/src/engine/community/core/dws_hosting/decision_repair.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 58
+apps/evolverun/clawweb/public/modules/clawinsight/scripts/insight_manage.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-99
+apps/baas/src/secbaas/community/adapters/web/routers/gateway/message_router.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 32,334-336
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/admission_routes.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 61-64
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/bot_access_check/router.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-135
+apps/backend/tests/community/bot_copy/test_copy_state_field.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-170
+apps/frontend-nextgen/test/services/backendApi/collaboration/workerTaskController.test.ts
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-24
+apps/baas/src/secbaas/community/core/service/publish_manage/_publish_service.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 1409-1417
+apps/backend/tests/community/http/test_copy_retry.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-149
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/authorization_rules.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 51-56,636-641
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/responses.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 93,440
+apps/backend/tests/community/config/golden/community.json
+  s_875e3f9d4d0db3::t_f522c796dd65be 185-187
+apps/bcs/crates/services/bcs-collaboration-runtime/src/runtime/progression.rs
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-331
+apps/backend/tests/community/architecture/test_service_api_conformance.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 375-377,379
+apps/evolverun/clawweb/public/app/clawweb/server/__tests__/public-workflow-comparison.test.ts
+  s_875e3f9d4d0db3::t_f522c796dd65be 20
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/approval-concurrent-actions.test.ts
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-19
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/approval-workbench-store.ts
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-48
+apps/bcs/crates/services/bcs-collaboration-runtime/src/runtime/human_input.rs
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-596
+apps/bcs/crates/services/bcs-message-flow/Cargo.toml
+  s_875e3f9d4d0db3::t_f522c796dd65be 54
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/WorkflowWorkspaceNavigation.test.tsx
+  s_875e3f9d4d0db3::t_f522c796dd65be 33,176-181
+  s_875e3f9d4d0db3::t_7fd95727fdaa95 182
+apps/frontend-nextgen/src/services/backendApi/collaboration/workerTaskController.ts
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-18
+apps/bcs/crates/services/bcs-collaboration-runtime/src/runtime/authoring.rs
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-258
+apps/evolverun/clawweb/public/modules/workflow/web/components/workflow-workspace/__tests__/WorkspaceSidebar.test.tsx
+  s_875e3f9d4d0db3::t_f522c796dd65be 74-87
+apps/frontend-nextgen/src/domain/groupTasks/receiptProjection.ts
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-162
+apps/frontend-nextgen/src/pages/Workspace/components/GroupChatPane/ManagerWorkerTasks.tsx
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-195
+engine/adapter/src/engine/community/core/dws_hosting/tests/test_scope.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 116-117,142
+apps/backend/tests/community/bot_copy/test_status_derive.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-88
+apps/bcs/crates/adapters/http/bcs-api-http/tests/worker_task_routes.rs
+  s_875e3f9d4d0db3::t_f522c796dd65be 64,66
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/bots/copy.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-504
+apps/frontend-nextgen/test/domain/groupTasks/receiptProjection.test.ts
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-148
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/task-service.ts
+  s_875e3f9d4d0db3::t_f522c796dd65be 169-170
+apps/frontend-nextgen/src/services/workspace/groupMessageMapper.ts
+  s_875e3f9d4d0db3::t_f522c796dd65be 5,67,207
+apps/baas/tests/unit/adapters/web/open_api/test_run_router.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 372-393
+  s_875e3f9d4d0db3::t_c9ec111f68b575 371
+apps/baas/tests/unit/adapters/web/test_gateway_message_router.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-62
+apps/baas/tests/unit/core/repository/bot/test_orm_bot_repository.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 1022,1026,1029-1030,1033-1040,1046,1054
+apps/backend/src/agentclaw/community/core/bot_copy/__init__.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-7
+apps/evolverun/clawweb/docs/specs/insight-agent-management.md
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-134
+apps/frontend-nextgen/src/pages/Workspace/components/GroupChatPane/GroupTaskRow.tsx
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-148
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/bot_access_check/schemas.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-48
+apps/bcs/crates/bootstrap/bcs/tests/caller_channel/runner.rs
+  s_875e3f9d4d0db3::t_f522c796dd65be 3,11-12,23
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/insight/management/contracts.ts
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-48
+apps/evolverun/clawweb/public/modules/workflow/web/components/ApprovalSlidePanel.tsx
+  s_875e3f9d4d0db3::t_f522c796dd65be 3,68,84-85,98,100,168-170,175,192,223,230,235,259,262,272,277,294
+apps/backend/tests/community/adapters/http/openapi_v1/test_bots_endpoints.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 274-288,365-379
+apps/evolverun/clawweb/public/app/clawweb/server/__tests__/public-pack-security.test.ts
+  s_875e3f9d4d0db3::t_f522c796dd65be 24
+engine/adapter/src/engine/community/core/dws_hosting/tests/test_hosting_gateway.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 279-281,291-297
+apps/baas/src/secbaas/community/core/repository/bot/_protocol.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 245,247-248
+apps/backend/tests/community/adapters/http/openapi_v1/test_path_convention.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 132-138
+apps/bcs/crates/services/bcs-message-flow/src/task_handle.rs
+  s_875e3f9d4d0db3::t_f522c796dd65be 33-55,58-60,161-180
+apps/bcs/crates/services/bcs-collaboration-runtime/src/runtime/service.rs
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-383
+apps/baas/src/secbaas/community/core/repository/bot/_orm_repository.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 647-665
+apps/bcs/crates/services/bcs-message-flow/tests/caller_dispatch_stage_timeout_contract.rs
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-441
+apps/bcs/scripts/task_handle_runtime_probe.cjs
+  s_875e3f9d4d0db3::t_f522c796dd65be 90-93
+apps/evolverun/clawweb/public/modules/clawinsight/web/pages/InsightCenter/monitoring/session-recovery/__tests__/SessionRecoveryDetail.test.tsx
+  s_875e3f9d4d0db3::t_f522c796dd65be 493,497,501-504
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/admission_account_routes.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 99-100
+apps/backend/src/agentclaw/community/configs/application.yaml
+  s_875e3f9d4d0db3::t_f522c796dd65be 217-221
+apps/backend/src/agentclaw/community/core/bot_overview/provider.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-59
+apps/baas/src/secbaas/community/adapters/web/session_id.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-23
+apps/backend/tests/community/architecture/test_module_boundaries.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 82
+apps/bcs/crates/services/bcs-collaboration-runtime/src/runtime/recovery.rs
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-364
+apps/evolverun/clawweb/public/modules/workflow/web/components/workflow-workspace/ApprovalWorkbench.tsx
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-109
+apps/baas/src/secbaas/community/core/service/bot_run/_baas_service.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 709
+apps/evolverun/clawweb/public/modules/workflow/server/routes/approval-workbench.ts
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-124
+apps/backend/tests/community/http/test_copy_route.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-177
+apps/backend/src/agentclaw/community/core/bot_overview/__init__.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 1
+apps/backend/src/agentclaw/community/core/bot_overview/bot_overview_service_protocol.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-26
+apps/backend/src/agentclaw/community/core/bot_overview/engines/__init__.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 1
+apps/bcs/crates/services/bcs-collaboration-runtime/src/runtime/caller.rs
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-97
+apps/bcs/crates/services/bcs-collaboration-runtime/src/runtime/opening.rs
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-142
+apps/bcs/crates/services/bcs-message-flow/src/delivery_runtime/caller_delegate.rs
+  s_875e3f9d4d0db3::t_f522c796dd65be 268-280
+apps/bcs/crates/services/bcs-collaboration-runtime/src/runtime/logging.rs
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-292
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/bots/overview.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-59
+apps/baas/src/secbaas/community/core/service/bot_manage/_bot_management_service.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 1408-1438
+apps/frontend-nextgen/src/pages/Workspace/hooks/useManagerWorkerTasks.ts
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-185
+apps/bcs/docs/task-panel-delivery-view.md
+  s_875e3f9d4d0db3::t_f522c796dd65be 8,65-71
+engine/adapter/src/engine/community/core/dws_hosting/scope.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 45
+apps/bcs/crates/services/bcs-message-flow/tests/support/task_handles.rs
+  s_875e3f9d4d0db3::t_f522c796dd65be 20,478-482,495-523
+apps/evolverun/clawweb/public/modules/clawinsight/server/repositories/insight-management-repository.ts
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-41
+apps/bcs/crates/service-api/bcs-service-api/src/port/coordination_intent.rs
+  s_875e3f9d4d0db3::t_f522c796dd65be 48-52
+apps/frontend-nextgen/src/pages/Workspace/components/GroupChatPane/GroupChatMessageList.tsx
+  s_875e3f9d4d0db3::t_f522c796dd65be 1,44,64
+apps/bcs/crates/services/bcs-collaboration-runtime/src/runtime/node_execution.rs
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-458
+apps/evolverun/clawweb/public/modules/clawinsight/server/repositories/insight-improvement-model.ts
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-326
+apps/baas/tests/unit/adapters/web/open_api/test_message_router.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 910-929
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/approval-workbench.test.ts
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-80
+apps/backend/tests/community/adapters/http/openapi_v1/test_explicit_user_id.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 291-292,626,837
+apps/bcs/crates/bootstrap/bcs/src/message_delivery_wiring.rs
+  s_875e3f9d4d0db3::t_f522c796dd65be 262-266
+apps/backend/specs/2026-11-02-openapi-bot-access-check/spec.md
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-76
+apps/backend/src/agentclaw/community/core/bot_copy/sql/2026_10_26_bot_copy.sql
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-32
+apps/bcs/crates/services/bcs-collaboration-runtime/src/runtime/events.rs
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-396
+apps/backend/tests/community/adapters/http/openapi_v1/test_bot_overview.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-118
+apps/backend/src/agentclaw/community/core/bot_overview/service.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-63
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/bots/schemas.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 26,140-145
+  s_875e3f9d4d0db3::t_b187d04de6d7ce 146
+apps/backend/src/agentclaw/community/core/bot_copy/repository/protocol.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-67
+apps/evolverun/clawweb/public/modules/clawinsight/package.json
+  s_875e3f9d4d0db3::t_f522c796dd65be 28-29
+apps/backend/src/agentclaw/community/core/bot_copy/status_derive.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-141
+apps/baas/src/secbaas/community/adapters/web/routers/open_api/run_router.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 26,217-219
+apps/evolverun/clawweb/public/modules/workflow/docs/dingtalk-approval-auth.md
+  s_875e3f9d4d0db3::t_f522c796dd65be 9,15-22
+apps/evolverun/clawweb/public/modules/workflow/web/components/workflow-workspace/__tests__/ApprovalWorkbench.test.tsx
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-182
+docs/superpowers/specs/2026-11-03-caller-dispatch-stage-timeouts-design.md
+  s_875e3f9d4d0db3::t_f522c796dd65be 80-85
+engine/adapter/src/engine/community/core/dws_hosting/tests/test_llm_budgets.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-39
+apps/evolverun/clawweb/scripts/ci/run-tests.mjs
+  s_875e3f9d4d0db3::t_f522c796dd65be 118-119
+apps/bcs/crates/adapters/http/bcs-http/src/routes/task_handle.rs
+  s_875e3f9d4d0db3::t_f522c796dd65be 9,12
+apps/bcs/crates/services/bcs-collaboration-runtime/src/runtime/completion.rs
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-470
+apps/evolverun/clawweb/public/modules/workflow/web/pages/WorkflowWorkspace.tsx
+  s_875e3f9d4d0db3::t_f522c796dd65be 6,24,35,270,352,359,375
+apps/evolverun/clawweb/public/app/clawweb/server/public-bootstrap.ts
+  s_875e3f9d4d0db3::t_f522c796dd65be 8,178
+apps/bcs/crates/services/bcs-collaboration-runtime/src/runtime/views.rs
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-567
+apps/evolverun/clawweb/public/modules/clawinsight/web/pages/InsightCenter/monitoring/session-recovery/SessionRecoveryDetail.tsx
+  s_875e3f9d4d0db3::t_f522c796dd65be 78
+apps/backend/src/agentclaw/community/di/modules/openapi_bot_access_check_config_module.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-98
+apps/backend/src/agentclaw/community/di/modules/openapi_user_id_bypass_config_module.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 46-47
+apps/bcs/crates/bootstrap/bcs/tests/caller_channel/README.md
+  s_875e3f9d4d0db3::t_f522c796dd65be 27-39
+apps/backend/src/agentclaw/community/core/bot_copy/repository/sqlalchemy_impl.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-136
+apps/frontend-nextgen/src/services/workspace/groupChatProviderHelpers.ts
+  s_875e3f9d4d0db3::t_f522c796dd65be 78-80,126-137,160
+apps/bcs/crates/service-api/bcs-service-api/src/application/task_delivery.rs
+  s_875e3f9d4d0db3::t_f522c796dd65be 8-9,35,71,79-91,108-110
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/insight/management/projection.ts
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-28
+apps/backend/tests/community/config/golden/test.json
+  s_875e3f9d4d0db3::t_f522c796dd65be 86-88
+apps/frontend-nextgen/src/pages/Workspace/components/GroupChatPane/GroupChatCollabPanel.tsx
+  s_875e3f9d4d0db3::t_f522c796dd65be 1,4,11,19,21,24,33-59
+apps/frontend-nextgen/test/services/workspace/messageDeliveryService.test.ts
+  s_875e3f9d4d0db3::t_f522c796dd65be 2-3,7,57-65
+  s_875e3f9d4d0db3::t_6938a0a89ee2d0 66
+apps/backend/src/agentclaw/community/core/bot_copy/repository/models.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-138
+apps/frontend-nextgen/src/pages/Workspace/hooks/useMessageDeliveries.ts
+  s_875e3f9d4d0db3::t_f522c796dd65be 53
+apps/backend/src/agentclaw/community/api/README.md
+  s_875e3f9d4d0db3::t_f522c796dd65be 231
+apps/bcs/crates/adapters/http/bcs-http/tests/task_handle_contract.rs
+  s_875e3f9d4d0db3::t_f522c796dd65be 33-34
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/approval-workbench.test.ts
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-84
+apps/bcs/crates/services/bcs-message-flow/tests/caller_protected_dispatch_runtime_contract/watchdog.rs
+  s_875e3f9d4d0db3::t_f522c796dd65be 28-37,47-48,55,138-141
+apps/baas/tests/unit/core/service/publish_manage/test_publish_service.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 9401-9402,9432,9434,9440-9446,9448-9449,9451-9453,9455-9458,9460-9473,9477-9479,9485-9494,9496-9509,9511-9515,9517,9519-9522,9524-9527,9529-9543,9545,9547,9549-9552,9555-9622
+apps/bcs/crates/services/bcs-collaboration-runtime/src/runtime/tests.rs
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-285
+apps/frontend-nextgen/src/domain/groupTasks/projection.ts
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-134
+apps/bcs/crates/bootstrap/bcs/tests/caller_channel/cache_fixture.rs
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-39
+apps/backend/src/agentclaw/community/core/bot_overview/engines/aicoding.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-24
+apps/backend/tests/community/endpoints/test_openapi_bot_access_check.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-166
+apps/bcs/crates/services/bcs-collaboration-runtime/src/runtime.rs
+  s_875e3f9d4d0db3::t_f522c796dd65be 172,376,380-382,384-390,392-394,396-401,403-407,409-413,416,418-423,425-427,429-438,440-441,444-445,447-450,452,454-457,459-462,464,466,468,470-473,475-478,480-483,485-488,490-493,495,497,499,501,503,505-508,510-511,513-516
+apps/bcs/crates/services/bcs-collaboration-runtime/src/runtime/terminal_event.rs
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-478
+apps/bcs/crates/services/bcs-coordination-store/src/lib.rs
+  s_875e3f9d4d0db3::t_f522c796dd65be 63,70-85
+apps/backend/src/agentclaw/community/core/bot_copy/types.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-101
+apps/evolverun/clawweb/public/modules/clawinsight/server/routes/insight-management.ts
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-85
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/simulation.test.ts
+  s_875e3f9d4d0db3::t_f522c796dd65be 147,154-172,174
+  s_875e3f9d4d0db3::t_0ed6a0345702ca 173,175
+apps/bcs/crates/services/bcs-message-flow/src/caller_dispatch_pipeline/stage.rs
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-30
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/simulation.ts
+  s_875e3f9d4d0db3::t_f522c796dd65be 17
+apps/evolverun/clawweb/scripts/ci/run-tests.test.mjs
+  s_875e3f9d4d0db3::t_f522c796dd65be 3,7,86-121
+  s_875e3f9d4d0db3::t_de089a53f09b2c 122
+apps/bcs/crates/services/bcs-message-flow/src/delivery_runtime/caller_dispatch.rs
+  s_875e3f9d4d0db3::t_f522c796dd65be 21-38,211-233
+apps/backend/src/agentclaw/community/api/bot_overview_service.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-17
+apps/backend/specs/2026-11-02-openapi-bot-access-check/plan.md
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-220
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/__init__.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 181-182,195,317-320,679-685
+apps/bcs/crates/services/bcs-collaboration-runtime/src/runtime/access.rs
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-222
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/approval-workbench-admin.test.ts
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-43
+apps/evolverun/clawweb/public/modules/workflow/server/services/approval-workbench.ts
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-100
+apps/backend/tests/community/core/config_compose/test_mcporter_composer.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 489-550
+apps/baas/tests/unit/adapters/web/test_session_id.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-26
+apps/backend/tests/community/framework/coverage_baseline.txt
+  s_875e3f9d4d0db3::t_f522c796dd65be 403-411
+apps/backend/src/agentclaw/community/di/modules/bot_overview_module.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-39
+apps/backend/tests/community/core/devices/test_mcp_device_payload.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 120-185
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/bots/router.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 92-99,881-884,890-900,902
+apps/evolverun/clawweb/public/modules/clawinsight/docs/session-recovery-api.md
+  s_875e3f9d4d0db3::t_f522c796dd65be 34-35
+apps/evolverun/clawweb/public/modules/clawinsight/server/routes/__tests__/insight-management.test.ts
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-182
+apps/evolverun/clawweb/public/app/clawweb/server/__tests__/public-repair-notifications.test.ts
+  s_875e3f9d4d0db3::t_f522c796dd65be 19
+apps/evolverun/clawweb/public/modules/workflow/web/components/workflow-workspace/Sidebar.tsx
+  s_875e3f9d4d0db3::t_f522c796dd65be 3,5,20,59
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/errors.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 170-177
+apps/frontend-nextgen/src/pages/Workspace/components/GroupChatPane/index.tsx
+  s_875e3f9d4d0db3::t_f522c796dd65be 103,153,215-216
+engine/adapter/src/engine/community/core/dws_hosting/reply_review.py
+  s_875e3f9d4d0db3::t_f522c796dd65be 170
+apps/frontend-nextgen/test/services/workspace/groupTaskDeliveryService.test.ts
+  s_875e3f9d4d0db3::t_f522c796dd65be 1-14
+apps/bcs/Cargo.lock
+  s_875e3f9d4d0db3::t_a4c2b7cc88c1ed 1941
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "5dfe6cfe8ef1fe1d36184946cf2b6b7b62341b18",
+  "prompts": {},
+  "sessions": {
+    "s_875e3f9d4d0db3": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "81193bbc-3d37-490a-a6c5-939434b5d738",
+        "model": "glink/GLM-5.3:glink_domestic"
+      },
+      "human_author": "shengping <jeremy.lsp@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,29 @@
+apps/backend/src/agentclaw/community/core/bot_management/engines/aicoding/restart_backup.py
+  s_ddabb6a28ddd81::t_407640b4a36871 765-767,907-909
+apps/backend/tests/community/core/bot_management/aicoding/test_restart_failure_log.py
+  s_1d07c07ce60209::t_1674fd1fbd1b5a 111-139
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b0f7d0d88b95f17c70f759935246556cb2f87643",
+  "prompts": {},
+  "sessions": {
+    "s_1d07c07ce60209": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a19ce5-8ba5-7e81-a33c-a2f791acbe0c",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    },
+    "s_ddabb6a28ddd81": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a19cc5-80d7-7420-a52a-8e1c30b94b6a",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

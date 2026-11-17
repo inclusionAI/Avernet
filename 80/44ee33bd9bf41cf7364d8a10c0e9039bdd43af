@@ -1,0 +1,56 @@
+apps/frontend-nextgen/test/components/BotWorkshop/ResourcePanelDownload.test.tsx
+  s_bc01be05f02440::t_8db45892406108 33-44
+apps/frontend-nextgen/src/hooks/useBotEditor.ts
+  s_bc01be05f02440::t_93acdac3a5b072 83-87
+  s_bc01be05f02440::t_af793d55bdb6e9 51
+  s_bc01be05f02440::t_549ea4a8bdf77b 19,42-46,48-50,52-73,75-76,79,81,88-96,110,163-164,195,198,200,268,270-271,273
+  s_bc01be05f02440::t_e90884aa8dce51 82
+  s_bc01be05f02440::t_812c9d521542e0 47,74,77-78,80,111-114,116,197
+apps/frontend-nextgen/src/services/botWorkshop/botEditorService.ts
+  s_bc01be05f02440::t_34d037f295b04e 320-322
+  s_cc93fd0c97018d::t_378be4944c8477 4,78,83,318
+apps/frontend-nextgen/src/components/BotWorkshop/Editor/ResourcePanel.tsx
+  s_bc01be05f02440::t_a8db7631c1b35a 28,45,176
+  s_bc01be05f02440::t_c17edf873f320b 25,27,42-44,138-143,180
+  s_bc01be05f02440::t_c37f124264ae2a 58-62
+  s_bc01be05f02440::t_a0536796f9a33d 135-137
+  s_bc01be05f02440::t_790807f45a1830 26,53-54,76-79
+  s_bc01be05f02440::t_0906e9672a02e5 8,57
+apps/frontend-nextgen/test/components/BotWorkshop/ResourcePanelRowClick.test.tsx
+  s_bc01be05f02440::t_a0536796f9a33d 169-192
+apps/frontend-nextgen/test/hooks/useBotEditor.test.tsx
+  s_bc01be05f02440::t_8db45892406108 8,98-104,106-108,113-120,124-125,127-130,132,134-141
+  s_bc01be05f02440::t_34d037f295b04e 19,41,47,105,109-112,121-123,126,131,133,142,145-173
+  s_bc01be05f02440::t_86fd02f3d9a0a4 143-144
+apps/frontend-nextgen/src/pages/BotWorkshop/Detail/DetailPanelContent.tsx
+  s_bc01be05f02440::t_c17edf873f320b 165-166,168
+  s_bc01be05f02440::t_a8db7631c1b35a 62,167
+apps/frontend-nextgen/src/services/backendApi/bots/botEditorController.ts
+  s_bc01be05f02440::t_f32280f4e9657a 308-312
+apps/frontend-nextgen/src/services/backendApi/httpClient.ts
+  s_bc01be05f02440::t_01624a8843ebe5 20-21,259
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8044ee33bd9bf41cf7364d8a10c0e9039bdd43af",
+  "prompts": {},
+  "sessions": {
+    "s_bc01be05f02440": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e4c7-8bdd-7f10-aa03-5c4cc5a653eb",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    },
+    "s_cc93fd0c97018d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e4c7-94e6-72c1-aa65-cacb9ab5936e",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

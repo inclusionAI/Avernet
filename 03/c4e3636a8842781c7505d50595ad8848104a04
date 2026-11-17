@@ -1,0 +1,16 @@
+apps/backend/src/agentclaw/community/core/bot_public_risk/tasks.py
+  h_9d7cfd405752f5 150,180-223
+apps/backend/tests/community/core/bot_public/test_risk_tasks.py
+  h_9d7cfd405752f5 450-588
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "03c4e3636a8842781c7505d50595ad8848104a04",
+  "prompts": {},
+  "humans": {
+    "h_9d7cfd405752f5": {
+      "author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

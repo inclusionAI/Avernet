@@ -1,0 +1,25 @@
+apps/backend/specs/caller-refresh-corp-di-rel20261112/002-code-report.md
+  s_bb98e2f10840b6::t_4f194a9aa741a2 1-23
+apps/backend/tests/corp/core/test_quality_bot_admin_correction_scope.py
+  s_bb98e2f10840b6::t_e462586fdb7adb 18,21,314,320,334,417-461
+apps/backend/specs/caller-refresh-corp-di-rel20261112/001-spec-output.md
+  s_bb98e2f10840b6::t_e462586fdb7adb 1-5
+apps/backend/src/agentclaw/corp/di/modules/infrastructure/corp/admin_bot_service_module.py
+  s_bb98e2f10840b6::t_ea845da86a2cd9 25,135,184
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "87a6596858656d5868f766b04b62a6ae25f7902f",
+  "prompts": {},
+  "sessions": {
+    "s_bb98e2f10840b6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a162ee-dd64-7f52-9208-9fd1326f32e5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

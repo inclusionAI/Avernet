@@ -1,0 +1,53 @@
+apps/backend/tests/community/core/service_bot/services/test_publish_flow_service.py
+  s_16462c91ec5d93::t_7b243dfa204126 3849-3850,3854-3859
+apps/backend/src/agentclaw/community/core/service_bot/services/publish_flow/retry_ops_mixin.py
+  s_b2651ef7499f7a::t_27928d298f8ae2 273-278,282-286
+  s_b2651ef7499f7a::t_028f7e1e3e990b 11,145-152,170-171,179-184
+  s_b2651ef7499f7a::t_0be899c4d6f106 296-299
+apps/backend/src/agentclaw/community/core/service_bot/services/publish_flow/ext_state.py
+  s_b2651ef7499f7a::t_ab50eefdbc3b61 152
+  s_b2651ef7499f7a::t_028f7e1e3e990b 154-161
+  s_b2651ef7499f7a::t_ae062429fac5ce 13
+  s_b2651ef7499f7a::t_f801743c2eff86 182-194
+  s_b2651ef7499f7a::t_98dddcb6efb6b1 153,162-181
+apps/backend/src/agentclaw/community/core/service_bot/services/publish_flow/tasks.py
+  s_b2651ef7499f7a::t_062f4162dc3a99 131-139,352-354,356
+  s_b2651ef7499f7a::t_45fe6478e5cfad 140-144,152-156,160-164
+  s_16462c91ec5d93::t_08c7f9cfc9cf40 340-341,343,355
+apps/backend/src/agentclaw/community/core/service_bot/services/publish_flow/build_stage.py
+  s_b2651ef7499f7a::t_66ffaee3fcdb9e 130
+  s_b2651ef7499f7a::t_7f964f07137d9b 305,354,394
+  s_b2651ef7499f7a::t_c2dcc16050793c 118,123,125,127,133-137,306-314,320,355-363,369,395-409
+  s_b2651ef7499f7a::t_606b1f5464ecf7 116-117,132,138
+  s_b2651ef7499f7a::t_028f7e1e3e990b 128-129
+  s_b2651ef7499f7a::t_56b86b4378164d 124,290-291
+  s_16462c91ec5d93::t_314c6a37b306ba 119-122,126,131,139-141,315-319,364-368
+apps/backend/src/agentclaw/community/core/service_bot/services/publish_flow_service.py
+  s_b2651ef7499f7a::t_028f7e1e3e990b 371-379
+  s_b2651ef7499f7a::t_e10b20deb6915d 382-385
+  s_b2651ef7499f7a::t_4405f7c81a1b82 519-520,523
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b366140d81076988b7704cab202616f25bd7aefc",
+  "prompts": {},
+  "sessions": {
+    "s_16462c91ec5d93": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a18d51-5517-7430-b6d2-f4ced4c931de",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    },
+    "s_b2651ef7499f7a": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a19c13-35af-7600-8afa-ea88cb29ca4c",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

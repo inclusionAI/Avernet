@@ -1,0 +1,25 @@
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/user-handoff.test.ts
+  s_d6030ab8e93c07::t_66175a64eb01c1 20,51,620-625,629-630,639-658
+  s_d6030ab8e93c07::t_c1d8002c37beb7 661
+  s_d6030ab8e93c07::t_fd7f75cbc4a899 659
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/agent-service.ts
+  s_d6030ab8e93c07::t_c1d8002c37beb7 641,862-863
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/owner-cooperation.ts
+  s_d6030ab8e93c07::t_c1d8002c37beb7 1,14-16
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e683e0916bcc57fa0677f4512186c0d6f72fe6e7",
+  "prompts": {},
+  "sessions": {
+    "s_d6030ab8e93c07": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d3d3-e65e-76b1-922a-ca312bf662cb",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}

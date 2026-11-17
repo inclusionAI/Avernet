@@ -1,0 +1,59 @@
+apps/frontend-nextgen/test/pages/BotWorkshop/RoutineRunConversation.test.tsx
+  s_ca96f68e142a0f::t_076c42b72695e6 103
+apps/frontend-nextgen/src/services/botScheduledTasks/metadata.ts
+  s_ca96f68e142a0f::t_5650b3c8d63caa 35
+apps/frontend-nextgen/src/pages/BotWorkshop/ScheduledTasks/index.tsx
+  s_b9f758036bb145::t_34a064e6500720 101-105
+  s_b9f758036bb145::t_abf714265a9fbd 5
+apps/frontend-nextgen/src/pages/BotWorkshop/ScheduledTasks/RoutineList.tsx
+  s_b9f758036bb145::t_fa30e086de41d1 8,10,58-59,75-87,98,100,110,113,117,125-129,131-139,141,143-146,148,151-152,154,162,178
+apps/frontend-nextgen/src/components/BotWorkshop/Editor/RoutineExecutionEnvironment.tsx
+  s_b9f758036bb145::t_1ab0eb66830d8a 12,20-21,25
+apps/frontend-nextgen/src/pages/BotWorkshop/ScheduledTasks/RoutineActions.tsx
+  s_b9f758036bb145::t_1ded5972c86455 91
+  s_b9f758036bb145::t_a75b9c8daf0459 5-9,39,54-55,68,72,88-90,92-93
+apps/frontend-nextgen/src/services/botScheduledTasks/types.ts
+  s_ca96f68e142a0f::t_330c1f6e39f1e7 194
+  s_ca96f68e142a0f::t_52b1f1a78b5516 3
+apps/frontend-nextgen/src/pages/BotWorkshop/ScheduledTasks/RoutineDetail.tsx
+  s_b9f758036bb145::t_4cca382785b606 200,202,205,208,210
+  s_b9f758036bb145::t_f9c9d80c3fbff7 5,16,18,26-43,96,106,108-109,111-147,151-165,169,184,186,190-197,199,201,203-204,206-207,209,211-212,215,217
+apps/frontend-nextgen/src/pages/BotWorkshop/ScheduledTasks/RoutineNextRun.tsx
+  s_b9f758036bb145::t_d1f76d302e7e5f 38
+apps/frontend-nextgen/src/pages/BotWorkshop/ScheduledTasks/RoutineBadges.tsx
+  s_b9f758036bb145::t_539b6a0c190a51 1-47
+apps/frontend-nextgen/src/pages/BotWorkshop/ScheduledTasks/RoutineFormDialog.tsx
+  s_b9f758036bb145::t_2a93f00178acfb 157,161,168,175
+  s_b9f758036bb145::t_b55af4e6cfb297 34-35
+  s_b9f758036bb145::t_cee1cbd13b1b8c 283
+  s_b9f758036bb145::t_757780920935ac 25
+  s_b9f758036bb145::t_2db7a3e167093d 256
+  s_b9f758036bb145::t_4f91febe13fb74 301
+  s_b9f758036bb145::t_05f91b06be3ece 162,239,285
+  s_b9f758036bb145::t_af717c8c43cd16 40-42
+  s_b9f758036bb145::t_c26cba3253e963 5,9,28-33,36-39,43-64,163-167,169-174,177,179,181-188,190-191,194-199,203-238,240-254,259,263-264,286,289-290,294
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "dda47e4728c16ce0ea7cc1048067170a2989d62a",
+  "prompts": {},
+  "sessions": {
+    "s_b9f758036bb145": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "17fa05ac-abb3-4548-a65e-df6bdfba991c",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    },
+    "s_ca96f68e142a0f": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "8fc6d7d4-402d-4c0b-aa1f-4656c396da7a",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    }
+  }
+}

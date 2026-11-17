@@ -1,0 +1,19 @@
+apps/backend/tests/community/core/service_bot/services/test_publish_flow_service.py
+  s_16462c91ec5d93::t_36627755675076 4637,4641
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8ba758a977075e854135a792e147b4fca15a0235",
+  "prompts": {},
+  "sessions": {
+    "s_16462c91ec5d93": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a18d51-5517-7430-b6d2-f4ced4c931de",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,22 @@
+apps/backend/specs/2026-11-06-task-search-viewer/plan.md
+  s_4efef845bd857d::t_8f61ffa1a061ef 63-65
+  s_4efef845bd857d::t_71fa6efd71de43 59
+  s_4efef845bd857d::t_e4f457cf2d7d5d 54-58,60,68-70
+  s_4efef845bd857d::t_d2137292eab71a 66
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8af461b2307a058fea7ba500b0575979202405f7",
+  "prompts": {},
+  "sessions": {
+    "s_4efef845bd857d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a181bc-3434-7bf3-a0d5-19c01487b59e",
+        "model": "GLM-5.3"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

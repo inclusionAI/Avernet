@@ -1,0 +1,41 @@
+apps/frontend-nextgen/test/pages/Workspace/Chat/friendSessionCreateFailure.test.tsx
+  s_cc93fd0c97018d::t_0e56cc80c012dd 1,6-26,28-33,36-44,46-48,51-59,61-68,70-80
+  s_cc93fd0c97018d::t_89bd7c7792401e 2-5,27,34-35,45,49-50,60,69
+  s_cc93fd0c97018d::t_46c0c9d26d3607 81-89
+apps/frontend-nextgen/src/services/backendApi/bots/privateBotSessionController.ts
+  s_cc93fd0c97018d::t_893ba3d8826f36 92,100
+apps/frontend-nextgen/src/services/backendApi/httpClient.ts
+  s_cc93fd0c97018d::t_893ba3d8826f36 31-32,240-242
+apps/frontend-nextgen/test/pages/Workspace/Chat/ConversationSessionPlaceholder.test.tsx
+  s_cc93fd0c97018d::t_610abbf3a745cd 226
+apps/frontend-nextgen/src/services/workspace/botSessionService.ts
+  s_cc93fd0c97018d::t_893ba3d8826f36 8-9,403-406,408-412
+  s_cc93fd0c97018d::t_cfbf100bfc4bbd 388,402
+  s_cc93fd0c97018d::t_a26a59038bab31 407
+  s_cc93fd0c97018d::t_14126bd3aa0f66 395-397
+apps/frontend-nextgen/test/pages/Workspace/Chat/hooks/useConversationSessions.test.tsx
+  s_cc93fd0c97018d::t_6cd6afe3afb841 400
+apps/frontend-nextgen/src/services/workspace/identityService.ts
+  s_cc93fd0c97018d::t_893ba3d8826f36 14
+apps/frontend-nextgen/src/pages/Workspace/Chat/hooks/useConversationSessionCreation.ts
+  s_cc93fd0c97018d::t_cfbf100bfc4bbd 125
+  s_cc93fd0c97018d::t_893ba3d8826f36 130-133
+apps/frontend-nextgen/test/pages/Workspace/Chat/hooks/useConversationSessionFilters.test.tsx
+  s_cc93fd0c97018d::t_6cd6afe3afb841 481
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4ad6f626b11ee7436ad7b67f838b653e7c728f97",
+  "prompts": {},
+  "sessions": {
+    "s_cc93fd0c97018d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e4c7-94e6-72c1-aa65-cacb9ab5936e",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": null
+    }
+  }
+}

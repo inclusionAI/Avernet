@@ -1,0 +1,21 @@
+apps/bcs/crates/plugin-api/bcs-store-api/README.md
+  s_a9c87caa3de52e::t_e8731df5467e89 193-195
+apps/bcs/crates/plugin-api/bcs-store-api/src/stream.rs
+  s_a9c87caa3de52e::t_e7b3fecf12099b 36-38
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ce421ece8308a54e298707609884a9cdedb9f065",
+  "prompts": {},
+  "sessions": {
+    "s_a9c87caa3de52e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d0b4-74ad-7423-9152-b7e80c647ef8",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "yuange.zjy <yuange.zjy@antgroup.com>"
+    }
+  }
+}

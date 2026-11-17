@@ -1,0 +1,45 @@
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/owner-cooperation.ts
+  s_df9e33e486a942::t_1267d75b13e375 4,17-26
+  s_df9e33e486a942::t_91ed9cb9692e69 10-16,27-28
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/user-handoff.test.ts
+  s_df9e33e486a942::t_1db3a9c6cf2895 592-635,637-639,647-660
+  s_df9e33e486a942::t_1267d75b13e375 636,640-646
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/notifications/dingtalk-sender.ts
+  s_df9e33e486a942::t_91ed9cb9692e69 26-32,106-115,118
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/task-service.test.ts
+  s_df9e33e486a942::t_1db3a9c6cf2895 4,45-62
+apps/evolverun/clawweb/public/modules/clawinsight/docs/session-recovery-api.md
+  s_df9e33e486a942::t_f01b471daa0e97 331-332,339
+apps/evolverun/clawweb/public/modules/clawinsight/server/repositories/repair/agent-tool-call-record.ts
+  s_df9e33e486a942::t_91ed9cb9692e69 67,80
+apps/evolverun/clawweb/public/modules/clawinsight/server/repositories/repair/agent-tool-call-repository.ts
+  s_df9e33e486a942::t_91ed9cb9692e69 97,101
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/task-service.ts
+  s_df9e33e486a942::t_1267d75b13e375 10,162,394
+  s_df9e33e486a942::t_91ed9cb9692e69 11,160-161,163,559-562,565,572-579
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/agent-service.ts
+  s_df9e33e486a942::t_91ed9cb9692e69 454,461-463,625-626,628-631,633,644-646,648-654,658
+  s_df9e33e486a942::t_1267d75b13e375 26,587
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/notifications/__tests__/dingtalk-card.test.ts
+  s_df9e33e486a942::t_f01b471daa0e97 45-47
+  s_df9e33e486a942::t_1db3a9c6cf2895 3-4,33-44,48-55
+  s_df9e33e486a942::t_ae267454637f6f 56
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/notification.ts
+  s_df9e33e486a942::t_566f5083f44f8b 1,75-85,87,89,91,93,107-108
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f9125ba87b3a09973c976d57cfb92f5dde63d56f",
+  "prompts": {},
+  "sessions": {
+    "s_df9e33e486a942": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c461-e821-7eb2-8d5a-02b04e069135",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,23 @@
+apps/frontend-nextgen/test/components/BotWorkshop/CapabilitySetManager.test.tsx
+  s_502dbf3f3ce405::t_ac99c78a393aa5 43,80,226,232-252
+apps/frontend-nextgen/test/components/BotWorkshop/BotTable.test.tsx
+  s_502dbf3f3ce405::t_ac99c78a393aa5 5,737-738,750,754,760-761,763-766,1041
+apps/frontend-nextgen/scripts/public-tests.list
+  s_502dbf3f3ce405::t_ac99c78a393aa5 120-123
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2af14c67d112dbd70a5dfd6dc5417b8a5873bd99",
+  "prompts": {},
+  "sessions": {
+    "s_502dbf3f3ce405": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1bf38-d50b-74a2-af65-1d53dfb9cd45",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "卷瓜 <juangua.swj@antgroup.com>"
+    }
+  }
+}

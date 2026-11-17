@@ -1,0 +1,48 @@
+apps/backend/src/agentclaw/community/core/engine_runtime/relay.py
+  s_620fb772f449f4::t_ff098bbcccb704 161,360-361
+  s_620fb772f449f4::t_eeeb297c0c1b2a 64,135
+apps/backend/src/agentclaw/community/core/repository/implementations/devices/device.py
+  s_620fb772f449f4::t_4508a2c750d632 200,207,230,248
+  s_620fb772f449f4::t_77c1247ce47cc3 86
+apps/backend/src/agentclaw/community/core/repository/implementations/bot/bot.py
+  s_620fb772f449f4::t_77c1247ce47cc3 71
+  s_620fb772f449f4::t_4508a2c750d632 175,186,711,722
+apps/backend/src/agentclaw/community/plugins/http_client.py
+  s_620fb772f449f4::t_4508a2c750d632 125-128,185,308-312
+  s_620fb772f449f4::t_77c1247ce47cc3 90
+apps/backend/src/agentclaw/community/core/bot_management/services/bot_service.py
+  s_620fb772f449f4::t_eeeb297c0c1b2a 150,2519,2559
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/engine_runtime/sessions/router.py
+  s_620fb772f449f4::t_4508a2c750d632 153,887
+  s_620fb772f449f4::t_77c1247ce47cc3 87
+apps/backend/src/agentclaw/community/core/service_bot/services/baas_service.py
+  s_620fb772f449f4::t_77c1247ce47cc3 58
+  s_620fb772f449f4::t_4508a2c750d632 1970,3848,3872
+apps/backend/tests/community/adapters/http/openapi_v1/test_runtime_list_timing.py
+  s_620fb772f449f4::t_eeeb297c0c1b2a 15,70
+  s_620fb772f449f4::t_fca2fc3e27c389 1-14,35-69,71-103
+  s_620fb772f449f4::t_06a58963038e20 16-34
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/engine_runtime/models/router.py
+  s_620fb772f449f4::t_77c1247ce47cc3 52
+  s_620fb772f449f4::t_4508a2c750d632 97
+apps/backend/src/agentclaw/community/utils/runtime_list_timing.py
+  s_620fb772f449f4::t_38380c209b7839 1-47
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/access_log.py
+  s_620fb772f449f4::t_ff098bbcccb704 73,82-83,278-280,310-314,360-362
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b6470e6e76b5a2884572381c4d9c6b3ef02801e3",
+  "prompts": {},
+  "sessions": {
+    "s_620fb772f449f4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a123ca-8212-7ef2-8637-c02975d987a2",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "evilcoda <yipu.hj@antgroup.com>"
+    }
+  }
+}
