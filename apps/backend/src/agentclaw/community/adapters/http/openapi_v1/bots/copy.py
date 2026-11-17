@@ -38,6 +38,12 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
     ErrorEnvelope,
     error_example,
 )
+from agentclaw.community.api.bot_config_manifest_service import (
+    BotConfigManifestServiceProtocol,
+)
+from agentclaw.community.api.skill_set_management_service import (
+    SkillSetManagementServiceProtocol,
+)
 from agentclaw.community.adapters.http.openapi_v1.enums import _DocumentedEnum
 from agentclaw.community.adapters.http.openapi_v1.principal import (
     DelegatedUserDep,
@@ -79,10 +85,8 @@ from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
 from agentclaw.community.utils.env_utils import get_current_env
 
 if TYPE_CHECKING:
-    # Typed only for the S1 serializer's signature; the runtime values come from
-    # DI (``BotConfigManifestServiceProtocol.get``) and from
-    # ``SkillSetApplyService.read_apply_snapshot``, both already imported by the
-    # handler chain. Quoted to avoid pulling the modules at import time.
+    # Typed only for the serializer's signature; the runtime values come from
+    # DI. Quoted to avoid pulling the dataclasses at module-import time.
     from agentclaw.community.core.bot_config_manifest.repository.models import (
         BotConfigManifestRecord,
     )
@@ -447,6 +451,8 @@ def submit_copy(
     space_context: BusinessSpaceContextProtocol,
     render_screen_service: RenderScreenServiceProtocol,
     bot_service: BotServiceProtocol,
+    manifest_get_service: BotConfigManifestServiceProtocol,
+    skill_set_service: SkillSetManagementServiceProtocol,
 ) -> BotCopyResponse:
     """Validate source + serialize manifest + persist + apply Passport + hand off.
 
@@ -533,12 +539,41 @@ def submit_copy(
             current_user_id=owner_id,
         )
     )
+    # Spec §6 S2 — read the source's capability-set state and serialize it
+    # into the dst manifest's ``skill_sets`` segment.
+    # * Branch A — source has its own manifest record (manifest-managed bot):
+    #   pass that record's ``skill_sets`` segment through verbatim.
+    # * Branch B — source has no manifest record (legacy Genome bot): read the
+    #   source's ``SkillSetApplySnapshot`` and derive the segment. Snapshot
+    #   ``read_apply_snapshot`` takes ``actor_id``; the caller (``owner_id``)
+    #   is the actor — the source.edit gate above already verified the caller
+    #   has edit permission on the source bot, and the snapshot read is
+    #   read-only with its own scope checks inside.
+    # ``manifest_seam.preflight`` below runs the document through
+    # ``validate_document``, which exercises ``validate_capabilities`` and
+    # refuses any malformed segment — so an unrepresentable source state is a
+    # 4xx at preflight, not silently stored.
+    source_manifest_record = manifest_get_service.get(
+        entity_id=source_entity_id, bot_id=source["bot_id"]
+    )
+    source_snapshot = None
+    if source_manifest_record is None:
+        source_snapshot = skill_set_service.read_apply_snapshot(
+            bot_id=source["bot_id"],
+            owner_id=source_owner_id,
+            actor_id=owner_id,
+        )
+    skill_sets = _serialize_skill_sets(
+        source_manifest_record=source_manifest_record,
+        snapshot=source_snapshot,
+    )
     manifest_document = _build_manifest_document(
         script_body=script_body,
         source_bot_id=source["bot_id"],
         source_owner_id=source_owner_id,
         excludes=request_excludes,
         render_screen_rows=source_render_screens,
+        skill_sets=skill_sets,
     )
 
     # Validate the document before anything is spent (manifest-creation's rule:
@@ -790,6 +825,12 @@ async def copy_bot(
         RenderScreenServiceProtocol
     ),
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
+    manifest_get_service: BotConfigManifestServiceProtocol = Injected(
+        BotConfigManifestServiceProtocol
+    ),
+    skill_set_service: SkillSetManagementServiceProtocol = Injected(
+        SkillSetManagementServiceProtocol
+    ),
 ) -> Envelope[BotCopyResponse]:
     """Copy an openclaw bot to a new dst bot (v1, Route B manifest-reuse)."""
     del caller
@@ -805,6 +846,8 @@ async def copy_bot(
         space_context=space_context,
         render_screen_service=render_screen_service,
         bot_service=bot_service,
+        manifest_get_service=manifest_get_service,
+        skill_set_service=skill_set_service,
     )
     return envelope(result, request)
 

@@ -82,7 +82,44 @@ def _mocks(script_body="echo hello", source_render_screens=None):
     render_screen_service.list_render_screens.return_value = source_render_screens or []
     bot_service = MagicMock()
     bot_service.check_create_bot_preflight.return_value = None  # over-quota → raises
-    return bot_repo, bot_copy_repo, bot_script_service, manifest_seam, passport, space_context, render_screen_service, bot_service
+    # S2 — the source's capability-set state read by ``submit_copy``. The
+    # manifest-get service returns None (manifest-managed source reads its own
+    # document in branch A, but the test's screenless-by-default source has no
+    # manifest record), and the skill-set snapshot returns an empty sets tuple
+    # so ``_serialize_skill_sets`` returns None (omit segment, full new baseline).
+    # Tests that exercise non-empty segments pass their own mocks.
+    manifest_get_service = MagicMock()
+    manifest_get_service.get.return_value = None
+    skill_set_service = MagicMock()
+    skill_set_service.read_apply_snapshot.return_value = _empty_snapshot()
+    return bot_repo, bot_copy_repo, bot_script_service, manifest_seam, passport, space_context, render_screen_service, bot_service, manifest_get_service, skill_set_service
+
+
+def _empty_snapshot():
+    # Minimal ``SkillSetApplySnapshot`` whose ``sets`` is empty → serializer
+    # returns None (brand-new baseline, no segment written).
+    from agentclaw.community.core.skill_center.skill_set_apply import (
+        BotCapabilityScope,
+        SkillSetApplySnapshot,
+    )
+
+    return SkillSetApplySnapshot(
+        scope=BotCapabilityScope(
+            bot_id=_SOURCE_BOT_ID,
+            owner_id=_OWNER,
+            engine_type="openclaw",
+            default_engine_types=("openclaw",),
+            tenant="teamclaw",
+            env="dev",
+        ),
+        sets=(),
+        skill_exclusions=frozenset(),
+        mcp_exclusions=frozenset(),
+        installed_skill_ids=frozenset(),
+        installed_mcp_codes=frozenset(),
+        platform_default_codes=frozenset(),
+        skills=(),
+    )
 
 
 def _call(body_over, source_over, mocks=None):
@@ -96,6 +133,8 @@ def _call(body_over, source_over, mocks=None):
         space_context,
         render_screen_service,
         bot_service,
+        manifest_get_service,
+        skill_set_service,
     ) = mocks
     body_kwargs = {"source_bot_id": _SOURCE_BOT_ID, "bot_name": "copied"}
     body_kwargs.update(body_over)
@@ -111,13 +150,15 @@ def _call(body_over, source_over, mocks=None):
         space_context=space_context,
         render_screen_service=render_screen_service,
         bot_service=bot_service,
+        manifest_get_service=manifest_get_service,
+        skill_set_service=skill_set_service,
     )
     return resp, mocks
 
 
 def test_submit_copy_oss_noop_persists_manifest_and_hands_off():
     mocks = _mocks(script_body="echo hello")
-    bot_repo, bot_copy_repo, bot_script_service, manifest_seam, passport, _, _, _ = mocks
+    bot_repo, bot_copy_repo, bot_script_service, manifest_seam, passport, _, _, _, _, _ = mocks
     bot_repo.get_by_id.return_value = _source_bot()
     passport.apply_agent_passport.return_value = {"token": "tok_1"}
 
@@ -155,7 +196,7 @@ def test_submit_copy_carries_caller_excludes_into_the_manifest_entry():
     # manifest resources entry, so the compiler and the sync read one source of
     # truth. An empty document omits them entirely — the empty branch.
     mocks = _mocks()
-    bot_repo, bot_copy_repo, _bot_script_service, manifest_seam, _passport, _, _, _ = mocks
+    bot_repo, bot_copy_repo, _bot_script_service, manifest_seam, _passport, _, _, _, _, _ = mocks
     bot_repo.get_by_id.return_value = _source_bot()
 
     body, _ = _call(
@@ -177,7 +218,7 @@ def test_submit_copy_an_empty_excludes_list_is_omitted_from_the_manifest():
     # No excludes → the entry carries no 'excludes' key at all (the falsy branch
     # of the serializer), so the compiler never sees an empty list.
     mocks = _mocks()
-    bot_repo, _bot_copy_repo, _bot_script_service, manifest_seam, _passport, _, _, _ = mocks
+    bot_repo, _bot_copy_repo, _bot_script_service, manifest_seam, _passport, _, _, _, _, _ = mocks
     bot_repo.get_by_id.return_value = _source_bot()
 
     _call({"request_detail": {"excludes": []}}, {}, mocks=mocks)
@@ -205,7 +246,7 @@ def test_submit_copy_serializes_source_render_screens_into_bot_config():
     mocks = _mocks(
         source_render_screens=[_record("lib-a", "https://cdn/a.js"), _record("lib-b", "https://cdn/b.js")],
     )
-    bot_repo, _bot_copy_repo, _bot_script_service, manifest_seam, _passport, _, render_screen_service, _ = mocks
+    bot_repo, _bot_copy_repo, _bot_script_service, manifest_seam, _passport, _, render_screen_service, _, _, _ = mocks
     bot_repo.get_by_id.return_value = _source_bot()
 
     resp, _ = _call({}, {}, mocks=mocks)
@@ -230,7 +271,7 @@ def test_submit_copy_a_screenless_source_emits_task_nav_but_omits_render_screen(
     # copy converges the destination's workflow-permission grants from the
     # source (always-emit — clawweb clone handles a grant-less source itself).
     mocks = _mocks(source_render_screens=[])
-    bot_repo, _bot_copy_repo, _bot_script_service, manifest_seam, _passport, _, _, _ = mocks
+    bot_repo, _bot_copy_repo, _bot_script_service, manifest_seam, _passport, _, _, _, _, _ = mocks
     bot_repo.get_by_id.return_value = _source_bot()
 
     _call({}, {}, mocks=mocks)
@@ -245,7 +286,7 @@ def test_submit_copy_always_emits_task_nav_referencing_the_source_bot():
     # the copy's source bot, so the destination's workflow-permission grants
     # converge from the source regardless of what else the source carries.
     mocks = _mocks(source_render_screens=[])
-    bot_repo, _bot_copy_repo, _bot_script_service, manifest_seam, _passport, _, _, _ = mocks
+    bot_repo, _bot_copy_repo, _bot_script_service, manifest_seam, _passport, _, _, _, _, _ = mocks
     bot_repo.get_by_id.return_value = _source_bot()
 
     _call({}, {}, mocks=mocks)
@@ -258,7 +299,7 @@ def test_submit_copy_always_emits_task_nav_referencing_the_source_bot():
 
 def test_submit_copy_internal_pending_returns_auth_required_with_iframe():
     mocks = _mocks()
-    bot_repo, _, _, _, passport, _, _, _ = mocks
+    bot_repo, _, _, _, passport, _, _, _, _, _ = mocks
     bot_repo.get_by_id.return_value = _source_bot()
     passport.apply_agent_passport.return_value = {"iframe_url": "https://auth/iframe", "redirect_url": ""}
 
@@ -270,7 +311,7 @@ def test_submit_copy_internal_pending_returns_auth_required_with_iframe():
 
 def test_submit_copy_rejects_teclaw_source_before_side_effects():
     mocks = _mocks()
-    bot_repo, bot_copy_repo, bot_script_service, manifest_seam, passport, _, _, _ = mocks
+    bot_repo, bot_copy_repo, bot_script_service, manifest_seam, passport, _, _, _, _, _ = mocks
     bot_repo.get_by_id.return_value = _source_bot(active_engine="teclaw")
 
     with pytest.raises(HTTPException) as exc_info:
@@ -290,7 +331,7 @@ def test_submit_copy_rejects_over_quota_before_passport_or_manifest_side_effects
     # without minting an AgentPassport identity or leaving a ledger row the FE
     # detail poll would chase into a 60s timeout.
     mocks = _mocks()
-    bot_repo, bot_copy_repo, _bot_script_service, manifest_seam, passport, _, _, bot_service = mocks
+    bot_repo, bot_copy_repo, _bot_script_service, manifest_seam, passport, _, _, bot_service, _, _ = mocks
     bot_repo.get_by_id.return_value = _source_bot()
     bot_service.check_create_bot_preflight.side_effect = BotQuotaExceededError(
         _quota_snapshot()
@@ -308,7 +349,7 @@ def test_submit_copy_rejects_over_quota_before_passport_or_manifest_side_effects
 
 def test_submit_copy_rejects_source_not_found():
     mocks = _mocks()
-    bot_repo, bot_copy_repo, manifest_seam, _, _, _, _, _ = mocks
+    bot_repo, bot_copy_repo, manifest_seam, _, _, _, _, _, _, _ = mocks
     bot_repo.get_by_id.return_value = None
     with pytest.raises(HTTPException) as exc_info:
         _call({}, {}, mocks=mocks)
@@ -319,7 +360,7 @@ def test_submit_copy_rejects_source_not_found():
 
 def test_submit_copy_rejects_non_copyable_lifecycle():
     mocks = _mocks()
-    bot_repo, bot_copy_repo, manifest_seam, _, _, _, _, _ = mocks
+    bot_repo, bot_copy_repo, manifest_seam, _, _, _, _, _, _, _ = mocks
     bot_repo.get_by_id.return_value = _source_bot(status="FAILED")
     with pytest.raises(HTTPException) as exc_info:
         _call({}, {}, mocks=mocks)
@@ -329,7 +370,7 @@ def test_submit_copy_rejects_non_copyable_lifecycle():
 
 def test_submit_copy_rejects_no_edit_permission_non_owner():
     mocks = _mocks()
-    bot_repo, bot_copy_repo, manifest_seam, _, _, _, _, _ = mocks
+    bot_repo, bot_copy_repo, manifest_seam, _, _, _, _, _, _, _ = mocks
     bot_repo.get_by_id.return_value = _source_bot(owner_id="other_owner", actions=["view"])
     with pytest.raises(HTTPException) as exc_info:
         _call({}, {}, mocks=mocks)
@@ -342,7 +383,7 @@ def test_submit_copy_passport_no_token_no_url_is_500_after_persist():
     # ledger row were already written (compensation is the retry path's job),
     # but no create_job hand-off happens.
     mocks = _mocks()
-    bot_repo, _, _, manifest_seam, passport, _, _, _ = mocks
+    bot_repo, _, _, manifest_seam, passport, _, _, _, _, _ = mocks
     bot_repo.get_by_id.return_value = _source_bot()
     passport.apply_agent_passport.return_value = {}
     with pytest.raises(HTTPException) as exc_info:
@@ -370,7 +411,7 @@ def test_copy_bot_handler_returns_envelope_with_result():
     # Handler-level (not submit_copy-level): covers the `del caller` + the
     # `return envelope(result, request)` path the ASGI adapter answers with.
     mocks = _mocks()
-    bot_repo, bot_copy_repo, _, manifest_seam, passport, space_context, render_screen_service, _ = mocks
+    bot_repo, bot_copy_repo, _, manifest_seam, passport, space_context, render_screen_service, _, _, _ = mocks
     bot_repo.get_by_id.return_value = _source_bot()
     passport.apply_agent_passport.return_value = {"token": "tok_1"}
 
@@ -388,7 +429,9 @@ def test_copy_bot_handler_returns_envelope_with_result():
             passport_plugin=passport,
             space_context=space_context,
             render_screen_service=render_screen_service,
-            bot_service=mocks[-1],
+            bot_service=mocks[-3],
+            manifest_get_service=mocks[-2],
+            skill_set_service=mocks[-1],
         )
     )
     # envelope(result, request) → a populated Envelope carrying the submit_copy result.
@@ -400,7 +443,7 @@ def test_copy_bot_handler_returns_envelope_with_result():
 def test_retry_copy_bot_handler_returns_envelope_with_result():
     # Handler-level: covers retry_copy_bot's `del caller` + `return envelope(...)`.
     mocks = _mocks()
-    bot_repo, bot_copy_repo, _, manifest_seam, _, space_context, _, _ = mocks
+    bot_repo, bot_copy_repo, _, manifest_seam, _, space_context, _, _, _, _ = mocks
     bot_repo.get_by_id.return_value = _source_bot(status="ACTIVE")
     bot_copy_repo.get_by_dst_bot_id.return_value = MagicMock(
         operation_id="op_1",
