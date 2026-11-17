@@ -3,6 +3,10 @@
 Status: proposed; awaiting review. Implements [spec](spec.md); store mapping in
 [research](research.md). Baseline `dev` = `5c3e30ea`.
 
+This replaces the plan of the closed PR #4111 (written before `bcs-store-api`
+and `bcs-dist-store` were in `dev`). The choices reviewed there on 2026-11-17
+are kept as decided and marked "reviewed"; they are not reopened.
+
 ## 1. Shape
 
 ```text
@@ -11,10 +15,12 @@ bcs-service-api (additive)
 
 services/bcs-dist-connector  (new)                                                 [engine, §3]
   rules      DistConnectorRules: the DistConnectorCoreService implementation
+  identity   request ids, input ids, interaction ids, digests
   engine     main loop: receive → claim → ack → spawn actor; drain; snapshot
   actor      one per holder generation: send / recover / stream / control tick / finish
-  ingress    events → InboxProducerPort (admit | append_stream), blob offload
   control    pending_input and cancel
+  delayed    report_unresolved (D2); HeldCallRecovery (local trait for D3/D8)
+  report     events → InboxProducerPort (admit | append_stream), blob offload
   uses ports: DispatchQueuePort, HeldDispatchPort, CommandFeedPort, InboxProducerPort,
               DistAgentClientPort, MembershipPort, BlobStorePort
   implements: DistRuntimeControlPort
@@ -25,7 +31,7 @@ services/bcs-dist-connector-store  (new, the only new user of bcs-store-api)    
   held       StoreHeldDispatch: HeldDispatchPort
   feed       StoreCommandFeed: CommandFeedPort (consumer group)
   held_index add before claim, remove after ENDED
-  recovery   ConnectorRecoveryPort (local trait) + stub provider: repost_held (D3), release (D8)
+  delayed    stub bodies of repost_held (D3) and release (D8)
   membership PendingMembership: MembershipPort stub (provider pending from the executor team)
 
 services/bcs-dist-store (shared, additive)                                         [§5]
@@ -47,81 +53,93 @@ by nobody else, and the split keeps the only shared edit to one new file.
 ## 2. Core contract: `bcs_service_api::core::dist_connector` (additive)
 
 A pure rules trait, like `DistRunnerCoreService`: no storage, network, clock or
-randomness. The module doc states the order of one call (spec B1–B6) as the
-contract the engine follows. **For the executor team to review.**
+randomness. It is a new file plus one `mod` line; no existing type changes.
+**For the executor team to review.** Shape as reviewed on 2026-11-17:
 
 ```rust
-pub enum EventClass { Key, Intermediate }
+/// Report position of one held call. A new cursor is made after every claim.
+pub struct ReportCursor { pub holder_epoch: HolderEpoch, pub last_seq: InputSeq /* 0 = none yet */ }
 
-pub struct CallContext<'a> {            // what the rules may look at
-    pub spec: &'a DispatchSpec,
-    pub holder_epoch: HolderEpoch,
-    pub confirmed_input_through: Option<InputSeq>,
+pub enum ResumeStep {
+    Send,                 // created / claimed, no cancel: begin_send(Start) then start
+    EndCanceledUnsent,    // created / claimed with a cancel intent: nothing was sent
+    ResolveStart,         // sending: the start may have reached the agent (SENT policy)
+    Reattach,             // accepted: remote task id known
+    Nothing,              // ended
 }
-
-pub enum Report {                        // result of normalizing one remote event
-    Admit(InputEnvelope),                // key event → InboxProducerPort::admit
-    Append(AppendAgentEvent),            // intermediate → InboxProducerPort::append_stream
-}
-
-pub enum RecoveryStep {                  // what a (new) holder does first
-    Send,                                // phase claimed: nothing was sent
-    Resend,                              // possibly sent, agent declares the send idempotent
-    QueryByRequest,                      // possibly sent, agent can be asked by request id
-    Subscribe,                           // accepted: follow the remote task's events
-    PollByTask,                          // accepted, no subscribe: poll the remote task
-    Unresolved { code: String },         // may not resend and cannot find out (D2)
-}
-
-pub enum SendVerdict {                   // after one send attempt
-    Accepted, Completed, Rejected,
-    Retry,                               // definite not-sent, attempts left
-    Recover(RecoveryStep),               // outcome unknown → SENT policy
-    Unresolved { code: String },
-}
+pub enum UncertainSend { Resend, AskAgent, Unresolved }
+pub enum Reattach { Subscribe { query_first: bool }, Poll, Unresolved }
+pub enum Report { Stream(AppendAgentEvent), Key(AdmitRequest) }
 
 pub trait DistConnectorCoreService: Send + Sync {
-    fn classify(&self, kind: &AgentEventKind) -> EventClass;
-    /// Stable request id of a send: start = "<did>:start", input = "<did>:in:<seq>".
-    fn request_id(&self, did: &Did, operation: SendKind) -> RequestId;
-    /// Stable identity of a key event, without the holder epoch (decision 29 b).
-    fn key_identity(&self, ctx: &CallContext<'_>, kind: KeyKind) -> KeyIdentity; // { input_id, interaction }
-    /// (did, holder_epoch, seq) + identity + digest; `seq` is supplied by the caller.
-    fn normalize(&self, ctx: &CallContext<'_>, seq: InputSeq, event: RemoteEvent)
-        -> Result<Report, ConnectorRuleError>;
-    fn recovery(&self, view: &DispatchView, sending: Option<&SendKind>) -> RecoveryStep;
-    fn after_send(&self, caps: &DownstreamCapabilities, kind: &SendKind,
-        outcome: SendClass, not_sent_attempts: u32) -> SendVerdict;
-    /// final → Completed; error → Canceled when the payload state is "canceled", else Failed.
-    fn terminal(&self, kind: &AgentEventKind, payload: &Payload) -> Option<FinalDispatchOutcome>;
+    fn resume_step(&self, view: &DispatchView) -> ResumeStep;
+    fn start_request_id(&self, did: &Did) -> RequestId;
+    fn input_request_id(&self, did: &Did, seq: InputSeq) -> RequestId;
+    fn uncertain_start(&self, capabilities: &DownstreamCapabilities) -> UncertainSend;
+    fn uncertain_input(&self, capabilities: &DownstreamCapabilities) -> UncertainSend;
+    fn reattach(&self, capabilities: &DownstreamCapabilities) -> Reattach;
+    /// Decision 29 (a)(b): assigns seq, and for key events the stable input id,
+    /// interaction id and digest. Never reads a clock or the holder for identity.
+    fn report(&self, view: &DispatchView, cursor: &mut ReportCursor, kind: AgentEventKind,
+              remote_event_id: Option<String>, payload: Payload) -> Report;
+    /// The definitive end a key event implies, if any.
+    fn end_of(&self, kind: &AgentEventKind, payload: &Payload) -> Option<FinalDispatchOutcome>;
+    /// Next pending input to send: lowest seq above the confirmed watermark, or none.
+    fn next_input<'a>(&self, view: &'a DispatchView) -> Option<&'a PendingInput>;
 }
+```
+
+The step order of one call is part of the contract (module doc) and is asserted
+by tests against recording fakes:
+
+```text
+receive → claim → ack
+  → actor:  begin_send(Start) → start → record_acceptance
+            → report events (append_stream | admit)
+            → on poll: begin_send(Input) → send_input → confirm_input
+                       cancel intent → record_cancel(Sending) → cancel → record_cancel(observed)
+            → admit final/error → finish
 ```
 
 Rules fixed by the trait docs:
 
 | Rule | Value |
 | --- | --- |
-| `input_id` | `ae:<hex of digest_fields(did, "final")>`; same with `"error"`; `(did, "input_required" \| "auth_required", n)` with n = `confirmed_input_through + 1` (1 when none). `InteractionId` = the same value with prefix `ai:` |
-| `business_digest` | `digest_json({did, kind, payload})`: no holder epoch, seq, remote event id or cursor |
-| `seq` | starts at 1 after each claim (also after `resume_owned`), +1 per reported event, key and intermediate share one counter |
-| SENT policy (start) | `idempotent_start` → `Resend`; else `query_by_request` → `QueryByRequest`; else `Unresolved` |
-| SENT policy (input) | `idempotent_input` → `Resend`; else `Unresolved` (the input stays pending and unconfirmed; later inputs wait) |
-| definite not-sent | retried 3 times (`NOT_SENT_RETRIES`), then `Unresolved` |
-| accepted | `subscribe` → `Subscribe`; else `query_by_task` → `PollByTask`; else `Unresolved` |
-| A2A `canceled` / `rejected` | `AgentEventKind::Error`, payload `{"state":"canceled" \| "rejected", …}` |
-| payloads | delta/thinking/tool/snapshot: the adapter's JSON of the A2A event; final: the remote task snapshot (see §3.3); error: `{"state", "code"?, "message"?}` |
+| request id (A2A `messageId`) | start: derived from the `did`; input: from `did` and `seq`. Same value on every attempt and for every holder |
+| `input_id` | `ae:` + sha256(did, "final"); `ae:` + sha256(did, "error"); `ae:` + sha256(did, kind, n) for input-required / auth-required, n = `confirmed_input_through + 1` (1 when none). Fields are length-prefixed before hashing |
+| `InteractionId` | `ia:` + the same hash |
+| `business_digest` | sha256 over the same identity fields plus the terminal state. The payload is **not** part of it: a new holder re-reports from `tasks/get`, whose JSON differs from the streamed event; the first admitted report wins |
+| `seq` | 1 after each claim (also after `resume_owned`), +1 per reported event; key and intermediate events share the counter |
+| SENT policy | start: `idempotent_start` → `Resend`; else `query_by_request` → `AskAgent`; else `Unresolved`. Input: `idempotent_input` → `Resend`; else `Unresolved` |
+| re-attach | `subscribe` → `Subscribe { query_first: query_by_task }`; else `query_by_task` → `Poll`; else `Unresolved` |
+| end of call | `Final` → `Completed`; `Error` with payload state `canceled` → `Canceled`; other `Error` → `Failed` |
 
-Known limit (tracked, per the 2026-11-17 review): two different input-required
-events before a confirmed reply share one `input_id`.
+Event payload per kind (assumed signed off by the executor team; samples in
+[research §9](research.md#9-agentevent-payload-per-kind)):
+
+| Kind | A2A source | Payload |
+| --- | --- | --- |
+| `delta` | artifact update with output parts | `artifact`, `append`, `last_chunk` |
+| `thinking` | status update in state working that carries a message | `message` |
+| `tool` | a record of the negotiated tools extension | `tool` |
+| `snapshot` | a whole non-terminal task (first event of a subscribe, or a poll) | `task` |
+| `input_required` / `auth_required` | status update or task in that state | `state`, `message` |
+| `final` | state completed, or a direct message answer | `state`, optional `message`, optional `artifacts` |
+| `error` | state failed, rejected, canceled; a definite rejection of the send; a cancel before anything was sent | `state`, `code`, optional `message` |
+
+Known limit (tracked): two different input-required events before a confirmed
+reply share one `input_id`; the second is dropped.
 
 ## 3. Engine: `crates/services/bcs-dist-connector`
 
 ### 3.1 Main loop (`engine.rs`)
 
 ```text
-start: membership.register (need_contract → warn once, continue) ; queue.notifications(pool, me)
+start: membership.register(me, Connector, 3 s) ; renew every 1 s      // provider pending: need_contract → warn once, continue
+       Renewal::Lost → stop claiming, ready = false (actors continue; disp fences them)
+       queue.notifications(pool, me)
 loop until draining:
-  free = max_held − actors ; if free == 0 → wait for an actor to end
+  free = max_active_calls − actors ; if free == 0 → wait for an actor to end
   deliveries = feed.receive(free, 1 s)
   for each delivery:
      claim(did)  Acquired(h)   → spawn actor(h)
@@ -135,59 +153,67 @@ loop until draining:
 - One actor per `(did, holder generation)`, kept in a map; a finished or lost
   actor removes itself. `resume_owned` is called only after the old actor's
   task has been joined.
-- Backpressure: the loop does not read hints while `max_held` actors run.
+- Backpressure: the loop does not read hints while `max_active_calls` actors run.
 - `drain(grace)`: stop reading and claiming, call `membership.set_draining`
   (stub tolerated), wait up to `grace` for actors to end, then for each
   leftover call `recovery.release` (D8 stub → logged) and return
   `DeadlineReached { remaining }`. Actors are not aborted: their calls stay
   held and recoverable.
+- Config: `partitions` required, no default (§5). Defaults: `pool = a2a`,
+  `max_active_calls = 1000`, `poll_interval = 1.5 s ± 20 %`,
+  `max_inline_bytes = 65536`, backoff 0.2 s → 5 s, `not_sent_retries = 3`.
 - `snapshot`: `active_work` = actors, `pending_effects` = unresolved calls +
   pending cancels; `ready` = feed open and not draining.
 
-### 3.2 Actor (`actor.rs`, `sender.rs`, `receiver.rs`)
+### 3.2 Actor (`actor.rs`, `sender.rs`)
 
-```text
-step = rules.recovery(view, connector.sending)
-Send / Resend:
-   refresh ; cancel already requested and nothing sent → report canceled, finish(Canceled)
-   begin_send(Start{request_id})                         // durable before the network call
-   client.start(target, StableSendRequest{request_id, context_id: None, payload})
-     Accepted{remote, events}  → record_acceptance → returned cancel intent? run cancel → stream
-     Completed{result}         → report final(result) → finish(Completed)
-     Rejected{code}            → report error{state: rejected, code} → finish(Failed)
-     NotSent                   → backoff, retry ≤ 3, then unresolved
-     OutcomeUnknown            → rules.after_send → Resend | QueryByRequest | unresolved
-QueryByRequest:  Found → record_acceptance → stream ; NotFound | Unsupported → unresolved ;
-                 Unavailable → backoff and ask again
-Subscribe:       client.subscribe(remote, None) ; read error → backoff, resubscribe
-PollByTask:      client.query(ByTask) every poll interval until terminal
-stream: for each RemoteEvent → rules.normalize(seq += 1) → ingress
-        terminal key event admitted → finish(outcome)   // final before finish (B5)
-unresolved: report_unresolved (D2 stub → log) ; keep the control tick ; never finish
-every 1–2 s (jittered) and on a poke: control tick (§3.4) ; HolderError::Lost → stop, write nothing
-```
+On start the actor asks `rules.resume_step(held.view())`:
 
-A transport failure never becomes an agent event (B11). The actor enforces no
-deadline (B13).
+| Step | Actor does |
+| --- | --- |
+| `Send` | `begin_send(Start { request_id })`, load the request (`BlobStorePort::get` when it is a reference), `client.start(...)`, then the table below |
+| `EndCanceledUnsent` | admit the error event (state canceled), `finish(Canceled, "canceled_before_send")` |
+| `ResolveStart` | `rules.uncertain_start`: `Resend` → send again with the same request id, with backoff; `AskAgent` → `query(ByRequest)`: `Found` → `record_acceptance`, continue; anything else → unresolved; `Unresolved` → unresolved |
+| `Reattach` | `rules.reattach`: `Subscribe { query_first }` → optional `query(ByTask)` reported as a `Snapshot` (its key state under the stable `input_id`), then `subscribe(remote, None)`; `Poll` → `query(ByTask)` every poll interval; `Unresolved` → unresolved |
+| `Nothing` | exit |
 
-### 3.3 Reporting (`ingress.rs`)
+| `SendOutcome` of `start` | Actor does |
+| --- | --- |
+| `Accepted { remote, events }` | `record_acceptance` (re-reads `disp`; a returned cancel intent is carried out at once), then consume `events`, or re-attach when there is no stream |
+| `Completed { result }` | admit final, `finish(Completed, "sync_result")` |
+| `Rejected { code }` | admit error (state rejected), `finish(Failed, "rejected:<code>")` |
+| `NotSent { code }` | retry up to 3 times with backoff; then unresolved (not sent) |
+| `OutcomeUnknown { code }` | as `ResolveStart` |
 
-- `Report::Admit` → `InboxProducerPort::admit(AdmitRequest { input, create_session: None, create_task: None })`.
-  `Accepted` and `Duplicate` are the same success. `ContentConflict` is logged
-  at error level and counted; for a terminal event the call is still finished
-  (a terminal is already admitted under that identity). `Quarantined` stops
-  the actor without finishing. Store errors are retried with backoff under the
-  same `input_id` while the actor still holds the call.
-- `Report::Append` → `append_stream`; an error is retried once, then the event
-  is dropped with a warning (intermediate events are best-effort).
-- Final payload: when the agent declares `query_by_task`, the actor reads the
-  remote task once (`query(ByTask)`) on the terminal status and reports that
-  snapshot, so a later holder re-reading the task produces the same content and
-  the same digest. Otherwise the terminal event's own payload.
-- Payloads larger than `max_inline_bytes` (engine config) are stored with
-  `BlobStorePort::put_immutable` under `disp/<did>/<input_id | epoch-seq>` and
-  reported as `Payload::Ref`. A request `Payload::Ref` is loaded with
-  `BlobStorePort::get` before the send.
+Then one select loop until the call ends or the holder is lost:
+
+- **remote event** → `rules.report(...)` → `append_stream` or `admit`, one at a
+  time, in order; the stream is not read further while a report is pending.
+- **poll tick (1.5 s ± 20 %) or poke** → `held.refresh()`: `HolderError::Lost` →
+  stop now, drop the stream, write nothing more; a store error → try again next
+  tick; cancel intent → §3.4; `rules.next_input(view)` → §3.4.
+- **stream ended or failed without a terminal event** → not an agent result
+  (B11); re-attach.
+
+Unresolved (uncertain or not sent): call the D2 stub and log its error; leave
+`disp` in its phase; never `finish`; keep polling so a cancel is still seen
+(not sent → `finish(Canceled)`; uncertain → `record_cancel(OutcomeUnknown)`, no
+finish); count it in `pending_effects`. The actor enforces no deadline (B13).
+
+### 3.3 Reporting (`report.rs`)
+
+- Key events → `InboxProducerPort::admit(AdmitRequest { input, create_session: None, create_task: None })`.
+  `Accepted` and `Duplicate` are the same success (works before and after the
+  Gateway session removes `Duplicate`). `ContentConflict` cannot happen with
+  the payload-free digest; if it does it is logged as a bug and the call is not
+  ended on it. `Quarantined` is logged; a terminal event still ends the call.
+  `NotApplied` / `OutcomeUnknown` → retry the same envelope with backoff;
+  `finish` is never called before the admit succeeded.
+- Intermediate events → `append_stream`; on an error retry the same event with
+  the same seq, with backoff (the Worker drops a repeat by `(holder_epoch, seq)`).
+- A payload whose inline JSON exceeds `max_inline_bytes` is written with
+  `BlobStorePort::put_immutable` (key `bcn/agent-event/<did>/<sha256>`) and
+  reported as `Payload::Ref`.
 - No batching of intermediate events (design proposal, not MVP).
 
 ### 3.4 Replies and cancels (`control.rs`)
@@ -198,21 +224,25 @@ Per tick, from `held.refresh()` (which hides pending inputs at or below
 - Next pending input (`seq == confirmed + 1`), phase accepted, nothing being
   sent: `begin_send(Input{seq, request_id})` → `client.send_input(target, remote, …)`.
   `Accepted` → `confirm_input(seq, evidence)`, follow the returned event stream
-  (or resubscribe). `Rejected` → not confirmed, logged, unresolved input.
-  `NotSent` → retry ≤ 3. `OutcomeUnknown` → `idempotent_input` ? resend : unresolved input.
+  (or re-attach). `Completed` → confirm, admit final, `finish(Completed)`.
+  `Rejected` → no confirm; D2 stub (not delivered); later inputs wait.
+  `NotSent` → retry ≤ 3, then as `Rejected`. `OutcomeUnknown` →
+  `idempotent_input` ? resend : D2 stub (uncertain); later inputs wait.
 - Cancel intent present and no final cancel observation:
   nothing sent yet → report canceled, `finish(Canceled)`;
   no `cancel` capability → `record_cancel(Rejected { code: "cancel_unsupported" })`;
   else `record_cancel(Sending)` → `client.cancel(target, remote, intent.request_id)` →
   `record_cancel(mapped)`. `ConfirmedCanceled` → report canceled, `finish(Canceled)`.
-  `RequestAccepted` / `AlreadyFinished` → keep reading until the terminal event.
+  `AlreadyFinished(outcome)` → query the task, admit its terminal event,
+  `finish(outcome)`. `RequestAccepted` → keep consuming until the agent ends.
   `OutcomeUnknown` → retried on later ticks.
 
 ### 3.5 Delayed-contract stubs in the engine
 
 | Method | Item | Returns | Caller |
 | --- | --- | --- | --- |
-| `UnresolvedReporter::report(did, UnresolvedKind)` | D2 | `RuntimeError { code: "need_contract_not_implemented" }` | logs, leaves the phase |
+| `report_unresolved(call, Uncertain \| NotSent) -> Result<AdmitOutcome, StoreError>` (`delayed.rs`) | D2 | `StoreError::NotApplied { code: "need_contract_not_implemented" }` | logs, leaves the phase |
+| `HeldCallRecovery::{repost_held, release}` (trait local to this crate) | D3, D8 | same; the stub bodies live in the store crate (§4.4) | `drain` calls `release` per leftover and logs; nothing calls `repost_held` in the MVP |
 
 ### 3.6 Access cost (per held call)
 
@@ -226,7 +256,7 @@ Per tick, from `held.refresh()` (which hides pending inputs at or below
 | key event | 1–2 | 4 via the shared producer |
 
 A normal call is 5 `disp` reads + 5 `disp` writes plus ticks. Idle cost is
-`held / 1.5` projection reads per second per Connector, bounded by `max_held`.
+`held / 1.5` projection reads per second per Connector, bounded by `max_active_calls`.
 Conflict retries are bounded (5) and re-read first. No scan grows with history:
 the feed reads at most `free` hints, idle takeover pages by `limit`.
 
@@ -245,11 +275,12 @@ loop (≤ 3):
   e = max(holder.epoch, band_of(v)) + 1
   mutate_json(disp, Newer(version::claim(e)),
               Patch[Set /execution {holder: {me, e}, phase: created→claimed else kept, rest kept},
-                    Set /connector {v:1, claim_request, sending: kept, finish_evidence: kept}],
+                    Set /connector {input_sending: kept, finish_evidence: kept}],
               Preserve)
      Applied          → Acquired(StoreHeldDispatch)
      ConditionNotMet  → loop (re-read, re-decide)
-     OutcomeUnknown   → StoreError::OutcomeUnknown (not acked; the retry finds OwnedByMe)
+     OutcomeUnknown   → re-read: holder is {me, e} → Acquired; else re-decide;
+                        re-read fails → StoreError::OutcomeUnknown (not acked)
 outcome is not Acquired / OwnedByMe / unknown → held_index.remove(me, did)
 ```
 
@@ -274,11 +305,11 @@ compare content: applied, or retry.
 
 | Method | Precondition (else `InvalidTransition`) | Effect | Repeat |
 | --- | --- | --- | --- |
-| `begin_send(Start)` | phase claimed | phase sending; `connector.sending = start` | same request while sending → same permit |
-| `begin_send(Input{seq})` | phase accepted; `seq == confirmed + 1`; input pending | `connector.sending = input` | same |
-| `record_acceptance` | phase sending or accepted | phase accepted; `remote`; `sending` cleared; returns `control.cancel` from the same read | same remote → no write |
-| `confirm_input(seq)` | `seq == confirmed + 1` | `confirmed_input_through = seq`; `sending` cleared | `seq ≤ confirmed` → `AlreadyApplied` |
-| `record_cancel(obs)` | not after `ConfirmedCanceled` / `AlreadyFinished` | `cancellation = obs` | equal → `AlreadyApplied` |
+| `begin_send(Start)` | phase claimed | phase sending | already sending → fenced read only, same permit |
+| `begin_send(Input{seq})` | phase accepted; `seq == confirmed + 1`; input pending | `connector.input_sending = seq` | same |
+| `record_acceptance` | phase sending or accepted | phase accepted; `remote`; returns `control.cancel` from the same read | same remote → no write |
+| `confirm_input(seq)` | `seq == confirmed + 1` | `confirmed_input_through = seq` | `seq ≤ confirmed` → `AlreadyApplied` |
+| `record_cancel(obs)` | forward only: `not_sent` → `sending` → an observed result | `cancellation = obs` | equal → `AlreadyApplied` |
 | `finish(outcome, evidence)` | phase not ended | phase ended; `outcome`; `finish_evidence`; then held-index remove | same outcome → `AlreadyApplied`; other → `ContentConflict` |
 | `refresh` | — | view from the read, pending inputs ≤ confirmed hidden | — |
 
@@ -301,19 +332,14 @@ The Connector never writes `/spec` or `/control`.
 - An entry without a readable `did` is acked and logged. `GroupMissing` →
   recreate the group and continue.
 
-### 4.4 Recovery port (local, both stubs)
+### 4.4 Delayed-contract stubs (`delayed.rs`)
 
-```rust
-#[async_trait]
-pub trait ConnectorRecoveryPort: Send + Sync {
-    /// D3 (walkthrough §16, Gap 5): re-post the held dispatches of a dead instance.
-    async fn repost_held(&self, dead: &Instance) -> Result<u64, StoreError>;
-    /// D8 (walkthrough §16): write the call back to unclaimed and re-notify.
-    async fn release(&self, did: &Did, holder: &Holder) -> Result<(), StoreError>;
-}
-```
-
-Both return `error::need_contract()`. The held index itself is real.
+`repost_held(dead: &Instance, page) -> Result<Page<Did>, StoreError>` (D3) and
+`release(did, holder: &Holder) -> Result<(), StoreError>` (D8), both returning
+`error::need_contract()`, each with a doc comment naming its §16 item and a
+test. The trait the engine calls (`HeldCallRecovery`) stays local to
+`bcs-dist-connector`; a thin wrapper joins the two at composition. The held
+index itself is real.
 
 ## 5. Shared crate change: `bcs_dist_store::command` (new file only)
 
@@ -379,7 +405,7 @@ Event mapping: status `working`/`submitted` and artifact updates → `Delta`
 adapter's `AgentEventKind` is a placeholder; the rules replace it (§2).
 `event_id` and `cursor` are `None` (the SSE decoder drops `id:` lines).
 
-New dependency: `bcs-a2a-http` → `bcs-dist-model`.
+New dependency: `bcs-a2a-http` → `bcs-dist-model` (optional, with the `dist-agent` feature, §9).
 
 ## 7. Admin (C6)
 
@@ -396,7 +422,7 @@ New dependency: `bcs-a2a-http` → `bcs-dist-model`.
 | rules | `bcs-dist-connector/tests/rules.rs` | identities stable across holder epochs and without event ids; digest excludes holder/transport data; every SENT-policy row; not-sent ×3; terminal mapping |
 | providers | `bcs-dist-connector-store/tests/` on `Model` + recording wrapper | claim race (one winner); `OwnedByMe`; takeover with a `Dead` fake; `PendingMembership` → `HeldByOther`; stale holder → `Lost`; every write with a lost response and with a definite failure; Worker write between read and write → merged retry; held index order; feed: group from the beginning, one consumer per entry, idle takeover, double ack, kept-alive reads; partition function |
 | port harnesses | same | `dispatch_queue_port_contract_tests`, `command_feed_port_contract_tests`, `held_dispatch_port_contract_tests` (Worker side played by a test-only fixture that writes `control`) |
-| engine | `bcs-dist-connector/tests/` with port fakes | the walkthrough §12.7 order; ack after the decision; final before finish; crash between admit and finish then takeover; SENT recovery per capability; reply continues the same call; cancel before / after acceptance; lost holder stops silently; drain; `dist_runtime_control_port_contract_tests` |
+| engine | `bcs-dist-connector/tests/` with port fakes | the §2 step order; ack after the decision; final before finish; crash between admit and finish then takeover; SENT recovery per capability; reply continues the same call; cancel before / after acceptance; lost holder stops silently; drain; `dist_runtime_control_port_contract_tests` |
 | end to end | `bcs-dist-connector/tests/store_e2e.rs` | engine + real providers + `StoreInboxProducer` on `Model`: one call from hint to ENDED, inbox entries checked |
 | adapter | `bcs-a2a-http/tests/dist_agent.rs` with an axum fake agent | each outcome class; stable `messageId`; `dist_agent_client_port_contract_tests` |
 | stubs | each crate | D2, D3, D8, membership return `need_contract_not_implemented` |
@@ -406,18 +432,41 @@ Commands: `cargo nextest run -p bcs-dist-connector -p bcs-dist-connector-store -
 
 ## 9. Repository rules that apply
 
-Filled from the architecture survey; see the end of this file.
+| Rule | What this change does |
+| --- | --- |
+| Workspace members and `[workspace.dependencies]` are explicit lists; CI builds `--locked` | one line each per new crate; `Cargo.lock` committed |
+| LINT-4: traits under `core/` end in `Service`; CLAUDE.md: `*CoreService` | `DistConnectorCoreService`; no other `pub trait` in the file |
+| LINT-2: a public name under `core/` may not appear as a word under `port/` | new type names checked against `port/` before commit (`Report`, `ResumeStep`, …) |
+| LINT-1: `services/*` may not import `application::`; `external-clients/*` only `port::` / types | engine implements `DistRuntimeControlPort` only; the facade lives in the application crate; the adapter imports `port::dist_agent` |
+| `r4_default_impl_inventory`: no default async bodies in `core/` | the trait has none (it is sync) |
+| API-1: a public-API diff of `bcs-service-api` needs a version change | `6.1.0` → `6.2.0` (additive) and a "Version 6.2.0" section in its `CONTEXT.md` |
+| R25.1: every `pub trait …(CoreService\|Service\|Port\|…)` under `service-api`, `plugin-api`, `services` needs `<snake>_contract_tests` in `bcs-test-support` | add `dist_connector_core_service_contract_tests`, exercised by a test. The engine-local D3/D8 trait is named `HeldCallRecovery` (no `Port` suffix): it only fronts two stubs and `bcs-test-support` must not depend on the engine |
+| R25.2: every `impl …Port/CoreService for T` under `crates/services` needs a `tests/conformance_*.rs` naming `T` and the harness | `conformance_rules.rs`, `conformance_runtime_control.rs` (engine); `conformance_dispatch_board.rs` (store). `PendingMembership` carries `CONFORMANCE_WAIVED` with the reason (a stub cannot pass a provider harness) |
+| R10: store plugins only in `*-store` crates; the script scans a fixed list | add `crates/services/bcs-dist-connector/src` to `check-store-boundaries.sh` and `tests/store_api_boundary.sh` |
+| Ports only in a service crate; concrete stores chosen at composition | engine normal deps: `bcs-service-api`, `bcs-dist-model` (+ async/runtime crates). Hashing is a small local `identity.rs` using the same length-prefixed sha256 as `bcs_dist_store::identity`; the store crates are dev-dependencies for the end-to-end test |
+| DEP-8: no unused dependencies (`cargo machete`) | manifests list only what is used |
+| LINT-3: no `std::env::var` in services | configuration is passed in as structs |
+| Workspace lints: `unsafe_code`, `unused_qualifications` deny; clippy `unwrap_used`, `expect_used` deny | `[lints] workspace = true`; tests opt out locally as existing tests do |
+| Unit-test gate on PRs to `dev`: 100 % pass, changed-line coverage > 85 %, nextest kills a test after 90 s | loop/actor tests use paused time and finish in milliseconds; every branch of §3–§6 has a test |
+| Singlebox E2E changed-line gate (> 65 %) counts code linked into the `bcs` binary | the adapter is the only new executable code in a linked crate (`bcs-a2a-http`): it sits behind a cargo feature `dist-agent`, off by default, so the binary does not contain it. To verify on the first CI run |
+| 1,000-line file limit | modules split as in §1; checked with `wc -l` before each push |
+| No global formatter | only new files and the touched lines |
+| PR to `dev` runs the unit and singlebox gates; architecture checks run on `main` | `BCS_BASE_REF=origin/dev bash scripts/ci/arch-check.sh` is run locally; checks that already fail on `dev` (LINT-1, LINT-4, DEP-1, DEP-6 outliers) are reported, not touched |
+| PR description | repository template, plus the BCS architecture fields the `main` gate reads (contract direction, affected consumers) because `bcs-service-api` changes |
+| Knowledge | `specs/README.md` entry; crate rows in `apps/bcs/README.md` "Crate Layout"; `validation.md` with the commands actually run |
 
 ## 10. Risks and open points
 
 1. `PendingMembership` and the takeover branch: the stub lives in our store
    crate until the executor team's provider replaces it.
 2. A connection refused before the request is written is `OutcomeUnknown` (§6).
-3. `query(ByRequest)` has no A2A equivalent, so `QueryByRequest` resolves only
+3. `query(ByRequest)` has no A2A equivalent, so `AskAgent` resolves only
    with a custom binding; plain A2A agents without `idempotent_start` end
    unresolved after an unknown send.
-4. `Quarantined` on a report stops the actor without finishing; D1 stubs the
-   quarantine read today, so this path cannot occur yet.
+4. Until D3 exists, an ACCEPTED call whose holder died is picked up again only
+   if the Worker's deadline produces a cancel or a re-post for an ACCEPTED
+   call. The design text only describes a re-post for calls that are not
+   ACCEPTED. Question for the executor team.
 5. `bcs-app-dist-runtime` may collide with the Worker's W7 crate of the same name.
 6. One PR is about six small crates' worth of code; if review asks for a
    split, the order is contract + shared module → providers → engine → adapter.
