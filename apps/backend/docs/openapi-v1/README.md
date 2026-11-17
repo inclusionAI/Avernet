@@ -2694,3 +2694,18 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
   back to the addressed Bot id, Owner and environment before update or delete;
   mismatches use the same fixed 404 as absence. Request bodies are strict and
   accept only HTTP(S) CDN URLs.
+
+- **2026-11-18 — Service-Bot container scaling requests.** Added
+  `POST /openapi/v1/bots/{bot_id}/containers/scale` for the Bot Owner. The body
+  carries a non-zero signed `delta`; the backend reads the authorized live
+  publication binding's instance snapshot, computes
+  `target_count = current_count + delta`, and creates an AntProcess approval
+  before any BaaS scale call. `GET /openapi/v1/bots/{bot_id}/containers` may
+  expose the active scale approval to the Owner, including its approval URL and
+  frozen counts. A scale callback is accepted only when its `puid` matches the
+  stored approval and the approval service independently reports the same
+  upstream decision; terminal decisions are immutable and the durable trigger
+  is idempotent per approval `puid`. The six product-named reviewer staff ids
+  are carried in the approval context; live AntProcess routing remains pending
+  real-environment verification. Existing instance listing and abnormal-instance
+  restart contracts are unchanged.

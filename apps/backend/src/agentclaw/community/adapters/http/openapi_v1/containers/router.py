@@ -23,6 +23,9 @@ from .schemas import (
     ContainerInstance,
     ContainerList,
     ContainerRestart,
+    ContainerScale,
+    ContainerScaleApproval,
+    ContainerScaleRequest,
     ContainerSummary,
     ContainerStatus,
     InstanceIdPath,
@@ -52,6 +55,18 @@ def _project_instance(raw: dict[str, Any]) -> ContainerInstance:
     )
 
 
+def _project_scale_approval(raw: dict[str, Any] | None) -> ContainerScaleApproval | None:
+    if not isinstance(raw, dict):
+        return None
+    return ContainerScaleApproval(
+        status=str(raw.get("status") or "UNKNOWN"),
+        approval_url=raw.get("approval_url"),
+        current_count=raw.get("current_count"),
+        delta=raw.get("delta"),
+        target_count=raw.get("target_count"),
+    )
+
+
 def _project_list(raw: dict[str, Any]) -> ContainerList:
     instances = [_project_instance(item) for item in raw.get("instances", [])]
     counts = {status: 0 for status in _STATUS_MAP.values()}
@@ -67,6 +82,7 @@ def _project_list(raw: dict[str, Any]) -> ContainerList:
             unknown=counts["unknown"],
         ),
         instances=instances,
+        scale_approval=_project_scale_approval(raw.get("scale_approval")),
     )
 
 
@@ -88,6 +104,42 @@ async def list_containers(
         owner_id=owner_id,
     )
     return envelope(_project_list(result), request)
+
+
+@router.post(
+    "/scale",
+    status_code=202,
+    response_model=Envelope[ContainerScale],
+)
+@envelope_errors
+async def scale_containers(
+    bot_id: BotIdPath,
+    body: ContainerScaleRequest,
+    request: Request,
+    actor_id: UserIdDep,
+    owner_id: OwnerIdDep,
+    facade: ServicePublicationFacadeProtocol = Injected(
+        ServicePublicationFacadeProtocol
+    ),
+) -> Envelope[ContainerScale]:
+    """Request a delta-based scale; execution waits for approval."""
+    result = await facade.scale_containers(
+        bot_id,
+        delta=body.delta,
+        actor_id=actor_id,
+        owner_id=owner_id,
+    )
+    return accepted(
+        ContainerScale(
+            bot_id=str(result["bot_id"]),
+            accepted=bool(result["accepted"]),
+            current_count=int(result["current_count"]),
+            delta=int(result["delta"]),
+            target_count=int(result["target_count"]),
+            approval=_project_scale_approval(result["approval"]),
+        ),
+        request,
+    )
 
 
 @router.post(

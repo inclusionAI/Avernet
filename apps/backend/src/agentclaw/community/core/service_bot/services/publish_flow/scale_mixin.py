@@ -32,6 +32,8 @@ class ScaleMixin:
         self,
         publish_id: int,
         operator: str = "system",
+        target_count: int | None = None,
+        approval_puid: str | None = None,
     ) -> dict:
         """Initiate a scale operation for a published service bot.
 
@@ -90,7 +92,10 @@ class ScaleMixin:
             )
 
         bot_uuid = binding.device_id
-        target_count = self._resolve_scale_target_count(publish_record)
+        if target_count is None:
+            target_count = self._resolve_scale_target_count(publish_record)
+        if target_count < 1:
+            raise PublishFlowServiceError("target_count must be at least 1")
         image_pin = self.resolve_publish_image_pin(
             publish_record, device_provider=device_provider
         )
@@ -140,7 +145,10 @@ class ScaleMixin:
         # ext is the read handle sync_scale_progress falls back to).
         if scale_publish_id is not None:
             def _mutate(latest_ext: dict) -> None:
-                latest_ext.setdefault("scale", {})["publish_id"] = scale_publish_id
+                marker = latest_ext.setdefault("scale", {})
+                marker["publish_id"] = scale_publish_id
+                if approval_puid:
+                    marker["approval_puid"] = approval_puid
 
             self._mutate_and_update_ext(
                 publish_id=publish_id,

@@ -1,4 +1,4 @@
-import { listBotContainers, restartBotContainer } from '@/services/backendApi/bots/botContainerController';
+import { listBotContainers, restartBotContainer, scaleBotContainers } from '@/services/backendApi/bots/botContainerController';
 import * as httpClient from '@/services/backendApi/httpClient';
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 
@@ -26,6 +26,18 @@ describe('botContainerController', () => {
     expect(backendRequest).toHaveBeenCalledWith('/openapi/v1/bots/bot%2Fa/containers/instance%2F1/restart', {
       method: 'POST',
       params: { user_id: 'user-1' },
+    });
+  });
+
+  it('posts a signed delta to the Bot-scoped scale endpoint', async () => {
+    backendRequest.mockResolvedValue({ data: { accepted: true } } as never);
+
+    await scaleBotContainers('bot/a', -1, 'user-1');
+
+    expect(backendRequest).toHaveBeenCalledWith('/openapi/v1/bots/bot%2Fa/containers/scale', {
+      method: 'POST',
+      params: { user_id: 'user-1' },
+      data: { delta: -1 },
     });
   });
 });

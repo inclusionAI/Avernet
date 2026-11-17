@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from starlette.requests import Request
@@ -10,6 +10,7 @@ from starlette.requests import Request
 from agentclaw.community.adapters.http.openapi_v1.containers.router import (
     list_containers,
     restart_container,
+    scale_containers,
 )
 
 
@@ -102,3 +103,69 @@ async def test_restart_container_returns_accepted_operation():
         actor_id="owner",
         owner_id="owner",
     )
+
+
+@pytest.mark.asyncio
+async def test_scale_containers_returns_pending_approval():
+    from agentclaw.community.adapters.http.openapi_v1.containers.schemas import (
+        ContainerScaleRequest,
+    )
+
+    facade = Mock()
+    facade.scale_containers = AsyncMock(
+        return_value={
+            "bot_id": "bot-1",
+            "accepted": True,
+            "current_count": 2,
+            "delta": -1,
+            "target_count": 1,
+            "approval": {
+                "status": "PROCESSING",
+                "approval_id": "scale-1",
+                "approval_url": "https://approval.example/scale-1",
+                "current_count": 2,
+                "delta": -1,
+                "target_count": 1,
+            },
+        }
+    )
+
+    response = await scale_containers(
+        "bot-1",
+        ContainerScaleRequest(delta=-1),
+        request("POST"),
+        "owner",
+        "owner",
+        facade,
+    )
+
+    assert response.code == 202000
+    assert response.data.current_count == 2
+    assert response.data.target_count == 1
+    assert response.data.approval.status == "PROCESSING"
+    facade.scale_containers.assert_awaited_once_with(
+        "bot-1", delta=-1, actor_id="owner", owner_id="owner"
+    )
+
+
+def test_scale_containers_rejects_zero_delta_in_public_schema():
+    from pydantic import ValidationError
+
+    from agentclaw.community.adapters.http.openapi_v1.containers.schemas import (
+        ContainerScaleRequest,
+    )
+
+    with pytest.raises(ValidationError):
+        ContainerScaleRequest(delta=0)
+
+
+def test_scale_containers_is_owner_only():
+    from agentclaw.community.adapters.http.openapi_v1.authorization import (
+        AUTHORIZATION,
+        Check,
+    )
+    from agentclaw.community.core.bot_collaborator.models import PermissionLevel
+
+    rule = AUTHORIZATION[("POST", "/openapi/v1/bots/{bot_id}/containers/scale")]
+    assert isinstance(rule, Check)
+    assert rule.level is PermissionLevel.OWNER

@@ -671,6 +671,10 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
         "POST",
+        "/openapi/v1/bots/{bot_id}/containers/scale",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "POST",
         "/openapi/v1/bots/{bot_id}/containers/{instance_id}/restart",
     ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (

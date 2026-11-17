@@ -664,7 +664,9 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 # none 156 -> 157. The standard evaluation workflow adds seven Bot-path-addressed
 # user-scoped operations under /bots/{bot_id}/eval: path 226 -> 233.
 # Admin Caller expiry correction adds one Bot-addressed operation: 233 -> 234.
-_BOT_ID_PLACEMENT = {"path": 234, "query": 2, "none": 157}
+# Service-Bot container scale adds one path-addressed, user-scoped operation:
+# path 234 -> 235.
+_BOT_ID_PLACEMENT = {"path": 235, "query": 2, "none": 157}
 
 
 
@@ -888,7 +890,9 @@ def test_the_pinned_number_of_operations_take_it():
     # sample-set read, task create/current read, environment create/current read/
     # destroy, and result save: 309 -> 316.
     # Admin Caller expiry correction keeps the verified actor user_id: 316 -> 317.
-    assert len(taking) == 317
+    # Service-Bot container scale is another path-addressed, user-scoped
+    # operation: 317 -> 318.
+    assert len(taking) == 318
 
 
 def test_the_exempt_operations_take_none():

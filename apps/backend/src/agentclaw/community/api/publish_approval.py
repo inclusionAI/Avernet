@@ -41,6 +41,18 @@ class PublishApprovalServiceProtocol(Protocol):
         """Check and process offline (unpublish) approval."""
         ...
 
+    async def request_scale_approval(
+        self,
+        publish_record: Any,
+        *,
+        operator: str,
+        current_count: int,
+        delta: int,
+        target_count: int,
+    ) -> ApprovalResult:
+        """Create or reuse the approval that gates a scale operation."""
+        ...
+
     async def handle_approval_callback(
         self,
         publish_id: int,
