@@ -38,15 +38,21 @@ pub struct ReadOptions {
     pub block: Option<Duration>,
 }
 
+/// Present only with StreamRecovery. None fields mean no head/deletion yet;
+/// an absent recovery object means the provider does not supply this evidence.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StreamRecovery {
+    pub last_id: Option<StreamId>,
+    /// Highest actually removed prefix ID; persistent and monotonic.
+    pub removed_through: Option<StreamId>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StreamPage {
     pub entries: Vec<StreamEntry>,
-    /// Retained last generated ID even if all entries have been trimmed.
-    pub last_id: Option<StreamId>,
-    /// Highest actually removed prefix ID. Persistent and monotonic. If a saved
-    /// cursor is less than this, a required prefix may be lost. Sparse IDs alone
-    /// are not evidence of loss. Metadata and entries form ONE per-key read cut.
-    pub removed_through: Option<StreamId>,
+    /// StreamRecovery: entries and metadata are one per-key read cut.
+    /// Basic Stream returns None; this MUST NOT be interpreted as no trimming.
+    pub recovery: Option<StreamRecovery>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -66,7 +72,8 @@ pub enum TrimPolicy {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TrimResult {
     pub removed: u64,
-    pub removed_through: Option<StreamId>,
+    /// Some only with StreamRecovery; atomically published with deletion.
+    pub recovery: Option<StreamRecovery>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -92,8 +99,8 @@ pub struct ClaimPage {
 
 /// Durable ordered logs. Successful appends survive the provider's documented
 /// failover model; no silent eviction/reset/TTL deletion. Trimming preserves head
-/// and removed-prefix evidence. Implementations must reject unsupported metadata
-/// guarantees instead of returning an empty result that silently hides a gap.
+/// ordering even after trim-to-empty. Basic reads do not detect lost history;
+/// consumers needing atomic removed-prefix evidence must require StreamRecovery.
 #[async_trait]
 pub trait StreamStorePlugin: StorePlugin {
     /// Nonempty fields. IDs strictly advance, including after trim-to-empty.
@@ -125,7 +132,7 @@ pub trait StreamStorePlugin: StorePlugin {
         limit: NonZeroU32,
         reverse: bool,
     ) -> StoreResult<StreamPage>;
-    /// Deletion and removed-prefix metadata publication are atomic. Coverage checks
+    /// Exact deletion. With StreamRecovery, evidence publication is atomic too. Coverage checks
     /// for checkpoints/snapshots are the service store's responsibility, not here.
     async fn trim(&self, key: &str, policy: TrimPolicy) -> StoreResult<TrimResult>;
     /// StreamGroups capability. Creates an empty stream if needed. An existing
@@ -147,6 +154,7 @@ pub trait StreamStorePlugin: StorePlugin {
         options: ReadOptions,
     ) -> StoreResult<Vec<StreamEntry>>;
     /// Remove pending records only, not stream data. Return newly acknowledged count.
+    /// A missing group has no pending records and returns zero.
     async fn ack(&self, key: &str, group: &str, ids: &[StreamId]) -> StoreResult<u64>;
     /// Bounded pending scan; claim only entries idle >= min_idle. Zero min_idle is
     /// valid for explicit recovery/tests. start is inclusive, next resumes the scan.

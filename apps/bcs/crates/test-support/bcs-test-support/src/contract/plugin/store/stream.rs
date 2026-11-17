@@ -84,7 +84,14 @@ pub async fn stream_store_plugin_contract_tests<P: StreamStorePlugin + ?Sized>(
     assert_eq!(reverse.entries[0].id, id(30));
     let trimmed = p.trim(&a, TrimPolicy::Before(id(20))).await.unwrap();
     assert_eq!(trimmed.removed, 1);
-    assert_eq!(trimmed.removed_through, Some(id(10)));
+    if p.supports(StoreCapability::StreamRecovery) {
+        assert_eq!(
+            trimmed.recovery.as_ref().unwrap().removed_through,
+            Some(id(10))
+        );
+    } else {
+        assert!(trimmed.recovery.is_none());
+    }
     let page = p
         .range(
             &a,
@@ -96,7 +103,14 @@ pub async fn stream_store_plugin_contract_tests<P: StreamStorePlugin + ?Sized>(
         .await
         .unwrap();
     assert_eq!(page.entries[0].id, id(20));
-    assert_eq!(page.removed_through, Some(id(10)));
+    if p.supports(StoreCapability::StreamRecovery) {
+        assert_eq!(
+            page.recovery.as_ref().unwrap().removed_through,
+            Some(id(10))
+        );
+    } else {
+        assert!(page.recovery.is_none());
+    }
     p.trim(&a, TrimPolicy::MaxLen(0)).await.unwrap();
     let empty = p
         .range(
@@ -109,8 +123,13 @@ pub async fn stream_store_plugin_contract_tests<P: StreamStorePlugin + ?Sized>(
         .await
         .unwrap();
     assert!(empty.entries.is_empty());
-    assert_eq!(empty.last_id, Some(id(30)));
-    assert_eq!(empty.removed_through, Some(id(30)));
+    if p.supports(StoreCapability::StreamRecovery) {
+        let evidence = empty.recovery.as_ref().unwrap();
+        assert_eq!(evidence.last_id, Some(id(30)));
+        assert_eq!(evidence.removed_through, Some(id(30)));
+    } else {
+        assert!(empty.recovery.is_none());
+    }
     assert_eq!(
         p.append(&a, AppendId::Explicit(id(30)), &fields(30)).await,
         Err(StoreError::IdNotIncreasing)
@@ -211,10 +230,7 @@ pub async fn stream_group_contract_tests<P: StreamStorePlugin + ?Sized>(p: &P, p
         .unwrap();
     assert!(deleted.entries.is_empty());
     assert_eq!(deleted.deleted, vec![id(20)]);
-    assert_eq!(
-        p.ack(&key, "missing", &[id(10)]).await,
-        Err(StoreError::GroupMissing)
-    );
+    assert_eq!(p.ack(&key, "missing", &[id(10)]).await, Ok(0));
 }
 
 /// Plain-read cancellation must not consume input; a subsequent reader still

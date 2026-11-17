@@ -38,15 +38,17 @@ factory registry or business wrapper is required.
 | Capability | Trait and surface | Guarantee |
 | --- | --- | --- |
 | Kv | `KvStorePlugin`: get, mget, set, put_if_absent, delete, expire, ttl | Byte values; atomic single-key writes/NX; explicit expiry |
-| ConditionalKv | Same trait: get_versioned, compare_and_set, set_if_newer, delete_if_version | Consistent value/version read; atomic exact-version or newer-version write |
+| ConditionalKv | Same trait: create_versioned, get_versioned, compare_and_set | Persistent versioned creation/read and atomic exact-version update within a live key incarnation |
+| MonotonicKv | Same trait: set_if_newer, delete_if_version; stronger history for all KV mutations | Caller-assigned versions and retained history across expiration/deletion/recreation |
 | AtomicJson | `JsonStorePlugin`: get_json, get_paths, mutate_json | Whole-key condition, ordered path edits/replacement/deletion, version and expiry commit together |
 | ZSet | `ZSetStorePlugin`: add, remove, range | Atomic batches; bounded ordered score/member queries |
 | VersionedZSet | Same trait: snapshot, update_if_version | One independent version for the entire collection; atomic check/mutate/advance |
-| Stream | `StreamStorePlugin`: append, read, range, trim | Ordered append/read, retained head and explicit removed-prefix evidence |
+| Stream | `StreamStorePlugin`: append, read, range, trim | Ordered append/read and exact trimming; IDs keep advancing after trim-to-empty |
+| StreamRecovery | Same read/range/trim methods | Atomic entries/head/removed-prefix evidence and atomic trim publication |
 | StreamGroups | Same trait: create_group, read_group, ack, claim_idle | Pending delivery tracking, acknowledgement and bounded idle reclamation |
 
-ConditionalKv requires Kv, VersionedZSet requires ZSet, and StreamGroups requires
-Stream. All methods for an unsupported capability return `Unsupported` before
+ConditionalKv requires Kv; MonotonicKv requires ConditionalKv. VersionedZSet
+requires ZSet. StreamGroups and StreamRecovery independently require Stream. All methods for an unsupported capability return `Unsupported` before
 mutation. There are no best-effort conditional defaults. Consumers check their
 required capabilities at assembly/startup, not after accepting durable work.
 
@@ -56,9 +58,13 @@ An ordinary single-key set is atomic too. Conditional operations additionally
 make **checking the condition and applying the write one atomic action**.
 
 - `put_if_absent`: create only if missing/expired; no version supplied.
-- `compare_and_set`: current live version must equal the observed version.
-  The provider chooses a strictly higher next version.
-- `set_if_newer`: supplied version must exceed retained history; that supplied
+- `create_versioned`: create a persistent versioned key only if absent.
+- `compare_and_set`: current persistent live version must equal the observed
+  version. The provider atomically chooses a strictly higher next version.
+  These basic methods intentionally have no TTL parameter. Do not mix ordinary
+  SET/expiry with basic versioned keys; a provider may use different native value
+  types. A lease requiring conditional TTL renewal needs a proven separate contract.
+- `set_if_newer` (MonotonicKv): supplied version must exceed retained history; that supplied
   version becomes the new version. Equal versions are rejected, even for equal data.
 - JSON uses `WriteCondition` to select these same rules. `Any` is unconditional;
   it still advances version. Patches compare and advance the entire document.
@@ -70,12 +76,15 @@ A provider may encode business versions only when the complete protocol proves
 the required checks. A greater timestamp alone does not prove correct owner,
 expected business sequence or matching commit content.
 
-When a provider advertises a versioned capability, **every mutation through all
+When a provider advertises MonotonicKv, AtomicJson or VersionedZSet, **every mutation through all
 its entry points participates in the same version history**, including ordinary
 set/add/remove, expiry changes, and writes of identical content. Versions survive
 expiration/removal/recreation so an old token cannot become valid again (ABA).
 A backend that cannot preserve this history cannot advertise the capability.
-Version zero and overflow are errors; there is no wraparound or silent reset.
+Version zero and overflow are errors; there is no wraparound. Basic ConditionalKv
+only guarantees advancement during a live incarnation and may reuse a version
+after deletion/recreation. Its callers must prevent key reuse while stale writers
+can act, or require MonotonicKv; an integer token alone is not a lifetime fence.
 
 `ConditionNotMet` means this attempt changed nothing. It is not `AlreadyApplied`.
 After uncertainty, service stores compare stable operation identity AND content
@@ -127,13 +136,14 @@ There is no cross-key snapshot. Providers either support the requested key routi
 or reject it before blocking; they do not silently omit keys. Stable ready streams
 must be served fairly across repeated bounded reads.
 
-Each page atomically pairs entries with the retained last ID and highest removed
-prefix ID. This metadata is required to distinguish trimming from an idle stream;
-first remaining ID alone cannot prove a gap when IDs are sparse. `trim` atomically
-publishes deletion evidence and never resets the head. `Before` is an exact lower
+With StreamRecovery, each page atomically pairs entries with the retained last
+ID and highest removed prefix ID in `StreamPage.recovery`. Basic Stream returns
+`recovery: None`: evidence is unavailable, not proof that nothing was trimmed. This metadata is required to distinguish trimming from an idle stream;
+first remaining ID alone cannot prove a gap when IDs are sparse. With StreamRecovery, `trim` atomically
+publishes deletion evidence. All streams retain ID ordering after trim-to-empty. `Before` is an exact lower
 boundary; `MaxLen` is an exact length limit, suitable for disposable hints. Native
-approximate trimming is not silently substituted. This metadata/atomicity may
-require backend extensions, just like conditional JSON or versioned ZSets.
+approximate trimming is not silently substituted. This optional metadata/atomicity may require backend extensions, just like
+conditional JSON or versioned ZSets; its absence does not disable basic Stream.
 
 Service stores verify snapshot/checkpoint coverage before trimming and coordinate
 that check with concurrent work. Prefix evidence does not prove that an old effect
@@ -143,7 +153,7 @@ silently restart. Namespace retirement is an explicit future protocol.
 
 Groups deliver new records and register pending ownership atomically. Creating an
 existing group never resets its cursor or pending list. ACK removes pending entries,
-not log data. Idle reclamation returns a bounded page and continuation; deleted
+not log data; a missing group has zero entries to acknowledge and returns zero. Idle reclamation returns a bounded page and continuation; deleted
 payloads are reported separately. Group ownership is not a business execution
 fence and does not make remote calls exactly-once. Cancelling a group read may leave
 pending delivery behind; it differs from cancelling a plain non-destructive read.
@@ -193,8 +203,9 @@ streams require keys within the provider's supported routing scope. Call:
 
 - `store_plugin_contract_tests` for capability declarations;
 - `kv_store_plugin_contract_tests`, and `kv_conditional_contract_tests` when supported;
-- `kv_expiry_contract_tests` with a clock/wait callback exceeding TTL rounding;
-- `kv_unknown_outcome_contract_tests` with provider/proxy response-loss injection;
+- `kv_monotonic_contract_tests` for MonotonicKv;
+- `kv_expiry_contract_tests` for MonotonicKv with a clock/wait callback exceeding TTL rounding;
+- `kv_unknown_outcome_contract_tests` for MonotonicKv with provider/proxy response-loss injection;
 - `json_store_plugin_contract_tests`;
 - `z_set_store_plugin_contract_tests` and `versioned_zset_contract_tests`;
 - `stream_store_plugin_contract_tests`, `stream_group_contract_tests` and
@@ -228,3 +239,12 @@ The intended enterprise provider is `bcs-tbase-store` in the host repository; it
 SDKs, credentials and command mapping remain outside Avernet. A Redis provider
 may advertise only supported capabilities. Full CAS, versioned paths/collections
 and trim metadata need explicit semantic verification, not command-name matching.
+
+## Capability split compatibility
+
+Before merging this contract, consumers must migrate CAS initialization to
+`create_versioned` and remove expiry arguments from basic `compare_and_set`.
+Require MonotonicKv for caller versions, conditional deletion or key-reuse safety.
+Read `page.recovery`/`trim.recovery` explicitly; services requiring loss detection
+must reject a provider without StreamRecovery instead of treating None as a clean
+stream. Service-owned snapshot/checkpoint and retention protocols remain required.

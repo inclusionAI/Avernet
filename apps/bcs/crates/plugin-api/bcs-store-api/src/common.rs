@@ -1,9 +1,9 @@
 use std::time::Duration;
 
-/// A logical storage version, not wall time or a business commit sequence.
-/// Zero is reserved. Versions never wrap or regress, including after deletion,
-/// expiration, migration and acknowledged-write failover. Providers retain the
-/// high-water mark/tombstone needed to reject stale writes (ABA protection).
+/// A positive storage version. Basic ConditionalKv versions advance within a live
+/// key incarnation; deletion/recreation may reuse them. MonotonicKv, AtomicJson
+/// and VersionedZSet additionally retain history across deletion and expiry.
+/// Never interpret this token as wall time or a business commit sequence.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Version(pub u64);
 
@@ -20,16 +20,20 @@ pub struct Versioned<T> {
 pub enum StoreCapability {
     Kv,
     ConditionalKv,
+    /// Retained history, caller-assigned newer versions and conditional deletion.
+    MonotonicKv,
     AtomicJson,
     ZSet,
     VersionedZSet,
     Stream,
     StreamGroups,
+    /// Atomic per-key read/trim evidence; not required for basic Stream or groups.
+    StreamRecovery,
 }
 
 /// Metadata only; operation traits are independently injectable as trait objects.
-/// ConditionalKv requires Kv; VersionedZSet requires ZSet; StreamGroups requires
-/// Stream. Declarations are stable for the lifetime of this plugin instance.
+/// ConditionalKv requires Kv; MonotonicKv requires ConditionalKv; VersionedZSet
+/// requires ZSet; StreamGroups and StreamRecovery independently require Stream. Declarations are stable for the lifetime of this plugin instance.
 pub trait StorePlugin: Send + Sync + 'static {
     fn supports(&self, capability: StoreCapability) -> bool;
 }
@@ -63,7 +67,8 @@ pub enum WriteCondition {
     Newer(Version),
 }
 
-/// All successful writes advance version, including writes of identical data.
+/// Successful conditional writes advance version, including identical data.
+/// Retention across key incarnations depends on the selected capability.
 /// For Any/Absent/Version the provider chooses a strictly higher version; for
 /// Newer it uses the supplied version. Exhaustion fails without changing data.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -28,6 +28,7 @@ pub struct Model {
     pub broken_zset_cas: bool,
     pub broken_zset_noop: bool,
     pub conditional_disabled: bool,
+    pub basic_only: bool,
 }
 #[derive(Clone)]
 struct Record<T> {
@@ -60,7 +61,14 @@ struct Pending {
 }
 impl StorePlugin for Model {
     fn supports(&self, c: StoreCapability) -> bool {
-        !(c == StoreCapability::ConditionalKv && self.conditional_disabled)
+        !(matches!(
+            c,
+            StoreCapability::ConditionalKv | StoreCapability::MonotonicKv
+        ) && self.conditional_disabled
+            || matches!(
+                c,
+                StoreCapability::MonotonicKv | StoreCapability::StreamRecovery
+            ) && self.basic_only)
     }
 }
 impl Model {

@@ -90,3 +90,17 @@ provider conformance work, not claims established by test fixtures.
   Verification was completed locally on codex/bcs-store-api before publication.
   Commit/push with --no-verify and a dev PR were subsequently requested; no host
   gitlink update or deployment is part of this change.
+
+## 2026-11-17 capability split
+
+User-approved adjustment: make persistent live-incarnation CAS and basic ordered
+Stream operations usable independently. Add explicit versioned creation and remove
+TTL from basic CAS. MonotonicKv retains the original stronger KV history/logical
+version/deletion guarantees; AtomicJson and VersionedZSet remain strong.
+StreamRecovery owns atomic head/deletion evidence, represented as an optional
+object so unavailable evidence cannot be mistaken for no deletion. Groups depend
+only on Stream. ACK of a missing group is an idempotent zero count.
+
+The basic and strong harnesses run separately. Basic-only fixtures demonstrate
+that neither caller-assigned versions nor recovery metadata are prerequisites.
+No provider implementation, private configuration or runtime wiring is added here.

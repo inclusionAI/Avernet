@@ -59,6 +59,10 @@ impl KvStorePlugin for Model {
             WriteOutcome::Applied { .. }
         ))
     }
+    async fn create_versioned(&self, key: &str, value: &[u8]) -> StoreResult<WriteOutcome> {
+        self.require(StoreCapability::ConditionalKv)?;
+        self.write_kv(key, value, WriteCondition::Absent, Expiry::Persistent)
+    }
     async fn get_versioned(&self, key: &str) -> StoreResult<Option<Versioned<Vec<u8>>>> {
         self.require(StoreCapability::ConditionalKv)?;
         let mut s = self.state.lock().unwrap();
@@ -74,10 +78,9 @@ impl KvStorePlugin for Model {
         key: &str,
         v: Version,
         value: &[u8],
-        e: Expiry,
     ) -> StoreResult<WriteOutcome> {
         self.require(StoreCapability::ConditionalKv)?;
-        self.write_kv(key, value, WriteCondition::Version(v), e)
+        self.write_kv(key, value, WriteCondition::Version(v), Expiry::Preserve)
     }
     async fn set_if_newer(
         &self,
@@ -86,7 +89,7 @@ impl KvStorePlugin for Model {
         value: &[u8],
         e: Expiry,
     ) -> StoreResult<WriteOutcome> {
-        self.require(StoreCapability::ConditionalKv)?;
+        self.require(StoreCapability::MonotonicKv)?;
         self.write_kv(key, value, WriteCondition::Newer(v), e)
     }
     async fn delete(&self, key: &str) -> StoreResult<bool> {
@@ -102,7 +105,7 @@ impl KvStorePlugin for Model {
         Ok(true)
     }
     async fn delete_if_version(&self, key: &str, expected: Version) -> StoreResult<WriteOutcome> {
-        self.require(StoreCapability::ConditionalKv)?;
+        self.require(StoreCapability::MonotonicKv)?;
         let mut s = self.state.lock().unwrap();
         s.expire_values(key, self.time());
         s.kind(key, "kv")?;

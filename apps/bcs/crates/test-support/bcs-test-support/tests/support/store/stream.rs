@@ -13,11 +13,13 @@ fn in_range(id: StreamId, start: &Bound<StreamId>, end: &Bound<StreamId>) -> boo
         Bound::Excluded(v) => id < *v,
     })
 }
-fn page(log: Option<&Log>, entries: Vec<StreamEntry>) -> StreamPage {
+fn page(log: Option<&Log>, entries: Vec<StreamEntry>, recovery: bool) -> StreamPage {
     StreamPage {
         entries,
-        last_id: log.and_then(|x| x.last),
-        removed_through: log.and_then(|x| x.removed),
+        recovery: recovery.then(|| StreamRecovery {
+            last_id: log.and_then(|x| x.last),
+            removed_through: log.and_then(|x| x.removed),
+        }),
     }
 }
 fn validate_read(options: ReadOptions) -> StoreResult<()> {
@@ -93,7 +95,7 @@ impl StreamStorePlugin for Model {
                         .collect();
                     out.push(StreamBatch {
                         key: r.key.clone(),
-                        page: page(log, entries),
+                        page: page(log, entries, !self.basic_only),
                     });
                 }
                 let mut remaining = options.max_entries.get() as usize;
@@ -134,7 +136,7 @@ impl StreamStorePlugin for Model {
             entries.reverse();
         }
         entries.truncate(limit.get() as usize);
-        Ok(page(log, entries))
+        Ok(page(log, entries, !self.basic_only))
     }
     async fn trim(&self, key: &str, policy: TrimPolicy) -> StoreResult<TrimResult> {
         let mut s = self.state.lock().unwrap();
@@ -142,7 +144,10 @@ impl StreamStorePlugin for Model {
         let Some(log) = s.streams.get_mut(key) else {
             return Ok(TrimResult {
                 removed: 0,
-                removed_through: None,
+                recovery: (!self.basic_only).then_some(StreamRecovery {
+                    last_id: None,
+                    removed_through: None,
+                }),
             });
         };
         let ids: Vec<_> = match policy {
@@ -165,7 +170,10 @@ impl StreamStorePlugin for Model {
         }
         Ok(TrimResult {
             removed: ids.len() as u64,
-            removed_through: log.removed,
+            recovery: (!self.basic_only).then_some(StreamRecovery {
+                last_id: log.last,
+                removed_through: log.removed,
+            }),
         })
     }
     async fn create_group(
@@ -237,11 +245,9 @@ impl StreamStorePlugin for Model {
     async fn ack(&self, key: &str, group: &str, ids: &[StreamId]) -> StoreResult<u64> {
         let mut s = self.state.lock().unwrap();
         s.kind(key, "stream")?;
-        let g = s
-            .streams
-            .get_mut(key)
-            .and_then(|l| l.groups.get_mut(group))
-            .ok_or(StoreError::GroupMissing)?;
+        let Some(g) = s.streams.get_mut(key).and_then(|l| l.groups.get_mut(group)) else {
+            return Ok(0);
+        };
         Ok(ids
             .iter()
             .filter(|id| g.pending.remove(id).is_some())

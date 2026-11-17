@@ -64,7 +64,7 @@ async fn unsupported_conditional_write_does_not_fall_back() {
     assert_eq!(
         p.set_if_newer("k", Version(9), b"new", Expiry::Persistent)
             .await,
-        Err(StoreError::Unsupported(StoreCapability::ConditionalKv))
+        Err(StoreError::Unsupported(StoreCapability::MonotonicKv))
     );
     assert_eq!(p.get("k").await.unwrap(), Some(b"old".to_vec()));
 }
@@ -147,4 +147,23 @@ async fn harness_rejects_interleaved_zset_check_write() {
     let mut p = Model::default();
     p.broken_zset_cas = true;
     versioned_zset_contract_tests(&p, "interleaved").await;
+}
+
+#[tokio::test]
+async fn basic_cas_harness_does_not_require_supplied_versions() {
+    let mut p = Model::default();
+    p.basic_only = true;
+    kv_conditional_contract_tests(&p, "basic").await;
+}
+
+#[tokio::test]
+async fn conformance_monotonic_kv() {
+    kv_monotonic_contract_tests(&Model::default(), "monotonic").await;
+}
+#[tokio::test]
+async fn basic_stream_harness_accepts_unavailable_recovery_evidence() {
+    let mut p = Model::default();
+    p.basic_only = true;
+    stream_store_plugin_contract_tests(&p, "basic-stream").await;
+    stream_group_contract_tests(&p, "basic-groups").await;
 }

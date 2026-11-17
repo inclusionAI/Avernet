@@ -46,8 +46,8 @@ pub async fn kv_store_plugin_contract_tests<P: KvStorePlugin + ?Sized>(p: &P, pr
     assert_eq!(p.get(&key).await.unwrap(), None);
 }
 
-pub async fn kv_conditional_contract_tests<P: KvStorePlugin + ?Sized>(p: &P, prefix: &str) {
-    assert!(p.supports(StoreCapability::ConditionalKv));
+pub async fn kv_monotonic_contract_tests<P: KvStorePlugin + ?Sized>(p: &P, prefix: &str) {
+    assert!(p.supports(StoreCapability::MonotonicKv));
     let key = format!("{prefix}:cas");
     applied(
         p.set_if_newer(&key, Version(100), b"base", Expiry::Persistent)
@@ -66,8 +66,8 @@ pub async fn kv_conditional_contract_tests<P: KvStorePlugin + ?Sized>(p: &P, pre
     }
     assert_eq!(p.ttl(&key).await.unwrap(), KeyTtl::Persistent);
     let (a, b) = tokio::join!(
-        p.compare_and_set(&key, base.version, b"a", Expiry::Preserve),
-        p.compare_and_set(&key, base.version, b"b", Expiry::Preserve)
+        p.compare_and_set(&key, base.version, b"a"),
+        p.compare_and_set(&key, base.version, b"b")
     );
     let a = a.unwrap();
     let b = b.unwrap();
@@ -106,7 +106,7 @@ pub async fn kv_conditional_contract_tests<P: KvStorePlugin + ?Sized>(p: &P, pre
             .unwrap()
     );
     assert_eq!(
-        p.compare_and_set(&key, latest.version, b"old owner", Expiry::Preserve)
+        p.compare_and_set(&key, latest.version, b"old owner")
             .await
             .unwrap(),
         WriteOutcome::ConditionNotMet,
@@ -117,7 +117,7 @@ pub async fn kv_conditional_contract_tests<P: KvStorePlugin + ?Sized>(p: &P, pre
         .await
         .unwrap();
     assert_eq!(
-        p.compare_and_set(&key, before_plain.version, b"stale", Expiry::Preserve)
+        p.compare_and_set(&key, before_plain.version, b"stale")
             .await
             .unwrap(),
         WriteOutcome::ConditionNotMet,
@@ -185,4 +185,56 @@ where
         WriteOutcome::ConditionNotMet
     );
     assert_eq!(p.get(&key).await.unwrap(), Some(b"committed".to_vec()));
+}
+
+/// Basic CAS needs no caller-assigned logical version or cross-incarnation history.
+pub async fn kv_conditional_contract_tests<P: KvStorePlugin + ?Sized>(p: &P, prefix: &str) {
+    assert!(p.supports(StoreCapability::ConditionalKv));
+    let key = format!("{prefix}:cas");
+    assert_eq!(p.get_versioned(&key).await.unwrap(), None);
+    let initial = applied(p.create_versioned(&key, &[0, 255, 1]).await.unwrap());
+    assert_eq!(
+        p.create_versioned(&key, b"duplicate").await.unwrap(),
+        WriteOutcome::ConditionNotMet
+    );
+    let base = p.get_versioned(&key).await.unwrap().unwrap();
+    assert_eq!(base.value, vec![0, 255, 1]);
+    assert_eq!(base.version, initial);
+    let (a, b) = tokio::join!(
+        p.compare_and_set(&key, initial, b"a"),
+        p.compare_and_set(&key, initial, b"b")
+    );
+    let (a, b) = (a.unwrap(), b.unwrap());
+    assert!(
+        matches!(
+            (&a, &b),
+            (WriteOutcome::Applied { .. }, WriteOutcome::ConditionNotMet)
+                | (WriteOutcome::ConditionNotMet, WriteOutcome::Applied { .. })
+        ),
+        "CAS must have one winner"
+    );
+    let latest = p.get_versioned(&key).await.unwrap().unwrap();
+    assert!(latest.version > initial);
+    assert_eq!(
+        latest.value,
+        if matches!(a, WriteOutcome::Applied { .. }) {
+            b"a"
+        } else {
+            b"b"
+        }
+    );
+    assert_eq!(
+        p.compare_and_set(&key, initial, b"stale").await.unwrap(),
+        WriteOutcome::ConditionNotMet
+    );
+    let next = applied(
+        p.compare_and_set(&key, latest.version, &latest.value)
+            .await
+            .unwrap(),
+    );
+    assert!(next > latest.version);
+    assert!(matches!(
+        p.compare_and_set(&key, Version(0), b"bad").await,
+        Err(StoreError::InvalidInput(_))
+    ));
 }
