@@ -47,10 +47,22 @@ Group destinations stay in **`ce_app_config`**, under
 
 The registry row must have `enabled = 1`. A missing/invalid referenced route or
 failed send never selects another route/channel. Existing claims and delivery
-audit remain in use. The existing `session_recovery_owner_notifications.card`
-configuration still supplies Owner card templates/callback routes by **ClawWeb
-control-plane** environment. Its `enabled`/`bot_overrides` govern only Bots that
-have no new-table record. Ordinary paused Owner notices remain paused.
+audit remain in use. Owner card templates/callback routes are shared resources
+in `ce_app_config.session_recovery_cards`, keyed by **ClawWeb control-plane**
+environment, never by Bot environment or team:
+
+```json
+{"pre":{"template_id":"existing-published-template","callback_route_key":"existing-registered-route"}}
+```
+
+The new row must have `enabled = 1`. Only absence of the entire row allows the
+configuration boundary to use legacy `session_recovery_owner_notifications.card`.
+A disabled/invalid row, missing environment/template, or read failure skips cards
+without fallback. Permission cards additionally require `callback_route_key`;
+noninteractive handoff cards only require the template. Markdown plan notices
+do not depend on card resources. Owner enablement still comes from Bot policy;
+old `enabled`/`bot_overrides` apply only to Bots without a new-table record.
+Existing paused ordinary Owner notices remain paused.
 
 ## Behavior and HTTP contracts
 
@@ -61,8 +73,11 @@ have no new-table record. Ordinary paused Owner notices remain paused.
   admission; unavailable storage is retryable. Existing idempotent requests
   return their original Task without requiring admission again.
 - `bot-configuration.ts` owns new/legacy source selection for admission, visible
-  switches, notifications, team ownership and model credential selection. `legacy-configuration.ts` contains read-only
-  parsers for the old keys. Only an unambiguous current Owner/directory lookup
+  switches, notifications, card resources, team ownership and model credential selection.
+  `legacy-configuration.ts` alone reads and adapts old keys/identity formats;
+  the dedicated migration service also imports its parsers. Neutral types and
+  the shared card schema live in `configuration-contracts.ts`. Consumers receive
+  effective values and do not import the legacy adapter. Only an unambiguous current Owner/directory lookup
   permits recovery admission or notifications. Read failures are never absence.
 - `createMonitoringRecoveryTrigger` still accepts the old host's `config`
   argument (`findByKey`), as well as the intermediate `find` argument. They are
@@ -157,13 +172,31 @@ chooses which switches to save.
 
 ## Removing compatibility later
 
-After migration, check remaining legacy-only current Bots and in-flight Task
-notification targets before removing old policies. Remove the legacy branches
-from `bot-configuration.ts`, their parser exports and the deprecated trigger
-argument once all hosts have dropped it. Admission, Task execution, notification
-claims, audit and UI writes remain the same pipeline; none needs a second
-implementation or distributed new/old conditionals. Retain the Owner card
-transport configuration while it still supplies templates/callback routes.
+Before retiring legacy entries:
+
+1. Copy the existing Owner entry's `.card` object unchanged into the root JSON
+   of `session_recovery_cards`, enabled, using the existing shared-config admin
+   API and its version check. Preserve only environments actually configured;
+   do not invent a production template or callback route. Read back and compare.
+   Creating this entry before deployment is safe: old hosts ignore it.
+2. Deploy the compatible reader and verify an own-Bot permission card, its
+   callback continuation/update, a noninteractive handoff, and group delivery.
+   Keep template/route values unchanged so outstanding cards retain their IDs
+   and registered callback destination. No Base or Skill update is needed for
+   this card-config split.
+3. Migrate remaining Bot switches, notification policies and explicit team
+   ownership. Check legacy-only current Bots **and in-flight Task notification
+   targets** before removing the three old entries. Keep the separate shared
+   handbook chapter routes and group destination registry.
+4. After verification, all of `session_recovery_allowlist`,
+   `session_recovery_notifications`, and `session_recovery_owner_notifications`
+   may be retired. There is no remaining card dependency on these entries.
+
+Code cleanup is localized: remove `legacy-configuration.ts` and its calls from
+`bot-configuration.ts`, plus retire the dedicated `bot-config-migration.ts`
+service/HTTP endpoint and compatibility tests. The obsolete trigger argument can
+be retired after old hosts stop supplying it. Admission consumers, execution,
+notifiers, callback handlers, claims/audits and UI require no new/old branches.
 
 Rollback to a pre-compatible implementation can ignore new-table disables and
 send using old destinations. Preserved legacy keys are **not** a synchronized
@@ -269,8 +302,9 @@ config outside archives; cleanup also runs after failure.
    This initialization does not migrate other Bots. A default team with no route
    sends no group notice.
 6. After all relevant Bots have explicit team ownership, remove the legacy
-   roster-selection/parser branch at the single boundary. Keep shared chapter
-   routes and Owner card transport settings while consumers still use them.
+   roster-selection adapter call at the single boundary. Keep shared chapter
+   routes and the new `session_recovery_cards` resource; the old Owner entry
+   can be removed after the card cutover described above.
 
 No new configuration page, migration marker, dual-write mechanism or upstream
 diagnosis integration is introduced. Deployment and production migration remain

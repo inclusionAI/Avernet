@@ -5,7 +5,7 @@ import { browserDiagnosisQuery, parseWindow, queryKeys } from './browser-validat
 import type { BotDiagnosisRecoveryConfig, BotDiagnosisRecoveryConfigStore } from './bot-config-contracts.js';
 import { configureBots, isServiceBot, replaceBotConfiguration } from './bot-config-service.js';
 import { recoveryConfigurations } from '../repair/session-recovery/bot-configuration.js';
-import type { RecoveryAppConfigStore } from '../repair/session-recovery/legacy-configuration.js';
+import type { RecoveryAppConfigStore } from '../repair/session-recovery/configuration-contracts.js';
 
 export function createMonitoringBrowserService(store: MonitoringStore, directory: MonitoringBotDirectory,
   references: MonitoringReferences, storageScope: DirectoryScope, now: () => number = Date.now,

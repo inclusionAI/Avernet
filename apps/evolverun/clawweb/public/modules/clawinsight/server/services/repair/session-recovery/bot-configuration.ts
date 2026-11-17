@@ -1,5 +1,4 @@
 import { parseRecoveryHandbookRoutes, recoveryHandbookForTeam, type RecoveryHandbookConfigStore, SESSION_RECOVERY_HANDBOOKS_KEY } from "./handbook.js";
-import { parseLegacyRecoveryHandbooks } from "./legacy-configuration.js";
 import type { RecoveryStoredTask } from "./task-contracts.js";
 import type { BotDiagnosisRecoveryConfigStore } from '../../monitoring/bot-config-contracts.js';
 import { parseBotNotifications } from '../../monitoring/bot-config-contracts.js';
@@ -7,20 +6,13 @@ import type { MonitoringTarget } from '../../monitoring/contracts.js';
 import { targetKey } from '../../monitoring/target.js';
 import type { RecoveryRequest } from './contracts.js';
 import { SessionRecoveryError } from './errors.js';
-import {
-  type RecoveryAppConfigStore, legacyOwnerNotificationEnabled, legacyWebhookConfig,
-  parseLegacyRecoveryAllowlist, SESSION_RECOVERY_ALLOWLIST_KEY,
-  SESSION_RECOVERY_OWNER_NOTIFICATIONS_KEY, SESSION_RECOVERY_NOTIFICATIONS_KEY,
-} from './legacy-configuration.js';
+import { cardConfiguration, type RecoveryAppConfigStore, type RecoveryNotifications, type RecoveryCardConfiguration } from './configuration-contracts.js';
+import type { AgentControlPlaneEnvironment } from '../common/task-control-plane.js';
+import { legacyAllowedTargets, legacyRecoveryNotifications, legacyRecoveryCardConfiguration, legacyRecoveryHandbookConfiguration } from './legacy-configuration.js';
 
 /** Recovery entity_id is the Owner, while configuration uses the directory entity. */
 export function recoveryConfigOwner(target: RecoveryRequest['target']) {
   return { botId: target.bot_id, ownerId: target.entity_id, env: target.env };
-}
-
-async function legacyAllowedTargets(app?: RecoveryAppConfigStore): Promise<Set<string>> {
-  const row = await app?.findByKey(SESSION_RECOVERY_ALLOWLIST_KEY);
-  return new Set(row?.enabled === 1 ? parseLegacyRecoveryAllowlist(JSON.parse(row.config_json)).map(targetKey) : []);
 }
 
 /** One source-selection boundary: only an absent row may use the read-only legacy policy. */
@@ -47,7 +39,6 @@ export async function requireRecoveryEnabled(store: BotDiagnosisRecoveryConfigSt
   if (!enabled) throw new SessionRecoveryError(403, 'recovery_disabled', '此 Bot 尚未开启自愈');
 }
 
-type RecoveryNotifications = { owner: boolean; group: { webhook: string; timeout_seconds: number } | null };
 export async function recoveryNotifications(store: BotDiagnosisRecoveryConfigStore | undefined, target: RecoveryRequest['target'], app?: RecoveryAppConfigStore): Promise<RecoveryNotifications> {
   const disabled = { owner: false, group: null };
   try {
@@ -66,19 +57,19 @@ export async function recoveryNotifications(store: BotDiagnosisRecoveryConfigSto
     }
     // In-flight legacy tasks keep their notification policy even after admission is disabled.
     // No fallback is permitted for malformed new JSON, disabled switches or storage errors.
-    const [ownerRow, groupRow] = await Promise.all([
-      app?.findByKey(SESSION_RECOVERY_OWNER_NOTIFICATIONS_KEY), app?.findByKey(SESSION_RECOVERY_NOTIFICATIONS_KEY),
-    ]);
-    const owner = ownerRow ? legacyOwnerNotificationEnabled(ownerRow.config_json, ownerRow.enabled,
-      { botId: target.bot_id, ownerId: target.entity_id, targetEnvironment: target.env }) : false;
-    let group: RecoveryNotifications['group'] = null;
-    if (groupRow?.enabled === 1) {
-      const parsed = legacyWebhookConfig(groupRow.config_json);
-      const webhook = parsed.bot_webhooks?.find(item => item.bot_id === target.bot_id && item.entity_id === target.entity_id)?.webhook ?? parsed.webhook;
-      group = { webhook, timeout_seconds: parsed.timeout_seconds };
-    }
-    return { owner, group };
+    return await legacyRecoveryNotifications(target, app);
   } catch { return disabled; }
+}
+
+export const SESSION_RECOVERY_CARDS_KEY = 'session_recovery_cards';
+/** Only an absent new row permits compatibility; every invalid/unavailable value fails closed. */
+export async function recoveryCardConfiguration(app: RecoveryAppConfigStore, environment: AgentControlPlaneEnvironment): Promise<RecoveryCardConfiguration | null> {
+  try {
+    const row = await app.findByKey(SESSION_RECOVERY_CARDS_KEY);
+    if (!row) return await legacyRecoveryCardConfiguration(app, environment);
+    if (row.enabled !== 1) return null;
+    return cardConfiguration(JSON.parse(row.config_json))[environment] ?? null;
+  } catch { return null; }
 }
 
 export const RECOVERY_NOTIFICATION_ROUTES_KEY = 'session_recovery_notification_routes';
@@ -152,10 +143,7 @@ export async function recoveryExecutionConfiguration(request: RecoveryRequest, a
   if (row && row.enabled !== 0) {
     if (row.enabled !== 1) return configurationInvalid();
     if (teamKey === undefined) {
-      const legacy = parseLegacyRecoveryHandbooks(row.config_json);
-      teamKey = legacy.bot_teams.find(item => item.env === request.target.env && item.bot_id === request.target.bot_id
-        && item.owner_id === request.target.entity_id)?.team_key;
-      routes = legacy.team_routes;
+      ({ teamKey, routes } = legacyRecoveryHandbookConfiguration(row.config_json, request.target));
     } else {
       // New ownership is independent of the obsolete Bot roster, including its validation.
       let value: unknown;
