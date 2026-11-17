@@ -1,8 +1,9 @@
 """产品 Profile 上线 → 建任务 → Bot 自查机会/申请/录取 → L4 Work → 用户验收。
 
-用户通过产品 Service API 操作和观察;case 显式以 Bot ActorContext 调用
-L5 Open 查询和提交申请,再以发布人授权的策略身份直接调用 Open.screen/admit,
-录取后直接调用 L4 协作服务的 Work.start;Bot 只负责执行并通过签名 A2A HTTP 入站上报。
+用户通过产品 Service API 操作和观察;case 以 Bot ActorContext 查询 L5 Open 机会,
+再由模拟 Bot 自己构造申请命令并调用注入的 L5 Open 服务提交申请。
+发布人授权的策略身份直接调用 Open.screen/admit,录取后直接调用 L4 Work.start;
+Bot 随后执行并通过签名 A2A HTTP 入站上报。
 使用真实产品 Profile、仓储、L5 Open 和 G1/G4。直接 Open 调用不验证 JWT;
 另保留真实产品策略的签名 HTTP Query/Apply 回归。Open 负责参与录取,
 开始、进度与成果提交属于 L4 Work,不是 Bot 的内置方法或新的 Open 方法。
@@ -64,7 +65,6 @@ from agentclaw.community.core.task.context_collab.l5_methods.open_profile import
 )
 from agentclaw.community.core.task.context_collab.l5_methods.operations.contracts import (
     OpenAdmitCommand,
-    OpenApplicationCommand,
     OpenScreenCommand,
     OpenMethodOpsServiceProtocol,
     OpenOpportunityCommand,
@@ -215,33 +215,29 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
         assert published.accepted and published.state == "OPEN"
 
         # 5、调用L5的OPEN方法-查询机会（实际应该是Agent自己调用）
-        bot_context = ActorContext(
-            PrincipalRef("bot", working_bot.bot_uuid), "a2a",
-            accountable_principal_ref=PrincipalRef("human", working_bot.owner_id),
-        )
+        bot_context = working_bot.actor_context
         [opportunity] = l5_open_method.query_opportunities(
             actor_context=bot_context,
         )
         assert opportunity.method_binding_id == binding_id
         assert opportunity.scope_ref == collect_id
 
-        # 6、调用 L5 Open Method的-提交申请。
+        # 6、由 Bot 自己调用注入的 L5 Open 服务提交申请,不是发布人代申请。
         record = injector.get(ContextCollabRepositoryProtocol).get_current_status(collect_id)
         assert record.task is not None
         task_id = record.task.task_id
-        submitted = l5_open_method.submit_application(
-            command=OpenApplicationCommand(
-                opportunity_ref=opportunity.opportunity_id,
-                actor_context=bot_context,
-                applicant_agent_ref=working_bot.bot_uuid,
-                capability_evidence_refs=["evidence://calculator-coding"],
-                requested_role_refs=_selected_agent_role_refs(record),   # TODO
-                reason="task_commission.bot_self_application",           # 声明本次查询的真实调用者，并经过授权检查；它不是查询目标，也不代表这个 Bot 已获得参与或执行任务的权限。
-            ),
+        submitted = working_bot.submit_application(
+            opportunity_ref=opportunity.opportunity_id,
+            capability_evidence_refs=["evidence://calculator-coding"],
+            requested_role_refs=_selected_agent_role_refs(record),
         )
         assert submitted.accepted and submitted.state == "SUBMITTED"
         application = store.get_application(axes, submitted.object_id, binding_id, collect_id)
+        assert application.state is ApplicationState.SUBMITTED
         assert application.applicant_agent_ref == working_bot.bot_uuid
+        assert application.transitioned_by == working_bot.bot_uuid
+        assert application.transition_reason == "task_commission.bot_self_application"
+        assert application.requested_role_refs == tuple(_selected_agent_role_refs(record))
         assert application.accountable_principal_ref == working_bot.owner_id
         assert application.capability_evidence_refs == ("evidence://calculator-coding",)
 
@@ -642,7 +638,8 @@ def _commission_runtime(
         yield (
             injector.get(TaskCommissionServiceProtocol),
             SimulatedWorkingBot(
-                client, signed_principal, profile.ref, bot_id, owner_id
+                client, signed_principal, profile.ref, bot_id, owner_id,
+                open_method=injector.get(OpenMethodOpsServiceProtocol),
             ),
             injector,
         )

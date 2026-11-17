@@ -162,9 +162,13 @@ participant-management API or SQL table.
 
 The [journey case](../../../../../../../../tests/community/core/task/context_collab/products/test_task_commission_end_to_end.py)
 resolves the real `OpenMethodOpsServiceProtocol` from its test injector.
-Publication uses the publisher actor; query and application use the Bot actor;
-screening and admission use the publisher's
-authorized policy actor:
+Publication uses the publisher actor; query uses the Bot actor. The fixture
+injects the same L5 service into `SimulatedWorkingBot`, whose
+`submit_application` helper builds `OpenApplicationCommand` from its own UUID,
+owner and actor context and invokes that service itself. The journey calls
+`working_bot.submit_application(...)`, without supplying an applicant or actor
+on the Bot's behalf. Screening and admission use the publisher's authorized
+policy actor:
 
 ```python
 open_method = injector.get(OpenMethodOpsServiceProtocol)
@@ -180,22 +184,16 @@ published = open_method.publish_opportunity(
     )
 )
 assert published.accepted and published.state == "OPEN"
-# Built from verified Bot authentication (UUID and signed owner), not request JSON.
-bot_context = ActorContext(
-    PrincipalRef("bot", working_bot.bot_uuid), source="a2a",
-    accountable_principal_ref=PrincipalRef("human", working_bot.owner_id),
-)
+# The simulated Bot owns the context built from the fixture's trusted identity.
+# Production ingress must establish these identity facts from verified authentication.
+bot_context = working_bot.actor_context
 [opportunity] = open_method.query_opportunities(
     actor_context=bot_context,
 )
-submitted = open_method.submit_application(
-    command=OpenApplicationCommand(
-        opportunity_ref=opportunity.opportunity_id,
-        actor_context=bot_context,
-        applicant_agent_ref=working_bot.bot_uuid,
-        capability_evidence_refs=["evidence://calculator-coding"],
-        requested_role_refs=selected_agent_role_refs,
-    ),
+submitted = working_bot.submit_application(
+    opportunity_ref=opportunity.opportunity_id,
+    capability_evidence_refs=["evidence://calculator-coding"],
+    requested_role_refs=selected_agent_role_refs,
 )
 assert submitted.state == "SUBMITTED"
 policy_context = ActorContext(
@@ -292,9 +290,12 @@ submission nor screening can authorize Work, and admission consumes capacity.
 It also exercises signed product-wide HTTP Query
 and checks that its minimal projection matches the L5 result. Product filtering
 continues to hide unrelated Bots' tasks; L5 itself does not import product
-profiles, SQL discovery or designation rules. `SimulatedWorkingBot` has neither
-a built-in `query_opportunities` method nor an `apply` method. Separate regression
-cases send the actual signed HTTP Apply envelope to preserve ingress coverage.
+profiles, SQL discovery or designation rules. `SimulatedWorkingBot.submit_application`
+is only a test-runtime caller of the injected L5 capability, not a new domain
+operation, admission policy or HTTP endpoint. The case checks the persisted
+SUBMITTED application's applicant and submitting actor against the Bot UUID,
+and its accountable principal against the Bot owner. Separate regression cases
+send the actual signed HTTP Apply envelope to preserve ingress coverage.
 
 ## Bot ingress and authentication
 
