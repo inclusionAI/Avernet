@@ -28,6 +28,8 @@ export interface BackendRequestOptions {
   maxResponseBytes?: number;
   /** 操作语义标签(如 create-skill),参与 toastKey 去重键组成,保证同接口跨操作的独立失败不被误合并。 */
   operation?: string;
+  /** Optional user-facing message for this request's server failures. */
+  serverErrorMessage?: string;
   signal?: AbortSignal;
   /** 旧版 AgentCoding /api/** 接口的特殊后端；新版 /api/** 不设置此项。 */
   target?: 'default' | 'legacy-agentclaw';
@@ -235,7 +237,9 @@ async function executeBackendRequest<T>(url: string, options: BackendRequestOpti
       throw new AceLoginRedirectError();
     }
     const apiPath = formatApiPath(requestUrl);
-    const message = extractFriendlyErrorMessage({ response: { status: response.status, data: inspectData } });
+    const message = response.status >= 500 && options.serverErrorMessage
+      ? options.serverErrorMessage
+      : extractFriendlyErrorMessage({ response: { status: response.status, data: inspectData } });
     const operation = options.operation;
     const toastKey = buildToastKey({ apiPath, operation, message });
     // 邀请码门禁拦截（oauth-provider 策略下 `error_code='invite_code_required'` 403）：单飞登记门禁弹窗信号 +

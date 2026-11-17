@@ -11,6 +11,7 @@ export interface DomainError {
   code: string;
   friendlyMessage: string;
   canRetry: boolean;
+  alreadyHandled?: boolean;
 }
 export type DomainResult<T> = { ok: true; data: T } | { ok: false; error: DomainError };
 
