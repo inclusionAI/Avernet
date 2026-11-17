@@ -61,12 +61,11 @@ it('resolves recovery Owner to the directory entity and fails closed after owner
   expect((await recoveryNotifications(configs, request.target)).owner).toBe(false);
 });
 
-it.each([true, false])('uses host-provided Bot type column metadata %s without inspecting the schema again', async hasBotType => {
+it('reads the Bot type in the existing directory query', async () => {
   await bot();
   await db.exec("UPDATE ac_bots SET bot_type = 'service'");
-  const directory = new SqlMonitoringBotDirectory(db, true, hasBotType);
   const query = vi.spyOn(db, 'query');
-  expect(await directory.get(target, scope)).toMatchObject({ botType: hasBotType ? 'service' : null });
+  expect(await directory.get(target, scope)).toMatchObject({ botType: 'service' });
   expect(query).toHaveBeenCalledTimes(1);
   expect(query.mock.calls[0][0]).toContain('FROM ac_bots WHERE');
   query.mockRestore();

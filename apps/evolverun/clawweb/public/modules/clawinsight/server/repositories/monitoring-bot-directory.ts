@@ -5,12 +5,7 @@ import { target } from '../services/monitoring/target.js';
 
 /** Adapter for the existing, explicitly supplied ac_bots connection. Never falls back to monitoring DB. */
 export class SqlMonitoringBotDirectory implements MonitoringBotDirectory {
-  private sqliteHasBotType?: Promise<boolean>;
-  constructor(
-    private readonly db: Pick<IDatabase, 'query' | 'dbType'>,
-    private readonly tenantColumn: boolean,
-    private readonly botTypeColumnPresent?: boolean,
-  ) {}
+  constructor(private readonly db: Pick<IDatabase, 'query' | 'dbType'>, private readonly tenantColumn: boolean) {}
   private exactColumn(column: string): string {
     return this.db.dbType === 'sqlite' ? `${column} COLLATE BINARY` : `BINARY ${column}`;
   }
@@ -23,16 +18,7 @@ export class SqlMonitoringBotDirectory implements MonitoringBotDirectory {
   }
   private async rows(where: string[], params: unknown[], limit: number): Promise<DirectoryBot[]> {
     try {
-      let botTypeColumnPresent = this.botTypeColumnPresent;
-      if (botTypeColumnPresent === undefined && this.db.dbType === 'sqlite') {
-        // Standalone SQLite callers can supply no schema metadata, and older snapshots omit bot_type.
-        this.sqliteHasBotType ??= this.db.query<{ name: string }>('PRAGMA table_info(ac_bots)')
-          .then(columns => columns.some(column => column.name === 'bot_type'))
-          .catch(error => { this.sqliteHasBotType = undefined; throw error; });
-        botTypeColumnPresent = await this.sqliteHasBotType;
-      }
-      const botTypeColumn = botTypeColumnPresent === false ? 'NULL AS bot_type' : 'bot_type';
-      const rows = await this.db.query(`SELECT CAST(id AS ${this.db.dbType === 'sqlite' ? 'TEXT' : 'CHAR'}) AS directory_id, active_engine, bot_name, bot_id, entity_id, env, owner_id, owner_name, ${botTypeColumn}
+      const rows = await this.db.query(`SELECT CAST(id AS ${this.db.dbType === 'sqlite' ? 'TEXT' : 'CHAR'}) AS directory_id, active_engine, bot_name, bot_id, entity_id, env, owner_id, owner_name, bot_type
         FROM ac_bots WHERE ${where.join(' AND ')} ORDER BY id DESC LIMIT ?`, [...params, limit]);
       return rows.map(this.decode);
     } catch { throw new MonitoringError('NOT_READY', 'Bot 目录暂不可用或目录数据不完整。'); }
