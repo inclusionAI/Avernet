@@ -796,6 +796,29 @@ class TestResolveCallerBinding:
         )
         assert info.sandbox_id == "sbx-agent"
 
+    async def test_resolves_sandbox_via_dingtalk_credential(self):
+        plugin = MagicMock()
+        plugin.get_caller_connection = AsyncMock(return_value="sbx-dingtalk")
+        resolver = BotBindingResolver(plugin)
+        info = await resolver.resolve_caller_binding(
+            bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            metadata={
+                "user_id": "dingtalk-user",
+                "caller_token": "device-token",
+                "type": "dingtalk",
+            },
+        )
+        plugin.get_caller_connection.assert_awaited_once_with(
+            bot_id=BOT_ID,
+            owner_id=ENTITY_ID,
+            user_id="dingtalk-user",
+            credential=CallerExecutionCredential(
+                type="dingtalk",
+                token="device-token",
+            ),
+        )
+        assert info.sandbox_id == "sbx-dingtalk"
+
     async def test_missing_credential_fails_closed(self):
         """无 supported credential 时不构造空凭据，也不调用插件。"""
         plugin = MagicMock()

@@ -41,10 +41,6 @@ from secbaas.community.core.service.bot_run import (
     build_caller_identity_metadata,
 )
 from secbaas.community.logger import get_logger
-from secbaas.community.spi.bot_service import (
-    CALLER_CREDENTIAL_TYPE_AGENTPASS,
-    CALLER_CREDENTIAL_TYPE_IAM_TOKEN,
-)
 
 logger = get_logger("core-service")
 
@@ -97,24 +93,11 @@ def _extract_caller_identity_metadata(
     user_id = str(subject.get("ref") or "")
     token_value = str(token.get("token") or "")
     token_type = str(token.get("type") or "")
-    if not user_id or not token_value:
-        raise ValueError(
-            "caller context requires subject.ref and caller_execution_token.token"
-        )
-
-    if token_type == CALLER_CREDENTIAL_TYPE_IAM_TOKEN:
-        return build_caller_identity_metadata(
-            user_id=user_id,
-            token=token_value,
-            token_type=token_type,
-        )
-    if token_type == CALLER_CREDENTIAL_TYPE_AGENTPASS:
-        return build_caller_identity_metadata(
-            user_id=user_id,
-            token=token_value,
-            token_type=token_type,
-        )
-    raise ValueError(f"unsupported caller execution token type: {token_type}")
+    return build_caller_identity_metadata(
+        user_id=user_id,
+        token=token_value,
+        token_type=token_type,
+    )
 
 
 def _normalize_interaction_resolution(
