@@ -64,22 +64,23 @@ Resume retries are idempotent. Once B is `in_progress` or a later `task.started`
 
 ## Bot execution and artifact reporting contract
 
-Each dispatched or resumed Bot run receives the artifact-reporting contract in
-the message body. The contract contains `todo_id`, `todo_execution_id`, the
-current-generation `todo_execution_token`, the Backend URL, and concrete
-report/upload/complete examples. Runtime metadata may repeat these values for
-observability, but Bot behavior must not depend on metadata being propagated by
-a transport.
+Each dispatched or resumed Bot run receives only its dynamic execution context
+in the message body: `todo_id`, `todo_execution_id`, the current-generation
+`todo_execution_token`, the environment-specific Backend URL, and the current
+objective. Runtime metadata may repeat these values for observability, but Bot
+behavior must not depend on metadata being propagated by a transport. Fixed
+report/upload/complete paths, request formats, ordering, and failure handling
+belong to the `todo-runner` Skill and are not duplicated in the runtime message.
 
 Every dispatched or resumed run explicitly loads the `todo-runner` Skill from
-`/home/admin/.openclaw/workspace/skills-pool/skills-repo/infra/todo-runner/SKILL.md`
+`/home/admin/.openclaw/workspace/skills/skills-repo/infra/todo-runner/SKILL.md`
 before doing business work. The Skill stays in the shared `infra` repository:
-it is not installed into a Bot Default SkillSet and no link is created under
-`workspace/skills`. Direct loading is repeated for every `[todo-execute]` and
-`[todo-resume]`, so a missing or unreadable source fails the run instead of
-silently executing without the Todo protocol. The runtime message supplies the
-current execution ids, token, Backend URL, objective, and concrete endpoints;
-the Skill owns the stable execution and artifact-reporting procedure.
+it is not installed into a Bot Default SkillSet and no link is created at the
+`workspace/skills` top level. Direct loading is repeated for every
+`[todo-execute]` and `[todo-resume]`, so a missing or unreadable source fails the
+run instead of silently executing without the Todo protocol. The Skill derives
+its fixed report/upload/complete URLs from `backend_url` and `todo_id` and owns
+the stable execution and artifact-reporting procedure.
 
 The identities form one hierarchy rather than three unrelated caller inputs:
 
