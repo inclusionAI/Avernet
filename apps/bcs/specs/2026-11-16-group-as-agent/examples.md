@@ -2,7 +2,7 @@
 
 状态：随 [spec](spec.md) 评审的协议样例，不是当前服务已经支持的接口。所有 ID、地址和内容均为合成数据；`${BCS_A2A_TOKEN}` 表示调用方通过管理面获得并安全保存的凭据，不应把 token 写入仓库。
 
-以下使用 public、`supportA2A=true`、无 Human 成员的主从群 `group-demo`。接口基地址为 `https://bcs.example.com/api/v1/collaboration/a2a/groups/group-demo`，协议 1.0；context 示例沿用 BCS Session ID 形状。
+以下使用 public、status=Active（Completed也可）、`supportA2A=true`、无 Human 成员的主从群 `group-demo`。接口基地址为 `https://bcs.example.com/api/v1/collaboration/a2a/groups/group-demo`，协议 1.0；context 示例沿用 BCS Session ID 形状。
 
 ## 1. 管理面开启
 
@@ -17,17 +17,15 @@
 
 校验修改后的群快照。若含 Human 成员或不支持的群类型，整次修改失败，不残留开启开关或注册 Card 的副作用。关闭使用 `{"supportA2A": false}`，停止新调用但不取消已有任务。
 
-## 2. 认证后读取 Card
+## 2. 公开读取最小 Card（调用仍需认证）
 
 ```http
 GET /api/v1/collaboration/a2a/groups/group-demo/agent-card.json HTTP/1.1
 Host: bcs.example.com
-Authorization: Bearer ${BCS_A2A_TOKEN}
-Accept: application/a2a+json
-A2A-Version: 1.0
+Accept: application/json
 ```
 
-200 响应示例：
+200响应 `Content-Type: application/json`；六类调用/Task操作仍要求Bearer，公开Card不是无鉴权执行。以下只含可公开的调用能力声明：
 
 ```json
 {
@@ -74,7 +72,20 @@ A2A-Version: 1.0
 }
 ```
 
-扩展 URI／Schema 在本次只是设计地址，实施发布对应文件后才能声明上线支持。Card 没有把 Bearer 描述成 JWT，没有匿名 security requirement，也不暴露 manager／Worker 身份。public 群的 Task 并不公开。
+该HTTP+JSON投影也用于Fuse Group PUT，不能复制旧LOCAL接口或required discovery-card/v1。真实HttpA2aCardFetcher可无Authorization读取，随后调用才使用已配置的Bearer。扩展 URI／Schema 在本次只是设计地址，实施发布对应文件后才能声明上线支持。Card 没有把 Bearer 描述成 JWT，没有匿名 security requirement，也不暴露 manager／Worker 身份。public 群的 Task 并不公开。
+
+### 2.1 状态机结果选择由管理面配置
+
+以下是有群管理权限的PATCH字段示例，不是A2A输入；`a2aOutput`存到GroupRuntimeBinding，node_id须对应当前固定流程的成功输出节点。资格与binding一起提交，不能只在测试fixture内设置outputs。
+
+```json
+{
+  "a2aOutput": [{"key": "result", "nodeId": "final-report", "format": "data"}],
+  "supportA2A": true
+}
+```
+
+Group.context/opening_message/routing_policy的变化属于执行配置变化，旧context续聊会被拒绝；label改名不是执行配置变化。Closed/Error/Inactive群不提供Card或接受新Task。
 
 ## 3. 首轮调用并立即获得 Task
 

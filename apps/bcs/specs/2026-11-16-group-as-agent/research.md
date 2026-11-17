@@ -1,6 +1,6 @@
 # Group as an Agent：来源、代码证据与设计差异
 
-日期：2026-11-16。本文是 [spec](spec.md) 的研究与验证记录，不是运行诊断或已上线能力声明。
+初稿日期：2026-11-16；2026-11-17修订见 [审阅修订记录](review-revisions.md)。本文是 [spec](spec.md) 的研究与验证记录，不是运行诊断或已上线能力声明。
 
 ## 1. 固定输入版本
 
@@ -46,7 +46,7 @@
 | [Group domain](../../crates/contracts/bcs-domain/src/group.rs) | 有 public/private、GroupStrategy、actor_kind；没有 supportA2A；legacy ParticipantKind 仅 Bot | 新字段、迁移、序列化、所有写入口资格校验；Human 用 actor_kind 判定 |
 | [Group application](../../crates/application/v1/bcs-app-group/CONTEXT.md)、[Group API](../../crates/service-api/bcs-service-api/src/application/v1/group.rs) | 管理授权与创建／变更用例已有 | 开关沿用管理权限，不给调用 token 群管理权 |
 | [Group Core](../../crates/services/bcs-group/src/core/group_core.rs) | 有 upsert、mutate、成员和 visibility 等多条写路径，已有 Provider scope 约束 | 不能只改一个 HTTP PATCH；新公开资格不绕过旧 Provider 约束 |
-| [Card snapshot](../../crates/services/bcs-group-store/src/card_snapshot.rs)、[Card sync](../../crates/services/bcs-fusion/src/core/card_sync.rs) | 资格 normal/public/active/支持类型；没有 supportA2A，也不读成员／流程 | 同步合同需要显式演进，资格在写入时维护；读取成本不扩成全量扫描 |
+| [Card snapshot](../../crates/services/bcs-group-store/src/card_snapshot.rs)、[Card sync](../../crates/services/bcs-fusion/src/core/card_sync.rs) | 资格 normal/public/active/支持类型；没有 supportA2A，也不读生命周期status、成员／流程；模板当前为LOCAL discovery | 同步合同需要显式演进，资格在写入时维护；读取成本不扩成全量扫描 |
 | [目录合同](../../docs/bcsfuse-catalog.md) | 队列内存持有、有限重试、不做启动全量扫描 | 不能当成可靠撤销证明；A2A 增加持久化意图与显式有界目录核对，不更改 Bot 发布策略 |
 | [AuthPluginChain](../../crates/plugin-api/bcs-auth-api/src/chain.rs)、[AuthPrincipal](../../crates/plugin-api/bcs-auth-api/src/types.rs) | 插件与链已有；主体以 Human/Bot 为中心；全链无命中可返回匿名 | 复用扩展基础但补通用 client 主体；A2A 的强制认证不得继承匿名结果 |
 | [现有 Bearer 插件](../../crates/plugins/bcs-auth-session/src/lib.rs)、[auth wiring](../../crates/bootstrap/bcs/src/auth_wiring.rs) | non-JWT token 主要通过 BotLookupPort 解析；默认链由构建配置决定 | 不能声称已支持通用应用 token；A2A 显式配置，不继承 debug local |
@@ -74,7 +74,7 @@
 - HTTP+JSON 错误使用 error.code/status/message/details，标准 ErrorInfo reason 为去除 Error 后缀的 UPPER_SNAKE_CASE，domain 为 a2a-protocol.org。
 - group 单独 Card URL、busy 错误、去重保留、同步等待上限、公开进度和 supportA2A 是 BCS 的明确选择，不伪称为 A2A 标准强制要求。
 
-## 5. 文档检查与未验证项
+## 5. 初稿文档检查与未验证项（2026-11-16历史记录）
 
 文档检查包括：修改范围与空白检查、相对链接／本地锚点、Markdown 代码块、JSON／SSE 样例解析、A2A 关键字段和本稿相互一致性。实际执行结果：
 
@@ -92,3 +92,15 @@
 未运行 Rust workspace、BCS 服务／Singlebox、真实 MySQL、迁移升级、客户端互通、HTTP/SSE 网关或大规模负载测试；本次没有实现代码或迁移可供验证。未来验收矩阵不能记为已通过。扩展发布路径和建议 API／配置／表名不代表现在可访问。
 
 文档提交主题：`docs(bcs): specify group A2A admission and lifecycle`；提交定位以 Git 历史为准，避免将自身尚未生成的 hash 写入文件。没有推送、创建新 PR、合并、host 依赖升级或部署。此处保留的是源版本、设计与文档验证范围，而非任何环境的运行状态。
+
+
+## 6. 2026-11-17 源码复核补充
+
+- 迁移039已创建Bot出站 `bcs_a2a_tasks`／`bcs_a2a_contexts`，Group入站必须独立 `bcs_group_a2a_*`；实际Session表为 `bcs_group_sessions`。SQLite通过磁盘SQL include_str加载，新DDL必须双方言交付并全量测试迁移版本断言。
+- `HttpA2aCardFetcher`无Authorization且只接收application/json；最小公开Card作为发现例外，执行仍需Bearer。旧Group模板是local://＋LOCAL＋required discovery-card/v1；采用显式Fuse Group投影替换，不能原样复用。旧Group直接writer退出，不与新durable worker并跑。
+- `GroupRuntimeBinding`当前缺a2a_output；管理入口、domain、Repo、SQL/Memory及Group资格组合提交必须同在T06交付，快照不是配置源。
+- Group.context、opening_message、routing_policy影响执行，必须纳入版本化快照；status的Active/Completed与Closed/Error/Inactive分别处理，record_status不能代替生命周期。
+- 现有Group Store禁止非空logical_db；新Store仅接收bootstrap绑定的DbPlugin＋StoreScope。新增deployment映射选择单数据源单deployment/env，不默许多租户共用同一Group空间。
+- 门禁实际路径为 `apps/bcs/scripts/ci/check-port-purity.sh` 与 `apps/bcs/scripts/ci/check-r25-conformance.sh`；共享DTO下沉domain，中立port不能导入application类型，所有新增合同共享harness见plan/conformance.md。
+
+复核只证明初稿与现有代码的设计矛盾，不代表已实施修复或跑通服务。产品／安全工具委托决议尚未确认，相关上线门槛见spec §3.7。

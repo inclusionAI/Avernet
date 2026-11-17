@@ -12,10 +12,10 @@
 
 ## Global Constraints
 
-- “首期只交付 BCS 签发 Token 的 Bearer 认证，不支持无鉴权”。
+- 首期六类数据面仅BCS Bearer，无匿名调用；公开最小Card GET无需认证、固定application/json，不含私有数据，是真实CardFetcher发现例外。
 - “不配置调用方到 Group 的白名单或 Group-scoped token”。
 - “`visibility=public` **且** `supportA2A=true`”；历史／创建省略默认 false，PATCH 省略不变、null 非法。
-- 支持 ManagerWorker／StateMachine；无 Human 成员（以 actor_kind 判断），无 HumanInput 依赖；Human owner 不等于 Human participant。
+- 仅GroupStatus Active／Completed可新调用和发布；Closed/Error/Inactive均撤销。支持 ManagerWorker／StateMachine；无 Human 成员（以 actor_kind 判断），无 HumanInput 依赖；Human owner 不等于 Human participant。
 - Group=Agent、Session=context；每轮新 Task；busy 不排队、不预留 messageId；先查重后检查新调用资格。
 - 入站 token 不进入 Task／日志／Artifact／成员上下文；调用身份不等于下游 Human 执行身份。
 - 受理事务包括 Session、Task、预留、占用、容量及启动意图；外部投递只能在提交后。
@@ -27,6 +27,7 @@
 - 不做匿名、调用方 Group grant、文件上传下载、FIFO、轮内追加、自然语言建群、单 Bot 入站或业务 exactly-once。
 - 遵循 adapters → application → core／business port → store → plugin API；Core 不直调 delivery，application 不导入 plugin API／SQL／HTTP。
 - 不运行 cargo fmt／全局格式化；新增／修改源文件不得超过 1,000 行，邻近大文件只加 mod／转发或作必要的局部提取。
+- Group入站使用bcs_group_a2a_*，不碰Bot出站bcs_a2a_tasks/contexts；Session表bcs_group_sessions；SQLite/MySQL实际SQL双交付、全量版本回归。
 - 不修改已提交迁移；运行时基于各方言最新编号新增，不把本文记录的编号当永久预留。
 - 单元测试通过不等于真实 MySQL、host 装配或部署通过；所有执行记录单独报告。
 
@@ -34,6 +35,7 @@
 
 ## 1. 执行边界与导航
 
+- 2026-11-17按PR4060审阅修订；逐条定位见 [review-revisions.md](review-revisions.md)。执行新增[集中conformance矩阵](plan/conformance.md)为每个任务Files和验证要求的一部分。
 - 计划编写基线：`171ce2e5408f5061da2711e7305bf6d499a0a4cf`，当前分支 `docs/bcs-group-as-agent-spec`。
 - 仅本次文档工作已执行；下列实施 checkbox 均未完成。
 - 同目录保存 plan 是仓库 spec/plan 布局要求；不使用根 `docs/superpowers/plans/` 默认路径。
@@ -50,6 +52,7 @@
 | [D：数据与发布](plan/04-results-catalog.md) | T14–T16 | 私有查询分页、逻辑清理、同源 Card 投影和可靠撤销 |
 | [E：HTTP 与交付](plan/05-http-integration.md) | T17–T20 | 标准 HTTP/SSE、完整装配、Singlebox／MySQL／回归与上线门槛 |
 | [迁移字段与事务布局](plan/schema.md) | T02 迁移输入 | 完整列／索引、方言、锁序与后续任务共享的存储合同 |
+| [集中conformance矩阵](plan/conformance.md) | T01–T20分阶段 | 每个新Service/Port/Repo/Plugin的harness和真实实现runner，port纯度门禁 |
 | [共享接口与测试基座](plan/interfaces.md) | 各任务的输入输出定义 | 跨任务的签名、状态、fixture 和 fault-point 命名 |
 
 ## 2. 依赖顺序与发布门槛
@@ -58,19 +61,20 @@
 T01 → T02 → T03 → T04 → T05
        └──→ T06 → T07 → T08 ─┬→ T09 ─┐
                            └→ T10 ─┴→ T11 → T12 → T13
-                    T07 + T11 ───────→ T14 → T15
-             T04 + T06 + T07 ────────→ T16
+                   T07 + T11 ─→ T14
+                         T13 + T14 ─→ T15
+             T04 + T06 + T07 + T08 ─→ T16
            T04 + T08 + T11 + T12 + T14 + T16 → T17
                                  T13 + T17 → T18 → T19 → T20
 ```
 
-T09/T10 可独立实现，但共享 Service API／bootstrap 文件必须串行整合；不能假定写集互不重叠。T14/T16 可以在执行适配尚未完成时用真实 Store＋记录型执行端口验证，仍不能开启生产入口。T15/T16 是 T19 的必要依赖，图中无直连不表示可以省略。
+T09/T10 可独立实现，但共享 Service API／bootstrap 文件必须串行整合；不能假定写集互不重叠。T16可以在执行适配尚未完成时用真实Store＋本地catalog peer验证；T14必须在T11完成事务交付之后验证，仍不能开启生产入口。T15/T16 是 T19 的必要依赖，图中无直连不表示可以省略。
 
 - Gate A（T05）：只允许操作签发／撤销通用 client 凭据；Group A2A 入口未挂载。
 - Gate B（T08）：同库组合事务和幂等可验证；执行必须是注入的 recording fixture，无伪装成功的生产默认 port。
 - Gate C（T13）：真实 MessageFlow／Runtime 的完成、取消、恢复闭环通过；未知执行仍隔离。
 - Gate D（T19）：全部能力明确注入、配置合法、migration／worker 就绪时才允许挂载新入口；默认仍 disabled。
-- Gate E（T20）：真实 MySQL、Singlebox、回归、容量验证、目录迁移和 host 集成记录完整后，才讨论部署授权。
+- Gate E（T20）：产品/安全委托授权书面确认、旧Group writer退出和LOCAL消费者迁移完成，真实 MySQL、Singlebox、回归、容量验证、目录迁移和 host 集成记录完整后，才讨论部署授权。
 
 ## 3. 文件结构与职责
 
@@ -130,7 +134,7 @@ T09/T10 可独立实现，但共享 Service API／bootstrap 文件必须串行�
 
 本次只进行源路径／类型／测试入口核对和文档校验；没有实现、运行未来测试或修改 Cargo／SQL／服务配置。任务中的 Expected PASS 仅描述未来目标。
 
-本次实际文档校验：
+2026-11-16首次计划编写时的实际文档校验（历史记录，不代表本轮修订后的计数；2026-11-17结果见审阅修订记录）：
 
 | 项目 | 结果 |
 | --- | --- |
@@ -143,4 +147,4 @@ T09/T10 可独立实现，但共享 Service API／bootstrap 文件必须串行�
 
 以上为临时文档检查脚本与人工接口复核的结果，不是未来代码编译、迁移或测试通过。提交前 `git diff --cached --check` 与 `git diff --check` 通过；变更仅为Markdown计划和导航，不含功能代码。
 
-本计划尚未执行，spec 保持 proposed。下一步由用户选择逐任务同会话执行或子 Agent 驱动执行；在选择之前不建实施 worktree、不修改运行代码、不推送。
+本计划尚未执行，spec 保持 proposed。安全委托决议未确认前不能启用生产群；下一步由用户选择逐任务同会话执行或子 Agent 驱动执行；在选择之前不建实施 worktree、不修改运行代码、不推送。

@@ -12,8 +12,8 @@
 | `contracts/bcs-domain/src/group_a2a/input.rs` | `InputPart::Text(String)` / `Data(serde_json::Map<String, Value>)`；`CallMessage { message_id, context_id: Option<String>, task_id: Option<String>, parts: Vec<InputPart>, semantic_json: Value }`；`ReturnOptions { immediately: bool, history_length: Option<u32>, accepted_output_modes: Vec<String> }`；`CallRequest { scope, message: CallMessage, options: ReturnOptions, include_progress: bool, active_extensions: Vec<String>, canonical_request: Value }` |
 | `contracts/bcs-domain/src/group_a2a/state.rs` | `TaskState::{Submitted,Working,Completed,Failed,Canceled,Rejected}`；`Phase::{Admitted,Starting,Running,Completing,Cancelling,Failing,Terminal}`；`ContextState::{Idle,Occupied,Isolated,HistoryExpired}`；`TaskView { key: TaskKey, context_id: String, state: TaskState, revision: u64, status_at_ms: u64, status_message: Option<PublicMessage>, artifacts: Vec<OutputArtifact>, history: Vec<PublicMessage> }` |
 | `contracts/bcs-domain/src/group_a2a/output.rs` | `PartAttributes { media_type: Option<String>, filename: Option<String>, metadata: Option<Value> }`；`OutputPart::Text { text: String, attributes: PartAttributes }` / `Data { data: Value, attributes: PartAttributes }`；`OutputArtifact { id: String, position: u32, name: Option<String>, description: Option<String>, parts: Vec<OutputPart>, metadata: Option<Value>, extensions: Vec<String> }`；`PublicMessage { id: String, task_id: String, context_id: String, from_client: bool, parts: Vec<OutputPart> }`；`PublicEvent { sequence: u64, event_id: String, body: PublicEventBody }`，body 为 Status(TaskView 中的状态投影)/Artifact(OutputArtifact)/Message(PublicMessage)，`StatusProjection {state:TaskState,status_at_ms:u64,message:Option<PublicMessage>}` 不递归嵌入 events |
-| `contracts/bcs-domain/src/group_a2a/configuration.rs` | `ExecutionSnapshot { group_revision: u64, config_hash: [u8;32], strategy: GroupStrategy, participants: Vec<Participant>, definition: Option<Value>, outputs: Vec<OutputSelector> }`；`OutputSelector { key: String, node_id: String, format: OutputFormat }`，format 为 Text/Data；definition 为固定版本已有 definition 的序列化快照，不是可变名称查找 |
-| `contracts/bcs-domain/src/group_a2a/error.rs` | `CallError::{InvalidArgument,Unauthenticated,AuthUnavailable,GroupUnavailable,GroupNotReady,TaskNotFound,ContextNotFound,ContextBusy,ContextUnavailable,ContextConfigurationChanged,ContextHistoryExpired,MessageConflict,ResultExpired,Unsupported,NotCancelable,OutputInvalid,Capacity,WaitTimeout,StorageUnavailable,Conflict}`；variants 可携带已授权 ID，但 Display 不输出底层异常 |
+| `contracts/bcs-domain/src/group_a2a/configuration.rs` | `ExecutionSnapshot { group_revision: u64, config_hash: [u8;32], strategy: GroupStrategy, participants: Vec<Participant>, context: Option<String>, opening_message: Option<OpeningMessage>, routing_policy: RoutingPolicy, definition: Option<Value>, outputs: Vec<OutputSelector> }`；`OutputSelector { key: String, node_id: String, format: OutputFormat }`，format为Text/Data（wire text/data），管理DTO显式将node_id序列化nodeId、a2a_output序列化a2aOutput；definition 为固定版本已有 definition 的序列化快照，不是可变名称查找 |
+| `contracts/bcs-domain/src/group_a2a/error.rs` | `CallError::{InvalidArgument,Unauthenticated,AuthUnavailable,GroupUnavailable,GroupNotReady,TaskNotFound,ContextNotFound,ContextBusy,ContextUnavailable,ContextConfigurationChanged,ContextHistoryExpired,MessageConflict,ResultExpired,Unsupported,NotCancelable,ContentTypeNotSupported,OutputInvalid,Capacity,WaitTimeout,StorageUnavailable,Conflict}`；variants 可携带已授权 ID，但 Display 不输出底层异常 |
 | `contracts/bcs-domain/src/group_a2a/mod.rs` | 只声明并 re-export 上述纯类型；原 domain `src/lib.rs` 注册 `pub mod group_a2a` |
 
 `semantic_json` 保留 Message 的标准字段；`canonical_request` 是**经结构校验、剔除传输头后**的完整语义 SendMessageRequest，不包含可信 scope。adapter 必须构造而非信任客户端传入一个 canonical 字段。CallRequest 是执行输入，不是历史公开投影。
@@ -22,18 +22,26 @@
 
 下面 `CallResult<T> = Result<T, CallError>`（由domain error模块导出）。Core／Repo error 在 application 边界统一转换，adapter 只见 application error；可复用该错误族但不向 adapter 透传 DbError。
 
+### 2.0 中立 DTO 的唯一声明位置
+
+application/core/port只声明trait及使用中立DTO，**不得在application/core声明任何被port使用的struct/enum/type，亦不得在这些模块重新声明type alias**。表格中的Submission、TaskQuery、ListQuery、TaskPage、SubscriptionStart、EventQuery统一定义在 `bcs-domain/src/group_a2a/query.rs`；AdmitCall、RecordIntent、CommitTerminal、CompletionCandidate、ExecutionClaim、DispatchFence、DispatchPermit、RenewLease、BeginDispatch、WorkEvidence、观察/恢复/清理DTO统一定义在 `bcs-domain/src/group_a2a/execution.rs`。domain不依赖config-api，AdmitCall.limits改为domain的 `InvocationLimits`，由application从GroupA2aConfig显式构造。
+
+PresentedToken、AuthenticatedA2aCaller、AuthFailure、ClientRecord、TokenRecord、TokenMetadata、IssuedToken及凭据DTO统一定义在 `bcs-domain/src/group_a2a/auth.rs`（含runtime-only redacted类型，禁止serde凭据）；CardProjection、PublicGroupKey、PublicationClaim/Desired、StoreScope在 `bcs-domain/src/group_a2a/publication.rs`／identity.rs。port只从bcs_domain或中立types导入，不从application/core re-export绕过门禁。Plugin API的PluginPrincipal等仍自持，由bootstrap桥接。
+
 ### 2.1 配置、资格、指纹与状态函数（T01／T06／T08）
 
 ```rust
 pub fn validate_a2a_config(c: &GroupA2aConfig) -> Result<(), ConfigError>;
 pub fn validate_eligibility(g: &Group, execution: &ExecutionSnapshot)
     -> Result<(), EligibilityError>;
+pub fn negotiate_output_modes(requested: &[String], supported: &[String])
+    -> CallResult<Vec<String>>; // domain/configuration.rs; empty requested uses supported
 pub fn fingerprint(request: &CallRequest) -> CallResult<[u8; 32]>;
 pub fn transition(phase: Phase, event: LifecycleEvent) -> CallResult<Phase>;
 ```
 
-- `GroupA2aConfig` 属于 `bcs-config-api/src/group_a2a.rs`：enabled、auth: GroupA2aAuthConfig（其chain: Vec<String>对应 `[a2a.auth].chain`）、wait_ms、execution_ms、settle_ms、retention_ms、heartbeat_ms、auth_timeout_ms、caller_active_limit、deployment_active_limit、caller_stream_limit、instance_stream_limit、request_bytes、artifact_bytes、artifact_count、history_message_bytes、history_count、history_bytes、history_default_count、history_response_max_count、page_default_size、page_max_size、page_bytes、scan_batch、unsettled_work_limit、input_part_limit、stream_event_limit、stream_byte_limit、manager_idle_ms、manager_grace_ms、recovery_attempt_limit、recovery_backoff_initial_ms、recovery_backoff_max_ms、token_default_ttl_ms、token_max_ttl_ms。值来自 spec §12，serde deny_unknown_fields。
-- `ConfigError::{MissingAuth,UnsupportedAuth,InvalidLimit}`；`EligibilityError::{NotPublic,Disabled,WrongKind,UnsupportedStrategy,HumanMember,InvalidExecution}`。
+- `GroupA2aConfig` 属于 `bcs-config-api/src/group_a2a.rs`：enabled、deployment: String（enabled时必填） 、auth: GroupA2aAuthConfig（其chain: Vec<String>对应 `[a2a.auth].chain`）、wait_ms、wait_poll_ms（1000）、dispatch_lease_ms（30000）、dispatch_renew_ms（10000）、execution_ms、settle_ms、retention_ms、heartbeat_ms、auth_timeout_ms、caller_active_limit、deployment_active_limit、caller_stream_limit、instance_stream_limit、request_bytes、artifact_bytes、artifact_count、history_message_bytes、history_count、history_bytes、history_default_count、history_response_max_count、page_default_size、page_max_size、page_bytes、scan_batch、unsettled_work_limit、input_part_limit、stream_event_limit、stream_byte_limit、manager_idle_ms、manager_grace_ms、recovery_attempt_limit、recovery_backoff_initial_ms、recovery_backoff_max_ms、token_default_ttl_ms、token_max_ttl_ms。值来自 spec §12，serde deny_unknown_fields。
+- `ConfigError::{MissingAuth,UnsupportedAuth,InvalidLimit,MissingDeployment,DeploymentBindingMismatch}`；`EligibilityError::{NotPublic,Disabled,WrongKind,UnsupportedStrategy,HumanMember,InvalidExecution,DisallowedStatus}`。
 - `LifecycleEvent::{Start,CompleteIntent,CancelIntent,FailIntent,CommitSuccess,CommitFailure,CommitCanceled}`。仅合法边可变；Completing+CancelIntent→NotCancelable，Terminal 不接纳新意图。
 - `Group` 新 support_a2a bool／a2a_revision u64；执行快照及 output selector 必须通过资格校验才可写入 validated publication snapshot。
 
@@ -59,10 +67,11 @@ pub trait GroupA2aService: Send + Sync {
 | TaskQuery | `{ key: TaskKey, history_length: Option<u32> }` |
 | ListQuery | `{ scope: CallScope, context_id: Option<String>, status: Option<TaskState>, page_size: u32, page_token: Option<String>, history_length: Option<u32>, status_after_ms: Option<u64>, include_artifacts: bool }` |
 | TaskPage | `{ tasks: Vec<TaskView>, next_page_token: String, page_size: u32, total_size: u32 }` |
+| TaskHead | `{ key:TaskKey, state:TaskState, revision:u64, public_sequence:u64 }`；poll_heads一次至多100个已授权key，固定deployment且逐key完整scope校验，未知/删除不泄漏其他scope |
 | SubscriptionStart | `{ task: TaskView, after_sequence: u64 }`；单个一致快照，首次 subscribe 拒绝终态 |
 | EventQuery | `{ key: TaskKey, after_sequence: u64, limit: u32 }`；只返回已提交公开事件，连续有序 |
 
-`GroupA2aService::send` 与 wire ReturnOptions 不矛盾：application 完成受理；adapter 用 `TaskWaitService` 等待／stream。Create 同文件 `TaskWaitService::wait(key: TaskKey, deadline_ms: u64) -> CallResult<TaskView>`，使用 application 的持久化读＋注入通知端口，达到 deadline 为 WaitTimeout。它不以 HTTP disconnect 触发业务取消。
+`GroupA2aService::send` 与 wire ReturnOptions 不矛盾：application 完成受理；adapter 用 `TaskWaitService` 等待／stream。Create 同文件 `TaskWaitService::wait(key: TaskKey, deadline_ms: u64) -> CallResult<TaskView>`，使用 application 的持久化读＋注入通知端口，达到 deadline 为 WaitTimeout。它不以 HTTP disconnect 触发业务取消。同trait增加 `wait_change(key:TaskKey, after_sequence:u64, deadline_ms:u64)->CallResult<SubscriptionStart>`，供SSE等待持久化更新；它可以返回终态快照，不走“新建subscribe拒绝终态”的规则。TaskWaitService统一拥有聚合poll_heads，adapter不直接调用Repo。
 
 ### 2.3 Core 与组合 Repo（T07–T15）
 
@@ -91,11 +100,15 @@ pub trait GroupInvocationRepo: Send + Sync {
     async fn commit_terminal(&self, cmd: CommitTerminal) -> CallResult<TaskView>;
     async fn snapshot(&self, key: TaskKey) -> CallResult<SubscriptionStart>;
     async fn events(&self, query: EventQuery) -> CallResult<Vec<PublicEvent>>;
+    async fn poll_heads(&self, keys: Vec<TaskKey>) -> CallResult<Vec<TaskHead>>;
     async fn project(&self, cmd: ProjectEvents) -> CallResult<u64>;
     async fn claim_due(&self, cmd: ClaimDue) -> CallResult<Vec<ExecutionClaim>>;
-    async fn record_observation(&self, cmd: RecordObservation) -> CallResult<()>;
+    async fn begin_dispatch(&self, cmd: BeginDispatch) -> CallResult<DispatchPermit>;
+    async fn renew_lease(&self, cmd: RenewLease) -> CallResult<DispatchFence>;
+    async fn consume_dispatch(&self, permit: DispatchPermit) -> CallResult<DispatchAdmission>;
+    async fn record_observation(&self, cmd: RecordObservation) -> CallResult<DispatchFence>;
     async fn execution(&self, key: TaskKey) -> CallResult<ExecutionClaim>;
-    async fn record_work(&self, claim: ExecutionClaim, evidence: WorkEvidence) -> CallResult<()>;
+    async fn record_work(&self, fence: DispatchFence, evidence: WorkEvidence) -> CallResult<DispatchFence>;
     async fn work(&self, claim: ExecutionClaim) -> CallResult<Vec<WorkEvidence>>;
     async fn release_isolation(&self, cmd: ReleaseIsolation) -> CallResult<()>;
     async fn expire(&self, cmd: ExpireTasks) -> CallResult<Vec<TaskKey>>;
@@ -105,15 +118,20 @@ pub trait GroupInvocationRepo: Send + Sync {
 
 | DTO | 字段和约束 |
 | --- | --- |
-| AdmitCall | `{ request: CallRequest, fingerprint: [u8;32], fingerprint_version: u16, now_ms: u64, limits: GroupA2aConfig }`；Repo 在事务内取群快照／前轮背景，不能只信任调用方传来的 eligible |
+| AdmitCall | `{ request: CallRequest, fingerprint: [u8;32], fingerprint_version: u16, now_ms: u64, limits: InvocationLimits }`；Repo 在事务内取群快照／前轮背景，不能只信任调用方传来的 eligible |
 | RecordIntent | `{ key, expected_revision: u64, generation: u64, kind: IntentKind, now_ms: u64, settle_deadline_ms: u64 }`；kind=Complete(Vec<OutputArtifact>)/Cancel/Fail(FailureReason) |
 | CommitTerminal | `{ key, expected_revision, generation, state: TaskState, artifacts: Vec<OutputArtifact>, stopped: bool, source_boundaries: Vec<SourcePosition>, now_ms }`；stopped=false 只允许 FAILED+isolated |
 | CompletionCandidate | `{ key, generation, execution_id: String, artifacts: Vec<OutputArtifact>, source_boundaries: Vec<SourcePosition>, evidence: Vec<WorkEvidence> }`；由受信执行关联构造，不直接用工具 payload 创建 |
 | SourcePosition | `{ stream: String, sequence: u64, event_id: String }`；跨 stream 不比较 sequence |
 | ProjectEvents | `{ key, generation, expected_revision, sources: Vec<SourcePosition>, events: Vec<PublicEvent> }`；cursor 与事件同事务，去重不重复追加 |
 | ClaimDue | `{ owner: String, now_ms: u64, lease_ms: u64, limit: u32 }`；limit≤100，owner 不是凭据 |
-| ExecutionClaim | `{ key, context_id: String, generation, revision, execution_id: String, phase: Phase, lease_token: u64, execution_deadline_ms, settle_deadline_ms: Option<u64>, snapshot: ExecutionSnapshot, input: Value }`；input是已保存的本轮initial/current/previous执行envelope，只 trusted worker 获得 |
-| RecordObservation | `{ claim: ExecutionClaim, observation: ExecutionObservation, now_ms, next_check_at_ms }`，必须 fence lease_token |
+| ExecutionClaim | `{ key, context_id: String, generation, revision, execution_id: String, phase: Phase, lease_token: u64, execution_deadline_ms, settle_deadline_ms: Option<u64>, snapshot: ExecutionSnapshot, input: Value, selected_output_modes: Vec<String> }`；input是已保存的本轮initial/current/previous执行envelope，只 trusted worker 获得；另带lease_owner:String、lease_until_ms:u64，不能直接当start许可 |
+| DispatchFence | `{ key:TaskKey, generation:u64, expected_revision:u64, owner:String, lease_token:u64, lease_until_ms:u64 }`，身份、generation/revision、owner/token必须全部匹配；scope取Store构造值；lease_until用于本地截止提示，DB要求当前租约未过期，不与旧副本时间逐字相等（续约会更新期限） |
+| BeginDispatch | `{ fence:DispatchFence, now_ms:u64 }`；CAS phase/start_barrier/cancel状态，写attempted_at/dispatch_owner/token，affected_rows=1才返回许可 |
+| DispatchPermit | runtime-only、不可由wire构造；`{ fence:DispatchFence, execution_id:String, permit_id:String, attempted_at_ms:u64, snapshot:ExecutionSnapshot, input:Value, selected_output_modes:Vec<String> }`；DB持久化同permit_id，进程内Clone不是再次授权 |
+| RenewLease | `{ fence:DispatchFence, now_ms:u64, lease_ms:u64 }`；只能续未过期且仍属本owner的lease，不能复活旧token |
+| DispatchAdmission | `Queued(WorkEvidence)` / `Existing(WorkEvidence)` / `ClosedNotStarted(WorkEvidence)`；consume_dispatch与根work入durable queue同事务，返回ClosedNotStarted后permit不可再用 |
+| RecordObservation | `{ fence: DispatchFence, observation: ExecutionObservation, now_ms, next_check_at_ms }`，事务同时检查generation、expected_revision、owner/lease_token及lease_until；CAS后返回最新fence供下一次写 |
 | ReleaseIsolation | `{ key, generation, expected_revision, evidence: Vec<WorkEvidence>, now_ms }`；所有未终结关联被覆盖，不能传 stopped=true 冒充证据 |
 | ExpireTasks | `{ now_ms, limit: u32 }`；原子逻辑删除，跳过恢复／新轮依赖 |
 | PurgeTask | `{ key, row_limit: u32 }`；已逻辑删除才可物理回收，false 表示尚有分片 |
@@ -128,7 +146,7 @@ Create `service-api/bcs-service-api/src/port/group_execution.rs`：
 ```rust
 #[async_trait]
 pub trait GroupExecutionPort: Send + Sync {
-    async fn start(&self, claim: ExecutionClaim) -> CallResult<ExecutionObservation>;
+    async fn start(&self, permit: DispatchPermit) -> CallResult<ExecutionObservation>;
     async fn observe(&self, claim: ExecutionClaim) -> CallResult<ExecutionObservation>;
     async fn stop(&self, claim: ExecutionClaim) -> CallResult<ExecutionObservation>;
 }
@@ -138,11 +156,13 @@ pub trait GroupExecutionPort: Send + Sync {
 
 `WorkEvidence { work_id: String, generation: u64, state: WorkState, proof_id: Option<String> }`；`WorkState::{Queued,Started,Stopped,NotStarted,Unknown}`。只有后端能核对的停止／未启动证据可以构造 stopped observation，端口不凭 Run.Aborted 认定 Stopped；proof_id 不是秘密，也不是可由请求者选择的权限。
 
+start必须先消费permit并原子登记根work＋队列项，phase/lease检查不能和排队分成两次提交；外部send-start再由队列worker CAS，已越barrier取消只等待/核实，不能承诺从未发送。NotStarted必须有原子封闭未消费permit或可信not-sent证据，不是observe查无Run。
+
 实现留在现有 MessageFlow／Runtime 的 application 方法后，通过 Bootstrap 的路由桥选 strategy，业务 application 不直接依赖两套具体服务。异步 lifecycle worker 消费 port、把观察交回 Core；Core 本身不调用 port。
 
 ### 2.5 认证及凭据（T03–T05）
 
-Create `service-api/bcs-service-api/src/application/a2a_auth.rs`、`port/a2a_credentials.rs`、`port/repo/a2a_token.rs`：
+中立凭据struct/enum定义在domain/auth.rs；下列三项trait分别放 `service-api/bcs-service-api/src/application/a2a_auth.rs`、`port/a2a_credentials.rs`、`port/repo/a2a_token.rs`，从domain导入类型，不能把同一代码块整体复制到application：
 
 ```rust
 pub struct PresentedToken(secrecy::Secret<String>); // 不 derive serde/Debug
@@ -190,7 +210,7 @@ Plugin API `bcs-auth-api/src/a2a.rs` 定义独立 `A2aAuthPlugin`（not-applicab
 
 ### 2.6 Card、运维及测试端口（T13／T16／T18）
 
-- `GroupA2aCardService::card(scope: CallScope) -> CallResult<CardProjection>`；CardProjection 为已校验的无凭据宣告（name、description、version、base_url、modes、skills、security），HTTP adapter 编成标准 DTO；Fuse 用同源投影。不能让 Core 持有标准 HTTP DTO。
+- `GroupA2aCardService::card(key: PublicGroupKey) -> CallResult<CardProjection>`；PublicGroupKey={deployment:String,group_id:String}由路由与固定配置构造，不要求Caller。CardProjection 为已校验的无凭据HTTP+JSON宣告（name、description、version、base_url、modes、skills、security），HTTP adapter 编成标准 DTO；Fuse 用同源投影。不能让 Core 持有标准 HTTP DTO。
 - `GroupA2aPublicationRepo::{claim,read_desired,ack,retry}` 使用 PublicationClaim={deployment:String,group_id:String,revision:u64,lease_token:u64}；PublicationDesired={revision,card:Option<CardProjection>}，None 表示 DELETE；ack 必须 fence revision，retry 保存 next_check_at 和安全错误类别。
 - `GroupA2aAdminService::inspect(key)` 返回未停止关联；`reconcile(key)` 触发重新核实；`release(key,evidence_ids)` 只查服务端证据并调用 ReleaseIsolation，不能接受 force flag。
 - `A2aChangeNotifier::wait(key:&TaskKey,after_sequence:u64,until_ms:u64)->CallResult<()>` 仅唤醒，返回后重读 Repo；注册通知和初始高水位要避免间隙。Memory watch 通知跨实例不可靠，worker 的有界持久化轮询仍必需。
@@ -219,7 +239,7 @@ Plugin API `bcs-auth-api/src/a2a.rs` 定义独立 `A2aAuthPlugin`（not-applicab
 | `TestWorld::pending_records()->(usize,usize,usize)` | DB 统计 Task／reservation／intent，用于 rollback 验证；T07 |
 | `key(task:&TaskView)->TaskKey` | 返回 task.key.clone()；T01 |
 
-FaultPoint 枚举：AfterSessionWrite、AfterReservationWrite、BeforeAdmissionCommit、AfterAdmissionCommit、BeforeDispatch、AfterDispatchBeforeAck、BeforeTerminalCommit、AfterTerminalCommit、BeforeExpiryCommit、AfterLogicalExpiry、BeforePublicationAck。只在测试配置注入，不加 production 环境变量分支。
+FaultPoint 枚举：AfterClaimBeforeBarrier、AfterBarrierBeforeStart、AfterPermitConsumedBeforeSend、AfterCancelBeforeOldOwnerStart、AfterLeaseExpired、AfterSessionWrite、AfterReservationWrite、BeforeAdmissionCommit、AfterAdmissionCommit、BeforeDispatch、AfterDispatchBeforeAck、BeforeTerminalCommit、AfterTerminalCommit、BeforeExpiryCommit、AfterLogicalExpiry、BeforePublicationAck。只在测试配置注入，不加 production 环境变量分支。
 
 Token 测试 helper `issue_fixture(store, client_id, secret, now_ms, ttl_ms)`：真实 create_client＋SHA-256(secret)＋Repo.issue，返回 credential_id；仅测试可用确定字符串，生产签发不接受调用方自选秘密。`now()` 固定 1_000_000ms。
 
@@ -259,14 +279,14 @@ pub trait A2aAuthPlugin: Send + Sync {
 ## 5. 任务中附加的方法归属补充
 
 - `GroupA2aWorker`、`GroupA2aRetention` 的构造都显式注入 clock/limits/ports，run_batch 不读取全局配置。
-- `SqlGroupInvocationRepo` 分阶段实现未到达任务的方法时返回 `CallError::Unsupported`，生产组装在T19只允许全能力实例；每个后续任务必须删除该方法的临时拒绝分支，最终conformance逐方法调用证明没有剩余缺口。这不是允许成功noop。
+- `SqlGroupInvocationRepo` 按T07/T11–15的交付进度增量声明和实现方法，并同步共享harness；本文签名是最终目标，不要求T01声明完整大trait然后留下Unsupported默认实现。每个新增方法在同次提交有真实conformance；生产T19只组装完整版本。不以临时拒绝、成功noop或门禁豁免代替R25。
 - `MemoryA2aUnitOfWork` 需要真实共享 Group/Session/Task 状态，不另造第二份同名数据；T07在组合Store内实现GroupRepoPort/SessionRepoPort的memory适配器并从composition注入，旧Store不新增对该具体crate的依赖；已有独立Memory构造继续用于非A2A测试。
 - 各crate测试 `TestWorld` 的 `task(key)` 调实际Repo.get；`context_occupied/is_isolated/capacity_used/pending_records` 用精确SQL／Memory读，不自己维护影子状态。
 - `running_call(id)` = app.send(request)+drain一次，fake下游保持Running；`running_stopped_call(id)` 再向fake执行端送停止观察，但Task本身仍未终态。
 - `completed_call(caller,id)` = send+drain+合法completion candidate+真实Core.complete+终态commit，不能直接UPDATE Task。
 - `finish/complete(key,summary)` 使用已关联execution_id和stopped evidence构造CompletionCandidate。T11以前仅专属Runtime输入测试允许受控终态fixture，T11必须替换成此真实闭环。
 - `now()->u64` 为测试固定时钟1_000_000；`sha256(&str)->[u8;32]` 通过已存在sha2，错误／日志不输出其原文或摘要。
-- `start_call_with_data(id,data)` 创建CallRequest的Data object并通过真实服务调用；`claim(key)` 是受信测试读取execution意图，不允许外部请求者构造lease token。
+- `start_call_with_data(id,data)` 创建CallRequest的Data object并通过真实服务调用；`claim(key)` 是受信测试读取execution意图，不允许外部请求者构造lease token。`dispatch_permit(key)` 调真实begin_dispatch生成许可，不能从claim直接造permit；runtime_start接收DispatchPermit。
 - publication接口参数不省略：`claim(owner:String,now_ms:u64,limit:u32)->CallResult<Vec<PublicationClaim>>`；`read_desired(claim:PublicationClaim)->CallResult<PublicationDesired>`；`ack(claim:PublicationClaim)->CallResult<bool>`；`retry(claim:PublicationClaim,next_check_at_ms:u64,uncertain:bool)->CallResult<()>`。初始claim获取DB租约，ack=false即旧版本不能当作同步完成。
 - `GroupA2aAdminService::{inspect,reconcile}` 参数为TaskKey；返回分别为 `CallResult<Vec<WorkEvidence>>`、`CallResult<TaskView>`；`release(key:TaskKey,evidence_ids:Vec<String>)->CallResult<()>`。管理身份在CLI/管理application入口核验，与A2A调用身份分离。
 - `GroupA2aCatalogPort::put(group_id:&str,card:CardProjection)->CallResult<()>`、`delete(group_id:&str)->CallResult<()>`；返回成功含远端有效ack，超时/ack=false不能当成功。该trait放Service API port，bootstrap映射Fuse类型。
@@ -276,6 +296,30 @@ pub trait A2aAuthPlugin: Send + Sync {
 
 所有公开DTO还需携带标准Part/Artifact可选属性并按spec公开allowlist处理；上述PartAttributes不得直接复制内部工具metadata。`InputPart`的执行投影可以简化，但原始Message必须完整保存在semantic_json，wire往返测试覆盖mediaType、filename、metadata和extensions。首期raw/url只在持久化schema中允许版本化的未来表达，输入及公开结果校验不放行文件。
 
+纯函数不额外创建trait；negotiate_output_modes在domain/configuration.rs，Repo与Core调用同一实现，避免Store引用Core实现。
+
 Pure helpers的位置：transition及其LifecycleEvent在domain/state.rs；ConfigError在config-api/group_a2a.rs；EligibilityError在domain/configuration.rs，validator在Group Core的a2a_eligibility.rs；fingerprint在bcs-group-a2a/fingerprint.rs。测试按这几个明确export导入，不通过未注册的便利函数猜测。
 
 Fixture代码不提交生产常量秘密，测试crate不得反向进入production依赖。新增测试目标文件必须被cargo发现；过滤运行显示0 tests即失败。有await的helper都声明async，TestWorld的控制方法只有advance、fail_at、set_stop_unknown、clear_memory_queue不async，其余DB／服务读取async；测试代码随定义保持一致。
+
+
+## 7. StoreScope 与接口增量交付
+
+`StoreScope { deployment:String, env:String }` 来自可信bootstrap配置；`a2a.deployment` 显式必填，env复用既有BcsConfig的已解析环境值。首期同一DbPlugin数据源只允许一个注册映射，`bcs_group_a2a_deployment_binding(slot=1,deployment,env)`在启动事务核对，多实例相同、异deployment/env失败；未知环境不默认回退。构造固定为 `SqlGroupInvocationRepo::new(db:Arc<dyn DbPlugin>, scope:StoreScope)`、`SqlA2aTokenStore::new(db,scope)`，没有logical_db参数。
+
+所有Repo为单deployment实例；后台ClaimDue/ExpireTasks无客户端scope也强制SQL `deployment=self.scope.deployment`，publication claim/retry/ack及Token revoke/current/list同样限定；带TaskKey或PublicationClaim的方法核对其deployment是否相同，旧Group/Session查询再加固定env。全局UUID不是省略隔离条件的理由。新增表索引见schema，映射由bootstrap和CLI共同核对，不能让第二个deployment实例跳过注册直接启动worker。
+
+`InvocationLimits`在domain/execution.rs显式保存受理所需数值（execution_ms、settle_ms、caller_active_limit、deployment_active_limit、artifact_bytes/count、history limits、unsettled_work_limit）；配置对象不跨入Repo。其余等待/认证/lease/扫描参数分别由application/worker注入。
+
+`selected_output_modes: Vec<String>`在Task持久化记录／ExecutionClaim中保存受理时确定的允许模式，不从当前Card重新计算。协商发生在Repo.admit事务中**去重未命中后**，集合交为空返回 `CallError::ContentTypeNotSupported`、不占ID/容量；Core/T08共享纯协商helper、Repo调用，T11逐Part校验不匹配转OutputInvalid。
+
+每个Service/Port/Repo/Plugin以及Clock/Notifier/Lookup的声明、共享harness、真实实现入口和交付阶段见 [conformance矩阵](conformance.md)。该矩阵为任务Files清单的一部分：首次声明/实现就注册harness/runner，禁止等T20才补、不能只靠grep存在一个函数名。
+
+
+## 8. 投递事务与轮询的实现约束
+
+begin_dispatch校验当前Task fence和取消状态，推进到Starting并返回新revision的DispatchPermit；permit/attempted_at/owner/token先durable。consume_dispatch使用同一DB事务校验permit有效和未取消、登记根work及durable queue，不推进Task revision；已消费返回Existing而非新投递。队列send-start与cancel各自CAS共享work状态，取消先赢则NotStarted，send-start先赢则在途且取消等待停止。renew只更新lease_until不增加Task revision；observe/work写如推进revision返回新DispatchFence，调用方不能复用旧fence。任务callback通过受信关联进入同一fenced写路径。
+
+调用begin_dispatch后若取消先于consume_dispatch，后者原子封闭permit、返回ClosedNotStarted，不调用网络；如果进程崩溃导致该证明尚未提交，恢复可按同事务核实未消费并封闭，无法核实则Unknown。旧owner过期不能续约／消费许可；新owner不依据“没查到Run”重发已越barrier的执行。
+
+TaskWaitService使用Repo.poll_heads周期读取，不依赖Notifier跨实例传播；每实例同Task聚合、批大小≤100、并发≤2。poll失败不能返回伪WORKING，等待请求映射503、SSE关闭；poll看到变更后从events(after_sequence)取已提交帧，保证不同实例终态会唤醒逻辑等待者。此方法在T14与共享query harness交付、T18使用。

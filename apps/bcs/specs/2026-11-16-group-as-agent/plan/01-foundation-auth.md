@@ -7,6 +7,7 @@
 **依赖：** 无。**产物：** 可独立编译／测试的 domain、Service API 与配置，不创建没有实现的生产空 crate。
 
 **Files:**
+- Create: `apps/bcs/crates/contracts/bcs-domain/src/group_a2a/query.rs`、`apps/bcs/crates/contracts/bcs-domain/src/group_a2a/execution.rs`、`apps/bcs/crates/contracts/bcs-domain/src/group_a2a/auth.rs`、`apps/bcs/crates/contracts/bcs-domain/src/group_a2a/publication.rs`。
 - Create: `apps/bcs/crates/contracts/bcs-domain/src/group_a2a/mod.rs`、`apps/bcs/crates/contracts/bcs-domain/src/group_a2a/identity.rs`、`apps/bcs/crates/contracts/bcs-domain/src/group_a2a/input.rs`、`apps/bcs/crates/contracts/bcs-domain/src/group_a2a/state.rs`、`apps/bcs/crates/contracts/bcs-domain/src/group_a2a/output.rs`、`apps/bcs/crates/contracts/bcs-domain/src/group_a2a/configuration.rs`、`apps/bcs/crates/contracts/bcs-domain/src/group_a2a/error.rs`。
 - Create: `apps/bcs/crates/service-api/bcs-config-api/src/group_a2a.rs`。
 - Create: `apps/bcs/crates/service-api/bcs-service-api/src/application/group_a2a.rs`、`apps/bcs/crates/service-api/bcs-service-api/src/application/a2a_auth.rs`、`apps/bcs/crates/service-api/bcs-service-api/src/core/group_invocation.rs`、`apps/bcs/crates/service-api/bcs-service-api/src/port/group_execution.rs`、`apps/bcs/crates/service-api/bcs-service-api/src/port/a2a_credentials.rs`、`apps/bcs/crates/service-api/bcs-service-api/src/port/repo/group_invocation.rs`、`apps/bcs/crates/service-api/bcs-service-api/src/port/repo/a2a_token.rs`。
@@ -17,7 +18,7 @@
 - Create: `apps/bcs/crates/service-api/bcs-config-api/tests/group_a2a_config.rs`。
 - Create: `apps/bcs/crates/test-support/bcs-test-support/src/contract/group_a2a/mod.rs`、`apps/bcs/crates/test-support/bcs-test-support/src/contract/group_a2a/fixtures.rs`。
 
-**Interfaces:** Produces 接口清单 §1–2 的 DTO／trait、`transition`、`validate_a2a_config`；Consumes 现有 GroupStrategy、Participant、secrecy 0.8。不把 CallError 转成 HTTP 类型。
+**Interfaces:** Produces 接口清单 §1–2 的中立 DTO／首期可验证trait（其余按conformance矩阵所属任务增量声明，不能提前留下Unsupported默认），`transition`、`validate_a2a_config`；Consumes 现有 GroupStrategy、Participant、secrecy 0.8。不把 CallError 转成 HTTP 类型。
 
 - [ ] **1. 写 RED 状态与配置测试。** 每个非法边一条 table-driven assertion，先固定已确认的取消竞争与空链拒绝：
 
@@ -33,6 +34,7 @@ fn completion_intent_excludes_cancel() {
 fn a2a_cannot_inherit_anonymous_auth() {
     let mut cfg = GroupA2aConfig::default();
     cfg.enabled = true;
+    cfg.deployment = "test".into();
     cfg.auth.chain.clear();
     assert_eq!(validate_a2a_config(&cfg), Err(ConfigError::MissingAuth));
     cfg.auth.chain = vec!["none".into()];
@@ -58,7 +60,7 @@ match (phase, event) {
 
 上面是关键分支；再分别加 Start、FailIntent 的测试和实现，保证 Starting／Completing／Cancelling 发生失败能进入 Failing，但 Terminal 不可逆。配置逐个复制 spec §12 默认值，positive 值和上限逐项验证，enabled=false 时不强求凭据依赖。
 - [ ] **4. 增加表驱动边界。** 检查所有 7 个 Phase×7 个事件组合、deadline 加法溢出、未识别配置键、零／负／超大 limits、PresentedToken 无 serde／redacted Debug；在 fixture 中构造 caller/scope/request，禁止真实 token。
-- [ ] **5. GREEN 与 API 回归。** 重跑第 2 步；`cargo test -p bcs-service-api && cargo check -p bcs-config-api -p bcs-domain`。Expected PASS，不要求所有后续 trait 已有具体实现。更新各 CONTEXT 的新增合同，说明尚未挂载入口。
+- [ ] **5. GREEN 与 API 回归。** 重跑第 2 步；`cargo test -p bcs-service-api && cargo check -p bcs-config-api -p bcs-domain`。Expected PASS，不要求所有后续 trait 已有具体实现。更新各 CONTEXT 的新增合同，说明尚未挂载入口；从apps/bcs运行 `bash scripts/ci/check-port-purity.sh`，新增port不得引用application/core中的Submission或AuthenticatedA2aCaller等DTO。R25共享harness按[矩阵](conformance.md)随声明交付；不因旧门禁红灯豁免新增合同。
 - [ ] **6. 提交。** 按 Files 逐项 stage，`git diff --cached --check`；主题 `feat(bcs): define group A2A lifecycle and configuration contracts`。
 
 ## T02：一次性交付完整 schema 和迁移测试
@@ -73,7 +75,9 @@ match (phase, event) {
 - Modify: `apps/bcs/crates/tools/bcs-admin/src/migrate.rs`（注册新测试模块；MySQL目录读取沿用现有实现）。
 - Create: `apps/bcs/crates/tools/bcs-admin/src/migrate_group_a2a_tests.rs`。
 - Modify: `apps/bcs/migrations/README.md`。
-- Create: `apps/bcs/migrations/mysql/` 下按下面算法分配的唯一 `*_group_a2a.sql`；基线最新 046，因此若未变化输出精确为 `047_group_a2a.sql`。
+- Create: `apps/bcs/migrations/mysql/` 下按下面算法分配的唯一 `*_group_a2a.sql`；本次核对最新047，若执行时未变化为 `048_group_a2a.sql`；不得覆盖已存在047_message_activity_indexes.sql。
+- Create: `apps/bcs/migrations/sqlite/` 下同算法分配的 `*_group_a2a.sql`；本次最新045，未变化时为 `046_group_a2a.sql`。
+- Modify: `apps/bcs/crates/tools/bcs-admin/src/migrate_mysql_chain_tests.rs`、`apps/bcs/crates/bootstrap/bcs/tests/bootstrap_auth_boundaries.rs`、`apps/bcs/crates/bootstrap/bcs/tests/integration_friend_cutover.rs`。
 
 **Interfaces:** Consumes spec §9 的表及 T01 DTO；Produces schema 支持 Repo 原子操作、`sqlite_target_version()` 新 target、冻结的迁移 checksum。
 
@@ -98,12 +102,13 @@ mysql = max(int(p.name.split('_', 1)[0]) for p in (root/'migrations/mysql').glob
 source = (root/'crates/services/bcs-db-migrations/src/lib.rs').read_text()
 sqlite = max(map(int, re.findall(r'version:\s*(\d+)', source))) + 1
 print(root / f'migrations/mysql/{mysql:03d}_group_a2a.sql')
+print(root / f'migrations/sqlite/{sqlite:03d}_group_a2a.sql')
 print('SQLite version:', sqlite)
 ```
 
-按 [存储布局](schema.md) 创建 spec §9 所有表，同时加入 token/client、execution associations、public source cursors、capacity counters、publication intents、output binding 快照和 Session 托管标记所需列，避免每个后续任务各补一次 migration。JSON 仅放有界 payload，过滤字段独立列；scope／ID binary comparison。Group 和 Session 的已有列在新 migration ALTER，禁止更新 baseline。
+先全链列出既有表并断言新入站表只用bcs_group_a2a_*（通用token/client为独立凭据表），保留出站bcs_a2a_tasks/contexts的结构与数据。SQLite include_str指向实际新SQL、并通过既有split_sql_statements加载，MySQL文件单独编号。Session ALTER必须用bcs_group_sessions。按 [存储布局](schema.md) 创建 spec §9 所有表，同时加入 token/client、execution associations、public source cursors、capacity counters、publication intents、output binding 快照和 Session 托管标记所需列，避免每个后续任务各补一次 migration。JSON 仅放有界 payload，过滤字段独立列；scope／ID binary comparison。Group 和 Session 的已有列在新 migration ALTER，禁止更新 baseline。
 - [ ] **4. 逐表补约束测试。** admission 唯一键、artifact position、token digest、source event 去重；due/retention 查询索引；revision CHECK／溢出；MySQL 大索引用固定 hash＋完整键碰撞比较，不截短 client/messageId。数据库类测试用回滚或隔离测试数据库，不连接生产。
-- [ ] **5. GREEN 与真实方言。** `cargo test -p bcs-db-migrations group_a2a && cargo test -p bcs-admin group_a2a`；`cargo run -p bcs-admin -- db migrate --dialect mysql --check-files`。真实 MySQL 测试读取 `BCS_TEST_MYSQL_URL`，无配置标记未运行，不能静态 check 冒充通过；T20 是合并前强制门槛。
+- [ ] **5. GREEN 与真实方言。** `cargo test -p bcs-db-migrations group_a2a && cargo test -p bcs-admin group_a2a`；`cargo run -p bcs-admin -- db migrate --dialect mysql --check-files`。增加全量 `cargo test -p bcs-db-migrations && cargo test -p bcs-admin && cargo test -p bcs --test bootstrap_auth_boundaries --test integration_friend_cutover`；用rg核查所有硬编码版本断言，目标版本改用registry读取，特定历史版本测试仍保留原预期。不能只用group_a2a名称过滤代替全量迁移chain。真实 MySQL 测试读取 `BCS_TEST_MYSQL_URL`，无配置标记未运行，不能静态 check 冒充通过；T20 是合并前强制门槛。
 - [ ] **6. 提交。** 主题 `feat(bcs): persist group A2A calls credentials and publication intents`。本提交之后冻结编号、内容、checksum；后续发现 schema 缺口只能新增迁移并报告原因。
 
 ## T03：client／token 的真实存储与轮换
@@ -117,7 +122,7 @@ print('SQLite version:', sqlite)
 - Modify: `apps/bcs/Cargo.toml`。
 - Modify: `apps/bcs/crates/test-support/bcs-test-support/src/contract/repo/mod.rs`。
 
-**Interfaces:** Implements A2aTokenRepo（接口清单 §2.5）；Consumes DbPlugin，不访问 BotRepo；Produces `SqlA2aTokenStore::new(db,logical_db,deployment)` 和 `MemoryA2aTokenStore::default()`，实现选择仅在测试／bootstrap。
+**Interfaces:** Implements A2aTokenRepo（接口清单 §2.5）；Consumes DbPlugin，不访问 BotRepo；Store实例固定单deployment、所有lookup/revoke/current/list/issue都校验固定scope，bootstrap/CLI先校验singleton映射；Produces `SqlA2aTokenStore::new(db,StoreScope {deployment,env})` 和 `MemoryA2aTokenStore::new(StoreScope {deployment,env})`，实现选择仅在测试／bootstrap。
 
 - [ ] **1. 写 RED 轮换及撤销测试。** 实现接口清单 issue_fixture、test_token_store，真实 DB 写入两个同 client token：
 
@@ -149,7 +154,7 @@ WHERE t.deployment=? AND t.digest=? AND t.purpose='a2a_call'
 LIMIT 1
 ```
 
-- [ ] **4. 扩展共享 conformance。** 到期边界等于 now 拒绝、跨部署摘要无结果、disable_client 不再可认证、ID 不复用、写失败不返回凭据、数据库故障≠missing。SQL recorder 断言 lookup 恰好一次 query，不扫描所有 Bot。
+- [ ] **4. 扩展共享 conformance。** 到期边界等于 now 拒绝、跨部署摘要无结果、disable_client 不再可认证、ID 不复用、写失败不返回凭据、数据库故障≠missing。SQL recorder 断言 lookup 恰好一次 query，不扫描所有 Bot。增加同源数据源两个不同StoreScope：第二部署启动绑定必须失败；受信构造下不同scope命令依旧拒绝，不能跳过WHERE或依赖UUID唯一。
 - [ ] **5. GREEN。** `cargo test -p bcs-a2a-token-store`；MySQL runner 同 suite，`cargo test -p bcs-a2a-token-store --test conformance_mysql -- --ignored` 必须显式提供测试连接，缺配置报清晰前置条件错误。
 - [ ] **6. 提交。** 主题 `feat(bcs): store scoped A2A client credentials with revocation`。
 

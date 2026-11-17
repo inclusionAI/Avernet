@@ -3,7 +3,7 @@
 ## Record
 
 - 状态：**proposed / 待书面评审**。核心范围和生命周期已经 brainstorming 确认；具体存储、凭据生命周期和参数是本稿的设计建议，不表示已实现或已部署。
-- 日期：2026-11-16。所属模块：公共 BCS；部署方负责凭据保管、公开地址与网关配置。
+- 初稿日期：2026-11-16；审阅修订：2026-11-17，变更与逐项回应见 [审阅修订记录](review-revisions.md)。所属模块：公共 BCS；部署方负责凭据保管、公开地址与网关配置。
 - 分支：`docs/bcs-group-as-agent-spec`，基于 `origin/dev` 的 `3b1b3859b32b3acf20888b9ad20ba6d32a047b26`。
 - 调研来源：PR [#3979](https://github.com/inclusionAI/Avernet/pull/3979)，引用版本 `387cd5c32a4d7c391a298ce6dfc3164cf3c764ab`；本稿不是对其代码的 cherry-pick。
 - 本稿收敛并替代该 PR 中本功能的待定设计方向；原材料保留为历史调研，不改写其结论和验证记录。
@@ -87,6 +87,7 @@ BCS 已具备主从群和状态机群执行能力，但 Session 的可变输入�
 ```text
 eligible = group_kind == normal
         && record_status == active
+        && status in {active, completed}
         && visibility == public
         && supportA2A == true
         && strategy in {manager_worker, state_machine}
@@ -94,7 +95,7 @@ eligible = group_kind == normal
         && execution_contract_is_valid
 ```
 
-`GroupStatus::Completed` 是会话执行语义，不等同于资源删除，不单独导致撤销一个仍有效的服务群。
+Group 生命周期 `status` 与 `record_status` 不同：仅 **Active／Completed** 可新调用／发布，Closed、Error、Inactive 均拒绝并撤销 Card。Completed 保留可复用服务语义；Inactive 不按“只是没活动”自动唤醒，管理员必须先按现有权限恢复 Active。生命周期变为不允许的状态必须提交 `a2a_revision` 和撤销意图；其为强制关闭入口的状态转换，不因开启不变量而阻止关闭／报错。现有 Task 是否取消由显式取消／关闭业务合同决定，不自动宣告已停止。
 
 ### 3.2 开启校验
 
@@ -109,13 +110,13 @@ eligible = group_kind == normal
 
 ### 3.3 持续不变量、并发与执行快照
 
-开启期间，对成员、visibility、strategy、流程绑定、输出声明的变更必须再次验证；使资格失效的变更拒绝，提示先关闭开关。允许原子执行 `supportA2A=false` 与 private 等变更，但不得修改既有活动轮次的执行快照。
+开启期间，对成员、visibility、strategy、流程绑定、输出声明、`context`、`opening_message`、`routing_policy` 的变更必须再次验证；使资格失效的变更拒绝，提示先关闭开关。允许原子执行 `supportA2A=false` 与 private 等变更，但不得修改既有活动轮次的执行快照。
 
 校验必须覆盖 REST、WS、邀请、Core upsert、流程配置等真实写路径，不只覆盖一个 PATCH handler。校验和保存共享数据库版本／锁，禁止“检查时无 Human，提交前插入 Human”的竞态。
 
 使用持久化 `a2a_revision` 对影响开放资格和 Card 的变更编号；新请求受理与开关变更必须在数据库中按该版本串行化。只检查缓存、先查后写或依赖目录最终一致性均不足。受理事务先提交者保留任务；关闭事务先提交者阻止新任务。
 
-首次 context 固定执行策略、成员、流程版本与结果选择，保存独立执行配置指纹。已有 Task 使用固定快照；下一轮只在当前群仍合格且执行配置与 context 兼容时受理。执行配置发生变化则返回 `CONTEXT_CONFIGURATION_CHANGED`，要求新建 context，不静默替换上下文。名称、描述和开关关闭再开启本身不改变执行配置指纹。
+首次 context 固定执行策略、成员、流程版本、结果选择和 Group 的 `context`（执行目标）、`opening_message`（规范化模板）、`routing_policy`（含默认值的完整投递策略），保存独立执行配置指纹。后续执行只消费该快照，不能又从可变 Group 重新读取这些字段。已有 Task 使用固定快照；下一轮只在当前群仍合格且执行配置与 context 兼容时受理。执行配置发生变化则返回 `CONTEXT_CONFIGURATION_CHANGED`，要求新建 context，不静默替换上下文。只改 label／独立的纯展示文案及开关关闭再开启本身不改变执行配置指纹；**Group.context 目前同时用作 Card 描述和执行输入，绝不能当作纯展示描述排除**。没有独立展示字段时，只有 label 更新走展示例外，不为此引入新可写描述字段。
 
 A2A Session 不能通过普通成员入口添加 Human，或增删已固定的执行成员；本轮内部派发限于固定快照中获准的 Bot。普通聊天、`/services` reactivation、原生 Run rerun 等也不得绕过 A2A 占用、归属及轮次入口。内部可信投递和精确关联的完成回调不是被禁止的旁路。
 
@@ -133,29 +134,52 @@ A2A Session 不能通过普通成员入口添加 Human，或增删已固定的�
 
 群删除及 Session 删除必须先处理活动／隔离执行；未确认停止时拒绝物理删除，不能靠删除释放占用。已完成结果按保留策略保存并继续按原 Caller 授权；必要的群墓碑与所有权字段不依赖活跃 Group 行。法律／运维强制清理不是此标准调用接口。
 
-### 3.5 Card 生成与可靠同步
+### 3.5 Card 投影选择与 discovery 迁移
 
-Group Store 是 Card 模板及群配置的事实来源；HTTP 发布和 Fuse 注册使用相同投影与资格判断。模板可以在开关关闭时存在，但不能作为可调用 Card 对外提供或注册。
+本期选择**替换 Fuse 的 Group discovery Card**，不采用两张同 ID 的并行 Card，也不把 LOCAL 与 HTTP+JSON 混进同一调用 Card。此选择有意收窄现有对外 Group discovery：未开启 supportA2A 的历史群从 Fuse Group 目录撤下。BCS 原生群列表／本地发现按原合同保留，不等于继续向 Fuse 发布 LOCAL Card。依赖 Fuse LOCAL 绑定的消费者需先迁移，否则阻止切换，不把兼容影响隐藏成内部重构。
 
-Card 必须声明真实 HTTP+JSON 基地址、协议 `1.0`、文本／JSON 能力、`streaming=true`、`pushNotifications=false`、`extendedAgentCard=false`，以及当前认证插件对应的安全声明。manager 输出仅文本；状态机按显式结果声明输出模式。Card 不包含成员身份、内部地址、token 或内部提示。
+| 出口／存储 | 唯一来源与形状 |
+| --- | --- |
+| 既有 `bcs_group_agent_cards.card_template` | 保留为旧本地 discovery 模板／展示信息来源；不直接作为新 HTTP Card 或 Fuse PUT body |
+| 新调用投影 | 从当前 Group/validated binding、能力、公开 URL 和 auth profile 构造 `CardProjection`；显式产生 HTTP+JSON 接口与 Bearer security；不拷贝 local://、LOCAL、required discovery-card/v1 或不受支持的扩展 |
+| `GET /agent-card.json` | 当前 eligible 群的最小公开调用 Card，**无需认证，Content-Type: application/json**；不含成员、身份、提示、历史、凭据或内部端点 |
+| Fuse Group PUT | 同一调用投影，额外加目录 resource_type/labels/groupId；不是独立模板或另一套资格判断 |
+| 原生 Group 查询／本地 discovery | 保留原有管理／可见性合同，不通过该公开 Card 扩大访问权限 |
 
-首次开关默认 false 会改变既有公共群的目录发布规则。实施必须包含一次**显式、可续跑、有界分页的目录核对**，撤销此前已发布但未开启的 Group Card；保留 Bot Agent 的现有发布规则。不能仅等待“未来恰好一次群更新”。
+Card 声明 HTTP+JSON 基地址、协议 `1.0`、实际文本／JSON 能力、`streaming=true`、`pushNotifications=false`、`extendedAgentCard=false`，securityRequirements 明确**调用接口**需要 Bearer。公开元数据读取不是匿名执行；不实现无鉴权调用插件，也不开放 extended Card。manager 输出文本；状态机按持久化 a2aOutput 声明。公开 Card 不回显未经校验的任意 Group.context，描述只使用明确可公开的摘要／字段，无法确认公开性则不得发布。
 
-Group 开关／相关配置提交时，在同一事务写入以 group_id 为键的持久化同步意图和 revision，提交后唤醒现有目录同步路径。重启按游标恢复未完成意图；不把现有内存通知队列当作持久化成功。每次尝试重新读取当前快照，关闭后重试 DELETE，而不是重放旧 PUT。
+契约测试必须使用真实 `HttpA2aCardFetcher.fetch(card_url, bearer_configured=true)`（boolean 仅表示后续调用配置了凭据，不会把 token 发给 Card URL）读取真实 Group Card 路由，并完成标准绑定／扩展校验。不能只用 JSON 反序列化替代接入验证。Card 请求 Accept=application/json；六类数据面请求使用 A2A 媒体类型。
 
-同群出站操作串行，重复 PUT／DELETE 幂等；接收端不支持 revision fencing 时，对超时的旧写保留不确定记录，重读最新状态并再次核对，不能声称远端强一致。目录延迟／故障不回滚开关，也不允许入口绕过本地资格；远端撤销未确认必须可观测和重试。启用 Fuse 不是执行的前置条件，但启用的目录必须遵守此发布合同。
+### 3.6 唯一发布者与切换顺序
+
+所有 Group 的 Fuse 写入由**持久化 publication worker 唯一负责**。旧 `FuseCardSyncLifecycle::publish(Resource::Group)` 分支退出直接网络写入；`CardChangeQueue` 的 Group 通知只唤醒新 worker，必要的 durable desired revision 已在 Group 事务内写入，不能凭一次内存通知代替它。旧 worker 的 Agent/Bot 分支独立保留。
+
+同一 Group 在所有实例上通过 DB claim／lease 串行发布。发布读取当前 eligible/status/supportA2A 和 revision，失败重读重试；关闭或不再合格产生 DELETE。数据库读取错误不是已删除。HTTP／Fuse 使用相同投影，不允许新旧 writer 各自生成 Card。
+
+切换步骤：停止所有旧 Group writer 的领取和重试 → drain 已开始的旧 HTTP 请求（超时请求保留 unknown）→ 确认旧实例已退出 → 新 worker 接管并执行有界目录核对 → 确认兼容消费者迁移后开放。每个本地 Group 和历史发布墓碑都要核对，不能只扫描开启群；没有本地记录的旧远端资源使用目录清单或显式迁移导出补齐，记录未覆盖范围。
+
+接收端若支持 revision fencing，则旧 PUT 被拒绝；若不支持，**不能保证任意迟到的旧 HTTP 请求永不覆盖 DELETE**。此时迁移在未确认旧请求结算前不得报告撤销完成，保持 uncertain 并在结算后执行最终 DELETE／核对；新端停止条件不可只凭本地 lease 到期。竞争测试验证“迟到旧 PUT 后最终撤下、入口始终拒绝、未核实不标同步成功”，不写不可能证明的强一致承诺。旧 writer 不得混跑或再次领取 Group 任务。
+
+Group 开关／生命周期／能力／相关配置提交时，同事务写 group_id 的同步意图和 desired revision，提交后唤醒；ack fence revision/lease。目录故障不回滚开关，入口仍基于本地数据库资格拒绝调用。Fuse 未启用不阻止直接调用；启用的目录必须遵守以上迁移和同步合同。
+
+### 3.7 工具能力委托：上线前书面决策门槛
+
+任意有效调用 token 可以调用任意已开放群；群内 Bot 使用自身既有工具权限，Caller 只用于 Task 归属和审计，不进入下游工具授权链。**开启 supportA2A 会对外暴露这些 Bot 能力及其潜在业务写副作用**，不能用“public/无 Human 成员”证明委托安全。
+
+本稿不擅自新增 Group 白名单、高风险工具开关或把 Caller 冒充 Human。产品与安全负责人必须在首次允许启用之前，书面确认：(1) 开启开关是否代表管理员接受该委托；(2) 写操作／高风险工具需独立策略还是不在该部署开放；(3) 可公开 Card 与管理提示如何告知授权不传递；(4) 现有审计如何串联 Caller→Group→Task→Run→work/tool call 的受信 ID，及保留／脱敏边界。决议和负责人记录于后续 delivery／决策文档，当前状态为**尚未确认、阻止上线启用**，不是新增已批准功能。可以先实现其余明确合同，但不能把技术验收全绿视为该授权决议已获批准。
 
 ## 4. A2A 认证与资源隔离
 
 ### 4.1 插件合同与装配
 
-A2A 数据面使用一套经配置选定的认证链，覆盖 Card GET、send、stream、get、list、subscribe、cancel，并供后续单 Agent 标准入站复用。首期仅内置 `bcs_token`，不是为每条 route 写一份 token 校验。
+A2A 数据面使用一套经配置选定的认证链，覆盖 send、stream、get、list、subscribe、cancel 六类操作；公开最小 Card GET 为 §3.5 的发现例外，并供后续单 Agent 标准入站复用。首期仅内置 `bcs_token`，不是为每条 route 写一份 token 校验。
 
 建议配置合同如下；这是**拟新增配置**，不是当前可直接使用的参数：
 
 ```toml
 [a2a]
 enabled = true
+deployment = "example-deployment"
 
 [a2a.auth]
 chain = ["bcs_token"]
@@ -171,6 +195,8 @@ chain = ["bcs_token"]
 - 链的顺序与配置一致，插件名及配置在启动时验证；声明 HTTP 的方式由 adapter 映射，应用／Core 合同只接收无凭据的可信主体。
 
 插件为受信进程内实现，只获得验证需要的存储、时钟和配置；不得读取聊天或修改 Task。验证超时有上限，关闭时释放资源。公共本地模式使用实际签发的测试凭据，不依赖内部服务。
+
+开启时 `a2a.deployment` 必填、非空且稳定；由可信配置给出，不能由 token/body/tenant 决定。首期启用本功能的一个选定 DbPlugin 数据源只绑定一个 `(deployment, 原BCS env)`，bootstrap 在新 `bcs_group_a2a_deployment_binding` 单行记录中原子登记并校验该映射；多实例必须相同。另一个 deployment 或 env 复用该数据源时启动失败，即使已有表为空也不得自动改绑定；迁移须显式离线操作。Store 实例单 deployment，构造为 `new(db, StoreScope { deployment, env })`，没有 logical_db 参数，数据源已由 DbPlugin 在组合根选定。每个查询／claim／清理／publication 都添加构造 scope 条件，并拒绝命令中的不同 scope，防止管理工具绕过。未知 Caller 声明不参与配置绑定。
 
 ### 4.2 BCS Token 首期落地建议
 
@@ -205,7 +231,7 @@ Authorization 只接受一个 Bearer 值，scheme 大小写不敏感；重复／
 
 | 方法／相对路径 | 响应 |
 | --- | --- |
-| `GET /agent-card.json` | 符合资格的 Group AgentCard；同样要求认证 |
+| `GET /agent-card.json` | 符合资格的最小公开 Group AgentCard；无需认证，application/json |
 | `POST /message:send` | `SendMessageResponse` 的 `task` 分支，HTTP 200 |
 | `POST /message:stream` | SSE；首帧为 `StreamResponse.task` |
 | `GET /tasks/{task_id}` | Task 快照 |
@@ -215,9 +241,11 @@ Authorization 只接受一个 Bearer 值，scheme 大小写不敏感；重复／
 
 已知但未支持的 `/extendedAgentCard` 和 Task Push Notification 配置操作在认证后分别返回 UNSUPPORTED_OPERATION／PUSH_NOTIFICATION_NOT_SUPPORTED，不将未知路径的 404 误当能力合同；不挂载对应业务实现。
 
+Group router 在 `v1/mod.rs` 与既有 `a2a::router()` **平级 merge**，公开 Card 子路由与认证数据面子路由分开；绝不嵌入现有管理 router 的 `transport::boundary`（会拒绝 A2A/SSE Accept、改写错误）。独立处理1 MiB限额、媒体协商、Bearer、裸错误和no-store，连406/413/415/404也不能经过旧管理 envelope。
+
 新路由归 `bcs-api-http`，不是把版本化路由实现复制到 legacy `bcs-http`。A2A 采用标准裸响应与错误，不套 V1 的 `code/message/data/request_id` envelope；OpenAPI validator 为明确的 A2A 路由增加窄范围协议例外，不全局放宽规则。既有 Agent 注册和 Card 管理路由、其 Provider-admin 权限和 envelope 不变。
 
-请求与响应首选 `application/a2a+json`；JSON 请求兼容 `application/json`；SSE 使用 `text/event-stream`。客户端发送 `A2A-Version: 1.0`，省略版本按标准兼容规则视为 0.3，本期不支持并返回版本错误；Card 发现 GET 不强制已有版本头。业务响应及私有结果使用 `Cache-Control: no-store`。
+除公开 Card 固定返回 `application/json` 外，数据面请求与响应首选 `application/a2a+json`；JSON 请求兼容 `application/json`；SSE 使用 `text/event-stream`。客户端发送 `A2A-Version: 1.0`，省略版本按标准兼容规则视为 0.3，本期不支持并返回版本错误；Card 发现 GET 不强制已有版本头。业务响应及私有结果使用 `Cache-Control: no-store`。
 
 动态动作路由遵守当前 router 能力：可将 POST 注册为 `/tasks/{task_action}`，只解析末尾 `:cancel`／`:subscribe`，不重复 URL 解码。未知后缀 404；空／非法 ID 或 body.id 与路径冲突 400。路径提供 ID 时允许 body 省略 id；不要求调用方重复同一信息。
 
@@ -228,7 +256,7 @@ Authorization 只接受一个 Bearer 值，scheme 大小写不敏感；重复／
 - 支持文本及至多一个 object 类型 data Part；多个 data、数组／标量 data 返回 INVALID_ARGUMENT。这是 BCS 输入限制，不改变 A2A data 可表示任意 JSON 的定义。
 - raw/url 文件输入返回 ContentTypeNotSupportedError；不尝试拉取 URL。文本／JSON 的 mediaType 与实际分支一致。
 - 原始 Message 的标准字段保存于当前轮次；`referenceTaskIds` 首期不开放，非空明确拒绝，不偷偷跨 context 加载历史。
-- `acceptedOutputModes` 省略／空表示使用群支持模式；非空与实际能力求交集，无交集在受理前拒绝。选择结果写入 Task，最终产物不满足时失败收尾。
+- `acceptedOutputModes` 省略／空表示使用群支持模式；非空与实际能力求交集，无交集在受理前拒绝。去重命中优先返回原 Task、不按当前 Card 重算；只有新请求在事务内按受理快照协商。解析出的允许输出模式集合写入 Task.selected_output_modes，不能只保留原始 configuration；最终每个 Artifact Part 必须符合已保存的模式，否则 OUTPUT_INVALID 失败收尾。
 - 首期成功产物仅文本或 JSON；JSON 输出可为任何合法 JSON 值，不受输入必须 object 的限制。
 - 不支持 Push Notification 配置，显式返回标准错误，不能静默忽略。
 
@@ -344,7 +372,7 @@ manager 无运行／排队工作、无回送、无重试、无不确定工作时
 
 每个新 Task 从入口新建 Run，固定 definition 版本、成员绑定、结果选择和本轮输入；不借用 Failed Run rerun 来续聊。原生 rerun 对 A2A 托管 Run 不开放，避免一次外部 Task 启动第二个独立执行。
 
-开启时的结果选择需要固定为 `a2a_output` 执行配置：命名一个产生成功结果的节点及 text/data 投影；支持多产物时配置有序的选择列表，每项有固定 artifact key/name。必须覆盖所有允许的成功结束分支；缺少选定输出或类型不匹配使本轮失败。顺序由配置决定，不靠节点完成时间或遍历顺序猜测。输出选择存于 Group runtime binding 的独立、版本化 A2A 配置中，Wire 使用 `a2aOutput`，不覆盖原始流程 DSL 或在 Card 上存执行规则。
+开启时的结果选择需要固定为 `a2a_output` 执行配置：命名一个产生成功结果的节点及 text/data 投影；支持多产物时配置有序的选择列表，每项有固定 artifact key/name。必须覆盖所有允许的成功结束分支；缺少选定输出或类型不匹配使本轮失败。顺序由配置决定，不靠节点完成时间或遍历顺序猜测。输出选择的权威配置为 `GroupRuntimeBinding.a2a_output: Vec<OutputSelector>`，Wire 字段 `a2aOutput` 进入现有 Group create/detail/PATCH 与 runtime configure 管理合同；省略保持／初建空，null非法，[]显式清空（启用状态不允许清空所需输出）。写入 Repo／SQL／Memory 的 binding 专属 `a2a_output_json` 和 `a2a_binding_revision`，与 Group资格、a2a_revision、publication意图在同一组合事务提交；definition/bindings/output selector必须同时校验 node_id存在、format支持及成功分支覆盖。执行快照只是该已提交配置的派生副本，不能用execution_json替代管理写入口。T06同时交付domain、Store、管理Wire和OpenAPI；不等T17再补生产入口。
 
 Run 显示成功不直接等于 A2A 成功：必须确认关联投递收尾，投影到边界，再写 Artifact 和终态。意外进入 HumanInput／缺少执行身份按失败收尾，不伪造 INPUT_REQUIRED 后永久挂起。
 
@@ -378,7 +406,13 @@ CancelTask 可返回仍非终态 Task 和安全的取消进度说明。只有底
 
 ### 8.3 重启与持久化启动
 
-启动意图由有租约、版本 fencing 的 worker 领取。持久化的 execution_id 在调用 Runtime／MessageFlow 前确定，它们必须能按 ID 查询、幂等确认同一执行，而不是每次调用随机创建新的 Run。
+启动意图由有租约、版本 fencing 的 worker 领取；claim **不是投递许可**。固定 execution_id 后，必须先调用 Repo.begin_dispatch，原子CAS检查 deployment、Task generation/revision、owner/lease_token、未过期lease、无取消／完成意图、barrier尚未越过，并写 attempted_at、dispatch owner/token 和不可重用的 permit；affected_rows必须为1。与取消使用同一Task锁序，取消先提交则begin_dispatch拒绝，旧owner不得调用start。
+
+执行入口 `start(DispatchPermit)` 消费许可并把根work登记到durable delivery queue，二者与取消检查**在同一DB事务线性化**；重复permit只查已有work，不创建第二个Run/投递。只有队列worker能越过外部send barrier，队列的send-start CAS和取消仍互斥。不允许消费许可后再无条件直接网络发送。每个子work也先登记并用同样的send barrier；record_work／record_observation同时检查generation、Task expected_revision、lease_token和有效lease，旧owner写入拒绝。
+
+DB的barrier和远端网络调用不能组成跨系统原子事务。若取消发生在已提交send-start之后，即使字节稍后才发送，也已算登记的在途工作，不能声称“取消后从未投递”；取消须覆盖该work、等待终态或Unknown隔离。barrier已越但ack丢失只能Unknown／核实同一execution_id，不能依据lease过期重发。NotStarted仅在事务中证明barrier未越且原子封闭该启动许可，或下游对已登记work给出可信not-sent证据时成立；“查无Run”不够。begin_dispatch后崩溃但尚未入队可以保守隔离；若permit事务能原子废止未消费许可则可证明NotStarted。
+
+lease默认30秒，每10秒续约，renew必须CAS owner/token/generation/revision并返回最新fence；续约失败停止新dispatch。进程暂停到lease过期后不能沿用旧permit；新owner只核实旧barrier，不自动再次start。状态转换后必须刷新revision再续约／写观察，不能拿旧claim继续写。
 
 | 故障位置 | 恢复行为 |
 | --- | --- |
@@ -405,25 +439,28 @@ A2A deadline 是新调用生命周期的责任，不恢复已废弃的 service_s
 
 ### 9.1 建议的逻辑存储
 
-具体列类型按双数据库规范实现，以下表名和唯一性是本稿建议。所有归属列来自可信上下文，外部 ID 字符串区分大小写。
+具体列类型按双数据库规范实现，以下表名和唯一性是本稿建议。所有归属列来自可信上下文，外部 ID 字符串区分大小写。既有 `bcs_a2a_tasks`／`bcs_a2a_contexts` 属于Bot出站，**不得创建或ALTER复用**；Group入站生命周期表统一使用 `bcs_group_a2a_*`。Session扩展表为 `bcs_group_sessions`；SQLite/MySQL各交付独立SQL并完整回归版本断言。
 
 | 记录 | 核心字段／约束 |
 | --- | --- |
+| `bcs_group_a2a_deployment_binding` | singleton映射deployment/env；bootstrap及CLI相同DB必须匹配，禁止多deployment共享该数据源 |
+| `bcs_group_sessions` 扩展 | a2a_managed默认false；原表名保持不变 |
+| `bcs_group_runtime_bindings` 扩展 | a2a_output_json、a2a_binding_revision；权威管理配置，与Group资格组合提交 |
 | `bcs_groups` 扩展 | support_a2a 默认 false、a2a_revision；不复用标签或 GroupStatus 代替开关 |
 | `bcs_a2a_clients` / `bcs_a2a_tokens` | 稳定 client_id、启停；凭据摘要唯一、用途、有效期、撤销；无原文 |
-| `bcs_a2a_contexts` | session_id 唯一、group/Caller scope、创建来源、初始输入、执行配置指纹、active_task_id、generation、isolation 状态 |
-| `bcs_a2a_tasks` | task_id、context、Caller scope、messageId、输入、输出模式、状态／阶段／revision、执行关联、绝对期限、完成／取消意图、大小与保留时间 |
-| `bcs_a2a_message_reservations` | 去重键唯一、fingerprint_version/hash、task_id、结果清理标记；保留墓碑 |
-| `bcs_a2a_artifacts` | `(task_id, artifact_id)` 唯一；position 唯一、context_id、name、description、parts JSON、公开 metadata/extensions、created_at |
-| `bcs_a2a_public_events` | `(task_id, sequence)` 唯一；稳定 event_id、公开 payload、来源去重键；供 history 与 SSE 读取 |
-| `bcs_a2a_execution_intents` | task/generation、execution_id、启动状态、lease/CAS、next_check_at、关联工作／停止证据与扫描索引 |
+| `bcs_group_a2a_contexts` | session_id 唯一、group/Caller scope、创建来源、初始输入、执行配置指纹、active_task_id、generation、isolation 状态 |
+| `bcs_group_a2a_tasks` | task_id、context、Caller scope、messageId、输入、输出模式、状态／阶段／revision、执行关联、绝对期限、完成／取消意图、大小与保留时间 |
+| `bcs_group_a2a_message_reservations` | 去重键唯一、fingerprint_version/hash、task_id、结果清理标记；保留墓碑 |
+| `bcs_group_a2a_artifacts` | `(task_id, artifact_id)` 唯一；position 唯一、context_id、name、description、parts JSON、公开 metadata/extensions、created_at |
+| `bcs_group_a2a_public_events` | `(task_id, sequence)` 唯一；稳定 event_id、公开 payload、来源去重键；供 history 与 SSE 读取 |
+| `bcs_group_a2a_execution_intents` | task/generation、execution_id、启动状态、lease/CAS、next_check_at、关联工作／停止证据与扫描索引 |
 | `bcs_group_a2a_publications` | group_id 唯一、当前期望 revision、已确认 revision、下一重试时间；历史撤销保留最小墓碑 |
 
 Task 对外 metadata 只允许已声明的安全字段，不回显内部执行 envelope、任意输入 metadata 或凭据标识。公开 Message 历史是 public_events 的有序 Message 投影，不复制一套无法对齐的 transcript。查询使用适当 kind／sequence 索引；内部 `bcs_events` 保持执行事实来源，公开投影额外保存 `(source_stream, source_sequence, event_id)` 消费位置，不能假定不同 stream 全局有序。
 
 Task／Artifact 的外键归属必须在组合写中校验。ContextID 不单独构成授权凭据；不在每个 Artifact 复制凭据。Task 状态时间使用 UTC，只有状态／公开 status.message 更新时改变，不因查询和保活改变。
 
-索引至少覆盖：Task 的 `(scope, Caller, group_id, status_timestamp, task_id)` 和 context 查询；预留唯一键；Artifact `(task_id, position)`；公开事件 `(task_id, sequence)`；恢复／清理／发布的到期时间与 key。组合身份键超过数据库索引字节限制时使用固定宽摘要索引并比较保存的完整键，不裁剪主体或 messageId 来规避限制；摘要碰撞不得复用不同请求。
+索引至少覆盖：Task 的 `(deployment, scope_hash, result_deleted_at_ms, status_timestamp_ms, task_id)`，查询同时约束scope_hash与完整Caller/group键 和 context 查询；预留唯一键；Artifact `(task_id, position)`；公开事件 `(task_id, sequence)`；恢复／清理／发布的到期时间与 key。组合身份键超过数据库索引字节限制时使用固定宽摘要索引并比较保存的完整键，不裁剪主体或 messageId 来规避限制；摘要碰撞不得复用不同请求。
 
 ### 9.2 事务边界
 
@@ -456,6 +493,8 @@ Parts 存储保留类型、顺序、mediaType、filename、公开 metadata，可
 ## 10. 公开事件、等待与 SSE
 
 `includeProgress=false` 只关闭可选阶段进度，不影响 Task 状态、输入历史、最终产物和失败原因。投影在持久化公开出口之前执行；GetTask、ListTasks、SSE 共用相同公开数据，不能一条路径直接透出内部事件。
+
+TaskWaitService 负责等待和SSE的持久化刷新：默认每 `wait_poll_ms=1000` 查询已授权Task状态／sequence，单实例同Task的等待者共享轮询，按最多100个key批量查询、最多2批并发并有连接许可上限；无事件时不拉全部history。进程内通知只加速，不能取消定时轮询；另一实例提交终态时本实例最迟下一次成功轮询观察到，DB失败返回等待错误／关闭流，不假装任务继续或永久只发心跳。测试使用两个独立notifier和共享DB，B提交、A等待／SSE必须结束。
 
 订阅在一致快照中取得 Task 和公开 sequence 高水位，首帧发该 Task，随后从高水位之后消费持久化事件。连接通知只用于唤醒，不是事实来源；快照与订阅建立间发生完成也不能丢终态。
 
@@ -513,6 +552,8 @@ Task 执行失败通过成功查询返回 TASK_STATE_FAILED 和安全业务原�
 | 完成／取消／失败收尾 | 60 秒；终态预算最长执行期限＋一次收尾，不因重试重置 |
 | manager 空闲提醒／提醒后空闲宽限 | 60 秒／120 秒，每 Task 最多一次提醒 |
 | 结果保留 | 7 天；恢复／背景依赖不清理 |
+| 执行lease／续约 | 30秒／10秒；续约小于lease，超时后旧owner不能派发或写状态 |
+| 跨实例持久化轮询 | `wait_poll_ms=1000`；单实例按Task合并等待者，每批至多100个key、并发最多2批，通知只加速 |
 | SSE 心跳／撤销复验 | 15 秒；发送队列至多 128 条或 1 MiB，先达到者生效 |
 | JSON 请求体 | 1 MiB，包含 message/configuration/metadata，解析前限制 |
 | 最终 Artifact | 每 Task 至多 16 个，总序列化内容至多 256 KiB |
@@ -537,7 +578,7 @@ Task 执行失败通过成功查询返回 TASK_STATE_FAILED 和安全业务原�
 | 幂等命中 | 精确预留查找＋Task 一致读取，不再触发执行配置／外部派发 |
 | GetTask | 一条带 Caller 条件的 Task 读取、一次 Artifact 批量读、一次有界 history 读；不读取内部全量消息 |
 | ListTasks | 轻量索引页＋同条件 COUNT；根据大小元数据选择 8 MiB 内的前缀，再批量读取选中页产物和历史，不能逐 Task N+1 |
-| Catalog | group_id 精确快照一次；资格基于事务维护的群状态，不每次扫描所有 Session |
+| Catalog | deployment＋group_id 精确快照一次，包含status；资格基于事务维护的群状态，不每次扫描所有 Session |
 | SSE | 合并共享 Task 通知与有界 cursor 消费；心跳不写 DB，凭据复验成本随活跃连接数计入容量 |
 | 恢复／取消 | 有界关联分页、CAS claim、退避；事务或锁外请求下游，不能每轮扫描所有工作 |
 | 清理 | 一次 claim 至多 100 个 key，先原子切换 Task／墓碑逻辑可见性，再按每 Task 有界分片物理回收 |
@@ -586,41 +627,41 @@ List 的 history 批量查询采用 partition 内 limit 或等价实现，不能
 | --- | --- |
 | AC-01 | 应用 client 不注册 Bot，持 BCS token 完成调用；Agent client 使用相同协议 |
 | AC-02 | 缺失／错误／过期／撤销 token 返回 401；依赖失败 503；无匿名或 local mock 兜底 |
-| AC-03 | 空链、未知／无鉴权插件启动失败；配置的插件确实被所有七类入口调用 |
+| AC-03 | 空链、未知／无鉴权插件启动失败；配置的插件确实被六类调用／任务入口调用；公开Card不调用认证插件且只返回application/json |
 | AC-04 | token 轮换保持主体与原 Task 可见；另一主体无法 get/list/subscribe/cancel/续聊／去重窥探 |
 | AC-05 | 对任意合格 Group 均可调用，不要求 Group grant；调用 token 不能修改开关或签发凭据 |
 | AC-06 | 旧群默认 supportA2A=false；public 单独不足；private+开启失败；同事务改 public 并开启成功 |
-| AC-07 | Chat/DM、Human（含 absent）、无 manager、HumanInput、无结果选择拒绝开启；owner 是 Human 不被误判为成员 |
+| AC-07 | Chat/DM、Human（含 absent）、无 manager、HumanInput、无结果选择及Closed/Error/Inactive拒绝开启；owner 是 Human 不被误判为成员 |
 | AC-08 | 所有邀请／成员／visibility／流程修改入口守住开启不变量；并发开启和加 Human 最多一个成功 |
-| AC-09 | supportA2A 显式 JSON 名、PATCH 省略／null／非布尔行为，以及创建／读取／更新回归 |
+| AC-09 | supportA2A及a2aOutput管理写入/读取/原子校验；context/opening/routing改变拒绝旧context续聊，label-only不变 |
 | AC-10 | 关闭与受理竞争按事务顺序判定；关闭后新轮次失败，旧任务读取／取消和幂等命中仍可用 |
-| AC-11 | Card GET 与 Fuse 同一资格／能力／安全声明；关闭后 DELETE，重启恢复未完成意图，旧目录有界核对 |
+| AC-11 | 真实HttpA2aCardFetcher无认证拉取最小Card并通过校验，Card GET 与 Fuse 同一HTTP+JSON投影；关闭后 DELETE，重启恢复未完成意图，旧目录有界核对 |
 | AC-12 | 目录写超时／旧 PUT 迟到不会绕过入站资格；最终核对到最新版本，失败可见且可重试 |
 | AC-13 | 新 context 并发同 messageId 只创建一个 Session/Task；事务失败不投递 |
 | AC-14 | 同 context 两个新请求只有一个受理；busy 不预留 messageId，稍后可重发 |
-| AC-15 | 重启、send/stream 切换、JSON key 顺序、默认值等价均正确去重；改 configuration/metadata/扩展冲突 |
+| AC-15 | acceptedOutputModes无交集受理前拒绝且不预留、已选模式持久化/终态校验；重启、send/stream 切换、JSON key 顺序、默认值等价均正确去重；改 configuration/metadata/扩展冲突 |
 | AC-16 | 两种群完成两轮，同 context、不同 Task，各轮结果稳定；新输入确实到达 manager／Run 节点，Runtime 不提前独立完成 Session |
 | AC-17 | manager 完成先 ack 再等退出；Worker 未结束、回送未完成、旧 activation／伪造完成不能提前成功 |
 | AC-18 | 无完成信号只提醒一次并有界失败；正常长 Worker 无消息不触发空闲超时 |
 | AC-19 | 状态机多分支结果选择确定；缺结果、类型错、超限、HumanInput 意外进入按失败收尾 |
 | AC-20 | 完成／取消／迟到回调竞争只有一个终态；取消覆盖队列、活动节点、Worker 和回送 |
 | AC-21 | Run.Aborted／下游 abort 请求成功但停止未确认：保持占用，超时 FAILED+isolated，不能新执行 |
-| AC-22 | 每个恢复崩溃点、主从切换、数据库错误不重置期限、不重发未知执行、不丢恢复关联；隔离仍占容量，禁止无限累积未知执行 |
+| AC-22 | 每个恢复崩溃点、主从切换、数据库错误不重置期限、不重发未知执行、不丢恢复关联；begin_dispatch先于start且取消/lease/revision竞争有fence；隔离仍占容量，禁止无限累积未知执行 |
 | AC-23 | 停止确认后只解除 context 隔离，不改原 FAILED；没有证据的人工解封拒绝 |
 | AC-24 | Artifact／终态事务注入失败无部分成功；GetTask 和 SSE 重启前后结果相同，ID／顺序稳定 |
-| AC-25 | 公开投影重复事件不重复历史；snapshot/subscribe 竞争不丢终态；终态后无公开追加 |
+| AC-25 | 公开投影重复事件不重复历史；snapshot/subscribe竞争和跨实例仅DB轮询均不丢终态；终态后无公开追加 |
 | AC-26 | 默认 send 终态返回／60 秒 504；断线任务继续；终态新 subscribe/cancel 与重复 stream 分别按合同 |
 | AC-27 | SSE 保活、代理 flush、慢客户端、有界缓冲、持续业务事件时的凭据到期／撤销复验、重连隔离及并发限额 |
-| AC-28 | 页内授权及精确总数、游标篡改／跨主体、时间筛选 >=、最大页产物和 history 无 N+1／全量扫描 |
+| AC-28 | scope_hash+完整scope、活结果索引在大量墓碑下EXPLAIN；页内授权及精确总数、游标篡改／跨主体、时间筛选 >=、最大页产物和 history 无 N+1／全量扫描 |
 | AC-29 | 文件／重复 data／超限／不支持输出／缺扩展头等受理前拒绝且不占 messageId |
 | AC-30 | 清理与下一轮受理竞争安全；逻辑删除后即使物理回收失败，墓碑仍阻止再执行，context 背景过期明确拒绝 |
 | AC-31 | 普通 Session reactivation、聊天、成员管理和原生 rerun 不能绕过 A2A 托管边界 |
-| AC-32 | SQLite／真实 MySQL 的组合事务、collation、迁移新装／升级和完整性一致；恢复批次与失败退避有断言 |
+| AC-32 | SQLite／真实 MySQL 的组合事务、collation、迁移新装／升级、出站表不冲突、全部版本断言和单deployment映射启动验证一致；恢复批次与失败退避有断言 |
 | AC-33 | 日志／错误／history／SSE／Card 不含凭据或内部工具原文；首期不声称自由文本过滤绝对防泄漏 |
-| AC-34 | 旧非 A2A 群调用、管理权限、Agent Card 注册、Bot catalog 行为回归；嵌入 host 接线验证 |
+| AC-34 | 旧非 A2A 群调用、管理权限、Agent Card 注册、Bot catalog 行为回归；嵌入host接线、port purity及全部新增合同集中conformance验证；委托安全决议是独立上线门槛 |
 
 ## 16. 文档验证与交付状态
 
 本次只交付规范、示例、证据和导航。协议字段以固定版本官方 proto／HTTP+JSON 章节校对；当前实现依据及其限制见 [research.md](research.md)。具体检查结果在该页记录，不将未来 AC 表写成通过。
 
-本稿的凭据实现建议、参数默认值、物理存储布局、结果选择字段属于书面评审内容；对应拆解见 [实施计划](plan.md)；编写计划不等于这些建议已最终批准，也不等于实现已经开始。发布扩展规范、修改正式 API、编写迁移、实际压力验证和部署均留到实现交付。没有功能实现、合并、host 集成或上线结论。
+本稿的凭据实现建议、参数默认值、物理存储布局、结果选择字段属于书面评审内容；对应拆解见 [实施计划](plan.md)；编写计划不等于这些建议已最终批准，也不等于实现已经开始。发布扩展规范、修改正式 API、编写迁移、实际压力验证和部署均留到实现交付。没有功能实现、合并、host 集成或上线结论。§3.7的委托授权决议仍待产品／安全书面确认，不能以文档技术修订视为批准。

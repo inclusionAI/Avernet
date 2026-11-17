@@ -8,15 +8,17 @@
 
 **Files:**
 - Create: `apps/bcs/crates/adapters/http/bcs-api-http/src/v1/a2a/group/mod.rs`、`apps/bcs/crates/adapters/http/bcs-api-http/src/v1/a2a/group/dto.rs`、`apps/bcs/crates/adapters/http/bcs-api-http/src/v1/a2a/group/auth.rs`、`apps/bcs/crates/adapters/http/bcs-api-http/src/v1/a2a/group/errors.rs`、`apps/bcs/crates/adapters/http/bcs-api-http/src/v1/a2a/group/send.rs`、`apps/bcs/crates/adapters/http/bcs-api-http/src/v1/a2a/group/tasks.rs`。
+- Modify: `apps/bcs/crates/adapters/http/bcs-api-http/src/v1/mod.rs`。
 - Modify: `apps/bcs/crates/adapters/http/bcs-api-http/src/v1/a2a/mod.rs`、`apps/bcs/crates/adapters/http/bcs-api-http/src/v1/common/state.rs`。
 - Create: `apps/bcs/crates/adapters/http/bcs-api-http/tests/group_a2a_routes.rs`、`apps/bcs/crates/adapters/http/bcs-api-http/tests/support/group_a2a.rs`。
 - Create: `apps/bcs/api-contracts/v1/internal/group-a2a.yaml`。
 - Modify: `apps/bcs/api-contracts/v1/internal.yaml`、`apps/bcs/api-contracts/v1/openapi/groups.yaml`。
 - Modify: `apps/bcs/scripts/validate_openapi_contract.py`。
 - Create: `apps/bcs/tests/openapi/test_group_a2a_contract.py`。
+- Create: `apps/bcs/crates/bootstrap/bcs/tests/integration_group_a2a_card_fetch.rs`。
 - Create: `docs/specs/a2a/extensions/call-metadata/v1.md`、`docs/specs/a2a/extensions/call-metadata/v1.schema.json`。
 
-**Interfaces:** Consumes GroupA2aService、A2aAuthenticationService、GroupA2aCardService；Produces seven operation handlers、strict request normalization、error map。ApiState 用明确 Optional 代表整个新能力未启用，但开启时必须完整注入，不能逐方法静默 fallback。
+**Interfaces:** Consumes GroupA2aService、A2aAuthenticationService、GroupA2aCardService；Produces六类认证数据面handler＋公开最小Card GET、strict request normalization、error map；Group router在v1/mod.rs平级merge，绝不穿过管理面的transport::boundary。ApiState 用明确 Optional 代表整个新能力未启用，但开启时必须完整注入，不能逐方法静默 fallback。
 
 - [ ] **1. RED HTTP 测试。** `http_world()` 组装 Axum router＋T03/T07 真 SQLite 服务；`post_send(token:Option<&str>,body:Value)->Response` 用 oneshot 请求真实 router；synthetic token 是 fixture 管理面签发的合法用途：
 
@@ -35,10 +37,11 @@ assert!(json.get("data").is_none());
 `send_body(id)` 构造 examples §3 的请求（无真实凭据）；`response_json` 读取测试 Response body，失败直接测试失败。
 - [ ] **2. RED。** `cargo test -p bcs-api-http --test group_a2a_routes`；先确保 expected 401/standard body 失败，而不是依赖装配 panic。
 - [ ] **3. 实现传输验证。** body 1MiB 解析前限制；strict JSON visitor 拒绝重复键、非法 Unicode／数；parts oneof/≤64、object data≤1、role／messageId；完整 canonical request 给 Core，Authorization 不入 body。非支持 mime/version/extensions 提前拒绝，无 reservation。
-- [ ] **4. 路由／错误／权限。** action suffix 精确拆解一次；cancel/subscribe 空 body `{}` 用 path ID，body ID 冲突400；unknown suffix404。旧 `/agents/**` Provider 管理认证／envelope 不变。所有七操作及 unsupported capability endpoint 认证；task 操作不因开关关闭失去访问。ErrorInfo 对应 spec §11，401带 challenge，503不冒充401。
+- [ ] **4. 路由／错误／权限。** v1/mod.rs分别merge(a2a::router())与merge(a2a::group::router())，management的2MiB/JSON/envelope layer只留在其router；Group的公开Card路由与带Bearer的data_router分开，独立1MiB边界保留原A2A错误。 action suffix 精确拆解一次；cancel/subscribe 空 body `{}` 用 path ID，body ID 冲突400；unknown suffix404。旧 `/agents/**` Provider 管理认证／envelope 不变。六类数据面操作及unsupported capability endpoint认证；Card GET公开且固定application/json，无需Bearer；task 操作不因开关关闭失去访问。ErrorInfo 对应 spec §11，401带 challenge，503不冒充401。
 
 ```rust
 match error {
+    CallError::ContentTypeNotSupported => error_info(400, "INVALID_ARGUMENT", "CONTENT_TYPE_NOT_SUPPORTED", "a2a-protocol.org"),
     CallError::TaskNotFound => error_info(404, "NOT_FOUND", "TASK_NOT_FOUND", "a2a-protocol.org"),
     CallError::ContextBusy => error_info(409, "ABORTED", "CONTEXT_BUSY", "inclusionai.avernet.bcs"),
     CallError::NotCancelable => error_info(400, "FAILED_PRECONDITION", "TASK_NOT_CANCELABLE", "a2a-protocol.org"),
@@ -48,8 +51,8 @@ match error {
 ```
 
 `error_info` 和 `map_remaining_call_error` 定义在 errors.rs，后者对接口清单 CallError **穷尽 match**，不得 `_ => 500` 吞掉规范错误；每个 variant 对应一条 table test。
-- [ ] **5. 更新机器合同。** YAML 增加标准裸 A2A 例外标记，validator 仅对确切 path+method+protocol 放行；其他 internal endpoint 仍需 envelope。发布 includeProgress schema，仅 boolean，Card `$ref` 可机器获取；缺 activation header400且不占ID。正式输出选择 a2aOutput 在 Group/runtime 管理合同声明，不从 A2A 请求传任意 workflow。
-- [ ] **6. GREEN。** `cargo test -p bcs-api-http --test group_a2a_routes --test a2a_routes --test boundary_contract`；仓库根 `uv run --with pytest --with pyyaml --with jsonschema pytest apps/bcs/tests/openapi/test_group_a2a_contract.py -q`；`uv run --with pyyaml python apps/bcs/scripts/validate_openapi_contract.py --root apps/bcs/api-contracts/v1`。生成 schema fixture 验证 examples，不仅 JSON parse。
+- [ ] **5. 更新机器合同。** YAML 增加标准裸 A2A 例外标记，validator 仅对确切 path+method+protocol 放行；其他 internal endpoint 仍需 envelope。发布 includeProgress schema，仅 boolean，Card `$ref` 可机器获取；缺 activation header400且不占ID。a2aOutput的domain/Store/管理合同已由T06交付，本任务只回归其schema，不再首次声明；不从A2A请求传任意workflow。
+- [ ] **6. GREEN。** `cargo test -p bcs-api-http --test group_a2a_routes --test a2a_routes --test boundary_contract`；仓库根 `uv run --with pytest --with pyyaml --with jsonschema pytest apps/bcs/tests/openapi/test_group_a2a_contract.py -q`；`uv run --with pyyaml python apps/bcs/scripts/validate_openapi_contract.py --root apps/bcs/api-contracts/v1`。使用examples的精确headers测试Accept application/a2a+json及text/event-stream、Content-Type两种JSON、1MiB+1请求→裸413、400/401/404/406/415均不被旧transport改写；在bootstrap的integration_group_a2a_card_fetch使用真实HttpA2aCardFetcher + 真实Group router，GET无Authorization、Accept application/json→JSON，HTTP+JSON接口校验通过，无LOCAL/required discovery扩展；后续无token发送返回401。运行 `cargo test -p bcs --test integration_group_a2a_card_fetch`；生成schema fixture验证examples，不仅JSON parse。
 - [ ] **7. 提交。** `feat(bcs): expose authenticated group A2A HTTP contracts`。
 
 ## T18：等待、SSE 高水位与独立认证复验
@@ -63,7 +66,7 @@ match error {
 - Create: `apps/bcs/crates/application/bcs-app-group-a2a/tests/wait.rs`。
 - Modify: `apps/bcs/crates/adapters/http/bcs-api-http/src/v1/a2a/group/send.rs`、`apps/bcs/crates/adapters/http/bcs-api-http/src/v1/a2a/group/tasks.rs`。
 
-**Interfaces:** Implements TaskWaitService 和 A2aChangeNotifier 消费；StreamResponse={task|statusUpdate|artifactUpdate}；in-flight stream 持 runtime-only AuthenticatedA2aCaller，按独立 timer 复验 credential，不保存原文 token。
+**Interfaces:** Implements TaskWaitService.wait/wait_change和A2aChangeNotifier消费；TaskWaitService拥有跨实例durable poll（wait_poll_ms=1000），六类请求认证不影响公开Card；StreamResponse={task|statusUpdate|artifactUpdate}；in-flight stream 持 runtime-only AuthenticatedA2aCaller，按独立 timer 复验 credential，不保存原文 token。
 
 - [ ] **1. RED：snapshot 到 subscribe 完成竞争。** HTTP fixture `subscribe_with_barrier(key)` 在取得初始高水位后等待 test Barrier；`finish` 通过真实 terminal transaction，`collect_sse` 解析有限流：
 
@@ -87,15 +90,16 @@ assert_eq!(frames.iter().filter(|f| f.get("artifactUpdate").is_some()).count(), 
 ```text
 select:
   new event/notification → read committed page → bounded send
+  durable poll tick (wait_poll_ms=1000) → scoped batch state/highwater read → refresh even without local notify
   heartbeat tick → SSE comment only
   auth_check tick (15s) → revalidate; failure closes transport
   credential expiry → close transport
   client disconnect → release connection permit, never cancel Task
 ```
 
-持续 progress 也每15秒复验；慢客户端最多128条/1MiB，溢出关闭。Caller32／instance512连接预算，RAII 释放；请求正文和业务deadline不受心跳影响。auth dependency失败关闭流但不改Task。
+持久化轮询由TaskWaitService单实例按Task聚合，最多100 key/批、最多2批并发、仅查state/highwater，单连接不各自COUNT或拉全history；notify只是加速。另一实例提交应在下一成功poll被看到，DB失败返回明确服务错误/关闭流。持续 progress 也每15秒复验；慢客户端最多128条/1MiB，溢出关闭。Caller32／instance512连接预算，RAII 释放；请求正文和业务deadline不受心跳影响。auth dependency失败关闭流但不改Task。
 - [ ] **5. 等待测试与错误。** fake clock推进60s，默认 send返回504且 Task继续；及时终态返回200，returnImmediately=true不等待；断线／过期／撤销保持后台执行；没有“网关504→换messageId重发”。includeProgress=false仍有状态/最终产物/心跳。
-- [ ] **6. GREEN。** 重跑第2步；同时测试活跃流不断事件时撤销、连接数超限429和关闭后 permit回收；真实网关缓冲与idle timeout仅T20集成验证，不能拿单元test代替。
+- [ ] **6. GREEN。** 添加两个独立服务/notifier实例A/B共DB：A建立阻塞send及SSE，B提交终态且不发A的watch；推进wait_poll_ms后A在60秒deadline前返回/关闭，帧含最终结果。并发等待者批量查询数按100 key/批断言，不随连接数线性轮询。重跑第2步；同时测试活跃流不断事件时撤销、连接数超限429和关闭后 permit回收；真实网关缓冲与idle timeout仅T20集成验证，不能拿单元test代替。
 - [ ] **7. 提交。** `feat(bcs): stream committed A2A results with bounded authenticated waits`。
 
 ## T19：公共装配、托管资源旁路保护与安全启动
@@ -131,10 +135,10 @@ assert!(boot(cfg).await.is_err());
 
 boot返回 TestServer 包装实际 app与lifecycle，has_group_a2a_routes 通过HTTP路径响应而非固定bool判断。valid_test_config包含 SQLite、正式测试client token而非local mock。
 - [ ] **2. RED。** `cargo test -p bcs --test integration_group_a2a_wiring --test integration_group_a2a_bypass`。
-- [ ] **3. 分阶段接线。** config validate→migrations/schema readiness→token store/plugin/bridge→group repo/core/app→执行端口→wait/card→恢复/retention/publication lifecycle→HTTP。所有实例共享同逻辑 DB，claim带 fencing；从未启用的部署禁用时不创建worker，启用时缺存储／执行端口拒绝启动。已有任务的部署不能以全局disabled替代drain；先关各群开关并完成收尾，保留查询／恢复到安全停机。Card发布还受入口就绪状态约束，不能入口未挂载却注册可调用地址。
+- [ ] **3. 分阶段接线。** config validate（a2a.deployment非空、env解析固定）→migrations/schema readiness→原子注册singleton StoreScope映射，异deployment/env启动失败→token store/plugin/bridge→group repo/core/app→执行端口→wait/card→恢复/retention/publication lifecycle→HTTP。所有实例共享已选DbPlugin和一致StoreScope，不传logical_db，claim/expiry/ack强制deployment；从未启用的部署禁用时不创建worker，启用时缺存储／执行端口拒绝启动。已有任务的部署不能以全局disabled替代drain；先关各群开关并完成收尾，保留查询／恢复到安全停机。Card发布还受入口就绪状态约束，不能入口未挂载却注册可调用地址。
 - [ ] **4. 封堵旧旁路。** A2A托管Session在 Session application／Core入口拒绝普通reactivate、聊天、成员增删、原生rerun；管理delete先验证无活动／隔离且清理顺序受控。不能只改legacy `/services` handler，测试直接Service API同样拒绝。可信execution关联回调仍能工作，不用客户端可伪造flag绕过guard。
 - [ ] **5. 启停与配置测试。** 关闭supportA2A先禁止新受理，历史query/cancel仍通；shutdown停止claim/dispatch，保存未知状态，不伪造失败完成；重启恢复。global disabled路由不存在；旧Auth chain、Provider admin、Group管理权限回归。bootstrap server.rs已经989行，新代码放group_a2a模块，必须检查≤1000。
-- [ ] **6. GREEN。** 重跑第2步；`cargo check -p bcs --all-targets && cargo test -p bcs-app-session && cargo test -p bcs-api-http --test a2a_routes`。主程序与嵌入构造都覆盖；没有host checkout则记录未验证，不能写host已集成。
+- [ ] **6. GREEN。** 在完整装配中回归T18的跨实例持久化轮询与T19的singleton部署绑定；重跑第2步；`cargo check -p bcs --all-targets && cargo test -p bcs-app-session && cargo test -p bcs-api-http --test a2a_routes`。用同数据源重复启动相同deployment/env成功，异deployment或env拒绝，CLI同样不能绕过；真实Fetcher集成测试通过再开放Card。主程序与嵌入构造都覆盖；没有host checkout则记录未验证，不能写host已集成。
 - [ ] **7. 提交。** `feat(bcs): assemble group A2A services and protect managed execution boundaries`。
 
 ## T20：端到端、真实 MySQL、预算与交付记录
@@ -169,9 +173,9 @@ async def test_disable_blocks_new_round_but_preserves_owned_result(world):
 - [ ] **2. RED与单机。** `cargo test -p bcs --test integration_group_a2a`；仓库根 `uv run --with pytest --with pytest-asyncio --with httpx pytest apps/bcs/scripts/e2e-test/test_group_a2a.py -q`。一次失败必须可定位具体合同，不加自动重试掩盖flaky。
 - [ ] **3. 实现遗漏的跨层适配与样例校验。** 对照spec AC逐条建立测试映射，覆盖shutdown/restart、旧Run晚回调、wrongcaller、旧目录DELETE、bounded buffers／counts、BodyError。JSON/SSE样例用正式DTO／JSON Schema反序列化，不只parse；错误reason、securityRequirements、list totalSize、subscribe语义对固定A2A版本。
 - [ ] **4. 真实MySQL。** 独立可丢弃测试库，`BCS_TEST_MYSQL_URL`从本地秘密环境注入，不写入文件／命令回显；`cargo test -p bcs --test integration_group_a2a_mysql -- --ignored --test-threads=1`。覆盖空库迁移、旧库升级、唯一collation、事务rollback、group enable/add-Human、双新call争context、cancel/complete、expiry/admission竞争。捕获EXPLAIN与query/row counts，不以SQLite代替。
-- [ ] **5. 预算和负载。** 建1/50/100页、16×256KiB产物边界、256未终结关联、16 caller/128 deployment执行容量、32/512连接等case，断言上限、退避、连接池不被长事务占用。大规模计数／持久化墓碑增长测试用合成数据；性能结果记录机器、数据量、并发、p95和失败率，不把小测试推成生产保证。
-- [ ] **6. GREEN 与完整门槛。** 从仓库根运行 `bash apps/bcs/scripts/ci_test.sh --fast-fail`；再跑真实OpenAPI合同、已有A2A出站／Group管理／Session／Provider回归和CI要求的覆盖率门槛。读取 `docs/agents/validation.md` 后按正常push gate执行，不能设置跳过开关。基线失败单独定位记录，不能全归本改动或忽略。
-- [ ] **7. 知识和运维交接。** 更新目录发布、接口、CONTEXT、CLI说明；记录扩展URI已发布状态。提供开启前旧Card核对、drain后关闭/回退、停止证据人工核实步骤；不回滚新表／墓碑。host源不在仓库时交付所需构造接口清单，标明未实际集成。
+- [ ] **5. 预算和负载。** 建1/50/100页、每Task最多16个Artifact且合计256KiB的产物边界、256未终结关联、16 caller/128 deployment执行容量、32/512连接等case，断言上限、退避、连接池不被长事务占用。至少100万墓碑＋少量活Task的EXPLAIN/rows examined必须证明result_deleted_at_ms索引前缀生效；测试scope_hash命中后仍比完整scope，不能因hash相同跨主体。大规模计数／持久化墓碑增长测试用合成数据；性能结果记录机器、数据量、并发、p95和失败率，不把小测试推成生产保证。
+- [ ] **6. GREEN 与完整门槛。** 从apps/bcs运行 `bash scripts/ci/check-port-purity.sh` 和 `bash scripts/ci/check-r25-conformance.sh`；按[矩阵](conformance.md)逐个真实实现runner调用共享harness。新增合同零缺口，不借现有失败或新增waiver掩盖，0 tests/exit77不是通过。 从仓库根运行 `bash apps/bcs/scripts/ci_test.sh --fast-fail`；再跑真实OpenAPI合同、已有A2A出站／Group管理／Session／Provider回归和CI要求的覆盖率门槛。读取 `docs/agents/validation.md` 后按正常push gate执行，不能设置跳过开关。基线失败单独定位记录，不能全归本改动或忽略。
+- [ ] **7. 知识和运维交接。** 更新目录发布、接口、CONTEXT、CLI说明；记录扩展URI已发布状态。记录spec §3.7委托风险的产品/安全书面决议（管理员开启责任、高风险写操作政策、审计链、管理/Card告知）；未签署保持supportA2A不开放，不自动新增Group白名单。提供开启前旧Card核对、drain后关闭/回退、停止证据人工核实步骤；不回滚新表／墓碑。host源不在仓库时交付所需构造接口清单，标明未实际集成。
 - [ ] **8. 提交。** `test(bcs): verify group A2A lifecycle across SQLite MySQL and HTTP`。delivery记录每项真实结果；实现／本地提交／推送／合并／host／部署六种状态分开，不自动把下一状态写成完成。
 
 ## 最终停止条件
