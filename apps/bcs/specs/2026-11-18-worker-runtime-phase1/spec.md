@@ -169,8 +169,10 @@ Worker 只写 dispatch 意图，不直接调用 Agent，也不把远端恢复算
 
 | 情况 | 处理 |
 | --- | --- |
-| checkpoint 可解释、此前必要 effects 可安全完成、终结候选可验证 | 进入 Quarantined；Worker 独立终结器完成当前任务 Failed、排队任务 Rejected，复用两阶段归档，不再调用坏 Runner |
+| checkpoint 可解释、此前必要 effects 可安全完成、终结候选可验证 | 进入 Quarantined；Worker 独立终结器将尚未冻结终态的 Running 任务终结为 Failed、Queued 任务终结为 Rejected，复用两阶段归档，不再调用坏 Runner |
 | checkpoint／格式无法解释、证据损坏、必要 effect 永久冲突或无法安全确认 | 进入 Blocked；停止业务推进，保留全部义务和证据，不伪造 Failed |
+
+已进入 AwaitingResult 的任务必须保留第一次 FinishTask 提交冻结的终态、完整结果及来源身份，继续原两阶段归档；即使归档已成功、第二次提交尚未完成，也不能改写为 Failed。已进入 Done 的任务只补齐原有必要 effects，不修改终态或不可变结果。无法确认冻结内容，或原归档存在无法安全解决的冲突时进入 Blocked。
 
 隔离写入核对精确 owner 和业务 head，只修改控制状态，不能覆盖最新 checkpoint 或清除 outbox。无法解析业务状态时仍须保存隔离原因，并依靠独立 dispatch 监督表继续处理远端未知义务。
 
@@ -224,7 +226,7 @@ owner、spec、checkpoint、受理及 effect 证据在首批不自动过期、�
 | 输出恢复 | Upsert／AppendText 一致折叠、Thinking 排除、初始空快照、并发裁剪及 Gap；恢复得到同一 cut 的完整内容 |
 | 归档 | 两次提交及归档之间各断点、保存未知与重复写、终态发布失败；下一任务不提前启动 |
 | 控制监督 | 人工回复重试、取消与完成竞争、超时身份稳定、Unknown 不当 Dead；任务结束后继续监督未知远端义务 |
-| 隔离 | 无需坏 Runner 收尾；坏 outbox 不被跳过；Blocked 不伪造 Failed；受权恢复不清证据 |
+| 隔离 | 无需坏 Runner 收尾；归档成功、第二次提交前进入隔离仍保留原冻结终态与不可变结果身份；坏 outbox 不被跳过；Blocked 不伪造 Failed；受权恢复不清证据 |
 | JSON provider | 原子创建唯一胜者、EQ 冲突、真实 null／删除／嵌套收缩／数组多编辑、元数据同名、版本耗尽、失败无部分修改 |
 | 资源 | 热会话公平性、缓存淘汰、连接耗尽、超大内容、reader 重启、长期存储故障；工作与内存有界 |
 | 组合 | 两个以上 Worker 加确定性测试 Runner，结合真实持久 provider 注入故障；不得只用内存模型替代 |
