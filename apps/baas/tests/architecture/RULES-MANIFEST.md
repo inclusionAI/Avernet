@@ -1,6 +1,6 @@
 # Architecture Rules Manifest
 
-**Source**: `../../docs/arch/arch.rules.md` (Microkernel Architecture Constitution v3.1, relative to this file — also reachable as `docs/arch/arch.rules.md` from monorepo root)  
+**Source**: `../../../../docs/arch/arch.rules.md` (Microkernel Architecture Constitution v3.1, relative to this file — also reachable as `docs/arch/arch.rules.md` from monorepo root)
 **Purpose**: Maps each constitutional rule to its test coverage, enforcement mechanism, and gap rationale.  
 **Updated**: 2026-06-26
 

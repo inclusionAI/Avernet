@@ -70,7 +70,7 @@ integration/
 │   │   ├── test_bot_repository.py
 │   │   ├── test_bot_sqlite.py
 │   │   └── ...
-│   └── service/             # Service 集成测试（15 个测试文件）
+│   └── service/             # Service 集成测试（22 个测试文件）
 │       ├── conftest.py      # 实体追踪 + 会话级清理
 │       └── ...
 ├── bootstrap/               # 容器初始化与插件选择器测试
@@ -212,8 +212,10 @@ _bot_runner: BotRunnerProtocol = BotRunner(
 **定位**: 验证每个 SPI 插件实现满足其 Protocol 接口契约。
 
 **放置规则**:
-- 每个插件类型一个文件：`test_<plugin_name>_plugin.py`
-- 位于 `contract/spi/` 子目录下
+- SPI 插件契约放在 `contract/spi/` 下，按被测契约命名：插件实现优先用
+  `test_<plugin_name>_plugin.py`，其余契约用 `test_<contract>.py`（如
+  `test_bot_engine_adapter.py`、`test_file_transfer_backend.py`）
+- 非 SPI 契约测试放在同级的其他子目录（如 `contract/arca_ttl/`）
 
 **现有契约测试**:
 ```
@@ -255,7 +257,7 @@ contract/spi/
 | 测试类 | `Test*` 前缀 | `TestBotCreation` |
 | 测试函数 | `test_*` 前缀，描述行为而非实现 | `test_create_bot_with_valid_data` |
 | conftest | `conftest.py`（pytest 约定） | 作用域涵盖同目录及子目录 |
-| Marker | 在 `pytest.ini` 和 `pyproject.toml` 中注册 | `@pytest.mark.integration` |
+| Marker | 在 `pytest.ini` 中注册 | `@pytest.mark.integration` |
 
 ---
 
