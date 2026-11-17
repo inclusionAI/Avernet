@@ -71,8 +71,8 @@ the held index. Without them the Worker's dispatches reach no agent.
 - B9. Intermediate events are appended, not admitted.
 - B10. A2A `canceled` and `rejected` are reported as an error event with the
   remote state in the payload.
-- B11. Both admission successes of the merged contract (`Accepted`,
-  `Duplicate`) are the same success. A content conflict is surfaced, never
+- B11. Every successful admission answer is the same success, whether or not
+  the input was admitted earlier. A content conflict is surfaced, never
   swallowed. A transport failure is never reported as an agent terminal.
 
 ### Replies and cancels
@@ -92,7 +92,8 @@ the held index. Without them the Worker's dispatches reach no agent.
   claimed only → send; accepted → re-read the remote task (subscribe or query)
   and re-report; possibly sent → resend only if the agent declares the send
   idempotent, else query by request if supported, else the call is unresolved.
-- B16. A definite "not sent" is retried at most three times, then unresolved.
+- B16. A definite "not sent", which includes a connection that could not be
+  established, is retried at most three times, then unresolved.
 - B17. An unresolved call stays in its phase, stays held, is still polled for a
   cancel, is logged, and is never promoted to an ended call.
 - B18. A stale holder can change nothing: its `disp` writes are rejected.

@@ -203,8 +203,10 @@ finish); count it in `pending_effects`. The actor enforces no deadline (B13).
 ### 3.3 Reporting (`report.rs`)
 
 - Key events → `InboxProducerPort::admit(AdmitRequest { input, create_session: None, create_task: None })`.
-  `Accepted` and `Duplicate` are the same success (works before and after the
-  Gateway session removes `Duplicate`). `ContentConflict` cannot happen with
+  The match handles `ContentConflict` and `Quarantined` explicitly and treats
+  every other `Ok(_)` as success, with a comment saying why: the code, tests
+  and fakes never name the duplicate variant, so they compile before and after
+  the Gateway PR (#4132) removes it. `ContentConflict` cannot happen with
   the payload-free digest; if it does it is logged as a bug and the call is not
   ended on it. `Quarantined` is logged; a terminal event still ends the call.
   `NotApplied` / `OutcomeUnknown` → retry the same envelope with backoff;
@@ -388,22 +390,51 @@ Send outcome classification, reusing the existing `initial_rejection` rule:
 
 | Failure | Outcome |
 | --- | --- |
-| resolver, URL guard, credential or client construction fails | `NotSent` (nothing left the process) |
+| resolver, URL guard, credential or client construction fails | `NotSent` |
+| the connection could not be established: DNS failure, connection refused, connect timeout (reqwest `is_connect()`; for gRPC a connect error raised before the request is sent) | `NotSent` |
 | HTTP 400/401/403/404/405/406/415/422, gRPC 3/5/7/12/16 | `Rejected` |
-| everything else once the request was handed to the transport (timeout, interrupted, 408/409/429/5xx, JSON-RPC errors, stream ended before the first event) | `OutcomeUnknown` |
+| everything else once the request was handed to the transport (timeout, reset or close after the request was read, 408/409/429/5xx, JSON-RPC errors, stream ended before the first event) | `OutcomeUnknown` |
 
-The existing client discards whether a failure happened before the request was
-written, so a refused connection is `OutcomeUnknown`, not `NotSent`. That is
-safe (never a blind resend) but sends more calls to the SENT policy than
-necessary; narrowing it means touching the shared low-level clients and is left
-as a follow-up. No retry inside the adapter.
+Why the second row is in this PR: a plain A2A agent declares neither
+`idempotent_start` nor `query_by_request`, so without it a brief network
+failure on the first send would leave the call unresolved for good. With it,
+that failure goes through the 3-retry path.
 
-Event mapping: status `working`/`submitted` and artifact updates → `Delta`
-(`Snapshot` for a full `Task`); `input-required` → `InputRequired`;
-`auth-required` → `AuthRequired`; `completed` → `Final`; `failed`, `canceled`,
-`rejected` → `Error` with the state in the payload. The interaction id in the
-adapter's `AgentEventKind` is a placeholder; the rules replace it (§2).
-`event_id` and `cursor` are `None` (the SSE decoder drops `id:` lines).
+Change to the shared low-level clients, kept narrow: today
+`client_json.rs`, `jsonrpc.rs` and `subscribe.rs` turn every send error into
+`A2AError::internal(<fixed message>)` with `map_err(|_| …)`, which drops the
+"nothing was written" fact. The send step keeps that fact by returning a
+distinct fixed message for a connect-phase error (`A2A connection not
+established`), chosen from `reqwest::Error::is_connect()`; `grpc_client.rs`
+does the same for a transport connect error. The adapter matches on that
+marker, the same way `initial_rejection` matches its own `A2A HTTP ` /
+`A2A gRPC ` markers. Existing delivery code is unaffected: it treats any
+message outside its rejection table as uncertain, so the new message stays
+uncertain there. Because this code is linked into the `bcs` binary, the
+changed lines are covered by tests in this PR (unit tests per binding, plus
+the adapter tests below) and by the existing delivery suites.
+
+Adapter tests for this table: refused port → `NotSent`; unresolvable host →
+`NotSent`; server closes after reading the request → `OutcomeUnknown`; each
+rejection status → `Rejected`. No retry inside the adapter.
+
+Event mapping (same table as §2):
+
+| A2A event | `AgentEventKind` |
+| --- | --- |
+| artifact update with output parts | `Delta` |
+| status update in state working that carries a message (other than tool records) | `Thinking` |
+| a record of the negotiated tools extension | `Tool` |
+| a whole non-terminal `Task` (first event of a subscribe, or a poll) | `Snapshot` |
+| status update `submitted` / `working` without content | nothing |
+| `input-required` | `InputRequired` |
+| `auth-required` | `AuthRequired` |
+| `completed`, or a direct message answer | `Final` |
+| `failed`, `canceled`, `rejected` | `Error`, with the state in the payload |
+
+The interaction id in the adapter's `AgentEventKind` is a placeholder; the
+rules replace it (§2). `event_id` and `cursor` are `None` (the SSE decoder
+drops `id:` lines).
 
 New dependency: `bcs-a2a-http` → `bcs-dist-model` (optional, with the `dist-agent` feature, §9).
 
@@ -419,12 +450,12 @@ New dependency: `bcs-a2a-http` → `bcs-dist-model` (optional, with the `dist-ag
 
 | Level | Where | What |
 | --- | --- | --- |
-| rules | `bcs-dist-connector/tests/rules.rs` | identities stable across holder epochs and without event ids; digest excludes holder/transport data; every SENT-policy row; not-sent ×3; terminal mapping |
+| rules | `bcs-dist-connector/tests/rules.rs` | fixed vectors for which `identity.rs` and `bcs_dist_store::identity` (a dev-dependency) produce the same bytes, so the two copies cannot drift; identities stable across holder epochs and without event ids; digest excludes holder/transport data; every SENT-policy row; not-sent ×3; terminal mapping |
 | providers | `bcs-dist-connector-store/tests/` on `Model` + recording wrapper | claim race (one winner); `OwnedByMe`; takeover with a `Dead` fake; `PendingMembership` → `HeldByOther`; stale holder → `Lost`; every write with a lost response and with a definite failure; Worker write between read and write → merged retry; held index order; feed: group from the beginning, one consumer per entry, idle takeover, double ack, kept-alive reads; partition function |
 | port harnesses | same | `dispatch_queue_port_contract_tests`, `command_feed_port_contract_tests`, `held_dispatch_port_contract_tests` (Worker side played by a test-only fixture that writes `control`) |
 | engine | `bcs-dist-connector/tests/` with port fakes | the §2 step order; ack after the decision; final before finish; crash between admit and finish then takeover; SENT recovery per capability; reply continues the same call; cancel before / after acceptance; lost holder stops silently; drain; `dist_runtime_control_port_contract_tests` |
 | end to end | `bcs-dist-connector/tests/store_e2e.rs` | engine + real providers + `StoreInboxProducer` on `Model`: one call from hint to ENDED, inbox entries checked |
-| adapter | `bcs-a2a-http/tests/dist_agent.rs` with an axum fake agent | each outcome class; stable `messageId`; `dist_agent_client_port_contract_tests` |
+| adapter | `bcs-a2a-http/tests/dist_agent.rs` with an axum fake agent | each outcome class, including refused port → `NotSent` and close-after-read → `OutcomeUnknown`; the event mapping table; stable `messageId`; `dist_agent_client_port_contract_tests` |
 | stubs | each crate | D2, D3, D8, membership return `need_contract_not_implemented` |
 
 Commands: `cargo nextest run -p bcs-dist-connector -p bcs-dist-connector-store -p bcs-dist-store -p bcs-a2a-http -p bcs-app-dist-runtime -p bcs-service-api`,
@@ -439,7 +470,7 @@ Commands: `cargo nextest run -p bcs-dist-connector -p bcs-dist-connector-store -
 | LINT-2: a public name under `core/` may not appear as a word under `port/` | new type names checked against `port/` before commit (`Report`, `ResumeStep`, …) |
 | LINT-1: `services/*` may not import `application::`; `external-clients/*` only `port::` / types | engine implements `DistRuntimeControlPort` only; the facade lives in the application crate; the adapter imports `port::dist_agent` |
 | `r4_default_impl_inventory`: no default async bodies in `core/` | the trait has none (it is sync) |
-| API-1: a public-API diff of `bcs-service-api` needs a version change | `6.1.0` → `6.2.0` (additive) and a "Version 6.2.0" section in its `CONTEXT.md` |
+| API-1: a public-API diff of `bcs-service-api` needs a version change | `6.1.0` → `6.2.0` (additive) and a "Version 6.2.0" section in its `CONTEXT.md`. The Gateway PR (#4132) removes `AdmitOutcome::Duplicate` and bumps to `7.0.0`; whichever lands second rebases: if the Gateway lands first, this becomes `7.1.0` with its own `CONTEXT.md` section |
 | R25.1: every `pub trait …(CoreService\|Service\|Port\|…)` under `service-api`, `plugin-api`, `services` needs `<snake>_contract_tests` in `bcs-test-support` | add `dist_connector_core_service_contract_tests`, exercised by a test. The engine-local D3/D8 trait is named `HeldCallRecovery` (no `Port` suffix): it only fronts two stubs and `bcs-test-support` must not depend on the engine |
 | R25.2: every `impl …Port/CoreService for T` under `crates/services` needs a `tests/conformance_*.rs` naming `T` and the harness | `conformance_rules.rs`, `conformance_runtime_control.rs` (engine); `conformance_dispatch_board.rs` (store). `PendingMembership` carries `CONFORMANCE_WAIVED` with the reason (a stub cannot pass a provider harness) |
 | R10: store plugins only in `*-store` crates; the script scans a fixed list | add `crates/services/bcs-dist-connector/src` to `check-store-boundaries.sh` and `tests/store_api_boundary.sh` |
@@ -448,7 +479,7 @@ Commands: `cargo nextest run -p bcs-dist-connector -p bcs-dist-connector-store -
 | LINT-3: no `std::env::var` in services | configuration is passed in as structs |
 | Workspace lints: `unsafe_code`, `unused_qualifications` deny; clippy `unwrap_used`, `expect_used` deny | `[lints] workspace = true`; tests opt out locally as existing tests do |
 | Unit-test gate on PRs to `dev`: 100 % pass, changed-line coverage > 85 %, nextest kills a test after 90 s | loop/actor tests use paused time and finish in milliseconds; every branch of §3–§6 has a test |
-| Singlebox E2E changed-line gate (> 65 %) counts code linked into the `bcs` binary | the adapter is the only new executable code in a linked crate (`bcs-a2a-http`): it sits behind a cargo feature `dist-agent`, off by default, so the binary does not contain it. To verify on the first CI run |
+| Singlebox E2E changed-line gate (> 65 %) counts code linked into the `bcs` binary | the adapter sits behind a cargo feature `dist-agent`, off by default, so the binary does not contain it. The connect-marker change in the low-level clients (§6) is linked: it is a few lines per binding on paths the existing delivery E2E already runs. To verify on the first CI run |
 | 1,000-line file limit | modules split as in §1; checked with `wc -l` before each push |
 | No global formatter | only new files and the touched lines |
 | PR to `dev` runs the unit and singlebox gates; architecture checks run on `main` | `BCS_BASE_REF=origin/dev bash scripts/ci/arch-check.sh` is run locally; checks that already fail on `dev` (LINT-1, LINT-4, DEP-1, DEP-6 outliers) are reported, not touched |
@@ -459,10 +490,13 @@ Commands: `cargo nextest run -p bcs-dist-connector -p bcs-dist-connector-store -
 
 1. `PendingMembership` and the takeover branch: the stub lives in our store
    crate until the executor team's provider replaces it.
-2. A connection refused before the request is written is `OutcomeUnknown` (§6).
-3. `query(ByRequest)` has no A2A equivalent, so `AskAgent` resolves only
-   with a custom binding; plain A2A agents without `idempotent_start` end
-   unresolved after an unknown send.
+2. Telling "could not connect" from "failed mid-request" needs a small change
+   in the shared low-level A2A clients (§6). It is linked into the `bcs`
+   binary, so its changed lines must be covered here.
+3. `query(ByRequest)` has no A2A equivalent, so `AskAgent` resolves only with
+   a custom binding. A plain A2A agent without `idempotent_start` is unresolved
+   only when a send fails **after** the request was handed to the transport;
+   connect failures are retried (§6).
 4. Until D3 exists, an ACCEPTED call whose holder died is picked up again only
    if the Worker's deadline produces a cancel or a re-post for an ACCEPTED
    call. The design text only describes a re-post for calls that are not
