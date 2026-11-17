@@ -1,12 +1,13 @@
-"""Online-publish session precheck: block the upgrade when the target bot has
-active sessions.
+"""Online-publish session precheck: block the upgrade while runs are in flight.
 
-Reuses the engine-neutral ``GET /api/sessions`` route through the
-engine-runtime relay (the same route ``EngineSessionActivityReader`` uses for
-the Bot overview). Only the count matters here, not the session contents.
-
-A relay error or timeout does not block the publish — the precheck returns 0
-so the release proceeds (the same fail-open posture the overview takes).
+The signal is per-session ``run_status``, read through the engine-neutral
+relay from the adapter's ``GET /api/aicoding/sessions``. ``run_status`` is the
+session's newest run's aix ``status.kind`` passthrough (running /
+awaitingApproval / awaitingHuman / awaitingLlmEvaluation / completed /
+failed), and ``idle`` covers "no run / no active run / lookup failed /
+enrichment timeout" — a conversation that merely has retained history never
+counts. A counting error (route absent on OSS/test profiles, relay failure,
+timeout) also fails open to 0 so an unavailable signal never blocks a publish.
 """
 
 from __future__ import annotations
@@ -27,18 +28,34 @@ logger = get_logger()
 #: ``SESSION_READ_TIMEOUT_S`` so the publish precheck has the same budget
 #: the Bot overview uses.
 SESSION_PRECHECK_TIMEOUT_S = 8.0
-#: One row is enough to know whether *any* active session exists.
-SESSION_PRECHECK_LIMIT = 1
+#: One bounded page of sessions. Counting only *in-flight* work, not history,
+#: keeps the scan small; a service bot with more conversations than this is
+#: the exception, and undercounting fails open (never blocks).
+SESSION_PRECHECK_LIMIT = 100
 
 _SERVICE_BOT_TYPE = "service"
 
 
+def _run_in_flight(run_status: Any) -> bool:
+    """True when the session's newest run is still working.
+
+    ``running`` and every ``awaiting*`` kind (approval / human / LLM
+    evaluation, plus any future aix awaiting kinds) mean work is held in
+    flight; ``completed`` / ``failed`` / ``idle`` / unknown values mean it is
+    not. Unknown *non-Awaiting* future kinds fall to the fail-open side — the
+    precheck must not invent blocks the engine did not report.
+    """
+    if not isinstance(run_status, str):
+        return False
+    return run_status == "running" or run_status.startswith("awaiting")
+
+
 class SessionPrechecker:
-    """Queries the engine relay for active sessions before an online upgrade.
+    """Queries the engine relay for in-flight runs before an online upgrade.
 
     Only service bots are checked; personal bots always return 0.  A relay
     error or timeout is logged and returns 0 — the release proceeds
-    (fail-open, same as the Bot overview).
+    (fail-open, same posture as the Bot overview).
     """
 
     def __init__(
@@ -51,7 +68,7 @@ class SessionPrechecker:
         self._timeout_s = timeout_s
 
     async def active_session_count(self, bot: Mapping[str, Any]) -> int:
-        """Return the number of active sessions for *bot*, or 0 on error/timeout."""
+        """Number of sessions with an in-flight run for *bot*; 0 on error."""
         bot_id = str(bot.get("bot_id") or "")
         owner_id = str(bot.get("owner_id") or "")
         if not bot_id or not owner_id:
@@ -76,20 +93,20 @@ class SessionPrechecker:
             return 0
 
     async def _query(self, *, bot_id: str, owner_id: str) -> int:
-        """Issue one page through the relay and return the row count."""
+        """One page of run-status-enriched sessions; count in-flight rows."""
         result = await self._relay.call(
             bot_id=bot_id,
             owner_id=owner_id,
             method="GET",
-            path="/api/sessions",
+            path="/api/aicoding/sessions",
             params={"limit": SESSION_PRECHECK_LIMIT, "offset": 0},
             timeout=self._timeout_s,
             stage=STAGE_ONLINE,
         )
-        data = result.data
-        if isinstance(data, list):
-            return len(data)
-        return 0
+        rows = result.data
+        if not isinstance(rows, list):
+            return 0
+        return sum(1 for row in rows if _run_in_flight(row.get("run_status")))
 
 
 __all__ = [

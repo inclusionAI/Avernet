@@ -5191,7 +5191,7 @@ async def test_execute_release_phase_blocks_when_active_sessions_exist():
     result = await svc.execute_release_phase(publish_record, operator='op')
 
     assert result.status == PublishStatus.FAILED
-    assert '3 active sessions' in result.message
+    assert '3 sessions still have active runs' in result.message
     svc._execute_first_release.assert_not_awaited()
     svc._execute_upgrade_release.assert_not_awaited()
     prechecker.active_session_count.assert_awaited_once()
@@ -5297,6 +5297,6 @@ async def test_execute_release_phase_precheck_single_session_message():
     result = await svc.execute_release_phase(publish_record, operator='op')
 
     assert result.status == PublishStatus.FAILED
-    assert '1 active session is still running' in result.message
-    assert 'terminate it before publishing' in result.message
+    assert '1 session still has active runs' in result.message
+    assert 'stop it before publishing' in result.message
     prechecker.active_session_count.assert_awaited_once()

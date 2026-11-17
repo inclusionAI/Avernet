@@ -83,19 +83,20 @@ class ReleasePhaseMixin:
             if not bot:
                 raise PublishFlowServiceError(f"Bot does not exist: {bot_id}")
 
-            # Session precheck: query the engine relay for active sessions.
-            # Block the online upgrade when sessions are still running — the
-            # container replacement would terminate them mid-flight.  Personal
+            # Session precheck: block the online upgrade while any session on
+            # the online runtime still has an in-flight run — the container
+            # replacement would terminate that work mid-flight. Retained
+            # conversations whose runs already concluded do not count. Personal
             # bots and relay errors/timeouts skip the check (fail-open).
             if self._session_prechecker is not None:
                 active_count = await self._session_prechecker.active_session_count(bot)
                 if active_count > 0:
                     error_msg = (
-                        f"Cannot publish while {active_count} active "
-                        f"session{'s' if active_count != 1 else ''} "
-                        f"{'are' if active_count != 1 else 'is'} still running. "
-                        f"Please wait for session{'s' if active_count != 1 else ''} "
-                        f"to finish or terminate "
+                        f"Cannot publish while {active_count} "
+                        f"session{'s' if active_count != 1 else ''} still "
+                        f"{'have' if active_count != 1 else 'has'} active runs. "
+                        f"Please wait for the run{'s' if active_count != 1 else ''} "
+                        f"to finish or stop "
                         f"{'them' if active_count != 1 else 'it'} before publishing."
                     )
                     logger.warning(
