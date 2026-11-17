@@ -13,7 +13,6 @@ Bot 随后执行并通过签名 A2A HTTP 入站上报。
 
 import secrets
 from contextlib import contextmanager
-from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 from uuid import uuid4
@@ -49,15 +48,9 @@ from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_reso
 from agentclaw.community.core.task.context_collab.l4_context_primitives.operations import (
     work as work_operations_module,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.collet_lifecycle import (
-    ColletLifecycleService,
-)
 from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.contracts import (
     ColletCreateCommand,
     WorkStartCommand,
-)
-from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
-    top_level_binding_id,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.open_profile import (
     ApplicationState,
@@ -80,9 +73,6 @@ from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     MethodRequirement,
     VersionedProfileRef,
 )
-from agentclaw.community.core.task.context_collab.l6_products.task_contracts import (
-    STANDARD_TASK_CONTRACT_REF,
-)
 from agentclaw.community.core.task.context_collab.l6_products.method_policies import (
     OpenMethodPolicy,
 )
@@ -102,9 +92,6 @@ from agentclaw.community.core.task.context_collab.persistence.method_store impor
 from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.records import (
     ContextCollabRepositoryProtocol as L4ContextCollabRepositoryProtocol,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.repository import (
-    ContextCollabRepository as L4ContextCollabRepository,
-)
 from agentclaw.community.core.task.context_collab.l6_products.persistence.records import ContextStatusRecord
 from agentclaw.community.core.task.context_collab.l6_products.persistence.repository import (
     ContextCollabRepositoryProtocol,
@@ -116,8 +103,6 @@ from agentclaw.community.core.task.context_collab.products.task_commission.profi
     TASK_COMMISSION_PROFILE,
 )
 from agentclaw.community.core.task.context_collab.products.task_commission.service_api import (
-    ApplyForTaskCommand,
-    PublishTaskCommand,
     TaskAdvanceCommand,
     TaskCommissionCreatedView,
     TaskCommissionServiceProtocol,
@@ -141,15 +126,12 @@ from tests.community.factories.task_commission import (
     BOT_ID as BOT_ASSIGNEE,
 )
 from tests.community.factories.task_commission import (
-    OWNER,
-    commission_report_request,
+    OWNER
 )
 from tests.community.core.task.context_collab.products.task_commission_e2e_support import (
     _AI_CODING_STEPS,
     SimulatedWorkingBot,
-    _participation_snapshot,
     _simulate_ai_coding,
-    opportunities_query_request,
 )
 
 HUMAN = ActorContext(actor=PrincipalRef("human", "u_owner_001"), source="api")
@@ -157,23 +139,31 @@ SPACE = SpaceRef(space_id="space_workspace_001", environment="test")
 OBJECTIVE = "为计算器增加求和能力:完成方案、编码和测试,生成待评审 PR,提交成果后由业务同学验收。"
 
 """产品上线 → 建任务 → Bot Query/Apply → 策略 Screen/Admit → scoped Participant → Work → accept。"""
+"""
+协议适配问题总结：
+- 语义不明确问题
+  - [ ] 现在只有DataModel、OperateModel，但是没有明确定义DataRelationModel。比如Collet和Participant、RoleBinding、Task的关系，如何建模没有明确语义
+  - [ ] Collect语义明确性问题：这份 ACCS 协议没有给出 Collet 的完整成员变量定义
+  - [ ] 单Agent执行任务过程中，需要上报内部的详细进度（步骤），目前协议没有明确表述怎么做
+  - [ ] open模式下，当录取了某个agent进入协作之后，谁来通知agent真正开始干活，没有明确的语义：没有定义一套统一的Agent执行上报 API
+"""
 def test_end_to_end_commission_flow(commission_deployment, tmp_path):
     # 1、调用L6层的方法，创建product profile
     l6_profile = create_product_profile(
         ProductProfileCreateCommand(
             ref=VersionedProfileRef("task_commission", 1),            # 版本
-            composition=MethodCompositionTemplate(                   # 绑定 L5 方法及其 L6 产品策略
+            composition=MethodCompositionTemplate(                    # 绑定 L5 方法及其 L6 产品策略
                 method_kind="Open",
                 scope="collet",
                 required_methods=(MethodRequirement("Open", "0.2"),),
                 policies=(
-                    OpenMethodPolicy(                               # 仅适用于 Open，不是通用 Profile 字段
-                        publication=OpenPublicationProfile(
+                    OpenMethodPolicy(
+                        publication=OpenPublicationProfile(           # OPEN方法，声明参与和录取策略
                             admission=BotSelfApplicationAdmission(
                                 applicant_role="assignee",
                                 accountable_role="owner",
-                                participation_type=ParticipationType.COLLET_PARTICIPANT,
-                                capacity=1,                         # 最多录取一个申请者
+                                participation_type=ParticipationType.COLLET_PARTICIPANT,  # 参与协作类型
+                                capacity=1,                           # 最多录取一个申请者
                             ),
                         ),
                     ),
@@ -206,12 +196,12 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
         collect_id = l4_collet.collet_id
 
         # 3、L6 实例化选择产品并编排 L5 Method/角色引用;不是 L4 create 的副作用。
-        instance = injector.get(ProductInstantiationServiceProtocol).instantiate(
+        # instantiate中：校验产品配置与角色所需主体；创建并保存 ACTIVE 的 MethodBinding
+        product_instance = injector.get(ProductInstantiationServiceProtocol).instantiate(
             ProductInstantiateCommand(collect_id, l6_profile.ref, l4_collet.version),
             HUMAN,
         )
-        assert instance.collet_ref == collect_id
-        binding_id = top_level_binding_id(collect_id)
+        assert product_instance.collet_ref == collect_id
 
         # 4、调用L5的OPEN方法-创建机会
         published = l5_open_method.publish_opportunity(
@@ -220,10 +210,10 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
                 actor_context=HUMAN, # actor context
                 participation_type=ParticipationType.COLLET_PARTICIPANT,  #协议中明确规定的字段及取值
                 admission_policy_refs=[
-                    "task_commission.designated_bot_self_application/1" #录取策略：指定 Bot 自己申请，并由任务产品的策略自动审核
+                    "task_commission.designated_bot_self_application/1"   #录取策略：指定 Bot 自己申请，并由任务产品的策略自动审核
                 ],
-                capacity=1,              #表示这个机会最多允许多少个未终态申请占用名额
-                reason="task_commission.owner_authorized_publish", #本次发布操作的审计原因
+                capacity=1,                                               #表示这个机会最多允许多少个未终态申请占用名额
+                reason="task_commission.owner_authorized_publish",        #本次发布操作的审计原因
             ),
         )
         assert published.accepted and published.state == "OPEN"
@@ -233,10 +223,21 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
         [opportunity] = l5_open_method.query_opportunities(
             actor_context=bot_context,
         )
-        assert opportunity.method_binding_id == binding_id
+        assert product_instance.method_binding_refs == (opportunity.method_binding_id,)
         assert opportunity.scope_ref == collect_id
 
-        # 6、由 Bot 自己调用注入的 L5 Open 服务提交申请,不是发布人代申请。
+        # 6、由 Bot 自己调用注入的 L5 Open 服务提交申请
+        # 问题：从协议中的如下描述，提交应用、录取agent之后，只是将agent拉到协作中，然后才开始真正干活,不过确实存在意义不明
+        """
+        publish opportunity
+          → Query/discover opportunity
+          → submit application or contribution
+          → authenticate applicant
+          → evaluate Requirement and policy
+          → apply capacity/rate/anti-abuse controls
+          → Decision: admit or reject
+          → create scoped Participant or Method-specific participation binding
+        """
         record = injector.get(ContextCollabRepositoryProtocol).get_current_status(collect_id)
         assert record.task is not None
         task_id = record.task.task_id
@@ -246,7 +247,9 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
             requested_role_refs=_selected_agent_role_refs(record),
         )
         assert submitted.accepted and submitted.state == "SUBMITTED"
-        application = store.get_application(axes, submitted.object_id, binding_id, collect_id)
+        application = store.get_application(
+            axes, submitted.object_id, opportunity.method_binding_id, collect_id
+        )
         assert application.state is ApplicationState.SUBMITTED
         assert application.applicant_agent_ref == working_bot.bot_uuid
         assert application.transitioned_by == working_bot.bot_uuid
@@ -291,7 +294,9 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
         assert admitted.accepted and admitted.state == "ADMITTED"
         assert admitted.object_id == submitted.object_id
         assert injector.get(A2aDeliveryPort).bridge_records() == ()
-        [application] = store.list_applications(axes, binding_id, collect_id)
+        [application] = store.list_applications(
+            axes, opportunity.method_binding_id, collect_id
+        )
         assert application.state is ApplicationState.ADMITTED
         assert application.applicant_agent_ref == BOT_ASSIGNEE
 
@@ -341,7 +346,7 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
         assert accepted.status == "done"
 
         # 11. 经应用门面的 L4 查询读取 Task 状态与产物,不依赖产品详情接口。
-        # TODO: 管理时、运行时分开
+        # TODO: 管理时、运行时分开。但是这里只是一个Collet查询服务，并不是管理服务。
         final = l4_context_operate.get_status(collect_id, trunk_events=False, context=HUMAN)
         assert final.current_snapshot is not None
         assert final.current_snapshot["status"] == "done"
