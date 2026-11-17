@@ -310,23 +310,24 @@ describe('管理 Bot 搜索与既有筛选共用(装配)', () => {
 });
 
 describe('协作 Bot 发起人筛选(装配)', () => {
-  it('可以切换到他人发起的只读视角并返回我发起的视角', () => {
+  it('暂时禁用他人发起按钮，点击不写入筛选状态，我发起和新建会话仍可用', () => {
     const botId = teamBot.bot.botId;
-    const { syncStore } = renderSidebar({
-      teamBots: [teamBot],
-      directory: directoryModel({ teamBots: [teamBot] }),
-    });
+    renderSidebar({ teamBots: [teamBot], directory: directoryModel({ teamBots: [teamBot] }) });
     fireEvent.click(screen.getByRole('button', { name: '发起人与会话筛选' }));
     const others = screen.getByRole('button', { name: '他人发起' });
-    expect(others).toBeEnabled();
+    expect(others).toBeDisabled();
     fireEvent.click(others);
-    expect(useConversationStore.getState().originByManagedBotId[botId]).toBe('others');
-    syncStore();
-    expect(screen.getByRole('button', { name: '发起人与会话筛选' })).toHaveClass('text-primary');
-    expect(screen.queryByRole('button', { name: '新建会话' })).not.toBeInTheDocument();
-    expect(screen.queryByText('会话', { exact: true })).not.toBeInTheDocument();
+    expect(useConversationStore.getState().originByManagedBotId[botId]).toBeUndefined();
+    expect(screen.getByRole('button', { name: '我发起' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '新建会话' })).toBeInTheDocument();
+  });
 
+  it('已有他人发起筛选时仍可切回我发起，不会被禁用按钮困住', () => {
+    const botId = teamBot.bot.botId;
+    useConversationStore.getState().setManagedBotOrigin(botId, 'others');
+    const { syncStore } = renderSidebar({ teamBots: [teamBot], directory: directoryModel({ teamBots: [teamBot] }) });
     fireEvent.click(screen.getByRole('button', { name: '发起人与会话筛选' }));
+    expect(screen.getByRole('button', { name: '他人发起' })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: '我发起' }));
     expect(useConversationStore.getState().originByManagedBotId[botId]).toBe('mine');
     syncStore();

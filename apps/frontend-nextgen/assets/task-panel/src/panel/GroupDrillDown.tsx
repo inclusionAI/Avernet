@@ -728,7 +728,7 @@ export const GroupSessionView: React.FC<{
             正在加载执行信息…
           </div>
         ) : error ? (
-          <Empty description={error} minHeight={120} />
+          null
         ) : (
           <>
             <button

@@ -89,7 +89,6 @@ export const TaskArtifactPreviewDrawer: React.FC<TaskArtifactPreviewDrawerProps>
   const preview = useTaskArtifactPreview(artifact, context);
   const closeRef = useRef<HTMLButtonElement>(null);
   const [downloading, setDownloading] = useState(false);
-  const [downloadError, setDownloadError] = useState<string | null>(null);
   const isLinkArtifact =
     artifact.kind === 'url_link' ||
     ((artifact.kind === null || artifact.kind === undefined) && artifact.type === 'link');
@@ -119,17 +118,12 @@ export const TaskArtifactPreviewDrawer: React.FC<TaskArtifactPreviewDrawerProps>
     };
   }, [onClose]);
 
-  useEffect(() => {
-    setDownloadError(null);
-  }, [artifact.id]);
-
   const download = async () => {
     setDownloading(true);
-    setDownloadError(null);
     try {
       await downloadTaskArtifact(artifact, { ...context, host });
     } catch (error) {
-      setDownloadError(error instanceof Error ? error.message : '产物下载失败，请稍后重试。');
+      console.warn('[TaskPanel] Artifact download failed', error);
     } finally {
       setDownloading(false);
     }
@@ -170,7 +164,7 @@ export const TaskArtifactPreviewDrawer: React.FC<TaskArtifactPreviewDrawerProps>
     }
     if (preview.status === 'loading') return <PreviewMessage>正在加载产物预览…</PreviewMessage>;
     if (preview.status === 'error') {
-      return <PreviewMessage danger>{preview.errorMessage ?? '预览加载失败，请稍后重试。'}</PreviewMessage>;
+      return null;
     }
     if (preview.status === 'unsupported') {
       return <PreviewMessage>该文件类型暂不支持站内预览，请下载后查看。</PreviewMessage>;
@@ -321,11 +315,6 @@ export const TaskArtifactPreviewDrawer: React.FC<TaskArtifactPreviewDrawerProps>
             borderTop: `1px solid ${C.border}`,
           }}
         >
-          {downloadError && (
-            <span role="alert" style={{ marginRight: 'auto', color: C.danger, fontSize: 11 }}>
-              {downloadError}
-            </span>
-          )}
           <button type="button" onClick={onClose} style={actionStyle}>
             关闭
           </button>

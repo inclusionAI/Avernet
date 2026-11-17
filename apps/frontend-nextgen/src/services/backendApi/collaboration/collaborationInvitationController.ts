@@ -13,6 +13,12 @@ export interface CollaborationInvitationData {
 export interface CreateInvitationBody {
   expires_in_seconds?: number;
 }
+export interface InvitationPreviewData {
+  target_type: 'group' | 'session';
+  target_id: string;
+  group_id: string;
+  already_joined: boolean;
+}
 export interface AcceptInvitationData {
   target_type: 'group' | 'session';
   target_id: string;
@@ -33,6 +39,14 @@ export async function createSessionInvitation(session_id: string, body: CreateIn
   return backendRequest<BackendApiEnvelope<CollaborationInvitationData>>(
     `/openapi/v1/collaboration/sessions/${session_id}/invitations`,
     { method: 'POST', data: body, injectUserId: false },
+  );
+}
+
+// 只读校验邀请并查询当前登录 Human 的成员身份；错误由落地页内联呈现。
+export async function previewInvitation(token: string) {
+  return backendRequest<BackendApiEnvelope<InvitationPreviewData>>(
+    `/openapi/v1/collaboration/invitations/${encodeURIComponent(token)}`,
+    { method: 'GET', injectUserId: false },
   );
 }
 

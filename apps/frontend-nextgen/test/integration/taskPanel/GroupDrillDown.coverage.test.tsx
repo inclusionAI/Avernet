@@ -138,7 +138,7 @@ describe('GroupSessionView 补充分支', () => {
     }
   });
 
-  it('节点缺少 session_id 时不发起任何请求,直接展示错误', async () => {
+  it('节点缺少 session_id 时不发起请求或展示错误', async () => {
     const originalFetch = global.fetch;
     const fetchMock = jest.fn<(...args: Parameters<typeof fetch>) => Promise<Response>>();
     global.fetch = fetchMock;
@@ -152,7 +152,8 @@ describe('GroupSessionView 补充分支', () => {
           onBack={jest.fn()}
         />,
       );
-      expect(await screen.findByText('节点缺少 session_id，无法下钻')).toBeInTheDocument();
+      await act(async () => {});
+      expect(screen.queryByText('节点缺少 session_id，无法下钻')).toBeNull();
       expect(fetchMock).not.toHaveBeenCalled();
     } finally {
       global.fetch = originalFetch;
@@ -179,7 +180,7 @@ describe('GroupSessionView 补充分支', () => {
     }
   });
 
-  it('协作群消息 500 → 错误外抛进入错误态(非权限问题不吞)', async () => {
+  it('协作群消息 500 → 内部错误态不在副屏显示', async () => {
     const originalFetch = global.fetch;
     const fetchMock = jest.fn<(...args: Parameters<typeof fetch>) => Promise<Response>>();
     fetchMock
@@ -189,7 +190,9 @@ describe('GroupSessionView 补充分支', () => {
 
     try {
       render(<GroupSessionView node={node()} bcsBaseUrl="" apiBaseUrl="" userId="user-1" onBack={jest.fn()} />);
-      expect(await screen.findByText('会话消息请求失败（500）')).toBeInTheDocument();
+      await act(async () => {});
+      expect(fetchMock).toHaveBeenCalled();
+      expect(screen.queryByText('会话消息请求失败（500）')).toBeNull();
     } finally {
       global.fetch = originalFetch;
     }
@@ -222,7 +225,7 @@ describe('GroupSessionView 补充分支', () => {
     }
   });
 
-  it('单聊消息 500 → 错误外抛进入错误态', async () => {
+  it('单聊消息 500 → 内部错误态不在副屏显示', async () => {
     const originalFetch = global.fetch;
     const fetchMock = jest.fn<(...args: Parameters<typeof fetch>) => Promise<Response>>();
     fetchMock.mockResolvedValueOnce(statusResponse(500));
@@ -243,13 +246,15 @@ describe('GroupSessionView 补充分支', () => {
           onBack={jest.fn()}
         />,
       );
-      expect(await screen.findByText('会话消息请求失败（500）')).toBeInTheDocument();
+      await act(async () => {});
+      expect(fetchMock).toHaveBeenCalled();
+      expect(screen.queryByText('会话消息请求失败（500）')).toBeNull();
     } finally {
       global.fetch = originalFetch;
     }
   });
 
-  it('群详情请求 404 → 错误态展示群详情失败信息', async () => {
+  it('群详情请求 404 → 不展示内部失败信息', async () => {
     const originalFetch = global.fetch;
     const fetchMock = jest.fn<(...args: Parameters<typeof fetch>) => Promise<Response>>();
     fetchMock.mockResolvedValueOnce(statusResponse(404));
@@ -257,7 +262,9 @@ describe('GroupSessionView 补充分支', () => {
 
     try {
       render(<GroupSessionView node={node()} bcsBaseUrl="" apiBaseUrl="" userId="user-1" onBack={jest.fn()} />);
-      expect(await screen.findByText('群详情请求失败（404）')).toBeInTheDocument();
+      await act(async () => {});
+      expect(fetchMock).toHaveBeenCalled();
+      expect(screen.queryByText('群详情请求失败（404）')).toBeNull();
     } finally {
       global.fetch = originalFetch;
     }

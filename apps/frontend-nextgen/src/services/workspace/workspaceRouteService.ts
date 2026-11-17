@@ -1,6 +1,7 @@
 import { clampView, getAvailableViews } from '@/domain/collaboration/availableViews';
 import type { IdentityView } from '@/domain/collaboration/types';
 import type { WorkspaceRouteState } from '@/domain/workspaceRoute';
+import { normalizeOpenApiUserId } from '@/domain/userIdentity';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 
 export type WorkspaceRouteHydrationResult =
@@ -14,6 +15,12 @@ function resolveRouteIdentity(route: WorkspaceRouteState, identities: IdentityVi
     ? identities.find((identity) => identity.id === requestedIdentityId) ?? null
     : null;
   if (requested) return requested;
+  // 邀请明确指向登录 Human，列表可能尚未加载该身份；不可退回 Bot 或展示占位 me。
+  if (requestedIdentityId?.startsWith('human_')) {
+    const userId = normalizeOpenApiUserId(requestedIdentityId);
+    return identities.find((identity) => identity.kind === 'user' && userId
+      && normalizeOpenApiUserId(identity.id) === userId) ?? null;
+  }
   const active = identities.find((identity) => identity.id === store.activeIdentityId) ?? null;
   // 兼容无 current、无 session 的协作群 URL（旧版内部页内切换）：保持当前 Bot 身份。
   if (!requestedIdentityId && !route.sessionId && active) return active;

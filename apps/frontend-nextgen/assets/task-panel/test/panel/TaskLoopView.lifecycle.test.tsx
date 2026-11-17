@@ -76,3 +76,16 @@ it('aborts the old list on leave without starting an unbound request, and resume
   });
   expect(requests).toHaveLength(2);
 });
+
+it('keeps navigation failures internal while continuing to render the task panel', async () => {
+  const { host, controller } = setup();
+  vi.mocked(host.navigate).mockResolvedValue({ status: 'unavailable', reason: '会话加载超时，请重试。' });
+  await controller.enterConversation({ sessionId: 'origin', kind: 'bot' }, tab('t1'), { recover: false });
+  const view = render(<TaskLoopView host={host} controller={controller} taskId="t1" apiBaseUrl="" />);
+  await act(async () => {
+    controller.nav('t1').selectNode('node', { sessionId: 'target', kind: 'bot', botId: 'bot' });
+  });
+  expect(controller.getSnapshot().navigationError).toBe('会话加载超时，请重试。');
+  expect(view.queryByRole('alert')).toBeNull();
+  expect(view.queryByText('会话加载超时，请重试。')).toBeNull();
+});

@@ -1,7 +1,7 @@
 // @asset-migrated: teamclaw 自研资产
 /**
  * NodeListViewV2 —— L1 节点卡片列表(PRD 方案A):
- * 点根节点 = 选中并恢复宿主会话；点其他节点 = 选中并联动会话；
+ * 节点有明确执行会话时按节点目标联动；目标缺失时，第一棒保留宿主原会话恢复兜底；
  * 节点点击仅做会话联动；下钻入口当前先隐藏，不提供节点副屏下钻展示。
  * 卡片信息:present 状态点/标题(完成划线)/执行体 pill(群/单聊 icon)/返工次数/HITL 徽章/子任务入口。
  */
@@ -49,10 +49,9 @@ export const NodeListViewV2: React.FC<NodeListViewV2Props> = ({ task, nav, onOpe
           node.executorLabel || node.assigneeName || (isGroup ? node.groupName : null) || node.executor || '—';
         const selected = nav.selectedNodeId === node.id;
         const target = resolveNodeSessionTarget(node, task);
-        const isRootNode = node.id === rootNodeId;
         const stageName = `第${stageIndex + 1}棒 ${node.name}`;
         const selectForConversation = () => {
-          if (isRootNode) nav.selectRootNode(node.id);
+          if (node.id === rootNodeId && !target) nav.selectRootNode(node.id);
           else nav.selectNode(node.id, target);
         };
         return (

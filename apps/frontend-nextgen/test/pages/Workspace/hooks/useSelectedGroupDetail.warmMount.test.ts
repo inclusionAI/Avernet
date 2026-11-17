@@ -49,6 +49,7 @@ const groupG1 = {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  gs.resolveGroupMembership.mockResolvedValue({ ok: true, data: null });
   gs.getVisibleGroups.mockImplementation((xs: any[]) => xs);
   gs.canManageGroup.mockImplementation(() => ({ allowed: true }));
   gs.canDissolveGroup.mockImplementation(() => ({ allowed: true }));
