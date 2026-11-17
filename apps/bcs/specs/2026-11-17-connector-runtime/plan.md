@@ -1,6 +1,7 @@
 # Plan: distributed Connector runtime
 
-Status: proposed; awaiting review. Implements [spec](spec.md); store mapping in
+Status: implemented; deviations from this plan are listed in
+[validation](validation.md#deviations-from-the-plan). Implements [spec](spec.md); store mapping in
 [research](research.md). Baseline `dev` = `5c3e30ea`.
 
 This replaces the plan of the closed PR #4111 (written before `bcs-store-api`

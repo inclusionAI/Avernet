@@ -1,6 +1,6 @@
 # Tasks: distributed Connector runtime
 
-Status: proposed; nothing started. Executes [plan](plan.md). Maps to C1–C6 of
+Status: done. Executes [plan](plan.md). Maps to C1–C6 of
 `specs/2026-11-15-distributed-contracts/tasks.md`. Tests are written before
 the code of each task; each group ends with its crate's tests green.
 
@@ -84,9 +84,9 @@ the code of each task; each group ends with its crate's tests green.
 ## Group 7 — End to end and finish
 
 - [x] 7.1 `store_e2e`: engine + providers + `StoreInboxProducer` on `Model`.
-- [ ] 7.2 File-size check, `BCS_BASE_REF=origin/dev scripts/ci/arch-check.sh`
+- [x] 7.2 File-size check, `BCS_BASE_REF=origin/dev scripts/ci/arch-check.sh`
   (pre-existing failures listed, not fixed), changed-line coverage, `cargo check --workspace
   --all-targets`, nextest for the affected crates.
-- [ ] 7.3 `validation.md` with the commands actually run; `specs/README.md`
+- [x] 7.3 `validation.md` with the commands actually run; `specs/README.md`
   entry; `apps/bcs/README.md` crate rows; PR description (calls out the core contract, the shared `command`
   module and the stubs for the executor team).

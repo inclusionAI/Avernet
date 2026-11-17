@@ -138,7 +138,10 @@ crates/
 │   ├── bcs-config/         # Runtime configuration service
 │   ├── bcs-route-security/ # Routing security and access control
 │   ├── bcs-system-message/ # System notification messages
-│   └── bcs-leader-election/ # Leader election for distributed mode
+│   ├── bcs-leader-election/ # Leader election for distributed mode
+│   ├── bcs-dist-store/     # Distributed executor plane: shared key layout, versions, admission
+│   ├── bcs-dist-connector/ # Distributed Connector engine: rules, claim loop, per-call actors
+│   └── bcs-dist-connector-store/ # Connector store providers: dispatch claim, held dispatch, command feed
 ├── plugin-api/
 │   ├── bcs-auth-api/       # Authentication interface
 │   ├── bcs-store-api/      # Runtime state and ordered-log capabilities
