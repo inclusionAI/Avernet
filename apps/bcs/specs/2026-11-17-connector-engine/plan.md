@@ -25,7 +25,8 @@ bcs-dist-connector (service crate)      rules (pure) + engine (loop, actors) —
 | --- | --- | --- | --- |
 | `crates/services/bcs-dist-connector` | new | pure rules, engine, per-call actor, reporting, delayed stubs | C1, C3, C4, C5, C6 (engine part) |
 | `crates/external-clients/bcs-a2a-http` | changed (new module `dist_agent/`) | `DistAgentClientPort` adapter | C2 |
-| `crates/services/bcs-dist-connector-store` | new | TBase providers for the three dispatch ports, held index | provider part of C1 |
+| `crates/services/bcs-dist-connector-store` | new; depends on `bcs-dist-store` (Gateway plan, #4112) for `layout`, `version`, `error`, `capability` | TBase providers for the three dispatch ports, held index | provider part of C1 |
+| `crates/services/bcs-dist-store` | one new module `membership`, only if §13 item 5 is decided that way | TBase `MembershipPort` provider (§10.1) | — |
 | `crates/application/bcs-app-dist-runtime` | new, or add a module if the executor team created it first | admin facade | C6 |
 | `crates/service-api/bcs-service-api` | **(decide)** additive only | Connector core contract, recovery port | — |
 
@@ -134,7 +135,8 @@ loop while not draining:
 - Snapshot: `active_work` = running actors; `pending_effects` = unresolved calls
   (§6) plus cancels whose outcome is unknown.
 
-Config (defaults): `pool = a2a`, `max_active_calls = 1000`, `claim_concurrency = 16`,
+Config: `partitions` is required and has no default (§10). Defaults for the rest:
+`pool = a2a`, `max_active_calls = 1000`, `claim_concurrency = 16`,
 `poll_interval = 1.5 s ± 20 %`, `max_inline_bytes = 65536`, safe-retry backoff
 0.2 s → 5 s, `not_sent_retries = 3`.
 
@@ -200,7 +202,9 @@ repeat is dropped by the Worker by `(holder_epoch, seq)`.
   `tasks/get`, whose JSON differs from the streamed event the former holder saw.
   With a payload digest the second report would be a content conflict instead of
   "same digest = accepted" (decision 24). The first admitted report wins.
-- `Accepted` and `Duplicate` are both success. `ContentConflict` cannot happen with
+- `Accepted` and `Duplicate` are both success. The Gateway plan (#4112 §3, C2)
+  proposes removing `Duplicate` from the merged contract (decision 24); if that
+  lands first, only `Accepted` is matched. `ContentConflict` cannot happen with
   this digest; if it does, it is logged as a bug and the call is not ended on it.
   `Quarantined` is logged; a terminal event still ends the call.
 - `NotApplied` / `OutcomeUnknown`: retry the same envelope. `finish` is never called
@@ -213,6 +217,12 @@ confirmed). Reason: a new holder must compute the same n as the former one, and 
 confirmed-input watermark is the only durable count in `disp`. Consequence: an agent
 that repeats its input-required status without a reply in between produces the same
 `input_id` (one input), which is the wanted result.
+
+The flip side is a known limit (§13): two **different** input-required events with
+no confirmed reply in between (the agent asks Q1, then re-asks a revised Q2) also
+get the same `input_id`. Because the digest leaves the payload out (§5.2), the
+second is "accepted" and dropped: the Worker and the PA only see Q1. A later fix
+needs a durable per-call count of reported input-required events in `/connector`.
 
 ### 5.4 Mapping A2A states **(decide)**
 
@@ -227,10 +237,10 @@ that repeats its input-required status without a reply in between produces the s
 | `canceled` | `Error`, payload state `canceled` | `Canceled` |
 
 The adapter (§9) sets the kind; the interaction id it puts in `InputRequired` /
-`AuthRequired` is a placeholder that `rules.report` replaces. Payloads are the
-normalized A2A JSON of the event (parts, artifact id and append flag for deltas;
-the task status and artifacts for terminal events). The exact payload schema per
-kind is the Worker's to confirm.
+`AuthRequired` is a placeholder that `rules.report` replaces. The proposed payload
+per kind, with one JSON sample each, is in
+[research §5](research.md#5-proposed-agentevent-payload-per-kind); the executor side
+signs it off (§13, E4).
 
 ### 5.5 Large content
 
@@ -338,8 +348,11 @@ Outcome classification for a send:
 
 ## 10. TBase providers (`bcs-dist-connector-store`)
 
-Blocked until the Gateway session's shared key and ts helpers are in `dev`. No key
-format or ts arithmetic is written here; both are imported.
+Blocked until the Gateway plan's PR 1 (#4112 §2: `bcs-dist-store` with `layout`,
+`version`, `error`, `capability`, and the exported test model) is in `dev`. No key
+format or ts arithmetic is written here: keys come from `layout` (`disp`, `cmd`,
+`held`), versions from `version::claim(new_holder_epoch)` and `version::next(read)`,
+error mapping from `error`, the startup check from `capability`.
 
 ```text
 src/lib.rs          TbaseDispatchBoard::new(json, zset, stream, membership, config) -> Result (capability check)
@@ -366,6 +379,12 @@ Stored `disp` **(decide)**: the JSON of the merged `DispatchView`
 - `finish_evidence`: the string given to `finish`, for the Worker's
   `SupersededTerminal`.
 - Both sides write by path, so neither overwrites the other's fields.
+- `JsonEdit::Set` needs existing parents, and the Worker creates `disp` without a
+  `connector` object. So the Connector never sets a path below `/connector`: it
+  always writes the **whole** `/connector` object, built from the value it just
+  read (absent = empty). `/connector` is Connector-only and every write is a read →
+  `Newer(read + 1)`, so nothing can be lost between the read and the write. This
+  needs nothing from the executor side beyond the layout sign-off.
 
 `claim(request)`:
 
@@ -420,14 +439,40 @@ mutate_json(Newer(read + 1), Patch[...], Preserve)
   `timeout`.
 - `ack`: `ack(key, "connectors", [id])`; `opaque` = `<partition>:<major>-<minor>`.
 - An entry without a `did` field is acked and logged.
-- Partitions: `partitions = 1` by default (`p0`); how the Worker picks a partition
-  for a `did` is the Worker's.
+- Partitions: the partition count is a **required** config value with no default,
+  and it must be the same number on the Worker and on every Connector. The Worker
+  picks a partition when it posts and each Connector reads all of them, so a
+  Connector configured with fewer partitions would never see some hints (only the
+  Worker's deadline re-post would rescue those calls). Construction fails when the
+  value is missing or zero. Who owns the number and how a `did` maps to a partition
+  are questions for the executor side (§13).
 
 Tests need (a) an in-memory `bcs-store-api` model and (b) something that plays the
 Worker on `disp` (create, cancel, push input, notify). (b) is a small test-only
-writer in this crate's `tests/`. For (a) **(decide)**: reuse the conformance model
-that lives in `bcs-test-support/tests/support/store/` by a `#[path]` include, or
-have the Gateway session's shared PR export it from `bcs-test-support`.
+writer in this crate's `tests/`. For (a): the conformance model exported from
+`bcs-test-support` by the Gateway plan's PR 1, the same one the Gateway tests use.
+No `#[path]` include; provider work starts after that PR merges anyway.
+
+### 10.1 Membership provider (only if §13 item 5 is decided that way)
+
+The claim needs liveness and the Connector needs a heartbeat, and the Gateway does
+not use membership, so nobody builds a `MembershipPort` provider today. If the
+owner confirms the executor team is not building one, this work adds it as module
+`membership` in `bcs-dist-store` (one `pub mod` line there), so the Worker can
+reuse it. Keys (`hb`, `member`, `members`) come from `layout`. It follows
+decision 15:
+
+| Method | Store calls | Rule |
+| --- | --- | --- |
+| `register` | member record `mutate_json(Newer(1), Replace, Persistent)`; `zset.add(members:<role>, InsertOnly)`; `kv.set(hb a, After(ttl))`, `kv.set(hb b, After(ttl))` | an identical retry is fine; an existing record with another role is `Invalid` |
+| `renew` | `kv.expire(hb a, ttl)`, `kv.expire(hb b, ttl)` | `expire` only extends a key that still exists, so a lost lease is never revived. Both `false` → `Lost`. One `false` → the instance is still alive by the two-copy rule; that copy is set again |
+| `set_draining` | the same check as `renew`, then a patch of the member record's state | `Lost` when both copies are gone |
+| `liveness` | `kv.get(hb a)`, `kv.get(hb b)` (two calls, the copies are in different slots) | both missing → `Dead`; one present → `Alive`; any read error → `Unknown`. `Unknown` instead of `Dead` until this process has renewed its own heartbeat for one full TTL |
+| `members` | `zset.range(members:<role>)`, paged | — |
+
+Defaults: renew every 1 s, TTL 3 s. Cost: 2 writes per second per instance; 2 reads
+per liveness check, and the claim checks liveness only when `disp` names another
+holder.
 
 ## 11. Delayed contracts (stubs)
 
@@ -452,7 +497,7 @@ D3 and D8 are storage steps, so the engine reaches them through a small port,
 | 1 | `docs(bcs): specify the distributed Connector` | — | this folder |
 | 2 | `feat(bcs): add the Connector core contract and engine` | plan approved; §13 items 1, 3, 6, 7 | §2–§8, §11 (D2), tests with fakes |
 | 3 | `feat(bcs): adapt the A2A client to the distributed agent port` | plan approved; §13 item 2 for the resolver only | §9 |
-| 4 | `feat(bcs): add TBase providers for the dispatch board` | Gateway shared PR in `dev`; §13 items 4, 5, 8 | §10, §11 (D3, D8), R10 list |
+| 4 | `feat(bcs): add TBase providers for the dispatch board` | Gateway plan's PR 1 in `dev`; §13 items 4 and 5; executor answers E1 and E2 | §10, §11 (D3, D8), R10 list; §10.1 as its own PR if item 5 says so |
 | 5 | `feat(bcs): expose Connector health and drain` | 2 | admin facade, composition |
 
 2 and 3 are independent and need no TBase. Each PR: `cargo nextest run` for the
@@ -464,21 +509,38 @@ for `resume_events`; a supervisor loop (D3); SSRF policy (decision 19).
 
 ## 13. Decisions needed from the owner
 
+Nothing in this table is chosen yet. "Reviewed" marks where the PR review agreed
+with the recommendation; the decision is still the owner's.
+
 | # | Question | Recommendation |
 | --- | --- | --- |
 | 1 | SENT policy (§6) | As written: resend only with `idempotent_start` / `idempotent_input`; else ask the agent when `query_by_request`; else unresolved. A definite "not sent" is retried 3 times, then unresolved |
 | 2 | What resolves `CredentialRef`, what `BindingVersion` means, and where the agent's interface (URL, binding) comes from (§9) | Not guessed. The adapter takes an injected resolver; its implementation waits for the answer |
 | 3 | May `bcs-service-api` get two additive, Connector-only items: `core/dist_connector.rs` (§2) and `DispatchRecoveryPort` (§11)? | Yes: it is where the Gateway and Worker contracts live, and no existing type changes. Otherwise both stay local to `bcs-dist-connector` |
-| 4 | Stored `disp` layout and the two Connector-owned fields (§10). Needs the executor side's agreement, since their provider creates the document | `DispatchView` JSON plus a `connector` sibling object. Alternative: add the two fields to `DispatchExecution` (a contract change) |
-| 5 | Who implements the TBase `MembershipPort` (heartbeats A/B, member record, liveness; decision 15's "judge others only after 3 s of own renewals")? The claim and the Connector's own heartbeat need it | The Gateway session's shared module, since all three roles use it; I code against the trait. I can take it if that is preferred |
-| 6 | Key-event `business_digest` without the payload (§5.2), and n = watermark + 1 (§5.3) | As written |
-| 7 | Mapping of A2A terminal states and the payload per event kind (§5.4): canceled and rejected as `Error`; payload = normalized A2A JSON | As written, to be confirmed with the executor side because their reducer reads it |
-| 8 | In-memory `bcs-store-api` model for provider tests (§10), and the name of the crate holding the shared key/ts helpers | Export the model from `bcs-test-support` in the shared PR; until then a `#[path]` include |
+| 4 | Stored `disp` layout and the two Connector-owned fields (§10) | `DispatchView` JSON plus a `connector` sibling object that the Connector always writes whole. Needs executor sign-off (E3). Alternative: add the two fields to `DispatchExecution` (a contract change) |
+| 5 | Who builds the TBase `MembershipPort` provider? The Gateway does not use membership (#4112 has no `MembershipPort`), so it will not come from there | This work builds it as module `membership` in `bcs-dist-store` (§10.1), following decision 15, **after** the owner confirms the executor team is not already building one. Reviewed |
+| 6 | Key-event `business_digest` without the payload (§5.2), and n = watermark + 1 (§5.3) | As written, with the limit below. Reviewed |
+| 7 | A2A terminal states and the payload per event kind (§5.4, samples in [research §5](research.md#5-proposed-agentevent-payload-per-kind)): canceled and rejected as `Error` with the state in the payload | As written; the executor side signs off the payload table (E4). Reviewed |
+
+Settled by the review, no decision left: the shared helpers crate is
+`bcs-dist-store`, and provider tests use the conformance model exported from
+`bcs-test-support` by the Gateway plan's PR 1 (§10).
+
+Questions for the executor side (to be asked through the owner):
+
+| # | Question | Why the Connector needs it |
+| --- | --- | --- |
+| E1 | Who owns the command-stream partition count, and how does a `did` map to a partition? | The count must be identical on the Worker and every Connector (§10) |
+| E2 | At a call's deadline, does the Worker produce a cancel or a re-post for a call that is already ACCEPTED? The design only says it re-posts calls that are not ACCEPTED; decision 29 (d) says its timeout decides retry, fail or cancel | Until D3 exists this is the only way an ACCEPTED call with a dead holder is picked up again (research §2 item 9) |
+| E3 | Sign-off of the stored `disp` layout: `DispatchView` JSON, path writes only after creation, and a Connector-owned `connector` object the Worker never writes | Both providers write the same document (§10) |
+| E4 | Sign-off of the `AgentEvent` payload per kind ([research §5](research.md#5-proposed-agentevent-payload-per-kind)), including "first terminal wins" when a final and an error are both admitted for one call | The reducer reads exactly that |
 
 Known limits to accept or object to:
 
 - Until D3 exists, an ACCEPTED call whose holder died waits for the Worker's
-  deadline (research §2 item 9).
+  deadline, and only if E2 is answered "yes" (research §2 item 9).
+- Two different input-required events with no confirmed reply in between: the
+  second is dropped (§5.3).
 - An unresolved call occupies one of `max_active_calls` until the Worker cancels it.
 - Polling costs one read per held call per 1.5 s (research §4).
 
