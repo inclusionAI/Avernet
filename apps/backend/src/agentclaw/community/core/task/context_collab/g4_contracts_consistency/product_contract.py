@@ -18,14 +18,18 @@ from agentclaw.community.core.task.context_collab.l6_products.binding import (
     actor_has_role,
     product_definition,
 )
-from agentclaw.community.core.task.context_collab.l6_products.catalog import ProductCatalog
+from agentclaw.community.core.task.context_collab.l6_products.catalog import (
+    ProductCatalog,
+)
 from agentclaw.community.core.task.context_collab.l6_products.creation_facts import (
     creation_method_kind,
-    creation_profile_ref,
     creation_product_kind,
+    creation_profile_ref,
     creation_workflow_kind,
 )
-from agentclaw.community.core.task.context_collab.l6_products.instance import ProductInstance
+from agentclaw.community.core.task.context_collab.l6_products.instance import (
+    ProductInstance,
+)
 from agentclaw.community.core.task.context_collab.l6_products.task_contracts import (
     TASK_PROGRESS_DETAIL_FIELDS,
     resolve_event_contract,
@@ -72,7 +76,9 @@ def validate_product_event(
     if contract.executor_submission_only and "percent" in payload:
         percent = payload["percent"]
         if type(percent) is not int or not 0 <= percent <= 100:
-            raise ContextCollabValidationError("task percent must be an integer in [0, 100]")
+            raise ContextCollabValidationError(
+                "task percent must be an integer in [0, 100]"
+            )
         if event_kind != "task.progress.updated":
             raise ContextCollabValidationError(
                 "task percent is only reportable by report_progress"
@@ -89,7 +95,9 @@ def validate_product_event(
                 raise ContextCollabValidationError(
                     f"task {field_name} must be a string"
                 )
-        if "task_id" in payload and (task is None or payload["task_id"] != task.task_id):
+        if "task_id" in payload and (
+            task is None or payload["task_id"] != task.task_id
+        ):
             raise ContextCollabValidationError(
                 "report task_id does not match the L4 Task"
             )
@@ -100,17 +108,23 @@ def validate_product_event(
         else None
     )
     if machine_ref is not None and machine is None:
-        raise ContextCollabValidationError("required versioned workflow machine is unavailable")
-    declared = next((action for action in contract.actions if action.event_kind == event_kind), None)
+        raise ContextCollabValidationError(
+            "required versioned workflow machine is unavailable"
+        )
+    declared = next(
+        (action for action in contract.actions if action.event_kind == event_kind), None
+    )
     if declared is not None and declared.required_role is not None:
-        has_role = actor_has_role(task, actor, declared.required_role, profile)
+        has_role = actor_has_role(task, actor, declared.required_role, profile, events)
         if not has_role:
             raise ContextCollabValidationError(
                 "actor is not the designated executor for this workflow action"
             )
     if not contract.strict_control_events or not event_kind.startswith("task."):
         return
-    if machine is None or not any(rule.event_name == event_kind for rule in machine.transitions):
+    if machine is None or not any(
+        rule.event_name == event_kind for rule in machine.transitions
+    ):
         raise ContextCollabValidationError(
             f"product workflow does not permit control event {event_kind!r}"
         )
@@ -123,8 +137,13 @@ def validate_product_event(
             f"product control event requires primitive_type {declared.primitive_type}"
         )
     if task is None:
-        raise ContextCollabValidationError("cannot advance task: no L4 Task to adjudicate")
-    if not any(rule.event_name == event_kind and task.status in rule.from_states for rule in machine.transitions):
+        raise ContextCollabValidationError(
+            "cannot advance task: no L4 Task to adjudicate"
+        )
+    if not any(
+        rule.event_name == event_kind and task.status in rule.from_states
+        for rule in machine.transitions
+    ):
         raise ContextCollabValidationError(
             f"cannot advance task: {event_kind!r} is not allowed from status {task.status!r}"
         )

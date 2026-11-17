@@ -24,6 +24,7 @@ def create_product_profile(
     """
     definition = ProductProfileDefinition(
         ref=command.ref,
+        participant_scope=command.participant_scope,
         composition=command.composition,
         scenario_roles=command.scenario_roles,
         domain=command.domain,

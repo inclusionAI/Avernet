@@ -83,6 +83,15 @@ choose it with `PublishTaskCommand.product_profile_ref` or L6 Instantiate.
 It omits domain/workflow, pins `standard_task@1` and requires Open@0.2 and
 Single@0.2. Do not change @1's topology or reinterpret historical records.
 
+Independent binding IDs are persisted with the selected @2 ProductInstance.
+Recovery fills missing bindings/edges after partial writes and validates requested
+IDs against this exact selection; it preserves suspended/terminated bindings and
+detached edges. SQL selection and MethodStore are not atomic together. Unknown
+IDs never cause new projections. Previously generated experimental composite @2
+snapshots are not silently migrated and fail strict reference validation; @1 and
+legacy Open + Group keep their historical topology.
+See [topology contracts and failure regressions](../../../../../../../../tests/community/core/task/context_collab/products/test_task_commission_method_topology.py).
+
 ## ProductInstance and the Open + Single journey
 
 The [end-to-end test](../../../../../../../../tests/community/core/task/context_collab/products/test_task_commission_end_to_end.py)
@@ -101,18 +110,27 @@ storage. See the [L6 identity contract](../../l6_products/README.md#productinsta
    `create_product_profile` operation and explicitly install @2 through [DI installation](../../../../../di/modules/context_collab_products.py).
    “Online” means an immutable code-owned definition installed into the actual
    application catalog, not a mutable registry or a mocked registration call.
-2. Business staff first create L4 work with `ColletCreateCommand(to_space,
-   initiator_ref, objective, executor_refs=(bot,))`. This atomically stores Collet,
-   root Task and initial Event without a Profile or binding input. They then call
-   `ProductInstantiationServiceProtocol.instantiate(ProductInstantiateCommand(
-   collet_id, profile_ref, expected_version), context)` to select that exact L6
-   profile and initialize L5. This separate installation preserves initial L4
-   evidence and requires an untouched Collet. L4 accepts zero/one/many executors;
-   this product still requires one scalar assignee. Existing product publishers
-   retain their combined application flow. L5 creates one ACTIVE composite
-   **Open + Single** MethodBinding with both exact Method versions, but no
-   opportunity, application, Group roster or SingleSelection yet. A selected-agent
-   RoleBinding is designation, not admission or selection.
+2. Business staff first create unassigned L4 work with
+   `ColletCreateCommand(to_space, initiator_ref, objective)`. This atomically stores
+   Collet, root Task and initial Event without executor/Profile/binding inputs.
+   They then call `ProductInstantiationServiceProtocol.instantiate(
+   ProductInstantiateCommand(collet_id, profile_ref, expected_version,
+   participant_refs=(bot,)), context)`. The product supplies the Agent; this sole
+   participant defaults to the scalar assignee role source. Every initial Agent
+   must be in the exact Profile's `participant_scope` (`OPEN` by default, or an
+   explicit typed Agent allowlist). Scope is eligibility, not admission.
+   The separate installation requires untouched unassigned Work, preserves the
+   initial Event, and atomically writes ProductInstance, actual L4 Participants /
+   RoleBindings and Task assignment plus `task.participants_bound`. Task and
+   Collet advance to revision 2: query the current revision before Work.start.
+   Multiple initial Agents require explicit executor designation for this
+   scalar-assignee product. Existing publishers retain their combined
+   upper-layer compatibility flow, with the same eligibility validation.
+   One L6 Instantiate creates two ACTIVE MethodBindings: **Open@0.2**
+   (`open_binding_id`) and **Single@0.2** (`single_binding_id`), plus the explicit
+   **Single --support--> Open** MethodCompositionEdge declared in the Profile.
+   No opportunity, application, Group roster or SingleSelection exists yet.
+   A selected-agent RoleBinding is designation, not admission or selection.
 3. The designated, authenticated Bot calls **L5 Open's `query_opportunities`**
    with only its `actor_context` to discover available opportunities in the
    current tenant/environment, then **L5 Open's `submit_application`** as itself
@@ -141,12 +159,17 @@ storage. See the [L6 identity contract](../../l6_products/README.md#productinsta
    Revocation retains evidence but immediately removes execution eligibility.
    These records are not Space membership, resource grants or session access.
 5. After ADMITTED, an explicit L5 `Single.select` chooses the scoped participant
-   created by that admission, carrying its application/decision as evidence.
+   created by that admission under `single_binding_id`, carrying the Open
+   application/decision as evidence. Opportunities, applications, decisions and
+   participant bindings remain under `open_binding_id`; admission does not move them.
    Admission alone is tested to reject Work.start. The product Apply adapter
    executes this same selection under the publisher's policy actor; Open itself
    does not call Single. Execution checks both valid scoped admission and an
    ACTIVE, in-window SingleSelection for the same participant/scope, selected by
-   the publisher. Release, mismatched evidence, wrong scope/participant, an
+   the publisher. Both independent MethodBindings and the declared composition
+   must be ACTIVE. Dispatch and executor reports carry `single_binding_id`, not
+   the opportunity's `open_binding_id`. Suspending either binding independently
+   denies execution without changing its peer or the pinned ProductInstance. Release, mismatched evidence, wrong scope/participant, an
    unauthorized selector or expired selection cannot authorize execution.
    After Select, the journey calls the injected L4
    `ContextCollabServiceProtocol.start` with `WorkStartCommand(expected_version,
@@ -158,7 +181,9 @@ storage. See the [L6 identity contract](../../l6_products/README.md#productinsta
    `ContextCollabService.append_event` is not a Work API; it is a generic event
    append entrypoint.
    The shared G1 adapter enforces these prerequisites for @2 execution events
-   through **both product and generic L4** writes. Admission to task A cannot
+   through **both product and generic L4** writes. It also rechecks the
+   authenticated actual Agent against the pinned Profile participant scope;
+   claimed event actors cannot bypass the scope. Admission to task A cannot
    authorize task B; Open revocation blocks subsequent execution. Structural
    designation alone cannot start work.
 6. Bot progress records plan, code, tests and PR-proposal steps. Successful
@@ -266,12 +291,13 @@ admitted = open_method.admit(
 )
 assert admitted.state == "ADMITTED"
 # Admission is participation, not Single selection or permission to start Work.
-decision = store.get_decision(axes, decision_id, binding_id, task_id)
+open_binding_id, single_binding_id = instance.method_binding_refs
+decision = store.get_decision(axes, decision_id, open_binding_id, task_id)
 [participant_ref] = decision.resulting_binding_refs
 single_method = injector.get(GroupMethodOpsServiceProtocol)
 selected = single_method.select(
     task_id,
-    binding_id,
+    single_binding_id,
     SingleSelectCommand(
         agent_participant_ref=participant_ref,
         scope_ref=task_id,
@@ -282,7 +308,8 @@ selected = single_method.select(
 assert selected.accepted and selected.state == "ACTIVE"
 ```
 
-`task_id` is the product's Collet ID; `binding_id` is its actual L5 MethodBinding.
+`task_id` is the product's Collet ID. `instance.method_binding_refs` pins the
+independent Open and Single binding IDs in the Profile's required-Method order.
 Screen and admit each accept only their command, with required `application_ref`,
 trusted `context` and `collect_id` (the Collet ID). L5 resolves the application's
 unique owning binding inside that Collet and the current tenant/environment;
@@ -578,6 +605,10 @@ also boot the real application/service graph; the
 deploys `task_commission@2` (Open + Single, omitting domain/workflow) through
 the real catalog seam. Its main case creates one Collet/root Task, separately
 instantiates one ProductInstance, then uses the product service for owner commands.
+The authored Profile allowlists two Agents, including the working Bot; only that
+Bot is initially bound. On the same instance, real L4 Work.start/G1 rejects an
+out-of-scope Agent and an eligible but unbound candidate without writes, then
+allows the admitted/selected working Bot to start and report through signed HTTP.
 It directly invokes L5 Open Query/SubmitApplication as the Bot and Screen/Admit
 as the policy actor, then explicitly calls Single Select before Work. Separate
 regression cases cover the product review/dispatch continuation; this journey

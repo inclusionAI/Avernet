@@ -29,27 +29,27 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.collet i
 from agentclaw.community.core.task.context_collab.l4_context_primitives.context_service import (
     ContextService,
 )
+from agentclaw.community.core.task.context_collab.l4_context_primitives.context_service_protocol import (
+    ContextServiceProtocol,
+)
 from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.contracts import (
     ColletCreateCommand,
     ColletWriter,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.context_service_protocol import (
-    ContextServiceProtocol,
+from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.records import (
+    ContextCollabRepositoryProtocol as L4ContextCollabRepositoryProtocol,
 )
 from agentclaw.community.core.task.context_collab.l6_products.catalog import (
     ProductCatalog,
-)
-from agentclaw.community.core.task.context_collab.persistence.method_store import (
-    MethodStoreProtocol,
-)
-from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.records import (
-    ContextCollabRepositoryProtocol as L4ContextCollabRepositoryProtocol,
 )
 from agentclaw.community.core.task.context_collab.l6_products.persistence.records import (
     ContextStatusRecord,
 )
 from agentclaw.community.core.task.context_collab.l6_products.persistence.repository import (
     ContextCollabRepositoryProtocol,
+)
+from agentclaw.community.core.task.context_collab.persistence.method_store import (
+    MethodStoreProtocol,
 )
 from agentclaw.community.core.task.context_collab.service_api import (
     ContextCollabServiceProtocol as ApplicationCollabServiceProtocol,
@@ -147,9 +147,7 @@ def test_l6_contract_only_extends_l4_and_preserves_compatibility_type_identity()
     assert ApplicationCollabService.__module__.endswith(
         "l6_products.operations.collaboration_creation"
     )
-    assert (
-        application_api.ContextCollabServiceProtocol is not ContextServiceProtocol
-    )
+    assert application_api.ContextCollabServiceProtocol is not ContextServiceProtocol
     assert issubclass(
         application_api.ContextCollabServiceProtocol, ContextServiceProtocol
     )
@@ -163,9 +161,7 @@ def test_l6_contract_only_extends_l4_and_preserves_compatibility_type_identity()
     ):
         assert getattr(application_api, name) is getattr(l4_api, name)
     for name in ("create_collet", "start", "append_event", "get_status", "get_events"):
-        assert getattr(ApplicationCollabService, name) is getattr(
-            ContextService, name
-        )
+        assert getattr(ApplicationCollabService, name) is getattr(ContextService, name)
     assert not hasattr(ContextService, "create_collaboration")
 
 
@@ -181,17 +177,14 @@ def test_l4_creation_resolves_direct_singleton_without_application_facade(
     assert service._authorizer is authorizer
 
 
-@pytest.mark.parametrize("executor_refs", [(), WORKERS[:1], WORKERS])
-def test_injected_creation_preserves_executors_and_selected_g1_policy(
-    creation_runtime, executor_refs
-):
+def test_injected_creation_is_unassigned_and_uses_selected_g1_policy(creation_runtime):
     injector, writer, authorizer = creation_runtime
-    command = ColletCreateCommand(SPACE, ACTOR.actor, "Deliver work", executor_refs)
+    command = ColletCreateCommand(SPACE, ACTOR.actor, "Deliver work")
     created = injector.get(ContextServiceProtocol).create_collet(command, ACTOR)
     assert created is writer.create_l4_collet.return_value.collet
     authorizer.check_create_collet.assert_called_once_with(command=command, actor=ACTOR)
     writer.create_l4_collet.assert_called_once_with(command, ACTOR.actor)
-    assert writer.create_l4_collet.call_args.args[0].executor_refs == executor_refs
+    assert not hasattr(command, "executor_refs")
 
 
 def test_injected_creation_rejection_never_calls_writer(creation_runtime):

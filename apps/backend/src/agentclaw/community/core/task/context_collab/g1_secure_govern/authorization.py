@@ -14,6 +14,9 @@ from agentclaw.community.core.task.context_collab.g1_secure_govern.collet_creati
     ColletCreationAuthorizer,
     StructuralColletCreationAuthorizer,
 )
+from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
+    AgentRef,
+)
 from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
     Collet,
 )
@@ -119,6 +122,13 @@ class StructuralContextCollabAuthorizer(
         command,
         actor: ActorContext,
     ) -> None:
+        if product_instance is not None and (
+            actor.actor.principal_type in {"bot", "service"}
+            or _is_executor(task, actor)
+        ):
+            product_instance.participant_scope.require(
+                AgentRef(actor.actor.principal_type, actor.actor.principal_id)
+            )
         if (
             _is_principal(task, actor)
             or _is_executor(task, actor)
@@ -145,8 +155,12 @@ class StructuralContextCollabAuthorizer(
         for record in events:
             if record.visibility == VISIBILITY_PUBLIC:
                 visible.append(record)
-            elif record.visibility == VISIBILITY_WORKSPACE and (is_principal or is_executor):
+            elif record.visibility == VISIBILITY_WORKSPACE and (
+                is_principal or is_executor
+            ):
                 visible.append(record)
-            elif (record.visibility == VISIBILITY_PRIVATE or record.visibility is None) and is_principal:
+            elif (
+                record.visibility == VISIBILITY_PRIVATE or record.visibility is None
+            ) and is_principal:
                 visible.append(record)
         return visible

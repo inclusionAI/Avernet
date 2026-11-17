@@ -17,8 +17,8 @@ from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs 
     PrincipalRef,
 )
 from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_resource_refs import (
-    SpaceRef,
     ResourceRef,
+    SpaceRef,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
     Collet,
@@ -26,8 +26,16 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.collet i
 from agentclaw.community.core.task.context_collab.l4_context_primitives.event_envelope import (
     EventRecord,
 )
+from agentclaw.community.core.task.context_collab.l4_context_primitives.participants import (
+    role_binding_ref,
+)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.participation import (
+    initial_participation,
+)
 from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.records import (
     InitialEventDraft as InitialEventDraft,
+)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.records import (
     PrimitiveReadState,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.task import Task
@@ -113,6 +121,14 @@ class ContextStatusRecord(_RecordView):
     tasks: tuple[Task, ...] = ()
     product_instance: ProductInstance | None = None
 
+    @property
+    def participants(self):
+        return initial_participation(self.events).participants
+
+    @property
+    def role_bindings(self):
+        return initial_participation(self.events).role_bindings
+
 
 @dataclass
 class EventAppendedRecord(_RecordView):
@@ -138,7 +154,9 @@ class ProductRecordDecoder:
     ) -> ContextStatusRecord:
         facts = decode_creation_facts(json.loads(creation_facts_json))
         if facts.get("product_instance") is not None and state.task is None:
-            raise ContextCollabValidationError("ProductInstance requires its L4 root Task")
+            raise ContextCollabValidationError(
+                "ProductInstance requires its L4 root Task"
+            )
         instance = decode_product_instance(
             facts,
             collet_id=state.collet.collet_id,
@@ -156,6 +174,27 @@ class ProductRecordDecoder:
             raise ContextCollabValidationError(
                 "ProductInstance creation evidence does not match initial event"
             )
+        participation = initial_participation(state.events)
+        if (
+            instance is not None
+            and "participant_scope" in facts["product_instance"]
+            and not participation.participants
+        ):
+            raise ContextCollabValidationError(
+                "ProductInstance requires actual L4 participation evidence"
+            )
+        if instance is not None and participation.participants:
+            actual = tuple(
+                role_binding_ref(state.collet.collet_id, b)
+                for b in participation.role_bindings
+            )
+            if actual != instance.role_binding_refs:
+                raise ContextCollabValidationError(
+                    "ProductInstance references missing L4 RoleBindings"
+                )
+            for participant in participation.participants:
+                if participant.agent_ref is not None:
+                    instance.participant_scope.require(participant.agent_ref)
         return ContextStatusRecord(
             collet=state.collet,
             creation_facts=facts,

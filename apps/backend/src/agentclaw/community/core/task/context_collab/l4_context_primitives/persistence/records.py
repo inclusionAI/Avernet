@@ -29,6 +29,9 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.collet i
 from agentclaw.community.core.task.context_collab.l4_context_primitives.event_envelope import (
     EventRecord,
 )
+from agentclaw.community.core.task.context_collab.l4_context_primitives.participation import (
+    initial_participation,
+)
 from agentclaw.community.core.task.context_collab.l4_context_primitives.service_ports import (
     CollaborationReadState,
     CollaborationStore,
@@ -68,6 +71,14 @@ class PrimitiveReadState:
     task: Task | None
     tasks: tuple[Task, ...]
     events: list[EventRecord]
+
+    @property
+    def participants(self):
+        return initial_participation(self.events).participants
+
+    @property
+    def role_bindings(self):
+        return initial_participation(self.events).role_bindings
 
     @property
     def owner_principal_id(self) -> str:

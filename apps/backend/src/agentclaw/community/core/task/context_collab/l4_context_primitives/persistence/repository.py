@@ -53,6 +53,7 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.persiste
     _collet_from_row,
     _dump_json,
     _event_from_row,
+    _event_row,
     _parent_event_exists,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.task_storage import (
@@ -86,7 +87,7 @@ class ContextCollabRepository(Generic[StateT]):
     ) -> CreatedColletRecord:
         facts = {
             "objective": command.objective,
-            "executor_refs": [ref.to_dict() for ref in command.executor_refs],
+            "executor_refs": [],
         }
         record = build_created_collet(
             command, InitialEventDraft("task.created", "Task", actor_ref, facts)
@@ -374,24 +375,7 @@ class ContextCollabRepository(Generic[StateT]):
 
     @staticmethod
     def _event_row(event: EventRecord, *, now: datetime) -> ContextCollabEventModel:
-        """``EventRecord`` 领域对象 → 落库行;append-only,gmt_modified 与 gmt_create 同值写入。"""
-        return ContextCollabEventModel(
-            collab_context_id=event.collab_context_id,
-            event_id=event.event_id,
-            task_ref=event.task_ref,
-            task_version_after=event.task_version_after,
-            parent_event=event.parent_event,
-            event_kind=event.event_kind,
-            primitive_type=event.primitive_type,
-            actor_ref=_dump_json(event.actor_ref.to_dict()),
-            visibility=event.visibility,
-            payload=_dump_json(event.payload),
-            context_version_after=event.context_version_after,
-            occurred_at=event.occurred_at,
-            env=get_current_env(),
-            gmt_create=now,
-            gmt_modified=now,
-        )
+        return _event_row(event, now=now)
 
     @staticmethod
     def _task_row(task: Task, *, now: datetime) -> ContextCollabTaskModel:

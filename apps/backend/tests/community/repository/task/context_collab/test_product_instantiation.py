@@ -39,6 +39,12 @@ from agentclaw.community.core.task.context_collab.l6_products.operations import 
 from agentclaw.community.core.task.context_collab.l6_products.operations.contracts import (
     ProductInstantiateCommand,
 )
+from agentclaw.community.core.task.context_collab.l6_products.operations.method_bootstrap import (
+    ensure_top_level_binding,
+)
+from agentclaw.community.core.task.context_collab.l6_products.operations.product_instantiation import (
+    ProductInstantiationService,
+)
 from agentclaw.community.core.task.context_collab.persistence.method_store import (
     InMemoryMethodStore,
 )
@@ -47,12 +53,6 @@ from agentclaw.community.core.task.context_collab.persistence.repository import 
 )
 from agentclaw.community.core.task.context_collab.products.task_commission.profile import (
     TASK_COMMISSION_PROFILE,
-)
-from agentclaw.community.core.task.context_collab.l6_products.operations.method_bootstrap import (
-    ensure_top_level_binding,
-)
-from agentclaw.community.core.task.context_collab.l6_products.operations.product_instantiation import (
-    ProductInstantiationService,
 )
 from sqlalchemy import event as sql_event
 
@@ -76,10 +76,12 @@ def runtime(db):
         repo, store, catalog, StructuralContextCollabAuthorizer()
     )
     created = repo.create_l4_collet(
-        ColletCreateCommand(SpaceRef("s", "test"), OWNER.actor, "Deliver work", (BOT,)),
+        ColletCreateCommand(SpaceRef("s", "test"), OWNER.actor, "Deliver work"),
         OWNER.actor,
     )
-    command = ProductInstantiateCommand(created.collet.collet_id, profile.ref, 1)
+    command = ProductInstantiateCommand(
+        created.collet.collet_id, profile.ref, 1, (BOT,)
+    )
     return service, repo, store, catalog, command
 
 
@@ -91,10 +93,14 @@ def test_l6_instantiation_is_explicit_and_preserves_initial_l4_authorities(runti
     instance = service.instantiate(command, OWNER)
     after = repo.get_current_status(command.collet_id)
     assert after.product_instance == instance
-    assert after.collet == before.collet and after.task == before.task
+    assert before.task.executor_refs == ()
+    assert after.task.executor_refs == (BOT,)
+    assert after.collet.version == after.task.version == 2
     assert after.collet.metadata is not None
-    assert after.collet.etag == before.collet.etag
-    assert after.events == before.events
+    assert after.collet.etag != before.collet.etag
+    assert after.events[:1] == before.events
+    assert after.events[-1].event_kind == "task.participants_bound"
+    assert after.participants and len(after.role_bindings) == 2
     assert after.creation_facts["product_profile_ref"] == {
         "profile_id": command.profile_ref.profile_id,
         "version": command.profile_ref.version,
@@ -143,9 +149,7 @@ def test_responsible_principal_may_select_even_when_not_initiator(runtime):
     service, repo, _, _, command = runtime
     responsible = ActorContext(PrincipalRef("human", "responsible"), "api")
     created = repo.create_l4_collet(
-        ColletCreateCommand(
-            SpaceRef("s", "test"), responsible.actor, "Delegated", (BOT,)
-        ),
+        ColletCreateCommand(SpaceRef("s", "test"), responsible.actor, "Delegated"),
         OWNER.actor,
     )
     instance = service.instantiate(
@@ -181,7 +185,9 @@ def test_product_selection_is_immutable_even_with_same_profile_and_collet_revisi
     before = repo.get_current_status(command.collet_id)
     binding = store.list_bindings(current_axes(), command.collet_id)
     with pytest.raises(ContextCollabValidationError, match="untouched L4 Collet"):
-        service.instantiate(command, OWNER)
+        service.instantiate(
+            replace(command, expected_version=before.collet.version), OWNER
+        )
     assert repo.get_current_status(command.collet_id) == before
     assert store.list_bindings(current_axes(), command.collet_id) == binding
 
@@ -208,24 +214,20 @@ def test_selection_rejects_collet_advanced_by_message(runtime):
     assert store.list_bindings(current_axes(), command.collet_id) == []
 
 
-def test_multiple_executors_remain_valid_l4_but_scalar_product_does_not_drop_them(
-    runtime,
-):
-    service, repo, store, _, command = runtime
+def test_multiple_participants_require_explicit_scalar_executor_designation(runtime):
+    service, repo, _, _, command = runtime
     refs = (BOT, AgentRef("bot", "second"))
-    created = repo.create_l4_collet(
-        ColletCreateCommand(
-            SpaceRef("s", "test"), OWNER.actor, "Collaborative work", refs
-        ),
-        OWNER.actor,
-    )
-    command = replace(command, collet_id=created.collet.collet_id)
     before = repo.get_current_status(command.collet_id)
-    with pytest.raises(ContextCollabValidationError, match="at most one executor"):
-        service.instantiate(command, OWNER)
+    with pytest.raises(ContextCollabValidationError, match="requires executor_ref"):
+        service.instantiate(replace(command, participant_refs=refs), OWNER)
     assert repo.get_current_status(command.collet_id) == before
-    assert before.task.executor_refs == refs
-    assert store.list_bindings(current_axes(), command.collet_id) == []
+    instance = service.instantiate(
+        replace(command, participant_refs=refs, executor_ref=BOT), OWNER
+    )
+    record = repo.get_current_status(command.collet_id)
+    assert record.product_instance == instance
+    assert {p.agent_ref for p in record.participants if p.agent_ref} == set(refs)
+    assert record.task.executor_refs == (BOT,)
 
 
 def test_sql_selection_failure_propagates_and_no_l5_binding_is_written(runtime, engine):
@@ -263,7 +265,9 @@ def test_method_store_failure_is_not_success_and_selection_can_be_recovered(
     assert (
         after.product_instance is not None
     )  # SQL and MethodStore are separate transactions.
-    assert after.task == before.task and after.events == before.events
+    assert after.task.executor_refs == (BOT,)
+    assert after.events[:1] == before.events
+    assert after.events[-1].event_kind == "task.participants_bound"
     assert store.list_bindings(current_axes(), command.collet_id) == []
     monkeypatch.setattr(store, "upsert_binding", original)
     recovered = ensure_top_level_binding(

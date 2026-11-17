@@ -15,6 +15,9 @@ from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs 
     AgentRef,
     PrincipalRef,
 )
+from agentclaw.community.core.task.context_collab.l4_context_primitives.participation import (
+    initial_participation,
+)
 from agentclaw.community.core.task.context_collab.l4_context_primitives.task import (
     Task,
 )
@@ -96,6 +99,8 @@ def validate_role_sources(
     executor_ref: AgentRef | None,
 ) -> None:
     """Validate typed subjects without renegotiating a historical selection."""
+    if executor_ref is not None:
+        profile.participant_scope.require(executor_ref)
     sources = {"principal_ref": principal_ref, "executor_ref": executor_ref}
     for role in profile.scenario_roles:
         if role.required and sources.get(role.participant_source) is None:
@@ -130,10 +135,13 @@ def role_binding_refs(
     collet_id: str,
     *,
     profile: ProductProfileDefinition,
+    executor_ref: AgentRef | None = None,
 ) -> tuple[str, ...]:
     """Return stable references for the profile's declared role facts."""
     refs: list[str] = []
     for role in profile.scenario_roles:
+        if role.participant_source == "executor_ref" and executor_ref is None:
+            continue
         participant_id = f"participant_{role.participant_source}"
         refs.append(
             "/".join(
@@ -148,10 +156,28 @@ def role_binding_refs(
     return tuple(refs)
 
 
-def actor_has_role(task: Task | None, actor: PrincipalRef, role: str, profile) -> bool:
-    """Check the actor against L4 Task identities for a declared L6 role."""
+def actor_has_role(
+    task: Task | None, actor: PrincipalRef, role: str, profile, events=()
+) -> bool:
+    """Resolve actual L4 RoleBindings; only legacy history uses Task identities."""
     if task is None:
         return False
+    facts = initial_participation(events)
+    if facts.participants:
+        ids = {b.participant_id for b in facts.role_bindings if b.role == role}
+        return any(
+            p.participant_id in ids
+            and (
+                p.principal_ref == actor
+                or (
+                    p.agent_ref is not None
+                    and p.agent_ref.agent_type == actor.principal_type
+                    and p.agent_ref.agent_id == actor.principal_id
+                )
+            )
+            for p in facts.participants
+        )
+    # Explicit compatibility for pre-participation event history only.
     scenario_role = next(
         (item for item in profile.scenario_roles if item.l4_role == role), None
     )

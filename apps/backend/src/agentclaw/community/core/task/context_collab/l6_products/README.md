@@ -15,14 +15,15 @@ Service APIs, not a new HTTP/ACCS operation family or product-specific wire prot
 | ProductCollaborationPolicy | [operations/collaboration_policy.py](operations/collaboration_policy.py) | Product-aware adapter to L4-owned policy ports; interprets selected L6 evidence without owning Work or query execution. |
 | ProductMethodBindingRecovery | [operations/method_bootstrap.py](operations/method_bootstrap.py) | Translates pinned product/identity facts into L5 initialization/recovery inputs through L5-owned operations and ports. |
 | ProductProfileDefinition | [contracts.py](contracts.py) | Versioned composition, scenario roles, optional domain/workflow mappings, Task contract selection, compatibility and G1–G4 implementation requirements. |
-| MethodCompositionTemplate | [contracts.py](contracts.py) | Required/optional L5 `MethodProfile` contracts, instantiation scope and typed method-specific product policies. Current runtime supports one explicit Collet-scoped top-level binding, including the existing composite binding representation. |
+| MethodCompositionTemplate | [contracts.py](contracts.py) | Required/optional L5 `MethodProfile` contracts, instantiation scope and typed method-specific product policies. Explicit relations instantiate independent Collet-scoped Method bindings and L5 composition edges; empty relations preserve legacy topology. |
+| ParticipantScope | [participant_scope.py](participant_scope.py) | Local typed Profile eligibility contract: OPEN or an explicit AgentRef allowlist. Not membership, admission, selection or permission authority. |
 | ScenarioRole | [binding.py](binding.py) | Maps owner/assignee to actual L4 Participant and RoleBinding facts. No L3 grant is created. |
 | DomainProfile | [contracts.py](contracts.py) | Maps product vocabulary to L3 Resource and L4 Collet/Task/Message/Artifact authority, not duplicate product-owned entities. |
 | TaskLifecycleContract / TaskAction | [task_contracts.py](task_contracts.py), [contracts.py](contracts.py) | Reusable, exactly versioned Task lifecycle/action contract, independent of product orchestration. References the existing G4 machine; never executes a Bot plan. |
 | WorkflowProfile | [contracts.py](contracts.py) | Optional product orchestration contract. Existing profiles own their action mappings and reference a versioned G4 machine over L4 Task, or explicitly declare a nontransition event stream. Not required merely to run an autonomous Bot. |
 | MethodPolicy / OpenMethodPolicy | [method_policies.py](method_policies.py) | Typed L6 product policy variants, scoped to a required Method in `composition.policies`. Currently only Open declares one; other Methods need no placeholder policy. |
 | OpenAdmissionPolicy / OpenPublicationProfile | [publication.py](publication.py) | Shared participation/role/capacity constraints, ADMITTED delivery gate and partial-failure behavior. Concrete products own specialized admission strategies and step order; L6 does not execute them. |
-| ProductInstance | [instance.py](instance.py) | Durable selection/evidence references: Collet and independent root Task IDs, product and selected Task/workflow/domain versions, actual top-level MethodBinding ID, selected Method versions, RoleBinding references, governance requirements and negotiation result. No independent lifecycle state. |
+| ProductInstance | [instance.py](instance.py) | Durable selection/evidence references: Collet and independent root Task IDs, product and selected Task/workflow/domain versions, actual MethodBinding references for the pinned topology, selected Method versions, actual RoleBinding references, pinned participant eligibility, governance requirements and negotiation result. No independent lifecycle state. |
 | Compatibility selection | `negotiate(profile, offer)` | Exact required profile/Method/ACCS/layer/extension/governance match. Reports missing required and omitted optional capabilities separately. Never silently chooses a newer version or weaker policy. |
 
 `profiles.py` retains the wire ID enums for compatibility; IDs alone are not
@@ -158,6 +159,51 @@ existing repository/MethodStore contracts and invoke lower-layer operations;
 concrete product services and DI remain outside L6.
 Shared G4 enforcement lives in
 [`g4_contracts_consistency/product_contract.py`](../g4_contracts_consistency/product_contract.py).
+
+## Participant eligibility and runtime authorization
+
+`ProductProfileCreateCommand` and `ProductProfileDefinition` accept a typed,
+immutable `participant_scope`. This is a **local Profile contract**, not a new
+ACCS Participation operation or MethodProfile. Omission retains `OPEN` for
+existing authored profiles:
+
+```python
+from agentclaw.community.core.task.context_collab.l6_products.participant_scope import (
+    ParticipantScope,
+    ParticipantScopeKind,
+)
+
+# All valid Agents are eligible; none becomes a participant just by being eligible.
+open_scope = ParticipantScope()
+restricted_scope = ParticipantScope(
+    ParticipantScopeKind.ALLOWLIST,
+    (AgentRef("bot", "worker"), AgentRef("service", "reviewer")),
+)
+# ProductProfileCreateCommand(..., participant_scope=restricted_scope)
+```
+
+`OPEN` cannot carry an allowlist. An empty `ALLOWLIST` admits no Agents.
+Agent identity includes both type and ID; duplicates, malformed references and
+unknown serialized fields are rejected. Scope concerns Agent eligibility, not
+the responsible Principal's ownership or L3 resource permissions.
+
+ProductInstance pins the selected exact version's scope. Runtime G1 checks that
+scope against the authenticated actual Agent on **both generic L4 and product
+append/Work paths**, before structural executor/public-contribution permission.
+A caller-supplied event actor, role reference or forged Task assignment cannot
+bypass this fence. Passing it is necessary, not sufficient: actual role, Task,
+Open admission and Single selection checks still apply. Catalog installation of
+a newer OPEN version does not widen an older restricted instance. A historical
+instance without the scope field decodes as OPEN only when consistent with its
+exact pinned definition; a restricted Profile cannot silently downgrade.
+
+The SQL read decoder resolves this evidence from the same read snapshot used by
+G1/G4, without a second collaboration query or an L4-to-L6 dependency. The legacy
+combined upper-layer creation path also validates eligibility and writes actual
+initial participation in its creation Event; its historical revision/wire shape
+is retained. This is not a general dynamic invite/join/leave/remove service or
+a new eligibility policy for every independent L5 Open operation.
+See [scope/storage/security tests](../../../../../../../tests/community/repository/task/context_collab/test_participant_scope.py).
 
 ## Optional domain and product orchestration
 
@@ -310,10 +356,11 @@ column/table names and tenant/env isolation remain unchanged.
 
 ### Explicit installation on an existing Collet
 
-Pure L4 `create_collet(ColletCreateCommand, context)` does not select a Profile,
-Method or bindings. Its input contains only space, initiator reference,
-objective and zero/one/many designated executor references. To apply a product,
-call the separate L6-owned
+Pure L4 `create_collet(ColletCreateCommand, context)` creates unassigned Work;
+it does not select a Profile, Method, participants or bindings. Its required
+inputs are space, initiator reference and objective (optional context description
+is keyword-only). To apply a product, pass the product's initial Agent identities
+to the separate L6-owned
 [`ProductInstantiationServiceProtocol`](operations/contracts.py):
 
 ```python
@@ -322,30 +369,49 @@ instance = product_instantiation.instantiate(
         collet_id=collet.collet_id,
         profile_ref=profile.ref,
         expected_version=collet.version,
+        participant_refs=(worker, reviewer),
+        executor_ref=worker,
     ),
     actor_context,
 )
+# Instantiation advances Collet/Task to revision 2: re-read before Work.start.
 ```
 
 [`operations/product_instantiation.py`](operations/product_instantiation.py)
 authorizes only the Collet initiator or responsible principal and resolves the
-exact installed version; it never selects latest. The repository CAS installs
-immutable selection on an untouched Collet/root Task (both revision 1), rejecting
-stale, repeated or conflicting selections. It validates the selection against
-the existing objective, typed executor and creation evidence. The original Task
-and Event remain unchanged, as do their revisions and the Collet event head.
-The L6 operation then invokes L5 initialization for the pinned Method and role references.
+exact installed version, never latest. Every initial Agent (including those not
+assigned to execute) must satisfy the Profile's participant scope before writes.
+The repository CAS installs immutable selection on an untouched Collet/root Task
+(both revision 1), rejecting stale, repeated, conflicting or already-assigned
+selection. It revalidates the scope, role subjects, objective and creation evidence
+inside the SQL transaction.
+
+The **same SQL transaction** persists ProductInstance plus actual L4 Participants
+and RoleBindings, assigns the designated Task executor, and appends the internal
+`task.participants_bound` Event with those facts. The original `task.created`
+Event remains immutable; Task and Collet revisions become 2, their event heads
+and audit are advanced, and state/completion remain unchanged. Role references
+resolve to actual L4 facts, not merely generated strings; G4 checks these actual
+bindings, with a compatibility fallback only for historical rows without such
+participation evidence. New scoped instances missing their binding evidence
+fail closed when read. No new membership table or public event-writing operation
+is introduced. L6 then invokes L5 initialization for the pinned Method topology.
 
 **Current product limit:** ScenarioRole's `executor_ref` source is scalar.
-This installation path rejects multiple designated executors rather than dropping
-all but the first; required-role rules may also reject unassigned Tasks. These
-are upper-layer product constraints, not restrictions on L4 creation. Supporting
-multi-subject product roles requires a separate contract evolution.
+A sole initial Agent defaults to that source. Multiple initial Agents are valid,
+but a Profile requiring this role needs an explicit `executor_ref` among them;
+the other Agents are Participants, not automatically executors or role holders.
+An empty initial set is valid only when the selected Method/Task/role contracts
+permit it. This is distinct from L4 Task's existing multi-executor storage model;
+general multi-subject product role mapping is not added here.
 
 SQL selection and MethodStore writes are separate transactions. A SQL error
-rolls back selection and no binding is created. A MethodStore error propagates;
-SQL selection may already be committed, and the existing top-level recovery
-adapter can rebuild that binding. Retrying installation cannot replace selection.
+rolls back selection, participation, roles, assignment and the binding Event; no
+Method binding is created. A MethodStore error propagates;
+SQL selection may already be committed. The recovery adapter validates the requested
+reference against the pinned topology, then fills all missing bindings and edges,
+including after a partial write. It preserves existing lifecycle/audit facts and
+never reactivates terminated bindings or detached edges. Retrying installation cannot replace selection.
 A method-independent Collet cannot be healed into an invented default Method.
 [SQLite tests](../../../../../../../tests/community/repository/task/context_collab/test_product_instantiation.py)
 cover these boundaries and the [commission journey](../../../../../../../tests/community/core/task/context_collab/products/test_task_commission_end_to_end.py)
@@ -372,9 +438,10 @@ the pure L4 command:
    The instance occupies the reserved `product_instance` member of the existing
    `creation_facts` JSON column. L6 owns selection decoding; L4 Collet/Task do not
    depend on that decoder or own product configuration.
-4. Existing L5 projection creates an explicit top-level MethodBinding. Its
-   `profile_versions` come from the pinned product definition; its
-   `role_binding_refs` identify the same declared roles as ProductInstance.
+4. L5 projection creates the selected Method topology: independent bindings and
+   declared edges for explicit relations, or the historical single-binding shape
+   otherwise. Each binding's `profile_versions` come from the pinned product
+   definition; its `role_binding_refs` identify the same declared roles as ProductInstance.
    Runtime role checks resolve their typed subjects from L4 Task. A role ref
    is a local, Collet-qualified `(role, participant)` reference, not an independent
    identity or resource permission authority. Commission @1 retains pure Open;
@@ -464,19 +531,38 @@ ProductInstance referencing one Collet and its independent root Task:
 ```text
 task_commission@2 (ProductProfile)
   └─ ProductInstance → existing Collet → root Task (and any L4 subtasks)
-       ├─ MethodBinding: Open@0.2 + Single@0.2
+       ├─ MethodBinding: Open@0.2    (opportunity/application/admission)
+       ├─ MethodBinding: Single@0.2  (selection/execution handoff)
+       ├─ MethodCompositionEdge: Single --support--> Open
        ├─ owner/assignee RoleBinding refs
        └─ pinned contracts, governance, negotiation and creation evidence
 ```
 
 This is the implementation's product mapping, not an ACCS-wide 1:1 constraint.
-The current runtime uses one explicit composite top-level MethodBinding, not
-implicit Open/Single child bindings. `method_binding_refs` link to L5 authority:
+The @2 template explicitly declares two Method Profiles and a
+`MethodRelationTemplate("Single", "Open", SUPPORT)`. One L6 Instantiate creates
+both independent bindings and their L5 edge; it does not require two client RPCs
+or wait for admission before binding Single. The relation means Open supports
+Single's candidate participation, not that Single calls Open automatically.
+[Topology reference resolution](topology.py) pins deterministic `mb_open_<collet>`
+and `mb_single_<collet>` IDs in required-Profile order. Each binding contains only
+its own Method name/version. `method_binding_refs` link to L5 authority:
 OpenOpportunity/Application/AdmissionDecision and SingleSelection remain there,
 not copied into ProductInstance. A materialized assignee role is designation,
-not Open admission or Single selection. Instantiation initializes the binding
+not Open admission or Single selection. Instantiation initializes both bindings
 before publication, without creating an opportunity, application or selection.
 The product instance has no independent Task/Method lifecycle or status mirror.
+Open opportunity/application/decision/participation stay under the Open binding;
+SingleSelection stays under the Single binding. Product dispatch and executor
+reports carry the Single binding reference. The Work gate requires both ACTIVE
+bindings, their active declared composition, and correlated admission/selection.
+Suspending either binding does not suspend its peer or rewrite ProductInstance.
+
+Profiles without explicit relations retain their historical single-binding path
+(including pure Open @1 and legacy Open + Group). No migration of previously
+generated experimental composite @2 snapshots is provided: strict reload rejects
+mismatched binding references rather than silently moving admission/selection
+history to newly invented partitions.
 
 `root_task_ref` is an explicit local ProductInstance reference, validated against
 the authoritative L4 root Task on creation, attachment and reload. It is not a
@@ -522,6 +608,9 @@ The [Open + Single regression suite](../../../../../../../tests/community/core/t
 also exercises the actual product and signed HTTP Apply orchestration (admit,
 select, then dispatch/permit execution), selection release, wrong scope/participant/evidence/selector/
 validity window, strict root-reference persistence and historical decoding.
+The [Method topology regressions](../../../../../../../tests/community/core/task/context_collab/products/test_task_commission_method_topology.py)
+cover exact independent partitions, execution-reference correlation, restart and
+partial-write recovery, unknown-ID rejection and non-reactivation of lifecycle facts.
 `task_commission@1` remains installed unchanged; selecting @2 is explicit,
 not an implicit default/version migration. The product still bounds eligibility
 to a designated Bot; it is not an unrestricted public multi-candidate market.
