@@ -66,7 +66,7 @@ the code of each task; each group ends with its crate's tests green.
 
 ## Group 5 — A2A adapter (C2)
 
-- [ ] 5.0 Low-level clients keep the connect-phase signal (REST, JSON-RPC,
+- [x] 5.0 Low-level clients keep the connect-phase signal (REST, JSON-RPC,
   SSE open, gRPC) as a fixed marker; unit tests per binding; existing delivery
   suites unchanged and green.
 - [ ] 5.1 `DistAgentResolver`, `A2aDistAgentClient::start` / `send_input`
