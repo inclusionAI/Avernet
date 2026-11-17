@@ -81,7 +81,7 @@ def test_query_only_returns_open_opportunities(published, state):
     opportunity = store.get_opportunity(AXES, "opp_alpha", binding, COLLET_ID)
     store.update_opportunity_state(AXES, replace(opportunity, state=state), COLLET_ID)
     before = _snapshot(store, binding)
-    result = service.query_opportunities(actor_context=make_actor())
+    result = service.query_opportunities_by_skill(actor_context=make_actor())
     assert bool(result) is (state is OpportunityState.OPEN)
     assert _snapshot(store, binding) == before
 
@@ -105,7 +105,7 @@ def test_query_obeys_the_application_window(
         COLLET_ID,
     )
     before = _snapshot(store, binding)
-    assert bool(service.query_opportunities(actor_context=make_actor())) is visible
+    assert bool(service.query_opportunities_by_skill(actor_context=make_actor())) is visible
     assert _snapshot(store, binding) == before
 
 
@@ -126,7 +126,7 @@ def test_query_uses_the_same_capacity_states_as_application(published, state, ca
         COLLET_ID,
     )
     before = _snapshot(store, binding)
-    result = service.query_opportunities(actor_context=make_actor())
+    result = service.query_opportunities_by_skill(actor_context=make_actor())
     occupied = state in {
         ApplicationState.SUBMITTED,
         ApplicationState.SCREENING,
@@ -161,7 +161,7 @@ def test_capacity_is_isolated_per_opportunity_and_binding(published):
     store.replace_binding(AXES, replace(original_binding, state=BindingState.SUSPENDED))
     service.publish_opportunity(opportunity_command(capacity=1))
     store.replace_binding(AXES, original_binding)
-    results = service.query_opportunities(actor_context=make_actor())
+    results = service.query_opportunities_by_skill(actor_context=make_actor())
     assert [(item.method_binding_id, item.opportunity_id) for item in results] == [
         (binding, "opp_free"),
         ("mb_other", "opp_alpha"),
@@ -177,7 +177,7 @@ def test_query_omits_inactive_bindings(published, state):
         AXES, replace(store.get_binding(AXES, binding, COLLET_ID), state=state)
     )
     before = _snapshot(store, binding)
-    assert service.query_opportunities(actor_context=make_actor()) == ()
+    assert service.query_opportunities_by_skill(actor_context=make_actor()) == ()
     assert _snapshot(store, binding) == before
 
 
@@ -193,7 +193,7 @@ def test_query_omits_non_open_bindings(published):
         ),
     )
     before = _snapshot(store, binding)
-    assert service.query_opportunities(actor_context=make_actor()) == ()
+    assert service.query_opportunities_by_skill(actor_context=make_actor()) == ()
     assert _snapshot(store, binding) == before
 
 
@@ -204,18 +204,18 @@ def test_query_accepts_only_actor_context(published):
         OpenMethodService.query_opportunities,
     ):
         assert list(inspect.signature(method).parameters) == ["self", "actor_context"]
-    assert service.query_opportunities(make_actor()) == service.query_opportunities(
+    assert service.query_opportunities_by_skill(make_actor()) == service.query_opportunities_by_skill(
         actor_context=make_actor()
     )
     with pytest.raises(TypeError):
-        service.query_opportunities(COLLET_ID, binding, make_actor())
+        service.query_opportunities_by_skill(COLLET_ID, binding, make_actor())
     with pytest.raises(TypeError):
-        service.query_opportunities(context=make_actor())
+        service.query_opportunities_by_skill(context=make_actor())
 
 
 def test_query_without_bindings_returns_an_empty_tuple():
     store, _, _, service = make_open_service()
-    assert service.query_opportunities(actor_context=make_actor()) == ()
+    assert service.query_opportunities_by_skill(actor_context=make_actor()) == ()
     assert store.list_bindings_in_axes(AXES) == []
 
 
@@ -254,7 +254,7 @@ def test_query_discovers_multiple_collets_without_mixing_capacity(published):
     other = replace(first, scope_ref=other_collet, capacity=1)
     store.insert_opportunity(AXES, other, other_collet)
     before = (_snapshot(store, binding), _snapshot(store, binding, other_collet))
-    assert service.query_opportunities(actor_context=make_actor()) == (other,)
+    assert service.query_opportunities_by_skill(actor_context=make_actor()) == (other,)
     assert (
         _snapshot(store, binding),
         _snapshot(store, binding, other_collet),
@@ -285,7 +285,7 @@ def test_query_does_not_expose_other_tenants_or_environments(published, foreign_
     store.insert_opportunity(
         foreign_axes, replace(local, opportunity_id="opp_foreign"), COLLET_ID
     )
-    [result] = service.query_opportunities(actor_context=make_actor())
+    [result] = service.query_opportunities_by_skill(actor_context=make_actor())
     assert result.opportunity_id == "opp_alpha"
     assert result.capacity == 1
 

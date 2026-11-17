@@ -233,7 +233,7 @@ def test_publish_opens_immediately_at_server_time_in_own_collet(publication):
     assert opens_at.utcoffset() == timedelta(0)
     assert row.transitioned_at == row.opens_at
     assert row.scope_ref == COLLET_ID
-    assert service.query_opportunities(actor_context=make_actor()) == (row,)
+    assert service.query_opportunities_by_skill(actor_context=make_actor()) == (row,)
 
 
 @pytest.mark.parametrize("transition", [None, "pause_opportunity", "close_opportunity"])
@@ -263,4 +263,4 @@ def test_publish_replay_keeps_first_timestamp_and_state_after_expiry(
         AXES, first.object_id, binding.method_binding_id, COLLET_ID
     ) is row
     assert store.list_opportunities(AXES, binding.method_binding_id, COLLET_ID) == [row]
-    assert service.query_opportunities(actor_context=make_actor()) == ()
+    assert service.query_opportunities_by_skill(actor_context=make_actor()) == ()
