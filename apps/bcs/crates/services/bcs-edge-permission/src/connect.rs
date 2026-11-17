@@ -9,7 +9,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tracing::{info, warn};
 use uuid::Uuid;
-use bcs_domain::actor::ActorKind;
+use bcs_domain::actor::{ActorKind, ActorStatus};
 use bcs_domain::edge_permission::{
     EdgeGrant, EdgeStatus,
     FriendListEntry, GrantKind, OriginatorPolicyType, PermissionRequest, RequestKind,
@@ -188,6 +188,96 @@ impl DbConnectService {
                 request_id = %request_id,
                 "permission request lookup missed"
             ),
+        }
+    }
+
+    /// Batch-enrich friend-list entries with `name`, `summary`, and `is_online`
+    /// from the bot registry and user directory.
+    ///
+    /// Bot actors are enriched via `collaboration_registry.try_get_many` (name +
+    /// summary) and `try_runtime_activity_for` (is_online). Human actors are
+    /// resolved via `user_directory.lookup_by_staff_no` → `nick_name`.
+    ///
+    /// This method is best-effort: missing registries, lookup failures, or
+    /// absent profiles leave the defaults (`name=None`, `is_online=false`)
+    /// unchanged so callers always get a usable response regardless of backend
+    /// availability.
+    async fn enrich_friend_entries(&self, entries: &mut [FriendListEntry]) {
+        // ── Bot enrichment ──────────────────────────────────────────────
+        let bot_ids: Vec<String> = entries
+            .iter()
+            .filter(|e| e.kind == ActorKind::Bot)
+            .map(|e| e.actor_id.clone())
+            .collect();
+
+        if !bot_ids.is_empty() {
+            if let Some(registry) = &self.collaboration_registry {
+                if let Ok(bots) = registry.try_get_many(&bot_ids).await {
+                    let name_map: std::collections::HashMap<&str, Option<String>> = bots
+                        .iter()
+                        .map(|b| (b.bot_uuid.as_str(), b.capabilities.name.clone()))
+                        .collect();
+                    let summary_map: std::collections::HashMap<&str, Option<String>> = bots
+                        .iter()
+                        .map(|b| (b.bot_uuid.as_str(), b.capabilities.summary.clone()))
+                        .collect();
+
+                    let online_candidates: Vec<String> = bots
+                        .iter()
+                        .filter(|b| {
+                            b.actor_kind == ActorKind::Bot
+                                && b.status == ActorStatus::Online
+                        })
+                        .map(|b| b.bot_uuid.clone())
+                        .collect();
+                    let active = if online_candidates.is_empty() {
+                        HashSet::new()
+                    } else {
+                        registry
+                            .try_runtime_activity_for(&online_candidates)
+                            .await
+                            .map(|snapshot| snapshot.active_bot_ids)
+                            .unwrap_or_default()
+                    };
+
+                    for entry in entries.iter_mut().filter(|e| e.kind == ActorKind::Bot) {
+                        if let Some(name) = name_map.get(entry.actor_id.as_str()) {
+                            entry.name = name.clone();
+                        }
+                        if let Some(summary) = summary_map.get(entry.actor_id.as_str()) {
+                            entry.summary = summary.clone();
+                        }
+                        entry.is_online = active.contains(&entry.actor_id);
+                    }
+                }
+            }
+        }
+
+        // ── Human enrichment ────────────────────────────────────────────
+        if let Some(user_directory) = &self.user_directory {
+            for entry in entries.iter_mut().filter(|e| e.kind == ActorKind::Human) {
+                let Some(staff_no) = entry.actor_id.strip_prefix("human_") else {
+                    continue;
+                };
+                match user_directory.lookup_by_staff_no(staff_no).await {
+                    Ok(Some(profile)) => {
+                        entry.name = profile
+                            .nick_name
+                            .as_deref()
+                            .map(str::trim)
+                            .filter(|n| !n.is_empty())
+                            .map(|n| n.to_string());
+                    }
+                    Ok(None) => {
+                        // No profile; name stays None — frontend falls back to
+                        // staff-no display.
+                    }
+                    Err(_) => {
+                        // Lookup failed; name stays None — frontend falls back
+                        // to staff-no display.
+                    }
+                }
+            }
         }
     }
 }
