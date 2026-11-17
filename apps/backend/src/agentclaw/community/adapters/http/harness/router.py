@@ -539,9 +539,9 @@ async def _run_scan(
         )
         all_findings: list[Finding] = []
 
-        # Pre-check: ensure bot files are not all empty
-        all_empty = True
-        reads_confirmed = bool(file_types)
+        # Pre-check: diagnostics need at least one readable, non-empty file.
+        has_config_content = False
+        failed_reads: set[str] = set()
         for ft in file_types:
             try:
                 ref = await scanner._bot_profile.read_file(
@@ -549,25 +549,31 @@ async def _run_scan(
                     publish_id=progress.bot_publish_id,
                 )
                 if ref and ref.content and ref.content.strip():
-                    all_empty = False
+                    has_config_content = True
                     break
             except Exception:
-                reads_confirmed = False
-        if all_empty:
-            logger.warning("[/diagnose] All bot files are empty for bot=%s", bot_id)
-            progress.status = "failed"
-            progress.failed_reason = (
-                "请先给 Bot 发一条消息完成初始化，再回来运行健康检测。"
-                if show_initialization_hint and reads_confirmed
-                else "请耐心等待配置文件同步完成后，再执行诊断"
+                failed_reads.add(ft)
+        if not has_config_content:
+            logger.warning(
+                "[/diagnose] No configuration content for bot=%s; failed reads=%s",
+                bot_id, sorted(failed_reads),
             )
+            progress.status = "failed"
+            if failed_reads:
+                progress.failed_reason = "Bot 配置文件读取失败。请确认 Bot 可访问后重试。"
+            elif show_initialization_hint and file_types:
+                progress.failed_reason = "请先给 Bot 发一条消息完成初始化，再回来运行健康检测。"
+            else:
+                progress.failed_reason = "未读取到健康检测所需的 Bot 配置内容。请检查配置后重试。"
             for i, p in enumerate(progress.diagnose_progress):
                 progress.diagnose_progress[i] = FileProgressItem(
                     check_item=p.check_item,
                     status="error",
                     cost=p.cost,
                     result="error",
-                    result_detail="md 文件为空",
+                    result_detail=(
+                        "配置文件读取失败" if p.check_item in failed_reads else "未读到配置内容"
+                    ),
                     score=0,
                 )
             # Persist error check_items to DB
