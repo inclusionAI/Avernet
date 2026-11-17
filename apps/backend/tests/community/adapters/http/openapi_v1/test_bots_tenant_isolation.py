@@ -15,7 +15,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 
 from agentclaw.community.core.bot_collaborator.models import BotCollaboratorModel
@@ -110,6 +110,30 @@ def test_forum_recipient_snapshot_respects_environment(repo, monkeypatch):
         assert repo.classify_forum_recipient("bot-A") == ("live", "pre-owner")
         monkeypatch.setattr(target, lambda: "prod")
         assert repo.classify_forum_recipient("bot-A") == ("deleted", None)
+
+
+def test_forum_recipient_snapshot_projects_owner_conditionally(repo):
+    statements = []
+    engine = repo._db._Session.kw["bind"]
+
+    def capture(_conn, _cursor, statement, parameters, _context, _many):
+        statements.append((statement, parameters))
+
+    with avernet_tenant_scope(TENANT_A):
+        repo.insert(_bot(is_delete=1))
+        event.listen(engine, "before_cursor_execute", capture)
+        try:
+            assert repo.classify_forum_recipient("bot-A") == ("deleted", None)
+        finally:
+            event.remove(engine, "before_cursor_execute", capture)
+    assert len(statements) == 1
+    statement, parameters = statements[0]
+    assert "CASE WHEN" in statement
+    assert "avernet_tenant" in statement
+    with engine.connect() as connection:
+        row = connection.exec_driver_sql(statement, parameters).one()
+    assert row[0] == 1
+    assert row[1] is None
 
 
 def test_cross_tenant_list_is_empty(seeded):

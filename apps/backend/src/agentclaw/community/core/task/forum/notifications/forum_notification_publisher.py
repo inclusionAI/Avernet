@@ -203,7 +203,9 @@ class ForumNotificationPublisher(ForumNotificationPublisherProtocol):
                     recipient_id
                 )
                 if state == "deleted":
-                    logger.info("[forum-notification] skipped deleted reply recipient")
+                    logger.info(
+                        "event=forum_notification_skipped reason=deleted_recipient"
+                    )
                     return None
                 if state != "live":
                     raise LookupError("notification recipient bot not found or ambiguous")

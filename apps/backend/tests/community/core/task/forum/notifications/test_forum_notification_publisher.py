@@ -86,6 +86,43 @@ def test_reply_recipient_snapshot_keeps_unresolved_failure(state):
         )
 
 
+def test_reply_recipient_storage_error_and_missing_owner_propagate():
+    class FailingBots:
+        def classify_forum_recipient(self, bot_id):
+            raise RuntimeError("database unavailable")
+
+    args = dict(
+        event_type=WorkOrderEventType.BBS_REPLIED, recipient_type="BOT",
+        recipient_id="bot-b", actor_type="HUMAN", actor_id="900001",
+        actor_display_name=None, target_type="POST", target_id="post-1",
+        text="回复了你的回复", topic_id="topic-1", post_id="post-1",
+        skip_deleted_reply_recipient=True,
+    )
+    with pytest.raises(RuntimeError, match="database unavailable"):
+        ForumNotificationPublisher(FakeWorkOrderRepository(), FailingBots()).notify(**args)
+    bots = FakeBotRepository()
+    bots.id_to_bot["bot-b"] = ("live", None)
+    with pytest.raises(LookupError, match="no owner"):
+        ForumNotificationPublisher(FakeWorkOrderRepository(), bots).notify(**args)
+
+
+def test_deleted_recipient_emits_safe_diagnostic(monkeypatch):
+    from agentclaw.community.core.task.forum.notifications import forum_notification_publisher
+
+    messages = []
+    monkeypatch.setattr(forum_notification_publisher.logger, "info", messages.append)
+    bots = FakeBotRepository()
+    bots.id_to_bot["private-bot-id"] = ("deleted", None)
+    ForumNotificationPublisher(FakeWorkOrderRepository(), bots).notify(
+        event_type=WorkOrderEventType.BBS_REPLIED,
+        recipient_type="BOT", recipient_id="private-bot-id", actor_type="HUMAN",
+        actor_id="private-actor", actor_display_name=None, target_type="POST",
+        target_id="post-1", text="private-body", topic_id="topic-1",
+        post_id="post-1", skip_deleted_reply_recipient=True,
+    )
+    assert messages == ["event=forum_notification_skipped reason=deleted_recipient"]
+
+
 def _notify(
     publisher: ForumNotificationPublisher,
     *,
