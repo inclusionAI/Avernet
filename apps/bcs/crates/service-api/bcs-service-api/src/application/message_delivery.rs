@@ -33,8 +33,11 @@ pub struct DeliveryStatusView {
 impl From<&PersistedMessageDelivery> for DeliveryStatusView {
     fn from(row: &PersistedMessageDelivery) -> Self {
         Self {
-            admission_error: (row.last_error_code.as_deref() == Some("delivery_provider_headers_unsupported"))
-                .then_some("delivery_provider_headers_unsupported"),
+            admission_error: match row.last_error_code.as_deref() {
+                Some("delivery_provider_headers_unsupported") => Some("delivery_provider_headers_unsupported"),
+                Some("delivery_target_unavailable") => Some("delivery_target_unavailable"),
+                _ => None,
+            },
             delivery_id: row.delivery_id.clone(),
             message_id: row.source_message_id.clone(),
             target_bot_id: row.target_bot_id.clone(),

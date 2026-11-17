@@ -167,6 +167,21 @@ def _redact_content(content: str) -> str:
             if value_start >= 0 and value_end >= 0:
                 spans.append((value_start, value_end))
 
+    try:
+        statement = ast.parse(content.strip().rstrip(","))
+    except (SyntaxError, ValueError):
+        pass
+    else:
+        if any(
+            isinstance(item, ast.JoinedStr) and any(
+                isinstance(part, ast.Constant) and isinstance(part.value, str)
+                and _looks_like_plaintext_value(part.value)
+                for part in ast.walk(item)
+            )
+            for item in ast.walk(statement)
+        ):
+            spans.append((0, len(content)))
+
     if not spans:
         return content
 
@@ -292,7 +307,7 @@ def _python_reference_is_safe(
     try:
         node = ast.parse(expression, mode="eval").body
     except (SyntaxError, ValueError):
-        return False
+        node = None
 
     def safe(value: ast.AST) -> bool:
         if isinstance(value, ast.Name):
@@ -310,12 +325,16 @@ def _python_reference_is_safe(
                 and PYTHON_FIELD_NAME_RE.fullmatch(value.slice.value)
             )
             return safe(value.value) and (bool(field_name) or safe(value.slice))
+        if isinstance(value, ast.BinOp):
+            return safe(value.left) and safe(value.right)
         if isinstance(value, ast.BoolOp):
             return all(safe(item) for item in value.values)
         if isinstance(value, ast.JoinedStr):
             return all(safe(item) for item in value.values)
         if isinstance(value, ast.FormattedValue):
-            return safe(value.value)
+            return safe(value.value) and (
+                value.format_spec is None or safe(value.format_spec)
+            )
         if isinstance(value, ast.Call):
             args = value.args
             # Only a mapping lookup's first argument names a field. Defaults,
@@ -340,6 +359,30 @@ def _python_reference_is_safe(
             )
         return False
 
+    if node is None:
+        # A credential-named field may be inside a formatted Cookie string.
+        # Parse the containing statement and require every string component,
+        # including literal prefixes/suffixes, to pass the existing checks.
+        try:
+            statement = ast.parse(stripped)
+        except (SyntaxError, ValueError):
+            return False
+        if len(statement.body) != 1 or not isinstance(
+            statement.body[0], (ast.Assign, ast.AnnAssign, ast.Expr)
+        ):
+            return False
+        enclosing_value = statement.body[0].value
+        if enclosing_value is None or not safe(enclosing_value):
+            return False
+        offset = len(content) - len(content.lstrip())
+        column = len(content[offset:assignment.start()].encode("utf-8"))
+        return any(
+            isinstance(item, ast.JoinedStr)
+            and item.lineno == item.end_lineno == 1
+            and item.col_offset <= column < item.end_col_offset
+            and safe(item)
+            for item in ast.walk(statement)
+        )
     return isinstance(
         node,
         (ast.Name, ast.Attribute, ast.Call, ast.Subscript, ast.BoolOp, ast.JoinedStr, ast.Tuple),
@@ -351,8 +394,9 @@ def _python_reference_is_safe(
 # expression exemption, including literals nested in constructors/macros.
 RUST_STRING_RE = re.compile(r'(?:b?r(?P<hashes>\#*)"(?P<raw>.*?)"(?P=hashes)|b?"(?P<escaped>(?:\\.|[^"\\])*)")')
 RUST_TYPE_FIELD_RE = re.compile(
-    r"^\s*pub(?:\(crate\))?\s+\w+\s*:\s*"
-    r"(?:[A-Za-z_]\w*::)*[A-Z]\w*(?:<(?:[A-Za-z_]\w*::)*[A-Z]\w*>)?\s*,?\s*$"
+    r"(?:^|[({,])\s*(?:pub(?:\(crate\))?\s+)?\w+\s*:\s*"
+    r"(?:[A-Za-z_]\w*::)*(?:[A-Z]\w*|&str)"
+    r"(?:<(?:[A-Za-z_]\w*::)*(?:[A-Z]\w*|&str)>)?\s*(?=[,)}]|$)"
 )
 
 
@@ -396,7 +440,16 @@ def _rust_assignment(content: str, assignment: re.Match[str]) -> tuple[bool, boo
     skeleton = RUST_STRING_RE.sub(replace_literal, expression)
     if suspicious:
         return False, True
-    if RUST_TYPE_FIELD_RE.fullmatch(content):
+    # Braced initializer fields carry values, even when a value looks like a
+    # type name. Only a struct declaration can introduce inline type fields.
+    before_field = content[:assignment.start()]
+    declaration = "{" not in before_field or re.fullmatch(
+        r"\s*(?:pub(?:\(crate\))?\s+)?struct\s+\w+\s*\{[^{}]*\}\s*;?\s*", content
+    )
+    if declaration and any(
+        match.start() <= assignment.start() < match.end()
+        for match in RUST_TYPE_FIELD_RE.finditer(content)
+    ):
         return True, False
     # Require a path/member access or call: an arbitrary bare high-entropy
     # identifier must never be mistaken for a runtime expression.

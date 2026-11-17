@@ -98,9 +98,7 @@ describe("online service session NAS instance correction", () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     vi.spyOn(console, "error").mockImplementation(() => {});
     const service = { create: vi.fn().mockRejectedValueOnce(new Error("storage unavailable")).mockResolvedValue({ status: "accepted" }) };
-    const config = { findByKey: vi.fn().mockResolvedValue({ enabled: 1, config_json: JSON.stringify({
-      allowed_bots: [{ bot_id: event.botId, entity_id: event.entityId, env: event.env }],
-    }) }) };
+    const config = { find: vi.fn().mockResolvedValue({ botId: event.botId, entityId: event.entityId, env: event.env, diagnosisEnabled: true, recoveryEnabled: true, configJson: '{}', version: 1 }) };
     const trigger = createMonitoringRecoveryTrigger({ config, service });
     const parsed = parse({ sessionNasPath });
     await expect(trigger.trigger(parsed)).rejects.toMatchObject({ code: "NOT_READY" });

@@ -48,7 +48,11 @@ pub(super) fn map_status_to_domain(status: V1SessionStatus) -> DomainSessionStat
     }
 }
 
-pub(super) fn project_summary(session: &Session, avatars: &BotAvatarMap) -> SessionSummary {
+pub(super) fn project_summary(
+    session: &Session,
+    avatars: &BotAvatarMap,
+    last_activity_at: Option<u64>,
+) -> SessionSummary {
     // Design §5.2: the lightweight rows' names are THIS Session's own member
     // snapshots (null allowed, session-only dynamic members included) and are
     // never backfilled from the registry; the avatar column comes from the
@@ -66,6 +70,7 @@ pub(super) fn project_summary(session: &Session, avatars: &BotAvatarMap) -> Sess
         created_by: session.created_by.clone(),
         created_at: session.created_at,
         updated_at: session.updated_at,
+        last_activity_at,
         collected: None,
         participants,
     }

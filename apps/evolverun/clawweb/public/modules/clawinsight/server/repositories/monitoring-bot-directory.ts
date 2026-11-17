@@ -18,7 +18,7 @@ export class SqlMonitoringBotDirectory implements MonitoringBotDirectory {
   }
   private async rows(where: string[], params: unknown[], limit: number): Promise<DirectoryBot[]> {
     try {
-      const rows = await this.db.query(`SELECT CAST(id AS ${this.db.dbType === 'sqlite' ? 'TEXT' : 'CHAR'}) AS directory_id, active_engine, bot_name, bot_id, entity_id, env, owner_id, owner_name
+      const rows = await this.db.query(`SELECT CAST(id AS ${this.db.dbType === 'sqlite' ? 'TEXT' : 'CHAR'}) AS directory_id, active_engine, bot_name, bot_id, entity_id, env, owner_id, owner_name, bot_type
         FROM ac_bots WHERE ${where.join(' AND ')} ORDER BY id DESC LIMIT ?`, [...params, limit]);
       return rows.map(this.decode);
     } catch { throw new MonitoringError('NOT_READY', 'Bot 目录暂不可用或目录数据不完整。'); }
@@ -27,7 +27,8 @@ export class SqlMonitoringBotDirectory implements MonitoringBotDirectory {
     if (!/^\d+$/.test(String(row.directory_id)) || typeof row.owner_id !== 'string' || !row.owner_id.trim()) throw new Error('Invalid directory row');
     return { ...target({ botId: row.bot_id as string, entityId: row.entity_id as string, env: row.env as string }),
       directoryId: String(row.directory_id), activeEngine: String(row.active_engine ?? ''), botName: typeof row.bot_name === 'string' && row.bot_name.trim() ? row.bot_name : '未命名 Bot',
-      ownerId: row.owner_id, ownerName: row.owner_name == null ? null : String(row.owner_name) };
+      ownerId: row.owner_id, ownerName: row.owner_name == null ? null : String(row.owner_name),
+      botType: typeof row.bot_type === 'string' ? row.bot_type : null };
   }
   async exact(botId: string, scope: DirectoryScope): Promise<DirectoryBot[]> {
     const { where, params } = this.scope(scope);

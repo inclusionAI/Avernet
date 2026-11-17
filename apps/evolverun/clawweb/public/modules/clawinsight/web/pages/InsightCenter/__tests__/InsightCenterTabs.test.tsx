@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, useLocation } from 'react-router-dom'
 import userEvent from '@testing-library/user-event'
 
 const mocks = vi.hoisted(() => ({
@@ -29,6 +29,9 @@ vi.mock('../AdminReviewQueue', () => ({
 }))
 
 vi.mock('../monitoring/MonitoringPanel', () => ({ default: () => <div>MONITORING_CONTENT</div> }))
+vi.mock('../monitoring/session-recovery/SessionRecoveryList', () => ({ SessionRecoveryList: () => <div>RECOVERY_LIST</div> }))
+vi.mock('../monitoring/MonitoringSettings', () => ({ MonitoringSettings: ({ onClose }: { onClose: () => void }) =>
+  <div role="dialog" aria-label="诊断监控设置"><button onClick={onClose}>关闭设置</button></div> }))
 
 import InsightCenter from '../index'
 
@@ -77,6 +80,16 @@ describe('Insight Center tabs', () => {
 
 
 describe('Insight monitoring module navigation', () => {
+  it('opens settings from the invitation URL and clears the flag when settings close', async () => {
+    function Location() { return <output>{useLocation().search}</output> }
+    const user = userEvent.setup()
+    render(<MemoryRouter initialEntries={['/insight?module=monitoring&openMonitoringSettings=1']}><InsightCenter /><Location /></MemoryRouter>)
+    expect(screen.getByRole('dialog', { name: '诊断监控设置' })).toBeInTheDocument()
+    expect(screen.getByText('MONITORING_CONTENT')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '关闭设置' }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent(/^\?module=monitoring$/)
+  })
   it('isolates monitoring from governance loading and preserves the governance deep link', async () => {
     mocks.overview.mockClear()
     mocks.user.isAdmin = true
@@ -87,9 +100,14 @@ describe('Insight monitoring module navigation', () => {
     expect(mocks.overview).not.toHaveBeenCalled()
     await user.click(screen.getByRole('button', { name: 'Agent 治理' }))
     expect(screen.getByText('ADMIN_CONTENT:88')).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'Agent 诊断治愈' }))
+    await user.click(screen.getByRole('button', { name: '诊断自愈' }))
     expect(screen.getByText('MONITORING_CONTENT')).toBeInTheDocument()
     expect(screen.queryByText('ADMIN_CONTENT:88')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '诊断', exact: true })).toHaveAttribute('aria-current', 'page')
+    await user.click(screen.getByRole('button', { name: '自愈', exact: true }))
+    expect(screen.getByRole('button', { name: '自愈', exact: true })).toHaveAttribute('aria-current', 'page')
+    expect(screen.getByText('RECOVERY_LIST')).toBeInTheDocument()
+    expect(screen.queryByText('MONITORING_CONTENT')).not.toBeInTheDocument()
   })
 })
 
@@ -98,7 +116,7 @@ describe('Monitoring member navigation boundary', () => {
     mocks.user.isAdmin = true
     mocks.user.isClawInsightAdmin = flag
     render(<MemoryRouter initialEntries={['/insight?module=monitoring']}><InsightCenter /></MemoryRouter>)
-    expect(screen.getByRole('button', { name: 'Agent 诊断治愈' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '诊断自愈' })).toBeInTheDocument()
     expect(screen.getByText('MONITORING_CONTENT')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Agent 治理' })).toBeInTheDocument()
     expect(mocks.overview).not.toHaveBeenCalled()
@@ -113,7 +131,7 @@ describe('Monitoring member navigation boundary', () => {
     mocks.user.userId = ''
     render(<MemoryRouter initialEntries={['/insight?module=monitoring']}><InsightCenter /></MemoryRouter>)
     expect(screen.queryByText('MONITORING_CONTENT')).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Agent 诊断治愈' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '诊断自愈' })).not.toBeInTheDocument()
   })
 
 })

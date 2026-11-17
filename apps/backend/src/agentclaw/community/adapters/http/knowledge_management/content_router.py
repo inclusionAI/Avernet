@@ -5,6 +5,8 @@ from typing import Literal
 from agentclaw.community.adapters.http.knowledge_management.content_schemas import (
     AutoSync,
     YuqueImport,
+    YuqueBookImport,
+    YuqueBookCancel,
 )
 from agentclaw.community.adapters.http.knowledge_management.dependencies import (
     context,
@@ -37,11 +39,13 @@ router = APIRouter(
 
 @router.get("/sources")
 async def sources(
+    exclude_book_documents: bool = Query(False),
     offset: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
     ctx=Depends(context),
 ):
-    return await ctx.call("sources", offset=offset, limit=limit)
+    options = {"exclude_book_documents": True} if exclude_book_documents else {}
+    return await ctx.call("sources", offset=offset, limit=limit, **options)
 
 
 async def uploads(files):
@@ -123,6 +127,70 @@ async def yuque_import(body: YuqueImport, ctx=Depends(context)):
     return await ctx.call("import_yuque", body=body.model_dump(exclude_none=True))
 
 
+@router.get("/yuque/books")
+async def yuque_books(
+    source: Literal["personal", "team"] | None = Query(None),
+    q: str = Query("", max_length=256),
+    offset: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
+    ctx=Depends(context),
+):
+    options = {"source": source} if source else {}
+    return await ctx.call("yuque_books", query=q, offset=offset, limit=limit, **options)
+
+
+@router.get("/yuque/book-imports")
+async def book_imports(
+    offset: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
+    ctx=Depends(context),
+):
+    return await ctx.call("book_imports", offset=offset, limit=limit)
+
+
+@router.post("/yuque/book-imports")
+async def import_book(body: YuqueBookImport, ctx=Depends(context)):
+    return await ctx.call("import_book", body=body.model_dump())
+
+
+@router.get("/yuque/book-imports/{source_id}")
+async def book_import(source_id: str, ctx=Depends(context)):
+    return await ctx.call("book_import", source_id=segment(source_id))
+
+
+@router.post("/yuque/book-imports/{source_id}/cancel")
+async def cancel_book_import(
+    source_id: str, body: YuqueBookCancel, ctx=Depends(context)
+):
+    return await ctx.call(
+        "cancel_book_import", source_id=segment(source_id), body=body.model_dump()
+    )
+
+
+@router.post("/yuque/book-imports/{source_id}/sync")
+async def sync_book(source_id: str, ctx=Depends(context)):
+    return await ctx.call("sync_book", source_id=segment(source_id))
+
+
+@router.get("/yuque/book-imports/{source_id}/sync-runs/{run_id}")
+async def book_sync_run(source_id: str, run_id: str, ctx=Depends(context)):
+    return await ctx.call(
+        "book_sync_run", source_id=segment(source_id), run_id=segment(run_id)
+    )
+
+
+@router.get("/yuque/book-imports/{source_id}/auto-sync")
+async def get_book_schedule(source_id: str, ctx=Depends(context)):
+    return await ctx.call("get_book_schedule", source_id=segment(source_id))
+
+
+@router.put("/yuque/book-imports/{source_id}/auto-sync")
+async def put_book_schedule(source_id: str, body: AutoSync, ctx=Depends(context)):
+    return await ctx.call(
+        "put_book_schedule", source_id=segment(source_id), body=body.model_dump()
+    )
+
+
 @router.post("/sources/{source_id}/sync")
 async def sync(source_id: str, ctx=Depends(context)):
     return await ctx.call("sync", source_id=segment(source_id))
@@ -178,3 +246,13 @@ async def job(job_id: str, ctx=Depends(context)):
     except KnowledgeError as exc:
         raise HTTPException(exc.status, detail={"code": exc.code}) from None
     return Response(reply.body, status_code=reply.status, headers=reply.headers)
+
+
+@router.delete("/yuque/book-imports/{source_id}")
+async def delete_book(source_id: str, ctx=Depends(context)):
+    return await ctx.call("delete_book", source_id=segment(source_id))
+
+
+@router.get("/yuque/book-imports/{source_id}/deletion")
+async def book_deletion(source_id: str, ctx=Depends(context)):
+    return await ctx.call("book_deletion", source_id=segment(source_id))

@@ -94,6 +94,21 @@ export function createMonitoringRouter(runtime: MonitoringRuntime = createMonito
     const user = await principal(req);
     await runtime.browser!.enroll(user, req.body);
   });
+  router.post('/monitoring/configurations', json({ limit: '4kb', inflate: false }), async (req, res) => {
+    const user = await principal(req);
+    if (!runtime.browser?.configure) throw new MonitoringError('NOT_READY', '诊断监控配置尚未就绪。');
+    res.json(await runtime.browser.configure(user, req.body));
+  });
+  router.get('/monitoring/configurations/:botRef', async (req, res) => {
+    const user = await principal(req);
+    if (!runtime.browser?.readConfiguration) throw new MonitoringError('NOT_READY', '诊断监控配置尚未就绪。');
+    res.json({ configuration: await runtime.browser.readConfiguration(user, String(req.params.botRef)) });
+  });
+  router.put('/monitoring/configurations/:botRef', json({ limit: '16kb', inflate: false }), async (req, res) => {
+    const user = await principal(req);
+    if (!runtime.browser?.replaceConfiguration) throw new MonitoringError('NOT_READY', '诊断监控配置尚未就绪。');
+    res.json({ configuration: await runtime.browser.replaceConfiguration(user, String(req.params.botRef), req.body) });
+  });
   router.use("/monitoring", requireClawInsightAdmin);
   router.get("/monitoring/bots", async (req, res) => {
     if (Object.keys(req.query).length) throw new MonitoringError("INVALID_EVENT", "不支持此查询参数。");

@@ -1,5 +1,7 @@
 # 会话自愈：通用与团队定制手册
 
+> 当前团队归属和模型凭据扩展见 [Bot 诊断自愈配置](bot-diagnosis-recovery-config.md#team-resources-and-gradual-ownership-migration)。下文 `bot_teams` 是兼容读取格式；显式 `team_key` 的 Bot 不再依赖它。
+
 ## 目标与范围
 
 自愈同时使用通用故障知识和团队自己的业务约定。团队可以在 Skill 手册中说明某个业务场景无需干预，而不改变其他团队的处理策略，也不把整个技术故障类别排除。

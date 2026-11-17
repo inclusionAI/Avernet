@@ -248,7 +248,7 @@ it('deep-linking into an empty Bot replaces old chat with creation prompt, and c
   expect(screen.queryByTestId('chat-session')).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: '创建会话' }));
   await waitFor(() => expect(screen.getByTestId('chat-session')).toHaveTextContent('新建会话'));
-  expect(botSessionService.createSession).toHaveBeenCalledWith(b.bot, 'user');
+  expect(botSessionService.createSession).toHaveBeenCalledWith(b.bot, 'user', undefined, { friendlyErrors: true });
   expect(store.getState().sessionsByBotId.b.sessions.total).toBe(1);
 });
 it('Coding Bot creation always delegates to AIXCoding and never falls back to the generic service', async () => {

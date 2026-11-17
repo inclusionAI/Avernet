@@ -50,7 +50,7 @@ async def _no_redeliver(ctx) -> None:
 
 
 def _ports(tag: str) -> MaterialiserPorts:
-    return MaterialiserPorts(*([tag] * 13), file_sync=None)
+    return MaterialiserPorts(*([tag] * 14), file_sync=None)
 
 
 def _arca() -> ArcaDelivery:
@@ -84,8 +84,7 @@ def test_arca_phases_are_the_strategys_own_table() -> None:
         (Category.RESOURCES, ApplyPhase.ON_CONTAINER),
         (Section.BOT_FILE_SYNC, ApplyPhase.ON_CONTAINER),
         (Category.BOT_CONFIG, ApplyPhase.ON_CONTAINER),
-        (Category.SKILLS, ApplyPhase.ON_CONTAINER),
-        (Category.MCP, ApplyPhase.ON_CONTAINER),
+        (Category.CAPABILITIES, ApplyPhase.ON_CONTAINER),
         (Category.ENGINE_CONFIG, ApplyPhase.ON_CONTAINER),
         (Category.CLI_TOOLS, ApplyPhase.ON_CONTAINER),
     ]
@@ -131,8 +130,7 @@ def test_the_platform_shape_puts_every_construct_before_the_container() -> None:
         Category.RESOURCES,
         Section.BOT_FILE_SYNC,
         Category.BOT_CONFIG,
-        Category.SKILLS,
-        Category.MCP,
+        Category.CAPABILITIES,
         Category.ENGINE_CONFIG,
         Category.CLI_TOOLS,
     }
@@ -254,7 +252,7 @@ def test_the_arca_table_itself_is_untouched_by_w9() -> None:
     step = next(s for s in APPLY_ORDER if s.construct is Category.CLI_TOOLS)
     assert (_ARCA_PHASES[step.construct], step.position) == (
         ApplyPhase.ON_CONTAINER,
-        8,
+        7,
     )
 
 
@@ -287,7 +285,7 @@ def test_no_phase_walks_every_construct_on_every_strategy() -> None:
     for strategy in _every_strategy():
         assert strategy.steps_for() == whole
         assert strategy.steps_for(None) == whole
-        assert len(whole) == len(APPLY_ORDER) == 9
+        assert len(whole) == len(APPLY_ORDER) == 8
 
 
 def test_the_two_phases_partition_the_whole_apply_on_every_strategy() -> None:

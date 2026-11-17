@@ -9,10 +9,12 @@ protobuf conversion library. Composition supplies a policy-checked channel and
 trusted MOSN routing metadata; this low-level binding does not discover a target,
 select endpoints, retry submissions, or cancel Tasks when a stream is dropped.
 Its five operations declare gRPC invocation shape to `bcs-tracing-api`, preserving
-original status codes and recording only initial response readiness.
+original status codes. Unary calls complete at response readiness; server streams
+retain their observation owner through terminal status or cancellation/drop.
 The [loopback tracing tests](tests/grpc_tracing.rs) exercise all five operations
 against a real gRPC peer: propagation replacement, routing/auth metadata, tenant,
-response models, raw failure status and exactly-once completion before stream reads.
+response models, raw failure status and exactly-once stream-terminal completion,
+including errors after headers and a stream dropped outside the original scope.
 Its five operations preserve task/event models and bounded typed ErrorInfo while
 excluding peer diagnostics. Bootstrap optionally injects validated `GrpcMeshConfig` into Card selection and
 delivery. Only explicitly configured Card interfaces can select gRPC; the channel

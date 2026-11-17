@@ -94,6 +94,8 @@ internal_dependencies:
   - agentclaw.community.core.devices
   - agentclaw.community.core.engine_runtime.stage    # canonical live-stage publish binding resolution for Caller identity updates
   - agentclaw.community.core.quality.services
+  - agentclaw.community.core.quality.quality_service_protocol  # standard evaluation consumes the task Service API Protocol
+  - agentclaw.community.core.quality.task_processor_service_protocol  # standard evaluation advances the durable task lifecycle
   - agentclaw.community.core.skills_pool
   - agentclaw.community.core.system_config
   - agentclaw.community.core.task_queue    # durable publish stage tasks (enqueue + handlers + worker)

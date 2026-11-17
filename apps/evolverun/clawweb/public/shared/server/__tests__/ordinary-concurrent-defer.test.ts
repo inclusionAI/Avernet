@@ -1,4 +1,4 @@
-import { migrations as currentMigrations } from '../schema.js';
+import { allMigrations as currentMigrations } from '../db.js';
 import { expect, it, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import { SqliteDatabase, closeDatabase, initDatabase, runMigrations, type IDatabase } from '../db.js';

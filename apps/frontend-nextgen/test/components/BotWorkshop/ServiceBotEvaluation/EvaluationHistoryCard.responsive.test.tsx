@@ -32,8 +32,8 @@ describe('service bot evaluation responsive layout', () => {
       />,
     );
 
-    const content = screen.getByText('手动认证');
-    const left = content.parentElement as HTMLElement;
+    const content = screen.getByText('版本 未知');
+    const left = content.closest('div') as HTMLElement;
     const row = left.parentElement as HTMLElement;
     expect(row).toHaveClass(
       'flex',
@@ -47,7 +47,7 @@ describe('service bot evaluation responsive layout', () => {
     const summary = screen.getByText(/这是一条超长评测摘要/);
     expect(summary).toHaveClass('break-words');
 
-    const actions = (screen.getByRole('link', { name: /查看报告/ }).parentElement as HTMLElement);
+    const actions = screen.getByRole('link', { name: /评测报告/ }).parentElement as HTMLElement;
     expect(actions).toHaveClass('flex', 'shrink-0', 'items-center', 'gap-2');
   });
 });

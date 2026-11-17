@@ -26,6 +26,9 @@ check.
 - [`rsi/evaluation-data-boundaries.md`](rsi/evaluation-data-boundaries.md): a
   research boundary for training, development evaluation, and independent
   acceptance data.
+- [`rsi/synthesis-contracts.md`](rsi/synthesis-contracts.md): a review-only
+  request/result boundary for Agent-directed synthesis, bounded autonomy,
+  idempotency, and candidate quality gates.
 - [`benchmark-question-meta.md`](benchmark-question-meta.md): how canonical
   question metadata is projected separately to the Actor and Judge.
 
@@ -52,3 +55,7 @@ parallel Genome, promotion path, or experiment ledger.
 - [`benchmark/difficulty-calibration.md`](benchmark/difficulty-calibration.md):
   four-dimensional difficulty assessment, initial bands and proposals for
   representative-question calibration.
+
+- [`benchmark/candidate-admission.md`](benchmark/candidate-admission.md): evidence
+  separating structural candidate validation from semantic review, controlled
+  Actor/Judge trials, data-use assignment and benchmark admission.

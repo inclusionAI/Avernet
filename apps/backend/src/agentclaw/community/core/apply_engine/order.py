@@ -109,10 +109,9 @@ APPLY_ORDER: tuple[ApplyStep, ...] = (
     # needs the row _create_the_bot wrote — so this is on_container, after the
     # resource/file constructs that touch the live mount.
     ApplyStep(Category.BOT_CONFIG, 4),
-    ApplyStep(Category.SKILLS, 5),
-    ApplyStep(Category.MCP, 6),
-    ApplyStep(Category.ENGINE_CONFIG, 7),
-    ApplyStep(Category.CLI_TOOLS, 8),
+    ApplyStep(Category.CAPABILITIES, 5),
+    ApplyStep(Category.ENGINE_CONFIG, 6),
+    ApplyStep(Category.CLI_TOOLS, 7),
 )
 
 __all__ = ["APPLY_ORDER", "ApplyPhase", "ApplyStep"]

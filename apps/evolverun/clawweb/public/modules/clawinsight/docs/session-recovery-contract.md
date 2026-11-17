@@ -137,7 +137,12 @@ Group delivery is a backend after-hook for saved recovery-message receipts, comp
 
 Terminal group notices are skipped when the existing task-wide tool audit reports `interventionStatus: none`, including investigation-only completion, failure, cancellation and user handoff before intervention. This decision is independent of the recovery effect: a Bot recovering on its own does not require a group completion notice. Confirmed interventions, uncertain interventions and legacy tasks without a conclusive audit retain terminal notices. Message receipts, plans (including Owner-only cooperation) and execution summaries retain their existing notifications. Skipping a group notice does not change task state, evidence, Owner notifications or upstream result reporting, and does not claim or record a notification delivery.
 
-One application-wide `ce_app_config` row, `session_recovery_notifications`, controls this channel. The existing `enabled` column is the switch. Its JSON value contains the default `webhook`, `timeout_seconds` (integer 1–60, normally 10), and optional `bot_webhooks` entries with `bot_id`, `entity_id` and `webhook`. Each entry must match both the task's exact Bot ID and Owner/entity ID; this keeps different Owners' `default` Bots separate. A match replaces the default webhook for that notification; unmatched Bots retain the default group. The legacy two-field configuration is unchanged. Duplicate target pairs and malformed overrides invalidate the configuration rather than silently sending to a different group. A selected-group failure never falls back to the default group. Missing or disabled configuration means no group notification. An unavailable config table, invalid configuration, timeout or rejected robot response is isolated from task execution. No control-plane environment selector, administrator list or mentions are added. Routing changes only the group destination; trigger points, formatting, notification claims and the independent Owner-notification channel are unchanged. Deploy all backends consuming this configuration before writing overrides: an older strict parser rejects the additional field.
+Group notification enablement and route references live in each Bot's
+`ce_bot_diagnosis_recovery_config.config_json.notifications.group`. Shared
+webhook addresses remain in `ce_app_config.session_recovery_notification_routes`.
+There is no default-group fallback. Missing/invalid settings or a failed lookup
+skip the attempt without affecting task execution. Existing claims, content,
+and delivery audit are unchanged. See [configuration and migration](bot-diagnosis-recovery-config.md).
 
 The notification formatter uses existing plan, action and judgment fields and retains the task link. Message notices show the saved operation purpose and delivery-call state; the complete diagnosis and recovery message remain on the task page. Terminal notices show recorded message purposes and business summaries of audited plan actions, map `judgment.delivery` and `judgment.response` into verification lines, and display `judgment.effect` separately as the recovery conclusion. Ordinary terminal notices do not copy the long `judgment.summary`, list unexecuted plan actions as interventions, or infer recovery from task completion. Failed or canceled tasks additionally retain their ending reason. Only `recovered` receives a fixed green font tag; actual rendering must be checked in the DingTalk client.
 
@@ -186,43 +191,15 @@ Pre-dispatch failures are `failed` with `dispatched: false`, and do not block a 
 
 ## Owner notification switch and linked task visibility
 
-Owner DingTalk notifications use the independent `ce_app_config` key
-`session_recovery_owner_notifications`. Its existing `enabled` column is the
-default for Bots without an override: `0` means off and `1` means on.
-`config_json` contains only optional Bot overrides:
-
-```json
-{
-  "bot_overrides": [
-    { "bot_id": "example-bot", "entity_id": "example-owner", "env": "prod", "enabled": true }
-  ]
-}
-```
-
-Overrides match the exact `bot_id + entity_id + env` from the task's frozen
-target. `env` is the target Bot environment, not the ClawWeb control-plane
-environment. A matching override's boolean `enabled` takes precedence over
-the row's default: a positive override can send with `enabled = 0`, and a
-negative override prevents sending with `enabled = 1`. Without a match,
-the row's `enabled` value applies. IDs remain strings, including leading
-zeros; different Owners' `default` Bots do not share overrides.
-
-Use `enabled = 0` with `{}` for all-off, `enabled = 1` with `{}` for all-on,
-`enabled = 0` with positive overrides for selected Bots, or `enabled = 1`
-with negative overrides for exceptions. The existing empty configurations
-retain their previous behavior. To turn off every Bot, set `enabled = 0`
-and clear the overrides; there is no separate master switch.
-
-Missing rows skip sending. Invalid `enabled` values, malformed JSON, invalid
-field types or environments, unknown fields and duplicate target overrides
-disable the whole notification attempt, even if another entry or the default
-grants sending. The existing recovery log records
-`session_recovery_notification / configuration_invalid` without the raw
-configuration. Each notification event reads current policy; disabled or
-filtered notifications are not recorded as successful sends and are not replayed
-when policy changes. This applies to both plan and result Owner notices, and
-does not affect group webhooks (`session_recovery_notifications`), Agent
-execution, plan approval, or Owner feedback through the task page.
+Owner DingTalk notification enablement lives in each Bot's
+`ce_bot_diagnosis_recovery_config.config_json.notifications.owner.enabled`.
+Only explicit `true` enables it. The existing
+`ce_app_config.session_recovery_owner_notifications.card` continues to supply
+transport templates/callback routes by control-plane environment; old defaults
+and Bot overrides are migration inputs only. Each attempt reads current policy;
+missing/invalid settings and read failures skip sending. No skipped notice is
+replayed when enabled later. Existing paused ordinary Owner messages remain
+paused. See [configuration and migration](bot-diagnosis-recovery-config.md).
 
 Administrators can list all tasks linked to a diagnosis event, including private
 tasks. Other users still see only their own tasks or tasks explicitly shared by

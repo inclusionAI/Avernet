@@ -14,6 +14,8 @@ Public BCS owns coordination contracts, services, adapters and reusable plugins;
 
 - [Local rules](AGENTS.md)
 - [API contracts](api-contracts/README.md)
+- [Distributed coordination contracts](crates/service-api/bcs-service-api/src/port/repo/distributed/README.md) — declarations; implementation pending
+- [Runtime store plugin API](crates/plugin-api/bcs-store-api/README.md) — capability contracts and provider harnesses
 - [Session deletion protocol](docs/session-delete-protocol.md)
 - [Flow navigation](docs/flows/README.md)
 - [Diagnostic navigation](docs/diagnostics/README.md)
@@ -139,6 +141,7 @@ crates/
 │   └── bcs-leader-election/ # Leader election for distributed mode
 ├── plugin-api/
 │   ├── bcs-auth-api/       # Authentication interface
+│   ├── bcs-store-api/      # Runtime state and ordered-log capabilities
 │   ├── bcs-cache-api/      # Cache interface
 │   ├── bcs-db-api/         # Database interface
 │   ├── bcs-llm-api/        # LLM interface

@@ -712,6 +712,17 @@ NormalGroupSummary:
     updated_at:
       type: integer
       minimum: 0
+    last_activity_at:
+      type: integer
+      minimum: 0
+      description: >-
+        Conversation activity key in epoch milliseconds: the newest persisted
+        message or Session creation across the Group's Sessions, falling back
+        to `created_at` when the Group has no activity rows. Populated on
+        `GET /openapi/v1/collaboration/groups` under every `sort` mode.
+        Absent (never null) on the public discovery catalog
+        (`GET /openapi/v1/collaboration/public-groups`), which does not
+        compute it.
 DirectMessageGroupSummary:
   type: object
   additionalProperties: false
@@ -769,6 +780,17 @@ DirectMessageGroupSummary:
     updated_at:
       type: integer
       minimum: 0
+    last_activity_at:
+      type: integer
+      minimum: 0
+      description: >-
+        Conversation activity key in epoch milliseconds: the newest persisted
+        message or Session creation across the Group's Sessions, falling back
+        to `created_at` when the Group has no activity rows. Populated on
+        `GET /openapi/v1/collaboration/groups` under every `sort` mode.
+        Absent (never null) on the public discovery catalog
+        (`GET /openapi/v1/collaboration/public-groups`), which does not
+        compute it.
 GroupSummary:
   oneOf:
     - $ref: "#/NormalGroupSummary"
@@ -1300,6 +1322,18 @@ SessionSummary:
         Whether the view actor (the `view_bot_id` resolved by the request) has
         collected this session. Surfaced only when `view_bot_id` is explicitly
         supplied; absent otherwise.
+    last_activity_at:
+      type: integer
+      minimum: 0
+      description: >-
+        Conversation activity key in epoch milliseconds: the newest persisted
+        message in the Session, falling back to the Session's `created_at` when
+        it has no persisted messages. On
+        `GET /openapi/v1/collaboration/groups/{group_id}/sessions` items it is
+        always present (integer milliseconds) under every `sort` mode,
+        including that `created_at` fallback case (never null); omitted only
+        where the value is not computed. Session detail is unaffected: it gains
+        no field.
 
 SessionDetail:
   type: object
@@ -1804,6 +1838,44 @@ Invitation:
     created_at:
       type: integer
       minimum: 0
+
+InvitationPreview:
+  type: object
+  additionalProperties: false
+  description: >-
+    Read-only target metadata and direct membership of the authenticated User's
+    Human actor. Bot control, public visibility and parent Group membership do
+    not count as membership. No actor creation or acceptance occurs.
+  required:
+    - target_type
+    - target_id
+    - group_id
+    - already_joined
+  properties:
+    target_type:
+      $ref: "#/InvitationTargetType"
+    target_id:
+      type: string
+    group_id:
+      type: string
+      description: Target Group ID, or the parent Group ID for a Session target.
+    already_joined:
+      type: boolean
+
+InvitationPreviewEnvelope:
+  type: object
+  additionalProperties: false
+  required: [code, message, data, request_id]
+  properties:
+    code:
+      type: integer
+      const: 20000
+    message:
+      type: string
+    data:
+      $ref: "#/InvitationPreview"
+    request_id:
+      type: string
 
 InvitationAcceptResult:
   type: object

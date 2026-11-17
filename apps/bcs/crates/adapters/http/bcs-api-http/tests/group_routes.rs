@@ -19,6 +19,7 @@ use bcs_service_api::application::v1::{
     DeleteResult, GetGroup, GroupDeliveryPolicy, GroupDetail, GroupService, GroupStatus,
     GroupStrategy, GroupSummary, GroupVisibility, InlineGroupEventSubscriptionRequest,
     ListGroups, ListPublicGroups, MembershipFilter,
+    GroupListSort,
     DirectMessageGroupSummary, Membership, NormalGroupSummary, Page, Participant,
     UpdateGroup, UpdateGroupParticipant,
 };
@@ -323,6 +324,13 @@ struct NoopInvitationService;
 
 #[async_trait]
 impl InvitationService for NoopInvitationService {
+    async fn preview_invitation(
+        &self,
+        _query: bcs_service_api::application::v1::PreviewInvitation,
+    ) -> Result<bcs_service_api::application::v1::InvitationPreview, ApplicationError> {
+        Err(ApplicationError::internal("invitation preview not configured"))
+    }
+
     async fn create_group_invitation(
         &self,
         _command: CreateGroupInvitation,
@@ -516,6 +524,7 @@ fn populated_group_summaries() -> Vec<GroupSummary> {
             human_mention_notify_mode: bcs_service_api::HumanMentionNotifyMode::All,
             created_at: 1,
             updated_at: 2,
+            last_activity_at: None,
         }),
         GroupSummary::DirectMessage(DirectMessageGroupSummary {
             group_id: "group-dm".into(),
@@ -532,12 +541,16 @@ fn populated_group_summaries() -> Vec<GroupSummary> {
             human_mention_notify_mode: bcs_service_api::HumanMentionNotifyMode::DriverBotOnly,
             created_at: 1,
             updated_at: 2,
+            last_activity_at: None,
         }),
     ]
 }
 
 #[path = "group_routes/existing.rs"]
 mod existing;
+
+#[path = "group_routes/activity_sort.rs"]
+mod activity_sort;
 
 #[path = "group_routes/driver_metadata.rs"]
 mod driver_metadata;

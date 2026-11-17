@@ -160,3 +160,7 @@ pub use caller_container::{CallerObserveTarget,
     CallerContainerIsolation, CallerContainerMinimum, CallerOpaqueRef, ContainerRunAssociation,
     EnsureCallerContainer, EnsureCreateMode,
 };
+pub mod dist_agent;
+pub mod dist_runtime;
+
+pub mod provider_request_headers;

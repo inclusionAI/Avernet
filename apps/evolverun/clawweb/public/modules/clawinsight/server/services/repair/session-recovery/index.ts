@@ -2,6 +2,8 @@ import { getCurrentEnv } from "@avernet/clawweb-shared/server/env";
 import { SessionRecoveryGroupNotifier, SessionRecoveryNotifier } from "./notification.js";
 import { DingTalkWebhookSender } from "../../notifications/dingtalk-webhook-sender.js";
 import { AppConfigRepository } from "@avernet/clawevolve/server/repositories/app-config-repository";
+import { BotDiagnosisRecoveryConfigRepository } from '../../../repositories/bot-diagnosis-recovery-config-repository.js';
+import { requireRecoveryEnabled } from './bot-configuration.js';
 import { type IDatabase } from "@avernet/clawweb-shared/server/db";
 import type { EvolveRepository } from "@avernet/clawevolve/server/repositories/evolve-repository";
 import type { AisExecutor } from "@avernet/clawevolve/server/contracts/ais-executor";
@@ -25,6 +27,7 @@ export function createSessionRecoveryRuntime(options: {
   notificationSender?: RecoveryNotificationSender | null; logs?: AgentLogTool; runtimeTool?: AgentRuntimeTool;
   trajectory?: BotSessionTrajectoryReader; nasRoots: string[];
   observationMs?: number; leaseSeconds?: number; launchGraceSeconds?: number;
+  resolveModelApiKey?: (reference: string) => Promise<string>;
   canReadAsBotCollaborator?: ConstructorParameters<typeof SessionRecoveryTaskService>[0]["canReadAsBotCollaborator"];
 }): SessionRecoveryRuntime | undefined {
   if (options.db.dbType === "noop") {
@@ -40,18 +43,20 @@ export function createSessionRecoveryRuntime(options: {
   if (!Number.isSafeInteger(observationMs) || observationMs < 20000) throw new Error("Invalid self-healing waiting deadline");
   const store = new SessionRecoveryTaskRepository(options.db, options.repo, options.artifactStore);
   const notificationConfig = new AppConfigRepository(options.db);
+  const botConfigurations = new BotDiagnosisRecoveryConfigRepository(options.db);
   const actionNotifier = new SessionRecoveryGroupNotifier({ controlPlaneEnvironment, tasks: store,
-    config: notificationConfig, sender: new DingTalkWebhookSender(), publicBaseUrl: options.publicBaseUrl });
+    config: notificationConfig, botConfigurations, sender: new DingTalkWebhookSender(), publicBaseUrl: options.publicBaseUrl });
   const reporter = new HttpRecoveryResultReporter({ baseUrl: options.publicBaseUrl });
   let tasks: SessionRecoveryTaskService;
-  const notifier = new SessionRecoveryNotifier(options.notificationSender, options.publicBaseUrl, notificationConfig, controlPlaneEnvironment);
+  const notifier = new SessionRecoveryNotifier(options.notificationSender, options.publicBaseUrl, notificationConfig, controlPlaneEnvironment, botConfigurations);
   const agent = new SessionRecoveryAgentService({ controlPlaneEnvironment, tasks: store, repo: options.repo,
     audit: new AgentToolCallRepository(options.db, "session_recovery"), ais: options.ais, runtime: options.runtime,
     targets: options.targets, trajectory: options.trajectory, logs: options.logs, runtimeTool: options.runtimeTool, business: () => tasks, publicBaseUrl: options.publicBaseUrl,
     snapshotId: options.snapshotId, nasRoots: options.nasRoots, leaseSeconds: options.leaseSeconds ?? 120,
-    launchGraceSeconds: options.launchGraceSeconds ?? 1800, observationMs, actionNotifier });
+    launchGraceSeconds: options.launchGraceSeconds ?? 1800, observationMs, resolveModelApiKey: options.resolveModelApiKey, actionNotifier });
   tasks = new SessionRecoveryTaskService({ controlPlaneEnvironment, tasks: store, agent, notifier, reporter, observationMs, actionNotifier,
-    handbookConfig: notificationConfig, canReadAsBotCollaborator: options.canReadAsBotCollaborator,
+    handbookConfig: notificationConfig, botConfigurations, canReadAsBotCollaborator: options.canReadAsBotCollaborator,
+    authorizeCreation: request => requireRecoveryEnabled(botConfigurations, request, notificationConfig),
     resolveTarget: async request => {
       const expected = { OC: "openclaw", CC: "claude_code", TE: "teclaw" }[request.target.engine];
       const target = await options.targets.resolve({ environment: request.target.env, ownerId: request.target.entity_id, botId: request.target.bot_id, ...(request.target.runtime_identity ? { runtimeIdentity: request.target.runtime_identity } : {}) });

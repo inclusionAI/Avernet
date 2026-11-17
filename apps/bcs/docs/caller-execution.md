@@ -18,3 +18,29 @@ At delivery preparation, only the original HTTP provider `chat.send` can resolve
 The HTTP adapter preserves other extensions and provider authentication but redacts the credential extension in request logs. Delivery command Debug omits request payloads. Task results, timeout notices, bot relays and future messages do not inherit caller execution. Secrets expire naturally; retries never extend their lifetime.
 
 Deploy all consumers before enabling bindings. Old consumers reject the new projection through its strict decoder; draining caller jobs is required before a binary rollback. There is no database schema migration. Additional cache cost is one conditional write per new caller request and one read per preparation attempt, plus the existing registry routing lookup for target validation. No background scan is added.
+
+## Deployment-owned request headers
+
+A hosting composition may install a `ProviderRequestHeaderPolicy` through
+`bcs_provider_http::install_provider_request_header_policy` once before serving.
+Public BCS installs none. The policy receives method, Provider identifiers and
+resolved runtime extensions, then returns secret header values. It must not
+perform I/O or persist credentials. The adapter invokes it only at HTTP request
+construction, after URL validation, for callback and SSE delivery. It does not
+change JSON extensions, admission, jobs, history or Provider authentication.
+Reserved authentication/protocol headers and invalid HTTP names or values fail
+closed before sending; generated values are marked sensitive. Policies also
+receive non-chat methods and must explicitly select their supported requests.
+The protected caller send port uses its separate wire contract and does not
+invoke this ordinary Provider policy.
+
+## Credential type ownership
+
+The credential type is an opaque nonempty label supplied by the trusted channel
+plugin. Admission requires its declared label to match `ExecutionToken`'s label;
+the cache and HTTP projection preserve it exactly. Public coordination does not
+interpret a label as an authentication scheme. The receiving Provider validates
+its supported types and owns credential exchange. Deploy compatible consumers
+before a channel starts emitting a new label; older queue consumers may reject
+that label, so drain its jobs before rolling back. Cache TTL, scope validation
+and credential non-persistence are unchanged.

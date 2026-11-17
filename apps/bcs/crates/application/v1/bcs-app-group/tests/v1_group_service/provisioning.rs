@@ -492,6 +492,7 @@ async fn provisioning_groups_are_hidden_from_v1_reads_and_lists() {
             membership: MembershipFilter::All,
             kind: GroupKindFilter::All,
             strategy: None,
+            sort: GroupListSort::CreatedAt,
         })
         .await
         .expect("list Groups");

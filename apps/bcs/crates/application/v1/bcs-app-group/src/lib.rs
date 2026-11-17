@@ -12,7 +12,7 @@ use bcs_service_api::application::v1::{
     DeleteGroup, DeleteGroupParticipant, DeleteResult, DirectMessageGroupDetail,
     DirectMessageGroupSummary, GetGroup, GroupDetail, GroupEventSubscriptionProvisioner,
     GroupKindFilter, GroupService, GroupStatus, GroupStrategy as V1GroupStrategy, GroupSummary,
-    GroupVisibility, HumanMentionNotifyMode, HumanPrincipal, IdentityPolicy,
+    GroupListSort, GroupVisibility, HumanMentionNotifyMode, HumanPrincipal, IdentityPolicy,
     InlineGroupEventSubscriptionRequest, ListGroups, ListPublicGroups,
     ManagerWorkerConfiguration, Membership, MembershipFilter,
     NormalGroupSummary, Page, Participant as V1Participant, ParticipantSummary,
@@ -35,7 +35,7 @@ use bcs_service_api::{
     Group as DomainGroup, GroupAddMemberCommand, GroupCoreService, GroupCreateCommand,
     GroupCreateParticipantCommand, GroupDeleteCommand, GroupKind, GroupManagementService,
     GroupMutableFieldsPatch, GroupParticipantView, GroupRemoveMemberCommand, GroupStrategy,
-    GroupUseCaseError, ParticipantMode, RoutingMode, RoutingPolicy,
+    GroupMessageHistoryService, GroupUseCaseError, ParticipantMode, RoutingMode, RoutingPolicy,
     RuntimeParticipantBinding, ServiceError, SessionManagementService, StartStateMachineRunCommand,
     generated_group_id,
 };
@@ -79,6 +79,10 @@ pub struct GroupServiceImpl {
     /// back to the historical `created_by` display when no
     /// authority Core is wired.
     bot_authority_core: Option<Arc<dyn BotAuthorityCoreService>>,
+    /// Batched conversation-activity source for the V1 list sort
+    /// (design D1/D4). Optional: an unwired facade degrades to
+    /// the `created_at` fallback instead of failing.
+    group_message_history: Option<Arc<dyn GroupMessageHistoryService>>,
 }
 
 /// Map one authority read to application errors: a strict
@@ -417,7 +421,18 @@ impl GroupServiceImpl {
             event_subscription_provisioner: None,
             bot_authority: None,
             bot_authority_core: None,
+            group_message_history: None,
         }
+    }
+
+    /// Wire the batched message activity source for the recent-activity
+    /// list sort (design D5). Unwired facades fall back to `created_at`.
+    pub fn with_group_message_history(
+        mut self,
+        group_message_history: Arc<dyn GroupMessageHistoryService>,
+    ) -> Self {
+        self.group_message_history = Some(group_message_history);
+        self
     }
 
     /// Wire the authority hook (bot-authority plan Task 6.3).

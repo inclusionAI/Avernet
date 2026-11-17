@@ -6,8 +6,8 @@ round-trip the contract promises (``manifest-v1-compatibility.md``) is that
 delivering the revision gives the bot that applying M gave. Both roads now
 end in one ``DesiredState``, so the promise is a comparison: the Manifest
 compiler's state for M, over the fixture sources, must equal the genome
-compiler's state for the revision, construct by construct, except for MCP:
-its preserve and clear actions are compared through actual apply/capture/restore.
+compiler's state for the revision, construct by construct, including MCP: omitted and empty overrides both clear the managed configuration.
+Execution and capture/restore regression coverage lives at the Apply seam.
 
 The reading of the two totality rules is the comparison's own: a category M
 leaves out is undeclared on the Manifest side (apply leaves the bot's state)
@@ -50,7 +50,6 @@ from tests.community.core.apply_engine._fakes import (
     real_validator,
 )
 from tests.community.core.bot_genome.example_blobs import EXAMPLES, BlobDir
-from tests.community.core.apply_engine.test_mcp_genome_round_trip import assert_mcp_compilers_restore_the_same_result
 
 CASES_DIR = EXAMPLES / "manifest-v1"
 SOURCES = CASES_DIR / "sources"
@@ -140,11 +139,16 @@ def test_the_manifest_and_its_revision_compile_to_the_same_desired_state(case: P
     from_revision = compile_spec(GenomeSpec.from_json(revision["spec"]), BlobDir())
 
     for construct in COMPARED:
-        if construct is Category.MCP:
-            asyncio.run(assert_mcp_compilers_restore_the_same_result(from_manifest, from_revision))
-            continue
-        manifest_side = _comparable(from_manifest.declaration(construct))
-        genome_side = _comparable(from_revision.declaration(construct))
+        if construct in (Category.SKILLS, Category.MCP):
+            # Genome keeps collection scope absent, while Manifest supplies a complete target.
+            field = construct.value
+            manifest_side = _comparable(getattr(from_manifest.capabilities.entries[0], field))
+            genome_side = _comparable(getattr(from_revision.capabilities.entries[0], field))
+            assert from_manifest.capabilities.entries[0].skill_sets.entries == ()
+            assert from_revision.capabilities.entries[0].skill_sets is None
+        else:
+            manifest_side = _comparable(from_manifest.declaration(construct))
+            genome_side = _comparable(from_revision.declaration(construct))
         assert genome_side is not None, f"{construct.value}: a revision declares every category"
         if manifest_side is None:
             assert genome_side == [], f"{construct.value}: the document left it alone; the captured bot had none"

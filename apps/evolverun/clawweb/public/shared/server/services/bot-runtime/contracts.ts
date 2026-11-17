@@ -19,7 +19,7 @@ export interface BotSessionTrajectoryReader {
     maxBytes?: number; observationId?: string; field?: "input" | "output"; contentOffset?: number; contentLimit?: number;
     /** Enable OpenClaw trajectory evidence for a live recovery assessment. */
     ocAssessmentEvidence?: boolean;
-    /** Observed fault time used as a hint for finding the original trace in a session list. */
+    /** Observed fault time used to find the original trace by ID or in a session list. */
     faultAtMs?: number;
     /** Optional exact user-message match in the scoped trace input; never infer it from previews or tool output. */
     messageMarker?: string; notBeforeMs?: number;

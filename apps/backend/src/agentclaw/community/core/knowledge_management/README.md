@@ -109,3 +109,36 @@ CAS revision and composite Bot/Owner identity are unchanged. The authenticated
 actor stays separate from the target Owner. This adds no display lookup or
 per-target I/O. Activity responses remain provider-owned and pass through the
 content adapter without reconstructing historical names locally.
+
+## Whole-book content delivery
+
+The ordinary content router also exposes `yuque/books` (q/offset/limit) and
+`yuque/book-imports` (list/start/detail/cancel/sync/sync-runs/auto-sync) under
+the existing space/KB prefix. A start accepts exactly one positive `book_id`;
+there is no document-subset or caller-selected execution target. The provider
+must enforce native KB read/write ACLs and exact source/run ownership before
+repair or mutations. The remote adapter uses one fixed KB-scoped upstream request
+per operation; it does not enumerate documents, persist jobs or run a scheduler.
+
+Catalog search precedes pagination upstream. Import-list `next_offset` counts
+examined source rows, so sparse/empty pages may have a continuation. Task
+acceptance is not completion; preserve partial, capped, empty-skip and blocked
+calendar semantics. Whole-book operations must not widen preexisting subtree
+sources. Calendar writes retain the existing version CAS and do not imply an
+enabled platform worker. Existing single-document routes remain unchanged.
+
+The book catalog additionally accepts optional `source=personal|team`; omission
+preserves the existing combined catalog. `sources?exclude_book_documents=true`
+opts into a provider-side filtered page with matching totals. The default source
+list is unchanged. Book list/detail responses pass through the provider's
+persisted `current_run` progress; the BFF never repairs or guesses task state.
+
+`DELETE yuque/book-imports/{source_id}` sends one fixed provider request. `202`
+means the provider durably accepted asynchronous removal, not that child cleanup
+finished. `GET yuque/book-imports/{source_id}/deletion` reads its progress after
+the connector disappears from the active list. The provider disables scheduling,
+fences old work, preserves independent document participation, and owns child
+cleanup, recovery and terminal results. No document fan-out, mutation retries,
+local task records or scheduler are added to this adapter. Neither operation
+deletes the original remote book or its documents. Native authorization and
+failures are preserved; accepted deletion is never projected as completed.

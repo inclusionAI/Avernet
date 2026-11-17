@@ -113,15 +113,23 @@ _REQUIRED_OWNER_OPERATIONS = {
 
 _OWNER_ADDRESSED_ELSEWHERE = {
     # Service-Bot evaluation addresses a bot by (owner, bot_id), but takes no
-    # runtime stage: its records and tasks are bot/version scoped, not runtime
-    # scoped. All six routes intentionally use the same owner-addressing seam
-    # as the collaborator-scoped Workshop groups above.
+    # runtime stage: its records, tasks, and Eval-zone environments are
+    # bot/version scoped, not runtime scoped. Every evaluation route
+    # intentionally uses the same owner-addressing seam as the
+    # collaborator-scoped Workshop groups above.
     ("get", "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}"),
     ("post", "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/simple-cert/precheck"),
     ("post", "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/simple-cert/submissions"),
     ("get", "/openapi/v1/bots/{bot_id}/eval/submissions/{submission_id}"),
     ("get", "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/history"),
     ("post", "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/simple-cert/sync"),
+    ("get", "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/sample-sets"),
+    ("post", "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/tasks"),
+    ("get", "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/tasks/current"),
+    ("post", "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/environments"),
+    ("get", "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/environments/current"),
+    ("delete", "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/environments/current"),
+    ("post", "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/standard-eval/results"),
     ("post", "/openapi/v1/bots/{bot_id}/iam-token"),
     ("get", "/openapi/v1/bots/{bot_id}/engine-version"),
     ("get", "/openapi/v1/bots/{bot_id}/status"),

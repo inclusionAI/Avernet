@@ -146,6 +146,7 @@ async fn dm_kind_rejects_a_strategy_filter() {
             membership: MembershipFilter::All,
             kind: GroupKindFilter::Dm,
             strategy: Some(V1GroupStrategy::Chat),
+            sort: GroupListSort::CreatedAt,
         })
         .await;
 
@@ -170,6 +171,7 @@ async fn explicit_view_requires_the_target_bot_to_exist_and_be_owned() {
             membership: MembershipFilter::All,
             kind: GroupKindFilter::Normal,
             strategy: None,
+            sort: GroupListSort::CreatedAt,
         })
         .await;
 
@@ -194,6 +196,7 @@ async fn explicit_view_propagates_registry_database_failure() {
             membership: MembershipFilter::All,
             kind: GroupKindFilter::Normal,
             strategy: None,
+            sort: GroupListSort::CreatedAt,
         })
         .await;
 

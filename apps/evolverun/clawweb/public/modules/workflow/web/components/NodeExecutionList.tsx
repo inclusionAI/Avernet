@@ -10,6 +10,7 @@ import NodeInputPanel from './NodeInputPanel'
 import RenderedNodeHero from './RenderedNodeHero'
 import NodeStepTracePanel from './NodeStepTracePanel'
 import AnalysisModal from './AnalysisModal'
+import AIStudioTrainWatchCard from './AIStudioTrainWatchCard'
 import type { SubworkflowGroupRef } from '../api/run-subworkflows'
 import SubworkflowPanel from './subworkflows/SubworkflowPanel'
 
@@ -22,6 +23,7 @@ const EXECUTOR_LABELS: Record<string, string> = {
   'loop-group': '循环',
   done: '完成',
   'baas-call': 'BaaS调用',
+  'aistudio-train': 'AIStudio 训练',
 }
 
 /** Parse runId/messageId and mode from progress_message */
@@ -251,6 +253,17 @@ function NodeRow({
                 ) : '刷新状态'}
               </button>
             )}
+            {node.executor_type === 'aistudio-train' && (
+              <AIStudioTrainWatchCard
+                key={`${node.flow_id}-${node.node_id}-${node.attempt}`}
+                flowId={node.flow_id}
+                nodeId={node.node_id}
+                attempt={node.attempt}
+                nodeStatus={node.status}
+                readOnly={readOnly}
+                compact
+              />
+            )}
             {!readOnly && hasApproval && onApproval && (
               <button
                 onClick={(e) => { e.stopPropagation(); onApproval(node) }}
@@ -466,7 +479,18 @@ function NodeDetailPanel({
         <h3 className="font-semibold text-foreground">子工作流组</h3>
         <p>暂无持久化数据，等待父运行快照；此入口不会启动子运行。</p>
       </section>}
-      <RenderedNodeHero node={node} workflowSpec={workflowSpec} nodes={nodes} />
+      {node.executor_type === 'aistudio-train' ? (
+        <AIStudioTrainWatchCard
+          key={`${flowId}-${node.node_id}-${node.attempt}`}
+          flowId={flowId}
+          nodeId={node.node_id}
+          attempt={node.attempt}
+          nodeStatus={node.status}
+          readOnly={readOnly}
+        />
+      ) : (
+        <RenderedNodeHero node={node} workflowSpec={workflowSpec} nodes={nodes} />
+      )}
       <NodeInputPanel nodeId={node.node_id} inputJson={node.input_json} nodes={nodes} />
       <NodeOutputViewer
         nodeId={node.node_id}
@@ -535,7 +559,8 @@ function NodeDetailPanel({
       {(node.executor_type === 'embedded-agent' ||
         node.executor_type === 'subagent' ||
         node.executor_type === 'collaboration' ||
-        node.executor_type === 'cli-script') && (
+        node.executor_type === 'cli-script' ||
+        node.executor_type === 'aistudio-train') && (
         <div className="border-t border-gray-100 pt-3">
           <NodeStepTracePanel flowId={flowId} nodeId={node.node_id} attempt={node.attempt} />
         </div>

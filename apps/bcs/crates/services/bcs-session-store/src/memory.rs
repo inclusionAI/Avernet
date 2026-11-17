@@ -16,7 +16,7 @@ use bcs_service_api::core::session::{
 };
 use bcs_service_api::port::repo::{
     AddSessionParticipantWithEvent, CompleteSessionWithEvent, CreateSessionWithEvent, NewSessionParams,
-    RemoveSessionParticipantWithEvent, SessionRepoPort,
+    RemoveSessionParticipantWithEvent, SessionActivityCandidate, SessionRepoPort,
     UpdateSessionParticipantMessageViewScopeWithEvent,
 };
 use bcs_service_api::types::MessageViewScope;
@@ -282,6 +282,51 @@ impl SessionRepoPort for MemorySessionRepo {
                 participant_id.map_or(true, |pid| s.participants.iter().any(|p| p.bot_uuid == pid))
             })
             .count() as u64)
+    }
+
+    /// Same filter chain as [`Self::count_by_group`], projecting only the
+    /// sort inputs (id + the Session's own `created_at`) instead of cloning
+    /// full Sessions — the D5-revised recent-activity candidate read.
+    async fn list_activity_candidates_by_group(
+        &self,
+        group_id: &str,
+        status: Option<SessionStatus>,
+        title_contains: Option<&str>,
+        participant_id: Option<&str>,
+    ) -> ServiceResult<Vec<SessionActivityCandidate>> {
+        let st = self.state.read().await;
+        Ok(st
+            .sessions
+            .values()
+            .filter(|s| s.group_id == group_id)
+            .filter(|s| status.map(|want| s.status == want).unwrap_or(true))
+            .filter(|s| {
+                title_contains.map_or(true, |q| {
+                    s.session_title
+                        .as_deref()
+                        .unwrap_or("")
+                        .to_lowercase()
+                        .contains(&q.to_lowercase())
+                })
+            })
+            .filter(|s| {
+                participant_id.map_or(true, |pid| s.participants.iter().any(|p| p.bot_uuid == pid))
+            })
+            .map(|s| SessionActivityCandidate {
+                session_id: s.id.clone(),
+                created_at: s.created_at,
+            })
+            .collect())
+    }
+
+    /// One-lock batched load ordered like the requested ids; ids with no
+    /// persisted Session are absent from the result.
+    async fn try_get_many(&self, session_ids: &[String]) -> ServiceResult<Vec<Session>> {
+        let st = self.state.read().await;
+        Ok(session_ids
+            .iter()
+            .filter_map(|session_id| st.sessions.get(session_id).cloned())
+            .collect())
     }
 
     async fn list_running_service_after(
@@ -635,6 +680,32 @@ impl SessionRepoPort for MemorySessionRepo {
         offset: u64,
         limit: u64,
     ) -> Vec<Session> { self.repo_list_collected_by_group(group_id, bot_uuid, status, title_contains, offset, limit).await }
+
+    /// Single pass over the stored sessions returning the max `created_at` per
+    /// requested group (design D2 Q2 shape, folded in Rust). The memory repo
+    /// holds only this process's rows and has no env dimension, so no env
+    /// filter applies. Only currently persisted rows count, so a hard-deleted
+    /// session drops out through [`Self::delete`]; groups without sessions stay
+    /// absent so callers keep their own `created_at` fallback.
+    async fn max_created_at_by_group_ids(
+        &self,
+        group_ids: &[String],
+    ) -> ServiceResult<HashMap<String, u64>> {
+        if group_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let wanted: std::collections::HashSet<&str> = group_ids.iter().map(String::as_str).collect();
+        let state = self.state.read().await;
+        let mut created = HashMap::new();
+        for session in state.sessions.values() {
+            if !wanted.contains(session.group_id.as_str()) {
+                continue;
+            }
+            let entry = created.entry(session.group_id.clone()).or_insert(session.created_at);
+            *entry = (*entry).max(session.created_at);
+        }
+        Ok(created)
+    }
 
     async fn collected_at_map(&self, session_ids: &[&str], bot_uuid: &str) -> Vec<(String, u64)> {
         let st = self.state.read().await;

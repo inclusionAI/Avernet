@@ -3,6 +3,7 @@
 pub mod bot_authority;
 pub mod bot_authority_sqlite;
 pub mod contract;
+pub mod store_model;
 
 mod db_transactions;
 mod auth_noop;

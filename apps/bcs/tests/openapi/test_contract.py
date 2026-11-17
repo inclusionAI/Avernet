@@ -72,6 +72,7 @@ EXPECTED_OPERATIONS = GROUP_CONTEXT_OPERATIONS | {
     ("delete", "/openapi/v1/collaboration/sessions/{session_id}/participants/{bot_uuid}"),
     ("post", "/openapi/v1/collaboration/groups/{group_id}/invitations"),
     ("post", "/openapi/v1/collaboration/sessions/{session_id}/invitations"),
+    ("get", "/openapi/v1/collaboration/invitations/{token}"),
     ("post", "/openapi/v1/collaboration/invitations/{token}/accept"),
     ("post", "/openapi/v1/collaboration/sessions/{session_id}/token"),
     ("get", "/openapi/v1/collaboration/messages/ws"),

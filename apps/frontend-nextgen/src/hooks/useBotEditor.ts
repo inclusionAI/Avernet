@@ -14,6 +14,7 @@ import { useBotEngineConfig } from '@/hooks/useBotEngineConfig';
 import { useBotLocalSkillUpload } from '@/hooks/useBotLocalSkillUpload';
 import { useResourcePathClipboard } from '@/hooks/useResourcePathClipboard';
 import { useRoutineActivation } from '@/hooks/useRoutineActivation';
+import { useResourceListState } from '@/hooks/useResourceListState';
 import { useSkillSetActivation } from '@/hooks/useSkillSetActivation';
 import { botEditorService } from '@/services/botWorkshop/botEditorService';
 import { useCallback, useEffect, useState } from 'react';
@@ -37,8 +38,7 @@ export function useBotEditor(
   const [mcps, setMcps] = useState<BotEditorMcp[]>([]);
   const [capabilityLoadError, setCapabilityLoadError] = useState<string>();
   const candidates = useBotEditorCandidates(botId, spaceId, ownerId);
-  const [resources, setResources] = useState<BotEditorResource[]>([]);
-  const [resourceLoadingPaths, setResourceLoadingPaths] = useState<string[]>([]);
+  const { resources, resourceLoadingPaths, resourceErrors, resourceLoadedPaths, startResourceRequest, finishResourceRequest } = useResourceListState(botId, ownerId);
   const [screens, setScreens] = useState<BotRenderScreen[]>([]);
   const [routines, setRoutines] = useState<BotEditorRoutine[]>([]);
   const routineActivation = useRoutineActivation(botId, ownerId, setRoutines);
@@ -52,13 +52,17 @@ export function useBotEditor(
   const load = useCallback(async (options?: { silent?: boolean }) => {
     if (!botId || !enabled) return;
     if (!options?.silent) setLoading(true);
+    const resourceTicket = startResourceRequest('');
+    void botEditorService.listResources(botId, '', ownerId, true).then(
+      (items) => finishResourceRequest(resourceTicket, items),
+      (error) => finishResourceRequest(resourceTicket, undefined, error),
+    );
     try {
-      const data = await botEditorService.load(botId, ownerId, deployment, engine);
+      const data = await botEditorService.load(botId, ownerId, deployment, engine, true);
       setSkills(data.skills);
       setSkillSets(data.skillSets);
       setMcps(data.mcps);
       setCapabilityLoadError(data.capabilityLoadError);
-      setResources(data.resources);
       setScreens(data.screens);
       setRoutines(data.routines);
       setEngineStatus(data.engineStatus);
@@ -101,6 +105,8 @@ export function useBotEditor(
     capabilityLoadError,
     ...candidates,
     resources,
+    resourceErrors,
+    resourceLoadedPaths,
     screens,
     routines,
     engineConfig: engineConfig.config,
@@ -132,10 +138,12 @@ export function useBotEditor(
       act(() => botEditorService.setMcpActive(botId!, mcp, active, ownerId), active ? 'MCP 已添加' : 'MCP 已移除'),
     createDirectory: (path: string) => act(() => botEditorService.createDirectory(botId!, path, ownerId), '目录已创建'),
     browseResources: async (directory = '') => {
+      const ticket = startResourceRequest(directory);
       try {
-        setResources(await botEditorService.listResources(botId!, directory, ownerId));
+        const items = await botEditorService.listResources(botId!, directory, ownerId, true);
+        finishResourceRequest(ticket, items);
       } catch (error) {
-        toast.error(error instanceof Error ? error.message : '资源目录加载失败');
+        finishResourceRequest(ticket, undefined, error);
       }
     },
     deleteResource: (path: string) => act(() => botEditorService.deleteResource(botId!, path, ownerId), '资源已删除'),
@@ -203,19 +211,13 @@ export function useBotEditor(
       }
     },
     loadResourceDirectory: async (directory: string) => {
-      setResourceLoadingPaths((current) => [...new Set([...current, directory])]);
+      const ticket = startResourceRequest(directory);
       try {
-        const children = await botEditorService.listResources(botId!, directory, ownerId);
-        setResources((current) => {
-          const merged = new Map(current.map((item) => [item.path, item]));
-          children.forEach((item) => merged.set(item.path, item));
-          return [...merged.values()];
-        });
+        const children = await botEditorService.listResources(botId!, directory, ownerId, true);
+        if (!finishResourceRequest(ticket, children)) throw new Error('stale resource request');
       } catch (error) {
-        toast.error(error instanceof Error ? error.message : '资源目录加载失败');
+        finishResourceRequest(ticket, undefined, error);
         throw error;
-      } finally {
-        setResourceLoadingPaths((current) => current.filter((path) => path !== directory));
       }
     },
     resourceLoadingPaths,

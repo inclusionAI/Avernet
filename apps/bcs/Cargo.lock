@@ -1440,6 +1440,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "bcs-dist-model"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "bcs-dist-store"
+version = "0.1.4-beta.3"
+dependencies = [
+ "async-trait",
+ "bcs-dist-model",
+ "bcs-service-api",
+ "bcs-store-api",
+ "bcs-test-support",
+ "hex",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "bcs-domain"
 version = "0.1.4-beta.3"
 dependencies = [
@@ -1599,6 +1624,7 @@ dependencies = [
  "thiserror 2.0.20",
  "tokio",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -2247,15 +2273,17 @@ dependencies = [
 
 [[package]]
 name = "bcs-service-api"
-version = "6.0.0"
+version = "6.1.0"
 dependencies = [
  "async-trait",
  "bcs-config-api",
+ "bcs-dist-model",
  "bcs-domain",
  "bcs-protocol",
  "bcs-storage-api",
  "bcs-test-support",
  "fastrand",
+ "futures",
  "serde",
  "serde_json",
  "strum",
@@ -2415,6 +2443,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "bcs-store-api"
+version = "0.1.4-beta.3"
+dependencies = [
+ "async-trait",
+ "serde_json",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "bcs-system-message"
 version = "0.1.4-beta.3"
 dependencies = [
@@ -2444,6 +2481,7 @@ version = "0.1.4-beta.3"
 dependencies = [
  "async-trait",
  "axum",
+ "bcs-app-a2a-bot",
  "bcs-app-bot",
  "bcs-app-register",
  "bcs-auth-api",
@@ -2455,9 +2493,12 @@ dependencies = [
  "bcs-config",
  "bcs-db-api",
  "bcs-db-local",
+ "bcs-dist-model",
  "bcs-domain",
  "bcs-edge-permission",
  "bcs-edge-permission-store",
+ "bcs-fuse-client",
+ "bcs-fusion",
  "bcs-human-notify-api",
  "bcs-jwt",
  "bcs-llm-api",
@@ -2468,6 +2509,8 @@ dependencies = [
  "bcs-service-api",
  "bcs-session",
  "bcs-session-file",
+ "bcs-store-api",
+ "futures",
  "serde_json",
  "sha2",
  "tokio",

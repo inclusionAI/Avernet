@@ -358,11 +358,7 @@ impl BcsChannelService {
             .get(&ctx.group_id)
             .await
             .ok_or_else(|| ChannelUseCaseError::NotFound(ctx.group_id.clone()))?;
-        let participants = group
-            .participants
-            .into_iter()
-            .filter(|participant| participant.is_bot())
-            .collect();
+        let participants = group.participants;
         let session = self
             .sessions
             .create_channel(

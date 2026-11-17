@@ -129,3 +129,18 @@ def test_python_runtime_credential_lookup_does_not_treat_field_label_as_value() 
     assert _findings(_diff('SLOT = registration["' + secret + '"]'))
     literal = 'SLOT = "a-real-looking-' + 'secret-value-12345"'
     assert _findings(_diff(literal.replace("SLOT", "token")))
+
+
+def test_rust_neighbor_type_does_not_exempt_a_credential_value() -> None:
+    source = 'pub struct Record {card:Card, SLOT: ' + 'a-real-looking-secret-value-12345 }'
+    assert _findings(_diff(source.replace("SLOT", "token"), path="example.rs"))
+
+
+def test_rust_initializer_field_is_not_a_type_declaration() -> None:
+    source = 'let config = Config { SLOT: ' + 'AbCdEf0123456789XYZ };'
+    assert _findings(_diff(source.replace("SLOT", "token"), path="example.rs"))
+
+
+def test_rust_prior_struct_does_not_exempt_a_later_initializer() -> None:
+    source = 'pub struct Empty {} fn f() { let config = Config { SLOT: ' + 'AbCdEf0123456789XYZ }; }'
+    assert _findings(_diff(source.replace("SLOT", "token"), path="example.rs"))

@@ -101,6 +101,7 @@ fn list_command(viewer: &str) -> ListGroups {
         membership: MembershipFilter::All,
         kind: GroupKindFilter::All,
         strategy: None,
+        sort: GroupListSort::CreatedAt,
     }
 }
 
@@ -242,6 +243,7 @@ async fn group_avatars_follow_current_profile() {
             membership: MembershipFilter::All,
             kind: GroupKindFilter::All,
             strategy: None,
+            sort: GroupListSort::CreatedAt,
         })
         .await
         .expect("list groups as the DM Human");
@@ -369,6 +371,7 @@ async fn group_avatars_follow_current_profile() {
             membership: MembershipFilter::All,
             kind: GroupKindFilter::All,
             strategy: None,
+            sort: GroupListSort::CreatedAt,
         })
         .await
         .expect("re-list groups as the DM Human");
@@ -587,6 +590,7 @@ async fn session_only_group_summaries_carry_avatars() {
             membership: MembershipFilter::SessionOnly,
             kind: GroupKindFilter::All,
             strategy: None,
+            sort: GroupListSort::CreatedAt,
         })
         .await
         .expect("list session-only groups");

@@ -56,7 +56,7 @@ async def test_a_set_beginning_supply_after_planning_prevents_parent_removal_wit
     world = McpWorld(runtime=Runtime())
     set_id = _set_with_mcp(world, "mcp.raced", active=False)
     _save(world, "mcp.raced")
-    report = await world.apply_manifest([{"server_code": "mcp.first"}])
+    report = await world.apply_manifest([{"server_code": "mcp.first"}], retain_fixture_supplies=True)
     assert report.status is ApplyStatus.PARTIAL
     assert report.categories[0].partially_written is True
     assert world.saved() == {"mcp.raced": {"headers": {"X-Saved": "keep"}}}

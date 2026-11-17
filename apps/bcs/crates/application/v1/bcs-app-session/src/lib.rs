@@ -26,7 +26,7 @@ pub use delivery_admission::{DeliveryAdmissionServiceImpl, ERROR_INTERNAL_READ};
 pub use file::SessionFileApplicationServiceImpl;
 pub use group_context_access::GroupContextAddAccessGuard;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -40,9 +40,9 @@ use bcs_service_api::application::v1::{
     session::{
         AddSessionParticipant, CollectSession, CompleteSession, CreateSession,
         CreateSessionOutcome, DeleteSession, DeleteSessionParticipant, GetSession, ListSessions,
-        SessionCollectionResult, SessionCompletionResult, SessionDetail, SessionParticipant,
-        SessionService, SessionStatus as V1SessionStatus, SessionSummary, UncollectSession,
-        UpdateSession, UpdateSessionParticipant,
+        SessionCollectionResult, SessionCompletionResult, SessionDetail, SessionListSort,
+        SessionParticipant, SessionService, SessionStatus as V1SessionStatus, SessionSummary,
+        UncollectSession, UpdateSession, UpdateSessionParticipant,
     },
 };
 use bcs_service_api::core::SessionAuthorizationCoreService;
@@ -288,31 +288,120 @@ impl SessionService for SessionServiceImpl {
         self.load_group(&command.group_id).await?;
         let participant_id = Some(view_actor_id.as_str());
         let status = command.status.map(map_status_to_domain);
-        let mut sessions = self
-            .sessions
-            .list_by_group(
-                &command.group_id,
-                status,
-                command.offset,
-                command.limit,
-                None,
-                participant_id,
-            )
-            .await
-            .map_err(map_session_error)?;
-        // Repo ORDER BY already guarantees created_at DESC, session_id ASC
-        // (VSN7M); keep this sort as a no-op safety net for impls that do not
-        // honour the ordered contract.
-        sessions.sort_by(|a, b| {
-            b.created_at
-                .cmp(&a.created_at)
-                .then_with(|| a.id.cmp(&b.id))
-        });
+        // The pre-pagination count of the viewer-scoped candidate set,
+        // reported as the page's `total` metadata. Design D5 (revised): it is
+        // ONLY a count — the `last_activity` path never uses it as a fetch
+        // limit, so a stale value can never truncate genuinely-active
+        // Sessions out of the sorted set.
         let total = self
             .session_repo
             .count_by_group(&command.group_id, status, None, participant_id)
             .await
             .map_err(map_service_error)?;
+        // Design D4/D5: viewer scope resolves FIRST and always — both paths
+        // read only Sessions the View Actor participates in. `last_activity`
+        // needs the key globally, so it reads the lightweight candidate
+        // projection (id + own `created_at`) in ONE snapshot query plus ONE
+        // group-scoped message aggregate, sorts in-app BEFORE pagination, and
+        // hydrates full Session rows only for the final page ids; the default
+        // mode keeps today's repository ordering and pays ONE batched lookup
+        // over the PAGE ids.
+        let (sessions, activity) = match command.sort {
+            SessionListSort::CreatedAt => {
+                let mut sessions = self
+                    .sessions
+                    .list_by_group(
+                        &command.group_id,
+                        status,
+                        command.offset,
+                        command.limit,
+                        None,
+                        participant_id,
+                    )
+                    .await
+                    .map_err(map_session_error)?;
+                // Repo ORDER BY already guarantees created_at DESC, session_id ASC
+                // (VSN7M); keep this sort as a no-op safety net for impls that do not
+                // honour the ordered contract.
+                sessions.sort_by(|a, b| {
+                    b.created_at
+                        .cmp(&a.created_at)
+                        .then_with(|| a.id.cmp(&b.id))
+                });
+                let page_ids = sessions
+                    .iter()
+                    .map(|session| session.id.clone())
+                    .collect::<Vec<_>>();
+                let activity = self.session_activity_keys(&page_ids).await?;
+                (sessions, activity)
+            }
+            SessionListSort::LastActivity => {
+                // D5 (revised): candidate SELECTION is one snapshot query that
+                // takes no limit derived from the COUNT above (a stale total
+                // would otherwise evict the genuinely most-active Session
+                // created before the newest one), reads only the lightweight
+                // (session_id, created_at) projection, and pairs it with ONE
+                // group-scoped message aggregate. The full Session rows load
+                // afterwards through ONE batched read of at most `limit` page
+                // ids — never the whole candidate set.
+                let candidates = self
+                    .session_repo
+                    .list_activity_candidates_by_group(
+                        &command.group_id,
+                        status,
+                        None,
+                        participant_id,
+                    )
+                    .await
+                    .map_err(map_service_error)?;
+                let activity = if candidates.is_empty() {
+                    HashMap::new()
+                } else {
+                    self.group_session_activity(&command.group_id).await?
+                };
+                // This in-app sort is the authoritative order for this mode:
+                // the D1 key with the session's own `created_at` fallback and
+                // `session_id ASC` as the stable tie-break, applied before
+                // pagination.
+                let mut ordered = candidates;
+                ordered.sort_by(|left, right| {
+                    let left_key = activity
+                        .get(&left.session_id)
+                        .copied()
+                        .unwrap_or(left.created_at);
+                    let right_key = activity
+                        .get(&right.session_id)
+                        .copied()
+                        .unwrap_or(right.created_at);
+                    right_key
+                        .cmp(&left_key)
+                        .then_with(|| left.session_id.cmp(&right.session_id))
+                });
+                let page_ids = ordered
+                    .into_iter()
+                    .skip(saturating_usize(command.offset))
+                    .take(saturating_usize(command.limit))
+                    .map(|candidate| candidate.session_id)
+                    .collect::<Vec<_>>();
+                let mut rows = HashMap::new();
+                for session in self
+                    .session_repo
+                    .try_get_many(&page_ids)
+                    .await
+                    .map_err(map_service_error)?
+                {
+                    rows.insert(session.id.clone(), session);
+                }
+                // Reconcile the store's unspecified row order with the
+                // authoritative activity order; a Session deleted between the
+                // candidate and page reads simply drops out of the page.
+                let page = page_ids
+                    .iter()
+                    .filter_map(|session_id| rows.remove(session_id))
+                    .collect::<Vec<_>>();
+                (page, activity)
+            }
+        };
         // Surface per-session collected state for the view actor, but only
         // when the request explicitly names that actor (mirrors the legacy
         // `list_sessions_for_group` gating: collected is only meaningful
@@ -342,7 +431,12 @@ impl SessionService for SessionServiceImpl {
         let items = sessions
             .iter()
             .map(|s| {
-                let mut summary = project_summary(s, &avatars);
+                // The same map entry for a given Session under every mode; a
+                // Session with no persisted messages falls back to its own
+                // `created_at` (D1), never `None`.
+                let last_activity_at =
+                    Some(activity.get(&s.id).copied().unwrap_or(s.created_at));
+                let mut summary = project_summary(s, &avatars, last_activity_at);
                 if command.view_bot_id.is_some() {
                     summary.collected = Some(collected_set.contains(&s.id));
                 }
@@ -756,6 +850,52 @@ impl SessionService for SessionServiceImpl {
     }
 }
 
+// ── recent-activity list keys ─────────────────────────────────────────
+
+impl SessionServiceImpl {
+    /// One batched D1 session-activity lookup for a list call (design
+    /// D4/D5/D6): the max persisted message `created_at` per session id,
+    /// submitted over the PAGE ids; an empty page pays no store read. A
+    /// lookup error fails the request (500) instead of serving a mis-ordered
+    /// or mis-dated page.
+    async fn session_activity_keys(
+        &self,
+        session_ids: &[String],
+    ) -> Result<HashMap<String, u64>, ApplicationError> {
+        if session_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        self.history
+            .last_activity_by_session_ids(session_ids)
+            .await
+            .map_err(|error| {
+                ApplicationError::internal(format!(
+                    "Session message activity lookup failed: {error}"
+                ))
+            })
+    }
+
+    /// ONE group-scoped aggregate of the persisted message activity keys for
+    /// the `last_activity` Session list sort (design D1/D4 revised): the
+    /// message side of the D1 key per Session of this group, under the
+    /// history store's env isolation. Sessions with no persisted message stay
+    /// absent from the map and keep their own `created_at` fallback; a store
+    /// failure fails the request (500, D6), never a silently mis-ordered page.
+    async fn group_session_activity(
+        &self,
+        group_id: &str,
+    ) -> Result<HashMap<String, u64>, ApplicationError> {
+        self.history
+            .last_activity_in_group(group_id)
+            .await
+            .map_err(|error| {
+                ApplicationError::internal(format!(
+                    "Session message activity lookup failed: {error}"
+                ))
+            })
+    }
+}
+
 // ── projection helpers ────────────────────────────────────────────────
 
 fn merge_participant_state_machine_snapshot(
@@ -769,6 +909,10 @@ fn merge_participant_state_machine_snapshot(
 }
 
 // ── error mappers ─────────────────────────────────────────────────────
+
+fn saturating_usize(value: u64) -> usize {
+    usize::try_from(value).unwrap_or(usize::MAX)
+}
 
 fn map_session_error(error: SessionUseCaseError) -> ApplicationError {
     match error {

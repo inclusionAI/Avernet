@@ -42,6 +42,17 @@ lane of the Session, including Bots that are no longer participants. Apply the
 remote DDL before new server code; SQLite bootstrap applies it automatically.
 No backfill.
 
+Conversation-activity sorting adds MySQL `047_message_activity_indexes.sql` and
+SQLite `045_message_activity_indexes.sql`: additive
+`(env, group_id, created_at)` / `(env, session_id, created_at)` indexes on
+`bcs_messages`, covering the batched `MAX(created_at)` aggregates behind
+`sort=last_activity` on the Group and Session list endpoints (design D2 evidence
+gate). The pre-existing `(group_id, created_at)` / `(session_id, created_at)`
+keys lack `env`, so the group aggregate re-planned to an env-wide scan on wide
+IN lists; the new keys keep the per-candidate range inside the index and remove
+the table fetch for `MAX()`. Apply the remote DDL before enabling the sort;
+SQLite bootstrap applies it automatically. No backfill, no write-path change.
+
 The open-source v1 baseline starts from a single MySQL/OceanBase init schema.
 001 is the starting schema, not a snapshot of the latest schema. Fresh databases
 must apply the subsequent numbered migrations in order as well.

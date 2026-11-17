@@ -251,3 +251,6 @@ mod caller_container;
 mod caller_observe;
 pub use caller_observe::HttpObserveInjector;
 mod caller_history;
+
+mod request_headers;
+pub use request_headers::install_provider_request_header_policy;

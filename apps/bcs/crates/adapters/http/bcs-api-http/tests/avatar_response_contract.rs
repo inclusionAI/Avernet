@@ -224,6 +224,7 @@ fn normal_summary(group_id: &str) -> GroupSummary {
         human_mention_notify_mode: HumanMentionNotifyMode::All,
         created_at: 1,
         updated_at: 2,
+        last_activity_at: None,
     })
 }
 
@@ -251,6 +252,7 @@ fn dm_summary() -> GroupSummary {
         human_mention_notify_mode: HumanMentionNotifyMode::All,
         created_at: 1,
         updated_at: 2,
+        last_activity_at: None,
     })
 }
 
@@ -370,6 +372,7 @@ fn session_summary() -> SessionSummary {
             v1_summary_row("driver-bot", Some(AVATAR)),
             v1_summary_row("plain-bot", None),
         ],
+        last_activity_at: None,
     }
 }
 
@@ -456,6 +459,13 @@ struct NoopInvitationService;
 
 #[async_trait]
 impl InvitationService for NoopInvitationService {
+    async fn preview_invitation(
+        &self,
+        _query: bcs_service_api::application::v1::PreviewInvitation,
+    ) -> Result<bcs_service_api::application::v1::InvitationPreview, ApplicationError> {
+        Err(ApplicationError::internal("invitation preview not configured"))
+    }
+
     async fn create_group_invitation(&self, _: CreateGroupInvitation) -> Result<Invitation, ApplicationError> {
         unreachable!("invitations are not exercised by this contract test")
     }

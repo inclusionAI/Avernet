@@ -438,6 +438,13 @@ pub(crate) struct NoopInvitationService;
 
 #[async_trait]
 impl InvitationService for NoopInvitationService {
+    async fn preview_invitation(
+        &self,
+        _query: PreviewInvitation,
+    ) -> Result<InvitationPreview, ApplicationError> {
+        Err(ApplicationError::internal("invitation preview not configured"))
+    }
+
     async fn create_group_invitation(
         &self,
         _: CreateGroupInvitation,

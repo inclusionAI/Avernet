@@ -346,6 +346,8 @@ _CORE_SERVICE_NAMES_OK: frozenset[str] = frozenset({
     "DeviceNotBoundError",
     "UnknownProviderError",
     "ConnInfoBuildError",
+    "DeviceOfflineError",
+    "DeviceConnectionUnavailableError",
     # ── Surfaced by widening the regex to cover ``core/services/<file>`` (R11/F43)
     # Those imports previously matched nothing and skipped this check entirely.
     #

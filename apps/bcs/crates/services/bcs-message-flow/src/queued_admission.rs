@@ -313,7 +313,9 @@ pub(crate) async fn commit_routed_reply(
         // world behavior for caller-enabled targets instead of re-
         // broadcasting an untrusted A2A. Inject targets never derive:
         // injections never trigger tools/children/runs (§15.38).
-        if target.delivery_type == bcs_domain::DeliveryType::Send
+        // A rejected recipient never executes and must not consume the
+        // parent's nonrefundable invocation budget ahead of valid siblings.
+        if rejection.is_none() && target.delivery_type == bcs_domain::DeliveryType::Send
             && target.bot_uuid != event.bot_id
         {
             let invocation = format!("reply:{}:{}", event.run_id, target.bot_uuid);

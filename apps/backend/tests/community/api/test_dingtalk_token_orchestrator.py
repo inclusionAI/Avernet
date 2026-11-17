@@ -25,8 +25,7 @@ def _orchestrated_service():
     real_identity.get_iam_token_context = identity.get_iam_token_context
     caller._caller_identity = real_identity
     caller._token_provider = SimpleNamespace(exchange_dingtalk=provider.exchange_dingtalk)
-    token_expiry = datetime.now() + timedelta(hours=1)
-    token = replace(_caller_token(), expires_at=token_expiry)
+    token = replace(_caller_token(), expires_at=datetime.now() + timedelta(hours=1))
     provider.exchange_dingtalk.return_value = token
     bindings.resolve.side_effect = None
     bindings.resolve.return_value = ResolvedRuntimeBinding(41, RuntimeBindingSource.CALLER_INSTANCE)

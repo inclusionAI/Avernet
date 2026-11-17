@@ -98,19 +98,54 @@ impl GroupService for GroupServiceImpl {
         // V1 contract (`api-contracts/v1/openapi/groups.yaml`) declares
         // `created_at DESC, group_id ASC`. Legacy HTTP endpoints keep
         // `updated_at` sort, so we use a dedicated comparator here.
-        groups.sort_by(|(left, _), (right, _)| {
-            DomainGroup::cmp_by_created_at_desc_group_id_asc(left, right)
-        });
+        // Design D4/D5: `last_activity` needs the key globally, so it pays
+        // the batched activity reads over the whole filtered set BEFORE
+        // sorting; every other mode sorts and paginates first and pays them
+        // over the page only.
+        let activity_sort = command.sort == GroupListSort::LastActivity;
+        let mut activity = if activity_sort {
+            let filtered_ids = groups
+                .iter()
+                .map(|(group, _)| group.id.clone())
+                .collect::<Vec<_>>();
+            self.group_activity_keys(&filtered_ids).await?
+        } else {
+            HashMap::new()
+        };
+        match command.sort {
+            GroupListSort::CreatedAt => groups.sort_by(|(left, _), (right, _)| {
+                DomainGroup::cmp_by_created_at_desc_group_id_asc(left, right)
+            }),
+            GroupListSort::LastActivity => groups.sort_by(|(left, _), (right, _)| {
+                let left_activity = activity.get(&left.id).copied().unwrap_or(left.created_at);
+                let right_activity = activity
+                    .get(&right.id)
+                    .copied()
+                    .unwrap_or(right.created_at);
+                right_activity
+                    .cmp(&left_activity)
+                    .then_with(|| left.id.cmp(&right.id))
+            }),
+        }
         let total = groups.len() as u64;
         let page = groups
             .into_iter()
             .skip(saturating_usize(command.offset))
             .take(saturating_usize(command.limit))
             .collect::<Vec<_>>();
+        if !activity_sort {
+            let page_ids = page
+                .iter()
+                .map(|(group, _)| group.id.clone())
+                .collect::<Vec<_>>();
+            activity = self.group_activity_keys(&page_ids).await?;
+        }
         let mut items = Vec::with_capacity(page.len());
         for (group, membership) in page {
+            let last_activity_at =
+                Some(activity.get(&group.id).copied().unwrap_or(group.created_at));
             items.push(
-                self.project_summary(group, &view_actor_id, membership)
+                self.project_summary(group, &view_actor_id, membership, last_activity_at)
                     .await?,
             );
         }
@@ -175,7 +210,7 @@ impl GroupService for GroupServiceImpl {
             .collect::<Vec<_>>();
         let mut items = Vec::with_capacity(page.len());
         for group in page {
-            items.push(self.project_summary(group, "", Membership::None).await?);
+            items.push(self.project_summary(group, "", Membership::None, None).await?);
         }
         // Design §5.2/§5.3: the public catalog reuses the same summary shape
         // and the same single batched avatar read over the rows it projects;
@@ -907,5 +942,47 @@ impl GroupService for GroupServiceImpl {
             }
             Err(error) => Err(map_group_error(error)),
         }
+    }
+}
+
+impl GroupServiceImpl {
+    /// Batched D1 activity keys for one list call (design D4/D5): the
+    /// message-side max per group merged with the max session `created_at`
+    /// per group using `max()`. An unwired history service contributes an
+    /// empty message map, so ids without a session row keep their caller-side
+    /// `created_at` fallback; a lookup error on either side fails the whole
+    /// request (D6) instead of serving a mis-dated or mis-ordered page.
+    async fn group_activity_keys(
+        &self,
+        group_ids: &[String],
+    ) -> Result<HashMap<String, u64>, ApplicationError> {
+        if group_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let mut activity = match self.group_message_history.as_deref() {
+            Some(history) => history
+                .last_activity_by_group_ids(group_ids)
+                .await
+                .map_err(|error| {
+                    ApplicationError::internal(format!(
+                        "Group message activity lookup failed: {error}"
+                    ))
+                })?,
+            None => HashMap::new(),
+        };
+        let session_created_at = self
+            .sessions
+            .max_created_at_by_group_ids(group_ids)
+            .await
+            .map_err(|error| {
+                ApplicationError::internal(format!(
+                    "Group session activity lookup failed: {error}"
+                ))
+            })?;
+        for (group_id, created_at) in session_created_at {
+            let entry = activity.entry(group_id).or_insert(created_at);
+            *entry = (*entry).max(created_at);
+        }
+        Ok(activity)
     }
 }

@@ -16,9 +16,11 @@ members = [
     "crates/service-api/bcs-service-api",
     "crates/service-api/bcs-services-container",
     # contracts
+    "crates/contracts/bcs-dist-model",
     "crates/contracts/bcs-domain",
     "crates/contracts/bcs-protocol",
     # services
+    "crates/services/bcs-dist-store",
     "crates/services/bcs-config",
     "crates/services/bcs-db-migrations",
     "crates/services/bcs-eventing",
@@ -76,6 +78,7 @@ members = [
     # plugin-api
     "crates/plugin-api/bcs-auth-api",
     "crates/plugin-api/bcs-cache-api",
+    "crates/plugin-api/bcs-store-api",
     "crates/plugin-api/bcs-channel-api",
     "crates/plugin-api/bcs-db-api",
     "crates/plugin-api/bcs-human-notify-api",
@@ -144,6 +147,8 @@ rust-version = "1.91"
 version      = "0.1.4-beta.3"
 
 [workspace.dependencies]
+bcs-dist-model = { path = "crates/contracts/bcs-dist-model" }
+bcs-dist-store = { path = "crates/services/bcs-dist-store" }
 bcs-a2a-binding-api = { path = "crates/plugin-api/bcs-a2a-binding-api" }
 bcs-tracing-api = { path = "crates/plugin-api/bcs-tracing-api" }
 bcs-network-tracing = { path = "crates/auxiliary/bcs-network-tracing" }
@@ -339,6 +344,7 @@ bcs-invite-code-store      = { path = "crates/services/bcs-invite-code-store" }
 bcs-session-file           = { path = "crates/services/bcs-session-file" }
 bcs-system-message         = { path = "crates/services/bcs-system-message" }
 bcs-cache-api              = { path = "crates/plugin-api/bcs-cache-api" }
+bcs-store-api              = { path = "crates/plugin-api/bcs-store-api" }
 bcs-channel-api            = { path = "crates/plugin-api/bcs-channel-api" }
 bcs-db-api                 = { path = "crates/plugin-api/bcs-db-api" }
 bcs-human-notify-api       = { path = "crates/plugin-api/bcs-human-notify-api" }

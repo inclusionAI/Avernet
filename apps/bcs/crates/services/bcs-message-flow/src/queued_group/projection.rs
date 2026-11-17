@@ -130,13 +130,28 @@ impl QueuedGroupProjection {
         if command.session_id.as_deref().is_none_or(|s| s.is_empty()) {
             return Err(invalid("queue admission requires a canonical session"));
         }
-        let is_provider = flow.registry.resolve_delivery_target(&target.bot_uuid).await?.is_http_provider();
-        // WS does not consume Provider-only headers. Preserve only explicitly
-        // approved routing metadata for a later Bot relay, never credentials.
-        let headers: Vec<_> = command.provider_bypass_headers.iter().filter(|(name, _)|
-            is_provider || flow.queue_persistable_headers.iter().any(|a| a.eq_ignore_ascii_case(name))).cloned().collect();
+        use bcs_service_api::port::repo::message_delivery::DeliveryAdmissionRejection;
+        let (headers, target_rejection) = match flow.registry.resolve_delivery_target(&target.bot_uuid).await {
+            Ok(delivery_target) => {
+                // WS does not consume Provider-only headers. Preserve only explicitly
+                // approved routing metadata for a later Bot relay, never credentials.
+                let headers: Vec<_> = command.provider_bypass_headers.iter().filter(|(name, _)|
+                    delivery_target.is_http_provider() || flow.queue_persistable_headers.iter().any(|a| a.eq_ignore_ascii_case(name))).cloned().collect();
+                (headers, None)
+            }
+            Err(error) => {
+                // Match inline delivery's per-recipient failure isolation. Keep
+                // this target in the atomic admission as Failed, so siblings
+                // proceed and retries replay the same result without dispatch.
+                tracing::warn!(request_id = %bcs_observability::CurrentRequestId,
+                    group_id = %group.id, session_id = ?command.session_id,
+                    bot_id = %target.bot_uuid, error_code = error.as_ref(),
+                    "queued group target resolution failed");
+                (Vec::new(), Some(DeliveryAdmissionRejection::TargetUnavailable))
+            }
+        };
         let header_snapshot = bcs_config_api::queued_provider_headers::snapshot(&headers, &flow.queue_persistable_headers);
-        let admission_rejection = header_snapshot.as_ref().err().map(|_| bcs_service_api::port::repo::message_delivery::DeliveryAdmissionRejection::ProviderHeadersUnsupported);
+        let admission_rejection = target_rejection.or_else(|| header_snapshot.as_ref().err().map(|_| DeliveryAdmissionRejection::ProviderHeadersUnsupported));
         let provider_route_headers = header_snapshot.unwrap_or_default();
         let participant = group
             .participants

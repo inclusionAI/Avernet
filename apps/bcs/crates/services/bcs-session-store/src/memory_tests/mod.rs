@@ -501,3 +501,168 @@
             );
         }
     }
+
+    /// Seed one session row with an exact `created_at` (epoch ms) for the
+    /// activity-key tests. Rows go straight into the store state so each one
+    /// controls its own timestamp (`create` always stamps `now_ms()`), the
+    /// same direct-seed shape the message-store activity tests use.
+    async fn seed_created_at(
+        repo: &MemorySessionRepo,
+        group_id: &str,
+        session_id: &str,
+        created_at: u64,
+    ) {
+        let mut state = repo.state.write().await;
+        let mut session =
+            session_from_params(session_id.to_string(), group_id, &NewSessionParams::default(), created_at);
+        session.created_at = created_at;
+        insert_session(&mut state, session);
+    }
+
+    /// Empty id lists short-circuit to an empty map: the group list paginates
+    /// over an empty candidate set and must not pay for a lookup.
+    #[tokio::test]
+    async fn max_created_at_empty_id_list_is_an_empty_map() {
+        let repo = MemorySessionRepo::new();
+        seed_created_at(&repo, "g-a", "g-a:00000001", 1_000).await;
+
+        assert!(repo.max_created_at_by_group_ids(&[]).await.unwrap().is_empty());
+    }
+
+    /// Per-group activity is the MAX `created_at` over the group's currently
+    /// persisted sessions — not the first, the last created, nor the count.
+    #[tokio::test]
+    async fn max_created_at_returns_per_group_maximum() {
+        let repo = MemorySessionRepo::new();
+        seed_created_at(&repo, "g-a", "g-a:00000001", 1_000).await;
+        seed_created_at(&repo, "g-a", "g-a:00000002", 5_000).await;
+        seed_created_at(&repo, "g-a", "g-a:00000003", 3_000).await;
+        seed_created_at(&repo, "g-b", "g-b:00000001", 2_000).await;
+        seed_created_at(&repo, "g-b", "g-b:00000002", 7_000).await;
+        seed_created_at(&repo, "g-untouched", "g-untouched:00000001", 9_000).await;
+
+        let created = repo
+            .max_created_at_by_group_ids(&["g-a".to_string(), "g-b".to_string()])
+            .await
+            .unwrap();
+        assert_eq!(created.len(), 2);
+        assert_eq!(created.get("g-a"), Some(&5_000));
+        assert_eq!(created.get("g-b"), Some(&7_000));
+        assert!(!created.contains_key("g-untouched"));
+    }
+
+    /// Group ids with no persisted session are absent so callers keep their
+    /// own `created_at` fallback (design D1).
+    #[tokio::test]
+    async fn max_created_at_omits_groups_without_sessions() {
+        let repo = MemorySessionRepo::new();
+        seed_created_at(&repo, "g-known", "g-known:00000001", 4_200).await;
+
+        let created = repo
+            .max_created_at_by_group_ids(&["g-known".to_string(), "g-missing".to_string()])
+            .await
+            .unwrap();
+        assert_eq!(created.len(), 1);
+        assert_eq!(created.get("g-known"), Some(&4_200));
+        assert!(!created.contains_key("g-missing"));
+    }
+
+    /// A hard-deleted session stops contributing (design D1, Review Focus #7
+    /// store half): deleting the newest session of a multi-session group drops
+    /// the group key to the remaining session, and deleting the rest removes
+    /// the group from the map entirely.
+    #[tokio::test]
+    async fn max_created_at_drops_hard_deleted_sessions() {
+        let repo = MemorySessionRepo::new();
+        seed_created_at(&repo, "g-del", "g-del:00000001", 1_000).await;
+        seed_created_at(&repo, "g-del", "g-del:00000002", 9_000).await;
+
+        let before = repo
+            .max_created_at_by_group_ids(&["g-del".to_string()])
+            .await
+            .unwrap();
+        assert_eq!(before.get("g-del"), Some(&9_000));
+
+        assert!(repo.delete("g-del:00000002").await.unwrap());
+        let after_newest = repo
+            .max_created_at_by_group_ids(&["g-del".to_string()])
+            .await
+            .unwrap();
+        assert_eq!(after_newest.get("g-del"), Some(&1_000));
+
+        assert!(repo.delete("g-del:00000001").await.unwrap());
+        let after_all = repo
+            .max_created_at_by_group_ids(&["g-del".to_string()])
+            .await
+            .unwrap();
+        assert!(after_all.is_empty());
+    }
+
+    /// More distinct ids than one SQL chunk (200) must all be answered; the
+    /// memory store folds in one pass, this guards the shared contract.
+    #[tokio::test]
+    async fn max_created_at_covers_ids_beyond_one_chunk() {
+        let repo = MemorySessionRepo::new();
+        for index in 0..250_u64 {
+            seed_created_at(&repo, &format!("g-{index:03}"), &format!("g-{index:03}:00000001"), 1_000 + index)
+                .await;
+        }
+
+        let group_ids: Vec<String> = (0..250).map(|index| format!("g-{index:03}")).collect();
+        let created = repo.max_created_at_by_group_ids(&group_ids).await.unwrap();
+        assert_eq!(created.len(), 250);
+        assert_eq!(created.get("g-000"), Some(&1_000));
+        assert_eq!(created.get("g-249"), Some(&1_249));
+    }
+
+    /// D5-revised candidates carry only the sort inputs: the ids and exact
+    /// `created_at` values match the `list_by_group` rows, filtered to the
+    /// requested group, with no pagination limit applied.
+    #[tokio::test]
+    async fn activity_candidates_project_id_and_created_at_like_the_listed_rows() {
+        let repo = MemorySessionRepo::new();
+        seed_created_at(&repo, "g-a", "g-a:00000001", 1_000).await;
+        seed_created_at(&repo, "g-a", "g-a:00000002", 5_000).await;
+        seed_created_at(&repo, "g-b", "g-b:00000001", 7_000).await;
+
+        let candidates = repo
+            .list_activity_candidates_by_group("g-a", None, None, None)
+            .await
+            .unwrap();
+        let mut keys: Vec<(&str, u64)> = candidates
+            .iter()
+            .map(|candidate| (candidate.session_id.as_str(), candidate.created_at))
+            .collect();
+        keys.sort();
+        assert_eq!(keys, vec![("g-a:00000001", 1_000), ("g-a:00000002", 5_000)]);
+        assert_eq!(
+            repo.list_activity_candidates_by_group("g-empty", None, None, None)
+                .await
+                .unwrap()
+                .len(),
+            0
+        );
+    }
+
+    /// The batched page-row fetch returns the found Sessions (ids with no
+    /// Session are absent, never an error) and issues no clone over the
+    /// missing entries; an empty request pays nothing.
+    #[tokio::test]
+    async fn try_get_many_returns_present_sessions_and_skips_missing() {
+        let repo = MemorySessionRepo::new();
+        seed_created_at(&repo, "g-a", "g-a:00000001", 1_000).await;
+        seed_created_at(&repo, "g-a", "g-a:00000002", 5_000).await;
+
+        let sessions = repo
+            .try_get_many(&[
+                "g-a:00000002".to_string(),
+                "g-a:000000ff".to_string(),
+                "g-a:00000001".to_string(),
+            ])
+            .await
+            .unwrap();
+        let ids: Vec<&str> = sessions.iter().map(|session| session.id.as_str()).collect();
+        assert_eq!(ids, vec!["g-a:00000002", "g-a:00000001"]);
+        assert_eq!(sessions[0].created_at, 5_000);
+        assert!(repo.try_get_many(&[]).await.unwrap().is_empty());
+    }

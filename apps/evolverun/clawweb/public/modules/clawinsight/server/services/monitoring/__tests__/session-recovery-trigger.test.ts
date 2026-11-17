@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { DIAGNOSIS_VERSION, DIAGNOSIS_V3_VERSION, DIAGNOSIS_V4_VERSION, type DiagnosisEvent } from "../contracts.js";
-import { createMonitoringRecoveryTrigger, SESSION_RECOVERY_ALLOWLIST_KEY } from "../session-recovery-trigger.js";
+import { DIAGNOSIS_VERSION, DIAGNOSIS_V3_VERSION, DIAGNOSIS_V4_VERSION, type DiagnosisEvent, type MonitoringTarget } from "../contracts.js";
+import { createMonitoringRecoveryTrigger, parseLegacyRecoveryAllowlist } from "../session-recovery-trigger.js";
 import { SessionRecoveryError } from "../../repair/session-recovery/errors.js";
 
 import { runtimeIdentity } from "./runtime-identity-fixture.js";
@@ -19,7 +19,8 @@ const event: DiagnosisEvent = {
   handlerName: "NOT_COMPLETED", humanIntervention: false,
 };
 function setup() {
-  const config = { findByKey: vi.fn().mockResolvedValue({ enabled: 1, config_json: JSON.stringify({ allowed_bots: [bot] }) }) };
+  const config = { find: vi.fn(async (t: MonitoringTarget) => t.botId === bot.bot_id && t.entityId === bot.entity_id && t.env === bot.env
+    ? { ...t, diagnosisEnabled: true, recoveryEnabled: true, configJson: '{}', version: 1 } : null) };
   const service = { create: vi.fn().mockResolvedValue({ event_id: event.eventId, delivery_key: "receipt", status: "accepted" }) };
   return { config, service, trigger: createMonitoringRecoveryTrigger({ config, service }) };
 }
@@ -29,7 +30,7 @@ describe("monitoring automatic recovery", () => {
   it.each(["OC", "TE"] as const)("maps %s diagnostics to the existing approval flow without inferring a location", async engine => {
     const { config, service, trigger } = setup();
     await trigger.trigger({ ...event, engine });
-    expect(config.findByKey).toHaveBeenCalledWith(SESSION_RECOVERY_ALLOWLIST_KEY);
+    expect(config.find).not.toHaveBeenCalled(); // Admission belongs to the recovery service.
     const [request, actor] = service.create.mock.calls[0];
     expect(request).toEqual({
       event_id: event.eventId, tc_fault_label: event.tcFaultLabel, target: { ...bot, engine, ...(engine === "OC" ? { runtime_identity: {
@@ -45,9 +46,11 @@ describe("monitoring automatic recovery", () => {
 
   it("keeps the diagnostic trace ID distinct from the session identifiers", async () => {
     const { service, trigger } = setup();
-    await trigger.trigger({ ...event, engine: "TE", traceId: "failing-turn" });
+    const occurredAt = "2026-10-14T23:41:15.000Z";
+    await trigger.trigger({ ...event, engine: "TE", traceId: "failing-turn", occurredAt });
     expect(service.create).toHaveBeenCalledWith(expect.objectContaining({
       trace_id: "failing-turn", session_key: event.sessionKey, session_id: event.sessionId,
+      fault_at_ms: Date.parse(occurredAt),
     }), expect.any(Object));
   });
 
@@ -69,7 +72,7 @@ describe("monitoring automatic recovery", () => {
   ])("does not trigger for an ineligible diagnostic %j", async patch => {
     const { config, service, trigger } = setup();
     await trigger.trigger({ ...event, ...patch } as DiagnosisEvent);
-    expect(config.findByKey).not.toHaveBeenCalled();
+    expect(config.find).not.toHaveBeenCalled();
     expect(service.create).not.toHaveBeenCalled();
   });
 
@@ -88,27 +91,19 @@ describe("monitoring automatic recovery", () => {
     const first = service.create.mock.calls[0];
     await trigger.trigger(eligible);
     expect(service.create.mock.calls[1]).toEqual(first); // Stable downstream idempotency input.
-    config.findByKey.mockResolvedValueOnce({ enabled: 1, config_json: '{"allowed_bots":[]}' });
+    service.create.mockRejectedValueOnce(new SessionRecoveryError(403, "recovery_disabled", "disabled"));
     await trigger.trigger(eligible);
     await trigger.trigger({ ...eligible, runtimeIdentity: null });
-    expect(service.create).toHaveBeenCalledTimes(2); // No bypass of allowlist or identity.
+    expect(service.create).toHaveBeenCalledTimes(3); // Disabled admission is acknowledged; missing identity is skipped.
   });
 
-  it("requires the exact Bot, Owner and environment and reloads the saved configuration", async () => {
-    const { config, service, trigger } = setup();
-    for (const patch of [{ botId: "another" }, { entityId: "1234" }, { env: "pre" }]) {
-      await trigger.trigger({ ...event, ...patch });
-    }
-    expect(service.create).not.toHaveBeenCalled();
-    await trigger.trigger(event);
-    config.findByKey.mockResolvedValueOnce({ enabled: 0, config_json: "invalid disabled content" });
-    await trigger.trigger(event);
-    config.findByKey.mockResolvedValueOnce(null);
-    await trigger.trigger(event);
-    config.findByKey.mockResolvedValueOnce({ enabled: 1, config_json: '{"allowed_bots":[]}' });
-    await trigger.trigger(event);
-    expect(service.create).toHaveBeenCalledTimes(1);
-    expect(config.findByKey).toHaveBeenCalledTimes(7);
+  it("accepts the unchanged legacy host argument and delegates admission to the service", async () => {
+    const config = { findByKey: vi.fn().mockRejectedValue(new Error("must not read in trigger")) };
+    const service = { create: vi.fn().mockRejectedValue(new SessionRecoveryError(403, "recovery_disabled", "disabled")) };
+    const trigger = createMonitoringRecoveryTrigger({ config, service });
+    await expect(trigger.trigger(event)).resolves.toBeUndefined();
+    expect(service.create).toHaveBeenCalledOnce();
+    expect(config.findByKey).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -117,21 +112,18 @@ describe("monitoring automatic recovery", () => {
     JSON.stringify({ allowed_bots: [{ ...bot, entity_id: "001234 " }] }),
     JSON.stringify({ allowed_bots: [bot, bot] }),
   ])("fails closed on invalid enabled configuration: %s", async config_json => {
-    const { config, service, trigger } = setup();
-    config.findByKey.mockResolvedValue({ enabled: 1, config_json });
-    await expect(trigger.trigger(event)).rejects.toMatchObject({ code: "NOT_READY" });
-    expect(service.create).not.toHaveBeenCalled();
+    expect(() => parseLegacyRecoveryAllowlist(JSON.parse(config_json))).toThrow();
   });
 
   it("preserves retryable configuration and task storage errors instead of acknowledging them", async () => {
     const { config, service, trigger } = setup();
-    config.findByKey.mockRejectedValueOnce(new Error("configuration DB unavailable"));
+    service.create.mockRejectedValueOnce(new SessionRecoveryError(503, "recovery_configuration_unavailable", "configuration DB unavailable"));
     await expect(trigger.trigger(event)).rejects.toMatchObject({ code: "NOT_READY" });
     service.create.mockRejectedValueOnce(new Error("task storage unavailable"));
     await expect(trigger.trigger(event)).rejects.toMatchObject({ code: "NOT_READY" });
     await trigger.trigger(event);
-    expect(service.create).toHaveBeenCalledTimes(2);
-    expect(service.create.mock.calls[0]).toEqual(service.create.mock.calls[1]);
+    expect(service.create).toHaveBeenCalledTimes(3);
+    expect(service.create.mock.calls[0]).toEqual(service.create.mock.calls[2]);
   });
 
   it("does not retry an explicitly rejected recovery request as a temporary storage failure", async () => {
@@ -154,11 +146,10 @@ describe("monitoring automatic recovery", () => {
     expect(service.create.mock.calls[0][0]).not.toHaveProperty("session_id");
   });
 
-  it("returns a retryable error only for allowed targets when the recovery service is unavailable", async () => {
+  it("returns a retryable error when admission cannot be checked because the recovery service is unavailable", async () => {
     const output = vi.mocked(logRepairEvent).mockClear();
     const { config } = setup();
     const trigger = createMonitoringRecoveryTrigger({ config, service: null });
-    await trigger.trigger({ ...event, entityId: "another-owner" });
     await expect(trigger.trigger(event)).rejects.toMatchObject({ code: "NOT_READY" });
     const events = output.mock.calls.map(([_scope, job, event, fields]) => ({ job, event, ...fields }));
     expect(events.filter(event => event.event === "CREATE_FAILED")).toEqual([expect.objectContaining({

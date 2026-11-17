@@ -1,3 +1,4 @@
+import { registerNotificationPersistenceTests } from './notification-persistence-cases.js';
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdtemp, mkdir, writeFile, appendFile, rm } from "node:fs/promises";
@@ -14,7 +15,6 @@ import { AgentToolCallRepository } from "../../../../repositories/repair/agent-t
 import { SessionRecoveryTaskService } from "../task-service.js";
 import { SessionRecoveryAgentService, recoveryTargetSnapshot } from "../agent-service.js";
 import { RecoverySessionReader } from "../session-reader.js";
-import { SessionRecoveryGroupNotifier } from "../notification.js";
 import { createSessionRecoveryRouter } from "../../../../routes/session-recovery.js";
 import { reconcileAgentExecutions } from "../../common/agent-execution-monitor.js";
 import type { RecoveryTaskResult, RecoveryPlan, RecoveryStoredTask } from "../task-contracts.js";
@@ -90,74 +90,8 @@ it("continues Owner confirmation without recording a sent notification when disa
   expect((await current(task.taskId)).phase).toBe("apply");
 });
 
-it("persists deduplicated group delivery facts without changing the business version or exposing them to the Agent", async () => {
-  const task = await create();
-  const sent = await agent.retryMessage(task, { clientRequestId: "group-advice", purpose: "纠正原操作", message: "请按真实工具参数继续" });
-  expect(actionNotifier.after).toHaveBeenCalledWith({ taskId: task.taskId, eventId: sent.toolCallId, kind: "message" });
-  const before = await current(task.taskId);
-  let finish!: () => void;
-  const sender = { send: vi.fn(() => new Promise<void>(resolve => { finish = resolve; })) };
-  const deps = { controlPlaneEnvironment: "pre" as const, tasks, sender, publicBaseUrl: "https://service.invalid",
-    config: { findByKey: async () => ({ enabled: 1, config_json: JSON.stringify({ webhook: "https://robot.invalid/send", timeout_seconds: 10 }) }) } };
-  const notice = { taskId: task.taskId, eventId: sent.toolCallId, kind: "message" as const };
-  new SessionRecoveryGroupNotifier(deps).after(notice);
-  new SessionRecoveryGroupNotifier(deps).after(notice);
-  await vi.waitFor(() => expect(sender.send).toHaveBeenCalledOnce());
-  expect((await current(task.taskId)).version).toBe(before.version);
-  await agent.report(await current(task.taskId), { kind: "assessment", phase: "assess", decision: "message",
-    summary: "已有现场证据，已发出指引", evidence_ids: [sent.evidenceId] });
-  expect((await current(task.taskId)).phase).toBe("observe");
-  finish();
-  await vi.waitFor(async () => expect((await current(task.taskId)).timeline.some(event => event.payload.channel === "group_webhook" && event.payload.sent === true)).toBe(true));
-  const after = await current(task.taskId);
-  expect(after.version).toBe(before.version + 1);
-  expect((await agent.bootstrap(after)).task.timeline.some(event => event.payload.channel === "group_webhook")).toBe(false);
-  expect((await repo.findTask(task.taskId))!.config_json).not.toContain("https://robot.invalid");
-});
-it("persists sharing and authorizes read-only task links without granting Owner actions", async () => {
-  const task = await create();
-  const read = await inspect(task, "share-evidence");
-  let principal: typeof actor | null = actor;
-  const app = express();
-  app.use(createSessionRecoveryRouter({ service, tasks: service, agent, resolveActor: async () => principal }));
-  const server = await new Promise<ReturnType<typeof app.listen>>(resolve => { const opened = app.listen(0, "127.0.0.1", () => resolve(opened)); });
-  const base = `http://127.0.0.1:${(server.address() as { port: number }).port}/monitoring/session-recoveries`;
-  const call = async (path: string, method = "GET", body?: unknown) => {
-    const response = await fetch(base + path, { method, ...(body === undefined ? {} : { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }) });
-    return { status: response.status, body: await response.json() };
-  };
-  try {
-    const version = (await current(task.taskId)).version;
-    const scope = `/${task.taskId}`;
-    expect(await call(scope + "/share", "PATCH", { shared: true })).toMatchObject({ status: 200, body: { shared: true, canOperate: true } });
-    const restored = new SessionRecoveryTaskRepository(db, new EvolveRepository(db), artifactStore);
-    expect(await restored.find(task.taskId)).toMatchObject({ shared: true, version: version + 1, phase: "assess", status: "running", execution: task.execution });
-    const raw = JSON.parse((await repo.findTask(task.taskId))!.config_json);
-    expect(raw.shared).toBe(true);
-    principal = { userId: "reader", isAdmin: false };
-    expect(await call(`?event_id=${request.event_id}`)).toMatchObject({ status: 200, body: { items: [{ task_id: task.taskId }] } });
-    const visible = await call(scope);
-    expect(visible).toMatchObject({ status: 200, body: { shared: true, canOperate: false, canManageShare: false } });
-    expect(visible.body.execution).toBeUndefined(); expect(visible.body.aisExecution).toBeUndefined();
-    expect((await call(scope + `/tool-calls/${read.toolCallId}`)).status).toBe(200);
-    for (const [suffix, method, body] of [
-      ["/share", "PATCH", { shared: false }],
-      ["/decision", "POST", { plan_digest: "digest", approved: true, cooperation_done: true }],
-      ["/annotations", "POST", { layer: "effect", correct: true, reason: "read only", evidence_ids: [] }],
-      ["/terminate", "POST", { reason: "read only" }],
-    ] as const) expect((await call(scope + suffix, method, body)).status).toBe(403);
-    principal = null;
-    expect((await call(scope)).status).toBe(401);
-    principal = actor;
-    expect((await call(scope + "/share", "PATCH", { shared: "true" })).status).toBe(422);
-    expect((await call(scope + "/share", "PATCH", { shared: false })).status).toBe(200);
-    principal = { userId: "reader", isAdmin: false };
-    expect((await call(scope)).status).toBe(403);
-    expect((await call(scope + `/tool-calls/${read.toolCallId}`)).status).toBe(403);
-    expect(await call(`?event_id=${request.event_id}`)).toMatchObject({ status: 200, body: { items: [] } });
-    expect(runtime.sendMessage).not.toHaveBeenCalled();
-  } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }
-});
+registerNotificationPersistenceTests(() => ({ request, runtime, create, current, inspect, actionNotifier, agent, tasks, repo, db, artifactStore, service, actor }));
+
 it("Agent-first MCP sends one targeted message without an environment approval and recovers the original session", async () => {
   let task = await create("approval", {});
   expect(task.phase).toBe("assess"); expect(runtime.sendMessage).not.toHaveBeenCalled();

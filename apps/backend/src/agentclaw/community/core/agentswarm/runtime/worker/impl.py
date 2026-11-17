@@ -52,6 +52,28 @@ _TERMINAL_RUN_STATUSES = (
 
 _BINDING_STATE_DESTROYED = "DESTROYED"
 
+# Poll-path exception types that are infra flakes, not swarm defects: a
+# single tick lost to the connection pool recovers on the next poll
+# (orchestration.poll_interval), and no dispatch is lost — a READY row
+# stays claimable, and a LEASED row is reclaimed on lease expiry without the
+# D40 breaker counting it (nothing was committed). Logged with a
+# `transient=true` marker instead of assuming swarm damage. Matched by type
+# NAME so this module stays free of DB-driver imports.
+_TRANSIENT_POLL_ERRORS = frozenset((
+    "PoolError",
+    "OperationalError",
+    "InterfaceError",
+    "DatabaseError",
+    "TimeoutError",
+    "DeadlockDetected",
+    "LockWaitTimeout",
+))
+
+# Consecutive failed ticks after which the poll loop stops treating the
+# failure as a one-off and logs at error — a sustained outage must not look
+# identical to a single blip (default poll 2s => ~10s).
+_POLL_FAILURE_ALERT_TICKS = 5
+
 # Lease-renewal thread: bounded join on shutdown. The thread only does a
 # short sync DB update per in-flight run, so 5s is generous headroom; a
 # hung join must never wedge drain past its abort window.
@@ -98,6 +120,9 @@ class AgentSwarmWorker(LifecycleBase):
         self._lease_thread: threading.Thread | None = None
         self._lease_stop = threading.Event()
         self._loop_ref: asyncio.AbstractEventLoop | None = None
+        # Poll-tick failure streak: consecutive run_once() failures, reset by
+        # any successful tick; drives the sustained-outage escalation.
+        self._poll_failures = 0
 
     def _maintenance_enabled(self) -> bool:
         return (
@@ -360,10 +385,50 @@ class AgentSwarmWorker(LifecycleBase):
                 await self.run_once()
             except asyncio.CancelledError:
                 raise
-            except Exception:
-                logger.exception("[agentswarm][worker] poll tick failed")
+            except Exception as exc:
+                self._poll_failures += 1
+                self._log_poll_failure(exc)
+            else:
+                if self._poll_failures:
+                    logger.info(
+                        "[agentswarm][worker] poll recovered after %d failed "
+                        "tick(s) worker_id=%s",
+                        self._poll_failures, self._worker_id,
+                    )
+                    self._poll_failures = 0
             delay = poll + random.uniform(-jitter, jitter)
             await asyncio.sleep(max(0.0, delay))
+
+    def _log_poll_failure(self, exc: Exception) -> None:
+        """Report a failed poll tick with the classification its type deserves.
+
+        A transient infra failure is expected to clear on the next tick, so
+        it is not worth a stack trace per occurrence — but a SUSTAINED run of
+        them is an outage, so the streak escalates to error. Anything not
+        recognised keeps the original full-traceback shape: an unexpected
+        exception is a defect and must stay maximally visible.
+        """
+        transient = type(exc).__name__ in _TRANSIENT_POLL_ERRORS
+        sustained = self._poll_failures >= _POLL_FAILURE_ALERT_TICKS
+        if transient and not sustained:
+            logger.warning(
+                "[agentswarm][worker] poll tick failed exc=%s transient=true "
+                "tick=%d worker_id=%s: %s",
+                type(exc).__name__, self._poll_failures, self._worker_id, exc,
+            )
+            return
+        if transient:
+            logger.error(
+                "[agentswarm][worker] poll tick failed exc=%s transient=true "
+                "tick=%d worker_id=%s (sustained, %d consecutive)",
+                type(exc).__name__, self._poll_failures, self._worker_id,
+                self._poll_failures,
+            )
+            return
+        logger.exception(
+            "[agentswarm][worker] poll tick failed exc=%s tick=%d worker_id=%s",
+            type(exc).__name__, self._poll_failures, self._worker_id,
+        )
 
     async def _heartbeat_loop(self) -> None:
         # Lifecycle keeper for the drain contract (12.2): it lives as long as

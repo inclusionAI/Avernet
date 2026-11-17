@@ -5,6 +5,25 @@
 processes. All producers finish before `../e2e_coverage.sh` aggregates their
 runtime profiles. Unit-test profiles are outside this E2E report.
 
+## Deleted group recipients
+
+The default `stories` inventory runs
+[`queued_target_failure_story.py`](queued_target_failure_story.py) against the
+shared instrumented BCS and Provider mock. It creates a Group/Session, deletes
+one Provider Bot through HTTP, and sends Workbench messages with explicit
+mentions. Public delivery queries must retain the deleted recipient as Failed
+with `delivery_target_unavailable`, while the real scheduler completes healthy
+recipients. The journey covers deleted Send/Inject targets, idempotent replay,
+all reply targets failing, and absence of duplicate/failed Provider requests.
+Queue policy is paused through its CAS API for deterministic admission checks
+and restored during cleanup. No database edits or unit-test profiles supply
+coverage. Run it against a local-auth BCS and the existing Provider mock:
+
+```bash
+python3 apps/bcs/scripts/e2e-test/queued_target_failure_story.py \
+  --base-url "$BCS_API_BASE_URL" --mock-url "$BCS_E2E_MOCK_BASE_URL" --human 001
+```
+
 ## Provider SSE failure recovery
 
 `caller_identity_story.py` invokes `provider_sse_cases.py` after acquiring a
@@ -62,3 +81,32 @@ owner's approval must succeed and produce exactly one grant for applicant
 `aud=backend`). Both identities remain explicit during cleanup and listing so
 this scenario does not inherit the suite's default mock user. The test uses the
 existing Provider/Judge HTTP mock and does not bypass receiver authorization.
+
+## Invitation membership and consent
+
+The default `stories` inventory includes `invitation_story.sh` /
+[`invitation_story.py`](invitation_story.py). It follows real V1 Group/Session
+share links using independently authenticated Humans and a disposable owned Bot.
+BCS itself issues the invitation tokens and persists all resources; the story
+never edits the database, calls service internals or manufactures invitation
+signatures.
+
+The journey distinguishes Bot control and parent-Group access from direct Human
+membership, proves preflight does not join, explicitly accepts before checking
+member navigation metadata, preserves Human modes/message scope on retries, and
+observes member removal on the next request. It also checks invalid/expired links
+(including an already joined Human), deleted targets, forbidden sharing, the
+minimal response shape and private/non-cacheable responses. All Group/Session/Bot
+fixtures are cleaned up via HTTP, including on story failure. Failure messages
+omit token-bearing URLs and response bodies.
+
+For focused validation against a running local-auth/gateway-principal BCS:
+
+```bash
+python3 apps/bcs/scripts/e2e-test/invitation_story.py --base-url "$BCS_API_BASE_URL"
+```
+
+Running the default coverage flow executes it against the shared instrumented
+server before profile aggregation. Unit-test profiles remain outside the E2E
+report; a focused story's global line/method percentages are not the complete
+Singlebox stack's global coverage result.

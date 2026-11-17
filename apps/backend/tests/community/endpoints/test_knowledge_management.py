@@ -118,6 +118,20 @@ def _answer(request):
             "connected": False,
             "authorization_url": "https://ecb.test/oauth/login",
         }
+    elif path.endswith("/yuque/books"):
+        payload = {"items": [], "next_offset": None}
+    elif path.endswith("/yuque/book-imports"):
+        payload = {"items": [], "next_offset": None}
+    elif path.endswith("/yuque/book-imports/source"):
+        payload = {"source_id": "source", "kb_id": "kb", "status": "ready"}
+    elif path.endswith("/yuque/book-imports/source/cancel"):
+        payload = {"source_id": "source", "status": "cancelled"}
+    elif path.endswith("/yuque/book-imports/source/sync"):
+        payload = {"run_id": "run", "status": "accepted"}
+    elif path.endswith("/yuque/book-imports/source/sync-runs/run"):
+        payload = {"run_id": "run", "status": "completed"}
+    elif path.endswith("/yuque/book-imports/source/auto-sync"):
+        payload = {"enabled": False, "expected_version": 0, "schedule": None}
     elif path.endswith("/sources/source"):
         payload = {"source_id": "source", "kb_id": "kb"}
     elif path.endswith("/sync-runs/run"):
@@ -305,6 +319,27 @@ CASES = [
     ("GET", KB + "/yuque/connection", {}),
     ("GET", KB + "/yuque/documents", {}),
     ("POST", KB + "/yuque/import", {"json_body": {"items": [{"doc_id": 1}]}}),
+    (
+        "GET",
+        KB + "/yuque/books",
+        {"query_params": {"q": "team", "offset": 0, "limit": 20}},
+    ),
+    ("GET", KB + "/yuque/book-imports", {}),
+    ("POST", KB + "/yuque/book-imports", {"json_body": {"book_id": 42}}),
+    ("GET", KB + "/yuque/book-imports/{source_id}", {}),
+    (
+        "POST",
+        KB + "/yuque/book-imports/{source_id}/cancel",
+        {"json_body": {"task_id": 7}},
+    ),
+    ("POST", KB + "/yuque/book-imports/{source_id}/sync", {}),
+    ("GET", KB + "/yuque/book-imports/{source_id}/sync-runs/{run_id}", {}),
+    ("GET", KB + "/yuque/book-imports/{source_id}/auto-sync", {}),
+    (
+        "PUT",
+        KB + "/yuque/book-imports/{source_id}/auto-sync",
+        {"json_body": {"enabled": False, "expected_version": 0}},
+    ),
     ("POST", KB + "/sources/{source_id}/sync", {}),
     ("GET", KB + "/sources/{source_id}/sync-runs/{run_id}", {}),
     ("GET", KB + "/sources/{source_id}/auto-sync", {}),

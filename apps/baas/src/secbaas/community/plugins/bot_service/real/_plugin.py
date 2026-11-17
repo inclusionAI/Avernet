@@ -618,7 +618,7 @@ class AiohttpBotServicePlugin(BotServicePlugin):
                     elif credential.is_dingtalk:
                         await self._refresh_caller_token(
                             bot_id=bot_id,
-                            cookie="IAM_TOKEN=" + credential.token,
+                            cookie=f"IAM_TOKEN={credential.token}",
                             token_type="dingtalk",
                         )
                     else:

@@ -204,6 +204,62 @@ async fn fixture(
 }
 
 #[tokio::test]
+async fn rejected_reply_target_preserves_last_delegation_for_healthy_sibling() {
+    use bcs_service_api::{BotRegistryCoreService, Participant, ParticipantRole, RoutingDecision, RoutingTarget};
+    use bcs_domain::message_delivery::MessageDeliveryStatus as Status;
+
+    let (mut flow, mut event, runs) = fixture(true, true).await;
+    let now = chrono::Utc::now().timestamp_millis();
+    let index = flow.caller_root_lineage.clone().unwrap();
+    let lineage = index.current(&event.run_id, now).unwrap();
+    let mut context = runs.get_context(&event.run_id).await.unwrap();
+    // A live workflow parent uses the same turn budget without a managed
+    // delivery of its own; routed replies still enter managed admission.
+    event.run_id = "workflow-reply".into();
+    context.run_id = event.run_id.clone();
+    runs.put_context(context).await;
+    assert!(index.register(&event.run_id, lineage, now));
+    for i in 0..15 {
+        index.reserve_invocation(&event.run_id, &format!("prior-{i}"), "bot-observer", now).unwrap();
+    }
+    let registry = Arc::new(bcs_bot::core::BotCore::memory());
+    for bot in ["bot-driver", "bot-deleted", "bot-observer"] {
+        registry.register(bot.into(), bcs_service_api::BotCapabilities::default()).await.unwrap();
+    }
+    assert!(registry.soft_delete("bot-deleted").await);
+    flow.registry = registry;
+    flow.group_delivery_limits = [("bot-deleted".into(), 10), ("bot-observer".into(), 10)].into();
+    let mut group = flow.group.get("group-1").await.unwrap();
+    group.participants.push(Participant::bot("bot-deleted", ParticipantRole::Observer));
+    let targets: Vec<_> = ["bot-deleted", "bot-observer"].into_iter().map(|bot| RoutingTarget {
+        bot_uuid: bot.into(), url: String::new(), is_driver: false, delivery_type: DeliveryType::Send,
+    }).collect();
+    let decision = RoutingDecision {
+        targets: targets.clone(), mentions: targets.iter().map(|t| t.bot_uuid.clone()).collect(),
+        cleaned_message: "reply".into(), hidden_mentions: Vec::new(),
+    };
+    let contexts = targets.into_iter().map(|target| {
+        let context = serde_json::from_value(json!({
+            "session_id":"session", "originator":"bot-driver", "from":"bot-driver", "message":"reply",
+        })).unwrap();
+        (target, context)
+    }).collect();
+    let result = crate::queued_admission::commit_routed_reply(
+        &flow, &group, &event, "reply", &decision, contexts, "Driver", None, None, false, None,
+    ).await.unwrap().unwrap();
+    assert!(result.relayed);
+    let rows = flow.managed_deliveries.as_ref().unwrap().snapshot(Some("session")).await.unwrap();
+    let failed = rows.iter().find(|r| r.target_bot_id == "bot-deleted").unwrap();
+    assert_eq!(failed.state.status, Status::Failed);
+    assert_eq!(failed.last_error_code.as_deref(), Some("delivery_target_unavailable"));
+    let healthy = rows.iter().find(|r| r.target_bot_id == "bot-observer").unwrap();
+    assert_eq!(healthy.state.status, Status::Queued);
+    assert_eq!(healthy.semantic_projection_json["caller_delegation"]["invocation_id"],
+        format!("reply:{}:bot-observer", event.run_id), "the failed target must not consume the last invocation");
+    assert!(failed.semantic_projection_json.get("caller_delegation").is_none());
+}
+
+#[tokio::test]
 async fn lost_identity_is_not_downgraded_but_ordinary_tasks_are_unchanged() {
     let (flow, event, _) = fixture(true, false).await;
     assert!(

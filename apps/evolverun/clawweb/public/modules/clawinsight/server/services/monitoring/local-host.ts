@@ -1,3 +1,4 @@
+import { botDiagnosisRecoveryMigrations } from '@avernet/clawweb-shared/server/schema-bot-diagnosis-recovery';
 /** Loopback-only integration host. Uses the production router/repository and real SQLite. */
 import express from "express";
 import Database from "better-sqlite3";
@@ -16,6 +17,7 @@ sqlite.pragma("journal_mode = WAL");
 sqlite.pragma("synchronous = FULL");
 const db = new SqliteDatabase(sqlite);
 await initializeMonitoringSqlite(db);
+  await botDiagnosisRecoveryMigrations[0].migrate!(db);
 const runtime = createMonitoringRuntime(() => db, Date.now, createLocalMonitoringIntegration());
 const port = Number(process.env.MONITORING_LOCAL_PORT ?? "3101");
 if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("Invalid local port");

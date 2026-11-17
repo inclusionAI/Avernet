@@ -42,7 +42,7 @@ async function diagnosis(t = a, eventId = 'event-1', patch = {}) {
 beforeEach(async () => {
   db = database(':memory:'); await initializeMonitoringSqlite(db);
   await db.exec(`CREATE TABLE ac_bots (id INTEGER PRIMARY KEY AUTOINCREMENT, bot_id TEXT, entity_id TEXT, env TEXT,
-    active_engine TEXT DEFAULT 'teclaw', owner_id TEXT, bot_name TEXT, owner_name TEXT, avernet_tenant TEXT, is_delete INTEGER)`);
+    active_engine TEXT DEFAULT 'teclaw', owner_id TEXT, bot_name TEXT, owner_name TEXT, avernet_tenant TEXT, is_delete INTEGER, bot_type TEXT DEFAULT 'personal')`);
   repo = new MonitoringRepository(db); directory = new SqlMonitoringBotDirectory(db, true);
 });
 afterEach(async () => { await db.close(); vi.restoreAllMocks(); });
@@ -147,7 +147,7 @@ describe('directory, authorization and browser contracts', () => {
     await bot(a); await diagnosis(a);
     const ref = refs.encode(a, scope.tenant);
     expect((await browser().options(member, all)).items[0]).toMatchObject({ enrollmentState: 'NOT_ENROLLED', monitoring: null });
-    await expect(browser().diagnoses(member, ref, all)).rejects.toMatchObject({ code: 'NOT_ENROLLED' });
+    expect((await browser().diagnoses(member, ref, all)).total).toBe(1);
     const exec = vi.spyOn(db, 'exec');
     await expect(browser().enroll(member, { botRef: ref })).rejects.toMatchObject({ code: 'ENROLLMENT_NOT_IMPLEMENTED' });
     expect(exec).not.toHaveBeenCalled();

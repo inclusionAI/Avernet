@@ -305,12 +305,11 @@ export const botEditorController = {
     ),
   setSkillSetMcp: (botId: string, setId: string, serverCode: string, active: boolean, ownerId?: string) =>
     request(path(botId, `skill-sets/${setId}/mcps/${encodeURIComponent(serverCode)}`), active ? 'PUT' : 'DELETE', { owner_id: ownerId }),
-  listResources: (botId: string, directory = '', ownerId?: string) =>
-    request<BackendApiPage<ResourceDto>>(path(botId, 'resources'), 'GET', {
-      path: directory,
-      page: 1,
-      page_size: 100,
-      owner_id: ownerId,
+  listResources: (botId: string, directory = '', ownerId?: string, suppressErrorNotification = false) =>
+    backendRequest<BackendApiEnvelope<BackendApiPage<ResourceDto>>>(path(botId, 'resources'), {
+      method: 'GET',
+      params: userScopedParams({ path: directory, page: 1, page_size: 100, owner_id: ownerId }),
+      suppressErrorNotification,
     }),
   createDirectory: (botId: string, resourcePath: string, ownerId?: string) =>
     request<ResourceDto>(path(botId, 'resources/mkdir'), 'POST', { path: resourcePath, owner_id: ownerId }),

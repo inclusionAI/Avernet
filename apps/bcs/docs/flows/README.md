@@ -3,6 +3,7 @@
 Start with [Session Deletion](session-deletion.md). Use these existing contracts and guides to trace the relevant flow. Verify the target version, implementation and tests before applying a document to a running system.
 
 - [Session deletion and compatibility](../session-delete-protocol.md)
+- [Channel chat session membership and creation](../channel-group-sessions.md)
 - [Public authentication contract](../../api-contracts/v1/authentication/contract.md)
 - [Gateway principal contract](../../api-contracts/v1/gateway-principal/contract.md)
 
@@ -13,3 +14,5 @@ For cross-app flows start at the [repository flow index](../../../../docs/flows/
 Record trigger, participants, state ownership, failure branches and evidence. Keep app-local implementation here and link cross-app flows; do not copy incident transcripts or credentials.
 
 For the wider inventory of existing app documentation and domain context, see the [existing knowledge catalog](../agents/existing-knowledge.md). Check each entry's status and target version.
+
+- [Request-scoped caller execution](../caller-execution.md): credential delivery and deployment-owned request header policy.

@@ -74,6 +74,7 @@ fn list_command(viewer: &str) -> ListGroups {
         membership: MembershipFilter::All,
         kind: GroupKindFilter::All,
         strategy: None,
+        sort: GroupListSort::CreatedAt,
     }
 }
 
@@ -605,6 +606,7 @@ async fn unauthorized_caller_gets_no_avatar_rows() {
         membership: MembershipFilter::All,
         kind: GroupKindFilter::All,
         strategy: None,
+        sort: GroupListSort::CreatedAt,
     };
     let page = fixture
         .service

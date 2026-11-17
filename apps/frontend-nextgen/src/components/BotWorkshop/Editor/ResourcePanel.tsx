@@ -5,7 +5,8 @@ import { Modal, ModalContent, ModalFooter, ModalHeader, ModalTitle } from '@/com
 import type { BotEditorResource, BotEditorResourcePreview } from '@/domain/botEditor';
 import { buildVisibleResourceTree } from '@/services/botWorkshop/resourceTree';
 import { FolderPlus, Upload } from 'lucide-react';
-import { useMemo, useRef, useState } from 'react';
+import { toast } from 'sonner';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ResourcePanelRow } from './ResourcePanelRow';
 import { ResourcePreviewDrawer } from './ResourcePreviewDrawer';
 
@@ -22,6 +23,10 @@ export function ResourcePanel({
   onCopyPath,
   onLoadDirectory,
   loadingPaths,
+  errors = {},
+  loadedPaths,
+  onRetry,
+  rootReady = true,
 }: {
   resources: BotEditorResource[];
   editable: boolean;
@@ -35,6 +40,10 @@ export function ResourcePanel({
   onCopyPath: (path: string) => Promise<void>;
   onLoadDirectory: (path: string) => Promise<void>;
   loadingPaths: string[];
+  errors?: Record<string, string>;
+  loadedPaths?: string[];
+  onRetry?: (path: string) => Promise<void>;
+  rootReady?: boolean;
 }) {
   const [path, setPath] = useState('');
   const [preview, setPreview] = useState<{ path: string; result: BotEditorResourcePreview }>();
@@ -42,9 +51,38 @@ export function ResourcePanel({
   const [createOpen, setCreateOpen] = useState(false);
   const [createParent, setCreateParent] = useState('');
   const [expanded, setExpanded] = useState<string[]>([]);
-  const [loaded, setLoaded] = useState<string[]>([]);
+  const [localLoadedPaths, setLocalLoadedPaths] = useState<string[]>([]);
+  const effectiveLoadedPaths = loadedPaths ?? localLoadedPaths;
   const uploadRef = useRef<HTMLInputElement>(null);
   const uploadDirectoryRef = useRef('');
+  const uploadTargetInvalid = useRef(false);
+  useEffect(() => {
+    if (loadedPaths) setExpanded((current) => {
+      const retained = current.filter((path) => loadedPaths.includes(path) || loadingPaths.includes(path) || Boolean(errors[path]));
+      return retained.length === current.length ? current : retained;
+    });
+  }, [loadedPaths, loadingPaths, errors]);
+  useEffect(() => {
+    if (!rootReady || loadingPaths.includes('') || errors['']) return;
+    // A missing descendant is only conclusive when its direct parent was loaded.
+    const confirmedMissing = (candidate: string) => {
+      let parent = '';
+      for (const part of candidate.split('/').filter(Boolean)) {
+        if (!(loadedPaths ?? ['']).includes(parent) || loadingPaths.includes(parent) || errors[parent]) return false;
+        const currentParent = parent;
+        const child = currentParent ? `${currentParent}/${part}` : part;
+        if (!resources.some((item) => item.parentPath === currentParent && item.path === child && item.type === 'folder')) return true;
+        parent = child;
+      }
+      return false;
+    };
+    if (directory && confirmedMissing(directory)) setDirectory('');
+    if (uploadDirectoryRef.current && confirmedMissing(uploadDirectoryRef.current)) uploadTargetInvalid.current = true;
+    if (createOpen && createParent && confirmedMissing(createParent)) {
+      setCreateOpen(false);
+      setCreateParent('');
+    }
+  }, [resources, rootReady, loadingPaths, loadedPaths, errors, directory, createOpen, createParent]);
   const visibleResources = useMemo(() => buildVisibleResourceTree(resources, expanded), [expanded, resources]);
   const uploadToDirectory = async (target: string, file: File) => {
     await onUpload(target ? `${target}/${file.name}` : file.name, file);
@@ -58,10 +96,10 @@ export function ResourcePanel({
       return;
     }
     setExpanded((current) => [...current, target]);
-    if (!loaded.includes(target)) {
-      void onLoadDirectory(target)
-        .then(() => setLoaded((current) => [...new Set([...current, target])]))
-        .catch(() => undefined);
+    if (!effectiveLoadedPaths.includes(target)) {
+      void onLoadDirectory(target).then(() => {
+        if (!loadedPaths) setLocalLoadedPaths((current) => [...new Set([...current, target])]);
+      }).catch(() => undefined);
     }
   };
   return (
@@ -86,7 +124,8 @@ export function ResourcePanel({
               const file = event.target.files?.[0];
               const target = uploadDirectoryRef.current;
               // 失败提示已由 act 的 toast 负责，吞掉传播避免 dev 遮罩报 Unhandled Rejection
-              if (file) void uploadToDirectory(target, file).catch(() => undefined);
+              if (file && uploadTargetInvalid.current) toast.error('目标目录已不存在，请重新选择');
+              else if (file) void uploadToDirectory(target, file).catch(() => undefined);
               event.target.value = '';
             }}
           />
@@ -97,6 +136,7 @@ export function ResourcePanel({
             leftIcon={<Upload className="size-4" />}
             onClick={() => {
               uploadDirectoryRef.current = directory;
+              uploadTargetInvalid.current = false;
               uploadRef.current?.click();
             }}
           >
@@ -117,6 +157,15 @@ export function ResourcePanel({
         </div>
       </div>
       <div className="w-full px-4 pb-6 pt-3">
+        {(loadingPaths.includes('') || (!rootReady && !errors[''])) && (
+          <div role="status" className="mb-3 text-sm text-muted-foreground">正在加载资源…</div>
+        )}
+        {Object.entries(errors).map(([failedPath, message]) => (
+          <div key={failedPath} role="alert" className="mb-3 flex items-center justify-between gap-3 rounded-md border border-border p-3">
+            <span>{failedPath ? `${failedPath}：` : ''}{message}</span>
+            <Button variant="outline" size="sm" disabled={loadingPaths.includes(failedPath)} onClick={() => void onRetry?.(failedPath).catch(() => undefined)}>重试</Button>
+          </div>
+        ))}
         {resources.length ? (
           <div>
             {visibleResources.map(({ item, depth }) => (
@@ -132,6 +181,7 @@ export function ResourcePanel({
                 onToggleDirectory={toggleDirectory}
                 onAddFileTo={(target) => {
                   uploadDirectoryRef.current = target;
+                  uploadTargetInvalid.current = false;
                   uploadRef.current?.click();
                 }}
                 onCreateSubdirectory={(parent) => {
@@ -149,11 +199,11 @@ export function ResourcePanel({
               />
             ))}
           </div>
-        ) : (
+        ) : rootReady && !errors[''] && !loadingPaths.includes('') ? (
           <div className="rounded-xl border border-dashed border-border bg-card py-14">
             <Empty compact title="工作区为空" description="当前目录没有文件或文件夹。" />
           </div>
-        )}
+        ) : null}
       </div>
       <ResourcePreviewDrawer preview={preview} onClose={() => setPreview(undefined)} />
       <Modal open={createOpen} onOpenChange={setCreateOpen}>

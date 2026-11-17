@@ -1,38 +1,16 @@
 import { createHash } from "node:crypto";
-import { logRepairEvent, repairLogError } from "../repair/common/logging.js";
+import { logRepairEvent } from "../repair/common/logging.js";
 import type { SessionRecoveryApi } from "../repair/session-recovery/contracts.js";
 import { SessionRecoveryError } from "../repair/session-recovery/errors.js";
 import { isRecoveryTraceId, parseRequest } from "../repair/session-recovery/validation.js";
 import {
-  DIAGNOSIS_V3_VERSION, DIAGNOSIS_V4_VERSION, MonitoringError, type DiagnosisEvent, type MonitoringRecoveryConfigStore, type MonitoringRecoveryTrigger, type MonitoringTarget, type RuntimeIdentity,
+  DIAGNOSIS_V3_VERSION, DIAGNOSIS_V4_VERSION, MonitoringError, type DiagnosisEvent, type MonitoringRecoveryTrigger, type RuntimeIdentity,
 } from "./contracts.js";
 import { RECOVERY_POLICY_VERSION, recoverySkipReason } from "./action-policy.js";
-import { target, targetKey } from "./target.js";
+import type { RecoveryAppConfigStore } from "../repair/session-recovery/legacy-configuration.js";
+import type { BotDiagnosisRecoveryConfigStore } from './bot-config-contracts.js';
 
-export const SESSION_RECOVERY_ALLOWLIST_KEY = "session_recovery_allowlist";
-
-function record(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function parseAllowlist(value: unknown): MonitoringTarget[] {
-  if (!record(value) || Object.keys(value).some(key => key !== "allowed_bots") || !Array.isArray(value.allowed_bots)) {
-    throw new Error("Invalid recovery allowlist");
-  }
-  const seen = new Set<string>();
-  return value.allowed_bots.map(item => {
-    if (!record(item) || Object.keys(item).length !== 3
-      || Object.keys(item).some(key => !["bot_id", "entity_id", "env"].includes(key))
-      || typeof item.bot_id !== "string" || !/^[A-Za-z0-9_-]+$/.test(item.bot_id)
-      || typeof item.entity_id !== "string" || !/^[A-Za-z0-9_.@+-]+$/.test(item.entity_id) || item.entity_id.includes("..")
-      || (item.env !== "pre" && item.env !== "prod")) throw new Error("Invalid recovery target");
-    const entry = target({ botId: item.bot_id, entityId: item.entity_id, env: item.env });
-    const key = targetKey(entry);
-    if (seen.has(key)) throw new Error("Duplicate recovery target");
-    seen.add(key);
-    return entry;
-  });
-}
+export { parseLegacyRecoveryAllowlist, SESSION_RECOVERY_ALLOWLIST_KEY } from "../repair/session-recovery/legacy-configuration.js";
 
 function recoveryRuntimeIdentity(event: DiagnosisEvent, identity: RuntimeIdentity): RuntimeIdentity {
   if (identity.BOT_TYPE !== "service" || identity.STAGE !== "online" || !event.sessionNasPath) return identity;
@@ -63,7 +41,8 @@ export function buildRecoveryTarget(event: DiagnosisEvent) {
 }
 
 export function createMonitoringRecoveryTrigger(input: {
-  config: MonitoringRecoveryConfigStore;
+  /** @deprecated Admission is enforced by the recovery service; retained for existing hosts. */
+  config?: Pick<BotDiagnosisRecoveryConfigStore, 'find'> | RecoveryAppConfigStore;
   service: SessionRecoveryApi | null;
 }): MonitoringRecoveryTrigger {
   return {
@@ -73,19 +52,6 @@ export function createMonitoringRecoveryTrigger(input: {
         console.info("[monitoring] recovery skipped", { eventId: event.eventId, policy: RECOVERY_POLICY_VERSION, reason });
         return;
       }
-      let allowed: MonitoringTarget[];
-      try {
-        const row = await input.config.findByKey(SESSION_RECOVERY_ALLOWLIST_KEY);
-        if (!row || row.enabled === 0) return;
-        if (row.enabled !== 1) throw new Error("Invalid recovery configuration state");
-        allowed = parseAllowlist(JSON.parse(row.config_json));
-      } catch (error) {
-        console.error("[monitoring] recovery unavailable", { eventId: event.eventId, reason: "allowlist_unavailable" });
-        logRepairEvent("session-recovery", "session_recovery_trigger", "configuration_unavailable", { eventId: event.eventId,
-          botId: event.botId, targetEnvironment: event.env, ...repairLogError(error) });
-        throw new MonitoringError("NOT_READY", "自愈内测白名单暂不可用或格式无效。");
-      }
-      if (!allowed.some(entry => targetKey(entry) === targetKey(event))) return;
       const recoveryTarget = buildRecoveryTarget(event);
       if (recoveryTarget === null) {
         console.warn("[monitoring] recovery skipped", { eventId: event.eventId, reason: "runtime_identity_unavailable_or_mismatched" });
@@ -97,7 +63,7 @@ export function createMonitoringRecoveryTrigger(input: {
           event.businessDiagnosis?.trim() ? `业务诊断：${event.businessDiagnosis}` : "",
           event.systemDiagnosis?.trim() ? `系统诊断：${event.systemDiagnosis}` : "",
         ].filter(Boolean).join("\n");
-        const faultAtMs = event.engine === "OC" && event.occurredAt ? Date.parse(event.occurredAt) : NaN;
+        const faultAtMs = event.occurredAt ? Date.parse(event.occurredAt) : NaN;
         request = parseRequest({
           event_id: event.eventId, tc_fault_label: event.tcFaultLabel,
           target: recoveryTarget,
@@ -121,6 +87,10 @@ export function createMonitoringRecoveryTrigger(input: {
       try {
         await input.service.create(request, { userId: event.entityId, isAdmin: false });
       } catch (error) {
+        if (error instanceof SessionRecoveryError && error.code === "recovery_disabled") {
+          console.info("[monitoring] recovery skipped", { eventId: event.eventId, reason: "recovery_disabled" });
+          return;
+        }
         console.error("[monitoring] recovery creation failed", { eventId: event.eventId,
           code: error instanceof SessionRecoveryError ? error.code : "recovery_unavailable" });
         if (error instanceof SessionRecoveryError && error.status < 500) {

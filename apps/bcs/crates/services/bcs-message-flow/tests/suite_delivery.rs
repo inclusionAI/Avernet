@@ -35,3 +35,5 @@ mod operation_output_lifecycle;
 mod operation_output_uncertainty;
 #[path = "cases/queued_provider_headers.rs"]
 mod queued_provider_headers;
+#[path = "cases/queued_target_failures.rs"]
+mod queued_target_failures;

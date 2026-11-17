@@ -40,7 +40,7 @@ describe('MonitoringPanel', () => {
     api.targetDiagnoses.mockResolvedValue({ ...page(), total: 11, totalPages: 1,
       counts: { all: 11, alert: 3, pass: 7, unresolved: 1 }, items });
     const { container } = render(<MonitoringPanel />);
-    expect(screen.getByRole('heading', { name: 'Agent 诊断治愈' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Agent 诊断' })).toBeInTheDocument();
     expect(screen.getByText('实时监测 Bot 任务执行状态，诊断会话异常，助力“罢工”的 Bot 恢复运行')).toBeInTheDocument();
     const filters = within(await screen.findByRole('group', { name: '诊断结果筛选' }));
     await filters.findByRole('button', { name: '全部 11' });
@@ -68,17 +68,16 @@ describe('MonitoringPanel', () => {
     expect(await screen.findByRole('button', { name: `${label} 10` })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByRole('button', { name: '全部 30' })).toHaveAttribute('aria-pressed', 'false');
   });
-  it('clears cached records when a status refresh reports NOT_ENROLLED', async () => {
+  it('preserves historical records after monitoring is disabled', async () => {
     render(<MonitoringPanel />);
     fireEvent.click(await screen.findByRole('button', { name: /外部服务异常/ }));
-    api.targetStatus.mockResolvedValue({ ...option('bot-te'), enrollmentState: 'NOT_ENROLLED', monitoring: null });
+    api.targetStatus.mockResolvedValue({ ...option('bot-te'), enrollmentState: 'NOT_ENROLLED', monitoring: null,
+      configuration: { diagnosisEnabled: false, recoveryEnabled: false, version: 2 } });
     api.targetDiagnoses.mockClear();
     fireEvent.click(screen.getByRole('button', { name: '刷新' }));
-    await screen.findByRole('heading', { name: '此 Bot 尚未纳入监控范围。' });
-    expect(screen.queryByText('trace-1')).not.toBeInTheDocument();
-    expect(screen.queryByText('是否人工纠错')).not.toBeInTheDocument();
-    expect(api.targetDiagnoses).not.toHaveBeenCalled();
-    expect(api.enroll).not.toHaveBeenCalled();
+    await screen.findByText('诊断监控已关闭');
+    expect(api.targetDiagnoses).toHaveBeenCalled();
+    expect(screen.getAllByText('trace-1').length).toBeGreaterThan(0);
   });
 
   it('preserves completed PASS attribution without a redundant policy row', async () => {
@@ -436,12 +435,12 @@ describe('MonitoringPanel', () => {
     expect(screen.queryByRole('button', { name: '监控 Bot bot-te' })).not.toBeInTheDocument();
     expect(screen.getAllByText('登录状态已失效，请重新登录后刷新。').length).toBeGreaterThan(0);
   });
-  it('never requests diagnosis history for an unmonitored directory Bot', async () => {
+  it('loads history for a directory Bot without a prior check', async () => {
     api.targetStatus.mockResolvedValue({ ...option('bot-te'), enrollmentState: 'NOT_ENROLLED', monitoring: null });
     render(<MonitoringPanel />);
-    await screen.findByRole('heading', { name: '此 Bot 尚未纳入监控范围。' });
-    expect(api.targetDiagnoses).not.toHaveBeenCalled();
-    expect(screen.queryByLabelText('诊断记录分页')).not.toBeInTheDocument();
+    await screen.findByRole('button', { name: /外部服务异常/ });
+    expect(api.targetDiagnoses).toHaveBeenCalled();
+    expect(screen.getByLabelText('诊断记录分页')).toBeInTheDocument();
     expect(api.enroll).not.toHaveBeenCalled();
     expect(screen.queryByRole('button', { name: '加入监控' })).not.toBeInTheDocument();
   });
@@ -452,10 +451,10 @@ describe('MonitoringPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: /外部服务异常/ }));
     api.targetDiagnoses.mockRejectedValue({ status: 409, body: JSON.stringify({ error: { code: 'MONITORING_NOT_ENROLLED' } }) });
     await act(async () => { await vi.advanceTimersByTimeAsync(30000); });
-    expect(screen.getByRole('heading', { name: '此 Bot 尚未纳入监控范围。' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '此 Bot 尚未开启诊断监控。' })).toBeInTheDocument();
     expect(screen.queryByText('是否人工纠错')).not.toBeInTheDocument();
     expect(screen.queryByText('trace-1')).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('诊断记录分页')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('诊断记录分页')).toBeInTheDocument();
     expect(api.enroll).not.toHaveBeenCalled();
     expect(screen.queryByRole('button', { name: '加入监控' })).not.toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();

@@ -212,6 +212,7 @@ async fn list_sorts_desc_and_reports_total() {
             offset: 0,
             limit: 10,
             status: None,
+            sort: SessionListSort::CreatedAt,
         },
     )
     .await
@@ -242,6 +243,7 @@ async fn list_authorized_human_with_no_participating_sessions_is_empty() {
             offset: 0,
             limit: 10,
             status: None,
+            sort: SessionListSort::CreatedAt,
         },
     )
     .await
@@ -294,6 +296,7 @@ async fn session_list_uses_only_the_selected_authorized_view_actor() {
         offset: 0,
         limit: 20,
         status: None,
+        sort: SessionListSort::CreatedAt,
     };
     let default_human = SessionService::list(&fixture.service, list(None))
         .await
@@ -511,6 +514,7 @@ async fn session_list_still_rejects_a_caller_without_user_identity() {
             offset: 0,
             limit: 20,
             status: None,
+            sort: SessionListSort::CreatedAt,
         },
     )
     .await

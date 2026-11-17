@@ -100,6 +100,13 @@ async fn cleanup_wrapper_forwards_non_delete_operations() {
             .unwrap()
             .is_empty()
     );
+    assert!(
+        service
+            .max_created_at_by_group_ids(&["group-1".to_string()])
+            .await
+            .unwrap()
+            .is_empty()
+    );
 }
 
 #[tokio::test]

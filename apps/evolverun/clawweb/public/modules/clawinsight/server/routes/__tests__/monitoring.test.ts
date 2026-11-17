@@ -1,3 +1,7 @@
+import { migrations } from '@avernet/clawweb-shared/server/schema';
+import { requireRecoveryEnabled } from '../../services/repair/session-recovery/bot-configuration.js';
+import { botDiagnosisRecoveryMigrations } from '@avernet/clawweb-shared/server/schema-bot-diagnosis-recovery';
+import { BotDiagnosisRecoveryConfigRepository } from '../../repositories/bot-diagnosis-recovery-config-repository.js';
 import { initializeMonitoringSqlite } from "../../services/monitoring/schema.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import express from "express";
@@ -11,7 +15,7 @@ import { AppConfigRepository } from "@avernet/clawevolve/server/repositories/app
 import { EvolveRepository } from "@avernet/clawevolve/server/repositories/evolve-repository";
 import { SessionRecoveryTaskRepository } from "../../repositories/repair/session-recovery-task-repository.js";
 import { SessionRecoveryTaskService } from "../../services/repair/session-recovery/task-service.js";
-import { createMonitoringRecoveryTrigger, SESSION_RECOVERY_ALLOWLIST_KEY } from "../../services/monitoring/session-recovery-trigger.js";
+import { createMonitoringRecoveryTrigger } from "../../services/monitoring/session-recovery-trigger.js";
 import { DIAGNOSIS_V3_VERSION, DIAGNOSIS_V4_VERSION } from "../../services/monitoring/contracts.js";
 import { runtimeIdentity } from "../../services/monitoring/__tests__/runtime-identity-fixture.js";
 import { MonitoringError } from "../../services/monitoring/contracts.js";
@@ -35,7 +39,7 @@ const check = { schemaVersion: "claw-monitoring/bot-check/v2", entityId: "001234
 let db: IDatabase, dir: string, url: string;
 let server: ReturnType<express.Application["listen"]> | undefined;
 let clock: number;
-let principal = { staffId: '001234', isAuthenticated: true, isClawInsightAdmin: true, tenant: 'test', allowedTargetEnvs: ['test'] };
+let principal: import('../../services/monitoring/directory-contracts.js').MonitoringPrincipal = { staffId: '001234', isAuthenticated: true, isClawInsightAdmin: true, tenant: 'test', allowedTargetEnvs: ['test'] };
 let env: Record<string, string | undefined>;
 let clawInsightAdmin: boolean | undefined = true;
 let recovery: MonitoringRecoveryTrigger | undefined;
@@ -76,6 +80,10 @@ beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), "monitoring-contract-"));
   db = database(join(dir, "runtime.sqlite3"));
   await initializeMonitoringSqlite(db);
+  await botDiagnosisRecoveryMigrations[0].migrate!(db);
+  const configMigration = migrations.find(m => m.version === 134)!;
+  await configMigration.migrate?.(db);
+  for (const ddl of configMigration.sql) await db.exec(db.dialect.renderDdl(ddl));
   await start();
 }, 30000);
 afterEach(async () => {
@@ -344,6 +352,75 @@ describe("monitoring HTTP -> module schema -> repository -> GET", () => {
 
 describe('monitoring browser HTTP identity and enrollment boundary', () => {
   beforeEach(() => { principal.isClawInsightAdmin = false; });
+  it('lets authenticated owners configure Bots without admin access and rejects stale or foreign writes', async () => {
+    clawInsightAdmin = false;
+    const { createMonitoringReferences } = await import('../../services/monitoring/target-ref.js');
+    const ref = createMonitoringReferences().encode({ botId: 'mock-bot-te', entityId: '001234', env: 'test' }, 'test');
+    const configure = (version: number) => call('/monitoring/configurations', { method: 'POST',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ botRef: ref, enabled: true, version }) });
+    expect(await configure(0)).toMatchObject({ status: 200, body: { updated: 1, failed: [] } });
+    const stored = await new BotDiagnosisRecoveryConfigRepository(db).find({ botId: 'mock-bot-te', entityId: '001234', env: 'test' });
+    expect(stored).toMatchObject({ diagnosisEnabled: true, recoveryEnabled: true, version: 1 });
+    expect(JSON.parse(stored!.configJson)).toEqual({ team_key: 'default',
+      notifications: { owner: { enabled: true }, group: { enabled: true } } });
+    expect((await configure(0)).status).toBe(409);
+    principal.staffId = 'another-owner'; principal.isClawInsightAdmin = true;
+    expect((await configure(1)).status).toBe(403);
+    principal.isAuthenticated = false;
+    expect((await configure(1)).status).toBe(401);
+  });
+  it.each(['insight', 'global'])('lets %s administrators replace and read only the specified Bot configuration', async role => {
+    const { createMonitoringReferences } = await import('../../services/monitoring/target-ref.js');
+    const refs = createMonitoringReferences();
+    const configPath = (botId: string) => '/monitoring/configurations/'
+      + refs.encode({ botId, entityId: '001234', env: 'test' }, 'test');
+    const path = configPath('mock-bot-te');
+    const configJson = JSON.stringify({ notifications: {
+      owner: { enabled: true }, group: { enabled: true, route_id: 'private-group' },
+    } });
+    const input = { diagnosisEnabled: false, recoveryEnabled: true, version: 0, configJson };
+    const put = (body: unknown) => call(path, { method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'X-User-Id': 'claimed-admin' }, body: JSON.stringify(body) });
+
+    // The existing host flag and caller-supplied identity do not authorize this API.
+    expect((await put(input)).status).toBe(403);
+    expect((await call(path)).status).toBe(403);
+    principal.isAuthenticated = false;
+    expect((await put(input)).status).toBe(401);
+    principal = { ...principal, isAuthenticated: true, isClawInsightAdmin: role === 'insight', isGlobalAdmin: role === 'global', staffId: 'admin' };
+    expect(await call(path)).toMatchObject({ status: 200, body: { configuration: null } });
+
+    // New-team validation occurs before persistence. Global role does not grant broad monitoring reads.
+    if (role === 'global') expect((await call('/monitoring/bot-options?scope=all')).status).toBe(403);
+    expect((await put({ ...input, configJson: '{"team_key":"missing"}' })).status).toBe(503);
+    expect(await call(path)).toMatchObject({ body: { configuration: null } });
+    const teams = new AppConfigRepository(db);
+    await teams.create({ config_key: 'session_recovery_teams', config_json: '{"teams":{"97":{}}}' });
+    input.configJson = JSON.stringify({ team_key: '97', notifications: {
+      owner: { enabled: true }, group: { enabled: true },
+    } });
+    const expectedJson = input.configJson;
+    const written = { ...input, version: 1 };
+    expect(await put(input)).toMatchObject({ status: 200, body: { configuration: written }, cache: 'no-store' });
+    expect(await call(path)).toMatchObject({ status: 200, body: { configuration: written } });
+    expect(await call(configPath('mock-bot-oc'))).toMatchObject({ status: 200, body: { configuration: null } });
+    expect((await put({ ...input, all: true })).status).toBe(400);
+    expect((await put({ ...input, configJson: '{' })).status).toBe(400);
+    expect((await put({ ...written, configJson: '{"notifications":{"group":{"enabled":true,"webhook":"https://example.invalid"}}}' })).status).toBe(400);
+    expect((await put(input)).status).toBe(409);
+
+    // A normal owner can still operate the page switch without erasing notification policy.
+    principal = { ...principal, isClawInsightAdmin: false, isGlobalAdmin: false, staffId: '001234' };
+    expect(await call('/monitoring/configurations', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ botRef: path.split('/').at(-1), enabled: false, version: 1 }) })).toMatchObject({ status: 200 });
+    principal = { ...principal, isClawInsightAdmin: true, staffId: 'admin' };
+    expect(await call(path)).toMatchObject({ status: 200,
+      body: { configuration: { diagnosisEnabled: false, recoveryEnabled: false, version: 2, configJson: expectedJson } } });
+    expect(await put({ ...input, version: 2, configJson: '{}' })).toMatchObject({ status: 200,
+      body: { configuration: { diagnosisEnabled: false, recoveryEnabled: true, version: 3, configJson: '{}' } } });
+    principal.tenant = 'another-tenant';
+    expect((await put(input)).status).toBe(403);
+  });
   it('does not grant legacy reads from a forged host role flag', async () => {
     clawInsightAdmin = true;
     expect((await call('/monitoring/bots')).status).toBe(403);
@@ -363,7 +440,7 @@ describe('monitoring browser HTTP identity and enrollment boundary', () => {
     const path = `/monitoring/targets/${ref}`;
     const enroll = () => call('/monitoring/enrollments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ botRef: ref }) });
     expect((await call(`${path}/status`)).body).toMatchObject({ enrollmentState: 'NOT_ENROLLED', monitoring: null });
-    expect((await call(`${path}/diagnoses`)).status).toBe(409);
+    expect((await call(`${path}/diagnoses`)).status).toBe(200);
     const exec = vi.spyOn(db, 'exec');
     expect(await enroll()).toMatchObject({ status: 501, body: { error: { code: 'MONITORING_ENROLLMENT_NOT_IMPLEMENTED' } } });
     expect(exec).not.toHaveBeenCalled();
@@ -376,16 +453,16 @@ describe('monitoring browser HTTP identity and enrollment boundary', () => {
   });
 });
 
-describe("diagnosis report -> allowlist -> durable recovery task", () => {
+describe("diagnosis report -> Bot recovery switch -> durable recovery task", () => {
   // Schema creation is fixture setup; keep the normal test timeout for the HTTP and persistence assertions.
   beforeEach(async () => { await runMigrations(db, "sqlite"); }, 30000);
 
   async function automaticRecovery(botId = "mock-bot-te") {
     await stop();
-    const config = new AppConfigRepository(db);
-    await config.create({ config_key: SESSION_RECOVERY_ALLOWLIST_KEY, config_json: JSON.stringify({
-      allowed_bots: [{ bot_id: botId, entity_id: "001234", env: "prod" }],
-    }) });
+    await db.exec('CREATE TABLE ac_bots (bot_id TEXT, entity_id TEXT, owner_id TEXT, env TEXT, is_delete INTEGER DEFAULT 0)');
+    await db.exec("INSERT INTO ac_bots (bot_id, entity_id, owner_id, env) VALUES (?, '001234', '001234', 'prod')", [botId]);
+    const config = new BotDiagnosisRecoveryConfigRepository(db);
+    await config.setSwitches({ botId, entityId: '001234', env: 'prod' }, { diagnosisEnabled: true, recoveryEnabled: true, expectedVersion: 0, updatedBy: '001234' });
     const objects = new Map<string, Buffer>();
     const artifacts = {
       putObject: async (key: string, content: Buffer) => { objects.set(key, Buffer.from(content)); return { etag: null }; },
@@ -395,6 +472,7 @@ describe("diagnosis report -> allowlist -> durable recovery task", () => {
     const agent = { start: vi.fn().mockResolvedValue(undefined), release: vi.fn().mockResolvedValue(undefined), listExecutions: vi.fn().mockResolvedValue([]),
       terminate: vi.fn().mockResolvedValue({ status: "remote_stopped", aisJobId: "job" }) };
     const service = new SessionRecoveryTaskService({ controlPlaneEnvironment: "pre", tasks, agent,
+      authorizeCreation: request => requireRecoveryEnabled(config, request, new AppConfigRepository(db)),
       notifier: { notify: vi.fn() }, reporter: { report: vi.fn() }, observationMs: 3600000 });
     recovery = createMonitoringRecoveryTrigger({ config, service });
     await start();
@@ -519,11 +597,12 @@ describe("diagnosis report -> allowlist -> durable recovery task", () => {
     const { input, config, agent } = await automaticRecovery();
     expect((await post({ ...input, entityId: "another-owner" })).status).toBe(201);
     expect(agent.start).not.toHaveBeenCalled();
-    await config.update(SESSION_RECOVERY_ALLOWLIST_KEY, { config_json: "null" });
+    const lookup = vi.spyOn(config, "find").mockRejectedValue(new Error("storage unavailable"));
     expect((await post(input)).status).toBe(409);
     const next = { ...input, eventId: "another-event", diagnosisId: "another-event" };
     expect((await post(next)).status).toBe(503);
-    await config.update(SESSION_RECOVERY_ALLOWLIST_KEY, { enabled: 0 });
+    lookup.mockRestore();
+    await config.setSwitches({ botId: input.botId, entityId: '001234', env: 'prod' }, { diagnosisEnabled: true, recoveryEnabled: false, expectedVersion: 1, updatedBy: '001234' });
     expect(await post(next)).toMatchObject({ status: 200, body: { duplicate: true } });
     expect(await db.query("SELECT task_id FROM ce_tasks WHERE task_type = 'session_recovery'")).toHaveLength(0);
     expect(agent.start).not.toHaveBeenCalled();

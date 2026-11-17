@@ -1,5 +1,6 @@
 //! MySQL-backed `MessageRepoPort` implementation via `bcs-db-api`.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -257,6 +258,77 @@ impl MySqlMessageStore {
             DbSqlFlavor::Mysql => "mysql",
             DbSqlFlavor::Sqlite => "sqlite",
         }
+    }
+
+    /// Batched `MAX(created_at)` per id for one activity key column (design D2
+    /// Q1/Q3), scoped to this store's env. `column` is a trusted store-owned
+    /// name (`group_id` / `session_id`). Chunk binds follow the
+    /// `get_messages_by_ids` precedent: at most 200 ids per round trip, one
+    /// aggregate per chunk, maxima merged across chunks.
+    async fn last_activity_by_ids(
+        &self,
+        column: &str,
+        ids: &[String],
+    ) -> Result<HashMap<String, u64>, MessageRepoError> {
+        let mut activity = HashMap::new();
+        for chunk in ids.chunks(200) {
+            let mut params: Vec<DbValue> = vec![self.env.as_str().into()];
+            params.extend(chunk.iter().map(|id| DbValue::from(id.as_str())));
+            let sql = format!(
+                "SELECT {column}, MAX(created_at) AS last_activity_at FROM bcs_messages \
+                 WHERE env = ? AND {column} IN ({}) GROUP BY {column}",
+                vec!["?"; chunk.len()].join(",")
+            );
+            let rows = self
+                .db
+                .query(DbStatement::with_params(sql, params))
+                .await
+                .map_err(|e| MessageRepoError::StorageError(e.to_string()))?;
+            for row in rows {
+                let id: String = db_get_column(&row, column).map_err(|e| {
+                    MessageRepoError::StorageError(format!("{column}: {}", e))
+                })?;
+                let last_at: u64 = db_get_column(&row, "last_activity_at").map_err(|e| {
+                    MessageRepoError::StorageError(format!("last_activity_at: {}", e))
+                })?;
+                let entry = activity.entry(id).or_insert(last_at);
+                *entry = (*entry).max(last_at);
+            }
+        }
+        Ok(activity)
+    }
+
+    /// Per-session `MAX(created_at)` across one whole group in ONE aggregate
+    /// round trip (design D5 revised). Covered by the `idx_messages_env_group_created`
+    /// (env, group_id, created_at) index: the scan filters on the index, the
+    /// aggregation happens server-side, and the caller receives at most one row
+    /// per session in the group — the round-trip count never grows with the
+    /// session count. Sessions with no persisted message in the group stay
+    /// absent so callers keep the `created_at` fallback.
+    async fn last_activity_of_group(
+        &self,
+        group_id: &str,
+    ) -> Result<HashMap<String, u64>, MessageRepoError> {
+        let rows = self
+            .db
+            .query(DbStatement::with_params(
+                "SELECT session_id, MAX(created_at) AS last_activity_at FROM bcs_messages \
+                 WHERE env = ? AND group_id = ? GROUP BY session_id",
+                vec![self.env.as_str().into(), group_id.into()],
+            ))
+            .await
+            .map_err(|e| MessageRepoError::StorageError(e.to_string()))?;
+        let mut activity = HashMap::new();
+        for row in rows {
+            let id: String = db_get_column(&row, "session_id")
+                .map_err(|e| MessageRepoError::StorageError(format!("session_id: {}", e)))?;
+            let last_at: u64 = db_get_column(&row, "last_activity_at").map_err(|e| {
+                MessageRepoError::StorageError(format!("last_activity_at: {}", e))
+            })?;
+            let entry = activity.entry(id).or_insert(last_at);
+            *entry = (*entry).max(last_at);
+        }
+        Ok(activity)
     }
 }
 
@@ -635,6 +707,15 @@ impl MessageRepoPort for MySqlMessageStore {
             for row in rows { messages.push(row_to_message(&row)?); }
         }
         Ok(messages)
+    }
+    async fn last_activity_by_group_ids(&self, group_ids: &[String]) -> Result<HashMap<String, u64>, MessageRepoError> {
+        self.last_activity_by_ids("group_id", group_ids).await
+    }
+    async fn last_activity_by_session_ids(&self, session_ids: &[String]) -> Result<HashMap<String, u64>, MessageRepoError> {
+        self.last_activity_by_ids("session_id", session_ids).await
+    }
+    async fn last_activity_in_group(&self, group_id: &str) -> Result<HashMap<String, u64>, MessageRepoError> {
+        self.last_activity_of_group(group_id).await
     }
     async fn get_message_by_id(
         &self,

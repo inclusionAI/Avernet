@@ -3,8 +3,7 @@
 The list speaks only for Direct servers: what the bot's skill sets supply — an
 active ordinary set, the Default less its exclusions, the platform's default
 servers less theirs — is outside it, never counted as current and never
-removed. A declared server a set supplies is a conflict (``set_conflicts``),
-which refuses the whole apply before anything is written.
+removed. A declared server a set supplies is a conflict handled by the aggregate capability resolver.
 
 Every declared server becomes a Direct Installation. A configuration directive
 can preserve its saved Bot override, clear it, or replace the complete override
@@ -28,7 +27,6 @@ from agentclaw.community.core.apply_engine.registry import (
     CategoryWriteResult,
     ConfirmedPartialWriteError,
     Intent,
-    ChecksSetSupply,
     Materialiser,
     PlannedEntry,
     ResolveFailure,
@@ -55,7 +53,7 @@ from agentclaw.community.core.skill_center.mcp_dependency_scope import (
 
 
 
-class McpMaterialiser(Materialiser, ChecksSetSupply):
+class McpMaterialiser(Materialiser):
     """Converges this bot's enabled MCP servers toward the declaration.
 
     ``identity`` is the server code and ``Intent.value`` is the optional
@@ -129,20 +127,6 @@ class McpMaterialiser(Materialiser, ChecksSetSupply):
             bot_id=ctx.bot_id, owner_id=ctx.owner_id, actor_id=ctx.actor_id
         )
         return frozenset(codes)
-
-    async def set_conflicts(
-        self, ctx: ApplyContext, entries: Sequence[DesiredMcpServer]
-    ) -> tuple[ResolveFailure, ...]:
-        supplied = self._set_supplied(ctx)
-        return tuple(
-            ResolveFailure(
-                entry.server_code,
-                "supplied by one of the bot's skill sets (or a platform default); declare it there or remove it "
-                "from the set",
-            )
-            for entry in entries
-            if entry.server_code in supplied
-        )
 
     def _permitted(self, ctx: ApplyContext, server_code: str) -> bool:
         """The activation service's own verdict, asked the same way.

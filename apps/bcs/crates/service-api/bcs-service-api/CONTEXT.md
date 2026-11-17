@@ -1,5 +1,54 @@
 # bcs-service-api Context
 
+## Managed admission target failures
+
+`DeliveryAdmissionRejection::TargetUnavailable` records a recipient's failed
+delivery-target resolution as an unsent terminal Failed row alongside valid
+siblings. The existing `DeliveryStatusView.admission_error` exposes the fixed
+`delivery_target_unavailable` code, never arbitrary resolver text. Group message
+and reply preparation share this behavior; stores retain atomic admission and
+idempotency, including when every recipient fails. Persistence errors remain
+request errors. The Rust enum gains one variant (exhaustive consumers must
+handle it); workspace path consumers rebuild together. Existing stored rows
+remain readable, and no schema, Plugin API or endpoint change is needed. See
+the [admission contract](src/port/repo/message_delivery.rs) and
+[message-flow boundary](../../services/bcs-message-flow/CONTEXT.md#queued-group-target-failure-isolation).
+
+## Version 6.1.0: Distributed coordination contracts
+
+Add opt-in Gateway, Worker and Connector service/port declarations plus
+`bcs-dist-model` shared data. No existing trait method, wire endpoint, runtime
+registration or stored record changes. All workspace path consumers rebuild;
+the additive Service API version is 6.1.0.
+
+The [distributed contract](src/port/repo/distributed/README.md) owns admission,
+atomic checkpoint/effect replay, scheduling, consistent task recovery and
+dispatch ownership semantics. State and queue adapters remain replaceable.
+The [change record](../../../specs/2026-11-15-distributed-contracts/spec.md) links
+ordered implementation tasks and actual validation; concrete providers and
+runtime implementations remain pending.
+
+`SessionStorePort::get_spec` owns frozen-session specification reads, even before
+the first checkpoint. Inbox producer/consumer ports and the stateful shard feed
+remain separate. Initial spec/task creation remains inside reliable admission;
+the read-method move adds no trait, storage layout or required database call.
+
+Distributed ownership uses `ShardOwner` for the shard-assigned identity and
+`SessionOwnership` for the processing identity obtained by sealing a specific session.
+Shard claims compare `expected_epoch`; business commits compare
+`expected_commit_seq` together with the sealed owner. Owner/checkpoint records,
+commit receipts and recovery responses expose no independent revision. Recovery
+metadata has an idempotent control-write path that preserves business state and
+outbox; dispatch recheck revisions and inbox scheduling tokens remain separate.
+`ShardClaim`, `MembershipLease` and `SessionOwnership` contain identities, not authority
+strings; providers still validate current claims and exact unexpired registrations.
+Old incarnations cannot renew or drain a replacement, and a lost lease cannot
+be revived by renew. Session commits validate sid-to-shard membership and the
+exact sealed node/incarnation/epoch atomically with the sequence check/write;
+caller-supplied identities alone grant no rights. Commit proofs remain.
+These refine the unpublished 6.1.0 distributed declarations only; no existing
+runtime or deployed persistence format changes.
+
 ## Version 5.1.0: Group Card snapshots
 
 `GroupCoreService` and `GroupRepoPort` add `read_card_snapshot`, returning

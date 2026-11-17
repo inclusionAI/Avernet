@@ -286,8 +286,9 @@ class ResourcesMaterialiser(Materialiser):
             raise ConfirmedPartialWriteError(
                 "the resource files were written but the bot's resource rows could not be replaced"
             ) from exc
-        declared = {planned.intent.identity for planned in plan.entries}
-        return CategoryWriteResult(tuple(results), _removals(cleared, declared))
+        # Failed uploads did not rebuild their old files or empty parent directories.
+        rebuilt = {file.path for file in written}
+        return CategoryWriteResult(tuple(results), _removals(cleared, rebuilt))
 
     async def _clear(self, coords: dict[str, str]) -> tuple[WorkspaceEntry, ...]:
         """Delete every unprotected root entry, concurrently, or raise ``ResourcesRootNotCleared``.

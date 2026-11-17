@@ -518,6 +518,39 @@ def test_caller_identity_keeps_legacy_read_and_write_permission_levels():
     assert cli_write.edit_lock is EDIT_LOCK
 
 
+def test_standard_evaluation_follows_the_publication_lifecycle_permission_model():
+    """Evaluation mutations advance the same publish workflow as lifecycle.
+
+    A collaborator who can advance the Bot publication can trigger evaluation,
+    but still passes the explicit-address and edit-lock checks used by that
+    flow. Polling stays read-only, while direct gate-result writes stay owner-only.
+    """
+    sample_sets = AUTHORIZATION[
+        ("GET", "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/sample-sets")
+    ]
+    current_environment = AUTHORIZATION[
+        ("GET", "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/environments/current")
+    ]
+    mutations = {
+        ("POST", "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/tasks"),
+        ("POST", "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/environments"),
+        ("DELETE", "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/environments/current"),
+    }
+    result_save = AUTHORIZATION[
+        ("POST", "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/standard-eval/results")
+    ]
+
+    assert sample_sets.level is PermissionLevel.MEMBER
+    assert sample_sets.explicit is False
+    assert current_environment.level is PermissionLevel.MEMBER
+    assert current_environment.explicit is False
+    assert all(AUTHORIZATION[key].level is PermissionLevel.MEMBER for key in mutations)
+    assert all(AUTHORIZATION[key].edit_lock is EDIT_LOCK for key in mutations)
+    assert all(AUTHORIZATION[key].explicit is True for key in mutations)
+    assert result_save.level is PermissionLevel.OWNER
+    assert result_save.explicit is True
+
+
 def test_edit_lock_operations_exactly_match_the_migrated_check_surface():
     expected = {
         ("POST", "/openapi/v1/bots/{bot_id}/channels"),
@@ -528,6 +561,10 @@ def test_edit_lock_operations_exactly_match_the_migrated_check_surface():
         # Promotion reaches the running bot the way apply does, so it takes apply's bar.
         ("POST", "/openapi/v1/bots/{bot_id}/genome/promotions"),
         ("POST", "/openapi/v1/bots/{bot_id}/diagnostics/health-check"),
+        # Standard evaluation mutates the same publish lifecycle as advancement.
+        ("POST", "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/tasks"),
+        ("POST", "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/environments"),
+        ("DELETE", "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/environments/current"),
         ("DELETE", "/openapi/v1/bots/{bot_id}/lifecycle"),
         ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/advance"),
         ("PUT", "/openapi/v1/bots/{bot_id}/lifecycle/approval"),

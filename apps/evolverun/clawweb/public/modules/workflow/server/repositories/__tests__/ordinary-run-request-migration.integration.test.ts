@@ -1,4 +1,4 @@
-import { migrations as currentMigrations } from '@avernet/clawweb-shared/server/schema';
+import { allMigrations as currentMigrations } from '@avernet/clawweb-shared/server/db';
 import { expect, it } from 'vitest';
 import Database from 'better-sqlite3';
 import { SqliteDatabase, runMigrations, type IDatabase } from '@avernet/clawweb-shared/server/db';

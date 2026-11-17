@@ -1,4 +1,5 @@
 import { EvalFileInput } from '@/components/BotWorkshop/ServiceBotEvaluation/EvalFileInput';
+import { RestartEvaluationPanel } from '@/components/BotWorkshop/ServiceBotEvaluation/RestartEvaluationPanel';
 import { EvaluationHistoryCard } from '@/components/BotWorkshop/ServiceBotEvaluation/EvaluationHistoryCard';
 import { EvaluationSubmissionCard } from '@/components/BotWorkshop/ServiceBotEvaluation/EvaluationSubmissionCard';
 import { evaluationStatusLabel } from '@/components/BotWorkshop/ServiceBotEvaluation/evaluationStatus';
@@ -7,9 +8,7 @@ import { Empty } from '@/components/ui/Empty';
 import { Button } from '@/components/ui/Button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Segmented } from '@/components/ui/Segmented';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select';
 import { Spin } from '@/components/ui/Spin';
-import { Textarea } from '@/components/ui/Textarea';
 import { useBotWorkshopRequestIdentity } from '@/hooks/useBotWorkshopEditorIdentity';
 import { useServiceBotEval } from '@/hooks/useServiceBotEval';
 import { history, useParams, useSearchParams } from '@umijs/max';
@@ -22,8 +21,6 @@ const resolveEvalTab = (value: string | null): EvalTab => {
   if (value === 'simple_cert_submit' || value === 'restart_eval' || value === 'eval_history') return value;
   return 'simple_cert_submit';
 };
-type GoalType = 'json' | 'semantic';
-
 const EvaluationPage: React.FC = () => {
   const params = useParams();
   const [searchParams] = useSearchParams();
@@ -41,11 +38,6 @@ const EvaluationPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<EvalTab>(initialTab);
   const [sampleFile, setSampleFile] = useState<File>();
   const [reportFile, setReportFile] = useState<File>();
-  const [datasetFile, setDatasetFile] = useState<File>();
-  const [goalFile, setGoalFile] = useState<File>();
-  const [datasetType, setDatasetType] = useState('jsonl');
-  const [goalType, setGoalType] = useState<GoalType>('json');
-  const [goalPrompt, setGoalPrompt] = useState('');
 
   const options = useMemo(() => {
     const tabOptions: Array<{ value: EvalTab; label: string }> = [
@@ -65,21 +57,11 @@ const EvaluationPage: React.FC = () => {
     : options[0]?.value ?? 'eval_history';
 
   const hasSimpleFiles = Boolean(sampleFile && reportFile);
-  const hasRestartFiles = Boolean(datasetFile && (goalType === 'json' ? goalFile : true));
+  const ownerPermission = detail?.owner_permission as { operable?: boolean } | undefined;
 
   const submitSimple = async () => {
     if (!sampleFile || !reportFile) return;
     await evaluation.submit([sampleFile], [reportFile], 'manual_simple_cert');
-  };
-
-  const submitRestart = async () => {
-    if (!datasetFile) return;
-    const reportFile: File | undefined =
-      goalType === 'json'
-        ? goalFile
-        : new File([goalPrompt || '{}'], 'evaluation-goal.json', { type: 'application/json' });
-    if (!reportFile) return;
-    await evaluation.submit([datasetFile], [reportFile], 'manual_restart_eval');
   };
 
   const certStatus = String(certState?.cert_status ?? '');
@@ -205,62 +187,19 @@ const EvaluationPage: React.FC = () => {
                       </div>
                     </div>
                   ) : effectiveTab === 'restart_eval' ? (
-                    <div className="space-y-4">
-                      <p className="m-0 text-xs text-muted-foreground">适合需要重新发起评测并重新编排执行的链路。</p>
-                      <div className="grid gap-3 md:grid-cols-2">
-                        <div className="space-y-1.5">
-                          <label className="text-xs font-medium text-muted-foreground" htmlFor="dataset-type">
-                            评测集格式
-                          </label>
-                          <Select value={datasetType} onValueChange={setDatasetType}>
-                            <SelectTrigger id="dataset-type" className="h-9 text-sm">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="jsonl">JSONL</SelectItem>
-                              <SelectItem value="csv">CSV</SelectItem>
-                              <SelectItem value="odps">ODPS</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <EvalFileInput label="评测集文件" file={datasetFile} onSelect={setDatasetFile} />
-                        <div className="space-y-1.5">
-                          <label className="text-xs font-medium text-muted-foreground" htmlFor="goal-type">
-                            评测目标格式
-                          </label>
-                          <Select value={goalType} onValueChange={(value) => setGoalType(value as GoalType)}>
-                            <SelectTrigger id="goal-type" className="h-9 text-sm">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="json">JSON</SelectItem>
-                              <SelectItem value="semantic">自然语义</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        {goalType === 'json' ? (
-                          <EvalFileInput label="评测目标文件" accept=".json" file={goalFile} onSelect={setGoalFile} />
-                        ) : null}
-                      </div>
-                      {goalType === 'semantic' ? (
-                        <Textarea
-                          className="text-sm"
-                          placeholder="例如：评估该 Bot 在金融政策问答场景下的准确率和安全性。"
-                          value={goalPrompt}
-                          onChange={(event) => setGoalPrompt(event.target.value)}
-                        />
-                      ) : null}
-                      <div className="flex flex-wrap justify-end gap-2">
-                        <Button
-                          onClick={() => void submitRestart()}
-                          disabled={!hasRestartFiles || evaluation.submitting}
-                        >
-                          {evaluation.submitting ? '提交中…' : '上报评测数据并认证'}
-                        </Button>
-                      </div>
-                    </div>
+                    <RestartEvaluationPanel
+                      botId={botId}
+                      botVersion={botVersion}
+                      ownerId={ownerId}
+                      enabled={!evaluation.loading}
+                      canStart={Boolean(ownerPermission?.operable)}
+                      onFinished={() => void evaluation.reload()}
+                    />
                   ) : (
-                    <EvaluationHistoryCard records={evaluation.history?.records} />
+                    <EvaluationHistoryCard
+                      currentRelease={evaluation.history?.current_release}
+                      records={evaluation.history?.records}
+                    />
                   )}
                 </div>
                 <EvaluationSubmissionCard submission={evaluation.submission} />

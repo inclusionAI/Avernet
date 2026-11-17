@@ -5,8 +5,8 @@ use bcs_service_api::application::v1::{
     AddGroupParticipant, ApplicationError, AuthenticatedCaller, AuthenticatedUser,
     AuthenticatedUserIdentity, BotFinalDelivery, DeleteGroup, DeleteGroupParticipant, DeleteResult,
     DirectMessageGroupSummary, GetGroup, GroupDeliveryPolicy, GroupDetail, GroupKindFilter,
-    GroupService, GroupStatus, GroupSummary, GroupVisibility, ListGroups, Membership,
-    MembershipFilter, Page, Participant, ParticipantMode, Principal, UpdateGroup,
+    GroupListSort, GroupService, GroupStatus, GroupSummary, GroupVisibility, ListGroups,
+    Membership, MembershipFilter, Page, Participant, ParticipantMode, Principal, UpdateGroup,
     UpdateGroupParticipant,
 };
 
@@ -117,6 +117,7 @@ fn list_command_carries_caller_view_actor_and_all_approved_filters() {
         membership: MembershipFilter::SessionOnly,
         kind: GroupKindFilter::All,
         strategy: Some(bcs_service_api::application::v1::GroupStrategy::StateMachine),
+        sort: GroupListSort::CreatedAt,
     };
 
     assert_eq!(command.caller.user.expect("User").id, "staff-1");
@@ -143,6 +144,7 @@ fn direct_message_summary_cannot_carry_normal_group_fields() {
         human_mention_notify_mode: bcs_service_api::HumanMentionNotifyMode::All,
         created_at: 1,
         updated_at: 2,
+        last_activity_at: None,
     });
 
     let json = serde_json::to_value(summary).expect("serialize summary");

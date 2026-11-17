@@ -52,4 +52,15 @@ describe('real local preview HTTP + directory + monitoring SQL', () => {
     expect(await response.json()).toMatchObject({ error: { code: 'MONITORING_ENROLLMENT_NOT_IMPLEMENTED', message: '加入监控功能正在开发中，敬请期待。' } });
     expect(exec).not.toHaveBeenCalled(); exec.mockRestore();
   });
+  it('marks service Bots in options and excludes them from owner writes', async () => {
+    const { items: [bot] } = await (await options('&q=weekly-report')).json();
+    expect(bot).toMatchObject({ botId: 'weekly-report', isServiceBot: true, configuration: { version: 0 } });
+    const configure = (body: unknown) => request('/monitoring/configurations', 'member', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+    });
+    expect((await configure({ botRef: bot.botRef, enabled: true, version: 0 })).status).toBe(403);
+    expect(await (await configure({ all: true, enabled: true })).json()).toEqual({ updated: 29, failed: [] });
+    const { items: [after] } = await (await options('&q=weekly-report')).json();
+    expect(after.configuration).toEqual(bot.configuration);
+  });
 });

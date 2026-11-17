@@ -1,7 +1,9 @@
 /** Composition root. Host-owned connections/identity; lazy, fail-closed, no implicit DB fallback. */
+import { AppConfigRepository } from '@avernet/clawevolve/server/repositories/app-config-repository';
 import type { Request } from 'express';
 import { getRepositories, type IDatabase } from '@avernet/clawweb-shared/server/db';
 import { MonitoringRepository } from '../../repositories/monitoring-repository.js';
+import { BotDiagnosisRecoveryConfigRepository } from '../../repositories/bot-diagnosis-recovery-config-repository.js';
 import { type MonitoringApi, type MonitoringRecoveryTrigger, MonitoringError } from './contracts.js';
 import type { DirectoryScope, LegacyReportBinding, MonitoringBotDirectory, MonitoringBrowserApi, MonitoringPrincipal } from './directory-contracts.js';
 import { createMonitoringService } from './monitoring-service.js';
@@ -50,7 +52,7 @@ export function createMonitoringRuntime(
       const resolver = createTargetResolver(integration.directory, integration.scope, integration.bindings);
       const references = createMonitoringReferences(now);
       assembled = { integration, service: createMonitoringService(repository, resolver, now, integration.recovery),
-        browser: createMonitoringBrowserService(repository, integration.directory, references, integration.scope, now) };
+        browser: createMonitoringBrowserService(repository, integration.directory, references, integration.scope, now, new BotDiagnosisRecoveryConfigRepository(getDb()), new AppConfigRepository(getDb())) };
       return assembled;
     } catch (error) {
       if (error instanceof MonitoringError) throw error;
@@ -67,6 +69,9 @@ export function createMonitoringRuntime(
       diagnoses: async (...args) => services().service.diagnoses(...args),
     },
     browser: {
+      configure: async (...args) => services().browser.configure!(...args),
+      readConfiguration: async (...args) => services().browser.readConfiguration!(...args),
+      replaceConfiguration: async (...args) => services().browser.replaceConfiguration!(...args),
       options: async (...args) => services().browser.options(...args),
       status: async (...args) => services().browser.status(...args),
       diagnoses: async (...args) => services().browser.diagnoses(...args),

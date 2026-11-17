@@ -98,7 +98,7 @@ pub use permission_request::PermissionRequestRepoPort;
 pub use session_speaking_lease::*;
 pub use session::{
     AddSessionParticipantWithEvent, CompleteSessionWithEvent, CreateSessionWithEvent, NewSessionParams,
-    RemoveSessionParticipantWithEvent, SessionRepoPort,
+    RemoveSessionParticipantWithEvent, SessionActivityCandidate, SessionRepoPort,
     UpdateSessionParticipantMessageViewScopeWithEvent,
 };
 pub use session_file::{
@@ -106,3 +106,4 @@ pub use session_file::{
 };
 pub use user_identity::{UserIdentity, UserIdentityRepoPort};
 pub mod collaboration_actor;
+pub mod distributed;

@@ -128,7 +128,7 @@ it.each(['offline', 'html', 'css', 'http'])('uses the complete remote release wh
   try {
     process.env.NODE_ENV = 'development';
     global.fetch = jest.fn(async (path: string) => {
-      if (path.includes('registry.npmjs.org')) return { ok: true, json: async () => ({ version: '9.8.7' }) };
+      if (new URL(path, window.location.href).origin === 'https://registry.npmjs.org') return { ok: true, json: async () => ({ version: '9.8.7' }) };
       if (failure === 'offline') throw new TypeError('Failed to fetch');
       return { ok: failure !== 'http', headers: { get: () => failure === 'html' || (failure === 'css' && path.endsWith('.css')) ? 'text/html' : 'application/javascript' } };
     });
@@ -156,7 +156,7 @@ it('falls back after the local probe times out', async () => {
   jest.useFakeTimers();
   try {
     process.env.NODE_ENV = 'development';
-    global.fetch = jest.fn((path: string, options: RequestInit) => path.includes('registry.npmjs.org') ? Promise.resolve({ ok: true, json: async () => ({ version: '9.8.7' }) }) : new Promise((_resolve, reject) => {
+    global.fetch = jest.fn((path: string, options: RequestInit) => new URL(path, window.location.href).origin === 'https://registry.npmjs.org' ? Promise.resolve({ ok: true, json: async () => ({ version: '9.8.7' }) }) : new Promise((_resolve, reject) => {
       options.signal!.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
     }));
     const pending = load(); await tick();

@@ -44,7 +44,7 @@ class Provider(BaseHTTPRequestHandler):
         # Group setup may emit unrelated welcome/inject messages. Track only
         # this story's user sends, including any invalid sends that leak through.
         if 'caller-e2e-message' in json.dumps(body.get('message', {})):
-            self.server.received.put((body, self.headers.get('Authorization')))
+            self.server.received.put((body, self.headers.get('Authorization'), self.headers.get('X-E2E-Caller')))
         if self.path == '/sse':
             payload = ('event: chat\ndata: ' + json.dumps({'runId': body['id'], 'seq': 1,
                 'state': 'final', 'message': {'role': 'assistant',
@@ -60,9 +60,10 @@ class Provider(BaseHTTPRequestHandler):
 
 
 class Story:
-    def __init__(self, base, key, provider, environment='local'):
+    def __init__(self, base, key, provider, environment='local', credential_type='iam-token'):
         self.base, self.key, self.provider = base, key, provider
         self.environment = environment
+        self.credential_type = credential_type
         self.delivered = []
         self.http = urllib.request.build_opener(urllib.request.ProxyHandler({}))
         self.checks = 0
@@ -112,8 +113,11 @@ class Story:
             {'expected_version': current['version'], 'policy': policy})
 
     def receive(self):
-        body, auth = self.provider.received.get(timeout=30)
+        body, auth, caller_header = self.provider.received.get(timeout=30)
         assert auth == 'Bearer ' + self.registration['bcs_to_provider_token'], 'provider auth changed'
+        credential = (body.get('extensions') or {}).get('caller_execution_token')
+        expected_header = credential['token'] if self.environment == 'pre' and credential else None
+        assert caller_header == expected_header, 'deployment caller header differs from JSON token or leaked into default mode'
         self.delivered.append(body)
         return body
 
@@ -171,7 +175,7 @@ class Story:
             ext = body['extensions']
             user = ext['caller_context']['subject']['ref']
             assert ext['caller_context']['subject']['kind'] == 'human'
-            assert ext['caller_execution_token'] == {'type': 'iam-token', 'token': 'test-token-' + user[-1]}
+            assert ext['caller_execution_token'] == {'type': self.credential_type, 'token': 'test-token-' + user[-1]}
             assert 'test-token-' not in json.dumps(body['message']), 'credential copied into message'
             seen.add(user)
             self.finish_callback(body)
@@ -189,7 +193,7 @@ class Story:
         self.callback(account, credential='test-token-sse', conversation='sse-conversation')
         streamed = self.receive()
         self.streamed_run = streamed['id']
-        assert streamed['extensions']['caller_execution_token'] == {'type': 'iam-token', 'token': 'test-token-sse'}
+        assert streamed['extensions']['caller_execution_token'] == {'type': self.credential_type, 'token': 'test-token-sse'}
         # Queue another send, then the launcher restarts BCS. The real in-memory
         # cache is lost while the durable queue survives; it must fail closed.
         self.policy(True)
@@ -311,7 +315,7 @@ def verify_business_logs(root, traces, streamed_run):
     print(f'Live business log correlation: {len(correlated)} selected events; text/JSON, excluded scopes and SSE verified', flush=True)
 
 
-def run_story(binary, environment):
+def run_story(binary, environment, credential_type='iam-token'):
     provider = ThreadingHTTPServer(('127.0.0.1', 0), Provider)
     provider.received = queue.Queue()
     provider.traces = queue.Queue()
@@ -324,7 +328,7 @@ def run_story(binary, environment):
             'strict_container_validation': False, 'bcs_endpoint': f'http://127.0.0.1:{port}',
             'auth': {'chain': ['local'], 'allow_mock_headers': True, 'mock_user_id': 'callere2eowner'},
             'gateway_principal': {'signing_key_env': 'CALLER_E2E_SIGNING_KEY'},
-            'channels': {'enabled': True, 'providers': {'caller-e2e': {'enabled': True, 'ingress_key': key}}},
+            'channels': {'enabled': True, 'providers': {'caller-e2e': {'enabled': True, 'ingress_key': key, 'credential_type': credential_type}}},
             'database': {'type': 'sqlite', 'sqlite': {'path': str(root / 'bcs.db')}},
             'security': {'outbound_url': {'block_private_networks': True, 'allow_loopback': True}},
             'llm': {'type': 'none'}, 'bcsfuse': {'enabled': False}})
@@ -344,13 +348,16 @@ def run_story(binary, environment):
         config_path.write_text(json.dumps(config))
         env = dict(os.environ, SERVER_ENV=environment, CALLER_E2E_SIGNING_KEY=uuid.uuid4().hex,
                    BCS_SECRET_BCN_GROUP_SESSION_WS_JWT=uuid.uuid4().hex)
+        # Public/default composition remains policy-free. The preproduction run
+        # hosts a synthetic deployment policy, never the enterprise mapping.
+        policy_args = ['--provider-request-headers'] if environment == 'pre' else []
         # Keep instrumented LLVM_PROFILE_FILE from the runner for real server coverage.
         with (root / 'server.log').open('w') as log:
             traces = root / 'network-traces.json'
-            process = subprocess.Popen([binary, '-c', str(config_path), '--trace-output', str(traces)],
+            process = subprocess.Popen([binary, '-c', str(config_path), '--trace-output', str(traces), *policy_args],
                 cwd=root, env=env, stdout=log, stderr=log)
             try:
-                story = Story(f'http://127.0.0.1:{port}', key, provider, environment)
+                story = Story(f'http://127.0.0.1:{port}', key, provider, environment, credential_type)
                 for _ in range(150):
                     if process.poll() is not None:
                         raise RuntimeError('test BCS exited during startup; ' + (root / 'server.log').read_text()[-2000:])
@@ -379,7 +386,7 @@ def run_story(binary, environment):
                 verify_network_traces(traces, provider)
                 verify_business_logs(root, traces, story.streamed_run)
                 traced_lines = len((root / 'business.json.log').read_text().splitlines())
-                process = subprocess.Popen([binary, '-c', str(config_path)], cwd=root, env=env, stdout=log, stderr=log)
+                process = subprocess.Popen([binary, '-c', str(config_path), *policy_args], cwd=root, env=env, stdout=log, stderr=log)
                 for _ in range(150):
                     if process.poll() is not None:
                         raise RuntimeError('test BCS exited during cache-loss restart')
@@ -427,6 +434,10 @@ def main():
     environments = (args.environment,) if args.environment else ('local', 'pre')
     for environment in environments:
         run_story(binary, environment)
+    if not args.environment:
+        # A deployment-owned label must survive admission/cache/queue/HTTP,
+        # without teaching public BCS any provider-specific credential names.
+        run_story(binary, 'local', 'test-proof')
 
 
 if __name__ == '__main__':

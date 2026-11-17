@@ -140,6 +140,8 @@ export type RecoveryTaskResult = {
 };
 
 export type RecoveryStoredTask = RecoveryTaskState & {
+  /** Frozen credential reference; historical tasks use the Base deployment default. Never stores a secret value. */
+  modelApiKeyRef?: string | null;
   /** Opt-in bootstrap-only audit references; absent from maintenance and mutation reads. */
   trajectoryIndexReads?: import("./bootstrap-evidence.js").TrajectoryIndexRead[];
   /** Transient facts from the existing read audit; never a claim of full session coverage. */
@@ -157,6 +159,7 @@ export type RecoveryEffectConfigCheck =
       recheck: { register: boolean; diagnosisVersion: number } };
 
 export interface RecoveryTaskStore {
+  listTasks?(query: import('./task-list.js').RecoveryTaskListQuery, ownerId: string): Promise<import('./task-list.js').RecoveryTaskListPage>;
   create(value: RecoveryStoredTask, stepId: string): Promise<void>;
   find(taskId: string, options?: { forBootstrap?: boolean }): Promise<RecoveryStoredTask | null>;
   listForEvent(eventId: string, ownerId: string, isAdmin: boolean): Promise<RecoveryStoredTask[]>;

@@ -40,7 +40,7 @@ ClawWeb 在现有 `POST /api/insight/v1/internal/monitoring/diagnosis-events` �
 自动触发同时满足：
 
 - `decision = ALERT` 且 `handlerName = NOT_COMPLETED`。当前实时诊断将 `task_completed` 映射为 `COMPLETED / NOT_COMPLETED`；缺失或其他值不推断为未完成。`PASS`、`UNRESOLVED` 和已完成任务不触发。
-- `ce_app_config` 中 `config_key = session_recovery_allowlist` 的记录已启用，且目标精确命中 `config_json.allowed_bots`。
+- `ce_bot_diagnosis_recovery_config` 中目标 Bot 目录身份与环境精确匹配，且 `recovery_enabled = 1`。直接创建入口同样校验；见 [Bot 诊断自愈配置](bot-diagnosis-recovery-config.md)。
 - 原诊断有合法的原会话键和非空诊断文本。缺失会话键时，不使用物理 `sessionId` 或 `traceId` 替代。
 
 白名单 JSON：
@@ -360,10 +360,10 @@ Agent 根据适用手册及当前现场，确认原任务仍受阻、现有恢�
 Owner卡配置扩展既有 `session_recovery_owner_notifications`：
 
 ```json
-{ "card": { "pre": { "template_id": "已发布模板ID", "callback_route_key": "已注册预发路由键" }, "prod": { "template_id": "已发布模板ID", "callback_route_key": "已注册生产路由键" } }, "bot_overrides": [] }
+{ "card": { "pre": { "template_id": "已发布模板ID", "callback_route_key": "已注册预发路由键" }, "prod": { "template_id": "已发布模板ID", "callback_route_key": "已注册生产路由键" } } }
 ```
 
-保留原enabled与精确Bot override；按CW控制面选择配置，绝不按目标Bot环境选择回调。Agent不提供模板ID或机器人凭据，完整环境方案审批通知沿用现有方式；普通转交使用同一模板，隐藏确认操作且不配置事件回调。`card.<env>.callback_route_key` 对普通转交可省略，权限待办发送时必须具备。未配置、失败及未知回执在CW可见，页面仍可确认，不假报已通知。卡片创建及更新复用同一发送器、令牌缓存和现有通知审计；相同待办状态最多三次尝试。创建请求确定未发出时可以重试创建；请求可能已经发出时，后续只更新固定 outTrackId。未知创建之后的成功更新不独立证明Owner已收到卡片。
+通知启用状态从 Bot 诊断自愈配置的 `config_json.notifications.owner.enabled` 读取；旧 enabled 和 Bot override 仅用于迁移。按CW控制面选择配置，绝不按目标Bot环境选择回调。Agent不提供模板ID或机器人凭据，完整环境方案审批通知沿用现有方式；普通转交使用同一模板，隐藏确认操作且不配置事件回调。`card.<env>.callback_route_key` 对普通转交可省略，权限待办发送时必须具备。未配置、失败及未知回执在CW可见，页面仍可确认，不假报已通知。卡片创建及更新复用同一发送器、令牌缓存和现有通知审计；相同待办状态最多三次尝试。创建请求确定未发出时可以重试创建；请求可能已经发出时，后续只更新固定 outTrackId。未知创建之后的成功更新不独立证明Owner已收到卡片。
 
 内部DingTalk适配由OCB组合：现有Gateway验证x-one-id并签名User，CW忽略原始userId／IAM正文与未签名身份头；校验Owner、当前requestId、固定card ID及控制面环境后快速确认，AIS续接异步进行。权限申请显示“已获取权限，继续任务”，普通转交不显示确认按钮；平台模板、应用互动卡片写权限和HTTP回调路由需按OCB接入说明准备，代码提交不代表已发布或真实发卡。新后端在bootstrap声明 `ownerCooperationProtocol=session-recovery-owner/v1`。新包仅在收到该声明时产出owner_request；旧服务未声明时仍用纯转交，并在wrapper解析层拒绝新字段，避免旧服务静默忽略。手册与runtime共包，可先提供新增手册资产，再部署引用它的后端候选。
 

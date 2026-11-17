@@ -13,7 +13,7 @@ use bcs_service_api::types::BindingTarget;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-struct Provider { ingress_key: String }
+struct Provider { ingress_key: String, credential_type: String }
 
 inventory::submit! {
     bcs::plugins::ChannelProviderFactory {
@@ -22,7 +22,9 @@ inventory::submit! {
             let ingress_key = ctx.provider_config.options.get("ingress_key")
                 .and_then(Value::as_str).filter(|s| !s.trim().is_empty())
                 .ok_or_else(|| bcs::BcsError::InvalidConfig("test ingress key required".into()))?;
-            Ok(Arc::new(Provider { ingress_key: ingress_key.to_owned() }))
+            let credential_type = ctx.provider_config.options.get("credential_type")
+                .and_then(Value::as_str).unwrap_or("iam-token");
+            Ok(Arc::new(Provider { ingress_key: ingress_key.to_owned(), credential_type: credential_type.into() }))
         },
     }
 }
@@ -50,7 +52,7 @@ impl ChannelProvider for Provider {
     fn redact_config(&self, config: &Value) -> Value { config.clone() }
     fn delivery(&self) -> Arc<dyn ChannelDeliveryPort> { Arc::new(Delivery) }
     fn http_ingress(&self) -> Option<Arc<dyn ChannelHttpIngressPort>> {
-        Some(Arc::new(Provider { ingress_key: self.ingress_key.clone() }))
+        Some(Arc::new(Provider { ingress_key: self.ingress_key.clone(), credential_type: self.credential_type.clone() }))
     }
     fn stream_lifecycle(&self, _: Arc<dyn ChannelInboundSink>) -> Option<Arc<dyn ServiceLifecycle>> { None }
 }
@@ -88,7 +90,7 @@ impl ChannelHttpIngressPort for Provider {
             return response(400, false);
         };
         let msg = InboundMessage {
-            execution_token: callback.execution.map(|v| ExecutionToken::new(v, "iam-token".into())),
+            execution_token: callback.execution.map(|v| ExecutionToken::new(v, self.credential_type.clone())),
             channel_type: "caller-e2e".into(), account_ref: callback.account,
             im_conversation_id: callback.conversation, conversation_type: callback.conversation_type,
             im_user_id: callback.sender, im_user_nick: None, text: callback.text,

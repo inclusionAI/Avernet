@@ -10,6 +10,8 @@ When a change yields verified reusable knowledge, update its owning documentatio
 
 These entries are task-specific records. Inspect their individual status, evidence and target version; their presence does not establish current authority or deployment. Explicitly adopted contracts retain their authority until replaced.
 
+- [2026-11-15-distributed-contracts](2026-11-15-distributed-contracts/spec.md) — declarations and ordered tasks; no runtime implementation
+
 - [2026-08-20-bot-task-modes](2026-08-20-bot-task-modes/)
 - [2026-09-09-group-context-api](2026-09-09-group-context-api/)
 - [2026-09-15-eventing-idle-polling](2026-09-15-eventing-idle-polling/)
@@ -44,3 +46,4 @@ These entries are task-specific records. Inspect their individual status, eviden
 - [2026-11-11-legacy-friend-cutover-fixes](2026-11-11-legacy-friend-cutover-fixes/spec.md)
 
 - [2026-11-12-bcs-large-file-split](2026-11-12-bcs-large-file-split/)（draft）：[spec](2026-11-12-bcs-large-file-split/spec.md)、[plan](2026-11-12-bcs-large-file-split/plan.md)。
+- [2026-11-13 AgentCard Fuse synchronization (proposed)](2026-11-13-agentcard-fuse-sync/spec.md)

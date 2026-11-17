@@ -270,6 +270,7 @@ async fn list_surfaces_per_session_collected_for_explicit_view_actor() {
             offset: 0,
             limit: 10,
             status: None,
+            sort: SessionListSort::CreatedAt,
         },
     )
     .await
@@ -296,6 +297,7 @@ async fn list_surfaces_per_session_collected_for_explicit_view_actor() {
             offset: 0,
             limit: 10,
             status: None,
+            sort: SessionListSort::CreatedAt,
         },
     )
     .await

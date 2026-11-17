@@ -225,12 +225,17 @@ async def get_bot_config_manifest_capabilities(
 ) -> Envelope[ConfigManifestCapabilities]:
     """Which manifest constructs this bot accepts, and why not when it does not.
 
-    Answered by the same resolver `PUT` refuses with, so this can never claim
-    support for something the next write rejects. A construct is a category or
-    a top-level section (`script`). Which (category, protocol) pairs are open
-    is the separate `source_matrix` field: a pair with no resolver fails the
-    way an unsupported category does, and the matrix is where a
-    category-aware reason can live.
+    Answered by the same resolver `PUT` and creation validation use. Current
+    execution categories include one aggregate `capabilities` construct for
+    Direct Skills, SkillSets/Default and MCP; historical `skills` and `mcp`
+    categories are not advertised separately.
+
+    `source_matrix` describes content transport, including Local Skill
+    packages. `skill_references` separately lists `package`, `repo_path`,
+    `skill_uuid` and `skill_code`, each with `supported` and `reason` for this
+    bot and engine. Direct and SkillSet entries share those verdicts. Git
+    package transport support does not imply shared Repo reference support.
+    Asset access and availability are checked during resolution.
 
     An unrecognised engine supports nothing.
     """

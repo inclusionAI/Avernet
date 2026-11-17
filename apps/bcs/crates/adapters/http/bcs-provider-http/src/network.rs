@@ -219,6 +219,7 @@ pub(super) async fn send_provider_request_with_policy(
             request = request.header(name.as_str(), value.as_str());
         }
     }
+    request = request_headers::apply(request, body)?;
     if protocol_version == "2.0" {
         request = request.header(BCN_TRANSPORT_HEADER, transport);
     }

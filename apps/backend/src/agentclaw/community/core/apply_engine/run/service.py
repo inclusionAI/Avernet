@@ -50,6 +50,7 @@ from agentclaw.community.core.apply_engine.carry_forward import (
 )
 from agentclaw.community.core.apply_engine.completion import CompletionPublisher, StateCompletionHandlers
 from agentclaw.community.core.apply_engine.context import ApplyContext
+from agentclaw.community.core.apply_engine.fetch_budget import fetch_budget_scope
 from agentclaw.community.core.apply_engine.delivery import (
     DeliveryStrategy,
     DeliveryStrategyFactory,
@@ -699,27 +700,28 @@ class ApplyRunService(ApplyRunServiceProtocol):
             entity_id=entity_id,
             env=get_current_env(),
         )
-        try:
-            compiled = await compiler.compile(ctx, state)
-        except CompileRefused as exc:
-            domain_error = exc.domain_error
-        else:
-            report = await self._orchestrator(self.delivery_for_engine(ctx.engine_type)).apply(
-                ctx,
-                compiled.state,
-                # No id: a dry run appears in no history, so there is nothing to
-                # address it by. Naming it explicitly rather than minting one keeps
-                # "writes nothing" true of the record as well as of the bot.
-                apply_id="",
-                trigger="dry_run",
-                started_at=datetime.now(),
-                dry_run=True,
-                sources=compiled.sources,
-            )
-            return dataclasses.replace(report, state=state)
-        # Raised outside the handler: the domain error keeps its own chain and
-        # does not acquire the worker-only refusal as its context.
-        raise domain_error
+        with fetch_budget_scope():
+            try:
+                compiled = await compiler.compile(ctx, state)
+            except CompileRefused as exc:
+                domain_error = exc.domain_error
+            else:
+                report = await self._orchestrator(self.delivery_for_engine(ctx.engine_type)).apply(
+                    ctx,
+                    compiled.state,
+                    # No id: a dry run appears in no history, so there is nothing to
+                    # address it by. Naming it explicitly rather than minting one keeps
+                    # "writes nothing" true of the record as well as of the bot.
+                    apply_id="",
+                    trigger="dry_run",
+                    started_at=datetime.now(),
+                    dry_run=True,
+                    sources=compiled.sources,
+                )
+                return dataclasses.replace(report, state=state)
+            # Raised outside the handler: the domain error keeps its own chain and
+            # does not acquire the worker-only refusal as its context.
+            raise domain_error
 
     # ── reading ─────────────────────────────────────────────────────────────
 
@@ -808,32 +810,33 @@ class ApplyRunService(ApplyRunServiceProtocol):
         only for a real apply; its failure is a note on the report, never a
         raise (§2.7: a manifest problem does not fail what it rode on).
         """
-        # A creation half compiles only its own constructs: the pre-container
-        # phase must not spend the fetch budget on skills it cannot deliver yet.
-        only = None if phase is None else frozenset(step.construct for step in strategy.steps_for(phase))
-        compiled = await compiler.compile(ctx, state, only=only)
-        report = await self._orchestrator(strategy).apply(
-            ctx,
-            compiled.state,
-            apply_id=apply_id,
-            trigger=trigger,
-            started_at=started_at,
-            phase=phase,
-            sources=compiled.sources,
-        )
-        report = dataclasses.replace(report, state=state)
-        try:
-            note = await strategy.finish(ctx, report)
-        except Exception as exc:  # noqa: BLE001 — recorded, never raised
-            logger.exception(
-                "[manifest_apply] closing step raised, apply_id=%s, bot_id=%s",
-                apply_id,
-                ctx.bot_id,
+        with fetch_budget_scope():
+            # A creation half compiles only its own constructs: the pre-container
+            # phase must not spend the fetch budget on skills it cannot deliver yet.
+            only = None if phase is None else frozenset(step.construct for step in strategy.steps_for(phase))
+            compiled = await compiler.compile(ctx, state, only=only)
+            report = await self._orchestrator(strategy).apply(
+                ctx,
+                compiled.state,
+                apply_id=apply_id,
+                trigger=trigger,
+                started_at=started_at,
+                phase=phase,
+                sources=compiled.sources,
             )
-            note = f"delivery could not be closed: {exc.__class__.__name__}"
-        if note:
-            report = dataclasses.replace(report, notes=report.notes + (note,))
-        return report
+            report = dataclasses.replace(report, state=state)
+            try:
+                note = await strategy.finish(ctx, report)
+            except Exception as exc:  # noqa: BLE001 — recorded, never raised
+                logger.exception(
+                    "[manifest_apply] closing step raised, apply_id=%s, bot_id=%s",
+                    apply_id,
+                    ctx.bot_id,
+                )
+                note = f"delivery could not be closed: {exc.__class__.__name__}"
+            if note:
+                report = dataclasses.replace(report, notes=report.notes + (note,))
+            return report
 
     def _context(
         self,

@@ -1,6 +1,7 @@
 import type {
   BotCapabilitySet,
   BotEditorMcp,
+  BotEditorResource,
   BotEditorRoutine,
   BotEditorRoutineInput,
   BotEditorSkill,
@@ -74,12 +75,12 @@ export const botEditorService = {
       return 0;
     }
   },
-  async load(botId: string, ownerId?: string, deployment = 'cloud', engine = '') {
+  async load(botId: string, ownerId?: string, deployment = 'cloud', engine = '', skipResources = false) {
     const policy = desktopCapabilityPolicy(deployment, engine);
     const [skills, skillSetResources, resources, screens, engineStatus, mcps] = await Promise.allSettled([
       listAllLocalBotSkills(botId, ownerId),
       botEditorController.listSkillSetResources(botId, ownerId),
-      botEditorService.listResources(botId, '', ownerId),
+      skipResources ? Promise.resolve([] as BotEditorResource[]) : botEditorService.listResources(botId, '', ownerId),
       policy.screens ? botEditorController.listRenderScreens(botId, ownerId) : Promise.resolve({ data: { items: [] } }),
       botEditorController.getEngineStatus(botId, ownerId),
       botEditorController.listBotMcps(botId, ownerId),
@@ -314,9 +315,11 @@ export const botEditorService = {
   },
   createDirectory: (botId: string, path: string, ownerId?: string) =>
     botEditorController.createDirectory(botId, path, ownerId),
-  async listResources(botId: string, directory = '', ownerId?: string) {
+  async listResources(botId: string, directory = '', ownerId?: string, suppressErrorNotification = false) {
     return (
-      (await botEditorController.listResources(botId, directory, ownerId)).data?.items?.map((item) =>
+      (await (suppressErrorNotification
+        ? botEditorController.listResources(botId, directory, ownerId, true)
+        : botEditorController.listResources(botId, directory, ownerId))).data?.items?.map((item) =>
         mapResource(item, directory),
       ) ?? []
     );

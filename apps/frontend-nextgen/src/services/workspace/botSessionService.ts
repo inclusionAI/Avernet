@@ -5,6 +5,8 @@ import type { IdentityView } from '@/domain/collaboration';
 import type { ConversationSessionRequestRange } from '@/domain/conversation/types';
 import type { BotLifecycle } from '@/domain/botWorkshop';
 import { resolveOpenApiUserId } from '@/domain/userIdentity';
+import { AceLoginRedirectError, BackendRequestError } from '@/services/backendApi/httpClient';
+import { extractFriendlyErrorMessage } from '@/utils/requestErrorHandler';
 import {
   listBots as listOwnedBotsApi,
   type OwnedBotDto,
@@ -24,7 +26,6 @@ import {
   type BotMessageDto,
   type BotModelDto,
 } from '@/services/backendApi/bots/privateBotSessionController';
-import { BackendRequestError } from '@/services/backendApi/httpClient';
 import { useErrorNotifyStore } from '@/stores/errorNotifyStore';
 import type { ChatMessage } from '@tc-chat/core';
 import type { BotIamTokenStage } from '../backendApi/privateChat/iamTokenController';
@@ -385,18 +386,31 @@ export const botSessionService = {
     bot: ChatBotView,
     userId: string,
     title: string = '新会话',
+    options?: { friendlyErrors?: boolean },
   ): Promise<DomainResult<BotChatSessionView>> {
     try {
       const params = withFriendBotRequestParams(bot, userId, {
         user_id: resolveUserId(userId),
         owner_id: bot.ownerId,
       });
-      const resp = await createBotSession(bot.realBotId, params, { title });
+      const resp = options?.friendlyErrors
+        ? await createBotSession(bot.realBotId, params, { title }, undefined, '创建会话失败，请稍后重试')
+        : await createBotSession(bot.realBotId, params, { title });
       const s = resp.data;
       if (!s) throw new Error('创建会话失败');
       return { ok: true, data: toSessionView(s, bot.botId) };
     } catch (e) {
-      return { ok: false, error: toDomainError(e) };
+      if (!options?.friendlyErrors) return { ok: false, error: toDomainError(e) };
+      return {
+        ok: false,
+        error: {
+          code: 'BOT_SESSION_FAILED',
+          friendlyMessage: e instanceof BackendRequestError ? e.message : extractFriendlyErrorMessage(e),
+          canRetry: true,
+          alreadyHandled: e instanceof AceLoginRedirectError ||
+            (e instanceof BackendRequestError && Boolean(e.alreadyHandled || e.silent)),
+        },
+      };
     }
   },
   async getSessionDetail(

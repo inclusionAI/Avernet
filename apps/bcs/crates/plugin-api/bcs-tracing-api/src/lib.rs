@@ -2,6 +2,8 @@
 use std::{any::Any, future::Future, sync::{Arc, OnceLock}};
 
 mod log_correlation;
+mod scope;
+pub use scope::CapturedContext;
 pub use log_correlation::{LogCorrelation, current_log_correlation, in_current_log_context, with_log_correlation};
 
 pub type Carrier = Vec<(String, String)>;
@@ -14,6 +16,8 @@ pub enum Kind {
     RpcClient,
     /// gRPC status codes and invocation shape, independent of deployment routing.
     GrpcClient { server_streaming: bool },
+    /// Remote-parent server scope; completion follows the transport terminal.
+    GrpcServer { server_streaming: bool },
 }
 
 /// Transport metadata only: never supply bodies, credentials or raw errors.
@@ -63,6 +67,9 @@ pub struct ParentContext<'a> {
 /// continues normally. Implementations must preserve business results and keep
 /// contexts safe across concurrent tasks.
 pub trait NetworkTracer: Send + Sync {
+    /// New server kinds are opt-in so existing providers safely remain no-op.
+    fn supports(&self, kind: Kind) -> bool { !matches!(kind, Kind::GrpcServer { .. }) }
+
     fn start(&self, info: &RequestInfo<'_>, incoming: &Carrier, parent: ParentContext<'_>) -> StartedTrace;
 
     /// Optional SDK bridge. Return only valid propagation fields, never bind a
@@ -128,30 +135,53 @@ fn provider() -> Option<Arc<dyn NetworkTracer>> {
     SCOPED_PROVIDER.try_with(Clone::clone).unwrap_or_else(|_| PROVIDER.get().cloned())
 }
 
-pub struct Call(Option<StartedTrace>);
+pub struct Call {
+    trace: Option<StartedTrace>,
+    scope: CapturedContext,
+}
 
 impl Call {
     pub fn start(info: &RequestInfo<'_>, incoming: &Carrier) -> Self {
-        Self(provider().map(|provider| {
-            let ambient = capture_ambient(Some(provider.as_ref()));
-            provider.start(info, incoming, ParentContext { local: current_context().as_ref(), ambient: &ambient })
-        }))
+        Self::start_with_parent(info, incoming, None)
     }
 
-    pub fn context(&self) -> Option<Context> { self.0.as_ref().map(|trace| trace.context.clone()) }
+    /// An explicit operation parent wins over unrelated ambient work. An active
+    /// suppression scope still wins over an explicitly captured provider.
+    pub fn start_with_parent(info: &RequestInfo<'_>, incoming: &Carrier, parent: Option<&CapturedContext>) -> Self {
+        let parent = parent.cloned().unwrap_or_else(CapturedContext::capture);
+        let provider = if SCOPED_PROVIDER.try_with(Option::is_none).unwrap_or(false) {
+            None
+        } else { parent.provider.clone() };
+        let trace = provider.as_ref().filter(|provider| provider.supports(info.kind)).map(|provider| {
+            provider.start(info, incoming, ParentContext { local: parent.context.as_ref(), ambient: &parent.ambient })
+        });
+        let scope = CapturedContext {
+            context: trace.as_ref().map(|trace| trace.context.clone()),
+            provider, ambient: parent.ambient,
+        };
+        Self { trace, scope }
+    }
+
+    pub fn context(&self) -> Option<Context> { self.trace.as_ref().map(|trace| trace.context.clone()) }
+    /// Captures the provider as well as the opaque context for later stream polls.
+    pub fn scope(&self) -> CapturedContext { self.scope.clone() }
     pub fn headers(&self) -> &[(String, String)] {
-        self.0.as_ref().map(|trace| trace.headers.as_slice()).unwrap_or_default()
+        self.trace.as_ref().map(|trace| trace.headers.as_slice()).unwrap_or_default()
     }
     pub fn remove_headers(&self) -> &[String] {
-        self.0.as_ref().map(|trace| trace.remove_headers.as_slice()).unwrap_or_default()
+        self.trace.as_ref().map(|trace| trace.remove_headers.as_slice()).unwrap_or_default()
     }
     pub fn finish(mut self, outcome: Outcome, response_size: Option<u64>) {
-        if let Some(trace) = self.0.take() { trace.record.finish(outcome, response_size); }
+        if let Some(trace) = self.trace.take() {
+            self.scope.scope_sync(|| trace.record.finish(outcome, response_size));
+        }
     }
 }
 
 impl Drop for Call {
     fn drop(&mut self) {
-        if let Some(trace) = self.0.take() { trace.record.finish(Outcome::Cancelled, None); }
+        if let Some(trace) = self.trace.take() {
+            self.scope.scope_sync(|| trace.record.finish(Outcome::Cancelled, None));
+        }
     }
 }

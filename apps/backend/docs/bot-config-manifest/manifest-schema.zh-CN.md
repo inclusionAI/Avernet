@@ -29,9 +29,11 @@ sources:                       # 命名源（可选，§2.3）：一处声明、
     auth: corp-git-content
 
 manifest:                      # 声明式部分，所有引擎
-  mcp: [ … ]                   # §3.1
+  capabilities:
+    skills: [ … ]              # §3.3；Direct Skills
+    skill_sets: [ … ]          # §3.3.1；普通集与 Default
+    mcp: [ … ]                 # §3.1；Direct MCP
   resources: [ … ]             # §3.2（含文件与目录两种条目形态）
-  skills: [ … ]                # §3.3
   engine_config: { … }         # §3.4
   identity: [ … ]              # §3.5
   cli_tools: [ … ]             # §3.7，命令行工具（W9 已交付；始终平台托管）
@@ -52,6 +54,14 @@ script:                        # 命令式部分，能力门控（teclaw / deskt
 | `DELETE` 整份文档 | 没有任何类别被声明 | **什么都不删**：此前落成的实体原样留在 bot 上 |
 
 仅写 `schema_version: 1` 也是有效文档，应用时清空适用类目。无文档记录时跳过类目物化。
+
+`manifest.capabilities` 是 Skills、SkillSet/Default 与 MCP 的唯一执行类别。
+旧平铺 `manifest.skills` / `manifest.skill_sets` / `manifest.mcp` 继续可读；
+出现 `capabilities` 后禁止同时出现任何旧位置的键（即使为 `[]`）。
+`capabilities: null`、子列表 `null` 均非法；`capabilities: {}` 等价于三个空列表。
+GET 保留提交原文，文档摘要先绑定原文，编译时才在内存中归一。
+能力内任一编译或解析失败阻止整组能力写入；写入开始后的错误可能部分提交，
+不提供共享资产、集合关系与 Runtime 的统一事务。其他执行类别保持原边界。
 
 **「区域」逐类别定义，不是全局的**——搞错这一点，一条本意是收敛 skill 列表
 的规则就会删掉 bot 的工作目录：
@@ -652,9 +662,9 @@ resources:
 - 目录条目的另一传输形态是 **git 源**（§2.2，免打包，业务内容在 git 上
   时优先）；索引文件、对象存储前缀列 v2 候选（design §9）。
 
-### 3.3 `skills` — local skills
+### 3.3 `capabilities.skills` — Direct Skills
 
-两种来源形态并存：
+Local 包的两种来源形态并存：
 
 ```yaml
 skills:
@@ -683,8 +693,47 @@ skills:
   限制（一个 identity 文件本身就是一段文本）。
 - teclaw：物化进 bot-data store 后以 `SkillRef(scope="user")` 进 artifact，
   与今天手工 upload 的 skill 走完全相同的路。
-- v2 预留来源：`source: center://<skill_uuid>@<version>`（skill center 引用，
-  不经 fetch，直接引 store）。
+- `origin` 省略或为 `local` 时继续使用上述包获取字段。
+- `origin: repo` 仅接受 `name`、`origin`、`repo_path`。`repo_path` 是规范化的
+  已同步共享仓库内路径，不是 Git URL；不复制成 Local 包。
+- `origin: center` 仅接受 `name`、`origin`，及二选一的 `skill_uuid` 或
+  `skill_code`。前者引用已有可见 UUID；后者精确引用公开市场 code，必要时在
+  resolve 预览精确包、真实 write 准备共享资产。Center 继续 Track Latest。
+- 所有分支的 `name` 必填且必须等于 Runtime Name；每个来源分支字段闭集。
+  普通集的 Skill 成员复用完全相同的语法与支持判断。
+
+### 3.3.1 `capabilities.skill_sets` — 普通集与 Default
+
+```yaml
+manifest:
+  capabilities:
+    skills:
+      - {name: review, origin: repo, repo_path: engineering/review}
+    skill_sets:
+      - {name: default}
+      - name: engineering
+        is_active: true
+        description: 工程工具
+        skills:
+          - {name: research, origin: center, skill_code: public-research}
+        mcp:
+          - {server_code: mcp.docs}
+    mcp: []
+```
+
+普通集条目必填 `name`、`is_active`、`skills`、`mcp`，列表可以为空，不能为
+`null`；可选 `description` 省略时清空描述。集内 MCP 仅允许 `server_code`，
+配置只由 Direct MCP 条目的 `config` 管理。inactive 集保留成员但停止供应。
+普通集按 Bot scope 与名称收敛，重复 Apply 复用 ID，省略的普通集被删除。
+
+精确小写 `default` 是保留名，每份声明最多一次，该条目只允许 `name`。
+包含 Default 引用时清除当前适用成员排除；省略引用时排除当前适用成员。
+省略整个 `skill_sets` 与 `skill_sets: []` 等价：清空计划范围普通集，排除
+当前 Default 成员。Genome 旧输入的集合范围保持不参与。
+
+最多声明 50 个普通集；Direct 与所有普通集成员合计最多 50 条 Skill 和
+50 条显式 MCP，inactive 成员也计数，Default 引用与派生依赖不计数。
+嵌套 Local 包共用同一次编译的源解析与获取预算，不按集重开账本。
 
 ### 3.4 `engine_config` — 引擎配置
 
@@ -883,7 +932,7 @@ cli_tools:
 | 项 | 建议上限 |
 | --- | --- |
 | 配置清单文档总大小 | 64 KiB（script 部分另按现状 24 KiB） |
-| 每类别条目数 | 50 |
+| 每类别条目数 | 50；能力内 Skill / 显式 MCP 各共享 50，普通集最多 50 |
 | `content` 内联单条 | 64 KiB |
 | `source` URL 单条 | 2048 字符（与 provenance 列宽一致；PUT 时拒绝——长度是准入可见的，不是取完后才该知道的） |
 | fetch 单条目 | skills zip 100 MiB；resources 文件 100 MiB；identity 1 MiB；cli_tools 单工具 200 MiB |
@@ -939,9 +988,8 @@ capabilities 端点发布的理由是**同一个字符串对象**，且有一个
 | --- | --- | --- | --- |
 | `identity` | ✅ | ✅ | ✅ |
 | `resources` | ✅ | ✅ | ✅ |
-| `skills` | ❌ 不是包 | ✅（强制 `digest`） | ✅ |
+| `capabilities` 中的 Local Skill 包 | ❌ 不是包 | ✅（强制 `digest`） | ✅ |
 | `cli_tools` | ❌ 不是可执行文件 | ✅（强制 `digest`） | ✅（**不需要** `digest`） |
-| `mcp` | —— 注册表引用，无来源轴 | | |
 | `engine_config` | —— 没有物化器，整个类别被拒 | | |
 
 **写客户端的人：能力表是唯一的事实来源**——先
@@ -950,3 +998,24 @@ capabilities 端点发布的理由是**同一个字符串对象**，且有一个
 `constructs` 数组，还带一个 `source_matrix`：**每个（类别，协议）组合一行**，
 这是扁平的 `constructs` 结构上表达不了的问题——而表达不了，正是本轮五个缺陷
 的共同根源。
+
+
+能力发现的 `constructs` 与 `source_matrix` 只遍历当前执行类别，Skills/MCP
+历史枚举仅保留解码。`source_matrix` 说明 Local 包传输；共享 Repo 引用支持
+不能从 Git 传输支持推断。`skill_references` 单独列出 `package`、`repo_path`、
+`skill_uuid`、`skill_code` 的 `supported` / `reason`，PUT、创建校验与 compiler
+复用同一判断。DeepSeek Harness 当前仅支持 Local/Repo，Center 引用会明确拒绝。
+
+
+能力发现响应片段（支持与否以实际 Bot/engine 为准）：
+
+```json
+{
+  "skill_references": [
+    {"reference": "package", "supported": true, "reason": ""},
+    {"reference": "repo_path", "supported": true, "reason": ""},
+    {"reference": "skill_uuid", "supported": true, "reason": ""},
+    {"reference": "skill_code", "supported": true, "reason": ""}
+  ]
+}
+```

@@ -40,6 +40,16 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ("GET", "/openapi/v1/bots/{bot_id}/eval/submissions/{submission_id}"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     ("GET", "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/history"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     ("POST", "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/simple-cert/sync"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    ("GET", "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/sample-sets"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    ("POST", "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/tasks"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    ("GET", "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/tasks/current"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    ("POST", "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/environments"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    ("GET", "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/environments/current"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    ("DELETE", "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/environments/current"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "POST",
+        "/openapi/v1/bots/{bot_id}/eval/versions/{bot_version}/standard-eval/results",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     ("GET", "/openapi/v1/bots/{bot_id}/engine-version"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     # Minimal classification requires a verified human, but no Bot grant.
     ("GET", "/openapi/v1/bots/{bot_id}/classification"): AdmissionMode.REFUSED,
