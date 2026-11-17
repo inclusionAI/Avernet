@@ -38,9 +38,6 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
     ErrorEnvelope,
     error_example,
 )
-from agentclaw.community.api.bot_config_manifest_service import (
-    BotConfigManifestServiceProtocol,
-)
 from agentclaw.community.api.skill_set_management_service import (
     SkillSetManagementServiceProtocol,
 )
@@ -87,9 +84,6 @@ from agentclaw.community.utils.env_utils import get_current_env
 if TYPE_CHECKING:
     # Typed only for the serializer's signature; the runtime values come from
     # DI. Quoted to avoid pulling the dataclasses at module-import time.
-    from agentclaw.community.core.bot_config_manifest.repository.models import (
-        BotConfigManifestRecord,
-    )
     from agentclaw.community.core.skill_center.skill_set_apply import (
         SkillSetApplySnapshot,
     )
@@ -186,135 +180,35 @@ _FILE_SYNC_PATH = "workspace/"
 
 def _serialize_skill_sets(
     *,
-    source_manifest_record: "BotConfigManifestRecord | None",
     snapshot: "SkillSetApplySnapshot | None",
 ) -> list[dict[str, Any]] | None:
     """Serialize the source's capability-set state into a manifest ``skill_sets`` segment.
 
     Returns the list to write under ``manifest.skill_sets``, or ``None`` when the
     segment is omitted (the dst reads as a brand-new bot: default enabled, no
-    ordinary sets — Spec §0 "省略段" invariant). Two branches (Spec §6):
+    ordinary sets — Spec §0 "省略段" invariant). The segment is derived solely
+    from the source's ``SkillSetApplySnapshot`` — the apply-engine source of
+    truth that carries every Set's members by origin (Spec §6).
 
-    * **Branch A — source has a manifest record** (manifest-managed bot): pass
-      the source's own ``skill_sets`` segment through verbatim. The source
-      document is already a validator-accepted vocabulary, so the dst inherits
-      it as-is. The default switch rides the presence of a ``{name: default}``
-      row in the passed-through list. ``None`` is returned when the source
-      manifest declares no ``skill_sets`` segment at all (the source itself
-      reads as a brand-new bot).
-    * **Branch B — source has no manifest record** (legacy Genome bot,
-      ``source_manifest_record is None``): derive the segment from the source's
-      ``SkillSetApplySnapshot``. Default-enabled is decided by whether the
-      snapshot carries a default set; each ordinary Set's members are
-      serialized by origin (center/repo/local) per Spec §1, and MCP members
-      become ``{server_code}`` rows (Spec §0). ``None`` is returned when the
-      snapshot has no sets at all — the source is a brand-new bot and the dst
-      inherits the same baseline.
+    Default-enabled is decided by whether the snapshot carries a default set;
+    each ordinary Set's members are serialized by origin (center/repo/local)
+    per Spec §1, and MCP members become ``{server_code}`` rows (Spec §0).
+    ``None`` is returned when the snapshot has no sets at all — the source is a
+    brand-new bot and the dst inherits the same baseline.
+
+    Local-package members (``local://``) are skipped at the declaration layer:
+    the manifest schema refuses a bare local SkillSet member and a
+    ``protocol: bot`` source for SKILLS (Spec §1), so there is no honest
+    vocabulary to declare them in. Their physical packages still arrive via
+    the copy's ``resources: workspace/`` file-sync entry, and the operator can
+    re-link them through the dst bot's Add-Skill flow.
 
     The function is pure: it neither reads nor writes any store. Its output is
     fed back into ``validate_capabilities`` (``skill_sets.py``) and the
     ``ManifestCompiler`` by the S1 unit tests.
     """
-    if source_manifest_record is not None:
-        return _passthrough_source_skill_sets(source_manifest_record.document)
     return _derive_skill_sets_from_snapshot(snapshot)
 
-
-def _passthrough_source_skill_sets(
-    document: str,
-) -> list[dict[str, Any]] | None:
-    """Branch A: read the source manifest document and pass its segment through.
-
-    The manifest stores the segment under ``manifest.skill_sets`` (the flat
-    form) — the same key ``validate_capabilities`` reads at PUT time. An
-    absent key means the source bot has no capability-set declaration, so the
-    dst inherits the brand-new baseline (return ``None``). The returned list is
-    a deep copy so the caller can mutate it without touching the source
-    document's parsed form.
-
-    The segment's member rows may carry ``from: <named_source>`` selectors
-    (e.g. a local-package skill naming a declared ``git``/``oss`` source). The
-    dst manifest must declare those sources too, or ``validate_document``
-    rejects the segment with an undeclared-source violation. The named sources
-    the segment transitively needs are returned by ``_passthrough_source_skill_sources``
-    so the handler can merge them into the dst document's top-level ``sources``
-    block alongside the copy's own ``from_bot`` file-sync source.
-    """
-    try:
-        parsed = yaml.safe_load(document) or {}
-    except yaml.YAMLError:
-        # The source manifest was validated at PUT, but a corrupt row is a
-        # data error rather than a code path we silently invent a segment for.
-        # Fall through to "no segment"; the dst reads as brand-new, which is
-        # the safe default rather than a 500 on a copy of an unreadable source.
-        return None
-    if not isinstance(parsed, dict):
-        return None
-    manifest = parsed.get("manifest")
-    if not isinstance(manifest, dict):
-        return None
-    segment = manifest.get("skill_sets")
-    if segment is None:
-        return None
-    # ``validate_capabilities`` already accepted this list on the source side,
-    # so the vocabulary is legal. Return a deep copy to keep the source parsed
-    # form immutable; ``yaml.safe_dump`` later walks the result without sharing
-    # references with the source document.
-    import copy
-
-    return copy.deepcopy(segment)
-
-
-def _passthrough_source_skill_sources(
-    document: str,
-) -> dict[str, dict[str, Any]]:
-    """Branch A companion to ``_passthrough_source_skill_sets``.
-
-    Returns the named sources the passed-through ``skill_sets`` segment
-    references (via member ``from:`` selectors) but the dst document does not
-    itself declare. The dst always declares ``from_bot`` (the copy's bot
-    file-sync source); any other named source a member points at must be
-    carried over from the source manifest's top-level ``sources`` block or
-    ``validate_document`` rejects the segment. Sources already present on the
-    dst (``from_bot``) are not duplicated. Returns ``{}`` when the source has
-    no segment, no extra sources, or the document is unreadable — the segment
-    is the authority for what is needed, and a sourceless segment needs nothing.
-
-    Only top-level ``sources`` entries the segment actually names are copied;
-    the source's own ``from_bot``-equivalent bot file-sync source is never
-    carried, because the dst declares its own (it reads the same source bot).
-    """
-    try:
-        parsed = yaml.safe_load(document) or {}
-    except yaml.YAMLError:
-        return {}
-    if not isinstance(parsed, dict):
-        return {}
-    sources = parsed.get("sources")
-    if not isinstance(sources, dict):
-        return {}
-    segment = _passthrough_source_skill_sets(document)
-    if segment is None:
-        return {}
-    referenced: set[str] = set()
-    for entry in segment:
-        if not isinstance(entry, dict):
-            continue
-        for member in entry.get("skills", []) or []:
-            if isinstance(member, dict) and "from" in member:
-                ref = member["from"]
-                if isinstance(ref, str):
-                    referenced.add(ref)
-    extra: dict[str, dict[str, Any]] = {}
-    for name in sorted(referenced):
-        if name in ("from_bot",):
-            continue
-        declaration = sources.get(name)
-        if isinstance(declaration, dict):
-            import copy
-
-            extra[name] = copy.deepcopy(declaration)
-    return extra
 
 
 def _derive_skill_sets_from_snapshot(
@@ -427,7 +321,6 @@ def _build_manifest_document(
     excludes: tuple[str, ...] = (),
     render_screen_rows: tuple[dict[str, str], ...] = (),
     skill_sets: list[dict[str, Any]] | None = None,
-    extra_skill_sources: dict[str, dict[str, Any]] | None = None,
 ) -> str:
     """Serialize source's config into a manifest config document.
 
@@ -491,13 +384,6 @@ def _build_manifest_document(
             "owner_id": source_owner_id,
         },
     }
-    if extra_skill_sources:
-        # Branch A passthrough carries named sources the verbatim ``skill_sets``
-        # segment references but the dst does not declare; ``from_bot`` is the
-        # copy's own file-sync source and is never overwritten here.
-        for name, declaration in extra_skill_sources.items():
-            if name != "from_bot" and name not in sources:
-                sources[name] = declaration
     document: dict[str, Any] = {
         "schema_version": 1,
         "script": {"body": script_body},
@@ -520,7 +406,6 @@ def submit_copy(
     space_context: BusinessSpaceContextProtocol,
     render_screen_service: RenderScreenServiceProtocol,
     bot_service: BotServiceProtocol,
-    manifest_get_service: BotConfigManifestServiceProtocol,
     skill_set_service: SkillSetManagementServiceProtocol,
 ) -> BotCopyResponse:
     """Validate source + serialize manifest + persist + apply Passport + hand off.
@@ -609,42 +494,22 @@ def submit_copy(
         )
     )
     # Spec §6 S2 — read the source's capability-set state and serialize it
-    # into the dst manifest's ``skill_sets`` segment.
-    # * Branch A — source has its own manifest record (manifest-managed bot):
-    #   pass that record's ``skill_sets`` segment through verbatim.
-    # * Branch B — source has no manifest record (legacy Genome bot): read the
-    #   source's ``SkillSetApplySnapshot`` and derive the segment. Snapshot
-    #   ``read_apply_snapshot`` takes ``actor_id``; the caller (``owner_id``)
-    #   is the actor — the source.edit gate above already verified the caller
-    #   has edit permission on the source bot, and the snapshot read is
-    #   read-only with its own scope checks inside.
+    # into the dst manifest's ``skill_sets`` segment. The snapshot is the
+    # apply-engine source of truth; it covers manifest-managed and legacy
+    # Genome bots alike. ``read_apply_snapshot`` takes ``actor_id``; the caller
+    # (``owner_id``) is the actor — the source.edit gate above already verified
+    # the caller has edit permission on the source bot, and the snapshot read
+    # is read-only with its own scope checks inside.
     # ``manifest_seam.preflight`` below runs the document through
     # ``validate_document``, which exercises ``validate_capabilities`` and
     # refuses any malformed segment — so an unrepresentable source state is a
     # 4xx at preflight, not silently stored.
-    source_manifest_record = manifest_get_service.get(
-        entity_id=source_entity_id, bot_id=source["bot_id"]
+    source_snapshot = skill_set_service.read_apply_snapshot(
+        bot_id=source["bot_id"],
+        owner_id=source_owner_id,
+        actor_id=owner_id,
     )
-    source_snapshot = None
-    if source_manifest_record is None:
-        source_snapshot = skill_set_service.read_apply_snapshot(
-            bot_id=source["bot_id"],
-            owner_id=source_owner_id,
-            actor_id=owner_id,
-        )
-    skill_sets = _serialize_skill_sets(
-        source_manifest_record=source_manifest_record,
-        snapshot=source_snapshot,
-    )
-    extra_skill_sources: dict[str, dict[str, Any]] = {}
-    if source_manifest_record is not None and skill_sets is not None:
-        # Branch A passthrough: member ``from:`` selectors may reference named
-        # sources the source manifest declares but the dst document does not —
-        # carry them alongside the copy's own ``from_bot`` file-sync source so
-        # ``validate_document`` re-accepts the verbatim segment.
-        extra_skill_sources = _passthrough_source_skill_sources(
-            source_manifest_record.document
-        )
+    skill_sets = _serialize_skill_sets(snapshot=source_snapshot)
     manifest_document = _build_manifest_document(
         script_body=script_body,
         source_bot_id=source["bot_id"],
@@ -652,7 +517,6 @@ def submit_copy(
         excludes=request_excludes,
         render_screen_rows=source_render_screens,
         skill_sets=skill_sets,
-        extra_skill_sources=extra_skill_sources,
     )
 
     # Validate the document before anything is spent (manifest-creation's rule:
@@ -904,9 +768,6 @@ async def copy_bot(
         RenderScreenServiceProtocol
     ),
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
-    manifest_get_service: BotConfigManifestServiceProtocol = Injected(
-        BotConfigManifestServiceProtocol
-    ),
     skill_set_service: SkillSetManagementServiceProtocol = Injected(
         SkillSetManagementServiceProtocol
     ),
@@ -925,7 +786,6 @@ async def copy_bot(
         space_context=space_context,
         render_screen_service=render_screen_service,
         bot_service=bot_service,
-        manifest_get_service=manifest_get_service,
         skill_set_service=skill_set_service,
     )
     return envelope(result, request)
