@@ -109,6 +109,15 @@ mode is sent to with the unary operation and `returnImmediately`; the feed
 backoff sleeps only until the next membership renewal is due (no new test: the
 existing feed-outage test covers the path, not the timing).
 
+## Review round 4 (2026-11-17)
+
+Fixed, each with a test: a resume still owed from a failure is dropped once the
+call has a running actor, so it can no longer stop that actor; a task read
+whose snapshot is stored by reference is reported as
+`{"state": <word>, "task_ref": <blob ref>}`, so the event itself carries the
+state the rules and the Worker read (this replaces the round-3 "end by status"
+shortcut beside the rules).
+
 ## Not run, and why
 
 - `cargo nextest` and the coverage gates (changed-line > 85 %, singlebox E2E):

@@ -331,6 +331,34 @@ async fn a_failed_resume_is_retried_until_it_succeeds() {
 }
 
 #[tokio::test]
+async fn a_resume_owed_from_a_failure_never_replaces_the_actor_that_settled_it() {
+    let mut rig = Rig::new();
+    // Long enough for a hint to arrive between two rounds of the main loop.
+    rig.config.receive_timeout = std::time::Duration::from_millis(1000);
+    rig.worker.create_spec(spec_with(|c| c.idempotent_start = true)).await;
+    rig.worker.notify().await;
+    rig.agent.on_start(Reply::Panic);
+    let events = rig.agent.start_stream();
+    let _running = rig.start();
+    until("the first start was attempted", || async { rig.agent.count("start") == 1 }).await;
+    // The resume of the dead actor fails once and is owed.
+    let writes = || rig.store.count("json.mutate") + rig.store.count("zset.add");
+    rig.store.fail_write(1);
+    let before = writes();
+    until("the resume failed", || async { writes() > before }).await;
+    // A hint for the same call arrives before the retry and resumes it.
+    rig.worker.notify().await;
+    until("accepted", || async { rig.phase().await == "accepted" }).await;
+    // Several rounds later the owed retry must not have replaced that actor:
+    // one claim, one resume, and the resumed actor ends the call itself.
+    tokio::time::sleep(std::time::Duration::from_millis(2500)).await;
+    assert_eq!(rig.doc().await["execution"]["holder"]["epoch"], 2, "the running actor was replaced");
+    events.send(final_event()).unwrap();
+    until("the call ends", || async { rig.phase().await == "ended" }).await;
+    assert_eq!(rig.agent.count("start"), 2);
+}
+
+#[tokio::test]
 async fn a_resume_that_landed_without_an_answer_is_resumed_again() {
     let rig = Rig::new();
     rig.worker.create_spec(spec_with(|c| c.idempotent_start = true)).await;

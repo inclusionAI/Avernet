@@ -293,6 +293,12 @@ async fn a_canceled_task_read_with_a_stored_snapshot_ends_as_canceled() {
     until("the call ends", || async { rig.phase().await == "ended" }).await;
     assert_eq!(rig.doc().await["execution"]["outcome"], "canceled", "the status decides, not the payload shape");
     assert_eq!(rig.kinds().await, vec!["error"]);
+    // The event itself says so: the Worker reads the end from the payload.
+    let Payload::Inline(payload) = rig.inbox_events().await[0].1.payload.clone() else {
+        panic!("the state word must be inline");
+    };
+    assert_eq!(payload["state"], "canceled");
+    assert_eq!(payload["task_ref"]["key"], "bcn/snapshot/rt-77c2");
 }
 
 #[tokio::test]

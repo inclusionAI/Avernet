@@ -30,20 +30,7 @@ impl Call {
         remote_event_id: Option<String>,
         payload: Payload,
     ) -> Flow {
-        self.on_event_ending(kind, remote_event_id, payload, None).await
-    }
-
-    /// Like `on_event`; `known_end` is how the call ends when the caller
-    /// knows it apart from the payload (a task read gives the status beside a
-    /// snapshot that may be stored by reference).
-    pub async fn on_event_ending(
-        &mut self,
-        kind: AgentEventKind,
-        remote_event_id: Option<String>,
-        payload: Payload,
-        known_end: Option<FinalDispatchOutcome>,
-    ) -> Flow {
-        let end = known_end.or_else(|| self.ports.rules.end_of(&kind, &payload));
+        let end = self.ports.rules.end_of(&kind, &payload);
         let question = matches!(
             kind,
             AgentEventKind::InputRequired { .. } | AgentEventKind::AuthRequired { .. }
