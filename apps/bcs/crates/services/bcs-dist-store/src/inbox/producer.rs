@@ -1,6 +1,6 @@
 //! Admission in the fixed write order of the design:
 //!
-//! 1. read `admit`: same digest → accepted; different → conflict;
+//! 1. read `admit`: same digest → duplicate; different → conflict;
 //! 2. create `spec` (new session) and `task` (new task), create-once;
 //! 3. append the input to `inbox`;
 //! 4. read the listener (delayed contract D1, see [`read_listener`]);
