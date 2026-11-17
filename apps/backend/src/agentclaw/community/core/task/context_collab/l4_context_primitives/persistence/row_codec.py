@@ -18,6 +18,9 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.collet i
     Collet,
     ColletState,
 )
+from agentclaw.community.core.task.context_collab.l4_context_primitives.collet_metadata import (
+    ColletMetadata,
+)
 from agentclaw.community.core.task.context_collab.l4_context_primitives.event_envelope import (
     EventRecord,
 )
@@ -36,12 +39,21 @@ def _dump_json(data: dict) -> str:
 def _collet_from_row(
     row: ContextCollabColletModel,
 ) -> Collet:
-    """Decode only L4 identity/scope; metadata is handled by the injected codec."""
+    """Decode L4 identity/scope/audit; composition stays with the injected codec."""
     if row.actor_ref is None:
         raise ContextCollabValidationError(
             f"collaboration context {row.collab_context_id!r} has a NULL actor_ref column; "
             "the Collet aggregate requires a non-null initiator_ref"
         )
+    metadata = None
+    if row.collet_metadata is not None:
+        try:
+            metadata = ColletMetadata.from_dict(json.loads(row.collet_metadata))
+        except (json.JSONDecodeError, ContextCollabValidationError) as error:
+            raise ContextCollabValidationError(
+                f"collaboration context {row.collab_context_id!r} has invalid "
+                f"collet_metadata: {error}"
+            ) from error
     collet = Collet(
         collet_id=row.collab_context_id,
         initiator_ref=PrincipalRef.from_dict(json.loads(row.actor_ref)),
@@ -49,6 +61,7 @@ def _collet_from_row(
         scope=SpaceRef.from_dict(json.loads(row.scope)),
         current_event_id=row.current_event_id,
         version=int(row.context_version),
+        metadata=metadata,
     )
     return collet
 

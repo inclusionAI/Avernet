@@ -153,8 +153,8 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
     l6_profile = create_product_profile(
         ProductProfileCreateCommand(
             ref=VersionedProfileRef("task_commission", 1),            # 版本
-            composition=MethodCompositionTemplate(                    # 绑定 L5 方法及其 L6 产品策略
-                method_kind="Open",
+            composition=MethodCompositionTemplate(                    # 绑定L5方法
+                method_kind="Open",                                   # 绑定OPEN方法
                 scope="collet",
                 required_methods=(MethodRequirement("Open", "0.2"),),
                 policies=(
@@ -191,10 +191,16 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
                 initiator_ref=HUMAN.actor,  # 发起主体引用
                 objective=OBJECTIVE,
                 executor_refs=(l2_executor_ref,),  # () / (bot,) / (bot1, bot2, ...)
+                title="代办任务协作",
+                description="用户与指定 Bot 之间的交付与验收上下文",
             ),
             HUMAN,  # 代办任务创建人
         )
         collect_id = l4_collet.collet_id
+        assert l4_collet.title == "代办任务协作"
+        assert l4_collet.created_by == l4_collet.updated_by == HUMAN.actor
+        assert l4_collet.created_at == l4_collet.updated_at
+        assert l4_collet.schema_version is not None and l4_collet.etag
 
         # 3、L6 实例化选择产品并编排 L5 Method/角色引用;不是 L4 create 的副作用。
         # instantiate中：校验产品配置与角色所需主体；创建并保存 ACTIVE 的 MethodBinding
@@ -207,8 +213,8 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
         # 4、调用L5的OPEN方法-创建机会
         published = l5_open_method.publish_opportunity(
             OpenOpportunityCommand(
-                collet_id=collect_id,
-                actor_context=HUMAN, # actor context
+                collet_id=collect_id,                                     #collet
+                actor_context=HUMAN,                                      #发布人信息
                 participation_type=ParticipationType.COLLET_PARTICIPANT,  #协议中明确规定的字段及取值
                 admission_policy_refs=[
                     "task_commission.designated_bot_self_application/1"   #录取策略：指定 Bot 自己申请，并由任务产品的策略自动审核
@@ -314,7 +320,8 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
         assert service.detail_task(collect_id).status == "in_progress"
         assert injector.get(A2aDeliveryPort).bridge_records() == ()
 
-        # 9. 模拟Agent执行任务，过程中上报信息
+        # 9. 模拟Agent执行任务，过程中上报自定义的步骤及进度信息
+        # 但是目前协议中没有统一的详细步骤上报 API 和固定字段，这里自定义了一套上报API和字段。
         created = TaskCommissionCreatedView(
             collet_id=l4_collet.collet_id,
             title=OBJECTIVE,

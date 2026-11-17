@@ -92,6 +92,8 @@ def test_l6_instantiation_is_explicit_and_preserves_initial_l4_authorities(runti
     after = repo.get_current_status(command.collet_id)
     assert after.product_instance == instance
     assert after.collet == before.collet and after.task == before.task
+    assert after.collet.metadata is not None
+    assert after.collet.etag == before.collet.etag
     assert after.events == before.events
     assert after.creation_facts["product_profile_ref"] == {
         "profile_id": command.profile_ref.profile_id,

@@ -1,11 +1,4 @@
-"""Collet 聚合根六字段纯值与严格解码单测(Task 2)。
-
-覆盖 ACCS 六字段聚合根的 ``to_dict`` / ``from_dict`` round-trip(键集 =
-六字段名、``state`` 大写 wire 值)、必填与合法值校验拒绝、未知顶层键
-拒绝,以及仓储 ``_collet_from_row`` 对 ``actor_ref IS NULL`` 外部部分行
-的严格解码拒绝(Ruling 方案 i:不再容忍,直接抛
-``ContextCollabValidationError``,不返回成功)。
-"""
+"""Legacy local six-field Collet shape and strict decoding, not a closed ACCS schema."""
 
 from __future__ import annotations
 
@@ -126,7 +119,8 @@ def test_null_initiator_row_decode_raises(db, engine):
             sql_insert(ContextCollabColletModel).values(
                 collab_context_id=context_id,
                 actor_ref=None,
-                creation_facts=json.dumps(_row_spec().to_dict(), ensure_ascii=False),
+                scope=json.dumps(_collet_dict()["scope"]),
+                creation_facts=json.dumps(_row_spec(), ensure_ascii=False),
                 current_snapshot=None,
                 context_version=1,
             )

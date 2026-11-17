@@ -10,8 +10,8 @@ API,不上 HTTP wire。
 守卫语义(同 G1 ``_is_principal`` / ``_is_executor`` 判定):发起者本人
 或结构匹配的 executor 可调,陌生 actor 抛 ``ContextCollabValidationError``;
 不扩 ``ContextCollabAuthorizerProtocol`` 合同。重复操作幂等拒绝——非法
-迁移即天然防重(沿 G2 §8.3 既有裁决)。操作返回小型结果对象,聚合根不
-加审计字段(审计与事件化一起归 P2)。
+迁移即天然防重(沿 G2 §8.3 既有裁决)。操作返回小型结果对象;此独立内存
+路径暂不推进 SQL Collet 的版本、事件头或审计元数据。
 """
 
 from __future__ import annotations

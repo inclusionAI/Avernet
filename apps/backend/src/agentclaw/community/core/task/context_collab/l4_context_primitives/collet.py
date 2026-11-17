@@ -1,13 +1,18 @@
 """L4 bounded collaboration context; independent from work and method state.
 
-The six-field layout is this implementation's representation, not an exhaustive
-ACCS schema requirement. Composition metadata and query views live outside L4.
+Identity, scope and lifecycle remain independent of Work and upper-layer
+composition. New records include description/audit metadata; legacy six-field
+representations remain readable without inventing their missing audit history.
 """
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
+from hashlib import sha256
+
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabValidationError,
 )
@@ -16,6 +21,10 @@ from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs 
 )
 from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_resource_refs import (
     SpaceRef,
+)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.collet_metadata import (
+    COLLET_METADATA_KEYS,
+    ColletMetadata,
 )
 
 
@@ -67,29 +76,33 @@ class ColletState(str, Enum):
     ARCHIVED = "ARCHIVED"
 
 
-# Collet 顶层键集与合法 state 值(from_dict 严格解码的两张白名单)。
-_COLLET_KEYS = frozenset(
-    {
-        "collet_id",
-        "initiator_ref",
-        "state",
-        "scope",
-        "current_event_id",
-        "version",
-    }
+# Known fields are closed for both legacy and current representations.
+_COLLET_KEYS = (
+    frozenset(
+        {
+            "collet_id",
+            "initiator_ref",
+            "state",
+            "scope",
+            "current_event_id",
+            "version",
+        }
+    )
+    | COLLET_METADATA_KEYS
+    | {"etag"}
 )
 _COLLET_STATES = frozenset({state.value for state in ColletState})
 
 
 @dataclass
 class Collet:
-    """L4 协作上下文聚合根(本实现的六字段,spec §3.4)。
+    """L4 bounded context, not a Task or a product execution snapshot.
 
-    只持有协议身份与顶层生命:聚合标识(``collab_context_id`` 落库列同名
-    同值)、发起主体引用(与初始 task.created 事件的 actor_ref 同值)、
-    ``collet_lifecycle`` 顶层状态、归属 Space、当前事件指针与聚合版本。
-    创建配置、Task 与查询投影不在本模型上;事件事实由 ``ac_context_collab_event`` 表
-    (见 ``event_envelope.EventRecord``)承载;不在此复制 Task 或事件历史。
+    scope is this implementation's L3 governance anchor, NOT the union of
+    accessible Spaces, Resources or Grants. version is the aggregate revision,
+    distinct from metadata.schema_version. Missing metadata denotes a legacy
+    representation only; every repository creation writes complete metadata.
+    The existing authenticated-actor initiator convention remains unchanged.
     """
 
     collet_id: str
@@ -98,16 +111,55 @@ class Collet:
     scope: SpaceRef
     current_event_id: str | None
     version: int
+    metadata: ColletMetadata | None = None
+
+    @property
+    def revision(self) -> int:
+        """Common-contract spelling; version remains the compatible wire field."""
+        return self.version
+
+    @property
+    def schema_version(self) -> str | None:
+        return self.metadata.schema_version if self.metadata else None
+
+    @property
+    def title(self) -> str | None:
+        return self.metadata.title if self.metadata else None
+
+    @property
+    def description(self) -> str | None:
+        return self.metadata.description if self.metadata else None
+
+    @property
+    def created_at(self) -> datetime | None:
+        return self.metadata.created_at if self.metadata else None
+
+    @property
+    def created_by(self) -> PrincipalRef | None:
+        return self.metadata.created_by if self.metadata else None
+
+    @property
+    def updated_at(self) -> datetime | None:
+        return self.metadata.updated_at if self.metadata else None
+
+    @property
+    def updated_by(self) -> PrincipalRef | None:
+        return self.metadata.updated_by if self.metadata else None
+
+    @property
+    def etag(self) -> str:
+        """Derived strong tag for this representation, not another stored revision."""
+        canonical = json.dumps(
+            self._representation(),
+            sort_keys=True,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        return '"' + sha256(canonical.encode("utf-8")).hexdigest() + '"'
 
     @classmethod
     def from_dict(cls, data: dict) -> "Collet":
-        """六字段严格解码;``to_dict`` 结果可无损 round-trip。
-
-        校验:``collet_id`` 非空;``initiator_ref`` / ``scope`` /
-        ``state`` / ``version`` 必填;``state`` 必须命中
-        ``ColletState`` 值;``version`` 必须是 ≥1 整数;未知顶层键
-        (键集 = 六字段名)拒绝。
-        """
+        """Decode legacy or complete current metadata; reject partial/unknown fields."""
         if not isinstance(data, dict):
             raise ContextCollabValidationError(
                 f"Collet must be an object, got: {data!r}"
@@ -130,7 +182,15 @@ class Collet:
             raise ContextCollabValidationError(
                 f"Collet.version must be an integer >= 1, got: {raw_version!r}"
             )
-        return cls(
+        metadata_fields = set(data) & COLLET_METADATA_KEYS
+        metadata = (
+            ColletMetadata.from_dict({key: data[key] for key in metadata_fields})
+            if metadata_fields
+            else None
+        )
+        if "etag" in data and metadata is None:
+            raise ContextCollabValidationError("Collet.etag requires complete metadata")
+        collet = cls(
             collet_id=_required_str(data, "collet_id", "Collet"),
             initiator_ref=PrincipalRef.from_dict(
                 _required_dict(data, "initiator_ref", "Collet")
@@ -139,9 +199,15 @@ class Collet:
             scope=SpaceRef.from_dict(_required_dict(data, "scope", "Collet")),
             current_event_id=_optional_str(data, "current_event_id", "Collet"),
             version=raw_version,
+            metadata=metadata,
         )
+        if "etag" in data and data["etag"] != collet.etag:
+            raise ContextCollabValidationError(
+                "Collet.etag does not match representation"
+            )
+        return collet
 
-    def to_dict(self) -> dict:
+    def _representation(self) -> dict:
         return {
             "collet_id": self.collet_id,
             "initiator_ref": self.initiator_ref.to_dict(),
@@ -149,4 +215,12 @@ class Collet:
             "scope": self.scope.to_dict(),
             "current_event_id": self.current_event_id,
             "version": self.version,
+            **(self.metadata.to_dict() if self.metadata is not None else {}),
         }
+
+    def to_dict(self) -> dict:
+        data = self._representation()
+        # Old representations preserve their exact shape; no fabricated audit.
+        if self.metadata is not None:
+            data["etag"] = self.etag
+        return data

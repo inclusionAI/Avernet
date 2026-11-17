@@ -233,6 +233,18 @@ class ContextCollabRepository(Generic[StateT]):
                     )
                     if updated != 1:
                         raise ContextCollabVersionConflict("Task CAS failed")
+            updated_collet = replace(
+                previous,
+                current_event_id=event.event_id,
+                version=context_version,
+                metadata=(
+                    replace(
+                        previous.metadata, updated_at=now, updated_by=request.actor_ref
+                    )
+                    if previous.metadata is not None
+                    else None
+                ),
+            )
             db.add(self._event_row(event, now=now))
             updated_rows = (
                 db.query(ContextCollabColletModel)
@@ -247,6 +259,11 @@ class ContextCollabRepository(Generic[StateT]):
                         "root_task_ref": new_task.task_id if new_task else None,
                         "current_event_id": event.event_id,
                         "context_version": context_version,
+                        "collet_metadata": (
+                            _dump_json(updated_collet.metadata.to_dict())
+                            if updated_collet.metadata is not None
+                            else None
+                        ),
                     },
                     synchronize_session=False,
                 )
@@ -260,11 +277,7 @@ class ContextCollabRepository(Generic[StateT]):
             db.flush()
             return StoredEventAppend(
                 event=event,
-                collet=replace(
-                    previous,
-                    current_event_id=event.event_id,
-                    version=context_version,
-                ),
+                collet=updated_collet,
                 creation_facts_json=row.creation_facts,
                 task=new_task,
             )
@@ -339,11 +352,16 @@ class ContextCollabRepository(Generic[StateT]):
         *,
         now: datetime,
     ) -> ContextCollabColletModel:
-        """Persist L4 scope plus plain creation facts and root Task reference."""
+        """Persist L4 scope/audit plus plain creation facts and root Task reference."""
         return ContextCollabColletModel(
             collab_context_id=collet.collet_id,
             actor_ref=_dump_json(collet.initiator_ref.to_dict()),
             scope=_dump_json(collet.scope.to_dict()),
+            collet_metadata=(
+                _dump_json(collet.metadata.to_dict())
+                if collet.metadata is not None
+                else None
+            ),
             creation_facts=creation_facts_json,
             current_snapshot=None,
             root_task_ref=task.task_id if task else None,

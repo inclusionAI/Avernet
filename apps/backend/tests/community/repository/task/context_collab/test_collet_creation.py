@@ -87,6 +87,8 @@ def test_create_retains_zero_one_or_many_executors_without_upper_access(
         "initiator_ref",
         "objective",
         "executor_refs",
+        "title",
+        "description",
     }
     assert command.initiator_ref == OWNER.actor
     assert command.executor_refs == expected_refs
