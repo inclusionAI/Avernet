@@ -14,6 +14,7 @@ fake 沿公开讨论 write 测试先例(in-memory 仓储 + 真 store)。
 import dataclasses
 from datetime import datetime, timezone
 from uuid import uuid4
+from unittest.mock import Mock
 
 import pytest
 
@@ -223,6 +224,7 @@ def _method_port(repo, store):
         product_catalog=PRODUCT_CATALOG,
         store=store,
         repository=repo,
+        group_ops=Mock(),
     )
 
 
@@ -272,7 +274,7 @@ class TestPublishTask:
         assert spec["executor_ref"] is not None
         assert spec["executor_ref"]["agent_id"] == ASSIGNEE
         assert spec["product_kind"] == "task_commission"
-        assert spec["workflow_kind"] == "task_commission_goal"
+        assert spec["workflow_kind"] is None
         assert request.initial_event.payload == spec
 
         collet_id, append_request = repo.append_calls[0]

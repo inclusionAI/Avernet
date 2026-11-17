@@ -9,7 +9,16 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.particip
 from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
     parse_method_kinds,
 )
+from agentclaw.community.core.task.context_collab.l5_methods.method_composition import (
+    CompositionRelation,
+    detect_cycle,
+    validate_composition,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.method_profile import (
+    MethodProfile,
+)
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
+    MethodRelationTemplate,
     ProductProfileDefinition,
     TaskLifecycleContract,
 )
@@ -24,12 +33,20 @@ from agentclaw.community.core.task.context_collab.l6_products.task_contracts imp
 def validate_product_profile(definition: ProductProfileDefinition) -> None:
     """Reject unsupported composition/role/method-policy contracts without installing."""
     methods = definition.composition.required_methods
-    if tuple(item.method for item in methods) != tuple(
+    for profiles in (methods, definition.composition.optional_methods):
+        if not isinstance(profiles, tuple) or any(
+            not isinstance(item, MethodProfile) for item in profiles
+        ):
+            raise ContextCollabValidationError(
+                "composition Methods must be an immutable tuple of L5 MethodProfile contracts"
+            )
+    if tuple(item.method_kind for item in methods) != tuple(
         item.value for item in parse_method_kinds(definition.composition.method_kind)
     ):
         raise ContextCollabValidationError(
             "composition and required Method profiles disagree"
         )
+    _validate_relations(definition)
     if definition.composition.scope != "collet":
         raise ContextCollabValidationError(
             "only collet-scoped top-level templates are supported"
@@ -73,10 +90,34 @@ def validate_product_profile(definition: ProductProfileDefinition) -> None:
         if policy.method in seen:
             raise ContextCollabValidationError("duplicate Method policy")
         seen.add(policy.method)
-        if policy.method not in {method.method for method in methods}:
+        if policy.method not in {method.method_kind for method in methods}:
             raise ContextCollabValidationError(
                 "Open publication requires Open Method in required_methods"
             )
         policy.publication.admission.validate_roles(definition.scenario_roles)
         if not contract.actions:
             raise ContextCollabValidationError("publication requires Task/workflow actions")
+
+
+def _validate_relations(definition: ProductProfileDefinition) -> None:
+    composition = definition.composition
+    relations = composition.relations
+    if not isinstance(relations, tuple) or any(
+        not isinstance(item, MethodRelationTemplate) for item in relations
+    ):
+        raise ContextCollabValidationError("Method relations must be an immutable tuple")
+    if composition.method_kind == "Open + Single" and not relations:
+        raise ContextCollabValidationError("Open + Single requires explicit Method relations")
+    methods = {item.method_kind for item in composition.required_methods}
+    pairs: list[tuple[str, str]] = []
+    for item in relations:
+        if item.parent_method not in methods or item.child_method not in methods:
+            raise ContextCollabValidationError("Method relation endpoint is not required")
+        if not isinstance(item.relation, CompositionRelation):
+            raise ContextCollabValidationError("Method relation requires CompositionRelation")
+        validate_composition(item.parent_method, item.relation, item.child_method)
+        pairs.append((item.parent_method, item.child_method))
+    if len(set(pairs)) != len(pairs) or detect_cycle(pairs):
+        raise ContextCollabValidationError("duplicate or cyclic Method relations")
+    if relations and {name for pair in pairs for name in pair} != methods:
+        raise ContextCollabValidationError("Method relations must cover all required Methods")

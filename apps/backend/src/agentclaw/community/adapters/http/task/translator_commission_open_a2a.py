@@ -47,7 +47,10 @@ def execute_open_operation(
     ctx = operation.context
     profile = ctx.product_profile_ref
     if (
-        profile != ObjectRef("ProductProfile", "task_commission", "1", ISSUER)
+        profile not in (
+            ObjectRef("ProductProfile", "task_commission", "1", ISSUER),
+            ObjectRef("ProductProfile", "task_commission", "2", ISSUER),
+        )
         or operation.payload != {}
         or operation.expected_revision is not None
     ):

@@ -137,9 +137,12 @@ class ProductRecordDecoder:
         self, state: PrimitiveReadState, creation_facts_json: str
     ) -> ContextStatusRecord:
         facts = decode_creation_facts(json.loads(creation_facts_json))
+        if facts.get("product_instance") is not None and state.task is None:
+            raise ContextCollabValidationError("ProductInstance requires its L4 root Task")
         instance = decode_product_instance(
             facts,
             collet_id=state.collet.collet_id,
+            root_task_id=state.task.task_id if state.task is not None else "",
             event_id=state.events[0].event_id if state.events else "",
             principal_ref=state.collet.initiator_ref,
             executor_ref=AgentRef.from_dict(facts["executor_ref"])

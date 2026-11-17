@@ -38,6 +38,7 @@ TOP_LEVEL_METHOD_KINDS = frozenset(
     {
         MethodKind.SINGLE.value,
         MethodKind.OPEN_GROUP.value,
+        MethodKind.OPEN_SINGLE.value,
         MethodKind.OPEN.value,
     }
 )

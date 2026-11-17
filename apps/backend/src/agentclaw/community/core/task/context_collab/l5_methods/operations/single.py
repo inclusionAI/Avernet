@@ -33,6 +33,7 @@ from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime 
     _shape_of,
     current_axes,
 )
+from agentclaw.community.core.task.context_collab.l5_methods.method_binding import MethodBinding
 from agentclaw.community.core.task.context_collab.l5_methods.single_profile import (
     SelectionState,
     SingleSelection,
@@ -89,6 +90,11 @@ def _require_scope_ref(value: str) -> str:
 
 
 class SingleOperations:
+    @staticmethod
+    def _require_single_binding(binding: MethodBinding) -> None:
+        if "Single" not in binding.method_names:
+            raise ContextCollabValidationError("Single operation requires a Single Method binding")
+
     def _select_event_audit(
         self, command_reason: str, actor: ActorContext, now: str
     ) -> dict:
@@ -121,6 +127,7 @@ class SingleOperations:
         axes = current_axes()
         binding = self._load_binding(axes, collab_context_id, method_binding_id)
         self._authorize("select", binding, context, collab_context_id)
+        self._require_single_binding(binding)
         self._require_active_binding("select", binding)
         new_state = _resolve_single_state("PROPOSED", "single.select")
         now = _now()
@@ -191,6 +198,7 @@ class SingleOperations:
         axes = current_axes()
         binding = self._load_binding(axes, collab_context_id, method_binding_id)
         self._authorize("replace", binding, context, collab_context_id)
+        self._require_single_binding(binding)
         self._require_active_binding("replace", binding)
         old = self._store.active_selection(
             axes, method_binding_id, scope_ref, collab_context_id
@@ -256,6 +264,7 @@ class SingleOperations:
         axes = current_axes()
         binding = self._load_binding(axes, collab_context_id, method_binding_id)
         self._authorize("release", binding, context, collab_context_id)
+        self._require_single_binding(binding)
         self._require_active_binding("release", binding)
         actives = [
             selection
@@ -310,6 +319,7 @@ class SingleOperations:
         axes = current_axes()
         binding = self._load_binding(axes, collab_context_id, method_binding_id)
         self._authorize("delegate", binding, context, collab_context_id)
+        self._require_single_binding(binding)
         self._require_active_binding("delegate", binding)
         bound = self._lifecycle.bind(
             collab_context_id,

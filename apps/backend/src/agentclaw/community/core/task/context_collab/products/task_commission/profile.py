@@ -9,13 +9,19 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.particip
 from agentclaw.community.core.task.context_collab.l5_methods.open_profile import (
     ParticipationType,
 )
+from agentclaw.community.core.task.context_collab.l5_methods.method_composition import (
+    CompositionRelation,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.method_profile import (
+    get_profile,
+)
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     CompatibilityRequirements,
     DomainMapping,
     DomainProfile,
     GovernanceRequirements,
     MethodCompositionTemplate,
-    MethodRequirement,
+    MethodRelationTemplate,
     ProductProfileDefinition,
     ScenarioRole,
     VersionedProfileRef,
@@ -39,10 +45,8 @@ from agentclaw.community.core.task.context_collab.products.task_commission.publi
     DesignatedOpenAdmission,
 )
 
-# The installed self-application behavior intentionally reuses the
-# task_commission@1 reference; existing instances never select latest.
-# Executor-only progress below enforces the task_commission@1 assignee
-# responsibility (authorization bug fix), not a profile migration.
+# Preserve the exact legacy topology for already-pinned instances.
+# Open + Single is a new definition, never an in-place upgrade of @1.
 TASK_COMMISSION_PROFILE_REF = VersionedProfileRef("task_commission", 1)
 
 TASK_COMMISSION_PROFILE = ProductProfileCreateCommand(
@@ -52,7 +56,7 @@ TASK_COMMISSION_PROFILE = ProductProfileCreateCommand(
     composition=MethodCompositionTemplate(
         method_kind="Open",
         scope="collet",
-        required_methods=(MethodRequirement("Open", "0.2"),),
+        required_methods=(get_profile("Open", "0.2"),),
         policies=(
             OpenMethodPolicy(
                 publication=OpenPublicationProfile(
@@ -111,3 +115,38 @@ def init_product_profile() -> ProductProfileDefinition:
     returned definition. Creating a profile does not mutate a runtime catalog.
     """
     return create_product_profile(TASK_COMMISSION_PROFILE)
+
+
+# Opt-in successor: Open establishes participation; Single selects the one
+# responsible executor from admitted candidates. The bounded product still
+# designates one eligible Bot; it does not implement a public marketplace.
+OPEN_SINGLE_COMMISSION_PROFILE_REF = VersionedProfileRef("task_commission", 2)
+OPEN_SINGLE_COMMISSION_PROFILE = create_product_profile(
+    replace(
+        TASK_COMMISSION_PROFILE,
+        ref=OPEN_SINGLE_COMMISSION_PROFILE_REF,
+        composition=MethodCompositionTemplate(
+            method_kind="Open + Single",
+            scope="collet",
+            required_methods=(
+                get_profile("Open", "0.2"),
+                get_profile("Single", "0.2"),
+            ),
+            relations=(
+                MethodRelationTemplate("Single", "Open", CompositionRelation.SUPPORT),
+            ),
+            policies=(
+                OpenMethodPolicy(
+                    publication=OpenPublicationProfile(
+                        admission=BotSelfApplicationAdmission(
+                            applicant_role="assignee",
+                            accountable_role="owner",
+                            participation_type=ParticipationType.COLLET_PARTICIPANT,
+                            capacity=1,
+                        ),
+                    ),
+                ),
+            ),
+        ),
+    )
+)

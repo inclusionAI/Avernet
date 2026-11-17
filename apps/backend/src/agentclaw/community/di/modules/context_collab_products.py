@@ -8,9 +8,14 @@ from agentclaw.community.core.task.context_collab.products.legacy_profiles impor
 )
 from agentclaw.community.core.task.context_collab.products.task_commission.profile import (
     init_product_profile,
+    OPEN_SINGLE_COMMISSION_PROFILE,
 )
 
-INSTALLED_PRODUCT_PROFILES = (*LEGACY_PRODUCT_PROFILES, init_product_profile())
+INSTALLED_PRODUCT_PROFILES = (
+    *LEGACY_PRODUCT_PROFILES,
+    init_product_profile(),
+    OPEN_SINGLE_COMMISSION_PROFILE,
+)
 
 
 def build_product_catalog() -> ProductCatalog:

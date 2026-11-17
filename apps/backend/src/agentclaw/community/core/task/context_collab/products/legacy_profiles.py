@@ -10,13 +10,15 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.particip
 from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
     parse_method_kinds,
 )
+from agentclaw.community.core.task.context_collab.l5_methods.method_profile import (
+    get_profile,
+)
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     CompatibilityRequirements,
     DomainMapping,
     DomainProfile,
     GovernanceRequirements,
     MethodCompositionTemplate,
-    MethodRequirement,
     ProductProfileDefinition,
     ScenarioRole,
     VersionedProfileRef,
@@ -40,7 +42,7 @@ def _definition(
             method_kind=method,
             scope="collet",
             required_methods=tuple(
-                MethodRequirement(item.value, "0.2")
+                get_profile(item.value, "0.2")
                 for item in parse_method_kinds(method)
             ),
         ),

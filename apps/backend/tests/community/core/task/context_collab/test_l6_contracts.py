@@ -23,6 +23,10 @@ from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_reso
 from agentclaw.community.core.task.context_collab.l4_context_primitives.participants import (
     Participant,
 )
+from agentclaw.community.core.task.context_collab.l5_methods.method_profile import (
+    MethodProfileRef,
+    get_profile,
+)
 from agentclaw.community.core.task.context_collab.l6_products.binding import (
     prepare_product_profile,
     product_definition,
@@ -33,13 +37,16 @@ from agentclaw.community.core.task.context_collab.l6_products.catalog import (
 )
 from tests.community.core.task.context_collab.creation_facts import creation_facts
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
-    MethodRequirement,
     VersionedProfileRef,
     negotiate,
+)
+from agentclaw.community.core.task.context_collab.l6_products.task_contracts import (
+    resolve_event_contract,
 )
 from tests.community.core.task.context_collab.product_catalog import (
     PRODUCT_CATALOG,
     PRODUCT_PROFILES,
+    standard_task_workflow,
 )
 
 
@@ -52,7 +59,7 @@ def _spec(**overrides):
         objective="deliver",
         resource_refs=(),
         product_kind="task_commission",
-        workflow_kind="task_commission_goal",
+        workflow_kind=None,
     )
     return creation_facts(**(fields | overrides))
 
@@ -73,25 +80,29 @@ def _profile(facts: dict, catalog=PRODUCT_CATALOG, profile_ref=None):
     )
 
 
-@pytest.mark.parametrize("profile", PRODUCT_PROFILES, ids=lambda p: p.ref.profile_id)
+@pytest.mark.parametrize(
+    "profile", PRODUCT_PROFILES, ids=lambda p: f"{p.ref.profile_id}@{p.ref.version}"
+)
 def test_builtins_have_exact_dependencies_and_reuse_g4(profile):
     selected = negotiate(profile, PRODUCT_CATALOG.capabilities())
     assert selected.accepted
     assert selected.selected_profile == profile.ref
     assert selected.missing_capabilities == ()
-    if profile.workflow.state_machine_ref is not None:
-        ref = profile.workflow.state_machine_ref
+    contract = resolve_event_contract(profile)
+    if contract.state_machine_ref is not None:
+        ref = contract.state_machine_ref
         machine = VERSIONED_MACHINE_REGISTRY[(ref.profile_id, ref.version)]
-        assert set(profile.workflow.completion_states) <= {
+        assert set(contract.completion_states) <= {
             state.name for state in machine.states
         }
-        assert set(profile.workflow.compensation_events) <= {
+        assert set(contract.compensation_events) <= {
             rule.event_name for rule in machine.transitions
         }
-    assert all(
-        mapping.authority.startswith(("L2.", "L3.", "L4.", "L5."))
-        for mapping in profile.domain.mappings
-    )
+    if profile.domain is not None:
+        assert all(
+            mapping.authority.startswith(("L2.", "L3.", "L4.", "L5."))
+            for mapping in profile.domain.mappings
+        )
 
 
 @pytest.mark.parametrize(
@@ -116,7 +127,10 @@ def test_required_and_optional_extensions_and_methods_are_distinct():
             optional_extensions=("trace/1",),
         ),
         composition=replace(
-            profile.composition, optional_methods=(MethodRequirement("Swarm", "999"),)
+            profile.composition,
+            optional_methods=(
+                replace(get_profile("Swarm", "0.2"), profile_version="999"),
+            ),
         ),
     )
     offer = PRODUCT_CATALOG.capabilities()
@@ -136,7 +150,7 @@ def test_method_version_never_silently_uses_installed_newer_version():
         profile,
         replace(
             PRODUCT_CATALOG.capabilities(),
-            methods=(MethodRequirement("Open", "0.3"),),
+            methods=(MethodProfileRef("Open", "0.3"),),
         ),
     )
     assert result.missing_capabilities == ("method:Open@0.2",)
@@ -221,7 +235,7 @@ def test_versioned_workflow_lookup_does_not_use_name_alias(monkeypatch):
         state_machine,
     )
 
-    spec = _spec()
+    spec = _spec(workflow_kind="task_commission_goal")
     from agentclaw.community.core.task.context_collab.l4_context_primitives.task import (
         Task,
     )
@@ -340,9 +354,8 @@ def test_l6_contracts_do_not_import_runtime_or_transport():
 
 def test_workflow_role_requirement_must_name_a_declared_role():
     profile = PRODUCT_CATALOG.get("task_commission", 1)
-    action = replace(
-        profile.workflow.action("report_progress"), required_role="unknown"
-    )
-    workflow = replace(profile.workflow, actions=(action,))
+    workflow = standard_task_workflow()
+    action = replace(workflow.action("report_progress"), required_role="unknown")
+    workflow = replace(workflow, actions=(action,))
     with pytest.raises(ContextCollabValidationError, match="undeclared scenario role"):
         ProductCatalog((replace(profile, workflow=workflow),))

@@ -15,7 +15,27 @@ from agentclaw.community.core.task.context_collab.errors import (
 
 
 @dataclass(frozen=True)
-class MethodProfileDefinition:
+class MethodProfileRef:
+    """Exact MethodProfile identity, not another Method contract or runtime object.
+
+    The method/version field names preserve existing ProductInstance JSON.
+    """
+
+    method: str
+    version: str
+
+    def __post_init__(self) -> None:
+        if any(
+            not isinstance(item, str) or not item.strip()
+            for item in (self.method, self.version)
+        ):
+            raise ContextCollabValidationError(
+                "Method profile reference needs non-empty method and version"
+            )
+
+
+@dataclass(frozen=True)
+class MethodProfile:
     """L5 方法 Profile 声明;字段语义见 L5 method objects spec §3.1。
 
     - ``capabilities``:对外可声明的能力(snake_case 操作族语义);
@@ -33,12 +53,20 @@ class MethodProfileDefinition:
     participation_model: str = ""
     composable_relations: tuple[str, ...] = ()
 
+    def __post_init__(self) -> None:
+        # Definitions and their persisted references share the exact identity.
+        MethodProfileRef(self.method_kind, self.profile_version)
 
-# 顶层 wire 取值按 spec §12.4 只允许 Single / Open + Group;
+    @property
+    def ref(self) -> MethodProfileRef:
+        return MethodProfileRef(self.method_kind, self.profile_version)
+
+
+# 顶层产品显式声明 Single / Open / Open + Group / Open + Single;
 # Group/Open/Swarm 裸值经嵌套 bind 进入,此处四者均为核心方法剧本。
-METHOD_PROFILE_REGISTRY: dict[str, MethodProfileDefinition] = {
+METHOD_PROFILE_REGISTRY: dict[str, MethodProfile] = {
     # ACCS-301 Single:选中者执行;escalate 至 Group/Swarm 纳入可组合关系。
-    "Single": MethodProfileDefinition(
+    "Single": MethodProfile(
         method_kind="Single",
         capabilities=(
             "single.selection.select",
@@ -58,7 +86,7 @@ METHOD_PROFILE_REGISTRY: dict[str, MethodProfileDefinition] = {
         composable_relations=("nest", "delegate_to", "support", "escalate"),
     ),
     # ACCS-302 Group:名册治理;可 escalate 至 Swarm。
-    "Group": MethodProfileDefinition(
+    "Group": MethodProfile(
         method_kind="Group",
         capabilities=(
             "group.roster.invite",
@@ -88,7 +116,7 @@ METHOD_PROFILE_REGISTRY: dict[str, MethodProfileDefinition] = {
         ),
     ),
     # ACCS-303 Swarm:阶段化并行;SWARM 已是最大参与规模,无 escalate 出边。
-    "Swarm": MethodProfileDefinition(
+    "Swarm": MethodProfile(
         method_kind="Swarm",
         capabilities=(
             "swarm.plan.submit_candidate",
@@ -115,7 +143,7 @@ METHOD_PROFILE_REGISTRY: dict[str, MethodProfileDefinition] = {
         composable_relations=("nest", "delegate_to", "support", "parallelize"),
     ),
     # ACCS-304 Open:机会发布 + 申请录取;仅参与式组合,无 escalate/parallelize。
-    "Open": MethodProfileDefinition(
+    "Open": MethodProfile(
         method_kind="Open",
         capabilities=(
             "open.opportunity.publish",
@@ -136,11 +164,16 @@ METHOD_PROFILE_REGISTRY: dict[str, MethodProfileDefinition] = {
 }
 
 
-def get_profile(method: str) -> MethodProfileDefinition:
-    """按核心方法名取 Profile 声明;未注册方法抛 ``ContextCollabValidationError``。"""
+def get_profile(method: str, version: str = "0.2") -> MethodProfile:
+    """Return the exact core contract; the default is fixed @0.2, never latest."""
     try:
-        return METHOD_PROFILE_REGISTRY[method]
+        profile = METHOD_PROFILE_REGISTRY[method]
     except KeyError:
         raise ContextCollabValidationError(
             f"unknown method profile: {method!r}"
         ) from None
+    if profile.profile_version != version:
+        raise ContextCollabValidationError(
+            f"unknown method profile version: {method!r}@{version}"
+        )
+    return profile

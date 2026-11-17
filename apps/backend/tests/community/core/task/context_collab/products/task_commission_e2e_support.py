@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from agentclaw.community.core.task.context_collab.l6_products.persistence.repository import ContextCollabRepositoryProtocol
+from agentclaw.community.core.task.context_collab.l6_products.catalog import ProductCatalog
+
 import runpy
 from collections.abc import Callable
 from pathlib import Path
@@ -22,8 +25,9 @@ from agentclaw.community.core.task.context_collab.l1_interoperate_deliver.delive
 from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
     PrincipalRef,
 )
-from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
-    top_level_binding_id,
+from agentclaw.community.core.task.context_collab.l6_products.topology import (
+    product_execution_binding_ref,
+    product_method_binding_ref,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.open_profile import (
     OpenOpportunity,
@@ -253,6 +257,7 @@ class SimulatedWorkingBot:
             payload,
         )
         ctx = request["params"]["message"]["parts"][0]["data"]["context"]
+        ctx["method_binding_ref"]["object_id"] = product_execution_binding_ref(created.collet_id, self.profile)
         ctx["caller"]["identity_id"] = self.bot_id
         ctx["accountable_principal_ref"]["identity_id"] = self.owner_id
         return request
@@ -335,7 +340,13 @@ class SimulatedWorkingBot:
 def _participation_snapshot(service, injector, created):
     """SQL observable state and all relevant Method facts, including dispatch."""
     store, axes = injector.get(MethodStoreProtocol), current_axes()
-    context_id, binding = created.collet_id, top_level_binding_id(created.collet_id)
+    context_id = created.collet_id
+    record = injector.get(ContextCollabRepositoryProtocol).get_current_status(context_id)
+    profile = injector.get(ProductCatalog).get(
+        record.product_instance.profile_ref.profile_id,
+        record.product_instance.profile_ref.version,
+    )
+    binding = product_method_binding_ref(context_id, profile, "Open")
     return (
         service.detail_task(context_id),
         store.get_binding(axes, binding, context_id),

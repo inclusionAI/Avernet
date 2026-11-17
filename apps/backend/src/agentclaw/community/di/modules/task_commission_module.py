@@ -34,8 +34,8 @@ from agentclaw.community.di.modules.task_commission_self_application import (
 
 class TaskCommissionModule(Module):
     def configure(self, binder: Binder) -> None:
-        # The installed task_commission@1 profile additionally requires scoped Open
-        # admission. Generic L4 and product Work resolve the same guard.
+        # Self-application profiles require scoped Open admission; @2 additionally
+        # requires Single selection. Generic L4 and product Work share this guard.
         binder.bind(
             ContextCollabAuthorizerProtocol,
             to=CommissionAdmissionAuthorizer,

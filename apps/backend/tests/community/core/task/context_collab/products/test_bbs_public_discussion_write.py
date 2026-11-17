@@ -40,11 +40,11 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.collet i
     Collet,
     ColletState,
 )
-from tests.community.core.task.context_collab.creation_facts import creation_facts
-from agentclaw.community.core.task.context_collab.l4_context_primitives.task import Task
-from agentclaw.community.core.task.context_collab.l6_products.creation_facts import (
-    creation_payload,
+from tests.community.core.task.context_collab.creation_facts import (
+    creation_facts,
+    create_collet_request,
 )
+from agentclaw.community.core.task.context_collab.l4_context_primitives.task import Task
 from agentclaw.community.core.task.context_collab.l4_context_primitives.event_envelope import (
     EventRecord,
 )
@@ -260,13 +260,13 @@ class TestCreateDiscussion:
 
         request = repo.create_calls[0]
         spec = request.creation_facts
-        assert spec.objective == TITLE
-        assert spec.method_kind == "Open + Group"
-        assert spec.product_kind == "bbs_public_discussion"
-        assert spec.workflow_kind == "bbs_public_discussion"
-        assert spec.executor_ref is None
+        assert spec["objective"] == TITLE
+        assert spec["method_kind"] == "Open + Group"
+        assert spec["product_kind"] == "bbs_public_discussion"
+        assert spec["workflow_kind"] == "bbs_public_discussion"
+        assert spec["executor_ref"] is None
         assert request.initial_event.event_kind == "task.created"
-        assert request.initial_event.payload == creation_payload(spec, TITLE)
+        assert request.initial_event.payload == spec
 
         assert len(repo.append_calls) == 1
         append = repo.append_calls[0]
@@ -359,13 +359,15 @@ class TestReplyDiscussion:
             workflow_kind="team_todo_execution",
         )
         created = repo.create_collet(
-            CreateColletRecordRequest(
-                creation_facts=spec,
+            create_collet_request(
+                spec,
+                space=SPACE,
+                principal_ref=PRINCIPAL,
                 initial_event=InitialEventDraft(
                     event_kind="task.created",
                     primitive_type="Task",
                     actor_ref=PRINCIPAL,
-                    payload={"objective": spec.objective, "resource_refs": []},
+                    payload={"objective": spec["objective"], "resource_refs": []},
                 ),
             )
         )

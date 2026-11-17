@@ -290,10 +290,10 @@ def _transition(rule_id: str, from_state: str,
     )
 
 
-# 全部 L5 绑定可跨任何方法 kind(顶层投影 Single/Open + Group,
+# 全部 L5 绑定可跨任何方法 kind(顶层投影 Single/Open + Group/Open + Single,
 # 嵌套 bind Group/Open/Swarm),机器族共享该状态列。
 _ALL_KINDS: tuple[str, ...] = (
-    "Single", "Open + Group", "Group", "Open", "Swarm",
+    "Single", "Open + Group", "Open + Single", "Group", "Open", "Swarm",
 )
 
 # ------------------------------------------------------- binding 生命周期(spec §3.2)

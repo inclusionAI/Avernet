@@ -37,7 +37,6 @@ from agentclaw.community.core.task.context_collab.l5_methods.method_binding impo
     MethodKind,
     effective_max_compose_depth,
     parse_method_kinds,
-    top_level_binding_id,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.method_composition import (
     CompositionEdgeState,
@@ -446,19 +445,15 @@ class MethodLifecycleService(MethodLifecycleServiceProtocol):
         evidence;读面授权,任意已认证 actor 放行。
 
         读路径自愈(§6.4):store 未命中**确定性顶层 ID** 时静默重建
-        ACTIVE 投影后照常投影,读路径不报错;其余缺失 ID 照旧
+        投影后照常投影;恢复端口只接受所选合同中声明的 ID,其余缺失 ID 抛
         ``ContextCollabNotFoundError``。
         """
         axes = current_axes()
         binding = self._store.get_binding(axes, method_binding_id, collab_context_id)
         if binding is None:
-            if method_binding_id == top_level_binding_id(collab_context_id):
-                binding = self._recovery.recover(collab_context_id, context, now=_now())
-            else:
-                raise ContextCollabNotFoundError(
-                    f"method binding {method_binding_id!r} not found in "
-                    f"collaboration context {collab_context_id!r}"
-                )
+            binding = self._recovery.recover(
+                collab_context_id, context, method_binding_id=method_binding_id, now=_now()
+            )
         self._authorize("inspect", binding, context, collab_context_id)
         edges = self._store.list_composition_edges(axes, collab_context_id)
         active_edges = sum(

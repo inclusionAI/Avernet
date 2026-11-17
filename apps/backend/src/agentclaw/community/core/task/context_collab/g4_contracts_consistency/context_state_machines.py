@@ -233,9 +233,9 @@ def _transition(rule_id: str, from_state: str,
 
 
 # Collet 是聚合根,任何方法 kind 的 Collet 都走同一生命周期(顶层投影
-# Single/Open + Group,嵌套绑定 Group/Open/Swarm),机器共享该状态列。
+# Single/Open + Group/Open + Single,嵌套绑定 Group/Open/Swarm),机器共享该状态列。
 _ALL_KINDS: tuple[str, ...] = (
-    "Single", "Open + Group", "Group", "Open", "Swarm",
+    "Single", "Open + Group", "Open + Single", "Group", "Open", "Swarm",
 )
 
 # --------------------------------------------------- Collet 生命周期(spec §4)

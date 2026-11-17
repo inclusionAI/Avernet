@@ -125,7 +125,9 @@ class Recovery:
         self.kind = kind
         self.calls = 0
 
-    def recover(self, collab_context_id, actor, *, now):
+    def recover(self, collab_context_id, actor, *, method_binding_id, now):
+        if method_binding_id != top_level_binding_id(collab_context_id):
+            raise ContextCollabNotFoundError("unknown binding")
         self.calls += 1
         return initialize_top_level_binding(
             self.store,

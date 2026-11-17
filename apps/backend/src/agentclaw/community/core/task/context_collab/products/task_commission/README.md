@@ -3,12 +3,14 @@
 Owner: Backend `core/task/context_collab/products/task_commission`.
 Versioned task-commission templates consume [L6 contracts](../../l6_products/README.md),
 not an L6 implementation or a second Task engine. DI explicitly installs their
-[definition](profile.py). Its explicit workflow and the reusable standard Task
-contract use the same exact `task_commission_goal@1` G4 machine.
+[definitions](profile.py). Both installed commission versions use the reusable
+standard Task contract and its exact `task_commission_goal@1` G4 machine;
+historical explicit-workflow definitions retain their pinned references.
 
 | Profile | Method composition | Admission and execution |
 | --- | --- | --- |
-| `task_commission@1` | Open | Designated Bot queries/applies itself; owner-authorized automatic review creates a task-scoped Participant binding before L4 Work starts. |
+| `task_commission@1` | Open | Preserved publisher-mediated designated-assignee admission. |
+| `task_commission@2` | Open + Single | Bot self-application → owner-policy scoped admission → explicit selection of the admitted participant → L4 Work. |
 
 Existing instances are never migrated. `PublishTaskCommand.product_profile_ref`
 selects an exact installed definition at creation; omission selects the installed
@@ -22,13 +24,13 @@ existing public user creation DTO.
   Query/Apply, review of an existing L5 application, six Work actions and
   `report_execution` for inbound Bot reports.
   The API layer re-exports only `TaskCommissionServiceProtocol`.
-- [Service](service.py): the installed `task_commission@1` definition publishes
-  an opportunity without applying for the Bot; dispatch waits for the Bot's own
-  application to reach ADMITTED. A separately assembled publisher-mediated
-  definition remains available only for compatibility tests.
-- [Workflow definition](profile.py) for historical `@1`, or the selected
-  [standard Task contract](../../l6_products/task_contracts.py) when orchestration
-  is omitted: executor actions require `selected-agent`.
+- [Service](service.py): exact @2 selection publishes an opportunity without
+  applying for the Bot. The DI adapter reviews the Bot's application and calls
+  Single Select before returning a receipt/dispatch. @1 keeps its original
+  publisher-mediated admission flow; no existing instance is upgraded.
+- The selected [standard Task contract](../../l6_products/task_contracts.py),
+  or a historical explicit workflow when pinned: executor actions require
+  `selected-agent`.
   Shared [G4 validation](../../g4_contracts_consistency/product_contract.py)
   enforces it for **both product and generic L4 writes**. Submission retains
   its executor-only rule. G1 authorization, machine guards and repository CAS
@@ -55,8 +57,9 @@ DI adapters resolve `composition.require_policy("Open").publication`; creation
 and catalog installation reject duplicate, untyped or unbound Method policies.
 Other Methods do not need an Open policy or a null placeholder. See the
 [L6 authoring example and migration](../../l6_products/README.md#create-a-product-profile).
-This is a Python configuration relocation only: existing participation strategy,
-profile versions, runtime storage and HTTP/ACCS operations are not changed.
+Moving policy into `composition.policies` is a Python configuration relocation,
+not a change to the L5 Open contract. The explicit @2 product definition adds
+Single selection without rewriting @1 or introducing a new HTTP/ACCS operation.
 
 ## Autonomous products without domain/workflow boilerplate
 
@@ -74,18 +77,28 @@ value. Work uses the same G1/G4 checks, artifact requirement, owner acceptance a
 Task/Collet revision fences as the explicit workflow path. Optional profiles do
 not remove the installed admission prerequisite.
 
-The default installed `task_commission@1` remains unchanged, including its old
-domain/workflow references and default publish selector. Use a new exact product
-version and explicit DI installation for new instances; do not strip historical
-`@1` definitions or migrate existing rows implicitly. The journey's autonomous
-`task_commission@2` is installed only in its test injector. Its ProductInstance
-pins `standard_task@1` and records null domain/workflow refs. Recovery validates
-those references without renegotiating or selecting latest.
+The default publish selector remains `task_commission@1` for compatibility.
+The installed `OPEN_SINGLE_COMMISSION_PROFILE` is the explicit @2 successor;
+choose it with `PublishTaskCommand.product_profile_ref` or L6 Instantiate.
+It omits domain/workflow, pins `standard_task@1` and requires Open@0.2 and
+Single@0.2. Do not change @1's topology or reinterpret historical records.
 
-## task_commission@1 complete journey and participation boundary
+## ProductInstance and the Open + Single journey
 
-1. Product staff author `init_product_profile()` and deploy it
-   through [DI installation](../../../../../di/modules/context_collab_products.py).
+The [end-to-end test](../../../../../../../../tests/community/core/task/context_collab/products/test_task_commission_end_to_end.py)
+shows one commission: first create its Collet/root Task, then instantiate its
+ProductInstance in a separate step. Multi-instance reuse/isolation is outside this
+journey's scope. For this product, each
+independent commission has one instance, one Collet and one independent root
+Task (potentially with L4 subtasks). This is not a universal protocol 1:1 rule.
+Each instance persists `root_task_ref` plus exact Profile/Method/Task-contract
+versions, binding/role refs, governance, negotiation and creation evidence.
+It does not copy runtime Open/Single objects or the Task status. Historical
+instances without an explicit root ref resolve it from L4 without rewriting
+storage. See the [L6 identity contract](../../l6_products/README.md#productinstance-identity-and-cardinality).
+
+1. Product staff author `OPEN_SINGLE_COMMISSION_PROFILE` via the pure L6
+   `create_product_profile` operation and explicitly install @2 through [DI installation](../../../../../di/modules/context_collab_products.py).
    “Online” means an immutable code-owned definition installed into the actual
    application catalog, not a mutable registry or a mocked registration call.
 2. Business staff first create L4 work with `ColletCreateCommand(to_space,
@@ -96,9 +109,10 @@ those references without renegotiating or selecting latest.
    profile and initialize L5. This separate installation preserves initial L4
    evidence and requires an untouched Collet. L4 accepts zero/one/many executors;
    this product still requires one scalar assignee. Existing product publishers
-   retain their combined application flow. L5 creates only an **Open** MethodBinding,
-   with no Group roster, Group member or Single selection. A selected-agent
-   RoleBinding is designation, not admission.
+   retain their combined application flow. L5 creates one ACTIVE composite
+   **Open + Single** MethodBinding with both exact Method versions, but no
+   opportunity, application, Group roster or SingleSelection yet. A selected-agent
+   RoleBinding is designation, not admission or selection.
 3. The designated, authenticated Bot calls **L5 Open's `query_opportunities`**
    with only its `actor_context` to discover available opportunities in the
    current tenant/environment, then **L5 Open's `submit_application`** as itself
@@ -126,7 +140,15 @@ those references without renegotiating or selecting latest.
    admitting application to remain ADMITTED and the Open MethodBinding ACTIVE.
    Revocation retains evidence but immediately removes execution eligibility.
    These records are not Space membership, resource grants or session access.
-5. After ADMITTED, the journey calls the injected L4
+5. After ADMITTED, an explicit L5 `Single.select` chooses the scoped participant
+   created by that admission, carrying its application/decision as evidence.
+   Admission alone is tested to reject Work.start. The product Apply adapter
+   executes this same selection under the publisher's policy actor; Open itself
+   does not call Single. Execution checks both valid scoped admission and an
+   ACTIVE, in-window SingleSelection for the same participant/scope, selected by
+   the publisher. Release, mismatched evidence, wrong scope/participant, an
+   unauthorized selector or expired selection cannot authorize execution.
+   After Select, the journey calls the injected L4
    `ContextCollabServiceProtocol.start` with `WorkStartCommand(expected_version,
    note)` and the Bot's authenticated `ActorContext`, not product `start_task`.
    This explicit root-Task Work operation shares G1/G4 and the atomic Task/Collet
@@ -135,7 +157,7 @@ those references without renegotiating or selecting latest.
    which reuses the same L4 Work machinery. The generic
    `ContextCollabService.append_event` is not a Work API; it is a generic event
    append entrypoint.
-   The shared G1 adapter requires active scoped admission for these task_commission@1 events
+   The shared G1 adapter enforces these prerequisites for @2 execution events
    through **both product and generic L4** writes. Admission to task A cannot
    authorize task B; Open revocation blocks subsequent execution. Structural
    designation alone cannot start work.
@@ -143,6 +165,11 @@ those references without renegotiating or selecting latest.
    execution submits artifact references and moves to `reviewing`; even 100%
    progress is not completion or acceptance. Only explicit publisher `accept`
    moves the task to `done`. Failed execution must not auto-submit.
+
+The product still designates one eligible Bot and uses a capacity-1 Open
+opportunity. Open + Single now separates admission from execution selection;
+it does not implement unrestricted discovery/admission of multiple competing
+Bots, candidate ranking or executor reassignment.
 
 The guard is deliberately bounded to task execution, not a replacement for all
 G1/Governance policy: other Open + Group products retain their existing public
@@ -163,12 +190,12 @@ Consumers must correlate the binding with the exact admission decision,
 ADMITTED application, actor and ACTIVE Open MethodBinding; a stored binding
 reference alone is not an authorization credential.
 
-The installed `task_commission@1` definition is pure Open: admission creates a
-scoped Participant binding and never creates a Group roster or Group member. The
-separately assembled `TASK_COMMISSION_PROFILE` keeps the publisher-mediated
-compatibility strategy for isolated legacy tests; it is not installed in the
-default catalog. No in-place conversion or historic admission rewrite is
-provided. MethodStore remains in-memory, with no new durable L4
+The installed `task_commission@1` definition remains pure Open and
+publisher-mediated; it does not acquire Single semantics. Historical
+self-application fixtures remain supported with their declared policy, while
+@2 composes scoped Open participation with Single selection. Neither path
+creates a Group roster/member. No in-place conversion or historic admission
+rewrite is provided. MethodStore remains in-memory, with no new durable L4
 participant-management API or SQL table.
 
 ## Calling L5 Open directly
@@ -238,6 +265,21 @@ admitted = open_method.admit(
     ),
 )
 assert admitted.state == "ADMITTED"
+# Admission is participation, not Single selection or permission to start Work.
+decision = store.get_decision(axes, decision_id, binding_id, task_id)
+[participant_ref] = decision.resulting_binding_refs
+single_method = injector.get(GroupMethodOpsServiceProtocol)
+selected = single_method.select(
+    task_id,
+    binding_id,
+    SingleSelectCommand(
+        agent_participant_ref=participant_ref,
+        scope_ref=task_id,
+        selection_evidence_refs=[submitted.object_id, decision_id],
+    ),
+    policy_context,
+)
+assert selected.accepted and selected.state == "ACTIVE"
 ```
 
 `task_id` is the product's Collet ID; `binding_id` is its actual L5 MethodBinding.
@@ -275,10 +317,11 @@ not a reservation, product eligibility decision, automatic application or
 participation grant. Submit/admit still perform their own checks.
 
 The case shows the real L5 calls in sequence: PublishOpportunity → Query → SubmitApplication →
-Screen → Admit. Submission returns SUBMITTED, not an admission receipt; it does
+Screen → Admit → Single Select. Submission returns SUBMITTED, not an admission receipt; it does
 not implicitly screen, admit or start Work. SCREENING still has no participant
 binding or decision and cannot authorize Work. Admission creates the scoped
-participant binding and decision; the case then explicitly invokes
+participant binding and decision; Single then explicitly selects that scoped
+participant with correlated evidence. Only after selection does the case invoke
 `collab_service.start(task_id, WorkStartCommand(expected_version, note), bot_context)`.
 This is the L4 Work.start API, not product `start_task`, a Bot method or a caller
 constructing a generic event. Its actor/event fields are chosen by L4 and its
@@ -303,10 +346,10 @@ L5 checked window/capacity at submission. Mismatches and repeat review are
 rejected without a second application, admission or Work start. Review/write or
 execution failures still propagate, without automatic retry or compensation.
 
-The case checks that repeated reads do not mutate participation, neither
-submission nor screening can authorize Work, and admission consumes capacity.
-It also exercises signed product-wide HTTP Query
-and checks that its minimal projection matches the L5 result. Product filtering
+The journey checks that admission alone cannot authorize Work. The
+[Open + Single regressions](../../../../../../../../tests/community/core/task/context_collab/products/test_task_commission_open_single.py)
+exercise signed product-wide HTTP Query/Apply, real selection before dispatch,
+released/invalid selection denial and immutable ProductInstance references. Product filtering
 continues to hide unrelated Bots' tasks; L5 itself does not import product
 profiles, SQL discovery or designation rules. `SimulatedWorkingBot.query_opportunities_by_skill`
 and `submit_application_by_skill` are only test-runtime callers of the injected L5
@@ -532,11 +575,13 @@ claims, cross-tenant input, stale replay and invalid state.
 [Endpoint framework cases](../../../../../../../../tests/community/endpoints/test_task_commission_a2a_endpoints.py)
 also boot the real application/service graph; the
 [product journey](../../../../../../../../tests/community/core/task/context_collab/products/test_task_commission_end_to_end.py)
-deploys both an explicit-workflow `task_commission@1` and an autonomous
-`task_commission@2` (omitting domain/workflow) through the real catalog seam, then
-uses the product service for owner commands. The main case directly invokes L5
-Open Query/SubmitApplication as the Bot and Screen/Admit as the policy actor;
-separate regression cases cover the product review/dispatch continuation.
+deploys `task_commission@2` (Open + Single, omitting domain/workflow) through
+the real catalog seam. Its main case creates one Collet/root Task, separately
+instantiates one ProductInstance, then uses the product service for owner commands.
+It directly invokes L5 Open Query/SubmitApplication as the Bot and Screen/Admit
+as the policy actor, then explicitly calls Single Select before Work. Separate
+regression cases cover the product review/dispatch continuation; this journey
+does not test multi-instance reuse or isolation.
 The simulated Bot exercises product
 discovery and execution reporting through signed A2A HTTP; regression cases also
 exercise signed HTTP Apply. Review regressions reject mismatched task, binding,

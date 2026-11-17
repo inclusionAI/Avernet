@@ -42,7 +42,7 @@ class TopLevelBindingRecovery(Protocol):
     """
 
     def recover(
-        self, collab_context_id: str, actor: ActorContext, *, now: str
+        self, collab_context_id: str, actor: ActorContext, *, method_binding_id: str, now: str
     ) -> MethodBinding: ...
 
 
@@ -51,6 +51,22 @@ _TOP_LEVEL_BIND_REASONS = frozenset({"create_collet", "create_collet_heal"})
 
 def build_top_level_binding(
     collab_context_id: str,
+    spec: ResolvedMethodSpec,
+    actor: ActorContext,
+    *,
+    now: str,
+    bind_reason: str,
+    reason: str,
+) -> MethodBinding:
+    return build_profile_binding(
+        collab_context_id, top_level_binding_id(collab_context_id), spec, actor,
+        now=now, bind_reason=bind_reason, reason=reason,
+    )
+
+
+def build_profile_binding(
+    collab_context_id: str,
+    method_binding_id: str,
     spec: ResolvedMethodSpec,
     actor: ActorContext,
     *,
@@ -69,7 +85,7 @@ def build_top_level_binding(
     versions = spec.profile_versions
     return MethodBinding.from_dict(
         {
-            "method_binding_id": top_level_binding_id(collab_context_id),
+            "method_binding_id": method_binding_id,
             "collab_context_id": collab_context_id,
             "method_kind": spec.method_kind,
             "method_names": list(method_names),
