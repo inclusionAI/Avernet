@@ -1,0 +1,26 @@
+src/ecb/ecb/application/task_benchmark/oncall_case_evaluation/service.py
+  s_7517e37f6fcee5::t_13a7484a156e30 248-255,1202-1204,1243-1248,1319,1513,1529
+  s_7517e37f6fcee5::t_58e66ff9bd8eb3 487,524,961,974,992,1277-1281,1296-1297,1339
+  s_7517e37f6fcee5::t_a993b05fa3ddee 1328
+src/ecb/tests/application/task_benchmark/oncall_case_evaluation/test_llm_judge.py
+  s_7517e37f6fcee5::t_ac2d48a4c5a0ae 615-668,670-691,760-763
+  s_7517e37f6fcee5::t_ed5419793b8d58 669
+src/ecb/docs/specs/task_regression/2026-11-11-oncall-effect-verdict-or-combination/implementation.md
+  s_7517e37f6fcee5::t_987b0c5f111517 1-26
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "14b1ee0c2968dbd00283f308056bf8ddfe95ec73",
+  "prompts": {},
+  "sessions": {
+    "s_7517e37f6fcee5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a9dc-9a35-7de0-88fa-7da8184fb762",
+        "model": "GLM-5.3"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

@@ -1,0 +1,43 @@
+apps/bcsfuse/docs/architecture/alipay-discover-tr.md
+  s_20c3b110241190::t_3420f951602f96 36-37
+apps/bcsfuse/internal/bcsfuse_internal/bootstrap/alipay_local.py
+  s_20c3b110241190::t_489754d20e294f 104
+apps/bcsfuse/internal/bcsfuse_internal/bootstrap/zbcsfuse.py
+  s_20c3b110241190::t_5097181b9c47e3 183
+apps/bcsfuse/internal/zbcsfuse_internal/adapters/tr_discover.py
+  s_20c3b110241190::t_a81e21bfe6dca6 25-26,77,104-111,116
+apps/bcsfuse/internal/zbcsfuse_internal/providers/operations_index.py
+  s_20c3b110241190::t_7b5cc06e682f1b 9,112
+apps/bcsfuse/tests/alipay/test_default_candidates.py
+  s_20c3b110241190::t_d3fc1b67852f5e 15,50-53,56
+apps/bcsfuse/tests/alipay/test_discovery_input_cards.py
+  s_9e428ec8192673::t_473caaddca5e33 108-112
+apps/bcsfuse/tests/alipay/test_tr_discover.py
+  s_20c3b110241190::t_b874f7ecee5ae2 158,164,203-204
+apps/bcsfuse/tests/alipay/test_v2_visibility_labels.py
+  s_20c3b110241190::t_c6889dabff7b8e 208-289
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c5e9c19f1bb6b8a1d7d977afa2ed82fd8f13748e",
+  "prompts": {},
+  "sessions": {
+    "s_20c3b110241190": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a18bb2-2a7d-74a3-9f9b-e05b95d7b339",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    },
+    "s_9e428ec8192673": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1673c-d8f0-7222-9db7-0c957c6d5e32",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}

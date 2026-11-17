@@ -1,0 +1,19 @@
+apps/bcs/crates/plugins/bcs-db-mysql/src/lib.rs
+  s_4510c0a8802d3e::t_fef338d7b01cd6 31-39,133-135,478-499
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8e54884a3602ce7f939b9bb693f4cd389632fd06",
+  "prompts": {},
+  "sessions": {
+    "s_4510c0a8802d3e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1abc2-03c9-7d12-9760-9c632cf09e6e",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

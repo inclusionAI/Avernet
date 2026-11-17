@@ -1,0 +1,330 @@
+apps/backend/specs/2026-10-25-owner-handoff-b6-b7/rollout.md
+  h_059e888e5e4e82 181-193
+apps/backend/specs/2026-10-26-online-conversation-stage/spec.md
+  h_059e888e5e4e82 13-33
+apps/backend/src/agentclaw/community/adapters/http/bot_management/router.py
+  h_059e888e5e4e82 114-116,477-484,2575-2582,2758-2765,3031-3032,3306-3313
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/admission_task_routes.py
+  h_059e888e5e4e82 17-20
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/authorization_rules_task.py
+  h_059e888e5e4e82 51-56
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/bot_access_check/router.py
+  h_059e888e5e4e82 21-25,91,122,127-129,132
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/bot_access_check/schemas.py
+  h_059e888e5e4e82 44-46
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/bot_public/router.py
+  h_059e888e5e4e82 40,160
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/bot_public/schemas.py
+  h_059e888e5e4e82 13-14
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/bots/converter_bot.py
+  h_059e888e5e4e82 1-157
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/bots/router.py
+  h_059e888e5e4e82 17,19,71,118-123,414-415,811,864
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/bots/router_listings.py
+  h_059e888e5e4e82 1-390
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/bots/router_runtime.py
+  h_059e888e5e4e82 1-331
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/bots/schemas.py
+  h_059e888e5e4e82 22,80,87,445
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/bots/schemas_metadata.py
+  h_059e888e5e4e82 42-43
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/collaborating_bots/router.py
+  h_059e888e5e4e82 34,53
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/collaborating_bots/schemas.py
+  h_059e888e5e4e82 33
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/contracts.py
+  h_059e888e5e4e82 13,107-119
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/service_publications/schemas.py
+  h_059e888e5e4e82 10-11,55,107
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/task/bbs/router.py
+  h_059e888e5e4e82 38,78,227-257
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/task/bbs/schemas.py
+  h_059e888e5e4e82 28,387-414
+apps/backend/src/agentclaw/community/adapters/http/service_bot/router_publish.py
+  h_059e888e5e4e82 1148
+apps/backend/src/agentclaw/community/api/service_publication_facade.py
+  h_059e888e5e4e82 10-15
+apps/backend/src/agentclaw/community/core/bot_management/README.md
+  h_059e888e5e4e82 130,184-191,196,243-245,261-266,270
+apps/backend/src/agentclaw/community/core/bot_management/avatar.py
+  h_059e888e5e4e82 1-20
+apps/backend/src/agentclaw/community/core/bot_management/engines/aicoding/restart-backup.md
+  h_059e888e5e4e82 3-114,128,130,258,264-265
+apps/backend/src/agentclaw/community/core/bot_management/engines/aicoding/restart_baas.py
+  h_059e888e5e4e82 259-262
+apps/backend/src/agentclaw/community/core/bot_management/engines/aicoding/restart_backup.py
+  h_059e888e5e4e82 153,355,374-375,379,381,430-438,448,453,597-637,642,652-658,663,668-669,673-675,679-681,685-689,698-699,723,727
+apps/backend/src/agentclaw/community/core/bot_management/engines/aicoding/restart_state.py
+  h_059e888e5e4e82 3-4,27-31,53-133,166-170,172-177,188,206-207,255,339-344
+apps/backend/src/agentclaw/community/core/bot_management/engines/aicoding/restart_task.py
+  h_059e888e5e4e82 162,183,187-189
+apps/backend/src/agentclaw/community/core/bot_management/engines/provisioning.py
+  h_059e888e5e4e82 25,272,283-304
+apps/backend/src/agentclaw/community/core/bot_management/engines/registry.py
+  h_059e888e5e4e82 603-632,651-654
+apps/backend/src/agentclaw/community/core/bot_management/engines/restart_contract.py
+  h_059e888e5e4e82 5,34-41
+apps/backend/src/agentclaw/community/core/bot_management/owner_handoff/README.md
+  h_059e888e5e4e82 151-173
+apps/backend/src/agentclaw/community/core/bot_management/owner_handoff/service.py
+  h_059e888e5e4e82 246-251
+apps/backend/src/agentclaw/community/core/bot_management/services/template_service.py
+  h_059e888e5e4e82 29,31-34,70-75,78-80,137-169,200-201,394-395
+apps/backend/src/agentclaw/community/core/bot_public/README.md
+  h_059e888e5e4e82 45-53
+apps/backend/src/agentclaw/community/core/bot_public/services/bot_public_service.py
+  h_059e888e5e4e82 9,12,14,56-65,67
+apps/backend/src/agentclaw/community/core/bot_public/services/catalog_pagination.py
+  h_059e888e5e4e82 1-37
+apps/backend/src/agentclaw/community/core/bot_public/services/friend_catalog_actions.py
+  h_059e888e5e4e82 1-852
+apps/backend/src/agentclaw/community/core/bot_public/services/public_support.py
+  h_059e888e5e4e82 1-73
+apps/backend/src/agentclaw/community/core/bot_public/services/publication_actions.py
+  h_059e888e5e4e82 1-717
+apps/backend/src/agentclaw/community/core/repository/implementations/task/forum/forum_repository.py
+  h_059e888e5e4e82 27,247-322
+apps/backend/src/agentclaw/community/core/repository/implementations/work_orders/notification.py
+  h_059e888e5e4e82 5-7,9,12-14,17,28,42,46-186,195,212-223,373,375-385
+apps/backend/src/agentclaw/community/core/repository/implementations/work_orders/work_order.py
+  h_059e888e5e4e82 819-841
+apps/backend/src/agentclaw/community/core/repository/protocols/task/forum.py
+  h_059e888e5e4e82 19,72-87
+apps/backend/src/agentclaw/community/core/repository/protocols/work_orders.py
+  h_059e888e5e4e82 6,58-82
+apps/backend/src/agentclaw/community/core/schema.py
+  h_059e888e5e4e82 86
+apps/backend/src/agentclaw/community/core/service_bot/schemas/publish_schemas.py
+  h_059e888e5e4e82 6,46-54
+apps/backend/src/agentclaw/community/core/service_bot/services/publish_flow/progress_sync_mixin.py
+  h_059e888e5e4e82 16-18,569-571,584,642,650-654,701-704,711,715,725,742-747
+apps/backend/src/agentclaw/community/core/service_bot/services/publish_flow/restart_mixin.py
+  h_059e888e5e4e82 136,152,161,167-169,172,174,186,189,202,221,231,241,254,263,265-272,280,335,411,454,516
+apps/backend/src/agentclaw/community/core/service_bot/services/publish_flow/tasks.py
+  h_059e888e5e4e82 209,211-215,218,439-440,444-445,461
+apps/backend/src/agentclaw/community/core/service_bot/services/service_publication_facade.py
+  h_059e888e5e4e82 31,324,341-345,744-747
+apps/backend/src/agentclaw/community/core/task/forum/interaction/notifying_forum_interaction_service.py
+  h_059e888e5e4e82 1-135
+apps/backend/src/agentclaw/community/core/task/forum/models.py
+  h_059e888e5e4e82 285-299
+apps/backend/src/agentclaw/community/core/task/forum/notifications/forum_notification_publisher.py
+  h_059e888e5e4e82 1-337
+apps/backend/src/agentclaw/community/core/task/forum/notifications/publisher_protocol.py
+  h_059e888e5e4e82 1-35
+apps/backend/src/agentclaw/community/core/task/forum/service_protocol.py
+  h_059e888e5e4e82 16,78-90
+apps/backend/src/agentclaw/community/core/task/forum/services/forum_service.py
+  h_059e888e5e4e82 10-15,57,175-193,284-285,289-290,331-332,336-337,354,531,635,804
+apps/backend/src/agentclaw/community/core/task/forum/services/notifying_forum_service.py
+  h_059e888e5e4e82 1-118
+apps/backend/src/agentclaw/community/core/task/task_runner/client/catalog_keyword_discover.py
+  h_059e888e5e4e82 93,95,181
+apps/backend/src/agentclaw/community/core/task/task_runner/client/semantic_keyword_bot_discover.py
+  h_059e888e5e4e82 81-85
+apps/backend/src/agentclaw/community/core/work_orders/models.py
+  h_059e888e5e4e82 54,179-198
+apps/backend/src/agentclaw/community/core/work_orders/repository/models.py
+  h_059e888e5e4e82 160-200,225
+apps/backend/src/agentclaw/community/core/work_orders/sql/2026_11_03_notification_aggregate.sql
+  h_059e888e5e4e82 1-17
+apps/backend/src/agentclaw/community/di/modules/bot_extension_module.py
+  h_059e888e5e4e82 1-2,4-5,15-18,24-26
+apps/backend/src/agentclaw/community/di/modules/task_module.py
+  h_059e888e5e4e82 112-123,247-252,274
+apps/backend/src/agentclaw/community/plugin_api/bot_template_write_extension.py
+  h_059e888e5e4e82 1-73
+apps/backend/src/agentclaw/community/plugin_api/passport.py
+  h_059e888e5e4e82 317-326
+apps/backend/src/agentclaw/community/plugins/community/passport.py
+  h_059e888e5e4e82 134-139
+apps/backend/src/agentclaw/community/plugins/local/passport.py
+  h_059e888e5e4e82 191-196
+apps/backend/tests/community/adapters/http/openapi_v1/test_bot_access_check.py
+  h_059e888e5e4e82 10-12,37,88-90,108,187,191-193,200-242
+apps/backend/tests/community/adapters/http/openapi_v1/test_bot_avatar_projections.py
+  h_059e888e5e4e82 1-59
+apps/backend/tests/community/adapters/http/openapi_v1/test_bots_endpoints.py
+  h_059e888e5e4e82 558
+apps/backend/tests/community/adapters/http/openapi_v1/test_collaborating_bots.py
+  h_059e888e5e4e82 118
+apps/backend/tests/community/adapters/http/openapi_v1/test_explicit_user_id.py
+  h_059e888e5e4e82 330-333,638,641
+apps/backend/tests/community/adapters/http/service_bot/test_router_publish_coverage.py
+  h_059e888e5e4e82 41,44,498-509
+apps/backend/tests/community/api/bot_management/test_template_write_rejection_responses.py
+  h_059e888e5e4e82 1-71
+apps/backend/tests/community/architecture/test_restart_engine_policy_boundary.py
+  h_059e888e5e4e82 13,16,61-104
+apps/backend/tests/community/contracts/test_passport.py
+  h_059e888e5e4e82 175-180
+apps/backend/tests/community/core/bot_management/aicoding/test_restart_fastdisk.py
+  h_059e888e5e4e82 111-113,222-225,366-367,427-430,529-537,542-546,599-625
+apps/backend/tests/community/core/bot_management/aicoding/test_restart_persistence.py
+  h_059e888e5e4e82 112,129,172-174,183,191,195,209-210,235-240,244
+apps/backend/tests/community/core/bot_management/aicoding/test_restart_runtime_preservation.py
+  h_059e888e5e4e82 1-235
+apps/backend/tests/community/core/bot_management/aicoding/test_restart_service.py
+  h_059e888e5e4e82 130,178,319,321-322,363,386,400,604
+apps/backend/tests/community/core/bot_management/aicoding/test_restart_task.py
+  h_059e888e5e4e82 207,210,245,250,281-283,286-288,298,441,511-513,573,585,588,820,844-846,862,884,886
+apps/backend/tests/community/core/bot_management/engines/aicoding/test_artifact_command.py
+  h_059e888e5e4e82 27
+apps/backend/tests/community/core/bot_management/services/test_template_service_write_hook_guard.py
+  h_059e888e5e4e82 1-113
+apps/backend/tests/community/core/bot_management/test_bot_template_write_extension_seam.py
+  h_059e888e5e4e82 1-174
+apps/backend/tests/community/core/bot_management/test_owner_handoff.py
+  h_059e888e5e4e82 58-60,672-716
+apps/backend/tests/community/core/bot_public/test_bot_public_service.py
+  h_059e888e5e4e82 1539,1562-1563,1617,1637,1772
+apps/backend/tests/community/core/bot_public/test_online_catalog.py
+  h_059e888e5e4e82 1-99
+apps/backend/tests/community/core/service_bot/services/test_publish_restart_veto.py
+  h_059e888e5e4e82 66-69,151-191
+apps/backend/tests/community/core/service_bot/services/test_service_publication_restart.py
+  h_059e888e5e4e82 1-255
+apps/backend/tests/community/core/task/forum/interaction/test_forum_interaction_service.py
+  h_059e888e5e4e82 40,614-733
+apps/backend/tests/community/core/task/forum/notifications/test_forum_notification_publisher.py
+  h_059e888e5e4e82 1-328
+apps/backend/tests/community/core/task/forum/test_forum_service.py
+  h_059e888e5e4e82 21,40-42,84-94,153-183,586
+apps/backend/tests/community/core/task/forum/test_notifying_forum_service.py
+  h_059e888e5e4e82 1-182
+apps/backend/tests/community/core/task/task_runner/integration/test_catalog_keyword_discover.py
+  h_059e888e5e4e82 111,187,192
+apps/backend/tests/community/core/task/task_runner/integration/test_semantic_keyword_bot_discover.py
+  h_059e888e5e4e82 101,118
+apps/backend/tests/community/endpoints/test_bbs_topic_content_endpoints.py
+  h_059e888e5e4e82 13,98-110,189-225
+apps/backend/tests/community/endpoints/test_openapi_service_publications.py
+  h_059e888e5e4e82 418-460
+apps/backend/tests/community/repository/skill_center/test_space_skill_publication_repository.py
+  h_059e888e5e4e82 376,383-385,418-428,445,456,492-502
+apps/backend/tests/community/repository/task/forum/test_forum_read_repository.py
+  h_059e888e5e4e82 522-603
+apps/backend/tests/community/repository/test_notification_aggregate_repository.py
+  h_059e888e5e4e82 1-203
+apps/evolverun/clawweb/public/modules/workflow/docs/approval-workbench.md
+  h_059e888e5e4e82 20-23,75,78
+apps/evolverun/clawweb/public/modules/workflow/docs/dingtalk-approval-auth.md
+  h_059e888e5e4e82 15-18
+apps/evolverun/clawweb/public/modules/workflow/web/components/ApprovalSlidePanel.tsx
+  h_059e888e5e4e82 99,258
+apps/evolverun/clawweb/public/modules/workflow/web/components/workflow-workspace/ApprovalWorkbench.tsx
+  h_059e888e5e4e82 20-23,33,85-94,99-103,121
+apps/evolverun/clawweb/public/modules/workflow/web/components/workflow-workspace/__tests__/ApprovalWorkbench.test.tsx
+  h_059e888e5e4e82 1-2,6-7,26-76,80,84,86,91-92
+apps/frontend-nextgen/src/components/Admin/NotificationBell/index.tsx
+  h_059e888e5e4e82 22,41-56,59,127
+apps/frontend-nextgen/src/components/Admin/WorkOrderTabs/index.tsx
+  h_059e888e5e4e82 12,56-57,73-83
+apps/frontend-nextgen/src/components/CollaborationSquare/BotCard/index.tsx
+  h_059e888e5e4e82 2,14,92
+apps/frontend-nextgen/src/components/Community/CommunityPage/index.tsx
+  h_059e888e5e4e82 5,19,44-49,62-63,143-144
+apps/frontend-nextgen/src/components/Community/CommunityPage/useNotificationTopicDeepLink.ts
+  h_059e888e5e4e82 1-51
+apps/frontend-nextgen/src/components/Community/CommunityPersonalCenter/ActivityList.tsx
+  h_059e888e5e4e82 8,21,69,74-81,83-109,111-113,115-118,204-209
+apps/frontend-nextgen/src/components/Community/CommunityPersonalCenter/FollowList.tsx
+  h_059e888e5e4e82 4,16,222
+apps/frontend-nextgen/src/components/Community/CommunityPersonalCenter/index.tsx
+  h_059e888e5e4e82 5,42
+apps/frontend-nextgen/src/components/Community/CommunityTopicDetail/index.tsx
+  h_059e888e5e4e82 7,58-60,100-101,128-129,151-173
+apps/frontend-nextgen/src/domain/admin/mappers.ts
+  h_059e888e5e4e82 34-49,167,175,208,224
+apps/frontend-nextgen/src/domain/admin/models.ts
+  h_059e888e5e4e82 17-22,87-88,115-124
+apps/frontend-nextgen/src/domain/collaborationSquare/mapper.ts
+  h_059e888e5e4e82 70,178
+apps/frontend-nextgen/src/domain/collaborationSquare/types.ts
+  h_059e888e5e4e82 122
+apps/frontend-nextgen/src/domain/community/types.ts
+  h_059e888e5e4e82 112-124
+apps/frontend-nextgen/src/hooks/useBotAdvancedConfig.ts
+  h_059e888e5e4e82 2,13,22,28,45-48,51-55
+apps/frontend-nextgen/src/hooks/useCommunityReplies.ts
+  h_059e888e5e4e82 56-65,83
+apps/frontend-nextgen/src/hooks/useCommunityTopicDetail.ts
+  h_059e888e5e4e82 1,6,8,14,45,50-51,64-99,108,127-153,192-193
+apps/frontend-nextgen/src/hooks/useNotifications.ts
+  h_059e888e5e4e82 51-67,121
+apps/frontend-nextgen/src/pages/BotWorkshop/Detail/index.tsx
+  h_059e888e5e4e82 16,53,56
+apps/frontend-nextgen/src/pages/Workspace/components/AvatarTile.tsx
+  h_059e888e5e4e82 16
+apps/frontend-nextgen/src/services/admin/notificationService.ts
+  h_059e888e5e4e82 68-70
+apps/frontend-nextgen/src/services/backendApi/bots/botController.ts
+  h_059e888e5e4e82 20,57
+apps/frontend-nextgen/src/services/backendApi/bots/botEditorController.ts
+  h_059e888e5e4e82 2,367,370,372-375
+apps/frontend-nextgen/src/services/backendApi/bots/botIdentityController.ts
+  h_059e888e5e4e82 2,13,16,20,23,27,30
+apps/frontend-nextgen/src/services/backendApi/bots/collaboratingBotController.ts
+  h_059e888e5e4e82 6
+apps/frontend-nextgen/src/services/backendApi/collaboration/publicBotController.ts
+  h_059e888e5e4e82 7
+apps/frontend-nextgen/src/services/backendApi/community/communityController.ts
+  h_059e888e5e4e82 38-43,204-220
+apps/frontend-nextgen/src/services/botWorkshop/botAdvancedConfigService.ts
+  h_059e888e5e4e82 2,6-7,10-11,14-15
+apps/frontend-nextgen/src/services/community/communityApiGateway.ts
+  h_059e888e5e4e82 14,28,113-131
+apps/frontend-nextgen/src/services/community/communityGateway.ts
+  h_059e888e5e4e82 4,49-54
+apps/frontend-nextgen/src/services/community/communityService.ts
+  h_059e888e5e4e82 78-82
+apps/frontend-nextgen/src/services/workspace/botSessionService.ts
+  h_059e888e5e4e82 263
+apps/frontend-nextgen/src/services/workspace/collaborationCandidateService.ts
+  h_059e888e5e4e82 87
+apps/frontend-nextgen/src/services/workspace/teamBotConversationService.ts
+  h_059e888e5e4e82 82
+apps/frontend-nextgen/src/stores/notificationStore.ts
+  h_059e888e5e4e82 11-13,26-29
+apps/frontend-nextgen/test/components/Admin/NotificationBell.test.tsx
+  h_059e888e5e4e82 15-33,45-46,74-94
+apps/frontend-nextgen/test/components/Admin/NotificationItem.test.tsx
+  h_059e888e5e4e82 15-16
+apps/frontend-nextgen/test/components/Admin/WorkOrderTabs.test.tsx
+  h_059e888e5e4e82 1-98
+apps/frontend-nextgen/test/components/Community/CommunityPage.test.tsx
+  h_059e888e5e4e82 49,66-70,77-91
+apps/frontend-nextgen/test/components/Community/CommunityPagePersonalCenterNavigation.test.tsx
+  h_059e888e5e4e82 43-46,59,78-81,112-115
+apps/frontend-nextgen/test/components/Community/CommunityTopicDetail.test.tsx
+  h_059e888e5e4e82 76-164,732,734-735
+apps/frontend-nextgen/test/components/Community/PersonalCenter.test.tsx
+  h_059e888e5e4e82 99,212,243-249,360,455-467
+apps/frontend-nextgen/test/components/Community/useNotificationTopicDeepLink.test.tsx
+  h_059e888e5e4e82 1-44
+apps/frontend-nextgen/test/domain/admin/mappers.test.ts
+  h_059e888e5e4e82 115-166
+apps/frontend-nextgen/test/hooks/useBotAdvancedConfig.test.ts
+  h_059e888e5e4e82 1-44
+apps/frontend-nextgen/test/pages/BotWorkshop/DwsHostingEntry.test.tsx
+  h_059e888e5e4e82 3,8-9,18,28,50,79-86
+apps/frontend-nextgen/test/services/backendApi/bots/botIdentityAddressing.test.ts
+  h_059e888e5e4e82 1-56
+apps/frontend-nextgen/test/services/botWorkshop/botAdvancedConfigService.test.ts
+  h_059e888e5e4e82 10-11,24,28-46
+apps/frontend-nextgen/test/services/community/communityService.test.ts
+  h_059e888e5e4e82 23-27
+apps/frontend-nextgen/test/services/workspace/botAvatarPropagation.test.tsx
+  h_059e888e5e4e82 1-57
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "81a9fb8f67ee5960b1213ac0a2595e372ef1f898",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

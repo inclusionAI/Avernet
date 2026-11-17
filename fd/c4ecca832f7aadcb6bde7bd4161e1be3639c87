@@ -1,0 +1,50 @@
+apps/backend/tests/corp/adapters/http/test_caller_refresh.py
+  s_bb98e2f10840b6::t_c250d17657f587 6-76
+  s_bb98e2f10840b6::t_7b852a89afadc6 1-5
+apps/backend/specs/asc-caller-refresh-openapi-20261112/001-spec-output.md
+  s_bb98e2f10840b6::t_a51e61a2eba26d 9
+  s_bb98e2f10840b6::t_e429427d6655a3 1-8,10-21
+apps/backend/src/agentclaw/corp/adapters/http/caller_identity/schemas.py
+  s_bb98e2f10840b6::t_c3193593304b5e 1-2,4-22,24-27
+  s_bb98e2f10840b6::t_c250d17657f587 3,23
+apps/backend/src/agentclaw/corp/core/caller_identity/scheduled_refresh.py
+  s_bb98e2f10840b6::t_98d8c706e801e4 7-8,62-70
+  s_bb98e2f10840b6::t_58fb003d167cf8 4,9,11,15,46-47,55-61,71-96,99-102,105,110-112,130,138-139,147-148,158,162,174,177-178
+  s_bb98e2f10840b6::t_c250d17657f587 10,12-14,21,26,97-98,165-171,175-176
+apps/backend/src/agentclaw/corp/di/modules/infrastructure/corp/app_services.py
+  s_bb98e2f10840b6::t_c250d17657f587 82
+  s_bb98e2f10840b6::t_c3193593304b5e 88
+apps/backend/specs/asc-caller-refresh-openapi-20261112/003-review-report.md
+  s_bb98e2f10840b6::t_247cef1ad79251 1-53
+apps/backend/src/agentclaw/corp/di/modules/infrastructure/corp/identity.py
+  s_bb98e2f10840b6::t_58fb003d167cf8 102,109
+apps/backend/tests/corp/core/test_independent_caller_refresh.py
+  s_bb98e2f10840b6::t_3873517f05efa8 1-9,11-33,35-47,49-58,60-69,71-77
+  s_bb98e2f10840b6::t_98d8c706e801e4 167-178
+  s_bb98e2f10840b6::t_f99122af61d3cb 34,48,59,70
+  s_bb98e2f10840b6::t_c250d17657f587 10,78-163,165
+  s_bb98e2f10840b6::t_8155844d08254e 164,166
+apps/backend/src/agentclaw/corp/adapters/http/caller_identity/__init__.py
+  s_bb98e2f10840b6::t_c3193593304b5e 1
+apps/backend/src/agentclaw/corp/adapters/http/caller_identity/router.py
+  s_bb98e2f10840b6::t_c250d17657f587 11,13-15,19-20,22,46,48,50,52-57
+  s_bb98e2f10840b6::t_c3193593304b5e 1-10,12,16-18,21,23-45,47,49,51
+apps/backend/src/agentclaw/corp/core/caller_identity/README.md
+  s_bb98e2f10840b6::t_c3193593304b5e 21-22,56-63
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "fdc4ecca832f7aadcb6bde7bd4161e1be3639c87",
+  "prompts": {},
+  "sessions": {
+    "s_bb98e2f10840b6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a162ee-dd64-7f52-9208-9fd1326f32e5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

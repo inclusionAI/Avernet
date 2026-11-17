@@ -1,0 +1,20 @@
+apps/evolverun/clawweb/.aci.yml
+  h_5f06d4d8b4bdd5 18
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/workflow-ai-draft-runtime.test.ts
+  h_5f06d4d8b4bdd5 25,62
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/workflow-ai-draft-runtime.ts
+  h_5f06d4d8b4bdd5 14,43-45,48,56,66
+devops/pipeline/PRChecker.aci.yml
+  h_5f06d4d8b4bdd5 525
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d4102a7a8b295f6f3900a1fe086091d46a9028e6",
+  "prompts": {},
+  "humans": {
+    "h_5f06d4d8b4bdd5": {
+      "author": "fudp <dapeng.fdp@antgroup.com>"
+    }
+  }
+}

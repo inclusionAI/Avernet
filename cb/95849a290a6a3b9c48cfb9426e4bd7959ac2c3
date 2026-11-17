@@ -1,0 +1,27 @@
+apps/backend/src/agentclaw/corp/plugins/prod/lingzhishu_http.py
+  s_befd386ce20825::t_e15d551d675d55 21-22,54-59
+apps/backend/tests/corp/plugins/prod/test_lingzhishu_http.py
+  s_befd386ce20825::t_bfe8c18eb27275 8,33-57
+  s_befd386ce20825::t_96ca917579bb52 58-59
+apps/backend/tests/corp/di/test_lingzhishu_security_binding.py
+  s_befd386ce20825::t_bfa2fa0ac176ee 225,246-264
+  s_befd386ce20825::t_3e597e61689382 265-266
+apps/backend/src/agentclaw/corp/di/modules/infrastructure/corp/config.py
+  s_befd386ce20825::t_388b3fa47e7c06 21,437-442,444
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "cb95849a290a6a3b9c48cfb9426e4bd7959ac2c3",
+  "prompts": {},
+  "sessions": {
+    "s_befd386ce20825": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a17e54-391f-7460-a1a1-4f8e39166a4f",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "卷瓜 <juangua.swj@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,16 @@
+apps/backend/src/agentclaw/community/core/skills_pool/runtime.py
+  h_dac96fb4da302f 447-454,659-666
+apps/backend/tests/community/core/skills_pool/test_runtime.py
+  h_dac96fb4da302f 631-673
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "de973d5ede606faa1d1281f32312795c7d0eab20",
+  "prompts": {},
+  "humans": {
+    "h_dac96fb4da302f": {
+      "author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

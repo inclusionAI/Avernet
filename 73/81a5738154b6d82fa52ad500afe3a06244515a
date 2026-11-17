@@ -1,0 +1,55 @@
+docs/designs/bcn-distributed/00-overview-design.md
+  s_ae779de10e764a::t_51fd0303400fb7 114
+  s_ae779de10e764a::t_4bc137bdadd246 200,248,293
+  s_ae779de10e764a::t_e74ae57ed6f2ae 3,24,27-28,33,61,105,144-146,149-151,170-173,182-185,209,235,241,247,249,261,269,271-273,283,291-292,295,359,361,363,365-369,373,392-397,399,434,436,442-443,452,468-470,476,478,480-484
+  s_ae779de10e764a::t_bcbfcef562db5f 364,371
+  s_ae779de10e764a::t_54ba018810e67a 372
+docs/designs/bcn-distributed/README.md
+  s_ae779de10e764a::t_51fd0303400fb7 59,71
+  s_ae779de10e764a::t_e74ae57ed6f2ae 17-18,40,47,104-106
+docs/designs/bcn-distributed/assets/04-durable-handoffs.svg
+  s_ae779de10e764a::t_520a2033c75742 1
+docs/designs/bcn-distributed/02-communication-and-failover.md
+  s_ae779de10e764a::t_f5c550b01250bb 7,11,13,33-34,39-52,58-60,98,100,102,104-119,121-125,127-128,130,132,164
+  s_ae779de10e764a::t_4bc137bdadd246 16,120
+  s_ae779de10e764a::t_bcbfcef562db5f 126
+docs/designs/bcn-distributed/04-validation-and-operations.md
+  s_ae779de10e764a::t_31a117b2eb1b01 18-21,73,83,94-95,102,104,111-112,118-119,122,124,126-130,146,157-161,163,167
+docs/designs/bcn-distributed/assets/03-transport-adapters.svg
+  s_ae779de10e764a::t_520a2033c75742 1
+docs/designs/bcn-distributed/presentation.html
+  s_ae779de10e764a::t_520a2033c75742 14,21,167-168,178-181,186-190,193,197,220
+docs/designs/bcn-distributed/tools/build_docs.py
+  s_ae779de10e764a::t_520a2033c75742 44-47,54-57,59,63,68,106,122,127-128
+docs/designs/bcn-distributed/bcn-distributed-design.md
+  s_ae779de10e764a::t_51fd0303400fb7 61,73,253
+  s_ae779de10e764a::t_520a2033c75742 1,19-20,42,49,106-108,138-252,254-338,340-386,388-431,433-502,504-509,511-631,645-648,654,662-664,667,673-678,680-683,688,706,710-712,724,736,748-749,775,778-781,801,805,807,827-828,833-846,852-854,892-894,896-905,907,909-913,915-916,918,922-926,958,978,989,1064-1077,1109-1112,1164,1174,1185-1186,1193,1195,1202-1203,1209-1210,1213-1217,1219,1221,1237,1248-1252,1254,1258
+  s_ae779de10e764a::t_4bc137bdadd246 339,387,432,708,728,769,776,810,914
+  s_ae779de10e764a::t_bcbfcef562db5f 503,510,679,777,920
+  s_ae779de10e764a::t_76d49acd72bf92 921
+docs/designs/bcn-distributed/01-architecture-and-adapters.md
+  s_ae779de10e764a::t_bcbfcef562db5f 47,145
+  s_ae779de10e764a::t_f5c550b01250bb 13-16,22,30-32,35,41-46,48-51,56,74,78-80,92,104,116-117,143,146-148
+  s_ae779de10e764a::t_4bc137bdadd246 76,96,137,144
+  s_ae779de10e764a::t_9c29f4db1443b7 149
+docs/designs/bcn-distributed/assets/01-logical-architecture.svg
+  s_ae779de10e764a::t_520a2033c75742 1
+docs/designs/bcn-distributed/03-collaboration-modes.md
+  s_ae779de10e764a::t_31a117b2eb1b01 11,22,97-110
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7381a5738154b6d82fa52ad500afe3a06244515a",
+  "prompts": {},
+  "sessions": {
+    "s_ae779de10e764a": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a19844-2a00-7a03-ac17-a1a451636220",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "yuange.zjy <yuange.zjy@antgroup.com>"
+    }
+  }
+}

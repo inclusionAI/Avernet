@@ -1,0 +1,21 @@
+apps/backend/specs/caller-instance-status/009-pr-report.md
+  s_ccda8e611a6d06::t_ff78c9cce34686 4-8,13-20,23,28-35,38,41-42,44-45
+apps/backend/specs/caller-instance-status/workflow-state.md
+  s_ccda8e611a6d06::t_0439575c31c5b0 11,13-17
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "06361d0ca69a625472073e78ffad76eddd1b0daf",
+  "prompts": {},
+  "sessions": {
+    "s_ccda8e611a6d06": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cda4-a056-7f61-ab7e-7505fc5c7282",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,18 @@
+.gitmodules
+  h_6cf66ba0310ba4 4
+apps/bcs-internal/Cargo.lock
+  h_6cf66ba0310ba4 515,649,828,2318
+submodules/avernet
+  h_6cf66ba0310ba4 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "799ae73fc3f5e91d4903d71469ffacd8d622c491",
+  "prompts": {},
+  "humans": {
+    "h_6cf66ba0310ba4": {
+      "author": "Zimin Zhang <zhangzimin.zzm@antgroup.com>"
+    }
+  }
+}
