@@ -7,6 +7,9 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.collet i
     Collet,
     ColletState,
 )
+from agentclaw.community.core.task.context_collab.l4_context_primitives.collet_metadata import (
+    ColletMetadata,
+)
 from agentclaw.community.core.task.context_collab.l4_context_primitives.event_envelope import (
     EventRecord,
 )
@@ -68,5 +71,13 @@ def build_created_collet(
         scope=command.to_space,
         current_event_id=initial_event.event_id,
         version=1,
+        metadata=ColletMetadata(
+            created_at=now,
+            created_by=initial_event_draft.actor_ref,
+            updated_at=now,
+            updated_by=initial_event_draft.actor_ref,
+            title=command.title,
+            description=command.description,
+        ),
     )
     return CreatedColletRecord(collet, task, initial_event)

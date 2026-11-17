@@ -26,6 +26,9 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.collet i
     Collet,
     ColletState,
 )
+from agentclaw.community.core.task.context_collab.l4_context_primitives.collet_metadata import (
+    validate_collet_text,
+)
 from agentclaw.community.core.task.context_collab.l4_context_primitives.event_envelope import (
     EventRecord,
 )
@@ -43,12 +46,16 @@ class ColletCreateCommand:
     executor_refs is an ordered set: () is unassigned; one or many AgentRefs
     are equally valid. It does not grant admission, roles or resource access.
     Lists supplied by library callers are normalized to an immutable tuple.
+    title/description optionally describe the context, not its Task objective
+    or completion conditions. Schema/revision/audit values are server-owned.
     """
 
     to_space: SpaceRef
     initiator_ref: PrincipalRef
     objective: str
     executor_refs: tuple[AgentRef, ...] = ()
+    title: str | None = None
+    description: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.objective, str) or not self.objective.strip():
@@ -59,6 +66,8 @@ class ColletCreateCommand:
             raise ContextCollabValidationError(
                 "creation requires typed Space/Principal references"
             )
+        validate_collet_text(self.title, "title")
+        validate_collet_text(self.description, "description")
         SpaceRef.from_dict(self.to_space.to_dict())
         PrincipalRef.from_dict(self.initiator_ref.to_dict())
         object.__setattr__(

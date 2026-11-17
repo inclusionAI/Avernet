@@ -33,6 +33,7 @@ def test_collet_columns_match_ddl(engine):
         "collab_context_id",
         "actor_ref",
         "scope",
+        "collet_metadata",
         "creation_facts",
         "current_snapshot",
         "root_task_ref",

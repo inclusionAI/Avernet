@@ -389,7 +389,7 @@ compatible and share the same L4 preparation/commit machinery.
 
 | Object | Authority and current implementation |
 | --- | --- |
-| [Collet](l4_context_primitives/collet.py) | Bounded context identity, initiator, scope, lifecycle vocabulary, event head and context revision. The six-field Python layout is local, not a claim that ACCS mandates exactly six fields. The legacy repository still seeds `ACTIVE`; the separate Collet lifecycle path is not unified by this change. |
+| [Collet](l4_context_primitives/collet.py) | Bounded context identity, initiator, governance scope, lifecycle vocabulary, event head and context revision, with optional title/description and versioned audit metadata for new records. This is a local representation, not an exhaustive ACCS schema. The SQL reader still seeds `ACTIVE`; the separate Collet lifecycle path is not unified by this change. |
 | [Task](l4_context_primitives/task.py) | Independent L4 work-item ID, Collet/parent links, objective, completion conditions, responsible principal, designated executor set, status, Task revision and event provenance. Not an A2A Task/execution attempt. |
 | [ScopedParticipantBinding](l4_context_primitives/participants.py) | Immutable task-scoped identity evidence created by Open COLLET_PARTICIPANT admission; validity derives from its admission application/decision and Method lifecycle, not an independent Group membership machine. |
 | [MethodBinding](l5_methods/method_binding.py) | L5 Method identity, scope and runtime facts. Neither creation facts nor ProductInstance substitutes for Method state. |
@@ -405,6 +405,42 @@ and the selected versioned machine. The repository receives a typed
 identity/revision plus the Collet revision in one transaction. Ordinary Messages
 cannot carry a TaskUpdate. L5's top-level termination gate reads root Task state,
 not the response projection.
+
+### Collet representation and audit
+
+Collet retains `collet_id`, `initiator_ref`, `state`, `scope`,
+`current_event_id` and `version`. `scope: SpaceRef` is this implementation's L3
+governance anchor, **not** the union of accessible Spaces or a Resource access
+grant. `version` is the aggregate revision used for CAS; the read-only `revision`
+property is an alias, not another persisted counter.
+
+New creations also expose `title`, `description`, `schema_version`, `created_at`,
+`created_by`, `updated_at`, `updated_by` and a derived `etag`. The immutable
+[ColletMetadata](l4_context_primitives/collet_metadata.py) value object groups
+description/schema/audit internally; `Collet.to_dict()` serializes these fields
+at the top level, not under a second aggregate. Local `schema_version="1.1"`
+identifies this representation, not an ACCS version or an aggregate revision.
+Audit timestamps are timezone-aware UTC values, normalized without losing
+microseconds. The authenticated initial event actor supplies creation/update
+identity; existing initiator-versus-responsible-Task-principal semantics remain
+unchanged. Callers can supply optional nonblank title/description through
+`ColletCreateCommand`, but not server-owned audit fields. Descriptions do not
+replace Task objectives or completion conditions.
+
+Every accepted SQL event append updates `updated_at`/`updated_by` in the same
+Collet CAS transaction as its event head/revision. Creation audit remains fixed.
+ETag is a quoted SHA-256 tag of the canonical Collet representation excluding the
+tag itself; it is derived, not separately persisted. It does not add an HTTP
+`If-Match` API or replace the existing expected-version fence. Reads and L6
+product installation do not advance Collet audit. The separate in-memory
+lifecycle service still does not persist lifecycle state/events/audit.
+
+Legacy six-field representations remain readable with `metadata=None`; absent
+schema/audit/description values are unknown, not synthesized from SQL row
+timestamps or deployment time. Their serialization retains its old shape, and
+appends do not invent missing creation history. Complete current metadata is
+required when any metadata field is supplied; partial/invalid metadata, unknown
+fields and mismatched supplied ETags fail validation.
 
 ## Persistence and compatibility
 
@@ -427,6 +463,11 @@ Collet.root_task_ref ──→ Task.task_id
   Application composition may include pinned ProductInstance metadata; explicit
   later L6 instantiation installs it separately without rewriting creation evidence. New rows leave `current_snapshot`
   NULL. Root IDs differ from Collet IDs, even when both revisions start at 1.
+- `ac_context_collab_collet.collet_metadata` stores L4 schema/description/audit
+  JSON separately from `creation_facts`, Task JSON and shared SQL row timestamps.
+  NULL is reserved for unknown legacy metadata; it is not automatically
+  backfilled. L6 may update composition facts on the same row without changing
+  the Collet representation, so `gmt_modified` is not Collet's audit authority.
 - New Task JSON stores `executor_refs` as a list of typed references. The explicit
   legacy decoder accepts the old nullable `executor_ref`; mixed singular/plural
   storage is rejected. The singular read property returns the sole executor only,
@@ -453,6 +494,14 @@ Apply [the Task migration](sql/2026_11_13_context_collab_task.sql) **after**
 runtime. It adds the root link, Event subject/revision and independent Task
 storage. The script targets OceanBase MySQL mode and is applied once by the
 normal deployment process; SQLite tests create ORM metadata, not this DDL.
+
+Existing deployments without `collet_metadata` must additionally apply the
+[additive metadata migration](sql/2026_11_17_context_collab_collet_metadata.sql)
+after their Task/creation-facts cutover and **before** deploying the new runtime.
+No legacy audit backfill is performed. Fresh installations using the current
+baseline already have this column and must skip that ALTER. The historical
+[creation-facts migration](sql/2026_11_16_context_collab_creation_facts.sql) is
+only for deployments still storing `context_spec`, not the current baseline.
 
 Stop old snapshot writers during cutover: mixed old/new writers and old-runtime
 rollback after Task-authoritative writes are not supported. Preserve historical
@@ -507,6 +556,8 @@ not historic control events:
 
 ## Verification and change impact
 
+- [Collet metadata contracts](../../../../../../tests/community/core/task/context_collab/test_collet_metadata.py): schema/revision separation, UTC precision, description/audit validation, canonical ETag and legacy decoding.
+- [Collet metadata SQL tests](../../../../../../tests/community/repository/task/context_collab/test_collet_metadata.py): authenticated creation audit, separate storage, append/read behavior, CAS/rollback and unknown/corrupt legacy metadata.
 - [Standalone L4 repository tests](../../../../../../tests/community/repository/task/context_collab/test_l4_repository.py): actual lower-only create/read/append SQL, decoder isolation, distinct principals, CAS, read-only queries and rollback.
 - [Real L4 repository wiring](../../../../../../tests/community/repository/task/context_collab/test_l4_repository_wiring.py): exact L4 implementation, singleton sharing with primitive readers and creation without resolving product storage or accessing the catalog.
 - [Pure L4 SQL creation tests](../../../../../../tests/community/repository/task/context_collab/test_collet_creation.py): zero/one/many executors, no upper-layer port access, authorization, readback, storage compatibility and rollback.
@@ -528,8 +579,9 @@ clients interpreting progress. The creation return contract also affects DI,
 library consumers, both HTTP adapters and their test doubles; update them
 together when changing it. Keep their tests and migration aligned. Source
 imports of product selection or snapshots must use their owning boundaries;
-Existing HTTP product inputs and the six-field Collet serialization remain
-unchanged; pure L4 creation evidence contains only objective and executor_refs.
+Existing HTTP product inputs remain unchanged; new Collet library serialization
+includes metadata/ETag while old six-field values remain readable. Pure L4
+creation evidence still contains only objective and executor_refs.
 The in-memory
 MethodStore and SQL/MethodStore/delivery transaction gap remain existing limits;
 this change does not add live A2A execution or a recursive workflow engine.

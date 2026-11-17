@@ -81,6 +81,10 @@ class ContextServiceProtocol(Protocol):
 
         Retain zero, one or many executors; never select a Profile/Method or
         create Method/Role/ResourceBindings. No idempotency key; errors propagate.
+        Optional title/description describe the context, not the root Task.
+        New Collets include a schema version and complete UTC creation/update
+        audit from the authenticated actor. ETag is derived from the Collet
+        representation; version remains the aggregate revision used for CAS.
         """
         ...
 

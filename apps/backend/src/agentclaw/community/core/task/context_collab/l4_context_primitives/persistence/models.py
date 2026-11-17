@@ -1,8 +1,10 @@
 """ORM storage for Collet, independent Task authority and append-only Events.
 
-Production applies the baseline SQL plus ``../../sql/2026_11_13_context_collab_task.sql``.
-Tests build these models on SQLite. ``current_snapshot`` is retained only for
-explicit legacy decoding; new writes persist Task and derive response views.
+Fresh installations apply the baseline SQL plus the Task migration; existing
+installations also need the additive Collet metadata migration. See the domain
+README's database cutover instructions. Tests build these models on SQLite.
+``current_snapshot`` is retained only for explicit legacy decoding; new writes
+persist Task and derive response views.
 """
 
 from __future__ import annotations
@@ -58,7 +60,9 @@ class ContextCollabColletModel(Base):
 
     ``root_task_ref`` selects independent Task storage. ``creation_facts`` retains
     plain creation facts and the optional L6 ProductInstance; it is not mutable
-    Task or Method state. ``scope`` is the L4 Collet scope.
+    Task or Method state. ``scope`` anchors L3 governance, not a permission union.
+    ``collet_metadata`` stores the local schema, description and audit separately
+    from composition facts and shared SQL row timestamps.
     Every accepted event advances ``context_version``; only Work advances Task.
     """
 
@@ -75,6 +79,9 @@ class ContextCollabColletModel(Base):
     # 外部部分行可以没有;P1 创建路径恒写。
     actor_ref = Column(String(2048), nullable=True)
     scope = Column(_medium_text(), nullable=False)
+    # Complete L4 description/audit facts for new writes; NULL means legacy
+    # unknown history, never a license to synthesize timestamps or actors.
+    collet_metadata = Column(_medium_text(), nullable=True)
     creation_facts = Column(_medium_text(), nullable=False)
     # Legacy-only compatibility column. New rows write NULL; a non-null root
     # Task reference always wins, even if an old snapshot is still present.
