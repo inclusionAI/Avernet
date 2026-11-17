@@ -29,6 +29,7 @@ apps/bcs-internal/crates/plugins/bcs-tbase-store/src/config.rs
   s_a9c87caa3de52e::t_02b77125f7d3d7 12-14
   s_a9c87caa3de52e::t_886516c30c093c 16-18,21-23
   s_a9c87caa3de52e::t_6ba1e9bca654ce 25-26
+  s_a9c87caa3de52e::t_22d024fef46bf6 6-7,19-20
 apps/bcs-internal/crates/plugins/bcs-tbase-store/tests/dev.rs
   s_a9c87caa3de52e::t_71b57be0967463 1-7,9-11,13-26,28-66,68-148,150-162,164-167,172-181,183-214
   s_a9c87caa3de52e::t_8789a4f26ebcca 8,12,27,67,149,163,168-171,182,215-216
