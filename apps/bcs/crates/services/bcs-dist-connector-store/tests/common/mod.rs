@@ -43,6 +43,11 @@ pub struct Recorder {
     lose_write: Mutex<Option<usize>>,
     fail_write: Mutex<Option<usize>>,
     reject_json: Mutex<usize>,
+    drop_write: Mutex<Option<usize>>,
+    interleave: Mutex<bool>,
+    gets: Mutex<usize>,
+    fail_get: Mutex<Option<usize>>,
+    before_mutate: Mutex<Option<(String, WriteCondition, JsonMutation)>>,
     deny: Mutex<Option<StoreCapability>>,
 }
 
@@ -75,6 +80,29 @@ impl Recorder {
     pub fn reject_json(&self, count: usize) {
         *self.reject_json.lock().unwrap() = count;
     }
+    /// Drop the n-th write from now (1-based): it is NOT applied and the
+    /// caller sees `OutcomeUnknown`.
+    pub fn drop_write(&self, n: usize) {
+        *self.writes.lock().unwrap() = 0;
+        *self.drop_write.lock().unwrap() = Some(n);
+    }
+    /// Fail the n-th JSON read from now (1-based).
+    pub fn fail_get(&self, n: usize) {
+        *self.gets.lock().unwrap() = 0;
+        *self.fail_get.lock().unwrap() = Some(n);
+    }
+    /// Yield at every JSON read, so concurrent callers interleave.
+    pub fn interleave(&self) {
+        *self.interleave.lock().unwrap() = true;
+    }
+    /// Apply this raw write to the model right before the next JSON write,
+    /// as another writer landing between a caller's read and its write.
+    pub fn before_next_mutate(&self, key: String, condition: WriteCondition, mutation: JsonMutation) {
+        *self.before_mutate.lock().unwrap() = Some((key, condition, mutation));
+    }
+    pub fn count(&self, op: &str) -> usize {
+        self.calls().iter().filter(|c| c.starts_with(op)).count()
+    }
     /// Report one capability as unsupported.
     pub fn deny(&self, capability: StoreCapability) {
         *self.deny.lock().unwrap() = Some(capability);
@@ -93,6 +121,11 @@ impl Recorder {
         self.calls.lock().unwrap().push(format!("{op} {key}"));
         let mut writes = self.writes.lock().unwrap();
         *writes += 1;
+        let mut dropped = self.drop_write.lock().unwrap();
+        if *dropped == Some(*writes) {
+            *dropped = None;
+            return Effect::Drop;
+        }
         let mut lose = self.lose_write.lock().unwrap();
         if *lose == Some(*writes) {
             *lose = None;
@@ -112,6 +145,7 @@ pub enum Effect {
     Apply,
     Lose,
     Fail,
+    Drop,
 }
 
 /// Runs a write unless it must fail definitely; loses its response if asked.
@@ -120,6 +154,8 @@ macro_rules! run {
         let effect = $effect;
         if effect == Effect::Fail {
             Err(StoreError::NotApplied("injected".into()))
+        } else if effect == Effect::Drop {
+            Err(StoreError::OutcomeUnknown("dropped".into()))
         } else {
             match $call {
                 Ok(_) if effect == Effect::Lose => Err(StoreError::OutcomeUnknown("lost".into())),
@@ -166,7 +202,22 @@ impl KvStorePlugin for Recorder {
 impl JsonStorePlugin for Recorder {
     async fn get_json(&self, key: &str) -> StoreResult<Option<Versioned<Value>>> {
         self.read("json.get", key);
-        self.model.get_json(key).await
+        {
+            let mut gets = self.gets.lock().unwrap();
+            *gets += 1;
+            let mut fail = self.fail_get.lock().unwrap();
+            if *fail == Some(*gets) {
+                *fail = None;
+                return Err(StoreError::NotApplied("injected read failure".into()));
+            }
+        }
+        let read = self.model.get_json(key).await;
+        let interleave = *self.interleave.lock().unwrap();
+        if interleave {
+            // The caller holds this read while others run.
+            tokio::task::yield_now().await;
+        }
+        read
     }
     async fn get_paths(&self, key: &str, pointers: &[String]) -> StoreResult<Option<JsonProjection>> {
         self.read("json.get_paths", key);
@@ -179,6 +230,12 @@ impl JsonStorePlugin for Recorder {
         mutation: JsonMutation,
         expiry: Expiry,
     ) -> StoreResult<WriteOutcome> {
+        let injected = self.before_mutate.lock().unwrap().take();
+        if let Some((other_key, other_condition, other_mutation)) = injected {
+            self.model
+                .mutate_json(&other_key, other_condition, other_mutation, Expiry::Preserve)
+                .await?;
+        }
         {
             let mut reject = self.reject_json.lock().unwrap();
             if *reject > 0 {
@@ -251,6 +308,7 @@ impl StreamStorePlugin for Recorder {
         consumer: &str,
         options: ReadOptions,
     ) -> StoreResult<Vec<StreamEntry>> {
+        self.read("stream.read_group", key);
         self.model.read_group(key, group, consumer, options).await
     }
     async fn ack(&self, key: &str, group: &str, ids: &[StreamId]) -> StoreResult<u64> {
@@ -575,7 +633,6 @@ impl WorkerFixture {
             !known || control.pending_input.len() != before
         })
         .await
-            && true
     }
 
     pub async fn notify_did(&self, did: &Did) -> StreamId {

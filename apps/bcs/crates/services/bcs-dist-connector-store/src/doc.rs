@@ -32,6 +32,8 @@ pub struct ConnectorState {
 pub struct DispatchDoc {
     pub view: DispatchView,
     pub connector: ConnectorState,
+    /// Whether the stored document has a `connector` object yet.
+    pub has_connector: bool,
     pub version: Version,
 }
 
@@ -62,6 +64,7 @@ pub fn decode(stored: Versioned<Value>) -> Result<DispatchDoc, StoreError> {
             control: doc.control,
             execution: doc.execution,
         },
+        has_connector: doc.connector.is_some(),
         connector: doc.connector.unwrap_or_default(),
         version: stored.version,
     })
@@ -84,6 +87,35 @@ pub fn connector_write(
         set("/execution", serde_json::to_value(execution))?,
         set("/connector", serde_json::to_value(connector))?,
     ]))
+}
+
+/// The claim's write: only the holder (and the first phase step), by path, so
+/// it cannot undo anything a former holder wrote after the claimant's read.
+/// `/connector` is created when the Worker's document has none yet.
+pub fn claim_write(
+    holder: &bcs_dist_model::Holder,
+    first_claim: bool,
+    create_connector: bool,
+) -> Result<JsonMutation, StoreError> {
+    let holder = serde_json::to_value(holder).map_err(|_| invalid("disp_encode"))?;
+    let mut edits = vec![JsonEdit::Set {
+        pointer: "/execution/holder".to_owned(),
+        value: holder,
+    }];
+    if first_claim {
+        edits.push(JsonEdit::Set {
+            pointer: "/execution/phase".to_owned(),
+            value: Value::String("claimed".to_owned()),
+        });
+    }
+    if create_connector {
+        let empty = serde_json::to_value(ConnectorState::default()).map_err(|_| invalid("disp_encode"))?;
+        edits.push(JsonEdit::Set {
+            pointer: "/connector".to_owned(),
+            value: empty,
+        });
+    }
+    Ok(JsonMutation::Patch(edits))
 }
 
 /// The view a holder works with: pending inputs at or below the confirmed

@@ -1487,13 +1487,17 @@ dependencies = [
 name = "bcs-dist-connector"
 version = "0.1.4-beta.3"
 dependencies = [
+ "async-trait",
  "bcs-dist-model",
  "bcs-dist-store",
  "bcs-service-api",
  "bcs-test-support",
+ "futures",
  "hex",
  "serde_json",
  "sha2",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

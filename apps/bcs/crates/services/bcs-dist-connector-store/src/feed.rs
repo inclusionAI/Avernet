@@ -40,6 +40,10 @@ pub struct StoreCommandFeed {
     reading: Vec<bool>,
     buffer: VecDeque<CommandDelivery>,
     reclaimed_at: Option<Instant>,
+    /// Where the next idle-takeover round starts, and how far each
+    /// partition's pending list was scanned.
+    reclaim_from: usize,
+    reclaim_cursor: Vec<Option<StreamId>>,
 }
 
 impl StoreCommandFeed {
@@ -53,10 +57,12 @@ impl StoreCommandFeed {
         let feed = Self {
             consumer: format!("{}:{}", me.node, me.incarnation),
             reading: vec![false; keys.len()],
-            keys,
             reads: FuturesUnordered::new(),
             buffer: VecDeque::new(),
             reclaimed_at: None,
+            reclaim_from: 0,
+            reclaim_cursor: vec![None; keys.len()],
+            keys,
             shared,
         };
         for key in &feed.keys {
@@ -84,8 +90,11 @@ impl StoreCommandFeed {
         }
     }
 
-    /// Buffers entries; one without a readable dispatch id is acked and dropped.
+    /// Buffers entries; one without a readable dispatch id is acked and
+    /// dropped. Valid entries are buffered before any await, so dropping the
+    /// caller's future cannot lose a delivery that was already registered.
     async fn accept(&mut self, partition: usize, entries: Vec<StreamEntry>) {
+        let mut malformed = Vec::new();
         for entry in entries {
             let did = entry
                 .fields
@@ -99,51 +108,54 @@ impl StoreCommandFeed {
                     consumer_generation: self.consumer.clone(),
                     opaque: format!("p{partition}:{}-{}", entry.id.major, entry.id.minor),
                 }),
-                None => {
-                    tracing::warn!(partition, "command entry without a dispatch id; dropped");
-                    let acked = self.shared.stream.ack(&self.keys[partition], GROUP, &[entry.id]).await;
-                    if let Err(error) = acked {
-                        tracing::debug!(?error, "ack of a malformed command entry failed");
-                    }
-                }
+                None => malformed.push(entry.id),
+            }
+        }
+        if !malformed.is_empty() {
+            tracing::warn!(partition, count = malformed.len(), "command entries without a dispatch id; dropped");
+            let acked = self.shared.stream.ack(&self.keys[partition], GROUP, &malformed).await;
+            if let Err(error) = acked {
+                tracing::debug!(?error, "ack of malformed command entries failed");
             }
         }
     }
 
-    /// Takes over hints other consumers left pending for too long. Bounded by
-    /// `max` entries per call; a failure is retried on the next round.
+    /// Takes over hints other consumers left pending for too long: at most
+    /// one page per partition per round, continuing where the last round
+    /// stopped and starting at a different partition each time, so no
+    /// partition is starved and a long pending list is not rescanned at once.
     async fn reclaim(&mut self, max: usize) {
         let limit = self.shared.config.read_batch;
-        for partition in 0..self.keys.len() {
-            let mut start = None;
-            while self.buffer.len() < max {
-                let page = self
-                    .shared
-                    .stream
-                    .claim_idle(
-                        &self.keys[partition],
-                        GROUP,
-                        &self.consumer,
-                        self.shared.config.reclaim_min_idle,
-                        start,
-                        limit,
-                    )
-                    .await;
-                match page {
-                    Ok(page) => {
-                        self.accept(partition, page.entries).await;
-                        start = page.next;
-                        if start.is_none() {
-                            break;
-                        }
+        let partitions = self.keys.len();
+        for step in 0..partitions {
+            if self.buffer.len() >= max {
+                break;
+            }
+            let partition = (self.reclaim_from + step) % partitions;
+            let page = self
+                .shared
+                .stream
+                .claim_idle(
+                    &self.keys[partition],
+                    GROUP,
+                    &self.consumer,
+                    self.shared.config.reclaim_min_idle,
+                    self.reclaim_cursor[partition],
+                    limit,
+                )
+                .await;
+            match page {
+                Ok(page) => {
+                    self.reclaim_cursor[partition] = page.next;
+                    if !page.deleted.is_empty() {
+                        tracing::debug!(partition, count = page.deleted.len(), "pending hints already trimmed");
                     }
-                    Err(error) => {
-                        tracing::debug!(?error, partition, "idle takeover failed");
-                        break;
-                    }
+                    self.accept(partition, page.entries).await;
                 }
+                Err(error) => tracing::debug!(?error, partition, "idle takeover failed"),
             }
         }
+        self.reclaim_from = (self.reclaim_from + 1) % partitions;
     }
 
     fn take(&mut self, max: usize) -> Vec<CommandDelivery> {
@@ -186,13 +198,17 @@ impl CommandFeedPort for StoreCommandFeed {
         let due = self
             .reclaimed_at
             .is_none_or(|at| at.elapsed() >= self.shared.config.reclaim_every);
-        if due {
+        // A round skipped because the buffer is full stays due.
+        if due && self.buffer.len() < max {
             self.reclaimed_at = Some(Instant::now());
             self.reclaim(max).await;
         }
         loop {
             if !self.buffer.is_empty() {
                 return Ok(self.take(max));
+            }
+            if Instant::now() >= deadline {
+                return Ok(Vec::new());
             }
             self.start_reads();
             let Ok(Some((partition, result))) =

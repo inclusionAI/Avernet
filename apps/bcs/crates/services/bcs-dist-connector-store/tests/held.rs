@@ -340,3 +340,78 @@ async fn a_read_failure_is_an_error_not_a_lost_holder() {
         Err(HolderError::Store(StoreError::UnsupportedFormat { format: 9 }))
     );
 }
+
+#[tokio::test]
+async fn an_input_intent_of_a_former_holder_is_reported_as_maybe_sent() {
+    use bcs_service_api::core::dist_connector::INPUT_MAYBE_SENT;
+    use bcs_service_api::port::repo::distributed::ownership::Liveness;
+    let (store, worker, mut first) = held().await;
+    first.begin_send(start_op()).await.unwrap();
+    first.record_acceptance(accepted(start_op())).await.unwrap();
+    worker.push(pending(1)).await;
+    worker.push(pending(2)).await;
+    first.begin_send(input_op(1)).await.unwrap();
+    // The same handle may ask again: its own intent.
+    first.begin_send(input_op(1)).await.unwrap();
+
+    // The holder dies after recording intent; another Connector takes over.
+    let q = queue_with(&store, Arc::new(FixedLiveness(Liveness::Dead)), config(1));
+    let ClaimOutcome::Acquired(mut second) = q.claim(claim_request(&instance("conn-07"))).await.unwrap() else {
+        panic!("no takeover");
+    };
+    let before = stored(&store).await.1;
+    assert_eq!(second.begin_send(input_op(1)).await, Err(invalid(INPUT_MAYBE_SENT)));
+    assert_eq!(stored(&store).await.1, before, "no write");
+    // Once it is confirmed, the next input is a fresh send for the new holder.
+    second.confirm_input(InputSeq(1), accepted(input_op(1))).await.unwrap();
+    second.begin_send(input_op(2)).await.unwrap();
+    assert_eq!(stored(&store).await.0["connector"]["input_sending"], 2);
+}
+
+#[tokio::test]
+async fn a_write_that_did_not_land_is_made_again() {
+    let (store, _worker, mut held) = held().await;
+    store.drop_write(1); // not applied, outcome unknown
+    held.begin_send(start_op()).await.unwrap();
+    let (doc, version) = stored(&store).await;
+    assert_eq!((doc["execution"]["phase"].as_str(), version), (Some("sending"), 1_000_000_001));
+    assert_eq!(store.count("json.mutate"), 2);
+
+    store.drop_write(1);
+    assert_eq!(
+        held.finish(FinalDispatchOutcome::Failed, "x".into()).await.unwrap(),
+        IdempotentWrite::Applied
+    );
+    assert_eq!(stored(&store).await.0["execution"]["phase"], "ended");
+}
+
+#[tokio::test]
+async fn a_failed_read_after_an_unknown_write_stays_unknown() {
+    let (store, _worker, mut held) = held().await;
+    store.lose_write(1); // applied, response lost
+    store.fail_get(2); // 1 = before the write, 2 = the re-read
+    let error = held.finish(FinalDispatchOutcome::Completed, "ok".into()).await.unwrap_err();
+    assert_eq!(
+        error,
+        HolderError::Store(StoreError::OutcomeUnknown { operation_id: DID.into() }),
+        "never reported as definitely not applied"
+    );
+    assert_eq!(stored(&store).await.0["execution"]["phase"], "ended");
+    // A retry settles it.
+    assert_eq!(
+        held.finish(FinalDispatchOutcome::Completed, "ok".into()).await.unwrap(),
+        IdempotentWrite::AlreadyApplied
+    );
+}
+
+#[tokio::test]
+async fn an_input_the_worker_never_queued_cannot_be_confirmed() {
+    let (store, _worker, mut held) = held().await;
+    held.begin_send(start_op()).await.unwrap();
+    held.record_acceptance(accepted(start_op())).await.unwrap();
+    assert_eq!(
+        held.confirm_input(InputSeq(1), accepted(input_op(1))).await,
+        Err(invalid("input_not_pending"))
+    );
+    assert_eq!(stored(&store).await.0["execution"]["confirmed_input_through"], serde_json::Value::Null);
+}

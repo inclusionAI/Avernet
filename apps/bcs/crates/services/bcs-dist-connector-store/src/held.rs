@@ -11,6 +11,7 @@ use crate::shared::{Shared, Wrote};
 use async_trait::async_trait;
 use bcs_dist_model::*;
 use bcs_dist_store::version;
+use bcs_service_api::core::dist_connector::INPUT_MAYBE_SENT;
 use bcs_service_api::port::repo::distributed::common::{IdempotentWrite, StoreError};
 use bcs_service_api::port::repo::distributed::dispatch::{
     AcceptanceEvidence, HeldDispatchPort, HolderError, SendOperation, SendPermit,
@@ -23,6 +24,8 @@ pub struct StoreHeldDispatch {
     holder: Holder,
     view: DispatchView,
     version: Version,
+    /// Highest input seq this handle itself recorded send intent for.
+    own_input_intent: Option<InputSeq>,
 }
 
 /// What a transition decided from one read of the document.
@@ -46,6 +49,7 @@ impl StoreHeldDispatch {
             holder,
             view: holder_view(view),
             version,
+            own_input_intent: None,
         }
     }
 
@@ -77,7 +81,16 @@ impl StoreHeldDispatch {
         let did = self.view.spec.did.clone();
         let mut unknown = false;
         for _ in 0..self.shared.config.write_attempts {
-            let doc = self.read_fenced().await?;
+            let doc = match self.read_fenced().await {
+                // An earlier attempt may have landed: a failed read cannot
+                // turn that into "definitely not applied".
+                Err(HolderError::Store(_)) if unknown => {
+                    return Err(HolderError::Store(StoreError::OutcomeUnknown {
+                        operation_id: did.0,
+                    }));
+                }
+                other => other?,
+            };
             let (execution, connector, answer) = match decide(&doc)? {
                 Step::Keep(answer) => {
                     return Ok(match (&settled, unknown) {
@@ -113,15 +126,6 @@ impl StoreHeldDispatch {
     }
 }
 
-/// Order of cancel observations: not sent, sending, then an observed result.
-fn cancel_rank(observation: &CancelObservation) -> u8 {
-    match observation {
-        CancelObservation::NotSent => 0,
-        CancelObservation::Sending => 1,
-        _ => 2,
-    }
-}
-
 #[async_trait]
 impl HeldDispatchPort for StoreHeldDispatch {
     fn view(&self) -> &DispatchView {
@@ -143,7 +147,18 @@ impl HeldDispatchPort for StoreHeldDispatch {
             holder: self.holder.clone(),
             operation: operation.clone(),
         };
-        self.transition(None, |doc| {
+        if let SendOperation::Input { seq, .. } = &operation {
+            // Intent recorded by a former holder generation: the input may
+            // already have reached the agent, so no fresh permit is given.
+            let doc = self.read_fenced().await?;
+            let recorded = doc.connector.input_sending.is_some_and(|sent| sent >= *seq);
+            let mine = self.own_input_intent.is_some_and(|sent| sent >= *seq);
+            let confirmed = doc.view.execution.confirmed_input_through.is_some_and(|c| c >= *seq);
+            if recorded && !mine && !confirmed {
+                return invalid(INPUT_MAYBE_SENT);
+            }
+        }
+        let permit = self.transition(None, |doc| {
             let execution = &doc.view.execution;
             match &operation {
                 SendOperation::Start { .. } => match execution.phase {
@@ -176,7 +191,11 @@ impl HeldDispatchPort for StoreHeldDispatch {
                 }
             }
         })
-        .await
+        .await?;
+        if let SendOperation::Input { seq, .. } = &permit.operation {
+            self.own_input_intent = self.own_input_intent.max(Some(*seq));
+        }
+        Ok(permit)
     }
 
     async fn record_acceptance(
@@ -231,6 +250,10 @@ impl HeldDispatchPort for StoreHeldDispatch {
             if execution.phase != DispatchPhase::Accepted {
                 return invalid("confirm_not_allowed_in_phase");
             }
+            // Confirming an input the Worker never queued would hide it later.
+            if !doc.view.control.pending_input.iter().any(|p| p.seq == seq) {
+                return invalid("input_not_pending");
+            }
             let mut next = execution.clone();
             next.confirmed_input_through = Some(seq);
             Ok(Step::Write(Box::new(next), doc.connector.clone(), IdempotentWrite::Applied))
@@ -254,7 +277,7 @@ impl HeldDispatchPort for StoreHeldDispatch {
                 current,
                 CancelObservation::ConfirmedCanceled | CancelObservation::AlreadyFinished { .. }
             );
-            if settled || cancel_rank(&observation) == 0 {
+            if settled || observation == CancelObservation::NotSent {
                 return invalid("cancel_observation_backward");
             }
             let mut next = execution.clone();
