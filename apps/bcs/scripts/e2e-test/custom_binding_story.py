@@ -14,6 +14,30 @@ from a2a_story import A2aStory, Peer
 from caller_execution_story import free_port
 
 
+def mesh_down_send(story, peer, grpc_peer, server_log):
+    """The mesh endpoint refuses the connection: nothing reaches the agent and
+    the delivery is reported as outcome unknown, never resent on its own."""
+    grpc_peer.send_signal(signal.SIGTERM)
+    grpc_peer.wait(timeout=10)
+    assert grpc_peer.returncode == 0, "gRPC mock peer exited abnormally"
+    with peer.lock:
+        before = len(peer.requests)
+    sent = story.request("POST", "/sessions/" + story.stream_session + "/chat",
+                         {"message": "A2A question while the mesh is down"})
+    delivery_id = sent["queue_admission"]["deliveries"][0]["delivery_id"]
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        if any("delivery outcome unknown" in line and delivery_id in line
+               for line in server_log.read_text(errors="replace").splitlines()):
+            break
+        time.sleep(0.1)
+    else:
+        raise AssertionError("A refused mesh connection was not reported as an unknown delivery outcome")
+    with peer.lock:
+        assert len(peer.requests) == before, "A request reached the agent although the mesh was down"
+    story.checks += 2
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--binary", required=True)
@@ -96,6 +120,7 @@ def main():
                     if args.grpc_peer_binary:
                         assert peer.rpc_methods == {"SendMessage", "SendStreamingMessage", "GetTask", "CancelTask", "SubscribeToTask"}, "gRPC story did not exercise every RPC"
                         assert grpc_peer.poll() is None, "gRPC mock peer exited during delivery"
+                        mesh_down_send(story, peer, grpc_peer, log_dir / "server.log")
                     print(f"{label} E2E: {story.checks} HTTP checks; streaming, polling, recovery and cancel passed")
                 finally:
                     try:

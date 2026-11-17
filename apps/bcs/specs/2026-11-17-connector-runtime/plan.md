@@ -392,9 +392,9 @@ Send outcome classification, reusing the existing `initial_rejection` rule:
 | Failure | Outcome |
 | --- | --- |
 | resolver, URL guard, credential or client construction fails | `NotSent` |
-| the connection could not be established: DNS failure, connection refused, connect timeout (reqwest `is_connect()`; for gRPC a connect error raised before the request is sent) | `NotSent` |
-| HTTP 400/401/403/404/405/406/415/422, gRPC 3/5/7/12/16 | `Rejected` |
-| everything else once the request was handed to the transport (timeout, reset or close after the request was read, 408/409/429/5xx, JSON-RPC errors, stream ended before the first event) | `OutcomeUnknown` |
+| the connection could not be established: DNS failure, connection refused, connect timeout (reqwest `is_connect()`); for gRPC, which only dials the loopback mesh sidecar, a refused connection | `NotSent` |
+| HTTP 400/401/403/404/405/406/415/422, gRPC 3/5/7/12/16; a JSON-RPC error on the initial response whose code says the request itself was refused (parse error, invalid request, method not found, invalid params, unsupported operation, content type / extension / version not supported) | `Rejected` |
+| everything else once the request was handed to the transport (timeout, reset or close after the request was read, 408/409/429/5xx, any other JSON-RPC error, an error as the first stream event, an empty task id, stream ended before the first event) | `OutcomeUnknown` |
 
 Why the second row is in this PR: a plain A2A agent declares neither
 `idempotent_start` nor `query_by_request`, so without it a brief network

@@ -450,6 +450,8 @@ class A2aStory(Story):
                 time.sleep(0.1)
             else:
                 raise AssertionError("A2A output did not reach visible history: " + mode)
+        # A session that later steps (e.g. a transport-down probe) can send to.
+        self.stream_session = session
         self.queued_rounds(session)
         self.message_context_rounds(group)
         assert len(self.peer.requests) == 13, "Recovery must not resubmit a message"

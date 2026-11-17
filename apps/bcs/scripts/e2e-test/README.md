@@ -56,6 +56,8 @@ documented in the [caller companion guide](../../crates/bootstrap/bcs/tests/call
 It cancels active tasks through public `chat.abort` before proceeding to polling
 and named runs. HTTP journeys also retain the invalid-replacement automatic
 cleanup regression; gRPC coverage does not depend on that separate behavior.
+Its last step stops the mesh peer and sends once more: the refused connection
+must reach no agent and be reported as an unknown delivery outcome.
 
 The CI supervisor supplies a diagnostics directory inside its report tree:
 `bcs/grpc-binding/`. It retains `server.log`, `grpc-peer.log`,
