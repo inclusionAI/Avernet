@@ -57,8 +57,8 @@ npm run serve
 
 注意：
 
-- 开发模式直接使用本地资产，不请求线上 manifest，也不需要先发布 npm 包。
-- 静态服务必须保持运行；它不代理任务业务接口，也不负责启动宿主或后端。
+- 开发模式优先使用本地资产，不请求线上 manifest，也不需要先发布 npm 包。frontend-nextgen 在本地资源不可用时查询 npm 的 `latest` 稳定版本，再加载该版本的远端资源；同一页面内的恢复入口、UI 和 CSS 固定使用同一版本，刷新页面后重新查询。查询失败或资源尚未同步到 CDN 时明确报错，不静默回退旧版本。
+- 验证尚未发布的本地修改时，静态服务必须保持运行；它不代理任务业务接口，也不负责启动宿主或后端。
 - 修改组件代码后重新运行 `npm run build`，再刷新宿主页面。`npm run serve` 本身不监听源码变更。
 - 本地联调验证组件与业务数据的交互，不代表线上 manifest 和 CDN 加载链路已经验证通过。
 
@@ -101,7 +101,7 @@ Content-Type: application/json
     {
       "name": "taskPanel",
       "type": "url",
-      "url": "https://cdn.jsdelivr.net/npm/@avernet-assets/task-panel@1.0.0/dist/index.umd.js"
+      "url": "https://cdn.jsdelivr.net/npm/@avernet-assets/task-panel@1.0.3/dist/index.umd.js"
     }
   ]
 }
