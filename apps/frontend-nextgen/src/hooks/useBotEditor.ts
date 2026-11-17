@@ -110,6 +110,7 @@ export function useBotEditor(
     screens,
     routines,
     engineConfig: engineConfig.config,
+    savedEngineConfig: engineConfig.savedConfig,
     engineStatus,
     setEngineConfig: engineConfig.setConfig,
     engineConfigLoading: engineConfig.loading,

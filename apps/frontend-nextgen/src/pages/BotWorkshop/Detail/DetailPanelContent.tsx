@@ -91,6 +91,7 @@ export function DetailPanelContent({
     <MoreConfigPanel
       tab={more}
       config={editor.engineConfig}
+      savedConfig={editor.savedEngineConfig}
       editable={editable}
       engineStatus={editor.engineStatus}
       restoringDefaults={editor.restoringDefaultEngineConfig}

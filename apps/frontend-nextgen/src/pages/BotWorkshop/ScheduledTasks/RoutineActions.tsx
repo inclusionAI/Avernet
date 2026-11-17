@@ -2,6 +2,11 @@ import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { preciseTarget, type ManagedRoutine, type OperationResult } from '@/services/botScheduledTasks/types';
 import type { useScheduledTasks } from './useScheduledTasks';
+
+// 行内操作统一用弱化的幽灵按钮：平时隐入行内，悬停才浮现语义色；
+// 删除单独染红，让"危险"只出现在唯一需要它的地方。
+const quietAction =
+  'h-7 px-2 text-xs text-muted-foreground hover:bg-transparent hover:text-foreground focus-visible:ring-1';
 export function RoutineActions({
   task,
   state,
@@ -31,7 +36,7 @@ export function RoutineActions({
     ? '任务已停用，请先启用任务'
     : undefined;
   return (
-    <div className="flex flex-wrap justify-end gap-2" onClick={(event) => event.stopPropagation()}>
+    <div className="flex flex-wrap justify-end gap-1" onClick={(event) => event.stopPropagation()}>
       {runHint && <span className="self-center text-xs text-muted-foreground">{runHint}</span>}
       <ConfirmDialog
         title={`立即执行「${task.name}」`}
@@ -46,7 +51,8 @@ export function RoutineActions({
       >
         <Button
           size="sm"
-          variant="outline"
+          variant="ghost"
+          className={quietAction}
           disabled={disabled || task.enabled !== true}
           aria-label={runHint ? `立即执行：${runHint}` : undefined}
         >
@@ -59,11 +65,11 @@ export function RoutineActions({
         disabled={disabled || statusUnknown}
         onConfirm={() => operate(() => state.toggle(task), task.enabled ? '任务已停用' : '任务已启用')}
       >
-        <Button size="sm" variant="outline" disabled={disabled || statusUnknown}>
+        <Button size="sm" variant="ghost" className={quietAction} disabled={disabled || statusUnknown}>
           {statusUnknown ? '状态未知' : task.enabled ? '停用' : '启用'}
         </Button>
       </ConfirmDialog>
-      <Button size="sm" variant="outline" disabled={contentDisabled} onClick={() => onEdit(task)}>
+      <Button size="sm" variant="ghost" className={quietAction} disabled={contentDisabled} onClick={() => onEdit(task)}>
         编辑
       </Button>
       <ConfirmDialog
@@ -79,7 +85,12 @@ export function RoutineActions({
           }, '任务已删除')
         }
       >
-        <Button size="sm" variant="outline" disabled={contentDisabled}>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-7 px-2 text-xs text-muted-foreground hover:bg-destructive/10 hover:text-destructive focus-visible:ring-1"
+          disabled={contentDisabled}
+        >
           删除
         </Button>
       </ConfirmDialog>
