@@ -59,8 +59,8 @@ Owner 记录永久保留，不删除或重置 epoch。第一版不对 checkpoint
 | 边界 | 变化与结果约定 |
 | --- | --- |
 | `MembershipPort` | 注册时登记控制地址；`members` 返回可寻址、活跃且未 draining 的候选；增加精确实例的幂等退休操作。保留注册、续租、draining 和三态存活查询。 |
-| `ShardLeasePort` | `current` 返回 `ShardRecord`；增加转交 owner、记录来源收尾完成、清理当前 handoff 的条件操作。所有操作核对精确 claim 和请求身份。 |
-| `SessionStorePort` | `AcquireOutcome` 增加 `Deferred`，附下一次检查时间；增加 `handoff_session`，只转移处理权并保留最新 envelope。 |
+| `ShardLeasePort` | `current` 返回 `ShardRecord`；增加转交 owner、记录来源收尾完成、同 epoch 清理当前 handoff 的条件操作。故障 `claim` 在同一次 CAS 中推进 owner 并移除旧 handoff，见第 3.2 节；不新增独立的强制清理操作。所有操作核对精确 claim 和请求身份。 |
+| `SessionStorePort` | `AcquireOutcome` 增加 `Deferred`，附下一次检查时间；增加来源调用的 `handoff_session`，按第 2.2.1 节条件转移处理权并保留最新 envelope。 |
 | `DistWorkerRuntimeService` / `DistRuntimeControlPort` | 保留 `snapshot/drain(grace)`，补接收交接请求和唤醒提示的入口。HTTP adapter 调 application service，由其使用控制端口推进；不新增高层协调服务或 Actor。 |
 | 存储插件边界 | 提供符合实际声明的持久单文档条件更新和严格租约能力。业务层不调用厂商命令。 |
 
@@ -70,7 +70,38 @@ Owner 记录永久保留，不删除或重置 epoch。第一版不对 checkpoint
 
 现有 claim 契约承诺同请求返回原结果，需与测试一起改成第 4.5 节的有界重试约定。该兼容性变化必须随实际接口改动交付，不能认为新增本稿已经改变旧契约。
 
+#### 2.2.1 `handoff_session` 的契约
+
+由来源 Worker 在该会话当前轮次及相关在途操作收尾后调用，入参为来源 `SessionOwnership`（含 sid、shard 和精确 owner）、目标 `ShardClaim` 和当前 handoff 的 `request_id`。这组身份固定同一交接操作，不另建逐会话交接历史。调用方不传待覆盖的 checkpoint；适配器必须读取并保留最新 envelope。
+
+新转移必须满足以下条件：
+
+1. sid 属于目标 shard；来源和目标 shard 相同，目标 epoch 严格大于来源 epoch。
+2. 当前 shard claim 精确等于目标 claim；当前 handoff 的 ID、from 与请求一致，且保护期尚未结束。目标实例租约有效。资格未知时不发起新写入；本次交接已被取代或结束时转入失权处理。
+3. checkpoint 的精确 owner 仍为来源 owner。以刚读取的整文档版本执行 CAS，只改为目标 owner，完整保留业务 checkpoint 和恢复信息；推进私有存储版本，保持 `commit_seq` 不变。
+4. 写后再次核对当前目标 claim 和会话 owner，结果未知按第 4.4 节确认。来源一旦发出转移就不能恢复该会话的业务写入；成功也不替接收方激活会话，接收方仍须核对自身资格、安装 scheduling fence 并恢复 outbox。
+
+结果语义如下；本稿不新增 Rust 返回类型：
+
+| 结果 | 含义 |
+| --- | --- |
+| 已转移 | 条件写与写后核对已确认，会话当前属于目标 owner。 |
+| 已在目标 | 重试读取到目标仍为当前 shard owner，且会话已属于该精确 owner；不再写入或推进版本。不承诺证明原请求曾成功，handoff 已清理也可确认这一当前状态。 |
+| `Fenced` | 当前 claim 已被取代，或会话已属于其他 owner；若仍为来源但 handoff 已结束/不匹配，也不再转移，由当前 owner 接管。不得把较新 owner 改回目标。 |
+| `StoreError` | 无效入参用 `Invalid`；可证明未写入的存储失败用 `NotApplied`；写入或确认超时、无法判定结果时用 `OutcomeUnknown`。未知不等于未转移。 |
+
+CAS 版本冲突在适配器内重读并重新核对上述条件，不暴露公开 revision；仅条件仍成立时才可用最新 envelope 重试，且受预算约束。已超时的同一次存储尝试重发时保留原条件，不能把迟到请求换成新版本强写。目标已取得会话后的业务提交必须保留，不能用来源旧快照覆盖。
+
+`acquire` 由接收方用于发现、封印和加载会话，正常保护期内可返回 `Deferred`；`handoff_session` 由来源主动释放自己已收尾的会话，不等待保护期自然结束。两者共用文档版本和禁止 owner 回退的规则。shard 记录与 checkpoint 不要求跨 key 事务：资格采用写前/写后核对。若来源 A 把会话交给 B 的迟到写先成功，后继 C 重读并保留最新内容再封印；若 C 已封印，迟到的 A→B 写入必须被文档版本和 owner 条件拒绝。
+
 ### 2.3 配置与默认值
+
+HRW 指 Highest Random Weight，也称 rendezvous hashing：对每个 shard 给候选分别算分，分数最高者优先认领。v1 固定使用 SHA-256，规则如下：
+
+- 输入依次为固定 ASCII 前缀 `bcn-worker-hrw-v1`、shard 的 u32 大端字节、一个模式字节（`node` 为 0，`node_incarnation` 为 1）、node；模式 1 再追加 incarnation。固定前缀直接写入；node 和 incarnation 采用成员记录的原始 UTF-8 字节，各自前置 u32 大端字节长度，不使用分隔符拼接或进程随机种子。
+- 将 32 字节摘要按大端无符号数降序排列。分数相同时按 `(node, incarnation)` 的原始 UTF-8 字节元组升序打破平局；同一实例去重。
+- 仅对同一成员域内符合资格的候选排序，排名从 0 开始，退避为 `排名 × 退避步长`。候选视图不同可能造成并发尝试，最终仍由 owner CAS 决定唯一赢家。
+- 默认只把 node 放入得分输入，节点重启不会改变它的得分；`node_incarnation` 才将注册实例加入得分输入。算法、编码和模式在同一集群内必须一致，变更需协调升级。
 
 | 配置 | 默认值或规则 |
 | --- | --- |
@@ -93,7 +124,7 @@ Shard 数量、pool 和 session 路由沿用部署配置。新节点加入、实
 ### 3.1 注册、续租和死亡判断
 
 1. Worker 生成新的 incarnation，注册角色和控制地址。
-2. 持续续租，稳定满一个 TTL 后，才参与故障认领和接收主动交接。
+2. 持续续租，稳定满一个 TTL 后，才参与故障认领和接收主动交接。Worker 的 `ready` 必须包含这一条件：本注册生命周期内租约连续保持有效满一个 TTL，所需依赖就绪且未 draining；新 incarnation 重新计时。自身资格 Unknown 时即使缓存 ready=true 也不得接单。
 3. draining 时继续续租，但关闭新增认领、接管和入站交接入口。
 4. 租约确认失效后，旧 incarnation 永不复活。正常运行的进程可以用新 UUID 重新注册，无须重启进程。
 5. 已进入 shutdown 的进程保持 draining，不通过重新注册恢复接单。
@@ -110,10 +141,12 @@ Unknown 不允许故障认领。自身租约不确定时暂停新增工作；超
 
 1. 读取当前 owner 和存储版本，取得旧实例已经终止的可靠证据。
 2. 核对 `expected_epoch`。从未持有时从 epoch=1 开始，否则加一；溢出失败，不能回绕。
-3. 以精确版本条件写入新 owner；竞争只允许一个请求成功。旧实例不可复活，因此它的终止证据不会在后续 CAS 前变回有效。
+3. 以精确版本条件在同一个 owner 记录内写入新 owner 并设置 `handoff = None`；两者一次原子提交，竞争只允许一个请求成功。旧实例不可复活，因此它的终止证据不会在后续 CAS 前变回有效。
 4. 再次核对自身成员资格及当前 owner，确认后启动分片处理。写入成功但本实例已失效时不能激活；记录留给后继者正常接管，不能回滚覆盖。
 
-故障认领清除上一轮 graceful handoff 的保护上下文。接管者恢复所有更旧的 session owner，不仅是直接上一任。
+故障认领推进 epoch 时，上一轮 graceful handoff 随同一次 CAS 失效；不是新 owner 认领成功后再调用清理接口。第 4.5 节的 source_done、来源 Dead 或到期条件只约束不推进 epoch 的普通清理。此处认领前必须确认死亡/退休的是当前 shard owner，不能把其状态为 Unknown 当作故障证据。
+
+例如 B/14 → C/15 尚未交完，B 仍 Alive、截止时间未到，但 C 已确认死亡：D 可条件认领为 D/16 并同时移除 B→C 的 handoff，无须再等 B 的旧保护期。D 仍须逐会话封印，才能挡住旧提交；推进 shard epoch 本身不撤销 session 写权限。接管者恢复所有更旧的 session owner，不仅是直接上一任。
 
 ### 3.3 Session 接管和提交
 
@@ -150,13 +183,13 @@ Unknown 不允许故障认领。自身租约不确定时暂停新增工作；超
 
 **A 确认在途接管结果。** 交出 shard 前，已经发出的 session acquire 必须有明确结果。成功的纳入 A 收尾范围，明确未成功的留给接收方，结果未知的继续确认。这里等待的是获取处理权的操作，不是所有业务轮次。
 
-**B 接收并写入 owner。** A 从候选中选择 B，发送固定请求 ID 的交接请求。B 在本地检查租约、ready、容量和 draining，登记在途请求后释放生命周期锁，再执行网络操作。
+**B 接收并写入 owner。** A 从候选中选择 B，发送固定请求 ID 的交接请求。B 在本地检查租约、ready（包含第 3.1 节稳定满一个 TTL）、容量和 draining，登记在途请求后释放生命周期锁，再执行网络操作。
 
 最终条件写由 B 执行：一次把 owner 从 A/13 改成 B/14，并写入当前 handoff 的来源、请求 ID 和截止时间。持久化确认后才返回接受成功。
 
 如果 B 登记请求后收到自己的 shutdown hook，仍须确认这笔在途请求的结果。成功入站的 shard 纳入自身排空范围，不能因为刚进入 draining 就把已发生的转交当作拒绝。相同请求的结果查询和确认不能被“拒绝新请求”的入口一起挡住。
 
-**A 逐个交出 session。** 空闲会话在相关在途操作确认后交出；忙碌会话完成当前轮次、确认 checkpoint、必要的 outbox 和已发出的调度操作后，再条件修改 owner 为 B。未确认的 settle 不能被忽略后报告会话已释放或 source_done。转移只改变处理权，保留最新 envelope。B 取得会话处理权并安装 scheduling fence 后，才能继续调度、恢复和处理。
+**A 逐个交出 session。** 空闲会话在相关在途操作确认后交出；忙碌会话完成当前轮次、确认 checkpoint、必要的 outbox 和已发出的调度操作后，调用第 2.2.1 节的 `handoff_session` 条件修改 owner 为 B。未确认的 settle 不能被忽略后报告会话已释放或 source_done。转移只改变处理权，保留最新 envelope。B 取得会话处理权并安装 scheduling fence 后，才能继续调度、恢复和处理。
 
 只依赖各节点的 shutdown hook，不假设存在发布批次协调器。因此不能保证 A 永远不会选中随后也开始 shutdown 的 B；靠 B 的本地入口和已接受请求收尾保证安全。
 
@@ -187,7 +220,7 @@ Unknown 不允许故障认领。自身租约不确定时暂停新增工作；超
 
 封印之前已成功的旧提交保留；之后的旧提交失败。在途外部动作仍依靠既有 effect ID、内容校验及幂等写入收敛，不能把 handoff 清理当作所有外部动作已经停止。
 
-如果本机退出预算耗尽、shard 仍未交出，停止业务并返回 `DeadlineReached`，保留未确认项的诊断信息。后继者必须等待合法故障接管条件，不能仅凭来源 hook 超时抢占 owner。无接收者时允许退回故障恢复，不承诺发布期间零延迟。
+如果本机退出预算耗尽，仍有 shard、session 或相关在途操作未完成收尾，停止业务并返回现有 `DrainOutcome::DeadlineReached { remaining: u64 }`。保持返回类型不变，未确认项的诊断详情通过第 5.2 节的结构化日志输出，数量通过指标观测，不放进返回值。后继者必须等待合法故障接管条件，不能仅凭来源 hook 超时抢占 owner。无接收者时允许退回故障恢复，不承诺发布期间零延迟。
 
 ### 4.4 结果未知与迟到请求
 
@@ -209,7 +242,7 @@ Unknown 不允许故障认领。自身租约不确定时暂停新增工作；超
 
 A 只有在新增入口关闭、已有轮次与相关在途操作收尾、所持会话转交结果明确后，才能报告 source_done。结果未知不能报告完成。接收方将该声明条件记录在当前 handoff 中；丢失通知可重试，来源宕机则走租约失效/期限结束路径。
 
-仅当前 owner 可以条件清理 handoff，必须匹配当前 claim 和 handoff ID，且满足 source_done、来源 Dead 或合法到期之一。清理不增加 epoch，不删除 owner。旧请求不能清掉下一轮 handoff。
+同 epoch 的普通 handoff 清理仅由当前 owner 执行，必须匹配当前 claim 和 handoff ID，且满足 source_done、来源 Dead 或合法到期之一。清理不增加 epoch，不删除 owner。旧请求不能清掉下一轮 handoff。第 3.2 节的故障 claim 是另一种状态转换：确认当前 owner 终止后，推进 epoch 并原子移除旧 handoff，不受旧来源保护期的这三个清理条件限制，也不提供绕过认领条件的强制清理入口。
 
 清理表示等待保护结束、后续恢复责任归当前 owner，不表示全部历史 session 已迁移。pending 扫描、会话封印、outbox 恢复继续运行；不能删除它们的恢复或去重依据。
 
@@ -238,17 +271,22 @@ JsonStorePlugin 已定义整文档版本条件语义，但具体 provider 仍需
 | 多个 Worker 同时认领 | 一方成功，epoch 只增加一次 |
 | 注册/续租回包丢失、旧 UUID 延迟重试 | Unknown 不当 Dead，失效实例不复活，不误操作新实例 |
 | 节点重启或短暂网络故障 | 默认 node 排名稳定，不搬走健康 shard |
+| 同一候选集在不同进程计算 HRW | 两种身份模式、字符串边界和同分决胜产生一致排名；成员视图不同仍由 CAS 决定赢家 |
+| 新注册实例尚未稳定满 TTL | ready 不成立，拒绝新交接；新 incarnation 重新计时 |
 | 旧提交与新封印并发 | 旧提交先成功则保留；新封印先成功则旧提交整笔失败 |
 | 封印与恢复元数据并发 | 不丢业务状态、consumed、outbox 或控制信息 |
 | shutdown 时 acquire 仍在途 | 未确认前不宣布正常交接完成 |
 | A、B 同时收到 hook | 新请求被拒；已接受请求继续收敛，无节点间等待死锁 |
 | RPC 超时、重复 ID、同 ID 不同内容 | 不重复推进 epoch；内容冲突拒绝；未知不冒充失败 |
 | 来源交一半宕机、outbox 执行一半 | 接收者封印后恢复，并幂等补做 |
-| H42 清理后 B→C，遗留 A 的 session | C 等 B，直接接管 A 的遗留会话 |
+| 上一轮 A→B 的 handoff 清理后，B→C 开始，仍有 A 的遗留 session | C 等待受当前保护期保护的 B，直接接管 A 的遗留会话 |
+| B→C 保护期尚未结束，C 宕机，D 故障认领 | 确认 C Dead 后，一次 CAS 写 D/新 epoch 并移除旧 handoff；D 不等待 B 的旧保护期，逐会话封印后恢复 |
+| 来源转移会话时 CAS 冲突、回包丢失或目标已更新 checkpoint | 只在精确交接条件仍成立时重试；已在目标则不再改写，保留目标新提交；更高 owner 返回 Fenced，未知不报完成 |
 | 通知丢失、未来 deadline、扫描重启 | 持久 pending 恢复仍然发现并推进工作 |
 | C 封印后 B 的请求迟到 | B 无法改回 owner 或覆盖业务状态 |
 | 旧 settle 与接管并发 | 来源确认在途操作；接收方 observe 安装新 fence 后拒绝旧 settle，不把 owner 修改误当成调度 fence 已生效 |
 | 截止时间读取失败或机器时钟偏差 | 不用不可靠时间提前强抢；按合法的终止证据恢复 |
+| 退出预算耗尽仍有未确认操作 | 保持 DeadlineReached { remaining } 返回形态，诊断详情写结构化日志，不返回 Drained |
 | 版本上限、删除重建、普通写绕过 | 上限失败；拒绝不满足历史/写入纪律的启用方式 |
 
 验证分为可控时钟和故障注入的契约测试、多 Worker 集成测试、每种 provider/transport 的开发环境测试。跨 transport 写入应使用同一版本协议。生产持久性和故障切换另行验收。
