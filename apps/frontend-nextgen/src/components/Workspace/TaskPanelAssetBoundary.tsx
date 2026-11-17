@@ -1,4 +1,3 @@
-import { Button } from '@/components/ui/Button';
 import React, { useEffect, useState, useSyncExternalStore } from 'react';
 import { loadTaskPanelAsset, type TaskPanelAsset } from '@/services/tasks/panel/taskPanelAssetLoader';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
@@ -32,9 +31,9 @@ function TaskAssetMount({ children }: AssetBoundaryProps) {
   );
 }
 
-/** Retries remount only this asset subtree, never reset the shared runtime. */
-class TaskAssetRenderBoundary extends React.Component<React.PropsWithChildren, { error: string | null; attempt: number }> {
-  state = { error: null as string | null, attempt: 0 };
+/** Isolate asset failures without introducing an error UI or resetting the shared runtime. */
+class TaskAssetRenderBoundary extends React.Component<React.PropsWithChildren, { error: string | null }> {
+  state = { error: null as string | null };
 
   static getDerivedStateFromError(error: unknown) {
     return { error: error instanceof Error ? error.message : String(error) };
@@ -42,14 +41,9 @@ class TaskAssetRenderBoundary extends React.Component<React.PropsWithChildren, {
 
   render() {
     if (this.state.error !== null) {
-      return (
-        <div role="alert" className="p-4">
-          {this.state.error}
-          <Button onClick={() => this.setState(state => ({ error: null, attempt: state.attempt + 1 }))}>重试</Button>
-        </div>
-      );
+      return null;
     }
-    return <React.Fragment key={this.state.attempt}>{this.props.children}</React.Fragment>;
+    return this.props.children;
   }
 }
 

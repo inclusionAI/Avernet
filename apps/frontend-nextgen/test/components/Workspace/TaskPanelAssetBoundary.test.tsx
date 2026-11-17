@@ -22,34 +22,40 @@ function deferred<T>() {
 beforeEach(() => { loadAsset.mockReset(); loadAsset.mockResolvedValue(asset); });
 afterEach(() => { jest.restoreAllMocks(); });
 
-it('shows loading, reports a failed load and retries through the shared loader', async () => {
+it('shows loading and keeps failed loads silent until a new mount', async () => {
   jest.spyOn(console, 'error').mockImplementation(() => {});
   const pending = deferred<TaskPanelAsset>();
   loadAsset.mockReturnValueOnce(pending.promise);
-  render(<TaskPanelAssetBoundary>{() => <div>asset ready</div>}</TaskPanelAssetBoundary>);
+  const mounted = render(<TaskPanelAssetBoundary>{() => <div>asset ready</div>}</TaskPanelAssetBoundary>);
   expect(screen.getByRole('status')).toBeTruthy();
   await act(async () => { pending.reject(new Error('load failed')); });
-  expect(screen.getByRole('alert').textContent).toContain('load failed');
-  fireEvent.click(screen.getByRole('button', { name: '重试' }));
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(screen.queryByText('load failed')).toBeNull();
+  expect(screen.queryByRole('button', { name: '重试' })).toBeNull();
+  mounted.unmount();
+  render(<TaskPanelAssetBoundary>{() => <div>asset ready</div>}</TaskPanelAssetBoundary>);
   expect(await screen.findByText('asset ready')).toBeTruthy();
   expect(screen.queryByRole('alert')).toBeNull();
   expect(loadAsset).toHaveBeenCalledTimes(2);
 });
 
-it('catches the render-prop call itself and resets it on retry', async () => {
+it('silently catches the render-prop call and permits a fresh mount', async () => {
   jest.spyOn(console, 'error').mockImplementation(() => {});
   let fail = true;
-  render(<TaskPanelAssetBoundary>{() => {
+  const mounted = render(<TaskPanelAssetBoundary>{() => {
     if (fail) throw new Error('callback failed');
     return <div>callback recovered</div>;
   }}</TaskPanelAssetBoundary>);
-  expect((await screen.findByRole('alert')).textContent).toContain('callback failed');
+  await act(async () => {});
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(screen.queryByText('callback failed')).toBeNull();
   fail = false;
-  fireEvent.click(screen.getByRole('button', { name: '重试' }));
+  mounted.unmount();
+  render(<TaskPanelAssetBoundary>{() => <div>callback recovered</div>}</TaskPanelAssetBoundary>);
   expect(await screen.findByText('callback recovered')).toBeTruthy();
 });
 
-it('catches descendant updates and remounts only the failed panel on retry', async () => {
+it('silently isolates descendant errors without affecting sibling panels', async () => {
   jest.spyOn(console, 'error').mockImplementation(() => {});
   const unmount = jest.fn();
   let instances = 0;
@@ -69,10 +75,10 @@ it('catches descendant updates and remounts only the failed panel on retry', asy
   await first.findByRole('button', { name: 'remote 1' });
   await second.findByRole('button', { name: 'remote 2' });
   fireEvent.click(first.getByRole('button'));
-  expect(first.getByRole('alert').textContent).toContain('descendant failed');
+  expect(first.queryByRole('alert')).toBeNull();
+  expect(first.queryByText('descendant failed')).toBeNull();
   expect(unmount).toHaveBeenCalledWith(1);
-  fireEvent.click(first.getByRole('button', { name: '重试' }));
-  expect(await first.findByRole('button', { name: 'remote 3' })).toBeTruthy();
+  expect(first.queryByRole('button', { name: '重试' })).toBeNull();
   expect(second.getByRole('button', { name: 'remote 2' })).toBeTruthy();
   expect(unmount).not.toHaveBeenCalledWith(2);
 });
@@ -103,14 +109,16 @@ it.each(['resolve', 'reject'] as const)('ignores a late asset %s after unmount w
   expect(screen.queryByRole('alert')).toBeNull();
 });
 
-it('also reports synchronous loader exceptions', async () => {
+it('also isolates synchronous loader exceptions without displaying them', async () => {
   jest.spyOn(console, 'error').mockImplementation(() => {});
   loadAsset.mockImplementationOnce(() => { throw new Error('sync load failed'); });
   render(<TaskPanelAssetBoundary>{() => null}</TaskPanelAssetBoundary>);
-  expect((await screen.findByRole('alert')).textContent).toContain('sync load failed');
+  await act(async () => {});
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(screen.queryByText('sync load failed')).toBeNull();
 });
 
-it('shares one real JS/CSS load across mounts and reuses the valid asset on render retry', async () => {
+it('shares one real JS/CSS load across mounts while isolating a failed panel', async () => {
   jest.spyOn(console, 'error').mockImplementation(() => {});
   const global = window as unknown as {
     taskPanel?: TaskPanelAsset;
@@ -145,9 +153,10 @@ it('shares one real JS/CSS load across mounts and reuses the valid asset on rend
       style.dispatchEvent(new Event('load'));
     });
     expect(await screen.findByText('sibling real asset')).toBeTruthy();
-    expect(screen.getByRole('alert').textContent).toContain('local render failure');
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.queryByText('local render failure')).toBeNull();
     fail = false;
-    fireEvent.click(screen.getByRole('button', { name: '重试' }));
+    render(<TaskPanelAssetBoundary>{() => <div>retried real asset</div>}</TaskPanelAssetBoundary>);
     expect(await screen.findByText('retried real asset')).toBeTruthy();
     expect(document.querySelector('script')).toBe(script);
     expect(document.querySelector('link[data-task-panel-source]')).toBe(style);

@@ -125,12 +125,13 @@ describe('TaskArtifactPreviewDrawer 覆盖补齐', () => {
     second.unmount();
   });
 
-  it('预览错误:展示 errorMessage', () => {
+  it('预览错误不展示 errorMessage', () => {
     mockedPreview.mockReturnValue(preview({ kind: 'other', status: 'error', errorMessage: '产物文件不存在或已被删除。' }));
 
     render(<TaskArtifactPreviewDrawer artifact={fileArtifact()} context={context} onClose={jest.fn()} />);
 
-    expect(screen.getByRole('alert')).toHaveTextContent('产物文件不存在或已被删除。');
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.queryByText('产物文件不存在或已被删除。')).toBeNull();
   });
 
   it('预览就绪但无内容:展示兜底提示', () => {
@@ -194,7 +195,7 @@ describe('TaskArtifactPreviewDrawer 覆盖补齐', () => {
     expect(within(host).getByRole('dialog')).toBeInTheDocument();
   });
 
-  it('下载成功与失败:失败态展示错误信息', async () => {
+  it('下载成功与失败:不展示错误且保留下载操作', async () => {
     const { rerender } = render(<TaskArtifactPreviewDrawer artifact={fileArtifact()} context={context} onClose={jest.fn()} />);
 
     // 下载成功(默认 mockResolvedValue):不弹错误提示
@@ -203,17 +204,21 @@ describe('TaskArtifactPreviewDrawer 覆盖补齐', () => {
     expect(mockedDownload).toHaveBeenCalledWith(expect.objectContaining({ id: 'artifact-file' }), context);
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
 
-    // Error 实例 → 展示 error.message
+    // Error 实例不展示到副屏
     mockedDownload.mockRejectedValueOnce(new Error('产物文件过大'));
     rerender(<TaskArtifactPreviewDrawer artifact={fileArtifact({ id: 'artifact-file-2' })} context={context} onClose={jest.fn()} />);
     fireEvent.click(screen.getByRole('button', { name: '下载文件' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('产物文件过大');
+    await actFlush();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.getByRole('button', { name: '下载文件' })).not.toBeDisabled();
 
-    // 非 Error 拒绝 → 展示兜底文案
+    // 非 Error 拒绝同样保持静默
     mockedDownload.mockRejectedValueOnce('boom');
     rerender(<TaskArtifactPreviewDrawer artifact={fileArtifact({ id: 'artifact-file-3' })} context={context} onClose={jest.fn()} />);
     fireEvent.click(screen.getByRole('button', { name: '下载文件' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('产物下载失败，请稍后重试。');
+    await actFlush();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.getByRole('button', { name: '下载文件' })).not.toBeDisabled();
   });
 
   it('下载中:按钮置灰展示「下载中…」,完成后恢复', async () => {
