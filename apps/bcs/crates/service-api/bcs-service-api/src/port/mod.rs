@@ -162,3 +162,5 @@ pub use caller_container::{CallerObserveTarget,
 };
 pub mod dist_agent;
 pub mod dist_runtime;
+
+pub mod provider_request_headers;

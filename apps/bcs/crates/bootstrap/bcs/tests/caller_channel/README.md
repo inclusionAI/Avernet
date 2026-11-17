@@ -73,3 +73,13 @@ the existing E2E profile pool. It does not merge unit-test profiles or change
 coverage thresholds or exclusions. See the
 [SSE story guidance](../../../../../scripts/e2e-test/README.md) for the shared
 Singlebox producer's additional fault journeys and retained gRPC diagnostics.
+
+The local caller story leaves the Provider request header policy unconfigured.
+The preproduction story launches the same fixture with
+`--provider-request-headers`, installing a synthetic deployment policy that
+adds `x-e2e-caller` from the resolved caller proof. The mock Provider asserts
+that each queued callback/SSE send receives exactly the JSON token value, that
+Provider Authorization remains unchanged, and that default-mode sends carry
+no caller header. The ordinary BCS executable never installs this test policy.
+These live-process profiles exercise the generic header adapter in Singlebox
+coverage without importing enterprise names or merging unit-test coverage.

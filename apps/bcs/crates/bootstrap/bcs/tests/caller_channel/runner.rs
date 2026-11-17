@@ -3,6 +3,7 @@ mod provider;
 mod cache_fixture;
 mod network_tracing;
 mod custom_binding;
+mod request_headers;
 
 #[derive(clap::Parser)]
 struct Args {
@@ -16,6 +17,8 @@ struct Args {
     trace_output: Option<std::path::PathBuf>,
     #[arg(long)]
     a2a_peer_url: Option<String>,
+    #[arg(long)]
+    provider_request_headers: bool,
 }
 
 #[tokio::main]
@@ -26,6 +29,7 @@ async fn main() -> anyhow::Result<()> {
         println!("{}", serde_json::to_string(&bcs::BcsConfig::default())?);
         return Ok(());
     }
+    if args.provider_request_headers { request_headers::install()?; }
     if let Some(url) = args.a2a_peer_url { custom_binding::install(url)?; }
     if let Some(port) = args.cache_fixture_port { cache_fixture::start(port).await?; }
     let recorder = args.trace_output.as_ref().map(|_| network_tracing::install()).transpose()?;
