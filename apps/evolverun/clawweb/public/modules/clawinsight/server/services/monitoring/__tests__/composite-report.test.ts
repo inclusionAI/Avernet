@@ -39,7 +39,7 @@ beforeEach(async () => {
   db = database(':memory:'); await initializeMonitoringSqlite(db);
   // Deliberately no UNIQUE constraint: also exercise defensive ambiguity rejection before any schema audit.
   await db.exec(`CREATE TABLE ac_bots (id INTEGER PRIMARY KEY AUTOINCREMENT, bot_id TEXT, entity_id TEXT,
-    env TEXT, avernet_tenant TEXT, is_delete INTEGER, active_engine TEXT, owner_id TEXT, bot_name TEXT, owner_name TEXT)`);
+    env TEXT, avernet_tenant TEXT, is_delete INTEGER, active_engine TEXT, owner_id TEXT, bot_name TEXT, owner_name TEXT, bot_type TEXT DEFAULT 'personal')`);
   directory = new SqlMonitoringBotDirectory(db, true); repo = new MonitoringRepository(db);
   const runtime = createMonitoringRuntime(() => db, () => now, { directory, scope, isolatedStorageTenant: scope.tenant,
     bindings: [{ reportedBotId: 'legacy-default', target: a }],
