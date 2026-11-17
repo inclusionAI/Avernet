@@ -842,7 +842,9 @@ class BotBuildService:
                     bot,
                     owner_id=user_id,
                     request_id=request_id,
-                    config_artifact=delivery.config_artifact,
+                    config_artifact=self._with_teclaw_evaluation_stage(
+                        delivery.config_artifact, ext_info
+                    ),
                     template_uuid=self._teclaw_template_uuid,
                     device_count=1,
                 )
@@ -955,6 +957,43 @@ class BotBuildService:
             template_uuid=template_uuid,
             in_place=in_place,
         )
+
+    def _with_teclaw_evaluation_stage(
+        self,
+        config_artifact: Dict[str, Any],
+        ext_info: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Return a TeClaw artifact copy carrying the evaluation runtime stage.
+
+        TeClaw's create/update contract accepts the composed artifact as the
+        opaque ``bot_config`` payload. Evaluation bots distinguish Default and
+        Eval instances by remapping the existing TeClaw lifecycle stage while
+        retaining ``default_tag`` as the business identifier. This is a
+        TeClaw-runtime subtype only; the Avernet publish state machine stays on
+        ``DRAFT -> VERIFY -> ONLINE`` and does not gain `default`.
+        """
+        default_tag = (ext_info or {}).get("default_tag")
+        if not default_tag:
+            return config_artifact
+
+        if default_tag == "eval":
+            stage = "eval"
+        elif default_tag == "default":
+            # TeClaw's sub-stage name stays inside the evaluation namespace. It
+            # is NOT a new PublishStage and must not leak into the main flow.
+            stage = "eval-default"
+        else:
+            raise BotBuildServiceError(
+                "unsupported evaluation default_tag for TeClaw: "
+                f"{default_tag!r}"
+            )
+
+        artifact = dict(config_artifact)
+        engine_ext = dict(artifact.get("engine_ext") or {})
+        engine_ext["stage"] = stage
+        engine_ext["default_tag"] = default_tag
+        artifact["engine_ext"] = engine_ext
+        return artifact
 
     def _run_local_command(
         self,
@@ -1811,7 +1850,9 @@ class BotBuildService:
                     bot,
                     owner_id=user_id,
                     request_id=request_id,
-                    config_artifact=delivery.config_artifact,
+                    config_artifact=self._with_teclaw_evaluation_stage(
+                        delivery.config_artifact, ext_info
+                    ),
                     template_uuid=self._teclaw_template_uuid,
                     device_count=1,
                 )

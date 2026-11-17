@@ -88,6 +88,80 @@ def test_release_routes_teclaw_to_create_teclaw_bot():
 
 
 @pytest.mark.unit
+def test_release_routes_teclaw_without_default_tag_is_unchanged():
+    svc, baas = _svc("teclaw")
+    artifact = {**_ARTIFACT, "engine_ext": {"stage": "release"}}
+    svc.release(
+        _BOT, user_id="u1", migration_path="", publish_stage=PublishStage.ONLINE,
+        delivery=DeliveryArtifact(artifact),
+    )
+    assert (
+        baas.create_teclaw_bot.call_args.kwargs["config_artifact"] == artifact
+    )
+
+
+@pytest.mark.unit
+def test_release_routes_teclaw_with_default_tag_eval():
+    svc, baas = _svc("teclaw")
+    artifact = {**_ARTIFACT, "engine_ext": {"stage": "eval"}}
+    svc.release(
+        _BOT, user_id="u1", migration_path="", publish_stage=PublishStage.EVAL,
+        delivery=DeliveryArtifact(artifact),
+        ext_info={"default_tag": "eval"},
+    )
+    sent_artifact = baas.create_teclaw_bot.call_args.kwargs["config_artifact"]
+    assert sent_artifact["engine_ext"]["default_tag"] == "eval"
+    assert sent_artifact["engine_ext"]["stage"] == "eval"
+
+
+@pytest.mark.unit
+def test_release_routes_teclaw_with_default_tag_default():
+    svc, baas = _svc("teclaw")
+    artifact = {
+        **_ARTIFACT,
+        "engine_ext": {"stage": "eval", "bot_id": "keep-me"},
+    }
+    svc.release(
+        _BOT, user_id="u1", migration_path="", publish_stage=PublishStage.EVAL,
+        delivery=DeliveryArtifact(artifact),
+        ext_info={"default_tag": "default"},
+    )
+    sent_engine_ext = baas.create_teclaw_bot.call_args.kwargs[
+        "config_artifact"
+    ]["engine_ext"]
+    assert sent_engine_ext == {
+        "stage": "eval-default", "bot_id": "keep-me", "default_tag": "default",
+    }
+
+
+@pytest.mark.unit
+def test_upgrade_routes_teclaw_with_default_tag():
+    svc, baas = _svc("teclaw")
+    artifact = {**_ARTIFACT, "engine_ext": {"stage": "eval"}}
+    svc.upgrade(
+        "BOT-t", _BOT, user_id="u1", migration_path="",
+        publish_stage=PublishStage.EVAL, delivery=DeliveryArtifact(artifact),
+        ext_info={"default_tag": "eval"},
+    )
+    sent_artifact = baas.update_teclaw_bot.call_args.kwargs["config_artifact"]
+    assert sent_artifact["engine_ext"]["default_tag"] == "eval"
+    assert sent_artifact["engine_ext"]["stage"] == "eval"
+
+
+@pytest.mark.unit
+def test_release_routes_teclaw_with_unknown_default_tag_rejected():
+    svc, baas = _svc("teclaw")
+    artifact = {**_ARTIFACT, "engine_ext": {"stage": "eval"}}
+    with pytest.raises(BotBuildServiceError, match="unsupported evaluation default_tag"):
+        svc.release(
+            _BOT, user_id="u1", migration_path="", publish_stage=PublishStage.EVAL,
+            delivery=DeliveryArtifact(artifact),
+            ext_info={"default_tag": "defualt"},
+        )
+    baas.create_teclaw_bot.assert_not_called()
+
+
+@pytest.mark.unit
 def test_release_routes_arca_to_create_bot_unchanged():
     svc, baas = _svc("baas")
     svc.release(
