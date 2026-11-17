@@ -31,9 +31,9 @@ export default function TaskLogArchives({ taskId }: { taskId: string }) {
     }
   };
   return (
-    <details onToggle={(e) => setOpen(e.currentTarget.open)} className="mt-4 rounded-lg border border-border p-3">
-      <summary className="cursor-pointer text-sm">任务运行日志归档</summary>
-      <div className="mt-3 space-y-3">
+    <details onToggle={(e) => setOpen(e.currentTarget.open)} className="mt-4 rounded-lg border border-border bg-card p-4">
+      <summary className="cursor-pointer text-sm font-medium leading-5 text-foreground">任务运行日志归档</summary>
+      <div className="mt-4 space-y-3">
         <ErrorBox message={error || logs.error} retry={logs.reload} />
         <div className="flex gap-2">
           <Button size="sm" variant="outline" disabled={busy} onClick={() => void act()}>
