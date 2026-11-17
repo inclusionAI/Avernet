@@ -216,6 +216,9 @@ class _FixedTodoArtifacts:
     def complete_execution(self, **_kwargs: Any) -> None:
         return None
 
+    def report_completion(self, **_kwargs: Any) -> None:
+        return None
+
     def report_artifact(self, **_kwargs: Any) -> TodoArtifactRecord:
         return _artifact_record()
 
@@ -882,6 +885,51 @@ def report_todo_artifact_ok():
 )
 def report_todo_artifact_rejects_conflicting_ids():
     """The compatibility alias cannot select another execution generation."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/v1/collaboration/tasks/todos/{todo_id}/complete",
+    scenario="complete_execution",
+    input=CaseInput(
+        path_params={"todo_id": "todo_1"},
+        headers={"X-Todo-Execution-Token": "todo-token"},
+        json_body={"todo_execution_id": "todoexec_1"},
+    ),
+    seed=_bind_artifact_world,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "code": 200000,
+            "data": {
+                "accepted": True,
+                "todo_id": "todo_1",
+                "todo_execution_id": "todoexec_1",
+            },
+        },
+    ),
+)
+def complete_todo_execution_ok():
+    """The active Bot generation can report that its work is complete."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/v1/collaboration/tasks/todos/{todo_id}/complete",
+    scenario="conflicting_execution_ids",
+    input=CaseInput(
+        path_params={"todo_id": "todo_1"},
+        headers={"X-Todo-Execution-Token": "todo-token"},
+        json_body={
+            "todo_execution_id": "todoexec_1",
+            "execution_id": "todoexec_old",
+        },
+    ),
+    seed=_bind_artifact_world,
+    expect=ExpectError(status=422),
+)
+def complete_todo_execution_rejects_conflicting_ids():
+    """The compatibility alias cannot complete another generation."""
 
 
 @endpoint_test(
