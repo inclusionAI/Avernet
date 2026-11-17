@@ -1,3 +1,4 @@
+import { TASK_READ_API_BASE } from '@/services/tasks/taskConfig';
 import type {
   CreateTodoInput,
   CreateTodoInteractionInput,
@@ -8,7 +9,7 @@ import { userScopedParams } from '../bots/botController';
 import { backendRequest } from '../httpClient';
 import type { BackendApiEnvelope, BackendApiPage, BackendUnknownRecord } from '../types';
 
-const TODO_API_BASE = '/openapi/v1/collaboration/tasks/todos';
+const TODO_API_BASE = `${TASK_READ_API_BASE}/todos`;
 
 export interface TodoDto extends BackendUnknownRecord {
   todo_id?: string | number;

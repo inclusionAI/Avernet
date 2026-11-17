@@ -8,6 +8,8 @@ import pytest
 from fastapi import HTTPException, Request, UploadFile
 
 from agentclaw.community.adapters.http.task.todos.artifact_routes import (
+    CompleteTodoRequest,
+    complete_todo_execution,
     ReportTodoArtifactRequest,
     report_todo_artifact,
     upload_todo_artifact_file,
@@ -52,6 +54,9 @@ class _Service:
             TodoArtifactKind.TEXT,
             {"kind": "text", "text": "done", "is_final_artifact": True},
         )
+
+    def report_completion(self, **kwargs):
+        self.calls.append(("complete", kwargs))
 
     def upload_file(self, **kwargs):
         self.calls.append(("upload", kwargs))
@@ -112,6 +117,54 @@ async def test_report_route_passes_execution_credential_and_returns_public_recor
     ]
 
 
+@pytest.mark.asyncio
+async def test_complete_route_passes_execution_credential_and_returns_acknowledgement():
+    service = _Service()
+
+    response = await complete_todo_execution(
+        todo_id="todo_1",
+        body=CompleteTodoRequest(
+            todo_execution_id="todoexec_1",
+            collab_context_id="context_from_untrusted_legacy_client",
+        ),
+        request=_request("/api/v1/collaboration/tasks/todos/todo_1/complete"),
+        execution_token="secret-token",
+        service=service,
+    )
+
+    assert response.request_id == "trace-todo-artifact"
+    assert response.data.accepted is True
+    assert response.data.todo_id == "todo_1"
+    assert response.data.todo_execution_id == "todoexec_1"
+    assert service.calls == [
+        (
+            "complete",
+            {
+                "todo_id": "todo_1",
+                "todo_execution_id": "todoexec_1",
+                "execution_token": "secret-token",
+            },
+        )
+    ]
+
+
+def test_complete_request_accepts_legacy_execution_id_during_compatibility_window():
+    body = CompleteTodoRequest(
+        execution_id="todoexec_legacy",
+        collab_context_id="context_legacy",
+    )
+
+    assert body.todo_execution_id == "todoexec_legacy"
+
+
+def test_complete_request_rejects_conflicting_execution_identifiers():
+    with pytest.raises(ValueError, match="must match"):
+        CompleteTodoRequest(
+            todo_execution_id="todoexec_new",
+            execution_id="todoexec_old",
+        )
+
+
 def test_report_request_accepts_legacy_execution_id_during_compatibility_window():
     body = ReportTodoArtifactRequest(
         execution_id="todoexec_legacy",
@@ -146,7 +199,9 @@ async def test_file_route_passes_multipart_fields_and_hides_storage_id():
 
     response = await upload_todo_artifact_file(
         todo_id="todo_1",
-        request=_request("/api/v1/collaboration/tasks/todos/todo_1/artifacts/object-file"),
+        request=_request(
+            "/api/v1/collaboration/tasks/todos/todo_1/artifacts/object-file"
+        ),
         execution_token="secret-token",
         todo_execution_id="todoexec_1",
         execution_id=None,
@@ -187,7 +242,9 @@ async def test_file_route_accepts_legacy_execution_id_during_compatibility_windo
 
     await upload_todo_artifact_file(
         todo_id="todo_1",
-        request=_request("/api/v1/collaboration/tasks/todos/todo_1/artifacts/object-file"),
+        request=_request(
+            "/api/v1/collaboration/tasks/todos/todo_1/artifacts/object-file"
+        ),
         execution_token="secret-token",
         todo_execution_id=None,
         execution_id="todoexec_legacy",

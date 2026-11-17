@@ -7,13 +7,16 @@ import hmac
 import json
 import re
 import secrets
+from collections.abc import Sequence
 from pathlib import PurePath
 from urllib.parse import urlparse
 
 from agentclaw.community.core.repository.protocols.task.todo_artifacts import (
     TodoArtifactRepositoryProtocol,
 )
-from agentclaw.community.core.repository.protocols.task.todos import TodoRepositoryProtocol
+from agentclaw.community.core.repository.protocols.task.todos import (
+    TodoRepositoryProtocol,
+)
 from agentclaw.community.core.spaces.protocols import SpaceAccessServiceProtocol
 from agentclaw.community.core.task.task_context.task_artifact.artifact_object_storage import (
     TaskArtifactObjectReadStatus,
@@ -31,6 +34,7 @@ from agentclaw.community.core.task.todos.artifact_models import (
 )
 from agentclaw.community.core.task.todos.collaboration.protocol import (
     TodoCollaborationError,
+    TodoCollaborationEvent,
     TodoCollaborationEventRequest,
     TodoCollaborationPort,
 )
@@ -44,6 +48,7 @@ from agentclaw.community.core.task.todos.errors import (
     TodoNotFoundError,
     TodoStateConflictError,
 )
+from agentclaw.community.core.task.todos.models import TodoStatus
 
 _SAFE_FILE_RE = re.compile(r"[^A-Za-z0-9._-]+")
 
@@ -86,13 +91,90 @@ class TodoArtifactService:
     def bind_run_id(self, *, execution_id: str, run_id: str) -> None:
         self._artifacts.bind_run_id(execution_id=execution_id, run_id=run_id)
 
-    def complete_execution(
-        self, *, todo_id: str, collab_context_id: str
-    ) -> None:
+    def complete_execution(self, *, todo_id: str, collab_context_id: str) -> None:
         self._artifacts.complete_active_execution(
             todo_id=todo_id,
             collab_context_id=collab_context_id,
         )
+
+    def report_completion(
+        self,
+        *,
+        todo_id: str,
+        todo_execution_id: str,
+        execution_token: str,
+    ) -> None:
+        """Append this Bot execution's completion event.
+
+        The existing scheduler remains the only owner of the A-side Todo
+        transition and execution-token invalidation.
+        """
+        execution = self._authorize(
+            todo_id=todo_id,
+            execution_id=todo_execution_id,
+            token=execution_token,
+        )
+        todo = self._repository.get_todo(todo_id=todo_id)
+        if todo.status is not TodoStatus.IN_PROGRESS:
+            raise TodoStateConflictError("Todo completion requires an in-progress Todo")
+        if todo.collab_context_id != execution.collab_context_id:
+            raise TodoStateConflictError(
+                "Todo execution does not match the bound collaboration Context"
+            )
+
+        payload: dict[str, object] = {
+            "todo_id": todo_id,
+            "todo_execution_id": todo_execution_id,
+        }
+        if execution.run_id:
+            payload["run_id"] = execution.run_id
+
+        last_error: TodoCollaborationError | None = None
+        for _attempt in range(3):
+            context = self._collaboration.get_context(
+                collab_context_id=execution.collab_context_id,
+                actor_id=todo.created_by,
+            )
+            if self._has_completion_event(
+                context.events,
+                todo_execution_id=todo_execution_id,
+                run_id=execution.run_id,
+            ):
+                return
+            if context.status != "in_progress":
+                raise TodoStateConflictError(
+                    "Todo collaboration Context is not in progress"
+                )
+            try:
+                self._collaboration.append_event(
+                    collab_context_id=execution.collab_context_id,
+                    request=TodoCollaborationEventRequest(
+                        expected_version=context.context_version,
+                        event_kind="task.completed",
+                        primitive_type="Task",
+                        actor_id=execution.executor_id,
+                        actor_type="bot",
+                        parent_event=context.current_event_id,
+                        visibility="workspace",
+                        payload=payload,
+                    ),
+                )
+                return
+            except TodoCollaborationError as exc:
+                last_error = exc
+
+        context = self._collaboration.get_context(
+            collab_context_id=execution.collab_context_id,
+            actor_id=todo.created_by,
+        )
+        if self._has_completion_event(
+            context.events,
+            todo_execution_id=todo_execution_id,
+            run_id=execution.run_id,
+        ):
+            return
+        assert last_error is not None
+        raise last_error
 
     def report_artifact(
         self,
@@ -207,9 +289,7 @@ class TodoArtifactService:
         env: str | None = None,
     ) -> TodoArtifactDownload:
         self._require_reader(todo_id=todo_id, actor_id=actor_id, env=env)
-        record = self._artifacts.get_artifact(
-            todo_id=todo_id, artifact_id=artifact_id
-        )
+        record = self._artifacts.get_artifact(todo_id=todo_id, artifact_id=artifact_id)
         if record.artifact_kind is not TodoArtifactKind.FILE:
             raise TodoArtifactContentError("artifact does not contain file bytes")
         if self._storage is None:
@@ -222,7 +302,10 @@ class TodoArtifactService:
         result = self._storage.get_object(storage_id)
         if result.status is TaskArtifactObjectReadStatus.NOT_FOUND:
             raise TodoArtifactObjectNotFoundError("Todo artifact object not found")
-        if result.status is TaskArtifactObjectReadStatus.FAILED or result.content is None:
+        if (
+            result.status is TaskArtifactObjectReadStatus.FAILED
+            or result.content is None
+        ):
             raise TodoArtifactStorageError("Todo artifact object storage read failed")
         return TodoArtifactDownload(record=record, payload=result.content)
 
@@ -339,6 +422,22 @@ class TodoArtifactService:
         assert last_error is not None
         raise last_error
 
+    @staticmethod
+    def _has_completion_event(
+        events: Sequence[TodoCollaborationEvent],
+        *,
+        todo_execution_id: str,
+        run_id: str | None,
+    ) -> bool:
+        for event in events:
+            if event.event_type != "task.completed":
+                continue
+            if event.payload.get("todo_execution_id") == todo_execution_id:
+                return True
+            if run_id and event.payload.get("run_id") == run_id:
+                return True
+        return False
+
     @classmethod
     def _artifact_event_payload(
         cls, *, record: TodoArtifactRecord, run_id: str | None
@@ -368,12 +467,10 @@ class TodoArtifactService:
             text = content.get("text")
             return cls._preview(text if isinstance(text, str) else record.artifact_name)
         if record.artifact_kind is TodoArtifactKind.FILE:
-            file_name = content.get("file_name")
-            return (
-                file_name.strip()
-                if isinstance(file_name, str) and file_name.strip()
-                else record.artifact_name
-            )
+            # `artifact_name` is the readable product title supplied with the
+            # upload. It may equal the sanitized filename for legacy callers
+            # that omit the field; those rows still display the file name.
+            return record.artifact_name
         if record.artifact_kind is TodoArtifactKind.URL_LINK:
             return record.artifact_name or str(content.get("url") or "")
         code_name = content.get("code_base_name")
@@ -397,7 +494,11 @@ class TodoArtifactService:
     @staticmethod
     def _kind(value: TodoArtifactKind | str) -> TodoArtifactKind:
         try:
-            return value if isinstance(value, TodoArtifactKind) else TodoArtifactKind(value)
+            return (
+                value
+                if isinstance(value, TodoArtifactKind)
+                else TodoArtifactKind(value)
+            )
         except (TypeError, ValueError) as exc:
             raise TodoArtifactContentError("unsupported Todo artifact kind") from exc
 
