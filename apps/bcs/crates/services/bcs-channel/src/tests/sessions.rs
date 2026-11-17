@@ -1,6 +1,61 @@
 use super::*;
 
 #[tokio::test]
+async fn inbound_chat_sessions_inherit_group_humans_and_preserve_membership() -> TestResult {
+    for group in [chat_group("group_chat"), manager_group("group_manager")] {
+        for conversation_type in ["1", "2"] {
+            for sender_is_member in [false, true] {
+                let mut group = group.clone();
+                let mut observer = Participant::human("human_observer", ParticipantRole::Observer);
+                observer.bot_name = Some("Observer".to_string());
+                observer.mode = Some(ParticipantMode::Absent);
+                observer.message_view_scope = bcs_domain::MessageViewScope::Participant;
+                group.participants.push(observer);
+                if sender_is_member {
+                    let mut sender = Participant::human("human_u1", ParticipantRole::Observer);
+                    sender.bot_name = Some("Existing name".to_string());
+                    sender.mode = Some(ParticipantMode::Present);
+                    sender.message_view_scope = bcs_domain::MessageViewScope::Participant;
+                    group.participants.push(sender);
+                }
+                let group_id = group.id.clone();
+                let inherited = group.participants.clone();
+                let harness = TestHarness::new(group).await?;
+                harness.binding_repo.create(active_binding(
+                    "binding_1", "robot_1", BindingTarget::Group { group_id },
+                    Visibility::FullTranscript,
+                )).await?;
+
+                for msg_id in ["msg_1", "msg_2"] {
+                    let mut message = inbound("conv_1", "u1", Some("Sender"), msg_id);
+                    message.conversation_type = conversation_type.to_string();
+                    harness.service.handle_inbound(message).await?;
+                }
+
+                let sessions = harness.session_repo.sessions.lock().await;
+                assert_eq!(sessions.len(), 1, "the second message reuses the session");
+                let session = sessions.values().next().expect("created chat session");
+                assert_eq!(session.participants.len(), inherited.len() + usize::from(!sender_is_member));
+                for expected in &inherited {
+                    let actual = session.participants.iter()
+                        .find(|participant| participant.bot_uuid == expected.bot_uuid)
+                        .expect("all group members are inherited, including non-senders");
+                    assert_eq!(serde_json::to_value(actual)?, serde_json::to_value(expected)?);
+                }
+                let sender = session.participants.iter()
+                    .find(|participant| participant.bot_uuid == "human_u1")
+                    .expect("the channel sender is a session member");
+                if !sender_is_member {
+                    assert_eq!(sender.role, ParticipantRole::Consultant);
+                    assert_eq!(sender.mode, Some(ParticipantMode::Present));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+#[tokio::test]
 async fn inbound_group_target_injects_initial_context_once_for_new_session() -> TestResult {
     let mut group = manager_group("group_1");
     group.label = Some("跨团队协作".to_string());
