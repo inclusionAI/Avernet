@@ -177,42 +177,28 @@ def test_baas_receipt_is_not_release_confirmation(baas):
         baas, target={"bot_uuid": "b1"}, request_id="op1", owner_id="u1"
     )
     assert result == {"publish_id": 42, "request_id": "op1"}
-    baas.get_publish_progress.return_value = {"status": "APPROVING"}
     assert (
-        observe_baas_release(baas, target={"bot_uuid": "b1"}, release=result, physical_targets=["s1@42"])
+        observe_baas_release(baas, physical_targets=["s1@42"])
         == "UNKNOWN"
     )
 
 
 def test_baas_empty_inventory_alone_is_unknown(baas):
     assert (
-        observe_baas_release(baas, target={"bot_uuid": "b1"}, release=None, physical_targets=["s1@42"]) == "UNKNOWN"
+        observe_baas_release(baas, physical_targets=["s1@42"]) == "UNKNOWN"
     )
 
 
-def test_baas_workflow_success_does_not_hide_live_device(baas):
-    baas.get_publish_progress.return_value = {"status": "SUCCESS"}
-    baas.list_devices_by_bot_uuid.return_value = [{"status": "ACTIVE"}]
-    assert (
-        observe_baas_release(
-            baas, target={"bot_uuid": "b1"}, release={"publish_id": 42}, physical_targets=["s1@42"]
-        )
-        == "UNKNOWN"
-    )
-
-
-def test_baas_physical_absence_can_recover_lost_post(baas):
+def test_physical_absence_is_authoritative_without_logical_release_reads(baas):
     baas.is_physical_device_destroyed.return_value = True
-    assert (
-        observe_baas_release(baas, target={"bot_uuid": "b1"}, release=None, physical_targets=["s1@42"])
-        == "RELEASED"
-    )
+    assert observe_baas_release(baas, physical_targets=["s1@42"]) == "RELEASED"
+    baas.list_devices_by_bot_uuid.assert_not_called()
 
 
 def test_baas_failed_query_is_not_absence(baas):
     baas.is_physical_device_destroyed.side_effect = TimeoutError("query timed out")
     with pytest.raises(TimeoutError):
-        observe_baas_release(baas, target={"bot_uuid": "b1"}, release=None, physical_targets=["s1@42"])
+        observe_baas_release(baas, physical_targets=["s1@42"])
 
 
 def test_unknown_provider_never_resolves_a_different_runtime():
@@ -280,32 +266,22 @@ def test_missing_logical_bot_does_not_hide_orphan_physical_device(baas):
     )
 
     baas.destroy_bot.side_effect = BaasBotNotFoundError("absent")
-    receipt = submit_baas_release(
+    submit_baas_release(
         baas, target={"bot_uuid": "b1"}, request_id="op1", owner_id="u1"
     )
-    baas.list_devices_by_bot_uuid.return_value = [{"status": "ACTIVE"}]
-    assert (
-        observe_baas_release(baas, target={"bot_uuid": "b1"}, release=receipt, physical_targets=["s1@42"])
-        == "UNKNOWN"
-    )
-
-
-@pytest.mark.parametrize("receipt", [None, {"publish_id": 42}])
-def test_logical_release_with_empty_inventory_does_not_prove_physical_release(baas, receipt):
-    baas.get_publish_progress.return_value = {"status": "SUCCESS"}
-    assert observe_baas_release(baas, target={"bot_uuid": "b1"}, release=receipt, physical_targets=["s1@42"]) == "UNKNOWN"
+    assert observe_baas_release(baas, physical_targets=["s1@42"]) == "UNKNOWN"
 
 
 @pytest.mark.parametrize("targets", [None, [], [""], [None]])
 def test_missing_pinned_physical_targets_never_confirm_release(baas, targets):
     baas.is_physical_device_destroyed.return_value = True
-    assert observe_baas_release(baas, target={"bot_uuid": "b1"}, release=None, physical_targets=targets) == "UNKNOWN"
+    assert observe_baas_release(baas, physical_targets=targets) == "UNKNOWN"
     baas.is_physical_device_destroyed.assert_not_called()
 
 
 def test_all_pinned_targets_must_be_physically_absent(baas):
     baas.is_physical_device_destroyed.side_effect = [True, False]
-    assert observe_baas_release(baas, target={"bot_uuid": "b1"}, release=None, physical_targets=["s1@42", "s2@43"]) == "UNKNOWN"
+    assert observe_baas_release(baas, physical_targets=["s1@42", "s2@43"]) == "UNKNOWN"
     assert [c.kwargs["provider_device_id"] for c in baas.is_physical_device_destroyed.call_args_list] == ["s1@42", "s2@43"]
     baas.destroy_bot.assert_not_called()
 

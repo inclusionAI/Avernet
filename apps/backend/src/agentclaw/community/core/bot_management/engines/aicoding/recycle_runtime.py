@@ -130,24 +130,15 @@ def submit_baas_release(baas, *, target, request_id, owner_id):
     return {"publish_id": result.get("publish_id"), "request_id": request_id}
 
 
-def observe_baas_release(baas: BaasRecycleRuntime, *, target, release, physical_targets):
+def observe_baas_release(baas: BaasRecycleRuntime, *, physical_targets):
     # A logical RELEASED row, successful workflow or empty inventory may conceal
     # a failed provider destroy. Only the previously pinned physical IDs count.
     if not isinstance(physical_targets, list) or not physical_targets or any(
         not isinstance(identity, str) or not identity for identity in physical_targets
     ):
         return "UNKNOWN"
-    publish_id = (release or {}).get("publish_id")
-    if publish_id:
-        progress = baas.get_publish_progress(int(publish_id), include_devices=False)
-        if progress.get("status") != "SUCCESS":
-            return "UNKNOWN"
-    devices = baas.list_devices_by_bot_uuid(bot_uuid=target["bot_uuid"])
-    if not isinstance(devices, list) or any(
-        not isinstance(d, dict) or d.get("status") not in {"RELEASED", "STOPPED"}
-        for d in devices
-    ):
-        return "UNKNOWN"
+    # The pinned provider identities are the authoritative release evidence.
+    # Logical Bot/workflow reads can disappear before or after physical cleanup.
     for identity in physical_targets:
         if baas.is_physical_device_destroyed(provider_device_id=identity) is not True:
             return "UNKNOWN"
@@ -201,7 +192,6 @@ def observe_release(dependencies, arca, *, target, release, physical_targets):
         return arca().observe(target)
     if target["provider"] in {"baas", "local"}:
         return observe_baas_release(
-            _baas_recycle_runtime(dependencies), target=target, release=release,
-            physical_targets=physical_targets,
+            _baas_recycle_runtime(dependencies), physical_targets=physical_targets,
         )
     return "UNKNOWN"
