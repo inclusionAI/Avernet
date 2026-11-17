@@ -65,7 +65,7 @@ from agentclaw.community.core.task.context_collab.l5_methods.open_profile import
 from agentclaw.community.core.task.context_collab.l5_methods.operations.contracts import (
     OpenAdmitCommand,
     OpenApplicationCommand,
-    OpenDecisionOpCommand,
+    OpenScreenCommand,
     OpenMethodOpsServiceProtocol,
     OpenOpportunityCommand,
 )
@@ -258,26 +258,25 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
         policy_context = ActorContext(HUMAN.actor, source="product_policy")   # 采用product profile中定义的录取策略
         [policy_ref] = opportunity.admission_policy_refs
         screened = l5_open_method.screen(
-            collab_context_id=collect_id,
-            method_binding_id=binding_id,
-            application_ref=submitted.object_id,
-            command=OpenDecisionOpCommand(reason=policy_ref),
-            context=policy_context,
+            command=OpenScreenCommand(
+                application_ref=submitted.object_id,
+                context=policy_context,
+                collect_id=collect_id,
+                reason=policy_ref,
+            ),
         )
         assert screened.accepted and screened.state == "SCREENING"
         assert screened.object_id == submitted.object_id
 
         decision_id = f"dec_{uuid4().hex[:12]}"
-        admitted = l5_open_method.admit(  # 要不要中心化的service
-            collab_context_id=collect_id,
-            method_binding_id=binding_id,
-            application_ref=submitted.object_id,
+        admitted = l5_open_method.admit(
             command=OpenAdmitCommand(
-                admitted_scope_ref=collect_id,
+                application_ref=submitted.object_id,
+                context=policy_context,
+                collect_id=collect_id,
                 decision_id=decision_id,
                 reason=policy_ref,
             ),
-            context=policy_context,
         )
         assert admitted.accepted and admitted.state == "ADMITTED"
         assert admitted.object_id == submitted.object_id

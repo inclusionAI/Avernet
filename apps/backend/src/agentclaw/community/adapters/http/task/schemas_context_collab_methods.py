@@ -25,6 +25,7 @@ from agentclaw.community.core.task.context_collab.method_service_api import (
     OpenAdmitCommand,
     OpenApplicationCommand,
     OpenDecisionOpCommand,
+    OpenScreenCommand,
     OpenOpportunityCommand,
     OpenOpportunityOpCommand,
     SingleDelegateCommand,
@@ -469,12 +470,27 @@ class OpenApplicationRequest(BaseModel):
         )
 
 
-class OpenAdmitRequest(BaseModel):
-    """录取请求;SWARM_ALLOCATION 必须携带 target_stage_ref。"""
+class OpenScreenRequest(BaseModel):
+    """Screen body; Collet/application come from route, context from auth."""
 
-    admitted_scope_ref: str | None = Field(
-        None, description="录取生效的作用域(仅对它生效)"
-    )
+    model_config = ConfigDict(extra="forbid")
+
+    reason: str = Field("", description="评审原因;落审计")
+
+    def to_domain(
+        self, application_ref: str, context: ActorContext, collect_id: str
+    ) -> OpenScreenCommand:
+        return OpenScreenCommand(
+            application_ref=application_ref, context=context,
+            collect_id=collect_id, reason=self.reason,
+        )
+
+
+class OpenAdmitRequest(BaseModel):
+    """录取范围固定为路由 Collet;SWARM_ALLOCATION 必须携带 target_stage_ref。"""
+
+    model_config = ConfigDict(extra="forbid")
+
     target_stage_ref: str | None = Field(
         None, description="SWARM_ALLOCATION 的目标 Stage 引用"
     )
@@ -483,9 +499,11 @@ class OpenAdmitRequest(BaseModel):
     )
     reason: str = Field("", description="录取原因;落审计")
 
-    def to_domain(self) -> OpenAdmitCommand:
+    def to_domain(
+        self, application_ref: str, context: ActorContext, collect_id: str
+    ) -> OpenAdmitCommand:
         return OpenAdmitCommand(
-            admitted_scope_ref=self.admitted_scope_ref,
+            application_ref=application_ref, context=context, collect_id=collect_id,
             target_stage_ref=self.target_stage_ref,
             decision_id=self.decision_id,
             reason=self.reason,
@@ -493,7 +511,7 @@ class OpenAdmitRequest(BaseModel):
 
 
 class OpenDecisionOpRequest(BaseModel):
-    """申请裁决操作共用请求(screen/reject/withdraw/revoke)。"""
+    """申请裁决操作共用请求(reject/withdraw/revoke)。"""
 
     reason: str = Field("", description="裁决原因;落审计")
 

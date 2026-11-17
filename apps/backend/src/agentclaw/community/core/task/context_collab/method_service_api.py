@@ -43,6 +43,9 @@ from agentclaw.community.core.task.context_collab.l5_methods.operations.contract
     OpenAdmitCommand as OpenAdmitCommand,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.operations.contracts import (
+    OpenScreenCommand as OpenScreenCommand,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.operations.contracts import (
     OpenApplicationCommand as OpenApplicationCommand,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.operations.contracts import (
@@ -112,6 +115,7 @@ __all__ = [
     "OpenOpportunityOpCommand",
     "OpenApplicationCommand",
     "OpenAdmitCommand",
+    "OpenScreenCommand",
     "OpenDecisionOpCommand",
     "MethodBindingResult",
     "MethodInspectionResult",

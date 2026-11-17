@@ -126,6 +126,35 @@ class OpenMethodServiceBase:
             )
         return candidates[0]
 
+    def _resolve_application_binding(
+        self, collect_id: str, application_ref: str
+    ) -> tuple[MethodBinding, ParticipationApplication]:
+        """Resolve exactly one application in this Collet and current axes.
+
+        Include inactive/non-Open bindings in ambiguity detection; _gate then
+        checks the resolved binding's structure, state and G1 authorization.
+        """
+        for name, value in (("collect_id", collect_id), ("application_ref", application_ref)):
+            if not isinstance(value, str) or not value.strip():
+                raise ContextCollabValidationError(f"{name} must not be empty")
+        axes = current_axes()
+        candidates = []
+        for binding in self._store.list_bindings(axes, collect_id):
+            application = self._store.get_application(
+                axes, application_ref, binding.method_binding_id, collect_id
+            )
+            if application is not None:
+                candidates.append((binding, application))
+        if not candidates:
+            raise ContextCollabNotFoundError(
+                f"open application {application_ref!r} not found in Collet {collect_id!r}"
+            )
+        if len(candidates) != 1:
+            raise ContextCollabValidationError(
+                f"ambiguous application_ref {application_ref!r} in Collet {collect_id!r}"
+            )
+        return candidates[0]
+
     @staticmethod
     def _application_accountability(command: OpenApplicationCommand) -> str:
         context = command.actor_context

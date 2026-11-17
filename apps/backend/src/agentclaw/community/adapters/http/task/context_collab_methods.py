@@ -41,6 +41,7 @@ from agentclaw.community.adapters.http.task.schemas_context_collab_methods impor
     OpenAdmitRequest,
     OpenApplicationRequest,
     OpenDecisionOpRequest,
+    OpenScreenRequest,
     OpenOpportunityOpRequest,
     OpenOpportunityRequest,
     ProfileOpAcceptedDto,
@@ -847,34 +848,31 @@ async def submit_open_application(
 
 
 @router.post(
-    _BINDINGS + "/{binding_id}/open/applications/{application_id}/screen",
+    "/context_collab/{collab_context_id}/open/applications/{application_id}/screen",
     response_model=Envelope[ProfileOpAcceptedDto],
 )
 @envelope_errors
 async def screen_open_application(
     collab_context_id: str,
-    binding_id: str,
     application_id: str,
-    body: OpenDecisionOpRequest,
+    body: OpenScreenRequest,
     request: Request,
     user: AuthenticatedUser = Depends(get_current_user),
     service: OpenMethodOpsServiceProtocol = Injected(OpenMethodOpsServiceProtocol),  # noqa: B008
 ) -> Envelope[ProfileOpAcceptedDto]:
     result = service.screen(
-        collab_context_id, binding_id, application_id, body.to_domain(),
-        _actor_context(user),
+        command=body.to_domain(application_id, _actor_context(user), collab_context_id),
     )
     return envelope(_profile_accepted(result), request)
 
 
 @router.post(
-    _BINDINGS + "/{binding_id}/open/applications/{application_id}/admit",
+    "/context_collab/{collab_context_id}/open/applications/{application_id}/admit",
     response_model=Envelope[ProfileOpAcceptedDto],
 )
 @envelope_errors
 async def admit_open_application(
     collab_context_id: str,
-    binding_id: str,
     application_id: str,
     body: OpenAdmitRequest,
     request: Request,
@@ -882,8 +880,7 @@ async def admit_open_application(
     service: OpenMethodOpsServiceProtocol = Injected(OpenMethodOpsServiceProtocol),  # noqa: B008
 ) -> Envelope[ProfileOpAcceptedDto]:
     result = service.admit(
-        collab_context_id, binding_id, application_id, body.to_domain(),
-        _actor_context(user),
+        command=body.to_domain(application_id, _actor_context(user), collab_context_id),
     )
     return envelope(_profile_accepted(result), request)
 

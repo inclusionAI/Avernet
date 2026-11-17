@@ -33,7 +33,7 @@ from agentclaw.community.core.task.context_collab.method_service_api import (
     BindMethodCommand,
     MethodStateChangeCommand,
     OpenApplicationCommand,
-    OpenDecisionOpCommand,
+    OpenScreenCommand,
     OpenOpportunityCommand,
 )
 from agentclaw.community.core.task.context_collab.persistence.method_store import (
@@ -351,7 +351,13 @@ def screening_application(
     """发布机会 + 投申请 + 评审,返回 (opportunity_id, application_id)。"""
     opp = published_opportunity(service, lifecycle, binding_id, **opportunity_overrides)
     app = submitted_application(service, opp, binding_id)
-    service.screen(COLLET_ID, binding_id, app, OpenDecisionOpCommand(), make_actor())
+    service.screen(
+        command=OpenScreenCommand(
+            application_ref=app,
+            context=make_actor(),
+            collect_id=COLLET_ID,
+        ),
+    )
     return opp, app
 
 

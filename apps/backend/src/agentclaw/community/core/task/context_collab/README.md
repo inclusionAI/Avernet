@@ -150,7 +150,7 @@ products/
   is removed. HTTP builds the command identity from verified authentication,
   not JSON. The HTTP publish body also omits `scope_ref` and `opens_at` and
   rejects caller-supplied overrides; the Collet comes from the route. Other Open
-  routes, except submission described below, remain binding-scoped. See the
+  routes, except submission and review described below, remain binding-scoped. See the
   [publication regressions](../../../../../../tests/community/core/task/context_collab/test_open_publication.py).
 - L5 Open owns `OpenMethodOpsServiceProtocol.query_opportunities(actor_context)`:
   read-only discovery across Collets and MethodBindings in the current
@@ -192,6 +192,29 @@ products/
   ignoring its path scope. HTTP rejects caller-supplied actor/accountability
   overrides. See [submission regressions](../../../../../../tests/community/core/task/context_collab/test_open_submission.py)
   and [real HTTP cases](../../../../../../tests/community/endpoints/test_open_submission_cases.py).
+- L5 Open review is command-only: `screen(OpenScreenCommand(...))` and
+  `admit(OpenAdmitCommand(...))`. Both commands require `application_ref`, trusted
+  `context` and `collect_id` (the L4 Collet ID); neither accepts a binding ID.
+  L5 resolves the application's unique owning MethodBinding within that Collet
+  and the current tenant/environment. Missing references are NotFound; empty
+  identifiers and duplicate application IDs across bindings are ValidationError,
+  including duplicates under inactive/non-Open bindings. It never selects the
+  first/top-level binding. The resolved binding still passes Open/ACTIVE/G1
+  authorization; G4 state transitions, actor/reason audit, propagated write
+  failures and decision-key idempotency remain in force. Admission scope is
+  derived from `collect_id`, not caller-supplied `admitted_scope_ref`; that field
+  remains on persisted `AdmissionDecision` evidence. COLLET_PARTICIPANT also
+  requires the opportunity's scope to match its owning Collet. Other admission
+  products keep their existing rules (including Swarm target-stage validation).
+  HTTP review routes are now
+  `POST /api/v1/collaboration/task/context_collab/{collab_context_id}/open/applications/{application_id}/screen`
+  and the same path ending in `/admit`. The previous MethodBinding-scoped routes
+  are removed. HTTP derives Collet/application from the route and context from
+  authentication, rejecting JSON context/scope overrides rather than ignoring
+  them. `OpenDecisionOpCommand` remains unchanged for reject/withdraw/revoke.
+  See [review regressions](../../../../../../tests/community/core/task/context_collab/test_open_review.py),
+  [participation/replay tests](../../../../../../tests/community/core/task/context_collab/test_open_collet_participation.py)
+  and [real HTTP cases](../../../../../../tests/community/endpoints/test_open_review_cases.py).
 - All `services/*` modules are import-only compatibility forwards, not
   implementations. Product instantiation, product-aware policy, combined creation
   and Method bootstrap/recovery live in L6. The L6 legacy lifecycle constructor

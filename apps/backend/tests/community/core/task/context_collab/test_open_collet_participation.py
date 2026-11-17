@@ -17,6 +17,7 @@ from agentclaw.community.core.task.context_collab.l5_methods.open_profile import
 from agentclaw.community.core.task.context_collab.method_service_api import (
     OpenAdmitCommand,
     OpenDecisionOpCommand,
+    OpenScreenCommand,
 )
 from agentclaw.community.core.task.context_collab.persistence.method_store import (
     InMemoryMethodStore,
@@ -47,7 +48,13 @@ def _pure_open():
 def _screen(service, binding, **application_overrides):
     submitted_application(service, binding_id=binding, **application_overrides)
     app = application_overrides.get("application_id", "app_1")
-    service.screen(COLLET_ID, binding, app, OpenDecisionOpCommand(), make_actor())
+    service.screen(
+        command=OpenScreenCommand(
+            application_ref=app,
+            context=make_actor(),
+            collect_id=COLLET_ID,
+        ),
+    )
     return app
 
 
@@ -58,13 +65,25 @@ def test_collet_participant_query_admit_replay_and_revoke():
     app = submitted_application(service, binding_id=binding)
     with pytest.raises(ContextCollabValidationError, match="does not accept event"):
         service.admit(
-            COLLET_ID, binding, app,
-            OpenAdmitCommand(admitted_scope_ref=COLLET_ID), make_actor(),
+            command=OpenAdmitCommand(
+                application_ref=app,
+                context=make_actor(),
+                collect_id=COLLET_ID,
+            ),
         )
     assert store.list_participant_bindings(AXES, binding, COLLET_ID) == []
-    service.screen(COLLET_ID, binding, app, OpenDecisionOpCommand(), make_actor())
-    command = OpenAdmitCommand(admitted_scope_ref=COLLET_ID, decision_id="dec_pure")
-    admitted = service.admit(COLLET_ID, binding, app, command, make_actor())
+    service.screen(
+        command=OpenScreenCommand(
+            application_ref=app,
+            context=make_actor(),
+            collect_id=COLLET_ID,
+        ),
+    )
+    command = OpenAdmitCommand(
+        application_ref=app, context=make_actor(), collect_id=COLLET_ID,
+        decision_id="dec_pure",
+    )
+    admitted = service.admit(command=command)
     assert admitted.state == "ADMITTED"
     [participant] = store.list_participant_bindings(AXES, binding, COLLET_ID)
     assert participant.scope_ref == COLLET_ID
@@ -75,7 +94,7 @@ def test_collet_participant_query_admit_replay_and_revoke():
     assert decision.application_ref == app
     assert decision.admitted_scope_ref == COLLET_ID
     assert decision.resulting_binding_refs == (participant.participant_binding_id,)
-    service.admit(COLLET_ID, binding, app, command, make_actor())
+    service.admit(command=command)
     assert store.list_participant_bindings(AXES, binding, COLLET_ID) == [participant]
     service.revoke_admission(
         COLLET_ID, binding, app, OpenDecisionOpCommand(), make_actor()
@@ -95,13 +114,20 @@ def test_collet_participant_query_admit_replay_and_revoke():
 
 
 @pytest.mark.parametrize("scope", [None, "another_collet", "a_child_task"])
-def test_admission_cannot_omit_or_expand_collet_scope(scope):
+def test_admission_rejects_legacy_opportunity_with_foreign_scope(scope):
     store, service, binding = _pure_open()
     app = _screen(service, binding)
+    [opportunity] = store.list_opportunities(AXES, binding, COLLET_ID)
+    store.update_opportunity_state(
+        AXES, replace(opportunity, scope_ref=scope), COLLET_ID
+    )
     with pytest.raises(ContextCollabValidationError, match="scope must match"):
         service.admit(
-            COLLET_ID, binding, app,
-            OpenAdmitCommand(admitted_scope_ref=scope), make_actor(),
+            command=OpenAdmitCommand(
+                application_ref=app,
+                context=make_actor(),
+                collect_id=COLLET_ID,
+            ),
         )
     assert store.list_participant_bindings(AXES, binding, COLLET_ID) == []
     assert store.list_decisions(AXES, binding, COLLET_ID) == []
@@ -155,8 +181,11 @@ def test_participant_write_failure_is_not_admission(monkeypatch):
     monkeypatch.setattr(store, "insert_participant_binding", fail)
     with pytest.raises(RuntimeError, match="storage unavailable"):
         service.admit(
-            COLLET_ID, binding, app,
-            OpenAdmitCommand(admitted_scope_ref=COLLET_ID), make_actor(),
+            command=OpenAdmitCommand(
+                application_ref=app,
+                context=make_actor(),
+                collect_id=COLLET_ID,
+            ),
         )
     assert store.list_decisions(AXES, binding, COLLET_ID) == []
     assert store.list_participant_bindings(AXES, binding, COLLET_ID) == []
@@ -168,17 +197,20 @@ def test_participant_write_failure_is_not_admission(monkeypatch):
 def test_admission_replay_finishes_failed_state_write_without_duplicate(monkeypatch):
     store, service, binding = _pure_open()
     app = _screen(service, binding)
-    command = OpenAdmitCommand(admitted_scope_ref=COLLET_ID, decision_id="dec_retry")
+    command = OpenAdmitCommand(
+        application_ref=app, context=make_actor(), collect_id=COLLET_ID,
+        decision_id="dec_retry",
+    )
     with monkeypatch.context() as patch:
         def fail(*args):
             raise RuntimeError("application storage unavailable")
         patch.setattr(store, "update_application_state", fail)
         with pytest.raises(RuntimeError, match="storage unavailable"):
-            service.admit(COLLET_ID, binding, app, command, make_actor())
+            service.admit(command=command)
     assert store.get_application(AXES, app, binding, COLLET_ID).state is (
         ApplicationState.SCREENING
     )
-    assert service.admit(COLLET_ID, binding, app, command, make_actor()).state == (
+    assert service.admit(command=command).state == (
         "ADMITTED"
     )
     assert len(store.list_participant_bindings(AXES, binding, COLLET_ID)) == 1
@@ -188,14 +220,17 @@ def test_admission_replay_finishes_failed_state_write_without_duplicate(monkeypa
 def test_decision_replay_cannot_admit_a_different_application():
     store, service, binding = _pure_open()
     app = _screen(service, binding)
-    command = OpenAdmitCommand(admitted_scope_ref=COLLET_ID, decision_id="dec_same")
-    service.admit(COLLET_ID, binding, app, command, make_actor())
+    command = OpenAdmitCommand(
+        application_ref=app, context=make_actor(), collect_id=COLLET_ID,
+        decision_id="dec_same",
+    )
+    service.admit(command=command)
     second = _screen(
         service, binding, application_id="app_second",
         applicant_agent_ref="agent_second",
     )
     with pytest.raises(ContextCollabValidationError, match="another application"):
-        service.admit(COLLET_ID, binding, second, command, make_actor())
+        service.admit(command=replace(command, application_ref=second))
     assert store.get_application(AXES, second, binding, COLLET_ID).state is (
         ApplicationState.SCREENING
     )

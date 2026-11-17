@@ -22,6 +22,7 @@ from agentclaw.community.core.task.context_collab.l5_methods.swarm_profile impor
 from agentclaw.community.core.task.context_collab.method_service_api import (
     OpenAdmitCommand,
     OpenDecisionOpCommand,
+    OpenScreenCommand,
     OpenMethodOpsServiceProtocol,
     OpenOpportunityOpCommand,
 )
@@ -253,7 +254,11 @@ class TestOpenApplicationLifecycle:
             application_command(opportunity_ref="opp_alpha", actor_context=make_actor())
         )
         screened = service.screen(
-            COLLET_ID, binding, "app_1", OpenDecisionOpCommand(), make_actor()
+            command=OpenScreenCommand(
+                application_ref="app_1",
+                context=make_actor(),
+                collect_id=COLLET_ID,
+            ),
         )
         assert screened.state == "SCREENING"
         rejected = service.reject(
@@ -325,7 +330,11 @@ class TestOpenApplicationLifecycle:
             )
         )
         service.screen(
-            COLLET_ID, binding, "app_s", OpenDecisionOpCommand(), make_actor()
+            command=OpenScreenCommand(
+                application_ref="app_s",
+                context=make_actor(),
+                collect_id=COLLET_ID,
+            ),
         )
         with pytest.raises(ContextCollabValidationError, match="does not accept event"):
             service.withdraw(
@@ -343,11 +352,11 @@ class TestOpenApplicationLifecycle:
         opp, app = screening_application(service, lifecycle)
         binding = "mb_open_alpha"
         admitted = service.admit(
-            COLLET_ID,
-            binding,
-            app,
-            OpenAdmitCommand(admitted_scope_ref="scope://admitted"),
-            make_actor(),
+            command=OpenAdmitCommand(
+                application_ref=app,
+                context=make_actor(),
+                collect_id=COLLET_ID,
+            ),
         )
         assert admitted.state == "ADMITTED"
         members = store.list_members(AXES, binding, COLLET_ID)
@@ -359,7 +368,7 @@ class TestOpenApplicationLifecycle:
             store.get_roster(AXES, binding, COLLET_ID).roster_id == f"roster_{binding}"
         )
         decision = store.list_decisions(AXES, binding, COLLET_ID)[0]
-        assert decision.admitted_scope_ref == "scope://admitted"
+        assert decision.admitted_scope_ref == COLLET_ID
         assert decision.resulting_binding_refs == (members[0].group_member_binding_id,)
         # G1 断言:录取不产生新 binding / selection / composition edge
         # (admitted ≠ Space Membership 的 service 面投影)。
@@ -381,17 +390,24 @@ class TestOpenApplicationLifecycle:
         )
         # 缺省 target_stage_ref 拒。
         with pytest.raises(ContextCollabValidationError, match="target_stage_ref"):
-            service.admit(COLLET_ID, binding, app, OpenAdmitCommand(), make_actor())
+            service.admit(
+                command=OpenAdmitCommand(
+                    application_ref=app,
+                    context=make_actor(),
+                    collect_id=COLLET_ID,
+                ),
+            )
         # 域内不存在的 Stage 拒。
         with pytest.raises(
             ContextCollabValidationError, match="not found in the scope"
         ):
             service.admit(
-                COLLET_ID,
-                binding,
-                app,
-                OpenAdmitCommand(target_stage_ref="st_ghost"),
-                make_actor(),
+                command=OpenAdmitCommand(
+                    application_ref=app,
+                    context=make_actor(),
+                    collect_id=COLLET_ID,
+                    target_stage_ref="st_ghost",
+                ),
             )
         # 直落一条 PENDING(未 READY)Stage 拒——谓 READY/RUNNING。
         store.insert_stage(
@@ -405,23 +421,26 @@ class TestOpenApplicationLifecycle:
         )
         with pytest.raises(ContextCollabValidationError, match="PENDING"):
             service.admit(
-                COLLET_ID,
-                binding,
-                app,
-                OpenAdmitCommand(target_stage_ref="st_pending"),
-                make_actor(),
+                command=OpenAdmitCommand(
+                    application_ref=app,
+                    context=make_actor(),
+                    collect_id=COLLET_ID,
+                    target_stage_ref="st_pending",
+                ),
             )
         # READY Stage 放行:落 ACTIVE 语义分配,能力证据承接申请。
         store.insert_stage(AXES, binding, make_ready_stage("st_ready"), COLLET_ID)
         admitted = service.admit(
-            COLLET_ID,
-            binding,
-            app,
-            OpenAdmitCommand(target_stage_ref="st_ready"),
-            make_actor(),
+            command=OpenAdmitCommand(
+                application_ref=app,
+                context=make_actor(),
+                collect_id=COLLET_ID,
+                target_stage_ref="st_ready",
+            ),
         )
         assert admitted.state == "ADMITTED"
         decisions = store.list_decisions(AXES, binding, COLLET_ID)
+        assert decisions[0].admitted_scope_ref == COLLET_ID
         allocation_id = decisions[0].resulting_binding_refs[0]
         allocation = store.get_allocation(AXES, allocation_id, binding, COLLET_ID)
         assert allocation.state is AllocationState.ACTIVE
@@ -435,15 +454,16 @@ class TestOpenApplicationLifecycle:
             service, lifecycle, participation_type=ParticipationType.SINGLE_CONTRIBUTION
         )
         admitted = service.admit(
-            COLLET_ID,
-            "mb_open_alpha",
-            app,
-            OpenAdmitCommand(admitted_scope_ref="scope://draft"),
-            make_actor(),
+            command=OpenAdmitCommand(
+                application_ref=app,
+                context=make_actor(),
+                collect_id=COLLET_ID,
+            ),
         )
         assert admitted.state == "ADMITTED"
         binding = "mb_open_alpha"
         decision = store.list_decisions(AXES, binding, COLLET_ID)[0]
+        assert decision.admitted_scope_ref == COLLET_ID
         assert decision.resulting_binding_refs == ("artifact://draft",)
         # 不产生成员行与分配。
         assert store.list_members(AXES, binding, COLLET_ID) == []
@@ -468,38 +488,56 @@ class TestOpenApplicationLifecycle:
         )
         submitted_application(service, "opp_alpha", binding)
         with pytest.raises(ContextCollabValidationError, match="does not accept event"):
-            service.admit(COLLET_ID, binding, "app_1", OpenAdmitCommand(), make_actor())
+            service.admit(
+                command=OpenAdmitCommand(
+                    application_ref="app_1",
+                    context=make_actor(),
+                    collect_id=COLLET_ID,
+                ),
+            )
         service.screen(
-            COLLET_ID, binding, "app_1", OpenDecisionOpCommand(), make_actor()
+            command=OpenScreenCommand(
+                application_ref="app_1",
+                context=make_actor(),
+                collect_id=COLLET_ID,
+            ),
         )
         first = service.admit(
-            COLLET_ID,
-            binding,
-            "app_1",
-            OpenAdmitCommand(decision_id="dec_1"),
-            make_actor(),
+            command=OpenAdmitCommand(
+                application_ref="app_1",
+                context=make_actor(),
+                collect_id=COLLET_ID,
+                decision_id="dec_1",
+            ),
         )
         assert first.state == "ADMITTED"
         replay = service.admit(
-            COLLET_ID,
-            binding,
-            "app_1",
-            OpenAdmitCommand(decision_id="dec_1"),
-            make_actor(),
+            command=OpenAdmitCommand(
+                application_ref="app_1",
+                context=make_actor(),
+                collect_id=COLLET_ID,
+                decision_id="dec_1",
+            ),
         )
         assert replay.state == "ADMITTED"
         # 产物不重建:成员行恰一条、decision 恰一条。
         assert len(store.list_members(AXES, binding, COLLET_ID)) == 1
         assert len(store.list_decisions(AXES, binding, COLLET_ID)) == 1
+        [decision] = store.list_decisions(AXES, binding, COLLET_ID)
+        store.insert_decision(
+            AXES, binding,
+            replace(decision, admission_decision_id="dec_conflicting",
+                    admitted_scope_ref="scope://other"),
+            COLLET_ID,
+        )
         with pytest.raises(ContextCollabValidationError, match="stored shape"):
             service.admit(
-                COLLET_ID,
-                binding,
-                "app_1",
-                OpenAdmitCommand(
-                    decision_id="dec_1", admitted_scope_ref="scope://other"
+                command=OpenAdmitCommand(
+                    application_ref="app_1",
+                    context=make_actor(),
+                    collect_id=COLLET_ID,
+                    decision_id="dec_conflicting",
                 ),
-                make_actor(),
             )
 
     def test_revoke_admission_terminates_products(self):
@@ -511,7 +549,13 @@ class TestOpenApplicationLifecycle:
             service, lifecycle, participation_type=ParticipationType.GROUP_MEMBER
         )
         binding = "mb_open_alpha"
-        service.admit(COLLET_ID, binding, app, OpenAdmitCommand(), make_actor())
+        service.admit(
+            command=OpenAdmitCommand(
+                application_ref=app,
+                context=make_actor(),
+                collect_id=COLLET_ID,
+            ),
+        )
         member_id = store.list_members(AXES, binding, COLLET_ID)[
             0
         ].group_member_binding_id
@@ -543,11 +587,12 @@ class TestOpenApplicationLifecycle:
             COLLET_ID,
         )
         service2.admit(
-            COLLET_ID,
-            binding2,
-            app2,
-            OpenAdmitCommand(target_stage_ref="st_ready"),
-            make_actor(),
+            command=OpenAdmitCommand(
+                application_ref=app2,
+                context=make_actor(),
+                collect_id=COLLET_ID,
+                target_stage_ref="st_ready",
+            ),
         )
         allocation_id = store2.list_decisions(AXES, binding2, COLLET_ID)[
             0
