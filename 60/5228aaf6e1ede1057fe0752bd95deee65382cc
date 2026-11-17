@@ -1,0 +1,30 @@
+apps/bcs/docs/caller-execution.md
+  s_d2bf2069ff97fe::t_523bc9f9ccb0e7 36-46
+apps/bcs/scripts/e2e-test/caller_execution_story.py
+  s_d2bf2069ff97fe::t_523bc9f9ccb0e7 63,66,178,196,318,331,360,437-440
+apps/bcs/crates/services/bcs-message-flow/tests/cases/caller_execution.rs
+  s_d2bf2069ff97fe::t_523bc9f9ccb0e7 62-67,89,123-128,266-277
+  s_d2bf2069ff97fe::t_9cd1eea2bfbfde 278
+apps/bcs/crates/services/bcs-message-flow/src/caller_execution.rs
+  s_d2bf2069ff97fe::t_523bc9f9ccb0e7 56,84
+apps/bcs/crates/bootstrap/bcs/tests/caller_channel/provider.rs
+  s_d2bf2069ff97fe::t_523bc9f9ccb0e7 16,25-27,55,93
+apps/bcs/crates/bootstrap/bcs/tests/caller_channel/README.md
+  s_d2bf2069ff97fe::t_523bc9f9ccb0e7 86-90
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "605228aaf6e1ede1057fe0752bd95deee65382cc",
+  "prompts": {},
+  "sessions": {
+    "s_d2bf2069ff97fe": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ce8a-9474-7172-8e43-0c593e52a6e9",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "卓人 <hx410025@antgroup.com>"
+    }
+  }
+}

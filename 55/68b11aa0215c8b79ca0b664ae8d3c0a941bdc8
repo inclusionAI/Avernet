@@ -1,0 +1,75 @@
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/aistudio-train-manual-audit-repository.ts
+  s_4e7e3f8993b73f::t_b2e2823d893a35 23-32,49,54-60,76-78,83,87-94
+  s_4e7e3f8993b73f::t_fc9eb94bc8dad7 1,42,52
+apps/evolverun/clawweb/public/shared/server/schema-aistudio-train.ts
+  s_4e7e3f8993b73f::t_b2e2823d893a35 4-6,9
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/aistudio-train-state.fixture.ts
+  s_4e7e3f8993b73f::t_2ab74536b96c76 1-12
+  s_4e7e3f8993b73f::t_05fab7e19585d2 13-16
+apps/evolverun/clawweb/public/shared/server/__tests__/schema-aistudio-train-manual-audit.test.ts
+  s_4e7e3f8993b73f::t_cff4070be0c54d 4-7,11-17
+apps/evolverun/clawweb/public/shared/server/schema-aistudio-train-manual-audit.ts
+  s_4e7e3f8993b73f::t_b2e2823d893a35 2-5,7-9
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/aistudio-train-manual-audit-repository.test.ts
+  s_4e7e3f8993b73f::t_b805eb08609ef6 4,14,26-31,42,44,50,64,68-85
+apps/evolverun/clawweb/public/shared/server/__tests__/schema-aistudio-train.test.ts
+  s_4e7e3f8993b73f::t_cff4070be0c54d 3,23,26-31,34-36,39,42-48
+  s_4e7e3f8993b73f::t_b7d989eaa15c1c 50-61,63
+  s_4e7e3f8993b73f::t_e552c990fcf772 49
+apps/evolverun/clawweb/public/shared/server/db/migrations-registry.ts
+  s_4e7e3f8993b73f::t_7fb1ae713b2ae4 8
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/aistudio-train-state.ts
+  s_4e7e3f8993b73f::t_c77271ee2f247e 1-33,35-47,77
+  s_4e7e3f8993b73f::t_fc9eb94bc8dad7 34,48-76
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/aistudio-train-state-schema.test.ts
+  s_4e7e3f8993b73f::t_40b806341f8817 1-83
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/aistudio-train-watch-repository.ts
+  s_4e7e3f8993b73f::t_fc9eb94bc8dad7 7,23,41,61,117,138
+  s_4e7e3f8993b73f::t_c77271ee2f247e 1,4,6,8-9,11-12,15,17,25-29,33-34,40,42-44,46-47,49-54,58,60,62-67,69-71,73-74,80,86-87,102-111,116,120-122,126-128,130-132,137,141-145,148-153,155-157,159-163,165-168
+  s_4e7e3f8993b73f::t_4c686980c70455 45,48,82-85,118-119,124,139-140,147
+  s_4e7e3f8993b73f::t_7d8d0357a430c0 13-14,16,19-22,68,92-101,123,125,146,154
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/aistudio-train-watch-repository.test.ts
+  s_4e7e3f8993b73f::t_4f4a412e9616f2 10,149,176,194-213
+  s_4e7e3f8993b73f::t_4c686980c70455 35-38,70-77,219-221,223-224
+  s_4e7e3f8993b73f::t_2ab74536b96c76 5,9,11,15,85,88,91,93,122-123,127,130,133,136,141,144-146,148,150-175,177-193,227-228
+  s_4e7e3f8993b73f::t_2311cb711f0db0 86-87,92,128-129
+  s_4e7e3f8993b73f::t_b805eb08609ef6 147
+  s_4e7e3f8993b73f::t_e2ce6ca19f5413 3,83,214-218,222,225-226
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/app-config-repository.ts
+  s_4e7e3f8993b73f::t_4c686980c70455 113,143,155
+  s_4e7e3f8993b73f::t_c77271ee2f247e 9-10,44-45,50,52,59,78,125,130,153
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/app-config-repository.test.ts
+  s_4e7e3f8993b73f::t_b805eb08609ef6 1-40
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/aistudio-train-state.test.ts
+  s_4e7e3f8993b73f::t_96c0cbdf43340f 1-16
+apps/evolverun/clawweb/public/app/clawweb/server/__tests__/aistudio-train-runtime.test.ts
+  s_4e7e3f8993b73f::t_ba1ca84e199805 8,15,50-51
+apps/evolverun/clawweb/public/modules/workflow/server/contracts/__tests__/aistudio-train.test.ts
+  s_4e7e3f8993b73f::t_82aa4f60ee7822 3-5,10,13-19
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/aistudio-train-restart.test.ts
+  s_4e7e3f8993b73f::t_0180327e1c4d5d 1-39
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/aistudio-train.test.ts
+  s_4e7e3f8993b73f::t_ec9c92b4bf7b23 6,13,71,89,95-96,99,101,107
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/__tests__/aistudio-train-generic-events.test.ts
+  s_4e7e3f8993b73f::t_ee95e2c2e7fb98 7,21,60
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/__tests__/aistudio-train-manual-audit.test.ts
+  s_4e7e3f8993b73f::t_b38381ab963eef 7,22,74,77
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/__tests__/aistudio-train-watches.test.ts
+  s_4e7e3f8993b73f::t_b88898bb945fc7 7,17,66,125
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "5568b11aa0215c8b79ca0b664ae8d3c0a941bdc8",
+  "prompts": {},
+  "sessions": {
+    "s_4e7e3f8993b73f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e375-c4b3-7d70-8077-b0b19e04c803",
+        "model": "GPT-6.1-SOL"
+      },
+      "human_author": "fudapeng <dapeng.fdp@antgroup.com>"
+    }
+  }
+}
