@@ -1,0 +1,14 @@
+apps/bcs-internal/crates/external-clients/bcs-agentbase-sofarpc/src/client.rs
+  h_fa66fe7c023b4b 672-683,1038-1130
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c94b8f8f57d98a0c470101045180df066a034289",
+  "prompts": {},
+  "humans": {
+    "h_fa66fe7c023b4b": {
+      "author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}
