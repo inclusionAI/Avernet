@@ -16,7 +16,14 @@ use bcs_store_api::*;
 
 pub fn store_plugin_contract_tests<P: StorePlugin + ?Sized>(p: &P) {
     for (extension, base) in [
-        (StoreCapability::ConditionalKv, StoreCapability::Kv),
+        (
+            StoreCapability::VersionedKvTtl,
+            StoreCapability::ConditionalKv,
+        ),
+        (
+            StoreCapability::VersionedKvConditionalDelete,
+            StoreCapability::ConditionalKv,
+        ),
         (StoreCapability::MonotonicKv, StoreCapability::ConditionalKv),
         (StoreCapability::StreamRecovery, StoreCapability::Stream),
         (StoreCapability::VersionedZSet, StoreCapability::ZSet),

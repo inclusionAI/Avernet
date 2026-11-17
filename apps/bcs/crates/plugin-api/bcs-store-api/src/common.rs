@@ -19,8 +19,14 @@ pub struct Versioned<T> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StoreCapability {
     Kv,
+    /// Versioned KV operations; independent of ordinary Kv.
     ConditionalKv,
-    /// Retained history, caller-assigned newer versions and conditional deletion.
+    /// All versioned expiry modes and atomic version-checked TTL updates.
+    VersionedKvTtl,
+    /// Atomic version check + deletion; does not imply retained history.
+    VersionedKvConditionalDelete,
+    /// Retained history across versioned mutations, including deletion/expiry,
+    /// plus caller-assigned newer versions. TTL/delete extensions are independent.
     MonotonicKv,
     AtomicJson,
     ZSet,
@@ -32,8 +38,10 @@ pub enum StoreCapability {
 }
 
 /// Metadata only; operation traits are independently injectable as trait objects.
-/// ConditionalKv requires Kv; MonotonicKv requires ConditionalKv; VersionedZSet
-/// requires ZSet; StreamGroups and StreamRecovery independently require Stream. Declarations are stable for the lifetime of this plugin instance.
+/// Kv and ConditionalKv are independent. VersionedKvTtl,
+/// VersionedKvConditionalDelete and MonotonicKv each require ConditionalKv.
+/// VersionedZSet requires ZSet; StreamGroups and StreamRecovery independently
+/// require Stream. Declarations are stable for the lifetime of this instance.
 pub trait StorePlugin: Send + Sync + 'static {
     fn supports(&self, capability: StoreCapability) -> bool;
 }

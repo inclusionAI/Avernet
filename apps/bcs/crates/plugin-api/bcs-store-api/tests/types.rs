@@ -1,5 +1,9 @@
 use bcs_store_api::{
-    json::JsonStorePlugin, kv::KvStorePlugin, stream::*, zset::ZSetStorePlugin, *,
+    json::JsonStorePlugin,
+    kv::{KvStorePlugin, VersionedKvStorePlugin},
+    stream::*,
+    zset::ZSetStorePlugin,
+    *,
 };
 
 #[test]
@@ -7,6 +11,7 @@ fn plugin_traits_are_object_safe() {
     fn accepts(
         _: &dyn StorePlugin,
         _: &dyn KvStorePlugin,
+        _: &dyn VersionedKvStorePlugin,
         _: &dyn JsonStorePlugin,
         _: &dyn ZSetStorePlugin,
         _: &dyn StreamStorePlugin,

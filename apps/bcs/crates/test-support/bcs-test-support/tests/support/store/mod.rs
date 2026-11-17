@@ -23,6 +23,13 @@ pub struct Model {
     now: AtomicU64,
     lose_response: AtomicBool,
     pub broken_cas: bool,
+    pub broken_kv_delete: bool,
+    pub broken_kv_ttl: bool,
+    pub ordinary_disabled: bool,
+    pub monotonic_disabled: bool,
+    pub versioned_ttl_disabled: bool,
+    pub versioned_delete_disabled: bool,
+    pub reset_kv_history: bool,
     pub broken_json: bool,
     pub broken_json_cas: bool,
     pub broken_zset_cas: bool,
@@ -65,12 +72,22 @@ impl StorePlugin for Model {
     fn supports(&self, c: StoreCapability) -> bool {
         !(matches!(
             c,
-            StoreCapability::ConditionalKv | StoreCapability::MonotonicKv
+            StoreCapability::ConditionalKv
+                | StoreCapability::MonotonicKv
+                | StoreCapability::VersionedKvTtl
+                | StoreCapability::VersionedKvConditionalDelete
         ) && self.conditional_disabled
             || matches!(
                 c,
-                StoreCapability::MonotonicKv | StoreCapability::StreamRecovery
-            ) && self.basic_only)
+                StoreCapability::MonotonicKv
+                    | StoreCapability::StreamRecovery
+                    | StoreCapability::VersionedKvTtl
+                    | StoreCapability::VersionedKvConditionalDelete
+            ) && self.basic_only
+            || c == StoreCapability::Kv && self.ordinary_disabled
+            || c == StoreCapability::MonotonicKv && self.monotonic_disabled
+            || c == StoreCapability::VersionedKvTtl && self.versioned_ttl_disabled
+            || c == StoreCapability::VersionedKvConditionalDelete && self.versioned_delete_disabled)
     }
 }
 impl Model {

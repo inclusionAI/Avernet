@@ -12,7 +12,7 @@ done
 checker="$fixture/scripts/ci/check-store-boundaries.sh"
 bash "$checker" >/dev/null
 probe="$fixture/crates/services/bcs-bot/src/probe.rs"
-for symbol in StorePlugin KvStorePlugin JsonStorePlugin ZSetStorePlugin StreamStorePlugin bcs_store_api; do
+for symbol in StorePlugin KvStorePlugin VersionedKvStorePlugin JsonStorePlugin ZSetStorePlugin StreamStorePlugin bcs_store_api; do
   printf 'use %s;\n' "$symbol" > "$probe"
   if bash "$checker" > "$fixture/output" 2>&1; then
     echo "FAIL: boundary accepted $symbol"

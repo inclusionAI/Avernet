@@ -6,7 +6,7 @@
 and reusable contract tests for KV, conditional writes, atomic JSON, sorted sets
 and streams. No provider, business store or runtime wiring is included.
 
-**Architecture:** Four capability traits share metadata/error/value types in
+**Architecture:** Five operation traits share metadata/error/value types in
 `bcs-store-api`. Service repositories own keys and business protocols; providers
 own atomic storage operations. Advanced capabilities are explicitly advertised,
 never emulated with unprotected client read/write sequences. Reusable harnesses
@@ -110,3 +110,30 @@ interleaved-reader fairness check and a negative fixture that reproduces the
 provider-global counter starvation bug. API Clippy, Rustdoc, R10 and negative
 boundary checks pass. The history-resetting fixture remains a non-blocking test
 enhancement; strong history assertions have not been weakened.
+
+
+## Independent KV interfaces (2026-11-17)
+
+User-approved refinement: ordinary KvStorePlugin and VersionedKvStorePlugin are
+independent injectable traits. Versioned creation/CAS retain explicit Expiry;
+direct deletion and TTL queries are baseline operations. VersionedKvTtl covers
+all expiry modes and atomic conditional renewal. VersionedKvConditionalDelete
+covers atomic conditional deletion and returns bool. Neither extension requires
+MonotonicKv; that capability remains the cross-incarnation history/logical-version
+guarantee. No-TTL providers reject Preserve/After before I/O instead of silently
+making values persistent. The earlier persistent-only basic CAS signature is
+superseded, not a permanent limitation of the public interface.
+
+Affected consumers: the test-only model/shared harnesses and separately maintained
+providers. No business service wiring is added. Both operation traits may share
+connections/private wire helpers; a versioned-only handle has no ordinary set.
+A compile-fail example enforces that boundary. Conformance includes basic-only,
+versioned-without-ordinary, independent TTL/delete capabilities, stale deletion,
+TTL failure rollback, and retained-history versus history-resetting fixtures.
+Migration and capability checks are documented in the owning crate README.
+
+Validation: 31 conformance tests, 3 type tests and the compile-fail boundary
+example passed on Rust 1.94.1. The previously deferred history-resetting fixture
+is now included: basic CAS accepts it and MonotonicKv rejects it. API all-target
+Clippy and the store boundary gate passed. Provider integration is validated in
+its owning repository; these fixtures do not certify backend failure behavior.

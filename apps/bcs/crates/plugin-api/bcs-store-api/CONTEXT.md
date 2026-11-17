@@ -2,7 +2,7 @@
 
 ## Provides
 
-- StorePlugin capability declaration and vendor-neutral KV, conditional KV,
+- StorePlugin capability declaration and independent ordinary/versioned KV,
   atomic JSON, sorted-set and stream operation traits.
 - Shared version, expiry, operation outcome and uncertainty contracts.
 - The [README](README.md) owns semantics, provider requirements and test mapping.
@@ -23,8 +23,10 @@ restricted to its configured storage namespace. No dynamic loader is introduced.
 
 ## Change impact
 
-This additive contract changes no existing consumer or implementation. Future
-service-store and provider implementations must coordinate changes to versions,
+This pre-merge contract revision splits KvStorePlugin/VersionedKvStorePlugin,
+adds optional versioned TTL/conditional deletion, and changes conditional delete
+to bool. Providers and harness callers must migrate together. Future
+service-store implementations must coordinate changes to versions,
 atomicity, stream cursor semantics, supported capabilities and error outcomes.
 Object/file storage and best-effort caches retain their existing API boundaries.
 

@@ -31,15 +31,17 @@ ports directly: it need not emulate these data structures.
 
 ## Capabilities and operation traits
 
-`StorePlugin::supports` declares support for this configured instance. Four
+`StorePlugin::supports` declares support for this configured instance. Five
 operation traits are independently injectable; no all-capabilities adapter,
 factory registry or business wrapper is required.
 
 | Capability | Trait and surface | Guarantee |
 | --- | --- | --- |
 | Kv | `KvStorePlugin`: get, mget, set, put_if_absent, delete, expire, ttl | Byte values; atomic single-key writes/NX; explicit expiry |
-| ConditionalKv | Same trait: create_versioned, get_versioned, compare_and_set | Persistent versioned creation/read and atomic exact-version update within a live key incarnation |
-| MonotonicKv | Same trait: set_if_newer, delete_if_version; stronger history for all KV mutations | Caller-assigned versions and retained history across expiration/deletion/recreation |
+| ConditionalKv | `VersionedKvStorePlugin`: create_versioned, get_versioned, compare_and_set, delete, ttl | Atomic exact-version update, unconditional deletion and read-only TTL; Persistent expiry is always supported |
+| VersionedKvTtl | Same trait: expiry arguments and expire_if_version | All expiry modes; atomic condition/content/version/TTL update and conditional renewal |
+| VersionedKvConditionalDelete | Same trait: delete_if_version | Atomic comparison and deletion; no cross-incarnation history implied |
+| MonotonicKv | Same trait: set_if_newer; stronger history for all versioned mutations | Caller-assigned versions and retained history across expiration/deletion/recreation |
 | AtomicJson | `JsonStorePlugin`: get_json, get_paths, mutate_json | Whole-key condition, ordered path edits/replacement/deletion, version and expiry commit together |
 | ZSet | `ZSetStorePlugin`: add, remove, range | Atomic batches; bounded ordered score/member queries |
 | VersionedZSet | Same trait: snapshot, update_if_version | One independent version for the entire collection; atomic check/mutate/advance |
@@ -47,7 +49,8 @@ factory registry or business wrapper is required.
 | StreamRecovery | Same read/range/trim methods | Atomic entries/head/removed-prefix evidence and atomic trim publication |
 | StreamGroups | Same trait: create_group, read_group, ack, claim_idle | Pending delivery tracking, acknowledgement and bounded idle reclamation |
 
-ConditionalKv requires Kv; MonotonicKv requires ConditionalKv. VersionedZSet
+Kv and ConditionalKv are independent. VersionedKvTtl, VersionedKvConditionalDelete
+and MonotonicKv each require ConditionalKv, not one another. VersionedZSet
 requires ZSet. StreamGroups and StreamRecovery independently require Stream. All methods for an unsupported capability return `Unsupported` before
 mutation. There are no best-effort conditional defaults. Consumers check their
 required capabilities at assembly/startup, not after accepting durable work.
@@ -58,14 +61,31 @@ An ordinary single-key set is atomic too. Conditional operations additionally
 make **checking the condition and applying the write one atomic action**.
 
 - `put_if_absent`: create only if missing/expired; no version supplied.
-- `create_versioned`: create a persistent versioned key only if absent.
-- `compare_and_set`: current persistent live version must equal the observed
-  version. The provider atomically chooses a strictly higher next version.
-  These basic methods intentionally have no TTL parameter. Do not mix ordinary
-  SET/expiry with basic versioned keys; a provider may use different native value
-  types. A lease requiring conditional TTL renewal needs a proven separate contract.
-- `set_if_newer` (MonotonicKv): supplied version must exceed retained history; that supplied
-  version becomes the new version. Equal versions are rejected, even for equal data.
+- `create_versioned`: create a versioned key only if absent; never change an existing value or its TTL.
+- `compare_and_set`: the live version must equal the observed version. Content,
+  the strictly higher next version and requested expiry are committed together.
+  Missing/expired values return ConditionNotMet, never recreation.
+- Both methods accept `Expiry`. Without VersionedKvTtl, only Persistent is
+  supported; Preserve/After fail Unsupported before I/O. With it, Preserve keeps
+  the existing deadline (new keys are persistent), Persistent removes expiry and
+  After sets a positive rounded-up duration. Failed conditions change no TTL.
+- `expire_if_version` (VersionedKvTtl): atomically compare, keep content, change
+  TTL and advance version. Missing/mismatch returns ConditionNotMet; zero TTL
+  is invalid. Successful renewals invalidate old tokens even for identical TTL.
+- `delete`: unconditional deletion, true only when this attempt removed live data.
+  It is deliberately available on both traits and is not an ownership fence.
+- `delete_if_version` (VersionedKvConditionalDelete): atomically compare and
+  delete. Returns bool: false means absent/mismatched, not proof that a previous
+  attempt succeeded. It does not return a new live-value version or promise ABA safety.
+- `set_if_newer` (MonotonicKv): supplied version must exceed retained history;
+  that version becomes the new version. Equal versions are rejected, even for
+  equal data. Non-Persistent expiry also requires VersionedKvTtl.
+
+Do not mix the two KV interfaces on the same logical key: native representations
+may differ. Inject only the required trait and keep key namespaces disciplined;
+the traits do not enforce physical isolation of arbitrary String keys. Both
+traits can share a provider's connections and private DEL/PTTL implementation.
+
 - JSON uses `WriteCondition` to select these same rules. `Any` is unconditional;
   it still advances version. Patches compare and advance the entire document.
 - ZSet CAS uses an exact collection version. `None` expects no history, not an
@@ -76,9 +96,11 @@ A provider may encode business versions only when the complete protocol proves
 the required checks. A greater timestamp alone does not prove correct owner,
 expected business sequence or matching commit content.
 
-When a provider advertises MonotonicKv, AtomicJson or VersionedZSet, **every mutation through all
-its entry points participates in the same version history**, including ordinary
-set/add/remove, expiry changes, and writes of identical content. Versions survive
+With MonotonicKv, **every versioned mutation retains the same history**, including
+unconditional deletion, expiry and identical writes. Ordinary KV is a separate
+key discipline, not an alternate versioned write path. AtomicJson and VersionedZSet
+likewise retain history across all their mutations, including ordinary ZSet
+add/remove, expiry changes and identical content. Versions survive
 expiration/removal/recreation so an old token cannot become valid again (ABA).
 A backend that cannot preserve this history cannot advertise the capability.
 Version zero and overflow are errors; there is no wraparound. Basic ConditionalKv
@@ -203,18 +225,20 @@ Use a fresh isolated namespace/prefix for each invocation. Tests that use multip
 streams require keys within the provider's supported routing scope. Call:
 
 - `store_plugin_contract_tests` for capability declarations;
-- `kv_store_plugin_contract_tests`, and `kv_conditional_contract_tests` when supported;
+- `kv_store_plugin_contract_tests` for ordinary KV;
+- `kv_conditional_contract_tests` for VersionedKvStorePlugin, plus `kv_versioned_optional_contract_tests` for explicit refusals;
+- `kv_versioned_ttl_contract_tests` and `kv_conditional_delete_contract_tests` for their independent extensions;
 - `kv_monotonic_contract_tests` for MonotonicKv;
-- `kv_expiry_contract_tests` for MonotonicKv with a clock/wait callback exceeding TTL rounding;
-- `kv_unknown_outcome_contract_tests` for MonotonicKv with provider/proxy response-loss injection;
+- `kv_expiry_contract_tests` for VersionedKvTtl with a clock/wait callback exceeding TTL rounding; retained-history assertions run only when MonotonicKv is advertised;
+- `kv_unknown_outcome_contract_tests` for ConditionalKv with provider/proxy response-loss injection;
 - `json_store_plugin_contract_tests`;
 - `z_set_store_plugin_contract_tests` and `versioned_zset_contract_tests`;
 - `stream_store_plugin_contract_tests`, `stream_group_contract_tests` and
   `stream_blocking_contract_tests`.
 
 The private `conformance_store` test model executes these assertions and includes
-intentionally broken CAS, JSON rollback, interleaved JSON/ZSet check-write and
-same-score invalidation variants that
+intentionally broken CAS, stale conditional deletion, rejected TTL mutation,
+lost KV history, JSON rollback, interleaved JSON/ZSet check-write and same-score invalidation variants that
 the harness must reject. It is not a production or exported in-memory plugin.
 Type tests also check trait-object use, ID ordering and outcome distinctions.
 
@@ -243,9 +267,15 @@ and trim metadata need explicit semantic verification, not command-name matching
 
 ## Capability split compatibility
 
-Before merging this contract, consumers must migrate CAS initialization to
-`create_versioned` and remove expiry arguments from basic `compare_and_set`.
-Require MonotonicKv for caller versions, conditional deletion or key-reuse safety.
+Before merging this contract, move versioned implementations/callers from
+KvStorePlugin to VersionedKvStorePlugin and pass an explicit Expiry to versioned
+creation/CAS. Use Persistent for providers without VersionedKvTtl. Conditional
+deletion now returns bool and requires VersionedKvConditionalDelete, independently
+of MonotonicKv. Require MonotonicKv for caller versions or key-reuse safety.
+Unconditional delete/ttl have the same method names on both traits: inject a
+narrow trait object, or use trait-qualified calls when a concrete provider
+implements both. Shared harnesses must use the corresponding trait; ordinary
+KV calls are no longer used to exercise versioned history.
 Read `page.recovery`/`trim.recovery` explicitly; services requiring loss detection
 must reject a provider without StreamRecovery instead of treating None as a clean
 stream. Service-owned snapshot/checkpoint and retention protocols remain required.
