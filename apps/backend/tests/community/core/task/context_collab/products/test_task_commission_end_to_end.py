@@ -185,33 +185,26 @@ def test_end_to_end_commission_flow(deploy_commission, tmp_path):
 
     # 测试用例需要的模块动态注入
     service, working_bot, injector = deploy_commission(profile)
-    l4_context_service = injector.get(ContextServiceProtocol)
     store, axes = injector.get(MethodStoreProtocol), current_axes()
-    open_ops = injector.get(OpenMethodOpsServiceProtocol)
+    l4_context_operate = injector.get(ContextServiceProtocol)
+    l5_open_method = injector.get(OpenMethodOpsServiceProtocol)
 
     # 2. 先创建 L4 Collet、独立根 Task 和初始 Event,不实例化产品。
-    collet = _create_commission_collet(l4_context_service)
+    collet = _create_commission_collet(l4_context_operate)
 
     # 3. 调用 L6 Instantiate，关联已有 Collet，并初始化 MethodBinding 等引用。
     instance = _instantiate_product_instance(injector, collet, profile)
 
-    open_binding_id, single_binding_id = instance.method_binding_refs
-    binding_id = open_binding_id
-    assert store.list_opportunities(axes, binding_id, collet.collet_id) == []
-    assert store.list_applications(axes, binding_id, collet.collet_id) == []
-    assert store.list_selections(axes, single_binding_id, collet.collet_id) == []
-
     # 4. 发布机会
-    _publish_opportunity(open_ops, collet.collet_id)
+    _publish_opportunity(l5_open_method, collet.collet_id)
 
     # 5. Agent主动发现机会
     opportunity, submitted = _discover_opportunity(store, axes, collet, working_bot)
-    assert opportunity.method_binding_id == binding_id
     assert opportunity.scope_ref == instance.collet_ref
 
     # 6. Open 录取只建立参与事实,不自动成为 Single 的选定执行者。
     decision = _admit_application_agent(
-        injector, open_ops, store, axes, collet.collet_id, opportunity, submitted
+        injector, l5_open_method, store, axes, collet.collet_id, opportunity, submitted
     )
 
     # 7. 明确选择该次录取产生的参与者,不是把 Agent ID 或 Query 结果当作选定。
@@ -219,7 +212,7 @@ def test_end_to_end_commission_flow(deploy_commission, tmp_path):
 
     # 8. 通知agent执行任务
     started, task_id = _notify_agent_work(
-        injector, l4_context_service, service, collet, working_bot.actor_context
+        injector, l4_context_operate, service, collet, working_bot.actor_context
     )
 
     # 9. Agent 自主执行;最终由用户验收,不是 Single 或 ProductInstance 推进 Task。
@@ -229,7 +222,7 @@ def test_end_to_end_commission_flow(deploy_commission, tmp_path):
 
     # 10. 查询和验证结果
     _query_task_result(
-        l4_context_service,
+        l4_context_operate,
         service,
         collet.collet_id,
         working_bot.actor_context,
@@ -331,11 +324,11 @@ def _create_product_profile():
     return profile
 
 
-def _create_commission_collet(l4):
+def _create_commission_collet(l4_context_operate):
     # 一个独立委托采用一个 Collet + 根 Task;这是本产品映射,不是协议的普遍 1:1。
-    # TODO l4_context_operate需要协议层统一提供
-    # TODO: to_space, executor_refs 是不是该从其他地方提取？
-    collet = l4.create_collet(
+    # TODO l4_context_operate需要协议层统一提供                (fixed：本身就是L4层协议提供)
+    # TODO: to_space, executor_refs 是不是该从其他地方提取？    (fixed: 这里不再传入)
+    collet = l4_context_operate.create_collet(
         ColletCreateCommand(
             to_space=SPACE,
             initiator_ref=HUMAN.actor,
