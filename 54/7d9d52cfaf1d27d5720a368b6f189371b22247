@@ -1,0 +1,26 @@
+apps/evolverun/clawweb/public/shared/server/__tests__/database-init.test.ts
+  s_4e7e3f8993b73f::t_b530fdc5b2cbea 29-32
+  s_4e7e3f8993b73f::t_1e592bb333cda4 27,33-34
+apps/evolverun/clawweb/public/modules/workflow/server/contracts/__tests__/aistudio-train.test.ts
+  s_4e7e3f8993b73f::t_b39e858b10eef1 1,3-4,8-15
+apps/evolverun/clawweb/public/shared/server/__tests__/schema-aistudio-train.test.ts
+  s_4e7e3f8993b73f::t_b39e858b10eef1 23,28
+apps/evolverun/clawweb/public/shared/server/__tests__/flow-run-link.test.ts
+  s_4e7e3f8993b73f::t_b530fdc5b2cbea 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "547d9d52cfaf1d27d5720a368b6f189371b22247",
+  "prompts": {},
+  "sessions": {
+    "s_4e7e3f8993b73f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e375-c4b3-7d70-8077-b0b19e04c803",
+        "model": "GPT-6.1-SOL"
+      },
+      "human_author": "fudapeng <dapeng.fdp@antgroup.com>"
+    }
+  }
+}
