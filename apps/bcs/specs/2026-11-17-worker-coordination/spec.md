@@ -38,7 +38,7 @@ Runner、输入去重、checkpoint 和 outbox 的业务流程沿用既有设计�
 | `Instance` | 节点名 `node` 和注册实例 `incarnation`。新注册生命周期生成新 UUID，正常续租不改变 UUID。 |
 | `ShardOwner` | `Instance + epoch`。epoch 在同一个 shard 内单调递增。 |
 | `ShardClaim` | `shard + ShardOwner`。继续作为认领身份，不携带公开存储版本或交接状态。 |
-| `ShardRecord`（拟新增） | 当前 `ShardClaim` 与可选的当前 `handoff`，作为完整协调状态的读取视图。 |
+| `ShardRecord`（拟新增） | 当前 `ShardClaim` 与可选的当前 `handoff`，作为完整协调状态的读取视图；底层 owner 记录使用独立于 epoch 的私有存储版本和 EQ，不把版本字段加到公开视图。 |
 | `handoff`（拟新增） | `request_id、from、deadline、source_done`。接收方就是当前 owner；持久 deadline 仅供诊断，实际等待由接收方本地单调时钟控制。当前记录是来源判断交接是否仍匹配的依据，见第 4.3 节。 |
 | 成员记录（拟扩展） | 实例、角色、运行/排空/退休状态、内部 HTTP 控制地址和租约信息。 |
 | `CheckpointEnvelope` | 复用 owner、业务 checkpoint 和恢复信息。封印保留最新业务内容。 |
@@ -52,6 +52,8 @@ Runner、输入去重、checkpoint 和 outbox 的业务流程沿用既有设计�
 **checkpoint 明确采用精确旧版本条件（EQ，即 `WriteCondition::Version`）。** 只有当前文档版本等于已确认的预期版本才可更新，成功返回新版本；业务提交仍独立校验精确 owner 和 expected_commit_seq。不把公开 `revision` 字段加回 `ShardOwner` 或 `Checkpoint`，也不按 `epoch × 10^9 + commit_seq` 计算 checkpoint 的存储版本。
 
 例如 commit_seq=2、存储版本=27，更新恢复信息后版本变成 28，commit_seq 仍为 2。下一轮业务提交比较版本 28，成功后推进存储版本并将 commit_seq 改为 3。控制写不会占掉业务第 3 轮的版本号。存储版本不能解释成真实时间或业务进度。
+
+**`ShardRecord` 同样使用私有存储版本 + EQ。** 认领、转交 owner、记录 source_done 和清理 handoff 都核对这份 owner 文档的预期版本，成功后推进版本；epoch 仅在认领/转交时推进，同 epoch 的控制写不改变它。owner 记录和每份 checkpoint 各自管理文档版本，不共用一个全局版本，也不能直接拿 epoch 当存储版本。首次创建仍使用原子 create-if-absent。
 
 存储元数据与业务 JSON 隔离。例如，一个逻辑业务值含有 `rev` 和真实 null 时，适配器可以在同一 key 内封装成：
 
@@ -68,7 +70,7 @@ Runner、输入去重、checkpoint 和 outbox 的业务流程沿用既有设计�
 
 - Worker checkpoint 的封印、提交和恢复控制更新使用上述 EQ 协议，不直接复用 `version::seal/commit/next` 的分段公式。已有数据启用新写法前必须隔离旧写入方并完成格式/版本迁移，不允许两种写协议混写同一记录。
 - `inbox/producer.rs` 的 `create_once` 目前使用 `Newer(CREATE)` 和持久化。严格 GT 在 key 一直存在时可以拒绝相等重试，但注释中的“过期后也永远拒绝”依赖额外历史能力。后续接入本模式时，spec 等一次性创建记录采用 `Absent` 加持久化，已存在时走身份/内容核对，不能把 Absent 当作删除后仍不许重建的保证。
-- 不要求删除其他路径使用的 GT 或整个 `version.rs`。GT 必须严格拒绝相等，不能降级成 GE；当前 `Newer`/`AtomicJson` 的删除后历史承诺仍需独立满足，不能因修改 SPEC 而悄悄放宽公共接口。
+- 不要求删除其他路径使用的 GT 或整个 `version.rs`，但这不允许 checkpoint 或 `ShardRecord` 继续使用业务序号/epoch 编码代替私有版本和 EQ。第 5.1 节有前提证明的 GT(prev+1) 映射仍属于 EQ 语义。其他 GT 路径必须独立证明正确性，严格拒绝相等，不能降级成 GE；当前 `Newer`/`AtomicJson` 的删除后历史承诺仍需独立满足，不能因修改 SPEC 而悄悄放宽公共接口。
 
 Owner、spec 和 checkpoint 防护记录第一版不自动过期、不删除重建，也不得被内存淘汰；owner 的 epoch 永不重置。首次创建使用原子 create-if-absent，只更新操作不能重建缺失记录。后续 GC 或恢复旧备份必须独立证明旧版本、旧实例和迟到请求不会重新有效，见第 5.1 节。
 
@@ -79,7 +81,7 @@ Owner、spec 和 checkpoint 防护记录第一版不自动过期、不删除重�
 | 边界 | 变化与结果约定 |
 | --- | --- |
 | `MembershipPort` | 注册时登记控制地址；`members` 返回可寻址、活跃且未 draining 的候选；增加精确实例的幂等退休操作。保留注册、续租、draining 和三态存活查询。 |
-| `ShardLeasePort` | `current` 返回 `ShardRecord`；增加转交 owner、记录来源收尾完成、同 epoch 清理当前 handoff 的条件操作。故障 `claim` 在同一次 CAS 中推进 owner 并移除旧 handoff，见第 3.2 节；不新增独立的强制清理操作。所有操作核对精确 claim 和请求身份。 |
+| `ShardLeasePort` | `current` 返回 `ShardRecord`；增加转交 owner、记录来源收尾完成、同 epoch 清理当前 handoff 的条件操作。已有 owner 记录的所有更新使用私有文档版本 + EQ，并核对精确 claim 和请求身份。故障 `claim` 在同一次 CAS 中推进 owner 并移除旧 handoff，见第 3.2 节；不新增独立的强制清理操作。 |
 | `SessionStorePort` | `AcquireOutcome` 增加 `Deferred`，附下一次检查时间；增加来源调用的 `handoff_session`，按第 2.2.1 节条件转移处理权并保留最新 envelope。 |
 | `DistWorkerRuntimeService` / `DistRuntimeControlPort` | 保留 `snapshot/drain(grace)`，补接收交接请求和唤醒提示的入口。HTTP adapter 调 application service，由其使用控制端口推进；不新增高层协调服务或 Actor。 |
 | 存储插件边界 | 提供符合实际声明的持久单文档条件更新和严格租约能力。业务层不调用厂商命令。 |
@@ -168,7 +170,7 @@ Unknown 不允许故障认领。自身租约不确定时暂停新增工作；超
 
 1. 读取当前 owner 和存储版本，取得旧实例已经终止的可靠证据。
 2. 核对 `expected_epoch`。从未持有时从 epoch=1 开始，否则加一；溢出失败，不能回绕。
-3. 以精确版本条件在同一个 owner 记录内写入新 owner 并设置 `handoff = None`；两者一次原子提交，竞争只允许一个请求成功。旧实例不可复活，因此它的终止证据不会在后续 CAS 前变回有效。
+3. 对已有 owner 记录，以读取到的私有文档版本执行 EQ，在同一次写入中推进文档版本、写入新 owner 并设置 `handoff = None`；从未持有时使用 create-if-absent。竞争只允许一个请求成功。旧实例不可复活，因此它的终止证据不会在后续 CAS 前变回有效。
 4. 再次核对自身成员资格及当前 owner，确认后启动分片处理。写入成功但本实例已失效时不能激活；记录留给后继者正常接管，不能回滚覆盖。
 
 故障认领推进 epoch 时，上一轮 graceful handoff 随同一次 CAS 失效；不是新 owner 认领成功后再调用清理接口。第 4.5 节的 source_done、来源 Dead 或到期条件只约束不推进 epoch 的普通清理。此处认领前必须确认死亡/退休的是当前 shard owner，不能把其状态为 Unknown 当作故障证据。
@@ -181,9 +183,13 @@ Unknown 不允许故障认领。自身租约不确定时暂停新增工作；超
 
 1. 确认当前 shard claim 和自身成员资格。
 2. 读取 checkpoint，按第 4.2 节判断当前 handoff 是否要求等待。
-3. 使用读取到的文档版本执行 EQ 条件更新 owner，保留最新 `commit_seq、consumed、runner_state、outbox` 和恢复信息。仅确认从未初始化的会话可用 create-if-absent 初始化；已有防护记录意外缺失时不能重建为空 checkpoint。
+3. checkpoint 存在时，使用读取到的文档版本执行 EQ 条件更新 owner，保留最新 `commit_seq、consumed、runner_state、outbox` 和恢复信息。加载时缺失按下述方案 A 处理；创建冲突后重读已有记录，不能覆盖。
 4. 确认封印及当前 claim、成员资格后，加载最新 checkpoint。校验失败或未知不激活，也不回滚已经发生的封印。
 5. 通过 `InboxSchedulingPort::observe` 安装并确认本代会话的 scheduling fence，再检查或结算调度安排；按既有恢复协议幂等补做 outbox，再处理下一批输入。
+
+**checkpoint 缺失采用方案 A，不新增初始化标记或其他持久证据。** 在防护记录不删除、不过期、不淘汰、不回滚的受支持部署中，加载时未发现 checkpoint，且没有已知它曾存在的版本/处理权凭据，可以按首次初始化走 create-if-absent。已持有版本或已知记录曾存在的更新、封印、重试发现缺失时，必须失败并报告数据异常，不能丢弃已知凭据后转入创建路径。
+
+这一判断依赖部署生命周期约束，不是协议能识别所有误删：一个没有历史凭据的新 Worker，仅凭 key 缺失无法区分从未创建和意外丢失。删除、淘汰或回滚违反约束时属于数据事故；发现事故后停止受影响范围的处理并走第 5.1 节恢复流程。不得宣称仅凭本协议即可自动发现全部此类事故。
 
 封印、业务提交、恢复控制更新必须推进同一个文档版本。一个示意顺序是：旧 Worker 读取 V1，新 Worker 封印产生 V2，旧 Worker 携带 V1 提交整份 checkpoint 时整笔失败。
 
@@ -303,7 +309,7 @@ A 只有在新增入口关闭、已有轮次与相关在途操作收尾、所持
 
 数据生命周期与运维约束：
 
-- 更新已有 checkpoint、封印或 dispatch 状态时，存在性与版本条件必须原子保证。单独先 GET 再写不能防止中间删除/过期；不得因缺失而创建残缺记录。首次创建走独立的 create-if-absent 路径。
+- 更新已有 checkpoint、封印或 dispatch 状态时，存在性与版本条件必须原子保证。单独先 GET 再写不能防止中间删除/过期；不得因缺失而创建残缺记录。首次创建走独立的 create-if-absent 路径；checkpoint 加载缺失按第 3.3 节方案 A 的部署前提判断，不另设初始化标记，也不承诺从单次缺失自动识别误删。
 - owner、spec、checkpoint 等防护记录不得过期、删除或淘汰。task、dispatch 若允许回收，保留窗口必须覆盖允许的客户端重试、outbox 重放和故障恢复；超出窗口必须有拒绝重建或等价去重依据，不能让迟到请求再次触发已完成动作。没有该证明时不能启用 TTL/GC。
 - 从旧备份恢复或切换到可能回退版本的存储，需要独立恢复流程：隔离旧实例及在途请求，并使用不会与旧凭据混淆的存储代次/命名空间或有独立上界证明的 fencing。仅在备份中的旧 epoch 上加一不构成安全保证，也不能掩盖业务数据回退。
 
@@ -318,6 +324,7 @@ A 只有在新增入口关闭、已有轮次与相关在途操作收尾、所持
 | 场景 | 预期结果 |
 | --- | --- |
 | 多个 Worker 同时认领 | 一方成功，epoch 只增加一次 |
+| 同 epoch 更新 source_done/清理 handoff，随后发生下一次认领 | owner 文档每次成功更新都推进私有版本；控制写不推进 epoch，下一次认领不因版本与 epoch 撞号被拒 |
 | 注册/续租回包丢失、旧 UUID 延迟重试 | Unknown 不当 Dead，失效实例不复活，不误操作新实例 |
 | 节点重启或短暂网络故障 | 默认 node 排名稳定，不搬走健康 shard |
 | 同一候选集在不同进程计算 HRW | 两种身份模式、字符串边界和同分决胜产生一致排名；成员视图不同仍由 CAS 决定赢家 |
@@ -346,7 +353,9 @@ A 只有在新增入口关闭、已有轮次与相关在途操作收尾、所持
 | 退休成功、超时或失败 | 成功形成终止证据；未知不冒充成功，停止发起续租并按预算退出，未完成项不报 Drained |
 | 退出预算耗尽仍有未确认操作 | 保持 DeadlineReached { remaining } 返回形态，诊断详情写结构化日志，不返回 Drained |
 | 版本上限、删除重建、普通写绕过 | 上限失败；拒绝不满足历史/写入纪律的启用方式 |
-| 更新时 key 缺失、内存淘汰或恢复旧备份 | 不重建残缺状态、不误报首次初始化，不让旧凭据再次有效；受限历史能力不得冒充完整 AtomicJson |
+| 生命周期约束成立、无历史凭据的会话加载缺失 | 按首次初始化执行 create-if-absent；并发创建只有一方成功，另一方重读；不写初始化标记 |
+| 已持有版本的更新/封印/重试遇到 key 缺失 | 返回失败并报告异常，不能转成首次创建或重建残缺记录 |
+| 误删、淘汰或旧备份回滚违反部署约束 | 验收部署防护及事故恢复流程；新 Worker 无历史凭据时不声称可自动识别误删，发现事故后停处理并恢复，不让旧凭据再次有效；受限历史能力不得冒充完整 AtomicJson |
 
 验证分为可控时钟和故障注入的契约测试、多 Worker 集成测试、每种 provider/transport 的开发环境测试。跨 transport 写入应使用同一版本协议。生产持久性和故障切换另行验收。
 
