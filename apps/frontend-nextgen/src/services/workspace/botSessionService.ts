@@ -24,6 +24,8 @@ import {
   type BotMessageDto,
   type BotModelDto,
 } from '@/services/backendApi/bots/privateBotSessionController';
+import { BackendRequestError } from '@/services/backendApi/httpClient';
+import { useErrorNotifyStore } from '@/stores/errorNotifyStore';
 import type { ChatMessage } from '@tc-chat/core';
 import type { BotIamTokenStage } from '../backendApi/privateChat/iamTokenController';
 import { mapBotActionPermissions } from './botActionPermissionMapper';
@@ -402,6 +404,7 @@ export const botSessionService = {
     userId: string,
     sessionId: string,
     range?: ConversationSessionRequestRange,
+    options?: { silentNotFound?: boolean },
   ): Promise<DomainResult<BotChatSessionView>> {
     try {
       const params = withFriendBotRequestParams(bot, userId, {
@@ -417,6 +420,11 @@ export const botSessionService = {
       if (!s) throw new Error('查询会话详情失败');
       return { ok: true, data: toSessionView(s, bot.botId) };
     } catch (e) {
+      // An instance lookup miss is expected; ordinary detail requests retain default notifications.
+      if (options?.silentNotFound && range?.deviceUuid && e instanceof BackendRequestError && e.status === 404) {
+        if (e.toastKey) useErrorNotifyStore.getState().cancel(e.toastKey);
+        return { ok: false, error: { code: 'NOT_FOUND', friendlyMessage: '目标会话未找到', canRetry: true } };
+      }
       return { ok: false, error: toDomainError(e) };
     }
   },
