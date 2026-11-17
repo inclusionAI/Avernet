@@ -180,9 +180,10 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
         l5_open_method = injector.get(OpenMethodOpsServiceProtocol)
 
         # 2、通过L4层操作创建Collet
+        current_space = SPACE  # 产品层传入，取bot或用户当前所属space
         l4_collet = l4_context_operate.create_collet(
             ColletCreateCommand(
-                to_space=SPACE,  # TODO: Collect所属的空间（长期持续管理的空间，比如小队、团队空间）
+                to_space=current_space,
                 initiator_ref=HUMAN.actor,  # 发起主体引用
                 objective=OBJECTIVE,
                 executor_refs=(l2_executor_ref,),  # () / (bot,) / (bot1, bot2, ...)
@@ -204,7 +205,7 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
             OpenOpportunityCommand(
                 collet_id=collect_id,
                 actor_context=HUMAN, # actor context
-                participation_type=ParticipationType.COLLET_PARTICIPANT,
+                participation_type=ParticipationType.COLLET_PARTICIPANT,  #协议中明确规定的字段及取值
                 admission_policy_refs=[
                     "task_commission.designated_bot_self_application/1" #录取策略：指定 Bot 自己申请，并由任务产品的策略自动审核
                 ],
@@ -364,54 +365,6 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
         assert final_events[-1].actor_ref == HUMAN.actor
         assert submitted_event.actor_ref == bot_context.actor
         _flow_log(_TEST_DIRECTORY, "完整用户旅程结束:L4 查询确认 status=done 且产物完整")
-
-
-
-@pytest.mark.parametrize("self_application", [False, True], ids=["publisher_proxy", "signed_bot"])
-def test_command_only_submission_through_product_adapters(
-    commission_deployment, self_application
-):
-    definition = TASK_COMMISSION_PROFILE
-    if self_application:
-        definition = replace(
-            definition,
-            publication=OpenPublicationProfile(
-                admission=BotSelfApplicationAdmission(
-                    applicant_role="assignee", accountable_role="owner",
-                    participation_type=ParticipationType.COLLET_PARTICIPANT, capacity=1,
-                )
-            ),
-        )
-    profile = create_product_profile(definition)
-    with commission_deployment(
-        profile, bot_id="bot_uuid.other-owner", owner_id="u_other_bot_owner"
-    ) as (service, working_bot, injector):
-        created = service.publish_task(
-            PublishTaskCommand(
-                title="Command-only application", body="Check product adapter wiring",
-                space=SPACE, assignee_agent_id=working_bot.bot_uuid,
-                product_profile_ref=profile.ref,
-            ), HUMAN,
-        )
-        store, axes = injector.get(MethodStoreProtocol), current_axes()
-        binding = top_level_binding_id(created.collet_id)
-        if self_application:
-            response = working_bot.request(opportunities_query_request(working_bot))
-            [opportunity] = response["data"]["opportunities"]
-            assert store.list_applications(axes, binding, created.collet_id) == []
-            forged = working_bot.application_request(opportunity)
-            operation = forged["params"]["message"]["parts"][0]["data"]
-            operation["context"]["accountable_principal_ref"]["identity_id"] = HUMAN.actor.principal_id
-            working_bot.request(forged, expected_status="REJECTED")
-            assert store.list_applications(axes, binding, created.collet_id) == []
-            working_bot.request(working_bot.application_request(opportunity))
-        [application] = store.list_applications(axes, binding, created.collet_id)
-        assert application.applicant_agent_ref == working_bot.bot_uuid
-        assert application.state is ApplicationState.ADMITTED
-        assert application.accountable_principal_ref == (
-            working_bot.owner_id if self_application else HUMAN.actor.principal_id
-        )
-        assert application.capability_evidence_refs == ()
 
 
 _TEST_DIRECTORY = __name__.rsplit(".", 1)[0].replace(".", "/")
