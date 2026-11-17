@@ -70,7 +70,7 @@ it.each(['offline', 'missing-recovery', 'css-load-error'])('开发模式本地�
   try {
     process.env.NODE_ENV = 'development';
     global.fetch = jest.fn(async (path: string) => {
-      if (path.includes('registry.npmjs.org')) return { ok: true, json: async () => ({ version: '9.8.7' }) };
+      if (new URL(path, window.location.href).origin === 'https://registry.npmjs.org') return { ok: true, json: async () => ({ version: '9.8.7' }) };
       if (failure === 'offline') throw new TypeError('offline');
       return { ok: failure !== 'missing-recovery' || !path.endsWith('recovery.umd.js'), headers: { get: () => path.endsWith('.css') ? 'text/css' : 'application/javascript' } };
     });
@@ -92,7 +92,7 @@ it.each(['offline', 'missing-recovery', 'css-load-error'])('开发模式本地�
     document.querySelector<HTMLScriptElement>(`script[src="${remote}"]`)!.dispatchEvent(new Event('load'));
     document.querySelector('link')!.dispatchEvent(new Event('load'));
     await expect(ui).resolves.toBe(global.taskPanel);
-    expect(global.fetch.mock.calls.filter(([path]: [string]) => path.includes('registry.npmjs.org'))).toHaveLength(1);
+    expect(global.fetch.mock.calls.filter(([path]: [string]) => new URL(path, window.location.href).origin === 'https://registry.npmjs.org')).toHaveLength(1);
     expect(request).not.toHaveBeenCalled();
   } finally { process.env.NODE_ENV = previous; }
 });
