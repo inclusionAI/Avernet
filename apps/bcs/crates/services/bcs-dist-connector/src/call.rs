@@ -58,6 +58,9 @@ pub(crate) struct Call {
     /// Follow the remote task by polling instead of a stream.
     pub polling: bool,
     pub last_polled: Option<(TaskStatus, Payload)>,
+    /// Reads of a task whose cancel answered "already finished" that did not
+    /// give its terminal state.
+    pub finished_reads: u32,
     /// The agent asked a question and its stream ended: wait for a reply.
     pub awaiting_input: bool,
     /// An input could not be delivered or its delivery is unknown: later
@@ -136,6 +139,7 @@ impl Call {
             reattach_due: false,
             polling: false,
             last_polled: None,
+            finished_reads: 0,
             awaiting_input: false,
             input_blocked: false,
             input_not_sent: 0,

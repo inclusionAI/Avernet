@@ -257,6 +257,61 @@ async fn a_direct_message_answer_completes_the_call() {
     assert_eq!(result["message"]["parts"][0]["text"], "42");
 }
 
+/// Resolves to an interface of an agent that declares no streaming.
+struct Unary(String);
+
+#[async_trait]
+impl DistAgentResolver for Unary {
+    async fn resolve(&self, _: &AgentBinding) -> Result<ResolvedAgent, String> {
+        Ok(ResolvedAgent {
+            interface: A2aInterface {
+                url: self.0.clone(),
+                tenant: None,
+                protocol_version: "1.0".into(),
+                binding: A2aBinding::JsonRpc,
+                update_mode: A2aUpdateMode::Poll,
+            },
+            bearer: None,
+            extensions: Vec::new(),
+        })
+    }
+}
+
+#[tokio::test]
+async fn a_non_streaming_interface_is_sent_to_with_the_unary_operation() {
+    let agent = Arc::new(Agent::default());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let app = Router::new().route("/rpc", post(rpc)).with_state(agent.clone());
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let resolver = Unary(format!("http://{address}/rpc"));
+    let client = A2aDistAgentClient::new(Arc::new(resolver), OutboundUrlGuard::new(false, true), None);
+
+    agent.on("SendMessage", Answer::Result(json!({"task": task("TASK_STATE_WORKING")})));
+    let outcome = client.start(&target(), request("s0042.d1:start")).await;
+    let SendOutcome::Accepted { remote: accepted, events } = outcome else {
+        panic!("{}", name(&outcome));
+    };
+    assert_eq!(accepted, remote());
+    let sent = agent.call(0);
+    assert_eq!(sent["method"], "SendMessage");
+    assert_eq!(sent["params"]["message"]["messageId"], "s0042.d1:start");
+    assert_eq!(sent["params"]["configuration"]["returnImmediately"], true);
+    // The answer's task is the only event; the caller follows the task.
+    assert_eq!(kinds(&collect(events.unwrap()).await), vec!["snapshot"]);
+
+    agent.on("SendMessage", Answer::Result(json!({"message": agent_message("42")})));
+    let outcome = client.send_input(&target(), &remote(), request("s0042.d1:in:1")).await;
+    assert_eq!(agent.call(1)["params"]["message"]["taskId"], "rt-1");
+    assert!(matches!(outcome, SendOutcome::Completed { .. }), "{}", name(&outcome));
+
+    agent.on("SendMessage", Answer::Rpc(-32601));
+    assert_eq!(name(&client.start(&target(), request("r-3")).await), "rejected:a2a_method_not_found");
+    agent.on("SendMessage", Answer::Http(503));
+    assert!(name(&client.start(&target(), request("r-4")).await).starts_with("unknown:"));
+    assert_eq!(agent.count(), 4, "no retry inside the adapter");
+}
+
 #[tokio::test]
 async fn an_input_continues_the_remote_task() {
     let (client, agent) = fixture().await;

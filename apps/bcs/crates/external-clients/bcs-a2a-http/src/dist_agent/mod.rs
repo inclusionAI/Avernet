@@ -1,15 +1,18 @@
 //! The distributed Connector's agent client: `DistAgentClientPort` over the
 //! existing A2A bindings (REST, JSON-RPC, gRPC and custom bindings).
 //!
-//! It adds no retry. A send has exactly one of these outcomes:
+//! It adds no retry. An interface resolved with the `Poll` update mode (the
+//! agent declares no streaming) is sent to with the unary operation and
+//! `returnImmediately`; every other interface with the streaming operation.
+//! A send has exactly one of these outcomes:
 //!
 //! | What happened | Outcome |
 //! | --- | --- |
 //! | target not resolvable, address refused by policy, client not buildable | `NotSent` |
 //! | no connection was established (DNS, refused, connect timeout) | `NotSent` |
 //! | HTTP 400/401/403/404/405/406/415/422, gRPC 3/5/7/12/16, or a JSON-RPC error on the initial response that says the request itself was refused (parse error, invalid request, method not found, invalid params, unsupported operation, content type / extension / version not supported) | `Rejected` |
-//! | first stream event carries a task | `Accepted` |
-//! | first stream event is the agent's direct message | `Completed` |
+//! | first stream event (or the unary answer) carries a task | `Accepted` |
+//! | first stream event (or the unary answer) is the agent's direct message | `Completed` |
 //! | anything else once the request was handed to the transport | `OutcomeUnknown` |
 
 mod events;
@@ -23,7 +26,7 @@ use async_trait::async_trait;
 use bcs_dist_model::*;
 use bcs_route_security::OutboundUrlGuard;
 use bcs_service_api::port::dist_agent::*;
-use bcs_service_api::types::a2a_bot::{A2aBinding, A2aInterface};
+use bcs_service_api::types::a2a_bot::{A2aBinding, A2aInterface, A2aUpdateMode};
 use events::Mapper;
 use futures::StreamExt;
 use futures::stream::BoxStream;
@@ -146,6 +149,10 @@ impl A2aDistAgentClient {
 
     /// Builds the binding client of a target. An error means nothing was sent.
     async fn client(&self, target: &AgentBinding) -> Result<(BindingClient, bool), String> {
+        self.client_and_mode(target).await.map(|(client, tools, _)| (client, tools))
+    }
+
+    async fn client_and_mode(&self, target: &AgentBinding) -> Result<(BindingClient, bool, A2aUpdateMode), String> {
         let agent = self.resolver.resolve(target).await?;
         let tools = agent.extensions.iter().any(|uri| uri == crate::tools::EXTENSION);
         let extensions = agent.extensions.join(",");
@@ -194,7 +201,7 @@ impl A2aDistAgentClient {
                 }
             }
         };
-        Ok((client, tools))
+        Ok((client, tools, interface.update_mode))
     }
 
     /// One send (start or continue-input); never repeated here.
@@ -204,23 +211,35 @@ impl A2aDistAgentClient {
         remote: Option<&RemoteTaskRef>,
         request: StableSendRequest,
     ) -> SendOutcome {
-        let message = match build_message(remote, &request) {
+        let (client, tools, mode) = match self.client_and_mode(target).await {
+            Ok(client) => client,
+            Err(code) => return SendOutcome::NotSent { code },
+        };
+        let unary = mode == A2aUpdateMode::Poll;
+        let message = match build_message(remote, &request, unary) {
             Ok(message) => message,
             // A request that cannot be expressed can never be sent.
             Err(code) => return SendOutcome::Rejected { code: code.to_owned() },
         };
-        let (client, tools) = match self.client(target).await {
-            Ok(client) => client,
-            Err(code) => return SendOutcome::NotSent { code },
+        let failed = |error: &A2AError| match classify(error) {
+            SendFailure::NotSent(code) => SendOutcome::NotSent { code },
+            SendFailure::Rejected(code) => SendOutcome::Rejected { code },
+            SendFailure::Unknown(code) => SendOutcome::OutcomeUnknown { code },
         };
-        let mut responses = match client.send_streaming_message(&message).await {
-            Ok(responses) => responses,
-            Err(error) => {
-                return match classify(&error) {
-                    SendFailure::NotSent(code) => SendOutcome::NotSent { code },
-                    SendFailure::Rejected(code) => SendOutcome::Rejected { code },
-                    SendFailure::Unknown(code) => SendOutcome::OutcomeUnknown { code },
-                };
+        let mut responses: Responses = if unary {
+            // The agent declares no streaming: one answer, then the task is
+            // followed by the caller (query or subscribe, as declared).
+            let answer = match tokio::time::timeout(FIRST_EVENT_TIMEOUT, client.send_message(&message)).await {
+                Ok(Ok(a2a::SendMessageResponse::Task(task))) => a2a::StreamResponse::Task(task),
+                Ok(Ok(a2a::SendMessageResponse::Message(answer))) => a2a::StreamResponse::Message(answer),
+                Ok(Err(error)) => return failed(&error),
+                Err(_) => return SendOutcome::OutcomeUnknown { code: "first_event_timeout".into() },
+            };
+            futures::stream::once(async move { Ok(answer) }).boxed()
+        } else {
+            match client.send_streaming_message(&message).await {
+                Ok(responses) => responses,
+                Err(error) => return failed(&error),
             }
         };
         // The request is with the transport: from here nothing is "not sent".
@@ -270,6 +289,7 @@ impl A2aDistAgentClient {
 fn build_message(
     remote: Option<&RemoteTaskRef>,
     request: &StableSendRequest,
+    return_immediately: bool,
 ) -> Result<a2a::SendMessageRequest, &'static str> {
     let Payload::Inline(payload) = &request.payload else {
         return Err("request_by_reference");
@@ -291,10 +311,11 @@ fn build_message(
     if let Some(remote) = remote {
         message["taskId"] = json!(remote.task_id);
     }
-    serde_json::from_value(json!({
-        "message": message,
-        "configuration": { "acceptedOutputModes": ["text/plain"] },
-    }))
+    let mut configuration = json!({ "acceptedOutputModes": ["text/plain"] });
+    if return_immediately {
+        configuration["returnImmediately"] = json!(true);
+    }
+    serde_json::from_value(json!({ "message": message, "configuration": configuration }))
     .map_err(|_| "request_invalid")
 }
 

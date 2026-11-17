@@ -150,9 +150,11 @@ impl ConnectorEngine {
                 }
                 Err(error) => {
                     tracing::warn!(?error, "command feed read failed");
-                    // Never longer than one renewal period: a feed outage
-                    // must not let this instance's registration expire.
-                    backoff.wait_at_most(config.membership_renew).await;
+                    // Only until the next renewal is due: a feed outage,
+                    // even one whose reads fail slowly, must not let this
+                    // instance's registration expire.
+                    let until_renewal = config.membership_renew.saturating_sub(renewed_at.elapsed());
+                    backoff.wait_at_most(until_renewal).await;
                 }
             }
         }

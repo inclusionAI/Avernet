@@ -244,32 +244,59 @@ impl Call {
         // The state word the rules read comes from the status, not from
         // whatever shape the snapshot has.
         let snapshot = with_state(snapshot, status);
-        self.on_event(kind, None, snapshot).await
+        // The end comes from the status: a snapshot stored by reference
+        // carries no state word the rules could read.
+        let end = match status {
+            TaskStatus::Completed => Some(FinalDispatchOutcome::Completed),
+            TaskStatus::Failed | TaskStatus::Rejected => Some(FinalDispatchOutcome::Failed),
+            TaskStatus::Canceled => Some(FinalDispatchOutcome::Canceled),
+            _ => None,
+        };
+        self.on_event_ending(kind, None, snapshot, end).await
     }
 
     /// Reads the remote task once and reports its state when it changed.
     pub async fn poll_remote(&mut self) -> Flow {
+        self.read_remote().await.map(|_| ())
+    }
+
+    /// `poll_remote`, telling the caller what the read answered.
+    pub async fn read_remote(&mut self) -> Flow<RemoteRead> {
         let target = self.spec().target.clone();
         let Some(remote) = self.held.view().execution.remote.clone() else {
-            return Ok(());
+            return Ok(RemoteRead::Gone);
         };
         match self.ports.agent.query(&target, RemoteQuery::ByTask(remote)).await {
-            QueryOutcome::Found { status, snapshot, .. } => self.report_task_state(status, snapshot).await,
+            QueryOutcome::Found { status, snapshot, .. } => {
+                self.report_task_state(status, snapshot).await?;
+                Ok(RemoteRead::Found)
+            }
             QueryOutcome::Unsupported if self.polling => {
                 self.mark_blind("query_unsupported").await;
-                Ok(())
+                Ok(RemoteRead::Gone)
             }
             QueryOutcome::NotFound | QueryOutcome::Unsupported => {
                 tracing::warn!(did = %self.did().0, "remote task not readable");
-                Ok(())
+                Ok(RemoteRead::Gone)
             }
             // Not an agent result: ask again on the next tick.
             QueryOutcome::Unavailable { code } => {
                 tracing::debug!(did = %self.did().0, code, "remote task query unavailable");
-                Ok(())
+                Ok(RemoteRead::Unavailable)
             }
         }
     }
+}
+
+/// What one read of the remote task answered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RemoteRead {
+    /// The task was read; its state was reported unless it was a repeat.
+    Found,
+    /// A definite "no such task" or "no task read": asking again cannot help.
+    Gone,
+    /// The read failed this time.
+    Unavailable,
 }
 
 /// Ensures a terminal or question payload carries the state word of `status`.

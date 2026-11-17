@@ -98,6 +98,17 @@ event; the credential is redacted in debug output. The singlebox changed-line
 gate failed on the gRPC connect-refused lines; the gRPC binding story now
 exercises them.
 
+## Review round 3 (2026-11-17)
+
+Fixed, each with a test unless noted: a cancel answered "already finished"
+reads the task a bounded number of times (per-call backoff) and then ends on
+the cancel answer; a definite "no such task" is not asked again and a lagging
+read is reported once; a task read ends the call by its status, also when the
+snapshot is stored by reference; an interface resolved with the `Poll` update
+mode is sent to with the unary operation and `returnImmediately`; the feed
+backoff sleeps only until the next membership renewal is due (no new test: the
+existing feed-outage test covers the path, not the timing).
+
 ## Not run, and why
 
 - `cargo nextest` and the coverage gates (changed-line > 85 %, singlebox E2E):
