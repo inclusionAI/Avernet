@@ -1,4 +1,6 @@
-//! Conditional-write versions ("ts" in the design), built only here.
+//! Legacy greater-than write versions for independently validated GT paths.
+//! Worker coordination and admission do NOT use this epoch encoding: they use
+//! DocumentCas with private versions, exact EQ and create-if-absent.
 //!
 //! The version space is split into bands of 10^9 per epoch: a Worker commits at
 //! `epoch × 10^9 + commit_seq`, a seal jumps to `epoch × 10^9`, a Connector claim
@@ -12,9 +14,9 @@ use bcs_store_api::Version;
 /// Size of one epoch band.
 pub const BAND: u64 = 1_000_000_000;
 
-/// First version of a document created once (`spec`, initial `task`, `disp`).
-/// Written with `Newer(CREATE)`, which is rejected forever after the first
-/// creation, including after the key expired (the store keeps its history).
+/// Legacy first version for callers requiring retained GT history.
+/// This is not the admission create condition and does not itself prevent
+/// recreation after deletion; that guarantee requires a matching capability.
 pub const CREATE: Version = Version(1);
 
 /// A Worker commit: `epoch × 10^9 + commit_seq`, with `commit_seq < 10^9`.

@@ -17,3 +17,5 @@ pub mod identity;
 pub mod inbox;
 pub mod layout;
 pub mod version;
+
+pub mod coordination;

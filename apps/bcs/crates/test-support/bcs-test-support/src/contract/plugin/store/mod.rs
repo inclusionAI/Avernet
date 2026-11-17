@@ -8,6 +8,7 @@
 )]
 
 pub mod json;
+pub mod document;
 pub mod kv;
 pub mod stream;
 pub mod zset;
