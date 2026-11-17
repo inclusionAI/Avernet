@@ -98,6 +98,10 @@ export class FlowEventRepository {
   }
 
   async insert(event: FlowEventInsert): Promise<boolean> {
+    // Manual training audits must use the marker + event atomic writer. Reject
+    // both the reserved namespace and disguised IDs carrying its audit marker.
+    if (event.id.startsWith("aistudio_manual_")
+      || (event.data?.source === "aistudio-train" && event.data?.manual === true)) return false;
     try {
       const now = this.db.dialect.now();
       await this.db.exec(
