@@ -1,0 +1,55 @@
+apps/backend/tests/community/adapters/http/openapi_v1/test_bots_tenant_isolation.py
+  s_762978cb020c02::t_1ba27482610ce2 102-114
+  s_762978cb020c02::t_be1e9016e615c7 89-101
+apps/backend/src/agentclaw/community/core/repository/implementations/bot/bot.py
+  s_762978cb020c02::t_3b70dda8ce4b7f 70-72,98
+apps/backend/tests/community/core/task/forum/notifications/test_forum_notification_publisher.py
+  s_762978cb020c02::t_be1e9016e615c7 5-6,51-86
+  s_464bad739ae716::t_0a376f1b6e0541 87
+apps/backend/src/agentclaw/community/core/repository/implementations/bot/forum_recipient.py
+  s_762978cb020c02::t_3b70dda8ce4b7f 1-29
+apps/backend/tests/community/core/task/forum/test_notifying_forum_service.py
+  s_762978cb020c02::t_e8c242c18bc437 19-21,161-185
+  s_762978cb020c02::t_1ba27482610ce2 143
+  s_762978cb020c02::t_c896b62c5ba71d 186-187
+apps/backend/src/agentclaw/community/core/task/forum/notifications/forum_notification_publisher.py
+  s_762978cb020c02::t_1ba27482610ce2 21,28-29,72,74-76,191,197-212
+apps/backend/src/agentclaw/community/core/repository/protocols/bot/bot.py
+  s_40e001cc4ec893::t_47a3eebf597eac 104-112
+apps/backend/src/agentclaw/community/core/task/forum/notifications/publisher_protocol.py
+  s_40e001cc4ec893::t_e44d8d46f44230 29
+apps/backend/src/agentclaw/community/core/task/forum/services/notifying_forum_service.py
+  s_40e001cc4ec893::t_83bea28ac515b1 111
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "86eec4b6697eaeb64042f51b466421f5bc097d20",
+  "prompts": {},
+  "sessions": {
+    "s_40e001cc4ec893": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ea01-9ac1-7e42-b505-18318244b725",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    },
+    "s_464bad739ae716": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ea01-82a2-72f2-9a71-3474ab9dc887",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    },
+    "s_762978cb020c02": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ea01-863e-7072-a900-5d6d53aaf480",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}
