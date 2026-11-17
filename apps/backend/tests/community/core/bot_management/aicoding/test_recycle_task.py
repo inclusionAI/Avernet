@@ -7,8 +7,9 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+from agentclaw.community.core.bot_management.repository.models import BotRestartLockModel
 from agentclaw.community.core.base import Base
-from agentclaw.community.core.bot_dormant.activate_service import ActivateBotService
+from agentclaw.community.core.bot_dormant.activate_service import ActivateBotService, validate_activation
 from agentclaw.community.core.bot_dormant.sqlite_models import DormantCheckAudit
 from agentclaw.community.core.bot_management.engines.aicoding.recycle_state import (
     RecycleUnavailable,
@@ -60,6 +61,7 @@ def case(tmp_path):
             EntityDeviceBinding.__table__,
             DormantCheckAudit.__table__,
             TaskQueueModel.__table__,
+            BotRestartLockModel.__table__,
         ],
     )
     factory = sessionmaker(engine, expire_on_commit=False)
@@ -117,7 +119,9 @@ def case(tmp_path):
     def is_teclaw(engine):
         return str(engine or "").strip().lower() == "teclaw"
 
-    store = RecycleRepository(db, config.app, is_teclaw=is_teclaw)
+    store = RecycleRepository(
+        db, config.app, validate_activation=lambda bot: validate_activation(bot, is_teclaw)
+    )
     tracer = MagicMock()
     tracer.current_trace_id.return_value = None
     tracer.export_trace_carrier.return_value = None
@@ -523,7 +527,127 @@ def test_canonical_external_engine_policy_guards_admission_and_activation(case):
     with case.db.orm_session() as session:
         row = session.query(BotModel).one()
         row.status, row.binding_id, row.device_id = "RECYCLED", None, None
-    case.store.is_teclaw = lambda _: True
+    case.store.validate_activation = lambda bot: validate_activation(bot, lambda _: True)
     with pytest.raises(BotOperationNotAllowedError):
         case.store.claim_activation("b1", "u1")
     assert case.store.read("b1", "u1")["status"] == "RECYCLED"
+
+
+@pytest.fixture
+def deletion(case):
+    from agentclaw.community.core.repository.implementations.bot.restart_lock import (
+        BotRestartLockRepository,
+    )
+    from agentclaw.community.di.config import TaskQueueWorkerConfig
+    from agentclaw.community.di.modules.aicoding_module import AICodingModule
+    from tests.community.core.bot_management.services.test_bot_service_misc import _make_service
+
+    locks = BotRestartLockRepository(case.db)
+    service = _make_service()
+    service._restart_lock_repo = locks
+    service._repository.get_by_id_and_owner.side_effect = case.store.read
+    device = MagicMock()
+    device.get_device.return_value = SimpleNamespace(status="ACTIVE")
+    service._device_service_provider = lambda: device
+    grants = MagicMock()
+    grants.revoke_all_for_bot.return_value = 0
+    service._bot_app_grant_provider = lambda: grants
+
+    def delete_row(*_):
+        with case.db.orm_session() as session:
+            session.query(BotModel).one().is_delete = 1
+        return True
+
+    service._repository.soft_delete_by_owner.side_effect = delete_row
+    assembled = AICodingModule().recycle_operations(
+        case.store, MagicMock(), case.queue, locks, MagicMock(),
+        TaskQueueConfig(app="agentclaw"), TaskQueueWorkerConfig(enabled=True),
+        MagicMock(), lambda: MagicMock(),
+    )
+    case.service.guard = assembled.guard
+    return SimpleNamespace(service=service, device=device, grants=grants, locks=locks)
+
+
+def test_delete_holds_admission_lock_through_destructive_effects(case, deletion):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+    from agentclaw.community.utils.avernet_tenant import bind_current_avernet_tenant
+
+    entered, resume = Event(), Event()
+
+    def withdraw(**_):
+        entered.set()
+        assert resume.wait(5), "delete was not resumed"
+        return 0
+
+    deletion.grants.revoke_all_for_bot.side_effect = withdraw
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(bind_current_avernet_tenant(deletion.service.delete_bot), "b1", "u1")
+        try:
+            assert entered.wait(5), "delete did not reach grant withdrawal"
+            with pytest.raises(BotInvalidLifecycleStateError):
+                submit(case)
+            assert journal(case.store.read("b1", "u1")) == {}
+            case.runtime.submit_release.assert_not_called()
+        finally:
+            resume.set()
+        assert future.result(timeout=5) is True
+    deletion.device.release_device.assert_called_once()
+    deletion.service._passport_plugin.destroy_passport.assert_called_once()
+    with case.db.orm_session() as session:
+        assert session.query(BotModel).one().is_delete == 1
+        assert session.query(TaskQueueModel).count() == 0
+        assert session.query(BotRestartLockModel).count() == 0
+
+
+def test_admitted_recycle_blocks_delete_before_any_side_effect(case, deletion):
+    submit(case)
+    with pytest.raises(BotInvalidLifecycleStateError):
+        deletion.service.delete_bot("b1", "u1")
+    deletion.grants.revoke_all_for_bot.assert_not_called()
+    deletion.device.release_device.assert_not_called()
+    deletion.service._passport_plugin.destroy_passport.assert_not_called()
+    deletion.service._repository.soft_delete_by_owner.assert_not_called()
+    assert journal(case.store.read("b1", "u1"))["phase"] == "QUEUED"
+
+
+def test_observation_consumes_durable_physical_targets_after_lost_response(case):
+    _, payload = submit(case)
+
+    def prepare(bot, record, save):
+        save(physical_targets=["s1@42", "s2@43"])
+        return lambda: None
+
+    case.runtime.prepare.side_effect = prepare
+    case.runtime.submit_release.side_effect = TimeoutError()
+    assert isinstance(case.handler.handle(payload), Reschedule)
+    assert isinstance(case.handler.handle(payload), Complete)
+    case.runtime.observe_release.assert_called_once_with(case.target, None, ["s1@42", "s2@43"])
+    case.runtime.submit_release.assert_called_once()
+
+
+@pytest.mark.parametrize("change", ["type", "engine", "recycle", "status"])
+def test_activation_rechecks_domain_admission_on_locked_row(case, monkeypatch, change):
+    stale = case.store.read("b1", "u1")
+    with case.db.orm_session() as session:
+        row = session.query(BotModel).one()
+        row.status, row.binding_id, row.device_id = "RECYCLED", None, None
+        if change == "type":
+            row.bot_type = "service"
+        elif change == "engine":
+            row.active_engine = "teclaw"
+        elif change == "recycle":
+            row.ext = json.dumps({"recycle": {"phase": "NEEDS_CONFIRMATION"}})
+        else:
+            row.status = "FAILED"
+    bots = MagicMock()
+    bots.get_bot.return_value = stale
+    bots.is_teclaw_bot.return_value = False
+    thread = MagicMock()
+    monkeypatch.setattr("threading.Thread", thread)
+    from agentclaw.community.core.bot_management.services.bot_service import BotOperationNotAllowedError
+    with pytest.raises((BotOperationNotAllowedError, BotInvalidLifecycleStateError)):
+        ActivateBotService(bots, case.passport, activation_control=case.store).activate(bot_id="b1", owner_id="u1")
+    thread.assert_not_called()
+    case.passport.unfreeze_agent_passport.assert_not_called()
+    assert case.store.read("b1", "u1")["status"] != "REACTIVATING"

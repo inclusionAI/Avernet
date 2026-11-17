@@ -458,10 +458,25 @@ real credential/device acceptance. See the
 engines invoke the existing synchronous callback, while `AicodingRecycleMixin`
 admits durable work. `prepare_recycle` reuses `prepare_restart` inside AICoding,
 including its config reader, shared backup helper, receipts and timeout constants.
-The coding package owns `recycle_task`, `recycle_state`, `recycle_runtime` and
-`recycle_runtime`; it does not add methods to the shared DeviceService surface.
+The coding package owns `recycle_task`, `recycle_state` and `recycle_runtime`; it does not add methods to the shared DeviceService surface.
 ARCA SDK primitives are bound through `ArcaRecycleTransport` in composition roots,
 like `ArcaRestartTransport`; BaaS/local release uses existing BaaS capabilities.
 Generic lifecycle calls dispatch engine veto/release hooks and never interpret
 `ext.recycle` or fastdisk policy themselves. Persistence/atomic completion remains
 in the repository package, while transport and public schema remain in adapters.
+
+BaaS recycle requires the additional `BaasRecycleRuntime` capabilities, checked
+at the coding boundary without widening restart-only consumers. Release
+observation uses the persisted `physical_targets`, including stopped/released
+inventory rows. Each exact provider ID (with its template/tenant suffix) must be
+confirmed absent by the existing PaaS device-info read. A successful publish,
+logical Bot deletion, empty inventory or stopped container is not proof of
+physical destruction. Missing targets or unconfirmed/error reads fail closed;
+the existing 600-second release budget leads to `NEEDS_CONFIRMATION`, without
+repeating destroy or freezing/unbinding the Bot.
+
+Coding `delete_bot` and `stop_bot` share the existing resource-release/admission
+lock. Deletion holds it across the locked lifecycle recheck, grant withdrawal,
+resource release, Passport destruction and soft deletion; an already admitted
+recycle vetoes deletion before side effects. Default engines retain their
+existing synchronous behavior.

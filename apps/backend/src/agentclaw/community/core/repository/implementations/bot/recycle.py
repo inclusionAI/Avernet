@@ -6,6 +6,7 @@ import json
 from contextlib import contextmanager
 from copy import deepcopy
 from datetime import datetime
+from typing import Callable
 
 from agentclaw.community.core.bot_management.engines.aicoding.recycle_state import (
     BLOCKING,
@@ -14,14 +15,11 @@ from agentclaw.community.core.bot_management.engines.aicoding.recycle_state impo
     journal,
 )
 from agentclaw.community.core.bot_dormant.sqlite_models import DormantCheckAudit
-from agentclaw.community.core.bot_management.engines.registry import assert_lifecycle_mutable
 from agentclaw.community.core.bot_management.owner_handoff.guard import (
     assert_bot_mutable,
 )
 from agentclaw.community.core.bot_management.services.bot_service import (
-    BotInvalidLifecycleStateError,
     BotNotFoundError,
-    BotOperationNotAllowedError,
 )
 from agentclaw.community.core.devices.repository.models import EntityDeviceBinding
 from agentclaw.community.core.repository.protocols.bot.recycle import (
@@ -44,8 +42,12 @@ class RecycleRepository(BotRecycleRepositoryProtocol):
     The provider is called outside transactions. Completion/audit commit together.
     """
 
-    def __init__(self, db: DatabasePlugin, app: str, *, is_teclaw):
-        self.db, self.app, self.is_teclaw = db, app, is_teclaw
+    def __init__(
+        self, db: DatabasePlugin, app: str, *, validate_activation: Callable[[dict], None]
+    ):
+        self.db, self.app = db, app
+        # The owning domain supplies policy; execute it on the locked snapshot.
+        self.validate_activation = validate_activation
 
     def _row(self, session, bot_id, owner_id, *, lock=False):
         q = session.query(BotModel).filter(
@@ -218,18 +220,9 @@ class RecycleRepository(BotRecycleRepositoryProtocol):
         """Atomically claim RECYCLED; all activation entrypoints share this claim."""
         with self.db.transactional_orm_session() as session:
             row = self._row(session, bot_id, owner_id, lock=True)
-            bot = row.to_dict()
-            if row.bot_type != "personal" or self.is_teclaw(row.active_engine):
-                raise BotOperationNotAllowedError(
-                    "Only personal managed-cloud Bots can be activated"
-                )
-            assert_lifecycle_mutable(bot)
+            self.validate_activation(row.to_dict())
             if row.status in {"ACTIVE", "REACTIVATING"}:
                 return row.status, False
-            if row.status != "RECYCLED":
-                raise BotInvalidLifecycleStateError(
-                    bot_id=bot_id, current_status=row.status
-                )
             row.status = "REACTIVATING"
             return "REACTIVATING", True
 
@@ -244,7 +237,7 @@ class RecycleRepository(BotRecycleRepositoryProtocol):
             row = self._row(session, bot_id, owner_id, lock=True)
             allowed = row.status == "REACTIVATING" and row.binding_id is None
             if allowed:
-                assert_lifecycle_mutable(row.to_dict())
+                self.validate_activation(row.to_dict())
             yield allowed
             if allowed:
                 row.status = "RECYCLED"

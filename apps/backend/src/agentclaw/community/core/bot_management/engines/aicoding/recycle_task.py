@@ -350,7 +350,7 @@ class AicodingRecycleHandler:
         service, store = self.service, self.service.store
         try:
             status = service.runtime.observe_release(
-                record["target"], record.get("release")
+                record["target"], record.get("release"), record.get("physical_targets")
             )
         except Exception:
             status = "UNKNOWN"
