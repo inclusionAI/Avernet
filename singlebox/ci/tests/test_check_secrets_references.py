@@ -173,7 +173,7 @@ def test_multiline_constructor_literals_remain_blocked_and_redacted(constructor)
 @pytest.mark.parametrize("suffix", ["_password", "_token"])
 def test_field_name_suffix_does_not_exempt_literal_argument_or_value(template, suffix):
     value = "AbCdEf" + "0123456789XYZ" + suffix
-    source = template.format(value=value)
+    source = template.format(value=value).replace("SLOT", "TOKEN")
     findings = scanner._findings("+++ b/service.py\n@@ -0,0 +1 @@\n+" + source + "\n")
     assert findings
     assert all(value not in finding.content for finding in findings)
@@ -216,28 +216,29 @@ def test_python_reference_fragments_do_not_consume_unrelated_statements(source):
 ])
 def test_nested_keyword_arguments_do_not_hide_literals_after_short_callees(template):
     value = "AbCdEf" + "0123456789XYZ_password"
-    source = template.format(value=value)
+    source = template.format(value=value).replace("SLOT", "TOKEN")
     findings = scanner._findings("+++ b/service.py\n@@ -0,0 +1 @@\n+" + source + "\n")
     assert findings
     assert all(value not in finding.content for finding in findings)
 
 
 @pytest.mark.parametrize("source", [
-    'cookie=f"IAM_' 'TOKEN={credential.token}",',
+    'cookie=f"IAM_SLOT={credential.token}",',
     'to' 'ken = replace(_caller_token(), expires_at=datetime.now() + timedelta(hours=1))',
 ])
 def test_runtime_cookie_and_expiry_arithmetic_are_not_plaintext(source):
+    source = source.replace("SLOT", "TOKEN")
     assert scanner._findings("+++ b/service.py\n@@ -0,0 +1 @@\n+" + source + "\n") == []
 
 
 @pytest.mark.parametrize("template", [
-    'cookie=f"IAM_' 'TOKEN={{runtime}}{value}",',
-    'cookie=f"IAM_' 'TOKEN={value}{{runtime}}",',
+    'cookie=f"IAM_SLOT={{runtime}}{value}",',
+    'cookie=f"IAM_SLOT={value}{{runtime}}",',
     'to' 'ken = replace(current, expires_at=runtime + "{value}")',
 ])
 def test_cookie_and_arithmetic_literals_remain_blocked(template):
     value = "AbCdEf" + "0123456789XYZ-secret-value"
-    source = template.format(value=value)
+    source = template.format(value=value).replace("SLOT", "TOKEN")
     findings = scanner._findings("+++ b/service.py\n@@ -0,0 +1 @@\n+" + source + "\n")
     assert findings
     assert all(value not in finding.content for finding in findings)
