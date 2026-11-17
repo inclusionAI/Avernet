@@ -2,7 +2,7 @@ use super::ContractResult;
 use bcs_dist_model::*;
 use bcs_service_api::{
     application::{dist_gateway::*, dist_runtime::*},
-    core::{dist_gateway::*, dist_runner::*},
+    core::{dist_connector::*, dist_gateway::*, dist_runner::*},
     port::dist_agent::*,
     port::dist_runtime::DistRuntimeControlPort,
 };
@@ -146,5 +146,48 @@ pub async fn dist_group_directory_port_contract_tests(
         serde_json::to_value(workflow)?,
         serde_json::to_value(directory.load_workflow(scope, &first.workflow).await?)?
     );
+    Ok(())
+}
+
+/// The fixture is an accepted dispatch. Identities must not depend on the
+/// holder generation, and the sequence restarts with every cursor.
+pub fn dist_connector_core_service_contract_tests(
+    rules: &dyn DistConnectorCoreService,
+    view: &DispatchView,
+) -> ContractResult {
+    let did = &view.spec.did;
+    assert_eq!(rules.start_request_id(did), rules.start_request_id(did));
+    assert_ne!(
+        rules.input_request_id(did, InputSeq(1)),
+        rules.input_request_id(did, InputSeq(2))
+    );
+    let payload = Payload::Inline(serde_json::json!({"state": "completed"}));
+    let mut first = ReportCursor { holder_epoch: HolderEpoch(1), last_seq: InputSeq(0) };
+    let mut later = ReportCursor { holder_epoch: HolderEpoch(2), last_seq: InputSeq(0) };
+    let delta = rules.report(view, &mut first, AgentEventKind::Delta, None, payload.clone());
+    match delta {
+        Report::Stream(append) => {
+            assert_eq!(append.event.seq, InputSeq(1));
+            assert_eq!(append.event.holder_epoch, HolderEpoch(1));
+        }
+        Report::Key(_) => panic!("a delta is not a key event"),
+    }
+    let a = rules.report(view, &mut first, AgentEventKind::Final, Some("e-1".into()), payload.clone());
+    let b = rules.report(view, &mut later, AgentEventKind::Final, None, payload.clone());
+    match (a, b) {
+        (Report::Key(a), Report::Key(b)) => {
+            assert_eq!(a.input.input_id, b.input.input_id);
+            assert_eq!(a.input.business_digest, b.input.business_digest);
+            assert!(a.create_session.is_none() && a.create_task.is_none());
+        }
+        _ => panic!("a final event must be admitted"),
+    }
+    assert_eq!(first.last_seq, InputSeq(2));
+    assert_eq!(later.last_seq, InputSeq(1));
+    assert_eq!(
+        rules.end_of(&AgentEventKind::Final, &payload),
+        Some(FinalDispatchOutcome::Completed)
+    );
+    assert_eq!(rules.end_of(&AgentEventKind::Delta, &payload), None);
     Ok(())
 }

@@ -13,7 +13,7 @@ the code of each task; each group ends with its crate's tests green.
 
 ## Group 1 — Contract and shared module (additive)
 
-- [ ] 1.1 `bcs_service_api::core::dist_connector`: types and
+- [x] 1.1 `bcs_service_api::core::dist_connector`: types and
   `DistConnectorCoreService` with the call-order and rule docs (plan §2);
   `dist_connector_core_service_contract_tests` harness in `bcs-test-support`;
   `bcs-service-api` 6.2.0 and its `CONTEXT.md` section; no name clash with `port/`.
