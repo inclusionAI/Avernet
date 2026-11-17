@@ -69,8 +69,9 @@ export function ResourcePanel({
       let parent = '';
       for (const part of candidate.split('/').filter(Boolean)) {
         if (!(loadedPaths ?? ['']).includes(parent) || loadingPaths.includes(parent) || errors[parent]) return false;
-        const child = parent ? `${parent}/${part}` : part;
-        if (!resources.some((item) => item.parentPath === parent && item.path === child && item.type === 'folder')) return true;
+        const currentParent = parent;
+        const child = currentParent ? `${currentParent}/${part}` : part;
+        if (!resources.some((item) => item.parentPath === currentParent && item.path === child && item.type === 'folder')) return true;
         parent = child;
       }
       return false;
