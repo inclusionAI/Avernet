@@ -32,19 +32,19 @@ the code of each task; each group ends with its crate's tests green.
 
 ## Group 3 — Providers (C1 storage side)
 
-- [ ] 3.1 `doc`: stored `disp` document codec with the `connector` object;
+- [x] 3.1 `doc`: stored `disp` document codec with the `connector` object;
   schema-version rejection; a Worker-created document without `connector` decodes.
-- [ ] 3.2 `held_index` + `StoreDispatchQueue::claim`: race, `OwnedByMe`,
+- [x] 3.2 `held_index` + `StoreDispatchQueue::claim`: race, `OwnedByMe`,
   `Ended`, `NotFound`, add-before-claim, cleanup, lost claim response.
-- [ ] 3.3 `PendingMembership` stub + takeover branch: `HeldByOther` with the
+- [x] 3.3 `PendingMembership` stub + takeover branch: `HeldByOther` with the
   stub (asserts the code), takeover at epoch + 1 with a `Dead` fake, `Unknown`
   is not `Dead`.
-- [ ] 3.4 `resume_owned`: advances the generation; refuses a changed holder.
-- [ ] 3.5 `StoreHeldDispatch`: every method of plan §4.2, stale holder → `Lost`,
+- [x] 3.4 `resume_owned`: advances the generation; refuses a changed holder.
+- [x] 3.5 `StoreHeldDispatch`: every method of plan §4.2, stale holder → `Lost`,
   Worker write in between, lost response, definite failure, bounded contention.
-- [ ] 3.6 `StoreCommandFeed`: plan §4.3; port harness.
-- [ ] 3.7 `delayed.rs`: `repost_held` (D3) and `release` (D8) stubs with tests.
-- [ ] 3.8 `conformance_dispatch_board.rs`: port harnesses for queue, feed and
+- [x] 3.6 `StoreCommandFeed`: plan §4.3; port harness.
+- [x] 3.7 `delayed.rs`: `repost_held` (D3) and `release` (D8) stubs with tests.
+- [x] 3.8 `conformance_dispatch_board.rs`: port harnesses for queue, feed and
   held dispatch with the test-only Worker fixture.
 
 ## Group 4 — Engine (C1 actor, C3, C4, C5)
