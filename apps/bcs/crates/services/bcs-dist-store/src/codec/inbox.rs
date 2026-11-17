@@ -1,4 +1,4 @@
-use super::invalid;
+use super::{invalid, supported};
 use bcs_dist_model::{Digest, InputBody, InputEnvelope, InputId, Sid, Tid};
 use bcs_service_api::port::repo::distributed::common::StoreError;
 use std::collections::BTreeMap;
@@ -7,6 +7,7 @@ type Fields = BTreeMap<String, Vec<u8>>;
 
 /// Fields of one `inbox` stream entry.
 pub fn encode_inbox_entry(input: &InputEnvelope) -> Result<Fields, StoreError> {
+    supported(input.schema_version)?;
     let body = serde_json::to_vec(&input.body).map_err(|_| invalid("inbox_body_encode"))?;
     let mut fields = Fields::new();
     fields.insert("v".into(), input.schema_version.to_string().into_bytes());
@@ -27,6 +28,7 @@ pub fn decode_inbox_entry(sid: &Sid, fields: &Fields) -> Result<InputEnvelope, S
     let schema_version = text("v")?
         .parse::<u32>()
         .map_err(|_| invalid("inbox_version"))?;
+    supported(schema_version)?;
     let body_bytes = fields.get("body").ok_or_else(|| invalid("inbox_field_missing"))?;
     let body: InputBody =
         serde_json::from_slice(body_bytes).map_err(|_| invalid("inbox_body_decode"))?;

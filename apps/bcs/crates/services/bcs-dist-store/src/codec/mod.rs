@@ -22,6 +22,18 @@ pub use json::{decode_json, encode_json};
 
 use bcs_service_api::port::repo::distributed::common::StoreError;
 
+/// The only schema version these codecs read and write. Readers reject any
+/// other version instead of decoding it with the current shapes.
+pub const SCHEMA_VERSION: u32 = 1;
+
+fn supported(version: u32) -> Result<(), StoreError> {
+    if version == SCHEMA_VERSION {
+        Ok(())
+    } else {
+        Err(StoreError::UnsupportedFormat { format: version })
+    }
+}
+
 fn invalid(code: &str) -> StoreError {
     StoreError::Invalid {
         code: code.to_owned(),

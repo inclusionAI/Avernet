@@ -155,3 +155,31 @@ fn codecs_round_trip() {
 
     assert_eq!(encode_wake_entry(&input.sid)["sid"], common::SID.as_bytes());
 }
+
+#[test]
+fn unsupported_schema_versions_are_rejected() {
+    use bcs_dist_store::codec::decode_json;
+    let input = common::user_input("adm-9c41e7", "hello");
+    let mut fields = encode_inbox_entry(&input).unwrap();
+    fields.insert("v".into(), b"2".to_vec());
+    assert_eq!(
+        decode_inbox_entry(&input.sid, &fields),
+        Err(StoreError::UnsupportedFormat { format: 2 })
+    );
+
+    let mut newer = input.clone();
+    newer.schema_version = 2;
+    assert_eq!(
+        encode_inbox_entry(&newer),
+        Err(StoreError::UnsupportedFormat { format: 2 })
+    );
+
+    let mut spec = serde_json::to_value(common::spec("grp-1")).unwrap();
+    spec["schema_version"] = json!(2);
+    assert_eq!(
+        decode_json::<SessionSpec>(spec),
+        Err(StoreError::UnsupportedFormat { format: 2 })
+    );
+    let current = serde_json::to_value(common::task()).unwrap();
+    assert!(decode_json::<TaskSnapshot>(current).is_ok());
+}
