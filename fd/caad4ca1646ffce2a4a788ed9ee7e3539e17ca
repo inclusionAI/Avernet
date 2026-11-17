@@ -1,0 +1,22 @@
+apps/frontend-nextgen/test/components/BotWorkshop/ResourcePanelRowClick.test.tsx
+  s_bc01be05f02440::t_097663094f49e8 205-227
+  s_bc01be05f02440::t_9c690b48058dde 193-204
+apps/frontend-nextgen/src/components/BotWorkshop/Editor/ResourcePanel.tsx
+  s_bc01be05f02440::t_5cd3cd9801ce83 8,58,65-84,126-127,138,183
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "fdcaad4ca1646ffce2a4a788ed9ee7e3539e17ca",
+  "prompts": {},
+  "sessions": {
+    "s_bc01be05f02440": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e4c7-8bdd-7f10-aa03-5c4cc5a653eb",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

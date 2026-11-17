@@ -1,0 +1,19 @@
+apps/bcs/crates/services/bcs-edge-permission-store/src/authority/managers.rs
+  s_9ae504578a00c9::t_95f4e569fc2258 1580-1635,1653,1657,1735
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f418c5b559faaaa58fc07d09601c78cc35dffdad",
+  "prompts": {},
+  "sessions": {
+    "s_9ae504578a00c9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e445-9478-7ee3-a3f4-1e1085c5da11",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}
