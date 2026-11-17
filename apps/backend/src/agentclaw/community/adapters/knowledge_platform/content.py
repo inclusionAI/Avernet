@@ -3,6 +3,7 @@
 import json
 from collections.abc import Mapping
 from urllib.parse import quote
+from typing import Literal
 
 from agentclaw.community.adapters.knowledge_platform.content_client import (
     EcbKnowledgeContentClient,
@@ -45,13 +46,23 @@ class RemoteKnowledgeContentService(KnowledgeContentServiceProtocol):
         return BASE + f"/kb/{segment(kb_id)}" + suffix
 
     async def sources(
-        self, *, kb_id: str, access: ContentAccess, offset: int, limit: int
+        self,
+        *,
+        kb_id: str,
+        access: ContentAccess,
+        offset: int,
+        limit: int,
+        exclude_book_documents: bool = False,
     ):
         return await self.client.call(
             "GET",
             self.path(kb_id, "/sources"),
             headers=access.credentials,
-            params={"offset": offset, "limit": limit},
+            params={
+                "offset": offset,
+                "limit": limit,
+                **({"exclude_book_documents": True} if exclude_book_documents else {}),
+            },
         )
 
     async def source(self, *, kb_id: str, source_id: str, access: ContentAccess):
@@ -135,13 +146,25 @@ class RemoteKnowledgeContentService(KnowledgeContentServiceProtocol):
         )
 
     async def yuque_books(
-        self, *, kb_id: str, access: ContentAccess, query: str, offset: int, limit: int
+        self,
+        *,
+        kb_id: str,
+        access: ContentAccess,
+        query: str,
+        offset: int,
+        limit: int,
+        source: Literal["personal", "team"] | None = None,
     ):
         return await self.client.call(
             "GET",
             self.path(kb_id, "/yuque/books"),
             headers=access.credentials,
-            params={"q": query, "offset": offset, "limit": limit},
+            params={
+                "q": query,
+                "offset": offset,
+                "limit": limit,
+                **({"source": source} if source else {}),
+            },
         )
 
     async def book_imports(
@@ -166,6 +189,20 @@ class RemoteKnowledgeContentService(KnowledgeContentServiceProtocol):
         return await self.client.call(
             "GET",
             self.path(kb_id, f"/yuque/book-imports/{segment(source_id)}"),
+            headers=access.credentials,
+        )
+
+    async def delete_book(self, *, kb_id: str, access: ContentAccess, source_id: str):
+        return await self.client.call(
+            "DELETE",
+            self.path(kb_id, f"/yuque/book-imports/{segment(source_id)}"),
+            headers=access.credentials,
+        )
+
+    async def book_deletion(self, *, kb_id: str, access: ContentAccess, source_id: str):
+        return await self.client.call(
+            "GET",
+            self.path(kb_id, f"/yuque/book-imports/{segment(source_id)}/deletion"),
             headers=access.credentials,
         )
 
