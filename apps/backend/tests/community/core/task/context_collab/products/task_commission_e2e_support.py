@@ -10,6 +10,9 @@ from uuid import uuid4
 
 from fastapi.testclient import TestClient
 
+from agentclaw.community.core.task.context_collab.errors import (
+    ContextCollabValidationError,
+)
 from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context import (
     ActorContext,
 )
@@ -22,6 +25,9 @@ from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs 
 from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
     top_level_binding_id,
 )
+from agentclaw.community.core.task.context_collab.l5_methods.open_profile import (
+    OpenOpportunity,
+)
 from agentclaw.community.core.task.context_collab.l5_methods.operations.contracts import (
     OpenApplicationCommand,
     OpenMethodOpsServiceProtocol,
@@ -29,6 +35,12 @@ from agentclaw.community.core.task.context_collab.l5_methods.operations.contract
 )
 from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime import (
     current_axes,
+)
+from agentclaw.community.core.task.context_collab.l6_products.binding import (
+    role_binding_refs,
+)
+from agentclaw.community.core.task.context_collab.l6_products.contracts import (
+    ProductProfileDefinition,
 )
 from agentclaw.community.core.task.context_collab.persistence.method_store import (
     MethodStoreProtocol,
@@ -145,13 +157,13 @@ def _simulate_ai_coding(
 
 
 class SimulatedWorkingBot:
-    """测试用 Bot runtime:自己申请参与,执行中上报,成功后才提交成果。"""
+    """测试用 Bot runtime:自己查询机会并申请参与,执行中上报,成功后才提交成果。"""
 
     def __init__(
         self,
         client: TestClient,
         signed_principal: str,
-        profile_ref,
+        profile: ProductProfileDefinition,
         bot_id: str,
         owner_id: str,
         *,
@@ -159,7 +171,8 @@ class SimulatedWorkingBot:
     ):
         self.bot_uuid = bot_id  # Exact UUID used in the signed gateway principal.
         self.bot_id, self.owner_id = self.bot_uuid, owner_id
-        self.profile_ref = profile_ref
+        self.profile = profile
+        self.profile_ref = profile.ref
         self.client = client
         self.headers = {"X-Avernet-Principal": signed_principal}
         self._open_method = open_method
@@ -170,22 +183,41 @@ class SimulatedWorkingBot:
             accountable_principal_ref=PrincipalRef("human", self.owner_id),
         )
 
-    def submit_application(
+    def query_opportunities_by_skill(self) -> tuple[OpenOpportunity, ...]:
+        """由模拟 Bot 以自身身份调用注入的 L5 Open 能力查询机会。"""
+        _flow_log(_TEST_DIRECTORY, "模拟 Bot 以自身身份调用 L5 Open.query_opportunities")
+        return self._open_method.query_opportunities(
+            actor_context=self.actor_context,
+        )
+
+    def submit_application_by_skill(
         self,
         *,
-        opportunity_ref: str,
+        opportunity: OpenOpportunity,
         capability_evidence_refs: list[str],
-        requested_role_refs: list[str],
+        requested_role: str,
     ) -> ProfileOpAcceptedResult:
-        """由模拟 Bot 自己构造申请命令并调用注入的 L5 Open 能力。"""
+        """按 Product Profile 的角色名申请,向 L5 传递对应的 L4 角色绑定引用。"""
+        declared_role_refs = {
+            role.name: ref
+            for role, ref in zip(
+                self.profile.scenario_roles,
+                role_binding_refs(opportunity.scope_ref, profile=self.profile),
+                strict=True,
+            )
+        }
+        if requested_role not in declared_role_refs:
+            raise ContextCollabValidationError(
+                f"product profile does not declare role {requested_role!r}"
+            )
         _flow_log(_TEST_DIRECTORY, "模拟 Bot 以自身身份调用 L5 Open.submit_application")
         return self._open_method.submit_application(
             command=OpenApplicationCommand(
-                opportunity_ref=opportunity_ref,
+                opportunity_ref=opportunity.opportunity_id,
                 actor_context=self.actor_context,
                 applicant_agent_ref=self.bot_uuid,
                 capability_evidence_refs=capability_evidence_refs,
-                requested_role_refs=requested_role_refs,
+                requested_role_refs=[declared_role_refs[requested_role]],
                 reason="task_commission.bot_self_application",
             ),
         )

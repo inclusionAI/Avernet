@@ -177,11 +177,18 @@ The [journey case](../../../../../../../../tests/community/core/task/context_col
 resolves the real `OpenMethodOpsServiceProtocol` from its test injector.
 Publication uses the publisher actor; query uses the Bot actor. The fixture
 injects the same L5 service into `SimulatedWorkingBot`, whose
-`submit_application` helper builds `OpenApplicationCommand` from its own UUID,
-owner and actor context and invokes that service itself. The journey calls
-`working_bot.submit_application(...)`, without supplying an applicant or actor
-on the Bot's behalf. Screening and admission use the publisher's authorized
-policy actor:
+`query_opportunities_by_skill` helper uses its own actor context to discover opportunities.
+Its `submit_application_by_skill` helper accepts a declared Product Profile role
+name, such as `requested_role="assignee"`, and derives the canonical L4 role-binding
+reference from that profile and the discovered opportunity's Collet scope, without
+reading repository records. It builds `OpenApplicationCommand` from its own UUID,
+owner and actor context and invokes L5 `submit_application` itself. L5 still
+receives `requested_role_refs`, not bare product role names; requesting a role
+does not grant it or bypass admission. The journey calls
+`working_bot.query_opportunities_by_skill()` and
+`working_bot.submit_application_by_skill(...)`, without supplying an applicant
+or actor on the Bot's behalf. These are test-runtime wrappers, not installed
+Skills. Screening and admission use the publisher's authorized policy actor:
 
 ```python
 open_method = injector.get(OpenMethodOpsServiceProtocol)
@@ -200,13 +207,11 @@ assert published.accepted and published.state == "OPEN"
 # The simulated Bot owns the context built from the fixture's trusted identity.
 # Production ingress must establish these identity facts from verified authentication.
 bot_context = working_bot.actor_context
-[opportunity] = open_method.query_opportunities(
-    actor_context=bot_context,
-)
-submitted = working_bot.submit_application(
-    opportunity_ref=opportunity.opportunity_id,
+[opportunity] = working_bot.query_opportunities_by_skill()
+submitted = working_bot.submit_application_by_skill(
+    opportunity=opportunity,
     capability_evidence_refs=["evidence://calculator-coding"],
-    requested_role_refs=selected_agent_role_refs,
+    requested_role="assignee",
 )
 assert submitted.state == "SUBMITTED"
 policy_context = ActorContext(
@@ -303,12 +308,16 @@ submission nor screening can authorize Work, and admission consumes capacity.
 It also exercises signed product-wide HTTP Query
 and checks that its minimal projection matches the L5 result. Product filtering
 continues to hide unrelated Bots' tasks; L5 itself does not import product
-profiles, SQL discovery or designation rules. `SimulatedWorkingBot.submit_application`
-is only a test-runtime caller of the injected L5 capability, not a new domain
-operation, admission policy or HTTP endpoint. The case checks the persisted
-SUBMITTED application's applicant and submitting actor against the Bot UUID,
-and its accountable principal against the Bot owner. Separate regression cases
-send the actual signed HTTP Apply envelope to preserve ingress coverage.
+profiles, SQL discovery or designation rules. `SimulatedWorkingBot.query_opportunities_by_skill`
+and `submit_application_by_skill` are only test-runtime callers of the injected L5
+capability, not new domain operations, admission policies or HTTP endpoints.
+The case checks the persisted SUBMITTED application's applicant and submitting
+actor against the Bot UUID, and its accountable principal against the Bot owner.
+[Bot-runtime regressions](../../../../../../../../tests/community/core/task/context_collab/products/test_task_commission_bot_runtime.py)
+check the discovery caller identity, unchanged empty/available results, declared
+role-to-binding conversion in the opportunity scope, rejection of undeclared
+roles and propagated query/submission failures. Separate regression cases send
+the actual signed HTTP Apply envelope to preserve ingress coverage.
 
 ## Bot ingress and authentication
 
