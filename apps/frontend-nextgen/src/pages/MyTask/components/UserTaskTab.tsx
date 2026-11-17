@@ -13,7 +13,6 @@ import { Eye, FileOutput, Search } from 'lucide-react';
 import React, { useMemo, useState } from 'react';
 import {
   formatDateTime,
-  formatDuration,
   getBotDisplayName,
   getUserTaskGoal,
   getUserTaskTitle,
@@ -25,7 +24,7 @@ import {
 } from '../userTaskUtils';
 import { filterUserTaskRecords, type UserTaskOwnerBotOption } from './userTaskFilters';
 import { UserTaskOwnerBotFilter } from './UserTaskOwnerBotFilter';
-import { UserTaskGoalContent, UserTaskPrimaryContent } from './UserTaskTableCells';
+import { UserTaskGoalContent, UserTaskModifiedTime, UserTaskPrimaryContent } from './UserTaskTableCells';
 import { ViewSessionButton } from './ViewSessionButton';
 
 function Th({ className, ...props }: React.ThHTMLAttributes<HTMLTableCellElement>) {
@@ -227,14 +226,7 @@ export function UserTaskTab({
                           <div className="text-xs leading-5 text-foreground">{formatDateTime(record.gmt_create)}</div>
                         </Td>
                         <Td>
-                          <div className="space-y-1 text-xs leading-5 text-foreground">
-                            <div>{formatDateTime(record.gmt_modified)}</div>
-                            {!isLabVariant ? (
-                              <div className="text-xs text-muted-foreground">
-                                耗时：{formatDuration(record.gmt_create, record.gmt_modified)}
-                              </div>
-                            ) : null}
-                          </div>
+                          <UserTaskModifiedTime record={record} lab={isLabVariant} />
                         </Td>
                         {isLabVariant ? <Td className="whitespace-nowrap">{taskStatusBadge(record.status)}</Td> : null}
                         <Td>
