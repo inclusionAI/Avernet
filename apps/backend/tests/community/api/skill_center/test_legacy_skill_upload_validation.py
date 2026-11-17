@@ -1,5 +1,7 @@
 
 import json
+import io
+from unittest.mock import patch
 
 import zipfile
 
@@ -43,10 +45,111 @@ from agentclaw.community.core.skill_center.errors import (
 
 
 from agentclaw.community.core.skill_center.skill_metadata import SkillManifestError
+from agentclaw.community.core.skill_center.skill_package import SkillPackageInvalidError, SkillPackageValidator
+from agentclaw.community.core.skill_center.services.skill_parser import SkillParser
 
 
 from tests.community.api.skill_center._skills_api_fixtures import mock_ctx as mock_ctx, _upload_skill_di_app
 class TestUploadSkillValidation:
+    @pytest.mark.parametrize(
+        ("error", "level", "code", "message"),
+        [
+            (LocalSkillInvalidPackageError("missing_skill_file"), "warning", SkillUploadErrorCode.MANIFEST_MISSING, "SKILL.md is required."),
+            (LocalSkillTooLargeError(), "warning", SkillUploadErrorCode.PACKAGE_TOO_LARGE, "Skill package is too large."),
+            (ValueError("SKILL.md is required."), "warning", SkillUploadErrorCode.MANIFEST_MISSING, "SKILL.md is required."),
+            (SkillManifestError("INVALID_FRONTMATTER", "bad manifest"), "warning", SkillUploadErrorCode.MANIFEST_INVALID, "bad manifest"),
+            (SkillManifestError("SKILL_FILE_READ_ERROR", "read failed"), "error", SkillUploadErrorCode.UPLOAD_FAILED, "read failed"),
+            (ValueError("runtime unavailable: central directory service timed out"), "error", SkillUploadErrorCode.ZIP_INVALID, "runtime unavailable: central directory service timed out"),
+        ],
+    )
+    def test_upload_log_severity_preserves_response(self, mock_ctx, error, level, code, message):
+        with _upload_skill_di_app(mock_ctx, bot_status="ACTIVE") as (client, service, _, _):
+            service.upload_local_skill_files.side_effect = error
+            with patch("agentclaw.community.adapters.http.skill_center.skills_upload_routes.logger") as logger:
+                response = client.post(
+                    "/api/skills/upload",
+                    files=[("files", ("README.md", b"readme", "text/markdown"))],
+                    data={"file_paths": json.dumps(["README.md"])},
+                )
+            assert response.status_code == 200
+            assert response.json()["success"] is False
+            assert response.json()["error_code"] == code
+            assert response.json()["message"] == message
+            getattr(logger, level).assert_called_once()
+            getattr(logger, "error" if level == "warning" else "warning").assert_not_called()
+
+    def test_upload_bad_file_paths_json_is_warning(self, mock_ctx):
+        with _upload_skill_di_app(mock_ctx, bot_status="ACTIVE") as (client, _, _, _):
+            with patch("agentclaw.community.adapters.http.skill_center.skills_upload_routes.logger") as logger:
+                response = client.post(
+                    "/api/skills/upload",
+                    files=[("files", ("README.md", b"readme", "text/markdown"))],
+                    data={"file_paths": "["},
+                )
+            assert response.status_code == 200
+            assert response.json()["error_code"] == SkillUploadErrorCode.FILE_PATHS_INVALID
+            assert response.json()["message"] == "file_paths must be a JSON array."
+            logger.warning.assert_called_once()
+            logger.error.assert_not_called()
+
+    def test_upload_unexpected_error_keeps_traceback(self, mock_ctx):
+        with _upload_skill_di_app(mock_ctx, bot_status="ACTIVE") as (client, service, _, _):
+            service.upload_local_skill_files.side_effect = RuntimeError("unexpected")
+            with patch("agentclaw.community.adapters.http.skill_center.skills_upload_routes.logger") as logger:
+                response = client.post(
+                    "/api/skills/upload",
+                    files=[("files", ("README.md", b"readme", "text/markdown"))],
+                )
+            assert response.status_code == 200
+            assert response.json()["error_code"] == SkillUploadErrorCode.UPLOAD_FAILED
+            assert response.json()["message"] == "Upload failed: unexpected"
+            logger.error.assert_called_once()
+            assert logger.error.call_args.kwargs["exc_info"] is True
+            logger.warning.assert_not_called()
+
+    def test_upload_unreadable_archive_keeps_error_level(self, mock_ctx):
+        error = LocalSkillInvalidPackageError("unreadable_archive")
+        package_error = SkillPackageInvalidError("unreadable_archive")
+        package_error.__cause__ = OSError("read failed")
+        error.__cause__ = package_error
+        with _upload_skill_di_app(mock_ctx, bot_status="ACTIVE") as (client, service, _, _):
+            service.upload_local_skill_files.side_effect = error
+            with patch("agentclaw.community.adapters.http.skill_center.skills_upload_routes.logger") as logger:
+                response = client.post(
+                    "/api/skills/upload",
+                    files=[("files", ("skill.zip", b"zip", "application/zip"))],
+                )
+            assert response.status_code == 200
+            assert response.json()["success"] is False
+            assert response.json()["error_code"] == SkillUploadErrorCode.MANIFEST_INVALID
+            assert response.json()["message"] == "Skill package could not be read"
+            logger.error.assert_called_once()
+            logger.warning.assert_not_called()
+
+    def test_upload_corrupt_zip_is_warning(self, mock_ctx):
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_STORED) as archive:
+            archive.writestr("SKILL.md", b"unique-content")
+        corrupt = buf.getvalue().replace(b"unique-content", b"broken-content", 1)
+        with pytest.raises(SkillPackageInvalidError) as raised:
+            SkillPackageValidator(SkillParser()).validate_legacy_local_zip(corrupt)
+        assert raised.value.reason == "unreadable_archive"
+        error = LocalSkillInvalidPackageError(raised.value.reason)
+        error.__cause__ = raised.value
+        with _upload_skill_di_app(mock_ctx, bot_status="ACTIVE") as (client, service, _, _):
+            service.upload_local_skill_files.side_effect = error
+            with patch("agentclaw.community.adapters.http.skill_center.skills_upload_routes.logger") as logger:
+                response = client.post(
+                    "/api/skills/upload",
+                    files=[("files", ("skill.zip", corrupt, "application/zip"))],
+                )
+            assert response.status_code == 200
+            assert response.json()["success"] is False
+            assert response.json()["error_code"] == SkillUploadErrorCode.MANIFEST_INVALID
+            assert response.json()["message"] == "Skill package could not be read"
+            logger.warning.assert_called_once()
+            logger.error.assert_not_called()
+
     def test_upload_rejects_non_active_bot(self, mock_ctx):
         with _upload_skill_di_app(mock_ctx, bot_status="PENDING") as (
             client,

@@ -341,6 +341,8 @@ Local OpenAPI 的 ZIP 与目录上传在包校验失败时保持 HTTP 400 / `400
 `core/skill_center/upload_error_codes.py`，Legacy HTTP adapter 负责将既有异常
 归类为该枚举。前端应按错误码而不是匹配 `message` 判断分支；完整枚举与兼容说明见
 `apps/backend/specs/2026-09-14-legacy-skill-upload-error-contract.md`。
+该入口明确的输入校验失败记录 WARNING；运行环境、文件读取和未知异常仍记录 ERROR。
+日志级别不改变失败响应或校验规则。
 
 ## 10. 当前边界：不得扩大成未交付能力
 
