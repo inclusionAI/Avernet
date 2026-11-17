@@ -35,9 +35,11 @@ it('Owner 打开引擎配置时按需加载且同一页面只加载一次', asyn
 
   expect(service.loadEngineConfig).toHaveBeenCalledTimes(1);
   expect(service.loadEngineConfig).toHaveBeenCalledWith('bot-1', 'owner-1');
+  // 加载成功后 diff 基线与当前配置一致
+  expect(result.current.savedConfig).toEqual({ model: 'demo' });
 });
 
-it('Owner 恢复默认配置时读取默认值、写回配置并更新编辑器', async () => {
+it('Owner 恢复默认配置时读取默认值、写回配置并更新编辑器与基线', async () => {
   service.loadDefaultEngineConfig.mockResolvedValue({ model: 'default-model' });
   service.saveEngineConfig.mockResolvedValue({} as never);
   const { result } = renderHook(() => useBotEngineConfig('bot-1', 'owner-1', true));
@@ -47,4 +49,24 @@ it('Owner 恢复默认配置时读取默认值、写回配置并更新编辑器'
   expect(service.loadDefaultEngineConfig).toHaveBeenCalledWith('bot-1', 'owner-1');
   expect(service.saveEngineConfig).toHaveBeenCalledWith('bot-1', { model: 'default-model' }, 'owner-1');
   expect(result.current.config).toEqual({ model: 'default-model' });
+  expect(result.current.savedConfig).toEqual({ model: 'default-model' });
+});
+
+it('保存成功后 diff 基线推进到已保存内容，失败时不推进', async () => {
+  service.saveEngineConfig.mockRejectedValueOnce(new Error('boom')).mockResolvedValue({} as never);
+  const { result } = renderHook(() => useBotEngineConfig('bot-1', 'owner-1', true));
+
+  const draft = { model: 'demo' };
+  act(() => result.current.setConfig(draft));
+
+  await act(async () => {
+    await result.current.save().catch(() => undefined);
+  });
+  expect(result.current.savedConfig).toEqual({});
+
+  await act(async () => {
+    await result.current.save();
+  });
+  expect(service.saveEngineConfig).toHaveBeenCalledTimes(2);
+  expect(result.current.savedConfig).toEqual({ model: 'demo' });
 });

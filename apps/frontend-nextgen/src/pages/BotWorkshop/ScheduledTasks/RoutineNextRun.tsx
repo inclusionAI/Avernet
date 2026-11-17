@@ -35,7 +35,7 @@ export function RoutineNextRun({ task, now }: { task: RoutineSchedule; now: numb
       <Tooltip>
         <TooltipTrigger asChild>
           {next ? (
-            <time dateTime={next} tabIndex={0}>
+            <time dateTime={next} tabIndex={0} className="font-mono">
               {new Intl.DateTimeFormat('zh-CN', {
                 timeZone: task.timezone,
                 year: 'numeric',

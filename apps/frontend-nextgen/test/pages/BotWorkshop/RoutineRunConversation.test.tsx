@@ -100,7 +100,7 @@ test('keeps reported target fields for a personal Bot and hides only missing fie
   render(<RoutineRunConversation botType="personal" run={{ ...base, operator_id: '  ' }} />);
   open();
   const dialog = screen.getByRole('dialog');
-  expect(dialog).toHaveTextContent('环境：生产态');
+  expect(dialog).toHaveTextContent('环境：运行中');
   expect(dialog).toHaveTextContent('运行实例：instance-a');
   expect(dialog).not.toHaveTextContent('Caller：');
 });
