@@ -1,0 +1,19 @@
+apps/bcs-internal/Cargo.lock
+  s_19c0e6699afcd7::t_24be82dfdbdf43 515,649,655,1081,1806,2140
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a8cdd382e2ca86d7233994e26f234906b50bac6c",
+  "prompts": {},
+  "sessions": {
+    "s_19c0e6699afcd7": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d3be-3a1a-7b13-9090-e1745ea29304",
+        "model": "GLM-5.3"
+      },
+      "human_author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}

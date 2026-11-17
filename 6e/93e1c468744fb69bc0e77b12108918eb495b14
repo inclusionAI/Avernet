@@ -1,0 +1,22 @@
+apps/bcs-internal/docs/overlay/governance/architecture-boundary.md
+  h_fa66fe7c023b4b 70-110
+apps/bcs-internal/docs/overlay/governance/architecture-waivers.md
+  h_fa66fe7c023b4b 34-49
+apps/bcs-internal/docs/overlay/governance/sofa-rpc-boundary-rfc.md
+  h_fa66fe7c023b4b 1-102
+apps/bcs-internal/docs/overlay/governance/sofa-rpc-boundary.md
+  h_fa66fe7c023b4b 1-188
+apps/bcs-internal/scripts/check-architecture.sh
+  h_fa66fe7c023b4b 61-100
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6e93e1c468744fb69bc0e77b12108918eb495b14",
+  "prompts": {},
+  "humans": {
+    "h_fa66fe7c023b4b": {
+      "author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}
