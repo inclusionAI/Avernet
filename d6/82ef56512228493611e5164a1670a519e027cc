@@ -1,0 +1,46 @@
+apps/bcs-internal/README.md
+  s_d2bf2069ff97fe::t_a20e9ce09e9ef0 87-89,91-97
+  s_d2bf2069ff97fe::t_abcdafa70440df 90
+apps/bcs-internal/crates/plugins/bcs-provider-headers-dingtalk/Cargo.toml
+  s_d2bf2069ff97fe::t_a20e9ce09e9ef0 1-22
+apps/bcs-internal/crates/plugins/bcs-provider-headers-dingtalk/README.md
+  s_d2bf2069ff97fe::t_abcdafa70440df 1-18
+apps/bcs-internal/Cargo.toml
+  s_d2bf2069ff97fe::t_a20e9ce09e9ef0 3,47-48
+apps/bcs-internal/crates/plugins/bcs-provider-headers-dingtalk/src/lib.rs
+  s_d2bf2069ff97fe::t_a20e9ce09e9ef0 1-65
+apps/bcs-internal/crates/bootstrap/bcs-internal/Cargo.toml
+  s_d2bf2069ff97fe::t_a20e9ce09e9ef0 10-11
+apps/bcs-internal/crates/bootstrap/bcs-internal/src/main.rs
+  s_d2bf2069ff97fe::t_a20e9ce09e9ef0 156-157
+apps/bcs-internal/scripts/check-p4.sh
+  s_d2bf2069ff97fe::t_abcdafa70440df 19
+apps/bcs-internal/Cargo.lock
+  s_d2521bd18759a5::t_2f3b8dca0a1d7e 895,1608-1615,1920-1921,2201-2213,2369,2373,2378,2607,2619,2623-2624,2634
+apps/bcs-internal/crates/plugins/bcs-provider-headers-dingtalk/tests/wire.rs
+  s_d2bf2069ff97fe::t_6591c61d3f2fb0 1-83
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d682ef56512228493611e5164a1670a519e027cc",
+  "prompts": {},
+  "sessions": {
+    "s_d2521bd18759a5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e770-c577-70e2-8b12-95cddacea5c4",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "卓人 <hx410025@antgroup.com>"
+    },
+    "s_d2bf2069ff97fe": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ce8a-9474-7172-8e43-0c593e52a6e9",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "卓人 <hx410025@antgroup.com>"
+    }
+  }
+}
