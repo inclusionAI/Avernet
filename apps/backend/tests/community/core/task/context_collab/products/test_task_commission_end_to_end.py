@@ -146,7 +146,7 @@ OBJECTIVE = "为计算器增加求和能力:完成方案、编码和测试,生�
   - [ ] Collet语义明确性问题：这份 ACCS 协议没有给出 Collet 的完整成员变量定义
   - [ ] 单Agent执行任务过程中，需要上报内部的详细进度（步骤），目前协议没有明确表述怎么做：没有统一的详细步骤上报 API 和固定字段
   - [ ] open模式下，任务执行到底是在录取之后，还是在录取之前，协议没有明确说明，还是说都可以？
-  - [ ] open模式下，当录取了某个agent进入协作之后，谁来通知agent真正开始干活，没有明确的语义：没有定义一套统一的Agent执行上报 API
+  - [ ] open模式下，当录取了某个agent进入协作之后，谁来通知agent真正开始干活，没有明确的语义
 """
 def test_end_to_end_commission_flow(commission_deployment, tmp_path):
     # 1、调用L6层的方法，创建product profile
