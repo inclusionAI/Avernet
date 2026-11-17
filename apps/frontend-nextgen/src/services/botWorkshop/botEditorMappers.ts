@@ -28,6 +28,7 @@ export const mapResource = (item: ResourceDto, parentPath = ''): BotEditorResour
   name: item.name,
   type: item.type,
   size: typeof item.size === 'number' && Number.isFinite(item.size) ? item.size : undefined,
+  isSymlink: item.is_symlink ?? undefined,
 });
 
 export const mapScreen = (item: RenderScreenDto): BotRenderScreen => ({

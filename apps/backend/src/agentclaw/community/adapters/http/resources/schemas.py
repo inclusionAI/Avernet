@@ -157,6 +157,7 @@ class FileItem(BaseModel):
     path: str = Field(..., description="Relative path from workspace root")
     absolute_path: Optional[str] = Field(None, description="Absolute path in workspace (for copy to chat)")
     is_dir: bool = Field(..., description="Whether this is a directory")
+    is_symlink: bool = Field(False, description="Whether this entry is a symbolic link")
     readonly: bool = Field(False, description="Whether this item is read-only (cannot delete)")
     size: Optional[int] = Field(None, description="File size in bytes (files only)")
     size_human: Optional[str] = Field(None, description="Human-readable size (files only)")

@@ -59,6 +59,12 @@ class FileEntry(BaseModel):
         description="Display name — the last segment of `path`."
     )
     type: ResourceType = Field(description="What kind of entry this is.")
+    is_symlink: bool = Field(
+        default=False,
+        description="True when the entry is a symbolic link. Default False — "
+        "providers that cannot detect symlinks leave this unset and the field "
+        "is always safe to consume.",
+    )
     size: int | None = Field(
         default=None,
         description="Size in bytes. Null for folders, and for files whose "
