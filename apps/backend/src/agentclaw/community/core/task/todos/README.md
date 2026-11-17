@@ -72,10 +72,10 @@ observability, but Bot behavior must not depend on metadata being propagated by
 a transport.
 
 Every dispatched or resumed run explicitly loads the `todo-runner` Skill from
-`/home/admin/.openclaw/workspace/skills-pool/skills-repo/infra/todo-runner/SKILL.md`
+`/home/admin/.openclaw/workspace/skills/skills-repo/infra/todo-runner/SKILL.md`
 before doing business work. The Skill stays in the shared `infra` repository:
-it is not installed into a Bot Default SkillSet and no link is created under
-`workspace/skills`. Direct loading is repeated for every `[todo-execute]` and
+it is not installed into a Bot Default SkillSet and no link is created at the
+`workspace/skills` top level. Direct loading is repeated for every `[todo-execute]` and
 `[todo-resume]`, so a missing or unreadable source fails the run instead of
 silently executing without the Todo protocol. The runtime message supplies the
 current execution ids, token, Backend URL, objective, and concrete endpoints;

@@ -173,7 +173,7 @@ async def test_run_context_loads_todo_runner_from_infra_without_symlink() -> Non
     assert "只有完成接口返回 HTTP 成功，本轮执行才算结束" in context
     assert "todo-runner Skill" in context
     assert (
-        "/home/admin/.openclaw/workspace/skills-pool/skills-repo/infra/"
+        "/home/admin/.openclaw/workspace/skills/skills-repo/infra/"
         "todo-runner/SKILL.md"
     ) in context
     assert "每次收到 [todo-execute] 或 [todo-resume] 都必须" in context

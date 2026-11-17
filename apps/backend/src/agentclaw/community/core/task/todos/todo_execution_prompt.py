@@ -6,7 +6,7 @@ import json
 
 
 TODO_RUNNER_SKILL_MD_PATH = (
-    "/home/admin/.openclaw/workspace/skills-pool/skills-repo/infra/todo-runner/SKILL.md"
+    "/home/admin/.openclaw/workspace/skills/skills-repo/infra/todo-runner/SKILL.md"
 )
 
 
@@ -41,7 +41,7 @@ def format_todo_execution_instruction(
         f"执行前必须先读取并加载 todo-runner Skill：{TODO_RUNNER_SKILL_MD_PATH}",
         "每次收到 [todo-execute] 或 [todo-resume] 都必须从上述 infra 路径重新读取 "
         "todo-runner/SKILL.md，并严格按照其中的流程执行；不要为 todo-runner 创建"
-        "软链接，也不要假定它已在 workspace/skills 中激活。",
+        "软链接，也不要假定它已在 workspace/skills 顶层激活。",
         "如果 todo-runner/SKILL.md 不存在或无法读取，必须明确报告 "
         "todo-runner skill unavailable 并停止本轮，不得跳过 Skill 直接执行。",
         f"todo_id={todo_id}",
