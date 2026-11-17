@@ -386,3 +386,5 @@ mod admission;
 mod request_pagination;
 
 mod friendship_writeback;
+
+mod enrich_friend_entries;
