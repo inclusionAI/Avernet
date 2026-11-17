@@ -35,3 +35,25 @@ Verification on 2026-11-17:
 Not run: browser end-to-end flow, frontend production build, real SQL deployment/load validation, and the complete Rust workspace suite. Existing snapshot stores are reused without SQL/schema changes; the flow document records the traced two-query Group and three-query Session cost rather than claiming measured production latency.
 
 Delivery: BCS is prepared as a standalone commit/branch targeting `dev`; the frontend companion is prepared separately against `REL20261117`. Git and the resulting PRs record publication status; no deployment is claimed. Durable navigation/consent rules are in the [cross-app flow](../../../../docs/flows/collaboration-invitation.md).
+
+## Changed-line coverage follow-up (2026-11-17)
+
+The BCS job in Unit Tests run `44026200654` passed all 8,678 tests and overall
+line coverage (89.24%), but failed changed-line coverage: 155/185 = 83.78%.
+The unchanged `cov_gate.py` reproduces that failure against the downloaded CI
+JUnit/Cobertura artifacts and base `f3f3267ea884495ce904ced1bc6444b801c69294`.
+All 30 missed changed lines were in the extracted invitation module, including
+rare legacy join error projections and absent Session-snapshot wiring.
+
+Added assertions for each join-failure category and its stable V1 message/code,
+including storage and login failures remaining errors rather than success. A
+separate integration regression verifies missing Session-snapshot wiring returns
+an internal error without creating a Human. Product behavior, HTTP/service
+contracts, coverage exclusions, thresholds and CI scripts are unchanged.
+
+Fresh instrumented invitation tests: 66 passed; the invitation module covers
+149/165 instrumentable lines (90.30%). These tests hit 14 exact lines missed by
+the original CI report. Combining that evidence with the original CI baseline
+would yield 169/185 = 91.35%; this is an explicitly scoped comparison, not a new
+full-workspace coverage result. The pushed CI rerun remains the authoritative
+full-workspace gate result.

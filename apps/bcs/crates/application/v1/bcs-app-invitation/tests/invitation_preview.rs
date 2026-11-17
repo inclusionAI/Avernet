@@ -244,3 +244,21 @@ async fn preview_reports_unconfigured_group_snapshots_as_internal_error() {
     }).await.unwrap_err();
     assert_eq!(error.code(), "internal_error");
 }
+
+#[tokio::test]
+async fn preview_reports_unconfigured_session_snapshots_as_internal_error() {
+    let fx = Fixture::new(true).await;
+    let session_id = fx.session(true).await;
+    let service = InvitationFriendshipServiceImpl::new(
+        Arc::new(FriendCore::memory()), Arc::new(support::FakeFriendService::new()),
+        fx.groups, fx.sessions, fx.bots.clone(), fx.invite,
+        SECRET.to_vec(), InvitationFriendshipServiceConfig { default_ttl_seconds: 3600 },
+    );
+    let error = service.preview_invitation(PreviewInvitation {
+        caller: caller(), token: token(Some(InviteTargetType::Session), &session_id, u64::MAX),
+    }).await.unwrap_err();
+    assert_eq!(error.code(), "internal_error");
+    assert!(matches!(error, bcs_service_api::application::v1::ApplicationError::Internal(message)
+        if message == "session authorization snapshot core is not wired"));
+    assert!(fx.bots.get("human_viewer").await.is_none(), "a wiring failure must not create a Human");
+}

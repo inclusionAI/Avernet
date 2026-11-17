@@ -397,3 +397,6 @@ fn invitation_not_found(target: &str) -> ApplicationError {
 fn map_snapshot_error(error: ServiceError) -> ApplicationError {
     ApplicationError::internal(format!("invitation membership snapshot failed: {error}"))
 }
+
+#[cfg(test)]
+mod tests;
