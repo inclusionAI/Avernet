@@ -10,11 +10,22 @@ from uuid import uuid4
 
 from fastapi.testclient import TestClient
 
+from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context import (
+    ActorContext,
+)
 from agentclaw.community.core.task.context_collab.l1_interoperate_deliver.delivery import (
     A2aDeliveryPort,
 )
+from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
+    PrincipalRef,
+)
 from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
     top_level_binding_id,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.operations.contracts import (
+    OpenApplicationCommand,
+    OpenMethodOpsServiceProtocol,
+    ProfileOpAcceptedResult,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime import (
     current_axes,
@@ -134,7 +145,7 @@ def _simulate_ai_coding(
 
 
 class SimulatedWorkingBot:
-    """测试用 Bot runtime:执行中提供上报工具,成功返回后才自动提交成果。"""
+    """测试用 Bot runtime:自己申请参与,执行中上报,成功后才提交成果。"""
 
     def __init__(
         self,
@@ -143,12 +154,41 @@ class SimulatedWorkingBot:
         profile_ref,
         bot_id: str,
         owner_id: str,
+        *,
+        open_method: OpenMethodOpsServiceProtocol,
     ):
         self.bot_uuid = bot_id  # Exact UUID used in the signed gateway principal.
         self.bot_id, self.owner_id = self.bot_uuid, owner_id
         self.profile_ref = profile_ref
         self.client = client
         self.headers = {"X-Avernet-Principal": signed_principal}
+        self._open_method = open_method
+        # 本地直接调用的可信身份夹具;不冒充 HTTP/JWT 认证。
+        self.actor_context = ActorContext(
+            actor=PrincipalRef("bot", self.bot_uuid),
+            source="a2a",
+            accountable_principal_ref=PrincipalRef("human", self.owner_id),
+        )
+
+    def submit_application(
+        self,
+        *,
+        opportunity_ref: str,
+        capability_evidence_refs: list[str],
+        requested_role_refs: list[str],
+    ) -> ProfileOpAcceptedResult:
+        """由模拟 Bot 自己构造申请命令并调用注入的 L5 Open 能力。"""
+        _flow_log(_TEST_DIRECTORY, "模拟 Bot 以自身身份调用 L5 Open.submit_application")
+        return self._open_method.submit_application(
+            command=OpenApplicationCommand(
+                opportunity_ref=opportunity_ref,
+                actor_context=self.actor_context,
+                applicant_agent_ref=self.bot_uuid,
+                capability_evidence_refs=capability_evidence_refs,
+                requested_role_refs=requested_role_refs,
+                reason="task_commission.bot_self_application",
+            ),
+        )
 
     def request(self, request: dict, *, expected_status="SUCCEEDED") -> dict:
         message = request["params"]["message"]
