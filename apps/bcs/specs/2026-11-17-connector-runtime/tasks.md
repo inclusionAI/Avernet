@@ -17,7 +17,7 @@ the code of each task; each group ends with its crate's tests green.
   `DistConnectorCoreService` with the call-order and rule docs (plan §2);
   `dist_connector_core_service_contract_tests` harness in `bcs-test-support`;
   `bcs-service-api` 6.2.0 and its `CONTEXT.md` section; no name clash with `port/`.
-- [ ] 1.2 `bcs_dist_store::command`: `GROUP`, `CommandStreams`, `partition_of`;
+- [x] 1.2 `bcs_dist_store::command`: `GROUP`, `CommandStreams`, `partition_of`;
   tests: stable known values, range, single partition.
 
 ## Group 2 — Rules (C3 normalizer, C5 identities)
