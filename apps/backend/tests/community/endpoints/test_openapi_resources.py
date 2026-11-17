@@ -29,6 +29,7 @@ import jwt
 from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_HEADER
 from agentclaw.community.api.resource_service import ResourceServiceFactoryProtocol
 from agentclaw.community.core.services.resource_file_service import ResourceFileService
+from agentclaw.community.core.devices.services.device_context import DeviceOfflineError
 from agentclaw.community.utils.gateway_principal_config import (
     init_principal_verifier_config,
 )
@@ -331,3 +332,26 @@ for _method, _path, _input, _status, _body in _HAPPY_CASES:
         seed=_seed_verifier,
         expect=ExpectError(status=403, json_contains={"data": None}),
     )(lambda: None)
+
+
+def _seed_offline_services(world) -> None:
+    _seed_happy_services(world)
+
+    async def list_dir(_self, **_kwargs):
+        raise DeviceOfflineError("device offline")
+
+    bind_overrides(world, ResourceFileService, {"list_dir": list_dir})
+
+
+endpoint_test(
+    method="GET",
+    path=_BASE_PATH,
+    scenario="device_offline",
+    input=CaseInput(
+        path_params=_PATH_PARAMS, query_params=_query(path="docs"), headers=_HEADERS
+    ),
+    seed=_seed_offline_services,
+    expect=ExpectError(
+        status=502, json_contains={"code": 502000, "message": "Bot device is offline", "data": None}
+    ),
+)(lambda: None)

@@ -19,20 +19,14 @@ a builder on success and let the decorator handle the mapped failures.
 
 from __future__ import annotations
 
-import inspect
-from functools import wraps
 from json import JSONDecodeError
-from typing import Awaitable, Callable, TypeVar
 
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
-from agentclaw.community.adapters.http.error_logging import (
-    capture_call_params,
-    log_public_error,
-    remember_call_params,
-)
-from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope
+from agentclaw.community.adapters.http.openapi_v1.error_decorator import envelope_errors as envelope_errors
+from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope as Envelope
+from agentclaw.community.core.expert_market.models import ExpertNotFoundError, ExpertCreationError
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
     CODE_ACCEPTED,
     CODE_CREATED,
@@ -187,7 +181,9 @@ from agentclaw.community.core.bot_inventory.errors import (
 )
 from agentclaw.community.core.devices.services.device_context import (
     ConnInfoBuildError,
+    DeviceConnectionUnavailableError,
     DeviceNotBoundError,
+    DeviceOfflineError,
     UnknownProviderError,
 )
 from agentclaw.community.core.cron.errors import (
@@ -373,7 +369,6 @@ __all__ = [
 # keep importing them from here, so the split must not drop the re-export.
 __all__ += ["CODE_ACCEPTED", "CODE_CREATED", "CODE_OK", "Deleted", "Page"]
 
-T = TypeVar("T")
 
 
 class SkillCenterMarketplaceUnavailableError(RuntimeError):
@@ -386,7 +381,6 @@ class SkillCenterMarketplaceUnavailableError(RuntimeError):
 # identifiers and internal-language text never leak to external callers, and
 # (b) the two 404-mapped errors are byte-for-byte identical — a caller cannot
 # tell "exists but not yours/other tenant" from "does not exist".
-from agentclaw.community.core.expert_market.models import ExpertNotFoundError, ExpertCreationError
 
 ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     ExpertNotFoundError: (404, "Not found"),
@@ -606,9 +600,15 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # The binding row names a device provider the resolver does not know: bad
     # data on our side, never something the caller can correct.
     UnknownProviderError: (500, "Device binding is misconfigured"),
-    # The connection-info build called the underlying device service and it
-    # failed — an upstream dependency problem, hence 502 like the other
-    # downstream-service mappings.
+    # The provider confirms the downstream device is offline. Keep the
+    # upstream-dependency 502 while distinguishing this lifecycle state.
+    DeviceOfflineError: (502, "Bot device is offline"),
+    # A transient provider connection failure where the device state is
+    # unknown. Still 502 (upstream dependency), but with a distinct message
+    # so callers can tell it apart from a permanent configuration error.
+    DeviceConnectionUnavailableError: (502, "Device connection temporarily unavailable"),
+    # Catch-all for other ConnInfoBuildError subclasses — upstream dependency
+    # problem, hence 502 like the other downstream-service mappings.
     ConnInfoBuildError: (502, "Device service error"),
     # The passport service answered with nothing at all — upstream problem, not
     # a caller mistake, and not an unhandled crash.
@@ -933,58 +933,6 @@ _SKILL_SET_CONFLICT_CODES: dict[str, tuple[int, str]] = {
     "BOT_MUTATION_BUSY": (409208, "Another SkillSet mutation is in progress"),
     "SKILL_SET_STATE_CHANGED_RETRY": (409211, "SkillSet state changed; retry the request"),
 }
-
-
-def _find_request(args: tuple, kwargs: dict) -> Request | None:
-    candidate = kwargs.get("request")
-    if isinstance(candidate, Request):
-        return candidate
-    for value in args:
-        if isinstance(value, Request):
-            return value
-    return None
-
-
-def envelope_errors(
-    fn: Callable[..., Awaitable[Envelope[T]]],
-) -> Callable[..., Awaitable[object]]:
-    """Map the domain errors in :data:`ENVELOPE_ERRORS` to enveloped responses.
-
-    The wrapped handler must take a ``request: Request`` parameter (used for the
-    error envelope's ``request_id``). Unmapped exceptions are re-raised so the
-    app's 500 handler still owns them.
-
-    Every failure is also logged here, with its traceback and the arguments the
-    handler was called with. This is the only frame that has both: the public
-    response carries a fixed message by design, so without this the sole record
-    of a mapped failure was the status code on the access log. Capture is lazy —
-    a successful request pays nothing — and the parameters are stashed on the
-    request for the unmapped case, where ``app.py`` logs further out.
-    """
-    # Resolved once, at import: ``fn`` is the undecorated handler, so the bind
-    # in the except-branch recovers real parameter names for positional args.
-    signature = inspect.signature(fn)
-
-    @wraps(fn)
-    async def wrapper(*args: object, **kwargs: object) -> object:
-        try:
-            return await fn(*args, **kwargs)
-        except Exception as exc:  # noqa: BLE001 — re-raised unless mapped
-            request = _find_request(args, kwargs)
-            if request is None:
-                raise
-            params = capture_call_params(signature, args, kwargs)
-            # Stashed before the mapping decision: an unmapped error is
-            # re-raised out of this frame, and the handler that catches it can
-            # no longer see the arguments.
-            remember_call_params(request, params)
-            response = mapped_error_response(exc, request)
-            if response is None:
-                raise
-            log_public_error(request, exc, status=response.status_code, params=params)
-            return response
-
-    return wrapper
 
 
 def mapped_error_response(exc: Exception, request: Request) -> JSONResponse | None:
