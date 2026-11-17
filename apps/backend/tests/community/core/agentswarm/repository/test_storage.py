@@ -274,6 +274,53 @@ class TestRunRepository:
         fetched = run_repo.get_by_idempotency("idem-env-1", TENANT_A)
         assert fetched is not None and fetched.run_id == run.run_id
 
+    def test_get_scopes_to_current_env(self, run_repo, monkeypatch):
+        # env keeps the lookup from reading another deployment's run.
+        monkeypatch.setenv("SERVER_ENV", "pre")
+        run = _mk_run()
+        run_repo.create(run)
+        assert run_repo.get(run.run_id, TENANT_A) is not None
+
+        monkeypatch.setenv("SERVER_ENV", "prod")
+        assert run_repo.get(run.run_id, TENANT_A) is None
+
+    def test_list_page_scopes_to_current_env(self, run_repo, monkeypatch):
+        # Preview listed production's runs before env scoping.
+        monkeypatch.setenv("SERVER_ENV", "pre")
+        run_repo.create(_mk_run())
+
+        monkeypatch.setenv("SERVER_ENV", "prod")
+        page = run_repo.list_page(TENANT_A)
+        assert page.total == 0 and page.items == ()
+
+        monkeypatch.setenv("SERVER_ENV", "pre")
+        page = run_repo.list_page(TENANT_A)
+        assert page.total == 1
+
+    def test_active_counts_scope_to_current_env(self, run_repo, monkeypatch):
+        # Admission is per deployment.
+        monkeypatch.setenv("SERVER_ENV", "pre")
+        run = _mk_run()
+        run_repo.create(run)
+        assert run_repo.count_active_runs(TENANT_A) == 1
+        assert run_repo.count_active_runs_global() == 1
+
+        monkeypatch.setenv("SERVER_ENV", "prod")
+        assert run_repo.count_active_runs(TENANT_A) == 0
+        assert run_repo.count_active_runs_global() == 0
+
+    def test_purge_run_scopes_to_current_env(self, run_repo, monkeypatch):
+        # Cleanup in one deployment must never delete another's row.
+        monkeypatch.setenv("SERVER_ENV", "pre")
+        run = _mk_run()
+        run_repo.create(run)
+
+        monkeypatch.setenv("SERVER_ENV", "prod")
+        assert run_repo.purge_run(run.run_id, TENANT_A) == 0
+
+        monkeypatch.setenv("SERVER_ENV", "pre")
+        assert run_repo.purge_run(run.run_id, TENANT_A) == 1
+
     def test_idempotency_double_create_converges_to_survivor(self, run_repo):
         # uk_run_idem is the duplicate-submit join invariant; a racing
         # submit that loses the double-INSERT inside the
