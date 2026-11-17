@@ -242,3 +242,24 @@ def test_cookie_and_arithmetic_literals_remain_blocked(template):
     findings = scanner._findings("+++ b/service.py\n@@ -0,0 +1 @@\n+" + source + "\n")
     assert findings
     assert all(value not in finding.content for finding in findings)
+
+
+def test_cookie_format_spec_literal_remains_blocked_and_redacted():
+    value = "AbCdEf" + "0123456789XYZ-secret-value"
+    source = 'cookie=f"IAM_SLOT={runtime:{\'' + value + '\'}}",'
+    source = source.replace("SLOT", "TOKEN")
+    findings = scanner._findings("+++ b/service.py\n@@ -0,0 +1 @@\n+" + source + "\n")
+    assert findings
+    assert all(value not in finding.content for finding in findings)
+
+
+@pytest.mark.parametrize("template", [
+    'cookie=f"IAM_SLOT={{credential.token}}" + "VALUE"',
+    'cookie=f"{{f\'IAM_SLOT={{credential.token}}\'}}VALUE"',
+])
+def test_cookie_enclosing_expression_literals_are_blocked_and_redacted(template):
+    value = "AbCdEf" + "0123456789XYZ-secret-value"
+    source = template.format().replace("VALUE", value).replace("SLOT", "TOKEN")
+    findings = scanner._findings("+++ b/service.py\n@@ -0,0 +1 @@\n+" + source + "\n")
+    assert findings
+    assert all(value not in finding.content for finding in findings)

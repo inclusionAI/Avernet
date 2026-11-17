@@ -167,6 +167,21 @@ def _redact_content(content: str) -> str:
             if value_start >= 0 and value_end >= 0:
                 spans.append((value_start, value_end))
 
+    try:
+        statement = ast.parse(content.strip().rstrip(","))
+    except (SyntaxError, ValueError):
+        pass
+    else:
+        if any(
+            isinstance(item, ast.JoinedStr) and any(
+                isinstance(part, ast.Constant) and isinstance(part.value, str)
+                and _looks_like_plaintext_value(part.value)
+                for part in ast.walk(item)
+            )
+            for item in ast.walk(statement)
+        ):
+            spans.append((0, len(content)))
+
     if not spans:
         return content
 
@@ -317,7 +332,9 @@ def _python_reference_is_safe(
         if isinstance(value, ast.JoinedStr):
             return all(safe(item) for item in value.values)
         if isinstance(value, ast.FormattedValue):
-            return safe(value.value)
+            return safe(value.value) and (
+                value.format_spec is None or safe(value.format_spec)
+            )
         if isinstance(value, ast.Call):
             args = value.args
             # Only a mapping lookup's first argument names a field. Defaults,
@@ -349,6 +366,13 @@ def _python_reference_is_safe(
         try:
             statement = ast.parse(stripped)
         except (SyntaxError, ValueError):
+            return False
+        if len(statement.body) != 1 or not isinstance(
+            statement.body[0], (ast.Assign, ast.AnnAssign, ast.Expr)
+        ):
+            return False
+        enclosing_value = statement.body[0].value
+        if enclosing_value is None or not safe(enclosing_value):
             return False
         offset = len(content) - len(content.lstrip())
         column = len(content[offset:assignment.start()].encode("utf-8"))
@@ -416,7 +440,13 @@ def _rust_assignment(content: str, assignment: re.Match[str]) -> tuple[bool, boo
     skeleton = RUST_STRING_RE.sub(replace_literal, expression)
     if suspicious:
         return False, True
-    if any(
+    # Braced initializer fields carry values, even when a value looks like a
+    # type name. Only a struct declaration can introduce inline type fields.
+    before_field = content[:assignment.start()]
+    declaration = "{" not in before_field or re.fullmatch(
+        r"\s*(?:pub(?:\(crate\))?\s+)?struct\s+\w+\s*\{[^{}]*\}\s*;?\s*", content
+    )
+    if declaration and any(
         match.start() <= assignment.start() < match.end()
         for match in RUST_TYPE_FIELD_RE.finditer(content)
     ):
