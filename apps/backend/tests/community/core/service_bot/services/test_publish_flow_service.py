@@ -5150,3 +5150,153 @@ async def test_execute_restore_draft_completed_operation_replay_is_noop():
     operation_repo.fail.assert_not_called()
     build_service.restore_teclaw_draft_async.assert_not_called()
     build_service.restore_draft_async.assert_not_called()
+
+
+# ── session precheck integration tests ───────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_execute_release_phase_blocks_when_active_sessions_exist():
+    """AC-2: active online sessions → FAILED publish with session count."""
+    publish_service = Mock()
+    build_service = Mock()
+    baas_service = Mock()
+    svc = _pf(publish_service, build_service, baas_service, Mock(), _arca_router(build_service))
+
+    publish_record = _make_publish_record(
+        source_bot_id='bot-source',
+        ext={'migration_path': '/m'},
+    )
+    bot_service = Mock()
+    bot_service.get_bot_by_address.return_value = {
+        'bot_id': 'bot-source',
+        'owner_id': 'u1',
+        'bot_type': 'service',
+    }
+    svc._bot_service = bot_service
+
+    # Stub the failure-handling plumbing.
+    svc._get_latest_ext = Mock(return_value={})
+    svc._clear_retry_flag = Mock()
+    svc._update_publish_status = Mock()
+
+    # Session prechecker returns 3 active sessions.
+    prechecker = Mock()
+    prechecker.active_session_count = AsyncMock(return_value=3)
+    svc._session_prechecker = prechecker
+
+    svc._execute_first_release = AsyncMock()
+    svc._execute_upgrade_release = AsyncMock()
+
+    result = await svc.execute_release_phase(publish_record, operator='op')
+
+    assert result.status == PublishStatus.FAILED
+    assert '3 active sessions' in result.message
+    svc._execute_first_release.assert_not_awaited()
+    svc._execute_upgrade_release.assert_not_awaited()
+    prechecker.active_session_count.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_execute_release_phase_proceeds_when_no_active_sessions():
+    """AC-1: zero active sessions → release proceeds normally."""
+    publish_service = Mock()
+    build_service = Mock()
+    baas_service = Mock()
+    svc = _pf(publish_service, build_service, baas_service, Mock(), _arca_router(build_service))
+
+    publish_record = _make_publish_record(
+        source_bot_id='bot-source',
+        ext={'migration_path': '/m'},
+    )
+    bot_service = Mock()
+    bot_service.get_bot_by_address.return_value = {
+        'bot_id': 'bot-source',
+        'owner_id': 'u1',
+        'bot_type': 'service',
+    }
+    svc._bot_service = bot_service
+
+    # Session prechecker returns 0 active sessions.
+    prechecker = Mock()
+    prechecker.active_session_count = AsyncMock(return_value=0)
+    svc._session_prechecker = prechecker
+
+    svc._execute_first_release = AsyncMock(return_value='FIRST')
+    svc._execute_upgrade_release = AsyncMock(return_value='UPGRADE')
+
+    result = await svc.execute_release_phase(publish_record, operator='op')
+
+    # Should proceed past the precheck (whichever deploy path is chosen).
+    assert result in ('FIRST', 'UPGRADE')
+    prechecker.active_session_count.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_execute_release_phase_proceeds_when_prechecker_is_none():
+    """No session prechecker (e.g. no runtime relay injected) → release proceeds
+    (backward-compatible)."""
+    publish_service = Mock()
+    build_service = Mock()
+    baas_service = Mock()
+    svc = _pf(publish_service, build_service, baas_service, Mock(), _arca_router(build_service))
+
+    publish_record = _make_publish_record(
+        source_bot_id='bot-source',
+        ext={'migration_path': '/m'},
+    )
+    bot_service = Mock()
+    bot_service.get_bot_by_address.return_value = {
+        'bot_id': 'bot-source',
+        'owner_id': 'u1',
+        'bot_type': 'service',
+    }
+    svc._bot_service = bot_service
+    svc._session_prechecker = None
+
+    svc._execute_first_release = AsyncMock(return_value='FIRST')
+    svc._execute_upgrade_release = AsyncMock(return_value='UPGRADE')
+
+    result = await svc.execute_release_phase(publish_record, operator='op')
+
+    # Precheck didn't block — whichever deploy path was chosen ran.
+    assert result in ('FIRST', 'UPGRADE')
+
+
+@pytest.mark.asyncio
+async def test_execute_release_phase_precheck_single_session_message():
+    """Singular grammar when exactly one session is active."""
+    publish_service = Mock()
+    build_service = Mock()
+    baas_service = Mock()
+    svc = _pf(publish_service, build_service, baas_service, Mock(), _arca_router(build_service))
+
+    publish_record = _make_publish_record(
+        source_bot_id='bot-source',
+        ext={'migration_path': '/m'},
+    )
+    bot_service = Mock()
+    bot_service.get_bot_by_address.return_value = {
+        'bot_id': 'bot-source',
+        'owner_id': 'u1',
+        'bot_type': 'service',
+    }
+    svc._bot_service = bot_service
+
+    svc._get_latest_ext = Mock(return_value={})
+    svc._clear_retry_flag = Mock()
+    svc._update_publish_status = Mock()
+
+    prechecker = Mock()
+    prechecker.active_session_count = AsyncMock(return_value=1)
+    svc._session_prechecker = prechecker
+
+    svc._execute_first_release = AsyncMock()
+    svc._execute_upgrade_release = AsyncMock()
+
+    result = await svc.execute_release_phase(publish_record, operator='op')
+
+    assert result.status == PublishStatus.FAILED
+    assert '1 active session is still running' in result.message
+    assert 'terminate it before publishing' in result.message
+    prechecker.active_session_count.assert_awaited_once()

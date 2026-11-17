@@ -95,10 +95,16 @@ from agentclaw.community.core.service_bot.services.publish_flow.retry_ops_mixin 
 from agentclaw.community.core.service_bot.services.publish_flow.draft_restore_ops_mixin import (
     DraftRestoreOpsMixin,
 )
+from agentclaw.community.core.engine_runtime.engine_runtime_service_protocol import (
+    EngineRuntimeRelayProtocol,
+)
 from agentclaw.community.core.service_bot.services.publish_flow.release_stage import (
     ONLINE_SPEC,
     VERIFY_SPEC,
     ReleaseStageRunner,
+)
+from agentclaw.community.core.service_bot.services.publish_flow.session_precheck import (
+    SessionPrechecker,
 )
 from agentclaw.community.core.service_bot.services.publish_flow.operation_runner import (
     PublishOperationRunner,
@@ -194,6 +200,7 @@ class PublishFlowService(
         runtime_projector: BotRuntimeProjectorProtocol,
         runtime_layout_probe: RuntimeLayoutProbeServiceProtocol,
         employee_publication_provider: Callable[[], DigitalEmployeePublicationProtocol] | None = None,
+        engine_runtime_relay: EngineRuntimeRelayProtocol | None = None,
     ):
         """Initialize the flow processing service.
 
@@ -292,6 +299,14 @@ class PublishFlowService(
         # release) are enqueued as persisted, crash-safe tasks instead of
         # fire-and-forget asyncio tasks. See publish_flow/tasks.py.
         self._task_queue_service = task_queue_service
+
+        # Session precheck: queries the engine relay for active sessions before
+        # an online upgrade.  ``None`` relay (no runtime access) skips the check.
+        self._session_prechecker = (
+            SessionPrechecker(relay=engine_runtime_relay)
+            if engine_runtime_relay is not None
+            else None
+        )
 
     def refresh_publish_handle(self, binding_id, publish_id) -> None:
         """Refresh the baas ``publish_id`` stashed in a reused binding's
