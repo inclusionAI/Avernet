@@ -202,6 +202,22 @@ async fn an_unknown_first_send_follows_the_same_policy() {
 }
 
 #[tokio::test]
+async fn a_rejected_resend_does_not_fail_a_start_that_may_have_arrived() {
+    let rig = Rig::new();
+    rig.worker.create_spec(spec_with(|c| c.idempotent_start = true)).await;
+    rig.worker.notify().await;
+    // The first send may have reached the agent; only the resend is refused.
+    rig.agent.on_start(Reply::Unknown);
+    rig.agent.on_start(Reply::Rejected("http_401"));
+    let _running = rig.start();
+    until("the resend was refused", || async { rig.agent.count("start") == 2 }).await;
+    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+    assert_eq!(rig.phase().await, "sending", "unresolved, not failed");
+    assert!(rig.kinds().await.is_empty(), "no error event for a call whose task may be running");
+    assert_eq!(rig.agent.count("start"), 2);
+}
+
+#[tokio::test]
 async fn a_definite_not_sent_is_retried_three_times_then_unresolved() {
     let rig = Rig::new();
     rig.worker.create().await;
