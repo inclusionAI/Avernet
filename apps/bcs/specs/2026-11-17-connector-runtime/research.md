@@ -31,7 +31,7 @@ behave differently from the Redis page and are absorbed in our code (§5).
 | list as held | `ZADD held` | `add(held, [{did, now_ms}], ZAddMode::Upsert)` before the claim | — |
 | read `disp` | `JSON.GETTS disp $` | `get_json(disp)` → `Versioned { value, version }` | — |
 | claim | `JSON.SETTS disp … (epoch+1)×10^9` | `mutate_json(disp, Newer(version::claim(epoch + 1)), Patch([Set /execution, Set /connector]), Expiry::Preserve)` | greater wins, equal rejected: one winner |
-| holder write | `JSON.SETTS disp … <read+1>` | `get_paths(disp, ["/control", "/execution", "/connector"])`, check holder is me, `mutate_json(disp, Newer(version::next(read)), Patch([Set /execution, Set /connector]), Preserve)` | compare-and-set |
+| holder write | `JSON.SETTS disp … <read+1>` | `get_json(disp)`, check holder is me, `mutate_json(disp, Newer(version::next(read)), Patch([Set /execution, Set /connector]), Preserve)` | compare-and-set |
 | poll for reply / cancel | `JSON.GETTS disp …` | `get_paths(disp, ["/control", "/execution"])` every 1–2 s per held call | — |
 | unlist | `ZREM held` | `remove(held, [did])` after the ENDED write (or when the claim found nothing to hold) | — |
 | key event | admission order | `InboxProducerPort::admit` (`StoreInboxProducer`) | unchanged |
@@ -87,23 +87,23 @@ objects built from what it just read.
     "holder": { "instance": { "node": "conn-03", "incarnation": "1794370950000" }, "epoch": 1 },
     "phase": "accepted",
     "remote": { "task_id": "rt-77c2", "context_id": "ctx-91" },
-    "confirmed_input_through": null,
+    "confirmed_input_through": 1,
     "cancellation": { "kind": "not_sent" },
     "outcome": null
   },
-  "connector": {
-    "v": 1,
-    "claim_request": "conn-03:1794370950000:s0042.7f3a9c.b21e.n2.a1:1",
-    "sending": null,
-    "finish_evidence": null
-  }
+  "connector": { "input_sending": 2, "finish_evidence": null }
 }
 ```
 
-`connector.sending` records the operation a holder was about to send
-(`{"kind":"start","request_id":…}` or `{"kind":"input","seq":2,"request_id":…}`),
-which the merged `DispatchExecution` cannot express for an input sent while the
-phase is `accepted`. Event `seq` is not stored: it restarts at 1 per claim.
+- `input_sending`: highest pending-input seq a send was started for. A later
+  holder treats a seq at or below it and above the watermark as "maybe sent",
+  anything above as "never sent". The merged `DispatchExecution` has no field
+  for it.
+- `finish_evidence`: the string given to `finish`, for the Worker's
+  `ControlOutcome::SupersededTerminal`.
+- The claim's `request_id` is not stored: `{instance, epoch}` identifies the
+  claim. Event `seq` is not stored: it restarts at 1 per claim. No replay
+  cursor is stored: `subscribe` is always called with `after = None`.
 
 ## 7. Existing code reused
 
@@ -125,6 +125,61 @@ one new module `bcs_dist_store::command` with the command-stream partition
 count type, the `did → partition` function and the group name. Additive; no
 existing module is edited.
 
-## 8. Existing outbound A2A client and architecture rules
+## 8. Existing outbound A2A client (`crates/external-clients/bcs-a2a-http`)
 
-See [plan](plan.md) §6 and §9; filled from the code survey.
+- Three bindings (`RestClient`, `JsonRpcClient`, `GrpcClient`) plus custom
+  bindings behind the private `BindingClient` enum; each has `send_message`,
+  `send_streaming_message`, `get_task`, `cancel_task`, `subscribe_to_task` on
+  SDK types (`a2a-lf` 0.4.2). Errors are all `a2a::A2AError`.
+- The clients add no ids and do not retry. The caller builds the request, so
+  the adapter sets `messageId` = request id, `contextId`, and `taskId` for an
+  input.
+- Auth headers are client defaults (`ClientWithDefaults`), built per target by
+  the crate-private `guarded_client_with_headers` (URL guard, pinned DNS, no
+  redirects). The adapter therefore lives inside this crate.
+- A connect failure and a mid-request failure both become
+  `A2AError::internal(...)`; nothing proves "no byte was written". Only
+  failures before the client call (resolver, guard, credential, client
+  construction) are provably not sent.
+- `delivery_error::initial_rejection` already lists the definite rejections
+  (HTTP 400/401/403/404/405/406/415/422, gRPC 3/5/7/12/16); the adapter reuses
+  that table.
+- SSE `id:` lines are dropped by the decoder: there is no remote event id or
+  replay cursor to pass on.
+- `AgentBinding` has no URL, binding kind or tenant: an injected resolver is
+  needed (walkthrough §17).
+- Test fakes to copy from: `tests/jsonrpc_binding.rs` (axum JSON-RPC agent),
+  `tests/conformance_a2a_delivery.rs` (REST + SSE agent), `tests/grpc_tracing.rs`.
+
+## 9. `AgentEvent` payload per kind
+
+Carried over from the reviewed plan; assumed signed off by the executor team.
+The payload is always a JSON object; `state` is our lower-case word; objects
+under `message`, `artifact`, `task` are the A2A objects as the pinned SDK
+serializes them; `code` is a machine code from a fixed list (`agent_failed`,
+`agent_rejected`, `agent_canceled`, `canceled_before_send`, `http_<status>`,
+`grpc_<code>`, `a2a_<reason>`).
+
+```json
+// delta
+{"artifact": {"artifactId": "a-1", "parts": [{"text": "Q3 revenue grew "}]}, "append": true, "last_chunk": false}
+// thinking
+{"message": {"messageId": "m-17", "role": "ROLE_AGENT", "parts": [{"text": "Comparing the two quarters"}]}}
+// tool
+{"tool": {"phase": "result", "toolCallId": "call-3", "name": "search", "isError": false, "result": {"content": [{"type": "text", "text": "12 hits"}]}}}
+// snapshot
+{"task": {"id": "rt-889", "contextId": "rc-12", "status": {"state": "TASK_STATE_WORKING"}, "artifacts": []}}
+// input_required (the interaction id is in AgentEventKind)
+{"state": "input_required", "message": {"messageId": "m-21", "role": "ROLE_AGENT", "parts": [{"text": "Publish the summary?"}]}}
+// final from the stream / from a whole task
+{"state": "completed"}
+{"state": "completed", "artifacts": [{"artifactId": "a-1", "parts": [{"text": "Q3 revenue grew 12%..."}]}]}
+// error: agent failed / send rejected / canceled by the agent / canceled before send
+{"state": "failed", "code": "agent_failed", "message": {"…": "…"}}
+{"state": "rejected", "code": "http_400"}
+{"state": "canceled", "code": "agent_canceled"}
+{"state": "canceled", "code": "canceled_before_send"}
+```
+
+`final` and `error` have different `input_id`s: if two holders disagree, both
+are admitted and the first terminal event of a call wins.
