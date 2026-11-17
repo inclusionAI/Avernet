@@ -1,0 +1,26 @@
+[package]
+name = "bcs-dist-store"
+description = "Shared store layout, version helpers and admission for the distributed executor plane"
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+rust-version = { workspace = true }
+version = { workspace = true }
+
+[dependencies]
+async-trait = { workspace = true }
+bcs-dist-model = { workspace = true }
+bcs-service-api = { workspace = true }
+bcs-store-api = { workspace = true }
+hex = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+bcs-test-support = { workspace = true }
+tokio = { workspace = true }
+
+[lints]
+workspace = true

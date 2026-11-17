@@ -1,5 +1,9 @@
-// Test-only executable model for the reusable harness. No public provider,
-// network/durability implementation or production wiring is introduced.
+//! In-memory model of the `bcs-store-api` traits, for tests only.
+//!
+//! It runs the reusable conformance harness (`tests/conformance_store.rs`) and
+//! backs provider tests of `*-store` crates. It is not a production plugin: no
+//! durability, no network, no failover. The `broken_*` and `*_disabled` flags
+//! inject faults the harness must reject.
 #![allow(clippy::unwrap_used, clippy::expect_used, reason = "test-only fixture")]
 mod json;
 mod kv;

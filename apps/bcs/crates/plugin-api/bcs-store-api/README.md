@@ -240,10 +240,11 @@ streams require keys within the provider's supported routing scope. Call:
 - `stream_store_plugin_contract_tests`, `stream_group_contract_tests` and
   `stream_blocking_contract_tests`.
 
-The private `conformance_store` test model executes these assertions and includes
+The `conformance_store` test uses `bcs_test_support::store_model::Model`, which executes these assertions and includes
 intentionally broken CAS, stale conditional deletion, rejected TTL mutation,
 lost KV history, JSON rollback, interleaved JSON/ZSet check-write and same-score invalidation variants that
-the harness must reject. It is not a production or exported in-memory plugin.
+the harness must reject. It is exported for tests of `*-store` crates only and is
+not a production in-memory plugin.
 Type tests also check trait-object use, ID ordering and outcome distinctions.
 
 From `apps/bcs`:
