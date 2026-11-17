@@ -17,6 +17,7 @@ members = [
     "crates/service-api/bcs-services-container",
     # contracts
     "crates/contracts/bcs-dist-model",
+    "crates/services/bcs-dist-store",
     "crates/contracts/bcs-domain",
     "crates/contracts/bcs-protocol",
     # services
@@ -147,6 +148,7 @@ version      = "0.1.4-beta.3"
 
 [workspace.dependencies]
 bcs-dist-model = { path = "crates/contracts/bcs-dist-model" }
+bcs-dist-store = { path = "crates/services/bcs-dist-store" }
 bcs-a2a-binding-api = { path = "crates/plugin-api/bcs-a2a-binding-api" }
 bcs-tracing-api = { path = "crates/plugin-api/bcs-tracing-api" }
 bcs-network-tracing = { path = "crates/auxiliary/bcs-network-tracing" }

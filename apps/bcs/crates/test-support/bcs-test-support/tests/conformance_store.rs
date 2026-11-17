@@ -3,8 +3,6 @@
     clippy::expect_used,
     reason = "contract assertions"
 )]
-#[path = "support/store/mod.rs"]
-mod store;
 use bcs_store_api::{
     kv::{KvStorePlugin, VersionedKvStorePlugin},
     *,
@@ -13,7 +11,7 @@ use bcs_test_support::contract::plugin::store::{
     self as contract, json::*, kv::*, stream::*, zset::*,
 };
 use std::time::Duration;
-use store::Model;
+use bcs_test_support::store_model::Model;
 
 #[tokio::test]
 async fn conformance_kv() {
