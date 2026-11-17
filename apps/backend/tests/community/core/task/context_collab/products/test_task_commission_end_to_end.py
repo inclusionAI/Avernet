@@ -12,7 +12,7 @@ Bot 随后执行并通过签名 A2A HTTP 入站上报。
 """
 
 import secrets
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 from uuid import uuid4
@@ -150,9 +150,12 @@ OBJECTIVE = "为计算器增加求和能力:完成方案、编码和测试,生�
 - 问题  
   - [ ] open模式下，当录取了某个agent进入协作之后，谁来通知agent真正开始干活，没有明确的语义
 """
-def test_end_to_end_commission_flow(commission_flow, tmp_path):
-    # 1、fixture已完成product profile的创建与部署，这里直接拿解开的数据
-    service, working_bot, injector, l6_profile = commission_flow
+def test_end_to_end_commission_flow(deploy_commission, tmp_path):
+    # 1、调用L6层的方法，创建product profile
+    l6_profile = _create_product_file()
+
+    # 测试用例引入的动态注入
+    service, working_bot, injector = deploy_commission(l6_profile)
     l4_context_operate = injector.get(ContextServiceProtocol)
     store, axes = injector.get(MethodStoreProtocol), current_axes()
     l5_open_method = injector.get(OpenMethodOpsServiceProtocol)
@@ -165,16 +168,16 @@ def test_end_to_end_commission_flow(commission_flow, tmp_path):
     _publish_opportunity(l5_open_method, collet_id_1)
 
     # 4、bot主动发现机会
-    opportunity, submitted = _discover_opportunity(l4_context_operate, l5_open_method, working_bot, injector, store, axes, collet_id_1, l4_collet)
+    opportunity, submitted = _discover_opportunity(injector, l4_context_operate, l5_open_method, store, axes, l4_collet, working_bot)
 
     # 5、录取agent
-    _admit_application_agent(l5_open_method, opportunity, submitted, collet_id_1, injector, store, axes)
+    _admit_application_agent(injector, l5_open_method, store, axes, collet_id_1, opportunity, submitted)
 
     # 6、通知agent开始任务
-    started, task_id = _notify_agent_work(l4_context_operate, service, injector, l4_collet, collet_id_1, working_bot.actor_context)
+    started, task_id = _notify_agent_work(injector, l4_context_operate, service, l4_collet, working_bot.actor_context)
 
     # 7、模拟agent执行任务
-    artifacts = _agent_run_simulate(l4_collet, service, working_bot, started, collet_id_1, injector, tmp_path, task_id)
+    artifacts = _agent_run_simulate(service, l4_collet, working_bot, started, tmp_path, task_id)
 
     # 8、查询并验证产物结果
     _query_task_result(l4_context_operate, service, collet_id_1, working_bot.actor_context, task_id, artifacts)
@@ -266,7 +269,9 @@ def _publish_opportunity(l5_open_method, collet_id_1):
     return published
 
 
-def _discover_opportunity(l4_context_operate, l5_open_method, working_bot, injector, store, axes, collet_id_1, l4_collet):
+def _discover_opportunity(injector, l4_context_operate, l5_open_method, store, axes, l4_collet, working_bot):
+    collet_id_1 = l4_collet.collet_id
+
     # 5、调用L5的OPEN方法-查询机会（实际应该是Agent自己调用）
     bot_context = working_bot.actor_context
     # TODO 每个bot skill
@@ -317,7 +322,7 @@ def _discover_opportunity(l4_context_operate, l5_open_method, working_bot, injec
     return opportunity, submitted
 
 
-def _admit_application_agent(l5_open_method, opportunity, submitted, collet_id_1, injector, store, axes):
+def _admit_application_agent(injector, l5_open_method, store, axes, collet_id_1, opportunity, submitted):
     # 7、针对每个机会，检查申请信息，并选择一个候选者录取
     policy_context = ActorContext(HUMAN.actor, source="product_policy")   # 采用product profile中定义的录取策略
     [policy_ref] = opportunity.admission_policy_refs
@@ -354,7 +359,9 @@ def _admit_application_agent(l5_open_method, opportunity, submitted, collet_id_1
     assert application.applicant_agent_ref == BOT_ASSIGNEE
 
 
-def _notify_agent_work(l4_context_operate, service, injector, l4_collet, collet_id_1, bot_context):
+def _notify_agent_work(injector, l4_context_operate, service, l4_collet, bot_context):
+    collet_id_1 = l4_collet.collet_id
+
     # 8、直接调用 L4 服务的 Work.start;不是产品 start_task 或通用事件追加接口。
     started = l4_context_operate.start(
         collet_id_1,
@@ -375,7 +382,8 @@ def _notify_agent_work(l4_context_operate, service, injector, l4_collet, collet_
     return started, task_id
 
 
-def _agent_run_simulate(l4_collet, service, working_bot, started, collet_id_1, injector, tmp_path, task_id):
+def _agent_run_simulate(service, l4_collet, working_bot, started, tmp_path, task_id):
+    collet_id_1 = l4_collet.collet_id
 
     # TODO: 协议相关的通知机制
 
@@ -700,12 +708,16 @@ def commission_deployment(db, monkeypatch):
 
 
 @pytest.fixture
-def commission_flow(commission_deployment):
-    """端到端用例专用:创建L6 product profile并部署,测试函数直接拿到解开的数据。"""
+def deploy_commission(commission_deployment):
+    """端到端用例专用:测试体内显式创建profile后以赋值方式部署,
+    所有部署的teardown由fixture析构时统一执行(含测试失败场景)。"""
 
-    l6_profile = _create_product_file()
-    with commission_deployment(l6_profile) as (service, working_bot, injector):
-        yield service, working_bot, injector, l6_profile
+    with ExitStack() as stack:
+
+        def deploy(profile, **identity):
+            return stack.enter_context(commission_deployment(profile, **identity))
+
+        yield deploy
 
 
 @pytest.fixture(
