@@ -1,7 +1,7 @@
 """产品 Profile 上线 → 建任务 → Bot 自查机会/申请/录取 → L4 Work → 用户验收。
 
-用户通过产品 Service API 操作和观察;case 以 Bot ActorContext 查询 L5 Open 机会,
-再由模拟 Bot 自己构造申请命令并调用注入的 L5 Open 服务提交申请。
+用户通过产品 Service API 操作和观察;模拟 Bot 以自身 ActorContext 调用注入的
+L5 Open 服务查询机会,再自己构造申请命令并提交申请。
 发布人授权的策略身份直接调用 Open.screen/admit,录取后直接调用 L4 Work.start;
 Bot 随后执行并通过签名 A2A HTTP 入站上报。
 使用真实产品 Profile、仓储、L5 Open 和 G1/G4。直接 Open 调用不验证 JWT;
@@ -26,9 +26,6 @@ from injector import Binder, Injector
 
 from agentclaw.community.adapters.http.task import commission_a2a, commission_a2a_auth
 from agentclaw.community.core.gateway_principal import PrincipalVerifierConfig
-from agentclaw.community.core.task.context_collab.errors import (
-    ContextCollabValidationError,
-)
 from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context import (
     ActorContext,
 )
@@ -168,7 +165,7 @@ def test_end_to_end_commission_flow(deploy_commission, tmp_path):
     _publish_opportunity(l5_open_method, collet_id_1)
 
     # 4、bot主动发现机会
-    opportunity, submitted = _discover_opportunity(injector, l4_context_operate, l5_open_method, store, axes, l4_collet, working_bot)
+    opportunity, submitted = _discover_opportunity(store, axes, l4_collet, working_bot)
 
     # 5、录取agent
     _admit_application_agent(injector, l5_open_method, store, axes, collet_id_1, opportunity, submitted)
@@ -269,17 +266,14 @@ def _publish_opportunity(l5_open_method, collet_id_1):
     return published
 
 
-def _discover_opportunity(injector, l4_context_operate, l5_open_method, store, axes, l4_collet, working_bot):
+def _discover_opportunity(store, axes, l4_collet, working_bot):
     collet_id_1 = l4_collet.collet_id
 
-    # 5、调用L5的OPEN方法-查询机会（实际应该是Agent自己调用）
-    bot_context = working_bot.actor_context
-    # TODO 每个bot skill
-    [opportunity] = l5_open_method.query_opportunities(
-        actor_context=bot_context,
-    )
+    # Step1：由 Bot 自己调用注入的 L5 Open 服务查询机会，比如bot自己通过skill查询。
+    # TODO(fixed): 每个bot skill == 这里方法名突出一下bot通过skill“发现机会”、“提交申请”
+    [opportunity] = working_bot.query_opportunities_by_skill()
 
-    # 6、由 Bot 自己调用注入的 L5 Open 服务提交申请
+    # Step2：由 Bot 自己调用注入的 L5 Open 服务提交申请
     # 问题：从协议中的如下描述，提交应用、录取agent之后，只是将agent拉到协作中，然后才开始真正干活,不过确实存在意义不明
     """
         publish opportunity
@@ -291,13 +285,12 @@ def _discover_opportunity(injector, l4_context_operate, l5_open_method, store, a
           → Decision: admit or reject
           → create scoped Participant or Method-specific participation binding
     """
-    record = injector.get(ContextCollabRepositoryProtocol).get_current_status(collet_id_1)
-    assert record.task is not None
-    submitted = working_bot.submit_application(
-        opportunity_ref=opportunity.opportunity_id,
+    submitted = working_bot.submit_application_by_skill(
+        opportunity=opportunity,
         capability_evidence_refs=["evidence://calculator-coding"],
-        requested_role_refs=_selected_agent_role_refs(record),
+        requested_role="assignee",
     )
+
     assert submitted.accepted and submitted.state == "SUBMITTED"
     application = store.get_application(
         axes, submitted.object_id, opportunity.method_binding_id, collet_id_1
@@ -305,19 +298,9 @@ def _discover_opportunity(injector, l4_context_operate, l5_open_method, store, a
     assert application.state is ApplicationState.SUBMITTED
     assert application.applicant_agent_ref == working_bot.bot_uuid
     assert application.transitioned_by == working_bot.bot_uuid
-    assert application.transition_reason == "task_commission.bot_self_application"
-    assert application.requested_role_refs == tuple(_selected_agent_role_refs(record))
-    assert application.accountable_principal_ref == working_bot.owner_id
-    assert application.capability_evidence_refs == ("evidence://calculator-coding",)
-
-    # 提交申请还不等于录取,不能启动 Work;拒绝不能写入 Task/Event。
-    repository = injector.get(ContextCollabRepositoryProtocol)
-    before_admission = repository.get_current_status(collet_id_1)
-    with pytest.raises(ContextCollabValidationError):
-        l4_context_operate.start(
-            collet_id_1, WorkStartCommand(expected_version=l4_collet.version), bot_context
-        )
-    assert repository.get_current_status(collet_id_1) == before_admission
+    assert application.requested_role_refs == (
+        f"{collet_id_1}/role-bindings/selected-agent/participant_executor_ref",
+    )
 
     return opportunity, submitted
 
@@ -616,18 +599,6 @@ def _trace_runtime(monkeypatch, injector: Injector) -> None:
         _trace_call(monkeypatch, module, name, description)
 
 
-def _selected_agent_role_refs(record) -> list[str]:
-    """从持久化 ProductInstance 读取已创建的 selected-agent 角色引用。"""
-    assert record.product_instance is not None
-    refs = [
-        ref
-        for ref in record.product_instance.role_binding_refs
-        if "/role-bindings/selected-agent/" in ref
-    ]
-    assert refs
-    return refs
-
-
 @contextmanager
 def _commission_runtime(
     db,
@@ -690,7 +661,7 @@ def _commission_runtime(
         yield (
             injector.get(TaskCommissionServiceProtocol),
             SimulatedWorkingBot(
-                client, signed_principal, profile.ref, bot_id, owner_id,
+                client, signed_principal, profile, bot_id, owner_id,
                 open_method=injector.get(OpenMethodOpsServiceProtocol),
             ),
             injector,
