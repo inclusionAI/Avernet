@@ -78,6 +78,7 @@ def create_catalog_search_app(
     index_builds: IndexBuildService | None = None,
     updates_factory=CardUpdates,
     metadata_factory=CardMetadataRetrieval,
+    default_candidates_reader=None,
     http_app_factory=create_search_app,
     allow_document_mapping=False,
 ):
@@ -168,7 +169,9 @@ def create_catalog_search_app(
         if not policy.retrieval.keyword_enabled and not policy.retrieval.vector_enabled:
             return metadata_factory(
                 DefaultCandidates(
-                    repository,
+                    repository
+                    if default_candidates_reader is None
+                    else default_candidates_reader,
                     updates,
                     caches.candidate_ids,
                     caches,
