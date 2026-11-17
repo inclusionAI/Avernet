@@ -3,10 +3,10 @@
 用户通过产品 Service API 操作和观察;模拟 Bot 以自身 ActorContext 调用注入的
 L5 Open 服务查询机会,再自己构造申请命令并提交申请。
 发布人授权的策略身份调用 Open.screen/admit,再显式 Single.select 后调用 L4 Work.start;
-Bot 随后执行并通过签名 A2A HTTP 入站上报。
+Bot 随后执行,直接调用 G3 记录步骤 Observation、进度 MetricSample 和结果 Outcome,通过签名 A2A HTTP 提交成果。
 使用真实产品 Profile、仓储、L5 Open 和 G1/G4。直接 Open 调用不验证 JWT;
 另保留真实产品策略的签名 HTTP Query/Apply 回归。Open 负责参与录取,
-开始、进度与成果提交属于 L4 Work,不是 Bot 的内置方法或新的 Open 方法。
+开始与成果提交属于 L4 Work;步骤详情是 G3 观测,不推进 Work 状态。
 仅模拟 Bot 执行和网关签名;本地产物不上传,不声称验证真实远端 Bot、
 网关转发或 LLM 执行。
 """
@@ -29,6 +29,9 @@ from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context
 )
 from agentclaw.community.core.task.context_collab.g1_secure_govern.authorization import (
     ContextCollabAuthorizerProtocol,
+)
+from agentclaw.community.core.task.context_collab.g3_observe_evaluate_evolve.service_api import (
+    TelemetryServiceProtocol,
 )
 from agentclaw.community.core.task.context_collab.l1_interoperate_deliver.delivery import (
     A2aDeliveryPort,
@@ -146,7 +149,6 @@ from fastapi_injector import attach_injector
 from injector import Binder, Injector
 
 from tests.community.core.task.context_collab.products.task_commission_e2e_support import (
-    _AI_CODING_STEPS,
     SimulatedWorkingBot,
     _simulate_ai_coding,
 )
@@ -169,7 +171,7 @@ OBJECTIVE = (
 - 语义不明确
   - [ ] L4层的DataRelationModel不明确。比如Collet和Participant、RoleBinding、Task的关系，如何建模没有明确语义
   - [ ] Collet语义明确性问题：这份 ACCS 协议没有给出 Collet 的完整成员变量定义
-  - [ ] 单Agent执行任务过程中，需要上报内部的详细进度（步骤），目前协议没有明确表述怎么做：没有统一的详细步骤上报 API 和固定字段
+  - [x] 单 Agent 步骤详情通过 G3 Observation.extensions 上报,字段由本地 schema 声明。
   - [ ] open模式下，任务执行到底是在录取之后，还是在录取之前，协议没有明确说明，还是说都可以？
   - [ ] open模式下，当录取了某个agent进入协作之后，谁来通知agent真正开始干活，没有明确的语义
 - 问题  
@@ -610,7 +612,7 @@ def _agent_run_simulate(service, l4_collet, working_bot, started, tmp_path, task
     # TODO: 协议相关的通知机制
 
     # 9. 模拟Agent执行任务，过程中上报自定义的步骤及进度信息
-    # 但是目前协议中没有统一的详细步骤上报 API 和固定字段，这里自定义了一套上报API和字段。
+    # G3:步骤用 Observation,百分比用 MetricDefinition/MetricSample,结果用 Outcome。
     created = TaskCommissionCreatedView(
         collet_id=l4_collet.collet_id,
         title=OBJECTIVE,
@@ -622,12 +624,13 @@ def _agent_run_simulate(service, l4_collet, working_bot, started, tmp_path, task
     # TODO 协议要提供远程服务
     artifacts = working_bot.run(
         created,
-        lambda report_progress: _simulate_ai_coding(
+        lambda report_telemetry: _simulate_ai_coding(
             tmp_path=tmp_path,
             collet_id=collet_id_1,
             task_id=task_id,
             service=service,
-            report_progress=report_progress,
+            working_bot=working_bot,
+            report_telemetry=report_telemetry,
         ),
         task_id=task_id,
         initial_revision=started.context_version,
@@ -664,25 +667,11 @@ def _query_task_result(
         "collet.participants_bound",
         "task.created",
         "task.started",
-        *["task.progress.updated"] * len(_AI_CODING_STEPS),
         "task.submitted",
         "task.accepted",
     ]
 
-    assert [
-        event.payload["note"]
-        for event in final_events
-        if event.event_kind == "task.progress.updated"
-    ] == [note for _, note in _AI_CODING_STEPS]
-    progress_events = [
-        event for event in final_events if event.event_kind == "task.progress.updated"
-    ]
     assert task_id != collet_id_1
-    for index, event in enumerate(progress_events):
-        assert event.payload["task_id"] == task_id
-        assert event.payload["progress"]
-        assert event.payload["error_msg"] == ""
-        assert event.payload["reason"] == f"产物已生成：{artifacts[index]}"
     [submitted_event] = [
         event for event in final_events if event.event_kind == "task.submitted"
     ]
@@ -925,6 +914,7 @@ def _commission_runtime(
                 bot_id,
                 owner_id,
                 open_method=injector.get(OpenMethodOpsServiceProtocol),
+                telemetry_service=injector.get(TelemetryServiceProtocol),
             ),
             injector,
         )

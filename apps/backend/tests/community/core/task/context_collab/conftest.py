@@ -16,8 +16,9 @@ from sqlalchemy.pool import StaticPool
 
 from agentclaw.community.core.base import Base
 
-# Side-effect import: registers the Collet/Task/Event models on Base.metadata.
+# Side-effect imports: register L4 and independent G3 models on Base.metadata.
 import agentclaw.community.core.task.context_collab.persistence.models  # noqa: F401
+import agentclaw.community.core.task.context_collab.g3_observe_evaluate_evolve.persistence  # noqa: F401
 
 
 class InMemorySqliteDB:

@@ -1,4 +1,4 @@
-# Context collaboration: authority and read projections
+# Context collaboration: authority, telemetry and read projections
 
 Owner: Backend `core/task/context_collab`. This is the ACCS collaboration path,
 separate from the older goal-driven TaskGraph framework in the parent directory.
@@ -14,7 +14,9 @@ It implements bounded local contracts, not full ACCS conformance.
   extends L4 with legacy combined creation; root `service_api.py` only reexports
   the canonical L4/L6 types. Method contracts live in
   `l5_methods/operations/contracts.py`, and product contracts in
-  `products/*/service_api.py`. Root API imports remain compatible.
+  `products/*/service_api.py`. [G3 acquisition](g3_observe_evaluate_evolve/README.md)
+  exposes `TelemetryServiceProtocol` for generic Observation, MetricDefinition/
+  MetricSample and Outcome, separate from Work. Root API imports remain compatible.
 - **Consumes:** injected `DatabasePlugin`, product catalog, MethodStore,
   authorization and delivery ports. DI chooses concrete implementations;
   HTTP adapters translate requests but do not own Task transitions.
@@ -42,6 +44,11 @@ HTTP route or a shared `services/` folder. This is a local implementation layout
 for ACCS semantic boundaries, not an ACCS-mandated Python directory tree.
 
 ```text
+g3_observe_evaluate_evolve/
+  telemetry.py / metrics.py # protocol values, not L4 commands
+  service_api.py / service.py # generic G1-gated acquisition/query contracts/body
+  persistence.py           # independent append-only telemetry SQL
+  observation.py           # existing Task/Event read projections
 l4_context_primitives/
   context_service_protocol.py # full ContextServiceProtocol, commands/results
   service_ports.py            # narrow read/write and G1/G4 policy contracts
@@ -562,6 +569,19 @@ Production DDL execution must be verified separately.
    It can receive ordinary Messages but cannot advance Work. This is distinct
    from a corrupted new row with a missing referenced Task, which is rejected.
 
+## Execution telemetry
+
+[G3 acquisition](g3_observe_evaluate_evolve/README.md) records step details as
+Observation, percentages as versioned MetricDefinition + MetricSample, and
+execution results as Outcome. The injected service applies G1 access and writes
+independent telemetry; it never advances L4 Events, Tasks or Collet revisions.
+Outcome SUCCEEDED is not submission/acceptance. The commission journey uses
+this direct library service, then separately submits Work through signed HTTP.
+Existing HTTP progress actions remain compatible; the older read projection
+below does not automatically consume these new samples. Apply the
+[additive telemetry DDL](sql/2026_11_17_context_collab_telemetry.sql) before using
+acquisition; SQLite contract tests do not establish deployed DDL readiness.
+
 ## Query progress
 
 Library callers query final Task state through the L4 service's `get_status`
@@ -594,6 +614,8 @@ not historic control events:
   not completed/active/pending work items. GET never advances either revision.
 
 ## Verification and change impact
+
+- [Generic G3 acquisition contracts and evidence](g3_observe_evaluate_evolve/README.md): step/metric/result separation, G1 access, immutable definitions, independent SQL, failure handling and compatibility.
 
 - [Collet metadata contracts](../../../../../../tests/community/core/task/context_collab/test_collet_metadata.py): schema/revision separation, UTC precision, description/audit validation, canonical ETag and legacy decoding.
 - [Collet metadata SQL tests](../../../../../../tests/community/repository/task/context_collab/test_collet_metadata.py): authenticated creation audit, separate storage, append/read behavior, CAS/rollback and unknown/corrupt legacy metadata.

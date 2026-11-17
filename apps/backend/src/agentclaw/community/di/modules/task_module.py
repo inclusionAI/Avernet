@@ -266,6 +266,7 @@ from agentclaw.community.core.task.task_runner.client.ports import (
 from agentclaw.community.di.config import TaskDispatchConfig
 from agentclaw.community.di.modules.context_collab_products import build_product_catalog
 from agentclaw.community.di.modules.task_commission_module import TaskCommissionModule
+from agentclaw.community.di.modules.telemetry_module import TelemetryModule
 from agentclaw.community.plugin_api.notify_sender import (
     QUALIFIER_BBS_DIGEST,
     NotifySenderPlugin,
@@ -370,6 +371,7 @@ class TaskModule(Module):
         # Commission installs the shared G1 admission guard and its product seams.
         # Explicit singleton bindings remain replaceable by profile modules.
         binder.install(TaskCommissionModule())
+        binder.install(TelemetryModule())
         # L5 method 内存存储(2026-11-12 L5 method objects spec §6):进程内
         # singleton,``ContextCollabService`` 构造路径新增 method_store 依赖
         # 后必须绑定;P2 持久化经同一 MethodStoreProtocol 键整体替换,服务层
