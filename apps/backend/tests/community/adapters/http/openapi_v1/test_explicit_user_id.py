@@ -662,7 +662,8 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 # with no Bot dimension: query 1 -> 2, none 147 -> 156.
 # Team-space deletion adds one user-scoped operation with no Bot dimension:
 # none 156 -> 157.
-_BOT_ID_PLACEMENT = {"path": 226, "query": 2, "none": 157}
+# Admin Caller expiry correction adds one Bot-addressed operation.
+_BOT_ID_PLACEMENT = {"path": 227, "query": 2, "none": 157}
 
 
 
@@ -882,7 +883,8 @@ def test_the_pinned_number_of_operations_take_it():
     # user-scoped, so the merged surface grows 298 -> 308. Context-collab derives
     # its actor from the verified principal and adds no user_id query.
     # Team-space deletion adds one more user-taking operation: 308 -> 309.
-    assert len(taking) == 309
+    # Admin Caller expiry correction keeps the verified actor user_id: 309 -> 310.
+    assert len(taking) == 310
 
 
 def test_the_exempt_operations_take_none():

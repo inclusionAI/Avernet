@@ -176,6 +176,7 @@ class TestTaskProcessor:
                 publish_id=100,
                 operator="operator-001",
                 biz_id="task-uuid-123",
+                default_tag="eval",
             )
         finally:
             task_processor_module.logger.removeHandler(caplog.handler)
@@ -548,6 +549,7 @@ class TestTaskProcessor:
             publish_id=100,
             operator="operator-001",
             biz_id="task-uuid-123",
+            default_tag="eval",
         )
         # Verify bot_uuid and baas_publish_id are saved to ext (first update_status call)
         call_args = mock_repo.update_status.call_args_list[0]
@@ -669,6 +671,7 @@ class TestTaskProcessor:
             publish_id=100,
             operator="",  # Empty string when None
             biz_id="task-uuid-123",
+            default_tag="eval",
         )
 
     @pytest.mark.asyncio

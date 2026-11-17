@@ -84,10 +84,13 @@ export function useConversationRouteResolver(options: {
       // Coding Session 的创建者由 sessionId 权威表达；深链缺失或携带了错误 origin 时，
       // 与 AIXCoding 路由模式一样先切到正确来源，再解析会话。
       const managedOrigin = isManagedConversationSection(section) ? codingOrigin ?? route.origin ?? 'mine' : 'mine';
-      const scope =
-        isManagedConversationSection(section) && managedOrigin === 'mine'
+      const scope = isManagedConversationSection(section)
+        ? selectedIsCodingBot
           ? route.scope ?? storeNow.effectiveScopeByManagedBotId[route.botId] ?? 'all'
-          : 'all';
+          : managedOrigin === 'mine'
+            ? route.scope ?? 'all'
+            : 'all'
+        : 'all';
       const friendUserId =
         isManagedConversationSection(section) && managedOrigin === 'others'
           ? route.friendUserId ??
@@ -101,7 +104,9 @@ export function useConversationRouteResolver(options: {
       storeNow.setExpandedBot(route.botId, true);
       if (isManagedConversationSection(section)) {
         if ((storeNow.originByManagedBotId[route.botId] ?? 'mine') !== managedOrigin) {
-          storeNow.setManagedBotOrigin(route.botId, managedOrigin);
+          storeNow.setManagedBotOrigin(route.botId, managedOrigin, {
+            supportsScopesOutsideMine: selectedIsCodingBot,
+          });
         }
         if ((storeNow.effectiveScopeByManagedBotId[route.botId] ?? 'all') !== scope) {
           storeNow.setManagedBotScope(route.botId, scope);

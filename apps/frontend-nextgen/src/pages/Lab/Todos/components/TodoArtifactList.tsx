@@ -2,6 +2,9 @@ import { Button, Empty, Spin } from '@/components/ui';
 import type { TodoArtifact } from '@/domain/todos/models';
 import { Code2, Download, ExternalLink, Eye, File, FileText, Link2 } from 'lucide-react';
 import { useState } from 'react';
+import { getPreviewKind } from '@/services/workspace/sessionFileUtils';
+import { TodoFilePreviewModal } from './TodoFilePreviewModal';
+import type { TodoFileArtifact } from './useTodoFilePreview';
 
 interface TodoArtifactListProps {
   artifacts: TodoArtifact[];
@@ -56,30 +59,20 @@ function triggerBlobDownload(blob: Blob, fileName: string) {
   URL.revokeObjectURL(objectUrl);
 }
 
-function triggerBlobPreview(blob: Blob) {
-  const objectUrl = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = objectUrl;
-  anchor.target = '_blank';
-  anchor.rel = 'noreferrer';
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
-}
-
 export function TodoArtifactList({ artifacts, loading, error, onRetry, onReadFile }: TodoArtifactListProps) {
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [previewArtifactId, setPreviewArtifactId] = useState<string | null>(null);
 
-  const handleFile = async (artifact: Extract<TodoArtifact, { kind: 'file' }>, disposition: 'inline' | 'attachment') => {
+  const handleFile = async (artifact: TodoFileArtifact, disposition: 'inline' | 'attachment') => {
     const actionKey = `${artifact.artifactId}:${disposition}`;
     setBusyAction(actionKey);
     setActionError(null);
     try {
       const blob = await onReadFile(artifact.artifactId, disposition);
-      if (disposition === 'inline') triggerBlobPreview(blob);
-      else triggerBlobDownload(blob, artifact.content.fileName || artifact.artifactName);
+      if (disposition === 'attachment') {
+        triggerBlobDownload(blob, artifact.content.fileName || artifact.artifactName);
+      }
     } catch (cause) {
       setActionError(cause instanceof Error ? cause.message : '产物文件读取失败');
     } finally {
@@ -142,6 +135,8 @@ export function TodoArtifactList({ artifacts, loading, error, onRetry, onReadFil
         }
 
         if (artifact.kind === 'file') {
+          const previewable =
+            getPreviewKind(artifact.content.fileName, artifact.content.fileType) !== 'other';
           return (
             <ArtifactShell
               key={artifact.artifactId}
@@ -149,16 +144,20 @@ export function TodoArtifactList({ artifacts, loading, error, onRetry, onReadFil
               title={artifact.artifactName}
               meta={`${artifact.content.fileName} · ${formatFileSize(artifact.content.size)}`}
             >
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <Button
                   variant="secondary"
                   size="sm"
-                  loading={busyAction === `${artifact.artifactId}:inline`}
+                  disabled={!previewable}
+                  loading={previewable && previewArtifactId === artifact.artifactId}
                   leftIcon={<Eye className="size-4" aria-hidden />}
-                  onClick={() => void handleFile(artifact, 'inline')}
+                  onClick={() => setPreviewArtifactId(artifact.artifactId)}
                 >
                   预览
                 </Button>
+                {!previewable ? (
+                  <span className="text-xs text-muted-foreground">该格式暂不支持在线预览</span>
+                ) : null}
                 <Button
                   variant="secondary"
                   size="sm"
@@ -233,6 +232,17 @@ export function TodoArtifactList({ artifacts, loading, error, onRetry, onReadFil
           </ArtifactShell>
         );
       })}
+      <TodoFilePreviewModal
+        artifact={
+          artifacts.find(
+            (artifact): artifact is TodoFileArtifact =>
+              artifact.kind === 'file' && artifact.artifactId === previewArtifactId,
+          ) ?? null
+        }
+        onOpenChange={() => setPreviewArtifactId(null)}
+        onDownload={(artifact) => void handleFile(artifact, 'attachment')}
+        readArtifact={onReadFile}
+      />
     </section>
   );
 }

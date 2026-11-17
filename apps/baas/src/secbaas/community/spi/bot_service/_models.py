@@ -41,6 +41,7 @@ class BotBindingData:
 
 CALLER_CREDENTIAL_TYPE_IAM_TOKEN = "iam-token"
 CALLER_CREDENTIAL_TYPE_AGENTPASS = "agentpass"
+CALLER_CREDENTIAL_TYPE_DINGTALK = "dingtalk"
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,6 +58,10 @@ class CallerExecutionCredential:
     @property
     def is_agentpass(self) -> bool:
         return self.type == CALLER_CREDENTIAL_TYPE_AGENTPASS
+
+    @property
+    def is_dingtalk(self) -> bool:
+        return self.type == CALLER_CREDENTIAL_TYPE_DINGTALK
 
 
 @dataclass

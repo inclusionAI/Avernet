@@ -65,8 +65,16 @@ export interface ConversationState {
   selectedSessionSnapshot: SelectedSessionSnapshot | null;
 
   setExpandedBot(botId: string, expanded: boolean): void;
-  setManagedBotOrigin(botId: string, origin: ConversationOrigin): void;
-  setManagedBotScope(botId: string, scope: ConversationSessionScope): void;
+  setManagedBotOrigin(
+    botId: string,
+    origin: ConversationOrigin,
+    options?: { supportsScopesOutsideMine?: boolean },
+  ): void;
+  setManagedBotScope(
+    botId: string,
+    scope: ConversationSessionScope,
+    options?: { preserveSelection?: boolean },
+  ): void;
   setSessionKeyFilter(botId: string, sessionKey: string): void;
   /** 写入多实例服务 Bot 的选中实例(device UUID);实际变化时失效该 Bot 列表缓存并递增过滤代次。 */
   setBotInstanceSelection(botId: string, instanceUuid: string): void;

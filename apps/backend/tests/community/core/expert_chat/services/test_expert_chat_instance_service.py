@@ -733,7 +733,7 @@ class TestGetCallerConnection:
         ws_info = _make_ws_info()
         baas.get_ws_info_by_bot_uuid = MagicMock(return_value=ws_info)
 
-        result = await svc.get_caller_connection(USER_ID, BOT_ID, OWNER_ID)
+        result = await svc.get_caller_connection(USER_ID, BOT_ID, OWNER_ID, iam_token="test-token")
 
         assert result["need_poll"] is False
         assert result["connection"]["bot_uuid"] == BOT_UUID
@@ -741,6 +741,8 @@ class TestGetCallerConnection:
         # No create or upgrade called
         bot_build_service.release_async.assert_not_called()
         bot_build_service.upgrade_async.assert_not_called()
+
+        caller_identity.exchange_caller_identity.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_success_instance_with_old_version_upgrades(self):
@@ -1661,6 +1663,7 @@ class TestCallerIdentityExchange:
         assert call_kwargs["stage"] == "online"
         assert call_kwargs["entity_id"] == OWNER_ID
         assert call_kwargs["is_test_exchange"] is False
+        assert call_kwargs["force_runtime_refresh"] is True
 
     @pytest.mark.asyncio
     async def test_exchange_not_called_when_no_iam_token(self):
@@ -1722,7 +1725,7 @@ class TestCallerIdentityExchange:
         caller_identity.exchange_caller_identity.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_exchange_failure_does_not_interrupt_container_startup(self):
+    async def test_exchange_failure_does_not_interrupt_container_startup(self, caplog):
         """When exchange_caller_identity fails, container startup continues normally."""
         svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater = _make_service()
 
@@ -1743,8 +1746,9 @@ class TestCallerIdentityExchange:
         instance_repo.update_instance = MagicMock(return_value=True)
 
         # Make exchange_caller_identity raise an exception
-        caller_identity.exchange_caller_identity = MagicMock(side_effect=RuntimeError("exchange failed"))
+        caller_identity.exchange_caller_identity = MagicMock(side_effect=RuntimeError("outbound-private-secret"))
 
+        caplog.set_level("INFO")
         # Call with iam_token
         result = await svc.get_caller_connection(
             USER_ID, BOT_ID, OWNER_ID, iam_token="test-iam-token"
@@ -1755,6 +1759,11 @@ class TestCallerIdentityExchange:
         assert result["connection"]["bot_uuid"] == BOT_UUID
         # Verify exchange_caller_identity was called
         caller_identity.exchange_caller_identity.assert_called_once()
+
+        assert "force_runtime_refresh=True" in caplog.text
+        assert "error_type=RuntimeError" in caplog.text
+        assert "outbound-private-secret" not in caplog.text
+        assert "test-iam-token" not in caplog.text
 
     @pytest.mark.asyncio
     async def test_exchange_with_binding_id_passed(self):
@@ -1874,7 +1883,7 @@ class TestCallerIdentityExchange:
         instance_repo.update_instance = MagicMock(return_value=True)
 
         # Make exchange_caller_identity raise an exception
-        caller_identity.exchange_caller_identity = MagicMock(side_effect=RuntimeError("exchange failed"))
+        caller_identity.exchange_caller_identity = MagicMock(side_effect=RuntimeError("outbound-private-secret"))
 
         with patch("agentclaw.community.core.expert_chat.services.expert_chat_instance_service.logger") as mock_logger:
             result = await svc.get_caller_connection(

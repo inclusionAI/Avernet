@@ -3436,11 +3436,14 @@ async def test_eval_publish_success():
     assert build_service.release_async.await_args.kwargs["publish_stage"] == PublishStage.EVAL
     assert build_service.release_async.await_args.kwargs["version"] == "3"
     assert build_service.release_async.await_args.kwargs["bot"] == bot_service.get_bot_by_address.return_value
-    assert build_service.release_async.await_args.kwargs["ext_info"] == {"biz_id": "biz-001"}
+    assert build_service.release_async.await_args.kwargs["ext_info"] == {
+        "biz_id": "biz-001",
+        "default_tag": "eval",
+    }
     assert bot_service.get_bot_by_address.return_value["ext"] == {}
-    # 未传 default_tag 时 AGENTCLAW_DEFAULT_TAG 不应注入 extra_envs
+    # 未显式传 default_tag 时评估环境默认进入 eval 区
     extra_envs = build_service.release_async.await_args.kwargs["extra_envs"]
-    assert "AGENTCLAW_DEFAULT_TAG" not in extra_envs
+    assert extra_envs.get("AGENTCLAW_DEFAULT_TAG") == "eval"
     # #197 all-auto: eval CREATE is auto-approved server-side — no client approve.
     baas_service.approve_publish.assert_not_called()
     # #197: a TTL teardown safety-net task is enqueued for the eval bot.
@@ -3525,6 +3528,16 @@ async def test_eval_publish_with_default_tag():
     # default_tag 应注入 extra_envs[DYNAMIC_ENV_TAG_KEY]，使容器内进程可感知评测环境
     extra_envs = build_service.release_async.await_args.kwargs["extra_envs"]
     assert extra_envs.get("AGENTCLAW_DEFAULT_TAG") == "eval"
+
+
+@pytest.mark.asyncio
+async def test_eval_publish_rejects_empty_default_tag():
+    """Default/Eval 区都必须显式携带实例子维度，不能退化为同一个 EVAL 槽位。"""
+
+    svc = _pf(Mock(), Mock(), Mock(), Mock(), Mock(), task_queue_service=Mock())
+
+    with pytest.raises(PublishFlowServiceError, match="default_tag"):
+        await svc.eval_publish(301, "u1", biz_id="biz-001", default_tag="")
 
 
 def test_eval_teardown_with_default_tag():

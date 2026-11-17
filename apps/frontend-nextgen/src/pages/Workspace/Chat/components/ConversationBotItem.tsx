@@ -9,14 +9,15 @@ import { cn } from '@/utils/cn';
 import React from 'react';
 import { AvatarTile } from '../../components/AvatarTile';
 import { useConversationInstanceRow } from '../hooks/useConversationInstanceScope';
+import type { ConversationBotItemProps } from './ConversationBotItem.types';
 import { ConversationBotItemActions } from './ConversationBotItemActions';
 import { resolveBotRowLayout } from './ConversationBotItemLayout';
 import { OthersArea } from './ConversationBotOthersArea';
 import { ConversationBotRuntimeBadge } from './ConversationBotRuntimeBadge';
 import { ConversationBotUnavailableTooltip, resolveBotUnavailable } from './ConversationBotUnavailableTooltip';
 import { ConversationSessionIdSearchInput } from './ConversationSessionIdSearchInput';
-import type { ConversationBotItemProps } from './ConversationBotItem.types';
 
+import { ConversationSessionArchives } from './ConversationSessionArchives';
 import { ConversationSessionList } from './ConversationSessionList';
 
 export const ConversationBotItem = React.memo(function ConversationBotItem({
@@ -30,7 +31,9 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
   sessionKey,
   sessions,
   others,
-  flatCodingOthers = false,
+  sessionArchives,
+  sessionArchiveActions,
+  flatCodingSharedSessions = false,
   onToggle,
   onOriginChange,
   onScopeChange,
@@ -47,6 +50,9 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
 }: ConversationBotItemProps) {
   const isManaged = isManagedConversationSection(section);
   const isOthers = isManaged && origin === 'others';
+  const isArchiveScope = isManaged && scope === 'archived';
+  const supportsArchives = Boolean(sessionArchives && sessionArchiveActions);
+  const supportsCollab = Boolean(supportsArchives);
   const hasSessionControls = bot.chatable;
   const interactive = bot.chatable;
   // Bot 状态异常或好友服务 Bot 无 online 发布时，整行禁用并悬停提示原因。
@@ -54,7 +60,7 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
   const canFavorite = supportsBotSessionFavorites(bot.engine);
   const [searchInputOpen, setSearchInputOpen] = React.useState(false);
   const visibleSessions = React.useMemo(() => {
-    if (!flatCodingOthers || !sessions) return sessions;
+    if (!flatCodingSharedSessions || !sessions) return sessions;
     return {
       ...sessions,
       items: sessions.items.map((session) => ({
@@ -62,7 +68,7 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
         title: formatCodingOtherSessionTitle(session.sessionId, session.title),
       })),
     };
-  }, [flatCodingOthers, sessions]);
+  }, [flatCodingSharedSessions, sessions]);
   // 多实例服务 Bot 实例范围聚合视图(能力缺省 null → 零渲染零激活):实例行判定/检索输入禁用/圆点口径。
   const {
     scope: instanceScope,
@@ -91,6 +97,7 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
     expanded,
     unavailable,
     hasSessionControls,
+    supportsArchives,
     searchMarked,
     hasManagement: Boolean(onOpenBotManagement && bot.spaceId),
   });
@@ -104,7 +111,6 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
     if (!bot.chatable) return;
     onToggle();
   };
-
   /* 一级行与协作群统一为 40px：固定头像槽位，引擎徽章与名称同行跟随(2026-10-20 设计稿还原)。 */
   const row = (
     <div
@@ -152,10 +158,10 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
               ? unavailable
                 ? 'pr-9'
                 : pinnedMarked
-                  ? // 常显指示器静态让位 + hover 全组让位叠加(hover 类特异性高,非 hover
-                    // 态落在常显宽度;漏叠会让展开态 hover 出现的整组按钮压名称——同日修正)。
-                    [pinnedMarkPadding, hoverActionsPadding]
-                  : hoverActionsPadding
+                ? // 常显指示器静态让位 + hover 全组让位叠加(hover 类特异性高,非 hover
+                  // 态落在常显宽度;漏叠会让展开态 hover 出现的整组按钮压名称——同日修正)。
+                  [pinnedMarkPadding, hoverActionsPadding]
+                : hoverActionsPadding
               : false,
           )}
         >
@@ -194,6 +200,8 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
           showFilter={showFilter}
           supportsOrigin={isManaged}
           supportsFavorites={canFavorite}
+          supportsArchives={supportsArchives}
+          supportsCollab={supportsCollab}
           origin={origin}
           scope={scope}
           onOriginChange={onOriginChange}
@@ -228,8 +236,19 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
               />
             </>
           )}
-          {isOthers && !flatCodingOthers ? (
+          {isOthers && !flatCodingSharedSessions ? (
             <OthersArea others={others} />
+          ) : isArchiveScope && sessionArchives && sessionArchiveActions ? (
+            <ConversationSessionArchives
+              origin={origin}
+              state={sessionArchives}
+              searchKeyword={sessionKey}
+              readOnly={isOthers}
+              onLoadMore={sessionArchiveActions.onLoadMore}
+              onRetry={sessionArchiveActions.onRetry}
+              onRestore={sessionArchiveActions.onRestore}
+              onPreview={sessionArchiveActions.onPreview}
+            />
           ) : (
             <ConversationSessionList
               actions={isOthers ? undefined : sessionActions}

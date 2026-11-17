@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from injector import Binder, Module, inject, provider, singleton
+from agentclaw.community.core.caller_identity.expiry_correction import CallerExpiryCorrectionService
+from agentclaw.community.core.caller_identity.protocols import CallerExpiryCorrectionServiceProtocol
 
 from agentclaw.community.core.caller_identity.scheduled_refresh import (
     NoopScheduledCallerRefresh, ScheduledCallerRefreshProtocol,
@@ -128,6 +130,14 @@ class CallerIdentityModule(Module):
             to=UnavailableCallerTokenProvider,
             scope=singleton,
         )
+
+    @singleton
+    @provider
+    def caller_expiry_correction(
+        self, bots: BotRepository, bindings: DeviceBindingRepository,
+        instances: ExpertChatInstanceRepository,
+    ) -> CallerExpiryCorrectionServiceProtocol:
+        return CallerExpiryCorrectionService(bots=bots, bindings=bindings, instances=instances)
 
     @singleton
     @provider

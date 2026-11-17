@@ -68,6 +68,7 @@ export const directoryModel = (over: Partial<ConversationDirectoryModel> = {}): 
 export const sessionsModel = (over: Partial<ConversationSessionsModel> = {}): ConversationSessionsModel => ({
   actions: { run: jest.fn(async () => true), isPending: jest.fn(() => false) },
   favorites: { toggleFavorite: jest.fn(async () => true), isPending: jest.fn(() => false) },
+  archives: { host: null, load: jest.fn(), retry: jest.fn(), restore: jest.fn(), preview: jest.fn() },
   openBotIds: {},
   toggleBot: jest.fn(),
   selectMineSession: jest.fn(),

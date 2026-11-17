@@ -32,7 +32,7 @@ export async function loadRoutineContext(scope: RoutineScope): Promise<RoutineCo
   const environments: RoutineEnvironment[] = (['draft', 'verify', 'online'] as const).map((stage) => ({
     runtime_stage: stage,
     instances: [],
-    reason: caller && stage !== 'online' ? 'Caller 模式仅支持生产态' : '当前尚未取得该环境的可信实例清单',
+    reason: caller && stage !== 'online' ? 'Caller 模式仅支持运行中环境' : '当前尚未取得该环境的可信实例清单',
   }));
   // This existing endpoint reports ONLINE only. Never reuse its UUIDs for draft/verify or Caller bindings.
   if (service && caller === false && engine !== 'teclaw') {

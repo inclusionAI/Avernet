@@ -20,8 +20,14 @@ class TodoArtifactServiceProtocol(Protocol):
 
     def bind_run_id(self, *, execution_id: str, run_id: str) -> None: ...
 
-    def complete_execution(
-        self, *, todo_id: str, collab_context_id: str
+    def complete_execution(self, *, todo_id: str, collab_context_id: str) -> None: ...
+
+    def report_completion(
+        self,
+        *,
+        todo_id: str,
+        todo_execution_id: str,
+        execution_token: str,
     ) -> None: ...
 
     def report_artifact(

@@ -240,14 +240,29 @@ class ExpertChatInstanceRepository(Protocol):
         ...
 
     @abstractmethod
+    def correct_caller_token_expiry(
+        self, *, user_id: str, bot_id: str, owner_id: str, binding_id: int,
+        expires_at: datetime, expected_expires_at: datetime | None,
+    ) -> dict:
+        """Correct one existing ledger under IAM's row lock; CAS against explicit old expiry.
+
+        Aware timestamps may move backward or forward. Missing/replaced instances
+        and stale expected expiry raise ValueError. Return instance id and previous UTC expiry.
+        """
+        ...
+
+    @abstractmethod
     def caller_token_refresh(
         self, *, user_id: str, bot_id: str, owner_id: str, binding_id: int,
+        force_runtime_refresh: bool = False,
     ) -> AbstractContextManager[CallerTokenRefresh]:
         """Lock the exact instance before signing, sharing IAM's row lock.
 
         Yield its latest snapshot after locking. Set the transaction state's
         ``expires_at`` only after successful installation; successful exit records
-        an aware, future, strictly increasing expiry. Unset expiry does not write.
+        an aware, future expiry. It must strictly increase unless an explicit
+        force_runtime_refresh reinstalls a credential after runtime replacement.
+        Unset expiry does not write.
         Missing, replaced or released instances raise ValueError.
         """
         ...
@@ -255,12 +270,14 @@ class ExpertChatInstanceRepository(Protocol):
     @abstractmethod
     def caller_token_update(
         self, *, user_id: str, bot_id: str, owner_id: str,
-        binding_id: int, expires_at: datetime,
+        binding_id: int, expires_at: datetime, force_runtime_refresh: bool = False,
     ) -> AbstractContextManager[bool]:
         """Serialize an install for the exact instance binding.
 
         Yield False when the installed credential expires later or equally.
         Yield True otherwise; record UTC expiry only on successful context exit.
+        force_runtime_refresh yields True even for shorter/equal expiry and records
+        the actual installed expiry, retaining the same row lock and target checks.
         Missing, replaced or released instances raise ValueError.
         """
         ...

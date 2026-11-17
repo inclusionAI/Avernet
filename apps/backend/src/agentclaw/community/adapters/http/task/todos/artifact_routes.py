@@ -1,4 +1,4 @@
-"""Bot-facing Todo artifact reporting and file upload routes."""
+"""Bot-facing Todo completion, artifact reporting, and file upload routes."""
 
 from __future__ import annotations
 
@@ -60,13 +60,43 @@ class ReportTodoArtifactRequest(BaseModel):
         legacy_execution_id = data.get("execution_id")
         if todo_execution_id and legacy_execution_id:
             if todo_execution_id != legacy_execution_id:
-                raise ValueError(
-                    "todo_execution_id and legacy execution_id must match"
-                )
+                raise ValueError("todo_execution_id and legacy execution_id must match")
             return data
         if legacy_execution_id:
             return {**data, "todo_execution_id": legacy_execution_id}
         return data
+
+
+class CompleteTodoRequest(BaseModel):
+    todo_execution_id: str = Field(min_length=1, max_length=64)
+    execution_id: str | None = Field(default=None, min_length=1, max_length=64)
+    collab_context_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=256,
+        description="Deprecated and ignored; the Backend derives Context from the execution.",
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_execution_id(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        todo_execution_id = data.get("todo_execution_id")
+        legacy_execution_id = data.get("execution_id")
+        if todo_execution_id and legacy_execution_id:
+            if todo_execution_id != legacy_execution_id:
+                raise ValueError("todo_execution_id and legacy execution_id must match")
+            return data
+        if legacy_execution_id:
+            return {**data, "todo_execution_id": legacy_execution_id}
+        return data
+
+
+class CompleteTodoResponse(BaseModel):
+    accepted: bool = True
+    todo_id: str
+    todo_execution_id: str
 
 
 def _store_todo_artifact_file(
@@ -129,6 +159,31 @@ async def report_todo_artifact(
         is_final_artifact=body.is_final_artifact,
     )
     return envelope(TodoArtifactRecordResponse.from_record(record), request)
+
+
+@router.post("/{todo_id}/complete", response_model=Envelope[CompleteTodoResponse])
+@envelope_errors
+async def complete_todo_execution(
+    todo_id: str,
+    body: CompleteTodoRequest,
+    request: Request,
+    execution_token: ExecutionToken,
+    service: TodoArtifactServiceProtocol = Injected(TodoArtifactServiceProtocol),
+) -> Envelope[CompleteTodoResponse]:
+    """Mark the active Bot execution complete in its collaboration Context."""
+    await run_in_threadpool(
+        service.report_completion,
+        todo_id=todo_id,
+        todo_execution_id=body.todo_execution_id,
+        execution_token=execution_token,
+    )
+    return envelope(
+        CompleteTodoResponse(
+            todo_id=todo_id,
+            todo_execution_id=body.todo_execution_id,
+        ),
+        request,
+    )
 
 
 @router.post(

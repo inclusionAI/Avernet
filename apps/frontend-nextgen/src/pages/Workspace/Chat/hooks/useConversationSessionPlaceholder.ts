@@ -9,7 +9,14 @@ import type { ConversationSessionsModel } from './useConversationSessions.types'
 
 export interface ConversationSessionPlaceholderModel {
   botName: string;
-  status: 'loading' | 'error' | 'empty' | 'favorite-empty' | 'unselected';
+  status:
+    | 'loading'
+    | 'error'
+    | 'empty'
+    | 'favorite-empty'
+    | 'archive-unselected'
+    | 'archive-empty'
+    | 'unselected';
   error?: string;
   creating: boolean;
   create(): Promise<void>;
@@ -30,7 +37,15 @@ export function useConversationSessionPlaceholder(options: {
   const view = [...options.managedBots, ...options.friendBots].find(
     (item) => item.bot.botId === state.selectedBotId && item.section === state.selectedSection,
   );
-  if (!view || state.selectedOrigin !== 'mine') return null;
+  // 好友 Bot 的生效范围读 scopeByFriendBotId(选中范围恒 all,不随好友筛选投影);
+  // 管理/团队空间 Bot 沿用已同步的 selectedScope。
+  const effectiveScope =
+    view?.section === 'friend' ? state.scopeByFriendBotId[view.bot.botId] ?? 'all' : state.selectedScope;
+  const managedCodingBot =
+    view !== undefined && isManagedConversationSection(view.section) && view.bot.isAgentCodingBot === true;
+  const archiveScope = managedCodingBot && effectiveScope === 'archived';
+  // Coding Bot 的 others/collab 归档也允许占位装配;普通 Bot 的 others 仍保持只读链路。
+  if (!view || (!archiveScope && state.selectedOrigin !== 'mine')) return null;
   // 已打开的主会话被过滤条件移出列表(spec: 搜索只改变侧栏列表,不自动关闭主会话),
   // 占位一律不遮蔽:加载/空态/失败/未命中都不会切换舞台,仍由保留快照驱动。
   if (
@@ -44,10 +59,34 @@ export function useConversationSessionPlaceholder(options: {
     })
   )
     return null;
-  // 好友 Bot 的生效范围读 scopeByFriendBotId(选中范围恒 all,不随好友筛选投影);
-  // 管理/团队空间 Bot 沿用已同步的 selectedScope。
-  const effectiveScope =
-    view.section === 'friend' ? state.scopeByFriendBotId[view.bot.botId] ?? 'all' : state.selectedScope;
+  // 归档列表不是普通 session list 缓存;不能把它的空占位误判成「Bot 暂无会话」。
+  // URL 带 sessionId 但详情快照未就绪时保持 loading,让深链 hydration 精确拉取会话。
+  if (archiveScope) {
+    const archives = state.sessionsByBotId[view.bot.botId]?.sessionArchives ?? null;
+    const status = state.selectedSessionId
+      ? 'loading'
+      : !archives || archives.loading
+      ? 'loading'
+      : archives.error
+      ? 'error'
+      : archives.items.length
+      ? 'archive-unselected'
+      : 'archive-empty';
+    return {
+      botName: view.bot.displayName,
+      status,
+      error: archives?.error ?? undefined,
+      creating: false,
+      create: async () => undefined,
+      retry: () => {
+        void options.sessions.archives.retry(view);
+      },
+      showAll: () => {
+        conversationBotSelectionService.showAll(view.bot.botId, view.section);
+        options.sessions.retrySessions(view.bot.botId, view.section);
+      },
+    };
+  }
   const list = conversationBotSelectionService.getList({
     botId: view.bot.botId,
     section: view.section,

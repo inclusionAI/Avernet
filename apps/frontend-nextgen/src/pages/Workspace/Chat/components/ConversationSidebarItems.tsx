@@ -1,5 +1,10 @@
 import { getCapabilities } from '@/capabilities';
-import type { ConversationBotView, ConversationSessionListState } from '@/domain/conversation/types';
+import type {
+  CodingBotSessionArchiveItem,
+  ConversationBotView,
+  ConversationSessionListState,
+} from '@/domain/conversation/types';
+import { emptySessionArchives } from '../hooks/conversationSessionArchiveState';
 import { ConversationBotItem } from './ConversationBotItem';
 import type { ConversationSidebarProps } from './ConversationSidebar';
 
@@ -34,12 +39,30 @@ export function ManagedItem({ view, props }: { view: ConversationBotView; props:
   const origin = store.originByManagedBotId[botId] ?? 'mine';
   const scope = store.effectiveScopeByManagedBotId[botId] ?? 'all';
   const cache = store.sessionsByBotId[botId];
-  const flatCodingOthers = view.bot.isAgentCodingBot === true && origin === 'others';
+  const flatCodingSharedSessions = view.bot.isAgentCodingBot === true && origin !== 'mine';
   const visibleSessions =
-    cache && cache.origin === origin && cache.scope === scope && (origin === 'mine' || flatCodingOthers)
+    cache && cache.origin === origin && cache.scope === scope && (origin === 'mine' || flatCodingSharedSessions)
       ? cache.sessions
       : undefined;
   const selectedBot = store.selectedBotId === botId && store.selectedSection === view.section;
+  const archiveHost =
+    view.bot.isAgentCodingBot === true ? getCapabilities().getCodingBotConversationHost().value?.sessionArchive : null;
+  const archiveEnabled = view.bot.isAgentCodingBot === true && selectedBot;
+  const archiveState = archiveEnabled && archiveHost ? cache?.sessionArchives ?? emptySessionArchives() : undefined;
+  const sessionArchiveActions =
+    archiveEnabled && archiveHost
+      ? {
+          onLoadMore: () => void sessions.archives.load(view, true),
+          onRetry: () => void sessions.archives.retry(view),
+          onRestore: async (input: { sessionKeys: string[]; focusRestored: boolean }) => {
+            const result = await sessions.archives.restore({ view, origin, ...input });
+            return result.ok;
+          },
+          onPreview: (item: CodingBotSessionArchiveItem) => {
+            return sessions.archives.preview({ view, item });
+          },
+        }
+      : undefined;
   // Browse-only managed/team Coding Bot 只能查看列表：已有 Session mutation 必须等
   // 目标 Bot Runtime/controller ready，入口先隐藏。Bot 行 + 是显式激活入口，保留可点。
   const hideCodingSessionActions = view.bot.isAgentCodingBot === true && !selectedBot;
@@ -91,9 +114,13 @@ export function ManagedItem({ view, props }: { view: ConversationBotView; props:
       sessionKey={store.sessionKeyByBotId[botId] ?? ''}
       sessions={visibleSessions}
       others={othersArea}
-      flatCodingOthers={flatCodingOthers}
+      sessionArchives={archiveState}
+      sessionArchiveActions={sessionArchiveActions}
+      flatCodingSharedSessions={flatCodingSharedSessions}
       onToggle={() => sessions.toggleBot(botId, view.section)}
-      onOriginChange={(next) => store.setManagedBotOrigin(botId, next)}
+      onOriginChange={(next) =>
+        store.setManagedBotOrigin(botId, next, { supportsScopesOutsideMine: archiveEnabled === true })
+      }
       onScopeChange={(next) => store.setManagedBotScope(botId, next)}
       onSearchSession={(nextKey) => {
         // 提交只落该 Bot 的过滤并展开其列表(mine/others 均按新条件重拉);不制造主舞台选中。
