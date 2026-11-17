@@ -37,7 +37,9 @@ and parent Group IDs and explicitly select the authenticated Human identity, not
 the previously active Bot. Invitation identity resolution only observes existing
 auth/capability/identity-store state; it never starts a mine/identity-loading
 request, which can create Human actors. A late global authentication result
-resumes navigation. The invitation history entry is replaced. Other users
+resumes navigation. While identity initialization is pending, the landing page shows
+a loading state rather than an error; unresolved initialization times out after ten
+seconds. The invitation history entry is replaced. Other users
 still explicitly confirm joining and select a message visibility scope.
 
 Preflight never accepts an invitation or infers membership from public visibility,
@@ -49,10 +51,28 @@ Group absent from the current sidebar page/filter is resolved by ID through the
 existing selected-Group detail fallback, including Session-only membership; list
 absence does not change membership or discard the requested Session.
 
+An explicit Session deep link issues one sidebar-location request after route
+identity hydration. Once the target Group and Session details are verified,
+location clears obstructing sidebar filters, displays an out-of-list target,
+expands the sidebar and scrolls to the Session. This display-only overlay does not
+join the parent Group, change membership, or modify paging/history state. It
+survives transient detail reloads while the Store selection is unchanged; user
+selection, newer filters or dismissal cancel even a still-pending request. A
+settled target-verification failure removes the cached overlay. Internal Store-to-URL projections do
+not replay location or remount the workspace. A canonical `human_` target waits
+for the matching real Human in the identity list instead of falling back to a
+Bot or placeholder identity. If route initialization cannot finish within ten
+seconds, the page offers explicit refresh and return actions instead of loading
+indefinitely under a missing identity.
+
 Regression coverage is in [invitationService.test.ts](test/services/workspace/invitationService.test.ts),
 [useInviteAccept.preview.test.ts](test/pages/Workspace/hooks/useInviteAccept.preview.test.ts),
 [useInviteAccept.readonlyIdentity.test.ts](test/pages/Workspace/hooks/useInviteAccept.readonlyIdentity.test.ts)
 and [InviteAcceptPanel.test.tsx](test/pages/Workspace/InviteAcceptPanel.test.tsx).
+Sidebar and route regressions are covered by
+[invitationSidebarNavigation.test.tsx](test/pages/Workspace/invitationSidebarNavigation.test.tsx),
+[useWorkspacePage.deepLinkLocation.test.tsx](test/pages/Workspace/hooks/useWorkspacePage.deepLinkLocation.test.tsx)
+and [useGroupSessionLocation.deepLink.test.tsx](test/pages/Workspace/hooks/useGroupSessionLocation.deepLink.test.tsx).
 
 ## Discovery public Bots
 

@@ -128,7 +128,7 @@ export function InviteAcceptPanel() {
         <Spin
           tip={
             status === 'accepted'
-              ? currentIdentityId ? '正在跳转…' : '正在加载当前用户身份…'
+              ? verifiedInviteType === 'session' ? '正在打开会话…' : '正在打开协作群…'
               : verifiedInviteType === 'session'
               ? '正在加入会话…'
               : '正在加入协作群…'
