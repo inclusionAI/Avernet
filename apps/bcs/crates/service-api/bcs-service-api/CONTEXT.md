@@ -14,6 +14,17 @@ remain readable, and no schema, Plugin API or endpoint change is needed. See
 the [admission contract](src/port/repo/message_delivery.rs) and
 [message-flow boundary](../../services/bcs-message-flow/CONTEXT.md#queued-group-target-failure-isolation).
 
+## Version 7.1.0: Connector core contract
+
+Add `core::dist_connector::DistConnectorCoreService`, the pure rules of one
+downstream call: what a holder does first in each dispatch phase, stable request
+and key-event identities, how an unknown send is resolved from declared
+capabilities, and how a remote event becomes a session input. It is additive:
+no existing trait, type, endpoint or stored record changes; the Worker relies on
+the reporting rules in the module documentation. The
+[change record](../../../specs/2026-11-17-connector-runtime/spec.md) holds the
+plan and validation.
+
 ## Version 7.0.0: One admission success and Gateway waiting
 
 Breaking for the unpublished distributed declarations only; no existing
