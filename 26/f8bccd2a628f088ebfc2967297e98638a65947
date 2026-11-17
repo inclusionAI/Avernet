@@ -1,8 +1,11 @@
 apps/backend/src/agentclaw/community/core/task/task_center/task_service_relay.py
   s_b6f36ed162c9bd::t_e13a8ef87ca7e6 27,31-35,206-210,212-213
+  s_4efef845bd857d::t_560fa033611e67 27,31-35,206-210,212-213
 apps/backend/tests/community/core/task/task_center/test_task_service_relay.py
   s_b6f36ed162c9bd::t_e13a8ef87ca7e6 80-83,105-108,127-132
   s_b6f36ed162c9bd::t_1867d57028a0d4 133-147
+  s_4efef845bd857d::t_560fa033611e67 80-83,105-108,127-132
+  s_4efef845bd857d::t_b05528ac322354 133-147
 ---
 {
   "schema_version": "authorship/3.0.0",
@@ -10,6 +13,14 @@ apps/backend/tests/community/core/task/task_center/test_task_service_relay.py
   "base_commit_sha": "26f8bccd2a628f088ebfc2967297e98638a65947",
   "prompts": {},
   "sessions": {
+    "s_4efef845bd857d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a181bc-3434-7bf3-a0d5-19c01487b59e",
+        "model": "GLM-5.3"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    },
     "s_b6f36ed162c9bd": {
       "agent_id": {
         "tool": "codex",
