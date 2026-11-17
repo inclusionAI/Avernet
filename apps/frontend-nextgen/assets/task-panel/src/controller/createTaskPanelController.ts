@@ -110,9 +110,10 @@ export function createTaskPanelController(host: TaskPanelHost) {
       cursor = null; pagesRead = 0; historyDone = false; scanning = false; cursors.clear(); recoveryStarted = false; recoveryPhase = 'association';
       const nextViewer = host.getViewer()?.userId ?? null;
       tabs.clear();
-      if (viewerId !== nextViewer) { origins.clear(); update({ navByTask: {} }); }
+      if (viewerId !== nextViewer) origins.clear();
       viewerId = nextViewer;
-      update({ conversation, activeTaskId: null, associatedTaskIds: [], orderedTaskIds: [], records: [], recovery: { status: 'idle' } });
+      // External conversation changes get a fresh default selection; task handoffs above preserve explicit navigation.
+      update({ conversation, activeTaskId: null, associatedTaskIds: [], orderedTaskIds: [], navByTask: {}, records: [], recovery: { status: 'idle' } });
     }
     if (!viewerId) return;
     // Scoped SDK presentation is adopted before any lookup, without opening a duplicate tab.
