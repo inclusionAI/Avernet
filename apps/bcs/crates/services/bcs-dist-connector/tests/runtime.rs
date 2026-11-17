@@ -199,3 +199,24 @@ async fn the_pending_membership_stub_does_not_stop_the_connector() {
     events.send(final_event()).unwrap();
     until("the call ends", || async { rig.phase().await == "ended" }).await;
 }
+
+#[tokio::test]
+async fn the_registration_is_kept_alive_during_the_drain_grace_period() {
+    let mut rig = Rig::new();
+    let leases = Arc::new(Leases { lose_after: usize::MAX, ..Leases::default() });
+    rig.membership = leases.clone();
+    let events = rig.agent.start_stream();
+    rig.worker.create().await;
+    rig.worker.notify().await;
+    let running = rig.start();
+    until("accepted", || async { rig.phase().await == "accepted" }).await;
+    let engine = running.engine.clone();
+    let drain = tokio::spawn(async move { engine.drain(Duration::from_secs(5)).await });
+    until("the loop stopped", || async { running.task.is_finished() }).await;
+    let before = leases.renewals.load(Ordering::SeqCst);
+    // The main loop no longer runs, yet the held call's instance must not
+    // look dead to other Connectors while it waits.
+    until("renewed during the grace period", || async { leases.renewals.load(Ordering::SeqCst) >= before + 3 }).await;
+    events.send(final_event()).unwrap();
+    assert_eq!(drain.await.unwrap().unwrap(), DrainOutcome::Drained);
+}

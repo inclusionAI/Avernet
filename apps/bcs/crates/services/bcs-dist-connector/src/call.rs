@@ -39,6 +39,12 @@ pub(crate) enum Stop {
 
 pub(crate) type Flow<T = ()> = Result<T, Stop>;
 
+/// A store error that no retry can cure.
+pub(crate) fn permanent(error: &bcs_service_api::port::repo::distributed::common::StoreError) -> bool {
+    use bcs_service_api::port::repo::distributed::common::StoreError;
+    matches!(error, StoreError::Invalid { .. } | StoreError::UnsupportedFormat { .. })
+}
+
 pub(crate) struct Call {
     pub ports: ConnectorPorts,
     pub config: Arc<ConnectorConfig>,
@@ -58,6 +64,11 @@ pub(crate) struct Call {
     /// inputs wait behind it.
     pub input_blocked: bool,
     pub input_not_sent: u32,
+    /// Resends of an idempotent input whose outcome stayed unknown.
+    pub input_resends: u32,
+    /// When a cancel or an input resend may next be attempted (backoff).
+    pub retry_after: Option<Instant>,
+    pub retry_backoff: std::time::Duration,
     /// The send's outcome is unknown or it was never sent: nothing can be
     /// done with the agent until the Worker acts.
     pub unresolved: Option<UnresolvedKind>,
@@ -88,6 +99,10 @@ macro_rules! held_write {
                     return Err($crate::call::Stop::Invalid);
                 }
                 Err(bcs_service_api::port::repo::distributed::dispatch::HolderError::Store(error)) => {
+                    if $crate::call::permanent(&error) {
+                        tracing::error!(did = %$call.did().0, ?error, concat!($what, " cannot succeed; leaving the call as it is"));
+                        return Err($crate::call::Stop::Invalid);
+                    }
                     tracing::warn!(did = %$call.did().0, ?error, concat!($what, " failed; retrying"));
                     backoff.wait().await;
                 }
@@ -124,6 +139,9 @@ impl Call {
             awaiting_input: false,
             input_blocked: false,
             input_not_sent: 0,
+            input_resends: 0,
+            retry_after: None,
+            retry_backoff: std::time::Duration::ZERO,
             unresolved: None,
             blind: false,
             conflicted: false,
@@ -142,6 +160,26 @@ impl Call {
 
     pub fn backoff(&self) -> Backoff {
         Backoff::new(&self.config)
+    }
+
+    /// Whether a repeated remote attempt (cancel, input resend) must still wait.
+    pub fn backing_off(&self) -> bool {
+        self.retry_after.is_some_and(|at| Instant::now() < at)
+    }
+
+    /// Schedules the next repeated attempt, doubling the wait up to the limit.
+    pub fn back_off(&mut self) {
+        self.retry_backoff = if self.retry_backoff.is_zero() {
+            self.config.backoff_min
+        } else {
+            self.retry_backoff.saturating_mul(2).min(self.config.backoff_max)
+        };
+        self.retry_after = Some(Instant::now() + self.retry_backoff);
+    }
+
+    pub fn reset_backoff(&mut self) {
+        self.retry_after = None;
+        self.retry_backoff = std::time::Duration::ZERO;
     }
 
     pub async fn run(mut self) {

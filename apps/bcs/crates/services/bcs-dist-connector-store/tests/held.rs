@@ -184,6 +184,12 @@ async fn cancel_observations_only_move_forward() {
     held.record_cancel(CancelObservation::Sending).await.unwrap();
     held.record_cancel(CancelObservation::Rejected { code: "busy".into() }).await.unwrap();
     held.record_cancel(CancelObservation::RequestAccepted).await.unwrap();
+    // An accepted request only moves on to a definite result.
+    assert_eq!(held.record_cancel(CancelObservation::Sending).await, Err(invalid("cancel_observation_backward")));
+    assert_eq!(
+        held.record_cancel(CancelObservation::OutcomeUnknown).await,
+        Err(invalid("cancel_observation_backward"))
+    );
     held.record_cancel(CancelObservation::ConfirmedCanceled).await.unwrap();
     assert_eq!(stored(&store).await.0["execution"]["cancellation"]["kind"], "confirmed_canceled");
     // A definite result is never replaced.

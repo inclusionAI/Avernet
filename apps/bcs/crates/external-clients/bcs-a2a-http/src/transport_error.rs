@@ -17,6 +17,10 @@ pub(crate) fn send_failure(error: &reqwest::Error, otherwise: &'static str) -> a
 }
 
 /// Whether a gRPC status reports a refused connection: nothing was sent.
+///
+/// Only a refused connection is recognised. gRPC here always dials the local
+/// mesh sidecar on a literal loopback address, so there is no DNS step, and a
+/// connect timeout to it is left ambiguous on purpose: it is the safe side.
 pub(crate) fn grpc_not_connected(status: &tonic::Status) -> bool {
     if status.code() != tonic::Code::Unavailable {
         return false;

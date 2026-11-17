@@ -13,6 +13,7 @@ use crate::config::{Backoff, ConnectorConfig, ConnectorPorts};
 use async_trait::async_trait;
 use bcs_dist_model::*;
 use bcs_service_api::port::dist_runtime::DistRuntimeControlPort;
+use bcs_service_api::port::repo::distributed::common::StoreError;
 use bcs_service_api::port::repo::distributed::dispatch::{
     ClaimOutcome, CommandDelivery, CommandFeedPort, DispatchClaimRequest, HeldDispatchPort,
     ResumeOwnedDispatch,
@@ -165,7 +166,7 @@ impl ConnectorEngine {
             request_id: self.claim_request_id(&did),
         };
         match inner.ports.queue.claim(request).await {
-            Ok(ClaimOutcome::Acquired(held)) => self.spawn(held),
+            Ok(ClaimOutcome::Acquired(held)) => self.spawn(held).await,
             Ok(ClaimOutcome::OwnedByMe(holder)) => {
                 if !self.poke(&did) {
                     // Held by this process but no actor runs it (it died, or
@@ -218,8 +219,16 @@ impl ConnectorEngine {
             request_id: self.claim_request_id(&did),
         };
         match self.inner.ports.queue.resume_owned(request.clone()).await {
-            Ok(ClaimOutcome::Acquired(held)) => self.spawn(held),
+            Ok(ClaimOutcome::Acquired(held)) => self.spawn(held).await,
+            // Held by this process under a generation no actor runs: an
+            // earlier resume landed but its answer was lost. Resume that one.
+            Ok(ClaimOutcome::OwnedByMe(holder)) => lock(&self.inner.orphans).push((did, holder)),
             Ok(_) => {}
+            // A permanent refusal (the document cannot be resumed as asked)
+            // is not retried; the call is left to its dispatch document.
+            Err(error @ (StoreError::Invalid { .. } | StoreError::UnsupportedFormat { .. })) => {
+                tracing::error!(did = %did.0, ?error, "resume refused; giving the call up");
+            }
             Err(error) => {
                 tracing::warn!(did = %did.0, ?error, "resume failed; retrying");
                 lock(&self.inner.orphans).push((did, request.previous));
@@ -227,9 +236,17 @@ impl ConnectorEngine {
         }
     }
 
-    fn spawn(&self, held: Box<dyn HeldDispatchPort>) {
+    async fn spawn(&self, held: Box<dyn HeldDispatchPort>) {
         let inner = self.inner.clone();
         let did = held.view().spec.did.clone();
+        // An older actor of this process for the same call is fenced in the
+        // dispatch, but its agent calls and inbox appends are not: stop and
+        // join it before the new generation starts.
+        let older = lock(&self.inner.actors).remove(&did);
+        if let Some(older) = older {
+            older.task.abort();
+            let _ = older.task.await;
+        }
         let holder = held.holder().clone();
         let status = Arc::new(CallStatus::default());
         let poke = Arc::new(Notify::new());
@@ -251,10 +268,7 @@ impl ConnectorEngine {
             poke,
             task,
         };
-        if let Some(old) = lock(&self.inner.actors).insert(did, actor) {
-            // A newer generation replaces it; the old one is fenced anyway.
-            old.task.abort();
-        }
+        lock(&self.inner.actors).insert(did, actor);
     }
 
     /// Forgets finished actors; one that died without finishing its run is
@@ -375,8 +389,16 @@ impl DistRuntimeControlPort for ConnectorEngine {
         // still take a call. Then the held calls get the rest of the grace.
         // Short waits instead of one long one: a wake-up can be missed.
         let step = Duration::from_millis(20);
+        let mut renewed_at = Instant::now();
         while (inner.looping.load(Ordering::SeqCst) || self.live() > 0) && Instant::now() < deadline {
             let _ = tokio::time::timeout(step, inner.wake.notified()).await;
+            // The main loop no longer renews. Without this the registration
+            // would expire during the grace period and other Connectors could
+            // take over calls whose actors are still running here.
+            if renewed_at.elapsed() >= inner.config.membership_renew {
+                renewed_at = Instant::now();
+                self.renew().await;
+            }
         }
         let leftover: Vec<(Did, Holder)> = lock(&inner.actors)
             .iter()

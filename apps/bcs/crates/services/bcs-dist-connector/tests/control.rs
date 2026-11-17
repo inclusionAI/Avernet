@@ -379,3 +379,62 @@ async fn a_recorded_cancel_result_is_completed_by_the_next_holder() {
     let reported = rig.inbox_events().await;
     assert_eq!(reported.last().unwrap().1.payload, Payload::Inline(json!({"state": "canceled", "code": "agent_canceled"})));
 }
+
+#[tokio::test]
+async fn the_same_question_after_a_reply_is_a_new_interaction() {
+    // A query-only agent: after the reply it asks the very same question again.
+    let rig = Rig::new();
+    let mut spec = dispatch_spec(&did());
+    spec.capabilities.subscribe = false;
+    rig.worker.create_spec(spec).await;
+    rig.worker.notify().await;
+    rig.agent.on_start(Reply::Accepted);
+    rig.agent.on_task(found(TaskStatus::InputRequired, json!({"message": {"parts": [{"text": "A or B?"}]}})));
+    rig.agent.on_input(Reply::Accepted);
+    let _running = rig.start();
+    until("the first question", || async { rig.kinds().await == vec!["input_required"] }).await;
+    rig.worker.push(pending(1)).await;
+    until("the same question again, as round two", || async { rig.kinds().await.len() == 2 }).await;
+    let reported = rig.inbox_events().await;
+    assert_eq!(kind_name(&reported[1].1.kind), "input_required");
+    assert_eq!(reported[0].1.payload, reported[1].1.payload, "identical question");
+    assert_ne!(reported[0].0.input_id, reported[1].0.input_id, "but a new interaction");
+}
+
+#[tokio::test]
+async fn an_unknown_cancel_is_not_resent_on_every_tick() {
+    let mut rig = Rig::new();
+    rig.config.backoff_min = std::time::Duration::from_secs(30);
+    rig.config.backoff_max = std::time::Duration::from_secs(60);
+    let (running, _events) = accepted_call(&rig).await;
+    rig.agent.on_cancel(CancelOutcome::OutcomeUnknown { code: "http_503".into() });
+    rig.agent.on_cancel(CancelOutcome::ConfirmedCanceled);
+    rig.worker.cancel().await;
+    until("the first attempt", || async { rig.agent.count("cancel") == 1 }).await;
+    let writes = rig.store.count("json.mutate");
+    settle().await; // several poll intervals
+    assert_eq!(rig.agent.count("cancel"), 1, "the retry waits out its backoff");
+    assert_eq!(rig.store.count("json.mutate"), writes, "and writes nothing meanwhile");
+    assert_eq!(running.pending_effects().await, 1, "the open cancel is visible");
+    assert_eq!(rig.phase().await, "accepted");
+}
+
+#[tokio::test]
+async fn an_idempotent_input_is_resent_a_bounded_number_of_times() {
+    let rig = Rig::new();
+    let mut spec = dispatch_spec(&did());
+    spec.capabilities.idempotent_input = true;
+    let _events = rig.agent.start_stream();
+    rig.worker.create_spec(spec).await;
+    rig.worker.notify().await;
+    let running = rig.start();
+    until("accepted", || async { rig.phase().await == "accepted" }).await;
+    for _ in 0..10 {
+        rig.agent.on_input(Reply::Unknown);
+    }
+    rig.worker.push(pending(1)).await;
+    until("blocked after the last resend", || async { running.pending_effects().await == 1 }).await;
+    settle().await;
+    assert_eq!(rig.agent.count("input"), 4, "one send and three resends");
+    assert_eq!(rig.doc().await["execution"]["confirmed_input_through"], serde_json::Value::Null);
+}

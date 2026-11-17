@@ -331,6 +331,65 @@ async fn a_failed_resume_is_retried_until_it_succeeds() {
 }
 
 #[tokio::test]
+async fn a_resume_that_landed_without_an_answer_is_resumed_again() {
+    let rig = Rig::new();
+    rig.worker.create_spec(spec_with(|c| c.idempotent_start = true)).await;
+    rig.worker.notify().await;
+    rig.agent.on_start(Reply::Panic);
+    let events = rig.agent.start_stream();
+    let running = rig.start();
+    until("the first start was attempted", || async { rig.agent.count("start") == 1 }).await;
+    // The resume's claim write lands, but its read-back fails: the engine
+    // gets no handle although the dispatch now names a newer generation of
+    // this process. It must not forget the call.
+    rig.store.fail_get(2);
+    until("accepted after the lost resume", || async { rig.phase().await == "accepted" }).await;
+    assert_eq!(rig.doc().await["execution"]["holder"]["epoch"], 3, "one lost resume, one more");
+    events.send(final_event()).unwrap();
+    until("the call ends", || async { rig.phase().await == "ended" }).await;
+    until("idle", || async { running.active().await == 0 }).await;
+}
+
+#[tokio::test]
+async fn a_request_id_lookup_that_already_has_the_result_ends_the_call() {
+    // The agent can be asked by request id but offers no way to follow a task.
+    let mut rig = Rig::new();
+    let spec = spec_with(|c| {
+        c.query_by_request = true;
+        c.subscribe = false;
+        c.query_by_task = false;
+    });
+    let _old = former_holder(&rig, spec, DispatchPhase::Sending).await;
+    dead_holders(&mut rig);
+    rig.agent.on_request(found(TaskStatus::Completed, json!({"artifacts": [{"artifactId": "a-1"}]})));
+    rig.worker.notify().await;
+    let running = rig.start();
+    until("the call ends", || async { rig.phase().await == "ended" }).await;
+    assert_eq!(rig.doc().await["execution"]["outcome"], "completed");
+    assert_eq!(rig.doc().await["execution"]["remote"]["task_id"], "rt-77c2", "acceptance is recorded first");
+    assert_eq!(rig.kinds().await, vec!["final"]);
+    assert_eq!(rig.agent.count("start"), 0);
+    until("idle", || async { running.active().await == 0 }).await;
+}
+
+#[tokio::test]
+async fn a_takeover_of_a_call_whose_request_is_gone_fails_it_cleanly() {
+    // Nothing was ever sent (the former holder died right after its claim)
+    // and the request blob no longer exists.
+    let mut rig = Rig::new();
+    let mut spec = dispatch_spec(&did());
+    spec.request = Payload::Ref(BlobRef { key: "gone".into(), digest: Digest("sha256:x".into()) });
+    let _old = former_holder(&rig, spec, DispatchPhase::Claimed).await;
+    dead_holders(&mut rig);
+    rig.worker.notify().await;
+    let _running = rig.start();
+    until("the call ends", || async { rig.phase().await == "ended" }).await;
+    assert_eq!(rig.agent.count("start"), 0);
+    assert_eq!(rig.doc().await["execution"]["outcome"], "failed");
+    assert_eq!(rig.doc().await["connector"]["finish_evidence"], "request_unavailable");
+}
+
+#[tokio::test]
 async fn report_unresolved_needs_contract_d2() {
     for kind in [UnresolvedKind::Uncertain, UnresolvedKind::NotSent] {
         assert_eq!(

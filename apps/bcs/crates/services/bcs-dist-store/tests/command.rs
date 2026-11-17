@@ -5,17 +5,27 @@ use bcs_dist_model::Did;
 use bcs_dist_store::command::{CommandStreams, DID_FIELD, GROUP};
 use std::num::NonZeroU32;
 
+/// (dispatch id, partition count, partition).
+const VECTORS: [(&str, u32, u32); 5] = [
+    ("s0042.7f3a9c.b21e.n2.a1", 8, 5),
+    ("s0042.7f3a9c.b21e.n2.a1", 3, 1),
+    ("s0001.000001.0001.n1.a1", 16, 12),
+    ("s0007.abcdef.1234.n9.a3", 5, 4),
+    ("s0042.7f3a9c.b21e.n1.a1", 1, 0),
+];
+
 fn streams(n: u32) -> CommandStreams {
     CommandStreams::new(NonZeroU32::new(n).unwrap())
 }
 
 #[test]
 fn partition_values_are_fixed() {
-    // Fixed vectors: a change here strands hints between Worker and Connector.
-    let did = Did("s0042.7f3a9c.b21e.n2.a1".into());
-    let hash = sha256_head(&did.0);
-    assert_eq!(streams(8).partition_of(&did), (hash % 8) as u32);
-    assert_eq!(streams(8).partition_of(&did), streams(8).partition_of(&did));
+    // Literal vectors: this mapping is a contract between the Worker (which
+    // posts) and every Connector (which reads), in any language. A change
+    // here strands hints.
+    for (did, partitions, expected) in VECTORS {
+        assert_eq!(streams(partitions).partition_of(&Did(did.into())), expected, "{did} / {partitions}");
+    }
     assert_eq!(streams(8).partitions(), 8);
     assert_eq!(GROUP, "connectors");
     assert_eq!(DID_FIELD, "did");
@@ -42,4 +52,11 @@ fn sha256_head(text: &str) -> u64 {
     use sha2::{Digest, Sha256};
     let hash = Sha256::digest(text.as_bytes());
     u64::from_be_bytes(hash[..8].try_into().unwrap())
+}
+
+#[test]
+fn the_vectors_follow_the_documented_formula() {
+    for (did, partitions, expected) in VECTORS {
+        assert_eq!((sha256_head(did) % u64::from(partitions)) as u32, expected);
+    }
 }

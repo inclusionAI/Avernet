@@ -260,6 +260,9 @@ async fn a_missing_request_blob_fails_the_call_without_sending() {
     let reported = rig.inbox_events().await;
     assert_eq!(reported[0].1.payload, Payload::Inline(json!({"state": "failed", "code": "request_unavailable"})));
     assert_eq!(rig.doc().await["execution"]["outcome"], "failed");
+    // The request is loaded before send intent is recorded: the call never
+    // entered "sending" (claim, then end: two dispatch writes).
+    assert_eq!(stored(&rig.store).await.1, 1_000_000_001);
 }
 
 #[tokio::test]
