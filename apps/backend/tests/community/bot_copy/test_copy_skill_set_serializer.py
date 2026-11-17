@@ -329,6 +329,58 @@ def test_scenario_5_snapshot_without_sets_returns_none():
     assert _default_enabled(segment) is True
 
 
+def test_branch_b_local_skill_member_is_skipped_schema_cannot_express_it():
+    # The manifest schema refuses a local skill member whose ``from`` names a
+    # ``protocol: bot`` source (``support_matrix.py:170``
+    # ``_BOT_SOURCE_IS_RESOURCES_ONLY``), and a bare ``origin: local`` entry
+    # fails the SKILLS-category source gate
+    # (``validate_skill_entry``→``resolve_source``). So a Genome snapshot that
+    # carries ``local://`` members must skip them in the derived segment —
+    # the physical packages still ride the copy's ``resources: workspace/``
+    # file-sync entry, and the dst operator can re-link local skills via
+    # Add-Skill. Repo/center members of the same Set must still come through.
+    members = (
+        {
+            "id": 101,
+            "name": "repo-tool",
+            "git_path": "tools/repo-tool",
+            "skill_uuid": None,
+        },
+        {
+            "id": 102,
+            "name": "local-only",
+            "git_path": "local://some/local/pkg",
+            "skill_uuid": None,
+        },
+    )
+    ordinary = SkillSetSnapshot(
+        id=2,
+        name="mixed",
+        description=None,
+        is_default=False,
+        is_active=True,
+        skill_ids=(101, 102),
+        mcp_codes=(),
+        skill_references=(),
+    )
+    snapshot = _snapshot(sets=(ordinary,), skills=members)
+
+    segment = _serialize_skill_sets(
+        source_manifest_record=None, snapshot=snapshot
+    )
+    assert segment is not None
+    ordinary_rows = [row for row in segment if row.get("name") == "mixed"]
+    assert len(ordinary_rows) == 1
+    # The repo member survived; the local member was dropped.
+    origins = {skill["origin"] for skill in ordinary_rows[0]["skills"]}
+    assert origins == {"repo"}
+    names = {skill["name"] for skill in ordinary_rows[0]["skills"]}
+    assert "local-only" not in names
+    # The derived segment re-validates against the schema (no local-only
+    # member that the SKILLS source gate would refuse).
+    _assert_skill_sets_validate(segment)
+
+
 @pytest.mark.parametrize("snapshot", [None])
 def test_branch_b_snapshot_none_returns_none(snapshot):
     """A ``None`` snapshot (legacy path with nothing to read) → omit segment."""
