@@ -26,7 +26,7 @@ beforeEach(async () => {
   }
   await initializeMonitoringSqlite(db);
   await db.exec(`CREATE TABLE ac_bots (id INTEGER PRIMARY KEY AUTOINCREMENT, bot_id TEXT, entity_id TEXT, env TEXT, active_engine TEXT DEFAULT 'openclaw',
-    bot_name TEXT DEFAULT 'Bot', owner_id TEXT, owner_name TEXT, avernet_tenant TEXT DEFAULT 'one', is_delete INTEGER DEFAULT 0)`);
+    bot_name TEXT DEFAULT 'Bot', owner_id TEXT, owner_name TEXT, avernet_tenant TEXT DEFAULT 'one', bot_type TEXT DEFAULT 'personal', is_delete INTEGER DEFAULT 0)`);
   await db.exec("CREATE TABLE ce_tasks (task_id TEXT, task_type TEXT, config_json TEXT)");
   configs = new BotDiagnosisRecoveryConfigRepository(db); directory = new SqlMonitoringBotDirectory(db, true);
 });
@@ -64,13 +64,19 @@ it('resolves recovery Owner to the directory entity and fails closed after owner
 it('bulk updates all owner pages, excludes other owners and refuses admin write escalation', async () => {
   for (let i = 0; i < 61; i++) await bot(`bot-${i}`);
   await bot('other', 'prod', '002');
+  await bot('service');
+  await db.exec("UPDATE ac_bots SET bot_type = 'service' WHERE bot_id = 'service'");
+  const service = { ...target, botId: 'service' };
+  await configs.setSwitches(service, switches(0));
+  await expect(configureBots(configs, directory, refs, principal, { botRef: refs.encode(service, 'one'), enabled: false, version: 1 })).rejects.toMatchObject({ code: 'FORBIDDEN' });
   const result = await configureBots(configs, directory, refs, principal, { all: true, enabled: true });
   expect(result).toEqual({ updated: 61, failed: [] });
   const [count] = await db.query<{ count: number }>('SELECT COUNT(*) AS count FROM ce_bot_diagnosis_recovery_config');
-  expect(count.count).toBe(61);
+  expect(count.count).toBe(62);
   await expect(configureBots(configs, directory, refs, principal, { botRef: refs.encode({ ...target, botId: 'other' }, 'one'), enabled: true, version: 0 })).rejects.toMatchObject({ code: 'FORBIDDEN' });
   expect(await configureBots(configs, directory, refs, principal, { all: true, enabled: false })).toEqual({ updated: 61, failed: [] });
   expect((await configs.find({ ...target, botId: 'bot-60' }))?.recoveryEnabled).toBe(false);
+  expect(await configs.find(service)).toMatchObject({ diagnosisEnabled: true, recoveryEnabled: true, version: 1 });
 });
 
 it.each(['', '{}', 'null', '[]', '{', '{"notifications":null}', '{"notifications":{"owner":{"enabled":"true"}}}',

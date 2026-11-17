@@ -23,6 +23,10 @@ export function displayTime(value: string | null): string {
   const p = timeParts(value);
   return p ? `${p.date} ${p.time}（北京时间）` : '时间未知';
 }
+export function RecordTime({ value }: { value: string | null }) {
+  const time = timeParts(value);
+  return <span className="record-time" title={time ? `${time.date} ${time.time}（北京时间）` : '时间未知'}>{time ? <><span className="day">{time.date}</span><span>{time.time}</span></> : '时间未知'}</span>;
+}
 function Field({ label, value, emphasis = false }: { label: string; value: string | null; emphasis?: boolean }) {
   return <div><dt>{label}</dt><dd className={emphasis ? 'confidence' : undefined}>{value ?? '—'}</dd></div>;
 }
@@ -31,7 +35,6 @@ export function DiagnosisRecord({ item, open, toggle }: { item: DiagnosisItem; o
   const [copyMessage, setCopyMessage] = useState('');
   const title = getDiagnosisTitle(item);
   const identifier = item.traceId || item.sessionKey || item.sessionId || item.diagnosisId;
-  const time = timeParts(item.occurredAt);
   const symbol = { ALERT: 'alert', PASS: 'check', UNRESOLVED: 'question' } as const;
   const ids = [['诊断编号', item.diagnosisId], ['Session Key', item.sessionKey], ['Session ID', item.sessionId], ['Trace ID', item.traceId]];
   const copy = async (label: string, value: string) => {
@@ -45,7 +48,7 @@ export function DiagnosisRecord({ item, open, toggle }: { item: DiagnosisItem; o
         <span className="record-text"><span className="record-title-line"><span className="record-title" title={title}>{title}</span></span><span className="record-session mono" title={identifier}>{identifier}</span></span>
       </span>
       <span className="summary-tc mono" title={item.tcFaultLabel ?? '—'}>{item.tcFaultLabel ?? '—'}</span>
-      <span className="record-time" title={displayTime(item.occurredAt)}>{time ? <><span className="day">{time.date}</span><span>{time.time}</span></> : '时间未知'}</span>
+      <RecordTime value={item.occurredAt} />
       <Icon name="chevron" className="expand-icon" />
     </button>
     {open && <div id={detailId} className="record-detail">

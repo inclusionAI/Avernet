@@ -75,8 +75,9 @@ have no new-table record. Ordinary paused Owner notices remain paused.
 - `POST /api/insight/v1/monitoring/configurations` accepts either
   `{ "botRef": "opaque reference", "enabled": true, "version": 0 }` or
   `{ "all": true, "enabled": false }`. The one visible switch writes both
-  flags; 0 is the expected version for a missing row. Only the current owner may
-  write, including callers who have administrator read access.
+  flags; 0 is the expected version for a missing row. The current owner may
+  configure a non-service Bot. The directory's `bot_type = service` marks
+  platform-managed Bots. A single-Bot write to a service Bot returns 403.
 - An authenticated ClawInsight administrator can read or replace a single Bot's
   full configuration within the existing tenant and target-environment scope via `GET` or `PUT`
   `/api/insight/v1/monitoring/configurations/:botRef`. Both return
@@ -88,10 +89,11 @@ have no new-table record. Ordinary paused Owner notices remain paused.
   Notification channels accept route references and booleans as above.
   Stale versions return 409. Group URLs still come from the shared registry.
 - Bulk operations use the existing owner directory and traverse all keyset
-  pages, irrespective of UI search/page. They affect existing Bots, not future
-  additions. `{updated, failed}` reports partial success; stale entries are not
-  overwritten. Retry reloads versions. This POST only writes switches.
-- Existing Bot options/status return the effective recovery switch. Legacy-only
+  pages, irrespective of UI search/page. Bulk writes skip service Bots and
+  cover the current owner's eligible Bots. `{updated, failed}` reports partial
+  success; retries reload versions and apply compare-and-swap to switch writes.
+- Bot options/status return the effective recovery switch and mark service Bots
+  with `isServiceBot: true`. Legacy-only
   Bots have `diagnosisEnabled: false`, their legacy recovery state, and version 0.
   The first UI write creates a new row, with `{}` notification JSON: it takes
   complete ownership and notifications remain off until explicitly configured.
@@ -102,12 +104,18 @@ have no new-table record. Ordinary paused Owner notices remain paused.
   task `status`. It reads only page-sized detail artifacts, not execution audit
   histories. Task state and recovery effect are independent columns.
 
-The left navigation and page heading are **Agent 诊断**. The existing diagnosis
-view and new **自愈任务** are sub-tabs. **诊断监控设置** opens the current owner's
-searchable/paginated Bot list with per-Bot and whole-roster controls. Mixed flag
-states show “部分开启”. The task list opens existing recovery details and keeps
-its filters/page in the URL for Back. Existing diagnosis/detail links continue
-to work. No application configuration or notification management page is added.
+The **诊断自愈** sidebar entry contains **诊断** and **自愈**. The recovery
+list shows task state and recovery result in separate columns and preserves
+filters and pagination when opening an existing detail.
+
+**诊断监控设置** shows the current owner's searchable, paginated Bot list.
+The switch appears on when both flags are true. Service Bot switches are
+read-only and show the platform contact. Platform staff use the administrator
+configuration endpoint to configure those Bots.
+
+Use `/insight?module=monitoring&openMonitoringSettings=1` as the invitation
+path. Opening it after ClawWeb sign-in shows the settings dialog. The user
+chooses which switches to save.
 
 ## Migration and deployment
 

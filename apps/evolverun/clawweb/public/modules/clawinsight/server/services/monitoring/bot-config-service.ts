@@ -2,6 +2,10 @@ import { MonitoringError } from './contracts.js';
 import { validBotConfiguration, type BotDiagnosisRecoveryConfigStore } from './bot-config-contracts.js';
 import type { DirectoryBot, MonitoringBotDirectory, MonitoringPrincipal, MonitoringReferences } from './directory-contracts.js';
 
+export function isServiceBot(bot: DirectoryBot): boolean {
+  return bot.botType?.trim().toLowerCase() === 'service';
+}
+
 export function replaceBotConfiguration(store: BotDiagnosisRecoveryConfigStore, bot: DirectoryBot, updatedBy: string, input: unknown) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new MonitoringError('INVALID_EVENT', '配置参数无效。');
   const value = input as Record<string, unknown>;
@@ -30,6 +34,7 @@ export async function configureBots(store: BotDiagnosisRecoveryConfigStore | und
   const failed: string[] = [];
   const write = async (bot: import('./directory-contracts.js').DirectoryBot, version: number) => {
     if (bot.ownerId !== principal.staffId) throw new MonitoringError('FORBIDDEN', '仅 Bot 所有者可以修改配置。');
+    if (isServiceBot(bot)) throw new MonitoringError('FORBIDDEN', '服务 Bot 请联系平台设置诊断自愈。');
     await store.setSwitches(bot, { diagnosisEnabled: value.enabled as boolean, recoveryEnabled: value.enabled as boolean,
       expectedVersion: version, updatedBy: principal.staffId });
     updated++;
@@ -49,6 +54,7 @@ export async function configureBots(store: BotDiagnosisRecoveryConfigStore | und
         // Revalidate ownership immediately before mutation, never trust an old UI roster.
         const current = await directory.get(bot, principal);
         if (!current || current.ownerId !== principal.staffId) { failed.push(references.encode(bot, principal.tenant)); continue; }
+        if (isServiceBot(current)) continue;
         try { await write(current, configs[i]?.version ?? 0); }
         catch { failed.push(references.encode(bot, principal.tenant)); }
       }

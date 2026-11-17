@@ -3,7 +3,7 @@ import type { BotOption, BotScope, DirectoryBot, DirectoryScope, MonitoringBotDi
   MonitoringPrincipal, MonitoringReferences } from './directory-contracts.js';
 import { browserDiagnosisQuery, parseWindow, queryKeys } from './browser-validation.js';
 import type { BotDiagnosisRecoveryConfig, BotDiagnosisRecoveryConfigStore } from './bot-config-contracts.js';
-import { configureBots, replaceBotConfiguration } from './bot-config-service.js';
+import { configureBots, isServiceBot, replaceBotConfiguration } from './bot-config-service.js';
 import { recoveryConfigurations } from '../repair/session-recovery/bot-configuration.js';
 import type { RecoveryAppConfigStore } from '../repair/session-recovery/legacy-configuration.js';
 
@@ -37,6 +37,7 @@ export function createMonitoringBrowserService(store: MonitoringStore, directory
   function option(bot: DirectoryBot, summary: MonitoringSummary | null, tenant: string, config?: BotDiagnosisRecoveryConfig | null): BotOption {
     return { botRef: references.encode(bot, tenant), botName: bot.botName, botId: bot.botId, ownerId: bot.ownerId, env: bot.env,
       enrollmentState: summary ? 'ENROLLED' : 'NOT_ENROLLED', monitoring: summary,
+      ...(isServiceBot(bot) && { isServiceBot: true }),
       configuration: { diagnosisEnabled: config?.diagnosisEnabled ?? false, recoveryEnabled: config?.recoveryEnabled ?? false, version: config?.version ?? 0 },
       capabilities: { canView: true, canRequestEnrollment: !summary } };
   }
