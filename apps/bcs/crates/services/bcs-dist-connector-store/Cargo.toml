@@ -13,9 +13,14 @@ bcs-dist-model = { workspace = true }
 bcs-dist-store = { workspace = true }
 bcs-service-api = { workspace = true }
 bcs-store-api = { workspace = true }
+futures = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
 
 [dev-dependencies]
-tokio = { workspace = true }
+bcs-test-support = { workspace = true }
 
 [lints]
 workspace = true
