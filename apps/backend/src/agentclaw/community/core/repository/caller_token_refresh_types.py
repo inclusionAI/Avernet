@@ -9,7 +9,9 @@ class CallerTokenRefresh:
     """Latest locked instance and optional expiry to persist on successful exit.
 
     Set ``expires_at`` only after runtime installation succeeds. Leaving it unset
-    performs no ledger write; it must advance the installed expiry when supplied.
+    performs no ledger write. Supplied expiry must advance unless the enclosing
+    context explicitly forces runtime recovery; forced recovery records the actual
+    installed credential even if its expiry is shorter or equal.
     """
 
     instance: dict[str, Any]
