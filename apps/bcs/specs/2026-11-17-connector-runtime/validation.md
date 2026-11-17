@@ -16,10 +16,12 @@ provider or agent resolver exists yet. Not deployed.
 | Command | Result |
 | --- | --- |
 | `cargo check --workspace --all-targets` | finished; only warnings that exist on `dev` |
-| `cargo test -p bcs-dist-connector` | 63 passed, 0 failed |
+| `cargo test -p bcs-dist-connector` | 70 passed, 0 failed |
 | `cargo test -p bcs-dist-connector-store` | 48 passed, 0 failed |
-| `cargo test -p bcs-a2a-http` (includes the `dist-agent` feature through its own dev-dependency) | 109 passed, 0 failed (16 new) |
-| `cargo test -p bcs-service-api -p bcs-test-support -p bcs-dist-store -p bcs-dist-model -p bcs-app-dist-runtime` | 412 passed, 0 failed |
+| `cargo test -p bcs-a2a-http` (includes the `dist-agent` feature through its own dev-dependency) | 111 passed, 0 failed (17 new) |
+| `scripts/e2e-test/custom_binding_story.py` with and without `--grpc-peer-binary` (plain debug build of `bcs-caller-e2e` and `bcs-a2a-grpc-peer`) | both pass; the gRPC variant now ends with a send while the mesh peer is down |
+| `cargo check -p bcs` (the binary, without the `dist-agent` feature) | pass |
+| `cargo test -p bcs-service-api -p bcs-test-support -p bcs-dist-store -p bcs-dist-model -p bcs-app-dist-runtime` | 413 passed, 0 failed |
 | the three new suites repeated five times | no failure, no timeout |
 | `scripts/ci/check-store-boundaries.sh` (R10, now also scans `bcs-dist-connector/src`) | PASS |
 | `scripts/ci/tests/store_api_boundary.sh` | PASS |
@@ -81,6 +83,20 @@ provider or agent resolver exists yet. Not deployed.
    without a reply through the Connector.
 8. **Claims are sequential** (no `claim_concurrency`), and the poll interval is
    spread ±20 % deterministically per call instead of randomly.
+
+## Review round 1 (2026-11-17)
+
+Fixed after the first automated review round, each with a test: a resume whose
+answer was lost; the state returned by a request-id lookup; the polled state
+after a confirmed reply; backoff and bounds for cancel and input resends;
+membership renewal during drain; an unknown claim write no longer unlists the
+call; the request is loaded before send intent; a replaced actor is joined;
+permanent store errors stop the actor instead of retrying forever. Adapter:
+JSON-RPC errors are rejections only for request-refusal codes on the initial
+response; an empty task id is not accepted; a repeated tool record produces no
+event; the credential is redacted in debug output. The singlebox changed-line
+gate failed on the gRPC connect-refused lines; the gRPC binding story now
+exercises them.
 
 ## Not run, and why
 
