@@ -1,0 +1,25 @@
+apps/evolverun/clawweb/public/modules/clawinsight/preview/main.tsx
+  s_c5125da3cacb9c::t_4e745e84d9176d 13
+apps/evolverun/clawweb/public/modules/clawinsight/web/pages/InsightCenter/monitoring/MonitoringSettings.tsx
+  s_c5125da3cacb9c::t_3336855dfb1d36 14,20,24,44,46
+apps/evolverun/clawweb/public/modules/clawinsight/web/pages/InsightCenter/monitoring/__tests__/MonitoringSettings.test.tsx
+  s_c5125da3cacb9c::t_0141987d555fd0 33-41
+apps/evolverun/clawweb/public/modules/clawinsight/server/routes/__tests__/monitoring.test.ts
+  s_c5125da3cacb9c::t_4e745e84d9176d 350-362
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "01b954bbc0e3b5bf17a97ad00c46455136c85403",
+  "prompts": {},
+  "sessions": {
+    "s_c5125da3cacb9c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e2fc-bace-73f3-9dee-91caa19a0ea5",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}

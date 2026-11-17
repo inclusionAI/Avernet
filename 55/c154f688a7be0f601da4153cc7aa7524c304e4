@@ -1,0 +1,16 @@
+apps/frontend-nextgen/assets/task-panel/src/panel/TaskLoopView.tsx
+  h_5b2ec9c12c4d18 32
+apps/frontend-nextgen/assets/task-panel/test/panel/TaskLoopView.lifecycle.test.tsx
+  h_5b2ec9c12c4d18 1-78
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "55c154f688a7be0f601da4153cc7aa7524c304e4",
+  "prompts": {},
+  "humans": {
+    "h_5b2ec9c12c4d18": {
+      "author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

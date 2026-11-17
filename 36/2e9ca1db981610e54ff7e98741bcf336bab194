@@ -1,0 +1,16 @@
+apps/backend/src/agentclaw/community/core/task/context_collab/l5_methods/open_profile.py
+  h_76f92786ca928a 95
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_end_to_end.py
+  h_76f92786ca928a 125,159,180,189-193,197,199-200,203,205-206,213,215,218,223-224,237,242,256,266,278,281,283,288,293,305,314,321,329,332-333,343-344,349,357,365,371,377,393
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "362e9ca1db981610e54ff7e98741bcf336bab194",
+  "prompts": {},
+  "humans": {
+    "h_76f92786ca928a": {
+      "author": "xingchi.wxc <xingchi.wxc@alipay.com>"
+    }
+  }
+}
