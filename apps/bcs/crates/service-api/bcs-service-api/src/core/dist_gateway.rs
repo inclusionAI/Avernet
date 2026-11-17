@@ -9,11 +9,9 @@ pub struct AdmitTaskCommand {
     pub create_task: Option<TaskSnapshot>,
 }
 
+/// The input is admitted, whether by this call or an earlier one.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum CoreAdmission {
-    Accepted(AdmissionReceipt),
-    Duplicate(AdmissionReceipt),
-}
+pub struct CoreAdmission(pub AdmissionReceipt);
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum DistGatewayCoreError {

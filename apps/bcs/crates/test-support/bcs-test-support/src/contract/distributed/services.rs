@@ -27,14 +27,8 @@ pub async fn dist_gateway_core_service_contract_tests(
     scope: &TaskScope,
     request: AdmitTaskCommand,
 ) -> ContractResult {
-    let receipt = match core.admit(scope, request.clone()).await? {
-        CoreAdmission::Accepted(receipt) => receipt,
-        other => panic!("fresh core admission failed: {other:?}"),
-    };
-    assert_eq!(
-        core.admit(scope, request).await?,
-        CoreAdmission::Duplicate(receipt)
-    );
+    let CoreAdmission(receipt) = core.admit(scope, request.clone()).await?;
+    assert_eq!(core.admit(scope, request).await?, CoreAdmission(receipt));
     Ok(())
 }
 

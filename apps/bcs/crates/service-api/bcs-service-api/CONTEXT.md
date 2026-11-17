@@ -14,6 +14,23 @@ remain readable, and no schema, Plugin API or endpoint change is needed. See
 the [admission contract](src/port/repo/message_delivery.rs) and
 [message-flow boundary](../../services/bcs-message-flow/CONTEXT.md#queued-group-target-failure-isolation).
 
+## Version 7.0.0: One admission success and Gateway waiting
+
+Breaking for the unpublished distributed declarations only; no existing
+runtime, wire endpoint or stored record changes.
+
+- `AdmitOutcome::Duplicate` is removed. An input already admitted with the same
+  digest is `Accepted`: the admission record may be written by a retry or by a
+  compensating writer, so the writer cannot and need not be told apart.
+  `CoreAdmission` becomes a struct holding the receipt.
+- `GatewayError::NotCancelable` reports a cancel of a finished task.
+- `DistGatewayService::wait_task` (`WaitTask`, `WaitUntil`) waits until a task
+  needs input or is finished and the stored view covers that event, and
+  returns the current view at its timeout. Blocking send and cancel use it.
+
+Consumers matching `Duplicate` or implementing `DistGatewayService` must be
+updated; workspace path consumers rebuild together.
+
 ## Version 6.1.0: Distributed coordination contracts
 
 Add opt-in Gateway, Worker and Connector service/port declarations plus

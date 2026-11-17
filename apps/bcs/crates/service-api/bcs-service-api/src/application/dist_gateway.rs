@@ -65,6 +65,25 @@ pub struct ListTasks {
     pub limit: std::num::NonZeroU32,
 }
 
+/// The task state a wait ends on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WaitUntil {
+    /// The task asks for input or authorization, or is finished.
+    InputOrFinal,
+    /// The task is finished.
+    Final,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WaitTask {
+    pub tid: Tid,
+    pub until: WaitUntil,
+    /// Coverage seen before the admission this wait follows. States at or
+    /// before it don't end the wait (e.g. the question a reply answers).
+    pub after: Option<EventId>,
+    pub timeout: std::time::Duration,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct TaskPage {
     pub tasks: Vec<TaskView>,
@@ -79,6 +98,8 @@ pub enum GatewayError {
     NotFound,
     #[error("request identity/content conflict")]
     Conflict,
+    #[error("task is finished and cannot be canceled")]
+    NotCancelable,
     #[error("session quarantined")]
     Quarantined,
     #[error("invalid input: {code}")]
@@ -104,7 +125,15 @@ pub trait DistGatewayService: Send + Sync {
         caller: &GatewayCaller,
         request: SubscribeTask,
     ) -> Result<TaskSubscription, GatewayError>;
+    /// Returns once the task reaches the requested state and the stored view
+    /// covers that event; at the timeout returns the current view.
+    async fn wait_task(
+        &self,
+        caller: &GatewayCaller,
+        request: WaitTask,
+    ) -> Result<TaskView, GatewayError>;
     /// Receipt acknowledges a durable cancellation request, not remote cancellation.
+    /// A finished task is refused with NotCancelable.
     async fn cancel(
         &self,
         caller: &GatewayCaller,

@@ -104,12 +104,12 @@ async fn gateway_core_harness_checks_duplicate_receipt() -> ContractResult {
             .expect(
                 "DistGatewayCoreService::admit",
                 (scope(), &request),
-                Ok::<_, DistGatewayCoreError>(CoreAdmission::Accepted(receipt())),
+                Ok::<_, DistGatewayCoreError>(CoreAdmission(receipt())),
             )
             .expect(
                 "DistGatewayCoreService::admit",
                 (scope(), &request),
-                Ok::<_, DistGatewayCoreError>(CoreAdmission::Duplicate(replay)),
+                Ok::<_, DistGatewayCoreError>(CoreAdmission(replay)),
             );
         let scope = scope();
         let test = dist_gateway_core_service_contract_tests(&script, &scope, request.clone());

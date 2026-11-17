@@ -116,7 +116,7 @@ async fn same_input_twice_is_one_success() {
     let AdmitOutcome::Accepted(receipt) = first else {
         panic!("first admission not accepted: {first:?}");
     };
-    assert_eq!(second, AdmitOutcome::Duplicate(receipt));
+    assert_eq!(second, AdmitOutcome::Accepted(receipt));
     assert_eq!(store.calls().len(), 1, "an admitted input is answered from admit");
     assert_eq!(inbox_len(&store).await, 1);
 }
@@ -153,7 +153,7 @@ async fn a_lost_response_at_any_step_is_unknown_and_a_retry_completes() {
         );
         let retry = p.admit(new_task_request("adm-9c41e7", "hello")).await.unwrap();
         assert!(
-            matches!(retry, AdmitOutcome::Accepted(ref r) | AdmitOutcome::Duplicate(ref r) if r.tid.0 == TID),
+            matches!(retry, AdmitOutcome::Accepted(ref r) if r.tid.0 == TID),
             "step {step}: {retry:?}"
         );
         assert!(inbox_len(&store).await >= 1, "step {step}");

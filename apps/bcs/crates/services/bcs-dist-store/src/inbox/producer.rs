@@ -1,6 +1,6 @@
 //! Admission in the fixed write order of the design:
 //!
-//! 1. read `admit`: same digest → duplicate; different → conflict;
+//! 1. read `admit`: same digest → accepted; different → conflict;
 //! 2. create `spec` (new session) and `task` (new task) only when absent;
 //! 3. append the input to `inbox`;
 //! 4. read the listener (delayed contract D1, see [`read_listener`]);
@@ -14,10 +14,9 @@
 //! retry may append a second `inbox` entry with the same input id; the Worker
 //! drops repeats by input id.
 //!
-//! The merged port separates `Accepted` (this call wrote `admit`) from
-//! `Duplicate` (the answer comes from an `admit` written earlier, by a previous
-//! attempt or by the Worker's compensation). Decision 24: callers treat both as
-//! the same success; a different digest is `ContentConflict`.
+//! Decision 24: an `admit` record with the same digest is `Accepted`, whoever
+//! wrote it (this call, a previous attempt or the Worker's compensation); a
+//! different digest is `ContentConflict`.
 //!
 //! `spec` and `task` use the persistent `DocumentCas` namespace also read by
 //! the session store. Existing documents are checked, never overwritten by
@@ -353,12 +352,11 @@ impl InboxProducerPort for StoreInboxProducer {
     }
 }
 
-/// Answer from a stored `admit` record: the same digest is the same input
-/// admitted earlier (`Duplicate`, which callers treat as success, decision 24);
-/// a different digest is a conflict.
+/// Answer from a stored `admit` record: the same digest is the same input,
+/// already admitted (decision 24); a different digest is a conflict.
 fn compare(input: &InputEnvelope, stored: &AdmitRecord) -> AdmitOutcome {
     if stored.digest == input.business_digest {
-        AdmitOutcome::Duplicate(receipt(input, stored))
+        AdmitOutcome::Accepted(receipt(input, stored))
     } else {
         AdmitOutcome::ContentConflict
     }

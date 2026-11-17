@@ -449,6 +449,14 @@ impl DistGatewayService for Script {
         self.call("DistGatewayService::subscribe", (caller, request))
     }
 
+    async fn wait_task(
+        &self,
+        caller: &GatewayCaller,
+        request: WaitTask,
+    ) -> Result<TaskView, GatewayError> {
+        self.call("DistGatewayService::wait_task", (caller, request))
+    }
+
     async fn cancel(
         &self,
         caller: &GatewayCaller,

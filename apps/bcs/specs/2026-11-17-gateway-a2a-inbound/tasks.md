@@ -6,8 +6,8 @@
 - **Goal:** `GatewayError::NotCancelable`, `wait_task`, one admission success, version 7.0.0.
 - **Files:** `crates/service-api/bcs-service-api/{Cargo.toml,CONTEXT.md,src/application/dist_gateway.rs,src/core/dist_gateway.rs,src/port/repo/distributed/{inbox.rs,README.md}}`, `crates/test-support/bcs-test-support/src/contract/distributed/`, `crates/services/bcs-dist-store/{src/inbox/producer.rs,tests/}`
 - **Done when:**
-  - [ ] no `Duplicate` admission outcome is left in the tree
-  - [ ] `bcs-service-api`, `bcs-test-support`, `bcs-dist-store` build and their tests pass
+  - [x] no `Duplicate` admission outcome is left in the tree
+  - [x] `bcs-service-api`, `bcs-test-support`, `bcs-dist-store` build and their tests pass
 - **Depends on:** —
 
 ## Task 2: Shared store: task index key, index write, `ev` codec
