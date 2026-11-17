@@ -1,0 +1,14 @@
+apps/frontend-nextgen/src/components/Admin/SpaceMemberList/index.tsx
+  h_9d7cfd405752f5 29-30
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "69a3c4a5d9409dab6456a455728fe31f2b627cc3",
+  "prompts": {},
+  "humans": {
+    "h_9d7cfd405752f5": {
+      "author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

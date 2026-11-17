@@ -1,0 +1,30 @@
+apps/backend/src/agentclaw/community/core/devices/services/baas_device_sync.py
+  s_0fe00ddeb32c55::t_ad4167aa24d3b4 71-76,78-84,88
+  s_a6fa00ea640af0::t_560a0f973b5034 27,238-256
+apps/backend/tests/community/core/devices/test_baas_device_sync.py
+  s_a6fa00ea640af0::t_5e3565b6404682 67-108
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c9b315c1c4b40eb9e8fffcbed215079f2a908dcd",
+  "prompts": {},
+  "sessions": {
+    "s_0fe00ddeb32c55": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a19a1e-9fa6-7b41-8ef4-8914940ad11e",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    },
+    "s_a6fa00ea640af0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a19a35-221c-7b83-b756-26a65729d936",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

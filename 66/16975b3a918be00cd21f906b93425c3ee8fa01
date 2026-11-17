@@ -1,0 +1,30 @@
+apps/bcsfuse/packages/search-core/src/search_core/catalog/conversion.py
+  s_e7fe9f07a64c50::t_25e12d143ec14c 52-54
+  s_e7fe9f07a64c50::t_a668c4e8a37cb4 14,35
+apps/bcsfuse/packages/search-core/tests/test_mapped_projection.py
+  s_e7fe9f07a64c50::t_c68e0f8ae862ca 49-51,55-81
+  s_e7fe9f07a64c50::t_25e12d143ec14c 52-54
+apps/bcsfuse/tests/unit/bootstrap/test_app_factory.py
+  s_e7fe9f07a64c50::t_a668c4e8a37cb4 130-131,141-144,149-150
+  s_e7fe9f07a64c50::t_80a9b059a5a2d8 145-148
+apps/bcsfuse/packages/search-core/src/search_core/catalog/updates.py
+  s_e7fe9f07a64c50::t_a668c4e8a37cb4 198,217-229
+apps/bcsfuse/packages/search-core/docs/provider-contracts.md
+  s_e7fe9f07a64c50::t_80a9b059a5a2d8 209-211
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6616975b3a918be00cd21f906b93425c3ee8fa01",
+  "prompts": {},
+  "sessions": {
+    "s_e7fe9f07a64c50": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cf7a-1d65-7ce2-80b0-e54cb93b8362",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}

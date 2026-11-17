@@ -1,0 +1,25 @@
+apps/bcs/crates/adapters/http/bcs-api-http/src/v1/a2a/chat.rs
+  s_b407ecbadd402c::t_565c543bd3e393 7,50,113,148
+apps/bcs/crates/adapters/http/bcs-api-http/src/v1/a2a/management.rs
+  s_b407ecbadd402c::t_901e0f8309f4c2 7,148,211
+apps/bcs/crates/adapters/http/bcs-api-http/src/v1/a2a/transport.rs
+  s_b407ecbadd402c::t_3df47112ec75f1 96,98
+apps/bcs/crates/adapters/http/bcs-api-http/tests/a2a_routes.rs
+  s_b407ecbadd402c::t_023d000348e325 514-531
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b6616a4ca0175a1bea36ee4d6c66624f5d944362",
+  "prompts": {},
+  "sessions": {
+    "s_b407ecbadd402c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cac2-f0d2-77f0-a456-bfdea69a959b",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "卓人 <hx410025@antgroup.com>"
+    }
+  }
+}

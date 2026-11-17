@@ -1,0 +1,16 @@
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/run-view-list-guard.test.ts
+  h_5f06d4d8b4bdd5 25,71-87
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/run-view-list-guard.ts
+  h_5f06d4d8b4bdd5 11
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "66f7ee860d5fcf301fc862a060c1715f7c5b4197",
+  "prompts": {},
+  "humans": {
+    "h_5f06d4d8b4bdd5": {
+      "author": "fudp <dapeng.fdp@antgroup.com>"
+    }
+  }
+}

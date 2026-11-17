@@ -1,0 +1,218 @@
+apps/frontend-nextgen/src/internal/capability-workshop/components/SkillListPanel.tsx
+  s_eef61c6717dd8c::t_87b1471b6ec1fb 2-7,9-10,19,72-74,77-84,90,95,98,100,130,135
+apps/frontend-nextgen/src/internal/capability-workshop/policies/skillPolicy.ts
+  s_168ffbc85a17ba::t_ec0dbc5c97248f 39-42,48-50
+  s_168ffbc85a17ba::t_23773410f54f19 51-52
+apps/frontend-nextgen/test/internal/capability-workshop/SkillCard.test.tsx
+  s_168ffbc85a17ba::t_25c14aef65aaa5 305
+  s_168ffbc85a17ba::t_7c512a1b8fb67f 282-304,306-327
+apps/frontend-nextgen/src/internal/capability-workshop/components/FileViewer.tsx
+  s_e450324c680db6::t_b43159fc68d098 104-106,116-122,126-127,134,141,143,156-157
+  s_e450324c680db6::t_f770923ee462a5 84-85,88-101,123-125,128-133,135-140,142,144-154
+  s_e450324c680db6::t_4658c7949ad558 6
+  s_e450324c680db6::t_7cd25fe9122c5c 167,172-184
+apps/frontend-nextgen/test/internal/capability-workshop/skillPolicy.test.ts
+  s_168ffbc85a17ba::t_483bebe2cb3947 9
+  s_168ffbc85a17ba::t_a1270da5f20245 106-111
+apps/frontend-nextgen/test/internal/capability-workshop/statusLabels.test.ts
+  s_eef61c6717dd8c::t_696bdf8ea07cb0 11
+apps/frontend-nextgen/src/internal/capability-workshop/components/SkillAuthDrawer.tsx
+  s_168ffbc85a17ba::t_d32cf497e10c50 155-163
+  s_168ffbc85a17ba::t_d3df40fb6864d8 46
+  s_168ffbc85a17ba::t_b78461871577ca 146-154
+apps/frontend-nextgen/test/internal/capability-workshop/UpgradeModal.test.tsx
+  s_168ffbc85a17ba::t_42b1c11111c154 87,89-94
+  s_168ffbc85a17ba::t_be262bd8d9bc61 69
+  s_168ffbc85a17ba::t_45744f07c69114 82,85-86
+  s_168ffbc85a17ba::t_ba8af14de84d1a 1-68,70-81,83-84,88,95-110
+apps/frontend-nextgen/src/internal/capability-workshop/store/workshopStore.ts
+  s_eef61c6717dd8c::t_ec7608e26c9764 51
+  s_eef61c6717dd8c::t_7c5f8f37154999 41-42
+  s_eef61c6717dd8c::t_ad54b4f088a762 7-12
+  s_eef61c6717dd8c::t_acf24470eb4d6f 62
+  s_eef61c6717dd8c::t_cfcac8c1b44e12 74
+apps/frontend-nextgen/test/internal/capability-workshop/CardTabPanel.test.tsx
+  s_eef61c6717dd8c::t_8d35ea754bcc94 14
+  s_eef61c6717dd8c::t_a783e52e2bf261 11-13
+  s_eef61c6717dd8c::t_c9663cf9f81be0 22
+  s_eef61c6717dd8c::t_3163d1dafce500 1,8,10,15-20,23-25,27-33,35,40-41
+  s_eef61c6717dd8c::t_35954520ac0519 2-7,9,21,26,34,36-39
+apps/frontend-nextgen/test/internal/capability-workshop/workshopStore.test.ts
+  s_eef61c6717dd8c::t_10cba46697cbca 25
+  s_eef61c6717dd8c::t_1aaf75632ff07f 10,19
+apps/frontend-nextgen/src/internal/capability-workshop/components/index.ts
+  s_168ffbc85a17ba::t_68aca1a32d1da0 21-22
+apps/frontend-nextgen/src/internal/capability-workshop/components/statusLabels.ts
+  s_eef61c6717dd8c::t_2ff01e43f99a70 26,32
+apps/frontend-nextgen/test/internal/capability-workshop/FileViewer.fileTree.test.tsx
+  s_e450324c680db6::t_f4e552f740bebd 1-53
+apps/frontend-nextgen/src/internal/capability-workshop/components/ReferenceBotList.tsx
+  s_168ffbc85a17ba::t_03f2b3dab09f6e 5,14-15,17,19-34,36-38,40,42-64
+.gitignore
+  s_e450324c680db6::t_539ed1d2efb07c 210-212
+apps/frontend-nextgen/config/routes.internal.ts
+  s_eef61c6717dd8c::t_171a40aac6e388 46-47
+apps/frontend-nextgen/src/internal/capability-workshop/components/SkillCard.tsx
+  s_eef61c6717dd8c::t_b4b6a8f0572283 270,273
+  s_eef61c6717dd8c::t_d141d586f73c29 252-266
+  s_eef61c6717dd8c::t_84ff519d590fa6 2-3,76-94,97,99,106-108,124-126,210-213,217-244,247,249-251,267,272,274-282,286,290-309,329,339,353,366,373
+  s_168ffbc85a17ba::t_a63cf48d3e125b 40
+  s_eef61c6717dd8c::t_d1fa8b77eb1080 350,358
+  s_eef61c6717dd8c::t_9743becf933669 4-9,11,21,33
+  s_eef61c6717dd8c::t_ce57c2426eab43 214-216
+  s_168ffbc85a17ba::t_55f1b7526946ec 271,314,319-321,330-331,340-341
+  s_eef61c6717dd8c::t_b2700e021a48d3 310
+apps/frontend-nextgen/src/internal/capability-workshop/components/SkillDrawerHeader.tsx
+  s_168ffbc85a17ba::t_308402a1aa897e 1-10,13-14,18-19,21-24,26-28
+  s_e450324c680db6::t_a32b90325660fa 11-12,17,25
+  s_e450324c680db6::t_cc8ef224252aef 15-16,20
+apps/frontend-nextgen/src/internal/capability-workshop/components/PublishModal.tsx
+  s_168ffbc85a17ba::t_3cf98357ad90fb 74
+  s_168ffbc85a17ba::t_336e5e021c4d76 48
+  s_168ffbc85a17ba::t_4f39e6c2861ee2 27
+apps/frontend-nextgen/src/internal/capability-workshop/components/UpgradeModal.tsx
+  s_168ffbc85a17ba::t_c6dbbb3a706b2c 11,14,16-17,24-25,29,33,37-55,79,91,100-113
+  s_168ffbc85a17ba::t_3e6f665736c99b 82-87
+  s_168ffbc85a17ba::t_0d35632c96ade6 30-31
+  s_168ffbc85a17ba::t_40344f62d98b94 13
+  s_168ffbc85a17ba::t_bc2159a611064a 81,89-90,92-99,114
+apps/frontend-nextgen/src/internal/capability-workshop/components/SkillCreateDrawer.tsx
+  s_9dc969c0ab542b::t_13cb99d66fdfd6 170-172
+  s_9dc969c0ab542b::t_53212d5f8de2c0 80-83
+  s_168ffbc85a17ba::t_75f4affa28d3f5 277-284
+  s_e450324c680db6::t_27f9476dd19f72 178-190,200,213,216-245
+  s_e450324c680db6::t_3fc0b0412c3a4e 147-148
+  s_168ffbc85a17ba::t_6a50d8de9e2326 3,5,11
+  s_9dc969c0ab542b::t_14627ad9e2f6d4 29-30,41-47,52,56-60,62-64,66-79,84-90,100,102-103
+  s_e450324c680db6::t_baca0be8df8943 61,65
+  s_168ffbc85a17ba::t_36a340a4fe0e99 115
+  s_e450324c680db6::t_d82c0fe165ec03 166-167
+  s_168ffbc85a17ba::t_5a1ed3852bcd81 24-26
+  s_168ffbc85a17ba::t_6b7a770f2c5030 168-169,175
+apps/frontend-nextgen/src/internal/capability-workshop/components/SkillDetailDrawer.tsx
+  s_e450324c680db6::t_32588bae95841d 45-46,50,52-56
+  s_168ffbc85a17ba::t_a5ca97a7c67ed3 199-202,205-209
+  s_e450324c680db6::t_f89d4ccc05e706 286-288
+  s_e450324c680db6::t_696eda6cfec82a 299-312,314-323
+  s_168ffbc85a17ba::t_397504a4b9ca7b 26
+  s_143559103dbd9f::t_dbc2fffd024f1b 42
+  s_e450324c680db6::t_6a2cee2017c759 3,17-18,20,38-41,43-44,47-48,51,57-61,76-77,82,143,150-190,203-204,210,218-228,232-237,239-246,248-252,254-285,295-296,313,325,327
+  s_e450324c680db6::t_ff5a12d955541c 191
+  s_e450324c680db6::t_a34b32c48e908a 289
+apps/frontend-nextgen/src/internal/capability-workshop/components/WorkshopPage.tsx
+  s_eef61c6717dd8c::t_0637be35a65a03 15
+  s_eef61c6717dd8c::t_d8bf1aeb4c5d66 284-289,291
+  s_ad7d3552e60496::t_94be535aee074a 303,307
+  s_eef61c6717dd8c::t_8845e0c51be502 85
+  s_168ffbc85a17ba::t_4619e4a4f97f05 165-167
+  s_eef61c6717dd8c::t_aec005dac0fab5 298,308-310,312-315,326,336-366
+  s_168ffbc85a17ba::t_09c193a6f0c566 415-420
+  s_eef61c6717dd8c::t_bd8469c07449e3 463
+  s_ad7d3552e60496::t_2efcdd6c6c386b 295-296
+  s_eef61c6717dd8c::t_91648de6503bd2 21
+  s_eef61c6717dd8c::t_3268968296c3cf 368-374,376
+  s_eef61c6717dd8c::t_f69195c0148884 22
+  s_eef61c6717dd8c::t_a685b6443bf2f5 128-133
+  s_eef61c6717dd8c::t_7347fce7c5882d 20
+  s_168ffbc85a17ba::t_343c4fd5435828 36
+  s_eef61c6717dd8c::t_317943e5006cc3 37
+  s_ad7d3552e60496::t_66d2b0e96b31d8 328
+  s_eef61c6717dd8c::t_d20e6c4c34c1e6 13
+  s_168ffbc85a17ba::t_aabee7e4b3bc85 249-258
+  s_eef61c6717dd8c::t_ecd333a3bbeaa5 51-53,55,60
+  s_168ffbc85a17ba::t_f88da2ae223917 375
+  s_eef61c6717dd8c::t_2ef661b2d0e69e 64-81
+  s_eef61c6717dd8c::t_69c84f21471a57 54
+  s_ad7d3552e60496::t_5a2b592cf0cf80 305-306
+  s_eef61c6717dd8c::t_466faa7a004fa4 311
+  s_eef61c6717dd8c::t_0c1c3cf4140c16 316-318,323-325
+  s_eef61c6717dd8c::t_73e3bdca598f71 462
+  s_e49d70d0b60aae::t_68de19987d21f1 297,299-302,319-322,329-335
+apps/frontend-nextgen/src/internal/capability-workshop/components/CardTabPanel.tsx
+  s_eef61c6717dd8c::t_6ca7bab23c48ca 5-13
+  s_ad7d3552e60496::t_6969055f5d1a88 16
+  s_eef61c6717dd8c::t_03fb1cd8c1b426 1-3,14-15,17-30
+  s_eef61c6717dd8c::t_f8eb2f40ca4985 4
+apps/frontend-nextgen/src/internal/capability-workshop/components/CardTabPanel.css
+  s_ad7d3552e60496::t_2666d87b31e6a6 1,3,8-9,13,16-17
+  s_ad7d3552e60496::t_4f3ee8c6e37497 2,4-7,10-12,14-15
+  s_ad7d3552e60496::t_92ad8390040e3d 18
+apps/frontend-nextgen/test/internal/capability-workshop/SkillDetailDrawer.contentView.test.tsx
+  s_e450324c680db6::t_c0ac352a4562be 112,114
+  s_e450324c680db6::t_dfeedad91b5805 98-99,101,103,113,116
+  s_e450324c680db6::t_b4e4fca28a0ab7 1-97,100,102,104-111,115,117-126
+submodules/avernet
+  s_009d4962fabe98::t_9901f051a2f93a 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0028cc7d5da375b054f1cee9a0af9f609a9d9551",
+  "prompts": {},
+  "sessions": {
+    "s_009d4962fabe98": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "73c1ee9c-6073-425c-803e-556c90fec9fe",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    },
+    "s_143559103dbd9f": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "927b25a9-8907-44d6-b18f-64fc77722c39",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    },
+    "s_168ffbc85a17ba": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "b9d24c0c-4df2-48f6-a2ec-be48495cdcf9",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    },
+    "s_9dc969c0ab542b": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "84db47db-2fb3-4916-a69d-089152ab5ca3",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    },
+    "s_ad7d3552e60496": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "4d0a9f69-28de-461a-a87e-5c261d865ae3",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    },
+    "s_e450324c680db6": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "93c1ecd6-e69e-4f95-b010-63290043f8b6",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    },
+    "s_e49d70d0b60aae": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "s_e49d70d0b60aae",
+        "model": "unknown"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    },
+    "s_eef61c6717dd8c": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "f337e582-d320-4193-8879-59f7cfa4f134",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    }
+  }
+}

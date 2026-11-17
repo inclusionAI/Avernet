@@ -1,0 +1,37 @@
+apps/backend/src/agentclaw/community/core/task/context_collab/products/task_commission/dispatch.py
+  s_64261436edbb0b::t_f4982d18bce211 105-106,108-111
+  s_64261436edbb0b::t_13b93474294775 16-30,49-66,68-104,107,112-163
+  s_64261436edbb0b::t_dbfb7779746428 14-15,67
+apps/backend/src/agentclaw/community/core/task/context_collab/products/task_commission/service.py
+  s_64261436edbb0b::t_13b93474294775 216
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_dispatch_bridge.py
+  s_64261436edbb0b::t_5d9bb206694a2a 1-115
+apps/backend/src/agentclaw/community/core/task/context_collab/products/task_commission/service_api.py
+  s_64261436edbb0b::t_13b93474294775 70-72
+  s_64261436edbb0b::t_f4982d18bce211 75
+apps/backend/tests/community/di/test_task_module.py
+  s_64261436edbb0b::t_90a9094638e4d2 60-67,73
+  s_64261436edbb0b::t_ccd5d75d15cc67 463-477
+apps/backend/tests/community/core/task/context_collab/products/test_products_layering.py
+  s_64261436edbb0b::t_e96f0e326e6854 21,55
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_end_to_end.py
+  s_64261436edbb0b::t_5d9bb206694a2a 100
+apps/backend/src/agentclaw/community/di/modules/task_module.py
+  s_64261436edbb0b::t_ccd5d75d15cc67 114-117,119,393-398
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4fa294ca8e5ce15099773bb01b3c0165a29bbd3b",
+  "prompts": {},
+  "sessions": {
+    "s_64261436edbb0b": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "6abdaae9-3cab-4f39-a132-80de8a711d13",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

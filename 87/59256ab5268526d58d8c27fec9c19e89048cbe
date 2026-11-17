@@ -1,0 +1,72 @@
+apps/backend/src/agentclaw/community/adapters/http/bot_friend_auth/router.py
+  h_5b2ec9c12c4d18 5-6
+apps/backend/src/agentclaw/community/adapters/http/bot_friend_auth/schemas.py
+  h_5b2ec9c12c4d18 21-25
+apps/backend/src/agentclaw/community/api/bot_friend_auth_service.py
+  h_5b2ec9c12c4d18 21-23
+apps/backend/src/agentclaw/community/core/bot_public/README.md
+  h_5b2ec9c12c4d18 71-73
+apps/backend/src/agentclaw/community/core/bot_public/services/friend_auth_sync_service.py
+  h_5b2ec9c12c4d18 9-22,76-86,92,98
+apps/backend/src/agentclaw/community/core/bot_public/services/friend_catalog_actions.py
+  h_5b2ec9c12c4d18 46,329-331
+apps/backend/tests/community/core/bot_public/test_bot_public_service.py
+  h_5b2ec9c12c4d18 1268-1270,1294-1296,1311-1315,1317-1330,1332-1347,1372,1382-1384,1398-1400,1414-1416,1435-1437
+apps/backend/tests/community/core/bot_public/test_friend_auth_sync_service.py
+  h_5b2ec9c12c4d18 18,20,32-35,47,50,96-121,123,125,145,147
+apps/frontend-nextgen/README.md
+  h_5b2ec9c12c4d18 30-50
+apps/frontend-nextgen/src/components/agentswarm/AgentFieldCard.tsx
+  h_5b2ec9c12c4d18 1,9-12,15-19,55,59-79,85-89,114-122,124
+apps/frontend-nextgen/src/components/agentswarm/VerticalResizeHandle.tsx
+  h_5b2ec9c12c4d18 1-80
+apps/frontend-nextgen/src/domain/agentswarm/manifest.ts
+  h_5b2ec9c12c4d18 16-17
+apps/frontend-nextgen/src/domain/agentswarm/manifestTemplate.ts
+  h_5b2ec9c12c4d18 1-31
+apps/frontend-nextgen/src/domain/collaborationSquare/bcsBotMapper.ts
+  h_5b2ec9c12c4d18 20,33-34,78
+apps/frontend-nextgen/src/domain/collaborationSquare/types.ts
+  h_5b2ec9c12c4d18 139
+apps/frontend-nextgen/src/services/bcs/botCandidatesController.ts
+  h_5b2ec9c12c4d18 127-128
+apps/frontend-nextgen/src/services/collaborationSquare/publicBotCursor.ts
+  h_5b2ec9c12c4d18 4,11-12
+apps/frontend-nextgen/src/services/collaborationSquare/publicBotMetadata.ts
+  h_5b2ec9c12c4d18 90-91,94,108,134-144
+apps/frontend-nextgen/test/components/agentswarm/VerticalResizeHandle.test.tsx
+  h_5b2ec9c12c4d18 1-78
+apps/frontend-nextgen/test/domain/agentswarm/manifest.test.ts
+  h_5b2ec9c12c4d18 43,49
+apps/frontend-nextgen/test/domain/agentswarm/manifestSubmit.test.ts
+  h_5b2ec9c12c4d18 21-27,58-59
+apps/frontend-nextgen/test/domain/agentswarm/manifestTemplate.test.ts
+  h_5b2ec9c12c4d18 1-43
+apps/frontend-nextgen/test/domain/collaborationSquare/bcsBotMapper.test.ts
+  h_5b2ec9c12c4d18 121-131
+apps/frontend-nextgen/test/services/bcs/botCandidatesController.test.ts
+  h_5b2ec9c12c4d18 157-174
+apps/frontend-nextgen/test/services/collaborationSquare/collaborationSquareApiAdapter.discovery.test.ts
+  h_5b2ec9c12c4d18 1-662
+apps/frontend-nextgen/test/services/collaborationSquare/collaborationSquareApiAdapter.fixtures.ts
+  h_5b2ec9c12c4d18 1-145
+apps/frontend-nextgen/test/services/collaborationSquare/collaborationSquareApiAdapter.test.ts
+  h_5b2ec9c12c4d18 7-18
+apps/frontend-nextgen/test/services/collaborationSquare/collaborationSquareRuntimeWiring.test.ts
+  h_5b2ec9c12c4d18 51,81,83
+apps/frontend-nextgen/test/services/collaborationSquare/publicBotCursor.test.ts
+  h_5b2ec9c12c4d18 31,80-98,132,155-159,162,165,236,269,272,291,295,298,302,321,323,327,333,351,395
+apps/frontend-nextgen/test/services/collaborationSquare/publicBotMetadata.test.ts
+  h_5b2ec9c12c4d18 117-166,168,300
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8759256ab5268526d58d8c27fec9c19e89048cbe",
+  "prompts": {},
+  "humans": {
+    "h_5b2ec9c12c4d18": {
+      "author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

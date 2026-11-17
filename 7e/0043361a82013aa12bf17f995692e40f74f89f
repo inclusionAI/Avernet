@@ -1,0 +1,59 @@
+apps/evolverun/clawweb/public/modules/clawinsight/server/repositories/repair/session-recovery-task-repository.ts
+  s_41d2ae492c3a5b::t_eff7b609ae5a4c 7,40-41,43-67,69-90,129-130,132-136,161-162
+  s_41d2ae492c3a5b::t_a1e587e84b7c63 68
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/task-contracts.ts
+  s_41d2ae492c3a5b::t_eff7b609ae5a4c 69-77,95-97,153-155,164-165
+  s_41d2ae492c3a5b::t_185e2a3d0fa28f 156
+apps/evolverun/clawweb/public/modules/clawevolve/server/repositories/app-config-repository.ts
+  s_41d2ae492c3a5b::t_eff7b609ae5a4c 98
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/task-service.ts
+  s_41d2ae492c3a5b::t_ea15ade72955da 18,134-136,284,288-290,296-299,343-344,517-525,528-529,535,540-551,568-571,574,578,580-590,593-598,600-601,603,605-610,612,614-623,625-634,636-664,763-769,831
+  s_41d2ae492c3a5b::t_29b8ef9f0a0048 9,133,635
+  s_41d2ae492c3a5b::t_8ddf18bda7c0e8 291-295
+  s_41d2ae492c3a5b::t_e747d6a44c25d6 579
+  s_41d2ae492c3a5b::t_c5dba96c65fdbe 591-592
+  s_41d2ae492c3a5b::t_f9e96b338c48c5 599
+  s_41d2ae492c3a5b::t_c82b91eee2f261 602
+  s_41d2ae492c3a5b::t_45f8e92e69ac42 604
+  s_41d2ae492c3a5b::t_6851a0c6d6fe91 611
+  s_41d2ae492c3a5b::t_9511964fa3ca92 613
+  s_41d2ae492c3a5b::t_4653d81359e731 624
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/agent-service.ts
+  s_41d2ae492c3a5b::t_29b8ef9f0a0048 1,131-138
+  s_41d2ae492c3a5b::t_ea15ade72955da 298
+  s_41d2ae492c3a5b::t_501ef64fabe9cb 194-197
+apps/evolverun/clawweb/public/modules/clawinsight/docs/session-recovery-contract.md
+  s_41d2ae492c3a5b::t_5685a9a947220f 38-53
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/effect-resume.ts
+  s_41d2ae492c3a5b::t_eff7b609ae5a4c 1-16,22-24,27-30
+  s_41d2ae492c3a5b::t_29b8ef9f0a0048 17-21
+  s_41d2ae492c3a5b::t_a5261644a13541 25-26
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/effect-resume.test.ts
+  s_41d2ae492c3a5b::t_29b8ef9f0a0048 127-152,154-171
+  s_41d2ae492c3a5b::t_5685a9a947220f 1-64,66-78,80-89,91-106,108-126
+  s_41d2ae492c3a5b::t_1093f1a46e251b 65
+  s_41d2ae492c3a5b::t_49f1fa0386e665 79
+  s_41d2ae492c3a5b::t_6e9efc8583b6f6 90
+  s_41d2ae492c3a5b::t_5217723e41ecf6 107
+  s_41d2ae492c3a5b::t_6023882d3fa692 153
+apps/evolverun/clawweb/public/modules/clawinsight/web/pages/InsightCenter/monitoring/session-recovery/RecoveryTaskLinks.tsx
+  s_41d2ae492c3a5b::t_64c06a2b00c391 29-30
+apps/evolverun/clawweb/public/modules/clawinsight/web/pages/InsightCenter/monitoring/session-recovery/SessionRecoveryDetail.tsx
+  s_41d2ae492c3a5b::t_0edc7481029fc2 39-40
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7e0043361a82013aa12bf17f995692e40f74f89f",
+  "prompts": {},
+  "sessions": {
+    "s_41d2ae492c3a5b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c9f5-9952-7503-85ab-66a3e3271d26",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}

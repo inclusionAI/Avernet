@@ -1,0 +1,19 @@
+apps/evolverun/docs/session-recovery-integration.md
+  s_41d2ae492c3a5b::t_b223cb5b3f8454 46
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "26803c57d08d42315a32570d1c8ea7db8db3fd48",
+  "prompts": {},
+  "sessions": {
+    "s_41d2ae492c3a5b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c9f5-9952-7503-85ab-66a3e3271d26",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,39 @@
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/task/context_collab.py
+  s_e0cb98366a65ad::t_2de36d3069c8b1 1-23,25-31,35-61,68-74,83,85-109,111-127,129-130,136-143
+  s_e0cb98366a65ad::t_b49bcb8bf17c7b 62-67
+  s_e0cb98366a65ad::t_834fa557c02d0e 24,75-82,84,110,128,131-135
+  s_e0cb98366a65ad::t_a0eb15ed4fdc20 32-34
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/admission_task_routes.py
+  s_e0cb98366a65ad::t_751bb9feae79a4 155-165
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/__init__.py
+  s_e0cb98366a65ad::t_20414c2f4cda9a 720-731
+  s_e0cb98366a65ad::t_7cad71f9efc26f 187
+apps/backend/tests/community/adapters/http/openapi_v1/test_explicit_user_id.py
+  s_e0cb98366a65ad::t_d3fdec43443d56 438-451
+  s_e0cb98366a65ad::t_ec1f0f849ffc7e 660-662
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/authorization_rules_task.py
+  s_e0cb98366a65ad::t_4962cd69be3518 40-56
+apps/backend/src/agentclaw/community/adapters/http/task/schemas_context_collab.py
+  s_e0cb98366a65ad::t_7ded5238229deb 3-13,46,50-58,65,69-76,83,87-94,101,105-117,127,129-131,136-167,171,175-180,199,201-205,210-248,275-290,294,296-298,301-311,315,317-322,326-343,347-367,371-388,392,394-396,398-402,406,408-415,419-433
+apps/backend/tests/community/endpoints/test_openapi_context_collab_endpoints.py
+  s_e0cb98366a65ad::t_129445e8017bfa 187
+  s_e0cb98366a65ad::t_de87bb945f6539 234
+  s_e0cb98366a65ad::t_d126635a179b31 1-186,190-233,235-434
+  s_e0cb98366a65ad::t_7d7c87dad1344e 188-189
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f06410f11e0491dc205b438456a25315fa8df1f8",
+  "prompts": {},
+  "sessions": {
+    "s_e0cb98366a65ad": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "1d67472f-3033-4c3f-9f69-89e0d4112039",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

@@ -1,0 +1,28 @@
+apps/backend/src/agentclaw/community/core/caller_identity/session_validator.py
+  s_6df2d19f5247b5::t_c52e20f48ec186 83-85
+apps/backend/src/agentclaw/community/core/caller_identity/README.md
+  s_6df2d19f5247b5::t_c52e20f48ec186 38-39,71-76,87-89
+apps/backend/tests/community/core/caller_identity/test_session_validator.py
+  s_6df2d19f5247b5::t_c52e20f48ec186 14
+apps/backend/tests/community/core/caller_identity/test_shared_teclaw_iam.py
+  s_6df2d19f5247b5::t_c52e20f48ec186 115,167-168
+  s_6df2d19f5247b5::t_e07af5e0775bbc 188,201-205,210,228-235
+apps/backend/specs/2026-11-12-teclaw-refresh-session-check/spec.md
+  s_6df2d19f5247b5::t_e07af5e0775bbc 1-18
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "01ebb8fb3cd37e11a694644e961926d3771e622f",
+  "prompts": {},
+  "sessions": {
+    "s_6df2d19f5247b5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d01d-682a-7c52-a40b-074c6b5d16ef",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

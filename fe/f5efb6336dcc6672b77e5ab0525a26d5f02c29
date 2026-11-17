@@ -1,0 +1,23 @@
+apps/bcsfuse/packages/search-core/src/search_core/application/search.py
+  s_89ee1c722ef961::t_4b66af612d6e69 5,37,41,51-54
+apps/bcsfuse/packages/search-core/tests/test_search_timing.py
+  s_89ee1c722ef961::t_df1a0dabcf9181 7,98-115
+apps/bcsfuse/packages/search-core/src/search_core/bootstrap/http.py
+  s_89ee1c722ef961::t_b5689e1c5e68e5 3-4,31,45
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "fef5efb6336dcc6672b77e5ab0525a26d5f02c29",
+  "prompts": {},
+  "sessions": {
+    "s_89ee1c722ef961": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a055-773d-7ad0-9462-d35c86fe60c8",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}

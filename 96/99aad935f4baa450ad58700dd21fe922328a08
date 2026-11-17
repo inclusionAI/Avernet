@@ -1,0 +1,21 @@
+apps/evolverun/clawweb/internal/modules/archive/server/middleware/request-logger.ts
+  s_df9e33e486a942::t_83fc311eb7980c 16
+apps/evolverun/clawweb/internal/modules/archive/server/middleware/__tests__/file-logging.test.ts
+  s_df9e33e486a942::t_6d0470643fc59e 38,40
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9699aad935f4baa450ad58700dd21fe922328a08",
+  "prompts": {},
+  "sessions": {
+    "s_df9e33e486a942": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c461-e821-7eb2-8d5a-02b04e069135",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}

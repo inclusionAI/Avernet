@@ -1,0 +1,14 @@
+apps/frontend-nextgen/test/pages/Workspace/Chat/hooks/useChatHeaderPanels.test.ts
+  h_5b2ec9c12c4d18 62,65-70,73,114,131
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1344e607e3e87e78c4af9c2157144920434d96bb",
+  "prompts": {},
+  "humans": {
+    "h_5b2ec9c12c4d18": {
+      "author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}
