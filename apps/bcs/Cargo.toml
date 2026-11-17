@@ -17,10 +17,10 @@ members = [
     "crates/service-api/bcs-services-container",
     # contracts
     "crates/contracts/bcs-dist-model",
-    "crates/services/bcs-dist-store",
     "crates/contracts/bcs-domain",
     "crates/contracts/bcs-protocol",
     # services
+    "crates/services/bcs-dist-store",
     "crates/services/bcs-config",
     "crates/services/bcs-db-migrations",
     "crates/services/bcs-eventing",

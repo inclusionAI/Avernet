@@ -25,6 +25,7 @@ pub struct Recorder {
     calls: Mutex<Vec<String>>,
     writes: Mutex<usize>,
     lose_write: Mutex<Option<usize>>,
+    fail_write: Mutex<Option<usize>>,
 }
 
 impl Recorder {
@@ -45,28 +46,56 @@ impl Recorder {
         *self.writes.lock().unwrap() = 0;
         *self.lose_write.lock().unwrap() = Some(n);
     }
+    /// Fail the n-th write from now (1-based) with a definite error, without
+    /// applying it.
+    pub fn fail_write(&self, n: usize) {
+        *self.writes.lock().unwrap() = 0;
+        *self.fail_write.lock().unwrap() = Some(n);
+    }
     fn read(&self, op: &str, key: &str) {
         self.calls.lock().unwrap().push(format!("{op} {key}"));
     }
-    /// Records a write; true when its response must be lost.
-    fn write(&self, op: &str, key: &str) -> bool {
+    /// Records a write and decides what happens to it.
+    fn write(&self, op: &str, key: &str) -> Effect {
         self.calls.lock().unwrap().push(format!("{op} {key}"));
         let mut writes = self.writes.lock().unwrap();
         *writes += 1;
         let mut lose = self.lose_write.lock().unwrap();
         if *lose == Some(*writes) {
             *lose = None;
-            return true;
+            return Effect::Lose;
         }
-        false
-    }
-    fn finish<T>(lose: bool, result: StoreResult<T>) -> StoreResult<T> {
-        match result {
-            Ok(_) if lose => Err(StoreError::OutcomeUnknown("lost".into())),
-            other => other,
+        let mut fail = self.fail_write.lock().unwrap();
+        if *fail == Some(*writes) {
+            *fail = None;
+            return Effect::Fail;
         }
+        Effect::Apply
     }
 }
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Effect {
+    Apply,
+    Lose,
+    Fail,
+}
+
+/// Runs a write unless it must fail definitely; loses its response if asked.
+macro_rules! run {
+    ($effect:expr, $call:expr) => {{
+        let effect = $effect;
+        if effect == Effect::Fail {
+            Err(StoreError::NotApplied("injected".into()))
+        } else {
+            match $call {
+                Ok(_) if effect == Effect::Lose => Err(StoreError::OutcomeUnknown("lost".into())),
+                other => other,
+            }
+        }
+    }};
+}
+
 
 impl StorePlugin for Recorder {
     fn supports(&self, capability: StoreCapability) -> bool {
@@ -84,20 +113,16 @@ impl KvStorePlugin for Recorder {
         self.model.mget(keys).await
     }
     async fn set(&self, key: &str, value: &[u8], expiry: Expiry) -> StoreResult<()> {
-        let lose = self.write("kv.set", key);
-        Self::finish(lose, self.model.set(key, value, expiry).await)
+        run!(self.write("kv.set", key), self.model.set(key, value, expiry).await)
     }
     async fn put_if_absent(&self, key: &str, value: &[u8], expiry: Expiry) -> StoreResult<bool> {
-        let lose = self.write("kv.put_if_absent", key);
-        Self::finish(lose, self.model.put_if_absent(key, value, expiry).await)
+        run!(self.write("kv.put_if_absent", key), self.model.put_if_absent(key, value, expiry).await)
     }
     async fn delete(&self, key: &str) -> StoreResult<bool> {
-        let lose = self.write("kv.delete", key);
-        Self::finish(lose, KvStorePlugin::delete(&self.model, key).await)
+        run!(self.write("kv.delete", key), KvStorePlugin::delete(&self.model, key).await)
     }
     async fn expire(&self, key: &str, ttl: Duration) -> StoreResult<bool> {
-        let lose = self.write("kv.expire", key);
-        Self::finish(lose, self.model.expire(key, ttl).await)
+        run!(self.write("kv.expire", key), self.model.expire(key, ttl).await)
     }
     async fn ttl(&self, key: &str) -> StoreResult<KeyTtl> {
         KvStorePlugin::ttl(&self.model, key).await
@@ -121,20 +146,17 @@ impl JsonStorePlugin for Recorder {
         mutation: JsonMutation,
         expiry: Expiry,
     ) -> StoreResult<WriteOutcome> {
-        let lose = self.write("json.mutate", key);
-        Self::finish(lose, self.model.mutate_json(key, condition, mutation, expiry).await)
+        run!(self.write("json.mutate", key), self.model.mutate_json(key, condition, mutation, expiry).await)
     }
 }
 
 #[async_trait]
 impl ZSetStorePlugin for Recorder {
     async fn add(&self, key: &str, entries: &[ZSetEntry], mode: ZAddMode) -> StoreResult<u64> {
-        let lose = self.write("zset.add", key);
-        Self::finish(lose, self.model.add(key, entries, mode).await)
+        run!(self.write("zset.add", key), self.model.add(key, entries, mode).await)
     }
     async fn remove(&self, key: &str, members: &[String]) -> StoreResult<u64> {
-        let lose = self.write("zset.remove", key);
-        Self::finish(lose, self.model.remove(key, members).await)
+        run!(self.write("zset.remove", key), self.model.remove(key, members).await)
     }
     async fn range(&self, key: &str, range: &ZSetRange) -> StoreResult<Vec<ZSetEntry>> {
         ZSetStorePlugin::range(&self.model, key, range).await
@@ -148,8 +170,7 @@ impl ZSetStorePlugin for Recorder {
         expected: Option<Version>,
         mutations: &[ZSetMutation],
     ) -> StoreResult<WriteOutcome> {
-        let lose = self.write("zset.update", key);
-        Self::finish(lose, self.model.update_if_version(key, expected, mutations).await)
+        run!(self.write("zset.update", key), self.model.update_if_version(key, expected, mutations).await)
     }
 }
 
@@ -161,8 +182,7 @@ impl StreamStorePlugin for Recorder {
         id: AppendId,
         fields: &BTreeMap<String, Vec<u8>>,
     ) -> StoreResult<StreamId> {
-        let lose = self.write("stream.append", key);
-        Self::finish(lose, self.model.append(key, id, fields).await)
+        run!(self.write("stream.append", key), self.model.append(key, id, fields).await)
     }
     async fn read(&self, streams: &[StreamRead], options: ReadOptions) -> StoreResult<Vec<StreamBatch>> {
         self.model.read(streams, options).await
@@ -178,8 +198,7 @@ impl StreamStorePlugin for Recorder {
         StreamStorePlugin::range(&self.model, key, start, end, limit, reverse).await
     }
     async fn trim(&self, key: &str, policy: TrimPolicy) -> StoreResult<TrimResult> {
-        let lose = self.write("stream.trim", key);
-        Self::finish(lose, self.model.trim(key, policy).await)
+        run!(self.write("stream.trim", key), self.model.trim(key, policy).await)
     }
     async fn create_group(&self, key: &str, group: &str, start: GroupStart) -> StoreResult<GroupCreateOutcome> {
         self.model.create_group(key, group, start).await

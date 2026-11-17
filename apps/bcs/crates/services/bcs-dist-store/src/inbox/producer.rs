@@ -14,8 +14,10 @@
 //! retry may append a second `inbox` entry with the same input id; the Worker
 //! drops repeats by input id.
 //!
-//! Decision 24: there is one success. This provider returns `Accepted` both for
-//! a new and for an already admitted input, and never `Duplicate`.
+//! The merged port separates `Accepted` (this call wrote `admit`) from
+//! `Duplicate` (the answer comes from an `admit` written earlier, by a previous
+//! attempt or by the Worker's compensation). Decision 24: callers treat both as
+//! the same success; a different digest is `ContentConflict`.
 
 use super::Clock;
 use super::listener::{ListenerState, read_listener};
@@ -349,9 +351,12 @@ impl InboxProducerPort for StoreInboxProducer {
     }
 }
 
+/// Answer from a stored `admit` record: the same digest is the same input
+/// admitted earlier (`Duplicate`, which callers treat as success, decision 24);
+/// a different digest is a conflict.
 fn compare(input: &InputEnvelope, stored: &AdmitRecord) -> AdmitOutcome {
     if stored.digest == input.business_digest {
-        AdmitOutcome::Accepted(receipt(input, stored))
+        AdmitOutcome::Duplicate(receipt(input, stored))
     } else {
         AdmitOutcome::ContentConflict
     }
