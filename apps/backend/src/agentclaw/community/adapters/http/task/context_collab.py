@@ -9,8 +9,6 @@ spec §6.1 的单数 ``/api/v1/collaboration/task``,与既有内部
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Request
-
 from agentclaw.community.adapters.http.auth.dependencies import get_current_user
 from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
 from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope
@@ -36,6 +34,7 @@ from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs 
 )
 from agentclaw.community.core.task.context_collab.service_api import ActorContext
 from agentclaw.community.di import Injected
+from fastapi import APIRouter, Depends, Request
 
 router = APIRouter(prefix="/api/v1/collaboration/task", tags=["task-context-collab"])
 
@@ -54,8 +53,10 @@ async def create_collet_collab(
     service: ContextCollabServiceProtocol = Injected(ContextCollabServiceProtocol),  # noqa: B008
 ) -> Envelope[ContextCollabCreatedResultDto]:
     command = body.to_domain()
-    collet = service.create_collaboration(command, _actor_context(user))
-    return envelope(created_collet_to_dto(collet, command), request)
+    context = _actor_context(user)
+    collet = service.create_collaboration(command, context)
+    events = service.get_events(collet.collet_id, context=context)
+    return envelope(created_collet_to_dto(collet, command, events), request)
 
 
 @router.post(

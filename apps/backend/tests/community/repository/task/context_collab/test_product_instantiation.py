@@ -1,5 +1,6 @@
 """Explicit application/L6 installation never becomes an L4 creation side effect."""
 
+import json
 from dataclasses import replace
 
 import pytest
@@ -17,12 +18,10 @@ from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs 
     AgentRef,
     PrincipalRef,
 )
-from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_resource_refs import (
-    SpaceRef,
-)
 from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.contracts import (
     AppendEventRecordRequest,
     ColletCreateCommand,
+    TaskCreateCommand,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime import (
     current_axes,
@@ -47,6 +46,9 @@ from agentclaw.community.core.task.context_collab.l6_products.operations.product
 )
 from agentclaw.community.core.task.context_collab.persistence.method_store import (
     InMemoryMethodStore,
+)
+from agentclaw.community.core.task.context_collab.persistence.models import (
+    ContextCollabColletModel,
 )
 from agentclaw.community.core.task.context_collab.persistence.repository import (
     ContextCollabRepository,
@@ -76,11 +78,16 @@ def runtime(db):
         repo, store, catalog, StructuralContextCollabAuthorizer()
     )
     created = repo.create_l4_collet(
-        ColletCreateCommand(SpaceRef("s", "test"), OWNER.actor, "Deliver work"),
+        ColletCreateCommand(OWNER.actor),
+        OWNER.actor,
+    )
+    created = repo.create_l4_task(
+        created.collet.collet_id,
+        TaskCreateCommand(1, OWNER.actor, "Deliver work"),
         OWNER.actor,
     )
     command = ProductInstantiateCommand(
-        created.collet.collet_id, profile.ref, 1, (BOT,)
+        created.collet.collet_id, profile.ref, created.collet.version, (BOT,)
     )
     return service, repo, store, catalog, command
 
@@ -95,7 +102,7 @@ def test_l6_instantiation_is_explicit_and_preserves_initial_l4_authorities(runti
     assert after.product_instance == instance
     assert before.task.executor_refs == ()
     assert after.task.executor_refs == (BOT,)
-    assert after.collet.version == after.task.version == 2
+    assert after.collet.version == 3 and after.task.version == 2
     assert after.collet.metadata is not None
     assert after.collet.etag != before.collet.etag
     assert after.events[:1] == before.events
@@ -149,7 +156,12 @@ def test_responsible_principal_may_select_even_when_not_initiator(runtime):
     service, repo, _, _, command = runtime
     responsible = ActorContext(PrincipalRef("human", "responsible"), "api")
     created = repo.create_l4_collet(
-        ColletCreateCommand(SpaceRef("s", "test"), responsible.actor, "Delegated"),
+        ColletCreateCommand(responsible.actor),
+        OWNER.actor,
+    )
+    repo.create_l4_task(
+        created.collet.collet_id,
+        TaskCreateCommand(1, responsible.actor, "Delegated"),
         OWNER.actor,
     )
     instance = service.instantiate(
@@ -161,7 +173,7 @@ def test_responsible_principal_may_select_even_when_not_initiator(runtime):
 @pytest.mark.parametrize(
     "change, error",
     [
-        ({"expected_version": 2}, ContextCollabVersionConflict),
+        ({"expected_version": 1}, ContextCollabVersionConflict),
         (
             {"profile_ref": VersionedProfileRef("missing", 1)},
             ContextCollabValidationError,
@@ -197,7 +209,7 @@ def test_selection_rejects_collet_advanced_by_message(runtime):
     repo.append_event(
         command.collet_id,
         AppendEventRecordRequest(
-            1,
+            command.expected_version,
             "user_interaction.posted",
             "Message",
             OWNER.actor,
@@ -209,7 +221,7 @@ def test_selection_rejects_collet_advanced_by_message(runtime):
     before = repo.get_current_status(command.collet_id)
     assert before.task.version == 1
     with pytest.raises(ContextCollabValidationError, match="untouched L4 Collet"):
-        service.instantiate(replace(command, expected_version=2), OWNER)
+        service.instantiate(replace(command, expected_version=3), OWNER)
     assert repo.get_current_status(command.collet_id) == before
     assert store.list_bindings(current_axes(), command.collet_id) == []
 
@@ -297,3 +309,77 @@ def test_product_instantiation_command_rejects_invalid_input(runtime, change):
     *_, command = runtime
     with pytest.raises(ContextCollabValidationError):
         replace(command, **change)
+
+
+def test_bare_collet_instantiation_binds_participants_without_creating_work(runtime):
+    service, repo, store, _, command = runtime
+    collet = repo.create_l4_collet(ColletCreateCommand(OWNER.actor), OWNER.actor).collet
+    before = repo.get_current_status(collet.collet_id)
+    instance = service.instantiate(
+        replace(command, collet_id=collet.collet_id, expected_version=collet.version),
+        OWNER,
+    )
+    after = repo.get_current_status(collet.collet_id)
+    assert before.events == [] and before.task is None
+    assert after.task is None and after.tasks == ()
+    assert instance.root_task_ref is None
+    assert after.product_instance == instance
+    assert after.collet.version == before.collet.version + 1
+    [evidence] = after.events
+    assert evidence.event_kind == "collet.participants_bound"
+    assert evidence.event_id == instance.creation_event_ref
+    assert evidence.task_ref is None and evidence.task_version_after is None
+    assert after.participants and after.role_bindings
+    assert store.list_bindings(current_axes(), collet.collet_id)
+
+
+def test_sql_installation_rechecks_untouched_work_after_intervening_message(
+    runtime, monkeypatch
+):
+    service, repo, store, _, command = runtime
+    original = repo.attach_product_instance
+
+    def install_after_message(collet_id, **kwargs):
+        # An intervening writer changes only the stream / Collet revision, not Task.
+        repo.append_event(
+            collet_id,
+            AppendEventRecordRequest(
+                kwargs["expected_version"],
+                "user_interaction.posted",
+                "Message",
+                OWNER.actor,
+                None,
+                "public",
+                {"content": "new evidence"},
+            ),
+        )
+        return original(collet_id, **{**kwargs, "expected_version": 3})
+
+    monkeypatch.setattr(repo, "attach_product_instance", install_after_message)
+    with pytest.raises(ContextCollabValidationError, match="untouched L4 Collet"):
+        service.instantiate(command, OWNER)
+    record = repo.get_current_status(command.collet_id)
+    assert record.product_instance is None and record.task.version == 1
+    assert record.task.executor_refs == () and not record.participants
+    assert len(record.events) == 2
+    assert store.list_bindings(current_axes(), command.collet_id) == []
+
+
+def test_existing_work_instance_cannot_masquerade_as_pre_start_installation(
+    runtime, db
+):
+    service, repo, _, _, command = runtime
+    instance = service.instantiate(command, OWNER)
+    assert instance.root_task_ref is not None
+    with db.orm_session() as session:
+        row = (
+            session.query(ContextCollabColletModel)
+            .filter_by(collab_context_id=command.collet_id)
+            .one()
+        )
+        facts = json.loads(row.creation_facts)
+        facts["product_instance"]["root_task_ref"] = None
+        row.creation_facts = json.dumps(facts)
+        session.commit()
+    with pytest.raises(ContextCollabValidationError, match="missing its root Task"):
+        repo.get_current_status(command.collet_id)

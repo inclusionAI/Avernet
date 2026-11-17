@@ -10,7 +10,7 @@ Service APIs, not a new HTTP/ACCS operation family or product-specific wire prot
 | Contract | Owner/source | Meaning |
 | --- | --- | --- |
 | ProductProfileCreateCommand / create_product_profile | [operations/](operations/) | Typed, pure creation operation: validate and return an immutable definition without installation, instances or runtime writes. |
-| ProductInstantiateCommand / ProductInstantiationServiceProtocol | [operations/contracts.py](operations/contracts.py), [implementation](operations/product_instantiation.py) | Explicit pinned selection on existing untouched L4 work, then invoke L5 initialization. |
+| ProductInstantiateCommand / ProductInstantiationServiceProtocol | [operations/contracts.py](operations/contracts.py), [implementation](operations/product_instantiation.py) | Explicit pinned selection on an untouched L4 Collet (Task optional), then invoke L5 initialization. |
 | CollaborationCreateCommand / ContextCollabServiceProtocol | [service_api.py](service_api.py), [implementation](operations/collaboration_creation.py) | Legacy combined Method/product creation extension over L4; root API is an identity reexport. |
 | ProductCollaborationPolicy | [operations/collaboration_policy.py](operations/collaboration_policy.py) | Product-aware adapter to L4-owned policy ports; interprets selected L6 evidence without owning Work or query execution. |
 | ProductMethodBindingRecovery | [operations/method_bootstrap.py](operations/method_bootstrap.py) | Translates pinned product/identity facts into L5 initialization/recovery inputs through L5-owned operations and ports. |
@@ -23,7 +23,7 @@ Service APIs, not a new HTTP/ACCS operation family or product-specific wire prot
 | WorkflowProfile | [contracts.py](contracts.py) | Optional product orchestration contract. Existing profiles own their action mappings and reference a versioned G4 machine over L4 Task, or explicitly declare a nontransition event stream. Not required merely to run an autonomous Bot. |
 | MethodPolicy / OpenMethodPolicy | [method_policies.py](method_policies.py) | Typed L6 product policy variants, scoped to a required Method in `composition.policies`. Currently only Open declares one; other Methods need no placeholder policy. |
 | OpenAdmissionPolicy / OpenPublicationProfile | [publication.py](publication.py) | Shared participation/role/capacity constraints, ADMITTED delivery gate and partial-failure behavior. Concrete products own specialized admission strategies and step order; L6 does not execute them. |
-| ProductInstance | [instance.py](instance.py) | Durable selection/evidence references: Collet and independent root Task IDs, product and selected Task/workflow/domain versions, actual MethodBinding references for the pinned topology, selected Method versions, actual RoleBinding references, pinned participant eligibility, governance requirements and negotiation result. No independent lifecycle state. |
+| ProductInstance | [instance.py](instance.py) | Durable selection/evidence references: Collet ID and optional independent root Task ID (absent before Work.start), product and selected Task/workflow/domain versions, actual MethodBinding references for the pinned topology, selected Method versions, actual RoleBinding references, pinned participant eligibility, governance requirements and negotiation result. No independent lifecycle state. |
 | Compatibility selection | `negotiate(profile, offer)` | Exact required profile/Method/ACCS/layer/extension/governance match. Reports missing required and omitted optional capabilities separately. Never silently chooses a newer version or weaker policy. |
 
 `profiles.py` retains the wire ID enums for compatibility; IDs alone are not
@@ -356,11 +356,11 @@ column/table names and tenant/env isolation remain unchanged.
 
 ### Explicit installation on an existing Collet
 
-Pure L4 `create_collet(ColletCreateCommand, context)` creates unassigned Work;
+Pure L4 `create_collet(ColletCreateCommand, context)` creates only a Collet;
 it does not select a Profile, Method, participants or bindings. Its required
-inputs are space, initiator reference and objective (optional context description
-is keyword-only). To apply a product, pass the product's initial Agent identities
-to the separate L6-owned
+input is an initiator reference (optional context description is keyword-only).
+No Task or Event is created by Collet creation. Pass initial Agent identities
+from the product caller directly to the separate L6-owned
 [`ProductInstantiationServiceProtocol`](operations/contracts.py):
 
 ```python
@@ -374,28 +374,34 @@ instance = product_instantiation.instantiate(
     ),
     actor_context,
 )
-# Instantiation advances Collet/Task to revision 2: re-read before Work.start.
+assert instance.root_task_ref is None  # No placeholder Task.
+# Collet is revision 2; re-read before Work.start, where objective is supplied.
 ```
 
 [`operations/product_instantiation.py`](operations/product_instantiation.py)
-authorizes only the Collet initiator or responsible principal and resolves the
-exact installed version, never latest. Every initial Agent (including those not
-assigned to execute) must satisfy the Profile's participant scope before writes.
-The repository CAS installs immutable selection on an untouched Collet/root Task
-(both revision 1), rejecting stale, repeated, conflicting or already-assigned
-selection. It revalidates the scope, role subjects, objective and creation evidence
-inside the SQL transaction.
+authorizes the initiator/responsible principal and selects the exact installed
+version, never latest. Every initial Agent, including non-executors, must satisfy
+the Profile's participant scope before writes. The repository CAS revalidates
+scope, role subjects and untouched Collet state; stale/repeated/conflicting
+selection fails closed.
 
-The **same SQL transaction** persists ProductInstance plus actual L4 Participants
-and RoleBindings, assigns the designated Task executor, and appends the internal
-`task.participants_bound` Event with those facts. The original `task.created`
-Event remains immutable; Task and Collet revisions become 2, their event heads
-and audit are advanced, and state/completion remain unchanged. Role references
-resolve to actual L4 facts, not merely generated strings; G4 checks these actual
-bindings, with a compatibility fallback only for historical rows without such
-participation evidence. New scoped instances missing their binding evidence
-fail closed when read. No new membership table or public event-writing operation
-is introduced. L6 then invokes L5 initialization for the pinned Method topology.
+The **same SQL transaction** persists ProductInstance, actual Collet-scoped L4
+Participants/RoleBindings and `collet.participants_bound` evidence. Collet advances
+from revision 1 to 2; no Task is written. The instance's creation_event_ref points
+to that binding Event. At Work.start, actual initial executor bindings initialize
+the Task alongside the objective/completion conditions in WorkStartCommand.
+All G1/G4 checks precede the atomic creation/start write. Root Task is revision 2
+and Collet revision 4 after a successful first start, absent intervening Events.
+
+For compatibility, installation also accepts untouched, unassigned existing Work
+(Task revision 1, only its creation Event). That path preserves `task.created`,
+assigns the Task and appends `task.participants_bound`, advancing Task/Collet once.
+It is not the commission journey's creation sequence.
+Role references resolve to actual L4 evidence, not generated strings alone;
+G4 checks those bindings, with a fallback only for historical rows without them.
+New scoped instances missing binding evidence fail closed when read. No new
+membership table or public event-writing operation is introduced. L6 then invokes
+L5 initialization for the pinned Method topology.
 
 **Current product limit:** ScenarioRole's `executor_ref` source is scalar.
 A sole initial Agent defaults to that source. Multiple initial Agents are valid,
@@ -526,11 +532,11 @@ authorize an operation merely because a role/template mentions it.
 
 A ProductProfile is a reusable versioned contract, not a runtime collaboration.
 For this bounded commission product, each independent commission creates one
-ProductInstance referencing one Collet and its independent root Task:
+ProductInstance referencing one Collet and, only after Work.start, its root Task:
 
 ```text
 task_commission@2 (ProductProfile)
-  └─ ProductInstance → existing Collet → root Task (and any L4 subtasks)
+  └─ ProductInstance → existing Collet → root Task after Work.start (then any subtasks)
        ├─ MethodBinding: Open@0.2    (opportunity/application/admission)
        ├─ MethodBinding: Single@0.2  (selection/execution handoff)
        ├─ MethodCompositionEdge: Single --support--> Open
@@ -564,13 +570,15 @@ generated experimental composite @2 snapshots is provided: strict reload rejects
 mismatched binding references rather than silently moving admission/selection
 history to newly invented partitions.
 
-`root_task_ref` is an explicit local ProductInstance reference, validated against
-the authoritative L4 root Task on creation, attachment and reload. It is not a
-new ACCS-mandated universal field or a Collet ID alias. New instances persist it
-in the existing `creation_facts` JSON. Historical JSON without this field is
-resolved from the same L4 snapshot without writes or capability renegotiation;
-a present but empty/mismatched reference is rejected. No table migration,
-implicit product-version upgrade or runtime-state backfill is performed.
+`root_task_ref` is a local reference, not a universal ACCS field or a Collet ID
+alias. Taskless installation persists `None` in `creation_facts`; no placeholder
+Task is created. Once Work.start creates the authoritative L4 root, reads resolve
+the live reference from the same L4 snapshot without rewriting immutable L6
+selection or renegotiating capabilities. Other pinned references and creation
+evidence remain unchanged. An instance installed on existing Work must retain
+its exact root reference; empty/mismatched references fail closed. Historical
+JSON missing the field resolves it from L4 without writes. No table migration,
+implicit product upgrade or runtime-state backfill is performed.
 
 ## Scope limits and conformance evidence
 
@@ -593,9 +601,11 @@ this minimum contract increment. Do not describe it as full ACCS conformance.
 The [commission user-journey test](../../../../../../../tests/community/core/task/context_collab/products/test_task_commission_end_to_end.py)
 uses the actual `TaskModule` / `TaskPersistenceModule`, isolated SQLite and the
 real catalog seam. It authors and deploys `task_commission@2` (Open + Single),
-then explicitly creates one L4 Collet/root Task before a separate L6 Instantiate
-call creates one ProductInstance. The journey does not test multi-instance reuse
-or isolation. That ProductInstance pins its Profile/Method/standard Task versions, root Task,
+then creates only one L4 Collet before a separate L6 Instantiate call creates
+one ProductInstance and actual initial bindings, still without a Task. Only
+Work.start creates and starts the root Task, after Open admission and Single
+selection. The journey does not test multi-instance reuse or isolation. The
+ProductInstance pins its Profile/Method/standard Task versions, eventual root Task,
 MethodBinding/RoleBinding refs, governance, negotiation and creation evidence.
 The case directly invokes L5 Open Query → SubmitApplication → Screen → Admit
 with the Bot/policy actors and verifies that admission alone cannot start Work.

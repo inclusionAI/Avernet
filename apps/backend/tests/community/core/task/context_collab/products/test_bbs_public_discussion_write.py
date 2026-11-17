@@ -18,7 +18,6 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 import pytest
-
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabNotFoundError,
     ContextCollabValidationError,
@@ -40,15 +39,11 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.collet i
     Collet,
     ColletState,
 )
-from tests.community.core.task.context_collab.creation_facts import (
-    creation_facts,
-    create_collet_request,
-)
-from agentclaw.community.core.task.context_collab.l4_context_primitives.task import Task
 from agentclaw.community.core.task.context_collab.l4_context_primitives.event_envelope import (
     EventRecord,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.task import (
+    Task,
     TaskStatus,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
@@ -71,6 +66,11 @@ from agentclaw.community.core.task.context_collab.products.bbs_public_discussion
 from agentclaw.community.core.task.context_collab.products.service_api import (
     CreateDiscussionCommand,
     ReplyDiscussionCommand,
+)
+
+from tests.community.core.task.context_collab.creation_facts import (
+    create_collet_request,
+    creation_facts,
 )
 from tests.community.core.task.context_collab.product_catalog import PRODUCT_CATALOG
 
@@ -111,7 +111,9 @@ class _FakeRepo:
             objective=request.objective,
             status=TaskStatus.CREATED.value,
             principal_ref=request.principal_ref,
-            executor_refs=((request.executor_ref,) if request.executor_ref is not None else ()),
+            executor_refs=(
+                (request.executor_ref,) if request.executor_ref is not None else ()
+            ),
             task_id="task_" + collab_context_id,
             collet_ref=collab_context_id,
             version=1,
@@ -125,7 +127,6 @@ class _FakeRepo:
             initiator_ref=request.initial_event.actor_ref,
             state=ColletState.ACTIVE,
             scope=request.space,
-            current_event_id=event_id,
             version=1,
         )
         initial_event = EventRecord(
@@ -185,7 +186,6 @@ class _FakeRepo:
         new_collet = dataclasses.replace(
             record.collet,
             version=record.collet.version + 1,
-            current_event_id=event_id,
         )
         self._status[collab_context_id] = ContextStatusRecord(
             collet=new_collet,

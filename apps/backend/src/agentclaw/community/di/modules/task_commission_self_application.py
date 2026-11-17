@@ -16,6 +16,9 @@ from agentclaw.community.core.task.context_collab.errors import (
 from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context import (
     ActorContext,
 )
+from agentclaw.community.core.task.context_collab.l4_context_primitives.participation import (
+    initial_executor_refs,
+)
 from agentclaw.community.core.task.context_collab.l4_context_primitives.participants import (
     ROLE_SELECTED_AGENT,
     RoleBinding,
@@ -28,7 +31,9 @@ from agentclaw.community.core.task.context_collab.l5_methods.open_profile import
     ApplicationState,
     ParticipationType,
 )
-from agentclaw.community.core.task.context_collab.l5_methods.single_profile import SingleSelection
+from agentclaw.community.core.task.context_collab.l5_methods.single_profile import (
+    SingleSelection,
+)
 from agentclaw.community.core.task.context_collab.l5_methods.operations.contracts import (
     GroupMethodOpsServiceProtocol,
     SingleSelectCommand,
@@ -79,7 +84,9 @@ from agentclaw.community.di.modules.task_commission_method_ops_adapter import (
     TaskCommissionOpenMethodAdapter,
 )
 
-from agentclaw.community.core.task.context_collab.l5_methods.method_composition import CompositionEdgeState
+from agentclaw.community.core.task.context_collab.l5_methods.method_composition import (
+    CompositionEdgeState,
+)
 from agentclaw.community.core.task.context_collab.l6_products.topology import (
     product_method_binding_ref,
     product_relation_id,
@@ -154,7 +161,8 @@ class TaskCommissionSelfApplicationAdapter(TaskCommissionOpenMethodAdapter):
                 method_kind=creation_method_kind(record.creation_facts),
                 profile_ref=creation_profile_ref(record.creation_facts),
                 catalog=self._product_catalog,
-            ) != profile
+            )
+            != profile
             or command.method_binding_ref
             != product_method_binding_ref(command.collab_context_id, profile, "Open")
         ):
@@ -175,7 +183,12 @@ class TaskCommissionSelfApplicationAdapter(TaskCommissionOpenMethodAdapter):
 
     @staticmethod
     def _designated(record: ContextStatusRecord, context: ActorContext) -> bool:
-        executor = record.task.executor_ref if record.task is not None else None
+        refs = (
+            record.task.executor_refs
+            if record.task is not None
+            else initial_executor_refs(record.events)
+        )
+        executor = refs[0] if len(refs) == 1 else None
         return (
             executor is not None
             and context.actor.principal_type == "bot"
@@ -308,8 +321,10 @@ class TaskCommissionSelfApplicationAdapter(TaskCommissionOpenMethodAdapter):
                 method_kind=creation_method_kind(record.creation_facts),
                 profile_ref=creation_profile_ref(record.creation_facts),
                 catalog=self._product_catalog,
-            ) != profile
-            or binding_id != product_method_binding_ref(command.collab_context_id, profile, "Open")
+            )
+            != profile
+            or binding_id
+            != product_method_binding_ref(command.collab_context_id, profile, "Open")
             or binding is None
             or binding.state is not BindingState.ACTIVE
             or binding.method_names != ("Open",)
@@ -321,11 +336,14 @@ class TaskCommissionSelfApplicationAdapter(TaskCommissionOpenMethodAdapter):
             or application.accountable_principal_ref != command.accountable_principal_id
             or opportunity is None
             or opportunity.scope_ref != command.collab_context_id
-            or opportunity.participation_type is not ParticipationType.COLLET_PARTICIPANT
+            or opportunity.participation_type
+            is not ParticipationType.COLLET_PARTICIPANT
             or opportunity.admission_policy_refs != (_POLICY_REF,)
             or opportunity.capacity != policy.capacity
         ):
-            raise ContextCollabValidationError("application unavailable for task review")
+            raise ContextCollabValidationError(
+                "application unavailable for task review"
+            )
         method_refs = self._require_active_methods(command.collab_context_id, profile)
         expected_roles = self._selected_agent_role_refs(
             command.collab_context_id, profile
@@ -410,12 +428,15 @@ class TaskCommissionSelfApplicationAdapter(TaskCommissionOpenMethodAdapter):
                 axes, product_relation_id(collet_id, relation), collet_id
             )
             if (
-                edge is None or edge.state is not CompositionEdgeState.ACTIVE
+                edge is None
+                or edge.state is not CompositionEdgeState.ACTIVE
                 or edge.parent_binding != refs[relation.parent_method]
                 or edge.child_binding != refs[relation.child_method]
                 or edge.relation_kind != relation.relation
             ):
-                raise ContextCollabValidationError("execution requires the active product Method composition")
+                raise ContextCollabValidationError(
+                    "execution requires the active product Method composition"
+                )
         return refs
 
     @staticmethod
@@ -450,11 +471,15 @@ class TaskCommissionSelfApplicationAdapter(TaskCommissionOpenMethodAdapter):
         axes, binding_id = current_axes(), method_refs["Open"]
         applications = {
             app.application_id: app
-            for app in self._store.list_applications(axes, binding_id, collab_context_id)
+            for app in self._store.list_applications(
+                axes, binding_id, collab_context_id
+            )
         }
         participants = {
             participant.participant_binding_id: participant
-            for participant in self._store.list_participant_bindings(axes, binding_id, collab_context_id)
+            for participant in self._store.list_participant_bindings(
+                axes, binding_id, collab_context_id
+            )
         }
         expected_roles = self._selected_agent_role_refs(collab_context_id, profile)
         for decision in self._store.list_decisions(axes, binding_id, collab_context_id):
@@ -478,7 +503,8 @@ class TaskCommissionSelfApplicationAdapter(TaskCommissionOpenMethodAdapter):
             ):
                 continue
             admitted_participants = {
-                ref for ref in decision.resulting_binding_refs
+                ref
+                for ref in decision.resulting_binding_refs
                 if ref in participants
                 and participants[ref].scope_ref == collab_context_id
                 and participants[ref].participant_ref == context.actor.principal_id
@@ -488,7 +514,10 @@ class TaskCommissionSelfApplicationAdapter(TaskCommissionOpenMethodAdapter):
             if admitted_participants:
                 if "Single" in method_refs:
                     selection = self._store.active_selection(
-                        axes, method_refs["Single"], collab_context_id, collab_context_id
+                        axes,
+                        method_refs["Single"],
+                        collab_context_id,
+                        collab_context_id,
                     )
                     if (
                         selection is None

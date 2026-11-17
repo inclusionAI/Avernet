@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from typing import Self
 
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabValidationError,
@@ -30,6 +31,8 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.particip
     role_binding_ref,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.participation import (
+    COLLET_BINDING_EVENT,
+    initial_executor_refs,
     initial_participation,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.records import (
@@ -87,7 +90,13 @@ class _RecordView:
 
     @property
     def designated_executor_id(self) -> str | None:
-        executor = self.task.executor_ref if self.task is not None else None
+        executor = (
+            self.task.executor_ref
+            if self.task is not None
+            else AgentRef.from_dict(self.creation_facts["executor_ref"])
+            if self.creation_facts.get("executor_ref") is not None
+            else None
+        )
         return executor.agent_id if executor is not None else None
 
     @property
@@ -121,6 +130,10 @@ class ContextStatusRecord(_RecordView):
     tasks: tuple[Task, ...] = ()
     product_instance: ProductInstance | None = None
 
+    def with_task(self, task: Task) -> Self:
+        """Uncommitted Work intent for policy validation, preserving all other facts."""
+        return replace(self, task=task, tasks=(task,))
+
     @property
     def participants(self):
         return initial_participation(self.events).participants
@@ -153,14 +166,10 @@ class ProductRecordDecoder:
         self, state: PrimitiveReadState, creation_facts_json: str
     ) -> ContextStatusRecord:
         facts = decode_creation_facts(json.loads(creation_facts_json))
-        if facts.get("product_instance") is not None and state.task is None:
-            raise ContextCollabValidationError(
-                "ProductInstance requires its L4 root Task"
-            )
         instance = decode_product_instance(
             facts,
             collet_id=state.collet.collet_id,
-            root_task_id=state.task.task_id if state.task is not None else "",
+            root_task_id=state.task.task_id if state.task is not None else None,
             event_id=state.events[0].event_id if state.events else "",
             principal_ref=state.collet.initiator_ref,
             executor_ref=AgentRef.from_dict(facts["executor_ref"])
@@ -174,6 +183,23 @@ class ProductRecordDecoder:
             raise ContextCollabValidationError(
                 "ProductInstance creation evidence does not match initial event"
             )
+        if instance is not None and facts["objective"] is None:
+            evidence = state.events[0]
+            expected_executors = (
+                (AgentRef.from_dict(facts["executor_ref"]),)
+                if facts["executor_ref"] is not None
+                else ()
+            )
+            if (
+                evidence.event_kind != COLLET_BINDING_EVENT
+                or evidence.primitive_type != "Collet"
+                or evidence.task_ref is not None
+                or evidence.task_version_after is not None
+                or initial_executor_refs(state.events) != expected_executors
+            ):
+                raise ContextCollabValidationError(
+                    "ProductInstance does not match initial Collet binding evidence"
+                )
         participation = initial_participation(state.events)
         if (
             instance is not None

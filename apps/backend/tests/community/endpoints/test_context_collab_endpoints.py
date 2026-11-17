@@ -13,22 +13,33 @@ Route prefix is asserted to be the spec §6.1 exact form — singular ``task``.
 from contextlib import contextmanager
 from types import SimpleNamespace
 
-import pytest
-from fastapi import HTTPException
-from fastapi.testclient import TestClient
-from injector import Injector
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
-
-from agentclaw.community.adapters.http.auth.dependencies import get_current_user
-from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
-from agentclaw.community.core.base import Base
-
 # Side-effect import: registers the 2 context collab models on Base.metadata.
 import agentclaw.community.core.task.context_collab.persistence.models  # noqa: F401
+
+# Match the real app's DI-first bootstrap (auth-first isolated imports are not
+# a supported baseline; see knowledge_management/conftest.py for the precedent).
+import agentclaw.community.di  # noqa: E402,F401
+import pytest
+from agentclaw.community.adapters.http.auth.dependencies import get_current_user
+from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
+from agentclaw.community.api.task.context_collab_service import (
+    ContextCollabServiceProtocol,
+)
+from agentclaw.community.core.base import Base
+from agentclaw.community.core.task.context_collab.errors import (
+    ContextCollabNotFoundError,
+    ContextCollabValidationError,
+    ContextCollabVersionConflict,
+)
 from agentclaw.community.core.task.context_collab.g1_secure_govern.authorization import (
     StructuralContextCollabAuthorizer,
+)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
+    Collet,
+    ColletState,
+)
+from agentclaw.community.core.task.context_collab.l6_products.operations.collaboration_creation import (
+    ContextCollabService,
 )
 from agentclaw.community.core.task.context_collab.persistence.method_store import (
     InMemoryMethodStore,
@@ -36,26 +47,19 @@ from agentclaw.community.core.task.context_collab.persistence.method_store impor
 from agentclaw.community.core.task.context_collab.persistence.repository import (
     ContextCollabRepository,
 )
-from agentclaw.community.core.task.context_collab.l6_products.operations.collaboration_creation import (
-    ContextCollabService,
-)
-from agentclaw.community.api.task.context_collab_service import (
-    ContextCollabServiceProtocol,
-)
-from agentclaw.community.core.task.context_collab.errors import (
-    ContextCollabNotFoundError,
-    ContextCollabValidationError,
-    ContextCollabVersionConflict,
-)
-from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
-    Collet,
-    ColletState,
-)
 from agentclaw.community.core.task.context_collab.service_api import (
     ContextCollabStatusProjection,
     EventAcceptedResult,
     TaskProgressProjectionDTO,
 )
+from fastapi import HTTPException
+from fastapi.testclient import TestClient
+from injector import Injector
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
+from tests.community.core.task.context_collab.product_catalog import PRODUCT_CATALOG
 from tests.community.framework import (
     CaseInput,
     ExpectError,
@@ -63,11 +67,6 @@ from tests.community.framework import (
     bind_overrides,
     endpoint_test,
 )
-
-# Match the real app's DI-first bootstrap (auth-first isolated imports are not
-# a supported baseline; see knowledge_management/conftest.py for the precedent).
-import agentclaw.community.di  # noqa: E402,F401
-from tests.community.core.task.context_collab.product_catalog import PRODUCT_CATALOG
 
 PREFIX = "/api/v1/collaboration/task"  # spec §6.1: singular "task"
 
@@ -107,6 +106,10 @@ class RecordingContextCollabService:
     def append_event(self, collab_context_id, command, context):
         self.calls.append("append_event")
         return self._inner.append_event(collab_context_id, command, context)
+
+    def get_events(self, collab_context_id, *, context):
+        self.calls.append("get_events")
+        return self._inner.get_events(collab_context_id, context=context)
 
     def get_status(self, collab_context_id, *, trunk_events, context):
         self.calls.append("get_status")
@@ -236,16 +239,19 @@ def test_create_happy_path_envelope_and_snapshot(client_world):
     assert current_event["parent_event"] is None
     assert current_event["event_kind"] == "task.created"
     assert current_event["primitive_type"] == "Task"
-    assert client_world.service.calls == ["create_collaboration"]
+    assert client_world.service.calls == ["create_collaboration", "get_events"]
 
 
 def test_create_without_executor_keeps_canonical_method_receipt(client_world):
-    created = create_context(client_world, {
-        "product_kind": "public_discussion",
-        "workflow_kind": "forum_public_discussion",
-        "method_kind": "Open + Group",
-        "executor_ref": None,
-    })
+    created = create_context(
+        client_world,
+        {
+            "product_kind": "public_discussion",
+            "workflow_kind": "forum_public_discussion",
+            "method_kind": "Open + Group",
+            "executor_ref": None,
+        },
+    )
     snapshot = created["current_snapshot"]
     assert snapshot["method_kind"] == "Open + Group"
     assert snapshot["executor_ref"] is None
@@ -257,7 +263,7 @@ def test_create_without_executor_keeps_canonical_method_receipt(client_world):
         "blocked_count": 0,
         "current_event_id": created["current_event"]["event_id"],
     }
-    assert client_world.service.calls == ["create_collaboration"]
+    assert client_world.service.calls == ["create_collaboration", "get_events"]
 
 
 def test_create_route_path_is_singular_task(client_world):
@@ -507,7 +513,6 @@ def _seed_create_happy(world) -> None:
             initiator_ref=_command.principal_ref,
             state=ColletState.ACTIVE,
             scope=_command.to_space,
-            current_event_id="evt_case_001",
             version=1,
         )
 

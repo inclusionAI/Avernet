@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabValidationError,
@@ -51,7 +51,7 @@ class ProductInstance:
 
     instance_id: str
     collet_ref: str
-    root_task_ref: str
+    root_task_ref: str | None
     profile_ref: VersionedProfileRef
     workflow_ref: VersionedProfileRef | None
     domain_ref: VersionedProfileRef | None
@@ -77,7 +77,9 @@ class ProductInstance:
         try:
             data = {"participant_scope": ParticipantScope().to_dict(), **data}
             root_ref = data["root_task_ref"]
-            if not isinstance(root_ref, str) or not root_ref.strip():
+            if root_ref is not None and (
+                not isinstance(root_ref, str) or not root_ref.strip()
+            ):
                 raise ValueError("root_task_ref must be a non-empty Task reference")
             result = data["negotiation"]
             if type(result["accepted"]) is not bool:
@@ -157,14 +159,14 @@ def _instance(
     *,
     facts: dict,
     collet_id: str,
-    root_task_id: str,
+    root_task_id: str | None,
     event_id: str,
     principal_ref: PrincipalRef,
     executor_ref: AgentRef | None,
     profile: ProductProfileDefinition,
     selection: NegotiationResult,
 ) -> ProductInstance:
-    if not root_task_id or root_task_id == collet_id:
+    if root_task_id is not None and (not root_task_id or root_task_id == collet_id):
         raise ContextCollabValidationError(
             "ProductInstance requires an independent root Task"
         )
@@ -196,7 +198,7 @@ def instantiate_product(
     *,
     facts: dict,
     collet_id: str,
-    root_task_id: str,
+    root_task_id: str | None,
     event_id: str,
     principal_ref: PrincipalRef,
     executor_ref: AgentRef | None,
@@ -232,7 +234,7 @@ def decode_product_instance(
     facts: dict,
     *,
     collet_id: str,
-    root_task_id: str,
+    root_task_id: str | None,
     event_id: str,
     principal_ref: PrincipalRef,
     executor_ref: AgentRef | None,
@@ -254,7 +256,15 @@ def decode_product_instance(
         )
     # Historical JSON predates the explicit root reference. Resolve it only
     # from the authoritative L4 snapshot; do not rewrite the stored record.
+    # A pre-start installation stores null, not a placeholder Task identity.
+    # Once Work exists, resolve that live reference from the authoritative L4 row.
     instance = ProductInstance.from_dict({"root_task_ref": root_task_id, **raw})
+    if instance.root_task_ref is None and root_task_id is not None:
+        if normalized["objective"] is not None:
+            raise ContextCollabValidationError(
+                "ProductInstance is missing its root Task reference"
+            )
+        instance = replace(instance, root_task_ref=root_task_id)
     profile = _resolve_profile(
         normalized,
         principal_ref=principal_ref,

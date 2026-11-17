@@ -5,8 +5,6 @@ from dataclasses import replace
 from datetime import datetime, timezone
 
 import pytest
-from sqlalchemy import event as sql_event
-
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabValidationError,
     ContextCollabVersionConflict,
@@ -24,9 +22,8 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.persiste
 from agentclaw.community.core.task.context_collab.l4_context_primitives.task import (
     TaskUpdate,
 )
-from tests.community.core.task.context_collab.creation_facts import (
-    create_collet_request,
-    creation_facts,
+from agentclaw.community.core.task.context_collab.l6_products.operations.collaboration_creation import (
+    ContextCollabService,
 )
 from agentclaw.community.core.task.context_collab.persistence.method_store import (
     InMemoryMethodStore,
@@ -39,15 +36,16 @@ from agentclaw.community.core.task.context_collab.persistence.models import (
 from agentclaw.community.core.task.context_collab.persistence.repository import (
     AppendEventRecordRequest,
     ContextCollabRepository,
-    CreateColletRecordRequest,
     InitialEventDraft,
 )
 from agentclaw.community.core.task.context_collab.service_api import (
     ActorContext,
     EventAppendCommand,
 )
-from agentclaw.community.core.task.context_collab.l6_products.operations.collaboration_creation import (
-    ContextCollabService,
+from sqlalchemy import event as sql_event
+from tests.community.core.task.context_collab.creation_facts import (
+    create_collet_request,
+    creation_facts,
 )
 from tests.community.core.task.context_collab.product_catalog import PRODUCT_CATALOG
 
@@ -90,7 +88,7 @@ def _message(repository, context_id, **overrides):
         event_kind="user_interaction.posted",
         primitive_type="Message",
         actor_ref=OWNER,
-        parent_event=record.collet.current_event_id,
+        parent_event=record.events[-1].event_id if record.events else None,
         visibility="public",
         payload={"message_kind": "user_interaction", "content": "补充说明"},
     )
@@ -115,7 +113,7 @@ def _work(
             event_kind=kind,
             primitive_type="Task",
             actor_ref=OWNER,
-            parent_event=record.collet.current_event_id,
+            parent_event=record.events[-1].event_id if record.events else None,
             visibility="public",
             payload=payload or {},
             task_update=update
@@ -239,7 +237,7 @@ def test_g4_uses_task_ignores_retired_snapshot_and_counts_work_items(
                 event_kind=kind,
                 primitive_type="Task",
                 actor_ref=actor.actor,
-                parent_event=current.collet.current_event_id,
+                parent_event=current.events[-1].event_id if current.events else None,
                 visibility="public",
                 payload=payload or {},
             ),

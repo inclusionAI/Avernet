@@ -67,6 +67,7 @@ from tests.community.core.task.context_collab.products.task_commission_e2e_suppo
 )
 from tests.community.core.task.context_collab.products.test_task_commission_end_to_end import (
     HUMAN,
+    OBJECTIVE,
     SPACE,
     _admit_application_agent,
     _create_commission_collet,
@@ -335,13 +336,18 @@ def test_admission_and_unrelated_selection_cannot_authorize_work(
         command,
         bot.actor_context if invalid == "bot_selector" else HUMAN,
     )
+    repository = injector.get(ContextCollabRepositoryProtocol)
+    before = repository.get_current_status(collet.collet_id)
+    assert before.task is None
     with pytest.raises(ContextCollabValidationError, match="Single selection"):
         injector.get(ContextServiceProtocol).start(
             collet.collet_id,
-            WorkStartCommand(expected_version=collet.version),
+            WorkStartCommand(
+                expected_version=before.collet.version, objective=OBJECTIVE
+            ),
             bot.actor_context,
         )
-    assert service.detail_task(collet.collet_id).status == "created"
+    assert repository.get_current_status(collet.collet_id) == before
 
 
 def test_releasing_selection_revokes_execution_but_preserves_instance(admitted_runtime):
@@ -357,14 +363,17 @@ def test_releasing_selection_revokes_execution_but_preserves_instance(admitted_r
         MethodStateChangeCommand(),
         HUMAN,
     )
+    repository = injector.get(ContextCollabRepositoryProtocol)
+    before = repository.get_current_status(collet.collet_id)
+    assert before.task is None
     with pytest.raises(ContextCollabValidationError, match="Single selection"):
-        service.start_task(TaskAdvanceCommand(collet.collet_id), bot.actor_context)
-    assert (
-        injector.get(ContextCollabRepositoryProtocol)
-        .get_current_status(collet.collet_id)
-        .product_instance
-        == instance
-    )
+        injector.get(ContextServiceProtocol).start(
+            collet.collet_id,
+            WorkStartCommand(before.collet.version, objective=OBJECTIVE),
+            bot.actor_context,
+        )
+    assert repository.get_current_status(collet.collet_id) == before
+    assert before.product_instance == instance
 
 
 @pytest.mark.parametrize("method_index, method", [(0, "Open"), (1, "Single")])
@@ -425,7 +434,7 @@ def test_instance_keeps_compact_exact_method_references_not_contract_copies(
     ]
 
 
-@pytest.mark.parametrize("root_ref", ["another_task", "", None])
+@pytest.mark.parametrize("root_ref", ["another_task", ""])
 def test_wrong_persisted_root_task_reference_fails_closed(
     instance_runtime, db, root_ref
 ):
@@ -446,9 +455,21 @@ def test_wrong_persisted_root_task_reference_fails_closed(
 
 
 def test_historical_instance_without_root_ref_uses_l4_identity_without_rewriting(
-    instance_runtime, db
+    admitted_runtime, db
 ):
-    _, _, injector, collet, instance = instance_runtime
+    _, bot, injector, collet, instance, decision = admitted_runtime
+    store, axes = injector.get(MethodStoreProtocol), current_axes()
+    _select_admitted_agent(injector, store, axes, instance, decision)
+    repository = injector.get(ContextCollabRepositoryProtocol)
+    injector.get(ContextServiceProtocol).start(
+        collet.collet_id,
+        WorkStartCommand(
+            repository.get_current_status(collet.collet_id).collet.version,
+            objective=OBJECTIVE,
+        ),
+        bot.actor_context,
+    )
+    instance = repository.get_current_status(collet.collet_id).product_instance
     with db.orm_session() as session:
         row = (
             session.query(ContextCollabColletModel)

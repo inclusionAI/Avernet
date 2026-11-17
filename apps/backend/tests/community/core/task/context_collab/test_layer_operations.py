@@ -4,7 +4,6 @@ from dataclasses import dataclass, replace
 from importlib import import_module
 
 import pytest
-
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabNotFoundError,
     ContextCollabValidationError,
@@ -113,7 +112,6 @@ class Reader:
                 OWNER.actor,
                 ColletState.ACTIVE,
                 SpaceRef("space", "test"),
-                None,
                 11,
             ),
             make_task(),

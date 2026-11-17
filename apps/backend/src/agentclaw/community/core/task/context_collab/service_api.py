@@ -21,6 +21,9 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.context_
     EventAppendCommand as EventAppendCommand,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.context_service_protocol import (
+    TaskCreateCommand as TaskCreateCommand,
+)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.context_service_protocol import (
     TaskProgressProjectionDTO as TaskProgressProjectionDTO,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.context_service_protocol import (

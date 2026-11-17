@@ -48,7 +48,7 @@ def creation_payload(
     *,
     method_kind: str,
     executor_ref: AgentRef | None,
-    objective: str,
+    objective: str | None,
     resource_refs: tuple[ResourceRef, ...] | list[ResourceRef],
     product_kind: str | None,
     workflow_kind: str | None,
@@ -63,7 +63,10 @@ def creation_payload(
         "product_kind": product_kind,
         "workflow_kind": workflow_kind,
         "product_profile_ref": (
-            {"profile_id": product_profile_ref.profile_id, "version": product_profile_ref.version}
+            {
+                "profile_id": product_profile_ref.profile_id,
+                "version": product_profile_ref.version,
+            }
             if product_profile_ref is not None
             else None
         ),
@@ -76,17 +79,23 @@ def decode_creation_facts(data: dict[str, Any]) -> dict:
         raise ContextCollabValidationError(
             f"creation facts must be an object, got: {data!r}"
         )
+    if data == {}:
+        return {}  # Bare L4 Collet: no Work or composition facts.
     unknown = set(data) - _CREATION_FACT_KEYS
     if unknown:
         raise ContextCollabValidationError(
             f"creation facts have unknown keys: {sorted(unknown)}"
         )
     objective = data.get("objective")
-    if not isinstance(objective, str) or not objective.strip():
+    if objective is not None and (
+        not isinstance(objective, str) or not objective.strip()
+    ):
         raise ContextCollabValidationError("creation facts objective must be non-empty")
     if "executor_refs" in data:
-        if set(data) != {"objective", "executor_refs"} or not isinstance(
-            data["executor_refs"], list
+        if (
+            objective is None
+            or set(data) != {"objective", "executor_refs"}
+            or not isinstance(data["executor_refs"], list)
         ):
             raise ContextCollabValidationError(
                 "invalid method-independent L4 creation facts"
@@ -104,7 +113,9 @@ def decode_creation_facts(data: dict[str, Any]) -> dict:
         }
     raw_resources = data.get("resource_refs")
     if not isinstance(raw_resources, list):
-        raise ContextCollabValidationError("creation facts resource_refs must be a list")
+        raise ContextCollabValidationError(
+            "creation facts resource_refs must be a list"
+        )
     resources = [ResourceRef.from_dict(item) for item in raw_resources]
     method_kind = MethodKind.from_wire(data.get("method_kind")).value
     raw_executor = data.get("executor_ref")
@@ -127,7 +138,10 @@ def decode_creation_facts(data: dict[str, Any]) -> dict:
     )
     product_kind = data.get("product_kind")
     workflow_kind = data.get("workflow_kind")
-    for key, value in (("product_kind", product_kind), ("workflow_kind", workflow_kind)):
+    for key, value in (
+        ("product_kind", product_kind),
+        ("workflow_kind", workflow_kind),
+    ):
         if value is not None and (not isinstance(value, str) or not value.strip()):
             raise ContextCollabValidationError(
                 f"creation facts {key} must be a non-empty string or null"
@@ -135,6 +149,10 @@ def decode_creation_facts(data: dict[str, Any]) -> dict:
     if profile_ref is not None and product_kind != profile_ref.profile_id:
         raise ContextCollabValidationError(
             "creation facts product_profile_ref does not match product_kind"
+        )
+    if objective is None and profile_ref is None:
+        raise ContextCollabValidationError(
+            "taskless product selection requires a pinned profile"
         )
     normalized = {
         "objective": objective,

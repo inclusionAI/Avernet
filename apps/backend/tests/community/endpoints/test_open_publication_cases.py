@@ -6,9 +6,6 @@ from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context
 from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
     PrincipalRef,
 )
-from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_resource_refs import (
-    SpaceRef,
-)
 from agentclaw.community.core.task.context_collab.l4_context_primitives.context_service_protocol import (
     ColletCreateCommand,
     ContextServiceProtocol,
@@ -24,10 +21,18 @@ from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime 
 from agentclaw.community.core.task.context_collab.persistence.method_store import (
     MethodStoreProtocol,
 )
-from tests.community.factories.access import make_staff_user
-from tests.community.framework import CaseInput, ExpectError, ExpectSuccess, endpoint_test
 
-_PATH = "/api/v1/collaboration/task/context_collab/{collab_context_id}/open/opportunities"
+from tests.community.factories.access import make_staff_user
+from tests.community.framework import (
+    CaseInput,
+    ExpectError,
+    ExpectSuccess,
+    endpoint_test,
+)
+
+_PATH = (
+    "/api/v1/collaboration/task/context_collab/{collab_context_id}/open/opportunities"
+)
 _OWNER = "u_open_publisher"
 _BINDING = "mb_open_publish_case"
 _BODY = {
@@ -45,9 +50,7 @@ def _seed_publication(world):
     actor = ActorContext(PrincipalRef("human", _OWNER), "api")
     collet = world.get(ContextServiceProtocol).create_collet(
         ColletCreateCommand(
-            to_space=SpaceRef("space_publication", "prod"),
             initiator_ref=actor.actor,
-            objective="Publish a contribution opportunity",
         ),
         actor,
     )
@@ -56,7 +59,8 @@ def _seed_publication(world):
     lifecycle.bind(
         collet.collet_id,
         BindMethodCommand(
-            method_kind="Open", method_binding_id=_BINDING,
+            method_kind="Open",
+            method_binding_id=_BINDING,
             parent_scope_ref="scope://nested",
         ),
         actor,
@@ -77,14 +81,20 @@ def _assert_publication(response, world):
 
 
 @endpoint_test(
-    method="POST", path=_PATH, scenario="binding_free_publish_ok",
+    method="POST",
+    path=_PATH,
+    scenario="binding_free_publish_ok",
     input=CaseInput(
-        path_params=_HAPPY_PARAMS, headers={"x-user-id": _OWNER}, json_body=_BODY,
+        path_params=_HAPPY_PARAMS,
+        headers={"x-user-id": _OWNER},
+        json_body=_BODY,
     ),
     seed=_seed_publication,
-    expect=ExpectSuccess(json_contains={
-        "data": {"accepted": True, "state": "OPEN", "method_binding_id": _BINDING},
-    }),
+    expect=ExpectSuccess(
+        json_contains={
+            "data": {"accepted": True, "state": "OPEN", "method_binding_id": _BINDING},
+        }
+    ),
     extra_assertions=(_assert_publication,),
 )
 def binding_free_publish_ok():
@@ -92,10 +102,13 @@ def binding_free_publish_ok():
 
 
 @endpoint_test(
-    method="POST", path=_PATH, scenario="binding_free_publish_missing_open_binding",
+    method="POST",
+    path=_PATH,
+    scenario="binding_free_publish_missing_open_binding",
     input=CaseInput(
         path_params={"collab_context_id": "missing_collet"},
-        headers={"x-user-id": _OWNER}, json_body=_BODY,
+        headers={"x-user-id": _OWNER},
+        json_body=_BODY,
     ),
     seed=lambda world: make_staff_user(world, user_id=_OWNER),
     expect=ExpectError(status=404),

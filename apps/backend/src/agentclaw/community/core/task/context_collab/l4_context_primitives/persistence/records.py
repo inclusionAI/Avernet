@@ -9,8 +9,8 @@ a second lookup. Creation never invokes this extension.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
-from typing import Protocol, TypeVar, runtime_checkable
+from dataclasses import dataclass, replace
+from typing import Protocol, Self, TypeVar, runtime_checkable
 
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabValidationError,
@@ -53,6 +53,11 @@ class InitialEventDraft:
 @dataclass
 class CreatedColletRecord:
     collet: Collet
+
+
+@dataclass
+class CreatedWorkRecord:
+    collet: Collet
     task: Task
     initial_event: EventRecord
 
@@ -71,6 +76,10 @@ class PrimitiveReadState:
     task: Task | None
     tasks: tuple[Task, ...]
     events: list[EventRecord]
+
+    def with_task(self, task: Task) -> Self:
+        """Uncommitted Work intent for policy validation, preserving all other facts."""
+        return replace(self, task=task, tasks=(task,))
 
     @property
     def participants(self):
@@ -108,6 +117,8 @@ class CollaborationRecordDecoder(Protocol[ReadStateT_co]):
 
 def decode_primitive_creation_facts(creation_facts_json: str) -> dict:
     facts = json.loads(creation_facts_json)
+    if facts == {}:
+        return {}  # A newly created Collet has no Work facts.
     if (
         not isinstance(facts, dict)
         or set(facts) != {"objective", "executor_refs"}

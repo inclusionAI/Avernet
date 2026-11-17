@@ -2,11 +2,14 @@
 
 No catalog, ProductInstance, Profile or Binding is imported here. Read codecs
 validate optional deployment metadata at the storage boundary; creation is
-self-contained and atomically writes exactly Collet, root Task and Event.
+self-contained and writes only Collet. Work.start can atomically create the
+root Task, both creation/start Events and their Collet revisions. Explicit
+existing-Work creation remains available for compatibility.
 """
 
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Generic, Sequence, TypeVar
@@ -33,9 +36,14 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.event_en
 from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.contracts import (
     AppendEventRecordRequest,
     ColletCreateCommand,
+    TaskCreateCommand,
+)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.participation import (
+    initial_executor_refs,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.creation import (
     build_created_collet,
+    build_created_work,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.models import (
     ContextCollabColletModel,
@@ -45,6 +53,7 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.persiste
 from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.records import (
     CollaborationRecordDecoder,
     CreatedColletRecord,
+    CreatedWorkRecord,
     InitialEventDraft,
     PrimitiveReadState,
     StoredEventAppend,
@@ -85,18 +94,96 @@ class ContextCollabRepository(Generic[StateT]):
     def create_l4_collet(
         self, command: ColletCreateCommand, actor_ref: PrincipalRef
     ) -> CreatedColletRecord:
-        facts = {
-            "objective": command.objective,
-            "executor_refs": [],
-        }
-        record = build_created_collet(
-            command, InitialEventDraft("task.created", "Task", actor_ref, facts)
-        )
-        self.persist_created(record, _dump_json(facts))
+        record = build_created_collet(command, actor_ref)
+        assert record.collet.metadata is not None
+        with self._transaction() as db:
+            db.add(
+                self._collet_row(
+                    record.collet, "{}", None, now=record.collet.metadata.created_at
+                )
+            )
+            db.flush()
         return record
 
+    def create_l4_task(
+        self,
+        collab_context_id: str,
+        command: TaskCreateCommand,
+        actor_ref: PrincipalRef,
+    ) -> CreatedWorkRecord:
+        """Create Work/evidence only on explicit request; all writes share one CAS."""
+        with self._transaction() as db:
+            row = (
+                db.query(ContextCollabColletModel)
+                .filter(
+                    ContextCollabColletModel.collab_context_id == collab_context_id,
+                    ContextCollabColletModel.env == get_current_env(),
+                )
+                .with_for_update()
+                .one_or_none()
+            )
+            if row is None:
+                raise ContextCollabNotFoundError(
+                    f"context {collab_context_id!r} not found"
+                )
+            ensure_expected_version(command.expected_version, int(row.context_version))
+            collet = _collet_from_row(row)
+            if actor_ref != collet.initiator_ref:
+                raise ContextCollabValidationError(
+                    "only the Collet initiator may create its Task"
+                )
+            existing, _ = load_tasks(db, row)
+            if existing is not None or json.loads(row.creation_facts) != {}:
+                raise ContextCollabValidationError(
+                    "root Task already exists or product is selected"
+                )
+            facts = {"objective": command.objective, "executor_refs": []}
+            now = datetime.now(timezone.utc)
+            updated_collet = replace(
+                collet,
+                version=collet.version + 1,
+                metadata=replace(collet.metadata, updated_at=now, updated_by=actor_ref)
+                if collet.metadata
+                else None,
+            )
+            record = build_created_work(
+                updated_collet,
+                command.principal_ref,
+                command.objective,
+                InitialEventDraft("task.created", "Task", actor_ref, facts),
+                command.completion_conditions,
+                occurred_at=now,
+            )
+            db.add(self._task_row(record.task, now=now))
+            db.add(self._event_row(record.initial_event, now=now))
+            count = (
+                db.query(ContextCollabColletModel)
+                .filter(
+                    ContextCollabColletModel.id == row.id,
+                    ContextCollabColletModel.context_version
+                    == command.expected_version,
+                    ContextCollabColletModel.root_task_ref.is_(None),
+                )
+                .update(
+                    {
+                        "root_task_ref": record.task.task_id,
+                        "creation_facts": _dump_json(facts),
+                        "context_version": updated_collet.version,
+                        "gmt_modified": now,
+                        "collet_metadata": _dump_json(updated_collet.metadata.to_dict())
+                        if updated_collet.metadata
+                        else None,
+                    },
+                    synchronize_session=False,
+                )
+            )
+            if count != 1:
+                raise ContextCollabVersionConflict("Task creation Collet CAS failed")
+            db.flush()
+            return record
+
     def persist_created(
-        self, record: CreatedColletRecord, creation_facts_json: str
+        self, record: CreatedWorkRecord, creation_facts_json: str
     ) -> None:
         """Store one creation atomically; opaque JSON is an SQL column, not policy.
 
@@ -168,10 +255,64 @@ class ContextCollabRepository(Generic[StateT]):
                 )
             context_version = request.expected_version + 1
             now = datetime.now(timezone.utc)
+            creating = request.task_creation
+            if creating is not None:
+                if (
+                    previous_task is not None
+                    or request.event_kind != "task.started"
+                    or request.primitive_type != "Task"
+                    or request.task_update is None
+                    or creating.collet_ref != collab_context_id
+                    or creating.parent_task_ref is not None
+                    or creating.status != "created"
+                    or creating.version != 1
+                    or creating.principal_ref != previous.initiator_ref
+                    or creating.created_event_ref != creating.last_event_ref
+                    or creating.legacy_context_version is not None
+                ):
+                    raise ContextCollabValidationError("invalid root Task start intent")
+                binding_rows = (
+                    db.query(ContextCollabEventModel)
+                    .filter(
+                        ContextCollabEventModel.collab_context_id == collab_context_id,
+                        ContextCollabEventModel.env == get_current_env(),
+                    )
+                    .order_by(ContextCollabEventModel.id.asc())
+                    .all()
+                )
+                if creating.executor_refs != initial_executor_refs(
+                    [_event_from_row(e) for e in binding_rows]
+                ):
+                    raise ContextCollabValidationError(
+                        "Task does not match initial executor bindings"
+                    )
+                previous_task = creating
+                creation_event = EventRecord(
+                    collab_context_id=collab_context_id,
+                    event_id=creating.created_event_ref,
+                    parent_event=None,
+                    event_kind="task.created",
+                    primitive_type="Task",
+                    actor_ref=request.actor_ref,
+                    visibility="public",
+                    payload={
+                        "objective": creating.objective,
+                        "executor_refs": [r.to_dict() for r in creating.executor_refs],
+                        "completion_conditions": list(creating.completion_conditions),
+                    },
+                    context_version_after=context_version,
+                    occurred_at=now,
+                    task_ref=creating.task_id,
+                    task_version_after=1,
+                )
+                db.add(self._event_row(creation_event, now=now))
+                context_version += 1
             event = EventRecord(
                 collab_context_id=collab_context_id,
                 event_id="evt_" + uuid4().hex,
-                parent_event=request.parent_event,
+                parent_event=creating.created_event_ref
+                if creating is not None
+                else request.parent_event,
                 event_kind=request.event_kind,
                 primitive_type=request.primitive_type,
                 actor_ref=request.actor_ref,
@@ -236,7 +377,6 @@ class ContextCollabRepository(Generic[StateT]):
                         raise ContextCollabVersionConflict("Task CAS failed")
             updated_collet = replace(
                 previous,
-                current_event_id=event.event_id,
                 version=context_version,
                 metadata=(
                     replace(
@@ -258,7 +398,6 @@ class ContextCollabRepository(Generic[StateT]):
                     {
                         "current_snapshot": None,
                         "root_task_ref": new_task.task_id if new_task else None,
-                        "current_event_id": event.event_id,
                         "context_version": context_version,
                         "collet_metadata": (
                             _dump_json(updated_collet.metadata.to_dict())
@@ -357,7 +496,9 @@ class ContextCollabRepository(Generic[StateT]):
         return ContextCollabColletModel(
             collab_context_id=collet.collet_id,
             actor_ref=_dump_json(collet.initiator_ref.to_dict()),
-            scope=_dump_json(collet.scope.to_dict()),
+            scope=_dump_json(collet.scope.to_dict())
+            if collet.scope is not None
+            else "null",
             collet_metadata=(
                 _dump_json(collet.metadata.to_dict())
                 if collet.metadata is not None
@@ -366,7 +507,6 @@ class ContextCollabRepository(Generic[StateT]):
             creation_facts=creation_facts_json,
             current_snapshot=None,
             root_task_ref=task.task_id if task else None,
-            current_event_id=collet.current_event_id,
             context_version=collet.version,
             env=get_current_env(),
             gmt_create=now,

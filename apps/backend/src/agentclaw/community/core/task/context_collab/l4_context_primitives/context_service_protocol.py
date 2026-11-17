@@ -18,8 +18,10 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.event_en
 from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.contracts import (
     ColletCreateCommand,
     EventAppendCommand,
+    TaskCreateCommand,
     WorkStartCommand,
 )
+from agentclaw.community.core.task.context_collab.l4_context_primitives.task import Task
 
 
 @dataclass
@@ -77,14 +79,24 @@ class ContextServiceProtocol(Protocol):
     def create_collet(
         self, command: ColletCreateCommand, context: ActorContext
     ) -> Collet:
-        """Authorize and atomically persist Collet, root Task and initial Event.
+        """Authorize and persist only Collet identity, description and audit.
 
-        Retain zero, one or many executors; never select a Profile/Method or
-        create Method/Role/ResourceBindings. No idempotency key; errors propagate.
-        Optional title/description describe the context, not the root Task.
-        New Collets include a schema version and complete UTC creation/update
-        audit from the authenticated actor. ETag is derived from the Collet
-        representation; version remains the aggregate revision used for CAS.
+        No Space, root Task, initial Work event, Profile or bindings are created.
+        No idempotency key; write failures propagate. New Collets carry complete
+        UTC audit from the authenticated actor and a derived representation ETag.
+        """
+        ...
+
+    @abstractmethod
+    def create_task(
+        self, collab_context_id: str, command: TaskCreateCommand, context: ActorContext
+    ) -> Task:
+        """Explicitly create this Collet's unassigned root Task and task.created.
+
+        Only the Collet initiator may create Work; principal_ref supplies Task
+        accountability independently. Fences Collet version, creates Task at
+        version 1 and advances Collet once. Duplicate roots fail without writes.
+        No product selection, method initialization or participant binding.
         """
         ...
 
@@ -94,8 +106,11 @@ class ContextServiceProtocol(Protocol):
     ) -> EventAcceptedResult:
         """L4 Work.start: start this Collet's root Task through G1/G4 and CAS.
 
-        Requires an existing Task and a matching lifecycle transition. Product
-        role/admission constraints still apply. The event actor is context.actor;
+        With no root Task, requires command.objective and creates/starts Work
+        atomically after G1/G4 validation, using actual initial executor bindings.
+        Existing Tasks retain identity, objective and completion conditions.
+        Requires a matching lifecycle transition; product role/admission checks
+        still apply. The event actor is context.actor;
         the result reports persisted Task status and Collet revision. No Agent
         dispatch, Activity creation, acceptance or Task completion is implied.
         Repeated/stale requests are rejected, not treated as successful no-ops.

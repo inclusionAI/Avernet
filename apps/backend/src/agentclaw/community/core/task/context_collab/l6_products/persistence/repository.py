@@ -33,18 +33,25 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.operatio
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.contracts import (
     ColletCreateCommand,
+    TaskCreateCommand,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.participation import (
     ParticipationFacts,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.creation import (
     build_created_collet,
+    build_created_work,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.models import (
     ContextCollabColletModel,
+    ContextCollabEventModel,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.participation import (
     bind_initial_participants,
+)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.records import (
+    CreatedColletRecord,
+    CreatedWorkRecord,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.repository import (
     ContextCollabRepository as L4ContextCollabRepository,
@@ -109,7 +116,14 @@ class ContextCollabRepositoryProtocol(Protocol):
 
     def create_l4_collet(
         self, command: ColletCreateCommand, actor_ref: PrincipalRef
-    ) -> ContextCreatedRecord: ...
+    ) -> CreatedColletRecord: ...
+
+    def create_l4_task(
+        self,
+        collab_context_id: str,
+        command: TaskCreateCommand,
+        actor_ref: PrincipalRef,
+    ) -> CreatedWorkRecord: ...
 
     def attach_product_instance(
         self,
@@ -123,9 +137,10 @@ class ContextCollabRepositoryProtocol(Protocol):
     ) -> None:
         """CAS-install L6 selection on an untouched, method-independent Collet.
 
-        Preserves the original creation Event; atomically binds participants/roles,
-        assigns the Task and appends binding evidence at revision 2. Selection
-        is immutable; repeats/conflicting selections fail closed.
+        Atomically binds participants/roles at Collet scope and writes binding
+        evidence without creating a Task. Existing untouched Work retains its
+        creation evidence and receives assignment. Selection is immutable;
+        repeats/conflicting selections fail closed.
         """
         ...
 
@@ -167,15 +182,17 @@ class ContextCollabRepository:
 
     def create_l4_collet(
         self, command: ColletCreateCommand, actor_ref: PrincipalRef
-    ) -> ContextCreatedRecord:
-        """Legacy rich result; actual creation is implemented entirely in L4."""
-        created = self._primitives.create_l4_collet(command, actor_ref)
-        return ContextCreatedRecord(
-            collet=created.collet,
-            task=created.task,
-            initial_event=created.initial_event,
-            creation_facts=dict(created.initial_event.payload),
-        )
+    ) -> CreatedColletRecord:
+        """Delegate pure Collet creation to L4; no Work or product selection."""
+        return self._primitives.create_l4_collet(command, actor_ref)
+
+    def create_l4_task(
+        self,
+        collab_context_id: str,
+        command: TaskCreateCommand,
+        actor_ref: PrincipalRef,
+    ) -> CreatedWorkRecord:
+        return self._primitives.create_l4_task(collab_context_id, command, actor_ref)
 
     def get_current_status(self, collab_context_id: str) -> ContextStatusRecord | None:
         return self._primitives.get_current_status(collab_context_id)
@@ -210,14 +227,19 @@ class ContextCollabRepository:
                 ),
             }
         )
-        record = build_created_collet(
-            ColletCreateCommand(
-                to_space=request.space,
-                initiator_ref=request.principal_ref,
-                objective=request.objective,
-            ),
+        collet = build_created_collet(
+            ColletCreateCommand(initiator_ref=request.principal_ref),
+            request.initial_event.actor_ref,
+        ).collet
+        collet = replace(collet, scope=request.space)
+        assert collet.metadata is not None
+        record = build_created_work(
+            collet,
+            request.principal_ref,
+            request.objective,
             request.initial_event,
             request.completion_conditions,
+            occurred_at=collet.metadata.created_at,
         )
         # Legacy application API only: historical combined creation is not L4 creation.
         record.task = replace(
@@ -296,15 +318,31 @@ class ContextCollabRepository:
             ensure_expected_version(expected_version, int(row.context_version))
             _, previous = _collet_from_row(row)
             task, _ = load_tasks(db, row)
-            if (
-                expected_version != 1
-                or task is None
-                or task.version != 1
-                or creation_method_kind(previous) is not None
-            ):
+            events = (
+                db.query(ContextCollabEventModel)
+                .filter(
+                    ContextCollabEventModel.collab_context_id == collab_context_id,
+                    ContextCollabEventModel.env == get_current_env(),
+                )
+                .all()
+            )
+            untouched = (
+                not events
+                if task is None
+                else len(events) == 1
+                and events[0].event_id == task.created_event_ref
+                and events[0].context_version_after == expected_version
+                and task.version == 1
+            )
+            if not untouched or creation_method_kind(previous) is not None:
                 raise ContextCollabValidationError(
                     "product instantiation requires an untouched L4 Collet"
                 )
+            principal = (
+                task.principal_ref
+                if task is not None
+                else _primitive_collet_from_row(row).initiator_ref
+            )
             stored = decode_creation_facts(
                 {**facts, "product_instance": instance.to_dict()}
             )
@@ -318,7 +356,7 @@ class ContextCollabRepository:
             )
             expected_participation = product_participation(
                 profile,
-                task.principal_ref,
+                principal,
                 tuple(
                     p.agent_ref
                     for p in participation.participants
@@ -331,7 +369,7 @@ class ContextCollabRepository:
                     "initial participation does not match the Profile"
                 )
             if actor_ref not in {
-                task.principal_ref,
+                principal,
                 _primitive_collet_from_row(row).initiator_ref,
             }:
                 raise ContextCollabValidationError(
@@ -339,9 +377,17 @@ class ContextCollabRepository:
                 )
             if (
                 instance.collet_ref != collab_context_id
-                or instance.creation_event_ref != task.created_event_ref
-                or stored["objective"] != task.objective
-                or task.executor_refs
+                or instance.root_task_ref
+                != (task.task_id if task is not None else None)
+                or (
+                    task is not None
+                    and (
+                        instance.creation_event_ref != task.created_event_ref
+                        or stored["objective"] != task.objective
+                        or task.executor_refs
+                    )
+                )
+                or (task is None and stored["objective"] is not None)
             ):
                 raise ContextCollabValidationError(
                     "product selection does not match L4 creation"
@@ -349,9 +395,11 @@ class ContextCollabRepository:
             decoded = decode_product_instance(
                 stored,
                 collet_id=collab_context_id,
-                root_task_id=task.task_id,
-                event_id=task.created_event_ref,
-                principal_ref=task.principal_ref,
+                root_task_id=task.task_id if task is not None else None,
+                event_id=task.created_event_ref
+                if task is not None
+                else instance.creation_event_ref,
+                principal_ref=principal,
                 executor_ref=executor,
                 catalog=self._product_catalog,
             )
@@ -373,7 +421,13 @@ class ContextCollabRepository:
             if updated != 1:
                 raise ContextCollabVersionConflict("product selection CAS failed")
             bind_initial_participants(
-                db, row, task, participation, (executor,) if executor else (), actor_ref
+                db,
+                row,
+                task,
+                participation,
+                (executor,) if executor else (),
+                actor_ref,
+                binding_event_id=instance.creation_event_ref if task is None else None,
             )
             db.flush()
 

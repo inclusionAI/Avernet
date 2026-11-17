@@ -54,12 +54,12 @@ def _collet_from_row(
                 f"collaboration context {row.collab_context_id!r} has invalid "
                 f"collet_metadata: {error}"
             ) from error
+    scope = json.loads(row.scope)
     collet = Collet(
         collet_id=row.collab_context_id,
         initiator_ref=PrincipalRef.from_dict(json.loads(row.actor_ref)),
         state=ColletState.ACTIVE,
-        scope=SpaceRef.from_dict(json.loads(row.scope)),
-        current_event_id=row.current_event_id,
+        scope=SpaceRef.from_dict(scope) if scope is not None else None,
         version=int(row.context_version),
         metadata=metadata,
     )

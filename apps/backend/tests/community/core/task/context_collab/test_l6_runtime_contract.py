@@ -23,6 +23,7 @@ from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_reso
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.contracts import (
     ColletCreateCommand,
+    TaskCreateCommand,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.operations.open.service import (
     OpenMethodService,
@@ -146,13 +147,9 @@ def _services(db, dispatch_port=None, *, catalog=LEGACY_PRODUCT_CATALOG):
 
 
 def _create_collet(repo):
-    return repo.create_l4_collet(
-        ColletCreateCommand(
-            to_space=SPACE,
-            initiator_ref=OWNER,
-            objective="deliver",
-        ),
-        OWNER,
+    collet = repo.create_l4_collet(ColletCreateCommand(OWNER), OWNER).collet
+    return repo.create_l4_task(
+        collet.collet_id, TaskCreateCommand(collet.version, OWNER, "deliver"), OWNER
     ).collet
 
 
@@ -273,7 +270,7 @@ def test_generic_message_is_nontransition_but_stale_control_is_conflict(db):
     repo, store, service, _ = _services(db)
     created = _create_collet(repo)
     _instantiate(repo, store, created)
-    started = _append(service, created.collet_id, 2, actor=BOT)
+    started = _append(service, created.collet_id, 3, actor=BOT)
     message = _append(
         service,
         created.collet_id,
@@ -302,7 +299,7 @@ def test_generic_control_cannot_bypass_product_shape(db, overrides):
     created = _create_collet(repo)
     _instantiate(repo, store, created)
     with pytest.raises(ContextCollabValidationError):
-        _append(service, created.collet_id, 2, actor=BOT, **overrides)
+        _append(service, created.collet_id, 3, actor=BOT, **overrides)
     assert _counts(db) == (1, 2)
 
 
@@ -314,7 +311,7 @@ def test_pinned_l4_roles_use_typed_identity_not_just_same_id(db, impostor):
     created = _create_collet(repo)
     _instantiate(repo, store, created)
     with pytest.raises(ContextCollabValidationError, match="only the principal"):
-        _append(service, created.collet_id, 2, actor=impostor)
+        _append(service, created.collet_id, 3, actor=impostor)
     assert _counts(db) == (1, 2)
 
 
@@ -327,7 +324,10 @@ def test_pinned_instance_round_trip_and_heal_do_not_renegotiate(db, monkeypatch)
     assert instance.profile_ref.version == 1
     assert instance.workflow_ref is None
     assert instance.task_contract_ref == STANDARD_TASK_CONTRACT_REF
-    assert instance.creation_event_ref == created.current_event_id
+    assert (
+        instance.creation_event_ref
+        == repo.get_current_status(created.collet_id).task.created_event_ref
+    )
     binding = store.get_binding(
         current_axes(), instance.method_binding_refs[0], created.collet_id
     )
@@ -443,7 +443,7 @@ def test_unprofiled_generic_context_keeps_legacy_wire_contract(db):
 
 
 def test_bbs_generic_cannot_reply_to_task_skeleton(db):
-    _, _, service, _ = _services(db)
+    repo, _, service, _ = _services(db)
     created = service.create_collaboration(
         _command(
             product_kind="bbs_public_discussion",
@@ -462,7 +462,9 @@ def test_bbs_generic_cannot_reply_to_task_skeleton(db):
             "user_interaction.posted",
             primitive_type="Message",
             payload={"content": "reply"},
-            parent_event=created.current_event_id,
+            parent_event=repo.get_current_status(
+                created.collet_id
+            ).task.created_event_ref,
         )
     assert _counts(db) == (1, 1)
 
@@ -475,7 +477,7 @@ def test_message_cannot_smuggle_commission_progress_evidence(db):
         _append(
             service,
             created.collet_id,
-            2,
+            3,
             "user_interaction.posted",
             primitive_type="Message",
             payload={"content": "update", "percent": 50},
@@ -601,7 +603,7 @@ def test_injected_exact_profile_survives_storage_recovery_and_shared_g4(
     message = _append(
         generic,
         collet_id,
-        2,
+        3,
         "user_interaction.posted",
         primitive_type="Message",
         visibility="private",
@@ -609,7 +611,7 @@ def test_injected_exact_profile_survives_storage_recovery_and_shared_g4(
     )
     assert message.current_status == "created"
     started = product.start_task(TaskAdvanceCommand(collet_id), _actor(BOT))
-    assert started.context_version == 4
+    assert started.context_version == 5
     assert restarted_repo.get_current_status(collet_id).product_instance == instance
     assert _counts(db) == (1, 4)
 
@@ -641,4 +643,4 @@ def test_legacy_commission_progress_requires_typed_executor(db):
         TaskAdvanceCommand(created.collet_id, percent=20),
         _actor(BOT),
     )
-    assert progressed.context_version == 4
+    assert progressed.context_version == 5

@@ -17,12 +17,18 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.collet i
     Collet,
     ColletState,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.task import Task
 from agentclaw.community.core.task.context_collab.l4_context_primitives.task import (
+    Task,
     TaskStatus,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.group_profile import (
     GroupRoster,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime import (
+    current_axes,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.operations.single_group import (
+    SingleGroupMethodService,
 )
 from agentclaw.community.core.task.context_collab.method_service_api import (
     BindMethodCommand,
@@ -40,12 +46,6 @@ from agentclaw.community.core.task.context_collab.service_api import (
 )
 from agentclaw.community.core.task.context_collab.services.method_lifecycle_service import (
     MethodLifecycleService,
-)
-from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime import (
-    current_axes,
-)
-from agentclaw.community.core.task.context_collab.l5_methods.operations.single_group import (
-    SingleGroupMethodService,
 )
 
 from tests.community.core.task.context_collab.product_catalog import PRODUCT_CATALOG
@@ -117,7 +117,6 @@ def _status_record(**overrides) -> ContextStatusRecord:
         initiator_ref=principal_ref,
         state=ColletState.ACTIVE,
         scope=SpaceRef(space_id="space_workspace_001", environment="prod"),
-        current_event_id=None,
         version=1,
     )
     return ContextStatusRecord(

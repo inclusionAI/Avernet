@@ -15,7 +15,6 @@ store 用真 ``InMemoryColletLifecycleStore``。
 """
 
 import pytest
-
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabNotFoundError,
     ContextCollabValidationError,
@@ -31,9 +30,12 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.collet i
     Collet,
     ColletState,
 )
-from tests.community.core.task.context_collab.creation_facts import creation_facts
-from agentclaw.community.core.task.context_collab.l4_context_primitives.task import Task
+from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.collet_lifecycle import (
+    ColletLifecycleResult,
+    ColletLifecycleService,
+)
 from agentclaw.community.core.task.context_collab.l4_context_primitives.task import (
+    Task,
     TaskStatus,
 )
 from agentclaw.community.core.task.context_collab.persistence.collet_lifecycle_store import (
@@ -45,10 +47,8 @@ from agentclaw.community.core.task.context_collab.persistence.repository import 
 from agentclaw.community.core.task.context_collab.service_api import (
     ActorContext,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.collet_lifecycle import (
-    ColletLifecycleResult,
-    ColletLifecycleService,
-)
+
+from tests.community.core.task.context_collab.creation_facts import creation_facts
 
 COLLET_ID = "collet_lifecycle_001"
 PRINCIPAL_ID = "u_1001"
@@ -94,7 +94,6 @@ def _status_record(collab_context_id: str = COLLET_ID) -> ContextStatusRecord:
         initiator_ref=principal_ref,
         state=ColletState.ACTIVE,
         scope=spec.space,
-        current_event_id=None,
         version=1,
     )
     return ContextStatusRecord(

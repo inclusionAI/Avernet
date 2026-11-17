@@ -20,6 +20,9 @@ from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs 
 from agentclaw.community.core.task.context_collab.l4_context_primitives.context_service_protocol import (
     ContextServiceProtocol,
 )
+from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.contracts import (
+    WorkStartCommand,
+)
 from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
     BindingState,
     top_level_binding_id,
@@ -68,6 +71,7 @@ from agentclaw.community.core.task.context_collab.products.task_commission.servi
 
 from tests.community.core.task.context_collab.products.test_task_commission_end_to_end import (
     HUMAN,
+    OBJECTIVE,
     _create_commission_collet,
     _create_product_profile,
     _select_admitted_agent,
@@ -294,23 +298,35 @@ def test_execution_http_requires_single_reference_not_open_reference(admitted_ru
     service, bot, injector, collet, instance, decision = admitted_runtime
     store, axes = injector.get(MethodStoreProtocol), current_axes()
     _select_admitted_agent(injector, store, axes, instance, decision)
+    repository = injector.get(ContextCollabRepositoryProtocol)
+    started = injector.get(ContextServiceProtocol).start(
+        collet.collet_id,
+        WorkStartCommand(
+            repository.get_current_status(collet.collet_id).collet.version,
+            objective=OBJECTIVE,
+        ),
+        bot.actor_context,
+    )
     created = TaskCommissionCreatedView(
         collet.collet_id,
         "",
         "",
-        "created",
-        injector.get(ContextCollabRepositoryProtocol)
-        .get_current_status(collet.collet_id)
-        .collet.version,
+        "in_progress",
+        started.context_version,
     )
-    request = bot.report_request(created)
+    payload = {"percent": 25, "note": "working", "progress": "in progress"}
+    request = bot.report_request(created, action="progress", payload=payload)
     request["params"]["message"]["parts"][0]["data"]["context"]["method_binding_ref"][
         "object_id"
     ] = instance.method_binding_refs[0]
     bot.request(request, expected_status="REJECTED")
-    assert service.detail_task(collet.collet_id).status == "created"
-    bot.request(bot.report_request(created))
-    assert service.detail_task(collet.collet_id).status == "in_progress"
+    before = repository.get_current_status(collet.collet_id)
+    assert before.task.status == "in_progress"
+    bot.request(bot.report_request(created, action="progress", payload=payload))
+    after = repository.get_current_status(collet.collet_id)
+    assert after.task.status == "in_progress"
+    assert after.task.version == before.task.version + 1
+    assert after.events[-1].event_kind == "task.progress.updated"
 
 
 @pytest.mark.parametrize(

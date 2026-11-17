@@ -14,7 +14,6 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 import pytest
-
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabNotFoundError,
     ContextCollabParentEventError,
@@ -36,13 +35,15 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.collet i
     Collet,
     ColletState,
 )
-from tests.community.core.task.context_collab.creation_facts import creation_facts
-from agentclaw.community.core.task.context_collab.l4_context_primitives.task import Task
 from agentclaw.community.core.task.context_collab.l4_context_primitives.event_envelope import (
     EventRecord,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.task import (
+    Task,
     TaskStatus,
+)
+from agentclaw.community.core.task.context_collab.l6_products.operations.collaboration_creation import (
+    ContextCollabService,
 )
 from agentclaw.community.core.task.context_collab.persistence.method_store import (
     InMemoryMethodStore,
@@ -57,14 +58,12 @@ from agentclaw.community.core.task.context_collab.persistence.repository import 
 )
 from agentclaw.community.core.task.context_collab.service_api import (
     ActorContext,
-    ContextCollabServiceProtocol,
     CollaborationCreateCommand,
+    ContextCollabServiceProtocol,
     EventAcceptedResult,
     EventAppendCommand,
 )
-from agentclaw.community.core.task.context_collab.l6_products.operations.collaboration_creation import (
-    ContextCollabService,
-)
+
 from tests.community.core.task.context_collab.product_catalog import PRODUCT_CATALOG
 
 OBJECTIVE = "整理 Context 协作协议评审结论并提交可评审 PR"
@@ -136,16 +135,16 @@ class _FakeContextCollabRepository:
         self.events: dict[str, list[EventRecord]] = {}
         self.append_calls: list[tuple[str, AppendEventRecordRequest]] = []
 
-    def create_collet(
-        self, request: CreateColletRecordRequest
-    ) -> ContextCreatedRecord:
+    def create_collet(self, request: CreateColletRecordRequest) -> ContextCreatedRecord:
         collab_context_id = "collet_" + uuid4().hex
         event_id = "evt_" + uuid4().hex
         task = Task(
             objective=request.objective,
             status=TaskStatus.CREATED.value,
             principal_ref=request.principal_ref,
-            executor_refs=((request.executor_ref,) if request.executor_ref is not None else ()),
+            executor_refs=(
+                (request.executor_ref,) if request.executor_ref is not None else ()
+            ),
             task_id="task_" + collab_context_id,
             collet_ref=collab_context_id,
             version=1,
@@ -159,7 +158,6 @@ class _FakeContextCollabRepository:
             initiator_ref=request.initial_event.actor_ref,
             state=ColletState.ACTIVE,
             scope=request.space,
-            current_event_id=event_id,
             version=1,
         )
         initial_event = EventRecord(
@@ -246,7 +244,6 @@ class _FakeContextCollabRepository:
         )
         updated = replace(
             collet,
-            current_event_id=event.event_id,
             version=context_version,
         )
         events.append(event)
@@ -258,6 +255,9 @@ class _FakeContextCollabRepository:
             creation_facts=self.creation_facts[collab_context_id],
             task=new_task,
         )
+
+    def create_l4_task(self, collab_context_id, command, actor_ref):
+        raise NotImplementedError("fake does not implement Task creation")
 
     def create_l4_collet(self, command, actor_ref):
         raise NotImplementedError("application-only fake")

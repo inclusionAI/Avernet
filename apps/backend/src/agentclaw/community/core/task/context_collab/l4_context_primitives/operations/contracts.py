@@ -18,9 +18,6 @@ from agentclaw.community.core.task.context_collab.errors import (
 from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
     PrincipalRef,
 )
-from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_resource_refs import (
-    SpaceRef,
-)
 from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
     Collet,
     ColletState,
@@ -39,33 +36,53 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.task imp
 
 @dataclass(frozen=True)
 class ColletCreateCommand:
-    """L4 Collet and root Work creation; no product, method or binding inputs.
+    """Create only a bounded context; no Space, Work or product selection.
 
-    Creates unassigned Work. Product Instantiate supplies initial participants
-    and establishes scoped L4 participation/role facts separately.
-    title/description optionally describe the context, not its Task objective
-    or completion conditions. Schema/revision/audit values are server-owned.
+    title/description describe the context. Schema/revision/audit are server-owned.
+    Task objectives belong to Work.start (or explicit existing-Work creation);
+    participants and scoped role bindings come from Product Instantiate.
     """
 
-    to_space: SpaceRef
     initiator_ref: PrincipalRef
-    objective: str
     title: str | None = field(default=None, kw_only=True)
     description: str | None = field(default=None, kw_only=True)
 
     def __post_init__(self) -> None:
-        if not isinstance(self.objective, str) or not self.objective.strip():
-            raise ContextCollabValidationError("objective must be a non-empty string")
-        if not isinstance(self.to_space, SpaceRef) or not isinstance(
-            self.initiator_ref, PrincipalRef
-        ):
+        if not isinstance(self.initiator_ref, PrincipalRef):
             raise ContextCollabValidationError(
-                "creation requires typed Space/Principal references"
+                "creation requires a typed Principal reference"
             )
+        PrincipalRef.from_dict(self.initiator_ref.to_dict())
         validate_collet_text(self.title, "title")
         validate_collet_text(self.description, "description")
-        SpaceRef.from_dict(self.to_space.to_dict())
-        PrincipalRef.from_dict(self.initiator_ref.to_dict())
+
+
+@dataclass(frozen=True)
+class TaskCreateCommand:
+    """Explicit root Work creation in an existing Collet, without assignment."""
+
+    expected_version: int
+    principal_ref: PrincipalRef
+    objective: str
+    completion_conditions: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if type(self.expected_version) is not int or self.expected_version < 1:
+            raise ContextCollabValidationError("expected_version must be positive")
+        if not isinstance(self.principal_ref, PrincipalRef):
+            raise ContextCollabValidationError(
+                "Task requires a typed Principal reference"
+            )
+        PrincipalRef.from_dict(self.principal_ref.to_dict())
+        if not isinstance(self.objective, str) or not self.objective.strip():
+            raise ContextCollabValidationError("objective must be a non-empty string")
+        if not isinstance(self.completion_conditions, tuple) or any(
+            not isinstance(item, str) or not item.strip()
+            for item in self.completion_conditions
+        ):
+            raise ContextCollabValidationError(
+                "completion_conditions must contain non-empty strings"
+            )
 
 
 class CreatedCollet(Protocol):
@@ -73,11 +90,27 @@ class CreatedCollet(Protocol):
     def collet(self) -> Collet: ...
 
 
+class CreatedTask(Protocol):
+    @property
+    def task(self) -> Task: ...
+
+
+class TaskWriter(Protocol):
+    def create_l4_task(
+        self,
+        collab_context_id: str,
+        command: TaskCreateCommand,
+        actor_ref: PrincipalRef,
+    ) -> CreatedTask:
+        """Atomically create root Task/evidence and fence the Collet revision."""
+        ...
+
+
 class ColletWriter(Protocol):
     def create_l4_collet(
         self, command: ColletCreateCommand, actor_ref: PrincipalRef
     ) -> CreatedCollet:
-        """Atomically persist Collet, root Task and task.created, without bindings."""
+        """Persist only Collet identity/description/audit, without Work or bindings."""
         ...
 
 
@@ -98,6 +131,8 @@ class AppendEventRecordRequest:
     visibility: str
     payload: dict
     task_update: TaskUpdate | None = None
+    # Internal L4-only draft, persisted atomically with task.created + task.started.
+    task_creation: Task | None = None
 
 
 class CollaborationRecord(Protocol):
@@ -134,8 +169,11 @@ class EventWriter(Protocol):
 
 @dataclass(frozen=True)
 class WorkStartCommand:
-    """Start the root Task of an existing Collet, fencing its Collet revision.
+    """Create/start root Work in an existing Collet, fencing its revision.
 
+    If no Task exists, objective is required and completion_conditions initialize
+    the new Task. Existing Work can omit them; supplied values cannot redefine it.
+    Assignees come from persisted L4 initial bindings, never caller-supplied IDs.
     Actor/event identity and public visibility are chosen by the L4 entrypoint,
     not supplied by the caller. Starting neither dispatches an Agent nor creates
     an Activity/external execution attempt.
@@ -143,10 +181,21 @@ class WorkStartCommand:
 
     expected_version: int
     note: str = ""
+    objective: str | None = None
+    completion_conditions: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if type(self.expected_version) is not int or self.expected_version < 1:
             raise ContextCollabValidationError("expected_version must be positive")
+        if self.objective is not None and (
+            not isinstance(self.objective, str) or not self.objective.strip()
+        ):
+            raise ContextCollabValidationError("objective must be a non-empty string")
+        if not isinstance(self.completion_conditions, tuple) or any(
+            not isinstance(item, str) or not item.strip()
+            for item in self.completion_conditions
+        ):
+            raise ContextCollabValidationError("invalid completion_conditions")
         if not isinstance(self.note, str):
             raise ContextCollabValidationError("Work start note must be a string")
 

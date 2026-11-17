@@ -12,36 +12,22 @@
 """
 
 import pytest
-
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabNotFoundError,
     ContextCollabValidationError,
     ContextCollabVersionConflict,
 )
-from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context import (
-    ActorContext,
-)
-from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_resource_refs import (
-    SpaceRef,
-)
 from agentclaw.community.core.task.context_collab.persistence.repository import (
     ContextStatusRecord,
 )
-from agentclaw.community.core.task.context_collab.products.task_commission.service import (
-    TaskCommissionService,
-)
 from agentclaw.community.core.task.context_collab.products.task_commission.service_api import (
-    PublishTaskCommand,
     TaskAdvanceCommand,
 )
 
 from tests.community.core.task.context_collab.products.test_task_commission_publish import (
     ASSIGNEE,
-    BODY,
     PRINCIPAL,
     SPACE,
-    TITLE,
-    _FakeRepo,
     _actor,
     _bot_actor,
     _publish_command,
@@ -303,7 +289,6 @@ class TestBoundary:
                 initiator_ref=PRINCIPAL,
                 state=ColletState.ACTIVE,
                 scope=SPACE,
-                current_event_id=None,
                 version=1,
             ),
             creation_facts=_bbs_spec(),

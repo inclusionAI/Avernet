@@ -3,8 +3,6 @@
 from dataclasses import replace
 
 import pytest
-from sqlalchemy import event as sql_event
-
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabNotFoundError,
     ContextCollabValidationError,
@@ -12,6 +10,9 @@ from agentclaw.community.core.task.context_collab.errors import (
 )
 from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context import (
     ActorContext,
+)
+from agentclaw.community.core.task.context_collab.g1_secure_govern.authorization import (
+    StructuralContextCollabAuthorizer,
 )
 from agentclaw.community.core.task.context_collab.g4_contracts_consistency import (
     workflow_resolution,
@@ -23,17 +24,11 @@ from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs 
 from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_resource_refs import (
     SpaceRef,
 )
-from agentclaw.community.core.task.context_collab.l6_products.operations.collaboration_creation import (
-    ContextCollabService as ApplicationCollabService,
-)
 from agentclaw.community.core.task.context_collab.l4_context_primitives.context_service import (
     ContextService,
 )
-from agentclaw.community.core.task.context_collab.g1_secure_govern.authorization import (
-    StructuralContextCollabAuthorizer,
-)
-from agentclaw.community.core.task.context_collab.l6_products.operations.collaboration_policy import (
-    ProductCollaborationPolicy,
+from agentclaw.community.core.task.context_collab.l4_context_primitives.context_service_protocol import (
+    ContextServiceProtocol,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.contracts import (
     WorkStartCommand as CanonicalWorkStartCommand,
@@ -47,6 +42,12 @@ from agentclaw.community.core.task.context_collab.l6_products.contracts import (
 )
 from agentclaw.community.core.task.context_collab.l6_products.operations import (
     create_product_profile,
+)
+from agentclaw.community.core.task.context_collab.l6_products.operations.collaboration_creation import (
+    ContextCollabService as ApplicationCollabService,
+)
+from agentclaw.community.core.task.context_collab.l6_products.operations.collaboration_policy import (
+    ProductCollaborationPolicy,
 )
 from agentclaw.community.core.task.context_collab.l6_products.task_contracts import (
     STANDARD_TASK_CONTRACT,
@@ -68,10 +69,7 @@ from agentclaw.community.core.task.context_collab.service_api import (
     EventAppendCommand,
     WorkStartCommand,
 )
-
-from agentclaw.community.core.task.context_collab.l4_context_primitives.context_service_protocol import (
-    ContextServiceProtocol,
-)
+from sqlalchemy import event as sql_event
 
 OWNER = ActorContext(PrincipalRef("human", "owner"), "api")
 BOT = ActorContext(PrincipalRef("bot", "worker"), "a2a")
@@ -190,7 +188,7 @@ def test_start_updates_root_task_and_returns_persisted_receipt(runtime, note):
     assert result.event_kind == event.event_kind == "task.started"
     assert result.primitive_type == event.primitive_type == "Task"
     assert result.context_version == after.collet.version == 3
-    assert result.event_id == after.collet.current_event_id == event.event_id
+    assert result.event_id == event.event_id
     assert result.parent_event == event.parent_event
     assert after.task.task_id == before.task.task_id != cid
     assert after.task.version == 2 and after.task.status == "in_progress"

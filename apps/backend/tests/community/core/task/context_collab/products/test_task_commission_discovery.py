@@ -35,21 +35,11 @@ from agentclaw.community.core.task.context_collab.l5_methods.operations.contract
 from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime import (
     current_axes,
 )
-from agentclaw.community.core.task.context_collab.l6_products.creation_facts import (
-    creation_payload,
-)
-from agentclaw.community.core.task.context_collab.l6_products.persistence.repository import (
-    ContextCollabRepositoryProtocol,
-    ContextStatusRecord,
-)
-from agentclaw.community.core.task.context_collab.persistence.method_store import (
-    InMemoryMethodStore,
-)
-from agentclaw.community.di.modules.task_commission_self_application import (
-    TaskCommissionSelfApplicationAdapter,
-)
 from agentclaw.community.core.task.context_collab.l6_products.catalog import (
     ProductCatalog,
+)
+from agentclaw.community.core.task.context_collab.l6_products.creation_facts import (
+    creation_payload,
 )
 from agentclaw.community.core.task.context_collab.l6_products.method_policies import (
     OpenMethodPolicy,
@@ -57,14 +47,24 @@ from agentclaw.community.core.task.context_collab.l6_products.method_policies im
 from agentclaw.community.core.task.context_collab.l6_products.operations import (
     create_product_profile,
 )
+from agentclaw.community.core.task.context_collab.l6_products.persistence.repository import (
+    ContextCollabRepositoryProtocol,
+    ContextStatusRecord,
+)
 from agentclaw.community.core.task.context_collab.l6_products.publication import (
     OpenPublicationProfile,
+)
+from agentclaw.community.core.task.context_collab.persistence.method_store import (
+    InMemoryMethodStore,
 )
 from agentclaw.community.core.task.context_collab.products.task_commission.profile import (
     TASK_COMMISSION_PROFILE,
 )
 from agentclaw.community.core.task.context_collab.products.task_commission.publication import (
     BotSelfApplicationAdmission,
+)
+from agentclaw.community.di.modules.task_commission_self_application import (
+    TaskCommissionSelfApplicationAdapter,
 )
 
 BOT_ID = "bot_discoverer"
@@ -116,7 +116,6 @@ def _record(collet_id: str, bot_id: str = BOT_ID) -> ContextStatusRecord:
             initiator_ref=OWNER,
             state=ColletState.ACTIVE,
             scope=SpaceRef("space", "test"),
-            current_event_id="evt_created",
             version=1,
         ),
         creation_facts=creation_payload(

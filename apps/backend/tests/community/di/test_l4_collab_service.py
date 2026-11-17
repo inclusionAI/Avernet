@@ -66,7 +66,7 @@ WORKERS = (AgentRef("bot", "worker-1"), AgentRef("bot", "worker-2"))
 def creation_runtime():
     writer = Mock(spec=ColletWriter)
     writer.create_l4_collet.return_value = SimpleNamespace(
-        collet=Collet("collet-test", ACTOR.actor, ColletState.ACTIVE, SPACE, "e1", 1)
+        collet=Collet("collet-test", ACTOR.actor, ColletState.ACTIVE, SPACE, 1)
     )
     authorizer = Mock(spec=ContextCollabAuthorizerProtocol)
 
@@ -96,7 +96,14 @@ def test_l4_protocol_conforms_to_full_implementation():
     assert ContextService.__name__ == "ContextService"
     assert ContextServiceProtocol.__name__ == "ContextServiceProtocol"
     assert issubclass(ContextService, ContextServiceProtocol)
-    methods = {"create_collet", "start", "append_event", "get_status", "get_events"}
+    methods = {
+        "create_collet",
+        "create_task",
+        "start",
+        "append_event",
+        "get_status",
+        "get_events",
+    }
     assert {
         name
         for name, value in vars(ContextServiceProtocol).items()
@@ -153,6 +160,7 @@ def test_l6_contract_only_extends_l4_and_preserves_compatibility_type_identity()
     )
     for name in (
         "ColletCreateCommand",
+        "TaskCreateCommand",
         "WorkStartCommand",
         "EventAppendCommand",
         "EventAcceptedResult",
@@ -160,7 +168,14 @@ def test_l6_contract_only_extends_l4_and_preserves_compatibility_type_identity()
         "TaskProgressProjectionDTO",
     ):
         assert getattr(application_api, name) is getattr(l4_api, name)
-    for name in ("create_collet", "start", "append_event", "get_status", "get_events"):
+    for name in (
+        "create_collet",
+        "create_task",
+        "start",
+        "append_event",
+        "get_status",
+        "get_events",
+    ):
         assert getattr(ApplicationCollabService, name) is getattr(ContextService, name)
     assert not hasattr(ContextService, "create_collaboration")
 
@@ -179,7 +194,7 @@ def test_l4_creation_resolves_direct_singleton_without_application_facade(
 
 def test_injected_creation_is_unassigned_and_uses_selected_g1_policy(creation_runtime):
     injector, writer, authorizer = creation_runtime
-    command = ColletCreateCommand(SPACE, ACTOR.actor, "Deliver work")
+    command = ColletCreateCommand(ACTOR.actor)
     created = injector.get(ContextServiceProtocol).create_collet(command, ACTOR)
     assert created is writer.create_l4_collet.return_value.collet
     authorizer.check_create_collet.assert_called_once_with(command=command, actor=ACTOR)
@@ -192,7 +207,7 @@ def test_injected_creation_rejection_never_calls_writer(creation_runtime):
     authorizer.check_create_collet.side_effect = ContextCollabValidationError(
         "deployment creation denied"
     )
-    command = ColletCreateCommand(SPACE, ACTOR.actor, "Deliver work")
+    command = ColletCreateCommand(ACTOR.actor)
     with pytest.raises(
         ContextCollabValidationError, match="deployment creation denied"
     ):
@@ -204,7 +219,7 @@ def test_injected_creation_rejection_never_calls_writer(creation_runtime):
 def test_injected_creation_propagates_storage_failure(creation_runtime):
     injector, writer, authorizer = creation_runtime
     writer.create_l4_collet.side_effect = RuntimeError("storage write failed")
-    command = ColletCreateCommand(SPACE, ACTOR.actor, "Deliver work")
+    command = ColletCreateCommand(ACTOR.actor)
     with pytest.raises(RuntimeError, match="storage write failed"):
         injector.get(ContextServiceProtocol).create_collet(command, ACTOR)
     authorizer.check_create_collet.assert_called_once_with(command=command, actor=ACTOR)

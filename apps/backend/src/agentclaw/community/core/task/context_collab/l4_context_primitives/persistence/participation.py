@@ -20,6 +20,7 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.event_en
     EventRecord,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.participation import (
+    COLLET_BINDING_EVENT,
     INITIAL_BINDING_EVENT,
     ParticipationFacts,
 )
@@ -39,12 +40,14 @@ from agentclaw.community.utils.env_utils import get_current_env
 def bind_initial_participants(
     db,
     row,
-    task: Task,
+    task: Task | None,
     facts: ParticipationFacts,
     executor_refs: tuple[AgentRef, ...],
     actor: PrincipalRef,
+    *,
+    binding_event_id: str | None = None,
 ) -> None:
-    if task.executor_refs or task.version != 1 or int(row.context_version) != 1:
+    if task is not None and (task.executor_refs or task.version != 1):
         raise ContextCollabValidationError(
             "initial binding requires untouched unassigned Work"
         )
@@ -54,46 +57,48 @@ def bind_initial_participants(
         raise ContextCollabValidationError(
             "Task executor must be an actual Participant"
         )
-    now, event_id = datetime.now(timezone.utc), "evt_" + uuid4().hex
-    updated_task = replace(
-        task, executor_refs=executor_refs, version=2, last_event_ref=event_id
-    )
+    previous_version = int(row.context_version)
+    now, event_id = datetime.now(timezone.utc), binding_event_id or "evt_" + uuid4().hex
     event = EventRecord(
-        collab_context_id=task.collet_ref,
+        collab_context_id=row.collab_context_id,
         event_id=event_id,
-        parent_event=row.current_event_id,
-        event_kind=INITIAL_BINDING_EVENT,
-        primitive_type="Task",
+        parent_event=task.last_event_ref if task is not None else None,
+        event_kind=INITIAL_BINDING_EVENT if task is not None else COLLET_BINDING_EVENT,
+        primitive_type="Task" if task is not None else "Collet",
         actor_ref=actor,
         visibility="workspace",
         payload={
             "participation": facts.to_dict(),
             "executor_refs": [r.to_dict() for r in executor_refs],
         },
-        context_version_after=2,
+        context_version_after=previous_version + 1,
         occurred_at=now,
-        task_ref=task.task_id,
-        task_version_after=2,
+        task_ref=task.task_id if task is not None else None,
+        task_version_after=2 if task is not None else None,
     )
-    count = (
-        db.query(ContextCollabTaskModel)
-        .filter(
-            ContextCollabTaskModel.task_id == task.task_id,
-            ContextCollabTaskModel.collab_context_id == task.collet_ref,
-            ContextCollabTaskModel.env == get_current_env(),
-            ContextCollabTaskModel.task_version == 1,
+    if task is not None:
+        updated_task = replace(
+            task, executor_refs=executor_refs, version=2, last_event_ref=event_id
         )
-        .update(
-            {
-                "task_data": _dump_json(updated_task.to_dict()),
-                "task_version": 2,
-                "gmt_modified": now,
-            },
-            synchronize_session=False,
+        count = (
+            db.query(ContextCollabTaskModel)
+            .filter(
+                ContextCollabTaskModel.task_id == task.task_id,
+                ContextCollabTaskModel.collab_context_id == task.collet_ref,
+                ContextCollabTaskModel.env == get_current_env(),
+                ContextCollabTaskModel.task_version == 1,
+            )
+            .update(
+                {
+                    "task_data": _dump_json(updated_task.to_dict()),
+                    "task_version": 2,
+                    "gmt_modified": now,
+                },
+                synchronize_session=False,
+            )
         )
-    )
-    if count != 1:
-        raise ContextCollabVersionConflict("initial binding Task CAS failed")
+        if count != 1:
+            raise ContextCollabVersionConflict("initial binding Task CAS failed")
     collet = _collet_from_row(row)
     metadata = (
         replace(collet.metadata, updated_at=now, updated_by=actor)
@@ -104,12 +109,11 @@ def bind_initial_participants(
         db.query(ContextCollabColletModel)
         .filter(
             ContextCollabColletModel.id == row.id,
-            ContextCollabColletModel.context_version == 1,
+            ContextCollabColletModel.context_version == previous_version,
         )
         .update(
             {
-                "current_event_id": event_id,
-                "context_version": 2,
+                "context_version": previous_version + 1,
                 "collet_metadata": _dump_json(metadata.to_dict()) if metadata else None,
                 "gmt_modified": now,
             },
