@@ -5,8 +5,6 @@ import { migrations } from '../schema.js';
 import { workflowSnapshotMigrations } from '../schema-workflow-snapshot.js';
 import { flowRunLinkMysqlUpgradeDdl } from '../schema-flow-run-links.js';
 import { ordinaryRunRequestDdl } from '../schema-ordinary-run-request.js';
-import { aistudioTrainDdl } from '../schema-aistudio-train.js';
-import { aistudioTrainManualAuditDdl } from '../schema-aistudio-train-manual-audit.js';
 
 type Migration = (typeof migrations)[number];
 
@@ -63,7 +61,6 @@ function createDb(dbType: 'mysql' | 'zdas', options: {
       throw options.failure.error;
     }
     const allowed = [
-      ...aistudioTrainDdl(dbType), ...aistudioTrainManualAuditDdl(dbType),
       ...migrations.flatMap(m => m.sql.map(ddl => dialectFor(dbType).renderDdl(ddl))),
       ...workflowSnapshotMigrations.flatMap(m => m.sql.map(ddl => dialectFor(dbType).renderDdl(ddl))),
       probes.ordinaryCallback, probes.healingCallback, tagAlter, flowRunLinkMysqlUpgradeDdl,

@@ -1,6 +1,6 @@
 import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
-import { aistudioTrainDdl, aistudioTrainMigrations } from '../schema-aistudio-train.js';
+import { aistudioTrainMigrations } from '../schema-aistudio-train.js';
 import { workflowSnapshotMigrations } from '../schema-workflow-snapshot.js';
 import { readFileSync } from 'node:fs';
 import { SqliteDatabase } from '../db/sqlite-database.js';
@@ -20,33 +20,45 @@ describe('AIStudio schema migration', () => {
     expect(versions).toEqual([...versions].sort((a,b) => a-b));
     expect(allMigrations.filter(m => m.version === 155)).toHaveLength(1);
   });
-  it('creates the watch table with mandatory gmt metadata and SQLite indexes', () => {
-    const raw = new Database(':memory:');
-    try {
-      for (const ddl of aistudioTrainDdl('sqlite')) raw.exec(ddl);
-      const columns = raw.prepare('PRAGMA table_info(aistudio_train_watches)').all() as {name:string}[];
-      expect(columns.map(c => c.name)).toEqual(expect.arrayContaining(['id','gmt_create','gmt_modified']));
-      expect(raw.prepare('PRAGMA index_list(aistudio_train_watches)').all().length).toBeGreaterThanOrEqual(4);
-    } finally { raw.close(); }
-  });
-  it('runs v155 through the actual migration runner and can replay DDL without losing rows', async () => {
+  it('runs retired IDs through the actual runner without creating tables, indexes or changing existing rows', async () => {
     const raw=new Database(':memory:'); const db=new SqliteDatabase(raw);
     try {
-      raw.exec("CREATE TABLE schema_version(version INTEGER,description TEXT); INSERT INTO schema_version VALUES(154,'latest dev');");
+      raw.exec(`CREATE TABLE schema_version(id INTEGER PRIMARY KEY AUTOINCREMENT,version INTEGER,description TEXT,gmt_create INTEGER DEFAULT (unixepoch()),gmt_modified INTEGER DEFAULT (unixepoch()));
+        INSERT INTO schema_version(version,description) VALUES(154,'latest dev');
+        CREATE TRIGGER trg_schema_version_update AFTER UPDATE ON schema_version FOR EACH ROW BEGIN UPDATE schema_version SET gmt_modified = (unixepoch()) WHERE id = NEW.id; END;`);
+      // Existing installations may still have rejected tables. Retirement must NOT drop or rewrite them.
+      raw.exec("CREATE TABLE aistudio_train_watches(payload TEXT); INSERT INTO aistudio_train_watches VALUES('keep');");
+      const schema=raw.prepare('SELECT * FROM sqlite_master ORDER BY name').all();
       await runMigrations(db,'sqlite');
       expect(raw.prepare('SELECT MAX(version) AS v FROM schema_version').get()).toEqual({v:156});
-      expect(raw.prepare("SELECT name FROM sqlite_master WHERE name='aistudio_train_watches'").get()).toBeTruthy();
-      await aistudioTrainMigrations[0].migrate!(db);
+      expect(raw.prepare('SELECT * FROM sqlite_master ORDER BY name').all()).toEqual(schema);
+      expect(raw.prepare('SELECT * FROM aistudio_train_watches').all()).toEqual([{payload:'keep'}]);
+      for(const m of aistudioTrainMigrations) {expect(m.sql).toEqual([]); await m.migrate?.(db);}
       await runMigrations(db,'sqlite');
       expect(raw.prepare('SELECT COUNT(*) AS n FROM schema_version WHERE version=155').get()).toEqual({n:1});
+      expect(raw.prepare('SELECT COUNT(*) AS n FROM schema_version WHERE version=156').get()).toEqual({n:1});
     } finally { raw.close(); }
   });
-  it.each(['mysql','zdas'] as const)('renders %s with inline indexes and epoch BIGINT columns, gmt TIMESTAMP only', type => {
-    const statements = aistudioTrainDdl(type); expect(statements).toHaveLength(1);
-    const ddl = statements[0];
-    expect(ddl).toMatch(/INDEX idx_aistudio_watch_due/); expect(ddl).not.toMatch(/CREATE INDEX/);
-    expect(ddl).toMatch(/submitted_at BIGINT NOT NULL/); expect(ddl).toMatch(/lease_expires_at BIGINT/);
-    expect(ddl).toMatch(/gmt_modified TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP/);
-    expect(ddl).toMatch(/flow_id VARCHAR\(255\).*ascii_bin/); expect(ddl).toMatch(/UNIQUE.*flow_id, node_id, attempt/);
+  it.each(['sqlite','mysql','zdas','noop'] as const)('retired registrations have zero DDL or callback side effects on %s', async dbType => {
+    const calls:string[]=[]; const db={dbType,exec:async (sql:string) => {calls.push(sql);throw new Error('DDL forbidden');},query:async (sql:string) => {calls.push(sql);throw new Error('probe forbidden');}};
+    for(const m of aistudioTrainMigrations) {
+      expect(m.sql).toEqual([]); expect(m.description).toMatch(/retired/i);
+      await m.migrate?.(db as any);
+    }
+    expect(calls).toEqual([]);
   });
+  it('leaves already-applied legacy 155/156 ledger entries and their original descriptions untouched', async () => {
+    const raw=new Database(':memory:'); const db=new SqliteDatabase(raw);
+    try {
+      raw.exec(`CREATE TABLE schema_version(id INTEGER PRIMARY KEY AUTOINCREMENT,version INTEGER,description TEXT,gmt_create INTEGER DEFAULT (unixepoch()),gmt_modified INTEGER DEFAULT (unixepoch()));
+        INSERT INTO schema_version(version,description) VALUES(154,'latest dev'),(155,'original watch migration'),(156,'original audit migration');
+        CREATE TRIGGER trg_schema_version_update AFTER UPDATE ON schema_version FOR EACH ROW BEGIN UPDATE schema_version SET gmt_modified = (unixepoch()) WHERE id = NEW.id; END;`);
+      const schema=raw.prepare('SELECT * FROM sqlite_master ORDER BY name').all();
+      const ledger=raw.prepare('SELECT * FROM schema_version ORDER BY id').all();
+      await runMigrations(db,'sqlite');
+      expect(raw.prepare('SELECT * FROM schema_version ORDER BY id').all()).toEqual(ledger);
+      expect(raw.prepare('SELECT * FROM sqlite_master ORDER BY name').all()).toEqual(schema);
+    } finally {raw.close();}
+  });
+
 });
