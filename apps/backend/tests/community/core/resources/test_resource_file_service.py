@@ -312,6 +312,51 @@ async def test_delete_routes_a_directory_through_delete_tree():
 
 
 @pytest.mark.asyncio
+async def test_legacy_delete_reports_identified_directory_failure(monkeypatch):
+    from fastapi import HTTPException
+    from agentclaw.community.adapters.http.resources import file_router
+
+    device_fs = _fs_listing({"name": "docs", "is_dir": True})
+    device_fs.delete_tree.return_value = False
+    svc, _ = _svc(provider="arca", device_fs=device_fs)
+    monkeypatch.setattr(file_router, "_resolve_params", lambda *a, **kw: ("u1", "bot-1", "openclaw"))
+
+    with pytest.raises(HTTPException) as caught:
+        await file_router.delete_file.__wrapped__(
+            path="sub/docs", bot_id="bot-1", engine_type="openclaw",
+            owner_id="u1", ctx=MagicMock(), bot_repo=MagicMock(), file_svc=svc,
+        )
+    assert caught.value.status_code == 502
+    assert caught.value.detail == "Delete storage failed"
+    device_fs.list_dir.assert_awaited_once_with("workspace/sub")
+    device_fs.delete_tree.assert_awaited_once_with("workspace/sub/docs")
+    device_fs.delete_file.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_directory_failure_retains_bool_for_default_callers():
+    device_fs = _fs_listing({"name": "docs", "is_dir": True})
+    device_fs.delete_tree.return_value = False
+    svc, _ = _svc(provider="arca", device_fs=device_fs)
+
+    assert await svc.delete(**_COORDS, path="sub/docs") is False
+    device_fs.delete_tree.assert_awaited_once_with("workspace/sub/docs")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("entries", [None, [], [{"name": "docs"}]])
+async def test_legacy_diagnostic_option_preserves_unknown_file_failure(entries):
+    device_fs = _fs_listing()
+    device_fs.list_dir.return_value = entries
+    device_fs.delete_file.return_value = False
+    svc, _ = _svc(provider="arca", device_fs=device_fs)
+
+    assert await svc.delete(**_COORDS, path="sub/docs", report_directory_failure=True) is False
+    device_fs.delete_file.assert_awaited_once_with("workspace/sub/docs")
+    device_fs.delete_tree.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_delete_asks_the_parent_not_the_path_itself():
     """Listing a *file* is not a defined operation on the engines, so probing
     the path directly would turn every file delete into an error."""

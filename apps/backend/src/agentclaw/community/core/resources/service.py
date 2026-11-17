@@ -39,6 +39,10 @@ class ResourceNotFoundError(ValueError):
     """
 
 
+class DirectoryDeleteFailed(Exception):
+    """A directory identified by the listing could not be deleted."""
+
+
 class FileTooLargeError(ValueError):
     """Raised when a preview's content exceeds the configured max preview size."""
 
