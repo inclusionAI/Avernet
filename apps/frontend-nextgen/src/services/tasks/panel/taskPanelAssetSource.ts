@@ -3,7 +3,21 @@ import { useErrorNotifyStore } from '@/stores/errorNotifyStore';
 
 let selectedReleaseUrl: string | null = null;
 let selectedVersion: string | null = null;
-export const TASK_PANEL_DEV_FALLBACK_URL = 'https://gw.alipayobjects.com/render/p/hitu_npm/@avernet-assets/task-panel/1.0.1/dist/index.umd.js';
+async function latestDevelopmentRelease(): Promise<string> {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), 10_000);
+  try {
+    const response = await fetch('https://registry.npmjs.org/@avernet-assets%2Ftask-panel/latest', {
+      credentials: 'omit', cache: 'no-store', signal: controller.signal,
+    });
+    if (!response.ok) throw new Error('无法查询任务副屏最新发布版本。');
+    const release = await response.json() as { version?: unknown };
+    if (typeof release?.version !== 'string' || !/^\d+\.\d+\.\d+$/.test(release.version)) {
+      throw new Error('任务副屏最新发布版本无效。');
+    }
+    return `https://gw.alipayobjects.com/render/p/hitu_npm/@avernet-assets/task-panel/${release.version}/dist/index.umd.js`;
+  } finally { window.clearTimeout(timer); }
+}
 let developmentRelease: Promise<string> | null = null;
 let developmentStyle: HTMLLinkElement | null = null;
 export function getTaskPanelDevelopmentStyle(url: string): HTMLLinkElement | null {
@@ -65,14 +79,14 @@ async function discoverDevelopmentRelease(): Promise<string> {
     return localUrl;
   } catch {
     style.remove();
-    return TASK_PANEL_DEV_FALLBACK_URL;
+    return await latestDevelopmentRelease();
   } finally { style.onload = null; style.onerror = null; window.clearTimeout(timer); controller.abort(); }
 }
 
 export async function discoverTaskPanelUrl(): Promise<string> {
   if (process.env.NODE_ENV === 'development') {
     if (selectedReleaseUrl) return selectedReleaseUrl;
-    developmentRelease ??= discoverDevelopmentRelease();
+    developmentRelease ??= discoverDevelopmentRelease().catch(error => { developmentRelease = null; throw error; });
     return developmentRelease;
   }
   const controller = new AbortController();

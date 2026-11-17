@@ -48,8 +48,9 @@ def _auth(world):
     init_principal_verifier_config(_Resolver(), "gateway_principal_signing_key", strict=False)
 
 
-async def _publish(self, *, publish_id, operator, biz_id, device_count, resource_spec=None):
+async def _publish(self, *, publish_id, operator, biz_id, default_tag, device_count, resource_spec=None):
     global _last_publish_biz_id
+    assert default_tag == "eval"
     assert resource_spec is None
     assert (publish_id, operator, device_count) == (1, "operator-1", 1)
     _last_publish_biz_id = biz_id
@@ -163,7 +164,8 @@ for _method, _path, _params in (
         expect=ExpectError(status=401))(lambda: None)
 
 
-async def _publish_resources(self, *, publish_id, operator, biz_id, device_count, resource_spec):
+async def _publish_resources(self, *, publish_id, operator, biz_id, default_tag, device_count, resource_spec):
+    assert default_tag == "eval"
     assert resource_spec.to_dict() == {"cpu": 4, "memory": 8, "disk": 200}
     assert device_count == 1
     return {"success": True, "publish_id": publish_id, "stage": "eval", "bot_uuid": "eval-1", "baas_publish_id": 42}
@@ -182,7 +184,8 @@ def publish_resources():
     pass
 
 
-async def _publish_device_count(self, *, publish_id, operator, biz_id, device_count, resource_spec=None):
+async def _publish_device_count(self, *, publish_id, operator, biz_id, default_tag, device_count, resource_spec=None):
+    assert default_tag == "eval"
     assert resource_spec is None
     assert (publish_id, operator, device_count) == (1, "operator-1", 3)
     return {"success": True, "publish_id": publish_id, "stage": "eval", "bot_uuid": "eval-1", "baas_publish_id": 42}

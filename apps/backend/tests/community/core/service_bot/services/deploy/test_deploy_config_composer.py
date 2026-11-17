@@ -193,6 +193,48 @@ class TestBaasServiceDelegates:
 
         assert "storage" not in deploy_config
 
+    def test_default_tag_is_forwarded_to_the_start_command(self):
+        """`eval_sandbox` and `eval` must coexist as two sub-environments.
+
+        The lifecycle stage stays `eval`; `default_tag` is an orthogonal
+        instance dimension forwarded to the start command.
+        """
+        composer = ManagedDeployConfigComposer(
+            storage_path=MagicMock(),
+            sandbox_registry=MagicMock(),
+            bot_repo=MagicMock(),
+            storage_policy=NoopStoragePolicy(),
+        )
+        service = _make_service(composer)
+
+        deploy_config = _build_payload(
+            service,
+            stage="eval",
+            ext_info={"default_tag": "eval"},
+        )
+
+        assert "--stage eval" in deploy_config["after_create_cmd_hook"]
+        assert "--default_tag eval" in deploy_config["after_create_cmd_hook"]
+
+    def test_default_tag_is_shell_quoted(self):
+        """A tag is caller data; the start hook must remain one shell argument."""
+
+        composer = ManagedDeployConfigComposer(
+            storage_path=MagicMock(),
+            sandbox_registry=MagicMock(),
+            bot_repo=MagicMock(),
+            storage_policy=NoopStoragePolicy(),
+        )
+        service = _make_service(composer)
+
+        deploy_config = _build_payload(
+            service,
+            stage="eval",
+            ext_info={"default_tag": "eval v2"},
+        )
+
+        assert "--default_tag 'eval v2'" in deploy_config["after_create_cmd_hook"]
+
     def test_every_call_sees_the_same_bot(self):
         """All three answers describe one container; composing them from
         different contexts is how mounts and storage drift apart."""

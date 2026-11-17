@@ -149,13 +149,13 @@ function TaskDetailContent() {
             </ConfirmDialog>
           )}
         </header>
-        <div className="mx-auto w-full max-w-[1040px] space-y-6 px-5 pb-8">
+        <div className="mx-auto flex w-full max-w-[1040px] flex-col gap-6 px-5 pt-8 pb-10">
           <ErrorBox message={identity.error ?? error} retry={reload} />
           <ErrorBox message={operationError} />
           {!task && !error && <Spin tip="加载任务…" />}
           {task && (
-            <div className="min-w-0 space-y-6" data-task-detail-content>
-              <div className="min-w-0 space-y-6">
+            <div className="flex min-w-0 flex-col gap-8" data-task-detail-content>
+              <div className="flex min-w-0 flex-col gap-8" data-task-detail-sections>
                 {!isBotEvolutionTask(task) && !['pack', 'pack_restore'].includes(task.task_type) && (
                   <p className="text-xs text-muted-foreground">
                     历史版本来源，仅展示执行记录；本页不提供该类型的创建或重试操作。
@@ -258,15 +258,15 @@ function TaskDetailContent() {
                     <TaskLogArchives taskId={task.task_id} />
                   </Section>
                 )}
-                <details className="rounded-xl border border-border bg-card p-5">
-                  <summary className="cursor-pointer text-sm font-medium">任务配置与技术信息</summary>
+                <details className="rounded-lg border border-border bg-card p-4">
+                  <summary className="cursor-pointer text-sm font-medium leading-5 text-foreground">任务配置与技术信息</summary>
                   <div className="mt-4">
                     <JsonView value={task.config} />
                   </div>
                 </details>
               </div>
-              <details className="rounded-lg border border-border p-4">
-                <summary className="cursor-pointer text-sm font-medium">查看进化版本</summary>
+              <details className="rounded-lg border border-border bg-card p-4">
+                <summary className="cursor-pointer text-sm font-medium leading-5 text-foreground">查看进化版本</summary>
                 <div className="mt-4">
                   <VersionList
                     task={task}

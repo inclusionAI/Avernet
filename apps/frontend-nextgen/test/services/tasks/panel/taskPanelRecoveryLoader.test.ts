@@ -65,30 +65,34 @@ it('同目录返回的 UI 与恢复入口版本不一致时也拒绝混用', asy
   expect((await failed).message).toContain('版本不一致');
 });
 
-it.each(['offline', 'missing-recovery', 'css-load-error'])('开发模式本地不可用时以远端完整 UMD 恢复，UI 复用同一资产：%s', async failure => {
+it.each(['offline', 'missing-recovery', 'css-load-error'])('开发模式本地不可用时以最新发布的轻量入口恢复，UI 复用同一版本：%s', async failure => {
   const previous = process.env.NODE_ENV;
   try {
     process.env.NODE_ENV = 'development';
     global.fetch = jest.fn(async (path: string) => {
+      if (path.includes('registry.npmjs.org')) return { ok: true, json: async () => ({ version: '9.8.7' }) };
       if (failure === 'offline') throw new TypeError('offline');
       return { ok: failure !== 'missing-recovery' || !path.endsWith('recovery.umd.js'), headers: { get: () => path.endsWith('.css') ? 'text/css' : 'application/javascript' } };
     });
     const pending = load(); await tick();
-    expect(document.querySelectorAll('script[src$="recovery.umd.js"]')).toHaveLength(0);
+    expect(document.querySelectorAll('script[src$="recovery.umd.js"]')).toHaveLength(failure === 'css-load-error' ? 0 : 1);
     if (failure === 'css-load-error') {
       document.querySelector('link')!.dispatchEvent(new Event('error')); await tick();
     }
-    const remote = 'https://gw.alipayobjects.com/render/p/hitu_npm/@avernet-assets/task-panel/1.0.1/dist/index.umd.js';
-    expect(document.querySelectorAll('script')).toHaveLength(1);
-    expect(document.querySelector('script')!.src).toBe(remote);
-    expect(document.querySelector('link')!.href).toBe(new URL('task-panel.css', remote).href);
-    global.taskPanel = { ...asset(), assetVersion: '1.0.1', TaskLoopView: () => null };
+    const remote = 'https://gw.alipayobjects.com/render/p/hitu_npm/@avernet-assets/task-panel/9.8.7/dist/index.umd.js';
+    expect(document.querySelector('script')!.src).toBe(new URL('recovery.umd.js', remote).href);
+    expect(document.querySelector('link')).toBeNull();
+    global.taskPanelRecovery = { ...asset(), assetVersion: '9.8.7' };
     document.querySelector('script')!.dispatchEvent(new Event('load'));
+    await expect(pending).resolves.toBe(global.taskPanelRecovery);
+    const ui = loadUI(); await tick();
+    expect(document.querySelector<HTMLScriptElement>(`script[src="${remote}"]`)).not.toBeNull();
+    expect(document.querySelector('link')!.href).toBe(new URL('task-panel.css', remote).href);
+    global.taskPanel = { ...asset(), assetVersion: '9.8.7', TaskLoopView: () => null };
+    document.querySelector<HTMLScriptElement>(`script[src="${remote}"]`)!.dispatchEvent(new Event('load'));
     document.querySelector('link')!.dispatchEvent(new Event('load'));
-    await expect(pending).resolves.toBe(global.taskPanel);
-    await expect(loadUI()).resolves.toBe(global.taskPanel);
-    expect(document.querySelectorAll('script')).toHaveLength(1);
-    expect(global.taskPanelRecovery).toBeUndefined();
+    await expect(ui).resolves.toBe(global.taskPanel);
+    expect(global.fetch.mock.calls.filter(([path]: [string]) => path.includes('registry.npmjs.org'))).toHaveLength(1);
     expect(request).not.toHaveBeenCalled();
   } finally { process.env.NODE_ENV = previous; }
 });
