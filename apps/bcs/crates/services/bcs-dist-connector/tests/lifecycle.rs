@@ -10,24 +10,34 @@ use serde_json::json;
 #[tokio::test]
 async fn a_call_runs_from_hint_to_end_in_the_contract_order() {
     let rig = Rig::new();
+    // The agent's whole answer is already waiting when the start returns.
     let events = rig.agent.start_stream();
-    rig.worker.create().await;
-    rig.worker.notify().await;
-    let running = rig.start();
-
-    until("the agent is called", || async { rig.agent.count("start") == 1 }).await;
-    // Send intent was durable before the network call, under a stable request id.
-    assert_eq!(
-        rig.agent.calls()[0],
-        format!("start {DID}:start agent=agent-analyst payload={} phase=sending", json!({"parts": [{"text": "compare"}]}))
-    );
-    until("acceptance is recorded", || async { rig.phase().await == "accepted" }).await;
-    assert_eq!(rig.doc().await["execution"]["remote"]["task_id"], "rt-77c2");
-
     events.send(delta("Q3 ")).unwrap();
     events.send(delta("grew")).unwrap();
     events.send(final_event()).unwrap();
+    rig.worker.create().await;
+    rig.worker.notify().await;
+    let running = rig.start();
     until("the call ends", || async { rig.phase().await == "ended" }).await;
+
+    // Send intent was durable before the network call, under a stable request id.
+    assert_eq!(
+        rig.agent.calls()[0],
+        format!(
+            "start {DID}:start agent=agent-analyst payload={} phase=sending cancel=not_sent input_sending=null",
+            json!({"parts": [{"text": "compare"}]})
+        )
+    );
+    // The remote task was durable before the first event was reported.
+    let calls = rig.store.calls();
+    let accepted = calls.iter().filter(|c| c.starts_with("json.mutate") && c.contains(":disp:")).nth(2).unwrap();
+    let accepted_at = calls.iter().position(|c| c == accepted).unwrap();
+    let first_report = calls.iter().position(|c| c.starts_with("stream.append") && c.contains(":inbox:")).unwrap();
+    assert!(
+        calls[..first_report].iter().filter(|c| c.starts_with("json.mutate") && c.contains(":disp:")).count() >= 3,
+        "claim, send intent and acceptance precede the first report (acceptance at {accepted_at}, report at {first_report})"
+    );
+    assert_eq!(rig.doc().await["execution"]["remote"]["task_id"], "rt-77c2");
 
     let doc = rig.doc().await;
     assert_eq!(doc["execution"]["outcome"], "completed");

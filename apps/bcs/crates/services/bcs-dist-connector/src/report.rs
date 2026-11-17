@@ -38,6 +38,11 @@ impl Call {
         let admitted = self.report(kind, remote_event_id, payload).await?;
         if question {
             self.awaiting_input = true;
+        } else if self.awaiting_input {
+            // The agent moved on without a reply through this Connector.
+            self.awaiting_input = false;
+            self.waiting_ticks = 0;
+            self.reattach_due = self.events.is_none();
         }
         if let (Some(outcome), Admitted::Yes) = (end, admitted) {
             let evidence = match outcome {
@@ -98,6 +103,8 @@ impl Call {
                         did = %self.did().0, input_id = %request.input.input_id.0,
                         "key event conflicts with one admitted earlier; the call is not ended on it"
                     );
+                    self.conflicted = true;
+                    self.status.pending_effect.store(true, std::sync::atomic::Ordering::SeqCst);
                     return Ok(Admitted::Conflict);
                 }
                 Ok(AdmitOutcome::Quarantined) => {

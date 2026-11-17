@@ -58,7 +58,17 @@ pub(crate) struct Call {
     /// inputs wait behind it.
     pub input_blocked: bool,
     pub input_not_sent: u32,
+    /// The send's outcome is unknown or it was never sent: nothing can be
+    /// done with the agent until the Worker acts.
     pub unresolved: Option<UnresolvedKind>,
+    /// The remote task is known but the agent offers no way to follow it.
+    /// Replies and cancels are still carried out.
+    pub blind: bool,
+    /// A key event conflicted with one admitted earlier: the call is not
+    /// ended on it and is no longer followed.
+    pub conflicted: bool,
+    /// Ticks since a waiting call last looked at its remote task.
+    pub waiting_ticks: u32,
     pub ended: bool,
 }
 
@@ -115,6 +125,9 @@ impl Call {
             input_blocked: false,
             input_not_sent: 0,
             unresolved: None,
+            blind: false,
+            conflicted: false,
+            waiting_ticks: 0,
             ended: false,
         }
     }
@@ -136,10 +149,29 @@ impl Call {
         match self.drive().await {
             Ok(()) => tracing::debug!(did = %did.0, "call ended"),
             Err(Stop::Lost) => tracing::info!(did = %did.0, "holder lost; actor stopped"),
-            Err(Stop::Invalid) => tracing::error!(did = %did.0, "actor stopped on an unexpected dispatch state"),
+            Err(Stop::Invalid) => {
+                tracing::error!(did = %did.0, "unexpected dispatch state; the call stays held and visible");
+                self.park().await;
+            }
         }
         self.status.pending_effect.store(false, Ordering::SeqCst);
         self.status.done.store(true, Ordering::SeqCst);
+    }
+
+    /// A call this actor cannot act on any more: it stays held and counted as
+    /// a pending effect until another holder takes it or it is ended.
+    async fn park(&mut self) {
+        self.events = None;
+        self.status.pending_effect.store(true, Ordering::SeqCst);
+        let interval = self.config.poll_interval_of(self.did());
+        loop {
+            tokio::time::sleep(interval).await;
+            match self.held.refresh().await {
+                Err(HolderError::Lost) => return,
+                Ok(view) if view.execution.phase == DispatchPhase::Ended => return,
+                _ => {}
+            }
+        }
     }
 
     async fn drive(&mut self) -> Flow {
@@ -164,6 +196,8 @@ impl Call {
                 event = next_event(&mut self.events) => match event {
                     Some(Ok(event)) => self.on_event(event.kind, event.event_id, event.payload).await?,
                     // A broken or finished stream is not an agent result.
+                    // While a question is open the stream normally ends; the
+                    // tick keeps observing the task instead.
                     Some(Err(_)) | None => {
                         self.events = None;
                         self.reattach_due = !self.awaiting_input;
@@ -199,18 +233,43 @@ impl Call {
         if self.ended {
             return Ok(());
         }
-        if self.reattach_due && !self.awaiting_input {
-            self.reattach().await?;
-        }
-        if self.polling && !self.ended {
-            self.poll_remote().await?;
+        if !self.blind && !self.conflicted {
+            if self.reattach_due && !self.awaiting_input {
+                self.reattach().await?;
+            }
+            if self.polling && !self.ended {
+                self.poll_remote().await?;
+            }
+            if self.awaiting_input && self.events.is_none() && !self.polling && !self.ended {
+                self.observe_while_waiting().await?;
+            }
         }
         if !self.ended && !self.input_blocked && self.unresolved.is_none() {
             if let Some(input) = self.ports.rules.next_input(&view).cloned() {
                 self.send_input(input).await?;
             }
         }
-        self.publish_status(&view);
+        // The flag reflects what this tick wrote, not what it read.
+        let now = self.held.view().clone();
+        self.publish_status(&now);
+        Ok(())
+    }
+
+    /// A call waiting on a question has no stream, but the agent may move on
+    /// without a reply through the Connector (out-of-band authorization, an
+    /// expired or canceled task, an input whose delivery is unknown). Keep
+    /// looking: by task query when the agent has one, otherwise by a
+    /// re-subscribe every few ticks.
+    async fn observe_while_waiting(&mut self) -> Flow {
+        const RESUBSCRIBE_EVERY: u32 = 8;
+        if self.spec().capabilities.query_by_task {
+            return self.poll_remote().await;
+        }
+        self.waiting_ticks += 1;
+        if self.waiting_ticks >= RESUBSCRIBE_EVERY && self.spec().capabilities.subscribe {
+            self.waiting_ticks = 0;
+            self.reattach().await?;
+        }
         Ok(())
     }
 
@@ -230,6 +289,15 @@ impl Call {
                 Ok(())
             }
         }
+    }
+
+    /// The remote task is known but cannot be followed: report it (D2) and
+    /// keep serving replies and cancels.
+    pub async fn mark_blind(&mut self, code: &str) {
+        self.blind = true;
+        self.polling = false;
+        self.status.pending_effect.store(true, Ordering::SeqCst);
+        self.report_unresolved(UnresolvedKind::Uncertain, code).await;
     }
 
     /// The call cannot be resolved here: report it (D2), keep it held.
@@ -254,7 +322,8 @@ impl Call {
                 view.execution.cancellation,
                 CancelObservation::NotSent | CancelObservation::Sending | CancelObservation::OutcomeUnknown
             );
-        let pending = self.unresolved.is_some() || self.input_blocked || (cancel_open && !self.ended);
+        let stuck = self.unresolved.is_some() || self.input_blocked || self.blind || self.conflicted;
+        let pending = stuck || (cancel_open && !self.ended);
         self.status.pending_effect.store(pending, Ordering::SeqCst);
     }
 }

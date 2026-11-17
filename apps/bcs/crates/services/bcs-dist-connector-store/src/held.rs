@@ -157,6 +157,10 @@ impl HeldDispatchPort for StoreHeldDispatch {
             if recorded && !mine && !confirmed {
                 return invalid(INPUT_MAYBE_SENT);
             }
+            // Nobody recorded intent before this read, and only this holder
+            // can write it from here on: whatever is recorded later is this
+            // handle's own, even if the write's answer is lost.
+            self.own_input_intent = self.own_input_intent.max(Some(*seq));
         }
         let permit = self.transition(None, |doc| {
             let execution = &doc.view.execution;
@@ -192,9 +196,6 @@ impl HeldDispatchPort for StoreHeldDispatch {
             }
         })
         .await?;
-        if let SendOperation::Input { seq, .. } = &permit.operation {
-            self.own_input_intent = self.own_input_intent.max(Some(*seq));
-        }
         Ok(permit)
     }
 

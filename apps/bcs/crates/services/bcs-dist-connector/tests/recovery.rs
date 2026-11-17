@@ -264,7 +264,8 @@ async fn owned_by_me_without_an_actor_resumes_under_a_new_generation() {
 
 #[tokio::test]
 async fn a_holder_that_lost_the_call_stops_and_writes_nothing() {
-    let rig = Rig::new();
+    let mut rig = Rig::new();
+    rig.config.poll_interval = std::time::Duration::from_secs(30); // it will not find out by polling
     let events = rig.agent.start_stream();
     rig.worker.create().await;
     rig.worker.notify().await;
@@ -276,15 +277,57 @@ async fn a_holder_that_lost_the_call_stops_and_writes_nothing() {
     let ClaimOutcome::Acquired(mut second) = other.claim(claim_request(&instance("conn-07"))).await.unwrap() else {
         panic!("no takeover");
     };
-    until("the old actor stops", || async { running.active().await == 0 }).await;
     let version = stored(&rig.store).await.1;
-    // A late terminal event on the old stream changes nothing in `disp`.
-    let _ = events.send(final_event());
-    settle().await;
-    assert_eq!(stored(&rig.store).await.1, version);
+    assert_eq!(running.active().await, 1, "the old actor does not know yet");
+
+    // The old holder still receives the agent's final event. Its key event
+    // is harmless (same identity for every holder), but its `finish` is
+    // fenced: it stops and the dispatch is untouched.
+    events.send(final_event()).unwrap();
+    until("the old actor stops", || async { running.active().await == 0 }).await;
+    assert_eq!(stored(&rig.store).await.1, version, "a lost holder writes nothing to the dispatch");
     assert_eq!(rig.phase().await, "accepted");
+    assert_eq!(rig.doc().await["execution"]["holder"]["instance"]["node"], "conn-07");
+    let reported = rig.inbox_events().await;
+    assert_eq!(reported.len(), 1);
+    assert_eq!(reported[0].1.holder_epoch, HolderEpoch(1), "tagged with the old holder epoch");
+
+    // The new holder's own report of the same final takes effect once.
     second.finish(FinalDispatchOutcome::Completed, "by the new holder".into()).await.unwrap();
     assert_eq!(rig.doc().await["connector"]["finish_evidence"], "by the new holder");
+}
+
+#[tokio::test]
+async fn an_actor_that_dies_is_resumed_under_a_new_generation() {
+    let rig = Rig::new();
+    rig.worker.create_spec(spec_with(|c| c.idempotent_start = true)).await;
+    rig.worker.notify().await;
+    rig.agent.on_start(Reply::Panic);
+    let events = rig.agent.start_stream();
+    let running = rig.start();
+    until("accepted by the resumed actor", || async { rig.phase().await == "accepted" }).await;
+    assert_eq!(rig.doc().await["execution"]["holder"]["epoch"], 2);
+    assert_eq!(rig.agent.count("start"), 2, "the idempotent start is sent again with the same id");
+    events.send(final_event()).unwrap();
+    until("the call ends", || async { rig.phase().await == "ended" }).await;
+    until("idle", || async { running.active().await == 0 }).await;
+}
+
+#[tokio::test]
+async fn a_failed_resume_is_retried_until_it_succeeds() {
+    let rig = Rig::new();
+    rig.worker.create_spec(spec_with(|c| c.idempotent_start = true)).await;
+    rig.worker.notify().await;
+    rig.agent.on_start(Reply::Panic);
+    let events = rig.agent.start_stream();
+    let running = rig.start();
+    until("the first start was attempted", || async { rig.agent.count("start") == 1 }).await;
+    // The resume's first write fails; the call must not be forgotten.
+    rig.store.fail_write(1);
+    until("accepted after a retried resume", || async { rig.phase().await == "accepted" }).await;
+    events.send(final_event()).unwrap();
+    until("the call ends", || async { rig.phase().await == "ended" }).await;
+    let _ = running;
 }
 
 #[tokio::test]

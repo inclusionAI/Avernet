@@ -40,7 +40,13 @@ impl Call {
                         self.mark_unresolved(UnresolvedKind::Uncertain, "resend_exhausted").await;
                         return Ok(());
                     }
-                    UncertainSend::AskAgent => return self.ask_agent(operation, request_id).await,
+                    UncertainSend::AskAgent => {
+                        if !possibly_sent {
+                            // Give the agent a moment to register the request.
+                            backoff.wait().await;
+                        }
+                        return self.ask_agent(operation, request_id).await;
+                    }
                     UncertainSend::Unresolved => {
                         self.mark_unresolved(UnresolvedKind::Uncertain, "start_outcome_unknown").await;
                         return Ok(());
@@ -118,14 +124,20 @@ impl Call {
         loop {
             match self.ports.agent.query(&target, RemoteQuery::ByRequest(request_id.clone())).await {
                 QueryOutcome::Found { remote, .. } => return self.accepted(operation, remote, None).await,
-                QueryOutcome::NotFound | QueryOutcome::Unsupported => {
-                    // "Not found" is no proof the agent will not process it.
-                    self.mark_unresolved(UnresolvedKind::Uncertain, "not_found_by_request").await;
+                QueryOutcome::Unsupported => {
+                    self.mark_unresolved(UnresolvedKind::Uncertain, "query_by_request_unsupported").await;
                     return Ok(());
                 }
-                QueryOutcome::Unavailable { code } => {
+                // "Not found" may only mean "not registered yet": ask a few
+                // times, and even then it is no proof, so the call is left
+                // unresolved rather than sent again.
+                outcome @ (QueryOutcome::NotFound | QueryOutcome::Unavailable { .. }) => {
                     tries += 1;
                     if tries > self.config.not_sent_retries {
+                        let code = match outcome {
+                            QueryOutcome::Unavailable { code } => code,
+                            _ => "not_found_by_request".to_owned(),
+                        };
                         self.mark_unresolved(UnresolvedKind::Uncertain, &code).await;
                         return Ok(());
                     }
@@ -185,9 +197,7 @@ impl Call {
                 }
             }
             Reattach::Poll => self.polling = true,
-            Reattach::Unresolved => {
-                self.mark_unresolved(UnresolvedKind::Uncertain, "cannot_observe_remote_task").await;
-            }
+            Reattach::Unresolved => self.mark_blind("cannot_observe_remote_task").await,
         }
         Ok(())
     }
@@ -217,11 +227,13 @@ impl Call {
                     TaskStatus::Completed => AgentEventKind::Final,
                     TaskStatus::Failed | TaskStatus::Canceled | TaskStatus::Rejected => AgentEventKind::Error,
                 };
+                // The state word the rules read comes from the status, not
+                // from whatever shape the snapshot has.
+                let snapshot = with_state(snapshot, status);
                 self.on_event(kind, None, snapshot).await
             }
             QueryOutcome::Unsupported if self.polling => {
-                self.polling = false;
-                self.mark_unresolved(UnresolvedKind::Uncertain, "query_unsupported").await;
+                self.mark_blind("query_unsupported").await;
                 Ok(())
             }
             QueryOutcome::NotFound | QueryOutcome::Unsupported => {
@@ -234,5 +246,26 @@ impl Call {
                 Ok(())
             }
         }
+    }
+}
+
+/// Ensures a terminal or question payload carries the state word of `status`.
+fn with_state(snapshot: Payload, status: TaskStatus) -> Payload {
+    let word = match status {
+        TaskStatus::Submitted | TaskStatus::Working => return snapshot,
+        TaskStatus::InputRequired => "input_required",
+        TaskStatus::AuthRequired => "auth_required",
+        TaskStatus::Completed => "completed",
+        TaskStatus::Failed => "failed",
+        TaskStatus::Canceled => "canceled",
+        TaskStatus::Rejected => "rejected",
+    };
+    match snapshot {
+        Payload::Inline(serde_json::Value::Object(mut object)) => {
+            object.insert("state".to_owned(), serde_json::Value::String(word.to_owned()));
+            Payload::Inline(serde_json::Value::Object(object))
+        }
+        Payload::Inline(other) => Payload::Inline(serde_json::json!({ "state": word, "task": other })),
+        by_reference => by_reference,
     }
 }
