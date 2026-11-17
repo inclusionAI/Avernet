@@ -60,7 +60,11 @@ impl HttpClient {
                 apply(&mut request, credential)?;
             }
         }
-        self.transport.execute_traced(request).await.map_err(|_| A2AError::internal(connection_error))
+        // Keeps whether a connection was established at all (see `transport_error`).
+        self.transport
+            .execute_traced(request)
+            .await
+            .map_err(|error| crate::transport_error::send_failure(&error, connection_error))
     }
 }
 
