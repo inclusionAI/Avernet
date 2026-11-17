@@ -187,6 +187,7 @@ describe('LabTodosPage（待办卡片工作台）', () => {
     expect(description).toBeInTheDocument();
     expect(description).toHaveClass('text-[13px]', 'font-normal', 'leading-[20px]');
     expect(screen.getByText('测试用户的个人空间')).toBeInTheDocument();
+    expect(screen.queryByText('个人空间')).not.toBeInTheDocument();
 
     await waitFor(() =>
       expect(mockedService.loadTodos).toHaveBeenCalledWith({
