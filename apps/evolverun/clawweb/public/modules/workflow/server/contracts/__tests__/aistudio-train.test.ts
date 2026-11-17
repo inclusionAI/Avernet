@@ -1,8 +1,18 @@
+import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
-import { assertWatchRecord, assertWatchCas, toWatchDto } from '../aistudio-train.js';
+import { aistudioTrainDdl } from '@avernet/clawweb-shared/server/schema-aistudio-train';
+import { WATCH_FIELDS, assertWatchRecord, assertWatchCas, toWatchDto } from '../aistudio-train.js';
 
 import { watchFixture } from './aistudio-train.fixture.js';
 describe('AIStudio wire and safe user projection', () => {
+  it('creates every snake-case business column from the wire contract plus mandatory gmt metadata', () => {
+    const raw = new Database(':memory:');
+    try {
+      for (const ddl of aistudioTrainDdl('sqlite')) raw.exec(ddl);
+      const columns = raw.prepare('PRAGMA table_info(aistudio_train_watches)').all() as {name:string}[];
+      expect(columns.map(c => c.name)).toEqual(expect.arrayContaining([...WATCH_FIELDS.map(k => k.replace(/[A-Z]/g,c => `_${c.toLowerCase()}`)),'id','gmt_create','gmt_modified']));
+    } finally { raw.close(); }
+  });
   it('accepts the exact worker wire contract and fences version increments', () => {
     expect(() => assertWatchRecord(watchFixture())).not.toThrow();
     expect(() => assertWatchCas(1, watchFixture({ version: 2 }))).not.toThrow();

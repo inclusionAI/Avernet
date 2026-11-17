@@ -1,7 +1,6 @@
 import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
 import { aistudioTrainDdl, aistudioTrainMigrations } from '../schema-aistudio-train.js';
-import { WATCH_FIELDS } from '../../../modules/workflow/server/contracts/aistudio-train.js';
 import { workflowSnapshotMigrations } from '../schema-workflow-snapshot.js';
 import { readFileSync } from 'node:fs';
 import { SqliteDatabase } from '../db/sqlite-database.js';
@@ -21,12 +20,12 @@ describe('AIStudio schema migration', () => {
     expect(versions).toEqual([...versions].sort((a,b) => a-b));
     expect(allMigrations.filter(m => m.version === 155)).toHaveLength(1);
   });
-  it('creates every snake-case business column plus mandatory gmt metadata and SQLite indexes', () => {
+  it('creates the watch table with mandatory gmt metadata and SQLite indexes', () => {
     const raw = new Database(':memory:');
     try {
       for (const ddl of aistudioTrainDdl('sqlite')) raw.exec(ddl);
       const columns = raw.prepare('PRAGMA table_info(aistudio_train_watches)').all() as {name:string}[];
-      expect(columns.map(c => c.name)).toEqual(expect.arrayContaining([...WATCH_FIELDS.map(k => k.replace(/[A-Z]/g,c => `_${c.toLowerCase()}`)),'id','gmt_create','gmt_modified']));
+      expect(columns.map(c => c.name)).toEqual(expect.arrayContaining(['id','gmt_create','gmt_modified']));
       expect(raw.prepare('PRAGMA index_list(aistudio_train_watches)').all().length).toBeGreaterThanOrEqual(4);
     } finally { raw.close(); }
   });
