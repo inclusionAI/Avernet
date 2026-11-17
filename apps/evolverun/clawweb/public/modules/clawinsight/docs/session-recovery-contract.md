@@ -193,10 +193,14 @@ Pre-dispatch failures are `failed` with `dispatched: false`, and do not block a 
 
 Owner DingTalk notification enablement lives in each Bot's
 `ce_bot_diagnosis_recovery_config.config_json.notifications.owner.enabled`.
-Only explicit `true` enables it. The existing
-`ce_app_config.session_recovery_owner_notifications.card` continues to supply
-transport templates/callback routes by control-plane environment; old defaults
-and Bot overrides are migration inputs only. Each attempt reads current policy;
+Only explicit `true` enables it. Shared templates/callback routes now come from
+`ce_app_config.session_recovery_cards`, selected by CW control-plane environment.
+Only absence of that entire entry permits the configuration boundary to read
+legacy `.card`; disabled/invalid/new-row read failures never fall back. Old Owner
+defaults/overrides apply only to Bots without a new-table record. Permission cards
+require a template and callback route; ordinary handoff cards require a template,
+and Markdown plan notices require neither. All legacy reads/format adaptation
+stay in the read-only adapter behind `bot-configuration.ts`. Each attempt reads current policy;
 missing/invalid settings and read failures skip sending. No skipped notice is
 replayed when enabled later. Existing paused ordinary Owner messages remain
 paused. See [configuration and migration](bot-diagnosis-recovery-config.md).

@@ -1,7 +1,8 @@
+import { SESSION_RECOVERY_OWNER_NOTIFICATIONS_KEY, SESSION_RECOVERY_NOTIFICATIONS_KEY, legacyOwnerNotificationEnabled } from '../legacy-configuration.js';
 import { notificationBotConfig } from './bot-config-fixture.js';
 import { RECOVERY_NOTIFICATION_ROUTES_KEY } from '../bot-configuration.js';
 import { expect, it, vi } from "vitest";
-import { SessionRecoveryGroupNotifier, SessionRecoveryNotifier, SESSION_RECOVERY_OWNER_NOTIFICATIONS_KEY, SESSION_RECOVERY_NOTIFICATIONS_KEY, legacyOwnerNotificationEnabled } from "../notification.js";
+import { SessionRecoveryGroupNotifier, SessionRecoveryNotifier } from "../notification.js";
 import type { RecoveryStoredTask, RecoveryTimelineEvent } from "../task-contracts.js";
 import { logRepairEvent } from "../../common/logging.js";
 vi.mock("../../common/logging.js", async importOriginal => ({
@@ -374,7 +375,9 @@ it("shortens Chinese and emoji only at sentence boundaries and treats inline Mar
 
 it("reads the explicit Bot Owner switch for each send and ignores the legacy global default", async () => {
   const sender = { sendNotification: vi.fn(), sendCard: vi.fn() };
-  const config = { findByKey: vi.fn().mockResolvedValue({ enabled: 0, config_json: JSON.stringify({ card: { pre: { template_id: "template" } } }) }) };
+  const config = { findByKey: vi.fn(async key => key === SESSION_RECOVERY_OWNER_NOTIFICATIONS_KEY
+    ? { enabled: 0, config_json: '{}' }
+    : { enabled: 1, config_json: JSON.stringify({ pre: { template_id: "template" } }) }) };
   const bots = notificationBotConfig('{}');
   const notifier = new SessionRecoveryNotifier(sender, "https://service.invalid", config, "pre", bots);
   const input = { ownerId: 'owner', botId: 'bot', targetEnvironment: 'prod' as const, taskId: 'SR-one', sessionKey: 'original', kind: 'result' as const, summary: '处理事项' };
@@ -422,7 +425,7 @@ it("notifies user handoff after intervention without claiming business recovery"
 
 it("keeps a legacy ended permission handoff terminal and sends a card without feedback continuation", async () => {
   const sender = { sendNotification: vi.fn(), sendCard: vi.fn() };
-  const config = { findByKey: async () => ({ enabled: 1, config_json: JSON.stringify({ card: { pre: { template_id: "template" } } }) }) };
+  const config = { findByKey: async () => ({ enabled: 1, config_json: JSON.stringify({ pre: { template_id: "template" } }) }) };
   const notifier = new SessionRecoveryNotifier(sender, "https://service.invalid", config, "pre", notificationBotConfig());
   await expect(notifier.notify({ ownerId: "owner-fixture", botId: "bot", targetEnvironment: "prod", taskId: "SR-permission",
     sessionKey: "original", kind: "result", summary: "请在能力集中申请 MCP 服务权限。" })).resolves.toBe(true);
@@ -434,7 +437,7 @@ it("keeps a legacy ended permission handoff terminal and sends a card without fe
 
 it("notifies the Owner of nonblocking suggestions after recovery without requesting approval or repair", async () => {
   const sender = { sendNotification: vi.fn().mockResolvedValue(undefined), sendCard: vi.fn().mockResolvedValue(undefined) };
-  const config = { findByKey: vi.fn().mockResolvedValue({ enabled: 1, config_json: JSON.stringify({ card: { pre: { template_id: "template" } } }) }) };
+  const config = { findByKey: vi.fn().mockResolvedValue({ enabled: 1, config_json: JSON.stringify({ pre: { template_id: "template" } }) }) };
   const notifier = new SessionRecoveryNotifier(sender, "https://service.invalid", config, "pre", notificationBotConfig());
   await notifier.notify({ ownerId: "owner", botId: "bot", targetEnvironment: "prod", taskId: "SR-suggestion", sessionKey: "original", kind: "result", effect: "recovered", summary: "原任务已完成；建议在 Skill 中补充参数示例。" });
   expect(sender.sendCard).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ cardParamMap: expect.objectContaining({

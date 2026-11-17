@@ -7,10 +7,9 @@ import {
   DIAGNOSIS_V3_VERSION, DIAGNOSIS_V4_VERSION, MonitoringError, type DiagnosisEvent, type MonitoringRecoveryTrigger, type RuntimeIdentity,
 } from "./contracts.js";
 import { RECOVERY_POLICY_VERSION, recoverySkipReason } from "./action-policy.js";
-import type { RecoveryAppConfigStore } from "../repair/session-recovery/legacy-configuration.js";
+import type { RecoveryAppConfigStore } from "../repair/session-recovery/configuration-contracts.js";
 import type { BotDiagnosisRecoveryConfigStore } from './bot-config-contracts.js';
 
-export { parseLegacyRecoveryAllowlist, SESSION_RECOVERY_ALLOWLIST_KEY } from "../repair/session-recovery/legacy-configuration.js";
 
 function recoveryRuntimeIdentity(event: DiagnosisEvent, identity: RuntimeIdentity): RuntimeIdentity {
   if (identity.BOT_TYPE !== "service" || identity.STAGE !== "online" || !event.sessionNasPath) return identity;

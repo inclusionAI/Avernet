@@ -1,5 +1,5 @@
 import { validateRecoveryTeamConfiguration } from "../repair/session-recovery/bot-configuration.js";
-import type { RecoveryAppConfigStore } from "../repair/session-recovery/legacy-configuration.js";
+import type { RecoveryAppConfigStore } from "../repair/session-recovery/configuration-contracts.js";
 import { MonitoringError } from './contracts.js';
 import { validBotConfiguration, type BotDiagnosisRecoveryConfigStore } from './bot-config-contracts.js';
 import type { DirectoryBot, MonitoringBotDirectory, MonitoringPrincipal, MonitoringReferences } from './directory-contracts.js';
