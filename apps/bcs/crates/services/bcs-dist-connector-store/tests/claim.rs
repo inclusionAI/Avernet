@@ -49,6 +49,9 @@ async fn first_claim_takes_the_call_at_the_claim_version() {
 async fn two_claimers_one_winner() {
     let store = store();
     WorkerFixture::new(&store).create().await;
+    // Both read the unclaimed document before either writes: both then write
+    // the same claim version, and equal is rejected for the second.
+    store.interleave();
     let (a, b) = (instance("conn-a"), instance("conn-b"));
     let (qa, qb) = (queue(&store), queue(&store));
     let (ra, rb) = tokio::join!(qa.claim(claim_request(&a)), qb.claim(claim_request(&b)));
@@ -58,8 +61,10 @@ async fn two_claimers_one_winner() {
     let (doc, version) = stored(&store).await;
     assert_eq!(version, 1_000_000_000);
     let winner = doc["execution"]["holder"]["instance"]["node"].as_str().unwrap().to_owned();
-    let loser = if winner == "conn-a" { &b } else { &a };
-    assert!(held_members(&store, loser).await.is_empty(), "the loser unlists the call");
+    let (won, lost) = if winner == "conn-a" { (&a, &b) } else { (&b, &a) };
+    assert!(held_members(&store, lost).await.is_empty(), "the loser unlists the call");
+    assert_eq!(held_members(&store, won).await, vec![DID.to_owned()]);
+    assert_eq!(store.count("json.mutate") + store.count("json.rejected"), 2, "both tried to claim");
 }
 
 #[tokio::test]
@@ -359,4 +364,97 @@ async fn held_by_lists_the_instance_index() {
     let limit = NonZeroU32::new(10).unwrap();
     assert_eq!(q.held_by(&me, limit).await.unwrap(), vec![did()]);
     assert!(q.held_by(&instance("conn-07"), limit).await.unwrap().is_empty());
+}
+
+/// A raw holder write, as a former holder landing it at `version`.
+fn raw_execution(execution: serde_json::Value, version: u64) -> (String, bcs_store_api::WriteCondition, bcs_store_api::json::JsonMutation) {
+    use bcs_store_api::json::{JsonEdit, JsonMutation};
+    (
+        disp_key(),
+        bcs_store_api::WriteCondition::Newer(bcs_store_api::Version(version)),
+        JsonMutation::Patch(vec![JsonEdit::Set { pointer: "/execution".into(), value: execution }]),
+    )
+}
+
+#[tokio::test]
+async fn a_takeover_never_undoes_the_former_holders_last_write() {
+    // The "dead" holder was only slow: its finish lands between the
+    // claimant's read and its claim.
+    let store = store();
+    WorkerFixture::new(&store).create().await;
+    let mut first = acquire(&queue(&store), &instance("conn-03")).await;
+    first.begin_send(start_op()).await.unwrap();
+    first.record_acceptance(accepted(start_op())).await.unwrap();
+    let (doc, version) = stored(&store).await;
+    let mut ended = doc["execution"].clone();
+    ended["phase"] = serde_json::json!("ended");
+    ended["outcome"] = serde_json::json!("completed");
+    let (key, condition, mutation) = raw_execution(ended, version + 1);
+    store.before_next_mutate(key, condition, mutation);
+
+    let q = queue_with(&store, Arc::new(FixedLiveness(Liveness::Dead)), config(1));
+    let other = instance("conn-07");
+    let outcome = q.claim(claim_request(&other)).await.unwrap();
+    assert_eq!(outcome_name(&outcome), "ended", "an ended call is not run again");
+    let (doc, _) = stored(&store).await;
+    assert_eq!(doc["execution"]["phase"], "ended");
+    assert_eq!(doc["execution"]["outcome"], "completed");
+    assert!(held_members(&store, &other).await.is_empty());
+}
+
+#[tokio::test]
+async fn a_takeover_starts_from_what_is_stored_after_the_claim() {
+    // The former holder recorded the remote task between the claimant's read
+    // and its claim: the new holder must re-attach, not send again.
+    let store = store();
+    WorkerFixture::new(&store).create().await;
+    let mut first = acquire(&queue(&store), &instance("conn-03")).await;
+    first.begin_send(start_op()).await.unwrap();
+    let (doc, version) = stored(&store).await;
+    let mut accepted_now = doc["execution"].clone();
+    accepted_now["phase"] = serde_json::json!("accepted");
+    accepted_now["remote"] = serde_json::json!({"task_id": "rt-77c2", "context_id": null});
+    let (key, condition, mutation) = raw_execution(accepted_now, version + 1);
+    store.before_next_mutate(key, condition, mutation);
+
+    let q = queue_with(&store, Arc::new(FixedLiveness(Liveness::Dead)), config(1));
+    let ClaimOutcome::Acquired(second) = q.claim(claim_request(&instance("conn-07"))).await.unwrap() else {
+        panic!("no takeover");
+    };
+    assert_eq!(second.view().execution.phase, DispatchPhase::Accepted);
+    assert_eq!(second.view().execution.remote.as_ref().map(|r| r.task_id.as_str()), Some("rt-77c2"));
+    let (doc, version) = stored(&store).await;
+    assert_eq!(version, 2_000_000_000);
+    assert_eq!(doc["execution"]["phase"], "accepted");
+    assert_eq!(doc["execution"]["holder"]["instance"]["node"], "conn-07");
+}
+
+#[tokio::test]
+async fn a_claim_write_that_did_not_land_is_made_again() {
+    let store = store();
+    WorkerFixture::new(&store).create().await;
+    let me = instance("conn-03");
+    store.drop_write(2); // the claim: not applied, outcome unknown
+    let held = acquire(&queue(&store), &me).await;
+    assert_eq!(held.holder().epoch, HolderEpoch(1));
+    assert_eq!(stored(&store).await.1, 1_000_000_000);
+    assert_eq!(store.count("json.mutate"), 2, "the second attempt wrote it");
+    assert_eq!(held_members(&store, &me).await, vec![DID.to_owned()]);
+}
+
+#[tokio::test]
+async fn an_unreadable_document_after_an_unknown_claim_is_outcome_unknown() {
+    let store = store();
+    WorkerFixture::new(&store).create().await;
+    let me = instance("conn-03");
+    store.lose_write(2);
+    store.fail_get(2); // 1 = the claim's read, 2 = the read-back
+    let error = match queue(&store).claim(claim_request(&me)).await {
+        Err(error) => error,
+        Ok(outcome) => panic!("{}", outcome_name(&outcome)),
+    };
+    assert_eq!(error, StoreError::OutcomeUnknown { operation_id: DID.into() });
+    // The claim landed; the index still lists it and a retry finds it.
+    assert_eq!(held_members(&store, &me).await, vec![DID.to_owned()]);
+    assert_eq!(outcome_name(&queue(&store).claim(claim_request(&me)).await.unwrap()), "owned_by_me");
 }

@@ -56,13 +56,18 @@ impl DispatchBoardConfig {
             backend,
             streams,
             read_block: Duration::from_secs(1),
-            read_batch: NonZeroU32::new(64).unwrap_or(NonZeroU32::MIN),
+            read_batch: READ_BATCH,
             reclaim_every: Duration::from_secs(10),
             reclaim_min_idle: Duration::from_secs(30),
             write_attempts: 5,
         }
     }
 }
+
+const READ_BATCH: NonZeroU32 = match NonZeroU32::new(64) {
+    Some(batch) => batch,
+    None => NonZeroU32::MIN,
+};
 
 /// How many times a claim re-reads after losing a race before giving up.
 const CLAIM_ATTEMPTS: u32 = 3;
@@ -131,45 +136,67 @@ impl StoreDispatchQueue {
         }
     }
 
-    /// Writes holder `{me, epoch}` at the claim version. `None` = lost a race.
+    /// Writes holder `{me, epoch}` at the claim version, then reads the
+    /// document back: the handle starts from what is stored now, not from the
+    /// claimant's earlier read (a former holder may have written in between).
+    /// `None` = lost a race.
+    ///
+    /// Claims of one dispatch by one instance are made one at a time (the
+    /// engine handles hints sequentially), so a document that names this
+    /// instance at `epoch` after an unknown write is this call's own claim.
     async fn take(
         &self,
         doc: &DispatchDoc,
         me: &Instance,
         epoch: HolderEpoch,
-    ) -> Result<Option<StoreHeldDispatch>, StoreError> {
+    ) -> Result<Option<ClaimOutcome>, StoreError> {
         let did = &doc.view.spec.did;
         let holder = Holder {
             instance: me.clone(),
             epoch,
         };
-        let mut execution = doc.view.execution.clone();
-        execution.holder = Some(holder.clone());
-        if execution.phase == DispatchPhase::Created {
-            execution.phase = DispatchPhase::Claimed;
-        }
-        let claimed = |version| {
-            let mut view = doc.view.clone();
-            view.execution = execution.clone();
-            StoreHeldDispatch::new(self.shared.clone(), holder.clone(), view, version)
-        };
-        match self
-            .shared
-            .write(did, version::claim(epoch)?, &execution, &doc.connector)
-            .await?
-        {
-            Wrote::Applied(version) => Ok(Some(claimed(version))),
-            Wrote::Rejected => Ok(None),
-            Wrote::Unknown => match self.shared.read(did).await {
-                // Only this instance writes its own name at this epoch.
-                Ok(Some(now)) if now.view.execution.holder.as_ref() == Some(&holder) => {
-                    Ok(Some(claimed(now.version)))
+        // Listed as held right before the claim, so the index never misses a call.
+        held_index::add(&self.shared, me, did).await?;
+        let first_claim = doc.view.execution.phase == DispatchPhase::Created;
+        let mutation = crate::doc::claim_write(&holder, first_claim, !doc.has_connector)?;
+        let wrote = self.shared.mutate(did, version::claim(epoch)?, mutation).await?;
+        let unknown = matches!(wrote, Wrote::Unknown);
+        let claimed = match wrote {
+            Wrote::Rejected => None,
+            Wrote::Applied(_) | Wrote::Unknown => match self.shared.read(did).await {
+                Ok(Some(now)) if now.view.execution.holder.as_ref() == Some(&holder) => Some(now),
+                Ok(_) if unknown => None,
+                // Applied, but the document cannot be read back: not a handle.
+                Ok(_) | Err(_) => {
+                    return Err(StoreError::OutcomeUnknown {
+                        operation_id: did.0.clone(),
+                    });
                 }
-                Ok(_) => Ok(None),
-                Err(_) => Err(StoreError::OutcomeUnknown {
-                    operation_id: did.0.clone(),
-                }),
             },
+        };
+        match claimed {
+            // The former holder ended the call just before the claim landed.
+            Some(now) if now.view.execution.phase == DispatchPhase::Ended => {
+                self.unlist(me, did).await;
+                Ok(Some(ClaimOutcome::Ended))
+            }
+            Some(now) => Ok(Some(ClaimOutcome::Acquired(Box::new(StoreHeldDispatch::new(
+                self.shared.clone(),
+                holder,
+                now.view,
+                now.version,
+            ))))),
+            None => {
+                self.unlist(me, did).await;
+                Ok(None)
+            }
+        }
+    }
+
+    /// Nothing to hold. A failure only leaves the index listing too much.
+    async fn unlist(&self, me: &Instance, did: &Did) {
+        if let Err(error) = held_index::remove(&self.shared, me, did).await {
+            tracing::warn!(?error, did = %did.0, "held index cleanup failed");
         }
     }
 
@@ -191,8 +218,8 @@ impl StoreDispatchQueue {
                 }
                 last_holder = Some(holder.clone());
             }
-            if let Some(held) = self.take(&doc, &request.me, next_epoch(&doc)?).await? {
-                return Ok(ClaimOutcome::Acquired(Box::new(held)));
+            if let Some(outcome) = self.take(&doc, &request.me, next_epoch(&doc)?).await? {
+                return Ok(outcome);
             }
         }
         // Lost every race: someone else holds it, or will be seen on a re-post.
@@ -226,18 +253,9 @@ fn next_epoch(doc: &DispatchDoc) -> Result<HolderEpoch, StoreError> {
 #[async_trait]
 impl DispatchQueuePort for StoreDispatchQueue {
     async fn claim(&self, request: DispatchClaimRequest) -> Result<ClaimOutcome, StoreError> {
-        // Validate the id before anything is written.
+        // Validate the id before anything is read or written.
         self.shared.layout.disp(&request.did)?;
-        // Listed as held before the claim, so the index never misses a call.
-        held_index::add(&self.shared, &request.me, &request.did).await?;
-        let outcome = self.decide_claim(&request).await?;
-        if !matches!(outcome, ClaimOutcome::Acquired(_) | ClaimOutcome::OwnedByMe(_)) {
-            // Nothing to hold. A failure only leaves the index listing too much.
-            if let Err(error) = held_index::remove(&self.shared, &request.me, &request.did).await {
-                tracing::warn!(?error, did = %request.did.0, "held index cleanup failed");
-            }
-        }
-        Ok(outcome)
+        self.decide_claim(&request).await
     }
 
     async fn resume_owned(&self, request: ResumeOwnedDispatch) -> Result<ClaimOutcome, StoreError> {
@@ -260,9 +278,8 @@ impl DispatchQueuePort for StoreDispatchQueue {
                 });
             }
         }
-        held_index::add(&self.shared, me, &request.did).await?;
         match self.take(&doc, me, next_epoch(&doc)?).await? {
-            Some(held) => Ok(ClaimOutcome::Acquired(Box::new(held))),
+            Some(outcome) => Ok(outcome),
             None => match self.shared.read(&request.did).await? {
                 None => Ok(ClaimOutcome::NotFound),
                 Some(now) if now.view.execution.phase == DispatchPhase::Ended => Ok(ClaimOutcome::Ended),

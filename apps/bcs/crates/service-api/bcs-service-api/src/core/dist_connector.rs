@@ -27,6 +27,12 @@
 use crate::port::repo::distributed::inbox::{AdmitRequest, AppendAgentEvent};
 use bcs_dist_model::*;
 
+/// Transition code a held-dispatch provider answers `begin_send(Input)` with
+/// when a former holder generation already recorded send intent for that
+/// input: the intent is durable, but whether the agent received it is unknown.
+/// The holder then applies `uncertain_input` instead of sending blindly.
+pub const INPUT_MAYBE_SENT: &str = "input_maybe_sent";
+
 /// Report position of one held call. A new cursor is made after every claim.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ReportCursor {

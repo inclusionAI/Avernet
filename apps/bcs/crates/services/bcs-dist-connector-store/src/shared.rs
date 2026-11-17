@@ -51,8 +51,17 @@ impl Shared {
         execution: &DispatchExecution,
         connector: &ConnectorState,
     ) -> Result<Wrote, StoreError> {
-        let key = self.layout.disp(did)?;
         let mutation = doc::connector_write(execution, connector)?;
+        self.mutate(did, version, mutation).await
+    }
+
+    pub async fn mutate(
+        &self,
+        did: &Did,
+        version: Version,
+        mutation: bcs_store_api::json::JsonMutation,
+    ) -> Result<Wrote, StoreError> {
+        let key = self.layout.disp(did)?;
         let outcome = self
             .json
             .mutate_json(&key, WriteCondition::Newer(version), mutation, Expiry::Preserve)

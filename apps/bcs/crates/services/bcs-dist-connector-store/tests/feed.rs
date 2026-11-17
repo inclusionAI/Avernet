@@ -104,14 +104,58 @@ async fn a_started_read_is_kept_across_receive_calls() {
     let store = Arc::new(Recorder::default());
     let worker = WorkerFixture::new(&store);
     let mut feed = feed(&store, "conn-03").await;
-    // Times out while the group read (20 ms block) may still be in flight.
-    assert!(feed.receive(max(10), Duration::from_millis(5)).await.unwrap().is_empty());
+    store.clear();
+    // Three receives that give up long before the group read's 20 ms block
+    // ends: the one read stays in flight, it is not dropped and restarted.
+    for _ in 0..3 {
+        assert!(feed.receive(max(10), Duration::from_millis(2)).await.unwrap().is_empty());
+    }
+    assert_eq!(store.count("stream.read_group"), 1, "{:?}", store.calls());
     worker.notify().await;
-    tokio::time::sleep(Duration::from_millis(40)).await;
-    // Whatever the in-flight read registered is delivered, not dropped.
-    let got = feed.receive(max(10), Duration::from_millis(200)).await.unwrap();
+    let got = feed.receive(max(10), Duration::from_millis(300)).await.unwrap();
     assert_eq!(got.len(), 1);
     assert_eq!(got[0].did, did());
+}
+
+#[tokio::test]
+async fn idle_takeover_covers_every_partition_with_a_small_max() {
+    let store = Arc::new(Recorder::default());
+    let streams = CommandStreams::new(max(3));
+    let worker = WorkerFixture { store: store.clone(), streams };
+    let pending_stub = || Arc::new(bcs_dist_connector_store::membership::PendingMembership);
+    let mut dead = queue_with(&store, pending_stub(), config(3))
+        .notifications(pool(), instance("conn-dead"))
+        .await
+        .unwrap();
+    let dids: Vec<Did> = (0..9).map(|n| Did(format!("s0042.7f3a9c.b21e.n{n}.a1"))).collect();
+    for did in &dids {
+        worker.notify_did(did).await;
+    }
+    let mut taken = 0;
+    while taken < dids.len() {
+        taken += dead.receive(max(20), Duration::from_millis(300)).await.unwrap().len();
+    }
+    drop(dead); // nothing acked
+
+    let mut config = config(3);
+    config.reclaim_min_idle = Duration::ZERO;
+    config.reclaim_every = Duration::ZERO;
+    let mut live = queue_with(&store, pending_stub(), config)
+        .notifications(pool(), instance("conn-08"))
+        .await
+        .unwrap();
+    let mut got = std::collections::BTreeSet::new();
+    for _ in 0..40 {
+        // One at a time: the takeover must still reach all three partitions.
+        for delivery in live.receive(max(1), Duration::from_millis(30)).await.unwrap() {
+            live.ack(&delivery).await.unwrap();
+            got.insert(delivery.did.0.clone());
+        }
+        if got.len() == dids.len() {
+            break;
+        }
+    }
+    assert_eq!(got.len(), dids.len(), "taken over: {got:?}");
 }
 
 #[tokio::test]
