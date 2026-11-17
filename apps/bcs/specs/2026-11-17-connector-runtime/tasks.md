@@ -79,7 +79,7 @@ the code of each task; each group ends with its crate's tests green.
 
 - [x] 6.1 `DistRuntimeControlPort` on the engine: snapshot, drain (stop
   claiming, wait, D8 stub for leftovers); `conformance_runtime_control.rs`.
-- [ ] 6.2 `ConnectorRuntimeFacade` in `bcs-app-dist-runtime`; service harness.
+- [x] 6.2 `ConnectorRuntimeFacade` in `bcs-app-dist-runtime`; service harness.
 
 ## Group 7 — End to end and finish
 

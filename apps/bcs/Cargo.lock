@@ -707,6 +707,7 @@ dependencies = [
  "async-trait",
  "bcs-dist-model",
  "bcs-service-api",
+ "bcs-test-support",
  "tokio",
 ]
 
