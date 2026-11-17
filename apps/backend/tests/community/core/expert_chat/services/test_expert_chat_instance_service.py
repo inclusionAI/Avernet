@@ -733,7 +733,7 @@ class TestGetCallerConnection:
         ws_info = _make_ws_info()
         baas.get_ws_info_by_bot_uuid = MagicMock(return_value=ws_info)
 
-        result = await svc.get_caller_connection(USER_ID, BOT_ID, OWNER_ID, iam_token="unused-iam-secret")
+        result = await svc.get_caller_connection(USER_ID, BOT_ID, OWNER_ID, iam_token="test-token")
 
         assert result["need_poll"] is False
         assert result["connection"]["bot_uuid"] == BOT_UUID

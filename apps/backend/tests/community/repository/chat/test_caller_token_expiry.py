@@ -695,6 +695,7 @@ def test_forced_install_commit_failure_retains_ledger_and_reports_failure(repo, 
     old = datetime.now(UTC) + timedelta(days=2)
     with scope(repo, old):
         pass
+    actual_expiry = old - timedelta(days=1)
     delegate = Mock()
     updater = ExpiryAwareCallerRuntimeUpdater(
         bots=Mock(get_unique_by_id=Mock(return_value={"active_engine": "openclaw"})),
@@ -709,7 +710,7 @@ def test_forced_install_commit_failure_retains_ledger_and_reports_failure(repo, 
         with pytest.raises(RuntimeError):
             updater.update_caller_identity(
                 bot_id="b1", owner_user_id="o1", caller_user_id="u1",
-                caller_token=CallerToken("private-caller-secret", "u1", old - timedelta(days=1), "fp"),
+                caller_token=CallerToken("test-token", "u1", actual_expiry, "fp"),
                 stage="online", publish_id=None, binding_id=7, force_runtime_refresh=True,
             )
     delegate.update_caller_identity.assert_called_once()
@@ -718,4 +719,4 @@ def test_forced_install_commit_failure_retains_ledger_and_reports_failure(repo, 
     assert "caller_token_force_install_succeeded" not in caplog.text
     assert "caller_token_expiry_recorded" not in caplog.text
     assert "private-commit-secret" not in caplog.text
-    assert "private-caller-secret" not in caplog.text
+    assert "test-token" not in caplog.text

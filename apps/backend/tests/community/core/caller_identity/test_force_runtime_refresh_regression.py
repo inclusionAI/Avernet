@@ -70,11 +70,11 @@ def _seed(repo, expiry):
 
 
 def _exchange(service, updater, end, *, force=False, binding_id=7, subject="u1"):
-    token = CallerToken("runtime-credential-canary", subject, end, "fingerprint")
+    token = CallerToken("test-token", subject, end, "fingerprint")
     issuer = Issuer(token)
     kwargs = {"force_runtime_refresh": True} if force else {}
     service.exchange_caller_identity(
-        iam_token="source-credential-canary", caller_user_id="u1", bot_id="b1",
+        iam_token="test-iam", caller_user_id="u1", bot_id="b1",
         owner_user_id="o1", token_provider=issuer, runtime_updater=updater,
         stage="online", publish_id=3, entity_id="o1", binding_id=binding_id,
         session_key="business-session", **kwargs,
@@ -100,8 +100,8 @@ def test_real_chain_installs_and_records_the_actual_selected_token(repo, caplog,
     if force:
         assert "caller_token_force_install_requested" in caplog.text
         assert "caller_token_force_install_succeeded" in caplog.text
-    assert "runtime-credential-canary" not in caplog.text
-    assert "source-credential-canary" not in caplog.text
+    assert "test-token" not in caplog.text
+    assert "test-iam" not in caplog.text
 
 
 def test_real_chain_failure_keeps_old_expiry_and_masks_the_failure_payload(repo, caplog):
@@ -109,7 +109,7 @@ def test_real_chain_failure_keeps_old_expiry_and_masks_the_failure_payload(repo,
     old = datetime.now(UTC) + timedelta(hours=48)
     _seed(repo, old)
     service, updater, installer, _ = _chain(repo)
-    installer.failure = RuntimeError("runtime-credential-canary source-credential-canary private-failure")
+    installer.failure = RuntimeError("test-token test-iam private-failure")
 
     with pytest.raises(RuntimeError):
         _exchange(service, updater, old - timedelta(hours=24), force=True)
@@ -119,8 +119,8 @@ def test_real_chain_failure_keeps_old_expiry_and_masks_the_failure_payload(repo,
     assert "caller_token_force_install_failed" in caplog.text
     assert "error_type=RuntimeError" in caplog.text
     assert "private-failure" not in caplog.text
-    assert "runtime-credential-canary" not in caplog.text
-    assert "source-credential-canary" not in caplog.text
+    assert "test-token" not in caplog.text
+    assert "test-iam" not in caplog.text
 
 
 @pytest.mark.parametrize("binding_id,subject,error", [(8, "u1", ValueError), (7, "someone-else", CallerCredentialError)])
@@ -140,8 +140,8 @@ def test_force_keeps_teclaw_installation_independent_of_expiry(provider, engine)
     instances.caller_token_update.side_effect = AssertionError("Teclaw must not access expiry coordination")
     instances.get_instance.side_effect = AssertionError("Teclaw must not read expiry")
     service, updater, installer, _ = _chain(instances, provider=provider, engine=engine)
-    token = _exchange(service, updater, datetime.now(UTC) + timedelta(hours=1), force=True)
-    assert installer.installed == [token]
+    issued = _exchange(service, updater, datetime.now(UTC) + timedelta(hours=1), force=True)
+    assert installer.installed == [issued]
     instances.caller_token_update.assert_not_called()
     instances.get_instance.assert_not_called()
 
@@ -151,12 +151,12 @@ async def test_startup_failure_isolated_without_logging_raw_credentials(caplog):
     caplog.set_level("INFO")
     service = ExpertChatInstanceService.__new__(ExpertChatInstanceService)
     service._caller_identity = Mock()
-    service._caller_identity.exchange_caller_identity.side_effect = RuntimeError("private-iam-canary private-runtime-canary")
+    service._caller_identity.exchange_caller_identity.side_effect = RuntimeError("test-startup-iam test-startup-token")
     service._token_provider = Mock()
     service._runtime_updater = Mock()
 
     await service._exchange_caller_identity(
-        iam_token="private-iam-canary", user_id="u1", bot_id="b1", owner_id="o1",
+        iam_token="test-startup-iam", user_id="u1", bot_id="b1", owner_id="o1",
         publish_id=3, binding_id=7, force_runtime_refresh=True,
     )
 
@@ -164,5 +164,5 @@ async def test_startup_failure_isolated_without_logging_raw_credentials(caplog):
     assert "Caller identity exchange requested" in caplog.text
     assert "Caller identity exchange failed" in caplog.text
     assert "error_type=RuntimeError" in caplog.text
-    assert "private-iam-canary" not in caplog.text
-    assert "private-runtime-canary" not in caplog.text
+    assert "test-startup-iam" not in caplog.text
+    assert "test-startup-token" not in caplog.text
