@@ -28,6 +28,9 @@ struct Subscription {
     /// Items ready before the first poll (the snapshot or the resume ack).
     first: Option<TaskStreamItem>,
     follow: Option<CoreFollow>,
+    /// `true` right after a snapshot was sent: a gap before any event then
+    /// means the stored position cannot be followed at all.
+    fresh_snapshot: bool,
 }
 
 pub(crate) async fn subscribe(
@@ -65,6 +68,7 @@ pub(crate) async fn subscribe(
         core,
         scope,
         tid: request.tid,
+        fresh_snapshot: matches!(first, TaskStreamItem::Snapshot { .. }),
         first: Some(first),
         follow,
     };
@@ -112,15 +116,25 @@ impl Subscription {
             None => None,
             Some(Err(error)) => Some((Err(core_error(error)), self)),
             Some(Ok(CoreFollowItem::Events { events, next })) => {
+                self.fresh_snapshot = false;
                 if !events.iter().any(ends_stream) {
                     self.follow = Some(follow);
                 }
                 Some((Ok(TaskStreamItem::Events { events, cursor: next }), self))
             }
+            // Two gaps in a row: starting over would only repeat. End the
+            // stream with a retryable error instead of sending snapshots forever.
+            Some(Ok(CoreFollowItem::Gap)) if self.fresh_snapshot => {
+                let error = GatewayError::Unavailable {
+                    code: "task_position_unavailable".to_owned(),
+                };
+                Some((Err(error), self))
+            }
             // The position is gone: start over from the stored view.
             Some(Ok(CoreFollowItem::Gap)) => match snapshot(&self.core, &self.scope, &self.tid).await {
                 Ok((item, follow)) => {
                     self.follow = follow;
+                    self.fresh_snapshot = true;
                     Some((Ok(item), self))
                 }
                 Err(error) => Some((Err(error), self)),

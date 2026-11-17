@@ -89,6 +89,8 @@ async fn another_scope_sees_no_task() {
 async fn resume_is_valid_only_at_or_after_coverage_of_a_running_task() {
     let f = fixture();
     f.worker.create(&snapshot(TID, TaskStatus::Working, Some(eid(12, 1)), 1)).await;
+    f.worker.append(&status_event(TID, eid(12, 1), TaskStatus::Working)).await;
+    f.worker.append(&text_event(TID, eid(13, 4), "newest")).await;
     let check = |value: &'static str| {
         let reader = &f.reader;
         async move { reader.validate_resume(&scope(), &cursor_at(value)).await.unwrap() }
@@ -98,6 +100,9 @@ async fn resume_is_valid_only_at_or_after_coverage_of_a_running_task() {
     // Before the coverage: those entries may be trimmed.
     assert_eq!(check("11-9").await, ResumeCheck::Gap);
     assert_eq!(check("not-a-position").await, ResumeCheck::Gap);
+    // Beyond the newest entry: never handed out, so never followed.
+    assert_eq!(check("13-5").await, ResumeCheck::Gap);
+    assert_eq!(check("999999999-1").await, ResumeCheck::Gap);
 
     let mut other_backend = cursor_at("12-1");
     other_backend.token.backend = BackendId("other".into());

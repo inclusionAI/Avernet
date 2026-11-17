@@ -142,6 +142,34 @@ impl Shared {
         }
     }
 
+    /// Id of the newest entry of a stream; `None` when it has none.
+    async fn head(&self, key: &str) -> Result<Option<StreamId>, StoreError> {
+        let page = self
+            .stream
+            .range(key, Bound::Unbounded, Bound::Unbounded, NonZeroU32::MIN, true)
+            .await
+            .map_err(|e| from_read(&e))?;
+        Ok(page.entries.first().map(|entry| entry.id))
+    }
+
+    /// Can `at` be followed for this task? Not when the task is finished (its
+    /// entries may be trimmed at any time), when `at` is before the snapshot's
+    /// coverage (those entries may be trimmed while it runs), or when `at` is
+    /// beyond the newest entry (no reader ever handed out such a position, and
+    /// a shared reader started there would deliver nothing to anyone).
+    async fn followable(&self, snapshot: &TaskSnapshot, at: StreamId) -> Result<bool, StoreError> {
+        if is_terminal(snapshot.content.status)
+            || snapshot.snapshot_event_id.is_some_and(|covered| at < stream_id(covered))
+        {
+            return Ok(false);
+        }
+        // The Worker really wrote both the newest entry and the snapshot's
+        // coverage, so either bounds what a client can legitimately hold.
+        let head = self.head(&self.layout.ev(&snapshot.sid)?).await?.unwrap_or(START);
+        let covered = snapshot.snapshot_event_id.map_or(START, stream_id);
+        Ok(at <= head.max(covered))
+    }
+
     fn cursor(&self, sid: &Sid, tid: &Tid, id: StreamId) -> TaskCursor {
         position::cursor(&self.config.backend, sid, tid, id)
     }
@@ -255,14 +283,11 @@ impl TaskReaderPort for StoreTaskReader {
         if &snapshot.scope != scope || snapshot.sid != cursor.sid {
             return Ok(ResumeCheck::InvalidScope);
         }
-        // A finished task's entries may be trimmed at any time, and entries
-        // before the snapshot's coverage may be trimmed while it runs.
-        if is_terminal(snapshot.content.status)
-            || snapshot.snapshot_event_id.is_some_and(|covered| at < stream_id(covered))
-        {
-            return Ok(ResumeCheck::Gap);
+        if self.shared.followable(&snapshot, at).await? {
+            Ok(ResumeCheck::Valid)
+        } else {
+            Ok(ResumeCheck::Gap)
         }
-        Ok(ResumeCheck::Valid)
     }
 
     fn follow(
@@ -446,9 +471,15 @@ impl Follow {
         let Some(after) = position::parse(&shared.config.backend, &self.cursor.token) else {
             return Ok(None);
         };
-        // One task read per subscription (never per event): the scope check.
+        // One task read per subscription (never per event): the scope check,
+        // and whether the position can still be followed. The task may have
+        // advanced or finished since the caller restored or validated it.
         match shared.snapshot(&self.cursor.tid).await? {
-            Some(snapshot) if snapshot.scope == self.scope && snapshot.sid == self.cursor.sid => {}
+            Some(snapshot) if snapshot.scope == self.scope && snapshot.sid == self.cursor.sid => {
+                if !shared.followable(&snapshot, after).await? {
+                    return Ok(None);
+                }
+            }
             Some(_) => return Err(invalid("cursor_scope_mismatch")),
             None => return Ok(None),
         }

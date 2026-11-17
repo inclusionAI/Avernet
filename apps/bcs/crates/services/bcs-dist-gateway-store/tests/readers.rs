@@ -236,3 +236,37 @@ async fn repeated_read_failures_end_the_subscribers_with_the_error() {
     assert!(follow.next().await.is_none());
     assert_eq!(f.reader.served_sessions(), 0);
 }
+
+#[tokio::test]
+async fn a_position_beyond_the_newest_entry_is_a_gap_and_starts_no_reader() {
+    let f = fixture();
+    f.worker.create(&snapshot(TID, TaskStatus::Working, None, 1)).await;
+    f.worker.append(&text_event(TID, eid(1, 1), "x")).await;
+    let mut forged = f.reader.follow(scope(), cursor(TID, "999999999-1"));
+    assert_eq!(forged.next().await, Some(Ok(FollowItem::Gap)));
+    assert!(forged.next().await.is_none());
+    assert_eq!(f.reader.served_sessions(), 0);
+    // Other subscribers of the session are unaffected.
+    let mut honest = f.reader.follow(scope(), cursor(TID, "0-0"));
+    assert_eq!(ids(&mut honest, 1).await, ["1-1"]);
+}
+
+#[tokio::test]
+async fn a_task_that_moved_on_since_it_was_restored_is_a_gap() {
+    let f = fixture();
+    f.worker.create(&snapshot(TID, TaskStatus::Working, Some(eid(5, 1)), 1)).await;
+    for n in 5..=9 {
+        f.worker.append(&text_event(TID, eid(n, 1), "x")).await;
+    }
+    // The snapshot now covers 9-1 (entries before it may be trimmed): a
+    // position restored at 5-1 is no longer safe to follow.
+    f.worker.publish(&snapshot(TID, TaskStatus::Working, Some(eid(9, 1)), 1)).await;
+    let mut stale = f.reader.follow(scope(), cursor(TID, "5-1"));
+    assert_eq!(stale.next().await, Some(Ok(FollowItem::Gap)));
+
+    // A task that finished meanwhile: nothing more will be delivered.
+    f.worker.publish(&snapshot(TID, TaskStatus::Completed, Some(eid(9, 1)), 1)).await;
+    let mut finished = f.reader.follow(scope(), cursor(TID, "9-1"));
+    assert_eq!(finished.next().await, Some(Ok(FollowItem::Gap)));
+    assert_eq!(f.reader.served_sessions(), 0);
+}

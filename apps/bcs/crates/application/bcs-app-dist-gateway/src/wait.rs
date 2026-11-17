@@ -74,7 +74,9 @@ pub(crate) async fn wait_task(
                 // Timeout: the current view is the answer.
                 Err(_) => return restore().await.map(|cut| cut.view),
                 Ok(None) => return restore().await.map(|cut| cut.view),
-                Ok(Some(Err(error))) => return Err(core_error(error)),
+                // The input is admitted either way: a failed read of the event
+                // stream ends the wait with the current view, like a timeout.
+                Ok(Some(Err(_))) => return restore().await.map(|cut| cut.view),
                 Ok(Some(Ok(CoreFollowItem::Gap))) => break None,
                 Ok(Some(Ok(CoreFollowItem::Events { events, .. }))) => {
                     if let Some(event) = events.iter().find(|e| event_matches(e, request.until)) {
@@ -85,8 +87,15 @@ pub(crate) async fn wait_task(
         };
         match found {
             Some(id) => break id,
-            // The position is gone: look at the stored view again.
-            None => cut = restore().await?,
+            // The position is gone: look at the stored view again, but never
+            // spin when it keeps being unusable.
+            None => {
+                if Instant::now() + gateway.config.snapshot_cover_retry >= deadline {
+                    return restore().await.map(|cut| cut.view);
+                }
+                sleep(gateway.config.snapshot_cover_retry).await;
+                cut = restore().await?;
+            }
         }
     };
     // The event is committed; wait (bounded) until the stored view covers it.
