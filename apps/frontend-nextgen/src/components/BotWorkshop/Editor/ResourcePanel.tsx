@@ -5,7 +5,7 @@ import { Modal, ModalContent, ModalFooter, ModalHeader, ModalTitle } from '@/com
 import type { BotEditorResource, BotEditorResourcePreview } from '@/domain/botEditor';
 import { buildVisibleResourceTree } from '@/services/botWorkshop/resourceTree';
 import { FolderPlus, Upload } from 'lucide-react';
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ResourcePanelRow } from './ResourcePanelRow';
 import { ResourcePreviewDrawer } from './ResourcePreviewDrawer';
 
@@ -22,6 +22,10 @@ export function ResourcePanel({
   onCopyPath,
   onLoadDirectory,
   loadingPaths,
+  errors = {},
+  loadedPaths,
+  onRetry,
+  rootReady = true,
 }: {
   resources: BotEditorResource[];
   editable: boolean;
@@ -35,6 +39,10 @@ export function ResourcePanel({
   onCopyPath: (path: string) => Promise<void>;
   onLoadDirectory: (path: string) => Promise<void>;
   loadingPaths: string[];
+  errors?: Record<string, string>;
+  loadedPaths?: string[];
+  onRetry?: (path: string) => Promise<void>;
+  rootReady?: boolean;
 }) {
   const [path, setPath] = useState('');
   const [preview, setPreview] = useState<{ path: string; result: BotEditorResourcePreview }>();
@@ -42,9 +50,16 @@ export function ResourcePanel({
   const [createOpen, setCreateOpen] = useState(false);
   const [createParent, setCreateParent] = useState('');
   const [expanded, setExpanded] = useState<string[]>([]);
-  const [loaded, setLoaded] = useState<string[]>([]);
+  const [localLoadedPaths, setLocalLoadedPaths] = useState<string[]>([]);
+  const effectiveLoadedPaths = loadedPaths ?? localLoadedPaths;
   const uploadRef = useRef<HTMLInputElement>(null);
   const uploadDirectoryRef = useRef('');
+  useEffect(() => {
+    if (loadedPaths) setExpanded((current) => {
+      const retained = current.filter((path) => loadedPaths.includes(path) || loadingPaths.includes(path) || Boolean(errors[path]));
+      return retained.length === current.length ? current : retained;
+    });
+  }, [loadedPaths, loadingPaths, errors]);
   const visibleResources = useMemo(() => buildVisibleResourceTree(resources, expanded), [expanded, resources]);
   const uploadToDirectory = async (target: string, file: File) => {
     await onUpload(target ? `${target}/${file.name}` : file.name, file);
@@ -58,10 +73,10 @@ export function ResourcePanel({
       return;
     }
     setExpanded((current) => [...current, target]);
-    if (!loaded.includes(target)) {
-      void onLoadDirectory(target)
-        .then(() => setLoaded((current) => [...new Set([...current, target])]))
-        .catch(() => undefined);
+    if (!effectiveLoadedPaths.includes(target)) {
+      void onLoadDirectory(target).then(() => {
+        if (!loadedPaths) setLocalLoadedPaths((current) => [...new Set([...current, target])]);
+      }).catch(() => undefined);
     }
   };
   return (
@@ -117,6 +132,15 @@ export function ResourcePanel({
         </div>
       </div>
       <div className="w-full px-4 pb-6 pt-3">
+        {(loadingPaths.includes('') || (!rootReady && !errors[''])) && (
+          <div role="status" className="mb-3 text-sm text-muted-foreground">正在加载资源…</div>
+        )}
+        {Object.entries(errors).map(([failedPath, message]) => (
+          <div key={failedPath} role="alert" className="mb-3 flex items-center justify-between gap-3 rounded-md border border-border p-3">
+            <span>{failedPath ? `${failedPath}：` : ''}{message}</span>
+            <Button variant="outline" size="sm" disabled={loadingPaths.includes(failedPath)} onClick={() => void onRetry?.(failedPath).catch(() => undefined)}>重试</Button>
+          </div>
+        ))}
         {resources.length ? (
           <div>
             {visibleResources.map(({ item, depth }) => (
@@ -149,11 +173,11 @@ export function ResourcePanel({
               />
             ))}
           </div>
-        ) : (
+        ) : rootReady && !errors[''] && !loadingPaths.includes('') ? (
           <div className="rounded-xl border border-dashed border-border bg-card py-14">
             <Empty compact title="工作区为空" description="当前目录没有文件或文件夹。" />
           </div>
-        )}
+        ) : null}
       </div>
       <ResourcePreviewDrawer preview={preview} onClose={() => setPreview(undefined)} />
       <Modal open={createOpen} onOpenChange={setCreateOpen}>

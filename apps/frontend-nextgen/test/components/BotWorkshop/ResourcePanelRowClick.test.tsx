@@ -166,3 +166,27 @@ test('删除确认弹层内取消不会误折叠已展开目录', async () => {
   expect(await screen.findByText('guide')).toBeInTheDocument();
   expect(onLoadDirectory).toHaveBeenCalledTimes(1);
 });
+
+test('目录加载失败后重试成功保持展开，根刷新失效后收起', async () => {
+  const load = jest.fn().mockResolvedValue(undefined);
+  const retry = jest.fn().mockResolvedValue(undefined);
+  const props = { resources, editable: true, onCreateDirectory: jest.fn(), onDelete: jest.fn(), onUpload: jest.fn(), onPreview: jest.fn(), onDownload: jest.fn(), onCopyPath: jest.fn(), onLoadDirectory: load, onRetry: retry };
+  const { rerender } = render(<ResourcePanel {...props} loadingPaths={[]} loadedPaths={['']} errors={{}} />);
+  clickDocsName();
+  rerender(<ResourcePanel {...props} loadingPaths={['docs']} loadedPaths={['']} errors={{}} />);
+  expect(screen.getByRole('button', { name: '收起docs' })).toBeInTheDocument();
+  rerender(<ResourcePanel {...props} loadingPaths={[]} loadedPaths={['']} errors={{ docs: '资源加载失败，请重试' }} />);
+  fireEvent.click(screen.getByRole('button', { name: '重试' }));
+  expect(retry).toHaveBeenCalledWith('docs');
+  rerender(<ResourcePanel {...props} loadingPaths={[]} loadedPaths={['', 'docs']} errors={{}} />);
+  expect(screen.getByRole('button', { name: '收起docs' })).toBeInTheDocument();
+  expect(screen.getByText('guide')).toBeInTheDocument();
+  rerender(<ResourcePanel {...props} loadingPaths={[]} loadedPaths={['']} errors={{}} />);
+  await waitFor(() => expect(screen.getByRole('button', { name: '展开docs' })).toBeInTheDocument());
+});
+
+test('根加载时显示加载状态', () => {
+  renderPanel({ resources: [], rootReady: false, loadingPaths: [''], loadedPaths: [] });
+  expect(screen.getByRole('status')).toHaveTextContent('正在加载资源');
+  expect(screen.queryByText('工作区为空')).not.toBeInTheDocument();
+});

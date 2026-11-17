@@ -16,7 +16,7 @@ import { useResourcePathClipboard } from '@/hooks/useResourcePathClipboard';
 import { useRoutineActivation } from '@/hooks/useRoutineActivation';
 import { useSkillSetActivation } from '@/hooks/useSkillSetActivation';
 import { botEditorService } from '@/services/botWorkshop/botEditorService';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
 export function useBotEditor(
@@ -39,6 +39,61 @@ export function useBotEditor(
   const candidates = useBotEditorCandidates(botId, spaceId, ownerId);
   const [resources, setResources] = useState<BotEditorResource[]>([]);
   const [resourceLoadingPaths, setResourceLoadingPaths] = useState<string[]>([]);
+  const [resourceErrors, setResourceErrors] = useState<Record<string, string>>({});
+  const [resourceLoadedPaths, setResourceLoadedPaths] = useState<string[]>([]);
+  const resourceIdentity = `${botId ?? ''}:${ownerId ?? ''}`;
+  const resourceRequests = useRef({ identity: resourceIdentity, sequence: 0, versions: {} as Record<string, number> });
+  if (resourceRequests.current.identity !== resourceIdentity) {
+    resourceRequests.current = { identity: resourceIdentity, sequence: resourceRequests.current.sequence + 1, versions: {} };
+  }
+  const startResourceRequest = (path: string) => {
+    const current = resourceRequests.current;
+    if (current.identity !== resourceIdentity) return { identity: resourceIdentity, path, version: -1 };
+    const version = ++current.sequence;
+    current.versions[path] = version;
+    setResourceLoadingPaths((paths) => [...new Set([...paths, path])]);
+    return { identity: current.identity, path, version };
+  };
+  const isCurrentResourceRequest = (ticket: { identity: string; path: string; version: number }) =>
+    resourceRequests.current.identity === ticket.identity && resourceRequests.current.versions[ticket.path] === ticket.version;
+  const finishResourceRequest = (
+    ticket: { identity: string; path: string; version: number },
+    items?: BotEditorResource[],
+    error?: unknown,
+  ) => {
+    if (!isCurrentResourceRequest(ticket)) return false;
+    const { path } = ticket;
+    if (items) {
+      // A refreshed parent invalidates all in-flight descendants and cached children.
+      const requests = resourceRequests.current;
+      Object.keys(requests.versions).forEach((child) => {
+        if (child !== path && (!path || child.startsWith(`${path}/`))) delete requests.versions[child];
+      });
+      setResources((current) => path ? [...current.filter((item) => item.parentPath !== path && !item.parentPath.startsWith(`${path}/`)), ...items] : items);
+      setResourceLoadedPaths((current) => [...current.filter((child) => child !== path && (path ? !child.startsWith(`${path}/`) : false)), path]);
+      setResourceErrors((current) => Object.fromEntries(Object.entries(current).filter(([child]) => child !== path && (path ? !child.startsWith(`${path}/`) : false))));
+      setResourceLoadingPaths((current) => current.filter((child) => child !== path && (path ? !child.startsWith(`${path}/`) : false)));
+    } else {
+      Object.keys(resourceRequests.current.versions).forEach((child) => {
+        if (child !== path && (!path || child.startsWith(`${path}/`))) delete resourceRequests.current.versions[child];
+      });
+      setResourceLoadedPaths((current) => current.filter((child) => child !== path && (path ? !child.startsWith(`${path}/`) : false)));
+      const data = error && typeof error === 'object' && 'data' in error ? error.data : undefined;
+      const offline = error && typeof error === 'object' && 'status' in error && error.status === 503 && data && typeof data === 'object' && 'message' in data && data.message === 'Bot device is offline';
+      setResourceErrors((current) => ({
+        ...Object.fromEntries(Object.entries(current).filter(([child]) => child !== path && (path ? !child.startsWith(`${path}/`) : false))),
+        [path]: offline ? 'Bot 暂时离线，请稍后重试' : '资源加载失败，请重试',
+      }));
+      setResourceLoadingPaths((current) => current.filter((child) => child !== path && (path ? !child.startsWith(`${path}/`) : false)));
+    }
+    return true;
+  };
+  useEffect(() => {
+    setResources([]);
+    setResourceErrors({});
+    setResourceLoadedPaths([]);
+    setResourceLoadingPaths([]);
+  }, [resourceIdentity]);
   const [screens, setScreens] = useState<BotRenderScreen[]>([]);
   const [routines, setRoutines] = useState<BotEditorRoutine[]>([]);
   const routineActivation = useRoutineActivation(botId, ownerId, setRoutines);
@@ -52,13 +107,17 @@ export function useBotEditor(
   const load = useCallback(async (options?: { silent?: boolean }) => {
     if (!botId || !enabled) return;
     if (!options?.silent) setLoading(true);
+    const resourceTicket = startResourceRequest('');
+    void botEditorService.listResources(botId, '', ownerId, true).then(
+      (items) => finishResourceRequest(resourceTicket, items),
+      (error) => finishResourceRequest(resourceTicket, undefined, error),
+    );
     try {
-      const data = await botEditorService.load(botId, ownerId, deployment, engine);
+      const data = await botEditorService.load(botId, ownerId, deployment, engine, true);
       setSkills(data.skills);
       setSkillSets(data.skillSets);
       setMcps(data.mcps);
       setCapabilityLoadError(data.capabilityLoadError);
-      setResources(data.resources);
       setScreens(data.screens);
       setRoutines(data.routines);
       setEngineStatus(data.engineStatus);
@@ -101,6 +160,8 @@ export function useBotEditor(
     capabilityLoadError,
     ...candidates,
     resources,
+    resourceErrors,
+    resourceLoadedPaths,
     screens,
     routines,
     engineConfig: engineConfig.config,
@@ -131,10 +192,12 @@ export function useBotEditor(
       act(() => botEditorService.setMcpActive(botId!, mcp, active, ownerId), active ? 'MCP 已添加' : 'MCP 已移除'),
     createDirectory: (path: string) => act(() => botEditorService.createDirectory(botId!, path, ownerId), '目录已创建'),
     browseResources: async (directory = '') => {
+      const ticket = startResourceRequest(directory);
       try {
-        setResources(await botEditorService.listResources(botId!, directory, ownerId));
+        const items = await botEditorService.listResources(botId!, directory, ownerId, true);
+        finishResourceRequest(ticket, items);
       } catch (error) {
-        toast.error(error instanceof Error ? error.message : '资源目录加载失败');
+        finishResourceRequest(ticket, undefined, error);
       }
     },
     deleteResource: (path: string) => act(() => botEditorService.deleteResource(botId!, path, ownerId), '资源已删除'),
@@ -202,19 +265,13 @@ export function useBotEditor(
       }
     },
     loadResourceDirectory: async (directory: string) => {
-      setResourceLoadingPaths((current) => [...new Set([...current, directory])]);
+      const ticket = startResourceRequest(directory);
       try {
-        const children = await botEditorService.listResources(botId!, directory, ownerId);
-        setResources((current) => {
-          const merged = new Map(current.map((item) => [item.path, item]));
-          children.forEach((item) => merged.set(item.path, item));
-          return [...merged.values()];
-        });
+        const children = await botEditorService.listResources(botId!, directory, ownerId, true);
+        if (!finishResourceRequest(ticket, children)) throw new Error('stale resource request');
       } catch (error) {
-        toast.error(error instanceof Error ? error.message : '资源目录加载失败');
+        finishResourceRequest(ticket, undefined, error);
         throw error;
-      } finally {
-        setResourceLoadingPaths((current) => current.filter((path) => path !== directory));
       }
     },
     resourceLoadingPaths,
