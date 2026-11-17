@@ -263,9 +263,16 @@ def _derive_skill_sets_from_snapshot(
     default switch is the default set's presence in ``snapshot.sets``: present
     → enabled (emit ``{name: default}``), absent → disabled. Skill members are
     serialized by origin from the snapshot's ``skills`` catalog — center →
-    ``{name, origin: center, skill_uuid}``, local → ``{name, origin: local}``,
-    otherwise repo → ``{name, origin: repo, repo_path}``. MCP members are
-    serialized as ``{server_code}``.
+    ``{name, origin: center, skill_uuid}``, repo → ``{name, origin: repo,
+    repo_path}``. Local-package members (``git_path`` starts with
+    ``local://``) are skipped: the manifest schema refuses a bare local
+    declaration (no fetchable source selector for the SKILLS category over a
+    bot source; see ``support_matrix.py:170`` ``_BOT_SOURCE_IS_RESOURCES_ONLY``),
+    and Spec §1's ``from: from_bot`` workaround is rejected by the same rule
+    — the honest representation is the file-sync ``resources: workspace/``
+    entry carrying the physical packages + the Set without local members (the
+    operator can re-link local skills through Add-Skill on the dst bot if
+    needed). MCP members are serialized as ``{server_code}``.
 
     ``None`` is returned when the snapshot has no sets at all — the source is
     a brand-new bot and the dst inherits the same baseline (Spec §0).
@@ -306,7 +313,26 @@ def _derive_skill_sets_from_snapshot(
                 skill_entry["origin"] = "center"
                 skill_entry["skill_uuid"] = asset.get("skill_uuid")
             elif git_path.startswith("local://"):
-                skill_entry["origin"] = "local"
+                # Spec §1 names local skills ``{origin: local, name}`` riding
+                # on ``resources: workspace/`` file-sync, but the manifest
+                # schema refuses a bare local member: ``validate_skill_entry``
+                # routes origin=local through the SKILLS-category source gate,
+                # which demands one of from/source/content AND refuses a
+                # ``protocol: bot`` source for SKILLS
+                # (``_BOT_SOURCE_IS_RESOURCES_ONLY`` at
+                # ``support_matrix.py:170``). The Genome snapshot's
+                # ``local://`` rows carry no git/oss address, so there is no
+                # honest source selector to declare. The physical packages
+                # still arrive via the file-sync ``resources: workspace/``
+                # entry, so the dst's workspace/skills/skills-local tree is
+                # populated; the dst SkillSet declaration lists only the
+                # repo/center members the manifest vocabulary can express, and
+                # the operator can re-link local skills through the edit-bot
+                # Add-Skill flow if needed. Skip the member rather than emit
+                # a declaration the schema would reject (which would drop the
+                # whole Set under Spec §3's "category-internal failure = no
+                # write" rule).
+                continue
             else:
                 skill_entry["origin"] = "repo"
                 skill_entry["repo_path"] = git_path
