@@ -244,15 +244,7 @@ impl Call {
         // The state word the rules read comes from the status, not from
         // whatever shape the snapshot has.
         let snapshot = with_state(snapshot, status);
-        // The end comes from the status: a snapshot stored by reference
-        // carries no state word the rules could read.
-        let end = match status {
-            TaskStatus::Completed => Some(FinalDispatchOutcome::Completed),
-            TaskStatus::Failed | TaskStatus::Rejected => Some(FinalDispatchOutcome::Failed),
-            TaskStatus::Canceled => Some(FinalDispatchOutcome::Canceled),
-            _ => None,
-        };
-        self.on_event_ending(kind, None, snapshot, end).await
+        self.on_event(kind, None, snapshot).await
     }
 
     /// Reads the remote task once and reports its state when it changed.
@@ -316,6 +308,8 @@ fn with_state(snapshot: Payload, status: TaskStatus) -> Payload {
             Payload::Inline(serde_json::Value::Object(object))
         }
         Payload::Inline(other) => Payload::Inline(serde_json::json!({ "state": word, "task": other })),
-        by_reference => by_reference,
+        // A snapshot stored by reference carries no state word: wrap it, so
+        // the event itself says how the call ended.
+        Payload::Ref(reference) => Payload::Inline(serde_json::json!({ "state": word, "task_ref": reference })),
     }
 }

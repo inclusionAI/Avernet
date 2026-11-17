@@ -208,6 +208,10 @@ impl ConnectorEngine {
         }
     }
 
+    fn running(&self, did: &Did) -> bool {
+        lock(&self.inner.actors).get(did).is_some_and(|actor| !actor.task.is_finished())
+    }
+
     /// Resumes a held call that has no actor. A failure is remembered and
     /// retried by the main loop, so the call is never silently left behind.
     async fn resume(&self, did: Did, previous: Holder) {
@@ -272,6 +276,8 @@ impl ConnectorEngine {
             poke,
             task,
         };
+        // Whatever resume was still owed for this call is settled by this actor.
+        lock(&self.inner.orphans).retain(|(orphan, _)| orphan != &did);
         lock(&self.inner.actors).insert(did, actor);
     }
 
@@ -299,6 +305,11 @@ impl ConnectorEngine {
         let mut pending = std::mem::take(&mut *lock(&self.inner.orphans));
         pending.extend(crashed);
         for (did, holder) in pending {
+            // Stale: the call was resumed meanwhile (a hint, or an earlier
+            // entry of this list). A running actor is never replaced here.
+            if self.running(&did) {
+                continue;
+            }
             self.resume(did, holder).await;
         }
     }
