@@ -257,7 +257,7 @@ def test_binding_lifecycle_machine_vocabulary():
 - Test: `tests/community/core/task/context_collab/test_open_profile.py`
 
 **Interfaces:**
-- Produces（spec §4.4）：容量 = ACTIVE+SUBMITTED+SCREENING 计数 < capacity、窗口校验、`submit_application` 任意已认证 actor；`admit` 幂等按 participation_type 产物（GROUP_MEMBER→ACTIVE 成员、SWARM_ALLOCATION→校验 `target_stage_ref` 属本 binding 作用域 READY/RUNNING Stage、SINGLE_CONTRIBUTION→仅记 refs、COLLET_PARTICIPANT→拒绝）；`revoke_admission` 按 resulting_binding_refs 终结成员/分配；`withdraw` 本人。binding 非 ACTIVE 拒绝；admitted ≠ Space Membership 断言。
+- Produces（spec §4.4）：容量 = ACTIVE+SUBMITTED+SCREENING 计数 < capacity、窗口校验、`submit_application_by_skill` 任意已认证 actor；`admit` 幂等按 participation_type 产物（GROUP_MEMBER→ACTIVE 成员、SWARM_ALLOCATION→校验 `target_stage_ref` 属本 binding 作用域 READY/RUNNING Stage、SINGLE_CONTRIBUTION→仅记 refs、COLLET_PARTICIPANT→拒绝）；`revoke_admission` 按 resulting_binding_refs 终结成员/分配；`withdraw` 本人。binding 非 ACTIVE 拒绝；admitted ≠ Space Membership 断言。
 
 - [ ] **Step 1: 失败测试 → 2 → 3 → 4**
 - [ ] **Step 5: Commit** `feat(backend): implement Open method profile admission operations`

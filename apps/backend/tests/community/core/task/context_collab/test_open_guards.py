@@ -87,7 +87,7 @@ class TestOpenGuards:
                 OpenOpportunityOpCommand(),
                 make_actor(),
             ),
-            lambda: service.submit_application(
+            lambda: service.submit_application_by_skill(
                 application_command(opportunity_ref="opp_x", actor_context=make_actor())
             ),
             lambda: service.screen(
@@ -177,7 +177,7 @@ class TestOpenGuards:
                 OpenOpportunityOpCommand(),
                 stranger,
             )
-        service.submit_application(
+        service.submit_application_by_skill(
             application_command(opportunity_ref="opp_alpha", actor_context=make_actor())
         )
         with pytest.raises(ContextCollabValidationError, match="u_9999"):
@@ -219,7 +219,7 @@ class TestOpenGuards:
                 make_actor(),
             )
         with pytest.raises(ContextCollabNotFoundError):
-            service.submit_application(
+            service.submit_application_by_skill(
                 application_command(
                     opportunity_ref="opp_none", actor_context=make_actor()
                 )

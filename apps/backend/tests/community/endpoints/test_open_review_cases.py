@@ -72,7 +72,7 @@ def _seed(world):
         collet_id=collet.collet_id, actor_context=context,
         participation_type=ParticipationType.COLLET_PARTICIPANT,
     ))
-    service.submit_application(OpenApplicationCommand(
+    service.submit_application_by_skill(OpenApplicationCommand(
         opportunity_ref=opportunity.object_id, actor_context=context,
         applicant_agent_ref="bot_uuid.review", application_id=_APP,
     ))
