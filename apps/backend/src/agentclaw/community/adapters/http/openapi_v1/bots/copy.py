@@ -231,6 +231,14 @@ def _passthrough_source_skill_sets(
     dst inherits the brand-new baseline (return ``None``). The returned list is
     a deep copy so the caller can mutate it without touching the source
     document's parsed form.
+
+    The segment's member rows may carry ``from: <named_source>`` selectors
+    (e.g. a local-package skill naming a declared ``git``/``oss`` source). The
+    dst manifest must declare those sources too, or ``validate_document``
+    rejects the segment with an undeclared-source violation. The named sources
+    the segment transitively needs are returned by ``_passthrough_source_skill_sources``
+    so the handler can merge them into the dst document's top-level ``sources``
+    block alongside the copy's own ``from_bot`` file-sync source.
     """
     try:
         parsed = yaml.safe_load(document) or {}
@@ -255,6 +263,58 @@ def _passthrough_source_skill_sets(
     import copy
 
     return copy.deepcopy(segment)
+
+
+def _passthrough_source_skill_sources(
+    document: str,
+) -> dict[str, dict[str, Any]]:
+    """Branch A companion to ``_passthrough_source_skill_sets``.
+
+    Returns the named sources the passed-through ``skill_sets`` segment
+    references (via member ``from:`` selectors) but the dst document does not
+    itself declare. The dst always declares ``from_bot`` (the copy's bot
+    file-sync source); any other named source a member points at must be
+    carried over from the source manifest's top-level ``sources`` block or
+    ``validate_document`` rejects the segment. Sources already present on the
+    dst (``from_bot``) are not duplicated. Returns ``{}`` when the source has
+    no segment, no extra sources, or the document is unreadable — the segment
+    is the authority for what is needed, and a sourceless segment needs nothing.
+
+    Only top-level ``sources`` entries the segment actually names are copied;
+    the source's own ``from_bot``-equivalent bot file-sync source is never
+    carried, because the dst declares its own (it reads the same source bot).
+    """
+    try:
+        parsed = yaml.safe_load(document) or {}
+    except yaml.YAMLError:
+        return {}
+    if not isinstance(parsed, dict):
+        return {}
+    sources = parsed.get("sources")
+    if not isinstance(sources, dict):
+        return {}
+    segment = _passthrough_source_skill_sets(document)
+    if segment is None:
+        return {}
+    referenced: set[str] = set()
+    for entry in segment:
+        if not isinstance(entry, dict):
+            continue
+        for member in entry.get("skills", []) or []:
+            if isinstance(member, dict) and "from" in member:
+                ref = member["from"]
+                if isinstance(ref, str):
+                    referenced.add(ref)
+    extra: dict[str, dict[str, Any]] = {}
+    for name in sorted(referenced):
+        if name in ("from_bot",):
+            continue
+        declaration = sources.get(name)
+        if isinstance(declaration, dict):
+            import copy
+
+            extra[name] = copy.deepcopy(declaration)
+    return extra
 
 
 def _derive_skill_sets_from_snapshot(
@@ -367,6 +427,7 @@ def _build_manifest_document(
     excludes: tuple[str, ...] = (),
     render_screen_rows: tuple[dict[str, str], ...] = (),
     skill_sets: list[dict[str, Any]] | None = None,
+    extra_skill_sources: dict[str, dict[str, Any]] | None = None,
 ) -> str:
     """Serialize source's config into a manifest config document.
 
@@ -423,16 +484,24 @@ def _build_manifest_document(
     }
     if skill_sets is not None:
         manifest["skill_sets"] = skill_sets
+    sources: dict[str, Any] = {
+        "from_bot": {
+            "protocol": "bot",
+            "bot_id": source_bot_id,
+            "owner_id": source_owner_id,
+        },
+    }
+    if extra_skill_sources:
+        # Branch A passthrough carries named sources the verbatim ``skill_sets``
+        # segment references but the dst does not declare; ``from_bot`` is the
+        # copy's own file-sync source and is never overwritten here.
+        for name, declaration in extra_skill_sources.items():
+            if name != "from_bot" and name not in sources:
+                sources[name] = declaration
     document: dict[str, Any] = {
         "schema_version": 1,
         "script": {"body": script_body},
-        "sources": {
-            "from_bot": {
-                "protocol": "bot",
-                "bot_id": source_bot_id,
-                "owner_id": source_owner_id,
-            },
-        },
+        "sources": sources,
         "manifest": manifest,
     }
     return yaml.safe_dump(document, sort_keys=False, allow_unicode=True)
@@ -567,6 +636,15 @@ def submit_copy(
         source_manifest_record=source_manifest_record,
         snapshot=source_snapshot,
     )
+    extra_skill_sources: dict[str, dict[str, Any]] = {}
+    if source_manifest_record is not None and skill_sets is not None:
+        # Branch A passthrough: member ``from:`` selectors may reference named
+        # sources the source manifest declares but the dst document does not —
+        # carry them alongside the copy's own ``from_bot`` file-sync source so
+        # ``validate_document`` re-accepts the verbatim segment.
+        extra_skill_sources = _passthrough_source_skill_sources(
+            source_manifest_record.document
+        )
     manifest_document = _build_manifest_document(
         script_body=script_body,
         source_bot_id=source["bot_id"],
@@ -574,6 +652,7 @@ def submit_copy(
         excludes=request_excludes,
         render_screen_rows=source_render_screens,
         skill_sets=skill_sets,
+        extra_skill_sources=extra_skill_sources,
     )
 
     # Validate the document before anything is spent (manifest-creation's rule:
