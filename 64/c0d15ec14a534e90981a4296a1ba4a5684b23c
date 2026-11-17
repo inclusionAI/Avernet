@@ -1,0 +1,28 @@
+apps/bcs-internal/Cargo.lock
+  h_fa66fe7c023b4b 549,554,625,651,675,699-709,718-719,723,1073,1711,1794,1855,2089,2122-2131,2181,2504,2610-2616
+apps/bcs-internal/crates/plugins/bcs-sofa-services/proto/README.md
+  h_fa66fe7c023b4b 163,174-179
+apps/bcs-internal/crates/plugins/bcs-sofa-services/proto/bcs/rpc/a2a/v1/agent_card_management.proto
+  h_fa66fe7c023b4b 13-14,62-78,107-110,127-129,134-138
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/a2a/mapping.rs
+  h_fa66fe7c023b4b 9,16-18,100-131,275-276,296,302,313-324,326-328,330-343
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/a2a/provider.rs
+  h_fa66fe7c023b4b 211-220
+apps/bcs-internal/crates/plugins/bcs-sofa-services/tests/a2a.rs
+  h_fa66fe7c023b4b 26,180-181,185-219,242,257,311,377,389-488,521,562
+apps/bcs-internal/docs/sofa-rpc/agent-card-management-service-spec.md
+  h_fa66fe7c023b4b 24-25,119,144,148,253-254
+submodules/avernet
+  h_fa66fe7c023b4b 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "64c0d15ec14a534e90981a4296a1ba4a5684b23c",
+  "prompts": {},
+  "humans": {
+    "h_fa66fe7c023b4b": {
+      "author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}

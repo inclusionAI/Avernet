@@ -1,0 +1,23 @@
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/host_sofa.rs
+  s_44ec3e595e34cf::t_c5985d601c53f0 308-309,311,314-317
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/runtime.rs
+  s_44ec3e595e34cf::t_8c4b112bd5a1f8 67-69,71,74,77-79,81-83
+apps/bcs-internal/crates/plugins/bcs-sofa-services/tests/sofa_provider_host.rs
+  s_44ec3e595e34cf::t_c75571f9e07a27 218-299
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "318bf794f07eca82e84371d633b4da1dfa968cb2",
+  "prompts": {},
+  "sessions": {
+    "s_44ec3e595e34cf": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "s_44ec3e595e34cf",
+        "model": "unknown"
+      },
+      "human_author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}

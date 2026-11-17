@@ -1,0 +1,29 @@
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/src/provider/mod.rs
+  s_e0675aa5bfa4c0::t_05143e8a7b6956 425-432
+apps/bcs-internal/docs/sofa-rpc/operations.md
+  s_460ca40e7dae23::t_39625bbb2f9262 241-247
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6227ce5d61772a13f26b1bb8695fed3ca0fff3d7",
+  "prompts": {},
+  "sessions": {
+    "s_460ca40e7dae23": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c086-a457-71b0-8466-0c9920e816e0",
+        "model": "GLM-5.3"
+      },
+      "human_author": "仰望 <lifang.shen@antgroup.com>"
+    },
+    "s_e0675aa5bfa4c0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ca19-0864-7a23-bed1-687844c95b73",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}

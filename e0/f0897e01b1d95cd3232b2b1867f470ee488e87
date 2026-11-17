@@ -1,0 +1,23 @@
+apps/bcs-internal/Cargo.lock
+  s_460ca40e7dae23::t_55708f3c0f6c14 84,111,150,173
+apps/bcs-internal/Cargo.toml
+  s_460ca40e7dae23::t_60fe978a489cb6 129-132,135,138
+apps/bcs-internal/tests/test_sofa_rpc_packaging.py
+  s_460ca40e7dae23::t_d9f710a58e4617 219,248
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e0f0897e01b1d95cd3232b2b1867f470ee488e87",
+  "prompts": {},
+  "sessions": {
+    "s_460ca40e7dae23": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c086-a457-71b0-8466-0c9920e816e0",
+        "model": "GLM-5.3"
+      },
+      "human_author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}
