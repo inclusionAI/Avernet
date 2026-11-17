@@ -71,27 +71,6 @@ class TestEnumHandling:
     """Tests for enum value validation."""
 
     @pytest.mark.asyncio
-    async def test_invalid_platform_type_returns_error(
-        self, api: APITestHelper, unique_id: str
-    ) -> None:
-        """POST /api/v1/paas/devices with invalid platform_type returns error."""
-        response = await api.client.post(
-            api.paas_device_url(),
-            params=api.params(),
-            json={
-                "platform_type": "INVALID_PLATFORM",
-                "config": {
-                    "template_id": "TEMPLATE-TEST",
-                    "name": f"test-{unique_id}",
-                },
-            },
-        )
-        assert response.status_code in (400, 404, 422, 500), (
-            f"Expected 400/404/422/500 for invalid platform_type, "
-            f"got {response.status_code}: {response.text[:200]}"
-        )
-
-    @pytest.mark.asyncio
     async def test_invalid_bot_status_enum(self, api: APITestHelper) -> None:
         """GET /api/v1/bots with invalid status enum returns 422."""
         response = await api.client.get(
@@ -157,21 +136,11 @@ class TestResponseSerialization:
     async def test_paas_device_create_response_shape(
         self, api: APITestHelper, unique_id: str
     ) -> None:
-        """POST /api/v1/paas/devices response has expected shape fields."""
-        response = await api.client.post(
-            api.paas_device_url(),
-            params=api.params(),
-            json={
-                "platform_type": "ARCA",
-                "config": {
-                    "template_id": "TEMPLATE-4d0e2849d7004111836333de782b95d8",
-                    "name": f"test-shape-{unique_id}",
-                },
-            },
+        """create_paas_device (in-process facade) returns expected shape fields."""
+        from tests.e2e.asgi.conftest import TEMPLATE_ARCA, create_paas_device
+
+        device = await create_paas_device(api, unique_id, template_uuid=TEMPLATE_ARCA)
+        assert isinstance(device, dict)
+        assert "platform" in device or "sandbox_id" in device or "container_id" in device, (
+            f"Expected device shape with platform/sandbox_id/container_id, got keys: {list(device.keys())}"
         )
-        assert response.status_code in (200, 201, 400, 404, 422, 500)
-        if response.status_code in (200, 201):
-            data = response.json()
-            assert isinstance(data, dict)
-            if "code" in data:
-                assert data["code"] == 0

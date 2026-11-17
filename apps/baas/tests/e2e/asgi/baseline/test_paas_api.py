@@ -1,7 +1,6 @@
 """E2E tests for PaaS Device API endpoints.
 
 Tests cover:
-- POST /api/v1/paas/devices - Create device
 - DELETE /api/v1/paas/devices/{paas_device_id} - Destroy device
 - POST /api/v1/paas/devices/{paas_device_id}/commands - Send command
 - GET /api/v1/paas/devices/{paas_device_id}/ws-info - Get WebSocket info
@@ -12,28 +11,6 @@ import pytest
 from tests.e2e.asgi.conftest import APITestHelper
 
 pytestmark = [pytest.mark.e2e_asgi]
-
-
-class TestCreateDevice:
-    """Tests for POST /api/v1/paas/devices endpoint."""
-
-    @pytest.mark.asyncio
-    async def test_create_device(self, api: APITestHelper, unique_id: str) -> None:
-        """Test create PaaS device."""
-        response = await api.client.post(
-            api.paas_device_url(),
-            params=api.params(),
-            json={
-                "platform_type": "ARCA",
-                "config": {
-                    "template_id": "TEMPLATE-4d0e2849d7004111836333de782b95d8",
-                    "name": f"test-device-{unique_id}",
-                },
-            },
-        )
-
-        # May fail if template doesn't exist or external service unavailable
-        assert response.status_code in [200, 201, 400, 404, 422, 500]
 
 
 class TestDestroyDevice:

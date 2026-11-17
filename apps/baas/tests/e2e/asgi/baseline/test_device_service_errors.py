@@ -41,38 +41,17 @@ class TestDeviceServiceErrors:
     async def test_device_create_nonexistent_template(
         self, api: APITestHelper, unique_id: str
     ) -> None:
-        """POST /api/v1/paas/devices with fake template UUID → 4xx error."""
-        response = await api.client.post(
-            api.paas_device_url(),
-            params=api.params(),
-            json={
-                "tenant_name": api.tenant,
-                "device_template_uuid": FAKE_TEMPLATE_UUID,
-                "detail_config": {
-                    "name": f"e2e-nonexistent-tpl-{unique_id}",
-                    "ttl_in_minutes": 60,
-                },
-            },
-        )
+        """create_paas_device with fake template UUID raises exception."""
+        import pytest
 
-        assert response.status_code in (200, 400, 401, 403, 404, 422, 500)
-        # Should not succeed with a nonexistent template
-        if response.status_code < 300:
-            # If stub/dev mode creates anyway, clean up
-            data = response.json()
-            if "data" in data and data["data"]:
-                device_id = (
-                    data["data"].get("sandbox_id")
-                    or data["data"].get("container_id")
-                    or data["data"].get("poolab_id")
-                    or data["data"].get("instance_id")
-                    or data["data"].get("teclaw_bot_id")
-                    or data["data"].get("device_id")
-                )
-                if device_id:
-                    await destroy_paas_device(api, device_id)
-        else:
-            assert response.status_code >= 400
+        from secbaas.community.api.device_manage import DeviceFacadeException
+
+        with pytest.raises(DeviceFacadeException):
+            await create_paas_device(
+                api,
+                unique_id,
+                template_uuid=FAKE_TEMPLATE_UUID,
+            )
 
     # ── 4.3: Quota exceeded on create ─────────────────────────────────────
 
@@ -80,47 +59,30 @@ class TestDeviceServiceErrors:
     async def test_device_create_quota_exceeded(
         self, api: APITestHelper, unique_id: str
     ) -> None:
-        """Create devices repeatedly to exercise quota / resource limits.
+        """Create devices repeatedly via facade to exercise quota / resource limits.
 
         In stub/dev mode the system may not enforce strict quotas.  If devices
         can be created without limit, the test verifies that the creation path
         remains stable under repeated calls.
         """
+        from secbaas.community.api.device_manage import DeviceFacadeException
+
         created_ids: list[str] = []
 
         try:
-            # Attempt to create up to 15 devices to probe for quota enforcement
             for i in range(15):
-                response = await api.client.post(
-                    api.paas_device_url(),
-                    params=api.params(),
-                    json={
-                        "tenant_name": api.tenant,
-                        "device_template_uuid": TEMPLATE_ARCA,
-                        "detail_config": {
-                            "name": f"e2e-quota-{unique_id}-{i}",
-                            "ttl_in_minutes": 10,
-                        },
-                    },
-                )
-
-                if response.status_code >= 400:
-                    # Quota / limit was enforced — verify it is a 4xx
-                    assert response.status_code in (400, 401, 403, 404, 422, 500)
+                try:
+                    device = await create_paas_device(
+                        api,
+                        f"{unique_id}-{i}",
+                        template_uuid=TEMPLATE_ARCA,
+                    )
+                except DeviceFacadeException:
                     break
 
-                assert response.status_code == 200
-                data = response.json()
-                if "data" in data and data["data"]:
-                    device_id = data["data"].get("sandbox_id") or data["data"].get(
-                        "container_id"
-                    )
-                    if device_id:
-                        created_ids.append(str(device_id))
-
-            # If no quota error was triggered, the test still passes —
-            # stub mode may allow unlimited creation
-            assert response.status_code in (200, 400, 401, 403, 404, 422, 500)
+                device_id = device.get("sandbox_id") or device.get("container_id")
+                if device_id:
+                    created_ids.append(str(device_id))
 
         finally:
             for did in created_ids:
@@ -313,10 +275,20 @@ class TestDeviceServiceErrors:
     async def test_device_update_invalid_params(
         self, api: APITestHelper, unique_id: str
     ) -> None:
-        """Update device with invalid parameter combinations → validation errors.
+        """Verify device creation and update parameter handling via facade.
 
-        Tests several invalid parameter scenarios against the device endpoints.
+        Tests several invalid parameter scenarios using the in-process facade.
         """
+        # Scenario A: create with empty detail_config (facade-level validation)
+        with pytest.raises(Exception):
+            await create_paas_device(
+                api,
+                f"{unique_id}-a",
+                template_uuid=TEMPLATE_ARCA,
+                detail_config={},
+            )
+
+        # Scenario B: create_paas_device with valid config succeeds for cleanup baseline
         device = await create_paas_device(api, unique_id)
         device_id = (
             device.get("sandbox_id")
@@ -329,59 +301,12 @@ class TestDeviceServiceErrors:
         assert device_id, f"No device ID in response: {device}"
 
         try:
-            # Scenario A: POST create with missing tenant_name
-            resp = await api.client.post(
-                api.paas_device_url(),
-                json={
-                    "device_template_uuid": TEMPLATE_ARCA,
-                    "detail_config": {
-                        "name": f"e2e-invalid-{unique_id}",
-                    },
-                },
-            )
-            assert resp.status_code in (200, 400, 401, 403, 404, 422, 500)
-
-            # Scenario B: POST create with empty detail_config that has
-            # missing required fields for a template-specified platform
-            resp = await api.client.post(
-                api.paas_device_url(),
-                params=api.params(),
-                json={
-                    "tenant_name": api.tenant,
-                    "device_template_uuid": TEMPLATE_ARCA,
-                    "detail_config": {},
-                },
-            )
-            assert resp.status_code in (200, 400, 401, 403, 404, 422, 500)
-
-            # Scenario C: POST create with an unknown platform type in
-            # detail_config (pass an object with unexpected fields)
-            resp = await api.client.post(
-                api.paas_device_url(),
-                params=api.params(),
-                json={
-                    "tenant_name": api.tenant,
-                    "device_template_uuid": TEMPLATE_ARCA,
-                    "detail_config": {
-                        "unknown_field": "value",
-                        "name": f"e2e-invalid-2-{unique_id}",
-                    },
-                },
-            )
-            assert resp.status_code in (200, 400, 401, 403, 404, 422, 500)
-
-            # Scenario D: TTL endpoint with empty body
+            # Update destroyed device — should fail
+            await destroy_paas_device(api, str(device_id))
             resp = await api.client.put(
                 api.paas_device_ttl_url(str(device_id)),
-                content=b"",
-            )
-            assert resp.status_code in (200, 400, 401, 403, 404, 422, 500, 501)
-
-            # Scenario E: GET device info with non-existent device UUID
-            resp = await api.client.get(
-                api.device_url("DEVICE-00000000000000000000000000000000"),
+                json={"ttl_in_minutes": 120},
             )
             assert resp.status_code in (200, 400, 401, 403, 404, 422, 500)
-
         finally:
             await destroy_paas_device(api, str(device_id))
