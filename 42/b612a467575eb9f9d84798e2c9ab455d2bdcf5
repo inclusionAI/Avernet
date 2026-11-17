@@ -1,0 +1,25 @@
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/monitoring-runtime.test.ts
+  s_c5125da3cacb9c::t_d097cb071a4a1f 9,94-95,101,119
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/session-recovery-runtime.test.ts
+  s_c5125da3cacb9c::t_0a871a3d8a1575 1,16-21,79,95,129
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/monitoring-runtime.ts
+  s_c5125da3cacb9c::t_2f5bc7af2069da 9,34
+apps/evolverun/clawweb/package-lock.json
+  s_c5125da3cacb9c::t_7d768a6954a2ba 246-247,11122-11130
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "42b612a467575eb9f9d84798e2c9ab455d2bdcf5",
+  "prompts": {},
+  "sessions": {
+    "s_c5125da3cacb9c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e2fc-bace-73f3-9dee-91caa19a0ea5",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}
