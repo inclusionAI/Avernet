@@ -16,6 +16,10 @@ use std::sync::Arc;
 /// Code of a Worker operation called on the Gateway's session store.
 pub const WORKER_ONLY: &str = "worker_only_operation";
 
+// CONFORMANCE_WAIVED: `session_store_port_contract_tests` drives a commit, which
+// only the Worker's provider implements. The spec read this provider serves is
+// covered by `session_spec_admission_contract_tests` in
+// `tests/conformance_gateway_store.rs`.
 /// Read-only session store of a Gateway. `get_spec` reads the frozen spec that
 /// admission created. Acquiring, loading and committing a session belong to the
 /// Worker; a Gateway never calls them, and this provider refuses them with

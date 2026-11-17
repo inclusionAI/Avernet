@@ -1,7 +1,7 @@
 # Plan: Gateway — inbound A2A server
 
-Status: reviewed on the PR (2026-11-17); review outcomes are folded in below.
-Nothing is implemented yet.
+Status: reviewed on the PR (2026-11-17) and implemented; see "As built" at the
+end for where the code differs from this plan.
 
 Review outcomes: Q1, Q2 accepted as proposed and treated as signed off by the
 executor team; Q4, Q5, Q7–Q10, the contract diffs, the admission order and the
@@ -531,3 +531,50 @@ Checks before every push: `cargo check --all-targets` and `cargo nextest run`
 for the touched crates, `scripts/ci/arch-check.sh`, the 1,000-line limit, no
 `cargo fmt`. Not run here: anything against a real TBase (no provider in
 Avernet).
+
+## As built
+
+Differences from the plan above, and what is left open.
+
+- **One event per follow item.** `TaskReaderPort::follow` yields one event per
+  item, so every event has its own cursor (the SSE `id:`), instead of a batch
+  with one cursor.
+- **Stricter resume and follow checks** (from the code review of this change).
+  A position is a gap when the task is finished, when it is before the
+  snapshot's coverage, or when it is beyond the newest `ev` entry. The last
+  rule stops a made-up `Last-Event-ID` from starting the session's shared
+  reader at a position where it would deliver nothing to anyone. `follow`
+  repeats the check when it starts, because the task may have advanced or
+  finished since it was restored.
+- **No endless gap loops.** A subscription that gets a gap right after a fresh
+  snapshot ends with a retryable error (`task_position_unavailable`); a wait
+  pauses between attempts and stops at its deadline.
+- **A wait survives a failed event read.** When the event stream cannot be
+  read, `wait_task` returns the current view, like at its timeout: the input
+  is already admitted.
+- **Conformance entries.** `tests/conformance_*.rs` run the shared harnesses
+  against `StoreTaskReader`, `GatewaySessionStore` (spec read; the commit
+  harness is waived in `session.rs`) and `DistGatewayCore`.
+- **Shared test fixtures.** The other crates include
+  `bcs-dist-gateway-store/tests/common/mod.rs` by path (store model, fake
+  Worker, in-memory result and blob stores) instead of a published test crate.
+- **Tests ran with `cargo test`**; `cargo nextest` is not installed in the
+  build environment.
+
+Open, each needing a decision:
+
+1. **A retried reply or cancel can be refused after it took effect.** The
+   state checks (is the question still open, is the task still running) run
+   before the admission record is consulted. If the first attempt was admitted
+   and the Worker has already acted on it, the retry gets
+   `interaction_not_open` / `invalid_task_state` (reply) or "not cancelable"
+   (cancel) instead of the original success. Fixing it needs an "already
+   admitted?" read on `InboxProducerPort`, which is a contract change. New
+   messages are not affected.
+2. **The SSE id format assumes the backend name `tbase`.** With another
+   `GatewayStoreConfig.backend` no frame carries an id and resume never works.
+3. **No backpressure while a reader replays a backlog.** A subscriber with no
+   coverage on a long, untrimmed session can be dropped as lagging and has to
+   reconnect; it makes progress each time, so no event is lost.
+4. **Q3** (the core inlines large content through `BlobStorePort`) is
+   implemented as proposed; it was not covered by the plan review.

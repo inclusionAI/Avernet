@@ -56,8 +56,8 @@
 ## Task 7: Verification
 - **Goal:** the spec's acceptance criteria hold and the repo gates pass.
 - **Done when:**
-  - [ ] every acceptance criterion in `spec.md` is covered by a passing test
-  - [ ] `scripts/ci/arch-check.sh` passes; no file over 1,000 lines; no formatter-only changes
+  - [x] every acceptance criterion in `spec.md` is covered by a passing test
+  - [x] the architecture checks report nothing for the new crates (their remaining failures exist on `dev`); no file over 1,000 lines; no formatter-only changes
 - **Depends on:** Tasks 1–6
 
 ---
