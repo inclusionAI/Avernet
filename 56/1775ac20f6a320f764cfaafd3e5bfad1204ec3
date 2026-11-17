@@ -1,0 +1,14 @@
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_end_to_end.py
+  h_059e888e5e4e82 149
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "561775ac20f6a320f764cfaafd3e5bfad1204ec3",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}
