@@ -2,9 +2,11 @@ import { RoutineExecutionEnvironment } from '@/components/BotWorkshop/Editor/Rou
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Modal, ModalContent, ModalFooter, ModalHeader, ModalTitle } from '@/components/ui/Modal';
+import { Segmented } from '@/components/ui/Segmented';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select';
 import { Textarea } from '@/components/ui/Textarea';
 import type { BotEditorModel } from '@/domain/botEditor';
+import { estimateNextRun } from '@/services/botScheduledTasks/nextRun';
 import {
   DEFAULT_ROUTINE_CRON,
   isRoutineSchedulePreset,
@@ -20,7 +22,45 @@ import {
   type RoutineForm,
   type RoutineStage,
 } from '@/services/botScheduledTasks/types';
+import { CalendarClock } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+
+/** 弹窗内的小节标题：与详情页分组称呼一致，弱化为眉题而不是大块标题。 */
+function SectionLabel({ children }: { children: string }) {
+  return <p className="m-0 text-xs font-semibold tracking-wide text-muted-foreground">{children}</p>;
+}
+
+/** 提交前就回答“这个表达式下次什么时候触发”，而不是保存后到列表里才发现写错。 */
+function CronPreview({ cron, timezone, enabled }: { cron: string; timezone: string; enabled: boolean }) {
+  const next = estimateNextRun({ cron, timezone, enabled }, Date.now());
+  if (!next)
+    return (
+      <p className="m-0 flex items-center gap-1.5 text-xs text-warning">
+        <CalendarClock aria-hidden className="size-3.5" />
+        {enabled
+          ? '无法解析该表达式，请检查是否为完整的五段 Cron（分钟 小时 日期 月份 星期）'
+          : '任务当前处于停用状态，保存后不会自动调度；启用后才会按此频率执行'}
+      </p>
+    );
+  const text = new Intl.DateTimeFormat('zh-CN', {
+    timeZone: timezone,
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).format(new Date(next));
+  return (
+    <p className="m-0 flex items-center gap-1.5 text-xs text-muted-foreground">
+      <CalendarClock aria-hidden className="size-3.5" />
+      下次执行预计：
+      <time dateTime={next} className="font-mono">
+        {text}
+      </time>
+      <span>（{timezone}，实际以运行环境为准）</span>
+    </p>
+  );
+}
 
 export function RoutineFormDialog({
   context,
@@ -114,110 +154,114 @@ export function RoutineFormDialog({
         if (!open && !saving) onClose();
       }}
     >
-      <ModalContent size="lg">
+      <ModalContent size="lg" className="gap-6">
         <ModalHeader>
           <ModalTitle>{original ? '编辑定时任务' : '创建定时任务'}</ModalTitle>
         </ModalHeader>
-        <fieldset disabled={!editable || saving} className="m-0 min-w-0 space-y-4 border-0 p-0">
-          <label className="block text-sm">
-            任务名称
-            <Input
-              aria-label="任务名称"
-              className="mt-1"
-              value={form.name}
-              onChange={(e) => setForm({ ...form, name: e.target.value })}
-            />
-          </label>
-          {context.bot_type === 'service' && (
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-1 text-sm">
-                <span>生效环境</span>
-                <Select
-                  value={form.runtime_stage || ''}
-                  disabled={Boolean(original) || !editable || saving}
-                  onValueChange={(value) =>
-                    setForm({
-                      ...form,
-                      runtime_stage: value as RoutineStage,
-                      device_uuid: undefined,
-                      operator_id: undefined,
-                    })
-                  }
-                >
-                  <SelectTrigger aria-label="生效环境">
-                    <SelectValue placeholder="请选择生效环境" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {(['draft', 'verify', 'online'] as const).map((stage) => (
-                      <SelectItem key={stage} value={stage} disabled={context.caller_mode && stage !== 'online'}>
-                        {stageNames[stage]}
-                        {context.caller_mode && stage !== 'online' ? '（Caller 模式不支持）' : ''}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              {instanceMode === 'multiple' && (
+        <fieldset disabled={!editable || saving} className="m-0 min-w-0 space-y-7 border-0 p-0">
+          <div className="space-y-5">
+            <SectionLabel>基本信息</SectionLabel>
+            <label className="block text-sm">
+              任务名称
+              <Input
+                aria-label="任务名称"
+                className="mt-2"
+                placeholder="给任务一个可辨认的名字，如「每日站会日报」"
+                value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+              />
+            </label>
+            {context.bot_type === 'service' && (
+              <div className="mt-3 grid gap-4 sm:grid-cols-2">
                 <div className="space-y-1 text-sm">
-                  <span>运行实例</span>
+                  <span>生效环境</span>
                   <Select
-                    value={form.device_uuid || ''}
+                    value={form.runtime_stage || ''}
                     disabled={Boolean(original) || !editable || saving}
-                    onValueChange={(device_uuid) => setForm({ ...form, device_uuid })}
+                    onValueChange={(value) =>
+                      setForm({
+                        ...form,
+                        runtime_stage: value as RoutineStage,
+                        device_uuid: undefined,
+                        operator_id: undefined,
+                      })
+                    }
                   >
-                    <SelectTrigger aria-label="运行实例">
-                      <SelectValue placeholder="请选择运行实例" />
+                    <SelectTrigger aria-label="生效环境">
+                      <SelectValue placeholder="请选择生效环境" />
                     </SelectTrigger>
                     <SelectContent>
-                      {[...new Set([...instanceIds, ...(original?.device_uuid ? [original.device_uuid] : [])])].map(
-                        (uid) => (
-                          <SelectItem key={uid} value={uid}>
-                            {uid}
-                          </SelectItem>
-                        ),
-                      )}
+                      {(['draft', 'verify', 'online'] as const).map((stage) => (
+                        <SelectItem key={stage} value={stage} disabled={context.caller_mode && stage !== 'online'}>
+                          {stageNames[stage]}
+                          {context.caller_mode && stage !== 'online' ? '（Caller 模式不支持）' : ''}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
-              )}
-              {!original && form.runtime_stage && instanceMode !== 'unknown' && targetError && (
-                <p className="text-xs text-destructive sm:col-span-2" role="status">
-                  {targetError}
-                </p>
-              )}
-              {original && (
-                <p className="text-xs text-muted-foreground sm:col-span-2">
-                  执行目标已固定。更换环境或实例请创建新任务，避免改动其他目标上的同名任务。
-                </p>
-              )}
-            </div>
-          )}
-          <div className="space-y-2 text-sm">
-            <span>执行频率</span>
-            <div className="flex gap-2">
-              <Button
-                size="sm"
-                variant={!customCron ? 'default' : 'outline'}
-                onClick={() => {
-                  setCustomCron(false);
-                  if (!isRoutineSchedulePreset(form.cron)) setForm({ ...form, cron: DEFAULT_ROUTINE_CRON });
-                }}
-              >
-                常用频率
-              </Button>
-              <Button size="sm" variant={customCron ? 'default' : 'outline'} onClick={() => setCustomCron(true)}>
-                高级设置
-              </Button>
-            </div>
+                {instanceMode === 'multiple' && (
+                  <div className="space-y-1 text-sm">
+                    <span>运行实例</span>
+                    <Select
+                      value={form.device_uuid || ''}
+                      disabled={Boolean(original) || !editable || saving}
+                      onValueChange={(device_uuid) => setForm({ ...form, device_uuid })}
+                    >
+                      <SelectTrigger aria-label="运行实例">
+                        <SelectValue placeholder="请选择运行实例" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {[...new Set([...instanceIds, ...(original?.device_uuid ? [original.device_uuid] : [])])].map(
+                          (uid) => (
+                            <SelectItem key={uid} value={uid}>
+                              {uid}
+                            </SelectItem>
+                          ),
+                        )}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+                {!original && form.runtime_stage && instanceMode !== 'unknown' && targetError && (
+                  <p className="text-xs text-destructive sm:col-span-2" role="status">
+                    {targetError}
+                  </p>
+                )}
+                {original && (
+                  <p className="text-xs text-muted-foreground sm:col-span-2">
+                    执行目标已固定。更换环境或实例请创建新任务，避免改动其他目标上的同名任务。
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+          <div className="space-y-5">
+            <SectionLabel>执行频率</SectionLabel>
+            <Segmented
+              aria-label="执行频率输入方式"
+              className="w-fit"
+              value={customCron ? 'custom' : 'preset'}
+              options={[
+                { value: 'preset', label: '常用频率' },
+                { value: 'custom', label: '自定义 Cron' },
+              ]}
+              onChange={(value) => {
+                const next = value === 'custom';
+                setCustomCron(next);
+                if (!next && !isRoutineSchedulePreset(form.cron)) setForm({ ...form, cron: DEFAULT_ROUTINE_CRON });
+              }}
+            />
             {customCron ? (
-              <>
+              <div className="space-y-2">
                 <Input
                   aria-label="Cron 表达式"
+                  className="font-mono"
                   value={form.cron}
                   onChange={(e) => setForm({ ...form, cron: e.target.value })}
                 />
-                <p className="text-xs text-muted-foreground">依次填写分钟、小时、日期、月份、星期，不支持秒。</p>
-              </>
+                <p className="m-0 text-xs text-muted-foreground">依次为分钟、小时、日期、月份、星期，不支持秒。</p>
+              </div>
             ) : (
               <Select
                 value={form.cron}
@@ -236,22 +280,25 @@ export function RoutineFormDialog({
                 </SelectContent>
               </Select>
             )}
+            <CronPreview cron={form.cron} timezone={form.timezone || 'Asia/Shanghai'} enabled={form.enabled !== false} />
           </div>
-          <label className="block text-sm">
-            执行指令
+          <div className="space-y-5">
+            <SectionLabel>执行指令</SectionLabel>
             <Textarea
               aria-label="执行指令"
-              className="mt-1 min-h-28"
+              className="min-h-28 font-mono text-[13px] leading-6"
+              placeholder={'到期后 Bot 将执行的指令，例如：\n总结今天群里的重点讨论，整理成一份日报'}
               value={form.command}
               onChange={(e) => setForm({ ...form, command: e.target.value })}
             />
-          </label>
+          </div>
           <RoutineExecutionEnvironment
             form={form}
             models={models}
             loading={modelsLoading}
             error={modelsError}
             allowDefaultModel={!original?.model}
+            showDivider={false}
             onChange={(value) => setForm({ ...form, ...value })}
           />
         </fieldset>

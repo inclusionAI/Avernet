@@ -5,7 +5,9 @@ import { Pagination } from '@/components/ui/Pagination';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select';
 import { stageNames, type ManagedRoutine, type RoutineStage } from '@/services/botScheduledTasks/types';
 import { getRoutineScheduleLabel } from '@/services/botWorkshop/routineSchedule';
+import { Search } from 'lucide-react';
 import type { ReactNode } from 'react';
+import { EnableBadge } from './RoutineBadges';
 import { RoutineNextRun, useRoutineClock } from './RoutineNextRun';
 export function RoutineList({
   tasks,
@@ -53,8 +55,8 @@ export function RoutineList({
       .includes(keyword.trim().toLowerCase()),
   );
   return (
-    <section className="rounded-xl border border-border bg-card p-5 sm:p-6">
-      <div className="mb-5 flex flex-wrap items-center gap-3">
+    <section className="overflow-hidden rounded-xl border border-border bg-card">
+      <div className="flex flex-wrap items-center gap-3 border-b border-divider px-5 py-4 sm:px-6">
         {showStageFilter && (
           <Select value={stage || 'all'} onValueChange={onStage}>
             <SelectTrigger className="w-40" aria-label="运行态筛选">
@@ -70,13 +72,19 @@ export function RoutineList({
             </SelectContent>
           </Select>
         )}
-        <Input
-          className="max-w-sm"
-          aria-label="当前页筛选"
-          placeholder="当前页筛选：名称、指令或实例"
-          value={keyword}
-          onChange={(event) => onKeyword(event.target.value)}
-        />
+        <div className="relative max-w-sm flex-1">
+          <Search
+            aria-hidden
+            className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
+          />
+          <Input
+            className="pl-8"
+            aria-label="当前页筛选"
+            placeholder="筛选当前页：名称 / 指令 / 实例"
+            value={keyword}
+            onChange={(event) => onKeyword(event.target.value)}
+          />
+        </div>
         {canManage && (
           <Button className="ml-auto" disabled={!editable || busy} onClick={onCreate}>
             创建定时任务
@@ -87,9 +95,9 @@ export function RoutineList({
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">
             <thead className="text-xs text-muted-foreground">
-              <tr>
+              <tr className="[&_th]:border-b [&_th]:border-divider [&_th]:font-medium">
                 {['任务', '运行目标', '频率 / 时区', '下次执行（预计）', '调度状态', '操作'].map((title) => (
-                  <th key={title} className="px-3 py-3 font-medium">
+                  <th key={title} className="px-4 py-2.5">
                     {title}
                   </th>
                 ))}
@@ -99,14 +107,14 @@ export function RoutineList({
               {visible.map((task) => (
                 <tr
                   key={task.key}
-                  className="cursor-pointer border-t border-border hover:bg-muted/40"
+                  className="cursor-pointer border-t border-border/70 transition-colors hover:bg-muted/40"
                   onClick={() => onSelect(task)}
                 >
-                  <td className="max-w-xs px-3 py-4">
+                  <td className="max-w-xs px-4 py-3.5">
                     <Button
                       variant="ghost"
                       size="sm"
-                      className="h-auto p-0 text-left font-medium text-primary"
+                      className="h-auto px-0 py-0 text-left text-sm font-medium text-primary hover:bg-transparent"
                       onClick={(event) => {
                         event.stopPropagation();
                         onSelect(task);
@@ -114,23 +122,36 @@ export function RoutineList({
                     >
                       {task.name}
                     </Button>
-                    <p className="mb-0 mt-1 line-clamp-2 text-xs text-muted-foreground">{task.command}</p>
+                    {task.command && (
+                      <p className="mb-0 mt-1 line-clamp-1 break-all font-mono text-xs text-muted-foreground">
+                        {task.command}
+                      </p>
+                    )}
                   </td>
-                  <td className="max-w-xs break-all px-3 py-4 text-xs">
-                    {task.runtime_stage ? stageNames[task.runtime_stage] || task.runtime_stage : '运行态未报告'}
-                    <p className="mt-1 text-muted-foreground">{task.device_uuid || '实例未报告'}</p>
+                  <td className="max-w-xs px-4 py-3.5 text-xs">
+                    {task.runtime_stage ? (
+                      <span>{stageNames[task.runtime_stage] || task.runtime_stage}</span>
+                    ) : (
+                      <span className="text-muted-foreground">运行态未报告</span>
+                    )}
+                    <p className="mb-0 mt-1 break-all font-mono text-muted-foreground">
+                      {task.device_uuid || '实例未报告'}
+                    </p>
                   </td>
-                  <td className="px-3 py-4 text-xs">
+                  <td className="px-4 py-3.5 text-xs">
                     {getRoutineScheduleLabel(task.cron)}
-                    <p className="mt-1 text-muted-foreground">{task.timezone || '时区未报告'}</p>
+                    <p className="mb-0 mt-1 font-mono text-muted-foreground">
+                      {task.cron}
+                      {task.timezone ? ` · ${task.timezone}` : ''}
+                    </p>
                   </td>
-                  <td className="whitespace-nowrap px-3 py-4 text-xs">
+                  <td className="whitespace-nowrap px-4 py-3.5 text-xs">
                     <RoutineNextRun task={task} now={now} />
                   </td>
-                  <td className="px-3 py-4">
-                    {task.enabled === true ? '已启用' : task.enabled === false ? '已停用' : '状态未知'}
+                  <td className="px-4 py-3.5">
+                    <EnableBadge enabled={task.enabled} />
                   </td>
-                  <td className="px-3 py-4">{actions(task)}</td>
+                  <td className="px-4 py-3.5">{actions(task)}</td>
                 </tr>
               ))}
             </tbody>
@@ -138,6 +159,7 @@ export function RoutineList({
         </div>
       ) : (
         <Empty
+          className="py-14"
           title={
             keyword ? '当前页没有匹配任务' : incomplete ? '未获取到任务，存在查询失败的实例' : '当前范围暂无定时任务'
           }
@@ -153,7 +175,7 @@ export function RoutineList({
         onChange={onPage}
         onPageSizeChange={onPageSize}
         pageSizeOptions={[10, 20, 50]}
-        className="mt-5 justify-end"
+        className="border-t border-divider px-5 py-4 sm:px-6"
       />
     </section>
   );
