@@ -4,9 +4,7 @@ The community singlebox config leaves the ``[llm]`` block commented out, so
 ``LLM.chat()`` short-circuits with ``"[llm disabled]"`` (no network). A freshly
 created personal bot has no synced AGENTS/SOUL/TOOLS content yet, so
 ``POST /api/harness/diagnose`` drives ``_run_scan`` into its pre-check guard
-(router.py: ``all_empty`` → status ``failed`` with "请耐心等待配置文件同步完成后，
-再执行诊断"), without entering the LLM diagnostic body, and without generating
-any patch.
+without entering the LLM diagnostic body or generating any patch.
 
 This story is the first singlebox acceptance test to exercise the diagnose
 write path end-to-end (handler → background ``_run_scan`` → scan-record
@@ -79,10 +77,13 @@ def test_diagnose_empty_bot_guarded_without_patches(live_backend, acceptance_fs_
         # A fresh bot with no synced config files is guarded: the scan must
         # reach a terminal state (failed fast), never hang in scanning.
         assert poll["status"] in ("completed", "failed"), poll
-        # The empty-config pre-check surfaces a synchronous reason when it fires.
+        # The config pre-check explains why it could not start diagnostics.
         failed_reason = poll.get("failed_reason") or ""
         if poll["status"] == "failed":
-            assert "同步" in failed_reason, (
+            assert failed_reason in {
+                "Bot 配置文件读取失败。请确认 Bot 可访问后重试。",
+                "未读取到健康检测所需的 Bot 配置内容。请检查配置后重试。",
+            }, (
                 f"expected empty-config guard reason, got: {failed_reason!r}"
             )
             # Each file-type probe is marked empty/error, not left pending.
