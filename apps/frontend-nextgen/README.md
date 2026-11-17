@@ -27,6 +27,33 @@ npm run check:open-core
 npm run ci
 ```
 
+## Group and Session invitation links
+
+The [invitation landing hook](src/pages/Workspace/hooks/useInviteAccept.ts) first
+calls the authenticated, read-only [BCS invitation preflight](../bcs/api-contracts/v1/openapi/invitations.yaml).
+BCS determines whether the signed-in Human is already a participant of the exact
+Group or Session. Existing members navigate directly using the returned target
+and parent Group IDs and explicitly select the authenticated Human identity, not
+the previously active Bot. Invitation identity resolution only observes existing
+auth/capability/identity-store state; it never starts a mine/identity-loading
+request, which can create Human actors. A late global authentication result
+resumes navigation. The invitation history entry is replaced. Other users
+still explicitly confirm joining and select a message visibility scope.
+
+Preflight never accepts an invitation or infers membership from public visibility,
+Bot management or successful detail access. Expired links remain invalid.
+Authentication failures are distinct from invalid invitations; transient preflight
+failures offer retry rather than an unchecked confirmation. The request renders
+errors inline while leaving shared login/authentication gates enabled. A selected
+Group absent from the current sidebar page/filter is resolved by ID through the
+existing selected-Group detail fallback, including Session-only membership; list
+absence does not change membership or discard the requested Session.
+
+Regression coverage is in [invitationService.test.ts](test/services/workspace/invitationService.test.ts),
+[useInviteAccept.preview.test.ts](test/pages/Workspace/hooks/useInviteAccept.preview.test.ts),
+[useInviteAccept.readonlyIdentity.test.ts](test/pages/Workspace/hooks/useInviteAccept.readonlyIdentity.test.ts)
+and [InviteAcceptPanel.test.tsx](test/pages/Workspace/InviteAcceptPanel.test.tsx).
+
 ## Discovery public Bots
 
 The [public Bot cursor](src/services/collaborationSquare/publicBotCursor.ts)
