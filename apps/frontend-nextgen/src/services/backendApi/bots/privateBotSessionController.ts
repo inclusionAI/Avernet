@@ -89,6 +89,7 @@ export function createBotSession(
   params: BotRequestParams,
   body: { title?: string },
   signal?: AbortSignal,
+  serverErrorMessage?: string,
 ) {
   return backendRequest<BackendApiEnvelope<BotSessionDto>>(`/openapi/v1/bots/${botId}/sessions`, {
     method: 'POST',
@@ -96,6 +97,7 @@ export function createBotSession(
     data: body,
     injectUserId: false,
     signal,
+    ...(serverErrorMessage ? { serverErrorMessage } : {}),
   });
 }
 

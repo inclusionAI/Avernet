@@ -122,13 +122,15 @@ export function useConversationSessionCreation(
             },
           };
         } else {
-          result = await botSessionService.createSession(view.bot, userIdNow); // 复用既有实现,不重复建。
+          result = await botSessionService.createSession(view.bot, userIdNow, undefined, { friendlyErrors: true });
         }
 
         if (userIdRef.current !== userIdNow || generation.current !== started) return;
         if (!result.ok) {
-          const createError = result as { error?: { friendlyMessage?: string }; message?: string };
-          toast.error(createError.error?.friendlyMessage || createError.message || '创建会话失败');
+          const createError = result as { error?: { friendlyMessage?: string; alreadyHandled?: boolean }; message?: string };
+          if (!createError.error?.alreadyHandled) {
+            toast.error(createError.error?.friendlyMessage || createError.message || '创建会话失败');
+          }
           return;
         }
 
