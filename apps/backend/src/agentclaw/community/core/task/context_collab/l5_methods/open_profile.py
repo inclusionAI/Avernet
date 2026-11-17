@@ -92,6 +92,7 @@ class ParticipationType(str, Enum):
     this does not imply any Group/Space membership or resource grant.
     """
 
+    # TODO 这几种类型不在同一个层次上面, 甚至有交叉，定义有问题。
     COLLET_PARTICIPANT = "COLLET_PARTICIPANT"
     GROUP_MEMBER = "GROUP_MEMBER"
     SWARM_ALLOCATION = "SWARM_ALLOCATION"

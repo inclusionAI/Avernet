@@ -122,6 +122,7 @@ from agentclaw.community.di.modules.task_module import TaskModule
 from agentclaw.community.di.modules.task_persistence_module import TaskPersistenceModule
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.utils.avernet_tenant import DEFAULT_AVERNET_TENANT
+from tests.community.core.task.context_collab.test_collet_metadata import collet
 from tests.community.factories.task_commission import (
     BOT_ID as BOT_ASSIGNEE,
 )
@@ -155,7 +156,7 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
             ref=VersionedProfileRef("task_commission", 1),            # 版本
             composition=MethodCompositionTemplate(                    # 绑定L5方法
                 method_kind="Open",                                   # 绑定OPEN方法
-                scope="collet",
+                scope="collet",                                       # TODO collet不应该传到scope？应该传collet的事例? 这个参数的具体含义是什么？
                 required_methods=(MethodRequirement("Open", "0.2"),),
                 policies=(
                     OpenMethodPolicy(
@@ -176,7 +177,7 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
         )
     )
 
-    # 动态注入
+    # 测试用例引入的动态注入
     with commission_deployment(l6_profile) as (service, working_bot, injector):
         l4_context_operate = injector.get(ContextServiceProtocol)
         l2_executor_ref = AgentRef(agent_type="bot", agent_id=BOT_ASSIGNEE)
@@ -185,36 +186,42 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
 
         # 2、通过L4层操作创建Collet
         current_space = SPACE  # 产品层传入，取bot或用户当前所属space
+        # TODO l4_context_operate 需要协议层统一提供
+
+        # 这个collet代表当前的待办的一个待办任务。
+        # TODO: to_space, executor_refs 是不是该从其他地方提取？
+        # 公共的是否应该进一步提炼
         l4_collet = l4_context_operate.create_collet(
             ColletCreateCommand(
                 to_space=current_space,
-                initiator_ref=HUMAN.actor,  # 发起主体引用
+                initiator_ref=HUMAN.actor,  # 谁发起协作的？
                 objective=OBJECTIVE,
-                executor_refs=(l2_executor_ref,),  # () / (bot,) / (bot1, bot2, ...)
-                title="代办任务协作",
+                executor_refs=(l2_executor_ref,),  # 参与这次协作Bot范围: () / (bot,) / (bot1, bot2, ...)
+                title="XX代办任务",
                 description="用户与指定 Bot 之间的交付与验收上下文",
             ),
-            HUMAN,  # 代办任务创建人
+            HUMAN,  # 代办任务创建人 TODO: 一次待办的Product，因为任务发起者不同，需要有多个collet.
         )
-        collect_id = l4_collet.collet_id
-        assert l4_collet.title == "代办任务协作"
+        collet_id_1 = l4_collet.collet_id
+        assert l4_collet.title == "XX代办任务"
         assert l4_collet.created_by == l4_collet.updated_by == HUMAN.actor
         assert l4_collet.created_at == l4_collet.updated_at
         assert l4_collet.schema_version is not None and l4_collet.etag
 
         # 3、L6 实例化选择产品并编排 L5 Method/角色引用;不是 L4 create 的副作用。
         # instantiate中：校验产品配置与角色所需主体；创建并保存 ACTIVE 的 MethodBinding
+        # TODO why 有这个方法？
         product_instance = injector.get(ProductInstantiationServiceProtocol).instantiate(
-            ProductInstantiateCommand(collect_id, l6_profile.ref, l4_collet.version),
+            ProductInstantiateCommand(collet_id_1, l6_profile.ref, l4_collet.version),
             HUMAN,
         )
-        assert product_instance.collet_ref == collect_id
+        assert product_instance.collet_ref == collet_id_1
 
         # 4、调用L5的OPEN方法-创建机会
         published = l5_open_method.publish_opportunity(
             OpenOpportunityCommand(
-                collet_id=collect_id,                                     #collet
-                actor_context=HUMAN,                                      #发布人信息
+                collet_id=collet_id_1,                                     #collet
+                actor_context=HUMAN,                                      #发布人信息 TODO: actor_context为什么要传HUMAN, HUMAN是collet里面已经有了。
                 participation_type=ParticipationType.COLLET_PARTICIPANT,  #协议中明确规定的字段及取值
                 admission_policy_refs=[
                     "task_commission.designated_bot_self_application/1"   #录取策略：指定 Bot 自己申请，并由任务产品的策略自动审核
@@ -227,11 +234,12 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
 
         # 5、调用L5的OPEN方法-查询机会（实际应该是Agent自己调用）
         bot_context = working_bot.actor_context
+        # TODO 每个bot skill
         [opportunity] = l5_open_method.query_opportunities(
             actor_context=bot_context,
         )
         assert product_instance.method_binding_refs == (opportunity.method_binding_id,)
-        assert opportunity.scope_ref == collect_id
+        assert opportunity.scope_ref == collet_id_1
 
         # 6、由 Bot 自己调用注入的 L5 Open 服务提交申请
         # 问题：从协议中的如下描述，提交应用、录取agent之后，只是将agent拉到协作中，然后才开始真正干活,不过确实存在意义不明
@@ -245,7 +253,7 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
           → Decision: admit or reject
           → create scoped Participant or Method-specific participation binding
         """
-        record = injector.get(ContextCollabRepositoryProtocol).get_current_status(collect_id)
+        record = injector.get(ContextCollabRepositoryProtocol).get_current_status(collet_id_1)
         assert record.task is not None
         task_id = record.task.task_id
         submitted = working_bot.submit_application(
@@ -255,7 +263,7 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
         )
         assert submitted.accepted and submitted.state == "SUBMITTED"
         application = store.get_application(
-            axes, submitted.object_id, opportunity.method_binding_id, collect_id
+            axes, submitted.object_id, opportunity.method_binding_id, collet_id_1
         )
         assert application.state is ApplicationState.SUBMITTED
         assert application.applicant_agent_ref == working_bot.bot_uuid
@@ -267,21 +275,22 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
 
         # 提交申请还不等于录取,不能启动 Work;拒绝不能写入 Task/Event。
         repository = injector.get(ContextCollabRepositoryProtocol)
-        before_admission = repository.get_current_status(collect_id)
+        before_admission = repository.get_current_status(collet_id_1)
         with pytest.raises(ContextCollabValidationError):
             l4_context_operate.start(
-                collect_id, WorkStartCommand(expected_version=l4_collet.version), bot_context
+                collet_id_1, WorkStartCommand(expected_version=l4_collet.version), bot_context
             )
-        assert repository.get_current_status(collect_id) == before_admission
+        assert repository.get_current_status(collet_id_1) == before_admission
 
         # 7、针对每个机会，检查申请信息，并选择一个候选者录取
         policy_context = ActorContext(HUMAN.actor, source="product_policy")   # 采用product profile中定义的录取策略
         [policy_ref] = opportunity.admission_policy_refs
+        # TODO: 系统服务进行录用判断？
         screened = l5_open_method.screen(
             command=OpenScreenCommand(
                 application_ref=submitted.object_id,
                 context=policy_context,
-                collect_id=collect_id,
+                collect_id=collet_id_1,
                 reason=policy_ref,
             ),
         )
@@ -293,7 +302,7 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
             command=OpenAdmitCommand(
                 application_ref=submitted.object_id,
                 context=policy_context,
-                collect_id=collect_id,
+                collect_id=collet_id_1,
                 decision_id=decision_id,
                 reason=policy_ref,
             ),
@@ -302,14 +311,14 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
         assert admitted.object_id == submitted.object_id
         assert injector.get(A2aDeliveryPort).bridge_records() == ()
         [application] = store.list_applications(
-            axes, opportunity.method_binding_id, collect_id
+            axes, opportunity.method_binding_id, collet_id_1
         )
         assert application.state is ApplicationState.ADMITTED
         assert application.applicant_agent_ref == BOT_ASSIGNEE
 
         # 8、直接调用 L4 服务的 Work.start;不是产品 start_task 或通用事件追加接口。
         started = l4_context_operate.start(
-            collect_id,
+            collet_id_1,
             WorkStartCommand(
                 expected_version=l4_collet.version,
                 note="录取后启动任务执行",
@@ -317,8 +326,10 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
             bot_context,
         )
         assert started.accepted and started.current_status == "in_progress"
-        assert service.detail_task(collect_id).status == "in_progress"
+        assert service.detail_task(collet_id_1).status == "in_progress"
         assert injector.get(A2aDeliveryPort).bridge_records() == ()
+
+        # TODO: 协议相关的通知机制
 
         # 9. 模拟Agent执行任务，过程中上报自定义的步骤及进度信息
         # 但是目前协议中没有统一的详细步骤上报 API 和固定字段，这里自定义了一套上报API和字段。
@@ -329,11 +340,13 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
             status="created",
             context_version=l4_collet.version,
         )
+
+        # TODO 协议要提供远程服务
         artifacts = working_bot.run(
             created,
             lambda report_progress: _simulate_ai_coding(
                 tmp_path=tmp_path,
-                collet_id=collect_id,
+                collet_id=collet_id_1,
                 task_id=task_id,
                 service=service,
                 report_progress=report_progress,
@@ -341,7 +354,7 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
             task_id=task_id,
             initial_revision=started.context_version,
         )
-        review = service.detail_task(collect_id)
+        review = service.detail_task(collet_id_1)
         assert review.status == "reviewing"
         assert review.events[-1]["payload"]["artifacts"] == artifacts
 
@@ -349,19 +362,19 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
         # 10. 用户查看成果并明确 accept,而不是以 Bot 完工代替验收。
         _flow_log(_TEST_DIRECTORY, "6. 用户检查方案、代码、测试、PR 提案,确认 accept")
         accepted = service.accept_task(
-            TaskAdvanceCommand(collect_id, note="成果符合要求,验收通过"), HUMAN
+            TaskAdvanceCommand(collet_id_1, note="成果符合要求,验收通过"), HUMAN
         )
         assert accepted.status == "done"
 
         # 11. 经应用门面的 L4 查询读取 Task 状态与产物,不依赖产品详情接口。
         # TODO: 管理时、运行时分开。但是这里只是一个Collet查询服务，并不是管理服务。
-        final = l4_context_operate.get_status(collect_id, trunk_events=False, context=HUMAN)
+        final = l4_context_operate.get_status(collet_id_1, trunk_events=False, context=HUMAN)
         assert final.current_snapshot is not None
         assert final.current_snapshot["status"] == "done"
         assert final.context_version == accepted.context_version
         assert final.current_snapshot["progress"]["percent"] == 100
 
-        final_events = l4_context_operate.get_events(collect_id, context=HUMAN)
+        final_events = l4_context_operate.get_events(collet_id_1, context=HUMAN)
         assert [event.event_kind for event in final_events] == [
             "task.created",
             "task.started",
@@ -377,7 +390,7 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
         progress_events = [
             event for event in final_events if event.event_kind == "task.progress.updated"
         ]
-        assert task_id != collect_id
+        assert task_id != collet_id_1
         for index, event in enumerate(progress_events):
             assert event.payload["task_id"] == task_id
             assert event.payload["progress"]
