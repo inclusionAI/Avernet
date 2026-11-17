@@ -1,5 +1,5 @@
 /** @jest-environment jsdom */
-import type { TodoEvent, TodoRecord } from '@/domain/todos/models';
+import type { TodoArtifact, TodoEvent, TodoRecord } from '@/domain/todos/models';
 import { useTodoDetail } from '@/hooks/useTodoDetail';
 import * as todoService from '@/services/todos/todoService';
 import { useTodoStore } from '@/stores/todoStore';
@@ -27,6 +27,14 @@ const runningTodo: TodoRecord = {
 const awaitingAcceptanceTodo: TodoRecord = { ...runningTodo, status: 'pending_acceptance' };
 const pendingDispatchTodo: TodoRecord = { ...runningTodo, status: 'pending', collabContextId: undefined };
 
+function createDeferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((promiseResolve) => {
+    resolve = promiseResolve;
+  });
+  return { promise, resolve };
+}
+
 function event(eventSeq: number, overrides: Partial<TodoEvent> = {}): TodoEvent {
   return {
     eventId: `event-${eventSeq}`,
@@ -53,6 +61,7 @@ beforeEach(() => {
     selectedTodo: null,
     interactions: [],
     events: [],
+    artifacts: [],
     listLoading: false,
     detailLoading: false,
     eventsLoading: false,
@@ -64,6 +73,78 @@ beforeEach(() => {
   mockedService.loadTodo.mockResolvedValue(awaitingAcceptanceTodo);
   mockedService.loadTodoInteractions.mockResolvedValue([]);
   mockedService.loadTodoEvents.mockResolvedValue([]);
+  mockedService.loadTodoArtifacts.mockResolvedValue([]);
+});
+
+test('切换待办时立即清理旧详情，避免先渲染上一个待办', async () => {
+  const firstTodo: TodoRecord = { ...runningTodo, todoId: 'todo-1', title: '第一个待办' };
+  const secondTodo: TodoRecord = { ...runningTodo, todoId: 'todo-2', title: '第二个待办' };
+  const firstArtifact: TodoArtifact = {
+    artifactId: 'artifact-1',
+    todoId: 'todo-1',
+    executionId: 'execution-1',
+    artifactName: '第一个产物',
+    kind: 'text',
+    content: { text: '第一个待办的产物', isFinalArtifact: true },
+    createdAt: '2026-11-10T01:30:00Z',
+  };
+  mockedService.loadTodo.mockResolvedValueOnce(firstTodo);
+  mockedService.loadTodoInteractions.mockResolvedValueOnce([event(1)]);
+  mockedService.loadTodoEvents.mockResolvedValueOnce([event(1)]);
+  mockedService.loadTodoArtifacts.mockResolvedValueOnce([firstArtifact]);
+
+  const { result, rerender } = renderHook((todoId) => useTodoDetail(todoId), {
+    initialProps: 'todo-1',
+  });
+  await waitFor(() => {
+    expect(result.current.selectedTodo).toEqual(firstTodo);
+    expect(result.current.interactions).toHaveLength(1);
+    expect(result.current.events).toHaveLength(1);
+    expect(result.current.artifacts).toEqual([firstArtifact]);
+  });
+
+  const secondDetail = createDeferred<TodoRecord>();
+  const secondInteractions = createDeferred<TodoEvent[]>();
+  const secondEvents = createDeferred<TodoEvent[]>();
+  const secondArtifacts = createDeferred<TodoArtifact[]>();
+  mockedService.loadTodo.mockResolvedValueOnce(secondDetail.promise);
+  mockedService.loadTodoInteractions.mockResolvedValueOnce(secondInteractions.promise);
+  mockedService.loadTodoEvents.mockResolvedValueOnce(secondEvents.promise);
+  mockedService.loadTodoArtifacts.mockResolvedValueOnce(secondArtifacts.promise);
+
+  rerender('todo-2');
+
+  expect(result.current.selectedTodo).toBeNull();
+  expect(result.current.interactions).toEqual([]);
+  expect(result.current.events).toEqual([]);
+  expect(result.current.artifacts).toEqual([]);
+  expect(result.current.loading).toBe(true);
+
+  await act(async () => {
+    secondDetail.resolve(secondTodo);
+    secondInteractions.resolve([event(2, { eventId: 'event-2' })]);
+    secondEvents.resolve([event(2, { eventId: 'event-2' })]);
+    secondArtifacts.resolve([
+      {
+        ...firstArtifact,
+        artifactId: 'artifact-2',
+        todoId: 'todo-2',
+        artifactName: '第二个产物',
+        content: { text: '第二个待办的产物', isFinalArtifact: true },
+      },
+    ]);
+    await Promise.all([
+      secondDetail.promise,
+      secondInteractions.promise,
+      secondEvents.promise,
+      secondArtifacts.promise,
+    ]);
+  });
+
+  expect(result.current.selectedTodo).toEqual(secondTodo);
+  expect(result.current.loading).toBe(false);
+  expect(result.current.artifacts[0]?.artifactId).toBe('artifact-2');
+  expect(mockedService.loadTodo).toHaveBeenLastCalledWith('todo-2');
 });
 
 test('B 事件接口失败时不阻断 A 的详情和互动加载', async () => {
@@ -154,7 +235,11 @@ test('执行中详情打开期间轮询刷新 Todo 和事件', async () => {
   mockedService.loadTodoEvents.mockResolvedValue([event(1)]);
   useTodoStore.setState({ selectedTodo: runningTodo });
 
-  const { unmount } = renderHook(() => useTodoDetail('todo-1'));
+  const { result, unmount } = renderHook(() => useTodoDetail('todo-1'));
+  await act(async () => {
+    await Promise.resolve();
+  });
+  expect(result.current.loading).toBe(false);
 
   await act(async () => {
     jest.advanceTimersByTime(5100);

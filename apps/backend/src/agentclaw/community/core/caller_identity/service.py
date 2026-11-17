@@ -615,6 +615,7 @@ class CallerIdentityService(CallerIdentityServiceProtocol):
         is_test_exchange: bool = False,
         session_key: str | None = None,
         caller_token: CallerToken | None = None,
+        force_runtime_refresh: bool = False,
     ) -> None:
         """Exchange and install the Caller credential for one chat request."""
         self._session_validator.validate(bot_id=bot_id, owner_id=owner_user_id, caller_user_id=caller_user_id, binding_id=binding_id, stage=stage, session_key=session_key)
@@ -645,12 +646,15 @@ class CallerIdentityService(CallerIdentityServiceProtocol):
             # Bot owner. BaaS needs the marker only to accept a personal Bot for
             # that controlled end-to-end test.
             runtime_update_kwargs["is_test_exchange"] = True
+        if force_runtime_refresh:
+            runtime_update_kwargs["force_runtime_refresh"] = True
         logger.info(
-            "caller_runtime_update_requested bot_id=%s stage=%s test_exchange=%s token_reused=%s",
+            "caller_runtime_update_requested bot_id=%s stage=%s test_exchange=%s token_reused=%s force_runtime_refresh=%s",
             bot_id,
             stage,
             is_test_exchange,
             token_reused,
+            force_runtime_refresh,
         )
         runtime_updater.update_caller_identity(
             **runtime_update_kwargs,

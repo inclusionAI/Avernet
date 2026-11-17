@@ -465,6 +465,28 @@ def test_file_upload_roundtrip_reuses_object_storage_and_authorizes_reader():
     assert access.calls == [{"space_id": 7, "user_id": "user_1", "env": None}]
 
 
+def test_file_upload_event_prefers_concise_artifact_name_as_summary():
+    service, _, _, _, credential, collaboration = _service()
+    service.bind_run_id(execution_id=credential.execution_id, run_id="run_named_file")
+
+    record = service.upload_file(
+        todo_id="todo_1",
+        todo_execution_id=credential.execution_id,
+        execution_token=credential.token,
+        artifact_name="AI 发展预测分析",
+        file_name="ai_comprehensive_report.csv",
+        content_type="text/csv",
+        payload=b"csv-bytes",
+        is_final_artifact=True,
+    )
+
+    event = collaboration.context.events[0]
+    assert record.artifact_name == "AI 发展预测分析"
+    assert record.content["file_name"] == "ai_comprehensive_report.csv"
+    assert event.content == "产出文件：AI 发展预测分析"
+    assert event.payload["artifact_name"] == "AI 发展预测分析"
+
+
 def test_new_execution_replaces_old_token():
     service, _, _, _, first, _ = _service()
     service.issue_execution(todo_id="todo_1", executor_id="bot_1")

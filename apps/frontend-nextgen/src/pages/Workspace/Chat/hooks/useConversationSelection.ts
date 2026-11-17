@@ -19,7 +19,7 @@ export interface UseConversationSelectionResult {
   /** URL 投影:当前选中状态的会话路由契约。 */
   selection: ConversationRouteState;
   /** 当前选中的归属(管理 Bot 按选择记录,好友 Bot 恒 mine)。 */
-  origin: 'mine' | 'others';
+  origin: 'mine' | 'others' | 'collab';
   /** 交互式分支数据:选中 Bot 及其 mine 会话(任一缺失即无交互目标)。 */
   interactive: { bot: ChatBotView | null; session: BotChatSessionView | null };
   /** 只读分支数据(origin=others):Bot/好友/只读会话,任一缺失面板降级空态。 */
@@ -67,7 +67,7 @@ export function useConversationSelection(options: {
     store.selectedSection === 'friend'
       ? friendBotIdKey.split('|').includes(store.selectedBotId ?? '')
       : managedBotIdKey.split('|').includes(`${store.selectedSection}=${store.selectedBotId}`);
-  const origin: 'mine' | 'others' =
+  const origin: 'mine' | 'others' | 'collab' =
     store.selectedBotId !== null && isManagedConversationSection(store.selectedSection) ? store.selectedOrigin : 'mine';
   const selection = useMemo<ConversationRouteState>(() => {
     const managedSelection = isManagedConversationSection(store.selectedSection);
@@ -75,7 +75,7 @@ export function useConversationSelection(options: {
       botId: store.selectedBotId ?? undefined,
       section: store.selectedSection ?? undefined,
       origin: managedSelection ? store.selectedOrigin : undefined,
-      scope: managedSelection && store.selectedOrigin === 'mine' ? store.selectedScope : undefined,
+      scope: managedSelection && store.selectedOrigin !== 'others' ? store.selectedScope : undefined,
       friendUserId:
         managedSelection && store.selectedOrigin === 'others' ? store.selectedFriendUserId ?? undefined : undefined,
       sessionId: store.selectedSessionId ?? undefined,

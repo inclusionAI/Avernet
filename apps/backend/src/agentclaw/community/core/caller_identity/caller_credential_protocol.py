@@ -94,8 +94,9 @@ class CallerRuntimeUpdater(Protocol):
         binding_id: int | None = None,
         is_test_exchange: bool = False,
         session_key: str | None = None,
+        force_runtime_refresh: bool = False,
     ) -> None:
-        """Append the Caller overlay to the exact runtime device."""
+        """Append the Caller overlay; force reinstalls despite a longer ledger expiry."""
         ...
 
 

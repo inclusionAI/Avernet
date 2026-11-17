@@ -467,12 +467,10 @@ class TodoArtifactService:
             text = content.get("text")
             return cls._preview(text if isinstance(text, str) else record.artifact_name)
         if record.artifact_kind is TodoArtifactKind.FILE:
-            file_name = content.get("file_name")
-            return (
-                file_name.strip()
-                if isinstance(file_name, str) and file_name.strip()
-                else record.artifact_name
-            )
+            # `artifact_name` is the readable product title supplied with the
+            # upload. It may equal the sanitized filename for legacy callers
+            # that omit the field; those rows still display the file name.
+            return record.artifact_name
         if record.artifact_kind is TodoArtifactKind.URL_LINK:
             return record.artifact_name or str(content.get("url") or "")
         code_name = content.get("code_base_name")

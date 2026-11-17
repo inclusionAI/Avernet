@@ -606,7 +606,7 @@ describe('instance session lookup error notifications', () => {
       { deviceUuid: 'device-a', stage: 'online' }, { silentNotFound: true });
     expect(result.ok).toBe(false);
     expect(useErrorNotifyStore.getState().queue[0].cancelled === true).toBe(status === 404);
-    if (status === 404) expect(result).toMatchObject({ error: { code: 'NOT_FOUND' } });
+    expect(result).toMatchObject({ error: { code: status === 404 ? 'NOT_FOUND' : 'BOT_SESSION_FAILED' } });
   });
   it('cancels the notification produced by the real HTTP request chain', async () => {
     const originalFetch = global.fetch;

@@ -1,5 +1,6 @@
 // Conversation Store 的纯切片 helpers:从 conversationStore.ts 拆出(Store 文件大小阈值),
 // 只做状态 patch 计算且无副作用;被 Store 的同步 setter 组合使用,不对外导出消费。
+import type { ConversationSessionScope } from '@/domain/conversation';
 import type { ConversationState } from './conversationStoreState';
 
 /** 删除记录键并返回新对象(不可变切片;原对象不动)。 */
@@ -74,4 +75,26 @@ export function instanceSelectionSet(state: ConversationState, botId: string, ne
     ...invalidateListCaches(state, botId),
     ...revisionPatch(state, botId),
   };
+}
+/** 范围切换只改变侧栏列表时,保留主舞台已打开会话并随当前选中身份更新快照范围。
+ *  归档是浏览性筛选(左侧展示归档目录,右侧继续阅读当前会话),不卸载仍在打开的
+ *  Coding Bot 会话;快照的其余身份字段必须完全一致,避免复活旧 Bot/旧会话。 */
+export function selectedSnapshotScopePatch(
+  state: ConversationState,
+  botId: string,
+  scope: ConversationSessionScope,
+): Partial<Pick<ConversationState, 'selectedSessionSnapshot'>> {
+  const snapshot = state.selectedSessionSnapshot;
+  if (!snapshot || !state.selectedSessionId || !state.selectedSection) return {};
+  if (
+    snapshot.section !== state.selectedSection ||
+    snapshot.botId !== botId ||
+    snapshot.origin !== state.selectedOrigin ||
+    snapshot.friendUserId !== state.selectedFriendUserId ||
+    snapshot.session.sessionId !== state.selectedSessionId
+  ) {
+    return {};
+  }
+  if (snapshot.scope === scope) return {};
+  return { selectedSessionSnapshot: { ...snapshot, scope } };
 }

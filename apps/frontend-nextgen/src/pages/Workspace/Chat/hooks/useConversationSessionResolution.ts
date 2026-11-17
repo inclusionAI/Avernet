@@ -21,7 +21,7 @@ export function useConversationSessionResolution(options: {
   botById: Map<string, ChatBotView>;
   /** 选中 Bot 是否仍在目录(目录外的会话按无效处理,不渲染交互舞台)。 */
   selectedInDirectory: boolean;
-  origin: 'mine' | 'others';
+  origin: 'mine' | 'others' | 'collab';
 }) {
   const { store, botById, selectedInDirectory, origin } = options;
   const selectedBot = store.selectedBotId ? botById.get(store.selectedBotId) ?? null : null;

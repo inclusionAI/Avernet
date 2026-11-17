@@ -103,6 +103,7 @@ jest.mock('@/services/workspace/managedBotConversationService', () => ({
 }));
 
 jest.mock('@/services/workspace/botSessionService', () => ({
+  ...jest.requireActual<typeof import('@/services/workspace/botSessionService')>('@/services/workspace/botSessionService'),
   splitBotId: (id: string) => {
     const index = id.indexOf(':');
     return index < 0 ? { realBotId: id } : { realBotId: id.slice(0, index), ownerId: id.slice(index + 1) };
@@ -486,6 +487,40 @@ describe('ConversationPage(Task 8 组合页)', () => {
     expect(stage).toHaveAttribute('data-session-id', '');
     expect(screen.getByText('请选择一个会话')).toBeInTheDocument();
     expect(stage.parentElement).toHaveAttribute('aria-hidden', 'true');
+  });
+
+  it('直进对话页时立即预载子应用，不等待 Bot 目录解析完成', async () => {
+    const preload = jest.fn();
+    extendCapabilities({
+      getCodingBotConversationHost: () => ({
+        status: 'available',
+        value: { Stage: () => <div />, preload },
+      }),
+    });
+
+    let resolveDirectory:
+      | ((value: { ok: true; data: { managedBots: []; friendBots: [] } }) => void)
+      | undefined;
+    const directoryGate = new Promise<{ ok: true; data: { managedBots: []; friendBots: [] } }>(
+      (resolve) => {
+        resolveDirectory = resolve;
+      },
+    );
+    const conversationServiceMock = require('@/services/workspace/conversationService').conversationService as {
+      listDirectory: jest.Mock;
+    };
+    conversationServiceMock.listDirectory.mockImplementationOnce(() => directoryGate);
+
+    render(<ConversationPage />);
+
+    await waitFor(() => expect(preload).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText('AgentCoding Bot')).not.toBeInTheDocument();
+    expect(useConversationStore.getState().selectedBotId).toBeNull();
+    expect(screen.queryByTestId('coding-bot-stage')).not.toBeInTheDocument();
+
+    await act(async () => {
+      resolveDirectory?.({ ok: true, data: { managedBots: [], friendBots: [] } });
+    });
   });
 
   it('识别出 Coding Bot 后，目标 Session 未就绪也先触发 Embedded 宿主预载', async () => {

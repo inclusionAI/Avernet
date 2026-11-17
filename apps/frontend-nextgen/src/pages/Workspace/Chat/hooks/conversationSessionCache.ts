@@ -69,6 +69,7 @@ export const managedViewOf = (
   origin,
   scope,
   sessions,
+  sessionArchives: prev?.sessionArchives,
   friendDirectory: prev?.friendDirectory ?? { items: [], loading: false, error: null },
   friendGroups: prev?.friendGroups ?? {},
 });
