@@ -6,8 +6,6 @@ Do not copy complete current contracts or private session records here. A comple
 
 When a change yields verified reusable knowledge, update its owning documentation and navigation; retain the task-specific evidence in the spec. Follow the [repository knowledge standard](../../../docs/agents/knowledge-standard.md).
 
-- [2026-11-17 Invitation membership preflight](2026-11-17-invitation-preflight/spec.md) — read-only inspection and member auto-navigation (implemented; validation limits recorded).
-
 ## Existing change records
 
 These entries are task-specific records. Inspect their individual status, evidence and target version; their presence does not establish current authority or deployment. Explicitly adopted contracts retain their authority until replaced.

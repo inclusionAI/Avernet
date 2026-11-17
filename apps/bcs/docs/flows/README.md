@@ -2,7 +2,6 @@
 
 Start with [Session Deletion](session-deletion.md). Use these existing contracts and guides to trace the relevant flow. Verify the target version, implementation and tests before applying a document to a running system.
 
-- [Collaboration invitation links](../../../../docs/flows/collaboration-invitation.md) — BCS preflight and frontend consent/navigation.
 - [Session deletion and compatibility](../session-delete-protocol.md)
 - [Public authentication contract](../../api-contracts/v1/authentication/contract.md)
 - [Gateway principal contract](../../api-contracts/v1/gateway-principal/contract.md)
