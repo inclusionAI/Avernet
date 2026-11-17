@@ -352,6 +352,6 @@ endpoint_test(
     ),
     seed=_seed_offline_services,
     expect=ExpectError(
-        status=503, json_contains={"message": "Bot device is offline", "data": None}
+        status=502, json_contains={"code": 502000, "message": "Bot device is offline", "data": None}
     ),
 )(lambda: None)

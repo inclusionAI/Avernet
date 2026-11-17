@@ -136,13 +136,13 @@ def _seed_offline(world) -> None:
 @endpoint_test(
     method="GET",
     path="/openapi/v1/bots/{bot_id}/skills/{skill_id}/content",
-    scenario="device_offline_returns_503",
+    scenario="device_offline_returns_502",
     input=CaseInput(path_params={"bot_id": _BOT_ID, "skill_id": "1"}, query_params={"user_id": _OWNER}, headers=_HEADERS),
     seed=_seed_offline,
-    expect=ExpectError(status=503),
+    expect=ExpectError(status=502, json_contains={"code": 502000, "message": "Bot device is offline", "data": None}),
 )
 def content_device_offline():
-    """Content returns 503 when the Bot device is offline."""
+    """Content returns a distinct 502 when the Bot device is offline."""
 
 
 @endpoint_test(

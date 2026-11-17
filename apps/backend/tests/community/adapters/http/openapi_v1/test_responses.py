@@ -118,8 +118,8 @@ async def test_envelope_errors_maps_domain_error():
 
 
 @pytest.mark.asyncio
-async def test_device_offline_error_returns_503():
-    """DeviceOfflineError → 503, distinct from generic ConnInfoBuildError 502."""
+async def test_device_offline_error_returns_502_with_distinct_message():
+    """Offline is a downstream 502 with a distinct, safe message."""
     import json
 
     @envelope_errors
@@ -128,8 +128,9 @@ async def test_device_offline_error_returns_503():
 
     resp = await handler(request=_request())
     assert isinstance(resp, JSONResponse)
-    assert resp.status_code == 503
+    assert resp.status_code == 502
     body = json.loads(bytes(resp.body))
+    assert body["code"] == 502000
     assert body["message"] == "Bot device is offline"
     assert body["data"] is None
 

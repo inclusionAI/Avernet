@@ -600,10 +600,9 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # The binding row names a device provider the resolver does not know: bad
     # data on our side, never something the caller can correct.
     UnknownProviderError: (500, "Device binding is misconfigured"),
-    # The provider confirms the current device is offline — an expected
-    # lifecycle state, not an upstream failure. 503 tells callers the
-    # resource is temporarily unavailable, distinct from a gateway error.
-    DeviceOfflineError: (503, "Bot device is offline"),
+    # The provider confirms the downstream device is offline. Keep the
+    # upstream-dependency 502 while distinguishing this lifecycle state.
+    DeviceOfflineError: (502, "Bot device is offline"),
     # A transient provider connection failure where the device state is
     # unknown. Still 502 (upstream dependency), but with a distinct message
     # so callers can tell it apart from a permanent configuration error.
