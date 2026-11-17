@@ -69,10 +69,10 @@ the code of each task; each group ends with its crate's tests green.
 - [x] 5.0 Low-level clients keep the connect-phase signal (REST, JSON-RPC,
   SSE open, gRPC) as a fixed marker; unit tests per binding; existing delivery
   suites unchanged and green.
-- [ ] 5.1 `DistAgentResolver`, `A2aDistAgentClient::start` / `send_input`
+- [x] 5.1 `DistAgentResolver`, `A2aDistAgentClient::start` / `send_input`
   with the classification table; fake-agent tests incl. refused port →
   `NotSent`, close-after-read → `OutcomeUnknown`.
-- [ ] 5.2 `query`, `subscribe`, `cancel`; event mapping;
+- [x] 5.2 `query`, `subscribe`, `cancel`; event mapping;
   `conformance_dist_agent_client.rs`.
 
 ## Group 6 — Admin (C6)
