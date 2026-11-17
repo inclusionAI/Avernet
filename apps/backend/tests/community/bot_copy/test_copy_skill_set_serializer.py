@@ -1,0 +1,370 @@
+"""S1 unit tests for ``copy._serialize_skill_sets`` (Spec §6 dual-branch).
+
+The serializer is a pure function: it takes the source bot's manifest record
+(Branch A, manifest-managed) or its ``SkillSetApplySnapshot`` (Branch B,
+legacy Genome bot) and returns the ``manifest.skill_sets`` list to write into
+the dst manifest document, or ``None`` to omit the segment (the dst reads as
+a brand-new bot: default enabled, no ordinary sets — Spec §0).
+
+Tests round-trip the output through ``validate_document`` — the same validator
+``PUT`` and the manifest-creation preflight call — which internally invokes
+``validate_capabilities`` (``skill_sets.py``). The validator is the schema
+gate; the full ``ManifestCompiler`` path is exercised end-to-end by the S3
+endpoint tests (Spec §4 separation), which feed a complete document with
+``sources``/``resources`` through the apply engine.
+
+Scenarios map to Spec §4 S1:
+* ①  source manifest carries a full segment (default + ordinary + center / repo
+  / local skill + mcp member) → passed through verbatim → re-validates.
+* ②  source manifest carries a non-empty segment without a ``default`` row
+  (default disabled) → passed through → default_enabled reads False.
+* ③  source manifest has no ``skill_sets`` key → ``None`` (omit the segment).
+* ④  Branch B fallback: snapshot with a default set + one ordinary set →
+  derived segment re-validates.
+* ⑤  Branch B fallback: empty snapshot → ``None`` (omit the segment).
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+import pytest
+
+from agentclaw.community.adapters.http.openapi_v1.bots.copy import (
+    _serialize_skill_sets,
+)
+from agentclaw.community.core.apply_engine.capabilities import resolve_capabilities
+from agentclaw.community.core.bot_config_manifest.repository.models import (
+    BotConfigManifestRecord,
+)
+from agentclaw.community.core.bot_config_manifest.schema.validator import (
+    validate_document,
+)
+from agentclaw.community.core.skill_center.skill_set_apply import (
+    BotCapabilityScope,
+    SkillSetApplySnapshot,
+    SkillSetSnapshot,
+)
+
+
+_CAPS = resolve_capabilities(
+    active_engine="openclaw", bot_type="personal", is_teclaw=lambda _: False
+)
+
+
+def _record(document_text: str) -> BotConfigManifestRecord:
+    return BotConfigManifestRecord(
+        env="dev",
+        entity_id="u1",
+        bot_id="src_1",
+        document=document_text,
+        size_bytes=len(document_text.encode("utf-8")),
+        schema_version=1,
+        modifier="u1",
+    )
+
+
+def _assert_skill_sets_validate(
+    segment: list[dict[str, Any]] | None,
+    *,
+    sources: dict[str, Any] | None = None,
+) -> None:
+    """Re-validate the segment through ``validate_document``.
+
+    A manifest document with ``schema_version: 1`` + the segment under
+    ``manifest.skill_sets`` is the minimal document the schema gate accepts;
+    ``validate_capabilities`` runs inside it. When members reference a named
+    source via ``from:``, the caller passes the matching ``sources`` block so
+    that ``resolve_source`` can resolve it — otherwise the schema would report
+    an undeclared-source violation that the segment's own vocabulary did not
+    cause.
+    """
+    import yaml as _yaml
+
+    manifest: dict[str, Any] = {"resources": []}
+    if segment is not None:
+        manifest["skill_sets"] = segment
+    document_obj: dict[str, Any] = {"schema_version": 1, "manifest": manifest}
+    if sources:
+        document_obj["sources"] = sources
+    document = _yaml.safe_dump(
+        document_obj,
+        sort_keys=False,
+        allow_unicode=True,
+    )
+    # ``validate_document`` raises on any violation; absence of raise == pass.
+    validate_document(document, _CAPS)
+
+
+_SOURCES_PACKAGES = {
+    "packages": {"protocol": "git", "url": "https://example.com/repo"},
+}
+
+
+def _default_enabled(segment: list[dict[str, Any]] | None) -> bool:
+    """Mirror ``capabilities_resolve.py:27-29`` — default switch by row presence.
+
+    Returning True when the segment is ``None`` matches the resolver's
+    ``is None`` branch: omitting the segment enables default, the brand-new
+    baseline.
+    """
+    if segment is None:
+        return True
+    return any(
+        isinstance(row, dict) and row.get("name") == "default" for row in segment
+    )
+
+
+# ---------------------------------------------------------------------------
+# Branch A — source has a manifest record (passthrough).
+# ---------------------------------------------------------------------------
+
+
+_SCENARIO_1_DOCUMENT = """\
+schema_version: 1
+sources:
+  packages:
+    protocol: git
+    url: https://example.com/repo
+manifest:
+  skill_sets:
+    - name: default
+    - name: my-tools
+      description: team shared tools
+      is_active: true
+      skills:
+        - name: qc
+          origin: center
+          skill_uuid: 11111111-1111-1111-1111-111111111111
+        - name: repo-tool
+          origin: repo
+          repo_path: tools/repo-tool
+        - name: local-pkg
+          from: packages
+      mcp:
+        - server_code: gh
+script:
+  body: echo hi
+"""
+
+
+def test_scenario_1_source_manifest_full_segment_passed_through():
+    record = _record(_SCENARIO_1_DOCUMENT)
+    segment = _serialize_skill_sets(
+        source_manifest_record=record, snapshot=None
+    )
+    assert segment is not None
+    assert _default_enabled(segment) is True
+    # The ordinary set carries all its members verbatim — center / repo / local
+    # origins plus the mcp member — exercising the Spec §1 vocabulary.
+    ordinary = [row for row in segment if row.get("name") != "default"]
+    assert len(ordinary) == 1
+    # Two origin-flagged members (center skill_uuid + repo repo_path) and one
+    # local member pulled from a named source (`from: packages` — the schema
+    # requires a local member to name one of from/source/content).
+    origins = {
+        skill.get("origin") for skill in ordinary[0]["skills"] if "origin" in skill
+    }
+    assert origins == {"center", "repo"}
+    local_members = [
+        skill
+        for skill in ordinary[0]["skills"]
+        if skill.get("origin", "local") == "local"
+    ]
+    assert len(local_members) == 1
+    assert local_members[0]["from"] == "packages"
+    assert ordinary[0]["mcp"] == [{"server_code": "gh"}]
+    _assert_skill_sets_validate(segment, sources=_SOURCES_PACKAGES)
+
+
+_SCENARIO_2_DOCUMENT = """\
+schema_version: 1
+manifest:
+  skill_sets:
+    - name: no-default-tools
+      is_active: true
+      skills:
+        - name: qc
+          origin: center
+          skill_uuid: 22222222-2222-2222-2222-222222222222
+      mcp: []
+script:
+  body: echo hi
+"""
+
+
+def test_scenario_2_source_manifest_segment_without_default_row_disables_default():
+    record = _record(_SCENARIO_2_DOCUMENT)
+    segment = _serialize_skill_sets(
+        source_manifest_record=record, snapshot=None
+    )
+    assert segment is not None
+    assert _default_enabled(segment) is False
+    # The single ordinary row re-validates against the schema.
+    _assert_skill_sets_validate(segment)
+
+
+_SCENARIO_3_DOCUMENT = """\
+schema_version: 1
+manifest:
+  resources: []
+script:
+  body: echo hi
+"""
+
+
+def test_scenario_3_source_manifest_without_skill_sets_key_returns_none():
+    record = _record(_SCENARIO_3_DOCUMENT)
+    segment = _serialize_skill_sets(
+        source_manifest_record=record, snapshot=None
+    )
+    assert segment is None
+    # ``None`` is what the serializer hands the builder, which omits the
+    # segment — the dst reads as a brand-new bot (default enabled).
+    assert _default_enabled(segment) is True
+
+
+# ---------------------------------------------------------------------------
+# Branch B — source has no manifest record (derive from snapshot).
+# ---------------------------------------------------------------------------
+
+
+def _snapshot(
+    *, sets: tuple[SkillSetSnapshot, ...], skills: tuple[dict[str, Any], ...] = ()
+) -> SkillSetApplySnapshot:
+    return SkillSetApplySnapshot(
+        scope=BotCapabilityScope(
+            bot_id="src_1",
+            owner_id="u1",
+            engine_type="openclaw",
+            default_engine_types=("openclaw",),
+            tenant="teamclaw",
+            env="dev",
+        ),
+        sets=sets,
+        skill_exclusions=frozenset(),
+        mcp_exclusions=frozenset(),
+        installed_skill_ids=frozenset(),
+        installed_mcp_codes=frozenset(),
+        platform_default_codes=frozenset(),
+        skills=skills,
+    )
+
+
+def test_scenario_4_snapshot_with_default_plus_ordinary_set_derives_segment():
+    # The ordinary Set's members cover center and repo origins: those are the
+    # branches that validate standalone against the schema (no `from:`
+    # declaration needed). The local-skill branch carries the extra S1/S2 wiring
+    # that needs a declared file-sync source; the S2 integration test exercises
+    # that path, this S1 test stays within branch-B vocabulary.
+    ordinary_skills = (
+        # A repo-path skill.
+        {
+            "id": 101,
+            "name": "repo-tool",
+            "git_path": "tools/repo-tool",
+            "skill_uuid": None,
+        },
+        # A center skill referenced by uuid.
+        {
+            "id": 102,
+            "name": "center-tool",
+            "git_path": "center://center-fixture",
+            "skill_uuid": "33333333-3333-3333-3333-333333333333",
+        },
+    )
+    default_set = SkillSetSnapshot(
+        id=1,
+        name="default",
+        description=None,
+        is_default=True,
+        is_active=True,
+        skill_ids=(1,),
+        mcp_codes=("platform-mcp",),
+        skill_references=(),
+    )
+    ordinary_set = SkillSetSnapshot(
+        id=2,
+        name="my-tools",
+        description="team shared",
+        is_default=False,
+        is_active=True,
+        skill_ids=(101, 102),
+        mcp_codes=("gh",),
+        skill_references=(),
+    )
+    snapshot = _snapshot(
+        sets=(default_set, ordinary_set), skills=ordinary_skills
+    )
+
+    segment = _serialize_skill_sets(
+        source_manifest_record=None, snapshot=snapshot
+    )
+    assert segment is not None
+    assert _default_enabled(segment) is True
+    ordinary = [row for row in segment if row.get("name") == "my-tools"]
+    assert len(ordinary) == 1
+    assert ordinary[0]["is_active"] is True
+    assert ordinary[0]["description"] == "team shared"
+    assert {skill["origin"] for skill in ordinary[0]["skills"]} == {
+        "repo",
+        "center",
+    }
+    # Center skill carries its uuid; repo skill carries its path; MCP members
+    # are emitted as ``{server_code}`` rows (Spec §0 / §1).
+    center_skill = next(s for s in ordinary[0]["skills"] if s["origin"] == "center")
+    assert center_skill["skill_uuid"] == "33333333-3333-3333-3333-333333333333"
+    repo_skill = next(s for s in ordinary[0]["skills"] if s["origin"] == "repo")
+    assert repo_skill["repo_path"] == "tools/repo-tool"
+    assert ordinary[0]["mcp"] == [{"server_code": "gh"}]
+    _assert_skill_sets_validate(segment)
+
+
+def test_scenario_5_snapshot_without_sets_returns_none():
+    snapshot = _snapshot(sets=(), skills=())
+    segment = _serialize_skill_sets(
+        source_manifest_record=None, snapshot=snapshot
+    )
+    assert segment is None
+    assert _default_enabled(segment) is True
+
+
+@pytest.mark.parametrize("snapshot", [None])
+def test_branch_b_snapshot_none_returns_none(snapshot):
+    """A ``None`` snapshot (legacy path with nothing to read) → omit segment."""
+    segment = _serialize_skill_sets(
+        source_manifest_record=None, snapshot=snapshot
+    )
+    assert segment is None
+
+
+def test_build_manifest_document_omits_skill_sets_when_none():
+    """``_build_manifest_document`` does not emit the segment when ``None``."""
+    from agentclaw.community.adapters.http.openapi_v1.bots.copy import (
+        _build_manifest_document,
+    )
+
+    document = _build_manifest_document(
+        script_body="echo hi",
+        source_bot_id="src_1",
+        source_owner_id="u1",
+        skill_sets=None,
+    )
+    assert "skill_sets" not in document
+
+
+def test_build_manifest_document_emits_skill_sets_when_provided():
+    from agentclaw.community.adapters.http.openapi_v1.bots.copy import (
+        _build_manifest_document,
+    )
+
+    segment: list[dict[str, Any]] = [{"name": "default"}]
+    document = _build_manifest_document(
+        script_body="echo hi",
+        source_bot_id="src_1",
+        source_owner_id="u1",
+        skill_sets=segment,
+    )
+    assert "skill_sets" in document
+    # The builder's output must pass the same validator.
+    validate_document(document, _CAPS)

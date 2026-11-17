@@ -23,7 +23,7 @@ from __future__ import annotations
 import random
 import string
 from datetime import datetime
-from typing import Annotated, Any, Optional
+from typing import Annotated, Any, Optional, TYPE_CHECKING
 
 import yaml
 from fastapi import APIRouter, HTTPException, Path, Request
@@ -77,6 +77,18 @@ from agentclaw.community.core.repository.protocols.bot.config_manifest_apply imp
 from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
 from agentclaw.community.utils.env_utils import get_current_env
+
+if TYPE_CHECKING:
+    # Typed only for the S1 serializer's signature; the runtime values come from
+    # DI (``BotConfigManifestServiceProtocol.get``) and from
+    # ``SkillSetApplyService.read_apply_snapshot``, both already imported by the
+    # handler chain. Quoted to avoid pulling the modules at import time.
+    from agentclaw.community.core.bot_config_manifest.repository.models import (
+        BotConfigManifestRecord,
+    )
+    from agentclaw.community.core.skill_center.skill_set_apply import (
+        SkillSetApplySnapshot,
+    )
 
 #: Copy supports openclaw bots only (PRD v1); teclaw's container is composed by
 #: the artifact at provision, a different mechanism from manifest-creation's
@@ -168,6 +180,155 @@ def _generate_operation_id() -> str:
 _FILE_SYNC_PATH = "workspace/"
 
 
+def _serialize_skill_sets(
+    *,
+    source_manifest_record: "BotConfigManifestRecord | None",
+    snapshot: "SkillSetApplySnapshot | None",
+) -> list[dict[str, Any]] | None:
+    """Serialize the source's capability-set state into a manifest ``skill_sets`` segment.
+
+    Returns the list to write under ``manifest.skill_sets``, or ``None`` when the
+    segment is omitted (the dst reads as a brand-new bot: default enabled, no
+    ordinary sets — Spec §0 "省略段" invariant). Two branches (Spec §6):
+
+    * **Branch A — source has a manifest record** (manifest-managed bot): pass
+      the source's own ``skill_sets`` segment through verbatim. The source
+      document is already a validator-accepted vocabulary, so the dst inherits
+      it as-is. The default switch rides the presence of a ``{name: default}``
+      row in the passed-through list. ``None`` is returned when the source
+      manifest declares no ``skill_sets`` segment at all (the source itself
+      reads as a brand-new bot).
+    * **Branch B — source has no manifest record** (legacy Genome bot,
+      ``source_manifest_record is None``): derive the segment from the source's
+      ``SkillSetApplySnapshot``. Default-enabled is decided by whether the
+      snapshot carries a default set; each ordinary Set's members are
+      serialized by origin (center/repo/local) per Spec §1, and MCP members
+      become ``{server_code}`` rows (Spec §0). ``None`` is returned when the
+      snapshot has no sets at all — the source is a brand-new bot and the dst
+      inherits the same baseline.
+
+    The function is pure: it neither reads nor writes any store. Its output is
+    fed back into ``validate_capabilities`` (``skill_sets.py``) and the
+    ``ManifestCompiler`` by the S1 unit tests.
+    """
+    if source_manifest_record is not None:
+        return _passthrough_source_skill_sets(source_manifest_record.document)
+    return _derive_skill_sets_from_snapshot(snapshot)
+
+
+def _passthrough_source_skill_sets(
+    document: str,
+) -> list[dict[str, Any]] | None:
+    """Branch A: read the source manifest document and pass its segment through.
+
+    The manifest stores the segment under ``manifest.skill_sets`` (the flat
+    form) — the same key ``validate_capabilities`` reads at PUT time. An
+    absent key means the source bot has no capability-set declaration, so the
+    dst inherits the brand-new baseline (return ``None``). The returned list is
+    a deep copy so the caller can mutate it without touching the source
+    document's parsed form.
+    """
+    try:
+        parsed = yaml.safe_load(document) or {}
+    except yaml.YAMLError:
+        # The source manifest was validated at PUT, but a corrupt row is a
+        # data error rather than a code path we silently invent a segment for.
+        # Fall through to "no segment"; the dst reads as brand-new, which is
+        # the safe default rather than a 500 on a copy of an unreadable source.
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    manifest = parsed.get("manifest")
+    if not isinstance(manifest, dict):
+        return None
+    segment = manifest.get("skill_sets")
+    if segment is None:
+        return None
+    # ``validate_capabilities`` already accepted this list on the source side,
+    # so the vocabulary is legal. Return a deep copy to keep the source parsed
+    # form immutable; ``yaml.safe_dump`` later walks the result without sharing
+    # references with the source document.
+    import copy
+
+    return copy.deepcopy(segment)
+
+
+def _derive_skill_sets_from_snapshot(
+    snapshot: "SkillSetApplySnapshot | None",
+) -> list[dict[str, Any]] | None:
+    """Branch B: derive the ``skill_sets`` segment from a snapshot.
+
+    The snapshot is the legacy Genome flow's source-of-truth. Its ``sets``
+    tuple carries the ordinary sets and (optionally) one default set row. The
+    default switch is the default set's presence in ``snapshot.sets``: present
+    → enabled (emit ``{name: default}``), absent → disabled. Skill members are
+    serialized by origin from the snapshot's ``skills`` catalog — center →
+    ``{name, origin: center, skill_uuid}``, local → ``{name, origin: local}``,
+    otherwise repo → ``{name, origin: repo, repo_path}``. MCP members are
+    serialized as ``{server_code}``.
+
+    ``None`` is returned when the snapshot has no sets at all — the source is
+    a brand-new bot and the dst inherits the same baseline (Spec §0).
+    """
+    if snapshot is None or not snapshot.sets:
+        return None
+    catalog = {int(item["id"]): item for item in snapshot.skills}
+    by_uuid = {
+        item["skill_uuid"]: item
+        for item in snapshot.skills
+        if item.get("skill_uuid")
+    }
+    default_present = any(item.is_default for item in snapshot.sets)
+    result: list[dict[str, Any]] = []
+    if default_present:
+        # Spec §0 — the default entry carries only ``{name}``. Its presence is
+        # the dst's default switch; listing its members would be rejected by
+        # ``validate_capabilities`` (``unknown_field``).
+        result.append({"name": "default"})
+    for group in snapshot.sets:
+        if group.is_default:
+            continue
+        skills: list[dict[str, Any]] = []
+        references = dict(group.skill_references)
+        for raw_id in group.skill_ids:
+            uuid = references.get(raw_id)
+            asset = by_uuid.get(uuid) if uuid else catalog.get(raw_id)
+            if asset is None:
+                # The snapshot is the live source of truth; a member id with no
+                # backing asset is a legacy row no longer resolvable. Skipping
+                # keeps the copy from failing on a stale reference the source
+                # itself no longer resolves — the dst's apply will report a
+                # ``ResolveFailure`` when center/repo is re-resolved.
+                continue
+            skill_entry: dict[str, Any] = {"name": asset.get("name")}
+            git_path = str(asset.get("git_path", "") or "")
+            if git_path.startswith("center://"):
+                skill_entry["origin"] = "center"
+                skill_entry["skill_uuid"] = asset.get("skill_uuid")
+            elif git_path.startswith("local://"):
+                skill_entry["origin"] = "local"
+            else:
+                skill_entry["origin"] = "repo"
+                skill_entry["repo_path"] = git_path
+            skills.append(skill_entry)
+        mcp_entries = [{"server_code": code} for code in group.mcp_codes]
+        row: dict[str, Any] = {
+            "name": group.name,
+            "is_active": bool(group.is_active),
+            "skills": skills,
+            "mcp": mcp_entries,
+        }
+        if group.description:
+            row["description"] = group.description
+        result.append(row)
+    # Spec §0 Q1 row "default 关闭且无普通 Set" — the snapshot carried no
+    # default set and no ordinary set; unreachable here (``not snapshot.sets``
+    # returns ``None`` above), but the branch-B fallback does not by itself
+    # express "explicit empty", so the dst reads as brand-new on a truly empty
+    # snapshot. That matches Spec §2 Q1's brand-new-source row.
+    return result
+
+
 def _build_manifest_document(
     *,
     script_body: str,
@@ -175,6 +336,7 @@ def _build_manifest_document(
     source_owner_id: str,
     excludes: tuple[str, ...] = (),
     render_screen_rows: tuple[dict[str, str], ...] = (),
+    skill_sets: list[dict[str, Any]] | None = None,
 ) -> str:
     """Serialize source's config into a manifest config document.
 
@@ -201,8 +363,15 @@ def _build_manifest_document(
     workflow-permission grants from the source — the clawweb clone endpoint
     handles a source with no grants gracefully (``no_source_grants``), so
     always-emit needs no probe; the handler is fire-and-log and never aborts
-    the copy on the clone outcome. ``identity`` / ``skills`` / ``mcp`` are
-    still deferred (能力集 stage).
+    the copy on the clone outcome.
+
+    ``skill_sets`` is the S1 payload (Spec §6): either the list to write as
+    ``manifest.skill_sets`` or ``None`` to omit the segment (the dst reads as
+    a brand-new bot per Spec §0). Branch A (source has a manifest) passes the
+    source segment through verbatim; branch B (legacy Genome bot) derives it
+    from a ``SkillSetApplySnapshot``. The handler computes the list via
+    ``_serialize_skill_sets`` and passes it in here; the serializer itself
+    never reads the source's stores, so this function stays pure and testable.
     """
     resources_entry: dict[str, Any] = {"path": _FILE_SYNC_PATH, "from": "from_bot"}
     if excludes:
@@ -222,6 +391,8 @@ def _build_manifest_document(
         "resources": [resources_entry],
         "bot_config": bot_config,
     }
+    if skill_sets is not None:
+        manifest["skill_sets"] = skill_sets
     document: dict[str, Any] = {
         "schema_version": 1,
         "script": {"body": script_body},
@@ -670,4 +841,5 @@ __all__ = [
     "retry_copy",
     "router",
     "submit_copy",
+    "_serialize_skill_sets",
 ]
