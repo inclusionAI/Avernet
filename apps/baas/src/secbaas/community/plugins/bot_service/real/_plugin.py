@@ -15,7 +15,7 @@ secret store) and ``need_poll`` responses are re-queried with bounded
 backoff.
 
 Once the instance is ready, GET /api/v1/token/iam is called once with the
-caller's cookie to refresh the Caller execution credentials.
+caller's cookie to refresh IAM or DingTalk Caller execution credentials.
 
 Reference: RFC 0002 atomic commit 1
 """
@@ -26,7 +26,7 @@ import asyncio
 import time
 import uuid
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, Literal
 
 import aiohttp
 from pydantic import ValidationError
@@ -484,7 +484,8 @@ class AiohttpBotServicePlugin(BotServicePlugin):
         Once the instance is ready, the credential-specific runtime update
         runs exactly once and is never retried on failure:
 
-        - ``iam-token``: GET /api/v1/token/iam with the IAM-token cookie;
+        - ``iam-token``: GET /api/v1/token/iam?token_type=iam with the IAM-token cookie;
+        - ``dingtalk``: GET /api/v1/token/iam with ``token_type=dingtalk``;
         - ``agentpass``: append an outbound ``x-caller-token`` rule
           to the ready sandbox through the BaaS PaasServiceFacade. The operator
           must provide the immutable domain allowlist in deployment config;
@@ -524,7 +525,9 @@ class AiohttpBotServicePlugin(BotServicePlugin):
                 ErrorCode.CONFIG_INVALID,
                 "caller-connection requires a non-empty execution credential",
             )
-        if not (credential.is_iam_token or credential.is_agentpass):
+        if not (
+            credential.is_iam_token or credential.is_agentpass or credential.is_dingtalk
+        ):
             raise PaasError(
                 ErrorCode.CONFIG_INVALID,
                 f"caller-connection received an unsupported credential type: {credential.type}",
@@ -607,9 +610,16 @@ class AiohttpBotServicePlugin(BotServicePlugin):
                     )
                     # 沙箱已就绪：按凭据类型单次安装 Caller 运行时身份，失败不重试。
                     if credential.is_iam_token:
-                        await self._refresh_caller_iam_token(
+                        await self._refresh_caller_token(
                             bot_id=bot_id,
                             cookie=f"IAM_TOKEN={credential.token}",
+                            token_type="iam",
+                        )
+                    elif credential.is_dingtalk:
+                        await self._refresh_caller_token(
+                            bot_id=bot_id,
+                            cookie=f"IAM_TOKEN={credential.token}",
+                            token_type="dingtalk",
                         )
                     else:
                         await self._append_agentpass_caller_token(
@@ -794,18 +804,25 @@ class AiohttpBotServicePlugin(BotServicePlugin):
             )
         return sandbox_id.removeprefix("ARCA_").removesuffix(":20003")
 
-    async def _refresh_caller_iam_token(self, *, bot_id: str, cookie: str) -> None:
+    async def _refresh_caller_token(
+        self,
+        *,
+        bot_id: str,
+        cookie: str,
+        token_type: Literal["iam", "dingtalk"] = "iam",
+    ) -> None:
         """GET /api/v1/token/iam — sandbox 就绪后单次刷新 Caller 执行凭据。
 
-        契约：凭据交换与运行时更新是服务端
-        副作用，响应只回显原始 IAM_TOKEN——回显值不消费也不入日志；该路由身份
-        走请求 Cookie（建议完整登录态），不接受 app Principal。带 bot_id 的请求
-        有副作用，故单次执行、失败不重试（重试会重复触发交换）。
+        契约：凭据交换与运行时更新是服务端副作用，响应只回显原始 IAM_TOKEN——
+        回显值不消费也不入日志；该路由身份走请求 Cookie（建议完整登录态），不接受
+        app Principal。带 bot_id 的请求有副作用，故单次执行、失败不重试（重试会
+        重复触发交换）。凭据类型始终通过 query 参数 ``token_type`` 显式传递。
         """
         url = f"{self._base_url.rstrip('/')}/api/v1/token/iam"
         params = {
             "bot_id": bot_id,
             "is_test_exchange": "false",
+            "token_type": token_type,
         }
         request_id = str(uuid.uuid4())
         headers = {

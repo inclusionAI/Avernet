@@ -1464,8 +1464,41 @@ class TestAiohttpBotServicePluginGetCallerConnection:
         assert get_args[1]["params"] == {
             "bot_id": "bot_001",
             "is_test_exchange": "false",
+            "token_type": "iam",
         }
         assert get_args[1]["headers"]["Cookie"] == _CALLER_COOKIE
+        assert "token_type" not in get_args[1]["headers"]
+
+        await plugin.close()
+
+    @pytest.mark.asyncio
+    async def test_dingtalk_success_passes_token_type_as_query_parameter(self):
+        mock_post = MagicMock(
+            return_value=_mock_caller_response(_caller_ready_body("sbx-dingtalk"))
+        )
+        mock_get = MagicMock(
+            return_value=_mock_caller_response(
+                {"success": True, "iam_token": "iam-echo"}
+            )
+        )
+        plugin = self._make_plugin(mock_post, mock_get)
+
+        result = await self._call(
+            plugin,
+            CallerExecutionCredential(type="dingtalk", token="device-token"),
+        )
+
+        assert result == "sbx-dingtalk"
+        mock_get.assert_called_once()
+        get_args = mock_get.call_args
+        assert get_args[0][0] == "https://agentclaw.example.com/api/v1/token/iam"
+        assert get_args[1]["params"] == {
+            "bot_id": "bot_001",
+            "is_test_exchange": "false",
+            "token_type": "dingtalk",
+        }
+        assert get_args[1]["headers"]["Cookie"] == "IAM_TOKEN=device-token"
+        assert "token_type" not in get_args[1]["headers"]
 
         await plugin.close()
 
