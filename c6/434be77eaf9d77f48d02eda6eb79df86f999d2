@@ -1,0 +1,20 @@
+apps/frontend-nextgen/assets/task-panel/README.md
+  h_5b2ec9c12c4d18 104
+apps/frontend-nextgen/assets/task-panel/package-lock.json
+  h_5b2ec9c12c4d18 3,9
+apps/frontend-nextgen/assets/task-panel/package.json
+  h_5b2ec9c12c4d18 3
+apps/frontend-nextgen/assets/task-panel/src/assetVersion.ts
+  h_5b2ec9c12c4d18 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c6434be77eaf9d77f48d02eda6eb79df86f999d2",
+  "prompts": {},
+  "humans": {
+    "h_5b2ec9c12c4d18": {
+      "author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

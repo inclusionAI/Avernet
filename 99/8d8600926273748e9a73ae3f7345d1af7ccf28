@@ -1,0 +1,23 @@
+apps/backend/tests/community/core/caller_identity/test_force_runtime_refresh_regression.py
+  s_bb98e2f10840b6::t_9c34bd3df2b3c2 73,77,103-104,112,122-123,143-144,154,159,167-168
+apps/backend/tests/community/core/expert_chat/services/test_expert_chat_instance_service.py
+  s_bb98e2f10840b6::t_6bfecdfd574ca7 736
+apps/backend/tests/community/repository/chat/test_caller_token_expiry.py
+  s_bb98e2f10840b6::t_c4ba5b4551ce59 698,713,722
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "998d8600926273748e9a73ae3f7345d1af7ccf28",
+  "prompts": {},
+  "sessions": {
+    "s_bb98e2f10840b6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a162ee-dd64-7f52-9208-9fd1326f32e5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}
