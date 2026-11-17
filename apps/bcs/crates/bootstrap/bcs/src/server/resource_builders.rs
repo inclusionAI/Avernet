@@ -646,6 +646,7 @@ pub(super) fn build_openapi_v1_state(
             },
         )
         .with_bot_authority_hook(bot_authority_hook.clone())
+        .with_session_authorization_core(session_authorization_core)
         .with_friend_connection_service(connect_service),
     );
     // The trusted chain: the SAME registry core instance

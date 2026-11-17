@@ -1839,6 +1839,44 @@ Invitation:
       type: integer
       minimum: 0
 
+InvitationPreview:
+  type: object
+  additionalProperties: false
+  description: >-
+    Read-only target metadata and direct membership of the authenticated User's
+    Human actor. Bot control, public visibility and parent Group membership do
+    not count as membership. No actor creation or acceptance occurs.
+  required:
+    - target_type
+    - target_id
+    - group_id
+    - already_joined
+  properties:
+    target_type:
+      $ref: "#/InvitationTargetType"
+    target_id:
+      type: string
+    group_id:
+      type: string
+      description: Target Group ID, or the parent Group ID for a Session target.
+    already_joined:
+      type: boolean
+
+InvitationPreviewEnvelope:
+  type: object
+  additionalProperties: false
+  required: [code, message, data, request_id]
+  properties:
+    code:
+      type: integer
+      const: 20000
+    message:
+      type: string
+    data:
+      $ref: "#/InvitationPreview"
+    request_id:
+      type: string
+
 InvitationAcceptResult:
   type: object
   additionalProperties: false

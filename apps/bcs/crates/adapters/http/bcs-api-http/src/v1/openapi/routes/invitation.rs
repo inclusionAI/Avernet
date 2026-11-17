@@ -1,10 +1,10 @@
 use axum::Router;
 use axum::extract::rejection::{JsonRejection, PathRejection};
 use axum::extract::{Extension, Json, Path, State};
-use axum::http::StatusCode;
+use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use axum::routing::post;
-use bcs_service_api::application::v1::AuthenticatedCaller;
+use axum::routing::{get, post};
+use bcs_service_api::application::v1::{AuthenticatedCaller, PreviewInvitation};
 
 use crate::v1::common::{
     ApiState, Envelope, ErrorResponse, RequestId, application_error_response, invalid_request,
@@ -21,6 +21,7 @@ pub fn router() -> Router<ApiState> {
             "/sessions/{session_id}/invitations",
             post(create_session_invitation),
         )
+        .route("/invitations/{token}", get(preview_invitation))
         .route(
             "/invitations/{token}/accept",
             post(accept_invitation),
@@ -88,4 +89,22 @@ async fn accept_invitation(
         Json(Envelope::success(20_000, "OK", result, request_id.0)),
     )
         .into_response())
+}
+
+async fn preview_invitation(
+    State(state): State<ApiState>,
+    Extension(caller): Extension<AuthenticatedCaller>,
+    Extension(request_id): Extension<RequestId>,
+    path: Result<Path<String>, PathRejection>,
+) -> Result<Response, ErrorResponse> {
+    let Path(token) = path.map_err(|error| invalid_request(&request_id, error.body_text()))?;
+    let result = state.invitation_service
+        .preview_invitation(PreviewInvitation { caller, token })
+        .await
+        .map_err(|error| application_error_response(&request_id, error))?;
+    Ok((
+        StatusCode::OK,
+        [(header::CACHE_CONTROL, "private, no-store")],
+        Json(Envelope::success(20_000, "OK", result, request_id.0)),
+    ).into_response())
 }

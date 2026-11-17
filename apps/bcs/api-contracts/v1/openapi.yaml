@@ -127,6 +127,8 @@ paths:
     $ref: ./openapi/sessions.yaml#/SessionParticipantPath
   /openapi/v1/collaboration/sessions/{session_id}/invitations:
     $ref: ./openapi/invitations.yaml#/CreateSessionInvitationPath
+  /openapi/v1/collaboration/invitations/{token}:
+    $ref: ./openapi/invitations.yaml#/PreviewInvitationPath
   /openapi/v1/collaboration/invitations/{token}/accept:
     $ref: ./openapi/invitations.yaml#/AcceptInvitationPath
   /openapi/v1/collaboration/invite-codes/claim:
@@ -195,6 +197,8 @@ components:
       $ref: ./openapi/session-files.yaml#/SessionFile
     SessionFilePage:
       $ref: ./openapi/session-files.yaml#/SessionFilePageEnvelope/properties/data
+    InvitationPreview:
+      $ref: ./domain-models.yaml#/InvitationPreview
     Invitation:
       $ref: ./domain-models.yaml#/Invitation
     Friendship:

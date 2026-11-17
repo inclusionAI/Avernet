@@ -459,6 +459,13 @@ struct NoopInvitationService;
 
 #[async_trait]
 impl InvitationService for NoopInvitationService {
+    async fn preview_invitation(
+        &self,
+        _query: bcs_service_api::application::v1::PreviewInvitation,
+    ) -> Result<bcs_service_api::application::v1::InvitationPreview, ApplicationError> {
+        Err(ApplicationError::internal("invitation preview not configured"))
+    }
+
     async fn create_group_invitation(&self, _: CreateGroupInvitation) -> Result<Invitation, ApplicationError> {
         unreachable!("invitations are not exercised by this contract test")
     }
