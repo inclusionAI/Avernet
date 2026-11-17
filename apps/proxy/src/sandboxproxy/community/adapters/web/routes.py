@@ -23,13 +23,16 @@ def build_router(container: ApplicationContainer, loaded: Config) -> APIRouter:
     jwt_verifier = container.jwt_verifier()
     relay_secret = loaded.user_config.jwt.secret
 
-    def _auth(request: Request) -> dict[str, Any] | None:
+    def _verify_token(headers: Any, path: str) -> dict[str, Any] | None:
         from sandboxproxy.community.core.authn.relay_auth import extract_token
 
-        token = extract_token(request.headers, str(request.url))
+        token = extract_token(headers, path)
         if not token:
             return None
         return cast(dict[str, Any], jwt_verifier.verify(token))
+
+    def _auth(request: Request) -> dict[str, Any] | None:
+        return _verify_token(request.headers, str(request.url))
 
     @router.get("/health")
     async def health() -> dict[str, str]:
@@ -77,6 +80,13 @@ def build_router(container: ApplicationContainer, loaded: Config) -> APIRouter:
     @router.websocket("/proxypass/{target:path}")
     async def proxypass_ws(websocket: WebSocket, target: str) -> None:
         await websocket.accept()
+        # Parity with HTTP /proxypass: the handshake must carry an HS256 JWT
+        # signed with the shared secret. Reject before resolving the target so
+        # an unauthenticated client can never drive an upstream connection.
+        if _verify_token(websocket.headers, str(websocket.url)) is None:
+            logger.warning("proxypass ws rejected: unauthorized")
+            await websocket.close(code=4401)
+            return
         resolver = container.target_resolver()
         target_hostport, sep, path = target.partition("/")
         target_path = "/" + path if sep else "/"

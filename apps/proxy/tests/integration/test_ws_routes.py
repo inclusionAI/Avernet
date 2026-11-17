@@ -3,8 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import hashlib
+import hmac
+import json
 import os
 import time
+from typing import Any
 
 import pytest
 import websockets.asyncio.client
@@ -14,6 +19,27 @@ from websockets.exceptions import ConnectionClosed
 from websockets.frames import Close
 
 _SECRET = "ws-secret"
+
+
+def _token(secret: str = _SECRET, ttl: int = 300, target: str = "STUB") -> str:
+    """Sign the same HS256 proxypass JWT that BaaS generates."""
+
+    def _b64(data: bytes) -> str:
+        return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
+
+    header = _b64(json.dumps({"alg": "HS256", "typ": "JWT"}).encode())
+    payload = _b64(
+        json.dumps({"target": target, "exp": int(time.time()) + ttl}).encode()
+    )
+    signing_input = f"{header}.{payload}".encode()
+    sig = hmac.new(secret.encode(), signing_input, hashlib.sha256).digest()
+    return f"{header}.{payload}.{_b64(sig)}"
+
+
+def _ws_url(target: str = "STUB/sock", token: str | None = None) -> str:
+    if token is None:
+        return f"/proxypass/{target}"
+    return f"/proxypass/{target}?x-proxypass-token={token}"
 
 
 @pytest.fixture
@@ -54,14 +80,59 @@ def app(tmp_path, monkeypatch):
 
 @pytest.mark.integration
 class TestWsRoutes:
-    def test_proxypass_ws_no_auth_closes(self, app) -> None:
+    def test_proxypass_ws_without_token_closes_4401(self, app: Any) -> None:
         from starlette.testclient import TestClient
 
         with TestClient(app) as client:
-            # proxypass websocket route accepts then closes on invalid target
-            with client.websocket_connect("/proxypass/BADTARGET") as ws:
+            with client.websocket_connect(_ws_url()) as ws:
                 msg = ws.receive()
-                assert msg["type"] in ("websocket.close", "websocket.send")
+                assert msg["type"] == "websocket.close"
+                assert msg["code"] == 4401
+
+    def test_proxypass_ws_invalid_token_closes_4401(self, app: Any) -> None:
+        from starlette.testclient import TestClient
+
+        with TestClient(app) as client:
+            with client.websocket_connect(
+                _ws_url(token=_token(secret="wrong-secret"))
+            ) as ws:
+                msg = ws.receive()
+                assert msg["type"] == "websocket.close"
+                assert msg["code"] == 4401
+
+    def test_proxypass_ws_expired_token_closes_4401(self, app: Any) -> None:
+        from starlette.testclient import TestClient
+
+        with TestClient(app) as client:
+            with client.websocket_connect(_ws_url(token=_token(ttl=-10))) as ws:
+                msg = ws.receive()
+                assert msg["type"] == "websocket.close"
+                assert msg["code"] == 4401
+
+    def test_proxypass_ws_rejects_before_upstream_connect(
+        self, app: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from starlette.testclient import TestClient
+
+        created = _patch_upstream_connect(monkeypatch, [])
+        with TestClient(app) as client:
+            with client.websocket_connect(_ws_url()) as ws:
+                ws.receive()
+        assert created == []
+
+    def test_proxypass_ws_accepts_header_token(
+        self, app: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from starlette.testclient import TestClient
+
+        created = _patch_upstream_connect(monkeypatch, [])
+        with TestClient(app) as client:
+            with client.websocket_connect(
+                "/proxypass/STUB/sock",
+                headers={"x-proxypass-token": _token()},
+            ) as ws:
+                ws.send_text("hello")
+        assert created and created[0][0] == "wss://127.0.0.1:9999/sock"
 
     def test_wsrelay_closes_without_mng(self, app) -> None:
         from starlette.testclient import TestClient
@@ -152,7 +223,7 @@ class TestProxypassWsTunnel:
         closed = ConnectionClosed(Close(1011, "upstream gone"), None)
         created = _patch_upstream_connect(monkeypatch, ["up-text", b"up-bin", closed])
         with TestClient(app) as client:
-            with client.websocket_connect("/proxypass/STUB/sock") as ws:
+            with client.websocket_connect(_ws_url(token=_token())) as ws:
                 assert ws.receive_text() == "up-text"
                 assert ws.receive_bytes() == b"up-bin"
                 with pytest.raises(WebSocketDisconnect) as exc_info:
@@ -167,7 +238,7 @@ class TestProxypassWsTunnel:
     ) -> None:
         created = _patch_upstream_connect(monkeypatch, [])
         with TestClient(app) as client:
-            with client.websocket_connect("/proxypass/STUB/sock") as ws:
+            with client.websocket_connect(_ws_url(token=_token())) as ws:
                 ws.send_text("hello")
                 ws.send_bytes(b"binary")
         _, _, conn = created[0]
@@ -180,7 +251,7 @@ class TestProxypassWsTunnel:
         # rcvd=None → tunnel falls back to code 1011
         created = _patch_upstream_connect(monkeypatch, [ConnectionClosed(None, None)])
         with TestClient(app) as client:
-            with client.websocket_connect("/proxypass/STUB/sock") as ws:
+            with client.websocket_connect(_ws_url(token=_token())) as ws:
                 with pytest.raises(WebSocketDisconnect) as exc_info:
                     ws.receive_text()
                 assert exc_info.value.code == 1011
@@ -190,7 +261,7 @@ class TestProxypassWsTunnel:
     def test_upstream_recv_runtime_error_is_ignored(self, app, monkeypatch) -> None:
         created = _patch_upstream_connect(monkeypatch, [RuntimeError("boom")])
         with TestClient(app) as client:
-            with client.websocket_connect("/proxypass/STUB/sock") as ws:
+            with client.websocket_connect(_ws_url(token=_token())) as ws:
                 ws.send_text("ignored")
         _, _, conn = created[0]
         assert _wait_until(lambda: conn.exited), "upstream ws was not exited"
@@ -200,7 +271,7 @@ class TestProxypassWsTunnel:
     ) -> None:
         created = _patch_upstream_connect(monkeypatch, [], factory=_SendFailsUpstreamWS)
         with TestClient(app) as client:
-            with client.websocket_connect("/proxypass/STUB/sock") as ws:
+            with client.websocket_connect(_ws_url(token=_token())) as ws:
                 ws.send_text("hello")
         _, _, conn = created[0]
         assert _wait_until(lambda: conn.exited), "upstream ws was not exited"

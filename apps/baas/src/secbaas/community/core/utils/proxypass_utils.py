@@ -55,7 +55,9 @@ def generate_proxypass_jwt(target: str, key: str, ttl: int = 300) -> str:
             或 {TYPE}_{device_id}:{port}（当 template_id 不可用时）
         key: HS256 签名密钥。
         ttl: token 有效期（秒），默认 300。调用方应根据自身场景
-            选择合适的 TTL（如 WS relay 使用 120s）。
+            选择合适的 TTL：proxypass WebSocket 握手应使用不超过 120s
+            的短时 token，且长连接断线重连时必须重新签发 fresh token，
+            不得复用上一轮已过期或临近过期的凭据（代理端按 exp 严格拒绝）。
 
     Returns:
         HS256 签名的 JWT token 字符串，包含 target claim 和 exp claim。
