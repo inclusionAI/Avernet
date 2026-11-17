@@ -1480,6 +1480,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "bcs-dist-gateway-http"
+version = "0.1.4-beta.3"
+dependencies = [
+ "a2a-lf",
+ "async-trait",
+ "axum",
+ "base64 0.22.1",
+ "bcs-app-dist-gateway",
+ "bcs-dist-gateway",
+ "bcs-dist-gateway-store",
+ "bcs-dist-model",
+ "bcs-dist-store",
+ "bcs-domain",
+ "bcs-service-api",
+ "bcs-store-api",
+ "bcs-test-support",
+ "futures",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tower",
+ "tracing",
+]
+
+[[package]]
 name = "bcs-dist-gateway-store"
 version = "0.1.4-beta.3"
 dependencies = [

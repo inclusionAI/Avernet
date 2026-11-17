@@ -48,9 +48,9 @@
 - **Goal:** the six A2A 1.0 methods, resume ids, agent card, error mapping.
 - **Files:** `crates/adapters/http/bcs-dist-gateway-http/` (new)
 - **Done when:**
-  - [ ] cursor, error-mapping, SSE and push-notification tests pass
-  - [ ] an end-to-end test runs send, stream, reply and cancel through all layers over the store model
-  - [ ] a test asserts `wake` is written on every input while D1 is stubbed
+  - [x] cursor, error-mapping, SSE and push-notification tests pass
+  - [x] an end-to-end test runs send, stream, reply and cancel through all layers over the store model
+  - [x] a test asserts `wake` is written on every input while D1 is stubbed
 - **Depends on:** Task 5
 
 ## Task 7: Verification

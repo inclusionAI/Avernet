@@ -9,6 +9,7 @@ members = [
     # adapters
     "crates/adapters/http/bcs-dist-worker-http",
     "crates/adapters/http/bcs-api-http",
+    "crates/adapters/http/bcs-dist-gateway-http",
     "crates/adapters/http/bcs-http",
     "crates/adapters/http/bcs-provider-http",
     "crates/external-clients/bcs-a2a-http",
@@ -337,6 +338,7 @@ bcs-test-support = { path = "crates/test-support/bcs-test-support" }
 bcs-http         = { path = "crates/adapters/http/bcs-http" }
 bcs-app-a2a-bot = { path = "crates/application/bcs-app-a2a-bot" }
 bcs-app-dist-gateway = { path = "crates/application/bcs-app-dist-gateway" }
+bcs-dist-gateway-http = { path = "crates/adapters/http/bcs-dist-gateway-http" }
 bcs-a2a-http = { path = "crates/external-clients/bcs-a2a-http" }
 bcs-provider-http = { path = "crates/adapters/http/bcs-provider-http" }
 bcs-ws           = { path = "crates/adapters/ws/bcs-ws" }
