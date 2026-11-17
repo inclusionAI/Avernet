@@ -38,7 +38,7 @@ class EvalPublishMixin:
         publish_id: int,
         operator: str,
         biz_id: str = "",
-        default_tag: str = "",
+        default_tag: str = "eval",
         template_uuid: str = "",
         ttl_seconds: int | None = None,
         migration_path: str | None = None,
@@ -82,6 +82,12 @@ class EvalPublishMixin:
                 ac_bot_publish.ext 中的旧值。
         """
         # This flow is EVAL-only; the stage is fixed here rather than taken as an arg.
+        # `default_tag` is an orthogonal instance dimension, not a lifecycle stage.
+        if not default_tag:
+            raise PublishFlowServiceError(
+                "eval_publish requires default_tag to distinguish default/eval environments"
+            )
+
         publish_stage = PublishStage.EVAL
         logger.info(
             f"[PublishFlowService.eval_publish] Start release: "
