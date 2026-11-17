@@ -105,10 +105,10 @@ function deferred<T>() {
 const emptyLoad = () => ({ skills: [], skillSets: [], mcps: [], availableMcps: [], marketSkills: [], workshopSkills: [], resources: [], screens: [], routines: [], engineStatus: undefined, errors: 0 });
 const item = (path: string, parentPath = '', type: 'file' | 'folder' = 'file') => ({ path, parentPath, name: path.split('/').pop()!, type });
 
-it('离线首次加载显示失败，手动重试成功后显示真实结果', async () => {
+it.each([502, 503])('离线首次加载（%s）显示失败，手动重试成功后显示真实结果', async (status) => {
   mockedLoad.mockResolvedValueOnce(emptyLoad());
   jest.mocked(botEditorService.listResources)
-    .mockRejectedValueOnce({ status: 503, data: { message: 'Bot device is offline' } })
+    .mockRejectedValueOnce({ status, data: { message: 'Bot device is offline' } })
     .mockResolvedValueOnce([item('file.txt')]);
   const { result } = renderHook(() => useBotEditor('bot-1'));
   await waitFor(() => expect(result.current.resourceErrors['']).toBe('Bot 暂时离线，请稍后重试'));
@@ -141,9 +141,9 @@ it('根刷新使在途子目录失效，旧子项不能复活', async () => {
   expect(result.current.resourceLoadedPaths).not.toContain('docs');
 });
 
-it('通用 503 不误称设备离线，重试为空时是已确认空列表', async () => {
+it.each([502, 503])('通用 %s 不误称设备离线，重试为空时是已确认空列表', async (status) => {
   mockedLoad.mockResolvedValueOnce(emptyLoad());
-  jest.mocked(botEditorService.listResources).mockRejectedValueOnce({ status: 503, data: { message: 'other outage' } }).mockResolvedValueOnce([]);
+  jest.mocked(botEditorService.listResources).mockRejectedValueOnce({ status, data: { message: 'other outage' } }).mockResolvedValueOnce([]);
   const { result } = renderHook(() => useBotEditor('bot-1'));
   await waitFor(() => expect(result.current.resourceErrors['']).toBe('资源加载失败，请重试'));
   await act(async () => { await result.current.browseResources(''); });

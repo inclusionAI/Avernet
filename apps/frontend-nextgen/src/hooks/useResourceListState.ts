@@ -44,7 +44,7 @@ export function useResourceListState(botId: string | null, ownerId?: string) {
       });
       setResourceLoadedPaths((current) => current.filter((child) => child !== path && (path ? !child.startsWith(`${path}/`) : false)));
       const data = error && typeof error === 'object' && 'data' in error ? error.data : undefined;
-      const offline = error && typeof error === 'object' && 'status' in error && error.status === 503 && data && typeof data === 'object' && 'message' in data && data.message === 'Bot device is offline';
+      const offline = error && typeof error === 'object' && 'status' in error && (error.status === 502 || error.status === 503) && data && typeof data === 'object' && 'message' in data && data.message === 'Bot device is offline';
       setResourceErrors((current) => ({
         ...Object.fromEntries(Object.entries(current).filter(([child]) => child !== path && (path ? !child.startsWith(`${path}/`) : false))),
         [path]: offline ? 'Bot 暂时离线，请稍后重试' : '资源加载失败，请重试',
