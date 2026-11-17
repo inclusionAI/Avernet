@@ -1,0 +1,22 @@
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/recovery-owner-callback-probe.ts
+  s_2877c6b8504772::t_54277bf39097c7 1-14,16-24
+  s_2877c6b8504772::t_1afc063fa24d22 15
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/index.ts
+  s_2877c6b8504772::t_54277bf39097c7 42,471
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e30fc394bb45e3bc94202bc3766d1ec3403d7504",
+  "prompts": {},
+  "sessions": {
+    "s_2877c6b8504772": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1af78-2006-7511-9a74-9700a3444273",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}

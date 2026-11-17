@@ -1,0 +1,18 @@
+apps/backend/src/agentclaw/community/core/repository/implementations/bot/mutations.py
+  h_9d7cfd405752f5 7-8,13,99-130
+apps/backend/tests/community/adapters/http/openapi_v1/spaces/test_deletion_contract.py
+  h_9d7cfd405752f5 22-23,187-225
+apps/backend/tests/community/repository/bot/test_bot_repository_unified.py
+  h_9d7cfd405752f5 27,62-64,939-955,998
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f35bda01edebd6f3d353b90e6b229736d0022742",
+  "prompts": {},
+  "humans": {
+    "h_9d7cfd405752f5": {
+      "author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

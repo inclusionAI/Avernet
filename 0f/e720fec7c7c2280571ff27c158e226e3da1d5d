@@ -1,0 +1,20 @@
+apps/backend/src/agentclaw/community/core/bot_public_risk/input_builder.py
+  h_9d7cfd405752f5 118-119
+apps/backend/src/agentclaw/community/di/modules/bot_public_module.py
+  h_9d7cfd405752f5 37-41,195-211
+apps/backend/tests/community/core/bot_public/test_risk_input.py
+  h_9d7cfd405752f5 133,143
+apps/backend/tests/community/di/test_bot_public_risk_input_wiring.py
+  h_9d7cfd405752f5 1-74
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0fe720fec7c7c2280571ff27c158e226e3da1d5d",
+  "prompts": {},
+  "humans": {
+    "h_9d7cfd405752f5": {
+      "author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

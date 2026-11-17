@@ -1,0 +1,70 @@
+apps/bcs/crates/contracts/bcs-dist-model/CONTEXT.md
+  s_a9c87caa3de52e::t_d73f9141119bb0 17
+  s_a9c87caa3de52e::t_6e68a5911f1ab8 18
+apps/bcs/specs/2026-11-15-distributed-contracts/spec.md
+  s_a9c87caa3de52e::t_b92c3ae87b59ea 17-21,28
+  s_a9c87caa3de52e::t_d73f9141119bb0 35
+  s_a9c87caa3de52e::t_1f6d4d6ebfc7c7 23-24,27
+  s_a9c87caa3de52e::t_6e68a5911f1ab8 22,25-26
+apps/bcs/crates/service-api/bcs-service-api/src/port/repo/distributed/README.md
+  s_a9c87caa3de52e::t_d438a564c5691b 119-121
+  s_a9c87caa3de52e::t_d4066b183a7980 229
+  s_a9c87caa3de52e::t_6e68a5911f1ab8 64-68,91-94,108,126
+  s_a9c87caa3de52e::t_1f6d4d6ebfc7c7 78-90,95
+  s_a9c87caa3de52e::t_d73f9141119bb0 59-63,69-77,115-118,122-125,139-161,226-228
+apps/bcs/specs/2026-11-15-distributed-contracts/validation.md
+  s_a9c87caa3de52e::t_de4770a6b5ca56 127-160
+apps/bcs/crates/test-support/bcs-test-support/src/contract/distributed/state.rs
+  s_a9c87caa3de52e::t_d438a564c5691b 84-90,111-113
+  s_a9c87caa3de52e::t_1b55bbe61340f2 39-40,48-49,56
+  s_a9c87caa3de52e::t_176fe9f61ec11d 11-14,19-24,50-55,57-83,91-95,107-110,114,116,119-121,161-162
+  s_a9c87caa3de52e::t_ba764bb9f39978 41-47
+  s_a9c87caa3de52e::t_0aa4b1fec57287 136,146-160
+  s_a9c87caa3de52e::t_d4066b183a7980 35-38
+  s_a9c87caa3de52e::t_08d9909c412592 163
+apps/bcs/crates/test-support/bcs-test-support/tests/distributed_harness/state.rs
+  s_a9c87caa3de52e::t_d4066b183a7980 109-113,144-147,177-181,255-259
+  s_a9c87caa3de52e::t_1b55bbe61340f2 14-16,51-55,82,95,99-100,114
+  s_a9c87caa3de52e::t_1f6d4d6ebfc7c7 170-176,283-284
+  s_a9c87caa3de52e::t_95e2ddb4449559 7,12-13,46-50,101-108,115-118,122,125-126,129,131-132,143,149-158,162-169,182-183
+  s_a9c87caa3de52e::t_0aa4b1fec57287 184,241-254,260-282,285-288
+  s_a9c87caa3de52e::t_9a1353b0d4a990 185
+apps/bcs/crates/service-api/bcs-service-api/src/port/repo/distributed/common.rs
+  s_a9c87caa3de52e::t_6e68a5911f1ab8 32-34
+  s_a9c87caa3de52e::t_7f4c7f95742fac 20,24-25,27,39,46
+apps/bcs/crates/service-api/bcs-service-api/src/port/repo/distributed/ownership.rs
+  s_a9c87caa3de52e::t_1f6d4d6ebfc7c7 72-74
+  s_a9c87caa3de52e::t_7f4c7f95742fac 11,18-19,32-36
+  s_a9c87caa3de52e::t_42220932f64dfb 6-7,49-50,71,81-82,84
+apps/bcs/crates/service-api/bcs-service-api/src/port/repo/distributed/session.rs
+  s_a9c87caa3de52e::t_42220932f64dfb 154-155
+  s_a9c87caa3de52e::t_d4066b183a7980 147
+  s_a9c87caa3de52e::t_d438a564c5691b 170-171
+  s_a9c87caa3de52e::t_7f4c7f95742fac 94-95,98,120-121,131,156-158,168-169,172-173,181-186,190
+  s_a9c87caa3de52e::t_6e68a5911f1ab8 166-167
+apps/bcs/crates/service-api/bcs-service-api/CONTEXT.md
+  s_a9c87caa3de52e::t_6e68a5911f1ab8 18,24,27-29
+  s_a9c87caa3de52e::t_d73f9141119bb0 17,19-23,30-32
+  s_a9c87caa3de52e::t_1f6d4d6ebfc7c7 25-26
+apps/bcs/crates/test-support/bcs-test-support/tests/distributed_harness.rs
+  s_a9c87caa3de52e::t_d73f9141119bb0 31-32
+apps/bcs/crates/test-support/bcs-test-support/tests/distributed_harness/recovery.rs
+  s_a9c87caa3de52e::t_d73f9141119bb0 1-23,25-88
+  s_a9c87caa3de52e::t_771529c7d84fbf 24
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6ad4f5a786d8086132c491af104183facb4f6039",
+  "prompts": {},
+  "sessions": {
+    "s_a9c87caa3de52e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d0b4-74ad-7423-9152-b7e80c647ef8",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "yuange.zjy <yuange.zjy@antgroup.com>"
+    }
+  }
+}

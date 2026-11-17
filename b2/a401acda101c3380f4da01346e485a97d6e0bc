@@ -1,0 +1,23 @@
+apps/backend/src/agentclaw/community/core/mcp/services/sync_service.py
+  s_77fc85edbdd3d1::t_5de2bfb7e431e5 937
+apps/backend/tests/community/core/devices/test_baas_device_sync.py
+  s_77fc85edbdd3d1::t_e63670242d9b4f 318
+apps/backend/tests/community/core/devices/test_singlebox_device_sync.py
+  s_77fc85edbdd3d1::t_9a3e5e7d8c2c53 40
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b2a401acda101c3380f4da01346e485a97d6e0bc",
+  "prompts": {},
+  "sessions": {
+    "s_77fc85edbdd3d1": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a19ad5-8095-7d23-a7d0-2317d5d38936",
+        "model": "GLM-5.3"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

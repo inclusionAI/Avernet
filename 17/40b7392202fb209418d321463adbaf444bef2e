@@ -1,0 +1,19 @@
+apps/evolverun/clawweb/public/modules/clawinsight/server/routes/__tests__/monitoring.test.ts
+  s_7041fdb3e974bb::t_127bb3c87ee696 380-382
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1740b7392202fb209418d321463adbaf444bef2e",
+  "prompts": {},
+  "sessions": {
+    "s_7041fdb3e974bb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d2c7-4774-7de1-a174-e229fad34f15",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}

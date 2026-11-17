@@ -1,0 +1,29 @@
+apps/evolverun/clawweb/public/modules/workflow/docs/subworkflow-observability.md
+  s_0205332b370112::t_0f02911c0ecdda 58-67
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/fanout-mirror.test.ts
+  s_0205332b370112::t_e75f33721da1f4 34-88
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/__tests__/fanout-state-roundtrip.test.ts
+  s_0205332b370112::t_ee405eb2b3b13d 46,57,61,69
+apps/evolverun/clawweb/public/shared/server/__tests__/flow-run-link.test.ts
+  s_0205332b370112::t_6717d602ece11f 45-95
+apps/evolverun/clawweb/public/shared/server/schema-flow-run-links.ts
+  s_0205332b370112::t_f80a0d4d6b8d50 12-14
+apps/evolverun/clawweb/public/shared/server/schema-workflow-snapshot.ts
+  s_0205332b370112::t_82b377bd261ce3 23-24
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f7f65c1a0ed989b47aeb02ae685a42e8d6fd7746",
+  "prompts": {},
+  "sessions": {
+    "s_0205332b370112": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ba4a-731b-7000-a7f8-4bb745bc25cf",
+        "model": "GPT-6.1-TERRA"
+      },
+      "human_author": "fudapeng <fudp@example.com>"
+    }
+  }
+}

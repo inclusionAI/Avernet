@@ -1,0 +1,41 @@
+apps/backend/tests/community/core/task/context_collab/test_context_collab_append.py
+  s_e0cb98366a65ad::t_cc2b2072ca2700 133
+apps/backend/src/agentclaw/community/core/task/context_collab/persistence/repository.py
+  s_e0cb98366a65ad::t_3962b8f6aaddca 144-148,248-249,393-397
+apps/backend/tests/community/core/task/context_collab/test_context_collab_service.py
+  s_e0cb98366a65ad::t_cc2b2072ca2700 105,245
+apps/backend/specs/2026-11-09-bbs-context-collaboration-protocol/spec.md
+  s_e0cb98366a65ad::t_4439e556e45021 4,816,847,866,888
+apps/backend/tests/community/core/task/context_collab/test_context_collab_status.py
+  s_e0cb98366a65ad::t_cc2b2072ca2700 81
+apps/backend/src/agentclaw/community/core/task/context_collab/sql/2026_11_11_context_collab.sql
+  s_e0cb98366a65ad::t_de855d9f75a53a 11,33
+apps/backend/src/agentclaw/community/core/task/context_collab/l4_context_primitives/collet.py
+  s_e0cb98366a65ad::t_3962b8f6aaddca 223-226,230
+apps/backend/src/agentclaw/community/core/task/context_collab/persistence/models.py
+  s_e0cb98366a65ad::t_de855d9f75a53a 60-64,77-79,141-142
+apps/backend/tests/community/repository/task/context_collab/test_repository_create_get.py
+  s_e0cb98366a65ad::t_8b0e3eb3f9d4b2 85-88
+apps/backend/tests/community/repository/task/context_collab/test_models.py
+  s_e0cb98366a65ad::t_8b0e3eb3f9d4b2 32
+apps/backend/specs/2026-11-09-bbs-context-collaboration-protocol/execution-ledger.md
+  s_e0cb98366a65ad::t_4439e556e45021 157
+apps/backend/tests/community/core/task/context_collab/test_l4_primitives.py
+  s_e0cb98366a65ad::t_cc2b2072ca2700 227
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4d9818fe18e8fc8109788cdb61ae557037b6f0fc",
+  "prompts": {},
+  "sessions": {
+    "s_e0cb98366a65ad": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "1d67472f-3033-4c3f-9f69-89e0d4112039",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

@@ -1,0 +1,27 @@
+apps/backend/specs/2026-11-12-context-collab-bbs-public-discussion-product/plan.md
+  s_64261436edbb0b::t_2eb5734d2eeb56 165
+apps/backend/specs/README.md
+  s_64261436edbb0b::t_b6613f6c82e81b 145
+apps/backend/specs/2026-11-12-context-collab-bbs-public-discussion-product/spec.md
+  s_64261436edbb0b::t_b82da180f2120e 95
+  s_64261436edbb0b::t_2e3480beae46d8 83
+  s_64261436edbb0b::t_ec4b7645baa68a 30
+apps/backend/specs/2026-11-12-context-collab-l4-creation-event-facts/spec.md
+  s_64261436edbb0b::t_a0c0de2e273251 1-59
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9d7a881177c11fb3f979a4e83ac8af2fee5cc7ae",
+  "prompts": {},
+  "sessions": {
+    "s_64261436edbb0b": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "6abdaae9-3cab-4f39-a132-80de8a711d13",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

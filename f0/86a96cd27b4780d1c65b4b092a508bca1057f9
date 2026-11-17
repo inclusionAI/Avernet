@@ -1,0 +1,19 @@
+apps/frontend-nextgen/src/internal/capability-workshop/hooks/useSkillCreate.ts
+  s_edf46fcbab38c5::t_05ecc4a05f9a98 6-7,146
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f086a96cd27b4780d1c65b4b092a508bca1057f9",
+  "prompts": {},
+  "sessions": {
+    "s_edf46fcbab38c5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c940-a59d-7633-a002-5161c102349e",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "卷瓜 <juangua.swj@antgroup.com>"
+    }
+  }
+}

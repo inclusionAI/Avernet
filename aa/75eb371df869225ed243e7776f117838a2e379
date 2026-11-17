@@ -1,0 +1,14 @@
+apps/frontend-nextgen/test/hooks/useCommunity.test.tsx
+  h_059e888e5e4e82 57-63
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "aa75eb371df869225ed243e7776f117838a2e379",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

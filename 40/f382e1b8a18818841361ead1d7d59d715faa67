@@ -1,0 +1,19 @@
+apps/backend/tests/community/adapters/http/openapi_v1/engine_runtime/test_connection.py
+  s_40621bc596f67b::t_6572181a1e382b 338,368-369
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "40f382e1b8a18818841361ead1d7d59d715faa67",
+  "prompts": {},
+  "sessions": {
+    "s_40621bc596f67b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cb41-f9a2-75c3-8556-2339c0498dac",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}
