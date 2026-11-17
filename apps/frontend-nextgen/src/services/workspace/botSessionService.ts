@@ -26,7 +26,6 @@ import {
   type BotMessageDto,
   type BotModelDto,
 } from '@/services/backendApi/bots/privateBotSessionController';
-import { BackendRequestError } from '@/services/backendApi/httpClient';
 import { useErrorNotifyStore } from '@/stores/errorNotifyStore';
 import type { ChatMessage } from '@tc-chat/core';
 import type { BotIamTokenStage } from '../backendApi/privateChat/iamTokenController';
