@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  SDK 本体：业务接口（spi）、标准服务适配对象与请求处理（server）、平台扩展编解码（ext）、
+  SOFA 发布规范（sofa）。AgentCard 由平台方注册，SDK 不生成。
+  不依赖 Spring，不做自动装配；grpc / protobuf 由 SOFA 基座提供（provided）。
+  不引入 a2a-java 的 server-common / extras（Task 存储、队列等用不到的运行时）。
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>bcn.a2a</groupId>
+        <artifactId>bcn-a2a-parent</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+    <artifactId>bcn-a2a-sdk</artifactId>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.a2aproject.sdk</groupId>
+            <artifactId>a2a-java-sdk-spec</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.a2aproject.sdk</groupId>
+            <artifactId>a2a-java-sdk-spec-grpc</artifactId>
+        </dependency>
+        <!-- 以下由 SOFA 基座提供；版本以基座为准（待在基座 5.14.1 上验证） -->
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-stub</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-protobuf</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.google.protobuf</groupId>
+            <artifactId>protobuf-java</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <!-- TODO(SOFA)：SOFA Triple 为 a2a.proto 生成的代码放在这里（provided 或单独的共享 jar），见 bcn.a2a.sofa 包说明 -->
+    </dependencies>
+</project>
