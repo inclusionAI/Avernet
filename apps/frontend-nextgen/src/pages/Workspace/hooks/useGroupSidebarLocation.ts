@@ -7,7 +7,8 @@ export function useGroupSidebarLocation(props: GroupSidebarProps) {
   const handledRequestRef = useRef<number>();
   const target =
     props.location?.group.groupId === props.selectedGroupId &&
-    props.location?.session.sessionId === props.selectedSessionId
+    props.location?.session.sessionId === props.selectedSessionId &&
+    (!props.location.group.membership || props.location.group.membership === props.membership)
       ? props.location
       : undefined;
   const groups = useMemo(

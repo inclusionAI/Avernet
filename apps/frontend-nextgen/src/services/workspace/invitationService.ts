@@ -1,8 +1,10 @@
 import type { MessageViewScope } from '@/domain/collaboration/types';
+import { useErrorNotifyStore } from '@/stores/errorNotifyStore';
 import {
   acceptInvitation,
   createGroupInvitation,
   createSessionInvitation,
+  previewInvitation,
 } from '@/services/backendApi/collaboration/collaborationInvitationController';
 import type { DomainError, DomainResult } from './identityService';
 
@@ -21,6 +23,14 @@ function inviteBase(): string {
 function buildInvitationUrl(token: string, type: 'group' | 'session'): string {
   // 路径形态：/workspace/invite/groups/{token} | /workspace/invite/sessions/{token}
   return `${inviteBase()}/workspace/invite/${type}s/${encodeURIComponent(token)}`;
+}
+
+export interface InvitationPreviewResult {
+  isValid: true;
+  targetType: 'group' | 'session';
+  targetId: string;
+  groupId: string;
+  alreadyJoined: boolean;
 }
 
 export interface InvitationAcceptResult {
@@ -88,18 +98,61 @@ export const invitationService = {
     }
   },
 
-  // 预览不支持（openapi 无 lookup 接口）：用户点击确认加入前不调用任何后端接口。
-  // 这里仅做本地非空/长度校验，确认框由 UI 直接调 acceptInvitation。
-  async getAcceptPageState(token: string): Promise<DomainResult<{ isValid: true }>> {
-    // openapi 没有 lookup 接口；此处仅做本地非空校验，确认框由 UI 直接调 acceptInvitation。
-    // 不引入额外长度阈值，避免与真实 token 形态耦合（brief 测试用 'tk' 视为合法）。
+  /** 只读预检；成员身份由 BCS 的当前 Human 权威快照判定，不调用接受接口。 */
+  async getAcceptPageState(token: string): Promise<DomainResult<InvitationPreviewResult>> {
     if (!token) {
       return {
         ok: false,
         error: toDomainError('INVITATION_INVALID', '该邀请已失效，请让群主重新生成。'),
       };
     }
-    return { ok: true, data: { isValid: true } };
+    try {
+      const resp = await previewInvitation(token);
+      const data = resp.data;
+      if (
+        !data ||
+        (data.target_type !== 'group' && data.target_type !== 'session') ||
+        typeof data.target_id !== 'string' || !data.target_id.trim() ||
+        typeof data.group_id !== 'string' || !data.group_id.trim() ||
+        typeof data.already_joined !== 'boolean'
+      ) {
+        return {
+          ok: false,
+          error: { code: 'INVITATION_PREVIEW_FAILED', friendlyMessage: '邀请校验失败，请稍后重试。', canRetry: true },
+        };
+      }
+      return {
+        ok: true,
+        data: {
+          isValid: true,
+          targetType: data.target_type,
+          targetId: data.target_id,
+          groupId: data.group_id,
+          alreadyJoined: data.already_joined,
+        },
+      };
+    } catch (err) {
+      // Release 客户端由队列统一提示；预检错误交给落地页内联处理，不影响已执行的认证门禁。
+      const toastKey = (err as { toastKey?: string })?.toastKey;
+      if (toastKey) useErrorNotifyStore.getState().cancel(toastKey);
+      const status = (err as { status?: number })?.status;
+      if (status === 400 || status === 404 || status === 410) {
+        return {
+          ok: false,
+          error: toDomainError('INVITATION_INVALID', '该邀请已失效，请让群主重新生成。'),
+        };
+      }
+      if (status === 401 || status === 403) {
+        return {
+          ok: false,
+          error: toDomainError('INVITATION_UNAUTHENTICATED', '请登录后再查看协作邀请。'),
+        };
+      }
+      return {
+        ok: false,
+        error: { code: 'INVITATION_PREVIEW_FAILED', friendlyMessage: '邀请校验失败，请稍后重试。', canRetry: true },
+      };
+    }
   },
 
   async acceptInvitation(

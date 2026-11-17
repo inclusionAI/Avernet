@@ -2,7 +2,8 @@
 import * as invitationController from '@/services/backendApi/collaboration/collaborationInvitationController';
 import type { DomainError } from '@/services/workspace/identityService';
 import { invitationService } from '@/services/workspace/invitationService';
-import { describe, expect, it, jest } from '@jest/globals';
+import { useErrorNotifyStore } from '@/stores/errorNotifyStore';
+import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 // 使用 auto-mock（不带 factory），避免在 hoisted factory 内引用 jest.fn() —— 与 @jest/globals 一起会触发 TDZ。
 // auto-mock 会把 createGroupInvitation/createSessionInvitation/acceptInvitation 替成 jest.fn()，下方强取即可。
@@ -11,6 +12,7 @@ const ic = invitationController as unknown as Record<string, jest.Mock<any>>;
 type FailureResult = { ok: false; error: DomainError };
 
 describe('invitationService', () => {
+  beforeEach(() => { jest.clearAllMocks(); useErrorNotifyStore.getState().reset(); });
   it('createGroupShare returns invitationUrl with token', async () => {
     ic.createGroupInvitation.mockResolvedValue({
       code: 20100,
@@ -83,13 +85,66 @@ describe('invitationService', () => {
     expect((res as FailureResult).error.code).toBe('INVITATION_INVALID');
   });
 
-  it('getAcceptPageState never calls backend before user confirms', async () => {
-    ic.acceptInvitation.mockClear();
-    ic.createGroupInvitation.mockClear();
+  it.each(['group', 'session'] as const)('getAcceptPageState reads %s membership without accepting', async (type) => {
+    ic.previewInvitation.mockResolvedValueOnce({
+      code: 20000,
+      data: { target_type: type, target_id: type === 'group' ? 'g1' : 's1', group_id: 'g1', already_joined: true },
+    });
     const res = await invitationService.getAcceptPageState('tk');
-    expect(res).toEqual({ ok: true, data: { isValid: true } });
+    expect(ic.previewInvitation).toHaveBeenCalledWith('tk');
+    expect(res).toEqual({ ok: true, data: {
+      isValid: true, targetType: type, targetId: type === 'group' ? 'g1' : 's1', groupId: 'g1', alreadyJoined: true,
+    } });
     expect(ic.acceptInvitation).not.toHaveBeenCalled();
     expect(ic.createGroupInvitation).not.toHaveBeenCalled();
+  });
+
+  it.each([400, 403, 410, 500])('preflight %s cancels only its default notification before inline handling', async (status) => {
+    const notify = useErrorNotifyStore.getState();
+    notify.enqueue({ toastKey: 'invitation-preview', message: 'preview failed' });
+    notify.enqueue({ toastKey: 'unrelated-request', message: 'other failure' });
+    ic.previewInvitation.mockRejectedValueOnce({ status, toastKey: 'invitation-preview' });
+    const result = await invitationService.getAcceptPageState('tk');
+    expect(result.ok).toBe(false);
+    expect(useErrorNotifyStore.getState().queue).toEqual([
+      expect.objectContaining({ toastKey: 'invitation-preview', cancelled: true }),
+      expect.objectContaining({ toastKey: 'unrelated-request' }),
+    ]);
+    expect(useErrorNotifyStore.getState().queue[1].cancelled).not.toBe(true);
+    expect(ic.acceptInvitation).not.toHaveBeenCalled();
+  });
+
+  it.each([400, 404, 410])('preflight %s remains invalid, not a nonmember result', async (status) => {
+    ic.previewInvitation.mockRejectedValueOnce({ status });
+    expect(await invitationService.getAcceptPageState('tk')).toMatchObject({
+      ok: false, error: { code: 'INVITATION_INVALID', canRetry: false },
+    });
+  });
+
+  it.each([401, 403])('preflight %s remains an authentication failure', async (status) => {
+    ic.previewInvitation.mockRejectedValueOnce({ status });
+    expect(await invitationService.getAcceptPageState('tk')).toMatchObject({
+      ok: false, error: { code: 'INVITATION_UNAUTHENTICATED', canRetry: false },
+    });
+  });
+
+  it('transient preview failure can be retried rather than confirming an unchecked invitation', async () => {
+    ic.previewInvitation.mockRejectedValueOnce({ status: 500 });
+    expect(await invitationService.getAcceptPageState('tk')).toMatchObject({
+      ok: false, error: { code: 'INVITATION_PREVIEW_FAILED', canRetry: true },
+    });
+  });
+
+  it.each([
+    undefined,
+    { target_type: 'group', target_id: 'g1', group_id: 'g1' },
+    { target_type: 'session', target_id: 's1', already_joined: false },
+    { target_type: 'bot', target_id: 'b1', group_id: 'g1', already_joined: true },
+  ])('rejects incomplete preview data instead of guessing membership', async (data) => {
+    ic.previewInvitation.mockResolvedValueOnce({ code: 20000, data });
+    expect(await invitationService.getAcceptPageState('tk')).toMatchObject({
+      ok: false, error: { code: 'INVITATION_PREVIEW_FAILED' },
+    });
   });
 
   it('getAcceptPageState rejects empty token as invalid', async () => {
@@ -99,5 +154,6 @@ describe('invitationService', () => {
     expect(res.ok).toBe(false);
     expect((res as FailureResult).error.code).toBe('INVITATION_INVALID');
     expect(ic.acceptInvitation).not.toHaveBeenCalled();
+    expect(ic.previewInvitation).not.toHaveBeenCalled();
   });
 });

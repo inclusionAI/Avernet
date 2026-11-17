@@ -37,21 +37,29 @@ export function useSelectedGroupDetail(
     const groupId = selectedGroupId!;
     const identityId = activeIdentityId!;
     let cancelled = false;
+    const controller = new AbortController();
     setDetail(null);
     const finish = (group: GroupView | null, error: string | null) => {
       if (!cancelled) setDetail({ identityId, groupId, group, error });
     };
-    void groupService.loadGroupDetailOrBcs(groupId, viewBotId).then((result) => {
+    void groupService.loadGroupDetailOrBcs(groupId, viewBotId).then(async (result) => {
+      if (cancelled) return;
       if (!result.ok) {
         finish(null, result.error.friendlyMessage);
       } else if (result.data.groupId !== groupId || result.data.status === 'dissolved') {
         finish(null, '指定协作群不存在、已解散或无权访问。');
       } else {
-        finish(result.data, null);
+        if (result.data.membership) {
+          finish(result.data, null);
+          return;
+        }
+        const membership = await groupService.resolveGroupMembership(groupId, viewBotId, controller.signal);
+        if (!membership.ok) finish(null, membership.error.friendlyMessage);
+        else finish(membership.data ? { ...result.data, membership: membership.data } : result.data, null);
       }
     }).catch(() => finish(null, '加载指定协作群失败，请稍后重试。'));
     // Selection/identity changes, list refreshes and unmount invalidate every late response.
-    return () => { cancelled = true; };
+    return () => { cancelled = true; controller.abort(); };
   }, [activeIdentityId, enabled, isGroupsLoading, listReadyForCurrentIdentity, retryCount, selectedGroupId, viewBotId]);
 
   const current = enabled && detail?.identityId === activeIdentityId && detail.groupId === selectedGroupId

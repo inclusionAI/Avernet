@@ -4,7 +4,10 @@ import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { act, renderHook } from '@testing-library/react';
 import { baseGroup } from '../components/GroupSidebar/GroupSidebar.testUtils';
 
-beforeEach(() => useWorkspaceStore.getState().reset());
+beforeEach(() => {
+  useWorkspaceStore.getState().reset();
+  useWorkspaceStore.setState({ selectedGroupId: 'g1', selectedSessionId: 's1' });
+});
 
 it('定位清除筛选并请求 UI 展开，保留 session、展开缓存与历史 nonce，支持重复定位', () => {
   useWorkspaceStore.setState({
