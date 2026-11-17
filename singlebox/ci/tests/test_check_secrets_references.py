@@ -220,3 +220,24 @@ def test_nested_keyword_arguments_do_not_hide_literals_after_short_callees(templ
     findings = scanner._findings("+++ b/service.py\n@@ -0,0 +1 @@\n+" + source + "\n")
     assert findings
     assert all(value not in finding.content for finding in findings)
+
+
+@pytest.mark.parametrize("source", [
+    'cookie=f"IAM_' 'TOKEN={credential.token}",',
+    'to' 'ken = replace(_caller_token(), expires_at=datetime.now() + timedelta(hours=1))',
+])
+def test_runtime_cookie_and_expiry_arithmetic_are_not_plaintext(source):
+    assert scanner._findings("+++ b/service.py\n@@ -0,0 +1 @@\n+" + source + "\n") == []
+
+
+@pytest.mark.parametrize("template", [
+    'cookie=f"IAM_' 'TOKEN={{runtime}}{value}",',
+    'cookie=f"IAM_' 'TOKEN={value}{{runtime}}",',
+    'to' 'ken = replace(current, expires_at=runtime + "{value}")',
+])
+def test_cookie_and_arithmetic_literals_remain_blocked(template):
+    value = "AbCdEf" + "0123456789XYZ-secret-value"
+    source = template.format(value=value)
+    findings = scanner._findings("+++ b/service.py\n@@ -0,0 +1 @@\n+" + source + "\n")
+    assert findings
+    assert all(value not in finding.content for finding in findings)
