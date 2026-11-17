@@ -6,6 +6,23 @@
 //!
 //! - [`rules`]: the pure rules (`DistConnectorCoreService`).
 //! - [`identity`]: stable request, input and interaction ids.
+//! - [`engine`]: the main loop (receive → claim → ack), drain and snapshot.
+//! - [`config`]: settings and ports.
+//! - [`delayed`]: explicit stubs of contracts that are not final.
+//!
+//! The per-call actor lives in the private modules `call`, `send`, `control`
+//! and `report`.
 
+mod call;
+mod control;
+mod report;
+mod send;
+
+pub mod config;
+pub mod delayed;
+pub mod engine;
 pub mod identity;
 pub mod rules;
+
+pub use config::{ConnectorConfig, ConnectorPorts};
+pub use engine::ConnectorEngine;
