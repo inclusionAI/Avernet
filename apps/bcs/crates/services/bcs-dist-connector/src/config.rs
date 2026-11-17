@@ -91,4 +91,11 @@ impl Backoff {
         tokio::time::sleep(self.next).await;
         self.next = self.next.saturating_mul(2).min(self.max);
     }
+
+    /// Like `wait`, but never sleeps longer than `limit` in one go, so the
+    /// caller can do periodic work (a heartbeat) between slices.
+    pub async fn wait_at_most(&mut self, limit: Duration) {
+        tokio::time::sleep(self.next.min(limit)).await;
+        self.next = self.next.saturating_mul(2).min(self.max);
+    }
 }

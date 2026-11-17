@@ -150,7 +150,9 @@ impl ConnectorEngine {
                 }
                 Err(error) => {
                     tracing::warn!(?error, "command feed read failed");
-                    backoff.wait().await;
+                    // Never longer than one renewal period: a feed outage
+                    // must not let this instance's registration expire.
+                    backoff.wait_at_most(config.membership_renew).await;
                 }
             }
         }

@@ -220,3 +220,48 @@ async fn the_registration_is_kept_alive_during_the_drain_grace_period() {
     events.send(final_event()).unwrap();
     assert_eq!(drain.await.unwrap().unwrap(), DrainOutcome::Drained);
 }
+
+#[tokio::test]
+async fn a_feed_outage_does_not_let_the_registration_expire() {
+    use bcs_service_api::port::repo::distributed::dispatch::{
+        ClaimOutcome, CommandDelivery, CommandFeedPort, DispatchClaimRequest, DispatchQueuePort, ResumeOwnedDispatch,
+    };
+    /// A queue whose command feed fails on every read.
+    struct BrokenFeed;
+    #[async_trait]
+    impl CommandFeedPort for BrokenFeed {
+        async fn receive(&mut self, _: std::num::NonZeroU32, _: Duration) -> Result<Vec<CommandDelivery>, StoreError> {
+            Err(StoreError::NotApplied { code: "store_not_applied".into() })
+        }
+        async fn ack(&mut self, _: &CommandDelivery) -> Result<(), StoreError> {
+            Ok(())
+        }
+    }
+    struct BrokenQueue;
+    #[async_trait]
+    impl DispatchQueuePort for BrokenQueue {
+        async fn claim(&self, _: DispatchClaimRequest) -> Result<ClaimOutcome, StoreError> {
+            Ok(ClaimOutcome::NotFound)
+        }
+        async fn resume_owned(&self, _: ResumeOwnedDispatch) -> Result<ClaimOutcome, StoreError> {
+            Ok(ClaimOutcome::NotFound)
+        }
+        async fn notifications(&self, _: PoolId, _: Instance) -> Result<Box<dyn CommandFeedPort>, StoreError> {
+            Ok(Box::new(BrokenFeed))
+        }
+    }
+    let mut rig = Rig::new();
+    // The feed backoff is far longer than the renewal period.
+    rig.config.backoff_min = Duration::from_secs(20);
+    rig.config.backoff_max = Duration::from_secs(60);
+    let leases = Arc::new(Leases { lose_after: usize::MAX, ..Leases::default() });
+    rig.membership = leases.clone();
+    let mut ports = rig.ports();
+    ports.queue = Arc::new(BrokenQueue);
+    let engine = ConnectorEngine::new(rig.config.clone(), ports).unwrap();
+    let looped = engine.clone();
+    let task = tokio::spawn(async move { looped.run().await });
+    until("renewals continue through the outage", || async { leases.renewals.load(Ordering::SeqCst) >= 4 }).await;
+    assert!(!task.is_finished(), "the engine keeps running");
+    task.abort();
+}

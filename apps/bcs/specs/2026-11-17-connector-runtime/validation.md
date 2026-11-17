@@ -16,7 +16,7 @@ provider or agent resolver exists yet. Not deployed.
 | Command | Result |
 | --- | --- |
 | `cargo check --workspace --all-targets` | finished; only warnings that exist on `dev` |
-| `cargo test -p bcs-dist-connector` | 70 passed, 0 failed |
+| `cargo test -p bcs-dist-connector` | 72 passed, 0 failed |
 | `cargo test -p bcs-dist-connector-store` | 48 passed, 0 failed |
 | `cargo test -p bcs-a2a-http` (includes the `dist-agent` feature through its own dev-dependency) | 111 passed, 0 failed (17 new) |
 | `scripts/e2e-test/custom_binding_story.py` with and without `--grpc-peer-binary` (plain debug build of `bcs-caller-e2e` and `bcs-a2a-grpc-peer`) | both pass; the gRPC variant now ends with a send while the mesh peer is down |
