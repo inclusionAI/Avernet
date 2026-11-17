@@ -641,6 +641,10 @@ reference_id DESC`。目标 Set 已被删除时，历史 Operation 仍可按 Bot
 | `RUNTIME_PROJECTION_FAILED` | Reference | active Set 最终 Runtime 投影失败并已补偿 |
 | `SC_PUBLISH_REJECTED` | Publication | SC 明确拒绝，本次 Attempt FAILED |
 | `MATERIALIZATION_FAILED` | Publication/Reference | exact Version 物化重试耗尽 |
+| `SKILL_PACKAGE_MANIFEST_MISSING` | Reference | exact 包缺少根入口 |
+| `SKILL_PACKAGE_MANIFEST_AMBIGUOUS` | Reference | exact 包没有唯一根入口 |
+| `SKILL_PACKAGE_TOO_LARGE` | Reference | exact 包超出大小或文件数限制 |
+| `SKILL_PACKAGE_INVALID` | Reference | exact 包格式或元数据无效 |
 
 实现时可增加更细的 additive error code，但不能把上表中的不同状态压成一个通用 500。
 
