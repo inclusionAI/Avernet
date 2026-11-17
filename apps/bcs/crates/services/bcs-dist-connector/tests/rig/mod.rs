@@ -57,6 +57,8 @@ pub struct ScriptedAgent {
     pub by_request: Mutex<VecDeque<QueryOutcome>>,
     pub cancels: Mutex<VecDeque<CancelOutcome>>,
     pub subscriptions: Mutex<VecDeque<Result<mpsc::UnboundedReceiver<Result<RemoteEvent, AgentReadError>>, AgentReadError>>>,
+    /// When set, the next `start` waits for it before answering.
+    start_gate: Mutex<Option<tokio::sync::oneshot::Receiver<()>>>,
 }
 
 impl ScriptedAgent {
@@ -71,6 +73,12 @@ impl ScriptedAgent {
     }
     pub fn count(&self, prefix: &str) -> usize {
         self.calls().iter().filter(|c| c.starts_with(prefix)).count()
+    }
+    /// Holds the next `start` on the wire until the returned sender fires.
+    pub fn gate_start(&self) -> tokio::sync::oneshot::Sender<()> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        *self.start_gate.lock().unwrap() = Some(rx);
+        tx
     }
     pub fn on_start(&self, reply: Reply) {
         self.starts.lock().unwrap().push_back(reply);
@@ -144,6 +152,10 @@ impl DistAgentClientPort for ScriptedAgent {
     async fn start(&self, target: &AgentBinding, request: StableSendRequest) -> SendOutcome {
         self.log(format!("start {} agent={} payload={}", request.request_id.0, target.agent.0, payload_text(&request.payload)))
             .await;
+        let gate = self.start_gate.lock().unwrap().take();
+        if let Some(gate) = gate {
+            let _ = gate.await;
+        }
         let reply = self.starts.lock().unwrap().pop_front();
         Self::outcome(reply)
     }
