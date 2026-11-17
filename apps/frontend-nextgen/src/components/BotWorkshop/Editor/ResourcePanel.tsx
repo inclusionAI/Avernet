@@ -5,6 +5,7 @@ import { Modal, ModalContent, ModalFooter, ModalHeader, ModalTitle } from '@/com
 import type { BotEditorResource, BotEditorResourcePreview } from '@/domain/botEditor';
 import { buildVisibleResourceTree } from '@/services/botWorkshop/resourceTree';
 import { FolderPlus, Upload } from 'lucide-react';
+import { toast } from 'sonner';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ResourcePanelRow } from './ResourcePanelRow';
 import { ResourcePreviewDrawer } from './ResourcePreviewDrawer';
@@ -54,12 +55,33 @@ export function ResourcePanel({
   const effectiveLoadedPaths = loadedPaths ?? localLoadedPaths;
   const uploadRef = useRef<HTMLInputElement>(null);
   const uploadDirectoryRef = useRef('');
+  const uploadTargetInvalid = useRef(false);
   useEffect(() => {
     if (loadedPaths) setExpanded((current) => {
       const retained = current.filter((path) => loadedPaths.includes(path) || loadingPaths.includes(path) || Boolean(errors[path]));
       return retained.length === current.length ? current : retained;
     });
   }, [loadedPaths, loadingPaths, errors]);
+  useEffect(() => {
+    if (!rootReady || loadingPaths.includes('') || errors['']) return;
+    // A missing descendant is only conclusive when its direct parent was loaded.
+    const confirmedMissing = (candidate: string) => {
+      let parent = '';
+      for (const part of candidate.split('/').filter(Boolean)) {
+        if (!(loadedPaths ?? ['']).includes(parent) || loadingPaths.includes(parent) || errors[parent]) return false;
+        const child = parent ? `${parent}/${part}` : part;
+        if (!resources.some((item) => item.parentPath === parent && item.path === child && item.type === 'folder')) return true;
+        parent = child;
+      }
+      return false;
+    };
+    if (directory && confirmedMissing(directory)) setDirectory('');
+    if (uploadDirectoryRef.current && confirmedMissing(uploadDirectoryRef.current)) uploadTargetInvalid.current = true;
+    if (createOpen && createParent && confirmedMissing(createParent)) {
+      setCreateOpen(false);
+      setCreateParent('');
+    }
+  }, [resources, rootReady, loadingPaths, loadedPaths, errors, directory, createOpen, createParent]);
   const visibleResources = useMemo(() => buildVisibleResourceTree(resources, expanded), [expanded, resources]);
   const uploadToDirectory = async (target: string, file: File) => {
     await onUpload(target ? `${target}/${file.name}` : file.name, file);
@@ -101,7 +123,8 @@ export function ResourcePanel({
               const file = event.target.files?.[0];
               const target = uploadDirectoryRef.current;
               // 失败提示已由 act 的 toast 负责，吞掉传播避免 dev 遮罩报 Unhandled Rejection
-              if (file) void uploadToDirectory(target, file).catch(() => undefined);
+              if (file && uploadTargetInvalid.current) toast.error('目标目录已不存在，请重新选择');
+              else if (file) void uploadToDirectory(target, file).catch(() => undefined);
               event.target.value = '';
             }}
           />
@@ -112,6 +135,7 @@ export function ResourcePanel({
             leftIcon={<Upload className="size-4" />}
             onClick={() => {
               uploadDirectoryRef.current = directory;
+              uploadTargetInvalid.current = false;
               uploadRef.current?.click();
             }}
           >
@@ -156,6 +180,7 @@ export function ResourcePanel({
                 onToggleDirectory={toggleDirectory}
                 onAddFileTo={(target) => {
                   uploadDirectoryRef.current = target;
+                  uploadTargetInvalid.current = false;
                   uploadRef.current?.click();
                 }}
                 onCreateSubdirectory={(parent) => {
