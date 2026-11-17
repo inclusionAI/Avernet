@@ -1,6 +1,7 @@
 import { createElement, type CSSProperties, Fragment, type ReactNode, useMemo } from 'react';
 
 const VOID_TAGS = new Set(['br', 'hr', 'img']);
+const TABLE_STRUCTURE_TAGS = new Set(['table', 'thead', 'tbody', 'tr']);
 
 const SAFE_HTML_TAGS = new Set([
   'a',
@@ -97,7 +98,7 @@ function renderSafeNode(node: Node, key: string, richText: boolean): ReactNode {
   const element = node as HTMLElement;
   const tagName = element.tagName.toLowerCase();
   const children = Array.from(element.childNodes)
-    .filter((child) => !(tagName === 'table' && child.nodeType === Node.TEXT_NODE && !child.textContent?.trim()))
+    .filter((child) => !(TABLE_STRUCTURE_TAGS.has(tagName) && child.nodeType === Node.TEXT_NODE && !child.textContent?.trim()))
     .map((child, index) => renderSafeNode(child, `${key}-${index}`, richText));
 
   if (!SAFE_HTML_TAGS.has(tagName)) {
