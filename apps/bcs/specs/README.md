@@ -11,6 +11,7 @@ When a change yields verified reusable knowledge, update its owning documentatio
 These entries are task-specific records. Inspect their individual status, evidence and target version; their presence does not establish current authority or deployment. Explicitly adopted contracts retain their authority until replaced.
 
 - [2026-11-15-distributed-contracts](2026-11-15-distributed-contracts/spec.md) — declarations and ordered tasks; no runtime implementation
+- [2026-11-17-worker-coordination](2026-11-17-worker-coordination/spec.md) — proposed heartbeat, shard ownership, failover and graceful handoff specification; documentation only
 
 - [2026-08-20-bot-task-modes](2026-08-20-bot-task-modes/)
 - [2026-09-09-group-context-api](2026-09-09-group-context-api/)
