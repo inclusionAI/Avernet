@@ -101,6 +101,12 @@ successfully installed on the current dedicated Caller runtime. It is independen
 of ASC authorization expiry and session expiry. A new/replaced runtime starts with
 NULL, and progress-only writes preserve it. The repository's `caller_token_update`
 scope serializes the decision, outbound install and expiry write for one addressed
-instance; an equal/later installed expiry means skip installation. Initial schema
-creation includes the field; existing MySQL/OceanBase deployments apply
+instance; ordinary chat skips installation for an equal/later installed expiry.
+After provisioning reaches SUCCESS with an IAM credential, initialization explicitly
+forces reinstallation under that same lock and records the actual installed expiry,
+including a shorter/equal value. Already-ready connection reuse does not force it;
+missing IAM retains the existing skip behavior. Teclaw retains its shared-runtime
+bypass. External installation and SQL commit are not atomic; see the
+[Caller installation policy](../caller_identity/README.md) for failed-recovery handling.
+Initial schema creation includes the field; existing MySQL/OceanBase deployments apply
 [the additive migration](sql/2026_11_13_caller_token_expiry.sql) first.
