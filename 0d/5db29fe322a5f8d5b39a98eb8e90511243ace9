@@ -1,0 +1,26 @@
+apps/bcs-internal/crates/plugins/bcs-sofa-services/tests/a2a.rs
+  h_fa66fe7c023b4b 430,455
+apps/bcs-internal/crates/plugins/bcs-sofa-services/tests/contracts.rs
+  h_fa66fe7c023b4b 75-95
+apps/bcs-internal/crates/plugins/bcs-sofa-services/tests/provider_host.rs
+  h_fa66fe7c023b4b 36
+apps/bcs-internal/crates/plugins/bcs-sofa-services/tests/roundtrip.rs
+  h_fa66fe7c023b4b 186
+apps/bcs-internal/crates/plugins/bcs-sofa-services/tests/runtime_config.rs
+  h_fa66fe7c023b4b 11,44-47,81-84,158,179-180,215,227,253,255,262,268,276,282,325,393-459
+apps/bcs-internal/crates/plugins/bcs-sofa-services/tests/sofa_provider_host.rs
+  h_fa66fe7c023b4b 13-14,89,109,221-375,385,409
+apps/bcs-internal/tests/test_sofa_rpc_packaging.py
+  h_fa66fe7c023b4b 376-407
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0d5db29fe322a5f8d5b39a98eb8e90511243ace9",
+  "prompts": {},
+  "humans": {
+    "h_fa66fe7c023b4b": {
+      "author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}
