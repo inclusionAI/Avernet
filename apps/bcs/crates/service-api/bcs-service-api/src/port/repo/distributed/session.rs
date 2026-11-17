@@ -112,7 +112,12 @@ pub struct AcquiredSession {
 pub enum AcquireOutcome {
     Acquired(AcquiredSession),
     Fenced,
+    /// Current graceful handoff still protects the exact source owner.
+    Deferred { check_after: std::time::Duration },
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SessionTransferOutcome { Transferred, AlreadyTransferred, Fenced }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CommitRequest {
@@ -151,6 +156,10 @@ pub enum RecoveryUpdate {
 
 #[async_trait]
 pub trait SessionStorePort: Send + Sync {
+    /// Release a quiescent local cache entry only. Never delete durable state or
+    /// revoke another owner. The caller must resolve current-round/commit/effect
+    /// and scheduling operations first. Providers without a cache need no work.
+    async fn release_local(&self, _owner: &SessionOwnership) -> Result<(), StoreError> { Ok(()) }
     /// Read the immutable specification established by InboxProducerPort::admit,
     /// including before the first checkpoint exists. Does not acquire ownership,
     /// create a session, or refresh its frozen definition. None means absent;
@@ -167,6 +176,10 @@ pub trait SessionStorePort: Send + Sync {
         claim: &ShardClaim,
         initial: Checkpoint,
     ) -> Result<AcquireOutcome, StoreError>;
+    /// Source is quiescent before calling. Preserve the latest full envelope;
+    /// never overwrite with a caller snapshot. Uncertain attempts retain identity.
+    async fn handoff_session(&self, source: &SessionOwnership, target: &ShardClaim, request_id: &RequestId)
+        -> Result<SessionTransferOutcome, StoreError>;
     async fn load(&self, sid: &Sid) -> Result<Option<CheckpointEnvelope>, StoreError>;
     /// Atomically validate sid-to-shard membership, the sealed owner's exact
     /// node/incarnation/epoch, and expected_commit_seq AND

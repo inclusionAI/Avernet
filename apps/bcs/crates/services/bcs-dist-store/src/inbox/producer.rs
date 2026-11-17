@@ -1,7 +1,7 @@
 //! Admission in the fixed write order of the design:
 //!
 //! 1. read `admit`: same digest → duplicate; different → conflict;
-//! 2. create `spec` (new session) and `task` (new task), create-once;
+//! 2. create `spec` (new session) and `task` (new task) only when absent;
 //! 3. append the input to `inbox`;
 //! 4. read the listener (delayed contract D1, see [`read_listener`]);
 //! 5. register the session in `active` with the lower score;
@@ -18,6 +18,14 @@
 //! `Duplicate` (the answer comes from an `admit` written earlier, by a previous
 //! attempt or by the Worker's compensation). Decision 24: callers treat both as
 //! the same success; a different digest is `ContentConflict`.
+//!
+//! `spec` and `task` use the persistent `DocumentCas` namespace also read by
+//! the session store. Existing documents are checked, never overwritten by
+//! admission; no epoch or business sequence is used as a creation version.
+//! Their keys must not expire, be deleted, or be recreated while old requests
+//! can arrive. This narrower capability does not require full `AtomicJson`.
+//! The change does not add store calls: a new session still has two document
+//! creates; an existing document may add one identity read before proceeding.
 
 use super::Clock;
 use super::listener::{ListenerState, read_listener};
@@ -26,18 +34,17 @@ use crate::codec::{AdmitRecord, encode_inbox_entry, encode_json, encode_wake_ent
 use crate::error::{from_read, from_write};
 use crate::identity::{digest_fields, digest_json, hex_of};
 use crate::layout::KeyLayout;
-use crate::version;
 use async_trait::async_trait;
 use bcs_dist_model::*;
 use bcs_service_api::port::repo::distributed::common::StoreError;
 use bcs_service_api::port::repo::distributed::inbox::{
     AdmitOutcome, AdmitRequest, AppendAgentEvent, InboxProducerPort,
 };
-use bcs_store_api::json::{JsonMutation, JsonStorePlugin};
+use bcs_store_api::document::DocumentStorePlugin;
 use bcs_store_api::kv::KvStorePlugin;
 use bcs_store_api::stream::{AppendId, StreamId, StreamStorePlugin, TrimPolicy};
 use bcs_store_api::zset::{ZAddMode, ZSetEntry, ZSetStorePlugin};
-use bcs_store_api::{Expiry, StoreCapability, WriteCondition, WriteOutcome};
+use bcs_store_api::{Expiry, StoreCapability, WriteOutcome};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -68,7 +75,7 @@ pub const LOG_GENERATION: &str = "1";
 
 pub struct StoreInboxProducer {
     kv: Arc<dyn KvStorePlugin>,
-    json: Arc<dyn JsonStorePlugin>,
+    documents: Arc<dyn DocumentStorePlugin>,
     zset: Arc<dyn ZSetStorePlugin>,
     stream: Arc<dyn StreamStorePlugin>,
     layout: KeyLayout,
@@ -78,10 +85,10 @@ pub struct StoreInboxProducer {
 }
 
 impl StoreInboxProducer {
-    /// Fails when a store lacks `Kv`, `AtomicJson`, `ZSet` or `Stream`.
+    /// Fails when a store lacks `Kv`, `DocumentCas`, `ZSet` or `Stream`.
     pub fn new(
         kv: Arc<dyn KvStorePlugin>,
-        json: Arc<dyn JsonStorePlugin>,
+        documents: Arc<dyn DocumentStorePlugin>,
         zset: Arc<dyn ZSetStorePlugin>,
         stream: Arc<dyn StreamStorePlugin>,
         layout: KeyLayout,
@@ -90,7 +97,7 @@ impl StoreInboxProducer {
     ) -> Result<Self, StoreError> {
         capability::require(&[
             (kv.as_ref(), StoreCapability::Kv),
-            (json.as_ref(), StoreCapability::AtomicJson),
+            (documents.as_ref(), StoreCapability::DocumentCas),
             (zset.as_ref(), StoreCapability::ZSet),
             (stream.as_ref(), StoreCapability::Stream),
         ])?;
@@ -101,7 +108,7 @@ impl StoreInboxProducer {
         }
         Ok(Self {
             kv,
-            json,
+            documents,
             zset,
             stream,
             layout,
@@ -132,7 +139,7 @@ impl StoreInboxProducer {
 
     /// Reads and decodes a stored JSON document.
     async fn stored<T: serde::de::DeserializeOwned>(&self, key: &str) -> Result<Option<T>, StoreError> {
-        match self.json.get_json(key).await.map_err(|e| from_read(&e))? {
+        match self.documents.read_document(key).await.map_err(|e| from_read(&e))? {
             Some(doc) => crate::codec::decode_json(doc.value).map(Some),
             None => Ok(None),
         }
@@ -150,13 +157,8 @@ impl StoreInboxProducer {
     /// Creates a once-only document; `Ok(false)` = it already existed.
     async fn create_once(&self, key: &str, doc: serde_json::Value) -> Result<bool, bcs_store_api::StoreError> {
         let outcome = self
-            .json
-            .mutate_json(
-                key,
-                WriteCondition::Newer(version::CREATE),
-                JsonMutation::Replace(doc),
-                Expiry::Persistent,
-            )
+            .documents
+            .create_document(key, &doc)
             .await?;
         Ok(matches!(outcome, WriteOutcome::Applied { .. }))
     }
@@ -181,7 +183,7 @@ impl StoreInboxProducer {
             .await
             .map_err(|e| Failure::Before(from_write(&e, op)))?;
 
-        let listener = match read_listener(self.json.as_ref(), &self.layout, &input.sid).await {
+        let listener = match read_listener(self.documents.as_ref(), &self.layout, &input.sid).await {
             Ok(state) => state,
             Err(error) => {
                 tracing::debug!(code = ?error, "listener read failed; writing wake");
@@ -212,7 +214,7 @@ impl StoreInboxProducer {
             .await
             .map_err(|_| Failure::After)?;
         let n = self.wake_appends.fetch_add(1, Ordering::Relaxed);
-        if n % self.config.wake_trim_every == 0 {
+        if n.is_multiple_of(self.config.wake_trim_every) {
             // `wake` is only a hint: a failed trim is retried on a later sample.
             let trimmed = self
                 .stream

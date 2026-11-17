@@ -1,0 +1,395 @@
+#![allow(dead_code)]
+use async_trait::async_trait;
+use bcs_dist_model::*;
+use bcs_dist_store::{coordination::CoordinationStore, layout::KeyLayout};
+use bcs_dist_worker::{WorkerConfig, WorkerRuntime};
+use bcs_service_api::{
+    port::{
+        dist_runtime::{DistRuntimeControlPort, DistWorkerPeerPort},
+        repo::distributed::{common::*, inbox::*, ownership::*, session::*},
+    },
+    types::dist_runtime::*,
+};
+use bcs_store_api::document::DocumentStorePlugin;
+use bcs_test_support::store_model::Model;
+use serde_json::json;
+use std::{
+    collections::BTreeMap,
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::Duration,
+};
+#[derive(Default)]
+pub struct FeedData {
+    pub watched: Mutex<Vec<Sid>>,
+    pub pending: Mutex<Vec<Sid>>,
+}
+struct Feed(Arc<FeedData>);
+#[async_trait]
+impl ShardFeedPort for Feed {
+    async fn watch(&mut self, sid: Sid, _after: Option<InboxPos>) -> Result<(), StoreError> {
+        self.0.watched.lock().unwrap().push(sid);
+        Ok(())
+    }
+    async fn unwatch(&mut self, sid: &Sid) -> Result<(), StoreError> {
+        self.0.watched.lock().unwrap().retain(|s| s != sid);
+        Ok(())
+    }
+    async fn next(
+        &mut self,
+        _limits: ReadLimits,
+        _timeout: Duration,
+    ) -> Result<FeedBatch, StoreError> {
+        Ok(FeedBatch {
+            sessions: vec![],
+            hints: vec![],
+        })
+    }
+}
+pub struct Inbox(pub Arc<FeedData>);
+#[async_trait]
+impl InboxConsumerPort for Inbox {
+    async fn open(&self, _shard: ShardId) -> Result<Box<dyn ShardFeedPort>, StoreError> {
+        Ok(Box::new(Feed(self.0.clone())))
+    }
+    async fn has_unconsumed(
+        &self,
+        _sid: &Sid,
+        _after: Option<&InboxPos>,
+    ) -> Result<bool, StoreError> {
+        Ok(false)
+    }
+    async fn confirm_committed(
+        &self,
+        _delivery: &DeliveryReceipt,
+        _proof: &CommitReceipt,
+    ) -> Result<(), StoreError> {
+        Ok(())
+    }
+    async fn trim_committed(&self, _proof: &CommitReceipt) -> Result<(), StoreError> {
+        Ok(())
+    }
+    async fn enumerate_pending(
+        &self,
+        _shard: ShardId,
+        page: PageRequest,
+    ) -> Result<Page<Sid>, StoreError> {
+        let pending = self.0.pending.lock().unwrap();
+        let after = page.after.map(|s| s.0);
+        let items = pending
+            .iter()
+            .filter(|s| after.as_ref().is_none_or(|a| s.0 > *a))
+            .take(page.limit.get() as usize)
+            .cloned()
+            .collect::<Vec<_>>();
+        let next = if items.len() == page.limit.get() as usize {
+            items.last().map(|s| PageToken(s.0.clone()))
+        } else {
+            None
+        };
+        Ok(Page { items, next })
+    }
+}
+#[derive(Default)]
+pub struct Scheduling {
+    pub observed: Mutex<Vec<SessionOwnership>>,
+    pub unknown: AtomicBool,
+    pub fenced: AtomicBool,
+}
+#[async_trait]
+impl InboxSchedulingPort for Scheduling {
+    async fn observe(&self, owner: &SessionOwnership) -> Result<ScheduleObservation, StoreError> {
+        if self.unknown.load(Ordering::SeqCst) {
+            return Err(StoreError::OutcomeUnknown {
+                operation_id: "observe".into(),
+            });
+        }
+        if self.fenced.load(Ordering::SeqCst) {
+            return Ok(ScheduleObservation::Fenced);
+        }
+        self.observed.lock().unwrap().push(owner.clone());
+        Ok(ScheduleObservation::Observed(ScheduleToken {
+            sid: owner.sid.clone(),
+            owner_epoch: owner.owner.epoch,
+            opaque: "observed".into(),
+        }))
+    }
+    async fn settle(&self, _request: SettleSession) -> Result<SettleOutcome, StoreError> {
+        Ok(SettleOutcome::Applied)
+    }
+    async fn due(
+        &self,
+        _shard: ShardId,
+        _now: TimestampMillis,
+        _page: PageRequest,
+    ) -> Result<Page<Sid>, StoreError> {
+        Ok(Page {
+            items: vec![],
+            next: None,
+        })
+    }
+}
+pub struct Sessions {
+    inner: Arc<CoordinationStore>,
+    pub released: Mutex<Vec<SessionOwnership>>,
+    pub release_unavailable: AtomicBool,
+}
+#[async_trait]
+impl SessionStorePort for Sessions {
+    async fn release_local(&self, owner: &SessionOwnership) -> Result<(), StoreError> {
+        if self.release_unavailable.load(Ordering::SeqCst) {
+            return Err(StoreError::NotApplied {
+                code: "release_unavailable".into(),
+            });
+        }
+        self.inner.release_local(owner).await?;
+        self.released.lock().unwrap().push(owner.clone());
+        Ok(())
+    }
+    async fn get_spec(&self, sid: &Sid) -> Result<Option<SessionSpec>, StoreError> {
+        self.inner.get_spec(sid).await
+    }
+    async fn acquire(
+        &self,
+        sid: &Sid,
+        claim: &ShardClaim,
+        initial: Checkpoint,
+    ) -> Result<AcquireOutcome, StoreError> {
+        self.inner.acquire(sid, claim, initial).await
+    }
+    async fn handoff_session(
+        &self,
+        source: &SessionOwnership,
+        target: &ShardClaim,
+        id: &RequestId,
+    ) -> Result<SessionTransferOutcome, StoreError> {
+        self.inner.handoff_session(source, target, id).await
+    }
+    async fn load(&self, sid: &Sid) -> Result<Option<CheckpointEnvelope>, StoreError> {
+        self.inner.load(sid).await
+    }
+    async fn commit(&self, request: CommitRequest) -> Result<CommitOutcome, StoreError> {
+        self.inner.commit(request).await
+    }
+    async fn resolve_commit(
+        &self,
+        owner: &SessionOwnership,
+        id: &CommitId,
+        digest: &Digest,
+    ) -> Result<CommitResolution, StoreError> {
+        self.inner.resolve_commit(owner, id, digest).await
+    }
+    async fn record_recovery_attempt(
+        &self,
+        owner: &SessionOwnership,
+        expected: CommitSeq,
+        attempt: RequestId,
+    ) -> Result<RecoveryUpdate, StoreError> {
+        self.inner
+            .record_recovery_attempt(owner, expected, attempt)
+            .await
+    }
+}
+#[derive(Default)]
+pub struct Peers {
+    pub workers: Mutex<BTreeMap<String, Arc<WorkerRuntime>>>,
+    pub lose_reply: AtomicBool,
+}
+#[async_trait]
+impl DistWorkerPeerPort for Peers {
+    async fn handoff(
+        &self,
+        target: &MemberRecord,
+        request: HandoffRequest,
+    ) -> Result<HandoffOutcome, RuntimeError> {
+        let worker = self
+            .workers
+            .lock()
+            .unwrap()
+            .get(&target.instance.node)
+            .cloned()
+            .ok_or_else(|| RuntimeError {
+                code: "peer_unavailable".into(),
+            })?;
+        let result = worker.accept_handoff(request).await?;
+        if self.lose_reply.swap(false, Ordering::SeqCst) {
+            return Err(RuntimeError {
+                code: "lost_reply".into(),
+            });
+        }
+        Ok(result)
+    }
+    async fn source_done(
+        &self,
+        target: &MemberRecord,
+        source: Instance,
+        claim: ShardClaim,
+        request_id: RequestId,
+    ) -> Result<bool, RuntimeError> {
+        let worker = self
+            .workers
+            .lock()
+            .unwrap()
+            .get(&target.instance.node)
+            .cloned()
+            .ok_or_else(|| RuntimeError {
+                code: "peer_unavailable".into(),
+            })?;
+        worker.handoff_done(source, claim, request_id).await
+    }
+}
+pub struct World {
+    pub model: Arc<Model>,
+    pub store: Arc<CoordinationStore>,
+    pub sessions: Arc<Sessions>,
+    pub data: Arc<FeedData>,
+    pub scheduling: Arc<Scheduling>,
+    pub peers: Arc<Peers>,
+}
+impl World {
+    pub fn new() -> Self {
+        let model = Arc::new(Model::default());
+        let store = Arc::new(
+            CoordinationStore::new(
+                model.clone(),
+                model.clone(),
+                model.clone(),
+                KeyLayout::new("test", "runtime").unwrap(),
+            )
+            .unwrap(),
+        );
+        Self {
+            model,
+            sessions: Arc::new(Sessions {
+                inner: store.clone(),
+                released: Mutex::default(),
+                release_unavailable: AtomicBool::new(false),
+            }),
+            store,
+            data: Arc::default(),
+            scheduling: Arc::default(),
+            peers: Arc::default(),
+        }
+    }
+    pub async fn worker(&self, name: &str) -> Arc<WorkerRuntime> {
+        self.worker_with_capacity(name, 10_000).await
+    }
+    pub async fn worker_with_capacity(&self, name: &str, capacity: usize) -> Arc<WorkerRuntime> {
+        let config = WorkerConfig {
+            shards: vec![ShardId(42)],
+            max_active_sessions: capacity,
+            ..WorkerConfig::default()
+        };
+        let runtime = WorkerRuntime::start(
+            name.into(),
+            format!("http://{name}.example.test:8080"),
+            config,
+            self.store.clone(),
+            self.store.clone(),
+            self.sessions.clone(),
+            Arc::new(Inbox(self.data.clone())),
+            self.scheduling.clone(),
+            self.peers.clone(),
+            Arc::new(|_| Ok(initial())),
+        )
+        .await
+        .unwrap();
+        self.peers
+            .workers
+            .lock()
+            .unwrap()
+            .insert(name.into(), runtime.clone());
+        runtime
+    }
+    pub fn instance(&self, name: &str) -> Instance {
+        self.peers.workers.lock().unwrap()[name].instance().clone()
+    }
+    pub async fn pending(&self, sid: &Sid) {
+        let spec = SessionSpec {
+            schema_version: 1,
+            sid: sid.clone(),
+            shard: ShardId(42),
+            scope: TaskScope {
+                tenant: TenantId("t".into()),
+                principal: PrincipalId("p".into()),
+            },
+            kind: SessionKind::FsmGroup,
+            group: GroupId("g".into()),
+            workflow: WorkflowRef {
+                definition_id: "wf".into(),
+                revision: "1".into(),
+                digest: Digest("d".into()),
+            },
+            participants: vec![],
+            limits: SessionLimits {
+                max_queued_tasks: 4,
+                max_task_steps: 32,
+                task_timeout_millis: 10_000,
+                max_inline_bytes: 1024,
+            },
+            digest: Digest("spec".into()),
+            created_at: TimestampMillis(0),
+        };
+        let key = KeyLayout::new("test", "runtime")
+            .unwrap()
+            .spec(sid)
+            .unwrap();
+        self.model
+            .create_document(&key, &serde_json::to_value(spec).unwrap())
+            .await
+            .unwrap();
+        self.data.pending.lock().unwrap().push(sid.clone());
+    }
+    pub async fn claim(&self, name: &str) -> ShardClaim {
+        match self
+            .store
+            .claim(ClaimShard {
+                shard: ShardId(42),
+                me: self.instance(name),
+                expected_epoch: None,
+                request_id: RequestId(format!("initial-{name}")),
+            })
+            .await
+            .unwrap()
+        {
+            LeaseClaim::Claimed(c) => c,
+            x => panic!("{x:?}"),
+        }
+    }
+}
+pub fn instance(name: &str) -> Instance {
+    Instance {
+        node: name.into(),
+        incarnation: format!("{name}-1"),
+    }
+}
+pub fn sid() -> Sid {
+    Sid("s0042.session".into())
+}
+pub fn initial() -> Checkpoint {
+    Checkpoint {
+        format_version: 1,
+        commit_seq: CommitSeq(0),
+        consumed: None,
+        tasks: Default::default(),
+        runner_state: RunnerState {
+            format_version: 1,
+            value: json!({}),
+        },
+        dispatch_seq: Default::default(),
+        deadlines: vec![],
+        view_drafts: Default::default(),
+        last_event_id: None,
+        outbox: None,
+    }
+}
+pub async fn warm(workers: &[Arc<WorkerRuntime>]) {
+    for _ in 0..3 {
+        tokio::time::advance(Duration::from_secs(1)).await;
+        for w in workers {
+            w.tick().await.unwrap();
+        }
+    }
+}

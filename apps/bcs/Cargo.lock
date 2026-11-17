@@ -677,6 +677,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "bcs-app-dist-runtime"
+version = "0.1.4-beta.3"
+dependencies = [
+ "async-trait",
+ "bcs-dist-model",
+ "bcs-service-api",
+ "tokio",
+]
+
+[[package]]
 name = "bcs-app-group"
 version = "0.1.4-beta.3"
 dependencies = [
@@ -1462,6 +1472,50 @@ dependencies = [
  "sha2",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "bcs-dist-worker"
+version = "0.1.4-beta.3"
+dependencies = [
+ "async-trait",
+ "bcs-dist-model",
+ "bcs-dist-store",
+ "bcs-service-api",
+ "bcs-store-api",
+ "bcs-test-support",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "bcs-dist-worker-client"
+version = "0.1.4-beta.3"
+dependencies = [
+ "async-trait",
+ "bcs-dist-model",
+ "bcs-service-api",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "bcs-dist-worker-http"
+version = "0.1.4-beta.3"
+dependencies = [
+ "async-trait",
+ "axum",
+ "bcs-dist-model",
+ "bcs-dist-worker-client",
+ "bcs-service-api",
+ "reqwest 0.12.28",
+ "serde",
+ "tokio",
 ]
 
 [[package]]

@@ -5,15 +5,18 @@ mod common;
 
 use bcs_dist_model::*;
 use bcs_dist_store::codec::decode_inbox_entry;
+use bcs_dist_store::coordination::CoordinationStore;
 use bcs_dist_store::error::NEED_CONTRACT;
 use bcs_dist_store::inbox::{InboxProducerConfig, StoreInboxProducer, read_listener};
 use bcs_dist_store::layout::KeyLayout;
 use bcs_service_api::port::repo::distributed::common::StoreError;
 use bcs_service_api::port::repo::distributed::inbox::*;
+use bcs_service_api::port::repo::distributed::session::SessionStorePort;
+use bcs_store_api::document::DocumentStorePlugin;
 use bcs_store_api::json::{JsonMutation, JsonStorePlugin};
 use bcs_store_api::stream::StreamStorePlugin;
 use bcs_store_api::zset::{ZSetRange, ZSetStorePlugin};
-use bcs_store_api::{Expiry, Version, WriteCondition};
+use bcs_store_api::{Expiry, StoreCapability, Version, WriteCondition};
 use bcs_test_support::store_model::Model;
 use common::*;
 use std::num::NonZeroU32;
@@ -70,8 +73,8 @@ async fn writes_happen_in_the_fixed_order() {
         store.calls(),
         vec![
             "kv.get bcn:v1:c01:main:s0042:admit:adm-9c41e7",
-            "json.mutate bcn:v1:c01:main:s0042:spec:s0042.7f3a9c",
-            "json.mutate bcn:v1:c01:main:s0042:task:s0042.7f3a9c.b21e",
+            "document.create bcn:v1:c01:main:s0042:spec:s0042.7f3a9c",
+            "document.create bcn:v1:c01:main:s0042:task:s0042.7f3a9c.b21e",
             "stream.append bcn:v1:c01:main:s0042:inbox:s0042.7f3a9c",
             "zset.add bcn:v1:c01:main:s0042:active",
             "stream.append bcn:v1:c01:main:s0042:wake",
@@ -187,9 +190,72 @@ async fn a_spec_of_another_group_is_a_conflict() {
     let store = Arc::new(Recorder::default());
     let p = producer(&store);
     p.admit(new_task_request("adm-1", "hello")).await.unwrap();
+    let key = "bcn:v1:c01:main:s0042:spec:s0042.7f3a9c";
+    let original = store.model.read_document(key).await.unwrap().unwrap();
     let mut other = new_task_request("adm-2", "again");
     other.create_session = Some(spec("grp-other"));
     assert_eq!(p.admit(other).await.unwrap(), AdmitOutcome::ContentConflict);
+    assert_eq!(store.model.read_document(key).await.unwrap().unwrap(), original);
+    assert_eq!(inbox_len(&store).await, 1);
+}
+
+#[tokio::test]
+async fn repeated_creation_preserves_the_first_spec_and_task() {
+    let store = Arc::new(Recorder::default());
+    let p = producer(&store);
+    p.admit(new_task_request("adm-1", "hello")).await.unwrap();
+    let spec_key = "bcn:v1:c01:main:s0042:spec:s0042.7f3a9c";
+    let task_key = "bcn:v1:c01:main:s0042:task:s0042.7f3a9c.b21e";
+    let original_spec = store.model.read_document(spec_key).await.unwrap().unwrap();
+    let original_task = store.model.read_document(task_key).await.unwrap().unwrap();
+    let mut retry = new_task_request("adm-2", "again");
+    // Rebuilding a request from newer configuration cannot change a frozen
+    // session, nor reset the task under the same identity.
+    retry.create_session.as_mut().unwrap().workflow.revision = "4".into();
+    retry.create_task.as_mut().unwrap().content.status = TaskStatus::Working;
+    assert!(matches!(p.admit(retry).await.unwrap(), AdmitOutcome::Accepted(_)));
+    assert_eq!(store.model.read_document(spec_key).await.unwrap().unwrap(), original_spec);
+    assert_eq!(store.model.read_document(task_key).await.unwrap().unwrap(), original_task);
+    assert_eq!(original_spec.version, Version(1));
+    assert_eq!(original_task.version, Version(1));
+}
+
+#[tokio::test]
+async fn admission_does_not_require_full_atomic_json() {
+    let store = Arc::new(Recorder::without_capability(StoreCapability::AtomicJson));
+    assert!(matches!(
+        producer(&store).admit(new_task_request("adm-1", "hello")).await.unwrap(),
+        AdmitOutcome::Accepted(_)
+    ));
+    assert!(store.calls().iter().all(|call| !call.starts_with("json.")));
+}
+
+#[tokio::test]
+async fn worker_reads_the_admitted_spec_through_the_same_document_api() {
+    let store = Arc::new(Recorder::without_capability(StoreCapability::AtomicJson));
+    let request = new_task_request("adm-1", "hello");
+    let expected = request.create_session.clone();
+    producer(&store).admit(request).await.unwrap();
+    let sessions = CoordinationStore::new(
+        store.clone(), Arc::new(Model::default()), store.clone(),
+        KeyLayout::new("c01", "main").unwrap(),
+    ).unwrap();
+    store.clear();
+    assert_eq!(sessions.get_spec(&Sid(SID.into())).await.unwrap(), expected);
+    assert_eq!(store.calls(), vec!["document.read bcn:v1:c01:main:s0042:spec:s0042.7f3a9c"]);
+}
+
+#[test]
+fn admission_requires_document_cas() {
+    let store = Arc::new(Recorder::without_capability(StoreCapability::DocumentCas));
+    let built = StoreInboxProducer::new(
+        store.clone(), store.clone(), store.clone(), store.clone(),
+        KeyLayout::new("c01", "main").unwrap(),
+        Arc::new(FixedClock(NOW)),
+        InboxProducerConfig::new(BackendId("tbase".into())),
+    );
+    assert!(matches!(built, Err(StoreError::NotApplied { ref code }) if code.contains("DocumentCas")));
+    assert!(store.calls().is_empty());
 }
 
 #[tokio::test]
@@ -348,7 +414,7 @@ async fn a_new_task_must_match_the_frozen_session_scope() {
         .unwrap();
     assert_eq!(outcome, AdmitOutcome::ContentConflict);
     assert!(
-        store.calls().iter().all(|c| c.starts_with("kv.get") || c.starts_with("json.get")),
+        store.calls().iter().all(|c| c.starts_with("kv.get") || c.starts_with("document.read")),
         "no writes: {:?}",
         store.calls()
     );

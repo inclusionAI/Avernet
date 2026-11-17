@@ -251,3 +251,11 @@ conformance. Future fixtures must extend them with at least:
 
 See [ordered tasks](../../../../../../../specs/2026-11-15-distributed-contracts/tasks.md)
 and [validation](../../../../../../../specs/2026-11-15-distributed-contracts/validation.md).
+
+
+Worker coordination uses addressable MemberRecord and full ShardRecord views.
+ShardClaim/ShardOwner still contain no public storage revision. Exact-version
+fencing is implemented in the repository provider. `release_local` drops only a
+quiescent local cache; it cannot delete durable state. Peer controls bind exact
+instances through the application boundary. See the Worker coordination SPEC and
+its implementation record for provider prerequisites and initialization scheme A.
