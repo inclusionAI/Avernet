@@ -101,7 +101,7 @@ Content-Type: application/json
     {
       "name": "taskPanel",
       "type": "url",
-      "url": "https://cdn.jsdelivr.net/npm/@avernet-assets/task-panel@1.0.3/dist/index.umd.js"
+      "url": "https://cdn.jsdelivr.net/npm/@avernet-assets/task-panel@1.0.4/dist/index.umd.js"
     }
   ]
 }
