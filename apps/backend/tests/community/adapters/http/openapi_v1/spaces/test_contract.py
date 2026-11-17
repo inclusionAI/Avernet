@@ -1835,3 +1835,53 @@ def test_batch_favorite_status_forwards_space_source_and_targets(
         target_type=FavoriteTargetType.SKILL,
         target_codes=["skill-1", "skill-2"],
     )
+
+
+def test_published_version_routes_parse_stored_mcp_objects(
+    client, skill_version_query_service, monkeypatch
+):
+    from agentclaw.community.core.skill_center.services.space_skill_version_query_service import (
+        SpaceSkillVersionQueryService,
+    )
+
+    access, repository, canonical = MagicMock(), MagicMock(), MagicMock()
+    service = SpaceSkillVersionQueryService(access, repository, canonical)
+    monkeypatch.setattr(
+        "agentclaw.community.core.skill_center.services.space_skill_version_query_service.get_current_env",
+        lambda: "test",
+    )
+    row = {
+        "version_ordinal": 1,
+        "sc_version_number": "1.0.0",
+        "name": "skill",
+        "description": None,
+        "metadata_json": '{"mcp_dependencies":[{"code":"mcp.a"},"mcp.b",{"server_code":"mcp.a"}]}',
+        "published_at": datetime(2026, 8, 30, 8),
+    }
+    repository.get_published_ordinal.return_value = row
+    repository.list_published.return_value = (3, [row])
+    skill_version_query_service.get_version.side_effect = service.get_version
+    skill_version_query_service.list_versions.side_effect = service.list_versions
+
+    detail = client.get("/openapi/v1/bots/spaces/7/skills/51/versions/1")
+    listing = client.get(
+        "/openapi/v1/bots/spaces/7/skills/51/versions?page=2&page_size=1"
+    )
+
+    assert detail.status_code == listing.status_code == 200
+    assert detail.json()["data"]["mcp_dependencies"] == ["mcp.a", "mcp.b", "mcp.a"]
+    assert listing.json()["data"]["total"] == 3
+    assert listing.json()["data"]["items"][0]["mcp_dependencies"] == [
+        "mcp.a",
+        "mcp.b",
+        "mcp.a",
+    ]
+    repository.list_published.assert_called_once_with(
+        space_id=7, skill_id=51, env="test", offset=1, limit=1
+    )
+    access.require_space_member.side_effect = SpaceAccessDeniedError(
+        "membership required"
+    )
+    assert (
+        client.get("/openapi/v1/bots/spaces/7/skills/51/versions/1").status_code == 403
+    )
