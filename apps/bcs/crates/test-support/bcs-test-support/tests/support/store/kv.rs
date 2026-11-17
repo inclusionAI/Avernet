@@ -125,12 +125,12 @@ impl VersionedKvStorePlugin for Model {
         value: &[u8],
         e: Expiry,
     ) -> StoreResult<WriteOutcome> {
-        self.require(StoreCapability::ConditionalKv)?;
+        self.require(StoreCapability::VersionedKv)?;
         self.versioned_expiry(e)?;
         self.write_kv(key, value, WriteCondition::Absent, e)
     }
     async fn get_versioned(&self, key: &str) -> StoreResult<Option<Versioned<Vec<u8>>>> {
-        self.require(StoreCapability::ConditionalKv)?;
+        self.require(StoreCapability::VersionedKv)?;
         let mut s = self.state.lock().unwrap();
         s.expire_values(key, self.time());
         s.kind(key, "kv")?;
@@ -162,11 +162,11 @@ impl VersionedKvStorePlugin for Model {
         self.write_kv(key, value, WriteCondition::Newer(v), e)
     }
     async fn delete(&self, key: &str) -> StoreResult<bool> {
-        self.require(StoreCapability::ConditionalKv)?;
+        self.require(StoreCapability::VersionedKv)?;
         self.remove_kv(key)
     }
     async fn ttl(&self, key: &str) -> StoreResult<KeyTtl> {
-        self.require(StoreCapability::ConditionalKv)?;
+        self.require(StoreCapability::VersionedKv)?;
         self.kv_ttl(key)
     }
     async fn delete_if_version(&self, key: &str, expected: Version) -> StoreResult<bool> {

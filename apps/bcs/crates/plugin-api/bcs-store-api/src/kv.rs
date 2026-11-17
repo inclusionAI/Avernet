@@ -22,8 +22,9 @@ pub trait KvStorePlugin: StorePlugin {
     async fn ttl(&self, key: &str) -> StoreResult<KeyTtl>;
 }
 
-/// Independently injectable versioned KV. ConditionalKv covers creation, reads,
-/// CAS, unconditional deletion and TTL queries. Without VersionedKvTtl only
+/// Independently injectable versioned KV. VersionedKv covers creation, reads,
+/// unconditional deletion and TTL queries. ConditionalKv adds strict CAS; its
+/// absence does not disable those base operations. Without VersionedKvTtl only
 /// Expiry::Persistent is supported; other modes fail Unsupported before I/O.
 /// With it, the condition, content, version and expiry change are one atomic
 /// operation. A failed condition changes neither content nor expiry.
@@ -51,9 +52,9 @@ pub trait VersionedKvStorePlugin: StorePlugin {
         value: &[u8],
         expiry: Expiry,
     ) -> StoreResult<WriteOutcome>;
-    /// Content and version from one consistent read; requires ConditionalKv.
+    /// Content and version from one consistent read; requires VersionedKv.
     async fn get_versioned(&self, key: &str) -> StoreResult<Option<Versioned<Vec<u8>>>>;
-    /// Update a live key only at expected. Successful identical writes also
+    /// ConditionalKv: update a live key only at expected. Successful identical writes also
     /// advance version. Zero versions and invalid expiry fail before mutation.
     async fn compare_and_set(
         &self,
@@ -87,6 +88,6 @@ pub trait VersionedKvStorePlugin: StorePlugin {
         expected: Version,
         ttl: Duration,
     ) -> StoreResult<WriteOutcome>;
-    /// Read-only; available with ConditionalKv even without VersionedKvTtl.
+    /// Read-only; available with VersionedKv even without ConditionalKv/VersionedKvTtl.
     async fn ttl(&self, key: &str) -> StoreResult<KeyTtl>;
 }

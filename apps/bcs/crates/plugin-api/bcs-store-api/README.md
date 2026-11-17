@@ -38,7 +38,8 @@ factory registry or business wrapper is required.
 | Capability | Trait and surface | Guarantee |
 | --- | --- | --- |
 | Kv | `KvStorePlugin`: get, mget, set, put_if_absent, delete, expire, ttl | Byte values; atomic single-key writes/NX; explicit expiry |
-| ConditionalKv | `VersionedKvStorePlugin`: create_versioned, get_versioned, compare_and_set, delete, ttl | Atomic exact-version update, unconditional deletion and read-only TTL; Persistent expiry is always supported |
+| VersionedKv | `VersionedKvStorePlugin`: create_versioned, get_versioned, delete, ttl | Atomic creation, consistent value/version read, unconditional deletion and TTL query; Persistent expiry is always supported |
+| ConditionalKv | Same trait: compare_and_set | Exact-version update of a live value; never recreate a missing/expired key |
 | VersionedKvTtl | Same trait: expiry arguments and expire_if_version | All expiry modes; atomic condition/content/version/TTL update and conditional renewal |
 | VersionedKvConditionalDelete | Same trait: delete_if_version | Atomic comparison and deletion; no cross-incarnation history implied |
 | MonotonicKv | Same trait: set_if_newer; stronger history for all versioned mutations | Caller-assigned versions and retained history across expiration/deletion/recreation |
@@ -49,7 +50,9 @@ factory registry or business wrapper is required.
 | StreamRecovery | Same read/range/trim methods | Atomic entries/head/removed-prefix evidence and atomic trim publication |
 | StreamGroups | Same trait: create_group, read_group, ack, claim_idle | Pending delivery tracking, acknowledgement and bounded idle reclamation |
 
-Kv and ConditionalKv are independent. VersionedKvTtl, VersionedKvConditionalDelete
+Kv and VersionedKv are independent. ConditionalKv requires VersionedKv.
+Lacking CAS does not disable versioned creation, reads, deletion or TTL queries.
+VersionedKvTtl, VersionedKvConditionalDelete
 and MonotonicKv each require ConditionalKv, not one another. VersionedZSet
 requires ZSet. StreamGroups and StreamRecovery independently require Stream. All methods for an unsupported capability return `Unsupported` before
 mutation. There are no best-effort conditional defaults. Consumers check their
@@ -226,11 +229,12 @@ streams require keys within the provider's supported routing scope. Call:
 
 - `store_plugin_contract_tests` for capability declarations;
 - `kv_store_plugin_contract_tests` for ordinary KV;
-- `kv_conditional_contract_tests` for VersionedKvStorePlugin, plus `kv_versioned_optional_contract_tests` for explicit refusals;
+- `kv_versioned_contract_tests` for VersionedKv, plus `kv_versioned_optional_contract_tests` for explicit refusals;
+- `kv_conditional_contract_tests` for the strict ConditionalKv extension;
 - `kv_versioned_ttl_contract_tests` and `kv_conditional_delete_contract_tests` for their independent extensions;
 - `kv_monotonic_contract_tests` for MonotonicKv;
 - `kv_expiry_contract_tests` for VersionedKvTtl with a clock/wait callback exceeding TTL rounding; retained-history assertions run only when MonotonicKv is advertised;
-- `kv_unknown_outcome_contract_tests` for ConditionalKv with provider/proxy response-loss injection;
+- `kv_unknown_outcome_contract_tests` for VersionedKv with provider/proxy response-loss injection;
 - `json_store_plugin_contract_tests`;
 - `z_set_store_plugin_contract_tests` and `versioned_zset_contract_tests`;
 - `stream_store_plugin_contract_tests`, `stream_group_contract_tests` and
@@ -269,7 +273,8 @@ and trim metadata need explicit semantic verification, not command-name matching
 
 Before merging this contract, move versioned implementations/callers from
 KvStorePlugin to VersionedKvStorePlugin and pass an explicit Expiry to versioned
-creation/CAS. Use Persistent for providers without VersionedKvTtl. Conditional
+creation/CAS. Declare VersionedKv for base operations and ConditionalKv only for
+strict CAS; absent CAS must not disable direct deletion. Use Persistent for providers without VersionedKvTtl. Conditional
 deletion now returns bool and requires VersionedKvConditionalDelete, independently
 of MonotonicKv. Require MonotonicKv for caller versions or key-reuse safety.
 Unconditional delete/ttl have the same method names on both traits: inject a

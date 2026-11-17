@@ -24,6 +24,7 @@ restricted to its configured storage namespace. No dynamic loader is introduced.
 ## Change impact
 
 This pre-merge contract revision splits KvStorePlugin/VersionedKvStorePlugin,
+separates VersionedKv base operations from strict ConditionalKv,
 adds optional versioned TTL/conditional deletion, and changes conditional delete
 to bool. Providers and harness callers must migrate together. Future
 service-store implementations must coordinate changes to versions,

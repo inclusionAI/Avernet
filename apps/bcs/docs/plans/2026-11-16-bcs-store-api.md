@@ -137,3 +137,18 @@ example passed on Rust 1.94.1. The previously deferred history-resetting fixture
 is now included: basic CAS accepts it and MonotonicKv rejects it. API all-target
 Clippy and the store boundary gate passed. Provider integration is validated in
 its owning repository; these fixtures do not certify backend failure behavior.
+
+
+### Base versioned operations remain available without CAS (2026-11-17)
+
+VersionedKv declares creation, consistent value/version reads, unconditional
+deletion and TTL queries. ConditionalKv now adds strict exact-version updates
+and requires VersionedKv. This separates a missing CAS guarantee from ordinary
+versioned operations; it must not accidentally disable direct deletion. The
+existing TTL, conditional-delete and monotonic extensions retain their declared
+prerequisites. Both traits and all TTL/delete signatures remain present.
+
+Add a reusable base-versioned harness and a provider model with CAS and ordinary
+KV disabled, proving creation/read/direct deletion still work while CAS rejects
+both existing and absent keys without changing data. Native provider evidence
+is recorded separately from these model tests.

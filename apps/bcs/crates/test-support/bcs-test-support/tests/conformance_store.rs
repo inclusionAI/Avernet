@@ -271,3 +271,15 @@ async fn versioned_ttl_and_conditional_delete_are_independent() {
     kv_conditional_delete_contract_tests(&deletion, "delete-no-ttl").await;
     kv_versioned_optional_contract_tests(&deletion, "delete-no-ttl").await;
 }
+
+#[tokio::test]
+async fn versioned_creation_read_and_delete_work_without_cas() {
+    let mut p = Model::default();
+    p.conditional_disabled = true;
+    p.ordinary_disabled = true;
+    contract::store_plugin_contract_tests(&p);
+    assert!(p.supports(StoreCapability::VersionedKv));
+    assert!(!p.supports(StoreCapability::ConditionalKv));
+    kv_versioned_contract_tests(&p, "no-cas").await;
+    kv_versioned_optional_contract_tests(&p, "no-cas").await;
+}

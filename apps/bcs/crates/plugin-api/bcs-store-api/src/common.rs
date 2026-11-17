@@ -19,7 +19,9 @@ pub struct Versioned<T> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StoreCapability {
     Kv,
-    /// Versioned KV operations; independent of ordinary Kv.
+    /// Versioned creation/read, unconditional deletion and TTL query; no CAS.
+    VersionedKv,
+    /// Strict exact-version update of a live value; requires VersionedKv.
     ConditionalKv,
     /// All versioned expiry modes and atomic version-checked TTL updates.
     VersionedKvTtl,
@@ -38,7 +40,8 @@ pub enum StoreCapability {
 }
 
 /// Metadata only; operation traits are independently injectable as trait objects.
-/// Kv and ConditionalKv are independent. VersionedKvTtl,
+/// Kv and VersionedKv are independent. ConditionalKv requires VersionedKv.
+/// VersionedKvTtl,
 /// VersionedKvConditionalDelete and MonotonicKv each require ConditionalKv.
 /// VersionedZSet requires ZSet; StreamGroups and StreamRecovery independently
 /// require Stream. Declarations are stable for the lifetime of this instance.

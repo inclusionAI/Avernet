@@ -49,7 +49,44 @@ pub async fn kv_store_plugin_contract_tests<P: KvStorePlugin + ?Sized>(p: &P, pr
     assert_eq!(p.get(&key).await.unwrap(), None);
 }
 
-/// Basic versioned operations, independently injectable without ordinary Kv.
+/// Basic versioned storage remains usable without exact CAS.
+pub async fn kv_versioned_contract_tests<P: VersionedKvStorePlugin + ?Sized>(p: &P, prefix: &str) {
+    assert!(p.supports(StoreCapability::VersionedKv));
+    let key = format!("{prefix}:versioned");
+    assert_eq!(p.get_versioned(&key).await.unwrap(), None);
+    assert_eq!(p.ttl(&key).await.unwrap(), KeyTtl::Missing);
+    let (a, b) = tokio::join!(
+        p.create_versioned(&key, &[0, 255], Expiry::Persistent),
+        p.create_versioned(&key, b"other", Expiry::Persistent)
+    );
+    let (a, b) = (a.unwrap(), b.unwrap());
+    let (version, value) = match (a, b) {
+        (WriteOutcome::Applied { version }, WriteOutcome::ConditionNotMet) => {
+            (version, vec![0, 255])
+        }
+        (WriteOutcome::ConditionNotMet, WriteOutcome::Applied { version }) => {
+            (version, b"other".to_vec())
+        }
+        other => panic!("versioned creation must have one winner: {other:?}"),
+    };
+    assert!(version.0 > 0);
+    assert_eq!(
+        p.get_versioned(&key).await.unwrap(),
+        Some(Versioned { version, value })
+    );
+    assert_eq!(p.ttl(&key).await.unwrap(), KeyTtl::Persistent);
+    assert!(p.delete(&key).await.unwrap());
+    assert!(!p.delete(&key).await.unwrap());
+    assert_eq!(p.get_versioned(&key).await.unwrap(), None);
+    assert_eq!(p.ttl(&key).await.unwrap(), KeyTtl::Missing);
+    applied(
+        p.create_versioned(&key, b"fresh", Expiry::Persistent)
+            .await
+            .unwrap(),
+    );
+}
+
+/// Strict exact-version updates, independently injectable without ordinary Kv.
 pub async fn kv_conditional_contract_tests<P: VersionedKvStorePlugin + ?Sized>(
     p: &P,
     prefix: &str,
@@ -142,16 +179,32 @@ pub async fn kv_versioned_optional_contract_tests<P: VersionedKvStorePlugin + ?S
             .await
             .unwrap(),
     );
+    if !p.supports(StoreCapability::ConditionalKv) {
+        for expiry in [
+            Expiry::Persistent,
+            Expiry::Preserve,
+            Expiry::After(Duration::from_secs(1)),
+        ] {
+            for target in [&key, &absent] {
+                assert_eq!(
+                    p.compare_and_set(target, version, b"bad", expiry).await,
+                    Err(StoreError::Unsupported(StoreCapability::ConditionalKv))
+                );
+            }
+        }
+    }
     if !p.supports(StoreCapability::VersionedKvTtl) {
         for expiry in [Expiry::Preserve, Expiry::After(Duration::from_secs(1))] {
             assert_eq!(
                 p.create_versioned(&absent, b"bad", expiry).await,
                 Err(StoreError::Unsupported(StoreCapability::VersionedKvTtl))
             );
-            assert_eq!(
-                p.compare_and_set(&key, version, b"bad", expiry).await,
-                Err(StoreError::Unsupported(StoreCapability::VersionedKvTtl))
-            );
+            if p.supports(StoreCapability::ConditionalKv) {
+                assert_eq!(
+                    p.compare_and_set(&key, version, b"bad", expiry).await,
+                    Err(StoreError::Unsupported(StoreCapability::VersionedKvTtl))
+                );
+            }
         }
         assert_eq!(
             p.expire_if_version(&key, version, Duration::from_secs(1))
