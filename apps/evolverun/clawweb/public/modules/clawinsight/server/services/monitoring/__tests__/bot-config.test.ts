@@ -81,11 +81,16 @@ it('bulk updates all owner pages, excludes other owners and refuses admin write 
   await expect(configureBots(configs, directory, refs, principal, { botRef: refs.encode(service, 'one'), enabled: false, version: 1 })).rejects.toMatchObject({ code: 'FORBIDDEN' });
   const result = await configureBots(configs, directory, refs, principal, { all: true, enabled: true });
   expect(result).toEqual({ updated: 61, failed: [] });
+  const created = await configs.findMany(Array.from({ length: 61 }, (_, i) => ({ ...target, botId: `bot-${i}` })));
+  expect(created.every(row => row?.diagnosisEnabled && row.recoveryEnabled
+    && JSON.parse(row.configJson).team_key === 'default'
+    && parseBotNotifications(row.configJson).owner && parseBotNotifications(row.configJson).group)).toBe(true);
   const [count] = await db.query<{ count: number }>('SELECT COUNT(*) AS count FROM ce_bot_diagnosis_recovery_config');
   expect(count.count).toBe(62);
   await expect(configureBots(configs, directory, refs, principal, { botRef: refs.encode({ ...target, botId: 'other' }, 'one'), enabled: true, version: 0 })).rejects.toMatchObject({ code: 'FORBIDDEN' });
   expect(await configureBots(configs, directory, refs, principal, { all: true, enabled: false })).toEqual({ updated: 61, failed: [] });
-  expect((await configs.find({ ...target, botId: 'bot-60' }))?.recoveryEnabled).toBe(false);
+  expect(await configs.find({ ...target, botId: 'bot-60' })).toMatchObject({ recoveryEnabled: false,
+    configJson: created[60]!.configJson });
   expect(await configs.find(service)).toMatchObject({ diagnosisEnabled: true, recoveryEnabled: true, version: 1 });
 });
 
@@ -154,7 +159,7 @@ it('reads legacy admission and exact Owner notification overrides until a new ro
   // The single UI action writes only the new table. Explicit false wins over the legacy allowlist.
   await configureBots(configs, directory, refs, principal, { botRef: refs.encode(target, 'one'), enabled: false, version: 0 });
   await expect(requireRecoveryEnabled(configs, recoveryRequest, app)).rejects.toMatchObject({ code: 'recovery_disabled' });
-  expect(await recoveryNotifications(configs, recoveryRequest.target, app)).toEqual(disabledNotifications);
+  expect(await recoveryNotifications(configs, recoveryRequest.target, app)).toEqual({ owner: true, group: null });
   expect((await recoveryConfigurations(configs, [target], app))[0]).toMatchObject({ recoveryEnabled: false, version: 1 });
   expect(await app.findByKey('session_recovery_allowlist')).toEqual(source);
 });
@@ -274,4 +279,11 @@ it('does not recover malformed team configuration through legacy resources', asy
   expect(await recoveryNotifications(configs, recoveryRequest.target, app)).toEqual(disabledNotifications);
   // Admission is independent of the availability of team resources.
   await expect(requireRecoveryEnabled(configs, recoveryRequest, app)).resolves.toBeUndefined();
+});
+
+it('does not retrofit enrollment defaults onto existing historical JSON', async () => {
+  await bot();
+  await configs.setSwitches(target, switches(0, false));
+  await configureBots(configs, directory, refs, principal, { botRef: refs.encode(target, 'one'), enabled: true, version: 1 });
+  expect(await configs.find(target)).toMatchObject({ diagnosisEnabled: true, recoveryEnabled: true, configJson: '{}', version: 2 });
 });

@@ -39,8 +39,13 @@ export async function configureBots(store: BotDiagnosisRecoveryConfigStore | und
   const write = async (bot: import('./directory-contracts.js').DirectoryBot, version: number) => {
     if (bot.ownerId !== principal.staffId) throw new MonitoringError('FORBIDDEN', '仅 Bot 所有者可以修改配置。');
     if (isServiceBot(bot)) throw new MonitoringError('FORBIDDEN', '服务 Bot 请联系平台设置诊断自愈。');
-    await store.setSwitches(bot, { diagnosisEnabled: value.enabled as boolean, recoveryEnabled: value.enabled as boolean,
-      expectedVersion: version, updatedBy: principal.staffId });
+    const switches = { diagnosisEnabled: value.enabled as boolean, recoveryEnabled: value.enabled as boolean,
+      expectedVersion: version, updatedBy: principal.staffId };
+    // Initialize only a new row. Existing settings remain administrator-owned, including historical empty JSON.
+    if (version === 0) await store.replaceConfiguration(bot, { ...switches, configJson: JSON.stringify({
+      team_key: 'default', notifications: { owner: { enabled: true }, group: { enabled: true } },
+    }) });
+    else await store.setSwitches(bot, switches);
     updated++;
   };
   if (!all) {
