@@ -5,6 +5,25 @@
 processes. All producers finish before `../e2e_coverage.sh` aggregates their
 runtime profiles. Unit-test profiles are outside this E2E report.
 
+## Deleted group recipients
+
+The default `stories` inventory runs
+[`queued_target_failure_story.py`](queued_target_failure_story.py) against the
+shared instrumented BCS and Provider mock. It creates a Group/Session, deletes
+one Provider Bot through HTTP, and sends Workbench messages with explicit
+mentions. Public delivery queries must retain the deleted recipient as Failed
+with `delivery_target_unavailable`, while the real scheduler completes healthy
+recipients. The journey covers deleted Send/Inject targets, idempotent replay,
+all reply targets failing, and absence of duplicate/failed Provider requests.
+Queue policy is paused through its CAS API for deterministic admission checks
+and restored during cleanup. No database edits or unit-test profiles supply
+coverage. Run it against a local-auth BCS and the existing Provider mock:
+
+```bash
+python3 apps/bcs/scripts/e2e-test/queued_target_failure_story.py \
+  --base-url "$BCS_API_BASE_URL" --mock-url "$BCS_E2E_MOCK_BASE_URL" --human 001
+```
+
 ## Provider SSE failure recovery
 
 `caller_identity_story.py` invokes `provider_sse_cases.py` after acquiring a
