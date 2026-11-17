@@ -22,7 +22,7 @@ async function ready() {
 const originalFetch = global.fetch;
 afterEach(() => { global.fetch = originalFetch; });
 beforeEach(() => {
-  global.fetch = jest.fn(async (path: string) => ({ ok: true, headers: { get: () => path.endsWith('.css') ? 'text/css' : 'application/javascript' } }));
+  global.fetch = jest.fn(async (path: string) => ({ ok: true, json: async () => ({ version: '9.8.7' }), headers: { get: () => path.endsWith('.css') ? 'text/css' : 'application/javascript' } }));
   jest.resetModules(); document.head.innerHTML = ''; delete global.taskPanel;
   request = require('@/services/backendApi/httpClient').backendRequest;
   request.mockResolvedValue(manifest() as never);
@@ -122,12 +122,13 @@ it('loads local unpublished assets in development without calling the backend ma
   } finally { process.env.NODE_ENV = previous; }
 });
 
-const developmentFallback = 'https://gw.alipayobjects.com/render/p/hitu_npm/@avernet-assets/task-panel/1.0.1/dist/index.umd.js';
+const developmentFallback = 'https://gw.alipayobjects.com/render/p/hitu_npm/@avernet-assets/task-panel/9.8.7/dist/index.umd.js';
 it.each(['offline', 'html', 'css', 'http'])('uses the complete remote release when local assets are unavailable: %s', async failure => {
   const previous = process.env.NODE_ENV;
   try {
     process.env.NODE_ENV = 'development';
     global.fetch = jest.fn(async (path: string) => {
+      if (path.includes('registry.npmjs.org')) return { ok: true, json: async () => ({ version: '9.8.7' }) };
       if (failure === 'offline') throw new TypeError('Failed to fetch');
       return { ok: failure !== 'http', headers: { get: () => failure === 'html' || (failure === 'css' && path.endsWith('.css')) ? 'text/html' : 'application/javascript' } };
     });
@@ -155,7 +156,7 @@ it('falls back after the local probe times out', async () => {
   jest.useFakeTimers();
   try {
     process.env.NODE_ENV = 'development';
-    global.fetch = jest.fn((_path: string, options: RequestInit) => new Promise((_resolve, reject) => {
+    global.fetch = jest.fn((path: string, options: RequestInit) => path.includes('registry.npmjs.org') ? Promise.resolve({ ok: true, json: async () => ({ version: '9.8.7' }) }) : new Promise((_resolve, reject) => {
       options.signal!.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
     }));
     const pending = load(); await tick();
