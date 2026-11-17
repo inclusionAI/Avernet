@@ -63,7 +63,7 @@ export function createMonitoringRecoveryTrigger(input: {
           event.businessDiagnosis?.trim() ? `业务诊断：${event.businessDiagnosis}` : "",
           event.systemDiagnosis?.trim() ? `系统诊断：${event.systemDiagnosis}` : "",
         ].filter(Boolean).join("\n");
-        const faultAtMs = event.engine === "OC" && event.occurredAt ? Date.parse(event.occurredAt) : NaN;
+        const faultAtMs = event.occurredAt ? Date.parse(event.occurredAt) : NaN;
         request = parseRequest({
           event_id: event.eventId, tc_fault_label: event.tcFaultLabel,
           target: recoveryTarget,

@@ -10,7 +10,10 @@ import { SessionRecoveryTaskRepository, type RecoveryArtifactStore } from "../..
 import { createSessionRecoveryRuntime } from "../index.js";
 
 it.each([
-  { engine: "TE", activeEngine: "teclaw", hint: { trace_id: "fault-trace" }, expected: { traceId: "fault-trace" } },
+  { engine: "TE", activeEngine: "teclaw", hint: { trace_id: "fault-trace", fault_at_ms: 1792107675000 },
+    expected: { traceId: "fault-trace", faultAtMs: 1792107675000 } },
+  { engine: "TE", activeEngine: "teclaw", hint: { trace_id: "fault-trace" },
+    expected: { traceId: "fault-trace", faultAtMs: expect.any(Number) } },
   { engine: "OC", activeEngine: "openclaw", hint: { fault_at_ms: 1792107675000 }, expected: { ocAssessmentEvidence: true, faultAtMs: 1792107675000 } },
 ] as const)("dispatches $engine immediately and passes the diagnostic hint to assessment reads", async ({ engine, activeEngine, hint, expected }) => {
   const db = new SqliteDatabase(new Database(":memory:"));
@@ -56,7 +59,7 @@ it.each([
       task: { phase: "assess", request: hint }, tools: { trajectory_read: true },
     });
     const read = (clientRequestId: string, currentTask = task) => runtime.agent!.trajectoryRead(currentTask, {
-      clientRequestId, purpose: "核实原会话故障轨迹", ...(engine === "TE" ? hint : {}), limit: 1,
+      clientRequestId, purpose: "核实原会话故障轨迹", ...(engine === "TE" ? { trace_id: hint.trace_id } : {}), limit: 1,
     });
     const first = await read("first-read");
     expect(first).toMatchObject({ status: "succeeded", result: { traces: [] } });
