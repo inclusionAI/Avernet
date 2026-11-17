@@ -110,12 +110,18 @@ impl Call {
         let Some(intent) = view.control.cancel.clone() else {
             return Ok(());
         };
-        // Already acted on with a result that needs no second attempt.
-        if !matches!(
-            view.execution.cancellation,
-            CancelObservation::NotSent | CancelObservation::Sending | CancelObservation::OutcomeUnknown
-        ) {
-            return Ok(());
+        match &view.execution.cancellation {
+            CancelObservation::NotSent | CancelObservation::Sending | CancelObservation::OutcomeUnknown => {}
+            // A definite result is recorded but the call is not ended: the
+            // holder that observed it died before reporting. Finish its work.
+            CancelObservation::ConfirmedCanceled => {
+                return self
+                    .end_with_error("canceled", "agent_canceled", FinalDispatchOutcome::Canceled, "cancel_confirmed")
+                    .await;
+            }
+            CancelObservation::AlreadyFinished { outcome } => return self.end_already_finished(*outcome).await,
+            // Accepted (wait for the agent) or refused: no second attempt.
+            CancelObservation::RequestAccepted | CancelObservation::Rejected { .. } => return Ok(()),
         }
         let Some(remote) = view.execution.remote.clone() else {
             return Ok(());

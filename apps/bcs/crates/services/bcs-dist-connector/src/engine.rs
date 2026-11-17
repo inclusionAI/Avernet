@@ -40,10 +40,16 @@ struct Inner {
     ports: ConnectorPorts,
     actors: Mutex<HashMap<Did, Actor>>,
     lease: Mutex<Option<MembershipLease>>,
+    /// Held calls whose actor died and whose resume has not succeeded yet.
+    orphans: Mutex<Vec<(Did, Holder)>>,
     draining: AtomicBool,
     ready: AtomicBool,
+    /// The main loop is running (it may be in the middle of a claim).
+    looping: AtomicBool,
     claims: AtomicU64,
     wake: Notify,
+    /// Interrupts the main loop's wait for hints when a drain starts.
+    stop: Notify,
 }
 
 /// One Connector process: reads the command feed, claims dispatches and runs
@@ -70,10 +76,13 @@ impl ConnectorEngine {
                 ports,
                 actors: Mutex::new(HashMap::new()),
                 lease: Mutex::new(None),
+                orphans: Mutex::new(Vec::new()),
                 draining: AtomicBool::new(false),
                 ready: AtomicBool::new(false),
+                looping: AtomicBool::new(false),
                 claims: AtomicU64::new(0),
                 wake: Notify::new(),
+                stop: Notify::new(),
             }),
         })
     }
@@ -81,6 +90,15 @@ impl ConnectorEngine {
     /// Runs until `drain` is called or the membership registration is lost.
     /// Actors of held calls keep running after it returns.
     pub async fn run(&self) -> Result<(), RuntimeError> {
+        self.inner.looping.store(true, Ordering::SeqCst);
+        let result = self.run_loop().await;
+        self.inner.ready.store(false, Ordering::SeqCst);
+        self.inner.looping.store(false, Ordering::SeqCst);
+        self.inner.wake.notify_waiters();
+        result
+    }
+
+    async fn run_loop(&self) -> Result<(), RuntimeError> {
         let inner = &self.inner;
         let config = inner.config.clone();
         self.register().await;
@@ -96,14 +114,14 @@ impl ConnectorEngine {
         inner.ready.store(true, Ordering::SeqCst);
         let mut renewed_at = Instant::now();
         let mut backoff = Backoff::new(&config);
-        let result = loop {
+        loop {
             if inner.draining.load(Ordering::SeqCst) {
-                break Ok(());
+                return Ok(());
             }
             if renewed_at.elapsed() >= config.membership_renew {
                 renewed_at = Instant::now();
                 if !self.renew().await {
-                    break Err(failed("membership_lost"));
+                    return Err(failed("membership_lost"));
                 }
             }
             self.reap().await;
@@ -113,7 +131,12 @@ impl ConnectorEngine {
                 let _ = tokio::time::timeout(config.receive_timeout, inner.wake.notified()).await;
                 continue;
             };
-            match feed.receive(free, config.receive_timeout).await {
+            // Dropping the wait is safe: the feed keeps its in-flight reads.
+            let received = tokio::select! {
+                received = feed.receive(free, config.receive_timeout) => received,
+                _ = inner.stop.notified() => continue,
+            };
+            match received {
                 Ok(deliveries) => {
                     backoff = Backoff::new(&config);
                     for delivery in deliveries {
@@ -129,9 +152,7 @@ impl ConnectorEngine {
                     backoff.wait().await;
                 }
             }
-        };
-        inner.ready.store(false, Ordering::SeqCst);
-        result
+        }
     }
 
     /// The claim decision for one hint, then the ack.
@@ -182,6 +203,8 @@ impl ConnectorEngine {
         }
     }
 
+    /// Resumes a held call that has no actor. A failure is remembered and
+    /// retried by the main loop, so the call is never silently left behind.
     async fn resume(&self, did: Did, previous: Holder) {
         // Only after the old actor is gone: stop and join it first.
         let old = lock(&self.inner.actors).remove(&did);
@@ -194,10 +217,13 @@ impl ConnectorEngine {
             previous,
             request_id: self.claim_request_id(&did),
         };
-        match self.inner.ports.queue.resume_owned(request).await {
+        match self.inner.ports.queue.resume_owned(request.clone()).await {
             Ok(ClaimOutcome::Acquired(held)) => self.spawn(held),
             Ok(_) => {}
-            Err(error) => tracing::warn!(did = %did.0, ?error, "resume failed; a later hint retries"),
+            Err(error) => {
+                tracing::warn!(did = %did.0, ?error, "resume failed; retrying");
+                lock(&self.inner.orphans).push((did, request.previous));
+            }
         }
     }
 
@@ -247,8 +273,14 @@ impl ConnectorEngine {
                 false
             });
         }
-        for (did, holder) in crashed {
+        for (did, holder) in &crashed {
             tracing::error!(did = %did.0, "call actor died; resuming under a new generation");
+            let _ = holder;
+        }
+        // Earlier failed resumes are tried again together with the new ones.
+        let mut pending = std::mem::take(&mut *lock(&self.inner.orphans));
+        pending.extend(crashed);
+        for (did, holder) in pending {
             self.resume(did, holder).await;
         }
     }
@@ -313,6 +345,9 @@ impl DistRuntimeControlPort for ConnectorEngine {
                 (active + 1, pending + u64::from(unsettled))
             })
         };
+        // A held call waiting for its resume is unsettled work too.
+        let orphans = lock(&inner.orphans).len() as u64;
+        let (active, pending) = (active + orphans, pending + orphans);
         Ok(RuntimeSnapshot {
             instance: inner.config.me.clone(),
             ready: inner.ready.load(Ordering::SeqCst) && !inner.draining.load(Ordering::SeqCst),
@@ -327,6 +362,7 @@ impl DistRuntimeControlPort for ConnectorEngine {
     async fn drain(&self, grace: Duration) -> Result<DrainOutcome, RuntimeError> {
         let inner = &self.inner;
         inner.draining.store(true, Ordering::SeqCst);
+        inner.stop.notify_one();
         inner.wake.notify_waiters();
         let lease = lock(&inner.lease).clone();
         if let Some(lease) = lease {
@@ -335,15 +371,23 @@ impl DistRuntimeControlPort for ConnectorEngine {
             }
         }
         let deadline = Instant::now() + grace;
-        while self.live() > 0 && Instant::now() < deadline {
-            let _ = tokio::time::timeout_at(deadline, inner.wake.notified()).await;
+        // First the main loop must leave its iteration: a claim in flight may
+        // still take a call. Then the held calls get the rest of the grace.
+        // Short waits instead of one long one: a wake-up can be missed.
+        let step = Duration::from_millis(20);
+        while (inner.looping.load(Ordering::SeqCst) || self.live() > 0) && Instant::now() < deadline {
+            let _ = tokio::time::timeout(step, inner.wake.notified()).await;
         }
         let leftover: Vec<(Did, Holder)> = lock(&inner.actors)
             .iter()
             .filter(|(_, actor)| !actor.task.is_finished())
             .map(|(did, actor)| (did.clone(), actor.holder.clone()))
             .collect();
-        if leftover.is_empty() {
+        let leftover: Vec<(Did, Holder)> = leftover
+            .into_iter()
+            .chain(lock(&inner.orphans).iter().cloned())
+            .collect();
+        if leftover.is_empty() && !inner.looping.load(Ordering::SeqCst) {
             return Ok(DrainOutcome::Drained);
         }
         for (did, holder) in &leftover {

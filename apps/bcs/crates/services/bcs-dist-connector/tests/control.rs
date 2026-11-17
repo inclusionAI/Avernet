@@ -45,9 +45,8 @@ async fn a_reply_continues_the_same_call_on_the_same_remote_task() {
     let call = rig.agent.calls().into_iter().find(|c| c.starts_with("input")).unwrap();
     assert!(call.starts_with(&format!("input {DID}:in:1 task=rt-77c2 context=Some(\"ctx-91\")")), "{call}");
     assert!(call.contains(r#"{"parts":[{"text":"A"}]}"#), "{call}");
-    assert!(call.ends_with("phase=accepted"), "{call}");
+    assert!(call.ends_with("phase=accepted cancel=not_sent input_sending=1"), "intent was durable before the send: {call}");
     let doc = rig.doc().await;
-    assert_eq!(doc["connector"]["input_sending"], 1, "intent was durable before the send");
     assert_eq!(doc["control"]["pending_input"].as_array().unwrap().len(), 1, "removal is the Worker's job");
     assert_eq!(doc["execution"]["holder"]["epoch"], 1, "the same call, the same holder");
 
@@ -162,9 +161,7 @@ async fn a_cancel_is_carried_out_and_confirmed() {
     assert_eq!(doc["execution"]["cancellation"]["kind"], "confirmed_canceled");
     let reported = rig.inbox_events().await;
     assert_eq!(reported[0].1.payload, Payload::Inline(json!({"state": "canceled", "code": "agent_canceled"})));
-    // The cancel intent was recorded before the network call.
-    let writes: Vec<String> = rig.store.calls().into_iter().filter(|c| c.starts_with("json.mutate")).collect();
-    assert!(writes.len() >= 5, "claim, sending, accepted, cancel sending, observed, ended: {writes:?}");
+    assert!(call.contains("cancel=sending"), "the cancel intent was durable before the network call: {call}");
     until("the actor is gone", || async { running.active().await == 0 }).await;
     assert_eq!(rig.agent.count("cancel"), 1);
 }
@@ -196,12 +193,11 @@ async fn a_cancel_with_an_unknown_outcome_is_tried_again() {
     rig.agent.on_cancel(CancelOutcome::OutcomeUnknown { code: "timeout".into() });
     rig.agent.on_cancel(CancelOutcome::ConfirmedCanceled);
     rig.worker.cancel().await;
-    until("a pending cancel is visible", || async {
-        running.pending_effects().await == 1 || rig.phase().await == "ended"
-    })
-    .await;
     until("the call ends", || async { rig.phase().await == "ended" }).await;
     assert_eq!(rig.agent.count("cancel"), 2);
+    let second = rig.agent.calls().into_iter().filter(|c| c.starts_with("cancel")).nth(1).unwrap();
+    assert!(second.contains("cancel=sending"), "{second}");
+    let _ = running;
     assert_eq!(rig.doc().await["execution"]["outcome"], "canceled");
 }
 
@@ -286,4 +282,100 @@ async fn a_renotification_makes_the_holder_look_at_once() {
     rig.worker.cancel().await;
     rig.worker.notify().await; // the Worker re-posts the did
     until("the call ends", || async { rig.phase().await == "ended" }).await;
+}
+
+#[tokio::test]
+async fn a_waiting_call_notices_when_the_agent_moves_on_without_a_reply() {
+    // auth-required: the user signs in out of band, the agent resumes and
+    // completes. No reply ever flows through the Connector.
+    let rig = Rig::new();
+    let (_running, events) = accepted_call(&rig).await;
+    rig.agent.on_task(found(TaskStatus::AuthRequired, json!({"state": "auth_required"})));
+    events
+        .send(event(
+            AgentEventKind::AuthRequired { interaction: InteractionId("x".into()) },
+            json!({"state": "auth_required"}),
+        ))
+        .unwrap();
+    drop(events);
+    until("the question is reported", || async { rig.kinds().await == vec!["auth_required"] }).await;
+    settle().await;
+    assert_eq!(rig.kinds().await, vec!["auth_required"], "the same question is not reported again");
+    assert!(rig.agent.count("query_task") >= 2, "the waiting call keeps looking at the task");
+
+    rig.agent.tasks.lock().unwrap().clear();
+    rig.agent.on_task(found(TaskStatus::Completed, json!({"artifacts": []})));
+    until("the call ends", || async { rig.phase().await == "ended" }).await;
+    assert_eq!(rig.kinds().await, vec!["auth_required", "final"]);
+    assert_eq!(rig.doc().await["execution"]["outcome"], "completed");
+    // The state word comes from the task status even if the snapshot lacks it.
+    assert_eq!(state_of(&rig.inbox_events().await[1].1), "completed");
+}
+
+#[tokio::test]
+async fn a_cancel_accepted_while_a_question_is_open_is_followed_to_the_end() {
+    let rig = Rig::new();
+    let (_running, events) = accepted_call(&rig).await;
+    rig.agent.on_task(found(TaskStatus::InputRequired, json!({"state": "input_required"})));
+    events.send(input_required()).unwrap();
+    drop(events);
+    until("the question is reported", || async { rig.kinds().await.len() == 1 }).await;
+    rig.agent.on_cancel(CancelOutcome::RequestAccepted);
+    rig.worker.cancel().await;
+    until("observed", || async {
+        rig.doc().await["execution"]["cancellation"]["kind"] == "request_accepted"
+    })
+    .await;
+    assert_eq!(rig.phase().await, "accepted");
+    // The agent cancels the task a little later; there is no stream to say so.
+    rig.agent.tasks.lock().unwrap().clear();
+    rig.agent.on_task(found(TaskStatus::Canceled, json!({"code": "agent_canceled"})));
+    until("the call ends", || async { rig.phase().await == "ended" }).await;
+    assert_eq!(rig.doc().await["execution"]["outcome"], "canceled");
+}
+
+#[tokio::test]
+async fn a_call_that_cannot_be_observed_still_gets_its_cancel() {
+    // The agent offers neither subscribe nor a task query, but it can cancel.
+    let rig = Rig::new();
+    let mut spec = dispatch_spec(&did());
+    spec.capabilities.subscribe = false;
+    spec.capabilities.query_by_task = false;
+    rig.worker.create_spec(spec).await;
+    rig.worker.notify().await;
+    rig.agent.on_start(Reply::Accepted);
+    let running = rig.start();
+    until("held but blind", || async { running.pending_effects().await == 1 }).await;
+    assert_eq!(rig.phase().await, "accepted");
+
+    rig.agent.on_cancel(CancelOutcome::ConfirmedCanceled);
+    rig.worker.cancel().await;
+    until("the call ends", || async { rig.phase().await == "ended" }).await;
+    assert_eq!(rig.agent.count("cancel"), 1, "the cancel is sent, not just recorded as unknown");
+    assert_eq!(rig.doc().await["execution"]["cancellation"]["kind"], "confirmed_canceled");
+    assert_eq!(rig.doc().await["execution"]["outcome"], "canceled");
+}
+
+#[tokio::test]
+async fn a_recorded_cancel_result_is_completed_by_the_next_holder() {
+    // The former holder recorded "confirmed canceled" and died before it
+    // reported the terminal event; the agent no longer knows the task.
+    let mut rig = Rig::new();
+    rig.worker.create().await;
+    let mut old = acquire(&queue(&rig.store), &instance("conn-01")).await;
+    old.begin_send(start_op()).await.unwrap();
+    old.record_acceptance(accepted(start_op())).await.unwrap();
+    rig.worker.cancel().await;
+    old.record_cancel(CancelObservation::Sending).await.unwrap();
+    old.record_cancel(CancelObservation::ConfirmedCanceled).await.unwrap();
+
+    rig.membership = Arc::new(FixedLiveness(Liveness::Dead));
+    rig.agent.on_task(bcs_service_api::port::dist_agent::QueryOutcome::NotFound);
+    rig.worker.notify().await;
+    let _running = rig.start();
+    until("the call ends", || async { rig.phase().await == "ended" }).await;
+    assert_eq!(rig.agent.count("cancel"), 0, "the cancel is not sent a second time");
+    assert_eq!(rig.doc().await["execution"]["outcome"], "canceled");
+    let reported = rig.inbox_events().await;
+    assert_eq!(reported.last().unwrap().1.payload, Payload::Inline(json!({"state": "canceled", "code": "agent_canceled"})));
 }

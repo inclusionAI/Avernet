@@ -43,6 +43,8 @@ pub enum Reply {
     Rejected(&'static str),
     NotSent,
     Unknown,
+    /// The agent client itself fails hard (kills the actor).
+    Panic,
 }
 
 #[derive(Default)]
@@ -112,11 +114,20 @@ impl ScriptedAgent {
         tx
     }
     async fn log(&self, what: String) {
-        let phase = match &self.store {
-            Some(store) => stored(store).await.0["execution"]["phase"].as_str().unwrap_or("?").to_owned(),
+        // What is durable in the dispatch at the moment the agent is called.
+        let durable = match &self.store {
+            Some(store) => {
+                let doc = stored(store).await.0;
+                format!(
+                    "phase={} cancel={} input_sending={}",
+                    doc["execution"]["phase"].as_str().unwrap_or("?"),
+                    doc["execution"]["cancellation"]["kind"].as_str().unwrap_or("?"),
+                    doc["connector"]["input_sending"]
+                )
+            }
             None => "?".to_owned(),
         };
-        self.calls.lock().unwrap().push(format!("{what} phase={phase}"));
+        self.calls.lock().unwrap().push(format!("{what} {durable}"));
     }
     fn outcome(reply: Option<Reply>) -> SendOutcome {
         match reply {
@@ -131,6 +142,7 @@ impl ScriptedAgent {
             Some(Reply::Completed(result)) => SendOutcome::Completed { result },
             Some(Reply::Rejected(code)) => SendOutcome::Rejected { code: code.into() },
             Some(Reply::NotSent) => SendOutcome::NotSent { code: "connect_refused".into() },
+            Some(Reply::Panic) => panic!("scripted agent client failure"),
             Some(Reply::Unknown) | None => SendOutcome::OutcomeUnknown { code: "timeout".into() },
         }
     }
