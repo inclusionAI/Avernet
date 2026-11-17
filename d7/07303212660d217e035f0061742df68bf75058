@@ -1,0 +1,20 @@
+apps/frontend-nextgen/assets/task-panel/README.md
+  h_5b2ec9c12c4d18 10
+apps/frontend-nextgen/assets/task-panel/src/controller/createTaskPanelController.ts
+  h_5b2ec9c12c4d18 113,115-116
+apps/frontend-nextgen/assets/task-panel/src/panel/v2/TaskPanelV2.tsx
+  h_5b2ec9c12c4d18 14-15,54-61
+apps/frontend-nextgen/assets/task-panel/test/panel/v2/conversationNodeSelection.test.tsx
+  h_5b2ec9c12c4d18 1-97
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d707303212660d217e035f0061742df68bf75058",
+  "prompts": {},
+  "humans": {
+    "h_5b2ec9c12c4d18": {
+      "author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}
