@@ -189,7 +189,7 @@ def test_end_to_end_commission_flow(deploy_commission, tmp_path):
     l4_context_operate = injector.get(ContextServiceProtocol)
     l5_open_method = injector.get(OpenMethodOpsServiceProtocol)
 
-    # 2. 先创建 L4 Collet、独立根 Task 和初始 Event,不实例化产品。
+    # 2. 先创建 L4 Collet
     collet = _create_commission_collet(l4_context_operate)
 
     # 3. 调用 L6 Instantiate，关联已有 Collet，并初始化 MethodBinding 等引用。
@@ -462,7 +462,7 @@ def _discover_opportunity(store, axes, l4_collet, working_bot):
     collet_id_1 = l4_collet.collet_id
 
     # Step1：由 Bot 自己调用注入的 L5 Open 服务查询机会，比如bot自己通过skill查询。
-    # TODO(fixed): 每个bot skill == 这里方法名突出一下bot通过skill“发现机会”、“提交申请”
+    # TODO: 每个bot skill         (fixed)这里方法名突出一下bot通过skill“发现机会”、“提交申请”
     [opportunity] = working_bot.query_opportunities_by_skill()
 
     # Step2：由 Bot 自己调用注入的 L5 Open 服务提交申请
