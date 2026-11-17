@@ -15,6 +15,7 @@ import {
   updateGroup,
 } from '@/services/backendApi/collaboration/collaborationGroupController';
 import { listGroupSessions } from '@/services/backendApi/collaboration/sessionController';
+import { resolveGroupMembership } from './groupMembership';
 import { buildCreateGroupBody, type CreateGroupInput } from './groupCreateRequest';
 import {
   createGroupViaExecute as execCreateGroupViaExecute,
@@ -60,6 +61,7 @@ function matchSearch(text: string, haystacks: string[]): boolean {
 }
 
 export const groupService = {
+  resolveGroupMembership,
   async loadGroups(
     identity: IdentityView,
     opts: { q?: string; membership?: 'direct' | 'session_only' } = {},

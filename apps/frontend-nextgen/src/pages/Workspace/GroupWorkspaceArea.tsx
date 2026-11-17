@@ -26,6 +26,7 @@ import { useSessionManagement } from './hooks/useSessionManagement';
 export function GroupWorkspaceArea({
   scope,
   sessionOnly = false,
+  sessionLocationRequest,
   userAvatarUrl,
   userIdentityId,
   userIdentityName,
@@ -49,7 +50,9 @@ export function GroupWorkspaceArea({
   // 右缘域面板（管理/历史/资源）全收出口：面板形态与 chat 同构（内联副屏），与悬浮副屏互斥——
   // 关合/让位回开统一经 useGroupChatHeaderPanels 内的 sidePanePanelMutex 编排。
   const closeHeaderPanels = useCallback(() => setActivePanel('none'), []);
-  const sessionLocation = useGroupSessionLocation(ws.selectedGroup, sessions.selectedSession, onOpenMobileList);
+  const sessionLocation = useGroupSessionLocation(
+    ws.selectedGroup, sessions.selectedSession, onOpenMobileList, sessionLocationRequest, Boolean(ws.selectedGroupError),
+  );
   // 头部六图标域（收藏/历史消息/副屏）：搜索口径与消息区渲染同源（filterVisibleGroupMessages），
   // 保证历史面板每条结果都能在消息区定位到（useGroupChatDisplayStatus 同款同源约定）。
   const headerPanels = useGroupChatHeaderPanels({

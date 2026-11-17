@@ -15,6 +15,14 @@ export interface WorkspaceRouteState {
   membership?: WorkspaceRouteMembership;
 }
 
+/** 已完成路由回填的显式会话入口；详情验证完成后只执行一次侧栏 UI 定位。 */
+export interface WorkspaceSessionLocationRequest {
+  request: number;
+  identityId: string;
+  groupId: string;
+  sessionId: string;
+}
+
 export interface WorkspaceRouteProjection {
   currentIdentityId?: string | null;
   groupId?: string | null;

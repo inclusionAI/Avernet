@@ -199,6 +199,8 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
           searchMarked={searchMarked}
           showFilter={showFilter}
           supportsOrigin={isManaged}
+          // 协作 Bot 的他人发起筛选待修复，暂时仅禁用该入口。
+          othersDisabledReason={section === 'team' ? '功能修复中，暂不可用' : undefined}
           supportsFavorites={canFavorite}
           supportsArchives={supportsArchives}
           supportsCollab={supportsCollab}

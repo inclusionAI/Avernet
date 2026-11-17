@@ -1,10 +1,10 @@
 import type { IdentityView } from '@/domain/collaboration';
-import { parseWorkspaceRoute, serializeWorkspaceRoutePreserving } from '@/domain/workspaceRoute';
+import { parseWorkspaceRoute, serializeWorkspaceRoutePreserving, type WorkspaceSessionLocationRequest } from '@/domain/workspaceRoute';
 import { sessionService } from '@/services/workspace/sessionService';
 import { applyResolvedGroupSession, hydrateWorkspaceRoute } from '@/services/workspace/workspaceRouteService';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { history, useSearchParams } from '@umijs/max';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 export type WorkspaceView = 'chat' | 'group';
 
@@ -15,6 +15,8 @@ export interface UseWorkspacePageResult {
   identities: IdentityView[];
   /** 当前 location.search 已完成 URL → Store 回填；完成前禁止 Store 反向覆盖深链。 */
   urlHydrated: boolean;
+  sessionLocationRequest?: WorkspaceSessionLocationRequest;
+  hydrationError?: string;
 }
 
 /**
@@ -35,36 +37,73 @@ export function useWorkspacePage(): UseWorkspacePageResult {
   const routeKey = searchParams.toString();
   const route = useMemo(() => parseWorkspaceRoute(routeKey), [routeKey]);
   const [hydratedRouteKey, setHydratedRouteKey] = useState<string | null>(null);
-  const urlHydrated = hydratedRouteKey === routeKey;
+  const appliedRouteKey = useRef<string | null>(null);
+  const projectedRouteKey = useRef<string | null>(null);
+  // 自身投影已经对应当前 Store，无需卸载工作区再回填（否则会重连会话历史）。
+  const urlHydrated = hydratedRouteKey === routeKey || projectedRouteKey.current === routeKey;
+  const requestSequence = useRef(0);
+  const [sessionLocationRequest, setSessionLocationRequest] = useState<WorkspaceSessionLocationRequest>();
 
-  // 每次 location.search 变化都重新回填，支持浏览器前进/后退和同路由 query 导航。
+  const [hydrationFailure, setHydrationFailure] = useState<{ key: string; message: string }>();
+  const hydrationError = !urlHydrated && hydrationFailure?.key === routeKey ? hydrationFailure.message : undefined;
   useEffect(() => {
+    setHydrationFailure(undefined);
+    if (urlHydrated) return;
+    const timer = setTimeout(() => setHydrationFailure({ key: routeKey,
+      message: '协作区初始化超时，请确认当前登录账号与链接指定身份一致，或刷新页面后重试。' }), 10_000);
+    return () => clearTimeout(timer);
+  }, [routeKey, urlHydrated]);
+
+  // 外部 query 导航才产生定位意图；自身 Store → URL 投影不得清筛选/重放定位。
+  useEffect(() => {
+    if (appliedRouteKey.current === routeKey) return;
+    if (projectedRouteKey.current === routeKey) {
+      projectedRouteKey.current = null;
+      appliedRouteKey.current = routeKey;
+      setHydratedRouteKey(routeKey);
+      return;
+    }
+    projectedRouteKey.current = null;
+    setSessionLocationRequest(undefined);
     let cancelled = false;
     const result = hydrateWorkspaceRoute(route);
     if (result.status === 'waiting_for_identities') return;
-    if (!result.unresolvedGroupSessionId) {
+    const identityId = useWorkspaceStore.getState().activeIdentityId;
+    const finish = () => {
+      const current = useWorkspaceStore.getState();
+      if (route.sessionId && current.activeIdentityId === identityId && identityId
+        && current.selectedGroupId && current.selectedSessionId === route.sessionId) {
+        setSessionLocationRequest({ request: ++requestSequence.current, identityId,
+          groupId: current.selectedGroupId, sessionId: route.sessionId });
+      }
+      appliedRouteKey.current = routeKey;
       setHydratedRouteKey(routeKey);
+    };
+    if (!result.unresolvedGroupSessionId) {
+      finish();
       return;
     }
 
     const sessionId = result.unresolvedGroupSessionId;
     void sessionService.getSessionDetail(sessionId).then((detail) => {
       if (cancelled) return;
-      if (detail.ok) applyResolvedGroupSession(detail.data.groupId, sessionId);
-      setHydratedRouteKey(routeKey);
+      if (detail.ok && useWorkspaceStore.getState().activeIdentityId === identityId) {
+        applyResolvedGroupSession(detail.data.groupId, sessionId);
+      }
+      finish();
     });
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [identities, route, routeKey]);
 
   const setView = useCallback((next: WorkspaceView) => {
     useWorkspaceStore.getState().setView(next);
   }, []);
 
-  // 群聊 Store → URL 投影（对话页投影走 useConversationUrlSync）。
+  // 独立协作群页的唯一 Store → URL 投影（不依赖旧混合页的 view 位）。
   useEffect(() => {
-    if (!urlHydrated || view !== 'group') return;
+    if (!urlHydrated) return;
+    setSessionLocationRequest((request) => request && (request.identityId !== activeIdentityId
+      || request.groupId !== selectedGroupId || request.sessionId !== selectedSessionId) ? undefined : request);
     const next = serializeWorkspaceRoutePreserving(window.location.search, {
       currentIdentityId: activeIdentityId,
       groupId: selectedGroupId,
@@ -72,11 +111,12 @@ export function useWorkspacePage(): UseWorkspacePageResult {
       membership,
     });
     if (next === routeKey) return;
+    projectedRouteKey.current = next;
     history.replace(`${window.location.pathname}?${next}${window.location.hash}`);
-  }, [activeIdentityId, membership, routeKey, selectedGroupId, selectedSessionId, urlHydrated, view]);
+  }, [activeIdentityId, membership, routeKey, selectedGroupId, selectedSessionId, urlHydrated]);
 
   return useMemo(
-    () => ({ view, setView, activeIdentityId, identities, urlHydrated }),
-    [view, setView, activeIdentityId, identities, urlHydrated],
+    () => ({ view, setView, activeIdentityId, identities, urlHydrated, sessionLocationRequest, hydrationError }),
+    [view, setView, activeIdentityId, identities, urlHydrated, sessionLocationRequest, hydrationError],
   );
 }
