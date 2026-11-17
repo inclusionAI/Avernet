@@ -27,6 +27,7 @@ _SPACE_SKILL_PUBLICATION = f"{_SPACE_SKILL_BASE}/publications"
 #: what ``gateway/core/paths/_pattern.py`` exists to prevent. Change ``REFUSED``
 #: here and that test is the one that will fail.
 ADMISSION: dict[tuple[str, str], AdmissionMode] = {
+    ("PATCH", "/openapi/v1/bots/{bot_id}/caller-instances/{caller_user_id}/token-expiry"): AdmissionMode.REFUSED,
     ("POST", "/openapi/v1/bots/service-envs/{bot_uuid}/env-teardown"): AdmissionMode.OPEN,
     ("GET", "/openapi/v1/bots/service-envs/env-publish/{baas_publish_id}/progress"): AdmissionMode.OPEN,
     (

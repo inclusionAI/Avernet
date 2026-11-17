@@ -5,6 +5,7 @@
 ```yaml
 purpose: Resolve and install authenticated Caller identity without changing Owner policy.
 provides:
+  - CallerExpiryCorrectionService
   - ExpiryAwareCallerRuntimeUpdater
   - CallerIdentityService
   - CallerIamTokenService
@@ -199,3 +200,25 @@ and forwards non-default sources to the Caller service. The default `iam`
 path omits that optional keyword when calling older IAM-only implementations.
 HTTP regression coverage must include the real orchestrator and Caller service;
 replacing the entire injected boundary can hide missing selector propagation.
+
+### Administrative expiry correction
+
+`PATCH /openapi/v1/bots/{bot_id}/caller-instances/{caller_user_id}/token-expiry`
+is non-delegable and limited to a verified human in configured `admin.super_admin`.
+The required `user_id` query must match that actor; the path's `caller_user_id`
+is the independently addressed target. A request names the exact immutable
+`entity_id`, current `binding_id`, aware `expires_at`, an explicitly supplied
+nullable `expected_expires_at`, and bounded audit `reason`. Missing expected value
+and naive dates are invalid. Past expiry is allowed to exercise scheduled refresh.
+Only an existing serving dedicated Caller of a non-Teclaw Caller-mode service is
+eligible. This endpoint never signs or installs a token, provisions a container,
+or changes cron jobs. The normal expiry installation APIs retain their monotonic
+future-expiry contract.
+
+The repository shares IAM/ASC's exact row lock, refreshes the locked snapshot,
+and compares the expected UTC expiry before changing it. A concurrent refresh,
+replaced binding, missing instance or non-serving status rejects correction.
+The response includes instance id, binding and previous/new UTC expiry. The
+`caller_expiry_correction_requested/succeeded/failed` HTTP events and
+`caller_expiry_corrected` audit event record safe actor/target/expiry coordinates;
+credentials, request headers and raw infrastructure exception messages are omitted.
