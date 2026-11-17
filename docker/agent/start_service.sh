@@ -58,6 +58,7 @@ CLIENT_ID=""
 OWNER_ID=""
 BOT_ID=""
 STAGE=""
+DEFAULT_TAG=""
 ENGINE="openclaw"
 ADAPTOR_PORT="${ADAPTOR_PORT:-20003}"
 
@@ -80,6 +81,9 @@ while [[ $# -gt 0 ]]; do
         --stage)
             [ $# -ge 2 ] || { warn "--stage value missing"; shift; continue; }
             STAGE="$2"; shift 2 ;;
+        --default_tag)
+            [ $# -ge 2 ] || { warn "--default_tag value missing"; shift; continue; }
+            DEFAULT_TAG="$2"; shift 2 ;;
         --engine)
             [ $# -ge 2 ] || { warn "--engine value missing"; shift; continue; }
             ENGINE="$2"; shift 2 ;;
@@ -103,6 +107,7 @@ CLIENT_ID=$CLIENT_ID
 OWNER_ID=$OWNER_ID
 BOT_ID=$BOT_ID
 STAGE=$STAGE
+DEFAULT_TAG=$DEFAULT_TAG
 ENGINE=$ENGINE
 EOF
 chmod 600 "$CREDENTIALS_FILE"

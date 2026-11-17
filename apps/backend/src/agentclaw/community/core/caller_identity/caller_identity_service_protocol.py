@@ -129,6 +129,7 @@ class CallerIdentityServiceProtocol(Protocol):
         is_test_exchange: bool = False,
         session_key: str | None = None,
         caller_token: CallerToken | None = None,
+        force_runtime_refresh: bool = False,
     ) -> None: ...
 
 

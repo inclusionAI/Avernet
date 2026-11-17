@@ -44,7 +44,7 @@ async def test_publish_eval_env_handler(resource_services):
     assert result.data.quality_task_id == 1
     service.eval_publish.assert_awaited_once_with(
         publish_id=7, operator="actor", biz_id=result.data.quality_task_uuid,
-        device_count=1, resource_spec=None,
+        default_tag="eval", device_count=1, resource_spec=None,
     )
     task = quality_tasks.get_task_by_uuid(result.data.quality_task_uuid)
     assert task is not None
@@ -96,7 +96,7 @@ async def test_publish_eval_env_device_count_forwarded(resource_services):
     assert result.code == 202000
     service.eval_publish.assert_awaited_once_with(
         publish_id=7, operator="actor", biz_id=result.data.quality_task_uuid,
-        device_count=3, resource_spec=None,
+        default_tag="eval", device_count=3, resource_spec=None,
     )
     assert result.data.quality_task_id == 1
 
@@ -298,7 +298,7 @@ async def test_publish_resource_spec_forwarded(resource_services, disk):
     assert result.code == 202000
     service.eval_publish.assert_awaited_once_with(
         publish_id=7, operator="actor", biz_id=result.data.quality_task_uuid,
-        device_count=1,
+        default_tag="eval", device_count=1,
         resource_spec=ResourceSpecification(cpu=4, memory=8, disk=disk),
     )
     task = quality_tasks.get_task_by_uuid(result.data.quality_task_uuid)

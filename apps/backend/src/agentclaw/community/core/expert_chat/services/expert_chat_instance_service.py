@@ -425,6 +425,7 @@ class ExpertChatInstanceService(ExpertChatBotLookupMixin, ExpertChatInstanceServ
                             owner_id=owner_id,
                             publish_id=service_bot_publish_id,
                             binding_id=binding_id,
+                            force_runtime_refresh=True,
                         )
                     else:
                         logger.warning(
@@ -780,6 +781,7 @@ class ExpertChatInstanceService(ExpertChatBotLookupMixin, ExpertChatInstanceServ
         owner_id: str,
         publish_id: int,
         binding_id: Optional[int] = None,
+        force_runtime_refresh: bool = False,
     ) -> None:
         """Exchange and install Caller credential for the container.
 
@@ -793,7 +795,13 @@ class ExpertChatInstanceService(ExpertChatBotLookupMixin, ExpertChatInstanceServ
             owner_id: The bot owner's ID.
             publish_id: The service bot publish record ID.
             binding_id: The device binding ID (optional).
+            force_runtime_refresh: Reinstall after provisioning even if expiry is not later.
         """
+        exchange_kwargs = {"force_runtime_refresh": True} if force_runtime_refresh else {}
+        logger.info(
+            "[ExpertChatInstance] Caller identity exchange requested: bot=%s owner=%s user=%s binding_id=%s force_runtime_refresh=%s",
+            bot_id, owner_id, user_id, binding_id, force_runtime_refresh,
+        )
         try:
             await asyncio.to_thread(
                 self._caller_identity.exchange_caller_identity,
@@ -808,14 +816,15 @@ class ExpertChatInstanceService(ExpertChatBotLookupMixin, ExpertChatInstanceServ
                 entity_id=owner_id,
                 binding_id=binding_id,
                 is_test_exchange=False,
+                **exchange_kwargs,
             )
             logger.info(
-                "[ExpertChatInstance] Caller identity exchange succeeded: bot=%s owner=%s user=%s",
-                bot_id, owner_id, user_id,
+                "[ExpertChatInstance] Caller identity exchange succeeded: bot=%s owner=%s user=%s binding_id=%s force_runtime_refresh=%s",
+                bot_id, owner_id, user_id, binding_id, force_runtime_refresh,
             )
         except Exception as e:
             # Log error but do not interrupt container startup
             logger.error(
-                "[ExpertChatInstance] Caller identity exchange failed: bot=%s owner=%s user=%s error=%s",
-                bot_id, owner_id, user_id, e,
+                "[ExpertChatInstance] Caller identity exchange failed: bot=%s owner=%s user=%s binding_id=%s force_runtime_refresh=%s error_type=%s",
+                bot_id, owner_id, user_id, binding_id, force_runtime_refresh, type(e).__name__,
             )

@@ -97,6 +97,7 @@ async def publish_eval_env(
         publish_id=publication_id,
         operator=operator,
         biz_id=biz_id,
+        default_tag="eval",
         device_count=device_count,
         resource_spec=resource_spec,
     )
