@@ -167,3 +167,11 @@ async fn basic_stream_harness_accepts_unavailable_recovery_evidence() {
     stream_store_plugin_contract_tests(&p, "basic-stream").await;
     stream_group_contract_tests(&p, "basic-groups").await;
 }
+
+#[tokio::test]
+#[should_panic(expected = "unrelated reads must not starve ready streams")]
+async fn harness_rejects_starvation_from_unrelated_reads() {
+    let mut p = Model::default();
+    p.broken_stream_fairness = true;
+    stream_store_plugin_contract_tests(&p, "starved").await;
+}

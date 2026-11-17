@@ -29,6 +29,7 @@ pub struct Model {
     pub broken_zset_noop: bool,
     pub conditional_disabled: bool,
     pub basic_only: bool,
+    pub broken_stream_fairness: bool,
 }
 #[derive(Clone)]
 struct Record<T> {
@@ -43,6 +44,7 @@ struct State {
     streams: HashMap<String, Log>,
     versions: HashMap<String, Version>,
     read_turn: usize,
+    read_turns: HashMap<Vec<String>, usize>,
 }
 #[derive(Default)]
 struct Log {

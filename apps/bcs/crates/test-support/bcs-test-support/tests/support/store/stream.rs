@@ -98,13 +98,23 @@ impl StreamStorePlugin for Model {
                         page: page(log, entries, !self.basic_only),
                     });
                 }
+                let start = if self.broken_stream_fairness {
+                    s.read_turn % reads.len()
+                } else {
+                    let mut keys = reads.iter().map(|r| r.key.clone()).collect::<Vec<_>>();
+                    keys.sort();
+                    let turn = s.read_turns.entry(keys.clone()).or_default();
+                    let key = &keys[*turn];
+                    *turn = (*turn + 1) % keys.len();
+                    reads.iter().position(|r| &r.key == key).unwrap()
+                };
                 let mut remaining = options.max_entries.get() as usize;
                 for n in 0..reads.len() {
-                    let i = (s.read_turn + n) % reads.len();
+                    let i = (start + n) % reads.len();
                     out[i].page.entries.truncate(remaining);
                     remaining -= out[i].page.entries.len();
                 }
-                s.read_turn = (s.read_turn + 1) % reads.len();
+                s.read_turn = s.read_turn.wrapping_add(1);
                 out
             };
             if result.iter().any(|x| !x.page.entries.is_empty())

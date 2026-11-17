@@ -104,3 +104,9 @@ only on Stream. ACK of a missing group is an idempotent zero count.
 The basic and strong harnesses run separately. Basic-only fixtures demonstrate
 that neither caller-assigned versions nor recovery metadata are prerequisites.
 No provider implementation, private configuration or runtime wiring is added here.
+
+Follow-up validation: 3 type tests and 22 conformance tests pass, with an
+interleaved-reader fairness check and a negative fixture that reproduces the
+provider-global counter starvation bug. API Clippy, Rustdoc, R10 and negative
+boundary checks pass. The history-resetting fixture remains a non-blocking test
+enhancement; strong history assertions have not been weakened.

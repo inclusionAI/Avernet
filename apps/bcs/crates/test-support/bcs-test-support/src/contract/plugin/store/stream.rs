@@ -139,6 +139,37 @@ pub async fn stream_store_plugin_contract_tests<P: StreamStorePlugin + ?Sized>(
         p.append(&a, AppendId::Auto, &BTreeMap::new()).await,
         Err(StoreError::InvalidInput(_))
     ));
+    let fair_a = format!("{prefix}:fair-a");
+    let fair_b = format!("{prefix}:fair-b");
+    for key in [&fair_a, &fair_b] {
+        p.append(key, AppendId::Auto, &fields(1)).await.unwrap();
+    }
+    let reads = [
+        StreamRead {
+            key: fair_a,
+            after: None,
+        },
+        StreamRead {
+            key: fair_b,
+            after: None,
+        },
+    ];
+    let noise = [StreamRead {
+        key: format!("{prefix}:fair-noise"),
+        after: None,
+    }];
+    let mut seen = [false; 2];
+    for _ in 0..4 {
+        let pages = p.read(&reads, options(1)).await.unwrap();
+        for i in 0..2 {
+            seen[i] |= !pages[i].page.entries.is_empty();
+        }
+        p.read(&noise, options(1)).await.unwrap();
+    }
+    assert!(
+        seen.into_iter().all(|ready| ready),
+        "unrelated reads must not starve ready streams"
+    );
 }
 
 pub async fn stream_group_contract_tests<P: StreamStorePlugin + ?Sized>(p: &P, prefix: &str) {
