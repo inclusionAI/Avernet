@@ -18,6 +18,10 @@ use tokio::sync::broadcast;
 /// subscribers; they resume from their last position.
 const MAX_READ_FAILURES: u32 = 3;
 const FAILURE_BACKOFF: Duration = Duration::from_millis(200);
+/// Extra time a blocking read gets beyond its own block time before it is
+/// counted as failed: a provider call that never returns must not hold a
+/// session's subscribers forever.
+const READ_GRACE: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone)]
 pub(crate) enum Message {
@@ -30,6 +34,11 @@ pub(crate) struct ReaderConfig {
     pub read_block: Duration,
     pub read_batch: NonZeroU32,
     pub subscriber_buffer: usize,
+    pub read_grace: Duration,
+}
+
+impl ReaderConfig {
+    pub(crate) const DEFAULT_GRACE: Duration = READ_GRACE;
 }
 
 struct Session {
@@ -107,8 +116,13 @@ impl SessionReaders {
     }
 
     /// Joins the fan-out of the stream `key`. Must be called inside a Tokio
-    /// runtime. A new reader starts at `after`; an existing one is never moved.
-    pub(crate) fn join(&self, key: &str, after: StreamId) -> Subscription {
+    /// runtime. A new reader starts at `head`, the stream's newest entry as the
+    /// caller just read it, never at a subscriber's own position: one
+    /// subscriber's cursor cannot place the shared reader for the others, and
+    /// everything before the head is each subscriber's own catch-up read. An
+    /// existing reader is never moved.
+    pub(crate) fn join(&self, key: &str, head: StreamId) -> Subscription {
+        let after = head;
         let mut state = self.inner.lock();
         let (rx, joined_at, id) = match state.sessions.get_mut(key) {
             Some(session) => {
@@ -158,19 +172,19 @@ async fn run(inner: Arc<Inner>, key: String, id: u64, mut position: StreamId) {
                 _ => return,
             }
         }
-        let read = inner
-            .stream
-            .read(
-                &[StreamRead {
-                    key: key.clone(),
-                    after: Some(position),
-                }],
-                ReadOptions {
-                    max_entries: inner.config.read_batch,
-                    block: Some(inner.config.read_block),
-                },
-            )
-            .await;
+        let streams = [StreamRead {
+            key: key.clone(),
+            after: Some(position),
+        }];
+        let options = ReadOptions {
+            max_entries: inner.config.read_batch,
+            block: Some(inner.config.read_block),
+        };
+        let limit = inner.config.read_block + inner.config.read_grace;
+        let read = match tokio::time::timeout(limit, inner.stream.read(&streams, options)).await {
+            Ok(read) => read,
+            Err(_) => Err(bcs_store_api::StoreError::NotApplied("blocking read timed out".to_owned())),
+        };
         match read {
             Ok(batches) => {
                 failures = 0;

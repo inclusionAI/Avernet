@@ -140,6 +140,8 @@ async fn the_same_message_selects_the_same_session_task_and_input() {
     let again = g.submit(&me(), message("msg-1", "hello")).await.unwrap();
     assert_eq!(first, again);
     assert!(first.tid.0.starts_with(&format!("{}.", first.sid.0)));
+    // 64 bits of the digest name the task within its session.
+    assert_eq!(first.tid.0.rsplit_once('.').unwrap().1.len(), 16);
     assert!(first.sid.0.starts_with('s') && first.sid.0.contains('.'));
 
     // Changed content under the same message id is a conflict.
@@ -508,4 +510,108 @@ async fn listing_needs_a_session_and_pages_its_tasks() {
         g.list_tasks(&caller("pa-002"), list(Some(first.sid.clone()), None, 3)).await,
         Err(GatewayError::AccessDenied)
     );
+    // A malformed page token is invalid input, not a dependency to retry.
+    assert_eq!(
+        g.list_tasks(&me(), list(Some(first.sid.clone()), Some(PageToken("garbage".into())), 3)).await,
+        Err(GatewayError::Invalid { code: "page_token".into() })
+    );
+}
+
+async fn snapshot_stream(g: &DistGateway, tid: &Tid) -> TaskSubscription {
+    g.subscribe(&me(), SubscribeTask { tid: tid.clone(), mode: SubscribeMode::Snapshot })
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn a_task_that_advances_right_after_the_first_snapshot_gets_a_fresh_snapshot() {
+    let p = ports();
+    let g = gateway(&p);
+    let tid = g.submit(&me(), message("msg-1", "hello")).await.unwrap().tid;
+    let mut stream = snapshot_stream(&g, &tid).await;
+    assert!(matches!(next(&mut stream).await, TaskStreamItem::Snapshot { .. }));
+    // The Worker picks the input up before the stream is polled again.
+    p.worker.append(&status_event(&tid.0, eid(1, 1), TaskStatus::Working)).await;
+    publish(&p.worker, &tid, TaskStatus::Working, Some(eid(1, 1)), &[]).await;
+    let TaskStreamItem::Snapshot { view, cursor } = next(&mut stream).await else {
+        panic!("an ordinary advance re-sends the snapshot, it does not end the stream");
+    };
+    assert_eq!(view.content.status, TaskStatus::Working);
+    assert_eq!(cursor.unwrap().token.value, "1-1");
+    // And the stream goes on from there.
+    p.worker.append(&status_event(&tid.0, eid(2, 1), TaskStatus::InputRequired)).await;
+    assert_eq!(event_ids(next(&mut stream).await).1, "2-1");
+    assert!(stream.next().await.is_none());
+}
+
+#[tokio::test]
+async fn a_task_that_finishes_right_after_the_first_snapshot_ends_with_its_final_view() {
+    let p = ports();
+    let g = gateway(&p);
+    let tid = g.submit(&me(), message("msg-1", "hello")).await.unwrap().tid;
+    let mut stream = snapshot_stream(&g, &tid).await;
+    assert!(matches!(next(&mut stream).await, TaskStreamItem::Snapshot { .. }));
+    publish(&p.worker, &tid, TaskStatus::Completed, Some(eid(3, 1)), &[]).await;
+    let TaskStreamItem::Snapshot { view, cursor } = next(&mut stream).await else {
+        panic!("the final view is delivered");
+    };
+    assert_eq!(view.content.status, TaskStatus::Completed);
+    assert_eq!(cursor, None);
+    assert!(stream.next().await.is_none());
+}
+
+#[tokio::test]
+async fn a_second_gap_in_a_row_ends_the_stream_with_a_retryable_error() {
+    let p = ports();
+    let g = gateway(&p);
+    let tid = g.submit(&me(), message("msg-1", "hello")).await.unwrap().tid;
+    let mut stream = snapshot_stream(&g, &tid).await;
+    assert!(matches!(next(&mut stream).await, TaskStreamItem::Snapshot { .. }));
+    publish(&p.worker, &tid, TaskStatus::Working, Some(eid(1, 1)), &[]).await;
+    assert!(matches!(next(&mut stream).await, TaskStreamItem::Snapshot { .. }));
+    // The task moves again before the re-sent snapshot could be followed.
+    publish(&p.worker, &tid, TaskStatus::Working, Some(eid(2, 1)), &[]).await;
+    let item = tokio::time::timeout(Duration::from_secs(5), stream.next()).await.unwrap();
+    assert_eq!(
+        item,
+        Some(Err(GatewayError::Unavailable { code: "task_position_unavailable".into() }))
+    );
+    assert!(stream.next().await.is_none());
+}
+
+#[tokio::test]
+async fn a_wait_returns_the_current_view_when_the_event_stream_cannot_be_read() {
+    let p = ports();
+    let g = gateway(&p);
+    let tid = g.submit(&me(), message("msg-1", "hello")).await.unwrap().tid;
+    p.stream.fail_reads.store(true, Ordering::SeqCst);
+    let started = std::time::Instant::now();
+    let view = g.wait_task(&me(), wait(&tid, WaitUntil::InputOrFinal, None, 30_000)).await.unwrap();
+    assert_eq!(view.content.status, TaskStatus::Submitted);
+    assert!(started.elapsed() < Duration::from_secs(10), "ends with the failed reads, not the timeout");
+}
+
+#[tokio::test]
+async fn a_wait_keeps_up_with_a_task_that_advances_under_it() {
+    let p = Arc::new(ports());
+    let g = gateway(&p);
+    let tid = g.submit(&me(), message("msg-1", "hello")).await.unwrap().tid;
+    let worker = {
+        let p = p.clone();
+        let tid = tid.clone();
+        tokio::spawn(async move {
+            // Each publish moves the coverage past the position the wait holds.
+            for n in 1..=3u64 {
+                tokio::time::sleep(Duration::from_millis(15)).await;
+                p.worker.append(&status_event(&tid.0, eid(n, 1), TaskStatus::Working)).await;
+                publish(&p.worker, &tid, TaskStatus::Working, Some(eid(n, 1)), &[]).await;
+            }
+            tokio::time::sleep(Duration::from_millis(15)).await;
+            p.worker.append(&status_event(&tid.0, eid(4, 1), TaskStatus::Completed)).await;
+            publish(&p.worker, &tid, TaskStatus::Completed, Some(eid(4, 1)), &[]).await;
+        })
+    };
+    let view = g.wait_task(&me(), wait(&tid, WaitUntil::Final, None, 5_000)).await.unwrap();
+    worker.await.unwrap();
+    assert_eq!(view.content.status, TaskStatus::Completed);
 }

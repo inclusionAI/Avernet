@@ -104,6 +104,17 @@ pub(crate) async fn handle(
     }
 }
 
+/// `true` when a stream starts with a snapshot of a task that asks for input
+/// or authorization. A stream ends once the task asks for input; when it
+/// already does, nothing further would arrive until someone answers.
+fn waits_for_input(first: Option<&Result<TaskStreamItem, GatewayError>>) -> bool {
+    matches!(
+        first,
+        Some(Ok(TaskStreamItem::Snapshot { view, .. }))
+            if matches!(view.content.status, TaskStatus::InputRequired | TaskStatus::AuthRequired)
+    )
+}
+
 struct Call<'a> {
     state: &'a AppState,
     caller: &'a GatewayCaller,
@@ -176,15 +187,22 @@ impl Call<'_> {
         let request: SendMessageRequest = params(request)?;
         let input = self.submit_input(&request)?;
         let gw = &self.state.gateway;
+        // A message to an existing task is the reply to its question: the task
+        // may still show that question, so its stream must stay open.
+        let is_reply = input.task.is_some();
         let receipt = gw.submit(self.caller, input).await.map_err(gateway)?;
         let subscribe = SubscribeTask {
             tid: receipt.tid,
             mode: SubscribeMode::Snapshot,
         };
-        let items = gw.subscribe(self.caller, subscribe).await.map_err(gateway)?;
+        let mut items = gw.subscribe(self.caller, subscribe).await.map_err(gateway)?;
+        let first = items.next().await;
+        if !is_reply && waits_for_input(first.as_ref()) {
+            items = futures::stream::empty().boxed();
+        }
         Ok(Answer::Stream(stream::response(
             self.id.clone(),
-            Vec::new(),
+            first.into_iter().collect(),
             items,
             &self.state.config,
         )))
@@ -228,6 +246,10 @@ impl Call<'_> {
             return Err(A2AError::unsupported_operation(
                 "task is in a terminal state; use GetTask",
             ));
+        }
+        // A task that already waits for input: the Task is the whole stream.
+        if waits_for_input(first.as_ref()) {
+            items = futures::stream::empty().boxed();
         }
         Ok(Answer::Stream(stream::response(
             self.id.clone(),

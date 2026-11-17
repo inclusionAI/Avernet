@@ -51,6 +51,9 @@ pub struct GatewayStoreConfig {
     pub read_batch: NonZeroU32,
     /// Batches a subscriber may fall behind before its stream is closed.
     pub subscriber_buffer: usize,
+    /// Time a blocking read may take beyond `read_block` before it counts as
+    /// a failed read.
+    pub read_grace: Duration,
 }
 
 impl GatewayStoreConfig {
@@ -60,6 +63,7 @@ impl GatewayStoreConfig {
             read_block: Duration::from_secs(1),
             read_batch: NonZeroU32::new(100).unwrap_or(NonZeroU32::MIN),
             subscriber_buffer: 256,
+            read_grace: ReaderConfig::DEFAULT_GRACE,
         }
     }
 }
@@ -102,6 +106,7 @@ impl StoreTaskReader {
                 read_block: config.read_block,
                 read_batch: config.read_batch,
                 subscriber_buffer: config.subscriber_buffer,
+                read_grace: config.read_grace,
             },
         );
         Ok(Self {
@@ -157,17 +162,23 @@ impl Shared {
     /// coverage (those entries may be trimmed while it runs), or when `at` is
     /// beyond the newest entry (no reader ever handed out such a position, and
     /// a shared reader started there would deliver nothing to anyone).
-    async fn followable(&self, snapshot: &TaskSnapshot, at: StreamId) -> Result<bool, StoreError> {
+    ///
+    /// `Some(head)` = yes, with the stream's newest entry id (or the start).
+    async fn followable(
+        &self,
+        snapshot: &TaskSnapshot,
+        at: StreamId,
+    ) -> Result<Option<StreamId>, StoreError> {
         if is_terminal(snapshot.content.status)
             || snapshot.snapshot_event_id.is_some_and(|covered| at < stream_id(covered))
         {
-            return Ok(false);
+            return Ok(None);
         }
         // The Worker really wrote both the newest entry and the snapshot's
         // coverage, so either bounds what a client can legitimately hold.
         let head = self.head(&self.layout.ev(&snapshot.sid)?).await?.unwrap_or(START);
         let covered = snapshot.snapshot_event_id.map_or(START, stream_id);
-        Ok(at <= head.max(covered))
+        Ok((at <= head.max(covered)).then_some(head))
     }
 
     fn cursor(&self, sid: &Sid, tid: &Tid, id: StreamId) -> TaskCursor {
@@ -283,11 +294,10 @@ impl TaskReaderPort for StoreTaskReader {
         if &snapshot.scope != scope || snapshot.sid != cursor.sid {
             return Ok(ResumeCheck::InvalidScope);
         }
-        if self.shared.followable(&snapshot, at).await? {
-            Ok(ResumeCheck::Valid)
-        } else {
-            Ok(ResumeCheck::Gap)
-        }
+        Ok(match self.shared.followable(&snapshot, at).await? {
+            Some(_) => ResumeCheck::Valid,
+            None => ResumeCheck::Gap,
+        })
     }
 
     fn follow(
@@ -474,17 +484,18 @@ impl Follow {
         // One task read per subscription (never per event): the scope check,
         // and whether the position can still be followed. The task may have
         // advanced or finished since the caller restored or validated it.
-        match shared.snapshot(&self.cursor.tid).await? {
+        let head = match shared.snapshot(&self.cursor.tid).await? {
             Some(snapshot) if snapshot.scope == self.scope && snapshot.sid == self.cursor.sid => {
-                if !shared.followable(&snapshot, after).await? {
-                    return Ok(None);
+                match shared.followable(&snapshot, after).await? {
+                    Some(head) => head,
+                    None => return Ok(None),
                 }
             }
             Some(_) => return Err(invalid("cursor_scope_mismatch")),
             None => return Ok(None),
-        }
+        };
         let key = shared.layout.ev(&self.cursor.sid)?;
-        let subscription = shared.readers.join(&key, after);
+        let subscription = shared.readers.join(&key, head);
         let upto = subscription.joined_at;
         Ok(Some(if after < upto {
             State::CatchUp {

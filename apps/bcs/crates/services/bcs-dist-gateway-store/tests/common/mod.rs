@@ -169,6 +169,8 @@ pub struct CountingStream {
     pub blocking_reads: AtomicUsize,
     pub ranges: AtomicUsize,
     pub fail_reads: AtomicBool,
+    /// Blocking reads never return (a stalled provider call).
+    pub hang_reads: AtomicBool,
     pub multi_key_reads: AtomicUsize,
 }
 
@@ -179,6 +181,7 @@ impl CountingStream {
             blocking_reads: AtomicUsize::new(0),
             ranges: AtomicUsize::new(0),
             fail_reads: AtomicBool::new(false),
+            hang_reads: AtomicBool::new(false),
             multi_key_reads: AtomicUsize::new(0),
         }
     }
@@ -199,6 +202,9 @@ impl StreamStorePlugin for CountingStream {
         self.blocking_reads.fetch_add(1, Ordering::SeqCst);
         if streams.len() != 1 {
             self.multi_key_reads.fetch_add(1, Ordering::SeqCst);
+        }
+        if self.hang_reads.load(Ordering::SeqCst) {
+            futures::future::pending::<()>().await;
         }
         if self.fail_reads.load(Ordering::SeqCst) {
             return Err(bcs_store_api::StoreError::NotApplied("injected".into()));
@@ -337,6 +343,7 @@ pub fn fixture_with(tune: impl FnOnce(&mut GatewayStoreConfig)) -> Fixture {
     let results = Arc::new(MemoryResults::default());
     let mut config = GatewayStoreConfig::new(BackendId("tbase".into()));
     config.read_block = Duration::from_millis(40);
+    config.read_grace = Duration::from_millis(60);
     tune(&mut config);
     let reader = StoreTaskReader::new(
         model.clone(),

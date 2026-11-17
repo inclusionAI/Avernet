@@ -28,8 +28,10 @@ struct Subscription {
     /// Items ready before the first poll (the snapshot or the resume ack).
     first: Option<TaskStreamItem>,
     follow: Option<CoreFollow>,
-    /// `true` right after a snapshot was sent: a gap before any event then
-    /// means the stored position cannot be followed at all.
+    /// `true` right after a snapshot that was sent because of a gap: another
+    /// gap before any event then means the stored position cannot be followed
+    /// at all. A gap after the first snapshot is ordinary (the task advanced
+    /// or finished since it was restored) and gets a fresh snapshot.
     fresh_snapshot: bool,
 }
 
@@ -68,7 +70,7 @@ pub(crate) async fn subscribe(
         core,
         scope,
         tid: request.tid,
-        fresh_snapshot: matches!(first, TaskStreamItem::Snapshot { .. }),
+        fresh_snapshot: false,
         first: Some(first),
         follow,
     };

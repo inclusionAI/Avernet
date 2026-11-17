@@ -18,7 +18,9 @@ use async_trait::async_trait;
 use bcs_dist_model::*;
 use bcs_service_api::application::dist_gateway::*;
 use bcs_service_api::application::principal::CallerContext;
-use bcs_service_api::core::dist_gateway::{CoreTaskQuery, DistGatewayCoreService};
+use bcs_service_api::core::dist_gateway::{
+    CoreTaskQuery, DistGatewayCoreError, DistGatewayCoreService,
+};
 use bcs_service_api::port::dist_agent::DistGroupDirectoryPort;
 use error::core_error;
 use std::num::NonZeroU32;
@@ -178,7 +180,12 @@ impl DistGatewayService for DistGateway {
             after: request.after,
             limit: request.limit.min(self.config.max_page),
         };
-        let page = self.core.list_tasks(&scope, query).await.map_err(core_error)?;
+        let page = self.core.list_tasks(&scope, query).await.map_err(|error| match error {
+            // The store rejected the token's format: invalid input, not a
+            // failed dependency a client should retry.
+            DistGatewayCoreError::Unavailable { code } if code == "page_token" => invalid("page_token"),
+            other => core_error(other),
+        })?;
         Ok(TaskPage {
             tasks: page.tasks,
             next: page.next,

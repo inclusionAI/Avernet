@@ -309,15 +309,24 @@ impl InboxProducerPort for StoreInboxProducer {
         }
         if let (Some(task), Some(prepared)) = (&request.create_task, prepared.task) {
             // "Already exists" is fine: never replace a task the Worker advanced.
+            // The index is scored with the creation time of the task as stored,
+            // so a repairing retry lists it where the first attempt would have.
+            let mut created_at = task.created_at;
             match self.create_once(&prepared.key, prepared.doc).await {
                 Ok(true) => wrote = true,
-                Ok(false) if !wrote => match self.stored::<TaskSnapshot>(&prepared.key).await? {
-                    Some(stored) if stored.scope != task.scope || stored.sid != task.sid => {
-                        return Ok(AdmitOutcome::ContentConflict);
+                Ok(false) => {
+                    let stored = match self.stored::<TaskSnapshot>(&prepared.key).await {
+                        Ok(stored) => stored,
+                        Err(_) if wrote => return Err(unknown()),
+                        Err(e) => return Err(e),
+                    };
+                    if let Some(stored) = stored {
+                        if !wrote && (stored.scope != task.scope || stored.sid != task.sid) {
+                            return Ok(AdmitOutcome::ContentConflict);
+                        }
+                        created_at = stored.created_at;
                     }
-                    _ => {}
-                },
-                Ok(false) => {}
+                }
                 Err(_) if wrote => return Err(unknown()),
                 Err(e) => return Err(from_write(&e, op)),
             }
@@ -325,10 +334,11 @@ impl InboxProducerPort for StoreInboxProducer {
             // first score, so a retry repairs a missing index entry.
             let entry = ZSetEntry {
                 member: task.tid.0.clone(),
-                score: task.created_at.0 as f64,
+                score: created_at.0 as f64,
             };
             match self.zset.add(&prepared.index_key, &[entry], ZAddMode::InsertOnly).await {
-                Ok(_) => {}
+                // A repairing insert is a write of this call too.
+                Ok(inserted) => wrote |= inserted > 0,
                 Err(_) if wrote => return Err(unknown()),
                 Err(e) => return Err(from_write(&e, op)),
             }

@@ -554,3 +554,49 @@ fn a_cursor_round_trips_and_other_formats_are_rejected() {
     rebuilt.token.generation = LogGeneration("2".into());
     assert_eq!(cursor::encode(&rebuilt), None);
 }
+
+#[tokio::test]
+async fn a_stream_on_a_task_that_already_waits_for_input_is_the_task_and_ends() {
+    let p = Arc::new(ports());
+    let app = app(&p);
+    let sent = json_of(&app, send("msg-1", "hello", None, None, true)).await;
+    let tid = sent["result"]["task"]["id"].as_str().unwrap().to_owned();
+    p.worker.append(&status_event(&tid, eid(7, 1), TaskStatus::InputRequired)).await;
+    publish(&p, &tid, TaskStatus::InputRequired, Some(eid(7, 1)), &["i-3"]).await;
+
+    // Subscribing, or retrying the send as a stream: one Task frame, then the end.
+    let subscribe = rpc("SubscribeToTask", json!({ "id": tid }));
+    let retry = rpc("SendStreamingMessage", json!({ "message": user_message("msg-1", "hello", None, None) }));
+    for request in [subscribe, retry] {
+        let frames = read_frames(app.clone().oneshot(request).await.unwrap(), 10).await;
+        assert_eq!(frames.len(), 1, "{frames:?}");
+        assert_eq!(frames[0].data["result"]["task"]["status"]["state"], "TASK_STATE_INPUT_REQUIRED");
+    }
+
+    // The reply as a stream stays open past the question it answers.
+    let worker = {
+        let p = p.clone();
+        let tid = tid.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(80)).await;
+            p.worker.append(&status_event(&tid, eid(8, 1), TaskStatus::Working)).await;
+            p.worker.append(&status_event(&tid, eid(9, 1), TaskStatus::Completed)).await;
+        })
+    };
+    let reply = rpc("SendStreamingMessage", json!({ "message": user_message("msg-2", "B", None, Some(&tid)) }));
+    let frames = read_frames(app.clone().oneshot(reply).await.unwrap(), 10).await;
+    worker.await.unwrap();
+    assert_eq!(frames.len(), 3, "{frames:?}");
+    assert_eq!(frames[0].data["result"]["task"]["status"]["state"], "TASK_STATE_INPUT_REQUIRED");
+    assert_eq!(frames[2].data["result"]["statusUpdate"]["status"]["state"], "TASK_STATE_COMPLETED");
+}
+
+#[tokio::test]
+async fn a_malformed_page_token_is_an_invalid_params_error() {
+    let p = ports();
+    let app = app(&p);
+    let sent = json_of(&app, send("msg-1", "hello", None, None, true)).await;
+    let sid = sent["result"]["task"]["contextId"].as_str().unwrap().to_owned();
+    let listed = json_of(&app, rpc("ListTasks", json!({ "contextId": sid, "pageToken": "garbage" }))).await;
+    assert_eq!(error_code(&listed), -32602);
+}

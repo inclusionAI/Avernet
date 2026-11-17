@@ -7,7 +7,7 @@
 //! | Id | Form | Derived from |
 //! | --- | --- | --- |
 //! | session | `s<shard:04>.<16 hex>` | tenant, principal, group, message id; shard = hash mod shard count |
-//! | task | `<session>.<8 hex>` | session, message id |
+//! | task | `<session>.<16 hex>` | session, message id |
 //! | input (user) | `in-<32 hex>` | tenant, principal, group, session, message id |
 //! | input (reply) | `in-<32 hex>` | principal, session, task, message id |
 //! | input (cancel) | `in-<32 hex>` | principal, session, task, request id |
@@ -42,7 +42,7 @@ pub(crate) fn session_id(scope: &TaskScope, group: &GroupId, message: &RequestId
 
 pub(crate) fn task_id(sid: &Sid, message: &RequestId) -> Tid {
     let digest = hash(&["tid", &sid.0, &message.0]);
-    Tid(format!("{}.{}", sid.0, hex::encode(&digest[..4])))
+    Tid(format!("{}.{}", sid.0, hex::encode(&digest[..8])))
 }
 
 fn input_id(fields: &[&str]) -> InputId {

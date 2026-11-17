@@ -551,3 +551,110 @@ async fn an_input_without_a_new_task_does_not_touch_the_index() {
     p.admit(reply).await.unwrap();
     assert!(!store.calls().iter().any(|c| c.contains(":tasks:")));
 }
+
+/// Spec and task as a first attempt left them, without the index entry.
+async fn preload_spec_and_task(store: &Recorder, created_at: i64) {
+    let mut first = task();
+    first.created_at = TimestampMillis(created_at);
+    for (key, doc) in [
+        ("bcn:v1:c01:main:s0042:spec:s0042.7f3a9c", bcs_dist_store::codec::encode_json(&spec("grp-research-01")).unwrap()),
+        ("bcn:v1:c01:main:s0042:task:s0042.7f3a9c.b21e", bcs_dist_store::codec::encode_json(&first).unwrap()),
+    ] {
+        store
+            .model
+            .mutate_json(key, WriteCondition::Newer(Version(1)), JsonMutation::Replace(doc), Expiry::Persistent)
+            .await
+            .unwrap();
+    }
+}
+
+#[tokio::test]
+async fn a_repairing_index_insert_counts_as_a_write_of_the_call() {
+    let store = Arc::new(Recorder::default());
+    preload_spec_and_task(&store, 1_794_371_200_000).await;
+    // Writes of this retry: 1 spec (exists), 2 task (exists), 3 index (repairs), 4 inbox.
+    store.fail_write(4);
+    let outcome = producer(&store).admit(new_task_request("adm-9c41e7", "hello")).await;
+    assert_eq!(
+        outcome,
+        Err(StoreError::OutcomeUnknown {
+            operation_id: "adm-9c41e7".into()
+        }),
+        "something was written, so the failure is not definite"
+    );
+    assert_eq!(task_index(&store).await.len(), 1);
+}
+
+#[tokio::test]
+async fn a_repaired_index_entry_is_scored_with_the_stored_creation_time() {
+    let store = Arc::new(Recorder::default());
+    preload_spec_and_task(&store, 1_794_371_200_000).await;
+    // The retry computes a later creation time; the task keeps its first one.
+    let mut retry = new_task_request("adm-9c41e7", "hello");
+    retry.create_task.as_mut().unwrap().created_at = TimestampMillis(1_794_371_299_000);
+    producer(&store).admit(retry).await.unwrap();
+    let index = task_index(&store).await;
+    assert_eq!(index.len(), 1);
+    assert_eq!(index[0].score, 1_794_371_200_000_f64);
+}
+
+#[tokio::test]
+async fn a_conflicting_task_is_not_listed() {
+    let store = Arc::new(Recorder::default());
+    // A task of another scope already holds the id.
+    let mut foreign = task();
+    foreign.scope.principal = PrincipalId("someone-else".into());
+    store
+        .model
+        .mutate_json(
+            "bcn:v1:c01:main:s0042:task:s0042.7f3a9c.b21e",
+            WriteCondition::Newer(Version(1)),
+            JsonMutation::Replace(bcs_dist_store::codec::encode_json(&foreign).unwrap()),
+            Expiry::Persistent,
+        )
+        .await
+        .unwrap();
+    preload_only_spec(&store).await;
+    let outcome = producer(&store).admit(new_task_request("adm-9c41e7", "hello")).await.unwrap();
+    assert_eq!(outcome, AdmitOutcome::ContentConflict);
+    assert!(task_index(&store).await.is_empty());
+}
+
+async fn preload_only_spec(store: &Recorder) {
+    store
+        .model
+        .mutate_json(
+            "bcn:v1:c01:main:s0042:spec:s0042.7f3a9c",
+            WriteCondition::Newer(Version(1)),
+            JsonMutation::Replace(bcs_dist_store::codec::encode_json(&spec("grp-research-01")).unwrap()),
+            Expiry::Persistent,
+        )
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn a_new_task_in_an_existing_session_writes_in_the_fixed_order() {
+    let store = Arc::new(Recorder::default());
+    preload_only_spec(&store).await;
+    let request = AdmitRequest {
+        input: user_input("adm-9c41e7", "hello"),
+        create_session: None,
+        create_task: Some(task()),
+    };
+    producer(&store).admit(request).await.unwrap();
+    assert_eq!(
+        store.calls(),
+        vec![
+            "kv.get bcn:v1:c01:main:s0042:admit:adm-9c41e7",
+            "json.get bcn:v1:c01:main:s0042:spec:s0042.7f3a9c",
+            "json.mutate bcn:v1:c01:main:s0042:task:s0042.7f3a9c.b21e",
+            "zset.add bcn:v1:c01:main:s0042:tasks:s0042.7f3a9c",
+            "stream.append bcn:v1:c01:main:s0042:inbox:s0042.7f3a9c",
+            "zset.add bcn:v1:c01:main:s0042:active",
+            "stream.append bcn:v1:c01:main:s0042:wake",
+            "stream.trim bcn:v1:c01:main:s0042:wake",
+            "kv.put_if_absent bcn:v1:c01:main:s0042:admit:adm-9c41e7",
+        ]
+    );
+}

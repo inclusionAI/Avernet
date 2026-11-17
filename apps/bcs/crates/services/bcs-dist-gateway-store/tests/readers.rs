@@ -270,3 +270,43 @@ async fn a_task_that_moved_on_since_it_was_restored_is_a_gap() {
     assert_eq!(finished.next().await, Some(Ok(FollowItem::Gap)));
     assert_eq!(f.reader.served_sessions(), 0);
 }
+
+#[tokio::test]
+async fn a_read_that_never_returns_is_a_failed_read() {
+    let f = fixture();
+    f.worker.create(&snapshot(TID, TaskStatus::Working, None, 1)).await;
+    f.stream.hang_reads.store(true, Ordering::SeqCst);
+    let mut follow = f.reader.follow(scope(), cursor(TID, "0-0"));
+    // Three timed-out reads end the reader; the subscriber gets an error, not silence.
+    let item = tokio::time::timeout(Duration::from_secs(5), follow.next()).await.expect("no hang");
+    assert_eq!(
+        item,
+        Some(Err(StoreError::NotApplied {
+            code: "store_not_applied".into()
+        }))
+    );
+    assert_eq!(f.reader.served_sessions(), 0, "the session entry does not leak");
+    // Once the store answers again, a new subscriber is served.
+    f.stream.hang_reads.store(false, Ordering::SeqCst);
+    let mut again = f.reader.follow(scope(), cursor(TID, "0-0"));
+    f.worker.append(&text_event(TID, eid(1, 1), "x")).await;
+    assert_eq!(ids(&mut again, 1).await, ["1-1"]);
+}
+
+#[tokio::test]
+async fn an_old_cursor_does_not_place_the_shared_reader_for_others() {
+    let f = fixture();
+    f.worker.create(&snapshot(TID, TaskStatus::Working, None, 1)).await;
+    for n in 1..=30 {
+        f.worker.append(&text_event(TID, eid(n, 1), "x")).await;
+    }
+    // The first subscriber is far behind; the reader still starts at the head.
+    let mut old = f.reader.follow(scope(), cursor(TID, "0-0"));
+    let mut current = f.reader.follow(scope(), cursor(TID, "30-1"));
+    assert_eq!(next_event(&mut old).await.1, "1-1");
+    f.worker.append(&text_event(TID, eid(31, 1), "new")).await;
+    // The up-to-date subscriber gets the new entry without the history.
+    assert_eq!(ids(&mut current, 1).await, ["31-1"]);
+    let rest: Vec<String> = (2..=31).map(|n| format!("{n}-1")).collect();
+    assert_eq!(ids(&mut old, rest.len()).await, rest);
+}
