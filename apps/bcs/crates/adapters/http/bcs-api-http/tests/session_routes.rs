@@ -19,10 +19,10 @@ use bcs_service_api::application::v1::{
     CompleteSession, CreateGroup, CreateSession, CreateSessionOutcome, DeleteGroup,
     DeleteGroupParticipant, DeleteResult, DeleteSession, DeleteSessionParticipant, GetGroup,
     GetSession, GroupDetail, GroupService, GroupSummary, ListGroups, ListSessionMessages,
-    ListSessions, Page, SessionCollectionResult, SessionCompletionResult, SessionDetail,
-    SessionListSort, SessionMessageService, SessionParticipant, SessionService, SessionStatus,
-    SessionSummary,
-    UncollectSession, UpdateGroup, UpdateGroupParticipant, UpdateSession, UpdateSessionParticipant,
+    ListSessions, Page, SendSessionMessage, SendSessionMessageOutcome, SessionCollectionResult,
+    SessionCompletionResult, SessionDetail, SessionListSort, SessionMessageService,
+    SessionParticipant, SessionService, SessionStatus, SessionSummary, UncollectSession,
+    UpdateGroup, UpdateGroupParticipant, UpdateSession, UpdateSessionParticipant,
 };
 use bcs_service_api::types::{AttachmentType, MessageAttachment};
 use bcs_service_api::{
@@ -574,6 +574,7 @@ impl SessionService for FakeSessionService {
 struct FakeSessionMessageService {
     listed: Mutex<Option<ListSessionMessages>>,
     options: Mutex<Option<MessageHistoryOptions>>,
+    sent: Mutex<Option<SendSessionMessage>>,
 }
 
 #[async_trait]
@@ -593,6 +594,19 @@ impl SessionMessageService for FakeSessionMessageService {
     ) -> Result<Vec<GroupMessage>, ApplicationError> {
         *self.options.lock().expect("list messages options lock") = Some(options);
         self.list(query).await
+    }
+
+    async fn send(
+        &self,
+        command: SendSessionMessage,
+    ) -> Result<SendSessionMessageOutcome, ApplicationError> {
+        *self.sent.lock().expect("send messages lock") = Some(command.clone());
+        Ok(SendSessionMessageOutcome {
+            session_id: command.session_id,
+            group_id: "group-1".into(),
+            sender: "human_staff-1".into(),
+            delivered_count: 1,
+        })
     }
 }
 

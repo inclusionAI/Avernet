@@ -2237,6 +2237,48 @@ SessionMessagesEnvelope:
     request_id:
       type: string
 
+SessionMessageDeliveryEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+    - code
+    - message
+    - data
+    - request_id
+  properties:
+    code:
+      const: 20000
+    message:
+      type: string
+    data:
+      type: object
+      additionalProperties: false
+      required:
+        - session_id
+        - group_id
+        - sender
+        - delivered_count
+      properties:
+        session_id:
+          type: string
+        group_id:
+          type: string
+        sender:
+          type: string
+          description: >-
+            The actor identity that spoke. An authenticated Human
+            speaks as its own `human_{user.id}` actor.
+        delivered_count:
+          type: integer
+          description: >-
+            Recipients that admitted the message into their
+            collaboration flow, following the existing group-chat
+            routing semantics. When a pending one-shot StateMachine
+            HumanInput consumes the message, the runtime accepts it as
+            the node input and this count is 1.
+    request_id:
+      type: string
+
 SessionCompletionEnvelope:
   type: object
   additionalProperties: false

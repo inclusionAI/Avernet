@@ -1,9 +1,10 @@
 """Approved BCN public OpenAPI V1 contract inventory.
 
 The public contract must expose exactly the approved operations across Authentication, Bot,
-Group, GroupParticipant, Session, SessionParticipant, Invitation, Friendship / FriendRequest,
-Message Delivery, Channel Binding, and Register, and must not expose session-file,
-bot candidate search, message-send, Internal API, or routing-only path aliases.
+Group, GroupParticipant, Session, SessionParticipant, Session messages (history read and
+send-into-Session), Invitation, Friendship / FriendRequest, Message Delivery, Channel
+Binding, and Register, and must not expose session-file, bot candidate search, Internal
+API, or routing-only path aliases.
 """
 
 import sys
@@ -62,6 +63,7 @@ EXPECTED_OPERATIONS = GROUP_CONTEXT_OPERATIONS | {
     ("post", "/openapi/v1/collaboration/sessions/{session_id}/collect"),
     ("delete", "/openapi/v1/collaboration/sessions/{session_id}/collect"),
     ("get", "/openapi/v1/collaboration/sessions/{session_id}/messages"),
+    ("post", "/openapi/v1/collaboration/sessions/{session_id}/messages"),
     ("get", "/openapi/v1/collaboration/messages/{message_id}/deliveries"),
     ("post", "/openapi/v1/collaboration/sessions/{session_id}/message-deliveries/query"),
     ("post", "/openapi/v1/collaboration/messages/{message_id}/deliveries/{delivery_id}/cancel"),
@@ -174,10 +176,6 @@ def test_contract_excludes_unapproved_runtime_and_routing_surfaces() -> None:
     actual = _actual_operations()
 
     assert ("get", "/openapi/v1/collaboration/group/ws") not in actual
-    assert (
-        "post",
-        "/openapi/v1/collaboration/sessions/{session_id}/messages",
-    ) not in actual
     assert ("get", "/openapi/v1/collaboration/sessions/{session_id}/files") not in actual
     assert ("post", "/openapi/v1/collaboration/sessions/{session_id}/files") not in actual
     assert ("get", "/openapi/v1/collaboration/bots/{bot_id}/candidates/search") not in actual

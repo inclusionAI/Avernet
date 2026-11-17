@@ -56,6 +56,10 @@ SessionParticipantInput:
   properties:
     bot_uuid:
       type: string
+      description: >-
+        Bot or Human Actor identifier. Human identifiers use
+        human_{user.id}; the historical bot_uuid name is retained for
+        wire compatibility.
     message_view_scope:
       $ref: ../domain-models.yaml#/MessageViewScope
 
@@ -707,6 +711,91 @@ SessionMessagesPath:
               $ref: ../shared.yaml#/ErrorEnvelope
       "500":
         $ref: ../shared.yaml#/InternalErrorResponse
+  post:
+    operationId: send_session_message
+    tags: ["Collaboration / Sessions"]
+    summary: Send a message into an existing Session.
+    x-avernet-security:
+      user: required
+      app: required
+    parameters:
+      - $ref: ../shared.yaml#/SessionIdPath
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required:
+              - message
+            properties:
+              message:
+                type: string
+                minLength: 1
+    responses:
+      "200":
+        description: >-
+          The message was accepted into the Session's collaboration
+          flow. The Envelope data reports the actor that spoke and
+          the group the Session belongs to; delivery counts follow
+          the existing group-chat routing semantics. When a pending
+          one-shot StateMachine HumanInput consumes the message, the
+          runtime accepts it as the node input and `delivered_count`
+          is 1. The sent message is observable through the session
+          message history read (GET on this path) for callers
+          authorized to view it.
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/SessionMessageDeliveryEnvelope
+      "400":
+        description: Request body is missing or the message is empty.
+        x-error-codes:
+          - invalid_request
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: Gateway Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: The caller is not a Participant of the requested Session.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "404":
+        description: Session, group, or participant state is missing.
+        x-error-codes:
+          - session_not_found
+          - group_not_found
+          - participant_not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "409":
+        description: >-
+          The Session's one-shot StateMachine state conflicts with this
+          message (for example, no HumanInput node is currently awaiting
+          a reply).
+        x-error-codes:
+          - conflict
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
 
 AddSessionParticipantPath:
   post:
@@ -755,7 +844,9 @@ AddSessionParticipantPath:
       "403":
         description: >-
           The Principal may not manage the Session, or the added Bot is not
-          collaboration-eligible. A Human Principal may manage when it can act
+          collaboration-eligible. A Human Actor identifier (human_{user.id})
+          bypasses the Bot eligibility gate; Session-management authority is
+          still required. A Human Principal may manage when it can act
           as the Session creator or at least one parent Group management actor:
           the driver, originator, or ManagerWorker manager participant.
           Human-to-actor authority is checked only against these target actors:

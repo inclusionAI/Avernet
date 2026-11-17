@@ -130,6 +130,57 @@ async fn list_session_messages_rejects_non_numeric_before_timestamp() {
     assert!(message.listed.lock().expect("list messages lock").is_none());
 }
 #[tokio::test]
+async fn send_session_message_forwards_authenticated_caller_and_body() {
+    let session = Arc::new(FakeSessionService::default());
+    let message = Arc::new(FakeSessionMessageService::default());
+    let app = test_session_router(session, message.clone());
+
+    let response = app
+        .oneshot(authenticated_request(
+            "POST",
+            "/openapi/v1/collaboration/sessions/session-1/messages",
+            json!({"message": "hello from the caller"}),
+        ))
+        .await
+        .expect("send message response");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_json(response).await;
+    assert_eq!(body["code"], 20_000);
+    assert_eq!(body["message"], "OK");
+    assert_eq!(body["data"]["session_id"], "session-1");
+    assert_eq!(body["data"]["group_id"], "group-1");
+    assert_eq!(body["data"]["sender"], "human_staff-1");
+    assert_eq!(body["data"]["delivered_count"], 1);
+    {
+        let sent = message.sent.lock().expect("send messages lock");
+        let sent = sent.as_ref().expect("send messages command");
+        assert_eq!(caller_user_id(&sent.caller), "staff-1");
+        assert_eq!(sent.session_id, "session-1");
+        assert_eq!(sent.message, "hello from the caller");
+    }
+}
+
+#[tokio::test]
+async fn send_session_message_rejects_unknown_fields_before_the_service() {
+    let session = Arc::new(FakeSessionService::default());
+    let message = Arc::new(FakeSessionMessageService::default());
+    let app = test_session_router(session, message.clone());
+
+    let response = app
+        .oneshot(authenticated_request(
+            "POST",
+            "/openapi/v1/collaboration/sessions/session-1/messages",
+            json!({"message": "hello", "sender": "human_someone_else"}),
+        ))
+        .await
+        .expect("send message response");
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body = response_json(response).await;
+    assert_eq!(body["data"]["error_code"], "invalid_request");
+    assert!(message.sent.lock().expect("send messages lock").is_none());
+}
+
+#[tokio::test]
 async fn add_session_participant_returns_participant() {
     let session = Arc::new(FakeSessionService::default());
     let message = Arc::new(FakeSessionMessageService::default());

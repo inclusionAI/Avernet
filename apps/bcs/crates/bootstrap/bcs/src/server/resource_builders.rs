@@ -481,6 +481,9 @@ pub(super) fn build_openapi_v1_state(
     group_message_history: Arc<dyn GroupMessageHistoryService>,
     session_files: Arc<dyn bcs_service_api::application::session_files::SessionFileService>,
     system_message: Arc<dyn SystemMessageService>,
+    // The finalized collaboration message flow backing the V1
+    // send-into-Session use case (`SessionMessageService::send`).
+    message_flow: Arc<dyn MessageFlowService>,
     collaboration_templates: Arc<dyn CollaborationTemplateService>,
     invite_code_service: Arc<dyn bcs_service_api::application::v1::InviteCodeService>,
     invite_code_gate_enabled: bool,
@@ -597,7 +600,8 @@ pub(super) fn build_openapi_v1_state(
         )
         .with_bot_authority_hook(bot_authority_hook.clone())
         .with_participant_view_bindings(participant_view_bindings)
-        .with_session_authorization_core(session_authorization_core.clone()),
+        .with_session_authorization_core(session_authorization_core.clone())
+        .with_message_flow(message_flow),
     );
     let session_file_url_projector = SessionFileUrlProjector::new(
         config

@@ -118,4 +118,90 @@ impl SessionMessageService for SessionServiceImpl {
             query.limit,
         ))
     }
+
+    async fn send(
+        &self,
+        command: SendSessionMessage,
+    ) -> Result<SendSessionMessageOutcome, ApplicationError> {
+        if command.message.trim().is_empty() {
+            return Err(ApplicationError::invalid(
+                "invalid_request",
+                "message must not be empty",
+            ));
+        }
+        // The Gateway security boundary (user: required, app: required)
+        // admits only Human callers here; a Human always speaks as its own
+        // `human_<user.id>` actor (caller-closed, same rule as the legacy
+        // POST /sessions/{sid}/chat adapter).
+        let user = require_authenticated_user(&command.caller)?;
+        let actor_id = format!("human_{}", user.id);
+
+        let session = self.load_session(&command.session_id).await?;
+        // Fail-closed for non-participants: the explicit
+        // POST .../participants use case is the sole membership
+        // admission path on this surface.
+        if !session
+            .participants
+            .iter()
+            .any(|participant| participant.bot_uuid == actor_id)
+        {
+            return Err(ApplicationError::forbidden(
+                "The caller is not a Session Participant",
+            ));
+        }
+
+        // A pending one-shot StateMachine HumanInput consumes the message
+        // through the runtime first. Mirror the legacy `POST /sessions/{sid}/chat`
+        // route: consult the runtime for every group strategy and only fall
+        // through to the ordinary group-chat flow on `NotStateMachine`. The
+        // runtime decides from the run/session binding, not from the group
+        // strategy alone (ManagerWorker and Chat groups may carry one-shot runs).
+        let outcome = self
+            .collaboration_runtime
+            .handle_session_human_input(HandleSessionHumanInputCommand {
+                group_id: session.group_id.clone(),
+                session_id: Some(command.session_id.clone()),
+                caller_actor_id: actor_id.clone(),
+                content: command.message.clone(),
+                source: HumanResponseSource::Http,
+                caller_ingress: None,
+            })
+            .await
+            .map_err(map_runtime_error)?;
+        if let HandleSessionHumanInputOutcome::Consumed { .. } = outcome {
+            return Ok(SendSessionMessageOutcome {
+                session_id: command.session_id,
+                group_id: session.group_id,
+                sender: actor_id,
+                // The runtime accepted this Human reply as the pending node
+                // input; it is not a fan-out delivery.
+                delivered_count: 1,
+            });
+        }
+
+        let message_flow = self.message_flow.as_deref().ok_or_else(|| {
+            ApplicationError::internal("session message flow is not wired")
+        })?;
+        let outcome = message_flow
+            .handle_group_chat(GroupChatCommand {
+                caller: CallerContext::Human(HumanActor {
+                    actor_id: actor_id.clone(),
+                    staff_no: user.id.clone(),
+                }),
+                group_id: session.group_id.clone(),
+                requested_sender_id: Some(actor_id.clone()),
+                message: command.message,
+                session_id: Some(command.session_id.clone()),
+                provider_bypass_headers: Vec::new(),
+                caller_ingress: None,
+            })
+            .await
+            .map_err(map_service_error)?;
+        Ok(SendSessionMessageOutcome {
+            session_id: command.session_id,
+            group_id: session.group_id,
+            sender: actor_id,
+            delivered_count: outcome.delivered_count as u64,
+        })
+    }
 }
