@@ -186,6 +186,10 @@ impl StoreDispatchQueue {
                 now.view,
                 now.version,
             ))))),
+            // The write may still land after this read-back. The call then
+            // names this instance, so it must stay listed: the index may list
+            // too much, never too little.
+            None if unknown => Ok(None),
             None => {
                 self.unlist(me, did).await;
                 Ok(None)

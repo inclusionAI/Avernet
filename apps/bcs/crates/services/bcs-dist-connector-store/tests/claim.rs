@@ -439,6 +439,9 @@ async fn a_claim_write_that_did_not_land_is_made_again() {
     assert_eq!(held.holder().epoch, HolderEpoch(1));
     assert_eq!(stored(&store).await.1, 1_000_000_000);
     assert_eq!(store.count("json.mutate"), 2, "the second attempt wrote it");
+    // An unknown claim write may still land later: the call is never
+    // unlisted on it (the index may list too much, never too little).
+    assert_eq!(store.count("zset.remove"), 0, "{:?}", store.calls());
     assert_eq!(held_members(&store, &me).await, vec![DID.to_owned()]);
 }
 

@@ -7,7 +7,7 @@
 //! | --- | --- |
 //! | target not resolvable, address refused by policy, client not buildable | `NotSent` |
 //! | no connection was established (DNS, refused, connect timeout) | `NotSent` |
-//! | HTTP 400/401/403/404/405/406/415/422, gRPC 3/5/7/12/16, or a JSON-RPC error answer other than an internal error | `Rejected` |
+//! | HTTP 400/401/403/404/405/406/415/422, gRPC 3/5/7/12/16, or a JSON-RPC error on the initial response that says the request itself was refused (parse error, invalid request, method not found, invalid params, unsupported operation, content type / extension / version not supported) | `Rejected` |
 //! | first stream event carries a task | `Accepted` |
 //! | first stream event is the agent's direct message | `Completed` |
 //! | anything else once the request was handed to the transport | `OutcomeUnknown` |
@@ -32,12 +32,23 @@ use std::sync::Arc;
 use std::time::Duration;
 
 /// Where an agent is and how to authenticate to it.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ResolvedAgent {
     pub interface: A2aInterface,
     pub bearer: Option<String>,
     /// Negotiated extension URIs, sent as `a2a-extensions`.
     pub extensions: Vec<String>,
+}
+
+/// The credential never appears in debug output.
+impl std::fmt::Debug for ResolvedAgent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ResolvedAgent")
+            .field("interface", &self.interface)
+            .field("bearer", &self.bearer.as_ref().map(|_| "<redacted>"))
+            .field("extensions", &self.extensions)
+            .finish()
+    }
 }
 
 /// Turns the frozen `AgentBinding` of a dispatch into a callable agent.
@@ -97,13 +108,31 @@ fn classify(error: &A2AError) -> SendFailure {
     // 429 and every 5xx stay uncertain.
     let rejected = http.is_some_and(|status| matches!(status, 400 | 401 | 403 | 404 | 405 | 406 | 415 | 422))
         || grpc.is_some_and(|code| matches!(code, 3 | 5 | 7 | 12 | 16))
-        // The agent answered with a protocol error: it did not take the request.
-        || (error.message == "A2A JSON-RPC failure" && error.code != a2a::error_code::INTERNAL_ERROR);
+        // A JSON-RPC error that says the request itself was refused. Any
+        // other code (internal error, a server-defined "overloaded" or
+        // "timeout") says nothing about whether the agent started work.
+        || (error.message == "A2A JSON-RPC failure" && request_refused(error.code));
     if rejected {
         SendFailure::Rejected(code_of(error))
     } else {
         SendFailure::Unknown(code_of(error))
     }
+}
+
+/// JSON-RPC and A2A codes that mean the request was not taken at all.
+fn request_refused(code: i32) -> bool {
+    use a2a::error_code::*;
+    matches!(
+        code,
+        PARSE_ERROR
+            | INVALID_REQUEST
+            | METHOD_NOT_FOUND
+            | INVALID_PARAMS
+            | UNSUPPORTED_OPERATION
+            | CONTENT_TYPE_NOT_SUPPORTED
+            | EXTENSION_SUPPORT_REQUIRED
+            | VERSION_NOT_SUPPORTED
+    )
 }
 
 impl A2aDistAgentClient {
@@ -197,12 +226,9 @@ impl A2aDistAgentClient {
         // The request is with the transport: from here nothing is "not sent".
         let first = match tokio::time::timeout(FIRST_EVENT_TIMEOUT, responses.next()).await {
             Ok(Some(Ok(first))) => first,
-            Ok(Some(Err(error))) => {
-                return match classify(&error) {
-                    SendFailure::Rejected(code) => SendOutcome::Rejected { code },
-                    SendFailure::NotSent(code) | SendFailure::Unknown(code) => SendOutcome::OutcomeUnknown { code },
-                };
-            }
+            // An error as the first stream event: the agent answered 200 and
+            // may already have created the task, so this is never a rejection.
+            Ok(Some(Err(error))) => return SendOutcome::OutcomeUnknown { code: code_of(&error) },
             Ok(None) => return SendOutcome::OutcomeUnknown { code: "stream_ended_before_first_event".into() },
             Err(_) => return SendOutcome::OutcomeUnknown { code: "first_event_timeout".into() },
         };
@@ -221,6 +247,10 @@ impl A2aDistAgentClient {
                 };
             }
         };
+        // A task that cannot be addressed later must not be recorded as accepted.
+        if remote.task_id.is_empty() {
+            return SendOutcome::OutcomeUnknown { code: "invalid_agent_response".into() };
+        }
         let rest = futures::stream::once(async move { Ok(first) }).chain(responses).boxed();
         SendOutcome::Accepted {
             remote,

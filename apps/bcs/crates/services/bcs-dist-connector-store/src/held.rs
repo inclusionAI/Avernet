@@ -273,11 +273,16 @@ impl HeldDispatchPort for StoreHeldDispatch {
                 return Ok(Step::Keep(IdempotentWrite::AlreadyApplied));
             }
             // A definite result is never replaced, and nothing goes back to
-            // "not sent". An unknown or refused attempt may be tried again.
+            // "not sent". An accepted request only moves on to a definite
+            // result. An unknown or refused attempt may be tried again.
             let settled = matches!(
                 current,
                 CancelObservation::ConfirmedCanceled | CancelObservation::AlreadyFinished { .. }
-            );
+            ) || (*current == CancelObservation::RequestAccepted
+                && !matches!(
+                    observation,
+                    CancelObservation::ConfirmedCanceled | CancelObservation::AlreadyFinished { .. }
+                ));
             if settled || observation == CancelObservation::NotSent {
                 return invalid("cancel_observation_backward");
             }

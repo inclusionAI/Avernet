@@ -25,6 +25,8 @@ enum Answer {
     Result(Value),
     /// A JSON-RPC error answer with this code.
     Rpc(i32),
+    /// HTTP 200 and an event stream whose first event is a JSON-RPC error.
+    SseError(i32),
     /// A bare HTTP status.
     Http(u16),
 }
@@ -59,6 +61,13 @@ async fn rpc(State(agent): State<Arc<Agent>>, headers: HeaderMap, Json(request):
                 .iter()
                 .map(|result| format!("data: {}\n\n", json!({"jsonrpc": "2.0", "id": id, "result": result})))
                 .collect();
+            ([("content-type", "text/event-stream")], wire).into_response()
+        }
+        Answer::SseError(code) => {
+            let wire = format!(
+                "data: {}\n\n",
+                json!({"jsonrpc": "2.0", "id": id, "error": {"code": code, "message": "private diagnostic"}})
+            );
             ([("content-type", "text/event-stream")], wire).into_response()
         }
         Answer::Result(result) => Json(json!({"jsonrpc": "2.0", "id": id, "result": result})).into_response(),
@@ -313,6 +322,17 @@ async fn tool_records_need_the_negotiated_extension() {
     assert_eq!(payload(&events[1])["tool"], json!({"phase": "start", "toolCallId": "call-3", "name": "search", "args": {"q": "x"}}));
     assert_eq!(agent.calls.lock().unwrap()[0].2.as_deref(), Some(extension));
 
+    // The agent repeats the same record (a retransmission): no second tool
+    // event, and never a "thinking" event carrying tool payload.
+    let (client, agent) = fixture_with(vec![extension.to_owned()]).await;
+    let mut repeated = stream.clone();
+    repeated.push(repeated[1].clone());
+    agent.on("SendStreamingMessage", Answer::Sse(repeated));
+    let SendOutcome::Accepted { events, .. } = client.start(&target(), request("r")).await else {
+        panic!("not accepted");
+    };
+    assert_eq!(kinds(&collect(events.unwrap()).await), vec!["snapshot", "tool"]);
+
     // Not negotiated: the record is dropped, not relayed as thinking.
     let (client, agent) = fixture().await;
     agent.on("SendStreamingMessage", Answer::Sse(stream));
@@ -330,6 +350,15 @@ async fn complete_rejections_are_distinct_from_uncertain_outcomes() {
         (Answer::Http(401), "rejected:http_401"),
         (Answer::Http(422), "rejected:http_422"),
         (Answer::Rpc(-32602), "rejected:a2a_invalid_params"),
+        (Answer::Rpc(-32601), "rejected:a2a_method_not_found"),
+        // A server-defined code ("overloaded", "timeout") proves nothing.
+        (Answer::Rpc(-32000), "unknown:a2a_internal_error"),
+        (Answer::Rpc(-32099), "unknown:a2a_internal_error"),
+        // An error as the first stream event: the task may already exist.
+        (Answer::SseError(-32602), "unknown:a2a_invalid_params"),
+        // A task that could never be addressed again.
+        (Answer::Sse(vec![json!({"task": {"id": "", "contextId": "c", "status": {"state": "TASK_STATE_WORKING"}}})]),
+            "unknown:invalid_agent_response"),
         (Answer::Http(408), "unknown:http_408"),
         (Answer::Http(429), "unknown:http_429"),
         (Answer::Http(503), "unknown:http_503"),
@@ -341,7 +370,7 @@ async fn complete_rejections_are_distinct_from_uncertain_outcomes() {
         agent.on("SendStreamingMessage", answer);
         assert_eq!(name(&client.start(&target(), request("r")).await), expected);
     }
-    assert_eq!(agent.count(), 9, "one request per send: never retried");
+    assert_eq!(agent.count(), 14, "one request per send: never retried");
 }
 
 #[tokio::test]
@@ -484,4 +513,15 @@ async fn cancel_keeps_accepted_confirmed_finished_and_unknown_apart() {
     agent.on("CancelTask", Answer::Http(503));
     assert_eq!(cancel().await, CancelOutcome::OutcomeUnknown { code: "a2a_invalid_agent_response".into() });
     assert_eq!(agent.call(0)["params"]["id"], "rt-1");
+}
+
+#[tokio::test]
+async fn the_credential_is_not_in_debug_output() {
+    let resolved = Fixed { url: "http://127.0.0.1:9/rpc".into(), extensions: Vec::new(), failures: Mutex::new(0) }
+        .resolve(&target())
+        .await
+        .unwrap();
+    let debug = format!("{resolved:?}");
+    assert!(!debug.contains("test-fixture-token"), "{debug}");
+    assert!(debug.contains("<redacted>"));
 }

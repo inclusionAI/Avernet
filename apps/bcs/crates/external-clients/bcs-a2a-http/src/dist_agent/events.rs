@@ -153,15 +153,18 @@ impl Mapper {
     /// A message during work: tool records when it carries the negotiated
     /// tools extension, otherwise the agent thinking aloud.
     fn message_events(&mut self, message: &a2a::Message) -> Vec<(AgentEventKind, Value)> {
+        let raw = serde_json::to_value(message).unwrap_or(Value::Null);
+        let tool_message = raw.get("metadata").and_then(|m| m.get(crate::tools::EXTENSION)).is_some();
         match self.tools.decode(message) {
             Ok(records) if !records.is_empty() => records
                 .into_iter()
                 .map(|record| (AgentEventKind::Tool, json!({ "tool": record["data"] })))
                 .collect(),
-            Ok(_) => match serde_json::to_value(message) {
-                Ok(message) => vec![(AgentEventKind::Thinking, json!({ "message": message }))],
-                Err(_) => Vec::new(),
-            },
+            // A tool message with nothing new (a repeated record): no event.
+            // It must not be relayed as thinking, it carries tool payload.
+            Ok(_) if tool_message => Vec::new(),
+            Ok(_) if raw.is_null() => Vec::new(),
+            Ok(_) => vec![(AgentEventKind::Thinking, json!({ "message": raw }))],
             // An unnegotiated or malformed tool record is dropped, not relayed.
             Err(reason) => {
                 tracing::debug!(reason, "tool record ignored");

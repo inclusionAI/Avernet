@@ -31,6 +31,10 @@ impl Call {
             request_id: request_id.clone(),
         };
         let resend_allowed = self.ports.rules.uncertain_input(&capabilities) == UncertainSend::Resend;
+        // A resend after an unknown outcome waits out its backoff.
+        if self.input_resends > 0 && self.backing_off() {
+            return Ok(());
+        }
         match self.held.begin_send(operation.clone()).await {
             Ok(_) => {}
             Err(HolderError::Lost) => return Err(Stop::Lost),
@@ -81,11 +85,18 @@ impl Call {
                 Ok(()) // retried on the next tick
             }
             SendOutcome::OutcomeUnknown { code } => {
-                if resend_allowed {
-                    tracing::warn!(did = %did.0, code, "input outcome unknown; resending on the next tick");
-                    return Ok(());
+                if !resend_allowed {
+                    return self.block_input(UnresolvedKind::Uncertain, &code).await;
                 }
-                self.block_input(UnresolvedKind::Uncertain, &code).await
+                // An idempotent input is sent again, with backoff and a bound
+                // like the start's resend.
+                self.input_resends += 1;
+                if self.input_resends > self.config.not_sent_retries {
+                    return self.block_input(UnresolvedKind::Uncertain, "resend_exhausted").await;
+                }
+                tracing::warn!(did = %did.0, code, "input outcome unknown; resending after a backoff");
+                self.back_off();
+                Ok(())
             }
         }
     }
@@ -95,6 +106,11 @@ impl Call {
         held_write!(self, "input confirmation", self.held.confirm_input(seq, evidence.clone()));
         self.awaiting_input = false;
         self.input_not_sent = 0;
+        self.input_resends = 0;
+        self.reset_backoff();
+        // A new question round begins: the same question asked again after
+        // this reply is a new interaction, not a repeat of the polled state.
+        self.last_polled = None;
         Ok(())
     }
 
@@ -126,6 +142,12 @@ impl Call {
         let Some(remote) = view.execution.remote.clone() else {
             return Ok(());
         };
+        // A cancel whose outcome stayed unknown is tried again, but not on
+        // every tick: each attempt costs two dispatch writes and one request
+        // to an agent that is already failing.
+        if view.execution.cancellation != CancelObservation::NotSent && self.backing_off() {
+            return Ok(());
+        }
         let target = view.spec.target.clone();
         if !view.spec.capabilities.cancel {
             let refused = CancelObservation::Rejected {
@@ -144,6 +166,11 @@ impl Call {
             CancelOutcome::OutcomeUnknown { .. } => CancelObservation::OutcomeUnknown,
         };
         held_write!(self, "cancel observation", self.held.record_cancel(observed.clone()));
+        if matches!(outcome, CancelOutcome::OutcomeUnknown { .. }) {
+            self.back_off();
+        } else {
+            self.reset_backoff();
+        }
         match outcome {
             CancelOutcome::ConfirmedCanceled => {
                 self.end_with_error("canceled", "agent_canceled", FinalDispatchOutcome::Canceled, "cancel_confirmed")

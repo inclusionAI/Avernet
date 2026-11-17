@@ -59,10 +59,12 @@ impl Call {
                     return self.end_canceled_unsent().await;
                 }
             }
-            // Send intent is durable before the network call.
-            held_write!(self, "send intent", self.held.begin_send(operation.clone()));
+            // The request is loaded first: a request that is gone fails the
+            // call cleanly from "claimed", and a later holder that finds the
+            // same call again reports the same error and finishes it.
             let Some(payload) = self.load(&request).await? else {
                 if uncertain {
+                    // It may have been sent earlier and cannot be sent again.
                     self.mark_unresolved(UnresolvedKind::Uncertain, "request_unavailable").await;
                     return Ok(());
                 }
@@ -70,6 +72,8 @@ impl Call {
                     .end_with_error("failed", "request_unavailable", FinalDispatchOutcome::Failed, "request_unavailable")
                     .await;
             };
+            // Send intent is durable before the network call.
+            held_write!(self, "send intent", self.held.begin_send(operation.clone()));
             let send = StableSendRequest {
                 request_id: request_id.clone(),
                 context_id: None,
@@ -123,7 +127,22 @@ impl Call {
         let mut tries = 0u32;
         loop {
             match self.ports.agent.query(&target, RemoteQuery::ByRequest(request_id.clone())).await {
-                QueryOutcome::Found { remote, .. } => return self.accepted(operation, remote, None).await,
+                // The answer may already carry the task's state, even its
+                // result: record the acceptance, then report that state
+                // before deciding whether the task must be followed at all.
+                QueryOutcome::Found { remote, status, snapshot } => {
+                    let evidence = AcceptanceEvidence { operation, remote };
+                    let cancel = held_write!(self, "acceptance", self.held.record_acceptance(evidence.clone()));
+                    self.report_task_state(status, snapshot).await?;
+                    if !self.ended && !self.awaiting_input {
+                        self.reattach().await?;
+                    }
+                    if cancel.is_some() && !self.ended {
+                        let view = self.held.view().clone();
+                        self.carry_out_cancel(&view).await?;
+                    }
+                    return Ok(());
+                }
                 QueryOutcome::Unsupported => {
                     self.mark_unresolved(UnresolvedKind::Uncertain, "query_by_request_unsupported").await;
                     return Ok(());
@@ -202,6 +221,32 @@ impl Call {
         Ok(())
     }
 
+    /// Reports the state of the remote task as read by a query, unless it is
+    /// the state that was reported last.
+    pub async fn report_task_state(&mut self, status: TaskStatus, snapshot: Payload) -> Flow {
+        if self.last_polled.as_ref() == Some(&(status, snapshot.clone())) {
+            return Ok(());
+        }
+        self.last_polled = Some((status, snapshot.clone()));
+        // The interaction ids are placeholders; the rules derive them.
+        let placeholder = || InteractionId(String::new());
+        let kind = match status {
+            TaskStatus::Submitted | TaskStatus::Working => AgentEventKind::Snapshot,
+            TaskStatus::InputRequired => AgentEventKind::InputRequired {
+                interaction: placeholder(),
+            },
+            TaskStatus::AuthRequired => AgentEventKind::AuthRequired {
+                interaction: placeholder(),
+            },
+            TaskStatus::Completed => AgentEventKind::Final,
+            TaskStatus::Failed | TaskStatus::Canceled | TaskStatus::Rejected => AgentEventKind::Error,
+        };
+        // The state word the rules read comes from the status, not from
+        // whatever shape the snapshot has.
+        let snapshot = with_state(snapshot, status);
+        self.on_event(kind, None, snapshot).await
+    }
+
     /// Reads the remote task once and reports its state when it changed.
     pub async fn poll_remote(&mut self) -> Flow {
         let target = self.spec().target.clone();
@@ -209,29 +254,7 @@ impl Call {
             return Ok(());
         };
         match self.ports.agent.query(&target, RemoteQuery::ByTask(remote)).await {
-            QueryOutcome::Found { status, snapshot, .. } => {
-                if self.last_polled.as_ref() == Some(&(status, snapshot.clone())) {
-                    return Ok(());
-                }
-                self.last_polled = Some((status, snapshot.clone()));
-                // The interaction ids are placeholders; the rules derive them.
-                let placeholder = || InteractionId(String::new());
-                let kind = match status {
-                    TaskStatus::Submitted | TaskStatus::Working => AgentEventKind::Snapshot,
-                    TaskStatus::InputRequired => AgentEventKind::InputRequired {
-                        interaction: placeholder(),
-                    },
-                    TaskStatus::AuthRequired => AgentEventKind::AuthRequired {
-                        interaction: placeholder(),
-                    },
-                    TaskStatus::Completed => AgentEventKind::Final,
-                    TaskStatus::Failed | TaskStatus::Canceled | TaskStatus::Rejected => AgentEventKind::Error,
-                };
-                // The state word the rules read comes from the status, not
-                // from whatever shape the snapshot has.
-                let snapshot = with_state(snapshot, status);
-                self.on_event(kind, None, snapshot).await
-            }
+            QueryOutcome::Found { status, snapshot, .. } => self.report_task_state(status, snapshot).await,
             QueryOutcome::Unsupported if self.polling => {
                 self.mark_blind("query_unsupported").await;
                 Ok(())

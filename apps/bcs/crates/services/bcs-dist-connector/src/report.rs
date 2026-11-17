@@ -116,6 +116,10 @@ impl Call {
                 // contract drops that variant (decision 24), and a re-report
                 // by a later holder is the same success as the first one.
                 Ok(_) => return Ok(Admitted::Yes),
+                Err(error) if crate::call::permanent(&error) => {
+                    tracing::error!(did = %self.did().0, ?error, "admission cannot succeed; the call stays held");
+                    return Err(Stop::Invalid);
+                }
                 Err(error) => {
                     tracing::warn!(did = %self.did().0, ?error, "admission failed; retrying with the same input id");
                     backoff.wait().await;
@@ -131,6 +135,10 @@ impl Call {
             // Same (did, holder_epoch, seq) on every attempt: the Worker drops repeats.
             match self.ports.inbox.append_stream(request.clone()).await {
                 Ok(_) => return Ok(()),
+                Err(error) if crate::call::permanent(&error) => {
+                    tracing::error!(did = %self.did().0, ?error, "event append cannot succeed; the call stays held");
+                    return Err(Stop::Invalid);
+                }
                 Err(error) => {
                     tracing::warn!(did = %self.did().0, ?error, "event append failed; retrying");
                     backoff.wait().await;
@@ -176,6 +184,10 @@ impl Call {
                     tracing::error!(did = %self.did().0, "blob identity conflict; payload kept inline");
                     return Ok(payload);
                 }
+                Err(error) if crate::call::permanent(&error) => {
+                    tracing::error!(did = %self.did().0, ?error, "blob write cannot succeed; the call stays held");
+                    return Err(Stop::Invalid);
+                }
                 Err(error) => {
                     tracing::warn!(did = %self.did().0, ?error, "blob write failed; retrying");
                     backoff.wait().await;
@@ -197,6 +209,10 @@ impl Call {
                     return Ok(serde_json::from_slice(&bytes).ok().map(Payload::Inline));
                 }
                 Ok(None) => return Ok(None),
+                Err(error) if crate::call::permanent(&error) => {
+                    tracing::error!(did = %self.did().0, ?error, "blob read cannot succeed; the call stays held");
+                    return Err(Stop::Invalid);
+                }
                 Err(error) => {
                     tracing::warn!(did = %self.did().0, ?error, "blob read failed; retrying");
                     backoff.wait().await;
