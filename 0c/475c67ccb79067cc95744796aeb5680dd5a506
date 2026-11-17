@@ -1,0 +1,36 @@
+apps/backend/src/agentclaw/community/adapters/http/task/commission_a2a_schemas.py
+  h_059e888e5e4e82 29-31,78-81,177,189-192
+apps/backend/src/agentclaw/community/core/task/context_collab/g4_contracts_consistency/product_contract.py
+  h_059e888e5e4e82 30,80-95
+apps/backend/src/agentclaw/community/core/task/context_collab/g4_contracts_consistency/state_machine.py
+  h_059e888e5e4e82 113-114,417-419,422
+apps/backend/src/agentclaw/community/core/task/context_collab/g4_contracts_consistency/workflow_resolution.py
+  h_059e888e5e4e82 88
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/task_contracts.py
+  h_059e888e5e4e82 19-20,41
+apps/backend/src/agentclaw/community/core/task/context_collab/products/task_commission/README.md
+  h_059e888e5e4e82 321,324-343,379-386
+apps/backend/src/agentclaw/community/core/task/context_collab/products/task_commission/service.py
+  h_059e888e5e4e82 71,464-471,676
+apps/backend/src/agentclaw/community/core/task/context_collab/products/task_commission/service_api.py
+  h_059e888e5e4e82 9,58-63,69-72
+apps/backend/tests/community/core/task/context_collab/products/task_commission_e2e_support.py
+  h_059e888e5e4e82 55-57,76,79,91,113-116,118-125,215,217,229,237-247
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_a2a_ingress.py
+  h_059e888e5e4e82 109,259-372
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_end_to_end.py
+  h_059e888e5e4e82 409,476-477,558-559,563,598-606
+apps/backend/tests/community/core/task/context_collab/test_state_machine.py
+  h_059e888e5e4e82 357-358,361,413-417
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0c475c67ccb79067cc95744796aeb5680dd5a506",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

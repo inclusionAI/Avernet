@@ -1,0 +1,21 @@
+apps/bcs/crates/adapters/http/bcs-http/tests/support/bot_chat_empty_input.rs
+  s_5e399fa0cb9c14::t_5515fe4b15a4c1 10
+apps/bcs/specs/2026-11-15-distributed-contracts/validation.md
+  s_5e399fa0cb9c14::t_2055c1e88e1e3d 127-143
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6e1c24186f63088851283db31cbc7a215002d86c",
+  "prompts": {},
+  "sessions": {
+    "s_5e399fa0cb9c14": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1dfc3-75aa-7d83-9747-20741727a48e",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "yuange.zjy <yuange.zjy@antgroup.com>"
+    }
+  }
+}

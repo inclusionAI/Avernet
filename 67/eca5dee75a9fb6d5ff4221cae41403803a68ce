@@ -1,0 +1,50 @@
+apps/backend/src/agentclaw/community/adapters/http/task/commission_a2a_schemas.py
+  h_059e888e5e4e82 151-154,159-163,184
+apps/backend/src/agentclaw/community/core/task/context_collab/README.md
+  h_059e888e5e4e82 46-50,62-65,67-68,74-75,88,94-95,112,146-148,152,259-260
+apps/backend/src/agentclaw/community/core/task/context_collab/g4_contracts_consistency/product_contract.py
+  h_059e888e5e4e82 29-31,57-58,60-65,71,79,87,94,114
+apps/backend/src/agentclaw/community/core/task/context_collab/l4_context_primitives/context_collab_service.py
+  h_059e888e5e4e82 63-65,274
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/README.md
+  h_059e888e5e4e82 13,17-18,20,47-49,63-64,79-80,104-145,178-180,209-210,231-236,241-242,245-246,249,270-271,302-304,315,345-347,350-354,357-362,406-407,440-441,451-452,454-455
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/binding.py
+  h_059e888e5e4e82 52-53,84,93-106
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/contracts.py
+  h_059e888e5e4e82 77-78,101-136,191-197
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/instance.py
+  h_059e888e5e4e82 15,17,30-32,50-51,58-59,62-65,77-86,104-108,125,136,154-158
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/operations/contracts.py
+  h_059e888e5e4e82 21,23-25,34-36
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/operations/product_profile.py
+  h_059e888e5e4e82 31
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/task_contracts.py
+  h_059e888e5e4e82 1-94
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/validation.py
+  h_059e888e5e4e82 6-8,14-17,47-58,68-69
+apps/backend/src/agentclaw/community/core/task/context_collab/products/task_commission/README.md
+  h_059e888e5e4e82 6-7,29-31,44-70,178,319-323,441-446,463-469,523-525
+apps/backend/src/agentclaw/community/core/task/context_collab/products/task_commission/profile.py
+  h_059e888e5e4e82 28-30,81,90,92,99,102
+apps/backend/src/agentclaw/community/core/task/context_collab/products/task_commission/service.py
+  h_059e888e5e4e82 70-72,195,214,226,433-434,519,522
+apps/backend/tests/community/adapters/http/task/test_commission_profile_versions.py
+  h_059e888e5e4e82 1-70
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_end_to_end.py
+  h_059e888e5e4e82 73-78,189,387-393,396-398,400-405,407,422,468-478
+apps/backend/tests/community/core/task/context_collab/test_l6_product_profile_operations.py
+  h_059e888e5e4e82 259,280,283-372
+apps/backend/tests/community/core/task/context_collab/test_optional_product_profiles.py
+  h_059e888e5e4e82 1-439
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "67eca5dee75a9fb6d5ff4221cae41403803a68ce",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}
