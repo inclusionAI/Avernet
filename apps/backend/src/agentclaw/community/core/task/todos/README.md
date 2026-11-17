@@ -16,7 +16,13 @@ Creating a Todo only persists `pending`. `TodoScheduler` periodically scans A-ow
 2. `pending_acceptance`: repair an acceptance decision that was durably appended in B but whose A-side projection failed.
 3. `in_progress`: refresh the B runtime; if durable Human work is waiting behind a completed Context, resume the original Bot session.
 
-Only a confirmed runtime `COMPLETED` result makes the Context `done` and advances the Todo to `pending_acceptance`. Runtime failure states stay visible in B and leave the Todo `in_progress` for inspection or recovery.
+A confirmed runtime `COMPLETED` result or the active Bot execution's authenticated
+`POST /api/v1/collaboration/tasks/todos/{todo_id}/complete` call appends
+`task.completed` and makes the Context `done`. The existing scheduler remains
+the only owner of completing the active execution credential and advancing the
+Todo to `pending_acceptance`; the completion endpoint does not mutate A-owned
+Todo state directly. Runtime failure states stay visible in B and leave the
+Todo `in_progress` for inspection or recovery.
 
 Acceptance is event-first. The client supplies a stable `decision_id`; A first finds or appends one immutable Human `task.accepted` or `task.rejected` event in B, then persists the same decision in A. Each acceptance round permits exactly one decision: reusing the same ID and payload is idempotent within that round, while a second ID or a changed verdict, content, actor, Todo, or targets conflicts. Repair considers the first valid decision appended after the latest `task.completed`; an older rejection can never be replayed against a later completed round. This ordering lets the scheduler repair B-success/A-failure without inventing or replacing a decision.
 
@@ -29,7 +35,7 @@ A and B run in the same process in the production composition root, so the adapt
 
 `TodoCollaborationPort` is an internal Task/Todo consumer boundary, not a globally replaceable Plugin API. `InProcessTodoCollaborationAdapter` is the production composition and delegates to the same-process `ContextCollabServiceProtocol`; it is fixed by `TaskTodoBindings` rather than selected by deployment Profile. The deterministic fake lives under Todo tests and is not shipped or registered as a local plugin.
 
-The Todo Events endpoint stays compact and event-centric: it returns normalized event metadata and concise primary content, but not the complete event payload. Every successfully persisted product artifact appends one durable `artifact.reported` event, so this view can say what was produced in chronological order. Text uses a whitespace-normalized 20-character preview; file, link, and code events use their display name. `task.completed` remains a separate run-completion notice and never substitutes for the artifact events.
+The Todo Events endpoint stays compact and event-centric: it returns normalized event metadata and concise primary content, but not the complete event payload. Every successfully persisted product artifact appends one durable `artifact.reported` event, so this view can say what was produced in chronological order. Text uses a whitespace-normalized 20-character preview; file, link, and code events use `artifact_name` as the concise display title. File rows fall back to the sanitized file name when a legacy caller omits `artifact_name`. `task.completed` remains a separate run-completion notice and never substitutes for the artifact events.
 
 The Interactions endpoint is actor/content-centric and richer: it includes the Human objective in `task.created`, Human messages and rejection instructions, selected rejection floors from the full payload, and `artifact.reported` payloads. The client resolves each artifact event by its stable `artifact_id`, displays complete text and complete file/link/code details at the event's exact position, and uses the reporting Bot as the actor. The Artifacts endpoint remains the complete persisted inventory and content source.
 
@@ -60,9 +66,10 @@ Resume retries are idempotent. Once B is `in_progress` or a later `task.started`
 
 Each dispatched or resumed Bot run receives the artifact-reporting contract in
 the message body. The contract contains `todo_id`, `todo_execution_id`, the
-current-generation `todo_execution_token`, the Backend URL, and concrete report/upload
-examples. Runtime metadata may repeat these values for observability, but Bot
-behavior must not depend on metadata being propagated by a transport.
+current-generation `todo_execution_token`, the Backend URL, and concrete
+report/upload/complete examples. Runtime metadata may repeat these values for
+observability, but Bot behavior must not depend on metadata being propagated by
+a transport.
 
 Every dispatched or resumed run explicitly loads the `todo-runner` Skill from
 `/home/admin/.openclaw/workspace/skills-pool/skills-repo/infra/todo-runner/SKILL.md`
@@ -84,10 +91,11 @@ Todo / collab_context_id
 
 `collab_context_id` is the Todo's B-owned collaboration Context. A
 `todo_execution_id` identifies one execution generation within that Context,
-and its token authorizes artifact reporting only for that generation. The Bot
-therefore reports `todo_execution_id` plus the token; it does not report or
-choose `collab_context_id`. The Backend resolves the Context from the persisted
-execution and rejects executions that do not belong to the Todo in the URL.
+and its token authorizes artifact reporting and completion only for that
+generation. The Bot therefore reports `todo_execution_id` plus the token; it
+does not report or choose `collab_context_id`. The Backend resolves the Context
+from the persisted execution and rejects executions that do not belong to the
+Todo in the URL.
 
 Issuing a replacement execution invalidates the previous generation. Marking
 the Context complete also completes its active execution, so the token cannot
@@ -96,6 +104,14 @@ be reused after the run reaches acceptance. The public request field is
 temporary compatibility alias. A legacy `collab_context_id` request field may
 be parsed during that window but is ignored and never used for authorization or
 artifact persistence.
+
+After at least one artifact is reported successfully, the Bot calls the
+generation-scoped Complete endpoint with `todo_execution_id` and the same
+`X-Todo-Execution-Token`. The endpoint appends one idempotent `task.completed`
+event for that execution. It intentionally leaves the execution credential and
+Todo row unchanged; the existing scheduler observes the resulting Context
+`done` state, invalidates the active credential, and projects the Todo from
+`in_progress` to `pending_acceptance`.
 
 Artifact persistence and Context event storage are separate stores. The service
 therefore persists the artifact first and appends `artifact.reported` only after

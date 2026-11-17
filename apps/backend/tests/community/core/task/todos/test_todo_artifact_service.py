@@ -32,6 +32,7 @@ from agentclaw.community.core.task.todos.errors import (
     TodoArtifactStorageError,
     TodoArtifactUploadTooLargeError,
     TodoExecutionAuthError,
+    TodoStateConflictError,
 )
 from agentclaw.community.core.task.todos.models import TodoRecord, TodoStatus
 from agentclaw.community.core.task.todos.services.todo_artifact_service import (
@@ -67,7 +68,7 @@ class _Collaboration:
     def __init__(self) -> None:
         self.context = TodoCollaborationContext(
             collab_context_id="context_1",
-            status="working",
+            status="in_progress",
             context_version=1,
             current_event_id="event_1",
             events=(),
@@ -106,6 +107,11 @@ class _Collaboration:
         )
         self.context = replace(
             self.context,
+            status=(
+                "done"
+                if request.event_kind == "task.completed"
+                else self.context.status
+            ),
             context_version=self.context.context_version + 1,
             current_event_id=event.event_id,
             events=(*self.context.events, event),
@@ -280,6 +286,16 @@ def _report(service: TodoArtifactService, credential, **overrides):
     return service.report_artifact(**values)
 
 
+def _complete(service: TodoArtifactService, credential, **overrides):
+    values: dict[str, Any] = {
+        "todo_id": "todo_1",
+        "todo_execution_id": credential.execution_id,
+        "execution_token": credential.token,
+    }
+    values.update(overrides)
+    return service.report_completion(**values)
+
+
 def test_issue_execution_derives_context_from_todo() -> None:
     _, artifacts, _, _, credential, _ = _service()
 
@@ -287,6 +303,59 @@ def test_issue_execution_derives_context_from_todo() -> None:
 
     assert execution.todo_id == "todo_1"
     assert execution.collab_context_id == "context_1"
+
+
+def test_report_completion_appends_task_completed_without_finishing_execution() -> None:
+    service, artifacts, _, _, credential, collaboration = _service()
+    service.bind_run_id(execution_id=credential.execution_id, run_id="run_complete")
+
+    _complete(service, credential)
+
+    assert collaboration.context.status == "done"
+    assert len(collaboration.context.events) == 1
+    event = collaboration.context.events[0]
+    assert event.event_type == "task.completed"
+    assert event.actor_id == "bot_1"
+    assert event.actor_type == "bot"
+    assert event.payload == {
+        "todo_id": "todo_1",
+        "todo_execution_id": credential.execution_id,
+        "run_id": "run_complete",
+    }
+    assert (
+        artifacts.get_execution(execution_id=credential.execution_id).status
+        is TodoExecutionStatus.ACTIVE
+    )
+
+
+def test_report_completion_is_idempotent_for_same_execution() -> None:
+    service, _, _, _, credential, collaboration = _service()
+
+    _complete(service, credential)
+    _complete(service, credential)
+
+    assert [event.event_type for event in collaboration.context.events] == [
+        "task.completed"
+    ]
+
+
+def test_report_completion_rejects_invalid_token() -> None:
+    service, _, _, _, credential, collaboration = _service()
+
+    with pytest.raises(TodoExecutionAuthError):
+        _complete(service, credential, execution_token="wrong-token")
+
+    assert collaboration.context.events == ()
+
+
+def test_report_completion_rejects_non_running_context_without_matching_event() -> None:
+    service, _, _, _, credential, collaboration = _service()
+    collaboration.context = replace(collaboration.context, status="done")
+
+    with pytest.raises(TodoStateConflictError, match="not in progress"):
+        _complete(service, credential)
+
+    assert collaboration.context.events == ()
 
 
 @pytest.mark.parametrize(
@@ -328,9 +397,7 @@ def test_report_persists_supported_non_file_artifacts(
     service, _, _, _, credential, collaboration = _service()
     service.bind_run_id(execution_id=credential.execution_id, run_id="run_1")
 
-    record = _report(
-        service, credential, artifact_kind=kind, content=content
-    )
+    record = _report(service, credential, artifact_kind=kind, content=content)
 
     assert record.artifact_kind is kind
     assert record.content == {
@@ -396,6 +463,28 @@ def test_file_upload_roundtrip_reuses_object_storage_and_authorizes_reader():
     assert collaboration.context.events[0].content == "产出文件：final_report.pdf"
     assert collaboration.context.events[0].payload["run_id"] == "run_file"
     assert access.calls == [{"space_id": 7, "user_id": "user_1", "env": None}]
+
+
+def test_file_upload_event_prefers_concise_artifact_name_as_summary():
+    service, _, _, _, credential, collaboration = _service()
+    service.bind_run_id(execution_id=credential.execution_id, run_id="run_named_file")
+
+    record = service.upload_file(
+        todo_id="todo_1",
+        todo_execution_id=credential.execution_id,
+        execution_token=credential.token,
+        artifact_name="AI 发展预测分析",
+        file_name="ai_comprehensive_report.csv",
+        content_type="text/csv",
+        payload=b"csv-bytes",
+        is_final_artifact=True,
+    )
+
+    event = collaboration.context.events[0]
+    assert record.artifact_name == "AI 发展预测分析"
+    assert record.content["file_name"] == "ai_comprehensive_report.csv"
+    assert event.content == "产出文件：AI 发展预测分析"
+    assert event.payload["artifact_name"] == "AI 发展预测分析"
 
 
 def test_new_execution_replaces_old_token():

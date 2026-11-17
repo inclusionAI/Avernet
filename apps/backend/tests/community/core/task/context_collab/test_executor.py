@@ -166,6 +166,11 @@ async def test_run_context_loads_todo_runner_from_infra_without_symlink() -> Non
         "POST https://backend.example/api/v1/collaboration/tasks/todos/todo_1/report"
         in context
     )
+    assert (
+        "POST https://backend.example/api/v1/collaboration/tasks/todos/todo_1/complete"
+        in context
+    )
+    assert "只有完成接口返回 HTTP 成功，本轮执行才算结束" in context
     assert "todo-runner Skill" in context
     assert (
         "/home/admin/.openclaw/workspace/skills-pool/skills-repo/infra/"
