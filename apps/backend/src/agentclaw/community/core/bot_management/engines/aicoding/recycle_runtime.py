@@ -46,25 +46,9 @@ class AicodingRecycleRuntime:
         if record["target"]["provider"] in {"baas", "local"}:
             runtime = _baas_recycle_runtime(self.dependencies)
 
-            def inventory():
-                devices = runtime.list_devices_by_bot_uuid(
-                    bot_uuid=record["target"]["bot_uuid"]
-                )
-                if not isinstance(devices, list):
-                    raise RecycleTargetChanged("Invalid physical inventory")
-                result = set()
-                for device in devices:
-                    if not isinstance(device, dict):
-                        raise RecycleTargetChanged("Invalid physical target")
-                    identity = device.get("provider_device_id")
-                    if not isinstance(identity, str) or not identity:
-                        raise RecycleTargetChanged("Physical target identity missing")
-                    result.add(identity)
-                if not result:
-                    raise RecycleTargetChanged("Physical targets missing")
-                return sorted(result)
-
-            physical_targets = inventory()
+            physical_targets = _physical_inventory(
+                runtime, bot_uuid=record["target"]["bot_uuid"]
+            )
             if (
                 record.get("physical_targets") is not None
                 and record["physical_targets"] != physical_targets
@@ -83,14 +67,12 @@ class AicodingRecycleRuntime:
         )
 
         def check():
-            if (
-                self.target(
-                    self.bots.get_by_id_and_owner(bot["bot_id"], bot["owner_id"])
-                )
-                != record["target"]
-            ):
+            current_bot = self.bots.get_by_id_and_owner(bot["bot_id"], bot["owner_id"])
+            if self.target(current_bot) != record["target"]:
                 raise RecycleTargetChanged("Recycle target changed")
-            if physical_targets is not None and inventory() != physical_targets:
+            if physical_targets is not None and _physical_inventory(
+                runtime, bot_uuid=record["target"]["bot_uuid"]
+            ) != physical_targets:
                 raise RecycleTargetChanged("Physical targets changed before release")
             if verify is not None:
                 verify()
@@ -115,6 +97,24 @@ class AicodingRecycleRuntime:
             self.dependencies, self.arca_transport, target=target, release=release,
             physical_targets=physical_targets,
         )
+
+
+def _physical_inventory(runtime: BaasRecycleRuntime, *, bot_uuid: str) -> list[str]:
+    """Read every physical identity, including stopped/released logical rows."""
+    devices = runtime.list_devices_by_bot_uuid(bot_uuid=bot_uuid)
+    if not isinstance(devices, list):
+        raise RecycleTargetChanged("Invalid physical inventory")
+    identities = set()
+    for device in devices:
+        if not isinstance(device, dict):
+            raise RecycleTargetChanged("Invalid physical target")
+        identity = device.get("provider_device_id")
+        if not isinstance(identity, str) or not identity:
+            raise RecycleTargetChanged("Physical target identity missing")
+        identities.add(identity)
+    if not identities:
+        raise RecycleTargetChanged("Physical targets missing")
+    return sorted(identities)
 
 
 def submit_baas_release(baas, *, target, request_id, owner_id):
