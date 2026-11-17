@@ -1,0 +1,19 @@
+submodules/avernet
+  s_4510c0a8802d3e::t_e7c3fac8b3ba80 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f238e24935d009eee9665ddf4f9c236a73543842",
+  "prompts": {},
+  "sessions": {
+    "s_4510c0a8802d3e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1abc2-03c9-7d12-9760-9c632cf09e6e",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

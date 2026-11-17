@@ -1,0 +1,24 @@
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/approval-search-signature.test.ts
+  h_5f06d4d8b4bdd5 1-27
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/approval-workbench-api.test.ts
+  h_5f06d4d8b4bdd5 1-39
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/approval-workbench-runtime.test.ts
+  h_5f06d4d8b4bdd5 1-24
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/approval-search-signature.ts
+  h_5f06d4d8b4bdd5 1-25
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/approval-workbench-runtime.ts
+  h_5f06d4d8b4bdd5 1-15
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/index.ts
+  h_5f06d4d8b4bdd5 85-88,528-549
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "94f6e9a33b3ec7f1387aab02d25b90494d904185",
+  "prompts": {},
+  "humans": {
+    "h_5f06d4d8b4bdd5": {
+      "author": "fudp <dapeng.fdp@antgroup.com>"
+    }
+  }
+}

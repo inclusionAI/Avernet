@@ -1,0 +1,18 @@
+apps/backend/src/agentclaw/corp/configs/application-prepub.yaml
+  h_dac96fb4da302f 364-373
+apps/backend/src/agentclaw/corp/configs/application-prod.yaml
+  h_dac96fb4da302f 364-373
+apps/backend/src/agentclaw/corp/plugins/prod/device_adapter_transport.py
+  h_dac96fb4da302f 21,47-58,79-86,496-518,521,523-537,539-568,571-574,576-578,580-608,656,669,763,772,828,847
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9a8c72ca11c6a5546d56e0d8a51960b52d4a8710",
+  "prompts": {},
+  "humans": {
+    "h_dac96fb4da302f": {
+      "author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

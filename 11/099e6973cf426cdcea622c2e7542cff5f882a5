@@ -1,0 +1,19 @@
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/routes/__tests__/internal-fanout-auth.test.ts
+  s_9c62afbb8da990::t_ff905225696c1d 103-111
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "11099e6973cf426cdcea622c2e7542cff5f882a5",
+  "prompts": {},
+  "sessions": {
+    "s_9c62afbb8da990": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c876-a4fb-7cd0-afcc-05b1ac3f616d",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}

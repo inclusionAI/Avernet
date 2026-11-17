@@ -1,0 +1,50 @@
+singlebox/modules/bcs.sh
+  s_9d3f70152b5f9f::t_aee62f83115a66 192
+apps/bcs/scripts/setup_dev_env.sh
+  s_9d3f70152b5f9f::t_06994dc07a38f7 8
+docs/agents/validation.md
+  s_9d3f70152b5f9f::t_06994dc07a38f7 106-111,115-117
+  s_9d3f70152b5f9f::t_d94b6670806bec 112-114
+apps/bcs/crates/bootstrap/bcs/tests/caller_channel/README.md
+  s_9d3f70152b5f9f::t_bb78be4cf8d85b 31-37
+.github/workflows/singlebox-coverage.yml
+  s_9d3f70152b5f9f::t_06994dc07a38f7 155,157
+  s_9d3f70152b5f9f::t_d94b6670806bec 158
+  s_9d3f70152b5f9f::t_4cd9020032e9d3 159-160
+.github/workflows/unit-tests.yml
+  s_9d3f70152b5f9f::t_d94b6670806bec 170
+  s_9d3f70152b5f9f::t_06994dc07a38f7 169
+  s_9d3f70152b5f9f::t_4cd9020032e9d3 171-172
+apps/bcs/scripts/e2e-test/caller_execution_story.py
+  s_9d3f70152b5f9f::t_7c7286c4758bf0 71
+  s_9d3f70152b5f9f::t_ce35fbea0f9cf1 381,391-393
+  s_9d3f70152b5f9f::t_70c536c5f5abad 32,35-40,90,384
+  s_9d3f70152b5f9f::t_2dfa21a0bb6a09 31,33-34,41-42,60,63-70,72-75,81-83,87-89,92,226-228,230-243,264,335,375-380,382-383,385-390,406,462-464,470,478
+  s_9d3f70152b5f9f::t_44d5469aafb537 465-466
+  s_9d3f70152b5f9f::t_6660818901bca3 61-62,85-86,91,229,244-260,394-405,460
+apps/bcs/README.md
+  s_9d3f70152b5f9f::t_06994dc07a38f7 174-175
+apps/bcs/crates/bootstrap/bcs/tests/support/e2e_helpers.rs
+  s_9d3f70152b5f9f::t_536f9b42716a9e 95-100
+apps/bcs/rust-toolchain.toml
+  s_9d3f70152b5f9f::t_06994dc07a38f7 1-6
+singlebox/verity/test_singlebox_bcs_prereqs.sh
+  s_9d3f70152b5f9f::t_49eaa088b904ee 104,106-124,129
+  s_9d3f70152b5f9f::t_4bb21f54442b8f 105
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "af3ae823b5930a47a426cd6493c5f85e2e988d1a",
+  "prompts": {},
+  "sessions": {
+    "s_9d3f70152b5f9f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d36a-1103-75b3-bd40-923ea9f89a9d",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Zimin Zhang <zhangzimin.zzm@antgroup.com>"
+    }
+  }
+}

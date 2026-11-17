@@ -1,0 +1,20 @@
+apps/frontend-nextgen/test/components/CollaborationSquare/GroupMemberAvatar.test.tsx
+  s_502dbf3f3ce405::t_183c9cd55accde 18,30-34
+  s_502dbf3f3ce405::t_a575a14159a939 35-36
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2eca769a1863cf1ea8f82111ba51c1ecd4f1e3bb",
+  "prompts": {},
+  "sessions": {
+    "s_502dbf3f3ce405": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1bf38-d50b-74a2-af65-1d53dfb9cd45",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

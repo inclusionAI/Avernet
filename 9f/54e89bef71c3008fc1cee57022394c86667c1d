@@ -1,0 +1,40 @@
+apps/backend/src/agentclaw/community/core/task/context_collab/l4_context_primitives/activity.py
+  s_e0cb98366a65ad::t_2fc63b435592d7 1-31,33-52
+  s_e0cb98366a65ad::t_2149fcc9fdbd8f 32
+apps/backend/src/agentclaw/community/core/task/context_collab/l4_context_primitives/decision.py
+  s_e0cb98366a65ad::t_a2895d63670bc4 1-61
+apps/backend/src/agentclaw/community/core/task/context_collab/l4_context_primitives/query.py
+  s_e0cb98366a65ad::t_d1892a0a450546 1-18
+apps/backend/src/agentclaw/community/core/task/context_collab/l4_context_primitives/event_envelope.py
+  s_e0cb98366a65ad::t_471b2c4045c909 1-118
+apps/backend/src/agentclaw/community/core/task/context_collab/l4_context_primitives/message.py
+  s_e0cb98366a65ad::t_37327a84e2906c 1-55
+apps/backend/src/agentclaw/community/core/task/context_collab/l4_context_primitives/collet.py
+  s_e0cb98366a65ad::t_ae257a15a9c2bf 1-233
+apps/backend/src/agentclaw/community/core/task/context_collab/l4_context_primitives/artifact.py
+  s_e0cb98366a65ad::t_906fb3055b2082 1-99
+apps/backend/src/agentclaw/community/core/task/context_collab/l4_context_primitives/task.py
+  s_e0cb98366a65ad::t_63d6a414f0d8e6 1-21
+apps/backend/tests/community/core/task/context_collab/test_l4_primitives.py
+  s_e0cb98366a65ad::t_58020e0f6c45ef 1-25,27-184,192-405
+  s_e0cb98366a65ad::t_007c9bd0c7a7a9 26
+  s_e0cb98366a65ad::t_3c7af187f5bcdc 185-191
+apps/backend/src/agentclaw/community/core/task/context_collab/l4_context_primitives/participants.py
+  s_e0cb98366a65ad::t_d85c3bd6da12aa 1-100
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9f54e89bef71c3008fc1cee57022394c86667c1d",
+  "prompts": {},
+  "sessions": {
+    "s_e0cb98366a65ad": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "1d67472f-3033-4c3f-9f69-89e0d4112039",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

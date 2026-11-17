@@ -1,0 +1,19 @@
+apps/backend/tests/community/core/bot_public/test_risk_repository.py
+  s_31bddf6da485b6::t_19e51645af96cc 273-366
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "aae06af3a909c28765289b5221da8c1562b3f252",
+  "prompts": {},
+  "sessions": {
+    "s_31bddf6da485b6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a15e3c-6538-7131-aa36-096bb26dec74",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

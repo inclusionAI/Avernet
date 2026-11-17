@@ -1,0 +1,32 @@
+apps/bcsfuse/docs/architecture/composition-contract.md
+  h_5686002b4ce7b9 310-318
+apps/bcsfuse/packages/search-core/src/search_core/config/embedding.py
+  h_5686002b4ce7b9 14,88-97
+apps/bcsfuse/src/app/adapters/http/recommend_routes.py
+  h_5686002b4ce7b9 363-365
+apps/bcsfuse/src/app/application/agent_search_service.py
+  h_5686002b4ce7b9 46-49,240,261,657-666,714-717,868-883,915-918
+apps/bcsfuse/src/app/application/services/retrieval_dependency_circuit.py
+  h_5686002b4ce7b9 1-112
+apps/bcsfuse/src/app/bootstrap/app_factory.py
+  h_5686002b4ce7b9 519-525,558
+apps/bcsfuse/src/app/bootstrap/oss_business_routes.py
+  h_5686002b4ce7b9 750-752
+apps/bcsfuse/tests/contract/test_dual_qdrant_outage_circuit_tdd.py
+  h_5686002b4ce7b9 1-228
+apps/bcsfuse/tests/contract/test_embedding_settings_hygiene_tdd.py
+  h_5686002b4ce7b9 1-34
+apps/bcsfuse/tests/contract/test_search_resilience_composition_tdd.py
+  h_5686002b4ce7b9 154,188-191
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d6c8bda787449e6307be6a10b7d870cfe8c9d31b",
+  "prompts": {},
+  "humans": {
+    "h_5686002b4ce7b9": {
+      "author": "文汐 <wenxi.sbw@antfin.com>"
+    }
+  }
+}

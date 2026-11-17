@@ -1,0 +1,36 @@
+apps/frontend-nextgen/test/pages/Workspace/Chat/ConversationSessionPlaceholder.test.tsx
+  s_cc93fd0c97018d::t_610abbf3a745cd 226
+apps/frontend-nextgen/src/services/backendApi/httpClient.ts
+  s_cc93fd0c97018d::t_893ba3d8826f36 31-32,240-242
+apps/frontend-nextgen/src/services/workspace/botSessionService.ts
+  s_cc93fd0c97018d::t_cfbf100bfc4bbd 388,395-398,403
+  s_cc93fd0c97018d::t_893ba3d8826f36 8-9,404-407,409-413
+  s_cc93fd0c97018d::t_a26a59038bab31 408
+apps/frontend-nextgen/src/services/workspace/identityService.ts
+  s_cc93fd0c97018d::t_893ba3d8826f36 14
+apps/frontend-nextgen/src/pages/Workspace/Chat/hooks/useConversationSessionCreation.ts
+  s_cc93fd0c97018d::t_cfbf100bfc4bbd 125
+  s_cc93fd0c97018d::t_893ba3d8826f36 130-133
+apps/frontend-nextgen/test/pages/Workspace/Chat/friendSessionCreateFailure.test.tsx
+  s_cc93fd0c97018d::t_89bd7c7792401e 2-5,27,34-35,45,49-50,60,69
+  s_cc93fd0c97018d::t_46c0c9d26d3607 81-89
+  s_cc93fd0c97018d::t_0e56cc80c012dd 1,6-26,28-33,36-44,46-48,51-59,61-68,70-80
+apps/frontend-nextgen/src/services/backendApi/bots/privateBotSessionController.ts
+  s_cc93fd0c97018d::t_893ba3d8826f36 92,100
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d92579ca31162dea3aa332ee7b7ebcf2ad7c2ec9",
+  "prompts": {},
+  "sessions": {
+    "s_cc93fd0c97018d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e4c7-94e6-72c1-aa65-cacb9ab5936e",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

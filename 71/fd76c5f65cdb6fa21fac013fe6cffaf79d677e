@@ -1,0 +1,23 @@
+apps/backend/specs/asc-caller-refresh-openapi-20261112/001-spec-output.md
+  s_bb98e2f10840b6::t_75e714b4ab8731 1-7
+apps/backend/specs/asc-caller-refresh-openapi-20261112/002-code-report.md
+  s_bb98e2f10840b6::t_75e714b4ab8731 1-7
+apps/backend/specs/asc-caller-refresh-openapi-20261112/003-review-report.md
+  s_bb98e2f10840b6::t_8a420a660ca604 1-49
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "71fd76c5f65cdb6fa21fac013fe6cffaf79d677e",
+  "prompts": {},
+  "sessions": {
+    "s_bb98e2f10840b6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a162ee-dd64-7f52-9208-9fd1326f32e5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}
