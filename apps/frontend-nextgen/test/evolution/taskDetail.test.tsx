@@ -187,11 +187,28 @@ it('uses a centered detail canvas and keeps versions available below without a s
   const title = await screen.findByRole('heading', { name: '目标进化演示' });
   expect(title).toHaveClass('text-2xl');
   const content = document.querySelector('[data-task-detail-content]')!;
-  expect(content.parentElement).toHaveClass('max-w-[1040px]', 'mx-auto');
+  expect(content.parentElement).toHaveClass('max-w-[1040px]', 'mx-auto', 'pt-8', 'pb-10');
+  expect(content).toHaveClass('flex', 'flex-col', 'gap-8');
+  expect(content.querySelector('[data-task-detail-sections]')).toHaveClass('flex', 'flex-col', 'gap-8');
   expect(content).not.toHaveClass('xl:grid-cols-[minmax(0,1fr)_300px]');
   const disclosure = screen.getByText('查看进化版本').closest('details')!;
   expect(disclosure).not.toHaveAttribute('open');
   fireEvent.click(screen.getByText('查看进化版本'));
   expect(disclosure).toHaveAttribute('open');
   expect(await screen.findByRole('complementary', { name: '当前任务进化版本' })).toBeInTheDocument();
+});
+
+it('keeps archive, configuration and version disclosure typography and padding consistent', async () => {
+  render(<TaskDetail />);
+  await screen.findByRole('heading', { name: '目标进化演示' });
+  await waitFor(() => expect(screen.getByText('任务运行日志归档')).toBeInTheDocument());
+  for (const label of ['任务运行日志归档', '任务配置与技术信息', '查看进化版本']) {
+    const summary = screen.getByText(label);
+    expect(summary.tagName).toBe('SUMMARY');
+    expect(summary).toHaveClass('text-sm', 'font-medium', 'leading-5', 'text-foreground');
+    const panel = summary.closest('details')!;
+    expect(panel).toHaveClass('rounded-lg', 'border', 'border-border', 'bg-card', 'p-4');
+    expect(panel).not.toHaveClass('p-3', 'p-5');
+    expect(panel).not.toHaveAttribute('open');
+  }
 });
