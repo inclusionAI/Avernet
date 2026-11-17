@@ -24,8 +24,8 @@ SQLite twin (flagged in the PR):
    twin was a stub returning ``None``); lives in
    :class:`BotDeviceProviderQueries` (``device_provider.py``).
 
-``insert`` is a **plain INSERT** (``db.add`` + ``db.flush``) — the
-table has no unique key; never an upsert. ``update_by_owner`` /
+``insert`` is a **plain INSERT** (``db.add`` + ``db.flush``), never an
+upsert; the model enforces a unique bot/entity/env/tenant key. ``update_by_owner`` /
 ``soft_delete_by_owner`` are **single conditional UPDATEs** guarded
 by ``is_delete=0 AND env`` with ``rowcount==0 → None/False`` after a Bot aggregate lock and maintenance check; soft-delete is an ``is_delete=1`` UPDATE, never a
 DELETE. ``gmt_modified=func.now()`` DB-side on every UPDATE (prod's
@@ -107,7 +107,7 @@ class BotRepository(
         self._db = db
         self.Model = BotModel
 
-    # ── insert (plain INSERT — no unique key, never an upsert) ──
+    # ── insert (plain INSERT — unique key enforced, never an upsert) ──
 
     def _new_bot_model(self, bot_data: Dict[str, Any]) -> BotModel:
         share_policy = bot_data.get("share_policy")

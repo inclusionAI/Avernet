@@ -593,6 +593,16 @@ def test_is_soft_deleted_distinguishes_deleted_from_absent(repo):
     assert repo.is_soft_deleted("b1", "staff_other") is False
 
 
+def test_soft_deleted_bot_still_reserves_its_unique_key(repo):
+    from sqlalchemy.exc import IntegrityError
+
+    repo.insert(_data(bot_id="b1"))
+    assert repo.soft_delete_by_owner("b1", "emp1")
+    with pytest.raises(IntegrityError):
+        repo.insert(_data(bot_id="b1"))
+    assert repo.is_soft_deleted("b1", "staff_x")
+
+
 def test_is_soft_deleted_respects_tenant_and_environment(repo, db, monkeypatch):
     from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 
