@@ -168,6 +168,7 @@ class TaskProcessor:
             publish_id=int(publish_id),
             operator=operator,
             biz_id=biz_id,
+            default_tag="eval",
         )
 
         logger.info("[to_env_preparing] eval_publish completed: result=%s", result)

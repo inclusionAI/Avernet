@@ -79,6 +79,8 @@ class BotDeployContext:
     #: Publish stage; ``None`` when the caller has none to declare.
     stage: Optional[str] = None
     version: str = "1"
+    #: 评测环境标签（default/eval）；普通发布为 ``None``。
+    default_tag: Optional[str] = None
     #: Caller-supplied extra NAS mount, mounted at the same path it names.
     mount_path: Optional[str] = None
     ext_info: Optional[Dict[str, Any]] = None
