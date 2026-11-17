@@ -1,6 +1,6 @@
 # Gateway: inbound A2A server of the cluster executor plane
 
-Status: proposal, waiting for plan review. No runtime code yet.
+Status: proposal, plan reviewed on the PR (2026-11-17). No runtime code yet.
 
 ## Summary
 
@@ -80,6 +80,8 @@ Streaming
       snapshot. An unusable resume id falls back to snapshot-first.
 - [ ] A stream ends after the task asks for input or finishes. Disconnecting
       does not affect the task.
+- [ ] Subscribing to a task that has already finished is refused with the A2A
+      "unsupported operation" error; the caller fetches the task instead.
 - [ ] Subscribers of the same session on one Gateway share one store read; a
       slow subscriber is closed with a retryable error and never delays others.
 - [ ] A resume id is opaque, works on any Gateway instance, and carries a

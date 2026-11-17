@@ -1,7 +1,12 @@
 # Plan: Gateway — inbound A2A server
 
-Status: for review. Nothing below is implemented. Two stops are requested by
-the brief: this plan, and the contract edits in §"Contract changes".
+Status: reviewed on the PR (2026-11-17); review outcomes are folded in below.
+Nothing is implemented yet.
+
+Review outcomes: Q1, Q2 accepted as proposed and treated as signed off by the
+executor team; Q4, Q5, Q7–Q10, the contract diffs, the admission order and the
+task index (decisions row 32) accepted; Q6 changed to follow A2A 1.0; a
+`bcs-service-api` version bump added. Q3 was not answered and stays a proposal.
 
 Sources: the decisions page (rows 1–31), the Gateway deep dive, the two PR
 walkthroughs, and `dev` at `5c3e30ea`. Store mapping: [research.md](research.md).
@@ -49,10 +54,12 @@ Numbered so you can answer by number. Q1–Q3 cross into the Worker's side.
    Worker operations (`acquire`, `load`, `commit`, …) fail with
    `NotApplied { code: "worker_only_operation" }`. It is not a delayed-contract
    stub: the Gateway must never call them.
-6. **Subscribe to a finished task.** The design page says "send the final Task
-   and close"; A2A 1.0 says `SubscribeToTask` on a terminal task returns
-   `UnsupportedOperationError`. Proposal: follow the design page (a client
-   that reconnects after missing the last event gets the final state).
+6. **Subscribe to a finished task — settled in review: follow A2A 1.0.**
+   `SubscribeToTask` on a task in a terminal state returns
+   `UnsupportedOperationError` (-32004); the client reads the final state with
+   `GetTask`. This is an adapter rule: the application's snapshot-first stream
+   still yields the final snapshot and ends, which `SendStreamingMessage` needs
+   when a retried send finds its task already finished.
 7. **Reply without an interaction id.** A2A has no field for it. Proposal:
    when the task has exactly one open interaction, a message with that
    `taskId` answers it; more than one open → `Invalid { code:
@@ -145,6 +152,21 @@ in the PR description for the executor team.
 +    async fn wait_task(&self, caller: &GatewayCaller, request: WaitTask)
 +        -> Result<TaskView, GatewayError>;
  }
+```
+
+Version (API-1): removing a public variant is a breaking change, so
+`bcs-service-api` goes `6.1.0` → `7.0.0`, with a "Version 7.0.0" section in its
+`CONTEXT.md` listing the three edits. The Connector PR (#4133) bumps to `6.2.0`
+(additive); whichever lands second rebases onto the other's version, so the
+final value is `7.0.0` or `7.1.0`. #4133 does not name `Duplicate` in a match,
+so it compiles before and after this edit. The contract edit stays the first,
+self-contained commit; on every rebase the tree is searched again for
+remaining `Duplicate` uses (README, harness, model).
+
+```diff
+# crates/service-api/bcs-service-api/Cargo.toml
+-version = "6.1.0"
++version = "7.0.0"
 ```
 
 `CoreAdmission` becoming a struct is my reading of "remove
@@ -284,6 +306,7 @@ SendMessage             submit → returnImmediately ? get_task : wait_task(Inpu
 SendStreamingMessage    submit → subscribe(Snapshot)                       [SSE]
 GetTask                 get_task
 SubscribeToTask         Last-Event-ID decodes ? subscribe(Resume) : subscribe(Snapshot)   [SSE]
+                        task already terminal → -32004 UnsupportedOperation, no stream
 CancelTask              cancel → wait_task(Final, 4 s)
 ListTasks               list_tasks (contextId required)
 *PushNotificationConfig, or a push config in SendMessage → -32003
@@ -293,6 +316,7 @@ ListTasks               list_tasks (contextId required)
 | --- | --- |
 | `NotFound` | -32001 TaskNotFound |
 | `NotCancelable` | -32002 TaskNotCancelable |
+| — (`SubscribeToTask` on a finished task) | -32004 UnsupportedOperation |
 | `AccessDenied` | -32600 with reason "access denied" (to align with the auth Issue) |
 | `Conflict`, `Invalid` | -32602 |
 | `Quarantined` | -32603, reason "session unavailable" |
@@ -496,6 +520,8 @@ fn first_sse_frame_is_the_task_and_ids_are_cursors() {}
 fn last_event_id_resumes_without_snapshot() {}
 fn every_gateway_error_maps_to_its_code() {}
 fn push_config_methods_return_32003() {}
+fn subscribe_to_finished_task_returns_32004() {}
+fn retried_streaming_send_on_finished_task_sends_the_task_and_closes() {}
 fn agent_card_declares_no_push_notifications() {}
 fn e2e_send_stream_reply_cancel_over_the_store_model() {}
 fn admission_always_writes_wake_while_d1_is_stubbed() {}
