@@ -40,7 +40,6 @@ export function TodoToolbar({
         <span className="rounded-lg border border-border bg-muted/40 px-2 py-1 text-xs font-medium text-foreground">
           {space?.spaceName ?? '空间加载中…'}
         </span>
-        {space?.spaceType === 'PERSONAL' ? <span>个人空间</span> : null}
         {space?.spaceType === 'TEAM' ? <span>团队空间</span> : null}
       </div>
 
