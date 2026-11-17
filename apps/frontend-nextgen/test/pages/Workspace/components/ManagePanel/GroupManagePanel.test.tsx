@@ -4,6 +4,7 @@
 import type { GroupUpdatePatch, GroupView, IdentityView } from '@/domain/collaboration';
 import { GroupManagePanel, type GroupManagePanelProps } from '@/pages/Workspace/components/ManagePanel/GroupManagePanel';
 import { ResizableWorkspaceSidebar } from '@/pages/Workspace/components/ResizableWorkspaceSidebar';
+import { listPresets } from '@/services/workspace/groupContextService';
 import type { PolicyResult } from '@/services/workspace/groupService';
 import { expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom';
@@ -236,4 +237,26 @@ it('右侧面板内 @Human 下拉在 Portal 弹出层交互不触发外部点击
   // 关闭下拉后点击面板外仍照常收起。
   fireEvent.pointerDown(document.body);
   expect(onClose).toHaveBeenCalledTimes(1);
+});
+
+jest.mock('@/services/workspace/groupContextService');
+
+it.each([true, false])('uses the signed-in user’s preset permissions in Bot view (%s)', async (canManage) => {
+  const list = jest.mocked(listPresets);
+  list.mockClear();
+  list.mockResolvedValue({ presets: [{ name: 'Timeline', description: 'Milestones' }], can_manage: canManage });
+
+  render(<GroupManagePanel {...panelProps({
+    activeIdentity: { ...identity, id: 'bot-1', kind: 'bot' },
+    sessionId: 'session-1',
+    authenticatedUserId: 'me',
+  })} />);
+  fireEvent.click(screen.getByRole('tab', { name: '群规则' }));
+
+  expect(await screen.findByText('Timeline')).toBeVisible();
+  expect(list).toHaveBeenCalledWith(
+    { groupId: 'g1', sessionId: undefined, view_bot_id: undefined },
+    expect.anything(),
+  );
+  expect(screen.queryAllByRole('button', { name: '编辑' })).toHaveLength(Number(canManage));
 });

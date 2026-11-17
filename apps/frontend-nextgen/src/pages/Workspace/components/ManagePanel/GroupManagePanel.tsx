@@ -251,12 +251,8 @@ export function GroupManagePanel(props: GroupManagePanelProps) {
           </div>
         ) : tab === 'presets' ? (
           <GroupPresetPanel
-            key={JSON.stringify([group.groupId, props.sessionId, activeIdentity?.id, authenticatedUserId])}
-            view={{
-              groupId: group.groupId,
-              sessionId: activeIdentity?.kind === 'bot' ? props.sessionId : undefined,
-              view_bot_id: activeIdentity?.kind === 'bot' ? activeIdentity.id : undefined,
-            }}
+            key={JSON.stringify([group.groupId, authenticatedUserId])}
+            view={{ groupId: group.groupId }}
           />
         ) : tab === 'sharedInfo' ? (
           <section className="space-y-3">
