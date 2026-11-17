@@ -93,24 +93,17 @@ class ActivateBotService:
             bot_id, owner_id, status, owner_name,
         )
 
-        if status == "ACTIVE":
+        # Both serving and in-progress Bots are idempotent, without side effects.
+        if status in {"ACTIVE", "REACTIVATING"}:
+            if status == "REACTIVATING":
+                logger.info(
+                    "[activate] already reactivating bot_id=%s user_id=%s",
+                    bot_id, owner_id,
+                )
             return BotLifecycleResult(
                 bot_id=bot_id,
                 owner_id=owner_id,
-                status="ACTIVE",
-                changed=False,
-            )
-
-        # Idempotent: already in progress → friendly return without side-effects
-        if status == "REACTIVATING":
-            logger.info(
-                "[activate] already reactivating bot_id=%s user_id=%s",
-                bot_id, owner_id,
-            )
-            return BotLifecycleResult(
-                bot_id=bot_id,
-                owner_id=owner_id,
-                status="REACTIVATING",
+                status=status,
                 changed=False,
             )
 
