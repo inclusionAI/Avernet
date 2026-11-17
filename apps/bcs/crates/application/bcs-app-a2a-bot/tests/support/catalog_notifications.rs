@@ -44,9 +44,9 @@ async fn writes_notify_once_and_failures_never_notify() {
     // Explicit refresh of unchanged content still commits and notifies.
     service.refresh_agent_by_id("test-admin", &id).await.unwrap();
     assert_eq!(changes.take(), vec![id.clone()]);
-    // Legacy/background no-write refresh retains the optimization.
+    // Unchanged refresh reprojects generic Bot fields and notifies the catalog.
     service.refresh("provider-a", "test-admin", &id, 1000).await.unwrap();
-    assert!(changes.take().is_empty());
+    assert_eq!(changes.take(), vec![id.clone()]);
     fetcher.fail.store(true, Ordering::SeqCst);
     assert!(service.refresh_agent_by_id("test-admin", &id).await.is_err());
     assert!(changes.take().is_empty());
@@ -83,6 +83,7 @@ impl A2aBotRepoPort for ReadbackFailure {
     async fn availability_many(&self, _: &[String]) -> ServiceResult<Vec<A2aBotAvailability>> { panic!("unused") }
     async fn compare_and_set(&self, _: &A2aBotRecord, _: u64) -> ServiceResult<bool> { panic!("unused") }
     async fn replace(&self, _: &A2aBotRecord) -> ServiceResult<A2aBotRecord> { panic!("unused") }
+    async fn synchronize_card_projection(&self, _: &A2aBotRecord) -> ServiceResult<()> { panic!("unused") }
     async fn get_by_name(&self, _: &str, _: &str) -> ServiceResult<Option<A2aBotRecord>> { panic!("unused") }
     async fn get_by_provider_ref(&self, _: &str, _: &str) -> ServiceResult<Option<A2aBotRecord>> { panic!("unused") }
     async fn refreshable(&self, _: Option<&str>, _: u32) -> ServiceResult<Vec<A2aBotRecord>> { panic!("unused") }

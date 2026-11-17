@@ -7,10 +7,10 @@ use std::time::Duration;
 use async_trait::async_trait;
 use bcs_fuse_client::{CardResourceType, CardWriteRequest, FuseClient};
 use bcs_service_api::lifecycle::{LifecycleError, ServiceLifecycle};
-use bcs_service_api::port::{BotCatalogCleanupPort, CatalogChangePort};
+use bcs_service_api::port::{BotCatalogCleanupPort, CatalogChangePort, repo::a2a_bot::A2aBotRepoPort};
 use bcs_service_api::{ActorKind, BotControlPlaneRecord, BotControlPlaneRepoPort, GroupCoreService, GroupKind, GroupStrategy, UserVisibility};
-use bcs_service_api::types::GroupCardSnapshot;
-use serde_json::json;
+use bcs_service_api::types::{GroupCardSnapshot, a2a_card_projection::{project_agent_card_capabilities, ProjectedAgentCardCapabilities}};
+use serde_json::{Value, json};
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 
@@ -78,17 +78,23 @@ impl CardChangeQueue {
     }
 }
 
-pub fn agent_card(bot: &BotControlPlaneRecord) -> Option<CardWriteRequest> {
+pub fn agent_card(bot: &BotControlPlaneRecord, agent_card: Option<&Value>) -> Result<Option<CardWriteRequest>, String> {
     if bot.kind == ActorKind::Human {
-        return None;
+        return Ok(None);
     }
-    let caps = &bot.descriptor;
+    let mut caps = bot.descriptor.clone();
+    let ProjectedAgentCardCapabilities { summary, domains, skills, scopes } =
+        project_agent_card_capabilities(agent_card).map_err(|error| error.to_string())?;
+    if let Some(summary) = summary { caps.summary = summary; }
+    if let Some(domains) = domains { caps.domains = domains; }
+    if let Some(skills) = skills { caps.skills = skills; }
+    if let Some(scopes) = scopes { caps.scopes = scopes; }
     // Fuse's default converter indexes description and skill text, not root domains.
     // Include domains here as well so domain-only Agents remain searchable.
     let description = std::iter::once(caps.summary.as_str())
         .chain(caps.domains.iter().map(String::as_str))
         .filter(|part| !part.is_empty()).collect::<Vec<_>>().join("\n");
-    Some(CardWriteRequest {
+    Ok(Some(CardWriteRequest {
         resource_type: CardResourceType::Agent,
         labels: [
             ("visibility".into(), vec![bot.visibility.clone()]),
@@ -107,8 +113,9 @@ pub fn agent_card(bot: &BotControlPlaneRecord) -> Option<CardWriteRequest> {
                 "tags": caps.domains,
             })).collect::<Vec<_>>(),
             "domains": caps.domains,
+            "scopes": caps.scopes,
         }),
-    })
+    }))
 }
 
 pub fn group_card(group: GroupCardSnapshot) -> Result<Option<CardWriteRequest>, String> {
@@ -131,6 +138,7 @@ pub struct FuseCardSyncLifecycle {
     queue: Arc<CardChangeQueue>,
     client: Arc<FuseClient>,
     bots: Arc<dyn BotControlPlaneRepoPort>,
+    cards: Option<Arc<dyn A2aBotRepoPort>>,
     groups: Arc<dyn GroupCoreService>,
     env: String,
     retry_delay: Duration,
@@ -140,10 +148,10 @@ pub struct FuseCardSyncLifecycle {
 impl FuseCardSyncLifecycle {
     pub fn new(
         queue: Arc<CardChangeQueue>, client: Arc<FuseClient>,
-        bots: Arc<dyn BotControlPlaneRepoPort>, groups: Arc<dyn GroupCoreService>,
-        env: String, retry_base_ms: u64,
+        bots: Arc<dyn BotControlPlaneRepoPort>, cards: Option<Arc<dyn A2aBotRepoPort>>,
+        groups: Arc<dyn GroupCoreService>, env: String, retry_base_ms: u64,
     ) -> Self {
-        Self { queue, client, bots, groups, env,
+        Self { queue, client, bots, cards, groups, env,
             retry_delay: Duration::from_millis(retry_base_ms).min(MAX_SYNC_BACKOFF),
             task: Mutex::new(None) }
     }
@@ -151,11 +159,19 @@ impl FuseCardSyncLifecycle {
 
 async fn publish(
     client: &FuseClient, bots: &dyn BotControlPlaneRepoPort,
-    groups: &dyn GroupCoreService, env: &str, resource: &Resource,
+    cards: Option<&dyn A2aBotRepoPort>, groups: &dyn GroupCoreService,
+    env: &str, resource: &Resource,
 ) -> Result<(), String> {
     let (id, card) = match resource {
-        Resource::Agent(id) => (id, bots.get_control_plane(id, env).await.map_err(|e| e.to_string())?
-            .as_ref().and_then(agent_card)),
+        Resource::Agent(id) => {
+            let bot = bots.get_control_plane(id, env).await.map_err(|e| e.to_string())?;
+            let card = match (bot.as_ref(), cards) {
+                (Some(_), Some(cards)) => cards.get(id).await.map_err(|e| e.to_string())?.map(|record| record.agent_card),
+                (Some(_), None) | (None, _) => None,
+            };
+            let published = bot.as_ref().map_or(Ok(None), |bot| agent_card(bot, card.as_ref()))?;
+            (id, published)
+        }
         Resource::Group(id) => (id, groups.read_card_snapshot(id).await.map_err(|e| e.to_string())?
             .map(group_card).transpose()?.flatten()),
     };
@@ -170,8 +186,8 @@ impl ServiceLifecycle for FuseCardSyncLifecycle {
     async fn initialize(&self) -> Result<(), LifecycleError> {
         let mut task = self.task.lock().expect("Card sync lifecycle poisoned");
         if task.is_some() { return Ok(()); }
-        let (queue, client, bots, groups, env, retry_delay) = (
-            self.queue.clone(), self.client.clone(), self.bots.clone(),
+        let (queue, client, bots, cards, groups, env, retry_delay) = (
+            self.queue.clone(), self.client.clone(), self.bots.clone(), self.cards.clone(),
             self.groups.clone(), self.env.clone(), self.retry_delay,
         );
         *task = Some(tokio::spawn(async move {
@@ -183,7 +199,7 @@ impl ServiceLifecycle for FuseCardSyncLifecycle {
                 }
                 let mut backoff: Option<Duration> = None;
                 for (resource, attempt) in batch {
-                    if let Err(error) = publish(client.as_ref(), bots.as_ref(), groups.as_ref(), &env, &resource).await {
+                    if let Err(error) = publish(client.as_ref(), bots.as_ref(), cards.as_deref(), groups.as_ref(), &env, &resource).await {
                         if attempt + 1 < MAX_SYNC_RETRIES {
                             tracing::warn!(?resource, attempt = attempt + 1, %error, "Card sync failed; queued for retry");
                             queue.retry(resource, attempt + 1);
@@ -223,24 +239,24 @@ mod tests {
             created_at: 0, updated_at: 0, user_visibility: UserVisibility::Protected,
             friend_ext: Default::default(), friend_check_in_strategy: Default::default(),
         };
-        let card = agent_card(&bot).unwrap();
+        let card = agent_card(&bot, None).unwrap().unwrap();
         assert_eq!(card.card["description"], "");
         assert_eq!(card.card["skills"], json!([]));
         assert!(card.card.get("visibility").is_none());
         bot.descriptor.domains = vec!["invoicing".into()];
-        assert_eq!(agent_card(&bot).unwrap().card["description"], "invoicing");
+        assert_eq!(agent_card(&bot, None).unwrap().unwrap().card["description"], "invoicing");
         for visibility in ["public", "protected", "private"] {
             for user_visibility in [UserVisibility::Public, UserVisibility::Protected, UserVisibility::Private] {
                 bot.visibility = visibility.into();
                 bot.user_visibility = user_visibility;
-                let card = serde_json::to_value(agent_card(&bot).unwrap()).unwrap();
+                let card = serde_json::to_value(agent_card(&bot, None).unwrap().unwrap()).unwrap();
                 assert_eq!(card["labels"]["visibility"], json!([visibility]));
                 assert_eq!(card["labels"]["user_visibility"], json!([user_visibility]));
                 assert_eq!(card["labels"].as_object().unwrap().len(), 2);
             }
         }
         bot.kind = ActorKind::Human;
-        assert!(agent_card(&bot).is_none());
+        assert!(agent_card(&bot, None).unwrap().is_none());
 
         let template = json!({"name": "Stored name", "description": "Stored goal", "skills": [{"id":"group.execute"}],
             "supportedInterfaces": [{"url":"local://groups/group", "protocolBinding":"LOCAL"}],
@@ -269,6 +285,41 @@ mod tests {
         assert!(group_card(group.clone()).unwrap().is_none());
         group.card_template = Some(json!("malformed template"));
         assert!(group_card(group).is_err());
+    }
+
+    #[test]
+    fn agent_card_fields_take_precedence_and_empty_lists_clear_fuse_fields() {
+        let bot = BotControlPlaneRecord {
+            bot_id: "agent".into(), name: "Billing".into(), visibility: "protected".into(),
+            descriptor: BotControlPlaneDescriptor {
+                summary: "Legacy summary".into(), domains: vec!["legacy".into()],
+                skills: vec![bcs_service_api::types::Skill::new("legacy")],
+                scopes: vec!["legacy:read".into()],
+            }, env: "local".into(), created_by: None, kind: ActorKind::Bot, status: ActorStatus::Hidden,
+            agent_code: None, task_claim_mode: false, task_dream_mode: false,
+            created_at: 0, updated_at: 0, user_visibility: UserVisibility::Public,
+            friend_ext: Default::default(), friend_check_in_strategy: Default::default(),
+        };
+        let card = json!({
+            "description": "Card summary",
+            "skills": [{"id": "orders", "description": "Order queries", "tags": ["orders", "billing"]}],
+            "domains": ["billing"],
+            "scopes": ["orders:read"]
+        });
+        let projected=agent_card(&bot,Some(&card)).unwrap().unwrap().card;
+        let ids=projected["skills"].as_array().unwrap().iter()
+            .map(|skill|skill["id"].as_str().unwrap()).collect::<Vec<_>>();
+        assert_eq!(ids,["orders"]);
+        assert_eq!(projected["description"],"Card summary\nbilling");
+        assert_eq!(projected["skills"][0]["description"],"Order queries");
+        assert_eq!(projected["domains"],json!(["billing"]));
+        assert_eq!(projected["scopes"],json!(["orders:read"]));
+
+        let card=json!({"description":"Card summary","skills":[{"id":"profile"}],"domains":[],"scopes":[]});
+        let projected=agent_card(&bot,Some(&card)).unwrap().unwrap().card;
+        assert_eq!(projected["skills"],json!([{"id":"profile","name":"profile","description":"","tags":[]}]));
+        assert_eq!(projected["domains"],json!([]));
+        assert_eq!(projected["scopes"],json!([]));
     }
 
     #[test]

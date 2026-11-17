@@ -156,7 +156,8 @@ Legacy Provider registration preflights affiliation before merging Bot capabilit
 ## A2A Card core
 
 `A2aBotCore` implements `A2aBotCoreService` using active Gateway affiliation and
-the `A2aBotRepoPort` CAS boundary. It does not perform HTTP access, parse SDK
+the `A2aBotRepoPort` CAS boundary, including the unchanged-Card projection resync
+used by refresh. It does not perform HTTP access, parse SDK
 types or authenticate Provider management requests. Those use cases live in
 `crates/application/bcs-app-a2a-bot`. Bootstrap injects the collaborators.
 
