@@ -503,6 +503,7 @@ dependencies = [
  "bcs-chat-run-store",
  "bcs-db-api",
  "bcs-db-local",
+ "bcs-dist-model",
  "bcs-domain",
  "bcs-interaction",
  "bcs-message-flow",
@@ -1480,6 +1481,28 @@ dependencies = [
  "mysql_async",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "bcs-dist-connector"
+version = "0.1.4-beta.3"
+dependencies = [
+ "async-trait",
+ "bcs-dist-model",
+ "bcs-service-api",
+ "tokio",
+]
+
+[[package]]
+name = "bcs-dist-connector-store"
+version = "0.1.4-beta.3"
+dependencies = [
+ "async-trait",
+ "bcs-dist-model",
+ "bcs-dist-store",
+ "bcs-service-api",
+ "bcs-store-api",
+ "tokio",
 ]
 
 [[package]]
