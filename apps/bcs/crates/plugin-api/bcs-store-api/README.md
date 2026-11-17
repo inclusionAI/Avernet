@@ -190,8 +190,9 @@ selects no backend. Providers may access only their configured storage namespace
 there are no shell/raw-command/administrative escape hatches.
 
 The composition root stops producers and drains/cancels operations before releasing
-provider resources. Plain blocking reads release their connection on cancellation;
-providers keep blocking IO from exhausting the ordinary operation pool. Existing
+provider resources. Cancellation stops additional read work; an in-flight native call may drain
+within documented native timeouts before releasing its bounded resource. Providers
+keep blocking IO from exhausting the ordinary operation pool. Existing
 configured handles are shared through Arc; this change adds no lifecycle registry.
 
 ## Verification and provider mounting

@@ -33,8 +33,9 @@ pub struct ReadOptions {
     /// Global maximum across all requested keys, NOT per-key COUNT.
     pub max_entries: NonZeroU32,
     /// None polls; Some must be positive and within provider limits. Cancellation
-    /// releases the blocking connection. Plain reads never advance a cursor;
-    /// cancelled group reads may already have registered pending delivery.
+    /// stops further work; an in-flight native call may drain within documented
+    /// timeouts before releasing its bounded blocking resource. Plain reads never
+    /// advance a cursor; cancelled group reads may have registered pending delivery.
     pub block: Option<Duration>,
 }
 
