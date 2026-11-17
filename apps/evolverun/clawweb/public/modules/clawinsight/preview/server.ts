@@ -17,14 +17,14 @@ export async function createPreviewApp() {
   await initializeMonitoringSqlite(db);
   await botDiagnosisRecoveryMigrations[0].migrate!(db);
   await db.exec(`CREATE TABLE ac_bots (id INTEGER PRIMARY KEY AUTOINCREMENT, bot_id TEXT, entity_id TEXT, env TEXT,
-    active_engine TEXT DEFAULT 'teclaw', bot_name TEXT, owner_id TEXT, owner_name TEXT, avernet_tenant TEXT, is_delete INTEGER DEFAULT 0)`);
+    active_engine TEXT DEFAULT 'teclaw', bot_name TEXT, owner_id TEXT, owner_name TEXT, avernet_tenant TEXT, bot_type TEXT, is_delete INTEGER DEFAULT 0)`);
   const scope = { tenant: 'teamclaw', allowedTargetEnvs: ['dev', 'prod'] };
   const repo = new MonitoringRepository(db);
   const now = Date.now();
   const fixture = JSON.parse(readFileSync(new URL('../server/fixtures/monitoring/alert.json', import.meta.url), 'utf8'));
-  const bot = async (botId: string, entityId: string, name: string, status: string | null, count: number, env = 'dev') => {
-    await db.exec('INSERT INTO ac_bots (bot_id,entity_id,env,bot_name,owner_id,owner_name,avernet_tenant) VALUES (?,?,?,?,?,?,?)',
-      [botId, entityId, env, name, entityId, entityId === '001234' ? '林小满' : '陈雨', scope.tenant]);
+  const bot = async (botId: string, entityId: string, name: string, status: string | null, count: number, env = 'dev', botType = 'personal') => {
+    await db.exec('INSERT INTO ac_bots (bot_id,entity_id,env,bot_name,owner_id,owner_name,avernet_tenant,bot_type) VALUES (?,?,?,?,?,?,?,?)',
+      [botId, entityId, env, name, entityId, entityId === '001234' ? '林小满' : '陈雨', scope.tenant, botType]);
     const target = { botId, entityId, env };
     if (status) await repo.applyCheck({ target, wire: parseCheck({ schemaVersion: 'claw-monitoring/bot-check/v2', ...target,
       engine: 'TE', status, checkedAt: new Date(now).toISOString(), lastSuccessfulCheckAt: new Date(now).toISOString() }, now) }, now);
@@ -45,7 +45,7 @@ export async function createPreviewApp() {
   await bot('default', '009876', '陈雨的默认助手', 'HEALTHY', 9);
   await bot('research-new', '009876', '陈雨的研究助手', null, 0);
   await bot('research-new', '001234', '研究助手', null, 0);
-  await bot('weekly-report', '001234', '周报助手', 'PAUSED', 8);
+  await bot('weekly-report', '001234', '周报助手', 'PAUSED', 8, 'dev', 'service');
   await bot('default', '001234', '我的默认助手', 'HEALTHY', 163);
   const app = express();
   const role = (cookie = '') => /(?:^|;\s*)monitoring_preview_role=(admin|member)(?:;|$)/.exec(cookie)?.[1];
@@ -56,7 +56,7 @@ export async function createPreviewApp() {
   app.get('/preview/login/:role', (req, res) => {
     if (!['admin', 'member'].includes(req.params.role)) { res.sendStatus(400); return; }
     res.set('Set-Cookie', `monitoring_preview_role=${req.params.role}; Path=/; HttpOnly; SameSite=Strict`);
-    res.redirect('/?module=monitoring');
+    res.redirect(req.query.openMonitoringSettings === '1' ? '/insight?module=monitoring&openMonitoringSettings=1' : '/?module=monitoring');
   });
   app.get('/api/auth/me', (req, res) => {
     const current = role(req.headers.cookie);

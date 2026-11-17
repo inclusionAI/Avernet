@@ -12,8 +12,11 @@ it('keeps task state separate from effect and preserves filters/page when openin
     sessionKey: 'session', status: 'completed', phase: 'verify', effect: 'unknown', createdAt: 1700000000 }] });
   render(<MemoryRouter initialEntries={['/insight?module=monitoring&monitoringTab=recovery&recoveryPage=2&recoveryStatus=completed']}><SessionRecoveryList /><Location /></MemoryRouter>);
   expect(await screen.findByText('尚未确认')).toBeInTheDocument();
+  expect(screen.getByText('2023-11-15')).toBeInTheDocument();
+  expect(screen.getByText('06:13:20')).toBeInTheDocument();
+  expect(screen.queryByText(/北京时间/)).not.toBeInTheDocument();
   expect(screen.getAllByText('已完成').length).toBeGreaterThan(0);
-  fireEvent.click(screen.getByRole('button', { name: '查看详情' }));
+  fireEvent.click(screen.getByRole('button', { name: /查看详情 default session/ }));
   await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('recoveryTaskId=SR-one'));
   expect(screen.getByRole('status')).toHaveTextContent('recoveryPage=2');
   expect(screen.getByRole('status')).toHaveTextContent('recoveryStatus=completed');

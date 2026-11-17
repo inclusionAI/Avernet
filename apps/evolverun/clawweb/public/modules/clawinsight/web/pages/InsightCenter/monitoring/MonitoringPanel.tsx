@@ -127,9 +127,9 @@ export default function MonitoringPanel({ isAdmin = false, embedded = false, rev
   const config = status?.configuration;
   const healthClass = statusError || config && !config.diagnosisEnabled ? 'unknown' : status?.monitoring?.status === 'HEALTHY' ? '' : status?.monitoring?.status.toLowerCase() ?? 'unknown';
   const statusText = statusError ? '状态未更新' : !status ? '状态加载中…' : config && !config.diagnosisEnabled
-    ? config.recoveryEnabled ? '仅开启自愈' : '诊断监控已关闭'
+    ? '诊断监控已关闭'
     : config?.diagnosisEnabled && !status.monitoring ? '等待首次检查'
-    : status.monitoring ? `${config && !config.recoveryEnabled ? '仅开启诊断 · ' : ''}${states[status.monitoring.status]}` : '未监控';
+    : status.monitoring ? states[status.monitoring.status] : '未监控';
   return <div className={`insight-monitoring${embedded ? ' monitoring-embedded' : ''}`}>
     {!embedded && <div className="page-heading"><div><h1>Agent 诊断</h1><p>实时监测 Bot 任务执行状态，诊断会话异常，助力“罢工”的 Bot 恢复运行</p></div></div>}
     <MonitoringControls selected={selected} isAdmin={isAdmin} revision={botsRevision + configRevision} loading={loading} startDate={query.startDate} endDate={query.endDate}

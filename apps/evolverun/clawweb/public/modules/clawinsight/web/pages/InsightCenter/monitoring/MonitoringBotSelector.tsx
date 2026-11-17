@@ -6,10 +6,12 @@ import { useBotPickerLayout } from './useBotPickerLayout';
 
 type Props = {
   autoSelect?: boolean;
+  onClearFilter?: () => void;
   selected: BotOption | null; isAdmin: boolean; startDate: string; endDate: string;
   revision: number; onSelect: (bot: BotOption) => void; onUnavailable: (error: unknown) => void;
 };
-export function MonitoringBotSelector({ selected, isAdmin, startDate, endDate, revision, onSelect, onUnavailable, autoSelect = true }: Props) {
+export function MonitoringBotSelector({ selected, isAdmin, startDate, endDate, revision, onSelect, onUnavailable, autoSelect = true, onClearFilter }: Props) {
+  const isFilter = Boolean(onClearFilter);
   const [open, setOpen] = useState(false);
   const [scope, setScope] = useState<BotScope>('mine');
   const [draft, setDraft] = useState(''), [q, setQ] = useState('');
@@ -61,20 +63,21 @@ export function MonitoringBotSelector({ selected, isAdmin, startDate, endDate, r
     document.addEventListener('pointerdown', dismiss); document.addEventListener('keydown', escape);
     return () => { document.removeEventListener('pointerdown', dismiss); document.removeEventListener('keydown', escape); };
   }, [open]);
-  return <div className="control-block bot" ref={root}>
-    <span className="label">监控 Bot</span>
-    <button type="button" ref={trigger} className="control-button bot-trigger" aria-label={`监控 Bot ${selected?.botName ?? '选择 Bot'}`}
+  return <div className={isFilter ? 'control-block bot-filter' : 'control-block bot'} ref={root}>
+    {!isFilter && <span className="label">监控 Bot</span>}
+    <button type="button" ref={trigger} className="control-button bot-trigger" aria-label={isFilter ? `筛选 Bot：${selected?.botName ?? '全部 Bot'}` : `监控 Bot ${selected?.botName ?? '选择 Bot'}`}
       title={selected ? `${selected.botId} · ${selected.ownerId} · ${selected.env}` : undefined} aria-expanded={open} aria-controls={`${id}-picker`} onClick={() => { setOpen(!open); if (!open) { setDraft(''); setQ(''); setScope('mine'); setCursor(null); setRetry(n => n + 1); } }}>
-      <span className="bot-glyph"><Icon name="bot" /></span><span className="trigger-text"><strong>{selected?.botName ?? '选择监控 Bot'}</strong>
-        <span className="mono">{selected ? `${selected.botId} · ${selected.ownerId}` : '搜索或选择你的 Bot'}</span></span><Icon name="chevron" className="chevron" />
+      {isFilter ? <><Icon name="bot" /><span className="bot-filter-name">{selected?.botName ?? '全部 Bot'}</span></> : <>
+        <span className="bot-glyph"><Icon name="bot" /></span><span className="trigger-text"><strong>{selected?.botName ?? '选择监控 Bot'}</strong>
+          <span className="mono">{selected ? `${selected.botId} · ${selected.ownerId}` : '搜索或选择你的 Bot'}</span></span></>}<Icon name="chevron" className="chevron" />
     </button>
     {open && <div ref={picker} style={pickerStyle} className="popover bot-picker" id={`${id}-picker`} aria-label="选择目标 Bot">
-      <div className="picker-heading">选择目标 Bot</div>
+      <div className="picker-heading">{isFilter ? '按 Bot 筛选' : '选择目标 Bot'}</div>
       <label className="bot-search"><Icon name="search" /><input ref={input} type="search" aria-label="搜索 Bot" maxLength={200}
         placeholder={isAdmin ? '搜索 Bot 名称、Bot ID 或工号' : '搜索 Bot 名称或 Bot ID'} value={draft} onKeyDown={e => { if (e.key === 'ArrowDown' && !e.nativeEvent.isComposing && !composing) { e.preventDefault(); root.current?.querySelector<HTMLButtonElement>('.bot-card')?.focus(); } }} onCompositionStart={() => setComposing(true)} onCompositionEnd={e => { setDraft(e.currentTarget.value); setComposing(false); }} onChange={e => setDraft(e.target.value)} /></label>
       {isAdmin && <div className="scope-switch" role="group" aria-label="Bot 范围">{(['mine', 'monitored', 'all'] as const).map(value => <button type="button" key={value}
         aria-pressed={scope === value} onClick={() => { setScope(value); setCursor(null); }}>{({ mine: '我的 Bot', monitored: '诊断 Bot', all: '全部 Bot' })[value]}</button>)}</div>}
-      <p className="summary-period">所选会话时间内的诊断摘要</p>
+      {!isFilter && <p className="summary-period">所选会话时间内的诊断摘要</p>}
       <div className="bot-candidates" aria-busy={loading} onKeyDown={e => {
         if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) return;
         const buttons = [...e.currentTarget.querySelectorAll<HTMLButtonElement>('.bot-card')];
@@ -83,6 +86,8 @@ export function MonitoringBotSelector({ selected, isAdmin, startDate, endDate, r
         e.preventDefault();
         buttons[e.key === 'Home' ? 0 : e.key === 'End' ? buttons.length - 1 : Math.max(0, Math.min(buttons.length - 1, current + (e.key === 'ArrowDown' ? 1 : -1)))]?.focus();
       }}>
+        {onClearFilter && <button type="button" className={`bot-card bot-filter-all ${!selected ? 'selected' : ''}`} aria-pressed={!selected}
+          onClick={() => { onClearFilter(); setOpen(false); trigger.current?.focus(); }}>全部 Bot</button>}
         {visibleItems.map(bot => {
           const m = bot.monitoring;
           const multipleEnvs = visibleItems.some(other => other.botId === bot.botId && other.ownerId === bot.ownerId && other.env !== bot.env);
@@ -91,10 +96,10 @@ export function MonitoringBotSelector({ selected, isAdmin, startDate, endDate, r
           return <button type="button" key={bot.botRef} className={`bot-card ${selected?.botRef === bot.botRef ? 'selected' : ''}`} aria-pressed={selected?.botRef === bot.botRef}
             onClick={() => { callback.current(bot); setOpen(false); trigger.current?.focus(); }}>
             <span className="bot-glyph"><Icon name="bot" /></span><span className="candidate-content">
-              <span className="candidate-heading"><strong title={bot.botName}>{bot.botName}</strong><span title={health} className={`enrollment-badge ${m?.status.toLowerCase() ?? 'unmonitored'}`}>{label}{m?.status === 'ERROR' ? ' !' : ''}</span></span>
+              <span className="candidate-heading"><strong title={bot.botName}>{bot.botName}</strong>{!isFilter && <span title={health} className={`enrollment-badge ${m?.status.toLowerCase() ?? 'unmonitored'}`}>{label}{m?.status === 'ERROR' ? ' !' : ''}</span>}</span>
               <span className="candidate-id mono" title={`${bot.botId} · ${bot.env}`}>{bot.botId}</span>
               <span className="candidate-owner">工号 {bot.ownerId}{multipleEnvs && <span className="candidate-env" aria-label={`环境 ${bot.env}`}>{bot.env}</span>}</span>
-              <span className="candidate-summary">{m ? <><span title={m.unidentifiedSessionDiagnosisCount ? `另有 ${m.unidentifiedSessionDiagnosisCount} 条诊断缺少会话标识` : '按可靠会话标识去重，不代表扫描覆盖总量'}>已诊断会话 <b>{m.diagnosedSessionCount ?? '—'}</b>{m.unidentifiedSessionDiagnosisCount > 0 ? '*' : ''}</span><span>诊断 <b>{m.diagnosisCount}</b></span><span className={m.alertCount ? 'has-alert' : ''}>告警 <b>{m.alertCount}</b></span></> : '尚未加入监控，暂无监控数据'}</span>
+              {!isFilter && <span className="candidate-summary">{m ? <><span title={m.unidentifiedSessionDiagnosisCount ? `另有 ${m.unidentifiedSessionDiagnosisCount} 条诊断缺少会话标识` : '按可靠会话标识去重，不代表扫描覆盖总量'}>已诊断会话 <b>{m.diagnosedSessionCount ?? '—'}</b>{m.unidentifiedSessionDiagnosisCount > 0 ? '*' : ''}</span><span>诊断 <b>{m.diagnosisCount}</b></span><span className={m.alertCount ? 'has-alert' : ''}>告警 <b>{m.alertCount}</b></span></> : '尚未加入监控，暂无监控数据'}</span>}
             </span>
           </button>;
         })}
@@ -105,7 +110,7 @@ export function MonitoringBotSelector({ selected, isAdmin, startDate, endDate, r
       {error && <p role="alert">{error} <button type="button" onClick={() => setRetry(n => n + 1)}>重试</button></p>}
       <div className="picker-footer">{isAdmin ? '按所选范围展示 Bot' : '仅展示你拥有的 Bot'} · Esc 收起</div>
     </div>}
-    {!open && !selected && !loading && !error && loadedContext === context && !items.length && <p className="empty-search">未找到可查看的 Bot。</p>}
+    {!isFilter && !open && !selected && !loading && !error && loadedContext === context && !items.length && <p className="empty-search">未找到可查看的 Bot。</p>}
     {!open && error && <p role="alert">{error} <button type="button" onClick={() => setRetry(n => n + 1)}>重试</button></p>}
   </div>;
 }

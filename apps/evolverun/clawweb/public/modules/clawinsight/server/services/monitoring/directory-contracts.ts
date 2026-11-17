@@ -7,7 +7,7 @@ export type MonitoringPrincipal = {
   tenant: string; allowedTargetEnvs: readonly string[];
 };
 export type DirectoryScope = { tenant: string; allowedTargetEnvs: readonly string[] };
-export type DirectoryBot = MonitoringTarget & { directoryId: string; activeEngine: string; botName: string; ownerId: string; ownerName: string | null };
+export type DirectoryBot = MonitoringTarget & { directoryId: string; activeEngine: string; botName: string; ownerId: string; ownerName: string | null; botType?: string | null };
 export type BotScope = 'mine' | 'monitored' | 'all';
 export type DirectorySearch = {
   principal: MonitoringPrincipal; scope: BotScope; q: string; limit: number; after: string | null;
@@ -37,6 +37,7 @@ export interface MonitoringReferences {
 }
 export type BotOption = {
   botRef: string; botName: string; botId: string; ownerId: string; env: string;
+  isServiceBot?: boolean;
   enrollmentState: 'ENROLLED' | 'NOT_ENROLLED'; monitoring: MonitoringSummary | null;
   configuration?: { diagnosisEnabled: boolean; recoveryEnabled: boolean; version: number };
   capabilities: { canView: true; canRequestEnrollment: boolean };
