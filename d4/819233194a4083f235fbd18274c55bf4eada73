@@ -1,0 +1,14 @@
+apps/frontend-nextgen/test/services/workspace/botSessionService.test.ts
+  h_5b2ec9c12c4d18 609
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d4819233194a4083f235fbd18274c55bf4eada73",
+  "prompts": {},
+  "humans": {
+    "h_5b2ec9c12c4d18": {
+      "author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

@@ -1,0 +1,19 @@
+apps/backend/src/agentclaw/community/core/expert_chat/README.md
+  s_bb98e2f10840b6::t_ef4bceeb32bae7 104-111
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "23af569a7b50cb71b21510919a4a8934a0e7d8ed",
+  "prompts": {},
+  "sessions": {
+    "s_bb98e2f10840b6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a162ee-dd64-7f52-9208-9fd1326f32e5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}
