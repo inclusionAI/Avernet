@@ -39,6 +39,7 @@ export interface ConversationBotItemActionsProps {
   showFilter: boolean;
   /** 归属筛选支持(managed 才支持归属切换)。 */
   supportsOrigin: boolean;
+  othersDisabledReason?: string;
   /** 收藏支持(好友 Bot 范围筛选)。 */
   supportsFavorites: boolean;
   supportsArchives?: boolean;
@@ -73,6 +74,7 @@ export function ConversationBotItemActions(props: ConversationBotItemActionsProp
     searchMarked,
     showFilter,
     supportsOrigin,
+    othersDisabledReason,
     supportsFavorites,
     supportsArchives,
     supportsCollab,
@@ -150,6 +152,7 @@ export function ConversationBotItemActions(props: ConversationBotItemActionsProp
           origin={origin}
           scope={scope}
           supportsOrigin={supportsOrigin}
+          othersDisabledReason={othersDisabledReason}
           supportsFavorites={supportsFavorites}
           supportsArchives={supportsArchives}
           supportsCollab={supportsCollab}

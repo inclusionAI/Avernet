@@ -1,6 +1,7 @@
 /** @jest-environment jsdom */
 import { useInviteAccept } from '@/pages/Workspace/hooks/useInviteAccept';
 import { invitationService } from '@/services/workspace/invitationService';
+import { useExternalAuthStore } from '@/stores/externalAuthStore';
 import { beforeEach, expect, it, jest } from '@jest/globals';
 import { act, renderHook } from '@testing-library/react';
 
@@ -10,6 +11,7 @@ jest.mock('@/services/workspace/sessionService');
 const inv = invitationService as unknown as Record<string, jest.Mock<any>>;
 
 beforeEach(() => {
+    useExternalAuthStore.getState().setAuthenticated({ userId: 'staff-1', displayName: '我', provider: 'github' });
   jest.clearAllMocks();
   inv.getAcceptPageState.mockResolvedValue({ ok: true, data: { isValid: true } });
   inv.acceptInvitation.mockResolvedValue({

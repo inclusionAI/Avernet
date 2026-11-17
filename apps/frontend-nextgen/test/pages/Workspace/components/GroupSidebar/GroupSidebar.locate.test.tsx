@@ -60,3 +60,15 @@ it('定位群被筛选隐藏时仍可显示目标，取消定位后不遗留额�
   view.rerender(<GroupSidebar {...props} location={undefined} />);
   expect(screen.queryByText('会话一')).not.toBeInTheDocument();
 });
+
+
+it('never injects a verified session-only parent under the fixed-membership filter', async () => {
+  HTMLElement.prototype.scrollIntoView = jest.fn();
+  const props = makeProps({ groups: [], selectedGroupId: 'g1', selectedSessionId: 's1', membership: 'direct',
+    location: { group: { ...baseGroup, membership: 'session_only' }, session: baseGroup.sessions[0], request: 1 },
+  });
+  const page = render(<GroupSidebar {...props} />);
+  expect(screen.queryByRole('button', { name: '会话一' })).not.toBeInTheDocument();
+  page.rerender(<GroupSidebar {...props} membership="session_only" />);
+  expect(await screen.findByRole('button', { name: '会话一' })).toBeInTheDocument();
+});

@@ -23,6 +23,7 @@ function deferred<T>() {
 beforeEach(() => {
   useWorkspaceStore.getState().resetWorkspace();
   jest.clearAllMocks();
+  gs.resolveGroupMembership.mockResolvedValue({ ok: true, data: null });
   useWorkspaceStore.setState({ activeIdentityId: 'me', membership: 'direct' });
 });
 
@@ -136,4 +137,34 @@ describe('useSelectedGroupDetail', () => {
     expect(useWorkspaceStore.getState()).toMatchObject({ selectedGroupId: 'g9', selectedSessionId: 's9' });
   });
 
+});
+
+it('exposes membership-query failure for retry instead of treating it as a list miss', async () => {
+  gs.loadGroupDetailOrBcs.mockResolvedValue({ ok: true, data: g9Group });
+  gs.resolveGroupMembership.mockResolvedValueOnce({ ok: false,
+    error: { code: 'FAILED', friendlyMessage: '无法确认参与方式', canRetry: true } })
+    .mockResolvedValueOnce({ ok: true, data: 'session_only' });
+  const { result } = renderHook(() => useSelectedGroupDetail('g9', [], false, true));
+  await waitFor(() => expect(result.current.error).toBe('无法确认参与方式'));
+  expect(result.current.group).toBeNull();
+  act(() => result.current.retry());
+  await waitFor(() => expect(result.current.group?.membership).toBe('session_only'));
+  expect(useWorkspaceStore.getState().membership).toBe('direct');
+});
+
+it('aborts an obsolete membership lookup and rejects its late classification for a newer selection', async () => {
+  const g10 = { ...g9Group, groupId: 'g10' };
+  gs.loadGroupDetailOrBcs.mockResolvedValueOnce({ ok: true, data: g9Group })
+    .mockResolvedValueOnce({ ok: true, data: g10 });
+  let resolve!: (value: { ok: true; data: 'session_only' }) => void;
+  gs.resolveGroupMembership.mockReturnValueOnce(new Promise((r) => { resolve = r; }))
+    .mockResolvedValueOnce({ ok: true, data: 'direct' });
+  const { result, rerender } = renderHook(({ gid }) => useSelectedGroupDetail(gid, [], false, true), { initialProps: { gid: 'g9' } });
+  await waitFor(() => expect(gs.resolveGroupMembership).toHaveBeenCalledTimes(1));
+  const signal = gs.resolveGroupMembership.mock.calls[0][2] as AbortSignal;
+  rerender({ gid: 'g10' });
+  await waitFor(() => expect(result.current.group?.groupId).toBe('g10'));
+  expect(signal.aborted).toBe(true);
+  await act(async () => resolve({ ok: true, data: 'session_only' }));
+  expect(result.current.group).toMatchObject({ groupId: 'g10', membership: 'direct' });
 });
