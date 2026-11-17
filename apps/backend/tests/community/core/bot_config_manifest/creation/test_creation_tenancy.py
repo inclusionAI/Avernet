@@ -264,6 +264,10 @@ class _RecordingBots:
         type(self).observed = get_current_avernet_tenant()
         return None
 
+    def is_soft_deleted(self, bot_id, entity_id):
+        assert get_current_avernet_tenant() == _TENANT
+        return False
+
 
 _PAYLOAD = {
     "bot_id": "b_1",

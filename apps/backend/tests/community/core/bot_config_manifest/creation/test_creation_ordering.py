@@ -164,6 +164,9 @@ class _Bots:
     def get_by_id_and_entity(self, bot_id, entity_id):
         return self.record
 
+    def is_soft_deleted(self, bot_id, entity_id):
+        return False
+
 
 class _FailingScripts(FakeStartupScriptService):
     """A startup-script store that refuses the write.

@@ -369,8 +369,14 @@ class BotCreateWithManifestHandler:
                 )
         except ValueError as exc:
             return Fail(f"{BOT_COULD_NOT_BE_PROVISIONED}: {exc}")
-        bot = self._bots_provider().get_by_id_and_entity(bot_id, entity_id)
+        bots = self._bots_provider()
+        bot = bots.get_by_id_and_entity(bot_id, entity_id)
         if bot is None:
+            # A deleted record still occupies its unique key. Treat it as a
+            # terminal creation, not as a bot that has yet to be created.
+            # Deletion owns cleanup; it may still overlap an in-flight apply.
+            if bots.is_soft_deleted(bot_id, entity_id):
+                return Fail(f"{BOT_COULD_NOT_BE_PROVISIONED}: bot was deleted")
             # An inheriting Bot applied for no passport, so the authorization
             # wait is skipped -- and only that: the pre-container phase must
             # still land before creation.

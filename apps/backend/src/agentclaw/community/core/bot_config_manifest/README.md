@@ -340,6 +340,11 @@ creation job. `create_job.py` is the job itself. Both live here rather than in
 `core/bot_management` because they are manifest concerns; creation decides *when*
 to call them.
 
+On re-entry the job distinguishes a soft-deleted bot from one that has not
+landed. A deleted record is terminal, since its identifier remains reserved;
+the job does not recreate it or repeat deletion's cleanup. This check does not
+cancel a provisioning or apply operation already in flight when deletion runs.
+
 **The dependency runs one way.** `create_job` imports `creation` for the phase
 triggers, so the seam is handed its job operations at construction (the DI module
 wires them) rather than importing them back. `create_flow` must not import this
