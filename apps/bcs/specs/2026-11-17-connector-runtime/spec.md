@@ -1,6 +1,6 @@
 # Distributed Connector runtime (BCN cluster executor plane)
 
-Status: proposed; awaiting plan review. No code in this change yet.
+Status: implemented in this change, not wired into the `bcs` binary (composition is task I1). Evidence: [validation](validation.md).
 
 Design authority (Notion, workspace Work / Projects / Teamclaw): the decisions
 page (rows 1–31), "Gateway & Connector — design" §5.1, "Worker & TBase — v2.9"
