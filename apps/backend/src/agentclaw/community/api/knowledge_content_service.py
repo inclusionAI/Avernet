@@ -12,6 +12,13 @@ configured provider authorization entry, never credentials. It does not assert
 remote token validity or MCP consent. The browser must recheck this state after
 a popup completion notice rather than trusting the notice as a grant.
 
+Knowledge-base deletion is provider-owned: omission of immediate schedules the
+configured cancellable grace period; immediate=True skips it. A successful reply
+acknowledges the provider's durable intent, not physical resource cleanup. Cancel
+uses the provider's current-owner/deadline checks without an active-KB read
+preflight, since a pending KB may be hidden. No local task or mutation retry is
+introduced; native status, deadline, warning and cleanup projections pass through.
+
 Session material is opaque to public orchestration, request-scoped and never logged.
 prepare_access interprets it using deployment-specific authentication; caller-supplied
 actor IDs cannot replace the authenticated identity. Unconfigured providers fail closed.
@@ -28,6 +35,12 @@ class KnowledgeContentServiceProtocol(Protocol):
     def prepare_access(
         self, *, actor_id: str, session: Mapping[str, str]
     ) -> ContentAccess: ...
+    async def delete_knowledge_base(
+        self, *, kb_id: str, access: ContentAccess, immediate: bool = False
+    ) -> ContentReply: ...
+    async def cancel_knowledge_base_deletion(
+        self, *, kb_id: str, access: ContentAccess
+    ) -> ContentReply: ...
     async def sources(
         self,
         *,

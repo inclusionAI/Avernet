@@ -142,3 +142,19 @@ cleanup, recovery and terminal results. No document fan-out, mutation retries,
 local task records or scheduler are added to this adapter. Neither operation
 deletes the original remote book or its documents. Native authorization and
 failures are preserved; accepted deletion is never projected as completed.
+
+
+## Knowledge-base deletion forwarding
+
+`DELETE /api/knowledge/spaces/{space_id}/knowledge-bases/{kb_id}` forwards one
+provider deletion request. The default requests a configurable cancellable grace
+period; `?immediate=true` skips that period. A successful response is durable
+acceptance, not confirmation that physical resources have been reclaimed.
+`POST .../{kb_id}/cancel-delete` asks the provider to cancel before its deadline.
+Both reuse authentication, local space membership and native provider Owner/KB
+checks. No active catalog/registry read is required before cancellation: pending
+KBs can be hidden from those read surfaces. The adapter preserves native statuses,
+opaque KB identities, deadline, warnings and cleanup state. It adds no scheduler,
+worker, table, automatic retry, restore policy or frontend UI. Protected default
+KBs and expired/deleted cancellation remain provider-denied; the adapter does not
+weaken those rules.
