@@ -174,19 +174,20 @@ describe('TaskOverviewV2(L1)', () => {
     expect((doneTitle as HTMLElement).style.textDecoration).toContain('line-through');
   });
 
-  it('根节点恢复宿主会话；其他节点保持会话联动', () => {
+  it('第一棒和后续节点均按节点会话目标联动', () => {
     const nav = makeNav();
     render(<TaskOverviewV2 {...props({ nav })} />);
 
     fireEvent.click(screen.getByText('第1棒 需求澄清与规划'));
-    expect(nav.calls.root).toEqual(['n-solo']);
-    expect(nav.calls.select).toHaveLength(0);
+    expect(nav.calls.root).toHaveLength(0);
+    expect(nav.calls.select).toHaveLength(1);
+    expect(nav.calls.select[0][0]).toBe('n-solo');
     expect(nav.calls.drill).toHaveLength(0);
 
     fireEvent.click(screen.getByText('第2棒 并行调研执行'));
-    expect(nav.calls.select).toHaveLength(1);
-    expect(nav.calls.select[0][0]).toBe('n-group');
-    expect(nav.calls.select[0][1]).toMatchObject({ sessionId: 'bcs_grp_902:round:2', kind: 'group' });
+    expect(nav.calls.select).toHaveLength(2);
+    expect(nav.calls.select[1][0]).toBe('n-group');
+    expect(nav.calls.select[1][1]).toMatchObject({ sessionId: 'bcs_grp_902:round:2', kind: 'group' });
     expect(nav.calls.drill).toHaveLength(0);
   });
 
