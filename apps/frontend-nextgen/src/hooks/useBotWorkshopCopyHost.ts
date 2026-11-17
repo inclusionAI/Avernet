@@ -12,11 +12,11 @@ interface UseBotWorkshopCopyHostOptions {
 }
 
 /**
- * 复制 Bot 特性开关。在建阶段,默认关闭:菜单不渲染「复制 Bot」项、openCopy no-op、
- * BotStatusCell 的 copy_state 徽标 + 重试入口不渲染。放开时改为 true 即整体启用;
- * 不查后端,纯前端常量。export 出来供 BotStatusCell 同源消费,保证开关一处生效。
+ * 复制 Bot 特性开关。后端 copy / retry 契约与前端 copy_state 流程已就绪,
+ * 开启后菜单渲染「复制 Bot」项、openCopy 生效,BotStatusCell 的 copy_state 徽标
+ * 与重试入口同源启用。不查后端,纯前端常量;export 供 BotStatusCell 同源消费。
  */
-export const BOT_COPY_FEATURE_ENABLED = false;
+export const BOT_COPY_FEATURE_ENABLED = true;
 
 /**
  * 编排「复制 Bot」:源 Bot 引用、Modal 开合、AgentPass 授权面板(不轮询)与列表刷新,
