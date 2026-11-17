@@ -77,7 +77,6 @@ export function TaskLoopView({ host, controller, onSelectTask, ...props }: TaskL
   // Single-task viewing is intentional; do not remove the floating entry when only one item remains.
   const switcher = props.switcher ?? (controller && items.length > 0 ? <TaskSwitcherControl key={props.taskId} items={items} activeTaskId={props.taskId} onSelectTask={selectTask} /> : null);
   return <TaskPanelHostContext.Provider value={host}>
-    {snapshot?.navigationError && <div role="alert">{snapshot.navigationError}</div>}
     <TaskPanel {...props} taskApiBase={host.taskApiBase ?? props.taskApiBase} userId={host.getViewer()?.userId} nav={selectedNav} switcher={switcher} />
   </TaskPanelHostContext.Provider>;
 }

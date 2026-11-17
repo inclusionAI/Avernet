@@ -1,6 +1,6 @@
 /** @jest-environment jsdom */
 import React from 'react';
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
 import { TaskPanelHost } from '@/components/Workspace/TaskPanelHost';
 import { TaskPanelAssetBoundary } from '@/components/Workspace/TaskPanelAssetBoundary';
 import { loadTaskPanelAsset, type TaskPanelAsset } from '@/services/tasks/panel/taskPanelAssetLoader';
@@ -53,28 +53,43 @@ it('uses the common boundary and forwards props, host and the same runtime contr
   expect(controller.leaveConversation).not.toHaveBeenCalled();
 });
 
-it('uses common load error/retry without acquiring a controller before the asset is ready', async () => {
+it('silently isolates asset load errors without acquiring a controller and permits a fresh mount', async () => {
   jest.spyOn(console, 'error').mockImplementation(() => {});
   loadAsset.mockRejectedValueOnce(new Error('asset unavailable'));
-  render(<TaskPanelHost apiBaseUrl="" taskId="one" />);
-  expect((await screen.findByRole('alert')).textContent).toContain('asset unavailable');
+  const mounted = render(<TaskPanelHost apiBaseUrl="" taskId="one" />);
+  await act(async () => {});
+  expect(loadAsset).toHaveBeenCalledTimes(1);
+  expect(screen.queryByRole('status')).toBeNull();
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(screen.queryByText('asset unavailable')).toBeNull();
+  expect(screen.queryByRole('button', { name: '重试' })).toBeNull();
   expect(getController).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('button', { name: '重试' }));
+  mounted.unmount();
+  render(<TaskPanelHost apiBaseUrl="" taskId="one" />);
   expect(await screen.findByText('task one')).toBeTruthy();
   expect(getController).toHaveBeenCalledTimes(1);
 });
 
-it('reports controller acquisition errors through the common boundary and retries', async () => {
+it('silently isolates controller acquisition errors and permits a fresh mount', async () => {
   jest.spyOn(console, 'error').mockImplementation(() => {});
   getController.mockRejectedValueOnce(new Error('controller unavailable'));
+  const mounted = render(<TaskPanelHost apiBaseUrl="" taskId="one" />);
+  await act(async () => {});
+  expect(getController).toHaveBeenCalledTimes(1);
+  expect(screen.queryByRole('status')).toBeNull();
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(screen.queryByText('controller unavailable')).toBeNull();
+  expect(screen.queryByRole('button', { name: '重试' })).toBeNull();
+  expect(view).not.toHaveBeenCalled();
+  mounted.unmount();
   render(<TaskPanelHost apiBaseUrl="" taskId="one" />);
-  expect((await screen.findByRole('alert')).textContent).toContain('controller unavailable');
-  fireEvent.click(screen.getByRole('button', { name: '重试' }));
   expect(await screen.findByText('task one')).toBeTruthy();
+  expect(getController).toHaveBeenCalledTimes(2);
   expect(createController).not.toHaveBeenCalled();
+  expect(controller.dispose).not.toHaveBeenCalled();
 });
 
-it('recovers a remote mount failure locally without replacing the shared controller or remounting a sibling', async () => {
+it('isolates a remote mount failure and permits a fresh mount without replacing the controller or remounting a sibling', async () => {
   jest.spyOn(console, 'error').mockImplementation(() => {});
   let fail = true;
   const siblingUnmount = jest.fn();
@@ -84,15 +99,20 @@ it('recovers a remote mount failure locally without replacing the shared control
     return <div>recovered {taskId}</div>;
   }
   view.mockImplementation(props => <Descendant {...props} />);
-  render(<>
-    <section aria-label="one"><TaskPanelHost apiBaseUrl="" taskId="one" /></section>
+  const panels = (attempt: number) => <>
+    <section aria-label="one"><TaskPanelHost key={attempt} apiBaseUrl="" taskId="one" /></section>
     <TaskPanelHost apiBaseUrl="" taskId="two" />
-  </>);
+  </>;
+  const mounted = render(panels(0));
   const first = within(screen.getByRole('region', { name: 'one' }));
-  await first.findByRole('alert');
   await screen.findByText('recovered two');
+  expect(first.queryByRole('status')).toBeNull();
+  expect(first.queryByRole('alert')).toBeNull();
+  expect(first.queryByText('remote crashed')).toBeNull();
+  expect(first.queryByRole('button', { name: '重试' })).toBeNull();
+  expect(first.queryByText('recovered one')).toBeNull();
   fail = false;
-  fireEvent.click(first.getByRole('button', { name: '重试' }));
+  mounted.rerender(panels(1));
   expect(await first.findByText('recovered one')).toBeTruthy();
   expect(siblingUnmount).not.toHaveBeenCalled();
   // React may probe a failed component with no props while building its error stack.

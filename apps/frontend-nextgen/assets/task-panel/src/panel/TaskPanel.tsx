@@ -67,7 +67,7 @@ export const TaskPanel: React.FC<TaskPanelProps> = ({
         userId={userId}
         includeActionLog={includeActionLog}
       >
-        {({ task, loading, error, retry }) => {
+        {({ task, loading }) => {
           const resolvedTask = task
             ? {
                 ...task,
@@ -94,25 +94,6 @@ export const TaskPanel: React.FC<TaskPanelProps> = ({
               }}
             >
               {loading && !task && <StateEmpty description="加载任务中…" />}
-              {error && !task && (
-                <div style={{ padding: 24, textAlign: 'center' }}>
-                  <div style={{ color: C.danger, fontSize: 13, marginBottom: 12 }}>加载失败:{error}</div>
-                  <button
-                    type="button"
-                    onClick={retry}
-                    style={{
-                      padding: '6px 16px',
-                      border: `1px solid ${C.primary}`,
-                      borderRadius: 4,
-                      background: C.surface,
-                      color: C.primary,
-                      cursor: 'pointer',
-                    }}
-                  >
-                    重试
-                  </button>
-                </div>
-              )}
               {resolvedTask && (
                 <TaskPanelV2
                   task={resolvedTask}
