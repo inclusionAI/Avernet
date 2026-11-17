@@ -162,23 +162,22 @@ async def test_run_context_loads_todo_runner_from_infra_without_symlink() -> Non
     assert "[todo-execute]" in context
     assert "todo_id=todo_1" in context
     assert "todo_execution_id=todoexec_1" in context
-    assert (
-        "POST https://backend.example/api/v1/collaboration/tasks/todos/todo_1/report"
-        in context
-    )
-    assert (
-        "POST https://backend.example/api/v1/collaboration/tasks/todos/todo_1/complete"
-        in context
-    )
-    assert "只有完成接口返回 HTTP 成功，本轮执行才算结束" in context
+    assert "todo_execution_token=todo-token-1" in context
+    assert "backend_url=https://backend.example" in context
     assert "todo-runner Skill" in context
     assert (
-        "/home/admin/.openclaw/workspace/skills-pool/skills-repo/infra/"
+        "/home/admin/.openclaw/workspace/skills/skills-repo/infra/"
         "todo-runner/SKILL.md"
     ) in context
     assert "每次收到 [todo-execute] 或 [todo-resume] 都必须" in context
     assert "不要为 todo-runner 创建软链接" in context
+    assert "workspace/skills 顶层激活" in context
     assert "todo-runner skill unavailable" in context
+    assert "请严格按照 todo-runner Skill 定义" in context
+    assert "/report" not in context
+    assert "/artifacts/object-file" not in context
+    assert "/complete" not in context
+    assert "X-Todo-Execution-Token:" not in context
 
 
 @pytest.mark.asyncio
