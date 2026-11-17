@@ -177,8 +177,8 @@ storage. See the [L6 identity contract](../../l6_products/README.md#productinsta
    and starts Work with `task.created` / `task.started` evidence: Task revision 2,
    Collet revision 4 absent intervening Events. Rejection or failed persistence
    leaves no Task or partial Event; start does not dispatch or create an Activity. The Bot then
-   reports progress and submission through the existing product/A2A ingress,
-   which reuses the same L4 Work machinery. The generic
+   reports steps, metrics and its result directly to the injected generic G3
+   service. Submission alone uses the existing product/A2A Work ingress. The generic
    `ContextCollabService.append_event` is not a Work API; it is a generic event
    append entrypoint.
    The shared G1 adapter enforces these prerequisites for @2 execution events
@@ -187,10 +187,19 @@ storage. See the [L6 identity contract](../../l6_products/README.md#productinsta
    claimed event actors cannot bypass the scope. Admission to task A cannot
    authorize task B; Open revocation blocks subsequent execution. Structural
    designation alone cannot start work.
-6. Bot progress records plan, code, tests and PR-proposal steps. Successful
-   execution submits artifact references and moves to `reviewing`; even 100%
-   progress is not completion or acceptance. Only explicit publisher `accept`
-   moves the task to `done`. Failed execution must not auto-submit.
+6. Bot execution records plan, code, tests and PR-proposal **step details** as
+   G3 `Observation` values. A registered, explicitly versioned `MetricDefinition`
+   declares percent/HIGHER_IS_BETTER/LAST/Task semantics; `MetricSample` carries
+   the actual 20/50/80/100 measurements. The final `Outcome` records SUCCEEDED,
+   artifact/evidence references and the final sample; it is not an acceptance
+   verdict. All three records leave L4 state/events/revisions unchanged. The
+   [generic G3 contract](../../g3_observe_evaluate_evolve/README.md) documents
+   scope, persistence and nonblocking acquisition failures; there is no
+   execution-progress-specific API. After successful business execution, signed
+   HTTP Work.submit submits artifact references and moves to `reviewing`.
+   Only explicit publisher `accept` moves the task to `done`. Failed execution
+   must not auto-submit. Existing HTTP progress remains available for older
+   callers but is not used for this journey's step/metric reporting.
 
 The product still designates one eligible Bot and uses a capacity-1 Open
 opportunity. Open + Single now separates admission from execution selection;
@@ -611,20 +620,22 @@ start after admission/selection. The product service handles owner commands.
 The authored Profile allowlists two Agents, including the working Bot; only that
 Bot is initially bound. On the same instance, real L4 Work.start/G1 rejects an
 out-of-scope Agent and an eligible but unbound candidate without writes, then
-allows the admitted/selected working Bot to start and report through signed HTTP.
+allows the admitted/selected working Bot to start through L4 Work, record
+G3 telemetry and submit through signed HTTP.
 It directly invokes L5 Open Query/SubmitApplication as the Bot and Screen/Admit
 as the policy actor, then explicitly calls Single Select before Work. Separate
 regression cases cover the product review/dispatch continuation; this journey
 does not test multi-instance reuse or isolation.
-The simulated Bot exercises product
-discovery and execution reporting through signed A2A HTTP; regression cases also
-exercise signed HTTP Apply. Review regressions reject mismatched task, binding,
+The simulated Bot directly calls the injected L5 Open and G3 services with its
+own trusted ActorContext, then submits through signed A2A HTTP; regressions also
+exercise signed HTTP Query/Apply and compatibility progress. Review regressions reject mismatched task, binding,
 opportunity, profile, application, caller, accountable principal, requested roles
 and repeated review without additional writes/delivery. The test checks Query nonmutation, delayed dispatch,
 applicant/accountable identities and a real task-scoped Participant binding,
 with no Group roster or members. It
 writes plan/code/test/PR-proposal files, executes three local code checks,
-reports each step and auto-submits only after successful return. Pure-Open
+records step Observations, metric samples and an Outcome before auto-submitting
+only after successful return; no telemetry acquisition advances Work. Pure-Open
 regressions cover task isolation, revocation and identity mismatches across the
 product/generic execution boundary, including a partially failed admission where
 binding/decision evidence exists but the application is not ADMITTED. The L5
@@ -676,8 +687,9 @@ independent **root L4 Task** with a different ID, its own revision, completion
 conditions, designated executor and event provenance. G4 and the product's
 Work pipeline use Task, not CurrentSnapshot or MethodBinding state.
 
-The body Message advances only the Collet revision; Bot start/progress/submit
-and publisher acceptance also advance the Task revision. Bot requests continue
+The body Message advances only the Collet revision; Bot Work start, compatibility
+HTTP progress, submit and publisher acceptance also advance the Task revision.
+G3 telemetry advances neither revision. Bot requests continue
 to carry the public Collet `expected_revision`; the product resolves and fences
 the current Task revision internally in the same SQL transaction. Public wire
 fields and `task_commission@1` remain unchanged. A 100-percent progress report

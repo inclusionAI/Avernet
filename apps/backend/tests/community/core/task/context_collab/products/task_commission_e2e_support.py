@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 import runpy
 from collections.abc import Callable
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -13,6 +15,22 @@ from agentclaw.community.core.task.context_collab.errors import (
 )
 from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context import (
     ActorContext,
+)
+from agentclaw.community.core.task.context_collab.g3_observe_evaluate_evolve.metrics import (
+    MetricDefinition,
+    MetricSample,
+    Outcome,
+)
+from agentclaw.community.core.task.context_collab.g3_observe_evaluate_evolve.service_api import (
+    TelemetryServiceProtocol,
+)
+from agentclaw.community.core.task.context_collab.g3_observe_evaluate_evolve.telemetry import (
+    Observation,
+    TelemetryContext,
+)
+from agentclaw.community.core.task.context_collab.l1_interoperate_deliver.common import (
+    IdentityRef,
+    ObjectRef,
 )
 from agentclaw.community.core.task.context_collab.l1_interoperate_deliver.delivery import (
     A2aDeliveryPort,
@@ -57,9 +75,6 @@ from agentclaw.community.core.task.context_collab.products.task_commission.servi
 )
 from fastapi.testclient import TestClient
 
-from tests.community.factories.task_commission import (
-    BOT_ID as BOT_ASSIGNEE,
-)
 from tests.community.factories.task_commission import commission_report_request
 
 
@@ -83,7 +98,10 @@ def opportunities_query_request(bot: Any) -> dict:
     return request
 
 
-ProgressReporter = Callable[[int, str, str, str, str], None]
+TelemetryReporter = Callable[
+    [Observation | MetricSample | Outcome, TelemetryContext], None
+]
+logger = logging.getLogger(__name__)
 
 
 _AI_CODING_STEPS = (
@@ -107,19 +125,43 @@ def _simulate_ai_coding(
     collet_id: str,
     task_id: str,
     service: TaskCommissionServiceProtocol,
-    report_progress: ProgressReporter,
+    working_bot: SimulatedWorkingBot,
+    report_telemetry: TelemetryReporter,
 ) -> list[str]:
-    """执行本地 AI coding 模拟,并通过回调逐步上报 L4 Work 进度。
+    """执行本地 AI coding 模拟,通过 G3 记录步骤、指标和结果。
 
-    这是测试夹具的业务动作,不是 Bot 的内置方法;Bot runtime 只负责
-    调用该函数、发送 progress/submit 入站消息。PR 仍是本地提案文件,
+    这是测试夹具的业务动作;Bot runtime 直接调用 G3 服务采集观测,
+    成功执行后才发送 submit 入站消息。PR 仍是本地提案文件,
     不冒充真实远端建 PR 或 LLM 执行。
     """
     plan, code = tmp_path / "plan.md", tmp_path / "calculator.py"
     test_result, pr = tmp_path / "test-result.txt", tmp_path / "pull-request.md"
     artifacts = [path.as_uri() for path in (plan, code, test_result, pr)]
 
-    assert service.detail_task(collet_id).status == "in_progress"
+    before = service.detail_task(collet_id)
+    assert before.status == "in_progress"
+    task_ref = ObjectRef("Task", task_id, None, "avernet")
+    collet_ref = ObjectRef("Collet", collet_id, None, "avernet")
+    trace_id = str(uuid4())
+    metric = MetricDefinition(
+        metric_id=f"task_commission.execution_percent:{working_bot.bot_uuid}",
+        name="Bot execution progress",
+        direction="HIGHER_IS_BETTER",
+        unit="percent",
+        aggregation="LAST",
+        scope="Task",
+        owner=IdentityRef("AGENT", working_bot.bot_uuid, "avernet"),
+        schema_version="1.0",
+    )
+    metric_ref = ObjectRef("MetricDefinition", metric.metric_id, "1", "avernet")
+    working_bot.capture_telemetry(
+        lambda: working_bot.telemetry_service.define_metric(
+            metric,
+            version="1",
+            actor_context=working_bot.actor_context,
+        )
+    )
+    evidence_refs = []
     for index, (percent, note) in enumerate(_AI_CODING_STEPS):
         if index == 0:
             plan.write_text(
@@ -141,20 +183,104 @@ def _simulate_ai_coding(
         _flow_log(_TEST_DIRECTORY, f"5. AI coding: {note}, progress={percent}%")
         progress = f"已完成 {index + 1}/{len(_AI_CODING_STEPS)} 个步骤：{note}"
         reason = f"产物已生成：{artifacts[index]}"
-        report_progress(percent, note, progress, "", reason)
+        now = datetime.now(timezone.utc)
+        observation = Observation(
+            observation_id=str(uuid4()),
+            observation_type="EVENT",
+            observed_at=now,
+            recorded_at=now,
+            observer=IdentityRef("AGENT", working_bot.bot_uuid, "avernet"),
+            subject_ref=task_ref,
+            context=TelemetryContext(
+                trace_id=trace_id,
+                span_id=str(uuid4()),
+                protocol_versions={"ACCS": "0.2"},
+                agent_ref=ObjectRef("Agent", working_bot.bot_uuid, None, "avernet"),
+                principal_ref=ObjectRef(
+                    "Principal", working_bot.owner_id, None, "avernet"
+                ),
+                collet_ref=collet_ref,
+                task_ref=task_ref,
+                method_binding_ref=ObjectRef(
+                    "MethodBinding",
+                    product_execution_binding_ref(collet_id, working_bot.profile),
+                    None,
+                    "avernet",
+                ),
+                product_profile_ref=ObjectRef(
+                    "ProductProfile",
+                    working_bot.profile_ref.profile_id,
+                    str(working_bot.profile_ref.version),
+                    "avernet",
+                ),
+            ),
+            schema_version="task_commission.execution_step@1",
+            extensions={
+                "step": index + 1,
+                "total_steps": len(_AI_CODING_STEPS),
+                "note": note,
+                "detail": progress,
+                "error_msg": "",
+                "reason": reason,
+                "artifact_ref": artifacts[index],
+            },
+        )
+        report_telemetry(observation, observation.context)
+        evidence_refs.append(
+            ObjectRef("Observation", observation.observation_id, None, "avernet")
+        )
+        sample = MetricSample(
+            metric_ref=metric_ref,
+            subject_ref=task_ref,
+            value=percent,
+            measured_at=now,
+            window=None,
+            evidence_refs=(evidence_refs[-1],),
+            dimensions={"step": str(index + 1)},
+        )
+        report_telemetry(sample, observation.context)
         live = service.detail_task(collet_id)
-        assert live.status == "in_progress"  # 100% is not accept or submit.
-        assert live.events[-1]["payload"] == {
-            "note": note,
-            "percent": percent,
-            "progress": progress,
-            "error_msg": "",
-            "reason": reason,
-            "task_id": task_id,
-        }
-        assert live.events[-1]["actor_id"] == BOT_ASSIGNEE
-        assert all(event["event_kind"] != "task.submitted" for event in live.events)
+        assert live == before  # Even 100% changes no L4 state, events or revision.
+        observations = working_bot.telemetry_service.query_observations(
+            task_ref,
+            collet_ref=collet_ref,
+            actor_context=working_bot.actor_context,
+        )
+        assert len(observations) == index + 1
+        assert observations[-1].extensions == observation.extensions
+        assert observations[-1].observer == observation.observer
+        assert observations[-1].context == observation.context
+        assert "percent" not in observations[-1].extensions
+        samples = working_bot.telemetry_service.query_metric_samples(
+            task_ref,
+            collet_ref=collet_ref,
+            actor_context=working_bot.actor_context,
+        )
+        assert [s.value for s in samples] == [
+            percent for percent, _ in _AI_CODING_STEPS[: index + 1]
+        ]
+        assert samples[-1] == sample
 
+    outcome = Outcome(
+        outcome_id=str(uuid4()),
+        subject_ref=task_ref,
+        improvement_objective_refs=(),
+        status="SUCCEEDED",
+        produced_at=datetime.now(timezone.utc),
+        result_refs=tuple(ObjectRef("Artifact", uri, None, None) for uri in artifacts),
+        evidence_refs=tuple(evidence_refs),
+        metric_samples=(sample,),
+        evaluator_ref=None,
+        protocol_versions={"ACCS": "0.2"},
+    )
+    report_telemetry(outcome, observation.context)
+    assert working_bot.telemetry_service.query_outcomes(
+        task_ref,
+        collet_ref=collet_ref,
+        actor_context=working_bot.actor_context,
+    ) == (outcome,)
+    # Bot's execution success is not submission or the owner's acceptance.
+    assert service.detail_task(collet_id) == before
     assert test_result.read_text(encoding="utf-8") == "3 passed"
     assert all(path.exists() for path in (plan, code, test_result, pr))
     return artifacts
@@ -172,6 +298,7 @@ class SimulatedWorkingBot:
         owner_id: str,
         *,
         open_method: OpenMethodOpsServiceProtocol,
+        telemetry_service: TelemetryServiceProtocol,
     ):
         self.bot_uuid = bot_id  # Exact UUID used in the signed gateway principal.
         self.bot_id, self.owner_id = self.bot_uuid, owner_id
@@ -180,6 +307,7 @@ class SimulatedWorkingBot:
         self.client = client
         self.headers = {"X-Avernet-Principal": signed_principal}
         self._open_method = open_method
+        self.telemetry_service = telemetry_service
         # 本地直接调用的可信身份夹具;不冒充 HTTP/JWT 认证。
         self.actor_context = ActorContext(
             actor=PrincipalRef("bot", self.bot_uuid),
@@ -295,10 +423,19 @@ class SimulatedWorkingBot:
         ]
         return request
 
+    @staticmethod
+    def capture_telemetry(acquire: Callable[[], object]) -> None:
+        try:
+            acquire()
+        except Exception:
+            # No mandatory evidence gate in this Profile. Acquisition failures
+            # are visible but must not block execution or claim recorded success.
+            logger.warning("G3 telemetry acquisition failed", exc_info=True)
+
     def run(
         self,
         created: TaskCommissionCreatedView,
-        execute: Callable[[ProgressReporter], list[str]],
+        execute: Callable[[TelemetryReporter], list[str]],
         *,
         task_id: str,
         initial_revision: int,
@@ -320,26 +457,37 @@ class SimulatedWorkingBot:
                 _TEST_DIRECTORY, f"模拟 Bot 收到 {action} 成功回执, revision={revision}"
             )
 
-        def report_progress(
-            percent: int, note: str, progress: str, error_msg: str, reason: str
+        def report_telemetry(
+            record: Observation | MetricSample | Outcome, context: TelemetryContext
         ) -> None:
-            send(
-                "progress",
-                {
-                    "percent": percent,
-                    "note": note,
-                    "progress": progress,
-                    "error_msg": error_msg,
-                    "reason": reason,
-                    "task_id": task_id,
-                },
-            )
+            if isinstance(record, Observation):
+                self.capture_telemetry(
+                    lambda: self.telemetry_service.record_observation(
+                        record,
+                        actor_context=self.actor_context,
+                    )
+                )
+            elif isinstance(record, MetricSample):
+                self.capture_telemetry(
+                    lambda: self.telemetry_service.record_metric_sample(
+                        record,
+                        context=context,
+                        actor_context=self.actor_context,
+                    )
+                )
+            else:
+                self.capture_telemetry(
+                    lambda: self.telemetry_service.record_outcome(
+                        record,
+                        context=context,
+                        actor_context=self.actor_context,
+                    )
+                )
 
-        # 调用方已直接通过 L4 Work.start 启动任务。
-        # Bot 只上报实际执行过程,不能把自身的运行器当成 L4 Work API。
-        # 不是 finally:执行或进度上报失败时不能伪造成功并自动提交。
+        # L4 Work.start already ran. Telemetry does not change its revision.
+        # Not finally: execution failure must never auto-submit a success.
         _flow_log(_TEST_DIRECTORY, "模拟 Bot 开始执行任务业务函数")
-        artifacts = execute(report_progress)
+        artifacts = execute(report_telemetry)
         _flow_log(_TEST_DIRECTORY, "模拟 Bot 业务函数成功返回产物,自动触发 submit")
         send(
             "submit",

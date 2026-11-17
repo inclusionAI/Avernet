@@ -9,7 +9,9 @@
 
 The ACCS context-collaboration path is separate from the older goal-driven
 framework below. Its [collaboration boundary](context_collab/README.md)
-owns independent L4 Task authority, G3 read projections and storage cutover.
+owns independent L4 Task authority, G3 read projections,
+[generic telemetry acquisition](context_collab/g3_observe_evaluate_evolve/README.md)
+and storage cutover.
 Its [L6 product contract](context_collab/l6_products/README.md)
 owns versioned product composition, ScenarioRole → L4 RoleBinding mappings,
 ProductInstance selection and the shared G4 enforcement/compatibility boundary.
@@ -18,8 +20,8 @@ Concrete product definitions, specialized strategies and services live in
 L6 supplies reusable contracts/mechanisms, not concrete business templates, a
 second Task/Method engine or Resource access grants.
 The [task commission product boundary](context_collab/products/task_commission/README.md)
-also documents its bounded signed-Bot A2A report ingress and executor-only
-progress enforcement.
+also documents its generic G3 step/metric/outcome reporting, bounded signed-Bot
+A2A Work ingress and executor-only compatibility progress enforcement.
 
 ## 任务副屏资产
 
