@@ -76,10 +76,15 @@ from agentclaw.community.core.task.context_collab.l6_products.catalog import (
     ProductCatalog,
 )
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
+    MethodCompositionTemplate,
+    MethodRequirement,
     VersionedProfileRef,
 )
 from agentclaw.community.core.task.context_collab.l6_products.task_contracts import (
     STANDARD_TASK_CONTRACT_REF,
+)
+from agentclaw.community.core.task.context_collab.l6_products.method_policies import (
+    OpenMethodPolicy,
 )
 from agentclaw.community.core.task.context_collab.l6_products.operations import (
     ProductProfileCreateCommand,
@@ -157,18 +162,26 @@ def test_end_to_end_commission_flow(commission_deployment, tmp_path):
     l6_profile = create_product_profile(
         ProductProfileCreateCommand(
             ref=VersionedProfileRef("task_commission", 1),            # 版本
-            composition=TASK_COMMISSION_PROFILE.composition,          # 绑定L5层方法，这里是OPEN方法
+            composition=MethodCompositionTemplate(                   # 绑定 L5 方法及其 L6 产品策略
+                method_kind="Open",
+                scope="collet",
+                required_methods=(MethodRequirement("Open", "0.2"),),
+                policies=(
+                    OpenMethodPolicy(                               # 仅适用于 Open，不是通用 Profile 字段
+                        publication=OpenPublicationProfile(
+                            admission=BotSelfApplicationAdmission(
+                                applicant_role="assignee",
+                                accountable_role="owner",
+                                participation_type=ParticipationType.COLLET_PARTICIPANT,
+                                capacity=1,                         # 最多录取一个申请者
+                            ),
+                        ),
+                    ),
+                ),
+            ),
             scenario_roles=TASK_COMMISSION_PROFILE.scenario_roles,    # 角色信息
             governance=TASK_COMMISSION_PROFILE.governance,            # g1-g4配置
             compatibility=TASK_COMMISSION_PROFILE.compatibility,      # 能力需求声明
-            publication=OpenPublicationProfile(                       # OPEN方法发布录取策略 TODO:change_name
-                admission=BotSelfApplicationAdmission(                # 指定执行者、发布人代办录取的策略
-                    applicant_role="assignee",
-                    accountable_role="owner",
-                    participation_type=ParticipationType.COLLET_PARTICIPANT,  # 录取为当前 Collet 的参与者
-                    capacity=1,    # 最多录取一个申请者
-                ),
-            ),
         )
     )
 
@@ -620,7 +633,6 @@ def commission_deployment(db, monkeypatch):
                 workflow=TASK_COMMISSION_PROFILE.workflow,
                 governance=TASK_COMMISSION_PROFILE.governance,
                 compatibility=TASK_COMMISSION_PROFILE.compatibility,
-                publication=TASK_COMMISSION_PROFILE.publication,
             )
         ),
     ],

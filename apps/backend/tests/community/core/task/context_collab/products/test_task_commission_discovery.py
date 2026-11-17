@@ -51,6 +51,9 @@ from agentclaw.community.di.modules.task_commission_self_application import (
 from agentclaw.community.core.task.context_collab.l6_products.catalog import (
     ProductCatalog,
 )
+from agentclaw.community.core.task.context_collab.l6_products.method_policies import (
+    OpenMethodPolicy,
+)
 from agentclaw.community.core.task.context_collab.l6_products.operations import (
     create_product_profile,
 )
@@ -71,13 +74,20 @@ OWNER = PrincipalRef("human", "owner")
 PROFILE = create_product_profile(
     replace(
         TASK_COMMISSION_PROFILE,
-        publication=OpenPublicationProfile(
-            admission=BotSelfApplicationAdmission(
-                applicant_role="assignee",
-                accountable_role="owner",
-                participation_type=ParticipationType.COLLET_PARTICIPANT,
-                capacity=1,
-            )
+        composition=replace(
+            TASK_COMMISSION_PROFILE.composition,
+            policies=(
+                OpenMethodPolicy(
+                    publication=OpenPublicationProfile(
+                        admission=BotSelfApplicationAdmission(
+                            applicant_role="assignee",
+                            accountable_role="owner",
+                            participation_type=ParticipationType.COLLET_PARTICIPANT,
+                            capacity=1,
+                        )
+                    ),
+                ),
+            ),
         ),
     )
 )

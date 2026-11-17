@@ -105,7 +105,6 @@ def _profile(*, workflow=False, version=2):
                 TASK_COMMISSION_PROFILE.compatibility,
                 required_layers=("L2", "L3", "L4", "L5"),
             ),
-            publication=TASK_COMMISSION_PROFILE.publication,
             **extra,
         )
     )

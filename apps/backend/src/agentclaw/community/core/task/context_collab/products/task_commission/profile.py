@@ -21,6 +21,9 @@ from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     VersionedProfileRef,
     WorkflowProfile,
 )
+from agentclaw.community.core.task.context_collab.l6_products.method_policies import (
+    OpenMethodPolicy,
+)
 from agentclaw.community.core.task.context_collab.l6_products.operations import (
     ProductProfileCreateCommand,
     create_product_profile,
@@ -50,6 +53,18 @@ TASK_COMMISSION_PROFILE = ProductProfileCreateCommand(
         method_kind="Open",
         scope="collet",
         required_methods=(MethodRequirement("Open", "0.2"),),
+        policies=(
+            OpenMethodPolicy(
+                publication=OpenPublicationProfile(
+                    admission=DesignatedOpenAdmission(
+                        applicant_role="assignee",
+                        accountable_role="owner",
+                        participation_type=ParticipationType.SINGLE_CONTRIBUTION,
+                        capacity=1,
+                    ),
+                ),
+            ),
+        ),
     ),
     # 角色信息
     scenario_roles=(
@@ -83,15 +98,6 @@ TASK_COMMISSION_PROFILE = ProductProfileCreateCommand(
         optional_extensions=(),
         downgrade_policy="reject_missing_required",
         migration_policy="new_instances_only",
-    ),
-    # 产品发布参与机会时使用的规则
-    publication=OpenPublicationProfile(
-        admission=DesignatedOpenAdmission(                               # 指定执行者、发布人代办录取的策略
-            applicant_role="assignee",
-            accountable_role="owner",
-            participation_type=ParticipationType.SINGLE_CONTRIBUTION,    # 参与者类型：单Agent
-            capacity=1,                                                  # 只需要一个Agent
-        ),
     ),
 )
 

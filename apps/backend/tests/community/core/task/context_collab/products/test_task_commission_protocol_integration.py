@@ -215,7 +215,7 @@ def test_commission_protocol_and_persistence_integration(product_app, db, engine
     assert binding.profile_versions == {"Open": "0.2"}
     assert binding.role_binding_refs == instance.role_binding_refs
     [opportunity] = store.list_opportunities(axes, binding_id, collet_id)
-    policy = profile.require_publication().admission
+    policy = profile.composition.require_policy("Open").publication.admission
     assert opportunity.state is OpportunityState.OPEN
     assert opportunity.scope_ref == collet_id
     assert opportunity.capacity == policy.capacity == 1

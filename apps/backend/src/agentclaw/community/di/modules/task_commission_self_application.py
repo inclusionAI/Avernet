@@ -100,7 +100,8 @@ class TaskCommissionSelfApplicationAdapter(TaskCommissionOpenMethodAdapter):
             profile.ref.profile_id != "task_commission"
             or profile.composition.method_kind != "Open"
             or not isinstance(
-                profile.require_publication().admission, BotSelfApplicationAdmission
+                profile.composition.require_policy("Open").publication.admission,
+                BotSelfApplicationAdmission,
             )
         ):
             raise ContextCollabValidationError(
@@ -147,7 +148,7 @@ class TaskCommissionSelfApplicationAdapter(TaskCommissionOpenMethodAdapter):
             raise ContextCollabValidationError(
                 "opportunity does not match owner/task selection"
             )
-        policy = profile.require_publication().admission
+        policy = profile.composition.require_policy("Open").publication.admission
         return self._open_ops.publish_opportunity(
             OpenOpportunityCommand(
                 collet_id=command.collab_context_id,
@@ -175,6 +176,7 @@ class TaskCommissionSelfApplicationAdapter(TaskCommissionOpenMethodAdapter):
         self, profile_ref: VersionedProfileRef, context: ActorContext
     ) -> tuple[TaskOpportunityView, ...]:
         profile = self._self_service_profile(profile_ref)
+        policy = profile.composition.require_policy("Open").publication.admission
         if context.actor.principal_type != "bot" or not context.actor.principal_id:
             raise ContextCollabValidationError("opportunity discovery requires a Bot")
         axes = current_axes()
@@ -204,8 +206,7 @@ class TaskCommissionSelfApplicationAdapter(TaskCommissionOpenMethodAdapter):
                     or opportunity.scope_ref != collet.collet_id
                     or opportunity.participation_type
                     is not ParticipationType.COLLET_PARTICIPANT
-                    or opportunity.capacity
-                    != profile.require_publication().admission.capacity
+                    or opportunity.capacity != policy.capacity
                 ):
                     continue
                 views.append(
@@ -274,6 +275,7 @@ class TaskCommissionSelfApplicationAdapter(TaskCommissionOpenMethodAdapter):
         """
         profile = self._self_service_profile(command.product_profile_ref)
         record = self._repo.get_current_status(command.collab_context_id)
+        policy = profile.composition.require_policy("Open").publication.admission
         axes, binding_id = current_axes(), command.method_binding_ref
         application = self._store.get_application(
             axes, application_id, binding_id, command.collab_context_id
@@ -308,7 +310,7 @@ class TaskCommissionSelfApplicationAdapter(TaskCommissionOpenMethodAdapter):
             or opportunity.scope_ref != command.collab_context_id
             or opportunity.participation_type is not ParticipationType.COLLET_PARTICIPANT
             or opportunity.admission_policy_refs != (_POLICY_REF,)
-            or opportunity.capacity != profile.require_publication().admission.capacity
+            or opportunity.capacity != policy.capacity
         ):
             raise ContextCollabValidationError("application unavailable for task review")
         expected_roles = self._selected_agent_role_refs(

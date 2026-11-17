@@ -32,6 +32,9 @@ from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs 
     AgentRef,
     PrincipalRef,
 )
+from agentclaw.community.core.task.context_collab.l6_products.method_policies import (
+    OpenMethodPolicy,
+)
 from agentclaw.community.core.task.context_collab.l6_products.publication import (
     OpenAdmissionPolicy,
     OpenPublicationProfile,
@@ -62,7 +65,7 @@ PRINCIPAL = PrincipalRef("human", "u_1001")
 def test_commission_has_a_complete_declarative_publication_and_work_contract():
     profile = PRODUCT_CATALOG.get("task_commission", 1)
     assert profile == init_product_profile()
-    publication = profile.require_publication()
+    publication = profile.composition.require_policy("Open").publication
     assert publication.admission.applicant_role == "assignee"
     assert publication.admission.accountable_role == "owner"
     assert publication.admission.strategy == "designated_bot_self_application"
@@ -167,7 +170,10 @@ def test_explicit_profile_selection_pins_exact_version_and_never_migrates():
 )
 def test_unsupported_publication_policy_rejected_before_execution(overrides):
     with pytest.raises(ContextCollabValidationError):
-        replace(TASK_COMMISSION_PROFILE.require_publication().admission, **overrides)
+        replace(
+            TASK_COMMISSION_PROFILE.composition.require_policy("Open").publication.admission,
+            **overrides,
+        )
 
 
 def test_catalog_rejects_publication_without_required_typed_roles_or_method():
@@ -183,7 +189,13 @@ def test_catalog_rejects_publication_without_required_typed_roles_or_method():
                 replace(assignee, participant_source="principal_ref"),
             ),
         ),
-        replace(profile, composition=PRODUCT_CATALOG.get("team_todo", 1).composition),
+        replace(
+            profile,
+            composition=replace(
+                PRODUCT_CATALOG.get("team_todo", 1).composition,
+                policies=profile.composition.policies,
+            ),
+        ),
         replace(profile, workflow=replace(profile.workflow, actions=())),
     ):
         with pytest.raises(ContextCollabValidationError):
@@ -194,12 +206,19 @@ def _adapter_case(*, admitted_state="ADMITTED"):
     # A separately installed exact version proves the adapter does not use v1
     # constants or select "latest". No production catalog is mutated.
     v1 = TASK_COMMISSION_PROFILE
-    publication = v1.require_publication()
+    publication = v1.composition.require_policy("Open").publication
     v2 = replace(
         v1,
         ref=VersionedProfileRef("task_commission", 2),
-        publication=replace(
-            publication, admission=replace(publication.admission, capacity=2)
+        composition=replace(
+            v1.composition,
+            policies=(
+                OpenMethodPolicy(
+                    publication=replace(
+                        publication, admission=replace(publication.admission, capacity=2)
+                    ),
+                ),
+            ),
         ),
     )
     ops = Mock(spec=OpenMethodOpsServiceProtocol)
@@ -227,7 +246,7 @@ def test_adapter_executes_exact_selected_policy_and_declared_steps():
     executor, ops, command, profile = _adapter_case()
     actor = _actor()
     receipt = executor.admit_designated_assignee(command, actor)
-    policy = profile.require_publication().admission
+    policy = profile.composition.require_policy("Open").publication.admission
     assert tuple(call[0] for call in ops.mock_calls) == policy.steps
     args = ops.publish_opportunity.call_args.args
     assert len(args) == 1
@@ -276,8 +295,17 @@ def test_generic_open_policy_does_not_encode_commission_role_sources():
             replace(owner, participant_source="executor_ref"),
             replace(assignee, participant_source="principal_ref"),
         ),
-        publication=OpenPublicationProfile(
-            OpenAdmissionPolicy("assignee", "owner", ParticipationType.GROUP_MEMBER, 3)
+        composition=replace(
+            profile.composition,
+            policies=(
+                OpenMethodPolicy(
+                    publication=OpenPublicationProfile(
+                        OpenAdmissionPolicy(
+                            "assignee", "owner", ParticipationType.GROUP_MEMBER, 3
+                        )
+                    ),
+                ),
+            ),
         ),
     )
     assert ProductCatalog((generic,)).get("task_commission", 1) is generic
@@ -301,14 +329,14 @@ def test_initial_profile_uses_self_application_without_version_bump():
     } == {
         "Open": "0.2",
     }
-    policy = profile.require_publication().admission
+    policy = profile.composition.require_policy("Open").publication.admission
     assert policy.strategy == "designated_bot_self_application"
     assert policy.participation_type is ParticipationType.COLLET_PARTICIPANT
     assert policy.capacity == 1
     assert profile.workflow == legacy.workflow
     assert legacy.composition.method_kind == "Open"
     assert (
-        legacy.require_publication().admission.participation_type
+        legacy.composition.require_policy("Open").publication.admission.participation_type
         is ParticipationType.SINGLE_CONTRIBUTION
     )
 
@@ -324,6 +352,6 @@ def test_initial_profile_uses_self_application_without_version_bump():
     ],
 )
 def test_self_application_policy_rejects_incompatible_semantics(overrides):
-    policy = init_product_profile().require_publication().admission
+    policy = init_product_profile().composition.require_policy("Open").publication.admission
     with pytest.raises(ContextCollabValidationError):
         replace(policy, **overrides)

@@ -202,7 +202,7 @@ class TaskCommissionService:
         )
         if profile is None:
             raise ContextCollabValidationError("task commission requires a product profile")
-        publication = profile.require_publication()
+        publication = profile.composition.require_policy("Open").publication
         self._authorizer.check_create(
             method_kind=method_kind, executor_ref=executor_ref, actor=context
         )
@@ -340,7 +340,8 @@ class TaskCommissionService:
         profile = self._product_catalog.get(
             command.product_profile_ref.profile_id, command.product_profile_ref.version
         )
-        profile.require_publication().require_dispatch_ready(receipt.state)
+        publication = profile.composition.require_policy("Open").publication
+        publication.require_dispatch_ready(receipt.state)
         record = self._repo.get_current_status(command.collab_context_id)
         if record is None:
             raise ContextCollabNotFoundError("admitted task not found")
