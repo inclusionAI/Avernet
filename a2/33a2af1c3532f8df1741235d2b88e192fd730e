@@ -1,0 +1,48 @@
+apps/backend/tests/community/core/task/context_collab/test_collet_aggregate.py
+  h_059e888e5e4e82 1,122-123
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_end_to_end.py
+  h_059e888e5e4e82 156-157,216-217,323-324
+  h_059e888e5e4e82 194-195,200-203
+apps/backend/src/agentclaw/community/core/task/context_collab/README.md
+  h_059e888e5e4e82 392,505,582-584
+  h_059e888e5e4e82 409-444,466-470,498-504,559-560
+apps/backend/src/agentclaw/community/core/task/context_collab/l4_context_primitives/operations/collet_lifecycle.py
+  h_059e888e5e4e82 13-14
+apps/backend/src/agentclaw/community/core/task/context_collab/l4_context_primitives/persistence/models.py
+  h_059e888e5e4e82 3,63-65
+  h_059e888e5e4e82 4-7,82-84
+apps/backend/src/agentclaw/community/core/task/context_collab/l4_context_primitives/persistence/row_codec.py
+  h_059e888e5e4e82 42
+  h_059e888e5e4e82 21-23,48-56,64
+apps/backend/src/agentclaw/community/core/task/context_collab/l4_context_primitives/collet.py
+  h_059e888e5e4e82 4,79-88,92,99,162,193,210
+  h_059e888e5e4e82 3,5,10,12,14-15,25-28,89-91,101-105,114-158,185-192,202,204-208,218,220-226
+apps/backend/src/agentclaw/community/core/task/context_collab/l4_context_primitives/persistence/repository.py
+  h_059e888e5e4e82 237-239,280,355
+  h_059e888e5e4e82 236,240-247,262-266,360-364
+apps/backend/src/agentclaw/community/core/task/context_collab/l4_context_primitives/context_service_protocol.py
+  h_059e888e5e4e82 84-87
+apps/backend/src/agentclaw/community/core/task/context_collab/l4_context_primitives/operations/contracts.py
+  h_059e888e5e4e82 29-31,49-50,57-58,69-70
+apps/backend/src/agentclaw/community/core/task/context_collab/l4_context_primitives/persistence/creation.py
+  h_059e888e5e4e82 10-12,74-81
+apps/backend/src/agentclaw/community/core/task/context_collab/sql/2026_11_11_context_collab.sql
+  h_059e888e5e4e82 13
+apps/backend/tests/community/repository/task/context_collab/test_collet_creation.py
+  h_059e888e5e4e82 90-91
+apps/backend/tests/community/repository/task/context_collab/test_models.py
+  h_059e888e5e4e82 36
+apps/backend/tests/community/repository/task/context_collab/test_product_instantiation.py
+  h_059e888e5e4e82 95-96
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a233a2af1c3532f8df1741235d2b88e192fd730e",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

@@ -1,0 +1,20 @@
+apps/backend/src/agentclaw/community/core/task/context_collab/l4_context_primitives/collet_metadata.py
+  h_059e888e5e4e82 1-123
+apps/backend/src/agentclaw/community/core/task/context_collab/sql/2026_11_17_context_collab_collet_metadata.sql
+  h_059e888e5e4e82 1-11
+apps/backend/tests/community/core/task/context_collab/test_collet_metadata.py
+  h_059e888e5e4e82 1-207
+apps/backend/tests/community/repository/task/context_collab/test_collet_metadata.py
+  h_059e888e5e4e82 1-242
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8eeea42b2c60bfdd08146651cb5f07b4fb4a8252",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

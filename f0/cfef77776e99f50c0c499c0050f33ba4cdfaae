@@ -1,0 +1,87 @@
+apps/backend/src/agentclaw/community/core/caller_identity/caller_credential_protocol.py
+  s_2d37bb4e89d220::t_99b78ef8e39b42 97,99
+apps/backend/src/agentclaw/community/core/caller_identity/service.py
+  s_2d37bb4e89d220::t_99b78ef8e39b42 618,649-650,652,657
+apps/backend/src/agentclaw/community/core/repository/README.md
+  s_2d37bb4e89d220::t_99b78ef8e39b42 520-528
+apps/backend/src/agentclaw/community/core/quality/services/task_processor.py
+  s_2d37bb4e89d220::t_99b78ef8e39b42 146
+apps/frontend-nextgen/src/pages/Workspace/components/ManagePanel/GroupManagePanel.tsx
+  s_2d37bb4e89d220::t_99b78ef8e39b42 254-255
+apps/frontend-nextgen/test/pages/Workspace/components/ManagePanel/GroupManagePanel.test.tsx
+  s_2d37bb4e89d220::t_99b78ef8e39b42 7,241-261
+  s_2d37bb4e89d220::t_a564eb7518b5d4 262
+apps/backend/src/agentclaw/community/core/caller_identity/protocols.py
+  s_2d37bb4e89d220::t_99b78ef8e39b42 80,131
+apps/backend/specs/caller-force-runtime-refresh-20261117/001-spec-output.md
+  s_2d37bb4e89d220::t_99b78ef8e39b42 1-21
+apps/backend/src/agentclaw/community/core/repository/protocols/chat.py
+  s_2d37bb4e89d220::t_99b78ef8e39b42 257,263-265,273,279-280
+apps/backend/tests/community/repository/chat/test_caller_token_expiry.py
+  s_2d37bb4e89d220::t_99b78ef8e39b42 325,328,347-348,470-472,475-476,478,586-722
+apps/backend/src/agentclaw/community/core/repository/caller_token_refresh_types.py
+  s_2d37bb4e89d220::t_99b78ef8e39b42 12-14
+apps/backend/src/agentclaw/community/core/expert_chat/README.md
+  s_2d37bb4e89d220::t_99b78ef8e39b42 104-111
+apps/backend/src/agentclaw/community/core/service_bot/services/baas_service.py
+  s_2d37bb4e89d220::t_99b78ef8e39b42 771,2451
+apps/backend/tests/community/core/expert_chat/services/test_expert_chat_instance_service.py
+  s_2d37bb4e89d220::t_99b78ef8e39b42 736,745-746,1666,1728,1749,1751,1763-1767,1886
+apps/frontend-nextgen/test/evolution/taskDetail.test.tsx
+  s_2d37bb4e89d220::t_99b78ef8e39b42 190-192,200-213
+  s_2d37bb4e89d220::t_ea79fede07af19 214
+apps/backend/tests/community/core/quality/test_task_processor.py
+  s_2d37bb4e89d220::t_99b78ef8e39b42 179,552,674
+apps/backend/src/agentclaw/community/core/service_bot/services/deploy/deploy_config_composer.py
+  s_2d37bb4e89d220::t_99b78ef8e39b42 82-83
+apps/backend/tests/community/endpoints/test_openapi_service_envs.py
+  s_2d37bb4e89d220::t_99b78ef8e39b42 51,53,167-168,187-188
+apps/frontend-nextgen/src/pages/EvolutionFactory/TaskDetail.tsx
+  s_2d37bb4e89d220::t_99b78ef8e39b42 152,157-158,261-262,268-269
+docker/agent/start_service.sh
+  s_2d37bb4e89d220::t_99b78ef8e39b42 61,84-86,110
+apps/backend/src/agentclaw/community/core/service_bot/services/deploy/managed_composer.py
+  s_2d37bb4e89d220::t_99b78ef8e39b42 30,117,201,229-232
+  s_2d37bb4e89d220::t_362610233253e3 233
+apps/backend/src/agentclaw/community/core/caller_identity/README.md
+  s_2d37bb4e89d220::t_99b78ef8e39b42 175-186,189-195,231-232
+apps/backend/tests/community/core/service_bot/services/test_publish_flow_service.py
+  s_2d37bb4e89d220::t_99b78ef8e39b42 3439-3442,3444,3446,3533-3540
+  s_2d37bb4e89d220::t_274e621562e5c9 3541-3542
+apps/frontend-nextgen/src/pages/EvolutionFactory/TaskLogArchives.tsx
+  s_2d37bb4e89d220::t_99b78ef8e39b42 34-36
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/service_envs/router.py
+  s_2d37bb4e89d220::t_99b78ef8e39b42 100
+apps/backend/src/agentclaw/community/core/service_bot/services/publish_flow/eval_publish_mixin.py
+  s_2d37bb4e89d220::t_99b78ef8e39b42 41,85-90
+apps/backend/src/agentclaw/community/core/caller_identity/expiry_runtime_updater.py
+  s_2d37bb4e89d220::t_99b78ef8e39b42 37,69,72
+apps/backend/src/agentclaw/community/core/expert_chat/services/expert_chat_instance_service.py
+  s_2d37bb4e89d220::t_99b78ef8e39b42 428,784,798,800-804,819,822-823,828-829
+apps/backend/tests/community/core/service_bot/services/deploy/test_deploy_config_composer.py
+  s_2d37bb4e89d220::t_99b78ef8e39b42 196-237
+apps/backend/src/agentclaw/community/core/caller_identity/caller_identity_service_protocol.py
+  s_2d37bb4e89d220::t_99b78ef8e39b42 132
+apps/backend/tests/community/adapters/http/openapi_v1/test_service_env_endpoints.py
+  s_2d37bb4e89d220::t_99b78ef8e39b42 47,99,301
+apps/backend/src/agentclaw/community/core/repository/implementations/chat/expert_chat_instance.py
+  s_2d37bb4e89d220::t_99b78ef8e39b42 266,271-293,325,348-350
+apps/backend/tests/community/core/caller_identity/test_force_runtime_refresh_regression.py
+  s_2d37bb4e89d220::t_99b78ef8e39b42 1-168
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f0cfef77776e99f50c0c499c0050f33ba4cdfaae",
+  "prompts": {},
+  "sessions": {
+    "s_2d37bb4e89d220": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "071ccc63-21bf-420f-bd47-9f4fb3b232f2",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    }
+  }
+}
