@@ -240,6 +240,18 @@ class ExpertChatInstanceRepository(Protocol):
         ...
 
     @abstractmethod
+    def correct_caller_token_expiry(
+        self, *, user_id: str, bot_id: str, owner_id: str, binding_id: int,
+        expires_at: datetime, expected_expires_at: datetime | None,
+    ) -> dict:
+        """Correct one existing ledger under IAM's row lock; CAS against explicit old expiry.
+
+        Aware timestamps may move backward or forward. Missing/replaced instances
+        and stale expected expiry raise ValueError. Return instance id and previous UTC expiry.
+        """
+        ...
+
+    @abstractmethod
     def caller_token_refresh(
         self, *, user_id: str, bot_id: str, owner_id: str, binding_id: int,
     ) -> AbstractContextManager[CallerTokenRefresh]:

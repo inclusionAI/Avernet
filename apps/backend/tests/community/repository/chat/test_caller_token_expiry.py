@@ -471,3 +471,110 @@ def test_refresh_and_iam_select_the_same_row_for_update(repo):
     assert str(locked[0]) == str(locked[1])
     assert str(locked[0]).endswith("FOR UPDATE")
     assert locked[0].params == locked[1].params
+
+
+def correction(repo, *, end, expected=None, binding_id=7):
+    return repo.correct_caller_token_expiry(user_id="u1", bot_id="b1", owner_id="o1", binding_id=binding_id,
+                                          expires_at=end, expected_expires_at=expected)
+
+
+def test_admin_correction_can_move_expiry_backwards_with_exact_cas(repo):
+    seed(repo)
+    future = datetime.now(UTC) + timedelta(days=3)
+    past = datetime(2000, 1, 1, tzinfo=UTC)
+    first = correction(repo, end=future)
+    assert first["instance_id"]
+    assert first["previous_expires_at"] is None
+    second = correction(repo, end=past, expected=future)
+    assert second["previous_expires_at"] == future.isoformat()
+    assert expiry(repo) == past.isoformat()
+
+
+def test_admin_correction_refuses_stale_expected_expiry(repo):
+    seed(repo)
+    future = datetime.now(UTC) + timedelta(days=3)
+    with scope(repo, future):
+        pass
+    with pytest.raises(ValueError, match="caller_token_expiry_conflict"):
+        correction(repo, end=datetime(2000, 1, 1, tzinfo=UTC))
+    assert expiry(repo) == future.isoformat()
+
+
+@pytest.mark.parametrize("change", ["wrong_binding", "naive_expiry", "naive_expected", "missing"])
+def test_admin_correction_fails_closed(repo, change):
+    if change != "missing":
+        seed(repo)
+    params = dict(end=datetime(2000, 1, 1, tzinfo=UTC))
+    if change == "wrong_binding":
+        params["binding_id"] = 8
+    elif change == "naive_expiry":
+        params["end"] = datetime(2000, 1, 1)
+    elif change == "naive_expected":
+        params["expected"] = datetime(2000, 1, 1)
+    with pytest.raises(ValueError):
+        correction(repo, **params)
+    if change == "missing":
+        assert repo.get_instance("u1", "b1", "o1") is None
+    else:
+        assert expiry(repo) is None
+
+
+def test_correction_waits_for_iam_and_rejects_stale_null(repo):
+    seed(repo)
+    future = datetime.now(UTC) + timedelta(days=3)
+    entered, release, attempting = Event(), Event(), Event()
+
+    def iam():
+        with scope(repo, future) as install:
+            assert install
+            entered.set()
+            assert release.wait(5)
+
+    def admin():
+        attempting.set()
+        with pytest.raises(ValueError, match="caller_token_expiry_conflict"):
+            correction(repo, end=datetime(2000, 1, 1, tzinfo=UTC))
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(iam)
+        assert entered.wait(5)
+        second = pool.submit(admin)
+        assert attempting.wait(5)
+        release.set()
+        first.result(timeout=5)
+        second.result(timeout=5)
+    assert expiry(repo) == future.isoformat()
+
+
+def test_correction_uses_the_same_mysql_row_lock_as_iam(repo):
+    from sqlalchemy import event
+    from sqlalchemy.dialects import mysql
+    from sqlalchemy.orm import Session
+
+    seed(repo)
+    locked = []
+
+    def capture(execution):
+        if getattr(execution.statement, "_for_update_arg", None) is not None:
+            locked.append(execution.statement.compile(dialect=mysql.dialect()))
+
+    event.listen(Session, "do_orm_execute", capture)
+    try:
+        with scope(repo, datetime.now(UTC) + timedelta(days=2)):
+            pass
+        with pytest.raises(ValueError, match="caller_token_expiry_conflict"):
+            correction(repo, end=datetime(2000, 1, 1, tzinfo=UTC))
+    finally:
+        event.remove(Session, "do_orm_execute", capture)
+    assert len(locked) == 2
+    assert str(locked[0]) == str(locked[1])
+    assert str(locked[0]).endswith("FOR UPDATE")
+    assert locked[0].params == locked[1].params
+
+
+def test_correction_does_not_treat_a_human_owner_alias_as_entity(repo):
+    seed(repo)
+    with pytest.raises(ValueError, match="caller_instance_changed"):
+        repo.correct_caller_token_expiry(user_id="u1", bot_id="b1", owner_id="different-entity",
+            binding_id=7, expires_at=datetime(2000, 1, 1, tzinfo=UTC), expected_expires_at=None)
+    assert expiry(repo) is None

@@ -178,3 +178,10 @@ class CallerIdentityLockMismatchError(RuntimeError):
 
 class CallerIdentityEngineChangedError(RuntimeError):
     """The Bot active engine changed while updating its MCP identity."""
+
+
+class CallerExpiryCorrectionError(Exception):
+    """Safe machine-readable reason an administrative expiry correction was refused."""
+    def __init__(self, code: str):
+        self.code = code
+        super().__init__(code)

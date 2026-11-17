@@ -29,6 +29,7 @@ from .dws_hosting.admission import OPERATIONS as DWS_OPERATIONS, PATH as DWS_PAT
 #: No row is :class:`Check` yet: this change builds the seam, and moving each
 #: group onto it is its own session (``spec.md`` *Decisions* 4).
 AUTHORIZATION: dict[tuple[str, str], Authorization] = {
+    ("PATCH", "/openapi/v1/bots/{bot_id}/caller-instances/{caller_user_id}/token-expiry"): NoCheck("verified human super-admin checked by CallerExpiryCorrectionService"),
     ("POST", "/openapi/v1/bots/service-envs/{bot_uuid}/env-teardown"): NoCheck(
         "service environment teardown intentionally has no Bot collaborator-level requirement"
     ),
@@ -991,7 +992,6 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     **TASK_BBS_AUTHORIZATION,
     **GENOME_AUTHORIZATION,
 }
-
 
 # The table asserts its own shape while it imports (Instruction #2551): a
 # MEMBER write/operations row without its explicit origin fails the boot —
