@@ -17,6 +17,12 @@ core/repository/
 └── implementations/  the ORM bodies — each declaring its Protocol(s) as a base
 ```
 
+Recycle activation claims take an explicit validator from the dormant domain.
+The repository invokes that policy against the locked Bot row in the same
+transaction as the `RECYCLED` → `REACTIVATING` claim; it does not select engine
+policy or decide personal/Teclaw eligibility. Rollback applies the same domain
+validation under its existing transaction.
+
 Repositories are not plugins. Each has exactly one implementation, and database selection remains the `DatabasePlugin` injected into the constructor.
 `BotRepository.list_catalog_bots_by_owner_bot_pairs` is a bounded (100-pair)
 read without COUNT, equivalent to the existing exact-pair first page including

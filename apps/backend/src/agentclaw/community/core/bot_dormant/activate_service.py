@@ -30,6 +30,21 @@ from agentclaw.community.utils.avernet_tenant import bind_current_avernet_tenant
 logger = get_logger()
 
 
+def validate_activation(bot, is_teclaw):
+    """Domain admission, also applied to the locked row before an atomic claim."""
+    from agentclaw.community.core.bot_management.engines.registry import assert_lifecycle_mutable
+
+    if bot.get("bot_type") != "personal":
+        raise BotOperationNotAllowedError("dormant activation only supports personal bots")
+    if is_teclaw(bot.get("active_engine")):
+        raise BotOperationNotAllowedError("teclaw bots use their engine-owned lifecycle")
+    assert_lifecycle_mutable(bot)
+    if bot.get("status") not in {"ACTIVE", "REACTIVATING", "RECYCLED"}:
+        raise BotInvalidLifecycleStateError(
+            bot_id=bot["bot_id"], current_status=str(bot.get("status") or "UNKNOWN"),
+        )
+
+
 class ActivateBotService:
     """Start the existing asynchronous reactivation orchestration."""
 
@@ -65,17 +80,7 @@ class ActivateBotService:
             )
             raise BotNotFoundError(f"bot not found: {bot_id}")
 
-        if bot.get("bot_type") != "personal":
-            raise BotOperationNotAllowedError(
-                "dormant activation only supports personal bots"
-            )
-        if self._bot_service.is_teclaw_bot(bot.get("active_engine")):
-            raise BotOperationNotAllowedError(
-                "teclaw bots use their engine-owned lifecycle"
-            )
-
-        from agentclaw.community.core.bot_management.engines.registry import assert_lifecycle_mutable
-        assert_lifecycle_mutable(bot)
+        validate_activation(bot, self._bot_service.is_teclaw_bot)
         status = bot.get("status")
         if self._activation_control is not None:
             status, claimed = self._activation_control.claim_activation(bot_id, owner_id)
@@ -107,16 +112,6 @@ class ActivateBotService:
                 owner_id=owner_id,
                 status="REACTIVATING",
                 changed=False,
-            )
-
-        if status != "RECYCLED":
-            logger.warning(
-                "[activate] invalid status bot_id=%s user_id=%s status=%s",
-                bot_id, owner_id, status,
-            )
-            raise BotInvalidLifecycleStateError(
-                bot_id=bot_id,
-                current_status=str(status or "UNKNOWN"),
             )
 
         # Transition to REACTIVATING synchronously so the caller gets a loading state.

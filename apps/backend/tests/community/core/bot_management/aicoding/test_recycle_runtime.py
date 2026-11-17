@@ -9,9 +9,13 @@ from agentclaw.community.core.bot_management.engines.aicoding.recycle_runtime im
     submit_release,
 )
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, create_autospec
 
 import pytest
+from agentclaw.community.core.bot_management.engines.aicoding.restart_dependencies import (
+    BaasRecycleRuntime, BaasRestartRuntime, RestartBackupDependencies,
+)
+from agentclaw.community.core.service_bot.services.baas_service import BaasService
 from agentclaw.community.core.bot_management.engines.aicoding import (
     restart_backup as backup,
 )
@@ -85,6 +89,7 @@ def test_baas_new_physical_device_with_same_binding_blocks_release():
         "sandbox_id": None,
         "bot_uuid": "d1",
     }
+    deps.baas_runtime.return_value = create_autospec(BaasRecycleRuntime, instance=True)
     deps.baas_runtime.return_value.list_devices_by_bot_uuid.return_value = [
         {"provider_device_id": "new-sandbox", "status": "ACTIVE"},
     ]
@@ -96,60 +101,69 @@ def test_baas_new_physical_device_with_same_binding_blocks_release():
         )
 
 
+@pytest.mark.parametrize("failed", [False, True])
 def test_recycle_uses_durable_policy_and_backup_context_without_restart_mutation(
-    monkeypatch,
+    monkeypatch, failed,
 ):
-    from agentclaw.community.core.bot_management.engines.aicoding.restart_state import (
-        current_restart,
-    )
+    from agentclaw.community.core.bot_management.engines import registry
+    from agentclaw.community.core.bot_management.engines.aicoding.restart_arca import ArcaRestartTransport
+    from agentclaw.community.core.bot_management.engines.aicoding.restart_backup import RestartBackupBlocked
+    from agentclaw.community.core.bot_management.engines.aicoding.restart_state import current_restart
+    from tests.community.core.bot_management.aicoding.test_restart_fastdisk import detection
+    from tests.community.core.bot_management.aicoding.test_restart_backup import response
 
-    devices, bots, deps = MagicMock(), MagicMock(), MagicMock()
+    config = MagicMock()
+    config.get_value.return_value = False
+    monkeypatch.setattr(registry, "_restart_common_config_provider", lambda: config)
+    devices, bots = MagicMock(), MagicMock()
     devices.get_device.return_value = SimpleNamespace(
-        device_id="d1", device_provider="arca", device_props={"sandbox_id": "s1"}
+        device_id="d1", device_provider="arca", status="ACTIVE", device_props={"sandbox_id": "s1"},
     )
-    runtime = AicodingRecycleRuntime(lambda: devices, bots, deps, MagicMock())
-    bot = {"bot_id": "b1", "owner_id": "u1", "binding_id": 1}
-    target = runtime.target(bot)
-    record = {
-        "operation_id": "a" * 32,
-        "backup_started_at": time.time(),
-        "target": target,
-    }
-    from agentclaw.community.core.bot_management.engines.aicoding.strategy import (
-        AicodingProvisioningStrategy,
-    )
+    bot = {"bot_id": "b1", "owner_id": "u1", "binding_id": 1, "active_engine": "claude_code", "bot_type": "personal", "ext": {}}
+    bots.get_by_id_and_owner.return_value = bot
+    record = {"operation_id": "a" * 32, "backup_started_at": time.time()}
 
-    strategy, ctx = AicodingProvisioningStrategy("claude_code"), MagicMock()
-    strategy._fastdisk_backup_blocking = MagicMock()
-    strategy.prepare_restart = MagicMock()
-    strategy._fastdisk_backup_blocking.return_value = False
+    def execute(**kwargs):
+        assert current_restart.get() is None
+        assert current_backup.get().operation_id == record["operation_id"]
+        assert kwargs["device"].device_props == {"sandbox_id": "s1"}
+        if kwargs["shell_cmd"] == backup.detection_command():
+            return detection()
+        assert record["operation_id"] in kwargs["shell_cmd"]
+        return response("failed") if failed else response("committed", backup={
+            "status": "success", "generation_id": "g1", "operation_id": record["operation_id"],
+        })
+
+    command = MagicMock(side_effect=execute)
+    deps = RestartBackupDependencies(arca_transport=lambda: ArcaRestartTransport(command))
+    runtime = AicodingRecycleRuntime(lambda: devices, bots, deps, MagicMock())
+    record["target"] = runtime.target(bot)
 
     def save(**changes):
         record.update(changes)
-        # Simulate another delivery winning the persisted configuration read.
+        # Another delivery's persisted switch must win over this False config read.
         record["fail_block"] = True
         return dict(record)
 
-    def prepare(*args, **kwargs):
-        assert current_restart.get() is None
-        assert current_backup.get().operation_id == record["operation_id"]
-        assert kwargs["blocking_enabled"]() is True
-        assert kwargs["operation_id"] == record["operation_id"]
-        return None
-
-    strategy.prepare_restart.side_effect = prepare
-    monkeypatch.setattr(
-        "agentclaw.community.core.bot_management.engines.aicoding.recycle_runtime.resolve_restart_strategy",
-        lambda _: (ctx, strategy),
-    )
-    runtime.prepare(bot, record, save)
+    if failed:
+        with pytest.raises(RestartBackupBlocked):
+            runtime.prepare(bot, record, save)
+    else:
+        verify = runtime.prepare(bot, record, save)
+        assert current_backup.get() is None
+        verify()
+    config.get_value.assert_called_once()
+    assert record["fastdisk_targets"] == ["s1"]
+    assert "warning" not in record
     assert current_backup.get() is None and current_restart.get() is None
+    assert bot["ext"] == {}
+    bots.update_by_owner.assert_not_called()
 
 
 @pytest.fixture
 def baas():
-    service = MagicMock()
-    service.get_recycle_release_status.return_value = "ACTIVE"
+    service = create_autospec(BaasRecycleRuntime, instance=True)
+    service.is_physical_device_destroyed.return_value = False
     service.list_devices_by_bot_uuid.return_value = []
     return service
 
@@ -165,14 +179,14 @@ def test_baas_receipt_is_not_release_confirmation(baas):
     assert result == {"publish_id": 42, "request_id": "op1"}
     baas.get_publish_progress.return_value = {"status": "APPROVING"}
     assert (
-        observe_baas_release(baas, target={"bot_uuid": "b1"}, release=result)
+        observe_baas_release(baas, target={"bot_uuid": "b1"}, release=result, physical_targets=["s1@42"])
         == "UNKNOWN"
     )
 
 
 def test_baas_empty_inventory_alone_is_unknown(baas):
     assert (
-        observe_baas_release(baas, target={"bot_uuid": "b1"}, release=None) == "UNKNOWN"
+        observe_baas_release(baas, target={"bot_uuid": "b1"}, release=None, physical_targets=["s1@42"]) == "UNKNOWN"
     )
 
 
@@ -181,24 +195,24 @@ def test_baas_workflow_success_does_not_hide_live_device(baas):
     baas.list_devices_by_bot_uuid.return_value = [{"status": "ACTIVE"}]
     assert (
         observe_baas_release(
-            baas, target={"bot_uuid": "b1"}, release={"publish_id": 42}
+            baas, target={"bot_uuid": "b1"}, release={"publish_id": 42}, physical_targets=["s1@42"]
         )
         == "UNKNOWN"
     )
 
 
-def test_baas_explicit_terminal_inventory_and_release_can_recover_lost_post(baas):
-    baas.get_recycle_release_status.return_value = "RELEASED"
+def test_baas_physical_absence_can_recover_lost_post(baas):
+    baas.is_physical_device_destroyed.return_value = True
     assert (
-        observe_baas_release(baas, target={"bot_uuid": "b1"}, release=None)
+        observe_baas_release(baas, target={"bot_uuid": "b1"}, release=None, physical_targets=["s1@42"])
         == "RELEASED"
     )
 
 
 def test_baas_failed_query_is_not_absence(baas):
-    baas.get_recycle_release_status.side_effect = TimeoutError("query timed out")
+    baas.is_physical_device_destroyed.side_effect = TimeoutError("query timed out")
     with pytest.raises(TimeoutError):
-        observe_baas_release(baas, target={"bot_uuid": "b1"}, release=None)
+        observe_baas_release(baas, target={"bot_uuid": "b1"}, release=None, physical_targets=["s1@42"])
 
 
 def test_unknown_provider_never_resolves_a_different_runtime():
@@ -222,30 +236,42 @@ def test_unconfigured_arca_transport_fails_closed():
     assert transport.observe({"sandbox_id": "s1"}) == "UNKNOWN"
 
 
-@pytest.mark.parametrize("typed", [False, True])
-def test_baas_untyped_404_is_not_release_evidence(typed):
+@pytest.mark.parametrize("status,code", [
+    (404, "DEVICE_NOT_FOUND"), (404, "NOT_FOUND"), (404, "BOT_NOT_FOUND"),
+    (404, "TEMPLATE_NOT_FOUND"), (404, "DEVICE_UNAVAILABLE"),
+    (500, "DEVICE_NOT_FOUND"), (500, "DEVICE_DESTROY_FAILED"),
+    (401, "DEVICE_NOT_FOUND"), (403, "DEVICE_NOT_FOUND"),
+])
+def test_only_typed_physical_not_found_confirms_destruction(status, code):
     import httpx
-    from agentclaw.community.core.service_bot.services.baas_service import BaasService
-
     service = object.__new__(BaasService)
-    request = httpx.Request("GET", "https://example.invalid/api/v1/bots/b1")
-    response = httpx.Response(
-        404,
-        request=request,
-        json={
-            "detail": {"error_code": "BOT_NOT_FOUND" if typed else "NOT_FOUND"},
-        },
+    service._tenant = "test"
+    service._http = MagicMock()
+    service._http.get.return_value = httpx.Response(
+        status, request=httpx.Request("GET", "https://example.invalid/info"),
+        json={"detail": {"error_code": code}},
     )
-    service._get_bots_api = MagicMock(
-        side_effect=httpx.HTTPStatusError(
-            "not found", request=request, response=response
-        )
-    )
-    if typed:
-        assert service.get_recycle_release_status(bot_uuid="b1") == "RELEASED"
+    if status == 404 and code == "DEVICE_NOT_FOUND":
+        assert service.is_physical_device_destroyed(provider_device_id="s1@42") is True
     else:
         with pytest.raises(httpx.HTTPStatusError):
-            service.get_recycle_release_status(bot_uuid="b1")
+            service.is_physical_device_destroyed(provider_device_id="s1@42")
+    service._http.get.assert_called_once_with(
+        "/api/v1/paas/devices/s1%4042/info", params={"tenant": "test"}, timeout=30.0,
+    )
+
+
+@pytest.mark.parametrize("status", ["RUNNING", "STOPPED", "RELEASED", "UNKNOWN"])
+def test_present_physical_resource_is_not_destroyed(status):
+    import httpx
+    service = object.__new__(BaasService)
+    service._tenant = "test"
+    service._http = MagicMock()
+    service._http.get.return_value = httpx.Response(
+        200, request=httpx.Request("GET", "https://example.invalid/info"),
+        json={"code": 0, "data": {"status": status}},
+    )
+    assert service.is_physical_device_destroyed(provider_device_id="s1@42") is False
 
 
 def test_missing_logical_bot_does_not_hide_orphan_physical_device(baas):
@@ -257,9 +283,93 @@ def test_missing_logical_bot_does_not_hide_orphan_physical_device(baas):
     receipt = submit_baas_release(
         baas, target={"bot_uuid": "b1"}, request_id="op1", owner_id="u1"
     )
-    baas.get_recycle_release_status.return_value = "RELEASED"
     baas.list_devices_by_bot_uuid.return_value = [{"status": "ACTIVE"}]
     assert (
-        observe_baas_release(baas, target={"bot_uuid": "b1"}, release=receipt)
+        observe_baas_release(baas, target={"bot_uuid": "b1"}, release=receipt, physical_targets=["s1@42"])
         == "UNKNOWN"
     )
+
+
+@pytest.mark.parametrize("receipt", [None, {"publish_id": 42}])
+def test_logical_release_with_empty_inventory_does_not_prove_physical_release(baas, receipt):
+    baas.get_publish_progress.return_value = {"status": "SUCCESS"}
+    assert observe_baas_release(baas, target={"bot_uuid": "b1"}, release=receipt, physical_targets=["s1@42"]) == "UNKNOWN"
+
+
+@pytest.mark.parametrize("targets", [None, [], [""], [None]])
+def test_missing_pinned_physical_targets_never_confirm_release(baas, targets):
+    baas.is_physical_device_destroyed.return_value = True
+    assert observe_baas_release(baas, target={"bot_uuid": "b1"}, release=None, physical_targets=targets) == "UNKNOWN"
+    baas.is_physical_device_destroyed.assert_not_called()
+
+
+def test_all_pinned_targets_must_be_physically_absent(baas):
+    baas.is_physical_device_destroyed.side_effect = [True, False]
+    assert observe_baas_release(baas, target={"bot_uuid": "b1"}, release=None, physical_targets=["s1@42", "s2@43"]) == "UNKNOWN"
+    assert [c.kwargs["provider_device_id"] for c in baas.is_physical_device_destroyed.call_args_list] == ["s1@42", "s2@43"]
+    baas.destroy_bot.assert_not_called()
+
+
+def test_restart_only_runtime_cannot_silently_supply_recycle_capabilities():
+    deps = RestartBackupDependencies.for_instance(create_autospec(BaasRestartRuntime, instance=True))
+    runtime = AicodingRecycleRuntime(MagicMock(), MagicMock(), deps, MagicMock())
+    with pytest.raises(RuntimeError, match="capabilities unavailable"):
+        runtime.submit_release({"binding_id": 1, "provider": "baas", "bot_uuid": "b1"}, "op1", "u1")
+
+
+def test_real_baas_service_supplies_declared_recycle_capabilities():
+    assert isinstance(object.__new__(BaasService), BaasRecycleRuntime)
+
+
+def test_runtime_observes_persisted_physical_targets_through_declared_capability(baas):
+    baas.is_physical_device_destroyed.return_value = True
+    runtime = AicodingRecycleRuntime(
+        MagicMock(), MagicMock(), RestartBackupDependencies.for_instance(baas), MagicMock(),
+    )
+    assert runtime.observe_release(
+        {"binding_id": 1, "provider": "baas", "bot_uuid": "b1"}, None, ["s1@42"],
+    ) == "RELEASED"
+    baas.is_physical_device_destroyed.assert_called_once_with(provider_device_id="s1@42")
+
+
+def test_prepare_pins_terminal_inventory_rows_instead_of_forgetting_physical_ids(baas):
+    from tests.community.core.bot_management.aicoding.test_restart_fastdisk import detection
+
+    baas.list_devices_by_bot_uuid.return_value = [
+        {"provider_device_id": "s1@42", "status": "ACTIVE"},
+        {"provider_device_id": "s2@42", "status": "STOPPED"},
+        {"provider_device_id": "s3@42", "status": "RELEASED"},
+    ]
+    baas.post_bots_api.return_value = detection("skip_no_fastdisk")
+    devices, bots = MagicMock(), MagicMock()
+    devices.get_device.return_value = SimpleNamespace(
+        device_id="d1", device_provider="baas", device_props={}, status="ACTIVE",
+    )
+    bot = {"bot_id": "b1", "owner_id": "u1", "bot_type": "personal", "active_engine": "claude_code", "binding_id": 1}
+    bots.get_by_id_and_owner.return_value = bot
+    runtime = AicodingRecycleRuntime(lambda: devices, bots, RestartBackupDependencies.for_instance(baas), MagicMock())
+    record = {"target": runtime.target(bot), "operation_id": "a" * 32, "backup_started_at": time.time(), "fail_block": False}
+
+    def save(**changes):
+        record.update(changes)
+        return dict(record)
+
+    runtime.prepare(bot, record, save)()
+    assert record["physical_targets"] == ["s1@42", "s2@42", "s3@42"]
+    baas.destroy_bot.assert_not_called()
+
+
+def test_bound_bot_without_physical_inventory_cannot_begin_release(baas):
+    devices = MagicMock()
+    devices.get_device.return_value = SimpleNamespace(device_id="d1", device_provider="baas", device_props={})
+    runtime = AicodingRecycleRuntime(lambda: devices, MagicMock(), RestartBackupDependencies.for_instance(baas), MagicMock())
+    bot = {"binding_id": 1}
+    with pytest.raises(RecycleTargetChanged, match="Physical targets missing"):
+        runtime.prepare(bot, {"target": runtime.target(bot)}, MagicMock())
+    baas.destroy_bot.assert_not_called()
+
+
+def test_unbound_bot_does_not_require_a_physical_probe():
+    deps = RestartBackupDependencies(baas_runtime=MagicMock(side_effect=AssertionError("must stay lazy")))
+    runtime = AicodingRecycleRuntime(MagicMock(), MagicMock(), deps, MagicMock())
+    assert runtime.observe_release({"binding_id": None}, None, None) == "RELEASED"

@@ -4150,6 +4150,7 @@ class BotService(BotServiceProtocol):
 
         return bot
 
+    @serialize_resource_release
     def delete_bot(self, bot_id: str, user_id: str, nick_name: Optional[str] = None) -> bool:
         """
         Soft delete a bot.

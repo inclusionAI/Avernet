@@ -28,7 +28,10 @@ from agentclaw.community.api.bot_dormant_service import (
 from agentclaw.community.api.bot_service import (
     BotServiceProtocol as _ApiBotServiceProtocol,
 )
-from agentclaw.community.core.bot_dormant.activate_service import ActivateBotService
+from agentclaw.community.core.bot_dormant.activate_service import (
+    ActivateBotService,
+    validate_activation,
+)
 from agentclaw.community.core.bot_dormant.audit_service import DormantAuditService
 from agentclaw.community.core.bot_dormant.baas_client import BaasDormantClient
 from agentclaw.community.core.bot_dormant.internal_service import DormantInternalService
@@ -173,7 +176,10 @@ class BotDormantModule(Module):
         engine_test: Callable[[], TeclawEngineTestProtocol],
     ) -> BotRecycleRepositoryProtocol:
         return RecycleRepository(
-            db, config.app, is_teclaw=lambda engine: engine_test().is_teclaw(engine)
+            db, config.app,
+            validate_activation=lambda bot: validate_activation(
+                bot, lambda engine: engine_test().is_teclaw(engine)
+            ),
         )
 
     @singleton

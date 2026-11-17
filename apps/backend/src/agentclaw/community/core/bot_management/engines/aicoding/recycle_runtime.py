@@ -13,9 +13,13 @@ from agentclaw.community.core.bot_management.engines.registry import (
     resolve_restart_strategy,
 )
 
+from .restart_dependencies import BaasRecycleRuntime, RestartBackupDependencies
+
 
 class AicodingRecycleRuntime:
-    def __init__(self, devices, bots, backup_dependencies, arca_transport):
+    def __init__(
+        self, devices, bots, backup_dependencies: RestartBackupDependencies, arca_transport
+    ):
         self.devices, self.bots, self.dependencies = devices, bots, backup_dependencies
         self.arca_transport = arca_transport
 
@@ -40,7 +44,7 @@ class AicodingRecycleRuntime:
             raise RecycleTargetChanged("Recycle target changed")
         physical_targets = None
         if record["target"]["provider"] in {"baas", "local"}:
-            runtime = self.dependencies.baas_runtime()
+            runtime = _baas_recycle_runtime(self.dependencies)
 
             def inventory():
                 devices = runtime.list_devices_by_bot_uuid(
@@ -52,22 +56,12 @@ class AicodingRecycleRuntime:
                 for device in devices:
                     if not isinstance(device, dict):
                         raise RecycleTargetChanged("Invalid physical target")
-                    if device.get("status") in {"RELEASED", "STOPPED"}:
-                        continue
                     identity = device.get("provider_device_id")
                     if not isinstance(identity, str) or not identity:
                         raise RecycleTargetChanged("Physical target identity missing")
                     result.add(identity)
-                if (
-                    not devices
-                    and runtime.get_bot(bot_uuid=record["target"]["bot_uuid"]).get(
-                        "status"
-                    )
-                    != "RELEASED"
-                ):
-                    raise RecycleTargetChanged(
-                        "Empty inventory is not release evidence"
-                    )
+                if not result:
+                    raise RecycleTargetChanged("Physical targets missing")
                 return sorted(result)
 
             physical_targets = inventory()
@@ -114,11 +108,12 @@ class AicodingRecycleRuntime:
             owner_id=owner_id,
         )
 
-    def observe_release(self, target, release):
+    def observe_release(self, target, release, physical_targets):
         if target["binding_id"] is None:
             return "RELEASED"
         return observe_release(
-            self.dependencies, self.arca_transport, target=target, release=release
+            self.dependencies, self.arca_transport, target=target, release=release,
+            physical_targets=physical_targets,
         )
 
 
@@ -135,23 +130,35 @@ def submit_baas_release(baas, *, target, request_id, owner_id):
     return {"publish_id": result.get("publish_id"), "request_id": request_id}
 
 
-def observe_baas_release(baas, *, target, release):
+def observe_baas_release(baas: BaasRecycleRuntime, *, target, release, physical_targets):
+    # A logical RELEASED row, successful workflow or empty inventory may conceal
+    # a failed provider destroy. Only the previously pinned physical IDs count.
+    if not isinstance(physical_targets, list) or not physical_targets or any(
+        not isinstance(identity, str) or not identity for identity in physical_targets
+    ):
+        return "UNKNOWN"
     publish_id = (release or {}).get("publish_id")
     if publish_id:
         progress = baas.get_publish_progress(int(publish_id), include_devices=False)
         if progress.get("status") != "SUCCESS":
             return "UNKNOWN"
-    status = baas.get_recycle_release_status(bot_uuid=target["bot_uuid"])
     devices = baas.list_devices_by_bot_uuid(bot_uuid=target["bot_uuid"])
-    if not isinstance(devices, list):
-        return "UNKNOWN"
-    terminal = all(
-        isinstance(d, dict) and d.get("status") in {"RELEASED", "STOPPED"}
+    if not isinstance(devices, list) or any(
+        not isinstance(d, dict) or d.get("status") not in {"RELEASED", "STOPPED"}
         for d in devices
-    )
-    if terminal and (bool(publish_id) or status == "RELEASED"):
-        return "RELEASED"
-    return "UNKNOWN"
+    ):
+        return "UNKNOWN"
+    for identity in physical_targets:
+        if baas.is_physical_device_destroyed(provider_device_id=identity) is not True:
+            return "UNKNOWN"
+    return "RELEASED"
+
+
+def _baas_recycle_runtime(dependencies: RestartBackupDependencies) -> BaasRecycleRuntime:
+    runtime = dependencies.baas_runtime()
+    if not isinstance(runtime, BaasRecycleRuntime):
+        raise RuntimeError("Coding recycle BaaS capabilities unavailable")
+    return runtime
 
 
 class ArcaRecycleTransport:
@@ -181,7 +188,7 @@ def submit_release(dependencies, arca, *, target, request_id, owner_id):
         return arca().submit(target, request_id)
     if target["provider"] in {"baas", "local"}:
         return submit_baas_release(
-            dependencies.baas_runtime(),
+            _baas_recycle_runtime(dependencies),
             target=target,
             request_id=request_id,
             owner_id=owner_id,
@@ -189,11 +196,12 @@ def submit_release(dependencies, arca, *, target, request_id, owner_id):
     raise RuntimeError("Recycle provider unavailable")
 
 
-def observe_release(dependencies, arca, *, target, release):
+def observe_release(dependencies, arca, *, target, release, physical_targets):
     if target["provider"] == "arca":
         return arca().observe(target)
     if target["provider"] in {"baas", "local"}:
         return observe_baas_release(
-            dependencies.baas_runtime(), target=target, release=release
+            _baas_recycle_runtime(dependencies), target=target, release=release,
+            physical_targets=physical_targets,
         )
     return "UNKNOWN"
