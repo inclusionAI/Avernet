@@ -6,7 +6,9 @@ import { Pagination } from '@/components/ui/Pagination';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select';
 import { Spin } from '@/components/ui/Spin';
 import type { TaskListItem } from '@/domain/tasks/models';
+import { Points } from '@/tracking/points';
 import { cn } from '@/utils/cn';
+import { Tracert } from '@/utils/tracert';
 import { Eye, FileOutput, Search } from 'lucide-react';
 import React, { useMemo, useState } from 'react';
 import {
@@ -25,8 +27,6 @@ import { filterUserTaskRecords, type UserTaskOwnerBotOption } from './userTaskFi
 import { UserTaskOwnerBotFilter } from './UserTaskOwnerBotFilter';
 import { UserTaskGoalContent, UserTaskPrimaryContent } from './UserTaskTableCells';
 import { ViewSessionButton } from './ViewSessionButton';
-import { Points } from '@/tracking/points';
-import { Tracert } from '@/utils/tracert';
 
 function Th({ className, ...props }: React.ThHTMLAttributes<HTMLTableCellElement>) {
   return <th className={cn('h-10 px-4 py-3 text-xs font-medium text-muted-foreground', className)} {...props} />;
@@ -86,10 +86,11 @@ export function UserTaskTab({
       filterUserTaskRecords({
         taskRecords,
         keyword: userKeyword,
+        titleOnly: isLabVariant,
         ownerBotFilter,
         ownerBotOptions,
       }),
-    [ownerBotFilter, ownerBotOptions, taskRecords, userKeyword],
+    [isLabVariant, ownerBotFilter, ownerBotOptions, taskRecords, userKeyword],
   );
 
   return (
@@ -253,7 +254,11 @@ export function UserTaskTab({
                                 >
                                   查看产物
                                 </Button>
-                                <ViewSessionButton record={record} label="进入对话" ownerBotUserIdMap={ownerBotUserIdMap} />
+                                <ViewSessionButton
+                                  record={record}
+                                  label="进入对话"
+                                  ownerBotUserIdMap={ownerBotUserIdMap}
+                                />
                               </>
                             ) : (
                               <>

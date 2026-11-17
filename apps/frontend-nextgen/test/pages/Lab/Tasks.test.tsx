@@ -2,6 +2,7 @@
 // 实验室「任务」体验页(PRD:TeamClaw-demo /tasks):跨Bot、跨群协同任务列表,
 // 状态类别筛选 + 定制任务表格 + TaskPanel 产物抽屉。与定时任务无关。
 import LabTasksPage from '@/pages/Lab/Tasks';
+import { filterUserTaskRecords } from '@/pages/MyTask/components/userTaskFilters';
 import { beforeEach, describe, expect, it } from '@jest/globals';
 import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
@@ -416,5 +417,70 @@ describe('LabTasksPage(实验室·任务体验页)', () => {
 
     expect(mockPush).toHaveBeenCalledWith('/workspace/chat?bot=b-10%3Au-1&session=sess-b10');
     expect(mockPush).not.toHaveBeenCalledWith(expect.stringContaining('creator-user-id'));
+  });
+});
+
+describe('lab title-only search compatibility', () => {
+  const record = {
+    ...listItem,
+    task_id: 'unique-task-id',
+    owner_bot_id: 'unique-owner-bot',
+    source_type: 'unique-channel',
+    task_spec: { context: { title: 'Primary TITLE' }, metadata: { title: 'Old metadata' } },
+  };
+  const filter = (keyword: string, titleOnly = true) =>
+    filterUserTaskRecords({
+      taskRecords: [record],
+      keyword,
+      titleOnly,
+      ownerBotFilter: 'all',
+      ownerBotOptions: [],
+    });
+
+  it('matches the displayed title case-insensitively with trimmed input', () => {
+    expect(filter('  primary title  ')).toEqual([record]);
+    expect(filter('old metadata')).toEqual([]);
+  });
+
+  it.each(['unique-task-id', 'unique-owner-bot', 'unique-channel'])('does not match non-title %s in lab', (keyword) => {
+    expect(filter(keyword)).toEqual([]);
+    expect(filter(keyword, false)).toEqual([record]);
+  });
+
+  it('retains the original broad matching by default', () => {
+    expect(
+      filterUserTaskRecords({
+        taskRecords: [record],
+        keyword: 'unique-owner-bot',
+        ownerBotFilter: 'all',
+        ownerBotOptions: [],
+      }),
+    ).toEqual([record]);
+  });
+
+  it('preserves displayed title fallback and Owner Bot intersection', () => {
+    const metadataRecord = { ...record, task_spec: { metadata: { title: 'Metadata title' } } };
+    const idFallbackRecord = { ...record, task_spec: {} };
+    const filtered = (
+      item: typeof record | typeof metadataRecord | typeof idFallbackRecord,
+      keyword: string,
+      ownerBotFilter = 'all',
+    ) => filterUserTaskRecords({ taskRecords: [item], keyword, titleOnly: true, ownerBotFilter, ownerBotOptions: [] });
+    expect(filtered(metadataRecord, 'metadata')).toEqual([metadataRecord]);
+    expect(filtered(idFallbackRecord, 'unique-task-id')).toEqual([idFallbackRecord]);
+    expect(filtered(record, 'primary', 'another-bot')).toEqual([]);
+    expect(filtered(record, 'primary', 'unique-owner-bot')).toEqual([record]);
+  });
+
+  it('wires title-only matching into the lab page without changing the query scope', async () => {
+    mockListMyTasks.mockResolvedValue({ code: 0, message: 'ok', data: [record], request_id: 'r' });
+    render(<LabTasksPage />);
+    await screen.findByText('Primary TITLE');
+    const input = screen.getByPlaceholderText('搜索任务标题');
+    fireEvent.change(input, { target: { value: 'unique-owner-bot' } });
+    expect(screen.queryByText('Primary TITLE')).not.toBeInTheDocument();
+    expect(screen.getByText('暂无符合条件的用户任务')).toBeInTheDocument();
+    fireEvent.change(input, { target: { value: '  PRIMARY  ' } });
+    expect(screen.getByText('Primary TITLE')).toBeInTheDocument();
   });
 });
