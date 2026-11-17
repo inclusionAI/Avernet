@@ -1,3 +1,4 @@
+import type { WorkspaceRouteMembership } from '@/domain/workspaceRoute';
 import type { GroupView, IdentityView } from '@/domain/collaboration';
 import { loadScopedGroup } from '@/services/workspace/collaborationScopeService';
 import { groupService, type PolicyResult } from '@/services/workspace/groupService';
@@ -41,7 +42,7 @@ export function useGroupWorkspace(pinnedGroup?: GroupView): UseGroupWorkspaceRes
   const rawSetMembership = useWorkspaceStore((s) => s.setMembership);
   const toggleGroupExpanded = useWorkspaceStore((s) => s.toggleGroupExpanded);
 
-  // 用户手动切换参与方式时清空当前选中群/会话；深链解析不自动改动筛选。
+  // 用户手动切换参与方式时清空当前选中群/会话；定位按已验证详情同步筛选时保留选中。
   const setMembership = useCallback(
     (m: 'direct' | 'session_only') => {
       const store = useWorkspaceStore.getState();
@@ -52,8 +53,10 @@ export function useGroupWorkspace(pinnedGroup?: GroupView): UseGroupWorkspaceRes
   );
 
   const [sessionGroups, setSessionGroups] = useState<GroupView[]>(pinnedGroup ? [pinnedGroup] : []);
-  // 标记列表所属身份，避免选中详情兜底消费上一身份的陈旧列表。
-  const [loadedListIdentity, setLoadedListIdentity] = useState<string | null>(null);
+  // 列表属于身份与参与方式的组合，不能把旧类别数据展示在新筛选下。
+  const [loadedListContext, setLoadedListContext] = useState<{
+    identityId: string; membership: WorkspaceRouteMembership;
+  } | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSearchRef = useRef('');
   // 成员补拉（含请求代次）/ 选中群详情重载 / 解散群：下沉至 useGroupWorkspaceMutations（控本体体积）。
@@ -116,9 +119,9 @@ export function useGroupWorkspace(pinnedGroup?: GroupView): UseGroupWorkspaceRes
           const seeded = seedFromCache(res.data, request);
           setSessionGroups(seeded);
           // 仅当这次列表仍属于当前活动身份时才记成“已为该身份加载完成”,
-          // 避免身份切换后旧身份的残留响应把 loadedListIdentity 写成旧值。
+          // 避免身份切换后旧身份的残留响应把列表上下文写成旧值。
           if (useWorkspaceStore.getState().activeIdentityId === identityId) {
-            setLoadedListIdentity(identityId);
+            setLoadedListContext({ identityId: identity.id, membership: requestedMembership });
           }
           void enrichParticipants(seeded, request, identity.kind === 'bot' ? identity.id : undefined);
         } else {
@@ -154,12 +157,16 @@ export function useGroupWorkspace(pinnedGroup?: GroupView): UseGroupWorkspaceRes
     };
   }, [groupSearchText, activeIdentityId, loadGroups, pinnedGroup]);
 
+  const listReadyForIdentity = activeIdentityId !== null && loadedListContext?.identityId === activeIdentityId;
+  const listReadyForCurrentIdentity = listReadyForIdentity && loadedListContext.membership === membership;
   const groups = useMemo(
     () =>
       pinnedGroup
         ? sessionGroups.filter((group) => group.groupId === pinnedGroup.groupId)
-        : groupService.getVisibleGroups(sessionGroups, { search: '', kind: kindFilter, sort: sortMode }),
-    [sessionGroups, kindFilter, sortMode, pinnedGroup],
+        : listReadyForCurrentIdentity
+        ? groupService.getVisibleGroups(sessionGroups, { search: '', kind: kindFilter, sort: sortMode })
+        : [],
+    [sessionGroups, kindFilter, sortMode, pinnedGroup, listReadyForCurrentIdentity],
   );
 
   const listedSelectedGroup = useMemo(
@@ -167,7 +174,6 @@ export function useGroupWorkspace(pinnedGroup?: GroupView): UseGroupWorkspaceRes
     [selectedGroupId, sessionGroups],
   );
 
-  const listReadyForCurrentIdentity = activeIdentityId !== null && loadedListIdentity === activeIdentityId;
   // 深链目标不依赖侧栏当前页：列表缺失时按 group id 独立加载详情。
   const selectedGroupFallback = useSelectedGroupDetail(
     pinnedGroup ? null : selectedGroupId,
@@ -175,7 +181,8 @@ export function useGroupWorkspace(pinnedGroup?: GroupView): UseGroupWorkspaceRes
     isGroupsLoading,
     listReadyForCurrentIdentity || Boolean(groupsError),
   );
-  const selectedGroup = (listReadyForCurrentIdentity || pinnedGroup ? listedSelectedGroup : null)
+  // 当前舞台详情属于身份，不因仅切换侧栏分类而失效或触发管理详情重复加载。
+  const selectedGroup = (listReadyForIdentity || pinnedGroup ? listedSelectedGroup : null)
     ?? selectedGroupFallback.group;
 
   const canManageGroup = useMemo<PolicyResult>(

@@ -18,6 +18,7 @@ const botIdentity = { id: 'bot-1', kind: 'bot' as const, displayName: 'B1', onli
 
 beforeEach(() => {
   jest.clearAllMocks();
+  gs.resolveGroupMembership.mockResolvedValue({ ok: true, data: null });
   useWorkspaceStore.getState().resetWorkspace();
   useWorkspaceStore.setState({ activeIdentityId: 'bot-1', identities: [botIdentity] });
   // 默认实现：getVisibleGroups 透传；权限校验一律放行。
@@ -288,7 +289,7 @@ describe('useGroupWorkspace', () => {
     act(() => useWorkspaceStore.getState().selectGroup('g9'));
     await waitFor(() => expect(gs.loadGroupDetailOrBcs).toHaveBeenCalledWith('g9', 'bot-1'));
     expect(useWorkspaceStore.getState().membership).toBe('direct');
-    expect(result.current.selectedGroup?.groupId).toBe('g9');
+    await waitFor(() => expect(result.current.selectedGroup?.groupId).toBe('g9'));
   });
 
   it('switch identity triggers loadGroups for new identity and clears selection', async () => {

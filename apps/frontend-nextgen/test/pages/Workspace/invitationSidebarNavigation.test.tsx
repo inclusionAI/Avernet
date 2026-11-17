@@ -9,7 +9,7 @@ import { groupService } from '@/services/workspace/groupService';
 import { sessionService } from '@/services/workspace/sessionService';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { history, useSearchParams } from '@umijs/max';
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useEffect } from 'react';
 import '@testing-library/jest-dom';
 import { baseGroup, makeProps, setupResizeObserverMock } from './components/GroupSidebar/GroupSidebar.testUtils';
@@ -19,7 +19,8 @@ jest.mock('@/services/workspace/groupService');
 jest.mock('@/services/workspace/sessionService');
 const human = { id: 'human_staff-1', kind: 'user' as const, displayName: '我', online: true };
 const target = { ...baseGroup.sessions[0], sessionId: 'off-page', title: '邀请目标会话' };
-const targetGroup = { ...baseGroup, membership: 'session_only' as const };
+// Public GET /groups/{id} has no viewer-specific membership field.
+const targetGroup = { ...baseGroup };
 const mounted = jest.fn();
 const unmounted = jest.fn();
 
@@ -30,7 +31,7 @@ function Area({ request }: { request: ReturnType<typeof useWorkspacePage>['sessi
   const location = useGroupSessionLocation(ws.selectedGroup, sessions.selectedSession, undefined, request, Boolean(ws.selectedGroupError));
   useEffect(() => { mounted(); return () => { unmounted(); }; }, []);
   return <GroupSidebar {...makeProps({
-    groups: ws.groups, isLoading: ws.isLoadingGroups,
+    groups: ws.groups, isLoading: ws.isLoadingGroups, membership: ws.membership,
     selectedGroupId: ws.selectedGroupId, selectedSessionId: sessions.selectedSessionId,
     expandedGroupIds: ws.expandedGroupIds, sessionsByGroupId: sessions.sessionsByGroupId,
     sessionTabsByGroup, favoriteSessionIds: sessions.favoriteSessionIds,
@@ -57,6 +58,7 @@ beforeEach(() => {
   jest.mocked(useSearchParams).mockImplementation(() => [new URLSearchParams(window.location.search), jest.fn()]);
   jest.mocked(history.replace).mockImplementation((path) => { window.history.replaceState({}, '', String(path)); });
   jest.mocked(groupService.loadGroups).mockResolvedValue({ ok: true, data: [] });
+  jest.mocked(groupService.resolveGroupMembership).mockResolvedValue({ ok: true, data: 'session_only' });
   jest.mocked(groupService.loadGroupDetailOrBcs).mockResolvedValue({ ok: true, data: targetGroup });
   jest.mocked(groupService.getVisibleGroups).mockImplementation((groups) => groups);
   jest.mocked(groupService.canManageGroup).mockReturnValue({ allowed: false });
@@ -82,16 +84,24 @@ it('opens and scrolls a collapsed sidebar to an off-page session whose parent is
   await waitFor(() => expect(scroll).toHaveBeenCalledTimes(1));
   expect(document.activeElement).toBe(row);
   expect(screen.getByLabelText('协作群列表')).toHaveAttribute('data-collapsed', 'false');
-  expect(useWorkspaceStore.getState()).toMatchObject({ activeIdentityId: human.id, membership: 'direct',
+  expect(useWorkspaceStore.getState()).toMatchObject({ activeIdentityId: human.id, membership: 'session_only',
     selectedGroupId: 'g1', selectedSessionId: target.sessionId, groupSearchText: '', groupKindFilter: 'all',
     sessionSearchText: '', sessionTabsByGroup: { g1: 'all' }, historyRefreshNonce: 11 });
-  expect(groupService.loadGroups).toHaveBeenCalledWith(human, expect.objectContaining({ membership: 'direct' }));
+  await waitFor(() => expect(groupService.loadGroups).toHaveBeenCalledWith(human,
+    expect.objectContaining({ membership: 'session_only' })));
+  expect(groupService.resolveGroupMembership).toHaveBeenCalledWith('g1', undefined, expect.any(AbortSignal));
+  expect(targetGroup).not.toHaveProperty('membership');
+  expect(window.location.search).toContain('membership=session_only');
+  fireEvent.click(screen.getByRole('button', { name: /筛选协作群/ }));
+  expect(screen.getByRole('button', { name: '仅参与临时会话' })).toHaveAttribute('aria-pressed', 'true');
+  expect(screen.getByRole('button', { name: '固定群成员' })).toHaveAttribute('aria-pressed', 'false');
+  fireEvent.click(screen.getByRole('button', { name: /筛选协作群/ }));
   // Canonical query updates must not remount the data/history hooks or replay location.
   view.rerender(<Page />);
   expect(mounted).toHaveBeenCalledTimes(1);
   expect(unmounted).not.toHaveBeenCalled();
   expect(scroll).toHaveBeenCalledTimes(1);
-  // Clearing the old search reloads direct-membership groups and temporarily clears detail props.
+  // Aligning membership and clearing the old search reload the correct category and temporarily clears detail props.
   // The verified overlay must survive that refresh even though its parent still is not listed.
   await waitFor(() => expect(jest.mocked(groupService.loadGroups).mock.calls.filter((call) => !call[1]?.q).length).toBeGreaterThan(1));
   expect(screen.getByRole('button', { name: target.title })).toBeInTheDocument();

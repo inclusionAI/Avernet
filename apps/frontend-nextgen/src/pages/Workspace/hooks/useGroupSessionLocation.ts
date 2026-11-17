@@ -1,4 +1,4 @@
-import type { WorkspaceSessionLocationRequest } from '@/domain/workspaceRoute';
+import type { WorkspaceSessionLocationRequest, WorkspaceRouteMembership } from '@/domain/workspaceRoute';
 import type { GroupView, SessionView } from '@/domain/collaboration';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -22,13 +22,14 @@ export function useGroupSessionLocation(
   const selectedSessionId = useWorkspaceStore((state) => state.selectedSessionId);
   const handledRouteRequest = useRef<number>();
   const pendingFilter = useRef<{ request: number; key: string }>();
+  const membership = useWorkspaceStore((state) => state.membership);
   const groupSearch = useWorkspaceStore((state) => state.groupSearchText);
   const kindFilter = useWorkspaceStore((state) => state.groupKindFilter);
   const sessionSearch = useWorkspaceStore((state) => state.sessionSearchText);
   const sessionTab = useWorkspaceStore((state) => selectedGroupId ? state.sessionTabsByGroup[selectedGroupId] : undefined);
-  const filterKey = JSON.stringify([groupSearch, kindFilter, sessionSearch, sessionTab ?? 'all']);
+  const filterKey = JSON.stringify([membership, groupSearch, kindFilter, sessionSearch, sessionTab ?? 'all']);
   const requestSequence = useRef(0);
-  const [requested, setRequested] = useState<(GroupSessionLocation & { identityId: string | null }) | undefined>();
+  const [requested, setRequested] = useState<(GroupSessionLocation & { identityId: string | null; membership: WorkspaceRouteMembership }) | undefined>();
   // 详情重拉会暂时清空 props；定位随 Store 选中态失效，而非随加载骨架失效。
   const location =
     !targetUnavailable &&
@@ -37,6 +38,7 @@ export function useGroupSessionLocation(
     !sessionSearch &&
     sessionTab !== 'favorite' &&
     requested?.identityId === identityId &&
+    requested?.membership === membership &&
     requested?.group.groupId === selectedGroupId &&
     requested?.session.sessionId === selectedSessionId
       ? requested
@@ -52,11 +54,15 @@ export function useGroupSessionLocation(
   const locate = useCallback(() => {
     if (!group || !session || session.groupId !== group.groupId) return;
     const store = useWorkspaceStore.getState();
+    // 只使用当前身份已验证的详情字段；列表缺失或字段缺失均不能推断参与方式。
+    const targetMembership = group.membership ?? store.membership;
+    // 使用原始筛选 setter，避免手动切换入口清空当前群/会话选中态。
+    if (store.membership !== targetMembership) store.setMembership(targetMembership);
     store.setGroupSearchText('');
     store.setGroupKindFilter('all');
     store.setSessionSearchText('');
     store.setSessionTabForGroup(group.groupId, 'all');
-    setRequested({ group, session, identityId, request: ++requestSequence.current });
+    setRequested({ group, session, identityId, membership: targetMembership, request: ++requestSequence.current });
     if (window.matchMedia?.('(max-width: 1023px)').matches) openMobileList?.();
   }, [group, session, identityId, openMobileList]);
   useEffect(() => {

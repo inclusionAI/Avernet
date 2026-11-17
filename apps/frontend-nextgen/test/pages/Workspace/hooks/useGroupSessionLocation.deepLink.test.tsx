@@ -13,7 +13,7 @@ beforeEach(() => {
     membership: 'direct', expandedGroupIds: { g1: true }, historyRefreshNonce: 8 });
 });
 
-it('waits for verified group and session then recovers sidebar visibility exactly once without changing membership, selection or history', () => {
+it('waits for verified details, aligns the participation filter once and preserves selection and history', () => {
   const { result, rerender } = renderHook(({ group, session }: { group: GroupView | null; session: SessionView | null }) =>
     useGroupSessionLocation(group, session, undefined, target), { initialProps: { group: null as GroupView | null, session: null as SessionView | null } });
   expect(result.current.location).toBeUndefined();
@@ -22,7 +22,7 @@ it('waits for verified group and session then recovers sidebar visibility exactl
   expect(result.current.location?.session.sessionId).toBe('s1');
   const first = result.current.location?.request;
   expect(useWorkspaceStore.getState()).toMatchObject({ groupSearchText: '', groupKindFilter: 'all', sessionSearchText: '',
-    sessionTabsByGroup: { g1: 'all' }, membership: 'direct', selectedGroupId: 'g1', selectedSessionId: 's1',
+    sessionTabsByGroup: { g1: 'all' }, membership: 'session_only', selectedGroupId: 'g1', selectedSessionId: 's1',
     expandedGroupIds: { g1: true }, historyRefreshNonce: 8 });
   rerender({ group: { ...baseGroup }, session: { ...baseGroup.sessions[0] } });
   expect(result.current.location?.request).toBe(first);
@@ -66,7 +66,7 @@ it('keeps the verified location through transient detail loading after clearing 
   expect(result.current.location?.request).toBe(request);
 });
 
-it.each(['groupSearch', 'kind', 'sessionSearch', 'favorite'] as const)('cancels pending location instead of clearing a newer user %s filter', (filter) => {
+it.each(['groupSearch', 'kind', 'sessionSearch', 'favorite', 'membership'] as const)('cancels pending location instead of clearing a newer user %s filter', (filter) => {
   const { result, rerender } = renderHook(({ ready }) => useGroupSessionLocation(
     ready ? baseGroup : null, ready ? baseGroup.sessions[0] : null, undefined, target,
   ), { initialProps: { ready: false } });
@@ -76,6 +76,7 @@ it.each(['groupSearch', 'kind', 'sessionSearch', 'favorite'] as const)('cancels 
     if (filter === 'kind') store.setGroupKindFilter('all');
     if (filter === 'sessionSearch') store.setSessionSearchText('new session search');
     if (filter === 'favorite') store.setSessionTabForGroup('g1', 'all');
+    if (filter === 'membership') store.setMembership('session_only');
   });
   const before = useWorkspaceStore.getState();
   rerender({ ready: true });
@@ -101,4 +102,22 @@ it('drops the cached overlay on terminal verification failure and does not resur
   expect(result.current.location).toBeUndefined();
   rerender({ unavailable: false });
   expect(result.current.location).toBeUndefined();
+});
+
+
+it.each(['direct', 'session_only'] as const)('manual location follows verified %s membership without clearing the current session', (membership) => {
+  useWorkspaceStore.setState({ membership: membership === 'direct' ? 'session_only' : 'direct' });
+  const { result } = renderHook(() => useGroupSessionLocation({ ...baseGroup, membership }, baseGroup.sessions[0]));
+  act(() => result.current.locate());
+  expect(result.current.location).toBeDefined();
+  expect(useWorkspaceStore.getState()).toMatchObject({ membership, selectedGroupId: 'g1', selectedSessionId: 's1', historyRefreshNonce: 8 });
+  act(() => useWorkspaceStore.getState().setMembership(membership === 'direct' ? 'session_only' : 'direct'));
+  expect(result.current.location).toBeUndefined();
+});
+
+it.each(['direct', 'session_only'] as const)('missing membership metadata never guesses a category from list absence (current=%s)', (membership) => {
+  useWorkspaceStore.setState({ membership });
+  const { result } = renderHook(() => useGroupSessionLocation(baseGroup, baseGroup.sessions[0], undefined, target));
+  expect(result.current.location).toBeDefined();
+  expect(useWorkspaceStore.getState().membership).toBe(membership);
 });

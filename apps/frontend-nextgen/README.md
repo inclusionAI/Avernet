@@ -49,13 +49,22 @@ failures offer retry rather than an unchecked confirmation. The request renders
 errors inline while leaving shared login/authentication gates enabled. A selected
 Group absent from the current sidebar page/filter is resolved by ID through the
 existing selected-Group detail fallback, including Session-only membership; list
-absence does not change membership or discard the requested Session.
+absence alone never changes the participation filter or discards the requested Session.
 
 An explicit Session deep link issues one sidebar-location request after route
 identity hydration. Once the target Group and Session details are verified,
 location clears obstructing sidebar filters, displays an out-of-list target,
-expands the sidebar and scrolls to the Session. This display-only overlay does not
-join the parent Group, change membership, or modify paging/history state. It
+expands the sidebar and scrolls to the Session. Once the selected Group detail
+is available, its classification is confirmed by a matching entry from the
+selected View Actor's paginated Group lists: the public target-independent Group
+detail does not itself report `membership`. Location aligns the participation
+filter with that explicit list value (`direct` or `session_only`) while preserving
+the selected Session. List absence is never treated as evidence for the opposite
+category. Classification-query failures offer a retry rather than guessing. List
+readiness is scoped to both identity and participation filter, so a previous
+category's Groups are not shown under a newly selected category during reload.
+This display-only operation never joins the parent Group, changes actual Group
+membership, or modifies paging/history state. It
 survives transient detail reloads while the Store selection is unchanged; user
 selection, newer filters or dismissal cancel even a still-pending request. A
 settled target-verification failure removes the cached overlay. Internal Store-to-URL projections do
