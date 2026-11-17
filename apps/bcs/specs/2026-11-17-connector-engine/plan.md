@@ -28,7 +28,7 @@ bcs-dist-connector (service crate)      rules (pure) + engine (loop, actors) —
 | `crates/services/bcs-dist-connector-store` | new; depends on `bcs-dist-store` (Gateway plan, #4112) for `layout`, `version`, `error`, `capability` | TBase providers for the three dispatch ports, held index | provider part of C1 |
 | `crates/services/bcs-dist-store` | one new module `membership`, only if §13 item 5 is decided that way | TBase `MembershipPort` provider (§10.1) | — |
 | `crates/application/bcs-app-dist-runtime` | new, or add a module if the executor team created it first | admin facade | C6 |
-| `crates/service-api/bcs-service-api` | **(decide)** additive only | Connector core contract, recovery port | — |
+| `crates/service-api/bcs-service-api` | **(decide)** additive only | Connector core contract | — |
 
 Workspace `Cargo.toml`: one `members` line and one `[workspace.dependencies]` line
 per new crate, nothing else.
@@ -486,9 +486,11 @@ has a doc comment naming the §16 item, and a test asserting the error.
 | D8 | `release(did, holder: &Holder) -> Result<(), StoreError>` | store crate `delayed.rs` | `drain` calls it for each leftover and logs |
 
 D3 and D8 are storage steps, so the engine reaches them through a small port,
-`DispatchRecoveryPort` **(decide)**: in
-`bcs_service_api::port::repo::distributed::dispatch` (additive), or local to
-`bcs-dist-connector` until the contracts are final. D5 and D7 need no code here.
+`DispatchRecoveryPort` **(decide)**. Recommended: local to `bcs-dist-connector`
+until D3 and D8 are final, implemented by the store crate's stubs through a thin
+wrapper in the composition; it moves to
+`bcs_service_api::port::repo::distributed::dispatch` once the contracts are settled.
+D5 and D7 need no code here.
 
 ## 12. Order of work and pull requests
 
@@ -516,7 +518,7 @@ with the recommendation; the decision is still the owner's.
 | --- | --- | --- |
 | 1 | SENT policy (§6) | As written: resend only with `idempotent_start` / `idempotent_input`; else ask the agent when `query_by_request`; else unresolved. A definite "not sent" is retried 3 times, then unresolved |
 | 2 | What resolves `CredentialRef`, what `BindingVersion` means, and where the agent's interface (URL, binding) comes from (§9) | Not guessed. The adapter takes an injected resolver; its implementation waits for the answer |
-| 3 | May `bcs-service-api` get two additive, Connector-only items: `core/dist_connector.rs` (§2) and `DispatchRecoveryPort` (§11)? | Yes: it is where the Gateway and Worker contracts live, and no existing type changes. Otherwise both stay local to `bcs-dist-connector` |
+| 3 | May `bcs-service-api` get the additive, Connector-only core contract `core/dist_connector.rs` (§2)? And where does `DispatchRecoveryPort` (§11) live? | Core contract: yes, next to `dist_gateway.rs` / `dist_runner.rs`; no existing type changes. `DispatchRecoveryPort`: local to `bcs-dist-connector` for now, because it only fronts the D3/D8 stubs and an undecided contract in the shared API invites the executor team to build against it. Reviewed |
 | 4 | Stored `disp` layout and the two Connector-owned fields (§10) | `DispatchView` JSON plus a `connector` sibling object that the Connector always writes whole. Needs executor sign-off (E3). Alternative: add the two fields to `DispatchExecution` (a contract change) |
 | 5 | Who builds the TBase `MembershipPort` provider? The Gateway does not use membership (#4112 has no `MembershipPort`), so it will not come from there | This work builds it as module `membership` in `bcs-dist-store` (§10.1), following decision 15, **after** the owner confirms the executor team is not already building one. Reviewed |
 | 6 | Key-event `business_digest` without the payload (§5.2), and n = watermark + 1 (§5.3) | As written, with the limit below. Reviewed |
