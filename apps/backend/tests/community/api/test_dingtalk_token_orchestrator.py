@@ -25,12 +25,12 @@ def _orchestrated_service():
     real_identity.get_iam_token_context = identity.get_iam_token_context
     caller._caller_identity = real_identity
     caller._token_provider = SimpleNamespace(exchange_dingtalk=provider.exchange_dingtalk)
-    token = replace(_caller_token(), expires_at=datetime.now() + timedelta(hours=1))
-    provider.exchange_dingtalk.return_value = token
+    resolved_identity = replace(_caller_token(), expires_at=datetime.now() + timedelta(hours=1))
+    provider.exchange_dingtalk.return_value = resolved_identity
     bindings.resolve.side_effect = None
     bindings.resolve.return_value = ResolvedRuntimeBinding(41, RuntimeBindingSource.CALLER_INSTANCE)
     orchestrator = TokenExchangeOrchestrator(caller_service=caller, token_pipeline=NoopTokenPluginPipeline(), bot_repository=MagicMock())
-    return orchestrator, provider, updater, bindings, auth, token
+    return orchestrator, provider, updater, bindings, auth, resolved_identity
 
 
 @pytest.mark.asyncio
@@ -39,7 +39,7 @@ async def test_http_dingtalk_reaches_exchange_and_exact_runtime_update(state, ca
     from agentclaw.community.core.caller_identity.credential import CallerCredentialError, CALLER_CREDENTIAL_REQUEST_INVALID
 
     caplog.set_level(logging.INFO)
-    orchestrator, provider, updater, bindings, auth, token = _orchestrated_service()
+    orchestrator, provider, updater, bindings, auth, resolved_identity = _orchestrated_service()
     if state == "rejected":
         provider.exchange_dingtalk.side_effect = CallerCredentialError(CALLER_CREDENTIAL_REQUEST_INVALID)
     headers = {} if state == "missing" else {"Cookie": "IAM_TOKEN=device-secret"}
@@ -50,13 +50,13 @@ async def test_http_dingtalk_reaches_exchange_and_exact_runtime_update(state, ca
     assert "caller_token_source_selected" in caplog.text
     assert "token_type=dingtalk" in caplog.text
     assert "device-secret" not in caplog.text
-    assert token.access_token not in caplog.text
+    assert resolved_identity.access_token not in caplog.text
     auth.resolve_user_from_request.assert_not_called()
     if state == "valid":
         assert provider.exchange_dingtalk.call_args.kwargs["device_token"] == "device-secret"
         assert provider.exchange_dingtalk.call_args.kwargs["owner_user_id"] == "owner-1"
         assert bindings.resolve.call_count == 2
-        updater.update_caller_identity.assert_called_once_with(bot_id="bot-1", owner_user_id="owner-1", caller_user_id="caller-1", caller_token=token, stage="draft", publish_id=None, entity_id="entity-1", binding_id=41, session_key="session-1")
+        updater.update_caller_identity.assert_called_once_with(bot_id="bot-1", owner_user_id="owner-1", caller_user_id="caller-1", caller_token=resolved_identity, stage="draft", publish_id=None, entity_id="entity-1", binding_id=41, session_key="session-1")
     else:
         updater.update_caller_identity.assert_not_called()
         if state == "missing":
