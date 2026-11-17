@@ -30,6 +30,12 @@ from agentclaw.community.core.skill_center.reference_contract import (
     SkillCenterReferenceStatus,
     TERMINAL_REFERENCE_STATUSES,
 )
+from agentclaw.community.core.skill_center.skill_package import (
+    SkillManifestMissingError,
+    SkillManifestMultipleError,
+    SkillPackageInvalidError,
+    SkillPackageTooLargeError,
+)
 from agentclaw.community.core.skill_center.public_center_identity import (
     PublicCenterSkillIdentity,
 )
@@ -62,6 +68,10 @@ _PUBLIC_REFERENCE_ERRORS = {
     "SC_SKILL_NOT_FOUND": "Skill Center Skill is not available",
     "SC_MARKET_UNAVAILABLE": "Skill Center is temporarily unavailable",
     "MATERIALIZATION_FAILED": "Exact Version materialization failed",
+    "SKILL_PACKAGE_MANIFEST_MISSING": "Skill package is missing its root manifest",
+    "SKILL_PACKAGE_MANIFEST_AMBIGUOUS": "Skill package has no unique root manifest",
+    "SKILL_PACKAGE_TOO_LARGE": "Skill package exceeds the size or file limit",
+    "SKILL_PACKAGE_INVALID": "Skill package is invalid",
     "SKILL_OFFLINE": "Skill is offline",
     "SKILL_RUNTIME_NAME_CONFLICT": "Skill runtime name conflicts with another Skill",
     "SKILL_SET_NOT_FOUND": "SkillSet is not available",
@@ -110,8 +120,7 @@ class SkillCenterReferenceProcessor:
         pending = [
             item
             for item in batch.items
-            if item.status
-            not in TERMINAL_REFERENCE_STATUSES
+            if item.status not in TERMINAL_REFERENCE_STATUSES
             and item.status
             not in {
                 SkillCenterReferenceStatus.ADDING_TO_SKILL_SET,
@@ -208,7 +217,8 @@ class SkillCenterReferenceProcessor:
                 or not detail.latest_version_number
             ):
                 raise _PermanentReferenceError(
-                    "SC_SKILL_NOT_FOUND", "public Skill has no consumable latest Version"
+                    "SC_SKILL_NOT_FOUND",
+                    "public Skill has no consumable latest Version",
                 )
             versions = self._gateway.list_versions(
                 SkillCenterVersionListRequest(
@@ -321,9 +331,7 @@ class SkillCenterReferenceProcessor:
             if exc.code is SkillCenterGatewayErrorCode.BUSINESS:
                 self._fail(batch.env, item.reference_id, "SC_SKILL_NOT_FOUND")
                 return False
-            return self._retry_or_fail(
-                batch.env, current, "SC_MARKET_UNAVAILABLE"
-            )
+            return self._retry_or_fail(batch.env, current, "SC_MARKET_UNAVAILABLE")
         except SkillVersionMaterializationError as exc:
             # Do not log the exception text or traceback here: download errors
             # can embed an exact-package presigned URL.  The materializer's
@@ -343,7 +351,7 @@ class SkillCenterReferenceProcessor:
                 _duration_ms(started_at),
             )
             return self._retry_or_fail(
-                batch.env, current, "MATERIALIZATION_FAILED"
+                batch.env, current, _materialization_error_code(exc)
             )
         except (TypeError, ValueError, RuntimeError) as exc:
             logger.warning(
@@ -403,7 +411,10 @@ class SkillCenterReferenceProcessor:
                     )
                     break
                 except SkillSetControlPlaneConflictError as exc:
-                    if str(exc) != "SKILL_SET_STATE_CHANGED_RETRY" or attempt == _MAX_ITEM_ATTEMPTS - 1:
+                    if (
+                        str(exc) != "SKILL_SET_STATE_CHANGED_RETRY"
+                        or attempt == _MAX_ITEM_ATTEMPTS - 1
+                    ):
                         raise
         except (
             SkillOfflineError,
@@ -524,11 +535,29 @@ def _final_add_error_code(error: Exception | None) -> str:
         return "SKILL_SET_NOT_FOUND"
     if isinstance(error, SkillSetRuntimeReconcileError):
         return "RUNTIME_PROJECTION_FAILED"
-    if isinstance(error, SkillSetControlPlaneConflictError) and str(error) == "SKILL_SET_STATE_CHANGED_RETRY":
+    if (
+        isinstance(error, SkillSetControlPlaneConflictError)
+        and str(error) == "SKILL_SET_STATE_CHANGED_RETRY"
+    ):
         return "SKILL_SET_STATE_CHANGED_RETRY"
     if isinstance(error, SkillSetAccessDeniedError):
         return "SKILL_SET_FORBIDDEN"
     return "SKILL_SET_UPDATE_FAILED"
+
+
+def _materialization_error_code(error: SkillVersionMaterializationError) -> str:
+    if error.stage != "package_validate":
+        return "MATERIALIZATION_FAILED"
+    cause = error.__cause__
+    if isinstance(cause, SkillManifestMissingError):
+        return "SKILL_PACKAGE_MANIFEST_MISSING"
+    if isinstance(cause, SkillManifestMultipleError):
+        return "SKILL_PACKAGE_MANIFEST_AMBIGUOUS"
+    if isinstance(cause, SkillPackageTooLargeError):
+        return "SKILL_PACKAGE_TOO_LARGE"
+    if isinstance(cause, SkillPackageInvalidError):
+        return "SKILL_PACKAGE_INVALID"
+    return "MATERIALIZATION_FAILED"
 
 
 def _public_error_message(code: str) -> str:
@@ -559,7 +588,6 @@ class SkillCenterReferenceTaskHandler:
         ):
             return Fail("request_id must be a non-empty unpadded string")
         return asyncio.run(self._processor.process(request_id))
-
 
 
 __all__ = ["SkillCenterReferenceProcessor", "SkillCenterReferenceTaskHandler"]

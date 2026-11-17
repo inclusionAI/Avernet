@@ -6,6 +6,14 @@
 
 下文 `community/` 指 `apps/backend/src/agentclaw/community/`；简称 `services/` 指本目录的 `services/`。仓库根 `AGENTS.md` 和 `docs/arch/` 仍规定通用架构约束。本目录 `README.md` 的 Context Boundary 继续承担机器可检验的依赖声明。
 
+## SC Reference 物化错误
+
+SC Public Reference 的 exact package 校验失败使用固定的公开错误码：
+`SKILL_PACKAGE_MANIFEST_MISSING`、`SKILL_PACKAGE_MANIFEST_AMBIGUOUS`、
+`SKILL_PACKAGE_TOO_LARGE` 和 `SKILL_PACKAGE_INVALID`。仅在 `package_validate`
+阶段按已知异常分类；未知异常及其他阶段仍为 `MATERIALIZATION_FAILED`，不得将异常文本
+或下载地址写入公开错误信息。历史通用错误码仍有效。
+
 ## Skill 运行名称准入
 
 向 SkillSet 添加成员（包括未激活的 Set）或激活 Set 时，先比较候选名称与当前安装及目标 Set 成员。名称相同但运行映射来源不同则拒绝；来源身份相同可共存，无法解析的同名来源按冲突处理。历史冲突不会被自动清理。Skill 成员与激活、Direct Skill、Default Skill 排除、Apply Skill claim 及安装回填写事务在支持行锁的数据库上先锁定同一租户、环境和稳定 entity 下的 Bot 行；SQLite 使用数据库写事务。此锁不覆盖所有 Set 或 MCP 命令、全局 Default 模板修改或提交后的 Runtime 投影。

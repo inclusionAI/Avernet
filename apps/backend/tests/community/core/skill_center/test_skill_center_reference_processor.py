@@ -417,6 +417,88 @@ def test_materialization_failure_logs_safe_stage_without_leaking_url(caplog) -> 
     assert "private-token" not in caplog.text
 
 
+@pytest.mark.parametrize(
+    ("cause", "stage", "expected"),
+    [
+        ("missing", "package_validate", "SKILL_PACKAGE_MANIFEST_MISSING"),
+        ("multiple", "package_validate", "SKILL_PACKAGE_MANIFEST_AMBIGUOUS"),
+        ("large", "package_validate", "SKILL_PACKAGE_TOO_LARGE"),
+        ("invalid", "package_validate", "SKILL_PACKAGE_INVALID"),
+        ("multiple", "package_download", "MATERIALIZATION_FAILED"),
+        ("unknown", "package_validate", "MATERIALIZATION_FAILED"),
+    ],
+)
+def test_materialization_errors_are_classified_without_exposing_details(
+    cause, stage, expected
+):
+    from agentclaw.community.core.skill_center.materialization_contract import (
+        SkillVersionMaterializationError,
+    )
+    from agentclaw.community.core.skill_center.skill_package import (
+        SkillManifestMissingError,
+        SkillManifestMultipleError,
+        SkillPackageInvalidError,
+        SkillPackageTooLargeError,
+    )
+
+    errors = {
+        "missing": SkillManifestMissingError,
+        "multiple": SkillManifestMultipleError,
+        "large": SkillPackageTooLargeError,
+        "invalid": SkillPackageInvalidError,
+        "unknown": ValueError,
+    }
+
+    class FailedMaterializer(_Materializer):
+        def materialize(self, request):
+            try:
+                raise errors[cause]("private-token")
+            except Exception as exc:
+                raise SkillVersionMaterializationError(
+                    "private-token", stage=stage
+                ) from exc
+
+    references = _References()
+    processor = _processor(
+        references=references,
+        skill_sets=_SkillSets(),
+        materializer=FailedMaterializer(),
+    )
+    for _ in range(3):
+        asyncio.run(processor.process("request-a"))
+    assert {item.error_code for item in references.batch.items} == {expected}
+    assert "private-token" not in repr(references.batch.items)
+
+
+def test_real_materializer_reports_ambiguous_package_to_reference() -> None:
+    import io
+    import zipfile
+
+    from tests.community.core.skill_center.test_skill_version_materializer import (
+        _materializer,
+        _target,
+        _Versions,
+    )
+
+    stream = io.BytesIO()
+    with zipfile.ZipFile(stream, "w") as archive:
+        archive.writestr("first/SKILL.md", "first")
+        archive.writestr("second/SKILL.md", "second")
+    references = _References()
+    processor = _processor(
+        references=references,
+        skill_sets=_SkillSets(),
+        materializer=_materializer(
+            package=stream.getvalue(), versions=_Versions(_target())
+        ),
+    )
+    for _ in range(3):
+        asyncio.run(processor.process("request-a"))
+    assert {item.error_code for item in references.batch.items} == {
+        "SKILL_PACKAGE_MANIFEST_AMBIGUOUS"
+    }
+
+
 def test_final_membership_infrastructure_failure_propagates_for_task_retry() -> None:
     references = _References()
     processor = _processor(
@@ -447,9 +529,14 @@ def test_set_state_race_retries_without_failing_references():
             return await super().add_skills(**kwargs)
 
     references = _References()
-    processor = _processor(references=references, skill_sets=RacingSets(), materializer=_Materializer())
+    processor = _processor(
+        references=references, skill_sets=RacingSets(), materializer=_Materializer()
+    )
     assert isinstance(asyncio.run(processor.process("request-a")), Complete)
-    assert all(item.status is SkillCenterReferenceStatus.COMPLETED for item in references.batch.items)
+    assert all(
+        item.status is SkillCenterReferenceStatus.COMPLETED
+        for item in references.batch.items
+    )
 
 
 def test_repeated_set_state_race_finishes_with_visible_failure():
@@ -460,11 +547,19 @@ def test_repeated_set_state_race_finishes_with_visible_failure():
 
     references = _References()
     sets = RacingSets()
-    processor = _processor(references=references, skill_sets=sets, materializer=_Materializer())
+    processor = _processor(
+        references=references, skill_sets=sets, materializer=_Materializer()
+    )
     assert isinstance(asyncio.run(processor.process("request-a")), Complete)
     assert len(sets.add_calls) == 3
-    assert all(item.status is SkillCenterReferenceStatus.FAILED for item in references.batch.items)
-    assert all(item.error_code == "SKILL_SET_STATE_CHANGED_RETRY" for item in references.batch.items)
+    assert all(
+        item.status is SkillCenterReferenceStatus.FAILED
+        for item in references.batch.items
+    )
+    assert all(
+        item.error_code == "SKILL_SET_STATE_CHANGED_RETRY"
+        for item in references.batch.items
+    )
 
 
 def test_name_conflict_is_a_terminal_per_item_result():
@@ -472,13 +567,24 @@ def test_name_conflict_is_a_terminal_per_item_result():
         async def add_skills(self, **kwargs):
             return [
                 SkillSetSkillOutcome(skill_id=kwargs["skill_ids"][0], changed=True),
-                SkillSetSkillOutcome(skill_id=kwargs["skill_ids"][1], error=SkillRuntimeNameConflictError()),
+                SkillSetSkillOutcome(
+                    skill_id=kwargs["skill_ids"][1],
+                    error=SkillRuntimeNameConflictError(),
+                ),
             ]
 
     references = _References()
-    processor = _processor(references=references, skill_sets=ConflictingSets(), materializer=_Materializer())
+    processor = _processor(
+        references=references,
+        skill_sets=ConflictingSets(),
+        materializer=_Materializer(),
+    )
     assert isinstance(asyncio.run(processor.process("request-a")), Complete)
     assert references.batch.items[0].status == SkillCenterReferenceStatus.COMPLETED
     assert references.batch.items[1].status == SkillCenterReferenceStatus.FAILED
-    failures = [fields for _, status, fields in references.transitions if status == SkillCenterReferenceStatus.FAILED]
+    failures = [
+        fields
+        for _, status, fields in references.transitions
+        if status == SkillCenterReferenceStatus.FAILED
+    ]
     assert failures[0]["error_code"] == "SKILL_RUNTIME_NAME_CONFLICT"

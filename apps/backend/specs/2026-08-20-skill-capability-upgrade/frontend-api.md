@@ -650,6 +650,10 @@ GET .../skill-center-references/{reference_id}?user_id={actor_id}&owner_id={bot_
 | `SC_SKILL_NOT_FOUND` | 提示市场项不可用，刷新搜索结果 |
 | `SC_MARKET_UNAVAILABLE` | 提示 SC 暂时不可用，可用新请求重试失败项 |
 | `MATERIALIZATION_FAILED` | 提示 Skill 同步失败 |
+| `SKILL_PACKAGE_MANIFEST_MISSING` | 提示缺少根入口，请发布者修正 |
+| `SKILL_PACKAGE_MANIFEST_AMBIGUOUS` | 提示根入口不明确，请发布者修正 |
+| `SKILL_PACKAGE_TOO_LARGE` | 提示包超出大小或文件数量限制 |
+| `SKILL_PACKAGE_INVALID` | 提示包格式或内容不符合要求 |
 | `SKILL_OFFLINE` | 提示该 TeamClaw 资产已下线 |
 | `SKILL_SET_NOT_FOUND` | 目标能力集已删除，刷新能力集 |
 | `SKILL_SET_FORBIDDEN` | 当前用户已无目标能力集权限 |
