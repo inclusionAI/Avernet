@@ -19,7 +19,8 @@ Sources read in `dev` (`7d644824`):
 Every operation the Gateway needs is expressible through the five store traits,
 with no raw command and no client-side CAS. Seven points are missing or behave
 differently from the design notes; they are listed in §4 and each has a proposed
-handling in the plan. None blocks the first PR (shared layout + admission).
+handling in the plan. One cross-team consequence (§6, plan Q11) needs the
+executor side's confirmation before the first PR relies on it.
 
 Task S2 (an in-memory protocol store, `crates/services/bcs-dist-store/src/memory/`)
 does **not** exist in `dev`. The only in-memory implementation of `bcs-store-api`
@@ -107,17 +108,25 @@ either. Exact detection needs one of:
 2. a `prev` field on each `ev` entry (the id of the previous entry of the
    session); the merged `AppendCommittedEvents.previous` already carries it.
 
-Proposal: use `page.recovery` when the provider returns it, use `prev` when the
-entry carries it, and otherwise fall back to the conservative snapshot-id check
-after a catch-up read. Ask the executor side to write `prev`. See plan Q3.
+A third way removes the race instead of detecting it, and needs no wire-format
+change:
+
+3. a Worker trim rule: trim only entries of tasks that have ended, after their
+   final snapshot, never the running task's. A live reader then cannot fall
+   behind a trim, and readers of an ended task always start from the snapshot.
+
+This is an executor-side question (plan Q3): preferred the trim rule, fallback
+`prev`. Nothing is designed around either yet. The reader uses `page.recovery`
+when the provider returns it.
 
 ### 4.4 No exported in-memory store
 
 `Model` passes the conformance suite but lives under `bcs-test-support/tests/`
-and the README states it is not exported. Provider tests need it. Proposal:
-include it from the store crate's integration tests with `#[path]` (no copy, no
-edit of the PR #4070 files). Alternative: export it from `bcs-test-support`
-behind a module, with the PR #4070 author's agreement. See plan Q7.
+and the README states it is not exported. Provider tests need it, and so do the
+Connector's. Proposal: export it from `bcs-test-support` as a module whose name
+says it is a test model, not a provider, after checking with the PR #4070
+author. `#[path]` includes from two crates would couple both to a private test
+file's location. See plan Q7.
 
 ### 4.5 `TaskReaderPort::list` has nothing to enumerate
 
@@ -126,8 +135,11 @@ and `ResultStorePort` has only `save_final` / `get_final`. `list` therefore need
 an index that the key catalogue does not have. Proposal: `…:tasks:<sid>` (sorted
 set, member `tid`, score `created_at`), added by admission right after the `task`
 creation with `ZAddMode::InsertOnly`; `list` requires a session filter in the
-MVP. Alternative: `list` is a "Need contract, not implemented yet" stub until the
-result-store layout exists. See plan Q1.
+MVP. Only the Gateway writes it, so the Worker does not change. It must outlive
+the `task` key of a finished task, so it has no expiry in the MVP; its retention
+is open and follows the result-store layout and retention, which are not
+designed yet. It is a new key in the catalogue. Alternative: `list` is a "Need
+contract, not implemented yet" stub. See plan Q1.
 
 ### 4.6 `SessionStorePort` is one trait
 
@@ -167,7 +179,10 @@ sign-off. See plan Q2.
 ## 6. Consequences worth knowing
 
 - A retried, unfinished admission appends a second `inbox` entry with the same
-  `input_id`. The Worker's consumer must drop physical repeats by `input_id`.
+  `input_id`. The Worker rule "`admit` exists with the same digest → process
+  it" lets both copies through, so the input would be processed twice unless
+  the Worker drops an `input_id` it has already consumed. This is an open
+  question for the executor side: plan Q11.
 - With the D1 stub, `append_stream` writes `inbox`, `active` and `wake` for every
   intermediate agent event (three round trips instead of one).
 - A new task has no `snapshot_event_id`, so its first subscriber starts at the
