@@ -109,6 +109,33 @@ impl StoreInboxProducer {
         })
     }
 
+    /// Validates the request and builds every key and document it writes.
+    fn prepare(&self, request: &AdmitRequest) -> Result<Prepared, StoreError> {
+        validate(request)?;
+        let input = &request.input;
+        self.layout.inbox(&input.sid)?;
+        encode_inbox_entry(input)?;
+        let spec_doc = request.create_session.as_ref().map(encode_json).transpose()?;
+        let task = match &request.create_task {
+            Some(task) => Some((self.layout.task(&task.tid)?, encode_json(task)?)),
+            None => None,
+        };
+        Ok(Prepared {
+            spec_key: self.layout.spec(&input.sid)?,
+            spec_doc,
+            task,
+            admit_key: self.layout.admit(&input.sid, &input.input_id)?,
+        })
+    }
+
+    /// Reads and decodes a stored JSON document.
+    async fn stored<T: serde::de::DeserializeOwned>(&self, key: &str) -> Result<Option<T>, StoreError> {
+        match self.json.get_json(key).await.map_err(|e| from_read(&e))? {
+            Some(doc) => crate::codec::decode_json(doc.value).map(Some),
+            None => Ok(None),
+        }
+    }
+
     /// Steps 1–2 of `admit`: `None` = not admitted yet.
     async fn existing(&self, input: &InputEnvelope) -> Result<Option<AdmitOutcome>, StoreError> {
         let key = self.layout.admit(&input.sid, &input.input_id)?;
@@ -134,12 +161,10 @@ impl StoreInboxProducer {
 
     /// `true` when the stored spec belongs to the same scope and group.
     async fn same_spec(&self, key: &str, spec: &SessionSpec) -> Result<bool, StoreError> {
-        let stored = self.json.get_json(key).await.map_err(|e| from_read(&e))?;
-        let Some(stored) = stored else {
-            return Ok(false);
-        };
-        let stored: SessionSpec = crate::codec::decode_json(stored.value)?;
-        Ok(stored.scope == spec.scope && stored.group == spec.group)
+        Ok(self
+            .stored::<SessionSpec>(key)
+            .await?
+            .is_some_and(|stored| stored.scope == spec.scope && stored.group == spec.group))
     }
 
     /// Steps 3–6 shared by `admit` and `append_stream`: inbox, listener, active,
@@ -210,6 +235,13 @@ impl StoreInboxProducer {
     }
 }
 
+struct Prepared {
+    spec_key: String,
+    spec_doc: Option<serde_json::Value>,
+    task: Option<(String, serde_json::Value)>,
+    admit_key: String,
+}
+
 enum Delivered {
     Appended(StreamId),
     Quarantined,
@@ -226,7 +258,9 @@ enum Failure {
 impl InboxProducerPort for StoreInboxProducer {
     async fn admit(&self, request: AdmitRequest) -> Result<AdmitOutcome, StoreError> {
         let input = &request.input;
-        validate(&request)?;
+        // Every key and document is built before the first read, so a bad id
+        // can never surface after something was written.
+        let prepared = self.prepare(&request)?;
         if let Some(outcome) = self.existing(input).await? {
             return Ok(outcome);
         }
@@ -234,25 +268,42 @@ impl InboxProducerPort for StoreInboxProducer {
         let unknown = || StoreError::OutcomeUnknown {
             operation_id: op.to_owned(),
         };
+        if let (Some(task), None) = (&request.create_task, &request.create_session) {
+            // A new task of an existing session must belong to its frozen scope.
+            match self.stored::<SessionSpec>(&prepared.spec_key).await? {
+                Some(spec) if spec.scope == task.scope => {}
+                Some(_) => return Ok(AdmitOutcome::ContentConflict),
+                None => {
+                    return Err(StoreError::NotApplied {
+                        code: "session_not_found".into(),
+                    });
+                }
+            }
+        }
         let mut wrote = false;
 
-        if let Some(spec) = &request.create_session {
-            let key = self.layout.spec(&spec.sid)?;
-            match self.create_once(&key, encode_json(spec)?).await {
+        if let (Some(spec), Some(doc)) = (&request.create_session, prepared.spec_doc) {
+            match self.create_once(&prepared.spec_key, doc).await {
                 Ok(true) => wrote = true,
                 Ok(false) => {
-                    if !self.same_spec(&key, spec).await? {
+                    if !self.same_spec(&prepared.spec_key, spec).await? {
                         return Ok(AdmitOutcome::ContentConflict);
                     }
                 }
                 Err(e) => return Err(from_write(&e, op)),
             }
         }
-        if let Some(task) = &request.create_task {
-            let key = self.layout.task(&task.tid)?;
+        if let (Some(task), Some((key, doc))) = (&request.create_task, prepared.task) {
             // "Already exists" is fine: never replace a task the Worker advanced.
-            match self.create_once(&key, encode_json(task)?).await {
-                Ok(created) => wrote |= created,
+            match self.create_once(&key, doc).await {
+                Ok(true) => wrote = true,
+                Ok(false) if !wrote => match self.stored::<TaskSnapshot>(&key).await? {
+                    Some(stored) if stored.scope != task.scope || stored.sid != task.sid => {
+                        return Ok(AdmitOutcome::ContentConflict);
+                    }
+                    _ => {}
+                },
+                Ok(false) => {}
                 Err(_) if wrote => return Err(unknown()),
                 Err(e) => return Err(from_write(&e, op)),
             }
@@ -269,10 +320,9 @@ impl InboxProducerPort for StoreInboxProducer {
             sid: input.sid.clone(),
             tid: input.tid.clone(),
         };
-        let key = self.layout.admit(&input.sid, &input.input_id)?;
         let created = self
             .kv
-            .put_if_absent(&key, &record.encode()?, Expiry::Persistent)
+            .put_if_absent(&prepared.admit_key, &record.encode()?, Expiry::Persistent)
             .await
             .map_err(|_| unknown())?;
         if created {
@@ -335,6 +385,11 @@ fn validate(request: &AdmitRequest) -> Result<(), StoreError> {
         && (task.sid != input.sid || task.tid != input.tid)
     {
         return Err(bad("task_identity_mismatch"));
+    }
+    if let (Some(spec), Some(task)) = (&request.create_session, &request.create_task)
+        && spec.scope != task.scope
+    {
+        return Err(bad("task_scope_mismatch"));
     }
     Ok(())
 }

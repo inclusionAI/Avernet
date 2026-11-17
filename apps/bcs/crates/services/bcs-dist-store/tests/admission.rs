@@ -294,3 +294,105 @@ async fn an_intermediate_agent_event_is_appended_and_activates_the_session() {
     assert_eq!(again.input_id, decoded.input_id);
     assert_eq!(again.business_digest, decoded.business_digest);
 }
+
+#[tokio::test]
+async fn a_bad_task_key_is_rejected_before_the_spec_is_written() {
+    let store = Arc::new(Recorder::default());
+    let mut request = new_task_request("adm-9c41e7", "hello");
+    let bad = Tid(format!("{TID}{{x}}"));
+    request.input.tid = bad.clone();
+    request.create_task.as_mut().unwrap().tid = bad;
+    assert!(matches!(
+        producer(&store).admit(request).await,
+        Err(StoreError::Invalid { .. })
+    ));
+    assert!(store.calls().is_empty(), "nothing read or written");
+}
+
+#[tokio::test]
+async fn task_and_spec_of_different_scopes_are_rejected_before_any_write() {
+    let store = Arc::new(Recorder::default());
+    let mut request = new_task_request("adm-9c41e7", "hello");
+    request.create_task.as_mut().unwrap().scope.principal = PrincipalId("someone-else".into());
+    assert!(matches!(
+        producer(&store).admit(request).await,
+        Err(StoreError::Invalid { ref code }) if code == "task_scope_mismatch"
+    ));
+    assert!(store.calls().is_empty());
+}
+
+#[tokio::test]
+async fn a_new_task_must_match_the_frozen_session_scope() {
+    let store = Arc::new(Recorder::default());
+    let p = producer(&store);
+    p.admit(new_task_request("adm-1", "hello")).await.unwrap();
+
+    let mut second = task();
+    second.tid = Tid(format!("{SID}.c3d4"));
+    second.scope.principal = PrincipalId("someone-else".into());
+    let mut input = user_input("adm-2", "second task");
+    input.tid = second.tid.clone();
+    store.clear();
+    let outcome = p
+        .admit(AdmitRequest {
+            input,
+            create_session: None,
+            create_task: Some(second),
+        })
+        .await
+        .unwrap();
+    assert_eq!(outcome, AdmitOutcome::ContentConflict);
+    assert!(
+        store.calls().iter().all(|c| c.starts_with("kv.get") || c.starts_with("json.get")),
+        "no writes: {:?}",
+        store.calls()
+    );
+}
+
+#[tokio::test]
+async fn a_new_task_needs_an_existing_session() {
+    let store = Arc::new(Recorder::default());
+    let mut request = new_task_request("adm-1", "hello");
+    request.create_session = None;
+    assert_eq!(
+        producer(&store).admit(request).await,
+        Err(StoreError::NotApplied {
+            code: "session_not_found".into()
+        })
+    );
+}
+
+#[tokio::test]
+async fn an_existing_task_of_another_scope_is_a_conflict() {
+    let store = Arc::new(Recorder::default());
+    let mut foreign = task();
+    foreign.scope.principal = PrincipalId("someone-else".into());
+    store
+        .model
+        .mutate_json(
+            "bcn:v1:c01:main:s0042:task:s0042.7f3a9c.b21e",
+            WriteCondition::Newer(Version(1)),
+            JsonMutation::Replace(serde_json::to_value(&foreign).unwrap()),
+            Expiry::Persistent,
+        )
+        .await
+        .unwrap();
+    let mut request = new_task_request("adm-1", "hello");
+    request.create_session = None;
+    // The session exists with the request's scope.
+    store
+        .model
+        .mutate_json(
+            "bcn:v1:c01:main:s0042:spec:s0042.7f3a9c",
+            WriteCondition::Newer(Version(1)),
+            JsonMutation::Replace(serde_json::to_value(spec("grp-research-01")).unwrap()),
+            Expiry::Persistent,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        producer(&store).admit(request).await.unwrap(),
+        AdmitOutcome::ContentConflict
+    );
+    assert_eq!(inbox_len(&store).await, 0);
+}
