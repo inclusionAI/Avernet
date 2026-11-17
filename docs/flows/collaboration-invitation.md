@@ -61,8 +61,9 @@ preflight into unchecked confirmation or automatic acceptance.
 - [HTTP adapter](../../apps/bcs/crates/adapters/http/bcs-api-http/src/v1/openapi/routes/invitation.rs)
 - [Frontend state machine](../../apps/frontend-nextgen/src/pages/Workspace/hooks/useInviteAccept.ts)
 - [Application tests](../../apps/bcs/crates/application/v1/bcs-app-invitation/tests/invitation_preview.rs)
+- [Live HTTP journey](../../apps/bcs/scripts/e2e-test/invitation_story.py) — default runtime E2E inventory, real token issuance/consent and membership freshness.
 - [Change record](../../apps/bcs/specs/2026-11-17-invitation-preflight/spec.md)
 
-Tests exercise in-memory stores, contract export, and frontend/HTTP behavior.
-They do not by themselves establish production routing, real SQL latency, or
-browser end-to-end correctness.
+Tests exercise in-memory stores, contract export, frontend/HTTP behavior and a
+live SQLite-backed BCS invitation journey. They do not by themselves establish
+production routing, real SQL latency, or browser end-to-end correctness.

@@ -57,3 +57,33 @@ the original CI report. Combining that evidence with the original CI baseline
 would yield 169/185 = 91.35%; this is an explicitly scoped comparison, not a new
 full-workspace coverage result. The pushed CI rerun remains the authoritative
 full-workspace gate result.
+
+## Live E2E coverage follow-up (2026-11-17)
+
+Singlebox run `44030670688` failed the separate runtime changed-line gate at
+10/185 = 5.41%. Its artifacts confirm that the default suite did not exercise the
+V1 invitation application; its older sharing journeys use legacy invite routes.
+The unchanged E2E gate reproduces that result from the original runtime report.
+
+Added a default `stories` entry covering real authenticated Group/Session sharing,
+read-only nonmember/member preflight, explicit and idempotent acceptance, scope
+and posture preservation, Session-only membership, membership revocation,
+forbidden sharing, invalid/expired tokens and deleted targets. The story uses
+HTTP for registration, state changes, inspection and cleanup. It neither edits
+persistence nor calls application code or synthesizes invitation signatures.
+
+Focused verification used a newly built instrumented BCS with an isolated SQLite
+database and loopback port. The registered shell story passed 168 live HTTP
+assertions. After graceful server shutdown, only that process's runtime profiles
+were merged and exported with the pinned LLVM tools; no unit-test profiles were
+included. The unchanged `e2e_cov_gate.py`, against the original PR base and the
+same 185 instrumentable changed lines, reports **144/185 = 77.84%**, passing the
+existing strictly-greater-than-65% threshold. The invitation application accounts
+for 124/165 covered changed lines and its HTTP adapter for 18/18.
+
+Shell syntax, Python compilation, Ruff, default runner registration and diff/file-size
+checks passed. Coverage-helper/runner-phase regressions passed 38 tests and 8
+subtests. This focused run is not a fresh all-module Singlebox run: global
+line/method, CLI/endpoint inventories and all other stories remain the CI
+aggregate's responsibility. No gate, exclusion, production behavior or frontend
+code changed.
