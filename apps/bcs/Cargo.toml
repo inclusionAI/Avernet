@@ -48,6 +48,7 @@ members = [
     "crates/services/bcs-organization-store",
     "crates/services/bcs-bot",
     "crates/application/bcs-app-a2a-bot",
+    "crates/application/bcs-app-dist-gateway",
     "crates/services/bcs-bot-store",
     "crates/services/bcs-chat-run-store",
     "crates/services/bcs-channel-store",
@@ -335,6 +336,7 @@ bcs-config-api   = { path = "crates/service-api/bcs-config-api" }
 bcs-test-support = { path = "crates/test-support/bcs-test-support" }
 bcs-http         = { path = "crates/adapters/http/bcs-http" }
 bcs-app-a2a-bot = { path = "crates/application/bcs-app-a2a-bot" }
+bcs-app-dist-gateway = { path = "crates/application/bcs-app-dist-gateway" }
 bcs-a2a-http = { path = "crates/external-clients/bcs-a2a-http" }
 bcs-provider-http = { path = "crates/adapters/http/bcs-provider-http" }
 bcs-ws           = { path = "crates/adapters/ws/bcs-ws" }

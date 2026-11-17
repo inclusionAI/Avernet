@@ -39,9 +39,9 @@
 - **Goal:** `DistGatewayService`: identity, routing, admission, query, subscribe, wait, cancel, list.
 - **Files:** `crates/application/bcs-app-dist-gateway/` (new)
 - **Done when:**
-  - [ ] the same message selects the same session, task and input; changed content conflicts
-  - [ ] snapshot-first and resume streams, wait, cancel and list tests pass
-  - [ ] the application contract harness passes
+  - [x] the same message selects the same session, task and input; changed content conflicts
+  - [x] snapshot-first and resume streams, wait, cancel and list tests pass
+  - [x] the application contract harness passes
 - **Depends on:** Task 4
 
 ## Task 6: A2A JSON-RPC + SSE adapter

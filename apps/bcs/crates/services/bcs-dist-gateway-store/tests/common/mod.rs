@@ -122,7 +122,9 @@ impl FakeWorker {
 
     pub async fn append(&self, event: &OutputEvent) {
         let (id, fields) = encode_ev_entry(event).unwrap();
-        let key = layout().ev(&Sid(SID.into())).unwrap();
+        // The session of an event is the task id without its last segment.
+        let sid = Sid(event.tid.0.rsplit_once('.').unwrap().0.to_owned());
+        let key = layout().ev(&sid).unwrap();
         StreamStorePlugin::append(self.model.as_ref(), &key, AppendId::Explicit(id), &fields)
             .await
             .unwrap();
