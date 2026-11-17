@@ -1,0 +1,19 @@
+apps/backend/src/agentclaw/corp/core/caller_identity/README.md
+  s_bb98e2f10840b6::t_95dd9eab4ee95d 45-47
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1e103785c8810f27afd07dc5b00787b2849cf74d",
+  "prompts": {},
+  "sessions": {
+    "s_bb98e2f10840b6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a162ee-dd64-7f52-9208-9fd1326f32e5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

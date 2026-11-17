@@ -1,0 +1,14 @@
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/spaces/schemas_deletion.py
+  h_9d7cfd405752f5 7-8
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "216fadbee68c87d3c97a50193a50d05da100c299",
+  "prompts": {},
+  "humans": {
+    "h_9d7cfd405752f5": {
+      "author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

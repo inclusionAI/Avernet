@@ -1,0 +1,77 @@
+apps/bcs/crates/bootstrap/bcs/src/server/state_default_tests.rs
+  s_81fdc009d51981::t_7501dd6f1e4b84 21-23
+  s_81fdc009d51981::t_b33f9be2c61330 1-5,24-35
+  s_81fdc009d51981::t_05a14fe5073cf4 6-20
+apps/bcs/crates/bootstrap/bcs/src/server/state.rs
+  s_81fdc009d51981::t_7501dd6f1e4b84 195-201
+  s_81fdc009d51981::t_5a74a52de860e1 737-739
+apps/bcs/crates/services/bcs-collaboration-runtime/src/runtime/logging_tests.rs
+  s_81fdc009d51981::t_f6d87ddba33d86 1-141
+apps/bcs/docs/diagnostics/unit-test-ci.md
+  s_81fdc009d51981::t_1b4686b9dad134 67-68,70
+  s_81fdc009d51981::t_8e981155706c66 1-63,73-78
+  s_81fdc009d51981::t_1d23be2fbd8c8d 64-66,69,71-72
+apps/bcs/crates/services/bcs-collaboration-runtime/src/runtime/logging.rs
+  s_81fdc009d51981::t_f6d87ddba33d86 2-5
+apps/bcs/crates/services/bcs-routing/tests/security_key_logs.rs
+  s_81fdc009d51981::t_0e1dea54e44c43 1-63
+apps/bcs/crates/external-clients/bcs-a2a-http/tests/grpc_tracing.rs
+  s_81fdc009d51981::t_1ba9e99f8e366e 1,3-51,53-135,138-173,175-191
+  s_81fdc009d51981::t_e9c2509bd3f89e 2,174
+  s_81fdc009d51981::t_976fc22656799d 52,136-137
+apps/bcs/crates/adapters/http/bcs-provider-http/Cargo.toml
+  s_81fdc009d51981::t_e53c803df263c8 33
+apps/bcs/docs/diagnostics/README.md
+  s_81fdc009d51981::t_8e981155706c66 7
+apps/bcs/crates/external-clients/bcs-a2a-http/CONTEXT.md
+  s_81fdc009d51981::t_bb5e2c1bc7697b 13-15
+apps/bcs/crates/services/bcs-message-flow/src/group_flow/delivery.rs
+  s_81fdc009d51981::t_5a393945a66fff 3,5-6
+  s_81fdc009d51981::t_4751f991429f5b 4
+apps/bcs/crates/services/bcs-message-flow/src/lib.rs
+  s_81fdc009d51981::t_5a393945a66fff 125-126,128
+  s_81fdc009d51981::t_4751f991429f5b 127
+apps/bcs/crates/bootstrap/bcs/src/server.rs
+  s_81fdc009d51981::t_b33f9be2c61330 190-191
+apps/bcs/crates/bootstrap/bcs/Cargo.toml
+  s_81fdc009d51981::t_e8d69810a13df6 221
+apps/bcs/crates/adapters/http/bcs-provider-http/src/sse_loop_tests.rs
+  s_81fdc009d51981::t_837c5c160a8c50 154,161,604,732-733,781,794-831
+apps/bcs/crates/bootstrap/bcs/tests/support/e2e_helpers.rs
+  s_81fdc009d51981::t_3b01cc310edc82 95-99,162-164
+apps/bcs/crates/services/bcs-routing/Cargo.toml
+  s_81fdc009d51981::t_0e1dea54e44c43 33
+apps/bcs/crates/services/bcs-message-flow/src/task_flow/support.rs
+  s_81fdc009d51981::t_5a393945a66fff 3,5-6
+  s_81fdc009d51981::t_4751f991429f5b 4
+apps/bcs/crates/bootstrap/bcs/tests/log_facade_bridge.rs
+  s_81fdc009d51981::t_e8d69810a13df6 1-8,10-12,19-39,51
+  s_81fdc009d51981::t_0e1dea54e44c43 9,13-18,40-50
+apps/bcs/crates/services/bcs-message-flow/src/bot_event/protocol.rs
+  s_81fdc009d51981::t_4751f991429f5b 4
+  s_81fdc009d51981::t_5a393945a66fff 3,5-6
+apps/bcs/crates/services/bcs-message-flow/src/message_log_tests/bot_event_tests.rs
+  s_81fdc009d51981::t_a327d0be0ce454 1-38
+apps/bcs/crates/services/bcs-message-flow/src/message_log_tests/group_tests.rs
+  s_81fdc009d51981::t_2383b54e3a1cab 1-34
+apps/bcs/crates/services/bcs-message-flow/src/message_log_tests/task_tests.rs
+  s_81fdc009d51981::t_d16fd0b4d96a95 1-29
+apps/bcs/crates/services/bcs-message-flow/src/message_log_tests/tests.rs
+  s_81fdc009d51981::t_ef212b9069ac73 1-29
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "31ba677161157aeaa073955d81d944e1956b3170",
+  "prompts": {},
+  "sessions": {
+    "s_81fdc009d51981": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d3c0-3815-7221-8a75-d2f11644257b",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Zimin Zhang <zhangzimin.zzm@antgroup.com>"
+    }
+  }
+}

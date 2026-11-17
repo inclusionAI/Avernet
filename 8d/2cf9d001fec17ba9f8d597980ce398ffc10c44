@@ -1,0 +1,19 @@
+scripts/db-recovery/20261110_restore_edge_grants.sql
+  s_d433ae467b1a9f::t_f9ecbbf0a1b18f 1-95
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8d2cf9d001fec17ba9f8d597980ce398ffc10c44",
+  "prompts": {},
+  "sessions": {
+    "s_d433ae467b1a9f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c566-f3af-7902-b295-a48cdcb2ed77",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

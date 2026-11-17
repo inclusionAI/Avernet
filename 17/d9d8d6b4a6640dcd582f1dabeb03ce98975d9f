@@ -1,0 +1,30 @@
+apps/backend/src/agentclaw/community/core/repository/caller_token_refresh_types.py
+  s_bb98e2f10840b6::t_c20f48a4b970b9 1-16
+apps/backend/specs/caller-refresh-db-lock-20261116/001-spec-output.md
+  s_bb98e2f10840b6::t_c20f48a4b970b9 1-3
+apps/backend/src/agentclaw/community/core/repository/protocols/chat.py
+  s_bb98e2f10840b6::t_c20f48a4b970b9 17,242-251
+  s_bb98e2f10840b6::t_45cfeea1d48fca 252-254
+apps/backend/src/agentclaw/community/core/repository/implementations/chat/expert_chat_instance.py
+  s_bb98e2f10840b6::t_c20f48a4b970b9 41,270-285,287,293,299-302,304-308,311
+apps/backend/tests/community/repository/chat/test_caller_token_expiry.py
+  s_bb98e2f10840b6::t_e2bf1d2586a22c 372-446
+apps/backend/src/agentclaw/community/core/repository/README.md
+  s_bb98e2f10840b6::t_abfb3d71c9b077 503-513
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "17d9d8d6b4a6640dcd582f1dabeb03ce98975d9f",
+  "prompts": {},
+  "sessions": {
+    "s_bb98e2f10840b6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a162ee-dd64-7f52-9208-9fd1326f32e5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

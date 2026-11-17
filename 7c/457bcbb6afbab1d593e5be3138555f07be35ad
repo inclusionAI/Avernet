@@ -1,0 +1,16 @@
+apps/backend/src/agentclaw/community/core/task/context_collab/l4_context_primitives/context_collab_service.py
+  h_059e888e5e4e82 194
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_end_to_end.py
+  h_059e888e5e4e82 427,430-432,435,448,452,466-467,483-486,515,579
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7c457bcbb6afbab1d593e5be3138555f07be35ad",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

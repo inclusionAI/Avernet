@@ -1,0 +1,45 @@
+apps/frontend-nextgen/test/pages/MyTask/RoutineTaskTab.test.tsx
+  s_3df6e394ac8808::t_e0819033787b4d 41-48
+  s_3df6e394ac8808::t_87aff5783a0fc8 38-40
+  s_3df6e394ac8808::t_0aabd364672ad8 49-51
+apps/frontend-nextgen/test/pages/BotWorkshop/RoutineDisabled.test.tsx
+  s_3df6e394ac8808::t_09b1ae4e43ed86 3-4,46,52-89,100,106,108
+  s_3df6e394ac8808::t_e0819033787b4d 6-40,104
+  s_3df6e394ac8808::t_719ff013b799dc 1-2
+  s_3df6e394ac8808::t_24020990114488 5
+  s_3df6e394ac8808::t_0403834efb38e7 41-45
+  s_3df6e394ac8808::t_349b847e82b9e9 47-51
+  s_3df6e394ac8808::t_74ed89fe58a318 90-92,97-99
+  s_3df6e394ac8808::t_552bd6dfc1d817 101-103
+  s_3df6e394ac8808::t_0952dac270915f 105
+  s_3df6e394ac8808::t_6d8577f666c025 107
+apps/frontend-nextgen/src/pages/BotWorkshop/ScheduledTasks/RoutineDetail.tsx
+  s_3df6e394ac8808::t_288fc62dedf67e 78
+  s_3df6e394ac8808::t_e0819033787b4d 1,6,10,157-165
+apps/frontend-nextgen/src/pages/BotWorkshop/ScheduledTasks/RoutineList.tsx
+  s_3df6e394ac8808::t_e0819033787b4d 7,130-131
+  s_3df6e394ac8808::t_3a90410c05d20f 132
+apps/frontend-nextgen/src/pages/BotWorkshop/ScheduledTasks/RoutineNextRun.tsx
+  s_3df6e394ac8808::t_288fc62dedf67e 28-29
+apps/frontend-nextgen/src/pages/BotWorkshop/ScheduledTasks/RoutineActions.tsx
+  s_3df6e394ac8808::t_e0819033787b4d 28-32,47-52
+  s_3df6e394ac8808::t_288fc62dedf67e 27,35,44,59,62-63
+apps/frontend-nextgen/src/pages/MyTask/components/RoutineTaskTab.tsx
+  s_3df6e394ac8808::t_288fc62dedf67e 180,253-256
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "f795e766de04559c5fb37a93dff6185e79719717",
+  "prompts": {},
+  "sessions": {
+    "s_3df6e394ac8808": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1dfb8-6204-7490-86e1-9529d8c049fe",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}
