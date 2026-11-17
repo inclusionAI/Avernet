@@ -70,3 +70,21 @@ describe('hydrateWorkspaceRoute(协作群 hydration)', () => {
     expect(state.selectedGroupId).toBeNull();
   });
 });
+
+it('waits for the explicitly requested Human rather than falling back to a Bot or placeholder Human', () => {
+  const placeholder = { ...user, id: 'me' };
+  useWorkspaceStore.getState().setIdentities([placeholder, bot], bot.id);
+  const before = useWorkspaceStore.getState();
+  const route = parseWorkspaceRoute('current=human_staff-1&group=g1&session=s1');
+  expect(hydrateWorkspaceRoute(route).status).toBe('waiting_for_identities');
+  expect(useWorkspaceStore.getState()).toBe(before);
+  useWorkspaceStore.getState().setIdentities([{ ...user, id: 'human_staff-1' }, bot], bot.id);
+  expect(hydrateWorkspaceRoute(route).status).toBe('applied');
+  expect(useWorkspaceStore.getState()).toMatchObject({ activeIdentityId: 'human_staff-1', selectedSessionId: 's1' });
+});
+
+it('matches an explicit canonical Human to the same normalized real user, not another user', () => {
+  useWorkspaceStore.getState().setIdentities([user, { ...user, id: 'staff-1' }, bot], bot.id);
+  hydrateWorkspaceRoute(parseWorkspaceRoute('current=human_staff-1&group=g1&session=s1'));
+  expect(useWorkspaceStore.getState().activeIdentityId).toBe('staff-1');
+});

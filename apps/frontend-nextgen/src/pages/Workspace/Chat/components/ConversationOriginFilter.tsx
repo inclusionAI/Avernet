@@ -19,6 +19,8 @@ export interface ConversationOriginFilterProps {
   scope: ConversationSessionScope;
   /** 是否展示「发起人」分组;好友 Bot 无归属概念,仅保留「会话」范围(dmore 截图 3.png)。 */
   supportsOrigin?: boolean;
+  /** 临时禁用他人发起入口；其他来源和会话范围不受影响。 */
+  othersDisabledReason?: string;
   supportsFavorites?: boolean;
   /** Coding Bot 归档列表能力；仅当前已挂载 Runtime 的 Bot 暴露。 */
   supportsArchives?: boolean;
@@ -46,6 +48,7 @@ export function ConversationOriginFilter({
   origin,
   scope,
   supportsOrigin = true,
+  othersDisabledReason,
   supportsFavorites = true,
   supportsArchives = false,
   supportsCollab = false,
@@ -115,7 +118,7 @@ export function ConversationOriginFilter({
               value={origin}
               options={[
                 { value: 'mine', label: '我发起' },
-                { value: 'others', label: '他人发起' },
+                { value: 'others', label: '他人发起', disabledReason: othersDisabledReason },
                 ...(supportsCollab ? [{ value: 'collab' as const, label: '协作' }] : []),
               ]}
               onChange={(next) => {

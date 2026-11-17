@@ -162,7 +162,7 @@ it('hides every scope option and its indicator when favorites are unsupported', 
   expect(screen.getByRole('button', { name: '发起人筛选' })).not.toHaveClass('bg-primary/10');
 });
 
-it('协作 Bot 可选择他人来源并切回我的来源', () => {
+it('默认允许选择他人来源并切回我的来源', () => {
   const handlers = callbacks();
   render(<ConversationOriginFilter botId="team:entity" origin="mine" scope="all" {...handlers} />);
   const others = screen.getByRole('button', { name: '他人发起' });
@@ -242,4 +242,18 @@ describe('好友 Bot 会话范围筛选(supportsOrigin=false)', () => {
     );
     expect(trigger).not.toHaveClass('text-primary');
   });
+});
+
+it('只禁用指定的他人发起选项，点击和键盘导航都不能选中它', () => {
+  const handlers = callbacks();
+  render(<ConversationOriginFilter botId="team:entity" origin="mine" scope="all"
+    othersDisabledReason="功能修复中，暂不可用" {...handlers} />);
+  const others = screen.getByRole('button', { name: '他人发起' });
+  const mine = screen.getByRole('button', { name: '我发起' });
+  expect(others).toBeDisabled();
+  expect(mine).toBeEnabled();
+  fireEvent.click(others);
+  expect(handlers.onOriginChange).not.toHaveBeenCalled();
+  fireEvent.keyDown(mine, { key: 'ArrowRight' });
+  expect(handlers.onOriginChange).not.toHaveBeenCalledWith('others');
 });

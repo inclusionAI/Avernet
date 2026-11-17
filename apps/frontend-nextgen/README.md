@@ -27,6 +27,62 @@ npm run check:open-core
 npm run ci
 ```
 
+## Group and Session invitation links
+
+The [invitation landing hook](src/pages/Workspace/hooks/useInviteAccept.ts) first
+calls the authenticated, read-only [BCS invitation preflight](../bcs/api-contracts/v1/openapi/invitations.yaml).
+BCS determines whether the signed-in Human is already a participant of the exact
+Group or Session. Existing members navigate directly using the returned target
+and parent Group IDs and explicitly select the authenticated Human identity, not
+the previously active Bot. Invitation identity resolution only observes existing
+auth/capability/identity-store state; it never starts a mine/identity-loading
+request, which can create Human actors. A late global authentication result
+resumes navigation. While identity initialization is pending, the landing page shows
+a loading state rather than an error; unresolved initialization times out after ten
+seconds. The invitation history entry is replaced. Other users
+still explicitly confirm joining and select a message visibility scope.
+
+Preflight never accepts an invitation or infers membership from public visibility,
+Bot management or successful detail access. Expired links remain invalid.
+Authentication failures are distinct from invalid invitations; transient preflight
+failures offer retry rather than an unchecked confirmation. The request renders
+errors inline while leaving shared login/authentication gates enabled. A selected
+Group absent from the current sidebar page/filter is resolved by ID through the
+existing selected-Group detail fallback, including Session-only membership; list
+absence alone never changes the participation filter or discards the requested Session.
+
+An explicit Session deep link issues one sidebar-location request after route
+identity hydration. Once the target Group and Session details are verified,
+location clears obstructing sidebar filters, displays an out-of-list target,
+expands the sidebar and scrolls to the Session. Once the selected Group detail
+is available, its classification is confirmed by a matching entry from the
+selected View Actor's paginated Group lists: the public target-independent Group
+detail does not itself report `membership`. Location aligns the participation
+filter with that explicit list value (`direct` or `session_only`) while preserving
+the selected Session. List absence is never treated as evidence for the opposite
+category. Classification-query failures offer a retry rather than guessing. List
+readiness is scoped to both identity and participation filter, so a previous
+category's Groups are not shown under a newly selected category during reload.
+This display-only operation never joins the parent Group, changes actual Group
+membership, or modifies paging/history state. It
+survives transient detail reloads while the Store selection is unchanged; user
+selection, newer filters or dismissal cancel even a still-pending request. A
+settled target-verification failure removes the cached overlay. Internal Store-to-URL projections do
+not replay location or remount the workspace. A canonical `human_` target waits
+for the matching real Human in the identity list instead of falling back to a
+Bot or placeholder identity. If route initialization cannot finish within ten
+seconds, the page offers explicit refresh and return actions instead of loading
+indefinitely under a missing identity.
+
+Regression coverage is in [invitationService.test.ts](test/services/workspace/invitationService.test.ts),
+[useInviteAccept.preview.test.ts](test/pages/Workspace/hooks/useInviteAccept.preview.test.ts),
+[useInviteAccept.readonlyIdentity.test.ts](test/pages/Workspace/hooks/useInviteAccept.readonlyIdentity.test.ts)
+and [InviteAcceptPanel.test.tsx](test/pages/Workspace/InviteAcceptPanel.test.tsx).
+Sidebar and route regressions are covered by
+[invitationSidebarNavigation.test.tsx](test/pages/Workspace/invitationSidebarNavigation.test.tsx),
+[useWorkspacePage.deepLinkLocation.test.tsx](test/pages/Workspace/hooks/useWorkspacePage.deepLinkLocation.test.tsx)
+and [useGroupSessionLocation.deepLink.test.tsx](test/pages/Workspace/hooks/useGroupSessionLocation.deepLink.test.tsx).
+
 ## Discovery public Bots
 
 The [public Bot cursor](src/services/collaborationSquare/publicBotCursor.ts)
@@ -65,8 +121,10 @@ and [`GroupOwnerDisplay.test.tsx`](test/components/CollaborationSquare/GroupOwne
 
 ## Collaborating Bot conversations
 
-In “对话 → 我协作的 Bot”, the origin filter supports both “我发起” and
-“他人发起”. Other-user conversations reuse the managed Bot friend-group flow:
+In “对话 → 我协作的 Bot”, “我发起” remains available; the visible “他人发起”
+filter button is temporarily disabled pending a bug fix. Managed Bot filters are
+unchanged, and an existing other-user selection can still switch back to “我发起”.
+The underlying other-user conversations reuse the managed Bot friend-group flow:
 friend users load under the Bot's composite actor ID, and session/message reads
 retain the owner context, normalized friend ID, pagination and runtime stage.
 Other-user browsing is read-only; it does not enable session writes, a composer
