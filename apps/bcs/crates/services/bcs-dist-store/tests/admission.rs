@@ -401,3 +401,21 @@ async fn an_existing_task_of_another_scope_is_a_conflict() {
     );
     assert_eq!(inbox_len(&store).await, 0);
 }
+
+#[tokio::test]
+async fn documents_of_an_unsupported_version_are_never_written() {
+    for which in ["spec", "task"] {
+        let store = Arc::new(Recorder::default());
+        let mut request = new_task_request("adm-9c41e7", "hello");
+        match which {
+            "spec" => request.create_session.as_mut().unwrap().schema_version = 2,
+            _ => request.create_task.as_mut().unwrap().schema_version = 2,
+        }
+        assert_eq!(
+            producer(&store).admit(request).await,
+            Err(StoreError::UnsupportedFormat { format: 2 }),
+            "{which}"
+        );
+        assert!(store.calls().is_empty(), "{which}: nothing read or written");
+    }
+}
