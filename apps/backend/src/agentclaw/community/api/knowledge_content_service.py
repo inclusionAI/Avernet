@@ -18,7 +18,7 @@ actor IDs cannot replace the authenticated identity. Unconfigured providers fail
 """
 
 from collections.abc import AsyncIterator, Mapping
-from typing import Protocol, runtime_checkable
+from typing import Literal, Protocol, runtime_checkable
 
 from agentclaw.community.kernel.knowledge_content import ContentAccess, ContentReply
 
@@ -29,7 +29,13 @@ class KnowledgeContentServiceProtocol(Protocol):
         self, *, actor_id: str, session: Mapping[str, str]
     ) -> ContentAccess: ...
     async def sources(
-        self, *, kb_id: str, access: ContentAccess, offset: int, limit: int
+        self,
+        *,
+        kb_id: str,
+        access: ContentAccess,
+        offset: int,
+        limit: int,
+        exclude_book_documents: bool = False,
     ) -> ContentReply: ...
     async def source(
         self, *, kb_id: str, source_id: str, access: ContentAccess
@@ -67,7 +73,14 @@ class KnowledgeContentServiceProtocol(Protocol):
         self, *, kb_id: str, access: ContentAccess, body: dict
     ) -> ContentReply: ...
     async def yuque_books(
-        self, *, kb_id: str, access: ContentAccess, query: str, offset: int, limit: int
+        self,
+        *,
+        kb_id: str,
+        access: ContentAccess,
+        query: str,
+        offset: int,
+        limit: int,
+        source: Literal["personal", "team"] | None = None,
     ) -> ContentReply: ...
     async def book_imports(
         self, *, kb_id: str, access: ContentAccess, offset: int, limit: int
@@ -76,6 +89,12 @@ class KnowledgeContentServiceProtocol(Protocol):
         self, *, kb_id: str, access: ContentAccess, body: dict
     ) -> ContentReply: ...
     async def book_import(
+        self, *, kb_id: str, source_id: str, access: ContentAccess
+    ) -> ContentReply: ...
+    async def delete_book(
+        self, *, kb_id: str, source_id: str, access: ContentAccess
+    ) -> ContentReply: ...
+    async def book_deletion(
         self, *, kb_id: str, source_id: str, access: ContentAccess
     ) -> ContentReply: ...
     async def cancel_book_import(

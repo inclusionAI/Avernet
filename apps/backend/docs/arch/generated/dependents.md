@@ -45,6 +45,7 @@ modules that import it. Built from the actual import graph.
 - `agentclaw.community.core.expert_market`
 - `agentclaw.community.core.repository`
 - `agentclaw.community.core.service_bot`
+- `agentclaw.community.core.skill_center`
 
 ## `agentclaw.community.core.approval`
 

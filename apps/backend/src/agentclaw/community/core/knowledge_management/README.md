@@ -126,3 +126,19 @@ acceptance is not completion; preserve partial, capped, empty-skip and blocked
 calendar semantics. Whole-book operations must not widen preexisting subtree
 sources. Calendar writes retain the existing version CAS and do not imply an
 enabled platform worker. Existing single-document routes remain unchanged.
+
+The book catalog additionally accepts optional `source=personal|team`; omission
+preserves the existing combined catalog. `sources?exclude_book_documents=true`
+opts into a provider-side filtered page with matching totals. The default source
+list is unchanged. Book list/detail responses pass through the provider's
+persisted `current_run` progress; the BFF never repairs or guesses task state.
+
+`DELETE yuque/book-imports/{source_id}` sends one fixed provider request. `202`
+means the provider durably accepted asynchronous removal, not that child cleanup
+finished. `GET yuque/book-imports/{source_id}/deletion` reads its progress after
+the connector disappears from the active list. The provider disables scheduling,
+fences old work, preserves independent document participation, and owns child
+cleanup, recovery and terminal results. No document fan-out, mutation retries,
+local task records or scheduler are added to this adapter. Neither operation
+deletes the original remote book or its documents. Native authorization and
+failures are preserved; accepted deletion is never projected as completed.

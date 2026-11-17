@@ -39,11 +39,13 @@ router = APIRouter(
 
 @router.get("/sources")
 async def sources(
+    exclude_book_documents: bool = Query(False),
     offset: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
     ctx=Depends(context),
 ):
-    return await ctx.call("sources", offset=offset, limit=limit)
+    options = {"exclude_book_documents": True} if exclude_book_documents else {}
+    return await ctx.call("sources", offset=offset, limit=limit, **options)
 
 
 async def uploads(files):
@@ -127,12 +129,14 @@ async def yuque_import(body: YuqueImport, ctx=Depends(context)):
 
 @router.get("/yuque/books")
 async def yuque_books(
+    source: Literal["personal", "team"] | None = Query(None),
     q: str = Query("", max_length=256),
     offset: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=100),
     ctx=Depends(context),
 ):
-    return await ctx.call("yuque_books", query=q, offset=offset, limit=limit)
+    options = {"source": source} if source else {}
+    return await ctx.call("yuque_books", query=q, offset=offset, limit=limit, **options)
 
 
 @router.get("/yuque/book-imports")
@@ -242,3 +246,13 @@ async def job(job_id: str, ctx=Depends(context)):
     except KnowledgeError as exc:
         raise HTTPException(exc.status, detail={"code": exc.code}) from None
     return Response(reply.body, status_code=reply.status, headers=reply.headers)
+
+
+@router.delete("/yuque/book-imports/{source_id}")
+async def delete_book(source_id: str, ctx=Depends(context)):
+    return await ctx.call("delete_book", source_id=segment(source_id))
+
+
+@router.get("/yuque/book-imports/{source_id}/deletion")
+async def book_deletion(source_id: str, ctx=Depends(context)):
+    return await ctx.call("book_deletion", source_id=segment(source_id))
