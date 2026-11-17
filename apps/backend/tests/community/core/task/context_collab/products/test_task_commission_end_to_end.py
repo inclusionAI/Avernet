@@ -142,7 +142,7 @@ OBJECTIVE = "为计算器增加求和能力:完成方案、编码和测试,生�
 """
 协议适配问题总结：
 - 语义不明确问题
-  - [ ] 现在只有DataModel、OperateModel，但是没有明确定义DataRelationModel。比如Collet和Participant、RoleBinding、Task的关系，如何建模没有明确语义
+  - [ ] L4层的DataRelationModel不明确。比如Collet和Participant、RoleBinding、Task的关系，如何建模没有明确语义
   - [ ] Collet语义明确性问题：这份 ACCS 协议没有给出 Collet 的完整成员变量定义
   - [ ] 单Agent执行任务过程中，需要上报内部的详细进度（步骤），目前协议没有明确表述怎么做：没有统一的详细步骤上报 API 和固定字段
   - [ ] open模式下，任务执行到底是在录取之后，还是在录取之前，协议没有明确说明，还是说都可以？
