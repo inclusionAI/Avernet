@@ -1,0 +1,57 @@
+apps/bcs-internal/crates/external-clients/bcs-agentbase-sofarpc/src/client.rs
+  s_19c0e6699afcd7::t_4a3a45e83863c6 92-93,108-109,113-124,128-129,133-139,720,734,800-805,1880-2386
+apps/bcs-internal/crates/external-clients/bcs-agentbase-sofarpc/src/config.rs
+  s_19c0e6699afcd7::t_4356ff2783365b 290-322
+apps/bcs-internal/crates/external-clients/bcs-agentbase-sofarpc/src/contract.rs
+  s_19c0e6699afcd7::t_2b096f9d087f7f 110-228
+apps/bcs-internal/crates/external-clients/bcs-agentbase-sofarpc/src/error.rs
+  s_19c0e6699afcd7::t_73a308e1421713 99-110
+apps/bcs-internal/crates/external-clients/bcs-agentbase-sofarpc/src/identity.rs
+  s_19c0e6699afcd7::t_51b80144b4498c 213-242
+apps/bcs-internal/crates/external-clients/bcs-agentbase-sofarpc/src/mapping.rs
+  s_19c0e6699afcd7::t_d81767666d31b1 2389-2924
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/src/config.rs
+  s_19c0e6699afcd7::t_f40783fbf5af23 135-203
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/src/consumer.rs
+  s_19c0e6699afcd7::t_0ae53b2eb0b56e 472-541
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/src/context.rs
+  s_19c0e6699afcd7::t_7aedb11db5c9b1 131-213
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/src/diagnostic.rs
+  s_19c0e6699afcd7::t_7db514d14e3900 59-79
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/src/error.rs
+  s_19c0e6699afcd7::t_ef8f2fbb757938 118-216
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/src/logging.rs
+  s_19c0e6699afcd7::t_0bac064a6f665c 509-646
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/src/triple_pojo/codec.rs
+  s_19c0e6699afcd7::t_0fdb356b65f195 1169-1181,1184,1186-1188,1191-1207,1335-1739
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/agent_card_management/mapping.rs
+  s_19c0e6699afcd7::t_4d8bbd59db4d08 1033-1330
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/config.rs
+  s_19c0e6699afcd7::t_8c459c32558762 289-308
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/test/agentbase_remote_chat/provider.rs
+  s_19c0e6699afcd7::t_404c630b5a1229 738-739,959-1406
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/test/agentbase_remote_chat/validation.rs
+  s_19c0e6699afcd7::t_8ed2caba163d58 41-108
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/test/logging.rs
+  s_19c0e6699afcd7::t_b06299987dab36 35-59
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/test/ucs_render/provider.rs
+  s_19c0e6699afcd7::t_25d191b48af6fd 195-253
+apps/bcs-internal/crates/plugins/bcs-sofa-services/src/test/ucs_render/validation.rs
+  s_19c0e6699afcd7::t_27b9f9aa98aa62 83-221
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6f49db96cc9cf33426e1c0faef52b0bdc4d046f8",
+  "prompts": {},
+  "sessions": {
+    "s_19c0e6699afcd7": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d3be-3a1a-7b13-9090-e1745ea29304",
+        "model": "GLM-5.3"
+      },
+      "human_author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}

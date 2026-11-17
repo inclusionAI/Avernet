@@ -1,0 +1,21 @@
+apps/bcs-internal/Cargo.lock
+  s_460ca40e7dae23::t_966af8153c13ab 84,111,150,173
+apps/bcs-internal/Cargo.toml
+  s_460ca40e7dae23::t_d1a5616eaff9f6 129-131,134,137-138
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6902c9c04fe632375bf989e5002e72fef321e258",
+  "prompts": {},
+  "sessions": {
+    "s_460ca40e7dae23": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c086-a457-71b0-8466-0c9920e816e0",
+        "model": "GLM-5.3"
+      },
+      "human_author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}
