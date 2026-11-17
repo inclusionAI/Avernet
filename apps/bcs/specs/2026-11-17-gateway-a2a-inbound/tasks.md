@@ -31,8 +31,8 @@
 - **Goal:** `DistGatewayCoreService`: scope, transition and reference rules over the ports.
 - **Files:** `crates/services/bcs-dist-gateway/` (new)
 - **Done when:**
-  - [ ] every row of the plan's admission-check table has a test
-  - [ ] the core contract harness passes
+  - [x] every row of the plan's admission-check table has a test
+  - [x] the core contract harness passes
 - **Depends on:** Task 3
 
 ## Task 5: Application service

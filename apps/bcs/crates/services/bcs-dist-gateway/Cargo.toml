@@ -1,0 +1,25 @@
+[package]
+name = "bcs-dist-gateway"
+description = "Gateway core service of the distributed executor plane: admission, restore, follow and list rules"
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+rust-version = { workspace = true }
+version = { workspace = true }
+
+[dependencies]
+async-trait = { workspace = true }
+bcs-dist-model = { workspace = true }
+bcs-service-api = { workspace = true }
+futures = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+bcs-dist-gateway-store = { workspace = true }
+bcs-dist-store = { workspace = true }
+bcs-store-api = { workspace = true }
+bcs-test-support = { workspace = true }
+tokio = { workspace = true }
+
+[lints]
+workspace = true

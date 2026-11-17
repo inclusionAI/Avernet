@@ -9,7 +9,8 @@ use bcs_dist_model::*;
 use bcs_dist_store::codec::{encode_ev_entry, encode_json};
 use bcs_dist_store::layout::KeyLayout;
 use bcs_service_api::port::repo::distributed::common::{EffectSource, StoreError};
-use bcs_service_api::port::repo::distributed::result::{ResultStorePort, SavedResult};
+use bcs_service_api::port::repo::distributed::common::IdempotentWrite;
+use bcs_service_api::port::repo::distributed::result::{BlobStorePort, ResultStorePort, SavedResult};
 use bcs_store_api::json::{JsonMutation, JsonStorePlugin};
 use bcs_store_api::stream::*;
 use bcs_store_api::zset::{ZAddMode, ZSetEntry, ZSetStorePlugin};
@@ -96,15 +97,11 @@ pub fn text_event(tid: &str, id: EventId, text: &str) -> OutputEvent {
 /// Writes what the Worker writes, in its order: `ev` entries, then `task`.
 pub struct FakeWorker {
     pub model: Arc<Model>,
-    version: Mutex<HashMap<String, u64>>,
 }
 
 impl FakeWorker {
     pub fn new(model: Arc<Model>) -> Self {
-        Self {
-            model,
-            version: Mutex::new(HashMap::new()),
-        }
+        Self { model }
     }
 
     /// What Gateway admission does for a new task: create it and list it.
@@ -140,17 +137,12 @@ impl FakeWorker {
 
     pub async fn publish(&self, task: &TaskSnapshot) {
         let key = layout().task(&task.tid).unwrap();
-        let version = {
-            let mut versions = self.version.lock().unwrap();
-            let v = versions.entry(key.clone()).or_insert(0);
-            *v += 1;
-            *v
-        };
+        let current = self.model.get_json(&key).await.unwrap().map_or(0, |doc| doc.version.0);
         let outcome = self
             .model
             .mutate_json(
                 &key,
-                WriteCondition::Newer(Version(version)),
+                WriteCondition::Newer(Version(current + 1)),
                 JsonMutation::Replace(encode_json(task).unwrap()),
                 Expiry::Persistent,
             )
@@ -297,6 +289,34 @@ impl ResultStorePort for MemoryResults {
     }
 }
 
+/// Immutable blobs, keyed by their storage key.
+#[derive(Default)]
+pub struct MemoryBlobs {
+    pub blobs: Mutex<HashMap<String, Vec<u8>>>,
+}
+
+impl MemoryBlobs {
+    pub fn put(&self, key: &str, bytes: &[u8]) -> BlobRef {
+        self.blobs.lock().unwrap().insert(key.to_owned(), bytes.to_vec());
+        BlobRef {
+            key: key.to_owned(),
+            digest: Digest("sha256:test".into()),
+        }
+    }
+}
+
+#[async_trait]
+impl BlobStorePort for MemoryBlobs {
+    async fn put_immutable(&self, _identity: BlobRef, _bytes: Vec<u8>) -> Result<IdempotentWrite, StoreError> {
+        Err(StoreError::NotApplied {
+            code: "not_used_by_gateway".into(),
+        })
+    }
+    async fn get(&self, reference: &BlobRef) -> Result<Option<Vec<u8>>, StoreError> {
+        Ok(self.blobs.lock().unwrap().get(&reference.key).cloned())
+    }
+}
+
 pub struct Fixture {
     pub model: Arc<Model>,
     pub stream: Arc<CountingStream>,
@@ -331,5 +351,103 @@ pub fn fixture_with(tune: impl FnOnce(&mut GatewayStoreConfig)) -> Fixture {
         stream,
         results,
         reader,
+    }
+}
+
+pub const NOW: i64 = 1_794_371_200_123;
+
+pub struct FixedClock(pub i64);
+impl bcs_dist_store::inbox::Clock for FixedClock {
+    fn now(&self) -> TimestampMillis {
+        TimestampMillis(self.0)
+    }
+}
+
+/// Every port the Gateway core needs, over one store model: the shared
+/// admission provider, the task reader, the session store and the blob store.
+pub struct Ports {
+    pub model: Arc<Model>,
+    pub stream: Arc<CountingStream>,
+    pub worker: FakeWorker,
+    pub results: Arc<MemoryResults>,
+    pub blobs: Arc<MemoryBlobs>,
+    pub inbox: Arc<bcs_dist_store::inbox::StoreInboxProducer>,
+    pub tasks: Arc<StoreTaskReader>,
+    pub sessions: Arc<bcs_dist_gateway_store::GatewaySessionStore>,
+}
+
+pub fn ports() -> Ports {
+    let f = fixture();
+    let inbox = bcs_dist_store::inbox::StoreInboxProducer::new(
+        f.model.clone(),
+        f.model.clone(),
+        f.model.clone(),
+        f.stream.clone(),
+        layout(),
+        Arc::new(FixedClock(NOW)),
+        bcs_dist_store::inbox::InboxProducerConfig::new(BackendId("tbase".into())),
+    )
+    .unwrap();
+    let sessions = bcs_dist_gateway_store::GatewaySessionStore::new(f.model.clone(), layout()).unwrap();
+    Ports {
+        model: f.model,
+        stream: f.stream,
+        worker: f.worker,
+        results: f.results,
+        blobs: Arc::new(MemoryBlobs::default()),
+        inbox: Arc::new(inbox),
+        tasks: Arc::new(f.reader),
+        sessions: Arc::new(sessions),
+    }
+}
+
+pub fn session_spec(sid: &str, scope: TaskScope) -> SessionSpec {
+    SessionSpec {
+        schema_version: 1,
+        sid: Sid(sid.into()),
+        shard: KeyLayout::shard_of(&Sid(sid.into())).unwrap(),
+        scope,
+        kind: SessionKind::FsmGroup,
+        group: GroupId("grp-research-01".into()),
+        workflow: WorkflowRef {
+            definition_id: "wf-research".into(),
+            revision: "7".into(),
+            digest: Digest("sha256:ab12".into()),
+        },
+        participants: vec![],
+        limits: SessionLimits {
+            max_queued_tasks: 16,
+            max_task_steps: 200,
+            task_timeout_millis: 1_800_000,
+            max_inline_bytes: 65_536,
+        },
+        digest: Digest("sha256:3f1a".into()),
+        created_at: TimestampMillis(NOW),
+    }
+}
+
+pub fn envelope(tid: &str, input_id: &str, body: InputBody) -> InputEnvelope {
+    let digest = bcs_dist_store::identity::digest_json(&serde_json::to_value(&body).unwrap());
+    InputEnvelope {
+        schema_version: 1,
+        sid: Sid(SID.into()),
+        tid: Tid(tid.into()),
+        input_id: InputId(input_id.into()),
+        business_digest: digest,
+        body,
+    }
+}
+
+pub fn user_body(text: &str) -> InputBody {
+    InputBody::User {
+        payload: Payload::Inline(serde_json::json!({ "text": text })),
+    }
+}
+
+pub fn question(id: &str) -> Interaction {
+    Interaction {
+        id: InteractionId(id.into()),
+        did: Did(format!("{TID}.n2.a1")),
+        kind: InteractionKind::HumanInput,
     }
 }
