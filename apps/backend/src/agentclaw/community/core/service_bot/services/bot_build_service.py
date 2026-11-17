@@ -989,10 +989,12 @@ class BotBuildService:
             )
 
         artifact = dict(config_artifact)
-        engine_ext = dict(artifact.get("engine_ext") or {})
-        engine_ext["stage"] = stage
-        engine_ext["default_tag"] = default_tag
-        artifact["engine_ext"] = engine_ext
+        engine_ext = artifact.get("engine_ext") or {}
+        artifact["engine_ext"] = {
+            **engine_ext,
+            "stage": stage,
+            "default_tag": default_tag,
+        }
         return artifact
 
     def _run_local_command(
