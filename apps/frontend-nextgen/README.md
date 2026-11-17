@@ -209,6 +209,15 @@ visibility policy remains applied without reclassifying Backend source results.
 Deploy Backend source-window support before this frontend: missing/mismatched
 source metadata produces an explicit unsupported error instead of presenting an
 unfiltered list as “mine”. See the [Backend contract](../backend/docs/openapi-v1/engine-surface.md).
+## Lab tasks
+
+The [Lab task list](src/pages/Lab/Tasks/index.tsx) searches displayed task titles within
+its currently loaded page, not Bot names or all pages. Existing status and Owner
+Bot filters remain available. “创建时间” shows `gmt_create`; “更新时间” shows
+`gmt_modified` (the last record modification, not task completion). Missing times
+display a dash. Lab rows do not claim execution duration from these timestamps;
+the default MyTask presentation remains unchanged. Regression coverage lives in
+[`Tasks.test.tsx`](test/pages/Lab/Tasks.test.tsx).
 
 ## Source synchronization
 

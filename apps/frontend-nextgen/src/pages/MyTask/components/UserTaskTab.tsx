@@ -146,7 +146,7 @@ export function UserTaskTab({
                   <Th>{isLabVariant ? 'Owner Bot' : 'Owner Bot / 来源'}</Th>
                   {!isLabVariant ? <Th>状态</Th> : null}
                   <Th>创建时间</Th>
-                  <Th>完成时间</Th>
+                  <Th>{isLabVariant ? '更新时间' : '完成时间'}</Th>
                   {isLabVariant ? <Th>状态</Th> : null}
                   <Th className="text-right">操作</Th>
                 </tr>
@@ -229,9 +229,11 @@ export function UserTaskTab({
                         <Td>
                           <div className="space-y-1 text-xs leading-5 text-foreground">
                             <div>{formatDateTime(record.gmt_modified)}</div>
-                            <div className="text-xs text-muted-foreground">
-                              耗时：{formatDuration(record.gmt_create, record.gmt_modified)}
-                            </div>
+                            {!isLabVariant ? (
+                              <div className="text-xs text-muted-foreground">
+                                耗时：{formatDuration(record.gmt_create, record.gmt_modified)}
+                              </div>
+                            ) : null}
                           </div>
                         </Td>
                         {isLabVariant ? <Td className="whitespace-nowrap">{taskStatusBadge(record.status)}</Td> : null}
