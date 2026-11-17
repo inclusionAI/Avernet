@@ -1,0 +1,23 @@
+apps/backend/tests/community/endpoints/test_harness_router.py
+  s_c980b83a9ffe7f::t_0db1b1997df180 65,69-70,118-121
+apps/backend/tests/community/acceptance/harness/test_diagnose_llm_disabled_smoke.py
+  s_c980b83a9ffe7f::t_0db1b1997df180 7,80,83-86
+apps/backend/src/agentclaw/community/adapters/http/harness/router.py
+  s_c980b83a9ffe7f::t_a749ba45aa08bf 542-544,552,555-559,561-567,574-576
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "cd4062cca4929a9edebac281232792745f05fb08",
+  "prompts": {},
+  "sessions": {
+    "s_c980b83a9ffe7f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e84e-8cc0-72b0-848b-eae19b4ed413",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}
