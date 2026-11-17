@@ -15,7 +15,8 @@ Columns: auto-increment `id`, the three identity columns, independent numeric
 `diagnosis_enabled` and `recovery_enabled` (default 0), `config_json` TEXT NOT
 NULL, `version` (starts at 1), `updated_by`, `gmt_create`, `gmt_modified`.
 The identity index uses the monitoring schema's case-sensitive collations and
-fits the 767-byte index limit. Inserts explicitly supply `{}` for JSON.
+fits the 767-byte index limit. Owner enrollment explicitly initializes the default team
+and both notification flags; raw repository callers can still supply `{}`.
 Switch updates use compare-and-swap on `version` and never overwrite JSON.
 
 Recovery requests identify the Owner. Current `ac_bots` ownership resolves the
@@ -95,9 +96,10 @@ have no new-table record. Ordinary paused Owner notices remain paused.
 - Bot options/status return the effective recovery switch and mark service Bots
   with `isServiceBot: true`. Legacy-only
   Bots have `diagnosisEnabled: false`, their legacy recovery state, and version 0.
-  The first UI write creates a new row, with `{}` notification JSON: it takes
-  complete ownership and notifications remain off until explicitly configured.
-  This does not copy or modify legacy notification preferences. Historical
+  The first UI write creates a new row with `team_key: "default"` and explicit
+  Owner/group notification flags set to true. This takes complete ownership
+  without copying or modifying legacy preferences. An unconfigured default group
+  destination skips group delivery. Existing rows, including `{}`, keep their JSON. Historical
   check/diagnosis data remains separate and readable after disabling.
 - `GET /api/insight/v1/monitoring/session-recoveries/tasks` lists the authenticated
   user's tasks using `page`, `pageSize` (1–50), optional exact `botId`, `env`, and
@@ -261,10 +263,11 @@ config outside archives; cleanup also runs after failure.
 4. Only after the own-Bot pilot succeeds, migrate remaining Bots explicitly
    through the administrator API. Do not rewrite legacy keys at startup or
    synchronize two writable sources. Switch changes preserve the rest of JSON.
-5. During this pilot the page retains its existing `{}` initialization. The
-   later enrollment cutover will initialize `team_key: "default"` and explicit
-   Owner/group `enabled: true`; it must not retrofit that default onto old `{}`
-   or malformed JSON. A default team with no route sends no group notice.
+5. Owner single/bulk switch operations initialize new rows with
+   `team_key: "default"` and explicit Owner/group `enabled: true`. Existing rows
+   keep their JSON, including historical `{}` and explicit administrator settings.
+   This initialization does not migrate other Bots. A default team with no route
+   sends no group notice.
 6. After all relevant Bots have explicit team ownership, remove the legacy
    roster-selection/parser branch at the single boundary. Keep shared chapter
    routes and Owner card transport settings while consumers still use them.

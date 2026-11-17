@@ -359,6 +359,10 @@ describe('monitoring browser HTTP identity and enrollment boundary', () => {
     const configure = (version: number) => call('/monitoring/configurations', { method: 'POST',
       headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ botRef: ref, enabled: true, version }) });
     expect(await configure(0)).toMatchObject({ status: 200, body: { updated: 1, failed: [] } });
+    const stored = await new BotDiagnosisRecoveryConfigRepository(db).find({ botId: 'mock-bot-te', entityId: '001234', env: 'test' });
+    expect(stored).toMatchObject({ diagnosisEnabled: true, recoveryEnabled: true, version: 1 });
+    expect(JSON.parse(stored!.configJson)).toEqual({ team_key: 'default',
+      notifications: { owner: { enabled: true }, group: { enabled: true } } });
     expect((await configure(0)).status).toBe(409);
     principal.staffId = 'another-owner'; principal.isClawInsightAdmin = true;
     expect((await configure(1)).status).toBe(403);
