@@ -1,0 +1,50 @@
+apps/bcs/crates/plugin-api/bcs-store-api/README.md
+  s_a9c87caa3de52e::t_0fd0fb43a3b2fb 41-42,46-47,50-51,61-67,79,84-87,139-143,145-146,156,206-208,242-250
+apps/bcs/crates/test-support/bcs-test-support/src/contract/plugin/store/kv.rs
+  s_a9c87caa3de52e::t_0fd0fb43a3b2fb 196-199,203-206,208-215,218-234,236-239
+  s_a9c87caa3de52e::t_acf0a7badc6e10 49-50,69-70,109,120,189-195,200-202,207,216-217,235
+  s_a9c87caa3de52e::t_b89cbd08461cee 240
+apps/bcs/crates/test-support/bcs-test-support/tests/conformance_store.rs
+  s_a9c87caa3de52e::t_acf0a7badc6e10 67,157-159,163-164,167-168
+  s_a9c87caa3de52e::t_00bdfddb2aaf1e 154-155
+  s_a9c87caa3de52e::t_a4f2f8c41d90be 151-153,156,169
+  s_a9c87caa3de52e::t_0fd0fb43a3b2fb 160-162,165-166
+apps/bcs/crates/test-support/bcs-test-support/tests/support/store/mod.rs
+  s_a9c87caa3de52e::t_0fd0fb43a3b2fb 64-71
+  s_a9c87caa3de52e::t_a4f2f8c41d90be 31
+apps/bcs/docs/plans/2026-11-16-bcs-store-api.md
+  s_a9c87caa3de52e::t_0fd0fb43a3b2fb 93-106
+apps/bcs/crates/plugin-api/bcs-store-api/src/kv.rs
+  s_a9c87caa3de52e::t_2200034f69a4cb 7,19-22,25-28,35,43,45,47-48
+apps/bcs/crates/plugin-api/bcs-store-api/src/stream.rs
+  s_a9c87caa3de52e::t_0fd0fb43a3b2fb 157
+  s_a9c87caa3de52e::t_2200034f69a4cb 41-42,44,46,50-57,75-76,102-103,135
+apps/bcs/crates/test-support/bcs-test-support/src/contract/plugin/store/mod.rs
+  s_a9c87caa3de52e::t_acf0a7badc6e10 20-21
+apps/bcs/crates/test-support/bcs-test-support/tests/support/store/kv.rs
+  s_a9c87caa3de52e::t_acf0a7badc6e10 62-65,83,92,108
+apps/bcs/crates/plugin-api/bcs-store-api/src/common.rs
+  s_a9c87caa3de52e::t_2200034f69a4cb 3-6,23-24,30-31,35-36,70-71
+apps/bcs/crates/test-support/bcs-test-support/src/contract/plugin/store/stream.rs
+  s_a9c87caa3de52e::t_0fd0fb43a3b2fb 88-94,107-113,130-132,233
+  s_a9c87caa3de52e::t_acf0a7badc6e10 87,106,126-129
+apps/bcs/crates/test-support/bcs-test-support/tests/support/store/stream.rs
+  s_a9c87caa3de52e::t_0fd0fb43a3b2fb 19-22,147-150,173-176,248-250
+  s_a9c87caa3de52e::t_acf0a7badc6e10 16,98,139
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c448fb2b77205e313bea267c18cc7222483c5e9e",
+  "prompts": {},
+  "sessions": {
+    "s_a9c87caa3de52e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d0b4-74ad-7423-9152-b7e80c647ef8",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "yuange.zjy <yuange.zjy@antgroup.com>"
+    }
+  }
+}
