@@ -4,8 +4,6 @@ import json
 from dataclasses import replace
 
 import pytest
-from sqlalchemy import func, select
-
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabValidationError,
     ContextCollabVersionConflict,
@@ -23,19 +21,34 @@ from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs 
 from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_resource_refs import (
     SpaceRef,
 )
-from agentclaw.community.core.task.context_collab.l6_products.contracts import (
-    VersionedProfileRef,
-    DomainProfile,
-    DomainMapping,
+from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.contracts import (
+    ColletCreateCommand,
 )
-from agentclaw.community.core.task.context_collab.products.legacy_profiles import (
-    LEGACY_PRODUCT_PROFILES,
+from agentclaw.community.core.task.context_collab.l5_methods.operations.open.service import (
+    OpenMethodService,
 )
-from agentclaw.community.core.task.context_collab.products.task_commission.profile import (
-    TASK_COMMISSION_PROFILE,
+from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime import (
+    current_axes,
 )
 from agentclaw.community.core.task.context_collab.l6_products.catalog import (
     ProductCatalog,
+)
+from agentclaw.community.core.task.context_collab.l6_products.contracts import (
+    DomainMapping,
+    DomainProfile,
+    VersionedProfileRef,
+)
+from agentclaw.community.core.task.context_collab.l6_products.operations.collaboration_creation import (
+    ContextCollabService,
+)
+from agentclaw.community.core.task.context_collab.l6_products.operations.contracts import (
+    ProductInstantiateCommand,
+)
+from agentclaw.community.core.task.context_collab.l6_products.operations.product_instantiation import (
+    ProductInstantiationService,
+)
+from agentclaw.community.core.task.context_collab.l6_products.task_contracts import (
+    STANDARD_TASK_CONTRACT_REF,
 )
 from agentclaw.community.core.task.context_collab.persistence.method_store import (
     InMemoryMethodStore,
@@ -46,8 +59,12 @@ from agentclaw.community.core.task.context_collab.persistence.models import (
 )
 from agentclaw.community.core.task.context_collab.persistence.repository import (
     ContextCollabRepository,
-    CreateColletRecordRequest,
-    InitialEventDraft,
+)
+from agentclaw.community.core.task.context_collab.products.legacy_profiles import (
+    LEGACY_PRODUCT_PROFILES,
+)
+from agentclaw.community.core.task.context_collab.products.task_commission.profile import (
+    TASK_COMMISSION_PROFILE,
 )
 from agentclaw.community.core.task.context_collab.products.task_commission.service import (
     TaskCommissionService,
@@ -61,36 +78,21 @@ from agentclaw.community.core.task.context_collab.service_api import (
     CollaborationCreateCommand,
     EventAppendCommand,
 )
-from agentclaw.community.core.task.context_collab.l6_products.operations.collaboration_creation import (
-    ContextCollabService,
-)
-from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime import (
-    current_axes,
-)
 from agentclaw.community.core.task.context_collab.services.method_lifecycle_service import (
     ensure_top_level_binding,
-)
-from agentclaw.community.core.task.context_collab.l5_methods.operations.open.service import (
-    OpenMethodService,
 )
 from agentclaw.community.di.modules.task_commission_method_ops_adapter import (
     TaskCommissionOpenMethodAdapter,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.contracts import (
-    ColletCreateCommand,
-)
-from agentclaw.community.core.task.context_collab.l6_products.operations.contracts import (
-    ProductInstantiateCommand,
-)
-from agentclaw.community.core.task.context_collab.l6_products.operations.product_instantiation import (
-    ProductInstantiationService,
-)
-from agentclaw.community.core.task.context_collab.l6_products.task_contracts import (
-    STANDARD_TASK_CONTRACT_REF,
-)
-from tests.community.core.task.context_collab.product_catalog import standard_task_workflow
+from sqlalchemy import func, select
 
-LEGACY_PRODUCT_CATALOG = ProductCatalog((*LEGACY_PRODUCT_PROFILES, TASK_COMMISSION_PROFILE))
+from tests.community.core.task.context_collab.product_catalog import (
+    standard_task_workflow,
+)
+
+LEGACY_PRODUCT_CATALOG = ProductCatalog(
+    (*LEGACY_PRODUCT_PROFILES, TASK_COMMISSION_PROFILE)
+)
 
 OWNER = PrincipalRef("human", "owner")
 BOT = PrincipalRef("bot", "worker")
@@ -149,14 +151,17 @@ def _create_collet(repo):
             to_space=SPACE,
             initiator_ref=OWNER,
             objective="deliver",
-            executor_refs=(AgentRef("bot", "worker"),),
         ),
         OWNER,
     ).collet
 
 
 def _instantiate(
-    repo, store, collet, *, catalog=LEGACY_PRODUCT_CATALOG,
+    repo,
+    store,
+    collet,
+    *,
+    catalog=LEGACY_PRODUCT_CATALOG,
     profile_ref=VersionedProfileRef("task_commission", 1),
 ):
     return ProductInstantiationService(
@@ -166,6 +171,7 @@ def _instantiate(
             collet_id=collet.collet_id,
             expected_version=collet.version,
             profile_ref=profile_ref,
+            participant_refs=(AgentRef("bot", "worker"),),
         ),
         _actor(),
     )
@@ -267,7 +273,7 @@ def test_generic_message_is_nontransition_but_stale_control_is_conflict(db):
     repo, store, service, _ = _services(db)
     created = _create_collet(repo)
     _instantiate(repo, store, created)
-    started = _append(service, created.collet_id, 1, actor=BOT)
+    started = _append(service, created.collet_id, 2, actor=BOT)
     message = _append(
         service,
         created.collet_id,
@@ -279,7 +285,7 @@ def test_generic_message_is_nontransition_but_stale_control_is_conflict(db):
     assert message.current_status == "in_progress"
     with pytest.raises(ContextCollabVersionConflict):
         _append(service, created.collet_id, 1)
-    assert _counts(db) == (1, 3)
+    assert _counts(db) == (1, 4)
 
 
 @pytest.mark.parametrize(
@@ -296,8 +302,8 @@ def test_generic_control_cannot_bypass_product_shape(db, overrides):
     created = _create_collet(repo)
     _instantiate(repo, store, created)
     with pytest.raises(ContextCollabValidationError):
-        _append(service, created.collet_id, 1, actor=BOT, **overrides)
-    assert _counts(db) == (1, 1)
+        _append(service, created.collet_id, 2, actor=BOT, **overrides)
+    assert _counts(db) == (1, 2)
 
 
 @pytest.mark.parametrize(
@@ -308,8 +314,8 @@ def test_pinned_l4_roles_use_typed_identity_not_just_same_id(db, impostor):
     created = _create_collet(repo)
     _instantiate(repo, store, created)
     with pytest.raises(ContextCollabValidationError, match="only the principal"):
-        _append(service, created.collet_id, 1, actor=impostor)
-    assert _counts(db) == (1, 1)
+        _append(service, created.collet_id, 2, actor=impostor)
+    assert _counts(db) == (1, 2)
 
 
 def test_pinned_instance_round_trip_and_heal_do_not_renegotiate(db, monkeypatch):
@@ -413,13 +419,14 @@ def test_legacy_rows_remain_readable_without_fabricated_negotiation(db):
     assert record.product_instance is None
     assert record.creation_facts["product_profile_ref"] is None
     assert record.creation_facts == {**data, "product_profile_ref": None}
-    assert _counts(db) == (1, 1)
+    assert _counts(db) == (1, 2)
 
 
 def test_unprofiled_generic_context_keeps_legacy_wire_contract(db):
     repo, _, service, _ = _services(db)
     created = service.create_collaboration(
-        _command(product_kind=None, workflow_kind=None, product_profile_ref=None), _actor()
+        _command(product_kind=None, workflow_kind=None, product_profile_ref=None),
+        _actor(),
     )
     record = repo.get_current_status(created.collet_id)
     assert record.product_instance is None
@@ -468,12 +475,12 @@ def test_message_cannot_smuggle_commission_progress_evidence(db):
         _append(
             service,
             created.collet_id,
-            1,
+            2,
             "user_interaction.posted",
             primitive_type="Message",
             payload={"content": "update", "percent": 50},
         )
-    assert _counts(db) == (1, 1)
+    assert _counts(db) == (1, 2)
 
 
 @pytest.mark.parametrize("legacy", [False, True])
@@ -496,9 +503,7 @@ def test_product_work_uses_exact_machine_even_for_legacy_v1(db, monkeypatch, leg
                 del data[key]
             row.creation_facts = json.dumps(data)
     monkeypatch.setitem(state_machine.MACHINE_REGISTRY, "task_commission_goal", None)
-    started = product.start_task(
-        TaskAdvanceCommand(created.collet_id), _actor(BOT)
-    )
+    started = product.start_task(TaskAdvanceCommand(created.collet_id), _actor(BOT))
     assert started.status == "in_progress"
 
 
@@ -550,7 +555,9 @@ def test_uninstalled_catalog_rejects_selection_without_work_or_method_writes(db)
     assert store.list_bindings(current_axes(), created.collet_id) == []
 
 
-def test_injected_exact_profile_survives_storage_recovery_and_shared_g4(db, monkeypatch):
+def test_injected_exact_profile_survives_storage_recovery_and_shared_g4(
+    db, monkeypatch
+):
     # The isolated catalog deliberately allows private messages, unlike the
     # installed initial contract.
     v2 = replace(
@@ -594,7 +601,7 @@ def test_injected_exact_profile_survives_storage_recovery_and_shared_g4(db, monk
     message = _append(
         generic,
         collet_id,
-        1,
+        2,
         "user_interaction.posted",
         primitive_type="Message",
         visibility="private",
@@ -602,9 +609,9 @@ def test_injected_exact_profile_survives_storage_recovery_and_shared_g4(db, monk
     )
     assert message.current_status == "created"
     started = product.start_task(TaskAdvanceCommand(collet_id), _actor(BOT))
-    assert started.context_version == 3
+    assert started.context_version == 4
     assert restarted_repo.get_current_status(collet_id).product_instance == instance
-    assert _counts(db) == (1, 3)
+    assert _counts(db) == (1, 4)
 
 
 def test_legacy_commission_progress_requires_typed_executor(db):
@@ -634,4 +641,4 @@ def test_legacy_commission_progress_requires_typed_executor(db):
         TaskAdvanceCommand(created.collet_id, percent=20),
         _actor(BOT),
     )
-    assert progressed.context_version == 3
+    assert progressed.context_version == 4

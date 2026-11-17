@@ -2,9 +2,16 @@
 
 from dataclasses import replace
 
-from agentclaw.community.core.task.context_collab.errors import ContextCollabValidationError
-from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context import ActorContext
-from agentclaw.community.core.task.context_collab.l5_methods.method_binding import BindingState, MethodBinding
+from agentclaw.community.core.task.context_collab.errors import (
+    ContextCollabValidationError,
+)
+from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context import (
+    ActorContext,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
+    BindingState,
+    MethodBinding,
+)
 from agentclaw.community.core.task.context_collab.l5_methods.method_composition import (
     CompositionEdgeState,
     MethodCompositionEdge,
@@ -13,12 +20,17 @@ from agentclaw.community.core.task.context_collab.l5_methods.operations.initiali
     ResolvedMethodSpec,
     build_profile_binding,
 )
-from agentclaw.community.core.task.context_collab.l6_products.contracts import ProductProfileDefinition
+from agentclaw.community.core.task.context_collab.l6_products.contracts import (
+    ProductProfileDefinition,
+)
 from agentclaw.community.core.task.context_collab.l6_products.topology import (
     product_method_binding_ref,
     product_relation_id,
 )
-from agentclaw.community.core.task.context_collab.persistence.method_store import MethodStoreProtocol, StoreAxes
+from agentclaw.community.core.task.context_collab.persistence.method_store import (
+    MethodStoreProtocol,
+    StoreAxes,
+)
 
 
 def project_method_topology(
@@ -52,14 +64,23 @@ def project_method_topology(
                     actor,
                     now=now,
                     bind_reason="create_collet_heal" if healing else "create_collet",
-                    reason="product topology heal" if healing else "product topology projection",
+                    reason="product topology heal"
+                    if healing
+                    else "product topology projection",
                 ),
             )
-        if binding.method_names != (name,) or binding.profile_versions != {name: version}:
-            raise ContextCollabValidationError("binding does not match pinned Method Profile")
+        if binding.method_names != (name,) or binding.profile_versions != {
+            name: version
+        }:
+            raise ContextCollabValidationError(
+                "binding does not match pinned Method Profile"
+            )
         bindings[name] = binding
     for relation in profile.composition.relations:
-        parent, child = bindings[relation.parent_method], bindings[relation.child_method]
+        parent, child = (
+            bindings[relation.parent_method],
+            bindings[relation.child_method],
+        )
         edge_id = product_relation_id(collet_id, relation)
         existing = store.get_composition_edge(axes, edge_id, collet_id)
         if existing is not None:
@@ -68,7 +89,9 @@ def project_method_topology(
                 or existing.child_binding != child.method_binding_id
                 or existing.relation_kind != relation.relation
             ):
-                raise ContextCollabValidationError("edge does not match pinned Method relation")
+                raise ContextCollabValidationError(
+                    "edge does not match pinned Method relation"
+                )
             # DETACHED remains detached; recovery never replays a lifecycle action.
             continue
         if BindingState.TERMINATED in {parent.state, child.state}:
@@ -83,7 +106,9 @@ def project_method_topology(
                 relation_kind=relation.relation,
                 state=CompositionEdgeState.ACTIVE,
                 transitioned_from="",
-                transition_reason="product topology heal" if healing else "product topology projection",
+                transition_reason="product topology heal"
+                if healing
+                else "product topology projection",
                 transitioned_by=actor.actor.principal_id,
                 transitioned_at=now,
             ),

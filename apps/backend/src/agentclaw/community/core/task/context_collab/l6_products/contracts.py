@@ -7,7 +7,6 @@ from dataclasses import asdict, dataclass
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabValidationError,
 )
-
 from agentclaw.community.core.task.context_collab.l5_methods.method_composition import (
     CompositionRelation,
 )
@@ -17,6 +16,9 @@ from agentclaw.community.core.task.context_collab.l5_methods.method_profile impo
 )
 from agentclaw.community.core.task.context_collab.l6_products.method_policies import (
     MethodPolicy,
+)
+from agentclaw.community.core.task.context_collab.l6_products.participant_scope import (
+    ParticipantScope,
 )
 
 
@@ -212,6 +214,7 @@ class ProductProfileDefinition:
     # With no workflow, omission selects the fixed standard Task contract @1.
     # With a legacy workflow, None preserves its existing Task/action contract.
     task_contract_ref: VersionedProfileRef | None = None
+    participant_scope: ParticipantScope = ParticipantScope()
 
 
 @dataclass(frozen=True)

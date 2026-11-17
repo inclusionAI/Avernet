@@ -39,11 +39,14 @@ from agentclaw.community.core.task.context_collab.l6_products.operations.contrac
 from agentclaw.community.core.task.context_collab.l6_products.operations.method_bootstrap import (
     project_created_context,
 )
-from agentclaw.community.core.task.context_collab.persistence.method_store import (
-    MethodStoreProtocol,
+from agentclaw.community.core.task.context_collab.l6_products.participation import (
+    product_participation,
 )
 from agentclaw.community.core.task.context_collab.l6_products.persistence.repository import (
     ContextCollabRepositoryProtocol,
+)
+from agentclaw.community.core.task.context_collab.persistence.method_store import (
+    MethodStoreProtocol,
 )
 from injector import inject
 
@@ -77,26 +80,35 @@ class ProductInstantiationService(ProductInstantiationServiceProtocol):
                 "only the Collet initiator or responsible principal may instantiate"
             )
         ensure_expected_version(command.expected_version, record.collet.version)
+        if (
+            record.product_instance is not None
+            or record.collet.version != 1
+            or task.version != 1
+        ):
+            raise ContextCollabValidationError(
+                "product instantiation requires an untouched L4 Collet"
+            )
         if task.created_event_ref is None:
             raise ContextCollabValidationError(
                 "product instantiation requires creation evidence"
             )
-        # Current ScenarioRole sources are scalar. Never silently pick the first.
-        if len(task.executor_refs) > 1:
-            raise ContextCollabValidationError(
-                "this product instantiation requires at most one executor"
-            )
         profile = self._catalog.get(
             command.profile_ref.profile_id, command.profile_ref.version
         )
+        executor_ref = command.executor_ref
+        if executor_ref is None and len(command.participant_refs) == 1:
+            executor_ref = command.participant_refs[0]
+        participation = product_participation(
+            profile, task.principal_ref, command.participant_refs, executor_ref
+        )
         self._authorizer.check_create(
             method_kind=profile.composition.method_kind,
-            executor_ref=task.executor_ref,
+            executor_ref=executor_ref,
             actor=context,
         )
         facts = creation_payload(
             method_kind=profile.composition.method_kind,
-            executor_ref=task.executor_ref,
+            executor_ref=executor_ref,
             objective=task.objective,
             resource_refs=(),
             product_kind=profile.ref.profile_id,
@@ -109,7 +121,7 @@ class ProductInstantiationService(ProductInstantiationServiceProtocol):
             root_task_id=task.task_id,
             event_id=task.created_event_ref,
             principal_ref=task.principal_ref,
-            executor_ref=task.executor_ref,
+            executor_ref=executor_ref,
             catalog=self._catalog,
         )
         if instance is None:
@@ -121,6 +133,8 @@ class ProductInstantiationService(ProductInstantiationServiceProtocol):
             expected_version=command.expected_version,
             facts=facts,
             instance=instance,
+            participation=participation,
+            actor_ref=context.actor,
         )
         project_created_context(
             self._store,
@@ -128,7 +142,7 @@ class ProductInstantiationService(ProductInstantiationServiceProtocol):
             command.collet_id,
             method_kind=profile.composition.method_kind,
             principal_ref=task.principal_ref,
-            executor_ref=task.executor_ref,
+            executor_ref=executor_ref,
             profile=profile,
             context=context,
             now=_now(),

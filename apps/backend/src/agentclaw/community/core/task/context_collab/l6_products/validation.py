@@ -25,6 +25,9 @@ from agentclaw.community.core.task.context_collab.l6_products.contracts import (
 from agentclaw.community.core.task.context_collab.l6_products.method_policies import (
     OpenMethodPolicy,
 )
+from agentclaw.community.core.task.context_collab.l6_products.participant_scope import (
+    ParticipantScope,
+)
 from agentclaw.community.core.task.context_collab.l6_products.task_contracts import (
     resolve_event_contract,
 )
@@ -32,6 +35,10 @@ from agentclaw.community.core.task.context_collab.l6_products.task_contracts imp
 
 def validate_product_profile(definition: ProductProfileDefinition) -> None:
     """Reject unsupported composition/role/method-policy contracts without installing."""
+    if not isinstance(definition.participant_scope, ParticipantScope):
+        raise ContextCollabValidationError(
+            "participant_scope must be a typed ParticipantScope"
+        )
     methods = definition.composition.required_methods
     for profiles in (methods, definition.composition.optional_methods):
         if not isinstance(profiles, tuple) or any(
@@ -96,7 +103,9 @@ def validate_product_profile(definition: ProductProfileDefinition) -> None:
             )
         policy.publication.admission.validate_roles(definition.scenario_roles)
         if not contract.actions:
-            raise ContextCollabValidationError("publication requires Task/workflow actions")
+            raise ContextCollabValidationError(
+                "publication requires Task/workflow actions"
+            )
 
 
 def _validate_relations(definition: ProductProfileDefinition) -> None:
@@ -105,19 +114,29 @@ def _validate_relations(definition: ProductProfileDefinition) -> None:
     if not isinstance(relations, tuple) or any(
         not isinstance(item, MethodRelationTemplate) for item in relations
     ):
-        raise ContextCollabValidationError("Method relations must be an immutable tuple")
+        raise ContextCollabValidationError(
+            "Method relations must be an immutable tuple"
+        )
     if composition.method_kind == "Open + Single" and not relations:
-        raise ContextCollabValidationError("Open + Single requires explicit Method relations")
+        raise ContextCollabValidationError(
+            "Open + Single requires explicit Method relations"
+        )
     methods = {item.method_kind for item in composition.required_methods}
     pairs: list[tuple[str, str]] = []
     for item in relations:
         if item.parent_method not in methods or item.child_method not in methods:
-            raise ContextCollabValidationError("Method relation endpoint is not required")
+            raise ContextCollabValidationError(
+                "Method relation endpoint is not required"
+            )
         if not isinstance(item.relation, CompositionRelation):
-            raise ContextCollabValidationError("Method relation requires CompositionRelation")
+            raise ContextCollabValidationError(
+                "Method relation requires CompositionRelation"
+            )
         validate_composition(item.parent_method, item.relation, item.child_method)
         pairs.append((item.parent_method, item.child_method))
     if len(set(pairs)) != len(pairs) or detect_cycle(pairs):
         raise ContextCollabValidationError("duplicate or cyclic Method relations")
     if relations and {name for pair in pairs for name in pair} != methods:
-        raise ContextCollabValidationError("Method relations must cover all required Methods")
+        raise ContextCollabValidationError(
+            "Method relations must cover all required Methods"
+        )

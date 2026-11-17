@@ -123,7 +123,8 @@ products/
   @2 uses **Open + Single**: COLLET_PARTICIPANT admission creates an immutable
   L4 ScopedParticipantBinding, then Single explicitly selects that participant
   for execution. No Group roster/member is created. Its authority requires the
-  correlated ADMITTED application/decision, ACTIVE composite binding and an
+  correlated ADMITTED application/decision, independently ACTIVE Open and Single
+  bindings with an explicit Single --support--> Open composition edge, and an
   owner-selected, in-window SingleSelection. DI installs the shared G1 guard,
   so product and generic L4 execution cannot bypass these prerequisites.
   Publisher-mediated @1 remains installed unchanged; selecting @2 is explicit.
@@ -286,11 +287,12 @@ inherits L4's five use cases, not a second copy. New direct L4 consumers import
 from L4 explicitly:
 
 The canonical [`ColletCreateCommand`](l4_context_primitives/operations/contracts.py)
-has exactly four fields: `to_space`, `initiator_ref`, `objective`, `executor_refs`.
-There is no Profile ID/reference, Method selection, or Method/Role/ResourceBinding
-input. L4 does not import L5, L6, the application facade or the rich repository.
-The command's `initiator_ref` initializes the root Task's `principal_ref`;
-Collet `initiator_ref` and creation-event provenance retain the authenticated actor.
+requires `to_space`, `initiator_ref` and `objective`; optional keyword-only
+`title`/`description` describe the context. It has **no `executor_refs`**,
+Profile/Method selection or binding input. L4 does not import L5, L6, the
+application facade or the rich repository. The command's `initiator_ref`
+initializes the root Task's `principal_ref`; Collet `initiator_ref` and
+creation-event provenance retain the authenticated actor.
 
 ```python
 from agentclaw.community.core.task.context_collab.l4_context_primitives.context_service_protocol import (
@@ -304,35 +306,39 @@ collet = l4_collab_service.create_collet(
         to_space=space_ref,
         initiator_ref=owner_ref,
         objective="Deliver work",
-        executor_refs=(bot_a, bot_b),  # omit or () for unassigned; (bot_a,) for one
     ),
     actor_context,
 )
 ```
 
-Executors are an ordered set of typed L2 AgentRefs, normalized to an immutable
-tuple. Duplicates and invalid references are rejected. Zero, one and many are
-valid L4 creation inputs and are retained on the root Task, in its stored JSON
-and in the initial `task.created` evidence. Designation is not admission, a role
-binding or a resource grant. Typed Work/append authorization checks all designated
-executors, not only the first.
+Creation atomically persists Collet, an **unassigned** root Task and initial
+`task.created` Event and returns the exact persisted Collet at revision 1.
+It never accesses a Profile/catalog or MethodStore, creates bindings or invents
+a default Method. A method-independent Collet has `method_kind=None` in its
+response projection and no ProductInstance. Method recovery fails explicitly
+until a Method has been selected. Objective/executors remain Task authority,
+not new Collet fields. Creation is not idempotent; authorization and storage
+failures propagate, with SQL writes rolled back.
 
-Creation atomically persists Collet, root Task and initial Event and returns the
-exact persisted Collet. It never accesses a Profile/catalog or MethodStore,
-creates bindings, or invents a default Method. A method-independent Collet has
-`method_kind=None` in its response projection and no ProductInstance. Method
-recovery fails explicitly until a Method has been selected. Objective/executors
-remain Task authority, not new fields on Collet. Creation is not idempotent;
-authorization and storage failures propagate, with SQL writes rolled back.
-
-Product-specific installation is a separate, explicit L6 composition operation:
+Product-specific installation is a separate L6 composition operation:
 [`ProductInstantiationServiceProtocol.instantiate`](l6_products/operations/contracts.py)
-accepts `ProductInstantiateCommand(collet_id, profile_ref, expected_version)`.
-It authorizes the initiator/responsible principal, pins the exact installed L6
-profile on an untouched Collet, and invokes L5 initialization through the
-L6-owned bootstrap adapter. It does not rewrite the initial L4 Event or advance the Task
-or Collet revision. See [L6 instantiation](l6_products/README.md#instantiation-and-persistence)
-for immutable selection, transaction limits and scalar product-role constraints.
+accepts `ProductInstantiateCommand(collet_id, profile_ref, expected_version,
+participant_refs=(bot_a,), executor_ref=bot_a)`. Initial participants are supplied
+by the product caller, not by L4 creation. The exact Profile's typed
+[`ParticipantScope`](l6_products/participant_scope.py) declares `OPEN` eligibility
+or an Agent allowlist; every supplied Agent must be eligible before any write.
+Eligibility is not participation, Open admission, Single selection or a grant.
+
+Instantiation authorizes the initiator/responsible principal and pins that exact
+Profile on untouched Work. In one SQL transaction it installs ProductInstance,
+binds actual scoped L4 Participants/RoleBindings and assigns the Task executor.
+The original creation Event is retained; a new `task.participants_bound` Event
+advances Task/Collet revisions to 2 and updates their event evidence and audit.
+L5 initialization follows separately. G1 uses the pinned instance scope and the
+**authenticated actual Agent** on both generic and product execution paths;
+claimed event actors and requested roles do not authorize execution. See
+[L6 instantiation](l6_products/README.md#instantiation-and-persistence) for
+immutable selection, transaction limits and scalar product-role constraints.
 
 The existing HTTP creation flow remains upper-layer composition:
 `create_collaboration(CollaborationCreateCommand, context) -> Collet`, implemented
@@ -562,8 +568,9 @@ not historic control events:
 - [Collet metadata SQL tests](../../../../../../tests/community/repository/task/context_collab/test_collet_metadata.py): authenticated creation audit, separate storage, append/read behavior, CAS/rollback and unknown/corrupt legacy metadata.
 - [Standalone L4 repository tests](../../../../../../tests/community/repository/task/context_collab/test_l4_repository.py): actual lower-only create/read/append SQL, decoder isolation, distinct principals, CAS, read-only queries and rollback.
 - [Real L4 repository wiring](../../../../../../tests/community/repository/task/context_collab/test_l4_repository_wiring.py): exact L4 implementation, singleton sharing with primitive readers and creation without resolving product storage or accessing the catalog.
-- [Pure L4 SQL creation tests](../../../../../../tests/community/repository/task/context_collab/test_collet_creation.py): zero/one/many executors, no upper-layer port access, authorization, readback, storage compatibility and rollback.
-- [Explicit product installation tests](../../../../../../tests/community/repository/task/context_collab/test_product_instantiation.py): pinned selection, unchanged L4 evidence, immutable/revision-fenced installation and surfaced write failures.
+- [Pure L4 SQL creation tests](../../../../../../tests/community/repository/task/context_collab/test_collet_creation.py): unassigned creation, rejection of removed executor inputs, later multi-executor binding, authorization, storage compatibility and rollback.
+- [Explicit product installation tests](../../../../../../tests/community/repository/task/context_collab/test_product_instantiation.py): pinned selection, preserved creation evidence, actual initial bindings, revision-fenced installation and surfaced write failures.
+- [Participant eligibility and G1 tests](../../../../../../tests/community/repository/task/context_collab/test_participant_scope.py): OPEN/allowlist contracts, all initial Agents checked before writes, binding rollback, pinned scope and authenticated execution through both entrypoints.
 - [Full L4 DI/contract tests](../../../../../../tests/community/di/test_l4_collab_service.py): direct protocol/implementation binding, complete API conformance, preserved G1 policy and no application-facade resolution.
 - [Lower-only L4 service tests](../../../../../../tests/community/core/task/context_collab/test_l4_collab_operations.py): Work/schema/policy/CAS ordering, authorized queries, visibility/trunk behavior and propagated failures, without L5/L6 read facts.
 - [L4 dependency gate](../../../../../../tests/community/architecture/test_context_collab_l4_dependencies.py): no L5/L6/application imports from L4.
@@ -583,7 +590,8 @@ together when changing it. Keep their tests and migration aligned. Source
 imports of product selection or snapshots must use their owning boundaries;
 Existing HTTP product inputs remain unchanged; new Collet library serialization
 includes metadata/ETag while old six-field values remain readable. Pure L4
-creation evidence still contains only objective and executor_refs.
+creation evidence still contains only objective and empty executor_refs; initial
+product participation is recorded separately.
 The in-memory
 MethodStore and SQL/MethodStore/delivery transaction gap remain existing limits;
 this change does not add live A2A execution or a recursive workflow engine.

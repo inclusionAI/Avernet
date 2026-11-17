@@ -9,14 +9,13 @@ propagate. These internal ports do not replace authorization at public entries.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol
 
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabValidationError,
 )
 from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
-    AgentRef,
     PrincipalRef,
 )
 from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_resource_refs import (
@@ -35,7 +34,6 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.event_en
 from agentclaw.community.core.task.context_collab.l4_context_primitives.task import (
     Task,
     TaskUpdate,
-    normalize_executor_refs,
 )
 
 
@@ -43,9 +41,8 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.task imp
 class ColletCreateCommand:
     """L4 Collet and root Work creation; no product, method or binding inputs.
 
-    executor_refs is an ordered set: () is unassigned; one or many AgentRefs
-    are equally valid. It does not grant admission, roles or resource access.
-    Lists supplied by library callers are normalized to an immutable tuple.
+    Creates unassigned Work. Product Instantiate supplies initial participants
+    and establishes scoped L4 participation/role facts separately.
     title/description optionally describe the context, not its Task objective
     or completion conditions. Schema/revision/audit values are server-owned.
     """
@@ -53,9 +50,8 @@ class ColletCreateCommand:
     to_space: SpaceRef
     initiator_ref: PrincipalRef
     objective: str
-    executor_refs: tuple[AgentRef, ...] = ()
-    title: str | None = None
-    description: str | None = None
+    title: str | None = field(default=None, kw_only=True)
+    description: str | None = field(default=None, kw_only=True)
 
     def __post_init__(self) -> None:
         if not isinstance(self.objective, str) or not self.objective.strip():
@@ -70,9 +66,6 @@ class ColletCreateCommand:
         validate_collet_text(self.description, "description")
         SpaceRef.from_dict(self.to_space.to_dict())
         PrincipalRef.from_dict(self.initiator_ref.to_dict())
-        object.__setattr__(
-            self, "executor_refs", normalize_executor_refs(self.executor_refs)
-        )
 
 
 class CreatedCollet(Protocol):

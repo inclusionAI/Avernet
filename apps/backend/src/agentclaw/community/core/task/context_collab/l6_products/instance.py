@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
 import json
+from dataclasses import asdict, dataclass
 
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabValidationError,
 )
-from agentclaw.community.core.task.context_collab.l6_products.topology import (
-    product_binding_refs,
+from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
+    AgentRef,
+    PrincipalRef,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.method_profile import (
     MethodProfileRef,
@@ -29,16 +30,18 @@ from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     VersionedProfileRef,
     negotiate,
 )
-from agentclaw.community.core.task.context_collab.l6_products.task_contracts import (
-    resolve_event_contract,
-)
 from agentclaw.community.core.task.context_collab.l6_products.creation_facts import (
     creation_profile_ref,
     decode_creation_facts,
 )
-from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
-    AgentRef,
-    PrincipalRef,
+from agentclaw.community.core.task.context_collab.l6_products.participant_scope import (
+    ParticipantScope,
+)
+from agentclaw.community.core.task.context_collab.l6_products.task_contracts import (
+    resolve_event_contract,
+)
+from agentclaw.community.core.task.context_collab.l6_products.topology import (
+    product_binding_refs,
 )
 
 
@@ -60,9 +63,11 @@ class ProductInstance:
     creation_event_ref: str
     # Absent only for historical WorkflowProfile-owned Task semantics.
     task_contract_ref: VersionedProfileRef | None = None
+    participant_scope: ParticipantScope = ParticipantScope()
 
     def to_dict(self) -> dict:
         data = json.loads(json.dumps(asdict(self)))
+        data["participant_scope"] = self.participant_scope.to_dict()
         if self.task_contract_ref is None:
             del data["task_contract_ref"]
         return data
@@ -70,6 +75,7 @@ class ProductInstance:
     @classmethod
     def from_dict(cls, data: dict) -> "ProductInstance":
         try:
+            data = {"participant_scope": ParticipantScope().to_dict(), **data}
             root_ref = data["root_task_ref"]
             if not isinstance(root_ref, str) or not root_ref.strip():
                 raise ValueError("root_task_ref must be a non-empty Task reference")
@@ -78,6 +84,7 @@ class ProductInstance:
                 raise ValueError("negotiation.accepted must be a boolean")
             instance = cls(
                 instance_id=data["instance_id"],
+                participant_scope=ParticipantScope.from_dict(data["participant_scope"]),
                 collet_ref=data["collet_ref"],
                 root_task_ref=data["root_task_ref"],
                 profile_ref=VersionedProfileRef(**data["profile_ref"]),
@@ -118,7 +125,9 @@ class ProductInstance:
                 raise ValueError("invalid product instance selection")
             return instance
         except (KeyError, TypeError, ValueError) as error:
-            raise ContextCollabValidationError(f"invalid ProductInstance: {error}") from error
+            raise ContextCollabValidationError(
+                f"invalid ProductInstance: {error}"
+            ) from error
 
 
 def _resolve_profile(
@@ -156,7 +165,9 @@ def _instance(
     selection: NegotiationResult,
 ) -> ProductInstance:
     if not root_task_id or root_task_id == collet_id:
-        raise ContextCollabValidationError("ProductInstance requires an independent root Task")
+        raise ContextCollabValidationError(
+            "ProductInstance requires an independent root Task"
+        )
     return ProductInstance(
         instance_id=f"pi_{collet_id}",
         collet_ref=collet_id,
@@ -168,8 +179,13 @@ def _instance(
             resolve_event_contract(profile).ref if profile.workflow is None else None
         ),
         method_binding_refs=product_binding_refs(collet_id, profile),
-        method_profiles=tuple(item.ref for item in profile.composition.required_methods),
-        role_binding_refs=role_binding_refs(collet_id, profile=profile),
+        method_profiles=tuple(
+            item.ref for item in profile.composition.required_methods
+        ),
+        role_binding_refs=role_binding_refs(
+            collet_id, profile=profile, executor_ref=executor_ref
+        ),
+        participant_scope=profile.participant_scope,
         governance=profile.governance,
         negotiation=selection,
         creation_event_ref=event_id,
@@ -228,10 +244,14 @@ def decode_product_instance(
     profile_ref = creation_profile_ref(normalized)
     if raw is None:
         if profile_ref is not None:
-            raise ContextCollabValidationError("pinned product is missing ProductInstance")
+            raise ContextCollabValidationError(
+                "pinned product is missing ProductInstance"
+            )
         return None
     if not isinstance(raw, dict):
-        raise ContextCollabValidationError("invalid ProductInstance: expected an object")
+        raise ContextCollabValidationError(
+            "invalid ProductInstance: expected an object"
+        )
     # Historical JSON predates the explicit root reference. Resolve it only
     # from the authoritative L4 snapshot; do not rewrite the stored record.
     instance = ProductInstance.from_dict({"root_task_ref": root_task_id, **raw})
@@ -254,7 +274,9 @@ def decode_product_instance(
         f"method:{item.method_kind}@{item.profile_version}"
         for item in profile.composition.optional_methods
     }
-    optional.update(f"extension:{item}" for item in profile.compatibility.optional_extensions)
+    optional.update(
+        f"extension:{item}" for item in profile.compatibility.optional_extensions
+    )
     if not set(selection.omitted_optional_capabilities) <= optional:
         raise ContextCollabValidationError(
             "unknown optional capability in persisted product negotiation"

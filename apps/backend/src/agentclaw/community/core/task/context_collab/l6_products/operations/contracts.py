@@ -11,6 +11,12 @@ from agentclaw.community.core.task.context_collab.errors import (
 from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context import (
     ActorContext,
 )
+from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
+    AgentRef,
+)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.task import (
+    normalize_executor_refs,
+)
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     CompatibilityRequirements,
     DomainProfile,
@@ -22,6 +28,9 @@ from agentclaw.community.core.task.context_collab.l6_products.contracts import (
 )
 from agentclaw.community.core.task.context_collab.l6_products.instance import (
     ProductInstance,
+)
+from agentclaw.community.core.task.context_collab.l6_products.participant_scope import (
+    ParticipantScope,
 )
 
 
@@ -43,6 +52,7 @@ class ProductProfileCreateCommand:
     domain: DomainProfile | None = None
     workflow: WorkflowProfile | None = None
     task_contract_ref: VersionedProfileRef | None = None
+    participant_scope: ParticipantScope = ParticipantScope()
 
 
 @dataclass(frozen=True)
@@ -55,8 +65,22 @@ class ProductInstantiateCommand:
     collet_id: str
     profile_ref: VersionedProfileRef
     expected_version: int
+    participant_refs: tuple[AgentRef, ...] = ()
+    # Omission uses the sole participant as the scalar role source; multiple
+    # participants require explicit designation when an executor role is required.
+    executor_ref: AgentRef | None = None
 
     def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "participant_refs", normalize_executor_refs(self.participant_refs)
+        )
+        if (
+            self.executor_ref is not None
+            and self.executor_ref not in self.participant_refs
+        ):
+            raise ContextCollabValidationError(
+                "executor_ref must be an initial participant"
+            )
         if not isinstance(self.collet_id, str) or not self.collet_id.strip():
             raise ContextCollabValidationError("collet_id must be non-empty")
         if not isinstance(self.profile_ref, VersionedProfileRef):
@@ -75,8 +99,9 @@ class ProductInstantiationServiceProtocol(Protocol):
 
         Only the initiator/responsible principal may select. Product selection
         is immutable; stale, repeated or advanced-Collet selection is rejected.
-        Selection does not rewrite initial L4 evidence or advance Task/Collet
-        revisions. SQL selection and MethodStore remain separate transactions;
+        Selection preserves initial L4 evidence and appends an initial binding
+        event, advancing Task/Collet revisions. SQL selection and MethodStore
+        remain separate transactions;
         binding errors propagate and existing recovery repairs missing bindings.
         """
         ...

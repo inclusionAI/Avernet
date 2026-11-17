@@ -5,7 +5,6 @@ from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
 import pytest
-
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabValidationError,
 )
@@ -26,8 +25,8 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.operatio
 )
 from agentclaw.community.core.task.context_collab.l5_methods.operations.contracts import (
     GroupMethodOpsServiceProtocol,
-    MethodStateChangeCommand,
     MethodLifecycleServiceProtocol,
+    MethodStateChangeCommand,
     OpenMethodOpsServiceProtocol,
     SingleSelectCommand,
 )
@@ -62,6 +61,7 @@ from agentclaw.community.core.task.context_collab.products.task_commission.servi
     TaskMethodOpsPort,
 )
 from agentclaw.community.di.modules.context_collab_products import build_product_catalog
+
 from tests.community.core.task.context_collab.products.task_commission_e2e_support import (
     opportunities_query_request,
 )
@@ -70,15 +70,18 @@ from tests.community.core.task.context_collab.products.test_task_commission_end_
     SPACE,
     _admit_application_agent,
     _create_commission_collet,
-    _instantiate_product_instance,
     _create_product_profile,
     _discover_opportunity,
+    _instantiate_product_instance,
     _publish_opportunity,
     _select_admitted_agent,
+)
+from tests.community.core.task.context_collab.products.test_task_commission_end_to_end import (
     commission_deployment as _commission_deployment_fixture,
+)
+from tests.community.core.task.context_collab.products.test_task_commission_end_to_end import (
     deploy_commission as _deploy_commission_fixture,
 )
-
 
 # Re-export the existing runtime fixtures without reimplementing their DI/SQL setup.
 commission_deployment = _commission_deployment_fixture
@@ -183,7 +186,9 @@ def test_product_apply_orchestrates_admission_then_selection_before_work(
     assert repository.get_current_status(created.collet_id).product_instance == instance
 
 
-def test_signed_http_query_apply_selects_before_dispatch(deploy_commission):
+def test_signed_http_query_apply_selects_before_dispatch(
+    deploy_commission, monkeypatch
+):
     profile = _create_product_profile()
     service, bot, injector = deploy_commission(profile)
     created = service.publish_task(
@@ -208,6 +213,14 @@ def test_signed_http_query_apply_selects_before_dispatch(deploy_commission):
     assert opportunity["collab_context_id"] == instance.collet_ref
     assert opportunity["method_binding_ref"] == binding_id
     assert store.list_applications(axes, binding_id, created.collet_id) == []
+    delivery = injector.get(A2aDeliveryPort)
+    send_message, sent = delivery.send_message, []
+
+    def capture_dispatch(card, message, envelope):
+        sent.append(envelope)
+        return send_message(card, message, envelope)
+
+    monkeypatch.setattr(delivery, "send_message", capture_dispatch)
     applied = bot.request(bot.application_request(opportunity))
     receipt = applied["data"]["admission"]
     assert receipt["state"] == "ADMITTED"
@@ -218,6 +231,8 @@ def test_signed_http_query_apply_selects_before_dispatch(deploy_commission):
     )
     [bridge] = injector.get(A2aDeliveryPort).bridge_records()
     assert bridge.direction == "OUTBOUND"
+    [dispatch] = sent
+    assert dispatch.context.method_binding_ref.object_id == single_binding_id
     assert store.list_selections(axes, binding_id, created.collet_id) == []
     assert store.list_opportunities(axes, single_binding_id, created.collet_id) == []
     injector.get(TaskMethodOpsPort).require_admitted(
@@ -354,7 +369,9 @@ def test_releasing_selection_revokes_execution_but_preserves_instance(admitted_r
 
 @pytest.mark.parametrize("method_index, method", [(0, "Open"), (1, "Single")])
 def test_suspended_binding_denies_work_without_mutating_peer_or_instance(
-    admitted_runtime, method_index, method,
+    admitted_runtime,
+    method_index,
+    method,
 ):
     _, bot, injector, collet, instance, decision = admitted_runtime
     store, axes = injector.get(MethodStoreProtocol), current_axes()
@@ -388,7 +405,9 @@ def test_suspended_binding_denies_work_without_mutating_peer_or_instance(
     )
 
 
-def test_instance_keeps_compact_exact_method_references_not_contract_copies(instance_runtime):
+def test_instance_keeps_compact_exact_method_references_not_contract_copies(
+    instance_runtime,
+):
     _, _, injector, collet, instance = instance_runtime
     assert instance.to_dict()["method_profiles"] == [
         {"method": "Open", "version": "0.2"},
@@ -401,7 +420,8 @@ def test_instance_keeps_compact_exact_method_references_not_contract_copies(inst
     )
     assert restored == instance
     assert [(item.method, item.version) for item in restored.method_profiles] == [
-        ("Open", "0.2"), ("Single", "0.2")
+        ("Open", "0.2"),
+        ("Single", "0.2"),
     ]
 
 
@@ -460,7 +480,9 @@ def test_product_selection_cannot_be_replaced_on_an_existing_instance(instance_r
             ProductInstantiateCommand(
                 collet.collet_id,
                 VersionedProfileRef("task_commission", 1),
-                collet.version,
+                injector.get(ContextCollabRepositoryProtocol)
+                .get_current_status(collet.collet_id)
+                .collet.version,
             ),
             HUMAN,
         )

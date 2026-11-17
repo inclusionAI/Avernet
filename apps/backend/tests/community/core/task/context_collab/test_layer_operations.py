@@ -6,6 +6,7 @@ from importlib import import_module
 import pytest
 
 from agentclaw.community.core.task.context_collab.errors import (
+    ContextCollabNotFoundError,
     ContextCollabValidationError,
     ContextCollabVersionConflict,
 )

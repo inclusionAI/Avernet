@@ -2,16 +2,11 @@
 
 from __future__ import annotations
 
-from agentclaw.community.core.task.context_collab.l6_products.persistence.repository import ContextCollabRepositoryProtocol
-from agentclaw.community.core.task.context_collab.l6_products.catalog import ProductCatalog
-
 import runpy
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
-
-from fastapi.testclient import TestClient
 
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabValidationError,
@@ -23,11 +18,8 @@ from agentclaw.community.core.task.context_collab.l1_interoperate_deliver.delive
     A2aDeliveryPort,
 )
 from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
+    AgentRef,
     PrincipalRef,
-)
-from agentclaw.community.core.task.context_collab.l6_products.topology import (
-    product_execution_binding_ref,
-    product_method_binding_ref,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.open_profile import (
     OpenOpportunity,
@@ -43,8 +35,18 @@ from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime 
 from agentclaw.community.core.task.context_collab.l6_products.binding import (
     role_binding_refs,
 )
+from agentclaw.community.core.task.context_collab.l6_products.catalog import (
+    ProductCatalog,
+)
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     ProductProfileDefinition,
+)
+from agentclaw.community.core.task.context_collab.l6_products.persistence.repository import (
+    ContextCollabRepositoryProtocol,
+)
+from agentclaw.community.core.task.context_collab.l6_products.topology import (
+    product_execution_binding_ref,
+    product_method_binding_ref,
 )
 from agentclaw.community.core.task.context_collab.persistence.method_store import (
     MethodStoreProtocol,
@@ -53,6 +55,8 @@ from agentclaw.community.core.task.context_collab.products.task_commission.servi
     TaskCommissionCreatedView,
     TaskCommissionServiceProtocol,
 )
+from fastapi.testclient import TestClient
+
 from tests.community.factories.task_commission import (
     BOT_ID as BOT_ASSIGNEE,
 )
@@ -122,9 +126,7 @@ def _simulate_ai_coding(
                 "# 方案\n新增 add(a, b),覆盖正数、负数及零。", encoding="utf-8"
             )
         elif index == 1:
-            code.write_text(
-                "def add(a, b):\n    return a + b\n", encoding="utf-8"
-            )
+            code.write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
         elif index == 2:
             add = runpy.run_path(str(code))["add"]
             for a, b, expected in ((1, 2, 3), (-1, 1, 0), (0, 0, 0)):
@@ -151,9 +153,7 @@ def _simulate_ai_coding(
             "task_id": task_id,
         }
         assert live.events[-1]["actor_id"] == BOT_ASSIGNEE
-        assert all(
-            event["event_kind"] != "task.submitted" for event in live.events
-        )
+        assert all(event["event_kind"] != "task.submitted" for event in live.events)
 
     assert test_result.read_text(encoding="utf-8") == "3 passed"
     assert all(path.exists() for path in (plan, code, test_result, pr))
@@ -189,7 +189,9 @@ class SimulatedWorkingBot:
 
     def query_opportunities_by_skill(self) -> tuple[OpenOpportunity, ...]:
         """由模拟 Bot 以自身身份调用注入的 L5 Open 能力查询机会。"""
-        _flow_log(_TEST_DIRECTORY, "模拟 Bot 以自身身份调用 L5 Open.query_opportunities")
+        _flow_log(
+            _TEST_DIRECTORY, "模拟 Bot 以自身身份调用 L5 Open.query_opportunities"
+        )
         return self._open_method.query_opportunities(
             actor_context=self.actor_context,
         )
@@ -206,7 +208,11 @@ class SimulatedWorkingBot:
             role.name: ref
             for role, ref in zip(
                 self.profile.scenario_roles,
-                role_binding_refs(opportunity.scope_ref, profile=self.profile),
+                role_binding_refs(
+                    opportunity.scope_ref,
+                    profile=self.profile,
+                    executor_ref=AgentRef("bot", self.bot_uuid),
+                ),
                 strict=True,
             )
         }
@@ -257,7 +263,9 @@ class SimulatedWorkingBot:
             payload,
         )
         ctx = request["params"]["message"]["parts"][0]["data"]["context"]
-        ctx["method_binding_ref"]["object_id"] = product_execution_binding_ref(created.collet_id, self.profile)
+        ctx["method_binding_ref"]["object_id"] = product_execution_binding_ref(
+            created.collet_id, self.profile
+        )
         ctx["caller"]["identity_id"] = self.bot_id
         ctx["accountable_principal_ref"]["identity_id"] = self.owner_id
         return request
@@ -315,14 +323,17 @@ class SimulatedWorkingBot:
         def report_progress(
             percent: int, note: str, progress: str, error_msg: str, reason: str
         ) -> None:
-            send("progress", {
-                "percent": percent,
-                "note": note,
-                "progress": progress,
-                "error_msg": error_msg,
-                "reason": reason,
-                "task_id": task_id,
-            })
+            send(
+                "progress",
+                {
+                    "percent": percent,
+                    "note": note,
+                    "progress": progress,
+                    "error_msg": error_msg,
+                    "reason": reason,
+                    "task_id": task_id,
+                },
+            )
 
         # 调用方已直接通过 L4 Work.start 启动任务。
         # Bot 只上报实际执行过程,不能把自身的运行器当成 L4 Work API。
@@ -341,7 +352,9 @@ def _participation_snapshot(service, injector, created):
     """SQL observable state and all relevant Method facts, including dispatch."""
     store, axes = injector.get(MethodStoreProtocol), current_axes()
     context_id = created.collet_id
-    record = injector.get(ContextCollabRepositoryProtocol).get_current_status(context_id)
+    record = injector.get(ContextCollabRepositoryProtocol).get_current_status(
+        context_id
+    )
     profile = injector.get(ProductCatalog).get(
         record.product_instance.profile_ref.profile_id,
         record.product_instance.profile_ref.version,

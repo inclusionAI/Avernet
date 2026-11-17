@@ -19,16 +19,11 @@ from uuid import uuid4
 
 import jwt
 import pytest
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-from fastapi_injector import attach_injector
-from injector import Binder, Injector
-
 from agentclaw.community.adapters.http.task import commission_a2a, commission_a2a_auth
 from agentclaw.community.core.gateway_principal import PrincipalVerifierConfig
-from agentclaw.community.core.task.context_collab.errors import ContextCollabValidationError
-from agentclaw.community.core.task.context_collab.l5_methods.method_binding import BindingState
-from agentclaw.community.core.task.context_collab.l6_products.instance import ProductInstance
+from agentclaw.community.core.task.context_collab.errors import (
+    ContextCollabValidationError,
+)
 from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context import (
     ActorContext,
 )
@@ -45,6 +40,9 @@ from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs 
 from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_resource_refs import (
     SpaceRef,
 )
+from agentclaw.community.core.task.context_collab.l4_context_primitives.context_service_protocol import (
+    ContextServiceProtocol,
+)
 from agentclaw.community.core.task.context_collab.l4_context_primitives.operations import (
     work as work_operations_module,
 )
@@ -52,20 +50,11 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.operatio
     ColletCreateCommand,
     WorkStartCommand,
 )
-from agentclaw.community.core.task.context_collab.l5_methods.open_profile import (
-    ApplicationState,
-    ParticipationType,
+from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.records import (
+    ContextCollabRepositoryProtocol as L4ContextCollabRepositoryProtocol,
 )
-from agentclaw.community.core.task.context_collab.l5_methods.operations.contracts import (
-    GroupMethodOpsServiceProtocol,
-    SingleSelectCommand,
-    OpenAdmitCommand,
-    OpenScreenCommand,
-    OpenMethodOpsServiceProtocol,
-    OpenOpportunityCommand,
-)
-from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime import (
-    current_axes,
+from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
+    BindingState,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.method_composition import (
     CompositionRelation,
@@ -73,45 +62,78 @@ from agentclaw.community.core.task.context_collab.l5_methods.method_composition 
 from agentclaw.community.core.task.context_collab.l5_methods.method_profile import (
     get_profile,
 )
+from agentclaw.community.core.task.context_collab.l5_methods.open_profile import (
+    ApplicationState,
+    ParticipationType,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.operations.contracts import (
+    GroupMethodOpsServiceProtocol,
+    OpenAdmitCommand,
+    OpenMethodOpsServiceProtocol,
+    OpenOpportunityCommand,
+    OpenScreenCommand,
+    SingleSelectCommand,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime import (
+    current_axes,
+)
 from agentclaw.community.core.task.context_collab.l6_products.catalog import (
     ProductCatalog,
 )
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
-    VersionedProfileRef, MethodCompositionTemplate, MethodRelationTemplate, ScenarioRole, GovernanceRequirements, CompatibilityRequirements,
+    CompatibilityRequirements,
+    GovernanceRequirements,
+    MethodCompositionTemplate,
+    MethodRelationTemplate,
+    ScenarioRole,
+    VersionedProfileRef,
+)
+from agentclaw.community.core.task.context_collab.l6_products.instance import (
+    ProductInstance,
+)
+from agentclaw.community.core.task.context_collab.l6_products.method_policies import (
+    OpenMethodPolicy,
 )
 from agentclaw.community.core.task.context_collab.l6_products.operations import (
     ProductProfileCreateCommand,
     create_product_profile,
 )
-from agentclaw.community.core.task.context_collab.persistence.method_store import (
-    MethodStoreProtocol,
+from agentclaw.community.core.task.context_collab.l6_products.operations.contracts import (
+    ProductInstantiateCommand,
+    ProductInstantiationServiceProtocol,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.records import (
-    ContextCollabRepositoryProtocol as L4ContextCollabRepositoryProtocol,
+from agentclaw.community.core.task.context_collab.l6_products.participant_scope import (
+    ParticipantScope,
+    ParticipantScopeKind,
 )
-from agentclaw.community.core.task.context_collab.l6_products.persistence.records import ContextStatusRecord
+from agentclaw.community.core.task.context_collab.l6_products.persistence.records import (
+    ContextStatusRecord,
+)
 from agentclaw.community.core.task.context_collab.l6_products.persistence.repository import (
     ContextCollabRepositoryProtocol,
+)
+from agentclaw.community.core.task.context_collab.l6_products.publication import (
+    OpenPublicationProfile,
+)
+from agentclaw.community.core.task.context_collab.persistence.method_store import (
+    MethodStoreProtocol,
 )
 from agentclaw.community.core.task.context_collab.products.task_commission import (
     service as commission_service_module,
 )
 from agentclaw.community.core.task.context_collab.products.task_commission.profile import (
-    TASK_COMMISSION_PROFILE,
     OPEN_SINGLE_COMMISSION_PROFILE,
+    TASK_COMMISSION_PROFILE,
+)
+from agentclaw.community.core.task.context_collab.products.task_commission.publication import (
+    BotSelfApplicationAdmission,
+    DesignatedOpenAdmission,
 )
 from agentclaw.community.core.task.context_collab.products.task_commission.service_api import (
     TaskAdvanceCommand,
     TaskCommissionCreatedView,
     TaskCommissionServiceProtocol,
     TaskMethodOpsPort,
-)
-from agentclaw.community.core.task.context_collab.l6_products.operations.contracts import (
-    ProductInstantiateCommand,
-    ProductInstantiationServiceProtocol,
-)
-from agentclaw.community.core.task.context_collab.l4_context_primitives.context_service_protocol import (
-    ContextServiceProtocol,
 )
 from agentclaw.community.di.modules.context_collab_products import (
     INSTALLED_PRODUCT_PROFILES,
@@ -120,25 +142,28 @@ from agentclaw.community.di.modules.task_module import TaskModule
 from agentclaw.community.di.modules.task_persistence_module import TaskPersistenceModule
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.utils.avernet_tenant import DEFAULT_AVERNET_TENANT
-from agentclaw.community.core.task.context_collab.l6_products.method_policies import OpenMethodPolicy
-from agentclaw.community.core.task.context_collab.l6_products.publication import OpenPublicationProfile
-from agentclaw.community.core.task.context_collab.products.task_commission.publication import DesignatedOpenAdmission, \
-    BotSelfApplicationAdmission
-from tests.community.factories.task_commission import (
-    BOT_ID as BOT_ASSIGNEE,
-)
-from tests.community.factories.task_commission import (
-    OWNER
-)
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from fastapi_injector import attach_injector
+from injector import Binder, Injector
+
 from tests.community.core.task.context_collab.products.task_commission_e2e_support import (
     _AI_CODING_STEPS,
     SimulatedWorkingBot,
     _simulate_ai_coding,
 )
+from tests.community.factories.task_commission import (
+    BOT_ID as BOT_ASSIGNEE,
+)
+from tests.community.factories.task_commission import OWNER
 
 HUMAN = ActorContext(actor=PrincipalRef("human", "u_owner_001"), source="api")
 SPACE = SpaceRef(space_id="space_workspace_001", environment="test")
-OBJECTIVE = "为计算器增加求和能力:完成方案、编码和测试,生成待评审 PR,提交成果后由业务同学验收。"
+OTHER_ELIGIBLE_AGENT = AgentRef("bot", "bot_candidate_002")
+OUTSIDE_AGENT = AgentRef("bot", "bot_outside_scope")
+OBJECTIVE = (
+    "为计算器增加求和能力:完成方案、编码和测试,生成待评审 PR,提交成果后由业务同学验收。"
+)
 
 """产品上线 → 建任务 → Bot Query/Apply → 策略 Screen/Admit → scoped Participant → Work → accept。"""
 """
@@ -152,6 +177,8 @@ OBJECTIVE = "为计算器增加求和能力:完成方案、编码和测试,生�
 - 问题  
   - [ ] open模式下，当录取了某个agent进入协作之后，谁来通知agent真正开始干活，没有明确的语义
 """
+
+
 def test_end_to_end_commission_flow(deploy_commission, tmp_path):
     # 1. L6层产品定义是可复用合同,创建 Profile 本身不产生协作运行对象。
     profile = _create_product_profile()
@@ -183,19 +210,32 @@ def test_end_to_end_commission_flow(deploy_commission, tmp_path):
     assert opportunity.scope_ref == instance.collet_ref
 
     # 6. Open 录取只建立参与事实,不自动成为 Single 的选定执行者。
-    decision = _admit_application_agent(injector, open_ops, store, axes, collet.collet_id, opportunity, submitted)
+    decision = _admit_application_agent(
+        injector, open_ops, store, axes, collet.collet_id, opportunity, submitted
+    )
 
     # 7. 明确选择该次录取产生的参与者,不是把 Agent ID 或 Query 结果当作选定。
     _select_admitted_agent(injector, store, axes, instance, decision)
 
     # 8. 通知agent执行任务
-    started, task_id = _notify_agent_work(injector, l4_context_service, service, collet, working_bot.actor_context)
+    started, task_id = _notify_agent_work(
+        injector, l4_context_service, service, collet, working_bot.actor_context
+    )
 
     # 9. Agent 自主执行;最终由用户验收,不是 Single 或 ProductInstance 推进 Task。
-    artifacts = _agent_run_simulate(service, collet, working_bot, started, tmp_path, task_id)
+    artifacts = _agent_run_simulate(
+        service, collet, working_bot, started, tmp_path, task_id
+    )
 
     # 10. 查询和验证结果
-    _query_task_result(l4_context_service, service, collet.collet_id, working_bot.actor_context, task_id, artifacts)
+    _query_task_result(
+        l4_context_service,
+        service,
+        collet.collet_id,
+        working_bot.actor_context,
+        task_id,
+        artifacts,
+    )
 
 
 def _create_product_profile():
@@ -226,6 +266,11 @@ def _create_product_profile():
                     ),
                 ),
             ),
+        ),
+        # 两个 Agent 有参与资格;只有 BOT_ASSIGNEE 在实例化时绑定为执行者。
+        participant_scope=ParticipantScope(
+            ParticipantScopeKind.ALLOWLIST,
+            (AgentRef("bot", BOT_ASSIGNEE), OTHER_ELIGIBLE_AGENT),
         ),
         # 角色信息
         scenario_roles=(
@@ -265,6 +310,7 @@ def _create_product_profile():
     profile = create_product_profile(
         ProductProfileCreateCommand(
             ref=authored.ref,
+            participant_scope=authored.participant_scope,
             composition=authored.composition,
             scenario_roles=authored.scenario_roles,
             governance=authored.governance,
@@ -272,6 +318,11 @@ def _create_product_profile():
         )
     )
     assert profile.ref == VersionedProfileRef("task_commission", 2)
+    assert profile.participant_scope.kind is ParticipantScopeKind.ALLOWLIST
+    assert profile.participant_scope.agent_refs == (
+        AgentRef("bot", BOT_ASSIGNEE),
+        OTHER_ELIGIBLE_AGENT,
+    )
     assert profile.composition.method_kind == "Open + Single"
     assert profile.composition.required_methods == (
         get_profile("Open", "0.2"),
@@ -289,7 +340,6 @@ def _create_commission_collet(l4):
             to_space=SPACE,
             initiator_ref=HUMAN.actor,
             objective=OBJECTIVE,
-            executor_refs=(AgentRef("bot", BOT_ASSIGNEE),),
             title="XX代办任务",
             description="Open 参与 + Single 选定执行者,成果由用户验收",
         ),
@@ -307,13 +357,26 @@ def _instantiate_product_instance(injector, collet, profile):
     repository = injector.get(ContextCollabRepositoryProtocol)
     unbound = repository.get_current_status(collet.collet_id)
     assert unbound.task is not None and unbound.product_instance is None
+    assert unbound.task.executor_refs == ()
+    assert unbound.participants == unbound.role_bindings == ()
 
     # L6 为已提交且未执行的 L4 对象选择合同并初始化绑定;不会替换初始 Event。
     instance = injector.get(ProductInstantiationServiceProtocol).instantiate(
-        ProductInstantiateCommand(collet.collet_id, profile.ref, collet.version), HUMAN
+        ProductInstantiateCommand(
+            collet.collet_id,
+            profile.ref,
+            collet.version,
+            participant_refs=(AgentRef("bot", BOT_ASSIGNEE),),
+        ),
+        HUMAN,
     )
     record = repository.get_current_status(collet.collet_id)
     assert record.product_instance == instance
+    assert instance.participant_scope == profile.participant_scope
+    # Profile 的允许列表不是本实例的实际参与者列表。
+    assert {p.agent_ref for p in record.participants if p.agent_ref} == {
+        AgentRef("bot", BOT_ASSIGNEE)
+    }
     assert instance.instance_id != instance.collet_ref
     assert instance.collet_ref == collet.collet_id
     assert instance.root_task_ref == record.task.task_id != collet.collet_id
@@ -327,14 +390,21 @@ def _instantiate_product_instance(injector, collet, profile):
     assert instance.governance == profile.governance
     assert len(instance.role_binding_refs) == 2
     assert instance.creation_event_ref == record.events[0].event_id
-    assert record.events == unbound.events
+    assert record.events[:1] == unbound.events
+    assert record.events[-1].event_kind == "task.participants_bound"
+    assert record.task.executor_refs == (AgentRef("bot", BOT_ASSIGNEE),)
+    assert len(record.participants) == len(record.role_bindings) == 2
+    assert record.task.version == record.collet.version == collet.version + 1
     assert ProductInstance.from_dict(instance.to_dict()) == instance
 
     # 一次 Instantiate 创建两份独立 Profile 绑定,显式 Single --support--> Open。
     open_binding_id, single_binding_id = instance.method_binding_refs
     assert open_binding_id != single_binding_id
     store, axes = injector.get(MethodStoreProtocol), current_axes()
-    for binding_id, method in ((open_binding_id, "Open"), (single_binding_id, "Single")):
+    for binding_id, method in (
+        (open_binding_id, "Open"),
+        (single_binding_id, "Single"),
+    ):
         binding = store.get_binding(axes, binding_id, collet.collet_id)
         assert binding.state is BindingState.ACTIVE
         assert binding.collab_context_id == instance.collet_ref
@@ -358,7 +428,10 @@ def _select_admitted_agent(injector, store, axes, instance, decision):
         SingleSelectCommand(
             agent_participant_ref=participant_ref,
             scope_ref=instance.collet_ref,
-            selection_evidence_refs=[decision.application_ref, decision.admission_decision_id],
+            selection_evidence_refs=[
+                decision.application_ref,
+                decision.admission_decision_id,
+            ],
             reason="task_commission.select_admitted_assignee",
         ),
         ActorContext(HUMAN.actor, source="product_policy"),
@@ -377,14 +450,14 @@ def _publish_opportunity(l5_open_method, collet_id_1):
     # 4、调用L5的OPEN方法-创建机会
     published = l5_open_method.publish_opportunity(
         OpenOpportunityCommand(
-            collet_id=collet_id_1,                                     #collet
-            actor_context=HUMAN,                                      #发布人信息 TODO: actor_context为什么要传HUMAN, HUMAN是collet里面已经有了。
-            participation_type=ParticipationType.COLLET_PARTICIPANT,  #协议中明确规定的字段及取值
+            collet_id=collet_id_1,  # collet
+            actor_context=HUMAN,  # 发布人信息 TODO: actor_context为什么要传HUMAN, HUMAN是collet里面已经有了。
+            participation_type=ParticipationType.COLLET_PARTICIPANT,  # 协议中明确规定的字段及取值
             admission_policy_refs=[
-                "task_commission.designated_bot_self_application/1"   #录取策略：指定 Bot 自己申请，并由任务产品的策略自动审核
+                "task_commission.designated_bot_self_application/1"  # 录取策略：指定 Bot 自己申请，并由任务产品的策略自动审核
             ],
-            capacity=1,                                               #表示这个机会最多允许多少个未终态申请占用名额
-            reason="task_commission.owner_authorized_publish",        #本次发布操作的审计原因
+            capacity=1,  # 表示这个机会最多允许多少个未终态申请占用名额
+            reason="task_commission.owner_authorized_publish",  # 本次发布操作的审计原因
         ),
     )
     assert published.accepted and published.state == "OPEN"
@@ -431,9 +504,13 @@ def _discover_opportunity(store, axes, l4_collet, working_bot):
     return opportunity, submitted
 
 
-def _admit_application_agent(injector, l5_open_method, store, axes, collet_id_1, opportunity, submitted):
+def _admit_application_agent(
+    injector, l5_open_method, store, axes, collet_id_1, opportunity, submitted
+):
     # Open 录取只建立 scoped Participant;执行者的选定另由 Single 完成。
-    policy_context = ActorContext(HUMAN.actor, source="product_policy")   # 采用product profile中定义的录取策略
+    policy_context = ActorContext(
+        HUMAN.actor, source="product_policy"
+    )  # 采用product profile中定义的录取策略
     [policy_ref] = opportunity.admission_policy_refs
     # TODO: 系统服务进行录用判断？
     screened = l5_open_method.screen(
@@ -477,11 +554,28 @@ def _admit_application_agent(injector, l5_open_method, store, axes, collet_id_1,
 def _notify_agent_work(injector, l4_context_operate, service, l4_collet, bot_context):
     collet_id_1 = l4_collet.collet_id
 
-    # 8、直接调用 L4 服务的 Work.start;不是产品 start_task 或通用事件追加接口。
+    # 同一实例验证 G1:范围外 Agent 拒绝;范围内但未绑定的候选也没有执行权。
+    repository = injector.get(ContextCollabRepositoryProtocol)
+    before = repository.get_current_status(collet_id_1)
+    for agent, error in (
+        (OUTSIDE_AGENT, "ProductProfile participant scope"),
+        (OTHER_ELIGIBLE_AGENT, "only the principal, executor"),
+    ):
+        with pytest.raises(ContextCollabValidationError, match=error):
+            l4_context_operate.start(
+                collet_id_1,
+                WorkStartCommand(expected_version=before.collet.version),
+                ActorContext(
+                    PrincipalRef(agent.agent_type, agent.agent_id), source="a2a"
+                ),
+            )
+        assert repository.get_current_status(collet_id_1) == before
+
+    # 8、真实执行 Bot 在允许范围内且已经录取/选定,经真实 G1/G4 后启动。
     started = l4_context_operate.start(
         collet_id_1,
         WorkStartCommand(
-            expected_version=l4_collet.version,
+            expected_version=before.collet.version,
             note="录取并经 Single 选定后启动任务执行",
         ),
         bot_context,
@@ -490,7 +584,9 @@ def _notify_agent_work(injector, l4_context_operate, service, l4_collet, bot_con
     assert service.detail_task(collet_id_1).status == "in_progress"
     assert injector.get(A2aDeliveryPort).bridge_records() == ()
 
-    record = injector.get(ContextCollabRepositoryProtocol).get_current_status(collet_id_1)
+    record = injector.get(ContextCollabRepositoryProtocol).get_current_status(
+        collet_id_1
+    )
     assert record.task is not None
     task_id = record.task.task_id
 
@@ -532,7 +628,9 @@ def _agent_run_simulate(service, l4_collet, working_bot, started, tmp_path, task
     return artifacts
 
 
-def _query_task_result(l4_context_operate, service, collet_id_1, bot_context, task_id, artifacts):
+def _query_task_result(
+    l4_context_operate, service, collet_id_1, bot_context, task_id, artifacts
+):
     # 10. 用户查看成果并明确 accept,而不是以 Bot 完工代替验收。
     _flow_log(_TEST_DIRECTORY, "6. 用户检查方案、代码、测试、PR 提案,确认 accept")
     accepted = service.accept_task(
@@ -542,7 +640,9 @@ def _query_task_result(l4_context_operate, service, collet_id_1, bot_context, ta
 
     # 11. 经应用门面的 L4 查询读取 Task 状态与产物,不依赖产品详情接口。
     # TODO: 管理时、运行时分开。但是这里只是一个Collet查询服务，并不是管理服务。
-    final = l4_context_operate.get_status(collet_id_1, trunk_events=False, context=HUMAN)
+    final = l4_context_operate.get_status(
+        collet_id_1, trunk_events=False, context=HUMAN
+    )
     assert final.current_snapshot is not None
     assert final.current_snapshot["status"] == "done"
     assert final.context_version == accepted.context_version
@@ -551,6 +651,7 @@ def _query_task_result(l4_context_operate, service, collet_id_1, bot_context, ta
     final_events = l4_context_operate.get_events(collet_id_1, context=HUMAN)
     assert [event.event_kind for event in final_events] == [
         "task.created",
+        "task.participants_bound",
         "task.started",
         *["task.progress.updated"] * len(_AI_CODING_STEPS),
         "task.submitted",
@@ -614,7 +715,11 @@ def _trace_call(monkeypatch, owner, name: str, description: str) -> None:
         snapshot = getattr(result, "current_snapshot", None)
         status = getattr(result, "status", getattr(result, "state", None))
         if snapshot is not None:
-            status = snapshot.get("status") if isinstance(snapshot, dict) else snapshot.status
+            status = (
+                snapshot.get("status")
+                if isinstance(snapshot, dict)
+                else snapshot.status
+            )
         if isinstance(result, str):
             status = result  # resolve_workflow_status 的返回值。
         suffix = f", status={status}" if status is not None else ""
@@ -685,7 +790,7 @@ def _trace_runtime(monkeypatch, injector: Injector) -> None:
             ContextCollabAuthorizerProtocol,
             {
                 "check_create": "G1 校验创建权限",
-                "check_append": "G1 校验事件写入权限",
+                "check_append": "G1 校验真实执行者的 Profile 参与范围及事件写入权限",
             },
         ),
         (
@@ -801,7 +906,11 @@ def _commission_runtime(
         yield (
             injector.get(TaskCommissionServiceProtocol),
             SimulatedWorkingBot(
-                client, signed_principal, profile, bot_id, owner_id,
+                client,
+                signed_principal,
+                profile,
+                bot_id,
+                owner_id,
                 open_method=injector.get(OpenMethodOpsServiceProtocol),
             ),
             injector,
