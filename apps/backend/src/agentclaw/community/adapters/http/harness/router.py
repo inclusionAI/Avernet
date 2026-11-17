@@ -503,6 +503,8 @@ async def _run_scan(
     entity_id: str,
     bot_id: str,
     patch_planner: "PatchPlannerProtocol | None" = None,
+    *,
+    show_initialization_hint: bool = False,
 ) -> None:
     """Background coroutine: run diagnostics, generate patches, persist results incrementally.
 
@@ -539,6 +541,7 @@ async def _run_scan(
 
         # Pre-check: ensure bot files are not all empty
         all_empty = True
+        reads_confirmed = bool(file_types)
         for ft in file_types:
             try:
                 ref = await scanner._bot_profile.read_file(
@@ -549,11 +552,15 @@ async def _run_scan(
                     all_empty = False
                     break
             except Exception:
-                continue
+                reads_confirmed = False
         if all_empty:
             logger.warning("[/diagnose] All bot files are empty for bot=%s", bot_id)
             progress.status = "failed"
-            progress.failed_reason = "请耐心等待配置文件同步完成后，再执行诊断"
+            progress.failed_reason = (
+                "Bot 配置文件为空。请先给 Bot 发一条消息，再回来运行健康检测。"
+                if show_initialization_hint and reads_confirmed
+                else "请耐心等待配置文件同步完成后，再执行诊断"
+            )
             for i, p in enumerate(progress.diagnose_progress):
                 progress.diagnose_progress[i] = FileProgressItem(
                     check_item=p.check_item,
@@ -581,7 +588,7 @@ async def _run_scan(
             except Exception:
                 logger.exception("Failed to persist error check_items for bot=%s", bot_id)
             try:
-                scan_repo.update_status(progress.scan_id, "failed", "请耐心等待配置文件同步完成后，再执行诊断")
+                scan_repo.update_status(progress.scan_id, "failed", progress.failed_reason)
             except Exception:
                 logger.exception("Failed to persist scan failure for bot=%s", bot_id)
             return
@@ -863,7 +870,8 @@ async def diagnose(
     if not body.bot_id or not body.entity_id:
         raise HTTPException(status_code=400, detail="bot_id and entity_id are required")
 
-    if not bot_repo.get_by_id_and_owner(body.bot_id, body.entity_id):
+    bot = bot_repo.get_by_id_and_owner(body.bot_id, body.entity_id)
+    if not bot:
         raise HTTPException(status_code=404, detail=f"Bot not found: {body.bot_id}")
 
     # Dedup check: reject if there is an unfinished scan created within 5 minutes
@@ -933,6 +941,11 @@ async def diagnose(
             entity_id=body.entity_id,
             bot_id=body.bot_id,
             patch_planner=patch_planner,
+            show_initialization_hint=(
+                body.bot_publish_id is None
+                and bot.get("bot_type") == "service"
+                and bot.get("active_engine") == "openclaw"
+            ),
         )
     )
 

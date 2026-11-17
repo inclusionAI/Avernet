@@ -1,6 +1,6 @@
 """Tests for collaborator-protected Harness endpoints.
 
-Both cases drive the real router over the real repository, so what is
+These cases drive the real router over the real repository, so what is
 asserted is the persisted outcome rather than a call count on a patched
 method. ``POST /api/harness/diagnose`` spawns its scan with
 ``asyncio.create_task``; the async client shares the test's event loop, so
@@ -16,7 +16,9 @@ import pytest
 from agentclaw.community.core.repository.protocols.harness import HarnessScanRecordRepository
 from tests.community.factories.access import make_staff_user
 from tests.community.factories.bot_collaborator import make_bot
+from tests.community.factories.devices import make_active_arca_device
 from tests.community.framework import drain_background_tasks
+from tests.community.framework.device_seams import route_device_accessor_to_local
 
 
 def _scan_records(world, *, bot_id: str, entity_id: str) -> list[dict]:
@@ -52,9 +54,37 @@ async def test_diagnose_rejects_nonexistent_bot_without_creating_scan(
 
 
 @pytest.mark.asyncio
-async def test_diagnose_starts_scan_for_existing_bot(async_client, world):
+@pytest.mark.parametrize(
+    ("device_bound", "publish_id", "failed_reason"),
+    [
+        pytest.param(
+            True, None, "Bot 配置文件为空。请先给 Bot 发一条消息，再回来运行健康检测。",
+            id="empty-draft",
+        ),
+        pytest.param(
+            False, None, "请耐心等待配置文件同步完成后，再执行诊断",
+            id="draft-read-failed",
+        ),
+        pytest.param(
+            True, "missing-release", "请耐心等待配置文件同步完成后，再执行诊断",
+            id="published-target",
+        ),
+    ],
+)
+async def test_diagnose_starts_scan_for_existing_bot(
+    async_client, world, device_bound, publish_id, failed_reason,
+):
     make_staff_user(world, user_id="u_owner")
-    make_bot(world, bot_id="bot_test", owner_id="u_owner")
+    binding_id = None
+    if device_bound:
+        binding_id = make_active_arca_device(
+            world, owner_id="u_owner", device_id="arca_test_device",
+        )
+        route_device_accessor_to_local(world)
+    make_bot(
+        world, bot_id="bot_test", owner_id="u_owner", active_engine="openclaw",
+        binding_id=binding_id,
+    )
 
     response = await async_client.post(
         "/api/harness/diagnose",
@@ -63,6 +93,7 @@ async def test_diagnose_starts_scan_for_existing_bot(async_client, world):
             "bot_id": "bot_test",
             "entity_id": "u_owner",
             "entity_type": "staff",
+            "bot_publish_id": publish_id,
         },
     )
 
@@ -80,8 +111,16 @@ async def test_diagnose_starts_scan_for_existing_bot(async_client, world):
         world, bot_id="bot_test", entity_id="u_owner",
     )] == [scan_id]
 
-    # Run the spawned scan to completion. This bot has no synced config files,
-    # so the scan's own empty-input guard is what ends it — and it records that
-    # verdict against the same scan_id the response handed out.
     await drain_background_tasks()
-    assert repo.get_by_id(scan_id)["status"] == "failed"
+    record = repo.get_by_id(scan_id)
+    assert record["status"] == "failed"
+    assert record["failed_reason"] == failed_reason
+
+    report = await async_client.get(
+        "/api/harness/diagnose/dim-report",
+        headers={"x-user-id": "u_owner"},
+        params={"bot_id": "bot_test", "entity_id": "u_owner"},
+    )
+    assert report.status_code == 200
+    [item] = report.json()["items"]
+    assert item["failed_reason"] == failed_reason
