@@ -1,0 +1,35 @@
+apps/bcs-internal/bcn-configs/agentbase-sofarpc.toml
+  s_460ca40e7dae23::t_2d18de71c0992a 5
+apps/bcs-internal/configs/agentbase-sofarpc.toml
+  s_460ca40e7dae23::t_e7493ca6ae3f50 5
+apps/bcs-internal/crates/external-clients/bcs-agentbase-sofarpc/src/client.rs
+  s_460ca40e7dae23::t_3cb4032e68eb94 219-220,247-248,328,353-354,993,1015
+apps/bcs-internal/crates/external-clients/bcs-agentbase-sofarpc/src/config.rs
+  s_460ca40e7dae23::t_0a5af389289940 31-33,46,181-183
+apps/bcs-internal/crates/external-clients/bcs-agentbase-sofarpc/src/identity.rs
+  s_460ca40e7dae23::t_23c1f94478a833 46-52
+apps/bcs-internal/crates/external-clients/bcs-agentbase-sofarpc/tests/config_fail_closed.rs
+  s_460ca40e7dae23::t_d7d32a919dc971 13,124-131,294
+apps/bcs-internal/crates/external-clients/bcs-agentbase-sofarpc/tests/identity_pins.rs
+  s_460ca40e7dae23::t_62d63c53cf6f93 42-45
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/src/triple_pojo/channel.rs
+  s_460ca40e7dae23::t_cca4afcf912364 128-136,179-197,1084-1102
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/tests/triple_pojo_channel.rs
+  s_460ca40e7dae23::t_01a2dfed1a8190 49,274-277,362-365
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6b16f5e254f5082da605623068d551ece9495750",
+  "prompts": {},
+  "sessions": {
+    "s_460ca40e7dae23": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c086-a457-71b0-8466-0c9920e816e0",
+        "model": "GLM-5.3"
+      },
+      "human_author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}

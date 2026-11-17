@@ -1,0 +1,27 @@
+apps/bcs-internal/Cargo.lock
+  s_14578f9514f223::t_1ff77b1e0fe989 895,2485,2576,2591-2592
+apps/bcs-internal/crates/plugins/bcs-sofa-services/Cargo.toml
+  s_14578f9514f223::t_d46fc969feba6f 38-40
+apps/bcs-internal/crates/plugins/bcs-sofa-services/build.rs
+  s_14578f9514f223::t_bf2ca6d720d5d8 4-13,36-42,49,57,61-65
+apps/bcs-internal/crates/plugins/bcs-sofa-services/tests/contracts.rs
+  s_14578f9514f223::t_2792739cefe853 241-242,275-327
+apps/bcs-internal/crates/plugins/bcs-sofa-services/tests/runtime_config.rs
+  s_14578f9514f223::t_c93f9c02791025 12,15-20,24-25,63,76-77
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6905fba5d4c5453e1f35e049ed9bf4987f009d43",
+  "prompts": {},
+  "sessions": {
+    "s_14578f9514f223": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e490-9a86-7883-a2dd-b902d9fae6cb",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}

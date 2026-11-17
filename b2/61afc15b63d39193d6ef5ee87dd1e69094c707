@@ -1,0 +1,21 @@
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/src/triple_pojo/channel.rs
+  s_460ca40e7dae23::t_9c2881a7ea0ff5 892-893,895,897-909,911,1317-1322,1324-1331
+apps/bcs-internal/crates/external-clients/bcs-sofa-rpc/tests/triple_pojo_channel.rs
+  s_460ca40e7dae23::t_c0f93795c13123 366
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b261afc15b63d39193d6ef5ee87dd1e69094c707",
+  "prompts": {},
+  "sessions": {
+    "s_460ca40e7dae23": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c086-a457-71b0-8466-0c9920e816e0",
+        "model": "GLM-5.3"
+      },
+      "human_author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}
