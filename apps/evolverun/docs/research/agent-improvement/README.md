@@ -26,6 +26,9 @@ check.
 - [`rsi/evaluation-data-boundaries.md`](rsi/evaluation-data-boundaries.md): a
   research boundary for training, development evaluation, and independent
   acceptance data.
+- [`rsi/synthesis-contracts.md`](rsi/synthesis-contracts.md): a review-only
+  request/result boundary for Agent-directed synthesis, bounded autonomy,
+  idempotency, and candidate quality gates.
 - [`benchmark-question-meta.md`](benchmark-question-meta.md): how canonical
   question metadata is projected separately to the Actor and Judge.
 
