@@ -166,3 +166,62 @@ test('删除确认弹层内取消不会误折叠已展开目录', async () => {
   expect(await screen.findByText('guide')).toBeInTheDocument();
   expect(onLoadDirectory).toHaveBeenCalledTimes(1);
 });
+
+test('目录加载失败后重试成功保持展开，根刷新失效后收起', async () => {
+  const load = jest.fn().mockResolvedValue(undefined);
+  const retry = jest.fn().mockResolvedValue(undefined);
+  const props = { resources, editable: true, onCreateDirectory: jest.fn(), onDelete: jest.fn(), onUpload: jest.fn(), onPreview: jest.fn(), onDownload: jest.fn(), onCopyPath: jest.fn(), onLoadDirectory: load, onRetry: retry };
+  const { rerender } = render(<ResourcePanel {...props} loadingPaths={[]} loadedPaths={['']} errors={{}} />);
+  clickDocsName();
+  rerender(<ResourcePanel {...props} loadingPaths={['docs']} loadedPaths={['']} errors={{}} />);
+  expect(screen.getByRole('button', { name: '收起docs' })).toBeInTheDocument();
+  rerender(<ResourcePanel {...props} loadingPaths={[]} loadedPaths={['']} errors={{ docs: '资源加载失败，请重试' }} />);
+  fireEvent.click(screen.getByRole('button', { name: '重试' }));
+  expect(retry).toHaveBeenCalledWith('docs');
+  rerender(<ResourcePanel {...props} loadingPaths={[]} loadedPaths={['', 'docs']} errors={{}} />);
+  expect(screen.getByRole('button', { name: '收起docs' })).toBeInTheDocument();
+  expect(screen.getByText('guide')).toBeInTheDocument();
+  rerender(<ResourcePanel {...props} loadingPaths={[]} loadedPaths={['']} errors={{}} />);
+  await waitFor(() => expect(screen.getByRole('button', { name: '展开docs' })).toBeInTheDocument());
+});
+
+test('根加载时显示加载状态', () => {
+  renderPanel({ resources: [], rootReady: false, loadingPaths: [''], loadedPaths: [] });
+  expect(screen.getByRole('status')).toHaveTextContent('正在加载资源');
+  expect(screen.queryByText('工作区为空')).not.toBeInTheDocument();
+});
+
+test('已选目录删除并刷新后，新建目录目标回到根目录', async () => {
+  const create = jest.fn().mockResolvedValue(undefined);
+  const props = { resources, editable: true, onCreateDirectory: create, onDelete: jest.fn(), onUpload: jest.fn(), onPreview: jest.fn(), onDownload: jest.fn(), onCopyPath: jest.fn(), onLoadDirectory: jest.fn().mockResolvedValue(undefined) };
+  const { rerender } = render(<ResourcePanel {...props} loadingPaths={[]} loadedPaths={['', 'docs']} errors={{}} />);
+  clickDocsName();
+  rerender(<ResourcePanel {...props} resources={[]} loadingPaths={[]} loadedPaths={['']} errors={{}} />);
+  fireEvent.click(screen.getByRole('button', { name: '新建目录' }));
+  fireEvent.change(screen.getByPlaceholderText('输入目录名称'), { target: { value: 'fresh' } });
+  fireEvent.click(screen.getByRole('button', { name: '创建' }));
+  await waitFor(() => expect(create).toHaveBeenCalledWith('fresh'));
+});
+
+test('根刷新后未重载的嵌套目录不被误判为已删除', async () => {
+  const create = jest.fn().mockResolvedValue(undefined);
+  const props = { resources, editable: true, onCreateDirectory: create, onDelete: jest.fn(), onUpload: jest.fn(), onPreview: jest.fn(), onDownload: jest.fn(), onCopyPath: jest.fn(), onLoadDirectory: jest.fn().mockResolvedValue(undefined) };
+  const { rerender } = render(<ResourcePanel {...props} loadingPaths={[]} loadedPaths={['', 'docs', 'docs/guide']} errors={{}} />);
+  clickDocsName();
+  fireEvent.click(screen.getByRole('button', { name: '展开guide' }));
+  rerender(<ResourcePanel {...props} resources={[resources[0]]} loadingPaths={[]} loadedPaths={['']} errors={{}} />);
+  fireEvent.click(screen.getByRole('button', { name: '新建目录' }));
+  fireEvent.change(screen.getByPlaceholderText('输入目录名称'), { target: { value: 'fresh' } });
+  fireEvent.click(screen.getByRole('button', { name: '创建' }));
+  await waitFor(() => expect(create).toHaveBeenCalledWith('docs/guide/fresh'));
+});
+
+test('文件选择期间上传目标被确认删除时不转投根目录', () => {
+  const upload = jest.fn().mockResolvedValue(undefined);
+  const props = { resources, editable: true, onCreateDirectory: jest.fn(), onDelete: jest.fn(), onUpload: upload, onPreview: jest.fn(), onDownload: jest.fn(), onCopyPath: jest.fn(), onLoadDirectory: jest.fn() };
+  const { rerender } = render(<ResourcePanel {...props} loadingPaths={[]} loadedPaths={['']} errors={{}} />);
+  fireEvent.click(screen.getByRole('button', { name: '向docs添加文件' }));
+  rerender(<ResourcePanel {...props} resources={[]} loadingPaths={[]} loadedPaths={['']} errors={{}} />);
+  fireEvent.change(screen.getByLabelText('资源文件选择'), { target: { files: [new File(['x'], 'x.txt')] } });
+  expect(upload).not.toHaveBeenCalled();
+});

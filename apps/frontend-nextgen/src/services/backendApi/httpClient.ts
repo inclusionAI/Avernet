@@ -17,6 +17,8 @@ export interface BackendRequestOptions {
   rawBody?: BodyInit;
   headers?: Record<string, string>;
   retryOnTransient?: boolean;
+  /** Caller renders this request failure inline; auth gates still run normally. */
+  suppressErrorNotification?: boolean;
   responseType?: 'json' | 'blob' | 'text';
   injectUserId?: boolean;
   /**
@@ -258,7 +260,7 @@ async function executeBackendRequest<T>(url: string, options: BackendRequestOpti
     // 默认提示投递(由顶层观察者 useErrorNotifyObserver 兜底发起):Service 层只 enqueue 上抛,不直接 toast,
     // 守 `src/services` 禁 toast/DOM。Hook 可在 catch 中 cancel(toastKey) 静默,或经 safeReportError 跳过重复。
     // 未登录(`silent`)时跳过投递,仅保留 alreadyHandled 标记供下游 safeReportError 亦不再补发。
-    if (authDisposition !== 'silent') {
+    if (authDisposition !== 'silent' && !options.suppressErrorNotification) {
       useErrorNotifyStore.getState().enqueue({ toastKey, message, apiPath, operation });
     }
     throw new BackendRequestError(message, {

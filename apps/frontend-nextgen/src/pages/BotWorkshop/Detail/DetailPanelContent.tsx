@@ -59,7 +59,7 @@ export function DetailPanelContent({
   ownerId?: string;
   onOpenFolder: ReturnType<typeof useDesktopFolder>;
 }) {
-  return editor.loading ? (
+  return editor.loading && (more || tab !== 'resource') ? (
     <Spin tip="加载编辑配置…" />
   ) : more === 'md' ? (
     <IdentityConfigPanel
@@ -162,6 +162,10 @@ export function DetailPanelContent({
         onDownload={editor.downloadResource}
         onLoadDirectory={editor.loadResourceDirectory}
         loadingPaths={editor.resourceLoadingPaths}
+        errors={editor.resourceErrors}
+        loadedPaths={editor.resourceLoadedPaths}
+        rootReady={editor.resourceLoadedPaths.includes('')}
+        onRetry={editor.browseResources}
       />
       {bot.deployment === 'local' ? <LinkPanel botId={bot.id} editable={editable && isOwner} /> : null}
     </>
