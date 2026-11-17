@@ -4,6 +4,7 @@ import bcn.a2a.spi.A2aAgent;
 import bcn.a2a.spi.BcnAgent;
 import bcn.a2a.spi.BcnCall;
 import bcn.a2a.spi.BcnException;
+import bcn.a2a.spi.CallerContext;
 import bcn.a2a.spi.Messages;
 import org.a2aproject.sdk.spec.Message;
 
@@ -20,9 +21,9 @@ public class OrderAgent implements BcnAgent {
         if (question.isBlank()) {
             throw new BcnException(BcnException.Code.INVALID_INPUT, "请告诉我要查询的订单号");
         }
-        // 业务自己约定的字段从 call.metadata() 读取，例如渠道；SDK 不解释这些字段。
-        Object channel = call.metadata().getOrDefault("channel", "默认渠道");
-        // 真实业务：调用订单服务
-        return Messages.agentText(channel + "：订单 1001 已发货");
+        // 调用上下文由平台给出；业务自己约定的字段从 call.metadata() 读取，SDK 不解释。
+        String user = call.caller().map(CallerContext::userId).orElse("匿名用户");
+        // 真实业务：按用户查询订单服务
+        return Messages.agentText(user + "，订单 1001 已发货");
     }
 }

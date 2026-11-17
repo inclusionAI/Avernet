@@ -12,7 +12,9 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.UnaryOperator;
 
 import bcn.a2a.ext.BcnKeys;
+import bcn.a2a.ext.CallerContextCodec;
 import bcn.a2a.spi.A2aListener;
+import bcn.a2a.spi.CallerContext;
 import bcn.a2a.spi.TaskEngine;
 import io.grpc.Context;
 import io.grpc.Deadline;
@@ -41,7 +43,7 @@ import org.a2aproject.sdk.spec.VersionNotSupportedError;
  * <ol>
  *   <li><b>开始</b>：计算截止时间，挂上取消回调，通知监听器（{@link #begin}）。</li>
  *   <li><b>准备</b>（在 RPC 线程上同步完成，失败直接返回错误）：大小、协议版本、转换为 a2a-java 模型、
- *       按 tenant 分发、扩展协商、入站校验、续交检查、contextId、回写激活结果（{@link #prepare}）。</li>
+ *       按 tenant 分发、扩展协商、入站校验、续交检查、contextId、调用上下文、回写激活结果（{@link #prepare}）。</li>
  *   <li><b>派发</b>：在业务线程池中执行业务代码，每个请求只提交一次，不在池内再次提交（避免线程池自锁）；
  *       并发已满或线程池拒绝时返回 UNAVAILABLE（{@link #dispatch}）。</li>
  *   <li><b>执行与出站检查</b>：调用业务方法；第一档检查回复，流式档位由 {@link TaskStreamWriter} 维护状态机。</li>
@@ -263,10 +265,12 @@ final class RequestPipeline {
         if (contextId == null || contextId.isEmpty()) {
             contextId = UUID.randomUUID().toString();
         }
-        // 9. 回写激活结果（随第一条响应的响应头发出）
+        // 9. 调用上下文：固定字段，不需要协商，带了就解析
+        CallerContext caller = CallerContextCodec.decode(params.metadata());
+        // 10. 回写激活结果（随第一条响应的响应头发出）
         CallHeaders.confirm(activated);
         DefaultBcnCall call = new DefaultBcnCall(entry.id(), params, contextId,
-                taskId == null || taskId.isEmpty() ? null : taskId,
+                taskId == null || taskId.isEmpty() ? null : taskId, caller,
                 BcnKeys.businessView(params.metadata()), activated, scope.cancel);
         return new Prepared(entry, call);
     }

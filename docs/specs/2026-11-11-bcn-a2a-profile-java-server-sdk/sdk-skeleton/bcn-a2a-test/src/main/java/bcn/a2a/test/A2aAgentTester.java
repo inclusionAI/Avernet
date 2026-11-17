@@ -2,12 +2,17 @@ package bcn.a2a.test;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.Executor;
 
 import bcn.a2a.server.A2aService;
 import bcn.a2a.spi.BcnAgent;
 import bcn.a2a.spi.Messages;
+import com.google.protobuf.ListValue;
+import com.google.protobuf.NullValue;
+import com.google.protobuf.Struct;
+import com.google.protobuf.Value;
 import io.grpc.Status;
 import org.a2aproject.sdk.grpc.Message;
 import org.a2aproject.sdk.grpc.Part;
@@ -32,7 +37,7 @@ import org.a2aproject.sdk.spec.TextPart;
  * <ul>
  *   <li>改为 in-process gRPC 通道，覆盖请求头（A2A-Extensions / A2A-Version）和协商结果，
  *       目前直接调用服务对象，不经过拦截器，因此所有扩展都视为未请求；</li>
- *   <li>提供请求构造器：带 contextId、taskId、业务 metadata、扩展请求（工具观察）；</li>
+ *   <li>提供请求构造器：带 contextId、taskId、扩展请求（工具观察）；</li>
  *   <li>TCK：在业务测试类上加一个注解，就在进程内对自己的 Agent 跑一遍一致性用例。</li>
  * </ul>
  */
@@ -62,8 +67,17 @@ public final class A2aAgentTester {
 
     /** SendMessage 给指定 Agent。 */
     public Reply send(String agentId, String text) {
+        return send(agentId, text, Map.of());
+    }
+
+    /**
+     * SendMessage 给指定 Agent，并带上请求级 metadata，例如
+     * {@code Map.of("bcn_caller", Map.of("userId", "u-1"), "channel", "app")}。
+     */
+    public Reply send(String agentId, String text, Map<String, ?> metadata) {
         CapturingObserver<SendMessageResponse> observer = new CapturingObserver<>();
-        service.sendMessage(request(agentId, text), observer);
+        SendMessageRequest request = request(agentId, text).toBuilder().setMetadata(struct(metadata)).build();
+        service.sendMessage(request, observer);
         observer.await(TIMEOUT);
         if (observer.error() != null) {
             return new Reply(null, observer.error());
@@ -89,6 +103,37 @@ public final class A2aAgentTester {
                 .addParts(Part.newBuilder().setText(text))
                 .build();
         return SendMessageRequest.newBuilder().setTenant(tenant).setMessage(message).build();
+    }
+
+    /** 把 Java 对象（Map / List / String / Number / Boolean / null）转成 protobuf Struct。 */
+    private static Struct struct(Map<?, ?> map) {
+        Struct.Builder builder = Struct.newBuilder();
+        map.forEach((k, v) -> builder.putFields(String.valueOf(k), value(v)));
+        return builder.build();
+    }
+
+    private static Value value(Object v) {
+        if (v == null) {
+            return Value.newBuilder().setNullValue(NullValue.NULL_VALUE).build();
+        }
+        if (v instanceof String s) {
+            return Value.newBuilder().setStringValue(s).build();
+        }
+        if (v instanceof Number n) {
+            return Value.newBuilder().setNumberValue(n.doubleValue()).build();
+        }
+        if (v instanceof Boolean b) {
+            return Value.newBuilder().setBoolValue(b).build();
+        }
+        if (v instanceof Map<?, ?> m) {
+            return Value.newBuilder().setStructValue(struct(m)).build();
+        }
+        if (v instanceof List<?> list) {
+            ListValue.Builder values = ListValue.newBuilder();
+            list.forEach(item -> values.addValues(value(item)));
+            return Value.newBuilder().setListValue(values).build();
+        }
+        throw new IllegalArgumentException("unsupported metadata value: " + v.getClass().getName());
     }
 
     /** SendMessage 的结果：成功时是 Message 或 Task，失败时是 gRPC 错误。 */

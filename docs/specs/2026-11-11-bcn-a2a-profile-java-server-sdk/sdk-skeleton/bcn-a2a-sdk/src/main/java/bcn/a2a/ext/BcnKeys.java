@@ -10,7 +10,11 @@ import java.util.Map;
  * <p>metadata 的键分三类：以 {@code bcn_} 开头的（以及裸的 {@code bcn}）归平台；含冒号的 URI 形式归外部标准扩展；
  * 其余都归业务。用下划线而不用点号，是为了避免 JSON 路径、日志检索、按路径读写的工具库把键拆成层级。
  *
- * <p>本期只有一个扩展：工具观察（toolcall）。它的数据在状态消息的 DataPart 中，不占用 metadata 键。
+ * <p>本期平台数据有两项：
+ * <ul>
+ *   <li>调用上下文：固定字段 {@link #CALLER}，不需要协商，带了就解析；</li>
+ *   <li>工具观察（toolcall）：唯一的 URI 扩展 {@link #EXT_TOOLS_V2}，需要协商；数据在状态消息的 DataPart 中，不占用 metadata 键。</li>
+ * </ul>
  *
  * <p>TODO(待定)：扩展 URI 的命名方式（Q2、HQ-9），下面的 URI 是占位。
  */
@@ -22,6 +26,9 @@ public final class BcnKeys {
     /** 平台键前缀。业务不得使用以它开头的键，也不得使用裸的 {@link #ROOT}。 */
     public static final String PREFIX = "bcn_";
     public static final String ROOT = "bcn";
+
+    /** 请求级 metadata：调用上下文。 */
+    public static final String CALLER = PREFIX + "caller";
 
     /** 工具观察扩展（toolcall）的 URI（占位）。 */
     public static final String EXT_TOOLS_V2 = "urn:bcn:a2a:extension:tools:v2";

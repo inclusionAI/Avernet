@@ -34,6 +34,12 @@ public interface BcnCall {
     Optional<String> taskId();
 
     /**
+     * 调用上下文（请求级 metadata 的固定字段 {@code bcn_caller}），请求里带了才有值。不需要协商。
+     * 字段是调用方的自述信息，不等于经过验证的身份（D1、P-101）。
+     */
+    Optional<CallerContext> caller();
+
+    /**
      * 请求级 metadata 中的业务字段：已经去掉平台保留键（{@code bcn}、{@code bcn_*}）和 URI 形式的扩展键。只读。
      * 消息级、Part 级的 metadata 仍在 {@link #message()} 中，SDK 不做处理。
      */

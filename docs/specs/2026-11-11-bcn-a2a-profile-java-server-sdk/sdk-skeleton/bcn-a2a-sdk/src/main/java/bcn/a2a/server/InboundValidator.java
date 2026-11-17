@@ -42,7 +42,7 @@ final class InboundValidator {
         //  1. 文本总长度上限；
         //  2. configuration.acceptedOutputModes 不为空且不包含 text/plain 时，返回 ContentTypeNotSupportedError；
         //  3. message.extensions 中标记了未激活的扩展（activated 中没有）：只忽略标记，不能因此认为扩展已激活；
-        //  4. metadata 中的保留键（bcn、bcn_*、URI 键）：本期没有任何入站保留键，保留并忽略，不报错；
+        //  4. metadata 中的保留键：bcn_caller 由 CallerContextCodec 解析；其余 bcn、bcn_*、URI 键保留并忽略，不报错；
         //  5. referenceTaskIds 只透传，不解析，不做存在性检查。
     }
 }

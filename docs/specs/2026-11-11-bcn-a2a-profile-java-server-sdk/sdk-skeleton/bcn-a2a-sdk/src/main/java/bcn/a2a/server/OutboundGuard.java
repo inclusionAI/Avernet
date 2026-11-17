@@ -39,7 +39,7 @@ final class OutboundGuard {
         //  1. 第一期只允许 TextPart（BCS 处理独立回复消息时只接受文本）；
         //  2. 回复总大小上限；
         //  3. message.extensions 中出现的扩展必须已激活（第一档不支持任何扩展，应为空）；
-        //  4. metadata 中不得出现平台保留键（bcn、bcn_*）。
+        //  4. metadata 中不得出现平台保留键（bcn、bcn_*）；回复中不得包含 userId 等调用上下文字段（P-105）。
         return reply.contextId() != null ? reply : Message.builder(reply).contextId(call.contextId()).build();
     }
 }

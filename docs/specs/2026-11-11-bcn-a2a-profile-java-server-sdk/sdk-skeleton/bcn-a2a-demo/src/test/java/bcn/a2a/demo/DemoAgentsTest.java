@@ -6,12 +6,14 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
+import java.util.Map;
 
 import bcn.a2a.server.A2aService;
 import bcn.a2a.spi.A2aAgent;
 import bcn.a2a.spi.BcnAgent;
 import bcn.a2a.spi.BcnCall;
 import bcn.a2a.spi.BcnStream;
+import bcn.a2a.spi.Messages;
 import bcn.a2a.test.A2aAgentTester;
 import io.grpc.Status;
 import org.a2aproject.sdk.spec.Message;
@@ -29,7 +31,24 @@ class DemoAgentsTest {
 
     @Test
     void messageAgentRepliesWithOneMessage() {
-        assertEquals("默认渠道：订单 1001 已发货", tester.send("order-agent", "查一下订单 1001").text());
+        assertEquals("匿名用户，订单 1001 已发货", tester.send("order-agent", "查一下订单 1001").text());
+    }
+
+    @Test
+    void callerContextIsParsedWithoutNegotiationAndHiddenFromBusinessMetadata() {
+        @A2aAgent(id = "echo")
+        class Echo implements BcnAgent {
+            @Override
+            public Message onMessage(BcnCall call) {
+                String user = call.caller().map(c -> c.userId()).orElse("-");
+                return Messages.agentText(user + "|" + String.join(",", call.metadata().keySet()));
+            }
+        }
+        A2aAgentTester echo = A2aAgentTester.of(new Echo());
+        Map<String, Object> metadata = Map.of(
+                "bcn_caller", Map.of("userId", "u-1", "source", Map.of("platform", "bcn")),
+                "channel", "app");
+        assertEquals("u-1|channel", echo.send("echo", "hi", metadata).text());
     }
 
     @Test
