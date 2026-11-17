@@ -43,7 +43,7 @@ impl A2aCardPort for Fetcher {
         if self.paused.load(Ordering::SeqCst) {self.entered.notify_one();self.release.notified().await;}
         if self.fail.load(Ordering::SeqCst) { return Err(ServiceError::InternalError("test fetch failure".into())); }
         let url=if self.change_route.load(Ordering::SeqCst) {"https://other.example.org"} else {"https://example.org/a2a/remote"};
-        Ok(ValidatedA2aCard { raw: json!({"name":"Card Agent","description":"Full description","supportedInterfaces":[{"url":url,"protocolBinding":"HTTP+JSON","protocolVersion":"1.0"}],"skills":[{"description":"full description", "future":42}]}),
+        Ok(ValidatedA2aCard { raw: json!({"name":"Card Agent","description":"Full description","supportedInterfaces":[{"url":url,"protocolBinding":"HTTP+JSON","protocolVersion":"1.0"}],"skills":[{"id":"full","description":"full description", "future":42}]}),
             interface: A2aInterface { url: if self.change_route.load(Ordering::SeqCst) { "https://other.example.org" } else { "https://example.org/a2a/remote" }.into(),
                 tenant: None, protocol_version: "1.0".into(), binding: A2aBinding::HttpJson, update_mode: A2aUpdateMode::Stream } })
     }
@@ -199,10 +199,10 @@ async fn scheduled_card_write_failure_is_returned_and_snapshot_remains_unchanged
 }
 
 #[tokio::test]
-async fn unchanged_manual_and_periodic_refreshes_do_not_write_or_invalidate_admin_revision() {
+async fn unchanged_manual_and_periodic_refreshes_reproject_without_invalidating_admin_revision() {
     let f=fixture().await;
     let before=f.service.configure(f.command.clone()).await.unwrap();
-    f.db.execute(DbStatement::new("CREATE TRIGGER reject_unchanged_update BEFORE UPDATE ON bcs_bots BEGIN SELECT RAISE(ABORT,'unexpected refresh write'); END")).await.unwrap();
+    f.db.execute(DbStatement::new("CREATE TRIGGER reject_unchanged_update BEFORE UPDATE ON bcs_bots WHEN NEW.agent_card IS NOT OLD.agent_card OR NEW.agent_card_url IS NOT OLD.agent_card_url OR NEW.agent_card_revision<>OLD.agent_card_revision BEGIN SELECT RAISE(ABORT,'unexpected refresh write'); END")).await.unwrap();
     let refreshed=f.service.refresh(&f.command.provider_id,&f.command.provider_admin_token,"bot",2000).await.unwrap();
     assert_eq!(refreshed,before);
     assert_eq!(f.service.refresh_due(1000).await.unwrap(),0);
