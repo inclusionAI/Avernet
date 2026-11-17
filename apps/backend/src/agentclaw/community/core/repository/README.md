@@ -511,3 +511,9 @@ submitted expiry must be aware, future and strictly advance the installed value.
 `caller_token_update` uses the same scope for IAM's existing longer-token check.
 Production transactions use SELECT FOR UPDATE; SQLite tests verify serialized
 transaction behavior and rollback, not production row-lock implementation.
+
+`correct_caller_token_expiry` is the separate administrative ledger correction
+operation. It locks the same exact instance as IAM/ASC, checks current binding and
+serving state and performs compare-and-set against an explicit nullable old UTC
+expiry. It permits earlier/past aware expiry only for authorized correction
+consumers; it never relaxes `caller_token_update` or `caller_token_refresh`.
