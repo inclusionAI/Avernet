@@ -1,0 +1,21 @@
+[package]
+name = "bcs-dist-connector-store"
+description = "Store providers of the Connector: dispatch queue, held dispatch, command feed, held index"
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+rust-version = { workspace = true }
+version = { workspace = true }
+
+[dependencies]
+async-trait = { workspace = true }
+bcs-dist-model = { workspace = true }
+bcs-dist-store = { workspace = true }
+bcs-service-api = { workspace = true }
+bcs-store-api = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
+
+[lints]
+workspace = true

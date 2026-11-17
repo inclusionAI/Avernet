@@ -6,7 +6,7 @@ the code of each task; each group ends with its crate's tests green.
 
 ## Group 0 — Scaffolding
 
-- [ ] 0.1 Add crates `bcs-dist-connector`, `bcs-dist-connector-store`,
+- [x] 0.1 Add crates `bcs-dist-connector`, `bcs-dist-connector-store`,
   `bcs-app-dist-runtime` (manifests, `[lints] workspace = true`, empty `lib.rs`),
   workspace members/dependencies, `Cargo.lock`, the R10 scan list, the
   `dist-agent` feature of `bcs-a2a-http`. `cargo check --workspace` passes.
