@@ -1,0 +1,36 @@
+apps/frontend-nextgen/assets/task-panel/src/panel/GroupDrillDown.tsx
+  h_5b2ec9c12c4d18 731
+apps/frontend-nextgen/assets/task-panel/src/panel/TaskArtifactsView.tsx
+  h_5b2ec9c12c4d18 30
+apps/frontend-nextgen/assets/task-panel/src/panel/TaskPanel.tsx
+  h_5b2ec9c12c4d18 70
+apps/frontend-nextgen/assets/task-panel/src/panel/v2/ArtifactsSection.tsx
+  h_5b2ec9c12c4d18 63
+apps/frontend-nextgen/assets/task-panel/src/panel/v2/TaskArtifactPreviewDrawer.tsx
+  h_5b2ec9c12c4d18 126,167
+apps/frontend-nextgen/assets/task-panel/test/panel/TaskArtifactsView.test.tsx
+  h_5b2ec9c12c4d18 39,42,45,47-48
+apps/frontend-nextgen/assets/task-panel/test/panel/TaskLoopView.lifecycle.test.tsx
+  h_5b2ec9c12c4d18 79-91
+apps/frontend-nextgen/assets/task-panel/test/panel/v2/ArtifactsSection.coverage.test.tsx
+  h_5b2ec9c12c4d18 4,10,38,45-46,50,56-58
+apps/frontend-nextgen/src/components/Workspace/TaskPanelAssetBoundary.tsx
+  h_5b2ec9c12c4d18 34-36,44,46
+apps/frontend-nextgen/test/components/Workspace/TaskPanelAssetBoundary.test.tsx
+  h_5b2ec9c12c4d18 25,29,32-36,42,45,49-51,53-54,58,78-79,81,112,116-118,121,156-157,159
+apps/frontend-nextgen/test/integration/taskPanel/GroupDrillDown.coverage.test.tsx
+  h_5b2ec9c12c4d18 141,155-156,183,193-195,228,249-251,257,265-267
+apps/frontend-nextgen/test/integration/taskPanel/v2/TaskArtifactPreviewDrawer.coverage.test.tsx
+  h_5b2ec9c12c4d18 128,133-134,198,207,211-213,215,219-221
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "80f1535073842ccf12e78d007712eea9af4fda83",
+  "prompts": {},
+  "humans": {
+    "h_5b2ec9c12c4d18": {
+      "author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}
