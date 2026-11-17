@@ -34,6 +34,7 @@ class ExpiryAwareCallerRuntimeUpdater:
         caller_token: CallerToken, stage: str, publish_id: int | None,
         entity_id: str | None = None, binding_id: int | None = None,
         is_test_exchange: bool = False, session_key: str | None = None,
+        force_runtime_refresh: bool = False,
     ) -> None:
         kwargs = dict(
             bot_id=bot_id, owner_user_id=owner_user_id, caller_user_id=caller_user_id,
@@ -65,9 +66,10 @@ class ExpiryAwareCallerRuntimeUpdater:
                         "device_provider=%s reason=teclaw_shared_runtime", bot_id, stage, binding_id, engine, provider)
             self._delegate.update_caller_identity(**kwargs)
             return
+        expiry_kwargs = {"force_runtime_refresh": True} if force_runtime_refresh else {}
         with self._instances.caller_token_update(
             user_id=caller_user_id, bot_id=bot_id, owner_id=owner_user_id,
-            binding_id=binding_id, expires_at=caller_token.expires_at,
+            binding_id=binding_id, expires_at=caller_token.expires_at, **expiry_kwargs,
         ) as install:
             if install:
                 self._delegate.update_caller_identity(**kwargs)

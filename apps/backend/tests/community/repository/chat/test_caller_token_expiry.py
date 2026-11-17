@@ -322,9 +322,10 @@ def test_preserving_expiry_cannot_bypass_target_checks(repo, change):
     delegate.update_caller_identity.assert_not_called()
 
 
+@pytest.mark.parametrize("force", [False, True])
 @pytest.mark.parametrize("stage", ["draft", "verify", "online"])
 @pytest.mark.parametrize("provider,engine", [("teclaw", "openclaw"), ("baas", "teclaw")])
-def test_teclaw_stages_keep_legacy_install_without_expiry_ledger(repo, stage, provider, engine, caplog):
+def test_teclaw_stages_keep_legacy_install_without_expiry_ledger(repo, stage, provider, engine, force, caplog):
     from agentclaw.community.core.caller_identity.credential import CallerToken
     from agentclaw.community.core.caller_identity.expiry_runtime_updater import ExpiryAwareCallerRuntimeUpdater
 
@@ -343,7 +344,8 @@ def test_teclaw_stages_keep_legacy_install_without_expiry_ledger(repo, stage, pr
     token = CallerToken("test-token", "u1", issued_expiry, "fingerprint")
     with caplog.at_level("INFO"):
         updater.update_caller_identity(bot_id="b1", owner_user_id="o1", caller_user_id="u1",
-                                       caller_token=token, stage=stage, publish_id=None, binding_id=7)
+                                       caller_token=token, stage=stage, publish_id=None, binding_id=7,
+                                       force_runtime_refresh=force)
     delegate.update_caller_identity.assert_called_once()
     assert delegate.update_caller_identity.call_args.kwargs["binding_id"] == 7
     instances.caller_token_update.assert_not_called()
@@ -465,12 +467,15 @@ def test_refresh_and_iam_select_the_same_row_for_update(repo):
             pass
         with scope(repo, datetime.now(UTC) + timedelta(days=2)):
             pass
+        with repo.caller_token_update(user_id="u1", bot_id="b1", owner_id="o1", binding_id=7,
+                                     expires_at=datetime.now(UTC) + timedelta(hours=1), force_runtime_refresh=True):
+            pass
     finally:
         event.remove(Session, "do_orm_execute", capture)
-    assert len(locked) == 2
-    assert str(locked[0]) == str(locked[1])
+    assert len(locked) == 3
+    assert str(locked[0]) == str(locked[1]) == str(locked[2])
     assert str(locked[0]).endswith("FOR UPDATE")
-    assert locked[0].params == locked[1].params
+    assert locked[0].params == locked[1].params == locked[2].params
 
 
 def correction(repo, *, end, expected=None, binding_id=7):
@@ -578,3 +583,139 @@ def test_correction_does_not_treat_a_human_owner_alias_as_entity(repo):
         repo.correct_caller_token_expiry(user_id="u1", bot_id="b1", owner_id="different-entity",
             binding_id=7, expires_at=datetime(2000, 1, 1, tzinfo=UTC), expected_expires_at=None)
     assert expiry(repo) is None
+
+
+@pytest.mark.parametrize("hours", [1, 48, 72])
+def test_forced_runtime_install_records_actual_expiry(repo, hours, caplog):
+    from agentclaw.community.core.caller_identity.credential import CallerToken
+    from agentclaw.community.core.caller_identity.expiry_runtime_updater import ExpiryAwareCallerRuntimeUpdater
+
+    seed(repo)
+    now = datetime.now(UTC)
+    with scope(repo, now + timedelta(hours=48)):
+        pass
+    delegate = Mock()
+    updater = ExpiryAwareCallerRuntimeUpdater(
+        bots=Mock(get_unique_by_id=Mock(return_value={"active_engine": "openclaw"})),
+        instances=repo, delegate=delegate, bindings=updater_bindings(),
+    )
+    end = now + timedelta(hours=hours)
+    with caplog.at_level("INFO"):
+        updater.update_caller_identity(
+            bot_id="b1", owner_user_id="o1", caller_user_id="u1",
+            caller_token=CallerToken("forced-secret", "u1", end, "fp"),
+            stage="online", publish_id=None, binding_id=7, force_runtime_refresh=True,
+        )
+    delegate.update_caller_identity.assert_called_once()
+    assert "force_runtime_refresh" not in delegate.update_caller_identity.call_args.kwargs
+    assert expiry(repo) == end.isoformat()
+    assert "caller_token_force_install_requested" in caplog.text
+    assert "caller_token_expiry_recorded" in caplog.text
+    assert "forced-secret" not in caplog.text
+
+
+def test_forced_install_failure_preserves_previous_expiry(repo, caplog):
+    seed(repo)
+    old = datetime.now(UTC) + timedelta(days=2)
+    with scope(repo, old):
+        pass
+    with caplog.at_level("INFO"), pytest.raises(RuntimeError):
+        with repo.caller_token_update(user_id="u1", bot_id="b1", owner_id="o1", binding_id=7,
+                                     expires_at=old - timedelta(days=1), force_runtime_refresh=True) as install:
+            assert install
+            raise RuntimeError("private-outbound-secret")
+    assert expiry(repo) == old.isoformat()
+    assert "caller_token_force_install_failed" in caplog.text
+    assert "private-outbound-secret" not in caplog.text
+
+
+@pytest.mark.parametrize("invalid", ["binding", "caller", "env", "released", "past", "naive"])
+def test_force_cannot_bypass_scope_or_expiry_validation(repo, monkeypatch, invalid):
+    from agentclaw.community.core.repository.implementations.chat import expert_chat_instance as module
+
+    seed(repo)
+    params = dict(user_id="u1", bot_id="b1", owner_id="o1", binding_id=7,
+                  expires_at=datetime.now(UTC) + timedelta(hours=1), force_runtime_refresh=True)
+    if invalid == "binding":
+        params["binding_id"] = 8
+    elif invalid == "caller":
+        params["user_id"] = "other"
+    elif invalid == "env":
+        monkeypatch.setattr(module, "get_current_env", lambda: "other")
+    elif invalid == "released":
+        repo.update_instance("u1", "b1", "o1", status="release")
+    elif invalid == "past":
+        params["expires_at"] = datetime(2000, 1, 1, tzinfo=UTC)
+    elif invalid == "naive":
+        params["expires_at"] = datetime(2099, 1, 1)
+    with pytest.raises(ValueError):
+        with repo.caller_token_update(**params):
+            pytest.fail("force must retain exact target and expiry validation")
+
+
+def test_scheduled_waiter_sees_forced_shorter_installed_expiry(repo):
+    seed(repo)
+    old = datetime.now(UTC) + timedelta(days=2)
+    with scope(repo, old):
+        pass
+    actual = old - timedelta(days=1)
+    entered, release, attempting = Event(), Event(), Event()
+    observed = []
+
+    def force():
+        with repo.caller_token_update(user_id="u1", bot_id="b1", owner_id="o1", binding_id=7,
+                                     expires_at=actual, force_runtime_refresh=True) as install:
+            assert install
+            entered.set()
+            assert release.wait(5)
+
+    def scheduled():
+        attempting.set()
+        with refresh_scope(repo) as state:
+            observed.append(state.instance["caller_token_expires_at"])
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(force)
+        assert entered.wait(5)
+        second = pool.submit(scheduled)
+        assert attempting.wait(5)
+        release.set()
+        first.result(timeout=5)
+        second.result(timeout=5)
+    assert observed == [actual.isoformat()]
+
+
+
+def test_forced_install_commit_failure_retains_ledger_and_reports_failure(repo, monkeypatch, caplog):
+    from sqlalchemy.orm import Session
+    from agentclaw.community.core.caller_identity.credential import CallerToken
+    from agentclaw.community.core.caller_identity.expiry_runtime_updater import ExpiryAwareCallerRuntimeUpdater
+
+    seed(repo)
+    old = datetime.now(UTC) + timedelta(days=2)
+    with scope(repo, old):
+        pass
+    delegate = Mock()
+    updater = ExpiryAwareCallerRuntimeUpdater(
+        bots=Mock(get_unique_by_id=Mock(return_value={"active_engine": "openclaw"})),
+        instances=repo, delegate=delegate, bindings=updater_bindings(),
+    )
+
+    def fail_commit(self):
+        raise RuntimeError("private-commit-secret")
+
+    with caplog.at_level("INFO"), monkeypatch.context() as patched:
+        patched.setattr(Session, "commit", fail_commit)
+        with pytest.raises(RuntimeError):
+            updater.update_caller_identity(
+                bot_id="b1", owner_user_id="o1", caller_user_id="u1",
+                caller_token=CallerToken("private-caller-secret", "u1", old - timedelta(days=1), "fp"),
+                stage="online", publish_id=None, binding_id=7, force_runtime_refresh=True,
+            )
+    delegate.update_caller_identity.assert_called_once()
+    assert expiry(repo) == old.isoformat()
+    assert "caller_token_force_install_failed" in caplog.text
+    assert "caller_token_force_install_succeeded" not in caplog.text
+    assert "caller_token_expiry_recorded" not in caplog.text
+    assert "private-commit-secret" not in caplog.text
+    assert "private-caller-secret" not in caplog.text
