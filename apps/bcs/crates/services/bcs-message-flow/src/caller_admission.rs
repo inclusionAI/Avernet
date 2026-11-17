@@ -97,7 +97,7 @@ pub async fn admit_caller_message(
     caller: CallerMessageAdmission,
     now_ms: i64,
 ) -> Result<CallerAdmissionOutcome, CallerAdmissionError> {
-    let CallerMessageAdmission { scope, extra_scopes, delegation_scopes, ingress, sender_name, mut admission } = caller;
+    let CallerMessageAdmission { scope, extra_scopes, mut delegation_scopes, ingress, sender_name, mut admission } = caller;
 
     // Recheck the canonical message and every target scope before reserving
     // or persisting. Callers of this seam need not pass through web_send.
@@ -116,6 +116,24 @@ pub async fn admit_caller_message(
         return Err(CallerAdmissionError::Admission(
             "caller admission requires one target scope".into(),
         ));
+    }
+
+    // Failed-at-admission recipients never execute. Their stale readiness
+    // or bounded handoff slots must not block valid siblings, and no identity
+    // may be published against their Failed receipts. Keep the rejected rows
+    // in ordinary atomic admission, including when every scope is rejected.
+    let rejected: std::collections::HashSet<&str> = admission.targets.iter()
+        .filter(|target| target.rejection.is_some())
+        .map(|target| target.target_bot_id.as_str()).collect();
+    let mut caller_scopes = scope.into_iter().chain(extra_scopes)
+        .filter(|scope| !rejected.contains(scope.target_bot_id.as_str()));
+    let scope = caller_scopes.next();
+    let extra_scopes: Vec<_> = caller_scopes.collect();
+    delegation_scopes.retain(|scope| !rejected.contains(scope.target_bot_id.as_str()));
+    if scope.is_none() && extra_scopes.is_empty() && delegation_scopes.is_empty() {
+        return deps.admission.admit(admission).await
+            .map(|result| CallerAdmissionOutcome { result })
+            .map_err(|error| CallerAdmissionError::Admission(managed_error_text(error)));
     }
 
     // 2) Target readiness (the caller-protected path only): enabled only.

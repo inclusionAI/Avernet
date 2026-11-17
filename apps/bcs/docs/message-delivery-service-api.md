@@ -318,6 +318,14 @@ Header 值不进入消息正文、模型、History、状态响应或日志。无
 附件存于 bcs_messages.content.attachments，实际发送重新读取 canonical 消息；
 历史、事件和状态不暴露保留的签名 URL。本轮不处理排队期间 URL 过期。
 
+群消息和回复的队列准入准备按目标隔离投递地址解析失败（包括 Bot 已删除）：
+该目标以原 Send/Inject 类型原子写入未发送的 `failed` 记录，`admission_error`
+为 `delivery_target_unavailable`，其他目标继续准入。失败目标不转入待处理上下文、
+不自动重试、不回退到非队列投递；幂等重放保留原失败结果。所有回复目标均失败时
+聚合状态为 `failed`，不能因其他 Inject 成功而返回 `queued`。失败记录仅存固定
+错误码，不保留原始解析错误或请求 Header；Session/投影校验和准入落库失败仍向上传播。
+已拒绝目标不占用 Caller 身份交接槽位、不发布身份，也不消耗回复转发的委派额度。
+
 ## 准入结果
 
 原有群聊响应增加可选 `queue_admission`，不把排队当作 Bot 已收到：
@@ -504,7 +512,7 @@ Private owner 的 Human 代理读取仍以授权查询为准，不扩大私有�
 | `state_version` | `u64` | 单调递增版本号，客户端按版本去重 |
 | `run_id` | `Option<String>` | 关联的运行 ID |
 | `wait_reason` | `Option<DeliveryWaitReason>` | 排队等待原因 |
-| `admission_error` | `Option<&'static str>` | 准入错误码（仅 `delivery_provider_headers_unsupported`） |
+| `admission_error` | `Option<&'static str>` | 准入错误码：`delivery_provider_headers_unsupported` 或 `delivery_target_unavailable` |
 | `content_preview` | `Option<String>` | 消息正文预览（UTF-8 安全截断至前 200 字节，超出以 `…` 结尾），供前端排队列表展示 |
 
 IM 使用原消息来源和原 canonical Session：排队超过 10 秒时，将原消息上的状态表情切换为

@@ -1,5 +1,19 @@
 # bcs-service-api Context
 
+## Managed admission target failures
+
+`DeliveryAdmissionRejection::TargetUnavailable` records a recipient's failed
+delivery-target resolution as an unsent terminal Failed row alongside valid
+siblings. The existing `DeliveryStatusView.admission_error` exposes the fixed
+`delivery_target_unavailable` code, never arbitrary resolver text. Group message
+and reply preparation share this behavior; stores retain atomic admission and
+idempotency, including when every recipient fails. Persistence errors remain
+request errors. The Rust enum gains one variant (exhaustive consumers must
+handle it); workspace path consumers rebuild together. Existing stored rows
+remain readable, and no schema, Plugin API or endpoint change is needed. See
+the [admission contract](src/port/repo/message_delivery.rs) and
+[message-flow boundary](../../services/bcs-message-flow/CONTEXT.md#queued-group-target-failure-isolation).
+
 ## Version 6.1.0: Distributed coordination contracts
 
 Add opt-in Gateway, Worker and Connector service/port declarations plus

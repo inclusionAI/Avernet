@@ -169,6 +169,60 @@ fn caller(bot: &str, message_id: &str, expiry: i64) -> CallerMessageAdmission {
 }
 
 #[tokio::test]
+async fn rejected_caller_targets_do_not_reserve_or_publish_identity() {
+    use bcs_service_api::application::caller_handoff::HandoffIdentityReadiness as Readiness;
+    use bcs_service_api::port::repo::message_delivery::DeliveryAdmissionRejection;
+    use bcs_domain::message_delivery::MessageDeliveryStatus as Status;
+
+    for position in ["primary", "extra", "delegation"] {
+        let mut deps = deps().await;
+        deps.handoff = Arc::new(HumanCallerDeliveryHandoff::new(1));
+        let message_id = source_message_id();
+        let mut args = caller("bot-on", &message_id, NOW + 300_000);
+        let mut rejected = args.admission.targets[0].clone();
+        rejected.target_bot_id = "bot-deleted".into();
+        rejected.rejection = Some(DeliveryAdmissionRejection::TargetUnavailable);
+        rejected.semantic_projection_json = json!({"version":1});
+        args.admission.targets.insert(0, rejected);
+        let rejected_scope = scope("bot-deleted", &message_id);
+        match position {
+            "primary" => {
+                args.extra_scopes = vec![args.scope.take().unwrap()];
+                args.scope = Some(rejected_scope.clone());
+            }
+            "extra" => args.extra_scopes = vec![rejected_scope.clone()],
+            _ => args.delegation_scopes = vec![rejected_scope.clone()],
+        }
+        let result = admit_caller_message(&deps, args, NOW).await
+            .expect("rejected targets must not starve the healthy target's only handoff slot").result;
+        assert_eq!(result.deliveries[0].state.status, Status::Failed);
+        assert_eq!(result.deliveries[1].state.status, Status::Queued);
+        assert_eq!(deps.handoff.identity_readiness(&rejected_scope).await, Readiness::Gone);
+        assert_eq!(deps.handoff.identity_readiness(&scope("bot-on", &message_id)).await, Readiness::Published);
+        assert!(result.deliveries[0].semantic_projection_json.get("caller_required").is_none());
+        assert!(result.deliveries[0].semantic_projection_json.get("caller_lineage").is_none());
+    }
+}
+
+#[tokio::test]
+async fn all_rejected_caller_targets_persist_without_readiness_or_identity() {
+    use bcs_service_api::application::caller_handoff::HandoffIdentityReadiness;
+    use bcs_service_api::port::repo::message_delivery::DeliveryAdmissionRejection;
+    use bcs_domain::message_delivery::MessageDeliveryStatus as Status;
+
+    for bot in ["bot-on", "bot-deleted"] {
+        let deps = deps().await;
+        let message_id = source_message_id();
+        let mut args = caller(bot, &message_id, NOW + 300_000);
+        args.admission.targets[0].target_bot_id = bot.into();
+        args.admission.targets[0].rejection = Some(DeliveryAdmissionRejection::TargetUnavailable);
+        let result = admit_caller_message(&deps, args, NOW).await.unwrap().result;
+        assert_eq!(result.deliveries[0].state.status, Status::Failed);
+        assert_eq!(deps.handoff.identity_readiness(&scope(bot, &message_id)).await, HandoffIdentityReadiness::Gone);
+    }
+}
+
+#[tokio::test]
 async fn textless_content_refuses_and_releases_the_reservation() {
     // Review P1-5: the protected wire digest requires plain text; an
     // admission without it refuses before persistence and releases the slot.

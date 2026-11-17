@@ -83,9 +83,20 @@ pub struct DeliveryAdmissionTarget {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub enum DeliveryAdmissionRejection { ProviderHeadersUnsupported }
+pub enum DeliveryAdmissionRejection {
+    ProviderHeadersUnsupported,
+    /// Target resolution failed before dispatch. Commit an unsent Failed row
+    /// for this recipient while admitting its siblings; never retry or fall
+    /// back to inline delivery. Store only the fixed code, not resolver text.
+    TargetUnavailable,
+}
 impl DeliveryAdmissionRejection {
-    pub fn code(self) -> &'static str { "delivery_provider_headers_unsupported" }
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::ProviderHeadersUnsupported => "delivery_provider_headers_unsupported",
+            Self::TargetUnavailable => "delivery_target_unavailable",
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

@@ -488,3 +488,39 @@ semantics; missing, reordered or ambiguous starts fail closed. Incremental paren
 reads use canonical scoped LIMIT 2 and existing Run-context/config caches, with no
 new queue scan or schema. See `docs/native-task-caller.md` for costs, retention,
 SDK-ordering prerequisites and conformance coverage.
+
+## Queued group target failure isolation
+
+Group admission and queued reply routing isolate delivery-target resolution
+errors per recipient, matching inline delivery. A missing/deleted Bot or other
+resolver failure becomes an unsent terminal `Failed` delivery with the fixed
+`delivery_target_unavailable` admission error; valid siblings continue. The
+failed target retains its Send/Inject kind and participates in the same atomic
+message admission and idempotent replay. It never falls back to inline delivery,
+becomes pending context, or reserves a runnable output stream. All failed Send
+targets produce a failed aggregate status even if observer context is accepted.
+Rejected reply targets also skip Caller delegation so they cannot consume the
+parent turn's nonrefundable invocation budget ahead of valid siblings.
+Human Caller admission filters rejected recipients out of readiness checks and
+identity handoff reservations/publication after validating the sender and scope
+environment. A surviving caller target becomes primary; when all requested
+scopes were rejected, ordinary atomic admission records the failures without
+parking identity. Non-rejected recipient behavior is unchanged. The
+[Caller admission regressions](tests/cases/caller_admission_contract.rs) cover
+primary, extra and delegation scopes with only one available handoff slot.
+Resolver diagnostics log Group/Session/Bot and the error category; raw resolver
+text and request headers are not persisted for rejected targets. Canonical
+Session validation, projection validation and persistence errors still propagate.
+
+The change adds no schema, remote reads, scans or retries: each selected target
+retains its existing registry/Provider resolution and projection reads. On a
+failure, preparation now continues through the remaining recipients and commits
+one message plus one delivery per selected target in the existing transaction.
+Those writes previously never occurred when resolution aborted the request.
+Memory/SQLite conformance covers durable failure and replay; this does not
+establish production MySQL load capacity. See the
+[admission contract](../../service-api/bcs-service-api/src/port/repo/message_delivery.rs),
+[failure regression tests](tests/cases/queued_target_failures.rs), and
+[shared store conformance](../../test-support/bcs-test-support/src/contract/repo/message_delivery.rs).
+The [delegation regressions](src/caller_delegation_tests.rs) cover a rejected
+reply target followed by a valid sibling with one invocation remaining.
