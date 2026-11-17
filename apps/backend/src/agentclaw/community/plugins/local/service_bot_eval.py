@@ -107,5 +107,68 @@ class LocalServiceBotEval(ServiceBotEvalPlugin):
             "page": {"page_no": page_no, "page_size": page_size, "total": 0},
         }
 
+    async def save_standard_result(
+        self,
+        context: ServiceBotEvalContext,
+        result: dict[str, Any],
+        *,
+        trigger_source: str = "manual_restart_standard_eval",
+    ) -> dict[str, Any]:
+        logger.info(
+            "[ServiceBotEval] skipped standard-result save bot=%s version=%s trigger=%s task=%s",
+            context.bot_id,
+            context.bot_version,
+            trigger_source,
+            result.get("task_id"),
+        )
+        return {
+            "saved": False,
+            "gate_status": "SKIPPED",
+            "cert_id": "",
+            "message": "当前环境未启用统一评测门禁",
+        }
+
+    async def create_standard_environment(
+        self,
+        context: ServiceBotEvalContext,
+        *,
+        default_tag: str = "eval",
+        ttl_minutes: int = 120,
+    ) -> dict[str, Any]:
+        return {
+            "supported": False,
+            "bot_id": context.bot_id,
+            "default_tag": default_tag,
+            "build_status": "not_supported",
+        }
+
+    async def get_standard_environment_status(
+        self,
+        context: ServiceBotEvalContext,
+        *,
+        default_tag: str = "eval",
+    ) -> dict[str, Any]:
+        return {
+            "supported": False,
+            "bot_id": context.bot_id,
+            "default_tag": default_tag,
+            "build_status": "not_supported",
+        }
+
+    async def destroy_standard_environment(
+        self,
+        context: ServiceBotEvalContext,
+        *,
+        default_tag: str = "eval",
+        reason: str = "standard_eval_finished",
+    ) -> dict[str, Any]:
+        return {
+            "supported": False,
+            "bot_id": context.bot_id,
+            "default_tag": default_tag,
+            "destroyed": False,
+            "reason": reason,
+        }
+
     async def sync(self, context: ServiceBotEvalContext) -> dict[str, Any]:
         return skipped_result()

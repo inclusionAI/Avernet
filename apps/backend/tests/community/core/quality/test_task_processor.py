@@ -4,7 +4,7 @@ Tests status transitions:
 - init → env_preparing → env_ready → task_created → task_executed → success/failed
 """
 import logging
-from unittest.mock import MagicMock, AsyncMock, call
+from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import datetime
 
 import pytest
@@ -1671,3 +1671,228 @@ class TestTaskProcessor:
             processor._transition_to(1, "init", "env_preparing")
 
         assert "Task not found: 1" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_init_with_active_prebuilt_env_skips_baas_eval_publish(
+        self, processor, mock_repo, mock_publish_flow_service
+    ):
+        """A browser-provisioned active Eval-zone Bot is not duplicated by BaaS."""
+        task = make_task(
+            id=1,
+            status="init",
+            bot_id="bot-1",
+            owner_id="owner-1",
+            ext={
+                "publish_id": 8,
+                "eval_env": {
+                    "build_status": "active",
+                    "binding_id": "binding-1",
+                    "device_id": "device-1",
+                    "eval_id": "eval-1",
+                },
+            },
+        )
+        done = make_task(id=1, status="task_created")
+        mock_repo.get_by_id.return_value = task
+        mock_repo.update_status.return_value = done
+
+        with patch.object(processor, "to_task_created", return_value=done) as mock_task_created:
+            result = await processor.to_env_preparing(1)
+
+        mock_publish_flow_service.eval_publish.assert_not_called()
+        mock_task_created.assert_called_once_with(1)
+        expected_ext = {**task.ext, "source_status": "init"}
+        mock_repo.update_status.assert_called_once_with(1, "env_ready", expected_ext)
+        assert result == done
+
+    @pytest.mark.asyncio
+    async def test_non_terminal_prebuilt_env_stays_in_env_preparing(
+        self, processor, mock_repo, mock_publish_flow_service
+    ):
+        """A still-building prebuilt environment must not be treated as failed."""
+        task = make_task(
+            id=1,
+            status="init",
+            ext={
+                "publish_id": 8,
+                "eval_env": {"build_status": "building"},
+            },
+        )
+        env_preparing = make_task(
+            id=1,
+            status="env_preparing",
+            ext={**task.ext, "source_status": "init"},
+        )
+        mock_repo.get_by_id.return_value = task
+
+        with (
+            patch.object(
+                processor,
+                "_transition_to",
+                return_value=env_preparing,
+            ) as mock_transition,
+            patch.object(processor, "to_env_ready", return_value=env_preparing),
+        ):
+            result = await processor.to_env_preparing(1)
+
+        mock_publish_flow_service.eval_publish.assert_not_called()
+        mock_transition.assert_called_once_with(
+            1,
+            TaskStatus.INIT.value,
+            TaskStatus.ENV_PREPARING.value,
+            task.ext,
+        )
+        assert result == env_preparing
+
+    def test_env_ready_with_non_terminal_prebuilt_env_returns_current_task(
+        self, processor, mock_repo, mock_publish_flow_service
+    ):
+        """A still-building prebuilt environment is persisted but not failed."""
+        task = make_task(
+            id=1,
+            status="env_preparing",
+            ext={"eval_env": {"build_status": "building"}},
+        )
+        mock_repo.get_by_id.return_value = task
+
+        result = processor.to_env_ready(1)
+
+        assert result == task
+        mock_publish_flow_service.get_baas_publish_progress.assert_not_called()
+        ext_update = mock_repo.update_ext.call_args.args[1]
+        assert ext_update["eval_env"]["build_status"] == "building"
+
+    @pytest.mark.asyncio
+    async def test_init_with_failed_prebuilt_env_marks_task_failed(
+        self, processor, mock_repo, mock_publish_flow_service
+    ):
+        """A failed prebuilt environment fails the task without BaaS publish."""
+        task = make_task(
+            id=1,
+            status="init",
+            ext={
+                "publish_id": 8,
+                "eval_env": {
+                    "build_status": "failed",
+                    "error": "build failed",
+                },
+            },
+        )
+        failed = make_task(id=1, status="failed", ext=task.ext)
+        mock_repo.get_by_id.return_value = task
+
+        with patch.object(processor, "to_env_released", return_value=failed) as mock_release:
+            result = await processor.to_env_preparing(1)
+
+        mock_publish_flow_service.eval_publish.assert_not_called()
+        mock_release.assert_called_once_with(
+            1,
+            TaskStatus.INIT.value,
+            TaskStatus.FAILED.value,
+        )
+        assert mock_repo.update_ext.call_args.args[1]["error_msg"] == "build failed"
+        assert result == failed
+
+    def test_terminal_transition_skips_baas_teardown_for_prebuilt_env(
+        self, processor, mock_repo, mock_publish_flow_service
+    ):
+        """The caller keeps ownership of Eval-zone Bot destruction."""
+        task = make_task(
+            id=1,
+            status="task_executed",
+            ext={"eval_env": {"build_status": "active"}},
+        )
+        terminal = make_task(id=1, status="success", ext=task.ext)
+        mock_repo.get_by_id.return_value = task
+        mock_repo.update_status.return_value = terminal
+
+        result = processor.to_env_released(
+            1,
+            TaskStatus.TASK_EXECUTED.value,
+            TaskStatus.SUCCESS.value,
+        )
+
+        mock_publish_flow_service.eval_teardown.assert_not_called()
+        assert result == terminal
+
+    def test_call_eval_start_api_forwards_prebuilt_eval_headers(
+        self, processor, mock_masa_eval_http
+    ):
+        """MASA receives the Eval-zone routing header when a prebuilt env exists."""
+        response = MagicMock()
+        response.status_code = 200
+        response.text = '{"success": true, "data": {"set_task_uuid": "masa-1"}}'
+        response.json.return_value = {"success": True, "data": {"set_task_uuid": "masa-1"}}
+        mock_masa_eval_http.post.return_value = response
+        headers = {
+            "X-Eval-Id": "eval-bot-1:eval",
+            "X-Agentclaw-Default-Tag": "eval",
+        }
+
+        result = processor._call_eval_start_api(
+            headers["X-Eval-Id"],
+            "bot-1:owner-1",
+            "set-1",
+            "8",
+            headers=headers,
+        )
+
+        assert result == "masa-1"
+        mock_masa_eval_http.post.assert_called_once_with(
+            "/eval/start",
+            json={
+                "env": "eval-bot-1:eval",
+                "bot_id": "bot-1:owner-1",
+                "set_uuid": "set-1",
+                "version": "8",
+            },
+            headers=headers,
+        )
+
+    @pytest.mark.asyncio
+    async def test_task_created_uses_prebuilt_eval_env_identifier(
+        self, processor, mock_repo
+    ):
+        """The new link starts MASA against the Eval-zone environment, not task ID."""
+        task = make_task(
+            id=1,
+            status="env_ready",
+            bot_id="bot-1",
+            owner_id="owner-1",
+            uuid="quality-1",
+            ext={
+                "set_uuid": "set-1",
+                "version": 8,
+                "eval_env": {
+                    "build_status": "active",
+                    "eval_headers": {
+                        "X-Eval-Id": "eval-bot-1:eval",
+                        "X-Agentclaw-Default-Tag": "eval",
+                    },
+                },
+            },
+        )
+        task_created = make_task(id=1, status="task_created", ext=task.ext)
+        mock_repo.get_by_id.return_value = task
+        mock_repo.update_status.return_value = task_created
+
+        with (
+            patch.object(
+                processor,
+                "_call_eval_start_api",
+                return_value="masa-1",
+            ) as mock_start,
+            patch.object(processor, "to_task_executed", return_value=task_created),
+        ):
+            processor.to_task_created(1)
+
+        mock_start.assert_called_once_with(
+            "eval-bot-1:eval",
+            "bot-1:owner-1",
+            "set-1",
+            "8",
+            headers={
+                "X-Eval-Id": "eval-bot-1:eval",
+                "X-Agentclaw-Default-Tag": "eval",
+            },
+        )

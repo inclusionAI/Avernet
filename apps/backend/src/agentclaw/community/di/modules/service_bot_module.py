@@ -71,6 +71,7 @@ from agentclaw.community.api.collaborator_lock_service import (
 )
 from agentclaw.community.api.collaborator_service import CollaboratorServiceProtocol
 from agentclaw.community.api.quality_service import QualityTaskServiceProtocol
+from agentclaw.community.api.task_processor_service import TaskProcessorProtocol
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_management.services.bcn_service import BcnService
 from agentclaw.community.core.bot_management.services.bot_service import BotService
@@ -101,6 +102,7 @@ from agentclaw.community.core.service_bot.services.deploy.teclaw_file_promotion 
 )
 from agentclaw.community.di.modules.skill_center_module import DeviceFilesystemDispatcher
 from agentclaw.community.plugin_api.object_storage import ObjectStoragePlugin
+from agentclaw.community.plugin_api.http_client import HttpClient, QUALIFIER_MASA_AGENT_EVAL
 from agentclaw.community.plugin_api.service_bot_eval import ServiceBotEvalPlugin
 from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
 from agentclaw.community.core.repository.protocols.publishing import PublishOperationRepository
@@ -188,7 +190,7 @@ from agentclaw.community.core.skill_center.canonical_center_store import (
 from agentclaw.community.di import config as cfg
 from agentclaw.community.kernel.bot_config import StoreRef
 from agentclaw.community.log import get_logger
-from agentclaw.community.plugin_api.http_client import HttpClient, QUALIFIER_BAAS, QUALIFIER_GENERAL
+from agentclaw.community.plugin_api.http_client import QUALIFIER_BAAS, QUALIFIER_GENERAL
 from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.plugin_api.secret_resolver import SecretResolver
 from agentclaw.community.plugin_api.outbound_rules import OutboundRuleProvider
@@ -843,6 +845,9 @@ class ServiceBotModule(Module):
         publish_repo: BotPublishRepositoryProtocol,
         collaborator_service: CollaboratorServiceProtocol,
         eval_gate: ServiceBotEvalPlugin,
+        quality_tasks: QualityTaskServiceProtocol,
+        task_processor: TaskProcessorProtocol,
+        masa_eval_http: Annotated[HttpClient, QUALIFIER_MASA_AGENT_EVAL],
     ) -> ServiceBotEvalService:
         """Bind evaluation release context and permissions to the selected plugin."""
         return ServiceBotEvalService(
@@ -850,6 +855,9 @@ class ServiceBotModule(Module):
             publish_repo=publish_repo,
             collaborator_service=collaborator_service,
             plugin=eval_gate,
+            quality_tasks=quality_tasks,
+            task_processor=task_processor,
+            masa_eval_http=masa_eval_http,
         )
 
     @singleton
