@@ -6,7 +6,6 @@ import { Segmented } from '@/components/ui/Segmented';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select';
 import { Textarea } from '@/components/ui/Textarea';
 import type { BotEditorModel } from '@/domain/botEditor';
-import { estimateNextRun } from '@/services/botScheduledTasks/nextRun';
 import {
   DEFAULT_ROUTINE_CRON,
   isRoutineSchedulePreset,
@@ -22,44 +21,13 @@ import {
   type RoutineForm,
   type RoutineStage,
 } from '@/services/botScheduledTasks/types';
-import { CalendarClock } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { RoutineCronPreview } from './RoutineCronPreview';
+import { useRoutineModels } from './useRoutineModels';
 
 /** 弹窗内的小节标题：与详情页分组称呼一致，弱化为眉题而不是大块标题。 */
 function SectionLabel({ children }: { children: string }) {
   return <p className="m-0 text-xs font-semibold tracking-wide text-muted-foreground">{children}</p>;
-}
-
-/** 提交前就回答“这个表达式下次什么时候触发”，而不是保存后到列表里才发现写错。 */
-function CronPreview({ cron, timezone, enabled }: { cron: string; timezone: string; enabled: boolean }) {
-  const next = estimateNextRun({ cron, timezone, enabled }, Date.now());
-  if (!next)
-    return (
-      <p className="m-0 flex items-center gap-1.5 text-xs text-warning">
-        <CalendarClock aria-hidden className="size-3.5" />
-        {enabled
-          ? '无法解析该表达式，请检查是否为完整的五段 Cron（分钟 小时 日期 月份 星期）'
-          : '任务当前处于停用状态，保存后不会自动调度；启用后才会按此频率执行'}
-      </p>
-    );
-  const text = new Intl.DateTimeFormat('zh-CN', {
-    timeZone: timezone,
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hourCycle: 'h23',
-  }).format(new Date(next));
-  return (
-    <p className="m-0 flex items-center gap-1.5 text-xs text-muted-foreground">
-      <CalendarClock aria-hidden className="size-3.5" />
-      下次执行预计：
-      <time dateTime={next} className="font-mono">
-        {text}
-      </time>
-      <span>（{timezone}，实际以运行环境为准）</span>
-    </p>
-  );
 }
 
 export function RoutineFormDialog({
@@ -91,28 +59,10 @@ export function RoutineFormDialog({
         },
   );
   const [customCron, setCustomCron] = useState(!isRoutineSchedulePreset(form.cron));
-  const [models, setModels] = useState<BotEditorModel[]>([]);
-  const [modelsError, setModelsError] = useState('');
-  const [modelsLoading, setModelsLoading] = useState(true);
+  const { models, error: modelsError, loading: modelsLoading } = useRoutineModels(onLoadModels);
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
   const [error, setError] = useState('');
-  useEffect(() => {
-    let active = true;
-    void onLoadModels()
-      .then((items) => {
-        if (active) setModels(items);
-      })
-      .catch((reason: unknown) => {
-        if (active) setModelsError(reason instanceof Error ? reason.message : '模型列表加载失败');
-      })
-      .finally(() => {
-        if (active) setModelsLoading(false);
-      });
-    return () => {
-      active = false;
-    };
-  }, [onLoadModels]);
   const instanceMode = routineInstanceMode(context, form.runtime_stage);
   const instanceIds = routineInstanceIds(context, form.runtime_stage);
   useEffect(() => {
@@ -280,7 +230,11 @@ export function RoutineFormDialog({
                 </SelectContent>
               </Select>
             )}
-            <CronPreview cron={form.cron} timezone={form.timezone || 'Asia/Shanghai'} enabled={form.enabled !== false} />
+            <RoutineCronPreview
+              cron={form.cron}
+              timezone={form.timezone || 'Asia/Shanghai'}
+              enabled={form.enabled !== false}
+            />
           </div>
           <div className="space-y-5">
             <SectionLabel>执行指令</SectionLabel>
