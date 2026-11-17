@@ -1,5 +1,7 @@
 //! Plugin contract harnesses.
 
+pub mod store;
+
 use bcs_cache_api::CachePlugin;
 use bcs_db_api::DbPlugin;
 use bcs_llm_api::{LlmChatCompletionPort, LlmChatCompletionRequest, LlmChatMessage};

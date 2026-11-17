@@ -77,6 +77,7 @@ members = [
     # plugin-api
     "crates/plugin-api/bcs-auth-api",
     "crates/plugin-api/bcs-cache-api",
+    "crates/plugin-api/bcs-store-api",
     "crates/plugin-api/bcs-channel-api",
     "crates/plugin-api/bcs-db-api",
     "crates/plugin-api/bcs-human-notify-api",
@@ -341,6 +342,7 @@ bcs-invite-code-store      = { path = "crates/services/bcs-invite-code-store" }
 bcs-session-file           = { path = "crates/services/bcs-session-file" }
 bcs-system-message         = { path = "crates/services/bcs-system-message" }
 bcs-cache-api              = { path = "crates/plugin-api/bcs-cache-api" }
+bcs-store-api              = { path = "crates/plugin-api/bcs-store-api" }
 bcs-channel-api            = { path = "crates/plugin-api/bcs-channel-api" }
 bcs-db-api                 = { path = "crates/plugin-api/bcs-db-api" }
 bcs-human-notify-api       = { path = "crates/plugin-api/bcs-human-notify-api" }

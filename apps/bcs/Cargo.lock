@@ -2426,6 +2426,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "bcs-store-api"
+version = "0.1.4-beta.3"
+dependencies = [
+ "async-trait",
+ "serde_json",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "bcs-system-message"
 version = "0.1.4-beta.3"
 dependencies = [
@@ -2483,6 +2492,7 @@ dependencies = [
  "bcs-service-api",
  "bcs-session",
  "bcs-session-file",
+ "bcs-store-api",
  "futures",
  "serde_json",
  "sha2",
