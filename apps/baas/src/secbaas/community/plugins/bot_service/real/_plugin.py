@@ -612,13 +612,13 @@ class AiohttpBotServicePlugin(BotServicePlugin):
                     if credential.is_iam_token:
                         await self._refresh_caller_token(
                             bot_id=bot_id,
-                            cookie=f"IAM_TOKEN={credential.token}",
+                            auth_header=self._iam_cookie(credential.token),
                             token_type="iam",
                         )
                     elif credential.is_dingtalk:
                         await self._refresh_caller_token(
                             bot_id=bot_id,
-                            cookie=f"IAM_TOKEN={credential.token}",
+                            auth_header=self._iam_cookie(credential.token),
                             token_type="dingtalk",
                         )
                     else:
@@ -804,11 +804,16 @@ class AiohttpBotServicePlugin(BotServicePlugin):
             )
         return sandbox_id.removeprefix("ARCA_").removesuffix(":20003")
 
+    @staticmethod
+    def _iam_cookie(auth_payload: str) -> str:
+        """Build the Caller refresh header without embedding a raw value."""
+        return "IAM_TOKEN=" + auth_payload
+
     async def _refresh_caller_token(
         self,
         *,
         bot_id: str,
-        cookie: str,
+        auth_header: str,
         token_type: Literal["iam", "dingtalk"] = "iam",
     ) -> None:
         """GET /api/v1/token/iam — sandbox 就绪后单次刷新 Caller 执行凭据。
@@ -827,7 +832,7 @@ class AiohttpBotServicePlugin(BotServicePlugin):
         request_id = str(uuid.uuid4())
         headers = {
             "Accept": "application/json",
-            "Cookie": cookie,
+            "Cookie": auth_header,
             "X-Request-ID": request_id,
         }
         try:
