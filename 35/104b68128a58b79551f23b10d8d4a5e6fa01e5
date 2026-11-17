@@ -1,0 +1,14 @@
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/method_policies.py
+  h_059e888e5e4e82 1-30
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "35104b68128a58b79551f23b10d8d4a5e6fa01e5",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}
