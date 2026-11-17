@@ -123,7 +123,7 @@ Unknown 不允许故障认领。自身租约不确定时暂停新增工作；超
 2. 读取 checkpoint，按第 4.2 节判断当前 handoff 是否要求等待。
 3. 使用读取到的文档版本条件更新 owner，保留最新 `commit_seq、consumed、runner_state、outbox` 和恢复信息。不存在时用 create-if-absent 初始化。
 4. 确认封印及当前 claim、成员资格后，加载最新 checkpoint。校验失败或未知不激活，也不回滚已经发生的封印。
-5. 按既有恢复协议幂等补做 outbox，再处理下一批输入。
+5. 通过 `InboxSchedulingPort::observe` 安装并确认本代会话的 scheduling fence，再检查或结算调度安排；按既有恢复协议幂等补做 outbox，再处理下一批输入。
 
 封印、业务提交、恢复控制更新必须推进同一个文档版本。一个示意顺序是：旧 Worker 读取 V1，新 Worker 封印产生 V2，旧 Worker 携带 V1 提交整份 checkpoint 时整笔失败。
 
@@ -139,7 +139,8 @@ Unknown 不允许故障认领。自身租约不确定时暂停新增工作；超
 - 全量恢复遍历独立于 handoff 存在；任务丢失或重启后重新启动，清掉 handoff 不能停止它。
 - 通知或已有会话读循环加快发现，持久 pending 枚举补齐未监听会话。
 - 遍历必须满足输入仓储的公平、有界和并发登记不丢失约定，不能把一次可变列表的偏移扫描当作完整快照证明。
-- 来源进入交接后停止删除 pending 项或推迟安排；在途调度操作由既有 scheduling owner fence 和条件更新拒绝，不能靠普通无条件更新替代。
+- 来源进入交接后停止删除 pending 项或推迟安排，并将已发出的调度操作纳入收尾确认。
+- 修改 shard owner 或 ckpt.owner 不会自动安装 scheduling fence。接收方通过 `observe` 安装新 fence 后，旧 owner 的 `settle` 才必须被拒绝；此之前仍按原 owner 与调度 token 校验，不能声称所有旧在途操作已经失效。
 
 ## 4. 主动交接、超时与清理
 
@@ -155,7 +156,7 @@ Unknown 不允许故障认领。自身租约不确定时暂停新增工作；超
 
 如果 B 登记请求后收到自己的 shutdown hook，仍须确认这笔在途请求的结果。成功入站的 shard 纳入自身排空范围，不能因为刚进入 draining 就把已发生的转交当作拒绝。相同请求的结果查询和确认不能被“拒绝新请求”的入口一起挡住。
 
-**A 逐个交出 session。** 空闲会话立即交出；忙碌会话完成当前轮次、确认 checkpoint 和必要的 outbox 后，再条件修改 owner 为 B。转移只改变处理权，保留最新 envelope。B 取得会话处理权后才能恢复、监听和处理。
+**A 逐个交出 session。** 空闲会话在相关在途操作确认后交出；忙碌会话完成当前轮次、确认 checkpoint、必要的 outbox 和已发出的调度操作后，再条件修改 owner 为 B。未确认的 settle 不能被忽略后报告会话已释放或 source_done。转移只改变处理权，保留最新 envelope。B 取得会话处理权并安装 scheduling fence 后，才能继续调度、恢复和处理。
 
 只依赖各节点的 shutdown hook，不假设存在发布批次协调器。因此不能保证 A 永远不会选中随后也开始 shutdown 的 B；靠 B 的本地入口和已接受请求收尾保证安全。
 
@@ -246,6 +247,7 @@ JsonStorePlugin 已定义整文档版本条件语义，但具体 provider 仍需
 | H42 清理后 B→C，遗留 A 的 session | C 等 B，直接接管 A 的遗留会话 |
 | 通知丢失、未来 deadline、扫描重启 | 持久 pending 恢复仍然发现并推进工作 |
 | C 封印后 B 的请求迟到 | B 无法改回 owner 或覆盖业务状态 |
+| 旧 settle 与接管并发 | 来源确认在途操作；接收方 observe 安装新 fence 后拒绝旧 settle，不把 owner 修改误当成调度 fence 已生效 |
 | 截止时间读取失败或机器时钟偏差 | 不用不可靠时间提前强抢；按合法的终止证据恢复 |
 | 版本上限、删除重建、普通写绕过 | 上限失败；拒绝不满足历史/写入纪律的启用方式 |
 
