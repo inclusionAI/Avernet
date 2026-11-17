@@ -557,7 +557,7 @@ async def _run_scan(
             logger.warning("[/diagnose] All bot files are empty for bot=%s", bot_id)
             progress.status = "failed"
             progress.failed_reason = (
-                "Bot 配置文件为空。请先给 Bot 发一条消息，再回来运行健康检测。"
+                "请先给 Bot 发一条消息完成初始化，再回来运行健康检测。"
                 if show_initialization_hint and reads_confirmed
                 else "请耐心等待配置文件同步完成后，再执行诊断"
             )

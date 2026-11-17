@@ -58,7 +58,7 @@ async def test_diagnose_rejects_nonexistent_bot_without_creating_scan(
     ("device_bound", "publish_id", "failed_reason"),
     [
         pytest.param(
-            True, None, "Bot 配置文件为空。请先给 Bot 发一条消息，再回来运行健康检测。",
+            True, None, "请先给 Bot 发一条消息完成初始化，再回来运行健康检测。",
             id="empty-draft",
         ),
         pytest.param(
