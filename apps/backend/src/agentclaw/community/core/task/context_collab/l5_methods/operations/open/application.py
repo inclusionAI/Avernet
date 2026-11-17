@@ -20,7 +20,7 @@ SCREENING→ADMITTED 一条规则,跳过评审直接 admit 由机器拒绝。
   this exact Collet; authority follows the admitting application's G4 state,
   so revoke invalidates participation without adding a second state machine.
 
-录取仅对 ``admitted_scope_ref`` 生效,不产生 Space Membership / Grant
+录取仅对命令的 ``collect_id`` 生效,不产生 Space Membership / Grant
 (G1 断言);``admit`` 的幂等键是 ``decision_id``(§8.3,同 ID 同形态
 早退、产物不重建);``revoke_admission`` 按 opportunity 类型终结产物:
 成员行经 group.remove_member 裁决 → REMOVED(roster 乐观并发,逐次
@@ -62,14 +62,12 @@ from agentclaw.community.core.task.context_collab.l5_methods.open_profile import
 from agentclaw.community.core.task.context_collab.l5_methods.operations.contracts import (
     OpenAdmitCommand,
     OpenDecisionOpCommand,
+    OpenScreenCommand,
     ProfileOpAcceptedResult,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.operations.open.base import (
     OpenMethodServiceBase,
     _now,
-)
-from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime import (
-    _shape_of,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.swarm_profile import (
     AllocationState,
@@ -90,10 +88,6 @@ _ALLOCATION_MACHINE = METHOD_MACHINE_REGISTRY["swarm_allocation"]
 # 替换;哨兵是结构上合法的非空引用,不与 allocate_stage 的真实 lease
 # 断言冲突(语义记录不经那条操作路径创建)。
 _ADMITTED_LEASE_EXPIRES_AT = "9999-12-31T23:59:59+00:00"
-
-# admit 幂等重放(§8.3)的比对面:admitted_scope_ref 是请求形态;
-# target_stage_ref 的产物只建一次(decision 早退),重放不重建。
-_ADMIT_REQUEST_FIELDS = ("admitted_scope_ref",)
 
 
 def _resolve_application_state(from_state: str, event: str) -> str:
@@ -165,19 +159,16 @@ class OpenApplicationOpsMixin(OpenMethodServiceBase):
         )
 
     def screen(
-        self,
-        collab_context_id: str,
-        method_binding_id: str,
-        application_ref: str,
-        command: OpenDecisionOpCommand,
-        context: ActorContext,
+        self, command: OpenScreenCommand
     ) -> ProfileOpAcceptedResult:
         """Screen 用例(owner 面,SUBMITTED──screen→SCREENING,标记
         进入评审)。"""
-        axes = self._gate("screen", collab_context_id, method_binding_id, context)
-        application = self._require_application(
-            axes, collab_context_id, method_binding_id, application_ref
+        collab_context_id, context = command.collect_id, command.context
+        binding, application = self._resolve_application_binding(
+            collab_context_id, command.application_ref
         )
+        method_binding_id = binding.method_binding_id
+        axes = self._gate("screen", collab_context_id, method_binding_id, context)
         return self._transition_application(
             axes,
             collab_context_id,
@@ -267,21 +258,18 @@ class OpenApplicationOpsMixin(OpenMethodServiceBase):
         return roster
 
     def admit(
-        self,
-        collab_context_id: str,
-        method_binding_id: str,
-        application_ref: str,
-        command: OpenAdmitCommand,
-        context: ActorContext,
+        self, command: OpenAdmitCommand
     ) -> ProfileOpAcceptedResult:
         """Admit 用例(owner 面,SCREENING──admit→ADMITTED):按机会
         participation_type 产生绑定产物并落一条 ``AdmissionDecision``
-        (幂等键 ``decision_id``,§8.3)。录取仅对 ``admitted_scope_ref``
-        生效,不产生 Space Membership / Grant(G1 断言)。"""
-        axes = self._gate("admit", collab_context_id, method_binding_id, context)
-        application = self._require_application(
-            axes, collab_context_id, method_binding_id, application_ref
+        (幂等键 ``decision_id``,§8.3)。录取范围从 ``collect_id``
+        派生,不产生 Space Membership / Grant(G1 断言)。"""
+        collab_context_id, context = command.collect_id, command.context
+        binding, application = self._resolve_application_binding(
+            collab_context_id, command.application_ref
         )
+        method_binding_id = binding.method_binding_id
+        axes = self._gate("admit", collab_context_id, method_binding_id, context)
         opportunity = self._require_opportunity(
             axes,
             collab_context_id,
@@ -302,12 +290,7 @@ class OpenApplicationOpsMixin(OpenMethodServiceBase):
                     raise ContextCollabValidationError(
                         "admission decision belongs to another application"
                     )
-                if _shape_of(
-                    existing_decision.to_dict(), _ADMIT_REQUEST_FIELDS
-                ) == _shape_of(
-                    {"admitted_scope_ref": command.admitted_scope_ref},
-                    _ADMIT_REQUEST_FIELDS,
-                ):
+                if existing_decision.admitted_scope_ref == collab_context_id:
                     if application.state is ApplicationState.SCREENING:
                         # A prior write failed after recording the decision.
                         # Finish the G4 transition; do not recreate its binding.
@@ -332,10 +315,7 @@ class OpenApplicationOpsMixin(OpenMethodServiceBase):
         # (与 swarm allocate 的"失败抛错于任何写之前"同款纪律)。
         _resolve_application_state(application.state.value, "open.application.admit")
         if opportunity.participation_type is ParticipationType.COLLET_PARTICIPANT:
-            if (
-                opportunity.scope_ref != collab_context_id
-                or command.admitted_scope_ref != opportunity.scope_ref
-            ):
+            if opportunity.scope_ref != collab_context_id:
                 raise ContextCollabValidationError(
                     "COLLET_PARTICIPANT admission scope must match its Collet"
                 )
@@ -346,7 +326,7 @@ class OpenApplicationOpsMixin(OpenMethodServiceBase):
             participant = ScopedParticipantBinding.from_dict(
                 {
                     "participant_binding_id": f"pb_{application.application_id}",
-                    "scope_ref": command.admitted_scope_ref,
+                    "scope_ref": collab_context_id,
                     "participant_ref": application.applicant_agent_ref,
                     "role_binding_refs": list(application.requested_role_refs),
                 }
@@ -405,7 +385,7 @@ class OpenApplicationOpsMixin(OpenMethodServiceBase):
                     f"open.admit:{opportunity.opportunity_id}:"
                     f"{application.application_id}"
                 ),
-                "admitted_scope_ref": command.admitted_scope_ref,
+                "admitted_scope_ref": collab_context_id,
                 "resulting_binding_refs": list(resulting_refs),
             }
         )

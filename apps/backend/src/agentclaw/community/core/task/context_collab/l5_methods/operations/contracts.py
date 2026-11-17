@@ -48,6 +48,7 @@ __all__ = [
     "OpenOpportunityOpCommand",
     "OpenApplicationCommand",
     "OpenAdmitCommand",
+    "OpenScreenCommand",
     "OpenDecisionOpCommand",
     "MethodBindingResult",
     "MethodInspectionResult",
@@ -272,15 +273,30 @@ class OpenApplicationCommand:
 
 
 @dataclass
-class OpenAdmitCommand:
-    """Open admission command.
+class OpenScreenCommand:
+    """Review one application in collect_id; context is trusted G1 provenance.
 
-    COLLET_PARTICIPANT requires admitted_scope_ref == opportunity.scope_ref ==
-    owning Collet ID. It creates an immutable L4 ScopedParticipantBinding, not
+    The owning MethodBinding is resolved uniquely within this Collet.
+    """
+
+    application_ref: str
+    context: ActorContext
+    collect_id: str
+    reason: str = ""
+
+
+@dataclass
+class OpenAdmitCommand:
+    """Admit an application in collect_id, using trusted G1 context.
+
+    The service resolves the owning MethodBinding and derives admission scope
+    from collect_id. COLLET_PARTICIPANT creates immutable L4 participation, not
     Group membership or a resource grant. SWARM_ALLOCATION needs target_stage_ref.
     """
 
-    admitted_scope_ref: str | None = None
+    application_ref: str
+    context: ActorContext
+    collect_id: str
     target_stage_ref: str | None = None
     decision_id: str | None = None  # AdmissionDecision 幂等键(spec §8.3)
     reason: str = ""
@@ -288,7 +304,7 @@ class OpenAdmitCommand:
 
 @dataclass
 class OpenDecisionOpCommand:
-    """Open application 裁决操作共用命令(spec §4.4):screen/reject/withdraw/revoke_admission。"""
+    """Open application 裁决操作共用命令(spec §4.4):reject/withdraw/revoke_admission。"""
 
     reason: str = ""
 
@@ -600,6 +616,11 @@ class OpenMethodOpsServiceProtocol(Protocol):
     ACTIVE MethodBinding before treating that evidence as participation authority.
     Revoke changes application state through G4; retained evidence grants nothing.
     Group/Swarm bindings and artifact-only contributions keep their own semantics.
+    Screen/admit accept only their complete command. Both require trusted context
+    and resolve application_ref uniquely within collect_id and current store axes;
+    missing is NotFound, duplicates are ValidationError (including inactive
+    bindings). Open/ACTIVE/G1/G4 checks still apply to the resolved binding.
+    Admission scope is derived from collect_id; it is not a caller override.
     """
 
     def query_opportunities(
@@ -658,12 +679,7 @@ class OpenMethodOpsServiceProtocol(Protocol):
         self, command: OpenApplicationCommand
     ) -> ProfileOpAcceptedResult: ...
     def screen(
-        self,
-        collab_context_id: str,
-        method_binding_id: str,
-        application_ref: str,
-        command: OpenDecisionOpCommand,
-        context: ActorContext,
+        self, command: OpenScreenCommand
     ) -> ProfileOpAcceptedResult: ...
     def reject(
         self,
@@ -682,12 +698,7 @@ class OpenMethodOpsServiceProtocol(Protocol):
         context: ActorContext,
     ) -> ProfileOpAcceptedResult: ...
     def admit(
-        self,
-        collab_context_id: str,
-        method_binding_id: str,
-        application_ref: str,
-        command: OpenAdmitCommand,
-        context: ActorContext,
+        self, command: OpenAdmitCommand
     ) -> ProfileOpAcceptedResult: ...
     def revoke_admission(
         self,

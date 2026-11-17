@@ -39,7 +39,7 @@ from agentclaw.community.core.task.context_collab.l6_products.contracts import (
 from agentclaw.community.core.task.context_collab.method_service_api import (
     OpenAdmitCommand,
     OpenApplicationCommand,
-    OpenDecisionOpCommand,
+    OpenScreenCommand,
     OpenMethodOpsServiceProtocol,
     OpenOpportunityCommand,
 )
@@ -101,25 +101,22 @@ class TaskCommissionOpenMethodAdapter(TaskMethodOpsPort):
             ),
         )
         self._open_ops.screen(
-            command.collab_context_id,
-            binding_id,
-            submitted.object_id,
-            OpenDecisionOpCommand(
+            command=OpenScreenCommand(
+                application_ref=submitted.object_id,
+                context=context,
+                collect_id=command.collab_context_id,
                 reason="task_commission.assignee_screening",
             ),
-            context,
         )
         decision_id = f"dec_{uuid4().hex[:12]}"
         admitted = self._open_ops.admit(
-            command.collab_context_id,
-            binding_id,
-            submitted.object_id,
-            OpenAdmitCommand(
-                admitted_scope_ref=command.collab_context_id,
+            command=OpenAdmitCommand(
+                application_ref=submitted.object_id,
+                context=context,
+                collect_id=command.collab_context_id,
                 decision_id=decision_id,
                 reason="task_commission.assigned_admission",
             ),
-            context,
         )
         profile.require_publication().require_dispatch_ready(admitted.state)
         return AssigneeAdmissionReceipt(

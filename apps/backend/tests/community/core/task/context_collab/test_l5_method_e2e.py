@@ -47,7 +47,7 @@ from agentclaw.community.core.task.context_collab.method_service_api import (
     MethodStateChangeCommand,
     OpenAdmitCommand,
     OpenApplicationCommand,
-    OpenDecisionOpCommand,
+    OpenScreenCommand,
     OpenOpportunityCommand,
     SingleDelegateCommand,
     SingleSelectCommand,
@@ -241,18 +241,18 @@ class TestL5MethodObjectsE2E:
         )
         assert application.state == "SUBMITTED"
         services.open.screen(
-            collab_id,
-            open_binding,
-            application.object_id,
-            OpenDecisionOpCommand(),
-            _actor(OWNER),
+            command=OpenScreenCommand(
+                application_ref=application.object_id,
+                context=_actor(OWNER),
+                collect_id=collab_id,
+            ),
         )
         admitted = services.open.admit(
-            collab_id,
-            open_binding,
-            application.object_id,
-            OpenAdmitCommand(admitted_scope_ref="scope://contrib"),
-            _actor(OWNER),
+            command=OpenAdmitCommand(
+                application_ref=application.object_id,
+                context=_actor(OWNER),
+                collect_id=collab_id,
+            ),
         )
         assert admitted.state == "ADMITTED"
         products = [

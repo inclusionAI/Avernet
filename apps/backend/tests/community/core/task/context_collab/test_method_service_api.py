@@ -30,6 +30,7 @@ from agentclaw.community.core.task.context_collab.method_service_api import (
     OpenAdmitCommand,
     OpenApplicationCommand,
     OpenDecisionOpCommand,
+    OpenScreenCommand,
     OpenMethodOpsServiceProtocol,
     OpenOpportunityCommand,
     OpenOpportunityOpCommand,
@@ -51,7 +52,7 @@ from agentclaw.community.core.task.context_collab.service_api import (
 
 MISSING = dataclasses.MISSING
 
-# 除 publish_opportunity 的完整命令、query_opportunities 的 actor_context 外,
+# 除 Open publish/submit/screen/admit 的完整命令与 query 的 actor_context 外,
 # 操作均以 context: ActorContext 收尾。
 CTX = ("context", "ActorContext")
 
@@ -192,8 +193,16 @@ COMMAND_FIELDS: dict[type, list[tuple[str, object]]] = {
         ("application_id", None),
         ("reason", ""),
     ],
+    OpenScreenCommand: [
+        ("application_ref", MISSING),
+        ("context", MISSING),
+        ("collect_id", MISSING),
+        ("reason", ""),
+    ],
     OpenAdmitCommand: [
-        ("admitted_scope_ref", None),
+        ("application_ref", MISSING),
+        ("context", MISSING),
+        ("collect_id", MISSING),
         ("target_stage_ref", None),
         ("decision_id", None),
         ("reason", ""),
@@ -407,9 +416,8 @@ OPEN_SIGNATURES: dict[str, tuple] = {
     "submit_application": (
         _params(("command", "OpenApplicationCommand")), "ProfileOpAcceptedResult"
     ),
-    "screen": _binding_ops(
-        "OpenDecisionOpCommand", "ProfileOpAcceptedResult",
-        ("application_ref", "str"),
+    "screen": (
+        _params(("command", "OpenScreenCommand")), "ProfileOpAcceptedResult"
     ),
     "reject": _binding_ops(
         "OpenDecisionOpCommand", "ProfileOpAcceptedResult",
@@ -419,9 +427,8 @@ OPEN_SIGNATURES: dict[str, tuple] = {
         "OpenDecisionOpCommand", "ProfileOpAcceptedResult",
         ("application_ref", "str"),
     ),
-    "admit": _binding_ops(
-        "OpenAdmitCommand", "ProfileOpAcceptedResult",
-        ("application_ref", "str"),
+    "admit": (
+        _params(("command", "OpenAdmitCommand")), "ProfileOpAcceptedResult"
     ),
     "revoke_admission": _binding_ops(
         "OpenDecisionOpCommand", "ProfileOpAcceptedResult",

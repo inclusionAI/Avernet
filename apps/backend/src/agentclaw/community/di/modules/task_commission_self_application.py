@@ -50,7 +50,7 @@ from agentclaw.community.core.task.context_collab.l6_products.contracts import (
 from agentclaw.community.core.task.context_collab.method_service_api import (
     OpenAdmitCommand,
     OpenApplicationCommand,
-    OpenDecisionOpCommand,
+    OpenScreenCommand,
     OpenMethodOpsServiceProtocol,
     OpenOpportunityCommand,
 )
@@ -322,23 +322,22 @@ class TaskCommissionSelfApplicationAdapter(TaskCommissionOpenMethodAdapter):
             record.collet.initiator_ref, source="product_policy"
         )
         self._open_ops.screen(
-            command.collab_context_id,
-            binding_id,
-            application_id,
-            OpenDecisionOpCommand(reason=_POLICY_REF),
-            policy_context,
+            command=OpenScreenCommand(
+                application_ref=application_id,
+                context=policy_context,
+                collect_id=command.collab_context_id,
+                reason=_POLICY_REF,
+            ),
         )
         decision_id = f"dec_{uuid4().hex[:12]}"
         admitted = self._open_ops.admit(
-            command.collab_context_id,
-            binding_id,
-            application_id,
-            OpenAdmitCommand(
-                admitted_scope_ref=command.collab_context_id,
+            command=OpenAdmitCommand(
+                application_ref=application_id,
+                context=policy_context,
+                collect_id=command.collab_context_id,
                 decision_id=decision_id,
                 reason=_POLICY_REF,
             ),
-            policy_context,
         )
         decision = self._store.get_decision(
             current_axes(), decision_id, binding_id, command.collab_context_id

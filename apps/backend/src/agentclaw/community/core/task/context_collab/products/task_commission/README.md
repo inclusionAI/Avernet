@@ -203,29 +203,36 @@ policy_context = ActorContext(
 )
 [policy_ref] = opportunity.admission_policy_refs
 screened = open_method.screen(
-    collab_context_id=task_id,
-    method_binding_id=binding_id,
-    application_ref=submitted.object_id,
-    command=OpenDecisionOpCommand(reason=policy_ref),
-    context=policy_context,
+    command=OpenScreenCommand(
+        application_ref=submitted.object_id,
+        context=policy_context,
+        collect_id=task_id,
+        reason=policy_ref,
+    ),
 )
 assert screened.state == "SCREENING"
 decision_id = f"dec_{uuid4().hex[:12]}"
 admitted = open_method.admit(
-    collab_context_id=task_id,
-    method_binding_id=binding_id,
-    application_ref=submitted.object_id,
     command=OpenAdmitCommand(
-        admitted_scope_ref=task_id,
+        application_ref=submitted.object_id,
+        context=policy_context,
+        collect_id=task_id,
         decision_id=decision_id,
         reason=policy_ref,
     ),
-    context=policy_context,
 )
 assert admitted.state == "ADMITTED"
 ```
 
 `task_id` is the product's Collet ID; `binding_id` is its actual L5 MethodBinding.
+Screen and admit each accept only their command, with required `application_ref`,
+trusted `context` and `collect_id` (the Collet ID). L5 resolves the application's
+unique owning binding inside that Collet and the current tenant/environment;
+callers no longer pass a MethodBinding ID. Admission has no `admitted_scope_ref`
+input: the persisted decision and scoped participation use `collect_id`.
+G1 reviewer authorization, ACTIVE/Open guards, G4 transitions and decision-key
+idempotency still apply. `OpenDecisionOpCommand` remains for reject/withdraw/revoke.
+
 Publication derives the persisted `scope_ref` from `collet_id` and records the
 server's current UTC time as `opens_at`; callers supply neither field. Same-ID
 replay preserves that first timestamp and current state rather than reopening

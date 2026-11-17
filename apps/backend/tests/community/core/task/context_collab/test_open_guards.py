@@ -10,12 +10,16 @@ from agentclaw.community.core.task.context_collab.g1_secure_govern.method_author
     OPEN_PUBLIC_OPS,
     OPEN_SELF_HELP_OPS,
 )
-from agentclaw.community.core.task.context_collab.l5_methods.open_profile import OpenOpportunity
+from agentclaw.community.core.task.context_collab.l5_methods.open_profile import (
+    OpenOpportunity,
+    ParticipationApplication,
+)
 from agentclaw.community.core.task.context_collab.method_service_api import (
     BindMethodCommand,
     MethodStateChangeCommand,
     OpenAdmitCommand,
     OpenDecisionOpCommand,
+    OpenScreenCommand,
     OpenOpportunityOpCommand,
 )
 
@@ -26,6 +30,7 @@ from tests.community.core.task.context_collab.open_profile_support import (
     OWNER_OPS_ALL,
     active_open_binding,
     application_command,
+    application_dict,
     make_actor,
     make_open_service,
     opportunity_command,
@@ -54,6 +59,11 @@ class TestOpenGuards:
             )),
             COLLET_ID,
         )
+        store.insert_application(
+            AXES, bound, ParticipationApplication.from_dict(application_dict(
+                application_id="app_x", opportunity_ref="opp_x",
+            )), COLLET_ID,
+        )
         callables = [
             lambda: service.publish_opportunity(opportunity_command()),
             lambda: service.pause_opportunity(
@@ -81,11 +91,11 @@ class TestOpenGuards:
                 application_command(opportunity_ref="opp_x", actor_context=make_actor())
             ),
             lambda: service.screen(
-                COLLET_ID,
-                bound,
-                "app_x",
-                OpenDecisionOpCommand(),
-                make_actor(),
+                command=OpenScreenCommand(
+                    application_ref="app_x",
+                    context=make_actor(),
+                    collect_id=COLLET_ID,
+                ),
             ),
             lambda: service.reject(
                 COLLET_ID,
@@ -102,7 +112,11 @@ class TestOpenGuards:
                 make_actor("u_member_001"),
             ),
             lambda: service.admit(
-                COLLET_ID, bound, "app_x", OpenAdmitCommand(), make_actor()
+                command=OpenAdmitCommand(
+                    application_ref="app_x",
+                    context=make_actor(),
+                    collect_id=COLLET_ID,
+                ),
             ),
             lambda: service.revoke_admission(
                 COLLET_ID,
@@ -168,14 +182,24 @@ class TestOpenGuards:
         )
         with pytest.raises(ContextCollabValidationError, match="u_9999"):
             service.screen(
-                COLLET_ID, binding, "app_1", OpenDecisionOpCommand(), stranger
+                command=OpenScreenCommand(
+                    application_ref="app_1",
+                    context=stranger,
+                    collect_id=COLLET_ID,
+                ),
             )
         with pytest.raises(ContextCollabValidationError, match="u_9999"):
             service.reject(
                 COLLET_ID, binding, "app_1", OpenDecisionOpCommand(), stranger
             )
         with pytest.raises(ContextCollabValidationError, match="u_9999"):
-            service.admit(COLLET_ID, binding, "app_1", OpenAdmitCommand(), stranger)
+            service.admit(
+                command=OpenAdmitCommand(
+                    application_ref="app_1",
+                    context=stranger,
+                    collect_id=COLLET_ID,
+                ),
+            )
         with pytest.raises(ContextCollabValidationError, match="u_9999"):
             service.revoke_admission(
                 COLLET_ID, binding, "app_1", OpenDecisionOpCommand(), stranger
