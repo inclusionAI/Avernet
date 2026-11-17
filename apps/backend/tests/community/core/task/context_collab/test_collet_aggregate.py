@@ -1,13 +1,10 @@
-"""Legacy local six-field Collet shape and strict decoding, not a closed ACCS schema."""
+"""Legacy local five-field Collet shape and strict decoding, not a closed ACCS schema."""
 
 from __future__ import annotations
-
 
 import json
 
 import pytest
-from sqlalchemy import insert as sql_insert
-
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabValidationError,
 )
@@ -21,24 +18,25 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.collet i
     Collet,
     ColletState,
 )
-from tests.community.core.task.context_collab.creation_facts import creation_facts
 from agentclaw.community.core.task.context_collab.persistence.models import (
     ContextCollabColletModel,
 )
 from agentclaw.community.core.task.context_collab.persistence.repository import (
     ContextCollabRepository,
 )
+from sqlalchemy import insert as sql_insert
+
+from tests.community.core.task.context_collab.creation_facts import creation_facts
 from tests.community.core.task.context_collab.product_catalog import PRODUCT_CATALOG
 
 
 def _collet_dict(**overrides) -> dict:
-    """六字段聚合根的最小合法 wire 形态;可按字段覆盖。"""
+    """五字段聚合根的最小合法 wire 形态;可按字段覆盖。"""
     data = {
         "collet_id": "collet_todo_001",
         "initiator_ref": {"principal_type": "human", "principal_id": "u_1001"},
         "state": "ACTIVE",
         "scope": {"space_id": "space_workspace_001", "environment": "prod"},
-        "current_event_id": "evt_004",
         "version": 4,
     }
     data.update(overrides)
@@ -47,13 +45,12 @@ def _collet_dict(**overrides) -> dict:
 
 def test_round_trip_preserves_field_names():
     collet = Collet.from_dict(_collet_dict())
-    # 键集 = 六字段名;state 以 ColletState 大写值往返。
+    # 键集 = 五字段名;state 以 ColletState 大写值往返。
     assert set(collet.to_dict()) == {
         "collet_id",
         "initiator_ref",
         "state",
         "scope",
-        "current_event_id",
         "version",
     }
     assert collet.to_dict()["state"] == "ACTIVE"
@@ -64,7 +61,7 @@ def test_round_trip_preserves_field_names():
 
 def test_initiator_and_scope_and_state_required():
     # 必填键缺失一律拒绝。
-    for key in ("initiator_ref", "scope", "state"):
+    for key in ("initiator_ref", "state"):
         data = {k: v for k, v in _collet_dict().items() if k != key}
         with pytest.raises(ContextCollabValidationError):
             Collet.from_dict(data)
@@ -131,3 +128,11 @@ def test_null_initiator_row_decode_raises(db, engine):
         ContextCollabRepository(db, product_catalog=PRODUCT_CATALOG).get_current_status(
             context_id
         )
+
+
+def test_unscoped_collet_roundtrips_without_fabricating_a_space():
+    collet = Collet.from_dict(_collet_dict(scope=None))
+    assert collet.scope is None and collet.to_dict()["scope"] is None
+    assert Collet.from_dict(collet.to_dict()) == collet
+    with pytest.raises(ContextCollabValidationError, match="unknown"):
+        Collet.from_dict(_collet_dict(current_event_id="removed"))

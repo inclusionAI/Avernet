@@ -95,13 +95,14 @@ See [topology contracts and failure regressions](../../../../../../../../tests/c
 ## ProductInstance and the Open + Single journey
 
 The [end-to-end test](../../../../../../../../tests/community/core/task/context_collab/products/test_task_commission_end_to_end.py)
-shows one commission: first create its Collet/root Task, then instantiate its
-ProductInstance in a separate step. Multi-instance reuse/isolation is outside this
+shows one commission: create only its Collet, instantiate its ProductInstance
+separately, then create/start root Work only at `l4_context_operate.start`. Multi-instance reuse/isolation is outside this
 journey's scope. For this product, each
 independent commission has one instance, one Collet and one independent root
 Task (potentially with L4 subtasks). This is not a universal protocol 1:1 rule.
-Each instance persists `root_task_ref` plus exact Profile/Method/Task-contract
-versions, binding/role refs, governance, negotiation and creation evidence.
+Before start, each instance persists `root_task_ref=None`; after start the query
+projection resolves the root from L4 without rewriting selection. It pins exact
+Profile/Method/Task-contract versions, binding/role refs, governance, negotiation and creation evidence.
 It does not copy runtime Open/Single objects or the Task status. Historical
 instances without an explicit root ref resolve it from L4 without rewriting
 storage. See the [L6 identity contract](../../l6_products/README.md#productinstance-identity-and-cardinality).
@@ -110,22 +111,19 @@ storage. See the [L6 identity contract](../../l6_products/README.md#productinsta
    `create_product_profile` operation and explicitly install @2 through [DI installation](../../../../../di/modules/context_collab_products.py).
    “Online” means an immutable code-owned definition installed into the actual
    application catalog, not a mutable registry or a mocked registration call.
-2. Business staff first create unassigned L4 work with
-   `ColletCreateCommand(to_space, initiator_ref, objective)`. This atomically stores
-   Collet, root Task and initial Event without executor/Profile/binding inputs.
-   They then call `ProductInstantiationServiceProtocol.instantiate(
-   ProductInstantiateCommand(collet_id, profile_ref, expected_version,
-   participant_refs=(bot,)), context)`. The product supplies the Agent; this sole
-   participant defaults to the scalar assignee role source. Every initial Agent
-   must be in the exact Profile's `participant_scope` (`OPEN` by default, or an
-   explicit typed Agent allowlist). Scope is eligibility, not admission.
-   The separate installation requires untouched unassigned Work, preserves the
-   initial Event, and atomically writes ProductInstance, actual L4 Participants /
-   RoleBindings and Task assignment plus `task.participants_bound`. Task and
-   Collet advance to revision 2: query the current revision before Work.start.
-   Multiple initial Agents require explicit executor designation for this
-   scalar-assignee product. Existing publishers retain their combined
-   upper-layer compatibility flow, with the same eligibility validation.
+2. Business staff first create only the L4 context with
+   `ColletCreateCommand(initiator_ref, title=..., description=...)`: no Space,
+   objective, executor, Task or Event is supplied/created. They then call
+   `ProductInstantiationServiceProtocol.instantiate(ProductInstantiateCommand(
+   collet_id, profile_ref, expected_version, participant_refs=(bot,)), context)`.
+   The sole initial participant defaults to the scalar assignee role source;
+   multiple initial Agents require explicit executor designation. Every supplied
+   Agent must satisfy the exact Profile's participant scope (`OPEN` or allowlist).
+   The journey's allowlist has two Agents, including the working Bot; only that
+   Bot is initially bound. Eligibility is not admission. One SQL transaction
+   installs ProductInstance, Collet-scoped Participants/RoleBindings and
+   `collet.participants_bound`, advancing Collet from revision 1 to 2. Task still
+   does not exist. Existing combined publishers retain their compatibility flow.
    One L6 Instantiate creates two ACTIVE MethodBindings: **Open@0.2**
    (`open_binding_id`) and **Single@0.2** (`single_binding_id`), plus the explicit
    **Single --support--> Open** MethodCompositionEdge declared in the Profile.
@@ -172,10 +170,13 @@ storage. See the [L6 identity contract](../../l6_products/README.md#productinsta
    denies execution without changing its peer or the pinned ProductInstance. Release, mismatched evidence, wrong scope/participant, an
    unauthorized selector or expired selection cannot authorize execution.
    After Select, the journey calls the injected L4
-   `ContextCollabServiceProtocol.start` with `WorkStartCommand(expected_version,
-   note)` and the Bot's authenticated `ActorContext`, not product `start_task`.
-   This explicit root-Task Work operation shares G1/G4 and the atomic Task/Collet
-   fences; starting does not dispatch a Bot or create an Activity. The Bot then
+   `ContextServiceProtocol.start` with `WorkStartCommand(expected_version,
+   note, objective=..., completion_conditions=...)` and the Bot's authenticated
+   `ActorContext`, not product `start_task`. G1/G4 validate an uncommitted root
+   Task draft using actual initial bindings. One SQL transaction then creates
+   and starts Work with `task.created` / `task.started` evidence: Task revision 2,
+   Collet revision 4 absent intervening Events. Rejection or failed persistence
+   leaves no Task or partial Event; start does not dispatch or create an Activity. The Bot then
    reports progress and submission through the existing product/A2A ingress,
    which reuses the same L4 Work machinery. The generic
    `ContextCollabService.append_event` is not a Work API; it is a generic event
@@ -349,7 +350,8 @@ not implicitly screen, admit or start Work. SCREENING still has no participant
 binding or decision and cannot authorize Work. Admission creates the scoped
 participant binding and decision; Single then explicitly selects that scoped
 participant with correlated evidence. Only after selection does the case invoke
-`collab_service.start(task_id, WorkStartCommand(expected_version, note), bot_context)`.
+`l4_context_operate.start(collet_id, WorkStartCommand(expected_version, note,
+objective=OBJECTIVE, completion_conditions=(...)), bot_context)`.
 This is the L4 Work.start API, not product `start_task`, a Bot method or a caller
 constructing a generic event. Its actor/event fields are chosen by L4 and its
 receipt reports the committed Task status and Collet revision. Open itself does
@@ -603,8 +605,9 @@ claims, cross-tenant input, stale replay and invalid state.
 also boot the real application/service graph; the
 [product journey](../../../../../../../../tests/community/core/task/context_collab/products/test_task_commission_end_to_end.py)
 deploys `task_commission@2` (Open + Single, omitting domain/workflow) through
-the real catalog seam. Its main case creates one Collet/root Task, separately
-instantiates one ProductInstance, then uses the product service for owner commands.
+the real catalog seam. Its main case creates one Collet, separately instantiates
+one ProductInstance with initial bindings, then creates/starts root Task at L4
+start after admission/selection. The product service handles owner commands.
 The authored Profile allowlists two Agents, including the working Bot; only that
 Bot is initially bound. On the same instance, real L4 Work.start/G1 rejects an
 out-of-scope Agent and an eligible but unbound candidate without writes, then

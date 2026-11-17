@@ -15,9 +15,6 @@ from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs 
     AgentRef,
     PrincipalRef,
 )
-from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_resource_refs import (
-    SpaceRef,
-)
 from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
     ColletState,
 )
@@ -27,6 +24,7 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.operatio
 from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.contracts import (
     AppendEventRecordRequest,
     ColletCreateCommand,
+    TaskCreateCommand,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.models import (
     ContextCollabColletModel,
@@ -57,10 +55,19 @@ MODELS = (ContextCollabColletModel, ContextCollabTaskModel, ContextCollabEventMo
 
 
 def command():
-    return ColletCreateCommand(SpaceRef("space", "test"), RESPONSIBLE, "Deliver work")
+    return ColletCreateCommand(RESPONSIBLE)
 
 
-def message(version=1):
+def create_work(repository):
+    collet = repository.create_l4_collet(command(), CREATOR).collet
+    return repository.create_l4_task(
+        collet.collet_id,
+        TaskCreateCommand(collet.version, RESPONSIBLE, "Deliver work"),
+        CREATOR,
+    )
+
+
+def message(version=2):
     return AppendEventRecordRequest(
         version,
         "user_interaction.posted",
@@ -89,42 +96,25 @@ def test_l4_storage_creates_and_reads_without_product_dependencies(repository, d
     assert type(repository).__module__.endswith(
         "l4_context_primitives.persistence.repository"
     )
-    assert ContextCollabRepositoryProtocol.__module__.endswith(
-        "l4_context_primitives.persistence.records"
-    )
-    assert created.collet.initiator_ref == CREATOR
-    assert created.task.principal_ref == RESPONSIBLE
-    assert created.task.executor_refs == ()
-    assert created.collet.scope == command().to_space
+    assert created.collet.initiator_ref == CREATOR and created.collet.scope is None
     state = repository.get_current_status(created.collet.collet_id)
     assert type(state) is PrimitiveReadState
     assert state.collet == created.collet
-    assert state.task == created.task
-    assert state.tasks == (created.task,)
-    assert state.events == [created.initial_event]
+    assert state.task is None and state.tasks == () and state.events == []
     assert state.owner_principal_id == CREATOR.principal_id
-    assert state.designated_executor_id == (None)
-    assert not hasattr(state, "creation_facts")
-    assert not hasattr(state, "product_instance")
-    assert state.current_snapshot.method_kind is None
-    facts = {
-        "objective": "Deliver work",
-        "executor_refs": [],
-    }
-    assert created.initial_event.payload == facts
-    assert created.initial_event.actor_ref == CREATOR
-    assert created.initial_event.task_ref == created.task.task_id
-    assert created.initial_event.task_version_after == 1
-    assert stored_counts(db) == (1, 1, 1)
+    assert state.designated_executor_id is None and state.current_snapshot is None
+    assert not hasattr(state, "creation_facts") and not hasattr(
+        state, "product_instance"
+    )
+    assert stored_counts(db) == (1, 0, 0)
     with db.orm_session() as session:
         row = session.query(ContextCollabColletModel).one()
-        assert row.root_task_ref == created.task.task_id
-        assert row.current_snapshot is None
-        assert json.loads(row.creation_facts) == facts
+        assert row.root_task_ref is None and row.current_snapshot is None
+        assert json.loads(row.creation_facts) == {}
 
 
 def test_primitive_repository_satisfies_a_lower_reader_consumer(repository):
-    created = repository.create_l4_collet(command(), CREATOR)
+    created = create_work(repository)
     cid = created.collet.collet_id
     lifecycle = ColletLifecycleService(InMemoryColletLifecycleStore(), repository)
     bot = ActorContext(CREATOR, "api")
@@ -147,8 +137,8 @@ def test_creation_never_calls_the_read_decoder(db):
     created = ContextCollabRepository(db, RejectDecoder()).create_l4_collet(
         command(), CREATOR
     )
-    assert created.task.objective == "Deliver work"
-    assert stored_counts(db) == (1, 1, 1)
+    assert created.collet.version == 1
+    assert stored_counts(db) == (1, 0, 0)
 
 
 def test_read_passes_the_exact_sql_state_once_and_does_not_write(db, engine):
@@ -162,7 +152,7 @@ def test_read_passes_the_exact_sql_state_once_and_does_not_write(db, engine):
     repository = ContextCollabRepository(db, RecordingDecoder())
     assert repository.get_current_status("missing") is None
     assert reads == []
-    created = repository.create_l4_collet(command(), CREATOR)
+    created = create_work(repository)
 
     def observe(conn, cursor, statement, parameters, context, executemany):
         if statement.lstrip().upper().startswith(("INSERT", "UPDATE", "DELETE")):
@@ -180,27 +170,27 @@ def test_read_passes_the_exact_sql_state_once_and_does_not_write(db, engine):
 
 
 def test_message_and_work_preserve_independent_revisions_and_evidence(repository):
-    created = repository.create_l4_collet(command(), CREATOR)
+    created = create_work(repository)
     cid = created.collet.collet_id
     saved = repository.append_event(cid, message())
-    assert saved.collet.version == 2
+    assert saved.collet.version == 3
     assert saved.task == created.task
     assert json.loads(saved.creation_facts_json) == created.initial_event.payload
     work = AppendEventRecordRequest(
-        2,
+        3,
         "task.started",
         "Task",
         CREATOR,
         saved.event.event_id,
         "public",
-        {},
+        {"invalid": "facts"},
         TaskUpdate(created.task.task_id, 1, "in_progress"),
     )
     started = repository.append_event(cid, work)
     state = repository.get_current_status(cid)
     assert state.collet == started.collet
     assert state.task == started.task
-    assert state.collet.version == 3
+    assert state.collet.version == 4
     assert state.task.version == 2 and state.task.status == "in_progress"
     assert state.task.executor_refs == ()
     assert state.task.last_event_ref == started.event.event_id
@@ -211,21 +201,20 @@ def test_message_and_work_preserve_independent_revisions_and_evidence(repository
     with pytest.raises(ContextCollabVersionConflict):
         repository.append_event(cid, message(version=2))
     with pytest.raises(ContextCollabVersionConflict):
-        repository.append_event(cid, replace(work, expected_version=3))
+        repository.append_event(cid, replace(work, expected_version=4))
     assert repository.get_current_status(cid) == before
 
 
-@pytest.mark.parametrize("target", [ContextCollabTaskModel, ContextCollabEventModel])
-def test_l4_sql_creation_failure_rolls_back_all_three_records(repository, db, target):
+def test_l4_sql_collet_failure_rolls_back_without_work(repository, db):
     def fail(*_):
         raise RuntimeError("injected SQL insert failure")
 
-    sql_event.listen(target, "before_insert", fail)
+    sql_event.listen(ContextCollabColletModel, "before_insert", fail)
     try:
         with pytest.raises(RuntimeError, match="injected SQL insert failure"):
             repository.create_l4_collet(command(), CREATOR)
     finally:
-        sql_event.remove(target, "before_insert", fail)
+        sql_event.remove(ContextCollabColletModel, "before_insert", fail)
     assert stored_counts(db) == (0, 0, 0)
 
 
@@ -235,7 +224,7 @@ def test_l4_sql_creation_failure_rolls_back_all_three_records(repository, db, ta
 def test_l4_work_write_failure_restores_task_collet_and_events(
     repository, db, engine, target
 ):
-    created = repository.create_l4_collet(command(), CREATOR)
+    created = create_work(repository)
     cid = created.collet.collet_id
     before = repository.get_current_status(cid)
 
@@ -252,13 +241,13 @@ def test_l4_work_write_failure_restores_task_collet_and_events(
             repository.append_event(
                 cid,
                 AppendEventRecordRequest(
-                    1,
+                    2,
                     "task.started",
                     "Task",
                     CREATOR,
                     None,
                     "public",
-                    {},
+                    {"invalid": "facts"},
                     TaskUpdate(created.task.task_id, 1, "in_progress"),
                 ),
             )
@@ -271,7 +260,7 @@ def test_l4_work_write_failure_restores_task_collet_and_events(
 @pytest.mark.parametrize(
     "facts",
     [
-        {},
+        {"invalid": "facts"},
         {"objective": "work", "executor_refs": None},
         {"objective": "work", "executor_refs": [], "profile_id": "not-l4"},
     ],
@@ -279,7 +268,7 @@ def test_l4_work_write_failure_restores_task_collet_and_events(
 def test_lower_decoder_rejects_invalid_storage_on_read_and_before_append(
     repository, db, facts
 ):
-    created = repository.create_l4_collet(command(), CREATOR)
+    created = create_work(repository)
     cid = created.collet.collet_id
     with db.orm_session() as session:
         session.query(ContextCollabColletModel).one().creation_facts = json.dumps(facts)

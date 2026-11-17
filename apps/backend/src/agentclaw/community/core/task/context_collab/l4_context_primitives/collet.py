@@ -1,7 +1,7 @@
 """L4 bounded collaboration context; independent from work and method state.
 
 Identity, scope and lifecycle remain independent of Work and upper-layer
-composition. New records include description/audit metadata; legacy six-field
+composition. New records include description/audit metadata; metadata-less
 representations remain readable without inventing their missing audit history.
 """
 
@@ -34,18 +34,6 @@ def _required_str(data: dict, key: str, owner: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ContextCollabValidationError(
             f"{owner}.{key} must be a non-empty string, got: {value!r}"
-        )
-    return value
-
-
-def _optional_str(data: dict, key: str, owner: str) -> str | None:
-    """从 dict 中取出可空字符串字段;缺失或 ``None`` 返回 ``None``。"""
-    value = data.get(key)
-    if value is None:
-        return None
-    if not isinstance(value, str) or not value.strip():
-        raise ContextCollabValidationError(
-            f"{owner}.{key} must be a non-empty string or null, got: {value!r}"
         )
     return value
 
@@ -84,7 +72,6 @@ _COLLET_KEYS = (
             "initiator_ref",
             "state",
             "scope",
-            "current_event_id",
             "version",
         }
     )
@@ -98,7 +85,7 @@ _COLLET_STATES = frozenset({state.value for state in ColletState})
 class Collet:
     """L4 bounded context, not a Task or a product execution snapshot.
 
-    scope is this implementation's L3 governance anchor, NOT the union of
+    scope is an optional legacy L3 governance anchor, NOT the union of
     accessible Spaces, Resources or Grants. version is the aggregate revision,
     distinct from metadata.schema_version. Missing metadata denotes a legacy
     representation only; every repository creation writes complete metadata.
@@ -108,8 +95,7 @@ class Collet:
     collet_id: str
     initiator_ref: PrincipalRef
     state: ColletState
-    scope: SpaceRef
-    current_event_id: str | None
+    scope: SpaceRef | None
     version: int
     metadata: ColletMetadata | None = None
 
@@ -196,8 +182,11 @@ class Collet:
                 _required_dict(data, "initiator_ref", "Collet")
             ),
             state=ColletState(raw_state),
-            scope=SpaceRef.from_dict(_required_dict(data, "scope", "Collet")),
-            current_event_id=_optional_str(data, "current_event_id", "Collet"),
+            scope=(
+                SpaceRef.from_dict(data["scope"])
+                if data.get("scope") is not None
+                else None
+            ),
             version=raw_version,
             metadata=metadata,
         )
@@ -212,8 +201,7 @@ class Collet:
             "collet_id": self.collet_id,
             "initiator_ref": self.initiator_ref.to_dict(),
             "state": self.state.value,
-            "scope": self.scope.to_dict(),
-            "current_event_id": self.current_event_id,
+            "scope": self.scope.to_dict() if self.scope is not None else None,
             "version": self.version,
             **(self.metadata.to_dict() if self.metadata is not None else {}),
         }

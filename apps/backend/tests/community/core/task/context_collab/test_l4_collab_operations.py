@@ -6,7 +6,6 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
-
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabNotFoundError,
     ContextCollabValidationError,
@@ -33,12 +32,12 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.collet i
 from agentclaw.community.core.task.context_collab.l4_context_primitives.context_service import (
     ContextService,
 )
-from agentclaw.community.core.task.context_collab.l4_context_primitives.event_envelope import (
-    EventRecord,
-)
 from agentclaw.community.core.task.context_collab.l4_context_primitives.context_service_protocol import (
     EventAppendCommand,
     WorkStartCommand,
+)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.event_envelope import (
+    EventRecord,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.service_ports import (
     CollaborationPolicy,
@@ -94,9 +93,7 @@ def message(*, version=11, visibility="public"):
 
 @pytest.fixture
 def runtime():
-    collet = Collet(
-        CID, OWNER.actor, ColletState.ACTIVE, SpaceRef("space", "test"), "e1", 11
-    )
+    collet = Collet(CID, OWNER.actor, ColletState.ACTIVE, SpaceRef("space", "test"), 11)
     task = Task(
         task_id="task_l4",
         collet_ref=CID,
@@ -115,7 +112,7 @@ def runtime():
     store.get_current_status.return_value = state
     store.append_event.return_value = SimpleNamespace(
         event=event("e2", kind="task.started"),
-        collet=replace(collet, version=12, current_event_id="e2"),
+        collet=replace(collet, version=12),
         task=replace(task, version=8, status="in_progress", last_event_ref="e2"),
     )
     policy = Mock(spec=CollaborationPolicy)
@@ -265,7 +262,6 @@ def test_missing_collet_rejected_before_policy_or_write(runtime, operation):
 def test_queries_apply_g1_before_g3_and_do_not_write(runtime):
     service, store, policy, state = runtime
     state.events.append(event("private_e2", kind="task.started"))
-    state.collet = replace(state.collet, current_event_id="private_e2")
     state.task = replace(state.task, last_event_ref="private_e2", status="in_progress")
     state.tasks = (state.task,)
     policy.filter_visible_events.side_effect = None
@@ -294,7 +290,6 @@ def test_trunk_only_filters_returned_events_not_task_progress(runtime):
             "current", kind="user_interaction.posted", primitive="Message", parent="e1"
         ),
     ]
-    state.collet = replace(state.collet, current_event_id="current")
     full = service.get_status(CID, trunk_events=False, context=OWNER)
     trunk = service.get_status(CID, trunk_events=True, context=OWNER)
     assert full.task_progress.total_events == 3

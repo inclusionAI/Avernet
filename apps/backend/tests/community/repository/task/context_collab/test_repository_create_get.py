@@ -16,22 +16,22 @@ from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_reso
     ResourceRef,
     SpaceRef,
 )
-from tests.community.core.task.context_collab.creation_facts import (
-    create_collet_request,
-    creation_facts,
-)
 from agentclaw.community.core.task.context_collab.persistence.models import (
     ContextCollabColletModel,
     ContextCollabEventModel,
 )
 from agentclaw.community.core.task.context_collab.persistence.repository import (
-    CreateColletRecordRequest,
     ContextCollabRepository,
     ContextCreatedRecord,
     ContextStatusRecord,
+    CreateColletRecordRequest,
     InitialEventDraft,
 )
 from agentclaw.community.utils.env_utils import get_current_env
+from tests.community.core.task.context_collab.creation_facts import (
+    create_collet_request,
+    creation_facts,
+)
 from tests.community.core.task.context_collab.product_catalog import PRODUCT_CATALOG
 
 OBJECTIVE = "整理 Context 协作协议评审结论并提交可评审 PR"
@@ -95,7 +95,7 @@ class TestCreateContext:
             assert json.loads(row.actor_ref) == CREATOR.to_dict()
             assert record.collet.initiator_ref == CREATOR
             assert row.context_version == 1
-            assert row.current_event_id == record.initial_event.event_id
+            assert row.current_event_id is None  # Deprecated SQL column is not written.
             assert row.env == get_current_env()
             assert json.loads(row.scope) == {
                 "space_id": "space_workspace_001",
@@ -142,7 +142,7 @@ class TestCreateContext:
         assert record.creation_facts == _context_spec()
         assert record.current_snapshot.status == "created"
         assert record.current_snapshot.executor_ref == EXECUTOR
-        assert record.collet.current_event_id == record.initial_event.event_id
+        assert not hasattr(record.collet, "current_event_id")
         assert record.collet.version == 1
         assert record.initial_event.actor_ref == CREATOR
         assert record.initial_event.payload == _context_spec()

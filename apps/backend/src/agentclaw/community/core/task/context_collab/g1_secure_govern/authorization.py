@@ -23,6 +23,9 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.collet i
 from agentclaw.community.core.task.context_collab.l4_context_primitives.event_envelope import (
     EventRecord,
 )
+from agentclaw.community.core.task.context_collab.l4_context_primitives.participation import (
+    initial_executor_refs,
+)
 from agentclaw.community.core.task.context_collab.l4_context_primitives.task import (
     Task,
 )
@@ -149,8 +152,17 @@ class StructuralContextCollabAuthorizer(
         events: Sequence[EventRecord],
         actor: ActorContext,
     ) -> list[EventRecord]:
-        is_principal = _is_principal(task, actor)
-        is_executor = _is_executor(task, actor)
+        is_principal = (
+            _is_principal(task, actor)
+            if task is not None
+            else actor.actor == collet.initiator_ref
+        )
+        is_executor = (
+            _is_executor(task, actor)
+            if task is not None
+            else AgentRef(actor.actor.principal_type, actor.actor.principal_id)
+            in initial_executor_refs(events)
+        )
         visible: list[EventRecord] = []
         for record in events:
             if record.visibility == VISIBILITY_PUBLIC:

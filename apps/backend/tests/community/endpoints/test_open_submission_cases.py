@@ -6,9 +6,6 @@ from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context
 from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
     PrincipalRef,
 )
-from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_resource_refs import (
-    SpaceRef,
-)
 from agentclaw.community.core.task.context_collab.l4_context_primitives.context_service_protocol import (
     ColletCreateCommand,
     ContextServiceProtocol,
@@ -29,6 +26,7 @@ from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime 
 from agentclaw.community.core.task.context_collab.persistence.method_store import (
     MethodStoreProtocol,
 )
+
 from tests.community.factories.access import make_staff_user
 from tests.community.framework import (
     CaseInput,
@@ -58,9 +56,7 @@ def _seed(world):
     actor = ActorContext(PrincipalRef("human", _OWNER), "api")
     collet = world.get(ContextServiceProtocol).create_collet(
         ColletCreateCommand(
-            SpaceRef("space_submission", "prod"),
             actor.actor,
-            "Test Open submission",
         ),
         actor,
     )

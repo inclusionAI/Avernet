@@ -95,12 +95,14 @@ class ProductInstantiationServiceProtocol(Protocol):
     def instantiate(
         self, command: ProductInstantiateCommand, context: ActorContext
     ) -> ProductInstance:
-        """Authorize L6 selection on untouched L4 work, then initialize L5.
+        """Authorize L6 selection on an untouched L4 Collet, then initialize L5.
 
         Only the initiator/responsible principal may select. Product selection
         is immutable; stale, repeated or advanced-Collet selection is rejected.
-        Selection preserves initial L4 evidence and appends an initial binding
-        event, advancing Task/Collet revisions. SQL selection and MethodStore
+        Initial participants/roles are bound at Collet scope without creating a
+        Task. A binding Event advances Collet; root_task_ref stays None until
+        Work.start. For pre-existing untouched Work, preserve its initial evidence
+        and advance Task/Collet when assigning. SQL selection and MethodStore
         remain separate transactions;
         binding errors propagate and existing recovery repairs missing bindings.
         """

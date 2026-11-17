@@ -1,9 +1,11 @@
-"""L6-owned explicit product instantiation on existing L4 work.
+"""L6-owned explicit product instantiation on an existing L4 Collet.
 
 L4 creation is already committed. SQL selection and the in-memory MethodStore
 are not a shared transaction; errors propagate and binding recovery can repair
 an installed selection. No retry may replace that immutable product selection.
 """
+
+from uuid import uuid4
 
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabNotFoundError,
@@ -72,26 +74,30 @@ class ProductInstantiationService(ProductInstantiationServiceProtocol):
         if record is None:
             raise ContextCollabNotFoundError(f"context {command.collet_id!r} not found")
         task = record.task
-        if task is None or context.actor not in {
+        principal = (
+            task.principal_ref if task is not None else record.collet.initiator_ref
+        )
+        if context.actor not in {
             record.collet.initiator_ref,
-            task.principal_ref,
+            principal,
         }:
             raise ContextCollabValidationError(
                 "only the Collet initiator or responsible principal may instantiate"
             )
         ensure_expected_version(command.expected_version, record.collet.version)
-        if (
-            record.product_instance is not None
-            or record.collet.version != 1
-            or task.version != 1
-        ):
+        untouched = (
+            not record.events
+            if task is None
+            else len(record.events) == 1
+            and record.events[0].event_id == task.created_event_ref
+            and record.events[0].context_version_after == record.collet.version
+            and task.version == 1
+        )
+        if record.product_instance is not None or not untouched:
             raise ContextCollabValidationError(
                 "product instantiation requires an untouched L4 Collet"
             )
-        if task.created_event_ref is None:
-            raise ContextCollabValidationError(
-                "product instantiation requires creation evidence"
-            )
+        event_id = task.created_event_ref if task is not None else "evt_" + uuid4().hex
         profile = self._catalog.get(
             command.profile_ref.profile_id, command.profile_ref.version
         )
@@ -99,7 +105,7 @@ class ProductInstantiationService(ProductInstantiationServiceProtocol):
         if executor_ref is None and len(command.participant_refs) == 1:
             executor_ref = command.participant_refs[0]
         participation = product_participation(
-            profile, task.principal_ref, command.participant_refs, executor_ref
+            profile, principal, command.participant_refs, executor_ref
         )
         self._authorizer.check_create(
             method_kind=profile.composition.method_kind,
@@ -109,7 +115,7 @@ class ProductInstantiationService(ProductInstantiationServiceProtocol):
         facts = creation_payload(
             method_kind=profile.composition.method_kind,
             executor_ref=executor_ref,
-            objective=task.objective,
+            objective=task.objective if task is not None else None,
             resource_refs=(),
             product_kind=profile.ref.profile_id,
             workflow_kind=profile.workflow.ref.profile_id if profile.workflow else None,
@@ -118,9 +124,9 @@ class ProductInstantiationService(ProductInstantiationServiceProtocol):
         instance = instantiate_product(
             facts=facts,
             collet_id=command.collet_id,
-            root_task_id=task.task_id,
-            event_id=task.created_event_ref,
-            principal_ref=task.principal_ref,
+            root_task_id=task.task_id if task is not None else None,
+            event_id=event_id,
+            principal_ref=principal,
             executor_ref=executor_ref,
             catalog=self._catalog,
         )
@@ -141,7 +147,7 @@ class ProductInstantiationService(ProductInstantiationServiceProtocol):
             current_axes(),
             command.collet_id,
             method_kind=profile.composition.method_kind,
-            principal_ref=task.principal_ref,
+            principal_ref=principal,
             executor_ref=executor_ref,
             profile=profile,
             context=context,

@@ -195,8 +195,8 @@ def ensure_top_level_binding(
                 collab_context_id,
                 method_kind=creation_method_kind(facts),
                 principal_ref=record.collet.initiator_ref,
-                executor_ref=record.task.executor_ref
-                if record.task is not None
+                executor_ref=AgentRef.from_dict(facts["executor_ref"])
+                if facts.get("executor_ref") is not None
                 else None,
                 profile=profile,
             ),
@@ -222,7 +222,9 @@ def ensure_top_level_binding(
                 method_kind=creation_method_kind(facts),
                 principal_ref=record.collet.initiator_ref,
                 executor_ref=(
-                    record.task.executor_ref if record.task is not None else None
+                    AgentRef.from_dict(facts["executor_ref"])
+                    if facts.get("executor_ref") is not None
+                    else None
                 ),
                 profile=profile,
             ),

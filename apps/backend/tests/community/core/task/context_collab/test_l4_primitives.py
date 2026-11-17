@@ -12,9 +12,13 @@ import pkgutil
 from datetime import datetime
 
 import pytest
-
+from agentclaw.community.core.task.context_collab import l4_context_primitives
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabValidationError,
+)
+from agentclaw.community.core.task.context_collab.g3_observe_evaluate_evolve.views import (
+    CurrentSnapshot,
+    ProgressSnapshot,
 )
 from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
     AgentRef,
@@ -24,7 +28,6 @@ from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_reso
     ResourceRef,
     SpaceRef,
 )
-from agentclaw.community.core.task.context_collab import l4_context_primitives
 from agentclaw.community.core.task.context_collab.l4_context_primitives.activity import (
     Activity,
 )
@@ -35,13 +38,6 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.artifact
 from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
     Collet,
     ColletState,
-)
-from agentclaw.community.core.task.context_collab.l6_products.creation_facts import (
-    decode_creation_facts,
-)
-from agentclaw.community.core.task.context_collab.g3_observe_evaluate_evolve.views import (
-    CurrentSnapshot,
-    ProgressSnapshot,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.decision import (
     Decision,
@@ -62,6 +58,9 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.query im
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.task import (
     TaskStatus,
+)
+from agentclaw.community.core.task.context_collab.l6_products.creation_facts import (
+    decode_creation_facts,
 )
 
 CREATION_FACTS = {
@@ -237,14 +236,13 @@ def test_collet_holds_aggregate_state():
         initiator_ref=initiator,
         state=ColletState.ACTIVE,
         scope=scope,
-        current_event_id="evt_004",
         version=4,
     )
     # Collet 只持有 L4 身份、scope 和生命周期；creation facts 不挂在聚合根上。
     assert collet.initiator_ref == initiator
     assert collet.state is ColletState.ACTIVE
     assert collet.scope == scope
-    assert collet.current_event_id == "evt_004"
+    assert not hasattr(collet, "current_event_id")
     assert collet.version == 4
     assert Collet.from_dict(collet.to_dict()) == collet
 

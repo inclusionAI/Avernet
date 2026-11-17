@@ -4,7 +4,6 @@ from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
 import pytest
-
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabValidationError,
 )
@@ -38,7 +37,6 @@ def collet():
         ACTOR,
         ColletState.ACTIVE,
         SpaceRef("space_1", "test"),
-        "evt_1",
         7,
         ColletMetadata(NOW, ACTOR, NOW, ACTOR, title="协作上下文", description="描述"),
     )
@@ -95,7 +93,7 @@ def test_optional_description_fields_can_be_absent_or_explicit_null():
     assert decoded.to_dict()["title"] is None
     assert decoded.to_dict()["description"] is None
     assert Collet.from_dict(decoded.to_dict()) == decoded
-    command = ColletCreateCommand(SpaceRef("s", "test"), ACTOR, "Task objective")
+    command = ColletCreateCommand(ACTOR)
     assert command.title is None and command.description is None
 
 
@@ -103,9 +101,7 @@ def test_optional_description_fields_can_be_absent_or_explicit_null():
 @pytest.mark.parametrize("value", ["", " \t", 1, False, [], {}])
 def test_description_validation_in_command_metadata_and_wire(field, value):
     with pytest.raises(ContextCollabValidationError, match=field):
-        ColletCreateCommand(
-            SpaceRef("s", "test"), ACTOR, "Task objective", **{field: value}
-        )
+        ColletCreateCommand(ACTOR, **{field: value})
     with pytest.raises(ContextCollabValidationError, match=field):
         replace(collet().metadata, **{field: value})
     with pytest.raises(ContextCollabValidationError, match=field):
@@ -166,7 +162,13 @@ def test_metadata_unknown_keys_and_non_authority_fields_rejected():
     data = collet().metadata.to_dict()
     with pytest.raises(ContextCollabValidationError):
         ColletMetadata.from_dict({**data, "objective": "not context authority"})
-    for field in ("objective", "executor_refs", "participants", "product_profile_ref"):
+    for field in (
+        "current_event_id",
+        "objective",
+        "executor_refs",
+        "participants",
+        "product_profile_ref",
+    ):
         with pytest.raises(ContextCollabValidationError, match="unknown"):
             Collet.from_dict(wire(**{field: "not Collet authority"}))
 
@@ -175,7 +177,6 @@ def test_metadata_unknown_keys_and_non_authority_fields_rejected():
     "changes",
     [
         {"version": 8},
-        {"current_event_id": "evt_2"},
         {"collet_id": "collet_2"},
         {"state": "SUSPENDED"},
         {"scope": {"space_id": "space_2", "environment": "test"}},

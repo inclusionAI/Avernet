@@ -9,7 +9,13 @@ persist Task and derive response views.
 
 from __future__ import annotations
 
+from agentclaw.community.core.base import Base
+from agentclaw.community.utils.avernet_tenant_guard import (
+    register_avernet_tenant_guard,
+)
+from agentclaw.community.utils.env_utils import get_current_env
 from sqlalchemy import (
+    TIMESTAMP,
     BigInteger,
     Column,
     DateTime,
@@ -17,16 +23,10 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
-    TIMESTAMP,
 )
 from sqlalchemy.dialects import mysql
-from sqlalchemy.sql import func, text as sql_text
-
-from agentclaw.community.core.base import Base
-from agentclaw.community.utils.avernet_tenant_guard import (
-    register_avernet_tenant_guard,
-)
-from agentclaw.community.utils.env_utils import get_current_env
+from sqlalchemy.sql import func
+from sqlalchemy.sql import text as sql_text
 
 AutoIncrementBigInteger = BigInteger().with_variant(Integer, "sqlite")
 
@@ -87,6 +87,8 @@ class ContextCollabColletModel(Base):
     # Task reference always wins, even if an old snapshot is still present.
     current_snapshot = Column(_medium_text(), nullable=True)
     root_task_ref = Column(String(128), nullable=True)
+    # Deprecated SQL compatibility column; not read/written by the domain.
+    # The current event is derived from accepted Event order at query time.
     current_event_id = Column(String(128), nullable=True)
     context_version = Column(
         BigInteger,

@@ -13,14 +13,12 @@ from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs 
     AgentRef,
     PrincipalRef,
 )
-from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_resource_refs import (
-    SpaceRef,
-)
 from agentclaw.community.core.task.context_collab.l4_context_primitives.context_service import (
     ContextService,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.contracts import (
     ColletCreateCommand,
+    TaskCreateCommand,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.task import Task
 from agentclaw.community.core.task.context_collab.l6_products.creation_facts import (
@@ -56,9 +54,7 @@ class NoUpperAccess:
 
 def _command(**kwargs):
     return ColletCreateCommand(
-        to_space=SpaceRef("space", "test"),
         initiator_ref=OWNER.actor,
-        objective="Deliver independently identified work",
         **kwargs,
     )
 
@@ -71,43 +67,68 @@ def runtime(db):
     return service, repo
 
 
-def test_create_is_unassigned_without_upper_access(runtime, db):
+def test_create_only_context_without_work_or_upper_access(runtime, db):
     service, repo = runtime
     command = _command()
     collet = service.create_collet(command, OWNER)
     record = repo.get_current_status(collet.collet_id)
     assert ExportedColletCreateCommand is ColletCreateCommand
     assert {field.name for field in fields(command)} == {
-        "to_space",
         "initiator_ref",
-        "objective",
         "title",
         "description",
     }
-    assert record.collet == collet
-    assert record.task.executor_refs == ()
-    assert record.task.task_id != collet.collet_id
-    assert record.task.version == record.collet.version == 1
-    assert record.product_instance is None
+    assert record.collet == collet and collet.version == 1 and collet.scope is None
+    assert record.task is None and record.tasks == () and record.events == []
+    assert record.creation_facts == {} and record.product_instance is None
     assert record.participants == record.role_bindings == ()
-    assert len(record.events) == 1
-    event = record.events[0]
+    assert not hasattr(collet, "current_event_id")
+    assert "current_event_id" not in collet.to_dict()
+    with db.orm_session() as session:
+        assert session.query(ContextCollabColletModel).count() == 1
+        assert session.query(ContextCollabTaskModel).count() == 0
+        assert session.query(ContextCollabEventModel).count() == 0
+        row = session.query(ContextCollabColletModel).one()
+        assert row.root_task_ref is None and row.current_snapshot is None
+
+
+def _create_work(service, repo):
+    collet = service.create_collet(_command(), OWNER)
+    task = service.create_task(
+        collet.collet_id,
+        TaskCreateCommand(
+            collet.version, OWNER.actor, "Deliver independently identified work"
+        ),
+        OWNER,
+    )
+    return repo.get_current_status(collet.collet_id).collet, task
+
+
+def test_task_is_created_only_by_explicit_l4_operation(runtime, db):
+    service, repo = runtime
+    collet, task = _create_work(service, repo)
+    record = repo.get_current_status(collet.collet_id)
+    assert record.task == task and task.task_id != collet.collet_id
+    assert collet.version == 2 and task.version == 1 and task.executor_refs == ()
+    assert task.principal_ref == OWNER.actor and task.parent_task_ref is None
+    assert record.product_instance is None and not record.participants
+    [event] = record.events
     assert event.event_kind == "task.created" and event.primitive_type == "Task"
-    assert event.actor_ref == OWNER.actor
-    assert event.event_id == record.task.created_event_ref
-    assert event.task_ref == record.task.task_id and event.task_version_after == 1
+    assert event.context_version_after == 2 and event.actor_ref == OWNER.actor
+    assert event.event_id == task.created_event_ref == task.last_event_ref
+    assert event.task_ref == task.task_id and event.task_version_after == 1
+    assert record.collet.updated_at == event.occurred_at
     assert (
         event.payload
         == record.creation_facts
-        == {"objective": command.objective, "executor_refs": []}
+        == {"objective": task.objective, "executor_refs": []}
     )
-    with db.orm_session() as session:
-        for model in (
-            ContextCollabColletModel,
-            ContextCollabTaskModel,
-            ContextCollabEventModel,
-        ):
-            assert session.query(model).count() == 1
+    before = record
+    with pytest.raises(ContextCollabValidationError, match="already exists"):
+        service.create_task(
+            collet.collet_id, TaskCreateCommand(2, OWNER.actor, "again"), OWNER
+        )
+    assert repo.get_current_status(collet.collet_id) == before
 
 
 def test_command_rejects_legacy_principal_keyword():
@@ -121,9 +142,7 @@ def test_command_rejects_legacy_principal_keyword():
 def test_command_requires_valid_initiator_reference(initiator):
     with pytest.raises(ContextCollabValidationError):
         ColletCreateCommand(
-            to_space=SpaceRef("space", "test"),
             initiator_ref=initiator,
-            objective="Deliver work",
         )
 
 
@@ -147,12 +166,14 @@ def test_invalid_executor_collection_rejected(refs):
 @pytest.mark.parametrize("objective", [None, "", "  ", 1])
 def test_objective_required(objective):
     with pytest.raises(ContextCollabValidationError, match="objective"):
-        ColletCreateCommand(SpaceRef("s", "test"), OWNER.actor, objective)
+        TaskCreateCommand(1, OWNER.actor, objective)
 
 
 @pytest.mark.parametrize(
     "extra",
     [
+        "to_space",
+        "objective",
         "product_profile_ref",
         "profile_id",
         "method_kind",
@@ -166,9 +187,7 @@ def test_command_rejects_upper_layer_inputs(extra):
         _command(**{extra: "not-an-l4-input"})
 
 
-@pytest.mark.parametrize(
-    "failure_target", [ContextCollabTaskModel, ContextCollabEventModel]
-)
+@pytest.mark.parametrize("failure_target", [ContextCollabColletModel])
 def test_sql_failure_rolls_back_entire_creation(runtime, db, failure_target):
     service, _ = runtime
 
@@ -227,10 +246,8 @@ def test_structural_creation_authorizer_rejects_invalid_actor(actor):
 
 def test_task_plural_value_roundtrip_and_explicit_single_legacy_read(runtime):
     service, repo = runtime
-    collet = service.create_collet(_command(), OWNER)
-    task = replace(
-        repo.get_current_status(collet.collet_id).task, executor_refs=WORKERS
-    )
+    collet, created_task = _create_work(service, repo)
+    task = replace(created_task, executor_refs=WORKERS)
     assert Task.from_dict(task.to_dict()) == task
     legacy = task.to_dict()
     del legacy["executor_refs"]
@@ -246,8 +263,8 @@ def test_task_plural_value_roundtrip_and_explicit_single_legacy_read(runtime):
 )
 def test_malformed_persisted_executor_list_fails_closed(runtime, refs):
     service, repo = runtime
-    collet = service.create_collet(_command(), OWNER)
-    data = repo.get_current_status(collet.collet_id).task.to_dict()
+    collet, task = _create_work(service, repo)
+    data = task.to_dict()
     data["executor_refs"] = refs
     with pytest.raises(ContextCollabValidationError):
         Task.from_dict(data)
@@ -257,8 +274,8 @@ def test_malformed_persisted_executor_list_fails_closed(runtime, refs):
 
 def test_persisted_task_rejects_ambiguous_single_and_plural(runtime):
     service, repo = runtime
-    collet = service.create_collet(_command(), OWNER)
-    data = repo.get_current_status(collet.collet_id).task.to_dict()
+    collet, task = _create_work(service, repo)
+    data = task.to_dict()
     data["executor_ref"] = None
     with pytest.raises(ContextCollabValidationError, match="ambiguous"):
         Task.from_dict(data)
@@ -274,10 +291,8 @@ def test_each_designated_executor_passes_l4_work_guard(runtime, executor):
     )
 
     service, repo = runtime
-    collet = service.create_collet(_command(), OWNER)
-    task = replace(
-        repo.get_current_status(collet.collet_id).task, executor_refs=WORKERS
-    )
+    collet, created_task = _create_work(service, repo)
+    task = replace(created_task, executor_refs=WORKERS)
     machine = STANDARD_TASK_CONTRACT.state_machine_ref
     assert (
         resolve_workflow_status(
@@ -308,8 +323,7 @@ def test_multiple_executors_bind_after_creation_and_roundtrip_authorize_typed_id
     )
 
     service, repo = runtime
-    collet = service.create_collet(_command(), OWNER)
-    task = repo.get_current_status(collet.collet_id).task
+    collet, task = _create_work(service, repo)
     participants = tuple(
         Participant(f"worker-{i}", None, ref) for i, ref in enumerate(WORKERS)
     )
@@ -326,10 +340,10 @@ def test_multiple_executors_bind_after_creation_and_roundtrip_authorize_typed_id
     record = repo.get_current_status(collet.collet_id)
     assert record.task.executor_refs == WORKERS
     assert record.participants == participants
-    assert record.task.version == record.collet.version == 2
+    assert record.task.version == 2 and record.collet.version == 3
     actor = PrincipalRef(executor.agent_type, executor.agent_id)
     message = EventAppendCommand(
-        2,
+        3,
         "user_interaction.posted",
         "Message",
         actor,
@@ -338,7 +352,7 @@ def test_multiple_executors_bind_after_creation_and_roundtrip_authorize_typed_id
         {"content": "update"},
     )
     result = service.append_event(collet.collet_id, message, ActorContext(actor, "a2a"))
-    assert result.context_version == 3
+    assert result.context_version == 4
     before = repo.get_current_status(collet.collet_id)
     for impostor in (
         PrincipalRef("human", executor.agent_id),
@@ -347,7 +361,130 @@ def test_multiple_executors_bind_after_creation_and_roundtrip_authorize_typed_id
         with pytest.raises(ContextCollabValidationError, match="only the principal"):
             service.append_event(
                 collet.collet_id,
-                replace(message, expected_version=3, actor_ref=impostor),
+                replace(message, expected_version=4, actor_ref=impostor),
                 ActorContext(impostor, "api"),
             )
         assert repo.get_current_status(collet.collet_id) == before
+
+
+@pytest.mark.parametrize("target", [ContextCollabTaskModel, ContextCollabEventModel])
+def test_task_creation_failure_keeps_existing_collet_unchanged(runtime, db, target):
+    service, repo = runtime
+    collet = service.create_collet(_command(), OWNER)
+    before = repo.get_current_status(collet.collet_id)
+
+    def fail(*_):
+        raise RuntimeError("Task insert failed")
+
+    sql_event.listen(target, "before_insert", fail)
+    try:
+        with pytest.raises(RuntimeError, match="Task insert failed"):
+            service.create_task(
+                collet.collet_id, TaskCreateCommand(1, OWNER.actor, "work"), OWNER
+            )
+    finally:
+        sql_event.remove(target, "before_insert", fail)
+    assert repo.get_current_status(collet.collet_id) == before
+    with db.orm_session() as session:
+        assert session.query(ContextCollabColletModel).count() == 1
+        assert session.query(ContextCollabTaskModel).count() == 0
+        assert session.query(ContextCollabEventModel).count() == 0
+
+
+def test_task_creation_checks_actor_and_stale_collet_without_side_effects(runtime):
+    from agentclaw.community.core.task.context_collab.errors import (
+        ContextCollabVersionConflict,
+    )
+
+    service, repo = runtime
+    collet = service.create_collet(_command(), OWNER)
+    before = repo.get_current_status(collet.collet_id)
+    command = TaskCreateCommand(1, OWNER.actor, "work")
+    stranger = ActorContext(PrincipalRef("human", "stranger"), "api")
+    with pytest.raises(ContextCollabValidationError, match="initiator"):
+        service.create_task(collet.collet_id, command, stranger)
+    with pytest.raises(ContextCollabVersionConflict):
+        service.create_task(
+            collet.collet_id, replace(command, expected_version=2), OWNER
+        )
+    assert repo.get_current_status(collet.collet_id) == before
+
+
+@pytest.mark.parametrize("expected_version", [None, True, 0, -1, "1"])
+def test_task_command_requires_positive_integer_revision(expected_version):
+    with pytest.raises(ContextCollabValidationError, match="expected_version"):
+        TaskCreateCommand(expected_version, OWNER.actor, "work")
+
+
+@pytest.mark.parametrize("conditions", [None, [], "done", ("",), ("  ",), (1,)])
+def test_task_command_validates_completion_conditions(conditions):
+    with pytest.raises(ContextCollabValidationError, match="completion_conditions"):
+        TaskCreateCommand(1, OWNER.actor, "work", conditions)
+
+
+def test_task_creation_preserves_responsible_principal_and_completion_conditions(
+    runtime,
+):
+    service, repo = runtime
+    collet = service.create_collet(_command(), OWNER)
+    responsible = PrincipalRef("human", "responsible")
+    command = TaskCreateCommand(1, responsible, "Deliver work", ("Owner accepts",))
+    task = service.create_task(collet.collet_id, command, OWNER)
+    record = repo.get_current_status(collet.collet_id)
+    assert record.task == task
+    assert task.principal_ref == responsible != collet.initiator_ref
+    assert task.completion_conditions == ("Owner accepts",)
+    assert task.executor_refs == ()
+    assert record.events[0].actor_ref == OWNER.actor
+
+
+def test_task_creation_authorizer_receives_actual_command_before_any_write():
+    from unittest.mock import Mock
+
+    from agentclaw.community.core.task.context_collab.g1_secure_govern.collet_creation import (
+        ColletCreationAuthorizer,
+    )
+
+    writer = NoUpperAccess()
+    authorizer = Mock(spec=ColletCreationAuthorizer)
+    authorizer.check_create_task.side_effect = ContextCollabValidationError("denied")
+    command = TaskCreateCommand(1, OWNER.actor, "work")
+    service = ContextService(writer, NoUpperAccess(), authorizer)
+    with pytest.raises(ContextCollabValidationError, match="denied"):
+        service.create_task("collet-test", command, OWNER)
+    authorizer.check_create_task.assert_called_once_with(
+        collet_id="collet-test", command=command, actor=OWNER
+    )
+    authorizer.check_create_collet.assert_not_called()
+
+
+def test_task_creation_collet_cas_failure_rolls_back_task_and_event(
+    runtime, db, engine
+):
+    from agentclaw.community.core.task.context_collab.errors import (
+        ContextCollabVersionConflict,
+    )
+
+    service, repo = runtime
+    collet = service.create_collet(_command(), OWNER)
+    before = repo.get_current_status(collet.collet_id)
+
+    def force_zero_matches(conn, cursor, statement, parameters, context, executemany):
+        if statement.startswith("UPDATE ac_context_collab_collet"):
+            return statement + " AND 1=0", parameters
+        return statement, parameters
+
+    sql_event.listen(engine, "before_cursor_execute", force_zero_matches, retval=True)
+    try:
+        with pytest.raises(
+            ContextCollabVersionConflict, match="Task creation Collet CAS"
+        ):
+            service.create_task(
+                collet.collet_id, TaskCreateCommand(1, OWNER.actor, "work"), OWNER
+            )
+    finally:
+        sql_event.remove(engine, "before_cursor_execute", force_zero_matches)
+    assert repo.get_current_status(collet.collet_id) == before
+    with db.orm_session() as session:
+        assert session.query(ContextCollabTaskModel).count() == 0
+        assert session.query(ContextCollabEventModel).count() == 0

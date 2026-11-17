@@ -6,6 +6,9 @@ from typing import Sequence
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabValidationError,
 )
+from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
+    AgentRef,
+)
 from agentclaw.community.core.task.context_collab.l4_context_primitives.event_envelope import (
     EventRecord,
 )
@@ -14,7 +17,12 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.particip
     RoleBinding,
 )
 
+from agentclaw.community.core.task.context_collab.l4_context_primitives.task import (
+    normalize_executor_refs,
+)
+
 INITIAL_BINDING_EVENT = "task.participants_bound"
+COLLET_BINDING_EVENT = "collet.participants_bound"
 
 
 @dataclass(frozen=True)
@@ -76,7 +84,7 @@ def initial_participation(events: Sequence[EventRecord]) -> ParticipationFacts:
     evidence = [
         e
         for e in events
-        if e.event_kind in {"task.created", INITIAL_BINDING_EVENT}
+        if e.event_kind in {"task.created", INITIAL_BINDING_EVENT, COLLET_BINDING_EVENT}
         and e.payload is not None
         and "participation" in e.payload
     ]
@@ -87,3 +95,19 @@ def initial_participation(events: Sequence[EventRecord]) -> ParticipationFacts:
         if evidence
         else ParticipationFacts()
     )
+
+
+def initial_executor_refs(events: Sequence[EventRecord]) -> tuple[AgentRef, ...]:
+    """Initial Task assignees declared by the actual Collet binding evidence."""
+
+    facts = initial_participation(events)
+    evidence = next((e for e in events if e.event_kind == COLLET_BINDING_EVENT), None)
+    if evidence is None:
+        return ()
+    raw = (evidence.payload or {}).get("executor_refs")
+    if not isinstance(raw, list) or any(not isinstance(item, dict) for item in raw):
+        raise ContextCollabValidationError("invalid initial executor binding evidence")
+    refs = normalize_executor_refs(tuple(AgentRef.from_dict(item) for item in raw))
+    if any(ref not in {p.agent_ref for p in facts.participants} for ref in refs):
+        raise ContextCollabValidationError("initial executor is not a Participant")
+    return refs

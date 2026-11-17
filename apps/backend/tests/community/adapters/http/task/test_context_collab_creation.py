@@ -1,6 +1,8 @@
 """Creation receipts serialize Collet without leaking transport state into L4."""
 
 from copy import deepcopy
+from dataclasses import replace
+from datetime import datetime, timezone
 
 import pytest
 from agentclaw.community.adapters.http.task.schemas_context_collab import (
@@ -22,11 +24,29 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.collet i
     Collet,
     ColletState,
 )
+from agentclaw.community.core.task.context_collab.l4_context_primitives.event_envelope import (
+    EventRecord,
+)
 from agentclaw.community.core.task.context_collab.service_api import (
     CollaborationCreateCommand,
     ContextCollabStatusProjection,
     TaskProgressProjectionDTO,
 )
+
+
+def _initial_event(collet):
+    return EventRecord(
+        collab_context_id=collet.collet_id,
+        event_id="evt_created",
+        parent_event=None,
+        event_kind="task.created",
+        primitive_type="Task",
+        actor_ref=collet.initiator_ref,
+        visibility="public",
+        payload={},
+        context_version_after=collet.version,
+        occurred_at=datetime(2026, 11, 17, tzinfo=timezone.utc),
+    )
 
 
 @pytest.mark.parametrize(
@@ -55,12 +75,20 @@ def test_creation_receipt_keeps_wire_shape_and_inputs(
         initiator_ref=PrincipalRef("human", "creator"),
         state=ColletState.ACTIVE,
         scope=command.to_space,
-        current_event_id="evt_created",
         version=1,
     )
     original = deepcopy((collet, command))
 
-    result = created_collet_to_dto(collet, command)
+    initial_event = _initial_event(collet)
+    later_event = replace(
+        initial_event,
+        event_id="evt_later",
+        parent_event=initial_event.event_id,
+        event_kind="user_interaction.posted",
+        primitive_type="Message",
+        context_version_after=2,
+    )
+    result = created_collet_to_dto(collet, command, [initial_event, later_event])
 
     assert result.model_dump() == {
         "collab_context_id": "collet_created",
@@ -106,12 +134,11 @@ def test_creation_receipt_rejects_missing_initial_event():
         initiator_ref=command.principal_ref,
         state=ColletState.ACTIVE,
         scope=command.to_space,
-        current_event_id=None,
         version=1,
     )
 
     with pytest.raises(ValueError, match="initial event"):
-        created_collet_to_dto(collet, command)
+        created_collet_to_dto(collet, command, [])
 
 
 @pytest.mark.parametrize("count", [0, 1, 2])

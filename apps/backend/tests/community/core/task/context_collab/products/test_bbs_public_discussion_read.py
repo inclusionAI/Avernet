@@ -19,7 +19,6 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 import pytest
-
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabNotFoundError,
 )
@@ -39,7 +38,6 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.collet i
     Collet,
     ColletState,
 )
-from tests.community.core.task.context_collab.creation_facts import creation_facts
 from agentclaw.community.core.task.context_collab.l4_context_primitives.event_envelope import (
     EventRecord,
 )
@@ -52,6 +50,8 @@ from agentclaw.community.core.task.context_collab.persistence.repository import 
 from agentclaw.community.core.task.context_collab.products.bbs_public_discussion.service import (
     BbsPublicDiscussionService,
 )
+
+from tests.community.core.task.context_collab.creation_facts import creation_facts
 from tests.community.core.task.context_collab.product_catalog import PRODUCT_CATALOG
 
 PRINCIPAL = PrincipalRef(principal_type="human", principal_id="u_1001")
@@ -154,7 +154,6 @@ class _FakeRepo:
             initiator_ref=PRINCIPAL,
             state=state,
             scope=SPACE,
-            current_event_id=None,
             version=1,
         )
 

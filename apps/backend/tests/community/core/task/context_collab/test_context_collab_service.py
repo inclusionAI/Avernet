@@ -11,7 +11,6 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 import pytest
-
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabValidationError,
 )
@@ -31,23 +30,30 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.collet i
     Collet,
     ColletState,
 )
-from tests.community.core.task.context_collab.creation_facts import creation_facts
-from agentclaw.community.core.task.context_collab.l4_context_primitives.task import Task
 from agentclaw.community.core.task.context_collab.l4_context_primitives.event_envelope import (
     EventRecord,
-)
-from agentclaw.community.core.task.context_collab.l4_context_primitives.task import (
-    TaskStatus,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.contracts import (
     EventAppendCommand,
 )
+from agentclaw.community.core.task.context_collab.l4_context_primitives.task import (
+    Task,
+    TaskStatus,
+)
 from agentclaw.community.core.task.context_collab.l5_methods.method_binding import (
     BindingState,
 )
-from agentclaw.community.core.task.context_collab.l6_products.catalog import ProductCatalog
+from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime import (
+    current_axes,
+)
+from agentclaw.community.core.task.context_collab.l6_products.catalog import (
+    ProductCatalog,
+)
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     VersionedProfileRef,
+)
+from agentclaw.community.core.task.context_collab.l6_products.operations.collaboration_creation import (
+    ContextCollabService,
 )
 from agentclaw.community.core.task.context_collab.persistence.method_store import (
     InMemoryMethodStore,
@@ -59,15 +65,11 @@ from agentclaw.community.core.task.context_collab.persistence.repository import 
 )
 from agentclaw.community.core.task.context_collab.service_api import (
     ActorContext,
-    ContextCollabServiceProtocol,
     CollaborationCreateCommand,
+    ContextCollabServiceProtocol,
 )
-from agentclaw.community.core.task.context_collab.l6_products.operations.collaboration_creation import (
-    ContextCollabService,
-)
-from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime import (
-    current_axes,
-)
+
+from tests.community.core.task.context_collab.creation_facts import creation_facts
 from tests.community.core.task.context_collab.product_catalog import PRODUCT_CATALOG
 
 OBJECTIVE = "整理 Context 协作协议评审结论并提交可评审 PR"
@@ -118,9 +120,7 @@ class _FakeContextCollabRepository:
         self.create_calls: list[CreateColletRecordRequest] = []
         self.created_records: list[ContextCreatedRecord] = []
 
-    def create_collet(
-        self, request: CreateColletRecordRequest
-    ) -> ContextCreatedRecord:
+    def create_collet(self, request: CreateColletRecordRequest) -> ContextCreatedRecord:
         self.create_calls.append(request)
 
         collab_context_id = "collet_" + uuid4().hex
@@ -129,7 +129,9 @@ class _FakeContextCollabRepository:
             objective=request.objective,
             status=TaskStatus.CREATED.value,
             principal_ref=request.principal_ref,
-            executor_refs=((request.executor_ref,) if request.executor_ref is not None else ()),
+            executor_refs=(
+                (request.executor_ref,) if request.executor_ref is not None else ()
+            ),
             task_id="task_" + collab_context_id,
             collet_ref=collab_context_id,
             version=1,
@@ -143,7 +145,6 @@ class _FakeContextCollabRepository:
             initiator_ref=request.initial_event.actor_ref,
             state=ColletState.ACTIVE,
             scope=request.space,
-            current_event_id=event_id,
             version=1,
         )
         initial_event = EventRecord(
@@ -173,6 +174,9 @@ class _FakeContextCollabRepository:
     def get_current_status(self, collab_context_id, *, trunk_events):
         raise NotImplementedError("fake only implements create_collet")
 
+    def create_l4_task(self, collab_context_id, command, actor_ref):
+        raise NotImplementedError("fake does not implement Task creation")
+
     def create_l4_collet(self, command, actor_ref):
         raise NotImplementedError("application-only fake")
 
@@ -201,8 +205,8 @@ class TestCreateContext:
         assert result.initiator_ref == actor.actor
         assert result.scope == make_create_command().to_space
         assert result.state is ColletState.ACTIVE
-        assert result.current_event_id == record.initial_event.event_id
-        assert result.current_event_id.startswith("evt_")
+        assert not hasattr(result, "current_event_id")
+        assert record.initial_event.event_id.startswith("evt_")
         assert Collet.from_dict(result.to_dict()) == result
         # Work and creation facts remain separate from the returned Collet.
         assert record.task.objective == OBJECTIVE
@@ -299,7 +303,9 @@ class TestCreateContext:
             product_catalog=PRODUCT_CATALOG,
         )
 
-        service.create_collaboration(make_create_command(resource_refs=[]), make_actor())
+        service.create_collaboration(
+            make_create_command(resource_refs=[]), make_actor()
+        )
 
         request = repo.create_calls[0]
         assert request.initial_event.payload["resource_refs"] == []
@@ -311,7 +317,9 @@ class TestCreateContext:
             product_catalog=PRODUCT_CATALOG,
         )
         with pytest.raises(ContextCollabValidationError):
-            service.create_collaboration(make_create_command(executor_ref=None), make_actor())
+            service.create_collaboration(
+                make_create_command(executor_ref=None), make_actor()
+            )
 
     @pytest.mark.parametrize(
         "overrides",
@@ -334,7 +342,9 @@ class TestCreateContext:
             service.create_collaboration(make_create_command(**overrides), make_actor())
 
     @pytest.mark.parametrize("profile_ref", [None, VersionedProfileRef("external", 9)])
-    def test_create_passes_product_metadata_without_resolving_profile(self, profile_ref):
+    def test_create_passes_product_metadata_without_resolving_profile(
+        self, profile_ref
+    ):
         repo = _FakeContextCollabRepository()
         store = InMemoryMethodStore()
         service = ContextCollabService(
@@ -386,7 +396,9 @@ class TestCreateContext:
                 )
         # 白名单内产品形态照常通过 G1 create 裁决(含 2026-11-13 新入的
         # 顶层单值 Open——任务代办产品的方法形态,spec 裁决 B)。
-        service.create_collaboration(make_create_command(method_kind="Single"), make_actor())
+        service.create_collaboration(
+            make_create_command(method_kind="Single"), make_actor()
+        )
         service.create_collaboration(
             make_create_command(
                 method_kind="Open + Group",
@@ -410,9 +422,7 @@ class _FixedIdContextCollabRepository(_FakeContextCollabRepository):
     """创建恒返回固定 collab_context_id 的 fake;用于顶层投影幂等用例的
     同命令重放(真实仓储创建不设幂等键,重放语义由 store 幂等承载)。"""
 
-    def create_collet(
-        self, request: CreateColletRecordRequest
-    ) -> ContextCreatedRecord:
+    def create_collet(self, request: CreateColletRecordRequest) -> ContextCreatedRecord:
         self.create_calls.append(request)
         collab_context_id = "collet_projected_001"
         event_id = "evt_projected_001"
@@ -420,7 +430,9 @@ class _FixedIdContextCollabRepository(_FakeContextCollabRepository):
             objective=request.objective,
             status=TaskStatus.CREATED.value,
             principal_ref=request.principal_ref,
-            executor_refs=((request.executor_ref,) if request.executor_ref is not None else ()),
+            executor_refs=(
+                (request.executor_ref,) if request.executor_ref is not None else ()
+            ),
             task_id="task_" + collab_context_id,
             collet_ref=collab_context_id,
             version=1,
@@ -434,7 +446,6 @@ class _FixedIdContextCollabRepository(_FakeContextCollabRepository):
             initiator_ref=request.initial_event.actor_ref,
             state=ColletState.ACTIVE,
             scope=request.space,
-            current_event_id=event_id,
             version=1,
         )
         initial_event = EventRecord(
@@ -556,7 +567,6 @@ def _fake_collet() -> Collet:
         initiator_ref=PRINCIPAL,
         state=ColletState.ACTIVE,
         scope=SpaceRef(space_id="space_workspace_001", environment="prod"),
-        current_event_id=None,
         version=1,
     )
 
@@ -603,7 +613,9 @@ def _fake_task() -> Task:
     )
 
 
-def _append_command(*, actor: PrincipalRef, visibility: str = "private") -> EventAppendCommand:
+def _append_command(
+    *, actor: PrincipalRef, visibility: str = "private"
+) -> EventAppendCommand:
     return EventAppendCommand(
         expected_version=1,
         event_kind="task.progress.updated",
@@ -629,13 +641,20 @@ class TestStructuralAuthorizer:
         facts = _fake_facts()
         # principal 通过
         authorizer.check_append(
-            collet, task, facts, None,
-            _append_command(actor=PRINCIPAL), make_actor("u_1001")
+            collet,
+            task,
+            facts,
+            None,
+            _append_command(actor=PRINCIPAL),
+            make_actor("u_1001"),
         )
         # executor(agent_id 即 bot_coding_001)通过
         bot_actor = PrincipalRef("bot", "bot_coding_001")
         authorizer.check_append(
-            collet, task, facts, None,
+            collet,
+            task,
+            facts,
+            None,
             _append_command(actor=bot_actor),
             ActorContext(bot_actor, "a2a"),
         )
@@ -643,8 +662,12 @@ class TestStructuralAuthorizer:
         outsider = PrincipalRef("human", "u_9999")
         with pytest.raises(ContextCollabValidationError):
             authorizer.check_append(
-                collet, task, facts, None,
-                _append_command(actor=outsider), ActorContext(outsider, "api")
+                collet,
+                task,
+                facts,
+                None,
+                _append_command(actor=outsider),
+                ActorContext(outsider, "api"),
             )
 
     def test_filter_visible_events_by_actor_role(self):
@@ -661,9 +684,7 @@ class TestStructuralAuthorizer:
         principal_view = authorizer.filter_visible_events(
             collet, task, facts, None, events, make_actor("u_1001")
         )
-        assert [e.event_id for e in principal_view] == [
-            "evt_pub", "evt_ws", "evt_priv"
-        ]
+        assert [e.event_id for e in principal_view] == ["evt_pub", "evt_ws", "evt_priv"]
 
         executor_view = authorizer.filter_visible_events(
             collet,

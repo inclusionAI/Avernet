@@ -201,7 +201,9 @@ class TaskCommissionService:
             catalog=self._product_catalog,
         )
         if profile is None:
-            raise ContextCollabValidationError("task commission requires a product profile")
+            raise ContextCollabValidationError(
+                "task commission requires a product profile"
+            )
         publication = profile.composition.require_policy("Open").publication
         self._authorizer.check_create(
             method_kind=method_kind, executor_ref=executor_ref, actor=context
@@ -224,7 +226,9 @@ class TaskCommissionService:
                 objective=title,
                 resource_refs=tuple(command.resource_refs),
                 product_kind=profile.ref.profile_id,
-                workflow_kind=profile.workflow.ref.profile_id if profile.workflow else None,
+                workflow_kind=profile.workflow.ref.profile_id
+                if profile.workflow
+                else None,
                 product_profile_ref=profile.ref,
                 creation_facts=facts,
                 completion_conditions=("提交任务说明所要求的成果，并由发布人验收通过",),
@@ -355,7 +359,9 @@ class TaskCommissionService:
                 assignee_agent_id=context.actor.principal_id,
                 publisher_principal_id=record.owner_principal_id,
                 product_profile_ref=profile.ref,
-                method_binding_ref=product_execution_binding_ref(command.collab_context_id, profile),
+                method_binding_ref=product_execution_binding_ref(
+                    command.collab_context_id, profile
+                ),
                 context_version=record.collet.version,
             )
         )
@@ -417,7 +423,10 @@ class TaskCommissionService:
             raise ContextCollabNotFoundError(
                 f"collaboration context {command.collab_context_id!r} not found"
             )
-        if creation_product_kind(record.creation_facts) != ProductProfile.TASK_COMMISSION.value:
+        if (
+            creation_product_kind(record.creation_facts)
+            != ProductProfile.TASK_COMMISSION.value
+        ):
             raise ContextCollabNotFoundError(
                 f"collaboration context {command.collab_context_id!r} is not "
                 "a task commission"
@@ -491,7 +500,12 @@ class TaskCommissionService:
         # G1 先于机器守卫(spec §5.2 权威管线,与通用服务同序):授权话术
         # 不把 rule_id/守卫内幕泄露给本应最先拒掉的陌生 actor。
         self._authorizer.check_append(
-            record.collet, task, record.creation_facts, record.product_instance, intent, context
+            record.collet,
+            task,
+            record.creation_facts,
+            record.product_instance,
+            intent,
+            context,
         )
         if report is not None:
             executor = task.executor_ref
@@ -644,7 +658,10 @@ class TaskCommissionService:
             raise ContextCollabNotFoundError(
                 f"collaboration context {collab_context_id!r} not found"
             )
-        if creation_product_kind(record.creation_facts) != ProductProfile.TASK_COMMISSION.value:
+        if (
+            creation_product_kind(record.creation_facts)
+            != ProductProfile.TASK_COMMISSION.value
+        ):
             raise ContextCollabNotFoundError(
                 f"collaboration context {collab_context_id!r} is not a task commission"
             )
@@ -695,7 +712,11 @@ class TaskCommissionService:
     def _title_of(record) -> str:
         """title 新主=初始事件 payload 的 objective;NULL-payload 回退
         伴随 ``creation_facts["objective"]``(P3 撤列时移除)。"""
-        title = record.task.objective if record.task is not None else record.creation_facts["objective"]
+        title = (
+            record.task.objective
+            if record.task is not None
+            else record.creation_facts.get("objective") or record.collet.title or ""
+        )
         for event in record.events:
             if event.event_kind == _CREATION_EVENT_KIND:
                 payload = event.payload

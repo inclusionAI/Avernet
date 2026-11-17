@@ -7,6 +7,7 @@ It never imports an application service, Profile, Binding, catalog or rich repo.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Generic, TypeVar
 
 from agentclaw.community.core.task.context_collab.errors import (
@@ -35,6 +36,12 @@ from agentclaw.community.core.task.context_collab.g4_contracts_consistency.schem
 from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
     Collet,
 )
+from agentclaw.community.core.task.context_collab.l4_context_primitives.context_service_protocol import (
+    ContextCollabStatusProjection,
+    ContextServiceProtocol,
+    EventAcceptedResult,
+    TaskProgressProjectionDTO,
+)
 from agentclaw.community.core.task.context_collab.l4_context_primitives.event_envelope import (
     EventRecord,
 )
@@ -42,22 +49,21 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.operatio
     AppendEventRecordRequest,
     ColletCreateCommand,
     EventAppendCommand,
+    TaskCreateCommand,
     WorkStartCommand,
+)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.start import (
+    prepare_root_task,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.work import (
     prepare_event_append,
-)
-from agentclaw.community.core.task.context_collab.l4_context_primitives.context_service_protocol import (
-    ContextCollabStatusProjection,
-    ContextServiceProtocol,
-    EventAcceptedResult,
-    TaskProgressProjectionDTO,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.service_ports import (
     CollaborationPolicy,
     CollaborationReadState,
     CollaborationStore,
 )
+from agentclaw.community.core.task.context_collab.l4_context_primitives.task import Task
 
 StateT = TypeVar("StateT", bound=CollaborationReadState)
 
@@ -104,16 +110,26 @@ class ContextService(ContextServiceProtocol, Generic[StateT]):
         self._authorizer.check_create_collet(command=command, actor=context)
         return self._repository.create_l4_collet(command, context.actor).collet
 
+    def create_task(
+        self, collab_context_id: str, command: TaskCreateCommand, context: ActorContext
+    ) -> Task:
+        self._authorizer.check_create_task(
+            collet_id=collab_context_id, command=command, actor=context
+        )
+        return self._repository.create_l4_task(
+            collab_context_id, command, context.actor
+        ).task
+
     def start(
         self, collab_context_id: str, command: WorkStartCommand, context: ActorContext
     ) -> EventAcceptedResult:
         """L4 Work.start, not a product action or an arbitrary event append.
 
-        The root Task and pinned lifecycle are resolved by this L4
-        pipeline through its G1/G4 policy ports. G1 (including admission), product contracts, G4 guards and both
-        Task/Collet revision fences remain authoritative. No delivery side effect.
+        When no root Task exists, construct a draft from the command's objective
+        and actual L4 bindings. G1 (including admission), product contracts and G4
+        validate before Task creation/start are committed together under Collet CAS.
+        Existing Work keeps its identity and both revision fences. No delivery.
         """
-        # TODO: invoke l4 task start operate
         return self._append_event(
             collab_context_id,
             EventAppendCommand(
@@ -127,6 +143,7 @@ class ContextService(ContextServiceProtocol, Generic[StateT]):
             ),
             context,
             require_transition=True,
+            start_command=command,
         )
 
     def append_event(
@@ -151,12 +168,31 @@ class ContextService(ContextServiceProtocol, Generic[StateT]):
         context: ActorContext,
         *,
         require_transition: bool = False,
+        start_command: WorkStartCommand | None = None,
     ) -> EventAcceptedResult:
         status = self._repository.get_current_status(collab_context_id)
         if status is None:
             raise ContextCollabNotFoundError(
                 f"collaboration context {collab_context_id!r} not found"
             )
+        task_creation = None
+        if start_command is not None:
+            if status.task is None:
+                task_creation = prepare_root_task(status, start_command)
+                # G1/G4 see the exact candidate Work and the unchanged Collet,
+                # participation and method evidence. No write has happened yet.
+                status = status.with_task(task_creation)
+            elif (
+                start_command.objective is not None
+                and start_command.objective != status.task.objective
+            ) or (
+                start_command.completion_conditions
+                and start_command.completion_conditions
+                != status.task.completion_conditions
+            ):
+                raise ContextCollabValidationError(
+                    "Work.start cannot redefine existing Task"
+                )
         collet = status.collet
         validate_event_body(
             event_kind=command.event_kind,
@@ -187,6 +223,11 @@ class ContextService(ContextServiceProtocol, Generic[StateT]):
             workflow_version=lifecycle.workflow_version,
             require_transition=require_transition,
         )
+        if task_creation is not None:
+            prepared = replace(
+                prepared,
+                request=replace(prepared.request, task_creation=task_creation),
+            )
         record = prepared.commit(self._repository)
         return EventAcceptedResult(
             accepted=True,
@@ -211,8 +252,8 @@ class ContextService(ContextServiceProtocol, Generic[StateT]):
         推导,过滤不改 current_snapshot / current_event / 统计。
         visibility 过滤(G1)先于推导;最新状态证据不可见的 Task 不对外暴露。
         返回的 ``current_snapshot`` 从 Task 生成并填入 G3 实时进度,
-        不读取持久化视图;``current_event`` 按 collet 行指针取投影
-        条目,指针事件不可见时为 ``None``。
+        不读取持久化视图;``current_event`` 从完整事件流的最后一条接纳记录
+        推导,该事件不可见时为 ``None``(不会回退到旧的可见事件)。
         """
         status = self._repository.get_current_status(collab_context_id)
         if status is None:
@@ -221,15 +262,17 @@ class ContextService(ContextServiceProtocol, Generic[StateT]):
             )
         collet = status.collet
         visible_events = self._policy.filter_visible_events(status, context)
+        # Acceptance order is authoritative, including a latest event hidden by G1.
+        current_event_id = status.events[-1].event_id if status.events else None
         # 投影始终基于全量可见事件,不因 trunk 开关退化;
         # trunk 过滤 = 当前活动链(active_chain_ids)在投影条目上的子集。
         projection = project_events(
             visible_events,
-            current_event_id=collet.current_event_id,
+            current_event_id=current_event_id,
         )
         trunk_ids = None
         if trunk_events:
-            trunk_ids = active_chain_ids(visible_events, collet.current_event_id)
+            trunk_ids = active_chain_ids(visible_events, current_event_id)
         listed_projection = (
             projection
             if trunk_ids is None
@@ -244,7 +287,7 @@ class ContextService(ContextServiceProtocol, Generic[StateT]):
         )
         progress = build_progress(
             visible_tasks,
-            current_event_id=collet.current_event_id,
+            current_event_id=current_event_id,
             visible_event_ids=visible_ids,
         )
         snapshot = None
@@ -259,7 +302,7 @@ class ContextService(ContextServiceProtocol, Generic[StateT]):
             snapshot["progress"] = progress.to_dict()
         current_event = None
         for entry in projection:
-            if entry.event_id == collet.current_event_id:
+            if entry.event_id == current_event_id:
                 current_event = {
                     **_event_projection_dict(entry),
                     "occurred_at": entry.occurred_at,

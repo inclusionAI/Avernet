@@ -9,7 +9,6 @@ import json
 from datetime import datetime
 
 import pytest
-
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabNotFoundError,
     ContextCollabParentEventError,
@@ -23,10 +22,6 @@ from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_reso
     ResourceRef,
     SpaceRef,
 )
-from tests.community.core.task.context_collab.creation_facts import (
-    create_collet_request,
-    creation_facts,
-)
 from agentclaw.community.core.task.context_collab.persistence.models import (
     ContextCollabColletModel,
     ContextCollabEventModel,
@@ -34,9 +29,12 @@ from agentclaw.community.core.task.context_collab.persistence.models import (
 from agentclaw.community.core.task.context_collab.persistence.repository import (
     AppendEventRecordRequest,
     ContextCollabRepository,
-    CreateColletRecordRequest,
     EventAppendedRecord,
     InitialEventDraft,
+)
+from tests.community.core.task.context_collab.creation_facts import (
+    create_collet_request,
+    creation_facts,
 )
 from tests.community.core.task.context_collab.product_catalog import PRODUCT_CATALOG
 
@@ -133,7 +131,7 @@ class TestAppendEvent:
         assert record.event.context_version_after == 2
         assert isinstance(record.event.occurred_at, datetime)
         assert record.collet.version == 2
-        assert record.collet.current_event_id == record.event.event_id
+        assert not hasattr(record.collet, "current_event_id")
         assert record.task.status == "created"
         assert record.task.version == 1
         assert record.event.task_ref is None
@@ -141,7 +139,7 @@ class TestAppendEvent:
         with db.orm_session() as session:
             row = _collet_row(session, context_id)
             assert row.context_version == 2
-            assert row.current_event_id == record.event.event_id
+            assert row.current_event_id is None  # Deprecated SQL column is not written.
             assert row.current_snapshot is None
             assert row.root_task_ref == repo.get_current_status(context_id).task.task_id
             events = _event_rows(session, context_id)
@@ -201,7 +199,10 @@ class TestAppendEvent:
         with db.orm_session() as session:
             row = _collet_row(session, context_id)
             assert row.context_version == 2
-            assert row.current_event_id == appended.event.event_id
+            assert row.current_event_id is None
+            assert (
+                _event_rows(session, context_id)[-1].event_id == appended.event.event_id
+            )
             assert row.current_snapshot is None
             assert row.root_task_ref == repo.get_current_status(context_id).task.task_id
             assert len(_event_rows(session, context_id)) == 2
@@ -217,7 +218,10 @@ class TestAppendEvent:
             context_id,
             _append_request(expected_version=1, parent_event=root_event_id),
         )
-        assert head.collet.current_event_id == head.event.event_id
+        assert (
+            repo.get_current_status(context_id).events[-1].event_id
+            == head.event.event_id
+        )
 
         # Message 分支只改变 Collet 事件头,不改变独立 Task。
         branch = repo.append_event(

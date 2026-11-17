@@ -9,9 +9,9 @@
 - 外 profile 404、未知 collet 404。
 """
 
-import pytest
 from datetime import datetime
 
+import pytest
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabNotFoundError,
 )
@@ -31,11 +31,10 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.collet i
     Collet,
     ColletState,
 )
-from tests.community.core.task.context_collab.creation_facts import creation_facts
-from agentclaw.community.core.task.context_collab.l4_context_primitives.task import Task
 from agentclaw.community.core.task.context_collab.l4_context_primitives.event_envelope import (
     EventRecord,
 )
+from agentclaw.community.core.task.context_collab.l4_context_primitives.task import Task
 from agentclaw.community.core.task.context_collab.persistence.method_store import (
     InMemoryMethodStore,
 )
@@ -49,6 +48,8 @@ from agentclaw.community.core.task.context_collab.products.task_commission.servi
     PublishTaskCommand,
     TaskAdvanceCommand,
 )
+
+from tests.community.core.task.context_collab.creation_facts import creation_facts
 from tests.community.core.task.context_collab.product_catalog import PRODUCT_CATALOG
 
 ASSIGNEE = "bot_commission_001"
@@ -241,7 +242,6 @@ def _status_record(collab_context_id: str, spec: dict):
             initiator_ref=PRINCIPAL,
             state=ColletState.ACTIVE,
             scope=SPACE,
-            current_event_id=None,
             version=1,
         ),
         creation_facts=spec,
@@ -269,7 +269,9 @@ class _WriteRepoShim(_FakeRepo):
             objective=request.objective,
             status="created",
             principal_ref=request.principal_ref,
-            executor_refs=((request.executor_ref,) if request.executor_ref is not None else ()),
+            executor_refs=(
+                (request.executor_ref,) if request.executor_ref is not None else ()
+            ),
             task_id="task_" + collab_context_id,
             collet_ref=collab_context_id,
             version=1,
@@ -280,6 +282,8 @@ class _WriteRepoShim(_FakeRepo):
         )
         from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
             Collet as _Collet,
+        )
+        from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
             ColletState as _ColletState,
         )
         from agentclaw.community.core.task.context_collab.persistence.repository import (
@@ -291,7 +295,6 @@ class _WriteRepoShim(_FakeRepo):
             initiator_ref=request.initial_event.actor_ref,
             state=_ColletState.ACTIVE,
             scope=request.space,
-            current_event_id=event_id,
             version=1,
         )
         initial_event = EventRecord(
@@ -322,8 +325,9 @@ class _WriteRepoShim(_FakeRepo):
 
     def append_event(self, collab_context_id, request):
         import dataclasses
+        from datetime import datetime as _dt
+        from datetime import timezone as _tz
         from uuid import uuid4
-        from datetime import datetime as _dt, timezone as _tz
 
         record = self._status[collab_context_id]
         event_id = "evt_" + uuid4().hex
@@ -352,7 +356,6 @@ class _WriteRepoShim(_FakeRepo):
         new_collet = dataclasses.replace(
             record.collet,
             version=record.collet.version + 1,
-            current_event_id=event_id,
         )
         self._status[collab_context_id] = ContextStatusRecord(
             collet=new_collet,

@@ -237,7 +237,7 @@ is invented for layers that do not yet have a corresponding use case.
 ## Creation and explicit composition
 
 [`ContextServiceProtocol`](l4_context_primitives/context_service_protocol.py) is the
-public **L4** Service API for `create_collet`, `start`, `append_event`, `get_status`
+public **L4** Service API for `create_collet`, `create_task`, `start`, `append_event`, `get_status`
 and `get_events`. `TaskModule` resolves it directly to the singleton
 [`ContextService`](l4_context_primitives/context_service.py) in L4,
 not to an application facade or a creation-only service. A direct L4 caller uses
@@ -265,7 +265,15 @@ instance in L4, not the L6 adapter or a subclass carrying product operations.
 L4 ContextServiceProtocol.create_collet
   → L4 ContextService.create_collet (G1 creation authorization)
   → L4 ContextCollabRepository.create_l4_collet
-  → one SQL transaction: Collet + root Task + initial task.created Event
+  → one SQL transaction: only Collet (no Tasks or Events)
+
+L6 ProductInstantiationServiceProtocol.instantiate(existing_collet_id, ...)
+  → one SQL transaction: ProductInstance + scoped participants/roles + binding Event
+  → initialize L5 Method bindings (separate MethodStore transaction); no Task
+
+L4 ContextServiceProtocol.start(existing_collet_id, WorkStartCommand, actor)
+  → in-memory root Task draft when missing; validate via G1/G4
+  → one SQL transaction: root Task + task.created + task.started + Collet CAS
 ```
 
 The SQL repository's read decoder port is storage-only: it receives the already
@@ -283,16 +291,18 @@ composition extension** for compatibility: it adds `create_collaboration` to the
 L4 Protocol. Root `service_api.ContextCollabServiceProtocol` is an identity
 reexport of that extension; primitive commands/results remain identity reexports
 from L4. The [L6 combined creation implementation](l6_products/operations/collaboration_creation.py)
-inherits L4's five use cases, not a second copy. New direct L4 consumers import
+inherits L4's use cases, not a second copy. New direct L4 consumers import
 from L4 explicitly:
 
 The canonical [`ColletCreateCommand`](l4_context_primitives/operations/contracts.py)
-requires `to_space`, `initiator_ref` and `objective`; optional keyword-only
-`title`/`description` describe the context. It has **no `executor_refs`**,
-Profile/Method selection or binding input. L4 does not import L5, L6, the
-application facade or the rich repository. The command's `initiator_ref`
-initializes the root Task's `principal_ref`; Collet `initiator_ref` and
-creation-event provenance retain the authenticated actor.
+requires only `initiator_ref`; optional keyword-only `title`/`description`
+describe the context. It has **no `to_space`, `objective`, `executor_refs`**,
+Profile/Method selection or binding input. New contexts have no L3 scope anchor
+(`scope=None`). Existing scoped contexts keep their stored anchor. L4 does not
+import L5, L6, the application facade or the rich repository. Collet initiator
+and audit provenance retain the authenticated actor. For root Work created by
+start, the Task principal is the Collet initiator; executors come from actual
+initial bindings, not the start caller's identity or a request participant list.
 
 ```python
 from agentclaw.community.core.task.context_collab.l4_context_primitives.context_service_protocol import (
@@ -303,22 +313,20 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.context_
 l4_collab_service = injector.get(ContextServiceProtocol)
 collet = l4_collab_service.create_collet(
     ColletCreateCommand(
-        to_space=space_ref,
         initiator_ref=owner_ref,
-        objective="Deliver work",
     ),
     actor_context,
 )
+# No Task/Event exists yet. Instantiate the product separately, then call start.
 ```
 
-Creation atomically persists Collet, an **unassigned** root Task and initial
-`task.created` Event and returns the exact persisted Collet at revision 1.
-It never accesses a Profile/catalog or MethodStore, creates bindings or invents
-a default Method. A method-independent Collet has `method_kind=None` in its
-response projection and no ProductInstance. Method recovery fails explicitly
-until a Method has been selected. Objective/executors remain Task authority,
-not new Collet fields. Creation is not idempotent; authorization and storage
-failures propagate, with SQL writes rolled back.
+Collet creation persists only the context and returns revision 1. It has no Task,
+Event, participants or creation facts. Root Task creation belongs to Work.start
+in the product journey, after installation and required admission/selection.
+The separate `create_task` API remains available for callers that explicitly
+need existing unassigned Work; it is not a prerequisite for Instantiate and is
+not used by the commission journey. Creation failures propagate and SQL writes
+roll back. Objective/executors remain Task authority, not Collet fields.
 
 Product-specific installation is a separate L6 composition operation:
 [`ProductInstantiationServiceProtocol.instantiate`](l6_products/operations/contracts.py)
@@ -329,15 +337,18 @@ by the product caller, not by L4 creation. The exact Profile's typed
 or an Agent allowlist; every supplied Agent must be eligible before any write.
 Eligibility is not participation, Open admission, Single selection or a grant.
 
-Instantiation authorizes the initiator/responsible principal and pins that exact
-Profile on untouched Work. In one SQL transaction it installs ProductInstance,
-binds actual scoped L4 Participants/RoleBindings and assigns the Task executor.
-The original creation Event is retained; a new `task.participants_bound` Event
-advances Task/Collet revisions to 2 and updates their event evidence and audit.
-L5 initialization follows separately. G1 uses the pinned instance scope and the
-**authenticated actual Agent** on both generic and product execution paths;
-claimed event actors and requested roles do not authorize execution. See
-[L6 instantiation](l6_products/README.md#instantiation-and-persistence) for
+Instantiation authorizes the initiator/responsible principal and pins the exact
+Profile on an untouched Collet. One SQL transaction writes ProductInstance and
+actual scoped L4 Participants/RoleBindings plus `collet.participants_bound`.
+Collet advances from revision 1 to 2; there is still **no Task**, and the stored
+instance's `root_task_ref` is `None`. Its creation evidence references this
+binding Event. L5 initialization follows separately. Existing untouched Work is
+also supported for compatibility: assignment preserves its creation Event and
+advances its Task revision with `task.participants_bound`.
+Collet itself has no current-event pointer. G1 checks the pinned eligibility
+scope against the **authenticated actual Agent** on generic and product execution
+paths; eligibility, claimed actors and requested roles do not grant execution.
+See [L6 instantiation](l6_products/README.md#instantiation-and-persistence) for
 immutable selection, transaction limits and scalar product-role constraints.
 
 The existing HTTP creation flow remains upper-layer composition:
@@ -357,13 +368,19 @@ is the explicit entrypoint on the L4-owned Service API for Work on the
 **root Task** of an existing Collet. It uses the same injected L4 service as
 creation and status/event queries; no application facade is required. Start does
 not call a product service or expose arbitrary event fields. The command requires the caller's positive integer Collet
-`expected_version` and optionally a string `note`; the event actor comes from
-`context.actor`.
+`expected_version` and optionally a string `note`. With no root Task, it also
+requires a real `objective`; optional `completion_conditions` initialize that
+Task. The event actor comes from `context.actor`.
 
 ```python
 started = l4_collab_service.start(
     collet.collet_id,
-    WorkStartCommand(expected_version=collet.version, note="Start admitted work"),
+    WorkStartCommand(
+        expected_version=current_collet_revision,  # Re-read after Instantiate.
+        note="Start admitted work",
+        objective="Deliver work",
+        completion_conditions=("Owner accepts deliverable",),
+    ),
     bot_context,
 )
 assert started.accepted and started.current_status == "in_progress"
@@ -372,10 +389,15 @@ assert started.accepted and started.current_status == "in_progress"
 
 The L4-owned pipeline preserves schema validation, G1 authorization
 (including scoped admission when required by the selected product), role/action
-contracts and the exact pinned G4 machine. Explicit Work requires an existing
-Task, an available machine and a matching permitted transition; it cannot report
-success by appending an unmatched `task.started` event without a transition.
-Task, Event and Collet revisions persist in the same repository transaction.
+contracts and the exact pinned G4 machine. With no root Task, it validates an
+uncommitted Task draft from the supplied objective, Collet initiator and actual
+initial executor bindings. Only after all gates pass does one SQL transaction
+create root Work and persist `task.created` (Task revision 1), then `task.started`
+(Task revision 2), advancing Collet twice under one CAS. Rejection or any write
+failure leaves no Task or partial Event. With existing Work, start preserves its
+identity and definition and only applies the permitted transition. Both paths
+require an available machine and matching transition; an unmatched start cannot
+report success. Generic `append_event` does not create missing Work.
 The result is an `EventAcceptedResult` from that committed write; stale/repeated
 starts, guard failures and storage errors propagate without a success receipt.
 `append_event` retains its generic unmatched-event compatibility semantics.
@@ -386,7 +408,10 @@ ACCS Work also names propose/assign/decompose/complete Task and record Activity;
 that vocabulary is not a claim that all of those APIs are implemented here.
 [Work.start contract tests](../../../../../../tests/community/core/task/context_collab/test_l4_work_start.py)
 exercise both standard Task and explicit Workflow contracts with SQLite,
-including distinct Task/Collet fences and SQL rollback. The
+including distinct Task/Collet fences and SQL rollback.
+[Root creation tests](../../../../../../tests/community/repository/task/context_collab/test_work_start_creation.py)
+add taskless installation, first-start atomicity, G1/G4 no-write denial,
+missing objective, repeated/stale starts and SQL failure/CAS rollback. The
 [commission journey](../../../../../../tests/community/core/task/context_collab/products/test_task_commission_end_to_end.py)
 uses the injected L4 service for creation, Work and queries after Open admission; no new
 HTTP route or wire operation is added. Existing product `start_task`/Bot-report adapters remain
@@ -396,7 +421,7 @@ compatible and share the same L4 preparation/commit machinery.
 
 | Object | Authority and current implementation |
 | --- | --- |
-| [Collet](l4_context_primitives/collet.py) | Bounded context identity, initiator, governance scope, lifecycle vocabulary, event head and context revision, with optional title/description and versioned audit metadata for new records. This is a local representation, not an exhaustive ACCS schema. The SQL reader still seeds `ACTIVE`; the separate Collet lifecycle path is not unified by this change. |
+| [Collet](l4_context_primitives/collet.py) | Bounded context identity, initiator, governance scope, lifecycle vocabulary and context revision (no current-event pointer), with optional title/description and versioned audit metadata for new records. This is a local representation, not an exhaustive ACCS schema. The SQL reader still seeds `ACTIVE`; the separate Collet lifecycle path is not unified by this change. |
 | [Task](l4_context_primitives/task.py) | Independent L4 work-item ID, Collet/parent links, objective, completion conditions, responsible principal, designated executor set, status, Task revision and event provenance. Not an A2A Task/execution attempt. |
 | [ScopedParticipantBinding](l4_context_primitives/participants.py) | Immutable task-scoped identity evidence created by Open COLLET_PARTICIPANT admission; validity derives from its admission application/decision and Method lifecycle, not an independent Group membership machine. |
 | [MethodProfile / MethodProfileRef](l5_methods/method_profile.py) | L5 versioned Method contract and its compact exact-version reference. L6 composition templates use the contract; negotiation and ProductInstance retain references rather than duplicate definitions. |
@@ -416,10 +441,16 @@ not the response projection.
 
 ### Collet representation and audit
 
-Collet retains `collet_id`, `initiator_ref`, `state`, `scope`,
-`current_event_id` and `version`. `scope: SpaceRef` is this implementation's L3
-governance anchor, **not** the union of accessible Spaces or a Resource access
-grant. `version` is the aggregate revision used for CAS; the read-only `revision`
+Collet retains `collet_id`, `initiator_ref`, `state`, `scope` and `version`.
+It has no `current_event_id`: G3 derives the current event from the last accepted
+Event in the complete stream, then applies G1 visibility (no fallback to an older
+visible event). The deprecated SQL column is retained for schema compatibility
+only; new domain code neither reads nor writes it. The legacy HTTP combined-create
+receipt resolves its immutable `task.created` evidence through `get_events` at
+the returned creation revision; concurrent appends cannot change that receipt.
+`scope: SpaceRef | None` is an
+optional legacy L3 governance anchor, **not** the union of accessible Spaces or a
+Resource access grant. `version` is the aggregate revision used for CAS; the read-only `revision`
 property is an alias, not another persisted counter.
 
 New creations also expose `title`, `description`, `schema_version`, `created_at`,
@@ -429,24 +460,24 @@ description/schema/audit internally; `Collet.to_dict()` serializes these fields
 at the top level, not under a second aggregate. Local `schema_version="1.1"`
 identifies this representation, not an ACCS version or an aggregate revision.
 Audit timestamps are timezone-aware UTC values, normalized without losing
-microseconds. The authenticated initial event actor supplies creation/update
+microseconds. The authenticated creation actor supplies creation/update
 identity; existing initiator-versus-responsible-Task-principal semantics remain
 unchanged. Callers can supply optional nonblank title/description through
 `ColletCreateCommand`, but not server-owned audit fields. Descriptions do not
 replace Task objectives or completion conditions.
 
 Every accepted SQL event append updates `updated_at`/`updated_by` in the same
-Collet CAS transaction as its event head/revision. Creation audit remains fixed.
+Collet CAS transaction as its revision. Creation audit remains fixed.
 ETag is a quoted SHA-256 tag of the canonical Collet representation excluding the
 tag itself; it is derived, not separately persisted. It does not add an HTTP
-`If-Match` API or replace the existing expected-version fence. Reads and L6
-product installation do not advance Collet audit. The separate in-memory
-lifecycle service still does not persist lifecycle state/events/audit.
+`If-Match` API or replace the existing expected-version fence. Reads do not
+advance Collet audit; explicit Task creation and L6 participant binding do. The
+separate in-memory lifecycle service still does not persist lifecycle state/events/audit.
 
-Legacy six-field representations remain readable with `metadata=None`; absent
+Legacy metadata-less representations remain readable with `metadata=None`; absent
 schema/audit/description values are unknown, not synthesized from SQL row
-timestamps or deployment time. Their serialization retains its old shape, and
-appends do not invent missing creation history. Complete current metadata is
+timestamps or deployment time. The removed event-pointer field is not accepted
+in the domain wire shape, and appends do not invent missing creation history. Complete current metadata is
 required when any metadata field is supplied; partial/invalid metadata, unknown
 fields and mismatched supplied ETags fail validation.
 

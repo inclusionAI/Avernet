@@ -13,7 +13,7 @@ L4 only reads the lower-layer CollaborationReadState properties below.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol, Sequence, TypeVar
+from typing import Protocol, Self, Sequence, TypeVar
 
 from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context import (
     ActorContext,
@@ -31,12 +31,17 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.operatio
     ColletWriter,
     EventAppendCommand,
     EventWriter,
+    TaskWriter,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.task import Task
 
 
 class CollaborationReadState(Protocol):
     """Lower-only read facts and a derived G3 response, never Work authority."""
+
+    def with_task(self, task: Task) -> Self:
+        """Stage Work for read-only G1/G4 checks; never persist from this method."""
+        ...
 
     @property
     def collet(self) -> Collet: ...
@@ -58,7 +63,9 @@ PolicyStateT_contra = TypeVar(
 )
 
 
-class CollaborationStore(ColletWriter, EventWriter, Protocol[ReadStateT_co]):
+class CollaborationStore(
+    ColletWriter, TaskWriter, EventWriter, Protocol[ReadStateT_co]
+):
     def get_current_status(self, collab_context_id: str) -> ReadStateT_co | None: ...
 
 

@@ -9,11 +9,10 @@ G3 投影(事件状态推导 + 进度统计,Message 不计数)、
 仓储用手写 in-memory dict fake,不触碰数据库。
 """
 
-from datetime import datetime, timezone
 from dataclasses import replace
+from datetime import datetime, timezone
 
 import pytest
-
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabNotFoundError,
 )
@@ -28,10 +27,12 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.collet i
     Collet,
     ColletState,
 )
-from tests.community.core.task.context_collab.creation_facts import creation_facts
-from agentclaw.community.core.task.context_collab.l4_context_primitives.task import Task
 from agentclaw.community.core.task.context_collab.l4_context_primitives.event_envelope import (
     EventRecord,
+)
+from agentclaw.community.core.task.context_collab.l4_context_primitives.task import Task
+from agentclaw.community.core.task.context_collab.l6_products.operations.collaboration_creation import (
+    ContextCollabService,
 )
 from agentclaw.community.core.task.context_collab.persistence.method_store import (
     InMemoryMethodStore,
@@ -46,9 +47,8 @@ from agentclaw.community.core.task.context_collab.service_api import (
     ContextCollabStatusProjection,
     TaskProgressProjectionDTO,
 )
-from agentclaw.community.core.task.context_collab.l6_products.operations.collaboration_creation import (
-    ContextCollabService,
-)
+
+from tests.community.core.task.context_collab.creation_facts import creation_facts
 from tests.community.core.task.context_collab.product_catalog import PRODUCT_CATALOG
 
 COLLET_ID = "collet_001"
@@ -92,14 +92,13 @@ def _task() -> Task:
     )
 
 
-def _collet(*, current_event_id: str = "evt_004") -> Collet:
-    """§6.4 示例形态的聚合根(current=evt_004);spec/快照是 record 伴随投影。"""
+def _collet() -> Collet:
+    """无事件头的 Collet;当前事件从接纳顺序推导。"""
     return Collet(
         collet_id=COLLET_ID,
         initiator_ref=PRINCIPAL,
         state=ColletState.ACTIVE,
         scope=_spec().space,
-        current_event_id=current_event_id,
         version=4,
     )
 
@@ -230,6 +229,9 @@ class _FakeStatusRepository:
         self.write_calls.append(("append_event", collab_context_id, request))
         raise NotImplementedError("get_status must not write")
 
+    def create_l4_task(self, collab_context_id, command, actor_ref):
+        raise NotImplementedError("fake does not implement Task creation")
+
     def create_l4_collet(self, command, actor_ref):
         raise NotImplementedError("application-only fake")
 
@@ -282,20 +284,20 @@ class TestGetStatusHappyPath:
         assert progress["completed_count"] == 0
         assert progress["active_count"] == 1
         assert progress["blocked_count"] == 0
-        # current_event_id 沿用 collet 行值,不重新推导(≠ evt_005)。
-        assert progress["current_event_id"] == "evt_004"
+        # 当前事件取完整接纳流的最后一条记录,不从 Collet 读取。
+        assert progress["current_event_id"] == "evt_005"
 
-    def test_current_event_keyed_by_collet_pointer(self):
+    def test_current_event_derived_from_latest_accepted_event(self):
         _, service = _make_service()
         result = service.get_status(COLLET_ID, trunk_events=False, context=make_actor())
         current_event = result.current_event
         assert current_event is not None
-        assert current_event["event_id"] == "evt_004"
-        assert current_event["parent_event"] == "evt_003"
+        assert current_event["event_id"] == "evt_005"
+        assert current_event["parent_event"] == "evt_004"
         assert current_event["event_kind"] == "task.progress.updated"
         assert current_event["primitive_type"] == "Activity"
-        assert current_event["summary"] == "开始整理协议设计"
-        # current 的状态由 collet.current_event_id 决定:evt_004 → active。
+        assert current_event["summary"] == "完成设计并准备提交 PR"
+        # 最新接纳事件 evt_005 为 active。
         assert current_event["status"] == "active"
         assert current_event["occurred_at"] == OCCURRED_AT
 
@@ -321,8 +323,8 @@ class TestGetStatusHappyPath:
             "evt_001": "completed",
             "evt_002": "completed",
             "evt_003": "completed",
-            "evt_004": "active",
-            "evt_005": "pending",
+            "evt_004": "completed",
+            "evt_005": "active",
         }
         message = task_progress.events[1]
         assert message["content"] == "上下文做一下补充xxx"
@@ -382,12 +384,13 @@ class TestTrunkFilterIdentity:
         assert full.task_progress.total_events == 6
         # Ruling R9:主干 = current(evt_004)沿 parent 回溯的活动链;
         # 链后的 pending 事件(evt_005)与链外分支(evt_006)都被滤除。
-        assert trunk.task_progress.total_events == 4
+        assert trunk.task_progress.total_events == 5
         assert [entry["event_id"] for entry in trunk.task_progress.events] == [
             "evt_001",
             "evt_002",
             "evt_003",
             "evt_004",
+            "evt_006",
         ]
         # 两次调用的 current_snapshot、current_event、percent 完全相等。
         assert full.current_snapshot == trunk.current_snapshot
@@ -395,7 +398,7 @@ class TestTrunkFilterIdentity:
         assert trunk.current_snapshot["progress"]["percent"] == 40
         assert trunk.current_snapshot["progress"]["completed_count"] == 0
         assert trunk.current_snapshot["progress"]["active_count"] == 1
-        assert trunk.current_event["event_id"] == "evt_004"
+        assert trunk.current_event["event_id"] == "evt_006"
 
     def test_branch_percent_does_not_drive_trunk_percent(self):
         """分支事件携带 percent=80:percent 从全量可见事件推导,
@@ -417,6 +420,7 @@ class TestTrunkFilterIdentity:
             "evt_002",
             "evt_003",
             "evt_004",
+            "evt_006",
         ]
         assert full.current_snapshot["progress"]["percent"] == 80
         assert trunk.current_snapshot["progress"]["percent"] == 80
@@ -446,13 +450,13 @@ class TestTrunkFilterIdentity:
         assert trunk.current_snapshot["progress"]["completed_count"] == 0
         assert full.current_snapshot["progress"] == (trunk.current_snapshot["progress"])
         # 活动链 = evt_001..evt_004(分支在链外)。
-        assert trunk.task_progress.total_events == 4
+        assert trunk.task_progress.total_events == 5
 
     def test_current_pointer_on_branch_event_stays_projected(self):
         """current 指针落在分支事件上(最强场景):current_event、事件
         状态、统计在两个开关下完全一致,主干条目不退化成全 pending。"""
         _, service = _make_service(
-            collet=_collet(current_event_id="evt_006"),
+            collet=_collet(),
             events=_fixture_events() + [self._branch_event()],
         )
         full = service.get_status(COLLET_ID, trunk_events=False, context=make_actor())
@@ -559,8 +563,10 @@ class TestVisibilityFiltering:
         assert principal.current_snapshot["progress"]["percent"] == 90
 
     def test_invisible_current_event_is_none_but_pointer_kept(self):
-        """current 事件本身不可见时投影为 None;collet 行指针不变。"""
-        _, service = _make_service(collet=_collet(current_event_id="evt_002"))
+        """最新事件不可见时为 None,不得回退到旧的可见事件。"""
+        events = _fixture_events()
+        # 接纳流的最后一条 workspace 事件对陌生读者不可见。
+        _, service = _make_service(events=[events[0], *events[2:], events[1]])
         result = service.get_status(
             COLLET_ID, trunk_events=False, context=make_actor("u_9999")
         )
@@ -585,7 +591,7 @@ class TestReadOnlyPath:
         assert repo.collets[COLLET_ID] is before
         assert before.version == 4
         assert repo.tasks[COLLET_ID].reported_percent == 40
-        assert before.current_event_id == "evt_004"
+        assert not hasattr(before, "current_event_id")
         assert len(repo.events[COLLET_ID]) == 5
         # 两次只读结果一致,且未把投影值写回行内。
         assert first.current_snapshot == second.current_snapshot

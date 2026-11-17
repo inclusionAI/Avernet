@@ -167,7 +167,9 @@ def test_all_initial_agents_must_be_eligible_before_any_write(scoped_runtime, re
     )
     with pytest.raises(ContextCollabValidationError, match="participant scope"):
         service.instantiate(
-            ProductInstantiateCommand(collet.collet_id, profile.ref, 1, refs, refs[0]),
+            ProductInstantiateCommand(
+                collet.collet_id, profile.ref, collet.version, refs, refs[0]
+            ),
             _actor(),
         )
     assert repo.get_current_status(collet.collet_id) == before
@@ -198,11 +200,7 @@ def test_initial_participation_is_real_scoped_and_does_not_imply_open_admission(
     assert record.events[:1] == before.events
     assert record.events[-1].actor_ref == OWNER
     assert record.events[-1].task_ref == record.task.task_id
-    assert (
-        record.task.last_event_ref
-        == record.collet.current_event_id
-        == record.events[-1].event_id
-    )
+    assert record.task.last_event_ref == record.events[-1].event_id
     assert record.task.created_event_ref == before.task.created_event_ref
     for binding in store.list_bindings(current_axes(), collet.collet_id):
         assert (
@@ -237,7 +235,7 @@ def test_binding_write_failure_rolls_back_instance_assignment_roles_and_event(
             or (
                 failure_stage == "collet"
                 and sql.startswith("UPDATE AC_CONTEXT_COLLAB_COLLET ")
-                and "CURRENT_EVENT_ID=" in sql
+                and "CONTEXT_VERSION=" in sql
             )
             or (
                 failure_stage == "event"
@@ -305,7 +303,7 @@ def test_eligible_bound_executor_can_work(scoped_runtime, entrypoint):
         result = generic.append_event(
             collet.collet_id,
             EventAppendCommand(
-                2,
+                3,
                 "task.started",
                 "Task",
                 PrincipalRef("bot", "worker"),
@@ -317,13 +315,13 @@ def test_eligible_bound_executor_can_work(scoped_runtime, entrypoint):
         )
     elif entrypoint == "work_start":
         result = generic.start(
-            collet.collet_id, WorkStartCommand(2), _actor(PrincipalRef("bot", "worker"))
+            collet.collet_id, WorkStartCommand(3), _actor(PrincipalRef("bot", "worker"))
         )
     else:
         result = product.start_task(
             TaskAdvanceCommand(collet.collet_id), _actor(PrincipalRef("bot", "worker"))
         )
-    assert result.context_version == 3
+    assert result.context_version == 4
 
 
 def test_open_eligibility_is_not_membership_or_executor_authority(runtime):
@@ -338,7 +336,7 @@ def test_open_eligibility_is_not_membership_or_executor_authority(runtime):
             record.creation_facts,
             instance,
             EventAppendCommand(
-                2,
+                3,
                 "task.started",
                 "Task",
                 PrincipalRef("bot", "outsider"),
@@ -416,7 +414,10 @@ def test_instantiate_empty_initial_agents_when_executor_role_is_optional(db):
     collet = _create_collet(repo)
     instance = ProductInstantiationService(
         repo, store, catalog, StructuralContextCollabAuthorizer()
-    ).instantiate(ProductInstantiateCommand(collet.collet_id, profile.ref, 1), _actor())
+    ).instantiate(
+        ProductInstantiateCommand(collet.collet_id, profile.ref, collet.version),
+        _actor(),
+    )
     record = repo.get_current_status(collet.collet_id)
     assert record.task.executor_refs == ()
     assert (

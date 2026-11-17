@@ -122,12 +122,10 @@ from agentclaw.community.core.task.context_collab.products.task_commission impor
     service as commission_service_module,
 )
 from agentclaw.community.core.task.context_collab.products.task_commission.profile import (
-    OPEN_SINGLE_COMMISSION_PROFILE,
     TASK_COMMISSION_PROFILE,
 )
 from agentclaw.community.core.task.context_collab.products.task_commission.publication import (
     BotSelfApplicationAdmission,
-    DesignatedOpenAdmission,
 )
 from agentclaw.community.core.task.context_collab.products.task_commission.service_api import (
     TaskAdvanceCommand,
@@ -165,7 +163,7 @@ OBJECTIVE = (
     "为计算器增加求和能力:完成方案、编码和测试,生成待评审 PR,提交成果后由业务同学验收。"
 )
 
-"""产品上线 → 建任务 → Bot Query/Apply → 策略 Screen/Admit → scoped Participant → Work → accept。"""
+"""产品上线 → Collet/Instantiate → Bot Query/Apply → Screen/Admit → Single → start 建 Task → accept。"""
 """
 协议适配问题总结：
 - 语义不明确
@@ -325,14 +323,12 @@ def _create_product_profile():
 
 
 def _create_commission_collet(l4_context_operate):
-    # 一个独立委托采用一个 Collet + 根 Task;这是本产品映射,不是协议的普遍 1:1。
+    # Collet 只提供上下文身份/描述;Task 在后续 L4 start 中才创建。
     # TODO l4_context_operate需要协议层统一提供                (fixed：本身就是L4层协议提供)
     # TODO: to_space, executor_refs 是不是该从其他地方提取？    (fixed: 这里不再传入)
     collet = l4_context_operate.create_collet(
         ColletCreateCommand(
-            to_space=SPACE,
             initiator_ref=HUMAN.actor,
-            objective=OBJECTIVE,
             title="XX代办任务",
             description="Open 参与 + Single 选定执行者,成果由用户验收",
         ),
@@ -349,16 +345,18 @@ def _create_commission_collet(l4_context_operate):
 def _instantiate_product_instance(injector, collet, profile):
     repository = injector.get(ContextCollabRepositoryProtocol)
     unbound = repository.get_current_status(collet.collet_id)
-    assert unbound.task is not None and unbound.product_instance is None
-    assert unbound.task.executor_refs == ()
+    assert unbound.task is None and unbound.product_instance is None
+    assert unbound.tasks == () and unbound.events == []
     assert unbound.participants == unbound.role_bindings == ()
+    assert unbound.creation_facts == {} and collet.version == 1
+    assert not hasattr(collet, "current_event_id")
 
-    # L6 为已提交且未执行的 L4 对象选择合同并初始化绑定;不会替换初始 Event。
+    # L6 在 Collet 上选择合同并绑定参与者/角色;此时没有任何 Task。
     instance = injector.get(ProductInstantiationServiceProtocol).instantiate(
         ProductInstantiateCommand(
             collet.collet_id,
             profile.ref,
-            collet.version,
+            unbound.collet.version,
             participant_refs=(AgentRef("bot", BOT_ASSIGNEE),),
         ),
         HUMAN,
@@ -372,7 +370,8 @@ def _instantiate_product_instance(injector, collet, profile):
     }
     assert instance.instance_id != instance.collet_ref
     assert instance.collet_ref == collet.collet_id
-    assert instance.root_task_ref == record.task.task_id != collet.collet_id
+    assert instance.root_task_ref is None
+    assert record.task is None and record.tasks == ()
     assert instance.profile_ref == instance.negotiation.selected_profile == profile.ref
     assert instance.negotiation.accepted
     assert instance.workflow_ref is instance.domain_ref is None
@@ -383,11 +382,11 @@ def _instantiate_product_instance(injector, collet, profile):
     assert instance.governance == profile.governance
     assert len(instance.role_binding_refs) == 2
     assert instance.creation_event_ref == record.events[0].event_id
-    assert record.events[:1] == unbound.events
-    assert record.events[-1].event_kind == "task.participants_bound"
-    assert record.task.executor_refs == (AgentRef("bot", BOT_ASSIGNEE),)
+    assert len(record.events) == 1
+    assert record.events[0].event_kind == "collet.participants_bound"
+    assert record.events[0].task_ref is None
     assert len(record.participants) == len(record.role_bindings) == 2
-    assert record.task.version == record.collet.version == collet.version + 1
+    assert record.collet.version == unbound.collet.version + 1
     assert ProductInstance.from_dict(instance.to_dict()) == instance
 
     # 一次 Instantiate 创建两份独立 Profile 绑定,显式 Single --support--> Open。
@@ -550,6 +549,7 @@ def _notify_agent_work(injector, l4_context_operate, service, l4_collet, bot_con
     # 同一实例验证 G1:范围外 Agent 拒绝;范围内但未绑定的候选也没有执行权。
     repository = injector.get(ContextCollabRepositoryProtocol)
     before = repository.get_current_status(collet_id_1)
+    assert before.task is None and before.tasks == ()
     for agent, error in (
         (OUTSIDE_AGENT, "ProductProfile participant scope"),
         (OTHER_ELIGIBLE_AGENT, "only the principal, executor"),
@@ -557,7 +557,9 @@ def _notify_agent_work(injector, l4_context_operate, service, l4_collet, bot_con
         with pytest.raises(ContextCollabValidationError, match=error):
             l4_context_operate.start(
                 collet_id_1,
-                WorkStartCommand(expected_version=before.collet.version),
+                WorkStartCommand(
+                    expected_version=before.collet.version, objective=OBJECTIVE
+                ),
                 ActorContext(
                     PrincipalRef(agent.agent_type, agent.agent_id), source="a2a"
                 ),
@@ -570,6 +572,8 @@ def _notify_agent_work(injector, l4_context_operate, service, l4_collet, bot_con
         WorkStartCommand(
             expected_version=before.collet.version,
             note="录取并经 Single 选定后启动任务执行",
+            objective=OBJECTIVE,
+            completion_conditions=("提交成果并由用户验收通过",),
         ),
         bot_context,
     )
@@ -580,7 +584,21 @@ def _notify_agent_work(injector, l4_context_operate, service, l4_collet, bot_con
     record = injector.get(ContextCollabRepositoryProtocol).get_current_status(
         collet_id_1
     )
-    assert record.task is not None
+    assert record.task is not None and len(record.tasks) == 1
+    assert record.task.objective == OBJECTIVE
+    assert record.task.executor_refs == (AgentRef("bot", BOT_ASSIGNEE),)
+    assert record.task.version == 2
+    assert record.collet.version == before.collet.version + 2
+    assert record.product_instance.root_task_ref == record.task.task_id
+    assert (
+        record.product_instance.creation_event_ref
+        == before.product_instance.creation_event_ref
+    )
+    assert [e.event_kind for e in record.events[-2:]] == [
+        "task.created",
+        "task.started",
+    ]
+    assert record.task.created_event_ref == record.events[-2].event_id
     task_id = record.task.task_id
 
     return started, task_id
@@ -643,8 +661,8 @@ def _query_task_result(
 
     final_events = l4_context_operate.get_events(collet_id_1, context=HUMAN)
     assert [event.event_kind for event in final_events] == [
+        "collet.participants_bound",
         "task.created",
-        "task.participants_bound",
         "task.started",
         *["task.progress.updated"] * len(_AI_CODING_STEPS),
         "task.submitted",
@@ -769,8 +787,9 @@ def _trace_runtime(monkeypatch, injector: Injector) -> None:
         (
             ContextServiceProtocol,
             {
-                "create_collet": "L4 服务创建 Collet、根 Task 与初始 Event",
-                "start": "L4 服务经 G1/G4 启动根 Task,不派发 Bot",
+                "create_collet": "L4 服务只创建 Collet",
+                "create_task": "L4 独立创建根 Task 与 task.created 证据",
+                "start": "L4 服务经 G1/G4 创建并启动根 Task,不派发 Bot",
                 "get_status": "L4 服务读取授权后的状态投影",
                 "get_events": "L4 服务读取可见事件事实",
             },
@@ -789,7 +808,8 @@ def _trace_runtime(monkeypatch, injector: Injector) -> None:
         (
             L4ContextCollabRepositoryProtocol[ContextStatusRecord],
             {
-                "create_l4_collet": "L4 仓储原子持久化 Collet、独立 Task 与初始事件",
+                "create_l4_collet": "L4 仓储只持久化 Collet",
+                "create_l4_task": "L4 仓储独立创建 Task/Event 并围栏 Collet",
                 "append_event": "L4 仓储追加事件并原子保存 Task;返回已保存状态",
             },
         ),

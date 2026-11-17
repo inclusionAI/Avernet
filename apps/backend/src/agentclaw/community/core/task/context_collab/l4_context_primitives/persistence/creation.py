@@ -1,8 +1,11 @@
-"""Construct L4 creation records without product selection or Method state."""
+"""Construct independent L4 context and Work records; no L5/L6 selection."""
 
 from datetime import datetime, timezone
 from uuid import uuid4
 
+from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
+    PrincipalRef,
+)
 from agentclaw.community.core.task.context_collab.l4_context_primitives.collet import (
     Collet,
     ColletState,
@@ -18,6 +21,7 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.operatio
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.records import (
     CreatedColletRecord,
+    CreatedWorkRecord,
     InitialEventDraft,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.task import (
@@ -25,59 +29,65 @@ from agentclaw.community.core.task.context_collab.l4_context_primitives.task imp
     TaskStatus,
 )
 
-_CREATION_EVENT_VISIBILITY = "public"
-
 
 def build_created_collet(
-    command: ColletCreateCommand,
-    initial_event_draft: InitialEventDraft,
-    completion_conditions: tuple[str, ...] = (),
+    command: ColletCreateCommand, actor_ref: PrincipalRef
 ) -> CreatedColletRecord:
     now = datetime.now(timezone.utc)
-    collab_context_id = "collet_" + uuid4().hex
+    return CreatedColletRecord(
+        Collet(
+            collet_id="collet_" + uuid4().hex,
+            initiator_ref=actor_ref,
+            state=ColletState.ACTIVE,
+            scope=None,
+            version=1,
+            metadata=ColletMetadata(
+                created_at=now,
+                created_by=actor_ref,
+                updated_at=now,
+                updated_by=actor_ref,
+                title=command.title,
+                description=command.description,
+            ),
+        )
+    )
+
+
+def build_created_work(
+    collet: Collet,
+    principal_ref: PrincipalRef,
+    objective: str,
+    initial_event_draft: InitialEventDraft,
+    completion_conditions: tuple[str, ...] = (),
+    *,
+    occurred_at: datetime,
+) -> CreatedWorkRecord:
     event_id = "evt_" + uuid4().hex
     task = Task(
         task_id="task_" + uuid4().hex,
-        collet_ref=collab_context_id,
-        objective=command.objective,
+        collet_ref=collet.collet_id,
+        objective=objective,
         status=TaskStatus.CREATED.value,
         version=1,
-        principal_ref=command.initiator_ref,
+        principal_ref=principal_ref,
         executor_refs=(),
         parent_task_ref=None,
         completion_conditions=completion_conditions,
         created_event_ref=event_id,
         last_event_ref=event_id,
     )
-    initial_event = EventRecord(
-        collab_context_id=collab_context_id,
+    event = EventRecord(
+        collab_context_id=collet.collet_id,
         event_id=event_id,
         parent_event=None,
         event_kind=initial_event_draft.event_kind,
         primitive_type=initial_event_draft.primitive_type,
         actor_ref=initial_event_draft.actor_ref,
-        visibility=_CREATION_EVENT_VISIBILITY,
+        visibility="public",
         payload=dict(initial_event_draft.payload),
-        context_version_after=1,
+        context_version_after=collet.version,
         task_ref=task.task_id,
         task_version_after=task.version,
-        occurred_at=now,
+        occurred_at=occurred_at,
     )
-    collet = Collet(
-        collet_id=collab_context_id,
-        # 创建主体与初始事件的 actor_ref 同源(创建人)。
-        initiator_ref=initial_event_draft.actor_ref,
-        state=ColletState.ACTIVE,
-        scope=command.to_space,
-        current_event_id=initial_event.event_id,
-        version=1,
-        metadata=ColletMetadata(
-            created_at=now,
-            created_by=initial_event_draft.actor_ref,
-            updated_at=now,
-            updated_by=initial_event_draft.actor_ref,
-            title=command.title,
-            description=command.description,
-        ),
-    )
-    return CreatedColletRecord(collet, task, initial_event)
+    return CreatedWorkRecord(collet, task, event)

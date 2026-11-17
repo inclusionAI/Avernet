@@ -1,7 +1,5 @@
 """Composition roots bind L4 storage, not a renamed product repository."""
 
-from injector import Injector, InstanceProvider
-
 from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context import (
     ActorContext,
 )
@@ -14,21 +12,19 @@ from agentclaw.community.core.task.context_collab.g1_secure_govern.collet_creati
 from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
     PrincipalRef,
 )
-from agentclaw.community.core.task.context_collab.l3_spaces_resources.space_resource_refs import (
-    SpaceRef,
+from agentclaw.community.core.task.context_collab.l4_context_primitives.context_service_protocol import (
+    ContextServiceProtocol,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.operations.contracts import (
     CollaborationReader,
     ColletCreateCommand,
+    TaskCreateCommand,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.records import (
     ContextCollabRepositoryProtocol as L4RepositoryProtocol,
 )
 from agentclaw.community.core.task.context_collab.l4_context_primitives.persistence.repository import (
     ContextCollabRepository as L4Repository,
-)
-from agentclaw.community.core.task.context_collab.l4_context_primitives.context_service_protocol import (
-    ContextServiceProtocol,
 )
 from agentclaw.community.core.task.context_collab.l6_products.catalog import (
     ProductCatalog,
@@ -42,6 +38,7 @@ from agentclaw.community.core.task.context_collab.l6_products.persistence.reposi
 from agentclaw.community.di.modules.task_module import TaskModule
 from agentclaw.community.di.modules.task_persistence_module import TaskPersistenceModule
 from agentclaw.community.plugin_api.database import DatabasePlugin
+from injector import Injector, InstanceProvider
 
 
 def test_actual_l4_service_creation_neither_resolves_nor_calls_product_repository(db):
@@ -72,13 +69,17 @@ def test_actual_l4_service_creation_neither_resolves_nor_calls_product_repositor
     actor = ActorContext(PrincipalRef("human", "owner"), "api")
     created = service.create_collet(
         ColletCreateCommand(
-            SpaceRef("space", "test"),
             actor.actor,
-            "Deliver work",
         ),
         actor,
     )
     state = repository.get_current_status(created.collet_id)
     assert state.collet == created
     assert state.product_instance is None
-    assert state.task.objective == "Deliver work"
+    assert state.task is None and state.events == []
+    task = service.create_task(
+        created.collet_id, TaskCreateCommand(1, actor.actor, "Deliver work"), actor
+    )
+    state = repository.get_current_status(created.collet_id)
+    assert state.task == task and task.objective == "Deliver work"
+    assert state.collet.version == 2 and task.version == 1
