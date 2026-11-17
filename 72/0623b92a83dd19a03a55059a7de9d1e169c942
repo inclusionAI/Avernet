@@ -1,0 +1,21 @@
+apps/frontend-nextgen/src/hooks/useBotEditor.ts
+  s_bc01be05f02440::t_c1b975960fb685 17,20,41
+apps/frontend-nextgen/src/hooks/useResourceListState.ts
+  s_bc01be05f02440::t_7c870594d6a01d 1-63
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "720623b92a83dd19a03a55059a7de9d1e169c942",
+  "prompts": {},
+  "sessions": {
+    "s_bc01be05f02440": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e4c7-8bdd-7f10-aa03-5c4cc5a653eb",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}
