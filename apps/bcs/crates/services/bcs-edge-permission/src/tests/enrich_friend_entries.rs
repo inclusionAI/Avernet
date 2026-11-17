@@ -192,6 +192,24 @@ async fn list_friends_human_name_none_when_profile_absent() {
     assert!(human.name.is_none(), "name stays None when nick_name absent");
 }
 
+#[tokio::test]
+async fn list_friends_human_name_none_when_directory_error() {
+    let (eg, pp, rq, bc, db) = assemble().await;
+    let registry = Arc::new(BotCore::memory());
+    seed_bot_for_enrich(&db, "x:err1", "FriendBot", "helper", &registry).await;
+    // FailingUserDirectoryPlugin: every lookup returns an error.
+    let user_dir = Arc::new(FailingUserLookupPlugin);
+    let svc = service_with_enrichment(&eg, &pp, &rq, &bc, registry, Some(user_dir));
+    svc.create_connect("human_66001", "x:err1", None, None).await.expect("c1");
+
+    let friends = svc.list_friends("x:err1").await.expect("list ok");
+    assert_eq!(friends.len(), 1);
+    let human = &friends[0];
+    assert_eq!(human.actor_id, "human_66001");
+    assert_eq!(human.kind, ActorKind::Human);
+    assert!(human.name.is_none(), "name stays None when directory lookup errors");
+}
+
 // ── Pagination semantics preserved ─────────────────────────────────
 
 #[tokio::test]

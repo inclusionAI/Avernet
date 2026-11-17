@@ -122,6 +122,27 @@ use bcs_user_directory_api::{UserDirectoryLookupContext, UserDirectoryPlugin};
         }
     }
 
+    /// User-directory stub whose `lookup_by_staff_no` always returns an error
+    /// — exercises the error-degradation path in human name enrichment.
+    struct FailingUserLookupPlugin;
+
+    #[async_trait]
+    impl UserDirectoryPlugin for FailingUserLookupPlugin {
+        async fn lookup_by_staff_no(
+            &self,
+            _staff_no: &str,
+        ) -> Result<Option<bcs_user_directory_api::UserDirectoryProfile>, bcs_user_directory_api::UserDirectoryError> {
+            Err(bcs_user_directory_api::UserDirectoryError::Request("injected failure".into()))
+        }
+
+        async fn lookup_department_by_staff_no(
+            &self,
+            _staff_no: &str,
+        ) -> Result<Option<String>, bcs_user_directory_api::UserDirectoryError> {
+            Ok(None)
+        }
+    }
+
     fn service_with_departments(
         edge_grants: &Arc<dyn EdgeGrantRepoPort>,
         profiles: &Arc<dyn PermissionProfileRepoPort>,
