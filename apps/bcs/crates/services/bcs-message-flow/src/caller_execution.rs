@@ -53,7 +53,7 @@ fn invalid() -> ServiceError {
 pub(crate) async fn store(flow: &BcsMessageFlow, cmd: &WebSendCommand) -> ServiceResult<()> {
     let Some(scope) = ExecutionRef::from_command(cmd) else { return Ok(()); };
     let c: &CallerExecution = cmd.caller_execution.as_ref().ok_or_else(invalid)?;
-    if c.token.expose().trim().is_empty() || c.token_type != "iam-token" || c.user_id.trim().is_empty()
+    if c.token.expose().trim().is_empty() || c.token_type.trim().is_empty() || c.token_type != c.token.token_type() || c.user_id.trim().is_empty()
         || c.binding_id.is_empty() || c.source_message_id.is_empty() || c.reference.is_empty()
         || scope.session_id.is_empty() || cmd.source_im_message_id.as_deref() != Some(&c.source_message_id) {
         return Err(invalid());
@@ -81,7 +81,7 @@ pub(crate) async fn apply(
         .map_err(|_| invalid())?.ok_or_else(invalid)?;
     let record: CachedExecution = serde_json::from_slice(&bytes).map_err(|_| invalid())?;
     if &record.scope != scope || record.expires_at_ms <= bcs_protocol::now_ms()
-        || record.token_type != "iam-token" || record.token.trim().is_empty() { return Err(invalid()); }
+        || record.token_type.trim().is_empty() || record.token.trim().is_empty() { return Err(invalid()); }
     let BcsFrame::Request(request) = frame else { return Err(invalid()); };
     if request.method != "chat.send" { return Err(invalid()); }
     let params = request.params.as_mut().and_then(|p| p.as_object_mut()).ok_or_else(invalid)?;

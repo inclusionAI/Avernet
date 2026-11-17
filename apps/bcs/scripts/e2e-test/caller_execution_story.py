@@ -60,9 +60,10 @@ class Provider(BaseHTTPRequestHandler):
 
 
 class Story:
-    def __init__(self, base, key, provider, environment='local'):
+    def __init__(self, base, key, provider, environment='local', credential_type='iam-token'):
         self.base, self.key, self.provider = base, key, provider
         self.environment = environment
+        self.credential_type = credential_type
         self.delivered = []
         self.http = urllib.request.build_opener(urllib.request.ProxyHandler({}))
         self.checks = 0
@@ -174,7 +175,7 @@ class Story:
             ext = body['extensions']
             user = ext['caller_context']['subject']['ref']
             assert ext['caller_context']['subject']['kind'] == 'human'
-            assert ext['caller_execution_token'] == {'type': 'iam-token', 'token': 'test-token-' + user[-1]}
+            assert ext['caller_execution_token'] == {'type': self.credential_type, 'token': 'test-token-' + user[-1]}
             assert 'test-token-' not in json.dumps(body['message']), 'credential copied into message'
             seen.add(user)
             self.finish_callback(body)
@@ -192,7 +193,7 @@ class Story:
         self.callback(account, credential='test-token-sse', conversation='sse-conversation')
         streamed = self.receive()
         self.streamed_run = streamed['id']
-        assert streamed['extensions']['caller_execution_token'] == {'type': 'iam-token', 'token': 'test-token-sse'}
+        assert streamed['extensions']['caller_execution_token'] == {'type': self.credential_type, 'token': 'test-token-sse'}
         # Queue another send, then the launcher restarts BCS. The real in-memory
         # cache is lost while the durable queue survives; it must fail closed.
         self.policy(True)
@@ -314,7 +315,7 @@ def verify_business_logs(root, traces, streamed_run):
     print(f'Live business log correlation: {len(correlated)} selected events; text/JSON, excluded scopes and SSE verified', flush=True)
 
 
-def run_story(binary, environment):
+def run_story(binary, environment, credential_type='iam-token'):
     provider = ThreadingHTTPServer(('127.0.0.1', 0), Provider)
     provider.received = queue.Queue()
     provider.traces = queue.Queue()
@@ -327,7 +328,7 @@ def run_story(binary, environment):
             'strict_container_validation': False, 'bcs_endpoint': f'http://127.0.0.1:{port}',
             'auth': {'chain': ['local'], 'allow_mock_headers': True, 'mock_user_id': 'callere2eowner'},
             'gateway_principal': {'signing_key_env': 'CALLER_E2E_SIGNING_KEY'},
-            'channels': {'enabled': True, 'providers': {'caller-e2e': {'enabled': True, 'ingress_key': key}}},
+            'channels': {'enabled': True, 'providers': {'caller-e2e': {'enabled': True, 'ingress_key': key, 'credential_type': credential_type}}},
             'database': {'type': 'sqlite', 'sqlite': {'path': str(root / 'bcs.db')}},
             'security': {'outbound_url': {'block_private_networks': True, 'allow_loopback': True}},
             'llm': {'type': 'none'}, 'bcsfuse': {'enabled': False}})
@@ -356,7 +357,7 @@ def run_story(binary, environment):
             process = subprocess.Popen([binary, '-c', str(config_path), '--trace-output', str(traces), *policy_args],
                 cwd=root, env=env, stdout=log, stderr=log)
             try:
-                story = Story(f'http://127.0.0.1:{port}', key, provider, environment)
+                story = Story(f'http://127.0.0.1:{port}', key, provider, environment, credential_type)
                 for _ in range(150):
                     if process.poll() is not None:
                         raise RuntimeError('test BCS exited during startup; ' + (root / 'server.log').read_text()[-2000:])
@@ -433,6 +434,10 @@ def main():
     environments = (args.environment,) if args.environment else ('local', 'pre')
     for environment in environments:
         run_story(binary, environment)
+    if not args.environment:
+        # A deployment-owned label must survive admission/cache/queue/HTTP,
+        # without teaching public BCS any provider-specific credential names.
+        run_story(binary, 'local', 'test-proof')
 
 
 if __name__ == '__main__':
