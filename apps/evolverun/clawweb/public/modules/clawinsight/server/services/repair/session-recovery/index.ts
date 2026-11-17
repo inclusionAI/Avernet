@@ -27,6 +27,7 @@ export function createSessionRecoveryRuntime(options: {
   notificationSender?: RecoveryNotificationSender | null; logs?: AgentLogTool; runtimeTool?: AgentRuntimeTool;
   trajectory?: BotSessionTrajectoryReader; nasRoots: string[];
   observationMs?: number; leaseSeconds?: number; launchGraceSeconds?: number;
+  resolveModelApiKey?: (reference: string) => Promise<string>;
   canReadAsBotCollaborator?: ConstructorParameters<typeof SessionRecoveryTaskService>[0]["canReadAsBotCollaborator"];
 }): SessionRecoveryRuntime | undefined {
   if (options.db.dbType === "noop") {
@@ -52,9 +53,9 @@ export function createSessionRecoveryRuntime(options: {
     audit: new AgentToolCallRepository(options.db, "session_recovery"), ais: options.ais, runtime: options.runtime,
     targets: options.targets, trajectory: options.trajectory, logs: options.logs, runtimeTool: options.runtimeTool, business: () => tasks, publicBaseUrl: options.publicBaseUrl,
     snapshotId: options.snapshotId, nasRoots: options.nasRoots, leaseSeconds: options.leaseSeconds ?? 120,
-    launchGraceSeconds: options.launchGraceSeconds ?? 1800, observationMs, actionNotifier });
+    launchGraceSeconds: options.launchGraceSeconds ?? 1800, observationMs, resolveModelApiKey: options.resolveModelApiKey, actionNotifier });
   tasks = new SessionRecoveryTaskService({ controlPlaneEnvironment, tasks: store, agent, notifier, reporter, observationMs, actionNotifier,
-    handbookConfig: notificationConfig, canReadAsBotCollaborator: options.canReadAsBotCollaborator,
+    handbookConfig: notificationConfig, botConfigurations, canReadAsBotCollaborator: options.canReadAsBotCollaborator,
     authorizeCreation: request => requireRecoveryEnabled(botConfigurations, request, notificationConfig),
     resolveTarget: async request => {
       const expected = { OC: "openclaw", CC: "claude_code", TE: "teclaw" }[request.target.engine];

@@ -1,3 +1,5 @@
+import { validateRecoveryTeamConfiguration } from "../repair/session-recovery/bot-configuration.js";
+import type { RecoveryAppConfigStore } from "../repair/session-recovery/legacy-configuration.js";
 import { MonitoringError } from './contracts.js';
 import { validBotConfiguration, type BotDiagnosisRecoveryConfigStore } from './bot-config-contracts.js';
 import type { DirectoryBot, MonitoringBotDirectory, MonitoringPrincipal, MonitoringReferences } from './directory-contracts.js';
@@ -6,7 +8,7 @@ export function isServiceBot(bot: DirectoryBot): boolean {
   return bot.botType?.trim().toLowerCase() === 'service';
 }
 
-export function replaceBotConfiguration(store: BotDiagnosisRecoveryConfigStore, bot: DirectoryBot, updatedBy: string, input: unknown) {
+export async function replaceBotConfiguration(store: BotDiagnosisRecoveryConfigStore, bot: DirectoryBot, updatedBy: string, input: unknown, app?: RecoveryAppConfigStore) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new MonitoringError('INVALID_EVENT', '配置参数无效。');
   const value = input as Record<string, unknown>;
   const { diagnosisEnabled, recoveryEnabled, version, configJson } = value;
@@ -16,6 +18,8 @@ export function replaceBotConfiguration(store: BotDiagnosisRecoveryConfigStore, 
     || typeof configJson !== 'string' || Buffer.byteLength(configJson) > 8192 || !validBotConfiguration(configJson)) {
     throw new MonitoringError('INVALID_EVENT', '配置参数或通知配置无效。');
   }
+  try { await validateRecoveryTeamConfiguration(configJson, app); }
+  catch { throw new MonitoringError('NOT_READY', '诊断自愈团队配置暂不可用，请检查团队配置。'); }
   return store.replaceConfiguration(bot, { diagnosisEnabled, recoveryEnabled, configJson, expectedVersion: version, updatedBy });
 }
 

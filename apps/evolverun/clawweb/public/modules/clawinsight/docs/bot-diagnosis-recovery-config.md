@@ -60,7 +60,7 @@ have no new-table record. Ordinary paused Owner notices remain paused.
   admission; unavailable storage is retryable. Existing idempotent requests
   return their original Task without requiring admission again.
 - `bot-configuration.ts` owns new/legacy source selection for admission, visible
-  switches and notifications. `legacy-configuration.ts` contains read-only
+  switches, notifications, team ownership and model credential selection. `legacy-configuration.ts` contains read-only
   parsers for the old keys. Only an unambiguous current Owner/directory lookup
   permits recovery admission or notifications. Read failures are never absence.
 - `createMonitoringRecoveryTrigger` still accepts the old host's `config`
@@ -78,7 +78,7 @@ have no new-table record. Ordinary paused Owner notices remain paused.
   flags; 0 is the expected version for a missing row. The current owner may
   configure a non-service Bot. The directory's `bot_type = service` marks
   platform-managed Bots. A single-Bot write to a service Bot returns 403.
-- An authenticated ClawInsight administrator can read or replace a single Bot's
+- An authenticated ClawInsight or global administrator can read or replace a single Bot's
   full configuration within the existing tenant and target-environment scope via `GET` or `PUT`
   `/api/insight/v1/monitoring/configurations/:botRef`. Both return
   `{ configuration }`; a GET with no stored row returns `{ configuration: null }`.
@@ -169,3 +169,106 @@ rollback policy: reconcile post-migration switches/routes and retire old
 consumers before allowing writes. Preserve the new table and Task/Step/audit
 history. No deployment, live Bot operation, upstream diagnosis change or
 production migration is performed merely by installing this code.
+
+## Team resources and gradual ownership migration
+
+The existing Bot JSON supports an explicit `team_key` (a string, including
+numeric names such as `"97"`). Only the per-Bot administrator PUT can replace
+this JSON. Owner single/bulk switch writes preserve it. The global role is
+resolved from trusted host membership; it grants this configuration API only,
+not other administrators' monitoring views or owner-only bulk operations.
+
+```json
+{
+  "team_key": "97",
+  "notifications": {
+    "owner": { "enabled": true },
+    "group": { "enabled": true }
+  }
+}
+```
+
+Team resources live in the existing **`ce_app_config`** under
+`session_recovery_teams` with `enabled = 1`:
+
+```json
+{
+  "teams": {
+    "default": {},
+    "97": {
+      "name": "97",
+      "notification_route_id": "team_97",
+      "llm": { "api_key_mist_key": "team-97-model-key" }
+    }
+  }
+}
+```
+
+`default` is built in and has no optional resources unless configured. Other
+team references require an enabled, valid definition. Invalid or unavailable
+team configuration rejects new execution; it is not treated as legacy absence.
+The administrator PUT validates the team before writing any switches or JSON.
+
+- **Group:** an explicit Bot `notifications.group.route_id` wins over the team
+  `notification_route_id`. Both reference the existing notification-route
+  registry. A missing team group destination skips group delivery while a valid
+  Owner setting can still send. A broken explicit route does not fall back to
+  the team/default/legacy group. Missing or invalid notification settings still
+  disable notifications; introducing teams does not implicitly enable old JSON.
+- **Handbooks:** `session_recovery_handbooks.team_routes` remains the catalog of
+  chapters. Explicit Bot ownership replaces only the old `bot_teams` lookup.
+  A team without a handbook route (including `default`) uses common chapters
+  with no custom handbook scope. A team with routes retains its custom scope
+  even when the current fault category has no preferred custom chapter.
+- **Model:** no configured MIST reference means AIS Base deployment defaults.
+  A configured reference is read by the OCB host using its existing MIST
+  provider/cache. CW sends the retrieved value only as
+  `input.credentials.modelApiKey`. Base overlays `llm.api_key` for this invocation;
+  model, endpoint and other defaults stay in the deployment configuration.
+  Empty/invalid values or a failed lookup stop dispatch and use the existing
+  retryable execution-failure path, never another team's/default key.
+
+`bot-configuration.ts` is the single compatibility boundary. A missing new row
+retains the existing legacy switch/notification behavior. A new row without
+`team_key` retains historical handbook membership and the Base default key;
+its notification behavior remains the existing new-row behavior. An explicit
+`team_key` resolves new team resources and does not consult the obsolete Bot
+roster. Repositories, task execution, notification transports and AIS Base do
+not select between legacy and new ownership.
+
+Task creation freezes handbook references and the optional `modelApiKeyRef`
+in existing task state; no new table/column is required. Actual keys are never
+stored in Task/Step artifacts. Each dispatch resolves the frozen reference,
+so secret rotation remains possible without reassigning a running task to a
+new team. Historical tasks without this field keep Base defaults. Base removes
+credentials before task persistence and uses an invocation-private temporary
+config outside archives; cleanup also runs after failure.
+
+### Pilot and cutover
+
+1. Deploy the compatible CW public/internal changes and the updated AIS Base
+   before enabling any team MIST reference. Existing records need no rewrite.
+   An old Base cannot consume the new per-invocation model credential.
+2. First verify the current Owner on the user's selected production Bot.
+   Establish an actual team `97` legacy baseline, then use the existing admin
+   PUT to set that same Bot's `team_key = "97"` and explicit notifications.
+   Reuse the existing 97 handbook routes. An explicit personal test-group route
+   can isolate notifications without changing shared 97 settings.
+3. Verify frozen 97 chapters, end-to-end recovery, configured personal/group
+   notification destinations, and (when a MIST reference is configured) actual
+   model consumption. Check real tasks independently; unit tests do not prove
+   production MIST permission or runtime package deployment.
+4. Only after the own-Bot pilot succeeds, migrate remaining Bots explicitly
+   through the administrator API. Do not rewrite legacy keys at startup or
+   synchronize two writable sources. Switch changes preserve the rest of JSON.
+5. During this pilot the page retains its existing `{}` initialization. The
+   later enrollment cutover will initialize `team_key: "default"` and explicit
+   Owner/group `enabled: true`; it must not retrofit that default onto old `{}`
+   or malformed JSON. A default team with no route sends no group notice.
+6. After all relevant Bots have explicit team ownership, remove the legacy
+   roster-selection/parser branch at the single boundary. Keep shared chapter
+   routes and Owner card transport settings while consumers still use them.
+
+No new configuration page, migration marker, dual-write mechanism or upstream
+diagnosis integration is introduced. Deployment and production migration remain
+separate operations from installing this change.

@@ -10,7 +10,7 @@ import { configureBots } from '../bot-config-service.js';
 import { createMonitoringReferences } from '../target-ref.js';
 import { parseBotNotifications } from '../bot-config-contracts.js';
 import { migrateBotDiagnosisRecoveryConfigs } from '../bot-config-migration.js';
-import { requireRecoveryEnabled, recoveryNotifications, recoveryConfigurations } from '../../repair/session-recovery/bot-configuration.js';
+import { requireRecoveryEnabled, recoveryNotifications, recoveryConfigurations, recoveryExecutionConfiguration } from '../../repair/session-recovery/bot-configuration.js';
 
 let db: IDatabase, configs: BotDiagnosisRecoveryConfigRepository, directory: SqlMonitoringBotDirectory;
 const scope = { tenant: 'one', allowedTargetEnvs: ['pre', 'prod'] };
@@ -228,4 +228,50 @@ it('does not write diagnosis-only, notification-only or historical targets durin
   expect(result.planned[0]).toMatchObject({ diagnosisEnabled: false, recoveryEnabled: true });
   expect(read.mock.calls.some(([sql]) => sql.includes('insight_monitoring') || sql.includes('FROM ce_tasks'))).toBe(false);
   expect(await configs.findMany(['diagnosed', 'notified', 'historical'].map(botId => ({ ...target, botId })))).toEqual([null, null, null]);
+});
+
+it('keeps legacy ownership until an explicit team is saved and resolves team resources in one boundary', async () => {
+  const app = await legacy();
+  await app.create({ config_key: 'session_recovery_handbooks', config_json: JSON.stringify({
+    bot_teams: { old: ['prod|default|001'] }, team_routes: { old: { 'TC.MCP': ['old/handbook.md'] },
+      '97': { 'TC.MCP': ['skill/handbook.md'] } },
+  }) });
+  await app.create({ config_key: 'session_recovery_teams', config_json: JSON.stringify({ teams: {
+    '97': { notification_route_id: 'team_97', llm: { api_key_mist_key: 'team-model' } },
+  } }) });
+  await app.create({ config_key: 'session_recovery_notification_routes', config_json: JSON.stringify({ routes: {
+    team_97: { webhook: 'https://team.invalid/send', timeout_seconds: 5 },
+    own: { webhook: 'https://own.invalid/send', timeout_seconds: 5 },
+  } }) });
+  const request = { ...recoveryRequest, tc_fault_label: 'TC.MCP.PERMISSION' };
+  await configs.setSwitches(target, switches(0));
+  expect(await recoveryExecutionConfiguration(request, app, configs)).toMatchObject({ handbook: { teamKey: 'old' }, modelApiKeyRef: null });
+  const config = { team_key: '97', notifications: { owner: { enabled: true }, group: { enabled: true } } };
+  await configs.replaceConfiguration(target, { ...switches(1), configJson: JSON.stringify(config) });
+  expect(await recoveryExecutionConfiguration(request, app, configs)).toMatchObject({
+    handbook: { teamKey: '97', chapters: expect.arrayContaining(['custom/97/skill/handbook.md']) }, modelApiKeyRef: 'team-model',
+  });
+  expect(await recoveryNotifications(configs, request.target, app)).toEqual({ owner: true, group: { webhook: 'https://team.invalid/send', timeout_seconds: 5 } });
+  for (const [route, expected] of [['own', 'https://own.invalid/send'], ['missing', null]] as const) {
+    const current = (await configs.find(target))!;
+    await configs.replaceConfiguration(target, { ...switches(current.version), configJson: JSON.stringify({ ...config,
+      notifications: { ...config.notifications, group: { enabled: true, route_id: route } } }) });
+    expect((await recoveryNotifications(configs, request.target, app)).group?.webhook ?? null).toBe(expected);
+  }
+  const current = (await configs.find(target))!;
+  await configs.replaceConfiguration(target, { ...switches(current.version), configJson: JSON.stringify({ ...config, team_key: 'default' }) });
+  expect(await recoveryNotifications(configs, request.target, app)).toEqual({ owner: true, group: null });
+  expect(await recoveryExecutionConfiguration(request, app, configs)).toMatchObject({ handbook: { teamKey: null }, modelApiKeyRef: null });
+  await configureBots(configs, directory, refs, principal, { all: true, enabled: false });
+  expect((await configs.find(target))?.configJson).toBe(JSON.stringify({ ...config, team_key: 'default' }));
+});
+
+it('does not recover malformed team configuration through legacy resources', async () => {
+  const app = await legacy();
+  await configs.replaceConfiguration(target, { ...switches(0), configJson: JSON.stringify({ team_key: '97',
+    notifications: { owner: { enabled: true }, group: { enabled: true } } }) });
+  await expect(recoveryExecutionConfiguration(recoveryRequest, app, configs)).rejects.toMatchObject({ code: 'recovery_configuration_invalid' });
+  expect(await recoveryNotifications(configs, recoveryRequest.target, app)).toEqual(disabledNotifications);
+  // Admission is independent of the availability of team resources.
+  await expect(requireRecoveryEnabled(configs, recoveryRequest, app)).resolves.toBeUndefined();
 });

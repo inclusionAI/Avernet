@@ -1,3 +1,6 @@
+import { parseRecoveryHandbookRoutes, recoveryHandbookForTeam, type RecoveryHandbookConfigStore, SESSION_RECOVERY_HANDBOOKS_KEY } from "./handbook.js";
+import { parseLegacyRecoveryHandbooks } from "./legacy-configuration.js";
+import type { RecoveryStoredTask } from "./task-contracts.js";
 import type { BotDiagnosisRecoveryConfigStore } from '../../monitoring/bot-config-contracts.js';
 import { parseBotNotifications } from '../../monitoring/bot-config-contracts.js';
 import type { MonitoringTarget } from '../../monitoring/contracts.js';
@@ -54,8 +57,11 @@ export async function recoveryNotifications(store: BotDiagnosisRecoveryConfigSto
     if (resolved.config) {
       const notifications = parseBotNotifications(resolved.config.configJson);
       if (!notifications.group) return { owner: notifications.owner, group: null };
+      const teamKey = botTeamKey(resolved.config.configJson);
+      const routeId = notifications.group.routeId ?? (teamKey ? (await recoveryTeam(teamKey, app)).notification_route_id : undefined);
+      if (!routeId) return { owner: notifications.owner, group: null };
       const row = await app?.findByKey(RECOVERY_NOTIFICATION_ROUTES_KEY);
-      const group = row?.enabled === 1 ? recoveryGroupRoute(row.config_json, notifications.group.routeId) : null;
+      const group = row?.enabled === 1 ? recoveryGroupRoute(row.config_json, routeId) : null;
       return { owner: notifications.owner, group };
     }
     // In-flight legacy tasks keep their notification policy even after admission is disabled.
@@ -88,4 +94,96 @@ export function recoveryGroupRoute(raw: string, routeId: string): { webhook: str
     if (url.protocol !== 'https:' || url.username || url.password) return null;
     return { webhook: route.webhook, timeout_seconds: route.timeout_seconds };
   } catch { return null; }
+}
+
+export const SESSION_RECOVERY_TEAMS_KEY = 'session_recovery_teams';
+type RecoveryTeam = { name?: string; notification_route_id?: string; llm?: { api_key_mist_key?: string } };
+const object = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
+
+function configurationInvalid(): never {
+  throw new SessionRecoveryError(503, 'recovery_configuration_invalid', '诊断自愈团队配置无效');
+}
+function botTeamKey(raw: string): string | undefined {
+  let value: unknown;
+  try { value = JSON.parse(raw); } catch { return configurationInvalid(); }
+  if (!object(value)) return configurationInvalid();
+  if (value.team_key === undefined) return undefined;
+  if (typeof value.team_key !== 'string' || !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(value.team_key)) return configurationInvalid();
+  return value.team_key;
+}
+async function recoveryTeam(key: string, app?: RecoveryAppConfigStore): Promise<RecoveryTeam> {
+  const row = await app?.findByKey(SESSION_RECOVERY_TEAMS_KEY);
+  // The default team can be used before any optional team resources are configured.
+  if (!row || row.enabled === 0) {
+    if (key === 'default') return {};
+    return configurationInvalid();
+  }
+  if (row.enabled !== 1) return configurationInvalid();
+  let value: unknown;
+  try { value = JSON.parse(row.config_json); } catch { return configurationInvalid(); }
+  if (!object(value) || !object(value.teams)) return configurationInvalid();
+  if (!Object.hasOwn(value.teams, key)) {
+    if (key === 'default') return {};
+    return configurationInvalid();
+  }
+  const team = value.teams[key];
+  if (!object(team) || Object.keys(team).some(field => !['name', 'notification_route_id', 'llm'].includes(field))
+    || team.name !== undefined && typeof team.name !== 'string'
+    || team.notification_route_id !== undefined && (typeof team.notification_route_id !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(team.notification_route_id))) return configurationInvalid();
+  if (team.llm !== undefined && (!object(team.llm) || Object.keys(team.llm).some(field => field !== 'api_key_mist_key')
+    || team.llm.api_key_mist_key !== undefined && (typeof team.llm.api_key_mist_key !== 'string'
+      || !/^[A-Za-z0-9_.-]{1,256}$/.test(team.llm.api_key_mist_key)))) return configurationInvalid();
+  return team as RecoveryTeam;
+}
+
+export async function validateRecoveryTeamConfiguration(raw: string, app?: RecoveryAppConfigStore): Promise<void> {
+  const key = botTeamKey(raw);
+  if (key) await recoveryTeam(key, app);
+}
+
+/** Resolve legacy ownership and current team policy here, once at creation. Consumers see only effective values. */
+export async function recoveryExecutionConfiguration(request: RecoveryRequest, app?: RecoveryHandbookConfigStore,
+  store?: BotDiagnosisRecoveryConfigStore) {
+  const resolved = store ? await configurationForOwner(store, request.target) : null;
+  let teamKey = resolved?.config ? botTeamKey(resolved.config.configJson) : undefined;
+  const team = teamKey ? await recoveryTeam(teamKey, app) : undefined;
+  const row = await app?.findByKey(SESSION_RECOVERY_HANDBOOKS_KEY);
+  let routes: Record<string, Record<string, string[]>> = {};
+  if (row && row.enabled !== 0) {
+    if (row.enabled !== 1) return configurationInvalid();
+    if (teamKey === undefined) {
+      const legacy = parseLegacyRecoveryHandbooks(row.config_json);
+      teamKey = legacy.bot_teams.find(item => item.env === request.target.env && item.bot_id === request.target.bot_id
+        && item.owner_id === request.target.entity_id)?.team_key;
+      routes = legacy.team_routes;
+    } else {
+      // New ownership is independent of the obsolete Bot roster, including its validation.
+      let value: unknown;
+      try { value = JSON.parse(row.config_json); } catch { return configurationInvalid(); }
+      if (!object(value)) return configurationInvalid();
+      routes = parseRecoveryHandbookRoutes(value.team_routes);
+    }
+  }
+  // A team without handbook resources uses common; the wrapper must not require a nonexistent custom directory.
+  const handbookTeam = teamKey && Object.hasOwn(routes, teamKey) ? teamKey : null;
+  return { handbook: recoveryHandbookForTeam(request.tc_fault_label, handbookTeam, routes),
+    modelApiKeyRef: team?.llm?.api_key_mist_key ?? null };
+}
+
+/** Existing callers can keep requesting just the handbook through the same configuration boundary. */
+export async function resolveRecoveryHandbook(request: RecoveryRequest, app: RecoveryHandbookConfigStore) {
+  return (await recoveryExecutionConfiguration(request, app)).handbook;
+}
+
+/** Old task snapshots select the deployment default; never re-resolve a running task's Bot team. */
+export async function recoveryModelCredentials(task: RecoveryStoredTask, resolve?: (reference: string) => Promise<string>): Promise<{ modelApiKey?: string }> {
+  if (!task.modelApiKeyRef) return {};
+  try {
+    if (!resolve) throw new Error('Model credential resolver unavailable');
+    const value = await resolve(task.modelApiKeyRef);
+    if (typeof value !== 'string' || !value.trim() || value.length > 8192 || /[\r\n\0]/.test(value)) throw new Error('Invalid model credential');
+    return { modelApiKey: value };
+  } catch {
+    throw new SessionRecoveryError(503, 'recovery_model_credentials_unavailable', '自愈模型凭据暂不可用');
+  }
 }
