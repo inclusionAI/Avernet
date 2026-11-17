@@ -61,6 +61,17 @@ it('resolves recovery Owner to the directory entity and fails closed after owner
   expect((await recoveryNotifications(configs, request.target)).owner).toBe(false);
 });
 
+it.each([true, false])('uses host-provided Bot type column metadata %s without inspecting the schema again', async hasBotType => {
+  await bot();
+  await db.exec("UPDATE ac_bots SET bot_type = 'service'");
+  const directory = new SqlMonitoringBotDirectory(db, true, hasBotType);
+  const query = vi.spyOn(db, 'query');
+  expect(await directory.get(target, scope)).toMatchObject({ botType: hasBotType ? 'service' : null });
+  expect(query).toHaveBeenCalledTimes(1);
+  expect(query.mock.calls[0][0]).toContain('FROM ac_bots WHERE');
+  query.mockRestore();
+});
+
 it('bulk updates all owner pages, excludes other owners and refuses admin write escalation', async () => {
   for (let i = 0; i < 61; i++) await bot(`bot-${i}`);
   await bot('other', 'prod', '002');
