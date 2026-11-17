@@ -1,6 +1,7 @@
 """Legacy skills upload routes."""
 
 import json
+import zipfile
 from typing import Optional
 
 from agentclaw.community.adapters.http.dependencies import (
@@ -37,6 +38,8 @@ from agentclaw.community.core.skill_center.errors import (
 from agentclaw.community.core.skill_center.upload_error_codes import (
     SkillUploadErrorCode,
 )
+from agentclaw.community.core.skill_center.skill_metadata import SkillManifestError
+from agentclaw.community.core.skill_center.skill_package import SkillPackageInvalidError
 from agentclaw.community.core.skills_pool.edit_guard import (
     SkillsPoolEditLockUnavailableError,
     SkillsPoolEditPausedError,
@@ -54,6 +57,8 @@ from fastapi import (
 from starlette.concurrency import run_in_threadpool
 
 from .skills_common import (
+    _MANIFEST_UPLOAD_ERROR_CODES,
+    _PACKAGE_UPLOAD_ERROR_CODES,
     _build_upload_error_response,
     _get_path_params,
     logger,
@@ -178,7 +183,7 @@ async def upload_skill(
             parsed_paths = json.loads(file_paths)
             logger.info(f"[skills.upload_skill] Parsed file_paths: {parsed_paths}")
         except json.JSONDecodeError as e:
-            logger.error(f"[skills.upload_skill] Failed to parse file_paths JSON: {e}")
+            logger.warning(f"[skills.upload_skill] Failed to parse file_paths JSON: {e}")
             return UploadSkillResponse(
                 success=False,
                 error_code=SkillUploadErrorCode.FILE_PATHS_INVALID,
@@ -281,7 +286,24 @@ async def upload_skill(
     except HTTPException:
         raise
     except (ValueError, LocalSkillInvalidPackageError, LocalSkillTooLargeError) as e:
-        logger.error(f"[skills.upload_skill] Validation error: {e}")
+        is_validation = (
+            isinstance(e, LocalSkillInvalidPackageError)
+            and (
+                e.reason in _PACKAGE_UPLOAD_ERROR_CODES
+                or e.reason == "unreadable_archive"
+                and isinstance(e.__cause__, SkillPackageInvalidError)
+                and (e.__cause__.__cause__ is None or isinstance(e.__cause__.__cause__, zipfile.BadZipFile))
+            )
+            or isinstance(e, LocalSkillTooLargeError)
+            or isinstance(e, SkillManifestError)
+            and e.code in _MANIFEST_UPLOAD_ERROR_CODES
+            or type(e) is ValueError
+            and str(e) == "SKILL.md is required."
+        )
+        if is_validation:
+            logger.warning(f"[skills.upload_skill] Validation error: {e}")
+        else:
+            logger.error(f"[skills.upload_skill] Validation error: {e}")
         return _build_upload_error_response(e)
     except Exception as e:
         logger.error(f"[skills.upload_skill] Unexpected error: {e}", exc_info=True)
