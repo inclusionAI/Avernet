@@ -188,3 +188,45 @@ def test_real_membership_and_auth_gates_deny_before_ecb(book_ui):
     w.app.dependency_overrides[get_current_user] = unauthenticated
     assert w.client.delete(w.prefix + "/yuque/book-imports/ds").status_code == 401
     assert not w.seen
+
+
+def test_browse_cursor_is_opaque_and_response_is_not_trimmed(book_ui):
+    w = book_ui
+    for supplied_cursor in (None, "opaque+/bookmark=="):
+        w.response["body"] = {"items": [], "next_cursor": "provider-next"}
+        params = {"source": "team", "pagination": "cursor"}
+        if supplied_cursor is not None:
+            params["cursor"] = supplied_cursor
+        response = w.client.get(w.prefix + "/yuque/books", params=params)
+        assert response.status_code == 200
+        assert response.json() == w.response["body"]
+        query = dict(w.seen[-1].url.params)
+        assert query["pagination"] == "cursor"
+        assert query.get("cursor") == supplied_cursor
+        assert query["source"] == "team"
+        assert w.seen[-1].url.path == "/api/v1/knowledge/kb/kb/yuque/books"
+
+
+def test_cursor_validation_and_provider_errors_are_not_retried(book_ui):
+    w = book_ui
+    for params in ({"pagination": "other"}, {"cursor": "x" * 4097}):
+        assert w.client.get(w.prefix + "/yuque/books", params=params).status_code == 422
+    assert not w.seen
+    w.response.update(status=422, body={"detail": "INVALID_YUQUE_BOOK_INPUT"})
+    result = w.client.get(
+        w.prefix + "/yuque/books",
+        params={"source": "team", "pagination": "cursor", "q": "global-search"},
+    )
+    assert result.status_code == 422 and len(w.seen) == 1
+    assert result.json() == w.response["body"]
+
+
+def test_cursor_browsing_keeps_real_membership_gate(book_ui):
+    w = book_ui
+    w.app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(
+        "outsider", "outsider", "outsider"
+    )
+    result = w.client.get(
+        w.prefix + "/yuque/books", params={"source": "team", "pagination": "cursor"}
+    )
+    assert result.status_code == 403 and not w.seen
