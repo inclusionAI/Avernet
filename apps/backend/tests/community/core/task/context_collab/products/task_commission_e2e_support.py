@@ -535,7 +535,7 @@ class SimulatedWorkingBot:
             _TEST_DIRECTORY, "模拟 Bot 以自身身份调用 L5 Open.query_opportunities"
         )
         return self._open_method.query_opportunities(
-            actor_context=self.actor_context,
+            actor_context=self.actor_context,          # 传入自身身份，仅仅用作鉴权、审计
         )
 
     def submit_application_by_skill(
