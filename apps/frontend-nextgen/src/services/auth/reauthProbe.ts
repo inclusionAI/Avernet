@@ -49,6 +49,8 @@ export async function probeGatewaySession(): Promise<GatewayReauthProbeResult> {
   try {
     const response = await fetch(resolveProbeUrl(), {
       method: 'GET',
+      // 与业务请求保持一致，让网关返回 JSON 登录拦截体，避免后台探活进入 302 登录跳转链。
+      headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
     });
     const body: unknown = await response.json().catch(() => null);

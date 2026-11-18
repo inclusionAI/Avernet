@@ -49,13 +49,14 @@ afterEach(() => {
 });
 
 describe('probeGatewaySession 正证据制', () => {
-  it('同源 GET 组织接口、credentials 含会话 cookie、注入当前身份工号', async () => {
+  it('GET 组织接口携带 JSON 请求头以获取登录拦截体，并保留会话 cookie 与当前身份工号', async () => {
     global.fetch = jest.fn().mockResolvedValue(jsonOk({ code: 200000, data: {} }));
 
     await probeGatewaySession();
 
     expect(global.fetch).toHaveBeenCalledWith('/openapi/v1/org/user?user_id=12345', {
       method: 'GET',
+      headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
     });
   });
