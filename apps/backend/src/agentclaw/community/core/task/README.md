@@ -213,6 +213,9 @@ stateDiagram-v2
 
 ### Todo ContextCollab 执行边界
 
+Todo 产品生命周期、Space/Bot 资格、自动调度、事件优先验收与事件/互动投影的权威说明见
+[todos/README.md](todos/README.md)。本域只承载执行边界，不复述 Todo 状态机。
+
 Todo ContextCollab 不注册独立 Plugin。`core/task/context_collab/executor.py`
 直接复用 Task 已有的 `BcsClientPort`、`BcsCreateGroupRequest`、
 `BcsBotTokenProvider` 及其 DI adapter/binding，复制 Todo 所需的群创建、恢复和
