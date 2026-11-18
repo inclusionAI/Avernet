@@ -1497,6 +1497,7 @@ dependencies = [
  "bcs-service-api",
  "bcs-store-api",
  "bcs-test-support",
+ "futures",
  "serde",
  "serde_json",
  "sha2",

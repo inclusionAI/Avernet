@@ -77,3 +77,74 @@ The existing import-rule baseline is unchanged. The complete architecture gate
 has pre-existing dependency/import findings; it is not recorded as passing.
 Validation uses dedicated build directories, disables incremental/debug artifacts,
 and does not require a native SDK or container.
+
+
+## Review follow-up (PR #4145)
+
+The review fixes distinguish preparation failure, uncertain acquisition, confirmed
+ownership awaiting scheduling, and local cleanup. Retry and new-discovery budgets
+are shared fairly; failed sessions no longer abort recovery of the rest of a page.
+Membership iteration keeps its cursor between rounds. Only confirmed terminal
+instances are removed from discovery; absent/unknown registrations remain safe
+across index-before-register races.
+
+Drain now bounds each request separately from the overall shutdown deadline,
+continues heartbeat during work, and transfers quiescent sessions concurrently
+within a global round budget. Per-session owner/handoff and post-write checks stay
+in place. The redundant pre-write owner read within one store transfer is removed.
+Confirmed rejection skips that candidate during the current drain; unknown
+handoffs retain their original identity and target. Subscription and cache release
+share one retryable quiescent path, and unneeded shard feeds close. Incoming
+handoffs preserve historical uncertainty through later read-only rejection.
+An in-flight session transfer reserves local state against concurrent release;
+per-shard transfer cursors prevent a failing prefix from starving later sessions.
+
+Coordination-store session capacity (default 10,000) and handoff-timer capacity
+(default 4,096) are independently configurable. Worker startup checks advertised
+session capacity; its admission backpressure precedes the store's final bound.
+Terminal handoffs reclaim exact matching timers. Known checkpoint-existence
+history is not discarded to make space or to hide a missing-record incident.
+
+Reusable DocumentCas tests cover missing replacement, concurrent create/replace,
+rejected-write invariance, exact deletion/null replacement and version exhaustion
+through fixture setup. Reusable StrictLease tests cover irreversible expiration,
+retire-before-register, idempotent registration, unchanged deadlines on rejected
+writes and persistent terminal evidence. Clock/wait callbacks allow reuse without
+adding timer or private-version setters to production plugin interfaces.
+
+Worker regressions include more failures than the per-round acquisition budget,
+unknown-then-definite errors, orphan discovery pages, deferred recovery hints,
+rejected/unknown handoff targets, failed unsubscribe cleanup and 300 sessions with
+20 ms transfer latency under a 10 s shutdown budget. These controlled tests are
+not a production throughput measurement or certification of a real lease backend.
+
+## Deferred work
+
+- [ ] Keep a bounded instance-to-shards owner view and prioritize shards belonging
+  to a newly confirmed dead instance. Retain periodic reconciliation and fresh
+  claim authorization. Current per-tick liveness deduplication already exists;
+  this follow-up reduces full-scan discovery latency at large shard counts.
+- [ ] Track multiple outstanding handoff targets with explicit request history
+  and reconciliation. Current behavior deliberately keeps one uncertain request
+  per shard. Do not switch targets solely because the old owner remains visible,
+  a retry is rejected, or the target's liveness is uncertain.
+
+Neither deferred optimization relaxes checkpoint fencing, strict lease termination,
+or the meaning of `DeadlineReached`. Production provider/host integration limits
+listed above remain separate prerequisites.
+
+
+### Local follow-up verification (2026-11-18)
+
+- 514 focused nextest cases passed across the eight crates listed above, including
+  reusable store/lease contracts and Worker shutdown/recovery regressions.
+- Instrumented changed-line coverage against the rebased dev baseline: **2301/2464
+  (93.38%)** using the repository CI calculation. This is a local changed-line
+  measurement; full-workspace CI is reported separately in the PR.
+- Selected production crates and their test targets passed Clippy with
+  `-D warnings`. The broader test-support Clippy invocation encounters existing
+  fixture-wide unwrap/expect findings; those rules were not relaxed.
+- Relative documentation links, changed-file whitespace and changed Rust source
+  size checks passed. Import-rule findings are confined to 56 untouched baseline
+  files; the complete architecture gate is not claimed as passing.
+- No native SDK, container image, production backend or deployment was used.

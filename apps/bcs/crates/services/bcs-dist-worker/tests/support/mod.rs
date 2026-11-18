@@ -17,7 +17,7 @@ use std::{
     collections::{BTreeMap, VecDeque},
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     time::Duration,
 };
@@ -27,8 +27,15 @@ pub struct FeedData {
     pub pending: Mutex<Vec<Sid>>,
     pub batches: Mutex<VecDeque<FeedBatch>>,
     pub reads: Mutex<Vec<(ReadLimits, Duration)>>,
+    pub unwatch_unavailable: AtomicBool,
+    pub open_feeds: AtomicUsize,
 }
 struct Feed(Arc<FeedData>);
+impl Drop for Feed {
+    fn drop(&mut self) {
+        self.0.open_feeds.fetch_sub(1, Ordering::SeqCst);
+    }
+}
 #[async_trait]
 impl ShardFeedPort for Feed {
     async fn watch(&mut self, sid: Sid, _after: Option<InboxPos>) -> Result<(), StoreError> {
@@ -36,6 +43,11 @@ impl ShardFeedPort for Feed {
         Ok(())
     }
     async fn unwatch(&mut self, sid: &Sid) -> Result<(), StoreError> {
+        if self.0.unwatch_unavailable.load(Ordering::SeqCst) {
+            return Err(StoreError::NotApplied {
+                code: "unwatch_unavailable".into(),
+            });
+        }
         self.0.watched.lock().unwrap().retain(|s| s != sid);
         Ok(())
     }
@@ -61,6 +73,7 @@ pub struct Inbox(pub Arc<FeedData>);
 #[async_trait]
 impl InboxConsumerPort for Inbox {
     async fn open(&self, _shard: ShardId) -> Result<Box<dyn ShardFeedPort>, StoreError> {
+        self.0.open_feeds.fetch_add(1, Ordering::SeqCst);
         Ok(Box::new(Feed(self.0.clone())))
     }
     async fn has_unconsumed(
@@ -82,13 +95,15 @@ impl InboxConsumerPort for Inbox {
     }
     async fn enumerate_pending(
         &self,
-        _shard: ShardId,
+        shard: ShardId,
         page: PageRequest,
     ) -> Result<Page<Sid>, StoreError> {
         let pending = self.0.pending.lock().unwrap();
         let after = page.after.map(|s| s.0);
+        let prefix = format!("s{:04}.", shard.0);
         let items = pending
             .iter()
+            .filter(|sid| sid.0.starts_with(&prefix))
             .filter(|s| after.as_ref().is_none_or(|a| s.0 > *a))
             .take(page.limit.get() as usize)
             .cloned()
@@ -144,9 +159,20 @@ pub struct Sessions {
     inner: Arc<CoordinationStore>,
     pub released: Mutex<Vec<SessionOwnership>>,
     pub release_unavailable: AtomicBool,
+    pub transfer_delay: Mutex<Duration>,
+    pub spec_unavailable: AtomicBool,
+    pub failed_acquires: Mutex<BTreeMap<Sid, bool>>,
+    pub acquire_calls: Mutex<Vec<Sid>>,
+    pub failed_transfers: Mutex<Vec<Sid>>,
+    pub hold_transfer: AtomicBool,
+    pub transfer_entered: tokio::sync::Notify,
+    pub transfer_release: tokio::sync::Notify,
 }
 #[async_trait]
 impl SessionStorePort for Sessions {
+    fn local_session_capacity(&self) -> Option<usize> {
+        self.inner.local_session_capacity()
+    }
     async fn release_local(&self, owner: &SessionOwnership) -> Result<(), StoreError> {
         if self.release_unavailable.load(Ordering::SeqCst) {
             return Err(StoreError::NotApplied {
@@ -158,6 +184,11 @@ impl SessionStorePort for Sessions {
         Ok(())
     }
     async fn get_spec(&self, sid: &Sid) -> Result<Option<SessionSpec>, StoreError> {
+        if self.spec_unavailable.load(Ordering::SeqCst) {
+            return Err(StoreError::NotApplied {
+                code: "spec_unavailable".into(),
+            });
+        }
         self.inner.get_spec(sid).await
     }
     async fn acquire(
@@ -166,6 +197,18 @@ impl SessionStorePort for Sessions {
         claim: &ShardClaim,
         initial: Checkpoint,
     ) -> Result<AcquireOutcome, StoreError> {
+        self.acquire_calls.lock().unwrap().push(sid.clone());
+        if let Some(unknown) = self.failed_acquires.lock().unwrap().get(sid).copied() {
+            return Err(if unknown {
+                StoreError::OutcomeUnknown {
+                    operation_id: "acquire".into(),
+                }
+            } else {
+                StoreError::NotApplied {
+                    code: "test_failure".into(),
+                }
+            });
+        }
         self.inner.acquire(sid, claim, initial).await
     }
     async fn handoff_session(
@@ -174,6 +217,20 @@ impl SessionStorePort for Sessions {
         target: &ShardClaim,
         id: &RequestId,
     ) -> Result<SessionTransferOutcome, StoreError> {
+        if self.hold_transfer.swap(false, Ordering::SeqCst) {
+            self.transfer_entered.notify_one();
+            self.transfer_release.notified().await;
+            return Err(StoreError::OutcomeUnknown {
+                operation_id: "delayed_transfer".into(),
+            });
+        }
+        if self.failed_transfers.lock().unwrap().contains(&source.sid) {
+            return Err(StoreError::OutcomeUnknown {
+                operation_id: "transfer".into(),
+            });
+        }
+        let delay = *self.transfer_delay.lock().unwrap();
+        tokio::time::sleep(delay).await;
         self.inner.handoff_session(source, target, id).await
     }
     async fn load(&self, sid: &Sid) -> Result<Option<CheckpointEnvelope>, StoreError> {
@@ -205,6 +262,9 @@ impl SessionStorePort for Sessions {
 pub struct Peers {
     pub workers: Mutex<BTreeMap<String, Arc<WorkerRuntime>>>,
     pub lose_reply: AtomicBool,
+    pub rejected_nodes: Mutex<Vec<String>>,
+    pub unknown_nodes: Mutex<Vec<String>>,
+    pub requests: Mutex<Vec<HandoffRequest>>,
 }
 #[async_trait]
 impl DistWorkerPeerPort for Peers {
@@ -213,6 +273,25 @@ impl DistWorkerPeerPort for Peers {
         target: &MemberRecord,
         request: HandoffRequest,
     ) -> Result<HandoffOutcome, RuntimeError> {
+        self.requests.lock().unwrap().push(request.clone());
+        if self
+            .unknown_nodes
+            .lock()
+            .unwrap()
+            .contains(&target.instance.node)
+        {
+            return Err(RuntimeError {
+                code: "reply_unknown".into(),
+            });
+        }
+        if self
+            .rejected_nodes
+            .lock()
+            .unwrap()
+            .contains(&target.instance.node)
+        {
+            return Ok(HandoffOutcome::Rejected);
+        }
         let worker = self
             .workers
             .lock()
@@ -275,6 +354,14 @@ impl World {
                 inner: store.clone(),
                 released: Mutex::default(),
                 release_unavailable: AtomicBool::new(false),
+                transfer_delay: Mutex::default(),
+                spec_unavailable: AtomicBool::default(),
+                failed_acquires: Mutex::default(),
+                acquire_calls: Mutex::default(),
+                failed_transfers: Mutex::default(),
+                hold_transfer: AtomicBool::default(),
+                transfer_entered: tokio::sync::Notify::new(),
+                transfer_release: tokio::sync::Notify::new(),
             }),
             store,
             data: Arc::default(),
@@ -291,6 +378,9 @@ impl World {
             max_active_sessions: capacity,
             ..WorkerConfig::default()
         };
+        self.worker_with_config(name, config).await
+    }
+    pub async fn worker_with_config(&self, name: &str, config: WorkerConfig) -> Arc<WorkerRuntime> {
         let runtime = WorkerRuntime::start(
             name.into(),
             format!("http://{name}.example.test:8080"),
@@ -319,7 +409,7 @@ impl World {
         let spec = SessionSpec {
             schema_version: 1,
             sid: sid.clone(),
-            shard: ShardId(42),
+            shard: KeyLayout::shard_of(sid).unwrap(),
             scope: TaskScope {
                 tenant: TenantId("t".into()),
                 principal: PrincipalId("p".into()),

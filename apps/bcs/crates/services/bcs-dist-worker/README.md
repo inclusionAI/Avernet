@@ -60,10 +60,46 @@ must not be enabled without exact authenticated instance binding.
 
 Candidate enumeration is bounded by page size and page count. A tick checks at
 most the configured shard budget and starts at most the configured acquisition
-budget. Foreign-owner liveness is memoized once per distinct instance per tick.
+budget. Member-page cursors advance across ticks, including pages containing
+orphan registrations; a bounded prefix cannot hide every newer member forever.
+Foreign-owner liveness is memoized once per distinct instance per tick.
 Local session and incoming-handoff capacities reject further admission rather
 than growing without bound. A scan page is retained until its entries have been
-visited; it is not replaced by a mutable offset.
+visited; it is not replaced by a mutable offset. Startup validates the configured
+session limit against the store's advertised local capacity (if supplied).
+
+Recovery prepares a frozen initial checkpoint before issuing an acquisition.
+Definite preparation/first-attempt failures enter bounded backoff without becoming
+in-flight writes. Unknown attempts retain their original claim and input, even
+if a later retry fails definitely. Confirmed acquisitions retry scheduling
+observation or local release directly. A round reserves new-discovery capacity
+alongside retry capacity, rotates retries, and isolates individual session errors.
+Deferred `check_after` is a hint capped by the periodic check interval; local
+handoff acceptance and `source_done` prioritize discovery, with the persistent
+pending scan as fallback. Neither hint grants processing rights.
+
+Drain uses a monotonic overall deadline and a separate timeout for each I/O.
+Session transfers run with bounded concurrency (default 8), within the global
+per-round operation budget, and retain exact per-session authorization checks.
+Heartbeat continues while a batch runs. Shard iteration rotates; a blocked shard
+does not indefinitely hide the next page. One candidate view serves each round.
+A definitely rejected target is skipped for this drain; an unknown request keeps
+its original ID, payload and target. A subsequent read-only rejection is not
+proof that the earlier request was cancelled. The receiver likewise retains an
+uncertain incoming handoff through a later rejection, until durable owner
+advancement or same-request acceptance confirms the outcome. Concurrent retries
+of the same incoming request share a gate; queued calls recheck entry identity
+and cannot write after their entry has been removed or replaced. Transfers reserve
+the local session before I/O, so concurrent local release cannot erase an
+uncertain write. The per-shard transfer cursor rotates past slow/failed sessions.
+Transferred and fenced sessions
+share the quiescent unwatch/cache-release path; cleanup failures retain local
+responsibility. Feeds close once neither ownership nor local work needs them.
+
+`heartbeat_interval + request_timeout` must be strictly less than `lease_ttl`,
+using checked arithmetic. `exit_margin` reserves final confirmation/retirement
+time; no new handoff starts without a remaining request budget. `drain(0)` is
+valid and returns `DeadlineReached` when a graceful drain cannot be confirmed.
 
 Tests exercise stable HRW, warmup, subscriptions after recovery, graceful transfer,
 unknown RPC outcomes, pending scheduling fences, delayed claim/shutdown races,

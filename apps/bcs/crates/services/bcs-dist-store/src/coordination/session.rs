@@ -1,5 +1,25 @@
 use super::*;
 use async_trait::async_trait;
+
+// Dropping an acquire future during the provider write is also an unknown
+// result. Preserve its reservation without changing the public port contract.
+struct AcquisitionWriteGuard<'a> {
+    store: &'a CoordinationStore,
+    sid: &'a Sid,
+    holder: &'a ShardOwner,
+    definite: bool,
+}
+impl Drop for AcquisitionWriteGuard<'_> {
+    fn drop(&mut self) {
+        if !self.definite
+            && let Ok(mut cache) = self.store.cache.lock()
+            && let Some(entry) = cache.get_mut(&self.sid.0)
+            && entry.holder == *self.holder
+        {
+            entry.uncertain_acquisition = true;
+        }
+    }
+}
 fn owner_valid(owner: &SessionOwnership) -> Result<(), StoreError> {
     if KeyLayout::shard_of(&owner.sid)? != owner.shard {
         return Err(invalid("session_shard"));
@@ -37,6 +57,10 @@ fn acquired(sid: &Sid, claim: &ShardClaim, envelope: StoredCheckpoint) -> Acquir
 }
 #[async_trait]
 impl SessionStorePort for CoordinationStore {
+    fn local_session_capacity(&self) -> Option<usize> {
+        Some(self.config.max_cached_sessions)
+    }
+
     async fn release_local(&self, owner: &SessionOwnership) -> Result<(), StoreError> {
         owner_valid(owner)?;
         let mut cache = self
@@ -64,10 +88,20 @@ impl SessionStorePort for CoordinationStore {
         // Definite non-acquisitions release observation slots. Unknown writes
         // and confirmed existence survive errors, especially a missing known
         // checkpoint: forgetting it would make a retry initialize lost state.
+        let uncertain = {
+            let mut cache = self.cache.lock().map_err(|_| not_applied("cache_poisoned"))?;
+            if let Some(entry) = cache.get_mut(&sid.0) {
+                if entry.holder == claim.owner && matches!(&result, Ok(AcquireOutcome::Acquired(_))) {
+                    entry.uncertain_acquisition = false;
+                }
+                entry.uncertain_acquisition
+            } else { false }
+        };
         let release = match &result {
             Ok(AcquireOutcome::Acquired(_)) | Err(StoreError::OutcomeUnknown { .. }) => false,
-            Ok(_) => true,
-            Err(_) => self.cached(sid)?.is_none(),
+            Ok(AcquireOutcome::Fenced) => true,
+            Ok(AcquireOutcome::Deferred { .. }) => !uncertain,
+            Err(_) => !uncertain && self.cached(sid)?.is_none(),
         };
         if release {
             self.release_local(&SessionOwnership {
@@ -91,13 +125,12 @@ impl SessionStorePort for CoordinationStore {
         }
         let key = self.layout.ckpt(&source.sid)?;
         for _ in 0..RETRIES {
-            if !self.valid_claim(target).await? {
-                return Ok(SessionTransferOutcome::Fenced);
-            }
             let Some(record) = self.current(target.shard).await? else {
                 return Ok(SessionTransferOutcome::Fenced);
             };
-            if record.claim != *target {
+            if record.claim != *target
+                || !self.confirmed_alive(&target.owner.instance, &id.0).await?
+            {
                 return Ok(SessionTransferOutcome::Fenced);
             }
             let Some(old) = self.checkpoint(&source.sid).await? else {
@@ -358,10 +391,13 @@ impl CoordinationStore {
                 return Ok(AcquireOutcome::Fenced);
             }
             envelope.owner = claim.owner.clone();
-            if let Some(version) = self
-                .write(&key, old.map(|x| x.version), &envelope, &sid.0)
-                .await?
-            {
+            let mut attempt = AcquisitionWriteGuard {
+                store: self, sid, holder: &claim.owner, definite: false,
+            };
+            let outcome = self.write(&key, old.map(|x| x.version), &envelope, &sid.0).await;
+            attempt.definite = !matches!(&outcome, Err(StoreError::OutcomeUnknown { .. }));
+            drop(attempt);
+            if let Some(version) = outcome? {
                 self.remember(
                     sid,
                     Versioned {

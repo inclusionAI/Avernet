@@ -156,6 +156,12 @@ pub enum RecoveryUpdate {
 
 #[async_trait]
 pub trait SessionStorePort: Send + Sync {
+    /// Maximum local session reservations supported by this port instance.
+    /// None means no local cache limit. Runtime wiring must reject a configured
+    /// active-session limit above Some(capacity), and apply backpressure before
+    /// issuing acquisitions. Unknown writes still occupy their reservations.
+    fn local_session_capacity(&self) -> Option<usize> { None }
+
     /// Release a quiescent local cache entry only. Never delete durable state or
     /// revoke another owner. The caller must resolve current-round/commit/effect
     /// and scheduling operations first. Providers without a cache need no work.

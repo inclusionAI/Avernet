@@ -4,7 +4,7 @@ use bcs_dist_model::*;
 use bcs_service_api::{
     port::{
         dist_runtime::DistRuntimeControlPort,
-        repo::distributed::{ownership::*, session::*},
+        repo::distributed::{common::StoreError, ownership::*},
     },
     types::dist_runtime::*,
 };
@@ -22,7 +22,12 @@ impl DistRuntimeControlPort for WorkerRuntime {
             active_work: state
                 .sessions
                 .values()
-                .filter(|s| matches!(s.phase, Phase::Running | Phase::Unknown))
+                .filter(|s| {
+                    matches!(
+                        s.phase,
+                        Phase::Running | Phase::Unknown | Phase::Transferring
+                    )
+                })
                 .count() as u64
                 + state.acquisitions.len() as u64
                 + state.incoming.len() as u64
@@ -44,7 +49,7 @@ impl DistRuntimeControlPort for WorkerRuntime {
         let confirm_only = {
             let mut state = self.state()?;
             if let Some(previous) = state.incoming.get(&id) {
-                if *previous != request {
+                if previous.request != request {
                     return Err(err("handoff_content_conflict"));
                 }
                 false
@@ -55,7 +60,14 @@ impl DistRuntimeControlPort for WorkerRuntime {
             {
                 return Ok(HandoffOutcome::Rejected);
             } else {
-                state.incoming.insert(id.clone(), request.clone());
+                state.incoming.insert(
+                    id.clone(),
+                    Incoming {
+                        request: request.clone(),
+                        uncertain: false,
+                        gate: std::sync::Arc::new(tokio::sync::Mutex::new(())),
+                    },
+                );
                 false
             }
         };
@@ -87,18 +99,17 @@ impl DistRuntimeControlPort for WorkerRuntime {
         {
             return Ok(false);
         }
-        self.bounded(self.owners.source_done(&target, &id)).await
+        let done = self.bounded(self.owners.source_done(&target, &id)).await?;
+        if done {
+            self.prioritize(target.shard)?;
+        }
+        Ok(done)
     }
     async fn wake(&self, shard: ShardId) -> Result<(), RuntimeError> {
         if !self.config.shards.contains(&shard) {
             return Err(err("unknown_shard"));
         }
-        // Rewind only the page cursor. Existing loaded page remains bounded; the
-        // normal owner/pending scan guarantees eventual discovery without hints.
-        if let Some(scan) = self.state()?.scans.get_mut(&shard) {
-            scan.next = None;
-        }
-        Ok(())
+        self.prioritize(shard)
     }
     async fn drain(&self, grace: Duration) -> Result<DrainOutcome, RuntimeError> {
         let deadline = Instant::now()
@@ -107,8 +118,19 @@ impl DistRuntimeControlPort for WorkerRuntime {
         // This is the first operation: close all new local admissions before I/O.
         self.state()?.draining = true;
         tracing::info!(node=%self.instance.node, incarnation=%self.instance.incarnation, grace_ms=grace.as_millis(), "Worker drain started");
+        // Finish or cancel the existing scan before retrying its in-flight
+        // records. A drain must not concurrently resolve the same acquisition.
+        let guard = tokio::time::timeout_at(deadline, self.tick_guard.lock()).await;
+        let Ok(_guard) = guard else {
+            self.state()?.stopped = true;
+            return Ok(DrainOutcome::DeadlineReached {
+                remaining: self.remaining()?.max(1),
+            });
+        };
         let _ = timeout(
-            grace.min(self.config.request_timeout),
+            deadline
+                .saturating_duration_since(Instant::now())
+                .min(self.config.request_timeout),
             self.membership.set_draining(&self.lease),
         )
         .await;
@@ -117,49 +139,32 @@ impl DistRuntimeControlPort for WorkerRuntime {
             if remaining <= self.config.exit_margin {
                 break;
             }
-            let _ = timeout(
-                deadline
-                    .saturating_duration_since(Instant::now())
-                    .min(self.config.request_timeout),
-                self.heartbeat(),
-            )
-            .await;
-            let _ = timeout(
-                deadline
-                    .saturating_duration_since(Instant::now())
-                    .min(self.config.request_timeout),
-                self.resolve_claims(),
-            )
-            .await;
-            let _ = timeout(
-                deadline
-                    .saturating_duration_since(Instant::now())
-                    .min(self.config.request_timeout),
-                self.resolve_acquisitions(),
-            )
-            .await;
-            let incoming = self.state()?.incoming.values().cloned().collect::<Vec<_>>();
-            for request in incoming.into_iter().take(self.config.max_shards_per_tick) {
-                if Instant::now() >= deadline {
-                    break;
+            let work_until = deadline - self.config.exit_margin;
+            let step = self.drain_round(work_until);
+            tokio::pin!(step);
+            let mut heartbeat = tokio::time::interval(self.config.heartbeat_interval);
+            loop {
+                tokio::select! {
+                    result = &mut step => {
+                        if let Err(error) = result { tracing::warn!(code=%error.code, "Worker drain step deferred"); }
+                        break;
+                    }
+                    _ = tokio::time::sleep_until(work_until) => break,
+                    _ = heartbeat.tick() => {
+                        if let Ok(Err(error)) = tokio::time::timeout_at(work_until, self.heartbeat()).await {
+                            tracing::warn!(code=%error.code, "Worker drain heartbeat unavailable");
+                        }
+                    }
                 }
-                let _ = timeout(
-                    deadline
-                        .saturating_duration_since(Instant::now())
-                        .min(self.config.request_timeout),
-                    self.finish_incoming(request),
-                )
-                .await;
             }
-            if self.state()?.acquisitions.is_empty() && self.state()?.claims.is_empty() {
-                let _ = timeout(
-                    deadline
-                        .saturating_duration_since(Instant::now())
-                        .min(self.config.request_timeout),
-                    self.drain_step(deadline.saturating_duration_since(Instant::now())),
-                )
-                .await;
-            }
+            self.close_unused_feeds()?;
+            tracing::debug!(
+                remaining = self.remaining()?,
+                budget_ms = deadline
+                    .saturating_duration_since(Instant::now())
+                    .as_millis(),
+                "Worker drain progress"
+            );
             if self.remaining()? == 0 {
                 self.state()?.stopped = true;
                 let budget = deadline
@@ -214,27 +219,118 @@ impl WorkerRuntime {
             HandoffOutcome::Fenced
         })
     }
+    async fn confirm_retired_incoming(
+        &self,
+        request: &HandoffRequest,
+    ) -> Result<HandoffOutcome, RuntimeError> {
+        // A stale waiter cannot validate a replacement entry's private content
+        // fingerprint. It may only confirm whether the old source still owns
+        // the shard; normal retry admission handles acceptance reconciliation.
+        let current = self
+            .bounded(self.owners.current(request.from.shard))
+            .await?;
+        Ok(
+            if current.is_some_and(|record| record.claim == request.from) {
+                HandoffOutcome::Rejected
+            } else {
+                HandoffOutcome::Fenced
+            },
+        )
+    }
     pub(crate) async fn finish_incoming(
         &self,
         request: HandoffRequest,
     ) -> Result<HandoffOutcome, RuntimeError> {
         let id = request.request_id.0.clone();
+        let gate = self
+            .state()?
+            .incoming
+            .get(&id)
+            .map(|pending| pending.gate.clone());
+        let Some(gate) = gate else {
+            return self.confirm_retired_incoming(&request).await;
+        };
+        let _guard = timeout(self.config.request_timeout, gate.lock())
+            .await
+            .map_err(|_| err("handoff_confirmation_busy"))?;
+        let same_entry = {
+            let state = self.state()?;
+            match state.incoming.get(&id) {
+                Some(pending) if std::sync::Arc::ptr_eq(&pending.gate, &gate) => {
+                    if pending.request != request {
+                        return Err(err("handoff_content_conflict"));
+                    }
+                    true
+                }
+                _ => false,
+            }
+        };
+        if !same_entry {
+            // This queued call belongs to an entry already removed/replaced.
+            // It must never issue a fresh write under the replacement's ID.
+            return self.confirm_retired_incoming(&request).await;
+        }
         let mut effective = request.clone();
         effective.grace = effective.grace.saturating_sub(self.config.exit_margin);
+        let prior_unknown = self
+            .state()?
+            .incoming
+            .get(&id)
+            .is_some_and(|pending| pending.uncertain);
         if effective.grace.is_zero() {
-            self.state()?.incoming.remove(&id);
-            return Ok(HandoffOutcome::Rejected);
+            if !prior_unknown {
+                self.state()?.incoming.remove(&id);
+                return Ok(HandoffOutcome::Rejected);
+            }
+            return Err(err("handoff_unknown"));
         }
-        let outcome = timeout(self.config.request_timeout, self.owners.handoff(effective))
+        if let Some(pending) = self.state()?.incoming.get_mut(&id) {
+            pending.uncertain = true;
+        }
+        let outcome = match timeout(self.config.request_timeout, self.owners.handoff(effective))
             .await
-            .map_err(|_| {tracing::warn!(shard=request.from.shard.0, handoff_id=%id, "Worker handoff result unknown");err("handoff_unknown")})?
-            .map_err(store_error)?;
+        {
+            Ok(Ok(outcome)) => outcome,
+            Ok(Err(error)) => {
+                if !prior_unknown && !matches!(error, StoreError::OutcomeUnknown { .. }) {
+                    self.state()?.incoming.remove(&id);
+                }
+                return Err(store_error(error));
+            }
+            Err(_) => {
+                tracing::warn!(shard=request.from.shard.0, handoff_id=%id, "Worker handoff result unknown");
+                return Err(err("handoff_unknown"));
+            }
+        };
+        if prior_unknown && !matches!(outcome, HandoffOutcome::Accepted(_)) {
+            // A source that has since died can make this retry be rejected while
+            // the first EQ is still in flight. Rejection alone cannot cancel it.
+            let current = self
+                .bounded(self.owners.current(request.from.shard))
+                .await?;
+            let Some(current) = current.filter(|r| r.claim.owner.epoch > request.from.owner.epoch)
+            else {
+                return Err(err("handoff_unknown"));
+            };
+            let mut state = self.state()?;
+            if current.claim.owner.instance == self.instance {
+                state.shards.insert(current.claim.shard, current.claim);
+            }
+            state.incoming.remove(&id);
+            return Ok(HandoffOutcome::Fenced);
+        }
         let mut state = self.state()?;
         if let HandoffOutcome::Accepted(record) = &outcome {
             tracing::info!(shard=record.claim.shard.0, epoch=record.claim.owner.epoch.0, handoff_id=%id, "Worker handoff accepted");
             state
                 .shards
                 .insert(record.claim.shard, record.claim.clone());
+            if !state.priority_shards.contains(&record.claim.shard) {
+                state.priority_shards.push_back(record.claim.shard);
+            }
+            if !state.recovery_priority.contains(&record.claim.shard) {
+                state.recovery_priority.push_back(record.claim.shard);
+            }
         }
         state.incoming.remove(&id);
         Ok(outcome)
@@ -247,148 +343,5 @@ impl WorkerRuntime {
             + state.incoming.len()
             + state.outgoing.len()
             + state.claims.len()) as u64)
-    }
-    async fn drain_step(&self, remaining: Duration) -> Result<(), RuntimeError> {
-        let claims = self.state()?.shards.values().cloned().collect::<Vec<_>>();
-        for claim in claims.into_iter().take(self.config.max_shards_per_tick) {
-            let Some(record) = self.bounded(self.owners.current(claim.shard)).await? else {
-                continue;
-            };
-            if record.claim != claim {
-                self.state()?.shards.remove(&claim.shard);
-                continue;
-            }
-            if let Some(h) = record.handoff {
-                if !self
-                    .bounded(self.owners.clear_handoff(&claim, &h.request_id))
-                    .await?
-                {
-                    continue;
-                }
-                tracing::debug!(shard=claim.shard.0, epoch=claim.owner.epoch.0, handoff_id=%h.request_id.0, "Worker handoff cleanup confirmed");
-            }
-            let pending = self.state()?.outgoing.get(&claim.shard).cloned();
-            let (target, request) = if let Some(pending) = pending {
-                pending
-            } else {
-                let mut candidates = self.candidates().await?;
-                candidates.retain(|m| m.instance != self.instance);
-                let ranked = crate::rank_candidates(
-                    claim.shard,
-                    &candidates
-                        .iter()
-                        .map(|m| m.instance.clone())
-                        .collect::<Vec<_>>(),
-                    self.config.identity,
-                );
-                let Some(first) = ranked.first() else {
-                    continue;
-                };
-                let Some(target) = candidates.into_iter().find(|m| m.instance == *first) else {
-                    continue;
-                };
-                let request = HandoffRequest {
-                    request_id: RequestId(uuid::Uuid::new_v4().to_string()),
-                    from: claim.clone(),
-                    target: target.instance.clone(),
-                    grace: remaining,
-                };
-                self.state()?
-                    .outgoing
-                    .insert(claim.shard, (target.clone(), request.clone()));
-                (target, request)
-            };
-            let outcome = self.peers.handoff(&target, request.clone()).await;
-            match outcome {
-                Ok(HandoffOutcome::Accepted(record)) => {
-                    if record.claim.owner.instance != target.instance
-                        || record.claim.shard != claim.shard
-                    {
-                        return Err(err("peer_handoff_response"));
-                    }
-                    self.transfer_quiescent(&request, &record.claim, &target)
-                        .await?;
-                }
-                Ok(HandoffOutcome::Rejected) => {
-                    self.state()?.outgoing.remove(&claim.shard);
-                }
-                Ok(HandoffOutcome::Fenced) => {
-                    self.state()?.outgoing.remove(&claim.shard);
-                    self.state()?.shards.remove(&claim.shard);
-                }
-                Err(_) => {}
-            }
-        }
-        // Outgoing accepted ownership is no longer the source shard owner. Keep
-        // progressing its per-session transfers independently of healthy shards.
-        let outgoing = self.state()?.outgoing.values().cloned().collect::<Vec<_>>();
-        for (target, request) in outgoing {
-            if let Some(record) = self
-                .bounded(self.owners.current(request.from.shard))
-                .await?
-            {
-                if record.claim.owner.instance == request.target {
-                    self.transfer_quiescent(&request, &record.claim, &target)
-                        .await?;
-                } else if record.claim.owner.epoch > request.from.owner.epoch {
-                    self.state()?.outgoing.remove(&request.from.shard);
-                }
-            }
-        }
-        Ok(())
-    }
-    async fn transfer_quiescent(
-        &self,
-        request: &HandoffRequest,
-        target: &ShardClaim,
-        member: &MemberRecord,
-    ) -> Result<(), RuntimeError> {
-        let owners = self
-            .state()?
-            .sessions
-            .values()
-            .filter(|s| {
-                s.acquired.ownership.shard == request.from.shard
-                    && s.acquired.ownership.owner == request.from.owner
-                    && s.phase == Phase::Idle
-                    && !s.pending_schedule
-            })
-            .map(|s| s.acquired.ownership.clone())
-            .collect::<Vec<_>>();
-        for source in owners.into_iter().take(self.config.max_acquires_per_tick) {
-            match self
-                .bounded(
-                    self.sessions
-                        .handoff_session(&source, target, &request.request_id),
-                )
-                .await?
-            {
-                SessionTransferOutcome::Transferred
-                | SessionTransferOutcome::AlreadyTransferred
-                | SessionTransferOutcome::Fenced => {
-                    self.bounded(self.sessions.release_local(&source)).await?;
-                    self.state()?.sessions.remove(&source.sid);
-                }
-            }
-        }
-        let unfinished = self.state()?.sessions.values().any(|s| {
-            s.acquired.ownership.shard == request.from.shard
-                && s.acquired.ownership.owner == request.from.owner
-        });
-        if !unfinished {
-            let _ = self
-                .peers
-                .source_done(
-                    member,
-                    self.instance.clone(),
-                    target.clone(),
-                    request.request_id.clone(),
-                )
-                .await;
-            let mut state = self.state()?;
-            state.shards.remove(&request.from.shard);
-            state.outgoing.remove(&request.from.shard);
-        }
-        Ok(())
     }
 }

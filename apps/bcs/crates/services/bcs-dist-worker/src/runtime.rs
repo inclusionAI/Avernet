@@ -24,6 +24,7 @@ pub(crate) enum Phase {
     Running,
     Effects,
     Unknown,
+    Transferring,
     Releasing,
 }
 pub(crate) struct Session {
@@ -37,6 +38,33 @@ pub(crate) struct Scan {
     pub queue: VecDeque<Sid>,
     pub next: Option<PageToken>,
 }
+#[derive(Clone)]
+pub(crate) enum AcquisitionStage {
+    Acquire {
+        initial: Box<Checkpoint>,
+        uncertain: bool,
+    },
+    Observe(Box<AcquiredSession>),
+    Release(SessionOwnership),
+}
+#[derive(Clone)]
+pub(crate) struct Acquisition {
+    pub claim: ShardClaim,
+    pub stage: AcquisitionStage,
+    pub retry_at: Instant,
+}
+#[derive(Clone)]
+pub(crate) struct Incoming {
+    pub request: HandoffRequest,
+    pub uncertain: bool,
+    pub gate: Arc<AsyncMutex<()>>,
+}
+#[derive(Clone)]
+pub(crate) struct Outgoing {
+    pub target: MemberRecord,
+    pub request: HandoffRequest,
+    pub uncertain: bool,
+}
 pub(crate) struct State {
     pub draining: bool,
     pub stopped: bool,
@@ -47,13 +75,24 @@ pub(crate) struct State {
     pub shards: BTreeMap<ShardId, ShardClaim>,
     pub sessions: BTreeMap<Sid, Session>,
     pub scans: BTreeMap<ShardId, Scan>,
-    pub acquisitions: BTreeMap<Sid, ShardClaim>,
+    pub acquisitions: BTreeMap<Sid, Acquisition>,
+    pub retries: BTreeMap<Sid, (ShardClaim, Instant)>,
+    pub priority_shards: VecDeque<ShardId>,
+    pub priority_turn: bool,
+    pub recovery_cursor: Option<ShardId>,
+    pub recovery_priority: VecDeque<ShardId>,
+    pub recovery_turn: bool,
+    pub member_cursor: Option<PageToken>,
+    pub rejected_targets: BTreeMap<ShardId, Vec<Instance>>,
     pub acquisition_cursor: Option<Sid>,
-    pub incoming: BTreeMap<String, HandoffRequest>,
+    pub retry_turn: bool,
+    pub incoming: BTreeMap<String, Incoming>,
     pub claims: BTreeMap<ShardId, (ClaimShard, bool)>,
-    pub outgoing: BTreeMap<ShardId, (MemberRecord, HandoffRequest)>,
+    pub outgoing: BTreeMap<ShardId, Outgoing>,
     pub candidates_since: BTreeMap<ShardId, Instant>,
     pub shard_cursor: usize,
+    pub drain_cursor: Option<ShardId>,
+    pub transfer_cursors: BTreeMap<ShardId, Sid>,
 }
 pub type CheckpointInitializer =
     dyn Fn(&SessionSpec) -> Result<Checkpoint, RuntimeError> + Send + Sync;
@@ -72,7 +111,7 @@ pub struct WorkerRuntime {
     pub(crate) peers: Arc<dyn DistWorkerPeerPort>,
     pub(crate) initialize: Arc<CheckpointInitializer>,
     pub(crate) state: Mutex<State>,
-    tick_guard: AsyncMutex<()>,
+    pub(crate) tick_guard: AsyncMutex<()>,
     feeds: Mutex<BTreeMap<ShardId, SharedFeed>>,
 }
 impl WorkerRuntime {
@@ -99,6 +138,12 @@ impl WorkerRuntime {
         initialize: Arc<CheckpointInitializer>,
     ) -> Result<Arc<Self>, RuntimeError> {
         config.validate()?;
+        if sessions
+            .local_session_capacity()
+            .is_some_and(|capacity| config.max_active_sessions > capacity)
+        {
+            return Err(err("session_store_capacity_mismatch"));
+        }
         let instance = Self::fresh_instance(node);
         let started = Instant::now();
         let lease = timeout(
@@ -142,12 +187,23 @@ impl WorkerRuntime {
                 sessions: BTreeMap::new(),
                 scans: BTreeMap::new(),
                 acquisitions: BTreeMap::new(),
+                retries: BTreeMap::new(),
+                priority_shards: VecDeque::new(),
+                priority_turn: true,
+                recovery_cursor: None,
+                recovery_priority: VecDeque::new(),
+                recovery_turn: true,
+                member_cursor: None,
+                rejected_targets: BTreeMap::new(),
                 acquisition_cursor: None,
+                retry_turn: false,
                 incoming: BTreeMap::new(),
                 claims: BTreeMap::new(),
                 outgoing: BTreeMap::new(),
                 candidates_since: BTreeMap::new(),
                 shard_cursor: 0,
+                drain_cursor: None,
+                transfer_cursors: BTreeMap::new(),
             }),
             tick_guard: AsyncMutex::new(()),
             feeds: Mutex::new(BTreeMap::new()),
@@ -228,9 +284,21 @@ impl WorkerRuntime {
         }
         self.resolve_claims().await?;
         let mut acquire_budget = self.config.max_acquires_per_tick;
-        if let Err(error) = self.resolve_acquisition_budget(&mut acquire_budget).await {
+        // Reserve at least half the round for newly discovered work. Unknown
+        // requests retain responsibility without monopolizing every round.
+        let mut retry_budget = if acquire_budget == 1 {
+            let mut state = self.state()?;
+            state.retry_turn = !state.retry_turn;
+            usize::from(state.retry_turn)
+        } else {
+            acquire_budget / 2
+        };
+        let retry_limit = retry_budget;
+        if let Err(error) = self.resolve_acquisition_budget(&mut retry_budget).await {
             tracing::warn!(node=%self.instance.node, incarnation=%self.instance.incarnation, code=%error.code, "Worker acquisition confirmation deferred");
         }
+        acquire_budget -= retry_limit - retry_budget;
+        let mut failure = None;
         let candidates = self.candidates().await?;
         let count = self
             .config
@@ -238,17 +306,38 @@ impl WorkerRuntime {
             .len()
             .min(self.config.max_shards_per_tick);
         let mut liveness = BTreeMap::new();
+        let mut visited = std::collections::BTreeSet::new();
         for _ in 0..count {
             if !self.ready_locked(&*self.state()?) {
                 break;
             }
             let shard = {
                 let mut s = self.state()?;
-                let shard = self.config.shards[s.shard_cursor % self.config.shards.len()];
-                s.shard_cursor = (s.shard_cursor + 1) % self.config.shards.len();
-                shard
+                // Alternate priority hints with the persistent scan so neither
+                // handoffs nor ordinary shards can starve the other.
+                let priority = if s.priority_turn && !s.priority_shards.is_empty() {
+                    s.priority_turn = false;
+                    s.priority_shards.pop_front()
+                } else {
+                    s.priority_turn = true;
+                    None
+                };
+                priority.unwrap_or_else(|| {
+                    let shard = self.config.shards[s.shard_cursor % self.config.shards.len()];
+                    s.shard_cursor = (s.shard_cursor + 1) % self.config.shards.len();
+                    shard
+                })
             };
-            let current = self.bounded(self.owners.current(shard)).await?;
+            if !visited.insert(shard) {
+                continue;
+            }
+            let current = match self.bounded(self.owners.current(shard)).await {
+                Ok(current) => current,
+                Err(error) => {
+                    failure.get_or_insert(error);
+                    continue;
+                }
+            };
             if let Some(record) = &current {
                 if record.claim.owner.instance == self.instance {
                     self.state()?.shards.insert(shard, record.claim.clone());
@@ -257,11 +346,13 @@ impl WorkerRuntime {
                             .bounded(self.owners.clear_handoff(&record.claim, &h.request_id))
                             .await?;
                     }
-                    self.recover_page(&record.claim, &mut acquire_budget)
-                        .await?;
                     continue;
                 }
-                self.state()?.shards.remove(&shard);
+                {
+                    let mut state = self.state()?;
+                    state.shards.remove(&shard);
+                    state.retries.retain(|_, (claim, _)| claim.shard != shard);
+                }
                 // Do not rebalance healthy owners; uncertain liveness is not death.
                 let identity = (
                     &record.claim.owner.instance.node,
@@ -319,9 +410,21 @@ impl WorkerRuntime {
                     .entry(shard)
                     .or_insert((request.clone(), false));
             }
-            self.issue_claim(request).await?;
+            if let Err(error) = self.issue_claim(request).await {
+                failure.get_or_insert(error);
+            }
         }
-        Ok(())
+        if let Err(error) = self.recover_owned(&mut acquire_budget).await {
+            failure.get_or_insert(error);
+        }
+        // Use unused new-work budget to confirm outstanding requests.
+        if acquire_budget > 0
+            && let Err(error) = self.resolve_acquisition_budget(&mut acquire_budget).await
+        {
+            failure.get_or_insert(error);
+        }
+        self.close_unused_feeds()?;
+        failure.map_or(Ok(()), Err)
     }
     pub(crate) async fn bounded<T>(
         &self,
@@ -418,7 +521,7 @@ impl WorkerRuntime {
         }
     }
     pub(crate) async fn candidates(&self) -> Result<Vec<MemberRecord>, RuntimeError> {
-        let mut after = None;
+        let mut after = self.state()?.member_cursor.clone();
         let mut result = vec![];
         for _ in 0..self.config.max_member_pages {
             let page = self
@@ -435,6 +538,7 @@ impl WorkerRuntime {
                 .await?;
             result.extend(page.items);
             after = page.next;
+            self.state()?.member_cursor = after.clone();
             if after.is_none() {
                 return Ok(result);
             }
@@ -645,9 +749,16 @@ impl WorkerRuntime {
             }
             s.phase = Phase::Releasing;
         }
-        let feed = self.feed(owner.shard).await?;
-        self.bounded(async { feed.lock().await.unwatch(&owner.sid).await })
-            .await?;
+        let feed = self
+            .feeds
+            .lock()
+            .map_err(|_| err("worker_feed_poisoned"))?
+            .get(&owner.shard)
+            .cloned();
+        if let Some(feed) = feed {
+            self.bounded(async { feed.lock().await.unwatch(&owner.sid).await })
+                .await?;
+        }
         self.bounded(self.sessions.release_local(owner)).await?;
         let mut state = self.state()?;
         if state
@@ -656,6 +767,41 @@ impl WorkerRuntime {
             .is_some_and(|s| s.acquired.ownership == *owner && s.phase == Phase::Releasing)
         {
             state.sessions.remove(&owner.sid);
+        }
+        drop(state);
+        self.close_unused_feeds()?;
+        Ok(())
+    }
+    pub(crate) fn close_unused_feeds(&self) -> Result<(), RuntimeError> {
+        let state = self.state()?;
+        self.feeds
+            .lock()
+            .map_err(|_| err("worker_feed_poisoned"))?
+            .retain(|shard, _| {
+                state.shards.contains_key(shard)
+                    || state
+                        .sessions
+                        .values()
+                        .any(|s| s.acquired.ownership.shard == *shard)
+                    || state.acquisitions.values().any(|a| a.claim.shard == *shard)
+            });
+        Ok(())
+    }
+    pub(crate) fn prioritize(&self, shard: ShardId) -> Result<(), RuntimeError> {
+        let mut state = self.state()?;
+        if !state.priority_shards.contains(&shard) {
+            state.priority_shards.push_back(shard);
+        }
+        if !state.recovery_priority.contains(&shard) {
+            state.recovery_priority.push_back(shard);
+        }
+        if let Some(scan) = state.scans.get_mut(&shard) {
+            scan.next = None;
+        }
+        for (claim, due) in state.retries.values_mut() {
+            if claim.shard == shard {
+                *due = Instant::now();
+            }
         }
         Ok(())
     }

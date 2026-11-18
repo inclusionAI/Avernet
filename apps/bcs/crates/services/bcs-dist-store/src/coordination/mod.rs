@@ -43,6 +43,20 @@ impl std::ops::DerefMut for StoredCheckpoint {
 struct CachedSession {
     holder: ShardOwner,
     checkpoint: Option<Versioned<StoredCheckpoint>>,
+    uncertain_acquisition: bool,
+}
+
+/// Local process bounds; no durable state is evicted to enforce these limits.
+#[derive(Debug, Clone)]
+pub struct CoordinationStoreConfig {
+    pub max_cached_sessions: usize,
+    /// Independent shard/handoff dimension, not an active-session budget.
+    pub max_handoff_timers: usize,
+}
+impl Default for CoordinationStoreConfig {
+    fn default() -> Self {
+        Self { max_cached_sessions: 10_000, max_handoff_timers: 4096 }
+    }
 }
 
 pub struct CoordinationStore {
@@ -50,6 +64,7 @@ pub struct CoordinationStore {
     leases: Arc<dyn LeaseStorePlugin>,
     index: Arc<dyn ZSetStorePlugin>,
     layout: KeyLayout,
+    config: CoordinationStoreConfig,
     cache: Mutex<HashMap<String, CachedSession>>,
     timers: Mutex<HashMap<u32, (HandoffRequest, Instant)>>,
 }
@@ -60,6 +75,18 @@ impl CoordinationStore {
         index: Arc<dyn ZSetStorePlugin>,
         layout: KeyLayout,
     ) -> Result<Self, StoreError> {
+        Self::with_config(documents, leases, index, layout, CoordinationStoreConfig::default())
+    }
+    pub fn with_config(
+        documents: Arc<dyn DocumentStorePlugin>,
+        leases: Arc<dyn LeaseStorePlugin>,
+        index: Arc<dyn ZSetStorePlugin>,
+        layout: KeyLayout,
+        config: CoordinationStoreConfig,
+    ) -> Result<Self, StoreError> {
+        if config.max_cached_sessions == 0 || config.max_handoff_timers == 0 {
+            return Err(invalid("coordination_capacity"));
+        }
         for (supported, code) in [
             (
                 documents.supports(StoreCapability::DocumentCas),
@@ -80,6 +107,7 @@ impl CoordinationStore {
             leases,
             index,
             layout,
+            config,
             cache: Mutex::new(HashMap::new()),
             timers: Mutex::new(HashMap::new()),
         })
@@ -118,12 +146,20 @@ impl CoordinationStore {
             WriteOutcome::ConditionNotMet => None,
         })
     }
+    async fn confirmed_alive(&self, instance: &Instance, operation: &str) -> Result<bool, StoreError> {
+        match self.liveness(instance).await? {
+            Liveness::Alive => Ok(true),
+            Liveness::Dead => Ok(false),
+            // A missing lease or read failure cannot prove an earlier mutation
+            // was fenced. Keep its identity/reservation for reconciliation.
+            Liveness::Unknown => Err(unknown(operation)),
+        }
+    }
     async fn valid_claim(&self, claim: &ShardClaim) -> Result<bool, StoreError> {
-        Ok(self
-            .current(claim.shard)
-            .await?
-            .is_some_and(|r| r.claim == *claim)
-            && self.liveness(&claim.owner.instance).await? == Liveness::Alive)
+        if !self.current(claim.shard).await?.is_some_and(|r| r.claim == *claim) {
+            return Ok(false);
+        }
+        self.confirmed_alive(&claim.owner.instance, "claim_liveness").await
     }
     fn cached(&self, sid: &Sid) -> Result<Option<Versioned<StoredCheckpoint>>, StoreError> {
         Ok(self
@@ -164,7 +200,7 @@ impl CoordinationStore {
             }
             entry.holder = holder.clone();
         } else {
-            if cache.len() >= 4096 {
+            if cache.len() >= self.config.max_cached_sessions {
                 return Err(not_applied("session_cache_capacity"));
             }
             cache.insert(
@@ -172,6 +208,7 @@ impl CoordinationStore {
                 CachedSession {
                     holder: holder.clone(),
                     checkpoint: None,
+                    uncertain_acquisition: false,
                 },
             );
         }
@@ -203,6 +240,13 @@ impl CoordinationStore {
             return Err(not_applied("known_checkpoint_missing"));
         }
         Ok(value)
+    }
+    fn release_handoff_timer(&self, shard: ShardId, id: &RequestId) -> Result<(), StoreError> {
+        let mut timers = self.timers.lock().map_err(|_| not_applied("timer_poisoned"))?;
+        if timers.get(&shard.0).is_some_and(|(request, _)| request.request_id == *id) {
+            timers.remove(&shard.0);
+        }
+        Ok(())
     }
     fn waiting(&self, record: &ShardRecord) -> Result<bool, StoreError> {
         let Some(h) = &record.handoff else {
