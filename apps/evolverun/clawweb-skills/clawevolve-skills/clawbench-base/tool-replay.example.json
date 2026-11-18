@@ -1,0 +1,28 @@
+{
+  "question_id": "task-status",
+  "case_id": "task-waiting",
+  "revision": 1,
+  "overrides": [
+    {
+      "target": {"kind": "mcp", "server": "demo-task", "tool": "getStatus"},
+      "rules": [
+        {
+          "match": {"args": {"taskId": "task-42"}},
+          "result": {"exit_code": 0, "stdout": "{\"status\":\"waiting\"}\n", "stderr": ""}
+        }
+      ],
+      "else": {"exit_code": 2, "stdout": "", "stderr": "fixture_uncovered\n"}
+    },
+    {
+      "target": {"kind": "command", "name": "cat"},
+      "rules": [
+        {
+          "match": {"argv": ["/tmp/demo-task-status.json"]},
+          "result": {"exit_code": 0, "stdout": "{\"status\":\"waiting\"}\n", "stderr": ""}
+        }
+      ],
+      "else": {"exit_code": 2, "stdout": "", "stderr": "fixture_uncovered\n"}
+    }
+  ],
+  "default_tool_action": "deny"
+}
