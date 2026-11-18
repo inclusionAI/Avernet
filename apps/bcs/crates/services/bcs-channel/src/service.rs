@@ -31,6 +31,14 @@ impl BcsChannelService {
 
 #[async_trait]
 impl ChannelService for BcsChannelService {
+    async fn exclusive_session_speaker(
+        &self,
+        session: &Session,
+        group: &Group,
+    ) -> Result<Option<String>, ChannelUseCaseError> {
+        self.resolve_exclusive_session_speaker(session, group).await
+    }
+
     async fn handle_inbound(&self, mut msg: InboundMessage) -> Result<(), ChannelInboundError> {
         msg.conversation_type = normalize_required(&msg.conversation_type, "conversation_type")
             .map_err(|error| invalid_inbound(error))?

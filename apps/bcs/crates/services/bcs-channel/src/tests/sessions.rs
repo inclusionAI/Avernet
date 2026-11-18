@@ -312,6 +312,38 @@ async fn direct_bot_group_chat_uses_bounded_channel_session_id() -> TestResult {
 }
 
 #[tokio::test]
+async fn managed_channel_session_has_exclusive_speaker_only_with_live_single_sender_scope() -> TestResult {
+    let harness = TestHarness::new(manager_group("group_1")).await?;
+    let binding_id = "binding_exclusive";
+    let mut binding = active_binding(
+        binding_id, "robot_1", BindingTarget::Bot { bot_id: "target_bot".into() },
+        Visibility::FullTranscript,
+    );
+    binding.group_chat_scope = Some(GroupChatScope::PerSender);
+    harness.binding_repo.create(binding).await?;
+    harness.service.handle_inbound(group_inbound("conv", "u1", None, "msg", true)).await?;
+    let mapping = harness.conversation_repo
+        .get(binding_id, "conv", SessionScope::PerSender, Some("u1"))
+        .await?.expect("channel mapping");
+    let session = harness.session_repo.get(&mapping.bcs_session_id).await.expect("channel Session");
+    let mut group = harness.service.groups.get(&session.group_id).await.expect("channel Group");
+    group.participants = session.participants.clone();
+    assert_eq!(
+        harness.service.exclusive_session_speaker(&session, &group).await?.as_deref(),
+        Some("human_u1"),
+    );
+
+    group.participants.push(Participant::human("human_u2", ParticipantRole::Consultant));
+    assert_eq!(harness.service.exclusive_session_speaker(&session, &group).await?, None);
+    group.participants.pop();
+    assert!(harness.conversation_repo.delete_if_session(
+        binding_id, "conv", SessionScope::PerSender, Some("u1"), &session.id,
+    ).await?);
+    assert_eq!(harness.service.exclusive_session_speaker(&session, &group).await?, None);
+    Ok(())
+}
+
+#[tokio::test]
 async fn direct_bot_group_chat_defaults_to_per_sender_scope() -> TestResult {
     let harness = TestHarness::new(manager_group("group_1")).await?;
     let binding_id = "binding_bot_default_scope";

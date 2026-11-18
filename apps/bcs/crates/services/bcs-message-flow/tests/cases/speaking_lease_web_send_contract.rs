@@ -91,11 +91,11 @@ async fn seed_bot(db: &dyn DbPlugin, bot_id: &str, caller_enabled: bool) {
     .expect("seed bot");
 }
 
-fn ingress() -> AuthenticatedHumanCallerIngress {
+fn ingress_from(source: HumanCallerAuthSource) -> AuthenticatedHumanCallerIngress {
     let now = now_clock();
     AuthenticatedHumanCallerIngress::new(
         CallerPrincipal { actor_id: "human_1".to_string(), staff_no: "1".to_string() },
-        HumanCallerAuthSource::HttpAuth,
+        source,
         now,
         resolve_env_str(),
     )
@@ -236,8 +236,62 @@ fn send_command(lease: Option<WebSendLeaseClaim>) -> WebSendCommand {
         channel_sender_identity: None,
         sender_conn_id: None,
         provider_bypass_headers: Vec::new(),
-        caller_ingress: Some(ingress()),
+        caller_ingress: Some(ingress_from(HumanCallerAuthSource::HttpAuth)),
         speaking_lease: lease,
+    }
+}
+
+mod channel_scope {
+    use super::*;
+    use bcs_domain::{BindingTarget, ChannelBinding, ChannelType, ConversationSessionMap, Group, Session};
+    use bcs_service_api::application::channel::{
+        ChannelInboundError, ChannelService, ChannelUseCaseError, CreateBindingCommand,
+        InboundMessage, OutboundMessage,
+    };
+
+    struct ChannelPolicy(AtomicUsize);
+
+    #[async_trait]
+    impl ChannelService for ChannelPolicy {
+        async fn exclusive_session_speaker(
+            &self,
+            session: &Session,
+            _group: &Group,
+        ) -> Result<Option<String>, ChannelUseCaseError> {
+            assert_eq!(session.id, "group-1:lease");
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Ok(Some("human_1".into()))
+        }
+        async fn handle_inbound(&self, _: InboundMessage) -> Result<(), ChannelInboundError> { unreachable!() }
+        async fn try_outbound(&self, _: OutboundMessage) -> Result<(), ChannelUseCaseError> { Ok(()) }
+        async fn create_binding(&self, _: CreateBindingCommand) -> Result<ChannelBinding, ChannelUseCaseError> { unreachable!() }
+        async fn list_bindings(&self) -> Result<Vec<ChannelBinding>, ChannelUseCaseError> { unreachable!() }
+        async fn list_bindings_by_target(&self, _: BindingTarget, _: Option<ChannelType>) -> Result<Vec<ChannelBinding>, ChannelUseCaseError> { unreachable!() }
+        async fn list_conversations_by_session(&self, _: &str, _: Option<ChannelType>) -> Result<Vec<ConversationSessionMap>, ChannelUseCaseError> { unreachable!() }
+        async fn set_binding_status(&self, _: &str, _: bool) -> Result<(), ChannelUseCaseError> { unreachable!() }
+        async fn update_binding_config(&self, _: &str, _: serde_json::Value) -> Result<(), ChannelUseCaseError> { unreachable!() }
+        async fn delete_binding(&self, _: &str) -> Result<(), ChannelUseCaseError> { unreachable!() }
+    }
+
+    #[tokio::test]
+    async fn only_channel_ingress_can_use_the_exclusive_speaker_policy() {
+        let world = harness(true, true).await;
+        let policy = Arc::new(ChannelPolicy(AtomicUsize::new(0)));
+        assert!(world.flow.channel_slot().set(policy.clone()).is_ok());
+
+        let mut web = send_command(None);
+        web.source_im_message_id = Some("source-id-alone-is-insufficient".into());
+        let error = world.flow.handle_web_send(web).await.unwrap_err();
+        assert!(error.to_string().contains("speaking lease required"), "{error}");
+        assert_eq!(policy.0.load(Ordering::SeqCst), 0);
+
+        let mut channel = send_command(None);
+        channel.source_im_message_id = Some("channel-message".into());
+        channel.caller_ingress = Some(ingress_from(HumanCallerAuthSource::ChannelIngress));
+        let outcome = world.flow.handle_web_send(channel).await.expect("exclusive speaker admits");
+        assert!(outcome.queue_admission.is_some());
+        assert_eq!(policy.0.load(Ordering::SeqCst), 1);
+        assert_eq!(world.store.checks.load(Ordering::SeqCst), 0);
     }
 }
 
