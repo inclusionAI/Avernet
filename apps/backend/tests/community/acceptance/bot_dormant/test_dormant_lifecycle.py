@@ -171,17 +171,43 @@ def _principal_headers(owner_id: str) -> dict[str, str]:
 
 
 @pytest.mark.acceptance
-def test_openapi_async_recycle_and_reactivate_live(live_backend):
-    """The public owner recycles via the real queue, observes it, then restores."""
+def test_openapi_async_recycle_without_binding_and_reactivate_live(live_backend):
+    """Recycle a resource-free Bot via the real queue, then allocate on activation.
+
+    Seed only the initial record through the existing local SQL test boundary;
+    admission, worker execution, journaling and activation remain real HTTP flows.
+    Physical-provider confirmation is covered by the recycle runtime contract
+    tests, not inferred from singlebox local_proc's untyped missing-resource error.
+    """
     owner_id = fresh_id("recycle_owner")
     query = {"user_id": owner_id}
     with httpx.Client(
         base_url=live_backend, headers={"x-user-id": owner_id}, timeout=60.0,
     ) as client:
-        bot = create_live_personal_bot(
-            client, user_id=owner_id, bot_name_prefix="Recycle API",
+        bot_id = fresh_id("recycle_bot")
+        seeded = client.post(
+            "/local/sql/execute",
+            json={"statements": [{
+                "sql": (
+                    "INSERT INTO ac_bots ("
+                    "bot_id, bot_name, entity_id, entity_type, creator_id, owner_id, "
+                    "owner_name, engine_types, active_engine, status, "
+                    "gmt_create, gmt_modified, is_delete, public, ext, env, bot_type, "
+                    "call_type, caller_config_revision"
+                    ") VALUES ("
+                    ":bot_id, :bot_id, :owner_id, 'staff', :owner_id, :owner_id, "
+                    ":owner_id, :engine_types, 'openclaw', 'ACTIVE', "
+                    "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 0, '0', '{}', 'dev', "
+                    "'personal', 'owner', 0)"
+                ),
+                "params": {
+                    "bot_id": bot_id, "owner_id": owner_id,
+                    "engine_types": '["openclaw"]',
+                },
+            }]},
         )
-        bot_id = bot["bot_id"]
+        assert seeded.status_code == 200, seeded.text
+        assert seeded.json()["results"][0]["rowcount"] == 1, seeded.text
         path = f"/openapi/v1/bots/{bot_id}"
         submitted = client.post(
             f"{path}/recycle", params=query, headers=_principal_headers(owner_id),
