@@ -93,6 +93,14 @@ The existing `/openapi/v1/bots/{bot_id}/sessions/{session_id}/files` list, conte
 and delete operations authorize the caller, resolve the runtime binding from
 Bot/owner/actor/stage, and invoke the corresponding Engine `/api/session-files`
 operation. They no longer require an upload database row for each ready file.
+For list, content (inline or attachment), delete and upload-intents, pass
+the chat's optional `caller_runtime_target` query parameter. Use `service`
+with the chat's `stage` for the service workspace, or `caller_instance` for
+the caller's workspace. Omitting the parameter preserves automatic resolution.
+An unavailable explicit target fails without trying the other workspace.
+Upload completion and materialization status use the existing resource record.
+A friend read with `f_user_id` cannot override its scope to `service`.
+
 Friend-session reads retain the authorized session subject and resolved stage:
 service conversations use online, and Caller conversations use the subject's
 instance even when the Bot owner is the reader. Shared runtimes retain the

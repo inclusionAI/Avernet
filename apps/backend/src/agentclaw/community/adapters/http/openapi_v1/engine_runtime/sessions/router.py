@@ -50,7 +50,11 @@ from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.schema
     _window,
 )
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.converter_creation import reconcile_created_session
-from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.dependencies_session_files import OpenApiSessionFileAdapter, UploadActorNameDep
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.dependencies_session_files import (
+    OpenApiSessionFileAdapter,
+    SessionFileRuntimeTargetDep,
+    UploadActorNameDep,
+)
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.file_access import authorize_file_list
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import RuntimeStage
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import (
@@ -547,6 +551,7 @@ async def create_session_file_upload_intents(
     user_id: UserIdDep,
     owner_id: OwnerIdDep,
     request: Request,
+    runtime_target: SessionFileRuntimeTargetDep,
     stage: StageQuery = RuntimeStage.DRAFT,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
     adapter: OpenApiSessionFileAdapter = Injected(OpenApiSessionFileAdapter),
@@ -563,6 +568,7 @@ async def create_session_file_upload_intents(
         intents = adapter.create_upload_intents(
             actor_user_id=user_id,
             creator_name=creator_name,
+            target=runtime_target,
             owner_id=owner_id,
             bot_id=bot_id,
             session_key=session_id,
@@ -669,6 +675,7 @@ async def list_ready_session_files(
     user_id: UserIdDep,
     owner_id: OwnerIdDep,
     request: Request,
+    runtime_target: SessionFileRuntimeTargetDep,
     stage: StageQuery = RuntimeStage.DRAFT,
     f_user_id: FriendUserIdQuery = None,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
@@ -678,12 +685,13 @@ async def list_ready_session_files(
 ) -> Envelope[SessionFileList]:
     resolved_stage = await authorize_file_list(
         request=request, bot_id=bot_id, session_id=session_id, user_id=user_id,
-        owner_id=owner_id, stage=stage, friend_user_id=f_user_id,
+        owner_id=owner_id, stage=stage, friend_user_id=f_user_id, runtime_target=runtime_target,
         relay=relay, friendships=friendships, expert=expert,
     )
     try:
         records = await adapter.list_ready(
             target=RuntimeBindingRequest(
+                target=runtime_target,
                 bot_id=bot_id, owner_id=owner_id, actor_user_id=user_id, stage=resolved_stage,
             ),
             session_key=session_id,
@@ -714,6 +722,7 @@ async def stream_session_file_content(
     user_id: UserIdDep,
     owner_id: OwnerIdDep,
     request: Request,
+    runtime_target: SessionFileRuntimeTargetDep,
     stage: StageQuery = RuntimeStage.DRAFT,
     f_user_id: FriendUserIdQuery = None,
     disposition: DispositionQuery = "inline",
@@ -724,12 +733,13 @@ async def stream_session_file_content(
 ) -> StreamingResponse:
     resolved_stage = await authorize_file_list(
         request=request, bot_id=bot_id, session_id=session_id, user_id=user_id,
-        owner_id=owner_id, stage=stage, friend_user_id=f_user_id,
+        owner_id=owner_id, stage=stage, friend_user_id=f_user_id, runtime_target=runtime_target,
         relay=relay, friendships=friendships, expert=expert,
     )
     try:
         upstream = await adapter.open_content(
             target=RuntimeBindingRequest(
+                target=runtime_target,
                 bot_id=bot_id, owner_id=owner_id, actor_user_id=user_id, stage=resolved_stage,
             ),
             session_key=session_id,
@@ -769,6 +779,7 @@ async def delete_session_file(
     user_id: UserIdDep,
     owner_id: OwnerIdDep,
     request: Request,
+    runtime_target: SessionFileRuntimeTargetDep,
     stage: StageQuery = RuntimeStage.DRAFT,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
     adapter: OpenApiSessionFileAdapter = Injected(OpenApiSessionFileAdapter),
@@ -780,6 +791,7 @@ async def delete_session_file(
     try:
         await adapter.delete(
             target=RuntimeBindingRequest(
+                target=runtime_target,
                 bot_id=bot_id, owner_id=owner_id, actor_user_id=user_id, stage=stage.value,
             ),
             session_key=session_id,
