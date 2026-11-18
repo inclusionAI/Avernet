@@ -43,7 +43,7 @@ export function DomainTemplates({
           <thead className="bg-muted">
             <tr>
               {['选择', '模板名', '展示名称', '最新版本', '发布版本', '状态', '操作'].map((v) => (
-                <th className="whitespace-nowrap p-3 text-xs font-medium" key={v}>
+                <th className="whitespace-nowrap p-3 text-xs font-medium text-foreground" key={v}>
                   {v === '选择' ? <span className="sr-only">选择</span> : v}
                 </th>
               ))}
@@ -66,19 +66,19 @@ export function DomainTemplates({
                 </td>
                 <td className="p-3">
                   <Hint content={t.templateName}>
-                    <div className="truncate text-[13px]">{t.templateName}</div>
+                    <div className="truncate text-[13px] text-foreground">{t.templateName}</div>
                   </Hint>
                 </td>
                 <td className="p-3">
                   <Hint content={t.displayName || t.templateName}>
-                    <div className="truncate font-medium">{t.displayName || t.templateName}</div>
+                    <div className="truncate text-[13px] font-medium text-foreground">{t.displayName || t.templateName}</div>
                   </Hint>
                 </td>
                 <td className="whitespace-nowrap p-3">
-                  <span className="text-[13px]">V{t.latestVersion}</span>
+                  <span className="text-[13px] text-foreground">V{t.latestVersion}</span>
                 </td>
                 <td className="whitespace-nowrap p-3">
-                  <span className="text-[13px]">{t.publishedVersion === null ? '—' : `V${t.publishedVersion}`}</span>
+                  <span className="text-[13px] text-foreground">{t.publishedVersion === null ? '—' : `V${t.publishedVersion}`}</span>
                 </td>
                 <td className="whitespace-nowrap p-3">
                   <span
