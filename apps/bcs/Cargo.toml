@@ -24,6 +24,7 @@ members = [
     "crates/contracts/bcs-protocol",
     # services
     "crates/services/bcs-dist-store",
+    "crates/services/bcs-dist-projection",
     "crates/services/bcs-dist-worker",
     "crates/application/bcs-app-dist-runtime",
     "crates/services/bcs-dist-gateway-store",
@@ -160,6 +161,7 @@ version      = "0.1.4-beta.3"
 [workspace.dependencies]
 bcs-dist-model = { path = "crates/contracts/bcs-dist-model" }
 bcs-dist-store = { path = "crates/services/bcs-dist-store" }
+bcs-dist-projection = { path = "crates/services/bcs-dist-projection" }
 bcs-dist-worker = { path = "crates/services/bcs-dist-worker" }
 bcs-dist-worker-client = { path = "crates/external-clients/bcs-dist-worker-client" }
 bcs-app-dist-runtime = { path = "crates/application/bcs-app-dist-runtime" }

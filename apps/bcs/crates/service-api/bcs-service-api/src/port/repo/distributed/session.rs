@@ -19,6 +19,30 @@ pub struct TaskProgress {
     pub phase: TaskPhase,
     pub input: Payload,
     pub result_ref: Option<BlobRef>,
+    /// Copied from the create-once task snapshot, never from current host config.
+    pub output_limits: OutputLimits,
+    pub output_usage: OutputUsage,
+    pub publication: SnapshotProgress,
+    pub finalization: Option<TaskFinalization>,
+}
+
+/// Frozen by the AwaitingResult commit. Archive recovery keeps the same record
+/// and identity. Done alone cannot start the next task: terminal publication
+/// must first be confirmed, with its stable output event identity retained.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TaskFinalization {
+    pub operation_id: RequestId,
+    pub record: FinalTaskRecord,
+    pub terminal_event_id: Option<EventId>,
+    pub terminal_published: bool,
+}
+
+/// Private reducer state belongs to exactly one active task. None is valid
+/// between tasks and during independent finalization after discarding that state.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TaskRunnerState {
+    pub tid: Tid,
+    pub state: RunnerState,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -75,7 +99,7 @@ pub struct Checkpoint {
     pub commit_seq: CommitSeq,
     pub consumed: Option<InboxPos>,
     pub tasks: VecDeque<TaskProgress>,
-    pub runner_state: RunnerState,
+    pub runner_state: Option<TaskRunnerState>,
     pub dispatch_seq: BTreeMap<Did, DispatchSequence>,
     pub deadlines: Vec<Deadline>,
     pub view_drafts: BTreeMap<Tid, TaskContent>,

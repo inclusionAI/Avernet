@@ -21,6 +21,8 @@ identities!(
     GroupId,
     AgentId,
     NodeId,
+    ArtifactId,
+    DeadlineId,
     PoolId,
     RequestId,
     CommitId,

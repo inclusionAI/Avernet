@@ -36,7 +36,8 @@ create/refresh state. Absence is None; storage failure is an error. Moving this
 read does not move creation: `AdmitRequest.create_session` and `create_task`
 remain part of `InboxProducerPort::admit` and its durable input/activation
 guarantee. The API move prescribes neither a new storage layout nor extra runtime
-database calls. The total remains 23 service/port traits.
+database calls. Output projection is a separate pure core contract, not another
+storage interface.
 
 ## Admission, identity and queue replacement
 
@@ -109,6 +110,26 @@ facts. `CommitReceipt.proof` remains durable evidence for committed effects; it
 is not removed with the ownership placeholder strings.
 
 ## Checkpoint and effect replay
+
+Task lifecycle and the pending task queue belong to Worker, independently of the
+opaque Runner state. `Checkpoint.runner_state` is `Option<TaskRunnerState>` and
+binds state to exactly one active tid. The Worker may discard it during independent
+quota finalization and must init fresh state for the next task only after terminal
+publication. `TaskProgress` copies frozen output limits from the initial task and
+retains cumulative usage, snapshot publication counters/deadline and finalization.
+The AwaitingResult commit freezes `TaskFinalization.record` and operation identity;
+the Done commit stores the archive reference and terminal event identity. Done
+without confirmed `terminal_published` does not authorize starting the next task.
+The same immutable snapshot Ref is reused in draft, published content and archive.
+
+Show and Artifact events use stable artifact identities and explicit operations.
+Worker and TaskFeed inject the shared
+[`OutputProjectionCoreService`](../../../core/dist_projection.rs); event replay
+does not charge cumulative quota again. The pure implementation documents exact
+encoding, limits and recovery in
+[bcs-dist-projection](../../../../../../services/bcs-dist-projection/README.md).
+Whole-Decision validation must reject terminal SetStatus before any effects;
+Completed/Failed/Canceled/Rejected require the two-commit archive protocol.
 
 1. Claim the shard, enumerate **all** pending sessions (including future due
    times), acquire/seal each session and activate its input reader.

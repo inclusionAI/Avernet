@@ -12,7 +12,6 @@ use bcs_service_api::{
 };
 use bcs_store_api::document::DocumentStorePlugin;
 use bcs_test_support::store_model::Model;
-use serde_json::json;
 use std::{
     collections::{BTreeMap, VecDeque},
     sync::{
@@ -487,10 +486,7 @@ pub fn initial() -> Checkpoint {
         commit_seq: CommitSeq(0),
         consumed: None,
         tasks: Default::default(),
-        runner_state: RunnerState {
-            format_version: 1,
-            value: json!({}),
-        },
+        runner_state: None,
         dispatch_seq: Default::default(),
         deadlines: vec![],
         view_drafts: Default::default(),

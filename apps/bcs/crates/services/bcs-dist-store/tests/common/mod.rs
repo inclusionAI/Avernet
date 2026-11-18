@@ -304,6 +304,8 @@ pub fn task() -> TaskSnapshot {
             snapshot: Payload::Inline(Value::Null),
             result_ref: None,
         },
+        output_limits: PHASE_ONE_OUTPUT_LIMITS,
+        output_usage: OutputUsage::default(),
         snapshot_event_id: None,
         source_commit: CommitSeq(0),
         created_at: TimestampMillis(1_794_371_200_000),

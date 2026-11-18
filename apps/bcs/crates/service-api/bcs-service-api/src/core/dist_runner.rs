@@ -34,11 +34,13 @@ pub enum ActionIntent {
     Show {
         tid: Tid,
         node: NodeId,
+        artifact_id: ArtifactId,
         class: OutputClass,
-        content: Payload,
+        update: ArtifactUpdate,
     },
     SetStatus {
         tid: Tid,
+        /// Nonterminal only. Terminal states require FinishTask + durable archive.
         status: TaskStatus,
         interactions: Vec<Interaction>,
     },
