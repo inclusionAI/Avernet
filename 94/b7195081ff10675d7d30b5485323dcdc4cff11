@@ -1,0 +1,14 @@
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/pack-candidate-save.test.ts
+  h_bb3ca6fb13c5df 393-397,409
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "94b7195081ff10675d7d30b5485323dcdc4cff11",
+  "prompts": {},
+  "humans": {
+    "h_bb3ca6fb13c5df": {
+      "author": "fudapeng <dapeng.fdp@antgroup.com>"
+    }
+  }
+}
