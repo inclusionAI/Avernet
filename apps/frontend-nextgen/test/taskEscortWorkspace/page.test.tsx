@@ -160,10 +160,18 @@ it('navigation removes old demo but preserves host query/hash, and does not refe
 });
 
 it('dashboard keeps the actual legacy controller/scope, with sequential context navigation + workflow selection', async () => {
-  read.mockResolvedValue([...rows, { ...rows[0], id: 'real-b', title: 'B' }]);
+  let resolveWorkflows!: (workflows: typeof rows) => void;
+  const workflows = new Promise<typeof rows>((resolve) => {
+    resolveWorkflows = resolve;
+  });
+  read.mockReturnValue(workflows);
   render(<TaskEscortPage />);
   await waitFor(() => expect(read).toHaveBeenCalledTimes(1));
-  await act(async () => undefined);
+  // Wait for metadata, not just request dispatch, before capturing workflow-selection callbacks.
+  await act(async () => {
+    resolveWorkflows([...rows, { ...rows[0], id: 'real-b', title: 'B' }]);
+    await workflows;
+  });
   const props = jest.mocked(Dashboard).mock.calls.at(-1)![0] as unknown as {
     demo: { navigate: (page: 'workbench') => void; setWorkflowId: (id: string) => void };
     scope: unknown;
@@ -172,6 +180,10 @@ it('dashboard keeps the actual legacy controller/scope, with sequential context 
   act(() => {
     props.demo.navigate('workbench');
     props.demo.setWorkflowId('real-b');
+  });
+  expect(Object.fromEntries(new URLSearchParams(history.location.search))).toMatchObject({
+    view: 'issues',
+    workflowId: 'real-b',
   });
   expect(await screen.findByTestId('parity-leaf')).toHaveTextContent('issues:real-b:');
 });
