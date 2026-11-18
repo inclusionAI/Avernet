@@ -39,7 +39,7 @@ def _instance_rows(client: httpx.Client, params: dict[str, str]) -> list[dict]:
     result = _execute_local_sql(client, [{
         "sql": (
             "SELECT id, user_id, bot_id, owner_id, env, status, ext, "
-            "gmt_create, gmt_modified FROM ac_expert_chat_instance "
+            "gmt_create, gmt_modified, caller_token_expires_at FROM ac_expert_chat_instance "
             "WHERE bot_id=:bot_id AND owner_id=:owner_id AND user_id=:user_id "
             "AND env='dev' ORDER BY id"
         ),
