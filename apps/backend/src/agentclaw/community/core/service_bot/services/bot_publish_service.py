@@ -1523,7 +1523,7 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
                 f"aicoding type bot cannot be upgraded to service: bot_id={bot_id}"
             )
 
-        # TCAuth updates Agent Portal ownership metadata and AgentPass before
+        # The authorization service updates ownership metadata and passport data before
         # BCN, database, restart or publication side effects begin. A failed
         # remote sync therefore leaves the existing personal Bot untouched.
         self._sync_passport_bot_type(bot, "service")
