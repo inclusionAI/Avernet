@@ -1,0 +1,509 @@
+apps/frontend-nextgen/src/domain/taskEscortParity/overviewTypes.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-140
+apps/frontend-nextgen/src/hooks/useTaskEscortWorkspace.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-165
+apps/frontend-nextgen/src/pages/TaskEscort/parity/management/ManagementAutomation.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-230
+apps/frontend-nextgen/src/pages/TaskEscort/parity/evolution/IssueEvidence.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-128
+apps/frontend-nextgen/test/taskEscortWorkspace/routes.test.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-32
+apps/frontend-nextgen/test/taskEscortWorkspace/dashboardHook.test.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-155
+apps/frontend-nextgen/src/domain/taskEscortWorkspace/workspace.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-87
+apps/frontend-nextgen/src/pages/TaskEscort/parity/management/ManagementPage.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-49
+apps/frontend-nextgen/test/taskEscortParity/evolutionPage.test.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-226
+apps/frontend-nextgen/src/domain/taskEscortParity/types.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-24
+apps/frontend-nextgen/src/pages/TaskEscort/dashboard/DashboardControls.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-101
+apps/frontend-nextgen/src/domain/taskEscortParity/repairTypes.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-147
+apps/frontend-nextgen/src/pages/TaskEscort/parity/evolution/ReadPrimitives.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-228
+apps/frontend-nextgen/src/pages/TaskEscort/parity/overview/overview.css
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-90
+apps/frontend-nextgen/test/taskEscortWorkspace/service.test.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-713
+apps/frontend-nextgen/test/taskEscortParity/runDetailHook.test.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-132
+apps/frontend-nextgen/src/domain/taskEscortWorkspace/demoWorkflows.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-78
+apps/frontend-nextgen/test/shell/SidebarNavList.test.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-159
+apps/frontend-nextgen/test/taskEscortParity/overviewDomain.test.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-62
+apps/frontend-nextgen/src/shell/SidebarNavList.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 5,42,59,97
+apps/frontend-nextgen/test/taskEscortWorkspace/editorNavigation.test.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-152
+apps/frontend-nextgen/src/services/taskEscortParity/workspaceService.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-32
+apps/frontend-nextgen/src/services/taskEscortWorkspace/demoActions.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-107
+apps/frontend-nextgen/src/hooks/taskEscortWorkspace/useIssueDetail.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-54
+apps/frontend-nextgen/src/services/taskEscortWorkspace/experiencePresentation.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-25
+apps/frontend-nextgen/test/taskEscortWorkspace/page.test.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-238
+apps/frontend-nextgen/test/taskEscortWorkspace/navigation.test.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-29
+apps/frontend-nextgen/config/routes.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 52
+apps/frontend-nextgen/src/services/taskEscortParity/overviewValidation.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-37
+apps/frontend-nextgen/test/services/backendApi/harnessFlowDashboardController.test.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-38
+apps/frontend-nextgen/src/hooks/taskEscortParity/useTaskEscortWorkspaceContext.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-90
+apps/frontend-nextgen/src/hooks/taskEscortWorkspace/useTaskEscortWorkspaceEditor.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-83
+apps/frontend-nextgen/src/pages/TaskEscort/Issues.parts.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-62
+apps/frontend-nextgen/src/pages/TaskEscort/ui.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-174
+apps/frontend-nextgen/src/pages/TaskEscort/parity/overview/OverviewPage.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-183
+apps/frontend-nextgen/test/taskEscortWorkspace/dashboardService.test.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-112
+apps/frontend-nextgen/src/pages/TaskEscort/styles.css
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-573
+apps/frontend-nextgen/test/taskEscortParity/editorHook.test.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-66
+apps/frontend-nextgen/src/pages/TaskEscort/LiveRunDetail.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-76
+apps/frontend-nextgen/src/pages/TaskEscort/Workbench.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-141
+apps/frontend-nextgen/src/hooks/taskEscortWorkspace/useExperiencePresentation.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-28
+apps/frontend-nextgen/test/taskEscortParity/evolutionHttp.test.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-13
+apps/frontend-nextgen/test/taskEscortParity/workspaceService.test.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-50
+apps/frontend-nextgen/src/pages/TaskEscort/parity/evolution/RepairEffect.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-122
+apps/frontend-nextgen/src/services/taskEscortWorkspace/index.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-15
+apps/frontend-nextgen/src/pages/TaskEscort/parity/overview/RunDagView.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-139
+apps/frontend-nextgen/src/pages/TaskEscort/EditorDialogs.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-98
+apps/frontend-nextgen/src/pages/TaskEscort/Issues.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-167
+apps/frontend-nextgen/test/taskEscortParity/overviewService.test.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-148
+apps/frontend-nextgen/src/pages/TaskEscort/SettingsNotifications.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-54
+apps/frontend-nextgen/src/shell/navigation.tsx
+  s_371aeedb96aaa0::t_b9d3f4b9115b38 124
+  s_371aeedb96aaa0::t_98eb1a49730aaf 3,80-87,120-123
+apps/frontend-nextgen/src/pages/TaskEscort/Experiences.cards.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-56
+apps/frontend-nextgen/src/hooks/taskEscortWorkspace/useTaskEscortWorkspaceScope.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-49
+apps/frontend-nextgen/test/taskEscortParity/workspaceNavigation.test.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-61
+apps/frontend-nextgen/src/services/taskEscortParity/overviewEvidence.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-87
+apps/frontend-nextgen/src/hooks/taskEscortParity/useTaskEscortRepair.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-20
+apps/frontend-nextgen/test/taskEscortParity/editorService.test.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-170
+apps/frontend-nextgen/src/domain/taskEscortParity/editor.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-80
+apps/frontend-nextgen/src/shell/routeMeta.ts
+  s_371aeedb96aaa0::t_a36546d07d8d99 144
+  s_371aeedb96aaa0::t_98eb1a49730aaf 145-150
+apps/frontend-nextgen/src/services/taskEscortParity/overviewAnalytics.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-66
+apps/frontend-nextgen/src/pages/TaskEscort/viewRegistry.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-14
+apps/frontend-nextgen/test/taskEscortWorkspace/presentation.test.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-214
+apps/frontend-nextgen/test/taskEscortParity/managementDomain.test.ts
+  s_371aeedb96aaa0::t_150c1e351012b9 52-58
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-51,59-117
+apps/frontend-nextgen/src/pages/TaskEscort/parity/management/ManagementHistory.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-149
+apps/frontend-nextgen/test/taskEscortWorkspace/hook.test.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-247
+apps/frontend-nextgen/specs/2026-11-18-task-escort-readonly/ownership-manifest.json
+  s_371aeedb96aaa0::t_247567ae7fd8d0 1-268
+apps/frontend-nextgen/src/pages/TaskEscort/types.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-2
+apps/frontend-nextgen/src/services/taskEscortParity/managementConfigMapper.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-97
+apps/frontend-nextgen/src/pages/TaskEscort/WorkspaceHeader.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-65
+apps/frontend-nextgen/test/shell/navigationPlacement.test.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 23-85
+apps/frontend-nextgen/test/taskEscortParity/repairVerification.test.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-54
+apps/frontend-nextgen/src/domain/taskEscortWorkspace/demoMetrics.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-50
+apps/frontend-nextgen/src/pages/TaskEscort/IssueDetail.parts.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-104
+apps/frontend-nextgen/src/pages/TaskEscort/dashboard/DashboardTrendDetails.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-58
+apps/frontend-nextgen/src/pages/TaskEscort/Navigation.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-100
+apps/frontend-nextgen/README.md
+  s_371aeedb96aaa0::t_247567ae7fd8d0 183-192
+apps/frontend-nextgen/src/hooks/taskEscortWorkspace/useIssuePresentation.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-24
+apps/frontend-nextgen/src/pages/TaskEscort/Dashboard.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-141
+apps/frontend-nextgen/src/pages/TaskEscort/SettingsManagementPanels.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-100
+apps/frontend-nextgen/src/domain/taskEscortWorkspace/dashboard.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-170
+apps/frontend-nextgen/src/domain/taskEscortWorkspace/demoIssues.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-108
+apps/frontend-nextgen/src/pages/TaskEscort/parity/overview/OverviewTrends.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-126
+apps/frontend-nextgen/test/taskEscortWorkspace/dashboardDomain.test.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-122
+apps/frontend-nextgen/src/domain/taskEscortParity/evolutionTypes.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-153
+apps/frontend-nextgen/src/pages/TaskEscort/Settings.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-95
+apps/frontend-nextgen/src/pages/TaskEscort/dashboard/DashboardCharts.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-128
+apps/frontend-nextgen/src/hooks/taskEscortWorkspace/useTaskEscortWorkspaceEditorContext.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-30
+apps/frontend-nextgen/src/services/taskEscortParity/managementError.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-25
+apps/frontend-nextgen/src/hooks/taskEscortParity/useTaskEscortManagement.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-49
+apps/frontend-nextgen/src/pages/TaskEscort/parity/WorkspaceWorkflowPicker.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-95
+apps/frontend-nextgen/src/pages/TaskEscort/DashboardWorkflows.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-76
+apps/frontend-nextgen/src/services/taskEscortWorkspace/dashboardMapper.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-170
+apps/frontend-nextgen/test/taskEscortParity/editorPage.test.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-233
+apps/frontend-nextgen/src/pages/TaskEscort/RunDetail.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-133
+apps/frontend-nextgen/src/pages/TaskEscort/parity/overview/NodeExecutionList.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-173
+apps/frontend-nextgen/test/taskEscortParity/evolutionIsolation.test.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-91
+apps/frontend-nextgen/src/services/taskEscortParity/managementAutomationMapper.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-107
+apps/frontend-nextgen/test/taskEscortWorkspace/dashboardAccessibility.test.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-60
+apps/frontend-nextgen/src/pages/TaskEscort/parity/management/ManagementAutomationHistory.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-169
+apps/frontend-nextgen/test/taskEscortWorkspace/dashboardEntry.test.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-102
+apps/frontend-nextgen/src/pages/TaskEscort/IssueDetail.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-203
+apps/frontend-nextgen/src/services/taskEscortParity/managementHistoryMapper.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-72
+apps/frontend-nextgen/src/services/taskEscortParity/editorService.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-51
+apps/frontend-nextgen/src/hooks/taskEscortWorkspace/useDetailFocus.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-25
+apps/frontend-nextgen/src/pages/TaskEscort/parity/overview/RunLogsPanel.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-84
+apps/frontend-nextgen/src/services/taskEscortWorkspace/editorNavigation.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-22
+apps/frontend-nextgen/src/services/taskEscortWorkspace/editorSession.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-106
+apps/frontend-nextgen/src/services/taskEscortWorkspace/service.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-98
+apps/frontend-nextgen/src/hooks/taskEscortWorkspace/useTaskEscortLiveRunDetail.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-38
+apps/frontend-nextgen/src/hooks/taskEscortParity/useTaskEscortRunDetail.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-37
+apps/frontend-nextgen/src/pages/TaskEscort/parity/evolution/RepairChanges.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-139
+apps/frontend-nextgen/src/pages/TaskEscort/parity/evolution/RepairTaskList.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-77
+apps/frontend-nextgen/test/taskEscortParity/workspacePicker.test.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-32
+apps/frontend-nextgen/src/domain/taskEscortWorkspace/demoRuns.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-37
+apps/frontend-nextgen/src/services/taskEscortParity/evolutionService.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-162
+apps/frontend-nextgen/test/taskEscortParity/evolutionService.test.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-144
+apps/frontend-nextgen/src/services/taskEscortParity/evolutionMapper.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-139
+apps/frontend-nextgen/test/taskEscortParity/managementService.test.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-337
+apps/frontend-nextgen/src/hooks/taskEscortWorkspace/useWorkbenchPresentation.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-25
+apps/frontend-nextgen/src/pages/TaskEscort/parity/overview/NodeAnalysisPanel.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-148
+apps/frontend-nextgen/src/services/taskEscortParity/overviewService.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-49
+apps/frontend-nextgen/src/pages/TaskEscort/parity/overview/RunArchivePanel.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-94
+apps/frontend-nextgen/src/pages/TaskEscort/DashboardQuality.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-152
+apps/frontend-nextgen/src/pages/TaskEscort/RunDetail.steps.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-118
+apps/frontend-nextgen/test/taskEscortParity/evolutionTabs.test.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-43
+apps/frontend-nextgen/test/taskEscortWorkspace/dashboardView.test.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-192
+apps/frontend-nextgen/test/taskEscortWorkspace/editorService.test.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-132
+apps/frontend-nextgen/src/domain/taskEscortWorkspace/immutable.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-8
+apps/frontend-nextgen/src/services/taskEscortWorkspace/runPresentation.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-80
+apps/frontend-nextgen/test/shell/navigation.test.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 2,4,23-60,69,135,139-146
+apps/frontend-nextgen/src/hooks/taskEscortWorkspace/useRunDetail.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-20
+apps/frontend-nextgen/src/pages/TaskEscort/EditorToolbar.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-113
+apps/frontend-nextgen/src/services/backendApi/harnessFlow/dashboardController.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-116
+apps/frontend-nextgen/src/pages/TaskEscort/parity/editor/WorkflowEditorPage.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-164
+apps/frontend-nextgen/src/pages/TaskEscort/parity/management/ManagementPermissions.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-78
+apps/frontend-nextgen/src/services/backendApi/harnessFlow/editorController.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-65
+apps/frontend-nextgen/test/taskEscortWorkspace/editorBrowserHistory.test.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-75
+apps/frontend-nextgen/src/services/taskEscortWorkspace/dashboardService.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-30
+apps/frontend-nextgen/src/pages/TaskEscort/parity/editor/EditorPrimitives.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-100
+apps/frontend-nextgen/test/taskEscortParity/workspaceLegacyReadiness.test.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-38
+apps/frontend-nextgen/src/domain/taskEscortWorkspace/index.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-2
+apps/frontend-nextgen/src/pages/TaskEscort/dashboard/DashboardSummary.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-222
+apps/frontend-nextgen/test/taskEscortParity/experiencePage.test.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-63
+apps/frontend-nextgen/src/services/backendApi/harnessFlow/repairController.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-144
+apps/frontend-nextgen/test/taskEscortParity/repairService.test.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-68
+apps/frontend-nextgen/src/hooks/taskEscortWorkspace/useTaskEscortDashboard.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-98
+apps/frontend-nextgen/src/pages/TaskEscort/index.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-47
+apps/frontend-nextgen/src/domain/taskEscortWorkspace/dashboardTypes.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-149
+apps/frontend-nextgen/src/pages/TaskEscort/parity/editor/EditorHistory.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-184
+apps/frontend-nextgen/src/services/taskEscortParity/managementService.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-78
+apps/frontend-nextgen/specs/2026-11-18-task-escort-readonly/changed-files.txt
+  s_371aeedb96aaa0::t_247567ae7fd8d0 1-243
+apps/frontend-nextgen/src/services/taskEscortParity/repairService.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-114
+apps/frontend-nextgen/src/pages/TaskEscort/parity/management/ManagementPrimitives.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-63
+apps/frontend-nextgen/src/stores/taskEscortWorkspaceStore.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-31
+apps/frontend-nextgen/src/domain/taskEscortParity/evolution.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-97
+apps/frontend-nextgen/src/pages/TaskEscort/parity/overview/RunDetail.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-125
+apps/frontend-nextgen/src/hooks/taskEscortWorkspace/useTaskEscortLiveReadView.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-23
+apps/frontend-nextgen/test/taskEscortWorkspace/dashboardIntegration.test.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-172
+apps/frontend-nextgen/src/pages/TaskEscort/EditorGraph.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-77
+apps/frontend-nextgen/test/taskEscortWorkspace/views.test.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-375
+apps/frontend-nextgen/src/pages/TaskEscort/parity/editor/EditorScripts.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-69
+apps/frontend-nextgen/test/taskEscortWorkspace/serviceApi.test.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-80
+apps/frontend-nextgen/src/hooks/taskEscortParity/useTaskEscortEvolution.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-24
+apps/frontend-nextgen/src/pages/TaskEscort/parity/evolution/IssuePage.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-266
+apps/frontend-nextgen/src/pages/TaskEscort/Runs.metrics.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-62
+apps/frontend-nextgen/test/taskEscortParity/overviewView.test.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-225
+apps/frontend-nextgen/src/pages/TaskEscort/EditorWorkspace.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-140
+apps/frontend-nextgen/test/taskEscortWorkspace/domain.test.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-45
+apps/frontend-nextgen/src/services/taskEscortWorkspace/types.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-74
+apps/frontend-nextgen/src/pages/TaskEscort/dashboard/DashboardWorkflows.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-270
+apps/frontend-nextgen/src/pages/TaskEscort/LiveReadView.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-171
+apps/frontend-nextgen/src/services/taskEscortParity/managementValidation.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-82
+apps/frontend-nextgen/specs/2026-11-18-task-escort-readonly/spec.md
+  s_371aeedb96aaa0::t_247567ae7fd8d0 1-2,4-99
+  s_371aeedb96aaa0::t_155dc5a987dc4d 3,116-119,121-130
+  s_371aeedb96aaa0::t_dffb4b5ad5f2bd 100-115,120
+  s_371aeedb96aaa0::t_ed4cec30824d20 131-139
+apps/frontend-nextgen/src/pages/TaskEscort/dashboard/DashboardQualitySvg.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-118
+apps/frontend-nextgen/src/services/backendApi/harnessFlow/overviewController.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-119
+apps/frontend-nextgen/src/pages/TaskEscort/parity/evolution/RepairTrialsPanel.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-56
+apps/frontend-nextgen/src/pages/TaskEscort/parity/editor/EditorGraph.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-138
+apps/frontend-nextgen/src/services/backendApi/harnessFlow/managementController.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-36
+apps/frontend-nextgen/src/services/taskEscortWorkspace/mapper.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-127
+apps/frontend-nextgen/src/services/taskEscortParity/overviewMapper.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-90
+apps/frontend-nextgen/src/domain/taskEscortParity/managementTypes.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-160
+apps/frontend-nextgen/test/shell/routeMeta.test.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 18,24-36,96,164
+apps/frontend-nextgen/src/pages/TaskEscort/parity/overview/OverviewShared.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-169
+apps/frontend-nextgen/src/hooks/taskEscortParity/useTaskEscortRead.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-51
+apps/frontend-nextgen/src/pages/TaskEscort/parity/overview/OverviewMetrics.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-143
+apps/frontend-nextgen/src/pages/TaskEscort/parity/evolution/RepairTargets.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-65
+apps/frontend-nextgen/src/domain/taskEscortParity/management.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-84
+apps/frontend-nextgen/src/domain/taskEscortParity/overview.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-136
+apps/frontend-nextgen/src/domain/taskEscortParity/editorTypes.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-51
+apps/frontend-nextgen/test/taskEscortParity/managementPage.test.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-357
+apps/frontend-nextgen/test/taskEscortParity/read.test.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-101
+apps/frontend-nextgen/test/taskEscortParity/workspaceContext.test.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-145
+apps/frontend-nextgen/src/pages/TaskEscort/parity/management/ManagementJobRecord.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-59
+apps/frontend-nextgen/src/services/taskEscortWorkspace/issuePresentation.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-89
+apps/frontend-nextgen/test/taskEscortWorkspace/editorContext.test.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-43
+apps/frontend-nextgen/src/hooks/taskEscortWorkspace/useTaskEscortDashboardResource.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-48
+apps/frontend-nextgen/src/pages/TaskEscort/DashboardHealth.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-109
+apps/frontend-nextgen/src/services/taskEscortWorkspace/livePresentation.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-44
+apps/frontend-nextgen/src/services/taskEscortWorkspace/navigation.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-15
+apps/frontend-nextgen/src/services/taskEscortWorkspace/api.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-9
+apps/frontend-nextgen/src/services/backendApi/harnessFlow/workspaceController.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-25
+apps/frontend-nextgen/src/pages/TaskEscort/parity/evolution/IssueDrawer.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-102
+apps/frontend-nextgen/src/services/taskEscortParity/workspaceNavigation.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-76
+apps/frontend-nextgen/test/taskEscortParity/repairWorkspace.test.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-106
+apps/frontend-nextgen/test/taskEscortWorkspace/editorViews.test.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-358
+apps/frontend-nextgen/src/pages/TaskEscort/parity/evolution/RepairTaskWorkspace.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-152
+apps/frontend-nextgen/src/services/taskEscortWorkspace/workbenchPresentation.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-39
+apps/frontend-nextgen/src/pages/TaskEscort/parity/evolution/ExperiencePage.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-109
+apps/frontend-nextgen/src/hooks/taskEscortParity/useTaskEscortEditor.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-67
+apps/frontend-nextgen/test/taskEscortWorkspace/livePresentation.test.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-44
+apps/frontend-nextgen/src/pages/TaskEscort/DashboardGuard.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-142
+apps/frontend-nextgen/src/pages/TaskEscort/Experiences.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-175
+apps/frontend-nextgen/test/taskEscortWorkspace/dashboardMalformed.test.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-73
+apps/frontend-nextgen/src/hooks/taskEscortWorkspace/useRunPresentation.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-27
+apps/frontend-nextgen/src/hooks/taskEscortParity/useTaskEscortOverview.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-47
+apps/frontend-nextgen/src/domain/taskEscortWorkspace/demoExperiences.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-56
+apps/frontend-nextgen/src/domain/taskEscortWorkspace/fixtures.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-20
+apps/frontend-nextgen/test/taskEscortWorkspace/liveViews.test.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-102
+apps/frontend-nextgen/src/pages/TaskEscort/parity/evolution/IssueCauses.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-105
+apps/frontend-nextgen/src/services/backendApi/harnessFlow/evolutionController.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-201
+apps/frontend-nextgen/src/pages/TaskEscort/Editor.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-46
+apps/frontend-nextgen/src/services/taskEscortParity/editorMapper.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-141
+apps/frontend-nextgen/src/pages/TaskEscort/parity/WorkspaceViews.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-56
+apps/frontend-nextgen/src/pages/TaskEscort/Workbench.cards.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-137
+apps/frontend-nextgen/src/hooks/taskEscortWorkspace/useTaskEscortWorkspaceEditorNavigation.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-83
+apps/frontend-nextgen/src/pages/TaskEscort/formatting.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-11
+apps/frontend-nextgen/src/pages/TaskEscort/parity/overview/OverviewRuns.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-195
+apps/frontend-nextgen/src/pages/TaskEscort/parity/evolution/SuggestionHistory.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-61
+apps/frontend-nextgen/src/pages/TaskEscort/parity/editor/EditorInspector.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-85
+apps/frontend-nextgen/test/taskEscortParity/managementHook.test.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-90
+apps/frontend-nextgen/test/taskEscortWorkspace/scope.test.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-34
+apps/frontend-nextgen/test/taskEscortParity/managementErrorNotify.test.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-169
+apps/frontend-nextgen/src/pages/TaskEscort/Runs.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-185
+apps/frontend-nextgen/src/pages/TaskEscort/parity/management/ManagementNotifications.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-180
+apps/frontend-nextgen/src/pages/TaskEscort/parity/evolution/EvolutionAccess.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-20
+apps/frontend-nextgen/src/pages/TaskEscort/parity/management/ManagementSettings.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-30
+apps/frontend-nextgen/src/services/taskEscortParity/repairMapper.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-122
+apps/frontend-nextgen/src/pages/TaskEscort/parity/evolution/RepairSuggestions.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-169
+apps/frontend-nextgen/src/pages/TaskEscort/parity/evolution/HistoricalIssues.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-81
+apps/frontend-nextgen/src/services/taskEscortWorkspace/editorModel.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-162
+apps/frontend-nextgen/test/taskEscortWorkspace/store.test.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-58
+apps/frontend-nextgen/src/domain/taskEscortWorkspace/types.ts
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-169
+apps/frontend-nextgen/src/pages/TaskEscort/SettingsAutomation.tsx
+  s_371aeedb96aaa0::t_98eb1a49730aaf 1-86
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "411449da3e6aa575a2b6da613a980051f3460ab1",
+  "prompts": {},
+  "sessions": {
+    "s_371aeedb96aaa0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e72c-2e74-7c03-93c8-65c0f1e71fbc",
+        "model": "GPT-6.1-SOL"
+      },
+      "human_author": null
+    }
+  }
+}
