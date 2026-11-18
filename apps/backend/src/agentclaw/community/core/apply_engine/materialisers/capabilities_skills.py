@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 
 from agentclaw.community.core.apply_engine.desired_state import (
+    BotSyncedLocalSkill,
     CenterSkillByCode,
     CenterSkillRef,
     LocalSkillPackage,
@@ -55,6 +56,34 @@ async def resolve_skill(materialiser, ctx, snapshot, entry):
             str(existing["id"]) if existing else None,
             frozenset(existing["mcp_codes"]) if existing else frozenset(),
             package=package.canonical_zip,
+            note=entry.note,
+        )
+    if isinstance(source, BotSyncedLocalSkill):
+        # file-sync has already written the package into the dst
+        # ``skills-local`` directory; upload_local_skill is not the road here.
+        # The upload port carries ``ensure_dst_local_skill_asset`` for this
+        # case: it reverse-looks-up the source bot's ``ac_skill`` row for
+        # name/description, recomputes the dst git_path through the same
+        # factory the upload road takes, and registers the dst ac_skill row
+        # without writing a package (file-sync already owns the bytes).
+        result = await materialiser._uploads.ensure_dst_local_skill_asset(
+            bot_id=ctx.bot_id,
+            owner_id=ctx.owner_id,
+            actor_id=ctx.actor_id,
+            source_bot_id=source.source_bot_id,
+            source_owner_id=source.source_owner_id,
+            name=entry.name,
+        )
+        skill_row = result["skill"]
+        # No package bytes flow through this road — the capabilities writer
+        # takes ``package is None → prepared = skill_id`` and runs the
+        # activation claim against the freshly-registered id.
+        return Skill(
+            entry.name,
+            asset_key(skill_row),
+            str(skill_row["id"]),
+            frozenset(),
+            package=None,
             note=entry.note,
         )
     if isinstance(source, CenterSkillRef):
