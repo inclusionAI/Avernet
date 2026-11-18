@@ -268,6 +268,37 @@ describe('conversationStore', () => {
     expect(useConversationStore.getState().friendBotSessionsByBotId['friend-bot:1'].page).toBe(2);
   });
 
+  it('removeFriendBotState clears the Bot local state without touching others or selection', () => {
+    const store = useConversationStore.getState();
+    store.setExpandedBot('friend-bot:1', true);
+    store.setFriendBotScope('friend-bot:1', 'favorite');
+    store.setSessionKeyFilter('friend-bot:1', 'sk-1');
+    store.setFriendBotSessions('friend-bot:1', sessionList({ page: 2, total: 12 }));
+    // 相邻好友 Bot 与其本地状态保持不动。
+    store.setExpandedBot('friend-bot:2', true);
+    store.setFriendBotSessions('friend-bot:2', sessionList());
+    store.selectConversation({
+      botId: 'friend-bot:2',
+      section: 'friend',
+      origin: 'mine',
+      scope: 'all',
+      friendUserId: null,
+      sessionId: 's2',
+    });
+
+    useConversationStore.getState().removeFriendBotState('friend-bot:1');
+
+    const s = useConversationStore.getState();
+    expect(s.friendBotSessionsByBotId['friend-bot:1']).toBeUndefined();
+    expect(s.scopeByFriendBotId['friend-bot:1']).toBeUndefined();
+    expect(s.sessionKeyByBotId['friend-bot:1']).toBeUndefined();
+    expect(s.expandedBotIds['friend-bot:1']).toBeUndefined();
+    expect(s.friendBotSessionsByBotId['friend-bot:2']).toBeDefined();
+    expect(s.expandedBotIds['friend-bot:2']).toBe(true);
+    // 主会话选中不在清理切片内处理(移除动线按当前选中判定后单独清空)。
+    expect(s.selectedBotId).toBe('friend-bot:2');
+  });
+
   it('selectConversation records the full main-stage selection', () => {
     const store = useConversationStore.getState();
     store.selectConversation({

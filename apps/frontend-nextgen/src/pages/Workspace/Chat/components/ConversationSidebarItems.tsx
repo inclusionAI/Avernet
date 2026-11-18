@@ -178,6 +178,7 @@ export function FriendItem({ view, props }: { view: ConversationBotView; props: 
       onLoadMore={() => void sessions.loadMoreSessions(botId, 'friend', scope)}
       onToggleFavorite={(sessionId) => void sessions.favorites.toggleFavorite(botId, 'friend', sessionId)}
       isFavoritePending={(sessionId) => sessions.favorites.isPending(botId, 'friend', sessionId)}
+      onRemoveFriend={props.onRemoveFriend}
       replyingSessionId={replyingSessionId}
     />
   );

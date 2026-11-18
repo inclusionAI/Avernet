@@ -22,6 +22,8 @@ export interface BotRowLayoutInputs {
   searchMarked: boolean;
   /** 「Bot 管理」菜单入口条件成立（回调存在且 bot.spaceId 有值）。 */
   hasManagement: boolean;
+  /** 好友 Bot「移除好友」入口条件成立（好友分组 + 移除回调存在；不依赖 Bot 可用性）。 */
+  canRemoveFriend: boolean;
 }
 
 export interface BotRowLayout {
@@ -31,6 +33,8 @@ export interface BotRowLayout {
   searchVisible: boolean;
   showFilter: boolean;
   showMenu: boolean;
+  /** 好友 Bot「移除好友」入口可见(移除不依赖 Bot 服务可用性,含不可用 Bot)。 */
+  showRemoveFriend: boolean;
   /** 操作区渲染门控：可用行走既有会话入口；不可用 Bot 仅保留常驻「更多操作」（运维直达）。 */
   stripVisible: boolean;
   /** 操作组 hover 让位的三档右侧预留（86/112/138px）。 */
@@ -54,6 +58,7 @@ export function resolveBotRowLayout(inputs: BotRowLayoutInputs): BotRowLayout {
     supportsArchives,
     searchMarked,
     hasManagement,
+    canRemoveFriend,
   } = inputs;
   // 筛选/搜索的激活与可见:归属 others 或非默认范围点亮筛选;归属+范围筛选对管理 Bot 开放,
   // 好友 Bot 仅在有收藏能力时暴露「会话」范围。Coding Bot 归档范围复用 Bot 行 sessionID
@@ -63,11 +68,19 @@ export function resolveBotRowLayout(inputs: BotRowLayoutInputs): BotRowLayout {
   const searchVisible = scope === 'all' || (scope === 'archived' && supportsArchives);
   const showFilter = isManaged || canFavorite;
   const showMenu = hasManagement && !isOthers;
-  const stripVisible = (hasSessionControls && !unavailable) || (unavailable && showMenu);
+  const showRemoveFriend = canRemoveFriend && !isOthers;
+  // 操作区渲染门控:可用行走既有会话入口;不可用 Bot 仅保留常驻可达入口(「Bot 管理」
+  // 运维直达 / 好友行「移除好友」——移除只作用于好友关系维度,不依赖 Bot 服务可用性)。
+  const stripVisible = (hasSessionControls && !unavailable) || (unavailable && showMenu) || showRemoveFriend;
   // 展开态的收起入口并入右侧操作组。发布分支已将渐隐区收紧 10px：
   // 3/4/5 个按钮分别预留 86/112/138px（按钮 24px + 间隙 2px）。
   const actionButtonCount =
-    (expanded ? 1 : 0) + (!isOthers ? 1 : 0) + (searchVisible ? 1 : 0) + (showFilter ? 1 : 0) + (showMenu ? 1 : 0);
+    (expanded ? 1 : 0) +
+    (!isOthers ? 1 : 0) +
+    (searchVisible ? 1 : 0) +
+    (showFilter ? 1 : 0) +
+    (showMenu ? 1 : 0) +
+    (showRemoveFriend ? 1 : 0);
   // hover 让位(2026-11-04 显隐重构):操作组仅 hover/键盘/菜单打开/触屏显示(触屏常显
   // → 让位同步常显),展开态不再整组钉住;激活 icon 让位见 pinnedMarkPadding。
   // 展开+菜单达 5 按钮时 hover 让位需 138px(原 pinned 独有档位下沉到 hover 变体)。
@@ -89,6 +102,7 @@ export function resolveBotRowLayout(inputs: BotRowLayoutInputs): BotRowLayout {
     searchVisible,
     showFilter,
     showMenu,
+    showRemoveFriend,
     stripVisible,
     hoverActionsPadding,
     pinnedMarkCount,

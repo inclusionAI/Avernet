@@ -26,6 +26,7 @@ function renderBotItem(
     botSelected?: boolean;
     createSessionPending?: boolean;
     onOpenBotManagement?: (bot: ChatBotView) => void;
+    onRemoveFriend?: (bot: ChatBotView) => void;
   } = {},
 ) {
   const onToggle = overrides.onToggle ?? jest.fn();
@@ -51,6 +52,7 @@ function renderBotItem(
       onToggleFavorite={noop}
       isFavoritePending={() => false}
       onOpenBotManagement={overrides.onOpenBotManagement}
+      onRemoveFriend={overrides.onRemoveFriend}
     />,
   );
   return { ...utils, onToggle };
@@ -719,5 +721,39 @@ describe('ConversationBotItem 非运行中好友服务 Bot', () => {
     fireEvent.click(screen.getByRole('button', { name: '测试 Bot' }));
     expect(onToggle).toHaveBeenCalledTimes(1);
     expect(document.querySelector('div[aria-disabled="true"]')).toBeNull();
+  });
+});
+
+describe('ConversationBotItem「移除好友」入口(移除好友 PRD R6/R17)', () => {
+  it('好友分组提供「移除好友」入口,点击透传该 Bot', () => {
+    const onRemoveFriend = jest.fn();
+    renderBotItem({ section: 'friend', onRemoveFriend });
+    fireEvent.click(screen.getByRole('button', { name: '移除好友' }));
+    expect(onRemoveFriend).toHaveBeenCalledTimes(1);
+    expect(onRemoveFriend).toHaveBeenCalledWith(expect.objectContaining({ botId: 'bot-1' }));
+  });
+
+  it('未提供移除回调时好友分组不渲染入口(装配层缺省)', () => {
+    renderBotItem({ section: 'friend' });
+    expect(screen.queryByRole('button', { name: '移除好友' })).not.toBeInTheDocument();
+  });
+
+  it.each(['managed', 'team'] as const)('%s 分组即使提供回调也不渲染移除入口(R6 权限归属)', (section) => {
+    renderBotItem({ section, onRemoveFriend: jest.fn() });
+    expect(screen.queryByRole('button', { name: '移除好友' })).not.toBeInTheDocument();
+  });
+
+  it('不可用好友 Bot 仍提供移除入口且可执行(R17 移除不依赖 Bot 服务可用性)', () => {
+    const onRemoveFriend = jest.fn();
+    renderBotItem({ section: 'friend', bot: { status: 'FAILED' }, onRemoveFriend });
+    expect(screen.getByRole('button', { name: '移除好友' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '移除好友' }));
+    expect(onRemoveFriend).toHaveBeenCalledTimes(1);
+  });
+
+  it('不可用好友 Bot 的移除入口常驻显示(与「Bot 管理」运维直达同款 opacity-100)', () => {
+    renderBotItem({ section: 'friend', bot: { status: 'FAILED' }, onRemoveFriend: jest.fn() });
+    const removeButton = screen.getByRole('button', { name: '移除好友' });
+    expect(removeButton.className).toContain('opacity-100');
   });
 });

@@ -61,9 +61,10 @@ export interface ListFriendConnectionsParams {
   page_size?: number;
 }
 
-export interface DeleteFriendConnectionBody {
-  from_actor: FriendConnectionActor;
-  to_actor: FriendConnectionActor;
+/** 移除好友连接的 query 参数（契约 friendships.yaml delete_friend_connection：主体为登录用户，目标由 query 指定）。 */
+export interface DeleteFriendConnectionParams {
+  target_actor_type: FriendConnectionActorType;
+  target_actor_id: string;
 }
 
 export const COLLABORATION_FRIEND_CONNECTION_ENDPOINTS = {
@@ -122,10 +123,10 @@ export function listFriendConnections<T = FriendConnectionDto>(
   });
 }
 
-export function deleteFriendConnection(body: DeleteFriendConnectionBody, signal?: AbortSignal) {
+export function deleteFriendConnection(params: DeleteFriendConnectionParams, signal?: AbortSignal) {
   return backendRequest<BackendApiEnvelope<void>>(COLLABORATION_FRIEND_CONNECTION_ENDPOINTS.connections, {
     method: 'DELETE',
-    data: body,
+    params: { ...params },
     injectUserId: false,
     signal,
   });
