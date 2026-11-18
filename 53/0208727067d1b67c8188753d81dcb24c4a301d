@@ -1,0 +1,19 @@
+apps/bcs-internal/crates/bootstrap/bcs-internal/src/main.rs
+  s_19c0e6699afcd7::t_47b11ae08b198c 313,317,323
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "530208727067d1b67c8188753d81dcb24c4a301d",
+  "prompts": {},
+  "sessions": {
+    "s_19c0e6699afcd7": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d3be-3a1a-7b13-9090-e1745ea29304",
+        "model": "GLM-5.3"
+      },
+      "human_author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}

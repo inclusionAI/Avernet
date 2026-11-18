@@ -1,0 +1,56 @@
+apps/evolverun/clawweb/public/modules/workflow/web/components/ActiveHistoryMismatchReview.tsx
+  s_2c75488fa42532::t_068e4f20a0876a 1-105
+apps/evolverun/clawweb/public/modules/workflow/web/components/EditorDeployConfirmDialog.tsx
+  s_2c75488fa42532::t_057638d501a994 1-2,4-7,13-14,16,18-42
+  s_2c75488fa42532::t_6e663961fccf5b 3,8-12,15,17
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/ActiveHistoryMismatchReview.test.tsx
+  s_2c75488fa42532::t_7b1861a9fb9ed5 24
+  s_2c75488fa42532::t_173187350728c6 1-18,20-21,23,25-37
+  s_2c75488fa42532::t_3143da84e1cdb1 22
+  s_2c75488fa42532::t_1ab98c475f6d6c 19
+apps/evolverun/clawweb/public/modules/workflow/web/pages/Editor.tsx
+  s_2c75488fa42532::t_302956e487812a 630,632
+  s_2c75488fa42532::t_7415fc5a9d44a9 5,85,597
+  s_2c75488fa42532::t_175300e25902b8 6
+  s_2c75488fa42532::t_b0780eaf11a8b4 247,249-250
+  s_2c75488fa42532::t_6e663961fccf5b 984-994
+  s_2c75488fa42532::t_859efcef0e98e6 84,246,631
+apps/evolverun/clawweb/public/modules/workflow/server/services/pack-script-snapshot.ts
+  s_2c75488fa42532::t_835cf22498e048 17-18
+apps/evolverun/clawweb/public/modules/workflow/web/components/useActiveHistoryMismatchReview.ts
+  s_2c75488fa42532::t_ad240773536493 1-36
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/pack-version-active-baseline.test.ts
+  s_2c75488fa42532::t_b0780eaf11a8b4 86-87
+  s_2c75488fa42532::t_ddbde5d20fe4f3 81,83-84,89,99
+apps/evolverun/clawweb/public/modules/workflow/docs/pack-version-read.md
+  s_2c75488fa42532::t_b0780eaf11a8b4 15-21
+apps/evolverun/clawweb/public/modules/workflow/web/components/WorkflowBaselineComparison.tsx
+  s_2c75488fa42532::t_1349f2fe6cb41b 33,38,148,150,153-154
+  s_2c75488fa42532::t_fe4ec49c347194 37,39-43,45-54,119
+  s_2c75488fa42532::t_b0780eaf11a8b4 44
+apps/evolverun/clawweb/public/modules/workflow/web/editor/packVersionSession.ts
+  s_2c75488fa42532::t_a7aa4a1524f0c4 243-245
+  s_2c75488fa42532::t_da06d6127ddc49 6,242
+apps/evolverun/clawweb/public/modules/workflow/server/routes/pack-version.ts
+  s_2c75488fa42532::t_a679dcabc83c11 73,78-79
+apps/evolverun/clawweb/public/modules/workflow/server/services/pack-version-remote.ts
+  s_2c75488fa42532::t_835cf22498e048 43,46-47,49,51,82,98-99,101
+  s_2c75488fa42532::t_b67081a117cb64 38,48
+  s_2c75488fa42532::t_a8b882fc825c51 58
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4bcdc26d45a68ad201f75433673f3a5995db1265",
+  "prompts": {},
+  "sessions": {
+    "s_2c75488fa42532": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c09d-d70a-70e3-989e-53272841b78e",
+        "model": "GLM-5.3"
+      },
+      "human_author": "fudapeng <fudp@example.com>"
+    }
+  }
+}

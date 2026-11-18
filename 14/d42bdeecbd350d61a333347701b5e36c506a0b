@@ -1,0 +1,33 @@
+apps/bcs-internal/crates/plugins/bcs-tbase-store/README.md
+  s_a9c87caa3de52e::t_a9245d76424f11 165-170
+  s_a9c87caa3de52e::t_31331eb42dcca0 179-183,187-190
+apps/bcs-internal/specs/2026-11-16-tbase-store/progress.md
+  s_a9c87caa3de52e::t_cffe102acaa13b 6
+  s_a9c87caa3de52e::t_31331eb42dcca0 5,22
+apps/bcs-internal/specs/2026-11-16-tbase-store/verification.md
+  s_a9c87caa3de52e::t_cffe102acaa13b 134-154
+  s_a9c87caa3de52e::t_a9245d76424f11 7
+  s_a9c87caa3de52e::t_31331eb42dcca0 6,127-133
+apps/bcs-internal/crates/plugins/bcs-tbase-store/Cargo.toml
+  s_a9c87caa3de52e::t_a9245d76424f11 26
+apps/bcs-internal/specs/2026-11-16-tbase-store/plan.md
+  s_a9c87caa3de52e::t_a9245d76424f11 9
+submodules/avernet
+  s_a9c87caa3de52e::t_a218f73d4ba2bb 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "14d42bdeecbd350d61a333347701b5e36c506a0b",
+  "prompts": {},
+  "sessions": {
+    "s_a9c87caa3de52e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d0b4-74ad-7423-9152-b7e80c647ef8",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "yuange.zjy <yuange.zjy@antgroup.com>"
+    }
+  }
+}

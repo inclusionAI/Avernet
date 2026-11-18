@@ -1,0 +1,36 @@
+apps/bcs-internal/crates/plugins/bcs-auth-cookie/src/v1_config_tests.rs
+  s_5a886b46403e7c::t_08463a5398e351 78-89
+  s_5a886b46403e7c::t_c5600285d538e7 74
+apps/bcs-internal/crates/plugins/bcs-auth-cookie/CONTEXT.md
+  s_5a886b46403e7c::t_265c8ae8836aa6 85,93-110
+  s_5a886b46403e7c::t_7c06be35fec22a 111
+apps/bcs-internal/crates/plugins/bcs-auth-cookie/src/remote.rs
+  s_5a886b46403e7c::t_52178d9ab9c4ef 270
+  s_5a886b46403e7c::t_265c8ae8836aa6 43-45,324,334,364,368
+  s_5a886b46403e7c::t_c5600285d538e7 95,145,237,269,271
+  s_5a886b46403e7c::t_1c296dea6b4ea9 318-323,325-333,335-363,365-367,369-393
+apps/bcs-internal/docs/diagnostics/README.md
+  s_5a886b46403e7c::t_265c8ae8836aa6 9
+apps/bcs-internal/bcn-configs/bcs-config-dev.toml
+  s_5a886b46403e7c::t_c5600285d538e7 43
+apps/bcs-internal/crates/plugins/bcs-auth-cookie/src/remote_tests.rs
+  s_5a886b46403e7c::t_08463a5398e351 117-183
+apps/bcs-internal/crates/plugins/bcs-auth-cookie/src/v1_config.rs
+  s_5a886b46403e7c::t_c5600285d538e7 73-75,159,207-213,353
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "fa06f14cb8380b949b7434e581485111cbfc6abe",
+  "prompts": {},
+  "sessions": {
+    "s_5a886b46403e7c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cfe7-6471-7a70-90de-e0018bca400d",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "卓人 <hx410025@antgroup.com>"
+    }
+  }
+}

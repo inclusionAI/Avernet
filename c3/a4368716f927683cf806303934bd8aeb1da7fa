@@ -1,0 +1,25 @@
+apps/backend/specs/caller-asc-owner-refresh/002-code-report.md
+  s_bb98e2f10840b6::t_33910f7fd96fd4 55-65
+apps/backend/tests/community/core/bot_management/services/test_scheduled_caller_refresh.py
+  s_bb98e2f10840b6::t_556d684373a27e 31
+apps/backend/tests/community/core/service_bot/services/test_publish_owner_handoff_lifecycle.py
+  s_bb98e2f10840b6::t_24c624506f8aa8 45
+apps/backend/tests/community/repository/devices/test_device_repository_unified.py
+  s_bb98e2f10840b6::t_0e2a1d25ea944c 2596
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c3a4368716f927683cf806303934bd8aeb1da7fa",
+  "prompts": {},
+  "sessions": {
+    "s_bb98e2f10840b6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a162ee-dd64-7f52-9208-9fd1326f32e5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

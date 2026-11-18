@@ -1,0 +1,54 @@
+apps/bcsfuse/packages/search-core/tests/test_document_mapping.py
+  s_e7fe9f07a64c50::t_08fce0fac5f6ab 11,18,38,50-88
+  s_e7fe9f07a64c50::t_1d17a842e72a4c 1-10,12-17,19-37,39-49
+apps/bcsfuse/packages/search-core/docs/card-management-api.md
+  s_e7fe9f07a64c50::t_b31b60433433ff 233-276
+apps/bcsfuse/packages/search-core/docs/index-rebuild.md
+  s_e7fe9f07a64c50::t_bc2b41ff87f369 160-180
+apps/bcsfuse/packages/search-core/docs/provider-contracts.md
+  s_e7fe9f07a64c50::t_bc895b06fc88ed 111,196-226
+apps/bcsfuse/packages/search-core/src/search_core/adapters/http/cards.py
+  s_e7fe9f07a64c50::t_5b92f0f446f3c1 10,13,28-32,37-40,46-49,61-64,93,97,105-106,110-111,116,119-127,136,138-139,146-149,181,196,202-207
+apps/bcsfuse/packages/search-core/src/search_core/adapters/http/catalog_cards.py
+  s_e7fe9f07a64c50::t_8d0b2f1b318edd 61,64-67
+apps/bcsfuse/packages/search-core/src/search_core/adapters/http/index_builds.py
+  s_e7fe9f07a64c50::t_0390af93d30855 11-15,17,29-33,50-54,56,66-69,74,78,82-84,88,93,96-106,114,119-120,130
+apps/bcsfuse/packages/search-core/src/search_core/api/cards.py
+  s_e7fe9f07a64c50::t_08ccee95ddad56 6,15-21,40,56-70
+apps/bcsfuse/packages/search-core/src/search_core/api/index_builds.py
+  s_e7fe9f07a64c50::t_9b470c5d751d56 8-9,25,43-57
+apps/bcsfuse/packages/search-core/src/search_core/bootstrap/catalog.py
+  s_e7fe9f07a64c50::t_e647488d382e56 82,282-286,290-293
+apps/bcsfuse/packages/search-core/src/search_core/config/document_mapping.py
+  s_e7fe9f07a64c50::t_36633ab5fbf7b3 1-234
+apps/bcsfuse/packages/search-core/src/search_core/config/index_builds.py
+  s_e7fe9f07a64c50::t_db72a104ecbdef 5-7,17-24
+apps/bcsfuse/packages/search-core/src/search_core/core/index_builds.py
+  s_e7fe9f07a64c50::t_6a8711b3508f0f 40-42,56
+apps/bcsfuse/packages/search-core/src/search_core/plugin_api/card_store.py
+  s_e7fe9f07a64c50::t_190ecd9b9c2edd 7,10,23-24
+apps/bcsfuse/packages/search-core/src/search_core/providers/card_writes.py
+  s_e7fe9f07a64c50::t_6eef306dc13477 3,6,22-32,62-68,74,76-81,92-94,96-100
+apps/bcsfuse/packages/search-core/src/search_core/providers/sql_cards.py
+  s_e7fe9f07a64c50::t_93f207089678ed 13,227,244-246,287-297,306-308,320-322
+apps/bcsfuse/packages/search-core/src/search_core/providers/sql_index_builds.py
+  s_e7fe9f07a64c50::t_0b3aecae9a2497 92
+apps/bcsfuse/packages/search-core/tests/test_card_management.py
+  s_e7fe9f07a64c50::t_795ed80465cd8b 249-304
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7900e9ea9ce55e3245b9ea308e6df6ce1d544d1a",
+  "prompts": {},
+  "sessions": {
+    "s_e7fe9f07a64c50": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cf7a-1d65-7ce2-80b0-e54cb93b8362",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}

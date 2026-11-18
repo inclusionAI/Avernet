@@ -1,0 +1,14 @@
+apps/backend/tests/corp/plugins/prod/test_scheduled_caller.py
+  h_3141242c39a938 192-193,211,310,325,430
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2444bd970ec7007c81c884393e3ffcf59a1ff11a",
+  "prompts": {},
+  "humans": {
+    "h_3141242c39a938": {
+      "author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

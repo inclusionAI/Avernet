@@ -1,0 +1,46 @@
+apps/backend/tests/community/core/expert_chat/services/test_owner_friend_session_reads.py
+  s_390509a550559e::t_38312d4cb7afd2 69-74,126-131
+  s_390509a550559e::t_73207a2412547a 79-80,102-103
+  s_390509a550559e::t_027a3ebbd28ca1 42-47
+  s_390509a550559e::t_0fe8cab25f0337 77-78,81-101,104-112
+  s_390509a550559e::t_58a92a08f3cfaa 75-76
+apps/backend/tests/community/core/devices/services/test_device_context_resolver.py
+  s_390509a550559e::t_f405b759b2e1a9 212-213,218-219,228,319-320
+  s_390509a550559e::t_3b7b4866562f73 238-258,289-303
+  s_390509a550559e::t_b14bf7b633e251 220-222,229-230,313
+  s_390509a550559e::t_ad3ca3d8fa9218 196-210
+  s_390509a550559e::t_f6f16c6500aead 259-288
+  s_390509a550559e::t_e363c121877176 211,214-217,223-227,231-237,304-312,314-318
+apps/backend/src/agentclaw/community/core/expert_chat/services/expert_chat_session_runtime.py
+  s_390509a550559e::t_8f06dcc1fbd109 150-158,160-165
+apps/backend/tests/community/core/expert_chat/services/test_expert_chat_service.py
+  s_390509a550559e::t_e91ee7e753b954 1648-1650
+apps/backend/src/agentclaw/community/core/devices/services/device_context.py
+  s_390509a550559e::t_8f06dcc1fbd109 30
+apps/backend/src/agentclaw/community/core/devices/services/device_context_resolver.py
+  s_390509a550559e::t_3b7b4866562f73 42-51,121-123,198-200
+  s_390509a550559e::t_a6a4daa0d36a19 32-37,78-83,119-120,124-125,143-147,149,196-197,201-202
+  s_390509a550559e::t_f6f16c6500aead 89-90,94-99,160-162,170-175
+apps/backend/tests/community/core/expert_chat/services/test_chat_stage.py
+  s_390509a550559e::t_38312d4cb7afd2 60-65,75-80
+apps/backend/tests/community/core/expert_chat/services/test_expert_chat_permission.py
+  s_390509a550559e::t_10b78b411cbf1c 103-105,124-126,141-143,238
+apps/backend/tests/community/core/expert_chat/services/test_expert_chat_uses_resolver.py
+  s_390509a550559e::t_e91ee7e753b954 64-66
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c6963e7910615753a5e72ecf714f8c940fcf7737",
+  "prompts": {},
+  "sessions": {
+    "s_390509a550559e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a19c08-3c81-71c2-b739-88221aa979a1",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

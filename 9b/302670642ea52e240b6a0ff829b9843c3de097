@@ -1,0 +1,29 @@
+apps/backend/tests/corp/plugins/prod/test_mcp_auth.py
+  s_763a81eb308339::t_8c791aa5ab0407 454
+  s_763a81eb308339::t_2144f174bed28a 439-444
+  s_763a81eb308339::t_c751b567aff72b 281-294,425-431,445-453
+  s_763a81eb308339::t_daa5baa7d5aeae 432-438
+  s_763a81eb308339::t_28ceee2fa01596 455-469
+apps/backend/src/agentclaw/corp/plugins/prod/mcp_auth.py
+  s_763a81eb308339::t_495fab7f64f9f1 342,349-355
+  s_763a81eb308339::t_a2e24a42c4f524 552
+  s_763a81eb308339::t_2144f174bed28a 543-549
+  s_763a81eb308339::t_89f5fa43995402 338-340,489-490,510-511,529-539,550-551
+  s_763a81eb308339::t_6fd5cd70c1a990 346-348,540-542
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9b302670642ea52e240b6a0ff829b9843c3de097",
+  "prompts": {},
+  "sessions": {
+    "s_763a81eb308339": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ed82-b79a-76e0-8143-6b80bc462b82",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": null
+    }
+  }
+}

@@ -1,0 +1,18 @@
+apps/backend/src/agentclaw/community/core/bot_public_risk/notices.py
+  h_9d7cfd405752f5 67,105-115,121-127
+apps/backend/src/agentclaw/community/core/bot_public_risk/tasks.py
+  h_9d7cfd405752f5 18,208-214,216-220,224
+apps/backend/tests/community/core/bot_public/test_risk_tasks.py
+  h_9d7cfd405752f5 500,526-532,597-632
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8da6061c191415442ac3b4f2945b8388632c8a73",
+  "prompts": {},
+  "humans": {
+    "h_9d7cfd405752f5": {
+      "author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

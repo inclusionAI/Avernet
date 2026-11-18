@@ -1,0 +1,14 @@
+apps/bcs/scripts/e2e-runner/bcs_e2e/direct_chat_cli_case_run.py
+  h_12dd6d063428b2 83-91
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "bc91623b35357cafc5971f744e5a13d7064328fb",
+  "prompts": {},
+  "humans": {
+    "h_12dd6d063428b2": {
+      "author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

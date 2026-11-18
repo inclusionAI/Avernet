@@ -1,0 +1,19 @@
+.gitmodules
+  s_5bb95fc7fe5a56::t_88266cc7f5f20f 4
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ed887f8dbd97c302a5a146ee01bc9ef5e243bd91",
+  "prompts": {},
+  "sessions": {
+    "s_5bb95fc7fe5a56": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e348-86dd-7db3-95df-e78c098d4972",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

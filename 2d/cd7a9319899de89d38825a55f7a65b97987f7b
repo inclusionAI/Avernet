@@ -1,0 +1,21 @@
+apps/evolverun/clawweb/public/modules/workflow/web/components/AutoHealReviewDiff.tsx
+  s_ebc19b85cd5061::t_1905b6293eea2e 64
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/AutoHealSaveReview.test.tsx
+  s_ebc19b85cd5061::t_1905b6293eea2e 45-46,140,150
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2dcd7a9319899de89d38825a55f7a65b97987f7b",
+  "prompts": {},
+  "sessions": {
+    "s_ebc19b85cd5061": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ba47-ee74-7003-b77f-e34955cdb56e",
+        "model": "GPT-6.1-SOL"
+      },
+      "human_author": "fudapeng <fudp@example.com>"
+    }
+  }
+}
