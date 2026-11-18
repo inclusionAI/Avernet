@@ -222,10 +222,6 @@ class EngineProvisioningStrategy(ABC):
         """Whether Caller chat allocates an independent runtime before sessions."""
         return True
 
-    def supports_caller_session_discovery(self, ctx: BotProvisioningContext) -> bool:
-        """Whether independent Caller runtime sessions can be indexed."""
-        return False
-
     @abstractmethod
     def uses_adapter_chat_session_lifecycle(self, ctx: BotProvisioningContext) -> bool:
         """Whether ExpertChat should manage chat sessions through Adapter APIs.

@@ -96,9 +96,6 @@ class DefaultProvisioningStrategy(EngineProvisioningStrategy):
         """Teclaw isolates callers within its published service runtime."""
         return self.engine_type != "teclaw"
 
-    def supports_caller_session_discovery(self, ctx: BotProvisioningContext) -> bool:
-        return ctx.active_engine == "openclaw"
-
     def uses_adapter_chat_session_lifecycle(self, ctx: BotProvisioningContext) -> bool:
         return True
 
