@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Request
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import BotIdPath, Envelope
+from agentclaw.community.adapters.http.openapi_v1.dependencies import Principal, require_principal
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import RuntimeStage
 from agentclaw.community.adapters.http.openapi_v1.errors import (
     CallerIdentityConflictError,
@@ -17,6 +19,7 @@ from agentclaw.community.adapters.http.openapi_v1.errors import (
 )
 from agentclaw.community.adapters.http.openapi_v1.principal import (
     UserIdDep,
+    caller_owner_id,
     refuse_app_only_caller,
 )
 from agentclaw.community.adapters.http.openapi_v1.responses import (
@@ -59,12 +62,13 @@ token_router = APIRouter(
 )
 
 
-def _auth_request(request: Request) -> AuthRequestContext:
+def _auth_request(request: Request, principal: Principal) -> AuthRequestContext:
     return AuthRequestContext(
         cookies=dict(request.cookies),
         headers=dict(request.headers),
         query_params=dict(request.query_params),
         base_url=str(request.base_url),
+        verified_actor_user_id=caller_owner_id(principal),
     )
 
 
@@ -92,6 +96,7 @@ async def get_bot_iam_token(
     bot_id: BotIdPath,
     request: Request,
     user_id: UserIdDep,
+    principal: Annotated[Principal, Depends(require_principal)],
     owner_id: str | None = Query(
         default=None,
         min_length=1,
@@ -120,6 +125,15 @@ async def get_bot_iam_token(
     entity_id: str | None = Query(
         default=None,
         description="Entity identifier used to resolve the Bot unambiguously.",
+    ),
+    # The orchestrator reads these raw values from the request snapshot after Caller refresh.
+    caller_runtime_target: str | None = Query(
+        default=None,
+        description="JIT runtime selection: service uses the stage binding; caller_instance uses the authenticated caller's instance.",
+    ),
+    device_uuid: str | None = Query(
+        default=None,
+        description="Opaque device identifier for exact JIT replica selection within the authorized runtime binding.",
     ),
     service: CallerIamTokenServiceProtocol = Injected(CallerIamTokenServiceProtocol),
     expert: ExpertChatServiceProtocol = Injected(ExpertChatServiceProtocol),
@@ -173,7 +187,7 @@ async def get_bot_iam_token(
         normalized_entity_id = user_id
     result = await service.get_iam_token(
         iam_token=request.cookies.get("IAM_TOKEN") or "",
-        auth_request=_auth_request(request),
+        auth_request=_auth_request(request, principal),
         bot_id=bot_id,
         stage=CoreCallerIdentityStage(stage.value),
         # Published runtime selection is server-owned.  The runtime updater
