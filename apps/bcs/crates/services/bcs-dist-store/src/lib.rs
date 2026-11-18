@@ -2,6 +2,7 @@
 //! Worker), written against public `bcs-store-api` / `bcs-db-api` plugins.
 //!
 //! - [`archive`]: immutable Result/Blob persistence and committed-effect evidence.
+//! - [`task_feed`]: committed output, snapshot publication and logical retention.
 //! - [`layout`]: every key name; no shard hash tag (TBase replicates writes
 //!   synchronously, so a shard's keys need not share a slot).
 //! - [`version`]: the conditional-write versions ("ts") of the design.
@@ -19,6 +20,7 @@ pub mod error;
 pub mod identity;
 pub mod inbox;
 pub mod layout;
+pub mod task_feed;
 pub mod version;
 
 pub mod coordination;
