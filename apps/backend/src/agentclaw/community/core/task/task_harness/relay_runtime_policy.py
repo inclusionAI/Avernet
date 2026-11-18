@@ -19,6 +19,30 @@ from agentclaw.community.core.task.domain.models import TaskNode
 
 _RELAY_TERMINAL_SUCCESS_UNREPORTED_SECONDS = (360.0, 600.0, 900.0)
 
+_RECOVERY_ANCHOR_TO_RESUME_STEP = {
+    "S1_S3": "S1-S3",
+    "S4A_CONTINUE": "S4a",
+    "S4A_WAIT": "S4a-wait",
+    "S4A_RECONCILE": "S4a-reconcile",
+    "S4B_REPORT": "S4b",
+    "S5A_REFRESH_GAPS": "S5a",
+    "S5B_PLAN_NEXT_NODE": "S5b",
+    "S5C_SEARCH_CANDIDATES": "S5c",
+    "S5D_SELECT_EXECUTOR": "S5d",
+    "S5E_REPORT_PLAN": "S5e",
+    "S6_DISPATCH": "S6",
+    "S6_FINALIZE": "S6",
+}
+
+
+def _projection_resume_step(node: TaskNode) -> str | None:
+    props = getattr(getattr(node, "run_info", None), "extend_props", {}) or {}
+    projection = props.get("relay_recovery_projection")
+    if not isinstance(projection, dict):
+        return None
+    anchor = projection.get("recovery_anchor")
+    return _RECOVERY_ANCHOR_TO_RESUME_STEP.get(anchor)
+
 
 def terminal_success_unreported_seconds(attempts: int) -> float:
     """Return the current silent-success timeout in seconds."""
@@ -41,15 +65,19 @@ def resolve_relay_resume_step(
     protocol step.  A graph read failure falls back to ``None`` so recovery can
     still send the unchanged generic prompt.
     """
+    # Backend accepted state is authoritative and must win over a stale local
+    # projection. The projection is consulted only when the accepted graph state
+    # does not identify a later phase.
     try:
         context = graph.get_node_context(task_id, node.node_id)
     except Exception:  # noqa: BLE001 - graph history is optional at this boundary
-        return None
-    if context.accepted_plan_report is not None:
-        return "S6"
-    if context.accepted_execution_patch is not None:
-        return "S5"
-    return "S1-S4a"
+        context = None
+    if context is not None:
+        if context.accepted_plan_report is not None:
+            return "S6"
+        if context.accepted_execution_patch is not None:
+            return "S5"
+    return _projection_resume_step(node) or "S1-S4a"
 
 
 def relay_resume_attempts(

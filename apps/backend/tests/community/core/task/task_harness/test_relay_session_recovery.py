@@ -156,10 +156,10 @@ class RelaySessionRecoveryTest(unittest.IsolatedAsyncioTestCase):
             with self.subTest(resume_step=resume_step):
                 await recovery.resume(node, resume_step=resume_step)
 
-        self.assertEqual(
-            [call["message"] for call in bot.calls],
-            [RELAY_HARNESS_RESUME_PROMPT] * 4,
-        )
+        self.assertEqual(bot.calls[0]["message"], RELAY_HARNESS_RESUME_PROMPT)
+        self.assertIn("当前恢复锚点：S1-S4a", bot.calls[1]["message"])
+        self.assertIn("当前恢复锚点：S5", bot.calls[2]["message"])
+        self.assertIn("当前恢复锚点：S6", bot.calls[3]["message"])
         self.assertIn("从当前会话历史中获取 S1 到断点前已形成的上下文和结果", RELAY_HARNESS_RESUME_PROMPT)
         self.assertIn("不要重做已完成步骤", RELAY_HARNESS_RESUME_PROMPT)
         self.assertIn("从第一个未完成步骤继续执行，直到流程执行完为止", RELAY_HARNESS_RESUME_PROMPT)

@@ -30,8 +30,16 @@ RELAY_HARNESS_RESUME_PROMPT = (
 
 
 def relay_harness_resume_prompt(resume_step: str | None = None) -> str:
-    """Return the single same-session continuation instruction."""
-    return RELAY_HARNESS_RESUME_PROMPT
+    """Return a same-session continuation instruction with a stable anchor."""
+    if not resume_step:
+        return RELAY_HARNESS_RESUME_PROMPT
+    anchor = {
+        "S1-S3": "S1~S3", "S4a": "S4a", "S4a-wait": "S4a 的在途调用等待/回收",
+        "S4a-reconcile": "S4a 的结果对账", "S4b": "S4b", "S5a": "S5a",
+        "S5b": "S5b", "S5c": "S5c", "S5d": "S5d", "S5e": "S5e",
+        "S6": "S6",
+    }.get(resume_step, resume_step)
+    return f"{RELAY_HARNESS_RESUME_PROMPT} 当前恢复锚点：{anchor}。先从该锚点校正状态，再继续。"
 
 
 
