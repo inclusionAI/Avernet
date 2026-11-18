@@ -1,13 +1,16 @@
 # Distributed repository contracts
 
-Status: declarations for an opt-in runtime; no concrete provider or runtime is
-implemented by this change. The Rust declarations own the exact method shapes.
+Status: contracts for an opt-in runtime. Public providers are being implemented
+in `bcs-dist-store`; complete runtime assembly and provider acceptance remain
+separate. The Rust declarations own the exact method shapes. See the
+[reliable Inbox provider](../../../../../../services/bcs-dist-store/src/inbox/README.md)
+for retained layout, cold-start health, resource bounds and validation limits.
 
 ## Boundaries
 
 | Boundary | Traits | Responsibility |
 | --- | --- | --- |
-| SessionInbox | `InboxProducerPort`, `InboxConsumerPort`, `ShardFeedPort`, `InboxSchedulingPort` | Durable admission, replayable per-session input, acknowledgements and recoverable activation |
+| SessionInbox | `InboxProducerPort`, `InboxConsumerPort`, `ShardFeedPort`, `InboxSchedulingPort`, `AdmissionMaintenancePort`, `AdmissionControlPort` | Durable admission, replayable per-session input, acknowledgements and recoverable activation |
 | TaskFeed | `TaskPublisherPort`, `TaskReaderPort` | Committed output, task snapshots, consistent restore and resumable subscriptions |
 | DispatchBoard | `DispatchControlPort`, `DispatchQueuePort`, `HeldDispatchPort`, `CommandFeedPort` | Worker intent, Connector ownership, remote progress and notification hints |
 | Session state | `SessionStorePort` | Frozen spec reads, per-session owner seal, atomic business commit, unknown-result resolution and recovery metadata |
@@ -51,6 +54,13 @@ Initial task creation is create-once as part of Gateway admission; a delayed
 retry must not replace a task already advanced by Worker. Session specification
 and task scope must match the admitted input. An existing frozen specification
 cannot be replaced by a retry with newer group configuration.
+
+`AdmitRequest.scope` is trusted application scope and must match the frozen
+Session and task. Providers recompute business digests and select canonical
+InputId identity independently of sid/shard. Durable admission maintenance and
+gate/cut ports are Worker infrastructure, not another business submission API.
+`FeedBatch.failures` isolates failed Session watches; Worker resolves retained
+candidates and rebuilds failed watches from committed consumed before reuse.
 
 An identity collision compares canonical business content, not transport
 metadata, a queue offset, a retry counter or holder incarnation. Critical Agent
@@ -184,13 +194,10 @@ business progress resets the failure streak.
 
 Owner records, checkpoint envelopes, commit receipts and recovery responses
 expose no independent revision. Storage adapters may use native versions or
-transactions internally. A TBase adapter may encode business writes using
-`epoch * 10^9 + commit_seq`, with range/overflow checks, and reserve the epoch
-boundary for sealing. Such encoding is not part of the portable API and does not
-by itself prove atomic owner/sequence checks or cross-path fencing. Recovery
-metadata must use an independent safe control-write protocol; it cannot rewrite
-the business checkpoint at the same timestamp or consume a timestamp reserved
-for its next commit. These backend guarantees remain to be verified.
+transactions internally. Phase one uses opaque DocumentCAS versions shared by
+sealing, business commits and recovery control. It does not encode a version as
+`epoch * 10^9 + commit_seq`. Control writes preserve business sequence and outbox.
+Concrete backend atomicity and fencing remain provider acceptance obligations.
 
 Dispatch recheck `Revision` and inbox `ScheduleToken` remain: concurrent control
 updates can invalidate a scheduling decision without a new Worker epoch or

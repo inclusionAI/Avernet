@@ -62,3 +62,18 @@ fn write_canonical(value: &Value, out: &mut Vec<u8>) {
         scalar => out.extend_from_slice(scalar.to_string().as_bytes()),
     }
 }
+
+/// Stable reliable Agent input identity. The caller keeps the same remote event
+/// ID across holder changes. The provider verifies this value before journaling;
+/// event kind and payload belong to the canonical content digest, not the ID.
+pub fn critical_agent_input_id(
+    did: &bcs_dist_model::Did,
+    remote_event_id: &str,
+) -> bcs_dist_model::InputId {
+    let digest = digest_fields(&[
+        b"critical-agent:v1",
+        did.0.as_bytes(),
+        remote_event_id.as_bytes(),
+    ]);
+    bcs_dist_model::InputId(format!("ac-{}", hex_of(&digest)))
+}

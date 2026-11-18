@@ -88,6 +88,7 @@ pub fn receipt() -> AdmissionReceipt {
 
 pub fn admission() -> AdmitRequest {
     AdmitRequest {
+        scope: scope(),
         input: input(),
         create_session: Some(spec()),
         create_task: Some(snapshot()),

@@ -28,6 +28,7 @@ fn producer(store: &Arc<Recorder>) -> StoreInboxProducer {
 
 fn new_session(input_id: &str, text: &str) -> AdmitRequest {
     AdmitRequest {
+        scope: scope(),
         input: user_input(input_id, text),
         create_session: Some(spec("grp-research-01")),
         create_task: Some(task()),
@@ -59,70 +60,39 @@ async fn the_merged_port_harness_passes() {
 }
 
 #[tokio::test]
-async fn admit_reports_a_definite_error_only_before_the_first_write() {
-    // New-session writes: 1 spec, 2 task, 3 task index, 4 inbox, 5 active,
-    // 6 wake, 7 trim, 8 admit.
-    let expected = [
-        (1, Err(definite())),
-        (2, Err(unknown("adm-1"))),
-        (3, Err(unknown("adm-1"))),
-        (4, Err(unknown("adm-1"))),
-        (5, Err(unknown("adm-1"))),
-        (6, Err(unknown("adm-1"))),
-        (8, Err(unknown("adm-1"))),
-    ];
-    for (step, want) in expected {
-        let store = Arc::new(Recorder::default());
-        store.fail_write(step);
-        let got = producer(&store).admit(new_session("adm-1", "hello")).await;
-        assert_eq!(got.map(|_| ()), want, "step {step}");
+async fn admit_reports_a_definite_error_only_before_journal_reservation() {
+    let baseline=Arc::new(Recorder::default());
+    producer(&baseline).admit(new_session("count", "hello")).await.unwrap();
+    let writes:Vec<_>=baseline.calls().into_iter().filter(|c|!c.starts_with("document.read")).collect();
+    for (index,call) in writes.iter().enumerate() {
+        let store=Arc::new(Recorder::default());store.fail_write(index+1);
+        let result=producer(&store).admit(new_session("failed", "hello")).await;
+        if index==0 {assert_eq!(result,Err(definite()));}
+        else if call.ends_with(":active") || call.ends_with(":wake") {
+            assert!(matches!(result,Ok(AdmitOutcome::Accepted(_))),"{call}: {result:?}");
+        } else {assert_eq!(result,Err(unknown("failed")),"{call}");}
     }
-    // The wake trim is best effort.
-    let store = Arc::new(Recorder::default());
-    store.fail_write(7);
-    let got = producer(&store).admit(new_session("adm-1", "hello")).await;
-    assert!(matches!(got, Ok(AdmitOutcome::Accepted(_))));
 }
 
 #[tokio::test]
-async fn admit_without_creation_passes_a_failed_inbox_append_through() {
-    // No spec or task to create: the inbox append is the first write.
-    let store = Arc::new(Recorder::default());
+async fn existing_task_control_is_journaled_before_delivery() {
+    let store=Arc::new(Recorder::default());let p=producer(&store);
+    p.admit(new_session("start", "hello")).await.unwrap();
     store.fail_write(1);
-    let request = AdmitRequest {
-        input: user_input("adm-2", "reply"),
-        create_session: None,
-        create_task: None,
-    };
-    assert_eq!(producer(&store).admit(request).await, Err(definite()));
+    let mut request=new_session("control", "reply");request.create_session=None;request.create_task=None;
+    request.input.body=InputBody::Cancel{reason:None};
+    assert_eq!(p.admit(request).await,Err(definite()));
 }
 
 #[tokio::test]
-async fn append_stream_reports_a_definite_error_only_before_the_first_write() {
-    let event = AgentEvent {
-        did: Did("s0042.7f3a9c.b21e.n2.a1".into()),
-        holder_epoch: HolderEpoch(1),
-        seq: InputSeq(7),
-        kind: AgentEventKind::Delta,
-        remote_event_id: None,
-        payload: Payload::Inline(serde_json::json!({"text": "partial"})),
-    };
-    let request = AppendAgentEvent {
-        sid: Sid(SID.into()),
-        tid: Tid(TID.into()),
-        event,
-    };
-    // Writes: 1 inbox, 2 active, 3 wake.
-    for step in 1..=3 {
-        let store = Arc::new(Recorder::default());
-        store.fail_write(step);
-        let got = producer(&store).append_stream(request.clone()).await;
-        match step {
-            1 => assert_eq!(got, Err(definite()), "step {step}"),
-            _ => assert!(
-                matches!(got, Err(StoreError::OutcomeUnknown { ref operation_id }) if operation_id.starts_with("as-")),
-                "step {step}: {got:?}"
-            ),
-        }
-    }
+async fn intermediate_activation_failure_is_unknown_and_discoverable() {
+    let store=Arc::new(Recorder::default());let p=producer(&store);
+    p.admit(new_session("start", "hello")).await.unwrap();
+    let request=AppendAgentEvent{sid:Sid(SID.into()),tid:Tid(TID.into()),event:AgentEvent{
+        did:Did(format!("{TID}.d")),holder_epoch:HolderEpoch(1),seq:InputSeq(1),kind:AgentEventKind::Delta,
+        remote_event_id:None,payload:Payload::Inline(serde_json::json!("delta"))}};
+    store.fail_write(3); // one atomic quota reservation, Inbox, then activation.
+    assert!(matches!(p.append_stream(request).await,Err(StoreError::OutcomeUnknown{..})));
+    use bcs_service_api::port::repo::distributed::admission::AdmissionMaintenancePort;
+    assert!(p.discover(ShardId(42)).await.unwrap().activated>0);
 }

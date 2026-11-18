@@ -176,6 +176,30 @@ impl KeyLayout {
         self.by_session("output-trim", sid)
     }
 
+    pub fn schedule(&self, sid: &Sid) -> Result<String, StoreError> {
+        self.by_session("schedule", sid)
+    }
+    pub fn admission_root(&self, shard: ShardId) -> String {
+        format!("{}:admission-root", self.shard_prefix(shard))
+    }
+    pub fn admission_intent(&self, shard: ShardId, sequence: u64) -> String {
+        format!("{}:admission-intent:{sequence}", self.shard_prefix(shard))
+    }
+    pub fn admission_scan(&self, shard: ShardId, kind: &str) -> Result<String, StoreError> {
+        segment(kind)?;
+        Ok(format!("{}:admission-scan:{kind}", self.shard_prefix(shard)))
+    }
+    /// Canonical identity is scope-wide, independent of the requested shard/target.
+    pub fn canonical_admission(&self, scope: &bcs_dist_model::TaskScope, id: &InputId) -> Result<String, StoreError> {
+        segment(&scope.tenant.0)?;
+        segment(&scope.principal.0)?;
+        segment(&id.0)?;
+        let digest = crate::identity::digest_fields(&[
+            scope.tenant.0.as_bytes(), scope.principal.0.as_bytes(), id.0.as_bytes(),
+        ]);
+        Ok(format!("{}:canonical:{}", self.namespace_identity(), crate::identity::hex_of(&digest)))
+    }
+
     fn shard_prefix(&self, shard: ShardId) -> String {
         format!(
             "{PREFIX}:{}:{}:{}",
