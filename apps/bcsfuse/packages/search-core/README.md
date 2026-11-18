@@ -44,6 +44,16 @@ and filter metadata from its own Profile/Card. No Worker-ID matching, TC fragmen
 aggregation, Fuse, Card parsing or audience policy is implicit in this pipeline.
 Failures propagate as `SearchUnavailable`; fallback policy is not invented here.
 
+Providers can use `stage_timing(name, emit_progress=True)` within an active search
+to emit `search_progress` records with `phase=started` and `phase=finished`.
+Finished records contain elapsed milliseconds, outcome and the exception type on
+failure. Use fixed stage names and bounded numeric annotations. The host-owned
+worker's copied context retains the original trace and request identifiers after
+a caller timeout or cancellation, so its eventual completion remains observable.
+Running synchronous provider work continues under its own network timeout.
+These records use the existing bounded INFO log queue. Logging does not extend
+the caller deadline or publish a late result to its response or metadata cache.
+
 `QdrantRetrievalIndex` requires Qdrant Server >=1.20 through an explicit
 `QdrantConnection`. Dense and native BM25 collections share that Server.
 Python Local cannot execute multilingual BM25 and is rejected, without fallback.
