@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import replace
 from datetime import UTC, datetime
+from threading import Lock
 
 import pytest
 from agentclaw.community.core.repository.skill_center_reference_types import (
@@ -62,30 +63,34 @@ class _References:
         )
         self.transitions: list[tuple[str, SkillCenterReferenceStatus, dict]] = []
         self._next_skill_id = 10
+        self._lock = Lock()
         self.target_status = target_status
 
     def get_work_batch(self, *, env, request_id):
         assert env == "pre"
-        return self.batch if request_id == self.batch.request_id else None
+        with self._lock:
+            return self.batch if request_id == self.batch.request_id else None
 
     def update_item(self, *, env, reference_id, status, **fields):
         assert env == "pre"
-        self.transitions.append((reference_id, status, fields))
-        updated = []
-        selected = None
-        for item in self.batch.items:
-            if item.reference_id == reference_id:
-                selected = replace(item, status=status, **fields)
-                updated.append(selected)
-            else:
-                updated.append(item)
-        assert selected is not None
-        self.batch = replace(self.batch, items=tuple(updated))
-        return selected
+        with self._lock:
+            self.transitions.append((reference_id, status, fields))
+            updated = []
+            selected = None
+            for item in self.batch.items:
+                if item.reference_id == reference_id:
+                    selected = replace(item, status=status, **fields)
+                    updated.append(selected)
+                else:
+                    updated.append(item)
+            assert selected is not None
+            self.batch = replace(self.batch, items=tuple(updated))
+            return selected
 
     def ensure_public_version(self, **kwargs):
-        skill_id = self._next_skill_id
-        self._next_skill_id += 1
+        with self._lock:
+            skill_id = self._next_skill_id
+            self._next_skill_id += 1
         return PublicCenterVersionTarget(
             skill_id=skill_id,
             skill_version_id=100 + skill_id,
