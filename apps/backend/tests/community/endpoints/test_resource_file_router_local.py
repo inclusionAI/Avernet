@@ -15,9 +15,11 @@ from __future__ import annotations
 
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
+from agentclaw.community.di.modules.skill_center_module import DeviceFilesystemDispatcher
 from tests.community.factories.access import make_staff_user
 from tests.community.factories.devices import make_active_arca_device
 from tests.community.framework import CaseInput, ExpectError, ExpectSuccess, endpoint_test
+from tests.community.framework.device_seams import install_fake_filesystem_dispatcher
 
 _OWNER = "u_resfile_local"
 _BOT = "bot_resfile_local"
@@ -214,6 +216,84 @@ def _assert_dir_deleted(response, world) -> None:
 )
 def local_delete_directory():
     """Deleting a non-empty directory on a local bot removes it recursively."""
+
+
+class _RefusingFilesystem:
+    def __init__(self, entries):
+        self.entries = entries
+        self.calls = []
+
+    async def list_dir(self, path, *, recursive=False):
+        self.calls.append(("list", path))
+        return self.entries
+
+    async def delete_tree(self, path):
+        self.calls.append(("tree", path))
+        return False
+
+    async def delete_file(self, path):
+        self.calls.append(("file", path))
+        return False
+
+
+def _seed_refused_delete(world, entries):
+    _seed_local_bot(world)
+    world.delete_fs = _RefusingFilesystem(entries)
+    install_fake_filesystem_dispatcher(
+        world, fs=world.delete_fs, dispatcher_cls=DeviceFilesystemDispatcher,
+    )
+
+
+def _assert_tree_refused(response, world):
+    assert response.json()["detail"] == "Delete storage failed"
+    assert world.delete_fs.calls == [("list", "workspace"), ("tree", "workspace/data")]
+
+
+@endpoint_test(
+    method="DELETE", path="/api/resources/files", scenario="error_directory_delete_refused",
+    input=CaseInput(query_params={"path": "data", "bot_id": _BOT, "owner_id": _OWNER},
+                    headers={"x-user-id": _OWNER}),
+    seed=lambda world: _seed_refused_delete(world, [{"name": "data", "is_dir": True}]),
+    expect=ExpectError(status=502), extra_assertions=(_assert_tree_refused,),
+)
+def directory_delete_refused():
+    """A known directory refusal is surfaced through the real HTTP stack."""
+
+
+def _assert_unknown_delete(response, world):
+    assert response.json()["detail"] == "File not found"
+    assert world.delete_fs.calls == [("list", "workspace"), ("file", "workspace/data")]
+
+
+@endpoint_test(
+    method="DELETE", path="/api/resources/files", scenario="error_directory_type_unknown",
+    input=CaseInput(query_params={"path": "data", "bot_id": _BOT, "owner_id": _OWNER},
+                    headers={"x-user-id": _OWNER}),
+    seed=lambda world: _seed_refused_delete(world, None),
+    expect=ExpectError(status=404), extra_assertions=(_assert_unknown_delete,),
+)
+def directory_type_unknown():
+    """An inconclusive listing retains the previous file-branch response."""
+
+
+def _seed_refused_delete_for_other_user(world):
+    _seed_refused_delete(world, [{"name": "data", "is_dir": True}])
+    make_staff_user(world, user_id="unrelated_user")
+
+
+def _assert_no_device_call(response, world):
+    assert world.delete_fs.calls == []
+
+
+@endpoint_test(
+    method="DELETE", path="/api/resources/files", scenario="error_delete_unauthorized",
+    input=CaseInput(query_params={"path": "data", "bot_id": _BOT, "owner_id": _OWNER},
+                    headers={"x-user-id": "unrelated_user"}),
+    seed=_seed_refused_delete_for_other_user,
+    expect=ExpectError(status=403), extra_assertions=(_assert_no_device_call,),
+)
+def directory_delete_unauthorized():
+    """An unrelated user cannot reach the device through the delete route."""
 
 
 # ── mkdir → 200, .keep created ───────────────────────────────────────────────

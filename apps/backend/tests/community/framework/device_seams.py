@@ -171,3 +171,4 @@ def install_fake_filesystem_dispatcher(
     fs_dispatcher = world.get(dispatcher_cls)
     setattr(fs_dispatcher, "dispatch", lambda ctx: fs)  # noqa: B010
     setattr(fs_dispatcher, "for_bot", lambda bot_id, user_id: fs)  # noqa: B010
+    setattr(fs_dispatcher, "dispatch_addressed", lambda ctx, **kwargs: fs)  # noqa: B010

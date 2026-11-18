@@ -52,6 +52,7 @@ from agentclaw.community.core.devices.services.device_filesystem import (
     FileTooLargeError as DeviceFileTooLargeError,
 )
 from agentclaw.community.core.resources.service import (
+    DirectoryDeleteFailed,
     DirectoryTooLargeError,
     ResourceNotFoundError,
 )
@@ -623,8 +624,15 @@ class ResourceFileService(ResourceFilePort):
         engine_type: str,
         path: str,
         runtime_context: DeviceContext | None = None,
+        report_directory_failure: bool = False,
     ) -> bool:
         """Delete a file or directory; returns False when nothing was deleted.
+
+        ``report_directory_failure`` is a concrete-service opt-in for the legacy
+        HTTP adapter: after a listing identifies a directory, a failed tree delete
+        raises ``DirectoryDeleteFailed``. The default ResourceFilePort contract
+        remains boolean for existing callers; a failed listing is not proof of
+        absence and retains the existing file-branch behavior.
 
         A directory needs ``delete_tree``: the engines route the two through
         separate operations (``/api/file/remove`` vs ``/api/file/rmtree``), and
@@ -639,7 +647,10 @@ class ResourceFileService(ResourceFilePort):
         )
         logical = self._logical(path)
         if await self._is_dir(device_fs, path):
-            return await device_fs.delete_tree(logical)
+            deleted = await device_fs.delete_tree(logical)
+            if not deleted and report_directory_failure:
+                raise DirectoryDeleteFailed()
+            return deleted
         return await device_fs.delete_file(logical)
 
     async def list_entries(
