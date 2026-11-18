@@ -1785,3 +1785,484 @@ async def test_cooldown_not_yet_satisfied_continues_warning(monkeypatch):
     assert summary.warned == 1 and summary.recycled == 0, \
         "cooldown 未满 M 天时应继续 warn, 不应 recycle"
     bot_service.stop_bot.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Auto-reactivation after recycle (AC-1 ~ AC-4)
+# ---------------------------------------------------------------------------
+
+from agentclaw.community.core.bot_dormant.auto_reactivate_policy import (
+    AutoReactivatePolicy,
+    AutoReactivatePolicyService,
+)
+from agentclaw.community.core.bot_dormant.auto_reactivate_whitelist import (
+    AutoReactivateWhitelistService,
+)
+from agentclaw.community.core.bot_dormant.activate_service import (
+    ActivateBotService,
+)
+
+
+def _make_auto_reactivate_policy_service(
+    *, enabled: bool = True, dry_run: bool = False,
+) -> AutoReactivatePolicyService:
+    """Return an AutoReactivatePolicyService that always returns the given values."""
+    svc = MagicMock(spec=AutoReactivatePolicyService)
+    svc.auto_reactivate_enabled.return_value = enabled
+    svc.dry_run.return_value = dry_run
+    return svc
+
+
+def _make_auto_reactivate_whitelist(
+    enabled_bots: frozenset[tuple[str, str]] = frozenset(),
+) -> AutoReactivateWhitelistService:
+    """Return an AutoReactivateWhitelistService that checks against a set."""
+    svc = MagicMock(spec=AutoReactivateWhitelistService)
+    svc.is_enabled.side_effect = (
+        lambda bot_id, owner_id: (bot_id, owner_id) in enabled_bots
+    )
+    return svc
+
+
+@pytest.mark.unit
+def test_auto_reactivate_after_recycle_triggers_activate():
+    """AC-1: whitelisted bot, policy enabled, real mode → activate called after recycle."""
+    session = _make_session()
+    days_inactive = N + M  # exactly at recycle threshold
+    candidate = Candidate(
+        bot_id="bot_auto",
+        entity_id="789",
+        owner_id="owner_auto",
+        bot_name="Auto Reactivate Bot",
+        gmt_create=_now() - timedelta(days=days_inactive),
+    )
+
+    baas = AsyncMock(spec=BaasDormantClient)
+    baas.check_alive = AsyncMock(
+        return_value=AliveResult(result="false", last_session_time=None)
+    )
+
+    bot_svc = MagicMock()
+    bot_svc.stop_bot = MagicMock(return_value=True)
+    bot_svc.update_status = MagicMock()
+
+    activate_svc = MagicMock(spec=ActivateBotService)
+    activate_svc.activate = MagicMock()
+
+    policy_svc = _make_auto_reactivate_policy_service(enabled=True)
+    whitelist = _make_auto_reactivate_whitelist(
+        enabled_bots=frozenset({("bot_auto", "owner_auto")}),
+    )
+
+    bot = BotModel(
+        bot_id=candidate.bot_id,
+        entity_id=candidate.entity_id,
+        entity_type="user",
+        creator_id="u1",
+        owner_id=candidate.owner_id,
+        bot_name=candidate.bot_name,
+        status="ACTIVE",
+        is_delete=0,
+        bot_type="personal",
+        gmt_create=candidate.gmt_create,
+        gmt_modified=_now(),
+    )
+    session.add(bot)
+    session.commit()
+
+    svc = _make_service(session, baas_client=baas, bot_service=bot_svc)
+    svc._activate_service = activate_svc
+    svc._auto_reactivate_policy = policy_svc
+    svc._auto_reactivate_whitelist = whitelist
+
+    # Plant a prior warn so recycle triggers
+    _insert_audit(
+        session,
+        bot_id=candidate.bot_id,
+        owner_id=candidate.owner_id,
+        action_taken="warn_enqueued",
+        gmt_create=_now() - timedelta(days=svc._M + 1),
+        dry_run=0,
+    )
+
+    summary: RunSummary = _run(svc.process_run(dry_run=False))
+
+    assert summary.recycled == 1
+    # Activate must have been called
+    activate_svc.activate.assert_called_once_with(
+        bot_id="bot_auto",
+        owner_id="owner_auto",
+    )
+    # Audit row for auto_reactivate_triggered must exist
+    audits = (
+        session.query(DormantCheckAudit)
+        .filter(DormantCheckAudit.source == "auto_reactivate")
+        .all()
+    )
+    assert len(audits) == 1
+    assert audits[0].action_taken == "auto_reactivate_triggered"
+    assert audits[0].check_result == "auto_reactivate"
+
+
+@pytest.mark.unit
+def test_auto_reactivate_not_triggered_for_non_whitelisted_bot():
+    """AC-3: bot not on whitelist → activate NOT called, no auto_reactivate audit."""
+    session = _make_session()
+    days_inactive = N + M
+    candidate = Candidate(
+        bot_id="bot_no_wl",
+        entity_id="789",
+        owner_id="owner_no_wl",
+        bot_name="No Whitelist Bot",
+        gmt_create=_now() - timedelta(days=days_inactive),
+    )
+
+    baas = AsyncMock(spec=BaasDormantClient)
+    baas.check_alive = AsyncMock(
+        return_value=AliveResult(result="false", last_session_time=None)
+    )
+
+    bot_svc = MagicMock()
+    bot_svc.stop_bot = MagicMock(return_value=True)
+    bot_svc.update_status = MagicMock()
+
+    activate_svc = MagicMock(spec=ActivateBotService)
+    activate_svc.activate = MagicMock()
+
+    policy_svc = _make_auto_reactivate_policy_service(enabled=True)
+    # whitelist does NOT contain bot_no_wl
+    whitelist = _make_auto_reactivate_whitelist(
+        enabled_bots=frozenset({("other_bot", "other_owner")}),
+    )
+
+    bot = BotModel(
+        bot_id=candidate.bot_id,
+        entity_id=candidate.entity_id,
+        entity_type="user",
+        creator_id="u1",
+        owner_id=candidate.owner_id,
+        bot_name=candidate.bot_name,
+        status="ACTIVE",
+        is_delete=0,
+        bot_type="personal",
+        gmt_create=candidate.gmt_create,
+        gmt_modified=_now(),
+    )
+    session.add(bot)
+    session.commit()
+
+    svc = _make_service(session, baas_client=baas, bot_service=bot_svc)
+    svc._activate_service = activate_svc
+    svc._auto_reactivate_policy = policy_svc
+    svc._auto_reactivate_whitelist = whitelist
+
+    _insert_audit(
+        session,
+        bot_id=candidate.bot_id,
+        owner_id=candidate.owner_id,
+        action_taken="warn_enqueued",
+        gmt_create=_now() - timedelta(days=svc._M + 1),
+        dry_run=0,
+    )
+
+    summary: RunSummary = _run(svc.process_run(dry_run=False))
+
+    assert summary.recycled == 1
+    activate_svc.activate.assert_not_called()
+    audits = (
+        session.query(DormantCheckAudit)
+        .filter(DormantCheckAudit.source == "auto_reactivate")
+        .all()
+    )
+    assert len(audits) == 0
+
+
+@pytest.mark.unit
+def test_auto_reactivate_failure_does_not_block_recycle():
+    """AC-4: activate raises → recycle still counts recycled, audit has auto_reactivate_failed."""
+    session = _make_session()
+    days_inactive = N + M
+    candidate = Candidate(
+        bot_id="bot_fail",
+        entity_id="789",
+        owner_id="owner_fail",
+        bot_name="Fail Bot",
+        gmt_create=_now() - timedelta(days=days_inactive),
+    )
+
+    baas = AsyncMock(spec=BaasDormantClient)
+    baas.check_alive = AsyncMock(
+        return_value=AliveResult(result="false", last_session_time=None)
+    )
+
+    bot_svc = MagicMock()
+    bot_svc.stop_bot = MagicMock(return_value=True)
+    bot_svc.update_status = MagicMock()
+
+    activate_svc = MagicMock(spec=ActivateBotService)
+    activate_svc.activate = MagicMock(side_effect=RuntimeError("BaaS unavailable"))
+
+    policy_svc = _make_auto_reactivate_policy_service(enabled=True)
+    whitelist = _make_auto_reactivate_whitelist(
+        enabled_bots=frozenset({("bot_fail", "owner_fail")}),
+    )
+
+    bot = BotModel(
+        bot_id=candidate.bot_id,
+        entity_id=candidate.entity_id,
+        entity_type="user",
+        creator_id="u1",
+        owner_id=candidate.owner_id,
+        bot_name=candidate.bot_name,
+        status="ACTIVE",
+        is_delete=0,
+        bot_type="personal",
+        gmt_create=candidate.gmt_create,
+        gmt_modified=_now(),
+    )
+    session.add(bot)
+    session.commit()
+
+    svc = _make_service(session, baas_client=baas, bot_service=bot_svc)
+    svc._activate_service = activate_svc
+    svc._auto_reactivate_policy = policy_svc
+    svc._auto_reactivate_whitelist = whitelist
+
+    _insert_audit(
+        session,
+        bot_id=candidate.bot_id,
+        owner_id=candidate.owner_id,
+        action_taken="warn_enqueued",
+        gmt_create=_now() - timedelta(days=svc._M + 1),
+        dry_run=0,
+    )
+
+    summary: RunSummary = _run(svc.process_run(dry_run=False))
+
+    # Recycle must still count — failure in auto-activate does NOT roll back
+    assert summary.recycled == 1
+    activate_svc.activate.assert_called_once()
+
+    # auto_reactivate_failed audit must be written
+    failed_audits = (
+        session.query(DormantCheckAudit)
+        .filter(
+            DormantCheckAudit.source == "auto_reactivate",
+            DormantCheckAudit.action_taken == "auto_reactivate_failed",
+        )
+        .all()
+    )
+    assert len(failed_audits) == 1
+    assert "BaaS unavailable" in (failed_audits[0].error_msg or "")
+
+
+@pytest.mark.unit
+def test_auto_reactivate_skipped_in_dry_run():
+    """dry_run=True → auto-reactivate is skipped entirely (no activate, no audit)."""
+    session = _make_session()
+    days_inactive = N + M
+    candidate = Candidate(
+        bot_id="bot_dry",
+        entity_id="789",
+        owner_id="owner_dry",
+        bot_name="Dry Bot",
+        gmt_create=_now() - timedelta(days=days_inactive),
+    )
+
+    baas = AsyncMock(spec=BaasDormantClient)
+    baas.check_alive = AsyncMock(
+        return_value=AliveResult(result="false", last_session_time=None)
+    )
+
+    bot_svc = MagicMock()
+    bot_svc.stop_bot = MagicMock(return_value=True)
+    bot_svc.update_status = MagicMock()
+
+    activate_svc = MagicMock(spec=ActivateBotService)
+    activate_svc.activate = MagicMock()
+
+    policy_svc = _make_auto_reactivate_policy_service(enabled=True)
+    whitelist = _make_auto_reactivate_whitelist(
+        enabled_bots=frozenset({("bot_dry", "owner_dry")}),
+    )
+
+    bot = BotModel(
+        bot_id=candidate.bot_id,
+        entity_id=candidate.entity_id,
+        entity_type="user",
+        creator_id="u1",
+        owner_id=candidate.owner_id,
+        bot_name=candidate.bot_name,
+        status="ACTIVE",
+        is_delete=0,
+        bot_type="personal",
+        gmt_create=candidate.gmt_create,
+        gmt_modified=_now(),
+    )
+    session.add(bot)
+    session.commit()
+
+    svc = _make_service(session, baas_client=baas, bot_service=bot_svc)
+    svc._activate_service = activate_svc
+    svc._auto_reactivate_policy = policy_svc
+    svc._auto_reactivate_whitelist = whitelist
+
+    _insert_audit(
+        session,
+        bot_id=candidate.bot_id,
+        owner_id=candidate.owner_id,
+        action_taken="warn_enqueued",
+        gmt_create=_now() - timedelta(days=svc._M + 1),
+        dry_run=0,
+    )
+
+    summary: RunSummary = _run(svc.process_run(dry_run=True))
+
+    assert summary.recycled == 1
+    # auto-reactivate must NOT be called in dry_run mode
+    activate_svc.activate.assert_not_called()
+    audits = (
+        session.query(DormantCheckAudit)
+        .filter(DormantCheckAudit.source == "auto_reactivate")
+        .all()
+    )
+    assert len(audits) == 0
+
+
+@pytest.mark.unit
+def test_auto_reactivate_policy_disabled_no_activate():
+    """Policy disabled → activate NOT called even when bot is whitelisted."""
+    session = _make_session()
+    days_inactive = N + M
+    candidate = Candidate(
+        bot_id="bot_disabled",
+        entity_id="789",
+        owner_id="owner_disabled",
+        bot_name="Disabled Policy Bot",
+        gmt_create=_now() - timedelta(days=days_inactive),
+    )
+
+    baas = AsyncMock(spec=BaasDormantClient)
+    baas.check_alive = AsyncMock(
+        return_value=AliveResult(result="false", last_session_time=None)
+    )
+
+    bot_svc = MagicMock()
+    bot_svc.stop_bot = MagicMock(return_value=True)
+    bot_svc.update_status = MagicMock()
+
+    activate_svc = MagicMock(spec=ActivateBotService)
+    activate_svc.activate = MagicMock()
+
+    policy_svc = _make_auto_reactivate_policy_service(enabled=False)
+    whitelist = _make_auto_reactivate_whitelist(
+        enabled_bots=frozenset({("bot_disabled", "owner_disabled")}),
+    )
+
+    bot = BotModel(
+        bot_id=candidate.bot_id,
+        entity_id=candidate.entity_id,
+        entity_type="user",
+        creator_id="u1",
+        owner_id=candidate.owner_id,
+        bot_name=candidate.bot_name,
+        status="ACTIVE",
+        is_delete=0,
+        bot_type="personal",
+        gmt_create=candidate.gmt_create,
+        gmt_modified=_now(),
+    )
+    session.add(bot)
+    session.commit()
+
+    svc = _make_service(session, baas_client=baas, bot_service=bot_svc)
+    svc._activate_service = activate_svc
+    svc._auto_reactivate_policy = policy_svc
+    svc._auto_reactivate_whitelist = whitelist
+
+    _insert_audit(
+        session,
+        bot_id=candidate.bot_id,
+        owner_id=candidate.owner_id,
+        action_taken="warn_enqueued",
+        gmt_create=_now() - timedelta(days=svc._M + 1),
+        dry_run=0,
+    )
+
+    summary: RunSummary = _run(svc.process_run(dry_run=False))
+
+    assert summary.recycled == 1
+    activate_svc.activate.assert_not_called()
+    audits = (
+        session.query(DormantCheckAudit)
+        .filter(DormantCheckAudit.source == "auto_reactivate")
+        .all()
+    )
+    assert len(audits) == 0
+
+
+@pytest.mark.unit
+def test_auto_reactivate_none_services_still_functional():
+    """None auto-reactivate services → bot is recycled normally, no crash.
+
+    This covers the existing test path where _make_service does not wire
+    the new auto-reactivation dependencies — they default to None and the
+    scan runs with no auto-reactivation.
+    """
+    session = _make_session()
+    days_inactive = N + M
+    candidate = Candidate(
+        bot_id="bot_legacy",
+        entity_id="789",
+        owner_id="owner_legacy",
+        bot_name="Legacy Bot",
+        gmt_create=_now() - timedelta(days=days_inactive),
+    )
+
+    baas = AsyncMock(spec=BaasDormantClient)
+    baas.check_alive = AsyncMock(
+        return_value=AliveResult(result="false", last_session_time=None)
+    )
+
+    bot_svc = MagicMock()
+    bot_svc.stop_bot = MagicMock(return_value=True)
+    bot_svc.update_status = MagicMock()
+
+    bot = BotModel(
+        bot_id=candidate.bot_id,
+        entity_id=candidate.entity_id,
+        entity_type="user",
+        creator_id="u1",
+        owner_id=candidate.owner_id,
+        bot_name=candidate.bot_name,
+        status="ACTIVE",
+        is_delete=0,
+        bot_type="personal",
+        gmt_create=candidate.gmt_create,
+        gmt_modified=_now(),
+    )
+    session.add(bot)
+    session.commit()
+
+    # _make_service does NOT wire auto-reactivation deps → all None
+    svc = _make_service(session, baas_client=baas, bot_service=bot_svc)
+
+    _insert_audit(
+        session,
+        bot_id=candidate.bot_id,
+        owner_id=candidate.owner_id,
+        action_taken="warn_enqueued",
+        gmt_create=_now() - timedelta(days=svc._M + 1),
+        dry_run=0,
+    )
+
+    summary: RunSummary = _run(svc.process_run(dry_run=False))
+
+    assert summary.recycled == 1
+    # No crash, no auto-reactivate audit
+    audits = (
+        session.query(DormantCheckAudit)
+        .filter(DormantCheckAudit.source == "auto_reactivate")
+        .all()
+    )
+    assert len(audits) == 0
