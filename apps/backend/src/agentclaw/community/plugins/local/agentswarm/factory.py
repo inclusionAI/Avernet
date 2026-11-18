@@ -287,6 +287,14 @@ class DefaultSubagentFactory:
         return True
 
     def _sweep_legacy_belt(self, run: Run, agents) -> list[str]:
+        """Pre-ledger rows: the recorded bot_id, else the legacy two-part id.
+
+        Only values this agent can be shown to own are addressed — its recorded
+        ``bot_id``, and the historical ``bot_id_for(run, agent)`` derivation.
+        No three-part id is guessed here: the ledger sweep above already covers
+        every per-attempt persona, and a blind guess could reach a persona this
+        sweep has no evidence for.
+        """
         destroyed: list[str] = []
         from agentclaw.community.plugins.community.agentswarm.host import bot_id_for
 
