@@ -14,6 +14,11 @@ from agentclaw.community.core.task.context_collab.l5_methods.operations.contract
     BindMethodCommand,
     MethodLifecycleServiceProtocol,
     MethodStateChangeCommand,
+    OpenMethodOpsServiceProtocol,
+    OpenOpportunityCommand,
+)
+from agentclaw.community.core.task.context_collab.l5_methods.open_profile import (
+    ParticipationType,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime import (
     current_axes,
@@ -115,3 +120,69 @@ def binding_free_publish_ok():
 )
 def binding_free_publish_missing_open_binding():
     """The service cannot resolve an Open binding in a nonexistent Collet."""
+
+
+def _seed_stranger(world):
+    _seed_publication(world)
+    make_staff_user(world, user_id="u_open_stranger")
+
+
+def _assert_no_opportunity(response, world):
+    assert world.get(MethodStoreProtocol).list_opportunities(
+        current_axes(), _BINDING, _HAPPY_PARAMS["collab_context_id"]
+    ) == []
+
+
+@endpoint_test(
+    method="POST",
+    path=_PATH,
+    scenario="publish_rejects_authenticated_stranger",
+    input=CaseInput(
+        path_params=_HAPPY_PARAMS,
+        headers={"x-user-id": "u_open_stranger"},
+        json_body=_BODY,
+    ),
+    seed=_seed_stranger,
+    expect=ExpectError(status=422),
+    extra_assertions=(_assert_no_opportunity,),
+)
+def publish_rejects_authenticated_stranger():
+    """HTTP must authorize its real caller, not substitute the Collet initiator."""
+
+
+def _seed_published_opportunity(world):
+    _seed_stranger(world)
+    world.get(OpenMethodOpsServiceProtocol).publish_opportunity(
+        OpenOpportunityCommand(
+            collet_id=_HAPPY_PARAMS["collab_context_id"],
+            participation_type=ParticipationType.SINGLE_CONTRIBUTION,
+            opportunity_id=_BODY["opportunity_id"],
+            reason=_BODY["reason"],
+        )
+    )
+
+
+def _assert_original_publication(response, world):
+    [row] = world.get(MethodStoreProtocol).list_opportunities(
+        current_axes(), _BINDING, _HAPPY_PARAMS["collab_context_id"]
+    )
+    assert row.opportunity_id == _BODY["opportunity_id"]
+    assert row.transitioned_by == _OWNER
+    assert row.transition_reason == _BODY["reason"]
+
+
+@endpoint_test(
+    method="POST",
+    path=_PATH,
+    scenario="publish_replay_rejects_authenticated_stranger",
+    input=CaseInput(
+        path_params=_HAPPY_PARAMS,
+        headers={"x-user-id": "u_open_stranger"},
+        json_body=_BODY,
+    ),
+    seed=_seed_published_opportunity,
+    expect=ExpectError(status=422),
+    extra_assertions=(_assert_original_publication,),
+)
+def publish_replay_rejects_authenticated_stranger():
+    """Same-shape replay is not permission to bypass authenticated G1 checks."""

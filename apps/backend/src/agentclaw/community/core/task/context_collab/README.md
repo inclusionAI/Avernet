@@ -137,8 +137,13 @@ products/
   Publisher-mediated @1 remains installed unchanged; selecting @2 is explicit.
   Unrelated Open + Group products retain their structural behavior.
 - L5 Open publication is `publish_opportunity(OpenOpportunityCommand(...))`.
-  The command's first two fields are `collet_id` and trusted `actor_context`,
-  followed by the required `participation_type` and optional publication fields.
+  The command requires `collet_id` and `participation_type`, followed by optional
+  publication fields; it has no `actor_context`. In-process publication derives
+  its G1/audit identity from the persisted Collet's typed `initiator_ref`, even
+  before any Task exists. A missing Collet fails without an opportunity write.
+  Authenticated entrypoints supply their actual trusted `context` separately as
+  a keyword-only service argument; HTTP never substitutes the initiator for its
+  caller. G1 checks run before both first publication and idempotent replay.
   Neither `scope_ref` nor `opens_at` is an input: the persisted opportunity scope
   is always `collet_id`, and its opening timestamp is the server's current UTC
   time at first publication. An optional `closes_at` must be later than that
@@ -159,8 +164,9 @@ products/
   The internal HTTP publish route is now
   `POST /api/v1/collaboration/task/context_collab/{collab_context_id}/open/opportunities`;
   the previous `/method-bindings/{binding_id}/open/opportunities` publish route
-  is removed. HTTP builds the command identity from verified authentication,
-  not JSON. The HTTP publish body also omits `scope_ref` and `opens_at` and
+  is removed. HTTP supplies the separate service context from verified
+  authentication, not JSON. The HTTP publish body also omits `actor_context`,
+  `scope_ref` and `opens_at` and
   rejects caller-supplied overrides; the Collet comes from the route. Other Open
   routes, except submission and review described below, remain binding-scoped. See the
   [publication regressions](../../../../../../tests/community/core/task/context_collab/test_open_publication.py).

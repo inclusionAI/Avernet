@@ -73,7 +73,6 @@ def _seed(world):
     opportunity = service.publish_opportunity(
         OpenOpportunityCommand(
             collet_id=collet.collet_id,
-            actor_context=context,
             participation_type=ParticipationType.COLLET_PARTICIPANT,
         )
     )

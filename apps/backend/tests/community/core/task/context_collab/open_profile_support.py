@@ -208,7 +208,6 @@ def opportunity_command(**overrides) -> OpenOpportunityCommand:
     """机会发布命令基型:立即开放、无穷闭窗、GROUP_MEMBER 型。"""
     fields = {
         "collet_id": COLLET_ID,
-        "actor_context": make_actor(),
         "participation_type": ParticipationType.GROUP_MEMBER,
         "opportunity_id": "opp_alpha",
         "requirement_refs": ["req://search"],

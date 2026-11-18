@@ -267,7 +267,8 @@ def test_adapter_executes_exact_selected_policy_and_declared_steps():
     args = ops.publish_opportunity.call_args.args
     assert len(args) == 1
     assert args[0].collet_id == command.collab_context_id
-    assert args[0].actor_context is actor
+    assert not hasattr(args[0], "actor_context")
+    assert ops.publish_opportunity.call_args.kwargs == {"context": actor}
     assert args[0].capacity == policy.capacity == 2
     assert args[0].participation_type is policy.participation_type
     application = ops.submit_application.call_args.args[0]

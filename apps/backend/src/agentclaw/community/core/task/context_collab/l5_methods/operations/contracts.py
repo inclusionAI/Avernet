@@ -231,12 +231,12 @@ class SwarmStageOutcomeCommand:
 class OpenOpportunityCommand:
     """发布机会的完整输入;服务解析 Collet 内唯一 ACTIVE Open 绑定。
 
-    ``actor_context`` 由可信调用边界提供;``opportunity_id`` 为幂等键。
-    机会作用域固定为 ``collet_id``,开放起点由服务端在首次发布时取当前时间。
+    发布身份默认取 Collet 的 initiator_ref,不由命令重复声明。
+    ``opportunity_id`` 为幂等键;机会作用域固定为 ``collet_id``,
+    开放起点由服务端在首次发布时取当前时间。
     """
 
     collet_id: str
-    actor_context: ActorContext
     participation_type: ParticipationType  # 录取后的参与形式,不表示参与者数量。
     opportunity_id: str | None = None
     requirement_refs: list[str] = field(default_factory=list)
@@ -643,10 +643,15 @@ class OpenMethodOpsServiceProtocol(Protocol):
     def publish_opportunity(
         self,
         command: OpenOpportunityCommand,
+        *,
+        context: ActorContext | None = None,
     ) -> ProfileOpAcceptedResult:
         """Publish on the Collet's unique ACTIVE Open binding, with G1 checks.
 
-        Missing Open bindings raise NotFound; no ACTIVE candidate or multiple
+        In-process publication may omit context: G1/audit then use the persisted
+        Collet initiator. Authenticated delivery must pass its actual context
+        separately; it is never a command field or caller-supplied JSON identity.
+        Missing Collets/Open bindings raise NotFound; no ACTIVE candidate or multiple
         ACTIVE candidates raise ValidationError without writing an opportunity.
         The accepted result identifies the resolved binding for later operations.
         """

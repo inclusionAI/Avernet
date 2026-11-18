@@ -15,7 +15,7 @@ Service APIs, not a new HTTP/ACCS operation family or product-specific wire prot
 | ProductCollaborationPolicy | [operations/collaboration_policy.py](operations/collaboration_policy.py) | Product-aware adapter to L4-owned policy ports; interprets selected L6 evidence without owning Work or query execution. |
 | ProductMethodBindingRecovery | [operations/method_bootstrap.py](operations/method_bootstrap.py) | Translates pinned product/identity facts into L5 initialization/recovery inputs through L5-owned operations and ports. |
 | ProductProfileDefinition | [contracts.py](contracts.py) | Versioned composition, scenario roles, optional domain/workflow mappings, Task contract selection, compatibility and G1–G4 implementation requirements. |
-| MethodCompositionTemplate | [contracts.py](contracts.py) | Required/optional L5 `MethodProfile` contracts, instantiation scope and typed method-specific product policies. Explicit relations instantiate independent Collet-scoped Method bindings and L5 composition edges; empty relations preserve legacy topology. |
+| MethodCompositionTemplate | [contracts.py](contracts.py) | Required/optional L5 `MethodProfile` contracts and typed method-specific product policies; instantiation always targets an existing Collet, with no caller-configurable `scope`. Explicit relations instantiate independent Collet-scoped Method bindings and L5 composition edges; empty relations preserve legacy topology. |
 | ParticipantScope | [participant_scope.py](participant_scope.py) | Local typed Profile eligibility contract: OPEN or an explicit AgentRef allowlist. Not membership, admission, selection or permission authority. |
 | ScenarioRole | [binding.py](binding.py) | Maps owner/assignee to actual L4 Participant and RoleBinding facts. No L3 grant is created. |
 | DomainProfile | [contracts.py](contracts.py) | Maps product vocabulary to L3 Resource and L4 Collet/Task/Message/Artifact authority, not duplicate product-owned entities. |
@@ -77,7 +77,6 @@ profile = create_product_profile(
         ref=profile_ref,
         composition=MethodCompositionTemplate(
             method_kind="Open",
-            scope="collet",
             required_methods=(get_profile("Open", "0.2"),),
             policies=(OpenMethodPolicy(publication=publication),),
         ),
@@ -113,7 +112,7 @@ Creation returns the definition itself, not an installation receipt. It preserve
 all supplied IDs, versions and product-specific admission strategies; it does not
 allocate versions, select latest, switch participation types or execute admission.
 [`validation.py`](validation.py) owns the shared structural checks used by both
-creation and catalog installation (Method composition/scope, role mappings,
+creation and catalog installation (Method composition, role mappings,
 Task/workflow role requirements and method-specific policies). Policy entries
 must be typed, held in an immutable tuple, unique per Method and matched to a
 required/bound Method. Merely listing Open in `optional_methods` does not allow
@@ -355,6 +354,12 @@ uses the lower-only decoder with no product dependency. The existing metadata
 column/table names and tenant/env isolation remain unchanged.
 
 ### Explicit installation on an existing Collet
+
+`MethodCompositionTemplate` has no `scope` field. Profile creation declares only
+Method contracts, relations and policies; `ProductInstantiateCommand.collet_id`
+selects the actual existing Collet, and resulting Method bindings are Collet-scoped.
+This removes the former fixed `scope="collet"` authoring argument; it does not
+change ProductInstance storage, persisted binding scopes or installed versions.
 
 Pure L4 `create_collet(ColletCreateCommand, context)` creates only a Collet;
 it does not select a Profile, Method, participants or bindings. Its required

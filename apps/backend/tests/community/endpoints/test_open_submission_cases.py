@@ -74,7 +74,6 @@ def _seed(world):
     world.get(OpenMethodOpsServiceProtocol).publish_opportunity(
         OpenOpportunityCommand(
             collet_id=collet.collet_id,
-            actor_context=actor,
             participation_type=ParticipationType.SINGLE_CONTRIBUTION,
             opportunity_id=_OPPORTUNITY,
         )

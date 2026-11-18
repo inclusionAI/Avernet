@@ -761,7 +761,7 @@ async def publish_open_opportunity(
     service: OpenMethodOpsServiceProtocol = Injected(OpenMethodOpsServiceProtocol),  # noqa: B008
 ) -> Envelope[ProfileOpAcceptedDto]:
     result = service.publish_opportunity(
-        body.to_domain(collab_context_id, _actor_context(user))
+        body.to_domain(collab_context_id), context=_actor_context(user)
     )
     return envelope(_profile_accepted(result), request)
 

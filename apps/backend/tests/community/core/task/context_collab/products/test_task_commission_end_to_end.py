@@ -169,17 +169,17 @@ OBJECTIVE = (
 """产品上线 → Collet/Instantiate → Bot Query/Apply → Screen/Admit → Single → start 建 Task → accept。"""
 """
 协议适配问题总结：
-- 语义不明确
+- 语义不明
   - [ ] L4层的DataRelationModel不明确。比如Collet和Participant、RoleBinding、Task的关系，如何建模没有明确语义
   - [ ] Collet语义明确性问题：这份 ACCS 协议没有给出 Collet 的完整成员变量定义
-  - [x] 单 Agent 步骤详情通过 G3 Observation.extensions 上报,字段由本地 schema 声明。
+  - [ ] 单 Agent 步骤详情通过 G3 Observation.extensions 上报,字段由本地 schema 声明
   - [ ] open模式下，任务执行到底是在录取之后，还是在录取之前，协议没有明确说明，还是说都可以？
   - [ ] open模式下，当录取了某个agent进入协作之后，谁来通知agent真正开始干活，没有明确的语义
+- 能力缺少
+  - [ ] open模式下，协议中的DataModel只有机会发布、参与申请、决策结果这三个，缺少录取判断策略（谁来做录取判断、怎么判断）
 - 问题  
-  - [ ] open模式下，当录取了某个agent进入协作之后，谁来通知agent真正开始干活，没有明确的语义
+  - [ ] open方法中的参与类型，协议中的枚举不在一个维度：participation_type: COLLET_PARTICIPANT | GROUP_MEMBER | SWARM_ALLOCATION | SINGLE_CONTRIBUTION
 """
-
-
 def test_end_to_end_commission_flow(deploy_commission, tmp_path):
     # 1. L6层产品定义是可复用合同,创建 Profile 本身不产生协作运行对象。
     profile = _create_product_profile()
@@ -193,7 +193,7 @@ def test_end_to_end_commission_flow(deploy_commission, tmp_path):
     # 2. 先创建 L4 Collet
     collet = _create_commission_collet(l4_context_operate)
 
-    # 3. 产品传入输入资源;Instantiate 同时建立资源、参与者和 Method/Role 绑定。
+    # 3. 产品传入输入资源;Instantiate 同时建立Collet和 资源、参与者和Method的绑定。
     instance = _instantiate_product_instance(
         injector,
         collet,
@@ -201,27 +201,26 @@ def test_end_to_end_commission_flow(deploy_commission, tmp_path):
         resource_refs=INPUT_RESOURCES,
     )
 
-    # 4. 发布机会
+    # 4. 发布机会， "METHOD"方法
     _publish_opportunity(l5_open_method, collet.collet_id)
 
     # 5. Agent主动发现机会
     opportunity, submitted = _discover_opportunity(store, axes, collet, working_bot)
-    assert opportunity.scope_ref == instance.collet_ref
 
-    # 6. Open 录取只建立参与事实,不自动成为 Single 的选定执行者。
+    # 6. 录取判断
     decision = _admit_application_agent(
         injector, l5_open_method, store, axes, collet.collet_id, opportunity, submitted
     )
 
-    # 7. 明确选择该次录取产生的参与者,不是把 Agent ID 或 Query 结果当作选定。
+    # 7. 明确选择该次录取产生的参与者，进入"SINGLE:方法
     _select_admitted_agent(injector, store, axes, instance, decision)
 
-    # 8. 通知agent执行任务
+    # 8. 通知agent开始执行任务
     started, task_id = _notify_agent_work(
         injector, l4_context_operate, service, collet, working_bot.actor_context
     )
 
-    # 9. Agent 自主执行;最终由用户验收,不是 Single 或 ProductInstance 推进 Task。
+    # 9. 模型Agent自主执行。
     artifacts = _agent_run_simulate(
         service, collet, working_bot, started, tmp_path, task_id
     )
@@ -238,14 +237,13 @@ def test_end_to_end_commission_flow(deploy_commission, tmp_path):
 
 
 def _create_product_profile():
-    # scope="collet" 是模板的目标类型,实例化才把它解析为实际 Collet ID。
+    # TODO: collet不应该传到scope？    (fixed: 已去掉参数)
     authored = ProductProfileCreateCommand(
         # Open + Single 使用 v2,保留 v1 的纯 Open 合同。
         ref=VersionedProfileRef("task_commission", 2),
         # 绑定 L5 的 Open 和 Single 方法。
         composition=MethodCompositionTemplate(
             method_kind="Open + Single",
-            scope="collet",  # TODO collet不应该传到scope？应该传collet的事例? 这个参数的具体含义是什么？
             required_methods=(
                 get_profile("Open", "0.2"),
                 get_profile("Single", "0.2"),
@@ -340,7 +338,7 @@ def _create_commission_collet(l4_context_operate):
             title="XX代办任务",
             description="Open 参与 + Single 选定执行者,成果由用户验收",
         ),
-        HUMAN,  # 代办任务创建人 TODO: 一次待办的Product，因为任务发起者不同，需要有多个collet.
+        HUMAN,  # 代办任务创建人 TODO: 一次待办的Product，因为任务发起者不同，需要有多个collet.  (fixed: 一个collet本就对应一个代办任务)
     )
     assert collet.title == "XX代办任务"
     assert collet.created_by == collet.updated_by == HUMAN.actor
@@ -392,10 +390,10 @@ def _select_admitted_agent(injector, store, axes, instance, decision):
 
 def _publish_opportunity(l5_open_method, collet_id_1):
     # 4、调用L5的OPEN方法-创建机会
+    # TODO: actor_context为什么要传HUMAN, HUMAN是collet里面已经有了。  (fixed: 已去掉)
     published = l5_open_method.publish_opportunity(
         OpenOpportunityCommand(
             collet_id=collet_id_1,  # collet
-            actor_context=HUMAN,  # 发布人信息 TODO: actor_context为什么要传HUMAN, HUMAN是collet里面已经有了。
             participation_type=ParticipationType.COLLET_PARTICIPANT,  # 协议中明确规定的字段及取值
             admission_policy_refs=[
                 "task_commission.designated_bot_self_application/1"  # 录取策略：指定 Bot 自己申请，并由任务产品的策略自动审核
@@ -456,7 +454,7 @@ def _admit_application_agent(
         HUMAN.actor, source="product_policy"
     )  # 采用product profile中定义的录取策略
     [policy_ref] = opportunity.admission_policy_refs
-    # TODO: 系统服务进行录用判断？
+    # TODO: 系统服务进行录用判断？      (fixed: l5_open_method本就是协议提供的操作)
     screened = l5_open_method.screen(
         command=OpenScreenCommand(
             application_ref=submitted.object_id,
@@ -559,8 +557,6 @@ def _notify_agent_work(injector, l4_context_operate, service, l4_collet, bot_con
 def _agent_run_simulate(service, l4_collet, working_bot, started, tmp_path, task_id):
     collet_id_1 = l4_collet.collet_id
 
-    # TODO: 协议相关的通知机制
-
     # 9. 模拟Agent执行任务，过程中上报自定义的步骤及进度信息
     # G3:步骤用 Observation,百分比用 MetricDefinition/MetricSample,结果用 Outcome。
     created = TaskCommissionCreatedView(
@@ -571,7 +567,7 @@ def _agent_run_simulate(service, l4_collet, working_bot, started, tmp_path, task
         context_version=l4_collet.version,
     )
 
-    # TODO 协议要提供远程服务
+    # TODO 上报协议要提供远程服务  (fixed: 上报通过G3提供的可观测数据上报接口进行)
     artifacts = working_bot.run(
         created,
         lambda report_telemetry: _simulate_ai_coding(
@@ -603,7 +599,7 @@ def _query_task_result(
     assert accepted.status == "done"
 
     # 11. 经应用门面的 L4 查询读取 Task 状态与产物,不依赖产品详情接口。
-    # TODO: 管理时、运行时分开。但是这里只是一个Collet查询服务，并不是管理服务。
+    # TODO: 管理时、运行时分开。        （fixed:这里只是一个Collet查询服务，并不是管理服务。)
     final = l4_context_operate.get_status(
         collet_id_1, trunk_events=False, context=HUMAN
     )

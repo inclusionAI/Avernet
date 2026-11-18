@@ -6,12 +6,6 @@ from pydantic import ValidationError
 from agentclaw.community.adapters.http.task.schemas_context_collab_methods import (
     OpenOpportunityRequest,
 )
-from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context import (
-    ActorContext,
-)
-from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
-    PrincipalRef,
-)
 from agentclaw.community.core.task.context_collab.l5_methods.open_profile import (
     ParticipationType,
 )
@@ -29,11 +23,10 @@ def test_open_request_converts_wire_value_to_domain_enum(participation_type):
     body = _body(participation_type=participation_type.value)
     request = OpenOpportunityRequest.model_validate(body)
     assert request.participation_type is participation_type
-    context = ActorContext(PrincipalRef("human", "owner"), "api")
-    command = request.to_domain("collet_enum", context)
+    command = request.to_domain("collet_enum")
     assert command.participation_type is participation_type
     assert command.collet_id == "collet_enum"
-    assert command.actor_context is context
+    assert not hasattr(command, "actor_context")
     wire = request.model_dump(mode="json", exclude_unset=True)
     assert type(wire["participation_type"]) is str
     assert wire == body
@@ -67,7 +60,7 @@ def test_open_request_schema_declares_the_existing_enum():
     ]
 
 
-@pytest.mark.parametrize("removed", ["scope_ref", "opens_at"])
+@pytest.mark.parametrize("removed", ["scope_ref", "opens_at", "actor_context", "context"])
 def test_open_request_rejects_caller_scope_and_opening_time(removed):
     with pytest.raises(ValidationError) as exc_info:
         OpenOpportunityRequest.model_validate(_body(**{removed: "caller_override"}))

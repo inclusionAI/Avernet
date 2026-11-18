@@ -49,12 +49,12 @@ class MethodRelationTemplate:
 class MethodCompositionTemplate:
     """Compose L5 MethodProfiles, not a second L6 Method requirement model.
 
+    Instantiation always targets an existing Collet; scope is not configurable.
     Relations instantiate one binding per required Profile and explicit L5 edges.
     Empty relations retain the historical single-binding topology.
     """
 
     method_kind: str
-    scope: str
     required_methods: tuple[MethodProfile, ...]
     optional_methods: tuple[MethodProfile, ...] = ()
     # Empty means no method-specific product policy, not a default Open policy.

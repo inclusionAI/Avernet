@@ -40,7 +40,6 @@ def _definition(
         ref=VersionedProfileRef(product, 1),
         composition=MethodCompositionTemplate(
             method_kind=method,
-            scope="collet",
             required_methods=tuple(
                 get_profile(item.value, "0.2")
                 for item in parse_method_kinds(method)

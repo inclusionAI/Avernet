@@ -244,7 +244,7 @@ participant-management API or SQL table.
 
 The [journey case](../../../../../../../../tests/community/core/task/context_collab/products/test_task_commission_end_to_end.py)
 resolves the real `OpenMethodOpsServiceProtocol` from its test injector.
-Publication uses the publisher actor; query uses the Bot actor. The fixture
+Publication derives the publisher from the Collet initiator; query uses the Bot actor. The fixture
 injects the same L5 service into `SimulatedWorkingBot`, whose
 `query_opportunities_by_skill` helper uses its own actor context to discover opportunities.
 Its `submit_application_by_skill` helper accepts a declared Product Profile role
@@ -264,7 +264,6 @@ open_method = injector.get(OpenMethodOpsServiceProtocol)
 published = open_method.publish_opportunity(
     OpenOpportunityCommand(
         collet_id=task_id,
-        actor_context=owner_context,
         participation_type=ParticipationType.COLLET_PARTICIPANT,
         capacity=1,
         admission_policy_refs=[
@@ -390,6 +389,13 @@ application already occupies the capacity-1 slot. It validates that application'
 L5 checked window/capacity at submission. Mismatches and repeat review are
 rejected without a second application, admission or Work start. Review/write or
 execution failures still propagate, without automatic retry or compensation.
+
+The authored `MethodCompositionTemplate` has no scope argument; the separate
+instantiation command selects the Collet. Its `OpenOpportunityCommand` likewise
+omits actor context: in-process publication resolves the initiator from that
+persisted Collet for G1 and audit. Authenticated HTTP publication retains its
+actual caller context as a separate service argument (see the
+[publication contract](../../README.md#operation-ownership)).
 
 The journey checks that admission alone cannot authorize Work. The
 [Open + Single regressions](../../../../../../../../tests/community/core/task/context_collab/products/test_task_commission_open_single.py)

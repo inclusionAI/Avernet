@@ -54,10 +54,6 @@ def validate_product_profile(definition: ProductProfileDefinition) -> None:
             "composition and required Method profiles disagree"
         )
     _validate_relations(definition)
-    if definition.composition.scope != "collet":
-        raise ContextCollabValidationError(
-            "only collet-scoped top-level templates are supported"
-        )
     if definition.compatibility.downgrade_policy != "reject_missing_required":
         raise ContextCollabValidationError("unsupported downgrade policy")
     if definition.compatibility.migration_policy != "new_instances_only":
