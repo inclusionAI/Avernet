@@ -71,6 +71,7 @@ export default function DomainList() {
       {
         id: 'name',
         header: 'Domain 名称',
+        headerClassName: 'text-foreground',
         width: COLUMN_WIDTHS[0],
         cell: (d) => (
           <Hint content={d.name}>
@@ -81,38 +82,43 @@ export default function DomainList() {
       {
         id: 'domainId',
         header: 'Domain ID',
+        headerClassName: 'text-foreground',
         width: COLUMN_WIDTHS[1],
         cell: (d) => (
           <Hint content={d.domainId}>
-            <span className="block truncate font-mono text-xs text-content-icon">{d.domainId}</span>
+            <span className="block truncate font-mono text-xs text-foreground">{d.domainId}</span>
           </Hint>
         ),
       },
       {
         id: 'owner',
         header: '工号',
+        headerClassName: 'text-foreground',
         width: COLUMN_WIDTHS[2],
-        cell: (d) => <span className="text-[13px] text-muted-foreground">{d.ownerUserId}</span>,
+        cell: (d) => <span className="text-[13px] text-foreground">{d.ownerUserId}</span>,
       },
       {
         id: 'count',
         header: '模板数量',
+        headerClassName: 'text-foreground',
         width: COLUMN_WIDTHS[3],
         cell: (d) => <span className="text-[13px] text-foreground">{d.templateCount}</span>,
       },
       {
         id: 'description',
         header: '描述',
+        headerClassName: 'text-foreground',
         width: COLUMN_WIDTHS[4],
         cell: (d) => (
           <Hint content={d.description || undefined}>
-            <span className="block truncate text-xs text-muted-foreground">{d.description || '—'}</span>
+            <span className="block truncate text-xs text-foreground">{d.description || '—'}</span>
           </Hint>
         ),
       },
       {
         id: 'actions',
         header: '操作',
+        headerClassName: 'text-foreground',
         width: COLUMN_WIDTHS[5],
         align: 'end',
         sticky: 'right',
