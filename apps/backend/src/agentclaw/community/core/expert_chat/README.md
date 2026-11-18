@@ -131,3 +131,27 @@ revives, upgrades, polls publishing, exchanges identity or updates ledger/bindin
 rows. Provider health observation may refresh the provider's own health cache.
 Provider payload logging is disabled for this query because details can carry
 credentials; diagnostic events project only status and health fields.
+
+
+### BaaS read-only Caller status
+
+`GET /api/v1/expert-chats/app-caller-instance/status` accepts the required,
+nonempty query values `bot_id`, `owner_id` and `user_id`. BaaS authenticates with
+its HS256 service JWT in `X-Avernet-Principal`, using the same signing-key and
+`iss=baas`, `iat`, `exp` and optional `nbf` verification as the application Caller
+connection endpoint above. Missing or invalid credentials return HTTP 401.
+The verified BaaS service may query another user's private Bot Caller without
+an application grant or current chat membership. Tenant and environment remain
+server-controlled; token identity, tenant and audience claims do not select them.
+
+The ordinary `ApiResponse` envelope's successful `data` contains only `exists`
+and `alive`, with the read-only allocation/live-health meanings above. No Caller
+record or missing UUID returns false/false without provider access. The query
+never provisions, restarts, upgrades, publishes, exchanges identity or writes
+instance/binding state. Source-Bot access failure returns the ordinary error
+code 403; upstream failures return a sanitized non-success 5999 envelope rather
+than reporting false health. Public
+`GET /openapi/v1/bots/{bot_id}/caller-instance/status` retains its existing user,
+application-grant and chat-access policy; a BaaS service JWT is not a public
+identity exception. Diagnostics identify `app_caller_instance_status` and never
+include the service JWT, signing key or full provider response.
