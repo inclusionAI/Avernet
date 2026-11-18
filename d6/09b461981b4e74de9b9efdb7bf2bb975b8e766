@@ -1,0 +1,42 @@
+apps/backend/src/agentclaw/community/core/bot_config_manifest/create_job.py
+  s_5417d0ab035efa::t_c598fcabb7d76f 375-377,379
+  s_5417d0ab035efa::t_336382d65dfa29 372-373,378
+apps/backend/tests/community/core/bot_config_manifest/creation/test_create_job.py
+  s_5417d0ab035efa::t_c598fcabb7d76f 181,183-184,189-192,256-271
+  s_5417d0ab035efa::t_336382d65dfa29 274-304
+  s_5417d0ab035efa::t_2aa22c8a9aff1e 272-273
+apps/backend/src/agentclaw/community/core/bot_config_manifest/README.md
+  s_5417d0ab035efa::t_9026887c06237e 343-347
+apps/backend/tests/community/core/bot_config_manifest/creation/test_creation_ordering.py
+  s_b1f9181430ccaa::t_eafa86cf2e76ba 167-169
+apps/backend/tests/community/core/bot_config_manifest/creation/test_creation_ordering_teclaw.py
+  s_b1f9181430ccaa::t_16771799785d9b 113-115
+apps/backend/tests/community/core/bot_config_manifest/creation/test_creation_tenancy.py
+  s_b1f9181430ccaa::t_f11f11ba28160d 267-270
+apps/backend/tests/community/repository/bot/test_bot_repository_unified.py
+  s_5417d0ab035efa::t_8a20072aa63277 596-612
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d609b461981b4e74de9b9efdb7bf2bb975b8e766",
+  "prompts": {},
+  "sessions": {
+    "s_5417d0ab035efa": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ea01-8fd8-7b12-9246-aadccd4bdba8",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    },
+    "s_b1f9181430ccaa": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ea01-61ec-7121-aead-10a35e63c6da",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

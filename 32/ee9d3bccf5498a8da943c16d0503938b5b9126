@@ -1,0 +1,21 @@
+apps/frontend-nextgen/test/services/tasks/panel/taskPanelRecoveryLoader.test.ts
+  s_12273d43a83942::t_4728bd1d859f31 73,95
+apps/frontend-nextgen/test/services/tasks/panel/taskPanelAssetLoader.test.ts
+  s_12273d43a83942::t_4728bd1d859f31 131,159
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "32ee9d3bccf5498a8da943c16d0503938b5b9126",
+  "prompts": {},
+  "sessions": {
+    "s_12273d43a83942": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e9f6-c9ef-77f1-88ad-8a7ab3e27148",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}
