@@ -1,0 +1,22 @@
+engine/adapter/src/engine/community/openclaw/client/gateway_client.py
+  s_3b198be521bb7f::t_a8f00e4c4b957e 37,195,229-230,426-435,444-445,466-475,897-899
+  s_3b198be521bb7f::t_4e92b76966dedf 377,395-401
+engine/adapter/src/engine/community/openclaw/client/tests/test_reasoning_announce.py
+  s_3b198be521bb7f::t_85bf0d0061803f 1-185
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a1230a3fe0ba32392fce971fb69cfc57426ba5f4",
+  "prompts": {},
+  "sessions": {
+    "s_3b198be521bb7f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a166c7-61d8-7221-aa2e-e6efde122735",
+        "model": "gpt-6.2-astra"
+      },
+      "human_author": "evilcoda <yipu.hj@antgroup.com>"
+    }
+  }
+}
