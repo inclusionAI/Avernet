@@ -397,14 +397,15 @@ def test_baas_rejects_unsafe_logical_id_before_query(service, logical_id):
     service.list_devices_by_bot_uuid.assert_not_called()
 
 
-def test_select_current_baas_replica_by_uuid_within_binding(service):
+@pytest.mark.parametrize("selected", ["DEVICE-2", " 副本/A:2 "])
+def test_select_current_baas_replica_by_uuid_within_binding(service, selected):
     devices = [
         {"device_uuid": "DEVICE-1", "status": "ACTIVE", "provider_device_id": "ARCA-SANDBOX-1@2"},
-        {"device_uuid": "DEVICE-2", "status": "ACTIVE", "provider_device_id": "ARCA-SANDBOX-2@2"},
+        {"device_uuid": selected, "status": "ACTIVE", "provider_device_id": "ARCA-SANDBOX-2@2"},
     ]
     service._active_token_replica_devices = MagicMock(return_value=devices)
     assert service.resolve_token_outbound_device_id(
-        binding(device_provider="baas"), device_uuid="DEVICE-2",
+        binding(device_provider="baas"), device_uuid=selected,
     ) == "ARCA-SANDBOX-2@2"
     service._active_token_replica_devices.assert_called_once_with("logical-bot")
 
@@ -483,3 +484,11 @@ def test_no_uuid_keeps_original_inventory_exception(service):
         service.resolve_token_outbound_device_id(binding(device_provider="baas"))
     assert exc.value is error
     service.list_devices_by_bot_uuid.assert_called_once_with("logical-bot", timeout=3.0)
+
+
+@pytest.mark.parametrize("provider", ["baas", "arca"])
+def test_explicit_empty_device_never_falls_back_or_matches_empty_metadata(service, provider):
+    record = binding(device_provider=provider, device_props={"device_uuid": "", "sandbox_id": TARGET})
+    with pytest.raises(module.BaasOutboundTargetError, match="target_not_found"):
+        service.resolve_token_outbound_device_id(record, device_uuid="")
+    service.list_devices_by_bot_uuid.assert_not_called()

@@ -1,8 +1,6 @@
 """Caller-first orchestration for independent outbound token plugins."""
 from __future__ import annotations
 
-import re
-
 from agentclaw.community.core.caller_identity.caller_iam_token_service_protocol import CallerIamTokenServiceProtocol
 from agentclaw.community.core.caller_identity.contracts import (
     CallerIamTokenOutcome,
@@ -129,32 +127,30 @@ class TokenExchangeOrchestrator:
     ) -> TokenExchangeContext | None:
         if not bot_id or not entity_id:
             return None
+        runtime_target = auth_request.query_params.get("caller_runtime_target")
+        device_uuid = auth_request.query_params.get("device_uuid")
+        if runtime_target not in (None, "service", "caller_instance"):
+            logger.warning("token_plugin_context_skipped bot_id=%s reason=invalid_runtime_target", bot_id)
+            return None
+        if device_uuid == "":
+            logger.warning("token_plugin_context_skipped bot_id=%s reason=invalid_device_uuid", bot_id)
+            return None
         bot = self._bot_repository.get_by_id_and_entity(bot_id, entity_id)
         if not bot:
             logger.info(
                 "token_plugin_context_unavailable bot_id=%s entity_id_present=%s",
-                bot_id,
-                True,
+                bot_id, True,
             )
             return None
         owner_user_id = str(bot.get("owner_id") or "")
         bot_type = str(bot.get("bot_type") or "")
         if not owner_user_id or not bot_type:
             return None
-        runtime_target = auth_request.query_params.get("caller_runtime_target")
-        device_uuid = auth_request.query_params.get("device_uuid")
-        if runtime_target not in (None, "service", "caller_instance"):
-            logger.warning("token_plugin_context_skipped bot_id=%s reason=invalid_runtime_target", bot_id)
-            return None
-        if friend_user_id is not None and runtime_target == "service":
-            logger.warning("token_plugin_context_skipped bot_id=%s reason=friend_shared_target_denied", bot_id)
-            return None
-        if device_uuid is not None and not re.fullmatch(r"[A-Za-z0-9._~-]{1,255}", device_uuid):
-            logger.warning("token_plugin_context_skipped bot_id=%s reason=invalid_device_uuid", bot_id)
-            return None
         # COSEC: resource and rollout identities do not prove the requester's subject.
-        identity = await self._auth_plugin.resolve_user_from_request(auth_request)
-        actor_user_id = getattr(identity, "staffId", None)
+        actor_user_id = auth_request.verified_actor_user_id
+        if actor_user_id is None:
+            identity = await self._auth_plugin.resolve_user_from_request(auth_request)
+            actor_user_id = getattr(identity, "staffId", None)
         if not isinstance(actor_user_id, str) or not actor_user_id.strip():
             logger.warning(
                 "token_plugin_actor_unavailable bot_id=%s reason=missing_authenticated_actor",

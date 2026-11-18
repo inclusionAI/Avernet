@@ -223,7 +223,7 @@ async def test_real_identity_module_injects_auth_plugin_into_orchestrator():
 @pytest.mark.asyncio
 @pytest.mark.parametrize("selection", [
     {}, {"caller_runtime_target": "service"}, {"caller_runtime_target": "caller_instance"},
-    {"device_uuid": "DEVICE-02"}, {"device_uuid": "DEVICE-02", "caller_runtime_target": "service"},
+    {"device_uuid": "DEVICE-02"}, {"device_uuid": " 副本/a:b "}, {"device_uuid": "DEVICE-02", "caller_runtime_target": "service"},
 ])
 async def test_jit_reads_selectors_after_unchanged_caller_refresh(selection):
     auth = _Auth()
@@ -239,7 +239,7 @@ async def test_jit_reads_selectors_after_unchanged_caller_refresh(selection):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("selection", [
     {"caller_runtime_target": ""}, {"caller_runtime_target": "AUTO"},
-    {"device_uuid": ""}, {"device_uuid": " foreign "}, {"device_uuid": "bad/uuid"},
+    {"device_uuid": ""},
 ])
 async def test_invalid_jit_selectors_preserve_caller_without_fallback(selection):
     service, caller, pipeline = _service(_Auth())
@@ -280,12 +280,12 @@ async def test_jit_selector_failure_preserves_original_caller_exception():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("target,allowed", [("service", False), ("caller_instance", True)])
-async def test_friend_request_can_only_select_its_independent_runtime(target, allowed):
+@pytest.mark.parametrize("target", ["service", "caller_instance"])
+async def test_verified_friend_keeps_requested_runtime_for_target_authorization(target):
     service, caller, pipeline = _service(_Auth("friend-1"))
     request = _request(friend_user_id="friend-1", auth_request=AuthRequestContext(
         query_params={"caller_runtime_target": target},
     ))
     assert await service.get_iam_token(**request) is caller.outcome
     assert caller.requests == [request]
-    assert [ctx.caller_runtime_target for ctx in pipeline.contexts] == ([target] if allowed else [])
+    assert [ctx.caller_runtime_target for ctx in pipeline.contexts] == [target]

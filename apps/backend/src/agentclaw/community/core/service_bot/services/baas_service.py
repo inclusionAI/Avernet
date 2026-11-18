@@ -3386,6 +3386,8 @@ class BaasService:  # pragma: no cover
         try:
             if binding is None or str(getattr(binding, "status", "")).upper() != "ACTIVE":
                 raise BaasOutboundTargetError("binding_unavailable")
+            if device_uuid == "":
+                raise BaasOutboundTargetError("target_not_found")
             if provider not in ("baas", "arca", "teclaw"):
                 raise BaasOutboundTargetError("unsupported_provider")
             if provider in ("baas", "teclaw"):
