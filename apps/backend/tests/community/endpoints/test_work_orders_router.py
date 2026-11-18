@@ -123,6 +123,20 @@ def _seed_bot_editor_request(world) -> None:
     )
 
 
+def _seed_cancellable_friend_event(world) -> None:
+    """A pending BOT_FRIEND approval the applicant is about to withdraw."""
+    _enable_public_auth(world)
+
+    def _cancel_pending_friend_event(_self, **_kwargs):
+        return 1
+
+    bind_overrides(
+        world,
+        WorkOrderServiceProtocol,
+        {"cancel_pending_friend_event": _cancel_pending_friend_event},
+    )
+
+
 def _seed_editor_policy(world, *, owner_id: str = _USER_ID) -> None:
     _enable_public_auth(world)
     space = world.get(SpaceServiceProtocol).create_team(
@@ -778,3 +792,46 @@ def create_work_order_event_http_happy():
 )
 def create_work_order_event_http_unauthenticated():
     """The authenticated HTTP mirror rejects requests without identity."""
+
+
+# ── POST /api/v1/work-orders/events/cancel ─────────────────────────────────────
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/v1/work-orders/events/cancel",
+    scenario="happy",
+    seed=_seed_cancellable_friend_event,
+    input=CaseInput(
+        json_body={
+            "biz_type": "BOT_FRIEND",
+            "biz_id": "friend-request-1",
+            "reason": "friend request cancelled by applicant",
+        },
+        headers=_principal_headers(),
+    ),
+    expect=ExpectSuccess(
+        status=201,
+        json_contains={"code": 201000, "data": {"cancelled_count": 1}},
+    ),
+)
+def cancel_work_order_event_http_happy():
+    """The authenticated mirror withdraws the applicant's pending approval."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/v1/work-orders/events/cancel",
+    scenario="unauthenticated",
+    seed=_enable_public_auth,
+    input=CaseInput(
+        json_body={
+            "biz_type": "BOT_FRIEND",
+            "biz_id": "friend-request-1",
+            "reason": "friend request cancelled by applicant",
+        },
+    ),
+    expect=ExpectError(status=401),
+)
+def cancel_work_order_event_http_unauthenticated():
+    """Withdrawing a friend approval requires a verified caller."""
