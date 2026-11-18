@@ -1,0 +1,20 @@
+apps/evolverun/clawweb/public/modules/clawinsight/web/pages/InsightCenter/monitoring/__tests__/MonitoringSettings.test.tsx
+  s_efe96cd8c65cfd::t_98c41ee6a1a128 26-29
+  s_efe96cd8c65cfd::t_b4f56618f2a9e9 30-39
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "86cc9c504a2241e838c733644bad832904aa10c0",
+  "prompts": {},
+  "sessions": {
+    "s_efe96cd8c65cfd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1eca3-90eb-71b3-a533-6f311014afc4",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}
