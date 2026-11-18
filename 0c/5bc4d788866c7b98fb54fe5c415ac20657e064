@@ -22,6 +22,7 @@ apps/bcs-internal/crates/plugins/bcs-app-identity-oneid/src/sdk.rs
   s_83a624b3301ddd::t_9829542a1655a2 1-146
 apps/bcs-internal/specs/application-identity/plan.md
   s_83a624b3301ddd::t_b8ba5c85c1d055 1-2,4-29
+  s_83a624b3301ddd::t_6d3b453eee6e54 3
 apps/bcs-internal/specs/application-identity/spec.md
   s_83a624b3301ddd::t_5a24b6acf8aefe 1-39
 ---
