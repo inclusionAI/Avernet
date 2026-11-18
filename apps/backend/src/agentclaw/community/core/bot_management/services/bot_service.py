@@ -82,7 +82,10 @@ if TYPE_CHECKING:
         RestartBackupDependencies,
     )
 from agentclaw.community.core.bot_management.repository.models import BotRestartLockRecord
-from agentclaw.community.core.repository.protocols.bot import BotRestartLockRepositoryProtocol
+from agentclaw.community.core.repository.protocols.bot import (
+    BotBuildActiveRepositoryProtocol,
+    BotRestartLockRepositoryProtocol,
+)
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_management.services.default_image_policy_listener import (
     DEFAULT_IMAGE_POLICY_VALUE,
@@ -395,6 +398,11 @@ class BotService(BotServiceProtocol):
         bot_storage_policy: BotStoragePolicyProtocol | None = None,
         restart_backup_dependencies: "RestartBackupDependencies | None" = None,
         scheduled_caller_refresh: ScheduledCallerRefreshProtocol | None = None,
+        # Build-active guard read by the coding restart lifecycle before it
+        # destroys the instance. ``None`` disables the guard for compositions
+        # (legacy/tests) that do not wire it; the restart path then keeps its
+        # pre-guard behavior.
+        build_active_repo: "BotBuildActiveRepositoryProtocol | None" = None,
     ) -> None:
         self._repository = repository
         self._scheduled_caller_refresh = scheduled_caller_refresh
@@ -444,6 +452,7 @@ class BotService(BotServiceProtocol):
         # unbound. Both use sites go through ``_require_workspace_hosting`` (B8).
         self._collaborator_repo = collaborator_repo
         self._restart_lock_repo = restart_lock_repo
+        self._build_active_repo = build_active_repo
         # Lazy (cycle-safe): teclaw provisioning pulls in BaasService +
         # ConfigComposer, whose graphs transitively reach BotService.
         self._teclaw_provision_provider = teclaw_provision_service_provider

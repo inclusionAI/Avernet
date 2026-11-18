@@ -69,6 +69,7 @@ from agentclaw.community.core.bot_management.render_screen.backfill import (
     RenderScreenOwnerScopeBackfill,
 )
 from agentclaw.community.core.repository.protocols.bot import (
+    BotBuildActiveRepositoryProtocol,
     BotConfigManifestRepositoryProtocol,
     BotRestartLockRepositoryProtocol,
     BotStartupScriptRepositoryProtocol,
@@ -415,7 +416,6 @@ class BotManagementModule(Module):
     def bot_repository(self, db: DatabasePlugin) -> BotRepository:
         return UnifiedBotRepository(db)
 
-
     @singleton
     @provider
     @inject
@@ -572,6 +572,7 @@ class BotManagementModule(Module):
             workspace_hosting_service=_optional_get(injector, WorkspaceHostingService),
             collaborator_repo=collaborator_repo,
             restart_lock_repo=restart_lock_repo,
+            build_active_repo=injector.get(BotBuildActiveRepositoryProtocol),
             teclaw_provision_service_provider=teclaw_provision_service_provider,
             drm_reader=drm_reader,
             # Leaf BaaS reader for the by-owner list's live desktop status.

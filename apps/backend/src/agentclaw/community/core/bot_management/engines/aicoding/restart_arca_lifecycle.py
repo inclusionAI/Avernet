@@ -6,9 +6,37 @@ handoff; this strategy must not unlock a successfully spawned allocation.
 """
 from __future__ import annotations
 
+from agentclaw.community.log import get_logger
 from agentclaw.community.utils.env_utils import get_current_env
 
+from .restart_baas import RestartSubmissionRejected
 from .restart_arca import RestartBackupTargetChanged
+
+
+logger = get_logger()
+
+BUILD_IN_PROGRESS_MESSAGE = "Bot 正在构建中，请等待构建完成后再重试重启"
+
+
+def build_in_progress(service, env: str, entity_id: str, bot_id: str) -> bool:
+    """Whether a publish build is currently reading this Bot's source workspace.
+
+    The guard is best-effort: an unwired or failing repository keeps the
+    pre-guard restart behavior instead of turning a guard lookup into a restart
+    outage. The failure is logged so a missing guard is visible in triage.
+    """
+    repo = getattr(service, "_build_active_repo", None)
+    if repo is None:
+        return False
+    try:
+        return bool(repo.is_active(env, entity_id, bot_id))
+    except Exception as error:
+        logger.warning(
+            "event=aicoding_restart_build_guard status=degraded "
+            "reason=lookup_failed error_type=%s bot_id=%s env=%s entity_id=%s",
+            type(error).__name__, bot_id, env, entity_id,
+        )
+        return False
 
 
 class AicodingArcaRestart:
@@ -48,6 +76,20 @@ class AicodingArcaRestart:
             return state.read()  # No mutation fence: the worker can retry.
         handed_off = False
         try:
+            # A publish build rsyncs from the workspace inside the instance we
+            # are about to destroy. Reject the overlap instead of queuing or
+            # cancelling the build. This runs BEFORE ``verify()``: verify is
+            # what fences the mutation (journal RESTARTING, Bot PENDING), so a
+            # rejection afterwards would mark a still-running Bot FAILED.
+            # Raising here releases the restart lock in the ``finally`` below
+            # and fails the task with a retry hint.
+            if build_in_progress(service, env, entity_id, state.bot_id):
+                logger.warning(
+                    "event=aicoding_restart_build_guard status=rejected "
+                    "reason=build_in_progress bot_id=%s env=%s entity_id=%s",
+                    state.bot_id, env, entity_id,
+                )
+                raise RestartSubmissionRejected(BUILD_IN_PROGRESS_MESSAGE)
             verify()
             if bot.get("bot_type") == "service":
                 bot = service._mark_service_bot_default_image(bot)

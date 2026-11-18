@@ -19,6 +19,7 @@ import os
 import shlex
 import subprocess
 import tempfile
+import threading
 import time
 import uuid
 from dataclasses import dataclass, replace
@@ -28,7 +29,11 @@ from typing import TYPE_CHECKING, Any, Dict, Optional
 from injector import inject
 
 from agentclaw.community.core.channel.channel_service_protocol import ChannelServiceProtocol
-from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.bot import (
+    DEFAULT_BUILD_ACTIVE_TTL_SECONDS,
+    BotBuildActiveRepositoryProtocol,
+    BotRepository,
+)
 from agentclaw.community.core.repository.protocols.identity import UserListRepositoryProtocol
 from agentclaw.community.core.service_bot.services.runtime_artifact_policy import resolve_runtime_artifacts
 from agentclaw.community.core.repository.protocols.build_ignore import BuildIgnoreRepositoryProtocol
@@ -158,6 +163,50 @@ DEVICE_COUNT_CONFIG_BUSINESS_CODE = "service_bot_device_count"
 DEVICE_COUNT_DEFAULT_PARAM_CODE = "default"
 
 
+class _BuildActiveHeartbeat:
+    """Renew the build-active marker while a long transfer is still running.
+
+    A build that outlives the guard TTL would otherwise lose its protection
+    (and let another build steal the marker). The heartbeat refreshes the row
+    from the token holder until the transfer finishes.
+    """
+
+    def __init__(self, repository, env, entity_id, bot_id, token, interval_seconds):
+        self._repository = repository
+        self._env = env
+        self._entity_id = entity_id
+        self._bot_id = bot_id
+        self._token = token
+        self._interval = interval_seconds
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        self._thread.join(timeout=5)
+
+    def _run(self) -> None:
+        while not self._stop.wait(self._interval):
+            try:
+                if not self._repository.touch(
+                    self._env, self._entity_id, self._bot_id, self._token,
+                ):
+                    logger.warning(
+                        "build_active.heartbeat status=lost bot_id=%s entity_id=%s env=%s",
+                        self._bot_id, self._entity_id, self._env,
+                    )
+                    return
+            except Exception as error:
+                logger.warning(
+                    "build_active.heartbeat status=degraded reason=write_failed "
+                    "error_type=%s bot_id=%s entity_id=%s env=%s",
+                    type(error).__name__, self._bot_id, self._entity_id, self._env,
+                )
+
+
 class BotBuildService:
     """Bot 构建迁移服务 - AgentClaw 层入口。
 
@@ -187,6 +236,10 @@ class BotBuildService:
         user_list_repository: UserListRepositoryProtocol,
         env: str,
         artifact_transfers: ArtifactTransferRegistry,
+        # Marks the source-reading window so a restart of the same Bot can be
+        # rejected instead of destroying the instance mid-rsync. ``None``
+        # disables the guard for compositions that do not wire it.
+        build_active_repository: BotBuildActiveRepositoryProtocol | None = None,
     ):
         """初始化 BotBuildService。
 
@@ -214,6 +267,7 @@ class BotBuildService:
         self._env = env
         self._user_list_repository = user_list_repository
         self._artifact_transfers = artifact_transfers
+        self._build_active_repository = build_active_repository
 
     def _get_device_binding_repo(self):
         return self._device_binding_repo
@@ -412,6 +466,11 @@ class BotBuildService:
             # 2.1 执行 rsync 迁移
             transfer_started = time.monotonic()
             migration_success = False
+            # Mark the whole source-reading window (artifact transfer or
+            # ``_migrate_bot_instance``): a restart that destroys this Bot's
+            # instance here would pull the rsync source out from under us.
+            build_lease = self._mark_build_active(entity_id, bot_id)
+            heartbeat = self._start_build_heartbeat(entity_id, bot_id, build_lease)
             try:
                 migration_success = self._artifact_transfers.resolve(build_plan.engine_type).publish(
                     device_id=device_id, plan=build_plan, provider=provider,
@@ -438,6 +497,9 @@ class BotBuildService:
                     "success" if migration_success else "failure",
                     int((time.monotonic() - transfer_started) * 1000),
                 )
+                if heartbeat is not None:
+                    heartbeat.stop()
+                self._clear_build_active(entity_id, bot_id, build_lease)
 
             # Unless handled by the engine transfer strategy, host-side rsync writes the
             # versioned artifact. It preserves active symlinks and local Skill
@@ -1362,6 +1424,74 @@ class BotBuildService:
                     os.unlink(tmp_path)
                 except OSError:
                     pass
+
+    def _mark_build_active(self, entity_id: str, bot_id: str) -> str | None:
+        """Mark that this build is reading the Bot's source workspace.
+
+        Returns the fencing token when *this* build owns the marker, or None
+        when another build already owns it (or the guard is unwired/failing).
+        The guard is a coordination layer: a guard write failure must not fail a
+        build that would otherwise succeed, but the gap is logged so a missing
+        guard is visible in triage.
+        """
+        repo = getattr(self, "_build_active_repository", None)
+        if repo is None:
+            return None
+        try:
+            token = repo.mark_active(self._env, entity_id, bot_id)
+        except Exception as error:
+            logger.warning(
+                "build_active.mark status=degraded reason=write_failed "
+                "error_type=%s bot_id=%s entity_id=%s env=%s",
+                type(error).__name__, bot_id, entity_id, self._env,
+            )
+            return None
+        if token is None:
+            logger.info(
+                "build_active.mark status=already_active bot_id=%s entity_id=%s env=%s",
+                bot_id, entity_id, self._env,
+            )
+        return token
+
+    def _start_build_heartbeat(
+        self, entity_id: str, bot_id: str, token: str | None,
+    ) -> "_BuildActiveHeartbeat | None":
+        """Keep this build's marker fresh; only its owner may renew it."""
+        repo = getattr(self, "_build_active_repository", None)
+        if repo is None or token is None:
+            return None
+        heartbeat = _BuildActiveHeartbeat(
+            repo, self._env, entity_id, bot_id, token,
+            DEFAULT_BUILD_ACTIVE_TTL_SECONDS / 3,
+        )
+        try:
+            heartbeat.start()
+        except Exception as error:
+            # Losing the heartbeat degrades protection to the TTL; it must not
+            # fail a build that already marked itself active.
+            logger.warning(
+                "build_active.heartbeat status=degraded reason=start_failed "
+                "error_type=%s bot_id=%s entity_id=%s env=%s",
+                type(error).__name__, bot_id, entity_id, self._env,
+            )
+            return None
+        return heartbeat
+
+    def _clear_build_active(
+        self, entity_id: str, bot_id: str, token: str | None,
+    ) -> None:
+        """Release the marker this build owns; never clear a successor's."""
+        repo = getattr(self, "_build_active_repository", None)
+        if repo is None or token is None:
+            return
+        try:
+            repo.clear(self._env, entity_id, bot_id, token)
+        except Exception as error:
+            logger.warning(
+                "build_active.clear status=degraded reason=write_failed "
+                "error_type=%s bot_id=%s entity_id=%s env=%s",
+                type(error).__name__, bot_id, entity_id, self._env,
+            )
 
     def _migrate_bot_instance(
         self,

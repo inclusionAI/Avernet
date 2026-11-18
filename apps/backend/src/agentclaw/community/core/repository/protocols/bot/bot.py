@@ -640,6 +640,87 @@ class BotRestartLockRepositoryProtocol(Protocol):
         ...
 
 
+# A build that crashed without clearing its marker stops blocking restarts
+# after this bound. Callers may pass a different TTL; the repository never
+# hard-codes a business constant of its own.
+DEFAULT_BUILD_ACTIVE_TTL_SECONDS = 30 * 60
+
+
+@runtime_checkable
+class BotBuildActiveRepositoryProtocol(Protocol):
+    """Protocol for the build-active guard repository.
+
+    One row per ``(env, entity_id, bot_id)`` marks that a publish build is
+    reading the Bot's source workspace. A restart checks ``is_active`` before
+    destroying the instance and is rejected while a build overlaps, because
+    the build's ``rsync`` source lives inside that instance's workspace.
+
+    A row is removed by the build's ``finally``; if the build process dies, the
+    row is treated as expired once it is older than ``ttl_seconds`` so restarts
+    are not blocked forever. The UNIQUE constraint is the coordination
+    primitive, exactly like ``ac_bot_restart_lock``.
+    """
+
+    @abstractmethod
+    def mark_active(
+        self,
+        env: str,
+        entity_id: str,
+        bot_id: str,
+        ttl_seconds: int = DEFAULT_BUILD_ACTIVE_TTL_SECONDS,
+    ) -> Optional[str]:
+        """Mark a build as active for this Bot and return its fencing token.
+
+        Returns the freshly minted token when this caller inserted the row (and
+        therefore owns clearing/touching it), or ``None`` when a fresh row
+        already exists — another build of the same Bot is active. A row older
+        than ``ttl_seconds`` is treated as crashed and replaced.
+        """
+        ...
+
+    @abstractmethod
+    def clear(self, env: str, entity_id: str, bot_id: str, build_lease: str) -> bool:
+        """Release the marker, only if it is still ours.
+
+        Compare-and-delete: ``DELETE WHERE (env, entity_id, bot_id) matches AND
+        build_lease = :build_lease``. The token guard prevents a slow build
+        whose row was replaced after TTL from deleting its successor's marker.
+        Returns ``True`` if a row was deleted.
+        """
+        ...
+
+    @abstractmethod
+    def touch(
+        self,
+        env: str,
+        entity_id: str,
+        bot_id: str,
+        build_lease: str,
+    ) -> bool:
+        """Renew a long-running build's marker.
+
+        Refreshes the row's ``gmt_create`` to the database clock only when the
+        token still matches, so a build longer than the TTL keeps its
+        protection. Returns ``False`` when the marker is gone or was replaced.
+        """
+        ...
+
+    @abstractmethod
+    def is_active(
+        self,
+        env: str,
+        entity_id: str,
+        bot_id: str,
+        ttl_seconds: int = DEFAULT_BUILD_ACTIVE_TTL_SECONDS,
+    ) -> bool:
+        """Return whether a fresh build marker exists.
+
+        Age is evaluated against the database clock, so application/DB clock
+        skew cannot leave a stale marker blocking restarts.
+        """
+        ...
+
+
 @runtime_checkable
 class TemplateRepository(Protocol):
     """Protocol for template repository implementations.

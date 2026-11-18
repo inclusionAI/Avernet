@@ -72,7 +72,10 @@ from agentclaw.community.api.collaborator_lock_service import (
 from agentclaw.community.api.collaborator_service import CollaboratorServiceProtocol
 from agentclaw.community.api.quality_service import QualityTaskServiceProtocol
 from agentclaw.community.api.task_processor_service import TaskProcessorProtocol
-from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.bot import (
+    BotBuildActiveRepositoryProtocol,
+    BotRepository,
+)
 from agentclaw.community.core.bot_management.services.bcn_service import BcnService
 from agentclaw.community.core.bot_management.services.bot_service import BotService
 from agentclaw.community.core.bot_management.services.template_service import TemplateService
@@ -458,10 +461,12 @@ class ServiceBotModule(Module):
         common_whitelist_service: CommonWhiteListService,
         system_config_service: SystemConfigService,
         artifact_transfers: ArtifactTransferRegistry,
+        build_active_repository: BotBuildActiveRepositoryProtocol,
     ) -> BotBuildService:
         """Construct ``BotBuildService`` with sandbox registry support."""
         return BotBuildService(
             artifact_transfers=artifact_transfers,
+            build_active_repository=build_active_repository,
             build_ignore_repository=build_ignore_repository,
             user_list_repository=user_list_repository,
             env=env_utils.get_current_env(),
