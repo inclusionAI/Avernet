@@ -50,7 +50,7 @@ export function MonitoringSettings({ onClose, onChanged, practiceUrl }: { onClos
       </div>
     </div>
     <div className="settings-notice settings-operation-notice"><Icon name="text" /><span>用 Bot 旁的开关可单独开启或关闭，也可以点击「一键全开」或「一键全关」批量设置。</span></div>
-    <div className="settings-notice settings-service-notice"><Icon name="alert" /><span>桌面 Bot、TE 及其他非 OpenClaw 引擎 Bot 暂不支持。服务 Bot 配置请联系山宗、安远、沐荛。</span></div>
+    <div className="settings-notice settings-service-notice"><Icon name="alert" /><span>仅支持 OpenClaw、TE 引擎，桌面 Bot 暂不支持。服务 Bot 需评估后由平台开启，请联系山宗、安远、沐荛。</span></div>
     <div className="records-toolbar settings-toolbar"><label className="search-box"><Icon name="search" /><input type="search" aria-label="搜索我的 Bot" placeholder="搜索 Bot 名称或 ID" value={q} disabled={busy} onChange={event => setQ(event.target.value)} /></label>
       <div className="settings-actions" role="group" aria-label="批量设置诊断自愈">
         <button type="button" className="copy-btn" disabled={busy} onClick={() => void save({ all: true, enabled: false })}>一键全关</button>
@@ -64,8 +64,13 @@ export function MonitoringSettings({ onClose, onChanged, practiceUrl }: { onClos
     <ul className="settings-bots">{page?.items.map(bot => {
       const config = bot.configuration, enabled = config?.diagnosisEnabled === true && config.recoveryEnabled === true;
       const disabledReason = bot.configurationDisabledReason;
+      const engine = bot.activeEngine?.trim().toLowerCase();
+      const engineLabel = engine === 'openclaw' ? 'OpenClaw' : engine === 'teclaw' ? 'TE' : bot.activeEngine?.trim() || '引擎未知';
+      const type = bot.botType?.trim().toLowerCase();
+      const typeLabel = type === 'service' ? '服务 Bot' : type === 'desktop' ? '桌面 Bot' : type === 'personal' ? '个人 Bot' : bot.botType?.trim() || '类型未知';
       return <li key={bot.botRef} className={disabledReason ? 'settings-disabled-bot' : undefined}><span className="bot-glyph"><Icon name="bot" /></span>
-        <div className="record-text"><strong className="record-title">{bot.botName}</strong><small className="record-session mono">{bot.botId} · {bot.ownerId} · {bot.env}</small>
+        <div className="record-text"><div className="settings-bot-heading"><strong className="record-title">{bot.botName}</strong>
+          <span className="settings-bot-tags"><span className="enrollment-badge">{engineLabel}</span><span className="enrollment-badge">{typeLabel}</span></span></div><small className="record-session mono">{bot.botId} · {bot.ownerId} · {bot.env}</small>
           {disabledReason && <span className="settings-bot-note">{disabledReason}</span>}</div>
         <span className={`settings-state${enabled && !disabledReason ? ' enabled' : ''}`}>{enabled ? '已开启' : '已关闭'}</span>
         <button type="button" role="switch" aria-label={`${bot.botName} 诊断监控`} aria-checked={enabled} className="monitoring-switch" disabled={busy || Boolean(disabledReason)} title={disabledReason}

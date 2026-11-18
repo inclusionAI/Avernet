@@ -116,14 +116,17 @@ it('bulk updates all owner pages, excludes other owners and refuses admin write 
 });
 
 it.each([
-  ['service', 'openclaw', '服务 Bot 请联系平台'],
+  ['service', 'openclaw', '服务 Bot 请联系平台评估开启'],
+  ['service', 'teclaw', '服务 Bot 请联系平台评估开启'],
+  ['service', 'claude_code', '当前引擎暂不支持'],
   ['desktop', 'openclaw', '桌面 Bot 暂不支持'],
   ['desktop', 'teclaw', '桌面 Bot 暂不支持'],
-  ['personal', 'teclaw', 'TE 引擎暂不支持'],
-  ['personal', 'claude_code', '非 OpenClaw 引擎暂不支持'],
-  ['personal', 'moltis', '非 OpenClaw 引擎暂不支持'],
-  ['personal', '', '非 OpenClaw 引擎暂不支持'],
-  ['personal', null, '非 OpenClaw 引擎暂不支持'],
+  ['personal', 'claude_code', '当前引擎暂不支持'],
+  ['personal', 'moltis', '当前引擎暂不支持'],
+  ['personal', '', '当前引擎暂不支持'],
+  ['personal', null, '当前引擎暂不支持'],
+  ['unknown', 'openclaw', '当前 Bot 类型暂不支持'],
+  [null, 'teclaw', '当前 Bot 类型暂不支持'],
 ])('shows and enforces the same owner restriction for type=%s engine=%s', async (botType, engine, reason) => {
   await bot('blocked-existing'); await bot('blocked-new');
   await db.exec('UPDATE ac_bots SET bot_type = ?, active_engine = ?', [botType, engine]);
@@ -151,8 +154,25 @@ it.each([
   }
 });
 
+it.each(['openclaw', 'teclaw'])('allows personal %s Bots through single and bulk owner controls', async engine => {
+  await bot();
+  await db.exec('UPDATE ac_bots SET active_engine = ?', [engine]);
+  const browser = createMonitoringBrowserService(new MonitoringRepository(db), directory, refs, scope, Date.now, configs);
+  expect((await browser.options(principal, { env: 'prod' })).items[0]).toMatchObject({ activeEngine: engine, botType: 'personal' });
+  expect((await browser.options(principal, { env: 'prod' })).items[0].configurationDisabledReason).toBeUndefined();
+  for (const [version, enabled] of [[0, true], [1, false]] as const) {
+    expect(await configureBots(configs, directory, refs, principal, { botRef: refs.encode(target, 'one'), enabled, version }))
+      .toEqual({ updated: 1, failed: [] });
+    expect(await configs.find(target)).toMatchObject({ diagnosisEnabled: enabled, recoveryEnabled: enabled });
+  }
+  for (const enabled of [true, false]) {
+    expect(await configureBots(configs, directory, refs, principal, { all: true, enabled })).toEqual({ updated: 1, failed: [] });
+    expect(await configs.find(target)).toMatchObject({ diagnosisEnabled: enabled, recoveryEnabled: enabled });
+  }
+});
+
 it.each([
-  ['bot_type', 'desktop'], ['active_engine', 'teclaw'],
+  ['bot_type', 'desktop'], ['active_engine', 'claude_code'],
 ])('rechecks changed %s before bulk writes', async (column, value) => {
   await bot();
   const get = directory.get.bind(directory);

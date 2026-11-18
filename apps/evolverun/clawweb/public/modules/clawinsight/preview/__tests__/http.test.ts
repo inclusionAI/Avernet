@@ -59,18 +59,18 @@ describe('real local preview HTTP + directory + monitoring SQL', () => {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
     });
     expect((await configure({ botRef: bot.botRef, enabled: true, version: 0 })).status).toBe(403);
-    expect(await (await configure({ all: true, enabled: true })).json()).toEqual({ updated: 1, failed: [] });
+    expect(await (await configure({ all: true, enabled: true })).json()).toEqual({ updated: 2, failed: [] });
     const { items: [after] } = await (await options('&q=weekly-report')).json();
     expect(after.configuration).toEqual(bot.configuration);
   });
-  it('keeps desktop, TE and other engines visible but rejects owner writes over HTTP', async () => {
+  it('keeps desktop and other engines visible but rejects owner writes over HTTP', async () => {
     const { items } = await (await options('&scope=mine&env=prod')).json();
     const configure = (input: unknown) => request('/monitoring/configurations', 'member', {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input),
     });
     for (const [botId, reason] of [
-      ['desktop-assistant', '桌面 Bot 暂不支持'], ['te-assistant', 'TE 引擎暂不支持'],
-      ['claude-assistant', '非 OpenClaw 引擎暂不支持'],
+      ['desktop-assistant', '桌面 Bot 暂不支持'],
+      ['claude-assistant', '当前引擎暂不支持'],
     ]) {
       const bot = items.find((item: { botId: string }) => item.botId === botId);
       expect(bot).toMatchObject({ configurationDisabledReason: reason, configuration: { version: 0 } });
@@ -80,10 +80,17 @@ describe('real local preview HTTP + directory + monitoring SQL', () => {
         expect(await response.json()).toMatchObject({ error: { message: reason } });
       }
     }
-    const supported = items.find((item: { botId: string }) => item.botId === 'default');
-    expect(supported.configurationDisabledReason).toBeUndefined();
+    for (const [botId, engine] of [['default', 'openclaw'], ['te-assistant', 'teclaw']]) {
+      const supported = items.find((item: { botId: string }) => item.botId === botId);
+      expect(supported).toMatchObject({ activeEngine: engine, botType: 'personal' });
+      expect(supported.configurationDisabledReason).toBeUndefined();
+      for (const enabled of [true, false]) {
+        const current = (await (await options('&scope=mine&env=prod')).json()).items.find((item: { botId: string }) => item.botId === botId);
+        expect((await configure({ botRef: current.botRef, version: current.configuration.version, enabled })).status).toBe(200);
+      }
+    }
     for (const enabled of [true, false]) {
-      expect(await (await configure({ all: true, enabled })).json()).toEqual({ updated: 1, failed: [] });
+      expect(await (await configure({ all: true, enabled })).json()).toEqual({ updated: 2, failed: [] });
       const { items: after } = await (await options('&scope=mine&env=prod')).json();
       expect(after.filter((item: { configurationDisabledReason?: string }) => item.configurationDisabledReason)
         .every((item: { configuration: { version: number } }) => item.configuration.version === 0)).toBe(true);
@@ -103,7 +110,7 @@ describe('real local preview HTTP + directory + monitoring SQL', () => {
     });
     expect((await configure({ botRef: pre.botRef, version: 1, enabled: false })).status).toBe(403);
     for (const enabled of [true, false]) {
-      expect(await (await configure({ all: true, enabled })).json()).toEqual({ updated: 1, failed: [] });
+      expect(await (await configure({ all: true, enabled })).json()).toEqual({ updated: 2, failed: [] });
       expect(await preRows()).toEqual(original);
     }
   });

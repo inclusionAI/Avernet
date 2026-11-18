@@ -24,11 +24,11 @@ export function isServiceBot(bot: DirectoryBot): boolean {
 
 /** Shared by option rendering and owner writes, using the current directory metadata. */
 export function botConfigurationDisabledReason(bot: DirectoryBot): string | undefined {
-  if (isServiceBot(bot)) return '服务 Bot 请联系平台';
   if (bot.botType?.trim().toLowerCase() === 'desktop') return '桌面 Bot 暂不支持';
   const engine = bot.activeEngine.trim().toLowerCase();
-  if (engine === 'teclaw') return 'TE 引擎暂不支持';
-  if (engine !== 'openclaw') return '非 OpenClaw 引擎暂不支持';
+  if (!['openclaw', 'teclaw'].includes(engine)) return '当前引擎暂不支持';
+  if (isServiceBot(bot)) return '服务 Bot 请联系平台评估开启';
+  if (bot.botType?.trim().toLowerCase() !== 'personal') return '当前 Bot 类型暂不支持';
   return undefined;
 }
 
