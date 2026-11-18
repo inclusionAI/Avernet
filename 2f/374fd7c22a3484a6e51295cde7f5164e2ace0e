@@ -1,0 +1,40 @@
+apps/frontend-nextgen/test/services/tasks/panel/taskPanelAssetLoader.test.ts
+  h_5b2ec9c12c4d18 2,12,15-17,22-23,25,124-206
+apps/frontend-nextgen/test/config/bbsProxyConfig.test.ts
+  h_5b2ec9c12c4d18 12,25,43,46-51
+apps/frontend-nextgen/test/services/tasks/panel/taskPanelDiagnostics.test.ts
+  h_5b2ec9c12c4d18 1-47
+apps/frontend-nextgen/src/services/tasks/panel/taskPanelAssetLoader.ts
+  h_5b2ec9c12c4d18 3,31-37,39,54
+apps/frontend-nextgen/src/services/tasks/panel/taskPanelAssetSource.ts
+  h_5b2ec9c12c4d18 6-12,36-71,74-76
+apps/frontend-nextgen/src/services/tasks/panel/taskPanelHandleAdapter.ts
+  h_5b2ec9c12c4d18 1,71-73
+apps/frontend-nextgen/test/services/tasks/panel/taskPanelRuntime.test.tsx
+  h_5b2ec9c12c4d18 179-203
+apps/frontend-nextgen/test/services/tasks/panel/taskPanelRecoveryLoader.test.ts
+  h_5b2ec9c12c4d18 2,7,11-12,67-122
+apps/frontend-nextgen/src/services/tasks/panel/taskPanelRuntime.ts
+  h_5b2ec9c12c4d18 1,47-59,73,111,115,155,164
+apps/frontend-nextgen/src/hooks/useSharedTaskPanelRecovery.ts
+  h_5b2ec9c12c4d18 1,19,26-32,35-42,45,51-53,55-57,100,102,109,113,117,125
+apps/frontend-nextgen/config/config.local.ts
+  h_5b2ec9c12c4d18 11,64,68
+apps/frontend-nextgen/src/services/tasks/panel/taskPanelRecoveryLoader.ts
+  h_5b2ec9c12c4d18 2-3,9,12-15,43-44
+apps/frontend-nextgen/src/services/tasks/panel/taskPanelDiagnostics.ts
+  h_5b2ec9c12c4d18 1-45
+apps/frontend-nextgen/deploy/nginx/default.conf.template
+  h_5b2ec9c12c4d18 20,25
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2f374fd7c22a3484a6e51295cde7f5164e2ace0e",
+  "prompts": {},
+  "humans": {
+    "h_5b2ec9c12c4d18": {
+      "author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

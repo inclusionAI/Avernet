@@ -1,0 +1,28 @@
+apps/bcs/crates/test-support/bcs-test-support/src/contract/plugin/store/stream.rs
+  s_a9c87caa3de52e::t_ca3715b3ba7aeb 144-160,164-166,169-172
+  s_a9c87caa3de52e::t_34c6d5289531c8 142-143,161-163,167-168
+apps/bcs/crates/test-support/bcs-test-support/tests/support/store/stream.rs
+  s_a9c87caa3de52e::t_ca3715b3ba7aeb 101-110,113,117
+apps/bcs/crates/test-support/bcs-test-support/tests/support/store/mod.rs
+  s_a9c87caa3de52e::t_ca3715b3ba7aeb 32,47
+apps/bcs/crates/test-support/bcs-test-support/tests/conformance_store.rs
+  s_a9c87caa3de52e::t_ca3715b3ba7aeb 170-177
+apps/bcs/docs/plans/2026-11-16-bcs-store-api.md
+  s_a9c87caa3de52e::t_f2b5f1eeba5574 107-112
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0e3956718b445c7efd76e5413dff6071342bcf81",
+  "prompts": {},
+  "sessions": {
+    "s_a9c87caa3de52e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d0b4-74ad-7423-9152-b7e80c647ef8",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "yuange.zjy <yuange.zjy@antgroup.com>"
+    }
+  }
+}
