@@ -1,0 +1,42 @@
+apps/evolverun/clawweb/public/modules/clawinsight/web/pages/InsightCenter/monitoring/monitoring-settings.css
+  s_c5125da3cacb9c::t_1e888b68c0eeea 90-91
+apps/evolverun/clawweb/public/modules/clawinsight/web/types/monitoring.ts
+  s_c5125da3cacb9c::t_d4651ed9213e8e 31
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/monitoring/__tests__/identity-fixtures.ts
+  s_c5125da3cacb9c::t_a470997305dbbb 13-14
+apps/evolverun/clawweb/public/modules/clawinsight/docs/bot-diagnosis-recovery-config.md
+  s_c5125da3cacb9c::t_d4651ed9213e8e 98,100-101,114,119-120
+apps/evolverun/clawweb/public/modules/clawinsight/web/pages/InsightCenter/monitoring/MonitoringSettings.tsx
+  s_c5125da3cacb9c::t_1e888b68c0eeea 72-73
+  s_c5125da3cacb9c::t_d4651ed9213e8e 53,67-70
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/monitoring/monitoring-browser-service.ts
+  s_c5125da3cacb9c::t_d4651ed9213e8e 41
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/monitoring/directory-contracts.ts
+  s_c5125da3cacb9c::t_d4651ed9213e8e 41
+apps/evolverun/clawweb/public/modules/clawinsight/web/pages/InsightCenter/monitoring/__tests__/MonitoringSettings.test.tsx
+  s_c5125da3cacb9c::t_d4651ed9213e8e 6,17-19,21,24-25,35-40
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/monitoring/__tests__/bot-config.test.ts
+  s_c5125da3cacb9c::t_d4651ed9213e8e 119-121,124-127,157-173,175
+  s_c5125da3cacb9c::t_a470997305dbbb 128-129
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/monitoring/bot-config-service.ts
+  s_c5125da3cacb9c::t_a470997305dbbb 31
+  s_c5125da3cacb9c::t_d4651ed9213e8e 29-30
+apps/evolverun/clawweb/public/modules/clawinsight/preview/__tests__/http.test.ts
+  s_c5125da3cacb9c::t_d4651ed9213e8e 62,66,72-73,83-91,93,113
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8a0d31f667aa3c975c78d207c8e9fa1ac8f0b3f8",
+  "prompts": {},
+  "sessions": {
+    "s_c5125da3cacb9c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e2fc-bace-73f3-9dee-91caa19a0ea5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}
