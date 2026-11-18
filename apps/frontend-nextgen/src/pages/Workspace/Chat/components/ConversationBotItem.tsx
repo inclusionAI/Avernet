@@ -44,6 +44,7 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
   onToggleFavorite,
   isFavoritePending,
   onOpenBotManagement,
+  onRemoveFriend,
   replyingSessionId,
   createSessionPending = false,
   sessionActions,
@@ -55,6 +56,8 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
   const supportsCollab = Boolean(supportsArchives);
   const hasSessionControls = bot.chatable;
   const interactive = bot.chatable;
+  // 好友 Bot 移除入口只由好友分组装配;运行状态不影响可移除性(PRD AC-18)。
+  const supportsFriendRemoval = section === 'friend' && Boolean(onRemoveFriend);
   // Bot 状态异常或好友服务 Bot 无 online 发布时，整行禁用并悬停提示原因。
   const { reason: unavailableReason, unavailable } = resolveBotUnavailable(bot, section);
   const canFavorite = supportsBotSessionFavorites(bot.engine);
@@ -100,6 +103,7 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
     supportsArchives,
     searchMarked,
     hasManagement: Boolean(onOpenBotManagement && bot.spaceId),
+    supportsFriendRemoval,
   });
   const searchInputVisible = expanded && searchVisible && (searchInputOpen || searchActive);
   const handleSearchToggle = () => {
@@ -212,6 +216,9 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
           onSearchToggle={handleSearchToggle}
           showMenu={showMenu}
           onOpenBotManagement={onOpenBotManagement}
+          supportsFriendRemoval={supportsFriendRemoval}
+          onRemoveFriend={onRemoveFriend ? () => onRemoveFriend(bot) : undefined}
+          hasSessionControls={hasSessionControls}
         />
       )}
     </div>

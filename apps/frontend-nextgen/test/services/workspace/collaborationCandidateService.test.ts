@@ -313,6 +313,29 @@ describe('collaborationCandidateService', () => {
     });
   });
 
+  it('removeFriend targets the Bot actor through the DELETE contract', async () => {
+    connections.deleteFriendConnection.mockResolvedValue({ code: 20000, data: { deleted: true } });
+
+    const res = await collaborationCandidateService.removeFriend('bot-1:owner-9');
+
+    expect(connections.deleteFriendConnection).toHaveBeenCalledWith({
+      target_actor_type: 'bot',
+      target_actor_id: 'bot-1:owner-9',
+    });
+    expect(res).toEqual({ ok: true, data: undefined });
+  });
+
+  it('removeFriend maps failures to a friendly removable error', async () => {
+    connections.deleteFriendConnection.mockRejectedValue(new Error('forbidden'));
+
+    const res = await collaborationCandidateService.removeFriend('bot-1');
+
+    expect(res).toMatchObject({
+      ok: false,
+      error: { code: 'COLLABORATION_FRIEND_REMOVE_FAILED', friendlyMessage: '移除好友失败，请稍后重试。' },
+    });
+  });
+
   it('listCandidates passes collaboration purpose and name', async () => {
     bc.listBotCandidates.mockResolvedValue({
       code: 20000,

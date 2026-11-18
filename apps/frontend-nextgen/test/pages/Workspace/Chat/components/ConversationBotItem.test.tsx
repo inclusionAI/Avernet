@@ -26,6 +26,7 @@ function renderBotItem(
     botSelected?: boolean;
     createSessionPending?: boolean;
     onOpenBotManagement?: (bot: ChatBotView) => void;
+    onRemoveFriend?: (bot: ChatBotView) => void;
   } = {},
 ) {
   const onToggle = overrides.onToggle ?? jest.fn();
@@ -51,6 +52,7 @@ function renderBotItem(
       onToggleFavorite={noop}
       isFavoritePending={() => false}
       onOpenBotManagement={overrides.onOpenBotManagement}
+      onRemoveFriend={overrides.onRemoveFriend}
     />,
   );
   return { ...utils, onToggle };
@@ -701,7 +703,7 @@ describe('ConversationBotItem 非运行中好友服务 Bot', () => {
     expect(onToggle).not.toHaveBeenCalled();
     expect(screen.queryByLabelText('会话列表：测试 Bot')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '新建会话' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '搜索会话' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '会话ID检索' })).not.toBeInTheDocument();
     fireEvent.pointerMove(row, { pointerType: 'mouse' });
     await waitFor(() => expect(screen.getByRole('tooltip')).toHaveTextContent('非运行中服务 Bot'));
   });
@@ -719,5 +721,57 @@ describe('ConversationBotItem 非运行中好友服务 Bot', () => {
     fireEvent.click(screen.getByRole('button', { name: '测试 Bot' }));
     expect(onToggle).toHaveBeenCalledTimes(1);
     expect(document.querySelector('div[aria-disabled="true"]')).toBeNull();
+  });
+});
+
+describe('ConversationBotItem 好友 Bot 移除入口（PRD v1.5 AC-01/AC-06/AC-17/AC-18）', () => {
+  it('好友 Bot 行提供「更多操作」菜单，红色「移除好友」回调移除目标 Bot', async () => {
+    const onRemoveFriend = jest.fn();
+    renderBotItem({ section: 'friend', onRemoveFriend });
+
+    fireEvent.click(screen.getByRole('button', { name: '更多操作' }));
+    const removeItem = await screen.findByRole('button', { name: '移除好友 测试 Bot' });
+    expect(removeItem).toHaveClass('text-destructive');
+    fireEvent.click(removeItem);
+
+    expect(onRemoveFriend).toHaveBeenCalledTimes(1);
+    expect(onRemoveFriend).toHaveBeenCalledWith(expect.objectContaining({ botId: 'bot-1' }));
+  });
+
+  it('管理/协作 Bot 行不渲染移除入口（仅好友分组承接好友关系）', () => {
+    const onRemoveFriend = jest.fn();
+    const managed = renderBotItem({ section: 'managed', onRemoveFriend, bot: { spaceId: '1' } });
+    expect(screen.queryByRole('button', { name: '更多操作' })).not.toBeInTheDocument();
+    managed.unmount();
+
+    renderBotItem({ section: 'team', onRemoveFriend, bot: { spaceId: '1' } });
+    expect(screen.queryByRole('button', { name: '更多操作' })).not.toBeInTheDocument();
+  });
+
+  it('不可用（已下线/异常）好友 Bot 仍保留移除入口（AC-18）', async () => {
+    const onRemoveFriend = jest.fn();
+    renderBotItem({ section: 'friend', bot: { status: 'FAILED' }, onRemoveFriend });
+
+    const row = screen.getByRole('button', { name: '测试 Bot' }).parentElement as HTMLElement;
+    expect(row).toHaveAttribute('aria-disabled', 'true');
+    fireEvent.click(screen.getByRole('button', { name: '更多操作' }));
+    fireEvent.click(await screen.findByRole('button', { name: '移除好友 测试 Bot' }));
+
+    expect(onRemoveFriend).toHaveBeenCalledTimes(1);
+  });
+
+  it('未装配移除回调的好友行不渲染「更多操作」', () => {
+    renderBotItem({ section: 'friend' });
+    expect(screen.queryByRole('button', { name: '更多操作' })).not.toBeInTheDocument();
+  });
+});
+
+describe('ConversationBotItem 不可会话好友行（详情未解析）', () => {
+  it('只保留「更多操作 → 移除好友」，不渲染新建/检索/筛选会话入口', () => {
+    renderBotItem({ section: 'friend', bot: { chatable: false }, onRemoveFriend: jest.fn() });
+    expect(screen.getByRole('button', { name: '更多操作' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '新建会话' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '会话ID检索' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '会话筛选' })).not.toBeInTheDocument();
   });
 });

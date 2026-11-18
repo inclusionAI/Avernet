@@ -22,6 +22,8 @@ export interface BotRowLayoutInputs {
   searchMarked: boolean;
   /** 「Bot 管理」菜单入口条件成立（回调存在且 bot.spaceId 有值）。 */
   hasManagement: boolean;
+  /** 好友 Bot 的「更多操作 → 移除好友」入口（运行状态不影响可移除性）。 */
+  supportsFriendRemoval: boolean;
 }
 
 export interface BotRowLayout {
@@ -54,6 +56,7 @@ export function resolveBotRowLayout(inputs: BotRowLayoutInputs): BotRowLayout {
     supportsArchives,
     searchMarked,
     hasManagement,
+    supportsFriendRemoval,
   } = inputs;
   // 筛选/搜索的激活与可见:归属 others 或非默认范围点亮筛选;归属+范围筛选对管理 Bot 开放,
   // 好友 Bot 仅在有收藏能力时暴露「会话」范围。Coding Bot 归档范围复用 Bot 行 sessionID
@@ -63,11 +66,17 @@ export function resolveBotRowLayout(inputs: BotRowLayoutInputs): BotRowLayout {
   const searchVisible = scope === 'all' || (scope === 'archived' && supportsArchives);
   const showFilter = isManaged || canFavorite;
   const showMenu = hasManagement && !isOthers;
-  const stripVisible = (hasSessionControls && !unavailable) || (unavailable && showMenu);
+  // 好友移除入口不受运行状态影响(AC-18):不可用好友行也必须保留操作区与「更多操作」。
+  const stripVisible = (hasSessionControls && !unavailable) || (unavailable && showMenu) || supportsFriendRemoval;
   // 展开态的收起入口并入右侧操作组。发布分支已将渐隐区收紧 10px：
   // 3/4/5 个按钮分别预留 86/112/138px（按钮 24px + 间隙 2px）。
   const actionButtonCount =
-    (expanded ? 1 : 0) + (!isOthers ? 1 : 0) + (searchVisible ? 1 : 0) + (showFilter ? 1 : 0) + (showMenu ? 1 : 0);
+    (expanded ? 1 : 0) +
+    (!isOthers ? 1 : 0) +
+    (searchVisible ? 1 : 0) +
+    (showFilter ? 1 : 0) +
+    (showMenu ? 1 : 0) +
+    (supportsFriendRemoval ? 1 : 0);
   // hover 让位(2026-11-04 显隐重构):操作组仅 hover/键盘/菜单打开/触屏显示(触屏常显
   // → 让位同步常显),展开态不再整组钉住;激活 icon 让位见 pinnedMarkPadding。
   // 展开+菜单达 5 按钮时 hover 让位需 138px(原 pinned 独有档位下沉到 hover 变体)。

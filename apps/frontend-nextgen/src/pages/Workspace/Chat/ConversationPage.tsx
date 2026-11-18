@@ -3,7 +3,7 @@
 // Task 4 会话 Hook(目录/会话/他人只读/URL 同步)+ Task 6 对话侧栏 +
 // 只读面板 + 普通/Coding Bot 两个互斥的 Runtime 边界。
 import { getCapabilities } from '@/capabilities';
-import { FriendRequestConfirmModal } from '@/components/CollaborationSquare/FriendRequestConfirmModal';
+import { ConversationPageModals } from './components/ConversationPageModals';
 import { ConversationTargetPlaceholder } from './components/ConversationTargetPlaceholder';
 import type { ConversationBotSection } from '@/domain/conversation/types';
 import { isManagedConversationSection } from '@/domain/conversation/types';
@@ -32,6 +32,7 @@ import { useConversationSelection } from './hooks/useConversationSelection';
 import { useConversationSessionPlaceholder } from './hooks/useConversationSessionPlaceholder';
 import { useConversationSessions } from './hooks/useConversationSessions';
 import { useConversationUrlSync } from './hooks/useConversationUrlSync';
+import { useFriendBotRemoval } from './hooks/useFriendBotRemoval';
 import { useLegacyShareLinkGuard } from './hooks/useLegacyShareLinkGuard';
 import { useLegacyFriendOthers } from './hooks/useLegacyFriendOthers';
 
@@ -68,7 +69,7 @@ export default function ConversationPage(): JSX.Element {
   const createEntrySpaces = useMemo(() => sortSpacesBySidebarOrder(spaces), [spaces]);
   const createEntryCurrentSpaceId = useSpaceContext((state) => state.currentSpaceId);
   const hydrated = !directory.managedLoading && !directory.teamLoading && !directory.friendLoading;
-  const { store, selection, origin, interactive, readonly, onRouteSelection, selectReadonlySession } =
+  const { store, selection, origin, interactive, readonly, onRouteSelection, selectReadonlySession, clearSelection } =
     useConversationSelection({
       userId,
       managedBots: managedAndTeamBots,
@@ -76,6 +77,8 @@ export default function ConversationPage(): JSX.Element {
       hydrated,
     });
   useConversationUrlSync({ hydrated, selection, onRouteSelection });
+  // 好友 Bot 移除(AC-01~AC-08):删除关系后清理侧栏缓存;选中该好友时清空主舞台选中(AC-05)。
+  const friendRemoval = useFriendBotRemoval({ removeFriendBot: directory.removeFriendBot, clearSelection });
   // 老版分享链接落地守护：无好友关系时反查公开 Bot 并唤起好友申请弹窗（plan §2.2）。
   const legacyShareLinkKnownBotIds = useMemo(() => {
     const ids = new Set<string>();
@@ -220,6 +223,7 @@ export default function ConversationPage(): JSX.Element {
     createEntryCurrentSpaceId,
     onCreateBotInSpace: createBotInSpace,
     onOpenBotManagement: openBotManagement,
+    onRemoveFriend: friendRemoval.requestRemoval,
     replyingSessionId,
   };
 
@@ -283,15 +287,13 @@ export default function ConversationPage(): JSX.Element {
           )}
         </div>
       </div>
-      {legacyShareLinkGuard.legacyBot && human && (
-        <FriendRequestConfirmModal
-          bot={legacyShareLinkGuard.legacyBot}
-          actor={{ type: 'human', id: human.userId }}
-          actorName={human.displayName || human.userId}
-          onClose={legacyShareLinkGuard.onClose}
-          onConfirm={legacyShareLinkGuard.onConfirm}
-        />
-      )}
+      <ConversationPageModals
+        human={human}
+        legacyGuard={legacyShareLinkGuard}
+        removalTarget={friendRemoval.target} removalLoading={friendRemoval.removing}
+        onConfirmRemoval={() => void friendRemoval.confirmRemoval()}
+        onCancelRemoval={friendRemoval.cancelRemoval}
+      />
     </div>
   );
 }

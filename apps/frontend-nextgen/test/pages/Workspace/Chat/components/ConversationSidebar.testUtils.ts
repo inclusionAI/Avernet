@@ -62,6 +62,7 @@ export const directoryModel = (over: Partial<ConversationDirectoryModel> = {}): 
   friendError: null,
   retryManaged: jest.fn(),
   retryFriend: jest.fn(),
+  removeFriendBot: jest.fn(),
   ...over,
 });
 

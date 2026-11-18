@@ -406,3 +406,36 @@ describe('conversationStore selectedSessionSnapshot', () => {
     expect(useConversationStore.getState().selectedSessionSnapshot).toBeNull();
   });
 });
+
+describe('conversationStore forgetFriendBot（移除好友）', () => {
+  beforeEach(() => useConversationStore.getState().reset());
+
+  it('丢弃该好友 Bot 的展开/缓存/筛选记忆，不影响其他 Bot', () => {
+    const store = useConversationStore.getState();
+    store.setFriendBotSessions('bot-friend', sessionList({ total: 3 }));
+    store.setFriendBotSessions('bot-other', sessionList({ total: 1 }));
+    store.setFriendBotScope('bot-friend', 'favorite');
+    store.setSessionKeyFilter('bot-friend', 'keyword');
+    store.setExpandedFriend('bot-friend', 'user-1', true);
+    store.selectConversation({
+      botId: 'bot-other',
+      section: 'friend',
+      origin: 'mine',
+      scope: 'all',
+      friendUserId: null,
+      sessionId: 'session-9',
+    });
+
+    useConversationStore.getState().forgetFriendBot('bot-friend');
+
+    const state = useConversationStore.getState();
+    expect(state.friendBotSessionsByBotId['bot-friend']).toBeUndefined();
+    expect(state.scopeByFriendBotId['bot-friend']).toBeUndefined();
+    expect(state.sessionKeyByBotId['bot-friend']).toBeUndefined();
+    expect(state.expandedFriendUserIdsByBotId['bot-friend']).toBeUndefined();
+    expect(state.friendBotSessionsByBotId['bot-other']).toEqual(sessionList({ total: 1 }));
+    // 选中态不由 Store 隐式清除：移除的不是当前选中 Bot 时保留现有选中，由装配层按身份判断。
+    expect(state.selectedBotId).toBe('bot-other');
+    expect(state.selectedSessionId).toBe('session-9');
+  });
+});

@@ -59,6 +59,16 @@ export const useConversationStore = create<ConversationState>((set) => ({
         ...revisionPatch(state, botId),
       };
     }),
+  forgetFriendBot: (botId) =>
+    set((state) => ({
+      expandedBotIds: withoutKey(state.expandedBotIds, botId),
+      friendBotSessionsByBotId: withoutKey(state.friendBotSessionsByBotId, botId),
+      scopeByFriendBotId: withoutKey(state.scopeByFriendBotId, botId),
+      sessionKeyByBotId: withoutKey(state.sessionKeyByBotId, botId),
+      sessionFilterRevisionByBotId: withoutKey(state.sessionFilterRevisionByBotId, botId),
+      instanceSelectionByBotId: withoutKey(state.instanceSelectionByBotId, botId),
+      expandedFriendUserIdsByBotId: withoutKey(state.expandedFriendUserIdsByBotId, botId),
+    })),
   setExpandedFriend: (botId, friendUserId, expanded) =>
     set((state) => {
       const current = state.expandedFriendUserIdsByBotId[botId] ?? {};

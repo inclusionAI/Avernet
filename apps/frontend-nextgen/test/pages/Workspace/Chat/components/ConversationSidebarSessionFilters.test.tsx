@@ -80,6 +80,7 @@ const directoryModel = (over: Partial<ConversationDirectoryModel> = {}): Convers
   friendError: null,
   retryManaged: jest.fn(),
   retryFriend: jest.fn(),
+  removeFriendBot: jest.fn(),
   ...over,
 });
 

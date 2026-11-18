@@ -10,6 +10,7 @@ import {
   type CollaborationBotDto,
 } from '@/services/backendApi/collaboration/collaborationBotController';
 import {
+  deleteFriendConnection,
   listFriendConnections,
   type FriendConnectionSummaryDto,
 } from '@/services/backendApi/collaboration/collaborationFriendConnectionController';
@@ -265,6 +266,19 @@ export const collaborationCandidateService = {
       return {
         ok: false,
         error: toDomainError('COLLABORATION_FRIENDS_LOAD_FAILED', '加载好友 Bot 失败，请稍后重试。'),
+      };
+    }
+  },
+
+  /** 用户身份移除好友 Bot：DELETE 由 Gateway Principal 鉴权，target actor 取好友目录中的 Bot id。 */
+  async removeFriend(targetBotId: string): Promise<DomainResult<void>> {
+    try {
+      await deleteFriendConnection({ target_actor_type: 'bot', target_actor_id: targetBotId });
+      return { ok: true, data: undefined };
+    } catch {
+      return {
+        ok: false,
+        error: toDomainError('COLLABORATION_FRIEND_REMOVE_FAILED', '移除好友失败，请稍后重试。'),
       };
     }
   },

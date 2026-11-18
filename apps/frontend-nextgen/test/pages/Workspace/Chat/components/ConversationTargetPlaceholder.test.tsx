@@ -7,7 +7,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 const directory = (): ConversationDirectoryModel => ({
   managedBots: [], teamBots: [], friendBots: [], managedLoading: false, teamLoading: false,
   friendLoading: false, managedError: null, teamError: null, friendError: null,
-  retryManaged: jest.fn(), retryTeam: jest.fn(), retryFriend: jest.fn(),
+  retryManaged: jest.fn(), retryTeam: jest.fn(), retryFriend: jest.fn(), removeFriendBot: jest.fn(),
 });
 
 it('ends the skeleton once the directory finishes without a unique match', () => {
