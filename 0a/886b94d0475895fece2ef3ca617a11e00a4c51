@@ -1,0 +1,19 @@
+apps/gateway/configs/schemas/bots.openapi.json
+  s_fc1557df5d7924::t_49cd425aa3a92e 83913-83948
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0a886b94d0475895fece2ef3ca617a11e00a4c51",
+  "prompts": {},
+  "sessions": {
+    "s_fc1557df5d7924": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1dde0-66b5-7650-8147-9dd4121d1f49",
+        "model": "gpt-6.2-astra"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}
