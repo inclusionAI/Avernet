@@ -35,6 +35,9 @@ export interface CollaborationBotView {
   onlineAvailable?: boolean | null;
   templateType?: string;
   templateName?: string;
+  /** Caller 模式标记('caller'):好友 Bot 会话 IAM 换签带 caller_runtime_target 使用
+   * (openspec add-iam-caller-runtime-target);缺失视为非 Caller Bot。 */
+  callType?: string;
   detailsResolved?: boolean;
 }
 
@@ -77,6 +80,8 @@ function mapBot(dto: CollaborationBotDto, isFriend?: boolean): CollaborationBotV
     visibility: dto.visibility ?? 'private',
     engine: dto.engine,
     botType: dto.bot_type,
+    // Caller 模式标记透传(openspec add-iam-caller-runtime-target);缺失保持 undefined。
+    callType: dto.call_type,
     ...(isFriend !== undefined ? { isFriend } : {}),
   };
 }
@@ -125,6 +130,8 @@ function mapBotMetadata(dto: BotMetadataDto, id: string): CollaborationBotView {
     onlineAvailable: dto.online_available,
     templateType: dto.template_type,
     templateName: dto.template_name,
+    // Caller 模式标记透传(openspec add-iam-caller-runtime-target);缺失保持 undefined。
+    callType: dto.call_type,
   };
 }
 

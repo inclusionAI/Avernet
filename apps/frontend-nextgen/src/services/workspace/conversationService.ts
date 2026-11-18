@@ -50,6 +50,8 @@ function toConversationFriendBotView(view: CollaborationBotView): ChatBotView {
     onlineAvailable: view.onlineAvailable,
     isFriendBot: true,
     isAgentCodingBot: runtime.isAgentCodingBot,
+    // Caller 模式标记透传(openspec add-iam-caller-runtime-target);缺失保持 undefined。
+    callType: view.callType,
   };
 }
 

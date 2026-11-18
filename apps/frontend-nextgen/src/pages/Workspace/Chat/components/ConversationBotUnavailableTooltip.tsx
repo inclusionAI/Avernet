@@ -1,32 +1,13 @@
 // 不可用 Bot 行的整行悬停提示包装器:状态异常或好友服务 Bot 无 online 发布时解释原因
 // (禁用不影响悬停);reason 为 null(可用 Bot)时原样透传 children,不挂 Tooltip。
+// 可用性判定与状态词表已下沉 @/domain/conversation/botAvailability(shell 层全局搜索复用),此处 re-export 保持既有引用不变。
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui';
-import type { ConversationBotSection } from '@/domain/conversation/types';
-import type { ChatBotView } from '@/services/workspace/botSessionService';
 import type { ReactNode } from 'react';
 
-/** 后端 Bot 生命周期中不能进入对话的状态及其用户提示。 */
-export const BOT_UNAVAILABLE_REASONS: Record<string, string> = {
-  FAILED: '该 Bot 因创建或运行异常暂时无法使用；可在 Bot 管理中尝试运维恢复',
-  PENDING: '该 Bot 正在创建或重启中，暂时无法使用，完成后可刷新重试',
-  OFFLINE: '该 Bot 已下线，暂时无法发起会话',
-  RECYCLED: '该 Bot 已回收，暂时无法发起会话',
-  RELEASED: '该 Bot 已回收，暂时无法发起会话',
-};
-
-/** 好友服务 Bot 无 online 发布时优先提示；其他情况按 Bot 生命周期判定。 */
-export function resolveBotUnavailable(
-  bot: Pick<ChatBotView, 'status' | 'botType' | 'onlineAvailable'>,
-  section: ConversationBotSection,
-): { reason: string | null; unavailable: boolean } {
-  const reason =
-    section === 'friend' && bot.botType === 'service' && bot.onlineAvailable === false
-      ? '非运行中服务 Bot'
-      : bot.status
-      ? BOT_UNAVAILABLE_REASONS[bot.status.toUpperCase()] ?? null
-      : null;
-  return { reason, unavailable: reason !== null };
-}
+export {
+  BOT_UNAVAILABLE_REASONS,
+  resolveBotUnavailable,
+} from '@/domain/conversation/botAvailability';
 
 /** 整行悬停提示:children 为 Bot 行,不可用时悬停约 0.3s 显示原因,可用时原样透传。 */
 export function ConversationBotUnavailableTooltip({
