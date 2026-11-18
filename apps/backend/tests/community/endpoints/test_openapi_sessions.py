@@ -280,6 +280,24 @@ _HAPPY_CASES = (
 )
 
 
+for _source, _items in (("mine", [_SESSION_BODY]), ("others", [])):
+    endpoint_test(
+        method="GET",
+        path=_BASE_PATH,
+        scenario=f"source_{_source}_real_query_service",
+        input=CaseInput(
+            path_params=_PATH_PARAMS,
+            query_params={**_QUERY, "source": _source},
+            headers=_HEADERS,
+        ),
+        seed=_seed_happy_services,
+        expect=ExpectSuccess(status=200, json_contains={"data": {
+            "source": _source, "items": _items, "has_more": False,
+            "next_cursor": None, "scan_limited": False,
+        }}),
+    )(lambda: None)
+
+
 for _method, _path, _input, _status, _contains in _HAPPY_CASES:
     endpoint_test(
         method=_method,

@@ -61,4 +61,97 @@ describe('iamTokenController OpenAPI contract', () => {
       expect.objectContaining({ method: 'POST' }),
     );
   });
+  test('carries device_uuid for the selected online Service Bot instance', async () => {
+    const fetch = jest.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({ code: 200000, message: 'OK', data: { iam_token: 'device-token' } }),
+    } as Response);
+    await expect(
+      getBotIamToken('bot-1', 'u1', 'owner-1', 'online', {
+        sessionKey: 'online-session',
+        deviceUuid: 'device-a',
+      }),
+    ).resolves.toBe('device-token');
+    expect(fetch).toHaveBeenCalledWith(
+      '/openapi/v1/bots/bot-1/iam-token?user_id=u1&entity_id=owner-1&stage=online&device_uuid=device-a&session_key=online-session',
+      expect.objectContaining({ method: 'POST' }),
+    );
+  });
+  test('omits device_uuid when the chat context has none', async () => {
+    const fetch = jest.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({ code: 200000, data: { iam_token: 'token' } }),
+    } as Response);
+    await getBotIamToken('personal', 'viewer', 'owner', 'online', { sessionKey: 's' });
+    expect(fetch).toHaveBeenCalledWith(
+      '/openapi/v1/bots/personal/iam-token?user_id=viewer&entity_id=owner&stage=online&session_key=s',
+      expect.objectContaining({ method: 'POST' }),
+    );
+  });
+  test('carries caller_runtime_target=service for a managed caller Bot chat', async () => {
+    const fetch = jest.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({ code: 200000, message: 'OK', data: { iam_token: 'caller-token' } }),
+    } as Response);
+    await expect(
+      getBotIamToken('bot-1', 'u1', 'owner-1', 'online', {
+        sessionKey: 'online-session',
+        callerRuntimeTarget: 'service',
+      }),
+    ).resolves.toBe('caller-token');
+    expect(fetch).toHaveBeenCalledWith(
+      '/openapi/v1/bots/bot-1/iam-token?user_id=u1&entity_id=owner-1&stage=online&caller_runtime_target=service&session_key=online-session',
+      expect.objectContaining({ method: 'POST' }),
+    );
+  });
+  test('carries caller_runtime_target=caller_instance for a friend caller Bot chat', async () => {
+    const fetch = jest.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({ code: 200000, message: 'OK', data: { iam_token: 'friend-token' } }),
+    } as Response);
+    await expect(
+      getBotIamToken('bot-1', 'u1', 'entity-1', 'online', {
+        sessionKey: 'friend-session',
+        friendUserId: 'u1',
+        ownerId: 'owner-1',
+        callerRuntimeTarget: 'caller_instance',
+      }),
+    ).resolves.toBe('friend-token');
+    expect(fetch).toHaveBeenCalledWith(
+      '/openapi/v1/bots/bot-1/iam-token?user_id=u1&entity_id=entity-1&stage=online&caller_runtime_target=caller_instance&owner_id=owner-1&f_user_id=u1&session_id=friend-session',
+      expect.objectContaining({ method: 'POST' }),
+    );
+  });
+  test('coexists with device_uuid for an online multi-instance caller Bot', async () => {
+    const fetch = jest.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({ code: 200000, message: 'OK', data: { iam_token: 'pair-token' } }),
+    } as Response);
+    await getBotIamToken('bot-1', 'u1', 'owner-1', 'online', {
+      sessionKey: 'online-session',
+      deviceUuid: 'device-a',
+      callerRuntimeTarget: 'service',
+    });
+    expect(fetch).toHaveBeenCalledWith(
+      '/openapi/v1/bots/bot-1/iam-token?user_id=u1&entity_id=owner-1&stage=online&device_uuid=device-a&caller_runtime_target=service&session_key=online-session',
+      expect.objectContaining({ method: 'POST' }),
+    );
+  });
+  test('omits caller_runtime_target when the chat context has none', async () => {
+    const fetch = jest.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({ code: 200000, data: { iam_token: 'token' } }),
+    } as Response);
+    await getBotIamToken('personal', 'viewer', 'owner', 'draft', { sessionKey: 's' });
+    expect(fetch).toHaveBeenCalledWith(
+      '/openapi/v1/bots/personal/iam-token?user_id=viewer&entity_id=owner&stage=draft&session_key=s',
+      expect.objectContaining({ method: 'POST' }),
+    );
+  });
 });

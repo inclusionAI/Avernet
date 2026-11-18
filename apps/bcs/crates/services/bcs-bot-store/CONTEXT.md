@@ -232,8 +232,11 @@ disabled bindings are out of scope without ever being reported
 `DbA2aBotStore` implements `A2aBotRepoPort` using only raw `agent_card`,
 nullable `agent_card_url` and `agent_card_revision` on `bcs_bots` after MySQL 038 /
 SQLite 039. One explicit read returns one Card. A short transaction updates the Card and
-synchronized Bot name and reads its committed snapshot.
-It also updates the generic Bot audit time. Writes fence environment, Provider/ref,
+the synchronized `bot_info` capability fields (`name`, `summary`, `domains`,
+`skills`, `scopes`) and reads its committed snapshot. An unchanged URL refresh can
+reapply that projection through a revision-fenced update without incrementing
+`agent_card_revision`, so a stale generic projection cannot survive the first refresh.
+The write also updates the generic Bot audit time. Writes fence environment, Provider/ref,
 active Gateway mode and revision; failures propagate. Routes and credential
 references are derived, never duplicated in this store.
 Refresh reads at most 16 URL-backed snapshots in one bot_uuid keyset query, not

@@ -172,7 +172,7 @@ class ServiceLifecycleView(ServiceLifecyclePort):
         }
         records_by_pk: dict[int, list[BotPublishRecord]] = defaultdict(list)
         for record in self._publish_repo.list_by_source_bots(
-            tuple(bot_by_pk), get_current_env()
+            tuple(bot_by_pk), get_current_env(), resolve_artifacts=False
         ):
             bot = bot_by_pk.get(record.source_bot_pk)
             if bot is not None and record.source_bot_id == bot.get("bot_id"):

@@ -38,8 +38,15 @@ export function createEditorService(api: EditorController = editorController) {
       try {
         return mapEditorPack(editorPayload(await api.scripts(id, params, signal)), id);
       } catch (error) {
+        // Shared login/invitation gates own silent failures; preserve their error metadata.
+        if (error && typeof error === 'object' && 'silent' in error && error.silent === true) throw error;
         const status = error && typeof error === 'object' && 'status' in error ? error.status : null;
-        if (status === 403) throw new Error('没有工作流编辑权限或 Pack 读取权限，无法查看脚本。');
+        if (status === 403) {
+          const data = error && typeof error === 'object' && 'data' in error ? error.data : null;
+          if (data && typeof data === 'object' && 'code' in data && data.code === 'ORIGIN_NOT_ALLOWED')
+            throw new Error('脚本请求来源校验失败，请检查访问地址或联系管理员。');
+          throw new Error('没有工作流编辑权限或 Pack 读取权限，无法查看脚本。');
+        }
         if (status === 409) throw new Error('Pack 快照存在分支冲突，暂无法安全读取。');
         if (status === 404) throw new Error('未找到工作流或 Pack Git 快照。');
         if (status === 503) throw new Error('Pack 脚本服务暂不可用，请稍后重试。');

@@ -34,6 +34,8 @@ from agentclaw.community.core.engine_runtime.desktop_connection import (
     DesktopConnectionServiceProtocol,
 )
 from agentclaw.community.core.engine_runtime.relay import EngineRuntimeRelay
+from agentclaw.community.api.session_source_listing import SessionSourceListingProtocol
+from agentclaw.community.core.engine_runtime.session_listing import SessionSourceListingService
 from agentclaw.community.core.engine_runtime.session_key import (
     TECLAW_ENGINE_TYPE,
     Base64SessionKeyCodec,
@@ -70,6 +72,7 @@ class EngineRuntimeModule(Module):
 
     def configure(self, binder: Binder) -> None:
         binder.bind(EngineRuntimeRelay, to=EngineRuntimeRelay, scope=singleton)
+        binder.bind(SessionSourceListingProtocol, to=SessionSourceListingService, scope=singleton)
 
     @singleton
     @provider

@@ -319,11 +319,15 @@ class SubagentRuntime:
 
         last_error: str | None = None
         attempts_used = item.max_attempts
+        # Lifetime ordinal: the persona id is derived from it, so it cannot restart
+        # at 1 per claim (that re-derives the previous slice's id and collides).
+        ordinal_base = await self._next_ordinal(item)
         for attempt in range(1, item.max_attempts + 1):
             attempts_used = attempt
+            ordinal = ordinal_base + attempt - 1
             if self._slice_lost.is_set():
-                await self._journal_result(item, attempt, "SLICE_LOST", "slice_lost")
-                return self._mk_result(item, AgentStatus.FAILED, None, "slice_lost", attempt)
+                await self._journal_result(item, ordinal, "SLICE_LOST", "slice_lost")
+                return self._mk_result(item, AgentStatus.FAILED, None, "slice_lost", ordinal)
 
             if (self._upstream_breaker is not None
                     and not self._upstream_breaker.allow(time.monotonic())):
@@ -331,9 +335,9 @@ class SubagentRuntime:
                 # through its normal failure path instead of burning the
                 # attempt budget waiting out timeouts against a dead upstream.
                 await self._journal_result(
-                    item, attempt, "FAILED", "upstream_breaker_open")
+                    item, ordinal, "FAILED", "upstream_breaker_open")
                 return self._mk_result(
-                    item, AgentStatus.FAILED, None, "upstream_breaker_open", attempt,
+                    item, AgentStatus.FAILED, None, "upstream_breaker_open", ordinal,
                 )
 
             subagent = None
@@ -353,11 +357,11 @@ class SubagentRuntime:
                 # per-attempt (D-J) — a retry mints a fresh executor and
                 # can never collide with the torn-down attempt's row.
                 subagent = self._factory.create(
-                    spec, item.run, item.agent_id, attempt,
+                    spec, item.run, item.agent_id, ordinal,
                 )
                 # Write-ahead: the binding INTENT lands before setup()
                 # so a setup failure leaves a reconcilable ledger row.
-                await self._journal_intent(subagent, spec, item, attempt)
+                await self._journal_intent(subagent, spec, item, ordinal)
                 # Park-aware setup wait: a ParkedAwaitingAuthorization
                 # outcome is the human gate's wait state, not an attempt
                 # failure — no failed-attempt increment, no new attempt key,
@@ -380,12 +384,12 @@ class SubagentRuntime:
                         if not parked:
                             parked = True
                             logger.info(
-                                "[agentswarm][runtime] agent=%s attempt=%d "
+                                "[agentswarm][runtime] agent=%s ordinal=%d "
                                 "parked at authorization gate: %s",
-                                item.agent_id, attempt, exc,
+                                item.agent_id, ordinal, exc,
                             )
                             await self._journal_result(
-                                item, attempt, _PARK_LEDGER_STATUS, str(exc),
+                                item, ordinal, _PARK_LEDGER_STATUS, str(exc),
                             )
                         # Write bot_id + AWAITING on EVERY recheck cycle:
                         # concurrent workers hit the DB simultaneously and
@@ -399,7 +403,7 @@ class SubagentRuntime:
                         )
                         await asyncio.sleep(self._park_recheck_interval)
                 parked = False
-                await self._journal_binding(subagent, spec, item, attempt)
+                await self._journal_binding(subagent, spec, item, ordinal)
                 raw = await asyncio.wait_for(
                     subagent.run_task(item.envelope),
                     timeout=self._resolve_per_task_timeout(item.run),
@@ -410,26 +414,26 @@ class SubagentRuntime:
                         # D42: schema-invalid results are retried, never routed.
                         last_error = f"schema_validation: {schema_error}"
                         await self._journal_result(
-                            item, attempt, "FAILED", last_error)
+                            item, ordinal, "FAILED", last_error)
                         logger.warning(
-                            "[agentswarm][runtime] agent=%s attempt=%d schema_validation=: %s",
-                            item.agent_id, attempt, schema_error,
+                            "[agentswarm][runtime] agent=%s ordinal=%d schema_validation=: %s",
+                            item.agent_id, ordinal, schema_error,
                         )
                         continue
-                result = self._mk_result(item, AgentStatus.COMPLETED, raw, None, attempt, raw)
+                result = self._mk_result(item, AgentStatus.COMPLETED, raw, None, ordinal, raw)
                 if self._upstream_breaker is not None:
                     # 12.5: success only counts once the completed result is
                     # materialized — a spill failure must not pair a recorded
                     # success with the attempt's recorded failure.
                     self._upstream_breaker.record_success()
-                await self._journal_result(item, attempt, "COMPLETED", None)
+                await self._journal_result(item, ordinal, "COMPLETED", None)
                 return result
             except asyncio.TimeoutError:
                 parked = False
                 last_error = "timeout"
-                await self._journal_result(item, attempt, "TIMEOUT", "timeout")
+                await self._journal_result(item, ordinal, "TIMEOUT", "timeout")
                 self._record_upstream_failure()
-                logger.warning("[agentswarm][runtime] agent=%s attempt=%d timeout", item.agent_id, attempt)
+                logger.warning("[agentswarm][runtime] agent=%s ordinal=%d timeout", item.agent_id, ordinal)
             except asyncio.CancelledError:
                 # Mid-park cancellation is the ONLY path that leaves ``parked``
                 # set: a parked persona awaiting its human must survive
@@ -450,12 +454,12 @@ class SubagentRuntime:
                 self.set_slice_lost(True)
                 last_error = "slice_lost"
                 logger.info(
-                    "[agentswarm][runtime] agent=%s attempt=%d binding journal fenced out",
-                    item.agent_id, attempt,
+                    "[agentswarm][runtime] agent=%s ordinal=%d binding journal fenced out",
+                    item.agent_id, ordinal,
                 )
                 # Terminal cooperative unwind: the item ends at the next
                 # top-of-loop check, so journal this attempt's outcome now.
-                await self._journal_result(item, attempt, "SLICE_LOST", "slice_lost")
+                await self._journal_result(item, ordinal, "SLICE_LOST", "slice_lost")
             except Exception as exc:
                 parked = False
                 if self._is_non_retryable(exc):
@@ -465,9 +469,9 @@ class SubagentRuntime:
                     # feed the LLM upstream breaker.
                     last_error = f"{type(exc).__name__}: {exc}"
                     logger.warning(
-                        "[agentswarm][runtime] agent=%s attempt=%d "
+                        "[agentswarm][runtime] agent=%s ordinal=%d "
                         "non_retryable=%s error=%s",
-                        item.agent_id, attempt, type(exc).__name__, exc,
+                        item.agent_id, ordinal, type(exc).__name__, exc,
                     )
                     if getattr(exc, "bot_state", ""):
                         # The authorization's terminal verdict overrides the
@@ -478,12 +482,12 @@ class SubagentRuntime:
                             item, getattr(exc, "bot_id", ""),
                             str(getattr(exc, "bot_state", "")),
                         )
-                    await self._journal_result(item, attempt, "FAILED", last_error)
+                    await self._journal_result(item, ordinal, "FAILED", last_error)
                     break
                 last_error = str(exc)
-                await self._journal_result(item, attempt, "FAILED", last_error)
+                await self._journal_result(item, ordinal, "FAILED", last_error)
                 self._record_upstream_failure()
-                logger.warning("[agentswarm][runtime] agent=%s attempt=%d error=%s", item.agent_id, attempt, exc)
+                logger.warning("[agentswarm][runtime] agent=%s ordinal=%d error=%s", item.agent_id, ordinal, exc)
             finally:
                 if subagent is not None and not parked:
                     # Parked (mid-park cancellation, D3): the persona's
@@ -507,6 +511,20 @@ class SubagentRuntime:
         return self._mk_result(
             item, AgentStatus.FAILED, None, last_error, attempts_used,
         )
+
+    async def _next_ordinal(self, item: _WorkItem) -> int:
+        """Start this slice's ordinals after everything the agent already used.
+
+        Additive SPI read: a store double (or an older composition) without the
+        method falls back to 1 — the pre-change behaviour — instead of taking
+        the worker loop down.
+        """
+        if self._binding_store is None:
+            return 1
+        read = getattr(self._binding_store, "next_attempt_ordinal", None)
+        if read is None:
+            return 1
+        return await read(item.run, item.agent_id)
 
     @staticmethod
     def _is_non_retryable(exc: BaseException) -> bool:

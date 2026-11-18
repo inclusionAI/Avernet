@@ -78,6 +78,9 @@ class CapabilitiesMaterialiser(Materialiser[DesiredCapabilities]):
             raise ValueError(
                 "this tenant does not have permission to enable this MCP server"
             )
+        return self._validate_mcp_config(ctx, code, config)
+
+    def _validate_mcp_config(self, ctx, code, config):
         validation = self._config.validate_bot_override(
             user_id=ctx.owner_id,
             server_code=code,
@@ -88,8 +91,14 @@ class CapabilitiesMaterialiser(Materialiser[DesiredCapabilities]):
             raise ValueError(str(validation.get("error") or "invalid MCP config"))
         return validation
 
-    def _validate_set_mcp(self, ctx, code, config):
-        validation = self._validate_mcp(ctx, code, config)
+    def _validate_set_mcp(self, ctx, code, config, *, default=False):
+        if default:
+            verdict = self._auth.check_mcp_permission_detail(ctx.actor_id, code)
+            if not verdict.get("access_level"):
+                raise ValueError("MCP permission service or catalogue returned incomplete detail")
+            validation = self._validate_mcp_config(ctx, code, config)
+        else:
+            validation = self._validate_mcp(ctx, code, config)
         require_mcp_delivery_eligibility(
             mcp_config=self._config,
             engine_type=ctx.engine_type,
@@ -176,16 +185,21 @@ class CapabilitiesMaterialiser(Materialiser[DesiredCapabilities]):
                     )
         resolved, conflicts = resolve_supply(target, snapshot, direct, groups, mcp)
         failures.extend(conflicts)
-        # Default restoration requires the same permission/config preflight as explicit members.
+        # Default supplies are validated independently of ordinary Set ownership.
         if (
             resolved is not None
             and target.skill_sets is not None
             and resolved.default_enabled
         ):
-            for code in sorted(resolved.set_codes):
+            default_codes = set(snapshot.platform_default_codes)
+            for group in snapshot.sets:
+                if group.is_default:
+                    default_codes.update(group.mcp_codes)
+            for code in sorted(default_codes):
                 try:
                     await asyncio.to_thread(
-                        self._validate_set_mcp, ctx, code, snapshot.mcp_overrides.get(code)
+                        self._validate_set_mcp, ctx, code,
+                        snapshot.mcp_overrides.get(code), default=True,
                     )
                 except Exception as exc:
                     failures.append(

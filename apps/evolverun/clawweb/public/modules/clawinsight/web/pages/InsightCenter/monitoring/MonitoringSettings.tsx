@@ -3,7 +3,7 @@ import { monitoringApi, monitoringErrorText } from '../../../api/monitoring';
 import { MonitoringIcon as Icon } from './MonitoringIcon';
 import type { BotOptionsPage } from '../../../types/monitoring';
 
-export function MonitoringSettings({ onClose, onChanged }: { onClose: () => void; onChanged: () => void }) {
+export function MonitoringSettings({ onClose, onChanged, practiceUrl }: { onClose: () => void; onChanged: () => void; practiceUrl?: string }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [q, setQ] = useState('');
   const [search, setSearch] = useState('');
@@ -37,12 +37,18 @@ export function MonitoringSettings({ onClose, onChanged }: { onClose: () => void
   }
   return <dialog ref={dialog} className="monitoring-settings" aria-labelledby="monitoring-settings-title" onCancel={event => { if (busy) event.preventDefault(); else onClose(); }}>
     <header className="settings-heading">
-      <div>
-        <h2 id="monitoring-settings-title">诊断监控设置</h2>
-        <p>诊断自愈会监测 Bot 的会话。发现任务卡住或执行异常时，系统会分析原因，并尝试让原任务继续执行。</p>
-      </div>
+      <h2 id="monitoring-settings-title">诊断监控设置</h2>
       <button type="button" className="settings-close" disabled={busy} aria-label="关闭设置" onClick={onClose}><Icon name="x" /></button>
     </header>
+    <div className="settings-notice settings-overview">
+      <Icon name="pulse" />
+      <div>
+        <p className="settings-description">诊断自愈会监测 Bot 的会话。发现任务卡住或执行异常时，系统会分析原因，并尝试让原任务继续执行。</p>
+        {practiceUrl && <a className="settings-case-link" href={practiceUrl} target="_blank" rel="noopener noreferrer">
+          查看诊断自愈实践案例 <span aria-hidden="true">↗</span>
+        </a>}
+      </div>
+    </div>
     <div className="settings-notice settings-operation-notice"><Icon name="text" /><span>用 Bot 旁的开关可单独开启或关闭，也可以点击「一键全开」或「一键全关」批量设置。</span></div>
     <div className="settings-notice settings-service-notice"><Icon name="alert" /><span>服务 Bot 配置请联系山宗、安远、沐荛。</span></div>
     <div className="records-toolbar settings-toolbar"><label className="search-box"><Icon name="search" /><input type="search" aria-label="搜索我的 Bot" placeholder="搜索 Bot 名称或 ID" value={q} disabled={busy} onChange={event => setQ(event.target.value)} /></label>

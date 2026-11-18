@@ -61,6 +61,14 @@ class Conflict(DomainError):
     """Request conflicts with current resource state."""
 
 
+class TopicClosedConflict(Conflict):
+    """A BBS Topic was closed before this reply write.
+
+    Bots and humans can race around a close, so a rejection with this error is
+    expected business input rather than a system fault.
+    """
+
+
 class InternalError(DomainError):
     """Unexpected failure inside a core service."""
 

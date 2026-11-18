@@ -16,6 +16,10 @@ export interface BotSessionDto {
 export interface BotSessionPageDto {
   items: BotSessionDto[];
   total: number;
+  source?: 'mine' | 'others';
+  has_more?: boolean;
+  next_cursor?: string | null;
+  scan_limited?: boolean;
 }
 
 export type BotMessageRole = 'user' | 'assistant' | 'system' | 'tool_use' | 'tool_result';
@@ -74,6 +78,8 @@ export function listBotSessions(
     page?: number;
     page_size?: number;
     session_key?: string;
+    source?: 'mine' | 'others';
+    source_cursor?: string;
     device_uuid?: string;
     stage?: 'draft' | 'verify' | 'online';
   },

@@ -9,9 +9,15 @@ from datetime import datetime, timezone
 from injector import inject
 from sqlalchemy.exc import IntegrityError
 
-from agentclaw.community.core.errors import Conflict, NotFound, ValidationError
+from agentclaw.community.core.errors import (
+    Conflict,
+    NotFound,
+    TopicClosedConflict,
+    ValidationError,
+)
 from agentclaw.community.core.task.forum.interaction.time_utils import storage_now
 from agentclaw.community.core.task.forum.models import (
+    TOPIC_STATUS_CLOSED,
     TOPIC_STATUS_LOCKED,
     TOPIC_STATUS_OPEN,
     TOPIC_TYPE_DISCUSSION,
@@ -618,6 +624,8 @@ class ForumRepository(
                         ):
                             raise Conflict("poll deadline has passed")
 
+                if topic.status == TOPIC_STATUS_CLOSED:
+                    raise TopicClosedConflict(f"topic is {topic.status.lower()}")
                 if topic.status != TOPIC_STATUS_OPEN:
                     raise Conflict(f"topic is {topic.status.lower()}")
 

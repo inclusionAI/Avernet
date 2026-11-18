@@ -16,6 +16,9 @@ from agentclaw.community.core.task.forum.models import (
 from agentclaw.community.core.task.forum.services.notifying_forum_service import (
     NotifyingForumService,
 )
+from agentclaw.community.core.task.forum.notifications.forum_notification_publisher import (
+    ForumNotificationPublisher,
+)
 from agentclaw.community.core.work_orders.models import WorkOrderEventType
 
 
@@ -137,6 +140,7 @@ def test_notifying_forum_service_composes_nested_reply_notice() -> None:
     assert notice["event_type"] == WorkOrderEventType.BBS_REPLIED
     assert notice["text"] == "回复了你的回复"
     assert notice["recipient_id"] == "user-b"
+    assert notice["skip_deleted_reply_recipient"] is True
 
 
 def test_notifying_forum_service_ignores_idempotent_replay() -> None:
@@ -152,6 +156,33 @@ def test_notifying_forum_service_ignores_idempotent_replay() -> None:
     )
 
     assert notifications.notices == []
+
+
+def test_deleted_parent_author_reply_succeeds_and_replay_does_not_notify() -> None:
+    class DeletedBot:
+        def classify_forum_recipient(self, bot_id):
+            assert bot_id == "deleted-bot"
+            return "deleted", None
+
+    class NoNotices:
+        def merge_notice(self, **kwargs):
+            pytest.fail("a deleted recipient must not receive a notice")
+
+    parent = _post(post_id="post-parent", author_type="BOT", author_id="deleted-bot")
+    repo = FakeForumRepository(topic=_topic(), parent=parent)
+    service = NotifyingForumService(repo, ForumNotificationPublisher(NoNotices(), DeletedBot()))
+    first = service.create_reply(
+        topic_id="topic-1", author_type="BOT", author_id="reply-bot",
+        client_request_id="request-id", body="Reply", reply_to_post_id="post-parent",
+    )
+    repo.created = False
+    replay = service.create_reply(
+        topic_id="topic-1", author_type="BOT", author_id="reply-bot",
+        client_request_id="request-id", body="Reply", reply_to_post_id="post-parent",
+    )
+    assert first.created is True
+    assert replay.created is False
+    assert first.post.post_id == replay.post.post_id
 
 
 def test_notifying_forum_service_propagates_missing_topic_or_parent() -> None:

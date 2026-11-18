@@ -862,7 +862,7 @@ describe('ConversationPage(Task 8 组合页)', () => {
     render(<ConversationPage />);
 
     // 只读面板(真实组件)接管:暂无选中可读会话的空态;交互舞台的 ChatPanel 不出现。
-    expect(await screen.findByText('请选择一个好友用户会话')).toBeInTheDocument();
+    expect(await screen.findByText('请选择一个他人发起的会话')).toBeInTheDocument();
     expect(screen.queryByTestId('interactive-stage')).not.toBeInTheDocument();
   });
 

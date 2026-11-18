@@ -31,6 +31,17 @@ const managedBot: ChatBotView = {
   chatable: true,
 };
 
+it('loads team others history as the current collaborator without f_user_id', async () => {
+  mocked.listBotSessionMessages.mockResolvedValue({ code: 200, data: { items: [], total: 0 } });
+  const bot = { ...managedBot, isTeamBot: true, botType: 'service' };
+  const result = await managedBotConversationService.listOperatorMessages(bot, 'human_123', 'other-session', 1,
+    { deviceUuid: 'instance', stage: 'online' });
+  expect(result).toMatchObject({ ok: true, data: { messages: [], hasMore: false } });
+  expect(mocked.listBotSessionMessages).toHaveBeenCalledWith('bot-a', 'other-session', {
+    user_id: '123', owner_id: '2088', stage: 'online', device_uuid: 'instance', page: 1, page_size: 50,
+  });
+});
+
 const relationsEnvelope = (ids: string[], total = ids.length) => ({
   code: 20000,
   message: 'OK',
@@ -430,6 +441,7 @@ describe('managedBotConversationService.listOtherMessages', () => {
 
   it('is read-only: the service exposes no create/update/delete/favorite methods', () => {
     expect(Object.keys(managedBotConversationService).sort()).toEqual([
+      'listOperatorMessages',
       'listOtherMessages',
       'listOtherSessions',
       'loadFriendUsers',

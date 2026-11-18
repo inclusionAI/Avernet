@@ -110,6 +110,7 @@ class FakeBotRepository:
                 "bot_name": "Contract Bot",
                 "space_id": 7,
                 "owner_id": "another_user",
+                "active_engine": "openclaw",
             }
         ]
 

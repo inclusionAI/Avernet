@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import copy
 import json
+import os
 import threading
 import time
 import uuid
@@ -37,6 +38,8 @@ class Peer:
         self.cancels = []
         self.stops = {}
         self.card_reads = 0
+        self.identity_values = set()
+        self.expect_identity = os.environ.get("BCS_E2E_APP_IDENTITY") == "1"
         self.legacy_requests = 0
         self.mode = "stream"
         self.release_terminal = threading.Event()
@@ -60,6 +63,14 @@ class Peer:
             def authenticated(self):
                 valid = self.headers.get("Authorization") is None
                 valid = valid and self.headers.get("A2A-Version") == "1.0"
+                values = self.headers.get_all("x-e2e-app-identity", [])
+                if peer.expect_identity:
+                    valid = valid and len(values) == 1 and values[0].startswith("singlebox-")
+                    if valid:
+                        with peer.lock:
+                            peer.identity_values.add(values[0])
+                else:
+                    valid = valid and not values
                 if not valid:
                     self.json_response(401, {"error": {"message": "Authentication required"}})
                 return valid
@@ -67,6 +78,9 @@ class Peer:
             def do_GET(self):
                 path = urlsplit(self.path).path
                 if path == "/agent-card.json":
+                    if self.headers.get("x-e2e-app-identity") is not None:
+                        self.json_response(400, {"error": {"message": "credential sent to Card endpoint"}})
+                        return
                     with peer.lock:
                         peer.card_reads += 1
                         card = copy.deepcopy(peer.card)
@@ -630,6 +644,8 @@ if __name__ == "__main__":
                 metrics = response.read().decode()
             assert "bcs_http_requests_total{" in metrics
             assert "bcs_message_delivery_total{" in metrics
+            if peer.expect_identity:
+                assert len(peer.identity_values) > 1, "A2A requests reused the same application credential"
             if binding == "JSONRPC":
                 assert peer.rpc_methods == {"SendMessage", "SendStreamingMessage", "GetTask", "CancelTask", "SubscribeToTask"}
         finally:

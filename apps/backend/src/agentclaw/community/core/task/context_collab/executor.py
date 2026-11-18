@@ -40,6 +40,7 @@ class ContextCollabRunRequest:
     executor_owner_id: str | None = None
     todo_execution_id: str | None = None
     todo_execution_token: str | None = None
+    todo_runner_skill_md_path: str | None = None
 
 
 @dataclass(frozen=True)
@@ -56,6 +57,7 @@ class ContextCollabResumeRequest:
     executor_owner_id: str | None = None
     todo_execution_id: str | None = None
     todo_execution_token: str | None = None
+    todo_runner_skill_md_path: str | None = None
     group_id: str | None = None
 
 
@@ -259,6 +261,11 @@ class ContextCollabExecutor:
             )
         if not execution_id or not execution_token:
             return instruction
+        runner_path = request.todo_runner_skill_md_path
+        if not runner_path:
+            raise ContextCollabExecutorError(
+                "Todo runner Skill path is required for execution delivery"
+            )
         backend_url = self._backend_url.strip().rstrip("/")
         if not backend_url:
             raise ContextCollabExecutorError(
@@ -271,6 +278,7 @@ class ContextCollabExecutor:
             backend_url=backend_url,
             instruction=instruction,
             resume=resume,
+            todo_runner_skill_md_path=runner_path,
         )
 
 

@@ -15,7 +15,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 
 from agentclaw.community.core.bot_collaborator.models import BotCollaboratorModel
@@ -84,6 +84,56 @@ def test_same_tenant_can_read(seeded):
 def test_cross_tenant_get_is_not_found(seeded):
     with avernet_tenant_scope(TENANT_B):
         assert seeded.get_by_id_and_owner("bot-A", "u1") is None
+
+
+def test_forum_recipient_snapshot_respects_tenant_and_ambiguity(repo):
+    with avernet_tenant_scope(TENANT_A):
+        repo.insert(_bot(is_delete=1))
+        assert repo.classify_forum_recipient("bot-A") == ("deleted", None)
+    with avernet_tenant_scope(TENANT_B):
+        assert repo.classify_forum_recipient("bot-A") == ("missing", None)
+        repo.insert(_bot(entity_id="other", owner_id="u2"))
+        assert repo.classify_forum_recipient("bot-A") == ("live", "u2")
+    with avernet_tenant_scope(TENANT_A):
+        repo.insert(_bot(entity_id="other", owner_id="u2"))
+        assert repo.classify_forum_recipient("bot-A") == ("ambiguous", None)
+
+
+def test_forum_recipient_snapshot_respects_environment(repo, monkeypatch):
+    target = "agentclaw.community.core.repository.implementations.bot.bot.get_current_env"
+    with avernet_tenant_scope(TENANT_A):
+        monkeypatch.setattr(target, lambda: "prod")
+        repo.insert(_bot(is_delete=1))
+        monkeypatch.setattr(target, lambda: "pre")
+        assert repo.classify_forum_recipient("bot-A") == ("missing", None)
+        repo.insert(_bot(owner_id="pre-owner"))
+        assert repo.classify_forum_recipient("bot-A") == ("live", "pre-owner")
+        monkeypatch.setattr(target, lambda: "prod")
+        assert repo.classify_forum_recipient("bot-A") == ("deleted", None)
+
+
+def test_forum_recipient_snapshot_projects_owner_conditionally(repo):
+    statements = []
+    engine = repo._db._Session.kw["bind"]
+
+    def capture(_conn, _cursor, statement, parameters, _context, _many):
+        statements.append((statement, parameters))
+
+    with avernet_tenant_scope(TENANT_A):
+        repo.insert(_bot(is_delete=1))
+        event.listen(engine, "before_cursor_execute", capture)
+        try:
+            assert repo.classify_forum_recipient("bot-A") == ("deleted", None)
+        finally:
+            event.remove(engine, "before_cursor_execute", capture)
+    assert len(statements) == 1
+    statement, parameters = statements[0]
+    assert "CASE WHEN" in statement
+    assert "avernet_tenant" in statement
+    with engine.connect() as connection:
+        row = connection.exec_driver_sql(statement, parameters).one()
+    assert row[0] == 1
+    assert row[1] is None
 
 
 def test_cross_tenant_list_is_empty(seeded):

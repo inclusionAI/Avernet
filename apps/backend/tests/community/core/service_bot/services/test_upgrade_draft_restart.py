@@ -41,7 +41,7 @@ def deps():
         publish_flow_service_provider=Mock(), bot_service=lifecycle,
         device_binding_repo=Mock(), bcn_service=Mock(), quality_task_service=Mock(),
         publish_operation_repo=Mock(), task_queue_service=Mock(),
-        bot_process_registry=Mock(), common_config_service=Mock(),
+        bot_process_registry=Mock(), common_config_service=Mock(), passport_plugin=Mock(),
     )
     service._get_next_version = Mock(return_value=2)
     service.create_publish = Mock(return_value=draft)

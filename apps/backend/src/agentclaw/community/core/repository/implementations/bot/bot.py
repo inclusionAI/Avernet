@@ -67,6 +67,9 @@ from agentclaw.community.core.repository.implementations.bot.quota import (
 from agentclaw.community.core.repository.implementations.bot.explicit_env import (
     BotExplicitEnvQueries,
 )
+from agentclaw.community.core.repository.implementations.bot.forum_recipient import (
+    BotForumRecipientQueries,
+)
 from agentclaw.community.core.workspace.constants import SUPPORTED_ENGINE_TYPES
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils.runtime_list_timing import mark
@@ -92,6 +95,7 @@ def _as_naive(dt: datetime) -> datetime:
 
 
 class BotRepository(
+    BotForumRecipientQueries,
     BotMutationRepositoryMixin,
     BotInitialLayoutRepositoryMixin,
     BotDeviceProviderQueries,

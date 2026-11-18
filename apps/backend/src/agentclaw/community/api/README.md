@@ -132,6 +132,7 @@ provides:
   - AcliCliServiceProtocol
   - AgentSwarmServiceProtocol
   - EngineSessionFilesProtocol
+  - SessionSourceListingProtocol
   - TodoServiceProtocol
   - TodoArtifactServiceProtocol
 consumes:
@@ -269,6 +270,7 @@ internal_dependencies:
   - agentclaw.community.core.economy.governance_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.engine_runtime.engine_connection_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.engine_runtime.engine_runtime_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.engine_runtime.session_listing_protocol  # Caller-relative bounded session scan contract
   - agentclaw.community.core.expert_chat.expert_chat_instance_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.expert_chat.expert_chat_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.task.forum.service_protocol  # ForumServiceProtocol — defined in its owning core module, re-exported here

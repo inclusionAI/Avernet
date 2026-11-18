@@ -102,6 +102,15 @@ class BotRepository(Protocol):
         ...
 
     @abstractmethod
+    def classify_forum_recipient(self, bot_id: str) -> tuple[str, str | None]:
+        """Classify one bare Bot ID in the current tenant and environment.
+
+        Return live with its owner, deleted without an owner, or missing/ambiguous.
+        The classification is a single read snapshot, not a lifecycle lock.
+        """
+        ...
+
+    @abstractmethod
     def list_live_by_bot_id(self, bot_id: str) -> List[Dict[str, Any]]:
         """List ALL live rows sharing this bot_id in this env (no .first()).
 

@@ -248,10 +248,16 @@ async fn url_registration_and_refresh_preserve_the_source_and_full_card() {
         initial.agent_card_url.as_deref(),
         Some("https://example.org/card.json")
     );
+    chain.db.execute(DbStatement::with_params("UPDATE bcs_bots SET bot_info=JSON_SET(COALESCE(bot_info,'{}'),'$.summary','Local drift','$.domains',JSON_ARRAY('local')) WHERE bot_uuid=?",
+        vec![initial.bot_id.clone().into()])).await.unwrap();
     let refreshed = service.refresh_agent_by_id("test-admin", &initial.bot_id).await.unwrap();
     assert_eq!(refreshed.bot_id, initial.bot_id);
     assert_eq!(refreshed.agent_card, initial.agent_card);
-    let rows=chain.db.query(DbStatement::with_params("SELECT visibility FROM bcs_bots WHERE bot_uuid=?",vec![initial.bot_id.into()])).await.unwrap();
+    let rows=chain.db.query(DbStatement::with_params("SELECT visibility,bot_info FROM bcs_bots WHERE bot_uuid=?",vec![initial.bot_id.into()])).await.unwrap();
+    let info=rows[0].get_string("bot_info").unwrap().unwrap();
+    let info:serde_json::Value=serde_json::from_str(&info).unwrap();
+    assert_eq!(info["summary"],"Card description");
+    assert_eq!(info["domains"],json!([]));
     assert_eq!(rows[0].get_string("visibility").unwrap().as_deref(),Some("private"));
 }
 

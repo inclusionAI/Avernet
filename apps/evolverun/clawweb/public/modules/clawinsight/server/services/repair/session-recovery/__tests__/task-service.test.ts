@@ -233,11 +233,12 @@ describe("self-healing task orchestration", () => {
     deps.resolveTarget = async () => { throw error; };
     await expect(service.create({ ...request, diagnosis: "PRIVATE_DIAGNOSIS" }, actor)).rejects.toBe(error);
     expect(output.mock.calls[0][0]).toBe("session-recovery");
-    const events = output.mock.calls.map(([_scope, job, event, fields]) => ({ job, event, ...fields }));
+    const allEvents = output.mock.calls.map(([_scope, job, event, fields]) => ({ job, event, ...fields }));
+    const events = allEvents.filter(event => event.job === "session_recovery_task");
     expect(events).toEqual([expect.objectContaining({ job: "session_recovery_task", event: "CREATE_FAILED", outcome: "failed",
       count: 1, eventId: "evt", botId: "default", environment: "pre", targetEnvironment: "prod", errorCode: "TARGET_LOOKUP_FAILED" })]);
     expect(events[0].reason).toContain("target resolution failed");
-    expect(JSON.stringify(events)).not.toMatch(/PRIVATE_DIAGNOSIS|private-value/);
+    expect(JSON.stringify(allEvents)).not.toMatch(/PRIVATE_DIAGNOSIS|private-value/);
   });
 
   it("does not count accepted duplicates, invalid inputs or expected conflicts as creation failures", async () => {

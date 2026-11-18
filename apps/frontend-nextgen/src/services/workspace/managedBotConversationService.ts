@@ -5,6 +5,7 @@ import type {
   ConversationMessagePageView,
   ConversationSessionListState,
   ConversationUserView,
+  ConversationSessionRequestRange,
 } from '@/domain/conversation/types';
 import {
   listBotSessionMessages,
@@ -20,6 +21,7 @@ import { BOT_FRIEND_PAGE_SIZE, normalizeFriendUserId, toFriendQueryId } from './
 import { mapBotSessionMessages } from './botSessionMessageMapper';
 import {
   BOT_MESSAGE_PAGE_SIZE,
+  botSessionService,
   BOT_SESSION_PAGE_SIZE,
   mapBotSessionSummary,
   resolveChatRuntimeStage,
@@ -117,6 +119,22 @@ async function resolveFriendUserNames(
 }
 
 export const managedBotConversationService = {
+  /** 来源平铺列表的他人会话：登录操作者鉴权，不冒充 Owner，不走好友后端。 */
+  async listOperatorMessages(
+    bot: ChatBotView, userId: string, sessionId: string, page = 1,
+    range?: ConversationSessionRequestRange,
+  ): Promise<DomainResult<ConversationMessagePageView>> {
+    try {
+      const result = await botSessionService.listMessagesPage(
+        { ...bot, isFriendBot: false }, userId, sessionId, page, BOT_MESSAGE_PAGE_SIZE, range,
+      );
+      return { ok: true, data: {
+        ...result, page, hasMore: page * BOT_MESSAGE_PAGE_SIZE < result.total,
+      } };
+    } catch {
+      return { ok: false, error: toDomainError('CONVERSATION_MESSAGES_LOAD_FAILED', '加载会话历史失败，请稍后重试。') };
+    }
+  },
   /** 管理/协作 Bot 的好友 Human 用户列表(bot actor 查询,signal 透传给 AbortController 取消)。 */
   async loadFriendUsers(bot: ChatBotView, signal?: AbortSignal): Promise<DomainResult<ConversationUserView[]>> {
     const requestSignal = signal ?? new AbortController().signal;

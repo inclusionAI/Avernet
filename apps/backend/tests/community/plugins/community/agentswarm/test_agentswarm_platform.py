@@ -238,9 +238,9 @@ class TestCreate:
         seen = self._record_submit(monkeypatch)
         platform = _mk()
         spec = BotCreateSpec(name="scout", description="a surveyor")
-        first = platform.create_bot(spec=spec, idempotency_key="run-1:scout",
+        first = platform.create_bot(spec=spec, idempotency_key="run-1:scout:1",
                       owner_id="owner-1")
-        again = platform.create_bot(spec=spec, idempotency_key="run-1:scout",
+        again = platform.create_bot(spec=spec, idempotency_key="run-1:scout:1",
                       owner_id="owner-1")
         assert first == again and first.startswith("agent_swarm_") and len(first) == 28
         assert [w["bot_id"] for w in seen] == [first, first]
@@ -253,7 +253,7 @@ class TestCreate:
         platform = _mk()
         spec = BotCreateSpec(name="tester_rust_f9ed5997468d",
                              description="writes rust tests")
-        bot_id = platform.create_bot(spec=spec, idempotency_key="run-9:a1",
+        bot_id = platform.create_bot(spec=spec, idempotency_key="run-9:a1:1",
                                      owner_id="owner-1")
         submitted = seen[0]
         assert submitted["bot_id"] == bot_id == submitted["spec"].bot_name
@@ -267,7 +267,7 @@ class TestCreate:
         seen = self._record_submit(monkeypatch)
         platform = _mk()
         spec = BotCreateSpec(name="scout")  # no description
-        platform.create_bot(spec=spec, idempotency_key="run-9:a2",
+        platform.create_bot(spec=spec, idempotency_key="run-9:a2:1",
                             owner_id="owner-1")
         desc = seen[0]["spec"].bot_desc
         # f"{spec.name}-{digest8}" and nothing else
@@ -277,7 +277,7 @@ class TestCreate:
         seen = self._record_submit(monkeypatch)
         platform = _mk()
         spec = BotCreateSpec(name="scout", description="x" * 20000)
-        platform.create_bot(spec=spec, idempotency_key="run-9:a3",
+        platform.create_bot(spec=spec, idempotency_key="run-9:a3:1",
                             owner_id="owner-1")
         assert len(seen[0]["spec"].bot_desc) <= 1024
 
@@ -294,9 +294,10 @@ class TestCreate:
 
         monkeypatch.setattr(create_flow, "submit_bot_creation_with_manifest",
                              refuse)
-        platform = _mk(repo=_Repo(bot={"bot_id": "ac_adopted"}))
+        platform = _mk(repo=_Repo(bot={"bot_id": "ac_adopted",
+                                      "status": "PROVISIONING"}))
         spec = BotCreateSpec(name="scout", description="a surveyor")
-        adopted = platform.create_bot(spec=spec, idempotency_key="run-1:scout",
+        adopted = platform.create_bot(spec=spec, idempotency_key="run-1:scout:1",
                       owner_id="owner-1")
         assert adopted.startswith("agent_swarm_") and len(adopted) == 28
 
@@ -317,7 +318,8 @@ class TestCreate:
 
         monkeypatch.setattr(create_flow, "submit_bot_creation_with_manifest",
                              refuse)
-        platform = _mk(repo=_Repo(bot={"bot_id": derived}))
+        platform = _mk(repo=_Repo(bot={"bot_id": derived,
+                                      "status": "PROVISIONING"}))
         spec = BotCreateSpec(name="scout", description="a surveyor")
         first = platform.create_bot(spec=spec,
                                     idempotency_key="run-1:agent-9:2",
@@ -345,7 +347,7 @@ class TestCreate:
         with pytest.raises(BotNameExistsError):
             platform.create_bot(
                 spec=BotCreateSpec(name="scout", description="a surveyor"),
-                idempotency_key="run-1:scout",
+                idempotency_key="run-1:scout:1",
                 owner_id="owner-1",
             )
 
@@ -356,7 +358,7 @@ class TestCreate:
             name="clerk", description="a filing clerk",
             instructions="File weekly reports.",
         )
-        platform.create_bot(spec=spec, idempotency_key="run-2:clerk",
+        platform.create_bot(spec=spec, idempotency_key="run-2:clerk:1",
                       owner_id="owner-1")
         (w,) = seen
         assert w["user_id"] == "owner-1" and w["modifier"] == "owner-1"
@@ -381,7 +383,7 @@ class TestCreate:
         seen = self._record_submit(monkeypatch)
         platform = _mk()
         spec = BotCreateSpec(name="blank")
-        platform.create_bot(spec=spec, idempotency_key="run-3:blank",
+        platform.create_bot(spec=spec, idempotency_key="run-3:blank:1",
                       owner_id="owner-1")
         document = seen[0]["document"]
         assert "type: SOUL.md" in document
@@ -415,7 +417,7 @@ class TestCreate:
             instructions="File weekly reports.",
             config_manifest=document,
         )
-        platform.create_bot(spec=spec, idempotency_key="run-4:clerk",
+        platform.create_bot(spec=spec, idempotency_key="run-4:clerk:1",
                       owner_id="owner-1")
         (w,) = seen
         assert w["document"] == document
@@ -434,7 +436,7 @@ class TestCreate:
             instructions="File weekly reports.",
             identity_file="RULES.md",
         )
-        platform.create_bot(spec=spec, idempotency_key="run-5:clerk",
+        platform.create_bot(spec=spec, idempotency_key="run-5:clerk:1",
                       owner_id="owner-1")
         (w,) = seen
         assert w["document"] == (
@@ -457,7 +459,7 @@ class TestCreate:
             name="clerk", instructions="File weekly reports.",
             config_manifest="   \n\t  \n",
         )
-        platform.create_bot(spec=spec, idempotency_key="run-5b:clerk",
+        platform.create_bot(spec=spec, idempotency_key="run-5b:clerk:1",
                       owner_id="owner-1")
         (w,) = seen
         assert w["document"] == (
@@ -499,7 +501,7 @@ class TestCreate:
                     config_manifest="schema_version: 1\nmanifest:\n"
                                     "  skills:\n"
                                     "    - name: x\n      content: y\n"),
-                idempotency_key="run-6:clerk",
+                idempotency_key="run-6:clerk:1",
                 owner_id="owner-1",
             )
 
@@ -508,13 +510,96 @@ class TestCreate:
         seen = self._record_submit(monkeypatch)
         platform = _mk()
         spec = BotCreateSpec(name="scout")
-        platform.create_bot(spec=spec, idempotency_key="run-a:scout",
+        platform.create_bot(spec=spec, idempotency_key="run-a:scout:1",
                       owner_id="owner-1")
-        platform.create_bot(spec=spec, idempotency_key="run-b:scout",
+        platform.create_bot(spec=spec, idempotency_key="run-b:scout:1",
                       owner_id="owner-1")
         names = {w["spec"].bot_name for w in seen}
         ids = {w["bot_id"] for w in seen}
         assert len(names) == 2 and len(ids) == 2
+
+
+class TestPersonaDerivation:
+    """One canonical derivation: ``agent_swarm_`` + sha1(key)[:16]."""
+
+    def _record_submit(self, monkeypatch):
+        seen: list = []
+
+        def fake_submit(**kwargs):
+            seen.append(kwargs)
+            return types.SimpleNamespace(bot_id=kwargs["bot_id"])
+
+        monkeypatch.setattr(create_flow, "submit_bot_creation_with_manifest",
+                            fake_submit)
+        return seen
+
+    def test_derivation_is_the_documented_sha1_formula(self):
+        expected = "agent_swarm_" + _idem_digest("run-1:agent-9:2", 16)
+        assert host_module.bot_id_for("run-1", "agent-9", 2) == expected
+
+    def test_derivation_carries_no_extra_separator(self):
+        # The pre-change create path concatenated "-" into the digest input,
+        # so its id was not reproducible by any other spelling.
+        bot_id = host_module.bot_id_for("run-1", "agent-9", 2)
+        assert "-" not in bot_id.removeprefix("agent_swarm_")
+        assert bot_id == "agent_swarm_" + _idem_digest("run-1:agent-9:2", 16)
+
+    def test_attempt_ordinal_changes_the_identity(self):
+        ids = {
+            host_module.bot_id_for("run-1", "agent-9", attempt)
+            for attempt in (1, 2, 3)
+        }
+        assert len(ids) == 3
+
+    def test_same_ordinal_is_reproducible(self):
+        assert (
+            host_module.bot_id_for("run-1", "agent-9", 2)
+            == host_module.bot_id_for("run-1", "agent-9", 2)
+        )
+
+    def test_same_name_different_agent_is_distinct(self):
+        assert (
+            host_module.bot_id_for("run-1", "agent-a", 1)
+            != host_module.bot_id_for("run-1", "agent-b", 1)
+        )
+
+    def test_legacy_two_part_form_is_a_different_id(self):
+        legacy = host_module.bot_id_for("run-1", "agent-9")
+        assert legacy == "agent_swarm_" + _idem_digest("run-1:agent-9", 16)
+        assert legacy != host_module.bot_id_for("run-1", "agent-9", 1)
+
+    def test_create_derives_the_same_id_the_subagent_key_implies(
+            self, monkeypatch):
+        seen = self._record_submit(monkeypatch)
+        platform = _mk()
+        key = host_module.spawn_idempotency_key("run-7", "agent-3", 4)
+        bot_id = platform.create_bot(
+            spec=BotCreateSpec(name="scout"),
+            idempotency_key=key,
+            owner_id="owner-1",
+        )
+        assert bot_id == host_module.bot_id_for("run-7", "agent-3", 4)
+        assert seen[0]["bot_id"] == bot_id
+
+    def test_a_key_without_an_ordinal_is_refused(self, monkeypatch):
+        self._record_submit(monkeypatch)
+        platform = _mk()
+        with pytest.raises(RuntimeError, match="run:agent:attempt"):
+            platform.create_bot(
+                spec=BotCreateSpec(name="scout"),
+                idempotency_key="run-1:scout",
+                owner_id="owner-1",
+            )
+
+    def test_a_key_with_a_non_numeric_ordinal_is_refused(self, monkeypatch):
+        self._record_submit(monkeypatch)
+        platform = _mk()
+        with pytest.raises(RuntimeError, match="numeric attempt ordinal"):
+            platform.create_bot(
+                spec=BotCreateSpec(name="scout"),
+                idempotency_key="run-1:scout:x",
+                owner_id="owner-1",
+            )
 
 
 def first8(hexstr):
@@ -934,7 +1019,7 @@ class TestBlankOwnerRefusal:
         for blank in ("", "   "):
             with pytest.raises(RuntimeError, match="no ambient identity"):
                 platform.create_bot(spec=spec,
-                                     idempotency_key="run-1:scout",
+                                     idempotency_key="run-1:scout:1",
                                      owner_id=blank)
             with pytest.raises(RuntimeError, match="no ambient identity"):
                 platform.bot_status("b1", owner_id=blank)
@@ -956,7 +1041,7 @@ class TestBlankOwnerRefusal:
         platform = _mk()
         with pytest.raises(RuntimeError, match="no ambient identity"):
             platform.create_bot(spec=BotCreateSpec(name="scout"),
-                                idempotency_key="run-1:scout")
+                                idempotency_key="run-1:scout:1")
         assert seen == []
 
 # ── the engine-chat transport's own seams (host_chat.py) ────────────────
@@ -1210,3 +1295,138 @@ class TestChatSendFrames:
         monkeypatch.setattr(host_chat_module, "_RECV_SLICE_SECONDS", 0.01)
         with pytest.raises(host_chat_module.ChatTimeoutError):
             platform.chat("b1", "x", owner_id="owner-1")
+
+
+class TestPersonaCollision:
+    """A derived id that already names a Bot is not inserted again: adopt a
+    persona still provisioning, refuse one that finished."""
+
+    def _record_submit(self, monkeypatch):
+        seen: list = []
+
+        def fake_submit(**kwargs):
+            seen.append(kwargs)
+            return types.SimpleNamespace(bot_id=kwargs["bot_id"])
+
+        monkeypatch.setattr(create_flow, "submit_bot_creation_with_manifest",
+                            fake_submit)
+        return seen
+
+    def test_provisioning_persona_is_adopted_without_a_second_submit(
+            self, monkeypatch):
+        seen = self._record_submit(monkeypatch)
+        platform = _mk(repo=_Repo(bot={"bot_id": "ac_pending",
+                                       "status": "PENDING"}))
+        bot_id = platform.create_bot(
+            spec=BotCreateSpec(name="scout"),
+            idempotency_key="run-1:agent-1:2",
+            owner_id="owner-1",
+        )
+        assert bot_id == host_module.bot_id_for("run-1", "agent-1", 2)
+        assert seen == []
+
+    @pytest.mark.parametrize("status", ["FAILED", "ACTIVE", "INACTIVE"])
+    def test_terminal_persona_is_refused_as_an_identity_fault(
+            self, monkeypatch, status):
+        seen = self._record_submit(monkeypatch)
+        platform = _mk(repo=_Repo(bot={"bot_id": "ac_dead", "status": status}))
+        with pytest.raises(host_module.NonRetryableProvisioningError,
+                           match="persona identity collision"):
+            platform.create_bot(
+                spec=BotCreateSpec(name="scout"),
+                idempotency_key="run-1:agent-1:2",
+                owner_id="owner-1",
+            )
+        assert seen == []
+
+    def test_soft_deleted_persona_is_refused(self, monkeypatch):
+        seen = self._record_submit(monkeypatch)
+        platform = _mk(repo=_Repo(bot=None, soft_deleted=True))
+        with pytest.raises(host_module.NonRetryableProvisioningError,
+                           match="soft-deleted"):
+            platform.create_bot(
+                spec=BotCreateSpec(name="scout"),
+                idempotency_key="run-1:agent-1:2",
+                owner_id="owner-1",
+            )
+        assert seen == []
+
+    def test_the_fault_names_the_colliding_bot_id(self, monkeypatch):
+        self._record_submit(monkeypatch)
+        expected = host_module.bot_id_for("run-1", "agent-1", 2)
+        platform = _mk(repo=_Repo(bot={"bot_id": expected, "status": "FAILED"}))
+        with pytest.raises(host_module.NonRetryableProvisioningError) as err:
+            platform.create_bot(
+                spec=BotCreateSpec(name="scout"),
+                idempotency_key="run-1:agent-1:2",
+                owner_id="owner-1",
+            )
+        assert expected in str(err.value)
+
+    def test_a_platform_duplicate_is_reclassified_on_the_race_path(
+            self, monkeypatch):
+        # Existence check could not see it (concurrent create); the platform's
+        # own 1062 must still surface as the identified fault, not a generic
+        # BotServiceError.
+        from agentclaw.community.core.bot_management.services.bot_service import (
+            BotServiceError,
+        )
+
+        def duplicate(**kwargs):
+            raise BotServiceError(
+                "Failed to create bot record: (mysql.connector.errors."
+                "IntegrityError) 1062 (23000): Duplicate entry "
+                f"'{kwargs['bot_id']}-548675-prod' for key "
+                "'uk_bot_id_entity_id_env'"
+            )
+
+        monkeypatch.setattr(create_flow, "submit_bot_creation_with_manifest",
+                            duplicate)
+        platform = _mk()
+        with pytest.raises(host_module.NonRetryableProvisioningError,
+                           match="persona identity collision"):
+            platform.create_bot(
+                spec=BotCreateSpec(name="scout"),
+                idempotency_key="run-1:agent-1:2",
+                owner_id="owner-1",
+            )
+
+    def test_other_bot_service_errors_keep_their_handling(self, monkeypatch):
+        from agentclaw.community.core.bot_management.services.bot_service import (
+            BotServiceError,
+        )
+
+        def boom(**kwargs):
+            raise BotServiceError("Failed to create bot record: disk on fire")
+
+        monkeypatch.setattr(create_flow, "submit_bot_creation_with_manifest",
+                            boom)
+        platform = _mk()
+        with pytest.raises(BotServiceError, match="disk on fire"):
+            platform.create_bot(
+                spec=BotCreateSpec(name="scout"),
+                idempotency_key="run-1:agent-1:2",
+                owner_id="owner-1",
+            )
+
+    def test_a_retry_under_the_next_ordinal_is_not_blocked(self, monkeypatch):
+        # The incident's fix: attempt 1 left a FAILED row, attempt 2 derives a
+        # different id, which is absent — so it provisions.
+        seen = self._record_submit(monkeypatch)
+
+        class _OrdinalScopedRepo(_Repo):
+            def get_by_id_and_entity(self, bot_id, entity_id):
+                return {"bot_id": bot_id, "status": "FAILED"} \
+                    if bot_id == self.taken else None
+
+        first_id = host_module.bot_id_for("run-1", "agent-1", 1)
+        repo = _OrdinalScopedRepo()
+        repo.taken = first_id
+        platform = _mk(repo=repo)
+        second = platform.create_bot(
+            spec=BotCreateSpec(name="scout"),
+            idempotency_key="run-1:agent-1:2",
+            owner_id="owner-1",
+        )
+        assert second != first_id
+        assert [w["bot_id"] for w in seen] == [second]

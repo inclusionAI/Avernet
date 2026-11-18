@@ -96,11 +96,8 @@ export function useConversationRouteResolver(options: {
           ? route.friendUserId ??
             (selectedIsCodingBot ? extractCodingSessionCreatorUserId(route.sessionId ?? '') : null)
           : null;
-      // 普通 Bot 的 others 仍要求好友分组身份；Coding Bot 可直接由 sessionId 解析创建者。
-      const sessionId =
-        isManagedConversationSection(section) && managedOrigin === 'others' && !friendUserId && !selectedIsCodingBot
-          ? null
-          : route.sessionId ?? null;
+      // 平铺 others 不要求好友身份；friend 仅兼容历史链接。
+      const sessionId = route.sessionId ?? null;
       storeNow.setExpandedBot(route.botId, true);
       if (isManagedConversationSection(section)) {
         if ((storeNow.originByManagedBotId[route.botId] ?? 'mine') !== managedOrigin) {

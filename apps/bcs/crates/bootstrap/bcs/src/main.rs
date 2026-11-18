@@ -10,6 +10,10 @@ use anyhow::Result;
 use clap::Parser;
 use std::path::PathBuf;
 
+#[cfg(feature = "a2a-http-e2e")]
+#[path = "../tests/a2a_http_identity/plugin.rs"]
+mod a2a_http_identity_fixture;
+
 /// Bot Coordination Service (BCS)
 #[derive(Parser, Debug)]
 #[command(name = "bcs", version = bcs::BCS_VERSION, about, long_about = None)]

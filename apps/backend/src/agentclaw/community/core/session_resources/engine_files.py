@@ -18,7 +18,7 @@ from agentclaw.community.core.engine_runtime.errors import (
     EngineRuntimeError,
 )
 from agentclaw.community.core.resources.service import FileTooLargeError
-from agentclaw.community.core.runtime_binding.models import RuntimeBindingRequest, RuntimeBindingTarget
+from agentclaw.community.core.runtime_binding.models import RuntimeBindingRequest, RuntimeBindingSource, RuntimeBindingTarget
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.runtime_binding.errors import RuntimeBindingResolutionError
 from agentclaw.community.core.runtime_binding.service import RuntimeBindingResolutionService
@@ -49,6 +49,10 @@ class EngineSessionFilesService:
     def _connection(
         self, target: RuntimeBindingRequest, session_user_id: str | None = None,
     ) -> dict[str, Any]:
+        # On the friend surface the selector can confirm the authorized runtime only.
+        confirm_caller = session_user_id is not None and target.target is RuntimeBindingTarget.CALLER_INSTANCE
+        if confirm_caller:
+            target = replace(target, target=RuntimeBindingTarget.AUTO)
         if session_user_id is not None and session_user_id != target.actor_user_id:
             # COSEC: only an authorized owner may address another session subject.
             if target.actor_user_id != target.owner_id:
@@ -60,6 +64,8 @@ class EngineSessionFilesService:
                 target = replace(target, actor_user_id=session_user_id, target=RuntimeBindingTarget.CALLER_INSTANCE)
         try:
             binding = self._bindings.resolve(target)
+            if confirm_caller and binding.source is not RuntimeBindingSource.CALLER_INSTANCE:
+                raise EngineResourceNotFoundError("caller runtime is unavailable for friend chat")
             return self._resolver.resolve_for_binding(
                 binding.binding_id, target.actor_user_id, bot_id=target.bot_id,
             ).conn_info

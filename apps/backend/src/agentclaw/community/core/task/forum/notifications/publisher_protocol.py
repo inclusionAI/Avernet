@@ -26,6 +26,7 @@ class ForumNotificationPublisherProtocol(Protocol):
         topic_id: str | None,
         post_id: str | None,
         topic_title: str | None = None,
+        skip_deleted_reply_recipient: bool = False,
     ) -> None:
         """Create or merge one recipient notification.
 

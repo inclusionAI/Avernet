@@ -27,6 +27,10 @@ export function useBotSessionFileUpload(
   userId: string | null,
   ownerId?: string,
   stage?: BotRuntimeStage,
+  /** 多实例选中实例(openspec add-session-files-device-uuid),缺省不携带 */
+  deviceUuid?: string,
+  /** Caller 模式 Bot 运行时定位(openspec add-session-files-caller-runtime-target),缺省不携带 */
+  callerRuntimeTarget?: 'service' | 'caller_instance',
 ): UseBotSessionFileUploadResult {
   const store = useBotSessionFileStore();
   const uploadingRef = useRef(false);
@@ -83,6 +87,10 @@ export function useBotSessionFileUpload(
           const res = await botSessionFileService.uploadOne(botId, sessionId, userId, currentTask.file, {
             ownerId,
             ...(stage ? { stage } : {}),
+            // 多实例选中实例定位(openspec add-session-files-device-uuid),缺省不携带
+            ...(deviceUuid ? { deviceUuid } : {}),
+            // Caller 模式 Bot 运行时定位(openspec add-session-files-caller-runtime-target)
+            ...(callerRuntimeTarget ? { callerRuntimeTarget } : {}),
             signal: abortController.signal,
             onProgress: updateProgress(currentTask.localId),
             // 字节直传后的编排阶段回写任务态:组装中/物化中(转圈),避免 100% 进度条停滞无反馈。
@@ -119,7 +127,7 @@ export function useBotSessionFileUpload(
         }
       }
     },
-    [botId, sessionId, userId, ownerId, stage, store],
+    [botId, sessionId, userId, ownerId, stage, deviceUuid, callerRuntimeTarget, store],
   );
 
   const cancelAll = useCallback(() => {

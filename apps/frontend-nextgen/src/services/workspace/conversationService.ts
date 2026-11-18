@@ -19,6 +19,7 @@ import {
 } from './botSessionService';
 import { collaborationCandidateService, type CollaborationBotView } from './collaborationCandidateService';
 import type { DomainResult } from './identityService';
+import { listConversationSource } from './conversationSourceService';
 
 export interface ConversationDirectoryResult {
   /** 当前用户管理的 Bot;包含 AgentCoding Bot,行点击走专用 coding-chat 入口。 */
@@ -50,6 +51,8 @@ function toConversationFriendBotView(view: CollaborationBotView): ChatBotView {
     onlineAvailable: view.onlineAvailable,
     isFriendBot: true,
     isAgentCodingBot: runtime.isAgentCodingBot,
+    // Caller 模式标记透传(openspec add-iam-caller-runtime-target);缺失保持 undefined。
+    callType: view.callType,
   };
 }
 
@@ -57,9 +60,8 @@ const CODING_SESSION_SCAN_PAGE_SIZE = 100;
 const CODING_SESSION_MAX_SCAN_PAGES = 20;
 
 /**
- * Relay 的 Coding Session 列表暂不支持按创建者过滤。与 AIXCoding 路由页一致，
- * TeamClaw 从 sessionId 提取创建者并在前端分流。为了避免原始一页恰好全是另一
- * 个来源时出现假空态，这里持续扫描，直到凑满当前展示页或到达数据尾部。
+ * 收藏接口没有 source 窗口，保持原有 Coding 收藏归属过滤。
+ * 普通 mine/others 列表改走 listConversationSource，不再由浏览器扫描原始页。
  */
 async function listCodingSessionsByOrigin(
   bot: ChatBotView,
@@ -149,16 +151,17 @@ export const conversationService = {
     sessionKey: string = '',
     range?: ConversationSessionRequestRange,
     origin: ConversationOrigin = 'mine',
+    cursor?: string | null,
   ): Promise<DomainResult<BotSessionPageView>> {
-    if (bot.isAgentCodingBot) {
+    if ((scope === 'favorite' || origin === 'collab') && bot.isAgentCodingBot) {
       return listCodingSessionsByOrigin(bot, userId, scope, origin, page, pageSize, sessionKey, range);
     }
+    if (origin === 'collab') return { ok: true, data: { items: [], total: 0 } };
     const rangeArgs: [] | [ConversationSessionRequestRange] = range ? [range] : [];
     if (scope === 'favorite' && supportsBotSessionFavorites(bot.engine)) {
       return botSessionService.listFavoriteSessionsPage(bot, userId, page, pageSize, ...rangeArgs);
     }
-    const result = await botSessionService.listSessionsPage(bot, userId, page, pageSize, sessionKey, ...rangeArgs);
-    return result;
+    return listConversationSource(bot, userId, origin, pageSize, sessionKey, range, cursor);
   },
 
   /** Human→Bot 好友 Bot 会话分页:鉴权 Human 既作 user_id 也作 f_user_id;

@@ -119,7 +119,7 @@ async fn mid_transaction_failures_roll_back_card_binding_and_ownership() {
 async fn scoped_inline_card_defaults_name_without_fetching_and_keeps_trusted_owner() {
     let (chain,service,fetcher)=fixture().await;
     let mut cmd=command(OWNER);cmd.bot_name.clear();
-    let raw=json!({"name":"Inline agent","supportedInterfaces":[{"url":"https://example.org/a2a","protocolBinding":"HTTP+JSON","protocolVersion":"1.0"}],"owners":["untrusted"],"skills":[{"description":"完整描述","unknown":42}]});
+    let raw=json!({"name":"Inline agent","supportedInterfaces":[{"url":"https://example.org/a2a","protocolBinding":"HTTP+JSON","protocolVersion":"1.0"}],"owners":["untrusted"],"skills":[{"id":"inline","description":"完整描述","unknown":42}]});
     let registered=service.register_a2a_card(cmd,A2aCardSource::Inline(raw.clone())).await.unwrap();
     assert_eq!(registered.bot_name,"Inline agent");assert_eq!(fetcher.calls.load(Ordering::SeqCst),0);
     let saved=DbA2aBotStore::sqlite(chain.db.clone(),bcs_config::resolve_env_str()).get(&registered.bot_uuid).await.unwrap().unwrap();

@@ -37,6 +37,11 @@ class GatewayAuthContext:
     resource_key_id: int
     tenant: str
     app: str
+    #: The bot this principal names in ``principals[0].app.bot_id``, already in
+    #: the platform's normalized ``<real_bot_id>:<entity_id>`` form. Absent for
+    #: principals minted without a target, which keeps their authorization
+    #: exactly as it was before the claim existed.
+    claimed_bot_id: str | None = None
 
 
 def _get_token_from_header(principal: str | None) -> str:
@@ -128,6 +133,10 @@ def validate_jwt_token(
         resource_key_id=record.id,
         tenant=record.tenant,
         app=record.app,
+        # Read defensively: an older or third-party principal may carry no
+        # ``app`` block at all, and a missing claim must read as "no claim"
+        # rather than fail validation.
+        claimed_bot_id=((principal.get("app") or {}).get("bot_id") or None),
     )
 
 
@@ -166,7 +175,9 @@ def check_bot_access(
     normalized = normalize_bot_id(bot_id)
 
     if not resource_key_repository.exists_bot_mapping(
-        auth_ctx.resource_key_id, normalized
+        auth_ctx.resource_key_id,
+        normalized,
+        claimed_bot_id=auth_ctx.claimed_bot_id,
     ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

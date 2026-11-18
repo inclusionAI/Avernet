@@ -10,7 +10,7 @@ from agentclaw.community.core.engine_runtime.errors import EngineDeviceNotReadyE
 from agentclaw.community.core.devices.services.device_context import DeviceNotBoundError, UnknownProviderError
 from agentclaw.community.core.runtime_binding.errors import RuntimeBindingNotFoundError
 from agentclaw.community.core.resources.service import FileTooLargeError
-from agentclaw.community.core.runtime_binding.models import RuntimeBindingRequest
+from agentclaw.community.core.runtime_binding.models import RuntimeBindingRequest, RuntimeBindingSource, RuntimeBindingTarget
 from agentclaw.community.core.session_resources.engine_files import EngineSessionFilesService
 from agentclaw.community.plugin_api.device_adapter_transport import (
     DeviceAdapterEndpointNotFoundError, DeviceAdapterHTTPStatusError,
@@ -246,3 +246,22 @@ async def test_missing_bot_does_not_select_subject_binding(setup):
         await service.list_files(RuntimeBindingRequest("bot", "owner", "owner"), "s", session_user_id="friend")
     bindings.resolve.assert_not_called()
     transport.invoke.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source", [RuntimeBindingSource.SERVICE_ONLINE, RuntimeBindingSource.CALLER_INSTANCE])
+async def test_friend_target_confirms_authorized_binding(setup, source):
+    service, _, bindings, resolver, transport = setup
+    target = RuntimeBindingRequest("bot", "owner", "owner", "online", target=RuntimeBindingTarget.CALLER_INSTANCE)
+    is_caller = source is RuntimeBindingSource.CALLER_INSTANCE
+    service._bots.get_by_id_and_owner.return_value = {"bot_type": "service", "call_type": "caller" if is_caller else "owner"}
+    bindings.resolve.return_value = SimpleNamespace(binding_id=73, source=source)
+    transport.invoke.return_value = {"files": []}
+    if is_caller:
+        assert await service.list_files(target, "s", session_user_id="friend") == []
+        resolver.resolve_for_binding.assert_called_once_with(73, "friend", bot_id="bot")
+    else:
+        with pytest.raises(EngineResourceNotFoundError):
+            await service.list_files(target, "s", session_user_id="friend")
+        resolver.resolve_for_binding.assert_not_called()
+        transport.invoke.assert_not_awaited()
