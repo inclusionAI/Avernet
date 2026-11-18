@@ -158,15 +158,17 @@ include the service JWT, signing key or full provider response.
 
 ### Independent Caller runtime sessions
 
-Expert-chat lists also discover all actual OpenClaw session IDs from the
-subject's independent Caller instance. When the ownership index is empty,
-discovery uses a read-only lookup of an existing ready instance; it never
-creates, restarts or upgrades an instance. Missing instances yield an empty list
-and initializing or failed instances remain pending. Existing indexed sessions
-retain their previous connection lifecycle. Discovery does not filter by
-user_id because scheduled sessions have no interactive user identity. Ordinary, cron and subagent entries with nonempty string IDs returned by that
-instance are registered in the existing Backend ownership index, so connect,
-messages, favorites and mutation retain the normal ownership checks. Shared
-runtimes and other engines keep index-only discovery. Runtime timestamps
-are preserved for stable ordering; merge and deduplication precede pagination.
-No session key is synthesized. Shared-runtime strategy checks precede Caller ledger reads.
+Independent Caller sessions are authorized by the authenticated subject's existing
+successful instance binding, selected only after Bot access and online publication
+checks. Lists, details, history, connection, favorites, rename, deletion and history
+clearing do not read or write the Backend-owned session index. Reads never create,
+restart or upgrade an instance. Missing instances yield an empty list; pending or
+failed instances remain pending. Exact operations confirm the session exists in
+that fixed runtime; supplied keys cannot select another user's container.
+
+Runtime lists accept all nonempty session IDs, including ordinary, cron and
+subagent sessions, without a user filter. Results are deduplicated, sorted by
+runtime timestamps with an ID tie break, then paginated. Favorites intersect that
+runtime result. Default-session get/create retain the current-session pointer
+without registering independent sessions in the ownership index. Shared runtimes,
+including Teclaw, retain existing ownership and lifecycle rules.
