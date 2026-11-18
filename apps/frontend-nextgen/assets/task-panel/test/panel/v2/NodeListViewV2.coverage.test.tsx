@@ -163,8 +163,8 @@ describe('NodeListViewV2 覆盖补齐', () => {
 
     // 其他节点:选中 + 会话联动(coop_group 派生会话唯一 → 群会话目标)
     fireEvent.click(screen.getByRole('button', { name: '选中节点 第2棒 群协作节点' }));
-    expect(recorded.calls.select).toHaveLength(2);
-    const [, groupTarget] = recorded.calls.select[1];
+    expect(recorded.calls.select).toHaveLength(1);
+    const [, groupTarget] = recorded.calls.select[0];
     expect(groupTarget).toMatchObject({ sessionId: 'bcs_grp_x', kind: 'group' });
 
     // 空格键同样触发选择;Enter 对第一棒也走节点联动
