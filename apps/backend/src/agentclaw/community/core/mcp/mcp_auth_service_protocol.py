@@ -6,7 +6,7 @@ from typing import Any, Protocol, runtime_checkable
 
 @runtime_checkable
 class MCPAuthServiceProtocol(Protocol):
-    """Service API for MCP server permission checks + IAM token exchange."""
+    """Permission denial is a result; incomplete access level indicates an error."""
 
     def check_mcp_permission_detail(self, *args: Any, **kwargs: Any) -> Any: ...
 

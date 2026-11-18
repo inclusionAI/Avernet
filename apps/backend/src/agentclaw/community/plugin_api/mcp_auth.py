@@ -42,7 +42,7 @@ class MCPAuthPlugin(Plugin, Protocol):
         tool_list: list[str] | None = None,
         is_public: bool = True,
     ) -> list[dict[str, Any]]:
-        """Query permission status + in-progress application status."""
+        """Query status; propagate service failures instead of reporting denial."""
         ...
 
     def exchange_iam_token(self, subject_token: str) -> str | None:
