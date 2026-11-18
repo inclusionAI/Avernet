@@ -7,6 +7,7 @@ import importlib
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 from fastapi import FastAPI
@@ -181,6 +182,7 @@ class _EngineFiles:
         self.resources.binding_requests.append(target)
         _, upstream = await self.resources.open_session_file_content(
             target=target, session_key=session_key, resource_id=resource_id, disposition=disposition,
+            session_user_id=session_user_id,
         )
         return upstream
 
@@ -834,11 +836,44 @@ def test_invalid_caller_runtime_target_is_rejected(
 
 
 @pytest.mark.parametrize("suffix", ["", "/sr_1/content"])
-def test_friend_session_masks_service_caller_runtime_target(client, friendships, resources, suffix):
+@pytest.mark.parametrize("selector,expected", [
+    ("service", RuntimeBindingTarget.CALLER_SERVICE),
+    ("caller_instance", RuntimeBindingTarget.CALLER_INSTANCE),
+])
+@pytest.mark.parametrize("actor", ["friend-1", OWNER], ids=["self", "owner-on-behalf"])
+def test_explicit_friend_target_after_ownership_check(
+    client, friendships, resources, expert, suffix, selector, expected, actor,
+):
     friendships.allowed = True
-    response = client.get(_base() + suffix, params={
-        "f_user_id": "friend-1", "caller_runtime_target": "service",
+    client.app.dependency_overrides[require_principal] = lambda: {"user_id": actor}
+    expert.require_friend_session_ownership = Mock()
+    response = user_scoped_client(client.app, actor).get(_base() + suffix, params={
+        "owner_id": OWNER, "f_user_id": "friend-1", "caller_runtime_target": selector,
+    })
+
+    assert response.status_code == 200, response.text
+    expert.require_friend_session_ownership.assert_called_once_with("friend-1", BOT, OWNER, SESSION_ID)
+    assert not any(call[0] == "get_owned_chat_session" for call in expert.calls)
+    target, = resources.binding_requests
+    assert target.target is expected
+    assert target.actor_user_id == actor
+    assert resources.calls[0][1]["session_user_id"] == "friend-1"
+
+
+@pytest.mark.parametrize("suffix", ["", "/sr_1/content"])
+@pytest.mark.parametrize("selector", ["service", "caller_instance"])
+@pytest.mark.parametrize("is_friend", [True, False], ids=["foreign-session", "not-friends"])
+def test_explicit_target_denies_unauthorized_read(friend_client, friendships, resources, expert, suffix, selector, is_friend):
+    friendships.allowed = is_friend
+    expert.require_friend_session_ownership = Mock(side_effect=BotNotFoundError("foreign session"))
+    response = friend_client.get(_base() + suffix, params={
+        "owner_id": OWNER, "f_user_id": "friend-1", "caller_runtime_target": selector,
     })
 
     assert fails(response, 404)["message"] == "Not found"
+    if is_friend:
+        expert.require_friend_session_ownership.assert_called_once_with("friend-1", BOT, OWNER, SESSION_ID)
+    else:
+        expert.require_friend_session_ownership.assert_not_called()
+    assert resources.binding_requests == []
     assert resources.calls == []

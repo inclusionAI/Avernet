@@ -1,5 +1,7 @@
 """Owned-session authorization shared by read-only friend files and IAM preparation."""
 
+import asyncio
+
 from fastapi import Request
 
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import RuntimeStage
@@ -10,7 +12,6 @@ from agentclaw.community.api.expert_chat_service import ExpertChatServiceProtoco
 from agentclaw.community.api.human_bot_friendship_service import HumanBotFriendshipServiceProtocol
 from agentclaw.community.core.engine_runtime.errors import EngineDeviceNotReadyError, EngineResourceNotFoundError
 from agentclaw.community.core.expert_chat.errors import BotNotFoundError, ConnectionError
-from agentclaw.community.core.runtime_binding.models import RuntimeBindingTarget
 
 
 async def authorize_file_list(
@@ -18,7 +19,7 @@ async def authorize_file_list(
     owner_id: str, stage: RuntimeStage, friend_user_id: str | None,
     relay: EngineRuntimeRelayProtocol, friendships: HumanBotFriendshipServiceProtocol,
     expert: ExpertChatServiceProtocol,
-    runtime_target: RuntimeBindingTarget = RuntimeBindingTarget.AUTO,
+    explicit_runtime: bool = False,
 ) -> str:
     if friend_user_id is None:
         await resolve_operable_bot(
@@ -26,9 +27,6 @@ async def authorize_file_list(
             stage=stage.value, surface="sessions",
         )
         return stage.value
-    # Friend authorization grants access only to the friend's conversation runtime.
-    if runtime_target is RuntimeBindingTarget.CALLER_SERVICE:
-        raise EngineResourceNotFoundError("service runtime selection is unavailable for friend chat")
     resolved_stage = await authorize_friend_chat(
         request=request, bot_id=bot_id, caller_id=user_id, owner_id=owner_id,
         friend_user_id=friend_user_id, friendships=friendships, expert=expert, stage=stage.value,
@@ -36,6 +34,11 @@ async def authorize_file_list(
     try:
         # The Backend-owned session index, not a user-id suffix in the key,
         # is authoritative. Never read resource metadata before this check.
+        if explicit_runtime:
+            await asyncio.to_thread(
+                expert.require_friend_session_ownership, friend_user_id, bot_id, owner_id, session_id,
+            )
+            return resolved_stage
         await expert.get_owned_chat_session(
             friend_user_id, bot_id, owner_id, session_id,
             request.cookies.get("IAM_TOKEN") or None,

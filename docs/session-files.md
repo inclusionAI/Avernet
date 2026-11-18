@@ -99,12 +99,10 @@ with the chat's `stage` for the service workspace, or `caller_instance` for
 the caller's workspace. Omitting the parameter preserves automatic resolution.
 An unavailable explicit target fails without trying the other workspace.
 Upload completion and materialization status use the existing resource record.
-A friend read with `f_user_id` cannot override its scope to `service`.
-
-Friend-session reads retain the authorized session subject and resolved stage:
-service conversations use online, and Caller conversations use the subject's
-instance even when the Bot owner is the reader. Shared runtimes retain the
-verified reader for connection resolution.
+For friend reads, `f_user_id` identifies the subject of the authorized session.
+Explicit `service` selects the service binding for the authorized stage and
+keeps the reader identity. Explicit `caller_instance` selects that friend's
+instance, including when the Bot owner reads on the friend's behalf.
 The public envelope and URLs are unchanged. The list's `status` maps the Engine's
 `availability` (`ready`, `missing`, `changed`); upload-control metadata such as
 `content_hash` and `task_version` is null when absent from the Engine view.

@@ -83,7 +83,7 @@ from agentclaw.community.core.engine_runtime.errors import (
 )
 from agentclaw.community.core.engine_runtime.session_key import SessionKeyCodecRegistry
 from agentclaw.community.core.resources.service import FileTooLargeError
-from agentclaw.community.core.runtime_binding.models import RuntimeBindingRequest
+from agentclaw.community.core.runtime_binding.models import RuntimeBindingRequest, RuntimeBindingTarget
 from .listing import list_sessions, _raise_expert_error
 from agentclaw.community.di import Injected
 from agentclaw.community.utils.runtime_list_timing import mark
@@ -685,7 +685,8 @@ async def list_ready_session_files(
 ) -> Envelope[SessionFileList]:
     resolved_stage = await authorize_file_list(
         request=request, bot_id=bot_id, session_id=session_id, user_id=user_id,
-        owner_id=owner_id, stage=stage, friend_user_id=f_user_id, runtime_target=runtime_target,
+        owner_id=owner_id, stage=stage, friend_user_id=f_user_id,
+        explicit_runtime=runtime_target is not RuntimeBindingTarget.AUTO,
         relay=relay, friendships=friendships, expert=expert,
     )
     try:
@@ -733,7 +734,8 @@ async def stream_session_file_content(
 ) -> StreamingResponse:
     resolved_stage = await authorize_file_list(
         request=request, bot_id=bot_id, session_id=session_id, user_id=user_id,
-        owner_id=owner_id, stage=stage, friend_user_id=f_user_id, runtime_target=runtime_target,
+        owner_id=owner_id, stage=stage, friend_user_id=f_user_id,
+        explicit_runtime=runtime_target is not RuntimeBindingTarget.AUTO,
         relay=relay, friendships=friendships, expert=expert,
     )
     try:
