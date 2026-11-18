@@ -415,16 +415,16 @@ async def test_runtime_operation_failures_are_sanitized(caller_service, caplog, 
 async def test_operation_boundary_excludes_nested_credentials_and_preserves_business_fields(caller_service, caplog):
     service, transport, repo = caller_service
     transport.invoke.side_effect = [{"data": {"id": "runtime-only"}}, {
-        "data": {"id": "runtime-only", "title": "visible", "nested": [{"token": "placeholder-response"}, {"Cookie": "placeholder-cookie"}]},
+        "data": {"id": "runtime-only", "title": "visible", "nested": [{"token": "<response-placeholder>"}, {"Cookie": "<cookie-placeholder>"}]},
     }]
     with caplog.at_level("INFO"):
         result = await service.update_owned_chat_session("user1", "bot1", "owner1", "runtime-only", {
-            "title": "visible", "nested": [{"Authorization": "placeholder-request"}, {"session": "placeholder-session"}, {"password": "placeholder-password"}],
+            "title": "visible", "nested": [{"Authorization": "<request-placeholder>"}, {"session": "<session-placeholder>"}, {"password": "<password-placeholder>"}],
         })
     assert result["title"] == "visible"
     assert "visible" in caplog.text
     assert "nested" not in caplog.text
-    assert not any(secret in caplog.text for secret in ("placeholder-request", "placeholder-response", "placeholder-cookie", "placeholder-session", "placeholder-password"))
+    assert not any(secret in caplog.text for secret in ("<request-placeholder>", "<response-placeholder>", "<cookie-placeholder>", "<session-placeholder>", "<password-placeholder>"))
 
 
 @pytest.mark.asyncio
