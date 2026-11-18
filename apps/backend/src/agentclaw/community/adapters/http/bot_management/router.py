@@ -3220,6 +3220,13 @@ async def get_bot_config_dir(
 @with_interceptors(CollaboratorPermissionInterceptor(
     bot_id="$bot_id",
     owner_id="$owner_id",
+    # Align with the public contract for /openapi/v1/bots/{bot_id}/restart:
+    # restarting a container is ordinary operational work (MEMBER) and only
+    # an explicit collaborator row may grant it; space-derived membership
+    # must not. The interceptor's default ADMIN bar would keep default-role
+    # (MEMBER) collaborators out of the "My Bots" restart button.
+    required_level=PermissionLevel.MEMBER,
+    explicit=True,
 ))
 async def restart_bot(
     bot_id: str,
