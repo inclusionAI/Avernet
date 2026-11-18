@@ -736,3 +736,94 @@ async def test_three_subtask_relay_chain_projects_step_timeline(monkeypatch) -> 
     topology = graph.query_task_dashboard(TASK_ID)
     assert topology.status == Status.DONE
     assert len(service.callback.ingested) == 6
+
+
+@pytest.mark.parametrize(
+    "decision,verdict,failure",
+    [
+        ("ACCEPTED", "DONE", None),
+        ("ACCEPTED", "FAILED", "tool_permission_denied"),
+        ("DECLINED", None, "capability_mismatch"),
+        ("ACCEPTED", "DONE", "waiting_for_user_input"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_no_trace_reports_keep_business_results_without_step_rows(
+    decision, verdict, failure,
+) -> None:
+    repo = _InMemoryTrajectoryRepo()
+    graph = _relay_graph()
+    trajectory = TaskTrajectoryService(
+        TaskTrajectoryAssembler(repo), repo, _Analyzer(), None, graph=graph,
+    )
+    tcs = TaskContextService(trajectory)
+    client = _build_client(_RelayService(graph, tcs, _CallbackStub()), tcs)
+    execution = _execution_body(NODE_ID, EXECUTION_EVENT_ID, GENERATION)
+    execution.pop("trace")
+    if decision == "DECLINED":
+        execution["event"] = {
+            "execution_decision": decision, "failure_reason": failure,
+        }
+    elif verdict == "FAILED":
+        execution["event"]["local_acceptance_result"] = {
+            "verdict": "FAILED", "done_items": [],
+            "gap_items": [
+                {"id": item["id"], "passed": False, "summary": failure}
+                for item in execution["event"]["actual_goal"]["acceptances"]
+            ],
+        }
+        execution["event"]["output_patch"] = {"result": "已保存部分事实，权限不足，验收未通过"}
+    plan = _closure_body(NODE_ID, PLAN_EVENT_ID, GENERATION)
+    plan.pop("trace")
+    if failure:
+        plan["task_acceptance_result"] = None
+        plan["failure_reason"] = failure
+        plan["final_conclusion"] = "已有事实已保留；请确认权限或补充输入后继续。"
+    path = "/api/v1/collaboration/tasks/callback/report"
+    for body in (execution, plan):
+        response = client.post(path, json=body)
+        assert response.status_code == 200, response.text
+        assert response.json()["data"]["status"] == "APPLIED"
+        assert client.post(path, json=body).json() == response.json()
+    result = response.json()["data"]
+    assert result["task_completed"] is (failure is None)
+    assert result["task_hung"] is (failure is not None)
+    current = graph.query_task_dashboard(TASK_ID)
+    assert current.output["final_conclusion"] == plan["final_conclusion"]
+    assert repo.events == []
+    assert any(e.action == NodeAction.EXECUTE for e in current.tasks[0].run_info.action_log)
+    timeline = client.get(
+        "/api/v1/collaboration/tasks/trajectory", params={"task_id": TASK_ID},
+    )
+    assert timeline.status_code == 200, timeline.text
+    assert not any(
+        event["action_type"].startswith(("S1_", "S2_", "S3_", "S4", "S5"))
+        for event in timeline.json()["data"]["timeline"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_no_trace_handoff_still_requires_authoritative_search() -> None:
+    repo = _InMemoryTrajectoryRepo()
+    graph = _relay_graph()
+    tcs = TaskContextService(TaskTrajectoryService(
+        TaskTrajectoryAssembler(repo), repo, _Analyzer(), None, graph=graph,
+    ))
+    client = _build_client(_RelayService(graph, tcs, _CallbackStub()), tcs)
+    path = "/api/v1/collaboration/tasks/callback/report"
+    execution = _execution_body(NODE_ID, EXECUTION_EVENT_ID, GENERATION)
+    execution.pop("trace")
+    assert client.post(path, json=execution).status_code == 200
+    plan = _plan_next_body(NODE_ID, PLAN_EVENT_ID, GENERATION, "bot-next")
+    plan.pop("trace")
+    assert client.post(path, json=plan).status_code == 409
+    graph.append_action_event(TASK_ID, NODE_ID, NodeAction.DISPATCH, {
+        "phase": "search", "action_result": "search",
+        "relay_token_fingerprint": hashlib.sha256(GENERATION.encode()).hexdigest(),
+        "candidates": [{"bot_id": "bot-next"}],
+    })
+    response = client.post(path, json=plan)
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["target_node_id"]
+    assert len(graph.query_task_dashboard(TASK_ID).tasks) == 2
+    assert not any(json.loads(event.ext_info or "{}").get("trace_step") for event in repo.events)

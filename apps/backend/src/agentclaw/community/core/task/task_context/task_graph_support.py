@@ -53,27 +53,35 @@ MAX_GRAPH_VERSION_RETRIES = 3
 
 
 def _used_executor_ids(graph: TaskExecutionGraph) -> list[str]:
-    """Project all bot IDs that have already executed on a relay chain.
+    """Project reserved/executed Bot identities, never collaboration group IDs.
 
-    This is a read-only, chain-level helper. It intentionally excludes group
-    IDs because they are not bot identities. BBS claims are included through
-    ``bbs_owner``.
+    Dynamic group membership comes from the persisted formation. A single Bot
+    may run through a manager-only group without changing its Bot assignee;
+    ``actual_run_mode`` preserves that identity projection. BBS uses its claim.
     """
     used_ids: set[str] = set()
     for node in graph.tasks:
         runtime = node.run_info
+        props = runtime.extend_props
         mode = str(runtime.run_mode or "").strip()
+        if mode == "coop_group":
+            formation = props.get("pending_group_formation")
+            if isinstance(formation, dict):
+                used_ids.update(
+                    str(bot_id).strip()
+                    for bot_id in formation.get("bot_ids", [])
+                    if str(bot_id).strip()
+                )
+            # The fallback retains a Bot assignee, unlike a true dynamic group.
+            mode = str(props.get("actual_run_mode") or "").strip()
         if mode == "single_bot":
             assignee = runtime.assignee
         elif mode == "bbs":
-            assignee = runtime.extend_props.get("bbs_owner") or runtime.assignee
+            assignee = props.get("bbs_owner") or runtime.assignee
         else:
             continue
-        # S5D exclusion operates on the same composite candidate identity the
-        # Relay /search endpoint returns, not the split node projection.
         candidate = compose_bot_identity(
-            str(assignee or "").strip(),
-            runtime.extend_props.get("assignee_owner_id"),
+            str(assignee or "").strip(), props.get("assignee_owner_id"),
         )
         if candidate and candidate not in {"NOT_DECIDED"}:
             used_ids.add(candidate)

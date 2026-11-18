@@ -242,6 +242,10 @@ Todo ContextCollab 不注册独立 Plugin。`core/task/context_collab/executor.p
   `PLAN_RESULT` 原子地持久化唯一后继节点，`/dispatch` 执行实际投递。
 - Relay 报告仅有 `EXECUTION_RESULT` 与 `PLAN_RESULT`。`event_id` 用于同一请求重试的幂等回放；
   `relay_token` 是当前节点执行代次的服务端围栏，不写入任务轨迹。
+  通用接口长期保留可选 `trace` 的结构校验、步骤轨迹写入和内容指纹能力；分布式接力
+  Runtime 不要求构造或上报 trace，无 trace 不影响业务校验，也不新增 Bot 步骤轨迹。
+  后继执行者由服务端根据当前代次搜索回执及图谱已用 Bot 身份校验，排除当前/历史执行者，
+  包括持久化组群方案的成员；群 ID 不作为 Bot 身份。
 - `TaskRuntimeProfile` 在建图时冻结策略名和允许的执行模态。
 
 模式差异：
