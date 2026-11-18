@@ -57,6 +57,7 @@ __all__ = [
     "DesiredState",
     "EntryFailure",
     "LocalSkillPackage",
+    "BotSyncedLocalSkill",
     "McpEndpointEnv",
     "McpHeader",
     "McpOverride",
@@ -194,6 +195,31 @@ class LocalSkillPackage:
 
 
 @dataclass(frozen=True)
+class BotSyncedLocalSkill:
+    """A local skill whose package arrives via bot file-sync (``from: from_bot``).
+
+    A ``protocol: bot`` source's package is not fetched through the content
+    store — a separate ``BOT_FILE_SYNC`` declaration converges the source
+    bot's workspace onto this one, and that sync writes the package into the
+    dst ``skills-local`` directory the way a manual upload would. The
+    materialiser therefore does not fetch, does not upload, and does not read
+    the package bytes: it reverse-looks-up the source bot's ``ac_skill`` row
+    for ``name``/``description``/``digest`` and recomputes the dst workspace
+    path through the same ``SkillServiceFactory`` call the upload road takes,
+    then registers the dst ``ac_skill`` row referencing the already-written
+    package.
+    """
+
+    #: The source bot whose own local skill row supplies the description and
+    #: names the package the file-sync layer is converging onto this bot.
+    source_bot_id: str
+    #: The source bot's owner. A ``bot_id`` is not globally unique (the reserved
+    #: ``default`` bot has a row per account), so the reverse-lookup reads the
+    #: source row by ``(bot_id, owner_id)`` and not by ``bot_id`` alone.
+    source_owner_id: str
+
+
+@dataclass(frozen=True)
 class CenterSkillByName:
     """Deprecated compatibility form for Genome mutation's name-based references.
 
@@ -233,7 +259,7 @@ class RepoSkillPath:
 @dataclass(frozen=True)
 class DesiredSkill:
     name: str
-    source: LocalSkillPackage | CenterSkillByName | CenterSkill | RepoSkillPath
+    source: LocalSkillPackage | CenterSkillByName | CenterSkill | RepoSkillPath | BotSyncedLocalSkill
     note: str | None = None
 
     def __post_init__(self) -> None:
@@ -245,7 +271,7 @@ class DesiredSkill:
 
     @property
     def origin(self) -> SkillOrigin:
-        if isinstance(self.source, LocalSkillPackage):
+        if isinstance(self.source, (LocalSkillPackage, BotSyncedLocalSkill)):
             return SkillOrigin.LOCAL
         if isinstance(self.source, (CenterSkillByName, CenterSkillRef, CenterSkillByCode)):
             return SkillOrigin.CENTER
