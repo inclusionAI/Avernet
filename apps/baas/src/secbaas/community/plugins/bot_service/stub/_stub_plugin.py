@@ -8,6 +8,7 @@ from secbaas.community.api.device_manage import ErrorCode, PaasError
 from secbaas.community.spi.bot_service import (
     BotBindingData,
     BotServicePlugin,
+    CallerInstanceStatus,
     LogRelationPayload,
 )
 
@@ -81,10 +82,55 @@ class StubBotServicePlugin(BotServicePlugin):
         """
         if os.getenv("BAAS_STUB_CALLER_ERROR"):
             raise PaasError(
-                code=ErrorCode.PAAS_ERROR,
+                code=ErrorCode.PLATFORM_ERROR,
                 message="stub: simulated caller-connection failure",
             )
         return os.getenv("BAAS_STUB_CALLER_SANDBOX_ID", f"stub-caller-{bot_id}")
+
+    async def get_existing_caller_connection(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        user_id: str,
+    ) -> str:
+        """Return a deterministic stub sandbox_id, or simulate failure.
+
+        Env overrides: ``BAAS_STUB_EXISTING_CALLER_SANDBOX_ID`` sets the id;
+        ``BAAS_STUB_CALLER_ERROR=1`` raises ``PaasError`` (shared with
+        ``get_caller_connection``).
+        """
+        if os.getenv("BAAS_STUB_CALLER_ERROR"):
+            raise PaasError(
+                code=ErrorCode.PLATFORM_ERROR,
+                message="stub: simulated caller-connection failure",
+            )
+        return os.getenv(
+            "BAAS_STUB_EXISTING_CALLER_SANDBOX_ID", f"stub-caller-{bot_id}"
+        )
+
+    async def get_caller_instance_status(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        user_id: str,
+    ) -> CallerInstanceStatus:
+        """Return deterministic stub status, or simulate failure.
+
+        Env overrides: ``BAAS_STUB_CALLER_STATUS_ERROR=1`` raises ``PaasError``;
+        ``BAAS_STUB_CALLER_INSTANCE_EXISTS=0`` / ``BAAS_STUB_CALLER_INSTANCE_ALIVE=0``
+        force the observation to ``False`` (default both ``True``).
+        """
+        if os.getenv("BAAS_STUB_CALLER_STATUS_ERROR"):
+            raise PaasError(
+                code=ErrorCode.PLATFORM_ERROR,
+                message="stub: simulated caller-instance status failure",
+            )
+        return CallerInstanceStatus(
+            exists=os.getenv("BAAS_STUB_CALLER_INSTANCE_EXISTS", "1") != "0",
+            alive=os.getenv("BAAS_STUB_CALLER_INSTANCE_ALIVE", "1") != "0",
+        )
 
     async def close(self) -> None:
         """No-op: no resources to release."""

@@ -18,6 +18,7 @@ from secbaas.community.logger import get_logger
 from secbaas.community.spi.bot_service import (
     BotBindingData,
     BotServicePlugin,
+    CallerInstanceStatus,
     LogRelationPayload,
 )
 
@@ -105,6 +106,60 @@ class LocalBotServicePlugin(BotServicePlugin):
         raise PaasError(
             ErrorCode.PLATFORM_UNAVAILABLE,
             f"caller-connection not available in local mode: "
+            f"bot_id={bot_id}, owner_id={owner_id}, user_id={user_id}",
+        )
+
+    async def get_existing_caller_connection(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        user_id: str,
+    ) -> str:
+        """Not available in local mode — raises PaasError.
+
+        In local/singlebox mode there is no remote caller-connection service.
+
+        Raises:
+            PaasError: Always, with PLATFORM_UNAVAILABLE.
+        """
+        logger.debug(
+            "[bot-service-local] get_existing_caller_connection: bot_id=%s "
+            "owner_id=%s user_id=%s",
+            bot_id,
+            owner_id,
+            user_id,
+        )
+        raise PaasError(
+            ErrorCode.PLATFORM_UNAVAILABLE,
+            f"existing caller-connection not available in local mode: "
+            f"bot_id={bot_id}, owner_id={owner_id}, user_id={user_id}",
+        )
+
+    async def get_caller_instance_status(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        user_id: str,
+    ) -> CallerInstanceStatus:
+        """Not available in local mode — raises PaasError.
+
+        In local/singlebox mode there is no remote caller-instance service.
+
+        Raises:
+            PaasError: Always, with PLATFORM_UNAVAILABLE.
+        """
+        logger.debug(
+            "[bot-service-local] get_caller_instance_status: bot_id=%s "
+            "owner_id=%s user_id=%s",
+            bot_id,
+            owner_id,
+            user_id,
+        )
+        raise PaasError(
+            ErrorCode.PLATFORM_UNAVAILABLE,
+            f"caller-instance status not available in local mode: "
             f"bot_id={bot_id}, owner_id={owner_id}, user_id={user_id}",
         )
 

@@ -37,6 +37,7 @@ from secbaas.community.spi.bot.engine_adapter import extract_session_key_from_pl
 from secbaas.community.spi.bot_service import (
     BotBindingData,
     CallerExecutionCredential,
+    CallerInstanceStatus,
 )
 
 BOT_ID = "test-bot-000001"
@@ -820,14 +821,71 @@ class TestResolveCallerBinding:
         assert info.sandbox_id == "sbx-dingtalk"
 
     async def test_missing_credential_fails_closed(self):
-        """无 supported credential 时不构造空凭据，也不调用插件。"""
+        """无 user_id 时不构造凭据也不调插件，fail closed。"""
         plugin = MagicMock()
         plugin.get_caller_connection = AsyncMock(return_value="sbx-8")
+        plugin.get_caller_instance_status = AsyncMock()
         resolver = BotBindingResolver(plugin)
         with pytest.raises(PaasError) as exc_info:
             await resolver.resolve_caller_binding(bot_id=BOT_ID, metadata={})
         assert exc_info.value.code == ErrorCode.CONFIG_INVALID
         plugin.get_caller_connection.assert_not_awaited()
+        plugin.get_caller_instance_status.assert_not_awaited()
+
+    async def test_user_id_only_resolves_via_status_then_connection(self):
+        """仅 user_id 无 token：状态 exists+alive 才拉起，connection 不装凭据。"""
+        plugin = MagicMock()
+        plugin.get_caller_instance_status = AsyncMock(
+            return_value=CallerInstanceStatus(exists=True, alive=True)
+        )
+        plugin.get_existing_caller_connection = AsyncMock(return_value="sbx-reuse")
+        resolver = BotBindingResolver(plugin)
+        info = await resolver.resolve_caller_binding(
+            bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            metadata={"user_id": "u-7"},
+        )
+        plugin.get_caller_instance_status.assert_awaited_once_with(
+            bot_id=BOT_ID,
+            owner_id=ENTITY_ID,
+            user_id="u-7",
+        )
+        plugin.get_existing_caller_connection.assert_awaited_once_with(
+            bot_id=BOT_ID,
+            owner_id=ENTITY_ID,
+            user_id="u-7",
+        )
+        assert info.sandbox_id == "sbx-reuse"
+        assert info.device_provider == "caller"
+
+    async def test_user_id_only_without_registration_fails_not_found(self):
+        """未登记（exists=false）：直接报错，不调 connection（不触发容器创建）。"""
+        plugin = MagicMock()
+        plugin.get_caller_instance_status = AsyncMock(
+            return_value=CallerInstanceStatus(exists=False, alive=False)
+        )
+        plugin.get_existing_caller_connection = AsyncMock(return_value="sbx-x")
+        resolver = BotBindingResolver(plugin)
+        with pytest.raises(PaasError) as exc_info:
+            await resolver.resolve_caller_binding(
+                bot_id=BOT_ID, metadata={"user_id": "u-7"}
+            )
+        assert exc_info.value.code == ErrorCode.NOT_FOUND
+        plugin.get_existing_caller_connection.assert_not_awaited()
+
+    async def test_user_id_only_registered_but_not_alive_fails_not_found(self):
+        """已登记但无存活设备（exists=true, alive=false）：同样报错不拉起。"""
+        plugin = MagicMock()
+        plugin.get_caller_instance_status = AsyncMock(
+            return_value=CallerInstanceStatus(exists=True, alive=False)
+        )
+        plugin.get_existing_caller_connection = AsyncMock(return_value="sbx-x")
+        resolver = BotBindingResolver(plugin)
+        with pytest.raises(PaasError) as exc_info:
+            await resolver.resolve_caller_binding(
+                bot_id=BOT_ID, metadata={"user_id": "u-7"}
+            )
+        assert exc_info.value.code == ErrorCode.NOT_FOUND
+        plugin.get_existing_caller_connection.assert_not_awaited()
 
 
 class TestResolveBindingNormalOnly:
@@ -876,7 +934,7 @@ class TestResolveBindingNormalOnly:
 
 
 class TestIsCallerMode:
-    """is_caller_mode 判定：metadata caller 键 + binding 引擎条件。"""
+    """is_caller_mode 判定：user_id（凭据可选）+ binding 引擎条件。"""
 
     def test_missing_binding_info_returns_false(self):
         """binding_info 缺失时无法确认引擎，保守判 False（不拉容器）。"""
@@ -887,6 +945,22 @@ class TestIsCallerMode:
             )
             is False
         )
+
+    def test_user_id_without_token_enables_caller_mode(self):
+        """只传 user_id 没有 caller_token 也进入 caller 模式（resolver 先查状态）。"""
+        binding = BotBindingInfo(
+            bot_id=BOT_ID,
+            entity_id=ENTITY_ID,
+            sandbox_id=None,
+            device_id=None,
+            device_provider="baas",
+            binding_id=1,
+            device_props={},
+            bot_type="service",
+            engine_type="openclaw",
+            baas_session_id=None,
+        )
+        assert is_caller_mode({"user_id": "u-7"}, binding) is True
 
     def test_agentpass_credential_enables_caller_mode(self):
         binding = BotBindingInfo(
@@ -1012,7 +1086,8 @@ class TestNormalizeCallerIdentityMetadata:
         assert "type" not in result
         assert result["user_id"] == "u-1"
 
-    def test_user_id_without_credential_stays_non_caller(self):
+    def test_user_id_without_credential_keeps_user_id_only(self):
+        """只有 user_id 时 normalize 不注入凭据键（caller 模式判定见 is_caller_mode）。"""
         result = normalize_caller_identity_metadata({"user_id": "u-1"})
         assert "caller_token" not in result
         assert "type" not in result
