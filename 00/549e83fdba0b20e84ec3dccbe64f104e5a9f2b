@@ -1,0 +1,23 @@
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/engine_runtime/sessions/router.py
+  s_f364df1c07a1e6::t_ee371c89e92dad 86,686-687,690,736-737,740
+apps/backend/tests/community/adapters/http/openapi_v1/engine_runtime/test_session_files.py
+  s_f364df1c07a1e6::t_1ff67a033040bd 184,838-866,870-871
+docs/session-files.md
+  s_f364df1c07a1e6::t_8493020db8066e 102-103
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "00549e83fdba0b20e84ec3dccbe64f104e5a9f2b",
+  "prompts": {},
+  "sessions": {
+    "s_f364df1c07a1e6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a02001-8e2d-7e92-859e-df38c4b298ac",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}
