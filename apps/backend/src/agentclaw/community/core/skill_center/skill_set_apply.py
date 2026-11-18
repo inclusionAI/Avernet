@@ -59,6 +59,7 @@ class SkillSetApplySnapshot:
 
     persistent_skill_ids: frozenset[int] = frozenset()
     local_skill_set_references: dict[int, frozenset[int]] = field(default_factory=dict)
+    installation_sources: dict[int, tuple[str, int | None]] = field(default_factory=dict)
 
     @property
     def raw_member_skill_ids(self) -> frozenset[int]:
