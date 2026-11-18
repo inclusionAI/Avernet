@@ -1,5 +1,8 @@
 use super::*;
 use bcs_service_api::application::caller_execution::ExecutionToken;
+use bcs_service_api::application::caller_identity::{
+    AuthenticatedHumanCallerIngress, HumanActor, HumanCallerAuthSource,
+};
 
 fn binding_command(target: BindingTarget, caller: bool) -> CreateBindingCommand {
     let mut config = dingtalk_config("robot_1");
@@ -41,9 +44,17 @@ async fn caller_bot_binding_supports_dm_and_at_group_and_does_not_change_default
                 else { inbound("conv", "u1", None, "msg") };
             message.is_at_bot = group_chat;
             message.execution_token = Some(ExecutionToken::new("test-token".into(), "iam-token".into()));
+            let ingress = AuthenticatedHumanCallerIngress::new(
+                HumanActor { actor_id: "human_u1".into(), staff_no: "u1".into() },
+                HumanCallerAuthSource::ChannelIngress,
+                1_000,
+                "dev",
+            )?;
+            message.caller_ingress = Some(ingress.clone());
             harness.service.handle_inbound(message).await?;
             let sends = harness.message_flow.web_sends.lock().await;
             assert_eq!(sends.len(), 1);
+            assert_eq!(sends[0].caller_ingress.as_ref(), Some(&ingress));
             assert_eq!(sends[0].caller_execution.is_some(), caller);
             if let Some(context) = &sends[0].caller_execution {
                 assert_eq!(context.token.expose(), "test-token");

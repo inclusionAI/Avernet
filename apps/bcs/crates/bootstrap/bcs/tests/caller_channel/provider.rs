@@ -90,6 +90,7 @@ impl ChannelHttpIngressPort for Provider {
             return response(400, false);
         };
         let msg = InboundMessage {
+            caller_ingress: None,
             execution_token: callback.execution.map(|v| ExecutionToken::new(v, self.credential_type.clone())),
             channel_type: "caller-e2e".into(), account_ref: callback.account,
             im_conversation_id: callback.conversation, conversation_type: callback.conversation_type,

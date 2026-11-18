@@ -95,6 +95,21 @@ impl ChannelService for BcsChannelService {
                 ),
             ));
         };
+        let caller_ingress = match msg.caller_ingress.take() {
+            Some(ingress) if matches!(&binding.target, BindingTarget::Bot { .. }) => {
+                if ingress.actor().staff_no != msg.im_user_id
+                    || ingress.actor().actor_id != human_actor_id(&msg.im_user_id)
+                {
+                    return Err(ChannelInboundError::new(
+                        ChannelInboundFailureKind::InvalidInbound,
+                        false,
+                        "authenticated channel sender does not match resolved Human",
+                    ));
+                }
+                Some(ingress)
+            }
+            _ => None,
+        };
         info!(
             channel_type = %binding.channel_type,
             account_ref = %binding.account_ref,
@@ -298,7 +313,7 @@ impl ChannelService for BcsChannelService {
                 .message_flow
                 .handle_web_send(WebSendCommand {
                     caller_execution,
-                    caller_ingress: None,
+                    caller_ingress,
                     speaking_lease: None,
                     caller,
                     group_id: dispatch_group_id.clone(),
