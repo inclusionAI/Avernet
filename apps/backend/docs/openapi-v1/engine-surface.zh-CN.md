@@ -102,6 +102,10 @@ C1 的权威清单是 `apps/frontend/src/requestConfig.ts:189-205` 里的 proxyp
 | PUT | `…/{bot_id}/sessions/{session_id}/favorite` | `PUT /api/session-favorites/{encoded_session_id}` | 幂等收藏 → `Envelope[SessionFavorite]` |
 | DELETE | `…/{bot_id}/sessions/{session_id}/favorite` | `DELETE /api/session-favorites/{encoded_session_id}` | 幂等取消收藏 → `Envelope[SessionFavorite]` |
 
+**实例选择。** 这些运维路由还接受可选 `device_uuid` 查询选择器。发布态服务 Bot 应使用 `GET …/containers` 的 `data.instances[].id`，并同时传 `stage=online`；后续 session 和 message 调用应继续携带同一选择器。协作者操作他人 Bot 时还需传 `entity_id={owner-id}`，`user_id` 保持为调用者。详见 [OpenAPI 实例选择](../../../../docs/openapi-instance-routing.md)。
+
+`/sessions/{session_id}/files` 及其子操作不暴露 `device_uuid`；创建 Session 时选择的实例不自动保证这些文件操作仍落在同一实例。
+
 ### 好友会话文件列表
 
 好友会话读取（列表、收藏列表、详情、消息、文件列表）区分认证操作者 `user_id`

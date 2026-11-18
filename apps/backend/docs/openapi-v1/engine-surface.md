@@ -122,6 +122,12 @@ the `Envelope[T]` / `Page[T]` shapes from `openapi_v1/contracts.py`.
 | PUT | `…/{bot_id}/sessions/{session_id}/favorite` | `PUT /api/session-favorites/{encoded_session_id}` | idempotently favorite → `Envelope[SessionFavorite]` |
 | DELETE | `…/{bot_id}/sessions/{session_id}/favorite` | `DELETE /api/session-favorites/{encoded_session_id}` | idempotently unfavorite → `Envelope[SessionFavorite]` |
 
+**Instance selection.** These operator routes also accept an optional
+`device_uuid` query selector. For a published service Bot, take the value from
+`GET …/containers` and send `stage=online`; carry the same selector on follow-up
+session and message calls. See
+[OpenAPI instance selection](../../../../docs/openapi-instance-routing.md).
+
 Two things about this group are not the shape a reader would assume:
 
 **Opt-in source filtering:** `GET /bots/{bot_id}/sessions?source=mine|others`
