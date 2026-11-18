@@ -27,6 +27,7 @@ LAYOUT_CONTRACT_VERSION = "skills-pool-p3-v1"
 MAPPING_CONTRACT_VERSION = "skills-pool-mapping-v2"
 MAPPING_V3_CONTRACT_VERSION = "skills-pool-mapping-v3"
 CUTOVER_EVIDENCE_CONTRACT_VERSION = "quarantine-v1"
+RUNTIME_NOT_BOUND_REASON = "current_runtime_not_bound"
 
 
 class RuntimeLayoutProbeStatus(str, Enum):
@@ -126,7 +127,7 @@ class CurrentRuntimeLayoutProbeService:
                 timeout=10.0,
             )
         except DeviceNotBoundError:
-            return self._not_capable(engine, "current_runtime_not_bound")
+            return self._not_capable(engine, RUNTIME_NOT_BOUND_REASON)
         except UnknownProviderError as error:
             return self._invalid_control_plane(
                 engine,
@@ -307,6 +308,7 @@ __all__ = [
     "MAPPING_CONTRACT_VERSION",
     "MAPPING_V3_CONTRACT_VERSION",
     "CUTOVER_EVIDENCE_CONTRACT_VERSION",
+    "RUNTIME_NOT_BOUND_REASON",
     "RuntimeLayoutProbeResult",
     "RuntimeLayoutProbeStatus",
 ]

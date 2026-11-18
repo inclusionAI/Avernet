@@ -24,6 +24,7 @@ from agentclaw.community.core.skill_center.services.runtime_layout_probe import 
     LAYOUT_CONTRACT_VERSION,
     MAPPING_CONTRACT_VERSION,
     MAPPING_V3_CONTRACT_VERSION,
+    RUNTIME_NOT_BOUND_REASON,
     RuntimeLayoutProbeResult,
     RuntimeLayoutProbeStatus,
 )
@@ -700,6 +701,55 @@ async def test_center_probe_not_capable_degrades_without_raising() -> None:
             RuntimeLayoutProbeStatus.NOT_CAPABLE,
             reason="runtime_layout_probe_endpoint_absent",
         ),
+    )
+
+    result = await _delivery(
+        pool,
+        _MissingLayoutRepository(),
+        device_contexts=_DeviceContexts(bot_type="personal"),
+    ).deliver(
+        plan=_plan(_center_asset(), bot_type="personal"),
+        service_factory=_Factory(_LegacyRuntimeService()),
+    )
+
+    assert result.status is RuntimeProjectionStatus.DEGRADED
+    assert [issue.code for issue in result.issues] == [
+        "ENGINE_SKILL_MAPPING_UNSUPPORTED"
+    ]
+    assert result.issues[0].retryable is False
+    assert [name for name, _ in pool.calls] == ["apply", "probe"]
+
+
+@pytest.mark.asyncio
+async def test_center_not_bound_probe_stays_retryable() -> None:
+    pool = _RecordingPoolRuntime(
+        fallback=True,
+        probe_result=_probe_result(
+            RuntimeLayoutProbeStatus.NOT_CAPABLE,
+            reason=RUNTIME_NOT_BOUND_REASON,
+        ),
+    )
+
+    result = await _delivery(
+        pool,
+        _MissingLayoutRepository(),
+        device_contexts=_DeviceContexts(bot_type="personal"),
+    ).deliver(
+        plan=_plan(_center_asset(), bot_type="personal"),
+        service_factory=_Factory(_LegacyRuntimeService()),
+    )
+
+    assert result.status is RuntimeProjectionStatus.PENDING
+    assert [issue.code for issue in result.issues] == ["SKILL_RUNTIME_UNAVAILABLE"]
+    assert result.issues[0].retryable is True
+    assert [name for name, _ in pool.calls] == ["apply", "probe"]
+
+
+@pytest.mark.asyncio
+async def test_center_invalid_probe_degrades_without_raising() -> None:
+    pool = _RecordingPoolRuntime(
+        fallback=True,
+        probe_result=_probe_result(RuntimeLayoutProbeStatus.INVALID),
     )
 
     result = await _delivery(

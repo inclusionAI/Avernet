@@ -32,6 +32,7 @@ from agentclaw.community.core.skill_center.runtime_resolver import (
     RuntimeSkillProjection,
 )
 from agentclaw.community.core.skill_center.services.runtime_layout_probe import (
+    RUNTIME_NOT_BOUND_REASON,
     RuntimeLayoutProbeStatus,
 )
 from agentclaw.community.core.skills_pool.mapping_intent import (
@@ -447,10 +448,16 @@ class SkillRuntimeDelivery:
                         reason="Skill 运行环境当前不可连接，能力状态已保存但尚未同步",
                     )
                 if probe.status is not RuntimeLayoutProbeStatus.READY:
-                    # A runtime that cannot report its layout facts cannot
-                    # honour the logical mapping contract. Report the
-                    # capability gap instead of failing the whole projection
-                    # with an unexpected exception.
+                    # An unbound runtime can gain a binding later, so keep
+                    # that case retryable. Other non-READY answers mean the
+                    # runtime cannot honour the logical mapping contract;
+                    # report the capability gap instead of failing the whole
+                    # projection with an unexpected exception.
+                    if probe.evidence.get("reason") == RUNTIME_NOT_BOUND_REASON:
+                        return RuntimeProjectionResult.pending(
+                            code="SKILL_RUNTIME_UNAVAILABLE",
+                            reason="Skill 运行环境当前不可连接，能力状态已保存但尚未同步",
+                        )
                     return self._unsupported_mapping_contract_result()
                 supported_versions = probe.evidence.get(
                     "supported_mapping_contract_versions"
