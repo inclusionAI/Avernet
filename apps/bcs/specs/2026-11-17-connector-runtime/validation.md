@@ -145,5 +145,11 @@ nothing about the earlier send.
   `idempotent_start` is unresolved after a send that failed once the request
   was handed to the transport. A connection that was never established is
   retried.
+- A new actor (takeover or resume) that reads the task right after a reply was
+  confirmed, before the agent updated its status, reports the answered
+  question again under the next question round; the agent's real next question
+  then shares that identity and is dropped. Telling the two apart needs a
+  stored marker of the answered question, which is a change to a merged
+  contract (`HeldDispatchPort`); deferred to a follow-up by the owner.
 - An unresolved, blind or conflicted call occupies one of `max_active_calls`
   until the Worker cancels it or another holder takes it.
