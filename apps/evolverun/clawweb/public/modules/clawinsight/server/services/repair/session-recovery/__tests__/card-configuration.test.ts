@@ -19,8 +19,8 @@ const task = (): RecoveryStoredTask => ({ schemaVersion: 'session-recovery-task/
     instructions: 'Request document read access', evidence_ids: [], resumePhase: 'assess', createdAtMs: 1 },
 });
 
-it.each([0, 1])('uses legacy card resources only while the new row is absent, independently of the old Owner default %s', async enabled => {
-  const config = { findByKey: vi.fn<RecoveryAppConfigStore['findByKey']>(async key => key === SESSION_RECOVERY_OWNER_NOTIFICATIONS_KEY ? { ...legacy, enabled } : null) };
+it('uses enabled legacy card resources only while the new row is absent', async () => {
+  const config = { findByKey: vi.fn<RecoveryAppConfigStore['findByKey']>(async key => key === SESSION_RECOVERY_OWNER_NOTIFICATIONS_KEY ? legacy : null) };
   const sender = { sendNotification: vi.fn(), sendCard: vi.fn(), updateCard: vi.fn() };
   const notifier = new SessionRecoveryNotifier(sender, 'https://cw.invalid', config, 'pre', notificationBotConfig());
   expect(await notifier.notifyOwnerRequest({ task: task(), updateOnly: false })).toBe(true);
@@ -34,12 +34,25 @@ it.each([0, 1])('uses legacy card resources only while the new row is absent, in
 
 it('keeps legacy-only Owner overrides and card delivery usable before migration', async () => {
   const config = { findByKey: vi.fn<RecoveryAppConfigStore['findByKey']>(async key => key === SESSION_RECOVERY_OWNER_NOTIFICATIONS_KEY
-    ? row({ card: { pre: card }, bot_overrides: [{ bot_id: 'bot', entity_id: 'owner', env: 'prod', enabled: true }] }, 0) : null) };
+    ? row({ card: { pre: card }, bot_overrides: [{ bot_id: 'bot', entity_id: 'owner', env: 'prod', enabled: true }] }) : null) };
   const bots = notificationBotConfig(); bots.find.mockResolvedValue(null);
   const sender = { sendNotification: vi.fn(), sendCard: vi.fn(), updateCard: vi.fn() };
   const notifier = new SessionRecoveryNotifier(sender, 'https://cw.invalid', config, 'pre', bots);
   expect(await notifier.notifyOwnerRequest({ task: task(), updateOnly: false })).toBe(true);
   expect(sender.sendCard).toHaveBeenCalledWith(expect.objectContaining({ templateId: card.template_id, callbackRouteKey: card.callback_route_key }));
+});
+
+
+it.each([0, 2])('never sends or updates cards from a legacy row with enabled=%s', async enabled => {
+  const config = { findByKey: vi.fn<RecoveryAppConfigStore['findByKey']>(async key => key === SESSION_RECOVERY_OWNER_NOTIFICATIONS_KEY
+    ? row({ card: { pre: card }, bot_overrides: [{ bot_id: 'bot', entity_id: 'owner', env: 'prod', enabled: true }] }, enabled) : null) };
+  const sender = { sendNotification: vi.fn(), sendCard: vi.fn(), updateCard: vi.fn() };
+  const notifier = new SessionRecoveryNotifier(sender, 'https://cw.invalid', config, 'pre', notificationBotConfig());
+  expect(await recoveryCardConfiguration(config, 'pre')).toBeNull();
+  expect(await notifier.notifyOwnerRequest({ task: task(), updateOnly: false })).toBe(false);
+  expect(await notifier.notifyOwnerRequest({ task: task(), updateOnly: true })).toBe(false);
+  expect(await notifier.notify({ botId: 'bot', ownerId: 'owner', targetEnvironment: 'prod', taskId: 'SR-one', sessionKey: 'original', kind: 'result', summary: 'handoff' })).toBe(false);
+  expect(sender.sendCard).not.toHaveBeenCalled(); expect(sender.updateCard).not.toHaveBeenCalled();
 });
 
 it.each([
@@ -78,14 +91,14 @@ it('keeps Markdown plan notices independent of unavailable card resources', asyn
   expect(config.findByKey).not.toHaveBeenCalled();
 });
 
-it('admits, resolves handbooks, sends/updates Owner cards, and audits group delivery with all three retired entries absent', async () => {
+it.each(['absent', 'disabled'])('admits, resolves handbooks, sends/updates cards, and audits group delivery with retired entries %s', async retired => {
   const rows: Record<string, ReturnType<typeof row>> = {
     session_recovery_cards: row({ pre: card }),
     session_recovery_teams: row({ teams: { '97': { notification_route_id: 'team_97' } } }),
     session_recovery_handbooks: row({ team_routes: { '97': { 'TC.MCP': ['permission/handbook.md'] } } }),
     session_recovery_notification_routes: row({ routes: { team_97: { webhook: 'https://group.invalid/send', timeout_seconds: 10 } } }),
   };
-  const config = { findByKey: vi.fn<RecoveryAppConfigStore['findByKey']>(async key => rows[key] ?? null) };
+  const config = { findByKey: vi.fn<RecoveryAppConfigStore['findByKey']>(async key => rows[key] ?? (retired === 'disabled' ? row({}, 0) : null)) };
   const bots = notificationBotConfig(JSON.stringify({ team_key: '97', notifications: { owner: { enabled: true }, group: { enabled: true } } }));
   let current = task();
   await expect(requireRecoveryEnabled(bots, current.request, config)).resolves.toBeUndefined();

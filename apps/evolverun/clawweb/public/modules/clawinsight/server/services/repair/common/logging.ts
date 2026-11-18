@@ -8,11 +8,14 @@ type RepairLogFields = {
   environment?: string; targetEnvironment?: string; eventId?: string; botId?: string;
   taskId?: string; executionId?: string; jobId?: string; stepId?: string; toolCallId?: string;
   phase?: string; status?: string; outcome?: string; operation?: string; reason?: string; errorCode?: string;
+  configuration?: string; source?: string; mistKey?: string; ownerId?: string; teamKey?: string; routeSource?: string;
+  enabled?: boolean; ownerEnabled?: boolean; groupEnabled?: boolean;
   count?: number; attempt?: number; elapsedMs?: number; retryAtMs?: number; stateVersion?: number;
 };
 const allowed = new Set(["environment", "targetEnvironment", "eventId", "botId", "taskId", "executionId", "jobId",
   "stepId", "toolCallId", "phase", "status", "outcome", "operation", "reason", "errorCode", "count", "attempt",
-  "elapsedMs", "retryAtMs", "stateVersion"]);
+  "elapsedMs", "retryAtMs", "stateVersion", "configuration", "source", "mistKey", "ownerId", "teamKey", "routeSource",
+  "enabled", "ownerEnabled", "groupEnabled"]);
 
 // Fixed log file; retention and rotation belong to the deployment's logrotate.
 const LOG_DIR = join(homedir(), "logs", "clawweb");

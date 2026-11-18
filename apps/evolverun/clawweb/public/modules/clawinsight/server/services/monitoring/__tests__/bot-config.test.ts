@@ -103,12 +103,12 @@ it('allows independent explicit channels and extensible top-level config', () =>
     .toEqual({ owner: true, group: { routeId: 'team_a' } });
 });
 
-it('dry-runs migration, deduplicates routes and preserves edited rows on rerun', async () => {
+it.each([0, 1])('dry-runs migration with legacy Owner enabled=%s and preserves edited rows on rerun', async enabled => {
   await bot('a'); await bot('b'); await bot('c', 'pre');
   const app = new AppConfigRepository(db);
   await app.create({ config_key: 'session_recovery_allowlist', config_json: JSON.stringify({ allowed_bots: ['a', 'b'].map(bot_id => ({ bot_id, entity_id: target.entityId, env: 'prod' })) }) });
-  await app.create({ config_key: 'session_recovery_owner_notifications', config_json: JSON.stringify({ bot_overrides: [{ bot_id: 'a', entity_id: '001', env: 'prod', enabled: true }] }) });
-  await app.update('session_recovery_owner_notifications', { enabled: 0 });
+  await app.create({ config_key: 'session_recovery_owner_notifications', config_json: JSON.stringify({ bot_overrides: [{ bot_id: 'a', entity_id: '001', env: 'prod', enabled: true }, { bot_id: 'b', entity_id: '001', env: 'prod', enabled: false }] }) });
+  await app.update('session_recovery_owner_notifications', { enabled });
   await app.create({ config_key: 'session_recovery_notifications', config_json: JSON.stringify({ webhook: 'https://business.invalid/send', timeout_seconds: 10,
     bot_webhooks: ['a', 'b'].map(bot_id => ({ bot_id, entity_id: '001', webhook: 'https://private.invalid/send' })) }) });
   await db.exec("INSERT INTO ce_tasks VALUES ('SR-history', 'session_recovery', ?)", [JSON.stringify({ request: { target: { bot_id: 'c', entity_id: '001', env: 'pre' } } })]);
@@ -121,7 +121,7 @@ it('dry-runs migration, deduplicates routes and preserves edited rows on rerun',
   await migrateBotDiagnosisRecoveryConfigs(db, directory, scope, { updatedBy: '001', apply: true });
   const a = (await configs.find({ ...target, botId: 'a' }))!, b = (await configs.find({ ...target, botId: 'b' }))!;
   expect(a.recoveryEnabled).toBe(true); expect(a.diagnosisEnabled).toBe(false);
-  expect(parseBotNotifications(a.configJson).owner).toBe(true); expect(parseBotNotifications(b.configJson).owner).toBe(false);
+  expect(parseBotNotifications(a.configJson).owner).toBe(enabled === 1); expect(parseBotNotifications(b.configJson).owner).toBe(false);
   expect(parseBotNotifications(a.configJson).group).toEqual(parseBotNotifications(b.configJson).group);
   await configs.setSwitches(a, switches(1, false));
   const repeat = await migrateBotDiagnosisRecoveryConfigs(db, directory, scope, { updatedBy: '001', apply: true });
@@ -139,7 +139,6 @@ async function legacy() {
   await app.create({ config_key: 'session_recovery_owner_notifications', config_json: JSON.stringify({
     bot_overrides: [{ bot_id: 'default', entity_id: '001', env: 'prod', enabled: true }],
   }) });
-  await app.update('session_recovery_owner_notifications', { enabled: 0 });
   await app.create({ config_key: 'session_recovery_notifications', config_json: JSON.stringify({
     webhook: 'https://business.invalid/send', timeout_seconds: 10,
     bot_webhooks: [{ bot_id: 'default', entity_id: '001', webhook: 'https://private.invalid/send' }],
@@ -162,6 +161,14 @@ it('reads legacy admission and exact Owner notification overrides until a new ro
   expect(await recoveryNotifications(configs, recoveryRequest.target, app)).toEqual({ owner: true, group: null });
   expect((await recoveryConfigurations(configs, [target], app))[0]).toMatchObject({ recoveryEnabled: false, version: 1 });
   expect(await app.findByKey('session_recovery_allowlist')).toEqual(source);
+});
+
+
+it('disables legacy Owner overrides with the row switch while leaving group policy independent', async () => {
+  const app = await legacy();
+  await app.update('session_recovery_owner_notifications', { enabled: 0 });
+  expect(await recoveryNotifications(configs, recoveryRequest.target, app)).toEqual({ owner: false,
+    group: { webhook: 'https://private.invalid/send', timeout_seconds: 10 } });
 });
 
 it('preserves Bot, directory entity, Owner and environment boundaries for legacy admission', async () => {

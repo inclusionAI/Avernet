@@ -94,3 +94,16 @@ it("reports an unavailable destination once, retries after recovery and never in
   expect(warning).toHaveBeenCalledTimes(2);
   expect(output).not.toHaveBeenCalled();
 });
+
+
+it("persists configuration provenance and MIST names but rejects secret-bearing fields", async () => {
+  const { logRepairEvent } = await import("../logging.js");
+  logRepairEvent("session-recovery", "session_recovery_configuration", "resolution", {
+    configuration: "model_credentials", source: "mist", mistKey: "team.model", ownerId: "owner", taskId: "SR-one",
+    status: "resolved", ownerEnabled: false, groupEnabled: true, enabled: true, teamKey: "97", routeSource: "team",
+    modelApiKey: "PRIVATE_API_KEY", webhook: "PRIVATE_WEBHOOK", configJson: "PRIVATE_CONFIG",
+  } as never);
+  expect(events()[0]).toMatchObject({ configuration: "model_credentials", source: "mist", mistKey: "team.model", taskId: "SR-one",
+    ownerEnabled: false, groupEnabled: true, enabled: true, teamKey: "97", routeSource: "team" });
+  expect(readFileSync(logFile, "utf8")).not.toContain("PRIVATE_");
+});

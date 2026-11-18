@@ -1,7 +1,8 @@
+import { logRepairEvent } from '../common/logging.js';
 import { parseRecoveryHandbookRoutes, recoveryHandbookForTeam, type RecoveryHandbookConfigStore, SESSION_RECOVERY_HANDBOOKS_KEY } from "./handbook.js";
 import type { RecoveryStoredTask } from "./task-contracts.js";
 import type { BotDiagnosisRecoveryConfigStore } from '../../monitoring/bot-config-contracts.js';
-import { parseBotNotifications } from '../../monitoring/bot-config-contracts.js';
+import { parseBotNotifications, validBotConfiguration } from '../../monitoring/bot-config-contracts.js';
 import type { MonitoringTarget } from '../../monitoring/contracts.js';
 import { targetKey } from '../../monitoring/target.js';
 import type { RecoveryRequest } from './contracts.js';
@@ -31,45 +32,79 @@ async function configurationForOwner(store: BotDiagnosisRecoveryConfigStore, tar
 
 export async function requireRecoveryEnabled(store: BotDiagnosisRecoveryConfigStore, request: RecoveryRequest, app?: RecoveryAppConfigStore) {
   let enabled = false;
+  let source = 'unresolved';
+  const fields = { configuration: 'admission', eventId: request.event_id, botId: request.target.bot_id,
+    ownerId: request.target.entity_id, targetEnvironment: request.target.env };
   try {
     const resolved = await configurationForOwner(store, request.target);
+    source = !resolved ? 'none' : resolved.config ? 'new' : 'legacy';
     if (resolved) enabled = resolved.config ? resolved.config.recoveryEnabled
       : (await legacyAllowedTargets(app)).has(targetKey(resolved.target));
-  } catch { throw new SessionRecoveryError(503, 'recovery_configuration_unavailable', '自愈配置暂不可用'); }
+  } catch {
+    logRepairEvent('session-recovery', 'session_recovery_configuration', 'resolution', { ...fields, source, status: 'unavailable', reason: 'read_or_parse_failed' });
+    throw new SessionRecoveryError(503, 'recovery_configuration_unavailable', '自愈配置暂不可用');
+  }
+  logRepairEvent('session-recovery', 'session_recovery_configuration', 'resolution', { ...fields, source, enabled,
+    status: enabled ? 'enabled' : 'disabled' });
   if (!enabled) throw new SessionRecoveryError(403, 'recovery_disabled', '此 Bot 尚未开启自愈');
 }
 
-export async function recoveryNotifications(store: BotDiagnosisRecoveryConfigStore | undefined, target: RecoveryRequest['target'], app?: RecoveryAppConfigStore): Promise<RecoveryNotifications> {
+export async function recoveryNotifications(store: BotDiagnosisRecoveryConfigStore | undefined, target: RecoveryRequest['target'], app?: RecoveryAppConfigStore,
+  taskId?: string): Promise<RecoveryNotifications> {
   const disabled = { owner: false, group: null };
+  let source = 'unresolved', routeSource = 'none';
+  let teamKey: string | undefined;
+  const finish = (value: RecoveryNotifications, reason: string) => {
+    logRepairEvent('session-recovery', 'session_recovery_configuration', 'resolution', { configuration: 'notifications', source,
+      botId: target.bot_id, ownerId: target.entity_id, targetEnvironment: target.env, taskId, teamKey, routeSource,
+      ownerEnabled: value.owner, groupEnabled: value.group !== null, reason });
+    return value;
+  };
   try {
-    if (!store) return disabled;
+    if (!store) { source = 'none'; return finish(disabled, 'store_unavailable'); }
     const resolved = await configurationForOwner(store, target);
-    if (!resolved) return disabled;
+    if (!resolved) { source = 'none'; return finish(disabled, 'target_unresolved'); }
+    source = resolved.config ? 'new' : 'legacy';
     if (resolved.config) {
+      if (!validBotConfiguration(resolved.config.configJson)) return finish(disabled, 'invalid_configuration');
       const notifications = parseBotNotifications(resolved.config.configJson);
-      if (!notifications.group) return { owner: notifications.owner, group: null };
-      const teamKey = botTeamKey(resolved.config.configJson);
+      if (!notifications.group) return finish({ owner: notifications.owner, group: null }, 'group_disabled_or_unconfigured');
+      teamKey = botTeamKey(resolved.config.configJson);
+      routeSource = notifications.group.routeId ? 'bot' : teamKey ? 'team' : 'none';
       const routeId = notifications.group.routeId ?? (teamKey ? (await recoveryTeam(teamKey, app)).notification_route_id : undefined);
-      if (!routeId) return { owner: notifications.owner, group: null };
+      if (!routeId) return finish({ owner: notifications.owner, group: null }, 'route_unconfigured');
       const row = await app?.findByKey(RECOVERY_NOTIFICATION_ROUTES_KEY);
       const group = row?.enabled === 1 ? recoveryGroupRoute(row.config_json, routeId) : null;
-      return { owner: notifications.owner, group };
+      return finish({ owner: notifications.owner, group }, group ? 'resolved' : 'route_unavailable');
     }
     // In-flight legacy tasks keep their notification policy even after admission is disabled.
     // No fallback is permitted for malformed new JSON, disabled switches or storage errors.
-    return await legacyRecoveryNotifications(target, app);
-  } catch { return disabled; }
+    routeSource = 'legacy';
+    return finish(await legacyRecoveryNotifications(target, app), 'resolved');
+  } catch { return finish(disabled, 'read_or_parse_failed'); }
 }
 
 export const SESSION_RECOVERY_CARDS_KEY = 'session_recovery_cards';
 /** Only an absent new row permits compatibility; every invalid/unavailable value fails closed. */
-export async function recoveryCardConfiguration(app: RecoveryAppConfigStore, environment: AgentControlPlaneEnvironment): Promise<RecoveryCardConfiguration | null> {
+export async function recoveryCardConfiguration(app: RecoveryAppConfigStore, environment: AgentControlPlaneEnvironment,
+  context: { taskId?: string; botId?: string; ownerId?: string; targetEnvironment?: string } = {}): Promise<RecoveryCardConfiguration | null> {
+  let source = 'unresolved';
+  const finish = (value: RecoveryCardConfiguration | null, reason: string) => {
+    logRepairEvent('session-recovery', 'session_recovery_configuration', 'resolution', { ...context, environment,
+      configuration: 'cards', source, enabled: value !== null, reason });
+    return value;
+  };
   try {
     const row = await app.findByKey(SESSION_RECOVERY_CARDS_KEY);
-    if (!row) return await legacyRecoveryCardConfiguration(app, environment);
-    if (row.enabled !== 1) return null;
-    return cardConfiguration(JSON.parse(row.config_json))[environment] ?? null;
-  } catch { return null; }
+    source = row ? 'new' : 'legacy';
+    if (!row) {
+      const legacy = await legacyRecoveryCardConfiguration(app, environment);
+      return finish(legacy, legacy ? 'resolved' : 'legacy_disabled_or_unconfigured');
+    }
+    if (row.enabled !== 1) return finish(null, 'disabled');
+    const card = cardConfiguration(JSON.parse(row.config_json))[environment] ?? null;
+    return finish(card, card ? 'resolved' : 'environment_unconfigured');
+  } catch { return finish(null, 'read_or_parse_failed'); }
 }
 
 export const RECOVERY_NOTIFICATION_ROUTES_KEY = 'session_recovery_notification_routes';
@@ -135,27 +170,39 @@ export async function validateRecoveryTeamConfiguration(raw: string, app?: Recov
 /** Resolve legacy ownership and current team policy here, once at creation. Consumers see only effective values. */
 export async function recoveryExecutionConfiguration(request: RecoveryRequest, app?: RecoveryHandbookConfigStore,
   store?: BotDiagnosisRecoveryConfigStore) {
-  const resolved = store ? await configurationForOwner(store, request.target) : null;
-  let teamKey = resolved?.config ? botTeamKey(resolved.config.configJson) : undefined;
-  const team = teamKey ? await recoveryTeam(teamKey, app) : undefined;
-  const row = await app?.findByKey(SESSION_RECOVERY_HANDBOOKS_KEY);
-  let routes: Record<string, Record<string, string[]>> = {};
-  if (row && row.enabled !== 0) {
-    if (row.enabled !== 1) return configurationInvalid();
-    if (teamKey === undefined) {
-      ({ teamKey, routes } = legacyRecoveryHandbookConfiguration(row.config_json, request.target));
-    } else {
-      // New ownership is independent of the obsolete Bot roster, including its validation.
-      let value: unknown;
-      try { value = JSON.parse(row.config_json); } catch { return configurationInvalid(); }
-      if (!object(value)) return configurationInvalid();
-      routes = parseRecoveryHandbookRoutes(value.team_routes);
+  let source = 'unresolved';
+  const fields = { configuration: 'execution', eventId: request.event_id, botId: request.target.bot_id,
+    ownerId: request.target.entity_id, targetEnvironment: request.target.env };
+  try {
+    const resolved = store ? await configurationForOwner(store, request.target) : null;
+    source = resolved?.config ? 'new' : 'legacy';
+    let teamKey = resolved?.config ? botTeamKey(resolved.config.configJson) : undefined;
+    source = teamKey === undefined ? 'legacy' : 'new';
+    const team = teamKey ? await recoveryTeam(teamKey, app) : undefined;
+    const row = await app?.findByKey(SESSION_RECOVERY_HANDBOOKS_KEY);
+    let routes: Record<string, Record<string, string[]>> = {};
+    if (row && row.enabled !== 0) {
+      if (row.enabled !== 1) return configurationInvalid();
+      if (teamKey === undefined) {
+        ({ teamKey, routes } = legacyRecoveryHandbookConfiguration(row.config_json, request.target));
+      } else {
+        // New ownership is independent of the obsolete Bot roster, including its validation.
+        let value: unknown;
+        try { value = JSON.parse(row.config_json); } catch { return configurationInvalid(); }
+        if (!object(value)) return configurationInvalid();
+        routes = parseRecoveryHandbookRoutes(value.team_routes);
+      }
     }
+    // A team without handbook resources uses common; the wrapper must not require a nonexistent custom directory.
+    const handbookTeam = teamKey && Object.hasOwn(routes, teamKey) ? teamKey : null;
+    logRepairEvent('session-recovery', 'session_recovery_configuration', 'resolution', { ...fields, source, teamKey,
+      status: 'resolved', reason: team?.llm?.api_key_mist_key ? 'team_model_credentials' : 'default_model_credentials' });
+    return { handbook: recoveryHandbookForTeam(request.tc_fault_label, handbookTeam, routes),
+      modelApiKeyRef: team?.llm?.api_key_mist_key ?? null };
+  } catch (error) {
+    logRepairEvent('session-recovery', 'session_recovery_configuration', 'resolution', { ...fields, source, status: 'unavailable', reason: 'read_or_parse_failed' });
+    throw error;
   }
-  // A team without handbook resources uses common; the wrapper must not require a nonexistent custom directory.
-  const handbookTeam = teamKey && Object.hasOwn(routes, teamKey) ? teamKey : null;
-  return { handbook: recoveryHandbookForTeam(request.tc_fault_label, handbookTeam, routes),
-    modelApiKeyRef: team?.llm?.api_key_mist_key ?? null };
 }
 
 /** Existing callers can keep requesting just the handbook through the same configuration boundary. */
@@ -165,13 +212,22 @@ export async function resolveRecoveryHandbook(request: RecoveryRequest, app: Rec
 
 /** Old task snapshots select the deployment default; never re-resolve a running task's Bot team. */
 export async function recoveryModelCredentials(task: RecoveryStoredTask, resolve?: (reference: string) => Promise<string>): Promise<{ modelApiKey?: string }> {
-  if (!task.modelApiKeyRef) return {};
+  const fields = { configuration: 'model_credentials', taskId: task.taskId, botId: task.request.target.bot_id,
+    ownerId: task.request.target.entity_id, targetEnvironment: task.request.target.env };
+  if (!task.modelApiKeyRef) {
+    logRepairEvent('session-recovery', 'session_recovery_configuration', 'resolution', { ...fields, source: 'default', status: 'resolved' });
+    return {};
+  }
   try {
     if (!resolve) throw new Error('Model credential resolver unavailable');
     const value = await resolve(task.modelApiKeyRef);
     if (typeof value !== 'string' || !value.trim() || value.length > 8192 || /[\r\n\0]/.test(value)) throw new Error('Invalid model credential');
+    logRepairEvent('session-recovery', 'session_recovery_configuration', 'resolution', { ...fields, source: 'mist',
+      mistKey: task.modelApiKeyRef, status: 'resolved' });
     return { modelApiKey: value };
   } catch {
+    logRepairEvent('session-recovery', 'session_recovery_configuration', 'resolution', { ...fields, source: 'mist',
+      mistKey: task.modelApiKeyRef, status: 'unavailable', reason: 'credential_resolution_failed' });
     throw new SessionRecoveryError(503, 'recovery_model_credentials_unavailable', '自愈模型凭据暂不可用');
   }
 }
