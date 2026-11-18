@@ -66,7 +66,7 @@ export const NodeListViewV2: React.FC<NodeListViewV2Props> = ({ task, nav, onOpe
         const drillReason = '节点缺少会话或执行者信息，无法下钻';
         const stageName = `第${stageIndex + 1}棒 ${node.name}`;
         const selectForConversation = () => {
-          if (node.id === rootNodeId && !target) nav.selectRootNode(node.id);
+          if (node.id === rootNodeId) nav.selectRootNode(node.id);
           else nav.selectNode(node.id, target);
         };
         return (
