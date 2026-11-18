@@ -64,3 +64,31 @@ Verify at the remote transport boundary and through native DI/service/HTTP
 serialization, including current/legacy provider pages and cancellable and
 non-cancellable pending states. This follow-up does not claim a new live
 cross-service or Simulator run.
+
+
+### Follow-up verification evidence
+
+- Before the projection/schema fix, the new contract suite reproduced the gap:
+  7 failed and 2 legacy-compatibility cases passed. After the fix, all 9 passed.
+- Neighboring knowledge-management, framework, architecture and HTTP contract
+  regression: 1049 passed (includes the 9 new contract cases, not additive).
+- Independent review identified that a shared seed hand-built a sync dependency.
+  The new list cases now select the optional enabled sync capability using the
+  existing DI provider and configured app identity, then persist context via
+  native `ensure_synced`. Only the external sink/HTTP transport are scripted;
+  catalog/service/repositories and the synchronizer are not hand-constructed.
+- The repaired native catalog runner has 5 passing cases: 4 enabled-profile
+  lifecycle pages and the unchanged default-closed profile returning 503 without
+  outbound catalog traffic. Final focused contracts, endpoint selections and
+  framework seam guards: 215 passed.
+- Enabled test-profile configuration is not evidence that a public default or an
+  enterprise deployment has enabled this capability. No new Simulator or live
+  cross-service validation, gitlink update, merge or deployment is claimed.
+
+- Local Backend CI (`scripts/ci_test.sh`) passed on the production projection
+  candidate before the test-only seed repair: 32225 passed, 40 skipped; line
+  coverage 91.23%, changed production lines 100% (13/13). The subsequent repair
+  changes only test setup and is covered by the final focused run above.
+- Independent Standards and Spec re-review confirmed the seed finding resolved
+  with no remaining P2-or-higher finding. Performance review was not triggered
+  for this follow-up: production changes do not alter DB, scheduling or I/O paths.
