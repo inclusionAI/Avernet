@@ -96,14 +96,18 @@ class CardMetadataRetrieval:
                 status="degraded",
                 reasons=tuple(dict.fromkeys(reasons)),
             )
+        timeout_items = {}
+        if timed_out and self.project_timeout is not None:
+            timeout_items = await self._project_timeouts(
+                [item for item in result.items if item.item_id in timed_out]
+            )
         items = []
         for item in result.items:
             if item.item_id in cards:
                 if not cards[item.item_id]["deleted"]:
                     items.append(self.project_item(item, cards[item.item_id]))
-            elif item.item_id in timed_out and self.project_timeout is not None:
-                # Host projection defines a summary, never invented invocation data.
-                items.append(self.project_timeout(item))
+            elif item.item_id in timeout_items:
+                items.append(timeout_items[item.item_id])
         items = tuple(items)
         if "card_metadata_unavailable" not in result.reasons and any(
             item.item_id not in cards for item in result.items
@@ -117,6 +121,9 @@ class CardMetadataRetrieval:
                 ),
             )
         return replace(result, items=items)
+
+    async def _project_timeouts(self, items):
+        return {item.item_id: self.project_timeout(item) for item in items}
 
     async def _load_batch(self, keys, revision):
         fetched = await self.execution.call(self.repository.get_many_cards, keys)

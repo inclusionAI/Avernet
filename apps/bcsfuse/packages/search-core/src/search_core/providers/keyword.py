@@ -49,7 +49,7 @@ class QdrantKeywordIndex:
             )
         self._exact_match_field = exact_match_field
         self._hit_payload = (
-            True
+            models.PayloadSelectorExclude(exclude=["_deferred_payload"])
             if hit_payload_fields is None
             else ["_keyword_external_id", *hit_payload_fields]
         )
@@ -146,6 +146,21 @@ class QdrantKeywordIndex:
             )
         if batch:
             self._client.upsert(self.collection_name, batch, wait=True)
+
+    def read_deferred_payloads(self, ids, **options):
+        self._ensure_client()
+        records = self._client.retrieve(
+            self.collection_name,
+            [str(uuid5(NAMESPACE_URL, key)) for key in ids],
+            with_payload=["_keyword_external_id", "_deferred_payload"],
+            with_vectors=False,
+            **options,
+        )
+        return {
+            row.payload["_keyword_external_id"]: row.payload["_deferred_payload"]
+            for row in records
+            if row.payload and "_deferred_payload" in row.payload
+        }
 
     def delete(self, ids: list[str]) -> None:
         if ids:
