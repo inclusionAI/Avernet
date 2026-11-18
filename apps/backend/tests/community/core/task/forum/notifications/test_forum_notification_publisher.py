@@ -38,13 +38,28 @@ class FakeWorkOrderRepository:
 class FakeBotRepository:
     def __init__(self) -> None:
         self.id_to_bot: dict[str, dict] = {}
+        self.lookups: list[tuple[str, ...]] = []
+        self.failure: Exception | None = None
 
     def get_by_id(self, bot_id: str):
+        self.lookups.append(("id", bot_id))
+        self._raise_if_failed()
         return self.id_to_bot.get(bot_id)
 
     def get_by_id_and_owner(self, bot_id: str, owner_id: str):
+        self.lookups.append(("owner", bot_id, owner_id))
+        self._raise_if_failed()
         bot = self.id_to_bot.get(f"{bot_id}:{owner_id}")
         return bot or (None if bot_id == "default" else self.id_to_bot.get(bot_id))
+
+    def get_unique_by_id(self, bot_id: str):
+        self.lookups.append(("unique", bot_id))
+        self._raise_if_failed()
+        return self.id_to_bot.get(bot_id)
+
+    def _raise_if_failed(self) -> None:
+        if self.failure is not None:
+            raise self.failure
 
 
 def _notify(
@@ -356,3 +371,188 @@ def test_default_bot_actor_falls_back_to_display_identity() -> None:
 
     scoped = factory(None)
     assert scoped["actors"] == [{"type": "BOT", "id": "default", "displayName": "Bot"}]
+
+
+def _notify_bot(
+    publisher: ForumNotificationPublisher,
+    *,
+    actor_id: str,
+    actor_display_name: str | None = None,
+    event_type: WorkOrderEventType = WorkOrderEventType.BBS_FOLLOWED,
+    text: str = "关注了你",
+) -> None:
+    publisher.notify(
+        event_type=event_type,
+        recipient_type="HUMAN",
+        recipient_id="900003",
+        actor_type="BOT",
+        actor_id=actor_id,
+        actor_display_name=actor_display_name,
+        target_type="TOPIC",
+        target_id="topic-1",
+        text=text,
+        topic_id="topic-1",
+        post_id=None,
+        topic_title="聚合通知测试",
+    )
+
+
+def test_owner_scoped_bot_actor_uses_bot_name_in_notice_text() -> None:
+    repository = FakeWorkOrderRepository()
+    bots = FakeBotRepository()
+    bots.id_to_bot = {"bot-alpha:900010": {"bot_name": "阿尔法"}}
+    publisher = ForumNotificationPublisher(repository, bots)
+
+    _notify_bot(publisher, actor_id="bot-alpha:900010")
+
+    assert repository.content is not None
+    assert repository.content["text"] == "阿尔法关注了你《聚合通知测试》"
+    assert repository.content["actors"] == [
+        {"type": "BOT", "id": "bot-alpha:900010", "displayName": "阿尔法"}
+    ]
+    assert bots.lookups == [("owner", "bot-alpha", "900010")]
+
+
+def test_bare_named_bot_actor_uses_unique_bot_lookup() -> None:
+    repository = FakeWorkOrderRepository()
+    bots = FakeBotRepository()
+    bots.id_to_bot = {"bot-beta": {"bot_name": "贝塔", "owner_id": "900010"}}
+    publisher = ForumNotificationPublisher(repository, bots)
+
+    _notify_bot(
+        publisher,
+        actor_id="bot-beta",
+        event_type=WorkOrderEventType.BBS_REPLIED,
+        text="回复了你的帖子",
+    )
+
+    assert repository.content is not None
+    assert repository.content["text"] == "贝塔回复了你的帖子《聚合通知测试》"
+    assert bots.lookups == [("unique", "bot-beta")]
+
+
+def test_scoped_default_bot_actor_uses_bot_name() -> None:
+    repository = FakeWorkOrderRepository()
+    bots = FakeBotRepository()
+    bots.id_to_bot = {"default:900010": {"bot_name": "我的默认助手"}}
+    publisher = ForumNotificationPublisher(repository, bots)
+
+    _notify_bot(
+        publisher,
+        actor_id="default:900010",
+        event_type=WorkOrderEventType.BBS_HELP_RESPONDED,
+        text="响应了你的求助帖",
+    )
+
+    assert repository.content is not None
+    assert repository.content["text"] == "我的默认助手响应了你的求助帖《聚合通知测试》"
+    assert bots.lookups == [("owner", "default", "900010")]
+
+
+def test_bot_name_overrides_leaked_bot_id_display_name() -> None:
+    repository = FakeWorkOrderRepository()
+    bots = FakeBotRepository()
+    bots.id_to_bot = {"bot-alpha:900010": {"bot_name": "阿尔法"}}
+    publisher = ForumNotificationPublisher(repository, bots)
+
+    _notify_bot(
+        publisher,
+        actor_id="bot-alpha:900010",
+        actor_display_name="bot-alpha:900010",
+        event_type=WorkOrderEventType.BBS_LIKED,
+        text="赞了你的内容",
+    )
+
+    assert repository.content is not None
+    assert repository.content["text"] == "阿尔法赞了你的内容《聚合通知测试》"
+
+
+def test_aggregated_bot_actors_render_names_and_keep_stable_ids() -> None:
+    repository = FakeWorkOrderRepository()
+    bots = FakeBotRepository()
+    bots.id_to_bot = {
+        "bot-alpha:900010": {"bot_name": "阿尔法"},
+        "bot-beta:900011": {"bot_name": "贝塔"},
+    }
+    publisher = ForumNotificationPublisher(repository, bots)
+
+    _notify_bot(
+        publisher,
+        actor_id="bot-alpha:900010",
+        event_type=WorkOrderEventType.BBS_FAVORITED,
+        text="收藏了你的内容",
+    )
+    _notify_bot(
+        publisher,
+        actor_id="bot-beta:900011",
+        event_type=WorkOrderEventType.BBS_FAVORITED,
+        text="收藏了你的内容",
+    )
+
+    assert repository.content is not None
+    assert repository.content["text"] == "阿尔法、贝塔收藏了你的内容《聚合通知测试》（2 条）"
+    assert repository.content["actors"] == [
+        {"type": "BOT", "id": "bot-alpha:900010", "displayName": "阿尔法"},
+        {"type": "BOT", "id": "bot-beta:900011", "displayName": "贝塔"},
+    ]
+
+
+def test_blank_bot_name_falls_back_to_existing_identity() -> None:
+    repository = FakeWorkOrderRepository()
+    bots = FakeBotRepository()
+    bots.id_to_bot = {"bot-alpha:900010": {"bot_name": "   "}}
+    publisher = ForumNotificationPublisher(repository, bots)
+
+    _notify_bot(publisher, actor_id="bot-alpha:900010")
+
+    assert repository.content is not None
+    assert repository.content["text"] == "bot-alpha:900010关注了你《聚合通知测试》"
+
+
+def test_missing_bot_falls_back_to_existing_identity() -> None:
+    repository = FakeWorkOrderRepository()
+    publisher = ForumNotificationPublisher(repository, FakeBotRepository())
+
+    _notify_bot(publisher, actor_id="bot-unknown")
+
+    assert repository.content is not None
+    assert repository.content["text"] == "bot-unknown关注了你《聚合通知测试》"
+
+
+def test_bot_lookup_failure_does_not_block_the_notification() -> None:
+    repository = FakeWorkOrderRepository()
+    bots = FakeBotRepository()
+    bots.failure = RuntimeError("bot store unavailable")
+    publisher = ForumNotificationPublisher(repository, bots)
+
+    _notify_bot(publisher, actor_id="bot-alpha:900010")
+
+    assert repository.calls == 1
+    assert repository.content is not None
+    assert repository.content["text"] == "bot-alpha:900010关注了你《聚合通知测试》"
+
+
+def test_human_actor_never_consults_the_bot_repository() -> None:
+    repository = FakeWorkOrderRepository()
+    bots = FakeBotRepository()
+    bots.id_to_bot = {"900001": {"bot_name": "不应命中"}}
+    publisher = ForumNotificationPublisher(repository, bots)
+
+    _notify(publisher, actor_id="900001", actor_name="张三")
+
+    assert repository.content is not None
+    assert repository.content["text"] == "张三回复了你的帖子《聚合通知测试》"
+    assert bots.lookups == []
+
+
+def test_bare_default_bot_actor_keeps_owner_ambiguous_fallback() -> None:
+    repository = FakeWorkOrderRepository()
+    bots = FakeBotRepository()
+    bots.id_to_bot = {"default": {"bot_name": "不属于任何人的默认助手"}}
+    publisher = ForumNotificationPublisher(repository, bots)
+
+    _notify_bot(publisher, actor_id="default")
+
+    assert repository.content is not None
+    assert repository.content["text"] == "Bot关注了你《聚合通知测试》"
+    assert bots.lookups == []
