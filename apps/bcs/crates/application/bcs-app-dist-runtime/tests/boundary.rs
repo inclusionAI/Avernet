@@ -97,3 +97,33 @@ async fn deadline_reached_is_preserved() {
         DrainOutcome::DeadlineReached { remaining: 7 }
     );
 }
+
+#[tokio::test]
+async fn unsupported_control_notifications_fail_instead_of_returning_false_success() {
+    let app = WorkerRuntimeApplication::new(Arc::new(Control {
+        calls: AtomicUsize::new(0),
+    }));
+    assert_eq!(app.snapshot().await.unwrap().instance, instance("b"));
+    let mut target = request().from;
+    target.owner.instance = instance("b");
+    let mut stale = target.clone();
+    stale.owner.instance.incarnation = "previous-process".into();
+    assert_eq!(
+        app.handoff_done(instance("a"), stale, RequestId("h".into()))
+            .await
+            .unwrap_err()
+            .code,
+        "target_incarnation_mismatch"
+    );
+    assert_eq!(
+        app.handoff_done(instance("a"), target, RequestId("h".into()))
+            .await
+            .unwrap_err()
+            .code,
+        "worker_handoff_unsupported"
+    );
+    assert_eq!(
+        app.wake(instance("a"), ShardId(42)).await.unwrap_err().code,
+        "worker_wake_unsupported"
+    );
+}

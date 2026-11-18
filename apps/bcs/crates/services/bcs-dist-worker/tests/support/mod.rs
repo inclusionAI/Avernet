@@ -14,7 +14,7 @@ use bcs_store_api::document::DocumentStorePlugin;
 use bcs_test_support::store_model::Model;
 use serde_json::json;
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, VecDeque},
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
@@ -25,6 +25,8 @@ use std::{
 pub struct FeedData {
     pub watched: Mutex<Vec<Sid>>,
     pub pending: Mutex<Vec<Sid>>,
+    pub batches: Mutex<VecDeque<FeedBatch>>,
+    pub reads: Mutex<Vec<(ReadLimits, Duration)>>,
 }
 struct Feed(Arc<FeedData>);
 #[async_trait]
@@ -39,13 +41,20 @@ impl ShardFeedPort for Feed {
     }
     async fn next(
         &mut self,
-        _limits: ReadLimits,
-        _timeout: Duration,
+        limits: ReadLimits,
+        timeout: Duration,
     ) -> Result<FeedBatch, StoreError> {
-        Ok(FeedBatch {
-            sessions: vec![],
-            hints: vec![],
-        })
+        self.0.reads.lock().unwrap().push((limits, timeout));
+        Ok(self
+            .0
+            .batches
+            .lock()
+            .unwrap()
+            .pop_front()
+            .unwrap_or(FeedBatch {
+                sessions: vec![],
+                hints: vec![],
+            }))
     }
 }
 pub struct Inbox(pub Arc<FeedData>);
