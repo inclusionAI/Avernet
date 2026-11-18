@@ -67,6 +67,10 @@ export interface ChatBotView {
   isFriendBot?: boolean;
   /** 团队空间 Bot 写接口必须显式携带实体 owner，不能由登录用户推断。 */
   isTeamBot?: boolean;
+  /** Caller 模式标记('caller'):IAM 换签按会话来源带 caller_runtime_target——
+   * 好友 Bot → caller_instance(用户独立 Caller 实例)，其余 → service(Bot 服务实例池，
+   * 实例仍由 stage/device_uuid 定位)(openspec add-iam-caller-runtime-target)。 */
+  callType?: string;
 }
 
 export interface BotChatSessionView {
@@ -307,6 +311,8 @@ function toOwnedBotView(dto: OwnedBotDto): ChatBotView {
     isAgentCodingBot: runtime.isAgentCodingBot,
     templateType: runtime.templateType,
     templateName: runtime.templateName,
+    // Caller 模式标记透传(openspec add-iam-caller-runtime-target);缺失保持 undefined。
+    callType: dto.call_type,
     spaceId: dto.space?.space_id,
     spaceName: dto.space?.name,
     spaceKind: normalizeSpaceKind(dto.space?.kind),

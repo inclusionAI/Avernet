@@ -153,6 +153,13 @@ struct Fixture {
 impl Drop for Fixture { fn drop(&mut self) { self.server.abort(); } }
 fn now() -> u64 { SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64 }
 async fn fixture(mode: Mode) -> Fixture {
+    fixture_with_identity(mode, None).await
+}
+
+async fn fixture_with_identity(
+    mode: Mode,
+    identity: Option<Arc<dyn bcs_app_identity_api::OutboundAppIdentity>>,
+) -> Fixture {
     let agent = Arc::new(Agent { mode, sequence: AtomicUsize::new(0), requests: Mutex::new(vec![]), tasks: Mutex::new(HashMap::new()), cancels: Mutex::new(vec![]), queries:AtomicUsize::new(0), subscriptions:AtomicUsize::new(0) });
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}/a2a/bots/demo", listener.local_addr().unwrap());
@@ -170,6 +177,10 @@ async fn fixture(mode: Mode) -> Fixture {
     credentials.insert_credential(ProviderCredential { provider_id:"provider".into(), credential_kind:"downlink_bcs_to_provider".into(),
         secret_value:"test-a2a-bearer".into(), disabled:false, created_at:1, updated_at:1 }).await.unwrap();
     let transport = A2aHttpTransport::new(OutboundUrlGuard::new(true,true), runs.clone(), credentials);
+    let transport = match identity {
+        Some(plugin) => transport.with_app_identity(plugin).unwrap(),
+        None => transport,
+    };
     let contexts = Arc::new(MemoryBotRunContextStore::new()); let ingest = Arc::new(Ingest::default());
     transport.set_ingest(ingest.clone(), contexts.clone()).unwrap();
     let target = BotDeliveryTarget::A2a { bot_id:"bot".into(), provider_id:"provider".into(), provider_bot_ref:"demo".into(),
@@ -308,6 +319,53 @@ async fn standalone_agent_message_finishes_but_cannot_invent_a_cancelable_task()
     let result=f.transport.abort(BotAbortDeliveryCommand {command_id:"cannot-cancel-message".into(),target:f.target.clone(),
         run_id:Some("message-only".into()),group_id:"group".into(),session_id:"session".into(),timeout_ms:1000,provider_bypass_headers:vec![]}).await;
     assert!(result.unwrap().aborted_run_ids.is_empty());assert!(f.agent.cancels.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn identity_failure_leaves_prior_uncertainty_but_fails_a_request_that_never_sent() {
+    use bcs_app_identity_api::{CredentialError, OutboundAppIdentity, OutboundTarget, SensitiveHeader};
+    use bcs_service_api::types::a2a_bot::A2aExtensionDeclaration;
+
+    struct Identity {
+        remaining: AtomicUsize,
+    }
+    impl OutboundAppIdentity for Identity {
+        fn credential_for(&self, target: &OutboundTarget<'_>) -> Result<Option<SensitiveHeader>, CredentialError> {
+            assert_eq!(target.provider_id, "provider");
+            assert!(target.origin.starts_with("http://127.0.0.1:"));
+            if self.remaining.swap(0, Ordering::SeqCst) == 0 {
+                return Err(CredentialError::Unavailable);
+            }
+            Ok(Some(SensitiveHeader {
+                name: "x-fixture-identity".into(),
+                value: RedactedToken::new("fixture"),
+            }))
+        }
+    }
+
+    for sent in [0, 1] {
+        let plugin = Arc::new(Identity { remaining: AtomicUsize::new(sent) });
+        let mut f = fixture_with_identity(Mode::HttpError(503), Some(plugin)).await;
+        if let BotDeliveryTarget::A2a { extensions, .. } = &mut f.target {
+            extensions.push(A2aExtensionDeclaration {
+                uri: bcs_a2a_http::delivery::DEDUP_EXTENSION.into(), required: None, params: Value::Null,
+            });
+        }
+        let result = f.transport.deliver(command(&f, "credential-failure").await).await;
+        let row = f.runs.get("credential-failure").await.unwrap().unwrap();
+        let events = f.ingest.events.lock().unwrap();
+        assert_eq!(f.agent.sequence.load(Ordering::SeqCst), sent);
+        if sent == 0 {
+            assert!(!result.unwrap().delivered);
+            assert_eq!(row.state, A2aRunState::Failed);
+            assert_eq!(events.len(), 1);
+            assert_eq!(events[0].event_payload["errorCode"], "A2A_APPLICATION_IDENTITY_NOT_SENT");
+        } else {
+            assert!(result.is_err());
+            assert_eq!(row.state, A2aRunState::Unknown);
+            assert!(events.is_empty());
+        }
+    }
 }
 
 #[tokio::test]

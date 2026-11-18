@@ -172,7 +172,7 @@ def test_uct_is_not_a_default_for_other_engines():
 _EXPECTED_CLI_CODES = (
     "adev-cli", "acli", "antcode-cli", "linke-cli",
     "linkw-cli", "qmx-invoke-cli", "serverless", "derisk-cli",
-    "yuque-cli",
+    "yuque-cli", "aixdev-cli",
 )
 
 
@@ -235,7 +235,7 @@ def test_default_cli_items_none_engine_returns_empty():
 
 
 def test_yuque_cli_is_default_entry():
-    """yuque-cli is the newest default entry: full shape, last position, no dupes."""
+    """yuque-cli keeps its full shape and flows through the shared aicoding link."""
     items = get_default_cli_items("aicoding")
     yuque = [it for it in items if it["cli_code"] == "yuque-cli"]
     assert len(yuque) == 1
@@ -245,14 +245,31 @@ def test_yuque_cli_is_default_entry():
         "cli_desc": "yuque cli",
     }
     codes = [it["cli_code"] for it in items]
+    assert len(codes) == len(set(codes))
+    # the claude_code coding templates share the same aicoding link, so the
+    # entry flows through that path too.
+    codes_cc = [it["cli_code"] for it in get_default_cli_items("claude_code", "applicationCoding")]
+    assert "yuque-cli" in codes_cc
+
+
+def test_aixdev_cli_is_newest_default_entry():
+    """aixdev-cli is appended last: full shape, no dupes, shared aicoding link."""
+    items = get_default_cli_items("aicoding")
+    aixdev = [it for it in items if it["cli_code"] == "aixdev-cli"]
+    assert len(aixdev) == 1
+    assert aixdev[0] == {
+        "cli_code": "aixdev-cli",
+        "cli_name": "aixdev-cli",
+        "cli_desc": "Aix 研发能力管理命令行工具",
+    }
+    codes = [it["cli_code"] for it in items]
     # appended last (stable ordering matters for downstream passport merge).
-    assert codes[-1] == "yuque-cli"
+    assert codes[-1] == "aixdev-cli"
     assert len(codes) == len(set(codes))
     # the claude_code coding templates share the same aicoding link, so the
     # new entry flows through that path too.
     codes_cc = [it["cli_code"] for it in get_default_cli_items("claude_code", "applicationCoding")]
-    assert "yuque-cli" in codes_cc
-    assert codes_cc[-1] == "yuque-cli"
+    assert codes_cc[-1] == "aixdev-cli"
 
 
 def test_default_cli_items_returns_copy():

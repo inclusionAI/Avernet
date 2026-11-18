@@ -331,6 +331,9 @@ def test_scaffolding_burn_down_is_reported():
 #: operation cannot be renamed to escape.
 _DEFERRED_OPERATIONS = frozenset(
     {
+        # Caller observation uses owner/public/chat-member policy in core;
+        # a collaborator-only MEMBER gate would exclude public chat users.
+        ("GET", "/openapi/v1/bots/{bot_id}/caller-instance/status"),
         # IAM friend preparation is not operator authorization: the adapter
         # verifies friendship plus own session and the service confines writes
         # to that subject's Caller instance. Operator MEMBER alone is not enough.

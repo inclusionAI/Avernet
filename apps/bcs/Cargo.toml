@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "crates/plugin-api/bcs-a2a-binding-api",
+    "crates/plugin-api/bcs-app-identity-api",
     "crates/plugin-api/bcs-tracing-api",
     "crates/auxiliary/bcs-network-tracing",
     # bootstrap
@@ -150,6 +151,7 @@ version      = "0.1.4-beta.3"
 bcs-dist-model = { path = "crates/contracts/bcs-dist-model" }
 bcs-dist-store = { path = "crates/services/bcs-dist-store" }
 bcs-a2a-binding-api = { path = "crates/plugin-api/bcs-a2a-binding-api" }
+bcs-app-identity-api = { path = "crates/plugin-api/bcs-app-identity-api" }
 bcs-tracing-api = { path = "crates/plugin-api/bcs-tracing-api" }
 bcs-network-tracing = { path = "crates/auxiliary/bcs-network-tracing" }
 # Async runtime

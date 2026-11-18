@@ -38,6 +38,10 @@ export interface UseBotSessionFilePreviewParams {
   userId: string | null;
   ownerId?: string;
   stage?: BotRuntimeStage;
+  /** 多实例选中实例(openspec add-session-files-device-uuid 扩展段),缺省不携带 */
+  deviceUuid?: string;
+  /** Caller 模式 Bot 运行时定位(openspec add-session-files-caller-runtime-target),缺省不携带 */
+  callerRuntimeTarget?: 'service' | 'caller_instance';
 }
 
 export function useBotSessionFilePreview(
@@ -47,7 +51,7 @@ export function useBotSessionFilePreview(
   const [state, setState] = useState<BotSessionFilePreviewState>(initialState);
   const resourceId = file?.resourceId ?? null;
   const name = file?.displayName ?? '';
-  const { botId, sessionId, userId, ownerId, stage } = params;
+  const { botId, sessionId, userId, ownerId, stage, deviceUuid, callerRuntimeTarget } = params;
 
   useEffect(() => {
     if (!resourceId || !botId || !sessionId || !userId) {
@@ -67,13 +71,27 @@ export function useBotSessionFilePreview(
       ownerId,
       'inline',
       ...(stage ? ([stage] as const) : []),
+      // 多实例选中实例定位(openspec add-session-files-device-uuid 扩展段),缺省不携带
+      ...(deviceUuid ? ([deviceUuid] as const) : []),
+      // Caller 模式 Bot 运行时定位(openspec add-session-files-caller-runtime-target),缺省不携带
+      ...(callerRuntimeTarget ? ([callerRuntimeTarget] as const) : []),
     );
     if (kind === 'text') {
       // 文本类走自绘：fetch 字节（512KB 截断）转文本渲染，与群聊侧同构。
       let cancelled = false;
       setState({ ...initialState, kind, status: 'loading', contentUrl });
       void botSessionFileService
-        .fetchBlob(botId, sessionId, resourceId, userId, ownerId, 'inline', ...(stage ? [stage] as const : []))
+        .fetchBlob(
+          botId,
+          sessionId,
+          resourceId,
+          userId,
+          ownerId,
+          'inline',
+          ...(stage ? [stage] as const : []),
+          ...(deviceUuid ? [deviceUuid] as const : []),
+          ...(callerRuntimeTarget ? [callerRuntimeTarget] as const : []),
+        )
         .then(async (result) => {
           if (cancelled) return;
           if (!result.ok) {
@@ -99,7 +117,7 @@ export function useBotSessionFilePreview(
       };
     }
     setState({ ...initialState, kind, status: 'ready', contentUrl });
-  }, [resourceId, name, botId, sessionId, userId, ownerId, stage]);
+  }, [resourceId, name, botId, sessionId, userId, ownerId, stage, deviceUuid, callerRuntimeTarget]);
 
   return state;
 }

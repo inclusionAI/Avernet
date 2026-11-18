@@ -23,6 +23,20 @@ it('shows the platform contacts and disables only the service Bot switch', async
   fireEvent.click(service);
   expect(api.configure).not.toHaveBeenCalled();
 });
+it('shows the host practice link only when configured', async () => {
+  const props = { onChanged: vi.fn(), onClose: vi.fn() };
+  const { rerender } = render(<MonitoringSettings {...props} />);
+  await screen.findByText('已关闭');
+  const name = '查看诊断自愈实践案例';
+  expect(screen.queryByRole('link', { name })).not.toBeInTheDocument();
+
+  const practiceUrl = 'https://example.com/recovery#practice';
+  rerender(<MonitoringSettings {...props} practiceUrl={practiceUrl} />);
+  const link = screen.getByRole('link', { name });
+  expect(link).toHaveAttribute('href', practiceUrl);
+  expect(link).toHaveAttribute('target', '_blank');
+  expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+});
 it('shows only the joint switch state and writes both settings with a version', async () => {
   const changed = vi.fn();
   render(<MonitoringSettings onChanged={changed} onClose={vi.fn()} />);

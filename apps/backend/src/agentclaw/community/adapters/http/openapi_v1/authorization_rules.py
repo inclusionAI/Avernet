@@ -23,7 +23,6 @@ from .models_authorization import (
 )
 from .rule_shape_audit import assert_member_writes_name_explicit_origin
 from .dws_hosting.admission import OPERATIONS as DWS_OPERATIONS, PATH as DWS_PATH
-
 #: Every operation on this surface, exactly once, keyed as ``ADMISSION`` is.
 #:
 #: No row is :class:`Check` yet: this change builds the seam, and moving each
@@ -174,6 +173,7 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("PUT", "/openapi/v1/bots/{bot_id}/channels/{channel_id}/status"): Check(
         PermissionLevel.ADMIN, EDIT_LOCK
     ),
+    ("GET", "/openapi/v1/bots/{bot_id}/caller-instance/status"): ServiceChecked(PermissionLevel.MEMBER, "agentclaw.community.core.expert_chat.services.expert_chat_service"),
     ("GET", "/openapi/v1/bots/{bot_id}/caller-context"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/{bot_id}/chats"): ServiceChecked(
         PermissionLevel.MEMBER, "…core.bot_chat.service"

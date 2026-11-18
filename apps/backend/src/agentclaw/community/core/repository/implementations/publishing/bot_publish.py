@@ -290,6 +290,8 @@ class BotPublishRepository(
         self,
         source_bot_pks: Sequence[int],
         env: str,
+        *,
+        resolve_artifacts: bool = True,
     ) -> List[BotPublishRecord]:
         if not source_bot_pks:
             return []
@@ -304,6 +306,8 @@ class BotPublishRepository(
                 .all()
             )
             records = [row.to_record() for row in rows]
+        if not resolve_artifacts:
+            return records
         return [self._resolve_record(record) for record in records]
 
     def list_by_status(

@@ -196,8 +196,12 @@ class BotPublishRepositoryProtocol(Protocol):
         self,
         source_bot_pks: Sequence[int],
         env: str,
+        *,
+        resolve_artifacts: bool = True,
     ) -> List[BotPublishRecord]:
-        """List publish records for multiple source bots in one query."""
+        """Batch read publications. Metadata-only consumers may leave offloaded
+        artifacts as storage markers; full records are the default.
+        """
         ...
 
     @abstractmethod

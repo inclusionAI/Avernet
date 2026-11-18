@@ -148,6 +148,26 @@ it('点击协作群行：落协作页 group 深链', async () => {
   expect(mockHistoryPush).toHaveBeenCalledWith('/workspace/collaboration?group=group-1');
 });
 
+it('不可用 Bot 不进结果集：下线/回收 Bot 不渲染、不发起逐 Bot 会话请求', async () => {
+  // dima 2026111800120735610：搜索弹窗纳入下线/回收 Bot 会触发逐 Bot listSessions 报「bot 不存在」。
+  const recycledBot = { ...botFixture, botId: 'dead-bot', realBotId: 'dead-bot', displayName: '已回收助手', status: 'RECYCLED' };
+  const offlineBot = { ...botFixture, botId: 'offline-bot', realBotId: 'offline-bot', displayName: '下线助手', status: 'OFFLINE' };
+  mockListOwnedBotsWithMeta.mockResolvedValue({
+    ok: true as const,
+    data: { bots: [botFixture, recycledBot, offlineBot], hasAgentCodingBots: false },
+  });
+  mockListSessions.mockClear();
+  renderDialog();
+  await waitFor(() => expect(screen.getByText('数据助手')).toBeInTheDocument());
+  // 不可用 Bot 行不出现（Bot 行与会话行副行均无其名称）
+  expect(screen.queryByText('已回收助手')).not.toBeInTheDocument();
+  expect(screen.queryByText('下线助手')).not.toBeInTheDocument();
+  // 会话请求只对可用 Bot 发起
+  await waitFor(() => expect(mockListSessions).toHaveBeenCalled());
+  const requestedBotIds = mockListSessions.mock.calls.map((call: unknown[]) => (call[0] as { realBotId: string }).realBotId);
+  expect(requestedBotIds).toEqual(['data-bot']);
+});
+
 it('清空数据源：全部为空时展示未找到空态', async () => {
   mockListOwnedBotsWithMeta.mockResolvedValue({ ok: true as const, data: { bots: [], hasAgentCodingBots: false } });
   mockListSessions.mockReset();
