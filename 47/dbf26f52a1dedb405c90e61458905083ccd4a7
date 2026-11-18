@@ -1,5 +1,6 @@
 apps/evolverun/clawweb/public/modules/clawinsight/server/services/monitoring/bot-config-service.ts
   h_b601d8706f5d44 4,7-20,25,37-41,46,57-58,64-65,71,74-79,82-84,86-91,93-97,100-101
+  s_71ecc0368356a8::t_6a77301f8bde93 80-81,85,92
 apps/evolverun/clawweb/public/modules/clawinsight/server/services/monitoring/monitoring-browser-service.ts
   h_b601d8706f5d44 6,12,68,76
 apps/evolverun/clawweb/public/modules/clawinsight/server/services/monitoring/monitoring-runtime.ts
@@ -13,6 +14,16 @@ apps/evolverun/clawweb/public/modules/clawinsight/server/services/monitoring/mon
   "humans": {
     "h_b601d8706f5d44": {
       "author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  },
+  "sessions": {
+    "s_71ecc0368356a8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e8b5-d1c5-7392-983a-301586384ef8",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
     }
   }
 }
