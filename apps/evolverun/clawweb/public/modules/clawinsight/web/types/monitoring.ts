@@ -29,6 +29,7 @@ export type BotOption = {
   configuration?: { diagnosisEnabled: boolean; recoveryEnabled: boolean; version: number };
   botRef: string; botName: string; botId: string; ownerId: string; env: string;
   isServiceBot?: boolean;
+  configurationDisabledReason?: string;
   enrollmentState: 'ENROLLED' | 'NOT_ENROLLED';
   monitoring: null | {
     status: BotStatus['status']; checkedAt: string; lastSuccessfulCheckAt: string | null;

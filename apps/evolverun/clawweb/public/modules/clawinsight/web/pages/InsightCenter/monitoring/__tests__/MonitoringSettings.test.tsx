@@ -12,15 +12,27 @@ beforeEach(() => {
   api.options.mockResolvedValue({ items: [bot], nextCursor: 'next' });
   api.configure.mockResolvedValue({ updated: 1, failed: [] });
 });
-it('shows the platform contacts and disables only the service Bot switch', async () => {
-  api.options.mockResolvedValue({ items: [bot, { ...bot, botRef: 'service', botName: '服务助手', isServiceBot: true }], nextCursor: null });
+it('shows reasons and gray switches for every unsupported Bot, including enabled settings', async () => {
+  const blocked = [
+    { ...bot, botRef: 'service', botName: '服务助手', isServiceBot: true, configurationDisabledReason: '服务 Bot 请联系平台' },
+    { ...bot, botRef: 'desktop', botName: '桌面助手', configurationDisabledReason: '桌面 Bot 暂不支持' },
+    { ...bot, botRef: 'te', botName: 'TE 助手', configurationDisabledReason: 'TE 引擎暂不支持' },
+    { ...bot, botRef: 'other', botName: '其他引擎助手', configurationDisabledReason: '非 OpenClaw 引擎暂不支持' },
+  ].map(item => ({ ...item, configuration: { diagnosisEnabled: true, recoveryEnabled: true, version: 1 } }));
+  api.options.mockResolvedValue({ items: [bot, ...blocked], nextCursor: null });
   render(<MonitoringSettings onChanged={vi.fn()} onClose={vi.fn()} />);
   expect(screen.getByText(/请联系山宗、安远、沐荛/)).toBeInTheDocument();
   expect(await screen.findByText('服务 Bot 请联系平台')).toBeInTheDocument();
-  const service = screen.getByRole('switch', { name: '服务助手 诊断监控' });
-  expect(service).toBeDisabled();
+  expect(screen.getByText(/桌面 Bot、TE 及其他非 OpenClaw 引擎 Bot 暂不支持/)).toBeInTheDocument();
+  for (const item of blocked) {
+    const toggle = screen.getByRole('switch', { name: `${item.botName} 诊断监控` });
+    expect(toggle).toBeDisabled();
+    expect(toggle).toHaveAttribute('aria-checked', 'true');
+    expect(toggle.closest('li')).toHaveClass('settings-disabled-bot');
+    expect(screen.getByText(item.configurationDisabledReason)).toBeInTheDocument();
+    fireEvent.click(toggle);
+  }
   expect(screen.getByRole('switch', { name: '我的 Bot 诊断监控' })).toBeEnabled();
-  fireEvent.click(service);
   expect(api.configure).not.toHaveBeenCalled();
 });
 it('shows the host practice link only when configured', async () => {
