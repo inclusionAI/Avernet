@@ -141,3 +141,17 @@ async def test_all_owned_session_operations_propagate_bcn_authorization():
         call.kwargs["bcn_friend_authorized"] is True
         for call in service._prepare_chat_connection.await_args_list
     )
+
+
+@pytest.mark.parametrize("indexed,legacy,allowed", [(True, None, True), (False, "s", True), (False, "foreign", False)])
+def test_friend_ownership_without_default_runtime(indexed, legacy, allowed):
+    service = Harness()
+    service._repo.get_owned_session.return_value = {"session_key": "s"} if indexed else None
+    service._repo.get_session.return_value = legacy
+    if allowed:
+        service.require_friend_session_ownership("friend", "b", "owner", "s")
+    else:
+        with pytest.raises(BotNotFoundError):
+            service.require_friend_session_ownership("friend", "b", "owner", "s")
+    service._repo.get_owned_session.assert_called_once_with("friend", "b", "owner", "s")
+    service._prepare_chat_connection.assert_not_awaited()

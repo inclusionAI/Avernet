@@ -10,7 +10,7 @@ from agentclaw.community.core.engine_runtime.errors import EngineDeviceNotReadyE
 from agentclaw.community.core.devices.services.device_context import DeviceNotBoundError, UnknownProviderError
 from agentclaw.community.core.runtime_binding.errors import RuntimeBindingNotFoundError
 from agentclaw.community.core.resources.service import FileTooLargeError
-from agentclaw.community.core.runtime_binding.models import RuntimeBindingRequest, RuntimeBindingSource, RuntimeBindingTarget
+from agentclaw.community.core.runtime_binding.models import RuntimeBindingRequest, RuntimeBindingTarget
 from agentclaw.community.core.session_resources.engine_files import EngineSessionFilesService
 from agentclaw.community.plugin_api.device_adapter_transport import (
     DeviceAdapterEndpointNotFoundError, DeviceAdapterHTTPStatusError,
@@ -249,19 +249,29 @@ async def test_missing_bot_does_not_select_subject_binding(setup):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("source", [RuntimeBindingSource.SERVICE_ONLINE, RuntimeBindingSource.CALLER_INSTANCE])
-async def test_friend_target_confirms_authorized_binding(setup, source):
+@pytest.mark.parametrize("actor", ["friend", "owner"])
+@pytest.mark.parametrize("selected", [RuntimeBindingTarget.CALLER_SERVICE, RuntimeBindingTarget.CALLER_INSTANCE])
+async def test_explicit_friend_target_resolves_selected_binding(setup, actor, selected):
     service, _, bindings, resolver, transport = setup
-    target = RuntimeBindingRequest("bot", "owner", "owner", "online", target=RuntimeBindingTarget.CALLER_INSTANCE)
-    is_caller = source is RuntimeBindingSource.CALLER_INSTANCE
-    service._bots.get_by_id_and_owner.return_value = {"bot_type": "service", "call_type": "caller" if is_caller else "owner"}
-    bindings.resolve.return_value = SimpleNamespace(binding_id=73, source=source)
+    target = RuntimeBindingRequest("bot", "owner", actor, "online", target=selected)
     transport.invoke.return_value = {"files": []}
-    if is_caller:
-        assert await service.list_files(target, "s", session_user_id="friend") == []
-        resolver.resolve_for_binding.assert_called_once_with(73, "friend", bot_id="bot")
-    else:
-        with pytest.raises(EngineResourceNotFoundError):
-            await service.list_files(target, "s", session_user_id="friend")
-        resolver.resolve_for_binding.assert_not_called()
-        transport.invoke.assert_not_awaited()
+
+    assert await service.list_files(target, "s", session_user_id="friend") == []
+    binding_actor = "friend" if selected is RuntimeBindingTarget.CALLER_INSTANCE else actor
+    bindings.resolve.assert_called_once_with(RuntimeBindingRequest("bot", "owner", binding_actor, "online", target=selected))
+    resolver.resolve_for_binding.assert_called_once_with(73, binding_actor, bot_id="bot")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("selected", [RuntimeBindingTarget.CALLER_SERVICE, RuntimeBindingTarget.CALLER_INSTANCE])
+async def test_unavailable_explicit_friend_target_never_falls_back(setup, selected):
+    service, _, bindings, resolver, transport = setup
+    target = RuntimeBindingRequest("bot", "owner", "owner", "online", target=selected)
+    bindings.resolve.side_effect = RuntimeBindingNotFoundError("unavailable")
+
+    with pytest.raises(EngineDeviceNotReadyError):
+        await service.list_files(target, "s", session_user_id="friend")
+    binding_actor = "friend" if selected is RuntimeBindingTarget.CALLER_INSTANCE else "owner"
+    bindings.resolve.assert_called_once_with(RuntimeBindingRequest("bot", "owner", binding_actor, "online", target=selected))
+    resolver.resolve_for_binding.assert_not_called()
+    transport.invoke.assert_not_awaited()

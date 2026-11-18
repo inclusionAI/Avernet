@@ -23,6 +23,17 @@ class ExpertChatOwnedSessionMixin:
             raise BotNotFoundError("Session不存在或不属于当前用户")
         return bot
 
+    def require_friend_session_ownership(
+        self, user_id: str, bot_id: str, owner_id: str, session_key: str,
+    ) -> None:
+        """Check the authorized friend's session index without opening a runtime."""
+        self._get_authorized_chat_bot(user_id, bot_id, owner_id, bcn_friend_authorized=True)
+        if self._repo.get_owned_session(user_id, bot_id, owner_id, session_key):
+            return
+        # Older chats store their single owned key on the user-to-bot record.
+        if self._repo.get_session(user_id, bot_id, owner_id) != session_key:
+            raise BotNotFoundError("Session不存在或不属于当前用户")
+
     async def get_owned_chat_session(
         self,
         user_id: str,

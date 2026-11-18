@@ -92,6 +92,10 @@ class ExpertChatServiceProtocol(Protocol):
         bcn_friend_authorized: bool = False,
     ) -> bool: ...
 
+    def require_friend_session_ownership(
+        self, user_id: str, bot_id: str, owner_id: str, session_key: str,
+    ) -> None: ...
+
     async def get_owned_chat_session(
         self, user_id: str, bot_id: str, owner_id: str, session_key: str,
         iam_token: Optional[str] = None,
