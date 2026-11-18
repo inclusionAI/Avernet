@@ -333,6 +333,38 @@ async fn managed_channel_session_has_exclusive_speaker_only_with_live_single_sen
         Some("human_u1"),
     );
 
+    // A previously private session does not keep its exemption when the
+    // binding is disabled, the Session is no longer marked for this sender,
+    // or the live mapping has moved to another Session.
+    harness.binding_repo.set_status(binding_id, false).await?;
+    assert_eq!(harness.service.exclusive_session_speaker(&session, &group).await?, None);
+    harness.binding_repo.set_status(binding_id, true).await?;
+    let mut wrong_principal = session.clone();
+    wrong_principal.caller_principal = Some("dingtalk:conv:u2".into());
+    assert_eq!(harness.service.exclusive_session_speaker(&wrong_principal, &group).await?, None);
+
+    // Keep the matching metadata and sender but present a Session in a
+    // Group that this binding does not own.
+    let mut foreign_group = group.clone();
+    foreign_group.id = "unrelated_group".into();
+    let mut foreign_session = session.clone();
+    foreign_session.group_id = foreign_group.id.clone();
+    assert_eq!(harness.service.exclusive_session_speaker(&foreign_session, &foreign_group).await?, None);
+
+    let mut missing_binding = session.clone();
+    missing_binding.meta.as_mut().expect("channel meta")["channel"]["binding_id"] =
+        serde_json::json!("missing_binding");
+    assert_eq!(harness.service.exclusive_session_speaker(&missing_binding, &group).await?, None);
+    let mut unmarked = session.clone();
+    unmarked.meta = None;
+    assert_eq!(harness.service.exclusive_session_speaker(&unmarked, &group).await?, None);
+
+    let mut moved = mapping.clone();
+    moved.bcs_session_id = format!("{}:replacement", group.id);
+    harness.conversation_repo.upsert(moved).await?;
+    assert_eq!(harness.service.exclusive_session_speaker(&session, &group).await?, None);
+    harness.conversation_repo.upsert(mapping).await?;
+
     group.participants.push(Participant::human("human_u2", ParticipantRole::Consultant));
     assert_eq!(harness.service.exclusive_session_speaker(&session, &group).await?, None);
     group.participants.pop();

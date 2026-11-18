@@ -5,6 +5,9 @@ use async_trait::async_trait;
 use bcs_channel_api::*;
 use bcs_service_api::{InboundMessage, ServiceResult};
 use bcs_service_api::application::caller_execution::ExecutionToken;
+use bcs_service_api::application::caller_identity::{
+    AuthenticatedHumanCallerIngress, HumanActor, HumanCallerAuthSource,
+};
 use bcs_service_api::lifecycle::ServiceLifecycle;
 use bcs_service_api::port::channel_delivery::{
     ChannelBindingRef, ChannelDeliveryPort, ChannelDeliveryResult, ChannelOutboundEvent,
@@ -69,6 +72,8 @@ struct Callback {
     text: String,
     #[serde(rename = "credential")]
     execution: Option<String>,
+    #[serde(default)]
+    attest_sender: bool,
 }
 
 fn response(status: u16, accepted: bool) -> ChannelHttpResponse {
@@ -89,8 +94,28 @@ impl ChannelHttpIngressPort for Provider {
         let Ok(callback) = serde_json::from_slice::<Callback>(&request.body) else {
             return response(400, false);
         };
+        let caller_ingress = if callback.attest_sender {
+            let now_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |age| age.as_millis() as i64);
+            let identity = AuthenticatedHumanCallerIngress::new(
+                HumanActor {
+                    actor_id: format!("human_{}", callback.sender),
+                    staff_no: callback.sender.clone(),
+                },
+                HumanCallerAuthSource::ChannelIngress,
+                now_ms,
+                bcs::resolve_env(),
+            );
+            match identity {
+                Ok(identity) => Some(identity),
+                Err(_) => return response(400, false),
+            }
+        } else {
+            None
+        };
         let msg = InboundMessage {
-            caller_ingress: None,
+            caller_ingress,
             execution_token: callback.execution.map(|v| ExecutionToken::new(v, self.credential_type.clone())),
             channel_type: "caller-e2e".into(), account_ref: callback.account,
             im_conversation_id: callback.conversation, conversation_type: callback.conversation_type,

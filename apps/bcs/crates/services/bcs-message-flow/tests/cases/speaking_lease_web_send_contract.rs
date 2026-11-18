@@ -249,7 +249,10 @@ mod channel_scope {
         InboundMessage, OutboundMessage,
     };
 
-    struct ChannelPolicy(AtomicUsize);
+    struct ChannelPolicy {
+        calls: AtomicUsize,
+        speaker: Result<&'static str, &'static str>,
+    }
 
     #[async_trait]
     impl ChannelService for ChannelPolicy {
@@ -259,8 +262,12 @@ mod channel_scope {
             _group: &Group,
         ) -> Result<Option<String>, ChannelUseCaseError> {
             assert_eq!(session.id, "group-1:lease");
-            self.0.fetch_add(1, Ordering::SeqCst);
-            Ok(Some("human_1".into()))
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            self.speaker
+                .map(|speaker| Some(speaker.into()))
+                .map_err(|reason| ChannelUseCaseError::Internal(
+                    bcs_service_api::ServiceError::InternalError(reason.into()),
+                ))
         }
         async fn handle_inbound(&self, _: InboundMessage) -> Result<(), ChannelInboundError> { unreachable!() }
         async fn try_outbound(&self, _: OutboundMessage) -> Result<(), ChannelUseCaseError> { Ok(()) }
@@ -273,25 +280,45 @@ mod channel_scope {
         async fn delete_binding(&self, _: &str) -> Result<(), ChannelUseCaseError> { unreachable!() }
     }
 
+    fn channel_command() -> WebSendCommand {
+        let mut command = send_command(None);
+        command.source_im_message_id = Some("channel-message".into());
+        command.caller_ingress = Some(ingress_from(HumanCallerAuthSource::ChannelIngress));
+        command
+    }
+
     #[tokio::test]
     async fn only_channel_ingress_can_use_the_exclusive_speaker_policy() {
         let world = harness(true, true).await;
-        let policy = Arc::new(ChannelPolicy(AtomicUsize::new(0)));
+        let policy = Arc::new(ChannelPolicy { calls: AtomicUsize::new(0), speaker: Ok("human_1") });
         assert!(world.flow.channel_slot().set(policy.clone()).is_ok());
 
         let mut web = send_command(None);
         web.source_im_message_id = Some("source-id-alone-is-insufficient".into());
         let error = world.flow.handle_web_send(web).await.unwrap_err();
         assert!(error.to_string().contains("speaking lease required"), "{error}");
-        assert_eq!(policy.0.load(Ordering::SeqCst), 0);
+        assert_eq!(policy.calls.load(Ordering::SeqCst), 0);
 
-        let mut channel = send_command(None);
-        channel.source_im_message_id = Some("channel-message".into());
-        channel.caller_ingress = Some(ingress_from(HumanCallerAuthSource::ChannelIngress));
-        let outcome = world.flow.handle_web_send(channel).await.expect("exclusive speaker admits");
+        let outcome = world.flow.handle_web_send(channel_command()).await.expect("exclusive speaker admits");
         assert!(outcome.queue_admission.is_some());
-        assert_eq!(policy.0.load(Ordering::SeqCst), 1);
+        assert_eq!(policy.calls.load(Ordering::SeqCst), 1);
         assert_eq!(world.store.checks.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn wrong_speaker_is_forbidden_and_policy_failure_does_not_waive_lease() {
+        for (speaker, expected) in [
+            (Ok("human_2"), "channel sender is not the speaker"),
+            (Err("binding lookup failed"), "speaking lease required"),
+        ] {
+            let world = harness(true, true).await;
+            let policy = Arc::new(ChannelPolicy { calls: AtomicUsize::new(0), speaker });
+            assert!(world.flow.channel_slot().set(policy.clone()).is_ok());
+            let error = world.flow.handle_web_send(channel_command()).await.unwrap_err();
+            assert!(error.to_string().contains(expected), "{error}");
+            assert_eq!(policy.calls.load(Ordering::SeqCst), 1);
+            assert_eq!(world.store.admissions.load(Ordering::SeqCst), 0);
+        }
     }
 }
 
