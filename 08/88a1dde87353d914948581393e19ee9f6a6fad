@@ -1,0 +1,14 @@
+apps/bcs-internal/crates/plugins/bcs-sofa-services/tests/a2a/catalog_sync.rs
+  h_fa66fe7c023b4b 40
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0888a1dde87353d914948581393e19ee9f6a6fad",
+  "prompts": {},
+  "humans": {
+    "h_fa66fe7c023b4b": {
+      "author": "仰望 <lifang.shen@antgroup.com>"
+    }
+  }
+}
