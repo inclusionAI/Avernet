@@ -20,6 +20,8 @@ provides:
   - OpenPublicationProfile
   - BotSelfApplicationAdmission
   - OpenMethodOpsServiceProtocol
+  - SwarmMethodOpsServiceProtocol
+  - stage_role_candidates
 consumes:
   - MethodStoreProtocol
   - CollaborationReader
@@ -90,3 +92,38 @@ remain unchanged.
   rejects L6/product dependencies, including relative and type-checking imports.
 - [L6 profile creation tests](../../../../../../../tests/community/core/task/context_collab/test_l6_product_profile_operations.py)
   cover policy selection, role mappings and shared creation/catalog validation.
+
+## Swarm stage handoff and role matching
+
+Swarm's Stage DAG, not a second product workflow stage variable, owns internal
+execution order. `start_plan`, successful `complete_stage`, and `resume_plan`
+project dependency satisfaction through the registered G4 `swarm_stage` machine:
+only PENDING stages whose predecessors have all SUCCEEDED become READY. A
+paused plan defers this projection until resume; failed predecessors do not
+satisfy dependencies. Projection is scoped to the current plan, binding and
+Collet. It does not automatically complete the plan or the L4 Task.
+
+[`operations/swarm/matching.py`](operations/swarm/matching.py) exposes a read-only
+`stage_role_candidates` helper over actual L4 Participation/RoleBinding facts.
+Stage `requirement_refs` using the local `<collet>/role-bindings/<role>/<participant>`
+reference format require the same Agent Participant to satisfy every referenced
+binding. Unknown/foreign role references fail closed. Other opaque requirements
+are not evaluated by this helper. Allocation rechecks these role requirements
+and requires an `AGENT` target and an `A2A_AGENT` execution profile that both
+reference that exact Participant. Stages without role references retain their
+existing allocation behavior.
+
+Matching is not admission, an allocation, or a resource grant. Having a worker
+role does not authorize Swarm governance operations: the existing G1
+owner/designated-executor checks still apply. External computation and authority
+remain separate; a coordinator evaluates completion evidence before explicitly
+calling `complete_stage`. There is no artifact predicate engine or external
+Agent dispatcher in this increment.
+
+Evidence:
+- [Dependency regressions](../../../../../../../tests/community/core/task/context_collab/test_swarm_stage_dependencies.py)
+  cover fan-in, plan isolation, paused completion/resume and failed predecessors.
+- [Role regressions](../../../../../../../tests/community/core/task/context_collab/test_l6_fixed_agent_roles.py)
+  cover scoped assignments, exact local refs and role intersections.
+- [Multi-role coding journey](../../../../../../../tests/community/core/task/context_collab/products/test_task_commission_end_to_end_swarm.py)
+  exercises real service/SQL/G1/G4 calls with simulated Agent computation.

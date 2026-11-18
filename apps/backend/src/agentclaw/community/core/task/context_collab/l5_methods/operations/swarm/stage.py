@@ -43,6 +43,9 @@ from agentclaw.community.core.task.context_collab.g4_contracts_consistency.metho
 from agentclaw.community.core.task.context_collab.g4_contracts_consistency.state_machine import (
     resolve_transition,
 )
+from agentclaw.community.core.task.context_collab.l4_context_primitives.participation import (
+    initial_participation,
+)
 from agentclaw.community.core.task.context_collab.l5_methods.operations.contracts import (
     ProfileOpAcceptedResult,
     SwarmAllocateCommand,
@@ -55,8 +58,12 @@ from agentclaw.community.core.task.context_collab.l5_methods.operations.swarm.ba
     SwarmMethodServiceBase,
     _now,
 )
+from agentclaw.community.core.task.context_collab.l5_methods.operations.swarm.matching import (
+    stage_role_candidates,
+)
 from agentclaw.community.core.task.context_collab.l5_methods.swarm_profile import (
     AllocationState,
+    ExecutionMode,
     PlanState,
     Stage,
     StageAllocation,
@@ -215,20 +222,35 @@ class SwarmStageOpsMixin(SwarmMethodServiceBase):
                 "future; a fresh lease is required before allocating the "
                 "stage"
             )
-        if (
-            self._store.get_execution_profile(
-                axes,
-                command.execution_profile_ref,
-                method_binding_id,
-                collab_context_id,
-            )
-            is None
-        ):
+        execution = self._store.get_execution_profile(
+            axes, command.execution_profile_ref, method_binding_id, collab_context_id
+        )
+        if execution is None:
             raise ContextCollabValidationError(
                 f"swarm stage {stage.stage_id!r} allocation references "
                 f"execution profile {command.execution_profile_ref!r} which "
                 f"is not declared on method binding {method_binding_id!r}"
             )
+        if any("/role-bindings/" in ref for ref in stage.requirement_refs):
+            record = self._collab_repo.get_current_status(collab_context_id)
+            if record is None:
+                raise ContextCollabNotFoundError("stage Collet not found")
+            candidates = stage_role_candidates(
+                collab_context_id, stage, initial_participation(record.events)
+            )
+            if command.target_kind != "AGENT" or command.target_ref not in {
+                participant.participant_id for participant in candidates
+            }:
+                raise ContextCollabValidationError(
+                    "allocation target does not satisfy stage role requirements"
+                )
+            if (
+                execution.mode is not ExecutionMode.A2A_AGENT
+                or execution.target_ref != command.target_ref
+            ):
+                raise ContextCollabValidationError(
+                    "execution profile does not match stage role target"
+                )
         allocation_id = command.allocation_id or f"alloc_{uuid4().hex[:12]}"
         now = _now()
         reason = command.reason or "swarm.stage.allocate"
@@ -410,6 +432,18 @@ class SwarmStageOpsMixin(SwarmMethodServiceBase):
         self._store.update_stage_state(
             axes, method_binding_id, updated, collab_context_id
         )
+        plan = self._require_plan(
+            axes, collab_context_id, method_binding_id, stage.swarm_plan_ref
+        )
+        if plan.state is PlanState.RUNNING:
+            self._ready_pending_stages(
+                axes,
+                collab_context_id,
+                method_binding_id,
+                stage.swarm_plan_ref,
+                context,
+                "swarm.stage.dependencies_satisfied",
+            )
         return ProfileOpAcceptedResult(
             accepted=True,
             collab_context_id=collab_context_id,

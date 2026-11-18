@@ -7,6 +7,9 @@ from dataclasses import asdict, dataclass
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabValidationError,
 )
+from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
+    AgentRef,
+)
 from agentclaw.community.core.task.context_collab.l5_methods.method_composition import (
     CompositionRelation,
 )
@@ -75,9 +78,12 @@ class MethodCompositionTemplate:
 class ScenarioRole:
     name: str
     l4_role: str
-    participant_source: str  # principal_ref / executor_ref
+    participant_source: str  # principal_ref / executor_ref / agent_ref
     required: bool
     responsibilities: tuple[str, ...]
+    # A fixed, profile-declared Agent assignment; never a resource grant.
+    # None is valid for the two identity sources supplied at instantiation.
+    agent_ref: AgentRef | None = None
 
 
 @dataclass(frozen=True)

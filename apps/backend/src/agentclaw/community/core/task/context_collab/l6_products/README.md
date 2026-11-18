@@ -819,3 +819,45 @@ not a ProductProfile object. `services/` and root APIs only reexport layer-owned
 implementations/contracts, and L6 must not import them back. See the
 [operation ownership map](../README.md#operation-ownership) for ports, compatibility
 imports and preserved restart/transaction limitations.
+
+## Fixed multi-Agent roles and the Swarm coding journey
+
+A local `ScenarioRole` may now use `participant_source="agent_ref"` with a typed
+`agent_ref` to declare a fixed Agent assignment in the product definition. The
+Agent must be within the profile's participant scope and must be explicitly
+supplied in Instantiate's `participant_refs`; a role declaration never fabricates
+participation. This also applies to fixed assignments marked optional. Legacy
+`principal_ref`/`executor_ref` sources retain their meaning and cannot carry a
+literal Agent subject. This is a local profile-authoring contract, not a new
+ACCS wire field or resource authorization.
+
+Instantiate materializes actual L4 Participants and RoleBindings. Multiple roles
+on the designated executor refer to the same Participant, and ProductInstance
+role refs match those facts exactly, including after SQL reload. Stage matching
+consumes these L4 refs without importing L6. See the
+[L5 Swarm handoff contract](../l5_methods/README.md#swarm-stage-handoff-and-role-matching).
+
+The [Swarm coding test](../../../../../../../tests/community/core/task/context_collab/products/test_task_commission_end_to_end_swarm.py)
+defines five scoped Agents and their requirements/design/coding/verification/PR
+roles before instantiation. Its explicit controller reads READY stages, matches
+their RoleBinding requirements, allocates work, validates local artifacts and
+completes each stage. A serial Stage dependency chain enforces handoff; it is not
+a new Method composition relation. Since bare Swarm is not a supported top-level
+Collet method, the test uses Single with an explicit runtime `nest` edge to a
+Task-scoped Swarm binding. The nested Swarm plan is authored through L5, not
+claimed as an automatically instantiated L6 nested template.
+
+The existing versioned G4 Task machine governs Work start/progress/submission/
+acceptance through a declared WorkflowProfile; Swarm's G4 Stage machine alone
+governs internal phase states. Role assignments do not broaden G1: the owner
+coordinates Swarm and reports aggregate progress, while the designated PR Agent
+submits the Task and the owner accepts it. The test controller waits for all
+stages before submitting; there is **no new cross-layer guard** that prevents an
+otherwise authorized direct Task submission while Swarm is unfinished.
+
+Only external Agent computation/PR creation is simulated: verification really
+runs four local Python unit tests, and the PR artifact is explicitly a simulated
+draft. No LLM, remote A2A, autonomous scheduler, real remote PR or MethodStore
+restart is covered. P1 has no `complete_plan` operation: the test leaves the plan
+RUNNING with all stages SUCCEEDED rather than mutating storage to invent a
+COMPLETED result. These limits do not change the installed commission product.

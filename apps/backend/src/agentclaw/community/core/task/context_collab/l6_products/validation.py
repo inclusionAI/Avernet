@@ -3,6 +3,9 @@
 from agentclaw.community.core.task.context_collab.errors import (
     ContextCollabValidationError,
 )
+from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
+    AgentRef,
+)
 from agentclaw.community.core.task.context_collab.l4_context_primitives.participants import (
     ROLE_SELECTED_AGENT,
 )
@@ -63,9 +66,23 @@ def validate_product_profile(definition: ProductProfileDefinition) -> None:
     if len(set(names)) != len(names) or len(set(roles)) != len(roles):
         raise ContextCollabValidationError("duplicate scenario role mapping")
     for role in definition.scenario_roles:
-        if role.participant_source not in {"principal_ref", "executor_ref"}:
+        if role.participant_source not in {
+            "principal_ref",
+            "executor_ref",
+            "agent_ref",
+        }:
             raise ContextCollabValidationError(
                 "unsupported scenario role participant source"
+            )
+        if role.participant_source == "agent_ref":
+            if not isinstance(role.agent_ref, AgentRef):
+                raise ContextCollabValidationError(
+                    "agent_ref role requires a typed AgentRef"
+                )
+            definition.participant_scope.require(role.agent_ref)
+        elif role.agent_ref is not None:
+            raise ContextCollabValidationError(
+                "agent_ref requires agent_ref participant source"
             )
     contract = resolve_event_contract(definition)
     if isinstance(contract, TaskLifecycleContract):
