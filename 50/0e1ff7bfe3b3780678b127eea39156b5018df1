@@ -1,0 +1,19 @@
+submodules/avernet
+  s_4a11c41fb99341::t_514e951055eb1a 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "500e1ff7bfe3b3780678b127eea39156b5018df1",
+  "prompts": {},
+  "sessions": {
+    "s_4a11c41fb99341": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fac85-1b54-7092-97bd-b1bcf8746122",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "卷瓜 <juangua.swj@antgroup.com>"
+    }
+  }
+}
