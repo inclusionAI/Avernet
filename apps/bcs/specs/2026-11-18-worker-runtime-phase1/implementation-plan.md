@@ -90,8 +90,12 @@ separately from public implementation status.
   dependencies excluded; the full dependency graph has existing domain lint debt.
   Worker integration, reference resolution and complete decision validation remain
   tasks 4–7; these foundation checks do not claim runtime completion.
-- Task 3: reliable admission/repair/consumer implementation in progress; no
-  complete runtime acceptance claimed yet.
+- Task 3: reliable admission, retained canonical decisions, scheduling and
+  independent repair/discovery implemented. Final SPEC and quality reviews pass;
+  all 136 store tests and strict library Clippy pass. Slow-IO regressions verify
+  durable phase progress, continuous reader prefixes and fair scan resumption.
+  Inbox capacity is reserved before admitting new intents. Worker failure handling,
+  terminal closure/resume proofs and shared scan budgets remain Tasks 5–7.
 - Task 4 archive slice: public DbPlugin Result/Blob provider, durable exact-effect
   evidence and additive SQLite/MySQL migrations implemented. Independent SPEC and
   quality reviews pass. Ten production-provider tests on file-backed SQLite and

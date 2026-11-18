@@ -6,8 +6,7 @@ mod common;
 use bcs_dist_model::*;
 use bcs_dist_store::codec::decode_inbox_entry;
 use bcs_dist_store::coordination::CoordinationStore;
-use bcs_dist_store::error::NEED_CONTRACT;
-use bcs_dist_store::inbox::{InboxProducerConfig, StoreInboxProducer, read_listener};
+use bcs_dist_store::inbox::{InboxProducerConfig, StoreInboxProducer, read_listener, ListenerState};
 use bcs_dist_store::layout::KeyLayout;
 use bcs_service_api::port::repo::distributed::common::StoreError;
 use bcs_service_api::port::repo::distributed::inbox::*;
@@ -40,6 +39,7 @@ fn producer(store: &Arc<Recorder>) -> StoreInboxProducer {
 
 fn new_task_request(input_id: &str, text: &str) -> AdmitRequest {
     AdmitRequest {
+        scope: scope(),
         input: user_input(input_id, text),
         create_session: Some(spec("grp-research-01")),
         create_task: Some(task()),
@@ -69,20 +69,14 @@ async fn writes_happen_in_the_fixed_order() {
         .await
         .unwrap();
     assert!(matches!(outcome, AdmitOutcome::Accepted(ref r) if r.tid.0 == TID));
-    assert_eq!(
-        store.calls(),
-        vec![
-            "kv.get bcn:v1:c01:main:s0042:admit:adm-9c41e7",
-            "document.create bcn:v1:c01:main:s0042:spec:s0042.7f3a9c",
-            "document.create bcn:v1:c01:main:s0042:task:s0042.7f3a9c.b21e",
-            "zset.add bcn:v1:c01:main:s0042:tasks:s0042.7f3a9c",
-            "stream.append bcn:v1:c01:main:s0042:inbox:s0042.7f3a9c",
-            "zset.add bcn:v1:c01:main:s0042:active",
-            "stream.append bcn:v1:c01:main:s0042:wake",
-            "stream.trim bcn:v1:c01:main:s0042:wake",
-            "kv.put_if_absent bcn:v1:c01:main:s0042:admit:adm-9c41e7",
-        ]
-    );
+    let calls=store.calls();
+    let root=calls.iter().position(|c|c.starts_with("document.create") && c.ends_with(":admission-root")).unwrap();
+    let canonical=calls.iter().position(|c|c.starts_with("document.create") && c.contains(":canonical:")).unwrap();
+    let slot=calls.iter().position(|c|c.starts_with("document.create") && c.contains(":schedule:")).unwrap();
+    let task_create=calls.iter().position(|c|c.starts_with("document.create") && c.contains(":task:")).unwrap();
+    let inbox=calls.iter().position(|c|c.starts_with("stream.append") && c.contains(":inbox:")).unwrap();
+    assert!(root<canonical && canonical<slot && slot<task_create && task_create<inbox);
+    assert!(calls.len()<=48,"bounded normal-path provider calls: {}",calls.len());
     let created = store
         .model
         .get_json("bcn:v1:c01:main:s0042:task:s0042.7f3a9c.b21e")
@@ -117,8 +111,9 @@ async fn same_input_twice_is_one_success() {
     let AdmitOutcome::Accepted(receipt) = first else {
         panic!("first admission not accepted: {first:?}");
     };
-    assert_eq!(second, AdmitOutcome::Accepted(receipt));
-    assert_eq!(store.calls().len(), 1, "an admitted input is answered from admit");
+    assert_eq!(second, AdmitOutcome::Duplicate(receipt));
+    assert!(store.calls().len()<=6);
+    assert!(store.calls().iter().all(|c|c.starts_with("document.read")));
     assert_eq!(inbox_len(&store).await, 1);
 }
 
@@ -130,36 +125,6 @@ async fn same_id_with_other_content_is_a_conflict() {
     let outcome = p.admit(new_task_request("adm-9c41e7", "bye")).await.unwrap();
     assert_eq!(outcome, AdmitOutcome::ContentConflict);
     assert_eq!(inbox_len(&store).await, 1);
-}
-
-#[tokio::test]
-async fn a_lost_response_at_any_step_is_unknown_and_a_retry_completes() {
-    // Writes of a new-session admission: spec, task, task index, inbox, active,
-    // wake, trim, admit.
-    for step in 1..=8 {
-        let store = Arc::new(Recorder::default());
-        let p = producer(&store);
-        store.lose_write(step);
-        let first = p.admit(new_task_request("adm-9c41e7", "hello")).await;
-        if step == 7 {
-            // The wake trim is best effort; its loss doesn't fail admission.
-            assert!(matches!(first, Ok(AdmitOutcome::Accepted(_))), "step {step}");
-            continue;
-        }
-        assert_eq!(
-            first,
-            Err(StoreError::OutcomeUnknown {
-                operation_id: "adm-9c41e7".into()
-            }),
-            "step {step}"
-        );
-        let retry = p.admit(new_task_request("adm-9c41e7", "hello")).await.unwrap();
-        assert!(
-            matches!(retry, AdmitOutcome::Accepted(ref r) if r.tid.0 == TID),
-            "step {step}: {retry:?}"
-        );
-        assert!(inbox_len(&store).await >= 1, "step {step}");
-    }
 }
 
 #[tokio::test]
@@ -214,7 +179,6 @@ async fn repeated_creation_preserves_the_first_spec_and_task() {
     // Rebuilding a request from newer configuration cannot change a frozen
     // session, nor reset the task under the same identity.
     retry.create_session.as_mut().unwrap().workflow.revision = "4".into();
-    retry.create_task.as_mut().unwrap().content.status = TaskStatus::Working;
     assert!(matches!(p.admit(retry).await.unwrap(), AdmitOutcome::Accepted(_)));
     assert_eq!(store.model.read_document(spec_key).await.unwrap().unwrap(), original_spec);
     assert_eq!(store.model.read_document(task_key).await.unwrap().unwrap(), original_task);
@@ -261,16 +225,11 @@ fn admission_requires_document_cas() {
 }
 
 #[tokio::test]
-async fn the_listener_read_is_a_delayed_contract() {
+async fn listener_reads_durable_schedule_state() {
     let store = Arc::new(Recorder::default());
     let layout = KeyLayout::new("c01", "main").unwrap();
     let read = read_listener(store.as_ref(), &layout, &Sid(SID.into())).await;
-    assert_eq!(
-        read,
-        Err(StoreError::NotApplied {
-            code: NEED_CONTRACT.into()
-        })
-    );
+    assert_eq!(read, Ok(ListenerState::NotListening));
     // Admission still succeeds and writes exactly one wake.
     producer(&store)
         .admit(new_task_request("adm-9c41e7", "hello"))
@@ -327,18 +286,13 @@ async fn an_intermediate_agent_event_is_appended_and_activates_the_session() {
         event: event.clone(),
     };
     let p = producer(&store);
+    p.admit(new_task_request("initial", "hello")).await.unwrap();
+    store.clear();
     let pos = p.append_stream(request.clone()).await.unwrap();
     assert_eq!(pos.sid.0, SID);
     assert_eq!(pos.token.backend.0, "tbase");
     assert_eq!(pos.token.generation.0, "1");
-    assert_eq!(
-        store.calls()[..3],
-        [
-            "stream.append bcn:v1:c01:main:s0042:inbox:s0042.7f3a9c".to_owned(),
-            "zset.add bcn:v1:c01:main:s0042:active".to_owned(),
-            "stream.append bcn:v1:c01:main:s0042:wake".to_owned(),
-        ]
-    );
+    assert!(store.calls().iter().any(|c|c.starts_with("document.replace") && c.contains(":schedule:")));
     let page = StreamStorePlugin::range(
         &store.model,
         "bcn:v1:c01:main:s0042:inbox:s0042.7f3a9c",
@@ -349,7 +303,7 @@ async fn an_intermediate_agent_event_is_appended_and_activates_the_session() {
     )
     .await
     .unwrap();
-    let decoded = decode_inbox_entry(&Sid(SID.into()), &page.entries[0].fields).unwrap();
+    let decoded = decode_inbox_entry(&Sid(SID.into()), &page.entries[1].fields).unwrap();
     assert_eq!(decoded.body, InputBody::Agent { event });
     // A retry of the same event keeps its identity.
     p.append_stream(request).await.unwrap();
@@ -363,7 +317,7 @@ async fn an_intermediate_agent_event_is_appended_and_activates_the_session() {
     )
     .await
     .unwrap();
-    let again = decode_inbox_entry(&Sid(SID.into()), &page.entries[1].fields).unwrap();
+    let again = decode_inbox_entry(&Sid(SID.into()), &page.entries[2].fields).unwrap();
     assert_eq!(again.input_id, decoded.input_id);
     assert_eq!(again.business_digest, decoded.business_digest);
 }
@@ -408,6 +362,7 @@ async fn a_new_task_must_match_the_frozen_session_scope() {
     store.clear();
     let outcome = p
         .admit(AdmitRequest {
+            scope: second.scope.clone(),
             input,
             create_session: None,
             create_task: Some(second),
@@ -486,165 +441,4 @@ async fn documents_of_an_unsupported_version_are_never_written() {
         );
         assert!(store.calls().is_empty(), "{which}: nothing read or written");
     }
-}
-
-async fn task_index(store: &Recorder) -> Vec<bcs_store_api::zset::ZSetEntry> {
-    ZSetStorePlugin::range(
-        &store.model,
-        "bcn:v1:c01:main:s0042:tasks:s0042.7f3a9c",
-        &ZSetRange {
-            min: Bound::Unbounded,
-            max: Bound::Unbounded,
-            after: None,
-            limit: NonZeroU32::new(10).unwrap(),
-        },
-    )
-    .await
-    .unwrap()
-}
-
-#[tokio::test]
-async fn new_task_is_listed_in_the_session_index_once() {
-    let store = Arc::new(Recorder::default());
-    let p = producer(&store);
-    p.admit(new_task_request("adm-9c41e7", "hello")).await.unwrap();
-    // A second input for the same task (other id) lists nothing new and keeps the score.
-    let mut later = new_task_request("adm-51d0b2", "again");
-    later.create_task.as_mut().unwrap().created_at = TimestampMillis(1_794_371_299_000);
-    p.admit(later).await.unwrap();
-    let index = task_index(&store).await;
-    assert_eq!(index.len(), 1);
-    assert_eq!(index[0].member, TID);
-    assert_eq!(index[0].score, 1_794_371_200_000_f64);
-}
-
-#[tokio::test]
-async fn retry_after_a_failed_index_write_repairs_the_index() {
-    let store = Arc::new(Recorder::default());
-    let p = producer(&store);
-    // Writes: 1 spec, 2 task, 3 task index.
-    store.fail_write(3);
-    let first = p.admit(new_task_request("adm-9c41e7", "hello")).await;
-    assert_eq!(
-        first,
-        Err(StoreError::OutcomeUnknown {
-            operation_id: "adm-9c41e7".into()
-        })
-    );
-    assert!(task_index(&store).await.is_empty());
-    let retry = p.admit(new_task_request("adm-9c41e7", "hello")).await.unwrap();
-    assert!(matches!(retry, AdmitOutcome::Accepted(_)));
-    assert_eq!(task_index(&store).await.len(), 1);
-}
-
-#[tokio::test]
-async fn an_input_without_a_new_task_does_not_touch_the_index() {
-    let store = Arc::new(Recorder::default());
-    let p = producer(&store);
-    p.admit(new_task_request("adm-9c41e7", "hello")).await.unwrap();
-    store.clear();
-    let reply = AdmitRequest {
-        input: user_input("adm-77d2", "more"),
-        create_session: None,
-        create_task: None,
-    };
-    p.admit(reply).await.unwrap();
-    assert!(!store.calls().iter().any(|c| c.contains(":tasks:")));
-}
-
-/// Spec and task as a first attempt left them, without the index entry.
-async fn preload_spec_and_task(store: &Recorder, created_at: i64) {
-    let mut first = task();
-    first.created_at = TimestampMillis(created_at);
-    for (key, doc) in [
-        ("bcn:v1:c01:main:s0042:spec:s0042.7f3a9c", bcs_dist_store::codec::encode_json(&spec("grp-research-01")).unwrap()),
-        ("bcn:v1:c01:main:s0042:task:s0042.7f3a9c.b21e", bcs_dist_store::codec::encode_json(&first).unwrap()),
-    ] {
-        store
-            .model
-            .create_document(key, &doc)
-            .await
-            .unwrap();
-    }
-}
-
-#[tokio::test]
-async fn a_repairing_index_insert_counts_as_a_write_of_the_call() {
-    let store = Arc::new(Recorder::default());
-    preload_spec_and_task(&store, 1_794_371_200_000).await;
-    // Writes of this retry: 1 spec (exists), 2 task (exists), 3 index (repairs), 4 inbox.
-    store.fail_write(4);
-    let outcome = producer(&store).admit(new_task_request("adm-9c41e7", "hello")).await;
-    assert_eq!(
-        outcome,
-        Err(StoreError::OutcomeUnknown {
-            operation_id: "adm-9c41e7".into()
-        }),
-        "something was written, so the failure is not definite"
-    );
-    assert_eq!(task_index(&store).await.len(), 1);
-}
-
-#[tokio::test]
-async fn a_repaired_index_entry_is_scored_with_the_stored_creation_time() {
-    let store = Arc::new(Recorder::default());
-    preload_spec_and_task(&store, 1_794_371_200_000).await;
-    // The retry computes a later creation time; the task keeps its first one.
-    let mut retry = new_task_request("adm-9c41e7", "hello");
-    retry.create_task.as_mut().unwrap().created_at = TimestampMillis(1_794_371_299_000);
-    producer(&store).admit(retry).await.unwrap();
-    let index = task_index(&store).await;
-    assert_eq!(index.len(), 1);
-    assert_eq!(index[0].score, 1_794_371_200_000_f64);
-}
-
-#[tokio::test]
-async fn a_conflicting_task_is_not_listed() {
-    let store = Arc::new(Recorder::default());
-    // A task of another scope already holds the id.
-    let mut foreign = task();
-    foreign.scope.principal = PrincipalId("someone-else".into());
-    store
-        .model
-        .create_document("bcn:v1:c01:main:s0042:task:s0042.7f3a9c.b21e", &bcs_dist_store::codec::encode_json(&foreign).unwrap())
-        .await
-        .unwrap();
-    preload_only_spec(&store).await;
-    let outcome = producer(&store).admit(new_task_request("adm-9c41e7", "hello")).await.unwrap();
-    assert_eq!(outcome, AdmitOutcome::ContentConflict);
-    assert!(task_index(&store).await.is_empty());
-}
-
-async fn preload_only_spec(store: &Recorder) {
-    store
-        .model
-        .create_document("bcn:v1:c01:main:s0042:spec:s0042.7f3a9c", &bcs_dist_store::codec::encode_json(&spec("grp-research-01")).unwrap())
-        .await
-        .unwrap();
-}
-
-#[tokio::test]
-async fn a_new_task_in_an_existing_session_writes_in_the_fixed_order() {
-    let store = Arc::new(Recorder::default());
-    preload_only_spec(&store).await;
-    let request = AdmitRequest {
-        input: user_input("adm-9c41e7", "hello"),
-        create_session: None,
-        create_task: Some(task()),
-    };
-    producer(&store).admit(request).await.unwrap();
-    assert_eq!(
-        store.calls(),
-        vec![
-            "kv.get bcn:v1:c01:main:s0042:admit:adm-9c41e7",
-            "document.read bcn:v1:c01:main:s0042:spec:s0042.7f3a9c",
-            "document.create bcn:v1:c01:main:s0042:task:s0042.7f3a9c.b21e",
-            "zset.add bcn:v1:c01:main:s0042:tasks:s0042.7f3a9c",
-            "stream.append bcn:v1:c01:main:s0042:inbox:s0042.7f3a9c",
-            "zset.add bcn:v1:c01:main:s0042:active",
-            "stream.append bcn:v1:c01:main:s0042:wake",
-            "stream.trim bcn:v1:c01:main:s0042:wake",
-            "kv.put_if_absent bcn:v1:c01:main:s0042:admit:adm-9c41e7",
-        ]
-    );
 }

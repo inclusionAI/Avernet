@@ -69,8 +69,13 @@ The [distributed contract](src/port/repo/distributed/README.md) owns admission,
 atomic checkpoint/effect replay, scheduling, consistent task recovery and
 dispatch ownership semantics. State and queue adapters remain replaceable.
 The [change record](../../../specs/2026-11-15-distributed-contracts/spec.md) links
-ordered implementation tasks and actual validation; concrete providers and
-runtime implementations remain pending.
+ordered implementation tasks and actual validation. The public
+[Inbox provider](../../services/bcs-dist-store/src/inbox/README.md) implements
+scoped canonical admission, consumption and independent repair/discovery.
+`AdmitRequest.scope` binds trusted scope; `FeedBatch.failures` requires Worker
+watch recovery. `AdmissionControlPort` exposes gate/cut obligations, while
+terminal/archive confirmation and authorized resume remain runtime duties.
+Complete runtime assembly and provider acceptance remain separate.
 
 `SessionStorePort::get_spec` owns frozen-session specification reads, even before
 the first checkpoint. Inbox producer/consumer ports and the stateful shard feed

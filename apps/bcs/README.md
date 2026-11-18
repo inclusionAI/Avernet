@@ -15,8 +15,9 @@ Public BCS owns coordination contracts, services, adapters and reusable plugins;
 - [Local rules](AGENTS.md)
 - [API contracts](api-contracts/README.md)
 - [Configured catalog labels](docs/catalog-labels.md): policy, Agent/Group omission, persistence, full publication and compatibility gates.
-- [Distributed coordination contracts](crates/service-api/bcs-service-api/src/port/repo/distributed/README.md) — declarations; implementation pending
+- [Distributed coordination contracts](crates/service-api/bcs-service-api/src/port/repo/distributed/README.md) — portable contracts and provider status
 - [Runtime store plugin API](crates/plugin-api/bcs-store-api/README.md) — capability contracts and provider harnesses
+- [Reliable distributed Inbox](crates/services/bcs-dist-store/src/inbox/README.md) — durable admission, consumption, scheduling and independent repair/discovery
 - [Distributed immutable archive](crates/services/bcs-dist-store/src/archive/README.md) — public Result/Blob persistence and committed-effect evidence
 - [Committed TaskFeed](crates/services/bcs-dist-store/src/task_feed/README.md) — output replay, snapshot publication and logical retention
 - [Distributed output projection](crates/services/bcs-dist-projection/README.md) — pure display transform, frozen quotas and replay accounting
