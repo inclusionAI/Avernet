@@ -33,7 +33,7 @@ from agentclaw.community.core.bot_config_manifest.sources.source_resolver import
 )
 from agentclaw.community.core.bot_config_manifest.schema.sources import parse_source
 
-__all__ = ["compile_bot_file_sync"]
+__all__ = ["compile_bot_file_sync", "resolve_bot_identity"]
 
 
 def compile_bot_file_sync(
@@ -70,7 +70,7 @@ def compile_bot_file_sync(
             failures.append(EntryFailure(path, refusal[1]))
             continue
         try:
-            source_bot_id, source_owner_id = _resolve_bot_identity(session, entry)
+            source_bot_id, source_owner_id = resolve_bot_identity(session, entry)
         except EntryFetchError as exc:  # pragma: no cover - defensive
             # ``declared_protocol`` already gated this entry as a bot source,
             # and ``_resolve_bot_id`` re-reads the same raw the gate read. The
@@ -95,7 +95,7 @@ def compile_bot_file_sync(
     return Declaration(tuple(desired), failures=tuple(failures))
 
 
-def _resolve_bot_identity(session: CompileSession, entry: Mapping[str, Any]) -> tuple[str, str]:
+def resolve_bot_identity(session: CompileSession, entry: Mapping[str, Any]) -> tuple[str, str]:
     """The ``(bot_id, owner_id)`` of the bot source an entry references.
 
     One road: a named ``from: <name>`` that points at a top-level
