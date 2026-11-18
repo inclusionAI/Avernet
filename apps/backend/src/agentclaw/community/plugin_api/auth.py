@@ -25,6 +25,8 @@ class AuthRequestContext:
     headers: dict[str, str] = field(default_factory=dict)
     query_params: dict[str, str] = field(default_factory=dict)
     base_url: str = ""
+    # Set only by an HTTP boundary that has verified the human principal.
+    verified_actor_user_id: str | None = None
 
 
 class AuthenticatedIdentity(BaseModel):
