@@ -26,7 +26,7 @@ export function UserTaskActions({
         <>
           <Button
             variant="link"
-            className="h-auto px-0 py-0 text-sm no-underline"
+            className="h-7 rounded-md px-1.5 text-[13px] font-normal text-primary no-underline hover:bg-primary/10 hover:text-primary"
             size="sm"
             onClick={(event) => {
               event.stopPropagation();

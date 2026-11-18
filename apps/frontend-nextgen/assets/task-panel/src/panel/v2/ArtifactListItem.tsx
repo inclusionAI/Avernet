@@ -118,6 +118,39 @@ export function ArtifactListItem({ artifact, downloading, onPreview, onDownload 
         <div style={mainStyle}>{body}</div>
       )}
       <span className="task-artifact-actions">
+        {preview ? (
+          <button
+            className="task-artifact-icon"
+            type="button"
+            aria-label={`打开产物 ${artifact.name}`}
+            title="预览产物"
+            onClick={onPreview}
+          >
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.7"
+              aria-hidden="true"
+            >
+              <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" />
+              <circle cx="12" cy="12" r="3" />
+            </svg>
+          </button>
+        ) : href ? (
+          <a
+            className="task-artifact-icon"
+            href={href}
+            aria-label={`打开产物 ${artifact.name}`}
+            title="打开产物"
+            target="_blank"
+            rel="noreferrer"
+          >
+            <ExternalLink size={18} />
+          </a>
+        ) : null}
         {file ? (
           <button
             className="task-artifact-icon"
@@ -139,28 +172,6 @@ export function ArtifactListItem({ artifact, downloading, onPreview, onDownload 
               <path d="M12 3v12m-4-4 4 4 4-4M4 16v5h16v-5" />
             </svg>
           </button>
-        ) : null}
-        {preview ? (
-          <button
-            className="task-artifact-icon"
-            type="button"
-            aria-label={`打开产物 ${artifact.name}`}
-            title="打开产物"
-            onClick={onPreview}
-          >
-            <ExternalLink size={18} />
-          </button>
-        ) : href ? (
-          <a
-            className="task-artifact-icon"
-            href={href}
-            aria-label={`打开产物 ${artifact.name}`}
-            title="打开产物"
-            target="_blank"
-            rel="noreferrer"
-          >
-            <ExternalLink size={18} />
-          </a>
         ) : null}
       </span>
     </li>

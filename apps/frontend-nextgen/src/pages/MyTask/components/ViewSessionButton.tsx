@@ -78,7 +78,7 @@ export function ViewSessionButton({
   return (
     <Button
       variant={displayVariant === 'lab' ? 'link' : 'secondary'}
-      className={displayVariant === 'lab' ? 'h-auto px-0 py-0 text-sm no-underline' : undefined}
+      className={displayVariant === 'lab' ? 'h-7 rounded-md px-1.5 text-[13px] font-normal text-primary no-underline hover:bg-primary/10 hover:text-primary' : undefined}
       size="sm"
       leftIcon={displayVariant === 'lab' ? undefined : <MessageCircle className="size-4" />}
       onClick={() => {

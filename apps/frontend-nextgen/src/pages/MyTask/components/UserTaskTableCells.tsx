@@ -49,7 +49,7 @@ export function UserTaskGoalContent({ goal }: { goal: string }) {
     <TooltipProvider delayDuration={300}>
       <Tooltip>
         <TooltipTrigger asChild>
-          <div tabIndex={0} className="w-full truncate leading-5 text-foreground">
+          <div tabIndex={0} className="w-full truncate text-xs leading-5 text-foreground">
             {goal}
           </div>
         </TooltipTrigger>

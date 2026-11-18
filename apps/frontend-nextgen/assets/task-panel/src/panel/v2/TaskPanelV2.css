@@ -80,20 +80,13 @@
 .task-node-row:focus-visible {
   box-shadow: inset 0 0 0 2px var(--task-panel-primary);
 }
-.task-node-summary {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  box-sizing: border-box;
-  padding: 8px 10px;
-  width: 180px;
-  max-width: 42%;
-  min-width: 0;
-  flex-shrink: 0;
-  border-radius: 14px;
+
+.task-node-state-running {
+  animation: task-node-state-spin 1s linear infinite;
+  border-top-color: transparent !important;
 }
-@media (max-width: 480px) {
-  .task-node-summary {
-    width: 140px;
+@keyframes task-node-state-spin {
+  to {
+    transform: rotate(360deg);
   }
 }

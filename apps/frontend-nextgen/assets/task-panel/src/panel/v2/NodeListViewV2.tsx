@@ -3,7 +3,7 @@
  * NodeListViewV2 —— L1 节点卡片列表(PRD 方案A):
  * 点根节点 = 选中并恢复宿主会话；点其他节点 = 选中并联动会话；
  * 节点本体仅做会话联动；独立图标下钻到节点副屏，不联动会话。
- * 行布局:present 状态环/任务说明(完成划线)/执行体/节点摘要卡及独立下钻/返工与 HITL 徽章/子任务入口。
+ * 行布局:present 状态环/任务说明(完成划线)/执行体/独立下钻/返工与 HITL 徽章/子任务入口。
  */
 import React from 'react';
 
@@ -91,8 +91,8 @@ export const NodeListViewV2: React.FC<NodeListViewV2Props> = ({ task, nav, onOpe
               alignItems: 'flex-start',
               gap: 10,
               padding: '14px 12px',
-              borderRadius: 2,
-              background: selected ? `${C.primary}08` : undefined,
+              borderRadius: 8,
+              background: selected ? C.surfaceHover : undefined,
               cursor: 'pointer',
               transition: 'border-color 0.15s, background 0.15s',
             }}
@@ -100,6 +100,7 @@ export const NodeListViewV2: React.FC<NodeListViewV2Props> = ({ task, nav, onOpe
             <span
               role="img"
               aria-label={tone.label}
+              className={present === 'running' ? 'task-node-state-running' : undefined}
               style={{
                 display: 'inline-block',
                 width: 14,
@@ -109,7 +110,11 @@ export const NodeListViewV2: React.FC<NodeListViewV2Props> = ({ task, nav, onOpe
                 borderRadius: '50%',
                 background: 'transparent',
                 border: `2px solid ${stateColor}`,
+                borderTopColor: present === 'running' ? 'transparent' : stateColor,
                 color: stateColor,
+                animation: present === 'running' ? 'task-node-state-spin 1s linear infinite' : undefined,
+                transformOrigin: 'center',
+                willChange: present === 'running' ? 'transform' : undefined,
                 lineHeight: '10px',
                 fontSize: 11,
                 textAlign: 'center',
@@ -182,31 +187,6 @@ export const NodeListViewV2: React.FC<NodeListViewV2Props> = ({ task, nav, onOpe
                 {node.needsHitl && present === 'running' && <span style={badgeStyle(C.warning)}>人工处理</span>}
               </div>
             </div>
-            <div className="task-node-summary" style={{ border: `1px solid ${C.border}` }}>
-              <div style={{ minWidth: 0, flex: 1 }}>
-                <div
-                  title={node.name}
-                  style={{
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                    fontSize: 14,
-                    lineHeight: '22px',
-                    color: C.textPrimary,
-                  }}
-                >
-                  {node.name}
-                </div>
-                <div
-                  style={{
-                    fontSize: 12,
-                    lineHeight: '20px',
-                    color: present === 'running' ? C.primary : C.textSecondary,
-                  }}
-                >
-                  {tone.label}
-                </div>
-              </div>
               <button
                 type="button"
                 aria-label={`下钻 ${node.name}${canDrill ? '' : `：${drillReason}`}`}
@@ -218,7 +198,7 @@ export const NodeListViewV2: React.FC<NodeListViewV2Props> = ({ task, nav, onOpe
                   if (canDrill) nav.drillInto(node.id, null);
                 }}
                 onMouseEnter={(e) => (e.currentTarget.style.background = C.surfaceAlt)}
-                onMouseLeave={(e) => (e.currentTarget.style.background = C.surface)}
+                onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
                 style={{
                   display: 'inline-flex',
                   alignItems: 'center',
@@ -227,7 +207,7 @@ export const NodeListViewV2: React.FC<NodeListViewV2Props> = ({ task, nav, onOpe
                   height: 28,
                   border: 0,
                   borderRadius: 999,
-                  background: C.surfaceAlt,
+                  background: 'transparent',
                   color: canDrill ? C.textSecondary : C.textMuted,
                   cursor: canDrill ? 'pointer' : 'not-allowed',
                   flexShrink: 0,
@@ -247,7 +227,6 @@ export const NodeListViewV2: React.FC<NodeListViewV2Props> = ({ task, nav, onOpe
                   <path d="M7 10v5a3 3 0 0 0 3 3h3" />
                 </svg>
               </button>
-            </div>
             {node.hasSubTask && node.subTaskId && onOpenSubTask && (
               <button
                 type="button"
