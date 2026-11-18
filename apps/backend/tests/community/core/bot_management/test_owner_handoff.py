@@ -67,7 +67,8 @@ class Passport:
             kwargs["entity_id"],
             kwargs["owner_workno"],
             kwargs["expected_credential_id"],
-        ) == ("A", self.target_owner, self.current["credential_id"])
+            kwargs["bot_type"],
+        ) == ("A", self.target_owner, self.current["credential_id"], "service")
         self.issues.append(kwargs)
         self.current = {
             "credential_id": self.next_credential_id,

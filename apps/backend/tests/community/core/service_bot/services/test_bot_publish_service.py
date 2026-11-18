@@ -79,6 +79,7 @@ def _make_service(
     task_queue_service=None,
     bot_process_registry=None,
     common_config_service=None,
+    passport_plugin=None,
 ) -> BotPublishService:
     """Build a ``BotPublishService`` with MagicMock fallbacks for unused deps.
 
@@ -183,6 +184,7 @@ def _make_service(
         task_queue_service=task_queue_service or MagicMock(),
         bot_process_registry=process_registry,
         common_config_service=common_config,
+        passport_plugin=passport_plugin or MagicMock(),
     )
 
 
@@ -1148,6 +1150,7 @@ class TestUpgradeBotToService:
         mock_bot_repo = Mock()
         mock_bot_service = Mock()
         mock_bcn_service = Mock()
+        mock_passport = Mock()
         mock_bcn_service.switch_bot.return_value = {
             "bot_id": "bot_001:user_001",
             "provider_id": "prv_test",
@@ -1188,6 +1191,7 @@ class TestUpgradeBotToService:
             bot_repo=mock_bot_repo,
             bot_service=mock_bot_service,
             bcn_service=mock_bcn_service,
+            passport_plugin=mock_passport,
         )
 
         # Act - 使用 mock threading.Thread 立即执行目标函数
@@ -1219,6 +1223,9 @@ class TestUpgradeBotToService:
             owner_workno="user_001",
             name="Test Bot",
             summary="Test description",
+        )
+        mock_passport.update_passport.assert_called_once_with(
+            bot_id="bot_001", user_id="user_001", bot_type="service"
         )
         # 验证 restart_bot 被异步调用
         mock_bot_service.restart_bot.assert_called_once_with(
@@ -1647,6 +1654,16 @@ class TestUpdateBotType:
         """更新 bot_type 为 service。"""
         mock_repo = Mock()
         mock_bot_repo = Mock()
+        mock_passport = Mock()
+
+        mock_bot_repo.get_by_id_and_owner.return_value = {
+            "id": 100,
+            "bot_id": "bot_001",
+            "bot_type": "personal",
+            "owner_id": "user_001",
+            "entity_id": "user_001",
+            "env": "dev",
+        }
 
         updated_bot = {
             "id": 100,
@@ -1660,6 +1677,7 @@ class TestUpdateBotType:
         service = _make_service(
             bot_publish_repo=mock_repo,
             bot_repo=mock_bot_repo,
+            passport_plugin=mock_passport,
         )
 
         result = service.update_bot_type(
@@ -1672,11 +1690,24 @@ class TestUpdateBotType:
         mock_bot_repo.update_by_owner.assert_called_once_with(
             "bot_001", "user_001", {"bot_type": "service"}
         )
+        mock_passport.update_passport.assert_called_once_with(
+            bot_id="bot_001", user_id="user_001", bot_type="service"
+        )
 
     def test_update_bot_type_to_personal(self):
         """更新 bot_type 为 personal。"""
         mock_repo = Mock()
         mock_bot_repo = Mock()
+        mock_passport = Mock()
+
+        mock_bot_repo.get_by_id_and_owner.return_value = {
+            "id": 100,
+            "bot_id": "bot_001",
+            "bot_type": "service",
+            "owner_id": "user_001",
+            "entity_id": "user_001",
+            "env": "dev",
+        }
 
         updated_bot = {
             "id": 100,
@@ -1690,6 +1721,7 @@ class TestUpdateBotType:
         service = _make_service(
             bot_publish_repo=mock_repo,
             bot_repo=mock_bot_repo,
+            passport_plugin=mock_passport,
         )
 
         result = service.update_bot_type(
@@ -1702,6 +1734,34 @@ class TestUpdateBotType:
         mock_bot_repo.update_by_owner.assert_called_once_with(
             "bot_001", "user_001", {"bot_type": "personal"}
         )
+        mock_passport.update_passport.assert_called_once_with(
+            bot_id="bot_001", user_id="user_001", bot_type="personal"
+        )
+
+    def test_update_bot_type_stops_before_database_when_passport_sync_fails(self):
+        mock_bot_repo = Mock()
+        mock_bot_repo.get_by_id_and_owner.return_value = {
+            "id": 100,
+            "bot_id": "bot_001",
+            "bot_type": "personal",
+            "owner_id": "user_001",
+            "entity_id": "user_001",
+            "env": "dev",
+        }
+        mock_passport = Mock()
+        mock_passport.update_passport.side_effect = RuntimeError("tcauth unavailable")
+        service = _make_service(
+            bot_publish_repo=Mock(),
+            bot_repo=mock_bot_repo,
+            passport_plugin=mock_passport,
+        )
+
+        with pytest.raises(
+            BotPublishServiceError, match="Failed to synchronize Passport bot_type"
+        ):
+            service.update_bot_type("bot_001", "user_001", "service")
+
+        mock_bot_repo.update_by_owner.assert_not_called()
 
     def test_update_bot_type_invalid_type(self):
         """无效的 bot_type 应该报错。"""
