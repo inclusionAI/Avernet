@@ -12,6 +12,7 @@ async-trait = { workspace = true }
 bcs-db-api = { workspace = true }
 bcs-domain = { workspace = true }
 bcs-service-api = { workspace = true }
+fastrand = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
 tokio = { workspace = true }
