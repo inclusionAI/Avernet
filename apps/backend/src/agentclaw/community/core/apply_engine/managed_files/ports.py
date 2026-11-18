@@ -321,6 +321,79 @@ class PlatformSkillPackageUpload(_StorePort, SkillPackageUploadPort):
             self._delete_local_skill, skill_id, name, bot_id, owner_id, actor_id
         )
 
+    async def ensure_dst_local_skill_asset(
+        self, *, bot_id: str, owner_id: str, actor_id: str,
+        source_bot_id: str, source_owner_id: str, name: str,
+    ) -> dict[str, Any]:
+        # The platform-managed road stores its packages in the same store, and
+        # a from:from_bot member reaches this bot through BOT_FILE_SYNC, which
+        # the platform-managed composition routes through the store-backed
+        # file-sync port (not a live container). File-sync writes the package
+        # objects under the dst ``workspace/skills-local/<name>/`` prefix; this
+        # method registers the dst ``ac_skill`` row that points at that prefix
+        # the same way an upload would, reusing the same locator and the
+        # source bot's reverse-looked-up description. No package write runs
+        # here — file-sync already wrote it.
+        return await asyncio.to_thread(
+            self._ensure_dst_local_skill_asset,
+            bot_id, owner_id, actor_id, source_bot_id, source_owner_id, name,
+        )
+
+    def _ensure_dst_local_skill_asset(
+        self, bot_id: str, owner_id: str, actor_id: str,
+        source_bot_id: str, source_owner_id: str, name: str,
+    ) -> dict[str, Any]:
+        src_rows = self._skills.list_bot_local_by_name(
+            bot_id=source_bot_id, name=name
+        )
+        src_owned = [
+            row for row in src_rows
+            if str(row.get("user_id") or "") == source_owner_id
+        ]
+        if len(src_owned) != 1:
+            from agentclaw.community.core.skill_center.errors import (
+                LocalSkillNotFoundError,
+            )
+            raise LocalSkillNotFoundError(
+                f"source bot {source_bot_id!r} has no unique local skill "
+                f"named {name!r} owned by {source_owner_id!r}"
+            )
+        src = src_owned[0]
+        description = src.get("description") or ""
+        # teclaw local locator is the minimal logical path — same as the upload
+        # road's. file-sync has already written its package objects under the
+        # dst ``workspace/skills-local/<name>/`` prefix this locator names.
+        locator = f"local://{SKILLS_LOCAL_DIR}/{name}"
+        existing = _own_row(
+            self._skills.list_bot_local_by_name(bot_id=bot_id, name=name), owner_id
+        )
+        if existing is None:
+            skill = self._skills.create(
+                {
+                    "name": name,
+                    "description": description,
+                    "git_path": locator,
+                    "category": "general",
+                    "tags": "[]",
+                    "is_public": False,
+                    "user_id": owner_id,
+                    "bolt_id": bot_id,
+                    "source_type": "upload",
+                }
+            )
+            operation = "created"
+        else:
+            skill = self._skills.update(
+                str(existing["id"]),
+                {"description": description, "git_path": locator},
+            ) or existing
+            operation = "replaced"
+        return {
+            "operation": operation,
+            "skill": {**skill, "active": False},
+            "actor_id": actor_id,
+        }
+
     def _delete_local_skill(
         self, skill_id: str, name: str, bot_id: str, owner_id: str, actor_id: str
     ) -> None:

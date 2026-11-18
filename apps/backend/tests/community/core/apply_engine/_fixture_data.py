@@ -597,6 +597,44 @@ class FakeSkillUploadService:
         self.rows.pop(name, None)
         self.installed.pop(name, None)
 
+    async def ensure_dst_local_skill_asset(
+        self, *, bot_id: str, owner_id: str, actor_id: str,
+        source_bot_id: str, source_owner_id: str, name: str,
+    ) -> dict[str, Any]:
+        # Test rig stand-in: surface the call, create the dst row from the
+        # source reverse-look-up contract, and return the same shape the real
+        # ``LocalSkillUploadService`` does. Caller-supplied source values are
+        # ignored in favour of a fixed dst git_path that matches the
+        # installed-skill locator format tests already inspect.
+        record = self.rows.get(name)
+        operation = "created" if record is None else "replaced"
+        if record is None:
+            self._next_id += 1
+            record = {
+                "id": self._next_id,
+                "name": name,
+                "git_path": f"local://skills-local/{name}",
+                "description": f"desc from {source_bot_id}/{source_owner_id}",
+                "mcp_dependencies": [],
+            }
+            self.rows[name] = record
+        self.uploads.append(
+            {
+                "bot_id": bot_id,
+                "owner_id": owner_id,
+                "actor_id": actor_id,
+                "name": name,
+                "source_bot_id": source_bot_id,
+                "source_owner_id": source_owner_id,
+                "operation": operation,
+            }
+        )
+        return {
+            "operation": operation,
+            "skill": {**record, "active": False},
+            "actor_id": actor_id,
+        }
+
     async def installed_package_digest(
         self, *, bot, bot_id: str, owner_id: str, name: str
     ):
