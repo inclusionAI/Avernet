@@ -191,6 +191,113 @@ describe('botChatProvider', () => {
     expect(mockedGetIamToken).toHaveBeenNthCalledWith(3, 'b', 'u', '2088', 'draft', draftContext);
   });
 
+  it('多实例 online 服务 Bot:初始化、重连刷新和发送前的 IAM 均带选中实例 device_uuid', async () => {
+    mockedGetConnection.mockResolvedValue({
+      code: 200000,
+      data: { engine: 'openclaw', expires_at: 'x', sockets: [{ kind: 'chat', url: 'wss://gw/ws?token=1' }] },
+      message: 'OK',
+      request_id: 'r',
+    });
+    const p = createBotChatProvider({
+      bot,
+      userId: 'u',
+      sessionId: 'sid-1',
+      range: { deviceUuid: 'device-a', stage: 'online' },
+    });
+    await p.connect();
+    const cfg = (adapters.OpenClawProvider as jest.Mock<any>).mock.calls[0][0] as {
+      credentialProvider?: () => Promise<{ xIAMToken?: string }>;
+    };
+    await cfg.credentialProvider!();
+    mockSdk.isConnected = true;
+    await p.request({ content: 'hi', sessionId: 'sid-1' });
+
+    const rangeContext = { sessionKey: 'sid-1', deviceUuid: 'device-a' };
+    expect(mockedGetIamToken).toHaveBeenCalledTimes(3);
+    expect(mockedGetIamToken).toHaveBeenNthCalledWith(1, 'b', 'u', '2088', 'online', rangeContext);
+    expect(mockedGetIamToken).toHaveBeenNthCalledWith(2, 'b', 'u', '2088', 'online', rangeContext);
+    expect(mockedGetIamToken).toHaveBeenNthCalledWith(3, 'b', 'u', '2088', 'online', rangeContext);
+  });
+
+  it('range.stage 非 online(草稿调试 Bot)时 IAM chatContext 不带 device_uuid', async () => {
+    mockedGetConnection.mockResolvedValue({
+      code: 200000,
+      data: { engine: 'openclaw', expires_at: 'x', sockets: [{ kind: 'chat', url: 'wss://gw/ws?token=1' }] },
+      message: 'OK',
+      request_id: 'r',
+    });
+    const p = createBotChatProvider({
+      bot: { ...bot, runtimeStage: 'draft' as const },
+      userId: 'u',
+      sessionId: 'sid-1',
+      range: { deviceUuid: 'device-a', stage: 'draft' },
+    });
+    await p.connect();
+
+    expect(mockedGetIamToken).toHaveBeenCalledWith('b', 'u', '2088', 'draft', { sessionKey: 'sid-1' });
+  });
+
+  it('Caller 模式管理 Bot:初始化、重连刷新和发送前的 IAM 均带 caller_runtime_target=service', async () => {
+    mockedGetConnection.mockResolvedValue({
+      code: 200000,
+      data: { engine: 'openclaw', expires_at: 'x', sockets: [{ kind: 'chat', url: 'wss://gw/ws?token=1' }] },
+      message: 'OK',
+      request_id: 'r',
+    });
+    const p = createBotChatProvider({
+      bot: { ...bot, callType: 'caller' },
+      userId: 'u',
+      sessionId: 'sid-1',
+    });
+    await p.connect();
+    const cfg = (adapters.OpenClawProvider as jest.Mock<any>).mock.calls[0][0] as {
+      credentialProvider?: () => Promise<{ xIAMToken?: string }>;
+    };
+    await cfg.credentialProvider!();
+    mockSdk.isConnected = true;
+    await p.request({ content: 'hi', sessionId: 'sid-1' });
+
+    const callerContext = { sessionKey: 'sid-1', callerRuntimeTarget: 'service' as const };
+    expect(mockedGetIamToken).toHaveBeenCalledTimes(3);
+    expect(mockedGetIamToken).toHaveBeenNthCalledWith(1, 'b', 'u', '2088', 'online', callerContext);
+    expect(mockedGetIamToken).toHaveBeenNthCalledWith(2, 'b', 'u', '2088', 'online', callerContext);
+    expect(mockedGetIamToken).toHaveBeenNthCalledWith(3, 'b', 'u', '2088', 'online', callerContext);
+  });
+
+  it('好友 Caller Bot:IAM chatContext 带 caller_runtime_target=caller_instance 且与好友参数并存', async () => {
+    mockedGetConnection.mockResolvedValue({
+      code: 200000,
+      data: { engine: 'openclaw', expires_at: 'x', sockets: [{ kind: 'chat', url: 'wss://gw/ws' }] },
+      message: 'OK',
+      request_id: 'r',
+    });
+    // 好友 Caller Bot 必为服务 Bot(call_type 是服务 Bot 侧字段),好友服务 Bot 的
+    // stage 契约为 online(withFriendBotRequestParams 仅服务 Bot 带 stage)。
+    const friendCallerBot = { ...bot, callType: 'caller', isFriendBot: true };
+    const p = createBotChatProvider({ bot: friendCallerBot, userId: 'u', sessionId: 'sid-1' });
+    await p.connect();
+
+    expect(mockedGetIamToken).toHaveBeenCalledWith('b', 'u', '2088', 'online', {
+      sessionKey: 'sid-1',
+      friendUserId: 'u',
+      ownerId: '2088',
+      callerRuntimeTarget: 'caller_instance',
+    });
+  });
+
+  it('非 Caller 模式 Bot(callType 非 caller)IAM chatContext 不带 caller_runtime_target', async () => {
+    mockedGetConnection.mockResolvedValue({
+      code: 200000,
+      data: { engine: 'openclaw', expires_at: 'x', sockets: [{ kind: 'chat', url: 'wss://gw/ws' }] },
+      message: 'OK',
+      request_id: 'r',
+    });
+    const p = createBotChatProvider({ bot: { ...bot, callType: 'owner' }, userId: 'u', sessionId: 'sid-1' });
+    await p.connect();
+
+    expect(mockedGetIamToken).toHaveBeenCalledWith('b', 'u', '2088', 'online', { sessionKey: 'sid-1' });
+  });
+
   it('getChatUrl 对 human_ 前缀的 userId 只传工号(回归:连接接口不再带 human_ 前缀)', async () => {
     mockedGetConnection.mockResolvedValue({
       code: 200000,

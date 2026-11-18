@@ -93,6 +93,8 @@ function toTeamBot(dto: CollaboratingBotDto): ChatBotView {
     isAgentCodingBot: runtime.isAgentCodingBot,
     templateType: runtime.templateType,
     templateName: runtime.templateName,
+    // Caller 模式标记透传(openspec add-iam-caller-runtime-target);缺失保持 undefined。
+    callType: dto.call_type,
     spaceId: dto.space?.space_id,
     spaceName: dto.space?.name,
   };
