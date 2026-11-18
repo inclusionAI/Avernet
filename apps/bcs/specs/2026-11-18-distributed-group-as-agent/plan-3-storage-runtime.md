@@ -79,7 +79,9 @@ artifact table UNIQUE (task_id, artifact_id) and UNIQUE (task_id, position)
 history table UNIQUE (task_id, history_id/position)
 reserve -> existing basis winner or new Preparing
 refresh_preparation -> CAS unclaimed preparation revision + idle context generation/background
-claim -> CAS preparation revision + matching context basis + no active round + source check
+claim -> resolve prior claim for exact identity as AlreadyOwned, without allocating generation
+         otherwise CAS revision + context basis + no active round + source/context-origin check
+         only GeneratedForRequest may initialize a context row; never upsert a supplied Sid
 activate -> CAS exact request/round + Inbox evidence;
             write Accepted and PendingStart obligation in ONE request mutation
 reject_unclaimed -> atomically revoke exact preparation revision and unbind the request key
@@ -93,9 +95,11 @@ prepared request 保存 raw semantics、basis/defaults/version、frozen ref、si
 
 context 控制行保存 initial_goal/最近已释放成功轮引用；read_context_basis 读取同一行/cut，成功 release 与推进成功指针及清空 slot 同事务，失败/取消只清空 slot。不要从“已能 GetTask 读取终态、但尚未 release”的 archive 提前推断下一轮背景；背景引用的 pin 由 D06/S04 生命周期合同保护。
 
+保存 ContextOrigin 并核对原 raw 是否省略 contextId。ClientSuppliedExisting 缺少 canonical SessionSpec/context 行时拒绝，不走 INSERT/UPSERT；GeneratedForRequest 也须证明 Sid 来自同 RequestKey 的服务端预留，冲突不能覆盖别的会话。同 request/preparation 的再次 claim 返回 AlreadyOwned（包括原轮已释放），永不被误判 Busy 或重建一轮。取消记录以 `(scope,group,tid)` 唯一保存原 request_id/控制内容，lookup_cancel 只读且失败不等于无记录；终态及响应丢失不清理身份，查询期内始终可恢复，结果过期后仍禁止重建取消。
+
 生产 GroupInvocation 实现只依赖 repo/plugin-api。若当前 bcs-store-api 无法原子满足 claim 涉及的多记录条件，不能逐 Key 普通写伪装一致；使用可证明的单文档/CAS 设计或事务 provider，并先提交布局/访问成本评审。新低层能力必须有接口与 conformance，不能私调 TBase。
 
-- [ ] **4. GREEN：** 新增 `tests/conformance_group_invocation.rs` 调用 `group_invocation_repo_port_contract_tests`，故障注入覆盖写前失败、写后丢响应、并发 reservation winner basis、直接 Busy/Lost→Busy 共用拒绝、拒绝后扫描不执行和旧 revision 不影响重试。验证 A 旧背景准备、B 成功释放、A 条件刷新及 refresh/claim 响应丢失；同时覆盖 abandon/activate 两种顺序、ClosedAbsent 确认、ClosedPresent 错误边界拒绝、Quarantined/ContentConflict 和 reopen 后准备恢复。每种 scenario 显式断言 Task/Input 未重复；运行 `cargo test -p bcs-db-migrations`，完整 SQLite 迁移新建/升级通过；MySQL 全链验证在 S04 真实环境继续完成。提交 `feat(bcs): persist exclusive group invocation rounds`。
+- [ ] **4. GREEN：** 新增 `tests/conformance_group_invocation.rs` 调用 `group_invocation_repo_port_contract_tests`，故障注入覆盖写前失败、写后丢响应、并发 reservation winner basis、直接 Busy/Lost→Busy 共用拒绝、拒绝后扫描不执行和旧 revision 不影响重试。验证显式未知/跨范围 context 不创建记录、同请求再次 claim 为 AlreadyOwned、终态后 lookup_cancel 仍返回原意图；验证 A 旧背景准备、B 成功释放、A 条件刷新及 refresh/claim 响应丢失。同时覆盖 abandon/activate 两种顺序、ClosedAbsent 确认、ClosedPresent 错误边界拒绝、Quarantined/ContentConflict 和 reopen 后准备恢复。每种 scenario 显式断言 Task/Input 未重复；运行 `cargo test -p bcs-db-migrations`，完整 SQLite 迁移新建/升级通过；MySQL 全链验证在 S04 真实环境继续完成。提交 `feat(bcs): persist exclusive group invocation rounds`。
 
 ## S02：reschedule、Start 封口与公平恢复
 
@@ -193,7 +197,7 @@ async fn failed_artifact_write_leaves_no_terminal() {
 }
 ```
 
-- [ ] **2a. 增加 Blob conformance 的真实故障用例。** manifest 在 put 前写；put 后事务前崩溃可扫描发现，archive 失败保持 pin；exact generation/digest 重删幂等，引用与 GC CAS 竞争不误删，旧 put 在途未知不得仅靠 TTL 回收。Memory/SQLite 生命周期 repo 与 file-backed Blob 适配均实际执行。
+- [ ] **2a. 增加 Blob conformance 的真实故障用例。** manifest 在 put 前写；put 后事务前崩溃可扫描发现，archive 失败保持 pin；exact generation/digest 重删幂等，引用与 GC CAS 竞争不误删，旧 put 在途未知不得仅靠 TTL 回收。get_bounded 按剩余预算从 IO 限长，B+1 返回 TooLarge、读取不超过 B+1，不能先完整 get；错误/未知大小元数据也不绕过限长。Memory/SQLite 生命周期 repo 与 file-backed Blob 适配均实际执行。
 - [ ] **3. RED：** `cargo test -p bcs-dist-store --test group_results --test group_results_sqlite --test blob_lifecycle`、`cargo test -p bcs-dist-blob-local --test conformance_blob_store`。
 - [ ] **4. 实现 DbPlugin::transaction，不使用 execute_batch 冒充事务。** 最终 Task、Artifact 集合、history/边界、digest 与结果引用同事务。相同 source/content 返回相同引用，不同内容冲突。对象采用 prepare_manifest/pin → put_immutable → archive+reference 同事务；归档响应丢失查询原 digest/reference。GC 只能 CAS Deleting 且无 pending/live pin/ref，使用 delete_immutable 精确 generation；不能仅有 put/get 而把删除留给未定义脚本。checkpoint 内容先 durable pin，提交 Unknown 保留，确认未提交/压缩完成才凭证明释放。文件 provider 仅使用配置的仓库外根目录、不跟随越界路径；宿主 provider 实现相同端口。
 
@@ -210,6 +214,8 @@ async fn failed_artifact_write_leaves_no_terminal() {
 同一个 sid 的两轮 `tid1/tid2` SQL 测试必须断言两个 archive 和各自产物都保留，不得将 slots 的 sid UNIQUE 复制到 archives。
 
 按 `(scope,group,status,status_updated_at,tid)` 支持分页索引。D02 的 context/status/statusTimestampAfter 条件在分页前执行；排序使用状态更新时间及 tid 倒序，不能以归档/Artifact 更新时间替代。TaskReader 的专用 TaskListPage 返回页、next、有效 page_size 和 total_size；从同一逻辑索引 cut 对完整授权/筛选集合聚合计数，热任务及归档以完整 scoped Tid 去重，不能只数 SQL archive 或把当前页长度当总量。跨存储实现由 TaskReader provider 提供一致的逻辑索引/版本读取，不让 adapter 拼数，也不持有 DB 锁跨网络。historyLength=0 不返回历史，正数有界读取最近 N 条；不修改归档内容。includeArtifacts 默认/显式 false 时不访问 Artifact 表或产物对象，true 时按当前页 task IDs 批量加载，不在应用层逐任务调用。用 SQL/对象调用记录验证投影和聚合次数/扫描行数，并测空页/末页、hot/archive 重叠、同时间分页、时间边界及群过滤与时间筛选组合。MySQL identity 字段按仓库大小写敏感规则定义，避免 messageId 大小写碰撞；SQLite 用完全一致比较。
+
+N 必须已经校验为 0～100；所有 Task 共享 ResponseReadBudget 的 8 MiB 字节预算。S01 的 history/Artifact/公开快照 schema 同时保存大小或保守编码上界，与正文/digest 同次写入；查询先以有界元数据批次判断总量，超限不加载大正文/对象。需要读取对象时调用 D06 get_bounded 并扣减整页剩余额度，不让每个对象各拿 8 MiB。history 按每 Task LIMIT、Artifact 元数据也分批；不得为计数或判断大小加载全量正文。`group_access_cost` 测默认/0/100/101、100 Task × 100 history、includeArtifacts=true 及超大单对象，断言读量、物化字节和对象 IO 有界；ResponseBudgetExceeded 不返回被截断的成功页。
 
 - [ ] **5. GREEN：** 全迁移链在 SQLite 文件新建/升级均通过；真实 MySQL 配置由现有测试基础读取，未配置时显式未验证，不把 skip 当 pass。运行 `cargo test -p bcs-dist-store --test conformance_blob_lifecycle --test conformance_group_results`、`cargo test -p bcs-dist-blob-local --test conformance_blob_store`、`cargo test -p bcs-db-migrations`、`cargo test -p bcs-dist-store --test group_results_mysql -- --ignored --nocapture`（创建测试时将真实环境用例标为 ignored，部署门槛必须实际执行）。提交 `feat(bcs): archive group artifacts with final task state`。
 
@@ -260,7 +266,7 @@ retire abandoned active work on ClosedAbsent proof or ClosedPresent + full drain
 retain closed-start/rejected-preparation tombstones outside active scans
 ```
 
-固定测试规模：内部维护分页 1/64/128、HTTP 列表页 1/50/100、至少 129 条恢复记录、至少 1000 条历史任务。分别测已完成无输入 abandon 只保留墓碑、不再反复 reschedule，及未解析封口继续退避。page 查询次数不随不可见任务数线性增长，total_size 聚合单独记录扫描行数而不读取全部正文，当前页 Artifact 批量加载；token 路径 OB writes=0。记录真实 SQL/插件调用数、最大读取行数和失败退避次数，不以 repo 方法计数代替 SQL。
+固定测试规模：内部维护分页 1/64/128、HTTP 列表页 1/50/100、history 默认 20/0/100/101、至少 129 条恢复记录、至少 1000 条历史任务；最重公开读取组合为 100×100 history 加 Artifact，仍共享 8 MiB，不全量加载后才失败。分别测已完成无输入 abandon 只保留墓碑、不再反复 reschedule，及未解析封口继续退避。page 查询次数不随不可见任务数线性增长，total_size 聚合单独记录扫描行数而不读取全部正文，当前页 Artifact 批量加载；token 路径 OB writes=0。记录真实 SQL/插件调用数、最大读取行数/字节数和失败退避次数，不以 repo 方法计数代替 SQL。
 
 - [ ] **4. GREEN 与提交：** 断言后页不饥饿、失败不会无限重复失效 token、停止未知不删证据，提交 `feat(bcs): bound group recovery retention and storage work`。
 
@@ -271,8 +277,27 @@ retain closed-start/rejected-preparation tombstones outside active scans
 - Modify：`apps/bcs/crates/services/bcs-dist-worker/src/{committer,effects,group_call/recovery}.rs`、`apps/bcs/crates/services/bcs-dist-store/src/{group_invocation/rounds,group_results/retention}.rs`。
 - Create：`apps/bcs/crates/services/bcs-dist-worker/tests/group_checkpoint_compaction.rs`、`apps/bcs/crates/services/bcs-dist-store/tests/group_checkpoint_compaction.rs`。
 
-- [ ] **1. RED：** 同一 Sid 生成 500 轮（每轮包含 dispatch/retry/effect），断言没有压缩时 checkpoint/加载成本增长，随后实现目标测试。
+- [ ] **1. 独立记录未压缩基线，不把它叫 RED。** 固定每轮 8 节点、至多 2 attempts、定长输入/结果引用，测同 Sid 1/100/500 轮后的 checkpoint 字节及一次稳定 checkpoint load/commit 的读行数、写行数、写字节。基线只记录旧实现增长；全部历史 archive 合法保留，不把累计 archive 大小计入单次 checkpoint 成本。
+- [ ] **1a. RED 直接断言目标上限。** 在 Worker 的 group_checkpoint_compaction.rs 定义 fixture `measure_checkpoint_cost(rounds)`，每次用同规格独立 world 跑完指定轮数、确认 release/待办完成，再采样同一 load/progress-only commit 操作；返回 checkpoint_bytes/read_rows/write_rows/written_bytes。测试如下，未实现压缩时应因上限断言失败，而不是因缺文件/编译错误失败：
+
+```rust
+#[tokio::test]
+async fn checkpoint_cost_stays_bounded() {
+    let first = measure_checkpoint_cost(1).await;
+    assert!(first.checkpoint_bytes <= 64 * 1024);
+    for rounds in [100, 500] {
+        let sample = measure_checkpoint_cost(rounds).await;
+        assert!(sample.checkpoint_bytes <= 64 * 1024);
+        assert!(sample.checkpoint_bytes <= first.checkpoint_bytes + 8 * 1024);
+        assert!(sample.read_rows <= first.read_rows + 4);
+        assert!(sample.write_rows <= first.write_rows + 4);
+        assert!(sample.written_bytes <= first.written_bytes + 8 * 1024);
+    }
+}
+```
+
+运行 `cargo test -p bcs-dist-worker --test group_checkpoint_compaction checkpoint_cost_stays_bounded -- --exact`，至少命中 1 项测试且确认由成本上限失败。固定容差用于 ID/计数编码及有限控制记录，不随 rounds 增长；provider 的统计必须记录真实读取/写入，不能把历史藏进 helper 后漏计。
 - [ ] **2. 实现 release 后逐轮压缩。** 保留 initial goal/成功背景引用、active round、closed_round_generation、fencing/effect tombstones；删除已关闭 task/view_drafts/dispatch_seq/deadlines/outbox。迟到输入/effect 先查 round/generation 目录，拒绝旧轮次且不创建新 dispatch；未知证明进入 quarantine。
-- [ ] **3. GREEN：** checkpoint 大小、读取和提交工作在 500 轮后不随历史线性增长（固定每轮节点上限，检查 1/100/500 轮的字节/行数/SQL 计数）；checkpoint 仅保留常数大小 closed generation，不把 500 份墓碑留在内存；压缩与接管、旧 release、SaveResult 回放交错时不解锁新轮次；提交 `feat(bcs): compact closed group rounds with late-event fencing`。
+- [ ] **3. GREEN：** 原样重跑 checkpoint_cost_stays_bounded 及整个 group_checkpoint_compaction target，保持相同 fixture/上限并记录 1/100/500 轮实测值；checkpoint 仅保留常数大小 closed generation，不把 500 份墓碑留在内存。压缩与接管、旧 release、SaveResult 回放交错时不解锁新轮次；提交 `feat(bcs): compact closed group rounds with late-event fencing`。
 
 本子计划退出条件：真实 memory+SQLite conformance、持久重启、Worker 桥接的受理/完成故障测试通过。生产 TBase/OB provider 的多进程验收独立保留，不由 reference provider 结果代替。

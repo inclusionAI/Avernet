@@ -44,7 +44,10 @@ fn saved_defaults_survive_new_configuration() {
 authenticate + current resource access + structural validation
   -> lookup RequestKey
   -> if found: normalize(raw, saved basis); compare; recover/read
-  -> if absent: freeze appropriate workflow; validate capability;
+  -> if absent and raw contextId omitted: derive server Sid, freeze new workflow
+  -> if absent and raw contextId supplied: require same-scope/group/source canonical session
+                missing/inaccessible -> ContextNotFound; never allocate or substitute a Sid
+  -> validate capability and history budget;
                 normalize(raw, frozen defaults); reserve
   -> if reservation lost: normalize again against winner basis
 ```
@@ -66,6 +69,10 @@ pub fn apply_defaults(raw: &serde_json::Value, defaults: &serde_json::Value) -> 
 基础格式校验已拒绝非对象 raw/configuration，函数不拿异常输入猜默认值。版本化 normalize 函数输出 D01 GroupCallInput。沿用现有 digest_fields/digest_json 的公开算法或提取共享纯函数，不让 application 依赖具体 bcs-dist-store。基础格式错误先拒绝；当前权限撤销即使请求已存在也拒绝。
 
 目录实现以已有群 Core、工作流/绑定端口读取，必须能取 exact revision。能力和 Card 结果只调用 C01 的 `GroupWorkflowValidatorCoreService`，不另写节点白名单；部署能力/编译版本与 workflow digest 不符时受理前失败。`card` 方法纯读，不调用新建会话 resolve；冻结后的 context 不随群更新重算能力。记录 ports 调用以证明读 Card 没有保存 spec/claim。
+
+显式 contextId 必须核对 canonical SessionSpec 与 context 控制记录的 tenant/principal/group/source；read_context_basis=None 只对 GeneratedForRequest 的服务端身份可走初始化，对 ClientSuppliedExisting 必须 404/CONTEXT_NOT_FOUND。保存 ContextOrigin 并在 Core claim 再检查，不能因中途缺行重建。测试未知但语法合法 Sid、首轮自带任意 Sid、跨群/主体/旧来源全部没有 reserve/claim/Inbox 调用；省略 context 的首轮及其 Session 尚未创建时的原请求恢复仍成功。
+
+historyLength 默认 20，上限 100，101/负数/溢出拒绝而非截断；预算 v1 上限 8 MiB 随有效返回配置保存。已有请求先按原 basis 比较并恢复，不用当前默认 historyLength 重新验证原请求语义；未知预算版本返回依赖错误。normalization 测试覆盖默认/0/100/101、显式值优先、保存值重放。
 
 - [ ] **4. GREEN：** normalization/directory 测试，增加配置改变冲突、send/stream 同语义、metadata 改值、权限撤销、并发 winner basis、expired tombstone 用例。`cargo test -p bcs-app-dist-gateway --test normalization --test directory`。
 - [ ] **5. 提交：** `feat(bcs): normalize group retries from saved request basis`。
@@ -127,7 +134,11 @@ Inbox error Quarantined/ContentConflict:
 Inbox result StartClosed:
   verify closure against the original Abandoned record; return its saved failure
   if verification is unknown: return OutcomeUnknown; never activate a closed Start
-claim result SlotHeld:
+claim result AlreadyOwned(saved_record):
+  resume its saved SlotHeld/InboxDurable/Accepted/released phase with original RoundRef
+  never claim a fresh generation, reject own preparation, or repeat completed steps
+claim result Acquired:
+  the saved record is now SlotHeld; this is a state, not another claim outcome
   admit identical InputEnvelope
   record inbox evidence
   activate same RoundRef atomically with pending obligation
@@ -144,6 +155,7 @@ Abandoned 先调用 D03 的 seal_abandoned_start：ClosedAbsent 交 confirm_star
 GroupSubmitResult.response 从保存的原请求与 basis 得到，显式字段优先于保存的默认值；重复/恢复请求以及预留落败者均复用获胜记录。它不是 Task 快照，handler 后续通过 get_task/observe_task 读取真实公共状态，不能把 receipt 包装成虚构 Task。
 
 - [ ] **4. GREEN：** admission/retry_recovery 覆盖每步写前失败/写后丢响应、claim 清理未知、Inbox 先到、许可后通知丢失、原请求恢复读取；`cargo test -p bcs-app-dist-gateway --test admission --test retry_recovery`。命名 barrier 验证：Lost→其他请求占用→拒绝成功→Busy→释放→恢复扫描不会产生 Start；拒绝响应丢失返回 Unknown；同 messageId 新 revision 不受旧扫描影响。另使 A 在 T0 背景准备后暂停、B 完成 T1 并释放，断言 A 重试使用 T1，刷新/claim 再竞争仍有界；背景被清理时先撤销准备。覆盖 Quarantined/ContentConflict、无输入 Abandoned 封口、已有输入封口/消费和响应丢失。
+- [ ] **4a. 核对自有 claim 的恢复。** 首次 Acquired，写成功响应丢失后同身份再次 claim 必须 AlreadyOwned；同一 generation、同一冻结输入，拒绝清理调用数为 0。已释放原轮的迟到 claim 只恢复其原结果，不占用下一轮；显式 contextId 的缺行永不生成 Session。
 - [ ] **5. 提交：** `feat(bcs): orchestrate recoverable exclusive group admission`。
 
 ## G03：公开查询、范围过滤、多轮背景和取消
@@ -155,22 +167,36 @@ GroupSubmitResult.response 从保存的原请求与 basis 得到，显式字段�
 - Create：`apps/bcs/crates/application/bcs-app-dist-gateway/tests/{queries,cancellation,background}.rs`。
 - Modify：`apps/bcs/crates/application/bcs-app-dist-gateway/tests/common/mod.rs`，添加真实内存 TaskFeed/Result fixture。
 
-- [ ] **1. 测试同 caller 不同群不能访问 Task；列表过滤和 total_size 计数发生在分页之前。** 加入未 Accepted 的热 Task，不出现在列表/计数/查询；同 Tid 同时在 hot/archive 时只算一次。覆盖 context/status/statusTimestampAfter 组合筛选、同状态更新时间的稳定分页、空页/末页仍保留有效 page_size 和正确总量、historyLength 缺省/0/正数，以及 includeArtifacts 缺省/false/true。终态归档热记录已清理仍可读取。下一轮拿最初目标、本轮 data、最近成功结果；已清理背景明确拒绝。
+- [ ] **1. 测试同 caller 不同群不能访问 Task；列表过滤和 total_size 计数发生在分页之前。** 加入未 Accepted 的热 Task，不出现在列表/计数/查询；同 Tid 同时在 hot/archive 时只算一次。覆盖 context/status/statusTimestampAfter 组合筛选、同状态更新时间的稳定分页、空页/末页仍保留有效 page_size 和正确总量、historyLength 默认 20/0/100/101，以及 includeArtifacts 缺省/false/true。加入 100 Task × 100 history 的共享 8 MiB 预算断言，响应超限明确错误且不先全量取正文。终态归档热记录已清理仍可读取。下一轮拿最初目标、本轮 data、最近成功结果；已清理背景明确拒绝。
 - [ ] **2. RED：** `cargo test -p bcs-app-dist-gateway --test queries --test cancellation --test background`。
 - [ ] **3. 实现 D02 的 typed 查询参数与单一公开投影。** get 优先遵循 repository restore 返回的完整 cut/Final；归档终态不能拼旧 hot 正文。list 在 repo 内先按 group/scope/source/Accepted、context、status、statusTimestampAfter 过滤，再按状态更新时间及 tid 倒序分页；从同一逻辑索引 cut 返回分页前去重 total_size 和有效 page_size，不能先截页再筛选或用当前页长度当总量。历史仅按 historyLength 裁剪响应，不改存储；Part 属性与顶层 metadata 独立保留。includeArtifacts 默认 false，不加载产物表/对象；true 时一次批量载入当前页。query 本身不驱动执行。
 
 ```text
 cancel(scope, group, tid):
   authorize exact task and group
-  if terminal: TaskNotCancelable
-  reserve/reuse stable cancel identity for this tid
-  admit cancel intent once
-  return CancelTaskResult { task: restored current public task, cancel_request_id }, not AdmissionReceipt-as-Canceled
+  saved = lookup_cancel(scope, group, tid); read failure is not None
+  if saved exists: restore_saved_cancel(saved)
+  else:
+    task = restore current authorized Task
+    if terminal:
+      recheck lookup_cancel to resolve a concurrently persisted intent
+      if found: restore_saved_cancel(saved)
+      otherwise: TaskNotCancelable, without creating an intent
+    else:
+      saved = reserve_cancel; reuse any concurrent winner
+      restore_saved_cancel(saved)
+restore_saved_cancel(saved):
+  restore current authorized Task with bounded response projection
+  if nonterminal: repair only unfinished Inbox admission with the original input identity
+  if terminal: return the real view without another cancel; old Inbox inputs follow closed-round rules
+  return CancelTaskResult { task: current real Task, cancel_request_id: saved.id }
 ```
+
+已有意图的响应丢失后重试，Task 无论为 CANCELED、FAILED 还是完成竞争获胜的 COMPLETED，都保留原 ID 和真实状态。重试 reason 不覆盖首个控制内容；实际结果已清理返回 ResultExpired，不重新取消。所有返回 Task 的路径（含 cancel）仍受默认 history 和共享响应预算约束；响应超限不是撤销原取消意图的理由。
 
 subscribe/observe_task 都校验群/主体/任务和 Accepted，并共享 Snapshot@H 后从 H follow、Gap 重建的实现。公开 subscribe 在首个恢复 cut 已终态时拒绝；内部 observe_task 返回终态首帧后关闭。若首帧非终态而任务随即完成，从该 cut 跟随终态事件，不再重新检查“可否新建公开订阅”。内部观察不要求先 get_task，也不调用公开 subscribe 来绕回终态拒绝逻辑。public cursor 不直接序列化物理 offset。取消/完成的胜负由 Worker checkpoint 决定，application 不写另一个终态。
 
-- [ ] **4. GREEN：** 验证重复 cancel 的同一 request_id、not terminal until confirmed、failed quarantine 不释放、跨群/跨筛选条件游标拒绝、Query 不调用 dispatch、无 per-event get_task。用调用记录确认 includeArtifacts=false 不读产物，true 按页批量读；用 barrier 覆盖任务在 observe restore 前/后完成，内部观察均成功，公开终态 subscribe 仍拒绝。提交 `feat(bcs): expose scoped group tasks and cancellation intents`。
+- [ ] **4. GREEN：** 验证取消意图已受理→响应丢失→Task 终态→重试，返回原 request_id/真实 Task，Input/取消派发数不增加；另测“终态无意图”才 TaskNotCancelable、lookup 失败不当作不存在、相同 Task 的并发首次取消复用 winner。保留 not terminal until confirmed、failed quarantine 不释放、跨群/跨筛选条件游标拒绝、Query 不调用 dispatch、无 per-event get_task。用调用记录确认 includeArtifacts=false 不读产物，true 按页批量读；用 barrier 覆盖任务在 observe restore 前/后完成，内部观察均成功，公开终态 subscribe 仍拒绝。提交 `feat(bcs): expose scoped group tasks and cancellation intents`。
 
 ## G04：独立 A2A HTTP adapter、Card 与版本化路由
 
@@ -213,6 +239,7 @@ pub fn split_task_action(value: &str) -> Option<(&str, &str)> {
 检查 application/a2a+json、A2A-Version=1.0；text/event-stream 为响应。静态 1 MiB 限制在解析和业务受理前；可变 capability 验证留在新请求分支。known includeProgress 键无激活头时应用拒绝，未知 metadata 不成为 principal。public raw/url 未实现时不输出 Card 能力。group Card 读取是纯读并匹配已装配认证，匿名模式不隐式启用。
 
 - [ ] **4. typed 错误完整映射。** 覆盖 Busy、Conflict、NotFound、ContextNotFound、ResultExpired、CapabilityUnsupported、BackgroundUnavailable、AdmissionUnknown、UnsupportedOperation、TaskNotCancelable 和安全 dependency failure；禁止将原始 SQL/upstream body 放进 response。按旧规范标准错误结构做 JSON golden assertions。
+- [ ] **4a. 执行响应预算。** HistoryLengthOutOfRange → 400/HISTORY_LENGTH_OUT_OF_RANGE；ResponseBudgetExceeded → 400/RESPONSE_BUDGET_EXCEEDED。使用最多 8 MiB 的限长 JSON writer（包括转义和封装），不能序列化到无界 Vec 后再检查。测试默认/0/100/101、8 MiB 边界、中文/转义膨胀，以及 list 的 100×100+Artifact 组合。已有受理时错误保留安全 taskId/contextId，不假报未执行；禁止靠截断 Artifact/history 或只返回部分页冒充成功。
 - [ ] **5. GREEN 后提交：** routes/request_validation/card 全通过，schema 是合法 JSON；`feat(bcs): add group A2A HTTP routes and card publication`。
 
 ## G05：同步等待、默认配置和无取消断线
@@ -226,6 +253,8 @@ pub fn split_task_action(value: &str) -> Option<(&str, &str)> {
 - [ ] **1. 使用 Tokio 控制时间验证默认 false 等待、60 秒 504、true 返回当前 Task。** 返回前任务已终态也允许真实终态；stream 的 returnImmediately 不改变首帧行为；断开 HTTP 等待不调用 cancel。用 barrier 在 submit 成功后、observe_task 恢复前完成 Task，再测试首帧恢复后、follow 前完成；两者均返回真实终态，不报 UnsupportedOperation。
 - [ ] **2. RED：** `cargo test -p bcs-dist-gateway-http --test send_wait`。
 - [ ] **3. 使用 GroupSubmitResult.response 和内部 observe_task，超时只结束传输。** 不从 raw 请求或当前默认值重新推导有效配置。已知 tid/context 放入安全 details；不能在超时路径成功返回 WORKING，也不能把公开订阅拒绝当成 send 的完成结果。
+
+effective.history_length/max_response_bytes 均来自保存的有效配置；application 的 get/observe 恢复原任务预算，adapter 用同一字节上限编码。101 在新受理前拒绝；已受理后响应超过 8 MiB 则返回 ResponseBudgetExceeded 并保留 ID，后台任务继续，客户端可用更小 historyLength 的 GetTask 获取，不自动重发或取消。
 
 ```text
 submitted = service.submit(caller, raw_request)
@@ -268,6 +297,8 @@ Gap -> application restores a fresh snapshot/cut and continues observation; adap
 ```
 
 首期不承诺 Last-Event-ID 精确重放；若提供 SSE id，采用绑定 caller/group/tid 的不透明逻辑令牌，不输出物理 Stream ID。慢连接缓冲达配置界限时关闭 reader，保留后台任务；普通事件不得逐条 get_task。
+
+首帧与 Gap 重建同样受 history≤100 和 8 MiB 帧预算限制；首次编码在发 HTTP 头前完成限长校验，后续帧超限发送标准错误并关闭 reader。测试不得用分割/截断 JSON 隐藏超限，SSE 缓冲也按字节计量，不只限制事件数量；持续流可累计超过 8 MiB，不把每帧上限误作整轮输出总量。
 
 - [ ] **4. GREEN：** 保活不写 history、不续期；客户端断开不取消；含内部工具/思考/堆栈及私有 Part metadata 的 fixture 在 get/list/SSE 三出口都不出现，允许的 Part filename/metadata 与 Artifact 顶层 metadata 各自保持不变。提交 `feat(bcs): stream committed group task views over SSE`。
 

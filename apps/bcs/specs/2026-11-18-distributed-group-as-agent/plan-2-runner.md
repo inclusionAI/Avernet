@@ -117,6 +117,8 @@ Thinking/Tool:
 
 不将任意 Agent 错误正文/堆栈放公开结果。includeProgress=false 只抑制阶段消息，状态/最终 Artifact 仍产生；JSON 结果保持原类型，不能先转字符串再当 data。每个 PublicPart 的 filename/media_type/metadata 独立于 Artifact 顶层属性；公开策略允许的值按原 Part 保留，私有 metadata 不透传，固定结果 digest 包含这些属性。public_output 测试同时断言允许属性未丢失与禁止属性未泄漏。
 
+预算 v1 要求单个最终产物集可在 8 MiB 公开响应中完整表达；在冻结成功决定前校验公开大小，超限走 PUBLIC_RESULT_TOO_LARGE 的失败收尾，不以截断内容生成成功 Artifact。纯 Runner 不读取 Blob；引用内容的大小/digest 由 Worker 在提供归约输入前核实。public_output 增加边界/超限用例，响应 history 的查询预算失败则只影响读取，不改变已冻结任务终态。
+
 - [ ] **4. GREEN：** 在三种输入顺序（Final→Cancel、Cancel→Final、Unknown→Deadline）断言一个终态决定，超时不假造远端取消；提交 `feat(bcs): bound group failures and filter public output`。
 
 ## R04（可选）：Judge 动作化执行

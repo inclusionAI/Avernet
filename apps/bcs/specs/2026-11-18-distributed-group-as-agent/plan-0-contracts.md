@@ -18,6 +18,7 @@
 
 - Create：`apps/bcs/crates/contracts/bcs-dist-model/src/group_call/{mod,request,public_task,admission}.rs`。
 - Modify：`apps/bcs/crates/contracts/bcs-dist-model/src/{lib,session,task}.rs`、`apps/bcs/crates/contracts/bcs-dist-model/CONTEXT.md`。
+- Modify：`apps/bcs/crates/contracts/bcs-dist-model/Cargo.toml`、`apps/bcs/Cargo.lock`、`apps/bcs/scripts/ci/check-public-api.sh`；Create：`apps/bcs/scripts/ci/tests/public_api_version_regression.sh`、本目录 `api-propagation.md`（实施时记录模型/API 的消费者及迁移）。
 - Test：`apps/bcs/crates/contracts/bcs-dist-model/tests/group_call_shapes.rs`。
 
 - [ ] **1. 建立模型测试入口，写序列化/规范化依据测试。** 测试 raw 请求保留“省略”和“显式默认”区别，basis 保存默认值后再比较；Artifact 支持 text、object/array/scalar JSON，不把最终结果限制成输入对象子集。两个 Part 分别带 filename/metadata，Artifact 顶层另带不同 metadata，序列化重载后各自保留；改变任一 Part 属性须改变完整语义指纹。
@@ -30,6 +31,9 @@ fn basis_round_trips_without_current_card() {
         format_version: 1,
         return_immediately: false,
         history_length: 20,
+        response_budget_version: 1,
+        max_history_length: 100,
+        max_response_bytes: 8 * 1024 * 1024,
         accepted_output_modes: vec!["text/plain".into()],
         include_progress: false,
         workflow_digest: bcs_dist_model::Digest("sha256:frozen".into()),
@@ -49,6 +53,9 @@ pub struct NormalizationBasis {
     pub format_version: u32,
     pub return_immediately: bool,
     pub history_length: u32,
+    pub response_budget_version: u32,
+    pub max_history_length: u32,
+    pub max_response_bytes: u64,
     pub accepted_output_modes: Vec<String>,
     pub include_progress: bool,
     pub workflow_digest: crate::Digest,
@@ -121,7 +128,27 @@ pub struct PublicTaskResult {
 
 PreparedRequest 另保存 `PreparationContextBasis { observed_generation: u64, initial_goal: BlobRef, previous_success: Option<PreviousSuccess> }` 和 `PreparationRevision(pub String)`（derive Debug/Clone/PartialEq/Eq/Serialize/Deserialize、serde transparent）；revision 由 repo 分配且永久不复用，BlobRef 自带 digest。该依据不进入客户端请求指纹。仅 Preparing 且未 claim 时可条件刷新背景及候选 round generation；claim 将匹配该依据的 GroupRoundInput 固定。刷新不改原请求/basis、稳定 ID 或绝对 deadline，已有 pin 只能在刷新提交已确认、旧引用不再需要后依证明解除。
 
-- [ ] **4. GREEN：** 同目标测试通过且测试数量非零；再运行 `cargo test -p bcs-dist-model`。CTX 标明新记录版本、未部署旧记录的兼容决策；不凭 serde 成功代表合法业务。
+PreparedRequest 再保存 `ContextOrigin::{GeneratedForRequest, ClientSuppliedExisting}`；来源从原 raw contextId 的存在性与服务端身份分配流程派生，不接受客户端直接填写。GeneratedForRequest 必须能证明保存的 Sid 属于该 RequestKey；ClientSuppliedExisting 在预留前证明同 scope/group/source 的 canonical Session 已存在。恢复时沿用来源，不把显式 Sid 的缺行变为新建指令。
+
+```rust
+pub const MAX_HISTORY_LENGTH: u32 = 100;
+pub const MAX_PUBLIC_RESPONSE_BYTES: u64 = 8 * 1024 * 1024;
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ResponseReadBudget {
+    pub format_version: u32,
+    pub history_length: u32,
+    pub max_response_bytes: u64,
+}
+```
+
+预算 v1 只接受 history_length≤100、max_response_bytes=8,388,608，默认 history_length=20；预算是服务端解析结果，不能信任任意 Rust 构造值。NormalizationBasis 保存上限及默认值，PreparedRequest/GroupCallInput 保存合并后的有效值；不是把 101 静默裁剪为 100。模型测试覆盖默认/0/100/101、负数/溢出 wire 转换、未知预算版本和相同请求重试的保存值。字节预算涵盖整个公开响应，不是逐 Task 配额。
+
+本次模型变更明确按 breaking 发布：D01 将 bcs-dist-model 0.1.0 升为 0.2.0；新增必需 group/source 等字段的既有 SessionSpec/TaskSnapshot/FinalTaskRecord 持久格式升 v2，旧 v1 明确 UnsupportedFormat，不默填归属。D01～D06 同一发布切片沿用 0.2.0，不以“尚未部署”免除外部构造者、枚举匹配、path/version 约束与锁文件迁移。`api-propagation.md` 分开列模型 0.2.0 和 Service API 7.0.0 的改动、消费者、实现者及持久化拒读/迁移策略。
+
+API gate 的 crate/path 映射加入 `bcs-dist-model -> crates/contracts/bcs-dist-model`，保留现有三个 Service API crate。0.x breaking 必须提高 minor（或进入更高 major），0.1.0→0.1.1 不接受；稳定版本 breaking 仍要求 major。`public_api_version_regression.sh` 用隔离 fixture 验证模型保持 0.1.0/仅升 patch 失败、升 0.2.0 通过、漏扫模型失败、Service API 6.x breaking 只有 7.0.0 通过；缺 crate/工具失败不得伪装为空 diff 成功。门槛增强不修改已有豁免或跳过其他 crate。
+
+- [ ] **4. GREEN：** 同目标测试通过且测试数量非零；再运行 `cargo test -p bcs-dist-model`、`bash scripts/ci/tests/public_api_version_regression.sh` 和 `cargo check --workspace --all-targets`。核对模型 0.2.0/Cargo.lock/全部构造者，CTX 标明持久 v2/旧 v1 拒读；不凭 serde 成功代表合法业务。真实 public API diff 在 D05 最终 gate 对整个提交切片验证。
 - [ ] **5. 审查并提交：** `git diff --check`，仅 stage 本任务文件；提交标题 `feat(bcs): define group call input and public result models`。
 
 ## D02：GroupInvocationRepo、共享能力校验与公开 Gateway 群范围
@@ -130,7 +157,7 @@ PreparedRequest 另保存 `PreparationContextBasis { observed_generation: u64, i
 
 - Create：`apps/bcs/crates/service-api/bcs-service-api/src/port/repo/distributed/group_invocation.rs`、`apps/bcs/crates/service-api/bcs-service-api/src/application/dist_group_card.rs`。
 - Create：`apps/bcs/crates/service-api/bcs-service-api/src/core/group_workflow_policy.rs`；C01 创建共享实现 crate。
-- Modify：`apps/bcs/crates/service-api/bcs-service-api/Cargo.toml`、`apps/bcs/Cargo.lock`；Create：本目录 `api-propagation.md`（执行时，记录 consumers/implementations/migration）。
+- Modify：`apps/bcs/crates/service-api/bcs-service-api/Cargo.toml`、`apps/bcs/Cargo.lock`、D01 创建的本目录 `api-propagation.md`（补 Service API 的 consumers/implementations/migration）。
 - Modify：`apps/bcs/crates/service-api/bcs-service-api/src/application/{dist_gateway,mod}.rs`、`apps/bcs/crates/service-api/bcs-service-api/src/core/dist_gateway.rs`、`apps/bcs/crates/service-api/bcs-service-api/src/port/{dist_agent.rs,repo/distributed/mod.rs}`。
 - Modify：`apps/bcs/crates/contracts/bcs-dist-model/src/group_call/admission.rs`、`apps/bcs/crates/service-api/bcs-service-api/src/port/repo/distributed/{result,task_feed}.rs`。
 - Test：`apps/bcs/crates/service-api/bcs-service-api/tests/group_call_contracts.rs`。
@@ -171,9 +198,11 @@ pub struct RequestKey {
 }
 ```
 
-repo 精确方法：`lookup_request`、`reserve_request`、`read_context_basis`、`refresh_preparation`、`claim_round`、`record_inbox_durable`、`activate_round`、`read_round_admission`、`scan_recovery`、`confirm_start_consumed`、`abandon_round`、`confirm_start_absent`、`confirm_start_discarded`、`release_round`、`quarantine_round`、`confirm_stopped`、`reject_unclaimed`、`reserve_cancel`。每个写入校验适用的 preparation revision/request/round identity 和 expected generation；返回操作专用枚举。lookup 保存 winner 的完整 basis，不在 repo 内按当前 Card 重算。
+repo 精确方法：`lookup_request`、`reserve_request`、`read_context_basis`、`refresh_preparation`、`claim_round`、`record_inbox_durable`、`activate_round`、`read_round_admission`、`scan_recovery`、`confirm_start_consumed`、`abandon_round`、`confirm_start_absent`、`confirm_start_discarded`、`release_round`、`quarantine_round`、`confirm_stopped`、`reject_unclaimed`、`lookup_cancel`、`reserve_cancel`。每个写入校验适用的 preparation revision/request/round identity 和 expected generation；返回操作专用枚举。lookup 保存 winner 的完整 basis，不在 repo 内按当前 Card 重算。
 
-`read_context_basis(scope, group, sid)` 返回同一控制 cut 的 PreparationContextBasis，真正不存在返回 None，不可访问/读失败分别按安全错误返回。context 控制记录保存 initial_goal 和最近已释放成功轮的 PreviousSuccess；成功 release 与更新该指针/清空占用同一原子操作，失败/取消不覆盖最近成功。新 context 的首次 claim 从首个准备登记初始依据。准备或刷新前保护所引用背景的 durable pin，确认刷新成功后才按证明释放废弃准备的 pin，不允许先写引用再补 pin。
+`read_context_basis(scope, group, sid)` 返回同一控制 cut 的 PreparationContextBasis；底层真实缺失可返回 None，但 application 对 ClientSuppliedExisting 的 None 必须返回 ContextNotFound，与跨 scope/group/source 同一对外错误。读失败不得当成 None。仅 GeneratedForRequest 且原 raw 省略 contextId、持久预留证明 Sid 由服务端为同请求分配时允许初始化；显式给出“首轮 Sid”也不能进入新建分支。canonical SessionSpec 与 context 控制记录均须核对，后续 claim 再验证来源模式，缺行不能 fallback 创建。context 控制记录保存 initial_goal 和最近已释放成功轮的 PreviousSuccess；成功 release 与更新该指针/清空占用同一原子操作，失败/取消不覆盖最近成功。准备或刷新前保护所引用背景的 durable pin，确认刷新成功后才按证明释放废弃准备的 pin，不允许先写引用再补 pin。
+
+冻结 `ClaimRoundOutcome::{Acquired, AlreadyOwned, Busy, Unavailable, Lost}`：Acquired/AlreadyOwned 均携带精确原 RequestRecord/RoundRef，前者新取得，后者是同 request/preparation 身份已经 claim 过的幂等恢复。provider 先解析该身份是否已 claim，再判断陈旧 expected generation；同请求响应丢失不能误报 Busy。原轮已 Accepted/Released 时 AlreadyOwned 仍返回原记录并交恢复分支，不新占用、不重写 Input、不把旧身份当当前 owner。SlotHeld 仅为记录状态，禁止另建同名结果变体；StoreError::OutcomeUnknown 与上述确定结果分开。
 
 `refresh_preparation` 输入 RequestKey、expected preparation revision、新 PreparationContextBasis 及派生 GroupRoundInput；provider 原子要求 Preparing/从未 claim、context 仍空闲且 generation/最近成功关联匹配。结果为 Refreshed（新 revision 和记录）、AlreadyClaimed（转恢复）、Busy、Lost 或 OutcomeUnknown；不能先更新 generation 再单独改背景。`claim_round` 使用准备 revision、basis 中 generation 和完整背景关联一起 CAS。Lost 重读发现其他请求占用，和直接 Busy 一样调用 reject_unclaimed；发现空闲但 generation/背景依据已变则重读并条件刷新，即使 release 仅更新成功指针而未改变 generation 数值也必须刷新。刷新/claim 共用至多 3 次预算。背景不可用也先撤销准备再返回确定拒绝；存储未知不伪装为未受理。
 
@@ -190,6 +219,7 @@ repo 精确方法：`lookup_request`、`reserve_request`、`read_context_basis`�
 pub struct EffectiveResponseConfig {
     pub return_immediately: bool,
     pub history_length: u32,
+    pub max_response_bytes: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -199,21 +229,23 @@ pub struct GroupSubmitResult {
 }
 ```
 
-`response` 来自原请求显式字段与已保存 basis 合并后的有效值，不是 basis 中的缺省值本身。首次、重复、并发预留落败和恢复受理都返回原记录的同一有效配置；adapter 不访问 repo，也不按当前配置补默认值。配置不可恢复时返回依赖错误，不能随意选择等待行为。业务输入中的选定输出模式/includeProgress 仍由 D01 持久保存，此返回类型不改变它们的执行语义。
+`response` 来自原请求显式字段与已保存 basis 合并后的有效值，不是 basis 中的缺省值本身。history_length 必须在 0～100 内，max_response_bytes 为保存的预算 v1 上限；首次、重复、并发预留落败和恢复受理都返回同一有效配置，adapter 不访问 repo，也不按当前配置补默认值。配置/预算版本不可恢复时返回依赖错误，不能随意选择等待行为或放大预算。业务输入中的选定输出模式/includeProgress 仍由 D01 持久保存，此返回类型不改变它们的执行语义。
 
 查询和观察请求在 `application/dist_gateway.rs` 定义，core/repo 定义各自协议无关的已解析查询，不从 application 反向导入类型：
 
 | application 方法/类型 | 必需字段与可省略字段 | 返回及约束 |
 | --- | --- | --- |
-| `get_task(caller, GetTaskQuery)` | group、tid；history_length: Option<u32> | PublicTaskView；省略使用查询默认量，0 不返回历史，正数取最近 N 条，不删除已保存历史 |
+| `get_task(caller, GetTaskQuery)` | group、tid；history_length: Option<u32> | PublicTaskView；默认 20，0 不返回历史，1～100 取最近 N 条，>100 拒绝；不删除存储历史 |
 | `list_tasks(caller, ListTasks)` | group；context_id、status、page_size、page_token、history_length、status_timestamp_after、include_artifacts 均可省略 | TaskPage 返回 tasks、next、有效 page_size 和分页前 total_size；include_artifacts 默认 false；page_size 缺省 50、范围 1～100 |
 | `subscribe(caller, SubscribeTask)` | group、tid、原有订阅模式 | 对外 SubscribeToTask；恢复首帧时已终态则 UnsupportedOperation，已建立的流允许推进至终态并关闭 |
-| `observe_task(caller, ObserveTask)` | group、tid、history_length: u32 | 供 send/stream 内部使用的 TaskSubscription；首帧为一致 Task@H，已终态则发该快照后关闭，否则从 H follow |
+| `observe_task(caller, ObserveTask)` | group、tid、history_length: u32 | 0～100 且使用原有效值；供 send/stream 内部使用的 TaskSubscription，首帧为一致 Task@H，已终态则发快照后关闭，否则从 H follow |
 | `cancel(caller, CancelTask)` | group、tid、可选 reason；内部稳定 request_id | `Result<CancelTaskResult, GatewayError>`，不再返回 AdmissionReceipt |
 
 `observe_task` 与公开 subscribe 共用 Core restore/follow、授权和 Accepted 检查，但终态入口策略分开；HTTP 不新增观察路由，也不接受客户端传入“允许终态订阅”的开关。观察建立期间任务完成必须返回完整终态快照或随后终态事件，不能报公开订阅错误。TaskSubscription 的 Snapshot/Events 同步迁移为 typed 公共视图/事件，不能仍要求 adapter 解释内部 OutputEvent。
 
 ListTasks 的可选字段分别采用 Sid、TaskStatus、u32、PageToken、u32、TimestampMillis、bool 类型。application 将 history/page 默认值解析为明确值；repo filter 显式表达 group/scope/source/Accepted、context、status 和状态更新时间下界，先筛选再按 `(status_updated_at DESC, tid DESC)` 排序分页。游标绑定主体、群及筛选条件；时间筛选使用状态更新时间，不能用 Artifact 写入时间。历史响应裁剪与 include_artifacts 作为读取投影传到 store；false 时不加载 Artifact 表/对象，true 时批量读取当前页，不能全量拉回再由 adapter 丢弃。新增参数及非法值转换、时间边界、同时间分页在 group_call_contracts 和 D05 suite 固定。
+
+所有公开读取（包括 subscribe/cancel 的 Task）统一形成 D01 ResponseReadBudget，Core/repo 的 get/list/restore 及公开 history/Artifact 加载显式接收它；list 是整页共享 max_response_bytes，而非每 Task 各一份。持久大小/保守编码上界预检必须在加载大正文/对象之前；最终 wire 大小由 adapter 限长编码再次验证。预算不足返回 typed ResponseBudgetExceeded，不静默减 history_length 或拆掉产物；超过历史上限返回 HistoryLengthOutOfRange。新 send 校验在 reserve 前，已受理 send 的响应超限只终止传输并保留 ID；SSE 按帧限长，错误后关闭 reader、不取消任务。
 
 ```rust
 #[derive(Debug, Clone, PartialEq)]
@@ -235,7 +267,7 @@ pub struct CancelTaskResult {
 }
 ```
 
-cancel 的内部 RequestId 由 reserve_cancel 分配，外部请求无需新字段；application 返回 `CancelTaskResult { task: PublicTaskView, cancel_request_id: RequestId }`，不能返回 AdmissionReceipt。新增 typed Busy/ResultExpired/BackgroundUnavailable/ContextNotFound/CapabilityUnsupported/AdmissionAbandoned/AdmissionContentConflict，Card application 合同只读。共享 `GroupWorkflowValidatorCoreService` 由 G01/R01 共同调用，返回 validated workflow/digest/compiler version/capability set；不支持工作流必须在 reserve/claim 前拒绝。
+cancel 的内部 RequestId 由 reserve_cancel 分配，外部请求无需新字段。授权后先 lookup_cancel：存在则恢复原身份/固定内容并返回当前真实 Task，即使已终态也不拒绝或重建意图；尚未终态的部分投递按原身份补齐，终态则直接返回、不新增 Inbox 输入，已存在的迟到输入按关闭轮次规则消费。无意图且终态时重新核实并发 lookup 后才 TaskNotCancelable；无意图且非终态才 reserve_cancel，竞争落败复用 winner。lookup 失败不能视为 None。保留取消意图/去重证据至少覆盖 Task 可查询期；归档实际过期返回 ResultExpired，不伪造 Task。application 返回 CancelTaskResult，不返回 AdmissionReceipt；新增 typed Busy/ResultExpired/BackgroundUnavailable/ContextNotFound/CapabilityUnsupported/AdmissionAbandoned/AdmissionContentConflict/HistoryLengthOutOfRange/ResponseBudgetExceeded。Card application 合同只读；不支持工作流仍在 reserve/claim 前拒绝。
 
 - [ ] **4. 同步迁移全部 Script trait 实现及结构体构造。** 用 `rg -n 'impl DistGateway|SubmitInput|AdmissionReceipt|TaskSubscription|ListTasks|TaskFilter|FinalTaskRecord' crates` 列出消费者，逐一更新，禁止 default 成功实现掩盖缺字段。新增 observe_task 的 recording 实现；ResultStore/TaskFeed filter 与读取投影同步迁移，scope 校验不能只在 adapter get 后临时判断。
 - [ ] **5. GREEN：** `cargo check --workspace --all-targets` 、`cargo test -p bcs-service-api --test group_call_contracts`、`cargo test -p bcs-dist-store --all-targets` 及 `cargo test -p bcs --all-targets`；D02 同时将 `bcs-service-api/Cargo.toml` 从 6.1.0 升到 7.0.0，更新 `apps/bcs/Cargo.lock` 和所有 trait/模型构造者，记录 propagation analysis；提交 `feat(bcs): add scoped group invocation contracts`。
@@ -331,13 +363,13 @@ Closing(decision, boundary, result_digest)
 
 Judge 作为可选扩展：定义 typed `EvaluateJudge` / `JudgeResult` 和 `JudgeAttemptId`，使用 Task/Node/attempt 及固定输入摘要；若本轮不交付 R04，能力集禁止 Judge。绝不通过向 payload 塞未定义 kind 绕过枚举。
 
-- [ ] **4. GREEN：** `cargo test -p bcs-dist-model -p bcs-service-api`。枚举/trait/构造者变更按现有版本策略登记不兼容影响；相关消费者一起重编译，旧持久化值没有迁移证据不能默认可读。将分布式 canonical Sid、Group 请求许可与结果发布协议写入 app ADR，注明兼容路径、代价和采用状态；D0 评审前保留 proposed，不假报 accepted。冻结 `GroupWorkflowValidatorCoreService::validate` 的只读输入和 `ValidatedGroupWorkflow` 输出；C01 负责真实实现，G01/R01 无各自能力白名单。提交 `feat(bcs): freeze group result and capability contracts`。
+- [ ] **4. GREEN：** `cargo test -p bcs-dist-model -p bcs-service-api`。将 D04 的模型/枚举/trait/构造者变更纳入同一发布切片的 bcs-dist-model 0.2.0、Service API 7.0.0 传播记录；消费者一起重编译，旧持久 v1 明确拒读，不默填归属。将分布式 canonical Sid、Group 请求许可与结果发布协议写入 app ADR，注明兼容路径、代价和采用状态；D0 评审前保留 proposed，不假报 accepted。冻结 `GroupWorkflowValidatorCoreService::validate` 的只读输入和 `ValidatedGroupWorkflow` 输出；C01 负责真实实现，G01/R01 无各自能力白名单。提交 `feat(bcs): freeze group result and capability contracts`。
 
 ## D06：Blob 生命周期、checkpoint 压缩与删除边界
 
 **Files**
 
-- Modify：`apps/bcs/crates/service-api/bcs-service-api/src/port/repo/distributed/result.rs`，新增 BlobLifecycleRepoPort 与 BlobStorePort::delete_immutable。
+- Modify：`apps/bcs/crates/service-api/bcs-service-api/src/port/repo/distributed/result.rs`，新增 BlobLifecycleRepoPort、BlobStorePort::delete_immutable 和 get_bounded；生命周期/删除/有界读取的合同 owner 均为 D06，不是 D04。
 - Create：`apps/bcs/crates/service-api/bcs-service-api/tests/group_lifecycle_contracts.rs`、`apps/bcs/crates/test-support/bcs-test-support/src/contract/distributed/group_call/lifecycle.rs`。
 - Modify：`apps/bcs/crates/contracts/bcs-dist-model/src/group_call/{public_task,admission}.rs`，定义 manifest/pin/reference generation 和 checkpoint compaction proof。
 - Modify：`apps/bcs/crates/service-api/bcs-service-api/src/port/repo/distributed/session.rs`，定义 closed round watermark、late event rejection 和 compaction proof。
@@ -345,6 +377,8 @@ Judge 作为可选扩展：定义 typed `EvaluateJudge` / `JudgeResult` 和 `Jud
 - [ ] **1. 写故障测试：** put 后归档前崩溃可发现 pending manifest；归档失败保留 pin；引用移除后 GC 才能 claim；delete 响应丢失按 generation 重试；同 Sid 500 轮后 checkpoint 只保留 active/背景/closed watermark，旧 event/effect 被拒绝。
 - [ ] **2. RED：** `cargo test -p bcs-service-api --test group_lifecycle_contracts`。
 - [ ] **3. 冻结生命周期规则。** manifest 在 put 前写入，pin/引用与 archive 同事务；GC 只能 CAS 精确 generation/digest 且无 live/pending 引用；checkpoint 压缩保留初始目标、成功背景引用、fencing 墓碑和 closed generation，旧 round 的 late Start/Agent/effect 不能复活。受管分布式 context 删除首期禁止，旧入口在副作用前返回 `DISTRIBUTED_CONTEXT_DELETE_UNSUPPORTED`。
+
+BlobStorePort 增加 `get_bounded(reference: &BlobRef, max_bytes: u64) -> Result<BlobReadOutcome, StoreError>`；`BlobReadOutcome` 为 `Found(Vec<u8>) / NotFound / TooLarge`，由 result.rs 定义。实现从 IO 开始限长（可多读至多 1 byte 判定超限），不得先调用无界 get 后检查 Vec 长度。预算先扣已选 history/Artifact 内容，未知对象大小仍按剩余预算读取；TooLarge 转 ResponseBudgetExceeded。测试边界 B-1/B/B+1、错误大小元数据、中文/转义膨胀、多个对象共享预算；保留原 get 供非公开内部消费者，不让公开读路径绕过 get_bounded。若需要低层能力变更，由 D06 登记插件版本与实现传播。
 - [ ] **4. GREEN：** 更新 R25 lifecycle harness、workspace all-targets 和 API 版本传播记录；提交 `feat(bcs): define group blob lifecycle and checkpoint compaction contracts`。
 
 
@@ -381,11 +415,12 @@ pub fn json_text_request(message_id: &str) -> serde_json::Value {
 公共 fault wrapper 支持“第 n 次写入前失败/写入后丢响应”、命名 barrier、控制时间、记录实际 repo/调度调用和 SQL 数量。所有后续任务可引用这些夹具；不能通过预填 expected output 代替调用被测服务。
 
 - [ ] **4. 每条 suite 接受真实 `Arc<dyn GroupInvocationRepoPort>`、SessionStore/Scheduler、InboxProducer、ResultStore 和查询服务，由 provider fixture 装配。** `group_invocation_repo_port_contract_tests` 验证 Lost→Busy 撤销后恢复不执行、generation/背景刷新及旧 revision fencing、并发 claim/abandon、ClosedAbsent 无 checkpoint 结束和原有效返回配置；`inbox_producer_port_contract_tests` 验证封口与 append 互斥及完整副本边界；`inbox_scheduling_port_contract_tests` 跑 settle 前后两种顺序。`result_store_port_contract_tests` 跑内容冲突、完整归档及 Part 属性；`dist_gateway_service_contract_tests` 混入另一群数据后测时间/context/status 过滤、排序分页、page_size/total_size 及 history/includeArtifacts 投影。为观察恢复设置命名 barrier，覆盖终态发生在建立观察前后；记录消费者确实调用对应 port。
+- [ ] **4a. 增补本轮负例。** 显式未知/跨群/跨主体/旧来源 contextId 不 reserve/claim/写 Inbox；同请求二次 claim 返回 AlreadyOwned 且不增加 generation；取消意图受理后丢响应、终态后重试返回原 ID/真实 Task，无意图终态首次取消才拒绝。预算测试覆盖默认/0/100/101、100 个 Task × 100 条历史及 includeArtifacts=true；超过字节预算不先加载全部正文，不返回截断成功；Blob suite 调用真实 get_bounded 验证 IO 读量。
 - [ ] **5. GREEN：** 文件名使用 `conformance_group_call.rs`，入口调用 `bcs_test_support::contract::distributed::group_call::*`；跑 conformance_group_call、distributed_harness、`bash scripts/ci/check-r25-conformance.sh`、`bash scripts/ci/check-public-api.sh` 和 workspace all-targets；提交 `test(bcs): add reusable group invocation contract fixtures`。D0 评审需核对本计划所有方法已有精确类型后，才能开始后续子计划。
 
 ### D0 最终 GREEN 与 R25 文件命名
 
-D02 major 升级已在相应任务列出，不等到合并前补版本。D05/D06 最终 GREEN 同时运行以下命令；gate 依赖缺失/原有失败逐项记录，不修改 gate 或新增豁免：
+D01 模型 0.2.0 和 D02 Service API 7.0.0 升级已在相应任务列出，不等到合并前补版本。D05/D06 最终 GREEN 同时运行以下命令；gate 依赖缺失/原有失败逐项记录，不放宽 gate 或新增豁免；D01 对 gate 的唯一增量是模型覆盖及正确的 0.x 版本检查：
 
 ```bash
 cargo check --workspace --all-targets
@@ -393,10 +428,11 @@ cargo test -p bcs-dist-model -p bcs-service-api -p bcs-dist-store --all-targets
 cargo test -p bcs --all-targets
 cargo test -p bcs-test-support --test distributed_harness --test conformance_group_call
 bash scripts/ci/check-r25-conformance.sh
+bash scripts/ci/tests/public_api_version_regression.sh
 bash scripts/ci/check-public-api.sh
 ```
 
-`PR_BODY_FILE` 在执行期指向包含“影响的 consumer”的 propagation 文本（仓库外临时文件），并核对 crate major 和 Cargo.lock；API 工具不可用不算通过。新增 trait 的精确命名：
+`PR_BODY_FILE` 在执行期指向包含“影响的 consumer”的 propagation 文本（仓库外临时文件），并分别核对 bcs-dist-model 0.2.0、bcs-service-api 7.0.0、Cargo.lock 和持久格式 v2。检查真实 gate 输出确实包含模型，不接受只跑原三个 Service API crate；API 工具不可用不算通过。新增 trait 的精确命名：
 
 | Trait | 集中 harness | 真实入口 |
 | --- | --- | --- |

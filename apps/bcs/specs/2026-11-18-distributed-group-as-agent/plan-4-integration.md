@@ -10,7 +10,7 @@
 
 ---
 
-前置：[Gateway](plan-1-gateway.md) G01～G06、[Runner](plan-2-runner.md) R01～R03、[存储/内核](plan-3-storage-runtime.md) S00～S07 可装配。D0 还必须完成 bcs-service-api 7.0.0 major/version propagation、R25 harness 和公开 API gate。未交付的依赖不以 Noop 代替。Judge 若未完成 R04，集成能力校验明确拒绝含 Judge 群。
+前置：[Gateway](plan-1-gateway.md) G01～G06、[Runner](plan-2-runner.md) R01～R03、[存储/内核](plan-3-storage-runtime.md) S00～S07 可装配。D0 还必须完成 bcs-dist-model 0.2.0、bcs-service-api 7.0.0 的版本/构造者/锁文件传播、持久 v2/旧 v1 拒读测试、R25 harness 和包含模型的公开 API gate。未交付的依赖不以 Noop 代替。Judge 若未完成 R04，集成能力校验明确拒绝含 Judge 群。
 
 ## I01：配置、真实角色装配与后端分流
 
@@ -36,9 +36,12 @@ execution_ms = 1800000
 closing_ms = 60000
 heartbeat_ms = 15000
 recovery_page_size = 64
+history_default_length = 20
 ```
 
 provider identity、namespace、advertised_base_url 和 auth 配置使用已有系统来源；无缺省生产私有 endpoint。后端名必须对应可用插件，不能未知值落回 memory。公共 single-process 参考使用 file-backed provider，重启路径位于显式测试临时目录，不写 repo runtime state。
+
+history_default_length 必须为 0～100，否则启动失败。预算 v1 的 100 条/8 MiB 硬上限由 D01 合同固定，不允许配置绕过；application/Core/store/Blob 与 adapter 注入同一预算版本，持久请求保存实际采用值。模型 0.2.0/持久 v2 的 provider 遇到旧 v1 明确拒绝而非猜 group/source；未交付有界读取的 Blob provider 不得装配公开结果读取。
 
 ```text
 build providers including file Blob adapter + BlobLifecycleRepo -> validate capability/health/schema -> build ports
@@ -95,6 +98,8 @@ async fn two_rounds_keep_one_context_and_two_artifacts() {
 | 省略配置的原请求重试，默认 returnImmediately/historyLength 已变更 | HTTP 仍按 GroupSubmitResult 的原有效值等待及裁剪历史；不读取当前默认值覆盖；显式请求值仍优先于保存的缺省值 |
 | submit 已成功，任务在 observe 建立前或首帧后/follow 前完成 | 阻塞 send 返回完整终态；message:stream 给出终态快照或随后终态事件并关闭；公开终态 subscribe 仍拒绝 |
 | 两 Gateway 同消息和不同消息并发 | 同消息一个逻辑轮次；同 context 不同消息一方 busy 且无新 Task/Input |
+| 首轮省略 contextId / 显式未知、跨群、跨主体、旧来源 contextId | 仅省略时生成 Sid；其余统一 CONTEXT_NOT_FOUND，无 reserve/claim/Task/Input，不替换 Sid；原省略 context 请求恢复仍使用原 Sid |
+| 同请求 claim 成功但响应丢失 | 再次 claim 返回 AlreadyOwned，复用原记录/generation；SlotHeld 是记录状态，已释放原轮不重新占用 |
 | Lost→其他请求占用→Busy，随后释放并运行恢复器 | 被拒准备不会自动开始；同 messageId 新 revision 可重试，旧恢复者不能影响它 |
 | A 以 T0 准备，B 完成 T1 后 A 重新 claim | A 条件刷新为 T1 背景及相应 generation；请求指纹/ID/deadline 不变，刷新竞争不绕过上限 |
 | 归档终态已可见，before_release_round barrier 未放行 | 下一轮明确 Busy；放行并确认持久 release 后，用同 messageId 重试成功 |
@@ -104,10 +109,13 @@ async fn two_rounds_keep_one_context_and_two_artifacts() {
 | 旧删除入口访问新 Session | 明确拒绝且无存储副作用，不存在删除后强制解锁路径 |
 | 同 caller 跨群/其他主体访问和游标 | get/list/subscribe/cancel 均不泄露，过滤在分页前 |
 | Get/List 的历史、时间、context/status 与分页参数 | historyLength=0 无历史且存储不变；statusTimestampAfter 在分页前筛选，同时间按 tid 稳定分页；游标不可换群/筛选条件 |
+| historyLength 默认/0/100/101 与整页预算 | 默认20，101受理/读正文前拒绝；100 Task × 100 history 共用8 MiB，连同Artifact/JSON转义超限明确错误、不静默截断 |
+| 已受理 send 或 SSE 后续帧超预算 | 保留原 Task/执行，响应含安全 ID；后续 SSE 标准错误后关闭 reader，不取消、不截断 JSON |
 | ListTasks 页元数据 | 空页/末页保留有效 pageSize，totalSize 是授权筛选后分页前的总量；hot/archive 同 Tid 不重计，其他主体数据不影响数量 |
 | ListTasks 的 includeArtifacts 缺省/false/true | 缺省及 false 不返回或加载产物；true 批量加载当前页，SQL/对象读取数不出现逐任务 N+1 |
 | 不支持 HumanInput/Judge/Loop | 受理前拒绝，无 Task/占用；部署未交付能力不出 Card |
 | 取消在途节点 | receipt 不是 CANCELED，直到全部停止；重复取消同身份 |
+| 取消意图已受理→响应丢失→Task终态→再次 cancel | 返回同一持久 cancel_request_id 对应的真实 Task，wire 不新增 ID 字段，Inbox/派发次数不增加；无既有意图的终态首次取消才 TaskNotCancelable |
 | cancel/finish 竞争 | 一个终态；旧消息不公开、旧 release 不解锁新轮次 |
 | 公开进度含 thinking/tool/stack | get/list/history/Artifact/SSE 一致过滤 |
 | 多 Part 各带 filename/metadata，Artifact 顶层另有 metadata | 允许公开的属性分别通过归档/get/list/SSE 保留；输入属性改变参与冲突判定，私有属性不泄漏 |
@@ -137,6 +145,8 @@ fault points:
   waiting-license takeover; Start commit succeeded but proof confirmation lost
   Worker commit applied but response lost; stale owner write
   Connector sent but acceptance lost; cancel accepted but not confirmed
+  Gateway cancel intent/admission durable but HTTP response lost -> terminal -> retry same cancel
+  new-context preparation without SessionSpec -> original omitted-context retry; supplied unknown Sid rejected
   archive committed before checkpoint; partial Feed append; snapshot before release
   Inbox Quarantined/ContentConflict -> abandon/discard; activate vs abandon race
   claim Lost generation churn; abandon applied before Drop reschedule or response lost
@@ -167,7 +177,7 @@ fault points:
 - Modify：`apps/bcs/crates/service-api/bcs-service-api/src/port/repo/distributed/README.md` 及各实现 CONTEXT。
 - Modify：旧 Group 草案追加采用范围/结果链接；分布式计划的任务接管导航已在本计划 §2 确定，此处只补实际交付链接，保留旧证据；本目录 validation.md 记录实现/测试/宿主验证边界。
 
-- [ ] **1. 写最大尺寸/持续失败成本测试，另在同一 Sid 连续执行 500 轮并对比 1/100/500 轮 checkpoint 字节、读取行数、提交写量。** 使用 S06 recording provider 统计实际 SQL/插件调用及行数；记录 normal、max-page、129 pending 公平扫描、1000 历史任务、1 MiB 输入、大结果引用、慢 SSE、连续 provider 错误。设置明确的 page/batch/buffer 上限，验证每 token 不读许可证、不写 OB。
+- [ ] **1. 写最大尺寸/持续失败成本测试，另在同一 Sid 连续执行 500 轮并按 S07 的固定上限对比 1/100/500 轮 checkpoint 字节、读取行数、提交写量。** 基线增长仅作诊断，RED 必须是目标成本上限断言失败。使用 S06 recording provider 统计实际 SQL/插件调用及行数/字节；记录 normal、max-page、129 pending 公平扫描、1000 历史任务、1 MiB 输入、大结果引用、慢 SSE、连续 provider 错误。额外覆盖 historyLength 默认20/0/100/101、100 Task × 100 history + includeArtifacts=true、8 MiB ±1 和转义膨胀，确认读取/分配/编码在预算内或在大量物化前拒绝；验证 get_bounded 真实 IO 及每 token 不读许可证、不写 OB。
 - [ ] **2. RED：** `cargo test -p bcs --test dist_group_load_bounds --test dist_group_checkpoint_bounds`；应在 N+1、过量扫描或无限内存时失败。
 - [ ] **3. 完成边界调整后只跑必要回归，再跑整体验证。**
 
@@ -180,11 +190,12 @@ cargo test -p bcs --test dist_group_e2e --test dist_group_e2e_cancel --test dist
 cargo test -p bcs-test-support --test distributed_harness --test conformance_group_call
 cargo check --workspace --all-targets
 bash scripts/ci/check-r25-conformance.sh
+bash scripts/ci/tests/public_api_version_regression.sh
 bash scripts/ci/check-public-api.sh
 bash scripts/ci/arch-check.sh
 ```
 
-另跑现有 `bcs-http`/`bcs-session`/`bcs-collaboration-runtime`/`bcs-a2a-http` 受影响测试，证明旧 API/Runtime 未被错误分流。真实 MySQL 迁移和进程测试按 S04/I03 单独执行，不以本段命令替代。现有 warning、baseline failure、skip 分开记录，禁止修改 hook/gate 使验证表看起来通过。R25 入口名称必须按 trait_snake 规则，公开 API 变化必须在 PR propagation analysis 中声明 7.0.0 major。
+另跑现有 `bcs-http`/`bcs-session`/`bcs-collaboration-runtime`/`bcs-a2a-http` 受影响测试，证明旧 API/Runtime 未被错误分流。真实 MySQL 迁移和进程测试按 S04/I03 单独执行，不以本段命令替代。现有 warning、baseline failure、skip 分开记录，禁止放宽 hook/gate 使验证表看起来通过。R25 入口名称必须按 trait_snake 规则；PR propagation analysis 同时声明模型 0.2.0、Service API 7.0.0、持久 v2/旧格式拒读和外部构造者迁移。确认 public API gate 实际扫描 contracts/bcs-dist-model，不能用旧脚本的三 crate 结果替代。
 
 - [ ] **4. 更新诊断与交付记录。** 诊断至少区分受理未知、pending license、pending scheduling、archive 等待、terminal publication、停止未知、毒会话隔离；按 request/tid/effect/commit 关联，不输出秘密。文档命令只能使用公开依赖和本地端口，运行态留仓库外。
 - [ ] **5. 发布检查点与提交。** 验证记录列 provider/配置、Git SHA、命令、退出码、测试数量和未验证项。默认新入口关闭；通过 D0/组件/I1/I2/真实 provider gate 后才允许部署开关评审，不能由功能测试推断 10 万 TPS、RPO=0 或恢复 SLA。提交 `docs(bcs): record distributed group validation and operation boundaries`。

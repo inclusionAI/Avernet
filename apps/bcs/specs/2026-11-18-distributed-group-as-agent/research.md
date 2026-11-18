@@ -124,4 +124,22 @@
 
 方案边界：保留 Lost 的有界重试而不是每次换 generation 都抛弃请求，但必须条件刷新服务器派生输入；保留消费证明而不是用超时清空 Drop，以写入封口提供真实无输入结束路径。新增 producer 能力由 S02 落地，无法实现实际 append 栅栏的 provider 不得开启该路径。未运行 Cargo、R25/public API、provider 故障注入、跨进程或容量测试；文档检查不替代这些门槛。
 
-本轮实际静态验证：直接检查本目录 8 份文档（含未跟踪文件），56 个相对链接（含 4 个标题锚点）、31 个表格、代码围栏、尾随空白、末尾换行、29 个唯一任务 ID，以及六项修订的跨文档覆盖和两轮测试步骤顺序均通过；`git diff --check` 通过。这些覆盖检查针对文档内容，不是运行时行为测试。spec SHA-256 为 `c1229e5fe1cdf11d8b672fa20854ba5cac7c23915755dc26a3d8fe1edcef7020`，已同步 plan.md 的执行基线。未改动本目录之外的既有工作区修改，未提交。
+此前六项修订的实际静态验证：当时直接检查本目录 8 份文档（含未跟踪文件），56 个相对链接（含 4 个标题锚点）、31 个表格、代码围栏、尾随空白、末尾换行、29 个唯一任务 ID，以及六项修订的跨文档覆盖和两轮测试步骤顺序均通过；`git diff --check` 通过。这些覆盖检查针对文档内容，不是运行时行为测试。当时 spec SHA-256 为 `c1229e5fe1cdf11d8b672fa20854ba5cac7c23915755dc26a3d8fe1edcef7020`，同步了当时 plan.md 的执行基线，完成修订时尚未提交。后续已包含在 cc5d6c483d；本次外部复审修订见 §9，保留上述历史证据。
+
+## 9. 2026-11-18 外部审阅七项修订
+
+用户提供 `2026-11-18-distributed-group-a2a-review.md`，审阅提交为 cc5d6c483d，结论是 4 个 Important、3 个 Minor，D0 不应冻结。本轮先核对意见与当前文档、旧 Group 草案、模型 Cargo.toml 及 API gate，再仅修改本目录文档；未修改 Rust、Cargo.lock、迁移、CI 脚本或运行时，未提交或推送。
+
+| 审阅项 | 核对与本轮处理 | 后续行为验证 |
+| --- | --- | --- |
+| 1. 显式未知 context 可能初始化 | 旧草案要求不合格 context 返回 CONTEXT_NOT_FOUND；spec/D01/D02/G01/S01 明确 ContextOrigin，只有省略 contextId 才能用服务端 Sid 初始化 | 未知/跨群/跨主体/旧来源/首轮自带 Sid 均零预留与 Inbox；省略 context 的原请求仍可恢复 |
+| 2. 终态前取消响应丢失后不能重试 | G03 原顺序确实先判 terminal；改为授权后 lookup_cancel，已有意图返回原 ID/真实 Task，无意图终态首次取消才拒绝 | G03/I02 覆盖受理→丢响应→终态→重试，新增输入/派发为0；完成竞争不改写终态 |
+| 3. 模型版本漏项 | 当前 bcs-dist-model=0.1.0，API gate 未扫描它；D01 明确 breaking 0.2.0、持久 v2/旧 v1 拒读，新增模型扫描及 0.x 版本回归门槛 | D01/D05/I04 验证未升版本/只升patch失败，0.2.0及完整消费者/锁文件传播通过；不以 Service API 7.0.0 替代 |
+| 4. history 无服务端上限 | spec/D01/D02 冻结默认20、上限100、预算v1每响应/每SSE帧8 MiB；保存有效值，超限拒绝不静默截断 | G03/G04/S04/I04 覆盖0/max/max+1、100×100+Artifact、转义膨胀、限长Blob IO及编码；已受理不因响应超限取消 |
+| 5. claim 返回与状态混用 | 统一 Acquired/AlreadyOwned/Busy/Unavailable/Lost；SlotHeld 只保留为请求状态 | 写成功响应丢失后重复 claim 恢复同一代，原轮释放后也不新占用 |
+| 6. S07 RED 断言反向 | 未压缩增长改为独立基线测量；RED 直接断言固定8节点/2attempt fixture 在1/100/500轮下的字节/读写上限 | 同一成本测试未压缩时断言失败，压缩后原样通过，不把环境/编译错误当RED |
+| 7. Blob owner 误写 | spec 两处 D04 改为 D06；D06 同时拥有生命周期、删除及为响应预算新增的 get_bounded 合同 | D0 交接核对 owner/版本传播，S04实际provider测试后才可宣称能力存在 |
+
+源码依据：[模型版本](../../crates/contracts/bcs-dist-model/Cargo.toml)、[模型格式边界](../../crates/contracts/bcs-dist-model/CONTEXT.md)、[当前 API/version gate](../../scripts/ci/check-public-api.sh)；context 行为沿用 [旧 Group 草案](../2026-11-05-group-as-agent/spec.md)。本轮没有实际升级模型或运行改造后的 gate；表中的测试和新增脚本仍是实施计划，不是完成证据。原始本地审阅文件未复制进公共仓库。
+
+本轮实际验证：8 份文档的 61 个相对链接（含 5 个标题锚点）、32 个表格、代码围栏、尾随空白、末尾换行、29 个唯一任务 ID 均通过；七项意见的跨文档覆盖、取消伪代码顺序及旧规则移除检查通过，`git diff --check` 通过。spec SHA-256 为 `3b3dd38301c4c546029e75708bb25c845fda2c25786e703061b901bd4922ea71`，已同步 plan.md。以上仅是静态文档检查，未运行 Cargo、API/R25 gate、Blob/provider、跨进程或容量测试；工作区只修改本目录 8 份 Markdown，未提交或推送。

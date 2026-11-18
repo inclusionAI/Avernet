@@ -12,8 +12,8 @@
 
 ## 1. 执行基线与边界
 
-- 输入是本轮审阅修订后的 [spec.md](spec.md)，SHA-256：`c1229e5fe1cdf11d8b672fa20854ba5cac7c23915755dc26a3d8fe1edcef7020`。执行前复核；文件继续变更时重做差异检查，不覆盖用户修改。
-- 当前代码 HEAD：`816e1f849e`。截至计划编写，工作区 spec、research 和 plans 均以当前工作区内容为准；spec 本轮会随审阅一起修订，计划不覆盖用户未相关的 `apps/bcs/specs/2026-11-15-distributed-contracts/tasks.md`。
+- 输入是本轮审阅修订后的 [spec.md](spec.md)，SHA-256：`3b3dd38301c4c546029e75708bb25c845fda2c25786e703061b901bd4922ea71`。执行前复核；文件继续变更时重做差异检查，不覆盖用户修改。
+- 原实现代码依据：`816e1f849e`；本轮外部审阅提交为 `cc5d6c483d`（其新增内容仅为文档）。spec、research 和 plans 以当前工作区修订为准，计划不覆盖无关工作区修改；本轮未执行实现、提交或推送。
 - [research.md §5](research.md#5-2026-11-18-评审修订) 的两项修订是必须交付的行为：按保存的规范化依据重试；Accepted 许可的可靠重调度、Start 消费屏障及消费证明。
 - 本次只写计划，未实现代码、创建 crate 或执行计划中的测试。文中 Create 均表示未来文件，不能拿未创建测试命令的结果作为已验证证据。
 - 各任务先读根/BCS AGENTS、CLAUDE、开发规则和受影响 CONTEXT。使用已有隔离工作区；执行者遵守 using-git-worktrees，不擅自覆盖其他开发者变更。禁止全局 cargo fmt。
@@ -124,16 +124,16 @@ bash scripts/ci/check-conformance-entries.sh
 | Spec 章节/场景 | 计划任务 |
 | --- | --- |
 | §1～§3 首期范围、角色分层 | D01、D03、G04、R01、I01 |
-| §4 新 canonical Sid、固定 workflow、多轮背景 | D01、C01、G01、G03、R01、I02 |
-| §5 Card、全部路由、媒体/扩展、typed 查询、有效返回配置、等待及完成竞态、错误 | D02、G01～G06、I02 |
-| §6 增量 Rust 合同及迁移 | D01～D06 |
+| §4 新 canonical Sid、显式 context 不新建、固定 workflow、多轮背景 | D01/D02、C01、G01～G03、R01、I02 |
+| §5 Card、全部路由、媒体/扩展、typed 查询、有效返回配置、history/字节预算、等待及完成竞态、错误 | D01/D02/D06、G01～G06、S04、I02/I04 |
+| §6 增量 Rust 合同、模型0.2.0/API7.0.0/持久v2迁移及模型gate | D01～D06 |
 | §7.1 保存规范化版本/默认值、竞态获胜依据 | D01、G01～G02、S01、I02 |
 | §7.2 prepare/claim/Inbox/Accepted/abandon | D02、G02、S01、I03 |
 | §7.3 未许可消费屏障、reschedule/settle 两种交错、Start 证明 | D03、S02～S03、I03 |
 | §7.4～§7.5 Busy 统一拒绝、Lost 背景刷新、abandon 封口及无输入/丢弃证明 | D01～D03、G02、S01～S03/S06、I03 |
 | §8 纯归约、typed Start/Finish、稳定提交/效果、归档后发布和释放 | D01/D04、R01～R03、S04～S05、I03 |
 | §9 同一公开投影、SSE/Gap、禁止内部信息 | D01、G03、G06、R03、S04 |
-| §10 取消/超时/未知停止/删除边界（首期删除禁止） | D02/D06、G03、R03、S05～S06、I02～I03 |
+| §10 取消意图优先恢复、终态重试、超时/未知停止/删除边界（首期删除禁止） | D02/D06、G03、R03、S01/S05～S06、I02～I03 |
 | §11 公共 provider、Blob 生命周期、checkpoint 压缩、访问成本、背压、分流 | D06、S01～S07、I01、I03～I04 |
 | §12 并行与集成门槛 | 本文 §2、I01～I04 |
 | §13 全部验收场景 | I02/I03 场景矩阵，并由各子任务局部覆盖 |
@@ -175,3 +175,9 @@ bash scripts/ci/check-conformance-entries.sh
 6. S05/I02/I03 用 before_release_round barrier 分别验证终态可见、Busy 和持久释放后重试，不把 wait_terminal 当作解锁条件。
 
 本轮证据与未验证边界追加到 [research.md §8](research.md#8-2026-11-18-完整复审六项修订)，执行基线 hash 同步更新；D0 仍待复审，不表示新增 Rust API 或 provider 能力已存在。
+
+### 外部审阅七项修订（审阅基线 cc5d6c483d）
+
+按用户提供的审阅文件逐项核实并修订：显式 contextId 只复用已有 canonical session；取消重试先查原意图、终态后仍幂等恢复；模型采用 0.2.0 并纳入 API/version gate；history 默认20/上限100，整响应/单SSE帧共享8 MiB；claim 明确 Acquired/AlreadyOwned 与 SlotHeld 状态的区别；S07 将增长基线与真正的 RED 上限断言分开；Blob 生命周期与 capability owner 统一为 D06。
+
+任务仍为 29 项，新增 gate/边界/成本用例归入既有任务，不创建实施占位 crate。细节和实际检查记录见 [research.md §9](research.md#9-2026-11-18-外部审阅七项修订)。本轮只改文档，D0 仍未冻结；模型版本、gate 脚本、Blob 有界读取及运行时测试全部留待授权实施。

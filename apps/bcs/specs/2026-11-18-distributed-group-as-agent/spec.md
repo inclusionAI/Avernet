@@ -121,6 +121,8 @@ Gateway 是 BCS 分布式角色，与 `apps/gateway` 无依赖。首期可同进
 
 仅可路由不代表可授权。查询、列表、续聊、订阅、取消、重复请求读取均校验 `(tenant, principal, group_id, source)`。不可访问和不存在资源使用同一错误。
 
+对未命中请求预留的新请求，只有客户端省略 contextId 才允许由服务端生成 Sid 并建立新 context。客户端携带 contextId 时，必须命中同一 `(tenant, principal, group_id, source=group_a2a)` 的已有 canonical SessionSpec 与 context 控制记录；未知、跨群、跨主体、旧运行时来源统一返回 404 / CONTEXT_NOT_FOUND，不创建预留/Task/Inbox，不改用另一个 Sid，也不以客户端给定 Sid 创建会话。空或格式非法的 ID 按基础格式错误拒绝。原请求命中时先核对已保存指纹：原本省略 contextId 的重试恢复服务端保存的 Sid，即使初次准备尚未建好 Session；不得将这条恢复规则扩展为接受任意客户端 Sid。
+
 ### 4.2 冻结与多轮
 
 首轮通过 `DistGroupDirectoryPort::resolve` 冻结精确 workflow revision/digest、参与者 binding、limits、公开能力和发布策略。恢复调用 `load_workflow` 校验同一版本，不能用当前群配置替代。
@@ -131,7 +133,7 @@ Gateway 是 BCS 分布式角色，与 `apps/gateway` 无依赖。首期可同进
 
 准备记录将派生背景与读取它的 context generation 绑定为 `PreparationContextBasis`：包含 observed generation、initial_goal 引用及摘要、最近成功 tid/result_ref/digest（可为空）。`claim_round` 同时核实该依据仍对应当前空闲 context；不能只把 expected generation 换成新值，沿用旧背景。未 claim 时可按 §6 条件刷新派生输入；一旦 SlotHeld，整份 GroupRoundInput 固定，恢复不能重选背景。
 
-GroupInvocation 的 context 控制记录保存 initial_goal 与最近已释放成功轮的引用，`read_context_basis` 从同一 cut 读取 generation 和这些关联。成功轮的 release 将最近成功指针与清空占用原子更新，失败/取消释放不覆盖它。新 context 的初始依据来自首个请求，首次 claim 原子登记；背景对象在准备/刷新发布引用前按 Blob 生命周期保护，不能让 retention 删除已被新轮次使用的输入。
+GroupInvocation 的 context 控制记录保存 initial_goal 与最近已释放成功轮的引用，`read_context_basis` 从同一 cut 读取 generation 和这些关联。成功轮的 release 将最近成功指针与清空占用原子更新，失败/取消释放不覆盖它。只有原始请求省略 contextId、且 Sid 与该请求的服务端预留身份相符时，首次 claim 才能登记新 context 的初始依据；显式 contextId 的 None 读取绝不是创建许可。背景对象在准备/刷新发布引用前按 Blob 生命周期保护，不能让 retention 删除已被新轮次使用的输入。
 
 工作流必须明确指定最终输出节点及文本/JSON 输出模式；不得按节点遍历顺序猜测。D0 定义共享纯 `GroupWorkflowValidatorCoreService::validate` 合同，由 `bcs-dist-workflow-policy` 的同一实现为 Card/新请求准入和 Runner compile 计算能力，输入是冻结定义、binding 与部署执行能力集，输出是版本化 `ValidatedGroupWorkflow`（digest、能力集、最终节点和确定的编译信息）或 typed 拒绝。Gateway 与 Runner 均不得另写节点白名单；Runner 校验结果中的 workflow digest/compiler version 必须匹配。该实现是 G01 与 R01 的共同前置，不在 Gateway 和 Runner 两条线重复开发。首期最低执行子集为 BotTask 节点构成的无环图，覆盖串行、分支扇出/汇合、超时和有界重试；由冻结定义给出可达路径和最终节点。GroupChat、ToolAction、SubStateMachine、Loop 和静态 HumanInput 不随“StateMachine”名称自动开放，未完成的种类在受理前拒绝。
 
@@ -167,6 +169,8 @@ Card 读取由独立的群发布 application 方法提供，不能调用“创�
 | --- | --- | --- |
 | 请求 JSON 大小 | 1 MiB | Gateway 在受理前限制；不等同于 checkpoint 大小 |
 | returnImmediately | false | HTTP 等待行为；任务独立执行 |
+| historyLength | 默认 20，每 Task 硬上限 100 | send/get/list/内部观察统一校验；0 不返回历史，超限拒绝 |
+| 公开响应读取预算 v1 | 8 MiB 未压缩 UTF-8 JSON | 每次完整响应/每个 SSE 帧的总预算，含 history、Artifact 和封装开销 |
 | 单次同步等待上限 | 60 秒 | 到期 504 / SEND_WAIT_TIMEOUT；可确定时带 taskId/contextId |
 | 执行期限 | 30 分钟 | 首次受理保存绝对 deadline，节点期限取更小值 |
 | 取消/失败收尾上限 | 60 秒 | 超时仍未知则 FAILED + context 隔离 |
@@ -177,6 +181,12 @@ Card 读取由独立的群发布 application 方法提供，不能调用“创�
 这些数值是本草案的默认提议，需配置、边界测试及部署确认；HTTP 等待、业务执行和收尾三种期限独立，接管不重置任何一种业务期限。
 
 historyLength 只限制响应历史，不决定是否记录进度；ListTasks 沿用旧草案标准参数并批量读取当前页产物。returnImmediately 对 stream 不起等待作用；HTTP/SSE 断开不发业务取消。
+
+**读取预算规则：** D0 冻结预算 v1 的 history 上限 100 和响应上限 8,388,608 bytes，不允许通过裸 u32 或不受限配置绕过。默认 historyLength=20，可在 0～100 内调整；首次 send 保存解析后的有效值、预算版本及上限到请求记录/NormalizationBasis，原请求重试仍用保存值，不按当前默认值重算。Get/List 采用本次查询的默认量；公开 subscribe/cancel 无历史参数时也使用已验证默认量。新请求或查询的 historyLength<0、>100 或数值溢出返回 400 / HISTORY_LENGTH_OUT_OF_RANGE，不截到 100；新 send 在 reserve/claim 前拒绝。预算版本变化须重新评审兼容性；无法兑现旧预算的实现明确报依赖错误，不能静默改原返回配置或重执行。
+
+8 MiB 是整页/完整 Task 的预算，不是每条历史或每个 Artifact 的额度；ListTasks 最大组合是 100 个 Task × 100 条历史，但仍共享一份字节预算。Core/repo 查询显式携带已解析 ResponseReadBudget，先以持久大小/保守编码上界及有界元数据页判断，再批量读取正文/对象；Blob 读取必须可限长，不能先全量加载再在 adapter 检查。adapter 最后用限长编码器核验实际 UTF-8 wire 大小（含 JSON 转义/结构），超过预算返回 400 / RESPONSE_BUDGET_EXCEEDED，不返回被截断的成功 Task/列表/Artifact。调用方可降低 historyLength/pageSize 或关闭 includeArtifacts；单个最终产物集自身超过预算则在完成发布校验时失败收尾，公开固定原因 PUBLIC_RESULT_TOO_LARGE，不生成不可读取的成功结果。
+
+send 已受理后才发现响应超限时，错误携带可确定的 taskId/contextId，不能声称未受理或取消后台任务。SSE 首帧在发头前检查；后续单帧超限发送标准错误并关闭 reader，不截断 JSON、不改变任务状态。SSE 总持续时间不受 8 MiB 总量限制，但每帧、待发送缓冲和解码中的内容都须有界；普通更新不反复加载整份 history。
 
 ListTasks 的 application/Core/repo 返回当前页、next token、实际采用的 page_size 和分页前 total_size。total_size 按相同 scope/group/source/Accepted 及 context/status/时间条件计数，热视图与归档中的同一 Tid 只算一次；不是当前页长度。单次查询的页与总量来自同一逻辑索引 cut，后续分页请求允许看到更新后的总量。HTTP pageSize 缺省 50、范围 1～100；页未填满时 page_size 仍是解析后的请求上限。adapter 只编码应用返回值，以空字符串编码无 next token，对 SDK int32 字段做范围检查，溢出明确报错而非截断或伪造总数。store 用聚合/索引统计，不全量加载 Task/Artifact 来计数。
 
@@ -191,13 +201,15 @@ includeProgress 的规范及 Schema 在公共扩展目录发布后才能在 Card
 | context 已有受理、启动、执行或收尾义务 | 409 / CONTEXT_BUSY；未创建新 Task |
 | context 停止未知、已隔离 | 400 / CONTEXT_UNAVAILABLE |
 | 上轮背景已清理，无法满足续聊输入合同 | 400 / CONTEXT_BACKGROUND_UNAVAILABLE |
-| context 不可访问、跨群、非本入口来源 | 404 / CONTEXT_NOT_FOUND |
+| 显式 contextId 不存在、不可访问、跨群或非本入口来源 | 404 / CONTEXT_NOT_FOUND；不得创建或替换 context |
 | Task 不可访问或跨群 | 标准 TaskNotFoundError |
 | 同 messageId 改变完整语义请求 | 400 / MESSAGE_ID_CONFLICT |
 | 相同请求的原结果已清理 | 404 / MESSAGE_RESULT_EXPIRED，不重执行 |
 | 工作流超出本部署已发布执行子集 | 400 / GROUP_CAPABILITY_UNSUPPORTED，未受理 |
 | 向现有 Task 追加新输入 | 标准 UnsupportedOperationError |
-| 终态新建 subscribe / 取消 | 分别 UnsupportedOperationError / TaskNotCancelableError |
+| 终态新建 subscribe / 从未有取消意图的首次取消 | 分别 UnsupportedOperationError / TaskNotCancelableError |
+| 已有取消意图的重试，Task 已终态 | 复用原 cancel_request_id，返回当前真实 Task；结果已清理则返回过期，不重发取消 |
+| historyLength 超过 100 / 公开响应超过 8 MiB | 分别 400 / HISTORY_LENGTH_OUT_OF_RANGE、400 / RESPONSE_BUDGET_EXCEEDED；不静默截断 |
 | 已使用扩展字段但未激活 | 400 / CALL_METADATA_NOT_ACTIVATED，未受理 |
 | 受理写入结果未知 | 503 / ADMISSION_OUTCOME_UNKNOWN；已知 ID 可提供，不声称未执行 |
 
@@ -230,9 +242,9 @@ includeProgress 的规范及 Schema 在公共扩展目录发布后才能在 Card
 推荐的职责方法语义：
 
 - `reserve_request`：以 `(scope, group, messageId)` 唯一预留完整指纹、规范化版本及所用默认值、冻结配置引用与稳定 sid/tid；返回新预留、已有预留、冲突或已清理。并发落败者使用获胜记录的规范化依据重新比较，不按自己读取的当前配置判定冲突。
-- `read_context_basis`：按已核实 scope/group/source/sid 读取同一 context 控制 cut 的 generation、initial_goal 和最近成功引用；真正的新 context 不存在时由首个请求建立初始依据，不能把不可访问当成不存在。
+- `read_context_basis`：按已核实 scope/group/source/sid 读取同一 context 控制 cut 的 generation、initial_goal 和最近成功引用。客户端显式 contextId 的 None 结果必须映射 CONTEXT_NOT_FOUND；仅原请求省略 contextId 且持久记录证明 Sid 为该请求服务端生成时，才能转入新建初始化。读取失败不当作 None，不可访问不泄露其存在性。
 - `refresh_preparation`：仅在请求仍为未 claim 的 Preparing、request revision 匹配且 context 仍为观察到的空闲 generation 时，原子替换 PreparationContextBasis 及派生背景并推进 request revision；保持 raw 请求、指纹/basis、sid/tid、execution_id 和原绝对 deadline 不变。已 claim/写入结果未知时不刷新，先解析原状态。
-- `claim_round`：用预留身份、request revision、PreparationContextBasis 的 expected context generation 原子校验来源/空闲/隔离及背景关联并占用一轮；返回 Acquired、Busy、Unavailable 或 Lost。不能拆成先 get 再 set，也不能接受只有新 generation、背景仍旧的准备记录。
+- `claim_round`：用预留身份、request revision、PreparationContextBasis 的 expected context generation 原子校验来源/空闲/隔离及背景关联并占用一轮；返回 Acquired、AlreadyOwned、Busy、Unavailable 或 Lost。Acquired 新取得一轮；AlreadyOwned 表示精确 request/preparation 身份此前已成功 claim，返回其原 RoundRef/冻结记录（包括已 Accepted/释放的记录），不分配新 generation。它不授予旧写者当前执行权，也不等于“此刻仍占用”。SlotHeld 只是记录状态，不是返回变体。显式 contextId 的请求只能使用已有 context，不能因 CAS 看到缺行而初始化；不能拆成先 get 再 set，也不能接受只有新 generation、背景仍旧的准备记录。
 - `reject_unclaimed`：按精确 preparation revision 原子记录拒绝、撤销该准备的 claim/recovery 资格，并解除当前请求键对该准备的绑定，允许后续重试创建新准备。返回 Rejected/AlreadyRejected、AlreadyClaimed、Lost 或 OutcomeUnknown；前两者必须证明上述逻辑清理已完成，非关键正文清理可稍后补做。同 messageId 的后续准备使用不可复用的新 revision，旧恢复者不能经删除重建绕过检查。拒绝后的维护只补清理，不能继续受理。
 - `activate_round`：确认与同一预留匹配的 Inbox 受理、初始 Task/spec 已可靠存在，原子保存 Worker 可验证的受理许可及待调度义务，再按 §7.3 可靠重新调度。重复调用恢复原义务，不以此前 Inbox 的 active/wake 代替许可发布后的激活。
 - `read_round_admission`：返回 Pending、Accepted 或 Abandoned（带 DiscardStartProof）；Worker 只在 Accepted 下执行 Start，未知时保留屏障。
@@ -247,9 +259,13 @@ includeProgress 的规范及 Schema 在公共扩展目录发布后才能在 Card
 
 公开接口不要求客户端提供额外的取消 request_id。Gateway 在应用层按 `(scope, group, tid)` 为首个取消意图持久分配稳定身份，重复取消复用它；内部 CancelTask.request_id 不得在每次 HTTP 重试时随机重建。application::cancel 显式迁移为 `Result<CancelTaskResult, GatewayError>`；task 是同群范围下恢复的当前真实视图，cancel_request_id 仅用于内部追踪，不新加标准 wire 字段。adapter 不能把 receipt 拼成 Task 或直接宣告 CANCELED。
 
+取消顺序固定为“当前授权/同群归属 → lookup_cancel → 恢复已有意图或检查是否能创建新意图”。存在原意图时，即使 Task 已是 CANCELED/FAILED/COMPLETED，也返回同一 cancel_request_id 和当前真实 Task，不更改冻结终态、不再追加 cancel 输入。尚未终态的部分受理按原身份补齐 Inbox；已终态时直接返回真实视图，已存在的迟到 Inbox 输入按关闭轮次规则消费，不创建新控制动作。只有终态且确认从未保存取消意图时才返回 TaskNotCancelableError；返回该错误前重新核实并发创建的原意图。lookup 失败不是“无意图”。重复请求的 reason 不覆盖第一次保存的控制内容；归档实际过期则返回 ResultExpired，仍不重建意图或伪造 Task。
+
 Group scope 校验不能仅在 HTTP adapter 中补一次 get。Core/repo 的 get/list/follow/cancel 也要携带已核实群范围，游标绑定同一范围，避免校验与使用之间被替换；GroupId 应是 Task/归档的可检索归属事实。
 
 D0 还须给出 schema/version、序列化例子、外部构造者迁移、持久化格式兼容和对应 conformance suite。当前 bcs-service-api=6.1.0，D02 的破坏性变更按 major 升至 7.0.0（实施基线变化时使用其下一 major），更新锁文件与所有消费者构造器/trait 实现，记录 propagation analysis。D0 GREEN 至少执行 workspace all-targets check，以及 model/service-api/dist-store/bcs 的相关测试；R25 harness 必须命名为 `<trait_snake>_contract_tests`，真实实现提供 `tests/conformance_*.rs` 入口且调用集中 harness，public API/版本 gate 不得跳过。当前分布式模型尚未部署不能被用于推断所有实现方都可以无通知重编译；不得修改历史迁移。
+
+本计划对既有 SessionSpec/TaskSnapshot/FinalTaskRecord 的必需归属字段及公开结构变更按不兼容模型发布处理：D01 将 bcs-dist-model 从 0.1.0 升至 0.2.0，D01～D06 属于同一发布切片；实施基线变化时重新审定下一不兼容版本。同步 Cargo.lock、workspace/path 及外部消费者约束、所有 struct literals/枚举匹配/trait 构造者及传播记录。crate 版本不代替持久 schema version：受影响记录升至格式 v2；旧 v1 不允许猜测 group/source 或补默认值，采用明确 UnsupportedFormat 拒读，若要恢复已有存量则另有显式迁移及测试后才能启用。API/version gate 必须覆盖 contracts/bcs-dist-model，0.x 不兼容变更至少提升 minor（或进入更高 major），不能只运行当前仅扫描三个 Service API crate 的脚本并宣布 GREEN。
 
 ## 7. 受理、去重与 context 占用
 
@@ -267,7 +283,7 @@ D0 还须给出 schema/version、序列化例子、外部构造者迁移、持�
 
 1. 解析可信主体和路径群，检查当前访问权限及传输安全限制，完成 JSON/标识/字段结构等基础格式校验。此时不按当前 Card 校验可变的群能力、输出模式或扩展支持；非法请求不创建任务或占用。
 2. 按 `(scope, group, messageId)` 查请求预留并核实来源归属：命中时按已保存的规范化版本、默认值和冻结配置核对完整指纹；同指纹先恢复/返回原任务，不同指纹拒绝，已清理则返回过期。此路径不重新协商输出模式；重复请求优先于当前能力、背景可用性及 busy 判断，但不绕过当前权限检查。
-3. 仅对未命中的新请求校验业务输入、能力、媒体类型、大小和扩展，并协商输出：已有 context 使用其冻结定义，新 context 使用当前群定义。通过后创建可恢复的准备记录，确定 sid/tid，保存不可变原请求或引用、规范化依据及冻结配置引用，并保存绑定 observed generation 的派生背景；这只是内部准备，不代表已受理。派生背景仅能经 §6 的 refresh_preparation 刷新。预留竞争命中已有记录时回到第 2 步。
+3. 仅对未命中的新请求按 contextId 是否省略分支：省略时由服务端生成 Sid 并使用当前群定义；携带时必须读取同 scope/group/source 的已有 canonical SessionSpec 和 context basis，缺失/不匹配返回 CONTEXT_NOT_FOUND，不进入 reserve/claim。再校验业务输入、能力、媒体类型、大小、扩展与 history 预算，并协商输出；已有 context 使用其冻结定义。通过后创建可恢复的准备记录，保存“服务端生成新 context”或“使用显式已有 context”的来源模式、稳定 sid/tid、不可变原请求或引用、规范化依据、有效返回配置和冻结配置引用，以及绑定 observed generation 的派生背景；这只是内部准备，不代表已受理。派生背景仅能经 §6 的 refresh_preparation 刷新。预留竞争命中已有记录时回到第 2 步。
 4. 通过 `claim_round` 原子校验准备 revision/背景 generation 并占用 context，固定本轮派生输入；占用从此覆盖准备、SUBMITTED、启动、执行、完成发布和停止确认。
 5. 调用 InboxProducer 创建所需 spec/初始 Task、追加输入、登记 active 和 wake；确认可靠受理。
 6. `activate_round` 原子保存本轮执行许可和待调度义务，执行 §7.3 的重新调度协议；Worker 必须确认许可才能对新轮次产生业务动作。
@@ -363,7 +379,7 @@ runner_state 只存决策和引用；大正文、累计文本与工具内容不�
 
 节点完成不直接等于公开 Task 完成。Runner 必须确认所有必要分支、重试、在途工作及最终输出；提前终止的流程先停止其余工作。工作停止未知进入收尾/隔离。
 
-成功、失败、取消由同一受保护 checkpoint 状态机裁决。进入固定的成功完成阶段后不再接受新的取消改变该决定；取消若先成为该轮的有效控制决定，则不再形成成功结果。Inbox 收到 cancel 的 receipt 仅证明请求保存，不保证它战胜已冻结的完成决定；查询/返回当前状态，必要时 TaskNotCancelableError。
+成功、失败、取消由同一受保护 checkpoint 状态机裁决。进入固定的成功完成阶段后不再接受新的取消改变该决定；取消若先成为该轮的有效控制决定，则不再形成成功结果。Inbox 收到 cancel 的 receipt 仅证明请求保存，不保证它战胜已冻结的完成决定；已有取消意图的重试返回当前状态，即便最后是 COMPLETED，也不改写它。只有终态且无既有意图的首次取消才返回 TaskNotCancelableError。
 
 不得让 ResultStore、Group 占用和 Worker 各自决定不同终态。完成边界、目标终态、固定结果内容及归档动作在 checkpoint 中持久化，回放只补做原决定。
 
@@ -444,7 +460,7 @@ Group 本期只承诺重新订阅时的当前快照及后续更新，不承诺�
 | 后台核实停止 | 原 FAILED 不改写，满足条件后解除 context 隔离 |
 | 迟到事件 | 已终态或关闭的轮次不再追加公共输出，仅内部追踪 |
 
-Group context 停止未知与分布式“毒会话”隔离是两种原因，分别持久保存，解除其中一种不自动解除另一种。取消重复请求复用原意图；终态再取消按标准拒绝。本期不开放新分布式 context/Session 的受管删除，旧删除入口必须按 source/backend 在任何副作用前拒绝该来源，返回 400 DISTRIBUTED_CONTEXT_DELETE_UNSUPPORTED。不存在生产删除/清 spec/ckpt 解锁接口；结果 retention 仅清理已归档公开结果，不是 Session 删除。后续开放受管删除必须另补停止确认、恢复与墓碑协议，不能借用本计划的 confirm_stopped 直接删存储。
+Group context 停止未知与分布式“毒会话”隔离是两种原因，分别持久保存，解除其中一种不自动解除另一种。取消重试先恢复原意图，终态后仍复用原身份并返回真实 Task；只有终态且无既有意图的首次取消才拒绝。本期不开放新分布式 context/Session 的受管删除，旧删除入口必须按 source/backend 在任何副作用前拒绝该来源，返回 400 DISTRIBUTED_CONTEXT_DELETE_UNSUPPORTED。不存在生产删除/清 spec/ckpt 解锁接口；结果 retention 仅清理已归档公开结果，不是 Session 删除。后续开放受管删除必须另补停止确认、恢复与墓碑协议，不能借用本计划的 confirm_stopped 直接删存储。
 
 确认不存在有效远端任务、已取消或已终态的证据以及恢复失败告警入口须可审计。首期没有人工强制解锁/受管删除 API，未知状态继续保持恢复义务。人工解除只能在明确的管理合同下操作；不得自动以时间过去、无消息、锁 TTL 或 Worker 接管作为停止证据。
 
@@ -465,7 +481,7 @@ Group context 停止未知与分布式“毒会话”隔离是两种原因，分
 
 - 首轮增加请求预留、独占 claim、受理许可及待调度义务写、重新调度和消费证明确认，属于每轮成本；D0/provider 须给出正常、结果未知重试和最大并发时的实际调用/SQL 数量。
 - 新轮次许可读取每次装载/受理边界批量处理，不按 token 查询；缓存必须有版本及失效依据，未知时不能开放执行。
-- ListTasks 的 scope/group 过滤和分页在 store 内完成；一页产物按 task IDs 批量读，不能先全量结果后过滤。
+- ListTasks 的 scope/group 过滤和分页在 store 内完成；一页产物按 task IDs 批量读，不能先全量结果后过滤。history 每 Task 最多 100 条，100 Task 页也共享 8 MiB 总预算；大小索引预检、有界 Blob 读取和限长编码共同防止先大量分配再拒绝。
 - 准备恢复、Accepted 待调度扫描、隔离核实、due scan、结果清理均用有界公平分页和退避；不得反复扫描固定第一页。待调度项按 checkpoint 证明批量确认，持续失败时不得无退避地反复使同一会话 token 失效。
 - Abandoned 的无输入项经封口/无输入证明退出主动恢复索引，仅保留按身份可查的拒绝墓碑；有输入项按封口边界消费确认。计数查询须覆盖热/归档去重后的相同可见集合，分别记录聚合次数及扫描行数，不把常数次 SQL 等同于常数成本。
 - checkpoint 不存增长正文；普通 delta 不写 OB、不逐条重写 task 快照。
@@ -480,14 +496,14 @@ Group context 停止未知与分布式“毒会话”隔离是两种原因，分
 
 ### 11.1 Blob 生命周期与回收 owner
 
-D04 新增 BlobLifecycleRepoPort，配合 BlobStorePort 的 `put_immutable/get/delete_immutable`；blob 身份含不可复用的对象 generation 和 digest。生命周期记录在 put 之前持久创建：Prepared(manifest、owner request/effect、大小/digest、未决 pin) → Stored → Referenced，回收时经版本条件进入 Deleting → Deleted。崩溃后以 manifest 有界扫描发现对象，不依赖对象存储枚举或进程内清单。
+D06 新增 BlobLifecycleRepoPort，配合 BlobStorePort 的 `put_immutable/get/get_bounded/delete_immutable`；get_bounded 对公开读取执行字节上限，不能先 get 完整对象再截断。blob 身份含不可复用的对象 generation 和 digest。生命周期记录在 put 之前持久创建：Prepared(manifest、owner request/effect、大小/digest、未决 pin) → Stored → Referenced，回收时经版本条件进入 Deleting → Deleted。崩溃后以 manifest 有界扫描发现对象，不依赖对象存储枚举或进程内清单。
 
 - `prepare_blob` 先保存 intent 与 owner/pin，再执行 put；put 成功响应丢失或进程重启后仍可由原身份检查/补做。
 - 最终 archive 的引用记录与 Task/Artifact 同事务提交；purge archive 时同事务移除其引用、生成待回收义务。Worker checkpoint 使用的对象先 durable pin，checkpoint 结果未知时保留 pin，解析确认失败才回收；成功后关联 commit proof，压缩后依证明释放。
 - GC 的 `claim_unreferenced` 必须原子核实“无 live/pending pin、无 archive 引用、所有 writer owner 已确定放弃或完成”，再 CAS 进入 Deleting；新引用/put 与该状态互斥。单纯超过 grace period 不能证明无引用；旧 writer 的 put 仍可能在途或结果未知时，必须保留 pin，不能凭 lease/时间失效进入 GC 后再让迟到 put 复活对象。
 - `delete_immutable` 只删除精确 generation/digest，重复删除同对象成功，不影响后来其他 generation；物理删除后标记确认失败可重试。不确定或活跃归属不可强删。
 
-S04 负责生命周期 repo、持久 manifest/pin 表、file-backed 公开参考 Blob provider 和 conformance；S06 负责有界 GC loop，I01 负责真实 wiring/启动/关闭，I03 注入 put 后、归档前、引用提交后和删除响应丢失故障。私有对象存储 provider 由宿主装配并跑同一 suite。新增低层对象删除 capability 如需调整 storage plugin API，D04 同时定义并升版本，不允许服务直接访问 filesystem/对象 SDK 绕过 port。
+S04 负责生命周期 repo、持久 manifest/pin 表、file-backed 公开参考 Blob provider 和 conformance；S06 负责有界 GC loop，I01 负责真实 wiring/启动/关闭，I03 注入 put 后、归档前、引用提交后和删除响应丢失故障。私有对象存储 provider 由宿主装配并跑同一 suite。新增低层对象删除或有界读取 capability 如需调整 storage plugin API，D06 同时定义并升版本，不允许服务直接访问 filesystem/对象 SDK 绕过 port。
 
 ## 12. 并行工作包与集成门槛
 
@@ -513,6 +529,9 @@ D0 后先完成共享纯工作流能力实现 C01，G01/R01 共同依赖它；�
 | 场景 | 必须观察到的结果 |
 | --- | --- |
 | 标准字段首轮 send(true) + get | 可靠受理后返回 Task/context，最终 Artifact 可查 |
+| 首轮 contextId 省略 / 显式未知或不合格 contextId | 仅省略时创建服务端 Sid；显式未知/跨群/跨主体/旧来源统一 CONTEXT_NOT_FOUND，零预留/claim/Task/Input，不换 Sid |
+| historyLength 默认/0/100/101、100 Task × 最大历史 | 默认20，101拒绝；最大页仍共用8 MiB，正文读取/对象IO/编码有界，超限明确错误而非截断成功 |
+| 8 MiB 响应/帧边界，Artifact 和 JSON 转义放大 | 完整 wire 上限生效；已受理 send 保留 ID/后台任务，后续 SSE 错误关闭不取消；单个超限最终产物集失败收尾 |
 | 默认阻塞 send | 终态返回或指定 504；超时不成功返回 working，不取消业务 |
 | stream / subscribe | 首帧一致 Task，公开进度先于最终产物和终态；断线不重发业务 |
 | 多 Artifact、文本与 JSON 类型 | 稳定 ID、顺序和原始 JSON 类型；GetTask/列表/SSE 一致 |
@@ -522,6 +541,7 @@ D0 后先完成共享纯工作流能力实现 C01，G01/R01 共同依赖它；�
 | claim 后 Inbox Quarantined / ContentConflict | 持久 abandon，无许可/业务动作；context 不永久占用，错误不冒充 Task 终态 |
 | Inbox durable 后放弃，与 activate 竞争及响应丢失 | 一个 Accepted 或 Abandoned；旧 Start 凭精确 DiscardStartProof 消费，无 Runner 动作 |
 | claim Lost/持续竞争 | 至多 3 次重读重试，超限明确未知；不写额外 Start、不释放其他 generation |
+| 同 request/preparation 重复 claim，含原响应丢失及轮次已释放 | 返回 AlreadyOwned 与原记录/generation，不误报 Busy、不删除自有准备、不重新占用；SlotHeld 仅为状态 |
 | Lost→其他请求占用→返回 Busy→原占用释放→恢复扫描 | 已拒绝准备不可再次受理；清理响应丢失返回未知，旧 revision 不能影响同 messageId 的新准备 |
 | A 准备 T0 背景，B 完成 T1 后 A Lost 重试 | A claim 前刷新为 T1 的 generation/背景；并发刷新只接受匹配 revision，deadline/请求指纹不变 |
 | abandon 前未创建 spec/Start，封口与在途 append/响应丢失 | ClosedAbsent 不造 checkpoint 且退出主动扫描；ClosedPresent 消费全部副本再退出；确认后旧写者不能新增输入 |
@@ -552,6 +572,7 @@ D0 后先完成共享纯工作流能力实现 C01，G01/R01 共同依赖它；�
 | GetTask 与 SSE 并发完成 | 归档完整，SSE 不跳前序事件；history/Artifact 内容和 ID 一致 |
 | restore/follow 与裁剪竞态 | 单一 cut 或 Gap 后重建；不静默丢事件，不新增持久化 Reset |
 | 取消与完成竞争 | 一个冻结终态决定；receipt 不冒充停止确认 |
+| cancel 已受理→响应丢失→Task 终态→重试 | 当前授权后先读取原意图，返回同 cancel_request_id/真实 Task，不新增取消输入；终态无意图的首次取消才拒绝 |
 | 停止未知、失败隔离后重启 | 原 deadline 不变，context 继续隔离；待核实工作不被清理 |
 | 确认旧工作已停止 | 可解除隔离，原 FAILED 不改为 CANCELED/COMPLETED |
 | 跨群/主体/context 来源访问及列表 | 统一不可访问错误，过滤在分页前，游标不越权 |
@@ -562,6 +583,7 @@ D0 后先完成共享纯工作流能力实现 C01，G01/R01 共同依赖它；�
 | 上轮成功背景已清理 | CONTEXT_BACKGROUND_UNAVAILABLE，不悄悄丢背景执行 |
 | 最大页、长会话、慢 SSE、持续 provider 失败 | 有界读取/内存/恢复工作，退避和公平性有证据 |
 | 新旧运行时同时部署 | 按来源/后端分流，无双重拥有或执行 |
+| 模型 breaking 版本和持久格式门槛 | bcs-dist-model 0.2.0、Service API 7.0.0、锁文件/构造者传播齐全；gate 实际覆盖模型，旧 v1 不猜 group/source |
 
 合同、纯单测、provider conformance、同进程集成、跨进程持久恢复分别记录结果。前四类通过不能代替生产存储、容量和故障域验收。
 
@@ -570,7 +592,7 @@ D0 后先完成共享纯工作流能力实现 C01，G01/R01 共同依赖它；�
 本文为阻塞审阅意见后的修订稿；本轮不得宣称 D0 已冻结。以下门槛仍需复审并在实现阶段验证：
 
 - D0 确认统一拒绝清理、generation/背景绑定及条件刷新、Start 封口与无输入/完整消费证明、分页返回元数据及 Part 属性；连同 abandon、许可竞争、typed Start/Finish/cancel、共享 validator、Blob 生命周期和逐轮压缩一起冻结精确 Rust 形状。
-- R25 真实入口、Service API 7.0.0 major/lockfile propagation、workspace all-targets check 与公开 API gate 全部列为 GREEN，不能只检查三个声明 crate。
+- R25 真实入口、bcs-dist-model 0.2.0 与 Service API 7.0.0 的版本/lockfile/外部构造者传播、持久 v2/旧 v1 拒读、workspace all-targets check 与包含模型的公开 API gate 全部列为 GREEN，不能只检查原来的三个 Service API crate。
 - 采用分布式 canonical Session 的范围须在旧 Group 草案写明；Workbench/旧 SQL Session 投影不自动成为首期依赖。
 - 明确公开结果归档和 Artifact 表的版本与 store 事务实现；物理迁移按方言新增，不修改已提交迁移。
 - 认证绑定、Card security 声明、call-metadata 扩展规范及配置默认值需随对应实现评审；未完成的能力不能发布。
