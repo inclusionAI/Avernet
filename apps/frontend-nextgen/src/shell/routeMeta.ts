@@ -142,6 +142,13 @@ export const routeMetaList: RouteMeta[] = [
     openCore: true,
   },
   {
+    path: '/evolution-factory/task-escort',
+    title: '任务护航',
+    section: 'bot',
+    navKey: 'task-escort',
+    openCore: true,
+  },
+  {
     path: '/evolution-factory',
     title: '智能进化',
     section: 'bot',

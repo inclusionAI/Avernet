@@ -1,7 +1,7 @@
 import { extendCapabilities } from '@/capabilities';
-import { getMergedNavigationItems, navigationItems } from '@/shell/navigation';
+import { getMergedNavigationItems, getNavigationItem, navigationItems } from '@/shell/navigation';
 import { describe, expect, it } from '@jest/globals';
-import { Compass, Sparkles } from 'lucide-react';
+import { Compass, ShieldCheck, Sparkles, Zap } from 'lucide-react';
 
 // getMergedNavigationItems 只承载产品侧栏的 collab / bot 两个分组。
 // 无导航位页面（如任务列表）保留路由，但不进入 navigationItems。
@@ -20,6 +20,44 @@ describe('getMergedNavigationItems（Open Core 默认 capabilities）', () => {
     );
   });
 
+  it('任务护航独立于智能进化，保留各自名称、图标及点击目的地', () => {
+    const items = getMergedNavigationItems();
+    expect(items.filter((item) => item.id === 'task-escort')).toEqual([
+      expect.objectContaining({
+        label: '任务护航',
+        path: '/evolution-factory/task-escort',
+        icon: ShieldCheck,
+        section: 'bot',
+      }),
+    ]);
+    expect(items.filter((item) => item.id === 'evolution-factory')).toEqual([
+      expect.objectContaining({
+        label: '智能进化',
+        path: '/evolution-factory',
+        icon: Zap,
+        section: 'bot',
+      }),
+    ]);
+  });
+
+  it.each(['/evolution-factory/task-escort', '/evolution-factory/task-escort/detail'])(
+    '护航路径 %s 归属独立导航',
+    (path) => {
+      expect(getNavigationItem(path)?.id).toBe('task-escort');
+    },
+  );
+
+  it.each([
+    '/evolution-factory',
+    '/evolution-factory/new',
+    '/evolution-factory/tasks/task-1',
+    '/evolution-factory/domains/owner/domain',
+    '/evolution-factory/bench/runs/run-1',
+    '/evolution-factory/task-escort-other',
+  ])('存量进化路径 %s 仍归属智能进化导航', (path) => {
+    expect(getNavigationItem(path)?.id).toBe('evolution-factory');
+  });
+
   it('双固定分组：flat 序 = collab → bot，组内基线项原序', () => {
     const merged = getMergedNavigationItems();
     expect(merged.filter((item) => item.section === 'collab').map((item) => item.id)).toEqual([
@@ -28,7 +66,7 @@ describe('getMergedNavigationItems（Open Core 默认 capabilities）', () => {
       'collaboration-square',
       'lab',
     ]);
-    expect(merged.filter((item) => item.section === 'bot').map((item) => item.id)).toEqual(['bot-workshop', 'evolution-factory']);
+    expect(merged.filter((item) => item.section === 'bot').map((item) => item.id)).toEqual(['bot-workshop', 'task-escort', 'evolution-factory']);
     expect(merged.some((item) => item.id === 'my-task')).toBe(false);
   });
 
@@ -94,8 +132,17 @@ describe('getMergedNavigationItems（internal overlay 注入语义）', () => {
       'bot-workshop',
       'capability-workshop',
       'market',
+      'task-escort',
       'evolution-factory',
     ]);
     expect(merged.find((item) => item.id === 'capability-workshop')?.label).toBe('能力管理');
+    expect(navigationItems.filter((item) => item.section === 'bot').map((item) => item.id)).toEqual([
+      'bot-workshop',
+      'task-escort',
+      'evolution-factory',
+    ]);
+    expect(getMergedNavigationItems()).toEqual(merged);
+    expect(getNavigationItem('/evolution-factory/task-escort')?.id).toBe('task-escort');
+    expect(getNavigationItem('/evolution-factory/tasks/task-1')?.id).toBe('evolution-factory');
   });
 });

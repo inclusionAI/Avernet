@@ -1,6 +1,6 @@
 import { getCapabilities } from '@/capabilities';
 import type { LucideIcon } from 'lucide-react';
-import { Bot, Compass, FlaskConical, MessagesSquare, Users, Zap } from 'lucide-react';
+import { Bot, Compass, FlaskConical, MessagesSquare, ShieldCheck, Users, Zap } from 'lucide-react';
 import { getRouteMeta, type RouteSection } from './routeMeta';
 
 /** 产品侧栏只展示协作与 Bot 两个固定分组。 */
@@ -78,6 +78,14 @@ export const navigationItems: NavigationItem[] = [
     description: '创建、配置和发布 Bot',
   },
   {
+    id: 'task-escort',
+    label: '任务护航',
+    path: '/evolution-factory/task-escort',
+    icon: ShieldCheck,
+    section: 'bot',
+    description: '观察任务运行并处置护航问题',
+  },
+  {
     id: 'evolution-factory',
     label: '智能进化',
     path: '/evolution-factory',
@@ -109,9 +117,11 @@ export function getMergedNavigationItems(): NavigationItem[] {
       if (grouped[item.section]) grouped[item.section].push(item);
     }
   }
-  // Evolution stays last in the Bot group, including after internal overlays.
-  const evolution = grouped.bot.findIndex((item) => item.id === 'evolution-factory');
-  if (evolution >= 0) grouped.bot.push(...grouped.bot.splice(evolution, 1));
+  // Keep Task Escort immediately above Evolution after ordinary overlays, before explicit last items.
+  for (const id of ['task-escort', 'evolution-factory']) {
+    const index = grouped.bot.findIndex((item) => item.id === id);
+    if (index >= 0) grouped.bot.push(...grouped.bot.splice(index, 1));
+  }
   return [grouped.collab, grouped.bot].flatMap((items) => [
     ...items.filter((item) => item.placement !== 'last'),
     ...items.filter((item) => item.placement === 'last'),

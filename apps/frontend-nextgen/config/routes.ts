@@ -49,6 +49,7 @@ export const routes = [
       { path: '/lab/todos', component: '@/pages/Lab/Todos' },
       { path: '/lab/tasks', component: '@/pages/Lab/Tasks' },
       { path: '/evolution-factory', component: '@/pages/EvolutionFactory' },
+      { path: '/evolution-factory/task-escort', component: '@/pages/TaskEscort' },
       { path: '/evolution-factory/new', component: '@/pages/EvolutionFactory/CreateTask' },
       { path: '/evolution-factory/tasks/:taskId', component: '@/pages/EvolutionFactory/TaskDetail' },
       { path: '/evolution-factory/domains/:ownerUserId/:domainId', component: '@/pages/EvolutionFactory/DomainDetail' },
