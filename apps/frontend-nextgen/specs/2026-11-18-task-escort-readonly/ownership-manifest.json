@@ -257,12 +257,13 @@
     "specs/2026-11-18-task-escort-readonly/spec.md"
   ],
   "changedFiles": "changed-files.txt",
-  "reviewedSourceContentSha256": "12f9e2846fb06f516dd66ab4eba1bae06f15e49d624b47ce753488d9873f2660",
+  "reviewedSourceContentSha256": "015c5ace8566379c63009dcb1890d86e0711e46be41f6c16193a8cf6f02eea26",
   "independentContentHashAlgorithm": "SHA-256 of concatenated sorted relative path, NUL, file SHA-256 hex and newline",
   "compatibilityAdjustments": [
     {
       "path": "test/taskEscortParity/managementDomain.test.ts",
       "reason": "Build URL credentials and sensitive query values from explicit dummy data; retain complete redaction assertions and the no-network assertion without weakening the secret-scanning gate."
     }
-  ]
+  ],
+  "reviewedSourceContentHashAlgorithm": "SHA-256 of concatenated sorted relative path, NUL, file SHA-256 hex and newline"
 }
