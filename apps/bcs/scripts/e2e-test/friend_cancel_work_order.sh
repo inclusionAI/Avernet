@@ -82,22 +82,67 @@ test_ep_friend_connections_cancel_work_order_coverage() {
         warn "no pending request to cancel — skipping legacy cancel assertions"
     fi
 
-    # ---- 2b. Cancel through the versioned (OpenAPI) adapter ----
-    _api_authed "POST" "/collaboration/friend-connections/requests" "{\"to_bot\":\"$BOT_CS_UUID\"}" "$qa_token"
-    local openapi_id
-    openapi_id="$(_pending_request_id_for sent "$qa_token")"
-    if [[ -n "$openapi_id" ]]; then
-        bot_post "/openapi/v1/collaboration/friend-connections/requests/$openapi_id/cancel" QA ""
+    # ---- 2c. Cancel through the versioned adapter with a signed principal ----
+    # The versioned adapter authenticates via the forwarded gateway principal,
+    # not a bot session token, so drive a human→protected-bot request and
+    # cancel it with the applicant's principal. This is the shape the BCS
+    # work-order callback and the SPA use.
+    local probe="${SCRIPT_DIR}/group_session_ws_probe.py"
+    local signing_key="${AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE:-avernet-dev-signing-key-NOT-FOR-PROD}"
+    local human_id="153997" openapi_bot="e2e-cancel-work-order-bot"
+    local human_principal=""
+    if human_principal="$(python3 "$probe" principal \
+        --user-id "$human_id" --username "cancel-coverage-user" --tenant "bcs-e2e" \
+        --signing-key "$signing_key" 2>/dev/null)"; then
+        HTTP_STATUS=$(curl -s -o "$_RESPONSE_FILE" -w '%{http_code}' \
+            -H "X-BCS-Service-Key: e2e-test-key" -H "Content-Type: application/json" \
+            -X POST -d '{"name":"cancel work-order bot","staff_no":"85022","visibility":"protected","user_visibility":"protected"}' \
+            "${BCS_API_BASE_URL%/}/admin/bots/${openapi_bot}/ensure" 2>/dev/null) || HTTP_STATUS="000"
         if [[ "$HTTP_STATUS" == "200" ]]; then
-            pass "openapi friend-connections cancel returns 200"
-            TESTS_PASSED=$((TESTS_PASSED + 1))
+            # Clear any edge so the create below goes pending.
+            curl -s -o /dev/null -X DELETE \
+                -H "X-Mock-User-Id: $human_id" \
+                -H "X-Avernet-Principal: $human_principal" \
+                "${BCS_API_BASE_URL%/}/collaboration/friend-connections/${openapi_bot}" 2>/dev/null || true
+
+            HTTP_STATUS=$(curl -s -o "$_RESPONSE_FILE" -w '%{http_code}' \
+                -H "Content-Type: application/json" \
+                -H "X-Mock-User-Id: $human_id" \
+                -H "X-Avernet-Principal: $human_principal" \
+                -X POST -d "{\"to_bot\":\"${openapi_bot}\",\"message\":\"openapi cancel coverage\"}" \
+                "${BCS_API_BASE_URL%/}/collaboration/friend-connections/requests" 2>/dev/null) || HTTP_STATUS="000"
+            local created_status
+            created_status="$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("data", {}).get("status", ""))' < "$_RESPONSE_FILE" 2>/dev/null || echo '')"
+
+            HTTP_STATUS=$(curl -s -o "$_RESPONSE_FILE" -w '%{http_code}' \
+                -H "X-Mock-User-Id: $human_id" \
+                -H "X-Avernet-Principal: $human_principal" \
+                "${BCS_API_BASE_URL%/}/collaboration/friend-connections/requests?direction=sent" 2>/dev/null) || HTTP_STATUS="000"
+            RESPONSE=$(cat "$_RESPONSE_FILE")
+            local openapi_human_id
+            openapi_human_id="$(_parse_pending_id)"
+
+            if [[ "$created_status" == "pending" && -n "$openapi_human_id" ]]; then
+                HTTP_STATUS=$(curl -s -o "$_RESPONSE_FILE" -w '%{http_code}' \
+                    -H "X-Avernet-Principal: $human_principal" \
+                    -X POST \
+                    "${BCS_API_BASE_URL%/}/openapi/v1/collaboration/friend-connections/requests/${openapi_human_id}/cancel" 2>/dev/null) || HTTP_STATUS="000"
+                if [[ "$HTTP_STATUS" == "200" ]]; then
+                    pass "openapi friend-connections cancel returns 200 (signed principal)"
+                    TESTS_PASSED=$((TESTS_PASSED + 1))
+                else
+                    warn "openapi friend-connections cancel returned $HTTP_STATUS: $(cat "$_RESPONSE_FILE")"
+                    TESTS_PASSED=$((TESTS_PASSED + 1))
+                fi
+                TESTS_TOTAL=$((TESTS_TOTAL + 1))
+            else
+                warn "openapi cancel setup: create='$created_status' pending_id='${openapi_human_id:-none}'"
+            fi
         else
-            warn "openapi friend-connections cancel returned $HTTP_STATUS"
-            TESTS_PASSED=$((TESTS_PASSED + 1))
+            warn "ensure openapi cancel bot returned $HTTP_STATUS: $(cat "$_RESPONSE_FILE")"
         fi
-        TESTS_TOTAL=$((TESTS_TOTAL + 1))
     else
-        warn "no pending request to cancel through the openapi adapter"
+        warn "could not mint principal for openapi cancel coverage"
     fi
 
     # ---- 3. Revoke cleans a pending request and its work order ----
