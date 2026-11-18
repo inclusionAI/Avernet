@@ -150,6 +150,7 @@ class _FixedBots:
                 "bot_name": "Todo Endpoint Bot",
                 "space_id": _SPACE_ID,
                 "owner_id": _USER_ID,
+                "active_engine": "openclaw",
             }
         ]
 

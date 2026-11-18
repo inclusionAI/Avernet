@@ -293,6 +293,7 @@ from agentclaw.community.core.errors import (  # noqa: E402
     InternalError,
     LoginRedirectRequired,
     NotFound,
+    TopicClosedConflict,
     Unauthorized,
     ValidationError,
 )
@@ -343,6 +344,7 @@ _DOMAIN_ERROR_STATUS_MAP: dict[type[DomainError], int] = {
     Forbidden:             403,
     NotFound:              404,
     Conflict:              409,
+    TopicClosedConflict:  409,
     InternalError:         500,
     CallerIdentityPermissionError: 403,
     CallerIdentityAmbiguousError: 409,
@@ -462,11 +464,15 @@ async def _domain_error_handler(request: Request, exc: DomainError) -> JSONRespo
             params_suffix(request),
         )
     elif status >= 400:
+        # A Topic close must stay a routine warning. The 409 response and
+        # ``conflict`` semantics are unchanged, but attaching a traceback can
+        # make company log collectors classify this expected business race as
+        # an error. Other 4xx conflicts retain their raise-site stack.
         logger.warning(
             "[DomainError %s] %s on %s %s: %s%s",
             status, type(exc).__name__, request.method, request.url.path,
             exc.detail, params_suffix(request),
-            exc_info=exc,
+            exc_info=None if isinstance(exc, TopicClosedConflict) else exc,
         )
     else:
         # 3xx is only ``LoginRedirectRequired``, an ordinary step in the login

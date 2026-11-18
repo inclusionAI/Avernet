@@ -142,6 +142,7 @@ class ContextCollabServiceProtocol(Protocol):
         *,
         todo_execution_id: str | None = None,
         todo_execution_token: str | None = None,
+        todo_runner_skill_md_path: str | None = None,
     ) -> ContextCollabRunResultDTO: ...
     async def resume_context(
         self,
@@ -151,6 +152,7 @@ class ContextCollabServiceProtocol(Protocol):
         context: ActorContext,
         todo_execution_id: str | None = None,
         todo_execution_token: str | None = None,
+        todo_runner_skill_md_path: str | None = None,
     ) -> ContextCollabRunResultDTO: ...
     async def refresh_run(
         self,

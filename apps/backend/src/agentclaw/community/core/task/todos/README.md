@@ -73,8 +73,15 @@ report/upload/complete paths, request formats, ordering, and failure handling
 belong to the `todo-runner` Skill and are not duplicated in the runtime message.
 
 Every dispatched or resumed run explicitly loads the `todo-runner` Skill from
-`/home/admin/.openclaw/workspace/skills/skills-repo/infra/todo-runner/SKILL.md`
-before doing business work. The Skill stays in the shared `infra` repository:
+the selected Bot's physical runtime engine before doing business work. Current
+sources are:
+
+- OpenClaw: `/home/admin/.openclaw/workspace/skills/skills-repo/infra/todo-runner/SKILL.md`
+- Claude Code: `/home/admin/.claude_code/workspace/skills/skills-repo/infra/todo-runner/SKILL.md`
+- AgentCoding: `/home/admin/.aicoding/workspace/skills/skills-repo/infra/todo-runner/SKILL.md`
+- Hermes: `/home/admin/.harness/workspace/skills/skills-repo/infra/todo-runner/SKILL.md`
+
+The Skill stays in the shared `infra` repository:
 it is not installed into a Bot Default SkillSet and no link is created at the
 `workspace/skills` top level. Direct loading is repeated for every
 `[todo-execute]` and `[todo-resume]`, so a missing or unreadable source fails the
