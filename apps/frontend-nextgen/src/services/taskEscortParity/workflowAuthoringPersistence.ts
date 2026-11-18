@@ -26,14 +26,14 @@ export function createWorkflowAuthoringPersistence(api: WorkflowAuthoringControl
   function draft(value: unknown, id: string) {
     const row = authoringRecord(value);
     if (row.workflowId !== id || !(row.packId === null || typeof row.packId === 'string') || typeof row.specJson !== 'string') throw new Error('数据库草稿身份或结构无效');
-    const token = authoringToken(row.draftToken);
+    const revision = authoringToken(row.draftToken);
     const spec = authoringSpec(JSON.parse(row.specJson), id);
-    return { packId: row.packId, specJson: row.specJson, token, spec };
+    return { packId: row.packId, specJson: row.specJson, revision, spec };
   }
   function bind(id: string, user: string, row: ReturnType<typeof draft>, snapshot: WorkflowAuthoringSnapshot, version: 'draft' | 'current'): WorkflowAuthoringBaseline {
     if (snapshot.packId !== (row.packId ?? id)) throw new Error('数据库与 Git Pack 身份不一致');
     const baseline: WorkflowAuthoringBaseline = Object.freeze({ workflowId: id, userId: user, packId: snapshot.packId,
-      rawPackId: row.packId, draftToken: row.token, spec: row.spec, specJson: row.specJson, sourceVersion: version,
+      rawPackId: row.packId, draftToken: row.revision, spec: row.spec, specJson: row.specJson, sourceVersion: version,
       sourceCommit: snapshot.baseCommit, expectedSavedHead: snapshot.draftHead });
     baselines.set(baseline, { snapshot, serialized: JSON.stringify(baseline), epoch: epochs.get(key(id, user)) ?? 0 });
     return baseline;
@@ -55,12 +55,12 @@ export function createWorkflowAuthoringPersistence(api: WorkflowAuthoringControl
     return bind(id, user, row, snapshot, version);
   }
   async function postflight(id: string, user: string, params: WorkflowAuthoringIdentity, requested: WorkflowAuthoringSpec,
-    packId: string, commit: string, token?: string, signal?: AbortSignal, rawPackId: string | null = packId): Promise<WorkflowAuthoringBaseline> {
+    packId: string, commit: string, revision?: string, signal?: AbortSignal, rawPackId: string | null = packId): Promise<WorkflowAuthoringBaseline> {
     const [rawDraft, rawPack] = await Promise.all([api.draft(id, params, signal), api.packVersion(id, 'draft', params, signal)]);
     signal?.throwIfAborted();
     const row = draft(rawDraft, id), snapshot = authoringSnapshot(rawPack, id, 'draft');
     if (row.packId !== rawPackId || (row.packId ?? id) !== packId || snapshot.packId !== packId || snapshot.baseCommit !== commit || snapshot.draftHead !== commit ||
-      token !== undefined && row.token !== token || workflowAuthoringSignature(requested) !== workflowAuthoringSignature(row.spec) ||
+      revision !== undefined && row.revision !== revision || workflowAuthoringSignature(requested) !== workflowAuthoringSignature(row.spec) ||
       !sameAuthoringExecution(workflowFromAuthoringPack(snapshot).spec, requested)) throw new Error('写入后数据库或 Git 快照与提交不一致');
     return bind(id, user, row, snapshot, 'draft');
   }
@@ -122,8 +122,8 @@ export function createWorkflowAuthoringPersistence(api: WorkflowAuthoringControl
         if (receipt.requestId !== requestId || receipt.outcome !== 'confirmed' || receipt.reconciliationRequired !== false ||
           proof.db !== 'confirmed' || proof.git !== 'confirmed') throw new Error('统一保存结果未确认');
         authoringToken(proof.inputHash);
-        const commit = authoringCommit(proof.commit), token = authoringToken(proof.draftToken);
-        const baseline = await postflight(id, user, params, spec, base.packId, commit, token, signal, base.rawPackId);
+        const commit = authoringCommit(proof.commit), revision = authoringToken(proof.draftToken);
+        const baseline = await postflight(id, user, params, spec, base.packId, commit, revision, signal, base.rawPackId);
         // Verify every unrelated resource and its mode survived the unified save.
         const oldPath = workflowFromAuthoringPack(evidence.snapshot).path;
         const saved = baselines.get(baseline)!.snapshot;
@@ -132,7 +132,7 @@ export function createWorkflowAuthoringPersistence(api: WorkflowAuthoringControl
         epochs.set(scope, (epochs.get(scope) ?? 0) + 1);
         baselines.get(baseline)!.epoch = epochs.get(scope)!;
         const result: WorkflowSaveResult = Object.freeze({ ok: true, saved: true, dbSaved: true, gitSaved: true,
-          workflowId: id, packId: base.packId, branch: `wf/${id}`, commit, spec: baseline.spec, draftToken: token, requestId, baseline });
+          workflowId: id, packId: base.packId, branch: `wf/${id}`, commit, spec: baseline.spec, draftToken: revision, requestId, baseline });
         receipts.add(result); locks.delete(scope); return result;
       } catch (cause) { throw new WorkflowAuthoringOutcomeError('save', id, requestId, cause); }
     },
