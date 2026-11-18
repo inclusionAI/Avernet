@@ -247,3 +247,26 @@ def test_expert_cli_declarations_are_rejected_before_content_resolution(catalog,
     assert result.valid == 0
     assert result.invalid == 1
     assert catalog.get(scope, "writer") is None
+
+
+def test_malformed_mcp_override_does_not_block_other_experts(catalog, tmp_path):
+    """One bad MCP override must not abort the whole scan.
+
+    ``endpoint_env: [PROD]`` used to reach ``x not in frozenset(...)`` inside
+    the shared validator and raise ``TypeError`` past the scanner's per-expert
+    handler, so a single malformed expert took down every other entry.
+    """
+    scope = ExpertScope("tenant-a", "dev", "aiworkbench")
+    write_expert(tmp_path, "good")
+    bad = write_expert(tmp_path, "bad")
+    manifest = bad / "manifest.yaml"
+    manifest.write_text(
+        manifest.read_text()
+        + "  mcp:\n    - server_code: github\n      config:\n        endpoint_env: [PROD]\n"
+    )
+    result = ExpertScanner(catalog).scan(
+        tmp_path, source_commit="a" * 40, scope=scope
+    )
+    assert (result.valid, result.invalid) == (1, 1)
+    assert catalog.get(scope, "good") is not None
+    assert catalog.get(scope, "bad") is None
