@@ -1,0 +1,90 @@
+/* Local surface only. Color follows host semantic tokens in both themes. */
+.tcov {
+  min-width: 0;
+  color: hsl(var(--foreground));
+}
+.tcov-card {
+  min-width: 0;
+  border: 1px solid hsl(var(--border));
+  border-radius: 12px;
+  background: hsl(var(--card));
+  overflow: hidden;
+}
+.tcov-kpis {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+.tcov-kpis > div + div {
+  border-left: 1px solid hsl(var(--border) / 0.65);
+}
+.tcov-trends {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr);
+  gap: 16px;
+}
+.tcov-scroll {
+  max-width: 100%;
+  min-width: 0;
+  overflow: auto;
+}
+.tcov-table {
+  border-collapse: collapse;
+  min-width: 100%;
+  width: max-content;
+  font-size: 12px;
+  text-align: left;
+}
+.tcov-table th {
+  padding: 10px 16px;
+  font-size: 11px;
+  font-weight: 500;
+  color: hsl(var(--muted-foreground));
+  background: hsl(var(--muted) / 0.45);
+  white-space: nowrap;
+}
+.tcov-table td {
+  padding: 9px 16px;
+  border-top: 1px solid hsl(var(--border) / 0.65);
+  vertical-align: top;
+  white-space: nowrap;
+}
+.tcov-table td.whitespace-normal {
+  white-space: normal;
+}
+.tcov-table td.whitespace-pre-wrap {
+  white-space: pre-wrap;
+}
+.tcov-table tbody tr:hover {
+  background: hsl(var(--accent) / 0.3);
+}
+.tcov-evidence {
+  max-height: 360px;
+  max-width: 100%;
+  overflow: auto;
+  border: 1px solid hsl(var(--border));
+  border-radius: 8px;
+  background: hsl(var(--muted) / 0.5);
+  padding: 12px;
+  font-size: 11px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: hsl(var(--foreground));
+}
+@media (max-width: 1024px) {
+  .tcov-trends {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .tcov-kpis {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+@media (max-width: 640px) {
+  .tcov-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .tcov-kpis > div {
+    padding: 12px;
+    border-bottom: 1px solid hsl(var(--border) / 0.65);
+  }
+}

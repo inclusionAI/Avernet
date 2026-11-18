@@ -15,11 +15,25 @@ describe('routeMeta 路由归属契约', () => {
       '/evolution-factory',
       '/evolution-factory/new',
       '/evolution-factory/tasks/task-1',
+      '/evolution-factory/domains/owner/domain',
       '/evolution-factory/bench/runs/run-1',
     ]) {
       expect(getRouteMeta(path)?.navKey).toBe('evolution-factory');
     }
   });
+  it('任务护航提供独立页面标题及 navKey，保留公共管理分组', () => {
+    expect(getRouteMeta('/evolution-factory/task-escort')).toEqual({
+      path: '/evolution-factory/task-escort',
+      title: '任务护航',
+      section: 'bot',
+      navKey: 'task-escort',
+      openCore: true,
+    });
+    expect(getRouteMeta('/evolution-factory/task-escort/detail')?.navKey).toBe('task-escort');
+    expect(getRouteMeta('/evolution-factory/task-escort-other')?.navKey).toBe('evolution-factory');
+    expect(getRouteMeta('/evolution-factory')?.title).toBe('智能进化');
+  });
+
   it('对话 / 协作群路由按约定落位（navKey + 标题），默认 capability 注入为空时合并结果=基线', () => {
     expect(getRouteMeta('/workspace/chat')?.navKey).toBe('conversation');
     expect(getRouteMeta('/workspace/chat')?.title).toBe('对话');
@@ -79,6 +93,7 @@ describe('getMergedNavigationItems（Open Core 默认 capabilities）', () => {
     ]);
     expect(merged.filter((item) => item.section === 'bot').map((item) => item.id)).toEqual([
       'bot-workshop',
+      'task-escort',
       'evolution-factory',
     ]);
     expect(merged.some((item) => item.id === 'my-task')).toBe(false);
@@ -146,6 +161,7 @@ describe('getMergedNavigationItems（internal overlay 注入语义）', () => {
       'bot-workshop',
       'capability-workshop',
       'market',
+      'task-escort',
       'evolution-factory',
     ]);
     expect(merged.find((item) => item.id === 'capability-workshop')?.label).toBe('能力管理');

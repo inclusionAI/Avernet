@@ -180,6 +180,16 @@ Regression tests cover
 [group URL state](test/pages/Workspace/hooks/useSessionFilePreview.test.tsx), and
 [shared preview rendering](test/pages/Workspace/components/GroupChatPane/SessionFilesPreviewPane.test.tsx).
 
+## Task Escort read-only workspace
+
+**任务护航** is a separate management entry immediately above **智能进化**.
+It reads real workflow, execution, issue, repair, experience and management
+resources without changing the existing Evolution pages. Task Escort domain
+requests are GET-only; write actions stay unsupported, and read failures never
+fall back to demo data. Fixture modules are not reachable from the formal page.
+See the [approved feature scope and validation handoff](specs/2026-11-18-task-escort-readonly/spec.md)
+and its [file ownership manifest](specs/2026-11-18-task-escort-readonly/ownership-manifest.json).
+
 ## Source synchronization
 
 `OPEN_CORE_MANIFEST.json` records the TeamClaw source commit. Changes originating in this public directory must be taken back into the TeamClaw Open Core baseline before the next export.
