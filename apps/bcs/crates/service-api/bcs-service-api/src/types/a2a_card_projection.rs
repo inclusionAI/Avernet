@@ -127,10 +127,19 @@ fn security_scopes(card: &Value) -> ServiceResult<Option<Vec<String>>> {
             .as_array()
             .ok_or_else(|| invalid(field))?;
         for requirement in requirements {
-            let schemes = requirement
+            let requirement = requirement
                 .as_object()
-                .and_then(|requirement| requirement.get("schemes"))
-                .and_then(Value::as_object)
+                .ok_or_else(|| invalid("agent_card.securityRequirements[].schemes"))?;
+            // An empty alternative (`{}`) is the protocol's anonymous channel
+            // (see `validate_anonymous_security`) and contributes no scopes.
+            let Some(schemes) = requirement.get("schemes") else {
+                if !requirement.is_empty() {
+                    return Err(invalid("agent_card.securityRequirements[].schemes"));
+                }
+                continue;
+            };
+            let schemes = schemes
+                .as_object()
                 .ok_or_else(|| invalid("agent_card.securityRequirements[].schemes"))?;
             for scheme in schemes.values() {
                 if let Some(values) = scheme.get("list") {
@@ -275,6 +284,46 @@ mod tests {
         let projected = project_agent_card_capabilities(Some(&card)).unwrap();
         assert_eq!(projected.domains, Some(vec!["top".into()]));
         assert_eq!(projected.scopes, Some(vec!["top:read".into()]));
+    }
+
+    #[test]
+    fn anonymous_empty_security_alternative_projects_no_scopes() {
+        // `{}` and `{"schemes":{}}` are the protocol's anonymous alternatives and
+        // must both project the same as an absent anonymous entry: no scopes.
+        for requirements in [json!([{}]), json!([{"schemes": {}}])] {
+            let card = json!({
+                "description": "Updated",
+                "skills": [{
+                    "id": "query",
+                    "securityRequirements": [{}]
+                }],
+                "securityRequirements": requirements
+            });
+            let projected = project_agent_card_capabilities(Some(&card)).unwrap();
+            assert_eq!(
+                projected.scopes,
+                Some(Vec::new()),
+                "unexpected scopes for {requirements}"
+            );
+        }
+        // An anonymous alternative mixes with a scoped one: only the scoped
+        // entry contributes scopes, the anonymous one is skipped.
+        let card = json!({
+            "description": "Updated",
+            "skills": [{
+                "id": "query",
+                "securityRequirements": [{}]
+            }],
+            "securityRequirements": [{}, {"schemes": {"oauth": {"list": ["orders:read"]}}}]
+        });
+        let projected = project_agent_card_capabilities(Some(&card)).unwrap();
+        assert_eq!(projected.scopes, Some(vec!["orders:read".into()]));
+    }
+
+    #[test]
+    fn non_empty_requirement_without_schemes_is_rejected() {
+        let card = json!({"securityRequirements": [{"unknown": 1}]});
+        assert!(project_agent_card_capabilities(Some(&card)).is_err());
     }
 
     #[test]

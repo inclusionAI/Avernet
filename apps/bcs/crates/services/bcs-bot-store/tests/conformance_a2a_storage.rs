@@ -100,6 +100,31 @@ async fn stale_refresh_cannot_overwrite_card_or_management_metadata() {
     assert_eq!(store.get("bot").await.unwrap(), Some(current));
 }
 
+#[tokio::test]
+async fn unchanged_card_synchronize_is_not_reported_as_conflict() {
+    let db = database().await;
+    let store = DbA2aBotStore::sqlite(db.clone(), "test".into());
+    let mut current = record();
+    assert!(store.compare_and_set(&current, 0).await.unwrap());
+    let mut committed = current.clone();
+    committed.revision = 2;
+    committed.agent_card["description"] = json!("Same-second Card refresh");
+    assert!(store.compare_and_set(&committed, 1).await.unwrap());
+    // A refresh that lands on the same committed values (MySQL would report
+    // zero affected rows here) is a success, not a revision conflict.
+    store.synchronize_card_projection(&committed).await.unwrap();
+    store.synchronize_card_projection(&committed).await.unwrap();
+    assert_eq!(store.get("bot").await.unwrap().unwrap().revision, 2);
+    // A synchronize fenced against an obsolete revision still conflicts;
+    // the SELECT fence check must not soften a genuine revision mismatch.
+    let mut advanced = committed.clone();
+    advanced.revision = 3;
+    advanced.agent_card["name"] = json!("Concurrently renamed");
+    assert!(store.compare_and_set(&advanced, 2).await.unwrap());
+    let conflict = store.synchronize_card_projection(&committed).await.unwrap_err();
+    assert!(matches!(conflict, bcs_service_api::ServiceError::Conflict(_)),"{conflict:?}");
+}
+
 
 async fn stored_bot_info(db:&Arc<LocalSqliteDbPlugin>,bot:&str)->serde_json::Value {
     let rows=db.query(DbStatement::with_params("SELECT bot_info FROM bcs_bots WHERE env='test' AND bot_uuid=?",vec![bot.into()])).await.unwrap();
