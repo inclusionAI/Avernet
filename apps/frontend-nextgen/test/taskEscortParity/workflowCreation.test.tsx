@@ -24,7 +24,6 @@ jest.mock(
       cancelModification: jest.fn(),
     },
   }),
-  { virtual: true },
 );
 const service = jest.mocked(workflowAuthoringService);
 const spec = {
