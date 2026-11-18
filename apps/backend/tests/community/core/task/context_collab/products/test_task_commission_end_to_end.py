@@ -190,10 +190,10 @@ def test_end_to_end_commission_flow(deploy_commission, tmp_path):
     l4_context_operate = injector.get(ContextServiceProtocol)
     l5_open_method = injector.get(OpenMethodOpsServiceProtocol)
 
-    # 2. 先创建 L4 Collet
+    # 2. 使用L4层操作创建Collet
     collet = _create_commission_collet(l4_context_operate)
 
-    # 3. 产品传入输入资源;Instantiate 同时建立Collet和 资源、参与者和Method的绑定。
+    # 3. Instantiate同时建立Collet和 资源、参与者和Method的绑定。
     instance = _instantiate_product_instance(
         injector,
         collet,
