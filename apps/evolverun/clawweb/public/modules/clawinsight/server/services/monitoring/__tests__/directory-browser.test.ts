@@ -17,7 +17,7 @@ import type { MonitoringPrincipal } from '../directory-contracts.js';
 const now = Date.parse('2026-09-10T09:00:00Z');
 const all = { start: 'all', end: 'all' };
 const window = { startMs: null, endMs: null };
-const scope = { tenant: 'one', allowedTargetEnvs: ['test', 'prod'] };
+const scope = { tenant: 'one', allowedTargetEnvs: ['test', 'pre', 'prod'] };
 const member: MonitoringPrincipal = { ...scope, staffId: '001', isAuthenticated: true, isClawInsightAdmin: false };
 const admin = { ...member, isClawInsightAdmin: true };
 const a = { botId: 'default', entityId: '001', env: 'test' };
@@ -109,6 +109,26 @@ describe('directory, authorization and browser contracts', () => {
     await expect(browser().options(member, { ...all, scope: 'all' })).rejects.toMatchObject({ code: 'FORBIDDEN' });
     await expect(browser().options({ ...member, tenant: 'two' }, all)).rejects.toMatchObject({ code: 'FORBIDDEN' });
     await expect(browser().options({ ...member, isAuthenticated: false }, all)).rejects.toMatchObject({ code: 'UNAUTHENTICATED' });
+  });
+  it('filters the Bot environment before pagination and binds cursors to that filter', async () => {
+    for (let i = 0; i < 4; i++) {
+      await bot({ ...prod, botId: `production-${i}` });
+      await bot({ ...a, env: 'pre', botId: `production-${i}` });
+    }
+    const query = { ...all, scope: 'mine', env: 'prod', limit: '2' };
+    const first = await browser().options(member, query);
+    expect(first.items).toHaveLength(2);
+    expect(first.items.every(item => item.env === 'prod')).toBe(true);
+    expect(first.nextCursor).toBeTruthy();
+    const second = await browser().options(member, { ...query, cursor: first.nextCursor! });
+    expect(second.items).toHaveLength(2);
+    expect(second.items.every(item => item.env === 'prod')).toBe(true);
+    expect(second.nextCursor).toBeNull();
+    expect(new Set([...first.items, ...second.items].map(item => item.botRef)).size).toBe(4);
+    expect((await browser().options(member, { ...all, limit: '20' })).items).toHaveLength(8);
+    await expect(browser().options(member, { ...all, env: 'staging' })).rejects.toMatchObject({ code: 'INVALID_EVENT' });
+    await expect(browser().options(member, { ...query, env: 'pre', cursor: first.nextCursor! })).rejects.toMatchObject({ code: 'INVALID_EVENT' });
+    await expect(browser().options({ ...member, allowedTargetEnvs: ['pre'] }, query)).rejects.toMatchObject({ code: 'INVALID_EVENT' });
   });
   it('supports name/ID search and only administrator staff search with literal LIKE characters', async () => {
     await bot(a, '001', '中文%_!Alpha'); await bot(b, '002', '中文其他');

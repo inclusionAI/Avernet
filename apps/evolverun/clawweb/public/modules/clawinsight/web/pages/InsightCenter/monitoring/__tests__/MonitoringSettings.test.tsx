@@ -41,6 +41,7 @@ it('shows only the joint switch state and writes both settings with a version', 
   const changed = vi.fn();
   render(<MonitoringSettings onChanged={changed} onClose={vi.fn()} />);
   expect(await screen.findByText('已关闭')).toBeInTheDocument();
+  expect(api.options.mock.lastCall?.[5]).toBe('prod');
   fireEvent.click(screen.getByRole('switch', { name: '我的 Bot 诊断监控' }));
   await waitFor(() => expect(api.configure).toHaveBeenCalledWith({ botRef: 'ref', enabled: true, version: 7 }));
   expect(changed).toHaveBeenCalledOnce();

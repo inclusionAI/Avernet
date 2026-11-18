@@ -59,8 +59,26 @@ describe('real local preview HTTP + directory + monitoring SQL', () => {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
     });
     expect((await configure({ botRef: bot.botRef, enabled: true, version: 0 })).status).toBe(403);
-    expect(await (await configure({ all: true, enabled: true })).json()).toEqual({ updated: 29, failed: [] });
+    expect(await (await configure({ all: true, enabled: true })).json()).toEqual({ updated: 1, failed: [] });
     const { items: [after] } = await (await options('&q=weekly-report')).json();
     expect(after.configuration).toEqual(bot.configuration);
+  });
+  it('shows only production Bot options and preserves pre configuration during bulk changes', async () => {
+    await fixture.db.exec("INSERT INTO ac_bots (bot_id,entity_id,env,owner_id,avernet_tenant,bot_type) VALUES ('default','001234','pre','001234','teamclaw','personal')");
+    await fixture.db.exec("INSERT INTO ce_bot_diagnosis_recovery_config (bot_id,entity_id,env,diagnosis_enabled,recovery_enabled,config_json,version) VALUES ('default','001234','pre',1,1,'{}',1)");
+    const { items } = await (await options('&scope=mine&env=prod')).json();
+    expect(items).toHaveLength(2);
+    expect(items.every((bot: { env: string }) => bot.env === 'prod')).toBe(true);
+    const preRows = () => fixture.db.query("SELECT diagnosis_enabled, recovery_enabled, config_json, version FROM ce_bot_diagnosis_recovery_config WHERE bot_id='default' AND env='pre'");
+    const original = await preRows();
+    const { items: [pre] } = await (await options('&q=default&env=pre')).json();
+    const configure = (input: unknown) => request('/monitoring/configurations', 'member', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input),
+    });
+    expect((await configure({ botRef: pre.botRef, version: 1, enabled: false })).status).toBe(403);
+    for (const enabled of [true, false]) {
+      expect(await (await configure({ all: true, enabled })).json()).toEqual({ updated: 1, failed: [] });
+      expect(await preRows()).toEqual(original);
+    }
   });
 });

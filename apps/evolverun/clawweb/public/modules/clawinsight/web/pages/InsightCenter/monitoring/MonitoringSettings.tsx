@@ -20,7 +20,7 @@ export function MonitoringSettings({ onClose, onChanged, practiceUrl }: { onClos
   useEffect(() => {
     const controller = new AbortController(); let active = true; setPage(null); setLoadError('');
     const timer = setTimeout(() => controller.abort(new DOMException('Timeout', 'TimeoutError')), 15000);
-    monitoringApi.options('mine', search, { startDate: '', endDate: '' }, cursor, controller.signal)
+    monitoringApi.options('mine', search, { startDate: '', endDate: '' }, cursor, controller.signal, 'prod')
       .then(value => { if (!controller.signal.aborted) setPage(value); })
       .catch(failure => { if (active) setLoadError(monitoringErrorText(controller.signal.reason ?? failure)); })
       .finally(() => clearTimeout(timer));
@@ -56,7 +56,7 @@ export function MonitoringSettings({ onClose, onChanged, practiceUrl }: { onClos
         <button type="button" className="copy-btn" disabled={busy} onClick={() => void save({ all: true, enabled: false })}>一键全关</button>
         <button type="button" className="copy-btn settings-primary" disabled={busy} onClick={() => void save({ all: true, enabled: true })}>一键全开</button>
       </div></div>
-    <p className="settings-hint">批量操作覆盖名下所有可自行设置的 Bot，包含当前搜索和分页之外的 Bot。</p>
+    <p className="settings-hint">仅展示生产环境 Bot。批量操作覆盖名下所有可自行设置的生产 Bot，包含当前搜索和分页之外的 Bot。</p>
     {(error || loadError) && <p role="alert" className="error-banner">{error || loadError}<button type="button" disabled={busy} onClick={() => { setError(''); setRevision(value => value + 1); }}>刷新</button></p>}
     {message && <p role="status" className="settings-feedback">{message}</p>}
     {!page && !loadError && <p className="monitoring-empty" role="status">正在加载…</p>}

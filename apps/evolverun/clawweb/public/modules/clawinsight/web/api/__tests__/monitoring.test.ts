@@ -34,6 +34,10 @@ describe('monitoring read API', () => {
     expect(params.get('end')).toBe(String(Date.parse('2026-09-11T00:00:00+08:00')));
     expect(params.get('q')).toBe('default & name'); expect(params.get('cursor')).toBe('signed-cursor');
     expect(params.has('ownerId')).toBe(false);
+    expect(params.has('env')).toBe(false);
+    monitoringApi.options('mine', '', dates, null, signal, 'prod');
+    params = new URL(fetchJson.mock.lastCall![0], 'http://localhost').searchParams;
+    expect(params.get('env')).toBe('prod');
     monitoringApi.targetDiagnoses('opaque/ref', { ...dates, decision: 'ALL', keyword: '', page: 18, pageSize: 50 }, signal);
     expect(fetchJson.mock.lastCall![0]).toContain('/targets/opaque%2Fref/diagnoses?');
     params = new URL(fetchJson.mock.lastCall![0], 'http://localhost').searchParams;

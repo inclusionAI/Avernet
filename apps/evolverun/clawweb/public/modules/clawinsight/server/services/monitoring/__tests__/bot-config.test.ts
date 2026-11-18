@@ -72,7 +72,17 @@ it('reads the Bot type in the existing directory query', async () => {
 });
 
 it('bulk updates all owner pages, excludes other owners and refuses admin write escalation', async () => {
-  for (let i = 0; i < 61; i++) await bot(`bot-${i}`);
+  for (let i = 0; i < 61; i++) {
+    await bot(`bot-${i}`);
+    await bot(`bot-${i}`, 'pre');
+  }
+  const preTarget = { ...target, botId: 'bot-0', env: 'pre' };
+  const missingPreTarget = { ...target, botId: 'bot-1', env: 'pre' };
+  await configs.setSwitches(preTarget, switches(0));
+  const preBefore = await configs.find(preTarget);
+  await expect(configureBots(configs, directory, refs, principal, {
+    botRef: refs.encode(preTarget, 'one'), enabled: false, version: 1,
+  })).rejects.toMatchObject({ code: 'FORBIDDEN' });
   await bot('other', 'prod', '002');
   await bot('service');
   await db.exec("UPDATE ac_bots SET bot_type = 'service' WHERE bot_id = 'service'");
@@ -81,17 +91,26 @@ it('bulk updates all owner pages, excludes other owners and refuses admin write 
   await expect(configureBots(configs, directory, refs, principal, { botRef: refs.encode(service, 'one'), enabled: false, version: 1 })).rejects.toMatchObject({ code: 'FORBIDDEN' });
   const result = await configureBots(configs, directory, refs, principal, { all: true, enabled: true });
   expect(result).toEqual({ updated: 61, failed: [] });
+  expect(await configs.find(preTarget)).toEqual(preBefore);
+  expect(await configs.find(missingPreTarget)).toBeNull();
   const created = await configs.findMany(Array.from({ length: 61 }, (_, i) => ({ ...target, botId: `bot-${i}` })));
   expect(created.every(row => row?.diagnosisEnabled && row.recoveryEnabled
     && JSON.parse(row.configJson).team_key === 'default'
     && parseBotNotifications(row.configJson).owner && parseBotNotifications(row.configJson).group)).toBe(true);
   const [count] = await db.query<{ count: number }>('SELECT COUNT(*) AS count FROM ce_bot_diagnosis_recovery_config');
-  expect(count.count).toBe(62);
+  expect(count.count).toBe(63);
   await expect(configureBots(configs, directory, refs, principal, { botRef: refs.encode({ ...target, botId: 'other' }, 'one'), enabled: true, version: 0 })).rejects.toMatchObject({ code: 'FORBIDDEN' });
   expect(await configureBots(configs, directory, refs, principal, { all: true, enabled: false })).toEqual({ updated: 61, failed: [] });
   expect(await configs.find({ ...target, botId: 'bot-60' })).toMatchObject({ recoveryEnabled: false,
     configJson: created[60]!.configJson });
   expect(await configs.find(service)).toMatchObject({ diagnosisEnabled: true, recoveryEnabled: true, version: 1 });
+  expect(await configs.find(preTarget)).toEqual(preBefore);
+  expect(await configs.find(missingPreTarget)).toBeNull();
+  const preOnly = { ...principal, allowedTargetEnvs: ['pre'] };
+  const search = vi.spyOn(directory, 'search');
+  expect(await configureBots(configs, directory, refs, preOnly, { all: true, enabled: true })).toEqual({ updated: 0, failed: [] });
+  expect(search).not.toHaveBeenCalled();
+  search.mockRestore();
 });
 
 it.each(['', '{}', 'null', '[]', '{', '{"notifications":null}', '{"notifications":{"owner":{"enabled":"true"}}}',

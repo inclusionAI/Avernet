@@ -95,7 +95,8 @@ Existing paused ordinary Owner notices remain paused.
   `{ "botRef": "opaque reference", "enabled": true, "version": 0 }` or
   `{ "all": true, "enabled": false }`. The one visible switch writes both
   flags; 0 is the expected version for a missing row. The current owner may
-  configure a non-service Bot. The directory's `bot_type = service` marks
+  configure a non-service Bot in the production environment (`env = prod`).
+  The directory's `bot_type = service` marks
   platform-managed Bots. A single-Bot write to a service Bot returns 403.
 - An authenticated ClawInsight or global administrator can read or replace a single Bot's
   full configuration within the existing tenant and target-environment scope via `GET` or `PUT`
@@ -108,7 +109,8 @@ Existing paused ordinary Owner notices remain paused.
   Notification channels accept route references and booleans as above.
   Stale versions return 409. Group URLs still come from the shared registry.
 - Bulk operations use the existing owner directory and traverse all keyset
-  pages, irrespective of UI search/page. Bulk writes skip service Bots and
+  pages, irrespective of UI search/page. Bulk writes select only production Bots,
+  skip service Bots and
   cover the current owner's eligible Bots. `{updated, failed}` reports partial
   success; retries reload versions and apply compare-and-swap to switch writes.
 - Bot options/status return the effective recovery switch and mark service Bots
@@ -128,7 +130,9 @@ The **诊断自愈** sidebar entry contains **诊断** and **自愈**. The recov
 list shows task state and recovery result in separate columns and preserves
 filters and pagination when opening an existing detail.
 
-**诊断监控设置** shows the current owner's searchable, paginated Bot list.
+**诊断监控设置** requests `env=prod` from the existing Bot options endpoint,
+which filters the current owner's production Bots before pagination. The optional
+`env` filter must be within the authenticated principal's allowed environments.
 The switch appears on when both flags are true. Service Bot switches are
 read-only and show the platform contact. Platform staff use the administrator
 configuration endpoint to configure those Bots.

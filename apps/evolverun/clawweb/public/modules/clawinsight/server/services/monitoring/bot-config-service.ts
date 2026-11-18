@@ -38,6 +38,7 @@ export async function configureBots(store: BotDiagnosisRecoveryConfigStore | und
   const failed: string[] = [];
   const write = async (bot: import('./directory-contracts.js').DirectoryBot, version: number) => {
     if (bot.ownerId !== principal.staffId) throw new MonitoringError('FORBIDDEN', '仅 Bot 所有者可以修改配置。');
+    if (bot.env !== 'prod') throw new MonitoringError('FORBIDDEN', '仅支持生产环境 Bot 的诊断自愈配置。');
     if (isServiceBot(bot)) throw new MonitoringError('FORBIDDEN', '服务 Bot 请联系平台设置诊断自愈。');
     const switches = { diagnosisEnabled: value.enabled as boolean, recoveryEnabled: value.enabled as boolean,
       expectedVersion: version, updatedBy: principal.staffId };
@@ -53,17 +54,19 @@ export async function configureBots(store: BotDiagnosisRecoveryConfigStore | und
     if (!bot) throw new MonitoringError('BOT_NOT_FOUND', 'Bot 不存在或无权访问。');
     await write(bot, Number(value.version));
   } else {
+    if (!principal.allowedTargetEnvs.includes('prod')) return { updated, failed };
+    const productionPrincipal = { ...principal, allowedTargetEnvs: ['prod'] };
     // Keyset traversal freezes the current roster's upper bound at the first page.
     let after: string | null = null;
     for (;;) {
-      const page = await directory.search({ principal, scope: 'mine', q: '', limit: 50, after });
+      const page = await directory.search({ principal: productionPrincipal, scope: 'mine', q: '', limit: 50, after });
       const configs = await store.findMany(page.items);
       for (let i = 0; i < page.items.length; i++) {
         const bot = page.items[i];
         // Revalidate ownership immediately before mutation, never trust an old UI roster.
         const current = await directory.get(bot, principal);
         if (!current || current.ownerId !== principal.staffId) { failed.push(references.encode(bot, principal.tenant)); continue; }
-        if (isServiceBot(current)) continue;
+        if (current.env !== 'prod' || isServiceBot(current)) continue;
         try { await write(current, configs[i]?.version ?? 0); }
         catch { failed.push(references.encode(bot, principal.tenant)); }
       }

@@ -49,7 +49,8 @@ async function start(parent = true, defaultFactory = false, getDb = () => db, un
   if (parent) app.use(express.json({ limit: "10mb" }));
   for (const [key, value] of Object.entries(env)) vi.stubEnv(key, value);
   const runtime = unassembled ? { service: null } : createMonitoringRuntime(getDb, () => clock, { ...fixtureIntegration,
-    ...(recovery ? { recovery, scope: { ...fixtureIntegration.scope, allowedTargetEnvs: ["test", "prod"] } } : {}), principal: async () => principal });
+    scope: { ...fixtureIntegration.scope, allowedTargetEnvs: ["test", "prod"] },
+    ...(recovery ? { recovery } : {}), principal: async () => principal });
   app.use("/api/insight/v1", defaultFactory ? createInsightRouter(null) : createInsightRouter(null, { monitoring: runtime }));
   server = await new Promise<ReturnType<express.Application["listen"]>>((resolve, reject) => {
     const s = app.listen(0, "127.0.0.1", (error?: Error) => error ? reject(error) : resolve(s));
@@ -354,12 +355,13 @@ describe('monitoring browser HTTP identity and enrollment boundary', () => {
   beforeEach(() => { principal.isClawInsightAdmin = false; });
   it('lets authenticated owners configure Bots without admin access and rejects stale or foreign writes', async () => {
     clawInsightAdmin = false;
+    principal.allowedTargetEnvs = ['test', 'prod'];
     const { createMonitoringReferences } = await import('../../services/monitoring/target-ref.js');
-    const ref = createMonitoringReferences().encode({ botId: 'mock-bot-te', entityId: '001234', env: 'test' }, 'test');
+    const ref = createMonitoringReferences().encode({ botId: 'mock-bot-te', entityId: '001234', env: 'prod' }, 'test');
     const configure = (version: number) => call('/monitoring/configurations', { method: 'POST',
       headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ botRef: ref, enabled: true, version }) });
     expect(await configure(0)).toMatchObject({ status: 200, body: { updated: 1, failed: [] } });
-    const stored = await new BotDiagnosisRecoveryConfigRepository(db).find({ botId: 'mock-bot-te', entityId: '001234', env: 'test' });
+    const stored = await new BotDiagnosisRecoveryConfigRepository(db).find({ botId: 'mock-bot-te', entityId: '001234', env: 'prod' });
     expect(stored).toMatchObject({ diagnosisEnabled: true, recoveryEnabled: true, version: 1 });
     expect(JSON.parse(stored!.configJson)).toEqual({ team_key: 'default',
       notifications: { owner: { enabled: true }, group: { enabled: true } } });
@@ -370,10 +372,11 @@ describe('monitoring browser HTTP identity and enrollment boundary', () => {
     expect((await configure(1)).status).toBe(401);
   });
   it.each(['insight', 'global'])('lets %s administrators replace and read only the specified Bot configuration', async role => {
+    principal.allowedTargetEnvs = ['test', 'prod'];
     const { createMonitoringReferences } = await import('../../services/monitoring/target-ref.js');
     const refs = createMonitoringReferences();
     const configPath = (botId: string) => '/monitoring/configurations/'
-      + refs.encode({ botId, entityId: '001234', env: 'test' }, 'test');
+      + refs.encode({ botId, entityId: '001234', env: 'prod' }, 'test');
     const path = configPath('mock-bot-te');
     const configJson = JSON.stringify({ notifications: {
       owner: { enabled: true }, group: { enabled: true, route_id: 'private-group' },
