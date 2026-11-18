@@ -16,6 +16,10 @@ from agentclaw.community.core.task.context_collab.errors import (
 from agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context import (
     ActorContext,
 )
+from agentclaw.community.core.task.context_collab.l2_agent_network.network_refs import (
+    AgentRef,
+    PrincipalRef,
+)
 from agentclaw.community.core.task.context_collab.l4_context_primitives.participation import (
     initial_executor_refs,
 )
@@ -350,11 +354,18 @@ class TaskCommissionSelfApplicationAdapter(TaskCommissionOpenMethodAdapter):
         )
         if not expected_roles or application.requested_role_refs != expected_roles:
             raise ContextCollabValidationError("application roles do not match task")
-        # The owner authorized this exact bounded rule when publishing the
-        # opportunity. This is policy execution, not a forged inbound Bot/user.
-        policy_context = ActorContext(
-            record.collet.initiator_ref, source="product_policy"
-        )
+        decision_agent = policy.decision_agent_ref
+        if isinstance(decision_agent, AgentRef):
+            policy_context = ActorContext(
+                PrincipalRef(decision_agent.agent_type, decision_agent.agent_id),
+                source="agent_admission",
+            )
+        else:
+            # The owner authorized the compatibility rule when publishing the
+            # opportunity. This is policy execution, not a forged actor.
+            policy_context = ActorContext(
+                record.collet.initiator_ref, source="product_policy"
+            )
         self._open_ops.screen(
             command=OpenScreenCommand(
                 application_ref=application_id,
@@ -393,7 +404,10 @@ class TaskCommissionSelfApplicationAdapter(TaskCommissionOpenMethodAdapter):
                     selection_id=f"sel_{application_id}",
                     reason="task_commission.select_admitted_assignee",
                 ),
-                policy_context,
+                ActorContext(
+                    record.collet.initiator_ref,
+                    source="product_policy",
+                ),
             )
         self.require_admitted(command.collab_context_id, context)
         return AssigneeAdmissionReceipt(

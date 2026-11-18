@@ -26,6 +26,7 @@ consumes:
   - TopLevelBindingRecovery
 internal_dependencies:
   - agentclaw.community.core.task.context_collab.errors
+  - agentclaw.community.core.task.context_collab.l2_agent_network
   - agentclaw.community.core.task.context_collab.l4_context_primitives
   - agentclaw.community.core.task.context_collab.l5_methods
   - agentclaw.community.core.task.context_collab.g1_secure_govern.actor_context
@@ -53,6 +54,16 @@ does not migrate ProductInstances, alter stored facts or authorize participation
   require named, required role mappings, positive capacity and a typed
   participation outcome. Publication permits delivery only after `ADMITTED` and
   preserves `propagate_without_rollback` failure behavior.
+- `OpenAdmissionPolicy` also declares who executes the admission decision and
+  which bounded rule selector describes the judgement:
+  `decision_actor`, `decision_agent_ref` and `decision_rule`. The
+  `accountable_role` / `product_policy` defaults preserve existing owner
+  behavior. `configured_agent` selects the exact `decision_agent_ref`; it is
+  the admission decision identity, not an initial task executor or role
+  binding. `capability_evidence` is the currently supported configured rule.
+  These declarations do not bypass L5 G1/G4 execution: product composition must
+  authorize and orchestrate the configured Agent's explicit `screen`/`admit`
+  calls.
 - `AdmissionRole` is L5's read-only structural view of role name, requiredness
   and participant source. L6 `ScenarioRole` satisfies it without an upward
   import, including in type-checking-only annotations.
