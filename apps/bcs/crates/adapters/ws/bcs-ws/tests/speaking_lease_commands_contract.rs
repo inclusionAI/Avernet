@@ -6,7 +6,7 @@
 #[path = "support/ws_lease_harness.rs"]
 mod lease_harness;
 
-use lease_harness::{lease_state, lease_state_without_store, send_frame};
+use lease_harness::{lease_state, lease_state_session_only, lease_state_without_store, send_frame};
 use bcs_ws::web::{WebClientConnectionState, WorkbenchConnectionAuth};
 use tokio::sync::mpsc;
 
@@ -223,4 +223,61 @@ async fn lease_window_follows_the_composition_configured_timeout() {
     assert!(current.ok, "current ok: {current:?}");
     assert_eq!(current.payload["status"], "held",
         "the lease must survive 70s under the configured 90s window");
+}
+
+#[tokio::test]
+async fn user_bound_session_only_member_uses_frame_session_scope_for_leases() {
+    // A Human who accepted a SESSION invitation but never joined the Group:
+    // on a user-level connection the frame-declared session scope is the
+    // only authorization path — the frame value declares WHERE, never WHO,
+    // and the session facts are still re-verified per command.
+    let state = lease_state_session_only("group-1:session-9");
+    let (tx, _rx) = mpsc::channel(8);
+    let mut connection = WebClientConnectionState::default();
+
+    // Frame carries the session id → session-fact authorization succeeds.
+    let response = send_frame(
+        &state, &tx, &mut connection, &user_bound("human_alice"),
+        "s-1", "lease.acquire",
+        serde_json::json!({"groupId": "group-1", "sessionId": "group-1:session-9"}),
+    ).await;
+    assert!(response.ok, "acquire via frame session scope: {response:?}");
+    assert_eq!(response.payload["status"], "granted");
+
+    // Same actor, no session scope → group-only facts deny.
+    let response = send_frame(
+        &state, &tx, &mut connection, &user_bound("human_bob"),
+        "s-2", "lease.acquire", serde_json::json!({"groupId": "group-1"}),
+    ).await;
+    assert!(!response.ok, "no scope must not authorize: {response:?}");
+
+    // A foreign session id must not authorize either.
+    let response = send_frame(
+        &state, &tx, &mut connection, &user_bound("human_bob"),
+        "s-3", "lease.acquire",
+        serde_json::json!({"groupId": "group-1", "sessionId": "group-1:session-x"}),
+    ).await;
+    assert!(!response.ok, "foreign session must not authorize: {response:?}");
+}
+
+#[tokio::test]
+async fn session_bound_lease_rejects_a_frame_session_that_differs_from_the_token() {
+    // The connection token is authoritative: a SessionScoped connection
+    // cannot redirect its lease commands at a different session.
+    let state = lease_state().await;
+    let (tx, _rx) = mpsc::channel(8);
+    let mut connection = WebClientConnectionState::default();
+    connection.phase = bcs_ws::web::WebConnectionPhase::Connected;
+    let auth = WorkbenchConnectionAuth::SessionBound {
+        tenant: None, actor_id: "human_alice".into(), group_id: "group-1".into(),
+        session_id: "group-1:session-9".into(), caller_ingress: None,
+    };
+    let response = send_frame(
+        &state, &tx, &mut connection, &auth,
+        "frame-vs-token", "lease.acquire",
+        serde_json::json!({"groupId": "group-1", "sessionId": "group-1:session-x"}),
+    ).await;
+    assert!(!response.ok);
+    assert_eq!(response.error_code, "token_scope_mismatch");
+    assert!(state.speaking_leases.as_ref().unwrap().current("group-1").await.unwrap().is_none());
 }
