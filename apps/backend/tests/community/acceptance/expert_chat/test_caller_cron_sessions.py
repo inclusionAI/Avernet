@@ -97,6 +97,35 @@ def test_existing_caller_discovers_runtime_sessions_without_owned_index(live_bac
             _ensure_human(bcs, subject)
             _ensure_projection_target(bcs, bcs_bot_id=f"{bot_id}:{subject}", owner_id=subject)
         _initialize_fixture_ownership(f"{bot_id}:{subject}")
+        # Owner metadata is not a runtime friendship grant. Exercise the actual
+        # human request/owner approval flow before entering friend-chat APIs.
+        target = f"{bot_id}:{subject}"
+        with httpx.Client(base_url=_BCS_BASE_URL, timeout=30) as bcs:
+            admission_params = {"actor": subject, "actor_kind": "human"}
+            admission_route = f"/bots/{quote(target, safe='')}/admission"
+            before = bcs.get(admission_route, params=admission_params)
+            assert before.status_code == 200
+            assert before.json()["allowed"] is False
+            assert before.json()["reason_code"] == "no_edge"
+            human_headers = {"X-Mock-User-Id": subject, "X-Mock-Nick-Name": subject}
+            request = assert_success(bcs.post(
+                "/collaboration/friend-connections/requests",
+                headers=human_headers, json={"to_bot": target},
+            ))["data"]
+            assert request["status"] == "pending"
+            assert request["request_ids"]
+            for request_id in request["request_ids"]:
+                accepted = assert_success(bcs.post(
+                    f"/collaboration/friend-connections/requests/{request_id}/accept",
+                    headers=human_headers,
+                ))["data"]
+                assert accepted["edge_ids"]
+            admitted = bcs.get(admission_route, params=admission_params)
+            assert admitted.status_code == 200
+            admission = admitted.json()
+            assert admission["allowed"] is True
+            assert admission["reason_code"] == "ok"
+            assert admission["public_default"] is False
         friend_params = {**runtime_params, "f_user_id": subject, "stage": "online"}
         principal = _principal_headers(subject)
         detail = _runtime_data(client.get(runtime_route, params=friend_params, headers=principal))
