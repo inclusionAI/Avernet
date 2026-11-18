@@ -4,14 +4,39 @@ from contextlib import contextmanager
 from typing import Annotated
 
 import httpx
+from agentclaw.community.adapters.knowledge_platform.config import (
+    KnowledgeIntegrationConfig,
+)
+from agentclaw.community.api.knowledge_management_service import (
+    KnowledgeManagementServiceProtocol,
+)
+from agentclaw.community.api.space_service import SpaceServiceProtocol
+from agentclaw.community.core.knowledge_management.config import (
+    KnowledgeManagementConfig,
+)
+from agentclaw.community.core.space_knowledge.membership_sync import (
+    SpaceMembershipSynchronizer,
+)
+from agentclaw.community.di.config import TaskQueueConfig
+from agentclaw.community.di.space_knowledge_capture_config import (
+    SpaceKnowledgeCaptureConfig,
+)
+from agentclaw.community.plugin_api.space_knowledge import SpaceKnowledgeSync
+from agentclaw.community.plugin_api.space_membership import SpaceMembershipSink
+from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.plugin_api.http_client import HttpClient
 
 from tests.community.endpoints.test_knowledge_management import (
     ACTOR,
     _assert_real_composition,
-    _seed_enabled,
 )
-from tests.community.framework import CaseInput, ExpectSuccess, endpoint_test
+from tests.community.factories.access import make_staff_user
+from tests.community.framework import (
+    CaseInput,
+    ExpectError,
+    ExpectSuccess,
+    endpoint_test,
+)
 from tests.community.knowledge_management.http_contract import detail
 
 
@@ -36,9 +61,44 @@ class CatalogWire(httpx.MockTransport):
         )
 
 
-def catalog_seed(lifecycle):
+class AcceptingMembershipSink:
+    def is_enabled(self):
+        return True
+
+    def apply_snapshot(self, snapshot):
+        pass
+
+
+def catalog_seed(lifecycle, *, enabled=True):
     def seed(world):
-        _seed_enabled(world)
+        world.injector.binder.bind(
+            KnowledgeIntegrationConfig,
+            to=KnowledgeIntegrationConfig(True, "https://knowledge.test"),
+        )
+        world.injector.binder.bind(
+            KnowledgeManagementConfig, to=KnowledgeManagementConfig(True, "teamclaw")
+        )
+        if enabled:
+            world.injector.binder.bind(
+                SpaceKnowledgeCaptureConfig,
+                to=SpaceKnowledgeCaptureConfig(enabled=True),
+            )
+            world.injector.binder.bind(
+                SpaceMembershipSink, to=AcceptingMembershipSink()
+            )
+            # Select the enabled capability using the existing DI provider, not a
+            # hand-built synchronizer. Public defaults deliberately stay closed.
+            world.injector.binder.bind(
+                SpaceKnowledgeSync, to=world.get(SpaceMembershipSynchronizer)
+            )
+        world.get(SpaceServiceProtocol).create_team(
+            name="Knowledge team", creator_id=ACTOR
+        )
+        make_staff_user(world, user_id=ACTOR)
+        if enabled:
+            world.get(SpaceKnowledgeSync).ensure_synced(
+                space_id=1, environment=get_current_env()
+            )
         # Include a READ-only row: cancellation capability is not can_manage.
         wire = CatalogWire(
             [
@@ -68,6 +128,10 @@ def catalog_seed(lifecycle):
 
 def lifecycle_page(response, world):
     _assert_real_composition(response, world)
+    sync = world.get(SpaceMembershipSynchronizer)
+    assert world.get(KnowledgeManagementServiceProtocol).sync is sync
+    assert world.get(SpaceKnowledgeSync) is sync
+    assert sync._app == world.get(TaskQueueConfig).app
     wire = world.get(CatalogWire)
     assert len(wire.calls) == 1
     body = response.json()
@@ -109,3 +173,27 @@ for scenario, lifecycle in [
         expect=ExpectSuccess(status=200, json_contains={"next_cursor": "next-page"}),
         extra_assertions=(lifecycle_page,),
     )(lambda: None)
+
+
+def closed_profile(response, world):
+    _assert_real_composition(response, world)
+    assert world.get(KnowledgeManagementServiceProtocol).sync is world.get(
+        SpaceKnowledgeSync
+    )
+    assert not isinstance(world.get(SpaceKnowledgeSync), SpaceMembershipSynchronizer)
+    assert not world.get(CatalogWire).calls
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/knowledge/spaces/{space_id}/knowledge-bases",
+    scenario="catalog_lifecycle_default_closed",
+    input=CaseInput(path_params={"space_id": 1}, headers={"x-user-id": ACTOR}),
+    seed=catalog_seed({}, enabled=False),
+    expect=ExpectError(
+        status=503, json_contains={"detail": {"code": "SPACE_SYNC_UNAVAILABLE"}}
+    ),
+    extra_assertions=(closed_profile,),
+)
+def default_sync_profile_remains_closed():
+    pass
