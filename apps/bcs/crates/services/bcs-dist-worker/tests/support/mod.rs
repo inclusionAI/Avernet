@@ -63,6 +63,7 @@ impl ShardFeedPort for Feed {
             .unwrap()
             .pop_front()
             .unwrap_or(FeedBatch {
+                failures: vec![],
                 sessions: vec![],
                 hints: vec![],
             }))

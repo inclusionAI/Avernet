@@ -1,8 +1,20 @@
-//! The `InboxProducerPort` provider, shared by the Gateway (PA inputs) and the
-//! Connector (agent events).
+//! Durable Inbox admission, consumption, scheduling and journal maintenance.
+//! All ports share authoritative DocumentCAS state; wake/index writes are hints.
+//! See `README.md` for retained data, budgets and Worker integration obligations.
 
+mod admission;
+mod capacity;
+mod consumer;
+mod health;
+mod journal;
 mod listener;
+mod maintenance;
 mod producer;
+mod progress;
+mod scheduling;
+mod state;
+mod storage;
+mod validation;
 
 pub use listener::{ListenerState, read_listener};
 pub use producer::{InboxProducerConfig, StoreInboxProducer};

@@ -71,6 +71,7 @@ fn next_commit(session: &AcquiredSession) -> CommitRequest {
 async fn feed_preserves_batch_limits_and_caps_wait_without_consuming_unowned_shards() {
     let (world, worker, _) = ready_session().await;
     world.data.batches.lock().unwrap().push_back(FeedBatch {
+                failures: vec![],
         sessions: vec![],
         hints: vec![sid()],
     });

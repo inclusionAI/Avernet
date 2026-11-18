@@ -129,6 +129,7 @@ async fn feed_watches_from_retained_start_and_checks_returned_input() -> Contrac
                 Duration::from_secs(1),
             ),
             ok(FeedBatch {
+                failures: vec![],
                 sessions: vec![SessionBatch {
                     sid: expected.sid.clone(),
                     entries: vec![expected.clone()],
