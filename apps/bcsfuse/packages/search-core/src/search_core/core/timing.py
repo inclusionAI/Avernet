@@ -94,10 +94,11 @@ def record_stage_elapsed(name, started):
 
 
 @contextmanager
-def stage_timing(name):
+def stage_timing(name, *, emit_progress=False):
     """Elapsed wall time includes await/queue time, not just dependency CPU time.
 
     Names and annotations must be bounded internal values, never query/Card data.
+    Opt-in progress records also survive caller timeouts in copied worker contexts.
     No active request means no timing or logging (e.g. background indexing/TC).
     """
     stages = _stages.get()
@@ -106,6 +107,8 @@ def stage_timing(name):
         yield fields
         return
     started = time.monotonic()
+    if emit_progress:
+        events.record_progress(name, _trace_id.get(), phase="started")
     try:
         yield fields
     except asyncio.CancelledError:
@@ -121,7 +124,9 @@ def stage_timing(name):
     finally:
         fields["elapsed_ms"] = round((time.monotonic() - started) * 1000, 2)
         stages[name] = fields
-        if name in {
+        if emit_progress:
+            events.record_progress(name, _trace_id.get(), phase="finished", **fields)
+        elif name in {
             "embedding",
             "vector",
             "keyword",
