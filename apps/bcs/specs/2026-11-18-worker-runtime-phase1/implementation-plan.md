@@ -90,4 +90,13 @@ separately from public implementation status.
   dependencies excluded; the full dependency graph has existing domain lint debt.
   Worker integration, reference resolution and complete decision validation remain
   tasks 4–7; these foundation checks do not claim runtime completion.
-- Tasks 3–8 and full host composition validation: pending.
+- Task 3: reliable admission/repair/consumer implementation in progress; no
+  complete runtime acceptance claimed yet.
+- Task 4 archive slice: public DbPlugin Result/Blob provider, durable exact-effect
+  evidence and additive SQLite/MySQL migrations implemented. Independent SPEC and
+  quality reviews pass. Ten production-provider tests on file-backed SQLite and
+  all 54 migration tests pass. Review caught and fixed a concurrent completion /
+  checkpoint-advance race; historical reads and retries now use stable format
+  bounds, with task-specific limits remaining frozen in TaskSnapshot. MySQL DDL
+  has static checks only; real host database acceptance is explicitly deferred.
+- Remaining Task 4 providers, Tasks 5–8 and full host composition: pending.

@@ -67,6 +67,7 @@ fn bot_provider_storage_uses_unique_versions_after_fixed_loop() {
     assert_eq!(mysql[45], "046_group_context_preset.sql");
     assert_eq!(mysql[46], "047_message_activity_indexes.sql");
     assert_eq!(mysql[47], "048_configured_catalog_labels.sql");
+    assert_eq!(mysql[48], "049_dist_immutable_objects.sql");
 }
 
 #[tokio::test]
@@ -124,9 +125,9 @@ async fn bot_provider_storage_upgrades_29_without_new_tables_or_rewriting_histor
     assert!(column_names(&db, "bcs_collaboration_draft_revisions").await?.iter().any(|c| c == "payload_json"));
     // The version-30+ tail legitimately adds: the Session-registry
     // table (32), Group context (34), the collaboration-draft
-    // tables (36) and the bot-authority tables (37); the Provider
+    // tables (36), bot-authority tables (37), and runtime archive (46); the Provider
     // storage upgrade itself adds no tables.
-    let tables = db.query(DbStatement::new("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT IN ('bcs_session_registry', 'bcs_group_contexts', 'bcs_group_context_item_presets', 'bcs_collaboration_drafts', 'bcs_collaboration_draft_revisions', 'bot_ownership_transfers', 'bot_authority_changes', 'bcs_a2a_tasks', 'bcs_a2a_run_bindings', 'bcs_a2a_contexts', 'bcs_group_agent_cards') ORDER BY name")).await?;
+    let tables = db.query(DbStatement::new("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT IN ('bcs_session_registry', 'bcs_group_contexts', 'bcs_group_context_item_presets', 'bcs_collaboration_drafts', 'bcs_collaboration_draft_revisions', 'bot_ownership_transfers', 'bot_authority_changes', 'bcs_a2a_tasks', 'bcs_a2a_run_bindings', 'bcs_a2a_contexts', 'bcs_group_agent_cards', 'bcs_dist_immutable_objects') ORDER BY name")).await?;
     assert_eq!(tables, original_tables);
     Ok(())
 }
