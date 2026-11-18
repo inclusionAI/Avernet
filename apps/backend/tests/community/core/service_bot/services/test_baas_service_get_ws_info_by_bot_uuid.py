@@ -106,6 +106,18 @@ def _ws_info_by_bot_uuid_logged_calls(spy: MagicMock, level: str) -> list:
 class TestGetWsInfoByBotUuid:
     """Tests for BaasService.get_ws_info_by_bot_uuid."""
 
+    def test_optional_a2a_auth_preserves_existing_positional_fields(self):
+        result = BotWsConnectionInfoResponse(
+            "wss://proxy.example/ws", "token", "target", "expiry", "",
+            "device", "https://baas.example", 20003, "tenant", "BOT-test",
+        )
+        assert result.paas_device_id == "device"
+        assert result.baas_base_url == "https://baas.example"
+        assert result.engine_port == 20003
+        assert result.tenant == "tenant"
+        assert result.bot_uuid == "BOT-test"
+        assert result.a2a_auth == ""
+
     def test_success_returns_ws_info(self):
         """Successful API call returns BotWsConnectionInfoResponse."""
         response_data = {
@@ -150,6 +162,7 @@ class TestGetWsInfoByBotUuid:
         result = service.get_ws_info_by_bot_uuid(bot_uuid="BOT-xyz")
 
         assert result.a2a_base_url == ""
+        assert result.a2a_auth == ""
 
     def test_a2a_base_url_passes_through_verbatim(self):
         """The issuer owns the A2A address; the answer arrives unmangled."""
@@ -161,6 +174,7 @@ class TestGetWsInfoByBotUuid:
                 "target": "TARGET-123",
                 "expires_at": "2026-01-01T00:00:00Z",
                 "a2a_base_url": "http://bot-a1b2-vc.stable.alipay.net:32196",
+                "a2a_auth": "proxypass",
             },
         }
         service = _make_service_with_response(response_data)
@@ -168,6 +182,7 @@ class TestGetWsInfoByBotUuid:
         result = service.get_ws_info_by_bot_uuid(bot_uuid="BOT-xyz")
 
         assert result.a2a_base_url == "http://bot-a1b2-vc.stable.alipay.net:32196"
+        assert result.a2a_auth == "proxypass"
 
     def test_custom_port_and_path(self):
         """Custom port and path are passed to API."""

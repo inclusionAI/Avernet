@@ -727,6 +727,16 @@ def test_an_empty_a2a_address_offers_no_socket():
     assert [s.kind for s in _build(_svc(devices=devices)).sockets] == ["chat"]
 
 
+def test_credentialed_a2a_headers_are_not_added_to_ws():
+    devices = _Devices(a2a_base_url="https://proxy.example/proxypass/tgt",
+                       a2a_proxy_token="proxy-token")
+    sockets = _build(_svc(devices=devices)).sockets
+    assert sockets[0].headers == {}
+    assert sockets[0].url == _build(_svc()).sockets[0].url
+    assert sockets[1].headers == {"X-PROXYPASS-TOKEN": "proxy-token"}
+    assert "proxy-token" not in repr(sockets[1])
+
+
 def test_the_a2a_socket_is_offered_for_a_bare_target_provider_too():
     """The a2a socket hangs on the provider's answer, not on which branch the
     *chat* URL took: an ARCA-shaped provider (bare target, composed onto the
@@ -787,18 +797,18 @@ def test_an_unparseable_provider_value_is_not_published_verbatim():
     assert abs((expires - expected).total_seconds()) < 60
 
 
-def test_neither_socket_model_carries_a_headers_field():
-    """The credential lives in the URL and only there. A ``headers`` field would
-    publish it twice and leave a caller guessing which copy the socket honours —
-    and a browser could not use that copy anyway."""
+def test_ws_credential_still_lives_only_in_url_and_rejects_http_headers():
+    """Only A2A may carry HTTP headers; the WS wire shape stays unchanged."""
     from agentclaw.community.adapters.http.openapi_v1.engine_runtime.connection.schemas import (  # noqa: E501
         Socket,
     )
-    from agentclaw.community.core.engine_runtime.models import SocketInfo
-
-    assert not hasattr(_build(_svc()).sockets[0], "headers")
-    assert {f.name for f in dataclasses.fields(SocketInfo)} == {"kind", "url"}
-    assert set(Socket.model_fields) == {"kind", "url"}
+    socket = _build(_svc()).sockets[0]
+    assert socket.headers == {}
+    assert Socket(**dataclasses.asdict(socket)).model_dump() == {
+        "kind": "chat", "url": socket.url,
+    }
+    with pytest.raises(ValueError, match="only supported for A2A"):
+        Socket(kind="chat", url=socket.url, headers={"X-PROXYPASS-TOKEN": "wrong"})
 
 
 def test_result_exposes_no_field_beside_the_url_to_compose_with():
@@ -819,7 +829,8 @@ def test_result_exposes_no_field_beside_the_url_to_compose_with():
         "transport_mode",
         "a2a_withheld",
     }
-    assert {f.name for f in dataclasses.fields(result.sockets[0])} == {"kind", "url"}
+    assert {f.name for f in dataclasses.fields(result.sockets[0])} == {"kind", "url", "headers"}
+    assert result.sockets[0].headers == {}
 
 
 # ── the operator gate ─────────────────────────────────────────────────────

@@ -262,6 +262,7 @@ class BotWsConnectionInfoResponse:
     engine_port: int = 20003
     tenant: str = ""
     bot_uuid: str = ""
+    a2a_auth: str = ""
 
 
 @dataclass
@@ -2097,6 +2098,7 @@ class BaasService:  # pragma: no cover
                 expires_at=data["expires_at"],
                 # 加性透传：旧 BaaS 不回该键时 .get 落空串，行为同未升级。
                 a2a_base_url=str(data.get("a2a_base_url") or ""),
+                a2a_auth=str(data.get("a2a_auth") or ""),
                 paas_device_id=bot_uuid,
                 baas_base_url=self._baas_api_base,
                 tenant=effective_tenant,

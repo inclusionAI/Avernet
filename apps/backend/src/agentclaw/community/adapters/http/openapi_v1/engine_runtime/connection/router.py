@@ -249,7 +249,7 @@ async def get_connection(
                 if result.transport_mode
                 else {}
             ),
-            sockets=[Socket(kind=s.kind, url=s.url) for s in result.sockets],
+            sockets=[Socket(kind=s.kind, url=s.url, headers=s.headers) for s in result.sockets],
         ),
         request,
     )

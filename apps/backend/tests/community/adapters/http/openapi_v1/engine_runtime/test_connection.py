@@ -156,6 +156,16 @@ def test_no_capability_probe_is_needed(client, relay):
     assert relay.calls == []
 
 
+def test_a2a_http_headers_survive_response_validation_without_changing_ws(client, connections):
+    connections.extra_socket = SocketInfo(
+        kind="a2a", url="https://proxy.example/proxypass/ARCA_test:20003",
+        headers={"X-PROXYPASS-TOKEN": "proxy-token"},
+    )
+    data = ok(client.get(URL))
+    assert set(data["sockets"][0]) == {"kind", "url"}
+    assert data["sockets"][1]["headers"] == {"X-PROXYPASS-TOKEN": "proxy-token"}
+
+
 def test_payload_never_exposes_routing_internals(client, relay):
     """No target, type, or bare token field — that hand-off is what this
     endpoint exists to replace. ``a2a_withheld`` is the allowed governance
