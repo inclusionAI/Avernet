@@ -212,6 +212,9 @@ echo 'PASS: QwenWork authorization survives regeneration'
 # tracked template, and the initial start is allowed before provisioning.
 unset SINGLEBOX_QWENWORK_PROVIDER_STATE
 write_local_template
+export BCS_E2E_APP_IDENTITY=1
+prepare_bcs_runtime_config
+assert_not_contains "${BCS_CONFIG_DIR}/bcs-config.toml" 'e2e-loopback-identity'
 export SINGLEBOX_COVERAGE=1
 export SINGLEBOX_ACCEPTANCE_REPAIR_PROVIDER_FILE="${TEST_ROOT}/repair-provider.json"
 prepare_bcs_runtime_config
@@ -222,7 +225,9 @@ assert_contains "${BCS_CONFIG_DIR}/bcs-config.toml" 'allowed_switch_provider_ids
 assert_contains "${BCS_CONFIG_DIR}/bcs-config-local.toml" 'allowed_switch_provider_ids = ["prv_repair_coverage"]'
 assert_not_contains "${BCS_DIR}/configs/bcs-config-local.toml" 'prv_repair_coverage'
 assert_not_contains "${BCS_CONFIG_DIR}/bcs-config.toml" 'test-token'
-unset SINGLEBOX_COVERAGE
+assert_contains "${BCS_CONFIG_DIR}/bcs-config.toml" 'plugin = "e2e-loopback-identity"'
+assert_not_contains "${BCS_DIR}/configs/bcs-config-local.toml" 'e2e-loopback-identity'
+unset SINGLEBOX_COVERAGE BCS_E2E_APP_IDENTITY
 if prepare_bcs_runtime_config >/dev/null 2>&1; then
     fail "Provider fixture must be rejected outside coverage mode"
 fi
