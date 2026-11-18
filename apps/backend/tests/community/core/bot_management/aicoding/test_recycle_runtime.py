@@ -226,6 +226,7 @@ def test_unconfigured_arca_transport_fails_closed():
     (404, "DEVICE_NOT_FOUND"), (404, "NOT_FOUND"), (404, "BOT_NOT_FOUND"),
     (404, "TEMPLATE_NOT_FOUND"), (404, "DEVICE_UNAVAILABLE"),
     (500, "DEVICE_NOT_FOUND"), (500, "DEVICE_DESTROY_FAILED"),
+    (503, "DEVICE_UNAVAILABLE"), (503, "DEVICE_NOT_FOUND"),
     (401, "DEVICE_NOT_FOUND"), (403, "DEVICE_NOT_FOUND"),
 ])
 def test_only_typed_physical_not_found_confirms_destruction(status, code):
