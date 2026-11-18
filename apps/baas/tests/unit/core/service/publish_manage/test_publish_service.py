@@ -1169,6 +1169,25 @@ class TestDeviceDrain:
             assert result.timeout_reached is False
 
     @pytest.mark.asyncio
+    async def test_drain_state_unknown_fails_closed(self):
+        """An unreadable session store must not authorize a destructive update."""
+        with patch.object(
+            _publish_service_instance,
+            "_get_active_sessions",
+            new_callable=AsyncMock,
+            return_value=None,
+        ):
+            result = await _publish_service_instance._drain_device(
+                tenant="test_tenant",
+                device_id=1,
+                timeout_seconds=30,
+            )
+
+        assert result.success is False
+        assert result.timeout_reached is False
+        assert result.sessions_remaining == 0
+
+    @pytest.mark.asyncio
     async def test_drain_timeout(self):
         """SVC-PUB-10: Drain timeout enforcement (default 30s)"""
         # Simulate sessions that never complete
@@ -3268,8 +3287,8 @@ class TestGetActiveSessions:
             )
 
     @pytest.mark.asyncio
-    async def test_get_active_sessions_returns_zero_when_no_device(self):
-        """Test that _get_active_sessions returns 0 when device not found."""
+    async def test_get_active_sessions_returns_none_when_no_device(self):
+        """Test that _get_active_sessions reports unknown when device not found."""
         _publish_service_instance._device_repo = MagicMock()
         _publish_service_instance._device_repo.get_by_id.return_value = (
             None  # Device not found
@@ -3283,11 +3302,11 @@ class TestGetActiveSessions:
                 tenant="test-tenant", device_id=999
             )
 
-            assert count == 0
+            assert count is None
 
     @pytest.mark.asyncio
     async def test_get_active_sessions_handles_exception(self):
-        """Test that _get_active_sessions returns 0 on error (graceful degradation)."""
+        """Test that _get_active_sessions reports unknown on a read error."""
         _publish_service_instance._device_repo = MagicMock()
         _publish_service_instance._device_repo.get_by_id.side_effect = Exception(
             "Database error"
@@ -3301,8 +3320,7 @@ class TestGetActiveSessions:
                 tenant="test-tenant", device_id=1
             )
 
-            # Should return 0 on error to allow drain to proceed
-            assert count == 0
+            assert count is None
 
     @pytest.mark.asyncio
     async def test_get_active_sessions_zero_sessions(self):
