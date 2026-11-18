@@ -27,6 +27,8 @@ from agentclaw.community.api.collaborator_lock_service import (
 )
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
 from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayProtocol
+from agentclaw.community.api.session_source_listing import SessionSourceListingProtocol
+from agentclaw.community.core.engine_runtime.session_listing import SessionSourceListingService
 from agentclaw.community.api.expert_chat_service import ExpertChatServiceProtocol
 from agentclaw.community.api.human_bot_friendship_service import (
     HumanBotFriendshipServiceProtocol,
@@ -165,7 +167,7 @@ class FakeRelay:
 
 
 def bind_session_key_codecs(binder) -> None:
-    """Bind the production session-key codec registry.
+    """Bind session support dependencies used by the minimal test routers.
 
     The real composition, not a stand-in: which engine gets which codec is
     ``EngineRuntimeModule``'s decision, so a registration dropped there has to
@@ -175,6 +177,7 @@ def bind_session_key_codecs(binder) -> None:
     binder.bind(
         SessionKeyCodecRegistry, to=EngineRuntimeModule().session_key_codec_registry()
     )
+    binder.bind(SessionSourceListingProtocol, to=SessionSourceListingService)
 
 
 def bind_seam_from_relay(binder, relay: FakeRelay) -> None:

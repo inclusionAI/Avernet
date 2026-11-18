@@ -221,6 +221,8 @@ from agentclaw.community.core.caller_identity.contracts import (
 from agentclaw.community.core.engine_runtime.errors import (
     EngineBotTypeNotSupportedError,
     EngineHistoryDepthExceededError,
+    EngineSessionCursorError,
+    EngineSessionScanDepthError,
     EngineCapabilityUnsupportedError,
     EngineDeviceNotReadyError,
     EngineResourceNotFoundError,
@@ -780,6 +782,8 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # Byte-identical to the other 404s above, so an engine-side missing resource
     # cannot be distinguished from a bot that is not the caller's.
     EngineResourceNotFoundError: (404, "Not found"),
+    EngineSessionCursorError: (422, "Invalid session source cursor or window"),
+    EngineSessionScanDepthError: (422, "Session source scan depth limit reached; more sessions may exist"),
     EngineUpstreamError: (502, "Engine service error"),
     # Base of the Engine* errors above — LAST of its group.
     EngineRuntimeError: (500, "Internal error"),

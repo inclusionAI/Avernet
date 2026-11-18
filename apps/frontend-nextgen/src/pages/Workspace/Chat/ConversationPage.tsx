@@ -33,7 +33,7 @@ import { useConversationSessionPlaceholder } from './hooks/useConversationSessio
 import { useConversationSessions } from './hooks/useConversationSessions';
 import { useConversationUrlSync } from './hooks/useConversationUrlSync';
 import { useLegacyShareLinkGuard } from './hooks/useLegacyShareLinkGuard';
-import { useManagedBotOthers } from './hooks/useManagedBotOthers';
+import { useLegacyFriendOthers } from './hooks/useLegacyFriendOthers';
 
 export default function ConversationPage(): JSX.Element {
   const { identity: human } = useHumanIdentity();
@@ -60,11 +60,7 @@ export default function ConversationPage(): JSX.Element {
     friendBots: directory.friendBots,
     sessions,
   });
-  const others = useManagedBotOthers({
-    userId,
-    managedBots: managedAndTeamBots,
-    enabled: true,
-  });
+  const others = useLegacyFriendOthers(userId, managedAndTeamBots);
   // 创建入口弹窗空间下拉数据(2026-11-05 验收微调,同日二轮):复用全局空间上下文并按
   // 侧栏切换顺序排序(个人空间置顶+团队 gmtModified 倒序,与 SpaceSwitcher 共享同一函数,
   // 验收问题「弹窗与左栏顺序不一致」的对齐);默认选中当前空间,确认后带空间上下文跳 Bot 管理页。
@@ -147,6 +143,8 @@ export default function ConversationPage(): JSX.Element {
   // 只读(others)装配:三元组不完整时 Hook 内部只清态不发请求。
   const selectionIsReadonly = origin === 'others' && selectedCodingBot === null && store.selectedBotId !== null;
   const readonlyHistory = useConversationHistory({
+    userId,
+    range: (readonly.bot ? getCapabilities().getConversationInstanceScope().value?.getSessionRange(readonly.bot) : undefined) ?? undefined,
     bot: selectionIsReadonly ? readonly.bot : null,
     friendUserId: selectionIsReadonly ? store.selectedFriendUserId : null,
     sessionId: selectionIsReadonly ? store.selectedSessionId : null,

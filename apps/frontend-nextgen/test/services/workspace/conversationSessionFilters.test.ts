@@ -44,7 +44,7 @@ const sessionItem = {
 const sessionsEnvelope = (items: unknown[], total = items.length) => ({
   code: 20000,
   message: 'OK',
-  data: { items, total },
+  data: { items, total, source: 'mine', has_more: false, next_cursor: null },
   request_id: 'sessions',
 });
 
@@ -107,7 +107,7 @@ describe('conversationService.listManagedSessions with session key', () => {
 
     expect(mocked.listBotSessions).toHaveBeenCalledWith(
       'bot-a',
-      expect.objectContaining({ user_id: '900003', owner_id: '2088', page: 2, page_size: 20, session_key: 'agent:main:x' }),
+      expect.objectContaining({ user_id: '900003', owner_id: '2088', page: 1, page_size: 20, session_key: 'agent:main:x', source: 'mine' }),
     );
     // 收藏改由列表展示后后台补全，Service 不阻塞普通会话读取。
     expect(mocked.listFavoriteSessions).not.toHaveBeenCalled();

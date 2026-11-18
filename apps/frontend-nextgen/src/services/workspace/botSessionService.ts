@@ -83,6 +83,9 @@ export interface BotChatSessionView {
 export interface BotSessionPageView {
   items: BotChatSessionView[];
   total: number;
+  hasMore?: boolean;
+  nextCursor?: string | null;
+  scanLimited?: boolean;
 }
 
 export const BOT_SESSION_PAGE_SIZE = 10;

@@ -9,6 +9,7 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 jest.mock('@/services/workspace/managedBotConversationService', () => ({
   managedBotConversationService: {
     listOtherMessages: require('jest-mock').fn(),
+    listOperatorMessages: require('jest-mock').fn(),
   },
 }));
 
@@ -56,6 +57,18 @@ beforeEach(() => {
 });
 
 describe('useConversationHistory', () => {
+  it('reads a flat others session as the authenticated operator without friend identity', async () => {
+    service.listOperatorMessages.mockResolvedValue(success([message('operator')], 1));
+    const range = { deviceUuid: 'instance', stage: 'online' as const };
+    const { result } = renderHook(() => useConversationHistory({
+      bot: { ...managedBot, isTeamBot: true }, userId: 'collaborator', friendUserId: null, sessionId: 's1', range,
+    }));
+    await waitFor(() => expect(result.current.messages).toHaveLength(1));
+    expect(service.listOperatorMessages).toHaveBeenCalledWith(
+      expect.objectContaining({ isTeamBot: true }), 'collaborator', 's1', 1, range,
+    );
+    expect(service.listOtherMessages).not.toHaveBeenCalled();
+  });
   it('loads the first page and decides hasMore from raw count/total', async () => {
     service.listOtherMessages.mockResolvedValue(success([message('new-2'), message('new-1', 'user')], 3, 1, true));
 

@@ -1,5 +1,5 @@
-// 会话列表 Hook:管理/团队空间 Bot(origin=mine)与好友 Bot 会话；managedBots 参数包含管理和团队目录。
-// origin=others 由 useManagedBotOthers 负责；列表首拉/分页与写操作互斥。
+// 会话列表 Hook:管理/团队 Bot 的 mine/others 来源窗口，以及好友 Bot 会话。
+// 来源由后端筛选；列表首拉/游标续查与写操作互斥。
 // 缓存态拼装/写复用 ./conversationSessionCache;分页请求生命周期(代次/去重/写回校验)
 // 拆至 ./conversationSessionPageRequest(文件大小阈值,行为不变)。
 import { extractCodingSessionCreatorUserId } from '@/domain/conversation/codingSessionOwnership';
@@ -85,15 +85,9 @@ export function useConversationSessions(options: {
     loadSessionPage(requestCtx, actions.isPending, view, more),
   ).current;
   const ensureViewLoaded = useRef((view: ConversationBotView): void => {
-    const botId = view.bot.botId;
-    // origin=others 的管理 Bot 会话由 useManagedBotOthers 接管,这里不加载。
-    if (isManagedConversationSection(view.section)) {
-      if ((useConversationStore.getState().effectiveScopeByManagedBotId[botId] ?? 'all') === 'archived') return;
-      const origin = useConversationStore.getState().originByManagedBotId[botId] ?? 'mine';
-      // Coding Bot 的会话接口返回共享实例内的混合创建者列表，others 也由
-      // 同一列表按 sessionId 分流；普通 Bot 仍由 useManagedBotOthers 的好友模型承接。
-      if (origin !== 'mine' && !view.bot.isAgentCodingBot) return;
-    }
+    if (isManagedConversationSection(view.section) &&
+        (useConversationStore.getState().effectiveScopeByManagedBotId[view.bot.botId] ?? 'all') === 'archived') return;
+    // mine/others 均消费后端来源窗口；不再按好友目录逐组拉取。
     loadPage(view, false);
   }).current;
   const scopeSignature = useMemo(
@@ -151,7 +145,7 @@ export function useConversationSessions(options: {
       const scope = isManagedConversationSection(section) ? store.effectiveScopeByManagedBotId[botId] ?? 'all' : 'all';
       const view = botByBotId.get(botId);
       const origin =
-        isManagedConversationSection(section) && view?.bot.isAgentCodingBot
+        isManagedConversationSection(section)
           ? store.originByManagedBotId[botId] ?? 'mine'
           : 'mine';
       // 行来源于当前列表缓存;写选中前保留会话快照,过滤重建列表后主会话仍可解析。

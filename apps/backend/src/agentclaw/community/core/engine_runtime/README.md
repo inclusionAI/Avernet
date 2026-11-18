@@ -16,6 +16,7 @@ provides:
   - "SessionKeyCodec / SessionKeyCodecRegistry — the engine-specific wire form of a session id (assembled by EngineRuntimeModule)"
   - "Engine-runtime domain errors (no HTTP status; the adapter maps them)"
   - "DesktopConnectionServiceProtocol — owner-affined desktop WebSocket discovery"
+  - "SessionSourceListingProtocol — bounded caller-relative session windows"
 consumes:
   - "RuntimeBotLookup — lightweight scoped legacy/entity address resolution; operator authorization remains in gate"
   - "DeviceContextResolver — bot -> DeviceContext (the repo's single provider-resolution point)"
@@ -76,6 +77,46 @@ are load-bearing and must survive any refactor:
 
 Adding a group means adding a router, not a relay method: `call()` is a generic
 forward on purpose.
+
+### Opt-in session source windows
+
+`SessionSourceListingService` consumes the existing relay after the operator
+gate has resolved `BotFacts`. Owners and explicit collaborators can request
+`source=mine|others`; caller identity always comes from the authenticated actor,
+not the Bot's owner locator. Omitted source preserves the existing single-read
+page-number behavior. For `mine`, verified OpenClaw and AICoding/Claude Code
+implementations receive `user_id=authenticated caller` and
+`source=all_but_others`, regardless of Owner/collaborator role. One native-filtered
+offset window is read, preserving the existing Owner filter's treatment of
+unknown keys (including some channel sessions). No second creator filter is applied.
+Other engines' `mine`, and all `others` queries, consume the unfiltered
+offset/limit list and use the fallback scanner below. Upstream errors propagate;
+they do not trigger an unfiltered retry masquerading as a successful native filter.
+
+Creator parsing supports the historical `user:<id>:...`, `...:user:<id>` and
+`...:direct:<id>` keys, case-insensitive with numeric leading-zero normalization.
+The engine's `user_id` field denotes the reader and is not creator evidence.
+Unknown and synthetic task identities stay in `mine` for owner-style compatibility
+and do not enter `others`. This is a visibility convenience, not an authorization
+rule or a strict audit of human-created sessions.
+
+The scanner performs at most two reads of at most `page_size+1` candidates each,
+with a three-second await/transport budget. Cursors resume the consumed **raw**
+offset for fallback scans, or the filtered offset for native mine, with no
+server-side data or permission cache. Strategy is part of the cursor scope.
+They bind the caller, resolved Bot/owner, engine, stage, instance and filters;
+they are not secret or authorization tokens. Every continuation is reauthorized.
+Concurrent insertions/deletions can shift offsets; this is not a snapshot export.
+Never infer exhaustion from a short/empty filtered window. Follow `has_more` and
+`next_cursor`; `scan_limited` says the bounded scan stopped early. Continuing
+beyond 2000 candidates returns an explicit error, not a false final page.
+The cumulative returned-match `total` is a lower bound, not the engine total.
+
+No cross-instance aggregation, new friend privileges, writes or message-history
+permissions are introduced. `f_user_id` cannot be combined with source filtering.
+Provider connection work already running in a blocking thread may finish after
+an await timeout; the per-request read bound also limits that outstanding work.
+Public request/response details live in [the Engine surface guide](../../../../../docs/openapi-v1/engine-surface.md).
 
 ### Runtime read budget
 

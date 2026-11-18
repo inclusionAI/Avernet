@@ -1,5 +1,5 @@
 // 对话页二级侧栏:搜索 + 我管理的 Bot / 我协作的 Bot / 好友 Bot 三组目录(组名按 dmore index.html 侧栏实测);
-// 协作组数据走独立 collaborations 目录(section=team,独立加载/错误/重试,他人会话开发中暂禁)。
+// 协作组数据走独立 collaborations 目录，mine/others 会话共用后端来源筛选。
 // 本体(ConversationSidebarContent)与外壳分离:桌面端用 ResizableWorkspaceSidebar,
 // <lg 由页面(任务 8)以 Drawer 包裹同一 Content,保证两端一致。
 // 组件只消费 Store 状态与同步 setter / Hook 模型回调,不触达 Service。
