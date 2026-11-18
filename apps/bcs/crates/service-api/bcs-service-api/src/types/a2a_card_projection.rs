@@ -336,4 +336,93 @@ mod tests {
             );
         }
     }
+
+    /// Cards admitted by management must project without errors: projection
+    /// derives the generic fields from the very same committed Card, so a
+    /// divergence between the two validators broke registration of cards that
+    /// management had just declared valid (the `{}` anonymous alternative).
+    ///
+    /// The matrix covers every securityRequirements shape management accepts:
+    /// absent, empty, both anonymous alternatives, declared schemes with and
+    /// without scopes, mixed anonymous/scoped entries, and skill-level entries.
+    /// It grows with the acceptance rules: extend it whenever management adds
+    /// another shape instead of re-deriving the fixture by hand.
+    #[test]
+    fn management_admitted_cards_project_without_errors() {
+        let scoped_scheme = json!({"schemes": {"oauth": {"list": ["orders:read"]}}});
+        // Management requires an anonymous alternative in every requirements
+        // list (ANONYMOUS_PATH_REQUIRED), so each root-level fixture pairs the
+        // shape under test with the `{}` anonymous alternative.
+        for requirements in [
+            json!([]),
+            json!([{}]),
+            json!([{"schemes": {}}]),
+            json!([{}, {"schemes": {}}]),
+            json!([scoped_scheme.clone(), {}]),
+            json!([{}, scoped_scheme.clone()]),
+            json!([{"schemes": {"oauth": {"list": ["orders:read", "billing:read"]}}}, {}]),
+            json!([{"schemes": {"oauth": {}, "oauth2": {"list": ["orders:read"]}}}, {}]),
+            json!([{"schemes": {
+                "oauth": {"list": ["orders:read"]},
+                "httpAuth": {"list": ["billing:read"]}
+            }}, {}]),
+        ] {
+            let card = anonymous_admission_card(json!({
+                "securityRequirements": requirements,
+                "skills": [{
+                    "id": "query",
+                    "name": "Query",
+                    "description": "Queries",
+                    "tags": ["orders"],
+                    "securityRequirements": [scoped_scheme.clone(), {}]
+                }]
+            }));
+            assert!(
+                bcs_domain::a2a_management::validate_management_card(&card).is_ok(),
+                "fixture rejected by management, adjust the matrix: {card}"
+            );
+            assert!(
+                project_agent_card_capabilities(Some(&card)).is_ok(),
+                "management-admitted card failed projection: {card}"
+            );
+        }
+        // Absent root-level securityRequirements is admitted as well.
+        let absent = anonymous_admission_card(json!({
+            "skills": [{"id": "query", "name": "Query", "description": "Queries", "tags": []}]
+        }));
+        assert!(bcs_domain::a2a_management::validate_management_card(&absent).is_ok());
+        assert!(project_agent_card_capabilities(Some(&absent)).is_ok());
+        // A scoped entry must keep its scopes through projection, not merely
+        // fail to error.
+        let scoped = anonymous_admission_card(json!({
+            "securityRequirements": [scoped_scheme, {}],
+            "skills": []
+        }));
+        let projected = project_agent_card_capabilities(Some(&scoped)).unwrap();
+        assert_eq!(projected.scopes, Some(vec!["orders:read".into()]));
+    }
+
+    /// Minimal AgentCard that passes management admission: every field the
+    /// validator requires, nothing else. `extras` overrides or extends it.
+    fn anonymous_admission_card(extras: Value) -> Value {
+        let mut card = json!({
+            "name": "Projection Matrix Bot",
+            "description": "Card accepted by management admission",
+            "version": "1.0",
+            "defaultInputModes": ["text/plain"],
+            "defaultOutputModes": ["text/plain"],
+            "supportedInterfaces": [{
+                "protocolBinding": "HTTP+JSON",
+                "protocolVersion": "1.0",
+                "url": "http://example.test/bcs/a2a"
+            }],
+            "capabilities": {"streaming": true, "pushNotifications": false},
+            "skills": [],
+            "securitySchemes": {"oauth": {}, "oauth2": {}, "httpAuth": {}}
+        });
+        for (key, value) in extras.as_object().into_iter().flatten() {
+            card.as_object_mut().unwrap().insert(key.clone(), value.clone());
+        }
+        card
+    }
 }
