@@ -80,10 +80,7 @@ from agentclaw.community.core.engine_runtime.errors import (
 from agentclaw.community.core.engine_runtime.session_key import SessionKeyCodecRegistry
 from agentclaw.community.core.resources.service import FileTooLargeError
 from agentclaw.community.core.runtime_binding.models import RuntimeBindingRequest
-from agentclaw.community.core.expert_chat.errors import (
-    BotNotFoundError as ExpertBotNotFoundError,
-    ConnectionError as ExpertConnectionError,
-)
+from .listing import list_sessions, _raise_expert_error
 from agentclaw.community.di import Injected
 from agentclaw.community.utils.runtime_list_timing import mark
 router = APIRouter(
@@ -91,6 +88,7 @@ router = APIRouter(
     tags=["sessions"],
     route_class=PublicAPIRoute,
 )
+router.add_api_route("", list_sessions, methods=["GET"], response_model=Envelope[SessionPage])
 
 #: The path parameter naming the session an operation addresses.
 SessionIdPath = Annotated[
@@ -116,85 +114,6 @@ _LOOKAHEAD = 1
 #: Generous for a conversation; bounded enough that a page number cannot be
 #: turned into device load.
 _MAX_HISTORY_DEPTH = 5000
-
-def _raise_expert_error(error: Exception) -> None:
-    if isinstance(error, ExpertBotNotFoundError):
-        raise EngineResourceNotFoundError("friend session not found") from error
-    if isinstance(error, ExpertConnectionError):
-        raise EngineDeviceNotReadyError("friend bot runtime is not ready") from error
-    raise error
-
-
-@router.get("", response_model=Envelope[SessionPage])
-@envelope_errors
-async def list_sessions(
-    bot_id: BotIdPath,
-    page: PageParamsDep,
-    user_id: UserIdDep,
-    owner_id: OwnerIdDep,
-    request: Request,
-    stage: StageQuery = RuntimeStage.DRAFT,
-    device_uuid: DeviceUuidQuery = None,
-    f_user_id: FriendUserIdQuery = None,
-    agent_id: Annotated[
-        str | None, Query(description="Only sessions belonging to this agent.")
-    ] = None,
-    session_key: Annotated[
-        str | None,
-        Query(
-            description="Only the session with this key. Pass the value "
-            "verbatim; no encoding is required."
-        ),
-    ] = None,
-    relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
-    friendships: HumanBotFriendshipServiceProtocol = Injected(HumanBotFriendshipServiceProtocol),
-    expert: ExpertChatServiceProtocol = Injected(ExpertChatServiceProtocol),
-) -> Envelope[SessionPage]:
-    """List the bot's sessions."""
-    mark("handler")
-    facts = await _resolve_session_backend(
-        relay=relay, friendships=friendships, expert=expert, request=request,
-        bot_id=bot_id, user_id=user_id, owner_id=owner_id, friend_user_id=f_user_id, stage=stage, device_uuid=device_uuid,
-    )
-    params: dict[str, Any] = _window(page)
-    if (facts.owner_id if facts is not None else owner_id) == user_id:
-        params.update(user_id=user_id, source="all_but_others")
-    if agent_id:
-        params["agent_id"] = agent_id
-    # Both filters are applied upstream, *before* the engine paginates — so
-    # they have to travel with the window rather than being applied to what
-    # came back, or the page boundaries would not line up with the filter.
-    if session_key:
-        params["session_key"] = session_key
-    if facts is None:
-        try:
-            friend_result = await expert.list_chat_sessions(
-                user_id=f_user_id, bot_id=bot_id, owner_id=owner_id,
-                session_key=session_key, limit=params["limit"],
-                offset=params["offset"],
-                iam_token=request.cookies.get("IAM_TOKEN") or None,
-                bcn_friend_authorized=True, actor_user_id=user_id,
-            )
-        except Exception as error:
-            _raise_expert_error(error)
-        mapped = [_map_session(d) for d in _as_list(friend_result)]
-        total, items = _page(mapped, page, reported=friend_result.get("total"))
-        return page_envelope(total, items, request)
-    result = await relay.call(
-        bot_id=bot_id,
-        owner_id=owner_id,
-        facts=facts,
-        stage=stage.value,
-        **({"device_uuid": device_uuid} if device_uuid is not None else {}),
-        method="GET",
-        path="/api/sessions",
-        params=params,
-    )
-    mapped = [_map_session(d, engine_type=facts.active_engine) for d in _as_list(result.data)]
-    # The session list reports no total; derive it from the window.
-    total, items = _page(mapped, page, reported=result.total)
-    return page_envelope(total, items, request)
-
 
 @router.post("", status_code=201, response_model=Envelope[Session])
 @envelope_errors

@@ -119,12 +119,10 @@ Regression coverage lives in
 [`GroupMemberAvatar.test.tsx`](test/components/CollaborationSquare/GroupMemberAvatar.test.tsx)
 and [`GroupOwnerDisplay.test.tsx`](test/components/CollaborationSquare/GroupOwnerDisplay.test.tsx).
 
-## Collaborating Bot conversations
+## Legacy friend-user deep links
 
-In “对话 → 我协作的 Bot”, “我发起” remains available; the visible “他人发起”
-filter button is temporarily disabled pending a bug fix. Managed Bot filters are
-unchanged, and an existing other-user selection can still switch back to “我发起”.
-The underlying other-user conversations reuse the managed Bot friend-group flow:
+New managed/collaborating Bot source lists use the flat source-window flow below.
+Existing `friend=` deep links retain the managed Bot friend-group flow:
 friend users load under the Bot's composite actor ID, and session/message reads
 retain the owner context, normalized friend ID, pagination and runtime stage.
 Other-user browsing is read-only; it does not enable session writes, a composer
@@ -189,6 +187,28 @@ requests are GET-only; write actions stay unsupported, and read failures never
 fall back to demo data. Fixture modules are not reachable from the formal page.
 See the [approved feature scope and validation handoff](specs/2026-11-18-task-escort-readonly/spec.md)
 and its [file ownership manifest](specs/2026-11-18-task-escort-readonly/ownership-manifest.json).
+## Conversation session origins
+
+The conversation sidebar uses Backend `sessions?source=mine|others` for managed
+and collaborating Bots. Both sources render flat lists ordered by the loaded
+sessions' modified time descending (creation time is the fallback). Later
+windows are merged, deduplicated by session ID and sorted again; this is not a
+global sort over sessions that have not been loaded.
+
+Source queries keep `page=1`, send the authenticated Human as `user_id`, the
+real Bot owner as `owner_id`, and preserve runtime stage, instance and session-key
+filters. Continuation uses `next_cursor`, never the cumulative `total` or the
+number of returned items. A short/empty scan window with `has_more=true` exposes
+“继续加载” rather than a false empty state; no automatic unbounded scan runs in
+the browser. Filter revisions and user generations reject stale responses.
+
+Others remain read-only: history uses the current operator, not `f_user_id` or an
+impersonated Owner. Favorites and friend Bots retain their separate existing
+flows; old `friend=` deep links retain the legacy friend view. Coding Bot
+visibility policy remains applied without reclassifying Backend source results.
+Deploy Backend source-window support before this frontend: missing/mismatched
+source metadata produces an explicit unsupported error instead of presenting an
+unfiltered list as “mine”. See the [Backend contract](../backend/docs/openapi-v1/engine-surface.md).
 
 ## Source synchronization
 

@@ -39,7 +39,7 @@ export function ManagedItem({ view, props }: { view: ConversationBotView; props:
   const origin = store.originByManagedBotId[botId] ?? 'mine';
   const scope = store.effectiveScopeByManagedBotId[botId] ?? 'all';
   const cache = store.sessionsByBotId[botId];
-  const flatCodingSharedSessions = view.bot.isAgentCodingBot === true && origin !== 'mine';
+  const flatCodingSharedSessions = origin === 'others' || (view.bot.isAgentCodingBot === true && origin === 'collab');
   const visibleSessions =
     cache && cache.origin === origin && cache.scope === scope && (origin === 'mine' || flatCodingSharedSessions)
       ? cache.sessions

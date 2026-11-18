@@ -447,155 +447,40 @@ describe('ConversationSidebar', () => {
     expect(screen.queryByRole('button', { name: '添加 Bot' })).not.toBeInTheDocument();
   });
 
-  it('renders read-only others sessions without interactive actions and opens via onOpenSession', () => {
-    const onOpenSession = jest.fn();
+  it.each([false, true])('renders flat readonly others sessions, team=%s', (team) => {
+    const view = team ? teamBot : managedBotA;
+    const botId = view.bot.botId;
     const store = seedStore((s) => {
-      s.setExpandedBot('bot-a:2088', true);
-      s.setManagedBotOrigin('bot-a:2088', 'others');
-      s.setManagedBotCache('bot-a:2088', {
-        botId: 'bot-a:2088',
-        origin: 'others',
-        scope: 'all',
-        sessions: emptyList(),
-        friendDirectory: { items: [{ userId: '447147', displayName: '风太' }], loading: false, error: null },
-        friendGroups: {
-          '447147': {
-            friend: { userId: '447147', displayName: '风太' },
-            state: 'loaded',
-            sessions: { ...emptyList(), items: [sessionOf('s-o')] },
-            expanded: true,
-          },
-        },
+      s.setExpandedBot(botId, true);
+      s.setManagedBotOrigin(botId, 'others');
+      s.setManagedBotCache(botId, {
+        botId, origin: 'others', scope: 'all',
+        sessions: { ...emptyList(), items: [sessionOf('s-o', botId)] },
+        friendDirectory: { items: [], loading: false, error: null }, friendGroups: {},
       });
-      s.setExpandedFriend('bot-a:2088', '447147', true);
     });
-    render(
-      <ConversationSidebar
-        {...sidebarProps({ store, onOpenSession, friendBots: [], directory: directoryModel({ friendBots: [] }) })}
-      />,
-    );
-    expect(screen.getByText('风太')).toBeInTheDocument();
+    const props = sidebarProps({ store, managedBots: team ? [] : [managedBotA], friendBots: [], teamBots: team ? [teamBot] : [] });
+    render(<ConversationSidebar {...props} />);
     const row = screen.getByRole('button', { name: /^会话 s-o/ });
     fireEvent.click(row);
-    expect(onOpenSession).toHaveBeenCalledWith('bot-a:2088', 'managed', 's-o', '447147');
-    // 只读会话无交互动作。
+    expect(props.sessions.selectMineSession).toHaveBeenCalledWith(botId, 's-o');
+    expect(screen.queryByText('风太')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '新建会话' })).not.toBeInTheDocument();
   });
 
-  it('hides friend groups whose session request succeeded with zero items', () => {
+  it('keeps continuation visible for an empty bounded others window', () => {
+    const botId = managedBotA.bot.botId;
     const store = seedStore((s) => {
-      s.setExpandedBot('bot-a:2088', true);
-      s.setManagedBotOrigin('bot-a:2088', 'others');
-      s.setManagedBotCache('bot-a:2088', {
-        botId: 'bot-a:2088',
-        origin: 'others',
-        scope: 'all',
-        sessions: emptyList(),
-        friendDirectory: {
-          items: [
-            { userId: '447147', displayName: '风太' },
-            { userId: '555555', displayName: '李四' },
-          ],
-          loading: false,
-          error: null,
-        },
-        friendGroups: {
-          '447147': {
-            friend: { userId: '447147', displayName: '风太' },
-            state: 'loaded',
-            sessions: emptyList(),
-            expanded: true,
-          },
-          '555555': {
-            friend: { userId: '555555', displayName: '李四' },
-            state: 'loaded',
-            sessions: { ...emptyList(), items: [sessionOf('s-l', 'bot-a:2088')] },
-            expanded: true,
-          },
-        },
+      s.setExpandedBot(botId, true);
+      s.setManagedBotOrigin(botId, 'others');
+      s.setManagedBotCache(botId, {
+        botId, origin: 'others', scope: 'all',
+        sessions: { ...emptyList(), hasMore: true, nextCursor: 'next', scanLimited: true },
+        friendDirectory: { items: [], loading: false, error: null }, friendGroups: {},
       });
     });
     render(<ConversationSidebar {...sidebarProps({ store })} />);
-    expect(screen.queryByText('风太')).not.toBeInTheDocument();
-    expect(screen.getByText('李四')).toBeInTheDocument();
-  });
-
-  it('shows the others empty state when every friend group loaded with zero sessions', () => {
-    const store = seedStore((s) => {
-      s.setExpandedBot('bot-a:2088', true);
-      s.setManagedBotOrigin('bot-a:2088', 'others');
-      s.setManagedBotCache('bot-a:2088', {
-        botId: 'bot-a:2088',
-        origin: 'others',
-        scope: 'all',
-        sessions: emptyList(),
-        friendDirectory: {
-          items: [
-            { userId: '447147', displayName: '风太' },
-            { userId: '555555', displayName: '李四' },
-          ],
-          loading: false,
-          error: null,
-        },
-        friendGroups: {
-          '447147': {
-            friend: { userId: '447147', displayName: '风太' },
-            state: 'loaded',
-            sessions: emptyList(),
-            expanded: true,
-          },
-          '555555': {
-            friend: { userId: '555555', displayName: '李四' },
-            state: 'loaded',
-            sessions: emptyList(),
-            expanded: true,
-          },
-        },
-      });
-    });
-    render(<ConversationSidebar {...sidebarProps({ store })} />);
-    // 全部分组成功且零会话 → 分组隐藏 + AC-9 空态兜底。
-    expect(screen.queryByText('风太')).not.toBeInTheDocument();
-    expect(screen.queryByText('李四')).not.toBeInTheDocument();
-    expect(screen.getByText('暂无他人发起的会话')).toBeInTheDocument();
-  });
-
-  it('does not show the others empty state while any group is still unloaded', () => {
-    const store = seedStore((s) => {
-      s.setExpandedBot('bot-a:2088', true);
-      s.setManagedBotOrigin('bot-a:2088', 'others');
-      s.setManagedBotCache('bot-a:2088', {
-        botId: 'bot-a:2088',
-        origin: 'others',
-        scope: 'all',
-        sessions: emptyList(),
-        friendDirectory: {
-          items: [
-            { userId: '447147', displayName: '风太' },
-            { userId: '555555', displayName: '李四' },
-          ],
-          loading: false,
-          error: null,
-        },
-        friendGroups: {
-          '447147': {
-            friend: { userId: '447147', displayName: '风太' },
-            state: 'loaded',
-            sessions: emptyList(),
-            expanded: true,
-          },
-          // 未展开的好友尚未加载:隐藏的另一分组 ≠ 整区为空。
-          '555555': {
-            friend: { userId: '555555', displayName: '李四' },
-            state: 'unloaded',
-            sessions: emptyList(),
-            expanded: false,
-          },
-        },
-      });
-    });
-    render(<ConversationSidebar {...sidebarProps({ store })} />);
-    expect(screen.getByText('李四')).toBeInTheDocument();
+    expect(screen.getByText('当前范围尚未找到匹配会话，可继续加载')).toBeInTheDocument();
     expect(screen.queryByText('暂无他人发起的会话')).not.toBeInTheDocument();
   });
 

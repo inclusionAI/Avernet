@@ -328,7 +328,7 @@ describe('useConversationSessions', () => {
     expect(useConversationStore.getState().sessionsByBotId['bot-a:2088'].sessions.items[0]?.sessionId).toBe('fav-1');
   });
 
-  it('does not load managed sessions while the origin is others', async () => {
+  it('loads the backend others window for managed sessions', async () => {
     listManagedSessions.mockResolvedValue(okPage(['s1']));
     act(() => useConversationStore.getState().setManagedBotOrigin('bot-a:2088', 'others'));
     const { result } = renderSessions();
@@ -338,7 +338,7 @@ describe('useConversationSessions', () => {
       await Promise.resolve();
     });
 
-    expect(listManagedSessions).not.toHaveBeenCalled();
+    expect(listManagedSessions).toHaveBeenCalledWith(managedBot.bot, '327325', 'all', 1, 10, '', undefined, 'others');
   });
 
   it('loads friend Bot sessions through the friend path', async () => {
@@ -665,7 +665,7 @@ describe('我协作的 Bot 复用管理会话', () => {
     await act(async () => {
       await result.current.createSession(teamBot.bot.botId);
     });
-    expect(listManagedSessions).not.toHaveBeenCalled();
+    expect(listManagedSessions).toHaveBeenCalledWith(teamBot.bot, '327325', 'all', 1, 10, '', undefined, 'others');
     expect(listFriendBotSessions).not.toHaveBeenCalled();
     expect(createSession).not.toHaveBeenCalled();
     // 展开不写选中；来源记忆保持用户选择的 others。

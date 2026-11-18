@@ -178,7 +178,7 @@ describe('useConversationSelection 入向(URL → Store)', () => {
     expect(store.selectedSessionId).toBe('s1');
   });
 
-  it('origin=others 缺 friend:剔除 sessionId,投影不回写残缺组合(AC-13)', () => {
+  it('origin=others 平铺会话无需 friend，保留 sessionId', () => {
     const { result } = renderHook(() =>
       useConversationSelection({ managedBots: [managedView], friendBots: [], hydrated: true }),
     );
@@ -195,7 +195,7 @@ describe('useConversationSelection 入向(URL → Store)', () => {
     const store = useConversationStore.getState();
     expect(store.selectedBotId).toBe('bot-a:1');
     expect(store.selectedOrigin).toBe('others');
-    expect(store.selectedSessionId).toBeNull();
+    expect(store.selectedSessionId).toBe('s9');
     // 投影保持 origin=others 且无 session= 串。
     expect(result.current.selection).toEqual({
       botId: 'bot-a:1',
@@ -203,10 +203,10 @@ describe('useConversationSelection 入向(URL → Store)', () => {
       origin: 'others',
       scope: undefined,
       friendUserId: undefined,
-      sessionId: undefined,
+      sessionId: 's9',
     });
     expect(serializeConversationRoute(result.current.selection)).toBe(
-      `section=managed&bot=${encodeURIComponent('bot-a:1')}&origin=others`,
+      `section=managed&bot=${encodeURIComponent('bot-a:1')}&origin=others&session=s9`,
     );
   });
 });

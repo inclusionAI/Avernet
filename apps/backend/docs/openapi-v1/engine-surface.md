@@ -124,6 +124,46 @@ the `Envelope[T]` / `Page[T]` shapes from `openapi_v1/contracts.py`.
 
 Two things about this group are not the shape a reader would assume:
 
+**Opt-in source filtering:** `GET /bots/{bot_id}/sessions?source=mine|others`
+uses bounded cursor windows instead of the legacy page-number contract.
+`user_id` remains the authenticated caller; `owner_id` locates the Bot's real
+owner. Both Owner and authorized collaborators may use either source. This does
+not expand their existing runtime-instance or message-read authorization.
+
+- Omit `source` to preserve all existing behavior, including owner-only
+  `all_but_others` forwarding and the legacy `total/items` response shape.
+- With `source`, keep `page=1` and set `page_size` (1–100). Continue with
+  `source_cursor=<previous data.next_cursor>` and identical caller/Bot/stage,
+  `device_uuid`, `agent_id`, `session_key` and page size.
+- The source response adds `source`, `has_more`, `next_cursor`, `scan_limited`.
+  Its `total` counts matching records returned so far, not all matching records.
+  A short or empty `items` **does not mean the end**; use `has_more`. There is no
+  arbitrary filtered page jump or exact total without an expensive full scan.
+- For `mine`, verified OpenClaw and AICoding/Claude Code implementations receive
+  `user_id=<authenticated caller>` plus `source=all_but_others`, for both Owner
+  and collaborator. Backend makes one native-filtered window read, with no
+  secondary creator filtering. Cursor offsets are filtered offsets in this mode.
+  This preserves the engine's existing Owner semantics, including retention of
+  some unknown/channel keys; it is not a strict human-creator audit.
+- `others`, and `mine` on engines without verified native support, use Backend
+  fallback filtering. Backend filters at most
+  two offset windows per request, each at most `page_size+1`, with a three-second
+  await budget. A sparse window can be resumed without scanning again from zero.
+  At candidate depth 2000, continuation returns 422 with an explicit depth-limit
+  message; this must be shown as a limit, not "no more sessions". Slow reads
+  return 504 rather than an invented successful empty page.
+- Fallback scanning uses historical session-key creator formats; engine `user_id` is not a
+  creator field. Unknown/synthetic creator keys remain in `mine` for compatibility,
+  never `others`. Numeric user IDs compare without leading zeros. This is not
+  a strict "human created" audit. Offset pagination is not snapshot-consistent
+  under concurrent additions/deletions. Cursors carry positions, not authority.
+- Invalid source/cursor, cursor-scope changes, `page!=1`, or mixing source with
+  `f_user_id` returns 422. Friend reads, favorites, messages and deprecated
+  component-first selectors are unchanged. Separate Caller instances are not
+  searched or enumerated by this filter.
+
+Example: `GET /openapi/v1/bots/example/sessions?owner_id=owner&user_id=reader&stage=online&source=others&page_size=20`.
+
 - **`total` is a lower bound, not a count.** All three paged routes answer with
   `SessionPage` / `MessagePage` — `Page` subclasses whose `total` says *at least
   this many exist*, exact once you reach a page shorter than `page_size`. The

@@ -129,10 +129,9 @@ export function useConversationDeepLinkSessionHydration(options: UseConversation
     if (!isManagedConversationSection(selectedSection) && selectedSection !== 'friend') return;
 
     const bot = botById.get(selectedBotId);
-    if (!bot || (selectedOrigin === 'others' && !bot.isAgentCodingBot)) return;
+    if (!bot || (selectedOrigin === 'others' && selectedFriendUserId && !bot.isAgentCodingBot)) return;
     if (supportsConversationInstanceScope(bot) && !bot.isAgentCodingBot &&
         instanceScope && !instanceScope.getState(bot).ready) return;
-
 
     const identity = {
       botId: selectedBotId,
@@ -145,7 +144,7 @@ export function useConversationDeepLinkSessionHydration(options: UseConversation
     if (selectedSnapshotMatches(selectedSnapshot, identity)) return;
     if (sessionList?.items.some((item) => item.sessionId === selectedSessionId)) return;
 
-    const inferredOrigin = bot.isAgentCodingBot ? resolveCodingSessionOrigin(selectedSessionId, userId) : 'mine';
+    const inferredOrigin = bot.isAgentCodingBot ? resolveCodingSessionOrigin(selectedSessionId, userId) : selectedOrigin;
     if (inferredOrigin && inferredOrigin !== selectedOrigin) return;
 
     const requestKey = [
@@ -201,7 +200,7 @@ export function useConversationDeepLinkSessionHydration(options: UseConversation
         return;
       }
 
-      const detailOrigin = bot.isAgentCodingBot ? resolveCodingSessionOrigin(result.data.sessionId, userId) : 'mine';
+      const detailOrigin = bot.isAgentCodingBot ? resolveCodingSessionOrigin(result.data.sessionId, userId) : selectedOrigin;
       if (detailOrigin && detailOrigin !== selectedOrigin) return;
 
       if (

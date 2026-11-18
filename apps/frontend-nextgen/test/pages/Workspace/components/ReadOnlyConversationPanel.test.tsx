@@ -110,7 +110,14 @@ describe('ReadOnlyConversationPanel', () => {
 
   it('shows an empty selection state before a Session is selected', () => {
     render(<ReadOnlyConversationPanel {...baseProps} friend={null} session={null} messages={[]} />);
-    expect(screen.getByText('请选择一个好友用户会话')).toBeInTheDocument();
+    expect(screen.getByText('请选择一个他人发起的会话')).toBeInTheDocument();
+  });
+
+  it('renders flat operator history without requiring a friend profile', () => {
+    render(<ReadOnlyConversationPanel {...baseProps} friend={null} />);
+    expect(screen.getByText('Bot 回复')).toBeInTheDocument();
+    expect(screen.getByText('会话发起人')).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText(/发送消息/)).not.toBeInTheDocument();
   });
 
   it('shows a retry action when initial history fails', () => {
