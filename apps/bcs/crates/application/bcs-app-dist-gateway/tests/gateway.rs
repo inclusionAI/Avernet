@@ -86,9 +86,13 @@ fn gateway(p: &Ports) -> DistGateway {
     gateway_over(p, p.inbox.clone())
 }
 
+fn grp() -> GroupId {
+    GroupId("grp-research-01".into())
+}
+
 fn message(id: &str, text: &str) -> SubmitInput {
     SubmitInput {
-        group: GroupId("grp-research-01".into()),
+        group: grp(),
         message_id: RequestId(id.into()),
         session: None,
         task: None,
@@ -198,7 +202,7 @@ async fn an_unknown_outcome_names_the_request_and_the_retry_completes() {
         })
     );
     let receipt = g.submit(&me(), message("msg-1", "hello")).await.unwrap();
-    assert_eq!(g.get_task(&me(), &receipt.tid).await.unwrap().content.status, TaskStatus::Submitted);
+    assert_eq!(g.get_task(&me(), &grp(), &receipt.tid).await.unwrap().content.status, TaskStatus::Submitted);
 }
 
 #[tokio::test]
@@ -207,10 +211,11 @@ async fn callers_only_reach_their_own_sessions_and_tasks() {
     let g = gateway(&p);
     let receipt = g.submit(&me(), message("msg-1", "hello")).await.unwrap();
     let other = caller("pa-002");
-    assert_eq!(g.get_task(&other, &receipt.tid).await, Err(GatewayError::NotFound));
+    assert_eq!(g.get_task(&other, &grp(), &receipt.tid).await, Err(GatewayError::NotFound));
     let mut intrude = message("msg-9", "hi");
     intrude.session = Some(receipt.sid.clone());
-    assert_eq!(g.submit(&other, intrude).await, Err(GatewayError::AccessDenied));
+    // Another caller's session is reported as absent, not as forbidden.
+    assert_eq!(g.submit(&other, intrude).await, Err(GatewayError::NotFound));
     let public = GatewayCaller {
         tenant: TenantId("t-ant".into()),
         caller: CallerContext::Public,
@@ -218,7 +223,7 @@ async fn callers_only_reach_their_own_sessions_and_tasks() {
     assert_eq!(g.submit(&public, message("msg-1", "hello")).await, Err(GatewayError::AccessDenied));
     // Malformed ids are rejected before any read.
     assert!(matches!(
-        g.get_task(&me(), &Tid("not-a-task".into())).await,
+        g.get_task(&me(), &grp(), &Tid("not-a-task".into())).await,
         Err(GatewayError::Invalid { .. })
     ));
     assert_eq!(
@@ -234,7 +239,7 @@ async fn a_new_subscriber_gets_the_snapshot_then_events_and_ends_on_input_requir
     let receipt = g.submit(&me(), message("msg-1", "hello")).await.unwrap();
     let tid = receipt.tid.clone();
     let mut stream = g
-        .subscribe(&me(), SubscribeTask { tid: tid.clone(), mode: SubscribeMode::Snapshot })
+        .subscribe(&me(), SubscribeTask { group: grp(), tid: tid.clone(), mode: SubscribeMode::Snapshot })
         .await
         .unwrap();
     let TaskStreamItem::Snapshot { view, cursor } = next(&mut stream).await else {
@@ -263,7 +268,7 @@ async fn a_resume_gets_only_later_events_and_an_unusable_cursor_gets_the_snapsho
     publish(&p.worker, &tid, TaskStatus::Working, Some(eid(2, 1)), &[]).await;
 
     let mut first = g
-        .subscribe(&me(), SubscribeTask { tid: tid.clone(), mode: SubscribeMode::Snapshot })
+        .subscribe(&me(), SubscribeTask { group: grp(), tid: tid.clone(), mode: SubscribeMode::Snapshot })
         .await
         .unwrap();
     let TaskStreamItem::Snapshot { cursor, .. } = next(&mut first).await else {
@@ -275,7 +280,7 @@ async fn a_resume_gets_only_later_events_and_an_unusable_cursor_gets_the_snapsho
 
     // Resume right after the snapshot's coverage: no snapshot, only what follows.
     let mut resumed = g
-        .subscribe(&me(), SubscribeTask { tid: tid.clone(), mode: SubscribeMode::Resume(at_snapshot.clone()) })
+        .subscribe(&me(), SubscribeTask { group: grp(), tid: tid.clone(), mode: SubscribeMode::Resume(at_snapshot.clone()) })
         .await
         .unwrap();
     assert_eq!(next(&mut resumed).await, TaskStreamItem::ResumeAccepted { cursor: at_snapshot.clone() });
@@ -285,7 +290,7 @@ async fn a_resume_gets_only_later_events_and_an_unusable_cursor_gets_the_snapsho
     let mut stale = at_snapshot.clone();
     stale.token.value = "1-1".into();
     let mut restarted = g
-        .subscribe(&me(), SubscribeTask { tid: tid.clone(), mode: SubscribeMode::Resume(stale) })
+        .subscribe(&me(), SubscribeTask { group: grp(), tid: tid.clone(), mode: SubscribeMode::Resume(stale) })
         .await
         .unwrap();
     assert!(matches!(next(&mut restarted).await, TaskStreamItem::Snapshot { .. }));
@@ -294,11 +299,11 @@ async fn a_resume_gets_only_later_events_and_an_unusable_cursor_gets_the_snapsho
     let mut foreign = at_snapshot.clone();
     foreign.tid = Tid(format!("{}.ffff", foreign.sid.0));
     assert!(matches!(
-        g.subscribe(&me(), SubscribeTask { tid: tid.clone(), mode: SubscribeMode::Resume(foreign) }).await,
+        g.subscribe(&me(), SubscribeTask { group: grp(), tid: tid.clone(), mode: SubscribeMode::Resume(foreign) }).await,
         Err(GatewayError::AccessDenied)
     ));
     assert!(matches!(
-        g.subscribe(&caller("pa-002"), SubscribeTask { tid: tid.clone(), mode: SubscribeMode::Snapshot }).await,
+        g.subscribe(&caller("pa-002"), SubscribeTask { group: grp(), tid: tid.clone(), mode: SubscribeMode::Snapshot }).await,
         Err(GatewayError::NotFound)
     ));
 }
@@ -310,7 +315,7 @@ async fn subscribing_to_a_finished_task_yields_its_final_view_and_ends() {
     let tid = g.submit(&me(), message("msg-1", "hello")).await.unwrap().tid;
     publish(&p.worker, &tid, TaskStatus::Completed, Some(eid(9, 1)), &[]).await;
     let mut stream = g
-        .subscribe(&me(), SubscribeTask { tid: tid.clone(), mode: SubscribeMode::Snapshot })
+        .subscribe(&me(), SubscribeTask { group: grp(), tid: tid.clone(), mode: SubscribeMode::Snapshot })
         .await
         .unwrap();
     let TaskStreamItem::Snapshot { view, cursor } = next(&mut stream).await else {
@@ -323,6 +328,7 @@ async fn subscribing_to_a_finished_task_yields_its_final_view_and_ends() {
 
 fn wait(tid: &Tid, until: WaitUntil, after: Option<EventId>, millis: u64) -> WaitTask {
     WaitTask {
+        group: grp(),
         tid: tid.clone(),
         until,
         after,
@@ -461,6 +467,7 @@ async fn cancel_is_admitted_once_and_refused_for_a_finished_task() {
     let g = gateway(&p);
     let tid = g.submit(&me(), message("msg-1", "hello")).await.unwrap().tid;
     let request = CancelTask {
+        group: grp(),
         tid: tid.clone(),
         request_id: RequestId("req-55".into()),
         reason: None,
@@ -492,6 +499,7 @@ async fn listing_needs_a_session_and_pages_its_tasks() {
         g.submit(&me(), next).await.unwrap();
     }
     let list = |session: Option<Sid>, after: Option<PageToken>, limit: u32| ListTasks {
+        group: grp(),
         session,
         statuses: vec![],
         after,
@@ -508,7 +516,7 @@ async fn listing_needs_a_session_and_pages_its_tasks() {
     assert_eq!(rest.next, None);
     assert_eq!(
         g.list_tasks(&caller("pa-002"), list(Some(first.sid.clone()), None, 3)).await,
-        Err(GatewayError::AccessDenied)
+        Err(GatewayError::NotFound)
     );
     // A malformed page token is invalid input, not a dependency to retry.
     assert_eq!(
@@ -518,7 +526,7 @@ async fn listing_needs_a_session_and_pages_its_tasks() {
 }
 
 async fn snapshot_stream(g: &DistGateway, tid: &Tid) -> TaskSubscription {
-    g.subscribe(&me(), SubscribeTask { tid: tid.clone(), mode: SubscribeMode::Snapshot })
+    g.subscribe(&me(), SubscribeTask { group: grp(), tid: tid.clone(), mode: SubscribeMode::Snapshot })
         .await
         .unwrap()
 }
@@ -614,4 +622,57 @@ async fn a_wait_keeps_up_with_a_task_that_advances_under_it() {
     let view = g.wait_task(&me(), wait(&tid, WaitUntil::Final, None, 5_000)).await.unwrap();
     worker.await.unwrap();
     assert_eq!(view.content.status, TaskStatus::Completed);
+}
+
+#[tokio::test]
+async fn a_session_is_reached_only_through_the_group_it_was_created_for() {
+    let p = ports();
+    let g = gateway(&p);
+    let receipt = g.submit(&me(), message("msg-1", "hello")).await.unwrap();
+    let (sid, tid) = (receipt.sid.clone(), receipt.tid.clone());
+    publish(&p.worker, &tid, TaskStatus::InputRequired, Some(eid(7, 1)), &["i-3"]).await;
+    let other = GroupId("grp-legal-01".into());
+
+    // A new task in the session.
+    let mut next_task = message("msg-2", "next");
+    next_task.group = other.clone();
+    next_task.session = Some(sid.clone());
+    assert_eq!(g.submit(&me(), next_task).await, Err(GatewayError::NotFound));
+    // A reply to its open question.
+    let mut answer = message("msg-3", "B");
+    answer.group = other.clone();
+    answer.task = Some(tid.clone());
+    assert_eq!(g.submit(&me(), answer).await, Err(GatewayError::NotFound));
+    // Get, subscribe, wait, cancel and list.
+    assert_eq!(g.get_task(&me(), &other, &tid).await, Err(GatewayError::NotFound));
+    let subscribe = SubscribeTask { group: other.clone(), tid: tid.clone(), mode: SubscribeMode::Snapshot };
+    assert!(matches!(g.subscribe(&me(), subscribe).await, Err(GatewayError::NotFound)));
+    let waiting = WaitTask { group: other.clone(), ..wait(&tid, WaitUntil::Final, None, 50) };
+    assert_eq!(g.wait_task(&me(), waiting).await, Err(GatewayError::NotFound));
+    let cancel = CancelTask {
+        group: other.clone(),
+        tid: tid.clone(),
+        request_id: RequestId("req-1".into()),
+        reason: None,
+    };
+    assert_eq!(g.cancel(&me(), cancel).await, Err(GatewayError::NotFound));
+    let list = ListTasks {
+        group: other,
+        session: Some(sid.clone()),
+        statuses: vec![],
+        after: None,
+        limit: NonZeroU32::new(10).unwrap(),
+    };
+    assert_eq!(g.list_tasks(&me(), list).await, Err(GatewayError::NotFound));
+
+    // Nothing was admitted through the wrong group; the right one still works.
+    let listed = ListTasks {
+        group: grp(),
+        session: Some(sid),
+        statuses: vec![],
+        after: None,
+        limit: NonZeroU32::new(10).unwrap(),
+    };
+    assert_eq!(g.list_tasks(&me(), listed).await.unwrap().tasks.len(), 1);
+    assert_eq!(g.get_task(&me(), &grp(), &tid).await.unwrap().content.status, TaskStatus::InputRequired);
 }

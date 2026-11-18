@@ -23,6 +23,8 @@ pub struct SubmitInput {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CancelTask {
+    /// The group the request was addressed to; must be the task's session's.
+    pub group: GroupId,
     pub tid: Tid,
     pub request_id: RequestId,
     pub reason: Option<String>,
@@ -36,6 +38,8 @@ pub enum SubscribeMode {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SubscribeTask {
+    /// The group the request was addressed to; must be the task's session's.
+    pub group: GroupId,
     pub tid: Tid,
     pub mode: SubscribeMode,
 }
@@ -59,6 +63,8 @@ pub type TaskSubscription = BoxStream<'static, Result<TaskStreamItem, GatewayErr
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ListTasks {
+    /// The group the request was addressed to; must be the listed session's.
+    pub group: GroupId,
     pub session: Option<Sid>,
     pub statuses: Vec<TaskStatus>,
     pub after: Option<PageToken>,
@@ -76,6 +82,8 @@ pub enum WaitUntil {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WaitTask {
+    /// The group the request was addressed to; must be the task's session's.
+    pub group: GroupId,
     pub tid: Tid,
     pub until: WaitUntil,
     /// Coverage seen before the admission this wait follows. States at or
@@ -118,7 +126,15 @@ pub trait DistGatewayService: Send + Sync {
         caller: &GatewayCaller,
         request: SubmitInput,
     ) -> Result<AdmissionReceipt, GatewayError>;
-    async fn get_task(&self, caller: &GatewayCaller, tid: &Tid) -> Result<TaskView, GatewayError>;
+    /// A session or task is reached only through the group it was created for:
+    /// here and in every request that names an existing session or task, another
+    /// group is answered as NotFound.
+    async fn get_task(
+        &self,
+        caller: &GatewayCaller,
+        group: &GroupId,
+        tid: &Tid,
+    ) -> Result<TaskView, GatewayError>;
     /// Snapshot@H continues at H; resume@C never follows an unrelated newer snapshot.
     async fn subscribe(
         &self,

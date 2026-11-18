@@ -41,7 +41,8 @@ pub(crate) async fn subscribe(
     request: SubscribeTask,
 ) -> Result<TaskSubscription, GatewayError> {
     let scope = scope_of(caller)?;
-    session_of_task(&request.tid)?;
+    let sid = session_of_task(&request.tid)?;
+    gateway.check_group(&scope, &sid, &request.group).await?;
     let core = gateway.core.clone();
     let resume = match request.mode {
         SubscribeMode::Snapshot => None,

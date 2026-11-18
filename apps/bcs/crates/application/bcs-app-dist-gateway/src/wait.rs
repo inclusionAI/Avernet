@@ -50,7 +50,8 @@ pub(crate) async fn wait_task(
     request: WaitTask,
 ) -> Result<TaskView, GatewayError> {
     let scope = scope_of(caller)?;
-    session_of_task(&request.tid)?;
+    let sid = session_of_task(&request.tid)?;
+    gateway.check_group(&scope, &sid, &request.group).await?;
     let deadline = Instant::now() + request.timeout;
     let restore = || async {
         gateway

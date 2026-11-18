@@ -25,6 +25,7 @@ pub(crate) async fn submit(
         (_, Some(tid)) => reply(gateway, &scope, &request, tid).await?,
         (Some(sid), None) => {
             parse_session(sid)?;
+            gateway.check_group(&scope, sid, &request.group).await?;
             new_task(gateway, &scope, &request, sid.clone(), None)
         }
         (None, None) => {
@@ -49,6 +50,7 @@ pub(crate) async fn cancel(
     let scope = scope_of(caller)?;
     check_request_id(&request.request_id)?;
     let sid = session_of_task(&request.tid)?;
+    gateway.check_group(&scope, &sid, &request.group).await?;
     let body = InputBody::Cancel {
         reason: request.reason.clone(),
     };
@@ -177,6 +179,7 @@ async fn reply(
     if request.session.as_ref().is_some_and(|given| given != &sid) {
         return Err(invalid("task_not_in_session"));
     }
+    gateway.check_group(scope, &sid, &request.group).await?;
     let interaction = match &request.interaction {
         Some(interaction) => interaction.clone(),
         None => {

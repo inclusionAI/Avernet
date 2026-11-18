@@ -98,6 +98,25 @@ impl DistGateway {
     }
 }
 
+impl DistGateway {
+    /// A session is reached only through the group it was created for. The
+    /// frozen spec holds that group; another one is answered as NotFound, so a
+    /// caller learns nothing about sessions it did not address.
+    pub(crate) async fn check_group(
+        &self,
+        scope: &TaskScope,
+        sid: &Sid,
+        group: &GroupId,
+    ) -> Result<(), GatewayError> {
+        let frozen = self.core.session_group(scope, sid).await.map_err(core_error)?;
+        if &frozen == group {
+            Ok(())
+        } else {
+            Err(GatewayError::NotFound)
+        }
+    }
+}
+
 pub(crate) fn invalid(code: &str) -> GatewayError {
     GatewayError::Invalid {
         code: code.to_owned(),
@@ -133,9 +152,15 @@ impl DistGatewayService for DistGateway {
         submit::submit(self, caller, request).await
     }
 
-    async fn get_task(&self, caller: &GatewayCaller, tid: &Tid) -> Result<TaskView, GatewayError> {
+    async fn get_task(
+        &self,
+        caller: &GatewayCaller,
+        group: &GroupId,
+        tid: &Tid,
+    ) -> Result<TaskView, GatewayError> {
         let scope = scope_of(caller)?;
-        session_of_task(tid)?;
+        let sid = session_of_task(tid)?;
+        self.check_group(&scope, &sid, group).await?;
         let cut = self.core.restore_task(&scope, tid).await.map_err(core_error)?;
         Ok(cut.view)
     }
@@ -174,6 +199,7 @@ impl DistGatewayService for DistGateway {
             return Err(invalid("session_filter_required"));
         };
         parse_session(&sid)?;
+        self.check_group(&scope, &sid, &request.group).await?;
         let query = CoreTaskQuery {
             sid: Some(sid),
             statuses: request.statuses,

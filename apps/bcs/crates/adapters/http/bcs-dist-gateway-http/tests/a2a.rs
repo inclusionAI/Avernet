@@ -483,7 +483,7 @@ impl DistGatewayService for Failing {
     async fn submit(&self, _: &GatewayCaller, _: SubmitInput) -> Result<AdmissionReceipt, GatewayError> {
         Err(self.0.clone())
     }
-    async fn get_task(&self, _: &GatewayCaller, _: &Tid) -> Result<TaskView, GatewayError> {
+    async fn get_task(&self, _: &GatewayCaller, _: &GroupId, _: &Tid) -> Result<TaskView, GatewayError> {
         Err(self.0.clone())
     }
     async fn subscribe(&self, _: &GatewayCaller, _: SubscribeTask) -> Result<TaskSubscription, GatewayError> {
@@ -599,4 +599,39 @@ async fn a_malformed_page_token_is_an_invalid_params_error() {
     let sid = sent["result"]["task"]["contextId"].as_str().unwrap().to_owned();
     let listed = json_of(&app, rpc("ListTasks", json!({ "contextId": sid, "pageToken": "garbage" }))).await;
     assert_eq!(error_code(&listed), -32602);
+}
+
+#[tokio::test]
+async fn another_groups_url_does_not_reach_the_session() {
+    let p = ports();
+    let app = app(&p);
+    let sent = json_of(&app, send("msg-1", "hello", None, None, true)).await;
+    let tid = sent["result"]["task"]["id"].as_str().unwrap().to_owned();
+    let sid = sent["result"]["task"]["contextId"].as_str().unwrap().to_owned();
+    let via_other = |method: &str, params: Value| {
+        let body = json!({ "jsonrpc": "2.0", "id": "r1", "method": method, "params": params });
+        Request::post("/a2a/grp-legal-01")
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap()
+    };
+    let new_task = json!({
+        "message": user_message("msg-2", "next", Some(&sid), None),
+        "configuration": { "returnImmediately": true },
+    });
+    for (method, params) in [
+        ("GetTask", json!({ "id": tid })),
+        ("CancelTask", json!({ "id": tid })),
+        ("SubscribeToTask", json!({ "id": tid })),
+        ("ListTasks", json!({ "contextId": sid })),
+        ("SendMessage", new_task.clone()),
+        ("SendStreamingMessage", new_task.clone()),
+    ] {
+        assert_eq!(error_code(&json_of(&app, via_other(method, params)).await), -32001, "{method}");
+    }
+    // Through its own group's URL the task is there, untouched.
+    let got = json_of(&app, rpc("GetTask", json!({ "id": tid }))).await;
+    assert_eq!(got["result"]["status"]["state"], "TASK_STATE_SUBMITTED");
+    let listed = json_of(&app, rpc("ListTasks", json!({ "contextId": sid }))).await;
+    assert_eq!(listed["result"]["tasks"].as_array().unwrap().len(), 1);
 }

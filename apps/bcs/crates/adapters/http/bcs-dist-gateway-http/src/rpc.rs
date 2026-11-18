@@ -162,15 +162,16 @@ impl Call<'_> {
         // A message to an existing task answers its open question: remember what
         // the task showed before, so the wait does not stop on that question.
         let before = match &input.task {
-            Some(tid) => gw.get_task(self.caller, tid).await.map_err(gateway)?.covered_through,
+            Some(tid) => gw.get_task(self.caller, &self.group, tid).await.map_err(gateway)?.covered_through,
             None => None,
         };
         let receipt = gw.submit(self.caller, input).await.map_err(gateway)?;
         let configuration = request.configuration.as_ref();
         let view = if configuration.and_then(|c| c.return_immediately) == Some(true) {
-            gw.get_task(self.caller, &receipt.tid).await
+            gw.get_task(self.caller, &self.group, &receipt.tid).await
         } else {
             let wait = WaitTask {
+                group: self.group.clone(),
                 tid: receipt.tid.clone(),
                 until: WaitUntil::InputOrFinal,
                 after: before,
@@ -192,6 +193,7 @@ impl Call<'_> {
         let is_reply = input.task.is_some();
         let receipt = gw.submit(self.caller, input).await.map_err(gateway)?;
         let subscribe = SubscribeTask {
+            group: self.group.clone(),
             tid: receipt.tid,
             mode: SubscribeMode::Snapshot,
         };
@@ -213,7 +215,7 @@ impl Call<'_> {
         let view = self
             .state
             .gateway
-            .get_task(self.caller, &Tid(request.id))
+            .get_task(self.caller, &self.group, &Tid(request.id))
             .await
             .map_err(gateway)?;
         result(&mapping::task(&view, TaskShape::history(request.history_length)))
@@ -230,7 +232,11 @@ impl Call<'_> {
             .and_then(cursor::decode)
             .filter(|cursor| cursor.tid == tid)
             .map_or(SubscribeMode::Snapshot, SubscribeMode::Resume);
-        let subscribe = SubscribeTask { tid, mode };
+        let subscribe = SubscribeTask {
+            group: self.group.clone(),
+            tid,
+            mode,
+        };
         let mut items = self
             .state
             .gateway
@@ -270,12 +276,14 @@ impl Call<'_> {
         };
         let gw = &self.state.gateway;
         let cancel = CancelTask {
+            group: self.group.clone(),
             tid: tid.clone(),
             request_id: RequestId(request_id),
             reason: None,
         };
         gw.cancel(self.caller, cancel).await.map_err(gateway)?;
         let wait = WaitTask {
+            group: self.group.clone(),
             tid,
             until: WaitUntil::Final,
             after: None,
@@ -293,6 +301,7 @@ impl Call<'_> {
         };
         let limit = NonZeroU32::new(size).ok_or_else(|| A2AError::invalid_params("pageSize must be positive"))?;
         let list = ListTasks {
+            group: self.group.clone(),
             session: request.context_id.map(Sid),
             statuses: request.status.as_ref().and_then(mapping::status_filter).into_iter().collect(),
             after: request.page_token.filter(|token| !token.is_empty()).map(PageToken),

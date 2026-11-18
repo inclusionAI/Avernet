@@ -28,6 +28,11 @@ runtime, wire endpoint or stored record changes.
   needs input or is finished and the stored view covers that event, and
   returns the current view at its timeout. Blocking send and cancel use it.
 
+- A session or task is reached only through the group it was created for.
+  `get_task` takes the addressed group, and `SubscribeTask`, `WaitTask`,
+  `CancelTask` and `ListTasks` carry it; another group is answered as
+  NotFound. `DistGatewayCoreService::session_group` reads the frozen group.
+
 Consumers matching `Duplicate` or implementing `DistGatewayService` must be
 updated; workspace path consumers rebuild together.
 

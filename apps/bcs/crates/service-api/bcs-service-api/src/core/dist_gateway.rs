@@ -76,6 +76,13 @@ pub trait DistGatewayCoreService: Send + Sync {
         scope: &TaskScope,
         command: AdmitTaskCommand,
     ) -> Result<CoreAdmission, DistGatewayCoreError>;
+    /// The group a session was frozen for at admission. NotFound when the
+    /// session is absent or belongs to another scope.
+    async fn session_group(
+        &self,
+        scope: &TaskScope,
+        sid: &Sid,
+    ) -> Result<GroupId, DistGatewayCoreError>;
     async fn restore_task(
         &self,
         scope: &TaskScope,

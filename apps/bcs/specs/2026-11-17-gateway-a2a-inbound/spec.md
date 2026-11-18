@@ -63,6 +63,8 @@ Admission
       or the task belongs to another session or caller.
 - [ ] A caller can only read or change sessions and tasks of its own tenant and
       principal.
+- [ ] A session or task is only reachable through the group it was created
+      for; through another group it is reported as not found.
 
 Query
 - [ ] Fetching a task returns its stored snapshot as is. Status, open questions

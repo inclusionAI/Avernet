@@ -164,12 +164,12 @@ async fn gateway_harness_checks_idempotency_task_identity_and_access_denial() ->
             )
             .expect(
                 "DistGatewayService::get_task",
-                (&caller, input().tid),
+                (&caller, &request.group, input().tid),
                 Ok::<_, GatewayError>(task_view()),
             )
             .expect(
                 "DistGatewayService::get_task",
-                (&unauthorized, input().tid),
+                (&unauthorized, &request.group, input().tid),
                 denied,
             );
         let test =

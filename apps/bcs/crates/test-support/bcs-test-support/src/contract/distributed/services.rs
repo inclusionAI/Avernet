@@ -38,14 +38,15 @@ pub async fn dist_gateway_service_contract_tests(
     unauthorized: &GatewayCaller,
     request: SubmitInput,
 ) -> ContractResult {
+    let group = request.group.clone();
     let receipt = gateway.submit(caller, request.clone()).await?;
     assert_eq!(gateway.submit(caller, request).await?, receipt);
     assert_eq!(
-        gateway.get_task(caller, &receipt.tid).await?.tid,
+        gateway.get_task(caller, &group, &receipt.tid).await?.tid,
         receipt.tid
     );
     assert!(matches!(
-        gateway.get_task(unauthorized, &receipt.tid).await,
+        gateway.get_task(unauthorized, &group, &receipt.tid).await,
         Err(GatewayError::AccessDenied | GatewayError::NotFound)
     ));
     Ok(())

@@ -579,6 +579,26 @@ Changed after the PR reviews (2026-11-17):
 - **Admission:** a repairing index insert counts as a write of the call, and
   a repaired entry is scored with the stored task's creation time.
 - **A malformed page token is invalid input** (-32602), not a retryable error.
+- **A session or task is reached only through the group it was created for**
+  (decided 2026-11-18). The URL is `/a2a/{group}`; the group creates the spec
+  on a session's first message, and every later request that names a session
+  or task (new task, reply, get, subscribe, wait, cancel, list) is refused
+  with "not found" when its group is not the one frozen in the spec. Contract:
+  `get_task` takes the group, `SubscribeTask`, `WaitTask`, `CancelTask` and
+  `ListTasks` carry it, and `DistGatewayCoreService::session_group` reads the
+  frozen group. Cost: one spec read per such request. Access to the group is
+  still checked with the directory only when a session is created.
+- **Another caller's session is "not found"**, where it used to be "access
+  denied" for a new task or a listing: the session check now comes first and
+  does not reveal that the session exists.
+
+Delayed, tracked as Active Tasks:
+
+- a retried reply or cancel refused after it took effect (open item 1);
+- detecting an `ev` trim while a subscriber is being fed (the check and the
+  reads are separate steps; only a reader behind the new snapshot is affected);
+- a warning log when a wait returns early because the event stream could not
+  be read.
 
 Open, each needing a decision:
 
@@ -595,10 +615,5 @@ Open, each needing a decision:
 3. **A slow client can still be dropped while live.** History is no longer
    pushed through the shared reader (see below), so only a client that reads
    live events too slowly is closed and has to reconnect.
-4. **The route's group is not checked against the session's group.** Only
-   tenant and principal are compared, so a caller can reach its own sessions
-   of group B through `/a2a/A`. `get_task`, `subscribe`, `cancel`, `wait_task`
-   and `list_tasks` carry no group, and `AdmitTaskCommand` carries none for a
-   new task in an existing session, so the check needs a contract change.
-5. **Q3** (the core inlines large content through `BlobStorePort`) is
+4. **Q3** (the core inlines large content through `BlobStorePort`) is
    implemented as proposed; it was not covered by the plan review.
