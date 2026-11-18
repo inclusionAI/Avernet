@@ -4,6 +4,8 @@
 
 - Independent DocumentCas and StrictLease contracts; their presence does not
   widen AtomicJson or ordinary TTL guarantees.
+- DocumentCas includes consistent path projection and ordered patch through
+  portable defaults over one consistent read and an atomic exact-version replace.
 - StorePlugin capability declaration and independent ordinary/versioned KV,
   atomic JSON, sorted-set and stream operation traits.
 - Shared version, expiry, operation outcome and uncertainty contracts.
@@ -32,6 +34,9 @@ to bool. Providers and harness callers must migrate together. Future
 service-store implementations must coordinate changes to versions,
 atomicity, stream cursor semantics, supported capabilities and error outcomes.
 Object/file storage and best-effort caches retain their existing API boundaries.
+DocumentCas providers can inherit path projection/patch, but must mount the
+expanded conformance suite; native overrides preserve the same whole-document
+version and failure semantics. First creation is version 1.
 
 ## Verification
 

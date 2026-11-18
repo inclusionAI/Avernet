@@ -8,6 +8,8 @@ use bcs_store_api::{
 
 #[async_trait]
 impl DocumentStorePlugin for Model {
+    // Inherit projection and patch to exercise the portable implementation on
+    // this model's consistent read and atomic whole-document replacement.
     async fn read_document(&self, key: &str) -> StoreResult<Option<Versioned<Value>>> {
         self.get_json(key).await
     }
