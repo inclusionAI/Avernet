@@ -116,7 +116,7 @@ class WorkOrderRepository(
         order,
         db,
         env: str,
-        reviewer_user_id: str,
+        approver_name: str | None,
         approved: bool,
         applicant_is_bot: bool,
         review_remark: str | None,
@@ -153,7 +153,7 @@ class WorkOrderRepository(
         return friend_result_content(
             approved=approved,
             applicant_is_bot=applicant_is_bot,
-            approver_name=self._resolve_human_display_name(reviewer_user_id),
+            approver_name=approver_name,
             applicant_bot_name=applicant_bot_name,
             target_bot_name=target_bot_name,
             review_remark=review_remark,
@@ -265,6 +265,10 @@ class WorkOrderRepository(
         env: str,
         source_event_type: str | None = None,
     ):
+        # Resolve the approver display name before taking the work-order row
+        # lock: the staff directory is an external call, and a friend result
+        # notice must not hold the transactional lock across it.
+        approver_display_name = self._resolve_human_display_name(reviewer_user_id)
         with self._db.transactional_orm_session() as db:
             now = db.execute(select(func.now())).scalar_one()
             order = (
@@ -452,7 +456,7 @@ class WorkOrderRepository(
                     order=order,
                     db=db,
                     env=env,
-                    reviewer_user_id=reviewer_user_id,
+                    approver_name=approver_display_name,
                     approved=approved,
                     applicant_is_bot=not is_human_friend,
                     review_remark=review_remark,

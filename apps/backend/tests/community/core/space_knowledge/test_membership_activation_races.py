@@ -21,6 +21,7 @@ from agentclaw.community.core.repository.implementations.spaces.space import (
 from agentclaw.community.core.repository.implementations.work_orders.work_order import (
     WorkOrderRepository,
 )
+from agentclaw.community.plugins.community.staff_dept import NoStaffDept
 from agentclaw.community.core.spaces.models import SpaceRole
 from agentclaw.community.core.work_orders.repository.models import WorkOrderModel
 from agentclaw.community.plugin_api.space_knowledge import SpaceKnowledgeError
@@ -111,7 +112,7 @@ def test_activation_roster_and_source_mutation_are_one_serial_order(
                 space_id=space_id, with_members=True, env="pre"
             )
         else:
-            WorkOrderRepository(other, Mock(), effects=KnowledgeSpacePersistenceEffects()).complete_auto_approval(
+            WorkOrderRepository(other, Mock(), effects=KnowledgeSpacePersistenceEffects(), staff_dept=NoStaffDept()).complete_auto_approval(
                 work_order_id=order_id,
                 recipient_user_ids=["new-member"],
                 source_event_type="SPACE_JOIN_REQUESTED",
