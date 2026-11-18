@@ -1,0 +1,20 @@
+apps/evolverun/clawweb/public/modules/clawinsight/docs/bot-diagnosis-recovery-config.md
+  h_b601d8706f5d44 18-19,99-102,266-270
+apps/evolverun/clawweb/public/modules/clawinsight/server/routes/__tests__/monitoring.test.ts
+  h_b601d8706f5d44 362-365
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/monitoring/__tests__/bot-config.test.ts
+  h_b601d8706f5d44 84-87,92-93,162,283-289
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/monitoring/bot-config-service.ts
+  h_b601d8706f5d44 42-48
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b8c679635aa4e4d366cc40faf3eed6d78701fe2b",
+  "prompts": {},
+  "humans": {
+    "h_b601d8706f5d44": {
+      "author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}

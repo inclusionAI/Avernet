@@ -1,0 +1,33 @@
+apps/bcs/crates/adapters/http/bcs-api-http/tests/a2a_catalog_sync.rs
+  s_3390a382ab8b6f::t_9ddf1ff83eae78 22-23,78-81
+apps/bcs/crates/application/bcs-app-a2a-bot/tests/conformance_provider_a2a_registration.rs
+  s_3390a382ab8b6f::t_495ef62c8be7d0 221-236
+apps/bcs/crates/services/bcs-bot/src/core/a2a_card_capabilities.rs
+  s_3390a382ab8b6f::t_2b09ea32960353 1-167
+apps/bcs/crates/services/bcs-bot/src/core/a2a_provider_registration.rs
+  s_3390a382ab8b6f::t_5aae0f4025fbe4 12,73,79
+apps/bcs/crates/services/bcs-bot/src/core/mod.rs
+  s_3390a382ab8b6f::t_619ebb2711b3e6 3
+apps/bcs/crates/services/bcs-fusion/src/core/card_sync.rs
+  s_3390a382ab8b6f::t_06defd04345a47 110
+apps/bcs/docs/bcsfuse-catalog.md
+  s_3390a382ab8b6f::t_b642823dbbade9 46,48-53
+docs/bcn-a2a-api-reference.zh-CN.md
+  s_3390a382ab8b6f::t_657a7fa818abe7 207-208
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a12bb09205baa9ff71eb9c409ea2a181d6d3f7b0",
+  "prompts": {},
+  "sessions": {
+    "s_3390a382ab8b6f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ce64-b71e-7ab0-af3f-e8a007f31b16",
+        "model": "GLM-5.3"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

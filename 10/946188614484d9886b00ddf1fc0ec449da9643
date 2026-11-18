@@ -1,0 +1,25 @@
+apps/frontend-nextgen/src/pages/BotWorkshop/ScheduledTasks/RoutineCronPreview.tsx
+  s_b9f758036bb145::t_cfaa497c6b8e48 1-34
+apps/frontend-nextgen/src/pages/BotWorkshop/ScheduledTasks/RoutineFormDialog.tsx
+  s_b9f758036bb145::t_8603d5665fe945 62
+  s_b9f758036bb145::t_24e266047f2ae5 25-26
+  s_b9f758036bb145::t_3ba07de08ec460 233-237
+apps/frontend-nextgen/src/pages/BotWorkshop/ScheduledTasks/useRoutineModels.ts
+  s_b9f758036bb145::t_8222d8e2ea5189 1-26
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "10946188614484d9886b00ddf1fc0ec449da9643",
+  "prompts": {},
+  "sessions": {
+    "s_b9f758036bb145": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "17fa05ac-abb3-4548-a65e-df6bdfba991c",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    }
+  }
+}

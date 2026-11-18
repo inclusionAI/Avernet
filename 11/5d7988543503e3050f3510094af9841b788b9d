@@ -1,0 +1,38 @@
+apps/backend/specs/2026-11-12-context-collab-l4-resource-binding/spec.md
+  h_059e888e5e4e82 76-111
+apps/backend/src/agentclaw/community/core/task/context_collab/README.md
+  h_059e888e5e4e82 341-344,351-356,359-361
+apps/backend/src/agentclaw/community/core/task/context_collab/l4_context_primitives/persistence/participation.py
+  h_059e888e5e4e82 1,19-21,52,77
+apps/backend/src/agentclaw/community/core/task/context_collab/l4_context_primitives/resource_binding.py
+  h_059e888e5e4e82 3-6,10,31,67-70,91
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/README.md
+  h_059e888e5e4e82 363-364,374,389-394,396-402,409-411,427-428,617-621
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/operations/contracts.py
+  h_059e888e5e4e82 17-19,66,76,82-91,117-121
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/operations/product_instantiation.py
+  h_059e888e5e4e82 10-11,120
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/persistence/repository.py
+  h_059e888e5e4e82 16-17,30-32,144-146,436-438
+apps/backend/src/agentclaw/community/core/task/context_collab/products/task_commission/README.md
+  h_059e888e5e4e82 118-119,125-132,625-629
+apps/backend/tests/community/core/task/context_collab/products/task_commission_e2e_support.py
+  h_059e888e5e4e82 13-14,44-56,76-83,102-185
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_end_to_end.py
+  h_059e888e5e4e82 22-26,49,149-151,159-162,196-202,353-362,624-626,723
+apps/backend/tests/community/core/task/context_collab/test_resource_binding.py
+  h_059e888e5e4e82 17-19,40-43,48-49,72-80,88-90
+apps/backend/tests/community/repository/task/context_collab/test_product_instantiation.py
+  h_059e888e5e4e82 7-8,23-25,31-34,61,72-75,103-107,323-327,408-487
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "115d7988543503e3050f3510094af9841b788b9d",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}
