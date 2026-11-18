@@ -1,0 +1,19 @@
+apps/backend/tests/community/repository/skill_center/test_capability_desired_state_exclusions.py
+  s_e059e30c850fff::t_8d1243ad058a9e 12,179-183
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4bd718fbbe0a9fabb628f6f7f1afd1acc12da2de",
+  "prompts": {},
+  "sessions": {
+    "s_e059e30c850fff": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ed70-3a8f-7e41-9d8f-50f66965b96d",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}
