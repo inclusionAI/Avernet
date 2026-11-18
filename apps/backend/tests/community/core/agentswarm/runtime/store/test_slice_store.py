@@ -758,3 +758,104 @@ class TestRehydrate:
         state, _, _ = asyncio.run(self._store(db).rehydrate(run))
 
         assert done.task_spec.objective in state.last_spawn_objectives
+
+class TestNextAttemptOrdinal:
+    """The pool's persona id is derived from the attempt ordinal, so it must
+    continue from the ledger across slices instead of restarting at 1."""
+
+    @pytest.fixture()
+    def db(self):
+        engine = create_engine(
+            "sqlite:///:memory:",
+            poolclass=StaticPool,
+            connect_args={"check_same_thread": False},
+        )
+        Base.metadata.create_all(engine, tables=[m.__table__ for m in om.ALL_MODELS])
+        yield _TestDB(engine)
+        engine.dispose()
+
+    @staticmethod
+    def _claim(db, run) -> int:
+        dispatch_repo = RunDispatchRepository(db)
+        dispatch_repo.enqueue(run_id=run.run_id, tenant=run.tenant,
+                              deadline_seconds=3600)
+        return dispatch_repo.claim_batch(
+            FENCE_WORKER, [run.tenant], 1, 0,
+        )[0]["claim_epoch"]
+
+    @staticmethod
+    def _ordinal_store(db, attempt_repo):
+        return SliceStore(
+            AgentSwarmConfig(),
+            AgentRepository(db), MessageRepository(db),
+            AgentResultRepository(db), RoundRepository(db),
+            lost_probe=lambda: False,
+            attempt_repo=attempt_repo,
+        )
+
+    def test_first_attempt_of_a_fresh_agent_is_ordinal_one(self, db):
+        from agentclaw.community.core.agentswarm.repository.agent_attempt import (
+            AgentAttemptRepository,
+        )
+
+        run = _mk_run(goal="ordinal-fresh")
+        RunRepository(db).create(run)
+        agent = _mk_agent(run, "a1")
+        attempt_repo = AgentAttemptRepository(db)
+
+        assert attempt_repo.max_agent_attempt_ordinal(
+            run.run_id, TENANT, agent.agent_id,
+        ) == 0
+        store = self._ordinal_store(db, attempt_repo)
+        assert asyncio.run(store.next_attempt_ordinal(run, agent.agent_id)) == 1
+
+    def test_ordinal_continues_after_a_failed_attempt_and_a_new_epoch(self, db):
+        # The reported incident shape: an attempt consumed ordinal 1, the
+        # slice ended, and a later claim must NOT re-derive ordinal 1.
+        from agentclaw.community.core.agentswarm.repository.agent_attempt import (
+            AgentAttemptRepository,
+        )
+
+        run = _mk_run(goal="ordinal-continues")
+        RunRepository(db).create(run)
+        agent = _mk_agent(run, "a1")
+        AgentRepository(db).create(agent)
+        epoch = self._claim(db, run)
+        attempt_repo = AgentAttemptRepository(db)
+        assert attempt_repo.record_agent_attempt_intent(
+            run.run_id, TENANT, agent.agent_id, epoch, 1,
+            dm.AgentKind.BOT.value, "agent_swarm_first", "a1",
+        )
+        attempt_repo.record_attempt_result(
+            run.run_id, TENANT, agent.agent_id, epoch, 1, "TIMEOUT", "timeout",
+        )
+
+        store = self._ordinal_store(db, attempt_repo)
+        assert asyncio.run(store.next_attempt_ordinal(run, agent.agent_id)) == 2
+
+    def test_ordinal_is_scoped_to_the_agent(self, db):
+        from agentclaw.community.core.agentswarm.repository.agent_attempt import (
+            AgentAttemptRepository,
+        )
+
+        run = _mk_run(goal="ordinal-scope")
+        RunRepository(db).create(run)
+        first = _mk_agent(run, "a1")
+        second = _mk_agent(run, "a2")
+        epoch = self._claim(db, run)
+        attempt_repo = AgentAttemptRepository(db)
+        attempt_repo.record_agent_attempt_intent(
+            run.run_id, TENANT, first.agent_id, epoch, 1,
+            dm.AgentKind.BOT.value, "agent_swarm_first", "a1",
+        )
+
+        store = self._ordinal_store(db, attempt_repo)
+        assert asyncio.run(store.next_attempt_ordinal(run, first.agent_id)) == 2
+        assert asyncio.run(store.next_attempt_ordinal(run, second.agent_id)) == 1
+
+    def test_missing_attempt_repo_falls_back_to_one(self, db):
+        run = _mk_run(goal="ordinal-norepo")
+        RunRepository(db).create(run)
+        agent = _mk_agent(run, "a1")
+        store = self._ordinal_store(db, None)
+        assert asyncio.run(store.next_attempt_ordinal(run, agent.agent_id)) == 1
