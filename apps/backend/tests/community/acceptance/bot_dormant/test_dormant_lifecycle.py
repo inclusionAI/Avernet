@@ -20,6 +20,12 @@ INTERNAL_HEADERS = {
 }
 
 
+_PRINCIPAL_KEY = os.environ.get(
+    "SINGLEBOX_GATEWAY_PRINCIPAL_SIGNING_KEY",
+    "singlebox-gateway-principal-key-not-for-production",
+)
+
+
 def _wait_reactivated_bot_ready(
     client: httpx.Client,
     bot_id: str,
@@ -154,14 +160,11 @@ def _principal_headers(owner_id: str) -> dict[str, str]:
             "principals": [
                 {
                     "type": "user",
-                    "subject": {"id": owner_id, "username": "dormant@example.test"},
+                    "subject": {"id": owner_id, "username": owner_id},
                 }
             ],
         },
-        os.environ.get(
-            "SINGLEBOX_GATEWAY_PRINCIPAL_SIGNING_KEY",
-            "singlebox-gateway-principal-key-not-for-production",
-        ),
+        _PRINCIPAL_KEY,
         algorithm="HS256",
     )
     return {"X-Avernet-Principal": token}
