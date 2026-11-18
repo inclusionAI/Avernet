@@ -101,23 +101,18 @@ class TaskServiceRelayMixin:
         )
 
     async def report(self, command: TaskReportCommand) -> TaskReportResult:
-        """Atomically apply EXECUTION_RESULT or PLAN_RESULT to the task graph,
-        then write the reported trace steps into the trajectory table.
+        """Apply the business report independently of optional observation data.
 
-        写时发射(2026-10-15 验收语义):relay 轨迹的**唯一事实源 = Bot 上报的
-        ``trace.steps``**——上报即逐条转 ``task_trajectory_events`` 行(七字段,
-        见 ``TaskReportTraceStep``),读取原样拼回;apply 记录的高层动作
-        (execute/verify/plan/transition)**不落轨迹表**(留在 action_log/图内,
-        是 dashboard 侧事实)。观测旁路,决策 #14 fire-and-forget:发射失败仅
-        日志,绝不影响上报结果。
-
-        幂等:发射前查图 ``_relay_report_event_ids`` ——该 event_id 已有回执 =
-        重放上报,跳过发射(apply 自身对重放返回既有结果,不重记账)。预查失败
-        best-effort 视为未见过(宁可多发,不可漏观测)。"""
+        A supplied trace is still emitted step by step, best-effort, without
+        duplicating replayed events. Reports without trace neither emit rows nor
+        perform the observation-only replay precheck. Business action logs and
+        persisted search receipts remain authoritative regardless of trace.
+        """
         self._load_relay_report_action_log(command)
-        already_known = self._relay_report_event_known(command)
+        has_trace = command.trace is not None and bool(command.trace.steps)
+        already_known = has_trace and self._relay_report_event_known(command)
         result = self._graph.apply_relay_report(command)
-        if not already_known and command.trace is not None and command.trace.steps:
+        if has_trace and not already_known:
             self._emit_trace_step_rows(command)
         return result
 
