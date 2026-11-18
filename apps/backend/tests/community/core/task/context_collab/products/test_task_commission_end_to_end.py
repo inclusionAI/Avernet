@@ -238,7 +238,7 @@ def test_end_to_end_commission_flow(deploy_commission, tmp_path):
         injector, l4_context_operate, service, collet, working_bot.actor_context
     )
 
-    # 8. 模拟Agent自主执行。
+    # 8. 模拟Agent自主执行，干活过程中通过G3的操作接口上报进度信息、明细步骤信息等。
     artifacts = _agent_run_simulate(
         service, collet, working_bot, started, tmp_path, task_id
     )
