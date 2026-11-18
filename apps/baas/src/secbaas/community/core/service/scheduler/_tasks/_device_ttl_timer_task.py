@@ -9,6 +9,10 @@
 baas 两组并行跑，页内并发续期）；HTTP 手动触发路径（run_direct）不抢锁，
 直接执行一轮，并可用 batch_size / max_pages 控制本轮规模。
 
+Per-Caller container bindings (``apply_reason=caller_instance:<bot_id>``) and
+their matching ``baas_device`` rows are excluded from both scan groups so an
+idle Caller container keeps its own TTL instead of being renewed forever.
+
 依赖通过构造方法注入，由 DI 容器管理生命周期。
 """
 

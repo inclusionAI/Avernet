@@ -16,6 +16,7 @@ This catalog routes existing repository knowledge into the app framework without
 
 ## Other app contracts, configuration and test guides
 
+- [docs/2026-11-18-caller-instance-ttl-renewal-exclusion.md](../2026-11-18-caller-instance-ttl-renewal-exclusion.md)
 - [tests/README.md](../../tests/README.md)
 - [tests/architecture/singlebox/README.md](../../tests/architecture/singlebox/README.md)
 

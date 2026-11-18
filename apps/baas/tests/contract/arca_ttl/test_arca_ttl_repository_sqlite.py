@@ -272,6 +272,8 @@ def _seed_hot_binding(
     device_provider: str = "arca",
     status: str = "ACTIVE",
     device_props: str | None = None,
+    device_id: str | None = None,
+    apply_reason: str | None = None,
 ) -> None:
     with db_manager.orm_session() as session:
         session.add(
@@ -279,12 +281,13 @@ def _seed_hot_binding(
                 id=id_val,
                 entity_id=f"entity-{id_val}",
                 entity_type="user",
-                device_id=f"device-{id_val}",
+                device_id=device_id or f"device-{id_val}",
                 device_provider=device_provider,
                 env=env,
                 status=status,
                 applied_by="applier",
                 device_props=device_props,
+                apply_reason=apply_reason,
             )
         )
 
@@ -1005,3 +1008,111 @@ class TestHotRowExists:
     def test_unsupported_source_table_raises(self, repo):
         with pytest.raises(ValueError, match="Unsupported source_table"):
             repo.hot_row_exists(ENV, "bogus", 1)
+
+
+class TestCallerInstanceTtlExclusion:
+    """Caller containers (apply_reason=caller_instance:*) are outside the
+    ARCA TTL renewal universe in both the device and binding sides."""
+
+    CALLER_APPLY_REASON = "caller_instance:bot-1"
+
+    def _seed(self):
+        # Caller container: a baas_device row plus its matching binding. The
+        # binding's device_id equals the baas_device device_uuid.
+        _seed_hot_device(id_val=30, env=ENV, provider_device_id="sb-caller-30")
+        _seed_hot_binding(
+            id_val=31,
+            env=ENV,
+            device_provider="arca",
+            device_id="uuid-30",
+            apply_reason=self.CALLER_APPLY_REASON,
+            device_props='{"sandbox_id": "sb-caller-30"}',
+        )
+        # Regular ARCA device + binding that must stay renewable.
+        _seed_hot_device(id_val=32, env=ENV, provider_device_id="sb-normal-32")
+        _seed_hot_binding(
+            id_val=33,
+            env=ENV,
+            device_provider="arca",
+            device_id="uuid-32",
+            apply_reason="manual",
+            device_props='{"sandbox_id": "sb-normal-32"}',
+        )
+        # Due cold rows for all four hot rows.
+        _seed_cold(
+            env=ENV,
+            source_table="baas_device",
+            source_id=30,
+            sandbox_id="sb-caller-30",
+            next_renew_at=datetime(2020, 1, 1),
+        )
+        _seed_cold(
+            env=ENV,
+            source_table="baas_device",
+            source_id=32,
+            sandbox_id="sb-normal-32",
+            next_renew_at=datetime(2020, 1, 2),
+        )
+        _seed_cold(
+            env=ENV,
+            source_table="ac_entity_device_binding",
+            source_id=31,
+            sandbox_id="sb-caller-30",
+            next_renew_at=datetime(2020, 1, 1),
+        )
+        _seed_cold(
+            env=ENV,
+            source_table="ac_entity_device_binding",
+            source_id=33,
+            sandbox_id="sb-normal-32",
+            next_renew_at=datetime(2020, 1, 2),
+        )
+
+    def test_list_due_excludes_caller_device(self, repo):
+        self._seed()
+
+        rows = repo.list_due_for_renewal(ENV, "baas_device", 500, now=NOW)
+
+        source_ids = {r["source_id"] for r in rows}
+        assert 30 not in source_ids
+        assert 32 in source_ids
+
+    def test_list_due_excludes_caller_binding(self, repo):
+        self._seed()
+
+        rows = repo.list_due_for_renewal(ENV, "ac_entity_device_binding", 500, now=NOW)
+
+        source_ids = {r["source_id"] for r in rows}
+        assert 31 not in source_ids
+        assert 33 in source_ids
+
+    def test_discovery_excludes_caller_device(self, repo):
+        self._seed()
+        # Remove the cold rows so both rows are discovery candidates.
+        with db_manager.orm_session() as session:
+            session.query(TtlRenewalScheduleModel).delete()
+
+        rows = repo.find_unregistered(ENV, "baas_device", limit=500)
+
+        sandbox_ids = {r["sandbox_id"] for r in rows}
+        assert "sb-caller-30" not in sandbox_ids
+        assert "sb-normal-32" in sandbox_ids
+
+    def test_discovery_excludes_caller_binding(self, repo):
+        self._seed()
+        with db_manager.orm_session() as session:
+            session.query(TtlRenewalScheduleModel).delete()
+
+        rows = repo.find_unregistered(ENV, "ac_entity_device_binding", limit=500)
+
+        sandbox_ids = {r["sandbox_id"] for r in rows}
+        assert "sb-caller-30" not in sandbox_ids
+        assert "sb-normal-32" in sandbox_ids
+
+    def test_hot_counts_exclude_caller_rows(self, repo):
+        self._seed()
+
+        assert repo.count_hot_arca_devices(ENV) == 1
+        # Both bindings are ARCA-provider; only the caller one is excluded by
+        # apply_reason, so the regular binding is the one left.
+        assert repo.count_hot_arca_bindings(ENV) == 1
