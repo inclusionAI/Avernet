@@ -39,6 +39,8 @@ from agentclaw.community.core.work_orders.repository.models import (
     WorkOrderModel,
 )
 from agentclaw.community.plugin_api.models import BotModel
+from agentclaw.community.plugin_api.staff_dept import StaffProfileInfo
+from agentclaw.community.plugins.community.staff_dept import NoStaffDept
 
 from tests.community.core.repository.implementations.test_space_market_work_order_repositories import (
     _bot_review_notification,
@@ -554,7 +556,7 @@ def test_bot_editor_request_approval_grants_admin_without_changing_existing_role
 def test_friend_approval_context_and_reviewed_event_use_original_applied_event(
     db,
 ) -> None:
-    repository = WorkOrderRepository(db, _skill_editor_requests(db), effects=NoKnowledgeSpacePersistenceEffects())
+    repository = WorkOrderRepository(db, _skill_editor_requests(db), effects=NoKnowledgeSpacePersistenceEffects(), staff_dept=NoStaffDept())
     created = repository.create_work_order_event(
         event_category=NotificationCategory.APPROVAL,
         biz_type=WorkOrderBizType.BOT_FRIEND.value,
@@ -606,11 +608,14 @@ def test_friend_approval_context_and_reviewed_event_use_original_applied_event(
         )
     assert result.event_type == WorkOrderEventType.BOT2BOT_FRIEND_REVIEWED.value
     assert result.title == "Bot 好友申请已通过"
-    assert json.loads(result.content) == {"text": "你的 Bot 好友申请已通过。"}
+    assert json.loads(result.content) == {
+        "text": "你的 Bot「applicant-friend」添加 Bot「legacy-id」"
+        "为好友的申请已通过。"
+    }
 
 
 def test_friend_rejection_persists_status_specific_content(db) -> None:
-    repository = WorkOrderRepository(db, _skill_editor_requests(db), effects=NoKnowledgeSpacePersistenceEffects())
+    repository = WorkOrderRepository(db, _skill_editor_requests(db), effects=NoKnowledgeSpacePersistenceEffects(), staff_dept=NoStaffDept())
     created = repository.create_work_order_event(
         event_category=NotificationCategory.APPROVAL,
         biz_type=WorkOrderBizType.BOT_FRIEND.value,
@@ -651,15 +656,16 @@ def test_friend_rejection_persists_status_specific_content(db) -> None:
             .one()
         )
     assert result.event_type == WorkOrderEventType.BOT2BOT_FRIEND_REVIEWED.value
-    assert result.title == "Bot 好友申请未通过"
+    assert result.title == "Bot 好友申请已驳回"
     assert json.loads(result.content) == {
-        "text": "你的 Bot 好友申请未通过。",
+        "text": "你的 Bot「applicant-reject」添加 Bot「legacy-id-reject」"
+        "为好友的申请已驳回。\n拒绝原因：审批备注",
         "review_remark": "审批备注",
     }
 
 
 def test_get_approval_context_rejects_missing_order(db) -> None:
-    repository = WorkOrderRepository(db, _skill_editor_requests(db), effects=NoKnowledgeSpacePersistenceEffects())
+    repository = WorkOrderRepository(db, _skill_editor_requests(db), effects=NoKnowledgeSpacePersistenceEffects(), staff_dept=NoStaffDept())
 
     with pytest.raises(WorkOrderNotFoundError):
         repository.get_approval_context(
@@ -670,7 +676,7 @@ def test_get_approval_context_rejects_missing_order(db) -> None:
 
 
 def test_get_approval_context_rejects_non_approver(db) -> None:
-    repository = WorkOrderRepository(db, _skill_editor_requests(db), effects=NoKnowledgeSpacePersistenceEffects())
+    repository = WorkOrderRepository(db, _skill_editor_requests(db), effects=NoKnowledgeSpacePersistenceEffects(), staff_dept=NoStaffDept())
     created = repository.create_work_order_event(
         event_category=NotificationCategory.APPROVAL,
         biz_type=WorkOrderBizType.BOT_FRIEND.value,
@@ -693,3 +699,155 @@ def test_get_approval_context_rejects_non_approver(db) -> None:
             reviewer_user_id="other-user",
             env="dev",
         )
+
+
+class _StubStaffDept:
+    def get_profile_by_work_no(self, *, work_no: str) -> StaffProfileInfo:
+        return StaffProfileInfo(work_no=work_no, nick_name="张三")
+
+
+def _add_friend_bots(db) -> None:
+    with db.orm_session() as session:
+        for bot_id, bot_name in (
+            ("applicant-bot", "申请Bot"),
+            ("target-bot", "目标Bot"),
+        ):
+            session.add(
+                BotModel(
+                    bot_id=bot_id,
+                    bot_name=bot_name,
+                    entity_id="owner-1",
+                    entity_type="user",
+                    creator_id="owner-1",
+                    owner_id="owner-1",
+                    status="ACTIVE",
+                    bot_type="service",
+                    env="dev",
+                )
+            )
+        session.flush()
+
+
+def _friend_repository(db) -> WorkOrderRepository:
+    return WorkOrderRepository(
+        db,
+        _skill_editor_requests(db),
+        effects=NoKnowledgeSpacePersistenceEffects(),
+        staff_dept=_StubStaffDept(),
+    )
+
+
+def _friend_result_payload(db, work_order_id: int, applicant_user_id: str):
+    with db.orm_session() as session:
+        row = (
+            session.query(WorkOrderNotificationModel)
+            .filter(
+                WorkOrderNotificationModel.work_order_id == work_order_id,
+                WorkOrderNotificationModel.recipient_user_id == applicant_user_id,
+                WorkOrderNotificationModel.notification_category
+                == NotificationCategory.NOTICE.value,
+            )
+            .one()
+        )
+        return row.title, json.loads(row.content)
+
+
+def test_bot_friend_result_uses_resolved_names_and_rejection_reason(db) -> None:
+    _add_friend_bots(db)
+    repository = _friend_repository(db)
+    created = repository.create_work_order_event(
+        event_category=NotificationCategory.APPROVAL,
+        biz_type=WorkOrderBizType.BOT_FRIEND.value,
+        biz_id="request-1",
+        event_type=WorkOrderEventType.BOT2BOT_FRIEND_APPLIED.value,
+        applicant_user_id="owner-1",
+        approver_user_ids=["reviewer-1"],
+        recipient_user_ids=[],
+        title="好友申请待审批",
+        content=None,
+        apply_reason=None,
+        biz_data=json.dumps(
+            {
+                "request_ids": ["request-1"],
+                "applicant_actor_id": "applicant-bot",
+                "target_bot_id": "target-bot",
+            }
+        ),
+        env="dev",
+    )
+
+    repository.process_approval(
+        work_order_id=created.work_order_id,
+        reviewer_user_id="reviewer-1",
+        decision=WorkOrderDecision.REJECTED,
+        review_remark="重复申请",
+        env="dev",
+    )
+
+    title, payload = _friend_result_payload(db, created.work_order_id, "owner-1")
+    assert title == "Bot 好友申请已驳回"
+    assert payload == {
+        "text": "张三已驳回你的 Bot「申请Bot」添加 Bot「目标Bot」"
+        "为好友的申请。\n拒绝原因：重复申请",
+        "review_remark": "重复申请",
+    }
+
+
+def test_human_friend_result_shares_title_and_omits_unresolved_approver(db) -> None:
+    _add_friend_bots(db)
+    repository = _friend_repository(db)
+
+    def _create() -> int:
+        created = repository.create_work_order_event(
+            event_category=NotificationCategory.APPROVAL,
+            biz_type=WorkOrderBizType.BOT_FRIEND.value,
+            biz_id="request-2",
+            event_type=WorkOrderEventType.HUMAN2BOT_FRIEND_APPLIED.value,
+            applicant_user_id="human-1",
+            approver_user_ids=["reviewer-1"],
+            recipient_user_ids=[],
+            title="好友申请待审批",
+            content=None,
+            apply_reason=None,
+            biz_data=json.dumps(
+                {
+                    "request_ids": ["request-2"],
+                    "applicant_actor_id": "human_123456",
+                    "target_bot_id": "target-bot",
+                }
+            ),
+            env="dev",
+        )
+        return created.work_order_id
+
+    work_order_id = _create()
+    repository.process_approval(
+        work_order_id=work_order_id,
+        reviewer_user_id="reviewer-1",
+        decision=WorkOrderDecision.APPROVED,
+        review_remark=None,
+        env="dev",
+    )
+    title, payload = _friend_result_payload(db, work_order_id, "human-1")
+    assert title == "Bot 好友申请已通过"
+    assert payload == {"text": "张三已通过你添加 Bot「目标Bot」的好友申请。"}
+
+    # With no staff directory injected the approver element is omitted rather
+    # than leaking the raw reviewer id.
+    no_directory = WorkOrderRepository(
+        db,
+        _skill_editor_requests(db),
+        effects=NoKnowledgeSpacePersistenceEffects(),
+        staff_dept=NoStaffDept(),
+    )
+    second_id = _create()
+    no_directory.process_approval(
+        work_order_id=second_id,
+        reviewer_user_id="reviewer-1",
+        decision=WorkOrderDecision.APPROVED,
+        review_remark=None,
+        env="dev",
+    )
+    _title, second_payload = _friend_result_payload(db, second_id, "human-1")
+    assert second_payload == {"text": "你添加 Bot「目标Bot」的好友申请已通过。"}
+    assert "reviewer-1" not in second_payload["text"]

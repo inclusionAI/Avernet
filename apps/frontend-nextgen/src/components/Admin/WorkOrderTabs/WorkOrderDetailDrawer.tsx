@@ -26,6 +26,14 @@ export function WorkOrderDetailDrawer({
   onClose,
   onNextUnread,
 }: WorkOrderDetailDrawerProps) {
+  // 通知类驳回原因：后端新模板已把「拒绝原因：…」并入正文，只有正文未包含时
+  // 才单独补一行，避免重复展示；兼容仅下发结构化 review_remark 的旧数据。
+  const notificationReviewRemark =
+    detail?.itemType === 'NOTIFICATION' &&
+    detail.reviewRemark &&
+    !(detail.content ?? '').includes(detail.reviewRemark)
+      ? detail.reviewRemark
+      : null;
   return (
     <Drawer open={open} onOpenChange={(o) => !o && onClose()}>
       <DrawerContent side="right" size="md" className="w-[480px]">
@@ -56,6 +64,11 @@ export function WorkOrderDetailDrawer({
             ) : (
               <div className="rounded-lg bg-muted/60 p-4 text-xs text-muted-foreground">（暂无内容）</div>
             )}
+            {notificationReviewRemark ? (
+              <p className="mt-2 rounded-lg bg-muted/60 px-4 py-2 text-xs text-muted-foreground">
+                拒绝原因：{notificationReviewRemark}
+              </p>
+            ) : null}
             {detail?.sessionUrl ? (
               <div className="mt-3">
                 <Button asChild variant="outline" size="sm">

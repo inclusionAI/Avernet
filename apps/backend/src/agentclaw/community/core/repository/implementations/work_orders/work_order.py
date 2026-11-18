@@ -61,6 +61,7 @@ from agentclaw.community.core.work_orders.models import (
     WorkOrderEventType,
     WorkOrderMessageContent,
     WorkOrderMessageTitle,
+    friend_result_content,
     reviewed_event_type_for,
     notification_title_for,
 )
@@ -70,6 +71,11 @@ from agentclaw.community.core.work_orders.repository.models import (
     WorkOrderApproverModel,
 )
 from agentclaw.community.plugin_api.database import DatabasePlugin
+from agentclaw.community.plugin_api.staff_dept import (
+    StaffDeptPlugin,
+    StaffProfileLookupError,
+)
+from agentclaw.community.utils.work_no import normalize_work_no_for_lookup
 
 
 _ADMINISTRATOR_ROLES = ("ADMIN", "ADMINISTRATOR")
@@ -84,9 +90,11 @@ class WorkOrderRepository(
         db: DatabasePlugin,
         skill_editor_requests: SkillEditorRequestRepositoryProtocol,
         effects: SpacePersistenceEffects,
+        staff_dept: StaffDeptPlugin,
     ) -> None:
         self._db = db
         self._effects = effects
+        self._staff_dept = staff_dept
         self._WorkOrder = WorkOrderModel
         self._Notification = WorkOrderNotificationModel
         self._Approver = WorkOrderApproverModel
@@ -101,6 +109,92 @@ class WorkOrderRepository(
     @staticmethod
     def _new_no() -> str:
         return _WorkOrderCreationRepository._new_no()
+
+    def _friend_result_text(
+        self,
+        *,
+        order,
+        db,
+        env: str,
+        reviewer_user_id: str,
+        approved: bool,
+        applicant_is_bot: bool,
+        review_remark: str | None,
+    ) -> str:
+        """Assemble the friend result body from the persisted work order.
+
+        Identities come from ``biz_data`` (the applicant actor and target bot
+        the BCS producer recorded) rather than the acting principal, so a
+        transferred Bot still names the Bot that was originally applied for.
+        Display-name misses degrade per PRD v1.1 §3.2: the approver element is
+        omitted and Bot names fall back to their ids.
+        """
+
+        biz_data: dict[str, object] = {}
+        try:
+            parsed = json.loads(order.biz_data or "{}")
+        except (TypeError, ValueError):
+            parsed = None
+        if isinstance(parsed, dict):
+            biz_data = parsed
+        applicant_actor_id = str(
+            biz_data.get("applicant_actor_id") or order.applicant_user_id or ""
+        )
+        target_bot_id = str(biz_data.get("target_bot_id") or order.biz_id or "")
+        target_bot_name = (
+            self._resolve_bot_name(db, env, target_bot_id) or target_bot_id
+        )
+        applicant_bot_name = ""
+        if applicant_is_bot:
+            applicant_bot_name = (
+                self._resolve_bot_name(db, env, applicant_actor_id)
+                or applicant_actor_id
+            )
+        return friend_result_content(
+            approved=approved,
+            applicant_is_bot=applicant_is_bot,
+            approver_name=self._resolve_human_display_name(reviewer_user_id),
+            applicant_bot_name=applicant_bot_name,
+            target_bot_name=target_bot_name,
+            review_remark=review_remark,
+        )
+
+    def _resolve_human_display_name(self, user_id: str | None) -> str | None:
+        """Return a staff nickname, or ``None`` when it cannot be resolved."""
+
+        if not user_id:
+            return None
+        try:
+            profile = self._staff_dept.get_profile_by_work_no(
+                work_no=normalize_work_no_for_lookup(user_id)
+            )
+        except StaffProfileLookupError:
+            return None
+        name = (profile.nick_name or "").strip()
+        return name or None
+
+    @staticmethod
+    def _resolve_bot_name(db, env: str, bot_id: str) -> str | None:
+        """Return a live Bot's display name, or ``None`` when it is unknown."""
+
+        if not bot_id:
+            return None
+        from agentclaw.community.plugin_api.models import BotModel
+
+        row = (
+            db.query(BotModel)
+            .filter(
+                BotModel.bot_id == bot_id,
+                BotModel.env == env,
+                BotModel.is_delete == 0,
+            )
+            .order_by(BotModel.id.asc())
+            .first()
+        )
+        if row is None:
+            return None
+        name = (row.bot_name or "").strip()
+        return name or None
 
     def create_work_order_event(
         self,
@@ -346,28 +440,23 @@ class WorkOrderRepository(
                     reviewed_event_type
                     == WorkOrderEventType.HUMAN2BOT_FRIEND_REVIEWED.value
                 )
-                if target is WorkOrderStatus.APPROVED:
-                    result_title = (
-                        WorkOrderMessageTitle.HUMAN_FRIEND_APPROVED.value
-                        if is_human_friend
-                        else WorkOrderMessageTitle.BOT_FRIEND_APPROVED.value
-                    )
-                    result_text = (
-                        WorkOrderMessageContent.HUMAN_FRIEND_APPROVED.value
-                        if is_human_friend
-                        else WorkOrderMessageContent.BOT_FRIEND_APPROVED.value
-                    )
-                else:
-                    result_title = (
-                        WorkOrderMessageTitle.HUMAN_FRIEND_REJECTED.value
-                        if is_human_friend
-                        else WorkOrderMessageTitle.BOT_FRIEND_REJECTED.value
-                    )
-                    result_text = (
-                        WorkOrderMessageContent.HUMAN_FRIEND_REJECTED.value
-                        if is_human_friend
-                        else WorkOrderMessageContent.BOT_FRIEND_REJECTED.value
-                    )
+                approved = target is WorkOrderStatus.APPROVED
+                # PRD v1.1 §3.2: one title for both Human-Bot and Bot-Bot
+                # results, with the applicant identity carried by the body.
+                result_title = (
+                    WorkOrderMessageTitle.BOT_FRIEND_APPROVED.value
+                    if approved
+                    else WorkOrderMessageTitle.BOT_FRIEND_REJECTED.value
+                )
+                result_text = self._friend_result_text(
+                    order=order,
+                    db=db,
+                    env=env,
+                    reviewer_user_id=reviewer_user_id,
+                    approved=approved,
+                    applicant_is_bot=not is_human_friend,
+                    review_remark=review_remark,
+                )
                 result_payload = {"text": result_text}
                 if review_remark is not None:
                     result_payload["review_remark"] = review_remark

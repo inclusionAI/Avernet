@@ -159,6 +159,34 @@ describe('WorkOrderDetailDrawer 审批类补充字段', () => {
 
     expect(screen.getByText('（暂无内容）')).toBeInTheDocument();
   });
+
+  it('通知类驳回原因未内嵌正文时补「拒绝原因」行', () => {
+    const detail = buildWorkOrder({
+      item_type: 'NOTICE',
+      event_type: 'BOT2BOT_FRIEND_REVIEWED',
+      title: 'Bot 好友申请已驳回',
+      content: { text: '张三已驳回你的 Bot「申请Bot」添加 Bot「目标Bot」为好友的申请。' },
+      review_remark: '重复申请',
+    });
+    render(<WorkOrderDetailDrawer open loading={false} detail={detail} onClose={noop} onNextUnread={noop} />);
+
+    expect(screen.getByText('拒绝原因：重复申请')).toBeInTheDocument();
+  });
+
+  it('通知类驳回原因已并入正文时不重复渲染', () => {
+    const detail = buildWorkOrder({
+      item_type: 'NOTICE',
+      event_type: 'BOT2BOT_FRIEND_REVIEWED',
+      title: 'Bot 好友申请已驳回',
+      content: {
+        text: '张三已驳回你的 Bot「申请Bot」添加 Bot「目标Bot」为好友的申请。\n拒绝原因：重复申请',
+      },
+      review_remark: '重复申请',
+    });
+    render(<WorkOrderDetailDrawer open loading={false} detail={detail} onClose={noop} onNextUnread={noop} />);
+
+    expect(screen.getAllByText(/重复申请/)).toHaveLength(1);
+  });
 });
 
 describe('WorkOrderDetailDrawer 已读与未读导航', () => {

@@ -20,6 +20,7 @@ from agentclaw.community.core.repository.implementations.spaces.space import (
 from agentclaw.community.core.repository.implementations.work_orders.work_order import (
     WorkOrderRepository,
 )
+from agentclaw.community.plugins.community.staff_dept import NoStaffDept
 from agentclaw.community.core.repository.implementations.skill_center.space_skill import (
     SpaceSkillRepository,
 )
@@ -80,7 +81,7 @@ def _skill_editor_requests(db) -> SkillEditorRequestRepository:
 
 
 def _work_orders(db) -> WorkOrderRepository:
-    return WorkOrderRepository(db, _skill_editor_requests(db), effects=NoKnowledgeSpacePersistenceEffects())
+    return WorkOrderRepository(db, _skill_editor_requests(db), effects=NoKnowledgeSpacePersistenceEffects(), staff_dept=NoStaffDept())
 
 
 def _space_skills(db) -> SpaceSkillRepository:
