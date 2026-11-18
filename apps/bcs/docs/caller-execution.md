@@ -1,5 +1,14 @@
 # Request-scoped caller execution
 
+For a channel binding that targets one Bot, trusted adapters can pass an
+authenticated Human in `InboundMessage.caller_ingress`. BCS checks that the
+identity matches the normalized channel sender before dispatch. The target
+Bot's Caller configuration controls managed Caller admission; providing
+identity does not itself enable Caller mode. Adapters must leave the field
+unset unless they have authenticated the sender at their ingress boundary.
+
+The binding-level credential forwarding below is a separate path.
+
 Channel providers may opt into caller execution with `requires_caller_execution` and validate the binding target with `validate_binding_config`. The default implementations preserve existing providers. The channel service additionally enforces a single Bot target. Group bindings, state-machine routing, WebSocket delivery and fan-out are not supported.
 
 An authenticated ingress may supply an `InboundMessage.execution_token`. This request-only value is not serializable and its Debug output is redacted. Local commands are processed normally. A caller-enabled binding requires a nonempty credential and sender identity before dispatch; an ordinary binding discards the credential. The normalized `WebSendCommand.caller_execution` carries the bound Bot, binding, original message and user identity, not a generic arbitrary extension map exposed to clients.

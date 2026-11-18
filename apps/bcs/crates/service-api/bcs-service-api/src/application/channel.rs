@@ -104,6 +104,9 @@ impl ChannelInboundError {
 /// 一条入站 IM 消息(已由 adapter 从 IM 原生 body 解析为中性结构)。
 #[derive(Debug, Clone)]
 pub struct InboundMessage {
+    /// Runtime-only sender identity attested by a trusted channel adapter.
+    /// Raw protocol parsers and unverified ingress must leave this unset.
+    pub caller_ingress: Option<super::caller_identity::AuthenticatedHumanCallerIngress>,
     /// Trusted callback credential; absent for unauthenticated ingress. Never persisted.
     pub execution_token: Option<super::caller_execution::ExecutionToken>,
     pub channel_type: ChannelType,
