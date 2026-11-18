@@ -34,6 +34,7 @@ from engine.community.openclaw.config import OpenClawConfig
 from engine.community.openclaw.client.gateway_connection import GatewayConnection
 from engine.community.openclaw.client.child_runs import ChildRuns, is_child_event, is_parent_continuation
 from engine.community.openclaw.client.merged_announce import MergedAnnounce
+from engine.community.openclaw.client.reasoning_announce import ReasoningAnnounce, empty_announce
 
 log = logging.getLogger("openclaw-client")
 _DEBUG = os.getenv("OPENCLAW_DEBUG_EVENTS", "").lower() in {"1", "true", "yes", "on"}
@@ -191,7 +192,7 @@ class OpenClawGatewayClient(GatewayConnection):
         except asyncio.TimeoutError:
             self._pending_requests.pop(request_id, None)
             raise TimeoutError(f"Request timeout: {method}")
-        except Exception:
+        except (Exception, asyncio.CancelledError):
             self._pending_requests.pop(request_id, None)
             raise
 
@@ -225,6 +226,8 @@ class OpenClawGatewayClient(GatewayConnection):
         event_queue: asyncio.Queue[EventFrame | MergedAnnounce | None] = asyncio.Queue()
         revision = 0
         merge_check: asyncio.Task[None] | None = None
+        retry_probe: ReasoningAnnounce | None = None
+        retry_check: asyncio.Task[None] | None = None
         ack_pending = on_ack is not None
         early_events: list[tuple[Callable[[EventFrame], None], EventFrame]] = []
         early_bytes = 0
@@ -371,7 +374,7 @@ class OpenClawGatewayClient(GatewayConnection):
             return True
 
         def authorize_parent_resume(event: EventFrame, payload: Dict[str, Any]) -> bool:
-            nonlocal waiting_for_subagent_resume, resumed_parent_run_id
+            nonlocal waiting_for_subagent_resume, resumed_parent_run_id, retry_probe
             payload_run_id = payload.get("runId")
             resumable = is_parent_continuation(event.event, payload) or event.event.endswith(approval_suffixes)
             if not (
@@ -389,6 +392,13 @@ class OpenClawGatewayClient(GatewayConnection):
             allowed_run_ids.add(payload_run_id)
             resumed_parent_run_id = payload_run_id
             waiting_for_subagent_resume = False
+            if retry_probe is not None:
+                # The parent now owns the answer. Settle the receipt without
+                # forwarding it, including any subsequent duplicate final.
+                children.complete_announce(retry_probe.run)
+                retry_probe = None
+                if retry_check is not None:
+                    retry_check.cancel()
             log.info(
                 "[chat_stream][subagent_parent_resumed] sessionKey=%s "
                 "runId=%s pendingAnnounces=%d",
@@ -413,8 +423,16 @@ class OpenClawGatewayClient(GatewayConnection):
             if verified and not done and revision == probe.revision:
                 event_queue.put_nowait(probe)
 
-        def on_chat_event(event: EventFrame) -> None:
-            nonlocal revision, merge_check
+        async def recover_announce(probe: ReasoningAnnounce) -> None:
+            event = await probe.resolve(self, self._config.session_transcript_dir,
+                                        timeout_ms / 1000 if timeout_ms else _DEFAULT_CHAT_STREAM_TIMEOUT_SECONDS)
+            if not done and retry_probe is probe:
+                if not waiting_for_subagent_resume or len(children.runs) != 1:
+                    event = probe.event
+                on_chat_event(event, settled=True)
+
+        def on_chat_event(event: EventFrame, *, settled: bool = False) -> None:
+            nonlocal revision, merge_check, retry_probe, retry_check
             nonlocal done, emitted_non_terminal, filter_drop_count
             nonlocal pending_compaction_finals, pending_early_final
             nonlocal suppressed_compaction_lifecycle_ends, waiting_for_subagent_resume
@@ -423,6 +441,8 @@ class OpenClawGatewayClient(GatewayConnection):
             if buffer_before_ack(on_chat_event, event):
                 return
             payload = event.payload or {}
+            if retry_probe is not None:
+                retry_probe.observe(event)
             if children.observe_event(event.event, payload):
                 return
             remember_trusted_parent_session(payload)
@@ -443,6 +463,16 @@ class OpenClawGatewayClient(GatewayConnection):
             state = payload.get("state")
             payload_run_id = payload.get("runId")
             if is_announce_event(payload) and state == "final":
+                child = children.announce_child(payload_run_id)
+                if (not settled and event.event == "chat" and child and not child.announced
+                        and not child.parent_covered and waiting_for_subagent_resume
+                        and len(children.runs) == 1 and empty_announce(payload)):
+                    if retry_probe is None:
+                        retry_probe = ReasoningAnnounce(event, next(iter(children.runs)), child.session_key)
+                        retry_check = asyncio.create_task(recover_announce(retry_probe))
+                    return
+                if retry_probe is not None and payload_run_id == retry_probe.run:
+                    retry_probe = None
                 if not children.complete_announce(payload_run_id):
                     return
             revision += 1
@@ -864,6 +894,9 @@ class OpenClawGatewayClient(GatewayConnection):
 
         finally:
             done = True
+            if retry_check is not None:
+                retry_check.cancel()
+                await asyncio.gather(retry_check, return_exceptions=True)
             if merge_check is not None:
                 merge_check.cancel()
                 await asyncio.gather(merge_check, return_exceptions=True)
