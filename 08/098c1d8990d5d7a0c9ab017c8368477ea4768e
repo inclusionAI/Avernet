@@ -1,0 +1,31 @@
+apps/backend/tests/community/core/apply_engine/test_default_mcp_device_delivery.py
+  s_763a81eb308339::t_8b3b1fcb308aa0 130
+  s_763a81eb308339::t_b7a5a4b453501b 107-127
+  s_763a81eb308339::t_ec96e407e188be 1-106,128-129,131-149
+apps/backend/tests/community/core/apply_engine/test_default_mcp_platform_artifact.py
+  s_bcc2d0974a665d::t_224a8ec32acef0 1-62
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "08098c1d8990d5d7a0c9ab017c8368477ea4768e",
+  "prompts": {},
+  "sessions": {
+    "s_763a81eb308339": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ed82-b79a-76e0-8143-6b80bc462b82",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    },
+    "s_bcc2d0974a665d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a9d9-072f-7481-adc1-c3e3d78b7fd1",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}
