@@ -1,0 +1,32 @@
+apps/frontend-nextgen/docs/task-escort/spec.md
+  s_2738fdf9728999::t_87e33895891594 1-61
+apps/frontend-nextgen/docs/task-escort/README.md
+  s_2738fdf9728999::t_87e33895891594 1-22,24-31,33-34,37-39
+  s_371aeedb96aaa0::t_2112aac6a57aba 23,32,35-36,40-52
+apps/frontend-nextgen/scripts/public-tests.list
+  s_371aeedb96aaa0::t_07d88d316f3934 288-347
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "228c4d4763794955752506e433858a4977cc795f",
+  "prompts": {},
+  "sessions": {
+    "s_2738fdf9728999": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ec5c-f504-7a92-a763-f3f98d301ac1",
+        "model": "GPT-6.1-SOL"
+      },
+      "human_author": "fudp <dapeng.fdp@antgroup.com>"
+    },
+    "s_371aeedb96aaa0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e72c-2e74-7c03-93c8-65c0f1e71fbc",
+        "model": "GPT-6.1-SOL"
+      },
+      "human_author": "fudp <dapeng.fdp@antgroup.com>"
+    }
+  }
+}

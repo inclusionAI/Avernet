@@ -1,0 +1,28 @@
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/monitoring-runtime.test.ts
+  s_71ecc0368356a8::t_adc44a236e9a35 27
+apps/evolverun/clawweb-ais-base/README.md
+  s_71ecc0368356a8::t_eb11697c4b7102 47,62-66
+  s_71ecc0368356a8::t_4bbb27b897dcda 67
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/monitoring-runtime.ts
+  s_71ecc0368356a8::t_adc44a236e9a35 40,43-44
+apps/evolverun/clawweb-ais-base/tests/test_runtime_llm.py
+  s_71ecc0368356a8::t_16d182e8df91e4 12,84,176-202
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/private/__tests__/config-mist-runtime.test.ts
+  s_71ecc0368356a8::t_f2d9bb9ef56985 3,287-304
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "34e3e75367625f956db3695787aae8605d87c6d0",
+  "prompts": {},
+  "sessions": {
+    "s_71ecc0368356a8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e8b5-d1c5-7392-983a-301586384ef8",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}
