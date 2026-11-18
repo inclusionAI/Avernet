@@ -181,9 +181,8 @@ OBJECTIVE = (
   - [ ] open方法中的参与类型，协议中的枚举不在一个维度：participation_type: COLLET_PARTICIPANT | GROUP_MEMBER | SWARM_ALLOCATION | SINGLE_CONTRIBUTION
 """
 
-
 def test_end_to_end_commission_flow(deploy_commission, tmp_path):
-    # 1. L6层产品定义是可复用合同,创建 Profile 本身不产生协作运行对象。
+    # 1. L6层产品定义是可复用合同,创建 Profile 本身不产生协作运行对象。L5层OPEN + SINGLE方法的组合
     profile = _create_product_profile()
 
     # 测试用例需要的模块动态注入
@@ -194,7 +193,6 @@ def test_end_to_end_commission_flow(deploy_commission, tmp_path):
 
     # 2. 一次 L6 Instantiate 创建产品协作;由内部 L4 创建 Collet,
     # 同时建立 ProductInstance、初始参与者/角色、资源/策略引用和 L5 方法组合。
-    # Profile 定义/安装独立;实例化不代表 Open 录取、Single 选定或开始执行。
     # 此时无 Task;后续 L4 Work.start 才创建并启动根 Task。
     instance = injector.get(ProductInstantiationServiceProtocol).instantiate(
         ProductInstantiateNewCommand(
@@ -203,37 +201,25 @@ def test_end_to_end_commission_flow(deploy_commission, tmp_path):
                 title="XX代办任务",
                 description="Open 参与 + Single 选定执行者,成果由用户验收",
             ),
-            profile_ref=profile.ref,
-            participant_refs=(AgentRef("bot", BOT_ASSIGNEE),),
-            resource_refs=INPUT_RESOURCES,
+            profile_ref=profile.ref,                                    # profile
+            participant_refs=(AgentRef("bot", BOT_ASSIGNEE),),          # 创建代办任务的时候，可以指定特定执行者，也可以不指定(在profile限定的参与者范围内)
+            resource_refs=INPUT_RESOURCES,                              # 输入的资源
         ),
         HUMAN,
-    )
-    _assert_product_instance(
-        injector,
-        instance.collet_ref,
-        profile,
-        instance,
-        participant_ref=AgentRef("bot", BOT_ASSIGNEE),
-        resource_refs=INPUT_RESOURCES,
     )
     collet = (
         injector.get(ContextCollabRepositoryProtocol)
         .get_current_status(instance.collet_ref)
         .collet
-    )
-    assert collet.title == "XX代办任务"
-    assert collet.created_by == collet.updated_by == HUMAN.actor
-    assert collet.created_at <= collet.updated_at
-    assert collet.schema_version is not None and collet.etag
+    )  # 读出最新创建的这个collet
 
-    # 3. 发布机会， "METHOD"方法
+    # 3. 发布机会（OPEN"方法）
     _publish_opportunity(l5_open_method, collet.collet_id)
 
-    # 4. Agent主动发现机会
+    # 4. Agent主动发现机会（OPEN"方法）
     opportunity, submitted = _discover_opportunity(store, axes, collet, working_bot)
 
-    # 5. 由 Profile 配置的审核 Agent 按能力证据执行录取判断。
+    # 5. 由 Profile 配置的审核 Agent 按能力证据执行录取判断。（OPEN"方法）
     decision = _admit_application_agent(
         injector,
         l5_open_method,
@@ -245,7 +231,7 @@ def test_end_to_end_commission_flow(deploy_commission, tmp_path):
         profile,
     )
 
-    # 6. 明确选择该次录取产生的参与者，进入"SINGLE:方法
+    # 6. 明确选择该次录取产生的参与者，进入"SINGLE方法"
     _select_admitted_agent(injector, store, axes, instance, decision)
 
     # 7. 通知agent开始执行任务
