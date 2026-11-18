@@ -18,6 +18,7 @@ Public BCS owns coordination contracts, services, adapters and reusable plugins;
 - [Distributed coordination contracts](crates/service-api/bcs-service-api/src/port/repo/distributed/README.md) — declarations; implementation pending
 - [Runtime store plugin API](crates/plugin-api/bcs-store-api/README.md) — capability contracts and provider harnesses
 - [Distributed immutable archive](crates/services/bcs-dist-store/src/archive/README.md) — public Result/Blob persistence and committed-effect evidence
+- [Committed TaskFeed](crates/services/bcs-dist-store/src/task_feed/README.md) — output replay, snapshot publication and logical retention
 - [Distributed output projection](crates/services/bcs-dist-projection/README.md) — pure display transform, frozen quotas and replay accounting
 - [Session deletion protocol](docs/session-delete-protocol.md)
 - [Flow navigation](docs/flows/README.md)

@@ -17,7 +17,7 @@ use serde_json::Value;
 use std::collections::BTreeMap;
 use std::num::NonZeroU32;
 use std::ops::Bound;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 #[derive(Default)]
@@ -28,6 +28,8 @@ pub struct Recorder {
     writes: Mutex<usize>,
     lose_write: Mutex<Option<usize>>,
     fail_write: Mutex<Option<usize>>,
+    pause: Mutex<Option<PauseRule>>,
+    fail_document_read: Mutex<Option<String>>,
 }
 
 impl Recorder {
@@ -42,6 +44,42 @@ impl Recorder {
             model,
             ..Self::default()
         }
+    }
+    pub fn pause_after(&self, operation: &str, key: &str, occurrence: usize) -> Arc<Pause> {
+        let pause = Arc::new(Pause::default());
+        *self.pause.lock().unwrap() = Some(PauseRule {
+            operation: operation.into(),
+            key: key.into(),
+            remaining: occurrence,
+            pause: pause.clone(),
+        });
+        pause
+    }
+    async fn paused(&self, operation: &str, key: &str) {
+        let pause = {
+            let mut rule = self.pause.lock().unwrap();
+            if let Some(r) = rule.as_mut() {
+                if r.operation == operation && key.contains(&r.key) {
+                    r.remaining -= 1;
+                    if r.remaining == 0 {
+                        rule.take().map(|r| r.pause)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        };
+        if let Some(pause) = pause {
+            pause.reached.notify_one();
+            pause.release.notified().await;
+        }
+    }
+    pub fn fail_document_read(&self, key: &str) {
+        *self.fail_document_read.lock().unwrap() = Some(key.into());
     }
     pub fn calls(&self) -> Vec<String> {
         self.calls.lock().unwrap().clone()
@@ -80,6 +118,28 @@ impl Recorder {
         }
         Effect::Apply
     }
+}
+
+#[derive(Default)]
+pub struct Pause {
+    reached: tokio::sync::Notify,
+    release: tokio::sync::Notify,
+}
+impl Pause {
+    pub async fn reached(&self) {
+        tokio::time::timeout(Duration::from_secs(2), self.reached.notified())
+            .await
+            .unwrap();
+    }
+    pub fn resume(&self) {
+        self.release.notify_one();
+    }
+}
+struct PauseRule {
+    operation: String,
+    key: String,
+    remaining: usize,
+    pause: Arc<Pause>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -141,13 +201,38 @@ impl KvStorePlugin for Recorder {
 impl DocumentStorePlugin for Recorder {
     async fn read_document(&self, key: &str) -> StoreResult<Option<Versioned<Value>>> {
         self.read("document.read", key);
-        self.model.read_document(key).await
+        {
+            let mut failure = self.fail_document_read.lock().unwrap();
+            if failure.as_ref().is_some_and(|pattern| key.contains(pattern)) {
+                *failure = None;
+                return Err(StoreError::NotApplied("injected_read".into()));
+            }
+        }
+        let result = self.model.read_document(key).await;
+        self.paused("document.read", key).await;
+        result
     }
     async fn create_document(&self, key: &str, value: &Value) -> StoreResult<WriteOutcome> {
-        run!(self.write("document.create", key), self.model.create_document(key, value).await)
+        self.paused("before.document.create", key).await;
+        let result = run!(
+            self.write("document.create", key),
+            self.model.create_document(key, value).await
+        );
+        self.paused("document.create", key).await;
+        result
     }
-    async fn replace_document(&self, key: &str, expected: Version, value: &Value) -> StoreResult<WriteOutcome> {
-        run!(self.write("document.replace", key), self.model.replace_document(key, expected, value).await)
+    async fn replace_document(
+        &self,
+        key: &str,
+        expected: Version,
+        value: &Value,
+    ) -> StoreResult<WriteOutcome> {
+        let result = run!(
+            self.write("document.replace", key),
+            self.model.replace_document(key, expected, value).await
+        );
+        self.paused("document.replace", key).await;
+        result
     }
 }
 
@@ -204,7 +289,12 @@ impl StreamStorePlugin for Recorder {
         id: AppendId,
         fields: &BTreeMap<String, Vec<u8>>,
     ) -> StoreResult<StreamId> {
-        run!(self.write("stream.append", key), self.model.append(key, id, fields).await)
+        let result = run!(
+            self.write("stream.append", key),
+            self.model.append(key, id, fields).await
+        );
+        self.paused("stream.append", key).await;
+        result
     }
     async fn read(&self, streams: &[StreamRead], options: ReadOptions) -> StoreResult<Vec<StreamBatch>> {
         self.model.read(streams, options).await
@@ -217,9 +307,12 @@ impl StreamStorePlugin for Recorder {
         limit: NonZeroU32,
         reverse: bool,
     ) -> StoreResult<StreamPage> {
-        StreamStorePlugin::range(&self.model, key, start, end, limit, reverse).await
+        let result = StreamStorePlugin::range(&self.model, key, start, end, limit, reverse).await;
+        self.paused("stream.range", key).await;
+        result
     }
     async fn trim(&self, key: &str, policy: TrimPolicy) -> StoreResult<TrimResult> {
+        self.paused("before.stream.trim", key).await;
         run!(self.write("stream.trim", key), self.model.trim(key, policy).await)
     }
     async fn create_group(&self, key: &str, group: &str, start: GroupStart) -> StoreResult<GroupCreateOutcome> {
@@ -301,7 +394,13 @@ pub fn task() -> TaskSnapshot {
         content: TaskContent {
             status: TaskStatus::Submitted,
             interactions: vec![],
-            snapshot: Payload::Inline(Value::Null),
+            snapshot: Payload::Inline(
+                serde_json::to_value(DisplaySnapshot {
+                    format_version: 1,
+                    units: vec![],
+                })
+                .unwrap(),
+            ),
             result_ref: None,
         },
         output_limits: PHASE_ONE_OUTPUT_LIMITS,

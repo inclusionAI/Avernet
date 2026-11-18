@@ -99,4 +99,11 @@ separately from public implementation status.
   checkpoint-advance race; historical reads and retries now use stable format
   bounds, with task-specific limits remaining frozen in TaskSnapshot. MySQL DDL
   has static checks only; real host database acceptance is explicitly deferred.
-- Remaining Task 4 providers, Tasks 5–8 and full host composition: pending.
+- Task 4 TaskFeed slice: committed append evidence, atomic snapshot publication,
+  logical retention and bounded restore/follow/list implemented. Independent SPEC
+  and quality reviews pass; 21 real provider tests pass with SQLite archive.
+  Fault tests cover both lost replies and definite later failures after partial
+  persistence, which remain OutcomeUnknown. Ref quotas count parsed public JSON
+  encoding, including legal numeric expansion. Entire read calls and each CAS
+  episode have enforced deadlines. This is not complete Worker acceptance.
+- Remaining Task 4 Dispatch provider, Tasks 5–8 and full host composition: pending.
