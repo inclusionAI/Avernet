@@ -83911,6 +83911,42 @@
             }
           },
           {
+            "description": "JIT runtime selection: service uses the stage binding; caller_instance uses the authenticated caller's instance.",
+            "in": "query",
+            "name": "caller_runtime_target",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "JIT runtime selection: service uses the stage binding; caller_instance uses the authenticated caller's instance.",
+              "title": "Caller Runtime Target"
+            }
+          },
+          {
+            "description": "Opaque device identifier for exact JIT replica selection within the authorized runtime binding.",
+            "in": "query",
+            "name": "device_uuid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque device identifier for exact JIT replica selection within the authorized runtime binding.",
+              "title": "Device Uuid"
+            }
+          },
+          {
             "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
             "in": "query",
             "name": "user_id",
