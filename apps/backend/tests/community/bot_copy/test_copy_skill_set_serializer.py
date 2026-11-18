@@ -267,6 +267,58 @@ def test_branch_b_local_skill_member_serialized_as_from_from_bot():
     )
 
 
+def test_git_sourced_skill_strips_git_scheme_prefix_into_repo_path():
+    # Git-sourced skills store their location as ``git://<scope>/<path>`` — a
+    # logical path the platform's registry resolves, not a fetchable URL. The
+    # manifest's ``repo_path`` (``RepoSkillPath``) accepts only the
+    # ``[A-Za-z0-9._/-]`` vocabulary, so the ``git://`` scheme prefix must be
+    # stripped; the scope segment (``business``/``infra``/``third-party``)
+    # stays as the leading path segment and the dst re-resolves it through the
+    # same registry the source used. Without the strip the segment would fail
+    # ``validate_document`` with ``invalid_path`` on the ``:`` the scheme
+    # carries — which is the pre-stripping failure every git-sourced member
+    # hit (``ac_skill.git_path`` for git skills is overwhelmingly
+    # ``git://<scope>/...``).
+    members = (
+        {
+            "id": 101,
+            "name": "todo-runner",
+            "git_path": "git://infra/todo-runner",
+            "skill_uuid": None,
+        },
+        {
+            "id": 102,
+            "name": "app-diagnose-deep",
+            "git_path": "git://business/ha-duty/app-diagnose-deep",
+            "skill_uuid": None,
+        },
+    )
+    ordinary = SkillSetSnapshot(
+        id=2,
+        name="git-sourced",
+        description=None,
+        is_default=False,
+        is_active=True,
+        skill_ids=(101, 102),
+        mcp_codes=(),
+        skill_references=(),
+    )
+    snapshot = _snapshot(sets=(ordinary,), skills=members)
+
+    segment = _serialize_skill_sets(snapshot=snapshot)
+    assert segment is not None
+    ordinary_rows = [row for row in segment if row.get("name") == "git-sourced"]
+    assert len(ordinary_rows) == 1
+    skills_out = ordinary_rows[0]["skills"]
+    assert {skill["origin"] for skill in skills_out} == {"repo"}
+    by_name = {skill["name"]: skill for skill in skills_out}
+    assert by_name["todo-runner"]["repo_path"] == "infra/todo-runner"
+    assert by_name["app-diagnose-deep"]["repo_path"] == "business/ha-duty/app-diagnose-deep"
+    # The derived segment re-validates: a bare ``repo`` path with no scheme
+    # is the vocabulary ``RepoSkillPath`` accepts.
+    _assert_skill_sets_validate(segment)
+
+
 @pytest.mark.parametrize("snapshot", [None])
 def test_branch_b_snapshot_none_returns_none(snapshot):
     """A ``None`` snapshot (legacy path with nothing to read) → omit segment."""

@@ -286,8 +286,23 @@ def _derive_skill_sets_from_snapshot(
                 skill_entry["origin"] = "local"
                 skill_entry["from"] = "from_bot"
             else:
+                # Git-sourced skills store their location as ``git://<scope>/<path>``
+                # (e.g. ``git://infra/todo-runner``): a logical path the platform's
+                # registry resolves, not a fetchable URL. The manifest's
+                # ``repo_path`` is that bare path — ``RepoSkillPath`` accepts only
+                # the ``[A-Za-z0-9._/-]`` vocabulary — so the ``git://`` scheme
+                # prefix is stripped here. The scope (``business``/``infra``/
+                # ``third-party``) stays as the leading path segment. The dst's
+                # resolve closes the loop symmetrically: ``find_repo_skill`` re-prefices
+                # ``git://`` onto ``path`` before the ``get_by_git_path`` lookup
+                # (``skill_query_service.py``), so the bare path round-trips back to
+                # the same registry row. The pre-strip behaviour was a double fault:
+                # ``invalid_path`` at schema validation on the ``:``, and a
+                # ``git://git://...`` double prefix at dst resolve.
                 skill_entry["origin"] = "repo"
-                skill_entry["repo_path"] = git_path
+                skill_entry["repo_path"] = (
+                    git_path[len("git://"):] if git_path.startswith("git://") else git_path
+                )
             skills.append(skill_entry)
         mcp_entries = [{"server_code": code} for code in group.mcp_codes]
         row: dict[str, Any] = {
