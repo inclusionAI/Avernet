@@ -230,6 +230,8 @@ exact 包；实际下载字节数留在私有内容值，供整次 Apply 预算�
 
 SC 下载物化不调用本地 Scanner。MCP 信息来自精确下载响应的 `mcp_services`，持久化在 `ac_skill_version.metadata_json.mcp_dependencies`；不要只更新主 Skill 字段。Local/Repo 自有扫描链路仍按各自合同执行。外部 MCP 字段的 null/缺失兼容由 Gateway adapter 归一化；修改时检查 adapter 和 conformance tests。
 
+已发布版本详情与列表输出 MCP server code 字符串列表；读取历史字符串或含 `code` / `server_code` 的对象依赖时复用 `mcp_dependency_codes`，保持顺序及重复，不能静默丢弃不认识的依赖。
+
 `canonical_center_store.py` 定义精确版本 Store contract，`services/canonical_center_store.py` 提供实现；文件型 Runtime 和 Teclaw 消费同一版本内容，物理交付不同。
 
 SC Public 引用已是持久异步批量 Operation：
