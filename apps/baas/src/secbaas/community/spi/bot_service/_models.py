@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, StrictBool
 
 
 class Result[T](BaseModel):
@@ -117,6 +117,18 @@ class CallerConnectionData(BaseModel):
     instance: CallerInstance | None = None
     connection: CallerConnection | None = None
     need_poll: bool = False
+
+
+class CallerInstanceStatus(BaseModel):
+    """GET /api/v1/expert-chats/app-caller-instance/status 响应 data（只读观察值）。
+
+    ``exists`` 是登记语义（Caller 账本已登记非空 BaaS Bot UUID），``alive`` 是
+    本次查询时刻观察到存活设备；两个字段都用 StrictBool——非布尔值属于契约
+    破坏，由校验层 fail closed。
+    """
+
+    exists: StrictBool
+    alive: StrictBool
 
 
 class IamTokenData(BaseModel):
