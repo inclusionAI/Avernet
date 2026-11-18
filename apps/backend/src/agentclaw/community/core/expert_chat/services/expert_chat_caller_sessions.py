@@ -82,7 +82,7 @@ class ExpertChatCallerSessionsMixin:
                 return {"total": 0, "items": []}
             matched = {session_key: item}
         else:
-            matched = await self._discover_caller_runtime_sessions(bot, connection, user_id, owner_id, None)
+            matched = await self._discover_caller_runtime_sessions(bot, connection, user_id)
         if favorite_only:
             try:
                 response = await self._invoke_caller_session(bot, connection, user_id, "GET", "/api/session-favorites",
@@ -108,7 +108,6 @@ class ExpertChatCallerSessionsMixin:
         bcn_friend_authorized: bool, actor_user_id: str | None,
     ) -> tuple[dict[str, Any] | None, bool]:
         """Resolve an existing Caller for reads without entering lifecycle flows."""
-        bot.pop("_caller_instance_binding_id", None)
         connection_user_id = self._session_read_actor(
             bot, user_id, actor_user_id, bcn_friend_authorized,
         )
@@ -131,7 +130,6 @@ class ExpertChatCallerSessionsMixin:
             return None, True
         # COSEC: Instance lookup uses the authenticated session subject and exact Bot.
         bot["binding_id"] = binding_id
-        bot["_caller_instance_binding_id"] = binding_id
         connection = self._get_connection(
             bot, connection_user_id, bcn_friend_authorized=bcn_friend_authorized,
         )
@@ -140,18 +138,10 @@ class ExpertChatCallerSessionsMixin:
 
     async def _discover_caller_runtime_sessions(
         self, bot: dict[str, Any], connection: dict[str, Any], user_id: str,
-        owner_id: str, session_key: str | None,
     ) -> dict[str, dict[str, Any]]:
-        # COSEC: Only a successfully resolved subject-owned Caller binding can
-        # authorize unindexed sessions; shared runtimes retain index-only access.
-        binding_id = bot.get("_caller_instance_binding_id")
-        ctx, strategy = self._resolve_chat_engine_strategy(bot, connection)
-        if (bot.get("bot_type") != "service" or bot.get("call_type") != "caller"
-                or not binding_id or binding_id != bot.get("binding_id")
-                or not strategy.requires_caller_chat_instance(ctx)):
-            return {}
+        """Read all pages from the already-authorized Caller container."""
+        binding_id = bot["binding_id"]
         matched = {}
-        seen: set[str] = set()
         offset = 0
         while True:
             started = monotonic()
@@ -159,7 +149,7 @@ class ExpertChatCallerSessionsMixin:
                 "caller_runtime_sessions_request system=engine operation=list_sessions "
                 "method=GET route=/api/sessions bot_id=%s owner_id=%s user_id=%s "
                 "binding_id=%s offset=%s limit=%s",
-                bot["bot_id"], owner_id, user_id, binding_id, offset, _PAGE_SIZE,
+                bot["bot_id"], bot["owner_id"], user_id, binding_id, offset, _PAGE_SIZE,
             )
             try:
                 response = await self._transport.invoke(
@@ -180,16 +170,15 @@ class ExpertChatCallerSessionsMixin:
                 break
             page_ids = {item["id"] for item in data if isinstance(item, dict)
                         and isinstance(item.get("id"), str) and item["id"].strip()}
-            new_page_ids = page_ids - seen
+            new_page_ids = page_ids - matched.keys()
             selected = []
             for item in data:
                 if not isinstance(item, dict):
                     continue
                 key = item.get("id")
                 if (not isinstance(key, str) or not key.strip()
-                        or key in seen or (session_key is not None and key != session_key)):
+                        or key in matched):
                     continue
-                seen.add(key)
                 matched[key] = item
                 selected.append(key)
             logger.info(
@@ -201,7 +190,6 @@ class ExpertChatCallerSessionsMixin:
             )
             if not new_page_ids:
                 break
-            seen.update(page_ids)
             # Runtime filters can shorten a page after applying its offset/limit.
             offset += _PAGE_SIZE
         return matched

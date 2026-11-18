@@ -420,8 +420,7 @@ class ExpertChatService(ExpertChatCallerSessionsMixin, ExpertChatBotLookupMixin,
                 bot, session_key, user_id, connection=connection
             )
             if exists:
-                if not self._is_independent_caller(bot):
-                    self._repo.add_owned_session(user_id, bot_id, owner_id, session_key)
+                self._repo.add_owned_session(user_id, bot_id, owner_id, session_key)
                 logger.info(
                     f"[ExpertChatService] Reusing session: user={user_id}, bot={bot_id}, session={session_key}"
                 )
@@ -432,15 +431,13 @@ class ExpertChatService(ExpertChatCallerSessionsMixin, ExpertChatBotLookupMixin,
                 }
             else:
                 # Session 已失效，删除旧记录
-                if not self._is_independent_caller(bot):
-                    self._repo.delete_owned_session(user_id, bot_id, owner_id, session_key)
+                self._repo.delete_owned_session(user_id, bot_id, owner_id, session_key)
                 self._repo.delete_session(user_id, bot_id, owner_id)
 
         # 7. 没有或无效则创建新 session
         session_key = await self._create_session(bot, user_id, connection=connection)
         self._repo.save_session(user_id, bot_id, owner_id, session_key)
-        if not self._is_independent_caller(bot):
-            self._repo.add_owned_session(user_id, bot_id, owner_id, session_key)
+        self._repo.add_owned_session(user_id, bot_id, owner_id, session_key)
 
         logger.info(
             f"[ExpertChatService] Created new session: user={user_id}, bot={bot_id}, session={session_key}"
@@ -493,9 +490,14 @@ class ExpertChatService(ExpertChatCallerSessionsMixin, ExpertChatBotLookupMixin,
         )
         if not rows:
             return {"total": 0, "items": []}
+
         connection, need_poll = await self._prepare_chat_connection(
-            bot, user_id, owner_id, iam_token,
-            bcn_friend_authorized=bcn_friend_authorized, actor_user_id=actor_user_id,
+            bot,
+            user_id,
+            owner_id,
+            iam_token,
+            bcn_friend_authorized=bcn_friend_authorized,
+            actor_user_id=actor_user_id,
         )
         if favorite_only and need_poll:
             return {"total": 0, "items": [], "need_poll": True}
@@ -547,10 +549,7 @@ class ExpertChatService(ExpertChatCallerSessionsMixin, ExpertChatBotLookupMixin,
                 if isinstance(last_message, dict)
                 else None
             )
-            stable_modified = (
-                last_message_at
-                or row.get("gmt_create")
-            )
+            stable_modified = last_message_at or row.get("gmt_create")
             if stable_modified:
                 enriched["gmt_modified"] = stable_modified
             items.append(enriched)
@@ -599,8 +598,7 @@ class ExpertChatService(ExpertChatCallerSessionsMixin, ExpertChatBotLookupMixin,
             user_id,
             connection=connection,
         )
-        if not self._is_independent_caller(bot):
-            self._repo.add_owned_session(user_id, bot_id, owner_id, created_session_key)
+        self._repo.add_owned_session(user_id, bot_id, owner_id, created_session_key)
         # Legacy clients resume the latest session created by the new UI.
         self._repo.save_session(user_id, bot_id, owner_id, created_session_key)
         return {
