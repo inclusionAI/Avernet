@@ -125,10 +125,14 @@ export function matchUserTaskScope(status: string, scope: UserTabFilter): boolea
   return true;
 }
 
-export function taskStatusBadge(status: string) {
+export function taskStatusBadge(status: string, showDot = false) {
   const normalizedStatus = normalizeTaskStatus(status);
   return (
-    <Badge tone={statusToneMap[normalizedStatus] ?? 'neutral'}>
+    <Badge
+      tone={statusToneMap[normalizedStatus] ?? 'neutral'}
+      className={showDot ? 'gap-1.5 whitespace-nowrap text-sm' : undefined}
+    >
+      {showDot ? <span aria-hidden className="size-1.5 rounded-full bg-current" /> : null}
       {statusLabelMap[normalizedStatus] ?? normalizedStatus}
     </Badge>
   );

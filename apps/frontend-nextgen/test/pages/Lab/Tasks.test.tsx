@@ -16,7 +16,7 @@ jest.mock('@/components/Workspace/TaskPanelAssetBoundary', () => ({
 }));
 
 jest.mock('@umijs/max', () => ({
-  history: { push: jest.fn(), replace: jest.fn() },
+  history: { push: jest.fn(), replace: jest.fn(), back: jest.fn() },
   useLocation: () => ({ pathname: '/lab/tasks' }),
 }));
 
@@ -245,6 +245,8 @@ describe('LabTasksPage(实验室·任务体验页)', () => {
   it('页头对齐 PRD:标题「任务」+ 跨Bot跨群协同任务描述 + 对话/协作群入口', async () => {
     render(<LabTasksPage />);
     expect(screen.getByRole('heading', { name: '任务' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '返回' }));
+    expect(jest.requireMock('@umijs/max').history.back).toHaveBeenCalledTimes(1);
     expect(screen.getByText(/查看跨Bot、跨群的协同任务/)).toBeInTheDocument();
     const chatLink = screen.getByRole('button', { name: '对话' });
     const groupLink = screen.getByRole('button', { name: '协作群' });
@@ -277,11 +279,57 @@ describe('LabTasksPage(实验室·任务体验页)', () => {
     const row = screen.getByText('t-collab-1').closest('tr');
     expect(row).not.toBeNull();
     expect(within(row!).getByText('调研助手')).toBeInTheDocument();
+    expect(within(row!).getByRole('img', { name: '调研助手' })).toBeInTheDocument();
+    expect(within(row!).getByRole('img', { name: '调研助手' })).toHaveAttribute(
+      'src',
+      expect.stringContaining('data:image/svg+xml'),
+    );
+    expect(within(row!).getByText('b-9')).toBeInTheDocument();
+    const title = within(row!).getByText('竞品协同分析');
+    const taskId = within(row!).getByText('t-collab-1');
+    expect(title.compareDocumentPosition(taskId) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(row!).getByRole('button', { name: '查看产物' })).toHaveClass('text-primary', 'no-underline');
+    expect(within(row!).getByRole('button', { name: '进入对话' })).toHaveClass('text-primary', 'no-underline');
+    expect(within(row!).getByText('执行中').querySelector('[aria-hidden]')).not.toBeNull();
     expect(within(row!).queryByText('协作群')).not.toBeInTheDocument();
     expect(within(row!).queryByText('动态任务')).not.toBeInTheDocument();
     expect(within(row!).getByRole('button', { name: '查看产物' })).toBeInTheDocument();
     expect(within(row!).getByRole('button', { name: '进入对话' })).toBeInTheDocument();
     expect(within(row!).queryByRole('button', { name: '查看详情' })).not.toBeInTheDocument();
+  });
+
+  it('长任务标题单行省略且悬停/键盘聚焦可查看完整内容，时间列不换行', async () => {
+    const title = '很长的任务标题'.repeat(30);
+    mockListMyTasks.mockResolvedValue({
+      code: 0,
+      data: [{ ...listItem, task_spec: { ...listItem.task_spec, context: { title } } }],
+    });
+    render(<LabTasksPage />);
+    const titleNode = await screen.findByText(title);
+    expect(titleNode).toHaveClass('truncate', 'w-full');
+    expect(titleNode).toHaveAttribute('tabindex', '0');
+    fireEvent.focus(titleNode);
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(title);
+    const table = titleNode.closest('table')!;
+    expect(table).toHaveClass('table-fixed', 'min-w-[1440px]');
+    expect(table.querySelectorAll('col')).toHaveLength(7);
+    const row = titleNode.closest('tr')!;
+    expect(row.cells[3]).toHaveClass('whitespace-nowrap');
+    expect(row.cells[4].firstElementChild).toHaveClass('whitespace-nowrap');
+  });
+
+  it('长任务目标单行省略，聚焦显示完整目标', async () => {
+    const objective = '需要完整展示的任务目标'.repeat(30);
+    mockListMyTasks.mockResolvedValue({
+      code: 0,
+      data: [{ ...listItem, task_spec: { ...listItem.task_spec, goal: { objective, acceptances: [] } } }],
+    });
+    render(<LabTasksPage />);
+    const goal = await screen.findByText(objective);
+    expect(goal).toHaveClass('w-full', 'truncate');
+    expect(goal).toHaveAttribute('tabindex', '0');
+    fireEvent.focus(goal);
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(objective);
   });
 
   it('使用最后修改时间展示更新时间，不声称完成时间或执行耗时', async () => {

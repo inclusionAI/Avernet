@@ -189,8 +189,8 @@ const props = (overrides?: Partial<TaskOverviewV2Props>): TaskOverviewV2Props =>
 describe('TaskOverviewV2(L1)', () => {
   it('节点视图默认:卡片渲染执行体 pill/返工徽章/HITL 徽章/完成划线', () => {
     render(<TaskOverviewV2 {...props()} />);
-    expect(screen.getByText('第1棒 需求澄清与规划')).toBeTruthy();
-    expect(screen.getByText('第2棒 并行调研执行')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '选中节点 第1棒 需求澄清与规划' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '选中节点 第2棒 并行调研执行' })).toBeTruthy();
     expect(screen.getByText('竞品研究员Group')).toBeTruthy();
     expect(screen.getByText('点击查看会话')).toBeTruthy();
     // I2:返工次数 = attemptCount-1(action_log 的 attempt 从 1 起 = 首发);attemptCount=2 → 第 1 次返工
@@ -199,24 +199,25 @@ describe('TaskOverviewV2(L1)', () => {
     expect(screen.queryByText('第 0 次返工')).toBeNull();
     expect(screen.getByText('人工处理')).toBeTruthy();
     // demo 语义:完成态(present done/merged)节点标题划线
-    const doneTitle = screen.getByText('第1棒 需求澄清与规划');
+    const doneTitle = screen
+      .getByRole('button', { name: '选中节点 第1棒 需求澄清与规划' })
+      .querySelector('[data-node-title]')!;
     expect((doneTitle as HTMLElement).style.textDecoration).toContain('line-through');
   });
 
-  it('第一棒和后续节点均按节点会话目标联动', () => {
+  it('根节点恢复宿主会话；其他节点保持会话联动', () => {
     const nav = makeNav();
     render(<TaskOverviewV2 {...props({ nav })} />);
 
-    fireEvent.click(screen.getByText('第1棒 需求澄清与规划'));
-    expect(nav.calls.root).toHaveLength(0);
-    expect(nav.calls.select).toHaveLength(1);
-    expect(nav.calls.select[0][0]).toBe('n-solo');
+    fireEvent.click(screen.getByRole('button', { name: '选中节点 第1棒 需求澄清与规划' }));
+    expect(nav.calls.root).toEqual(['n-solo']);
+    expect(nav.calls.select).toHaveLength(0);
     expect(nav.calls.drill).toHaveLength(0);
 
-    fireEvent.click(screen.getByText('第2棒 并行调研执行'));
-    expect(nav.calls.select).toHaveLength(2);
-    expect(nav.calls.select[1][0]).toBe('n-group');
-    expect(nav.calls.select[1][1]).toMatchObject({ sessionId: 'bcs_grp_902:round:2', kind: 'group' });
+    fireEvent.click(screen.getByRole('button', { name: '选中节点 第2棒 并行调研执行' }));
+    expect(nav.calls.select).toHaveLength(1);
+    expect(nav.calls.select[0][0]).toBe('n-group');
+    expect(nav.calls.select[0][1]).toMatchObject({ sessionId: 'bcs_grp_902:round:2', kind: 'group' });
     expect(nav.calls.drill).toHaveLength(0);
   });
 
@@ -233,7 +234,7 @@ describe('TaskOverviewV2(L1)', () => {
 
   it('DAG 视图入口隐藏,总览始终展示节点视图', () => {
     render(<TaskOverviewV2 {...props()} />);
-    expect(screen.getByText('第1棒 需求澄清与规划')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '选中节点 第1棒 需求澄清与规划' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'DAG视图' })).toBeNull();
     expect(screen.queryByTitle('切换到 DAG 视图')).toBeNull();
     expect(screen.queryByTitle('当前为 DAG 视图')).toBeNull();
@@ -248,19 +249,16 @@ describe('TaskOverviewV2(L1)', () => {
     // 每个产物标记归属棒次; 仅 is_final_artifact=true 的产物边框高亮。
     // 展示顺序按棒次 sequence 正序;根 legacy 产物回落第 1 棒,第 2 棒内按创建时间正序。
     const stageLabels = screen.getAllByTestId('artifact-stage').map((item) => item.textContent);
-    expect(stageLabels).toEqual(['第1棒产物', '最终产物', '第2棒产物', '第2棒产物']);
+    expect(stageLabels).toEqual(['节点 n-solo', '最终产物', '节点 n-group', '节点 n-group']);
     const finalArtifactRow = screen.getByText('需求说明书').closest('li')!;
-    expect(finalArtifactRow.style.border).toBe('1px solid rgb(37, 99, 235)');
-    expect(finalArtifactRow.style.background).toBe('rgba(37, 99, 235, 0.06)');
-    const finalArtifact = within(finalArtifactRow);
-    const stageLabelElement = finalArtifact.getByTestId('artifact-stage');
-    expect(finalArtifact.getByText('链接').compareDocumentPosition(stageLabelElement)).toBe(
-      Node.DOCUMENT_POSITION_FOLLOWING,
-    );
-    // kind 徽章
-    expect(screen.getByText('链接')).toBeTruthy();
-    expect(screen.getByText('代码')).toBeTruthy();
-    expect(screen.queryByText('文件')).toBeNull(); // 无 file kind 产物
+    expect(finalArtifactRow.getAttribute('data-final-artifact')).toBe('true');
+    expect(finalArtifactRow.className).toContain('task-artifact-row');
+    expect(finalArtifactRow.style.border).toBe('');
+    expect(finalArtifactRow.querySelector('svg')).not.toBeNull();
+    expect(within(finalArtifactRow).getByTestId('artifact-stage').textContent).toBe('最终产物');
+    // 文件类型以图标呈现，不再使用类型标签。
+    expect(screen.queryByText('链接')).toBeNull();
+    expect(screen.queryByText('代码')).toBeNull();
     // url_link/code 卡仅保留外链入口，不提供站内预览按钮。
     expect(screen.getByRole('link', { name: '跳转产物 需求说明书' }).getAttribute('href')).toBe(
       'https://yuque.example/doc1',
@@ -481,7 +479,7 @@ describe('TaskOverviewV2 real controller navigation', () => {
       );
       expect(controller.getSnapshot().navByTask[first.id].selectedNodeId).toBe(node.id);
       expect(controller.getSnapshot().navByTask[first.id].drillStack).toEqual([]);
-      await user.click(screen.getByText('第1棒 需求澄清与规划'));
+      await user.click(screen.getByRole('button', { name: '选中节点 第1棒 需求澄清与规划' }));
       expect(host.restoreOrigin).toHaveBeenCalledTimes(1);
       expect(host.restoreOrigin).toHaveBeenCalledWith('origin-handle', expect.any(AbortSignal));
 
@@ -490,7 +488,7 @@ describe('TaskOverviewV2 real controller navigation', () => {
       expect(controller.getSnapshot().navByTask[second.id].drillStack).toEqual([]);
       expect(screen.getByTestId('task-overview-v2')).toBeTruthy();
       expect(screen.queryByTestId('task-node-panel-v2')).toBeNull();
-      expect(screen.getByText('第1棒 另一任务节点')).toBeTruthy();
+      expect(screen.getByRole('button', { name: '选中节点 第1棒 另一任务节点' })).toBeTruthy();
       expect(screen.queryByText('Bot 节点产物')).toBeNull();
       expect(screen.queryByText('需求说明书')).toBeNull();
       await user.click(screen.getByRole('button', { name: '下钻 另一任务节点' }));

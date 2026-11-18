@@ -139,7 +139,7 @@ describe('NodeListViewV2 覆盖补齐', () => {
     recorded = recordedSelected;
 
     // 完成节点标题划线
-    const rootTitle = screen.getByText('第1棒 根节点');
+    const rootTitle = screen.getByRole('button', { name: '选中节点 第1棒 根节点' }).querySelector('[data-node-title]');
     expect(rootTitle).toHaveStyle({ textDecoration: 'line-through' });
 
     // 群节点:执行体群名 + 返工徽章 + HITL 徽章;未知态节点 tone 兜底

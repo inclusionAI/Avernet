@@ -3,16 +3,17 @@
  * NodeListViewV2 —— L1 节点卡片列表(PRD 方案A):
  * 点根节点 = 选中并恢复宿主会话；点其他节点 = 选中并联动会话；
  * 节点本体仅做会话联动；独立图标下钻到节点副屏，不联动会话。
- * 卡片信息:present 状态点/标题(完成划线)/执行体 pill(群/单聊 icon)/返工次数/HITL 徽章/子任务入口。
+ * 行布局:present 状态环/任务说明(完成划线)/执行体/节点摘要卡及独立下钻/返工与 HITL 徽章/子任务入口。
  */
 import React from 'react';
 
-import { ChevronRight, Info, Users } from '../icons';
+import { Users } from '../icons';
 import { resolveNodeSessionTarget } from '../sessionResolution';
 import { Empty as StateEmpty } from '../theme';
-import { C, PRESENT_TONES } from '../tokens';
+import { C, PANEL_CSS_VARIABLES, PRESENT_TONES } from '../tokens';
 import type { TaskView } from '../types';
 import type { TaskPanelNav } from './taskPanelNav';
+import './TaskPanelV2.css';
 
 export interface NodeListViewV2Props {
   task: TaskView;
@@ -39,10 +40,21 @@ export const NodeListViewV2: React.FC<NodeListViewV2Props> = ({ task, nav, onOpe
   }
   const rootNodeId = task.nodes[0]?.id;
   return (
-    <ul style={{ listStyle: 'none', margin: 0, padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+    <ul
+      style={{
+        ...PANEL_CSS_VARIABLES,
+        listStyle: 'none',
+        margin: 0,
+        padding: '12px 20px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 12,
+      }}
+    >
       {task.nodes.map((node, stageIndex) => {
         const present = node.present ?? node.status;
         const tone = PRESENT_TONES[present] ?? { label: present, color: C.textMuted };
+        const stateColor = present === 'running' ? C.primary : tone.color;
         const isDone = present === 'done' || present === 'merged';
         const isGroup = node.runMode === 'coop_group' || node.runMode === 'bbs' || node.drillable === true;
         const executorName =
@@ -72,14 +84,15 @@ export const NodeListViewV2: React.FC<NodeListViewV2Props> = ({ task, nav, onOpe
                 selectForConversation();
               }
             }}
+            className="task-node-row"
+            aria-pressed={selected}
             style={{
               display: 'flex',
-              alignItems: 'center',
+              alignItems: 'flex-start',
               gap: 10,
-              padding: '10px 12px',
-              borderRadius: 10,
-              border: `1px solid ${selected ? C.primary : C.border}`,
-              background: selected ? `${C.primary}0F` : C.surface,
+              padding: '14px 12px',
+              borderRadius: 2,
+              background: selected ? `${C.primary}08` : undefined,
               cursor: 'pointer',
               transition: 'border-color 0.15s, background 0.15s',
             }}
@@ -89,19 +102,29 @@ export const NodeListViewV2: React.FC<NodeListViewV2Props> = ({ task, nav, onOpe
               aria-label={tone.label}
               style={{
                 display: 'inline-block',
-                width: 10,
-                height: 10,
+                width: 14,
+                height: 14,
+                marginTop: 3,
+                boxShadow: `0 0 0 4px ${stateColor}10`,
                 borderRadius: '50%',
-                background: tone.color,
-                border: `2px solid ${tone.color}33`,
+                background: 'transparent',
+                border: `2px solid ${stateColor}`,
+                color: stateColor,
+                lineHeight: '10px',
+                fontSize: 11,
+                textAlign: 'center',
                 flexShrink: 0,
               }}
-            />
+            >
+              {isDone ? '✓' : ''}
+            </span>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div
+                data-node-title="true"
+                title={node.taskSpec?.instruction || node.taskSpec?.target || node.name}
                 style={{
-                  fontSize: 13,
-                  fontWeight: 600,
+                  fontSize: 14,
+                  fontWeight: 400,
                   color: isDone ? C.textSecondary : C.textPrimary,
                   textDecoration: isDone ? 'line-through' : 'none',
                   overflow: 'hidden',
@@ -109,7 +132,7 @@ export const NodeListViewV2: React.FC<NodeListViewV2Props> = ({ task, nav, onOpe
                   whiteSpace: 'nowrap',
                 }}
               >
-                {stageName}
+                {node.taskSpec?.instruction || node.taskSpec?.target || node.name}
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
                 <span
@@ -117,17 +140,40 @@ export const NodeListViewV2: React.FC<NodeListViewV2Props> = ({ task, nav, onOpe
                     display: 'inline-flex',
                     alignItems: 'center',
                     gap: 4,
-                    fontSize: 11,
-                    color: '#5B3FA8',
-                    background: '#F1ECFB',
-                    borderRadius: 999,
-                    padding: '1px 8px',
+                    maxWidth: '100%',
+                    minWidth: 0,
+                    fontSize: 12,
+                    color: C.textSecondary,
+                    padding: 0,
                     lineHeight: '18px',
                     whiteSpace: 'nowrap',
                   }}
                 >
-                  {isGroup ? <Users size={11} /> : <Info size={11} />}
-                  {executorName}
+                  {isGroup ? (
+                    <Users size={14} style={{ flexShrink: 0 }} />
+                  ) : (
+                    <svg
+                      width="16"
+                      height="16"
+                      style={{ flexShrink: 0 }}
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.6"
+                      aria-hidden="true"
+                    >
+                      <rect x="4" y="7" width="16" height="13" rx="5" />
+                      <path d="M12 7V3M9 3h6M1 12v5m22-5v5M8 16h8" />
+                      <circle cx="8.5" cy="12" r="1" />
+                      <circle cx="15.5" cy="12" r="1" />
+                    </svg>
+                  )}
+                  <span
+                    title={executorName}
+                    style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                  >
+                    {executorName}
+                  </span>
                 </span>
                 {/* 返工次数 = attemptCount-1(action_log 的 attempt 从 1 起算,首发不亮徽章) */}
                 {(node.attemptCount ?? 0) > 1 && (
@@ -136,34 +182,72 @@ export const NodeListViewV2: React.FC<NodeListViewV2Props> = ({ task, nav, onOpe
                 {node.needsHitl && present === 'running' && <span style={badgeStyle(C.warning)}>人工处理</span>}
               </div>
             </div>
-            <button
-              type="button"
-              aria-label={`下钻 ${node.name}${canDrill ? '' : `：${drillReason}`}`}
-              aria-disabled={!canDrill}
-              title={canDrill ? '下钻节点副屏' : drillReason}
-              onClick={(e) => {
-                e.stopPropagation();
-                // null 只更新下钻栈；传入会话目标会同时触发宿主导航。
-                if (canDrill) nav.drillInto(node.id, null);
-              }}
-              onMouseEnter={(e) => (e.currentTarget.style.background = C.surfaceAlt)}
-              onMouseLeave={(e) => (e.currentTarget.style.background = C.surface)}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                width: 28,
-                height: 28,
-                border: `1px solid ${C.border}`,
-                borderRadius: 6,
-                background: C.surface,
-                color: canDrill ? C.primary : C.textMuted,
-                cursor: canDrill ? 'pointer' : 'not-allowed',
-                flexShrink: 0,
-              }}
-            >
-              <ChevronRight size={16} color={canDrill ? C.primary : C.textMuted} aria-hidden="true" />
-            </button>
+            <div className="task-node-summary" style={{ border: `1px solid ${C.border}` }}>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div
+                  title={node.name}
+                  style={{
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    fontSize: 14,
+                    lineHeight: '22px',
+                    color: C.textPrimary,
+                  }}
+                >
+                  {node.name}
+                </div>
+                <div
+                  style={{
+                    fontSize: 12,
+                    lineHeight: '20px',
+                    color: present === 'running' ? C.primary : C.textSecondary,
+                  }}
+                >
+                  {tone.label}
+                </div>
+              </div>
+              <button
+                type="button"
+                aria-label={`下钻 ${node.name}${canDrill ? '' : `：${drillReason}`}`}
+                aria-disabled={!canDrill}
+                title={canDrill ? '下钻节点副屏' : drillReason}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  // null 只更新下钻栈；传入会话目标会同时触发宿主导航。
+                  if (canDrill) nav.drillInto(node.id, null);
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = C.surfaceAlt)}
+                onMouseLeave={(e) => (e.currentTarget.style.background = C.surface)}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: 28,
+                  height: 28,
+                  border: 0,
+                  borderRadius: 999,
+                  background: C.surfaceAlt,
+                  color: canDrill ? C.textSecondary : C.textMuted,
+                  cursor: canDrill ? 'pointer' : 'not-allowed',
+                  flexShrink: 0,
+                }}
+              >
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.7"
+                  aria-hidden="true"
+                >
+                  <rect x="3" y="2" width="8" height="8" rx="2" />
+                  <rect x="13" y="14" width="8" height="8" rx="2" />
+                  <path d="M7 10v5a3 3 0 0 0 3 3h3" />
+                </svg>
+              </button>
+            </div>
             {node.hasSubTask && node.subTaskId && onOpenSubTask && (
               <button
                 type="button"
