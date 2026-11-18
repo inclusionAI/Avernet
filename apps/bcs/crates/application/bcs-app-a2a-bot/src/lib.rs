@@ -58,6 +58,7 @@ impl A2aBotManagement {
                     if latest.provider_bot_ref!=binding.provider_bot_ref {
                         return Err(ServiceError::Conflict("A2A Bot binding changed".into()));
                     }
+                    self.core.synchronize_card_projection(&current).await?;
                     return Ok(current);
                 }
             }

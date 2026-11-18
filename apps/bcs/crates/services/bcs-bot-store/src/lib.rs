@@ -97,7 +97,7 @@ pub fn caller_config_cache_statistics() -> [u64; 6] {
 /// Maximum time before a bot registration expires (5 minutes).
 const BOT_EXPIRY: Duration = Duration::from_secs(300);
 
-fn bot_info_json_set(
+pub(crate) fn bot_info_json_set(
     updates: Vec<(&'static str, serde_json::Value)>,
 ) -> ServiceResult<(String, Vec<Value>)> {
     let mut expressions = Vec::with_capacity(updates.len());

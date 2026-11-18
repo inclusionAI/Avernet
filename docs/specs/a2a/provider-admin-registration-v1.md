@@ -18,9 +18,10 @@ Bearer，支持两个互斥来源：`agent_card_url` 或完整 `agent_card` 对�
 - 两种来源都缺省/null：原 Provider Bot 注册路径，名称及其他原有要求不变。
 - 两者同时提供、URL 空/带外围空白、Card 非对象：400，不发起 Card 获取。
 - A2A 必须 gateway 且无 Bot webhook_url；Provider 也无需默认 webhook。
-- A2A name 可省略/为空，默认 Card.name；显式值为 BCS 展示别名。既有名称
-  2..64 字符规则不变，不能静默截断 Card。summary 未提供时默认 Card.description。
-  默认值只初始化，不在刷新时覆盖现有别名。skills 与未知字段保存完整 Card。
+- A2A name 可省略/为空，默认并同步 Card.name。既有名称规则不变，Card
+  更新/刷新时同步覆盖 Bot name。Card `description` 与 `skills` 同步投影到
+  generic `bot_info`，`domains`、scopes 使用同一“显式字段优先、缺失字段回退”
+  规则；空数组会清空对应字段。未知字段保存完整 Card。
 - provider_bot_ref、单个 owner、Provider 授权、归属、可见性和权限不从 Card 推导。
 - GET/PUT `.../bots/{bot_uuid}/a2a` 读/更新最小 Card 配置；PUT 使用同样互斥来源
   与 expected_revision。刷新端点仅重读已保存 URL，inline Card 需要显式 PUT 更新。

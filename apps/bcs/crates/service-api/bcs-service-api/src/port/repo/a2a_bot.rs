@@ -29,6 +29,10 @@ pub trait A2aBotRepoPort: Send + Sync {
     /// Atomic explicit replacement, incrementing the stored revision internally.
     /// Returns this write's committed snapshot; never reads back a subsequent writer.
     async fn replace(&self, record: &A2aBotRecord) -> ServiceResult<A2aBotRecord>;
+    /// Reapplies the Card projection to generic Bot columns without changing
+    /// the committed Card, source URL or revision. Revision fencing prevents a
+    /// stale refresh from overwriting a newer Card's derived fields.
+    async fn synchronize_card_projection(&self, record: &A2aBotRecord) -> ServiceResult<()>;
     /// Bounded keyset page of URL-backed Cards, at most 16 full snapshots.
     /// Inline Cards are excluded; callers keep their refresh-round cursor.
     async fn get_by_name(&self, provider_id:&str, name:&str)->ServiceResult<Option<A2aBotRecord>>;
