@@ -478,11 +478,12 @@ class TestCreateBot:
         assert passport_kwargs["engine_type"] == "claude_code"  # folded alias
         # The aicoding form (marker in the template snapshot) keeps the CLI set.
         cli_codes = [c["cli_code"] for c in passport_kwargs["cli_items"]]
-        assert len(cli_codes) == 9
+        assert len(cli_codes) == 10
         assert "antcode-cli" in cli_codes
         assert "adev-cli" in cli_codes
         assert "derisk-cli" in cli_codes
         assert "yuque-cli" in cli_codes
+        assert "aixdev-cli" in cli_codes
 
     def test_create_passport_carries_default_cli_items_for_claude_code_coding_templates(
         self, mock_bot_service, mock_passport
@@ -537,8 +538,8 @@ class TestCreateBot:
         kwargs = mock_passport.apply_first_agent_passport.call_args.kwargs
         assert kwargs["engine_type"] == "claude_code"
         cli_codes = [c["cli_code"] for c in kwargs["cli_items"]]
-        assert len(cli_codes) == 9
-        assert {"antcode-cli", "adev-cli", "derisk-cli", "yuque-cli"} <= set(cli_codes)
+        assert len(cli_codes) == 10
+        assert {"antcode-cli", "adev-cli", "derisk-cli", "yuque-cli", "aixdev-cli"} <= set(cli_codes)
 
         # applicationCoding → 同样走 aicoding CLI 链路。
         mock_passport.apply_first_agent_passport.reset_mock()
@@ -557,7 +558,7 @@ class TestCreateBot:
             )
         kwargs = mock_passport.apply_first_agent_passport.call_args.kwargs
         assert kwargs["engine_type"] == "claude_code"
-        assert len(kwargs["cli_items"]) == 9
+        assert len(kwargs["cli_items"]) == 10
 
         # claude_code 不带 template_type / 带 service 等非研发模板 → fail-closed 空。
         mock_passport.apply_first_agent_passport.reset_mock()

@@ -2,6 +2,8 @@
 // 实验室「任务」体验页(PRD:TeamClaw-demo /tasks):跨Bot、跨群协同任务列表,
 // 状态类别筛选 + 定制任务表格 + TaskPanel 产物抽屉。与定时任务无关。
 import LabTasksPage from '@/pages/Lab/Tasks';
+import { UserTaskTab, type UserTaskTabProps } from '@/pages/MyTask/components/UserTaskTab';
+import { filterUserTaskRecords } from '@/pages/MyTask/components/userTaskFilters';
 import { beforeEach, describe, expect, it } from '@jest/globals';
 import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
@@ -14,7 +16,7 @@ jest.mock('@/components/Workspace/TaskPanelAssetBoundary', () => ({
 }));
 
 jest.mock('@umijs/max', () => ({
-  history: { push: jest.fn(), replace: jest.fn() },
+  history: { push: jest.fn(), replace: jest.fn(), back: jest.fn() },
   useLocation: () => ({ pathname: '/lab/tasks' }),
 }));
 
@@ -243,6 +245,8 @@ describe('LabTasksPage(实验室·任务体验页)', () => {
   it('页头对齐 PRD:标题「任务」+ 跨Bot跨群协同任务描述 + 对话/协作群入口', async () => {
     render(<LabTasksPage />);
     expect(screen.getByRole('heading', { name: '任务' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '返回' }));
+    expect(jest.requireMock('@umijs/max').history.back).toHaveBeenCalledTimes(1);
     expect(screen.getByText(/查看跨Bot、跨群的协同任务/)).toBeInTheDocument();
     const chatLink = screen.getByRole('button', { name: '对话' });
     const groupLink = screen.getByRole('button', { name: '协作群' });
@@ -261,7 +265,7 @@ describe('LabTasksPage(实验室·任务体验页)', () => {
       '任务目标',
       'Owner Bot',
       '创建时间',
-      '完成时间',
+      '更新时间',
       '状态',
       '操作',
     ]);
@@ -275,11 +279,91 @@ describe('LabTasksPage(实验室·任务体验页)', () => {
     const row = screen.getByText('t-collab-1').closest('tr');
     expect(row).not.toBeNull();
     expect(within(row!).getByText('调研助手')).toBeInTheDocument();
+    expect(within(row!).getByRole('img', { name: '调研助手' })).toBeInTheDocument();
+    expect(within(row!).getByRole('img', { name: '调研助手' })).toHaveAttribute(
+      'src',
+      expect.stringContaining('data:image/svg+xml'),
+    );
+    expect(within(row!).getByText('b-9')).toBeInTheDocument();
+    const title = within(row!).getByText('竞品协同分析');
+    const taskId = within(row!).getByText('t-collab-1');
+    expect(title.compareDocumentPosition(taskId) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(row!).getByRole('button', { name: '查看产物' })).toHaveClass('text-primary', 'no-underline');
+    expect(within(row!).getByRole('button', { name: '进入对话' })).toHaveClass('text-primary', 'no-underline');
+    expect(within(row!).getByText('执行中').querySelector('[aria-hidden]')).not.toBeNull();
     expect(within(row!).queryByText('协作群')).not.toBeInTheDocument();
     expect(within(row!).queryByText('动态任务')).not.toBeInTheDocument();
     expect(within(row!).getByRole('button', { name: '查看产物' })).toBeInTheDocument();
     expect(within(row!).getByRole('button', { name: '进入对话' })).toBeInTheDocument();
     expect(within(row!).queryByRole('button', { name: '查看详情' })).not.toBeInTheDocument();
+  });
+
+  it('长任务标题单行省略且悬停/键盘聚焦可查看完整内容，时间列不换行', async () => {
+    const title = '很长的任务标题'.repeat(30);
+    mockListMyTasks.mockResolvedValue({
+      code: 0,
+      data: [{ ...listItem, task_spec: { ...listItem.task_spec, context: { title } } }],
+    });
+    render(<LabTasksPage />);
+    const titleNode = await screen.findByText(title);
+    expect(titleNode).toHaveClass('truncate', 'w-full');
+    expect(titleNode).toHaveAttribute('tabindex', '0');
+    fireEvent.focus(titleNode);
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(title);
+    const table = titleNode.closest('table')!;
+    expect(table).toHaveClass('table-fixed', 'min-w-[1440px]');
+    expect(table.querySelectorAll('col')).toHaveLength(7);
+    const row = titleNode.closest('tr')!;
+    expect(row.cells[3]).toHaveClass('whitespace-nowrap');
+    expect(row.cells[4].firstElementChild).toHaveClass('whitespace-nowrap');
+  });
+
+  it('长任务目标单行省略，聚焦显示完整目标', async () => {
+    const objective = '需要完整展示的任务目标'.repeat(30);
+    mockListMyTasks.mockResolvedValue({
+      code: 0,
+      data: [{ ...listItem, task_spec: { ...listItem.task_spec, goal: { objective, acceptances: [] } } }],
+    });
+    render(<LabTasksPage />);
+    const goal = await screen.findByText(objective);
+    expect(goal).toHaveClass('w-full', 'truncate');
+    expect(goal).toHaveAttribute('tabindex', '0');
+    fireEvent.focus(goal);
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(objective);
+  });
+
+  it('使用最后修改时间展示更新时间，不声称完成时间或执行耗时', async () => {
+    mockListMyTasks.mockResolvedValue({
+      code: 0,
+      message: 'ok',
+      data: [{ ...listItem, gmt_modified: '2026-10-21T11:35:42' }],
+      request_id: 'r',
+    });
+
+    render(<LabTasksPage />);
+    const row = (await screen.findByText('t-collab-1')).closest('tr')!;
+    const cells = within(row).getAllByRole('cell');
+    expect(screen.getByRole('columnheader', { name: '更新时间' })).toBeInTheDocument();
+    expect(cells[3]).toHaveTextContent(/^2026-10-21 10:00:00$/);
+    expect(cells[4]).toHaveTextContent(/^2026-10-21 11:35:42$/);
+    expect(screen.queryByText('完成时间')).not.toBeInTheDocument();
+    expect(screen.queryByText(/耗时/)).not.toBeInTheDocument();
+  });
+
+  it.each(['', null, undefined])('更新时间缺失 (%s) 时沿用破折号，不回退到创建时间', async (gmtModified) => {
+    mockListMyTasks.mockResolvedValue({
+      code: 0,
+      message: 'ok',
+      data: [{ ...listItem, gmt_modified: gmtModified }],
+      request_id: 'r',
+    });
+
+    render(<LabTasksPage />);
+    const row = (await screen.findByText('t-collab-1')).closest('tr')!;
+    const cells = within(row).getAllByRole('cell');
+    expect(cells[3]).toHaveTextContent(/^2026-10-21 10:00:00$/);
+    expect(cells[4]).toHaveTextContent(/^—$/);
+    expect(screen.queryByText(/耗时/)).not.toBeInTheDocument();
   });
 
   it('支持按 Owner Bot 筛选当前任务列表', async () => {
@@ -416,5 +500,137 @@ describe('LabTasksPage(实验室·任务体验页)', () => {
 
     expect(mockPush).toHaveBeenCalledWith('/workspace/chat?bot=b-10%3Au-1&session=sess-b10');
     expect(mockPush).not.toHaveBeenCalledWith(expect.stringContaining('creator-user-id'));
+  });
+});
+
+describe('lab title-only search compatibility', () => {
+  const record = {
+    ...listItem,
+    task_id: 'unique-task-id',
+    owner_bot_id: 'unique-owner-bot',
+    source_type: 'api' as const,
+    status: 'EXECUTING' as const,
+    execution_config: { ...listItem.execution_config, task_type: 'dynamic' as const },
+    task_spec: {
+      context: { ...listItem.task_spec.context, title: 'Primary TITLE', extend_props: {} },
+      metadata: { title: 'Old metadata' },
+      goal: listItem.task_spec.goal,
+    },
+  };
+  const filter = (keyword: string, titleOnly = true) =>
+    filterUserTaskRecords({
+      taskRecords: [record],
+      keyword,
+      titleOnly,
+      ownerBotFilter: 'all',
+      ownerBotOptions: [],
+    });
+
+  it('matches the displayed title case-insensitively with trimmed input', () => {
+    expect(filter('  primary title  ')).toEqual([record]);
+    expect(filter('old metadata')).toEqual([]);
+  });
+
+  it.each(['unique-task-id', 'unique-owner-bot', 'api'])('does not match non-title %s in lab', (keyword) => {
+    expect(filter(keyword)).toEqual([]);
+    expect(filter(keyword, false)).toEqual([record]);
+  });
+
+  it('retains the original broad matching by default', () => {
+    expect(
+      filterUserTaskRecords({
+        taskRecords: [record],
+        keyword: 'unique-owner-bot',
+        ownerBotFilter: 'all',
+        ownerBotOptions: [],
+      }),
+    ).toEqual([record]);
+  });
+
+  it('preserves displayed title fallback and Owner Bot intersection', () => {
+    const metadataRecord = {
+      ...record,
+      task_spec: {
+        ...record.task_spec,
+        context: { ...record.task_spec.context, title: '' },
+        metadata: { title: 'Metadata title' },
+      },
+    };
+    const idFallbackRecord = {
+      ...metadataRecord,
+      task_spec: { ...metadataRecord.task_spec, metadata: { title: '' } },
+    };
+    const filtered = (
+      item: typeof record | typeof metadataRecord | typeof idFallbackRecord,
+      keyword: string,
+      ownerBotFilter = 'all',
+    ) => filterUserTaskRecords({ taskRecords: [item], keyword, titleOnly: true, ownerBotFilter, ownerBotOptions: [] });
+    expect(filtered(metadataRecord, 'metadata')).toEqual([metadataRecord]);
+    expect(filtered(idFallbackRecord, 'unique-task-id')).toEqual([idFallbackRecord]);
+    expect(filtered(record, 'primary', 'another-bot')).toEqual([]);
+    expect(filtered(record, 'primary', 'unique-owner-bot')).toEqual([record]);
+  });
+
+  it('wires title-only matching into the lab page without changing the query scope', async () => {
+    mockListMyTasks.mockResolvedValue({ code: 0, message: 'ok', data: [record], request_id: 'r' });
+    render(<LabTasksPage />);
+    await screen.findByText('Primary TITLE');
+    const input = screen.getByPlaceholderText('搜索任务标题');
+    fireEvent.change(input, { target: { value: 'unique-owner-bot' } });
+    expect(screen.queryByText('Primary TITLE')).not.toBeInTheDocument();
+    expect(screen.getByText('暂无符合条件的用户任务')).toBeInTheDocument();
+    fireEvent.change(input, { target: { value: '  PRIMARY  ' } });
+    expect(screen.getByText('Primary TITLE')).toBeInTheDocument();
+  });
+});
+
+describe('UserTaskTab default timestamp compatibility', () => {
+  it.each([undefined, 'default'] as const)('preserves labels and duration for displayVariant=%s', (displayVariant) => {
+    const props: UserTaskTabProps = {
+      taskRecords: [
+        {
+          ...listItem,
+          source_type: 'coop_group',
+          status: 'EXECUTING',
+          execution_config: { ...listItem.execution_config, task_type: 'dynamic' },
+          task_spec: {
+            ...listItem.task_spec,
+            context: { ...listItem.task_spec.context, extend_props: {} },
+          },
+          gmt_modified: '2026-10-21T11:35:42',
+        },
+      ],
+      total: 1,
+      page: 1,
+      pageSize: 10,
+      loading: false,
+      error: null,
+      statusFilter: 'all',
+      selectedTaskId: null,
+      botNameMap: { 'b-9': '调研助手' },
+      ownerBotUserIdMap: {},
+      onStatusFilterChange: jest.fn(),
+      onRetry: jest.fn(),
+      onSelectTask: jest.fn(),
+      onPageChange: jest.fn(),
+      onPageSizeChange: jest.fn(),
+    };
+    render(<UserTaskTab {...props} displayVariant={displayVariant} />);
+
+    expect(screen.getAllByRole('columnheader').map((header) => header.textContent)).toEqual([
+      '任务',
+      'Owner Bot / 来源',
+      '状态',
+      '创建时间',
+      '完成时间',
+      '操作',
+    ]);
+    expect(screen.queryByRole('columnheader', { name: '更新时间' })).not.toBeInTheDocument();
+    const row = screen.getByText('竞品协同分析').closest('tr')!;
+    const cells = within(row).getAllByRole('cell');
+    expect(cells[3]).toHaveTextContent(/^2026-10-21 10:00:00$/);
+    expect(cells[4]).toHaveTextContent('2026-10-21 11:35:42');
+    expect(within(cells[4]).getByText('耗时：1 小时 36 分钟')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('搜索任务标题 / ID / Bot / 来源')).toBeInTheDocument();
   });
 });

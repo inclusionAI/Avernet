@@ -148,10 +148,36 @@ class SliceStore:
                               content, completion["token_usage"]),
         )
 
+    async def next_attempt_ordinal(self, run: Run, agent_id: AgentId) -> int:
+        """The ordinal this agent's next provisioning attempt must use.
+
+        ``slice_retry_index`` feeds the persona id, so it must be monotonic
+        across slices: the in-slice counter restarts at 1 and would re-derive
+        the previous slice's id, whose Bot row still holds
+        ``uk_bot_id_entity_id_env``.
+
+        Fail-soft: an unreadable ledger degrades to 1 (pre-change behaviour);
+        the host's collision classification still names the duplicate.
+        """
+        if self._attempt_repo is None:
+            return 1
+        try:
+            highest = await run_blocking(
+                self._attempt_repo.max_agent_attempt_ordinal,
+                run.run_id, run.tenant, agent_id,
+            )
+        except Exception:
+            logger.warning(
+                "[agentswarm][swarm] attempt ordinal read failed agent=%s; "
+                "falling back to 1", agent_id, exc_info=True,
+            )
+            return 1
+        return int(highest or 0) + 1
+
     async def journal_attempt_intent(self, run: Run, agent_id: AgentId,
-                                      claim_epoch: int, attempt: int,
-                                      executor_kind: str, executor_id: str,
-                                      executor_name: str) -> None:
+                                     claim_epoch: int, attempt: int,
+                                     executor_kind: str, executor_id: str,
+                                     executor_name: str) -> None:
         """Write-ahead the attempt's binding INTENT, before setup().
 
         Fencing mirrors ``persist_completion`` exactly: the intent insert

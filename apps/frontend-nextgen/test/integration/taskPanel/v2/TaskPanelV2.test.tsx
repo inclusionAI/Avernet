@@ -1,18 +1,27 @@
 /** @jest-environment jsdom */
 // TaskPanelV2 壳:面包屑两级栈 + 收起按钮 + nav 注入/本地降级(spec §3.2)。
-import type { ResolvedSessionTarget } from '@task-panel-test/panel/sessionResolution';
+import { beforeEach, describe, expect, it } from '@jest/globals';
 import { fetchGroupDetail } from '@task-panel-test/panel/GroupDrillDown';
+import type { ResolvedSessionTarget } from '@task-panel-test/panel/sessionResolution';
 import type { TaskView } from '@task-panel-test/panel/types';
 import { TaskPanelV2, type TaskPanelV2Props } from '@task-panel-test/panel/v2/TaskPanelV2';
 import { useLocalTaskPanelNav, type TaskPanelNav } from '@task-panel-test/panel/v2/taskPanelNav';
-import { beforeEach, describe, expect, it } from '@jest/globals';
 import { TaskPanelTestHost } from '../../../helpers/taskPanelHost';
 
-import { act, fireEvent, render as baseRender, renderHook as baseRenderHook, screen, waitFor } from '@testing-library/react';
+import {
+  act,
+  render as baseRender,
+  renderHook as baseRenderHook,
+  fireEvent,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react';
 
-const renderHook: typeof baseRenderHook = (callback, options) => baseRenderHook(callback, { wrapper: TaskPanelTestHost, ...options });
-const render = (ui: Parameters<typeof baseRender>[0], options?: Parameters<typeof baseRender>[1]) => baseRender(ui, { wrapper: TaskPanelTestHost, ...options });
-
+const renderHook: typeof baseRenderHook = (callback, options) =>
+  baseRenderHook(callback, { wrapper: TaskPanelTestHost, ...options });
+const render = (ui: Parameters<typeof baseRender>[0], options?: Parameters<typeof baseRender>[1]) =>
+  baseRender(ui, { wrapper: TaskPanelTestHost, ...options });
 
 jest.mock('@task-panel-test/panel/GroupDrillDown', () => {
   const actual = jest.requireActual('@task-panel-test/panel/GroupDrillDown');
@@ -124,7 +133,8 @@ describe('TaskPanelV2 壳', () => {
     render(<TaskPanelV2 {...baseProps()} />);
     expect(screen.queryByTitle('焦点任务')).toBeNull();
     expect(screen.getByText('竞品分析')).toBeTruthy();
-    expect(screen.getByText('执行中')).toBeTruthy();
+    const header = screen.getByTitle('任务总览：竞品分析').closest('header')!;
+    expect(within(header).getByText('执行中')).toBeTruthy();
     expect(screen.getByTitle('任务总览：竞品分析')).toBeTruthy();
   });
 
@@ -222,7 +232,13 @@ describe('TaskPanelV2 协作群成员名展示', () => {
 
     const view = render(<TaskPanelV2 {...baseProps({ task: groupTask })} />);
 
-    await waitFor(() => expect(mockedFetchGroupDetail).toHaveBeenCalledWith('bcs_grp_display', '', expect.objectContaining({ artifacts: expect.any(Object) })));
+    await waitFor(() =>
+      expect(mockedFetchGroupDetail).toHaveBeenCalledWith(
+        'bcs_grp_display',
+        '',
+        expect.objectContaining({ artifacts: expect.any(Object) }),
+      ),
+    );
     await waitFor(() => expect(screen.getAllByText('成员甲、成员乙').length).toBeGreaterThan(0));
     expect(screen.queryByText('bcs_grp_display')).toBeNull();
     expect(screen.getAllByText(/成员甲、成员乙/).length).toBe(2);

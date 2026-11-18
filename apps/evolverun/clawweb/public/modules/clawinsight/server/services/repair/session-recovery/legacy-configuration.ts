@@ -36,6 +36,7 @@ export function parseLegacyRecoveryAllowlist(value: unknown): MonitoringTarget[]
 }
 
 export function legacyOwnerNotificationEnabled(raw: string, enabled: number, input: { botId: string; ownerId: string; targetEnvironment: string }): boolean {
+  if (enabled !== 1) return false;
   let value;
   try { value = JSON.parse(raw); }
   catch { throw new Error("Invalid recovery owner notification JSON"); }
@@ -60,7 +61,7 @@ export function legacyOwnerNotificationEnabled(raw: string, enabled: number, inp
     targets.add(key);
     if (item.bot_id === input.botId && item.entity_id === input.ownerId && item.env === input.targetEnvironment) matched = item.enabled;
   }
-  return matched ?? (enabled === 1);
+  return matched ?? true;
 }
 
 type BotWebhook = { bot_id: string; entity_id: string; webhook: string };
@@ -162,8 +163,7 @@ export async function legacyRecoveryNotifications(target: RecoveryRequest['targe
 
 export async function legacyRecoveryCardConfiguration(app: RecoveryAppConfigStore, environment: AgentControlPlaneEnvironment) {
   const row = await app.findByKey(SESSION_RECOVERY_OWNER_NOTIFICATIONS_KEY);
-  // The old row's enabled flag is the Owner default, not a card-resource switch.
-  return row ? cardConfiguration(JSON.parse(row.config_json).card)[environment] ?? null : null;
+  return row?.enabled === 1 ? cardConfiguration(JSON.parse(row.config_json).card)[environment] ?? null : null;
 }
 
 export function legacyRecoveryHandbookConfiguration(raw: string, target: RecoveryRequest['target']) {

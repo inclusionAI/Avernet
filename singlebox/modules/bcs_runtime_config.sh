@@ -186,6 +186,9 @@ prepare_bcs_runtime_config() {
     mkdir -p "$config_dir"
     cp "$template" "$base_config"
     cp "$template" "$local_config"
+    if [ "${SINGLEBOX_COVERAGE:-0}" = "1" ] && [ "${BCS_E2E_APP_IDENTITY:-0}" = "1" ]; then
+        printf '\n[a2a_http_identity]\nplugin = "e2e-loopback-identity"\n' >> "$base_config"
+    fi
 
     local sed_args=()
     local escaped_bcs_url

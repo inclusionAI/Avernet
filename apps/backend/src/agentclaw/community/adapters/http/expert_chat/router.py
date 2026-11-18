@@ -24,8 +24,11 @@ import traceback
 
 from fastapi import APIRouter, Depends, Query, Request
 
-from agentclaw.community.adapters.http.org.dependencies import require_baas_caller
+from agentclaw.community.adapters.http.org.dependencies import (
+    require_baas_caller, require_baas_caller_status,
+)
 from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
+from agentclaw.community.utils.env_utils import get_current_env
 
 from agentclaw.community.adapters.http.expert_chat.schemas import (
     AddChatBotRequest,
@@ -678,5 +681,54 @@ async def get_caller_connection_for_application(
     logger.info(
         "event=expert_chat.app_caller_connection.%s context=%s response=%s",
         event, context, _application_log_value(response.model_dump()),
+    )
+    return response
+
+
+@router.get("/app-caller-instance/status", response_model=ApiResponse, dependencies=[Depends(require_baas_caller_status)])
+async def get_caller_instance_status_for_application(
+    request: Request,
+    bot_id: str = Query(..., min_length=1, description="Source Bot ID"),
+    owner_id: str = Query(..., min_length=1, description="Source Bot owner ID"),
+    user_id: str = Query(..., min_length=1, description="Target Caller user ID"),
+    instance_service: ExpertChatInstanceServiceProtocol = Injected(
+        ExpertChatInstanceServiceProtocol
+    ),
+):
+    """Observe Caller allocation and health for a verified BaaS service.
+
+    This service-scoped read needs no user delegation or chat membership and
+    never enters the Caller lifecycle. The public OpenAPI retains its policy.
+    """
+    started_at = time.perf_counter()
+    context = {
+        "system": "backend", "direction": "inbound",
+        "operation": "app_caller_instance_status", "method": "GET",
+        "route": request.url.path, "request_id": request.headers.get("x-request-id"),
+        "tenant": get_current_avernet_tenant(), "env": get_current_env(),
+        "bot_id": bot_id, "owner_id": owner_id, "user_id": user_id,
+    }
+    logger.info("event=expert_chat.app_caller_instance_status.request context=%s", context)
+    try:
+        # COSEC: the verified BaaS service may query the named Caller directly;
+        # tenant/environment still come from trusted server context, not claims.
+        result = await instance_service.get_caller_instance_status(
+            bot_id=bot_id, owner_id=owner_id, user_id=user_id,
+        )
+        response = ApiResponse(success=True, message="获取成功", error_code=0, data=result)
+        event = "success"
+    except ChatPermissionError as error:
+        context["reason"] = getattr(error, "reason", "permission_denied")
+        context["exception_type"] = type(error).__name__
+        response = ApiResponse(success=False, message="无权限执行此操作", error_code=403, data=None)
+        event = "denied"
+    except Exception as error:
+        context["exception_type"] = type(error).__name__
+        response = ApiResponse(success=False, message="获取 Caller 状态失败，请稍后重试", error_code=5999)
+        event = "failed"
+    context.update(status=200, duration_ms=round((time.perf_counter() - started_at) * 1000, 1))
+    logger.info(
+        "event=expert_chat.app_caller_instance_status.%s context=%s response=%s",
+        event, context, response.model_dump(),
     )
     return response

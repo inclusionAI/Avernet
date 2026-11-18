@@ -31,14 +31,50 @@
 .insight-monitoring .settings-heading, .insight-monitoring .settings-footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .insight-monitoring .settings-heading { align-items: flex-start; padding: 22px 24px 0; }
 .insight-monitoring .settings-heading h2 { font-size: 20px; margin: 0; font-weight: 650; }
-.insight-monitoring .settings-heading p { color: var(--sub); font-size: 13px; margin: 5px 0 0; }
 .insight-monitoring .settings-close { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 7px; color: var(--sub); }
 .insight-monitoring .settings-close:hover { background: var(--bg); }
 .insight-monitoring .settings-notice { display: flex; gap: 10px; align-items: flex-start; margin: 12px 24px 0; padding: 10px 12px; border: 1px solid; border-radius: 8px; font-size: 12px; }
 .insight-monitoring .settings-notice + .settings-notice { margin-top: 8px; }
 .insight-monitoring .settings-notice .icon { width: 16px; height: 16px; }
 .insight-monitoring .settings-operation-notice { border-color: #d7ebe0; background: #eff8f3; color: #286044; }
-.insight-monitoring .settings-service-notice { border-color: #dce7fb; background: var(--blue-light); color: #385986; }
+.insight-monitoring .settings-overview {
+  gap: 12px;
+  border-color: #d4e1ff;
+  background: var(--blue-light);
+  padding: 14px;
+}
+.insight-monitoring .settings-overview .icon {
+  width: 20px;
+  height: 20px;
+  margin-top: 2px;
+  color: var(--blue);
+}
+.insight-monitoring .settings-description {
+  margin: 0;
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.6;
+}
+.insight-monitoring .settings-overview .settings-case-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  margin-top: 10px;
+  padding: 5px 10px;
+  border: 1px solid #a8c3ff;
+  border-radius: 7px;
+  color: #174ebd;
+  background: var(--paper);
+  font-size: 13px;
+  font-weight: 650;
+}
+.insight-monitoring .settings-overview .settings-case-link:hover {
+  border-color: var(--blue);
+  background: #dfeaff;
+}
+.insight-monitoring .settings-service-notice { border-color: #f3dfb7; background: #fffbf0; color: #80541d; }
 .insight-monitoring .settings-toolbar { padding: 11px 24px; min-height: 0; border-bottom: 0; flex-wrap: wrap; }
 .insight-monitoring .settings-toolbar .search-box { flex: 1; min-width: 170px; }
 .insight-monitoring .settings-actions { display: flex; gap: 8px; }
@@ -54,7 +90,16 @@
 .insight-monitoring .settings-bots .record-session { margin-top: 2px; }
 .insight-monitoring .settings-state { color: var(--sub); font-size: 12px; white-space: nowrap; }
 .insight-monitoring .settings-state.enabled { color: var(--blue); }
-.insight-monitoring .settings-bot-note { display: block; color: var(--sub); font-size: 12px; margin-top: 3px; }
+.insight-monitoring .settings-bot-note {
+  display: inline-block;
+  margin-top: 4px;
+  padding: 2px 7px;
+  border-radius: 5px;
+  background: #fff3d9;
+  color: #80541d;
+  font-size: 12px;
+  font-weight: 500;
+}
 .insight-monitoring .settings-footer { padding: 12px 24px; border-top: 1px solid var(--line); color: var(--sub); font-size: 12px; }
 .insight-monitoring .settings-feedback { margin: 0; padding: 9px 24px; color: var(--blue); background: var(--blue-light); }
 .insight-monitoring .monitoring-switch { padding: 3px; width: 40px; height: 24px; flex: none; border-radius: 20px; background: var(--muted); }

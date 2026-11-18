@@ -140,9 +140,16 @@ class _RecordingContextService:
         *,
         todo_execution_id=None,
         todo_execution_token=None,
+        todo_runner_skill_md_path=None,
     ):
         self.run_calls.append(
-            (collab_context_id, context, todo_execution_id, todo_execution_token)
+            (
+                collab_context_id,
+                context,
+                todo_execution_id,
+                todo_execution_token,
+                todo_runner_skill_md_path,
+            )
         )
         self.projection = _projection(status="in_progress")
         return ContextCollabRunResultDTO(
@@ -313,6 +320,33 @@ def test_get_context_maps_created_objective_to_interaction_content() -> None:
 
 
 @pytest.mark.asyncio
+async def test_run_context_forwards_runner_path_to_context_runtime() -> None:
+    service = _RecordingContextService()
+    adapter = InProcessTodoCollaborationAdapter(service)
+    runner_path = (
+        "/home/admin/.aicoding/workspace/skills/skills-repo/infra/todo-runner/SKILL.md"
+    )
+
+    await adapter.run_context(
+        collab_context_id=_CONTEXT_ID,
+        actor_id="user_1",
+        todo_execution_id="todoexec_1",
+        todo_execution_token="token_1",
+        todo_runner_skill_md_path=runner_path,
+    )
+
+    assert service.run_calls == [
+        (
+            _CONTEXT_ID,
+            service.run_calls[0][1],
+            "todoexec_1",
+            "token_1",
+            runner_path,
+        )
+    ]
+
+
+@pytest.mark.asyncio
 async def test_run_context_calls_service_then_refreshes_with_same_actor() -> None:
     service = _RecordingContextService()
     adapter = InProcessTodoCollaborationAdapter(service)
@@ -329,6 +363,7 @@ async def test_run_context_calls_service_then_refreshes_with_same_actor() -> Non
     assert run_actor == get_actor
     assert run_actor.actor.principal_id == "user_1"
     assert run_actor.source == "todo"
+    assert service.run_calls[0][4] is None
 
 
 @pytest.mark.asyncio
@@ -380,6 +415,7 @@ async def test_run_context_translates_context_domain_rejection() -> None:
         *,
         todo_execution_id=None,
         todo_execution_token=None,
+        todo_runner_skill_md_path=None,
     ):
         raise failure
 
@@ -406,6 +442,7 @@ async def test_run_context_translates_runtime_failure_to_todo_boundary() -> None
         *,
         todo_execution_id=None,
         todo_execution_token=None,
+        todo_runner_skill_md_path=None,
     ):
         raise ContextCollabExecutorError("runtime unavailable")
 

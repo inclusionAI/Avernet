@@ -1,5 +1,5 @@
 /** Verified wire contracts only. Domain mapping and authorization interpretation live in Service. */
-import { backendRequest } from '../httpClient';
+import { backendRequest, type BackendRequestOptions } from '../httpClient';
 
 export interface EditorIdentityParams {
   user_id?: string;
@@ -39,13 +39,18 @@ export interface EditorPackDto {
   files: Array<{ path: string; content: string; mode: '100644' | '100755' }>;
 }
 const path = (id: string) => `/openapi/v1/harnessflow/api/workflows/${encodeURIComponent(id)}`;
-function get<T>(url: string, params: object, signal?: AbortSignal, noStore = false): Promise<T> {
+function get<T>(
+  url: string,
+  params: object,
+  signal?: AbortSignal,
+  options: Pick<BackendRequestOptions, 'headers' | 'suppressErrorNotification'> = {},
+): Promise<T> {
   return backendRequest<T>(url, {
     method: 'GET',
     params: { ...params },
     signal,
     injectUserId: false,
-    ...(noStore ? { headers: { 'Cache-Control': 'no-store', Pragma: 'no-cache' } } : {}),
+    ...options,
   });
 }
 export const editorController = {
@@ -60,6 +65,10 @@ export const editorController = {
   diff: (id: string, from: number, to: number, params: EditorIdentityParams, signal?: AbortSignal) =>
     get<EditorDiffDto>(`${path(id)}/history/diff`, { ...params, fromDeploy: from, toDeploy: to }, signal),
   scripts: (id: string, params: EditorIdentityParams, signal?: AbortSignal) =>
-    get<EditorPackDto>(`${path(id)}/pack-scripts`, params, signal, true),
+    get<EditorPackDto>(`${path(id)}/pack-scripts`, params, signal, {
+      headers: { 'Cache-Control': 'no-store', Pragma: 'no-cache' },
+      // Scripts render failures inline; backendRequest still runs shared auth/invitation gates.
+      suppressErrorNotification: true,
+    }),
 };
 export type EditorController = typeof editorController;

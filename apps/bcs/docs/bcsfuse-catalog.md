@@ -43,12 +43,18 @@ local context fusion service, since their API has no legacy Group-fusion route.
 
 ## Published data
 
-- Agent: BCS bot ID, display name, summary, skills and domain tags. The Card
+- Agent: BCS bot ID, display name, summary, skills, domain tags and scopes. The Card
   description combines the summary and domains so the default Fuse converter
-  indexes domain-only Agents too. All three bot visibility values and all three
-  user visibility values are synchronized. Human actors and deleted Agents are
-  removed. BCS still enforces collaboration permission checks on search results,
-  including allowing a private Agent that is already a friend.
+  indexes domain-only Agents too. At registration, update and refresh publication time,
+  the sync worker re-reads the committed AgentCard. Card capability fields take precedence
+  over the stored generic Bot fields: Card `description`, `domains`, `skills` and
+  explicit/derived scopes replace the corresponding generic fields, and an empty list is
+  a real value that clears them. The same projection synchronizes these fields to
+  `bcs_bots.bot_info`. All three bot visibility values and all three user visibility
+  values are synchronized.
+  Human actors and deleted Agents are removed. BCS still enforces collaboration
+  permission checks on search results, including allowing a private Agent that is
+  already a friend.
 - Group: the stored Group Card template, with `groupId` added to the Card and
   `resource_type=group` / visibility labels supplied by the catalog adapter.
   Names, descriptions, skills, supported interfaces and extensions come from

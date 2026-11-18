@@ -60,6 +60,9 @@ export function ConversationSessionList(props: {
   }
   return (
     <>
+      {sessions.items.length === 0 && sessions.hasMore && (
+        <p className="px-4 py-2 text-xs text-muted-foreground">当前范围尚未找到匹配会话，可继续加载</p>
+      )}
       <div>
         {sessions.items.map((session) => {
           const selected = selectedSessionId === session.sessionId;

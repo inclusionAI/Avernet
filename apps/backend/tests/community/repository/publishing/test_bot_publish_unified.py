@@ -993,6 +993,7 @@ def test_upgrade_restart_failure_keeps_persisted_draft_for_idempotent_retry(repo
         publish_flow_service_provider=Mock(), device_binding_repo=Mock(),
         bcn_service=Mock(), quality_task_service=Mock(), publish_operation_repo=Mock(),
         task_queue_service=Mock(), bot_process_registry=Mock(), common_config_service=Mock(),
+        passport_plugin=Mock(),
     )
     service._env = "dev"
     service._get_next_version = Mock(return_value=2)

@@ -32,6 +32,7 @@ export function buildVersionColumns(
     {
       id: 'version',
       header: '版本',
+      headerClassName: 'text-foreground',
       width: COLUMN_WIDTHS[0],
       cell: (v) => (
         <div className="min-w-0">
@@ -45,6 +46,7 @@ export function buildVersionColumns(
     {
       id: 'bot',
       header: 'Bot',
+      headerClassName: 'text-foreground',
       width: COLUMN_WIDTHS[1],
       className: 'text-[13px]',
       cell: (v) => (
@@ -64,6 +66,7 @@ export function buildVersionColumns(
     {
       id: 'sourceTask',
       header: '来源任务',
+      headerClassName: 'text-foreground',
       width: COLUMN_WIDTHS[2],
       cell: (v) => {
         const name = typeof v.taskName === 'string' && v.taskName.trim() ? v.taskName : v.taskId;
@@ -82,13 +85,14 @@ export function buildVersionColumns(
             </Hint>
           </div>
         ) : (
-          <span className="text-xs text-muted-foreground">—</span>
+          <span className="text-xs text-foreground">—</span>
         );
       },
     },
     {
       id: 'review',
       header: '状态',
+      headerClassName: 'text-foreground',
       width: COLUMN_WIDTHS[3],
       cell: (v) => {
         const label = versionStatus(v);
@@ -100,12 +104,13 @@ export function buildVersionColumns(
     {
       id: 'reviewSpec',
       header: 'Review / Spec',
+      headerClassName: 'text-foreground',
       width: COLUMN_WIDTHS[4],
       cell: (v) => {
         const value = `${v.reviewStatus || '—'} / ${v.specVersion || '—'}`;
         return (
           <Hint content={value}>
-            <span className="block truncate text-xs text-muted-foreground">{value}</span>
+            <span className="block truncate text-xs text-foreground">{value}</span>
           </Hint>
         );
       },
@@ -113,18 +118,21 @@ export function buildVersionColumns(
     {
       id: 'bench',
       header: 'Test Bench',
+      headerClassName: 'text-foreground',
       width: COLUMN_WIDTHS[5],
       cell: (v) => <Comparison version={v} />,
     },
     {
       id: 'createdAt',
       header: '生成时间',
+      headerClassName: 'text-foreground',
       width: COLUMN_WIDTHS[6],
-      cell: (v) => <span className="whitespace-nowrap text-xs text-muted-foreground">{formatTime(v.createdAt)}</span>,
+      cell: (v) => <span className="whitespace-nowrap text-xs text-foreground">{formatTime(v.createdAt)}</span>,
     },
     {
       id: 'actions',
       header: '操作',
+      headerClassName: 'text-foreground',
       width: COLUMN_WIDTHS[7],
       align: 'start',
       sticky: 'right',

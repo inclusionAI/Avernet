@@ -266,6 +266,30 @@ class AgentAttemptRepository(AgentAttemptRepositoryProtocol):
                 )
             ).scalar_one()
 
+    def max_agent_attempt_ordinal(self, run_id: dm.RunId,
+                                  tenant: dm.TenantId,
+                                  agent_id: dm.AgentId) -> int:
+        """Highest attempt ordinal this agent has used, or 0.
+
+        ``slice_retry_index`` feeds the persona id, and the earlier attempt's
+        Bot row still holds ``uk_bot_id_entity_id_env``. Soft-deleted rows are
+        excluded so retention pruning can free an ordinal only once the row is
+        really gone.
+        """
+        with self._db.orm_session() as session:
+            highest = session.execute(
+                select(func.max(
+                    om.AcAgentSwarmAgentAttemptModel.slice_retry_index
+                )).where(
+                    om.AcAgentSwarmAgentAttemptModel.run_id == run_id,
+                    om.AcAgentSwarmAgentAttemptModel.tenant == tenant,
+                    om.AcAgentSwarmAgentAttemptModel.agent_id == agent_id,
+                    om.AcAgentSwarmAgentAttemptModel.is_deleted.is_(False),
+                )
+            ).scalar_one()
+        # MAX over zero rows is NULL, not 0 — the first attempt is ordinal 1.
+        return int(highest or 0)
+
     def list_agent_bindings(self, run_id: dm.RunId,
                               tenant: dm.TenantId) -> list[dict]:
         """Every live ledger row of the run, ascending insertion order.

@@ -23,6 +23,10 @@ export function useBotSessionFiles(
   ownerId?: string,
   friendUserId?: string,
   stage?: BotRuntimeStage,
+  /** 多实例选中实例(openspec add-session-files-device-uuid),缺省不携带 */
+  deviceUuid?: string,
+  /** Caller 模式 Bot 运行时定位(openspec add-session-files-caller-runtime-target),缺省不携带 */
+  callerRuntimeTarget?: 'service' | 'caller_instance',
 ): UseBotSessionFilesResult {
   const store = useBotSessionFileStore();
   const { setIsLoadingList, setReadyFiles, resetForSession } = store;
@@ -47,12 +51,16 @@ export function useBotSessionFiles(
       ownerId,
       friendUserId,
       ...(stage ? ([stage] as const) : []),
+      // 多实例选中实例定位(openspec add-session-files-device-uuid),缺省不携带
+      ...(deviceUuid ? ([deviceUuid] as const) : []),
+      // Caller 模式 Bot 运行时定位(openspec add-session-files-caller-runtime-target),缺省不携带
+      ...(callerRuntimeTarget ? ([callerRuntimeTarget] as const) : []),
     );
     if (requestIdRef.current !== requestId) return;
     setIsLoadingList(false);
     if (readyRes.ok) setReadyFiles(readyRes.data.items);
     else toast.error(readyRes.error.friendlyMessage);
-  }, [botId, sessionId, userId, ownerId, friendUserId, stage, setIsLoadingList, setReadyFiles]);
+  }, [botId, sessionId, userId, ownerId, friendUserId, stage, deviceUuid, callerRuntimeTarget, setIsLoadingList, setReadyFiles]);
 
   useEffect(() => {
     // 懒加载(2026-10-21):进入会话不再默认调 file 接口(选会话≠有查看文件清单的诉求);
@@ -62,7 +70,7 @@ export function useBotSessionFiles(
       requestIdRef.current++;
       setIsLoadingList(false);
     };
-  }, [botId, sessionId, userId, ownerId, friendUserId, stage, resetForSession, setIsLoadingList]);
+  }, [botId, sessionId, userId, ownerId, friendUserId, stage, deviceUuid, callerRuntimeTarget, resetForSession, setIsLoadingList]);
 
   const deleteFile = useCallback(
     async (file: BotSessionFileView) => {
@@ -74,6 +82,10 @@ export function useBotSessionFiles(
         userId,
         ownerId,
         ...(stage ? ([stage] as const) : []),
+        // 多实例选中实例定位(openspec add-session-files-device-uuid 扩展段),缺省不携带
+        ...(deviceUuid ? ([deviceUuid] as const) : []),
+        // Caller 模式 Bot 运行时定位(openspec add-session-files-caller-runtime-target),缺省不携带
+        ...(callerRuntimeTarget ? ([callerRuntimeTarget] as const) : []),
       );
       if (res.ok) {
         store.removeReadyFile(file.resourceId);
@@ -83,7 +95,7 @@ export function useBotSessionFiles(
       toast.error(res.error.friendlyMessage);
       return false;
     },
-    [botId, sessionId, userId, ownerId, stage, store],
+    [botId, sessionId, userId, ownerId, stage, deviceUuid, callerRuntimeTarget, store],
   );
 
   const downloadFile = useCallback(
@@ -99,6 +111,10 @@ export function useBotSessionFiles(
               userId,
               ownerId,
               ...(stage ? ([stage] as const) : []),
+              // 多实例选中实例定位(openspec add-session-files-device-uuid 扩展段),缺省不携带
+              ...(deviceUuid ? ([deviceUuid] as const) : []),
+              // Caller 模式 Bot 运行时定位(openspec add-session-files-caller-runtime-target)
+              ...(callerRuntimeTarget ? ([callerRuntimeTarget] as const) : []),
             )
           : await botSessionFileService.resolveContentUrl(
               botId,
@@ -108,6 +124,8 @@ export function useBotSessionFiles(
               ownerId,
               'attachment',
               ...(stage ? ([stage] as const) : []),
+              ...(deviceUuid ? ([deviceUuid] as const) : []),
+              ...(callerRuntimeTarget ? ([callerRuntimeTarget] as const) : []),
             );
       } catch (err) {
         toast.error(err instanceof Error ? err.message : '下载失败');
@@ -124,7 +142,7 @@ export function useBotSessionFiles(
       a.click();
       a.remove();
     },
-    [botId, sessionId, userId, ownerId, stage],
+    [botId, sessionId, userId, ownerId, stage, deviceUuid, callerRuntimeTarget],
   );
 
   const previewFile = useCallback(
@@ -140,6 +158,10 @@ export function useBotSessionFiles(
           ownerId,
           'inline',
           ...(stage ? [stage] as const : []),
+          // 多实例选中实例定位(openspec add-session-files-device-uuid 扩展段),缺省不携带
+          ...(deviceUuid ? [deviceUuid] as const : []),
+          // Caller 模式 Bot 运行时定位(openspec add-session-files-caller-runtime-target),缺省不携带
+          ...(callerRuntimeTarget ? [callerRuntimeTarget] as const : []),
         );
       } catch (err) {
         toast.error(err instanceof Error ? err.message : '预览失败');
@@ -147,7 +169,7 @@ export function useBotSessionFiles(
       }
       window.open(url, '_blank', 'noopener,noreferrer');
     },
-    [botId, sessionId, userId, ownerId, stage],
+    [botId, sessionId, userId, ownerId, stage, deviceUuid, callerRuntimeTarget],
   );
 
   return {

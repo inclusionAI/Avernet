@@ -56,7 +56,7 @@ class TestBotPlatformConformance:
         sig = _sig("chat")
         assert list(sig.parameters) == [
             "self", "bot_id", "message", "owner_id",
-            "session_key", "cancel_event",
+            "session_key", "cancel_event", "timeout_seconds", "tenant",
         ]
         assert sig.parameters["bot_id"].annotation is BotId
         assert sig.parameters["session_key"].annotation == (str | None)

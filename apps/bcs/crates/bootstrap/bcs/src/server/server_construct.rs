@@ -723,7 +723,7 @@ impl BcsServer {
 
         let (leader_election, lifecycle) = create_standalone_leader_lifecycle();
         register_late_lifecycles(&lifecycle, fuse_client.as_ref(), card_changes.clone(),
-            control_plane_repo, sessions.clone(), &config);
+            control_plane_repo, None, sessions.clone(), &config);
         register_eventing_lifecycles(
             &lifecycle,
             eventing_runtime.lifecycle.as_ref(),

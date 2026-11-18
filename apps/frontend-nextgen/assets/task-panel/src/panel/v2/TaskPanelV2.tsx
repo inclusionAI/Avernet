@@ -77,6 +77,12 @@ export const TaskPanelV2: React.FC<TaskPanelV2Props> = ({
       data-task-panel-root="true"
       className={className}
       style={{
+        boxSizing: 'border-box',
+        width: '100%',
+        maxWidth: 1126,
+        maxHeight: 810,
+        border: '1px solid rgba(255, 255, 255, 0.1)',
+        borderRadius: 2,
         position: 'relative',
         display: 'flex',
         flexDirection: 'column',

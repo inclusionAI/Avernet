@@ -31,6 +31,8 @@ from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions import
 )
 from agentclaw.community.api.bot_app_grant_service import BotAppGrantServiceProtocol
 from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayProtocol
+from agentclaw.community.api.session_source_listing import SessionSourceListingProtocol
+from agentclaw.community.core.engine_runtime.session_listing import SessionSourceListingService
 from agentclaw.community.api.expert_chat_service import ExpertChatServiceProtocol
 from agentclaw.community.api.human_bot_friendship_service import (
     HumanBotFriendshipServiceProtocol,
@@ -131,6 +133,7 @@ def app_client(relay, grants, friendships, expert):
         class _M(Module):
             def configure(self, binder):
                 binder.bind(EngineRuntimeRelayProtocol, to=relay)
+                binder.bind(SessionSourceListingProtocol, to=SessionSourceListingService)
                 binder.bind(BotAppGrantServiceProtocol, to=grants)
                 binder.bind(HumanBotFriendshipServiceProtocol, to=friendships)
                 binder.bind(ExpertChatServiceProtocol, to=expert)

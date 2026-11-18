@@ -109,6 +109,7 @@ class TodoCollaborationPort(Protocol):
         actor_id: str,
         todo_execution_id: str | None = None,
         todo_execution_token: str | None = None,
+        todo_runner_skill_md_path: str | None = None,
     ) -> TodoCollaborationContext:
         """Start the configured executor and return the refreshed Context."""
         ...
@@ -127,6 +128,7 @@ class TodoCollaborationPort(Protocol):
         triggered_by_event_id: str,
         todo_execution_id: str | None = None,
         todo_execution_token: str | None = None,
+        todo_runner_skill_md_path: str | None = None,
     ) -> TodoCollaborationContext:
         """Continue the prior executor session from a Human interaction event."""
         ...

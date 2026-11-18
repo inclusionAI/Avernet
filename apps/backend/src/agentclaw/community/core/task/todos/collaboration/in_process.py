@@ -100,6 +100,7 @@ class InProcessTodoCollaborationAdapter(TodoCollaborationPort):
         actor_id: str,
         todo_execution_id: str | None = None,
         todo_execution_token: str | None = None,
+        todo_runner_skill_md_path: str | None = None,
     ) -> TodoCollaborationContext:
         actor = _actor_context(actor_id, "human")
         try:
@@ -108,6 +109,7 @@ class InProcessTodoCollaborationAdapter(TodoCollaborationPort):
                 actor,
                 todo_execution_id=todo_execution_id,
                 todo_execution_token=todo_execution_token,
+                todo_runner_skill_md_path=todo_runner_skill_md_path,
             )
         except ContextCollabExecutorError as exc:
             raise TodoCollaborationError(
@@ -146,6 +148,7 @@ class InProcessTodoCollaborationAdapter(TodoCollaborationPort):
         triggered_by_event_id: str,
         todo_execution_id: str | None = None,
         todo_execution_token: str | None = None,
+        todo_runner_skill_md_path: str | None = None,
     ) -> TodoCollaborationContext:
         actor = _actor_context(actor_id, "human")
         try:
@@ -155,6 +158,7 @@ class InProcessTodoCollaborationAdapter(TodoCollaborationPort):
                 context=actor,
                 todo_execution_id=todo_execution_id,
                 todo_execution_token=todo_execution_token,
+                todo_runner_skill_md_path=todo_runner_skill_md_path,
             )
         except ContextCollabExecutorError as exc:
             raise TodoCollaborationError(

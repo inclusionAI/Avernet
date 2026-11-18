@@ -3,9 +3,33 @@
 from __future__ import annotations
 
 
-TODO_RUNNER_SKILL_MD_PATH = (
-    "/home/admin/.openclaw/workspace/skills/skills-repo/infra/todo-runner/SKILL.md"
+TODO_RUNNER_RELATIVE_SKILL_MD_PATH = (
+    "/workspace/skills/skills-repo/infra/todo-runner/SKILL.md"
 )
+_TODO_RUNNER_WORKSPACE_ROOTS = {
+    "openclaw": "/home/admin/.openclaw",
+    "claude_code": "/home/admin/.claude_code",
+    "aicoding": "/home/admin/.aicoding",
+    "hermes": "/home/admin/.harness",
+}
+
+
+def todo_runner_skill_md_path(executor_runtime_engine: str) -> str:
+    """Return the Bot-visible todo-runner source for one runtime engine.
+
+    Todo loads the runner from the full infra content store, never from the
+    Bot-specific active Skill directory. The mapping deliberately covers the
+    physical runtimes that dispatch Todos today and fails closed for engines
+    without a reviewed runner layout instead of falling back to OpenClaw.
+    """
+
+    root = _TODO_RUNNER_WORKSPACE_ROOTS.get(executor_runtime_engine)
+    if root is None:
+        raise ValueError(
+            "todo-runner Skill layout is not implemented for runtime engine: "
+            f"{executor_runtime_engine!r}"
+        )
+    return root + TODO_RUNNER_RELATIVE_SKILL_MD_PATH
 
 
 def format_todo_execution_instruction(
@@ -16,6 +40,7 @@ def format_todo_execution_instruction(
     backend_url: str,
     instruction: str,
     resume: bool,
+    todo_runner_skill_md_path: str,
 ) -> str:
     """Build the dynamic runtime context consumed by ``todo-runner``."""
     backend = backend_url.rstrip("/")
@@ -25,7 +50,7 @@ def format_todo_execution_instruction(
     parts = [
         opening,
         context_label,
-        f"执行前必须先读取并加载 todo-runner Skill：{TODO_RUNNER_SKILL_MD_PATH}",
+        f"执行前必须先读取并加载 todo-runner Skill：{todo_runner_skill_md_path}",
         "每次收到 [todo-execute] 或 [todo-resume] 都必须从上述 infra 路径重新读取 "
         "todo-runner/SKILL.md，并严格按照其中的流程执行；不要为 todo-runner 创建"
         "软链接，也不要假定它已在 workspace/skills 顶层激活。",
@@ -49,4 +74,7 @@ def format_todo_execution_instruction(
     return "\n".join(parts)
 
 
-__all__ = ["TODO_RUNNER_SKILL_MD_PATH", "format_todo_execution_instruction"]
+__all__ = [
+    "format_todo_execution_instruction",
+    "todo_runner_skill_md_path",
+]

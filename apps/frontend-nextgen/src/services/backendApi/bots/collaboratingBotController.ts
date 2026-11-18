@@ -20,6 +20,8 @@ export interface CollaboratingBotDto {
   bot_template_config?: Record<string, unknown> | null;
   engine_properties?: Record<string, unknown> | null;
   space?: { space_id: string; name: string; kind: string } | null;
+  /** Caller 模式标记('caller'):IAM 换签需带 caller_runtime_target(openspec add-iam-caller-runtime-target);缺失视为非 Caller Bot。 */
+  call_type?: string;
   collaboration: { id: number; role: 'admin' | 'member'; joined_at: string };
 }
 

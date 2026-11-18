@@ -5,7 +5,7 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
-from agentclaw.community.core.errors import Conflict, NotFound
+from agentclaw.community.core.errors import Conflict, NotFound, TopicClosedConflict
 from agentclaw.community.core.task.forum.models import (
     ForumPollConfig,
     ForumPollSelection,
@@ -497,7 +497,10 @@ def test_create_reply_rejects_non_open_topic(db, status):
         row = session.query(ForumTopicModel).filter_by(topic_id=topic.topic_id).one()
         row.status = status
 
-    with pytest.raises(Conflict, match=status.lower()):
+    expected_error = (
+        TopicClosedConflict if status == TOPIC_STATUS_CLOSED else Conflict
+    )
+    with pytest.raises(expected_error, match=status.lower()):
         _create_reply(repo, topic.topic_id)
 
 

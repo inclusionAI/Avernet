@@ -338,6 +338,35 @@ config → 400; unknown run → 404. SSE `run_events` advance row
 cursors (`after_agent_id`, `after_round_id`, `after_event`) — each event
 emits once per stream.
 
+#### Persona identity: one derivation, one identity per attempt
+
+A bot-kind agent provisions a platform Bot under
+`agent_swarm_` + `sha1(f"{run_id}:{agent_id}:{attempt}")[:16]`, with no
+separator inserted before the digest (host `bot_id_for` /
+`spawn_idempotency_key`). Creation, adoption, status reads and teardown all
+call that one function, so a persona id is reproducible from the triple.
+
+`attempt` is the agent's **lifetime** ordinal — the `slice_retry_index` of
+its `ac_agent_swarm_agent_attempt` row — not the pool's in-slice counter. The
+counter restarts at 1 on every claim, and a re-derived id would collide on the
+platform's `uk_bot_id_entity_id_env` (deletion there is a soft update, so the
+failed row keeps the tuple). The pool therefore starts each slice after the
+ledger's highest ordinal, and a retry always derives a new id.
+
+A derived id that already exists is never inserted again:
+
+- still `PENDING`/`PROVISIONING` → adopted, no second submission;
+- terminal or soft-deleted → `NonRetryableProvisioningError` whose message is
+  `persona identity collision: bot_id=… already exists (…)`. It is
+  non-retryable on purpose: every retry would hit the same row, so the pool
+  fails the agent immediately instead of spending its attempt budget on
+  identical duplicates. A duplicate that still reaches the platform (a
+  concurrent create) is reclassified to the same error.
+
+Operators: a `persona identity collision` failure means the ordinal and the
+identity disagreed, not that the platform is unhealthy. Grep the reason;
+the agent row and the attempt ledger name the ordinals involved.
+
 ### Bot-create human gate (`AWAITING_AUTHORIZATION`)
 
 Bot lifecycle states (`ac_agent_swarm_agent.bot_state`) are

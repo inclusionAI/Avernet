@@ -91,9 +91,8 @@ export function loadSessionPage(
   const cachedHit = isManagedConversationSection(sectionOf)
     ? managedCache?.origin === origin && managedCache?.scope === scope && !managedCache?.sessions.error
     : Boolean(state && !state.error);
-  if (!more && cachedHit && !(state?.hasMore && state.items.length === 0)) return;
+  if (!more && cachedHit && !(state?.hasMore && state.items.length === 0 && !state.nextCursor)) return;
   if (isManagedConversationSection(sectionOf) && scope === 'archived') return;
-  if (!more && isManagedConversationSection(sectionOf) && origin === 'others' && !view.bot.isAgentCodingBot) return;
   ctx.inFlight.add(requestKey);
   const generation = ctx.generation.current;
   const page = sessionRequestPage(state, scope, more);
@@ -114,15 +113,9 @@ export function loadSessionPage(
   );
   void (
     isManagedConversationSection(sectionOf)
-      ? origin === 'mine'
+      ? origin === 'mine' && !state?.nextCursor
         ? conversationService.listManagedSessions(
-            view.bot,
-            userIdNow,
-            scope,
-            page,
-            BOT_SESSION_PAGE_SIZE,
-            sessionKey,
-            ...requestRangeArgs,
+            view.bot, userIdNow, scope, page, BOT_SESSION_PAGE_SIZE, sessionKey, ...requestRangeArgs,
           )
         : conversationService.listManagedSessions(
             view.bot,
@@ -133,6 +126,7 @@ export function loadSessionPage(
             sessionKey,
             requestRange,
             origin,
+            ...(more ? [state?.nextCursor] : []),
           )
       : conversationService.listFriendBotSessions(
           view.bot,
@@ -168,7 +162,7 @@ export function loadSessionPage(
       return;
     }
     const hydrateFavorites = () => {
-      if (scope !== 'all') return;
+      if (scope !== 'all' || origin === 'others') return;
       void hydrateConversationFavorites(view, userIdNow, result.data, origin, () => {
         const current = useConversationStore.getState();
         return ctx.generation.current === generation && ctx.userId.current === userIdNow &&
@@ -179,7 +173,7 @@ export function loadSessionPage(
       }, requestRange);
     };
     if (!more) {
-      writeSessionState(botId, sectionOf, scope, firstPageOf(result.data.items, result.data.total), origin);
+      writeSessionState(botId, sectionOf, scope, firstPageOf(result.data.items, result.data.total, result.data), origin);
       hydrateFavorites();
       return;
     }

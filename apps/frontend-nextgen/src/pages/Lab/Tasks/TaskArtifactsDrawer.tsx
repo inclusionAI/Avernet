@@ -18,8 +18,8 @@ export function TaskArtifactsDrawer({ taskId, ownerUserId, onClose }: TaskArtifa
       <DrawerContent
         ref={setDrawerElement}
         side="right"
-        size="lg"
-        className="overflow-hidden bg-background"
+        size="full"
+        className="w-[min(1126px,100vw)] overflow-hidden rounded-sm bg-background"
         bodyClassName="flex flex-col p-0"
         closeLabel="关闭任务产物抽屉"
       >
@@ -32,15 +32,17 @@ export function TaskArtifactsDrawer({ taskId, ownerUserId, onClose }: TaskArtifa
 
         <div className="min-h-0 flex-1 overflow-y-auto">
           {taskId ? (
-            <TaskPanelAssetBoundary>{asset => (
-              <asset.TaskArtifactsView
-                apiBaseUrl={TASK_API_BASE}
-                taskApiBase={TASK_READ_API_BASE}
-                taskId={taskId}
-                ownerUserId={ownerUserId}
-                previewPortalContainer={drawerElement}
-              />
-            )}</TaskPanelAssetBoundary>
+            <TaskPanelAssetBoundary>
+              {(asset) => (
+                <asset.TaskArtifactsView
+                  apiBaseUrl={TASK_API_BASE}
+                  taskApiBase={TASK_READ_API_BASE}
+                  taskId={taskId}
+                  ownerUserId={ownerUserId}
+                  previewPortalContainer={drawerElement}
+                />
+              )}
+            </TaskPanelAssetBoundary>
           ) : null}
         </div>
       </DrawerContent>

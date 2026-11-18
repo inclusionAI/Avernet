@@ -100,6 +100,11 @@ export function useConversationSessionResolution(options: {
   const liveReadonly = useMemo(() => {
     const botId = store.selectedBotId;
     if (!botId || origin !== 'others' || selectedIsCodingBot) return null;
+    const cache = store.sessionsByBotId[botId];
+    const flat = cache?.origin === 'others'
+      ? cache.sessions.items.find((item) => item.sessionId === store.selectedSessionId)
+      : undefined;
+    if (flat) return { friend: null, session: flat };
     const group = store.sessionsByBotId[botId]?.friendGroups[store.selectedFriendUserId ?? ''];
     const session = group?.sessions.items.find((item) => item.sessionId === store.selectedSessionId) ?? null;
     return session && group ? { friend: group.friend, session } : null;

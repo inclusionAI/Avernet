@@ -4,11 +4,14 @@
 // 并发保护:Bot/好友/会话三元组任一变化即换代,陈旧响应写回被丢弃;
 // loadMore 由 in-flight guard 防重复,page 由 Service 回传结果推进。
 import type { ChatBotView } from '@/services/workspace/botSessionService';
+import type { ConversationSessionRequestRange } from '@/domain/conversation/types';
 import { managedBotConversationService } from '@/services/workspace/managedBotConversationService';
 import type { ChatMessage } from '@tc-chat/core';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 export interface UseConversationHistoryOptions {
+  userId?: string | null;
+  range?: ConversationSessionRequestRange;
   bot: ChatBotView | null;
   friendUserId: string | null;
   sessionId: string | null;
@@ -26,6 +29,8 @@ export interface UseConversationHistoryResult {
 }
 
 export function useConversationHistory({
+  userId,
+  range,
   bot,
   friendUserId,
   sessionId,
@@ -58,11 +63,12 @@ export function useConversationHistory({
     setIsLoadingMore(false);
     setLoadMoreError(null);
     const currentBot = botRef.current;
-    if (!currentBot || !friendUserId || !sessionId) return;
+    if (!currentBot || (!friendUserId && !userId) || !sessionId) return;
 
     setLoading(true);
-    void managedBotConversationService
-      .listOtherMessages(currentBot, friendUserId, sessionId, 1)
+    void (friendUserId
+      ? managedBotConversationService.listOtherMessages(currentBot, friendUserId, sessionId, 1)
+      : managedBotConversationService.listOperatorMessages(currentBot, userId!, sessionId, 1, range))
       .then((result) => {
         if (generation !== generationRef.current) return;
         if (!result.ok) {
@@ -76,13 +82,13 @@ export function useConversationHistory({
       .finally(() => {
         if (generation === generationRef.current) setLoading(false);
       });
-  }, [bot?.botId, friendUserId, retryNonce, sessionId]);
+  }, [bot?.botId, friendUserId, retryNonce, sessionId, userId, range?.deviceUuid, range?.stage]);
 
   const retry = useCallback(() => setRetryNonce((current) => current + 1), []);
 
   const loadMore = useCallback(async () => {
     const currentBot = botRef.current;
-    if (!currentBot || !friendUserId || !sessionId || !hasMore || loadMoreInFlightRef.current) {
+    if (!currentBot || (!friendUserId && !userId) || !sessionId || !hasMore || loadMoreInFlightRef.current) {
       return;
     }
     loadMoreInFlightRef.current = true;
@@ -91,12 +97,9 @@ export function useConversationHistory({
     setIsLoadingMore(true);
     setLoadMoreError(null);
     try {
-      const result = await managedBotConversationService.listOtherMessages(
-        currentBot,
-        friendUserId,
-        sessionId,
-        nextPage,
-      );
+      const result = friendUserId
+        ? await managedBotConversationService.listOtherMessages(currentBot, friendUserId, sessionId, nextPage)
+        : await managedBotConversationService.listOperatorMessages(currentBot, userId!, sessionId, nextPage, range);
       if (generation !== generationRef.current) return;
       if (!result.ok) {
         setLoadMoreError(result.error.friendlyMessage);
@@ -107,10 +110,12 @@ export function useConversationHistory({
       // 更早的一页在旧→新升序的整体序列之前,前置拼接。
       setMessages((current) => [...result.data.messages, ...current]);
     } finally {
-      loadMoreInFlightRef.current = false;
-      if (generation === generationRef.current) setIsLoadingMore(false);
+      if (generation === generationRef.current) {
+        loadMoreInFlightRef.current = false;
+        setIsLoadingMore(false);
+      }
     }
-  }, [friendUserId, hasMore, sessionId]);
+  }, [friendUserId, hasMore, sessionId, userId, range?.deviceUuid, range?.stage]);
 
   return { messages, loading, error, hasMore, isLoadingMore, loadMoreError, retry, loadMore };
 }

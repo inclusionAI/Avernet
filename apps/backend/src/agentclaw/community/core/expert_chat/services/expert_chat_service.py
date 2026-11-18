@@ -15,6 +15,7 @@ ExpertChat Service — 用户与专家Bot对话业务逻辑层
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
 from typing import Dict, Any, List, Optional, Protocol, runtime_checkable
 from urllib.parse import quote
@@ -346,6 +347,19 @@ class ExpertChatService(ExpertChatBotLookupMixin, ExpertChatOwnedSessionMixin, E
             f"[ExpertChatService] Removed chat bot: user={user_id}, bot={bot_id}, owner={owner_id}"
         )
         return result
+
+    async def get_caller_instance_status(
+        self, *, user_id: str, bot_id: str, owner_id: str,
+    ) -> Dict[str, bool]:
+        """Authorize the existing chat relation before observing this Caller."""
+        bot = await asyncio.to_thread(self._find_chat_bot, bot_id, owner_id)
+        if not bot:
+            raise BotNotFoundError(f"Bot not found: {bot_id}")
+        # COSEC: the authenticated subject must retain the existing chat access.
+        await asyncio.to_thread(self._check_chat_access, bot, user_id)
+        return await self._instance_service.get_caller_instance_status(
+            user_id=user_id, bot_id=bot_id, owner_id=str(bot["owner_id"]),
+        )
 
     async def get_chat_session(
         self, user_id: str, bot_id: str, owner_id: str, iam_token: Optional[str] = None

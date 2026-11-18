@@ -71,7 +71,7 @@ def test_cards_are_batched_and_expand_each_service_bot(monkeypatch) -> None:
         ]
     )
 
-    repo.list_by_source_bots.assert_called_once_with((10, 11), "dev")
+    repo.list_by_source_bots.assert_called_once_with((10, 11), "dev", resolve_artifacts=False)
     assert [card.publication_id for card in result["service-1"]] == [4, 3]
     assert result["service-1"][0].display_state is DisplayState.SERVICE_DRAFT
     assert result["service-1"][0].status == "draft"

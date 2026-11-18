@@ -216,6 +216,14 @@ async fn inline_registration_defaults_name_and_summary_and_preserves_full_card()
     assert_eq!(fetcher.calls.load(Ordering::SeqCst),0);
     let store=DbA2aBotStore::sqlite(chain.db.clone(),bcs_config::resolve_env_str());
     let saved=store.get(&created.bot_uuid).await.unwrap().unwrap();assert_eq!(saved.agent_card,raw);assert!(saved.agent_card_url.is_none());
+    let rows=chain.db.query(DbStatement::with_params("SELECT name,bot_info FROM bcs_bots WHERE bot_uuid=?",
+        vec![created.bot_uuid.clone().into()])).await.unwrap();
+    let info=rows[0].get_string("bot_info").unwrap().unwrap();
+    let info:serde_json::Value=serde_json::from_str(&info).unwrap();
+    assert_eq!(rows[0].get_string("name").unwrap().as_deref(),Some("Remote"));
+    assert_eq!(info["summary"],"Card description");
+    assert_eq!(info["domains"],json!([]));
+    assert_eq!(info["skills"],json!([{"name":"lookup","description":"完整技能描述"}]));
 }
 
 #[tokio::test]

@@ -68,6 +68,10 @@ materialiser. Reads use the SkillCenter Apply snapshot without reconciliation.
 The snapshot's asset catalog stays keyed by actual asset ID. Historical Center
 membership aliases are resolved within each Set by UUID; Default exclusions
 still use that Set's raw membership key. Aliases never shadow Direct assets.
+Default preflight and materialization use available members: missing historical
+assets, offline assets and Center references without a published supply are
+skipped, while dependency and service failures remain errors. The complete raw
+membership remains the exclusion target and is never deleted by Apply.
 An unchanged Direct Skill installation still reaches the claim flow so Device
 delivery can retry runtime projection. The report keeps `unchanged` and exposes
 any pending/degraded projection; Platform delegates retain their no-projection

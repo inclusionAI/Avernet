@@ -69,5 +69,6 @@ pub struct GroupHumanNotifyPolicy {
 }
 
 pub mod a2a_bot;
+pub mod a2a_card_projection;
 
 pub mod run_budget;

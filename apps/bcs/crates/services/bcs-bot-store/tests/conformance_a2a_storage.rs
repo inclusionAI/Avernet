@@ -36,6 +36,57 @@ async fn migration_preserves_legacy_rows_and_card_round_trip_is_lossless() {
 }
 
 #[tokio::test]
+async fn card_capabilities_are_synchronized_with_bot_info() {
+    let db=database().await;
+    db.execute(DbStatement::with_params("UPDATE bcs_bots SET bot_info=? WHERE env='test' AND bot_uuid='bot'",
+        vec![json!({"summary":"Legacy summary","domains":["legacy"],"skills":[{"name":"legacy","description":"Legacy description"}],
+            "scopes":["legacy:read"],"agent_code":"legacy-agent"}).to_string().into()])).await.unwrap();
+    let store=DbA2aBotStore::sqlite(db.clone(),"test".into());
+    let first=record();
+    assert!(store.compare_and_set(&first,0).await.unwrap());
+    let info=stored_bot_info(&db,"bot").await;
+    assert_eq!(info["name"],"Agent");
+    assert_eq!(info["summary"],"Legacy summary");
+    assert_eq!(info["domains"],json!([]));
+    assert_eq!(info["skills"],json!([{"name":"lookup","description":"完整说明"}]));
+    assert_eq!(info["scopes"],json!(["legacy:read"]));
+    assert_eq!(info["agent_code"],"legacy-agent");
+
+    let mut second=record();second.revision=2;
+    second.agent_card["description"]=json!("New card description");
+    second.agent_card["domains"]=json!(["orders"]);
+    second.agent_card["scopes"]=json!(["orders:read"]);
+    second.agent_card["skills"]=json!([]);
+    assert!(store.compare_and_set(&second,1).await.unwrap());
+    let info=stored_bot_info(&db,"bot").await;
+    assert_eq!(info["summary"],"New card description");
+    assert_eq!(info["domains"],json!(["orders"]));
+    assert_eq!(info["skills"],json!([]));
+    assert_eq!(info["scopes"],json!(["orders:read"]));
+    assert_eq!(info["agent_code"],"legacy-agent");
+
+    db.execute(DbStatement::with_params("UPDATE bcs_bots SET bot_info=JSON_SET(bot_info,'$.summary','Local drift','$.domains',JSON_ARRAY('legacy')) WHERE env='test' AND bot_uuid='bot'",vec![])).await.unwrap();
+    store.synchronize_card_projection(&second).await.unwrap();
+    let info=stored_bot_info(&db,"bot").await;
+    assert_eq!(info["summary"],"New card description");
+    assert_eq!(info["domains"],json!(["orders"]));
+    assert_eq!(store.get("bot").await.unwrap().unwrap().revision,2);
+
+    let mut third=second;third.revision=3;
+    third.agent_card.as_object_mut().unwrap().remove("description");
+    third.agent_card.as_object_mut().unwrap().remove("domains");
+    third.agent_card.as_object_mut().unwrap().remove("scopes");
+    third.agent_card["skills"]=json!([{"id":"query","name":"Query","description":"Queries","tags":["billing"]}]);
+    assert!(store.compare_and_set(&third,2).await.unwrap());
+    let info=stored_bot_info(&db,"bot").await;
+    assert_eq!(info["summary"],"New card description");
+    assert_eq!(info["domains"],json!(["billing"]));
+    assert_eq!(info["skills"],json!([{"name":"query","description":"Queries"}]));
+    assert_eq!(info["scopes"],json!(["orders:read"]));
+    assert_eq!(info["agent_code"],"legacy-agent");
+}
+
+#[tokio::test]
 async fn stale_refresh_cannot_overwrite_card_or_management_metadata() {
     let db = database().await;
     let store = DbA2aBotStore::sqlite(db, "test".into());
@@ -49,6 +100,36 @@ async fn stale_refresh_cannot_overwrite_card_or_management_metadata() {
     assert_eq!(store.get("bot").await.unwrap(), Some(current));
 }
 
+#[tokio::test]
+async fn unchanged_card_synchronize_is_not_reported_as_conflict() {
+    let db = database().await;
+    let store = DbA2aBotStore::sqlite(db.clone(), "test".into());
+    let mut current = record();
+    assert!(store.compare_and_set(&current, 0).await.unwrap());
+    let mut committed = current.clone();
+    committed.revision = 2;
+    committed.agent_card["description"] = json!("Same-second Card refresh");
+    assert!(store.compare_and_set(&committed, 1).await.unwrap());
+    // A refresh that lands on the same committed values (MySQL would report
+    // zero affected rows here) is a success, not a revision conflict.
+    store.synchronize_card_projection(&committed).await.unwrap();
+    store.synchronize_card_projection(&committed).await.unwrap();
+    assert_eq!(store.get("bot").await.unwrap().unwrap().revision, 2);
+    // A synchronize fenced against an obsolete revision still conflicts;
+    // the SELECT fence check must not soften a genuine revision mismatch.
+    let mut advanced = committed.clone();
+    advanced.revision = 3;
+    advanced.agent_card["name"] = json!("Concurrently renamed");
+    assert!(store.compare_and_set(&advanced, 2).await.unwrap());
+    let conflict = store.synchronize_card_projection(&committed).await.unwrap_err();
+    assert!(matches!(conflict, bcs_service_api::ServiceError::Conflict(_)),"{conflict:?}");
+}
+
+
+async fn stored_bot_info(db:&Arc<LocalSqliteDbPlugin>,bot:&str)->serde_json::Value {
+    let rows=db.query(DbStatement::with_params("SELECT bot_info FROM bcs_bots WHERE env='test' AND bot_uuid=?",vec![bot.into()])).await.unwrap();
+    serde_json::from_str(&rows[0].get_string("bot_info").unwrap().unwrap()).unwrap()
+}
 #[tokio::test]
 async fn public_card_batch_is_lossless_fresh_bounded_and_scoped() {
     let db=database().await;

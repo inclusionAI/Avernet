@@ -272,6 +272,7 @@ _DEFAULT_CLI_ITEMS_BY_ENGINE: Dict[str, List[dict]] = {
         {"cli_code": "serverless",         "cli_name": "serverless",         "cli_desc": "Serverless 命令行工具"},
         {"cli_code": "derisk-cli",         "cli_name": "derisk-cli",         "cli_desc": "Derisk 风控命令行工具"},
         {"cli_code": "yuque-cli",         "cli_name": "yuque-cli",         "cli_desc": "yuque cli"},
+        {"cli_code": "aixdev-cli",        "cli_name": "aixdev-cli",        "cli_desc": "Aix 研发能力管理命令行工具"},
     ],
 }
 

@@ -91,6 +91,10 @@ from agentclaw.community.plugins.community.agentswarm.host_chat import (
     chat_bridge_executor, set_chat_bridge_max_workers,
     shutdown_chat_bridge,
 )
+from agentclaw.community.plugins.community.agentswarm.chat.base import (
+    ChatTransport,
+    SessionMode,
+)
 from agentclaw.community.core.apply_engine.outcomes import ApplyStatus
 from agentclaw.community.core.bot_config_manifest.creation import (
     CREATE_ON_CONTAINER_TRIGGER, CREATE_PRE_CONTAINER_TRIGGER,
@@ -132,6 +136,12 @@ _CREATION_TRIGGERS = frozenset({CREATE_PRE_CONTAINER_TRIGGER, CREATE_ON_CONTAINE
 _BOT_UP = frozenset({"ACTIVE"})
 _BOT_DEAD = frozenset({"FAILED", "DELETED", "INACTIVE"})
 _HASHED_IDEMPOTENCY_ID_DIGITS = 16
+#: Statuses where a persona exists but has not finished provisioning, so a
+#: retry of the same attempt can continue it rather than create it again.
+_PERSONA_ADOPTABLE_STATUSES = frozenset({"PENDING", "PROVISIONING"})
+#: The platform's unique key on the Bot table. A duplicate here means the
+#: persona id was reused, which is an identity fault, not a transient error.
+_PERSONA_UNIQUE_KEY = "uk_bot_id_entity_id_env"
 #: The create job's ``Fail`` reason when the authorization ended terminally
 #: without the service issuing the license (create_job: "Declined, expired,
 #: or anything else terminal the service reports"). The reason carries the
@@ -199,13 +209,79 @@ def _idem_digest(idempotency_key: str, length: int) -> str:
     return hashlib.sha1(idempotency_key.encode("utf-8")).hexdigest()[:length]
 
 
-def bot_id_for(run_id: str, agent_id: str) -> str:
-    """Deterministic transient-bot identity for a (run, agent) pair.
+def spawn_idempotency_key(run_id: str, agent_id: str, attempt: int) -> str:
+    """The one per-attempt spawn key identities are derived from.
 
-    The platform's create derives the same value from the spawn's
-    idempotency key, so a cleanup that only knows the run and agent ids
-    can still address the bot that was created for it."""
-    return f"agent_swarm_{_idem_digest(f'{run_id}:{agent_id}', _HASHED_IDEMPOTENCY_ID_DIGITS)}"
+    ``attempt`` is the agent's lifetime ordinal: a retry must derive a different
+    key, a replay of the same attempt the same one. Creation and the subagent
+    both call this, so their spellings cannot drift.
+    """
+    return f"{run_id}:{agent_id}:{attempt}"
+
+
+def bot_id_for(run_id: str, agent_id: str, attempt: int | None = None) -> str:
+    """``agent_swarm_`` + ``sha1(key)[:16]``, no separator before the digest.
+
+    ``attempt=None`` is the legacy two-part form, addressed only by teardown
+    for pre-ledger rows.
+    """
+    key = (
+        spawn_idempotency_key(run_id, agent_id, attempt)
+        if attempt is not None
+        else f"{run_id}:{agent_id}"
+    )
+    return f"agent_swarm_{_idem_digest(key, _HASHED_IDEMPOTENCY_ID_DIGITS)}"
+
+
+def _persona_identity_fault(bot_id: str, detail: str) -> Exception:
+    """The swarm's non-retryable marker for a persona id that already exists.
+
+    A re-derived id is deterministic: every retry would hit the same row, so
+    the pool must fail this agent immediately instead of spending its attempt
+    budget on identical duplicates.
+    """
+    from agentclaw.community.core.agentswarm.domain.models import (
+        NonRetryableProvisioningError,
+    )
+
+    return NonRetryableProvisioningError(
+        f"persona identity collision: bot_id={bot_id} already exists "
+        f"({detail}); a retry must derive a new attempt ordinal"
+    )
+
+
+def _collision_from_platform(exc: Exception, bot_id: str) -> Exception | None:
+    """Translate a duplicate-key failure on the Bot table into the fault.
+
+    ``None`` for every other error, so the caller keeps its own handling.
+    """
+    if _PERSONA_UNIQUE_KEY not in str(exc):
+        return None
+    return _persona_identity_fault(bot_id, f"platform duplicate: {exc}")
+
+
+def _split_spawn_key(idempotency_key: str) -> tuple[str, str, int]:
+    """Invert :func:`spawn_idempotency_key`, refusing a key it did not mint."""
+    run_id, agent_id, attempt_text = str(idempotency_key).rsplit(":", 2) \
+        if str(idempotency_key).count(":") >= 2 else ("", "", "")
+    if not run_id or not agent_id:
+        raise RuntimeError(
+            "agentswarm persona identity requires a 'run:agent:attempt' "
+            f"idempotency key, got {idempotency_key!r}"
+        )
+    try:
+        attempt = int(attempt_text)
+    except ValueError:
+        raise RuntimeError(
+            "agentswarm persona identity requires a numeric attempt ordinal "
+            f"in the idempotency key, got {idempotency_key!r}"
+        ) from None
+    if attempt < 1:
+        raise RuntimeError(
+            "agentswarm persona identity requires attempt >= 1, "
+            f"got {idempotency_key!r}"
+        )
+    return run_id, agent_id, attempt
 
 
 class AvernetBotPlatform(ChatLegMixin, BotPlatform):
@@ -237,6 +313,7 @@ class AvernetBotPlatform(ChatLegMixin, BotPlatform):
         baas_service: BaasService,
         max_platform_workers: int = _DEFAULT_MAX_PLATFORM_WORKERS,
         chat_timeout_seconds: float = _CHAT_TIMEOUT_SECONDS,
+        chat_transport: ChatTransport | None = None,
     ) -> None:
         self._manifest_seam = manifest_seam
         self._bot_service = bot_service
@@ -247,7 +324,43 @@ class AvernetBotPlatform(ChatLegMixin, BotPlatform):
         self._space_context = space_context
         self._baas_service = baas_service
         self._chat_timeout_seconds = chat_timeout_seconds
+        # ``None`` means this platform *is* the engine transport: ``chat``
+        # then runs the mixin's own leg, which is the exact pre-seam code
+        # path. A configured transport delegates instead. Nothing is
+        # allocated for the default case.
+        self._chat_transport = chat_transport
         set_chat_bridge_max_workers(max_platform_workers)
+
+    # ── chat ──────────────────────────────────────────────────────────────
+
+    def chat(self, bot_id: BotId, message: str, owner_id: str = "",
+             session_key: str | None = None,
+             cancel_event: threading.Event | None = None,
+             timeout_seconds: float | None = None,
+             tenant: str = "") -> str:
+        """One chat leg, on the configured transport.
+
+        With no transport injected this is the engine leg unchanged. With one
+        injected the leg is delegated, and the session semantics are always
+        ``FRESH``: the subagent never addresses a conversation by name, which is
+        what keeps a retried or respawned turn from inheriting an orphaned one.
+        """
+        if self._chat_transport is None:
+            return ChatLegMixin.chat(
+                self, bot_id, message, owner_id,
+                session_key=session_key,
+                cancel_event=cancel_event,
+                timeout_seconds=timeout_seconds,
+                tenant=tenant,
+            )
+        return self._chat_transport.chat(
+            bot_id, message, owner_id,
+            session_mode=SessionMode.FRESH,
+            session_key=session_key,
+            cancel_event=cancel_event,
+            timeout_seconds=timeout_seconds,
+            tenant=tenant,
+        )
 
 
     # ── create ────────────────────────────────────────────────────────────
@@ -260,7 +373,7 @@ class AvernetBotPlatform(ChatLegMixin, BotPlatform):
             submit_bot_creation_with_manifest,
         )
         from agentclaw.community.core.bot_management.services.bot_service import (
-            BotNameExistsError,
+            BotNameExistsError, BotServiceError,
         )
         from agentclaw.community.core.bot_management.bot_quota import (
             BotQuotaExceededError,
@@ -272,11 +385,10 @@ class AvernetBotPlatform(ChatLegMixin, BotPlatform):
                 "provisioning requires the run's authenticated owner "
                 "(per-call owner_id); no ambient identity exists"
             )
-        # Same digest as bot_id_for(): the subagent always passes the
-        # idempotency key f"{run_id}:{agent_id}", so a cleanup that only
-        # knows the (run, agent) pair addresses the identical bot id.
-        bot_id = (
-            f"agent_swarm_{_idem_digest(idempotency_key, _HASHED_IDEMPOTENCY_ID_DIGITS)}")
+        # Canonical derivation (see ``bot_id_for``) — a retry derives a new id
+        # because the previous attempt's row still holds uk_bot_id_entity_id_env.
+        run_id, agent_id, attempt = _split_spawn_key(idempotency_key)
+        bot_id = bot_id_for(run_id, agent_id, attempt)
         # One persona per (run, spec): the idempotency key derives the bot id,
         # so retries rebind the same creation. The platform caps bot_name at
         # 32 chars and a spec-derived name can exceed it: bot_name is the
@@ -304,6 +416,26 @@ class AvernetBotPlatform(ChatLegMixin, BotPlatform):
         # D16 idempotent resume: prior slice's job already tracking this identity.
         if self._manifest_seam.find_job(entity_id=owner, bot_id=bot_id):
             return BotId(bot_id)
+        # The derived id may already name a Bot. The platform's unique key is
+        # (bot_id, entity_id, env) and its deletion is a soft update, so an
+        # insert over a leftover row raises a raw 1062. Decide here instead:
+        # adopt a persona that is still provisioning, refuse one that is
+        # finished. Narrowing only — a race can still reach the insert, and
+        # ``_collision_from_platform`` classifies that.
+        # Adopt only a row this check can actually read: a mocked/foreign
+        # repository object is not evidence that a persona exists.
+        existing = self._bot_repo.get_by_id_and_entity(bot_id, owner)
+        if isinstance(existing, dict):
+            state = str(existing.get("status") or "").upper()
+            if state in _PERSONA_ADOPTABLE_STATUSES:
+                logger.info(
+                    "[agentswarm][host-platform] adopting persona %s already "
+                    "provisioning (status=%s)", bot_id, state,
+                )
+                return BotId(bot_id)
+            raise _persona_identity_fault(bot_id, state or "unknown status")
+        if self._bot_repo.is_soft_deleted(bot_id, owner) is True:
+            raise _persona_identity_fault(bot_id, "soft-deleted")
         try:
             submitted = submit_bot_creation_with_manifest(
                 user_id=owner,
@@ -363,6 +495,11 @@ class AvernetBotPlatform(ChatLegMixin, BotPlatform):
             # submit, before anything is persisted) — quota refusals
             # above keep their classification.
             raise NonRetryableProvisioningError(str(exc)) from exc
+        except BotServiceError as exc:
+            fault = _collision_from_platform(exc, bot_id)
+            if fault is None:
+                raise
+            raise fault from exc
         except PassportError:
             # Cross-slice resume: passport already ISSUED — start the job directly.
             auth = self._passport.query_auth_status(bot_id=bot_id, owner_workno=owner)
