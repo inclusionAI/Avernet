@@ -10,7 +10,6 @@ from agentclaw.community.api.expert_chat_service import ExpertChatServiceProtoco
 from agentclaw.community.api.human_bot_friendship_service import HumanBotFriendshipServiceProtocol
 from agentclaw.community.core.engine_runtime.errors import EngineDeviceNotReadyError, EngineResourceNotFoundError
 from agentclaw.community.core.expert_chat.errors import BotNotFoundError, ConnectionError
-from agentclaw.community.core.runtime_binding.models import RuntimeBindingTarget
 
 
 async def authorize_file_list(
@@ -18,7 +17,6 @@ async def authorize_file_list(
     owner_id: str, stage: RuntimeStage, friend_user_id: str | None,
     relay: EngineRuntimeRelayProtocol, friendships: HumanBotFriendshipServiceProtocol,
     expert: ExpertChatServiceProtocol,
-    runtime_target: RuntimeBindingTarget = RuntimeBindingTarget.AUTO,
 ) -> str:
     if friend_user_id is None:
         await resolve_operable_bot(
@@ -26,9 +24,6 @@ async def authorize_file_list(
             stage=stage.value, surface="sessions",
         )
         return stage.value
-    # Friend authorization grants access only to the friend's conversation runtime.
-    if runtime_target is RuntimeBindingTarget.CALLER_SERVICE:
-        raise EngineResourceNotFoundError("service runtime selection is unavailable for friend chat")
     resolved_stage = await authorize_friend_chat(
         request=request, bot_id=bot_id, caller_id=user_id, owner_id=owner_id,
         friend_user_id=friend_user_id, friendships=friendships, expert=expert, stage=stage.value,
