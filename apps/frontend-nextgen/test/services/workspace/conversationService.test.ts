@@ -44,10 +44,10 @@ const sessionItem = {
   gmt_modified: '2026-09-16T10:00:00Z',
 };
 
-const sessionsEnvelope = (items: unknown[], total = items.length) => ({
+const sessionsEnvelope = (items: unknown[], total = items.length, source: 'mine' | 'others' = 'mine') => ({
   code: 20000,
   message: 'OK',
-  data: { items, total },
+  data: { items, total, source, has_more: false, next_cursor: null, scan_limited: false },
   request_id: 'sessions',
 });
 
@@ -242,7 +242,7 @@ describe('conversationService.listManagedSessions', () => {
 
     expect(mocked.listBotSessions).toHaveBeenCalledWith(
       'bot-a',
-      expect.objectContaining({ user_id: '900003', owner_id: '2088', page: 2, page_size: 20 }),
+      expect.objectContaining({ user_id: '900003', owner_id: '2088', page: 1, page_size: 20, source: 'mine' }),
     );
     expect(mocked.listFavoriteSessions).not.toHaveBeenCalled();
     expect(result.ok).toBe(true);
@@ -281,29 +281,18 @@ describe('conversationService.listManagedSessions', () => {
       title: `历史会话_${sessionId}`,
     });
 
-    it('continues scanning raw pages when the first page only contains sessions from another user', async () => {
-      const otherSessions = Array.from({ length: 100 }, (_, index) =>
-        sessionDto(`user:200:session:other-${index}:agent:bot-a`),
-      );
+    it('delegates mine filtering to backend without rescanning raw pages in the browser', async () => {
       const mineSession = sessionDto('user:100:session:mine:agent:bot-a');
-      mocked.listBotSessions.mockImplementation((_botId: string, params: Parameters<typeof ctrl.listBotSessions>[1]) =>
-        Promise.resolve(
-          params.page === 1 ? sessionsEnvelope(otherSessions, 101) : sessionsEnvelope([mineSession], 101),
-        ),
-      );
+      mocked.listBotSessions.mockResolvedValue(sessionsEnvelope([mineSession]));
 
       const result = await conversationService.listManagedSessions(codingBot, '100', 'all', 1, 10);
 
       expect(mocked.listBotSessions).toHaveBeenNthCalledWith(
         1,
         'bot-a',
-        expect.objectContaining({ page: 1, page_size: 100 }),
+        expect.objectContaining({ page: 1, page_size: 10, source: 'mine', user_id: '100' }),
       );
-      expect(mocked.listBotSessions).toHaveBeenNthCalledWith(
-        2,
-        'bot-a',
-        expect.objectContaining({ page: 2, page_size: 100 }),
-      );
+      expect(mocked.listBotSessions).toHaveBeenCalledTimes(1);
       expect(result).toMatchObject({
         ok: true,
         data: { items: [{ sessionId: 'user:100:session:mine:agent:bot-a' }], total: 1 },
@@ -313,9 +302,8 @@ describe('conversationService.listManagedSessions', () => {
     it('returns only sessions created by other users for origin=others', async () => {
       mocked.listBotSessions.mockResolvedValue(
         sessionsEnvelope([
-          sessionDto('user:100:session:mine:agent:bot-a'),
           sessionDto('user:200:session:other:agent:bot-a'),
-        ]),
+        ], 1, 'others'),
       );
 
       const result = await conversationService.listManagedSessions(
@@ -450,6 +438,6 @@ it('normalizes a stale TEClaw favorite scope to ordinary sessions', async () => 
     10,
   );
   expect(result.ok).toBe(true);
-  expect(mocked.listBotSessions).toHaveBeenCalledWith('bot-a', expect.objectContaining({ page: 2, page_size: 10 }));
+  expect(mocked.listBotSessions).toHaveBeenCalledWith('bot-a', expect.objectContaining({ page: 1, page_size: 10, source: 'mine' }));
   expect(mocked.listFavoriteSessions).not.toHaveBeenCalled();
 });

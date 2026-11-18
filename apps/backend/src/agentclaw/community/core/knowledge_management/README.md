@@ -142,3 +142,38 @@ cleanup, recovery and terminal results. No document fan-out, mutation retries,
 local task records or scheduler are added to this adapter. Neither operation
 deletes the original remote book or its documents. Native authorization and
 failures are preserved; accepted deletion is never projected as completed.
+
+
+## Knowledge-base deletion forwarding
+
+`DELETE /api/knowledge/spaces/{space_id}/knowledge-bases/{kb_id}` forwards one
+provider deletion request. The default requests a configurable cancellable grace
+period; `?immediate=true` skips that period. A successful response is durable
+acceptance, not confirmation that physical resources have been reclaimed.
+`POST .../{kb_id}/cancel-delete` asks the provider to cancel before its deadline.
+Both reuse authentication, local space membership and native provider Owner/KB
+checks. No active catalog/registry read is required before cancellation: pending
+KBs can be hidden from those read surfaces. The adapter preserves native statuses,
+opaque KB identities, deadline, warnings and cleanup state. It adds no scheduler,
+worker, table, automatic retry, restore policy or frontend UI. Protected default
+KBs and expired/deleted cancellation remain provider-denied; the adapter does not
+weaken those rules.
+
+
+### Management-list lifecycle metadata
+
+`GET /api/knowledge/spaces/{space_id}/knowledge-bases` forwards the provider's
+management page, including `active` and `pending_delete` knowledge bases within
+the existing space membership and native ACL visibility. Both `items` and
+`knowledge_bases` expose the same optional provider fields:
+
+- `status`: `active` or `pending_delete`, independent of `kgbase_status`.
+- `delete_at_ms`: the persisted epoch-millisecond deadline, or null when active.
+- `can_cancel_delete`: the current actor's provider-owned cancellation capability.
+
+Explicit false/null values and the cursor are preserved. An older provider that
+omits these fields remains compatible; the adapter does not fabricate defaults,
+filter lifecycle states, read a clock or infer cancellation from `can_manage`.
+The provider owns Owner/deadline checks and excludes permanently deleted KBs.
+Seeing pending management metadata does not grant content/retrieval/Bot access.
+No extra provider request, local lifecycle state or database change is added.

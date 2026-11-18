@@ -48,6 +48,7 @@ from agentclaw.community.core.service_bot.services.deploy.provider_resolver impo
     TECLAW_DEVICE_PROVIDER,
 )
 from agentclaw.community.core.service_bot.types import PublishStage
+from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.utils.avernet_tenant import bind_current_avernet_tenant
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.log import get_logger
@@ -77,6 +78,7 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
         task_queue_service: TaskQueueService,
         bot_process_registry: BotProcessRegistry,
         common_config_service: CommonConfigService,
+        passport_plugin: PassportPlugin,
     ):
         self._repo = bot_publish_repo
         self._bot_repo = bot_repo
@@ -91,6 +93,7 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
         self._task_queue_service = task_queue_service
         self._bot_process_registry = bot_process_registry
         self._common_config_service = common_config_service
+        self._passport_plugin = passport_plugin
         self._image_policy_resolver = PublishImagePolicyResolver(
             publish_repository=bot_publish_repo,
             common_config_service=common_config_service,
@@ -1467,6 +1470,30 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
             return current_ext
         return apply_default_image_to_ext(current_ext)
 
+    def _sync_passport_bot_type(self, bot: Dict[str, Any], bot_type: str) -> None:
+        """Synchronize one real type transition before local side effects begin."""
+        try:
+            self._passport_plugin.update_passport(
+                bot_id=str(bot["bot_id"]),
+                user_id=str(bot["owner_id"]),
+                bot_type=bot_type,
+            )
+        except Exception as exc:
+            raise BotPublishServiceError(
+                f"Failed to synchronize Passport bot_type: bot_id={bot['bot_id']}"
+            ) from exc
+
+    def _restore_passport_bot_type(self, bot: Dict[str, Any], bot_type: str) -> None:
+        """Best-effort compensation when a later local transition step fails."""
+        try:
+            self._sync_passport_bot_type(bot, bot_type)
+        except Exception:
+            logger.exception(
+                "[bot_type_sync] Failed to restore Passport metadata: bot_id=%s, bot_type=%s",
+                bot.get("bot_id"),
+                bot_type,
+            )
+
     def upgrade_bot_to_service(
         self,
         bot_id: str,
@@ -1496,6 +1523,11 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
                 f"aicoding type bot cannot be upgraded to service: bot_id={bot_id}"
             )
 
+        # The authorization service updates ownership metadata and passport data before
+        # BCN, database, restart or publication side effects begin. A failed
+        # remote sync therefore leaves the existing personal Bot untouched.
+        self._sync_passport_bot_type(bot, "service")
+
         # Resolve the policy before side effects. Restart is asynchronous,
         # whereas create_publish() runs immediately after the Bot update.
         is_teclaw = self._bot_service.is_teclaw_bot(active_engine)
@@ -1504,7 +1536,11 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
         )
 
         # 5. 调用 BCN switch_bot 接口切换绑定
-        switch_result = self._bcn_service.switch_bot(teamclaw_bot_uuid=bot_id, owner_workno=current_owner_id, name=bot.get("bot_name") or bot_id, summary=bot.get("bot_desc") or "")
+        try:
+            switch_result = self._bcn_service.switch_bot(teamclaw_bot_uuid=bot_id, owner_workno=current_owner_id, name=bot.get("bot_name") or bot_id, summary=bot.get("bot_desc") or "")
+        except Exception:
+            self._restore_passport_bot_type(bot, str(bot_type or "personal"))
+            raise
         logger.info(f"[upgrade_bot_to_service] BCN switch_bot succeeded: bot_id={bot_id}, owner_id={current_owner_id}, websocket_kicked={switch_result.get('websocket_kicked')}, idempotent_replay={switch_result.get('idempotent_replay')}")
 
         # switch_bot addressed the existing personal binding, not a new entity
@@ -1521,6 +1557,7 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
             bot_id, current_owner_id, update_fields
         )
         if not updated_bot:
+            self._restore_passport_bot_type(bot, str(bot_type or "personal"))
             raise BotNotFoundError(f"Failed to update bot: bot_id={bot_id}")
 
         # 7. 异步重启 Bot（不阻塞主流程，无论后续是否有发布记录都要重启）。
@@ -1607,10 +1644,16 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
         # 2. 更新 bot_type
         bot = self._resolve_bot(bot_id=bot_id, owner_id=owner_id)
         current_owner_id = str(bot["owner_id"])
+        if bot.get("bot_type") != bot_type:
+            self._sync_passport_bot_type(bot, bot_type)
         updated_bot = self._bot_repo.update_by_owner(
             bot_id, current_owner_id, {"bot_type": bot_type}
         )
         if not updated_bot:
+            if bot.get("bot_type") != bot_type:
+                self._restore_passport_bot_type(
+                    bot, str(bot.get("bot_type") or "personal")
+                )
             raise BotNotFoundError(f"Bot not found: bot_id={bot_id}, owner_id={owner_id}")
 
         logger.info(

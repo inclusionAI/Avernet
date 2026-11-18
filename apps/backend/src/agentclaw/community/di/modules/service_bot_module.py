@@ -507,6 +507,7 @@ class ServiceBotModule(Module):
         task_queue_service: TaskQueueService,
         bot_process_registry: BotProcessRegistry,
         common_config_service: CommonConfigService,
+        passport_plugin: PassportPlugin,
     ) -> BotPublishService:
         """Construct ``BotPublishService``.
 
@@ -527,6 +528,7 @@ class ServiceBotModule(Module):
             task_queue_service=task_queue_service,
             bot_process_registry=bot_process_registry,
             common_config_service=common_config_service,
+            passport_plugin=passport_plugin,
             publish_flow_service_provider=lambda: injector.get(PublishFlowService),
         )
 

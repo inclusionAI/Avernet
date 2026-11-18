@@ -75,6 +75,14 @@ impl A2aBotCoreService for A2aBotCore {
         Ok(saved)
     }
 
+    async fn synchronize_card_projection(&self,record:&A2aBotRecord)->ServiceResult<()> {
+        let binding=self.provider_binding(&record.provider_id,&record.bot_uuid).await?;
+        if binding.provider_bot_ref!=record.provider_bot_ref {return Err(ServiceError::Conflict("A2A Bot binding changed".into()));}
+        self.cards.synchronize_card_projection(record).await?;
+        self.notify_card_change(record, "synchronize_card_projection");
+        Ok(())
+    }
+
     async fn commit_card_with_visibility(&self,record:A2aBotRecord,expected:u64,visibility:Option<bcs_service_api::types::a2a_bot::A2aRegistrationVisibility>)->ServiceResult<A2aBotRecord> {
         let binding=self.provider_binding(&record.provider_id,&record.bot_uuid).await?;
         if binding.provider_bot_ref!=record.provider_bot_ref {return Err(ServiceError::Conflict("A2A Bot binding changed".into()));}

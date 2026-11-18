@@ -8,7 +8,7 @@ const task: RecoveryStoredTask = { schemaVersion: "session-recovery-task/v1", ta
   ownerRequest: { requestId: "r1", revision: 1, status: "pending", reason: "permission", summary: "原文档读取权限不足", instructions: "请申请原文档读取权限", evidence_ids: [], resumePhase: "assess", createdAtMs: 1 } };
 it("selects the card route by CW environment even when the Bot is production, and updates one card", async () => {
   const sender = { sendNotification: vi.fn(), sendCard: vi.fn(), updateCard: vi.fn() };
-  const config = { findByKey: vi.fn().mockResolvedValue({ enabled: 1, config_json: JSON.stringify({ card: { pre: { template_id: "template-pre", callback_route_key: "route-pre" }, prod: { template_id: "template-prod", callback_route_key: "route-prod" } } }) }) };
+  const config = { findByKey: vi.fn().mockResolvedValue({ enabled: 1, config_json: JSON.stringify({ pre: { template_id: "template-pre", callback_route_key: "route-pre" }, prod: { template_id: "template-prod", callback_route_key: "route-prod" } }) }) };
   const notifier = new SessionRecoveryNotifier(sender, "https://pre.invalid", config, "pre", notificationBotConfig());
   expect(await notifier.notifyOwnerRequest({ task, updateOnly: false })).toBe(true);
   expect(sender.sendCard).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ outTrackId: "sr-owner:pre:SR-one", templateId: "template-pre", callbackRouteKey: "route-pre", recipientUserId: "123", cardParamMap: expect.objectContaining({ request_id: "r1", task_id: "SR-one", session_key: "original", confirm_label: "已获取权限，继续任务", confirm_status: "normal", confirm_enabled: "true", instructions: "请申请原文档读取权限", control_plane: "pre" }) }));
@@ -25,13 +25,13 @@ it("does not claim card delivery when disabled, not configured for the control p
   expect(await notifier.notifyOwnerRequest({ task, updateOnly: false })).toBe(false);
   row.enabled = 1;
   expect(await notifier.notifyOwnerRequest({ task, updateOnly: false })).toBe(false);
-  row.config_json = JSON.stringify({ card: { pre: { template_id: "template", callback_route_key: "route" } } });
+  row.config_json = JSON.stringify({ pre: { template_id: "template", callback_route_key: "route" } });
   await expect(notifier.notifyOwnerRequest({ task, updateOnly: false })).rejects.toThrow("unknown");
 });
 
 it("updates the single permission button after Owner feedback", async () => {
   const sender = { sendNotification: vi.fn(), sendCard: vi.fn(), updateCard: vi.fn() };
-  const config = { findByKey: async () => ({ enabled: 1, config_json: JSON.stringify({ card: { pre: { template_id: "template", callback_route_key: "route" } } }) }) };
+  const config = { findByKey: async () => ({ enabled: 1, config_json: JSON.stringify({ pre: { template_id: "template", callback_route_key: "route" } }) }) };
   const notifier = new SessionRecoveryNotifier(sender, "https://pre.invalid", config, "pre", notificationBotConfig());
   const pending: RecoveryStoredTask = { ...task, ownerRequest: { ...task.ownerRequest!, reason: "permission" } };
   await notifier.notifyOwnerRequest({ task: pending, updateOnly: false });
@@ -51,7 +51,7 @@ it("updates the single permission button after Owner feedback", async () => {
 it.each(["completed", "failed", "canceled"] as const)("disables an outstanding button when the Task is %s", async status => {
   const sender = { sendNotification: vi.fn(), sendCard: vi.fn(), updateCard: vi.fn() };
   const notifier = new SessionRecoveryNotifier(sender, "https://pre.invalid", {
-    findByKey: async () => ({ enabled: 1, config_json: JSON.stringify({ card: { pre: { template_id: "template", callback_route_key: "route" } } }) }),
+    findByKey: async () => ({ enabled: 1, config_json: JSON.stringify({ pre: { template_id: "template", callback_route_key: "route" } }) }),
   }, "pre", notificationBotConfig());
   await notifier.notifyOwnerRequest({ task: { ...task, status }, updateOnly: true });
   expect(sender.updateCard).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ cardParamMap: expect.objectContaining({ confirm_status: "disabled", confirm_enabled: "false" }) }));
@@ -60,7 +60,7 @@ it.each(["completed", "failed", "canceled"] as const)("disables an outstanding b
 it("clips the original logical session key by UTF-8 bytes without changing the stored request", async () => {
   const sender = { sendNotification: vi.fn(), sendCard: vi.fn(), updateCard: vi.fn() };
   const notifier = new SessionRecoveryNotifier(sender, "https://pre.invalid", {
-    findByKey: async () => ({ enabled: 1, config_json: JSON.stringify({ card: { pre: { template_id: "template", callback_route_key: "route" } } }) }),
+    findByKey: async () => ({ enabled: 1, config_json: JSON.stringify({ pre: { template_id: "template", callback_route_key: "route" } }) }),
   }, "pre", notificationBotConfig());
   const sessionKey = `agent:main:session:${"会话😀".repeat(200)}`;
   const longTask = { ...task, request: { ...task.request, session_key: sessionKey, session_id: "physical-session" } };
@@ -76,7 +76,7 @@ it("clips the original logical session key by UTF-8 bytes without changing the s
 
 it.each(["recovered", "not_recovered", "unknown"] as const)("sends an ordinary handoff as a noninteractive card while preserving its %s outcome", async effect => {
   const sender = { sendNotification: vi.fn(), sendCard: vi.fn(), updateCard: vi.fn() };
-  const config = { findByKey: async () => ({ enabled: 1, config_json: JSON.stringify({ card: { pre: { template_id: "shared-template" } } }) }) };
+  const config = { findByKey: async () => ({ enabled: 1, config_json: JSON.stringify({ pre: { template_id: "shared-template" } }) }) };
   const notifier = new SessionRecoveryNotifier(sender, "https://pre.invalid", config, "pre", notificationBotConfig());
   const summary = "完整调查报告：" + "原任务、现场证据、已做核查及未知项。".repeat(90);
   const handoff = effect === "recovered"
@@ -101,7 +101,7 @@ it.each(["recovered", "not_recovered", "unknown"] as const)("sends an ordinary h
 it("keeps permission confirmation unavailable until its callback route is configured", async () => {
   const sender = { sendNotification: vi.fn(), sendCard: vi.fn(), updateCard: vi.fn() };
   const notifier = new SessionRecoveryNotifier(sender, "https://pre.invalid", {
-    findByKey: async () => ({ enabled: 1, config_json: JSON.stringify({ card: { pre: { template_id: "template" } } }) }),
+    findByKey: async () => ({ enabled: 1, config_json: JSON.stringify({ pre: { template_id: "template" } }) }),
   }, "pre", notificationBotConfig());
   expect(await notifier.notifyOwnerRequest({ task, updateOnly: false })).toBe(false);
   expect(sender.sendCard).not.toHaveBeenCalled();
@@ -113,7 +113,7 @@ it("does not fall back to Markdown or claim an ordinary card was sent without a 
   const notifier = new SessionRecoveryNotifier(sender, "https://pre.invalid", { findByKey: async () => row }, "pre", notificationBotConfig());
   const input = { ownerId: "123", botId: "bot", targetEnvironment: "prod" as const, taskId: "SR-one", sessionKey: "original", kind: "result" as const, summary: "需要 Owner 排查" };
   expect(await notifier.notify(input)).toBe(false);
-  row.config_json = JSON.stringify({ card: { pre: { template_id: "template" } } });
+  row.config_json = JSON.stringify({ pre: { template_id: "template" } });
   await expect(notifier.notify(input)).rejects.toThrow("delivery unknown");
   expect(sender.sendNotification).not.toHaveBeenCalled();
 });
@@ -121,7 +121,7 @@ it("does not fall back to Markdown or claim an ordinary card was sent without a 
 it("preserves complete legacy instructions or points to the complete Task instead of slicing a list or URL", async () => {
   const sender = { sendNotification: vi.fn(), sendCard: vi.fn(), updateCard: vi.fn() };
   const notifier = new SessionRecoveryNotifier(sender, "https://pre.invalid", {
-    findByKey: async () => ({ enabled: 1, config_json: JSON.stringify({ card: { pre: { template_id: "template", callback_route_key: "route" } } }) }),
+    findByKey: async () => ({ enabled: 1, config_json: JSON.stringify({ pre: { template_id: "template", callback_route_key: "route" } }) }),
   }, "pre", notificationBotConfig());
   const longText = "完整问题及对象清单。".repeat(200) + "https://docs.invalid/last-required-resource";
   await notifier.notifyOwnerRequest({ task: { ...task, ownerRequest: { ...task.ownerRequest!, summary: longText, instructions: longText } }, updateOnly: false });

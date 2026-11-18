@@ -5,7 +5,7 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
-from agentclaw.community.core.errors import Conflict, NotFound
+from agentclaw.community.core.errors import Conflict, NotFound, TopicClosedConflict
 from agentclaw.community.core.task.forum.models import (
     ForumPollConfig,
     ForumPollSelection,
@@ -29,6 +29,13 @@ from agentclaw.community.core.repository.implementations.task.forum.forum_reposi
     _is_topic_request_idempotency_conflict,
 )
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
+from agentclaw.community.core.repository.implementations.bot.bot import BotRepository
+from agentclaw.community.core.task.forum.notifications.forum_notification_publisher import (
+    ForumNotificationPublisher,
+)
+from agentclaw.community.core.task.forum.services.notifying_forum_service import (
+    NotifyingForumService,
+)
 
 
 def _create_topic(
@@ -87,6 +94,32 @@ def test_create_topic_persists_topic_description_without_root_post(db):
     assert result.topic.status == "OPEN"
     with db.orm_session() as session:
         assert session.query(ForumPostModel).count() == 0
+
+
+def test_deleted_topic_author_reply_replay_persists_once(db):
+    class NoNotices:
+        def merge_notice(self, **kwargs):
+            pytest.fail("deleted recipient must not be notified")
+
+    bots = BotRepository(db)
+    bots.insert(dict(
+        bot_id="deleted-bot", entity_id="e", entity_type="staff",
+        creator_id="owner", owner_id="owner", is_delete=1,
+    ))
+    repo = ForumRepository(db)
+    topic = _create_topic(repo, author_id="deleted-bot").topic
+    service = NotifyingForumService(repo, ForumNotificationPublisher(NoNotices(), bots))
+    args = dict(
+        topic_id=topic.topic_id, author_type="BOT", author_id="reply-bot",
+        client_request_id="reply-request", body="reply",
+    )
+    first = service.create_reply(**args)
+    replay = service.create_reply(**args)
+    assert first.created is True
+    assert replay.created is False
+    assert first.post.post_id == replay.post.post_id
+    with db.orm_session() as session:
+        assert session.query(ForumPostModel).filter_by(topic_id=topic.topic_id).count() == 1
 
 
 def test_create_topic_persists_and_returns_poll_configuration(db):
@@ -464,7 +497,10 @@ def test_create_reply_rejects_non_open_topic(db, status):
         row = session.query(ForumTopicModel).filter_by(topic_id=topic.topic_id).one()
         row.status = status
 
-    with pytest.raises(Conflict, match=status.lower()):
+    expected_error = (
+        TopicClosedConflict if status == TOPIC_STATUS_CLOSED else Conflict
+    )
+    with pytest.raises(expected_error, match=status.lower()):
         _create_reply(repo, topic.topic_id)
 
 

@@ -494,7 +494,8 @@ it("keeps ordinary blocked for a proven failed delivery and an unrepairable plan
 function useNativeOwnerCards() {
   const sender = { sendNotification: vi.fn(), sendCard: vi.fn(), updateCard: vi.fn() };
   const cards = new SessionRecoveryNotifier(sender, "https://pre.invalid", {
-    findByKey: async () => ({ enabled: 1, config_json: JSON.stringify({ card: { pre: { template_id: "template", callback_route_key: "route" } } }) }),
+    findByKey: async key => key === "session_recovery_cards"
+      ? { enabled: 1, config_json: JSON.stringify({ pre: { template_id: "template", callback_route_key: "route" } }) } : null,
   }, "pre", notificationBotConfig());
   notifier.notify.mockImplementation(input => cards.notify(input));
   notifier.notifyOwnerRequest = vi.fn(input => cards.notifyOwnerRequest(input));
@@ -548,6 +549,13 @@ it("uses the same Owner brief for permission handling and preserves its full inv
   expect(card).toMatchObject({ callbackRouteKey: "route", cardParamMap: { summary: handoff.summary, instructions: handoff.instructions, confirm_visible: "true" } });
   expect(card.cardParamMap.summary).not.toContain("权限调查"); expect(card.cardParamMap).not.toHaveProperty("config");
   expect(runtime.sendMessage).not.toHaveBeenCalled();
+  await service.confirmOwner(saved.taskId, saved.ownerRequest!.requestId, actor, "已处理");
+  await vi.waitFor(() => expect(sender.updateCard).toHaveBeenCalledWith(expect.objectContaining({
+    outTrackId: card.outTrackId, cardParamMap: expect.objectContaining({ confirm_enabled: "false" }),
+  })));
+  expect(await current(saved.taskId)).toMatchObject({ status: "running", phase: "assess", requiresFreshObservation: true,
+    ownerRequest: { status: "confirmed", feedback: { userId: actor.userId, text: "已处理" } } });
+  expect(sender.sendCard).toHaveBeenCalledOnce();
 });
 
 it.each([

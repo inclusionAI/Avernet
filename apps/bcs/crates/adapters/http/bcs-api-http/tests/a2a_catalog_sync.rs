@@ -19,7 +19,8 @@ fn card() -> Value {
     json!({"name":"Catalog Agent","description":"Card description","version":"1.0.0",
         "capabilities":{"streaming":true},"defaultInputModes":["text/plain"],"defaultOutputModes":["text/plain"],
         "supportedInterfaces":[{"url":"https://example.org/agent","protocolBinding":"JSONRPC","protocolVersion":"1.0"}],
-        "skills":[{"id":"query","name":"query","description":"Queries","tags":[]}]})
+        "skills":[{"id":"query","name":"query","description":"Queries","tags":["orders"]}],
+        "domains":["billing"],"scopes":["orders:read"]})
 }
 struct Fetcher;
 #[async_trait]
@@ -65,7 +66,7 @@ async fn v1_mutations_publish_to_fuse_and_rejected_writes_do_not() {
     let listener=tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr=listener.local_addr().unwrap();
     let server=tokio::spawn(async move {axum::serve(listener,fuse).await.unwrap()});
-    let worker=fuse_card_sync_worker(&chain, stack.queue, addr.to_string());
+    let worker=fuse_card_sync_worker(&chain, stack.queue, stack.cards, addr.to_string());
     worker.initialize().await.unwrap();
     let input=json!({"provider_bot_ref":"catalog-ref","owners":["delegated-owner"],"agent_card_url":"https://example.org/card.json"});
     let (status, saved)=call(&app,"POST","/api/v1/collaboration/a2a/agents",input.clone()).await;
@@ -74,6 +75,11 @@ async fn v1_mutations_publish_to_fuse_and_rejected_writes_do_not() {
     let published=tokio::time::timeout(std::time::Duration::from_secs(3),rx.recv()).await.unwrap().unwrap();
     assert_eq!(published.0,id);
     assert_eq!(published.1["card"]["name"],"Catalog Agent");
+    assert_eq!(published.1["card"]["description"],"Card description\nbilling");
+    assert_eq!(published.1["card"]["skills"][0]["id"],"query");
+    assert_eq!(published.1["card"]["skills"][0]["description"],"Queries");
+    assert_eq!(published.1["card"]["domains"],json!(["billing"]));
+    assert_eq!(published.1["card"]["scopes"],json!(["orders:read"]));
     assert_eq!(published.1["resource_type"],"agent");
     let path=format!("/api/v1/collaboration/a2a/agents/{id}/agent-card");
     for (method,path,body) in [

@@ -204,6 +204,8 @@ AgentSkill：
 
 `signatures` 等非本期执行所需对象的完整结构见官方规范；保存这些字段不等于启用对应协议功能。
 
+Fuse 目录发布会在每次 AgentCard 同步时重新读取已提交的 Card，并将其中可发现的通用能力投影到目录 Card：`description` 覆盖 summary，`skills` 来自 Card skills；顶层 `domains` 存在时覆盖 domains，缺失时从 Card skill tags 派生；顶层 `scopes` 存在时覆盖 scopes，缺失时从 Card / skill `securityRequirements` 派生。空数组是已存在字段，会清空对应字段而不回退旧 BCN capability。同一投影也会同步刷新 `bcs_bots.bot_info` 的 `name/summary/domains/skills/scopes`。该投影只用于展示、检索和同步，不授予任何权限。
+
 ### 3.3 拉取与校验
 
 URL 模式下，BCN 先验证注册调用方权限，再主动拉取 Card 并验证声明。这个过程不创建测试 Task，不探测工具是否可用，也不证明 Card 声称的业务所有权。

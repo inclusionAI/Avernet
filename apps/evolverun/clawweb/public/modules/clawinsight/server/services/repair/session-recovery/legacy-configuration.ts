@@ -5,7 +5,8 @@ import type { AgentControlPlaneEnvironment } from '../common/task-control-plane.
 import type { MonitoringTarget } from '../../monitoring/contracts.js';
 import { target, targetKey } from '../../monitoring/target.js';
 
-export type RecoveryAppConfigStore = { findByKey(key: string): Promise<{ enabled: number; config_json: string } | null> };
+import { cardConfiguration, type RecoveryAppConfigStore, type RecoveryNotifications } from './configuration-contracts.js';
+import type { RecoveryRequest } from './contracts.js';
 export const SESSION_RECOVERY_OWNER_NOTIFICATIONS_KEY = "session_recovery_owner_notifications";
 export const SESSION_RECOVERY_NOTIFICATIONS_KEY = "session_recovery_notifications";
 
@@ -34,19 +35,8 @@ export function parseLegacyRecoveryAllowlist(value: unknown): MonitoringTarget[]
   });
 }
 
-export function cardConfiguration(value: unknown): Partial<Record<AgentControlPlaneEnvironment, { template_id: string; callback_route_key?: string }>> {
-  if (value === undefined) return {};
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid recovery card configuration");
-  for (const [environment, item] of Object.entries(value)) {
-    if (!["pre", "prod"].includes(environment) || !item || typeof item !== "object" || Array.isArray(item)
-      || Object.keys(item).some(key => !["template_id", "callback_route_key"].includes(key))
-      || typeof item.template_id !== "string" || !item.template_id.trim() || item.template_id.length > 256
-      || item.callback_route_key !== undefined && (typeof item.callback_route_key !== "string" || !item.callback_route_key.trim() || item.callback_route_key.length > 256)) throw new Error("Invalid recovery card configuration");
-  }
-  return value;
-}
-
 export function legacyOwnerNotificationEnabled(raw: string, enabled: number, input: { botId: string; ownerId: string; targetEnvironment: string }): boolean {
+  if (enabled !== 1) return false;
   let value;
   try { value = JSON.parse(raw); }
   catch { throw new Error("Invalid recovery owner notification JSON"); }
@@ -71,7 +61,7 @@ export function legacyOwnerNotificationEnabled(raw: string, enabled: number, inp
     targets.add(key);
     if (item.bot_id === input.botId && item.entity_id === input.ownerId && item.env === input.targetEnvironment) matched = item.enabled;
   }
-  return matched ?? (enabled === 1);
+  return matched ?? true;
 }
 
 type BotWebhook = { bot_id: string; entity_id: string; webhook: string };
@@ -148,4 +138,36 @@ export function parseLegacyRecoveryHandbooks(raw: string): HandbookConfig {
     targets.add(target);
   }
   return { bot_teams: botTeams as BotTeam[], team_routes: parseRecoveryHandbookRoutes(value.team_routes) };
+}
+
+/** Legacy storage and identity formats end at this adapter. */
+export async function legacyAllowedTargets(app?: RecoveryAppConfigStore): Promise<Set<string>> {
+  const row = await app?.findByKey(SESSION_RECOVERY_ALLOWLIST_KEY);
+  return new Set(row?.enabled === 1 ? parseLegacyRecoveryAllowlist(JSON.parse(row.config_json)).map(targetKey) : []);
+}
+
+export async function legacyRecoveryNotifications(target: RecoveryRequest['target'], app?: RecoveryAppConfigStore): Promise<RecoveryNotifications> {
+  const [ownerRow, groupRow] = await Promise.all([
+    app?.findByKey(SESSION_RECOVERY_OWNER_NOTIFICATIONS_KEY), app?.findByKey(SESSION_RECOVERY_NOTIFICATIONS_KEY),
+  ]);
+  const owner = ownerRow ? legacyOwnerNotificationEnabled(ownerRow.config_json, ownerRow.enabled,
+    { botId: target.bot_id, ownerId: target.entity_id, targetEnvironment: target.env }) : false;
+  let group: RecoveryNotifications['group'] = null;
+  if (groupRow?.enabled === 1) {
+    const parsed = legacyWebhookConfig(groupRow.config_json);
+    const webhook = parsed.bot_webhooks?.find(item => item.bot_id === target.bot_id && item.entity_id === target.entity_id)?.webhook ?? parsed.webhook;
+    group = { webhook, timeout_seconds: parsed.timeout_seconds };
+  }
+  return { owner, group };
+}
+
+export async function legacyRecoveryCardConfiguration(app: RecoveryAppConfigStore, environment: AgentControlPlaneEnvironment) {
+  const row = await app.findByKey(SESSION_RECOVERY_OWNER_NOTIFICATIONS_KEY);
+  return row?.enabled === 1 ? cardConfiguration(JSON.parse(row.config_json).card)[environment] ?? null : null;
+}
+
+export function legacyRecoveryHandbookConfiguration(raw: string, target: RecoveryRequest['target']) {
+  const legacy = parseLegacyRecoveryHandbooks(raw);
+  return { teamKey: legacy.bot_teams.find(item => item.env === target.env && item.bot_id === target.bot_id
+    && item.owner_id === target.entity_id)?.team_key, routes: legacy.team_routes };
 }

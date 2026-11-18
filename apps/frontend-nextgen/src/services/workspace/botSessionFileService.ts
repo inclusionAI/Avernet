@@ -77,11 +77,21 @@ function mapIntent(dto: UploadIntentDto): UploadIntentView {
   };
 }
 
-function buildParams(userId: string, ownerId?: string, stage?: BotRuntimeStage): BotRequestParams {
+function buildParams(
+  userId: string,
+  ownerId?: string,
+  stage?: BotRuntimeStage,
+  deviceUuid?: string,
+  /** Caller 模式 Bot 运行时定位(openspec add-session-files-caller-runtime-target),缺省不携带 */
+  callerRuntimeTarget?: 'service' | 'caller_instance',
+): BotRequestParams {
   return {
     user_id: resolveUserId(userId),
     ...(ownerId ? { owner_id: ownerId } : {}),
     ...(stage ? { stage } : {}),
+    // 多实例选中实例定位(openspec add-session-files-device-uuid),缺省不携带
+    ...(deviceUuid ? { device_uuid: deviceUuid } : {}),
+    ...(callerRuntimeTarget ? { caller_runtime_target: callerRuntimeTarget } : {}),
   };
 }
 
@@ -123,12 +133,24 @@ export const botSessionFileService = {
     opts: {
       ownerId?: string;
       stage?: BotRuntimeStage;
+      /**
+       * 多实例服务 Bot 的选中实例(openspec add-session-files-device-uuid)。
+       * 上传链 upload-intents / upload-complete / materialize-status 全程携带为
+       * query `device_uuid`;缺省完全不携带(好友/个人 Bot/teclaw 语境)。
+       */
+      deviceUuid?: string;
+      /**
+       * Caller 模式 Bot 的运行时目标(openspec add-session-files-caller-runtime-target)。
+       * 服务 Bot 会话语境 `service` / 好友会话语境 `caller_instance`;上传链三接口
+       * 携带为 query `caller_runtime_target`;非 Caller Bot 缺省完全不携带。
+       */
+      callerRuntimeTarget?: 'service' | 'caller_instance';
       signal?: AbortSignal;
       onProgress?: (loaded: number, total: number) => void;
       onPhase?: (phase: 'completing' | 'materializing') => void;
     },
   ): Promise<DomainResult<BotSessionFileView>> {
-    const params = buildParams(userId, opts.ownerId, opts.stage);
+    const params = buildParams(userId, opts.ownerId, opts.stage, opts.deviceUuid, opts.callerRuntimeTarget);
     try {
       const hash = await sha256Hex(file);
       const intents = await createUploadIntents(botId, sessionId, params, {
@@ -191,10 +213,14 @@ export const botSessionFileService = {
     ownerId?: string,
     friendUserId?: string,
     stage?: BotRuntimeStage,
+    /** 多实例选中实例(openspec add-session-files-device-uuid),缺省不携带 */
+    deviceUuid?: string,
+    /** Caller 模式 Bot 运行时定位(openspec add-session-files-caller-runtime-target),缺省不携带 */
+    callerRuntimeTarget?: 'service' | 'caller_instance',
   ): Promise<DomainResult<BotSessionFileListResult>> {
     try {
       const data = await listReadyApi(botId, sessionId, {
-        ...buildParams(userId, ownerId, stage),
+        ...buildParams(userId, ownerId, stage, deviceUuid, callerRuntimeTarget),
         ...(friendUserId ? { f_user_id: resolveUserId(friendUserId) } : {}),
       });
       const items = (data.files ?? []).map(mapView);
@@ -213,12 +239,15 @@ export const botSessionFileService = {
     ownerId?: string,
     disposition?: 'inline' | 'attachment',
     stage?: BotRuntimeStage,
+    deviceUuid?: string,
+    /** Caller 模式 Bot 运行时定位(openspec add-session-files-caller-runtime-target),缺省不携带 */
+    callerRuntimeTarget?: 'service' | 'caller_instance',
   ): string {
     const path = buildBotSessionFileContentUrl(
       botId,
       sessionId,
       resourceId,
-      buildParams(userId, ownerId, stage),
+      buildParams(userId, ownerId, stage, deviceUuid, callerRuntimeTarget),
       disposition,
     );
     const origin = resolveGroupGatewayOrigin();
@@ -233,12 +262,15 @@ export const botSessionFileService = {
     userId: string,
     ownerId?: string,
     stage?: BotRuntimeStage,
+    deviceUuid?: string,
+    /** Caller 模式 Bot 运行时定位(openspec add-session-files-caller-runtime-target),缺省不携带 */
+    callerRuntimeTarget?: 'service' | 'caller_instance',
   ): Promise<string> {
     const contentUrl = buildBotSessionFileContentUrl(
       botId,
       sessionId,
       resourceId,
-      buildParams(userId, ownerId, stage),
+      buildParams(userId, ownerId, stage, deviceUuid, callerRuntimeTarget),
       'attachment',
     );
     return fetchExternalDownloadUrl(contentUrl);
@@ -251,9 +283,13 @@ export const botSessionFileService = {
     userId: string,
     ownerId?: string,
     stage?: BotRuntimeStage,
+    /** 多实例选中实例(openspec add-session-files-device-uuid 扩展段),缺省不携带 */
+    deviceUuid?: string,
+    /** Caller 模式 Bot 运行时定位(openspec add-session-files-caller-runtime-target),缺省不携带 */
+    callerRuntimeTarget?: 'service' | 'caller_instance',
   ): Promise<DomainResult<boolean>> {
     try {
-      await deleteFile(botId, sessionId, resourceId, buildParams(userId, ownerId, stage));
+      await deleteFile(botId, sessionId, resourceId, buildParams(userId, ownerId, stage, deviceUuid, callerRuntimeTarget));
       return { ok: true, data: true };
     } catch (err) {
       return { ok: false, error: toDomainError(err, '删除失败') };
@@ -268,9 +304,12 @@ export const botSessionFileService = {
     ownerId?: string,
     disposition?: 'inline' | 'attachment',
     stage?: BotRuntimeStage,
+    deviceUuid?: string,
+    /** Caller 模式 Bot 运行时定位(openspec add-session-files-caller-runtime-target),缺省不携带 */
+    callerRuntimeTarget?: 'service' | 'caller_instance',
   ): Promise<DomainResult<Blob>> {
     try {
-      const blob = await getContentBlob(botId, sessionId, resourceId, buildParams(userId, ownerId, stage), disposition);
+      const blob = await getContentBlob(botId, sessionId, resourceId, buildParams(userId, ownerId, stage, deviceUuid, callerRuntimeTarget), disposition);
       return { ok: true, data: blob };
     } catch (err) {
       return { ok: false, error: toDomainError(err, '下载失败') };

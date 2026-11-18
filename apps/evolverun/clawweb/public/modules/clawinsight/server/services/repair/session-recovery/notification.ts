@@ -7,9 +7,8 @@ import type { RecoveryStoredTask, RecoveryTaskStore, RecoveryTimelineEvent } fro
 import { resolveTaskControlPlaneEnvironment, type AgentControlPlaneEnvironment } from "../common/task-control-plane.js";
 import { logRepairEvent, repairLogError } from "../common/logging.js";
 import type { BotDiagnosisRecoveryConfigStore } from '../../monitoring/bot-config-contracts.js';
-import { recoveryNotifications } from './bot-configuration.js';
-import { cardConfiguration, SESSION_RECOVERY_OWNER_NOTIFICATIONS_KEY, type RecoveryAppConfigStore } from './legacy-configuration.js';
-export { legacyOwnerNotificationEnabled, legacyWebhookConfig, SESSION_RECOVERY_OWNER_NOTIFICATIONS_KEY, SESSION_RECOVERY_NOTIFICATIONS_KEY } from './legacy-configuration.js';
+import { recoveryNotifications, recoveryCardConfiguration } from './bot-configuration.js';
+import type { RecoveryAppConfigStore } from './configuration-contracts.js';
 
 export type RecoveryNotificationSender = Pick<DingTalkNotificationSender, "sendNotification"> & Partial<Pick<DingTalkNotificationSender, "sendCard" | "updateCard">>;
 export function recoveryOwnerCardTrackId(taskId: string, environment: AgentControlPlaneEnvironment): string {
@@ -62,10 +61,9 @@ export class SessionRecoveryNotifier implements RecoveryTaskNotifier {
   private async prepareOwnerCard(task: RecoveryStoredTask) {
     const request = task.ownerRequest, environment = this.controlPlaneEnvironment;
     if (!request || !environment || resolveTaskControlPlaneEnvironment(task) !== environment) return;
-    if (!(await recoveryNotifications(this.botConfigurations, task.request.target, this.config)).owner) return;
-    const row = await this.config.findByKey(SESSION_RECOVERY_OWNER_NOTIFICATIONS_KEY);
-    if (!row) return;
-    const config = cardConfiguration(JSON.parse(row.config_json).card)[environment];
+    if (!(await recoveryNotifications(this.botConfigurations, task.request.target, this.config, task.taskId)).owner) return;
+    const config = await recoveryCardConfiguration(this.config, environment, { taskId: task.taskId,
+      botId: task.request.target.bot_id, ownerId: task.request.target.entity_id, targetEnvironment: task.request.target.env });
     if (!config?.callback_route_key) return;
     const url = new URL("/insight", this.publicBaseUrl);
     url.searchParams.set("module", "monitoring"); url.searchParams.set("recoveryTaskId", task.taskId);
@@ -73,17 +71,8 @@ export class SessionRecoveryNotifier implements RecoveryTaskNotifier {
   }
 
   async notify(input: Parameters<RecoveryTaskNotifier["notify"]>[0]): Promise<boolean> {
-    const row = await this.config.findByKey(SESSION_RECOVERY_OWNER_NOTIFICATIONS_KEY).catch(() => null);
-    if (!row) return false;
-    try {
-      if (!(await recoveryNotifications(this.botConfigurations, { bot_id: input.botId, entity_id: input.ownerId, env: input.targetEnvironment, engine: 'OC' }, this.config)).owner) return false;
-      cardConfiguration(JSON.parse(row.config_json).card);
-    } catch (error) {
-      logRepairEvent("session-recovery", "session_recovery_notification", "configuration_invalid", {
-        taskId: input.taskId, botId: input.botId, targetEnvironment: input.targetEnvironment, operation: input.kind, ...repairLogError(error),
-      });
-      return false;
-    }
+    if (!(await recoveryNotifications(this.botConfigurations, { bot_id: input.botId, entity_id: input.ownerId,
+      env: input.targetEnvironment, engine: 'OC' }, this.config, input.taskId)).owner) return false;
     if (!this.sender) throw new Error("Notification unavailable");
     const recovered = input.kind === "result" && input.effect === "recovered";
     const title = input.kind === "plan" ? "会话自愈方案待确认" : recovered ? "会话自愈已恢复，有后续建议" : "会话自愈需要人工处理";
@@ -92,7 +81,8 @@ export class SessionRecoveryNotifier implements RecoveryTaskNotifier {
     if (input.kind === "result") {
       const environment = this.controlPlaneEnvironment;
       if (!environment) return false;
-      const config = cardConfiguration(JSON.parse(row.config_json).card)[environment];
+      const config = await recoveryCardConfiguration(this.config, environment, { taskId: input.taskId,
+        botId: input.botId, ownerId: input.ownerId, targetEnvironment: input.targetEnvironment });
       if (!config) return false;
       if (!this.sender.sendCard) throw new Error("Native card notification unavailable");
       await this.sender.sendCard({ recipientUserId: input.ownerId, outTrackId: `sr-owner-handoff:${environment}:${input.taskId}`,
@@ -239,7 +229,7 @@ export class SessionRecoveryGroupNotifier implements RecoveryActionNotifier {
   private async notify(input: GroupNotification): Promise<void> {
     const task = await this.deps.tasks.find(input.taskId);
     if (!task || resolveTaskControlPlaneEnvironment(task) !== this.deps.controlPlaneEnvironment) return;
-    const config = (await recoveryNotifications(this.deps.botConfigurations, task.request.target, this.deps.config)).group;
+    const config = (await recoveryNotifications(this.deps.botConfigurations, task.request.target, this.deps.config, task.taskId)).group;
     if (!config) return;
     // Reuse the complete tool audit; uncertain delivery must not be treated as no intervention.
     if (input.kind === "result" && task.interventionStatus === "none") return;

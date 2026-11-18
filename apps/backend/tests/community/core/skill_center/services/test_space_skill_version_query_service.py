@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import datetime
 from unittest.mock import MagicMock
 
+import pytest
+
 from agentclaw.community.core.skill_center.canonical_center_store import (
     CanonicalCenterVersion,
     CanonicalCenterVersionIdentity,
@@ -118,3 +120,38 @@ def test_consumable_paginates_on_persisted_published_ready_fact(monkeypatch):
         limit=1,
     )
     canonical.verify_version.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("metadata", "expected"),
+    [
+        (None, []),
+        ("{}", []),
+        ('{"mcp_dependencies": []}', []),
+        (
+            '{"mcp_dependencies": ["mcp.a", {"code": "mcp.b"}, {"server_code": "mcp.c", "code": "ignored"}, "mcp.a"]}',
+            ["mcp.a", "mcp.b", "mcp.c", "mcp.a"],
+        ),
+    ],
+)
+def test_version_dependency_shapes(metadata, expected):
+    row = _version_record()
+    row["metadata_json"] = metadata
+    assert SpaceSkillVersionQueryService._version(row)["mcp_dependencies"] == expected
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        '{"mcp_dependencies": null}',
+        '{"mcp_dependencies": "mcp.a"}',
+        '{"mcp_dependencies": [{"name": "missing code"}]}',
+        '{"mcp_dependencies": [42]}',
+        "{invalid",
+    ],
+)
+def test_invalid_version_dependency_metadata_fails(metadata):
+    row = _version_record()
+    row["metadata_json"] = metadata
+    with pytest.raises(ValueError):
+        SpaceSkillVersionQueryService._version(row)

@@ -108,6 +108,7 @@ class NotifyingForumService(ForumService):
             topic_id=result.post.topic_id,
             post_id=result.post.post_id,
             topic_title=topic.title,
+            skip_deleted_reply_recipient=True,
         )
         return result
 

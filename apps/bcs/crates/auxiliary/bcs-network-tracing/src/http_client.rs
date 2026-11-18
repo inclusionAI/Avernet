@@ -87,9 +87,10 @@ macro_rules! client_adapter {
                 let _ = endpoint.set_password(None);
                 endpoint.set_query(None);
                 endpoint.set_fragment(None);
-                let incoming = request.headers().iter().filter_map(|(name, value)| {
-                    value.to_str().ok().map(|value| (name.to_string(), value.to_owned()))
-                }).collect();
+                let incoming = request.headers().iter().filter(|(_, value)| !value.is_sensitive())
+                    .filter_map(|(name, value)| {
+                        value.to_str().ok().map(|value| (name.to_string(), value.to_owned()))
+                    }).collect();
                 let call = Call::start(&RequestInfo {
                     kind: Kind::HttpClient, method: request.method().as_str(), endpoint: endpoint.as_str(),
                     route: None, target_app: "", request_size: request.body().and_then(|body| body.as_bytes()).map(|bytes| bytes.len() as u64),

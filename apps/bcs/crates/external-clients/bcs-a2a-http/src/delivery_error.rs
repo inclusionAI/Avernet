@@ -33,16 +33,19 @@ fn diagnostic(error:&a2a::A2AError)->Value {
 
 pub(super) fn protocol_failure(error:&a2a::A2AError,operation:&str)->ServiceError {
     // Query/cancel errors are request failures, not proof of a Task terminal.
+    if let Some(message) = crate::http_client::identity_failure(error) {
+        return invalid(message);
+    }
     invalid(&format!("{operation}: {}",diagnostic(error)))
 }
 
 impl A2aHttpTransport {
-    pub(super) async fn rejected(&self, record:&mut A2aRunRecord, payload:Value) -> ServiceResult<BotDeliveryResult> {
+    pub(super) async fn rejected(&self, record:&mut A2aRunRecord, payload:Value, message: &str) -> ServiceResult<BotDeliveryResult> {
         self.save(record,A2aRunState::Failed).await?;
         self.emit_payload(record,ChatEventState::Error,payload).await?;
         self.runtime()?.contexts.mark_provider_transport_terminal(&record.run_id).await;
         Ok(BotDeliveryResult {target_bot_id:record.scope.bot_id.clone(),delivered:false,
-            error:Some(invalid("remote request rejected before Task creation"))})
+            error:Some(invalid(message))})
     }
 }
 

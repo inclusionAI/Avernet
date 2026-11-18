@@ -18,7 +18,7 @@ use bcs_bot_store::{MemoryProviderStore, a2a::DbA2aBotStore};
 use bcs_config::resolve_env_str;
 use bcs_fuse_client::{BcsFuseConfig, FuseClient};
 use bcs_fusion::{CardChangeQueue, FuseCardSyncLifecycle};
-use bcs_service_api::port::a2a_card::A2aCardPort;
+use bcs_service_api::port::{repo::a2a_bot::A2aBotRepoPort, a2a_card::A2aCardPort};
 
 use crate::NoopGroupCoreService;
 use crate::contract::bot_registration_chain::RegistrationChain;
@@ -29,6 +29,8 @@ pub struct A2aCatalogStack {
     pub api: A2aApiService,
     /// Queue consumed by the Fuse catalog-sync worker.
     pub queue: Arc<CardChangeQueue>,
+    /// AgentCard store used by that worker to project current Cards.
+    pub cards: Arc<dyn A2aBotRepoPort>,
 }
 
 /// Compose the real `A2aBotManagement` stack over a registration chain.
@@ -51,7 +53,7 @@ pub fn build_a2a_catalog_stack(
         DbA2aBotStore::sqlite(chain.db.clone(), resolve_env_str()).with_registry(&chain.bot_repo),
     );
     let core = Arc::new(
-        A2aBotCore::new(cards, chain.provider_repo.clone())
+        A2aBotCore::new(cards.clone(), chain.provider_repo.clone())
             .with_catalog_changes(Some(queue.clone())),
     );
     let registration = Arc::new(
@@ -65,6 +67,7 @@ pub fn build_a2a_catalog_stack(
     A2aCatalogStack {
         api: A2aApiService::new(management),
         queue,
+        cards,
     }
 }
 
@@ -72,6 +75,7 @@ pub fn build_a2a_catalog_stack(
 pub fn fuse_card_sync_worker(
     chain: &RegistrationChain,
     queue: Arc<CardChangeQueue>,
+    cards: Arc<dyn A2aBotRepoPort>,
     fuse_listen_addr: String,
 ) -> FuseCardSyncLifecycle {
     let config = BcsFuseConfig {
@@ -82,6 +86,7 @@ pub fn fuse_card_sync_worker(
         queue,
         Arc::new(FuseClient::new(&config).unwrap()),
         chain.bot_repo.clone(),
+        Some(cards),
         Arc::new(NoopGroupCoreService),
         resolve_env_str(),
         1,

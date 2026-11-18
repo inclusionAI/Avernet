@@ -30,10 +30,12 @@ test = false
 [features]
 default = ["prometheus-metrics"]
 metrics = ["prometheus-metrics"]
+a2a-http-e2e = []
 prometheus-metrics = ["dep:metrics", "dep:metrics-exporter-prometheus"]
 test-utils = ["dep:bcs-a2a-binding-api", "dep:a2a-e2e-sdk", "dep:reqwest-e2e", "dep:a2a-pb-e2e", "dep:tonic-e2e"]
 
 [dependencies]
+bcs-app-identity-api.workspace = true
 bcs-a2a-binding-api = { workspace = true, optional = true }
 a2a-e2e-sdk = { package = "a2a-lf", version = "=0.4.2", optional = true }
 reqwest-e2e = { package = "reqwest", version = "0.13", default-features = false, features = ["rustls", "json", "stream"], optional = true }

@@ -128,11 +128,13 @@ it('collapsing the expanded Bot keeps the selection and the cached list', () => 
   expect(store.getState()).toMatchObject({ expandedBotIds: {}, selectedBotId: 'a', selectedSessionId: 'a2' });
   expect(store.getState().sessionsByBotId.b.sessions.items[0].sessionId).toBe('b1');
 });
-it('readonly Bot expansion keeps the selection and never requests the mine list', () => {
+it('readonly Bot expansion keeps the selection and requests the others list', () => {
   store.getState().setManagedBotOrigin('b', 'others');
   const { result } = renderSessions();
   act(() => result.current.toggleBot('b', 'managed'));
-  expect(conversationService.listManagedSessions).not.toHaveBeenCalled();
+  expect(conversationService.listManagedSessions).toHaveBeenCalledWith(
+    expect.objectContaining({ botId: 'b' }), 'user', 'all', 1, 10, '', undefined, 'others',
+  );
   expect(store.getState()).toMatchObject({
     expandedBotIds: { b: true },
     selectedBotId: 'a',
@@ -251,4 +253,41 @@ it('user change cancels a pending list request', async () => {
   await act(async () => request.resolve(page(['b1'], 'b')));
   expect(store.getState().sessionsByBotId.b).toBeUndefined();
   expect(store.getState().selectedSessionId).toBeNull();
+});
+
+it('continues an empty source window with its cursor rather than reloading from zero', async () => {
+  const list = jest.mocked(conversationService.listManagedSessions);
+  list.mockResolvedValueOnce({ ok: true, data: {
+    items: [], total: 0, hasMore: true, nextCursor: 'scan-next', scanLimited: true,
+  } }).mockResolvedValueOnce({ ok: true, data: {
+    items: [session('other', 'b')], total: 1, hasMore: false, nextCursor: null, scanLimited: false,
+  } });
+  store.getState().setManagedBotOrigin('b', 'others');
+  const { result } = renderSessions();
+  act(() => result.current.toggleBot('b', 'managed'));
+  await waitFor(() => expect(store.getState().sessionsByBotId.b?.sessions.nextCursor).toBe('scan-next'));
+  act(() => result.current.toggleBot('b', 'managed'));
+  act(() => result.current.toggleBot('b', 'managed'));
+  expect(list).toHaveBeenCalledTimes(1);
+  await act(async () => result.current.loadMoreSessions('b', 'managed', 'all'));
+  await waitFor(() => expect(store.getState().sessionsByBotId.b.sessions.items).toHaveLength(1));
+  expect(list).toHaveBeenLastCalledWith(b.bot, 'user', 'all', 2, 10, '', undefined, 'others', 'scan-next');
+  expect(store.getState().sessionsByBotId.b.sessions.hasMore).toBe(false);
+});
+
+it('does not let an older mine response overwrite the new others window', async () => {
+  const mine = deferred();
+  jest.mocked(conversationService.listManagedSessions)
+    .mockReturnValueOnce(mine.promise)
+    .mockResolvedValueOnce({ ...page(['others'], 'b'), data: {
+      ...page(['others'], 'b').data, hasMore: true, nextCursor: 'others-next',
+    } });
+  const { result } = renderSessions();
+  act(() => result.current.toggleBot('b', 'managed'));
+  act(() => store.getState().setManagedBotOrigin('b', 'others'));
+  await waitFor(() => expect(store.getState().sessionsByBotId.b?.sessions.nextCursor).toBe('others-next'));
+  await act(async () => mine.resolve(page(['stale-mine'], 'b')));
+  expect(store.getState().sessionsByBotId.b).toMatchObject({
+    origin: 'others', sessions: { items: [{ sessionId: 'others' }], nextCursor: 'others-next' },
+  });
 });

@@ -7,7 +7,7 @@ use bcs_bot_store::a2a::DbA2aBotStore;
 use bcs_db_api::DbPlugin;
 use bcs_route_security::OutboundUrlGuard;
 use bcs_service_api::{ProviderCoreService, application::a2a_bot::A2aBotManagementService};
-use bcs_service_api::port::repo::bot_provider::BotProviderRepoPort;
+use bcs_service_api::port::repo::{a2a_bot::A2aBotRepoPort, bot_provider::BotProviderRepoPort};
 
 pub(super) fn build_card_management(
     db: Arc<dyn DbPlugin>, flavor:bcs_db_api::DbSqlFlavor, bots: Arc<dyn BotProviderRepoPort>,
@@ -15,24 +15,38 @@ pub(super) fn build_card_management(
     registry_repo: Arc<bcs_bot_store::PersistentBotRepo>,
     guard: OutboundUrlGuard, grpc: Option<&bcs_a2a_http::grpc_mesh::GrpcMeshConfig>,
     catalog_changes: Option<Arc<dyn bcs_service_api::port::CatalogChangePort>>,
-) -> crate::Result<(Arc<dyn A2aBotManagementService>, Arc<dyn bcs_service_api::core::a2a_bot::A2aBotCoreService>)> {
+) -> crate::Result<(
+    Arc<dyn A2aBotManagementService>,
+    Arc<dyn bcs_service_api::core::a2a_bot::A2aBotCoreService>,
+    Arc<dyn A2aBotRepoPort>,
+)> {
     let cards = Arc::new(DbA2aBotStore::new(db, crate::env::resolve_env(), flavor).with_registry(&registry_repo));
     let registration = Arc::new(bcs_bot::core::a2a_provider_registration::A2aProviderRegistrationCore::new(providers.clone(), bots.clone())
         .with_catalog_changes(catalog_changes.clone()));
-    let core = Arc::new(A2aBotCore::new(cards, bots).with_catalog_changes(catalog_changes));
+    let core = Arc::new(A2aBotCore::new(cards.clone(), bots).with_catalog_changes(catalog_changes));
     let mut fetcher = HttpA2aCardFetcher::new(guard, vec![bcs_a2a_http::tools::EXTENSION.into(),
         bcs_a2a_http::delivery::DEDUP_EXTENSION.into(),bcs_a2a_http::structured_exec::EXTENSION.into()]);
     if let Some(grpc)=grpc {fetcher=fetcher.with_grpc_mesh(grpc.clone())?;}
-    Ok((Arc::new(A2aBotManagement::new(providers, core.clone(), Arc::new(fetcher)).with_registration(registration, registry)), core))
+    Ok((
+        Arc::new(A2aBotManagement::new(providers, core.clone(), Arc::new(fetcher)).with_registration(registration, registry)),
+        core,
+        cards,
+    ))
 }
 
 pub(super) fn build_delivery(
     db: Arc<dyn DbPlugin>, flavor: bcs_db_api::DbSqlFlavor,
     credentials: Arc<dyn bcs_service_api::ProviderCredentialRepoPort>, guard: OutboundUrlGuard, grpc: Option<&bcs_a2a_http::grpc_mesh::GrpcMeshConfig>,
+    identity: Option<&bcs_app_identity_api::OutboundAppIdentityConfig>,
 ) -> crate::Result<Arc<bcs_a2a_http::delivery::A2aHttpTransport>> {
     let runs = Arc::new(bcs_chat_run_store::a2a::DbA2aRunStore::new(db, crate::env::resolve_env(), flavor));
     let mut transport=bcs_a2a_http::delivery::A2aHttpTransport::new(guard, runs, credentials);
     if let Some(grpc)=grpc {transport=transport.with_grpc_mesh(grpc.clone())?;}
+    if let Some(identity) = identity {
+        let plugin = bcs_app_identity_api::build_outbound_app_identity(identity)
+            .map_err(|error| crate::BcsError::InvalidConfig(error.to_string()))?;
+        transport = transport.with_app_identity(plugin)?;
+    }
     Ok(Arc::new(transport))
 }
 

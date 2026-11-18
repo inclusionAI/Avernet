@@ -126,6 +126,8 @@ from agentclaw.community.api.bot_app_grant_service import (
     BotAppGrantServiceProtocol,
 )
 from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayProtocol
+from agentclaw.community.api.session_source_listing import SessionSourceListingProtocol
+from agentclaw.community.core.engine_runtime.session_listing import SessionSourceListingService
 from agentclaw.community.api.health_diagnosis_service import (
     HealthDiagnosisServiceProtocol,
 )
@@ -419,6 +421,7 @@ _PAIRS = [
     (EngineConfigServiceProtocol, EngineConfigService),
     (EngineVersionServiceProtocol, EngineVersionService),
     (EngineRuntimeRelayProtocol, EngineRuntimeRelay),
+    (SessionSourceListingProtocol, SessionSourceListingService),
     (EngineConnectionServiceProtocol, EngineConnectionService),
     (HealthDiagnosisServiceProtocol, HealthDiagnosisService),
     (BotRuntimeProjectorProtocol, BotRuntimeProjector),

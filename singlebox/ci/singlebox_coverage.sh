@@ -329,7 +329,7 @@ run_real_singlebox() {
     principal_signing_key="$SINGLEBOX_GATEWAY_PRINCIPAL_SIGNING_KEY" \
     AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE="$SINGLEBOX_GATEWAY_PRINCIPAL_SIGNING_KEY" \
     AGENTCLAW_SECRET_GATEWAY_PRINCIPAL_SIGNING_KEY_VALUE="$SINGLEBOX_GATEWAY_PRINCIPAL_SIGNING_KEY" \
-    BCS_DEBUG=true BCS_COVERAGE_FORCE_REBUILD="${BCS_COVERAGE_FORCE_REBUILD:-1}" \
+    BCS_E2E_APP_IDENTITY=1 BCS_DEBUG=true BCS_COVERAGE_FORCE_REBUILD="${BCS_COVERAGE_FORCE_REBUILD:-1}" \
     BCS_BIN="$bcs_coverage_dir/llvm-cov-target/debug/bcs" \
     BCS_CLI_BIN="$bcs_coverage_dir/llvm-cov-target/debug/bcs-cli" \
     LLVM_PROFILE_FILE="$bcs_coverage_dir/llvm-cov-target/bcs-%m-%p.profraw" \
@@ -564,6 +564,7 @@ run_bcs_e2e() {
     STANDALONE_OPENCLAW_ROOT="$coverage_standalone_root" \
     STANDALONE_RUNTIME_DIR="$coverage_standalone_runtime" \
     BCS_BOTS_DATA_DIR="$coverage_standalone_root/profiles" \
+    BCS_E2E_APP_IDENTITY=1 \
     BCS_E2E_CHANGED_LINE_MIN="${BCS_E2E_CHANGED_LINE_MIN:-65}" \
     BCS_E2E_CHANGED_BASE_REF="${BCS_E2E_CHANGED_BASE_REF:-${SINGLEBOX_BASE_REF:-origin/dev}}" \
     AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE="$SINGLEBOX_GATEWAY_PRINCIPAL_SIGNING_KEY" \

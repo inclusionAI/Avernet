@@ -46,7 +46,7 @@ function parseImprovementId(value: string | null): number | undefined {
   return Number.isSafeInteger(id) && id > 0 ? id : undefined;
 }
 
-export default function InsightCenter() {
+export default function InsightCenter({ monitoringPracticeUrl }: { monitoringPracticeUrl?: string } = {}) {
   const viewportRef = useInsightViewport();
   const [params, setParams] = useSearchParams();
   const { user } = useClientUser();
@@ -84,7 +84,7 @@ export default function InsightCenter() {
         </nav>
       </div>
     </aside>
-    <div className="insight-content" role="region" aria-label="效果中心内容" tabIndex={0}>{monitoring && recoveryTaskId ? <SessionRecoveryDetail taskId={recoveryTaskId} onBack={() => openMonitoring(monitoringTab)} /> : monitoring ? <MonitoringWorkspace key={`${user?.userId}:${user?.isClawInsightAdmin}`} tab={monitoringTab} isAdmin={user?.isClawInsightAdmin === true} /> : <GovernanceCenter />}</div>
+    <div className="insight-content" role="region" aria-label="效果中心内容" tabIndex={0}>{monitoring && recoveryTaskId ? <SessionRecoveryDetail taskId={recoveryTaskId} onBack={() => openMonitoring(monitoringTab)} /> : monitoring ? <MonitoringWorkspace key={`${user?.userId}:${user?.isClawInsightAdmin}`} tab={monitoringTab} isAdmin={user?.isClawInsightAdmin === true} practiceUrl={monitoringPracticeUrl} /> : <GovernanceCenter />}</div>
   </div>;
 }
 

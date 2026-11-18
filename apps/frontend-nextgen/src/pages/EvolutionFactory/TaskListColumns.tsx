@@ -49,6 +49,7 @@ export function useTaskListColumns(
       {
         id: 'name',
         header: '任务名称',
+        headerClassName: 'text-foreground',
         width: COLUMN_WIDTHS[0],
         cell: (task) => (
           <div className="min-w-0">
@@ -64,10 +65,11 @@ export function useTaskListColumns(
       {
         id: 'remark',
         header: '备注',
+        headerClassName: 'text-foreground',
         width: COLUMN_WIDTHS[1],
         cell: (task) => (
           <Hint content={task.remark || undefined}>
-            <span className="line-clamp-2 break-words text-xs leading-[18px] text-muted-foreground">
+            <span className="line-clamp-2 break-words text-xs leading-[18px] text-foreground">
               {task.remark || '—'}
             </span>
           </Hint>
@@ -76,12 +78,14 @@ export function useTaskListColumns(
       {
         id: 'type',
         header: '任务类型',
+        headerClassName: 'text-foreground',
         width: COLUMN_WIDTHS[2],
         cell: (task) => <TaskTypeBadge type={task.task_type} />,
       },
       {
         id: 'object',
         header: '进化对象',
+        headerClassName: 'text-foreground',
         width: COLUMN_WIDTHS[3],
         cell: (task) => (
           <div className="min-w-0">
@@ -97,33 +101,37 @@ export function useTaskListColumns(
       {
         id: 'status',
         header: '状态',
+        headerClassName: 'text-foreground',
         width: COLUMN_WIDTHS[4],
         cell: (task) => <TaskStatusBadge status={task.status} />,
       },
       {
         id: 'node',
         header: '当前节点',
+        headerClassName: 'text-foreground',
         width: COLUMN_WIDTHS[5],
         cell: (task) => (
           <Hint content={stepNameOf(task)}>
-            <span className="block truncate text-[13px] text-muted-foreground">{stepNameOf(task)}</span>
+            <span className="block truncate text-[13px] text-foreground">{stepNameOf(task)}</span>
           </Hint>
         ),
       },
       {
         id: 'creator',
         header: '创建人',
+        headerClassName: 'text-foreground',
         width: COLUMN_WIDTHS[6],
         cell: (task) => <span className="text-[13px] text-foreground">{task.created_by}</span>,
       },
       {
         id: 'times',
         header: '开始/结束时间',
+        headerClassName: 'text-foreground',
         width: COLUMN_WIDTHS[7],
         cell: (task) => {
           const times = taskTimes(task);
           return (
-            <span className="block text-xs leading-5 text-muted-foreground">
+            <span className="block text-xs leading-5 text-foreground">
               <span className="block whitespace-nowrap">开始：{formatTime(times.start)}</span>
               <span className="block whitespace-nowrap">结束：{formatTime(times.end)}</span>
             </span>
@@ -133,6 +141,7 @@ export function useTaskListColumns(
       {
         id: 'actions',
         header: '操作',
+        headerClassName: 'text-foreground',
         width: COLUMN_WIDTHS[8],
         align: 'end',
         sticky: 'right',

@@ -45,6 +45,25 @@ class RemoteKnowledgeContentService(KnowledgeContentServiceProtocol):
     def path(kb_id: str, suffix: str = "") -> str:
         return BASE + f"/kb/{segment(kb_id)}" + suffix
 
+    async def delete_knowledge_base(
+        self, *, kb_id: str, access: ContentAccess, immediate: bool = False
+    ):
+        return await self.client.call(
+            "DELETE",
+            self.path(kb_id),
+            headers=access.credentials,
+            **({"params": {"immediate": True}} if immediate else {}),
+        )
+
+    async def cancel_knowledge_base_deletion(
+        self, *, kb_id: str, access: ContentAccess
+    ):
+        return await self.client.call(
+            "POST",
+            self.path(kb_id, "/cancel-delete"),
+            headers=access.credentials,
+        )
+
     async def sources(
         self,
         *,

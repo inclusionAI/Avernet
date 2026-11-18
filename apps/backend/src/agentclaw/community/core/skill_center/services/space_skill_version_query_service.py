@@ -15,6 +15,9 @@ from agentclaw.community.core.skill_center.canonical_center_store import (
     CanonicalCenterVersionRef,
     CanonicalCenterVersionStore,
 )
+from agentclaw.community.core.skill_center.mcp_dependency_scope import (
+    mcp_dependency_codes,
+)
 from agentclaw.community.core.skill_center.errors import (
     DraftFileNotFoundError,
     DraftFileNotTextError,
@@ -159,11 +162,9 @@ class SpaceSkillVersionQueryService(SpaceSkillVersionQueryServiceProtocol):
         if row["metadata_json"]:
             metadata = json.loads(row["metadata_json"])
             raw = metadata.get("mcp_dependencies", [])
-            if not isinstance(raw, list) or any(
-                not isinstance(item, str) for item in raw
-            ):
+            if not isinstance(raw, list):
                 raise ValueError("Published Version MCP metadata is invalid")
-            dependencies = raw
+            dependencies = list(mcp_dependency_codes(raw))
         return {
             "version": row["version_ordinal"],
             "sc_version_number": row["sc_version_number"],

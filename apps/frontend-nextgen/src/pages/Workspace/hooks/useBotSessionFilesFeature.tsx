@@ -8,6 +8,7 @@ import { useBotResourceJump } from '@/pages/Workspace/hooks/useBotResourceJump';
 import { useBotSessionCommands } from '@/pages/Workspace/hooks/useBotSessionCommands';
 import { useBotCapabilitySets } from '@/pages/Workspace/hooks/useBotCapabilitySets';
 import { useBotSessionFileUpload } from '@/pages/Workspace/hooks/useBotSessionFileUpload';
+import { useBotSessionRange } from '@/pages/Workspace/hooks/useBotSessionRange';
 import { useBotSessionFiles } from '@/pages/Workspace/hooks/useBotSessionFiles';
 import { useBotSkills } from '@/pages/Workspace/hooks/useBotSkills';
 import type { BotSessionFileView } from '@/services/workspace/botSessionFileService';
@@ -56,6 +57,23 @@ export function useBotSessionFilesFeature(
       ? resolveChatRuntimeStage(bot)
       : undefined);
 
+  // 多实例选中实例范围(openspec add-session-files-device-uuid):与会话列表/IAM token 同一
+  // range 取值源(useBotSessionRange → instanceSelectionByBotId)。supportsConversationInstanceScope
+  // 已排除好友 Bot 与 teclaw——好友/个人 Bot 对话天成不携带 device_uuid。
+  const instanceRange = useBotSessionRange(bot);
+  const deviceUuid = instanceRange?.deviceUuid;
+
+  // Caller 模式 Bot(call_type === 'caller')的文件请求运行时目标(openspec
+  // add-session-files-caller-runtime-target):好友 Bot → caller_instance(当前用户独立
+  // Caller 实例);我管理的/我协作的 Bot → service(Bot 服务实例池,实例仍由
+  // stage/device_uuid 定位)。推导与 botChatProvider.fetchIamToken 同款,非 Caller Bot 不带。
+  const callerRuntimeTarget =
+    bot?.callType === 'caller'
+      ? bot.isFriendBot
+        ? ('caller_instance' as const)
+        : ('service' as const)
+      : undefined;
+
   const files = useBotSessionFiles(
     botId,
     sessionId,
@@ -63,8 +81,18 @@ export function useBotSessionFilesFeature(
     ownerId,
     bot?.isFriendBot ? userId ?? undefined : undefined,
     ...(stage ? ([stage] as const) : []),
+    ...(deviceUuid ? ([deviceUuid] as const) : []),
+    ...(callerRuntimeTarget ? ([callerRuntimeTarget] as const) : []),
   );
-  const upload = useBotSessionFileUpload(botId, sessionId, userId, ownerId, ...(stage ? ([stage] as const) : []));
+  const upload = useBotSessionFileUpload(
+    botId,
+    sessionId,
+    userId,
+    ownerId,
+    ...(stage ? ([stage] as const) : []),
+    ...(deviceUuid ? ([deviceUuid] as const) : []),
+    ...(callerRuntimeTarget ? ([callerRuntimeTarget] as const) : []),
+  );
   const skillsState = useBotSkills(bot, userId, false);
   // 「通用协作能力」能力集装配：好友 Bot / 不可会话 Bot 为 null（文案区随之隐藏）。
   const capabilitySets = useBotCapabilitySets(bot, userId);
@@ -154,6 +182,8 @@ export function useBotSessionFilesFeature(
       userId={userId}
       ownerId={ownerId}
       stage={stage}
+      deviceUuid={deviceUuid}
+      callerRuntimeTarget={callerRuntimeTarget}
       files={files}
       upload={upload}
       drawerOpen={drawerOpen}

@@ -1,9 +1,11 @@
 //! Three Bot-owned Card columns. Routes/credentials are never persisted here.
 use std::sync::Arc;
+use serde_json::json;
 use async_trait::async_trait;
 use bcs_db_api::{DbPlugin, DbStatement, DbValue, DbSqlFlavor};
 use bcs_service_api::{ServiceError, ServiceResult};
 use bcs_service_api::port::repo::a2a_bot::{A2aBotAvailability, A2aBotRecord, A2aBotRepoPort};
+use bcs_service_api::types::a2a_card_projection::project_agent_card_capabilities;
 
 pub struct DbA2aBotStore { db: Arc<dyn DbPlugin>, env: String, flavor:DbSqlFlavor, registry:Option<std::sync::Weak<crate::PersistentBotRepo>> }
 
@@ -107,6 +109,28 @@ impl A2aBotRepoPort for DbA2aBotStore {
         }
         Err(ServiceError::Conflict("A2A Bot binding unavailable or revision exhausted".into()))
     }
+    async fn synchronize_card_projection(&self,record:&A2aBotRecord)->ServiceResult<()> {
+        let name=bcs_service_api::types::a2a_names::card_bot_name(&record.agent_card).map_err(|message|ServiceError::InvalidOperation {message:message.into(),request_id:None})?;
+        let (bot_info_assignment,bot_info_values)=crate::bot_info_json_set(card_bot_info_updates(&name,&record.agent_card)?)?;
+        let mut params=vec![name.into()];
+        params.extend(bot_info_values);
+        params.push(self.env.clone().into());params.push(record.bot_uuid.clone().into());
+        params.push(record.provider_id.clone().into());params.push(record.provider_bot_ref.clone().into());
+        params.push(i64::try_from(record.revision).map_err(error)?.into());
+        let result=self.db.execute(DbStatement::with_params(format!(
+            "UPDATE bcs_bots SET name=?,{bot_info_assignment},gmt_modified=CURRENT_TIMESTAMP WHERE env=? AND bot_uuid=? AND provider_id=? AND provider_bot_ref=? AND is_deleted=0 AND connection_mode='gateway' AND agent_card_revision=?"),params)).await.map_err(error)?;
+        // MySQL reports zero affected rows when the UPDATE matched the row but
+        // every written value equalled the stored value (no CLIENT_FOUND_ROWS).
+        // A matched-but-unchanged synchronize is a success, not a conflict:
+        // re-check the fence before signalling a revision conflict.
+        if result.affected_rows==0 && !card_projection_unchanged(self.db.as_ref(),self.env.as_str(),record).await? {
+            return Err(ServiceError::Conflict("A2A Card configuration changed".into()));
+        }
+        if let Some(registry)=self.registry.as_ref().and_then(std::sync::Weak::upgrade) {
+            registry.invalidate_registry_metadata(&self.env,&record.bot_uuid).await;
+        }
+        Ok(())
+    }
     async fn get_by_name(&self,provider_id:&str,name:&str)->ServiceResult<Option<A2aBotRecord>> {
         let name_column=match self.flavor {DbSqlFlavor::Mysql=>"name COLLATE utf8mb4_bin",DbSqlFlavor::Sqlite=>"name COLLATE BINARY"};
         let rows=self.db.query(DbStatement::with_params(
@@ -136,6 +160,17 @@ fn decode(row:&bcs_db_api::DbRow)->ServiceResult<A2aBotRecord> {
         agent_card_url:row.get_string("agent_card_url").map_err(error)?,agent_card:parse_card(&required("agent_card")?)?,
         revision:u64::try_from(row.get_i64("agent_card_revision").map_err(error)?.ok_or_else(||error("missing revision"))?).map_err(error)?})
 }
+/// Whether the Card binding still satisfies the synchronize fence: the row is
+/// present, not deleted, gateway-bound to this Provider Bot and still at the
+/// expected revision. MySQL (without CLIENT_FOUND_ROWS) reports zero affected
+/// rows for an UPDATE that matched a row whose values were all unchanged, so a
+/// passing fence check distinguishes a no-op synchronize from a real conflict.
+async fn card_projection_unchanged(db:&dyn DbPlugin,env:&str,record:&A2aBotRecord)->ServiceResult<bool> {
+    let rows=db.query(DbStatement::with_params(
+        "SELECT bot_uuid FROM bcs_bots WHERE env=? AND bot_uuid=? AND provider_id=? AND provider_bot_ref=? AND is_deleted=0 AND connection_mode='gateway' AND agent_card_revision=?",
+        vec![env.into(),record.bot_uuid.clone().into(),record.provider_id.clone().into(),record.provider_bot_ref.clone().into(),i64::try_from(record.revision).map_err(error)?.into()])).await.map_err(error)?;
+    Ok(!rows.is_empty())
+}
 pub(crate) fn validate_registration_card(bot:&bcs_service_api::bot_provider::BotProviderRecord, card:&A2aBotRecord)->ServiceResult<()> {
     if card.bot_uuid!=bot.bot_uuid || card.provider_id!=bot.provider_id || card.provider_bot_ref!=bot.provider_bot_ref || bot.is_deleted
         || bot.connection_mode!=bcs_service_api::bot_provider::BotConnectionMode::Gateway || card.revision!=1 || !card.agent_card.is_object() {
@@ -146,10 +181,26 @@ pub(crate) fn validate_registration_card(bot:&bcs_service_api::bot_provider::Bot
 }
 pub(crate) fn registration_card_steps(card:&A2aBotRecord,env:&str)->ServiceResult<Vec<bcs_db_api::DbTransactionStep>> {
     let name=bcs_service_api::types::a2a_names::card_bot_name(&card.agent_card).map_err(error)?;
-    Ok(vec![bcs_db_api::DbTransactionStep::ExecuteChecked {statement:DbStatement::with_params(
-        "UPDATE bcs_bots SET name=?,bot_info=JSON_SET(COALESCE(bot_info,'{}'),'$.name',?),agent_card=?,agent_card_url=?,agent_card_revision=1,gmt_modified=CURRENT_TIMESTAMP WHERE bot_uuid=? AND env=? AND provider_id=? AND provider_bot_ref=? AND connection_mode='gateway' AND is_deleted=0 AND agent_card IS NULL AND agent_card_revision=0",
-        vec![name.into(),name.into(),serde_json::to_string(&card.agent_card).map_err(error)?.into(),card.agent_card_url.clone().map(DbValue::from).unwrap_or(DbValue::Null),
-            card.bot_uuid.clone().into(),env.into(),card.provider_id.clone().into(),card.provider_bot_ref.clone().into()]),expected_affected_rows:1}])
+    let (bot_info_assignment,bot_info_values)=crate::bot_info_json_set(card_bot_info_updates(&name,&card.agent_card)?)?;
+    let mut params=vec![name.into()];
+    params.extend(bot_info_values);
+    params.push(serde_json::to_string(&card.agent_card).map_err(error)?.into());
+    params.push(card.agent_card_url.clone().map(DbValue::from).unwrap_or(DbValue::Null));
+    params.push(card.bot_uuid.clone().into());params.push(env.into());
+    params.push(card.provider_id.clone().into());params.push(card.provider_bot_ref.clone().into());
+    Ok(vec![bcs_db_api::DbTransactionStep::ExecuteChecked {statement:DbStatement::with_params(format!(
+        "UPDATE bcs_bots SET name=?,{bot_info_assignment},agent_card=?,agent_card_url=?,agent_card_revision=1,gmt_modified=CURRENT_TIMESTAMP WHERE bot_uuid=? AND env=? AND provider_id=? AND provider_bot_ref=? AND connection_mode='gateway' AND is_deleted=0 AND agent_card IS NULL AND agent_card_revision=0"),
+        params),expected_affected_rows:1}])
+}
+
+pub(crate) fn card_bot_info_updates(name:&str,card:&serde_json::Value)->ServiceResult<Vec<(&'static str,serde_json::Value)>> {
+    let projection=project_agent_card_capabilities(Some(card))?;
+    let mut updates=vec![("$.name",json!(name))];
+    if let Some(summary)=projection.summary {updates.push(("$.summary",json!(summary)));}
+    if let Some(domains)=projection.domains {updates.push(("$.domains",json!(domains)));}
+    if let Some(skills)=projection.skills {updates.push(("$.skills",json!(skills)));}
+    if let Some(scopes)=projection.scopes {updates.push(("$.scopes",json!(scopes)));}
+    Ok(updates)
 }
 
 impl DbA2aBotStore {
@@ -164,12 +215,17 @@ impl DbA2aBotStore {
         // Caller retries the local CAS only.
         let expected=Some(expected.unwrap_or_else(||previous.as_ref().map_or(0,|v|v.revision)));
         let visibility_assignment=if let Some(value)=visibility {format!("visibility='{}',",value.as_str())} else {String::new()};
-        let mut params=vec![name.into(),name.into(),serde_json::to_string(&record.agent_card).map_err(error)?.into(),record.agent_card_url.clone().map(DbValue::from).unwrap_or(DbValue::Null),
-            self.env.clone().into(),record.bot_uuid.clone().into(),record.provider_id.clone().into(),record.provider_bot_ref.clone().into()];
+        let (bot_info_assignment,bot_info_values)=crate::bot_info_json_set(card_bot_info_updates(&name,&record.agent_card)?)?;
+        let mut params=vec![name.into()];
+        params.extend(bot_info_values);
+        params.push(serde_json::to_string(&record.agent_card).map_err(error)?.into());
+        params.push(record.agent_card_url.clone().map(DbValue::from).unwrap_or(DbValue::Null));
+        params.push(self.env.clone().into());params.push(record.bot_uuid.clone().into());
+        params.push(record.provider_id.clone().into());params.push(record.provider_bot_ref.clone().into());
         let predicate=if let Some(expected)=expected {params.push(i64::try_from(expected).map_err(error)?.into());" AND agent_card_revision=?"} else {""};
         let results=self.db.transaction(vec![
             DbTransactionStep::Execute(DbStatement::with_params(format!(
-                "UPDATE bcs_bots SET {visibility_assignment}name=?,bot_info=JSON_SET(COALESCE(bot_info,'{{}}'),'$.name',?),agent_card=?,agent_card_url=?,agent_card_revision=agent_card_revision+1,gmt_modified=CURRENT_TIMESTAMP WHERE env=? AND bot_uuid=? AND provider_id=? AND provider_bot_ref=? AND is_deleted=0 AND connection_mode='gateway' AND agent_card_revision<9223372036854775807{predicate}"),params).with_transaction_stop_on_no_rows()),
+                "UPDATE bcs_bots SET {visibility_assignment}name=?,{bot_info_assignment},agent_card=?,agent_card_url=?,agent_card_revision=agent_card_revision+1,gmt_modified=CURRENT_TIMESTAMP WHERE env=? AND bot_uuid=? AND provider_id=? AND provider_bot_ref=? AND is_deleted=0 AND connection_mode='gateway' AND agent_card_revision<9223372036854775807{predicate}"),params).with_transaction_stop_on_no_rows()),
             DbTransactionStep::Query(DbStatement::with_params(
                 "SELECT bot_uuid,provider_id,provider_bot_ref,agent_card,agent_card_url,agent_card_revision FROM bcs_bots WHERE env=? AND bot_uuid=?",vec![self.env.clone().into(),record.bot_uuid.clone().into()])),
         ]).await.map_err(|failure|if failure.is_duplicate_key() {ServiceError::Conflict("Bot name is already in use in this Provider".into())} else {error(failure)})?;

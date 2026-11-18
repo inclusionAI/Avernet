@@ -29,7 +29,8 @@ impl Record for Completion {
 }
 impl NetworkTracer for B3Multi {
     fn start(&self, _: &RequestInfo<'_>, incoming: &Carrier, _: ParentContext<'_>) -> StartedTrace {
-        // Extraction sees the complete original carrier, before any deletion.
+        // Extraction sees propagation headers before deletion, without sensitive values.
+        assert!(!incoming.iter().any(|(name, _)| name == "x-test-credential"));
         assert_eq!(incoming.iter().filter(|(name, _)| name.eq_ignore_ascii_case("b3")).count(), 2);
         StartedTrace {
             context: Arc::new(()),
@@ -116,6 +117,9 @@ macro_rules! async_clients {
                 let mut authorization = $client::header::HeaderValue::from_static("Bearer default");
                 authorization.set_sensitive(true);
                 defaults.insert("authorization", authorization);
+                let mut sensitive = $client::header::HeaderValue::from_static("fixture");
+                sensitive.set_sensitive(true);
+                defaults.insert("x-test-credential", sensitive);
                 defaults.insert("x-opaque", $client::header::HeaderValue::from_bytes(&[0x80]).unwrap());
                 let client = ClientWithDefaults::new($client::Client::builder().no_proxy().build().unwrap(), defaults);
                 let built = client.request(|http| http.get(&peer.url)).build().unwrap();
@@ -131,6 +135,12 @@ macro_rules! async_clients {
                 assert_eq!(wire.get_all("authorization").iter().count(), 1);
                 assert_eq!(wire.get_all("x-tenant").iter().map(|v| v.to_str().unwrap()).collect::<Vec<_>>(), ["override", "second"]);
                 assert_eq!(wire["x-opaque"].as_bytes(), &[0x80]);
+
+                with_provider(Some(Arc::new(B3Multi)), client.request(|http| http.get(&peer.url))
+                    .send_traced()).await.unwrap();
+                let wire = peer.received.recv().await.unwrap();
+                assert_eq!(wire["x-test-credential"], "fixture");
+                assert_eq!(wire["authorization"], "Bearer default");
 
                 // A failed request build must not start the provider or reach the peer.
                 let error = with_provider(Some(Arc::new(B3Multi)), client.request(|http| http.get(&peer.url)

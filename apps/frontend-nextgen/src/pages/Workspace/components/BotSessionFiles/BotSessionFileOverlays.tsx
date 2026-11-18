@@ -14,6 +14,10 @@ interface BotSessionFileOverlaysProps {
   userId: string | null;
   ownerId?: string;
   stage?: BotRuntimeStage;
+  /** 多实例选中实例(openspec add-session-files-device-uuid 扩展段),预览内容链定向;缺省不携带 */
+  deviceUuid?: string;
+  /** Caller 模式 Bot 运行时定位(openspec add-session-files-caller-runtime-target),缺省不携带 */
+  callerRuntimeTarget?: 'service' | 'caller_instance';
   files: UseBotSessionFilesResult;
   upload: UseBotSessionFileUploadResult;
   drawerOpen: boolean;
@@ -33,7 +37,7 @@ interface BotSessionFileOverlaysProps {
  * BotSessionFilesPanel 保持「挂载 == 打开」的列表刷新语义，仅展开态渲染。
  */
 export function BotSessionFileOverlays(props: BotSessionFileOverlaysProps) {
-  const { botId, sessionId, userId, ownerId, stage, files, upload } = props;
+  const { botId, sessionId, userId, ownerId, stage, deviceUuid, callerRuntimeTarget, files, upload } = props;
   return (
     <>
       <BotUploadFilesModal
@@ -65,6 +69,8 @@ export function BotSessionFileOverlays(props: BotSessionFileOverlaysProps) {
             userId={userId ?? undefined}
             ownerId={ownerId}
             stage={stage}
+            deviceUuid={deviceUuid}
+            callerRuntimeTarget={callerRuntimeTarget}
             onClose={props.onCloseDrawer}
             onUploadClick={props.onOpenUpload}
             onOpen={() => void files.refresh()}

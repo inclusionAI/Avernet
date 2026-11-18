@@ -2,7 +2,7 @@ import { getCapabilities } from '@/capabilities';
 import { Button, IconButton } from '@/components/ui';
 import { cn } from '@/utils/cn';
 import { Fragment } from 'react';
-import { navSectionLabels, type NavigationItem, type NavigationSection } from './navigation';
+import { getNavigationItem, navSectionLabels, type NavigationItem, type NavigationSection } from './navigation';
 import { SpaceSwitcher } from './SpaceSwitcher';
 
 interface SidebarNavListProps {
@@ -39,6 +39,7 @@ export function SidebarNavList({ activePath, items, onNavigate, collapsed = fals
   // 隐藏 UI 不影响空间数据链路：initSpaceContext 由 AppShell 按 Bot 分组路由触发，与开关无关。
   const showSpaceSwitcher = getCapabilities().getShellVisibility().value.spaceSwitcher;
   const sections = SECTION_ORDER.filter((section) => items.some((item) => item.section === section));
+  const activeNavigationId = getNavigationItem(activePath)?.id;
 
   if (collapsed) {
     return (
@@ -55,7 +56,7 @@ export function SidebarNavList({ activePath, items, onNavigate, collapsed = fals
               <div className="flex w-full flex-col items-center gap-2">
                 {sectionItems.map((item) => {
                   const Icon = item.icon;
-                  const active = activePath.startsWith(item.path);
+                  const active = activeNavigationId === item.id;
                   return (
                     <IconButton
                       key={item.id}
@@ -93,7 +94,7 @@ export function SidebarNavList({ activePath, items, onNavigate, collapsed = fals
             <div className="flex flex-col gap-0.5">
               {sectionItems.map((item) => {
                 const Icon = item.icon;
-                const active = activePath.startsWith(item.path);
+                const active = activeNavigationId === item.id;
                 return (
                   <Button
                     key={item.id}

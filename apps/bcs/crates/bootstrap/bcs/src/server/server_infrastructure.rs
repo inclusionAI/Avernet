@@ -123,8 +123,6 @@ impl BcsServer {
         let router = Arc::new(MessageRouter::new());
 
         let (fusion, fuse_client) = create_fusion_service(&config);
-        register_late_lifecycles(&lifecycle, fuse_client.as_ref(), card_changes.clone(),
-            control_plane_repo.clone(), sessions.clone(), &config);
 
         // F.1/F.2 dual-write wiring: relation_svc MUST be constructed BEFORE
         // friend_svc so it can be injected via `with_relation(...)`.
@@ -163,11 +161,13 @@ impl BcsServer {
                 build_bot_catalog_cleanup(&config, card_changes.as_ref()),
                 Some(organization_repo.clone()),
             );
-        let (a2a_bot_management, a2a_card_queries) = super::a2a_wiring::build_card_management(
+        let (a2a_bot_management, a2a_card_queries, a2a_cards) = super::a2a_wiring::build_card_management(
             db_plugin.clone(), db_flavor, provider_repos.bot_providers.clone(),
             provider_core.clone(), bot_registry.clone(), bot_repo.clone(), outbound_url_guard.clone(), config.a2a_grpc.as_ref(),
             card_changes.clone().map(|queue| queue as Arc<dyn bcs_service_api::port::CatalogChangePort>),
         )?;
+        register_late_lifecycles(&lifecycle, fuse_client.as_ref(), card_changes.clone(),
+            control_plane_repo.clone(), Some(a2a_cards), sessions.clone(), &config);
         let (organization_core, organization_management) = build_organization_services(
             organization_repo,
             &provider_repos,
@@ -367,7 +367,8 @@ impl BcsServer {
                 .with_chat_run_timeout_ms(config.provider_chat_run_timeout_ms),
         );
         let a2a_transport = super::a2a_wiring::build_delivery(db_plugin.clone(), db_flavor,
-            provider_repos.provider_credentials.clone(), outbound_url_guard.clone(), config.a2a_grpc.as_ref())?;
+            provider_repos.provider_credentials.clone(), outbound_url_guard.clone(),
+            config.a2a_grpc.as_ref(), config.a2a_http_identity.as_ref())?;
         let provider_stream_gray_list = create_provider_stream_gray_list(&config);
         let raw_bot_delivery: Arc<dyn BotDeliveryPort> = Arc::new(
             bcs_provider_http::BotTransportMux::new(ws_bot_delivery, provider_transport.clone()).with_a2a(a2a_transport.clone()),

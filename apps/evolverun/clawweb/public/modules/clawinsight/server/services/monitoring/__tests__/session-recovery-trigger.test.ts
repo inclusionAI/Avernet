@@ -1,6 +1,7 @@
+import { parseLegacyRecoveryAllowlist } from '../../repair/session-recovery/legacy-configuration.js';
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DIAGNOSIS_VERSION, DIAGNOSIS_V3_VERSION, DIAGNOSIS_V4_VERSION, type DiagnosisEvent, type MonitoringTarget } from "../contracts.js";
-import { createMonitoringRecoveryTrigger, parseLegacyRecoveryAllowlist } from "../session-recovery-trigger.js";
+import { createMonitoringRecoveryTrigger } from "../session-recovery-trigger.js";
 import { SessionRecoveryError } from "../../repair/session-recovery/errors.js";
 
 import { runtimeIdentity } from "./runtime-identity-fixture.js";

@@ -310,14 +310,14 @@ describe('管理 Bot 搜索与既有筛选共用(装配)', () => {
 });
 
 describe('协作 Bot 发起人筛选(装配)', () => {
-  it('暂时禁用他人发起按钮，点击不写入筛选状态，我发起和新建会话仍可用', () => {
+  it('启用他人发起按钮并写入来源筛选，仍可切回我发起', () => {
     const botId = teamBot.bot.botId;
     renderSidebar({ teamBots: [teamBot], directory: directoryModel({ teamBots: [teamBot] }) });
     fireEvent.click(screen.getByRole('button', { name: '发起人与会话筛选' }));
     const others = screen.getByRole('button', { name: '他人发起' });
-    expect(others).toBeDisabled();
+    expect(others).toBeEnabled();
     fireEvent.click(others);
-    expect(useConversationStore.getState().originByManagedBotId[botId]).toBeUndefined();
+    expect(useConversationStore.getState().originByManagedBotId[botId]).toBe('others');
     expect(screen.getByRole('button', { name: '我发起' })).toBeEnabled();
     expect(screen.getByRole('button', { name: '新建会话' })).toBeInTheDocument();
   });
@@ -327,7 +327,7 @@ describe('协作 Bot 发起人筛选(装配)', () => {
     useConversationStore.getState().setManagedBotOrigin(botId, 'others');
     const { syncStore } = renderSidebar({ teamBots: [teamBot], directory: directoryModel({ teamBots: [teamBot] }) });
     fireEvent.click(screen.getByRole('button', { name: '发起人与会话筛选' }));
-    expect(screen.getByRole('button', { name: '他人发起' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '他人发起' })).toBeEnabled();
     fireEvent.click(screen.getByRole('button', { name: '我发起' }));
     expect(useConversationStore.getState().originByManagedBotId[botId]).toBe('mine');
     syncStore();

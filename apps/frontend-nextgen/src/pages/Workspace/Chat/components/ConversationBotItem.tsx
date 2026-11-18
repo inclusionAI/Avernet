@@ -60,7 +60,7 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
   const canFavorite = supportsBotSessionFavorites(bot.engine);
   const [searchInputOpen, setSearchInputOpen] = React.useState(false);
   const visibleSessions = React.useMemo(() => {
-    if (!flatCodingSharedSessions || !sessions) return sessions;
+    if (!flatCodingSharedSessions || !bot.isAgentCodingBot || !sessions) return sessions;
     return {
       ...sessions,
       items: sessions.items.map((session) => ({
@@ -68,7 +68,7 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
         title: formatCodingOtherSessionTitle(session.sessionId, session.title),
       })),
     };
-  }, [flatCodingSharedSessions, sessions]);
+  }, [flatCodingSharedSessions, bot.isAgentCodingBot, sessions]);
   // 多实例服务 Bot 实例范围聚合视图(能力缺省 null → 零渲染零激活):实例行判定/检索输入禁用/圆点口径。
   const {
     scope: instanceScope,
@@ -199,8 +199,6 @@ export const ConversationBotItem = React.memo(function ConversationBotItem({
           searchMarked={searchMarked}
           showFilter={showFilter}
           supportsOrigin={isManaged}
-          // 协作 Bot 的他人发起筛选待修复，暂时仅禁用该入口。
-          othersDisabledReason={section === 'team' ? '功能修复中，暂不可用' : undefined}
           supportsFavorites={canFavorite}
           supportsArchives={supportsArchives}
           supportsCollab={supportsCollab}

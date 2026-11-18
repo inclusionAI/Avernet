@@ -10,6 +10,7 @@ import type {
   ManagedBotConversationView,
 } from '@/domain/conversation/types';
 import { isManagedConversationSection } from '@/domain/conversation/types';
+import { sortConversationSessions } from '@/domain/conversation/sessionOrder';
 import type { BotSessionPageView } from '@/services/workspace/botSessionService';
 import { BOT_SESSION_PAGE_SIZE } from '@/services/workspace/botSessionService';
 import type { DomainResult } from '@/services/workspace/identityService';
@@ -32,7 +33,12 @@ export const emptySessions = (): ConversationSessionListState => ({ ...EMPTY_FIE
 export const firstPageOf = (
   items: ConversationSessionListState['items'],
   total: number,
-): ConversationSessionListState => ({ ...emptySessions(), items, total, hasMore: BOT_SESSION_PAGE_SIZE < total });
+  window?: Pick<BotSessionPageView, 'hasMore' | 'nextCursor' | 'scanLimited'>,
+): ConversationSessionListState => ({
+  ...emptySessions(), items: sortConversationSessions(items), total,
+  hasMore: window?.hasMore ?? BOT_SESSION_PAGE_SIZE < total,
+  nextCursor: window?.nextCursor, scanLimited: window?.scanLimited,
+});
 
 /** 追加下一页；使用最新缓存，重取偏移页时去重并保留已更新的会话状态。 */
 export const nextPageOf = (
@@ -43,13 +49,15 @@ export const nextPageOf = (
   if (!result.ok) return { ...base, isLoadingMore: false, loadMoreError: result.error.friendlyMessage };
   return {
     ...base,
-    items: [
+    items: sortConversationSessions([
       ...base.items,
       ...result.data.items.filter((item) => !base.items.some((existing) => existing.sessionId === item.sessionId)),
-    ],
+    ]),
     page,
     total: result.data.total,
-    hasMore: page * BOT_SESSION_PAGE_SIZE < result.data.total,
+    hasMore: result.data.hasMore ?? page * BOT_SESSION_PAGE_SIZE < result.data.total,
+    nextCursor: result.data.nextCursor,
+    scanLimited: result.data.scanLimited,
     loading: false,
     error: null,
     isLoadingMore: false,

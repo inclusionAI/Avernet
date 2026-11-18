@@ -856,7 +856,9 @@ or database migration; consumers persist the same correlation JSON atomically.
 refresh. `A2aCardPort` returns a validated, credential-free declaration; SDK and
 HTTP types do not enter this contract. `A2aBotCoreService` checks the active
 Gateway affiliation and delegates CAS to `A2aBotRepoPort`. Complete Card JSON,
-nullable source URL and revision are one atomic Bot-row write. Inline and URL
+nullable source URL and revision are one atomic Bot-row write; the same Card projection
+also synchronizes generic Bot fields, and an unchanged URL refresh can reapply it without
+incrementing revision. Inline and URL
 sources share validation. Routes and fixed-kind Provider credentials derive from
 trusted current configuration; refresh failure does not overwrite the snapshot.
 No tool execution proves compatibility; in-flight tasks keep frozen interfaces.

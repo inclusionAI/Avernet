@@ -53,6 +53,8 @@ export interface ConversationSessionListState {
   error: string | null;
   isLoadingMore: boolean;
   loadMoreError: string | null;
+  nextCursor?: string | null;
+  scanLimited?: boolean;
 }
 
 /** 多实例服务 Bot 的会话请求范围:按实例(device UUID)与发布阶段取数;缺省不传 = 不限定(现状行为)。 */

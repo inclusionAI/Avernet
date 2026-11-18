@@ -674,6 +674,7 @@ fn inbound(
     msg_id: &str,
 ) -> InboundMessage {
     InboundMessage {
+        caller_ingress: None,
         execution_token: None,
         channel_type: channel_type(),
         account_ref: "robot_1".to_string(),
@@ -696,6 +697,7 @@ fn group_inbound(
     is_at_bot: bool,
 ) -> InboundMessage {
     InboundMessage {
+        caller_ingress: None,
         execution_token: None,
         channel_type: channel_type(),
         account_ref: "robot_1".to_string(),

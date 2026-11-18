@@ -16,6 +16,9 @@ capabilities such as cache or database access.
 
 ## Contract Shape
 
+- [`bcs-app-identity-api`](bcs-app-identity-api/CONTEXT.md) supplies request-scoped
+  application credentials for the built-in A2A HTTP bindings.
+
 - [`bcs-store-api`](bcs-store-api/README.md) owns runtime state capabilities: KV,
   conditional writes, atomic JSON, versioned sorted sets and ordered streams.
   Service stores own business protocols; providers own storage guarantees.
