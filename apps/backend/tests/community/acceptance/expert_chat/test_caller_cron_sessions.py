@@ -135,7 +135,10 @@ def test_existing_caller_discovers_runtime_sessions_without_owned_index(live_bac
         connected = assert_success(client.post(f"{route}/connect", json={"session_key": key}))["data"]
         assert connected["session_key"] == key
         renamed = _runtime_data(client.patch(runtime_route, params=friend_params, headers=principal, json={"title": "Caller renamed"}))
-        assert renamed["title"] == "Caller renamed"
+        # The friend API preserves the Adapter's stable OpenClaw label suffix.
+        assert renamed["title"] == f"Caller renamed_{key}"
+        reread = _runtime_data(client.get(runtime_route, params=friend_params, headers=principal))
+        assert reread["title"] == renamed["title"]
         favorite = _runtime_data(client.put(f"{runtime_route}/favorite", params=friend_params, headers=principal))
         assert favorite["favorited"] is True
         favorite_list = assert_success(client.get(route, params={"favorite_only": True}))["data"]
