@@ -15,7 +15,6 @@ import secrets
 from contextlib import ExitStack, contextmanager
 from datetime import datetime, timedelta, timezone
 from functools import wraps
-from uuid import uuid4
 
 import jwt
 import pytest
@@ -74,10 +73,8 @@ from agentclaw.community.core.task.context_collab.l5_methods.open_profile import
 )
 from agentclaw.community.core.task.context_collab.l5_methods.operations.contracts import (
     GroupMethodOpsServiceProtocol,
-    OpenAdmitCommand,
     OpenMethodOpsServiceProtocol,
     OpenOpportunityCommand,
-    OpenScreenCommand,
     SingleSelectCommand,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime import (
@@ -141,6 +138,7 @@ from agentclaw.community.di.modules.task_persistence_module import TaskPersisten
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.utils.avernet_tenant import DEFAULT_AVERNET_TENANT
 from tests.community.core.task.context_collab.products.task_commission_e2e_support import (
+    SimulatedAdmissionAgent,
     SimulatedWorkingBot,
     _simulate_ai_coding,
 )
@@ -474,12 +472,6 @@ def _discover_opportunity(store, axes, l4_collet, working_bot):
     return opportunity, submitted
 
 
-def _configured_agent_decides(admission, application):
-    """模拟配置的审核Agent执行已声明的 capability_evidence 规则。"""
-    assert admission.decision_rule == "capability_evidence"
-    return "admit" if application.capability_evidence_refs else "reject"
-
-
 def _admit_application_agent(
     injector,
     l5_open_method,
@@ -490,30 +482,16 @@ def _admit_application_agent(
     submitted,
     profile,
 ):
-    policy_context = ADMISSION_JUDGE
-    [policy_ref] = opportunity.admission_policy_refs
-    # TODO: 系统服务进行录用判断？      (fixed: l5_open_method本就是协议提供的操作)
-    screened = l5_open_method.screen(
-        command=OpenScreenCommand(
-            application_ref=submitted.object_id,
-            context=policy_context,
-            collect_id=collet_id_1,
-            reason=policy_ref,
-        ),
+    admission_agent = SimulatedAdmissionAgent(
+        l5_open_method, store, axes, opportunity, profile
     )
+    screened = admission_agent.screen(collet_id_1)
     assert screened.accepted and screened.state == "SCREENING"
     assert screened.object_id == submitted.object_id
 
-    decision_id = f"dec_{uuid4().hex[:12]}"
-    admitted = l5_open_method.admit(
-        command=OpenAdmitCommand(
-            application_ref=submitted.object_id,
-            context=policy_context,
-            collect_id=collet_id_1,
-            decision_id=decision_id,
-            reason=policy_ref,
-        ),
-    )
+    admitted = admission_agent.admit(collet_id_1)
+    decision_id = admission_agent.last_decision_id
+    assert decision_id
 
     assert admitted.accepted and admitted.state == "ADMITTED"
     assert admitted.object_id == submitted.object_id

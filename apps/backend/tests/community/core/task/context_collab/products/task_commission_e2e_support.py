@@ -55,11 +55,15 @@ from agentclaw.community.core.task.context_collab.l5_methods.method_composition 
     CompositionRelation,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.open_profile import (
+    ApplicationState,
     OpenOpportunity,
+    ParticipationApplication,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.operations.contracts import (
+    OpenAdmitCommand,
     OpenApplicationCommand,
     OpenMethodOpsServiceProtocol,
+    OpenScreenCommand,
     ProfileOpAcceptedResult,
 )
 from agentclaw.community.core.task.context_collab.l5_methods.operations.runtime import (
@@ -91,6 +95,7 @@ from agentclaw.community.core.task.context_collab.l6_products.topology import (
 )
 from agentclaw.community.core.task.context_collab.persistence.method_store import (
     MethodStoreProtocol,
+    StoreAxes,
 )
 from agentclaw.community.core.task.context_collab.products.task_commission.service_api import (
     TaskCommissionCreatedView,
@@ -389,6 +394,95 @@ def _simulate_ai_coding(
     assert test_result.read_text(encoding="utf-8") == "3 passed"
     assert all(path.exists() for path in (plan, code, test_result, pr))
     return artifacts
+
+
+class SimulatedAdmissionAgent:
+    """Profile-configured admission Agent; its actions are Collet-scoped.
+
+    The test runtime resolves the one application in the configured state and
+    supplies the configured Agent identity, so the public methods accept only
+    ``collect_id``. The underlying L5 Protocol still consumes full commands.
+    """
+
+    def __init__(
+        self,
+        open_method: OpenMethodOpsServiceProtocol,
+        store: MethodStoreProtocol,
+        axes: StoreAxes,
+        opportunity: OpenOpportunity,
+        profile: ProductProfileDefinition,
+    ):
+        self._open_method = open_method
+        self._store = store
+        self._axes = axes
+        self._opportunity = opportunity
+        self._admission = profile.composition.require_policy(
+            "Open"
+        ).publication.admission
+        configured_agent = self._admission.decision_agent_ref
+        if self._admission.decision_actor != "configured_agent" or not isinstance(
+            configured_agent, AgentRef
+        ):
+            raise ContextCollabValidationError("profile has no admission Agent")
+        self.actor_context = ActorContext(
+            PrincipalRef(configured_agent.agent_type, configured_agent.agent_id),
+            source="agent_admission",
+        )
+        self.last_decision_id: str = ""
+
+    def screen(self, collect_id: str) -> ProfileOpAcceptedResult:
+        application = self._application(collect_id, ApplicationState.SUBMITTED)
+        if not self._agent_decides(application):
+            raise ContextCollabValidationError(
+                "capability_evidence admission strategy rejected the application"
+            )
+        [policy_ref] = self._opportunity.admission_policy_refs
+        return self._open_method.screen(
+            command=OpenScreenCommand(
+                application_ref=application.application_id,
+                context=self.actor_context,
+                collect_id=collect_id,
+                reason=policy_ref,
+            )
+        )
+
+    def admit(self, collect_id: str) -> ProfileOpAcceptedResult:
+        application = self._application(collect_id, ApplicationState.SCREENING)
+        decision_id = f"dec_{uuid4().hex[:12]}"
+        [policy_ref] = self._opportunity.admission_policy_refs
+        admitted = self._open_method.admit(
+            command=OpenAdmitCommand(
+                application_ref=application.application_id,
+                context=self.actor_context,
+                collect_id=collect_id,
+                decision_id=decision_id,
+                reason=policy_ref,
+            )
+        )
+        self.last_decision_id = decision_id
+        return admitted
+
+    def _application(
+        self, collect_id: str, state: ApplicationState
+    ) -> ParticipationApplication:
+        applications = [
+            application
+            for application in self._store.list_applications(
+                self._axes, self._opportunity.method_binding_id, collect_id
+            )
+            if application.state is state
+        ]
+        if len(applications) != 1:
+            raise ContextCollabValidationError(
+                "configured admission Agent requires exactly one application "
+                f"in state {state.value}"
+            )
+        return applications[0]
+
+    def _agent_decides(self, application: ParticipationApplication) -> bool:
+        return self._admission.decision_rule == "capability_evidence" and bool(
+            application.capability_evidence_refs
+        )
 
 
 class SimulatedWorkingBot:
