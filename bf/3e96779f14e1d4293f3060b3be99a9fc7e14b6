@@ -1,0 +1,19 @@
+apps/frontend-nextgen/specs/2026-11-18-task-escort-readonly/ownership-manifest.json
+  s_371aeedb96aaa0::t_235bc60934d685 260,267-268
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "bf3e96779f14e1d4293f3060b3be99a9fc7e14b6",
+  "prompts": {},
+  "sessions": {
+    "s_371aeedb96aaa0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e72c-2e74-7c03-93c8-65c0f1e71fbc",
+        "model": "GPT-6.1-SOL"
+      },
+      "human_author": "fudapeng <dapeng.fdp@antgroup.com>"
+    }
+  }
+}

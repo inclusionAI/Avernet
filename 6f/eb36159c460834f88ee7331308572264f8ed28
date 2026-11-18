@@ -1,0 +1,88 @@
+apps/baas/src/secbaas/community/core/service/device_manage/_provider_receipt.py
+  s_45f5dc83f7ac50::t_94aa9e261258aa 1-50
+apps/baas/tests/integration/core/service/test_arca_storage_lifecycle_regression.py
+  s_45f5dc83f7ac50::t_bc0c86e475deb1 591,593-595,597,606,608-610
+  s_45f5dc83f7ac50::t_19e3d4eb820155 668-693
+  s_45f5dc83f7ac50::t_9741d019cdcca8 54
+  s_45f5dc83f7ac50::t_dbb8c03b0070eb 717-734
+  s_45f5dc83f7ac50::t_ed4af0c6ce53f4 615,620-621,625-628,635-638,643-644
+  s_45f5dc83f7ac50::t_68ceb6b576fa00 616-619,622-624,629-634,639-642
+  s_45f5dc83f7ac50::t_2bfb7254b144d9 522
+  s_45f5dc83f7ac50::t_94aa9e261258aa 646,648-650,654,661
+  s_45f5dc83f7ac50::t_21df89a36919e5 694-716
+  s_45f5dc83f7ac50::t_501ebc08fa2a6c 590,592,596,598-605,607,611-614
+  s_45f5dc83f7ac50::t_874bea79b25c77 645,647,651-653,655-660,662-667
+apps/baas/src/secbaas/community/plugins/sandbox/arca/local_k8s/_sandbox.py
+  s_45f5dc83f7ac50::t_8c65d656db7f40 201-206,222-225,238-251
+  s_45f5dc83f7ac50::t_321e1baa1d0962 235-237,252-261
+apps/baas/src/secbaas/community/api/device_manage/_device_info.py
+  s_45f5dc83f7ac50::t_4f2fcda99d71d9 50
+apps/baas/src/secbaas/community/core/service/paas/_arca_paas_service.py
+  s_45f5dc83f7ac50::t_4f2fcda99d71d9 217-220
+apps/baas/src/secbaas/community/spi/sandbox/arca/_arca_sandbox_info.py
+  s_45f5dc83f7ac50::t_4f2fcda99d71d9 110,133
+apps/baas/src/secbaas/community/api/device_manage/_device_creation_result.py
+  s_45f5dc83f7ac50::t_4f2fcda99d71d9 36
+apps/baas/tests/unit/plugins/sandbox/arca/local_k8s/test_sandbox_plugin.py
+  s_45f5dc83f7ac50::t_8c65d656db7f40 1480-1482
+apps/baas/tests/unit/core/service/device_manage/test_device_service.py
+  s_45f5dc83f7ac50::t_2fcb3402406efc 81,2509
+apps/baas/tests/unit/core/service/device_manage/test_device_service_coverage.py
+  s_45f5dc83f7ac50::t_a8448117e1811f 192
+  s_45f5dc83f7ac50::t_2fcb3402406efc 84-89,182
+apps/baas/tests/unit/core/service/device_manage/test_device_manage.py
+  s_45f5dc83f7ac50::t_2fcb3402406efc 75
+apps/baas/src/secbaas/community/core/service/device_manage/_device_start.py
+  s_45f5dc83f7ac50::t_94aa9e261258aa 39,76,503-505,515-516
+  s_45f5dc83f7ac50::t_979c3380a23f84 34,536,557,583,605,622,642
+apps/baas/src/secbaas/community/core/service/device_manage/_device_disposal.py
+  s_45f5dc83f7ac50::t_457f682df61621 435-436
+  s_45f5dc83f7ac50::t_3e9395f173050c 39,63,165,247,295-296,369,608
+apps/baas/tests/unit/plugins/sandbox/arca/local_k8s/test_a2a_discovery_state.py
+  s_45f5dc83f7ac50::t_8c65d656db7f40 315,331-335
+  s_45f5dc83f7ac50::t_a8448117e1811f 316,336
+apps/baas/tests/unit/core/service/publish_manage/test_publish_retry_orchestrator.py
+  s_45f5dc83f7ac50::t_e65a5aaeb77740 1152,1158-1160,1162-1164
+  s_45f5dc83f7ac50::t_2e19eef155c6eb 1151,1153-1157,1161,1165-1170
+  s_45f5dc83f7ac50::t_6685862551fc7e 11-14,201-203,233,287,315-317,1057
+apps/baas/src/secbaas/community/core/service/publish_manage/_publish_retry_orchestrator.py
+  s_45f5dc83f7ac50::t_2298f3ac6fd268 334
+  s_45f5dc83f7ac50::t_e65a5aaeb77740 318,324-328
+apps/baas/src/secbaas/community/core/service/device_manage/_device_update.py
+  s_45f5dc83f7ac50::t_68ceb6b576fa00 462-480
+  s_45f5dc83f7ac50::t_94aa9e261258aa 38,535-537,547-548
+  s_45f5dc83f7ac50::t_2e08b44d81f01b 34,101,300,308,580,605,631,660
+apps/baas/src/secbaas/community/core/service/paas/_facade_creation.py
+  s_45f5dc83f7ac50::t_4f2fcda99d71d9 418
+apps/baas/tests/unit/core/service/device_manage/test_upfs_storage.py
+  s_45f5dc83f7ac50::t_a8448117e1811f 315
+  s_45f5dc83f7ac50::t_2fcb3402406efc 348
+apps/baas/tests/unit/plugins/sandbox/arca/local_k8s/test_release_wait_for_pods.py
+  s_45f5dc83f7ac50::t_321e1baa1d0962 2,8-10,21-32,37-39,47-50
+  s_45f5dc83f7ac50::t_8c65d656db7f40 14-15,17
+  s_45f5dc83f7ac50::t_55169b1ad56724 1,3-7,11-13,16,18-20,33-36,40-46,51-52
+  s_45f5dc83f7ac50::t_6540d73407430d 53-71
+apps/baas/src/secbaas/community/core/service/device_manage/_device_storage_lifecycle.py
+  s_45f5dc83f7ac50::t_4f2fcda99d71d9 58-59,68-69,84-85,91
+apps/baas/src/secbaas/community/core/service/paas/_arca_lifecycle.py
+  s_45f5dc83f7ac50::t_bc0c86e475deb1 419-433,484-489,502-507
+  s_45f5dc83f7ac50::t_4f2fcda99d71d9 326-329
+apps/baas/src/secbaas/community/core/service/device_manage/_device_service_support.py
+  s_45f5dc83f7ac50::t_68c694b0602c25 43,46,51,59
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6feb36159c460834f88ee7331308572264f8ed28",
+  "prompts": {},
+  "sessions": {
+    "s_45f5dc83f7ac50": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ea50-1141-7730-93e2-7477d4e77f5a",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}
