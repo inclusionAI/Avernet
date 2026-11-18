@@ -416,6 +416,7 @@ def test_send_message_executes_once_with_streaming_dedup(app_client,
         "message": {"role": "ROLE_USER", "parts": [{"text": "内容"}],
                     "messageId": "k1", "contextId": "c1"}})
     assert r1.json()["result"]["task"]["metadata"]["created"] is True
+    assert "x-accel-buffering" not in r1.headers
     # create_task runs on the TestClient portal loop — poll briefly for the
     # background dispatch to land (production path unchanged by the test).
     # sleep 先行：轮询行必须每次至少执行一次，别写成永不执行的防御分支。
@@ -432,6 +433,7 @@ def test_send_message_executes_once_with_streaming_dedup(app_client,
                                    "parts": [{"text": "内容"}],
                                    "messageId": "k1",
                                    "contextId": "c1"}}}) as resp:
+        assert resp.headers["x-accel-buffering"] == "no"
         first_tid = None
         for line in resp.iter_lines():
             if not line.startswith("data: "):
@@ -2510,6 +2512,7 @@ async def test_subscribe_context_stream_lifecycle(monkeypatch):
     k = R._kernel
     resp = await R._subscribe_context({"contextId": "sc"}, "ctx-sub", None)
     assert resp.media_type == "text/event-stream"
+    assert resp.headers["x-accel-buffering"] == "no"
 
     async def collect():
         return [chunk async for chunk in resp.body_iterator]

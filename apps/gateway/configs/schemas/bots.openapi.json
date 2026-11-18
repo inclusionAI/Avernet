@@ -4682,7 +4682,7 @@
             "type": "string"
           },
           "expires_at": {
-            "description": "Deadline for *opening* the sockets here (ISO 8601). It bounds the handshake only: a socket you already opened stays open past this instant, because the credential is checked once at connect time. Request this endpoint again before connecting or reconnecting — not on a timer to keep a live socket alive. An expired credential fails the handshake rather than reporting why.",
+            "description": "Deadline for *opening* the sockets here (ISO 8601). It bounds the handshake only: a socket you already opened stays open past this instant, because the credential is checked once at connect time. Request this endpoint again before connecting or reconnecting — not on a timer to keep a live socket alive. An expired credential fails the handshake rather than reporting why. For A2A HTTP headers, refresh before issuing a new HTTP request after this deadline.",
             "title": "Expires At",
             "type": "string"
           },
@@ -6223,7 +6223,7 @@
             "type": "string"
           },
           "expires_at": {
-            "description": "Deadline for *opening* the sockets here (ISO 8601). It bounds the handshake only: a socket you already opened stays open past this instant, because the credential is checked once at connect time. Request this endpoint again before connecting or reconnecting — not on a timer to keep a live socket alive. An expired credential fails the handshake rather than reporting why.",
+            "description": "Deadline for *opening* the sockets here (ISO 8601). It bounds the handshake only: a socket you already opened stays open past this instant, because the credential is checked once at connect time. Request this endpoint again before connecting or reconnecting — not on a timer to keep a live socket alive. An expired credential fails the handshake rather than reporting why. For A2A HTTP headers, refresh before issuing a new HTTP request after this deadline.",
             "title": "Expires At",
             "type": "string"
           },
@@ -28443,12 +28443,20 @@
           "url": "wss://gateway.example/openapi/v1/bots/messages/ws/abc/api/openclaw/ws?x-proxypass-token=…"
         },
         "properties": {
+          "headers": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "A2A-only HTTP headers for the card and RPC paths under url. Never forward to redirects or other URLs; refresh connection before expires_at. These do not replace per-request IAM authentication.",
+            "title": "Headers",
+            "type": "object"
+          },
           "kind": {
             "$ref": "#/components/schemas/SocketKind",
             "description": "Which socket this is."
           },
           "url": {
-            "description": "Complete URL for this socket, credential included on the chat kinds. Open it as given — do not append to it, rebuild it, or move any part of it into a header; a browser cannot set headers on a WebSocket handshake, which is why everything needed is in the URL. The a2a kind is the exception in shape, not in the rule: it is an HTTP base URL with no credential, and the two A2A paths (/.well-known/agent-card.json and /rpc) hang beneath it as given.",
+            "description": "Complete URL for this socket, credential included on the chat kinds. Open it as given — do not append to it, rebuild it, or move any part of it into a header; a browser cannot set headers on a WebSocket handshake, which is why everything needed is in the URL. The a2a kind is the exception in shape, not in the rule: it is an HTTP base URL with optional authentication headers, and the two A2A paths (/.well-known/agent-card.json and /rpc) hang beneath it as given.",
             "title": "Url",
             "type": "string"
           }
@@ -28470,7 +28478,7 @@
         "type": "string",
         "x-enum-descriptions": [
           "Converse with the bot.",
-          "The bot's A2A agent endpoint — an HTTP base URL. The agent card is served at /.well-known/agent-card.json beneath it and the A2A JSON-RPC surface at /rpc; address both against the URL as given. Unlike a chat socket it carries no credential and never expires on its own. Absent when the deployment defines no browser-direct address for it."
+          "The bot's A2A agent endpoint — an HTTP base URL. The agent card is served at /.well-known/agent-card.json beneath it and the A2A JSON-RPC surface at /rpc; address both against the URL as given. Optional HTTP headers expire at the connection's expires_at deadline. Absent when the deployment defines no browser-direct address for it."
         ],
         "x-enum-varnames": [
           "CHAT",

@@ -53,6 +53,8 @@ export interface BotSocketDto {
   /** B17：a2a = 服务端签发的 A2A base（浏览器可达），card/rpc 挂其下 */
   kind: 'chat' | 'a2a';
   url: string;
+  /** A2A card/RPC transport headers; never apply to WS or unrelated URLs. */
+  headers?: Record<string, string>;
 }
 export interface BotConnectionDto {
   transport_mode?: 'direct' | 'relay';
