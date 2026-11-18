@@ -1,0 +1,172 @@
+apps/bcs-internal/README.md
+  h_10f6235a5d078a 88
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/.gitattributes
+  h_10f6235a5d078a 1-2
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/.gitignore
+  h_10f6235a5d078a 1-8
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/.mvn/maven.config
+  h_10f6235a5d078a 1-2
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/.mvn/settings.xml
+  h_10f6235a5d078a 1
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/.mvn/wrapper/maven-wrapper.properties
+  h_10f6235a5d078a 1-3
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/README.md
+  h_10f6235a5d078a 1-203
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/bcn-a2a-demo/pom.xml
+  h_10f6235a5d078a 1-49
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/bcn-a2a-demo/src/main/java/bcn/a2a/demo/DemoWiring.java
+  h_10f6235a5d078a 1-43
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/bcn-a2a-demo/src/main/java/bcn/a2a/demo/OrderAgent.java
+  h_10f6235a5d078a 1-29
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/bcn-a2a-demo/src/main/java/bcn/a2a/demo/WritingAgent.java
+  h_10f6235a5d078a 1-32
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/bcn-a2a-demo/src/test/java/bcn/a2a/demo/DemoAgentsTest.java
+  h_10f6235a5d078a 1-107
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/bcn-a2a-sdk/pom.xml
+  h_10f6235a5d078a 1-60
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/bcn-a2a-sdk/src/main/java/bcn/a2a/ext/BcnKeys.java
+  h_10f6235a5d078a 1-56
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/bcn-a2a-sdk/src/main/java/bcn/a2a/ext/CallerContextCodec.java
+  h_10f6235a5d078a 1-43
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/bcn-a2a-sdk/src/main/java/bcn/a2a/ext/ToolObservationCodec.java
+  h_10f6235a5d078a 1-65
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/bcn-a2a-sdk/src/main/java/bcn/a2a/server/A2aService.java
+  h_10f6235a5d078a 1-267
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/bcn-a2a-sdk/src/main/java/bcn/a2a/server/A2aServiceOptions.java
+  h_10f6235a5d078a 1-30
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/bcn-a2a-sdk/src/main/java/bcn/a2a/server/AgentEntry.java
+  h_10f6235a5d078a 1-36
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/bcn-a2a-sdk/src/main/java/bcn/a2a/server/AgentRegistry.java
+  h_10f6235a5d078a 1-132
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/bcn-a2a-sdk/src/main/java/bcn/a2a/server/CallHeaders.java
+  h_10f6235a5d078a 1-98
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/bcn-a2a-sdk/src/main/java/bcn/a2a/server/CallScope.java
+  h_10f6235a5d078a 1-183
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/bcn-a2a-sdk/src/main/java/bcn/a2a/server/CancelSignal.java
+  h_10f6235a5d078a 1-42
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/bcn-a2a-sdk/src/main/java/bcn/a2a/server/CollectingStream.java
+  h_10f6235a5d078a 1-81
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/bcn-a2a-sdk/src/main/java/bcn/a2a/server/DefaultBcnCall.java
+  h_10f6235a5d078a 1-48
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/bcn-a2a-sdk/src/main/java/bcn/a2a/server/ErrorMapper.java
+  h_10f6235a5d078a 1-124
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/bcn-a2a-sdk/src/main/java/bcn/a2a/server/ExtensionNegotiator.java
+  h_10f6235a5d078a 1-31
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/bcn-a2a-sdk/src/main/java/bcn/a2a/server/InboundValidator.java
+  h_10f6235a5d078a 1-50
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/bcn-a2a-sdk/src/main/java/bcn/a2a/server/OutboundGuard.java
+  h_10f6235a5d078a 1-44
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/bcn-a2a-sdk/src/main/java/bcn/a2a/server/OutputModes.java
+  h_10f6235a5d078a 1-37
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/bcn-a2a-sdk/src/main/java/bcn/a2a/server/PayloadValidator.java
+  h_10f6235a5d078a 1-152
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/bcn-a2a-sdk/src/main/java/bcn/a2a/server/ProtocolErrors.java
+  h_10f6235a5d078a 1-29
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/bcn-a2a-sdk/src/main/java/bcn/a2a/server/RequestPipeline.java
+  h_10f6235a5d078a 1-374
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/bcn-a2a-sdk/src/main/java/bcn/a2a/server/ResponseTrace.java
+  h_10f6235a5d078a 1-76
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/bcn-a2a-sdk/src/main/java/bcn/a2a/server/ScopedStream.java
+  h_10f6235a5d078a 1-42
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/bcn-a2a-sdk/src/main/java/bcn/a2a/server/StreamBridge.java
+  h_10f6235a5d078a 1-44
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/bcn-a2a-sdk/src/main/java/bcn/a2a/server/TaskStreamWriter.java
+  h_10f6235a5d078a 1-332
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/bcn-a2a-sdk/src/main/java/bcn/a2a/sofa/SofaA2aGrpc.java
+  h_10f6235a5d078a 1-44
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/bcn-a2a-sdk/src/main/java/bcn/a2a/sofa/SofaCallHeaders.java
+  h_10f6235a5d078a 1-87
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/bcn-a2a-sdk/src/main/java/bcn/a2a/sofa/SofaPublishSpec.java
+  h_10f6235a5d078a 1-28
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/bcn-a2a-sdk/src/main/java/bcn/a2a/sofa/SofaServices.java
+  h_10f6235a5d078a 1-67
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/bcn-a2a-sdk/src/main/java/bcn/a2a/sofa/SofaTracing.java
+  h_10f6235a5d078a 1-35
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/bcn-a2a-sdk/src/main/java/bcn/a2a/sofa/UnaryResult.java
+  h_10f6235a5d078a 1-30
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/bcn-a2a-sdk/src/main/java/bcn/a2a/sofa/package-info.java
+  h_10f6235a5d078a 1-6
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/bcn-a2a-sdk/src/main/java/bcn/a2a/spi/A2aAgent.java
+  h_10f6235a5d078a 1-34
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/bcn-a2a-sdk/src/main/java/bcn/a2a/spi/A2aListener.java
+  h_10f6235a5d078a 1-49
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/bcn-a2a-sdk/src/main/java/bcn/a2a/spi/BcnAgent.java
+  h_10f6235a5d078a 1-59
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/bcn-a2a-sdk/src/main/java/bcn/a2a/spi/BcnCall.java
+  h_10f6235a5d078a 1-70
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/bcn-a2a-sdk/src/main/java/bcn/a2a/spi/BcnException.java
+  h_10f6235a5d078a 1-28
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/bcn-a2a-sdk/src/main/java/bcn/a2a/spi/BcnStream.java
+  h_10f6235a5d078a 1-95
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/bcn-a2a-sdk/src/main/java/bcn/a2a/spi/CallerContext.java
+  h_10f6235a5d078a 1-16
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/bcn-a2a-sdk/src/main/java/bcn/a2a/spi/Messages.java
+  h_10f6235a5d078a 1-34
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/bcn-a2a-sdk/src/main/java/bcn/a2a/spi/TaskEngine.java
+  h_10f6235a5d078a 1-36
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/bcn-a2a-sdk/src/main/java/bcn/a2a/spi/ToolEvent.java
+  h_10f6235a5d078a 1-28
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/bcn-a2a-sdk/src/main/java/bcn/a2a/spi/ToolResult.java
+  h_10f6235a5d078a 1-11
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/bcn-a2a-sdk/src/main/java/bcn/a2a/spi/TraceContext.java
+  h_10f6235a5d078a 1-33
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/bcn-a2a-sdk/src/test/java/bcn/a2a/ext/BcnKeysTest.java
+  h_10f6235a5d078a 1-32
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/bcn-a2a-sdk/src/test/java/bcn/a2a/server/AsyncLifecycleTest.java
+  h_10f6235a5d078a 1-75
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/bcn-a2a-sdk/src/test/java/bcn/a2a/server/BackpressureTest.java
+  h_10f6235a5d078a 1-64
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/bcn-a2a-sdk/src/test/java/bcn/a2a/server/DirectoryAndPayloadTest.java
+  h_10f6235a5d078a 1-58
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/bcn-a2a-sdk/src/test/java/bcn/a2a/server/OutputModesTest.java
+  h_10f6235a5d078a 1-41
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/bcn-a2a-sdk/src/test/java/bcn/a2a/server/ResponseTraceTest.java
+  h_10f6235a5d078a 1-36
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/bcn-a2a-sdk/src/test/java/bcn/a2a/server/ReviewPayloadTest.java
+  h_10f6235a5d078a 1-60
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/bcn-a2a-sdk/src/test/java/bcn/a2a/server/ScopedStreamTest.java
+  h_10f6235a5d078a 1-45
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/bcn-a2a-sdk/src/test/java/bcn/a2a/server/TaskStreamWriterTest.java
+  h_10f6235a5d078a 1-190
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/bcn-a2a-sdk/src/test/java/bcn/a2a/server/TenantRegistrationTest.java
+  h_10f6235a5d078a 1-69
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/bcn-a2a-sdk/src/test/java/bcn/a2a/server/TraceContextTest.java
+  h_10f6235a5d078a 1-37
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/bcn-a2a-sdk/src/test/java/bcn/a2a/sofa/SofaTracingTest.java
+  h_10f6235a5d078a 1-34
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/bcn-a2a-sdk/src/test/java/bcn/a2a/sofa/SofaTransportTest.java
+  h_10f6235a5d078a 1-206
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/bcn-a2a-sdk/src/test/resources/payload-review-targets.json
+  h_10f6235a5d078a 1-3452
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/bcn-a2a-test/pom.xml
+  h_10f6235a5d078a 1-35
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/bcn-a2a-test/src/main/java/bcn/a2a/test/A2aAgentTester.java
+  h_10f6235a5d078a 1-168
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/bcn-a2a-test/src/main/java/bcn/a2a/test/CapturingObserver.java
+  h_10f6235a5d078a 1-55
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/mvnw
+  h_10f6235a5d078a 1-294
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/mvnw.cmd
+  h_10f6235a5d078a 1-189
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/pom.xml
+  h_10f6235a5d078a 1-93
+apps/bcs-internal/sdks/bcn-a2a-java-sdk/scripts/verify.sh
+  h_10f6235a5d078a 1-5
+devops/hook/pre_push.sh
+  h_10f6235a5d078a 185-189
+devops/pipeline/PRChecker.aci.yml
+  h_10f6235a5d078a 463-492
+tests/ci/test_harness_sdk_pre_push.py
+  h_10f6235a5d078a 12,16-18,31-32,38,62,64,68,70,77,80,82-93
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e6f93722ac4fb40458135265f4fb8c3f4783c42f",
+  "prompts": {},
+  "humans": {
+    "h_10f6235a5d078a": {
+      "author": "卓人 <hx410025@antgroup.com>"
+    }
+  }
+}
