@@ -191,6 +191,7 @@ export type EvolveRouterDeps = {
   runAnalysisStarter?: RunAnalysisStarter | null;
   hostLocalSkills?: BotSkillGateway | null;
   hostSpaces?: SpaceDirectory;
+  localTaskVisibilityOnly?: boolean;
   hostExtensions?: readonly EvolveExtension[];
   stageSkillRepo?: StageSkillRepository | null;
   skillAssetRepo?: SkillAssetRepository | null;
@@ -3636,10 +3637,11 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
       res.status(400).json({ error: "targetType 参数不合法" }); return;
     }
     const status = String(req.query.status ?? "all");
+    const localVisibility = deps.localTaskVisibilityOnly === true && !teamclawScope(req) && scope === "mine";
     const result = await repo.listTasksPage({
       createdBy: teamclawScope(req) ? null : scope === "all" ? null : actor,
       skillTeamSpaceIds: !teamclawScope(req) && scope === "mine" && req.query.targetType !== "bot"
-        ? await teamSpaceIds(req) : undefined,
+        ? localVisibility ? [] : await teamSpaceIds(req) : undefined,
       authorizedBots: teamclawScope(req)?.bots,
       ownerUserId: scope === "all" ? String(req.query.ownerUserId ?? "").trim() || null : null,
       page,
@@ -3650,7 +3652,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
       statuses: statusGroups[status],
       query: String(req.query.query ?? ""),
     });
-    res.json({ tasks: await Promise.all(result.rows.map(async (row) => withTaskSource(
+    res.json({ ...(localVisibility ? { spaceExpansion: "disabled-in-dev" } : {}), tasks: await Promise.all(result.rows.map(async (row) => withTaskSource(
       publicTask(row as unknown as Record<string, unknown>, await repo.listSteps(row.task_id)),
       row,
       taskSourceService,

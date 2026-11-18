@@ -1293,7 +1293,7 @@ export const api = {
     }> {
       return fetchJson(`${BASE}/evolve/task-definitions`)
     },
-    listTasks(params: { page?: number; pageSize?: number; scope?: 'mine' | 'all'; ownerUserId?: string; category?: string; status?: string; query?: string } = {}): Promise<{ tasks: EvolveTask[]; page: number; pageSize: number; total: number; totalPages: number; scope: 'mine' | 'all'; canViewAll: boolean }> {
+    listTasks(params: { page?: number; pageSize?: number; scope?: 'mine' | 'all'; ownerUserId?: string; category?: string; status?: string; query?: string } = {}): Promise<{ tasks: EvolveTask[]; page: number; pageSize: number; total: number; totalPages: number; scope: 'mine' | 'all'; canViewAll: boolean; spaceExpansion?: 'disabled-in-dev' }> {
       const sp = new URLSearchParams()
       if (params.page) sp.set('page', String(params.page))
       if (params.pageSize) sp.set('pageSize', String(params.pageSize))

@@ -8,6 +8,7 @@ import type { ClawWebBootstrapModule } from "./bootstrap.js";
 import { loadClawWebConfigFiles, mergeClawWebConfig } from "./config-loader.js";
 import { resolveMachineEnvironment } from "./environment.js";
 import { registerShutdown } from "./shutdown.js";
+import { logStartupError } from "./console-logging.js";
 
 type CliOptions = { bootstrap?: string; env?: string; config?: string };
 
@@ -70,6 +71,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((error) => {
-  console.error("[clawweb] Failed to start server:", error);
+  logStartupError(process.argv.slice(2).includes("--bootstrap"), "[clawweb] Failed to start server:", error);
   process.exit(1);
 });
