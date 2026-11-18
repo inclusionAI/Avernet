@@ -256,3 +256,13 @@ async def delete_book(source_id: str, ctx=Depends(context)):
 @router.get("/yuque/book-imports/{source_id}/deletion")
 async def book_deletion(source_id: str, ctx=Depends(context)):
     return await ctx.call("book_deletion", source_id=segment(source_id))
+
+
+@router.delete("")
+async def delete_knowledge_base(immediate: bool = Query(False), ctx=Depends(context)):
+    return await ctx.call("delete_knowledge_base", immediate=immediate)
+
+
+@router.post("/cancel-delete")
+async def cancel_knowledge_base_deletion(ctx=Depends(context)):
+    return await ctx.call("cancel_knowledge_base_deletion")
