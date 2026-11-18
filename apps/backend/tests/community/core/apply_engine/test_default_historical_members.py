@@ -264,14 +264,16 @@ def test_reader_rejects_direct_conflict_when_default_becomes_available(same_asse
             source_kind=SkillInstallationSourceKind.DIRECT,
         )
     before = world.snapshot()
-    with pytest.raises(
-        SkillSetControlPlaneConflictError
-        if same_asset
-        else SkillRuntimeNameConflictError
-    ):
+    if same_asset:
         world.reader.active_skill_assets(
             bot_id="bot-1", owner_id="entity-1", bot=world.bot
         )
+        assert world.snapshot().installation_sources[direct_id] == ("DIRECT", None)
+    else:
+        with pytest.raises(SkillRuntimeNameConflictError):
+            world.reader.active_skill_assets(
+                bot_id="bot-1", owner_id="entity-1", bot=world.bot
+            )
     assert world.snapshot() == before
 
 

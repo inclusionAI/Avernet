@@ -475,10 +475,11 @@ class BotSkillSetInstallations:
         ).items() if kind == SkillInstallationSourceKind.DIRECT}
         center_uuids = {skill.skill_uuid for skill in skills
                         if str(skill.git_path or "").startswith("center://") and skill.skill_uuid}
-        if default_ids & direct_ids or (center_uuids and direct_ids and self._scope(
+        other_direct_ids = direct_ids - default_ids
+        if center_uuids and other_direct_ids and self._scope(
             session.query(Skill.id), Skill
-        ).filter(Skill.id.in_(direct_ids), Skill.git_path.like("center://%"),
-                 Skill.skill_uuid.in_(center_uuids)).first()):
+        ).filter(Skill.id.in_(other_direct_ids), Skill.git_path.like("center://%"),
+                 Skill.skill_uuid.in_(center_uuids)).first():
             raise SkillSetControlPlaneConflictError("RESOURCE_DIRECT_ACTIVE")
         ordinary_facts = self._apply_facts(session, [row for row in bot_sets if not row.is_default])
         if any(self._apply_set_owns_skill(fact, skill, frozenset())
