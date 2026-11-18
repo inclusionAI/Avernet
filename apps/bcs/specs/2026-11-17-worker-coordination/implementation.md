@@ -92,12 +92,28 @@ Drain now bounds each request separately from the overall shutdown deadline,
 continues heartbeat during work, and transfers quiescent sessions concurrently
 within a global round budget. Per-session owner/handoff and post-write checks stay
 in place. The redundant pre-write owner read within one store transfer is removed.
-Confirmed rejection skips that candidate during the current drain; unknown
+Confirmed rejection cools down that shard/instance for `candidate_backoff`; unknown
 handoffs retain their original identity and target. Subscription and cache release
 share one retryable quiescent path, and unneeded shard feeds close. Incoming
 handoffs preserve historical uncertainty through later read-only rejection.
 An in-flight session transfer reserves local state against concurrent release;
 per-shard transfer cursors prevent a failing prefix from starving later sessions.
+
+Confirmed stage changes now continue drain immediately after yielding. Otherwise
+the loop waits `check_interval`, unless a bounded scan still has unvisited ready
+shards. Retry timestamps for claims, incoming confirmations, outgoing handoffs,
+and session transfer/cleanup are retained before I/O. One healthy shard cannot
+accelerate a failing shard's requests. Cooling/busy entries do not consume the
+ready-shard scan budget; accepted shards without due session work avoid owner
+reads. Each round still has the existing global session-operation budget and
+handoff concurrency limit. The ready-work view is one local pass over bounded
+runtime state; it adds no storage calls and does not replace authorization.
+
+Rejected candidates use full instance identity, prefer untried recipients, then
+the oldest eligible rejection with HRW tie-breaking. Expiry permits another
+attempt only after definite rejection; it never cancels an unknown request.
+With no eligible recipient, drain normally waits until `grace - exit_margin` and
+returns `DeadlineReached`. The host must account for that shutdown-hook duration.
 
 Coordination-store session capacity (default 10,000) and handoff-timer capacity
 (default 4,096) are independently configurable. Worker startup checks advertised
@@ -114,8 +130,12 @@ adding timer or private-version setters to production plugin interfaces.
 
 Worker regressions include more failures than the per-round acquisition budget,
 unknown-then-definite errors, orphan discovery pages, deferred recovery hints,
-rejected/unknown handoff targets, failed unsubscribe cleanup and 300 sessions with
-20 ms transfer latency under a 10 s shutdown budget. These controlled tests are
+rejected/unknown handoff targets, failed unsubscribe cleanup, and 3000-session
+batches with zero/20 ms simulated transfer latency. Mixed cases verify each failed
+operation's retry interval and demand-driven owner reads while another shard
+continues progressing, with shard scan budgets of both 1 and 32. These tests check
+scheduler gaps and bounded retries, rather than promising fixed completion times.
+These controlled tests are
 not a production throughput measurement or certification of a real lease backend.
 
 ## Deferred work
@@ -136,13 +156,14 @@ listed above remain separate prerequisites.
 
 ### Local follow-up verification (2026-11-18)
 
-- 514 focused nextest cases passed across the eight crates listed above, including
+- 520 focused nextest cases passed across the eight crates listed above, including
   reusable store/lease contracts and Worker shutdown/recovery regressions.
-- Instrumented changed-line coverage against the rebased dev baseline: **2301/2464
-  (93.38%)** using the repository CI calculation. This is a local changed-line
+- Instrumented changed-line coverage against the PR merge-base: **2383/2547
+  (93.56%)**. The latest drain follow-up alone covers **123/138 (89.13%)** changed
+  instrumentable lines against `a46d2791aa`. This is a local changed-line
   measurement; full-workspace CI is reported separately in the PR.
-- Selected production crates and their test targets passed Clippy with
-  `-D warnings`. The broader test-support Clippy invocation encounters existing
+- The Worker crate and all its test targets passed Clippy with `-D warnings`
+  after this drain follow-up. The earlier broader test-support invocation encounters existing
   fixture-wide unwrap/expect findings; those rules were not relaxed.
 - Relative documentation links, changed-file whitespace and changed Rust source
   size checks passed. Import-rule findings are confined to 56 untouched baseline

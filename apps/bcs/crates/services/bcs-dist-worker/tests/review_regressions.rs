@@ -235,7 +235,7 @@ async fn deferred_retry_respects_hint_but_source_done_wakes_it() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn definite_rejected_target_is_skipped_for_rest_of_drain() {
+async fn definite_rejection_prefers_untried_target_even_after_cooldown_expires() {
     let world = World::new();
     let a = world.worker("a").await;
     let b = world.worker("b").await;

@@ -167,6 +167,9 @@ pub struct Sessions {
     pub hold_transfer: AtomicBool,
     pub transfer_entered: tokio::sync::Notify,
     pub transfer_release: tokio::sync::Notify,
+    pub transfer_calls: Mutex<Vec<(Sid, tokio::time::Instant)>>,
+    pub release_calls: Mutex<Vec<(Sid, tokio::time::Instant)>>,
+    pub failed_releases: Mutex<Vec<Sid>>,
 }
 #[async_trait]
 impl SessionStorePort for Sessions {
@@ -174,7 +177,10 @@ impl SessionStorePort for Sessions {
         self.inner.local_session_capacity()
     }
     async fn release_local(&self, owner: &SessionOwnership) -> Result<(), StoreError> {
-        if self.release_unavailable.load(Ordering::SeqCst) {
+        self.release_calls.lock().unwrap().push((owner.sid.clone(), tokio::time::Instant::now()));
+        if self.release_unavailable.load(Ordering::SeqCst)
+            || self.failed_releases.lock().unwrap().contains(&owner.sid)
+        {
             return Err(StoreError::NotApplied {
                 code: "release_unavailable".into(),
             });
@@ -217,6 +223,7 @@ impl SessionStorePort for Sessions {
         target: &ShardClaim,
         id: &RequestId,
     ) -> Result<SessionTransferOutcome, StoreError> {
+        self.transfer_calls.lock().unwrap().push((source.sid.clone(), tokio::time::Instant::now()));
         if self.hold_transfer.swap(false, Ordering::SeqCst) {
             self.transfer_entered.notify_one();
             self.transfer_release.notified().await;
@@ -265,6 +272,8 @@ pub struct Peers {
     pub rejected_nodes: Mutex<Vec<String>>,
     pub unknown_nodes: Mutex<Vec<String>>,
     pub requests: Mutex<Vec<HandoffRequest>>,
+    pub request_times: Mutex<Vec<(HandoffRequest, tokio::time::Instant)>>,
+    pub unknown_shards: Mutex<Vec<ShardId>>,
 }
 #[async_trait]
 impl DistWorkerPeerPort for Peers {
@@ -274,11 +283,13 @@ impl DistWorkerPeerPort for Peers {
         request: HandoffRequest,
     ) -> Result<HandoffOutcome, RuntimeError> {
         self.requests.lock().unwrap().push(request.clone());
+        self.request_times.lock().unwrap().push((request.clone(), tokio::time::Instant::now()));
         if self
             .unknown_nodes
             .lock()
             .unwrap()
             .contains(&target.instance.node)
+            || self.unknown_shards.lock().unwrap().contains(&request.from.shard)
         {
             return Err(RuntimeError {
                 code: "reply_unknown".into(),
@@ -362,6 +373,9 @@ impl World {
                 hold_transfer: AtomicBool::default(),
                 transfer_entered: tokio::sync::Notify::new(),
                 transfer_release: tokio::sync::Notify::new(),
+                transfer_calls: Mutex::default(),
+                release_calls: Mutex::default(),
+                failed_releases: Mutex::default(),
             }),
             store,
             data: Arc::default(),

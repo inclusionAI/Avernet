@@ -67,6 +67,9 @@ async fn lost_acceptance_reply_is_read_back_even_after_receiver_starts_shutdown(
         b.drain(Duration::ZERO).await.unwrap(),
         DrainOutcome::DeadlineReached { .. }
     ));
+    // Shutdown retains the unknown request, including its retry deadline.
+    assert_eq!(b.accept_handoff(request.clone()).await.unwrap_err().code, "handoff_confirmation_backoff");
+    tokio::time::advance(Duration::from_millis(500)).await;
     assert_eq!(
         b.accept_handoff(request.clone()).await.unwrap(),
         HandoffOutcome::Accepted(accepted.clone())
