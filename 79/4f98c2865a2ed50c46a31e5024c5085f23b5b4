@@ -1,0 +1,19 @@
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/EditorDivergenceComparison.test.tsx
+  s_9811b7b3d0b263::t_da4c00e99a0484 189,205,223
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "794f98c2865a2ed50c46a31e5024c5085f23b5b4",
+  "prompts": {},
+  "sessions": {
+    "s_9811b7b3d0b263": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c389-8ac1-7f93-aa03-f9e20121f685",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}

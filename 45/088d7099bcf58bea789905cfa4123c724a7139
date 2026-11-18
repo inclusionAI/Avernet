@@ -1,0 +1,33 @@
+apps/frontend-nextgen/scripts/public-tests.list
+  s_3487cf77f0393d::t_093f76ba4ca817 151-160
+apps/frontend-nextgen/src/internal/market/components/McpOverviewTab.tsx
+  s_e552dc728b5023::t_1df65c2ce455f9 7
+apps/frontend-nextgen/src/internal/market/components/RepoSkillDetailView.tsx
+  s_e552dc728b5023::t_d9198b681a917f 11
+apps/frontend-nextgen/src/internal/capability-workshop/components/SkillDetailDrawer.tsx
+  s_e552dc728b5023::t_ad79b2b4b357e8 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "45088d7099bcf58bea789905cfa4123c724a7139",
+  "prompts": {},
+  "sessions": {
+    "s_3487cf77f0393d": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "6e5ec3a0-e1fe-4634-acfe-8179993eb508",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    },
+    "s_e552dc728b5023": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "26c8956b-9e72-45f0-8ad6-c3e15b8671a6",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    }
+  }
+}

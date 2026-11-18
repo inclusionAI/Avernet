@@ -1,0 +1,65 @@
+apps/bcs-internal/crates/plugins/bcs-auth-agentpass/Cargo.toml
+  s_7eb4dfc2a0b5ff::t_19ee7a647af26f 33
+apps/bcs-internal/third_party/tracer-rust/tracer-core/src/util/trace_id.rs
+  s_315120ddeca812::t_f9f2ee1743ffdb 6,11,14-35,38,187-216
+  s_315120ddeca812::t_73d80967b68abd 217
+apps/bcs-internal/third_party/tracer-rust/tracer-core/src/util/time.rs
+  s_80fc7b98894eba::t_75a27961c51955 26-29
+  s_80fc7b98894eba::t_d258549e99c5b1 49-61
+  s_80fc7b98894eba::t_85fcb40958cab6 48
+apps/bcs-internal/crates/plugins/bcs-auth-agentpass/src/identity_tests.rs
+  s_7eb4dfc2a0b5ff::t_19ee7a647af26f 8-41
+  s_7eb4dfc2a0b5ff::t_ff5b7acd975fab 7
+apps/bcs-internal/crates/plugins/bcs-tracing-sofa/tests/trace_chain.rs
+  s_7eb4dfc2a0b5ff::t_e24881d9ec26c4 344-377
+  s_7eb4dfc2a0b5ff::t_1d36b5d2c79383 343
+apps/bcs-internal/third_party/tracer-rust/tracer-core/src/appender/mod.rs
+  s_80fc7b98894eba::t_f1bf420c835b34 321-323,325,327-332,337-360,363,367-392
+  s_80fc7b98894eba::t_100447e60680c2 238
+  s_80fc7b98894eba::t_d258549e99c5b1 188-237,239-271
+  s_315120ddeca812::t_3f9e416d00fe1d 275
+  s_315120ddeca812::t_f9f2ee1743ffdb 116-131,272-274,276-279,281-304
+  s_315120ddeca812::t_92f61c699ce52e 280
+  s_80fc7b98894eba::t_89ac6e537b8428 361-362,364-366
+  s_80fc7b98894eba::t_75a27961c51955 4,12,18,22-28,35-38,44-48,60,65,71-72,74-84,86,88-89,96-98,101-106,108-110
+  s_315120ddeca812::t_68df9104c95ec4 305
+apps/bcs-internal/third_party/tracer-rust/README.md
+  s_315120ddeca812::t_f9f2ee1743ffdb 16,18-20
+  s_7eb4dfc2a0b5ff::t_19ee7a647af26f 26-28
+  s_315120ddeca812::t_92f61c699ce52e 17
+  s_80fc7b98894eba::t_0c4f84b1562931 21-24
+apps/bcs-internal/crates/plugins/bcs-auth-agentpass/src/identity.rs
+  s_7eb4dfc2a0b5ff::t_19ee7a647af26f 54,58
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "4e2ca13205833fb1078549bd5c6437bedbe40e3f",
+  "prompts": {},
+  "sessions": {
+    "s_315120ddeca812": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1abb6-5fd1-7390-b945-9601978b30dc",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Zimin Zhang <zhangzimin.zzm@antgroup.com>"
+    },
+    "s_7eb4dfc2a0b5ff": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1aba9-ed17-7960-b50d-5abcaa80a8a0",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Zimin Zhang <zhangzimin.zzm@antgroup.com>"
+    },
+    "s_80fc7b98894eba": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1abc3-42ae-75f0-bcd6-2937bf8e6290",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Zimin Zhang <zhangzimin.zzm@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,53 @@
+apps/bcsfuse/src/app/tc/search.py
+  s_ce84d91f3d35be::t_598b0627aa3eb7 43,247
+  s_ce84d91f3d35be::t_d891c33f042830 31-38,123-125,140-144
+  s_ce84d91f3d35be::t_aef210570fcb60 39,42,121-122,126,128,137-139,151
+docs/specs/2026-11-04-tc-bcsfuse-card-migration/implementation.md
+  s_ce84d91f3d35be::t_c7df3820ca259b 26-31
+  s_ce84d91f3d35be::t_57ea5348dc9c09 20-25
+docs/deploy/tc-card-migration.md
+  s_ce84d91f3d35be::t_57ea5348dc9c09 3-41
+apps/bcsfuse/tests/contract/test_tc_catalog.py
+  s_ce84d91f3d35be::t_e87bcb2f87c66a 282,284
+  s_ce84d91f3d35be::t_a858788b52c338 415-416,420-422,424-428
+  s_ce84d91f3d35be::t_d891c33f042830 236-242,246-257,263-281,283,285-296,326-331,345-354,356-361,368-371,374-376,378-381,384-392
+  s_ce84d91f3d35be::t_7b839f698966fe 243-245,258-262,321-325,332-338,355,362-367,372-373,377,382-383,393-398
+  s_ce84d91f3d35be::t_00829e6bcba956 297-308,311-320,339-342,401-414
+  s_ce84d91f3d35be::t_598b0627aa3eb7 309-310,343-344,399-400
+  s_ce84d91f3d35be::t_9d04d69389ae32 417-419,423
+apps/bcsfuse/src/app/tc/bootstrap.py
+  s_ce84d91f3d35be::t_a858788b52c338 60-66
+  s_ce84d91f3d35be::t_3f83e87dcb26f0 166-168
+  s_ce84d91f3d35be::t_aef210570fcb60 11,30-31,42,56-59,67-68,88,107-108,169
+  s_ce84d91f3d35be::t_d891c33f042830 27-29
+apps/bcsfuse/src/app/tc/routes.py
+  s_ce84d91f3d35be::t_598b0627aa3eb7 162
+apps/bcsfuse/src/app/tc/legacy_index.py
+  s_ce84d91f3d35be::t_5890c04782ee82 1-5,9-25,32,34-37,39-41,45-50,58-76,95-123,126-133,138-143,159-169,173-177,182-188
+  s_ce84d91f3d35be::t_d891c33f042830 51-57,124-125,134-137,144-158,170-172
+  s_ce84d91f3d35be::t_71b841154d2b31 77-78,178-181
+  s_ce84d91f3d35be::t_5abc771c5cc3b1 79-94
+  s_ce84d91f3d35be::t_00829e6bcba956 6-8,28
+  s_ce84d91f3d35be::t_598b0627aa3eb7 26-27,29-31
+  s_ce84d91f3d35be::t_76b510b7c48bfb 33,38,42-44
+apps/bcsfuse/src/app/tc/providers.py
+  s_ce84d91f3d35be::t_aef210570fcb60 30-37,50,54-59,66-68,84-85,95-100,103-108
+  s_ce84d91f3d35be::t_d891c33f042830 38-49,51-53,60-65,69-83,101-102
+  s_ce84d91f3d35be::t_8e8a92f4cffe53 86-94
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e19a0f7374d4be6949e966f3290ca1d40fb22c38",
+  "prompts": {},
+  "sessions": {
+    "s_ce84d91f3d35be": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a5bb-a115-7280-8eb7-64cf057003e5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}

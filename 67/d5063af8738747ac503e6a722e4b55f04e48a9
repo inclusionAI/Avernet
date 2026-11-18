@@ -1,0 +1,19 @@
+apps/frontend-nextgen/test/pages/BotWorkshop/RoutineDisabled.test.tsx
+  s_3df6e394ac8808::t_7c08903ba9669b 94-96
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "67d5063af8738747ac503e6a722e4b55f04e48a9",
+  "prompts": {},
+  "sessions": {
+    "s_3df6e394ac8808": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1dfb8-6204-7490-86e1-9529d8c049fe",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

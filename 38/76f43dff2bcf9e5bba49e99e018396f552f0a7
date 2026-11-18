@@ -1,0 +1,50 @@
+apps/backend/tests/community/adapters/http/openapi_v1/test_skills_endpoints.py
+  s_79439ec6a1b301::t_6e0c0917adf028 43-45,1178-1201
+  s_79439ec6a1b301::t_89547640f04455 61-62,1176-1177,1202-1224
+apps/backend/src/agentclaw/community/core/skill_center/skill_package.py
+  s_79439ec6a1b301::t_6e0c0917adf028 33-35
+  s_79439ec6a1b301::t_d186b537554c4e 37,56-59,140,164,167-170,223,226-229,235,309,316-323,342
+apps/frontend-nextgen/src/hooks/useBotLocalSkillUpload.ts
+  s_79439ec6a1b301::t_53431a236826c5 10,13
+  s_79439ec6a1b301::t_89547640f04455 11-12
+apps/backend/tests/community/core/skill_center/test_skill_package_validator.py
+  s_79439ec6a1b301::t_89547640f04455 570-571,583,587-588
+  s_79439ec6a1b301::t_6e0c0917adf028 572-582,584-586
+apps/backend/src/agentclaw/community/core/skill_center/errors.py
+  s_79439ec6a1b301::t_6e0c0917adf028 69-71
+  s_79439ec6a1b301::t_d186b537554c4e 73-74,83-85
+  s_79439ec6a1b301::t_b35b04f4cc2209 86
+apps/backend/src/agentclaw/community/core/skill_center/services/local_skill_upload_service.py
+  s_79439ec6a1b301::t_d186b537554c4e 891,893,899,901
+apps/frontend-nextgen/test/components/BotWorkshop/localSkillUploadErrors.test.ts
+  s_79439ec6a1b301::t_5a0d3674221332 1-21
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/errors_payloads.py
+  s_79439ec6a1b301::t_6e0c0917adf028 34-71,73-78,92-94,100-104
+  s_79439ec6a1b301::t_d186b537554c4e 24-25,33,72,79
+apps/frontend-nextgen/src/components/BotWorkshop/Editor/localSkillUploadErrors.ts
+  s_79439ec6a1b301::t_53431a236826c5 1-39
+  s_79439ec6a1b301::t_5a0d3674221332 40-44
+apps/frontend-nextgen/src/components/BotWorkshop/Editor/CapabilityPickerModal.tsx
+  s_79439ec6a1b301::t_5a0d3674221332 11,148
+  s_79439ec6a1b301::t_53431a236826c5 9-10,70,119,134,149-153,228-230
+apps/backend/docs/openapi-v1/README.md
+  s_79439ec6a1b301::t_319c6ddb52335e 1831,1834-1844
+apps/backend/docs/openapi-v1/README.zh-CN.md
+  s_79439ec6a1b301::t_9e44e8f7a81265 1062,1064-1074
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "3876f43dff2bcf9e5bba49e99e018396f552f0a7",
+  "prompts": {},
+  "sessions": {
+    "s_79439ec6a1b301": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cfae-5b10-75f3-9ddb-9a40d88bbad6",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

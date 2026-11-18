@@ -1,0 +1,23 @@
+apps/backend/src/agentclaw/community/core/devices/services/conn_info_builders/teclaw_builder.py
+  s_9c5b6d45358b18::t_a29efdef14e459 58-59
+apps/backend/src/agentclaw/community/plugins/community/device_adapter_transport.py
+  s_9c5b6d45358b18::t_bae40cc93c6566 21,67-77,86,102-103,127,130
+apps/backend/tests/community/core/devices/services/conn_info_builders/test_teclaw_builder.py
+  s_9c5b6d45358b18::t_c9b06ccabe6b2e 62-84
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "be5789adfc86d56ce4b4b683aa6ea9c340837a15",
+  "prompts": {},
+  "sessions": {
+    "s_9c5b6d45358b18": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a157-d086-74e0-b4bd-3dcfd235491a",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,24 @@
+submodules/avernet
+  h_7ecb107b24dd7d 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "bfd574bf9da78186366ced5e44c3efc88c0cd0dc",
+  "prompts": {},
+  "humans": {
+    "h_7ecb107b24dd7d": {
+      "author": "shengping <jeremy.lsp@antgroup.com>"
+    }
+  },
+  "sessions": {
+    "s_043c8aae0ca0a5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "s_043c8aae0ca0a5",
+        "model": "unknown"
+      },
+      "human_author": "shengping <jeremy.lsp@antgroup.com>"
+    }
+  }
+}

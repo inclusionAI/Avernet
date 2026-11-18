@@ -1,0 +1,19 @@
+apps/backend/tests/community/architecture/test_http_adapter_layer_is_http_only.py
+  s_d590eeb58783bc::t_dd0b6dcbe279e0 75-77
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "78b5d925b12d4ec85fea1da127c46d6b2b059f51",
+  "prompts": {},
+  "sessions": {
+    "s_d590eeb58783bc": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a423-f3e5-7b43-813a-f4fb0646200c",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

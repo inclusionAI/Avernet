@@ -1,0 +1,19 @@
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/monitoring/__tests__/runtime-identity-recovery-boundary.test.ts
+  s_25c8d69584ee47::t_68d33babdb0413 15-18
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "713f7b1a0957904cef3c2d2be3d87359b33b6720",
+  "prompts": {},
+  "sessions": {
+    "s_25c8d69584ee47": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c946-1fbb-7b62-8d1c-995aca01ed39",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,19 @@
+submodules/avernet
+  s_ca7af9dfba2884::t_1d2aa319f59b0e 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c88694d00bbaf754a64f06d1f9bd1daf2e71c0d2",
+  "prompts": {},
+  "sessions": {
+    "s_ca7af9dfba2884": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a0b5-cba6-7be2-89be-5ef06d15a772",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

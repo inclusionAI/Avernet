@@ -1,0 +1,32 @@
+apps/backend/src/agentclaw/community/core/runtime_binding/service.py
+  s_620fb772f449f4::t_5893138ec7beee 6-7,32-34,58-65,70,88-94
+apps/backend/tests/community/core/token_exchange/test_pipeline.py
+  s_620fb772f449f4::t_eab04e51eb5e06 3,122-132,134,184-191,211
+  s_620fb772f449f4::t_bac2299c18e945 23,32-47
+  s_620fb772f449f4::t_1b4a92649f3f29 48-49
+apps/backend/src/agentclaw/community/core/token_exchange/timing.py
+  s_620fb772f449f4::t_5893138ec7beee 1-15,19-31
+  s_620fb772f449f4::t_bac2299c18e945 16-18
+apps/backend/src/agentclaw/community/core/token_exchange/pipeline.py
+  s_620fb772f449f4::t_5893138ec7beee 13,42,52,56-57
+apps/backend/tests/community/core/runtime_binding/test_service.py
+  s_620fb772f449f4::t_62e029345b9d6b 114-129
+apps/backend/src/agentclaw/community/core/token_exchange/orchestrator.py
+  s_620fb772f449f4::t_5893138ec7beee 12,69-70
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "895633558eaa70911e1139ef5ad0757882f8aca6",
+  "prompts": {},
+  "sessions": {
+    "s_620fb772f449f4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a123ca-8212-7ef2-8637-c02975d987a2",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "evilcoda <yipu.hj@antgroup.com>"
+    }
+  }
+}

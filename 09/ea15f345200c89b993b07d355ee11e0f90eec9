@@ -1,0 +1,131 @@
+apps/bcsfuse/tests/integration/test_isolated_runtime_acceptance.py
+  s_ce84d91f3d35be::t_1b19530e935976 12
+docs/specs/2026-11-04-tc-bcsfuse-card-migration/spec.md
+  s_ce84d91f3d35be::t_ff543ae74acb3a 6,28-31,79-81,84-90,93-106,109-114,119-123,125-134,177-178
+  s_ce84d91f3d35be::t_da844aafb62b19 140-141,251,259-278,449-467,476-478,496,501-502
+  s_ce84d91f3d35be::t_61047d7c5e5795 49,533-536,539,541,559-575,577
+  s_ce84d91f3d35be::t_6ddd6974054994 3,5,7,32,51-52,107-108,115-116,468,540,591,611-614
+  s_ce84d91f3d35be::t_813dbe212b7553 55,124,576
+  s_ce84d91f3d35be::t_5eb47eade37cde 117-118
+  s_ce84d91f3d35be::t_993c35d1e14104 50,179
+apps/bcsfuse/tests/contract/test_tc_migration.py
+  s_ce84d91f3d35be::t_052a49e309b3e8 52-68
+  s_ce84d91f3d35be::t_de4eec3e3d96aa 11,69-76
+apps/bcsfuse/src/app/tc/v2.py
+  s_ce84d91f3d35be::t_1a2a20522724a9 46-47,76
+  s_ce84d91f3d35be::t_a692e1320fece2 34-44,50-52,71-73,78-87,95,105-112
+  s_ce84d91f3d35be::t_210bd2908f3412 1-33,45,48-49,53-70,74-75,77,88-94,96-104,113-115
+apps/bcsfuse/src/app/tc/catalog.py
+  s_ce84d91f3d35be::t_d1eb92e2bbe2fe 54-59,67-73,77-79,84-88,143
+  s_ce84d91f3d35be::t_a692e1320fece2 60-66,74-76,80-83,90-92,95-98
+  s_ce84d91f3d35be::t_210bd2908f3412 89,93-94,99-100
+apps/bcsfuse/tests/unit/bootstrap/test_app_factory.py
+  s_ce84d91f3d35be::t_2b89129c6e7407 26-30
+apps/bcsfuse/docs/architecture/tc-card-migration.md
+  s_ce84d91f3d35be::t_6ddd6974054994 1,3-5,8
+apps/bcsfuse/tests/contract/test_tc_catalog.py
+  s_ce84d91f3d35be::t_ebfa52fc7e1a19 13,239,246
+docs/deploy/tc-card-migration.md
+  s_ce84d91f3d35be::t_6ddd6974054994 3,16,19,30-32,48-49,53-57,65-70,146,148-152
+  s_ce84d91f3d35be::t_e2d9a5f6e685ee 1-2,4-15,17-18,20-29,33-47,50-51,141-144
+  s_ce84d91f3d35be::t_fa8ba663e52000 52
+apps/bcsfuse/tests/contract/test_tc_legacy_transactions.py
+  s_ce84d91f3d35be::t_fe397f0b43206d 1-59,61-88
+  s_ce84d91f3d35be::t_cd036bf4dddd3d 60
+apps/bcsfuse/scripts/run_targeted_tests.sh
+  s_ce84d91f3d35be::t_d52c8f55af6a21 19
+  s_ce84d91f3d35be::t_a84c1e0607b08b 18
+apps/bcsfuse/src/app/tc/legacy_providers.py
+  s_ce84d91f3d35be::t_a692e1320fece2 17-28,30-34,36-38,43-58,60,63-77,83-101,103
+  s_ce84d91f3d35be::t_67277e65504120 1-3,5-16,29,35,39-42,61-62
+  s_ce84d91f3d35be::t_3d0bf6de9dabbf 4,59,78-82,102
+apps/bcsfuse/src/app/tc/legacy_index.py
+  s_ce84d91f3d35be::t_f97eec66c95594 117-121
+  s_ce84d91f3d35be::t_410dd712a019c8 124
+  s_ce84d91f3d35be::t_845f99be2dff38 33,38-49,54-58
+  s_ce84d91f3d35be::t_67277e65504120 1-10,12-20,25-32,34-37,59-63,70-77,81-91,113-114,125-132,137-138,142-146,150-167,173-176,192-197
+  s_ce84d91f3d35be::t_3d0bf6de9dabbf 50-53
+  s_ce84d91f3d35be::t_a692e1320fece2 11,21-24,64-69,92-112,133-136,139-141,147-149,168-172,177-191
+  s_ce84d91f3d35be::t_67aa5951c51c80 78-80
+  s_ce84d91f3d35be::t_8ecc334b6174b9 115-116
+  s_ce84d91f3d35be::t_435563253996ad 122-123
+apps/bcsfuse/src/app/tc/legacy_transaction.py
+  s_ce84d91f3d35be::t_4dc90650fcdabe 45-57
+  s_ce84d91f3d35be::t_9c8bbd410b6669 1-41,43-44,58-69
+  s_ce84d91f3d35be::t_8dbae2a95fead8 42
+apps/bcsfuse/src/app/tc/providers.py
+  s_ce84d91f3d35be::t_a692e1320fece2 102-105
+apps/bcsfuse/tests/contract/test_composed_log_level.py
+  s_ce84d91f3d35be::t_2b89129c6e7407 17
+apps/bcsfuse/src/app/tc/search.py
+  s_ce84d91f3d35be::t_9ee26d637aeebb 43,253
+  s_ce84d91f3d35be::t_a692e1320fece2 31-40,61-73,77-78
+  s_ce84d91f3d35be::t_210bd2908f3412 22,74-76,131,141,152,168-171
+  s_ce84d91f3d35be::t_7c4e5b8ca81cb3 172
+docs/specs/2026-11-04-tc-bcsfuse-card-migration/implementation.md
+  s_ce84d91f3d35be::t_abffd6132e8aa8 1,3-4,6,8,10-12,14-16,18,20,22-73,95-99,101
+  s_ce84d91f3d35be::t_6539678899638d 74-86,89,93
+apps/bcsfuse/src/app/tc/migration_api.py
+  s_ce84d91f3d35be::t_f97eec66c95594 17-19,29-30,33-34,39-47,51-58,62-73,86-91,97-99
+  s_ce84d91f3d35be::t_0b524292cda381 1-16,20-28,31-32,35-38,48-50,59-61,74-85,92-96,100-121
+apps/bcsfuse/tests/contract/test_shared_search_application.py
+  s_ce84d91f3d35be::t_2b89129c6e7407 71-74,79-81
+  s_ce84d91f3d35be::t_484014b771d5d9 10-13,76-78
+apps/bcsfuse/src/app/tc/routes.py
+  s_ce84d91f3d35be::t_9ee26d637aeebb 162
+.github/workflows/search-core.yml
+  s_ce84d91f3d35be::t_a84c1e0607b08b 30
+  s_ce84d91f3d35be::t_d52c8f55af6a21 31
+apps/bcsfuse/scripts/migrate_tc_cards.py
+  s_ce84d91f3d35be::t_0b524292cda381 2,16-17,24,69-70,73,88-91,99,133,140
+  s_ce84d91f3d35be::t_99dc9635546328 92-98,141-144
+  s_ce84d91f3d35be::t_afe388196408ac 145-151
+apps/bcsfuse/tests/contract/test_composed_embedding_provider.py
+  s_ce84d91f3d35be::t_1b19530e935976 32
+apps/bcsfuse/docs/architecture/search-core-boundary.md
+  s_ce84d91f3d35be::t_6ddd6974054994 4,65,83
+apps/bcsfuse/tests/contract/test_tc_same_instance_migration.py
+  s_ce84d91f3d35be::t_78189e9ff1b383 19
+  s_ce84d91f3d35be::t_2b89129c6e7407 20,245,248,250-253,463,468-474,476-485,497-502,506-510,512-515
+  s_ce84d91f3d35be::t_8e6a23bec25c84 303-305,309-313,323-325,361-362,364,366-370,372-373,377-384,388-400
+  s_ce84d91f3d35be::t_f97eec66c95594 363,365,371,374-376,385-387,417-425,428-431,435-440,447-452,454-456
+  s_ce84d91f3d35be::t_ebfa52fc7e1a19 217-218,239-244,246-247,249,254-258,330-332,461-462,464-467,475,486-496,503-505,511,516
+  s_ce84d91f3d35be::t_9ee26d637aeebb 219-222,227-231,236-238
+  s_ce84d91f3d35be::t_a692e1320fece2 5,22-24,38-46,54-63,75-78,97-113,115-140,142-146,150-153,156-161,167-170,173-176,186-191,195-198,200-202,204-207,215-216
+  s_ce84d91f3d35be::t_75b87034868f1f 6,223-226,232-235,259-302,306-308,314-322,326-329
+  s_ce84d91f3d35be::t_a1bcf2a2b2c173 1-4,7-18,21,25-37,47-53,64-70,72-74,79-96,114,141,147-149,154-155,162-166,171-172,177-185,192-194,199,203,208-214
+  s_ce84d91f3d35be::t_410dd712a019c8 71
+  s_ce84d91f3d35be::t_fe397f0b43206d 333-360,401-402
+  s_ce84d91f3d35be::t_ab3b84fb9792c4 403-416,426-427,432-434,441-446,453,457-460
+apps/bcsfuse/src/app/tc/legacy_catalog.py
+  s_ce84d91f3d35be::t_845f99be2dff38 4-5,22,84-101,110-114,118-120,190-201,205-207
+  s_ce84d91f3d35be::t_a692e1320fece2 28,39-45,47-49,57-66,68,128-132,135-144,146-156,164-166,183-185
+  s_ce84d91f3d35be::t_3d0bf6de9dabbf 3,19,23,67,109,117,160,162,168-182,189,204
+  s_ce84d91f3d35be::t_d1eb92e2bbe2fe 1-2,6-18,20-21,24-27,29-38,46,50-56,69-80,108,115-116,121-127,133-134,145,157-159,161,163,167,186-188,202-203
+  s_ce84d91f3d35be::t_f640680c7a6bf3 81-83,102-107
+  s_ce84d91f3d35be::t_31ca1f943774fe 208-211
+apps/bcsfuse/src/app/tc/bootstrap.py
+  s_ce84d91f3d35be::t_410dd712a019c8 4,15,189
+  s_ce84d91f3d35be::t_2b89129c6e7407 188
+  s_ce84d91f3d35be::t_1a2a20522724a9 33-34,42-44,58-59,63,67-78,91,104-105,120-122,126,128,130,134-137,167,169,183-187,190-191,199-200
+  s_ce84d91f3d35be::t_0b524292cda381 201-203,208
+  s_ce84d91f3d35be::t_a692e1320fece2 30-32,60-62,64-66,80-86,88-90,92-103,168
+  s_ce84d91f3d35be::t_3d0bf6de9dabbf 79,87
+  s_ce84d91f3d35be::t_baf961824b230b 16,209-210
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "09ea15f345200c89b993b07d355ee11e0f90eec9",
+  "prompts": {},
+  "sessions": {
+    "s_ce84d91f3d35be": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a5bb-a115-7280-8eb7-64cf057003e5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}

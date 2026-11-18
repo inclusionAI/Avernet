@@ -1,0 +1,21 @@
+apps/bcs/crates/plugins/bcs-db-mysql/src/lib.rs
+  s_4510c0a8802d3e::t_e5ef6b2539c9fc 420-471
+apps/bcs/crates/services/bcs-group-store/src/store_tests.rs
+  s_4510c0a8802d3e::t_33cc726f312a42 963-979
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b9cb75f524b558d6fb9def3605ad00400897295d",
+  "prompts": {},
+  "sessions": {
+    "s_4510c0a8802d3e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1abc2-03c9-7d12-9760-9c632cf09e6e",
+        "model": "DeepSeek-V4-Pro"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

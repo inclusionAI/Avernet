@@ -1,0 +1,30 @@
+apps/evolverun/clawweb/docs/pack-scripts-browser-auth.md
+  h_5f06d4d8b4bdd5 141-208
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/pack-origin-bootstrap.test.ts
+  h_5f06d4d8b4bdd5 1-56
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/pack-origin-config.test.ts
+  h_5f06d4d8b4bdd5 1-310
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/pack-version-persistence.test.ts
+  h_5f06d4d8b4bdd5 8-9,24,33-38,66,81-87,98,100-107
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/index.ts
+  h_5f06d4d8b4bdd5 92,469
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/pack-scripts.ts
+  h_5f06d4d8b4bdd5 4,33
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/pack-security.ts
+  h_5f06d4d8b4bdd5 1,5-47,50-53,109
+apps/evolverun/clawweb/internal/configs/application-pre.yaml
+  h_5f06d4d8b4bdd5 3-6
+apps/evolverun/clawweb/internal/configs/application-prod.yaml
+  h_5f06d4d8b4bdd5 2-5
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "87750612b2156d6bc8b1a8af807cb1e0861899d8",
+  "prompts": {},
+  "humans": {
+    "h_5f06d4d8b4bdd5": {
+      "author": "fudp <dapeng.fdp@antgroup.com>"
+    }
+  }
+}
