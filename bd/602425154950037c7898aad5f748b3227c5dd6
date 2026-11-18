@@ -1,0 +1,50 @@
+apps/backend/tests/community/endpoints/test_resource_file_router_local.py
+  s_ab192cec4dd246::t_8936df2b7d2c27 279-298
+  s_ab192cec4dd246::t_f0aef556997f98 18,22,221-276
+  s_ab192cec4dd246::t_849d2c5303fc16 277-278
+apps/backend/src/agentclaw/community/core/resources/service.py
+  s_ab192cec4dd246::t_90b440efaaddca 42-45
+apps/backend/src/agentclaw/community/core/services/resource_file_service.py
+  s_ab192cec4dd246::t_90b440efaaddca 55
+  s_ab192cec4dd246::t_378b0a24d0696d 631-636
+  s_dea008fd9bf12d::t_48ff30e4f7fc6a 627,650-653
+apps/backend/src/agentclaw/community/adapters/http/resources/file_router.py
+  s_ab192cec4dd246::t_90b440efaaddca 54
+  s_dea008fd9bf12d::t_0b1885528f0692 426-432
+apps/backend/tests/community/framework/device_seams.py
+  s_ab192cec4dd246::t_378b0a24d0696d 174
+apps/backend/tests/community/core/resources/test_resource_file_service.py
+  s_6b81fd99a163f8::t_d2f6be942e9192 314-358
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "bd602425154950037c7898aad5f748b3227c5dd6",
+  "prompts": {},
+  "sessions": {
+    "s_6b81fd99a163f8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ea01-5d7c-7f81-88e0-c8b621598b88",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    },
+    "s_ab192cec4dd246": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ea01-7794-7451-bf70-eddbb50305c1",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    },
+    "s_dea008fd9bf12d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ea01-64cd-7633-86c3-5d3986df554a",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

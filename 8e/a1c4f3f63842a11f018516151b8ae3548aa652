@@ -1,0 +1,71 @@
+apps/bcs/crates/test-support/bcs-test-support/src/contract/a2a_catalog_stack.rs
+  s_3390a382ab8b6f::t_c4358e8341c0b1 21,32-33,56,70,78,89
+apps/bcs/docs/bcsfuse-catalog.md
+  s_3390a382ab8b6f::t_b642823dbbade9 46,48-57
+apps/bcs/crates/bootstrap/bcs/src/server/server_infrastructure.rs
+  s_3390a382ab8b6f::t_58370b0f0c2a42 164,169-170
+apps/bcs/crates/bootstrap/bcs/src/server/a2a_wiring.rs
+  s_3390a382ab8b6f::t_0a0636ec36e9a2 10,18-22,26,30-34
+apps/bcs/crates/bootstrap/bcs/src/server/server_construct.rs
+  s_3390a382ab8b6f::t_6199cfabc07a4d 726
+apps/bcs/crates/bootstrap/bcs/src/server/lifecycle_wiring.rs
+  s_3390a382ab8b6f::t_e369a8381fd2cf 132,146
+apps/bcs/crates/services/bcs-fusion/src/core/card_sync.rs
+  s_3390a382ab8b6f::t_b6d41b975a5bf6 10,12-13,81,83,85-91,141,151-152,154,162-163,166-174,189-190,202,242,247,252,259,290-324
+  s_3390a382ab8b6f::t_06defd04345a47 116
+  s_3390a382ab8b6f::t_ac460b478d6bf0 97,118
+docs/bcn-a2a-api-reference.zh-CN.md
+  s_3390a382ab8b6f::t_657a7fa818abe7 207-208
+apps/bcs/crates/adapters/http/bcs-api-http/tests/a2a_catalog_sync.rs
+  s_3390a382ab8b6f::t_9ddf1ff83eae78 22-23,69,78-82
+apps/bcs/crates/application/bcs-app-a2a-bot/src/lib.rs
+  s_3390a382ab8b6f::t_d0455c1f8febec 61
+apps/bcs/crates/application/bcs-app-a2a-bot/tests/conformance_provider_a2a_registration.rs
+  s_3390a382ab8b6f::t_29b8653123319c 219-226
+apps/bcs/crates/application/bcs-app-a2a-bot/tests/support/catalog_notifications.rs
+  s_3390a382ab8b6f::t_cc4959a67a52fd 47,49,86
+apps/bcs/crates/application/bcs-app-a2a-bot/tests/support/public_management.rs
+  s_3390a382ab8b6f::t_aef7ffcab6035a 251-252,256-260
+apps/bcs/crates/service-api/bcs-service-api/CONTEXT.md
+  s_3390a382ab8b6f::t_6343aeee2d02c8 859-861
+apps/bcs/crates/service-api/bcs-service-api/src/core/a2a_bot.rs
+  s_3390a382ab8b6f::t_4ca558e38c3fab 36-37
+apps/bcs/crates/service-api/bcs-service-api/src/port/repo/a2a_bot.rs
+  s_3390a382ab8b6f::t_084ef415825aa5 32-35
+apps/bcs/crates/service-api/bcs-service-api/src/types/a2a_card_projection.rs
+  s_3390a382ab8b6f::t_7347cbb3286bb6 1-290
+apps/bcs/crates/service-api/bcs-service-api/src/types/mod.rs
+  s_3390a382ab8b6f::t_f7f9090446d856 72
+apps/bcs/crates/services/bcs-bot-store/CONTEXT.md
+  s_3390a382ab8b6f::t_72e050d0e19c9a 235-239
+apps/bcs/crates/services/bcs-bot-store/src/a2a.rs
+  s_3390a382ab8b6f::t_e8f968f3e0d1c2 3,8,112-127,167-186,201-207,211
+apps/bcs/crates/services/bcs-bot-store/src/lib.rs
+  s_3390a382ab8b6f::t_170918e4abe625 100
+apps/bcs/crates/services/bcs-bot-store/tests/conformance_a2a_storage.rs
+  s_3390a382ab8b6f::t_0d06963170bcb9 38-88,103-107
+apps/bcs/crates/services/bcs-bot/CONTEXT.md
+  s_3390a382ab8b6f::t_eb264a82ec1251 159-160
+apps/bcs/crates/services/bcs-bot/src/core/a2a_bot.rs
+  s_3390a382ab8b6f::t_ce6c048bafbe79 78-85
+docs/specs/a2a/minimal-card-registration-v1.md
+  s_3390a382ab8b6f::t_4b237f0b15daea 31-37
+docs/specs/a2a/provider-admin-registration-v1.md
+  s_3390a382ab8b6f::t_81483e020cd375 21-24
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8ea1c4f3f63842a11f018516151b8ae3548aa652",
+  "prompts": {},
+  "sessions": {
+    "s_3390a382ab8b6f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ce64-b71e-7ab0-af3f-e8a007f31b16",
+        "model": "GLM-5.3"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}
