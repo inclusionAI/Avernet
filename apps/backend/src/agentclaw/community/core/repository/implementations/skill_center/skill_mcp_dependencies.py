@@ -93,9 +93,10 @@ def skill_projection_mcp_dependency_codes(
             return cleanup_fallback()
         raise ValueError("Center Skill has no PUBLISHED Version MCP metadata")
     try:
-        return frozenset(
-            mcp_dependency_codes_from_version_metadata(version.metadata_json)
-        )
+        codes = mcp_dependency_codes_from_version_metadata(version.metadata_json)
+        if any(not code for code in codes):
+            raise ValueError("Skill Version has an empty MCP dependency code")
+        return frozenset(codes)
     except (TypeError, ValueError):
         if allow_unresolvable_center:
             return cleanup_fallback()

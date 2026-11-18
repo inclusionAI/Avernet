@@ -8,6 +8,7 @@ from agentclaw.community.core.models.skill import (
     SkillSet,
     SkillSetSkill,
 )
+from agentclaw.community.core.models.space_skill import SkillVersion
 from agentclaw.community.core.models.mcp import (
     BotMCPConfig,
     BotMCPInstallation,
@@ -185,10 +186,30 @@ def test_an_apply_skill_claim_refuses_the_current_center_default_version_by_name
         )
         session.add_all([default, current, local])
         session.flush()
+        session.add(SkillVersion(
+            skill_id=current.id, version_ordinal=2, status="PUBLISHED",
+            sc_version_number="2", name="same-name", metadata_json='{"mcp_dependencies":[]}',
+            created_by="owner", env="dev",
+        ))
         session.add(SkillSetSkill(skill_set_id=default.id, skill_id=999, skill_uuid="same-uuid", env="dev"))
 
     with pytest.raises(SkillSetControlPlaneConflictError):
         repository.claim_apply_skill(skill_id=str(local.id), **_APPLY_SCOPE)
+    with db.orm_session() as session:
+        assert session.query(DefaultSkillsetSkillExclusion).count() == 0
+
+
+def test_an_unpublished_default_center_does_not_reserve_the_runtime_name():
+    db = _Database()
+    repository = CapabilityDesiredStateRepository(db)
+    with db.transactional_orm_session() as session:
+        default = SkillSet(name="default", user_id="", bolt_id="", engine_type="openclaw", is_default=True, env="dev")
+        center = Skill(name="same-name", git_path="center://same-uuid", skill_uuid="same-uuid", status="PUBLISHED", env="dev")
+        local = Skill(name="same-name", git_path="local://same-name", user_id="owner", bolt_id="bot", env="dev")
+        session.add_all([default, center, local])
+        session.flush()
+        session.add(SkillSetSkill(skill_set_id=default.id, skill_id=999, skill_uuid="same-uuid", env="dev"))
+    assert repository.claim_apply_skill(skill_id=str(local.id), **_APPLY_SCOPE).changed
     with db.orm_session() as session:
         assert session.query(DefaultSkillsetSkillExclusion).count() == 0
 
