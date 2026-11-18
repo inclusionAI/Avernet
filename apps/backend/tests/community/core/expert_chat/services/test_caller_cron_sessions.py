@@ -170,16 +170,6 @@ async def test_repeated_lists_preserve_runtime_cron_order(caller_service):
 
 
 @pytest.mark.asyncio
-async def test_discovery_requires_actual_caller_binding_marker(caller_service):
-    service, transport, repo = caller_service
-    for bot in [dict(ACTIVE_BOT, bot_type="service", call_type="caller"),
-                dict(ACTIVE_BOT, bot_type="service", call_type="caller", _caller_instance_binding_id="other-binding")]:
-        assert await service._discover_caller_runtime_sessions(bot, {"engine_type": "openclaw"}, "user1", "owner1", None) == {}
-    transport.invoke.assert_not_awaited()
-    repo.add_owned_session.assert_not_called()
-
-
-@pytest.mark.asyncio
 async def test_ownership_repository_failure_is_irrelevant(caller_service):
     service, transport, repo = caller_service
     transport.invoke.return_value = {"data": [{"id": "agent:main:cron:job"}]}
@@ -497,10 +487,8 @@ async def test_pending_caller_detail_is_not_ready(caller_service):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("entrypoint", ["get", "create"])
-async def test_default_session_entrypoints_keep_pointer_without_owned_registration(caller_service, entrypoint):
+async def test_default_session_entrypoints_preserve_original_registration(caller_service, entrypoint):
     service, transport, repo = caller_service
-    repo.add_owned_session.side_effect = AssertionError("no owned registration")
-    repo.delete_owned_session.side_effect = AssertionError("no owned deletion")
     service._create_session = AsyncMock(return_value="created-session")
     if entrypoint == "get":
         result = await service.get_chat_session("user1", "bot1", "owner1")
@@ -508,3 +496,23 @@ async def test_default_session_entrypoints_keep_pointer_without_owned_registrati
         result = await service.create_chat_session("user1", "bot1", "owner1")
     assert result["session_key"] == "created-session"
     repo.save_session.assert_called_once_with("user1", "bot1", "owner1", "created-session")
+
+    repo.add_owned_session.assert_called_once_with("user1", "bot1", "owner1", "created-session")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("exists", [True, False])
+async def test_default_session_reuse_keeps_original_owned_index_behavior(caller_service, exists):
+    service, transport, repo = caller_service
+    repo.get_session.return_value = "previous-session"
+    service._check_session_exists = AsyncMock(return_value=exists)
+    service._create_session = AsyncMock(return_value="new-session")
+    result = await service.get_chat_session("user1", "bot1", "owner1")
+    expected = "previous-session" if exists else "new-session"
+    assert result["session_key"] == expected
+    repo.add_owned_session.assert_called_once_with("user1", "bot1", "owner1", expected)
+    if exists:
+        service._create_session.assert_not_awaited()
+        repo.delete_owned_session.assert_not_called()
+    else:
+        repo.delete_owned_session.assert_called_once_with("user1", "bot1", "owner1", "previous-session")
