@@ -2,9 +2,13 @@
 
 Wires the four ports and both services:
 
-- ``TaskExperienceLLMProtocol`` → ``OpenAICompatibleTaskExperienceLLM`` with
-  empty ``base_url`` / ``secret_name`` so the LLM is always disabled (sentinel
-  is returned) and Community tests never touch the network.
+- ``TaskExperienceLLMProtocol`` → ``OpenAICompatibleTaskExperienceLLM``
+  configured from :class:`TaskExperienceLLMConfig` (the ``task_experience.llm``
+  user_config block, parsed by :class:`TaskExperienceConfigModule`).
+  Community default leaves the block unset, so the ``OpenAICompatibleTask…LLM``
+  sentinel kicks in (``base_url=""`` ⇒ ``_resolve_token`` short-circuits,
+  ``chat()`` returns ``TASK_EXPERIENCE_LLM_DISABLED`` without HTTP) and
+  community tests never touch the network.
 - ``PolicyRetrievalPort`` → ``_NoopPolicyRetrieval`` returning ``[]``; KGBase
   is a corp-owned upstream and Community mode must not require it (arch rule
   20 / single-box dev first).
@@ -43,6 +47,9 @@ from agentclaw.community.core.task.task_experience.services.task_plan_service im
     TaskPlanService,
 )
 from agentclaw.community.core.task.task_experience.types import KGBasePolicy
+from agentclaw.community.di.task_experience_config import (
+    TaskExperienceLLMConfig,
+)
 from agentclaw.community.plugin_api.http_client import (
     QUALIFIER_GENERAL,
     HttpClient,
@@ -90,17 +97,21 @@ class TaskExperienceModule(Module):
     @inject
     def task_experience_llm(
         self,
+        config: TaskExperienceLLMConfig,
         secret_resolver: SecretResolver,
         general_http: Annotated[HttpClient, QUALIFIER_GENERAL],
     ) -> TaskExperienceLLMProtocol:
-        # base_url="" and secret_name="" short-circuit at _resolve_token /
-        # chat time, so the chat() call returns the disabled sentinel without
-        # ever firing an HTTP request; community mode stays single-box only.
+        # base_url/secret_name are read from the TaskExperienceLLMConfig block.
+        # When the block is unset (community default), the OpenAI-compatible
+        # adapter short-circuits at _resolve_token / chat time and returns
+        # the disabled sentinel without any HTTP. A configured block wires
+        # the same adapter with prod values via Bcom-compatible DI overrides
+        # upstream from the corp composition root.
         return OpenAICompatibleTaskExperienceLLM(
-            base_url="",
-            secret_name="",
-            model="",
-            timeout_ms=1000,
+            base_url=config.base_url,
+            secret_name=config.secret_name,
+            model=config.model,
+            timeout_ms=config.timeout_ms,
             secret_resolver=secret_resolver,
             http_client=general_http,
         )
