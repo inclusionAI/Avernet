@@ -50,7 +50,7 @@ export function MonitoringSettings({ onClose, onChanged, practiceUrl }: { onClos
       </div>
     </div>
     <div className="settings-notice settings-operation-notice"><Icon name="text" /><span>用 Bot 旁的开关可单独开启或关闭，也可以点击「一键全开」或「一键全关」批量设置。</span></div>
-    <div className="settings-notice settings-service-notice"><Icon name="alert" /><span>服务 Bot 配置请联系山宗、安远、沐荛。</span></div>
+    <div className="settings-notice settings-service-notice"><Icon name="alert" /><span>桌面 Bot、TE 及其他非 OpenClaw 引擎 Bot 暂不支持。服务 Bot 配置请联系山宗、安远、沐荛。</span></div>
     <div className="records-toolbar settings-toolbar"><label className="search-box"><Icon name="search" /><input type="search" aria-label="搜索我的 Bot" placeholder="搜索 Bot 名称或 ID" value={q} disabled={busy} onChange={event => setQ(event.target.value)} /></label>
       <div className="settings-actions" role="group" aria-label="批量设置诊断自愈">
         <button type="button" className="copy-btn" disabled={busy} onClick={() => void save({ all: true, enabled: false })}>一键全关</button>
@@ -63,11 +63,12 @@ export function MonitoringSettings({ onClose, onChanged, practiceUrl }: { onClos
     {page?.items.length === 0 && <p className="monitoring-empty">没有找到 Bot。</p>}
     <ul className="settings-bots">{page?.items.map(bot => {
       const config = bot.configuration, enabled = config?.diagnosisEnabled === true && config.recoveryEnabled === true;
-      return <li key={bot.botRef} className={bot.isServiceBot ? 'settings-service-bot' : undefined}><span className="bot-glyph"><Icon name="bot" /></span>
+      const disabledReason = bot.configurationDisabledReason;
+      return <li key={bot.botRef} className={disabledReason ? 'settings-disabled-bot' : undefined}><span className="bot-glyph"><Icon name="bot" /></span>
         <div className="record-text"><strong className="record-title">{bot.botName}</strong><small className="record-session mono">{bot.botId} · {bot.ownerId} · {bot.env}</small>
-          {bot.isServiceBot && <span className="settings-bot-note">服务 Bot 请联系平台</span>}</div>
-        <span className={`settings-state${enabled && !bot.isServiceBot ? ' enabled' : ''}`}>{enabled ? '已开启' : '已关闭'}</span>
-        <button type="button" role="switch" aria-label={`${bot.botName} 诊断监控`} aria-checked={enabled} className="monitoring-switch" disabled={busy || bot.isServiceBot}
+          {disabledReason && <span className="settings-bot-note">{disabledReason}</span>}</div>
+        <span className={`settings-state${enabled && !disabledReason ? ' enabled' : ''}`}>{enabled ? '已开启' : '已关闭'}</span>
+        <button type="button" role="switch" aria-label={`${bot.botName} 诊断监控`} aria-checked={enabled} className="monitoring-switch" disabled={busy || Boolean(disabledReason)} title={disabledReason}
           onClick={() => void save({ botRef: bot.botRef, version: config?.version ?? 0, enabled: !enabled })}><span /></button></li>;
     })}</ul>
     <footer className="settings-footer"><button type="button" className="copy-btn" disabled={busy || cursors.length === 1} onClick={() => setCursors(value => value.slice(0, -1))}>上一页</button>

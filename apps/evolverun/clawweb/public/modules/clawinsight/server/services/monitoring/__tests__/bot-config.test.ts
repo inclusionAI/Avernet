@@ -7,6 +7,8 @@ import { SqlMonitoringBotDirectory } from '../../../repositories/monitoring-bot-
 import { AppConfigRepository } from '@avernet/clawevolve/server/repositories/app-config-repository';
 import { initializeMonitoringSqlite } from '../schema.js';
 import { configureBots } from '../bot-config-service.js';
+import { createMonitoringBrowserService } from '../monitoring-browser-service.js';
+import { MonitoringRepository } from '../../../repositories/monitoring-repository.js';
 import { createMonitoringReferences } from '../target-ref.js';
 import { parseBotNotifications } from '../bot-config-contracts.js';
 import { migrateBotDiagnosisRecoveryConfigs } from '../bot-config-migration.js';
@@ -111,6 +113,55 @@ it('bulk updates all owner pages, excludes other owners and refuses admin write 
   expect(await configureBots(configs, directory, refs, preOnly, { all: true, enabled: true })).toEqual({ updated: 0, failed: [] });
   expect(search).not.toHaveBeenCalled();
   search.mockRestore();
+});
+
+it.each([
+  ['service', 'openclaw', '服务 Bot 请联系平台'],
+  ['desktop', 'openclaw', '桌面 Bot 暂不支持'],
+  ['desktop', 'teclaw', '桌面 Bot 暂不支持'],
+  ['personal', 'teclaw', 'TE 引擎暂不支持'],
+  ['personal', 'claude_code', '非 OpenClaw 引擎暂不支持'],
+  ['personal', 'moltis', '非 OpenClaw 引擎暂不支持'],
+  ['personal', '', '非 OpenClaw 引擎暂不支持'],
+  ['personal', null, '非 OpenClaw 引擎暂不支持'],
+])('shows and enforces the same owner restriction for type=%s engine=%s', async (botType, engine, reason) => {
+  await bot('blocked-existing'); await bot('blocked-new');
+  await db.exec('UPDATE ac_bots SET bot_type = ?, active_engine = ?', [botType, engine]);
+  const existing = { ...target, botId: 'blocked-existing' }, missing = { ...target, botId: 'blocked-new' };
+  await configs.replaceConfiguration(existing, { ...switches(0), configJson: '{"future":{"keep":true}}' });
+  const before = await configs.find(existing);
+  const browser = createMonitoringBrowserService(new MonitoringRepository(db), directory, refs, scope, Date.now, configs);
+  const page = await browser.options(principal, { env: 'prod' });
+  expect(page.items).toHaveLength(2);
+  expect(page.items.every(item => item.configurationDisabledReason === reason)).toBe(true);
+  expect(await browser.status(principal, refs.encode(existing, 'one'), {})).toMatchObject({ configurationDisabledReason: reason });
+  for (const enabled of [true, false]) {
+    for (const [t, version] of [[existing, 1], [missing, 0]] as const) {
+      await expect(configureBots(configs, directory, refs, principal, {
+        botRef: refs.encode(t, 'one'), enabled, version,
+      })).rejects.toMatchObject({ code: 'FORBIDDEN', message: reason });
+    }
+  }
+  await bot('supported');
+  for (const enabled of [true, false]) {
+    expect(await configureBots(configs, directory, refs, principal, { all: true, enabled })).toEqual({ updated: 1, failed: [] });
+    expect(await configs.find(existing)).toEqual(before);
+    expect(await configs.find(missing)).toBeNull();
+    expect(await configs.find({ ...target, botId: 'supported' })).toMatchObject({ diagnosisEnabled: enabled, recoveryEnabled: enabled });
+  }
+});
+
+it.each([
+  ['bot_type', 'desktop'], ['active_engine', 'teclaw'],
+])('rechecks changed %s before bulk writes', async (column, value) => {
+  await bot();
+  const get = directory.get.bind(directory);
+  vi.spyOn(directory, 'get').mockImplementation(async (...args) => {
+    await db.exec(`UPDATE ac_bots SET ${column} = ?`, [value]);
+    return get(...args);
+  });
+  expect(await configureBots(configs, directory, refs, principal, { all: true, enabled: true })).toEqual({ updated: 0, failed: [] });
+  expect(await configs.find(target)).toBeNull();
 });
 
 it.each(['', '{}', 'null', '[]', '{', '{"notifications":null}', '{"notifications":{"owner":{"enabled":"true"}}}',

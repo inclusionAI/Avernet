@@ -22,15 +22,15 @@ export async function createPreviewApp() {
   const repo = new MonitoringRepository(db);
   const now = Date.now();
   const fixture = JSON.parse(readFileSync(new URL('../server/fixtures/monitoring/alert.json', import.meta.url), 'utf8'));
-  const bot = async (botId: string, entityId: string, name: string, status: string | null, count: number, env = 'dev', botType = 'personal') => {
-    await db.exec('INSERT INTO ac_bots (bot_id,entity_id,env,bot_name,owner_id,owner_name,avernet_tenant,bot_type) VALUES (?,?,?,?,?,?,?,?)',
-      [botId, entityId, env, name, entityId, entityId === '001234' ? '林小满' : '陈雨', scope.tenant, botType]);
+  const bot = async (botId: string, entityId: string, name: string, status: string | null, count: number, env = 'dev', botType = 'personal', engine = 'teclaw') => {
+    await db.exec('INSERT INTO ac_bots (bot_id,entity_id,env,bot_name,owner_id,owner_name,avernet_tenant,bot_type,active_engine) VALUES (?,?,?,?,?,?,?,?,?)',
+      [botId, entityId, env, name, entityId, entityId === '001234' ? '林小满' : '陈雨', scope.tenant, botType, engine]);
     const target = { botId, entityId, env };
     if (status) await repo.applyCheck({ target, wire: parseCheck({ schemaVersion: 'claw-monitoring/bot-check/v2', ...target,
-      engine: 'TE', status, checkedAt: new Date(now).toISOString(), lastSuccessfulCheckAt: new Date(now).toISOString() }, now) }, now);
+      engine: engine === 'openclaw' ? 'OC' : 'TE', status, checkedAt: new Date(now).toISOString(), lastSuccessfulCheckAt: new Date(now).toISOString() }, now) }, now);
     for (let i = 0; i < count; i++) {
       const eventId = `preview-${entityId}-${botId}-${env}-${i}`;
-      const wire = parseDiagnosis({ ...fixture, ...target, eventId, diagnosisId: eventId,
+      const wire = parseDiagnosis({ ...fixture, ...target, engine: engine === 'openclaw' ? 'OC' : 'TE', eventId, diagnosisId: eventId,
         sessionId: `session-${entityId}-${Math.floor(i / 2)}`, traceId: `trace-${eventId}`,
         decision: i % 3 === 0 ? 'ALERT' : 'PASS',
         confidence: i % 3 === 0 ? 0.86 : null,
@@ -41,10 +41,13 @@ export async function createPreviewApp() {
     }
   };
   for (let i = 0; i < 26; i++) await bot(`assistant-${i}`, '001234', `工作助手 ${String(i + 1).padStart(2, '0')}`, i % 2 ? 'HEALTHY' : null, 0);
-  await bot('default', '001234', '默认助手 · 生产', 'HEALTHY', 3, 'prod');
+  await bot('default', '001234', '默认助手 · 生产', 'HEALTHY', 3, 'prod', 'personal', 'openclaw');
   await bot('default', '009876', '陈雨的默认助手', 'HEALTHY', 9);
   await bot('research-new', '009876', '陈雨的研究助手', null, 0);
   await bot('research-new', '001234', '研究助手', null, 0);
+  await bot('desktop-assistant', '001234', '桌面助手', null, 0, 'prod', 'desktop', 'openclaw');
+  await bot('te-assistant', '001234', 'TE 助手', null, 0, 'prod');
+  await bot('claude-assistant', '001234', 'Claude Code 助手', null, 0, 'prod', 'personal', 'claude_code');
   await bot('weekly-report', '001234', '周报助手', 'PAUSED', 8, 'prod', 'service');
   await bot('default', '001234', '我的默认助手', 'HEALTHY', 163);
   const app = express();

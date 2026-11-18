@@ -106,7 +106,7 @@
 .insight-monitoring .monitoring-switch span { display: block; width: 18px; height: 18px; border-radius: 50%; background: var(--paper); }
 .insight-monitoring .monitoring-switch[aria-checked=true] { background: var(--blue); }
 .insight-monitoring .monitoring-switch[aria-checked=true] span { margin-left: 16px; }
-.insight-monitoring .settings-service-bot .monitoring-switch { background: var(--muted); }
+.insight-monitoring .settings-disabled-bot .monitoring-switch { background: var(--muted); }
 
 .insight-monitoring .recovery-toolbar { justify-content: flex-start; flex-wrap: wrap; padding-block: 11px; }
 .insight-monitoring .recovery-toolbar .refresh { margin-left: auto; }

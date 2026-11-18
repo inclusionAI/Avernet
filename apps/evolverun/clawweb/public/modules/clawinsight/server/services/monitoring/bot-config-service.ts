@@ -22,6 +22,16 @@ export function isServiceBot(bot: DirectoryBot): boolean {
   return bot.botType?.trim().toLowerCase() === 'service';
 }
 
+/** Shared by option rendering and owner writes, using the current directory metadata. */
+export function botConfigurationDisabledReason(bot: DirectoryBot): string | undefined {
+  if (isServiceBot(bot)) return '服务 Bot 请联系平台';
+  if (bot.botType?.trim().toLowerCase() === 'desktop') return '桌面 Bot 暂不支持';
+  const engine = bot.activeEngine.trim().toLowerCase();
+  if (engine === 'teclaw') return 'TE 引擎暂不支持';
+  if (engine !== 'openclaw') return '非 OpenClaw 引擎暂不支持';
+  return undefined;
+}
+
 export async function replaceBotConfiguration(store: BotDiagnosisRecoveryConfigStore, bot: DirectoryBot, updatedBy: string, input: unknown, app?: RecoveryAppConfigStore, onBotEnabled?: BotEnabledNotifier) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new MonitoringError('INVALID_EVENT', '配置参数无效。');
   const value = input as Record<string, unknown>;
@@ -58,7 +68,8 @@ export async function configureBots(store: BotDiagnosisRecoveryConfigStore | und
   const write = async (bot: DirectoryBot, version: number, previous?: BotDiagnosisRecoveryConfig | null) => {
     if (bot.ownerId !== principal.staffId) throw new MonitoringError('FORBIDDEN', '仅 Bot 所有者可以修改配置。');
     if (bot.env !== 'prod') throw new MonitoringError('FORBIDDEN', '仅支持生产环境 Bot 的诊断自愈配置。');
-    if (isServiceBot(bot)) throw new MonitoringError('FORBIDDEN', '服务 Bot 请联系平台设置诊断自愈。');
+    const disabledReason = botConfigurationDisabledReason(bot);
+    if (disabledReason) throw new MonitoringError('FORBIDDEN', disabledReason);
     const switches = { diagnosisEnabled: value.enabled as boolean, recoveryEnabled: value.enabled as boolean,
       expectedVersion: version, updatedBy: principal.staffId };
     const enabling = onBotEnabled && switches.diagnosisEnabled;
@@ -89,7 +100,7 @@ export async function configureBots(store: BotDiagnosisRecoveryConfigStore | und
           // Revalidate ownership immediately before mutation, never trust an old UI roster.
           const current = await directory.get(bot, principal);
           if (!current || current.ownerId !== principal.staffId) { failed.push(references.encode(bot, principal.tenant)); continue; }
-          if (current.env !== 'prod' || isServiceBot(current)) continue;
+          if (current.env !== 'prod' || botConfigurationDisabledReason(current)) continue;
           try { await write(current, configs[i]?.version ?? 0, configs[i]); }
           catch { failed.push(references.encode(bot, principal.tenant)); }
         }
