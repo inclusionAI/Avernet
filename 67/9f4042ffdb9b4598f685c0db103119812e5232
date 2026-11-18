@@ -1,0 +1,14 @@
+apps/frontend-nextgen/test/components/Workspace/TaskPanelHost.test.tsx
+  h_5b2ec9c12c4d18 3,56,59-65,67-68,73,76-84,87,89,92,102-103,105-106,109-113,115
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "679f4042ffdb9b4598f685c0db103119812e5232",
+  "prompts": {},
+  "humans": {
+    "h_5b2ec9c12c4d18": {
+      "author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

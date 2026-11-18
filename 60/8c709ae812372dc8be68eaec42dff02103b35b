@@ -1,0 +1,21 @@
+apps/backend/specs/baas-caller-status/000-implementation-plan.md
+  s_ccda8e611a6d06::t_1349ea309024b3 1-6
+apps/backend/specs/baas-caller-status/009-pr-report.md
+  s_ccda8e611a6d06::t_a714cdf9aef8c5 7-8,47
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "608c709ae812372dc8be68eaec42dff02103b35b",
+  "prompts": {},
+  "sessions": {
+    "s_ccda8e611a6d06": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cda4-a056-7f61-ab7e-7505fc5c7282",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}
