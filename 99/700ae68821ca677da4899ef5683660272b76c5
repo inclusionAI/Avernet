@@ -1,0 +1,26 @@
+singlebox/ci/tests/test_check_secrets_references.py
+  s_12273d43a83942::t_9219e0c0559f49 223-226,228-243
+  s_12273d43a83942::t_ca9dbddd0e239d 227
+devops/hook/test_check_secrets.py
+  s_12273d43a83942::t_68143f829eb12b 132-136
+devops/hook/check_secrets.py
+  s_12273d43a83942::t_68143f829eb12b 419-422
+  s_12273d43a83942::t_bd0d108bff8005 295,313-314,345-361
+  s_12273d43a83942::t_dd8a8605b513d0 373-375
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "99700ae68821ca677da4899ef5683660272b76c5",
+  "prompts": {},
+  "sessions": {
+    "s_12273d43a83942": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e9f6-c9ef-77f1-88ad-8a7ab3e27148",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

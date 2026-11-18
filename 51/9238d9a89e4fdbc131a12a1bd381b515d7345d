@@ -1,0 +1,31 @@
+apps/backend/src/agentclaw/community/core/repository/implementations/publishing/bot_publish.py
+  s_02f79795f3d37a::t_d968550ea3ef6d 293-294,309-310
+apps/backend/src/agentclaw/community/core/bot_inventory/adapters/service_lifecycle.py
+  s_02f79795f3d37a::t_d968550ea3ef6d 175
+apps/backend/tests/community/adapters/http/openapi_v1/inventory/test_inventory_handlers.py
+  s_02f79795f3d37a::t_f04a271b798f0c 329-333,335
+  s_02f79795f3d37a::t_13859259b457b8 13-14,42-47,321-328,334,336-366
+  s_02f79795f3d37a::t_3bd25d8dcf2bbf 367-368
+apps/backend/src/agentclaw/community/core/repository/protocols/publishing.py
+  s_02f79795f3d37a::t_d968550ea3ef6d 199-200,202-204
+apps/backend/tests/community/core/bot_inventory/adapters/test_service_lifecycle.py
+  s_02f79795f3d37a::t_d968550ea3ef6d 74
+apps/backend/src/agentclaw/community/core/bot_inventory/README.md
+  s_02f79795f3d37a::t_d968550ea3ef6d 68-70
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "519238d9a89e4fdbc131a12a1bd381b515d7345d",
+  "prompts": {},
+  "sessions": {
+    "s_02f79795f3d37a": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a05bec-667c-7102-9d27-cc8ec88f9217",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "evilcoda <yipu.hj@antgroup.com>"
+    }
+  }
+}

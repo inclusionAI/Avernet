@@ -1,0 +1,66 @@
+apps/bcs/crates/external-clients/bcs-a2a-http/src/client.rs
+  s_83a624b3301ddd::t_7a7ed38dfe95fd 8,11,22,42,49,71-75
+apps/bcs/crates/external-clients/bcs-a2a-http/src/jsonrpc.rs
+  s_83a624b3301ddd::t_7a7ed38dfe95fd 3-4,12,47-50,71-74
+apps/bcs/crates/external-clients/bcs-a2a-http/src/lib.rs
+  s_83a624b3301ddd::t_7a7ed38dfe95fd 14
+apps/bcs/crates/external-clients/bcs-a2a-http/tests/conformance_a2a_delivery.rs
+  s_83a624b3301ddd::t_f2a6377397b5bc 156-162,180-183,324-369
+  s_83a624b3301ddd::t_5bbe2ca00321bb 370
+apps/bcs/crates/external-clients/bcs-a2a-http/src/delivery_error.rs
+  s_83a624b3301ddd::t_7a7ed38dfe95fd 36-38,43,48
+apps/bcs/crates/external-clients/bcs-a2a-http/src/http_client.rs
+  s_83a624b3301ddd::t_f2a6377397b5bc 91-93
+  s_83a624b3301ddd::t_7a7ed38dfe95fd 1-90
+apps/bcs/crates/external-clients/bcs-a2a-http/src/client_json.rs
+  s_83a624b3301ddd::t_7a7ed38dfe95fd 2,11-12,15,17-18
+apps/bcs/crates/external-clients/bcs-a2a-http/src/subscribe.rs
+  s_83a624b3301ddd::t_7a7ed38dfe95fd 2,53,59,61-67
+apps/bcs/crates/external-clients/bcs-a2a-http/src/http_client/tests.rs
+  s_83a624b3301ddd::t_f2a6377397b5bc 1-127
+apps/bcs/crates/external-clients/bcs-a2a-http/src/delivery.rs
+  s_83a624b3301ddd::t_7a7ed38dfe95fd 49,73,82-88,144-147,149-151,153-155,316,335-343,345
+  s_83a624b3301ddd::t_69bb7729ec4625 16
+apps/bcs/Cargo.lock
+  s_83a624b3301ddd::t_1a3308ab01437b 342,501,724-734
+apps/bcs/Cargo.toml
+  s_83a624b3301ddd::t_3408aa920e4c99 4,152
+apps/bcs/crates/auxiliary/bcs-network-tracing/src/http_client.rs
+  s_83a624b3301ddd::t_963f194fe1ea77 90-93
+apps/bcs/crates/auxiliary/bcs-network-tracing/tests/propagation.rs
+  s_83a624b3301ddd::t_6a16858fa90b5b 32-33,120-122,139-144
+apps/bcs/crates/bootstrap/bcs/Cargo.toml
+  s_83a624b3301ddd::t_197443d04ad010 37
+apps/bcs/crates/bootstrap/bcs/src/config/root.rs
+  s_83a624b3301ddd::t_94494ab1176801 43-45,467
+apps/bcs/crates/bootstrap/bcs/src/server/a2a_wiring.rs
+  s_83a624b3301ddd::t_cd7d130c4523a4 32,37-41
+apps/bcs/crates/bootstrap/bcs/src/server/server_infrastructure.rs
+  s_83a624b3301ddd::t_1ca62725a1ac94 370-371
+apps/bcs/crates/external-clients/bcs-a2a-http/Cargo.toml
+  s_83a624b3301ddd::t_0e64e03047a86a 14
+apps/bcs/crates/plugin-api/README.md
+  s_83a624b3301ddd::t_96961c05b4d277 19-21
+apps/bcs/crates/plugin-api/bcs-app-identity-api/CONTEXT.md
+  s_83a624b3301ddd::t_0cd02be52ea7e4 1-22
+apps/bcs/crates/plugin-api/bcs-app-identity-api/Cargo.toml
+  s_83a624b3301ddd::t_7011c1f8226a01 1-18
+apps/bcs/crates/plugin-api/bcs-app-identity-api/src/lib.rs
+  s_83a624b3301ddd::t_c60821060810ec 1-68
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "054a1ee245887467530caff0c6d93f8d40a6cf1b",
+  "prompts": {},
+  "sessions": {
+    "s_83a624b3301ddd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e45d-5111-7891-a6fd-1154755a372f",
+        "model": "gpt-6.2-sol"
+      },
+      "human_author": "卓人 <hx410025@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,31 @@
+apps/backend/tests/community/repository/chat/test_caller_token_expiry.py
+  s_bb98e2f10840b6::t_4b67ed1bebdb7f 323-324,326-354,358-359,366,368,371
+  s_bb98e2f10840b6::t_b18a529f4f52b7 15,61,156,176,254,286,313,325,355-357,360-365,367,369-370
+apps/backend/src/agentclaw/community/core/caller_identity/expiry_runtime_updater.py
+  s_bb98e2f10840b6::t_4b67ed1bebdb7f 18
+  s_bb98e2f10840b6::t_391c92e7817e2e 8-13,19-20,25-27,57-67
+apps/backend/src/agentclaw/community/core/caller_identity/README.md
+  s_bb98e2f10840b6::t_4b67ed1bebdb7f 183-185
+apps/backend/specs/caller-token-expiry-20261113/001-spec.md
+  s_bb98e2f10840b6::t_bd8d4943bb63bb 6-8
+apps/backend/specs/caller-token-expiry-20261113/002-code-report.md
+  s_bb98e2f10840b6::t_1ccdbb4012fb67 12-19
+apps/backend/src/agentclaw/community/di/modules/caller_identity_module.py
+  s_bb98e2f10840b6::t_e5778cf000c862 226,228
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "44d7053d098a18eae0d190d98073bce33433b309",
+  "prompts": {},
+  "sessions": {
+    "s_bb98e2f10840b6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a162ee-dd64-7f52-9208-9fd1326f32e5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}

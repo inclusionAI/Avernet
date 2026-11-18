@@ -1,0 +1,20 @@
+apps/backend/src/agentclaw/corp/plugins/prod/antprocess.py
+  h_109ba21d0fda5e 295-305,313
+apps/backend/src/agentclaw/corp/plugins/prod/risk_approval_recovery.py
+  h_109ba21d0fda5e 1-31
+apps/backend/tests/corp/plugins/prod/test_antprocess_service.py
+  h_109ba21d0fda5e 162-170
+apps/backend/tests/corp/plugins/prod/test_risk_approval_recovery.py
+  h_109ba21d0fda5e 1-36
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "5a03f152ad83d074a1c2d0a8ba7c0e4f8a639e33",
+  "prompts": {},
+  "humans": {
+    "h_109ba21d0fda5e": {
+      "author": "卷瓜 <juangua.swj@antgroup.com>"
+    }
+  }
+}

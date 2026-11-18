@@ -1,0 +1,25 @@
+apps/bcs/scripts/e2e-runner/bcs_e2e/authority/dual_case_run.py
+  s_cecdc98e721f4b::t_fcf977dcbfbed4 27,34,260-261
+apps/bcs/scripts/e2e-runner/bcs_e2e/draft_delivery/story.py
+  s_cecdc98e721f4b::t_529c1f7a755d0d 34-40,97-103
+apps/bcs/scripts/e2e-runner/bcs_e2e/service_policy/story.py
+  s_cecdc98e721f4b::t_1ece6f747a21ff 42-48,127-128
+apps/bcs/scripts/e2e-runner/tests/test_preprod_child_tls_context.py
+  s_cecdc98e721f4b::t_c05c71f01c2cd7 1-74
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "76a79fd006ed13a8cc68c357fb0d4fd1c2419d45",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "Ling-3.1-flash"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

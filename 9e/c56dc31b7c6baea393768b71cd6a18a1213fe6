@@ -1,0 +1,30 @@
+apps/frontend-nextgen/specs/2026-11-11-task-panel-shared-asset/verification.md
+  s_2b26d456bc46f8::t_7b840565fefeb9 1-215
+apps/frontend-nextgen/specs/2026-11-11-task-panel-shared-asset/tasks.md
+  s_2b26d456bc46f8::t_d04b4b18322d5e 10
+  s_2b26d456bc46f8::t_7b840565fefeb9 1-9,11-256
+apps/frontend-nextgen/specs/2026-11-11-task-panel-shared-asset/research.md
+  s_2b26d456bc46f8::t_7b840565fefeb9 1-79,81
+  s_2b26d456bc46f8::t_d04b4b18322d5e 80
+apps/frontend-nextgen/specs/2026-11-11-task-panel-shared-asset/plan.md
+  s_2b26d456bc46f8::t_d04b4b18322d5e 224,330
+  s_2b26d456bc46f8::t_7b840565fefeb9 1-223,225-329,331-397
+apps/frontend-nextgen/specs/2026-11-11-task-panel-shared-asset/spec.md
+  s_2b26d456bc46f8::t_7b840565fefeb9 1-50
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9ec56dc31b7c6baea393768b71cd6a18a1213fe6",
+  "prompts": {},
+  "sessions": {
+    "s_2b26d456bc46f8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c9e1-f10f-7070-b86d-e1f6e68e3178",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

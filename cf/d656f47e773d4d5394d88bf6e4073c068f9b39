@@ -1,0 +1,35 @@
+apps/bcs/crates/services/bcs-bot/src/application/caller_delivery_gate.rs
+  s_1dec39ecda78e7::t_cc654088f604d8 3-11
+apps/bcs/crates/services/bcs-message-flow/src/group_flow/web_send.rs
+  s_1dec39ecda78e7::t_8273d05c7dde53 564
+apps/bcs/specs/2026-11-11-caller-forced-managed-admission/spec.md
+  s_1dec39ecda78e7::t_7dad4859c4ecf4 1-94
+apps/bcs/crates/services/bcs-message-flow/tests/cases/caller_inline_policy_off_contract.rs
+  s_1dec39ecda78e7::t_9392b3dc8f6bf9 37
+  s_1dec39ecda78e7::t_8bc6e0e5b76a1a 33
+  s_1dec39ecda78e7::t_ebb0410bcb9787 136
+  s_1dec39ecda78e7::t_38c2a1de9ce471 117,147,150,178-180,183-184,206,209,265,269-270,276-277,279
+  s_1dec39ecda78e7::t_4f9182a65c8a56 1-32,34-36,38-116,118-135,137-146,148-149,151-177,181-182,185-205,207-208,210-264,266-268,271-275,278,280-283
+apps/bcs/crates/services/bcs-message-flow/src/queued_admission.rs
+  s_1dec39ecda78e7::t_3008810df81e4d 650
+  s_1dec39ecda78e7::t_4311e2cadb5a71 661
+  s_1dec39ecda78e7::t_1fe65c1014fb45 680-693
+apps/bcs/crates/services/bcs-message-flow/tests/suite_caller_admission.rs
+  s_1dec39ecda78e7::t_0ca0a764a148a6 8-9
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "cfd656f47e773d4d5394d88bf6e4073c068f9b39",
+  "prompts": {},
+  "sessions": {
+    "s_1dec39ecda78e7": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "5a06de0a-e4c9-47b0-9ae2-33518ebd9311",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "shengping <jeremy.lsp@antgroup.com>"
+    }
+  }
+}

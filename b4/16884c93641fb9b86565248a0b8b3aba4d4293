@@ -1,0 +1,18 @@
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/__tests__/parent-related-run-registration.test.ts
+  h_43af82e14600e4 7,88-129
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/__tests__/parent-relation-fixture.ts
+  h_43af82e14600e4 9,15,29
+apps/evolverun/clawweb/public/modules/workflow/server/services/parent-related-run-registration.ts
+  h_43af82e14600e4 30-31,33
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b416884c93641fb9b86565248a0b8b3aba4d4293",
+  "prompts": {},
+  "humans": {
+    "h_43af82e14600e4": {
+      "author": "fudapeng <fudp@example.com>"
+    }
+  }
+}

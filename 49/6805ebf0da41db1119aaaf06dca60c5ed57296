@@ -1,0 +1,1552 @@
+.github/workflows/publish-bcs-bridge.yml
+  h_10f6235a5d078a 1-194
+apps/bcs/Cargo.lock
+  h_10f6235a5d078a 258,404,432,461,480,489,498,521,539,553,568,595,618,632,652,672,683,695,706,721,749,769,792,809,838,840,845,862,870,880,893,909,928,941,960,976,1008,1043,1065,1080,1091,1104,1119,1127,1140,1153,1169,1187,1203,1224,1250,1268,1287,1301,1318,1343,1365,1439,1453,1471,1486,1505,1518,1533,1545,1561,1571,1587,1606,1643,1667,1679,1695,1711,1726,1738,1748,1774,1786,1799,1811,1829,1850,1859,1870,1884,1891,1922,1933,1955,1975,1992,2012,2047,2065,2082,2089,2112,2120,2134,2151,2725
+apps/bcs/Cargo.toml
+  h_10f6235a5d078a 132,134,364-368
+apps/bcs/api-contracts/v1/openapi.yaml
+  h_10f6235a5d078a 122-123
+apps/bcs/api-contracts/v1/openapi/channel-conversations.yaml
+  h_10f6235a5d078a 1-95
+apps/bcs/crates/adapters/http/bcs-api-http/CONTEXT.md
+  h_10f6235a5d078a 5-10
+apps/bcs/crates/adapters/http/bcs-api-http/src/v1/openapi/dto/channel.rs
+  h_10f6235a5d078a 2-3,82-117
+apps/bcs/crates/adapters/http/bcs-api-http/src/v1/openapi/routes/channel.rs
+  h_10f6235a5d078a 9,18,21,23,25-26,34,41-71
+apps/bcs/crates/adapters/http/bcs-api-http/tests/channel_routes.rs
+  h_10f6235a5d078a 176-191,356-358,410-411,413-417,609-709
+apps/bcs/crates/adapters/ws/bcs-ws/CONTEXT.md
+  h_10f6235a5d078a 16-17
+apps/bcs/crates/adapters/ws/bcs-ws/docs/task-rpc-session-scope.md
+  h_10f6235a5d078a 1-39
+apps/bcs/crates/adapters/ws/bcs-ws/src/bot/dispatcher.rs
+  h_10f6235a5d078a 78-96,1896-1897,1911-1912,1919-1920,2313,2385,2447
+apps/bcs/crates/adapters/ws/bcs-ws/tests/frame_compat.rs
+  h_10f6235a5d078a 38-40
+apps/bcs/crates/adapters/ws/bcs-ws/tests/support/task_rpc_scope.rs
+  h_10f6235a5d078a 1-119
+apps/bcs/crates/plugins/openclaw-channel-bcn/README.md
+  h_10f6235a5d078a 28-48,51,60-65,96
+apps/bcs/crates/plugins/openclaw-channel-bcn/package.json
+  h_10f6235a5d078a 3
+apps/bcs/crates/plugins/openclaw-channel-bcn/src/inbound-handler.ts
+  h_10f6235a5d078a 54,601-603,2862-2865,2945-2948,3022-3025
+apps/bcs/crates/plugins/openclaw-channel-bcn/test/run-timeout.test.ts
+  h_10f6235a5d078a 1-138
+apps/bcs/crates/plugins/openclaw-channel-bcn/test/task-tool-session.test.ts
+  h_10f6235a5d078a 1-52
+apps/bcs/crates/services/bcs-message-store/CONTEXT.md
+  h_10f6235a5d078a 31-32
+apps/bcs/crates/services/bcs-message-store/src/delivery.rs
+  h_10f6235a5d078a 243-245,268-271
+apps/bcs/crates/services/bcs-message-store/src/delivery_decode_tests.rs
+  h_10f6235a5d078a 1-73
+apps/bcs/crates/tools/bcs-bridge/app/src/app.rs
+  h_10f6235a5d078a 16-19,49,64,73-78,114-118
+apps/bcs/crates/tools/bcs-bridge/app/src/cli.rs
+  h_10f6235a5d078a 21-23,32-40,93-104
+apps/bcs/crates/tools/bcs-bridge/app/src/registration/mod.rs
+  h_10f6235a5d078a 65-67,87-99,146
+apps/bcs/crates/tools/bcs-bridge/cli/QUICKSTART.md
+  h_10f6235a5d078a 1-82
+apps/bcs/crates/tools/bcs-bridge/cli/README.md
+  h_10f6235a5d078a 177-180
+apps/bcs/crates/tools/bcs-bridge/cli/dist.toml
+  h_10f6235a5d078a 1-7
+apps/bcs/crates/tools/bcs-bridge/cli/docs/codex-desktop.md
+  h_10f6235a5d078a 1-54
+apps/bcs/crates/tools/bcs-bridge/cli/src/bin/bcs-bridge.rs
+  h_10f6235a5d078a 54-55
+apps/bcs/crates/tools/bcs-bridge/cli/tests/qwenwork_init.rs
+  h_10f6235a5d078a 1-24
+apps/bcs/crates/tools/bcs-bridge/cli/tests/register.rs
+  h_10f6235a5d078a 119-144
+apps/bcs/crates/tools/bcs-bridge/core/src/engine/codex_app_server.rs
+  h_10f6235a5d078a 31,43-44,51-79,119-127,146-148,180-184,190-195,205-209,219,228,246,252-255,259-262,266-269,273-276,288,462,528,543,550,559,569,649,653-666,773-809
+apps/bcs/crates/tools/bcs-bridge/core/src/engine/codex_desktop.rs
+  h_10f6235a5d078a 1-53
+apps/bcs/crates/tools/bcs-bridge/core/src/engine/codex_transport.rs
+  h_10f6235a5d078a 1-88
+apps/bcs/crates/tools/bcs-bridge/core/src/engine/mod.rs
+  h_10f6235a5d078a 8-9,27-28,140-141,160,271,276-279,298
+apps/bcs/crates/tools/bcs-bridge/core/tests/codex_desktop.rs
+  h_10f6235a5d078a 1-123
+apps/bcs/crates/tools/bcs-bridge/qwenwork/CONTEXT.md
+  h_10f6235a5d078a 14-15,54-71
+apps/bcs/crates/tools/bcs-bridge/qwenwork/Cargo.toml
+  h_10f6235a5d078a 14-16
+apps/bcs/crates/tools/bcs-bridge/qwenwork/README.md
+  h_10f6235a5d078a 16-44,58-59,81-84,146-147,171,188-253
+apps/bcs/crates/tools/bcs-bridge/qwenwork/src/desktop_control.rs
+  h_10f6235a5d078a 1-74
+apps/bcs/crates/tools/bcs-bridge/qwenwork/src/lib.rs
+  h_10f6235a5d078a 2,4-5,32,58-60,135
+apps/bcs/crates/tools/bcs-bridge/qwenwork/src/question_tests.rs
+  h_10f6235a5d078a 1-242
+apps/bcs/crates/tools/bcs-bridge/qwenwork/src/questions.rs
+  h_10f6235a5d078a 1-159
+apps/bcs/crates/tools/bcs-bridge/qwenwork/src/session.rs
+  h_10f6235a5d078a 50-64
+apps/bcs/crates/tools/bcs-bridge/qwenwork/src/setup.rs
+  h_10f6235a5d078a 1-167
+apps/bcs/crates/tools/bcs-bridge/qwenwork/src/setup_tests.rs
+  h_10f6235a5d078a 1-129
+apps/bcs/crates/tools/bcs-bridge/qwenwork/src/tests.rs
+  h_10f6235a5d078a 41-42,685-688
+apps/bcs/crates/tools/bcs-bridge/qwenwork/src/transport.rs
+  h_10f6235a5d078a 236-239,241-245,251,296,326,329,347-357,360,363
+apps/bcs/crates/tools/bcs-bridge/qwenwork/src/turn.rs
+  h_10f6235a5d078a 124-125,184,199-201,207,217,237-258
+apps/bcs/logs/common-error.log.2026-10-13
+  h_10f6235a5d078a 1-44
+apps/bcs/logs/message-delivery.log.2026-10-21
+  h_10f6235a5d078a 1-83976
+apps/bcs/logs/message-delivery.log.2026-10-22
+  h_10f6235a5d078a 1-71520
+apps/bcs/logs/message-delivery.log.2026-10-23
+  h_10f6235a5d078a 1-61032
+apps/bcs/logs/message-delivery.log.2026-10-24
+  h_10f6235a5d078a 1-19032
+apps/bcs/logs/message-delivery.log.2026-10-25
+  h_10f6235a5d078a 1-39192
+apps/bcs/logs/message-delivery.log.2026-10-26
+  h_10f6235a5d078a 1-81720
+apps/bcs/logs/message-delivery.log.2026-10-27
+  h_10f6235a5d078a 1-59376
+apps/bcs/tests/openapi/test_contract.py
+  h_10f6235a5d078a 81,128
+apps/bcs/tests/openapi/test_dump_openapi.py
+  h_10f6235a5d078a 69
+apps/frontend-nextgen/README.md
+  h_10f6235a5d078a 37-77
+apps/frontend-nextgen/config/config.ts
+  h_10f6235a5d078a 26
+apps/frontend-nextgen/package-lock.json
+  h_10f6235a5d078a 25-28,5435-5437,5440-5441,5450-5452,5458-5460,5471,5542-5544,8714-8716
+apps/frontend-nextgen/package.json
+  h_10f6235a5d078a 37-40
+apps/frontend-nextgen/src/capabilities/defaultCapabilities.ts
+  h_10f6235a5d078a 200-219
+apps/frontend-nextgen/src/capabilities/index.ts
+  h_10f6235a5d078a 11,62
+apps/frontend-nextgen/src/capabilities/types.ts
+  h_10f6235a5d078a 251-259,395-401
+apps/frontend-nextgen/src/components/Workspace/IdentitySelector/BotRegistrationDialog.tsx
+  h_10f6235a5d078a 1,5,17-21,24,27,43-51,55-58,68-78,81,89-91,101,104,108,110,115-118,122-123,125-129,131-247,250-251
+apps/frontend-nextgen/src/components/Workspace/IdentitySelector/QwenWorkRegistrationPanel.tsx
+  h_10f6235a5d078a 1-171
+apps/frontend-nextgen/src/pages/Workspace/hooks/useBotRegistrationToken.ts
+  h_10f6235a5d078a 14,16,38-41,45,64,66-75
+apps/frontend-nextgen/src/services/backendApi/collaboration/collaborationRegistrationController.ts
+  h_10f6235a5d078a 8-12,15,20,23-39
+apps/frontend-nextgen/src/services/workspace/botRegistrationCommand.ts
+  h_10f6235a5d078a 1-66
+apps/frontend-nextgen/src/services/workspace/botRegistrationService.ts
+  h_10f6235a5d078a 1-4,64,68-80,89-92,94-102,106
+apps/frontend-nextgen/src/services/workspace/bridgeReleaseService.ts
+  h_10f6235a5d078a 1-17
+apps/frontend-nextgen/src/services/workspace/qwenWorkRegistrationCommand.ts
+  h_10f6235a5d078a 1-79
+apps/frontend-nextgen/src/typings/global.d.ts
+  h_10f6235a5d078a 21-23
+apps/frontend-nextgen/test/capabilities/qwenWorkRegistration.test.ts
+  h_10f6235a5d078a 1-21
+apps/frontend-nextgen/test/components/Workspace/IdentitySelector.actions.test.tsx
+  h_10f6235a5d078a 68-103,147
+apps/frontend-nextgen/test/components/Workspace/QwenWorkRegistrationPanel.test.tsx
+  h_10f6235a5d078a 1-42
+apps/frontend-nextgen/test/pages/Workspace/hooks/useBotRegistrationToken.test.ts
+  h_10f6235a5d078a 5,42-65
+apps/frontend-nextgen/test/services/workspace/botRegistrationCommand.test.ts
+  h_10f6235a5d078a 1-103
+apps/frontend-nextgen/test/services/workspace/botRegistrationService.test.ts
+  h_10f6235a5d078a 3,18-19,27,83-126
+apps/frontend-nextgen/test/services/workspace/qwenWorkRegistrationCommand.test.ts
+  h_10f6235a5d078a 1-63
+apps/gateway/configs/schemas/bcn.openapi.json
+  h_10f6235a5d078a 1
+apps/gateway/docs/channel-conversation-lookup.md
+  h_10f6235a5d078a 1-64
+apps/gateway/tests/integration/test_forward_signs_principal.py
+  h_10f6235a5d078a 7,255-285
+apps/gateway/tests/unit/core/forwarding/test_served_openapi.py
+  h_10f6235a5d078a 166-181
+apps/gateway/tests/unit/scripts/test_dump_and_publish_script.py
+  h_10f6235a5d078a 42,44-50
+apps/gateway/tests/unit/scripts/test_gate_and_publish.py
+  h_10f6235a5d078a 90,92-98
+avernet
+  h_10f6235a5d078a 1
+bcs_smoke_test.md
+  h_10f6235a5d078a 1-3
+devops/release/bcs_bridge_release.py
+  h_10f6235a5d078a 1-175
+devops/release/install_dist.sh
+  h_10f6235a5d078a 1-31
+devops/release/smoke_bcs_bridge.py
+  h_10f6235a5d078a 1-139
+devops/release/tests/test_bcs_bridge_release.py
+  h_10f6235a5d078a 1-127
+dist-workspace.toml
+  h_10f6235a5d078a 1-19
+docker/agent/openclaw.json
+  h_10f6235a5d078a 155,197
+docker/agent/openclaw.path
+  h_10f6235a5d078a 15
+docs/releases/bcs-bridge.md
+  h_10f6235a5d078a 1-101
+paseo.json
+  h_10f6235a5d078a 1-26
+scripts/.dependencies/bcs-config/bcs-config-local.toml
+  h_10f6235a5d078a 1-169
+scripts/.dependencies/bcs-config/bcs-config.toml
+  h_10f6235a5d078a 1-169
+scripts/.dependencies/bcs-config/seeds/collaboration-templates/README.md
+  h_10f6235a5d078a 1-45
+scripts/.dependencies/bcs-config/seeds/collaboration-templates/en-US/parallel-expert-review.yaml
+  h_10f6235a5d078a 1-136
+scripts/.dependencies/bcs-config/seeds/collaboration-templates/en-US/single-bot-guided-answer.yaml
+  h_10f6235a5d078a 1-40
+scripts/.dependencies/bcs-config/seeds/collaboration-templates/en-US/solution-and-risk-review.yaml
+  h_10f6235a5d078a 1-147
+scripts/.dependencies/bcs-config/seeds/collaboration-templates/en-US/write-and-review.yaml
+  h_10f6235a5d078a 1-132
+scripts/.dependencies/bcs-config/seeds/collaboration-templates/registry.yaml
+  h_10f6235a5d078a 1-20
+scripts/.dependencies/bcs-config/seeds/collaboration-templates/zh-CN/parallel-expert-review.yaml
+  h_10f6235a5d078a 1-136
+scripts/.dependencies/bcs-config/seeds/collaboration-templates/zh-CN/single-bot-guided-answer.yaml
+  h_10f6235a5d078a 1-40
+scripts/.dependencies/bcs-config/seeds/collaboration-templates/zh-CN/solution-and-risk-review.yaml
+  h_10f6235a5d078a 1-146
+scripts/.dependencies/bcs-config/seeds/collaboration-templates/zh-CN/write-and-review.yaml
+  h_10f6235a5d078a 1-132
+scripts/.dependencies/bcs_bot_ports.env
+  h_10f6235a5d078a 1-5
+scripts/.dependencies/coverage/singlebox/mock-services/ready
+  h_10f6235a5d078a 1
+scripts/.dependencies/coverage/singlebox/raw/baas/router_hits.jsonl
+  h_10f6235a5d078a 1-16
+scripts/.dependencies/coverage/singlebox/raw/backend/router_hits.jsonl
+  h_10f6235a5d078a 1-21
+scripts/.dependencies/coverage/singlebox/reports/acceptance-junit.xml
+  h_10f6235a5d078a 1
+scripts/.dependencies/coverage/singlebox/reports/baas-coverage.json
+  h_10f6235a5d078a 1
+scripts/.dependencies/coverage/singlebox/reports/baas-coverage.txt
+  h_10f6235a5d078a 1-549
+scripts/.dependencies/coverage/singlebox/reports/backend-coverage.json
+  h_10f6235a5d078a 1
+scripts/.dependencies/coverage/singlebox/reports/backend-coverage.txt
+  h_10f6235a5d078a 1-964
+scripts/.dependencies/coverage/singlebox/reports/bcs/cli_command_coverage.txt
+  h_10f6235a5d078a 1-57
+scripts/.dependencies/coverage/singlebox/reports/bcs/cobertura.xml
+  h_10f6235a5d078a 1-119598
+scripts/.dependencies/coverage/singlebox/reports/bcs/coverage.txt
+  h_10f6235a5d078a 1-344
+scripts/.dependencies/coverage/singlebox/reports/bcs/endpoint_coverage.txt
+  h_10f6235a5d078a 1-195
+scripts/.dependencies/coverage/singlebox/reports/bcs/endpoint_coverage.xml
+  h_10f6235a5d078a 1-179
+scripts/.dependencies/coverage/singlebox/reports/bcs/summary.json
+  h_10f6235a5d078a 1
+scripts/.dependencies/coverage/singlebox/reports/dashboard.html
+  h_10f6235a5d078a 1-9
+scripts/.dependencies/coverage/singlebox/reports/summary.json
+  h_10f6235a5d078a 1-99
+scripts/.dependencies/coverage/singlebox/reports/summary.md
+  h_10f6235a5d078a 1-18
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/extensions/openclaw-channel-bcn
+  h_10f6235a5d078a 1
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/.bcs/session.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/agent/models.json
+  h_10f6235a5d078a 1-27
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/022e49bf-be73-4cb2-9937-6fc6c45ec518.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/022e49bf-be73-4cb2-9937-6fc6c45ec518.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/022e49bf-be73-4cb2-9937-6fc6c45ec518.trajectory.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/08cff1fa-764c-448b-a7cc-db1de3102201.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/08cff1fa-764c-448b-a7cc-db1de3102201.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/08cff1fa-764c-448b-a7cc-db1de3102201.trajectory.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/0a4f16ed-5514-4270-9e9e-1dd17312ed11.jsonl
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/0a4f16ed-5514-4270-9e9e-1dd17312ed11.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/0a4f16ed-5514-4270-9e9e-1dd17312ed11.trajectory.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/184bf3ef-9c56-4256-9c40-75845ada1657.jsonl
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/184bf3ef-9c56-4256-9c40-75845ada1657.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/184bf3ef-9c56-4256-9c40-75845ada1657.trajectory.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/3007930d-b9ae-4038-99ec-370b65952569.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/3007930d-b9ae-4038-99ec-370b65952569.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/3007930d-b9ae-4038-99ec-370b65952569.trajectory.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/300f592d-da5d-4140-bed6-6403460493b6.jsonl
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/300f592d-da5d-4140-bed6-6403460493b6.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/300f592d-da5d-4140-bed6-6403460493b6.trajectory.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/3a08ffaa-8710-4309-9c18-b3bacfd2422a.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/3a08ffaa-8710-4309-9c18-b3bacfd2422a.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/3a08ffaa-8710-4309-9c18-b3bacfd2422a.trajectory.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/5d159e81-5e48-49c4-8e6a-47e6ff55cc71.jsonl
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/5d159e81-5e48-49c4-8e6a-47e6ff55cc71.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/5d159e81-5e48-49c4-8e6a-47e6ff55cc71.trajectory.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/5f476e47-843c-4fbe-badb-491a64d699fc.jsonl
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/5f476e47-843c-4fbe-badb-491a64d699fc.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/5f476e47-843c-4fbe-badb-491a64d699fc.trajectory.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/6118b2bc-58a5-4b4a-b9a2-b9efaedb7092.jsonl
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/6118b2bc-58a5-4b4a-b9a2-b9efaedb7092.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/6118b2bc-58a5-4b4a-b9a2-b9efaedb7092.trajectory.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/65d2d48d-f3b2-4185-a944-af5200a61cee.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/65d2d48d-f3b2-4185-a944-af5200a61cee.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/65d2d48d-f3b2-4185-a944-af5200a61cee.trajectory.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/6fef7f23-d6f5-43bd-a67b-3a323bd97165.jsonl
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/6fef7f23-d6f5-43bd-a67b-3a323bd97165.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/6fef7f23-d6f5-43bd-a67b-3a323bd97165.trajectory.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/71013926-5929-442e-8ade-3ce6ce959008.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/71013926-5929-442e-8ade-3ce6ce959008.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/71013926-5929-442e-8ade-3ce6ce959008.trajectory.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/7615742e-52c2-40a0-9db6-60f1013d577c.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/7615742e-52c2-40a0-9db6-60f1013d577c.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/7615742e-52c2-40a0-9db6-60f1013d577c.trajectory.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/76f9a9fc-3cd0-41a3-9b5a-4ea7b5ff21ba.jsonl
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/76f9a9fc-3cd0-41a3-9b5a-4ea7b5ff21ba.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/76f9a9fc-3cd0-41a3-9b5a-4ea7b5ff21ba.trajectory.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/859f25b6-1de0-470d-b6e5-14907d650885.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/859f25b6-1de0-470d-b6e5-14907d650885.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/859f25b6-1de0-470d-b6e5-14907d650885.trajectory.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/98a4bc78-1f6c-4186-a06b-83ec9c580837.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/98a4bc78-1f6c-4186-a06b-83ec9c580837.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/98a4bc78-1f6c-4186-a06b-83ec9c580837.trajectory.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/9c1b806a-ed3f-4f98-82f4-08826c8b91e6.jsonl
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/9c1b806a-ed3f-4f98-82f4-08826c8b91e6.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/9c1b806a-ed3f-4f98-82f4-08826c8b91e6.trajectory.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/9e089088-2b95-4c7a-8a1b-6f054a6585b2.jsonl
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/9e089088-2b95-4c7a-8a1b-6f054a6585b2.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/9e089088-2b95-4c7a-8a1b-6f054a6585b2.trajectory.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/a8976da9-5d47-4213-95c0-88b7667ced85.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/a8976da9-5d47-4213-95c0-88b7667ced85.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/a8976da9-5d47-4213-95c0-88b7667ced85.trajectory.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/b60f13d1-2cb2-4ffa-9919-9be7e5c44311.jsonl
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/b60f13d1-2cb2-4ffa-9919-9be7e5c44311.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/b60f13d1-2cb2-4ffa-9919-9be7e5c44311.trajectory.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/bc690d98-6d4d-41b1-896c-755b1c2d4603.jsonl
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/bc690d98-6d4d-41b1-896c-755b1c2d4603.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/bc690d98-6d4d-41b1-896c-755b1c2d4603.trajectory.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/cd17d12b-f9ec-4a10-9b08-27b6e1718732.jsonl
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/cd17d12b-f9ec-4a10-9b08-27b6e1718732.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/cd17d12b-f9ec-4a10-9b08-27b6e1718732.trajectory.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/d7bf6369-082f-4d9c-9b98-00b132bd2e01.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/d7bf6369-082f-4d9c-9b98-00b132bd2e01.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/d7bf6369-082f-4d9c-9b98-00b132bd2e01.trajectory.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/d8d4cc25-bb94-4cd8-b224-be71d716eb3a.jsonl
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/d8d4cc25-bb94-4cd8-b224-be71d716eb3a.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/d8d4cc25-bb94-4cd8-b224-be71d716eb3a.trajectory.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/ec7d6fdd-07ea-4512-9076-996270a88070.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/ec7d6fdd-07ea-4512-9076-996270a88070.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/ec7d6fdd-07ea-4512-9076-996270a88070.trajectory.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/ef383302-dda4-40f3-b179-cb5aa1310047.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/ef383302-dda4-40f3-b179-cb5aa1310047.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/ef383302-dda4-40f3-b179-cb5aa1310047.trajectory.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/f90b7591-9feb-4d7c-96d8-abbb8bb3fb83.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/f90b7591-9feb-4d7c-96d8-abbb8bb3fb83.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/f90b7591-9feb-4d7c-96d8-abbb8bb3fb83.trajectory.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/agents/main/sessions/sessions.json
+  h_10f6235a5d078a 1-10474
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/config/provider_keys.json
+  h_10f6235a5d078a 1-10
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/identity/device.json
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/logs/config-health.json
+  h_10f6235a5d078a 1-37
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/openclaw.json
+  h_10f6235a5d078a 1-106
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/openclaw.json.last-good
+  h_10f6235a5d078a 1-106
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/plugin-skills/browser-automation
+  h_10f6235a5d078a 1
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/ceo/update-check.json
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/customer-service/.bcs/session.json
+  h_10f6235a5d078a 1-5
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/customer-service/agents/main/agent/models.json
+  h_10f6235a5d078a 1-27
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/customer-service/config/provider_keys.json
+  h_10f6235a5d078a 1-10
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/customer-service/identity/device.json
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/customer-service/logs/config-health.json
+  h_10f6235a5d078a 1-37
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/customer-service/openclaw.json
+  h_10f6235a5d078a 1-106
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/customer-service/openclaw.json.last-good
+  h_10f6235a5d078a 1-106
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/customer-service/update-check.json
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/.bcs/session.json
+  h_10f6235a5d078a 1-5
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/agents/main/agent/models.json
+  h_10f6235a5d078a 1-27
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/agents/main/sessions/0392fb90-e209-46ec-989a-7e13de97cbfd.jsonl
+  h_10f6235a5d078a 1-2
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/agents/main/sessions/0a3b9eff-12e0-4d47-a48c-ccee75abc3f1.jsonl
+  h_10f6235a5d078a 1-2
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/agents/main/sessions/0a85c642-246e-4311-9015-2895b16e7f61.jsonl
+  h_10f6235a5d078a 1-3
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/agents/main/sessions/0ca98b92-a6c4-4213-8ff3-221aa2f56425.jsonl
+  h_10f6235a5d078a 1-2
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/agents/main/sessions/0cd632a3-c26c-47c3-9341-bdbaab16df75.jsonl
+  h_10f6235a5d078a 1-2
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/agents/main/sessions/10796c58-8f96-47a1-8413-c503489fe93c.jsonl
+  h_10f6235a5d078a 1-2
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/agents/main/sessions/12977ec4-3074-45e9-9c8e-031fabc7b8f5.jsonl
+  h_10f6235a5d078a 1-3
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/agents/main/sessions/14740fcf-dcd7-4e56-a489-f1f4701ab666.jsonl
+  h_10f6235a5d078a 1-3
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/agents/main/sessions/15ab8a2e-5198-403d-955e-8b76fc3f288a.jsonl
+  h_10f6235a5d078a 1-3
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/agents/main/sessions/1af76607-94d8-41f1-8e96-67dea0760baa.jsonl
+  h_10f6235a5d078a 1-2
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/agents/main/sessions/22352657-0750-46c0-8d77-3252b400701c.jsonl
+  h_10f6235a5d078a 1-2
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/agents/main/sessions/23045d38-043f-4220-a224-2d445456bcba.jsonl
+  h_10f6235a5d078a 1-2
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/agents/main/sessions/286729c5-f208-4557-b3e9-3183a783c534.jsonl
+  h_10f6235a5d078a 1-3
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/agents/main/sessions/2a7775db-c5a6-40ea-91c0-0ceed318f8f5.jsonl
+  h_10f6235a5d078a 1-3
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/agents/main/sessions/2c74ceb0-8584-4fad-a9e4-7204180c932a.jsonl
+  h_10f6235a5d078a 1-4
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/agents/main/sessions/48dc6d20-af00-4c41-8ad6-0995d04cab77.jsonl
+  h_10f6235a5d078a 1-2
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/agents/main/sessions/4d644801-9459-44a8-9ed3-483cfb0ab99d.jsonl
+  h_10f6235a5d078a 1-2
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/agents/main/sessions/5164c0d3-81ca-4103-bd77-11774a3c2e3a.jsonl
+  h_10f6235a5d078a 1-3
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/agents/main/sessions/53d37770-25d8-4f8f-bb56-1b3ccfa3477d.jsonl
+  h_10f6235a5d078a 1-5
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/agents/main/sessions/569313d3-92e7-4b78-8cbb-99eec8f7c1f5.jsonl
+  h_10f6235a5d078a 1-2
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/agents/main/sessions/5ef0a53b-d1bc-48ce-991b-cddcefb1a6f3.jsonl
+  h_10f6235a5d078a 1-3
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/agents/main/sessions/5f431e3c-c134-4efe-9ac9-69fc662391b7.jsonl
+  h_10f6235a5d078a 1-3
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/agents/main/sessions/6020ad0e-58cf-4a95-aeeb-ea0d1070a83d.jsonl
+  h_10f6235a5d078a 1-4
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/agents/main/sessions/6367f0fb-b410-4337-bb32-a4bb7efbf664.jsonl
+  h_10f6235a5d078a 1-2
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/agents/main/sessions/697cfc14-79c1-4fcd-944e-5f97af38f34c.jsonl
+  h_10f6235a5d078a 1-2
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/agents/main/sessions/6f3e5721-5df8-4b9c-aeea-b64cf5915cd4.jsonl
+  h_10f6235a5d078a 1-2
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/agents/main/sessions/760d39e1-0988-4649-b7ce-252677efa711.jsonl
+  h_10f6235a5d078a 1-2
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/agents/main/sessions/76d98fbb-2ccc-4b27-b305-6c3e5cb7b636.jsonl
+  h_10f6235a5d078a 1-3
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/agents/main/sessions/76e6215f-ebe6-4952-8f53-8544fe5f64de.jsonl
+  h_10f6235a5d078a 1-2
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/agents/main/sessions/772c3eda-619d-450c-a744-aa7cd542116d.jsonl
+  h_10f6235a5d078a 1-2
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/agents/main/sessions/79610695-ab2c-441d-9f5c-6cf8670c8bfa.jsonl
+  h_10f6235a5d078a 1-2
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/agents/main/sessions/7a556969-1a9a-4536-8283-4dad88ea410c.jsonl
+  h_10f6235a5d078a 1-2
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/agents/main/sessions/7c2dbe45-4d27-4f8a-8da6-3a79cc0a7ae2.jsonl
+  h_10f6235a5d078a 1-3
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/agents/main/sessions/80ecf1a3-c952-4e0e-874b-abf4338cfbd3.jsonl
+  h_10f6235a5d078a 1-2
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/agents/main/sessions/86c0b05a-08af-4e24-9094-3ce7f63db8b9.jsonl
+  h_10f6235a5d078a 1-2
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/agents/main/sessions/88ae3f28-c7fb-44d8-869d-ca403070cc63.jsonl
+  h_10f6235a5d078a 1-3
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/agents/main/sessions/89b1bdc5-5539-4b2c-8c91-3ff703303942.jsonl
+  h_10f6235a5d078a 1-5
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/agents/main/sessions/8b1551b5-f1a1-4ecc-800b-5c65d32053ec.jsonl
+  h_10f6235a5d078a 1-2
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/agents/main/sessions/996fd9ae-94fb-4ec5-ba39-8d77d5b1e8a5.jsonl
+  h_10f6235a5d078a 1-2
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/agents/main/sessions/9b3f564b-ab3d-48cc-8a1d-b1ff1d71459b.jsonl
+  h_10f6235a5d078a 1-3
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/agents/main/sessions/a02e74d8-40eb-4218-a703-e7428d77965e.jsonl
+  h_10f6235a5d078a 1-3
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/agents/main/sessions/a2a0a776-4006-4ebc-b5b9-d966628c56df.jsonl
+  h_10f6235a5d078a 1-3
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/agents/main/sessions/a2b3927f-ca00-4ca8-96de-4834743d8209.jsonl
+  h_10f6235a5d078a 1-2
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/agents/main/sessions/b3c2fad6-f188-49ff-9c42-c39fa441f897.jsonl
+  h_10f6235a5d078a 1-5
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/agents/main/sessions/b4ee5e1d-1ade-4194-90dc-fef081ab41af.jsonl
+  h_10f6235a5d078a 1-2
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/agents/main/sessions/b5c9fc85-dc7a-4dcc-8a6b-e91f851a0dac.jsonl
+  h_10f6235a5d078a 1-3
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/agents/main/sessions/b9759a1a-ba69-45c5-bd00-25801fcb2b64.jsonl
+  h_10f6235a5d078a 1-3
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/agents/main/sessions/bb6772c3-9063-4bd8-b7e7-53984b5e52b8.jsonl
+  h_10f6235a5d078a 1-3
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/agents/main/sessions/bba156c1-b525-4341-aa9d-aa0b8bd53b86.jsonl
+  h_10f6235a5d078a 1-3
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/agents/main/sessions/bd612991-662e-455a-b98c-470bc5b00c9c.jsonl
+  h_10f6235a5d078a 1-5
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/agents/main/sessions/be29ebda-f98c-417b-86e0-0bd1f29f1a4c.jsonl
+  h_10f6235a5d078a 1-2
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/agents/main/sessions/c10a378c-9666-43b6-8f01-1efaa7f2bad0.jsonl
+  h_10f6235a5d078a 1-2
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/agents/main/sessions/c1880bd3-d697-41f2-b0fb-924e3ee6a3da.jsonl
+  h_10f6235a5d078a 1-2
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/agents/main/sessions/c51a9dfe-895f-4c41-92fc-36987a3ddd9c.jsonl
+  h_10f6235a5d078a 1-2
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/agents/main/sessions/ccf882c2-f791-462b-9907-11b921045503.jsonl
+  h_10f6235a5d078a 1-3
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/agents/main/sessions/d26e56f9-9985-427b-91b9-b1d7d6a24d68.jsonl
+  h_10f6235a5d078a 1-2
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/agents/main/sessions/d92680ed-b05e-4805-864d-59d067858f5f.jsonl
+  h_10f6235a5d078a 1-3
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/agents/main/sessions/dad62d76-a034-438e-af27-bb650c21ffdb.jsonl
+  h_10f6235a5d078a 1-2
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/agents/main/sessions/dbbd9495-2a8b-458b-84a0-88e12aecb2e9.jsonl
+  h_10f6235a5d078a 1-2
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/agents/main/sessions/e011c750-5741-4808-a8fd-b1432542b1bf.jsonl
+  h_10f6235a5d078a 1-2
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/agents/main/sessions/e6e15f38-5c94-4229-bce7-ec4f0e3795c4.jsonl
+  h_10f6235a5d078a 1-2
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/agents/main/sessions/e8e52c2e-bbc2-4187-bb57-42866e06943d.jsonl
+  h_10f6235a5d078a 1-2
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/agents/main/sessions/efcee240-3d60-4b1a-801a-885ce60467a8.jsonl
+  h_10f6235a5d078a 1-2
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/agents/main/sessions/f0505d1f-6730-42b3-b0f1-d06dc7977ec9.jsonl
+  h_10f6235a5d078a 1-2
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/agents/main/sessions/f5df3930-b5e2-46f9-b428-6a649d54f6e3.jsonl
+  h_10f6235a5d078a 1-3
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/agents/main/sessions/fdbf3a9e-26ab-4783-9f8c-750b64bd4b1b.jsonl
+  h_10f6235a5d078a 1-2
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/agents/main/sessions/sessions.json
+  h_10f6235a5d078a 1-1718
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/config/provider_keys.json
+  h_10f6235a5d078a 1-10
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/identity/device.json
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/logs/config-health.json
+  h_10f6235a5d078a 1-37
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/openclaw.json
+  h_10f6235a5d078a 1-106
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/openclaw.json.last-good
+  h_10f6235a5d078a 1-106
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/engineering/update-check.json
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/.bcs/session.json
+  h_10f6235a5d078a 1-5
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/agent/models.json
+  h_10f6235a5d078a 1-27
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/0b5e8ed1-0594-4ae8-b530-58f067ba2521.jsonl
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/0b5e8ed1-0594-4ae8-b530-58f067ba2521.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/0b5e8ed1-0594-4ae8-b530-58f067ba2521.trajectory.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/0d320afd-ceae-4e17-ac9d-99ede30d00a6.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/0d320afd-ceae-4e17-ac9d-99ede30d00a6.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/0d320afd-ceae-4e17-ac9d-99ede30d00a6.trajectory.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/0e5f64ca-f779-4e6f-86d9-fbe7f5efc858.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/0e5f64ca-f779-4e6f-86d9-fbe7f5efc858.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/0e5f64ca-f779-4e6f-86d9-fbe7f5efc858.trajectory.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/1114894f-d55d-4ff4-b952-03a1881720cd.jsonl
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/1114894f-d55d-4ff4-b952-03a1881720cd.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/1114894f-d55d-4ff4-b952-03a1881720cd.trajectory.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/1acee586-c135-48cb-b52f-dd6ca6a3fe1c.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/1acee586-c135-48cb-b52f-dd6ca6a3fe1c.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/1acee586-c135-48cb-b52f-dd6ca6a3fe1c.trajectory.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/1dfed43c-caf8-4a13-86af-f85a7d2334ec.jsonl
+  h_10f6235a5d078a 1-2
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/27d119d5-f82c-4643-af33-c78fd188f8ea.jsonl
+  h_10f6235a5d078a 1-3
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/28218d56-e54c-4f62-ab0e-819251d38b1d.jsonl
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/28218d56-e54c-4f62-ab0e-819251d38b1d.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/28218d56-e54c-4f62-ab0e-819251d38b1d.trajectory.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/2942c88f-ac0c-4573-b4cd-735da78b190d.jsonl
+  h_10f6235a5d078a 1-3
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/2a457883-39db-4a24-a4f8-c3dac839ecd9.jsonl
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/2a457883-39db-4a24-a4f8-c3dac839ecd9.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/2a457883-39db-4a24-a4f8-c3dac839ecd9.trajectory.jsonl
+  h_10f6235a5d078a 1-4
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/2c4328e2-36be-4d77-8516-b3069d473665.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/2c4328e2-36be-4d77-8516-b3069d473665.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/2c4328e2-36be-4d77-8516-b3069d473665.trajectory.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/2e842fb4-9760-40e8-9561-8c4127206e24.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/2e842fb4-9760-40e8-9561-8c4127206e24.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/2e842fb4-9760-40e8-9561-8c4127206e24.trajectory.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/2f4eba41-d0dd-4f1c-941d-7376314191d0.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/2f4eba41-d0dd-4f1c-941d-7376314191d0.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/2f4eba41-d0dd-4f1c-941d-7376314191d0.trajectory.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/3a02842e-3634-4270-8c93-2e648938e30f.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/3a02842e-3634-4270-8c93-2e648938e30f.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/3a02842e-3634-4270-8c93-2e648938e30f.trajectory.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/3f0226ad-5191-4664-8721-8539952f67d6.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/3f0226ad-5191-4664-8721-8539952f67d6.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/3f0226ad-5191-4664-8721-8539952f67d6.trajectory.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/40f247d6-bd54-4021-8105-03e320f0eec9.jsonl
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/40f247d6-bd54-4021-8105-03e320f0eec9.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/40f247d6-bd54-4021-8105-03e320f0eec9.trajectory.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/43c12ba1-3868-4276-93a4-f655d8aa1fd8.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/43c12ba1-3868-4276-93a4-f655d8aa1fd8.trajectory.jsonl
+  h_10f6235a5d078a 1-2
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/45547171-02fc-4246-b8ca-2ac619d0f88a.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/45547171-02fc-4246-b8ca-2ac619d0f88a.trajectory.jsonl
+  h_10f6235a5d078a 1-2
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/46cef3c2-87b1-49a9-9a36-a3cc6757c771.jsonl
+  h_10f6235a5d078a 1-3
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/4d048ce3-8a61-43ea-8d69-bd8b961a3622.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/4d048ce3-8a61-43ea-8d69-bd8b961a3622.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/4d048ce3-8a61-43ea-8d69-bd8b961a3622.trajectory.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/51ff210b-facc-46e5-9df0-e7754b8ba396.jsonl
+  h_10f6235a5d078a 1-3
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/5f25488f-c73b-4f04-8cfd-ba55b77a5ae8.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/5f25488f-c73b-4f04-8cfd-ba55b77a5ae8.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/5f25488f-c73b-4f04-8cfd-ba55b77a5ae8.trajectory.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/648c5883-2ccb-4184-a39e-5e6202190ea9.jsonl
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/648c5883-2ccb-4184-a39e-5e6202190ea9.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/648c5883-2ccb-4184-a39e-5e6202190ea9.trajectory.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/683cfe68-df6c-4545-94fd-4cdc982bebba.jsonl
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/683cfe68-df6c-4545-94fd-4cdc982bebba.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/683cfe68-df6c-4545-94fd-4cdc982bebba.trajectory.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/72190aeb-fade-4276-820e-c72b49e3fbb1.jsonl
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/72190aeb-fade-4276-820e-c72b49e3fbb1.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/72190aeb-fade-4276-820e-c72b49e3fbb1.trajectory.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/7dcbe67d-c3c2-411d-a26b-a02304b70131.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/7dcbe67d-c3c2-411d-a26b-a02304b70131.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/7dcbe67d-c3c2-411d-a26b-a02304b70131.trajectory.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/86ab58dd-ba06-4696-aaa7-aa7f544f1215.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/86ab58dd-ba06-4696-aaa7-aa7f544f1215.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/86ab58dd-ba06-4696-aaa7-aa7f544f1215.trajectory.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/87eb6a8c-cd94-42a1-98da-3f40cfc6ffa4.jsonl
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/87eb6a8c-cd94-42a1-98da-3f40cfc6ffa4.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/87eb6a8c-cd94-42a1-98da-3f40cfc6ffa4.trajectory.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/89558ee6-5e59-4841-b588-7cc4d2c0efcd.jsonl
+  h_10f6235a5d078a 1-2
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/90f3e327-1f76-4821-8ac9-06406e9f7e79.jsonl
+  h_10f6235a5d078a 1-2
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/991c3ffc-e750-458b-bc10-537568d75667.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/991c3ffc-e750-458b-bc10-537568d75667.trajectory.jsonl
+  h_10f6235a5d078a 1-2
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/9c021b5c-280c-4d25-b0ca-5f03af6816e6.jsonl
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/9c021b5c-280c-4d25-b0ca-5f03af6816e6.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/9c021b5c-280c-4d25-b0ca-5f03af6816e6.trajectory.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/9c3a6c8d-ca50-4e1c-8ed8-6639ba342e00.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/9c3a6c8d-ca50-4e1c-8ed8-6639ba342e00.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/9c3a6c8d-ca50-4e1c-8ed8-6639ba342e00.trajectory.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/a092140b-1aae-4ac0-ae1c-a2cea88aa3cb.jsonl
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/a092140b-1aae-4ac0-ae1c-a2cea88aa3cb.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/a092140b-1aae-4ac0-ae1c-a2cea88aa3cb.trajectory.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/a519dc38-b179-4a6b-816a-b9c2db434374.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/a519dc38-b179-4a6b-816a-b9c2db434374.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/a519dc38-b179-4a6b-816a-b9c2db434374.trajectory.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/a6ccc29c-9870-4122-aee2-ea8a6e9f6d93.jsonl
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/a6ccc29c-9870-4122-aee2-ea8a6e9f6d93.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/a6ccc29c-9870-4122-aee2-ea8a6e9f6d93.trajectory.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/a6d0cb8e-597d-47b4-a1ca-8131b4cbfbe9.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/a6d0cb8e-597d-47b4-a1ca-8131b4cbfbe9.trajectory.jsonl
+  h_10f6235a5d078a 1-2
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/b7f8297f-ccdb-41e5-81e3-5744f58d5de8.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/b7f8297f-ccdb-41e5-81e3-5744f58d5de8.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/b7f8297f-ccdb-41e5-81e3-5744f58d5de8.trajectory.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/c1e141b0-8f84-4471-83c4-72dc221f50a5.jsonl
+  h_10f6235a5d078a 1-3
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/c28f9609-bfb8-49a9-8c22-b88ae52a5f58.jsonl
+  h_10f6235a5d078a 1-3
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/c4fb6628-37fb-4a41-9ec1-37dd1ebd29ce.jsonl
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/c4fb6628-37fb-4a41-9ec1-37dd1ebd29ce.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/c4fb6628-37fb-4a41-9ec1-37dd1ebd29ce.trajectory.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/ccce8c62-f85f-4448-9ca7-3399a71c07a8.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/ccce8c62-f85f-4448-9ca7-3399a71c07a8.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/ccce8c62-f85f-4448-9ca7-3399a71c07a8.trajectory.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/d25dc234-61cf-42e3-80d2-98b7371115bf.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/d25dc234-61cf-42e3-80d2-98b7371115bf.trajectory.jsonl
+  h_10f6235a5d078a 1-2
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/db576f64-b9f3-4279-bbab-bcdeb45adff1.jsonl
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/db576f64-b9f3-4279-bbab-bcdeb45adff1.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/db576f64-b9f3-4279-bbab-bcdeb45adff1.trajectory.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/dbd2d08b-c3e4-4542-8a4e-cd3e4db9ca34.jsonl
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/dbd2d08b-c3e4-4542-8a4e-cd3e4db9ca34.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/dbd2d08b-c3e4-4542-8a4e-cd3e4db9ca34.trajectory.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/ddef0ddb-1902-472a-8424-8a487674fda4.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/ddef0ddb-1902-472a-8424-8a487674fda4.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/ddef0ddb-1902-472a-8424-8a487674fda4.trajectory.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/e06c7184-e714-4557-a0d5-382fdde3f6ac.jsonl
+  h_10f6235a5d078a 1-2
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/e8b5ee00-d399-400f-8978-2f2986bccdd5.jsonl
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/e8b5ee00-d399-400f-8978-2f2986bccdd5.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/e8b5ee00-d399-400f-8978-2f2986bccdd5.trajectory.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/ee6ed28b-3770-4835-8023-267f3ba5c009.jsonl
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/ee6ed28b-3770-4835-8023-267f3ba5c009.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/ee6ed28b-3770-4835-8023-267f3ba5c009.trajectory.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/ef6ca571-fa11-4bc9-b8fd-f9cbff203fba.jsonl
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/ef6ca571-fa11-4bc9-b8fd-f9cbff203fba.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/ef6ca571-fa11-4bc9-b8fd-f9cbff203fba.trajectory.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/f0c8dd3b-5ed0-4370-9bfa-b4290708c12f.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/f0c8dd3b-5ed0-4370-9bfa-b4290708c12f.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/f0c8dd3b-5ed0-4370-9bfa-b4290708c12f.trajectory.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/fc053819-bbeb-4189-90ce-eb5bfe5dfe03.jsonl
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/fc053819-bbeb-4189-90ce-eb5bfe5dfe03.trajectory-path.json
+  h_10f6235a5d078a 1-6
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/fc053819-bbeb-4189-90ce-eb5bfe5dfe03.trajectory.jsonl
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/agents/main/sessions/sessions.json
+  h_10f6235a5d078a 1-13198
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/config/provider_keys.json
+  h_10f6235a5d078a 1-10
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/identity/device.json
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/logs/config-health.json
+  h_10f6235a5d078a 1-37
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/openclaw.json
+  h_10f6235a5d078a 1-106
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/openclaw.json.last-good
+  h_10f6235a5d078a 1-106
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/plugin-skills/browser-automation
+  h_10f6235a5d078a 1
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/product-manager/update-check.json
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/verification/.bcs/session.json
+  h_10f6235a5d078a 1-5
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/verification/agents/main/agent/models.json
+  h_10f6235a5d078a 1-27
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/verification/agents/main/sessions/2993ba77-1b29-4942-8248-6f022db12c25.jsonl
+  h_10f6235a5d078a 1-2
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/verification/agents/main/sessions/364e70fd-b988-4fc5-a426-13abc5a4136f.jsonl
+  h_10f6235a5d078a 1-3
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/verification/agents/main/sessions/9384bdf0-38b9-40ce-9f1c-b412e438e581.jsonl
+  h_10f6235a5d078a 1-2
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/verification/agents/main/sessions/ec5a47fb-91c7-4a64-aa2a-173e9ebe4741.jsonl
+  h_10f6235a5d078a 1-3
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/verification/agents/main/sessions/sessions.json
+  h_10f6235a5d078a 1-106
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/verification/config/provider_keys.json
+  h_10f6235a5d078a 1-10
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/verification/identity/device.json
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/verification/logs/config-health.json
+  h_10f6235a5d078a 1-37
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/verification/openclaw.json
+  h_10f6235a5d078a 1-106
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/verification/openclaw.json.last-good
+  h_10f6235a5d078a 1-106
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/profiles/verification/update-check.json
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/ceo/.openclaw/workspace-state.json
+  h_10f6235a5d078a 1-5
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/ceo/AGENTS.md
+  h_10f6235a5d078a 1-16
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/ceo/BOOTSTRAP.md
+  h_10f6235a5d078a 1-11
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/ceo/HEARTBEAT.md
+  h_10f6235a5d078a 1-13
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/ceo/IDENTITY.md
+  h_10f6235a5d078a 1-13
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/ceo/KNOWLEDGE.md
+  h_10f6235a5d078a 1-12
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/ceo/MEMORY.md
+  h_10f6235a5d078a 1-16
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/ceo/OKR.md
+  h_10f6235a5d078a 1-11
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/ceo/OUTPUT.md
+  h_10f6235a5d078a 1-21
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/ceo/RULES.md
+  h_10f6235a5d078a 1-9
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/ceo/SAFETY.md
+  h_10f6235a5d078a 1-8
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/ceo/SOUL.md
+  h_10f6235a5d078a 1-18
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/ceo/TOOLS.md
+  h_10f6235a5d078a 1-12
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/ceo/USER.md
+  h_10f6235a5d078a 1-11
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/ceo/skills/bcs-coordination/SKILL.md
+  h_10f6235a5d078a 1-153
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/ceo/skills/bcs-coordination/references/access-control.md
+  h_10f6235a5d078a 1-305
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/ceo/skills/bcs-coordination/references/bot.md
+  h_10f6235a5d078a 1-228
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/ceo/skills/bcs-coordination/references/custom-collaboration-schema.md
+  h_10f6235a5d078a 1-236
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/ceo/skills/bcs-coordination/references/custom-collaboration.md
+  h_10f6235a5d078a 1-116
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/ceo/skills/bcs-coordination/references/fuse.md
+  h_10f6235a5d078a 1-152
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/ceo/skills/bcs-coordination/references/group.md
+  h_10f6235a5d078a 1-522
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/ceo/skills/bcs-coordination/references/network.md
+  h_10f6235a5d078a 1-176
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/ceo/skills/bcs-coordination/references/service.md
+  h_10f6235a5d078a 1-136
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/ceo/skills/bcs-coordination/references/session-file.md
+  h_10f6235a5d078a 1-207
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/ceo/skills/bcs-coordination/references/session.md
+  h_10f6235a5d078a 1-301
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/ceo/skills/bcs-coordination/test/test.md
+  h_10f6235a5d078a 1-17
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/customer-service/AGENTS.md
+  h_10f6235a5d078a 1-16
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/customer-service/BOOTSTRAP.md
+  h_10f6235a5d078a 1-11
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/customer-service/HEARTBEAT.md
+  h_10f6235a5d078a 1-13
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/customer-service/IDENTITY.md
+  h_10f6235a5d078a 1-13
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/customer-service/KNOWLEDGE.md
+  h_10f6235a5d078a 1-13
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/customer-service/MEMORY.md
+  h_10f6235a5d078a 1-16
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/customer-service/OKR.md
+  h_10f6235a5d078a 1-11
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/customer-service/OUTPUT.md
+  h_10f6235a5d078a 1-18
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/customer-service/RULES.md
+  h_10f6235a5d078a 1-8
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/customer-service/SAFETY.md
+  h_10f6235a5d078a 1-8
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/customer-service/SOUL.md
+  h_10f6235a5d078a 1-17
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/customer-service/TOOLS.md
+  h_10f6235a5d078a 1-12
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/customer-service/USER.md
+  h_10f6235a5d078a 1-11
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/customer-service/skills/bcs-coordination/SKILL.md
+  h_10f6235a5d078a 1-153
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/customer-service/skills/bcs-coordination/references/access-control.md
+  h_10f6235a5d078a 1-305
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/customer-service/skills/bcs-coordination/references/bot.md
+  h_10f6235a5d078a 1-228
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/customer-service/skills/bcs-coordination/references/custom-collaboration-schema.md
+  h_10f6235a5d078a 1-236
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/customer-service/skills/bcs-coordination/references/custom-collaboration.md
+  h_10f6235a5d078a 1-116
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/customer-service/skills/bcs-coordination/references/fuse.md
+  h_10f6235a5d078a 1-152
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/customer-service/skills/bcs-coordination/references/group.md
+  h_10f6235a5d078a 1-522
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/customer-service/skills/bcs-coordination/references/network.md
+  h_10f6235a5d078a 1-176
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/customer-service/skills/bcs-coordination/references/service.md
+  h_10f6235a5d078a 1-136
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/customer-service/skills/bcs-coordination/references/session-file.md
+  h_10f6235a5d078a 1-207
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/customer-service/skills/bcs-coordination/references/session.md
+  h_10f6235a5d078a 1-301
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/customer-service/skills/bcs-coordination/test/test.md
+  h_10f6235a5d078a 1-17
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/engineering/AGENTS.md
+  h_10f6235a5d078a 1-15
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/engineering/BOOTSTRAP.md
+  h_10f6235a5d078a 1-11
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/engineering/HEARTBEAT.md
+  h_10f6235a5d078a 1-13
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/engineering/IDENTITY.md
+  h_10f6235a5d078a 1-13
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/engineering/KNOWLEDGE.md
+  h_10f6235a5d078a 1-13
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/engineering/MEMORY.md
+  h_10f6235a5d078a 1-16
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/engineering/OKR.md
+  h_10f6235a5d078a 1-11
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/engineering/OUTPUT.md
+  h_10f6235a5d078a 1-18
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/engineering/RULES.md
+  h_10f6235a5d078a 1-9
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/engineering/SAFETY.md
+  h_10f6235a5d078a 1-8
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/engineering/SOUL.md
+  h_10f6235a5d078a 1-17
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/engineering/TOOLS.md
+  h_10f6235a5d078a 1-12
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/engineering/USER.md
+  h_10f6235a5d078a 1-11
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/engineering/skills/bcs-coordination/SKILL.md
+  h_10f6235a5d078a 1-153
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/engineering/skills/bcs-coordination/references/access-control.md
+  h_10f6235a5d078a 1-305
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/engineering/skills/bcs-coordination/references/bot.md
+  h_10f6235a5d078a 1-228
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/engineering/skills/bcs-coordination/references/custom-collaboration-schema.md
+  h_10f6235a5d078a 1-236
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/engineering/skills/bcs-coordination/references/custom-collaboration.md
+  h_10f6235a5d078a 1-116
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/engineering/skills/bcs-coordination/references/fuse.md
+  h_10f6235a5d078a 1-152
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/engineering/skills/bcs-coordination/references/group.md
+  h_10f6235a5d078a 1-522
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/engineering/skills/bcs-coordination/references/network.md
+  h_10f6235a5d078a 1-176
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/engineering/skills/bcs-coordination/references/service.md
+  h_10f6235a5d078a 1-136
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/engineering/skills/bcs-coordination/references/session-file.md
+  h_10f6235a5d078a 1-207
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/engineering/skills/bcs-coordination/references/session.md
+  h_10f6235a5d078a 1-301
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/engineering/skills/bcs-coordination/test/test.md
+  h_10f6235a5d078a 1-17
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/product-manager/.openclaw/workspace-state.json
+  h_10f6235a5d078a 1-5
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/product-manager/AGENTS.md
+  h_10f6235a5d078a 1-15
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/product-manager/BOOTSTRAP.md
+  h_10f6235a5d078a 1-11
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/product-manager/HEARTBEAT.md
+  h_10f6235a5d078a 1-13
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/product-manager/IDENTITY.md
+  h_10f6235a5d078a 1-13
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/product-manager/KNOWLEDGE.md
+  h_10f6235a5d078a 1-12
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/product-manager/MEMORY.md
+  h_10f6235a5d078a 1-16
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/product-manager/OKR.md
+  h_10f6235a5d078a 1-11
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/product-manager/OUTPUT.md
+  h_10f6235a5d078a 1-18
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/product-manager/RULES.md
+  h_10f6235a5d078a 1-8
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/product-manager/SAFETY.md
+  h_10f6235a5d078a 1-8
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/product-manager/SOUL.md
+  h_10f6235a5d078a 1-17
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/product-manager/TOOLS.md
+  h_10f6235a5d078a 1-12
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/product-manager/USER.md
+  h_10f6235a5d078a 1-11
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/product-manager/skills/bcs-coordination/SKILL.md
+  h_10f6235a5d078a 1-153
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/product-manager/skills/bcs-coordination/references/access-control.md
+  h_10f6235a5d078a 1-305
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/product-manager/skills/bcs-coordination/references/bot.md
+  h_10f6235a5d078a 1-228
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/product-manager/skills/bcs-coordination/references/custom-collaboration-schema.md
+  h_10f6235a5d078a 1-236
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/product-manager/skills/bcs-coordination/references/custom-collaboration.md
+  h_10f6235a5d078a 1-116
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/product-manager/skills/bcs-coordination/references/fuse.md
+  h_10f6235a5d078a 1-152
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/product-manager/skills/bcs-coordination/references/group.md
+  h_10f6235a5d078a 1-522
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/product-manager/skills/bcs-coordination/references/network.md
+  h_10f6235a5d078a 1-176
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/product-manager/skills/bcs-coordination/references/service.md
+  h_10f6235a5d078a 1-136
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/product-manager/skills/bcs-coordination/references/session-file.md
+  h_10f6235a5d078a 1-207
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/product-manager/skills/bcs-coordination/references/session.md
+  h_10f6235a5d078a 1-301
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/product-manager/skills/bcs-coordination/test/test.md
+  h_10f6235a5d078a 1-17
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/verification/AGENTS.md
+  h_10f6235a5d078a 1-15
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/verification/BOOTSTRAP.md
+  h_10f6235a5d078a 1-11
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/verification/HEARTBEAT.md
+  h_10f6235a5d078a 1-13
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/verification/IDENTITY.md
+  h_10f6235a5d078a 1-13
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/verification/KNOWLEDGE.md
+  h_10f6235a5d078a 1-13
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/verification/MEMORY.md
+  h_10f6235a5d078a 1-16
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/verification/OKR.md
+  h_10f6235a5d078a 1-11
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/verification/OUTPUT.md
+  h_10f6235a5d078a 1-18
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/verification/RULES.md
+  h_10f6235a5d078a 1-8
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/verification/SAFETY.md
+  h_10f6235a5d078a 1-8
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/verification/SOUL.md
+  h_10f6235a5d078a 1-17
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/verification/TOOLS.md
+  h_10f6235a5d078a 1-12
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/verification/USER.md
+  h_10f6235a5d078a 1-11
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/verification/skills/bcs-coordination/SKILL.md
+  h_10f6235a5d078a 1-153
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/verification/skills/bcs-coordination/references/access-control.md
+  h_10f6235a5d078a 1-305
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/verification/skills/bcs-coordination/references/bot.md
+  h_10f6235a5d078a 1-228
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/verification/skills/bcs-coordination/references/custom-collaboration-schema.md
+  h_10f6235a5d078a 1-236
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/verification/skills/bcs-coordination/references/custom-collaboration.md
+  h_10f6235a5d078a 1-116
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/verification/skills/bcs-coordination/references/fuse.md
+  h_10f6235a5d078a 1-152
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/verification/skills/bcs-coordination/references/group.md
+  h_10f6235a5d078a 1-522
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/verification/skills/bcs-coordination/references/network.md
+  h_10f6235a5d078a 1-176
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/verification/skills/bcs-coordination/references/service.md
+  h_10f6235a5d078a 1-136
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/verification/skills/bcs-coordination/references/session-file.md
+  h_10f6235a5d078a 1-207
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/verification/skills/bcs-coordination/references/session.md
+  h_10f6235a5d078a 1-301
+scripts/.dependencies/coverage/singlebox/standalone-openclaw/workspaces/verification/skills/bcs-coordination/test/test.md
+  h_10f6235a5d078a 1-17
+scripts/.dependencies/coverage/singlebox/standalone-runtime/bcs-config/bcs-config-local.toml
+  h_10f6235a5d078a 1-211
+scripts/.dependencies/coverage/singlebox/standalone-runtime/bcs-config/bcs-config.toml
+  h_10f6235a5d078a 1-211
+scripts/.dependencies/coverage/singlebox/standalone-runtime/bcs-config/seeds/collaboration-templates/README.md
+  h_10f6235a5d078a 1-51
+scripts/.dependencies/coverage/singlebox/standalone-runtime/bcs-config/seeds/collaboration-templates/en-US/bot-human-bot-review.yaml
+  h_10f6235a5d078a 1-62
+scripts/.dependencies/coverage/singlebox/standalone-runtime/bcs-config/seeds/collaboration-templates/en-US/micro-merchant-event-orchestration.yaml
+  h_10f6235a5d078a 1-282
+scripts/.dependencies/coverage/singlebox/standalone-runtime/bcs-config/seeds/collaboration-templates/en-US/parallel-expert-review.yaml
+  h_10f6235a5d078a 1-136
+scripts/.dependencies/coverage/singlebox/standalone-runtime/bcs-config/seeds/collaboration-templates/en-US/single-bot-guided-answer.yaml
+  h_10f6235a5d078a 1-40
+scripts/.dependencies/coverage/singlebox/standalone-runtime/bcs-config/seeds/collaboration-templates/en-US/solution-and-risk-review.yaml
+  h_10f6235a5d078a 1-147
+scripts/.dependencies/coverage/singlebox/standalone-runtime/bcs-config/seeds/collaboration-templates/en-US/world-cup-preview-content-production.yaml
+  h_10f6235a5d078a 1-197
+scripts/.dependencies/coverage/singlebox/standalone-runtime/bcs-config/seeds/collaboration-templates/en-US/write-and-review.yaml
+  h_10f6235a5d078a 1-132
+scripts/.dependencies/coverage/singlebox/standalone-runtime/bcs-config/seeds/collaboration-templates/registry.yaml
+  h_10f6235a5d078a 1-32
+scripts/.dependencies/coverage/singlebox/standalone-runtime/bcs-config/seeds/collaboration-templates/zh-CN/bot-human-bot-review.yaml
+  h_10f6235a5d078a 1-62
+scripts/.dependencies/coverage/singlebox/standalone-runtime/bcs-config/seeds/collaboration-templates/zh-CN/micro-merchant-event-orchestration.yaml
+  h_10f6235a5d078a 1-282
+scripts/.dependencies/coverage/singlebox/standalone-runtime/bcs-config/seeds/collaboration-templates/zh-CN/parallel-expert-review.yaml
+  h_10f6235a5d078a 1-136
+scripts/.dependencies/coverage/singlebox/standalone-runtime/bcs-config/seeds/collaboration-templates/zh-CN/single-bot-guided-answer.yaml
+  h_10f6235a5d078a 1-40
+scripts/.dependencies/coverage/singlebox/standalone-runtime/bcs-config/seeds/collaboration-templates/zh-CN/solution-and-risk-review.yaml
+  h_10f6235a5d078a 1-146
+scripts/.dependencies/coverage/singlebox/standalone-runtime/bcs-config/seeds/collaboration-templates/zh-CN/world-cup-preview-content-production.yaml
+  h_10f6235a5d078a 1-197
+scripts/.dependencies/coverage/singlebox/standalone-runtime/bcs-config/seeds/collaboration-templates/zh-CN/write-and-review.yaml
+  h_10f6235a5d078a 1-132
+scripts/.dependencies/coverage/singlebox/standalone-runtime/bcs_bot_ports.env
+  h_10f6235a5d078a 1-5
+scripts/.dependencies/coverage/singlebox/standalone-runtime/bcsfuse/.gitignore
+  h_10f6235a5d078a 1-7
+scripts/.dependencies/logs/prepush/e2e.exit
+  h_10f6235a5d078a 1
+scripts/.dependencies/logs/prepush/unit.exit
+  h_10f6235a5d078a 1
+scripts/.dependencies/openclaw/model-config/openclaw.json
+  h_10f6235a5d078a 1-43
+scripts/.dependencies/standalone/bcs-config/bcs-config-local.toml
+  h_10f6235a5d078a 1-169
+scripts/.dependencies/standalone/bcs-config/bcs-config.toml
+  h_10f6235a5d078a 1-169
+scripts/.dependencies/standalone/bcs-config/seeds/collaboration-templates/README.md
+  h_10f6235a5d078a 1-45
+scripts/.dependencies/standalone/bcs-config/seeds/collaboration-templates/en-US/parallel-expert-review.yaml
+  h_10f6235a5d078a 1-136
+scripts/.dependencies/standalone/bcs-config/seeds/collaboration-templates/en-US/single-bot-guided-answer.yaml
+  h_10f6235a5d078a 1-40
+scripts/.dependencies/standalone/bcs-config/seeds/collaboration-templates/en-US/solution-and-risk-review.yaml
+  h_10f6235a5d078a 1-147
+scripts/.dependencies/standalone/bcs-config/seeds/collaboration-templates/en-US/write-and-review.yaml
+  h_10f6235a5d078a 1-132
+scripts/.dependencies/standalone/bcs-config/seeds/collaboration-templates/registry.yaml
+  h_10f6235a5d078a 1-20
+scripts/.dependencies/standalone/bcs-config/seeds/collaboration-templates/zh-CN/parallel-expert-review.yaml
+  h_10f6235a5d078a 1-136
+scripts/.dependencies/standalone/bcs-config/seeds/collaboration-templates/zh-CN/single-bot-guided-answer.yaml
+  h_10f6235a5d078a 1-40
+scripts/.dependencies/standalone/bcs-config/seeds/collaboration-templates/zh-CN/solution-and-risk-review.yaml
+  h_10f6235a5d078a 1-146
+scripts/.dependencies/standalone/bcs-config/seeds/collaboration-templates/zh-CN/write-and-review.yaml
+  h_10f6235a5d078a 1-132
+scripts/.dependencies/standalone/bcsfuse/pids/open_core.pid
+  h_10f6235a5d078a 1
+singlebox/QWENWORK.md
+  h_10f6235a5d078a 1-73
+singlebox/modules/bcs.sh
+  h_10f6235a5d078a 35
+singlebox/modules/bcs_runtime_config.sh
+  h_10f6235a5d078a 1-244
+singlebox/qwenwork.sh
+  h_10f6235a5d078a 1-59
+singlebox/qwenwork_provider.py
+  h_10f6235a5d078a 1-160
+singlebox/verity/test_qwenwork_minimal_stack.sh
+  h_10f6235a5d078a 1-27
+singlebox/verity/test_qwenwork_provider.py
+  h_10f6235a5d078a 1-79
+singlebox/verity/test_singlebox_bcs_runtime_config.sh
+  h_10f6235a5d078a 187-202
+src/bcs/bcs_bots_test_dir/ceo/workspace/.openclaw/workspace-state.json
+  h_10f6235a5d078a 1-5
+src/bcs/bcs_bots_test_dir/ceo/workspace/AGENTS.md
+  h_10f6235a5d078a 1-16
+src/bcs/bcs_bots_test_dir/ceo/workspace/BOOTSTRAP.md
+  h_10f6235a5d078a 1-11
+src/bcs/bcs_bots_test_dir/ceo/workspace/HEARTBEAT.md
+  h_10f6235a5d078a 1-13
+src/bcs/bcs_bots_test_dir/ceo/workspace/IDENTITY.md
+  h_10f6235a5d078a 1-13
+src/bcs/bcs_bots_test_dir/ceo/workspace/KNOWLEDGE.md
+  h_10f6235a5d078a 1-12
+src/bcs/bcs_bots_test_dir/ceo/workspace/MEMORY.md
+  h_10f6235a5d078a 1-16
+src/bcs/bcs_bots_test_dir/ceo/workspace/OKR.md
+  h_10f6235a5d078a 1-11
+src/bcs/bcs_bots_test_dir/ceo/workspace/OUTPUT.md
+  h_10f6235a5d078a 1-21
+src/bcs/bcs_bots_test_dir/ceo/workspace/RULES.md
+  h_10f6235a5d078a 1-9
+src/bcs/bcs_bots_test_dir/ceo/workspace/SAFETY.md
+  h_10f6235a5d078a 1-8
+src/bcs/bcs_bots_test_dir/ceo/workspace/SOUL.md
+  h_10f6235a5d078a 1-18
+src/bcs/bcs_bots_test_dir/ceo/workspace/TOOLS.md
+  h_10f6235a5d078a 1-12
+src/bcs/bcs_bots_test_dir/ceo/workspace/USER.md
+  h_10f6235a5d078a 1-11
+src/bcs/bcs_bots_test_dir/ceo/workspace/skills/bcs-coordination/SKILL.md
+  h_10f6235a5d078a 1-146
+src/bcs/bcs_bots_test_dir/ceo/workspace/skills/bcs-coordination/references/access-control.md
+  h_10f6235a5d078a 1-305
+src/bcs/bcs_bots_test_dir/ceo/workspace/skills/bcs-coordination/references/bot.md
+  h_10f6235a5d078a 1-223
+src/bcs/bcs_bots_test_dir/ceo/workspace/skills/bcs-coordination/references/fuse.md
+  h_10f6235a5d078a 1-152
+src/bcs/bcs_bots_test_dir/ceo/workspace/skills/bcs-coordination/references/group.md
+  h_10f6235a5d078a 1-463
+src/bcs/bcs_bots_test_dir/ceo/workspace/skills/bcs-coordination/references/network.md
+  h_10f6235a5d078a 1-176
+src/bcs/bcs_bots_test_dir/ceo/workspace/skills/bcs-coordination/references/service.md
+  h_10f6235a5d078a 1-136
+src/bcs/bcs_bots_test_dir/ceo/workspace/skills/bcs-coordination/references/session.md
+  h_10f6235a5d078a 1-295
+src/bcs/bcs_bots_test_dir/ceo/workspace/skills/bcs-coordination/test/test.md
+  h_10f6235a5d078a 1-17
+src/bcs/bcs_bots_test_dir/customer-service/workspace/.openclaw/workspace-state.json
+  h_10f6235a5d078a 1-5
+src/bcs/bcs_bots_test_dir/customer-service/workspace/AGENTS.md
+  h_10f6235a5d078a 1-16
+src/bcs/bcs_bots_test_dir/customer-service/workspace/BOOTSTRAP.md
+  h_10f6235a5d078a 1-11
+src/bcs/bcs_bots_test_dir/customer-service/workspace/HEARTBEAT.md
+  h_10f6235a5d078a 1-13
+src/bcs/bcs_bots_test_dir/customer-service/workspace/IDENTITY.md
+  h_10f6235a5d078a 1-13
+src/bcs/bcs_bots_test_dir/customer-service/workspace/KNOWLEDGE.md
+  h_10f6235a5d078a 1-13
+src/bcs/bcs_bots_test_dir/customer-service/workspace/MEMORY.md
+  h_10f6235a5d078a 1-16
+src/bcs/bcs_bots_test_dir/customer-service/workspace/OKR.md
+  h_10f6235a5d078a 1-11
+src/bcs/bcs_bots_test_dir/customer-service/workspace/OUTPUT.md
+  h_10f6235a5d078a 1-18
+src/bcs/bcs_bots_test_dir/customer-service/workspace/RULES.md
+  h_10f6235a5d078a 1-8
+src/bcs/bcs_bots_test_dir/customer-service/workspace/SAFETY.md
+  h_10f6235a5d078a 1-8
+src/bcs/bcs_bots_test_dir/customer-service/workspace/SOUL.md
+  h_10f6235a5d078a 1-17
+src/bcs/bcs_bots_test_dir/customer-service/workspace/TOOLS.md
+  h_10f6235a5d078a 1-12
+src/bcs/bcs_bots_test_dir/customer-service/workspace/USER.md
+  h_10f6235a5d078a 1-11
+src/bcs/bcs_bots_test_dir/customer-service/workspace/skills/bcs-coordination/SKILL.md
+  h_10f6235a5d078a 1-146
+src/bcs/bcs_bots_test_dir/customer-service/workspace/skills/bcs-coordination/references/access-control.md
+  h_10f6235a5d078a 1-305
+src/bcs/bcs_bots_test_dir/customer-service/workspace/skills/bcs-coordination/references/bot.md
+  h_10f6235a5d078a 1-223
+src/bcs/bcs_bots_test_dir/customer-service/workspace/skills/bcs-coordination/references/fuse.md
+  h_10f6235a5d078a 1-152
+src/bcs/bcs_bots_test_dir/customer-service/workspace/skills/bcs-coordination/references/group.md
+  h_10f6235a5d078a 1-463
+src/bcs/bcs_bots_test_dir/customer-service/workspace/skills/bcs-coordination/references/network.md
+  h_10f6235a5d078a 1-176
+src/bcs/bcs_bots_test_dir/customer-service/workspace/skills/bcs-coordination/references/service.md
+  h_10f6235a5d078a 1-136
+src/bcs/bcs_bots_test_dir/customer-service/workspace/skills/bcs-coordination/references/session.md
+  h_10f6235a5d078a 1-295
+src/bcs/bcs_bots_test_dir/customer-service/workspace/skills/bcs-coordination/test/test.md
+  h_10f6235a5d078a 1-17
+src/bcs/bcs_bots_test_dir/engineering/workspace/.openclaw/workspace-state.json
+  h_10f6235a5d078a 1-5
+src/bcs/bcs_bots_test_dir/engineering/workspace/AGENTS.md
+  h_10f6235a5d078a 1-15
+src/bcs/bcs_bots_test_dir/engineering/workspace/BOOTSTRAP.md
+  h_10f6235a5d078a 1-11
+src/bcs/bcs_bots_test_dir/engineering/workspace/HEARTBEAT.md
+  h_10f6235a5d078a 1-13
+src/bcs/bcs_bots_test_dir/engineering/workspace/IDENTITY.md
+  h_10f6235a5d078a 1-13
+src/bcs/bcs_bots_test_dir/engineering/workspace/KNOWLEDGE.md
+  h_10f6235a5d078a 1-13
+src/bcs/bcs_bots_test_dir/engineering/workspace/MEMORY.md
+  h_10f6235a5d078a 1-16
+src/bcs/bcs_bots_test_dir/engineering/workspace/OKR.md
+  h_10f6235a5d078a 1-11
+src/bcs/bcs_bots_test_dir/engineering/workspace/OUTPUT.md
+  h_10f6235a5d078a 1-18
+src/bcs/bcs_bots_test_dir/engineering/workspace/RULES.md
+  h_10f6235a5d078a 1-9
+src/bcs/bcs_bots_test_dir/engineering/workspace/SAFETY.md
+  h_10f6235a5d078a 1-8
+src/bcs/bcs_bots_test_dir/engineering/workspace/SOUL.md
+  h_10f6235a5d078a 1-17
+src/bcs/bcs_bots_test_dir/engineering/workspace/TOOLS.md
+  h_10f6235a5d078a 1-12
+src/bcs/bcs_bots_test_dir/engineering/workspace/USER.md
+  h_10f6235a5d078a 1-11
+src/bcs/bcs_bots_test_dir/engineering/workspace/index.html
+  h_10f6235a5d078a 1-212
+src/bcs/bcs_bots_test_dir/engineering/workspace/skills/bcs-coordination/SKILL.md
+  h_10f6235a5d078a 1-146
+src/bcs/bcs_bots_test_dir/engineering/workspace/skills/bcs-coordination/references/access-control.md
+  h_10f6235a5d078a 1-305
+src/bcs/bcs_bots_test_dir/engineering/workspace/skills/bcs-coordination/references/bot.md
+  h_10f6235a5d078a 1-223
+src/bcs/bcs_bots_test_dir/engineering/workspace/skills/bcs-coordination/references/fuse.md
+  h_10f6235a5d078a 1-152
+src/bcs/bcs_bots_test_dir/engineering/workspace/skills/bcs-coordination/references/group.md
+  h_10f6235a5d078a 1-463
+src/bcs/bcs_bots_test_dir/engineering/workspace/skills/bcs-coordination/references/network.md
+  h_10f6235a5d078a 1-176
+src/bcs/bcs_bots_test_dir/engineering/workspace/skills/bcs-coordination/references/service.md
+  h_10f6235a5d078a 1-136
+src/bcs/bcs_bots_test_dir/engineering/workspace/skills/bcs-coordination/references/session.md
+  h_10f6235a5d078a 1-295
+src/bcs/bcs_bots_test_dir/engineering/workspace/skills/bcs-coordination/test/test.md
+  h_10f6235a5d078a 1-17
+src/bcs/bcs_bots_test_dir/product-manager/workspace/.openclaw/workspace-state.json
+  h_10f6235a5d078a 1-5
+src/bcs/bcs_bots_test_dir/product-manager/workspace/AGENTS.md
+  h_10f6235a5d078a 1-15
+src/bcs/bcs_bots_test_dir/product-manager/workspace/BOOTSTRAP.md
+  h_10f6235a5d078a 1-11
+src/bcs/bcs_bots_test_dir/product-manager/workspace/HEARTBEAT.md
+  h_10f6235a5d078a 1-13
+src/bcs/bcs_bots_test_dir/product-manager/workspace/IDENTITY.md
+  h_10f6235a5d078a 1-13
+src/bcs/bcs_bots_test_dir/product-manager/workspace/KNOWLEDGE.md
+  h_10f6235a5d078a 1-12
+src/bcs/bcs_bots_test_dir/product-manager/workspace/MEMORY.md
+  h_10f6235a5d078a 1-16
+src/bcs/bcs_bots_test_dir/product-manager/workspace/OKR.md
+  h_10f6235a5d078a 1-11
+src/bcs/bcs_bots_test_dir/product-manager/workspace/OUTPUT.md
+  h_10f6235a5d078a 1-18
+src/bcs/bcs_bots_test_dir/product-manager/workspace/RULES.md
+  h_10f6235a5d078a 1-8
+src/bcs/bcs_bots_test_dir/product-manager/workspace/SAFETY.md
+  h_10f6235a5d078a 1-8
+src/bcs/bcs_bots_test_dir/product-manager/workspace/SOUL.md
+  h_10f6235a5d078a 1-17
+src/bcs/bcs_bots_test_dir/product-manager/workspace/TOOLS.md
+  h_10f6235a5d078a 1-12
+src/bcs/bcs_bots_test_dir/product-manager/workspace/USER.md
+  h_10f6235a5d078a 1-11
+src/bcs/bcs_bots_test_dir/product-manager/workspace/skills/bcs-coordination/SKILL.md
+  h_10f6235a5d078a 1-146
+src/bcs/bcs_bots_test_dir/product-manager/workspace/skills/bcs-coordination/references/access-control.md
+  h_10f6235a5d078a 1-305
+src/bcs/bcs_bots_test_dir/product-manager/workspace/skills/bcs-coordination/references/bot.md
+  h_10f6235a5d078a 1-223
+src/bcs/bcs_bots_test_dir/product-manager/workspace/skills/bcs-coordination/references/fuse.md
+  h_10f6235a5d078a 1-152
+src/bcs/bcs_bots_test_dir/product-manager/workspace/skills/bcs-coordination/references/group.md
+  h_10f6235a5d078a 1-463
+src/bcs/bcs_bots_test_dir/product-manager/workspace/skills/bcs-coordination/references/network.md
+  h_10f6235a5d078a 1-176
+src/bcs/bcs_bots_test_dir/product-manager/workspace/skills/bcs-coordination/references/service.md
+  h_10f6235a5d078a 1-136
+src/bcs/bcs_bots_test_dir/product-manager/workspace/skills/bcs-coordination/references/session.md
+  h_10f6235a5d078a 1-295
+src/bcs/bcs_bots_test_dir/product-manager/workspace/skills/bcs-coordination/test/test.md
+  h_10f6235a5d078a 1-17
+src/bcs/bcs_bots_test_dir/verification/workspace/.openclaw/workspace-state.json
+  h_10f6235a5d078a 1-5
+src/bcs/bcs_bots_test_dir/verification/workspace/AGENTS.md
+  h_10f6235a5d078a 1-15
+src/bcs/bcs_bots_test_dir/verification/workspace/BOOTSTRAP.md
+  h_10f6235a5d078a 1-11
+src/bcs/bcs_bots_test_dir/verification/workspace/HEARTBEAT.md
+  h_10f6235a5d078a 1-13
+src/bcs/bcs_bots_test_dir/verification/workspace/IDENTITY.md
+  h_10f6235a5d078a 1-13
+src/bcs/bcs_bots_test_dir/verification/workspace/KNOWLEDGE.md
+  h_10f6235a5d078a 1-13
+src/bcs/bcs_bots_test_dir/verification/workspace/MEMORY.md
+  h_10f6235a5d078a 1-16
+src/bcs/bcs_bots_test_dir/verification/workspace/OKR.md
+  h_10f6235a5d078a 1-11
+src/bcs/bcs_bots_test_dir/verification/workspace/OUTPUT.md
+  h_10f6235a5d078a 1-18
+src/bcs/bcs_bots_test_dir/verification/workspace/RULES.md
+  h_10f6235a5d078a 1-8
+src/bcs/bcs_bots_test_dir/verification/workspace/SAFETY.md
+  h_10f6235a5d078a 1-8
+src/bcs/bcs_bots_test_dir/verification/workspace/SOUL.md
+  h_10f6235a5d078a 1-17
+src/bcs/bcs_bots_test_dir/verification/workspace/TOOLS.md
+  h_10f6235a5d078a 1-12
+src/bcs/bcs_bots_test_dir/verification/workspace/USER.md
+  h_10f6235a5d078a 1-11
+src/bcs/bcs_bots_test_dir/verification/workspace/skills/bcs-coordination/SKILL.md
+  h_10f6235a5d078a 1-146
+src/bcs/bcs_bots_test_dir/verification/workspace/skills/bcs-coordination/references/access-control.md
+  h_10f6235a5d078a 1-305
+src/bcs/bcs_bots_test_dir/verification/workspace/skills/bcs-coordination/references/bot.md
+  h_10f6235a5d078a 1-223
+src/bcs/bcs_bots_test_dir/verification/workspace/skills/bcs-coordination/references/fuse.md
+  h_10f6235a5d078a 1-152
+src/bcs/bcs_bots_test_dir/verification/workspace/skills/bcs-coordination/references/group.md
+  h_10f6235a5d078a 1-463
+src/bcs/bcs_bots_test_dir/verification/workspace/skills/bcs-coordination/references/network.md
+  h_10f6235a5d078a 1-176
+src/bcs/bcs_bots_test_dir/verification/workspace/skills/bcs-coordination/references/service.md
+  h_10f6235a5d078a 1-136
+src/bcs/bcs_bots_test_dir/verification/workspace/skills/bcs-coordination/references/session.md
+  h_10f6235a5d078a 1-295
+src/bcs/bcs_bots_test_dir/verification/workspace/skills/bcs-coordination/test/test.md
+  h_10f6235a5d078a 1-17
+src/bcs/crates/plugins/openclaw-channel-bcn/coverage/cobertura-coverage.xml
+  h_10f6235a5d078a 1-5710
+src/bcs/crates/plugins/openclaw-channel-bcn/coverage/coverage-final.json
+  h_10f6235a5d078a 1-11
+src/bcs/crates/plugins/openclaw-channel-bcn/coverage/coverage-summary.json
+  h_10f6235a5d078a 1-12
+src/bcs/crates/plugins/openclaw-channel-bcn/coverage/lcov-report/accounts.ts.html
+  h_10f6235a5d078a 1-388
+src/bcs/crates/plugins/openclaw-channel-bcn/coverage/lcov-report/api.ts.html
+  h_10f6235a5d078a 1-115
+src/bcs/crates/plugins/openclaw-channel-bcn/coverage/lcov-report/base.css
+  h_10f6235a5d078a 1-224
+src/bcs/crates/plugins/openclaw-channel-bcn/coverage/lcov-report/bcs-ws-client.ts.html
+  h_10f6235a5d078a 1-1990
+src/bcs/crates/plugins/openclaw-channel-bcn/coverage/lcov-report/block-navigation.js
+  h_10f6235a5d078a 1-87
+src/bcs/crates/plugins/openclaw-channel-bcn/coverage/lcov-report/channel.ts.html
+  h_10f6235a5d078a 1-1165
+src/bcs/crates/plugins/openclaw-channel-bcn/coverage/lcov-report/core.ts.html
+  h_10f6235a5d078a 1-838
+src/bcs/crates/plugins/openclaw-channel-bcn/coverage/lcov-report/gateway-security.ts.html
+  h_10f6235a5d078a 1-172
+src/bcs/crates/plugins/openclaw-channel-bcn/coverage/lcov-report/inbound-handler.ts.html
+  h_10f6235a5d078a 1-8449
+src/bcs/crates/plugins/openclaw-channel-bcn/coverage/lcov-report/index.html
+  h_10f6235a5d078a 1-251
+src/bcs/crates/plugins/openclaw-channel-bcn/coverage/lcov-report/index.ts.html
+  h_10f6235a5d078a 1-154
+src/bcs/crates/plugins/openclaw-channel-bcn/coverage/lcov-report/prettify.css
+  h_10f6235a5d078a 1
+src/bcs/crates/plugins/openclaw-channel-bcn/coverage/lcov-report/prettify.js
+  h_10f6235a5d078a 1-2
+src/bcs/crates/plugins/openclaw-channel-bcn/coverage/lcov-report/runtime.ts.html
+  h_10f6235a5d078a 1-109
+src/bcs/crates/plugins/openclaw-channel-bcn/coverage/lcov-report/session-cleanup.ts.html
+  h_10f6235a5d078a 1-1606
+src/bcs/crates/plugins/openclaw-channel-bcn/coverage/lcov-report/sorter.js
+  h_10f6235a5d078a 1-210
+src/bcs/crates/plugins/openclaw-channel-bcn/coverage/lcov.info
+  h_10f6235a5d078a 1-6021
+src/bcs/crates/plugins/openclaw-channel-bcn/package-lock.json
+  h_10f6235a5d078a 1-25269
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "496805ebf0da41db1119aaaf06dca60c5ed57296",
+  "prompts": {},
+  "humans": {
+    "h_10f6235a5d078a": {
+      "author": "卓人 <hx410025@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,22 @@
+apps/backend/src/agentclaw/corp/plugins/prod/oss_storage.py
+  s_f3493eea865773::t_a9cf5363ebbb0e 410-412
+apps/backend/tests/corp/plugins/prod/test_oss_storage_edge_paths.py
+  s_f3493eea865773::t_75d65e9bc4c855 8,275-304
+  s_f3493eea865773::t_bdea5d89b0c390 7,255-274,305,341
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "155ea05a7eac9922f112086f4c91ec2a2e25cb71",
+  "prompts": {},
+  "sessions": {
+    "s_f3493eea865773": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d2d8-464d-7570-9e70-e99dc128111e",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "卷瓜 <juangua.swj@antgroup.com>"
+    }
+  }
+}

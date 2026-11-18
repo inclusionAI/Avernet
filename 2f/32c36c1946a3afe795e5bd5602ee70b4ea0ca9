@@ -1,0 +1,115 @@
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/handbook-team.test.ts
+  s_0e0389a35f491c::t_4ef14bad8426ea 20,23,28,49,53,55,60,69
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/user-handoff.test.ts
+  s_0e0389a35f491c::t_222e8f70c657c6 37-38,42,45,60
+  s_0e0389a35f491c::t_0dab32841d4a68 39
+  s_0e0389a35f491c::t_305696551c9a7a 40-41,43-44,46-47,50-51,54-59,61-65,79
+  s_0e0389a35f491c::t_c73c73c8957573 49,66-78
+  s_0e0389a35f491c::t_a9bdaf4dd1b2af 48
+  s_0e0389a35f491c::t_a8034862ad40d9 52-53
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/task-contracts.ts
+  s_0e0389a35f491c::t_0e770d42d3f33e 13-27,85-86
+  s_0e0389a35f491c::t_5805211fd0583d 87-88
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/notification.ts
+  s_0e0389a35f491c::t_009707005ba006 12-26,33,37,57-82,86-92
+  s_0e0389a35f491c::t_514f69cf8fd16e 83-85
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/contracts.ts
+  s_0e0389a35f491c::t_d38d5348ffa106 39-41
+apps/evolverun/specs/2026-11-04-recovery-owner-feedback/plan.md
+  s_0e0389a35f491c::t_3b7686467d8846 1-23,27
+  s_0e0389a35f491c::t_1891d67b27a656 24-26
+  s_0e0389a35f491c::t_c6a287063cd7c6 28-31
+apps/evolverun/clawweb/public/modules/clawinsight/web/pages/InsightCenter/monitoring/session-recovery/SessionRecoveryDetail.tsx
+  s_0e0389a35f491c::t_9edad0178ef6ec 7-8,34,157,445,465,493,547,598,656,724-725,729
+  s_0e0389a35f491c::t_e4318265af7081 447
+  s_0e0389a35f491c::t_330d8c7c82f49b 545,554-555,564,574,577,579-580,589,726-728
+apps/evolverun/clawweb/public/modules/clawinsight/docs/session-recovery-api.md
+  s_0e0389a35f491c::t_0682c4ced56721 277,288,294-325
+  s_0e0389a35f491c::t_975dcb8924f448 326
+  s_0e0389a35f491c::t_00d8d199121806 327
+apps/evolverun/clawweb/public/modules/clawinsight/server/repositories/repair/session-recovery-task-repository.ts
+  s_0e0389a35f491c::t_902055dbc29cb0 185,189,191,238
+  s_0e0389a35f491c::t_5805211fd0583d 43
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/task-service.test.ts
+  s_0e0389a35f491c::t_091045c0942997 16,39,44-60
+  s_0e0389a35f491c::t_617bddcca49fec 61-75
+  s_0e0389a35f491c::t_d35425a6d735d2 115-125
+  s_0e0389a35f491c::t_bfb8d5eead0640 76-114
+  s_0e0389a35f491c::t_dddc42176f8cae 126-135,139-140
+  s_0e0389a35f491c::t_84b610fd38cdcb 136-138
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/index.ts
+  s_0e0389a35f491c::t_009707005ba006 20,25,46
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/handbook-persistence.test.ts
+  s_0e0389a35f491c::t_0dab32841d4a68 38,45
+apps/evolverun/clawweb/public/modules/clawinsight/web/api/__tests__/session-recovery.test.ts
+  s_0e0389a35f491c::t_3cb72ce9039ec9 1-11
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/handbook.test.ts
+  s_0e0389a35f491c::t_01306de3c1126f 11-13
+  s_0e0389a35f491c::t_4ef14bad8426ea 17,21,23,25-27,29,37
+apps/evolverun/clawweb/public/modules/clawinsight/server/routes/session-recovery.ts
+  s_0e0389a35f491c::t_7e308dc1204d00 84-88
+  s_0e0389a35f491c::t_09b054b27d5b82 83
+apps/evolverun/clawweb/public/modules/clawinsight/web/pages/InsightCenter/monitoring/session-recovery/__tests__/OwnerCooperation.test.tsx
+  s_0e0389a35f491c::t_3cb72ce9039ec9 2-29,36-88,102,136-204
+  s_0e0389a35f491c::t_66a47e0275df04 1,30-35,89-101,103-135
+apps/evolverun/clawweb/public/modules/clawinsight/docs/session-recovery-team-handbooks-spec.md
+  s_0e0389a35f491c::t_0682c4ced56721 119-124
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/task-service.ts
+  s_0e0389a35f491c::t_a8034862ad40d9 345,369
+  s_0e0389a35f491c::t_0897dd6bdef887 509-511,520,523-526,528-530,532-534,536-544,546,548-553
+  s_0e0389a35f491c::t_d38d5348ffa106 10,27-28,244-256,258-262,265-269,464,506-508,521-522,535,545,587
+  s_0e0389a35f491c::t_5805211fd0583d 512-519,527,531,547,554,574
+  s_0e0389a35f491c::t_902055dbc29cb0 144,257,263-264
+  s_0e0389a35f491c::t_e514342bae9296 158-160
+  s_0e0389a35f491c::t_3784cff14dd1c5 148,163-164
+apps/evolverun/clawweb/public/modules/clawinsight/web/pages/InsightCenter/monitoring/session-recovery/OwnerCooperation.tsx
+  s_0e0389a35f491c::t_9edad0178ef6ec 1-65
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/owner-card.test.ts
+  s_0e0389a35f491c::t_4ed3e4c1b4bcf5 1-27
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/notifications/dingtalk-sender.ts
+  s_0e0389a35f491c::t_649c10e27e636a 77-108
+apps/evolverun/clawweb/public/modules/clawinsight/web/types/session-recovery.ts
+  s_0e0389a35f491c::t_9edad0178ef6ec 2-13,25
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/task-state.ts
+  s_0e0389a35f491c::t_902055dbc29cb0 29
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/owner-cooperation.ts
+  s_0e0389a35f491c::t_0e770d42d3f33e 1-12,14-21,24-37
+  s_0e0389a35f491c::t_dddc42176f8cae 13
+  s_0e0389a35f491c::t_3784cff14dd1c5 22-23
+apps/evolverun/clawweb/public/modules/clawinsight/web/api/session-recovery.ts
+  s_0e0389a35f491c::t_9edad0178ef6ec 17-19
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/agent-service.ts
+  s_0e0389a35f491c::t_e514342bae9296 443-448,451-452,483-484,550-556,626,628-629,633
+  s_0e0389a35f491c::t_da3fb9f52dcf0e 278
+  s_0e0389a35f491c::t_3784cff14dd1c5 298,627
+  s_0e0389a35f491c::t_5805211fd0583d 270
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/insight/insight-runtime.ts
+  s_0e0389a35f491c::t_009707005ba006 27
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/notifications/__tests__/dingtalk-card.test.ts
+  s_0e0389a35f491c::t_649c10e27e636a 11
+  s_0e0389a35f491c::t_108dd056324f8e 1-10,12-21
+apps/evolverun/clawweb/public/modules/clawinsight/web/pages/InsightCenter/monitoring/session-recovery/PlanMarkdown.tsx
+  s_0e0389a35f491c::t_9edad0178ef6ec 1-9
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/owner-cooperation.test.ts
+  s_0e0389a35f491c::t_dddc42176f8cae 36-37,43
+  s_0e0389a35f491c::t_95fec962582910 1-35,39-42,44-58
+  s_0e0389a35f491c::t_d35425a6d735d2 38
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/handbook.ts
+  s_0e0389a35f491c::t_4ef14bad8426ea 66-69
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2f32c36c1946a3afe795e5bd5602ee70b4ea0ca9",
+  "prompts": {},
+  "sessions": {
+    "s_0e0389a35f491c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a56a-2741-7ad2-b03c-29b728d6311b",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "xieanyi.xay <xieanyi.xay@antgroup.com>"
+    }
+  }
+}

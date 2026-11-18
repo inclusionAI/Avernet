@@ -1,0 +1,23 @@
+apps/bcs/crates/services/bcs-channel/src/lib.rs
+  s_bfac72aaaff711::t_c38fe5a41c66e8 162,188
+apps/bcs/crates/services/bcs-channel/src/service.rs
+  s_bfac72aaaff711::t_b6c511d25b80a1 132,139,293
+apps/bcs/crates/services/bcs-channel/src/tests/inbound_identity.rs
+  s_bfac72aaaff711::t_34cb07862d702f 28-34,48-70
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ab9f3ada06c390cca24e9ae31963f14e616f4c32",
+  "prompts": {},
+  "sessions": {
+    "s_bfac72aaaff711": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c993-b186-76c1-a52d-d247d8a9eb68",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "卓人 <hx410025@antgroup.com>"
+    }
+  }
+}

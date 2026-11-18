@@ -1,0 +1,21 @@
+apps/bcsfuse/packages/search-core/tests/test_native_async_models.py
+  s_ce84d91f3d35be::t_48f4ffc4e089ba 84-85
+apps/bcsfuse/packages/search-core/tests/test_score_details.py
+  s_ce84d91f3d35be::t_48f4ffc4e089ba 62
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9dc4c9521059d4e668fc733c410477f05f847f8c",
+  "prompts": {},
+  "sessions": {
+    "s_ce84d91f3d35be": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a5bb-a115-7280-8eb7-64cf057003e5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}

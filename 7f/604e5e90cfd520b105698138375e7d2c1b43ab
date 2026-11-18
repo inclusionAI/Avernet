@@ -1,0 +1,21 @@
+apps/gateway/configs/application.yaml
+  s_befd386ce20825::t_f6d3e498802a3c 214-215
+apps/gateway/tests/test_gateway_config.py
+  s_befd386ce20825::t_93d06a88b7fc9c 421,431-433,449-450
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7f604e5e90cfd520b105698138375e7d2c1b43ab",
+  "prompts": {},
+  "sessions": {
+    "s_befd386ce20825": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a17e54-391f-7460-a1a1-4f8e39166a4f",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "卷瓜 <juangua.swj@antgroup.com>"
+    }
+  }
+}

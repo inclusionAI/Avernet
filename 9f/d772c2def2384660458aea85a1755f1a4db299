@@ -1,0 +1,26 @@
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/fanout-run-links.test.ts
+  s_e5af2ba86e6f98::t_c632993c08ea34 1-99
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/fanout-state-fixture.ts
+  s_e5af2ba86e6f98::t_9b5fffb806a090 17-25
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/fanout-state-repository.ts
+  s_e5af2ba86e6f98::t_a64a282faa33ef 10,513,515-523
+  s_e5af2ba86e6f98::t_99122dba27fa9b 512
+  s_e5af2ba86e6f98::t_70884fe2f11e19 528,557
+  s_e5af2ba86e6f98::t_f963f04f9b2357 514
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9fd772c2def2384660458aea85a1755f1a4db299",
+  "prompts": {},
+  "sessions": {
+    "s_e5af2ba86e6f98": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c059-e7b2-7490-8a14-23437878b491",
+        "model": "GLM-5.3"
+      },
+      "human_author": "fudapeng <fudp@example.com>"
+    }
+  }
+}

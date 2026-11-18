@@ -1,0 +1,16 @@
+apps/backend/tests/community/core/task/context_collab/products/task_commission_e2e_support.py
+  h_059e888e5e4e82 538
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_end_to_end.py
+  h_059e888e5e4e82 194-195,397-398,491-492
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "eed236675f9dcf4d5dde1859b5d93e294159b9fd",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

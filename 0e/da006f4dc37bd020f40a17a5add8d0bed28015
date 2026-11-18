@@ -1,0 +1,20 @@
+apps/frontend-nextgen/src/services/backendApi/harnessFlow/editorController.ts
+  h_bb3ca6fb13c5df 2,42-47,53,68-72
+apps/frontend-nextgen/src/services/taskEscortParity/editorService.ts
+  h_bb3ca6fb13c5df 41-42,44-49
+apps/frontend-nextgen/test/taskEscortParity/editorPage.test.tsx
+  h_bb3ca6fb13c5df 234-261
+apps/frontend-nextgen/test/taskEscortParity/editorService.test.ts
+  h_bb3ca6fb13c5df 5-9,79-86,184-319
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0eda006f4dc37bd020f40a17a5add8d0bed28015",
+  "prompts": {},
+  "humans": {
+    "h_bb3ca6fb13c5df": {
+      "author": "fudapeng <dapeng.fdp@antgroup.com>"
+    }
+  }
+}

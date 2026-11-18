@@ -1,0 +1,22 @@
+apps/backend/src/agentclaw/community/core/task/context_collab/README.md
+  h_059e888e5e4e82 31
+apps/backend/src/agentclaw/community/core/task/context_collab/l4_context_primitives/operations/collet_lifecycle.py
+  h_059e888e5e4e82 1,3-5,59-68,70,81-109
+apps/backend/src/agentclaw/community/core/task/context_collab/services/collet_lifecycle_service.py
+  h_059e888e5e4e82 3-5
+apps/backend/tests/community/core/task/context_collab/products/task_commission_e2e_support.py
+  h_059e888e5e4e82 9-11,32,123-238
+apps/backend/tests/community/core/task/context_collab/products/test_task_commission_end_to_end.py
+  h_059e888e5e4e82 51-53,68,71-73,77-79,85-86,107-109,126,385-388,390-420,424,426-428,430-437,439-453,455,457,459,461,463,467,474-479,492-493,679-687,694-703
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "056e50618c68f548e2e7e8684f6f66e78e7ca349",
+  "prompts": {},
+  "humans": {
+    "h_059e888e5e4e82": {
+      "author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

@@ -1,0 +1,19 @@
+apps/backend/tests/community/endpoints/test_openapi_task_endpoints.py
+  s_4b400329c6a7c2::t_06f5b315495c39 138-146,151,169-177,207
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "aa22699ab93ad0753e102b3fa2592be8881ef3d6",
+  "prompts": {},
+  "sessions": {
+    "s_4b400329c6a7c2": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "98a6cd13-fbb8-42cc-b35c-3b235f4a35b1",
+        "model": "antchat/GLM-5.2"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}
