@@ -1,0 +1,35 @@
+apps/backend/src/agentclaw/community/plugin_api/auth.py
+  s_fc1557df5d7924::t_3b72bbffc9924a 28-29
+apps/backend/src/agentclaw/community/core/token_exchange/orchestrator.py
+  s_fc1557df5d7924::t_3b72bbffc9924a 135,150-153
+  s_fc1557df5d7924::t_37f58f64f9f33b 130-131
+  s_fc1557df5d7924::t_49b52737f30041 132-134,136-137,142
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/token/router.py
+  s_fc1557df5d7924::t_3b72bbffc9924a 6,11,22,65,71,99,129-137,190
+apps/backend/tests/community/core/token_exchange/test_actor_identity.py
+  s_fc1557df5d7924::t_37f58f64f9f33b 226,242,283-284,291
+apps/backend/src/agentclaw/community/core/service_bot/services/baas_service.py
+  s_fc1557df5d7924::t_49691cccaa8c69 3389-3390
+apps/backend/src/agentclaw/community/plugin_api/README.md
+  s_fc1557df5d7924::t_b4eb9070a6b767 232-236
+apps/backend/tests/community/adapters/http/openapi_v1/test_friend_iam.py
+  s_fc1557df5d7924::t_8463594e66ba8d 157-231
+apps/backend/tests/community/core/service_bot/services/test_baas_service_token_outbound_target.py
+  s_fc1557df5d7924::t_a736521349a839 400-401,404,408,487-494
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0760e887c6c1f5e5eec5a22718f33a494900a6bd",
+  "prompts": {},
+  "sessions": {
+    "s_fc1557df5d7924": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1dde0-66b5-7650-8147-9dd4121d1f49",
+        "model": "gpt-6.2-astra"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    }
+  }
+}
