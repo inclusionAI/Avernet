@@ -48,6 +48,7 @@ from agentclaw.community.core.expert_chat.services.expert_chat_session_runtime i
 from agentclaw.community.core.expert_chat.services.expert_chat_owned_session import (
     ExpertChatOwnedSessionMixin,
 )
+from agentclaw.community.core.expert_chat.services.expert_chat_caller_sessions import ExpertChatCallerSessionsMixin
 from agentclaw.community.core.expert_chat.services.bot_lookup import ExpertChatBotLookupMixin
 from agentclaw.community.core.expert_chat.services.chat_stage import ExpertChatStageMixin
 from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
@@ -111,7 +112,7 @@ class BotInfoProvider(Protocol):
 # ============ Service Implementation ============
 
 
-class ExpertChatService(ExpertChatBotLookupMixin, ExpertChatOwnedSessionMixin, ExpertChatSessionRuntimeMixin, ExpertChatStageMixin, ExpertChatServiceProtocol):
+class ExpertChatService(ExpertChatCallerSessionsMixin, ExpertChatBotLookupMixin, ExpertChatOwnedSessionMixin, ExpertChatSessionRuntimeMixin, ExpertChatStageMixin, ExpertChatServiceProtocol):
     """用户与专家Bot对话业务逻辑"""
 
     @inject
@@ -465,7 +466,8 @@ class ExpertChatService(ExpertChatBotLookupMixin, ExpertChatOwnedSessionMixin, E
         """List one user's sessions for one expert Bot.
 
         The Backend-owned index is authoritative for ownership. Adapter data is
-        only used to enrich those already-authorized keys with live metadata.
+        used to enrich authorized keys. Independent Caller runtime sessions are
+        discovered in the subject instance and registered before enrichment.
         """
         bot = self._get_authorized_chat_bot(
             user_id,
@@ -483,17 +485,24 @@ class ExpertChatService(ExpertChatBotLookupMixin, ExpertChatOwnedSessionMixin, E
             owner_id=owner_id,
             session_key=session_key,
         )
-        if not rows:
+        if not rows and not (bot.get("bot_type") == "service" and bot.get("call_type") == "caller"):
             return {"total": 0, "items": []}
 
-        connection, need_poll = await self._prepare_chat_connection(
-            bot,
-            user_id,
-            owner_id,
-            iam_token,
-            bcn_friend_authorized=bcn_friend_authorized,
-            actor_user_id=actor_user_id,
-        )
+        if not rows and bot.get("bot_type") == "service" and bot.get("call_type") == "caller":
+            connection, need_poll = self._prepare_existing_caller_connection(
+                bot, user_id, owner_id,
+                bcn_friend_authorized=bcn_friend_authorized, actor_user_id=actor_user_id,
+            )
+        else:
+            connection, need_poll = await self._prepare_chat_connection(
+                bot, user_id, owner_id, iam_token,
+                bcn_friend_authorized=bcn_friend_authorized, actor_user_id=actor_user_id,
+            )
+        caller_items = {}
+        if not need_poll and connection is not None:
+            caller_items = await self._discover_caller_runtime_sessions(
+                bot, connection, user_id, owner_id, rows, session_key,
+            )
         if favorite_only and need_poll:
             return {"total": 0, "items": [], "need_poll": True}
 
@@ -522,10 +531,11 @@ class ExpertChatService(ExpertChatBotLookupMixin, ExpertChatOwnedSessionMixin, E
         if not need_poll and connection is not None:
             adapter_items = await self._list_owned_adapter_sessions(
                 connection=connection,
-                rows=rows,
+                rows=[row for row in rows if row["session_key"] not in caller_items],
                 user_id=user_id,
             )
 
+        adapter_items.update(caller_items)
         items = []
         for row in rows:
             item = adapter_items.get(row["session_key"])
@@ -544,7 +554,12 @@ class ExpertChatService(ExpertChatBotLookupMixin, ExpertChatOwnedSessionMixin, E
                 if isinstance(last_message, dict)
                 else None
             )
-            stable_modified = last_message_at or row.get("gmt_create")
+            stable_modified = (
+                last_message_at
+                or (item.get("gmt_modified") or item.get("gmt_created")
+                    if row["session_key"] in caller_items else None)
+                or row.get("gmt_create")
+            )
             if stable_modified:
                 enriched["gmt_modified"] = stable_modified
             items.append(enriched)

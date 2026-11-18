@@ -155,3 +155,18 @@ than reporting false health. Public
 application-grant and chat-access policy; a BaaS service JWT is not a public
 identity exception. Diagnostics identify `app_caller_instance_status` and never
 include the service JWT, signing key or full provider response.
+
+### Independent Caller runtime sessions
+
+Expert-chat lists also discover all actual OpenClaw session IDs from the
+subject's independent Caller instance. When the ownership index is empty,
+discovery uses a read-only lookup of an existing ready instance; it never
+creates, restarts or upgrades an instance. Missing instances yield an empty list
+and initializing or failed instances remain pending. Existing indexed sessions
+retain their previous connection lifecycle. Discovery does not filter by
+user_id because scheduled sessions have no interactive user identity. Ordinary, cron and subagent entries with nonempty string IDs returned by that
+instance are registered in the existing Backend ownership index, so connect,
+messages, favorites and mutation retain the normal ownership checks. Shared
+runtimes and other engines keep index-only discovery. Runtime timestamps
+are preserved for stable ordering; merge and deduplication precede pagination.
+No session key is synthesized. Shared-runtime strategy checks precede Caller ledger reads.
