@@ -1,4 +1,5 @@
 import { authoringRecord, authoringSpec, workflowAuthoringSignature } from '@/domain/taskEscortParity/workflowAuthoring';
+import { parseLosslessAuthoringText } from '@/domain/taskEscortParity/workflowAuthoringNumbers';
 import { authoringCommit, authoringFileChanges, authoringSnapshot, authoringToken, sameAuthoringExecution, workflowFromAuthoringPack } from '@/domain/taskEscortParity/workflowAuthoringPack';
 import { WorkflowAuthoringOutcomeError, type WorkflowAuthoringBaseline, type WorkflowAuthoringIdentity,
   type WorkflowAuthoringSnapshot, type WorkflowAuthoringSpec, type WorkflowCreateFromSpecInput,
@@ -27,6 +28,7 @@ export function createWorkflowAuthoringPersistence(api: WorkflowAuthoringControl
     const row = authoringRecord(value);
     if (row.workflowId !== id || !(row.packId === null || typeof row.packId === 'string') || typeof row.specJson !== 'string') throw new Error('数据库草稿身份或结构无效');
     const revision = authoringToken(row.draftToken);
+    parseLosslessAuthoringText(row.specJson);
     const spec = authoringSpec(JSON.parse(row.specJson), id);
     return { packId: row.packId, specJson: row.specJson, revision, spec };
   }

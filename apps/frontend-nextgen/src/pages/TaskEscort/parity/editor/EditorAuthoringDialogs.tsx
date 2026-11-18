@@ -106,9 +106,9 @@ export function EditorPublishReviewDialog({ publication }: { publication: Editor
             {change.operation} · {change.path}
           </summary>
           <p className="font-mono">文件权限：{change.beforeMode ?? '不存在'} → {change.afterMode ?? '不存在'}</p>
-          <p>发布前</p>
+          <p>发布前{change.beforeEncoding === 'base64' ? ' · 二进制 Base64（完整内容）' : ''}</p>
           <EditorCode label={`${change.path} 发布前`} text={change.before ?? '（不存在）'} />
-          <p>发布后</p>
+          <p>发布后{change.afterEncoding === 'base64' ? ' · 二进制 Base64（完整内容）' : ''}</p>
           <EditorCode label={`${change.path} 发布后`} text={change.after ?? '（已删除）'} />
         </details>
       ))}

@@ -16,8 +16,21 @@ it('includes executable permission changes in the complete publish review', () =
   const file = { path: 'scripts/run.sh', contentBase64: 'ZWNobyBvaw==', mode: '100644' as const };
   expect(authoringFileChanges([file], [{ ...file, mode: '100755' }])).toEqual([{
     path: file.path, operation: 'replace', before: 'echo ok', after: 'echo ok',
-    beforeMode: '100644', afterMode: '100755',
+    beforeMode: '100644', afterMode: '100755', beforeEncoding: 'utf-8', afterEncoding: 'utf-8',
   }]);
+});
+
+it.each(['9007199254740990.5', '1e-400', '0.1234567890123456789', '9007199254740993'])(
+  'rejects numeric text that JavaScript would silently round: %s', value => {
+    expect(() => parseWorkflowAuthoringYaml(`${workflowAuthoringYaml(spec)}\nprecise: ${value}\n`)).toThrow(/无损/);
+  },
+);
+
+it('retains exact binary file contents in publish review instead of decoding or omitting them', () => {
+  const file = { path: 'assets/icon.bin', contentBase64: '/wAB', mode: '100644' as const };
+  expect(authoringFileChanges([], [file])).toEqual([expect.objectContaining({
+    path: file.path, before: null, after: file.contentBase64, afterEncoding: 'base64', afterMode: '100644',
+  })]);
 });
 
 it('uses the real blank workflow starter and never claims an empty nodes spec is valid', () => {

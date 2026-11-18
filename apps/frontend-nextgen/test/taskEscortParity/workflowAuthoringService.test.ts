@@ -1,6 +1,6 @@
 import { createHash, webcrypto } from 'node:crypto';
 import { authoringRecord, workflowAuthoringYaml } from '@/domain/taskEscortParity/workflowAuthoring';
-import { WorkflowAiRecoveryError, WorkflowAuthoringOutcomeError, type WorkflowAiDraftJob } from '@/domain/taskEscortParity/workflowAuthoringTypes';
+import { WorkflowAiRecoveryError, WorkflowAuthoringOutcomeError } from '@/domain/taskEscortParity/workflowAuthoringTypes';
 import { workflowAuthoringController } from '@/services/backendApi/harnessFlow/workflowAuthoringController';
 import { backendRequest, type BackendRequestOptions } from '@/services/backendApi/httpClient';
 import { createWorkflowAuthoringService } from '@/services/taskEscortParity/workflowAuthoringService';
@@ -21,7 +21,8 @@ function files(value = spec, packId = 'flow') {
     { path: `workflows/${value.id}.yaml`, mode: '100644', contentBase64: encode(workflowAuthoringYaml(value)) },
     { path: 'scripts/run.sh', mode: '100755', contentBase64: encode('echo untouched\n') }];
 }
-function fixture(rawPackId: string | null = 'flow') {
+function fixture(initialPackId: string | null = 'flow') {
+  let rawPackId = initialPackId;
   let stored = spec, head = a, token = t;
   let lateMutation: (() => void) | undefined;
   const pack = () => ({ workflowId: stored.id, packId: rawPackId ?? stored.id, packPath: '', baseRef: `origin/wf/${stored.id}`, baseCommit: head, draftHead: head, versionFiles: files(stored, rawPackId ?? stored.id) });
@@ -212,8 +213,9 @@ it('uses prepare/receipt/POST poll, validates a candidate, and only applies in m
 });
 it('retains a signed recovery job before a lost submit ack and never re-prepares or re-dispatches', async () => {
   const f = aiFixture(); request.mockImplementation((url: string, options: BackendRequestOptions) => url.endsWith('/ai-drafts') ? Promise.reject(new Error('lost ack')) : f.transport(url, options));
-  let recovered: WorkflowAiDraftJob | undefined;
-  try { await f.start(); } catch (error) { expect(error).toBeInstanceOf(WorkflowAiRecoveryError); recovered = (error as WorkflowAiRecoveryError).job; }
+  const failure: unknown = await f.start().catch(error => error);
+  expect(failure).toBeInstanceOf(WorkflowAiRecoveryError);
+  const recovered = (failure as WorkflowAiRecoveryError).job;
   expect(recovered?.receipt).toBe('signed-receipt');
   await expect(f.service.waitForModification(recovered!, identity)).resolves.toMatchObject({ status: 'completed' });
   await expect(f.start()).resolves.toMatchObject({ status: 'completed' });
@@ -271,10 +273,11 @@ it('retries validation of a completed candidate without creating another AI task
 it('cancels locally before an uncooperative late completed poll can escape or apply', async () => {
   const f = aiFixture(), job = await f.start(); let release: ((value: unknown) => void) | undefined;
   request.mockImplementation((url: string, options: BackendRequestOptions) => url.endsWith('/poll') ? new Promise(resolve => { release = resolve; }) : f.transport(url, options));
-  const polling = f.service.pollModification(job, identity); const rejected = expect(polling).rejects.toThrow(/取消/);
+  const polling = f.service.pollModification(job, identity).catch(error => error);
   const cancelled = await f.service.cancelModification(job, identity);
   expect(cancelled.status).toBe('cancelled'); expect(posts('/cancel')[0][1].data).toEqual({ receipt: 'signed-receipt' });
-  release!(await f.transport(`${root}/workflows/flow/ai-drafts/draft-1/poll`, {})); await rejected;
+  release!(await f.transport(`${root}/workflows/flow/ai-drafts/draft-1/poll`, {}));
+  expect(await polling).toEqual(expect.objectContaining({ message: expect.stringMatching(/取消/) }));
   await expect(f.service.applyModification(job, spec, identity)).rejects.toThrow(/取消/);
 });
 it('aborts polling promptly, never emitting a late result to onUpdate', async () => {
@@ -435,13 +438,9 @@ it('fails postflight when Git changed a script that was not part of the candidat
 it('recovers a create-mode generation from its signed error job without a new prepare or submit', async () => {
   const f = aiFixture();
   request.mockImplementation((url: string, options: BackendRequestOptions) => url.endsWith('/ai-drafts') ? Promise.reject(new Error('lost generation ack')) : f.transport(url, options));
-  let recovery: WorkflowAiDraftJob | undefined;
-  try {
-    await f.service.startGeneration({ workflowId: 'flow', currentYaml: workflowAuthoringYaml(spec), prompt: '新增能力' }, identity);
-  } catch (cause) {
-    expect(cause).toBeInstanceOf(WorkflowAiRecoveryError);
-    recovery = (cause as WorkflowAiRecoveryError).job;
-  }
+  const failure: unknown = await f.service.startGeneration({ workflowId: 'flow', currentYaml: workflowAuthoringYaml(spec), prompt: '新增能力' }, identity).catch(cause => cause);
+  expect(failure).toBeInstanceOf(WorkflowAiRecoveryError);
+  const recovery = (failure as WorkflowAiRecoveryError).job;
   expect(recovery?.receipt).toBe('signed-receipt');
   const resumed = await f.service.resumeGeneration(recovery!, identity);
   const candidate = await f.service.applyGeneration(resumed, { workflowId: 'new-flow' }, identity);

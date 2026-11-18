@@ -92,6 +92,8 @@ export interface WorkflowPublishChange {
   after: string | null;
   beforeMode?: '100644' | '100755' | null;
   afterMode?: '100644' | '100755' | null;
+  beforeEncoding?: 'utf-8' | 'base64';
+  afterEncoding?: 'utf-8' | 'base64';
 }
 export interface WorkflowPublishReview {
   workflowId: string; packId: string; candidateCommit: string; draftToken: string;

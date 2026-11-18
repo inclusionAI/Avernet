@@ -73,9 +73,21 @@ export function authoringFileChanges(before: WorkflowAuthoringFile[], after: Wor
   for (const name of new Set([...a.keys(), ...b.keys()])) {
     const old = a.get(name), next = b.get(name);
     if (old?.contentBase64 === next?.contentBase64 && old?.mode === next?.mode) continue;
+    const content = (file: WorkflowAuthoringFile | undefined) => {
+      if (!file) return { text: null, encoding: 'utf-8' as const };
+      try {
+        const text = decodeWorkflowAuthoringFile(file);
+        if (text.includes('\u0000')) throw new Error('binary');
+        return { text, encoding: 'utf-8' as const };
+      } catch {
+        return { text: file.contentBase64, encoding: 'base64' as const };
+      }
+    };
+    const previous = content(old), candidate = content(next);
     changes.push({ path: name, operation: !next ? 'delete' : old ? 'replace' : 'create',
-      before: old ? decodeWorkflowAuthoringFile(old) : null, after: next ? decodeWorkflowAuthoringFile(next) : null,
-      beforeMode: old?.mode ?? null, afterMode: next?.mode ?? null });
+      before: previous.text, after: candidate.text,
+      beforeMode: old?.mode ?? null, afterMode: next?.mode ?? null,
+      beforeEncoding: previous.encoding, afterEncoding: candidate.encoding });
   }
   return changes;
 }

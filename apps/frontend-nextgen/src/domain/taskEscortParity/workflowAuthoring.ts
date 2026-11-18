@@ -1,5 +1,6 @@
 /** Pure, lossless workflow authoring validation. No API, stores or UI imports. */
-import { dump, JSON_SCHEMA, load } from 'js-yaml';
+import { dump, JSON_SCHEMA } from 'js-yaml';
+import { parseLosslessAuthoringText } from './workflowAuthoringNumbers';
 import type { WorkflowAuthoringSpec } from './workflowAuthoringTypes';
 
 export function authoringRecord(value: unknown): Record<string, unknown> {
@@ -89,7 +90,7 @@ export function authoringYamlText(value: unknown): string {
   return text;
 }
 export function parseWorkflowAuthoringYaml(yaml: string): WorkflowAuthoringSpec {
-  const parsed: unknown = load(authoringYamlText(yaml), { schema: JSON_SCHEMA });
+  const parsed: unknown = parseLosslessAuthoringText(authoringYamlText(yaml));
   const row = authoringRecord(parsed);
   // Smart onboarding may emit a workflow metadata wrapper. Preserve it and all
   // extension keys while projecting the documented id/title/version to the root.
