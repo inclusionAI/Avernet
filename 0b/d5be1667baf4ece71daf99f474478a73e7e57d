@@ -1,0 +1,43 @@
+apps/frontend-nextgen/tsconfig.json
+  s_2a8abdc9af1170::t_e9918d4bc38fe0 22-27
+apps/frontend-nextgen/scripts/public-tests.list
+  s_2a8abdc9af1170::t_fb72023b5014db 62-72,74-107
+  s_2a8abdc9af1170::t_e8a4fe2749f45c 153-154
+  s_853dc2328e6e01::t_8c68a803d77a7b 208,212-223
+apps/frontend-nextgen/scripts/assemble-internal.sh
+  s_2a8abdc9af1170::t_c14b7a35466fe6 209-219
+apps/frontend-nextgen/jest.config.cjs
+  s_2a8abdc9af1170::t_1efe497abb8a3c 22-26
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0bd5be1667baf4ece71daf99f474478a73e7e57d",
+  "prompts": {},
+  "sessions": {
+    "s_2a8abdc9af1170": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "b7903c3f-dab3-4e7d-87b3-7d23f3d7a102",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    },
+    "s_5c173f6b8a3b51": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ce92-ae83-7ee3-a7cd-2cd2e1135dca",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "运海 <zhangyunhai.zyh@antgroup.com>"
+    },
+    "s_853dc2328e6e01": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "baf3979c-b7e9-4f49-8731-da28a1b45f70",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    }
+  }
+}

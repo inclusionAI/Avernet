@@ -1,0 +1,32 @@
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/body-parsers.ts
+  s_4e7e3f8993b73f::t_c834faa708facf 2,13-14
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/aistudio-train-host.test.ts
+  s_4e7e3f8993b73f::t_4a51777ac1f119 98,108,118,131,134,142,144-196,205,208,211,221,232
+  s_4e7e3f8993b73f::t_532ca806b0413b 7-26
+  s_4e7e3f8993b73f::t_2acfc718d680b3 1-6,27-97,99-107,109-117,119-130,132-133,135-141,143,197-204,206-207,209-210,212-220,222-231,233
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/aistudio-train-mount.ts
+  s_4e7e3f8993b73f::t_c834faa708facf 1-102
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/index.ts
+  s_4e7e3f8993b73f::t_c834faa708facf 41
+  s_4e7e3f8993b73f::t_7a8c9fdf134686 39,44,186,560
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/aistudio-train-host.fixture.ts
+  s_4e7e3f8993b73f::t_a19e1b3187f009 1-59
+apps/evolverun/clawweb/internal/bootstrap/clawweb/vitest.config.ts
+  s_4e7e3f8993b73f::t_4d7a34e8719d19 9-16
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "51705ae033a78a5d694eb1bca6f0173b6e20cfcc",
+  "prompts": {},
+  "sessions": {
+    "s_4e7e3f8993b73f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e375-c4b3-7d70-8077-b0b19e04c803",
+        "model": "GPT-6.1-SOL"
+      },
+      "human_author": "fudp <dapeng.fdp@antgroup.com>"
+    }
+  }
+}
