@@ -49,7 +49,7 @@ export function UserTaskGoalContent({ goal }: { goal: string }) {
     <TooltipProvider delayDuration={300}>
       <Tooltip>
         <TooltipTrigger asChild>
-          <div tabIndex={0} className="w-full truncate text-xs leading-5 text-foreground">
+          <div tabIndex={0} className="w-full truncate text-[13px] leading-5 text-foreground">
             {goal}
           </div>
         </TooltipTrigger>
@@ -63,7 +63,7 @@ export function UserTaskModifiedTime({ record, lab }: { record: TaskListItem; la
   return (
     <div
       className={
-        lab ? 'whitespace-nowrap text-xs leading-5 text-foreground' : 'space-y-1 text-xs leading-5 text-foreground'
+        lab ? 'whitespace-nowrap text-[13px] leading-5 text-foreground' : 'space-y-1 text-xs leading-5 text-foreground'
       }
     >
       <div>{formatDateTime(record.gmt_modified)}</div>
@@ -81,7 +81,7 @@ export function UserTaskOwnerBotCell({ name, botId, avatarUrl }: { name: string;
     <div className="flex items-center gap-2">
       <Avatar name={name} src={resolveBotAvatarUrl(avatarUrl, botId)} size={32} />
       <div className="min-w-0 flex-1">
-        <div className="truncate text-sm font-medium leading-5 text-foreground">{name}</div>
+        <div className="truncate text-[13px] font-medium leading-5 text-foreground">{name}</div>
         <div className="truncate text-xs leading-5 text-muted-foreground">{botId}</div>
       </div>
     </div>
