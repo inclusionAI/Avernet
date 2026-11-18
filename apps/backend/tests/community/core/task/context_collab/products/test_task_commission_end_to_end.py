@@ -94,7 +94,7 @@ from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     ScenarioRole,
     VersionedProfileRef,
 )
-from agentclaw.community.core.task.context_collab.l6_products.method_policies import (
+from agentclaw.community.core.task.context_collab.l5_methods.method_policies import (
     OpenMethodPolicy,
 )
 from agentclaw.community.core.task.context_collab.l6_products.operations import (
@@ -114,7 +114,8 @@ from agentclaw.community.core.task.context_collab.l6_products.persistence.record
 from agentclaw.community.core.task.context_collab.l6_products.persistence.repository import (
     ContextCollabRepositoryProtocol,
 )
-from agentclaw.community.core.task.context_collab.l6_products.publication import (
+from agentclaw.community.core.task.context_collab.l5_methods.publication import (
+    BotSelfApplicationAdmission,
     OpenPublicationProfile,
 )
 from agentclaw.community.core.task.context_collab.persistence.method_store import (
@@ -125,9 +126,6 @@ from agentclaw.community.core.task.context_collab.products.task_commission impor
 )
 from agentclaw.community.core.task.context_collab.products.task_commission.profile import (
     TASK_COMMISSION_PROFILE,
-)
-from agentclaw.community.core.task.context_collab.products.task_commission.publication import (
-    BotSelfApplicationAdmission,
 )
 from agentclaw.community.core.task.context_collab.products.task_commission.service_api import (
     TaskAdvanceCommand,

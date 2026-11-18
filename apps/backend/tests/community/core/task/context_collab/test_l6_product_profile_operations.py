@@ -35,14 +35,15 @@ from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     WorkflowProfile,
     negotiate,
 )
-from agentclaw.community.core.task.context_collab.l6_products.method_policies import (
+from agentclaw.community.core.task.context_collab.l5_methods.method_policies import (
     OpenMethodPolicy,
 )
 from agentclaw.community.core.task.context_collab.l6_products.operations import (
     ProductProfileCreateCommand,
     create_product_profile,
 )
-from agentclaw.community.core.task.context_collab.l6_products.publication import (
+from agentclaw.community.core.task.context_collab.l5_methods.publication import (
+    BotSelfApplicationAdmission,
     OpenAdmissionPolicy,
     OpenPublicationProfile,
 )
@@ -51,7 +52,6 @@ from agentclaw.community.core.task.context_collab.products.task_commission.profi
     init_product_profile,
 )
 from agentclaw.community.core.task.context_collab.products.task_commission.publication import (
-    BotSelfApplicationAdmission,
     DesignatedOpenAdmission,
 )
 

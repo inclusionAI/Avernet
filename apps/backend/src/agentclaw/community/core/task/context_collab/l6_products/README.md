@@ -21,8 +21,8 @@ Service APIs, not a new HTTP/ACCS operation family or product-specific wire prot
 | DomainProfile | [contracts.py](contracts.py) | Maps product vocabulary to L3 Resource and L4 Collet/Task/Message/Artifact authority, not duplicate product-owned entities. |
 | TaskLifecycleContract / TaskAction | [task_contracts.py](task_contracts.py), [contracts.py](contracts.py) | Reusable, exactly versioned Task lifecycle/action contract, independent of product orchestration. References the existing G4 machine; never executes a Bot plan. |
 | WorkflowProfile | [contracts.py](contracts.py) | Optional product orchestration contract. Existing profiles own their action mappings and reference a versioned G4 machine over L4 Task, or explicitly declare a nontransition event stream. Not required merely to run an autonomous Bot. |
-| MethodPolicy / OpenMethodPolicy | [method_policies.py](method_policies.py) | Typed L6 product policy variants, scoped to a required Method in `composition.policies`. Currently only Open declares one; other Methods need no placeholder policy. |
-| OpenAdmissionPolicy / OpenPublicationProfile | [publication.py](publication.py) | Shared participation/role/capacity constraints, ADMITTED delivery gate and partial-failure behavior. Concrete products own specialized admission strategies and step order; L6 does not execute them. |
+| MethodPolicy / OpenMethodPolicy | [L5 method_policies.py](../l5_methods/method_policies.py) | L5-owned Method policy values selected in `composition.policies` for a required Method. Currently only Open declares one; other Methods need no placeholder policy. |
+| OpenAdmissionPolicy / OpenPublicationProfile / BotSelfApplicationAdmission | [L5 publication.py](../l5_methods/publication.py) | L5-owned participation/role/capacity constraints, bounded Bot self-application, ADMITTED delivery gate and partial-failure behavior. L6 selects these values; product services and DI execute the journey. |
 | ProductInstance | [instance.py](instance.py) | Durable selection/evidence references: Collet ID and optional independent root Task ID (absent before Work.start), product and selected Task/workflow/domain versions, actual MethodBinding references for the pinned topology, selected Method versions, actual RoleBinding references, pinned participant eligibility, governance requirements and negotiation result. No independent lifecycle state. |
 | Compatibility selection | `negotiate(profile, offer)` | Exact required profile/Method/ACCS/layer/extension/governance match. Reports missing required and omitted optional capabilities separately. Never silently chooses a newer version or weaker policy. |
 
@@ -51,8 +51,8 @@ runtime registry, catalog database or registration API.
 library operation for authoring a `ProductProfileDefinition`. Its typed input is
 [`ProductProfileCreateCommand`](operations/contracts.py): exact `ref`, Method
 composition, scenario roles, governance and compatibility requirements, plus
-optional domain, workflow and Task contract selection. Method-specific product
-policies belong to `composition.policies`, not the universal ProductProfile.
+optional domain, workflow and Task contract selection. L5-owned Method policies
+are selected in `composition.policies`, not the universal ProductProfile.
 The default `policies=()` declares no method-specific product policy, including
 no automatic Open publication use case. It is valid for Open as well as other
 Methods; an Open binding alone does not imply a publication policy.
@@ -64,7 +64,7 @@ from agentclaw.community.core.task.context_collab.l5_methods.method_profile impo
 from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     MethodCompositionTemplate,
 )
-from agentclaw.community.core.task.context_collab.l6_products.method_policies import (
+from agentclaw.community.core.task.context_collab.l5_methods.method_policies import (
     OpenMethodPolicy,
 )
 from agentclaw.community.core.task.context_collab.l6_products.operations import (
@@ -124,11 +124,13 @@ Invalid definitions raise
 installation still validates it. Reference uniqueness is enforced within each
 catalog, not by this stateless creation operation.
 
-Consumers of Open product policy use
+Consumers of Open policy use
 `profile.composition.require_policy("Open").publication`; missing or duplicate
-policies fail explicitly rather than selecting a default. Policy declarations
-remain L6 values; L5 operations still receive their existing L5 commands and do
-not depend on L6 or product strategy classes.
+policies fail explicitly rather than selecting a default. The policy types and
+Bot self-application constraints are [L5 contracts](../l5_methods/README.md); L6
+only selects and composes them. L5 validates role mappings through its structural
+`AdmissionRole` contract, never an import of L6 `ScenarioRole`. L5 operations still
+receive their existing commands and do not resolve product profiles.
 
 **Python compatibility:** the former top-level `publication` field on both
 `ProductProfileCreateCommand` and `ProductProfileDefinition`, and
@@ -138,6 +140,12 @@ accessor above. Product definitions, DI adapters and test catalogs are migrated
 together. This relocates the same policy, not its semantics or installed version;
 ProductInstance storage, pinned references and HTTP/ACCS wire shapes are
 unchanged. No runtime state migration or new capability negotiation is needed.
+
+The canonical `MethodPolicy` / `OpenMethodPolicy` imports now live in
+`l5_methods.method_policies`; `OpenAdmissionPolicy`, `OpenPublicationProfile` and
+`BotSelfApplicationAdmission` live in `l5_methods.publication`. The former L6
+policy/publication modules and the former commission Bot-policy import remain
+identity reexports, not duplicate definitions. Internal consumers use L5 directly.
 
 Creating a definition performs no I/O, runtime authorization, capability
 negotiation, global registration, catalog mutation or Collet/Task/Method creation.
@@ -270,9 +278,10 @@ requires a new version; preserve old definitions for existing instances.
 [`products/task_commission/profile.py`](../products/task_commission/profile.py)
 owns the installed `task_commission@1` definition, rather than placing business
 templates in L6 or a generic profile factory. The specialized
-`DesignatedOpenAdmission` compatibility policy and
-`BotSelfApplicationAdmission` policy belong in
+`DesignatedOpenAdmission` compatibility policy remains in
 [`products/task_commission/publication.py`](../products/task_commission/publication.py).
+The reusable `BotSelfApplicationAdmission` policy is owned by
+[L5 publication](../l5_methods/publication.py) and selected by the @2 definition.
 The other four existing compatibility definitions live in
 [`products/legacy_profiles.py`](../products/legacy_profiles.py), not L6. Neither
 module registers itself; only DI chooses the installation.

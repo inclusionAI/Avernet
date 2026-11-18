@@ -22,7 +22,7 @@ from agentclaw.community.core.task.context_collab.l6_products.contracts import (
     ProductProfileDefinition,
     TaskLifecycleContract,
 )
-from agentclaw.community.core.task.context_collab.l6_products.method_policies import (
+from agentclaw.community.core.task.context_collab.l5_methods.method_policies import (
     OpenMethodPolicy,
 )
 from agentclaw.community.core.task.context_collab.l6_products.participant_scope import (

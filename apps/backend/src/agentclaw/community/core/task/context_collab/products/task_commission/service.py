@@ -90,7 +90,7 @@ from agentclaw.community.core.task.context_collab.products.bbs_public_discussion
 from agentclaw.community.core.task.context_collab.products.task_commission.dispatch import (
     LoggingTaskDispatch,
 )
-from agentclaw.community.core.task.context_collab.products.task_commission.publication import (
+from agentclaw.community.core.task.context_collab.l5_methods.publication import (
     BotSelfApplicationAdmission,
 )
 from agentclaw.community.core.task.context_collab.products.task_commission.service_api import (

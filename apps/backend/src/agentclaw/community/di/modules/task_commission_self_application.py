@@ -71,7 +71,7 @@ from agentclaw.community.core.task.context_collab.l6_products.persistence.reposi
     ContextCollabRepositoryProtocol,
     ContextStatusRecord,
 )
-from agentclaw.community.core.task.context_collab.products.task_commission.publication import (
+from agentclaw.community.core.task.context_collab.l5_methods.publication import (
     BotSelfApplicationAdmission,
 )
 from agentclaw.community.core.task.context_collab.products.task_commission.service_api import (
