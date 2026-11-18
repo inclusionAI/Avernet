@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
 from injector import inject
 
@@ -16,6 +17,7 @@ from agentclaw.community.core.task.domain.identity import (
     parse_scoped_bot_identity,
 )
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.log import get_logger
 from .publisher_protocol import ForumNotificationPublisherProtocol
 
 from agentclaw.community.utils.env_utils import get_current_env
@@ -24,6 +26,8 @@ from agentclaw.community.core.work_orders.models import (
     WorkOrderBizType,
     WorkOrderEventType,
 )
+
+logger = get_logger()
 
 
 @dataclass(frozen=True)
@@ -94,10 +98,10 @@ class ForumNotificationPublisher(ForumNotificationPublisherProtocol):
                 event_type=event_type,
                 actor_type=actor_type,
                 actor_id=actor_id,
-                actor_display_name=_actor_display_name(
-                    actor_type,
-                    actor_id,
-                    actor_display_name,
+                actor_display_name=self._resolve_actor_display_name(
+                    actor_type=actor_type,
+                    actor_id=actor_id,
+                    actor_display_name=actor_display_name,
                 ),
                 original_text=text,
                 target_type=target_type,
@@ -204,6 +208,54 @@ class ForumNotificationPublisher(ForumNotificationPublisherProtocol):
                 raise LookupError("notification recipient bot has no owner")
             return owner_id.strip()
         raise LookupError(f"unsupported notification recipient type: {recipient_type}")
+
+    def _resolve_actor_display_name(
+        self,
+        *,
+        actor_type: str,
+        actor_id: str,
+        actor_display_name: str | None,
+    ) -> str:
+        """Return the name rendered in the notice body for this actor.
+
+        A Bot actor is named from its authoritative Bot record so owner-scoped
+        and bare Bot ids stop leaking into the notice text. Resolving the name
+        is best effort: a missing Bot, an empty ``bot_name`` or a failed lookup
+        keeps the historical identity fallback and never fails the interaction
+        that triggered the notice. Human actors are unchanged.
+        """
+        fallback = _actor_display_name(actor_type, actor_id, actor_display_name)
+        if actor_type != "BOT":
+            return fallback
+        return self._bot_name(actor_id) or fallback
+
+    def _bot_name(self, actor_id: str) -> str | None:
+        try:
+            bot = self._find_actor_bot(actor_id)
+        except Exception:
+            logger.warning(
+                "[forum-notification][actor-name] bot lookup failed actor_id=%s",
+                actor_id,
+                exc_info=True,
+            )
+            return None
+        if bot is None:
+            return None
+        bot_name = bot.get("bot_name")
+        if isinstance(bot_name, str) and bot_name.strip():
+            return bot_name.strip()
+        return None
+
+    def _find_actor_bot(self, actor_id: str) -> dict[str, Any] | None:
+        scoped = parse_scoped_bot_identity(actor_id)
+        if scoped is not None:
+            bot_id, owner_id = scoped
+            return self._bot_repository.get_by_id_and_owner(bot_id, owner_id)
+        if is_bare_default_bot_identity(actor_id):
+            # The shared ``default`` id carries no owner here; picking any row
+            # would attribute the name of an unrelated owner's Bot.
+            return None
+        return self._bot_repository.get_unique_by_id(actor_id)
 
 
 @dataclass(frozen=True)
