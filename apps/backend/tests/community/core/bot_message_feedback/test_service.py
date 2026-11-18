@@ -153,3 +153,49 @@ async def test_like_clears_reason_and_comment():
     )
 
 
+
+
+async def test_get_feedback_returns_none_when_repo_has_no_row():
+    repo = AsyncMock()
+    repo.list_by_message_ids.return_value = []
+    service = BotMessageFeedbackService(repo)
+
+    record = await service.get_feedback("msg-1", "u1")
+
+    assert record is None
+    repo.list_by_message_ids.assert_awaited_once_with(
+        ["msg-1"], user_id="u1", env="dev"
+    )
+
+
+async def test_get_feedback_validates_identity_and_message_id():
+    service = BotMessageFeedbackService(AsyncMock())
+
+    with pytest.raises(ValueError, match="message_id is required"):
+        await service.get_feedback(" ", "u1")
+    with pytest.raises(ValueError, match="user_id is required"):
+        await service.get_feedback("msg-1", "")
+
+
+async def test_list_feedback_deduplicates_and_trims_ids():
+    repo = AsyncMock()
+    repo.list_by_message_ids.return_value = [_record(message_id="msg-1")]
+    service = BotMessageFeedbackService(repo)
+
+    records = await service.list_feedback([" msg-1 ", "msg-2", "msg-1", ""], "u1")
+
+    assert [record.message_id for record in records] == ["msg-1"]
+    repo.list_by_message_ids.assert_awaited_once_with(
+        ["msg-1", "msg-2"], user_id="u1", env="dev"
+    )
+
+
+async def test_list_feedback_rejects_empty_and_oversized_batches():
+    service = BotMessageFeedbackService(AsyncMock())
+
+    with pytest.raises(ValueError, match="message_ids is required"):
+        await service.list_feedback([" ", ""], "u1")
+    with pytest.raises(ValueError, match="at most 100 items"):
+        await service.list_feedback(
+            [f"msg-{index}" for index in range(101)], "u1"
+        )

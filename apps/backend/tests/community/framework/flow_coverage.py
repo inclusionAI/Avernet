@@ -223,9 +223,10 @@ SINGLEBOX_E2E_EXEMPT: dict[str, str] = {
         "singlebox can sign a principal and a provider reports real data."
     ),
     "bot_message_feedback": (
-        "New bot output message feedback module. Covered by endpoint, service, "
-        "repository and architecture tests; drain when a real singlebox flow "
-        "exercises the feedback submission end-to-end."
+        "Bot output message feedback module: submit plus per-user/env-scoped "
+        "reads (single and batch) used to restore history state. Covered by "
+        "endpoint, service, repository and architecture tests; drain when a "
+        "real singlebox flow exercises submit then read end-to-end."
     ),
     "bot_copy": (
         "Bot-copy v1 module (Route B manifest-reuse: ac_bot_copy ledger + "

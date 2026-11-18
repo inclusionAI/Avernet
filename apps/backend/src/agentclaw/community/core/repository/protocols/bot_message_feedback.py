@@ -10,7 +10,7 @@ if TYPE_CHECKING:
 
 @runtime_checkable
 class BotMessageFeedbackRepositoryProtocol(Protocol):
-    """Persist per-user feedback on individual messages."""
+    """Persist and read per-user feedback on individual messages."""
 
     @abstractmethod
     async def upsert(
@@ -30,3 +30,16 @@ class BotMessageFeedbackRepositoryProtocol(Protocol):
         """Create or update a feedback record for (message_id, user_id)."""
         ...
 
+    @abstractmethod
+    async def list_by_message_ids(
+        self,
+        message_ids: list[str],
+        user_id: str,
+        env: str | None = None,
+    ) -> list["BotMessageFeedbackRecord"]:
+        """Return this user's feedback rows for the given messages in one env.
+
+        Missing message ids are skipped; the caller must not assume one row per
+        requested id.
+        """
+        ...

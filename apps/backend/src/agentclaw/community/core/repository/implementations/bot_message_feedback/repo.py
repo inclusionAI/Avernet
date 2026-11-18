@@ -108,8 +108,28 @@ class BotMessageFeedbackRepository(BotMessageFeedbackRepositoryProtocol):
             session.flush()
             session.refresh(row)
             return self._to_record(row)
-        # In the rare case of a concurrent insert that wins the unique key,
-        # retry once by updating the existing row.
-        # Note: the with-block above cannot catch exceptions across the close,
-        # so the retry is implemented in the service layer instead.
+
+    async def list_by_message_ids(
+        self,
+        message_ids: list[str],
+        user_id: str,
+        env: str | None = None,
+    ) -> list[BotMessageFeedbackRecord]:
+        """Read one user's feedback rows for a set of message ids."""
+        ids = [message_id for message_id in message_ids if message_id]
+        if not ids:
+            return []
+        env = (env or "").strip().lower() or get_current_env()
+        with self._db.orm_session() as session:
+            rows = (
+                session.query(self._model)
+                .filter(
+                    self._model.message_id.in_(ids),
+                    self._model.user_id == user_id,
+                    self._model.env == env,
+                )
+                .order_by(self._model.id.asc())
+                .all()
+            )
+            return [self._to_record(row) for row in rows]
 
