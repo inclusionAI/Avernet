@@ -231,3 +231,31 @@ it('uses the source two-workspace structure, toolbar history dialog and desktop 
   fireEvent.keyDown(historyDialog, { key: 'Escape' });
   expect(screen.queryByRole('dialog', { name: '发布历史' })).not.toBeInTheDocument();
 });
+
+it('shows an Origin-specific inline script error without raw response data and retries only that read', async () => {
+  request.mockImplementation((url: string, options: { params: Record<string, unknown> }) =>
+    url.endsWith('/pack-scripts')
+      ? Promise.reject(
+          Object.assign(new Error('Origin not allowed'), {
+            status: 403,
+            data: { error: 'Origin not allowed', code: 'ORIGIN_NOT_ALLOWED', message: 'untrusted raw body' },
+          }),
+        )
+      : respond(url, options),
+  );
+  render(<WorkflowEditorPage context={context} />);
+  await screen.findByRole('button', { name: /准备数据.*cli-script/ });
+  fireEvent.click(screen.getByRole('button', { name: '脚本文件' }));
+  const alert = await screen.findByRole('alert');
+  expect(alert).toHaveTextContent('脚本请求来源校验失败，请检查访问地址或联系管理员。');
+  expect(alert).not.toHaveTextContent(/Pack 读取权限|Origin not allowed|ORIGIN_NOT_ALLOWED|untrusted raw body/);
+  expect(screen.queryByLabelText('脚本内容')).not.toBeInTheDocument();
+  const nonScriptCalls = request.mock.calls.filter(([url]) => !url.endsWith('/pack-scripts'));
+  request.mockImplementation(respond);
+  fireEvent.click(screen.getByRole('button', { name: '重试读取' }));
+  expect(await screen.findByLabelText('脚本内容')).toHaveTextContent('echo actual-content');
+  expect(request.mock.calls.filter(([url]) => !url.endsWith('/pack-scripts'))).toEqual(nonScriptCalls);
+  expect(request.mock.calls.filter(([url]) => url.endsWith('/pack-scripts'))).toHaveLength(2);
+  expect(request.mock.calls.every(([, options]) => options.method === 'GET')).toBe(true);
+  expect(screen.getByRole('button', { name: '保存脚本' })).toBeDisabled();
+});
