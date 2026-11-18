@@ -13,7 +13,7 @@ use bcs_service_api::port::repo::a2a_run::{A2aContextScope, A2aRunRecord, A2aRun
 use bcs_service_api::types::a2a_bot::A2aBinding;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use crate::{client::bind_rest_client, binding_client::BindingClient, grpc_mesh::GrpcMeshConfig, projection::{Output, Projection}};
+use crate::{binding_client::BindingClient, grpc_mesh::GrpcMeshConfig, projection::{Output, Projection}};
 
 #[path = "delivery_driver.rs"]
 mod driver;
@@ -46,6 +46,7 @@ struct Inner {
     input: RwLock<Option<InputRuntime>>,
     slots: Arc<tokio::sync::Semaphore>,
     grpc: Option<GrpcMeshConfig>,
+    identity: Option<Arc<dyn bcs_app_identity_api::OutboundAppIdentity>>,
 }
 
 #[derive(Clone)]
@@ -69,12 +70,19 @@ fn now_ms() -> u64 { SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_defa
 impl A2aHttpTransport {
     pub fn new(guard: OutboundUrlGuard, runs: Arc<dyn A2aRunRepoPort>, credentials: Arc<dyn ProviderCredentialRepoPort>) -> Self {
         Self { inner: Arc::new(Inner { guard, runs, credentials, runtime: RwLock::new(None),
-            active: Mutex::new(HashMap::new()), input:RwLock::new(None), slots: Arc::new(tokio::sync::Semaphore::new(256)), grpc:None }) }
+            active: Mutex::new(HashMap::new()), input:RwLock::new(None), slots: Arc::new(tokio::sync::Semaphore::new(256)), grpc:None, identity: None }) }
     }
 
     pub fn with_grpc_mesh(mut self, config: GrpcMeshConfig) -> ServiceResult<Self> {
         config.validate().map_err(|_| invalid("invalid gRPC mesh configuration"))?;
         Arc::get_mut(&mut self.inner).ok_or_else(||invalid("configure gRPC before sharing transport"))?.grpc=Some(config);
+        Ok(self)
+    }
+
+    pub fn with_app_identity(mut self, plugin: Arc<dyn bcs_app_identity_api::OutboundAppIdentity>) -> ServiceResult<Self> {
+        Arc::get_mut(&mut self.inner)
+            .ok_or_else(|| invalid("configure application identity before sharing transport"))?
+            .identity = Some(plugin);
         Ok(self)
     }
 
@@ -133,10 +141,18 @@ impl A2aHttpTransport {
                 .map_err(|_|invalid("extension header invalid"))?);
         }
         let http = crate::card_fetch::guarded_client_with_headers(&self.inner.guard, &record.interface.url, headers).await?;
-        if record.interface.binding == A2aBinding::JsonRpc {
-            return Ok(BindingClient::JsonRpc(crate::jsonrpc::JsonRpcClient::new(http, record.interface.url.clone(), record.interface.tenant.clone())));
+        let mut http = crate::http_client::HttpClient::new(http);
+        if let Some(identity) = &self.inner.identity {
+            http = http.with_identity(identity.clone(), record.scope.provider_id.clone());
         }
-        Ok(BindingClient::Rest(bind_rest_client(http, record.interface.url.clone(), record.interface.tenant.clone())))
+        if record.interface.binding == A2aBinding::JsonRpc {
+            return Ok(BindingClient::JsonRpc(crate::jsonrpc::JsonRpcClient::with_http(
+                http, record.interface.url.clone(), record.interface.tenant.clone(),
+            )));
+        }
+        Ok(BindingClient::Rest(crate::client::rest_client(
+            http, record.interface.url.clone(), record.interface.tenant.clone(),
+        )))
     }
 
     async fn save(&self, record: &mut A2aRunRecord, state: A2aRunState) -> ServiceResult<()> {
@@ -297,7 +313,7 @@ impl BotDeliveryPort for A2aHttpTransport {
         let request = serde_json::from_value(json!({"message":message,"configuration":configuration}))?;
         let attempts = if record.extensions.iter().any(|uri|uri == DEDUP_EXTENSION) { 2 } else { 1 };
         let mut received = None;
-        for _ in 0..attempts {
+        for attempt in 0..attempts {
             let budget = record.deadline_ms.saturating_sub(now_ms()).min(15_000);
             if budget == 0 { break; }
             let first = async {
@@ -316,8 +332,17 @@ impl BotDeliveryPort for A2aHttpTransport {
             match tokio::time::timeout(Duration::from_millis(budget), first).await {
                 Ok(Ok(value)) => { received = Some(value); break; }
                 Ok(Err(error)) => {
+                    if let Some(message) = crate::http_client::identity_failure(&error) {
+                        if attempt == 0 {
+                            let payload = json!({"state": "error", "errorKind": "a2a_application_identity",
+                                "errorCode": "A2A_APPLICATION_IDENTITY_NOT_SENT", "errorMessage": message});
+                            return self.rejected(&mut record, payload, message).await;
+                        }
+                        // A prior network attempt may already have reached the peer.
+                        break;
+                    }
                     if let Some(payload)=delivery_error::initial_rejection(&error) {
-                        return self.rejected(&mut record,payload).await;
+                        return self.rejected(&mut record, payload, "remote request rejected before Task creation").await;
                     }
                 }
                 Err(_) => {}

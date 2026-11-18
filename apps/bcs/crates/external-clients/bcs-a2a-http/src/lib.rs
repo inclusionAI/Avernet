@@ -11,5 +11,6 @@ pub mod card_fetch;
 mod subscribe;
 pub mod delivery;
 mod client_json;
+mod http_client;
 pub mod tools;
 pub mod structured_exec;

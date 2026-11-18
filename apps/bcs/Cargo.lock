@@ -339,6 +339,7 @@ dependencies = [
  "bcs-app-collaboration-template",
  "bcs-app-group",
  "bcs-app-group-context",
+ "bcs-app-identity-api",
  "bcs-app-invitation",
  "bcs-app-invite-code",
  "bcs-app-register",
@@ -497,6 +498,7 @@ dependencies = [
  "async-trait",
  "axum",
  "bcs-a2a-binding-api",
+ "bcs-app-identity-api",
  "bcs-bot-store",
  "bcs-chat-run-store",
  "bcs-db-api",
@@ -717,6 +719,17 @@ dependencies = [
  "tokio",
  "tracing",
  "ulid",
+]
+
+[[package]]
+name = "bcs-app-identity-api"
+version = "0.1.4-beta.3"
+dependencies = [
+ "bcs-domain",
+ "inventory",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
 ]
 
 [[package]]

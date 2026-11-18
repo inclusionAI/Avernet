@@ -40,6 +40,9 @@ pub struct BcsConfig {
     /// closed; present = full validation at startup, fail closed.
     #[serde(default)]
     pub caller_identity: Option<bcs_config_api::CallerIdentityServiceConfig>,
+    /// Optional application credentials for built-in outbound A2A HTTP requests.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub a2a_http_identity: Option<bcs_app_identity_api::OutboundAppIdentityConfig>,
     /// Speaking-lease idle window (spec §10.13.9, §15.99): defaults to the
     /// frozen 60s constant; absent section changes nothing.
     #[serde(default)]
@@ -461,6 +464,7 @@ impl Default for BcsConfig {
         Self {
             collaboration_drafts: None,
             caller_identity: None,
+            a2a_http_identity: None,
             speaking_lease: Default::default(),
             state_machine_history: Default::default(),
             bind: default_bind(),
