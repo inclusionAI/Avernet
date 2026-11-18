@@ -71,4 +71,14 @@ class DeviceSkillPackageUpload(SkillPackageUploadPort):
             skill_id=skill_id, owner_id=owner_id, user_id=actor_id
         )
 
+    async def ensure_dst_local_skill_asset(
+        self, *, bot_id: str, owner_id: str, actor_id: str,
+        source_bot_id: str, source_owner_id: str, name: str,
+    ) -> dict[str, Any]:
+        return await self._inner.ensure_dst_local_skill_asset(
+            bot_id=bot_id, owner_id=owner_id, actor_id=actor_id,
+            source_bot_id=source_bot_id, source_owner_id=source_owner_id,
+            name=name,
+        )
+
 __all__ = ["DeviceSkillPackageUpload"]

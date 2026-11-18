@@ -221,6 +221,60 @@ class _PersistedSkillPackages:
         )
         self.packages.pop(name, None)
 
+    async def ensure_dst_local_skill_asset(
+        self, *, bot_id: str, owner_id: str, actor_id: str,
+        source_bot_id: str, source_owner_id: str, name: str,
+    ) -> dict:
+        src_rows = self._skills.list_bot_local_by_name(
+            bot_id=source_bot_id, name=name
+        )
+        src = next(
+            (
+                r for r in src_rows
+                if str(r.get("user_id") or "") == source_owner_id
+            ),
+            None,
+        )
+        assert src is not None, (
+            f"ensure_dst_local_skill_asset: source bot {source_bot_id!r} has "
+            f"no local skill named {name!r} owned by {source_owner_id!r}"
+        )
+        existing = next(
+            (
+                asset
+                for asset in self._skills.list_bot_local_assets(
+                    env="dev", owner_id=owner_id, bot_id=bot_id
+                )
+                if asset.name == name
+            ),
+            None,
+        )
+        if existing is None:
+            row = self._skills.create(
+                {
+                    "name": name,
+                    "description": src["description"] or "",
+                    "git_path": f"local://skills-local/{name}",
+                    "is_public": False,
+                    "user_id": owner_id,
+                    "bolt_id": bot_id,
+                    "status": "PUBLISHED",
+                    "source_type": "upload",
+                }
+            )
+            operation = "created"
+        else:
+            row = self._skills.update(
+                str(existing.skill_id),
+                {"description": src["description"] or ""},
+            ) or existing
+            operation = "replaced"
+        return {
+            "operation": operation,
+            "skill": {**row, "active": False},
+            "actor_id": actor_id,
+        }
+
 
 class _PersistedSkillQuery:
     """Narrow query adapter over the same real Skill repository."""

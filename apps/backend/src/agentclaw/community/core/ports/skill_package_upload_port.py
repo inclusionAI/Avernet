@@ -56,4 +56,22 @@ class SkillPackageUploadPort(Protocol):
         """Physically delete one unreferenced Bot-owned Local package and row."""
         ...
 
+    @abstractmethod
+    async def ensure_dst_local_skill_asset(
+        self, *, bot_id: str, owner_id: str, actor_id: str,
+        source_bot_id: str, source_owner_id: str, name: str,
+    ) -> dict[str, Any]:
+        """Register the dst ``ac_skill`` row for a bot-file-synced Local skill.
+
+        A ``from: from_bot`` member reaches this bot through BOT_FILE_SYNC: the
+        sync writes the source bot's workspace onto this one, which carries the
+        package's bytes to the dst ``skills-local`` directory. This method does
+        not fetch, upload or read the package — it reverse-looks-up the source
+        bot's ``ac_skill`` row for ``name``/``description``, recomputes the dst
+        ``git_path`` through the same factory the upload road takes, and writes
+        the dst ``ac_skill`` row (create-or-replace same-name), skipping the
+        package write the upload road runs (file-sync already wrote it).
+        """
+        ...
+
 __all__ = ["SkillPackageUploadPort"]
