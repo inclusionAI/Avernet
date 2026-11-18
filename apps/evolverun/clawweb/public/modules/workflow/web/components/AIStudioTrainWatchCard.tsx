@@ -86,9 +86,9 @@ export default function AIStudioTrainWatchCard({ flowId, nodeId, attempt, nodeSt
         <Field label="最近查询">{absoluteTime(watch.lastPolledAt)}</Field>
         <Field label="最近来源">{watch.lastPollSource === 'auto' ? '自动查询' : watch.lastPollSource === 'manual' ? '手工查询' : '—'}</Field>
         <Field label="超时时间">{absoluteTime(watch.timeoutAt)}{active && Date.parse(watch.timeoutAt) <= now && <span className="block text-muted-foreground">已到超时时间，等待服务端确认</span>}</Field>
-        <Field label="累计查询错误">{watch.errorCount}</Field>
+        <Field label="连续观测异常">{watch.errorCount}</Field>
       </dl>
-      {watch.lastError && <p className="break-words text-xs text-destructive">最近查询错误：{watch.lastError}（查询错误不等于节点失败）</p>}
+      {watch.lastError && <p className="break-words text-xs text-destructive">最近观测诊断：{watch.lastError}（节点状态以服务端为准）</p>}
     </>}
     {feedback}
     {query.isError && <button type="button" className={controlClass} onClick={() => void query.refetch()} disabled={query.isFetching}>重试观测</button>}

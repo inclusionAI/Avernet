@@ -3,6 +3,8 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import AIStudioTrainWatchCard from '../AIStudioTrainWatchCard'
 import { trainWatch } from '../../api/__tests__/aistudio-train.fixture'
+import { toWatchDto } from '../../../server/contracts/aistudio-train'
+import { watchFixture } from '../../../server/contracts/__tests__/aistudio-train.fixture'
 
 let client: QueryClient
 const fetchMock = vi.fn<typeof fetch>()
@@ -26,6 +28,18 @@ describe('AIStudioTrainWatchCard', () => {
     expect(screen.getByText('AIS 状态：RUNNING')).toBeInTheDocument()
     expect(screen.getAllByText('2026-11-16 08:05:00')).toHaveLength(2)
     expect(screen.getByText('300 秒')).toBeInTheDocument()
+  })
+  it('shows the AIS error status and a status interpretation diagnostic without inferring node failure', async () => {
+    const watch = toWatchDto(watchFixture({
+      attempt: 2, lastStatus: 'error', lastError: 'AIStudio status unknown', errorCount: 1,
+    }), 200)
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ watch })))
+    show()
+    expect(await screen.findByText('AIS 状态：error')).toBeInTheDocument()
+    expect(screen.getByText('节点状态：waiting')).toBeInTheDocument()
+    expect(screen.getByText('连续观测异常')).toBeInTheDocument()
+    expect(screen.getByText('最近观测诊断：AIStudio returned an unrecognized status（节点状态以服务端为准）')).toBeInTheDocument()
+    expect(screen.queryByText(/查询错误|AIStudio status query failed/)).not.toBeInTheDocument()
   })
   it('places the safe external task link immediately after Copy in the recordId row, not the header', async () => {
     show()
@@ -120,7 +134,7 @@ describe('watch schedule, errors and accessibility', () => {
       await act(async () => { await vi.advanceTimersByTimeAsync(2000) })
       expect(screen.getByText('已到计划时间，等待服务端查询')).toBeInTheDocument()
       expect(screen.getByText('已到超时时间，等待服务端确认')).toBeInTheDocument()
-      expect(screen.getByText(/最近查询错误：upstream query failed/)).toBeInTheDocument()
+      expect(screen.getByText(/最近观测诊断：upstream query failed/)).toBeInTheDocument()
       expect(client.getQueryData(key)).toMatchObject({ watch: { nextPollAt: trainWatch.nextPollAt, phase: 'waiting' } })
     } finally { vi.useRealTimers() }
   })
