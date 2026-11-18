@@ -291,7 +291,7 @@ describe('发布审批组（collab-permission-entry-migration AC-06~08，SHAPE:I
     await waitFor(() => expect(screen.getByText('参与协作群聊')).toBeInTheDocument());
 
     expect(screen.getByText('发布审批')).toBeInTheDocument();
-    expect(screen.getByText('个人 Bot 暂不支持协作者申请')).toBeInTheDocument();
+    expect(screen.getByText('发布审批仅服务 Bot 可配置')).toBeInTheDocument();
     const approvalSwitch = screen.getByRole('switch', { name: '开启共同编辑者发布需 Owner 审批' });
     expect(approvalSwitch).toBeDisabled();
     expect(botEditorService.loadApproval).not.toHaveBeenCalled();
