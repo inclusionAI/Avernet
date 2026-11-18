@@ -20,11 +20,13 @@
  * ⑤ source snapshot carries a default Set and an ordinary Set → dst segment
    derived from the snapshot, validate_document re-accepts it.
 
-Local-package members (``local://``) are skipped at the declaration layer
-(Spec §1): the manifest schema refuses a bare local SkillSet member. Their
-physical packages still arrive via the copy's ``resources: workspace/``
-file-sync entry, and the operator can re-link them through Add-Skill. So no
-endpoint scenario asserts a local member riding the declaration.
+Local-package members (``local://``) ride the declaration as
+``{name, origin: local, from: from_bot}`` (Spec §1.4): wave-1 opened the
+``(SKILLS, BOT)`` ``support_matrix`` cell, wave-2 implemented
+``BotSyncedLocalSkill`` resolve (reverse-lookup source ``ac_skill`` + register
+dst row without uploading). The physical package still arrives via the
+copy's ``resources: workspace/`` file-sync entry, and the declaration
+references the top-level ``sources.from_bot`` named source.
 
 The manifest's ``skill_sets`` segment under test lives at
 ``manifest.seam.persist.call_args.kwargs['document']`` (the YAML body
@@ -137,9 +139,8 @@ def _snapshot(
 def test_scenario_1_source_manifest_full_segment_passthrough_to_dst():
     """AC-1 endpoint coverage — source N ordinary Set + default enabled →
     dst manifest carries the full segment derived from the snapshot,
-    validate_document re-accepts it. Local-package members cannot be
-    expressed in the schema (Spec §1) and are skipped; center/repo members
-    + mcp still derive."""
+    validate_document re-accepts it. Scenario 1 stays in the center/repo +
+    mcp vocabulary; scenario 6 below exercises the local-member path."""
     ordinary_skills = (
         {
             "id": 101,
@@ -304,9 +305,9 @@ def test_scenario_4_non_openclaw_source_refused_before_persist():
 
 def _snapshot_with_default_and_ordinary() -> SkillSetApplySnapshot:
     """A snapshot a legacy Genome bot would surface: one default set + one
-    ordinary Set with center and repo members (local members skipped per the
-    S1-fix; the spec's §1 local representation is refused by the schema, so
-    the serializer drops them and the physical packages ride file-sync)."""
+    ordinary Set with center and repo members (local members now ride as
+    ``from: from_bot`` per wave-3; the scenario 6 below covers the local
+    case)."""
     ordinary_skills = (
         {
             "id": 101,
@@ -362,4 +363,81 @@ def test_scenario_5_branch_b_snapshot_derives_skill_sets_on_dst():
     origins = {skill["origin"] for skill in ordinary["skills"]}
     assert origins == {"repo", "center"}
     assert ordinary["mcp"] == [{"server_code": "gh"}]
+    validate_document(mocks[3].persist.call_args.kwargs["document"], _CAPS)
+
+
+# ---------------------------------------------------------------------------
+# Scenario ⑥ — snapshot with a local-package member → dst carries
+# ``{origin: local, from: from_bot}`` (波3 / Spec §1.4)
+# ---------------------------------------------------------------------------
+
+
+def test_scenario_6_local_skill_member_passthrough_to_dst():
+    """AC-1 / AC-5 endpoint coverage — a snapshot carrying a ``local://``
+    skill member → ``_serialize_skill_sets`` emits
+    ``{name, origin: local, from: from_bot}``; the dst manifest document
+    embeds it under ``manifest.skill_sets`` and the document's top-level
+    ``sources.from_bot`` declaration lets the local member's ``from:``
+    reference resolve, so ``validate_document`` re-accepts the full persisted
+    document. The physical package still rides the ``resources: workspace/``
+    file-sync entry — the declaration only carries the name + source pointer,
+    which wave-2's ``BotSyncedLocalSkill`` resolve consumes to reverse-lookup
+    the source ``ac_skill`` row and register the dst row without uploading."""
+    ordinary_skills = (
+        {
+            "id": 301,
+            "name": "repo-tool",
+            "git_path": "tools/repo-tool",
+            "skill_uuid": None,
+        },
+        {
+            "id": 302,
+            "name": "local-tool",
+            "git_path": "local://some/local/pkg",
+            "skill_uuid": None,
+        },
+    )
+    default_set = SkillSetSnapshot(
+        id=1,
+        name="default",
+        description=None,
+        is_default=True,
+        is_active=True,
+        skill_ids=(),
+        mcp_codes=(),
+        skill_references=(),
+    )
+    ordinary_set = SkillSetSnapshot(
+        id=2,
+        name="with-local",
+        description=None,
+        is_default=False,
+        is_active=True,
+        skill_ids=(301, 302),
+        mcp_codes=(),
+        skill_references=(),
+    )
+    snapshot = _snapshot(
+        sets=(default_set, ordinary_set), skills=ordinary_skills
+    )
+
+    mocks = _mocks(script_body="echo hi")
+    _set_snapshot(mocks, snapshot)
+    resp = _call_submit_copy(mocks)
+    assert resp.type == "success"
+    doc = _persisted_document(mocks[3])
+    segment = doc["manifest"]["skill_sets"]
+    assert any(row.get("name") == "default" for row in segment)
+    ordinary = next(row for row in segment if row.get("name") == "with-local")
+    by_origin = {skill["origin"]: skill for skill in ordinary["skills"]}
+    assert set(by_origin) == {"repo", "local"}
+    local_member = by_origin["local"]
+    assert local_member["name"] == "local-tool"
+    assert local_member["from"] == "from_bot"
+    repo_member = by_origin["repo"]
+    assert repo_member["repo_path"] == "tools/repo-tool"
+    # The top-level ``sources.from_bot`` is the file-sync source the local
+    # member references — its presence is what lets ``validate_document``
+    # accept the local declaration (wave-1 support_matrix cell open).
+    assert doc["sources"]["from_bot"]["protocol"] == "bot"
     validate_document(mocks[3].persist.call_args.kwargs["document"], _CAPS)
