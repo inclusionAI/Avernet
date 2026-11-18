@@ -1,0 +1,70 @@
+apps/evolverun/clawweb/public/app/clawweb/server/workflow-ai-draft-baas-execution.ts
+  s_f055f71a132094::t_fff2d1e515d779 18,123-126,131-132
+  s_f055f71a132094::t_6f539b3f61e787 4,10-17,19-41,44-46,68,70-82,90-95,99-100,102,105,121,139-140
+  s_1515a2ffb44a94::t_d3b9240b9f3ff6 107-108,117-118
+  s_f055f71a132094::t_e9810a89c48d9c 133-134,136,138
+  s_9fdf331bac042e::t_dca55bc32f5450 6,69,83-89,127,129-130,135,137
+apps/evolverun/clawweb/public/modules/clawevolve/server/services/baas-intervention.ts
+  s_1515a2ffb44a94::t_6b3ab524db01cb 91
+  s_0c9b3af0be1e6f::t_cd79f537c68d35 224-225,265,270,275,279-282,290-329
+  s_1515a2ffb44a94::t_d3b9240b9f3ff6 47-48,90,92-95,215-218,232
+apps/evolverun/clawweb/public/app/clawweb/server/__tests__/workflow-ai-draft-baas.test.ts
+  s_1515a2ffb44a94::t_f8d7b55c7c4f97 81-83,116
+  s_1515a2ffb44a94::t_bf5582b7f1c449 132-134
+  s_1515a2ffb44a94::t_30c59cf76e8a48 37,58-59,63,65-67,79-80,84,90,105,118,129-130,135-172,176,182-317,337-339,342-346,350-351,353-365
+  s_1515a2ffb44a94::t_56290a0b65f2a2 85-87
+  s_1515a2ffb44a94::t_67ab1a84751fba 347
+  s_1515a2ffb44a94::t_8c7c6c72fca4a5 57
+  s_1515a2ffb44a94::t_d13885fd1dc5a4 60-62
+  s_1515a2ffb44a94::t_f11376d39ed2f4 64
+  s_1515a2ffb44a94::t_72153b8fa0cdd8 68-70,76-78
+  s_1515a2ffb44a94::t_7bcbfbaf19ea27 88-89
+  s_1515a2ffb44a94::t_b82678ca4ebcf8 91-92
+  s_1515a2ffb44a94::t_df713661524719 102-104
+  s_1515a2ffb44a94::t_98db93beec8847 106-108,113-115
+  s_1515a2ffb44a94::t_4e58fb653a8ec5 117
+  s_1515a2ffb44a94::t_09d16db53e0acd 119-121,126-128
+  s_1515a2ffb44a94::t_66f2df1c2c50bc 131
+apps/evolverun/clawweb/public/modules/workflow/web/api/__tests__/workflow-ai.route.integration.test.ts
+  s_1515a2ffb44a94::t_3417f6a55aea6c 16,20,60,62-64,66-67,69-71,73-76,78-81,84-90,92,96,101,103-105
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9b7fa341fdf0367baf6c39a55ddcb19239a3bdf7",
+  "prompts": {},
+  "sessions": {
+    "s_0c9b3af0be1e6f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1dd31-943b-7b01-987a-5b52f6fd4d58",
+        "model": "GLM-5.3"
+      },
+      "human_author": "fudapeng <dapeng.fdp@antgroup.com>"
+    },
+    "s_1515a2ffb44a94": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1dd23-2120-7020-ad1c-3d72cf004f09",
+        "model": "GLM-5.3"
+      },
+      "human_author": "fudapeng <dapeng.fdp@antgroup.com>"
+    },
+    "s_9fdf331bac042e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1dd3c-19fd-7b02-9fb5-3ab74ed44c5e",
+        "model": "GLM-5.3"
+      },
+      "human_author": "fudapeng <dapeng.fdp@antgroup.com>"
+    },
+    "s_f055f71a132094": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1dd32-0647-7692-aca4-5f93b782c065",
+        "model": "GLM-5.3"
+      },
+      "human_author": "fudapeng <dapeng.fdp@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,3011 @@
+apps/bcsfuse/src/app/domain/models/structured_conflict_analysis.py
+  s_4efef845bd857d::t_106173527a9f8d 1-241
+apps/bcs/crates/service-api/bcs-service-api/src/types/bot_authority.rs
+  s_4efef845bd857d::t_106173527a9f8d 118-119,546-549
+apps/bcs/crates/bootstrap/bcs/src/delivery_metrics.rs
+  s_4efef845bd857d::t_106173527a9f8d 1-2,9,11-13,15-16,18,20-21,24-27,29-37,39-43,50-51,53,58-59,65,68,71-72,77,79-99,153-162,164-167,169,171-188,190,192-200,202,204,206-220,224-225,227-255
+apps/bcsfuse/src/app/application/services/profile_analyzer_service.py
+  s_4efef845bd857d::t_106173527a9f8d 1-538
+apps/backend/tests/community/adapters/http/agentswarm/test_http_adapter.py
+  s_4efef845bd857d::t_106173527a9f8d 35-36,613-632
+  s_4efef845bd857d::t_9cd676c2496a5c 633
+apps/bcs/docs/arch/README.md
+  s_4efef845bd857d::t_106173527a9f8d 1-13
+apps/bcsfuse/src/app/infra/embedding/providers/fake_provider.py
+  s_4efef845bd857d::t_106173527a9f8d 1-126
+apps/bcsfuse/src/app/application/services/semantic_match_service.py
+  s_4efef845bd857d::t_106173527a9f8d 1-322
+apps/bcsfuse/packages/search-core/src/search_core/providers/qdrant_process.py
+  s_4efef845bd857d::t_106173527a9f8d 1-106
+apps/bcsfuse/src/app/infra/config/data_paths.py
+  s_4efef845bd857d::t_106173527a9f8d 1-47
+apps/bcsfuse/src/app/infra/public/reranker/http_reranker.py
+  s_4efef845bd857d::t_106173527a9f8d 1-20
+apps/bcsfuse/src/app/adapters/http/schemas/fusion_schemas.py
+  s_4efef845bd857d::t_106173527a9f8d 1-594
+apps/bcsfuse/src/app/domain/models/openclaw_adapter_result.py
+  s_4efef845bd857d::t_106173527a9f8d 1-111
+apps/bcs/scripts/e2e-test/caller_config_storage_story.py
+  s_4efef845bd857d::t_106173527a9f8d 1-240
+apps/bcsfuse/packages/search-core/src/search_core/providers/embedding.py
+  s_4efef845bd857d::t_106173527a9f8d 1-525
+apps/bcsfuse/packages/search-core/tests/test_search_timing.py
+  s_4efef845bd857d::t_106173527a9f8d 1-467
+apps/bcsfuse/src/app/application/services/worker_import_service.py
+  s_4efef845bd857d::t_106173527a9f8d 1-376
+apps/bcs/crates/application/v1/bcs-app-bot/tests/authority_mine.rs
+  s_4efef845bd857d::t_106173527a9f8d 708-719
+apps/bcs/crates/external-clients/bcs-fuse-client/CONTEXT.md
+  s_4efef845bd857d::t_106173527a9f8d 5-6,10-14
+apps/bcsfuse/packages/search-core/tests/test_ranking.py
+  s_4efef845bd857d::t_106173527a9f8d 1-43
+apps/bcsfuse/src/app/domain/models/profile_fusion/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1-33
+apps/bcsfuse/src/app/domain/enums/fuse_enums.py
+  s_4efef845bd857d::t_106173527a9f8d 1-75
+apps/bcs/migrations/legacy/mysql/043_actor_identity_collation.sql
+  s_4efef845bd857d::t_106173527a9f8d 1-89
+apps/bcsfuse/src/app/adapters/http/oss_dependencies.py
+  s_4efef845bd857d::t_106173527a9f8d 1-181
+apps/bcsfuse/src/app/domain/services/retrieval_logging.py
+  s_4efef845bd857d::t_106173527a9f8d 1-52
+apps/bcsfuse/src/app/domain/services/worker_profile_retrieval_service.py
+  s_4efef845bd857d::t_106173527a9f8d 1-51
+apps/bcsfuse/src/app/infra/retrievers/baseline_retriever.py
+  s_4efef845bd857d::t_106173527a9f8d 1-541
+apps/bcsfuse/docs/api/api-reference.md
+  s_4efef845bd857d::t_106173527a9f8d 136-140,254-261,281-283,287-289,292-293,297-298
+  s_4efef845bd857d::t_9e0970e76c0618 299
+apps/baas/docs/agents/knowledge-standard.md
+  s_4efef845bd857d::t_106173527a9f8d 1-16
+apps/backend/tests/community/core/apply_engine/materialisers/test_nas_bot_file_sync.py
+  s_4efef845bd857d::t_106173527a9f8d 88,100-106,122,126-129,162,212,214,237,245,270,282,290-296,299-314,316-317,320,322-331,334-347,377,379
+apps/bcsfuse/src/app/infra/public/database/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1-17
+apps/bcsfuse/src/app/domain/models/profile_fusion/fusion_context.py
+  s_4efef845bd857d::t_106173527a9f8d 1-102
+apps/bcs/crates/application/v1/bcs-app-bot/tests/layering_contract.rs
+  s_4efef845bd857d::t_106173527a9f8d 2-13,18-23,25-38
+apps/bcs/crates/bootstrap/bcs/tests/provider_slug_migration.rs
+  s_4efef845bd857d::t_106173527a9f8d 26
+apps/bcs/crates/service-api/bcs-service-api/src/core/candidate_search.rs
+  s_4efef845bd857d::t_106173527a9f8d 3,7,22-39,97-126,135
+apps/bcsfuse/packages/search-core/docs/search-api.md
+  s_4efef845bd857d::t_106173527a9f8d 1-382
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/bots/schemas_create_with_manifest.py
+  s_4efef845bd857d::t_106173527a9f8d 122-137
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/errors_bot_create.py
+  s_4efef845bd857d::t_106173527a9f8d 7,13,23-24
+apps/backend/tests/community/plugin_api/test_models.py
+  s_4efef845bd857d::t_106173527a9f8d 201-205
+apps/bcs/crates/bootstrap/bcs/src/server/use_case_wiring.rs
+  s_4efef845bd857d::t_106173527a9f8d 64-70
+apps/bcs/crates/service-api/bcs-service-api/src/port/repo/message_delivery.rs
+  s_4efef845bd857d::t_106173527a9f8d 41-46,144-171,197-203
+apps/bcsfuse/packages/search-core/pyproject.toml
+  s_4efef845bd857d::t_106173527a9f8d 1-28
+apps/bcsfuse/packages/search-core/src/search_core/core/card_management.py
+  s_4efef845bd857d::t_106173527a9f8d 1-41
+apps/bcsfuse/packages/search-core/src/search_core/plugin_api/embedding.py
+  s_4efef845bd857d::t_106173527a9f8d 1-76
+apps/bcs/crates/bootstrap/bcs/src/http_adapter.rs
+  s_4efef845bd857d::t_106173527a9f8d 397-400
+apps/bcsfuse/src/app/domain/events/event_bus.py
+  s_4efef845bd857d::t_106173527a9f8d 1-46
+apps/bcsfuse/src/app/infra/adapters/zdas_fused_profile_store.py
+  s_4efef845bd857d::t_106173527a9f8d 1-22
+apps/bcsfuse/src/app/infra/observability/service_counters.py
+  s_4efef845bd857d::t_106173527a9f8d 1-174
+apps/bcsfuse/src/app/domain/models/compiler_input.py
+  s_4efef845bd857d::t_106173527a9f8d 1-74
+apps/bcs/crates/service-api/bcs-service-api/src/core/a2a_bot.rs
+  s_4efef845bd857d::t_106173527a9f8d 32-33
+apps/bcsfuse/packages/search-core/docs/provider-contracts.md
+  s_4efef845bd857d::t_106173527a9f8d 1-168
+apps/bcsfuse/packages/search-core/tests/test_embedding_singleflight.py
+  s_4efef845bd857d::t_106173527a9f8d 1-189
+apps/bcsfuse/src/app/infra/public/llm/fake_llm_provider.py
+  s_4efef845bd857d::t_106173527a9f8d 1-20
+apps/bcs/crates/services/bcs-bot-store/src/memory_authority.rs
+  s_4efef845bd857d::t_106173527a9f8d 576-586
+  s_4efef845bd857d::t_d21c7ea8613d72 575
+apps/bcs/crates/services/bcs-bot/tests/provider_registration.rs
+  s_4efef845bd857d::t_106173527a9f8d 462-470,474
+apps/bcsfuse/src/app/domain/models/expert_diagnosis.py
+  s_4efef845bd857d::t_106173527a9f8d 1-136
+apps/bcs/crates/application/v1/bcs-app-bot/tests/candidate_friend_reads.rs
+  s_4efef845bd857d::t_106173527a9f8d 1-402
+apps/bcsfuse/packages/search-core/src/search_core/config/index_sync.py
+  s_4efef845bd857d::t_106173527a9f8d 1-59
+apps/bcs/crates/application/v1/bcs-app-bot/tests/v1_bot_service.rs
+  s_4efef845bd857d::t_106173527a9f8d 6,11,14-16,25-28,41,52,62,71,140,142,145,147-151,157-158,161-201,256-287,294,379,383-389,402,404,413-429
+apps/bcs/specs/2026-11-06-provider-initial-managers/plan.md
+  s_4efef845bd857d::t_106173527a9f8d 1-36
+apps/bcs/crates/services/bcs-bot-store/tests/candidate_friend_set_mysql.rs
+  s_4efef845bd857d::t_106173527a9f8d 1-29
+apps/backend/src/agentclaw/community/core/bot_config_manifest/schema/bot_config_kinds.py
+  s_4efef845bd857d::t_106173527a9f8d 1-83
+apps/bcs/crates/services/bcs-message-store/src/mysql.rs
+  s_4efef845bd857d::t_106173527a9f8d 62,246,250
+apps/bcsfuse/packages/search-core/src/search_core/config/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1
+apps/bcs/api-contracts/v1/internal.yaml
+  s_4efef845bd857d::t_106173527a9f8d 28-34
+apps/bcsfuse/src/app/infra/llm/config/llm_settings.py
+  s_4efef845bd857d::t_106173527a9f8d 1-337
+apps/backend/src/agentclaw/community/core/apply_engine/materialisers/bot_file_sync.py
+  s_4efef845bd857d::t_106173527a9f8d 111
+apps/bcsfuse/src/app/application/services/peer_review_service.py
+  s_4efef845bd857d::t_106173527a9f8d 1-414
+apps/bcsfuse/src/app/infra/config/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1-9
+apps/bcs/migrations/README.md
+  s_4efef845bd857d::t_106173527a9f8d 38-44,114-127
+  s_4efef845bd857d::t_10e0d902691263 128
+apps/bcsfuse/packages/search-core/src/search_core/application/emergency.py
+  s_4efef845bd857d::t_106173527a9f8d 1-229
+apps/backend/tests/community/core/bot_management/test_identity_inheriting_passport_copy.py
+  s_4efef845bd857d::t_106173527a9f8d 1-133
+apps/bcsfuse/src/app/domain/protocols/bot_cognition_protocol.py
+  s_4efef845bd857d::t_106173527a9f8d 1-84
+apps/bcsfuse/src/app/infra/config/search_provider_settings.py
+  s_4efef845bd857d::t_106173527a9f8d 1-29
+apps/bcs/crates/services/bcs-bot/tests/provider_initial_managers.rs
+  s_4efef845bd857d::t_106173527a9f8d 1-208
+apps/bcsfuse/src/app/infra/metadatastores/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1-5
+apps/bcsfuse/src/app/infra/providers/ecb_bot_recognition_provider.py
+  s_4efef845bd857d::t_106173527a9f8d 1-188
+apps/bcsfuse/src/app/infra/public/vectorstores/qdrant_sqlite_vector_store.py
+  s_4efef845bd857d::t_106173527a9f8d 1-143
+apps/backend/tests/community/core/agentswarm/service/test_sync_wait_and_purge.py
+  s_4efef845bd857d::t_106173527a9f8d 96,217-222
+apps/bcsfuse/packages/search-core/src/search_core/providers/qdrant_ids.py
+  s_4efef845bd857d::t_106173527a9f8d 1-101
+apps/bcsfuse/src/app/application/services/verify_judge.py
+  s_4efef845bd857d::t_106173527a9f8d 1-246
+apps/bcs/crates/adapters/http/bcs-http/CONTEXT.md
+  s_4efef845bd857d::t_106173527a9f8d 142-152
+apps/bcsfuse/src/app/application/dto/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1-9
+apps/backend/src/agentclaw/community/core/content_store/service.py
+  s_4efef845bd857d::t_106173527a9f8d 14-19,41,186,190-191,194,279,329,336-341,355-358,363-367,370-371,373,375
+apps/bcsfuse/packages/search-core/src/search_core/adapters/http/routes.py
+  s_4efef845bd857d::t_106173527a9f8d 1-153
+apps/bcsfuse/Dockerfile.dockerignore
+  s_4efef845bd857d::t_106173527a9f8d 1-21
+apps/bcsfuse/packages/search-core/src/search_core/catalog/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1
+apps/backend/tests/community/di/test_content_store_module_wiring.py
+  s_4efef845bd857d::t_106173527a9f8d 7-9,16,25,35-69
+apps/backend/src/agentclaw/community/di/profile_modules.py
+  s_4efef845bd857d::t_106173527a9f8d 30-32,105
+apps/baas/docs/agents/templates/README.md
+  s_4efef845bd857d::t_106173527a9f8d 1-3
+apps/bcsfuse/src/app/domain/services/adapters/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1-74
+apps/bcsfuse/packages/search-core/src/search_core/api/index_builds.py
+  s_4efef845bd857d::t_106173527a9f8d 1-39
+apps/bcsfuse/src/app/application/services/fusion_recommendation_service.py
+  s_4efef845bd857d::t_106173527a9f8d 1-189
+apps/bcsfuse/src/app/infra/config/feature_flags.py
+  s_4efef845bd857d::t_106173527a9f8d 1-590
+apps/bcs/crates/services/bcs-bot-store/src/persistent_repo/candidate_friend_set.rs
+  s_4efef845bd857d::t_106173527a9f8d 1-80
+apps/bcsfuse/packages/search-core/src/search_core/providers/keyword.py
+  s_4efef845bd857d::t_106173527a9f8d 1-237
+apps/bcsfuse/src/app/application/services/expert_diagnosis_service.py
+  s_4efef845bd857d::t_106173527a9f8d 1-1839
+apps/bcs/crates/external-clients/bcs-fuse-client/src/cards.rs
+  s_4efef845bd857d::t_106173527a9f8d 1-100
+apps/bcsfuse/src/app/infra/compilers/baseline_execution_packet_compiler.py
+  s_4efef845bd857d::t_106173527a9f8d 1-444
+apps/bcs/crates/services/bcs-bot-store/src/memory_registration_ownership.rs
+  s_4efef845bd857d::t_106173527a9f8d 69-74,77-87,208-210,217-218,312,325-328,340,354,422-427,467,481-488,490,702-761
+  s_4efef845bd857d::t_5618f4dc56f4ad 68
+apps/bcs/specs/README.md
+  s_4efef845bd857d::t_106173527a9f8d 1-41
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/a2a_card_routes.rs
+  s_4efef845bd857d::t_106173527a9f8d 13,22-24,26,29-42,44,47,49-51,168,203,207-210,221,230-283,294-296,304
+apps/bcsfuse/src/app/adapters/http/schemas/worker_config_schemas.py
+  s_4efef845bd857d::t_106173527a9f8d 1-51
+apps/bcsfuse/src/app/infra/llm/providers/openai_compatible_provider.py
+  s_4efef845bd857d::t_106173527a9f8d 1-545
+apps/bcsfuse/packages/search-core/src/search_core/core/execution.py
+  s_4efef845bd857d::t_106173527a9f8d 1-73
+apps/bcs/crates/services/bcs-bot-store/src/persistent_repo/bot_repo_port.rs
+  s_4efef845bd857d::t_106173527a9f8d 60,64-72
+  s_4efef845bd857d::t_53cfcc86abe508 73
+apps/bcsfuse/packages/search-core/tests/test_index_identity.py
+  s_4efef845bd857d::t_106173527a9f8d 1-29
+apps/bcsfuse/src/app/application/search/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1
+apps/bcsfuse/src/app/domain/models/model_profile.py
+  s_4efef845bd857d::t_106173527a9f8d 1-144
+apps/backend/src/agentclaw/community/core/runtime_binding/README.md
+  s_4efef845bd857d::t_106173527a9f8d 28-30
+apps/bcsfuse/src/app/domain/services/sample_collector.py
+  s_4efef845bd857d::t_106173527a9f8d 1-192
+apps/bcsfuse/src/app/domain/services/adapters/worker_profile_binding_store_adapter.py
+  s_4efef845bd857d::t_106173527a9f8d 1-141
+apps/bcsfuse/src/app/application/services/verify_prompt_composer.py
+  s_4efef845bd857d::t_106173527a9f8d 1-201
+apps/bcsfuse/packages/search-core/src/search_core/core/index_builds.py
+  s_4efef845bd857d::t_106173527a9f8d 1-215
+apps/bcsfuse/src/app/domain/models/evaluation_result.py
+  s_4efef845bd857d::t_106173527a9f8d 1-153
+apps/bcsfuse/src/app/adapters/http/verify_parity_routes.py
+  s_4efef845bd857d::t_106173527a9f8d 1-514
+apps/bcsfuse/src/app/adapters/http/error_handling.py
+  s_4efef845bd857d::t_106173527a9f8d 1-135
+apps/bcsfuse/src/app/infra/providers/stub_perspective_provider.py
+  s_4efef845bd857d::t_106173527a9f8d 1-99
+apps/bcsfuse/src/app/domain/services/participants_sufficiency_checker.py
+  s_4efef845bd857d::t_106173527a9f8d 1-155
+apps/bcs/crates/bootstrap/bcs/CONTEXT.md
+  s_4efef845bd857d::t_106173527a9f8d 68-69,79-82
+apps/backend/src/agentclaw/community/core/content_store/settings.py
+  s_4efef845bd857d::t_106173527a9f8d 3,19-20
+apps/bcsfuse/src/app/bootstrap/opensource.py
+  s_4efef845bd857d::t_106173527a9f8d 1-142
+apps/bcs/crates/bootstrap/bcs/src/server/candidate_search_wiring_tests.rs
+  s_4efef845bd857d::t_106173527a9f8d 1-143
+apps/bcsfuse/src/app/application/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1-15
+apps/bcs/crates/service-api/bcs-service-api/src/port/repo/a2a_bot.rs
+  s_4efef845bd857d::t_106173527a9f8d 35-36
+apps/bcs/docs/diagnostics/session-delete.md
+  s_4efef845bd857d::t_106173527a9f8d 1-12
+apps/backend/src/agentclaw/community/core/bot_management/render_screen/services/render_screen_service.py
+  s_4efef845bd857d::t_106173527a9f8d 6-7,19-24,252-331
+apps/bcsfuse/src/app/domain/models/profile_fusion/group_conversation_summary.py
+  s_4efef845bd857d::t_106173527a9f8d 1-50
+apps/bcsfuse/src/app/application/use_cases/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1-9
+apps/bcsfuse/src/app/infra/compilers/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1-13
+apps/bcsfuse/src/app/domain/services/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1-97
+apps/bcs/configs/bcs-config-local.toml
+  s_4efef845bd857d::t_106173527a9f8d 253-254
+apps/bcsfuse/packages/search-core/README.md
+  s_4efef845bd857d::t_106173527a9f8d 1-93
+apps/bcsfuse/src/app/domain/models/worker_profile_binding.py
+  s_4efef845bd857d::t_106173527a9f8d 1-79
+apps/bcsfuse/packages/search-core/src/search_core/application/admission.py
+  s_4efef845bd857d::t_106173527a9f8d 1-39
+apps/bcs/crates/application/v1/bcs-app-bot/tests/v1_bot_service/candidates_and_projection.rs
+  s_4efef845bd857d::t_106173527a9f8d 33-36,50-55,70-74,95-97,100,102-105,123-130,142-143,212,236-255,257-263
+apps/bcsfuse/docs/diagnostics/README.md
+  s_4efef845bd857d::t_106173527a9f8d 1-17
+apps/bcsfuse/src/app/domain/services/evidence_aggregation_service.py
+  s_4efef845bd857d::t_106173527a9f8d 1-535
+apps/bcs/crates/services/bcs-bot-store/tests/provider_initial_managers.rs
+  s_4efef845bd857d::t_106173527a9f8d 1-131
+apps/bcsfuse/src/app/infra/reranker/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1-21
+apps/bcsfuse/src/app/application/services/worker_sync_merge.py
+  s_4efef845bd857d::t_106173527a9f8d 1-162
+apps/bcs/crates/application/bcs-app-a2a-bot/src/registration.rs
+  s_4efef845bd857d::t_106173527a9f8d 15
+apps/bcsfuse/src/app/domain/models/openclaw_adapter_input.py
+  s_4efef845bd857d::t_106173527a9f8d 1-60
+apps/bcsfuse/packages/search-core/docs/card-management-api.md
+  s_4efef845bd857d::t_106173527a9f8d 1-227
+apps/backend/src/agentclaw/community/plugins/community/agentswarm/host.py
+  s_4efef845bd857d::t_106173527a9f8d 322-325
+apps/bcsfuse/src/app/domain/models/stance_signal.py
+  s_4efef845bd857d::t_106173527a9f8d 1-128
+apps/bcsfuse/packages/search-core/src/search_core/providers/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1
+apps/bcs/crates/services/bcs-db-migrations/src/lib.rs
+  s_4efef845bd857d::t_106173527a9f8d 162,554-561
+apps/bcs/crates/services/bcs-message-store/src/delivery.rs
+  s_4efef845bd857d::t_106173527a9f8d 97,110-111,159-171,239,242-244,247-248,482,508,511,516,574,627-638,665-667,679,686,709-711,722-723,840-842
+apps/backend/tests/community/contracts/gateway/schema_snapshots/api_response/service_backed_rule01_GET_api_bots_search_domain_bots.json
+  s_4efef845bd857d::t_106173527a9f8d 179-181,245
+apps/bcsfuse/packages/search-core/tests/test_index_lock.py
+  s_4efef845bd857d::t_106173527a9f8d 1-30
+apps/bcsfuse/src/app/domain/services/workspace_assembler.py
+  s_4efef845bd857d::t_106173527a9f8d 1-51
+apps/backend/tests/community/contracts/gateway/schema_snapshots/api_response/service_backed_rule01_PUT_api_bots_id.json
+  s_4efef845bd857d::t_106173527a9f8d 170-172,236
+apps/backend/docs/arch/generated/dependents.md
+  s_4efef845bd857d::t_106173527a9f8d 1-426
+apps/bcs/crates/application/v1/bcs-app-bot/src/lib.rs
+  s_4efef845bd857d::t_106173527a9f8d 6-7,19-22,45-50,512,558,567,574
+apps/bcs/scripts/e2e-test/oauth/story.py
+  s_4efef845bd857d::t_106173527a9f8d 9,51-52
+apps/bcsfuse/src/app/bootstrap/oss_schemas.py
+  s_4efef845bd857d::t_106173527a9f8d 1-155
+apps/bcsfuse/src/app/infra/adapters/sqlite_fused_profile_store.py
+  s_4efef845bd857d::t_106173527a9f8d 1-404
+apps/backend/tests/community/core/bot_config_manifest/test_manifest_entry_schema.py
+  s_4efef845bd857d::t_106173527a9f8d 799,852,871,889,911,938,959,975,982-1062
+apps/backend/src/agentclaw/community/core/bot_management/create_context.py
+  s_4efef845bd857d::t_106173527a9f8d 105-106
+apps/backend/src/agentclaw/community/core/service_bot/services/deploy/teclaw_file_promotion.py
+  s_4efef845bd857d::t_106173527a9f8d 154,184-189,195-197,199-200,230,233
+apps/bcs/docs/caller-identity-configuration.md
+  s_4efef845bd857d::t_106173527a9f8d 129-140
+apps/bcsfuse/src/app/bootstrap/app_factory.py
+  s_4efef845bd857d::t_106173527a9f8d 1-45
+apps/bcs/crates/services/bcs-bot/tests/actor_directory.rs
+  s_4efef845bd857d::t_106173527a9f8d 548
+apps/bcsfuse/src/app/domain/models/retrieval_mode.py
+  s_4efef845bd857d::t_106173527a9f8d 1-91
+apps/bcsfuse/src/app/domain/models/worker_runtime_state.py
+  s_4efef845bd857d::t_106173527a9f8d 1-38
+apps/bcsfuse/src/app/infra/public/stores/sqlite_worker_registry_store.py
+  s_4efef845bd857d::t_106173527a9f8d 1-20
+apps/bcsfuse/src/app/infra/adapters/sqlite_worker_runtime_state_store.py
+  s_4efef845bd857d::t_106173527a9f8d 1-163
+apps/bcsfuse/src/app/infra/parsers/markdown_parser.py
+  s_4efef845bd857d::t_106173527a9f8d 1-348
+apps/bcsfuse/src/app/bootstrap/opensource_app.py
+  s_4efef845bd857d::t_106173527a9f8d 1-15
+apps/backend/tests/community/core/repository/implementations/test_bot_quota_inheriting_sqlite.py
+  s_4efef845bd857d::t_106173527a9f8d 1-161
+apps/bcsfuse/packages/search-core/src/search_core/providers/qdrant_server.py
+  s_4efef845bd857d::t_106173527a9f8d 1-129
+apps/bcsfuse/src/app/domain/models/hybrid_score.py
+  s_4efef845bd857d::t_106173527a9f8d 1-260
+apps/backend/docs/flows/bot-manager-sync.md
+  s_4efef845bd857d::t_106173527a9f8d 1-281
+apps/bcsfuse/src/app/application/services/task_understanding_service.py
+  s_4efef845bd857d::t_106173527a9f8d 1-88
+apps/bcsfuse/src/app/domain/models/profile_fragment.py
+  s_4efef845bd857d::t_106173527a9f8d 1-172
+apps/bcsfuse/src/app/domain/taxonomy/models.py
+  s_4efef845bd857d::t_106173527a9f8d 1-314
+apps/bcsfuse/src/app/application/services/worker_runtime_state_service.py
+  s_4efef845bd857d::t_106173527a9f8d 1-703
+apps/bcsfuse/src/app/domain/taxonomy/registry.py
+  s_4efef845bd857d::t_106173527a9f8d 1-771
+apps/bcsfuse/docs/flows/README.md
+  s_4efef845bd857d::t_106173527a9f8d 1-16
+apps/bcsfuse/src/app/infra/observability/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1-21
+apps/bcsfuse/packages/search-core/tests/test_retrieval_review.py
+  s_4efef845bd857d::t_106173527a9f8d 1-183
+apps/bcs/docs/diagnostics/README.md
+  s_4efef845bd857d::t_106173527a9f8d 1-17
+apps/bcsfuse/src/app/domain/services/adapters/worker_audit_log_adapter.py
+  s_4efef845bd857d::t_106173527a9f8d 1-89
+apps/backend/AGENTS.md
+  s_4efef845bd857d::t_106173527a9f8d 1-7
+apps/bcsfuse/packages/search-core/src/search_core/core/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1
+apps/bcsfuse/packages/search-core/src/search_core/providers/storage_logging.py
+  s_4efef845bd857d::t_106173527a9f8d 1-399
+apps/bcsfuse/src/app/domain/models/profile_quality_score.py
+  s_4efef845bd857d::t_106173527a9f8d 1-45
+apps/bcsfuse/src/app/adapters/http/route_skeleton.py
+  s_4efef845bd857d::t_106173527a9f8d 1-36
+apps/bcsfuse/src/app/infra/llm/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1-7
+apps/bcs/crates/service-api/bcs-service-api/src/types/a2a_bot.rs
+  s_4efef845bd857d::t_106173527a9f8d 41,45
+apps/backend/docs/bot-evolution/01-genome.md
+  s_4efef845bd857d::t_106173527a9f8d 1311-1314,1319-1323
+apps/bcsfuse/src/app/infra/embedding/providers/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1-36
+apps/bcsfuse/src/app/domain/models/fusion_simulation_input.py
+  s_4efef845bd857d::t_106173527a9f8d 1-126
+apps/bcsfuse/src/app/infra/public/stores/in_memory_worker_profile_content_store.py
+  s_4efef845bd857d::t_106173527a9f8d 1-241
+apps/baas/docs/diagnostics/publish-failures.md
+  s_4efef845bd857d::t_106173527a9f8d 1-13
+apps/bcsfuse/packages/search-core/src/search_core/providers/sql_index_builds.py
+  s_4efef845bd857d::t_106173527a9f8d 1-164
+apps/baas/README.md
+  s_4efef845bd857d::t_106173527a9f8d 3-24,183,185
+apps/bcsfuse/docs/flows/index-rebuild.md
+  s_4efef845bd857d::t_106173527a9f8d 1-15
+apps/bcsfuse/packages/search-core/src/search_core/core/ranking.py
+  s_4efef845bd857d::t_106173527a9f8d 1-35
+apps/bcsfuse/packages/search-core/src/search_core/providers/vector_index_lifecycle.py
+  s_4efef845bd857d::t_106173527a9f8d 1-87
+apps/bcsfuse/src/app/infra/public/config/drm_config_provider.py
+  s_4efef845bd857d::t_106173527a9f8d 1-353
+apps/backend/src/agentclaw/community/core/apply_engine/materialisers/bot_file_sync_noop.py
+  s_4efef845bd857d::t_106173527a9f8d 28-36
+apps/backend/tests/community/core/apply_engine/test_orchestrator_stays_generic.py
+  s_4efef845bd857d::t_106173527a9f8d 147-153,159,163
+apps/bcsfuse/packages/search-core/src/search_core/providers/qdrant.py
+  s_4efef845bd857d::t_106173527a9f8d 1-599
+apps/bcsfuse/packages/search-core/src/search_core/config/qdrant.py
+  s_4efef845bd857d::t_106173527a9f8d 1-51
+apps/backend/src/agentclaw/community/adapters/http/system/content_store_backfill.py
+  s_4efef845bd857d::t_106173527a9f8d 1-97
+apps/bcsfuse/src/app/application/ports/cache_provider.py
+  s_4efef845bd857d::t_106173527a9f8d 1-63
+apps/bcsfuse/packages/search-core/src/search_core/application/search.py
+  s_4efef845bd857d::t_106173527a9f8d 1-216
+apps/bcsfuse/src/app/domain/services/evaluation_service.py
+  s_4efef845bd857d::t_106173527a9f8d 1-179
+apps/bcsfuse/src/app/adapters/http/verify_routes.py
+  s_4efef845bd857d::t_106173527a9f8d 1-309
+apps/bcsfuse/src/app/infra/adapters/in_memory_worker_registry_store.py
+  s_4efef845bd857d::t_106173527a9f8d 1-324
+apps/bcsfuse/packages/search-core/tests/test_card_metadata_coalescing.py
+  s_4efef845bd857d::t_106173527a9f8d 1-128
+apps/bcsfuse/src/app/infra/observability/fallback_logger.py
+  s_4efef845bd857d::t_106173527a9f8d 1-301
+apps/backend/src/agentclaw/community/core/apply_engine/materialisers/bot_file_sync_registry.py
+  s_4efef845bd857d::t_106173527a9f8d 76,84
+apps/bcsfuse/src/app/domain/models/profiling_result.py
+  s_4efef845bd857d::t_106173527a9f8d 1-434
+apps/bcs/crates/services/bcs-bot-store/src/persistent_repo/caller_config.rs
+  s_4efef845bd857d::t_106173527a9f8d 12-19,177,193,212-216,218,303-333,336-339,341,347-353
+apps/bcsfuse/src/app/application/services/worker_profile_content_service.py
+  s_4efef845bd857d::t_106173527a9f8d 1-809
+apps/bcsfuse/src/app/infra/llm/config/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1-7
+apps/bcsfuse/src/app/application/services/capability_verify_service.py
+  s_4efef845bd857d::t_106173527a9f8d 1-785
+apps/bcsfuse/docs/arch/README.md
+  s_4efef845bd857d::t_106173527a9f8d 1-13
+apps/bcs/crates/external-clients/bcs-fuse-client/src/types.rs
+  s_4efef845bd857d::t_106173527a9f8d 205-213,225-228,343-378
+  s_4efef845bd857d::t_f37e34ddbf0d55 379
+apps/bcsfuse/packages/search-core/tests/test_index_sync.py
+  s_4efef845bd857d::t_106173527a9f8d 1-37
+apps/bcsfuse/packages/search-core/src/search_core/application/card_metadata.py
+  s_4efef845bd857d::t_106173527a9f8d 1-147
+apps/bcs/crates/bootstrap/bcs/src/server/state.rs
+  s_4efef845bd857d::t_106173527a9f8d 214-216,222,234,246,265,582,610,636
+apps/bcsfuse/docs/adr/README.md
+  s_4efef845bd857d::t_106173527a9f8d 1-9
+apps/bcsfuse/docs/architecture/search-core-boundary.md
+  s_4efef845bd857d::t_106173527a9f8d 1-83
+apps/backend/tests/community/core/apply_engine/materialisers/test_bot_file_sync.py
+  s_4efef845bd857d::t_106173527a9f8d 47-49,64,67
+apps/backend/src/agentclaw/community/di/modules/content_store_module.py
+  s_4efef845bd857d::t_106173527a9f8d 9-13,20,23,31,35,46-52,59,61-62
+apps/bcsfuse/packages/search-core/src/search_core/adapters/http/admission.py
+  s_4efef845bd857d::t_106173527a9f8d 1-37
+apps/bcs/crates/adapters/http/bcs-api-http/tests/bot_routes/fixtures.rs
+  s_4efef845bd857d::t_106173527a9f8d 245
+apps/bcsfuse/packages/search-core/tests/test_import_boundary.py
+  s_4efef845bd857d::t_106173527a9f8d 1-79
+apps/bcs/crates/service-api/bcs-service-api/Cargo.toml
+  s_4efef845bd857d::t_106173527a9f8d 4
+apps/backend/docs/adr/README.md
+  s_4efef845bd857d::t_106173527a9f8d 1-40
+apps/bcsfuse/src/app/domain/models/worker_audit_log.py
+  s_4efef845bd857d::t_106173527a9f8d 1-112
+apps/bcsfuse/packages/search-core/src/search_core/config/embedding.py
+  s_4efef845bd857d::t_106173527a9f8d 1-142
+apps/bcsfuse/src/app/domain/models/profile_fusion/fusion_conversation.py
+  s_4efef845bd857d::t_106173527a9f8d 1-270
+apps/bcsfuse/src/app/application/services/conflict_alignment_service.py
+  s_4efef845bd857d::t_106173527a9f8d 1-1753
+apps/backend/src/agentclaw/community/di/modules/apply_engine_module.py
+  s_4efef845bd857d::t_106173527a9f8d 86-94,226-228,294-295,539-557
+  s_4efef845bd857d::t_f384cab26281bb 558
+apps/bcsfuse/src/app/domain/services/g5_expert_enhancer.py
+  s_4efef845bd857d::t_106173527a9f8d 1-73
+apps/bcsfuse/src/app/infra/adapters/in_memory_worker_index_sync_adapter.py
+  s_4efef845bd857d::t_106173527a9f8d 1-174
+apps/bcs/crates/services/bcs-bot/tests/bot_control_plane_core.rs
+  s_4efef845bd857d::t_106173527a9f8d 12-15,88-180,250
+apps/backend/specs/2026-11-10-content-store-object-storage/plan.md
+  s_4efef845bd857d::t_106173527a9f8d 1-268
+apps/bcsfuse/src/app/bootstrap/provider_registry.py
+  s_4efef845bd857d::t_106173527a9f8d 1-94
+apps/bcsfuse/packages/search-core/src/search_core/core/source_rebuild.py
+  s_4efef845bd857d::t_106173527a9f8d 1-66
+apps/bcs/crates/services/bcs-message-store/src/memory.rs
+  s_4efef845bd857d::t_106173527a9f8d 598-608,628
+apps/bcs/migrations/mysql/036_bot_authority.sql
+  s_4efef845bd857d::t_106173527a9f8d 11-17,54-56,58,61,90,93
+apps/bcs/scripts/e2e-test/delivery_fault_isolation_story.sh
+  s_4efef845bd857d::t_106173527a9f8d 1-11
+apps/bcsfuse/src/app/application/ports/worker_registry_store.py
+  s_4efef845bd857d::t_106173527a9f8d 1-62
+apps/bcsfuse/src/app/application/services/llm_gateway_service.py
+  s_4efef845bd857d::t_106173527a9f8d 1-174
+apps/bcsfuse/src/app/domain/services/decision_evaluator.py
+  s_4efef845bd857d::t_106173527a9f8d 1-149
+apps/bcsfuse/packages/search-core/src/search_core/providers/sql_index_documents.py
+  s_4efef845bd857d::t_106173527a9f8d 1-424
+apps/backend/specs/2026-10-27-bcs-manager-sync/spec.md
+  s_4efef845bd857d::t_106173527a9f8d 12-16
+apps/bcsfuse/src/app/infra/observability/g2_metrics.py
+  s_4efef845bd857d::t_106173527a9f8d 1-327
+apps/bcs/crates/services/bcs-db-migrations/src/migrations/tests/bot_provider_storage.rs
+  s_4efef845bd857d::t_106173527a9f8d 9,48,64-66,95
+apps/bcsfuse/src/app/domain/models/fusion_request.py
+  s_4efef845bd857d::t_106173527a9f8d 1-206
+apps/bcsfuse/src/app/infra/planners/baseline_planner.py
+  s_4efef845bd857d::t_106173527a9f8d 1-584
+apps/bcsfuse/src/app/adapters/http/trace_middleware.py
+  s_4efef845bd857d::t_106173527a9f8d 1-47
+apps/bcsfuse/src/app/application/services/workspace_assembly_service.py
+  s_4efef845bd857d::t_106173527a9f8d 1-68
+apps/bcsfuse/packages/search-core/docs/local-catalog.md
+  s_4efef845bd857d::t_106173527a9f8d 1-123
+apps/bcsfuse/src/app/adapters/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1-15
+apps/bcs/docs/message-delivery-service-api.md
+  s_4efef845bd857d::t_106173527a9f8d 654-692,695,698-727
+apps/bcs/crates/services/bcs-bot-store/tests/support/a2a_mysql_cases.rs
+  s_4efef845bd857d::t_106173527a9f8d 82,87-88,90-95
+apps/bcs/crates/services/bcs-bot/tests/authorized_candidate_registry_reads.rs
+  s_4efef845bd857d::t_106173527a9f8d 1-533
+apps/bcsfuse/packages/search-core/src/search_core/adapters/http/index_builds.py
+  s_4efef845bd857d::t_106173527a9f8d 1-101
+apps/backend/tests/community/http/test_copy_route.py
+  s_4efef845bd857d::t_106173527a9f8d 26-31,51-67,78-84,89-98,111-112,119,157,179,187-236,239,251,264-286,289,300,310,323,351,368-369,381
+apps/bcsfuse/src/app/infra/vectorstore_backends/mysql_vector_persistence_backend.py
+  s_4efef845bd857d::t_106173527a9f8d 1-681
+apps/backend/tests/community/core/apply_engine/materialisers/test_bot_config_materialiser.py
+  s_4efef845bd857d::t_106173527a9f8d 1-167
+apps/bcsfuse/src/app/infra/trace_context.py
+  s_4efef845bd857d::t_106173527a9f8d 1-72
+apps/bcsfuse/src/app/domain/models/expert_risk_assessment.py
+  s_4efef845bd857d::t_106173527a9f8d 1-86
+apps/bcs/scripts/e2e-test/oauth/README.md
+  s_4efef845bd857d::t_106173527a9f8d 58-67
+apps/bcsfuse/src/app/domain/services/execution_packet_compiler.py
+  s_4efef845bd857d::t_106173527a9f8d 1-51
+apps/backend/src/agentclaw/community/core/apply_engine/desired_state.py
+  s_4efef845bd857d::t_106173527a9f8d 28,39,306-312,459-478,491,532
+apps/backend/src/agentclaw/community/core/apply_engine/registry.py
+  s_4efef845bd857d::t_106173527a9f8d 63-65,396,480-491
+apps/backend/tests/community/contracts/gateway/schema_snapshots/api_response/service_backed_rule02_GET_api_v1_bot_public_friend_record.json
+  s_4efef845bd857d::t_106173527a9f8d 173-175,239
+apps/bcs/scripts/e2e-test/e2e.sh
+  s_4efef845bd857d::t_106173527a9f8d 87,101-103
+apps/bcs/crates/adapters/http/bcs-api-http/tests/bot_routes/read.rs
+  s_4efef845bd857d::t_106173527a9f8d 68-69,81-85,248-277
+  s_4efef845bd857d::t_6981aca5e16512 278-279
+apps/bcs/crates/services/bcs-bot/tests/candidate_search_authorized_core.rs
+  s_4efef845bd857d::t_106173527a9f8d 1-961
+apps/backend/docs/bot-ownership-sync-operations.md
+  s_4efef845bd857d::t_106173527a9f8d 3,189
+apps/backend/src/agentclaw/community/core/apply_engine/support_matrix.py
+  s_4efef845bd857d::t_106173527a9f8d 137-148,202-208
+apps/bcsfuse/src/app/domain/models/evidence_bundle.py
+  s_4efef845bd857d::t_106173527a9f8d 1-236
+apps/backend/src/agentclaw/community/core/apply_engine/materialisers/bot_config.py
+  s_4efef845bd857d::t_106173527a9f8d 1-201
+apps/bcsfuse/src/app/infra/understanders/baseline_task_understander.py
+  s_4efef845bd857d::t_106173527a9f8d 1-422
+apps/bcsfuse/src/app/infra/public/llm/anthropic_compatible_provider.py
+  s_4efef845bd857d::t_106173527a9f8d 1-27
+apps/backend/src/agentclaw/community/core/apply_engine/delivery.py
+  s_4efef845bd857d::t_106173527a9f8d 81-83,214-220,242,396-402
+apps/bcs/crates/services/bcs-message-flow/src/session_delivery_cleanup.rs
+  s_4efef845bd857d::t_106173527a9f8d 1-139
+apps/bcsfuse/src/app/domain/models/composition_result.py
+  s_4efef845bd857d::t_106173527a9f8d 1-112
+apps/bcsfuse/packages/search-core/src/search_core/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1
+apps/bcsfuse/src/app/bootstrap/application_context.py
+  s_4efef845bd857d::t_106173527a9f8d 1-88
+apps/bcsfuse/src/app/domain/protocols/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1-7
+apps/bcsfuse/src/app/infra/llm/routing/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1-7
+apps/bcsfuse/src/app/infra/repositories/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1-21
+apps/bcsfuse/src/app/infra/public/stores/mysql_worker_profile_binding_store.py
+  s_4efef845bd857d::t_106173527a9f8d 1-663
+apps/bcsfuse/packages/search-core/src/search_core/providers/sql_cards.py
+  s_4efef845bd857d::t_106173527a9f8d 1-370
+apps/bcs/crates/service-api/bcs-service-api/src/port/repo/bot.rs
+  s_4efef845bd857d::t_106173527a9f8d 90-100
+apps/bcs/crates/services/bcs-bot-store/src/persistent_repo/control_plane.rs
+  s_4efef845bd857d::t_106173527a9f8d 14,22,42-43,189-199,203,224,327,334,345-356,365-377,380,492-493
+apps/backend/tests/community/core/apply_engine/_fakes.py
+  s_4efef845bd857d::t_106173527a9f8d 117-126
+apps/bcsfuse/src/app/adapters/http/cors_middleware.py
+  s_4efef845bd857d::t_106173527a9f8d 1-60
+apps/backend/src/agentclaw/community/plugin_api/models.py
+  s_4efef845bd857d::t_106173527a9f8d 103-105,183-186
+apps/bcsfuse/src/app/adapters/http/schemas/recommend_schemas.py
+  s_4efef845bd857d::t_106173527a9f8d 1-192
+apps/bcs/docs/flows/README.md
+  s_4efef845bd857d::t_106173527a9f8d 1-15
+apps/backend/tests/community/core/apply_engine/test_desired_state.py
+  s_4efef845bd857d::t_106173527a9f8d 18,209-245
+  s_4efef845bd857d::t_ce7ebfce53ad2b 246-247
+apps/backend/tests/community/core/bot_config_manifest/compiler/test_bot_file_sync.py
+  s_4efef845bd857d::t_106173527a9f8d 38,47,57,74,83,94,106,118
+apps/bcs/crates/services/bcs-bot-store/src/memory_bot_repo_port.rs
+  s_4efef845bd857d::t_106173527a9f8d 69,73-82,340-341,343
+apps/bcsfuse/packages/search-core/src/search_core/providers/sql_card_preparation.py
+  s_4efef845bd857d::t_106173527a9f8d 1-159
+apps/bcsfuse/src/app/domain/models/vector_point.py
+  s_4efef845bd857d::t_106173527a9f8d 1-4
+apps/bcs/crates/services/bcs-db-migrations/src/migrations/tests.rs
+  s_4efef845bd857d::t_106173527a9f8d 269-270,281,738-739
+apps/bcsfuse/packages/search-core/tests/test_card_management.py
+  s_4efef845bd857d::t_106173527a9f8d 1-248
+apps/bcs/crates/application/v1/bcs-app-bot/CONTEXT.md
+  s_4efef845bd857d::t_106173527a9f8d 15-29
+apps/bcs/crates/application/v1/bcs-app-bot/src/candidate_friends.rs
+  s_4efef845bd857d::t_106173527a9f8d 1-71
+apps/bcsfuse/docs/architecture/waivers/2026-10-27-namespace-move-size.md
+  s_4efef845bd857d::t_106173527a9f8d 1-37
+apps/bcs/crates/service-api/bcs-service-api/src/application/message_delivery.rs
+  s_4efef845bd857d::t_106173527a9f8d 484-488
+apps/bcs/scripts/e2e-test/oauth/candidate_discovery.py
+  s_4efef845bd857d::t_106173527a9f8d 1-194
+apps/bcs/crates/services/bcs-bot-store/src/ownership.rs
+  s_4efef845bd857d::t_106173527a9f8d 63,209,218,227,234,347-349,367-368
+  s_4efef845bd857d::t_f435815f7eb785 369
+apps/bcsfuse/src/app/domain/services/profile_embedding_indexer.py
+  s_4efef845bd857d::t_106173527a9f8d 1-847
+apps/bcs/crates/test-support/bcs-test-support/src/contract/bot_mine_contract.rs
+  s_4efef845bd857d::t_106173527a9f8d 119,422-456
+  s_4efef845bd857d::t_f6290ea1d34771 457
+apps/backend/tests/community/core/bot_render_screen/services/test_copy_render_screens.py
+  s_4efef845bd857d::t_106173527a9f8d 1-156
+apps/backend/src/agentclaw/community/core/apply_engine/materialisers/nas_bot_file_sync.py
+  s_4efef845bd857d::t_106173527a9f8d 96,107-109,111,158-166
+apps/bcsfuse/src/app/application/services/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1-71
+apps/bcsfuse/src/app/application/services/bot_fuse/fused_profile_storage_service.py
+  s_4efef845bd857d::t_106173527a9f8d 1-480
+apps/bcsfuse/src/app/infra/repositories/in_memory_worker_repository.py
+  s_4efef845bd857d::t_106173527a9f8d 1-210
+apps/bcsfuse/src/app/domain/events/worker_profile_created_event.py
+  s_4efef845bd857d::t_106173527a9f8d 1-11
+apps/bcsfuse/src/app/domain/services/adapters/worker_registry_store_adapter.py
+  s_4efef845bd857d::t_106173527a9f8d 1-9
+apps/bcsfuse/src/app/infra/vectorstores/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1-25
+apps/bcsfuse/packages/search-core/tests/test_default_conversion.py
+  s_4efef845bd857d::t_106173527a9f8d 1-66
+apps/backend/src/agentclaw/community/core/content_store/service_protocol.py
+  s_4efef845bd857d::t_106173527a9f8d 19,46,48-50,111-124
+  s_4efef845bd857d::t_6d48fca8927b67 125
+apps/bcsfuse/src/app/infra/adapters/in_memory_worker_runtime_state_store.py
+  s_4efef845bd857d::t_106173527a9f8d 1-114
+apps/bcsfuse/src/app/domain/services/profile_extractor.py
+  s_4efef845bd857d::t_106173527a9f8d 1-62
+apps/backend/tests/community/core/agentswarm/test_bot_e2e.py
+  s_4efef845bd857d::t_106173527a9f8d 409-413,419-438,554,563-565,610-622,646-653,677-685
+apps/backend/tests/community/core/bot_config_manifest/compiler/test_file_produced_heal.py
+  s_4efef845bd857d::t_106173527a9f8d 1-87
+apps/bcs/crates/bootstrap/bcs/src/message_flow_metrics.rs
+  s_4efef845bd857d::t_106173527a9f8d 145-152,225-256
+  s_4efef845bd857d::t_171ac4c2eee9e3 257
+apps/backend/src/agentclaw/community/plugin_api/agentswarm/bot/protocol.py
+  s_4efef845bd857d::t_106173527a9f8d 67-73
+apps/bcs/crates/service-api/bcs-service-api/src/core/provider.rs
+  s_4efef845bd857d::t_106173527a9f8d 58-62,334-336,344-357
+  s_4efef845bd857d::t_de413200be9394 358
+apps/backend/tests/community/bot_copy/test_status_derive.py
+  s_4efef845bd857d::t_106173527a9f8d 80-93
+apps/bcsfuse/src/app/infra/reranker/http_reranker.py
+  s_4efef845bd857d::t_106173527a9f8d 1-15
+apps/bcs/crates/tools/bcs-admin/src/migrate_mysql_chain_tests.rs
+  s_4efef845bd857d::t_106173527a9f8d 1-3,24-29,57,59,63-65,182,184,220-237,295,388,400-447
+apps/baas/docs/flows/README.md
+  s_4efef845bd857d::t_106173527a9f8d 1-16
+apps/bcsfuse/src/app/infra/matchmakers/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1-11
+apps/backend/src/agentclaw/community/api/manifest_inline_backfill_service.py
+  s_4efef845bd857d::t_106173527a9f8d 1-22
+apps/backend/src/agentclaw/community/core/bot_config_manifest/compiler/entries/bot_config.py
+  s_4efef845bd857d::t_106173527a9f8d 1-47
+apps/bcsfuse/packages/search-core/tests/test_retrieval_resilience.py
+  s_4efef845bd857d::t_106173527a9f8d 1-164
+apps/backend/tests/community/core/content_store/test_blobs.py
+  s_4efef845bd857d::t_106173527a9f8d 1-179
+apps/backend/tests/community/core/apply_engine/materialisers/test_bot_config_kind_registry.py
+  s_4efef845bd857d::t_106173527a9f8d 1-112
+apps/bcs/crates/bootstrap/bcs/tests/bootstrap_auth_boundaries.rs
+  s_4efef845bd857d::t_106173527a9f8d 5
+apps/bcs/crates/services/bcs-bot/src/core/candidate_search_core.rs
+  s_4efef845bd857d::t_106173527a9f8d 11,16-17,20-22,52-55,70,74-84,104,270-275
+  s_4efef845bd857d::t_3a5a1eac02cc83 276
+apps/bcsfuse/src/app/domain/models/handoff_bundle.py
+  s_4efef845bd857d::t_106173527a9f8d 1-114
+apps/backend/src/agentclaw/community/core/content_store/blobs.py
+  s_4efef845bd857d::t_106173527a9f8d 1-117
+apps/bcsfuse/README.md
+  s_4efef845bd857d::t_106173527a9f8d 3-24,31-35,39-41,48-49,55,58,61,94-96,165-167,183-184,250,252-256,260,266-268,393,398,453,497-512
+apps/backend/src/agentclaw/community/core/bot_management/sql/2026_11_09_ac_bots_identity_bot_id.sql
+  s_4efef845bd857d::t_106173527a9f8d 1-15
+apps/baas/docs/flows/publish-lifecycle.md
+  s_4efef845bd857d::t_106173527a9f8d 1-17
+apps/backend/src/agentclaw/community/core/apply_engine/capabilities.py
+  s_4efef845bd857d::t_106173527a9f8d 321-326
+apps/bcsfuse/docs/archive/validation/public-catalog-20261103.md
+  s_4efef845bd857d::t_106173527a9f8d 1-37
+apps/bcsfuse/packages/search-core/tests/test_document_retrieval.py
+  s_4efef845bd857d::t_106173527a9f8d 1-84
+apps/backend/specs/2026-11-10-content-store-object-storage/spec.md
+  s_4efef845bd857d::t_106173527a9f8d 1-98
+apps/bcs/crates/services/bcs-message-store/tests/delivery_fault_classification.rs
+  s_4efef845bd857d::t_106173527a9f8d 1-138
+apps/bcs/crates/services/bcs-bot/src/core/a2a_bot.rs
+  s_4efef845bd857d::t_106173527a9f8d 48-51
+apps/bcs/README.md
+  s_4efef845bd857d::t_106173527a9f8d 3-24
+apps/bcsfuse/src/app/application/services/execution_packet_service.py
+  s_4efef845bd857d::t_106173527a9f8d 1-68
+apps/bcsfuse/src/app/domain/models/fusion_result.py
+  s_4efef845bd857d::t_106173527a9f8d 1-304
+apps/bcsfuse/src/app/domain/services/llm_router.py
+  s_4efef845bd857d::t_106173527a9f8d 1-43
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/errors.py
+  s_4efef845bd857d::t_106173527a9f8d 143-152
+apps/bcsfuse/src/app/application/ports/llm_provider.py
+  s_4efef845bd857d::t_106173527a9f8d 1-69
+apps/backend/src/agentclaw/community/core/apply_engine/README.md
+  s_4efef845bd857d::t_106173527a9f8d 146
+apps/bcsfuse/src/app/domain/models/metadata_record.py
+  s_4efef845bd857d::t_106173527a9f8d 1-62
+apps/bcsfuse/src/app/infra/public/vectorstores/qdrant_keyword_index.py
+  s_4efef845bd857d::t_106173527a9f8d 1-40
+apps/bcs/crates/bootstrap/bcs/src/server/server_construct.rs
+  s_4efef845bd857d::t_106173527a9f8d 85-87,103,116,128,147,460,527,529,627,673-674
+apps/bcs/migrations/mysql/044_actor_identity_no_pad.sql
+  s_4efef845bd857d::t_106173527a9f8d 1-83
+apps/bcsfuse/src/app/adapters/http/server_ip_middleware.py
+  s_4efef845bd857d::t_106173527a9f8d 1-73
+apps/bcsfuse/src/app/domain/models/worker_lifecycle_state.py
+  s_4efef845bd857d::t_106173527a9f8d 1-39
+apps/bcsfuse/src/app/domain/services/llm_provider.py
+  s_4efef845bd857d::t_106173527a9f8d 1-49
+apps/bcsfuse/packages/search-core/src/search_core/api/cards.py
+  s_4efef845bd857d::t_106173527a9f8d 1-46
+apps/bcsfuse/packages/search-core/src/search_core/api/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1
+apps/backend/tests/community/contracts/gateway/schema_snapshots/api_response/service_backed_rule02_GET_api_v1_bot_public_search.json
+  s_4efef845bd857d::t_106173527a9f8d 240-242,307
+apps/bcsfuse/packages/search-core/src/search_core/application/cache.py
+  s_4efef845bd857d::t_106173527a9f8d 1-227
+apps/bcsfuse/docs/agents/templates/README.md
+  s_4efef845bd857d::t_106173527a9f8d 1-3
+apps/bcs/crates/contracts/bcs-domain/src/a2a_management.rs
+  s_4efef845bd857d::t_106173527a9f8d 9,21,306-308,325-326,344-353
+apps/bcsfuse/src/app/domain/models/feedback_sample.py
+  s_4efef845bd857d::t_106173527a9f8d 1-139
+apps/backend/src/agentclaw/community/core/bot_config_manifest/schema/validator.py
+  s_4efef845bd857d::t_106173527a9f8d 22,47-49,304-306,340-403
+  s_4efef845bd857d::t_05162389dff0a7 404-405
+apps/backend/tests/community/adapters/http/agentswarm/test_submit_schema_validation.py
+  s_4efef845bd857d::t_106173527a9f8d 330-394
+apps/bcsfuse/packages/search-core/src/search_core/application/default_candidates.py
+  s_4efef845bd857d::t_106173527a9f8d 1-96
+apps/bcsfuse/src/app/infra/adapters/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1-41
+apps/backend/specs/README.md
+  s_4efef845bd857d::t_106173527a9f8d 1-172
+apps/bcs/crates/bootstrap/bcs/src/server/a2a_wiring.rs
+  s_4efef845bd857d::t_106173527a9f8d 77,82
+apps/bcsfuse/packages/search-core/tests/test_selection.py
+  s_4efef845bd857d::t_106173527a9f8d 1-30
+apps/backend/src/agentclaw/community/core/apply_engine/order.py
+  s_4efef845bd857d::t_106173527a9f8d 107-115
+apps/bcsfuse/src/app/application/services/team_composition_service.py
+  s_4efef845bd857d::t_106173527a9f8d 1-67
+apps/bcsfuse/src/app/domain/models/hybrid_retrieval_result.py
+  s_4efef845bd857d::t_106173527a9f8d 1-272
+apps/bcsfuse/src/app/domain/services/reranker.py
+  s_4efef845bd857d::t_106173527a9f8d 1-4
+apps/bcs/crates/application/v1/bcs-app-bot/tests/v1_bot_service/candidate_search.rs
+  s_4efef845bd857d::t_106173527a9f8d 3-23,81,83,91,93-99,101-113,116-118,123-124,126,128,130,132-143,146-147,152,155,157,162-166,168-169,172-192,195,197-202,204-215,217-218,220,222-232,234,236-259,262,264,274-290,294-297,299-302,304,306-308,311-312,315-371,389-400,402,433-439,444-445,450,453-457,459,483-503,505,507,517-519,541,544-548,550,558,568,598-599,617,619,629,635,641-684,686-687,689-713,716-725,728-739,741,744,747,749-773,775
+apps/bcsfuse/packages/search-core/tests/test_public_catalog.py
+  s_4efef845bd857d::t_106173527a9f8d 1-237
+apps/bcsfuse/src/app/infra/adapters/sqlite_worker_profile_content_store.py
+  s_4efef845bd857d::t_106173527a9f8d 1-483
+apps/bcsfuse/packages/search-core/src/search_core/catalog/updates.py
+  s_4efef845bd857d::t_106173527a9f8d 1-489
+apps/bcs/crates/adapters/http/bcs-http/src/routes/a2a_management.rs
+  s_4efef845bd857d::t_106173527a9f8d 5,17,22-23,28,31,44-57,69,102-103,129,132,233-234,238,240,243-246,248-251,253-257,259-261,271,280,283,287-289,291-293,297,299-303,305-306,308-310,319,321,323-324
+apps/backend/src/agentclaw/community/core/agentswarm/service/protocols.py
+  s_4efef845bd857d::t_106173527a9f8d 30-35,82-91,274-300
+  s_4efef845bd857d::t_9c37ef4361023d 301-302
+apps/bcsfuse/src/app/infra/public/cache/in_memory_cache_provider.py
+  s_4efef845bd857d::t_106173527a9f8d 1-161
+apps/backend/src/agentclaw/community/core/bot_config_manifest/compiler/entries/_fetch.py
+  s_4efef845bd857d::t_106173527a9f8d 107-110,116-121
+  s_4efef845bd857d::t_c1c066419ad9f6 122-123
+apps/backend/docs/diagnostics/runtime-targeting.md
+  s_4efef845bd857d::t_106173527a9f8d 1-56
+apps/bcsfuse/packages/search-core/src/search_core/providers/card_writes.py
+  s_4efef845bd857d::t_106173527a9f8d 1-84
+apps/bcsfuse/packages/search-core/src/search_core/bootstrap/local.py
+  s_4efef845bd857d::t_106173527a9f8d 1-110
+apps/bcsfuse/src/app/infra/public/observability/storage_logging.py
+  s_4efef845bd857d::t_106173527a9f8d 1-2
+apps/bcs/crates/services/bcs-bot/tests/conformance_application_services.rs
+  s_4efef845bd857d::t_106173527a9f8d 494
+apps/bcs/crates/services/bcs-message-store/tests/support/cancelled_history.rs
+  s_4efef845bd857d::t_106173527a9f8d 108-112
+apps/backend/src/agentclaw/community/core/bot_config_manifest/compiler/entries/bot_file_sync.py
+  s_4efef845bd857d::t_106173527a9f8d 73,87,98-99,104-109,121,125,127
+apps/bcs/migrations/reconciliation/bot-authority-generated-columns.md
+  s_4efef845bd857d::t_106173527a9f8d 1-79
+apps/bcs/crates/application/bcs-app-a2a-bot/tests/support/public_management_by_id.rs
+  s_4efef845bd857d::t_106173527a9f8d 1-151
+apps/backend/docs/agents/knowledge-standard.md
+  s_4efef845bd857d::t_106173527a9f8d 1-16
+apps/bcsfuse/src/app/infra/adapters/in_memory_fused_profile_store.py
+  s_4efef845bd857d::t_106173527a9f8d 1-254
+apps/bcsfuse/src/app/application/services/worker_profiling_service.py
+  s_4efef845bd857d::t_106173527a9f8d 1-233
+apps/bcsfuse/src/app/infra/indexing/profile_embedding_store.py
+  s_4efef845bd857d::t_106173527a9f8d 1-534
+apps/backend/docs/agents/templates/README.md
+  s_4efef845bd857d::t_106173527a9f8d 1-3
+apps/bcsfuse/src/app/application/services/candidate_recommendation_projection.py
+  s_4efef845bd857d::t_106173527a9f8d 1-81
+apps/backend/docs/bot-manager-sync-operations.md
+  s_4efef845bd857d::t_106173527a9f8d 3-4,8,12,16,20,24,28,30,32,36,40,44,48,52
+apps/bcs/crates/services/bcs-bot-store/tests/common/memory_registration_manager.rs
+  s_4efef845bd857d::t_106173527a9f8d 1-68
+apps/bcs/migrations/sqlite/043_delivery_session_lookup.sql
+  s_4efef845bd857d::t_106173527a9f8d 1-4
+apps/bcsfuse/src/app/adapters/http/fusion_fallback.py
+  s_4efef845bd857d::t_106173527a9f8d 1-26
+apps/bcsfuse/src/app/application/services/participant_availability_checker.py
+  s_4efef845bd857d::t_106173527a9f8d 1-266
+apps/bcs/scripts/e2e-test/delivery_fault_isolation_story.py
+  s_4efef845bd857d::t_106173527a9f8d 1-237
+apps/bcs/crates/bootstrap/bcs/tests/integration_fuse_cards.rs
+  s_4efef845bd857d::t_106173527a9f8d 1-283
+apps/bcsfuse/src/app/infra/config/capability_verify_settings.py
+  s_4efef845bd857d::t_106173527a9f8d 1-149
+apps/bcsfuse/src/app/domain/services/task_understander.py
+  s_4efef845bd857d::t_106173527a9f8d 1-49
+apps/bcsfuse/src/app/domain/services/profile_key_canonicalizer.py
+  s_4efef845bd857d::t_106173527a9f8d 1-286
+apps/bcsfuse/src/app/infra/public/reranker/noop_reranker.py
+  s_4efef845bd857d::t_106173527a9f8d 1-46
+apps/bcsfuse/src/app/infra/public/vectorstores/qdrant_mysql_vector_store.py
+  s_4efef845bd857d::t_106173527a9f8d 1-546
+apps/bcs/crates/services/bcs-group/CONTEXT.md
+  s_4efef845bd857d::t_106173527a9f8d 5-6
+apps/bcs/crates/application/bcs-app-a2a-bot/src/names.rs
+  s_4efef845bd857d::t_106173527a9f8d 16,27
+AGENTS.md
+  s_4efef845bd857d::t_106173527a9f8d 1,3-4,6,8-12,14,16,18-34
+apps/bcs/crates/application/bcs-app-a2a-bot/tests/conformance_provider_a2a_registration.rs
+  s_4efef845bd857d::t_106173527a9f8d 192-193,311,316,321-323,325,327-330,334,338-339,341,343,371-389
+apps/bcsfuse/src/app/application/services/llm_stance_extractor.py
+  s_4efef845bd857d::t_106173527a9f8d 1-492
+apps/bcsfuse/src/app/infra/adapters/zdas_worker_profile_binding_store.py
+  s_4efef845bd857d::t_106173527a9f8d 1-22
+apps/bcsfuse/src/app/infra/llm/parsing/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1-13
+apps/bcsfuse/src/app/infra/adapters/in_memory_worker_profile_binding_store.py
+  s_4efef845bd857d::t_106173527a9f8d 1-221
+apps/bcsfuse/FUSE_API_LOGIC.md
+  s_4efef845bd857d::t_106173527a9f8d 241,291,342,564-571
+apps/bcs/specs/2026-11-06-provider-initial-managers/review-followup.md
+  s_4efef845bd857d::t_106173527a9f8d 1-126
+apps/bcsfuse/src/app/infra/public/profile_sources/mock_worker_profile_source.py
+  s_4efef845bd857d::t_106173527a9f8d 1-59
+apps/bcsfuse/src/app/application/services/structured_signal_extractor.py
+  s_4efef845bd857d::t_106173527a9f8d 1-234
+apps/bcs/crates/services/bcs-bot-store/src/memory_control_plane.rs
+  s_4efef845bd857d::t_106173527a9f8d 12,26-52,147,157-163,230,240-247,256-265,366
+apps/bcsfuse/src/app/domain/services/fallback_attribution.py
+  s_4efef845bd857d::t_106173527a9f8d 1-323
+apps/bcsfuse/src/app/domain/models/expert_context_pack.py
+  s_4efef845bd857d::t_106173527a9f8d 1-85
+apps/bcsfuse/src/app/adapters/http/dependencies/worker_dependencies.py
+  s_4efef845bd857d::t_106173527a9f8d 1-576
+apps/bcsfuse/packages/search-core/src/search_core/application/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1
+apps/bcsfuse/src/app/application/services/bot_fuse/group_context_service.py
+  s_4efef845bd857d::t_106173527a9f8d 1-801
+apps/bcs/crates/services/bcs-bot-store/src/persistent_repo/mod.rs
+  s_4efef845bd857d::t_106173527a9f8d 36
+apps/bcsfuse/src/app/bootstrap/profile_activation_index.py
+  s_4efef845bd857d::t_106173527a9f8d 1-86
+apps/backend/tests/community/contracts/gateway/schema_snapshots/api_response/service_backed_rule02_GET_api_v1_bot_public_my_friend_bots.json
+  s_4efef845bd857d::t_106173527a9f8d 178-180,244
+apps/bcs/crates/services/bcs-bot-store/tests/memory_authority.rs
+  s_4efef845bd857d::t_106173527a9f8d 267
+apps/bcsfuse/packages/search-core/src/search_core/plugin_api/vector_search_hit.py
+  s_4efef845bd857d::t_106173527a9f8d 1-46
+apps/bcsfuse/src/app/domain/models/vector_search_hit.py
+  s_4efef845bd857d::t_106173527a9f8d 1-4
+apps/bcsfuse/src/app/application/services/bot_fuse/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1-28
+apps/bcsfuse/src/app/infra/adapters/sqlite_worker_profile_binding_store.py
+  s_4efef845bd857d::t_106173527a9f8d 1-274
+apps/backend/src/agentclaw/community/core/bot_management/errors.py
+  s_4efef845bd857d::t_106173527a9f8d 54-63
+apps/backend/src/agentclaw/community/core/runtime_binding/service.py
+  s_4efef845bd857d::t_106173527a9f8d 93-97
+apps/bcs/crates/tools/bcs-admin/src/migrate_human_input_index_tests.rs
+  s_4efef845bd857d::t_106173527a9f8d 40
+apps/bcsfuse/packages/search-core/src/search_core/plugin_api/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1
+apps/bcsfuse/src/app/application/services/worker_vector_state_sync.py
+  s_4efef845bd857d::t_106173527a9f8d 1-32
+apps/bcs/crates/services/bcs-fusion/CONTEXT.md
+  s_4efef845bd857d::t_106173527a9f8d 5-10,14-18
+apps/bcsfuse/src/app/adapters/http/oss_routes.py
+  s_4efef845bd857d::t_106173527a9f8d 1-399
+apps/bcs/crates/services/bcs-session/tests/delete_queue_cleanup.rs
+  s_4efef845bd857d::t_106173527a9f8d 1-98
+apps/bcsfuse/src/app/application/services/question_rewrite_service.py
+  s_4efef845bd857d::t_106173527a9f8d 1-327
+apps/bcsfuse/packages/search-core/src/search_core/catalog/cards.py
+  s_4efef845bd857d::t_106173527a9f8d 1-67
+apps/bcsfuse/src/app/infra/llm/providers/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1-29
+apps/backend/tests/community/endpoints/test_content_store_backfill.py
+  s_4efef845bd857d::t_106173527a9f8d 1-171
+apps/bcs/crates/services/bcs-db-migrations/src/migrations/auth_session_version_migration_tests.rs
+  s_4efef845bd857d::t_106173527a9f8d 86-87
+apps/bcs/crates/services/bcs-message-flow/src/delivery_runtime/row_isolation.rs
+  s_4efef845bd857d::t_106173527a9f8d 1-154
+apps/bcsfuse/src/app/application/ports/reranker_provider.py
+  s_4efef845bd857d::t_106173527a9f8d 1-34
+apps/bcsfuse/src/app/application/search/service.py
+  s_4efef845bd857d::t_106173527a9f8d 1-107
+apps/bcs/crates/services/bcs-bot-store/src/memory_bot_provider_storage.rs
+  s_4efef845bd857d::t_106173527a9f8d 116,119-126,301-387
+apps/bcsfuse/packages/search-core/src/search_core/providers/sql_catalog.py
+  s_4efef845bd857d::t_106173527a9f8d 1-62
+apps/backend/tests/community/di/test_apply_engine_module_wiring.py
+  s_4efef845bd857d::t_106173527a9f8d 226-261
+apps/backend/tests/community/endpoints/test_config_manifest_source_matrix.py
+  s_4efef845bd857d::t_106173527a9f8d 147-152,157-158
+apps/bcs/crates/services/bcs-bot-store/tests/provider_initial_managers_mysql.rs
+  s_4efef845bd857d::t_106173527a9f8d 1-82
+apps/bcsfuse/src/app/infra/context/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1-19
+apps/bcsfuse/src/app/infra/llm/parsing/structured_output_parser.py
+  s_4efef845bd857d::t_106173527a9f8d 1-398
+apps/backend/src/agentclaw/community/di/modules/manifest_fetch_module.py
+  s_4efef845bd857d::t_106173527a9f8d 29-31,413-421
+  s_4efef845bd857d::t_5a07f1b750b215 422-425
+apps/bcs/crates/services/bcs-message-store/tests/conformance_delivery_repo.rs
+  s_4efef845bd857d::t_106173527a9f8d 88-118
+  s_4efef845bd857d::t_c4678f689d65f5 87
+apps/bcs/scripts/e2e-test/queued_message_cancellation_story.py
+  s_4efef845bd857d::t_106173527a9f8d 12,108-168,258
+apps/bcs/crates/application/v1/bcs-app-bot/src/mine.rs
+  s_4efef845bd857d::t_106173527a9f8d 29-33,80,95-107,239-244,247,407-427,447-449
+apps/bcs/crates/services/bcs-message-flow/tests/support/deleted_session_queue.rs
+  s_4efef845bd857d::t_106173527a9f8d 1-83
+apps/bcsfuse/src/app/infra/context/request_context.py
+  s_4efef845bd857d::t_106173527a9f8d 1-65
+apps/bcsfuse/src/app/application/ports/secret_provider.py
+  s_4efef845bd857d::t_106173527a9f8d 1-42
+apps/bcsfuse/src/app/infra/public/vector_persistence/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1-14
+apps/bcs/crates/service-api/bcs-service-api/CONTEXT.md
+  s_4efef845bd857d::t_106173527a9f8d 3-74
+apps/bcsfuse/src/app/domain/models/task_spec.py
+  s_4efef845bd857d::t_106173527a9f8d 1-67
+apps/bcsfuse/src/app/adapters/http/fusion_routes.py
+  s_4efef845bd857d::t_106173527a9f8d 1-493
+apps/bcsfuse/src/app/domain/protocols/openclaw_adapter.py
+  s_4efef845bd857d::t_106173527a9f8d 1-51
+apps/bcsfuse/src/app/application/services/llm_conflict_analyzer.py
+  s_4efef845bd857d::t_106173527a9f8d 1-653
+apps/bcs/crates/services/bcs-fusion/src/core/fuse_backed_sync.rs
+  s_4efef845bd857d::t_106173527a9f8d 19,22
+apps/bcs/crates/services/bcs-bot-store/src/lib.rs
+  s_4efef845bd857d::t_106173527a9f8d 59
+apps/bcsfuse/src/app/infra/public/llm/openai_compatible_provider.py
+  s_4efef845bd857d::t_106173527a9f8d 1-35
+apps/bcs/crates/services/bcs-bot/tests/my_legacy_window.rs
+  s_4efef845bd857d::t_106173527a9f8d 80
+apps/bcsfuse/docs/deploy/tc-card-migration.md
+  s_4efef845bd857d::t_106173527a9f8d 1-170
+apps/bcs/crates/application/bcs-app-a2a-bot/tests/conformance_a2a_configuration.rs
+  s_4efef845bd857d::t_106173527a9f8d 241,245,248
+apps/bcs/crates/services/bcs-db-migrations/src/migrations/tests/group_human_mention_notify_mode.rs
+  s_4efef845bd857d::t_106173527a9f8d 66
+apps/bcsfuse/packages/search-core/src/search_core/adapters/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1
+apps/bcsfuse/src/app/application/ports/config_provider.py
+  s_4efef845bd857d::t_106173527a9f8d 1-81
+apps/bcsfuse/packages/search-core/src/search_core/core/memory_cache.py
+  s_4efef845bd857d::t_106173527a9f8d 1-120
+apps/bcs/crates/services/bcs-bot/src/application/provider.rs
+  s_4efef845bd857d::t_106173527a9f8d 104-105,117,126-128,409-410,418,425,434,437-446,449
+apps/bcs/api-contracts/v1/openapi/bots.yaml
+  s_4efef845bd857d::t_106173527a9f8d 12-23,34-37,130,133-134,136-147,158-161,261,266-280,297-301,580-582,584-587,606-607,632-635,654-658
+apps/bcsfuse/packages/search-core/src/search_core/application/catalog_retrieval.py
+  s_4efef845bd857d::t_106173527a9f8d 1-35
+apps/backend/src/agentclaw/community/core/repository/implementations/bot/bot.py
+  s_4efef845bd857d::t_106173527a9f8d 151,650,658-659,672-688
+  s_4efef845bd857d::t_1e1f22289dbae6 689
+apps/backend/tests/community/core/bot_management/services/test_bot_service_create_validation.py
+  s_4efef845bd857d::t_106173527a9f8d 304-307
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/a2a_management_errors.rs
+  s_4efef845bd857d::t_106173527a9f8d 43,53,55,59,61,68,87-88,100,103,109,148,176,279,305,312,376,384,398-399,415,455,468,519,524-525,529-530,535,555,559,660,669,724-725,727,733,735,746,749-750
+apps/backend/tests/community/core/agentswarm/service/test_admission.py
+  s_4efef845bd857d::t_106173527a9f8d 69,253-258
+apps/bcsfuse/src/app/infra/public/profile_sources/registry_worker_profile_source.py
+  s_4efef845bd857d::t_106173527a9f8d 1-20
+apps/backend/src/agentclaw/community/configs/application-test.yaml
+  s_4efef845bd857d::t_106173527a9f8d 11-18
+apps/bcsfuse/docs/archive/README.md
+  s_4efef845bd857d::t_106173527a9f8d 1-8
+apps/bcs/crates/adapters/http/bcs-api-http/src/v1/openapi/routes/bot.rs
+  s_4efef845bd857d::t_106173527a9f8d 68-82,93,103-105,116
+apps/bcsfuse/src/app/application/services/registry_aware_worker_filter.py
+  s_4efef845bd857d::t_106173527a9f8d 1-343
+apps/bcs/crates/services/bcs-bot-store/tests/common/authority_lifecycle_registration.rs
+  s_4efef845bd857d::t_106173527a9f8d 479
+apps/bcs/crates/services/bcs-bot-store/src/ownership_managers.rs
+  s_4efef845bd857d::t_106173527a9f8d 1-118
+apps/bcsfuse/src/app/domain/services/perspective_provider.py
+  s_4efef845bd857d::t_106173527a9f8d 1-68
+apps/bcs/migrations/mysql/045_delivery_session_lookup.sql
+  s_4efef845bd857d::t_106173527a9f8d 1-4
+apps/bcsfuse/docs/diagnostics/index-not-current.md
+  s_4efef845bd857d::t_106173527a9f8d 1-12
+apps/bcsfuse/src/app/infra/repositories/fused_profile_repository.py
+  s_4efef845bd857d::t_106173527a9f8d 1-185
+apps/backend/tests/community/contracts/gateway/schema_snapshots/api_response/service_backed_rule01_GET_api_bots_id.json
+  s_4efef845bd857d::t_106173527a9f8d 170-172,236
+apps/bcsfuse/specs/2026-11-04-tc-bcsfuse-card-migration/spec.md
+  s_4efef845bd857d::t_106173527a9f8d 1-615
+apps/bcsfuse/src/app/domain/models/fallback_reason_v2.py
+  s_4efef845bd857d::t_106173527a9f8d 1-380
+apps/bcsfuse/src/app/infra/public/config/yaml_env_config_provider.py
+  s_4efef845bd857d::t_106173527a9f8d 1-152
+apps/bcsfuse/packages/search-core/src/search_core/core/preparation_lease.py
+  s_4efef845bd857d::t_106173527a9f8d 1-32
+apps/bcsfuse/specs/2026-11-04-tc-bcsfuse-card-migration/implementation.md
+  s_4efef845bd857d::t_106173527a9f8d 1-108
+apps/bcsfuse/src/app/bootstrap/logging_setup.py
+  s_4efef845bd857d::t_106173527a9f8d 1-50
+apps/backend/src/agentclaw/community/core/bot_management/render_screen_service_protocol.py
+  s_4efef845bd857d::t_106173527a9f8d 4-37,68-99
+apps/bcsfuse/src/app/domain/enums/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1-17
+apps/bcs/crates/service-api/bcs-config-api/tests/bcsfuse_layout.rs
+  s_4efef845bd857d::t_106173527a9f8d 34-43
+apps/bcsfuse/packages/search-core/src/search_core/bootstrap/http.py
+  s_4efef845bd857d::t_106173527a9f8d 1-73
+apps/bcsfuse/src/app/infra/public/stores/sqlite_worker_runtime_state_store.py
+  s_4efef845bd857d::t_106173527a9f8d 1-20
+apps/bcsfuse/src/app/infra/extractors/baseline_profile_extractor.py
+  s_4efef845bd857d::t_106173527a9f8d 1-819
+apps/bcsfuse/packages/search-core/src/search_core/catalog/inspection.py
+  s_4efef845bd857d::t_106173527a9f8d 1-63
+apps/bcsfuse/src/app/adapters/http/schemas/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1-138
+apps/bcsfuse/src/app/application/ports/startup_provider.py
+  s_4efef845bd857d::t_106173527a9f8d 1-31
+apps/bcs/crates/bootstrap/bcs/src/logging.rs
+  s_4efef845bd857d::t_106173527a9f8d 532,540,543
+apps/bcsfuse/src/app/infra/public/audit/sqlite_worker_audit_log_store.py
+  s_4efef845bd857d::t_106173527a9f8d 1-20
+apps/backend/src/agentclaw/community/core/apply_engine/materialisers/resources.py
+  s_4efef845bd857d::t_106173527a9f8d 74,191
+apps/bcs/crates/services/bcs-bot/CONTEXT.md
+  s_4efef845bd857d::t_106173527a9f8d 5-6,20-33,199-221
+apps/backend/src/agentclaw/community/configs/application-singlebox.yaml
+  s_4efef845bd857d::t_106173527a9f8d 32-39
+apps/bcsfuse/src/app/domain/models/retrieval_input.py
+  s_4efef845bd857d::t_106173527a9f8d 1-84
+apps/bcsfuse/src/app/domain/models/profile_match_score.py
+  s_4efef845bd857d::t_106173527a9f8d 1-315
+apps/bcs/crates/service-api/bcs-service-api/src/types/bot_control_plane.rs
+  s_4efef845bd857d::t_106173527a9f8d 58-60,72-74,84-87,147-150
+apps/bcsfuse/specs/README.md
+  s_4efef845bd857d::t_106173527a9f8d 1-13
+apps/bcsfuse/src/app/domain/models/candidate_recommendation.py
+  s_4efef845bd857d::t_106173527a9f8d 1-278
+apps/bcs/crates/services/bcs-message-flow/src/lib.rs
+  s_4efef845bd857d::t_106173527a9f8d 37
+apps/backend/src/agentclaw/community/api/README.md
+  s_4efef845bd857d::t_106173527a9f8d 243
+apps/bcsfuse/src/app/infra/llm/providers/anthropic_compatible_provider.py
+  s_4efef845bd857d::t_106173527a9f8d 1-517
+apps/bcsfuse/src/app/domain/models/llm_response.py
+  s_4efef845bd857d::t_106173527a9f8d 1-169
+apps/bcsfuse/src/app/domain/services/conflict_dimension_analyzer.py
+  s_4efef845bd857d::t_106173527a9f8d 1-536
+apps/bcsfuse/src/app/infra/observability/strict_mode_checker.py
+  s_4efef845bd857d::t_106173527a9f8d 1-320
+apps/bcsfuse/src/app/infra/public/stores/mysql_worker_runtime_state_store.py
+  s_4efef845bd857d::t_106173527a9f8d 1-240
+apps/bcsfuse/src/app/domain/models/composition_input.py
+  s_4efef845bd857d::t_106173527a9f8d 1-90
+apps/bcsfuse/src/app/infra/logging/utils.py
+  s_4efef845bd857d::t_106173527a9f8d 1-5
+apps/backend/src/agentclaw/community/core/bot_config_manifest/services/inline_backfill.py
+  s_4efef845bd857d::t_106173527a9f8d 1-99
+apps/bcs/docs/adr/README.md
+  s_4efef845bd857d::t_106173527a9f8d 1-9
+apps/bcsfuse/src/app/domain/models/worker_config.py
+  s_4efef845bd857d::t_106173527a9f8d 1-26
+apps/bcs/crates/services/bcs-bot/src/core/provider_registration.rs
+  s_4efef845bd857d::t_106173527a9f8d 34,61,67-71,172,296
+apps/bcsfuse/src/app/domain/models/team_spec.py
+  s_4efef845bd857d::t_106173527a9f8d 1-51
+apps/bcsfuse/src/app/application/ports/vector_persistence_provider.py
+  s_4efef845bd857d::t_106173527a9f8d 1-163
+apps/bcsfuse/src/app/domain/models/bot_recommendation.py
+  s_4efef845bd857d::t_106173527a9f8d 1-248
+apps/backend/docs/flows/README.md
+  s_4efef845bd857d::t_106173527a9f8d 1-16
+apps/bcsfuse/packages/search-core/src/search_core/catalog/documents.py
+  s_4efef845bd857d::t_106173527a9f8d 1-170
+apps/bcsfuse/src/app/domain/models/profiling_input.py
+  s_4efef845bd857d::t_106173527a9f8d 1-195
+apps/bcsfuse/src/app/domain/models/workspace_assembly_result.py
+  s_4efef845bd857d::t_106173527a9f8d 1-138
+apps/bcsfuse/packages/search-core/src/search_core/api/services.py
+  s_4efef845bd857d::t_106173527a9f8d 1-39
+apps/bcsfuse/packages/search-core/tests/test_http_contract.py
+  s_4efef845bd857d::t_106173527a9f8d 1-249
+apps/bcs/scripts/e2e-test/provider_managers_story.sh
+  s_4efef845bd857d::t_106173527a9f8d 1-9
+apps/bcsfuse/src/app/adapters/http/schemas/verify_schemas.py
+  s_4efef845bd857d::t_106173527a9f8d 1-277
+apps/bcsfuse/src/app/domain/models/attribution_report.py
+  s_4efef845bd857d::t_106173527a9f8d 1-215
+apps/bcsfuse/packages/search-core/src/search_core/plugin_api/reranker.py
+  s_4efef845bd857d::t_106173527a9f8d 1-47
+apps/bcsfuse/src/app/domain/value_objects/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1-9
+apps/backend/src/agentclaw/community/core/cron/services/cron_targeted_operations.py
+  s_4efef845bd857d::t_106173527a9f8d 103-107
+apps/bcs/scripts/e2e-test/caller_config_storage_story.sh
+  s_4efef845bd857d::t_106173527a9f8d 1-13
+apps/bcsfuse/packages/search-core/src/search_core/catalog/conversion.py
+  s_4efef845bd857d::t_106173527a9f8d 1-52
+apps/bcsfuse/packages/search-core/tests/test_retrieval_switches.py
+  s_4efef845bd857d::t_106173527a9f8d 1-56
+apps/bcsfuse/src/app/domain/models/candidate_retrieval_result.py
+  s_4efef845bd857d::t_106173527a9f8d 1-17
+apps/bcsfuse/src/app/application/ports/audit_log_store.py
+  s_4efef845bd857d::t_106173527a9f8d 1-49
+apps/bcsfuse/src/app/application/services/bot_fuse/fusion_expert_chat_service.py
+  s_4efef845bd857d::t_106173527a9f8d 1-784
+apps/bcsfuse/src/app/domain/models/skill_profile.py
+  s_4efef845bd857d::t_106173527a9f8d 1-82
+apps/bcsfuse/src/app/infra/public/stores/mysql_fused_profile_store.py
+  s_4efef845bd857d::t_106173527a9f8d 1-721
+apps/bcs/crates/external-clients/bcs-fuse-client/tests/card_contract.rs
+  s_4efef845bd857d::t_106173527a9f8d 1-86
+apps/bcsfuse/packages/search-core/src/search_core/providers/async_model_http.py
+  s_4efef845bd857d::t_106173527a9f8d 1-67
+apps/backend/tests/community/core/service_bot/services/deploy/test_teclaw_file_promotion.py
+  s_4efef845bd857d::t_106173527a9f8d 233-235,237-244,246-254,256-280
+apps/bcsfuse/docs/agents/existing-knowledge.md
+  s_4efef845bd857d::t_106173527a9f8d 1-45
+apps/bcsfuse/src/app/adapters/http/worker_routes.py
+  s_4efef845bd857d::t_106173527a9f8d 1-5
+apps/bcsfuse/docs/deploy/macos_local.md
+  s_4efef845bd857d::t_106173527a9f8d 608,610
+apps/backend/src/agentclaw/community/plugins/community/agentswarm/bot_authorization.py
+  s_4efef845bd857d::t_106173527a9f8d 41,65,69-93
+apps/bcsfuse/packages/search-core/src/search_core/plugin_api/execution.py
+  s_4efef845bd857d::t_106173527a9f8d 1-13
+apps/bcsfuse/src/app/infra/adapters/zdas_worker_profile_content_store.py
+  s_4efef845bd857d::t_106173527a9f8d 1-22
+apps/bcsfuse/src/app/infra/public/database/sqlite_database_provider.py
+  s_4efef845bd857d::t_106173527a9f8d 1-279
+apps/bcs/api-contracts/v1/domain-models.yaml
+  s_4efef845bd857d::t_106173527a9f8d 331
+apps/bcsfuse/src/app/bootstrap/profile_store_compat.py
+  s_4efef845bd857d::t_106173527a9f8d 1-135
+apps/bcs/crates/services/bcs-bot-store/tests/support/candidate_friend_set_contract.rs
+  s_4efef845bd857d::t_106173527a9f8d 1-870
+apps/backend/src/agentclaw/community/core/content_store/models.py
+  s_4efef845bd857d::t_106173527a9f8d 8
+apps/bcsfuse/src/app/application/ports/context_provider.py
+  s_4efef845bd857d::t_106173527a9f8d 1-53
+apps/bcsfuse/src/app/application/services/verify_executor.py
+  s_4efef845bd857d::t_106173527a9f8d 1-422
+apps/bcsfuse/src/app/domain/policies/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1-9
+apps/bcs/crates/services/bcs-bot-store/src/a2a.rs
+  s_4efef845bd857d::t_106173527a9f8d 119-126,161-164,171-172
+apps/bcs/tests/openapi/test_bot_v1_contract.py
+  s_4efef845bd857d::t_106173527a9f8d 183-184,201-283,296-297,349-354,481
+apps/bcsfuse/src/app/infra/retrievers/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1-14
+apps/bcsfuse/src/app/domain/services/vector_persistence_backend.py
+  s_4efef845bd857d::t_106173527a9f8d 1-225
+apps/bcsfuse/packages/search-core/src/search_core/adapters/http/card_diagnostics.py
+  s_4efef845bd857d::t_106173527a9f8d 1-39
+apps/backend/src/agentclaw/community/plugins/community/passport.py
+  s_4efef845bd857d::t_106173527a9f8d 19-20,33-34,46-68,226,228-229
+apps/bcsfuse/src/app/infra/embedding/providers/real_provider.py
+  s_4efef845bd857d::t_106173527a9f8d 1-62
+apps/bcsfuse/docker-compose.yml
+  s_4efef845bd857d::t_106173527a9f8d 21-22,30-34,36,44,49-63,66
+apps/bcsfuse/src/app/application/utils/drm_config_helper.py
+  s_4efef845bd857d::t_106173527a9f8d 1-133
+apps/bcsfuse/packages/search-core/tests/test_memory_cache.py
+  s_4efef845bd857d::t_106173527a9f8d 1-53
+apps/bcs/crates/adapters/http/bcs-http/src/routes/a2a_names.rs
+  s_4efef845bd857d::t_106173527a9f8d 1,11,33,42,48,54,58
+apps/bcs/crates/application/v1/bcs-app-bot/tests/authority_mine/avatar_drift.rs
+  s_4efef845bd857d::t_106173527a9f8d 7-12
+apps/bcsfuse/src/app/infra/public/stores/in_memory_worker_registry_store.py
+  s_4efef845bd857d::t_106173527a9f8d 1-99
+apps/bcs/crates/external-clients/bcs-fuse-client/src/client.rs
+  s_4efef845bd857d::t_106173527a9f8d 17,21
+.github/workflows/search-core.yml
+  s_4efef845bd857d::t_106173527a9f8d 1-45
+apps/bcsfuse/src/app/infra/public/audit/mysql_worker_audit_log_store.py
+  s_4efef845bd857d::t_106173527a9f8d 1-352
+apps/bcs/tests/openapi/test_contract.py
+  s_4efef845bd857d::t_106173527a9f8d 188-216
+apps/bcsfuse/src/app/application/services/worker_vector_index_service.py
+  s_4efef845bd857d::t_106173527a9f8d 1-366
+apps/bcsfuse/packages/search-core/src/search_core/providers/index_lock.py
+  s_4efef845bd857d::t_106173527a9f8d 1-63
+apps/bcs/crates/services/bcs-bot/tests/authority_human_target.rs
+  s_4efef845bd857d::t_106173527a9f8d 17-18
+apps/bcs/crates/services/bcs-bot/src/core/bot_control_plane_core.rs
+  s_4efef845bd857d::t_106173527a9f8d 7-8,20,24-28,39,205-211,284
+apps/backend/src/agentclaw/community/core/apply_engine/materialisers/skills.py
+  s_4efef845bd857d::t_106173527a9f8d 38,189
+apps/bcsfuse/src/app/infra/public/config/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1-33
+apps/backend/specs/2026-11-10-content-store-object-storage/tasks.md
+  s_4efef845bd857d::t_106173527a9f8d 1-75
+apps/bcs/crates/services/bcs-message-flow/src/session_delivery_cleanup_tests.rs
+  s_4efef845bd857d::t_106173527a9f8d 1-85
+apps/bcsfuse/AGENTS.md
+  s_4efef845bd857d::t_106173527a9f8d 1-5
+apps/bcsfuse/src/app/infra/public/object_storage/local_runtime_object_storage_provider.py
+  s_4efef845bd857d::t_106173527a9f8d 1-267
+apps/bcsfuse/src/app/domain/models/llm_conflict_analysis.py
+  s_4efef845bd857d::t_106173527a9f8d 1-233
+apps/bcs/crates/service-api/bcs-service-api/src/types/provider_authority_initialization.rs
+  s_4efef845bd857d::t_106173527a9f8d 1-87
+apps/bcs/crates/contracts/bcs-domain/tests/a2a_source_agent.rs
+  s_4efef845bd857d::t_106173527a9f8d 1-2,4-7,11,13-21,26-28,30-37,39-41,46-49
+apps/bcsfuse/src/app/domain/services/profile_quality_scorer.py
+  s_4efef845bd857d::t_106173527a9f8d 1-132
+apps/backend/src/agentclaw/community/core/cron/README.md
+  s_4efef845bd857d::t_106173527a9f8d 47-49,64-66
+apps/baas/docs/arch/README.md
+  s_4efef845bd857d::t_106173527a9f8d 1-15
+apps/bcsfuse/packages/search-core/tests/test_index_documents.py
+  s_4efef845bd857d::t_106173527a9f8d 1-183
+apps/backend/src/agentclaw/community/core/bot_management/create_authorization.py
+  s_4efef845bd857d::t_106173527a9f8d 1-230
+apps/bcsfuse/src/app/infra/assemblers/baseline_workspace_assembler.py
+  s_4efef845bd857d::t_106173527a9f8d 1-222
+apps/bcs/crates/services/bcs-bot-store/tests/provider_initial_managers_mysql/registration.rs
+  s_4efef845bd857d::t_106173527a9f8d 1-130
+apps/bcsfuse/src/app/domain/services/metadata_store_adapter.py
+  s_4efef845bd857d::t_106173527a9f8d 1-156
+apps/bcs/docs/bot-provider-integration.md
+  s_4efef845bd857d::t_106173527a9f8d 135-175,481,486
+apps/bcs/crates/service-api/bcs-config-api/src/lib.rs
+  s_4efef845bd857d::t_106173527a9f8d 25
+apps/bcs/crates/service-api/bcs-service-api/src/application/message_flow.rs
+  s_4efef845bd857d::t_106173527a9f8d 536-547
+apps/bcsfuse/packages/search-core/tests/test_embedding_singleflight_drm.py
+  s_4efef845bd857d::t_106173527a9f8d 1-104
+apps/bcsfuse/src/app/infra/parsers/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1
+apps/bcs/crates/service-api/bcs-service-api/src/port/catalog_change.rs
+  s_4efef845bd857d::t_106173527a9f8d 1-6
+apps/bcsfuse/packages/search-core/tests/test_catalog_startup.py
+  s_4efef845bd857d::t_106173527a9f8d 1-159
+apps/bcsfuse/src/app/domain/models/planning_result.py
+  s_4efef845bd857d::t_106173527a9f8d 1-228
+apps/bcsfuse/src/app/infra/vectorstore_backends/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1-23
+apps/bcs/crates/services/bcs-bot/src/core/bot_core.rs
+  s_4efef845bd857d::t_106173527a9f8d 50,61-69,85,104,272-274,320,342-349,367-369,374-376,388-391,400-402,591-593,606-608,612-614,622-626,646-648,652-654
+apps/bcs/docs/superpowers/specs/2026-10-10-bot-authority-simple-design.md
+  s_4efef845bd857d::t_106173527a9f8d 359
+apps/bcsfuse/src/app/domain/models/plan_draft.py
+  s_4efef845bd857d::t_106173527a9f8d 1-48
+apps/bcsfuse/src/app/domain/models/profile_fusion/fused_profile_record.py
+  s_4efef845bd857d::t_106173527a9f8d 1-156
+apps/bcsfuse/src/app/adapters/http/dependencies/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1-43
+apps/bcs/crates/services/bcs-bot-store/tests/control_plane_parts/cases_3.rs
+  s_4efef845bd857d::t_106173527a9f8d 78,88,102,115,129,139,153,163,177,187,201,211,226,236,250,260,274,284
+apps/bcsfuse/packages/search-core/docs/index-rebuild.md
+  s_4efef845bd857d::t_106173527a9f8d 1-145
+apps/bcsfuse/packages/search-core/src/search_core/core/timing.py
+  s_4efef845bd857d::t_106173527a9f8d 1-132
+apps/bcsfuse/src/app/domain/models/planning_input.py
+  s_4efef845bd857d::t_106173527a9f8d 1-63
+apps/bcsfuse/src/app/domain/models/compiler_result.py
+  s_4efef845bd857d::t_106173527a9f8d 1-111
+apps/bcs/crates/services/bcs-fusion/src/core/card_sync.rs
+  s_4efef845bd857d::t_106173527a9f8d 1-281
+apps/bcs/crates/services/bcs-bot-store/tests/control_plane_parts/cases_1.rs
+  s_4efef845bd857d::t_106173527a9f8d 75,372,395,417,465,713-741
+  s_4efef845bd857d::t_e39d06a2beeff0 742-743
+apps/bcs/crates/application/bcs-app-a2a-bot/CONTEXT.md
+  s_4efef845bd857d::t_106173527a9f8d 54,63-73,77
+apps/bcs/crates/service-api/bcs-service-api/tests/candidate_search_core_contract.rs
+  s_4efef845bd857d::t_106173527a9f8d 3,7,30,98,103,180,219-287,324,351
+apps/backend/tests/community/core/content_store/test_content_store.py
+  s_4efef845bd857d::t_106173527a9f8d 23,33,106,363,468,508-518,714-811
+apps/bcsfuse/src/app/infra/llm/prompts/expert_perspective_prompt.py
+  s_4efef845bd857d::t_106173527a9f8d 1-212
+apps/backend/tests/community/core/agentswarm/service/test_service.py
+  s_4efef845bd857d::t_106173527a9f8d 115,712-717
+apps/bcsfuse/packages/search-core/tests/test_index_builds.py
+  s_4efef845bd857d::t_106173527a9f8d 1-268
+apps/bcsfuse/src/app/infra/public/database/mysql_connection_pool.py
+  s_4efef845bd857d::t_106173527a9f8d 1-404
+apps/bcsfuse/src/app/infra/public/observability/trace_middleware.py
+  s_4efef845bd857d::t_106173527a9f8d 1-70
+apps/bcsfuse/src/app/infra/vectorstore_backends/sqlite_vector_persistence_backend.py
+  s_4efef845bd857d::t_106173527a9f8d 1-422
+apps/bcs/crates/services/bcs-bot-store/src/bot_provider_storage.rs
+  s_4efef845bd857d::t_106173527a9f8d 126-129,176,613-619
+  s_4efef845bd857d::t_6d44e65c30a264 620-621
+apps/bcsfuse/src/app/domain/services/embedding_provider.py
+  s_4efef845bd857d::t_106173527a9f8d 1-4
+apps/bcs/crates/services/bcs-bot-store/src/persistent_repo/registration_ownership.rs
+  s_4efef845bd857d::t_106173527a9f8d 215,425-426,439-440
+  s_4efef845bd857d::t_cb0275b9ffafab 441
+apps/bcsfuse/src/app/domain/models/fusion_alignment.py
+  s_4efef845bd857d::t_106173527a9f8d 1-44
+apps/bcs/crates/services/bcs-bot/src/application/bot_query.rs
+  s_4efef845bd857d::t_106173527a9f8d 310-312,322
+apps/bcsfuse/packages/search-core/src/search_core/plugin_api/card_store.py
+  s_4efef845bd857d::t_106173527a9f8d 1-23
+apps/bcsfuse/packages/search-core/src/search_core/bootstrap/catalog.py
+  s_4efef845bd857d::t_106173527a9f8d 1-342
+apps/bcs/scripts/e2e-test/a2a_story.py
+  s_4efef845bd857d::t_106173527a9f8d 280,282,292-293,295-296,302,314,318,442-444,446,448-450,463,468
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/bots/copy.py
+  s_4efef845bd857d::t_106173527a9f8d 49-51,70-72,175,177,184-199,204-210,215-219,221,237-238,282-300,312-324,328,330,578-581,595-596
+apps/bcs/crates/service-api/bcs-service-api/src/application/a2a_bot.rs
+  s_4efef845bd857d::t_106173527a9f8d 17-18,26,39,45,47-48,57-58,61-62,65-69,72,78
+apps/bcsfuse/src/app/domain/services/retrieval_evaluator.py
+  s_4efef845bd857d::t_106173527a9f8d 1-98
+apps/bcsfuse/src/app/adapters/http/dependencies/fusion_dependencies.py
+  s_4efef845bd857d::t_106173527a9f8d 1-444
+apps/bcs/specs/2026-11-06-provider-initial-managers/validation.md
+  s_4efef845bd857d::t_106173527a9f8d 1-61
+apps/bcs/crates/application/v1/bcs-app-register/src/lib.rs
+  s_4efef845bd857d::t_106173527a9f8d 83,203
+apps/bcsfuse/src/app/domain/models/candidate_bundle.py
+  s_4efef845bd857d::t_106173527a9f8d 1-49
+apps/backend/src/agentclaw/community/core/bot_config_manifest/compiler/compile.py
+  s_4efef845bd857d::t_106173527a9f8d 39-41,171-178,198
+apps/bcs/crates/services/bcs-message-flow/src/managed_delivery.rs
+  s_4efef845bd857d::t_106173527a9f8d 30-52,63-68,170-171,176,179,343,378,431-433,747-757
+apps/bcsfuse/src/app/domain/services/worker_candidate_recommendation_service.py
+  s_4efef845bd857d::t_106173527a9f8d 1-81
+apps/bcs/crates/service-api/bcs-config-api/src/bcsfuse.rs
+  s_4efef845bd857d::t_106173527a9f8d 6-14,22-25,47-49,98
+apps/backend/docs/agents/existing-knowledge.md
+  s_4efef845bd857d::t_106173527a9f8d 1-180
+apps/bcsfuse/packages/search-core/src/search_core/adapters/http/catalog_cards.py
+  s_4efef845bd857d::t_106173527a9f8d 1-86
+apps/bcsfuse/packages/search-core/src/search_core/config/index_builds.py
+  s_4efef845bd857d::t_106173527a9f8d 1-50
+apps/bcs/crates/services/bcs-fusion/tests/conformance_fuse_worker_profile_service.rs
+  s_4efef845bd857d::t_106173527a9f8d 7-9,176,212-289
+  s_4efef845bd857d::t_2ce2256a550957 290
+apps/bcsfuse/scripts/run_targeted_tests.sh
+  s_4efef845bd857d::t_106173527a9f8d 13-14,16-24,26-28,33-34,36-40,51-54
+apps/bcs/crates/adapters/http/bcs-http/src/router.rs
+  s_4efef845bd857d::t_106173527a9f8d 72,74-75
+apps/bcsfuse/src/app/application/ports/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1-44
+apps/bcsfuse/packages/search-core/src/search_core/plugin_api/retrieval.py
+  s_4efef845bd857d::t_106173527a9f8d 1-53
+apps/backend/docs/diagnostics/README.md
+  s_4efef845bd857d::t_106173527a9f8d 1-15
+apps/backend/src/agentclaw/community/di/config.py
+  s_4efef845bd857d::t_106173527a9f8d 981-982
+apps/bcsfuse/packages/search-core/src/search_core/plugin_api/index_builds.py
+  s_4efef845bd857d::t_106173527a9f8d 1-62
+apps/bcs/crates/external-clients/bcs-fuse-client/src/lib.rs
+  s_4efef845bd857d::t_106173527a9f8d 7,10-11
+apps/bcs/crates/services/bcs-bot-store/tests/common/authority_lifecycle.rs
+  s_4efef845bd857d::t_106173527a9f8d 334
+apps/bcsfuse/src/app/infra/providers/llm_perspective_provider.py
+  s_4efef845bd857d::t_106173527a9f8d 1-378
+apps/backend/tests/community/core/apply_engine/materialisers/test_bot_file_sync_registry.py
+  s_4efef845bd857d::t_106173527a9f8d 44,48,91,100,117
+apps/bcsfuse/packages/search-core/src/search_core/api/models.py
+  s_4efef845bd857d::t_106173527a9f8d 1-114
+apps/bcs/crates/service-api/bcs-service-api/src/core/registry.rs
+  s_4efef845bd857d::t_106173527a9f8d 169-179
+apps/bcsfuse/packages/search-core/src/search_core/bootstrap/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1
+apps/bcs/crates/services/bcs-message-flow/tests/cases/delivery_runtime/isolation.rs
+  s_4efef845bd857d::t_106173527a9f8d 1-141
+apps/bcsfuse/docs/README.md
+  s_4efef845bd857d::t_106173527a9f8d 1-41
+apps/bcsfuse/packages/search-core/src/search_core/core/observation.py
+  s_4efef845bd857d::t_106173527a9f8d 1-203
+apps/bcsfuse/packages/search-core/src/search_core/providers/qdrant_mutations.py
+  s_4efef845bd857d::t_106173527a9f8d 1-546
+apps/bcs/crates/services/bcs-message-flow/src/group_flow.rs
+  s_4efef845bd857d::t_106173527a9f8d 682-689
+apps/bcs/crates/services/bcs-message-store/src/delivery/corrupt_rows.rs
+  s_4efef845bd857d::t_106173527a9f8d 1-81
+apps/bcsfuse/src/app/adapters/http/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1-26
+apps/bcsfuse/src/app/domain/exceptions/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1-278
+apps/bcsfuse/packages/search-core/src/search_core/api/errors.py
+  s_4efef845bd857d::t_106173527a9f8d 1-13
+apps/bcsfuse/packages/search-core/src/search_core/core/selection.py
+  s_4efef845bd857d::t_106173527a9f8d 1-44
+apps/bcsfuse/src/app/application/ports/database_provider.py
+  s_4efef845bd857d::t_106173527a9f8d 1-104
+apps/bcsfuse/packages/search-core/src/search_core/adapters/http/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1-5
+apps/bcs/crates/application/bcs-app-a2a-bot/src/lib.rs
+  s_4efef845bd857d::t_106173527a9f8d 78-79,81-82,84-85,87-91,94,100-101
+apps/bcs/crates/services/bcs-group/src/core/group_core.rs
+  s_4efef845bd857d::t_106173527a9f8d 29,35-43,79,114-117,138-141,203,211-213,225-227,288-290,321-323,400-402
+apps/bcsfuse/src/app/application/services/worker_lifecycle_service.py
+  s_4efef845bd857d::t_106173527a9f8d 1-160
+apps/bcsfuse/src/app/infra/matchmakers/baseline_matchmaker.py
+  s_4efef845bd857d::t_106173527a9f8d 1-444
+apps/bcs/docs/flows/session-deletion.md
+  s_4efef845bd857d::t_106173527a9f8d 1-11
+apps/bcsfuse/src/app/application/services/retrieval_service.py
+  s_4efef845bd857d::t_106173527a9f8d 1-67
+apps/bcsfuse/packages/search-core/src/search_core/plugin_api/index_documents.py
+  s_4efef845bd857d::t_106173527a9f8d 1-110
+apps/bcsfuse/src/app/infra/embedding/config/embedding_settings.py
+  s_4efef845bd857d::t_106173527a9f8d 1-3
+apps/bcsfuse/src/app/infra/assemblers/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1-13
+apps/bcs/crates/services/bcs-bot-store/src/memory_controllable.rs
+  s_4efef845bd857d::t_106173527a9f8d 88
+apps/bcsfuse/src/app/application/ports/embedding_provider.py
+  s_4efef845bd857d::t_106173527a9f8d 1-39
+apps/bcs/crates/services/bcs-bot-store/tests/memory_authority_fixture.rs
+  s_4efef845bd857d::t_106173527a9f8d 498,944-945
+apps/backend/tests/community/core/bot_management/test_identity_inheriting_call_sites.py
+  s_4efef845bd857d::t_106173527a9f8d 1-173
+apps/bcsfuse/src/app/infra/public/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1-27
+apps/bcsfuse/src/app/infra/providers/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1-13
+apps/bcsfuse/src/app/infra/public/observability/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1-29
+apps/bcsfuse/src/app/domain/models/task_understanding_result.py
+  s_4efef845bd857d::t_106173527a9f8d 1-114
+apps/bcsfuse/src/app/domain/models/fusion_conflict_conclusion.py
+  s_4efef845bd857d::t_106173527a9f8d 1-86
+apps/backend/tests/community/core/bot_config_manifest/test_inline_backfill.py
+  s_4efef845bd857d::t_106173527a9f8d 1-136
+apps/bcsfuse/src/app/infra/adapters/sqlite_worker_audit_log_store.py
+  s_4efef845bd857d::t_106173527a9f8d 1-169
+apps/bcsfuse/src/app/infra/llm/routing/static_llm_router.py
+  s_4efef845bd857d::t_106173527a9f8d 1-106
+apps/bcsfuse/packages/search-core/tests/test_card_deletion.py
+  s_4efef845bd857d::t_106173527a9f8d 1-119
+apps/bcsfuse/src/app/infra/config/ecb_settings.py
+  s_4efef845bd857d::t_106173527a9f8d 1-73
+apps/bcs/crates/services/bcs-bot/src/core/provider_core.rs
+  s_4efef845bd857d::t_106173527a9f8d 156,179-181,183,187-200,226,287-296,852-854
+apps/bcsfuse/src/app/domain/events/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1-11
+apps/bcs/crates/service-api/bcs-service-api/src/application/provider.rs
+  s_4efef845bd857d::t_106173527a9f8d 101-102
+apps/bcsfuse/src/app/domain/models/llm_request.py
+  s_4efef845bd857d::t_106173527a9f8d 1-114
+apps/bcs/crates/services/bcs-bot-store/tests/conformance_caller_configuration.rs
+  s_4efef845bd857d::t_106173527a9f8d 326-462
+apps/bcsfuse/src/app/domain/services/retriever.py
+  s_4efef845bd857d::t_106173527a9f8d 1-49
+apps/bcs/crates/services/bcs-bot/src/core/provider_core/initial_authority.rs
+  s_4efef845bd857d::t_106173527a9f8d 1-37
+apps/bcsfuse/packages/search-core/tests/test_qdrant_modes.py
+  s_4efef845bd857d::t_106173527a9f8d 1-247
+apps/bcs/specs/2026-11-06-provider-initial-managers/carolynli-followup.md
+  s_4efef845bd857d::t_106173527a9f8d 1-106
+apps/bcsfuse/src/app/domain/models/workspace_assembly_input.py
+  s_4efef845bd857d::t_106173527a9f8d 1-77
+apps/backend/src/agentclaw/community/testing/content_blob_store.py
+  s_4efef845bd857d::t_106173527a9f8d 1-120
+apps/bcsfuse/packages/search-core/src/search_core/config/search.py
+  s_4efef845bd857d::t_106173527a9f8d 1-60
+apps/bcsfuse/src/app/domain/models/scoring_signal.py
+  s_4efef845bd857d::t_106173527a9f8d 1-67
+apps/bcsfuse/src/app/application/ports/auth_provider.py
+  s_4efef845bd857d::t_106173527a9f8d 1-54
+apps/backend/src/agentclaw/community/core/repository/protocols/bot/bot.py
+  s_4efef845bd857d::t_106173527a9f8d 400,413-415,456-463
+  s_4efef845bd857d::t_3f394e9fb55bb0 464-465
+apps/bcsfuse/src/app/domain/services/worker_context_preparation_service.py
+  s_4efef845bd857d::t_106173527a9f8d 1-485
+apps/backend/src/agentclaw/community/core/content_store/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 3,10,20,54,67
+apps/bcsfuse/scripts/verify_docker_deployment.sh
+  s_4efef845bd857d::t_106173527a9f8d 59-60,74,176-177,244
+apps/bcsfuse/src/app/domain/models/domain_coverage.py
+  s_4efef845bd857d::t_106173527a9f8d 1-95
+apps/bcsfuse/src/app/infra/adapters/zdas_worker_registry_store.py
+  s_4efef845bd857d::t_106173527a9f8d 1-22
+apps/bcs/crates/services/bcs-bot/src/core/provider_core/bots.rs
+  s_4efef845bd857d::t_106173527a9f8d 160,164-168
+  s_4efef845bd857d::t_5228038fa4f630 169-170
+apps/bcs/crates/services/bcs-bot-store/tests/authority_mine_store.rs
+  s_4efef845bd857d::t_106173527a9f8d 452
+apps/bcsfuse/src/app/infra/config/zdas_settings.py
+  s_4efef845bd857d::t_106173527a9f8d 1-172
+apps/bcs/crates/services/bcs-bot-store/src/memory_provider_registration_tests.rs
+  s_4efef845bd857d::t_106173527a9f8d 1-27
+apps/bcs/scripts/test_candidate_discovery_story.py
+  s_4efef845bd857d::t_106173527a9f8d 1-47
+apps/bcsfuse/packages/search-core/tests/test_catalog_table_isolation.py
+  s_4efef845bd857d::t_106173527a9f8d 1-109
+apps/bcsfuse/src/app/infra/public/audit/in_memory_worker_audit_log_store.py
+  s_4efef845bd857d::t_106173527a9f8d 1-20
+apps/backend/src/agentclaw/community/core/session_resources/README.md
+  s_4efef845bd857d::t_106173527a9f8d 44-59
+apps/bcs/configs/bcs-config-example.toml
+  s_4efef845bd857d::t_106173527a9f8d 409-418,457-458
+apps/backend/tests/community/contracts/gateway/schema_snapshots/api_response/service_backed_rule01_GET_api_bots_by_owner.json
+  s_4efef845bd857d::t_106173527a9f8d 255-257,324
+apps/bcsfuse/src/app/application/services/planning_service.py
+  s_4efef845bd857d::t_106173527a9f8d 1-110
+apps/backend/src/agentclaw/community/core/bot_config_manifest/README.md
+  s_4efef845bd857d::t_106173527a9f8d 208-209,211
+apps/bcs/migrations/mysql/043_actor_identity_collation.sql
+  s_4efef845bd857d::t_106173527a9f8d 1-87
+apps/bcsfuse/src/app/infra/planners/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1-13
+apps/bcsfuse/src/app/domain/services/vector_store_adapter.py
+  s_4efef845bd857d::t_106173527a9f8d 1-225
+apps/bcs/scripts/e2e-test/a2a_management_cases.py
+  s_4efef845bd857d::t_106173527a9f8d 6,18,20-23,30-35,39,41,43-46,86,88
+apps/bcs/crates/services/bcs-bot-store/tests/conformance_a2a_storage.rs
+  s_4efef845bd857d::t_106173527a9f8d 158-183,228,233-240,268-269,272-289,291-308
+apps/backend/docs/arch/README.md
+  s_4efef845bd857d::t_106173527a9f8d 1-13
+apps/backend/src/agentclaw/community/core/agentswarm/service/impl.py
+  s_4efef845bd857d::t_106173527a9f8d 32-33,86-114,116,473-482
+apps/bcsfuse/src/app/domain/services/adapters/evidence_adapters.py
+  s_4efef845bd857d::t_106173527a9f8d 1-576
+apps/bcsfuse/src/app/infra/vectorstore_backends/zdas_vector_persistence_backend.py
+  s_4efef845bd857d::t_106173527a9f8d 1-18
+apps/backend/src/agentclaw/community/core/apply_engine/constructs.py
+  s_4efef845bd857d::t_106173527a9f8d 57-63
+apps/backend/src/agentclaw/community/core/bot_config_manifest/create_job.py
+  s_4efef845bd857d::t_106173527a9f8d 374-380,401-403,418-424,428,430
+apps/backend/src/agentclaw/community/core/repository/implementations/bot/mutations.py
+  s_4efef845bd857d::t_106173527a9f8d 178-182
+apps/bcs/crates/services/bcs-session/src/application/sessionmanagementserviceimpl.rs
+  s_4efef845bd857d::t_106173527a9f8d 20,32,35-40,202-206,215-223
+apps/bcsfuse/src/app/infra/public/stores/mysql_worker_registry_store.py
+  s_4efef845bd857d::t_106173527a9f8d 1-600
+apps/bcsfuse/src/app/infra/public/stores/in_memory_worker_runtime_state_store.py
+  s_4efef845bd857d::t_106173527a9f8d 1-20
+apps/bcsfuse/src/app/application/ports/vector_store.py
+  s_4efef845bd857d::t_106173527a9f8d 1-68
+apps/bcs/crates/contracts/bcs-protocol/src/http/provider.rs
+  s_4efef845bd857d::t_106173527a9f8d 208-209
+apps/bcsfuse/Dockerfile
+  s_4efef845bd857d::t_106173527a9f8d 8-9,12,24-25,34-35,37-42,44-45,48,61,64
+apps/backend/src/agentclaw/community/core/bot_copy/status_derive.py
+  s_4efef845bd857d::t_106173527a9f8d 101-108,111
+apps/bcs/crates/tools/bcs-admin/src/migrate_bot_authority_contract.rs
+  s_4efef845bd857d::t_106173527a9f8d 1-59
+apps/bcsfuse/src/app/adapters/http/fusion_parity_routes.py
+  s_4efef845bd857d::t_106173527a9f8d 1-908
+apps/bcs/docs/agents/templates/README.md
+  s_4efef845bd857d::t_106173527a9f8d 1-3
+apps/backend/tests/community/core/agentswarm/test_production_gates.py
+  s_4efef845bd857d::t_106173527a9f8d 72,540-545
+apps/bcsfuse/src/app/infra/understanders/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1
+apps/bcs/crates/services/bcs-bot-store/tests/control_plane_parts/cases_2.rs
+  s_4efef845bd857d::t_106173527a9f8d 521,531,545,558,572,582,596,606,620,630,644,654,669,679,693,703,717,727
+apps/bcsfuse/src/app/bootstrap/oss_diagnostics.py
+  s_4efef845bd857d::t_106173527a9f8d 1-333
+apps/bcs/crates/services/bcs-bot/src/core/candidate_search_authorized.rs
+  s_4efef845bd857d::t_106173527a9f8d 1-252
+apps/bcsfuse/src/app/domain/models/fusion_conflict.py
+  s_4efef845bd857d::t_106173527a9f8d 1-71
+apps/backend/src/agentclaw/community/core/agentswarm/domain/models/specs.py
+  s_4efef845bd857d::t_106173527a9f8d 145-157
+apps/bcsfuse/src/app/infra/public/stores/mysql_worker_profile_content_store.py
+  s_4efef845bd857d::t_106173527a9f8d 1-712
+apps/bcs/crates/service-api/bcs-service-api/src/port/repo/bot_provider.rs
+  s_4efef845bd857d::t_106173527a9f8d 71-81
+apps/baas/AGENTS.md
+  s_4efef845bd857d::t_106173527a9f8d 51-52
+apps/bcs/specs/2026-11-09-bcs-standalone-friend-discovery/plan.md
+  s_4efef845bd857d::t_106173527a9f8d 1-281
+apps/bcsfuse/src/app/infra/config/worker_registry_settings.py
+  s_4efef845bd857d::t_106173527a9f8d 1-87
+apps/bcsfuse/packages/search-core/tests/test_native_async_models.py
+  s_4efef845bd857d::t_106173527a9f8d 1-281
+apps/bcsfuse/src/app/infra/schema_loader.py
+  s_4efef845bd857d::t_106173527a9f8d 1-140
+apps/bcsfuse/packages/search-core/src/search_core/adapters/http/cards.py
+  s_4efef845bd857d::t_106173527a9f8d 1-166
+apps/bcsfuse/src/app/domain/models/worker_profile_content.py
+  s_4efef845bd857d::t_106173527a9f8d 1-341
+apps/bcs/AGENTS.md
+  s_4efef845bd857d::t_106173527a9f8d 90-91
+apps/bcsfuse/configs/application.yaml
+  s_4efef845bd857d::t_106173527a9f8d 15-16,33-34,96,101-102
+apps/bcsfuse/packages/search-core/tests/test_index_status_details.py
+  s_4efef845bd857d::t_106173527a9f8d 1-151
+apps/bcsfuse/main.py
+  s_4efef845bd857d::t_106173527a9f8d 17-18,26,64,67
+apps/bcsfuse/src/app/application/services/g5_expert_enhancer_impl.py
+  s_4efef845bd857d::t_106173527a9f8d 1-1473
+apps/backend/src/agentclaw/community/core/bot_management/services/bot_service.py
+  s_4efef845bd857d::t_106173527a9f8d 7,1189-1192,1468,1654,2836-2862,4111-4126,4260-4276
+apps/bcsfuse/src/app/domain/models/workspace.py
+  s_4efef845bd857d::t_106173527a9f8d 1-68
+apps/backend/src/agentclaw/community/core/cron/services/cron_relay.py
+  s_4efef845bd857d::t_106173527a9f8d 164,202-207
+apps/bcsfuse/src/app/application/services/group_fusion_service.py
+  s_4efef845bd857d::t_106173527a9f8d 1-1466
+apps/backend/tests/community/core/agentswarm/test_coverage_gaps.py
+  s_4efef845bd857d::t_106173527a9f8d 849,1255-1260
+apps/bcs/crates/services/bcs-message-flow/tests/cases/conformance_queued_task.rs
+  s_4efef845bd857d::t_106173527a9f8d 625-626
+apps/bcsfuse/src/app/infra/public/vectorstores/in_memory_vector_store.py
+  s_4efef845bd857d::t_106173527a9f8d 1-210
+apps/bcs/crates/services/bcs-bot-store/CONTEXT.md
+  s_4efef845bd857d::t_106173527a9f8d 337-392
+apps/bcs/migrations/legacy/mysql/036_bot_authority.sql
+  s_4efef845bd857d::t_106173527a9f8d 1-120
+apps/bcsfuse/src/app/domain/models/worker.py
+  s_4efef845bd857d::t_106173527a9f8d 1-365
+apps/bcsfuse/src/app/domain/services/matchmaker.py
+  s_4efef845bd857d::t_106173527a9f8d 1-50
+apps/backend/tests/community/core/bot_management/services/test_bot_service_identity_source.py
+  s_4efef845bd857d::t_106173527a9f8d 1-126
+apps/backend/src/agentclaw/community/plugins/community/agentswarm/bot_subagent.py
+  s_4efef845bd857d::t_106173527a9f8d 134-136
+apps/bcs/crates/bootstrap/bcs/src/server/lifecycle_wiring.rs
+  s_4efef845bd857d::t_106173527a9f8d 11-15,130-133,143-147
+apps/bcsfuse/docs/deploy/macos_local_chinese.md
+  s_4efef845bd857d::t_106173527a9f8d 605,607
+apps/bcsfuse/src/app/domain/models/worker_context_digest.py
+  s_4efef845bd857d::t_106173527a9f8d 1-117
+apps/bcsfuse/src/app/infra/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1-12
+apps/backend/src/agentclaw/community/core/apply_engine/materialisers/identity.py
+  s_4efef845bd857d::t_106173527a9f8d 70,168
+apps/backend/src/agentclaw/community/di/modules/infrastructure/test/content_blob_store.py
+  s_4efef845bd857d::t_106173527a9f8d 1-32
+apps/backend/tests/community/contracts/gateway/schema_snapshots/api_response/service_backed_rule01_GET_api_bots_id_appcoding_bots.json
+  s_4efef845bd857d::t_106173527a9f8d 172-174,257
+apps/bcsfuse/src/app/domain/models/profile_fusion/fused_profile.py
+  s_4efef845bd857d::t_106173527a9f8d 1-340
+apps/bcsfuse/src/app/domain/models/llm_expert_perspective.py
+  s_4efef845bd857d::t_106173527a9f8d 1-81
+apps/bcsfuse/packages/search-core/tests/test_score_details.py
+  s_4efef845bd857d::t_106173527a9f8d 1-92
+apps/bcsfuse/src/app/infra/adapters/sqlite_worker_registry_store.py
+  s_4efef845bd857d::t_106173527a9f8d 1-579
+apps/bcsfuse/src/app/domain/models/structured_risk_assessment.py
+  s_4efef845bd857d::t_106173527a9f8d 1-218
+apps/backend/tests/community/core/bot_config_manifest/compiler/test_resources.py
+  s_4efef845bd857d::t_106173527a9f8d 99
+apps/bcsfuse/src/app/infra/adapters/zdas_worker_runtime_state_store.py
+  s_4efef845bd857d::t_106173527a9f8d 1-22
+apps/bcsfuse/src/app/adapters/http/route_skeletons_oss.py
+  s_4efef845bd857d::t_106173527a9f8d 1-76
+apps/bcsfuse/src/app/domain/models/execution_packet.py
+  s_4efef845bd857d::t_106173527a9f8d 1-104
+apps/bcsfuse/scripts/migrate_tc_cards.py
+  s_4efef845bd857d::t_106173527a9f8d 1-154
+apps/bcsfuse/src/app/domain/models/verify_dto.py
+  s_4efef845bd857d::t_106173527a9f8d 1-80
+apps/bcsfuse/packages/search-core/src/search_core/providers/demo_embedding.py
+  s_4efef845bd857d::t_106173527a9f8d 1-24
+apps/bcsfuse/src/app/domain/services/worker_profile_source.py
+  s_4efef845bd857d::t_106173527a9f8d 1-154
+apps/bcsfuse/src/app/domain/models/task_understanding_input.py
+  s_4efef845bd857d::t_106173527a9f8d 1-78
+apps/bcs/crates/application/v1/bcs-app-bot/tests/authority_mine/cases.rs
+  s_4efef845bd857d::t_106173527a9f8d 321-324,351-355,384-389,425-427,429-431,503-625
+apps/bcsfuse/src/app/infra/logging/logging_config.py
+  s_4efef845bd857d::t_106173527a9f8d 1-247
+apps/backend/tests/community/core/bot_genome/service_fixtures.py
+  s_4efef845bd857d::t_106173527a9f8d 11,106
+apps/bcs/crates/services/bcs-fusion/src/core/card_worker_profiles.rs
+  s_4efef845bd857d::t_106173527a9f8d 1-60
+apps/backend/tests/community/contracts/gateway/schema_snapshots/api_response/service_backed_rule01_GET_api_bots_id_detail_by_owner.json
+  s_4efef845bd857d::t_106173527a9f8d 255-257,322
+apps/bcs/docs/agents/existing-knowledge.md
+  s_4efef845bd857d::t_106173527a9f8d 1-249
+apps/bcsfuse/packages/search-core/src/search_core/plugin_api/card_documents.py
+  s_4efef845bd857d::t_106173527a9f8d 1-26
+apps/bcsfuse/src/app/infra/public/vector_persistence/local_vector_persistence_provider.py
+  s_4efef845bd857d::t_106173527a9f8d 1-453
+apps/bcsfuse/packages/search-core/src/search_core/core/index_sync.py
+  s_4efef845bd857d::t_106173527a9f8d 1-28
+apps/backend/tests/community/contracts/gateway/schema_snapshots/api_response/service_backed_rule01_POST_api_bots_search.json
+  s_4efef845bd857d::t_106173527a9f8d 188-190,259
+apps/bcsfuse/src/app/adapters/cli/bcs_cli.py
+  s_4efef845bd857d::t_106173527a9f8d 1-511
+apps/backend/src/agentclaw/community/core/bot_management/identity_source.py
+  s_4efef845bd857d::t_106173527a9f8d 1-134
+apps/bcsfuse/src/app/domain/models/context_fragment.py
+  s_4efef845bd857d::t_106173527a9f8d 1-102
+apps/bcsfuse/src/app/infra/public/stores/sqlite_worker_profile_content_store.py
+  s_4efef845bd857d::t_106173527a9f8d 1-190
+apps/bcs/crates/application/bcs-app-a2a-bot/tests/support/public_management.rs
+  s_4efef845bd857d::t_106173527a9f8d 2-4,16,18,27,35,37,61,64,73,83,85,92,95-100,104-151,153-161,199-206,211,213,221,224-225,230-231,241,250,252-253,256-266,271-272,274
+apps/bcs/crates/tools/bcs-admin/src/migrate/history.rs
+  s_4efef845bd857d::t_106173527a9f8d 208-209,317-341
+apps/bcsfuse/src/app/domain/models/fusion_recommendation.py
+  s_4efef845bd857d::t_106173527a9f8d 1-88
+apps/backend/src/agentclaw/community/core/bot_config_manifest/schema/sources.py
+  s_4efef845bd857d::t_106173527a9f8d 65-73,75,85,106-110,116,200-206,378-382,411
+apps/backend/src/agentclaw/community/core/session_resources/materialization.py
+  s_4efef845bd857d::t_106173527a9f8d 6,29,119-125,158-159
+apps/bcs/crates/services/bcs-bot-store/tests/authority_human_retirement.rs
+  s_4efef845bd857d::t_106173527a9f8d 13-14
+apps/backend/tests/community/core/bot_management/test_identity_source.py
+  s_4efef845bd857d::t_106173527a9f8d 1-205
+apps/bcs/crates/service-api/bcs-service-api/src/lib.rs
+  s_4efef845bd857d::t_106173527a9f8d 290,323
+apps/backend/tests/community/adapters/http/openapi_v1/test_create_with_manifest_models.py
+  s_4efef845bd857d::t_106173527a9f8d 76-79,86-89
+  s_4efef845bd857d::t_2517e6c28be0b4 90-91
+apps/bcs/crates/bootstrap/bcs/src/message_delivery_wiring.rs
+  s_4efef845bd857d::t_106173527a9f8d 396-397,464-478,592-630
+  s_4efef845bd857d::t_3b2c5d6fa69ffb 631-632
+apps/baas/docs/agents/existing-knowledge.md
+  s_4efef845bd857d::t_106173527a9f8d 1-41
+apps/bcsfuse/src/app/application/services/bot_fuse/profile_merge_service.py
+  s_4efef845bd857d::t_106173527a9f8d 1-711
+apps/bcsfuse/src/app/infra/llm/prompts/fusion_recommendation_prompt.py
+  s_4efef845bd857d::t_106173527a9f8d 1-211
+apps/bcsfuse/packages/search-core/tests/test_model_connection_reuse.py
+  s_4efef845bd857d::t_106173527a9f8d 1-173
+apps/bcsfuse/src/app/domain/services/profile_fragment_decomposer.py
+  s_4efef845bd857d::t_106173527a9f8d 1-224
+apps/bcs/crates/bootstrap/bcs/src/server/channel_wiring.rs
+  s_4efef845bd857d::t_106173527a9f8d 118-121
+apps/bcsfuse/docs/architecture/tc-card-migration.md
+  s_4efef845bd857d::t_106173527a9f8d 1-58
+apps/bcs/crates/application/bcs-app-a2a-bot/src/management.rs
+  s_4efef845bd857d::t_106173527a9f8d 1,3,19,25,37,39-53,81,95-112,122-123,146-156,160,162-163,168,172,174,177,186,188,205,212,219,221-222,248
+apps/bcsfuse/packages/search-core/src/search_core/core/retrieval.py
+  s_4efef845bd857d::t_106173527a9f8d 1-313
+apps/bcsfuse/src/app/domain/services/worker_repository.py
+  s_4efef845bd857d::t_106173527a9f8d 1-134
+apps/bcsfuse/src/app/infra/public/vectorstores/qdrant_local_vector_store.py
+  s_4efef845bd857d::t_106173527a9f8d 1-129
+apps/bcs/crates/services/bcs-message-flow/src/delivery_runtime.rs
+  s_4efef845bd857d::t_106173527a9f8d 224-275,306,308,318,320,326,328,337,349,370,373,379,383,388-393,407-408,413,460-462,502,509,516,519-520,575-580,589-594,604-606,614,619,646,660,667-671,676-683,685,711-716,719-722,729,733,741-742,747,752,784,791,796,804,822
+  s_4efef845bd857d::t_fe80adf4dab2b4 823
+apps/bcsfuse/src/app/domain/services/planner.py
+  s_4efef845bd857d::t_106173527a9f8d 1-48
+apps/bcs/crates/bootstrap/bcs/src/server/server_infrastructure.rs
+  s_4efef845bd857d::t_106173527a9f8d 78-80,82-83,117,128-129,152,164,742,800
+apps/baas/docs/diagnostics/README.md
+  s_4efef845bd857d::t_106173527a9f8d 1-17
+apps/backend/src/agentclaw/community/adapters/http/agentswarm/router.py
+  s_4efef845bd857d::t_106173527a9f8d 49,54-55,212-223,390-404,410-411,468-474,482
+apps/backend/tests/community/core/bot_config_manifest/compiler/test_entries.py
+  s_4efef845bd857d::t_106173527a9f8d 8-10,84-95
+  s_4efef845bd857d::t_626e5d1d71212a 96
+apps/bcsfuse/packages/search-core/tests/test_embedding_dimensions.py
+  s_4efef845bd857d::t_106173527a9f8d 1-52
+apps/backend/tests/community/core/agentswarm/service/test_submit_contract.py
+  s_4efef845bd857d::t_106173527a9f8d 190,470-475
+apps/backend/tests/community/core/cron/services/test_cron_targeted_operations.py
+  s_4efef845bd857d::t_106173527a9f8d 666-720
+apps/bcsfuse/src/app/domain/services/adapters/worker_profile_content_store_adapter.py
+  s_4efef845bd857d::t_106173527a9f8d 1-11
+apps/backend/src/agentclaw/community/core/bot_config_manifest/inline_backfill_protocol.py
+  s_4efef845bd857d::t_106173527a9f8d 1-61
+apps/bcs/crates/services/bcs-bot-store/src/controllable.rs
+  s_4efef845bd857d::t_106173527a9f8d 18-22,34,73,84-87,92-93,138-139,203-219,226,232-233,248-249,267-269
+apps/backend/src/agentclaw/community/adapters/http/agentswarm/schemas.py
+  s_4efef845bd857d::t_106173527a9f8d 116-126
+apps/bcsfuse/src/app/infra/llm/prompts/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1-13
+apps/bcsfuse/src/app/infra/adapters/zdas_worker_audit_log_store.py
+  s_4efef845bd857d::t_106173527a9f8d 1-22
+apps/bcsfuse/packages/search-core/tests/test_retrieval_pipeline.py
+  s_4efef845bd857d::t_106173527a9f8d 1-85
+apps/backend/src/agentclaw/community/core/bot_management/create_flow.py
+  s_4efef845bd857d::t_106173527a9f8d 58-63,72,75-78,420-426,471-474,486,491-505,582,584-585,618,626,671,698,721-722,727,734-735,753,757-759,795-811,844
+apps/bcs/crates/services/bcs-message-flow/src/managed_delivery/service.rs
+  s_4efef845bd857d::t_106173527a9f8d 344-347,368-369,371-376,380,628-629,631,643-651
+apps/bcsfuse/src/app/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1-12
+apps/bcsfuse/packages/search-core/src/search_core/providers/reranker.py
+  s_4efef845bd857d::t_106173527a9f8d 1-288
+apps/bcs/scripts/e2e-test/fuse_cards_story.sh
+  s_4efef845bd857d::t_106173527a9f8d 1-11
+apps/backend/src/agentclaw/community/core/apply_engine/materialisers/bot_config_render_screen_handler.py
+  s_4efef845bd857d::t_106173527a9f8d 1-81
+apps/bcsfuse/src/app/adapters/http/app.py
+  s_4efef845bd857d::t_106173527a9f8d 1-5
+apps/bcsfuse/src/app/infra/extractors/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1
+apps/backend/src/agentclaw/community/adapters/http/system/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 6-12
+apps/bcs/crates/application/v1/bcs-app-bot/tests/support/candidate_friend_harness.rs
+  s_4efef845bd857d::t_106173527a9f8d 1-893
+apps/bcsfuse/src/app/infra/adapters/sqlite_schema.py
+  s_4efef845bd857d::t_106173527a9f8d 1-175
+apps/bcsfuse/packages/search-core/src/search_core/providers/card_schema.py
+  s_4efef845bd857d::t_106173527a9f8d 1-58
+apps/bcsfuse/src/app/infra/public/embedding/real_embedding_provider.py
+  s_4efef845bd857d::t_106173527a9f8d 1-21
+apps/backend/docs/bot-evolution/01-genome.zh-CN.md
+  s_4efef845bd857d::t_106173527a9f8d 1178-1179,1183-1186
+apps/backend/README.md
+  s_4efef845bd857d::t_106173527a9f8d 3-10,16-29,108-135
+  s_4efef845bd857d::t_e04fe83e6f4694 136
+apps/bcsfuse/src/app/infra/embedding/config/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1-10
+apps/bcsfuse/src/app/application/services/worker_registry_service.py
+  s_4efef845bd857d::t_106173527a9f8d 1-166
+apps/bcsfuse/packages/search-core/src/search_core/plugin_api/vector_point.py
+  s_4efef845bd857d::t_106173527a9f8d 1-41
+apps/bcsfuse/pyproject.toml
+  s_4efef845bd857d::t_106173527a9f8d 26,36,38,59-60,63-69
+apps/bcs/crates/bootstrap/bcs/src/server/resource_builders.rs
+  s_4efef845bd857d::t_106173527a9f8d 455,458-459,463-472,484,550-551,556,738-739
+apps/bcs/crates/services/bcs-fusion/src/core/mod.rs
+  s_4efef845bd857d::t_106173527a9f8d 1-2,19-21
+apps/bcs/crates/bootstrap/bcs/tests/bot_authority_migration.rs
+  s_4efef845bd857d::t_106173527a9f8d 263-264
+apps/bcsfuse/src/app/application/ports/worker_profile_content_store.py
+  s_4efef845bd857d::t_106173527a9f8d 1-53
+apps/bcsfuse/servers/web/app.py
+  s_4efef845bd857d::t_106173527a9f8d 13
+apps/backend/tests/community/contracts/gateway/schema_snapshots/api_response/service_backed_rule01_GET_api_bots.json
+  s_4efef845bd857d::t_106173527a9f8d 182-184,248
+apps/bcsfuse/src/app/domain/services/explanation_builder_v2.py
+  s_4efef845bd857d::t_106173527a9f8d 1-543
+apps/backend/src/agentclaw/community/core/content_store/README.md
+  s_4efef845bd857d::t_106173527a9f8d 21-52,88,104-105,110,122
+apps/backend/tests/community/core/agentswarm/test_identity_source_contract.py
+  s_4efef845bd857d::t_106173527a9f8d 1-157
+apps/bcs/crates/services/bcs-fusion/src/core/fuse_backed_worker_profiles.rs
+  s_4efef845bd857d::t_106173527a9f8d 6,9,30-38,45
+apps/bcs/crates/services/bcs-bot/src/core/a2a_provider_registration.rs
+  s_4efef845bd857d::t_106173527a9f8d 40,60,68-69
+apps/bcsfuse/src/app/adapters/http/schemas/profile_management_schemas.py
+  s_4efef845bd857d::t_106173527a9f8d 1-574
+apps/bcsfuse/src/app/adapters/http/schemas/worker_management_schemas.py
+  s_4efef845bd857d::t_106173527a9f8d 1-937
+apps/bcsfuse/src/app/infra/metadatastores/file_metadata_store_adapter.py
+  s_4efef845bd857d::t_106173527a9f8d 1-271
+apps/bcsfuse/src/app/infra/public/auth/simple_token_auth_provider.py
+  s_4efef845bd857d::t_106173527a9f8d 1-124
+apps/bcsfuse/src/app/infra/config/content_embedding_config.py
+  s_4efef845bd857d::t_106173527a9f8d 1-77
+apps/bcs/docs/agents/knowledge-standard.md
+  s_4efef845bd857d::t_106173527a9f8d 1-16
+apps/backend/src/agentclaw/community/adapters/http/openapi_v1/bots/create_with_manifest.py
+  s_4efef845bd857d::t_106173527a9f8d 236-238,439-443
+apps/bcsfuse/src/app/domain/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1-15
+apps/bcsfuse/src/app/infra/adapters/in_memory_worker_audit_log_store.py
+  s_4efef845bd857d::t_106173527a9f8d 1-104
+apps/bcs/docs/bcsfuse-catalog.md
+  s_4efef845bd857d::t_106173527a9f8d 1-182
+apps/bcs/crates/application/v1/bcs-app-bot/Cargo.toml
+  s_4efef845bd857d::t_106173527a9f8d 28
+apps/bcsfuse/src/app/domain/models/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1-325
+apps/bcsfuse/src/app/infra/llm/providers/fake_provider.py
+  s_4efef845bd857d::t_106173527a9f8d 1-227
+apps/bcsfuse/docs/qdrant-modes.md
+  s_4efef845bd857d::t_106173527a9f8d 1-87
+apps/backend/tests/community/core/runtime_binding/test_service.py
+  s_4efef845bd857d::t_106173527a9f8d 356-373
+apps/bcsfuse/src/app/domain/services/adapters/worker_profile_filter_adapter.py
+  s_4efef845bd857d::t_106173527a9f8d 1-98
+apps/bcsfuse/src/app/domain/services/adapters/worker_index_sync_adapter.py
+  s_4efef845bd857d::t_106173527a9f8d 1-124
+apps/bcsfuse/packages/search-core/src/search_core/providers/qdrant_index.py
+  s_4efef845bd857d::t_106173527a9f8d 1-248
+apps/bcsfuse/src/app/application/ports/object_storage_provider.py
+  s_4efef845bd857d::t_106173527a9f8d 1-67
+apps/bcsfuse/src/app/domain/taxonomy/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1-39
+apps/bcsfuse/src/app/domain/models/worker_source_info.py
+  s_4efef845bd857d::t_106173527a9f8d 1-62
+apps/bcsfuse/src/app/infra/public/embedding/fake_embedding_provider.py
+  s_4efef845bd857d::t_106173527a9f8d 1-20
+apps/bcsfuse/packages/search-core/tests/test_provider_execution.py
+  s_4efef845bd857d::t_106173527a9f8d 1-235
+apps/backend/tests/community/core/session_resources/test_materialization.py
+  s_4efef845bd857d::t_106173527a9f8d 3,5-7,210-270
+apps/bcsfuse/docs/archive/validation/retrieval-extraction-20261027.md
+  s_4efef845bd857d::t_106173527a9f8d 1-54
+apps/bcs/crates/services/bcs-message-flow/tests/cases/delivery_runtime.rs
+  s_4efef845bd857d::t_106173527a9f8d 350-351
+apps/bcs/api-contracts/README.md
+  s_4efef845bd857d::t_106173527a9f8d 93-108,111-114,119-122
+apps/bcsfuse/src/app/domain/models/evidence.py
+  s_4efef845bd857d::t_106173527a9f8d 1-222
+apps/bcs/crates/services/bcs-fusion/src/lib.rs
+  s_4efef845bd857d::t_106173527a9f8d 13-15
+apps/backend/tests/community/core/agentswarm/service/test_run_detail_authorization.py
+  s_4efef845bd857d::t_106173527a9f8d 393-397,400,584-620
+apps/bcsfuse/packages/search-core/tests/test_source_rebuild.py
+  s_4efef845bd857d::t_106173527a9f8d 1-86
+apps/bcsfuse/src/app/domain/models/retrieval_result.py
+  s_4efef845bd857d::t_106173527a9f8d 1-162
+apps/bcsfuse/src/app/infra/logging/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1-165
+apps/backend/src/agentclaw/community/core/apply_engine/materialisers/bot_config_kind_registry.py
+  s_4efef845bd857d::t_106173527a9f8d 1-168
+apps/bcs/crates/application/v1/bcs-app-bot/src/candidate_search.rs
+  s_4efef845bd857d::t_106173527a9f8d 1-123
+apps/bcsfuse/src/app/domain/services/fusion_simulation_service.py
+  s_4efef845bd857d::t_106173527a9f8d 1-781
+apps/bcs/crates/services/bcs-bot-store/src/memory_registration_concurrency_tests.rs
+  s_4efef845bd857d::t_106173527a9f8d 1-23
+apps/bcs/scripts/e2e-test/fuse_cards_story.py
+  s_4efef845bd857d::t_106173527a9f8d 1-366
+apps/bcsfuse/docs/agents/knowledge-standard.md
+  s_4efef845bd857d::t_106173527a9f8d 1-16
+apps/bcs/crates/services/bcs-bot/tests/provider_core.rs
+  s_4efef845bd857d::t_106173527a9f8d 650,654,753-765
+apps/backend/tests/community/core/apply_engine/test_delivery_strategy.py
+  s_4efef845bd857d::t_106173527a9f8d 86,133,257,290
+apps/backend/src/agentclaw/community/core/ports/bot_file_sync_port.py
+  s_4efef845bd857d::t_106173527a9f8d 92,96-102
+apps/bcsfuse/src/app/infra/profile_description_metadata.py
+  s_4efef845bd857d::t_106173527a9f8d 1-25
+apps/backend/tests/community/core/agentswarm/test_e2e.py
+  s_4efef845bd857d::t_106173527a9f8d 212,341-346
+apps/bcs/crates/service-api/bcs-service-api/src/core/bot_control_plane.rs
+  s_4efef845bd857d::t_106173527a9f8d 8-9,67-88
+  s_4efef845bd857d::t_c52dc1578fb146 89-90
+apps/baas/specs/README.md
+  s_4efef845bd857d::t_106173527a9f8d 1-13
+apps/bcs/scripts/e2e-test/provider_managers_story.py
+  s_4efef845bd857d::t_106173527a9f8d 1-135
+apps/bcs/crates/service-api/bcs-service-api/src/port/mod.rs
+  s_4efef845bd857d::t_106173527a9f8d 1-2
+apps/backend/src/agentclaw/community/di/modules/agentswarm/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 147-149,153
+apps/backend/tests/community/core/agentswarm/test_wire_e2e.py
+  s_4efef845bd857d::t_106173527a9f8d 44-47,147-150,157-159,183-200
+  s_4efef845bd857d::t_ba4863f6a0e606 201
+apps/bcsfuse/src/app/infra/embedding/__init__.py
+  s_4efef845bd857d::t_106173527a9f8d 1-59
+apps/bcsfuse/src/app/bootstrap/oss_business_routes.py
+  s_4efef845bd857d::t_106173527a9f8d 1-5
+apps/bcsfuse/src/app/domain/models/worker_profile.py
+  s_4efef845bd857d::t_106173527a9f8d 1-309
+apps/bcsfuse/src/app/infra/storage/feedback_store.py
+  s_4efef845bd857d::t_106173527a9f8d 1-356
+apps/backend/src/agentclaw/community/core/repository/implementations/bot/quota.py
+  s_4efef845bd857d::t_106173527a9f8d 27,56
+apps/bcsfuse/docs/architecture/composition-contract.md
+  s_4efef845bd857d::t_106173527a9f8d 7-12,25,36-42,45,226-230,360-366,491,494,600-611
+apps/bcsfuse/src/app/domain/models/llm_task_spec.py
+  s_4efef845bd857d::t_106173527a9f8d 1-119
+apps/bcsfuse/src/app/domain/services/adapters/worker_runtime_state_store_adapter.py
+  s_4efef845bd857d::t_106173527a9f8d 1-97
+apps/bcs/crates/services/bcs-bot-store/tests/conformance_bot_control_plane_repo.rs
+  s_4efef845bd857d::t_106173527a9f8d 9-10,120-124,248-503
+  s_4efef845bd857d::t_10209ea0644ccb 504
+CONTEXT-MAP.md
+  s_4efef845bd857d::t_45cf9e9a925ef0 19,22,24-25,31-80,86
+CONTEXT.md
+  s_4efef845bd857d::t_2ab61830e48038 1,3,5-10,16-17,22-23,28-29,34-35,40-41,46-47,52-53,58-59,64-65,70-71,76-77,82-83,88-90,96-97,102-103,108-109,114-115,120-121,126-127,132-133,138-139,144-145,150-151,156-158,164-165,170-171,176-177,182-183,188-189,194-195,200-201,206-207,212-213,218-219,224-225,230-231,236-237,242-243,248-249,254-255,260-261,266-268,274-275,280-282,288-289,294-295,300-301,306-307,312-313,318-319,324-325,330-332,338-339,344-346,352-353,358-359,364-366,372-373,378-379,383-401
+apps/bcs/Cargo.lock
+  s_4efef845bd857d::t_5bef539cd8a0a6 636,2238
+apps/bcsfuse/src/app/infra/vectorstores/faiss_zdas_vector_store.py
+  s_4efef845bd857d::t_a78dbf9bae098f 3
+apps/bcsfuse/src/app/infra/vectorstores/qdrant_zdas_vector_store.py
+  s_4efef845bd857d::t_76fba8197a1b26 7,25,34
+apps/bcsfuse/src/app/infra/worker_profiles/config/worker_profile_settings.py
+  s_4efef845bd857d::t_75dee1d5016ab7 21
+apps/bcsfuse/src/app/infra/worker_profiles/loaders/file_context_loader.py
+  s_4efef845bd857d::t_f20395dcf89745 14-16
+apps/bcsfuse/src/app/infra/worker_profiles/loaders/file_skill_loader.py
+  s_4efef845bd857d::t_9de490a6735033 15-17
+apps/bcsfuse/src/app/infra/worker_profiles/scanners/file_scanner.py
+  s_4efef845bd857d::t_881d2e99e54faf 16-17
+apps/bcsfuse/src/app/infra/worker_profiles/sources/api_profile_scan.py
+  s_4efef845bd857d::t_37cf8fc1d1e846 8,11
+apps/bcsfuse/src/app/infra/worker_profiles/sources/api_profile_source.py
+  s_4efef845bd857d::t_7609d2ac171e9c 24-26,33-35,331,367-368
+apps/bcsfuse/src/app/infra/worker_profiles/sources/api_worker_profile_source.py
+  s_4efef845bd857d::t_130c470abba80f 14-16,22-24
+apps/bcsfuse/src/app/infra/worker_profiles/sources/composite_worker_profile_source.py
+  s_4efef845bd857d::t_4bdba14a1acb98 21,26,121,351
+apps/bcsfuse/src/app/infra/worker_profiles/sources/file_worker_profile_source.py
+  s_4efef845bd857d::t_49972a003511c8 13,19-23
+apps/bcsfuse/src/app/infra/worker_profiles/sources/registry_worker_profile_source.py
+  s_4efef845bd857d::t_f4b5993ba99430 23-25,31-35,38
+apps/bcsfuse/src/app/providers/public/__init__.py
+  s_4efef845bd857d::t_db39f0aa34c293 22-23
+apps/bcsfuse/src/app/providers/public/vector_index_startup_provider.py
+  s_4efef845bd857d::t_2fbb8c5d45ab88 6
+apps/bcsfuse/src/app/tc/__init__.py
+  s_4efef845bd857d::t_786668e38309b0 1
+apps/bcsfuse/src/app/tc/admin_routes.py
+  s_4efef845bd857d::t_727969d6dbfafa 1-86
+apps/bcsfuse/src/app/tc/auth.py
+  s_4efef845bd857d::t_05ded71b32f407 1-19
+apps/bcsfuse/src/app/tc/bootstrap.py
+  s_4efef845bd857d::t_65e498d943431a 1,3,5-6,8-9,11-13,15,18-50,53-67,69-85,87-89,91-102,104-112,114-158,160-161,163-164,166-204,206-221
+apps/bcsfuse/src/app/tc/catalog.py
+  s_4efef845bd857d::t_dfd9bd0a5922e9 1-350
+apps/bcsfuse/src/app/tc/compat_routes.py
+  s_4efef845bd857d::t_e925d0b0b6aadd 1-180
+apps/bcsfuse/src/app/tc/fuse.py
+  s_4efef845bd857d::t_d9480fd87d72de 1-125
+apps/bcsfuse/src/app/tc/group_context.py
+  s_4efef845bd857d::t_d661f2c4b12d5a 1,8-10,13-15,17-19,21-22,25
+apps/bcsfuse/src/app/tc/legacy_catalog.py
+  s_4efef845bd857d::t_23eb03cf46f970 1-247
+apps/bcsfuse/src/app/tc/legacy_index.py
+  s_4efef845bd857d::t_11211fd5bcce0f 1-197
+apps/bcsfuse/src/app/tc/legacy_providers.py
+  s_4efef845bd857d::t_1c34a5a99c1386 1,3-4,7,10-18,20-21,23-24,26-27,30-33,35-46,48-59,61-103
+apps/bcsfuse/src/app/tc/legacy_transaction.py
+  s_4efef845bd857d::t_f10d42258211f3 1-69
+apps/bcsfuse/src/app/tc/migration.py
+  s_4efef845bd857d::t_b7e3d56037f4ff 1-317
+apps/bcsfuse/src/app/tc/migration_api.py
+  s_4efef845bd857d::t_b4f601bcc2ff5f 1-123
+apps/bcsfuse/src/app/tc/providers.py
+  s_4efef845bd857d::t_b5cfa4577c71b4 1,3-5,7-14,16-36,38-73,75-86,88-91,93-102,105-107,109-123,125-132,134-149,151
+apps/bcsfuse/src/app/tc/responses.py
+  s_4efef845bd857d::t_1e718dbae3ad23 1-37
+apps/bcsfuse/src/app/tc/routes.py
+  s_4efef845bd857d::t_5326f3c358ef07 1,5-8,11-16,18-24,29-30,32,34,37,40-44,48-49,52-55,59,61-79,82,84,86-90,93-94,97-98,102-103,105,107-112,115-121,124-125,127-132,134-144,146-147,149-279,281,283-308,310-317,319-320,322-332,334-346,348-393,395-425
+apps/bcsfuse/src/app/tc/search.py
+  s_4efef845bd857d::t_7afb18ea17c921 1-16,20-23,26-27,30-31,33-41,43-50,52-56,58-60,62-74,76-87,89,91-98,100-142,144-148,150-151,153-187,190-199,202-215,217-224,226-271,275-307,310-311,315-322,325-339
+apps/bcsfuse/src/app/tc/v2.py
+  s_4efef845bd857d::t_7fcbc05838a995 1-151
+apps/bcsfuse/src/app/utils/fuse_util.py
+  s_4efef845bd857d::t_a40cc24f413ed1 15,20-21,45,50,87-93,203,205-206,208,211,213-217,230
+apps/bcsfuse/tests/application/services/test_strict_participants_behavior.py
+  s_4efef845bd857d::t_0cf475a55d07d2 12-13,26,60,101,139,164-165,197-198,235,277,285-286,355-356,411-412,462-463,515,570
+apps/bcsfuse/tests/conftest.py
+  s_4efef845bd857d::t_45d11aaacca3bf 42-46,75-76
+apps/bcsfuse/tests/contract/adapters/helpers.py
+  s_4efef845bd857d::t_9bd6b99c611c17 17,27-31,34-37,166,312
+apps/bcsfuse/tests/contract/adapters/test_worker_audit_log_adapter_contract.py
+  s_4efef845bd857d::t_cdd2106fac0262 10,58
+apps/bcsfuse/tests/contract/adapters/test_worker_profile_binding_store_contract.py
+  s_4efef845bd857d::t_82fa131480ae03 10,62
+apps/bcsfuse/tests/contract/adapters/test_worker_registry_store_contract.py
+  s_4efef845bd857d::t_af396e5f69f74e 13-16,19-20,226
+apps/bcsfuse/tests/contract/adapters/test_worker_runtime_state_store_contract.py
+  s_4efef845bd857d::t_2bff117f7e984d 10,54
+apps/bcsfuse/tests/contract/api/test_fusion_api_contract.py
+  s_4efef845bd857d::t_2c9f2f0bd7fa1b 21,30,44,62,82,108,142,183,196,213,221
+apps/bcsfuse/tests/contract/schema/test_schema_validation.py
+  s_4efef845bd857d::t_28f02e67626c02 21,37,80,91-92,134,149
+apps/bcsfuse/tests/contract/test_acceptance_runner.py
+  s_4efef845bd857d::t_426ebfc2709f20 27-32,37-40,64-68,72-75,84-86,92,94-96,98-99,103-109
+apps/bcsfuse/tests/contract/test_auth_provider_contract.py
+  s_4efef845bd857d::t_dfbf657b7def84 3
+apps/bcsfuse/tests/contract/test_composed_embedding_provider.py
+  s_4efef845bd857d::t_ef85db26d688b8 1,3-16,22-23,26-47,49-52,54-77,79-82,84-87,90-93,95-96,98-125,131,134-138
+apps/bcsfuse/tests/contract/test_composed_log_level.py
+  s_4efef845bd857d::t_0d17a534234f33 9-12,17-18,22,26,30-31,54,61,63-69,73,94-97,118-120,131-133,140-142
+apps/bcsfuse/tests/contract/test_composed_trace_contract.py
+  s_4efef845bd857d::t_395b8c49abdbc2 10-12,20,29
+apps/bcsfuse/tests/contract/test_fusion_profile_store_wiring.py
+  s_4efef845bd857d::t_a60fd327de2a98 1,7-11,13,16-22,24-33,37-45,48-50,54-57,60,62,65,71-75,77-79
+apps/bcsfuse/tests/contract/test_fusion_response_projection.py
+  s_4efef845bd857d::t_f1db06e192e79d 9-10
+apps/bcsfuse/tests/contract/test_internal_only_vector_boundary.py
+  s_4efef845bd857d::t_f938a887c0f1fb 16
+apps/bcsfuse/tests/contract/test_keyword_retrieval.py
+  s_4efef845bd857d::t_595e78004d21fc 6-8,11,74,149-152,166
+apps/bcsfuse/tests/contract/test_mysql_fused_profile_store_contract.py
+  s_4efef845bd857d::t_e7d5b9189072f0 39,49,51,59,116,136-140,147,154-155,175,196,223,328,360
+apps/bcsfuse/tests/contract/test_mysql_storage_clock_contract.py
+  s_4efef845bd857d::t_bd37f4a1e88e45 8-11
+apps/bcsfuse/tests/contract/test_mysql_vector_decode_failures.py
+  s_4efef845bd857d::t_cc9468a19d787a 6,9
+apps/bcsfuse/tests/contract/test_mysql_vector_persistence_backend_contract.py
+  s_4efef845bd857d::t_2df338ff7572d4 29,39,74,128,148-152,160,176,200,217,229,268,329,367,390,418,443,463,490
+apps/bcsfuse/tests/contract/test_mysql_worker_profile_binding_store_contract.py
+  s_4efef845bd857d::t_e6ccca6734d86f 30,40,46,60,108,128-132,140,143,163,166,209,238,254,268,283,319,335,358
+apps/bcsfuse/tests/contract/test_mysql_worker_registry_config_contract.py
+  s_4efef845bd857d::t_06c824355fb381 9-12
+apps/bcsfuse/tests/contract/test_opencore_model_service_contract.py
+  s_4efef845bd857d::t_9987ac22e9feef 32,43,66,71,76,81,93,104,109,114,123,128,133,142,156,171,179,190,205,216,221,227,232,237,242,247,252,261-262,279,299,322,346,372,381,399,421,426,431,436,441,446,451,456,465,470,475-476
+apps/bcsfuse/tests/contract/test_profile_identifier_content.py
+  s_4efef845bd857d::t_d6dc99283e1ec2 5-7
+apps/bcsfuse/tests/contract/test_profile_versioned_save.py
+  s_4efef845bd857d::t_575106959530d3 11-13,16,19
+apps/bcsfuse/tests/contract/test_provider_contract_skeleton.py
+  s_4efef845bd857d::t_6ea9da125fe29d 13,22,48,67,78,103,121,164
+apps/bcsfuse/tests/contract/test_public_safe_contract_models.py
+  s_4efef845bd857d::t_00ddb173020134 23,44,55,70,84,101,117,126,135,143,151,158,166,176,186,194,201,209,216,227,247,274,286,304,322,333-337,345,361,377,393,413,429,441,449
+apps/bcsfuse/tests/contract/test_qdrant_deployment_modes.py
+  s_4efef845bd857d::t_34865ab605953b 1-54
+apps/bcsfuse/tests/contract/test_qdrant_mysql_vector_store_contract.py
+  s_4efef845bd857d::t_15ad070e51611c 32,42,71,117,137-138,146,158,182,199,213,242,264,308,348,374,413,440
+apps/bcsfuse/tests/contract/test_qdrant_server_recovery.py
+  s_4efef845bd857d::t_23ecec0c150023 1-112
+apps/bcsfuse/tests/contract/test_qdrant_sqlite_get_contract.py
+  s_4efef845bd857d::t_aa54ee4a905a21 1,7-11,13,17,22,29,37,47
+apps/bcsfuse/tests/contract/test_qdrant_sqlite_recovery.py
+  s_4efef845bd857d::t_d8aab94c8674b6 1,3,5-8,11,13-82,84-85,87-118,120,122-148,151-159
+apps/bcsfuse/tests/contract/test_qdrant_vector_store_contract.py
+  s_4efef845bd857d::t_04fa561003877d 42,53,80,134,154-158,166,173,183,207,236,415,514,589,640,694,744
+apps/bcsfuse/tests/contract/test_reranker_profile_inputs.py
+  s_4efef845bd857d::t_49c90948461007 6,8-9,51,55-56,61,63-64,86,88-90,93,97,107,109,121-122,134-135,143-144,146,151-181,183-184
+apps/bcsfuse/tests/contract/test_retrieval_log_noise.py
+  s_4efef845bd857d::t_ecb4874fb65e66 7,25-30
+apps/bcsfuse/tests/contract/test_retrieval_logging.py
+  s_4efef845bd857d::t_6cc8a353cee407 7-12,16-17,41,97-113
+apps/bcsfuse/tests/contract/test_search_migration_baseline.py
+  s_4efef845bd857d::t_3f4637c50a71fd 1-22
+apps/bcsfuse/tests/contract/test_shared_search_application.py
+  s_4efef845bd857d::t_61f976bf6d0440 1-148
+apps/bcsfuse/tests/contract/test_sqlite_profile_description_metadata.py
+  s_4efef845bd857d::t_d37258fd97464c 3-4
+apps/bcsfuse/tests/contract/test_storage_observability_contract.py
+  s_4efef845bd857d::t_385773697f894f 15,338,353-354,362,387,398,410,437,469
+apps/bcsfuse/tests/contract/test_tc_catalog.py
+  s_4efef845bd857d::t_77db96d5c1909f 1,6-8,11-13,15-24,27-28,31-37,39-40,42-58,60-70,72-77,81-84,86-158,161-163,165-166,168-171,173-186,188-192,194-223,226-236,239-254,256-271
+apps/bcsfuse/tests/contract/test_tc_fuse_modes.py
+  s_4efef845bd857d::t_521c1267aa3e66 1-220
+apps/bcsfuse/tests/contract/test_tc_http_compat.py
+  s_4efef845bd857d::t_16dfb72afefff2 1,3,7,10-18,20,22-24,26-29,31-33,37-39,41,44-46,48-49,52-62,64-68,72-74,76,78-80,82,85-105,107-125,127,130-132,135-137,140-141,143-150,152-165,167-170,172-174,176-180,182-183
+apps/bcsfuse/tests/contract/test_tc_legacy_transactions.py
+  s_4efef845bd857d::t_0aae48917a63fe 1-88
+apps/bcsfuse/tests/contract/test_tc_migration.py
+  s_4efef845bd857d::t_3ef0b126a343a2 1,3-9,11,13-44,48-49,52-55,57-65,67-87,89-93,95-97,100-105,107-121,123-139,141-162,164-165,167-174,176-233,235-249,251-252,255-258,260-261,263-276,278,280-283,286-295,297-299,302-315,317-320,323-325,327-339,342-367,369-393,395-413,415-420,423-444,446-480,482-483,487-489,491-495
+apps/bcsfuse/tests/contract/test_tc_review_regressions.py
+  s_4efef845bd857d::t_828c32cade21cc 1-158
+apps/bcsfuse/tests/contract/test_tc_same_instance_migration.py
+  s_4efef845bd857d::t_45933c3c61d5cb 1-6,11-13,17-45,47-193,195-216,219-222,225-230,232-233,236-243,245,248-253,255-256,258-261,263-313,315-323,325-367,369-384,386-441,443-448,450-460,462-464,466-482,484-493,495-518,520-523,525-558,561-567,569-581,583-584,587-645,647-707,709-710,713-723
+apps/bcsfuse/tests/contract/test_tc_sync_contract.py
+  s_4efef845bd857d::t_27d3dd72233e7f 1,3,6-7,11-30,34-48,51-66,70-84,87-88,90-108
+apps/bcsfuse/tests/contract/test_vector_point_lookup.py
+  s_4efef845bd857d::t_3dbab32c3bdbc3 8-9,12,15
+apps/bcsfuse/tests/contract/test_vector_rebuild_pagination.py
+  s_4efef845bd857d::t_e63194b8228415 8-9,12
+apps/bcsfuse/tests/contract/test_worker_scoped_profile_index.py
+  s_4efef845bd857d::t_818ea6edc4bec3 6-11,14,17,20,23,26-27,30,36-43,45-48,54-67,69-91,97-99,103,107,109-114,123-127,131-139,141-149,152-154,163-165
+apps/bcsfuse/tests/contract/test_worker_sync_concurrency.py
+  s_4efef845bd857d::t_3802cc923df681 9-13,178
+apps/bcsfuse/tests/domain/services/test_profile_key_canonicalizer.py
+  s_4efef845bd857d::t_42964c754b1296 10
+apps/bcsfuse/tests/e2e/test_cli_fuse_command.py
+  s_4efef845bd857d::t_1b1cf8b15a7eb3 18-19,56,61,75,90,108,123,146-147,170-171,191-192,232-233,250,263-264,284-285,324,331
+apps/bcsfuse/tests/e2e/test_g2_cli_fuse_command.py
+  s_4efef845bd857d::t_1e4ea424a35a2a 14-15
+apps/bcsfuse/tests/fixtures/planning_inputs.py
+  s_4efef845bd857d::t_4aaaa4a1f3bfc3 16-17
+apps/bcsfuse/tests/fixtures/profiling_documents.py
+  s_4efef845bd857d::t_559315d4568a81 16
+apps/bcsfuse/tests/fixtures/profiling_results.py
+  s_4efef845bd857d::t_865b58c81eff58 17-18
+apps/bcsfuse/tests/fixtures/retrieval_data.py
+  s_4efef845bd857d::t_79b86280d245ff 17,36-38
+apps/bcsfuse/tests/fixtures/task_requests.py
+  s_4efef845bd857d::t_aea9f6618f68ba 16
+apps/bcsfuse/tests/golden_regression/test_golden_smoke.py
+  s_4efef845bd857d::t_999be2157906ca 26,34-40,71-76,105,110-111,129-134,150-151,170,174-175,202
+apps/bcsfuse/tests/integration/api/test_worker_registry_state_effects.py
+  s_4efef845bd857d::t_c84182aa0c0f81 1,5-47,49
+apps/bcsfuse/tests/integration/test_anthropic_provider_integration.py
+  s_4efef845bd857d::t_7afb67a1eca67e 19,24-25,224-230,258
+apps/bcsfuse/tests/integration/test_composition_flow.py
+  s_4efef845bd857d::t_4bcdf8e116af8f 20-25,30-31
+apps/bcsfuse/tests/integration/test_execution_packet_flow.py
+  s_4efef845bd857d::t_efdf8b25732b4d 20-27,32-34
+apps/bcsfuse/tests/integration/test_fusion_offline_participant_warning.py
+  s_4efef845bd857d::t_a860d1d60118e9 22,27,37-46,50-54,61,123-124
+apps/bcsfuse/tests/integration/test_fusion_simulation_snapshot.py
+  s_4efef845bd857d::t_8a6f3733ec14cc 26-33,36,392,395
+apps/bcsfuse/tests/integration/test_g1_llm_integration.py
+  s_4efef845bd857d::t_fa880c387864a1 9-15
+apps/bcsfuse/tests/integration/test_g2_conflict_alignment_flow.py
+  s_4efef845bd857d::t_501bcf9d14cf47 15-17,53
+apps/bcsfuse/tests/integration/test_g2_structured_conflict_flow.py
+  s_4efef845bd857d::t_f4605307d41aa8 14-19,60,350,390,422,439,471
+apps/bcsfuse/tests/integration/test_g2_three_layer_fallback.py
+  s_4efef845bd857d::t_ea106b781145c9 20,24-28,35-37,203,264,307,354,386,420,458,468,506,542
+apps/bcsfuse/tests/integration/test_g5_candidate_recommendation_flow.py
+  s_4efef845bd857d::t_3df8489782b270 21-22,26-32,34,66-82,85-88,724,729-735,770
+apps/bcsfuse/tests/integration/test_g5_expert_diagnosis_flow.py
+  s_4efef845bd857d::t_713d9077a93428 14-16,48-57,774-776,795-798
+apps/bcsfuse/tests/integration/test_g5_profile_driven_llm_flow.py
+  s_4efef845bd857d::t_edd84b9f28466b 20,22-30,343-344,376,402-403,419,467
+apps/bcsfuse/tests/integration/test_g9_core_acceptance.py
+  s_4efef845bd857d::t_bc4579c5d418b6 4,11-12,14,51,54-63,77,80-86,141-171
+apps/bcsfuse/tests/integration/test_isolated_runtime_acceptance.py
+  s_4efef845bd857d::t_e9ea92d76c2762 1,5-26,28-56,58-59
+apps/bcsfuse/tests/integration/test_m10_failure_paths.py
+  s_4efef845bd857d::t_dd79dbc0e1aa37 11-20,31-36,38-43
+apps/bcsfuse/tests/integration/test_mysql_backup_restore_e2e.py
+  s_4efef845bd857d::t_dd8be8739eae4d 80,193,261-262,344-345,452,493,536
+apps/bcsfuse/tests/integration/test_mysql_pooled_transactions.py
+  s_4efef845bd857d::t_f49c9f1e2bb74a 8-13,16
+apps/bcsfuse/tests/integration/test_mysql_registry_delete.py
+  s_4efef845bd857d::t_57db8e0141d148 11-13
+apps/bcsfuse/tests/integration/test_mysql_storage_timestamps.py
+  s_4efef845bd857d::t_44a3fe372f2be1 14-20,23,26-27
+apps/bcsfuse/tests/integration/test_opencore_app_startup_health_e2e.py
+  s_4efef845bd857d::t_87dc8b1272a04a 24,34,45
+apps/bcsfuse/tests/integration/test_opencore_fusion_verify_e2e.py
+  s_4efef845bd857d::t_080c5e6a7bcd5f 31,185
+apps/bcsfuse/tests/integration/test_opencore_middleware_lifespan_e2e.py
+  s_4efef845bd857d::t_42da8edb345df4 34,224
+apps/bcsfuse/tests/integration/test_opencore_runtime_real_services_smoke.py
+  s_4efef845bd857d::t_8aa52b11942d8c 39-40,46,64-67
+apps/bcsfuse/tests/integration/test_planning_flow.py
+  s_4efef845bd857d::t_34ed383a6f0ab1 27-30,95-98,132-135,172-176,220-222,253-255,257,278-280
+apps/bcsfuse/tests/integration/test_profile_api_mvp.py
+  s_4efef845bd857d::t_2bf722b2901479 14,20-23
+apps/bcsfuse/tests/integration/test_profiling_flow.py
+  s_4efef845bd857d::t_3fbb1eabb958bb 37-38,58-59,79-80,82,101-102,118-120,151-152,168-169,171,203-204,209,240-241,243,266-267,269,293,295,310,312,325,327
+apps/bcsfuse/tests/integration/test_qdrant_durable_sync_e2e.py
+  s_4efef845bd857d::t_06e81fbc98b093 15-16,19,82-84
+apps/bcsfuse/tests/integration/test_qdrant_mysql_performance_smoke.py
+  s_4efef845bd857d::t_5189e0c7118ae4 83,108
+apps/bcsfuse/tests/integration/test_qdrant_mysql_rebuild_e2e.py
+  s_4efef845bd857d::t_6c8fcffe7dc064 54,89,130,170,219,265,293,329,374
+apps/bcsfuse/tests/integration/test_real_llm_embedding.py
+  s_4efef845bd857d::t_1f3e266872ca20 103-104,123-124,243-246,259,289
+apps/bcsfuse/tests/integration/test_registry_aware_filtering.py
+  s_4efef845bd857d::t_6f4a2217c7bdc7 16,19,29-39
+apps/bcsfuse/tests/integration/test_registry_aware_wiring.py
+  s_4efef845bd857d::t_9ece2dc2303cf3 1-28,30-34,36,39-46
+apps/bcsfuse/tests/integration/test_retrieval_flow.py
+  s_4efef845bd857d::t_9b04c1229d5f51 20-24,327-328
+apps/bcsfuse/tests/integration/test_task_understanding_flow.py
+  s_4efef845bd857d::t_509e41651731d5 37-38,61-62,79-80,100-101,116-117,136-137,160-161,163,177-178,180,198-200,225-226,240-242,267-268,287-288,309-310,312,331-332,354-355,375-376
+apps/bcsfuse/tests/integration/test_worker_registry_flow.py
+  s_4efef845bd857d::t_3cb38b69e608ec 22-27,43,59-67
+apps/bcsfuse/tests/integration/test_worker_vector_index_flow.py
+  s_4efef845bd857d::t_7a9679c30e57ad 14-18,63-64,243,257,278
+apps/bcsfuse/tests/integration/test_workspace_assembly_flow.py
+  s_4efef845bd857d::t_7452eb73f67519 20-26,31-33
+apps/bcsfuse/tests/opensource/test_bootstrap_safe_imports.py
+  s_4efef845bd857d::t_05591feaf69132 9,17,19-20,43
+apps/bcsfuse/tests/opensource/test_package_layout.py
+  s_4efef845bd857d::t_c4e57cb93faf7f 1-85
+apps/bcsfuse/tests/opensource/test_provider_registry.py
+  s_4efef845bd857d::t_5e63c6ceed433a 6,8,30-31,47-49,53,62-64,97,101,104,107,131,135,171-173,183-185,191-192,194,196-204
+apps/bcsfuse/tests/security/test_opencore_security_boundary.py
+  s_4efef845bd857d::t_6b77490e0ac44d 25-26,308,375,413
+apps/bcsfuse/tests/smoke/auth_regression.py
+  s_4efef845bd857d::t_b38289644038ca 47,67,87,107,125,146,169,194,215,238,283,300-301,338,347,353,359
+apps/bcsfuse/tests/smoke/basic_business_regression.py
+  s_4efef845bd857d::t_a2cf389ef6b1c0 36,60,82,106,153,179,201,223,258,286,326,386,420,428,431,434,439,453,457,461,464,466,471,485,489,493,496,498,506
+apps/bcsfuse/tests/smoke/basic_lifecycle_regression.py
+  s_4efef845bd857d::t_aadf7cecd7b732 55
+apps/bcsfuse/tests/smoke/business_api_smoke.py
+  s_4efef845bd857d::t_f83f2ae25a0acb 39,70,107,144,187,221,332,354,387,396,401,405,416,433,437,441,446,461,493,541
+apps/bcsfuse/tests/smoke/config_contract_smoke.py
+  s_4efef845bd857d::t_909d4e3114d1a8 97,146-147,191-192,218,391,406
+apps/bcsfuse/tests/smoke/dev_lifecycle_regression.py
+  s_4efef845bd857d::t_6eeb6557c626fa 6,11,38,40,43,60-61,70,84
+apps/bcsfuse/tests/smoke/provider_registry_dry_run.py
+  s_4efef845bd857d::t_0cf80d39b4c872 41,74,91,106,171,194,217
+apps/bcsfuse/tests/smoke/provider_registry_smoke.py
+  s_4efef845bd857d::t_521b753a3ba950 30,40,77-82,170
+apps/bcsfuse/tests/smoke/route_import_inventory.py
+  s_4efef845bd857d::t_9f45221fcf4b29 58
+apps/bcsfuse/tests/smoke/runtime_local_lifecycle_smoke.py
+  s_4efef845bd857d::t_1f0132c011e155 162,407
+apps/bcsfuse/tests/smoke/runtime_provider_contract_smoke.py
+  s_4efef845bd857d::t_3d64d6f92c5fc4 99,110-111,141-142,163,167,195,199,224,248,260,280-283,315-318,345,349-351,385-386,420,459-460,469-470
+apps/bcsfuse/tests/smoke/startup_smoke.py
+  s_4efef845bd857d::t_36ccb163c5f248 40,51,64,78,91,117,213,247,254,259-260,263,268,282,286,290,293,295,303,324
+apps/bcsfuse/tests/smoke/test_g5_smoke.py
+  s_4efef845bd857d::t_cd2ca6256590e4 22-30,54-56,357-358,364,369,388,407-410,435,439-440
+apps/bcsfuse/tests/smoke/test_smoke_main.py
+  s_4efef845bd857d::t_5123bd9d762410 25,30,35,40,45,50-51,55,60,119,124,129,134,139,144,149
+apps/bcsfuse/tests/unit/application/services/test_capability_verify_feature_flag.py
+  s_4efef845bd857d::t_aaae6d50e1cdde 7
+apps/bcsfuse/tests/unit/application/services/test_capability_verify_service.py
+  s_4efef845bd857d::t_941fa6c84c23e6 9-11,18,24,91
+apps/bcsfuse/tests/unit/application/services/test_online_vector_state_guard.py
+  s_4efef845bd857d::t_91bad73ee93117 4,7-10,13,16,19
+apps/bcsfuse/tests/unit/application/services/test_peer_review_service.py
+  s_4efef845bd857d::t_4733f522f8994b 9-10,14,24,40,542,608,622,671
+apps/bcsfuse/tests/unit/application/services/test_profile_analyzer_service.py
+  s_4efef845bd857d::t_47e117ab4491d0 24,28-29
+apps/bcsfuse/tests/unit/application/services/test_structured_signal_extractor.py
+  s_4efef845bd857d::t_d423b81fcbe0f5 13-15,25,32,45,48,77,80,95,98,126,129,154,157,182,185,210,213
+apps/bcsfuse/tests/unit/application/services/test_verify_executor.py
+  s_4efef845bd857d::t_1274e4d809c5bd 9-10,46,71,91,163,188
+apps/bcsfuse/tests/unit/application/services/test_verify_judge.py
+  s_4efef845bd857d::t_a18faf1eab5f2f 8-9,11-12,19
+apps/bcsfuse/tests/unit/application/services/test_verify_prompt_composer.py
+  s_4efef845bd857d::t_9db2683927f7c3 8-9,11-13
+apps/bcsfuse/tests/unit/application/services/test_worker_config_service.py
+  s_4efef845bd857d::t_3999004a7385b6 14,36,41,47,58,88,124,129,179,184,216,246-249,267-268,288-289
+apps/bcsfuse/tests/unit/application/services/test_worker_import_service.py
+  s_4efef845bd857d::t_69131f8ccbcf6f 9-18
+apps/bcsfuse/tests/unit/application/services/test_worker_runtime_state_service.py
+  s_4efef845bd857d::t_02d36e0708930c 9-14,24-26
+apps/bcsfuse/tests/unit/application/test_conflict_alignment_service.py
+  s_4efef845bd857d::t_1369e0c14665f2 15,25,30,40,47,59-60,101,136,167,199,238,270,306,336,365,396,430-431,468,497,529,553,589,611,662,707
+apps/bcsfuse/tests/unit/application/test_execution_packet_service.py
+  s_4efef845bd857d::t_a54ed3625ca847 13-23,305,332
+apps/bcsfuse/tests/unit/application/test_expert_diagnosis_service.py
+  s_4efef845bd857d::t_6151d44807e2f6 22-24,34,39,49,56,76,114,150,186,222,250,286,316,343,368,414,447,476,517,548,578,612,635,662,689,713,737,766,790,822,839,862
+apps/bcsfuse/tests/unit/application/test_expert_diagnosis_service_candidate_recommendation.py
+  s_4efef845bd857d::t_735e57b262128f 21-22,26-28
+apps/bcsfuse/tests/unit/application/test_expert_diagnosis_service_g5_enhancer.py
+  s_4efef845bd857d::t_eb46022eaf35c8 14-18
+apps/bcsfuse/tests/unit/application/test_feature_flag_matrix.py
+  s_4efef845bd857d::t_d3838c93e7de10 19-23
+apps/bcsfuse/tests/unit/application/test_fusion_recommendation_service.py
+  s_4efef845bd857d::t_83199c08f045f9 9-13
+apps/bcsfuse/tests/unit/application/test_g5_expert_enhancer_context.py
+  s_4efef845bd857d::t_e5ec2a9225f00a 8-12,28,38,55,79,111-112,135-140,240,269,298,309,322-323,343-345,384,409,418,436,444,469,500,539,564
+apps/bcsfuse/tests/unit/application/test_g5_expert_enhancer_impl.py
+  s_4efef845bd857d::t_58ca885f571958 14-20,40-42,77,200,514,529,558,723,734-736,763-765,786-787,817-819,862,873,926,937
+apps/bcsfuse/tests/unit/application/test_group_context_service.py
+  s_4efef845bd857d::t_87fe31c301dce1 12,16
+apps/bcsfuse/tests/unit/application/test_group_fusion_service.py
+  s_4efef845bd857d::t_e084cc969cb5d7 14-15,20,95,100,114,123,141,166,182,227,244,268,303,337,371,399,416,463,482,506,530,556,598,619,641,663,688,723,771,818,842,869,897,926,957,990,1040,1086,1090,1094,1098-1099
+apps/bcsfuse/tests/unit/application/test_llm_gateway_service.py
+  s_4efef845bd857d::t_34cb97df766717 9-15
+apps/bcsfuse/tests/unit/application/test_planning_service.py
+  s_4efef845bd857d::t_7b95dbbdc7afc8 29,35-36,49-51,68-70,93-95,112-114,135-137,154-156,173-175,196-198
+apps/bcsfuse/tests/unit/application/test_profile_merge_service.py
+  s_4efef845bd857d::t_916b17e06d50ad 1,4,8-9,11-19,22-25,27-28,30-35,39-53,57-139
+apps/bcsfuse/tests/unit/application/test_retrieval_service.py
+  s_4efef845bd857d::t_b4af847b9cd833 17-24
+apps/bcsfuse/tests/unit/application/test_task_understanding_service.py
+  s_4efef845bd857d::t_0f1088efdfde56 34,40-41,54-56,73-75,92-94,116-118,139-141,147,168-170,192-194,218-220
+apps/bcsfuse/tests/unit/application/test_team_composition_service.py
+  s_4efef845bd857d::t_64ee5be7b0081a 13-20,48,234,257
+apps/bcsfuse/tests/unit/application/test_worker_candidate_recommendation_impl.py
+  s_4efef845bd857d::t_ee13528d61fb93 1,3,6-7,9-10,13-18,20-21,24-28,30-31,34-39,41-83
+apps/bcsfuse/tests/unit/application/test_worker_profiling_service.py
+  s_4efef845bd857d::t_1b9fe5365b27f0 43,49-50,63-65,93-95,118-120,149-151,186-188,239-241,266-268,296-298,323-325,360-362,389-391,415-417,441-443,471-473,482-484,501-502,507-508,533-534,539,578-580
+apps/bcsfuse/tests/unit/application/test_worker_registry_service.py
+  s_4efef845bd857d::t_000b80b55ff41b 17,22-23,35-36,81,106-107,144-145,216-217,244,259-260
+apps/bcsfuse/tests/unit/application/test_worker_vector_index_service.py
+  s_4efef845bd857d::t_cdf77d76a471d5 10-15,20-21,35-36,144,146-149,326,338,360,434
+apps/bcsfuse/tests/unit/application/test_workspace_assembly_service.py
+  s_4efef845bd857d::t_b290ad35f6b634 13-21,49,280,305
+apps/bcsfuse/tests/unit/bootstrap/test_app_factory.py
+  s_4efef845bd857d::t_40d5e882b98e31 1,6-8,12,17,22,26-28,31-37,40-41,44-46,55,62,64-66,68-69,71-74,76-78,81-82,84-86,88-94,97-98,100-101,103-105,107,109-110,112-119,122,124-129,132,134,136-137,139-140,142,144-146
+apps/bcsfuse/tests/unit/bootstrap/test_trust_gateway_auth.py
+  s_4efef845bd857d::t_71273ccd437900 6-8
+apps/bcsfuse/tests/unit/domain/models/test_bot_recommendation.py
+  s_4efef845bd857d::t_b29ed5a2462ec3 7,13,17-18
+apps/bcsfuse/tests/unit/domain/models/test_candidate_recommendation.py
+  s_4efef845bd857d::t_08adb9538eba10 11,15-16,157-159,164,171
+apps/bcsfuse/tests/unit/domain/models/test_domain_coverage.py
+  s_4efef845bd857d::t_7d459f402c97a9 11
+apps/bcsfuse/tests/unit/domain/models/test_evidence_edge_cases.py
+  s_4efef845bd857d::t_a947fe61c57c66 15,21,25,34-38,42,50,558
+apps/bcsfuse/tests/unit/domain/models/test_evidence_models.py
+  s_4efef845bd857d::t_ab2f5236cecdfe 16,23,27,34-38,42,47
+apps/bcsfuse/tests/unit/domain/models/test_expert_context_pack.py
+  s_4efef845bd857d::t_90127fdabd995c 13
+apps/bcsfuse/tests/unit/domain/models/test_llm_expert_perspective.py
+  s_4efef845bd857d::t_6eaafdf42386ba 13
+apps/bcsfuse/tests/unit/domain/models/test_metadata_record.py
+  s_4efef845bd857d::t_66d2ed2813e03a 6
+apps/bcsfuse/tests/unit/domain/models/test_stance_signal.py
+  s_4efef845bd857d::t_484d58ce996ed6 11
+apps/bcsfuse/tests/unit/domain/models/test_structured_conflict_analysis.py
+  s_4efef845bd857d::t_002965a8b6afb2 11-12
+apps/bcsfuse/tests/unit/domain/models/test_structured_risk_assessment.py
+  s_4efef845bd857d::t_2b3834d66fac6a 11,18
+apps/bcsfuse/tests/unit/domain/models/test_vector_point.py
+  s_4efef845bd857d::t_3c6436d26f4476 6
+apps/bcsfuse/tests/unit/domain/models/test_vector_search_hit.py
+  s_4efef845bd857d::t_528cec3f1d536b 6
+apps/bcsfuse/tests/unit/domain/models/test_worker_audit_log.py
+  s_4efef845bd857d::t_0a9bdae6945864 10-11
+apps/bcsfuse/tests/unit/domain/models/test_worker_lifecycle_state.py
+  s_4efef845bd857d::t_f504e3798dd710 9
+apps/bcsfuse/tests/unit/domain/models/test_worker_model_enhanced.py
+  s_4efef845bd857d::t_924c65e7ef885b 10,20-22
+apps/bcsfuse/tests/unit/domain/models/test_worker_runtime_state.py
+  s_4efef845bd857d::t_d1e170773af2a9 9
+apps/bcsfuse/tests/unit/domain/models/test_worker_source_info.py
+  s_4efef845bd857d::t_40c60260c14306 10
+apps/bcsfuse/tests/unit/domain/services/test_agent_retrieval_compatibility.py
+  s_4efef845bd857d::t_5a6a3a22b185a8 1,3-6,9-15,18-22,24
+apps/bcsfuse/tests/unit/domain/services/test_conflict_dimension_analyzer.py
+  s_4efef845bd857d::t_2b0ac88f183f0c 12-13,17,47,58,69,72,99,102,128,131,157,160,207,210,235,238,263,266,292,295,337,340,362,365,389,392,428,431,457,460,499,502,526,529
+apps/bcsfuse/tests/unit/domain/services/test_fusion_simulation_service.py
+  s_4efef845bd857d::t_c9d6e85f892852 19-25,103,123,141,160,179,197,215,233,253,271,296,324,352,386,408,432,457,485
+apps/bcsfuse/tests/unit/domain/services/test_g5_expert_enhancer.py
+  s_4efef845bd857d::t_5ec96151f0e280 13-14
+apps/bcsfuse/tests/unit/domain/services/test_metadata_store_adapter.py
+  s_4efef845bd857d::t_c20f73e117024c 5-6
+apps/bcsfuse/tests/unit/domain/services/test_participants_sufficiency_checker.py
+  s_4efef845bd857d::t_d05489f06648b0 17
+apps/bcsfuse/tests/unit/domain/services/test_profile_embedding_indexer.py
+  s_4efef845bd857d::t_3f4a116e09e01f 3-4
+apps/bcsfuse/tests/unit/domain/services/test_profile_quality_scorer.py
+  s_4efef845bd857d::t_2489689e3e3deb 9,13,17
+apps/bcsfuse/tests/unit/domain/services/test_vector_store_adapter.py
+  s_4efef845bd857d::t_30b310d72ced1a 5-7
+apps/bcsfuse/tests/unit/domain/services/test_worker_candidate_recommendation_service.py
+  s_4efef845bd857d::t_0ae6b6dcddc307 11,14,18
+apps/bcsfuse/tests/unit/domain/services/test_worker_context_preparation_service.py
+  s_4efef845bd857d::t_9471c999cb1f38 18-22,102,122,142,161,182,203,221,249,274,292,313,345,378,404,428,467,496
+apps/bcsfuse/tests/unit/domain/services/test_worker_profile_retrieval_service.py
+  s_4efef845bd857d::t_2a366346a5db3c 6,13-17,28,96,128,174-176,179-186,189-196,199-207
+apps/bcsfuse/tests/unit/domain/taxonomy/test_models.py
+  s_4efef845bd857d::t_a78b45b47e31bd 10,167,174
+apps/bcsfuse/tests/unit/domain/taxonomy/test_registry.py
+  s_4efef845bd857d::t_a792cfccbfd8e4 14,21
+apps/bcsfuse/tests/unit/domain/test_compiler_input.py
+  s_4efef845bd857d::t_a4ccd9eef3a644 13-19
+apps/bcsfuse/tests/unit/domain/test_compiler_result.py
+  s_4efef845bd857d::t_2b2062f21c6fb0 13,19,27-29
+apps/bcsfuse/tests/unit/domain/test_composition_input.py
+  s_4efef845bd857d::t_ce0b60ebd2fb0b 13-17
+apps/bcsfuse/tests/unit/domain/test_composition_result.py
+  s_4efef845bd857d::t_0b71baf1826655 13,19
+apps/bcsfuse/tests/unit/domain/test_context_fragment.py
+  s_4efef845bd857d::t_a50120a5981126 22,36,44,55,73,91,105,119,153,175,201,216,234,247,260,284
+apps/bcsfuse/tests/unit/domain/test_event_bus.py
+  s_4efef845bd857d::t_c702b5fd2aad5b 8
+apps/bcsfuse/tests/unit/domain/test_exceptions.py
+  s_4efef845bd857d::t_f218d2aff12530 15,20,25,32,40,48,56,65,77,85,95,103,115,124,132,140,148,161
+apps/bcsfuse/tests/unit/domain/test_execution_packet.py
+  s_4efef845bd857d::t_f55aace173b911 13,21-25
+apps/bcsfuse/tests/unit/domain/test_execution_packet_compiler.py
+  s_4efef845bd857d::t_408e12ace1fe96 13,51
+apps/bcsfuse/tests/unit/domain/test_expert_diagnosis.py
+  s_4efef845bd857d::t_7469149348a27c 14,92,257
+apps/bcsfuse/tests/unit/domain/test_expert_risk_assessment.py
+  s_4efef845bd857d::t_e4b4e8213f5b05 14,52,63,69,77
+apps/bcsfuse/tests/unit/domain/test_fusion_alignment.py
+  s_4efef845bd857d::t_91b10a2ff32a38 21,26,36,46,58,68,84,94,104,118,132,147,164,174,185
+apps/bcsfuse/tests/unit/domain/test_fusion_conflict.py
+  s_4efef845bd857d::t_f007259eb00914 21,26,36,52,66,83,96,109,122,139,157,180,186
+apps/bcsfuse/tests/unit/domain/test_fusion_recommendation.py
+  s_4efef845bd857d::t_362d4d3d22a58b 10
+apps/bcsfuse/tests/unit/domain/test_fusion_request.py
+  s_4efef845bd857d::t_ece514ccf94734 22,27,37,51,87,94,101,108,117,130,143,159,166,182,193,213,232,251,262,293,333,345,357,369,380,405,412,419,429,450,462,474,488,511,521,531,541,552,566,580
+apps/bcsfuse/tests/unit/domain/test_fusion_result.py
+  s_4efef845bd857d::t_d5899c63d42bad 22,27,37,57,74,90,103,117,131,162,178,191,207,225,240,269,317,341,364,387,445,460,475,490,507,532,556,580-581,614-615,645,670,697,703-704,781,795,811,825,842,866-867,901-903,938-939,980,1012,1037,1066,1072-1073
+apps/bcsfuse/tests/unit/domain/test_fusion_simulation_input.py
+  s_4efef845bd857d::t_556d405f7e605b 21-23,45-48,82-83,98-99,127-128,140,154-155,166-168,191-192,215-217,237-239,253-256,283-284
+apps/bcsfuse/tests/unit/domain/test_handoff_bundle.py
+  s_4efef845bd857d::t_1507d4ce1b491f 13
+apps/bcsfuse/tests/unit/domain/test_hybrid_score_compatibility.py
+  s_4efef845bd857d::t_50f3596c2ebe4e 5
+apps/bcsfuse/tests/unit/domain/test_llm_provider.py
+  s_4efef845bd857d::t_5b89b9de39f3f2 10-13
+apps/bcsfuse/tests/unit/domain/test_llm_request.py
+  s_4efef845bd857d::t_c0eb5a446a469e 10-11
+apps/bcsfuse/tests/unit/domain/test_llm_response.py
+  s_4efef845bd857d::t_9976d01ab8a166 10
+apps/bcsfuse/tests/unit/domain/test_llm_router.py
+  s_4efef845bd857d::t_ea7c0fe7f504c2 10-12
+apps/bcsfuse/tests/unit/domain/test_llm_task_spec.py
+  s_4efef845bd857d::t_2ccb9bf6af3ac1 10
+apps/bcsfuse/tests/unit/domain/test_matchmaker.py
+  s_4efef845bd857d::t_61b541dd2939ef 15,58
+apps/bcsfuse/tests/unit/domain/test_model_profile.py
+  s_4efef845bd857d::t_ad12d24dd3cf51 10,16
+apps/bcsfuse/tests/unit/domain/test_openclaw_adapter_input.py
+  s_4efef845bd857d::t_03c4b64c82de2f 13,17,25-27
+apps/bcsfuse/tests/unit/domain/test_openclaw_adapter_protocol.py
+  s_4efef845bd857d::t_8068d9aaba8bcc 15,23-25,107,114,121-123,141-143,161-163,189,194
+apps/bcsfuse/tests/unit/domain/test_openclaw_adapter_result.py
+  s_4efef845bd857d::t_70fdbf26a5854f 13,19
+apps/bcsfuse/tests/unit/domain/test_planning_input.py
+  s_4efef845bd857d::t_24a3b696d4c49e 23,29,40,59-60,81,94,112,123,141,151,161,171
+apps/bcsfuse/tests/unit/domain/test_planning_result.py
+  s_4efef845bd857d::t_1405c8f5793285 24,30-31,61,65,100,104,137-138,162-163,186,190,222-223,252,256,287,291,326-327,349,353,382,386,419,430-431,453-454,491-492,516-517,544-545,567-568,590-591,613-614,636-637,659-660,682-683,705-706,728-729,755,771,785,799,813
+apps/bcsfuse/tests/unit/domain/test_profiling_input.py
+  s_4efef845bd857d::t_1131625543ed90 24,48,66,87,103,115,127,141,165,184,202,221,246,266,284,304,331,372,384,403,436
+apps/bcsfuse/tests/unit/domain/test_profiling_result.py
+  s_4efef845bd857d::t_625147cef0f471 34,53,67,82,95,114,131,149,164,181,209,237,265,293,323,356,385,414,448,482,511,540,583,618,668,716
+apps/bcsfuse/tests/unit/domain/test_retrieval_input.py
+  s_4efef845bd857d::t_23755a66d66490 13,18-19
+apps/bcsfuse/tests/unit/domain/test_retrieval_mode.py
+  s_4efef845bd857d::t_f91af2ed1da797 20,32,41,48,56,70
+apps/bcsfuse/tests/unit/domain/test_retrieval_result.py
+  s_4efef845bd857d::t_4a4489a22e5bed 19-24
+apps/bcsfuse/tests/unit/domain/test_scoring_signal.py
+  s_4efef845bd857d::t_cbab524ac57c80 21,38,57,70,83,117,144,166,182
+apps/bcsfuse/tests/unit/domain/test_skill_profile.py
+  s_4efef845bd857d::t_710d18d2784e02 21,41,59,78,91,116,127,138,149,167,180,192,208,228
+apps/bcsfuse/tests/unit/domain/test_task_understanding_input.py
+  s_4efef845bd857d::t_3369b9bbacc7b4 28,34,46,68,76,84,94,107,115,123,131,143,154,169
+apps/bcsfuse/tests/unit/domain/test_task_understanding_result.py
+  s_4efef845bd857d::t_5b685ab8c6976e 29,35-36,55-56,80-81,98,102,125,129,155-156,173,177,199,203,229,243,259,273,288-289,309,324-325
+apps/bcsfuse/tests/unit/domain/test_team_spec.py
+  s_4efef845bd857d::t_1d91ef27f8b29b 13
+apps/bcsfuse/tests/unit/domain/test_worker_context_digest.py
+  s_4efef845bd857d::t_8d879551dab545 21-24,64-65,87-88,108-109,127-128,147-148,167,185-186,199-200,214-217,267-268
+apps/bcsfuse/tests/unit/domain/test_worker_model.py
+  s_4efef845bd857d::t_5b4d93035ace2c 16,21,47,71,99,116,133,150,167,188,212
+apps/bcsfuse/tests/unit/domain/test_worker_profile.py
+  s_4efef845bd857d::t_18e1bf588e68b5 28,35,46,54,64,80,94,104,119,124-125,160,183,201,226,262,275,287,299,315,329-330,354-355,379-381,435-436,468-469,497,528,569,586,613,638,675,708,725,758
+apps/bcsfuse/tests/unit/domain/test_worker_repository_interface.py
+  s_4efef845bd857d::t_bb1e4cd1e3414a 19,24,34,43,50,57,64,75-76,90
+apps/bcsfuse/tests/unit/domain/test_workspace.py
+  s_4efef845bd857d::t_a4649485858606 15-16
+apps/bcsfuse/tests/unit/domain/test_workspace_assembler.py
+  s_4efef845bd857d::t_7516eb29f8e424 13,51
+apps/bcsfuse/tests/unit/domain/test_workspace_assembly_input.py
+  s_4efef845bd857d::t_0d5845a2883e5a 13,17-21
+apps/bcsfuse/tests/unit/domain/test_workspace_assembly_result.py
+  s_4efef845bd857d::t_eaef5af19c3a15 15,22-23
+apps/bcsfuse/tests/unit/infra/adapters/test_in_memory_adapters.py
+  s_4efef845bd857d::t_cbceba6a8fc7aa 9-10,20-22
+apps/bcsfuse/tests/unit/infra/test_anthropic_provider.py
+  s_4efef845bd857d::t_17931c6e016de2 12,18-20,28,106,130,152,179,213,235,262,283,300,319,338,359,382,428,455,489
+apps/bcsfuse/tests/unit/infra/test_baseline_execution_packet_compiler.py
+  s_4efef845bd857d::t_3e0e6373c10774 13-21
+apps/bcsfuse/tests/unit/infra/test_baseline_matchmaker.py
+  s_4efef845bd857d::t_67ceef97f1c096 13-19,24-25
+apps/bcsfuse/tests/unit/infra/test_baseline_planner.py
+  s_4efef845bd857d::t_73ef7a8f62a944 32,38-39,50-51,66-67,82-83,98-99,118-119,134-135,151-152,171-172,188-189,209-210,225-226,242-243,258-259,278-279,294-295,314-315,329-330,349-350,364-365,392-394,419-420,435-436,451-452,470-471,493-494,515-516
+apps/bcsfuse/tests/unit/infra/test_baseline_profile_extractor.py
+  s_4efef845bd857d::t_a2d39c155cd9f1 32,38-39,50-51,90-91,96,119-120,145-146,169-170,192-193,217-218,244-245,250,271-272,277,296-297,324-325,349-350,375-376,407-408,434-435,457-458,495-496,522-523,555-556,594-595
+apps/bcsfuse/tests/unit/infra/test_baseline_retriever.py
+  s_4efef845bd857d::t_4409aa3a2e8da4 23-28,33-34
+apps/bcsfuse/tests/unit/infra/test_baseline_task_understander.py
+  s_4efef845bd857d::t_bf92ac187b177f 34,40-41,52-53,68-69,88-89,104-105,124-125,140-141,161-162,176-177,196-197,212-213,232-234,249-251,266-268,287-288,306-307,331-332,347-348,367-368,383-384,402-403,424-425
+apps/bcsfuse/tests/unit/infra/test_baseline_workspace_assembler.py
+  s_4efef845bd857d::t_4095645c64431a 13-20,25
+apps/bcsfuse/tests/unit/infra/test_fake_llm_provider.py
+  s_4efef845bd857d::t_431022b60acbd1 10-13
+apps/bcsfuse/tests/unit/infra/test_file_metadata_store_adapter.py
+  s_4efef845bd857d::t_8fb915aa2f6ca3 10-11,550
+apps/bcsfuse/tests/unit/infra/test_fusion_recommendation_prompt.py
+  s_4efef845bd857d::t_6467412d5ea851 9
+apps/bcsfuse/tests/unit/infra/test_in_memory_worker_repository.py
+  s_4efef845bd857d::t_e339986da4de42 19,24,31-32,44,50,101,126,165,170,185,194,201,222-223
+apps/bcsfuse/tests/unit/infra/test_llm_settings.py
+  s_4efef845bd857d::t_1d9d903f2195d8 11-13,128
+apps/bcsfuse/tests/unit/infra/test_markdown_parser.py
+  s_4efef845bd857d::t_a92d92111b37da 25,31,55,71,105,120,145,171,185,195,204,231,251,274,284,309,328,351,369,390,406
+apps/bcsfuse/tests/unit/infra/test_mysql_worker_audit_log_store.py
+  s_4efef845bd857d::t_3e84ee7ed5b88e 8-9
+apps/bcsfuse/tests/unit/infra/test_profile_embedding_store_cleanup.py
+  s_4efef845bd857d::t_2fcbc5c49cecf1 5-7
+apps/bcsfuse/tests/unit/infra/test_qdrant_durable_vector_store.py
+  s_4efef845bd857d::t_92a9957ab3969a 7-9,148-152
+apps/bcsfuse/tests/unit/infra/test_sqlite_fused_profile_store.py
+  s_4efef845bd857d::t_a14e2ea733a185 9-12,552,562,569,583,586,591,604,609,616,629,634
+apps/bcsfuse/tests/unit/infra/test_static_llm_router.py
+  s_4efef845bd857d::t_724242ed1defaa 9-12
+apps/bcsfuse/tests/unit/infra/test_structured_output_parser.py
+  s_4efef845bd857d::t_8851ec11626bfb 9
+apps/bcsfuse/tests/unit/infra/test_trace_context.py
+  s_4efef845bd857d::t_bdbad812858045 20
+apps/bcsfuse/tests/unit/infra/worker_profiles/test_file_context_loader.py
+  s_4efef845bd857d::t_7bf806ea982b1c 25,28,31,73,76,92,95,111,114,117,139,142,145,171,174,206,209,235,238,241
+apps/bcsfuse/tests/unit/infra/worker_profiles/test_file_scanner.py
+  s_4efef845bd857d::t_eb6429903386ad 26,29,51,54,82,85,107,110,133,136,157,160,180,183,217,220,250,253,276,279,292,295,315,336,339,369,372
+apps/bcsfuse/tests/unit/infra/worker_profiles/test_file_skill_loader.py
+  s_4efef845bd857d::t_55374341a645f4 26,29,93,96,111,114,136,139,171,174,215,218,252,255,291,294,338,341
+apps/bcsfuse/tests/unit/infra/worker_profiles/test_file_worker_profile_source.py
+  s_4efef845bd857d::t_fcbe84586b4cc5 66,69,88,91,107,110,123,126,147,150,153,173,176,195,198,220,223,236,239,259,262,294-295,305
+apps/bcsfuse/tests/unit/infra/worker_profiles/test_registry_worker_profile_source.py
+  s_4efef845bd857d::t_18582d1cf7548d 9-10,20-21
+apps/bcsfuse/tests/unit/infra/worker_profiles/test_worker_profile_settings.py
+  s_4efef845bd857d::t_bb98b45b18be0e 26,43,54,72,91,94,112,115,129,145,159,178,195,213,227,240,257,267,284,305,323,336,349
+apps/bcsfuse/tests/unit/interfaces/test_cors_middleware.py
+  s_4efef845bd857d::t_b8f45dacea1eb0 3
+apps/bcsfuse/tests/unit/interfaces/test_error_handling.py
+  s_4efef845bd857d::t_ee438f3ba90a05 16-17,26-27,29,44-45,47,56-57,59,72-73,84-85,97-98,110-111,124,136-137,139,155-156,163,170-171,178-179,186-187,194-195,202-203,210,217,224
+apps/bcsfuse/tests/unit/interfaces/test_fusion_schemas_session_id.py
+  s_4efef845bd857d::t_877fdf8d4eb4ae 3
+apps/bcsfuse/tests/unit/interfaces/test_run_fuse_threadpool.py
+  s_4efef845bd857d::t_7bca91b54225c7 4
+apps/bcsfuse/tests/unit/providers/test_vector_index_startup_provider.py
+  s_4efef845bd857d::t_2971c1e6a35dd9 2
+apps/bcsfuse/tests/unit/test_g2_metrics.py
+  s_4efef845bd857d::t_a3665262628549 10
+apps/bcsfuse/tests/unit/test_llm_conflict_analyzer.py
+  s_4efef845bd857d::t_8c9c3c30713433 16,20,27-28,64,265,315,363,400,441,466,486
+apps/bcsfuse/tests/unit/test_llm_stance_extractor.py
+  s_4efef845bd857d::t_30b8476089e83e 16,20-22,58,161,190,215,252,280,310,353,364
+apps/bcsfuse/tests/unit/test_trace_middleware.py
+  s_4efef845bd857d::t_a2ac125b8ce6af 21,26
+apps/bcsfuse/tests/unit/utils/test_error_codes.py
+  s_4efef845bd857d::t_dd9146ad0b2021 15-16,23-24,37-38,54-55,65,73,80,87,94,101,108,115-116,127,142,148,154,160,166,177,184,191,202,210
+apps/bcsfuse/tests/unit/utils/test_fuse_util.py
+  s_4efef845bd857d::t_db357d6c782d74 1,5-70
+apps/bcsfuse/tests/verification/test_binding_store_injection.py
+  s_4efef845bd857d::t_f60474b0e91c32 24,55,82,112,129
+apps/bcsfuse/tests/verification/test_candidate_recommendation_strict_mode.py
+  s_4efef845bd857d::t_1dfcbd30d6da3a 1,3-4,7-11,13-14
+apps/bcsfuse/tests/verification/test_profile_key_canonicalization_strict.py
+  s_4efef845bd857d::t_76c87da13adb86 15
+apps/bcsfuse/tests/verification/test_strict_participants_e2e.py
+  s_4efef845bd857d::t_864cf1d5977708 34,72,115,155-156,189-190,228-230
+apps/bcsfuse/uv.lock
+  s_4efef845bd857d::t_1fcb516ea937f1 10-106,151-159,197,225,227,405-461,659-786,882-941,1180,1191,1193,1289-1320,1559-1624
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-plan/clawevolve_plan/bench/template_builder.py
+  s_4efef845bd857d::t_a80d4e979bddad 342-344
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-plan/tests/test_template_prompt_headings.py
+  s_4efef845bd857d::t_fc6e06406306c6 1-69
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-workflow/scripts/handlers/clawevolve_optimize_run.py
+  s_4efef845bd857d::t_bb4406052ddba1 5065-5066,7157-7158,7169-7171,7200-7202,7224,8875,9079,9084,9097,9100,9103-9104,9126-9128,9161,9168-9169,9176,9180,9209-9210,9212,9342-9343,9606-9619
+apps/evolverun/clawweb-skills/clawevolve-skills/clawevolve-workflow/tests/test_initial_baseline_cache.py
+  s_4efef845bd857d::t_54f89db3b4e147 1-88
+apps/evolverun/clawweb-skills/clawevolve-skills/tests/test_optimize_tune_failure.py
+  s_4efef845bd857d::t_ed5a26fa590cc7 1-252
+apps/evolverun/clawweb/public/modules/clawevolve/server/repositories/analysis-workflow-snapshot.ts
+  s_4efef845bd857d::t_637c94c864cea3 26-27
+apps/evolverun/clawweb/public/modules/clawevolve/server/routes/__tests__/session-analysis-router.test.ts
+  s_4efef845bd857d::t_06f3c58908369c 174-229
+apps/evolverun/clawweb/public/modules/clawevolve/server/routes/session-analysis.ts
+  s_4efef845bd857d::t_c48bbe49851077 439-453,455
+apps/evolverun/clawweb/public/modules/clawevolve/web/src/pages/SessionAnalysis.tsx
+  s_4efef845bd857d::t_7a8d8268bd412d 1088-1107
+apps/evolverun/clawweb/public/modules/clawinsight/docs/session-recovery-api.md
+  s_4efef845bd857d::t_7557a135f5c35f 173,223,225,285,300,306,321,327,331-332,339,341,343
+apps/evolverun/clawweb/public/modules/clawinsight/docs/session-recovery-contract.md
+  s_4efef845bd857d::t_0be6e71e7da034 204-215
+apps/evolverun/clawweb/public/modules/clawinsight/server/repositories/repair/agent-tool-call-record.ts
+  s_4efef845bd857d::t_c35c5580dbb6c9 67,80
+apps/evolverun/clawweb/public/modules/clawinsight/server/repositories/repair/agent-tool-call-repository.ts
+  s_4efef845bd857d::t_8cf9ce411a0bc6 97,101
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/monitoring/__tests__/recovery-results.test.ts
+  s_4efef845bd857d::t_8e705a7cd7280e 143-153
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/monitoring/recovery-result-validation.ts
+  s_4efef845bd857d::t_e5f5ae894aefd1 2,34-35
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/notifications/__tests__/dingtalk-card.test.ts
+  s_4efef845bd857d::t_b8062a189c841f 3-4,33-56
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/notifications/dingtalk-sender.ts
+  s_4efef845bd857d::t_0fde7a7a3a5a14 26-32,106-115,118
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/owner-card.test.ts
+  s_4efef845bd857d::t_48f93c66cb5757 31-34,38,41,49
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/task-service.test.ts
+  s_4efef845bd857d::t_1084d72b1b7b66 4,45-94,369-384
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/__tests__/user-handoff.test.ts
+  s_4efef845bd857d::t_7e67cf60dba3d8 3,38-42,44-45,48-50,55,58,60-61,64-80,82-87,100-115,638-706
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/agent-service.ts
+  s_4efef845bd857d::t_81e523f444fed0 26,30,286,306,454,461-463,567,587,625-626,628-631,633,644-646,648-654,658
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/contracts.ts
+  s_4efef845bd857d::t_65138438db9dde 34
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/index.ts
+  s_4efef845bd857d::t_102c990a0367ad 28,54
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/notification.ts
+  s_4efef845bd857d::t_a25c2d2c7aa6ba 1,75-80,83,85-87,92,100-113
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/owner-cooperation.ts
+  s_4efef845bd857d::t_9708db0804bf00 4,10-29,33,35
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/result.ts
+  s_4efef845bd857d::t_703094edd6dd8d 22,24-25
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/simulation.ts
+  s_4efef845bd857d::t_4fa9f230fcefd6 17
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/task-contracts.ts
+  s_4efef845bd857d::t_973ddaf53ccdff 12-13,17,20,34,78-79,117
+apps/evolverun/clawweb/public/modules/clawinsight/server/services/repair/session-recovery/task-service.ts
+  s_4efef845bd857d::t_63febdebafa0ee 9,11-12,52,148,151-166,177-180,198,280-282,298,315-318,414,579-582,585,592-599
+apps/evolverun/clawweb/public/modules/clawinsight/web/pages/InsightCenter/monitoring/session-recovery/OwnerCooperation.tsx
+  s_4efef845bd857d::t_2b3ff7f55d66d9 24,51,58,61
+apps/evolverun/clawweb/public/modules/clawinsight/web/pages/InsightCenter/monitoring/session-recovery/RecoveryTaskLinks.tsx
+  s_4efef845bd857d::t_5d1d27fb3b22cb 28-29,33-34
+apps/evolverun/clawweb/public/modules/clawinsight/web/pages/InsightCenter/monitoring/session-recovery/SessionRecoveryDetail.tsx
+  s_4efef845bd857d::t_ff726b3280c2ba 38,80,655,658,712
+apps/evolverun/clawweb/public/modules/clawinsight/web/pages/InsightCenter/monitoring/session-recovery/__tests__/SessionRecoveryDetail.test.tsx
+  s_4efef845bd857d::t_c28772381343fe 124-128,130
+apps/evolverun/clawweb/public/modules/clawinsight/web/types/session-recovery.ts
+  s_4efef845bd857d::t_ac8daa83be62ed 6,23,39
+apps/evolverun/clawweb/public/modules/workflow/docs/internal-version-contract.md
+  s_4efef845bd857d::t_3c293bd0e63853 25-64
+apps/evolverun/clawweb/public/modules/workflow/docs/ordinary-run-request-contract.md
+  s_4efef845bd857d::t_b6814b7a677822 116-119
+apps/evolverun/clawweb/public/modules/workflow/docs/pack-version-read.md
+  s_4efef845bd857d::t_c67d1960331224 15-22
+apps/evolverun/clawweb/public/modules/workflow/docs/subworkflow-observability.md
+  s_4efef845bd857d::t_e4d471deb2e861 30-63,150-182
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/fanout-run-links.test.ts
+  s_4efef845bd857d::t_c2592c65f1ac79 1-99
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/fanout-state-fixture.ts
+  s_4efef845bd857d::t_e92572a2592e35 15,18-26
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/__tests__/fanout-state-repository.test.ts
+  s_4efef845bd857d::t_9249815ad96372 517,519
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/fanout-state-repository.ts
+  s_4efef845bd857d::t_ca45b1455e5fb4 10,20-21,150-151,158-162,165-174,247,304-305,527-538,543,572
+apps/evolverun/clawweb/public/modules/workflow/server/repositories/flow-run-repository.ts
+  s_4efef845bd857d::t_c0b6197cbe23d9 11-12,138,142,148-151
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/bot-workflow-permission-clone.test.ts
+  s_4efef845bd857d::t_aa53bc620b98fb 105,110-124,140-146,230-266,295-300
+apps/evolverun/clawweb/public/modules/workflow/server/routes/__tests__/pack-version-active-baseline.test.ts
+  s_4efef845bd857d::t_f19a85557f78ab 81,83-84,86-101
+apps/evolverun/clawweb/public/modules/workflow/server/routes/bot-workflow-permission-clone.ts
+  s_4efef845bd857d::t_ed6e986d54fae2 51-52,56-63,188,190-200,209-210,255-267,270-271
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/__tests__/fanout-version-metadata.integration.test.ts
+  s_4efef845bd857d::t_ad29b273060d00 1-130
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/__tests__/fanouts.test.ts
+  s_4efef845bd857d::t_7ec8b9dc449a0e 35-40
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/__tests__/parent-related-run-registration.test.ts
+  s_4efef845bd857d::t_8462674a5de051 1-217
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/__tests__/parent-relation-fixture.ts
+  s_4efef845bd857d::t_ef1ec7d6e2c312 1-57
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/fanouts.ts
+  s_4efef845bd857d::t_f7821de642d645 23,41-44,65
+apps/evolverun/clawweb/public/modules/workflow/server/routes/internal/runs.ts
+  s_4efef845bd857d::t_94204957a0af30 3,52,133,155,220-233,239-253,266
+apps/evolverun/clawweb/public/modules/workflow/server/routes/pack-version.ts
+  s_4efef845bd857d::t_cd2d68bbc2e19a 73,78-79
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/fanout-group-save-service.test.ts
+  s_4efef845bd857d::t_cd4accb27f2a68 1-203
+apps/evolverun/clawweb/public/modules/workflow/server/services/fanout-group-save-service.ts
+  s_4efef845bd857d::t_11f31724307038 1-179
+apps/evolverun/clawweb/public/modules/workflow/server/services/pack-script-snapshot.ts
+  s_4efef845bd857d::t_52a3d8d0fd65da 17-18
+apps/evolverun/clawweb/public/modules/workflow/server/services/pack-version-remote.ts
+  s_4efef845bd857d::t_d141cb251e5e1f 38,46-49,51,58
+apps/evolverun/clawweb/public/modules/workflow/server/services/parent-related-run-registration.ts
+  s_4efef845bd857d::t_dfebd41c920f12 1-274
+apps/evolverun/clawweb/public/modules/workflow/vitest.run-registration.config.ts
+  s_4efef845bd857d::t_b2b99fd07ca129 1-16
+apps/evolverun/clawweb/public/modules/workflow/web/components/ActiveHistoryMismatchReview.tsx
+  s_4efef845bd857d::t_3135d5d7b1c423 1-105
+apps/evolverun/clawweb/public/modules/workflow/web/components/DeploySnapshotReview.tsx
+  s_4efef845bd857d::t_4209db1c71bbc8 1-3,7-8,12,14-51,58-68
+apps/evolverun/clawweb/public/modules/workflow/web/components/EditorDeployConfirmDialog.tsx
+  s_4efef845bd857d::t_acdbcdfdeb9a5f 1-42
+apps/evolverun/clawweb/public/modules/workflow/web/components/PackFileCodeEditor.tsx
+  s_4efef845bd857d::t_748e93fcd2e32d 1-121
+apps/evolverun/clawweb/public/modules/workflow/web/components/PackVersionEditor.tsx
+  s_4efef845bd857d::t_25c0811f39a866 2,294,299
+apps/evolverun/clawweb/public/modules/workflow/web/components/SyntaxHighlightedText.tsx
+  s_4efef845bd857d::t_963a60908989dd 1-38
+apps/evolverun/clawweb/public/modules/workflow/web/components/WorkflowBaselineComparison.tsx
+  s_4efef845bd857d::t_fd53735dc911c1 12,34,38-55,120,149,151,154-155
+apps/evolverun/clawweb/public/modules/workflow/web/components/YamlEditor.tsx
+  s_4efef845bd857d::t_947f79a976a78b 8,223,235
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/ActiveHistoryMismatchReview.test.tsx
+  s_4efef845bd857d::t_c2ad57f721b82a 1-37
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/DeploySnapshotReview.test.tsx
+  s_4efef845bd857d::t_4e8675712ebef8 1-110
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/PackFileCodeEditor.test.tsx
+  s_4efef845bd857d::t_08ec405520f5ee 1-182
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/PackVersionEditor.test.tsx
+  s_4efef845bd857d::t_1e6e46fa0242f0 20-61
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/SyntaxHighlightedText.test.tsx
+  s_4efef845bd857d::t_5871265545b881 1-76
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/WorkflowBaselineComparison.test.tsx
+  s_4efef845bd857d::t_a755a3f3c4417e 2,12,16,20-33,39-40,115-188
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/WorkflowDiffPanesHighlighting.test.tsx
+  s_4efef845bd857d::t_a31b6fb6a8aa1d 1-176
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/YamlEditor.test.tsx
+  s_4efef845bd857d::t_94117b3e4e5f7e 1,63-64
+apps/evolverun/clawweb/public/modules/workflow/web/components/__tests__/YamlEditorHighlighting.test.tsx
+  s_4efef845bd857d::t_c5c8734118c75e 1-153
+apps/evolverun/clawweb/public/modules/workflow/web/components/syntaxHighlighting.ts
+  s_4efef845bd857d::t_547c9f40ffbc83 1-113
+apps/evolverun/clawweb/public/modules/workflow/web/components/useActiveHistoryMismatchReview.ts
+  s_4efef845bd857d::t_58d05eb77b4eb8 1-36
+apps/evolverun/clawweb/public/modules/workflow/web/editor/packVersionSession.ts
+  s_4efef845bd857d::t_22c1f4f174c0a2 6,242-245
+apps/evolverun/clawweb/public/modules/workflow/web/pages/Editor.tsx
+  s_4efef845bd857d::t_21f20f7caa941b 5-6,84-85,246-247,249-250,597,630-632,984-994
+apps/evolverun/clawweb/public/modules/workflow/web/pages/__tests__/EditorDivergenceComparison.test.tsx
+  s_4efef845bd857d::t_9d43dbed2cca5c 189,205,223
+apps/evolverun/clawweb/public/shared/server/__tests__/workflow-snapshot.test.ts
+  s_4efef845bd857d::t_5e7a0249d1cc67 6,48-54
+apps/evolverun/clawweb/public/shared/server/services/workflow-snapshot.ts
+  s_4efef845bd857d::t_57be79aedbf5ff 57-58
+apps/evolverun/clawweb/public/shared/web/api/client.ts
+  s_4efef845bd857d::t_d10627a9c39969 640
+apps/evolverun/docs/research/agent-improvement/README.md
+  s_4efef845bd857d::t_e33391918d2981 43-46
+apps/evolverun/docs/research/agent-improvement/benchmark/taxonomy-versioning.md
+  s_4efef845bd857d::t_352a29a73dc850 1-189
+apps/frontend-nextgen/README.md
+  s_4efef845bd857d::t_5c4c90febdb22c 30-44
+apps/frontend-nextgen/docs/design-migration/space-management-figma.md
+  s_4efef845bd857d::t_2f6dba4ea40069 1-39
+apps/frontend-nextgen/specs/2026-11-09-bot-debug-slash/plan.md
+  s_4efef845bd857d::t_8d5c92df9ae4a9 1-32
+apps/frontend-nextgen/specs/2026-11-09-bot-debug-slash/spec.md
+  s_4efef845bd857d::t_b9809fab1b1b4c 1-26
+apps/frontend-nextgen/specs/2026-11-09-bot-debug-slash/tasks.md
+  s_4efef845bd857d::t_587c4213600f2e 1-9
+apps/frontend-nextgen/specs/2026-11-09-bot-debug-slash/validation.md
+  s_4efef845bd857d::t_ff1c1b09f6f98e 1-78
+apps/frontend-nextgen/src/capabilities/defaultCapabilities.ts
+  s_4efef845bd857d::t_6b3a644e63a47f 264
+apps/frontend-nextgen/src/capabilities/types.ts
+  s_4efef845bd857d::t_c01a6a64dddbe3 8,652-653
+apps/frontend-nextgen/src/capabilities/userMessagePresentation.ts
+  s_4efef845bd857d::t_ec548b693b31a9 1-10
+apps/frontend-nextgen/src/components/Admin/NotificationBell/index.tsx
+  s_4efef845bd857d::t_f37507dc60b367 4,8,10,92-97,99-108,110,115,135-141
+apps/frontend-nextgen/src/components/Admin/NotificationItem/index.tsx
+  s_4efef845bd857d::t_e2fb7925dfba75 1,4,15,19-20,23-35,37
+apps/frontend-nextgen/src/components/Admin/SpaceCard/index.tsx
+  s_4efef845bd857d::t_56b50db502b4ec 1,13,16,18-22,28-30,32-33,38-45,47,50,52-53,56,58-65,68-72,77-78,84,95-96
+apps/frontend-nextgen/src/components/Admin/SpaceCreateForm/index.tsx
+  s_4efef845bd857d::t_63a1d58f3076fd 11-14,16,31,33-39,43-48,50-67,69,73,78,81,90,94-95,103,107
+apps/frontend-nextgen/src/components/Admin/SpaceJoinForm/index.tsx
+  s_4efef845bd857d::t_fa1dd13101917f 28,30-36,41
+apps/frontend-nextgen/src/components/Admin/SpaceMemberList/AddMembersModal.tsx
+  s_4efef845bd857d::t_e25587295eaba1 22-23,89-91,93,95-97,133-135,137,147-148
+apps/frontend-nextgen/src/components/Admin/SpaceMemberList/SpaceMemberRow.tsx
+  s_4efef845bd857d::t_f1b7ea83686ff8 5,81-88,91-95,114,130-163,165-176
+apps/frontend-nextgen/src/components/Admin/SpaceMemberList/index.tsx
+  s_4efef845bd857d::t_8c850a02495101 4,7-18,23,49,74-76,81-87,94,119-137,142-176,178-205,207-209,230-231
+apps/frontend-nextgen/src/components/Admin/WorkOrderCard/index.tsx
+  s_4efef845bd857d::t_e109a64e54394c 12,63,65,73-82,84,88-89,92,115,119-122,128-129,141-142,156,161-162
+apps/frontend-nextgen/src/components/Admin/WorkOrderTabs/index.tsx
+  s_4efef845bd857d::t_b90be0e4538748 1,3-4,12,14,30,32,66,134-152,154-155,163,165-185,191,210-214,218,230,241
+apps/frontend-nextgen/src/components/BotWorkshop/BotCard/BotCopyActionsCell.tsx
+  s_4efef845bd857d::t_a17115d7fc270e 1-40
+apps/frontend-nextgen/src/components/BotWorkshop/BotCard/BotCopyDeleteAction.tsx
+  s_4efef845bd857d::t_38f05184208848 1-48
+apps/frontend-nextgen/src/components/BotWorkshop/CopyBotModal/index.tsx
+  s_4efef845bd857d::t_4b3c386d7947d4 16,20,30-32,62,91-93,95-117
+apps/frontend-nextgen/src/components/BotWorkshop/Editor/DebugUserMessage.tsx
+  s_4efef845bd857d::t_86a266a91342cd 1-29
+apps/frontend-nextgen/src/components/CollaborationSquare/GroupCard/index.tsx
+  s_4efef845bd857d::t_bc82ee975d851f 9,46,74,141
+apps/frontend-nextgen/src/components/CollaborationSquare/GroupMembersModal/index.tsx
+  s_4efef845bd857d::t_0b14af205fcbec 1,5,31,33-35,38
+apps/frontend-nextgen/src/components/Workspace/ChatPanel/ChatMessageList.tsx
+  s_4efef845bd857d::t_8e70e69acf5504 2,127-137,170
+apps/frontend-nextgen/src/components/Workspace/ChatPanel/UserMessageText.tsx
+  s_4efef845bd857d::t_0a7c5c20ef6af7 1-23
+apps/frontend-nextgen/src/components/Workspace/UserMessagePresentationHost.tsx
+  s_4efef845bd857d::t_e9a5b0a9f3d9ea 1-13
+apps/frontend-nextgen/src/domain/admin/mappers.ts
+  s_4efef845bd857d::t_d74627635e23b9 127-128,144
+apps/frontend-nextgen/src/domain/admin/models.ts
+  s_4efef845bd857d::t_df3a983bdd8fdb 36,40-41,43,54
+apps/frontend-nextgen/src/domain/collaborationSquare/types.ts
+  s_4efef845bd857d::t_f69b4263079425 213-214
+apps/frontend-nextgen/src/hooks/useAdmin.ts
+  s_4efef845bd857d::t_1c8ef1b8b4b478 74,79,165,169
+apps/frontend-nextgen/src/hooks/useBotTableColumns.tsx
+  s_4efef845bd857d::t_41d964e33e6b72 2,143-145
+apps/frontend-nextgen/src/hooks/useBotWorkshopCopyFlow.ts
+  s_4efef845bd857d::t_b51062473c7a6a 1,4,15,20-26,32-35,37-40,42-69,74-76,78-79,92,95,97,99-100,102-106,111,120-121,132-139,153,156-161,164-168
+apps/frontend-nextgen/src/hooks/useBotWorkshopCopyHost.ts
+  s_4efef845bd857d::t_136d60b03b4656 74
+apps/frontend-nextgen/src/pages/Admin/Spaces/index.tsx
+  s_4efef845bd857d::t_0c4f59f429192a 6,11-12,43,47-53,55,63-64,83,87,92-131,133-145,152-159,171
+apps/frontend-nextgen/src/pages/BotWorkshop/Detail/index.tsx
+  s_4efef845bd857d::t_69dc6feca83e0d 37-43,204,206
+apps/frontend-nextgen/src/pages/BotWorkshop/index.tsx
+  s_4efef845bd857d::t_ba3cd05c8cace1 220
+apps/frontend-nextgen/src/pages/SpaceAdmin/index.tsx
+  s_4efef845bd857d::t_fabc97dca2ca9e 22
+apps/frontend-nextgen/src/pages/TicketCenter/index.tsx
+  s_4efef845bd857d::t_cfa8c806080839 4-5,8-9,17,27-34
+apps/frontend-nextgen/src/pages/Workspace/hooks/botSessionCommandItems.tsx
+  s_4efef845bd857d::t_483dc6d1aa569e 9-10,21,65
+apps/frontend-nextgen/src/pages/Workspace/hooks/useBotSessionCommands.tsx
+  s_4efef845bd857d::t_8c1d7b43fbb3ea 1-122
+apps/frontend-nextgen/src/pages/Workspace/hooks/useBotSessionFilesFeature.tsx
+  s_4efef845bd857d::t_41caf165f67224 6,13-14,127-129
+apps/frontend-nextgen/src/pages/Workspace/hooks/useDebugChatClearContext.ts
+  s_4efef845bd857d::t_731ffe7797f66c 1-21
+apps/frontend-nextgen/src/services/botWorkshop/debugChatFiles.ts
+  s_4efef845bd857d::t_30b06c3fb7e306 2,34-37,39,41,43-44,46-47
+apps/frontend-nextgen/src/services/collaborationSquare/collaborationSquareApiAdapter.ts
+  s_4efef845bd857d::t_4109c90dfbe1c2 283
+apps/frontend-nextgen/src/stores/workOrderStore.ts
+  s_4efef845bd857d::t_d704d76a21a675 29,55
+apps/frontend-nextgen/src/utils/notificationTime.ts
+  s_4efef845bd857d::t_509ec5d8b18d51 1-13
+apps/frontend-nextgen/test/capabilities/userMessagePresentation.test.tsx
+  s_4efef845bd857d::t_d0f94cd25d887f 1-42
+apps/frontend-nextgen/test/components/Admin/NotificationBell.test.tsx
+  s_4efef845bd857d::t_fed2c95881a340 15,112-122
+apps/frontend-nextgen/test/components/Admin/NotificationItem.test.tsx
+  s_4efef845bd857d::t_d3fc0cbc6a0047 6,21-37
+apps/frontend-nextgen/test/components/Admin/SpaceManagement.test.tsx
+  s_4efef845bd857d::t_3e2b6b0037068e 1-166
+apps/frontend-nextgen/test/components/Admin/WorkOrderCard.test.tsx
+  s_4efef845bd857d::t_4181c8c84fb3a6 49,129-136
+apps/frontend-nextgen/test/components/Admin/WorkOrderTabs.test.tsx
+  s_4efef845bd857d::t_fb7b691bf86658 5,11-24,31,40,43,46-49,51,108-150
+apps/frontend-nextgen/test/components/CollaborationSquare/GroupMemberAvatar.test.tsx
+  s_4efef845bd857d::t_9e82c9813fcb61 1-41
+apps/frontend-nextgen/test/components/CollaborationSquare/GroupMembersModal.test.tsx
+  s_4efef845bd857d::t_975c62d29649fa 4,35,37-40
+apps/frontend-nextgen/test/components/CollaborationSquare/GroupOwnerDisplay.test.tsx
+  s_4efef845bd857d::t_59c0045357ff69 23-29
+apps/frontend-nextgen/test/components/Workspace/ChatMessageList.userCollapse.test.tsx
+  s_4efef845bd857d::t_7fe2af6ce8b3c6 9,69-74,94,116-117,123,125,133,146,208-238
+apps/frontend-nextgen/test/pages/Admin/Spaces.test.tsx
+  s_4efef845bd857d::t_4432658728463d 1-44
+apps/frontend-nextgen/test/pages/BotWorkshop/DebugChatStage.test.tsx
+  s_4efef845bd857d::t_7fcd1f0814aa8a 1-72
+apps/frontend-nextgen/test/pages/TicketCenter/TicketCenterPage.test.tsx
+  s_4efef845bd857d::t_79bcfb90176d98 6,9,11,14,23-29,44-53,64-71
+apps/frontend-nextgen/test/pages/Workspace/hooks/useBotSessionCommands.test.tsx
+  s_4efef845bd857d::t_a843e8ad79d85e 1-114
+apps/frontend-nextgen/test/pages/Workspace/hooks/useBotSessionFileCommand.test.tsx
+  s_4efef845bd857d::t_d85aabf5607884 7,47,50,52-53
+apps/frontend-nextgen/test/pages/Workspace/hooks/useDebugChatClearContext.test.tsx
+  s_4efef845bd857d::t_01168a4c32e70e 1-32
+apps/frontend-nextgen/test/services/botWorkshop/debugChatFiles.test.ts
+  s_4efef845bd857d::t_5a29e48b614bb6 3-15,18-19,22-23,26-27,34-35,38-48,50-61
+apps/frontend-nextgen/test/services/collaborationSquare/publicGroupOwnerDisplay.test.ts
+  s_4efef845bd857d::t_805bbd2834d5ba 102-124
+apps/frontend-nextgen/test/stores/workOrderStore.test.ts
+  s_4efef845bd857d::t_e525ce7c6b321a 78-87
+apps/frontend-nextgen/test/utils/notificationTime.test.ts
+  s_4efef845bd857d::t_68debd9db831e3 1-17
+docker/services/bcsfuse.dockerfile
+  s_4efef845bd857d::t_64291fd14703b5 3,7,45-46,55-58
+docs/adr/README.md
+  s_4efef845bd857d::t_a4adee3c52f9b9 1-11
+docs/agents/development.md
+  s_4efef845bd857d::t_75b942c86f4c66 1-97
+docs/agents/domain.md
+  s_4efef845bd857d::t_0c366fceb86962 18-21,28
+docs/agents/knowledge-standard.md
+  s_4efef845bd857d::t_4542212e327938 1-149
+docs/agents/pull-requests.md
+  s_4efef845bd857d::t_0c09614690cd56 1-68
+docs/agents/templates/README.md
+  s_4efef845bd857d::t_40d10c7c3dee20 1-12
+docs/agents/templates/adr.md
+  s_4efef845bd857d::t_fbf5a0f2376c82 1-13
+docs/agents/templates/app.md
+  s_4efef845bd857d::t_bb89995fed5e7a 1-13
+docs/agents/templates/diagnostic.md
+  s_4efef845bd857d::t_c42cc706bcf6b2 1-13
+docs/agents/templates/domain.md
+  s_4efef845bd857d::t_0f1394bfc0eb9f 1-13
+docs/agents/templates/flow.md
+  s_4efef845bd857d::t_573439721d6f9d 1-13
+docs/agents/templates/spec.md
+  s_4efef845bd857d::t_8cc3c38a6dd210 1-13
+docs/agents/validation.md
+  s_4efef845bd857d::t_6940e2c88b2daa 1-122
+docs/arch/README.md
+  s_4efef845bd857d::t_fbc19c13b3617c 1-13
+docs/bcn-a2a-api-reference.zh-CN.md
+  s_4efef845bd857d::t_b5ebeba17d319e 224-228,232,236,268
+docs/bcn-a2a-integration-guide.zh-CN.md
+  s_4efef845bd857d::t_83663056fb196c 50,115,117-119,123,125,129,147,188,194,196,204-207,209,212,216,224,233,254,257,260-261,266
+docs/bcn-provider-agent-card-api-v0.1.zh-CN.md
+  s_4efef845bd857d::t_9127d6d25444e2 8,19-21,45-46,50,53,57-62,71,86,115,117,120,124,126,130-131,158,204,235-237,242,247,251,253,258,263,296,304-305,307-308,317,322,328-335,343-344,348,370,373-374
+docs/flows/README.md
+  s_4efef845bd857d::t_245238c6764cf4 1-13
+docs/flows/backend-runtime-targeting.md
+  s_4efef845bd857d::t_9fbfaf293a31a1 1-59
+docs/specs/a2a/extensions/source-agent/v1.md
+  s_4efef845bd857d::t_7a478992a3ab8e 3-4
+docs/specs/a2a/extensions/source-agent/v2.md
+  s_4efef845bd857d::t_c1497670a069df 1-24
+docs/specs/a2a/minimal-card-registration-v1.md
+  s_4efef845bd857d::t_ad8c8b05a6cd2f 3,18-25,49-50,158-161,176-184,194-205
+docs/specs/a2a/todo.zh-CN.md
+  s_4efef845bd857d::t_27cb96cd45a909 14,144,152-154,164,166,344,352
+singlebox/ci/tests/test_pre_push_hook.py
+  s_4efef845bd857d::t_98e7b0acc10f80 507-508,526
+singlebox/ci/tests/test_singlebox_coverage_workflow.py
+  s_4efef845bd857d::t_d6076c45be313d 1,4,8-43
+singlebox/modules/bcsfuse.sh
+  s_4efef845bd857d::t_8e88129da1d3c6 51-56
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d975e681a85f9b0a43b29506d4712d8cf1c0bbcd",
+  "prompts": {},
+  "sessions": {
+    "s_4efef845bd857d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a181bc-3434-7bf3-a0d5-19c01487b59e",
+        "model": "GLM-5.3"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

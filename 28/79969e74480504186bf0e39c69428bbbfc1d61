@@ -1,0 +1,56 @@
+docs/specs/a2a/minimal-card-registration-v1.md
+  s_b407ecbadd402c::t_13adda5410c2dd 206-217
+apps/bcs/scripts/e2e-test/a2a_story.sh
+  s_b407ecbadd402c::t_0370433d802cee 9-10
+  s_b407ecbadd402c::t_576abf95ccd0bd 7-8,11
+apps/bcs/crates/adapters/http/bcs-http/src/routes/a2a_management.rs
+  s_b407ecbadd402c::t_73174cc61043dc 263,299-300,324
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/a2a_card_routes.rs
+  s_b407ecbadd402c::t_13adda5410c2dd 213-230
+  s_b407ecbadd402c::t_73174cc61043dc 212
+  s_b407ecbadd402c::t_4cebf606061b0b 238-243,245,253-254
+apps/bcs/crates/adapters/http/bcs-http/CONTEXT.md
+  s_b407ecbadd402c::t_13adda5410c2dd 142-150
+apps/gateway/tests/unit/core/authn/test_route_security.py
+  s_b407ecbadd402c::t_73174cc61043dc 30-48
+docs/bcn-a2a-integration-guide.zh-CN.md
+  s_b407ecbadd402c::t_13adda5410c2dd 138,196,206-209,214,256
+  s_172d103570f764::t_08948a7d10528d 133-134
+apps/gateway/configs/application.yaml
+  s_b407ecbadd402c::t_73174cc61043dc 346-348
+apps/bcs/crates/adapters/http/bcs-http/tests/cases/a2a_management_errors.rs
+  s_b407ecbadd402c::t_13adda5410c2dd 638-643,666,669,684,705,717
+docs/bcn-a2a-api-reference.zh-CN.md
+  s_b407ecbadd402c::t_13adda5410c2dd 225-232
+  s_172d103570f764::t_8d0d318b2d135f 217-218
+apps/bcs/crates/adapters/http/bcs-http/src/router.rs
+  s_b407ecbadd402c::t_cb865b5d75faaf 78-84
+apps/bcs/scripts/e2e-test/a2a_management_cases.py
+  s_b407ecbadd402c::t_ebf85fc11bf167 23,35,43,86,88
+apps/bcs/scripts/e2e-test/a2a_story.py
+  s_b407ecbadd402c::t_17cc55b3d49cae 264,266,281,293,446,464,470,599-600,605
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2879969e74480504186bf0e39c69428bbbfc1d61",
+  "prompts": {},
+  "sessions": {
+    "s_172d103570f764": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c5c5-dcdf-70e1-a916-44078da46c35",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "卓人 <hx410025@antgroup.com>"
+    },
+    "s_b407ecbadd402c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cac2-f0d2-77f0-a456-bfdea69a959b",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "卓人 <hx410025@antgroup.com>"
+    }
+  }
+}

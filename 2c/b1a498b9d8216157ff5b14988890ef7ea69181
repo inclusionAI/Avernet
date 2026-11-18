@@ -1,0 +1,21 @@
+apps/backend/src/agentclaw/community/adapters/http/harness/router.py
+  s_c980b83a9ffe7f::t_d3c5e41e291210 506-507,544,555,559-563,591,873-874,944-948
+apps/backend/tests/community/endpoints/test_harness_router.py
+  s_c980b83a9ffe7f::t_a0b3079b8b7392 3,19,21,57-76,78-87,96,115-126
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "2cb1a498b9d8216157ff5b14988890ef7ea69181",
+  "prompts": {},
+  "sessions": {
+    "s_c980b83a9ffe7f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1e84e-8cc0-72b0-848b-eae19b4ed413",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}

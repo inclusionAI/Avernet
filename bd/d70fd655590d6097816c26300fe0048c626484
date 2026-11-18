@@ -1,0 +1,50 @@
+apps/backend/src/agentclaw/community/core/task/context_collab/persistence/models.py
+  s_e0cb98366a65ad::t_39a8c057711951 76-78,113-116,132-137
+apps/backend/src/agentclaw/community/core/task/context_collab/l4_context_primitives/collet.py
+  s_e0cb98366a65ad::t_6c7afd8e72628e 230-231
+apps/backend/src/agentclaw/community/core/task/context_collab/l4_context_primitives/event_envelope.py
+  s_e0cb98366a65ad::t_6c7afd8e72628e 31-33,41-46
+apps/backend/src/agentclaw/community/core/task/context_collab/persistence/repository.py
+  s_e0cb98366a65ad::t_6c7afd8e72628e 138-141,145-149,168-172,174-179
+  s_e0cb98366a65ad::t_a515ffdfb75573 305-308,310-311,324
+  s_e0cb98366a65ad::t_a4cb0d72fe6807 309,312-313
+apps/backend/src/agentclaw/community/core/task/context_collab/sql/2026_11_11_context_collab.sql
+  s_e0cb98366a65ad::t_39a8c057711951 12,32-35
+apps/backend/src/agentclaw/community/adapters/http/task/schemas_context_collab.py
+  s_e0cb98366a65ad::t_0161dc22232071 349-351
+  s_e0cb98366a65ad::t_d939246a45b01a 486-490
+apps/backend/src/agentclaw/community/core/task/context_collab/services/context_collab_service.py
+  s_e0cb98366a65ad::t_a5016869b449ff 159,169-171,295-302,313,324-328
+  s_e0cb98366a65ad::t_6268f142de8d5b 380,382-388
+  s_e0cb98366a65ad::t_cd3620353ba566 148-149
+apps/backend/specs/2026-11-09-bbs-context-collaboration-protocol/execution-ledger.md
+  s_e0cb98366a65ad::t_c6cc67d7488766 147-155
+apps/backend/specs/2026-11-09-bbs-context-collaboration-protocol/spec.md
+  s_e0cb98366a65ad::t_c6cc67d7488766 4,848-849
+apps/backend/src/agentclaw/community/core/task/context_collab/service_api.py
+  s_e0cb98366a65ad::t_6268f142de8d5b 86-87,100-104,108
+apps/backend/src/agentclaw/community/core/task/context_collab/g3_observe_evaluate_evolve/observation.py
+  s_e0cb98366a65ad::t_a5016869b449ff 100,108-109
+apps/backend/src/agentclaw/community/core/task/context_collab/g1_secure_govern/authorization.py
+  s_e0cb98366a65ad::t_74e42b95afac4a 45-49,53,64-65,97-101
+apps/backend/tests/community/core/task/context_collab/test_service_real_repository.py
+  s_e0cb98366a65ad::t_feab2d79c49db7 647
+  s_e0cb98366a65ad::t_8d5209a37a0c4b 26,30
+  s_e0cb98366a65ad::t_bc951ee586362e 544-646,648-651
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "bdd70fd655590d6097816c26300fe0048c626484",
+  "prompts": {},
+  "sessions": {
+    "s_e0cb98366a65ad": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "1d67472f-3033-4c3f-9f69-89e0d4112039",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

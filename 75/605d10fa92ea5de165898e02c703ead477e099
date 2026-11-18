@@ -1,0 +1,34 @@
+apps/backend/src/agentclaw/community/core/task/context_collab/g4_contracts_consistency/workflow_resolution.py
+  s_64261436edbb0b::t_ac0ea2e2bbabe1 1-89
+apps/backend/src/agentclaw/community/core/task/context_collab/g4_contracts_consistency/state_machine.py
+  s_64261436edbb0b::t_ad805b63354dd6 525-576,581,587
+apps/backend/tests/community/core/task/context_collab/test_workflow_resolution.py
+  s_64261436edbb0b::t_81c01240433468 1-119
+apps/backend/src/agentclaw/community/core/task/context_collab/g1_secure_govern/authorization.py
+  s_64261436edbb0b::t_4164fa4552bac0 33-37,39-43
+apps/backend/tests/community/core/task/context_collab/test_state_machine.py
+  s_64261436edbb0b::t_49ad829932385a 16,50,431-460
+apps/backend/tests/community/core/task/context_collab/test_context_collab_service.py
+  s_64261436edbb0b::t_81c01240433468 278-280,285,292-293,300-302
+  s_64261436edbb0b::t_d83bfb65e6a171 303
+apps/backend/src/agentclaw/community/core/task/context_collab/l6_products/profiles.py
+  s_64261436edbb0b::t_ad805b63354dd6 20,30
+apps/backend/src/agentclaw/community/core/task/context_collab/services/context_collab_service.py
+  s_64261436edbb0b::t_4fb86b38de7fe8 30-32,178-186,188
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "75605d10fa92ea5de165898e02c703ead477e099",
+  "prompts": {},
+  "sessions": {
+    "s_64261436edbb0b": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "6abdaae9-3cab-4f39-a132-80de8a711d13",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

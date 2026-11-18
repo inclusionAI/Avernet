@@ -1,0 +1,22 @@
+apps/bcs-internal/Cargo.lock
+  h_f4a73db4ad12be 563
+apps/bcs-internal/crates/bootstrap/bcn-edge-internal/Cargo.toml
+  h_f4a73db4ad12be 35
+apps/bcs-internal/crates/bootstrap/bcn-edge-internal/src/lib.rs
+  h_f4a73db4ad12be 62
+apps/bcs-internal/crates/bootstrap/bcn-edge-internal/src/telemetry.rs
+  h_f4a73db4ad12be 6,12,22-68
+apps/bcs-internal/docs/overlay/bcn-runtime.md
+  h_f4a73db4ad12be 73,81-86,115-138
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "a2f26f44bf13ec94422ff1f1f3a2d5938c0ee9cd",
+  "prompts": {},
+  "humans": {
+    "h_f4a73db4ad12be": {
+      "author": "元歌 <yuange.zjy@antgroup.com>"
+    }
+  }
+}

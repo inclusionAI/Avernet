@@ -1,0 +1,14 @@
+apps/evolverun/clawweb/public/modules/workflow/server/services/__tests__/run-subworkflows-fanout-origin.test.ts
+  h_43af82e14600e4 10,60,64,66,69,71
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b82e0ca7e0cdc9baab910c2f86eb3c548753484a",
+  "prompts": {},
+  "humans": {
+    "h_43af82e14600e4": {
+      "author": "fudapeng <fudp@example.com>"
+    }
+  }
+}

@@ -1,0 +1,20 @@
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/__tests__/bot-workflow-permission-mount.test.ts
+  h_5f06d4d8b4bdd5 1-85
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/bot-workflow-permission-mount.ts
+  h_5f06d4d8b4bdd5 1-6
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/index.ts
+  h_5f06d4d8b4bdd5 130,923-924
+apps/evolverun/clawweb/internal/bootstrap/clawweb/server/routes/__tests__/internal-fanout-auth.test.ts
+  h_5f06d4d8b4bdd5 1-123
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "04d7b47c3cb8beb22130a20d307f83596ca05ad4",
+  "prompts": {},
+  "humans": {
+    "h_5f06d4d8b4bdd5": {
+      "author": "fudp <dapeng.fdp@antgroup.com>"
+    }
+  }
+}

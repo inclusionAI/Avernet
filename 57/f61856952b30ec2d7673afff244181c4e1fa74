@@ -1,0 +1,59 @@
+apps/backend/src/agentclaw/community/core/task/task_dispatch/search.py
+  s_4efef845bd857d::t_a93d32765d150a 43,57,76,99
+apps/backend/src/agentclaw/community/adapters/http/task/schemas_relay_search.py
+  s_4efef845bd857d::t_a93d32765d150a 32-40,44
+  s_4efef845bd857d::t_e5ef204687a459 41-43
+apps/backend/tests/community/adapters/http/task/test_router.py
+  s_4efef845bd857d::t_5b94743e651097 896
+apps/backend/src/agentclaw/community/core/task/task_runner/client/candidate_search.py
+  s_4efef845bd857d::t_a93d32765d150a 119,141
+apps/backend/src/agentclaw/community/adapters/http/task/relay_routes.py
+  s_4efef845bd857d::t_a3dbcacc05788e 85-87
+apps/backend/tests/community/core/task/task_runner/integration/test_task_search_viewer.py
+  s_4efef845bd857d::t_ed2508986552a0 43
+  s_4efef845bd857d::t_692c9d334dc98b 144-145,150,152,236,239-243
+  s_4efef845bd857d::t_40a95f27b3c4f6 136-140
+  s_4efef845bd857d::t_4c37b7d952639e 151,153,158,237-238,244,268-272
+  s_4efef845bd857d::t_5b94743e651097 245-267
+apps/backend/tests/community/adapters/http/task/router_test_support.py
+  s_4efef845bd857d::t_a3dbcacc05788e 193-196
+apps/backend/src/agentclaw/community/core/task/task_center/task_service_relay.py
+  s_4efef845bd857d::t_a93d32765d150a 143,151-153
+apps/backend/tests/community/adapters/http/task/test_schemas.py
+  s_4efef845bd857d::t_5719e2ae7448cf 780,782-792,794-811
+  s_4efef845bd857d::t_5b94743e651097 773-779,781,793
+  s_4efef845bd857d::t_a467ee0b4182b1 772
+apps/backend/tests/community/core/task/task_runner/integration/test_semantic_keyword_bot_discover.py
+  s_4efef845bd857d::t_40a95f27b3c4f6 134,159,173,268-270
+  s_4efef845bd857d::t_692c9d334dc98b 306,314,320-324
+  s_4efef845bd857d::t_bc61edeb2e802b 14,297-303,318-319,325-326
+  s_4efef845bd857d::t_15cfafdc4c7251 271-296,304-305,307-313,315-317,327-328
+apps/backend/src/agentclaw/community/core/task/task_runner/client/semantic_keyword_bot_discover.py
+  s_4efef845bd857d::t_40a95f27b3c4f6 22-25,47,50-52,160,253
+  s_4efef845bd857d::t_a93d32765d150a 128
+  s_4efef845bd857d::t_92d54364014dac 173
+  s_4efef845bd857d::t_e0d32a796042f2 126-127
+  s_4efef845bd857d::t_b37995575fb97c 18-21,43-46,48-49,53-56,180,183,187-189,215-216
+  s_4efef845bd857d::t_b483dce4f5ba50 14,33,182,184-186,190-196
+  s_4efef845bd857d::t_649394f6441b55 181
+  s_4efef845bd857d::t_a3dbcacc05788e 103,171
+  s_4efef845bd857d::t_4124597781c093 116
+apps/backend/src/agentclaw/community/core/task/task_service_protocol.py
+  s_4efef845bd857d::t_a93d32765d150a 113
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "57f61856952b30ec2d7673afff244181c4e1fa74",
+  "prompts": {},
+  "sessions": {
+    "s_4efef845bd857d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a181bc-3434-7bf3-a0d5-19c01487b59e",
+        "model": "GLM-5.3"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

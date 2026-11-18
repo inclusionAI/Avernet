@@ -1,0 +1,21 @@
+apps/backend/tests/community/api/bot_management/test_update_bot_invalid_body.py
+  s_e9bda242e74a4f::t_d3b1fe292c12ed 1-77
+apps/backend/src/agentclaw/community/adapters/http/bot_management/router.py
+  s_e9bda242e74a4f::t_1df9e9a52403bb 2633-2642
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "22718805c70cd0322edef864828056292be870dd",
+  "prompts": {},
+  "sessions": {
+    "s_e9bda242e74a4f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cb41-e851-7412-8a65-050dc549fa44",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

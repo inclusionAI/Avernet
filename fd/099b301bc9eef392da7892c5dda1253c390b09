@@ -1,0 +1,46 @@
+autocoding/skills/teamclaw-implement/scripts/impl/core.py
+  s_f0f9eabb8f8a42::t_895f36e46a99d8 65-67,72-74,76,91,93
+autocoding/skills/teamclaw-plan/references/review.md
+  s_f0f9eabb8f8a42::t_c0d46a6f8035fa 22
+autocoding/skills/teamclaw-plan/references/project-context.md
+  s_f0f9eabb8f8a42::t_a432787b85f572 17,20
+  s_f0f9eabb8f8a42::t_2d75faa3b5f541 18
+autocoding/skills/teamclaw-plan/references/show-me.md
+  s_f0f9eabb8f8a42::t_a432787b85f572 50-51
+autocoding/skills/teamclaw-clarify/references/runtime-evidence.md
+  s_f0f9eabb8f8a42::t_a432787b85f572 13,16
+autocoding/skills/teamclaw-implement/scripts/implement.py
+  s_f0f9eabb8f8a42::t_895f36e46a99d8 22-23,37,59-70,98-104,110-112
+  s_f0f9eabb8f8a42::t_eaea80e03e4487 109,137-138
+  s_f0f9eabb8f8a42::t_851088f0e501a5 113-114
+autocoding/skills/teamclaw-plan/references/delivery.md
+  s_f0f9eabb8f8a42::t_c69c9c37f263d5 15,44
+autocoding/skills/teamclaw-implement/tests/test_execution.py
+  s_f0f9eabb8f8a42::t_306614c038a846 142,148-166
+  s_f0f9eabb8f8a42::t_67cc215e00e100 130
+  s_f0f9eabb8f8a42::t_80ca75e4683c03 141,143-147,167-168
+  s_f0f9eabb8f8a42::t_786ba6efa76d0d 102-129,131-140
+autocoding/skills/teamclaw-implement/references/queue.md
+  s_f0f9eabb8f8a42::t_a432787b85f572 32-33
+autocoding/skills/teamclaw-implement/scripts/impl/queue.py
+  s_f0f9eabb8f8a42::t_895f36e46a99d8 100-101
+autocoding/skills/teamclaw-plan/SKILL.md
+  s_f0f9eabb8f8a42::t_c6ff53f003a635 53
+  s_f0f9eabb8f8a42::t_c69c9c37f263d5 32-33
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "fd099b301bc9eef392da7892c5dda1253c390b09",
+  "prompts": {},
+  "sessions": {
+    "s_f0f9eabb8f8a42": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1cb41-e119-7743-aec9-42595bd43929",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "卷瓜 <juangua.swj@antgroup.com>"
+    }
+  }
+}

@@ -1,0 +1,23 @@
+src/ecb/ecb/application/task_benchmark/oncall_case_evaluation/service.py
+  s_7517e37f6fcee5::t_d05e01acf8ac5c 669-699,706
+src/ecb/ecb/application/task_benchmark/online_service.py
+  s_7517e37f6fcee5::t_d589f223e96cda 5195,5235-5236
+src/ecb/tests/application/task_benchmark/test_task_locate.py
+  s_7517e37f6fcee5::t_63720e5b605ad4 232-261
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "743cfb3279aaf41a6e7654809acfd09af15e2a48",
+  "prompts": {},
+  "sessions": {
+    "s_7517e37f6fcee5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a9dc-9a35-7de0-88fa-7da8184fb762",
+        "model": "GLM-5.3"
+      },
+      "human_author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

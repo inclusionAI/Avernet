@@ -1,0 +1,48 @@
+apps/backend/specs/2026-11-09-bbs-context-collaboration-protocol/execution-ledger.md
+  s_e0cb98366a65ad::t_3504eac50b9163 133-137
+apps/backend/src/agentclaw/community/core/task/context_collab/l4_context_primitives/collet.py
+  s_e0cb98366a65ad::t_3ac2e1aeda6350 223
+apps/backend/tests/community/repository/task/context_collab/test_models.py
+  s_e0cb98366a65ad::t_7e85d7bb181f50 47-49
+apps/backend/src/agentclaw/community/core/task/context_collab/persistence/repository.py
+  s_e0cb98366a65ad::t_5d70a755303d5f 129-131
+  s_e0cb98366a65ad::t_a45d307a04dfc9 235-238,253,256-257,276-280
+  s_e0cb98366a65ad::t_eb00089960295d 71,79
+apps/backend/tests/community/core/task/context_collab/test_context_collab_append.py
+  s_e0cb98366a65ad::t_edcc563cde8c85 118-120,150,164
+apps/backend/specs/2026-11-09-bbs-context-collaboration-protocol/spec.md
+  s_e0cb98366a65ad::t_5d320247edb9d3 4,829,849
+apps/backend/src/agentclaw/community/adapters/http/task/schemas_context_collab.py
+  s_e0cb98366a65ad::t_6e379712427613 319
+  s_e0cb98366a65ad::t_dc73f84fe32dde 129-132,185-188
+  s_e0cb98366a65ad::t_16c06c6a5598cc 189-190
+apps/backend/src/agentclaw/community/core/task/context_collab/service_api.py
+  s_e0cb98366a65ad::t_d558c597cd0926 34-37
+  s_e0cb98366a65ad::t_7993095fea1e42 65
+apps/backend/src/agentclaw/community/core/task/context_collab/services/context_collab_service.py
+  s_e0cb98366a65ad::t_84dff6375c2df6 213-214,252
+apps/backend/tests/community/core/task/context_collab/test_context_collab_service.py
+  s_e0cb98366a65ad::t_4fa13fbabd998f 5,89-92,120,132
+apps/backend/tests/community/repository/task/context_collab/test_repository_create_get.py
+  s_e0cb98366a65ad::t_8ec9c8f9774875 3-5,129-130,170-171,177-178,180-182,198
+apps/backend/tests/community/core/task/context_collab/test_service_real_repository.py
+  s_e0cb98366a65ad::t_dc4705fcc04b7b 207,216,225,234
+  s_e0cb98366a65ad::t_bc3c228deabbe6 17
+  s_e0cb98366a65ad::t_659b6a27cfb236 427-428,432-435
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d7bd6e3d1dd1819aad7623d0c683f761d1dedec3",
+  "prompts": {},
+  "sessions": {
+    "s_e0cb98366a65ad": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "1d67472f-3033-4c3f-9f69-89e0d4112039",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "jian.jiangj <jian.jiangj@antfin.com>"
+    }
+  }
+}

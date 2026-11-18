@@ -1,0 +1,16 @@
+apps/bcs-internal/crates/tools/bcs-bridge/tests/register.rs
+  h_f4a73db4ad12be 403,405-406,613,615-616
+apps/bcs-internal/crates/tools/bcs-bridge/tests/register/subbots.rs
+  h_f4a73db4ad12be 131,133-134
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "144c316eb10deebd4e0326fef24ba88a8e276546",
+  "prompts": {},
+  "humans": {
+    "h_f4a73db4ad12be": {
+      "author": "元歌 <yuange.zjy@antgroup.com>"
+    }
+  }
+}

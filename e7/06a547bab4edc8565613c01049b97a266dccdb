@@ -1,0 +1,39 @@
+apps/bcs/scripts/e2e-runner/bcs_e2e/agent_network_density/__init__.py
+  s_cecdc98e721f4b::t_b35fff7295c20a 1-31
+apps/bcs/scripts/e2e-runner/bcs_e2e/agent_network_density/registration_proposal.py
+  s_cecdc98e721f4b::t_83180a6a4cdff8 1-330
+apps/bcs/scripts/e2e-runner/bcs_e2e/agent_network_density/replay.py
+  s_cecdc98e721f4b::t_2af997a231dbeb 1-364
+apps/bcs/scripts/e2e-runner/bcs_e2e/inventory.py
+  s_cecdc98e721f4b::t_df63f17212b699 114,170
+apps/bcs/scripts/e2e-runner/executor-migration.json
+  s_cecdc98e721f4b::t_b9f54e5af7146a 19-21
+apps/bcs/scripts/e2e-runner/tests/agent_network_density_test_support.py
+  s_cecdc98e721f4b::t_c232c35d4b3080 1-164
+apps/bcs/scripts/e2e-runner/tests/test_agent_network_density_contract.py
+  s_cecdc98e721f4b::t_5343b356b34c2e 1-405
+apps/bcs/scripts/e2e-runner/tests/test_agent_network_density_hygiene.py
+  s_cecdc98e721f4b::t_b7ef8d8e5cb1e6 1-80
+apps/bcs/scripts/e2e-runner/tests/test_agent_network_density_registration_proposal.py
+  s_cecdc98e721f4b::t_50d14315b8133f 1-322
+apps/bcs/scripts/e2e-runner/tests/test_agent_network_density_replay.py
+  s_cecdc98e721f4b::t_c8c6f2a290a16b 1-385
+apps/bcs/scripts/e2e-runner/tests/test_migration_inventory.py
+  s_cecdc98e721f4b::t_cdfe6ed25d3f68 45-46,878-901
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "e706a547bab4edc8565613c01049b97a266dccdb",
+  "prompts": {},
+  "sessions": {
+    "s_cecdc98e721f4b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14023-e802-7af1-b7d8-c9b606225511",
+        "model": "Ling-3.1-flash"
+      },
+      "human_author": "lifang-yangwang <lifang.shen@antgroup.com>"
+    }
+  }
+}

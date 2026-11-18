@@ -1,0 +1,21 @@
+CONTEXT-MAP.md
+  s_47ed8e91e4b8af::t_2fb3e82f4d8d97 44-46
+docs/agents/knowledge-standard.md
+  s_47ed8e91e4b8af::t_8fcd30c7461c93 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "d01b84775f3eb6373b64092b797d4810021d4127",
+  "prompts": {},
+  "sessions": {
+    "s_47ed8e91e4b8af": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1c399-a9b4-7db3-b10d-10bee70838e6",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "卷瓜 <juangua.swj@antgroup.com>"
+    }
+  }
+}

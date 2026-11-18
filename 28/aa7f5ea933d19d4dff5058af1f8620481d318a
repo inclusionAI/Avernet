@@ -1,0 +1,45 @@
+apps/backend/src/agentclaw/community/core/expert_chat/README.md
+  s_6b81fd99a163f8::t_3d18810d5040be 22,97-100
+  s_ab192cec4dd246::t_0631da08d8d6b9 101
+apps/backend/tests/community/api/expert_chat/test_router.py
+  s_6b81fd99a163f8::t_400e961e30933d 2-3,444,812
+apps/backend/tests/community/core/expert_chat/services/test_expert_chat_permission.py
+  s_6b81fd99a163f8::t_400e961e30933d 17-18,54
+apps/backend/src/agentclaw/community/core/expert_chat/services/expert_chat_service.py
+  s_6b81fd99a163f8::t_71b6b679d55482 918
+  s_6b81fd99a163f8::t_7c37cddebd94d7 58,129,160,314,671,911
+apps/backend/tests/community/core/expert_chat/services/test_expert_chat_service.py
+  s_6b81fd99a163f8::t_400e961e30933d 2-3,83,1359
+  s_6b81fd99a163f8::t_0f113212adc7cb 395,417,675-722
+  s_6b81fd99a163f8::t_fa5ef6d732cc08 396-416
+  s_6b81fd99a163f8::t_226b9ebcdc0784 418-435
+  s_6b81fd99a163f8::t_fa8e0154dc473a 460
+apps/backend/tests/community/core/expert_chat/services/test_expert_chat_uses_resolver.py
+  s_6b81fd99a163f8::t_400e961e30933d 12-13,30
+apps/backend/src/agentclaw/community/core/expert_chat/services/expert_chat_session_runtime.py
+  s_6b81fd99a163f8::t_7c37cddebd94d7 35-41,529
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "28aa7f5ea933d19d4dff5058af1f8620481d318a",
+  "prompts": {},
+  "sessions": {
+    "s_6b81fd99a163f8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ea01-5d7c-7f81-88e0-c8b621598b88",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": null
+    },
+    "s_ab192cec4dd246": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ea01-7794-7451-bf70-eddbb50305c1",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Weijia Sun <freddiesun95@gmail.com>"
+    }
+  }
+}

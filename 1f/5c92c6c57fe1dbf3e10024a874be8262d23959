@@ -1,0 +1,29 @@
+apps/baas/src/secbaas/enterprise/plugins/sandbox/arca/_arca_sdk.py
+  s_12aa8dfbb414c9::t_2bef21f3faf30e 90-91,322-323
+apps/baas/tests/unit/plugins/sandbox/arca/test_arca_sdk.py
+  s_eef20a3e12db07::t_7c4a69c92adc09 1454-1471,1641-1644
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1f5c92c6c57fe1dbf3e10024a874be8262d23959",
+  "prompts": {},
+  "sessions": {
+    "s_12aa8dfbb414c9": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a19ce6-9b1b-7521-bf37-8cba27f67784",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    },
+    "s_eef20a3e12db07": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a19ce7-1802-7991-a01c-76186db0c22a",
+        "model": "GLM-5.3-Flash"
+      },
+      "human_author": "caizi.xz <caizi.xz@antgroup.com>"
+    }
+  }
+}

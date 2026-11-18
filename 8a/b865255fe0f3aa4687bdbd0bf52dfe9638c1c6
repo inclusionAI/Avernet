@@ -1,0 +1,19 @@
+apps/frontend-nextgen/scripts/public-tests.list
+  s_4a9652da7d4535::t_de7082c35fcb75 135
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8ab865255fe0f3aa4687bdbd0bf52dfe9638c1c6",
+  "prompts": {},
+  "sessions": {
+    "s_4a9652da7d4535": {
+      "agent_id": {
+        "tool": "antcc",
+        "id": "d40213d2-3e7b-44e7-8f89-571865678b60",
+        "model": "antchat/GLM-5.3"
+      },
+      "human_author": "拓界 <wangyuqiao.wyq@digital-engine.com>"
+    }
+  }
+}

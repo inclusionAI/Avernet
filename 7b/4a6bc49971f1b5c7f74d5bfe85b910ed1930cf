@@ -1,0 +1,20 @@
+apps/frontend-nextgen/assets/task-panel/src/panel/v2/NodeListViewV2.tsx
+  h_5b2ec9c12c4d18 4,54
+apps/frontend-nextgen/assets/task-panel/test/panel/v2/NodeListViewV2.coverage.test.tsx
+  h_5b2ec9c12c4d18 150,153,155-157,161-162,165,167-168,171-173,177-178
+apps/frontend-nextgen/assets/task-panel/test/panel/v2/rootNodeConversation.test.tsx
+  h_5b2ec9c12c4d18 1-64
+apps/frontend-nextgen/test/integration/taskPanel/v2/TaskOverviewV2.test.tsx
+  h_5b2ec9c12c4d18 177,182-184,188-190
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7b4a6bc49971f1b5c7f74d5bfe85b910ed1930cf",
+  "prompts": {},
+  "humans": {
+    "h_5b2ec9c12c4d18": {
+      "author": "msjbear <shangjian.msj@antfin.com>"
+    }
+  }
+}

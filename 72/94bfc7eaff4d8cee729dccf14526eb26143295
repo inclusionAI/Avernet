@@ -1,0 +1,23 @@
+singlebox/modules/bcsfuse.sh
+  s_ce84d91f3d35be::t_b2e3b57dfa9e43 51-56
+singlebox/ci/tests/test_singlebox_coverage_workflow.py
+  s_ce84d91f3d35be::t_044ccd525144e7 1,4,8-23,30-42
+  s_ce84d91f3d35be::t_e8caaa0e50ba83 24-29
+  s_ce84d91f3d35be::t_b2e3b57dfa9e43 43
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "7294bfc7eaff4d8cee729dccf14526eb26143295",
+  "prompts": {},
+  "sessions": {
+    "s_ce84d91f3d35be": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a5bb-a115-7280-8eb7-64cf057003e5",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "墨馠 <mohan.wy@antgroup.com>"
+    }
+  }
+}
